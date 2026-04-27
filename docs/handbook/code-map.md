@@ -24,6 +24,7 @@ docs/
     README.md
     reports/
       README.md
+      ALA-R0-source-extraction-report.md
     task-cards/
       README.md
       ALA-R0 through ALA-R12 root task cards

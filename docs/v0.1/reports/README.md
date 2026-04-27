@@ -2,7 +2,10 @@
 
 本目录用于后续 v0.1 执行报告、review 报告和 fix-loop 报告。
 
-当前只声明放置规则，不声明已有报告。
+## Existing Reports
+
+- [ALA-R0 Source Extraction Report](ALA-R0-source-extraction-report.md) - closes
+  the R0 docs/source preflight gate; does not claim runtime readiness.
 
 ## Placement Rules
 

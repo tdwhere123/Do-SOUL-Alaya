@@ -25,6 +25,13 @@ review 入口在本目录维护。
 
 状态：任务卡执行 schema 已规范化；这些卡片仍是 v0.1 规划/交付入口，不是当前实现说明。
 
+R0 closeout：ALA-R0 source/doc preflight 已由
+[ALA-R0 Source Extraction Report](../reports/ALA-R0-source-extraction-report.md)
+关闭。该状态只覆盖 source references、source classification、task-card
+schema、link/stale-marker hygiene 与 defaults containment；不表示 package、
+runtime、CLI、MCP、Gateway、Inspector 或 benchmark 已可运行。下一张执行卡是
+[ALA-R1 Runtime Truth Kernel](runtime-truth-kernel.md)。
+
 根任务卡 schema：
 
 - `Goal`：本卡要交付的根能力。
