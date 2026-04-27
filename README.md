@@ -1,77 +1,75 @@
-# SOUL Memory Product Prototype
+# Do-SOUL Alaya
 
-Status: standalone local prototype. This folder is currently parked outside the main `do-what-new` repository while the SOUL memory product boundary is explored. The final product name is intentionally not settled yet.
+Do-SOUL Alaya 是面向 CLI agent 的本地优先长期记忆核心。
 
-## Boundary
+它不只是保存记忆，而是管理记忆如何形成、连接、召回、显影、治理，
+并证明 agent 是否真的使用了它。
 
-- Keep implementation work inside this package.
-- Do not import `@do-what/*` packages from this prototype.
-- Do not treat this folder as a hidden implementation branch for the main repo.
-- Public API names mirror the product specs, but server, runtime, storage, CLI, and MCP adapters are separate slices.
-- Durable memory truth belongs to the runtime API and SQLite storage layer. Inspector and benchmark code must not infer or duplicate storage semantics.
+## 当前状态
 
-## Layout
+本仓库处于 reset/extraction 阶段。
 
-- `src/contracts/`: public SOUL Memory contracts and runtime validation.
-- `src/storage/`: Node 24 `node:sqlite` baseline schema and repository.
-- `src/runtime/`: semantic root used by every adapter.
-- `src/server/`: localhost HTTP API and inspector asset server.
-- `src/cli/`: setup, doctor, serve, ingest, recall, context, session, govern, import/export, backup, gateway, and inspector commands.
-- `src/mcp/`: minimal MCP stdio JSON-RPC tool surface.
-- `src/inspector/`: dependency-free graph-first static inspector assets.
-- `src/bench/`: deterministic benchmark/demo harness.
-- `docs/product/`: product boundary, memory planes, public API, positioning, completeness.
-- `docs/interfaces/`: CLI, MCP, activation, and integration surfaces.
-- `docs/implementation/`: extraction notes, storage/recall design, inspector model, benchmark plan.
-- `docs/reviews/`: review and verification closure records.
-- `dist/`: generated TypeScript output.
-- `var/`: generated local runtime data.
+- 旧本地原型实现已按计划删除。
+- 当前工作是文档与架构重置。
+- 目标 package namespace 是 `@do-soul/alaya`。
+- archive 文档只作为历史参考，不是当前真相。
+- 除非后续迁移计划明确负责，不要恢复已删除的 `src/` 实现。
 
-## Commands
+## 产品方向
 
-Run from this package root:
+Do-SOUL Alaya 是本地优先的 CLI agent memory core。它应当能通过同一组
+公共接口接入 Codex、Claude Code，以及其它 agent CLI。
 
-```bash
-cd /home/tdwhere/vibe/soul-ledger
-rtk pnpm exec tsc -p tsconfig.json
-rtk pnpm exec vitest run --config vitest.config.mjs
+产品形态：
+
+- 本地 daemon core：负责存储、runtime、召回、治理、审计与配置；
+- MCP-first integration：作为 agent 访问的首要入口；
+- CLI protocol 与 SDK/adapters：围绕同一 public API 提供备用接入；
+- Attach/Profile installer：为 Codex、Claude Code 与项目级 agent rules
+  生成接入配置，并让用户确认写入；
+- 可选 Gateway mode：用于强制经过 Alaya 的测试、评测与 benchmark；
+- Graph inspector：核心迁移完成后的 Phase 2 展示面板。
+
+## 架构基线
+
+Do-SOUL Alaya 将 SOUL 模型作为硬架构：
+
+- `Memory Ontology`: durable memory truth.
+- `Structure Registry`: routing, scope, surface, mapping, path, and governance
+  registration.
+- `Runtime Control Plane`: current-turn recall, activation, manifestation,
+  context projection, and usage audit.
+
+四轴保持正交：
+
+- `Object`: 记住什么。
+- `Path`: 对象与 facet 为什么在特定条件下连接。
+- `Evidence`: 记忆为什么成立，以及支持度如何变化。
+- `Governance`: 什么可以影响未来 agent 行为。
+
+核心规则：
+
+```text
+Embedding affects what can be found.
+LLM or connected agents propose what may become memory.
+Alaya decides what is durable truth.
 ```
 
-Package scripts are also available from this directory:
+## 文档入口
 
-```bash
-rtk pnpm build
-rtk pnpm test
-```
+从这里开始：
 
-## Smoke Flow
+- [docs/README.md](docs/README.md) - 文档地图。
+- [docs/handbook/README.md](docs/handbook/README.md) - 当前真相层级。
+- [docs/handbook/architecture.md](docs/handbook/architecture.md) - 架构基线。
+- [docs/handbook/invariants.md](docs/handbook/invariants.md) - 最高优先级规则。
+- [docs/v0.1/README.md](docs/v0.1/README.md) - 第一轮完整产品闭环计划。
 
-```bash
-rtk node dist/cli/index.js doctor --data-dir /tmp/soul-memory-product-smoke
-rtk node dist/cli/index.js ingest --data-dir /tmp/soul-memory-product-smoke --summary "smoke memory test"
-rtk node dist/cli/index.js recall --data-dir /tmp/soul-memory-product-smoke --query "smoke memory"
-rtk node dist/cli/index.js export --data-dir /tmp/soul-memory-product-smoke --file /tmp/soul-memory-product-smoke/export.json
-rtk node dist/cli/index.js gateway --data-dir /tmp/soul-memory-product-smoke --query "smoke memory" -- node -e "process.exit(0)"
-```
+历史原型材料已归档到
+[docs/archive/2026-04-27-old-prototype/](docs/archive/2026-04-27-old-prototype/).
 
-Start the HTTP API and inspector with:
+## 操作文件
 
-```bash
-rtk node dist/cli/index.js serve --data-dir /tmp/soul-memory-product-smoke --host 127.0.0.1 --port 8787
-```
-
-The inspector is then available at `http://127.0.0.1:8787/`.
-
-## Agent And Operator Files
-
-- `AGENTS.md`: Codex/operator rules for this standalone package.
-- `CLAUDE.md`: Claude-oriented operator rules adapted from the main repo.
-- `RTK.md`: command-prefix rule for local shell work.
-
-## Docs Index
-
-Start with [docs/README.md](docs/README.md), then read the relevant product, interface, or implementation folder. Current review closure lives at [docs/reviews/final-review.md](docs/reviews/final-review.md).
-
-## Conceptual Invariants
-
-The main repo SOUL invariants still apply conceptually: memory objects are ontology, projections and context packs are not durable truth, evidence and governance changes must be explicit and auditable, and UI state must not infer backend truth.
+- [AGENTS.md](AGENTS.md) - Codex/operator 规则。
+- [CLAUDE.md](CLAUDE.md) - Claude-oriented operator 规则。
+- [RTK.md](RTK.md) - 本地 shell 命令前缀规则。
