@@ -37,6 +37,7 @@
 | 导入导出备份 | `import-export-backup` | portability surface；必须保留 source/evidence/governance/audit integrity。 |
 | 文档重置态 | `docs-reset-state` | 当前仓库以文档为主，旧实现已删除。 |
 | R1 基线就绪 | `r1-baseline-ready` | ALA-R1 package/runtime/storage/audit/doctor baseline 已实现并通过当前 gate；不等于完整产品 ready。 |
+| Foundation contracts 就绪 | `foundation-contracts-ready` | ALA-R2/R3/R4 ontology、structure、governance foundation contracts 已通过当前 package gate；不等于 recall/provider/adapter/full product ready。 |
 | 产品就绪 | `product-ready` | 完整 agent memory core 闭环就绪状态；当前为 false。 |
 | 未实现 | `not-implemented` | 功能尚无当前代码承载，不可宣称可运行。 |
 | 未就绪 | `not-ready` | 不能声明 build/test/run readiness，直到实现面和验证证据存在。 |

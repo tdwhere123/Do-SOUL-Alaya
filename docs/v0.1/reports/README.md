@@ -10,6 +10,10 @@
   closes the verified R1 package/runtime/storage/audit/doctor baseline; does
   not claim MCP, Attach/Profile, Gateway, recall/provider, Inspector,
   benchmark, or full product readiness.
+- [ALA-R2/R3/R4 Foundation Contracts Report](ALA-R2-R3-R4-foundation-contracts-report.md) -
+  closes the verified Memory Ontology/Evidence, Structure Registry/Paths, and
+  Governance/Promotion foundation slice; does not claim MCP, Attach/Profile,
+  Gateway, recall/provider, Inspector, benchmark, or full product readiness.
 
 ## Placement Rules
 

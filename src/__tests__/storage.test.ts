@@ -19,7 +19,10 @@ describe("SqliteAlayaStorage", () => {
     try {
       expect(existsSync(join(temp.path, "alaya.sqlite"))).toBe(true);
       expect(storage.listAppliedMigrations()).toEqual([
-        expect.objectContaining({ id: "001-runtime-truth-kernel-baseline" })
+        expect.objectContaining({ id: "001-runtime-truth-kernel-baseline" }),
+        expect.objectContaining({ id: "002-ontology" }),
+        expect.objectContaining({ id: "003-structure" }),
+        expect.objectContaining({ id: "004-governance" })
       ]);
     } finally {
       storage.close();

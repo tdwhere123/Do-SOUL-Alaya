@@ -23,6 +23,7 @@ export interface DoctorReport {
   readonly schema_version: 1;
   readonly product: "Do-SOUL Alaya";
   readonly r1_baseline_ready: boolean;
+  readonly foundation_contracts_ready: boolean;
   readonly product_ready: false;
   readonly package: DoctorComponent & {
     readonly name: string;
@@ -32,6 +33,9 @@ export interface DoctorReport {
     readonly api: "AlayaRuntimePort";
   };
   readonly storage: DoctorComponent & DoctorStorageReport;
+  readonly ontology: DoctorComponent;
+  readonly structure: DoctorComponent;
+  readonly governance: DoctorComponent;
   readonly profile: DoctorComponent;
   readonly provider: DoctorComponent;
 }
@@ -41,6 +45,7 @@ export function createDoctorReport(storage: DoctorStorageReport): DoctorReport {
     schema_version: 1,
     product: "Do-SOUL Alaya",
     r1_baseline_ready: true,
+    foundation_contracts_ready: true,
     product_ready: false,
     package: {
       status: "ok",
@@ -50,7 +55,7 @@ export function createDoctorReport(storage: DoctorStorageReport): DoctorReport {
     },
     runtime: {
       status: "ok",
-      detail: "Public R1 port exposes runtime-owned audited decision recording; callback-based mutation orchestration stays internal.",
+      detail: "Public runtime port exposes audited R1 decisions plus R2/R3/R4 ontology, structure, manifestation, and governance operations; callback-based mutation orchestration stays internal.",
       api: "AlayaRuntimePort"
     },
     storage: {
@@ -58,13 +63,25 @@ export function createDoctorReport(storage: DoctorStorageReport): DoctorReport {
       detail: "SQLite storage initialized through the runtime-owned service.",
       ...storage
     },
+    ontology: {
+      status: "ok",
+      detail: "R2 ontology validators and runtime-owned durable write operations require source, evidence, usable evidence refs, and audit."
+    },
+    structure: {
+      status: "ok",
+      detail: "R3 PathRelation, runtime-only ActivationCandidate, manifestation resolver, and read-only topology projection contracts are available."
+    },
+    governance: {
+      status: "ok",
+      detail: "R4 promotion gate, HITL/operator reason policy, and governance bypass fail-closed signal are available."
+    },
     profile: {
       status: "not_implemented",
-      detail: "Attach/Profile installer is outside ALA-R1 and remains explicit future work."
+      detail: "Attach/Profile installer is outside the current foundation slice and remains explicit future work."
     },
     provider: {
       status: "not_implemented",
-      detail: "Provider, recall, and agent usage proof are outside ALA-R1 and are not implied by doctor."
+      detail: "Provider, recall, and agent usage proof are outside the current foundation slice and are not implied by doctor."
     }
   };
 }
@@ -75,6 +92,7 @@ export function createDoctorFailureReport(error: unknown): DoctorReport {
     schema_version: 1,
     product: "Do-SOUL Alaya",
     r1_baseline_ready: false,
+    foundation_contracts_ready: false,
     product_ready: false,
     package: {
       status: "ok",
@@ -94,13 +112,25 @@ export function createDoctorFailureReport(error: unknown): DoctorReport {
       database: "unavailable",
       migrations: []
     },
+    ontology: {
+      status: "failed",
+      detail: `Foundation contract readiness unavailable because runtime initialization failed: ${String(redactedError.message)}.`
+    },
+    structure: {
+      status: "failed",
+      detail: `Foundation contract readiness unavailable because runtime initialization failed: ${String(redactedError.message)}.`
+    },
+    governance: {
+      status: "failed",
+      detail: `Foundation contract readiness unavailable because runtime initialization failed: ${String(redactedError.message)}.`
+    },
     profile: {
       status: "not_implemented",
-      detail: "Attach/Profile installer is outside ALA-R1 and remains explicit future work."
+      detail: "Attach/Profile installer is outside the current foundation slice and remains explicit future work."
     },
     provider: {
       status: "not_implemented",
-      detail: "Provider, recall, and agent usage proof are outside ALA-R1 and are not implied by doctor."
+      detail: "Provider, recall, and agent usage proof are outside the current foundation slice and are not implied by doctor."
     }
   };
 }

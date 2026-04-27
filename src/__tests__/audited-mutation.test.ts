@@ -7,7 +7,7 @@ import {
   type AuditedMutationInput
 } from "../runtime/audit-types.js";
 import { executeAuditedMutation } from "../runtime/audited-mutation.js";
-import type { AuditEventWrite, AuditLogWriter } from "../runtime/audited-mutation.js";
+import type { AtomicAuditLogWriter, AuditEventWrite, AuditLogWriter } from "../runtime/audited-mutation.js";
 import { SqliteAlayaStorage } from "../storage/sqlite.js";
 
 const baseInput: AuditedMutationInput = {
@@ -181,6 +181,25 @@ describe("executeAuditedMutation", () => {
     }
   });
 
+  it("redacts actor strings before storing audit events", async () => {
+    const { storage } = await openStorage("alaya-audit-actor-redaction-");
+    try {
+      const result = await executeAuditedMutation(
+        storage,
+        {
+          ...baseInput,
+          actor: "operator --token=raw-secret"
+        },
+        () => "ok"
+      );
+
+      const auditEvents = storage.listAuditEventsForMutation(result.mutationId);
+      expect(auditEvents[0]?.actor).toBe("operator --token=[REDACTED]");
+    } finally {
+      storage.close();
+    }
+  });
+
   it("rejects durable mutations without explicit source or evidence before audit write", async () => {
     const { storage } = await openStorage("alaya-audit-invalid-");
     try {
@@ -197,6 +216,20 @@ describe("executeAuditedMutation", () => {
     } finally {
       storage.close();
     }
+  });
+
+  it("rolls back atomic domain writes if the committed audit event cannot be written", async () => {
+    const auditLog = new FailingCommittedAtomicAuditLog();
+
+    const rejection = await executeAuditedMutation(auditLog, baseInput, () => {
+      auditLog.domainWrites.push("durable-write");
+      return "would-have-committed";
+    }).catch((error: unknown) => error);
+
+    expect(rejection).toBeInstanceOf(AuditedMutationExecutionError);
+    expect((rejection as AuditedMutationExecutionError).mutationId).toBe(auditLog.mutationId);
+    expect(auditLog.domainWrites).toEqual([]);
+    expect(auditLog.phases).toEqual(["intent", "committed", "mutation_failed"]);
   });
 
   async function openStorage(prefix: string): Promise<{ storage: SqliteAlayaStorage }> {
@@ -230,5 +263,39 @@ class FailingFailureAuditLog implements AuditLogWriter {
       evidence: event.input.evidence,
       createdAt: new Date().toISOString()
     };
+  }
+}
+
+class FailingCommittedAtomicAuditLog implements AtomicAuditLogWriter {
+  public readonly phases: string[] = [];
+  public readonly domainWrites: string[] = [];
+  public mutationId = "";
+
+  public async appendAuditEvent(event: AuditEventWrite) {
+    this.phases.push(event.phase);
+    this.mutationId = event.mutationId;
+    if (event.phase === "committed") {
+      throw new Error("secret: committed-audit-failed");
+    }
+    return {
+      auditEventId: `${event.phase}-event`,
+      mutationId: event.mutationId,
+      phase: event.phase,
+      status: event.status,
+      mutationKind: event.input.kind,
+      source: event.input.source,
+      evidence: event.input.evidence,
+      createdAt: new Date().toISOString()
+    };
+  }
+
+  public async executeAtomic<T>(operation: () => Promise<T> | T): Promise<T> {
+    const before = [...this.domainWrites];
+    try {
+      return await operation();
+    } catch (error) {
+      this.domainWrites.splice(0, this.domainWrites.length, ...before);
+      throw error;
+    }
   }
 }

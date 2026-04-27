@@ -26,6 +26,10 @@ export interface AuditLogWriter {
   appendAuditEvent(event: AuditEventWrite): Promise<AuditedMutationRecord>;
 }
 
+export interface AtomicAuditLogWriter extends AuditLogWriter {
+  executeAtomic<T>(operation: () => Promise<T> | T): Promise<T>;
+}
+
 export type AuditedMutationCallback<T> = (context: AuditedMutationContext) => Promise<T> | T;
 export type AuditedMutationNotifier<T> = (context: AuditedMutationNotificationContext<T>) => Promise<void> | void;
 
@@ -46,8 +50,31 @@ export async function executeAuditedMutation<T>(
   });
 
   let result: T;
+  let committed: AuditedMutationRecord;
   try {
-    result = await mutate({ mutationId, intent });
+    if (isAtomicAuditLogWriter(auditLog)) {
+      ({ result, committed } = await auditLog.executeAtomic(async () => {
+        const atomicResult = await mutate({ mutationId, intent });
+        const atomicCommitted = await auditLog.appendAuditEvent({
+          mutationId,
+          phase: "committed",
+          status: "committed",
+          input
+        });
+        return {
+          result: atomicResult,
+          committed: atomicCommitted
+        };
+      }));
+    } else {
+      result = await mutate({ mutationId, intent });
+      committed = await auditLog.appendAuditEvent({
+        mutationId,
+        phase: "committed",
+        status: "committed",
+        input
+      });
+    }
   } catch (cause) {
     try {
       await auditLog.appendAuditEvent({
@@ -62,13 +89,6 @@ export async function executeAuditedMutation<T>(
     }
     throw new AuditedMutationExecutionError(mutationId, cause);
   }
-
-  const committed = await auditLog.appendAuditEvent({
-    mutationId,
-    phase: "committed",
-    status: "committed",
-    input
-  });
 
   if (notify === undefined) {
     return {
@@ -109,4 +129,8 @@ export async function executeAuditedMutation<T>(
     committed: true,
     notification: "notified"
   };
+}
+
+function isAtomicAuditLogWriter(auditLog: AuditLogWriter): auditLog is AtomicAuditLogWriter {
+  return "executeAtomic" in auditLog && typeof auditLog.executeAtomic === "function";
 }

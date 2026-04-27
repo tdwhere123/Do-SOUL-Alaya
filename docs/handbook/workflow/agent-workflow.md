@@ -1,6 +1,6 @@
 # Agent Workflow
 
-本页定义 Do-SOUL Alaya 在当前 reset/extraction + ALA-R1 baseline 阶段的执行纪律。
+本页定义 Do-SOUL Alaya 在当前 reset/extraction + ALA-R1-R4 foundation contracts 阶段的执行纪律。
 默认目标：小步、可验证、严格遵守写入范围。
 
 ## Required Read Order
@@ -52,7 +52,7 @@
 - targeted `rtk sed` / `rtk nl` evidence reads；
 - 检查 handbook 没有把 v0.1 planning 或 archive 写成实现事实。
 
-ALA-R1 package/runtime baseline 已重新引入，root package 的 build/test/doctor gate 适用。若任务要求未实现 surface 的 build/test/smoke（例如 MCP、Attach/Profile、Gateway、recall/provider、Inspector），报告 `NOT_VERIFIED` 或 `BLOCKED`，不要假造命令。
+ALA-R1-R4 package/runtime foundation contracts 已重新引入，root package 的 build/test/doctor gate 适用。若任务要求未实现 surface 的 build/test/smoke（例如 MCP、Attach/Profile、Gateway、recall/provider、Inspector），报告 `NOT_VERIFIED` 或 `BLOCKED`，不要假造命令。
 
 ## BLOCKED Protocol
 

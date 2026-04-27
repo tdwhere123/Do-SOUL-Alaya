@@ -12,7 +12,7 @@ describe("doctor status", () => {
     await Promise.all(tempDirs.splice(0).map((entry) => entry.cleanup()));
   });
 
-  it("reports the R1 package, runtime, and storage baseline without claiming profile/provider readiness", async () => {
+  it("reports the R1 package plus R2/R3/R4 foundation contracts without claiming profile/provider readiness", async () => {
     const temp = await createTempDir("alaya-doctor-report-");
     tempDirs.push(temp);
     const runtime = await createAlayaRuntime({ dataDir: temp.path });
@@ -21,6 +21,7 @@ describe("doctor status", () => {
         schema_version: 1,
         product: "Do-SOUL Alaya",
         r1_baseline_ready: true,
+        foundation_contracts_ready: true,
         product_ready: false,
         package: {
           status: "ok",
@@ -34,6 +35,15 @@ describe("doctor status", () => {
           status: "ok",
           driver: "node:sqlite",
           database: "initialized"
+        },
+        ontology: {
+          status: "ok"
+        },
+        structure: {
+          status: "ok"
+        },
+        governance: {
+          status: "ok"
         },
         profile: {
           status: "not_implemented"
@@ -105,10 +115,12 @@ describe("doctor status", () => {
     expect(stderr).toBe("");
     const report = JSON.parse(stdout) as {
       r1_baseline_ready: boolean;
+      foundation_contracts_ready: boolean;
       runtime: { status: string; detail: string };
       storage: { status: string; database: string };
     };
     expect(report.r1_baseline_ready).toBe(false);
+    expect(report.foundation_contracts_ready).toBe(false);
     expect(report.runtime.status).toBe("failed");
     expect(report.storage.status).toBe("failed");
     expect(report.storage.database).toBe("unavailable");

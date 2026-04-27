@@ -103,6 +103,13 @@ export class InvalidRuntimeDecisionKindError extends AlayaRuntimeError {
   }
 }
 
+export class AlayaValidationError extends AlayaRuntimeError {
+  public constructor(message: string, options?: ErrorOptions) {
+    super(message, "VALIDATION_FAILED", options);
+    this.name = "AlayaValidationError";
+  }
+}
+
 export class AuditedMutationExecutionError extends AlayaRuntimeError {
   public readonly failure: JsonObject;
   public readonly auditWriteFailure?: JsonObject;
