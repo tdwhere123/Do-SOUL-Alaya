@@ -1,121 +1,44 @@
-# API 与契约（v0.1 计划）
+# v0.1 API And Contract Execution Brief
 
-公共契约是语义根。MCP、CLI protocol、Gateway wrapper、Inspector、benchmark
-都必须反映同一套 runtime 行为。
+Status: execution brief. Stable interface boundaries live in
+[Architecture](../handbook/architecture.md),
+[Surface Strategy](../handbook/surface-strategy.md), and
+[Invariants](../handbook/invariants.md).
 
-## 契约层次
+This file routes contract work to task cards. It must not become a second
+source of product truth.
 
-- Product contract：记忆语义、证据、治理、trust rules。
-- Runtime API contract：durable operations 与 validation。
-- Adapter contract：MCP-first，CLI protocol fallback。
-- Session contract：run 级激活、使用证明与 ingest 结果。
-- Provider contract：embedding、agent-assisted recall、LLM/agent proposal。
+## Contract Ownership
 
-## 第一稳定 Runtime 操作
+| Contract area | Owning cards | Notes |
+|---|---|---|
+| Runtime/API boundary | [ALA-R1](task-cards/runtime-truth-kernel.md) | Defines the only path to durable state mutation. |
+| Durable ontology operations | [ALA-R2](task-cards/ontology-and-evidence.md) | Covers source, evidence, lifecycle, and durable object semantics. |
+| Path and structure operations | [ALA-R3](task-cards/structure-registry-and-paths.md) | Keeps path truth distinct from graph/UI projection. |
+| Governance operations | [ALA-R4](task-cards/governance-and-promotion.md) | Covers promotion, rejection, retirement, conflict, and high-risk confirmation. |
+| Recall/context operations | [ALA-R5](task-cards/recall-and-context.md), [ALA-R6](task-cards/provider-and-agent-proposal.md) | Covers route outputs, proposal boundaries, provider status, and degradation metadata. |
+| Session proof | [ALA-R7](task-cards/session-audit-and-trust.md) | Records delivery, use, skip, unverifiable state, and violations. |
+| Agent adapters | [ALA-R8](task-cards/agent-integration.md) | MCP and CLI fallback must call the same runtime contract. |
+| Portability | [ALA-R9](task-cards/operations-and-portability.md) | Import/export/backup/restore must preserve governance and audit integrity. |
+| Graph and benchmark consumers | [ALA-R10](task-cards/evaluation-and-benchmark.md), [ALA-R11](task-cards/graph-inspector-contract.md) | Consumers read derived views from runtime/API and do not own durable truth. |
 
-Health / profile：
+## Required Contract Checks
 
-- `health`
-- `doctor`
-- `getVersion`
-- `getStorageStatus`
-- `getProfileStatus`
-- `listProviders`
+Every implementation card that changes API behavior must verify:
 
-Recall / context：
+- adapter-only mutation is impossible;
+- durable memory write paths require source and evidence;
+- high-risk governance changes require explicit confirmation;
+- fallback paths preserve session/audit semantics;
+- degraded provider or recall routes are visible in explanations and audit;
+- graph, benchmark, and inspector outputs are derived views.
 
-- `recall`
-- `assembleContext`
-- `explainRecall`
-- `listRecallCandidates`
-- `listRecallExclusions`
+## Stop Conditions
 
-Session / usage：
+Return `BLOCKED` rather than implementing a contract if:
 
-- `startMemorySession`
-- `assembleContextForSession`
-- `recordMemoryUsage`
-- `recordMemoryIngest`
-- `finishMemorySession`
-- `getMemorySession`
-- `listSessionViolations`
-
-Ingest / governance：
-
-- `proposeMemory`
-- `proposePathRelation`
-- `proposeGovernance`
-- `ingestEvidence`
-- `acceptCandidate`
-- `rejectCandidate`
-- `retireMemory`
-- `markSensitive`
-- `resolveConflict`
-
-Portability：
-
-- `exportBundle`
-- `importBundle`
-- `backup`
-- `restore`
-
-## MCP-first 与 CLI fallback
-
-主路径：
-
-- MCP tools/resources/prompts 映射到 runtime operations。
-- MCP 不能被描述为“保证 agent 会调用”；它是能力面。
-
-Fallback：
-
-- CLI protocol 调用同一 runtime operations。
-- fallback 需要产生同等 session/audit events。
-
-Non-goal：
-
-- 不允许 adapter-only mutation。
-
-## Memory Session Contract
-
-```text
-memory_session_id
-agent_kind
-agent_client
-agent_version
-mode: connect | attach | gateway
-user_scope_ref
-project_scope_ref
-started_at
-finished_at
-context_pack_id
-context_pack_attached
-usage_state: configured | delivered | used | skipped | unverifiable | mixed
-post_run_ingest_state
-provider_usage_summary
-degradation_summary
-violations
-```
-
-## Durable Truth Rules
-
-- 只有 runtime 可以 commit durable memory。
-- 每条 durable memory 必须有 source 和 evidence。
-- Context pack、inspector overlay、benchmark view 都是 derived view。
-- Governance 和 trust transitions 必须显式且可审计。
-
-## Candidate Proposer Boundary
-
-- Connected agent、子智能体、LLM provider 可以提出候选。
-- Proposal 不等于 durable write。
-- Runtime 校验 policy、evidence、conflict、scope、sensitivity、HITL。
-
-## 高风险 HITL
-
-默认需要显式确认：
-
-- `ClaimForm`；
-- reject / retire / override / strengthen；
-- 敏感内容；
-- 跨项目或全局强记忆；
-- 强 `PathRelation` 改写；
-- 低证据但会影响未来行为的 required guidance。
+- a contract would require importing `@do-what/*` or code from
+  `/home/tdwhere/vibe/do-what-new/packages/*`;
+- an adapter needs to mutate storage outside the runtime boundary;
+- a task needs stable product truth not yet captured in handbook;
+- source-backed behavior conflicts with [Invariants](../handbook/invariants.md).

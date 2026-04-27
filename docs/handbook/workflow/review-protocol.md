@@ -39,8 +39,24 @@
 - 术语是否与 `glossary.md` 一致。
 - `code-map.md` 是否只陈述当前存在/缺失事实。
 - `runtime-status.md` 是否避免 build/test/run readiness 误报。
+- `architecture.md` 是否保持 runtime/API 是 durable truth gate，且 adapter/provider/Inspector/benchmark 不直接写 durable truth。
+- `surface-strategy.md` 是否把 MCP/CLI/Attach/Gateway/Inspector 写成策略边界，而不是已实现事实。
 - workflow 文档是否包含 `BLOCKED` 出口与证据纪律。
+- handbook 是否避免链接或依赖 v0.1 execution ordering docs 作为当前真相。
 - 是否把 archive 当成了当前实现（若有则至少 Important，通常 Blocking）。
+
+## Handbook Stable-Truth Review
+
+评审 handbook docs-truth 变更时，必须分开判断四类内容：
+
+| Layer | Acceptable claim | Finding trigger |
+|---|---|---|
+| Product positioning | 本地优先 CLI agent memory core，namespace target，surface direction | 写成已发布包、已实现命令或已接入 agent |
+| Architecture/runtime | 三层四轴、runtime-only durable write、source/evidence/governance | 允许 adapter/provider/UI 直接 durable write |
+| Surface strategy | MCP-first、CLI fallback、Attach/Profile、Gateway、Inspector/benchmark 的边界 | 声称这些 surface 当前可运行 |
+| Runtime status | reset/extraction、not-implemented、build/test gate deferred until package surface returns | 声称当前 build/test/run 已通过或可执行 |
+
+若 v0.1 source material 与 handbook/invariants 冲突，finding 至少为 Blocking，除非变更明确保留 handbook 优先级并没有吸收冲突内容。
 
 ## Fix Loop Rule
 

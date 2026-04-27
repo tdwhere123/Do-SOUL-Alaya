@@ -1,98 +1,43 @@
-# 集成与激活（v0.1 计划）
+# v0.1 Integration And Activation Execution Brief
 
-## 集成目标
+Status: execution brief. Stable surface boundaries live in
+[Surface Strategy](../handbook/surface-strategy.md) and
+[Runtime Status](../handbook/runtime-status.md).
 
-支持任意 CLI agent 以稳定、本地优先的方式接入 Do-SOUL Alaya：
+This file coordinates implementation tasks for agent access and activation. It
+does not claim any adapter is currently implemented.
 
-- MCP-first 作为通用能力面；
-- CLI protocol fallback；
-- Attach/Profile installer 作为行为面；
-- Gateway mode 作为可选强制与 benchmark envelope；
-- Session audit 作为证明面。
+## Execution Ownership
 
-## Access Stack
+| Area | Owning cards | Acceptance focus |
+|---|---|---|
+| Session contract | [ALA-R7](task-cards/session-audit-and-trust.md) | Distinguishes configured, delivered, used, skipped, unverifiable, and mixed states. |
+| MCP and CLI fallback | [ALA-R8](task-cards/agent-integration.md) | Both paths call the same runtime/API contract. |
+| Attach/Profile installer | [ALA-R8](task-cards/agent-integration.md), [ALA-R9](task-cards/operations-and-portability.md) | Profile writes are previewed, consented, scoped, and audited. |
+| Gateway mode | [ALA-R8](task-cards/agent-integration.md), [ALA-R10](task-cards/evaluation-and-benchmark.md) | Gateway provides stronger proof for evaluation without redefining durable truth. |
+| Configuration and portability | [ALA-R9](task-cards/operations-and-portability.md) | User/project scope, provider policy, import/export, backup, and restore remain auditable. |
 
-1. Runtime API：语义根。
-2. MCP adapter：第一接入协议。
-3. CLI protocol adapter：fallback 与 operator 操作。
-4. Attach/Profile installer：写入或生成 Codex/Claude 等 agent 规则。
-5. Gateway runner：强制闭环与 benchmark。
-6. Inspector / benchmark consumers。
+## Dependency Rules
 
-## Installer 与 Profile Scope
+- ALA-R8 cannot claim adapter acceptance until ALA-R1 defines the runtime/API
+  boundary.
+- ALA-R8 cannot claim usage proof until ALA-R7 defines session audit semantics.
+- ALA-R9 must align profile, secret reference, import/export, and backup
+  behavior with governance rules from ALA-R4.
+- ALA-R10 can compare activation modes only after ALA-R7 and ALA-R8 expose
+  evidence for delivered/used/skipped/unverifiable states.
 
-Installer/profile 管理需要支持：
+## Review Focus
 
-- User scope：
-  - 跨项目默认配置；
-  - 默认 data/profile path；
-  - 默认 provider；
-  - 默认 activation preference。
-- Project scope：
-  - workspace/repo 覆盖规则；
-  - project recall constraints；
-  - local sensitivity policy；
-  - provider 禁用或替换。
+Review integration work for:
 
-计划 merge rule：project scope 覆盖 user scope 的冲突字段。
+- MCP being described as a capability surface, not a usage guarantee;
+- Attach/Profile being best-effort unless Gateway mode is explicitly selected;
+- CLI fallback preserving audit and governance semantics;
+- global or project profile changes requiring explicit preview and consent;
+- installed-but-unused sessions remaining observable.
 
-## Attach/Profile 行为
+## Stop Conditions
 
-默认行为：生成配置草案并请求用户确认写入。
-
-首批目标：
-
-- Codex；
-- Claude Code。
-
-Attach/Profile 内容必须说明：
-
-- 什么时候先 recall；
-- 什么时候 post-run ingest；
-- 什么时候引用 memory id / evidence；
-- 什么时候记录 skipped / unverifiable；
-- 高风险候选如何触发确认。
-
-Attach 是 best-effort，不得宣称保证使用。
-
-## Activation Modes
-
-Connect：
-
-- MCP tools/resources/prompts 可用。
-- 低摩擦接入。
-- 不保证 pre/post memory 行为。
-
-Attach：
-
-- 添加 profile/instruction assets。
-- 提高主动调用概率。
-- 仍是 best-effort，不是 enforcement。
-
-Gateway：
-
-- 包裹 agent launch；
-- 尝试强制 pre-recall、context attachment、post-run ingest；
-- 适合 benchmark 和需要强证明的任务。
-
-## Fallback Behavior
-
-MCP 不可用时：
-
-- CLI protocol 执行等价 runtime calls；
-- session usage 与 audit fields 兼容；
-- reduced capabilities 必须可见，不得隐式降级。
-
-## Trust And Safety Baseline
-
-- local-first 默认。
-- 写入 profile、修改全局规则、破坏性治理动作都需要明确 consent。
-- install/profile 变更需要 audit。
-- Attach assets 不允许隐藏 mutation。
-
-## 激活完成度检查
-
-- installed-but-unused sessions 可检测。
-- delivered / used / skipped / unverifiable 是不同状态。
-- Gateway 与 non-Gateway runs 可在 benchmark 输出中对比。
-- 即使 agent 已集成，也能解释为什么没有使用记忆。
+Return `BLOCKED` if implementation would hide profile mutations, weaken audit in
+fallback mode, or let an adapter bypass the runtime truth gate.

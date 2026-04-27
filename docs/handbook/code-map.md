@@ -10,12 +10,23 @@ docs/
   README.md
   handbook/
     README.md
+    architecture.md
+    surface-strategy.md
+    invariants.md
     glossary.md
     code-map.md
+    extraction-source-map.md
     runtime-status.md
     workflow/
       agent-workflow.md
       review-protocol.md
+  v0.1/
+    README.md
+    reports/
+      README.md
+    task-cards/
+      README.md
+      ALA-R0 through ALA-R12 root task cards
   archive/
     2026-04-27-old-prototype/
       product/
