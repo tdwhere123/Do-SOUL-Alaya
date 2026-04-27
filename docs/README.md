@@ -31,7 +31,6 @@ Do-SOUL Alaya 处于 reset/extraction 阶段。当前真相在 handbook 与 v0.1
 - [Waves](v0.1/waves.md) - 执行波次。
 - [Extraction Ledger](v0.1/extraction-ledger.md) - 从 `do-what-new` 抽取与适配的账本。
 - [Root Task Cards](v0.1/task-cards/README.md) - 通向完整闭环的根任务卡。
-- [Open Questions](v0.1/open-questions.md) - 开放问题。
 
 ## Archive
 

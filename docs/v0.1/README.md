@@ -31,7 +31,6 @@ v0.1 必须覆盖：
 - [执行波次](waves.md)
 - [抽取账本](extraction-ledger.md)
 - [根任务卡](task-cards/README.md)
-- [开放问题](open-questions.md)
 
 ## 规划纪律
 
@@ -45,7 +44,7 @@ v0.1 必须覆盖：
 
 ## 给 AI 的执行入口
 
-不要把 v0.1 当作“小 MVP”来做。v0.1 的任务拆分应从
+不要把 v0.1 当作临时 demo 来做。v0.1 的任务拆分应从
 [根任务卡](task-cards/README.md) 开始：每张根任务卡都是通向完整产品闭环
 的基础能力，而不是临时 demo。
 
@@ -54,6 +53,6 @@ v0.1 必须覆盖：
 - 先读 [抽取账本](extraction-ledger.md)，从 `do-what-new` 抽取 source truth。
 - `source-extracted` 内容直接进入任务卡 acceptance。
 - `adapted` 内容要写清继承点、改写点、禁止误用点。
-- 只有 `needs-product-decision` 才请求用户判断；不要把“尚未抽取”误当成
-  “需要用户决策”。
+- `alaya-default` 是已采用的产品默认值；不要把“尚未抽取”误当成
+  “需要用户重新决策”。
 - 任何任务卡都不得绕过 handbook 中的不变量。
