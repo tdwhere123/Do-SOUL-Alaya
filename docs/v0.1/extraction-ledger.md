@@ -8,6 +8,20 @@ source-backed SOUL model from `/home/tdwhere/vibe/do-what-new`, adapts it into
 an independent local-first CLI agent memory product, and records every
 adaptation explicitly in task cards.
 
+## Implementation Reuse Rule
+
+When `do-what-new` already has implementation for a v0.1 behavior, implementation
+work must inspect that code before creating an Alaya version. The preferred path
+is to port, adapt, or optimize the existing implementation and its test intent
+into `@do-soul/alaya`, then adjust names, package boundaries, storage paths, and
+product semantics as needed.
+
+A clean-room rewrite is the fallback, not the default. Use it only when the
+source implementation conflicts with Alaya invariants, is too coupled to
+do-what-new application wiring, or would take longer to untangle than to replace.
+Record that reason in the task report. Ported code must not import
+`@do-what/*` or `do-what-new/packages/*` at runtime.
+
 ## Classification
 
 | Classification | Meaning | AI action |

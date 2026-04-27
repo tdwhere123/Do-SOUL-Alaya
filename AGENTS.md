@@ -32,6 +32,20 @@ Core product invariants:
 - Do not import `@do-what/*` or rely on runtime code from
   `/home/tdwhere/vibe/do-what-new/packages/*`.
 
+Implementation reuse discipline:
+
+- When `/home/tdwhere/vibe/do-what-new` already has an implementation for the
+  behavior being built, inspect that implementation before writing new Alaya
+  code.
+- Prefer porting, adapting, or optimizing the proven implementation and test
+  intent into Alaya-owned modules over a clean-room rewrite.
+- Keep the inherited behavior, failure modes, and audit semantics unless the
+  Alaya package boundary or product requirements require a change; document
+  those changes in the task report.
+- Ported code must be independent `@do-soul/alaya` code. Do not create runtime
+  imports from `@do-what/*` or `do-what-new/packages/*`.
+- If a rewrite is necessary, record the reason before implementing it.
+
 ## Before You Code
 
 Read in this order:
