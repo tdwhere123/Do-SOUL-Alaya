@@ -6,7 +6,7 @@
 - 工程命名空间目标：`@do-soul/alaya`（目标态，不是已发布包事实）。
 - 仓库性质：**reset/extraction 仓库**。旧实现已按计划删除；当前文档用于定义现行架构真相，而非复述历史代码结构。
 - 产品边界：本地优先（local-first）的 CLI agent memory core，可通过同一公共语义接入 Codex、Claude Code 与其它 agent CLI。
-- 运行形态方向：local daemon core 承载 runtime/API、MCP-first 接入、CLI protocol fallback、后台任务与审计；当前仓库尚未重新引入这些实现。
+- 运行形态方向：local daemon core 承载 runtime/API、MCP-first 接入、CLI protocol fallback、后台任务与审计；当前仓库已重新引入 ALA-R1 runtime/API、audit、storage baseline 和 doctor CLI，但 daemon、MCP、CLI protocol fallback、后台任务、recall/provider/inspector 尚未实现。
 
 ## 1. SOUL 三层模型（当前真相）
 
@@ -83,9 +83,10 @@ source/evidence/session
 
 ## 6. 当前阶段约束
 
-- 当前阶段：handbook 稳定真相对齐 + v0.1 执行规划。
-- 当前仓库没有 runtime、package、adapter、storage、build/test/run surface。
-- 后续实现必须在 `@do-soul/alaya` 独立边界内重建，不恢复旧 prototype 文件作为捷径。
+- 当前阶段：ALA-R1 runtime truth kernel baseline 已在 `@do-soul/alaya` 独立边界内落地。
+- 当前仓库有 root package、public runtime API、internal SQLite storage baseline、audit-first mutation helper、doctor CLI、build/test/smoke gate。
+- 当前仓库仍没有 daemon、MCP adapter、CLI protocol fallback、Attach/Profile、Gateway、full ontology、recall/provider、Inspector 或 benchmark implementation。
+- 后续实现必须继续在 `@do-soul/alaya` 独立边界内重建，不恢复旧 prototype 文件作为捷径。
 - 本仓库不得依赖 `@do-what/*` 或 `do-what-new/packages/*` 运行时代码。
 
 ## 7. 术语使用规范

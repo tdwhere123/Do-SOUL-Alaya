@@ -1,0 +1,142 @@
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { createTempDir, type TempDir } from "./helpers.js";
+import { runCli } from "../cli/doctor.js";
+import { createAlayaRuntime } from "../index.js";
+
+describe("doctor status", () => {
+  const tempDirs: TempDir[] = [];
+
+  afterEach(async () => {
+    await Promise.all(tempDirs.splice(0).map((entry) => entry.cleanup()));
+  });
+
+  it("reports the R1 package, runtime, and storage baseline without claiming profile/provider readiness", async () => {
+    const temp = await createTempDir("alaya-doctor-report-");
+    tempDirs.push(temp);
+    const runtime = await createAlayaRuntime({ dataDir: temp.path });
+    try {
+      await expect(runtime.doctor()).resolves.toMatchObject({
+        schema_version: 1,
+        product: "Do-SOUL Alaya",
+        r1_baseline_ready: true,
+        product_ready: false,
+        package: {
+          status: "ok",
+          name: "@do-soul/alaya"
+        },
+        runtime: {
+          status: "ok",
+          api: "AlayaRuntimePort"
+        },
+        storage: {
+          status: "ok",
+          driver: "node:sqlite",
+          database: "initialized"
+        },
+        profile: {
+          status: "not_implemented"
+        },
+        provider: {
+          status: "not_implemented"
+        }
+      });
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("prints stable JSON through the CLI doctor command", async () => {
+    const temp = await createTempDir("alaya-doctor-cli-");
+    tempDirs.push(temp);
+    let stdout = "";
+    let stderr = "";
+
+    await expect(
+      runCli(["doctor", "--data-dir", temp.path], {
+        stdout: {
+          write: (chunk: string) => {
+            stdout += chunk;
+            return true;
+          }
+        },
+        stderr: {
+          write: (chunk: string) => {
+            stderr += chunk;
+            return true;
+          }
+        }
+      })
+    ).resolves.toBe(0);
+
+    expect(stderr).toBe("");
+    const report = JSON.parse(stdout) as { profile: { status: string }; provider: { status: string } };
+    expect(report.profile.status).toBe("not_implemented");
+    expect(report.provider.status).toBe("not_implemented");
+    expect(stdout).not.toMatch(/secret|token|password/i);
+  });
+
+  it("prints structured failure JSON when runtime/storage initialization fails", async () => {
+    const temp = await createTempDir("alaya-doctor-failure-");
+    tempDirs.push(temp);
+    const filePath = join(temp.path, "not-a-directory");
+    await writeFile(filePath, "not a data dir", "utf8");
+    let stdout = "";
+    let stderr = "";
+
+    await expect(
+      runCli(["doctor", "--data-dir", filePath], {
+        stdout: {
+          write: (chunk: string) => {
+            stdout += chunk;
+            return true;
+          }
+        },
+        stderr: {
+          write: (chunk: string) => {
+            stderr += chunk;
+            return true;
+          }
+        }
+      })
+    ).resolves.toBe(1);
+
+    expect(stderr).toBe("");
+    const report = JSON.parse(stdout) as {
+      r1_baseline_ready: boolean;
+      runtime: { status: string; detail: string };
+      storage: { status: string; database: string };
+    };
+    expect(report.r1_baseline_ready).toBe(false);
+    expect(report.runtime.status).toBe("failed");
+    expect(report.storage.status).toBe("failed");
+    expect(report.storage.database).toBe("unavailable");
+  });
+
+  it("redacts secret-looking unknown CLI arguments on stderr", async () => {
+    let stdout = "";
+    let stderr = "";
+
+    await expect(
+      runCli(["doctor", "--authorization=raw-secret"], {
+        stdout: {
+          write: (chunk: string) => {
+            stdout += chunk;
+            return true;
+          }
+        },
+        stderr: {
+          write: (chunk: string) => {
+            stderr += chunk;
+            return true;
+          }
+        }
+      })
+    ).resolves.toBe(2);
+
+    expect(stdout).toBe("");
+    expect(stderr).toContain("--authorization=[REDACTED]");
+    expect(stderr).not.toContain("raw-secret");
+  });
+});

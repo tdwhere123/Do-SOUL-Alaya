@@ -6,6 +6,10 @@
 
 - [ALA-R0 Source Extraction Report](ALA-R0-source-extraction-report.md) - closes
   the R0 docs/source preflight gate; does not claim runtime readiness.
+- [ALA-R1 Runtime Truth Kernel Report](ALA-R1-runtime-truth-kernel-report.md) -
+  closes the verified R1 package/runtime/storage/audit/doctor baseline; does
+  not claim MCP, Attach/Profile, Gateway, recall/provider, Inspector,
+  benchmark, or full product readiness.
 
 ## Placement Rules
 

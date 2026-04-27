@@ -29,7 +29,9 @@
 
 ## 3. 本次抽取裁剪项
 
-- 不迁移旧实现代码结构、旧路由明细、旧迁移号或旧测试状态。
+- 不把旧实现代码结构、旧路由明细、旧迁移号或旧测试状态直接声明为当前真相。
+- 若 `do-what-new` 已有对应实现，后续实现应先阅读并迁移/改造可复用代码与测试意图，
+  再落到 `@do-soul/alaya` 独立边界内；从零重写是 fallback，不是默认路径。
 - 不把 archive 文档里的“计划态/历史态”描述升级为当前实现承诺。
 - 不新增未在 current truth 中确认的产品能力（例如 Inspector 当前仅定位为 Phase 2）。
 - 不把 v0.1 execution order、任务卡退出条件或 planned commands 写成当前 build/test/run readiness。
@@ -38,7 +40,9 @@
 ## 4. 当前仓库真相覆盖声明
 
 - 本仓库是 reset/extraction 仓库，旧实现已删除。
-- handbook 目标是定义当前语义与边界，不回填不存在的代码。
-- 工程命名空间目标为 `@do-soul/alaya`。当前没有 package、command 或
-  MCP 实现可改；后续新实现应默认采用该目标，除非产品命名再次被显式调整。
+- handbook 目标是定义当前语义与边界，不回填不存在的历史代码。
+- 工程命名空间目标为 `@do-soul/alaya`。ALA-R1 已引入 root package、
+  runtime/API、storage baseline 与 doctor command；当前仍没有 MCP、CLI
+  protocol fallback、Attach/Profile、Gateway、recall/provider、Inspector 或
+  benchmark 实现可改。后续新实现应默认采用该目标，除非产品命名再次被显式调整。
 - v0.1 是执行规划层；如果 v0.1 内容与 handbook/invariants 冲突，handbook/invariants 优先，并应在实现前返回 `BLOCKED` 或修正规划材料。

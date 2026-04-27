@@ -1,11 +1,38 @@
 # Code Map
 
 本页记录当前仓库中“真实存在且可定位”的代码与文档版图。
-当前事实：仓库处于 docs reset；旧原型实现已删除，未保留可执行 runtime、适配器或存储实现。
+当前事实：仓库处于 reset/extraction 后的 ALA-R1 baseline；旧原型实现已删除，当前可执行代码只覆盖 root package、runtime/API、audit-first mutation、internal storage migration baseline、doctor CLI 和 focused tests。
 
 ## Top Level (Current)
 
 ```text
+package.json
+pnpm-lock.yaml
+tsconfig.json
+vitest.config.ts
+src/
+  index.ts
+  package-info.ts
+  cli/
+    doctor.ts
+    index.ts
+  doctor/
+    report.ts
+  runtime/
+    audit-types.ts
+    audited-mutation.ts
+    json.ts
+    redaction.ts
+    runtime.ts
+    types.ts
+  storage/
+    sqlite.ts
+  __tests__/
+    audited-mutation.test.ts
+    doctor-cli.test.ts
+    helpers.ts
+    public-api-boundary.test.ts
+    storage.test.ts
 docs/
   README.md
   handbook/
@@ -25,6 +52,7 @@ docs/
     reports/
       README.md
       ALA-R0-source-extraction-report.md
+      ALA-R1-runtime-truth-kernel-report.md
     task-cards/
       README.md
       ALA-R0 through ALA-R12 root task cards
@@ -40,16 +68,21 @@ docs/
 
 | Area | Current status | Evidence anchor |
 |---|---|---|
-| Runtime/API boundary | `not-implemented` | 当前树无可执行实现目录 |
-| Storage | `not-implemented` | 当前树无存储实现代码 |
-| Adapters (CLI/HTTP/MCP/Inspector/Bench) | `not-implemented` | 当前树无对应实现目录 |
-| Build/Test wiring | `not-implemented` | 当前无可用于构建测试的实现面 |
+| Package surface | `r1-baseline-ready` | `package.json` owns `@do-soul/alaya`, build/test scripts, exports, and doctor bins |
+| Runtime/API boundary | `r1-baseline-ready` | `src/index.ts`, `src/runtime/runtime.ts`, `src/runtime/types.ts` expose `createAlayaRuntime(...)`, `AlayaRuntimePort`, and runtime-owned `recordAuditedRuntimeDecision(...)` for `runtime.*` decision kinds |
+| Audit-first mutation | `r1-baseline-ready` | `src/runtime/audited-mutation.ts` records intent before mutation, committed after mutation, and notification status after notify |
+| Storage | `r1-baseline-ready` | `src/storage/sqlite.ts` is internal storage; initializes `alaya.sqlite`, migration metadata, and audit events |
+| Doctor CLI/status | `r1-baseline-ready` | `src/cli/index.ts`, `src/cli/doctor.ts`, `src/doctor/report.ts` produce doctor JSON through runtime service |
+| Tests | `r1-baseline-ready` | `src/__tests__/*.test.ts` cover storage init/idempotency, audit success/failures, doctor, CLI handler, and public API boundary |
+| Adapters (MCP/CLI protocol/Attach/Profile/Gateway/HTTP/Inspector/Bench) | `not-implemented` | No corresponding implementation directories exist |
+| Recall/provider/session usage proof | `not-implemented` | No recall, provider, context pack, or usage-proof implementation exists |
+| Build/Test wiring | `r1-baseline-ready` | `tsconfig.json`, `vitest.config.ts`, `pnpm-lock.yaml`, and R1 verification gate |
 
 ## Archive Boundary
 
 - `docs/archive/2026-04-27-old-prototype/**` 是历史快照。
 - Archive 可用于背景对照，不可当作“当前已实现”。
-- 若需要恢复实现，应先由任务卡明确范围，再在新实现路径落地并更新本页。
+- 若需要恢复或迁移历史能力，应先由任务卡明确范围，再在新实现路径落地并更新本页。
 
 ## Update Rules
 

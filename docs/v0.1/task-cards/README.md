@@ -29,8 +29,14 @@ R0 closeout：ALA-R0 source/doc preflight 已由
 [ALA-R0 Source Extraction Report](../reports/ALA-R0-source-extraction-report.md)
 关闭。该状态只覆盖 source references、source classification、task-card
 schema、link/stale-marker hygiene 与 defaults containment；不表示 package、
-runtime、CLI、MCP、Gateway、Inspector 或 benchmark 已可运行。下一张执行卡是
-[ALA-R1 Runtime Truth Kernel](runtime-truth-kernel.md)。
+runtime、CLI、MCP、Gateway、Inspector 或 benchmark 已可运行。
+
+R1 closeout：ALA-R1 runtime truth kernel 已在当前树落地 package/runtime/API、
+audit-first mutation、storage migration baseline、doctor CLI 与 focused tests，并已完成
+review/fix-loop closure。
+该状态只覆盖 R1 baseline；MCP、CLI protocol fallback、Attach/Profile、
+Gateway、full ontology、recall/provider、Inspector、benchmark 与完整产品闭环
+仍未实现。后续 foundation contract work 可从 ALA-R2 / ALA-R3 / ALA-R4 开始。
 
 根任务卡 schema：
 
