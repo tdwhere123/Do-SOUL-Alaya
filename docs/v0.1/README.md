@@ -29,6 +29,8 @@ v0.1 必须覆盖：
 - [集成与激活](integration-and-activation.md)
 - [Inspector 与评测](inspector-and-evaluation.md)
 - [执行波次](waves.md)
+- [抽取账本](extraction-ledger.md)
+- [根任务卡](task-cards/README.md)
 - [开放问题](open-questions.md)
 
 ## 规划纪律
@@ -40,3 +42,18 @@ v0.1 必须覆盖：
 - adapter 必须调用 runtime contract，不得直接改 storage。
 - embedding 影响“找得到什么”；LLM/agent 影响“什么可被提议为记忆”；
   Alaya 决定“什么成为 durable truth”。
+
+## 给 AI 的执行入口
+
+不要把 v0.1 当作“小 MVP”来做。v0.1 的任务拆分应从
+[根任务卡](task-cards/README.md) 开始：每张根任务卡都是通向完整产品闭环
+的基础能力，而不是临时 demo。
+
+执行规则：
+
+- 先读 [抽取账本](extraction-ledger.md)，从 `do-what-new` 抽取 source truth。
+- `source-extracted` 内容直接进入任务卡 acceptance。
+- `adapted` 内容要写清继承点、改写点、禁止误用点。
+- 只有 `needs-product-decision` 才请求用户判断；不要把“尚未抽取”误当成
+  “需要用户决策”。
+- 任何任务卡都不得绕过 handbook 中的不变量。
