@@ -4,8 +4,8 @@
 > - **Wave**: 1
 > - **Card ID**: P1-topology
 > - **Port mode**: trivial-copy
-> - **Source**: `vendor/do-what-new-snapshot/packages/soul/src/garden/topology-service.ts`, `vendor/do-what-new-snapshot/packages/soul/src/garden/path-graph-snapshotter.ts`, `vendor/do-what-new-snapshot/packages/soul/src/__tests__/topology-service.test.ts`, `vendor/do-what-new-snapshot/packages/soul/src/__tests__/path-graph-snapshotter.test.ts`
-> - **Target**: `packages/soul/src/garden/topology-service.ts`, `packages/soul/src/garden/path-graph-snapshotter.ts`, `packages/soul/src/__tests__/topology-service.test.ts`, `packages/soul/src/__tests__/path-graph-snapshotter.test.ts`
+> - **Source**: `vendor/do-what-new-snapshot/packages/soul/src/garden/topology-service.ts`, `vendor/do-what-new-snapshot/packages/soul/src/garden/path-graph-snapshotter.ts`, `vendor/do-what-new-snapshot/packages/soul/src/shared/deep-freeze.ts`, `vendor/do-what-new-snapshot/packages/soul/src/__tests__/topology-service.test.ts`, `vendor/do-what-new-snapshot/packages/soul/src/__tests__/path-graph-snapshotter.test.ts`
+> - **Target**: `packages/soul/src/garden/topology-service.ts`, `packages/soul/src/garden/path-graph-snapshotter.ts`, `packages/soul/src/shared/deep-freeze.ts`, `packages/soul/src/__tests__/topology-service.test.ts`, `packages/soul/src/__tests__/path-graph-snapshotter.test.ts`
 > - **Size**: M
 > - **Prerequisite**: P1-soul-skeleton, P1-storage-shared
 > - **Blocks**: P2-garden-batch-3, P5-graph-contract
@@ -31,6 +31,7 @@
 |---|---|---|
 | `vendor/do-what-new-snapshot/packages/soul/src/garden/topology-service.ts` | `packages/soul/src/garden/topology-service.ts` | Copy first; only package-name/path rewrites are allowed. |
 | `vendor/do-what-new-snapshot/packages/soul/src/garden/path-graph-snapshotter.ts` | `packages/soul/src/garden/path-graph-snapshotter.ts` | Copy first; only package-name/path rewrites are allowed. |
+| `vendor/do-what-new-snapshot/packages/soul/src/shared/deep-freeze.ts` | `packages/soul/src/shared/deep-freeze.ts` | Copy first; required package-local dependency for the topology leaves. |
 | `vendor/do-what-new-snapshot/packages/soul/src/__tests__/topology-service.test.ts` | `packages/soul/src/__tests__/topology-service.test.ts` | Copy first; only package-name/path rewrites are allowed. |
 | `vendor/do-what-new-snapshot/packages/soul/src/__tests__/path-graph-snapshotter.test.ts` | `packages/soul/src/__tests__/path-graph-snapshotter.test.ts` | Copy first; only package-name/path rewrites are allowed. |
 
@@ -50,7 +51,7 @@ Nothing deferred.
 | AC | Criteria | Evidence |
 |---|---|---|
 | AC1 | All files in §2 are ported per trivial-copy rules | Reviewer compares target files against the cited vendor source paths and adapter points |
-| AC2 | Every source path cited by this card exists before dispatch | `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/packages/soul/src/garden/topology-service.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/garden/path-graph-snapshotter.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/__tests__/topology-service.test.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/__tests__/path-graph-snapshotter.test.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"` exits 0 |
+| AC2 | Every source path cited by this card exists before dispatch | `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/packages/soul/src/garden/topology-service.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/garden/path-graph-snapshotter.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/shared/deep-freeze.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/__tests__/topology-service.test.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/__tests__/path-graph-snapshotter.test.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"` exits 0 |
 | AC3 | Build succeeds after this card lands | `rtk pnpm build` is green |
 | AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-soul topology-service path-graph-snapshotter` |
 | AC5 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-1-briefs/reports/task-p1-topology.md` exists and cites backlog issues for any deferred scope |
@@ -58,7 +59,7 @@ Nothing deferred.
 
 ## 5. Verification
 
-1. `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/packages/soul/src/garden/topology-service.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/garden/path-graph-snapshotter.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/__tests__/topology-service.test.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/__tests__/path-graph-snapshotter.test.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"`
+1. `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/packages/soul/src/garden/topology-service.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/garden/path-graph-snapshotter.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/shared/deep-freeze.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/__tests__/topology-service.test.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/__tests__/path-graph-snapshotter.test.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"`
 2. `rtk pnpm install`
 3. `rtk pnpm build`
 4. `rtk pnpm exec tsc --noEmit -p packages/soul`
