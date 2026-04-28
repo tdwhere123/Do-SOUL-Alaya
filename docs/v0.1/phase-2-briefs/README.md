@@ -20,8 +20,9 @@ avoid trivial-copy port-mode escalation, services land in dependency-
 depth order:
 
 ```
-Wave 2B.0 (leaf, parallel up to 4): output-shaping, narrative-budget,
-                                    health-journal+karma, event-publisher
+Wave 2B.0 (foundation, mostly parallel): output-shaping, event-publisher,
+                                         health-journal+karma
+Wave 2B.0 follow-on: narrative-budget after event-publisher
 Wave 2B.1 (depend on 2B.0, parallel up to 6): evidence, signal, memory,
                                               green, governance-lease,
                                               session-override
