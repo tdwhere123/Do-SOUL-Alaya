@@ -120,6 +120,42 @@ describe("RuntimeEventNormalizer", () => {
     expect(notifyEntry).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps a pending notification retryable after the retry itself fails", async () => {
+    const event = makeRuntimeEvent({
+      type: "session_started",
+      session_id: "session-1"
+    });
+    const appendSpy = vi.fn(
+      async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => createEventLogEntry(entry)
+    );
+    const notifyEntry = vi
+      .fn<(entry: EventLogEntry) => void | Promise<void>>()
+      .mockRejectedValueOnce(new Error("initial notify failed"))
+      .mockImplementationOnce(() => {
+        throw new Error("retry notify failed");
+      })
+      .mockResolvedValueOnce(undefined);
+    const normalizer = new RuntimeEventNormalizer({
+      eventLogRepo: { append: appendSpy },
+      runtimeNotifier: { notifyEntry }
+    });
+
+    await expect(normalizer.normalize(event, context)).rejects.toMatchObject({
+      name: "RuntimeEventNormalizerPropagationError",
+      entry: expect.objectContaining({ event_type: "worker.session_started" })
+    });
+    await expect(normalizer.normalize(event, context)).rejects.toMatchObject({
+      name: "RuntimeEventNormalizerPropagationError",
+      entry: expect.objectContaining({ event_type: "worker.session_started" })
+    });
+    await expect(normalizer.normalize(event, context)).resolves.toEqual(
+      expect.objectContaining({ event_type: "worker.session_started" })
+    );
+
+    expect(appendSpy).toHaveBeenCalledTimes(1);
+    expect(notifyEntry).toHaveBeenCalledTimes(3);
+  });
+
   it("deduplicates message_delta only by session_id and sequence", async () => {
     const operations: string[] = [];
     const { normalizer, appendSpy, notifyEntry } = createHarness(operations);

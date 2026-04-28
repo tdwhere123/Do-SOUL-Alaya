@@ -136,7 +136,18 @@ export class RuntimeEventNormalizer {
       retry
     });
 
-    return await retry;
+    try {
+      return await retry;
+    } catch (error) {
+      const current = this.pendingNotifications.get(pendingKey);
+      if (current?.retry === retry) {
+        this.pendingNotifications.set(pendingKey, {
+          entry: pending.entry,
+          sessionId: pending.sessionId
+        });
+      }
+      throw error;
+    }
   }
 
   private async runPendingNotification(
@@ -147,10 +158,6 @@ export class RuntimeEventNormalizer {
     try {
       await this.dependencies.runtimeNotifier.notifyEntry(entry);
     } catch (error) {
-      this.pendingNotifications.set(pendingKey, {
-        entry,
-        sessionId: event.session_id
-      });
       throw new RuntimeEventNormalizerPropagationError(entry, error);
     }
 
