@@ -22,13 +22,15 @@ export interface EventPublisherDependencies {
 
 export class EventPublisherPropagationError extends Error {
   public readonly entry: EventLogEntry;
+  public readonly entries: readonly EventLogEntry[];
 
-  public constructor(entry: EventLogEntry, cause: unknown) {
+  public constructor(entry: EventLogEntry, cause: unknown, entries: readonly EventLogEntry[] = [entry]) {
     super(`Event ${entry.event_type} was appended but propagation failed.`, {
       cause: cause instanceof Error ? cause : undefined
     });
     this.name = "EventPublisherPropagationError";
     this.entry = entry;
+    this.entries = entries;
   }
 }
 
@@ -89,7 +91,7 @@ export class EventPublisher {
       try {
         await this.propagate(entry);
       } catch (propagateError) {
-        throw new EventPublisherPropagationError(entry, propagateError);
+        throw new EventPublisherPropagationError(entry, propagateError, entries);
       }
     }
 

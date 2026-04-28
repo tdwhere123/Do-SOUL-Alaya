@@ -31,8 +31,26 @@ export interface NormalizerContext {
   readonly workerRunId: string;
 }
 
+interface PendingNormalizedNotification {
+  readonly entry: EventLogEntry;
+  readonly sessionId: string;
+}
+
+export class RuntimeEventNormalizerPropagationError extends Error {
+  public readonly entry: EventLogEntry;
+
+  public constructor(entry: EventLogEntry, cause: unknown) {
+    super(`Runtime event ${entry.event_type} was appended but notification failed.`, {
+      cause: cause instanceof Error ? cause : undefined
+    });
+    this.name = "RuntimeEventNormalizerPropagationError";
+    this.entry = entry;
+  }
+}
+
 export class RuntimeEventNormalizer {
   private readonly state: RuntimeEventNormalizerState;
+  private readonly pendingNotifications = new Map<string, PendingNormalizedNotification>();
 
   public constructor(private readonly dependencies: RuntimeEventNormalizerDependencies) {
     this.state = new RuntimeEventNormalizerState();
@@ -42,7 +60,12 @@ export class RuntimeEventNormalizer {
     event: RuntimeEvent,
     context: NormalizerContext
   ): Promise<Readonly<EventLogEntry> | null> {
-    let appended = false;
+    const pendingKey = this.getPendingNotificationKey(event);
+    const pending = this.pendingNotifications.get(pendingKey);
+
+    if (pending !== undefined) {
+      return await this.notifyPendingEntry(pendingKey, pending.entry, event);
+    }
 
     if (event.type === "message_delta" && !this.state.reserveMessageDelta(event.session_id, event.sequence)) {
       return null;
@@ -52,36 +75,90 @@ export class RuntimeEventNormalizer {
       return null;
     }
 
+    let entry: EventLogEntry;
     try {
-      const entry = await this.dependencies.eventLogRepo.append(this.buildEntry(event, context));
-      appended = true;
-
-      if (event.type === "session_finished") {
-        this.state.markSessionFinishedAppended(event.session_id);
-      }
-
-      await this.dependencies.runtimeNotifier.notifyEntry(entry);
-
-      if (event.type === "session_finished") {
-        this.state.clearSessionState(event.session_id);
-      }
-
-      return entry;
+      entry = await this.dependencies.eventLogRepo.append(this.buildEntry(event, context));
     } catch (error) {
-      if (event.type === "message_delta" && !appended) {
+      if (event.type === "message_delta") {
         this.state.releaseMessageDelta(event.session_id, event.sequence);
       }
 
-      if (event.type === "session_finished" && !appended) {
+      if (event.type === "session_finished") {
         this.state.clearSessionState(event.session_id);
       }
 
       throw error;
     }
+
+    if (event.type === "session_finished") {
+      this.state.markSessionFinishedAppended(event.session_id);
+    }
+
+    try {
+      await this.dependencies.runtimeNotifier.notifyEntry(entry);
+    } catch (error) {
+      this.pendingNotifications.set(pendingKey, {
+        entry,
+        sessionId: event.session_id
+      });
+      throw new RuntimeEventNormalizerPropagationError(entry, error);
+    }
+
+    if (event.type === "session_finished") {
+      this.state.clearSessionState(event.session_id);
+    }
+
+    return entry;
   }
 
   public clearSessionState(sessionId: string): void {
     this.state.clearSessionState(sessionId);
+    for (const [key, pending] of this.pendingNotifications) {
+      if (pending.sessionId === sessionId) {
+        this.pendingNotifications.delete(key);
+      }
+    }
+  }
+
+  private async notifyPendingEntry(
+    pendingKey: string,
+    entry: EventLogEntry,
+    event: RuntimeEvent
+  ): Promise<Readonly<EventLogEntry>> {
+    try {
+      await this.dependencies.runtimeNotifier.notifyEntry(entry);
+    } catch (error) {
+      throw new RuntimeEventNormalizerPropagationError(entry, error);
+    }
+
+    this.pendingNotifications.delete(pendingKey);
+
+    if (event.type === "session_finished") {
+      this.state.clearSessionState(event.session_id);
+    }
+
+    return entry;
+  }
+
+  private getPendingNotificationKey(event: RuntimeEvent): string {
+    switch (event.type) {
+      case "session_started":
+      case "session_finished":
+        return `${event.type}:${event.session_id}`;
+      case "message_delta":
+        return `${event.type}:${event.session_id}:${event.sequence}`;
+      case "tool_call_started":
+      case "tool_call_finished":
+        return `${event.type}:${event.session_id}:${event.call_id}`;
+      case "permission_requested":
+        return `${event.type}:${event.session_id}:${event.request_id}`;
+      case "patch_emitted":
+        return `${event.type}:${event.session_id}:${event.patch_id}`;
+      case "runtime_error":
+        return `${event.type}:${event.session_id}:${event.error_code}:${event.message}:${event.emitted_at}`;
+      default:
+        return assertNever(event);
+    }
   }
 
   private buildEntry(

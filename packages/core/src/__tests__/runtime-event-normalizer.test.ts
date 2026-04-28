@@ -1,6 +1,10 @@
 import { RuntimeEventSchema, type EventLogEntry, type RuntimeEvent } from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
-import { RuntimeEventNormalizer, type NormalizerContext } from "../runtime-event-normalizer.js";
+import {
+  RuntimeEventNormalizer,
+  RuntimeEventNormalizerPropagationError,
+  type NormalizerContext
+} from "../runtime-event-normalizer.js";
 
 const context: NormalizerContext = {
   workspaceId: "ws-1",
@@ -37,6 +41,38 @@ describe("RuntimeEventNormalizer", () => {
     expect(operations).toEqual(["append:worker.session_started", "notify:worker.session_started"]);
     expect(appendSpy).toHaveBeenCalledTimes(1);
     expect(notifyEntry).toHaveBeenCalledWith(result);
+  });
+
+  it("retries a pending session_started notification without appending a duplicate", async () => {
+    const event = makeRuntimeEvent({
+      type: "session_started",
+      session_id: "session-1"
+    });
+    const appendSpy = vi.fn(
+      async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => createEventLogEntry(entry)
+    );
+    const notifyEntry = vi
+      .fn<(entry: EventLogEntry) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("notify exploded"))
+      .mockResolvedValueOnce(undefined);
+    const normalizer = new RuntimeEventNormalizer({
+      eventLogRepo: { append: appendSpy },
+      runtimeNotifier: { notifyEntry }
+    });
+
+    const rejection = await normalizer.normalize(event, context).catch((error: unknown) => error);
+
+    expect(rejection).toBeInstanceOf(RuntimeEventNormalizerPropagationError);
+    expect(rejection).toMatchObject({
+      name: "RuntimeEventNormalizerPropagationError",
+      entry: expect.objectContaining({ event_type: "worker.session_started" })
+    });
+    await expect(normalizer.normalize(event, context)).resolves.toEqual(
+      expect.objectContaining({ event_type: "worker.session_started" })
+    );
+
+    expect(appendSpy).toHaveBeenCalledTimes(1);
+    expect(notifyEntry).toHaveBeenCalledTimes(2);
   });
 
   it("deduplicates message_delta only by session_id and sequence", async () => {
@@ -119,7 +155,7 @@ describe("RuntimeEventNormalizer", () => {
     await expect(first).resolves.toEqual(expect.objectContaining({ event_type: "worker.message_delta" }));
   });
 
-  it("deduplicates session_finished after append succeeds but notify fails", async () => {
+  it("retries a pending session_finished notification without appending a duplicate", async () => {
     const event = makeRuntimeEvent({
       type: "session_finished",
       session_id: "session-1",
@@ -131,17 +167,29 @@ describe("RuntimeEventNormalizer", () => {
     );
     const notifyEntry = vi
       .fn<(entry: EventLogEntry) => Promise<void>>()
-      .mockRejectedValueOnce(new Error("notify exploded"));
+      .mockRejectedValueOnce(new Error("notify exploded"))
+      .mockResolvedValueOnce(undefined);
     const normalizer = new RuntimeEventNormalizer({
       eventLogRepo: { append: appendSpy },
       runtimeNotifier: { notifyEntry }
     });
 
-    await expect(normalizer.normalize(event, context)).rejects.toThrow("notify exploded");
-    await expect(normalizer.normalize(event, context)).resolves.toBeNull();
+    const rejection = await normalizer.normalize(event, context).catch((error: unknown) => error);
 
-    expect(appendSpy).toHaveBeenCalledTimes(1);
-    expect(notifyEntry).toHaveBeenCalledTimes(1);
+    expect(rejection).toBeInstanceOf(RuntimeEventNormalizerPropagationError);
+    expect(rejection).toMatchObject({
+      name: "RuntimeEventNormalizerPropagationError",
+      entry: expect.objectContaining({ event_type: "worker.session_finished" })
+    });
+    await expect(normalizer.normalize(event, context)).resolves.toEqual(
+      expect.objectContaining({ event_type: "worker.session_finished" })
+    );
+    await expect(normalizer.normalize(event, context)).resolves.toEqual(
+      expect.objectContaining({ event_type: "worker.session_finished" })
+    );
+
+    expect(appendSpy).toHaveBeenCalledTimes(2);
+    expect(notifyEntry).toHaveBeenCalledTimes(3);
   });
 
   it("releases session_finished dedup when append fails before persisting", async () => {
@@ -205,7 +253,10 @@ describe("RuntimeEventNormalizer", () => {
       runtimeNotifier: { notifyEntry }
     });
 
-    await expect(normalizer.normalize(event, context)).rejects.toThrow("notify exploded");
+    await expect(normalizer.normalize(event, context)).rejects.toMatchObject({
+      name: "RuntimeEventNormalizerPropagationError",
+      entry: expect.objectContaining({ event_type: "worker.session_finished" })
+    });
     normalizer.clearSessionState("session-1");
     await expect(normalizer.normalize(event, context)).resolves.toEqual(
       expect.objectContaining({ event_type: "worker.session_finished" })
@@ -456,7 +507,7 @@ describe("RuntimeEventNormalizer", () => {
     expect(notifyEntry).not.toHaveBeenCalled();
   });
 
-  it("keeps message_delta reserved after append succeeds so notify retries do not double-append", async () => {
+  it("retries a pending message_delta notification without appending a duplicate", async () => {
     const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => createEventLogEntry(entry));
     const notifyEntry = vi.fn(async (_entry: EventLogEntry) => undefined);
     notifyEntry.mockRejectedValueOnce(new Error("notify failed"));
@@ -471,11 +522,20 @@ describe("RuntimeEventNormalizer", () => {
       delta: "durable chunk"
     });
 
-    await expect(normalizer.normalize(event, context)).rejects.toThrow("notify failed");
+    const rejection = await normalizer.normalize(event, context).catch((error: unknown) => error);
+
+    expect(rejection).toBeInstanceOf(RuntimeEventNormalizerPropagationError);
+    expect(rejection).toMatchObject({
+      name: "RuntimeEventNormalizerPropagationError",
+      entry: expect.objectContaining({ event_type: "worker.message_delta" })
+    });
+    await expect(normalizer.normalize(event, context)).resolves.toEqual(
+      expect.objectContaining({ event_type: "worker.message_delta" })
+    );
     await expect(normalizer.normalize(event, context)).resolves.toBeNull();
 
     expect(appendSpy).toHaveBeenCalledTimes(1);
-    expect(notifyEntry).toHaveBeenCalledTimes(1);
+    expect(notifyEntry).toHaveBeenCalledTimes(2);
   });
 });
 
