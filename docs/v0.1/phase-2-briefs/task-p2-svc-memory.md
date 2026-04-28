@@ -47,6 +47,7 @@
 |---|---|---|
 | `MemorySseBroadcaster` with `broadcastEntry(entry)` | `MemoryRuntimeNotifier` with `notifyEntry(entry)` | Invariant §11 forbids SSE transport; Phase 2 may preserve only in-process notification semantics. |
 | Dependency property `sseBroadcaster` | Dependency property `runtimeNotifier` | Keeps source ordering while removing GUI/TUI SSE terminology. |
+| Optional `transitionLifecycle` / `hardDeleteTombstoned` repo-port checks after EventLog append | Check optional repo ports before appending EventLog entries | Invariant §7 requires state-changing EventLog rows to describe a DB mutation that can actually run. |
 
 ## 3. Deferred
 

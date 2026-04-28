@@ -31,6 +31,9 @@ the cited vendor paths. The permitted adaptations are:
 - `MemorySseBroadcaster` -> `MemoryRuntimeNotifier`
 - dependency property `sseBroadcaster` -> `runtimeNotifier`
 - method call `broadcastEntry(entry)` -> `notifyEntry(entry)`
+- optional lifecycle / tombstone delete repo-port checks now run before EventLog
+  append so durable state-change rows cannot be emitted without an available DB
+  mutation port
 - test/comment wording and order labels from SSE/broadcast language to
   in-process notification language
 
@@ -63,6 +66,9 @@ rewrite and the task-card SSE-to-runtime-notifier adapter point.
 - Upstream SSE terminology is removed. Memory notification is represented as an
   in-process `runtimeNotifier.notifyEntry` port only.
 - No daemon, MCP, CLI, GUI, TUI, or live SSE surface was introduced.
+- Review Blocking finding B1 is fixed: missing optional lifecycle / tombstone
+  delete repo ports now fail before EventLog append or runtime notification,
+  preserving the Alaya state-change durability invariant.
 
 ## Intentional Deviations
 
@@ -74,6 +80,10 @@ rewrite and the task-card SSE-to-runtime-notifier adapter point.
   `memory-service.test.ts` imports it.
 - `P2-svc-signal` was added as a prerequisite because the signal card blocks
   memory service dispatch.
+- The optional `transitionLifecycle` and `hardDeleteTombstoned` repo-port checks
+  intentionally run before EventLog append in Alaya. The source performs those
+  checks after append; the target order is required by invariant §7 so an
+  unavailable DB mutation port cannot leave a durable state-change event behind.
 
 ## Deferred Issues
 

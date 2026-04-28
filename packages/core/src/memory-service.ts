@@ -345,6 +345,11 @@ export class MemoryService {
       return await this.archive(parsedObjectId, parsedReason, parsedCausedBy);
     }
 
+    const transitionLifecycle = this.dependencies.memoryEntryRepo.transitionLifecycle;
+    if (transitionLifecycle === undefined) {
+      throw new CoreError("CONFLICT", "Memory lifecycle transition port is not available");
+    }
+
     const occurredAt = this.now();
     const revision = await this.getNextRevision("memory_entry", existing.object_id);
     const event = await this.dependencies.eventLogRepo.append({
@@ -369,15 +374,7 @@ export class MemoryService {
       })
     });
 
-    if (this.dependencies.memoryEntryRepo.transitionLifecycle === undefined) {
-      throw new CoreError("CONFLICT", "Memory lifecycle transition port is not available");
-    }
-
-    const updated = await this.dependencies.memoryEntryRepo.transitionLifecycle(
-      parsedObjectId,
-      parsedNextState,
-      occurredAt
-    );
+    const updated = await transitionLifecycle(parsedObjectId, parsedNextState, occurredAt);
 
     await this.dependencies.runtimeNotifier.notifyEntry(event);
     return updated;
@@ -399,6 +396,11 @@ export class MemoryService {
 
     if (existing.retention_state !== "tombstoned") {
       throw new CoreError("VALIDATION", "Only tombstoned memories can be hard-deleted");
+    }
+
+    const hardDeleteTombstoned = this.dependencies.memoryEntryRepo.hardDeleteTombstoned;
+    if (hardDeleteTombstoned === undefined) {
+      throw new CoreError("CONFLICT", "Memory tombstone delete port is not available");
     }
 
     const occurredAt = this.now();
@@ -425,11 +427,7 @@ export class MemoryService {
       })
     });
 
-    if (this.dependencies.memoryEntryRepo.hardDeleteTombstoned === undefined) {
-      throw new CoreError("CONFLICT", "Memory tombstone delete port is not available");
-    }
-
-    await this.dependencies.memoryEntryRepo.hardDeleteTombstoned(parsedObjectId);
+    await hardDeleteTombstoned(parsedObjectId);
     await this.dependencies.runtimeNotifier.notifyEntry(event);
   }
 

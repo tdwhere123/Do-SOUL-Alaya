@@ -483,6 +483,27 @@ describe("MemoryService", () => {
     });
   });
 
+  it("rejects lifecycle transitions without a repo port before appending EventLog entries", async () => {
+    const { dependencies, appendSpy, notifySpy } = createDependencies();
+    const service = new MemoryService(dependencies);
+
+    await expect(
+      service.transitionLifecycle(
+        "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+        "tombstone",
+        "janitor_gc",
+        TransitionCausedBy.SYSTEM
+      )
+    ).rejects.toMatchObject({
+      name: "CoreError",
+      code: "CONFLICT",
+      message: "Memory lifecycle transition port is not available"
+    });
+
+    expect(appendSpy).not.toHaveBeenCalled();
+    expect(notifySpy).not.toHaveBeenCalled();
+  });
+
   it("rejects hard delete when retention_state is not tombstoned", async () => {
     const hardDeleteSpy = vi.fn(async () => undefined);
     const { dependencies, appendSpy, notifySpy } = createDependencies({
@@ -518,6 +539,34 @@ describe("MemoryService", () => {
 
     expect(appendSpy).not.toHaveBeenCalled();
     expect(hardDeleteSpy).not.toHaveBeenCalled();
+    expect(notifySpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects hard delete without a repo port before appending EventLog entries", async () => {
+    const { dependencies, appendSpy, notifySpy } = createDependencies();
+    const service = new MemoryService({
+      ...dependencies,
+      memoryEntryRepo: {
+        ...dependencies.memoryEntryRepo,
+        findById: vi.fn(async () =>
+          createMemoryEntry({ lifecycle_state: "tombstone", retention_state: "tombstoned" })
+        )
+      }
+    });
+
+    await expect(
+      service.hardDeleteTombstoned(
+        "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+        "janitor_gc",
+        TransitionCausedBy.SYSTEM
+      )
+    ).rejects.toMatchObject({
+      name: "CoreError",
+      code: "CONFLICT",
+      message: "Memory tombstone delete port is not available"
+    });
+
+    expect(appendSpy).not.toHaveBeenCalled();
     expect(notifySpy).not.toHaveBeenCalled();
   });
 
