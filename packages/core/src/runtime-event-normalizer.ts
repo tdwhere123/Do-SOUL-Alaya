@@ -34,6 +34,7 @@ export interface NormalizerContext {
 interface PendingNormalizedNotification {
   readonly entry: EventLogEntry;
   readonly sessionId: string;
+  readonly retry?: Promise<Readonly<EventLogEntry>>;
 }
 
 export class RuntimeEventNormalizerPropagationError extends Error {
@@ -64,7 +65,7 @@ export class RuntimeEventNormalizer {
     const pending = this.pendingNotifications.get(pendingKey);
 
     if (pending !== undefined) {
-      return await this.notifyPendingEntry(pendingKey, pending.entry, event);
+      return await this.notifyPendingEntry(pendingKey, pending, event);
     }
 
     if (event.type === "message_delta" && !this.state.reserveMessageDelta(event.session_id, event.sequence)) {
@@ -122,12 +123,34 @@ export class RuntimeEventNormalizer {
 
   private async notifyPendingEntry(
     pendingKey: string,
+    pending: PendingNormalizedNotification,
+    event: RuntimeEvent
+  ): Promise<Readonly<EventLogEntry>> {
+    if (pending.retry !== undefined) {
+      return await pending.retry;
+    }
+
+    const retry = this.runPendingNotification(pendingKey, pending.entry, event);
+    this.pendingNotifications.set(pendingKey, {
+      ...pending,
+      retry
+    });
+
+    return await retry;
+  }
+
+  private async runPendingNotification(
+    pendingKey: string,
     entry: EventLogEntry,
     event: RuntimeEvent
   ): Promise<Readonly<EventLogEntry>> {
     try {
       await this.dependencies.runtimeNotifier.notifyEntry(entry);
     } catch (error) {
+      this.pendingNotifications.set(pendingKey, {
+        entry,
+        sessionId: event.session_id
+      });
       throw new RuntimeEventNormalizerPropagationError(entry, error);
     }
 

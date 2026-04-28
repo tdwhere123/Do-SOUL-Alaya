@@ -75,6 +75,51 @@ describe("RuntimeEventNormalizer", () => {
     expect(notifyEntry).toHaveBeenCalledTimes(2);
   });
 
+  it("single-flights concurrent retries for the same pending notification", async () => {
+    const event = makeRuntimeEvent({
+      type: "session_started",
+      session_id: "session-1"
+    });
+    let releaseRetry!: () => void;
+    const appendSpy = vi.fn(
+      async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => createEventLogEntry(entry)
+    );
+    const notifyEntry = vi
+      .fn<(entry: EventLogEntry) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("notify exploded"))
+      .mockImplementationOnce(
+        async () =>
+          await new Promise<void>((resolve) => {
+            releaseRetry = resolve;
+          })
+      );
+    const normalizer = new RuntimeEventNormalizer({
+      eventLogRepo: { append: appendSpy },
+      runtimeNotifier: { notifyEntry }
+    });
+
+    await expect(normalizer.normalize(event, context)).rejects.toMatchObject({
+      name: "RuntimeEventNormalizerPropagationError",
+      entry: expect.objectContaining({ event_type: "worker.session_started" })
+    });
+
+    const firstRetry = normalizer.normalize(event, context);
+    const secondRetry = normalizer.normalize(event, context);
+    await Promise.resolve();
+
+    expect(appendSpy).toHaveBeenCalledTimes(1);
+    expect(notifyEntry).toHaveBeenCalledTimes(2);
+
+    releaseRetry();
+
+    await expect(Promise.all([firstRetry, secondRetry])).resolves.toEqual([
+      expect.objectContaining({ event_type: "worker.session_started" }),
+      expect.objectContaining({ event_type: "worker.session_started" })
+    ]);
+    expect(appendSpy).toHaveBeenCalledTimes(1);
+    expect(notifyEntry).toHaveBeenCalledTimes(2);
+  });
+
   it("deduplicates message_delta only by session_id and sequence", async () => {
     const operations: string[] = [];
     const { normalizer, appendSpy, notifyEntry } = createHarness(operations);
