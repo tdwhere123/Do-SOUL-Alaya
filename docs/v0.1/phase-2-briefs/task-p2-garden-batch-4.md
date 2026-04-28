@@ -4,8 +4,8 @@
 > - **Wave**: 2
 > - **Card ID**: P2-garden-batch-4
 > - **Port mode**: trivial-copy
-> - **Source**: `vendor/do-what-new-snapshot/packages/soul/src/garden/bootstrapping-service.ts`, `vendor/do-what-new-snapshot/packages/soul/src/garden/session-override-remediation.ts`, `vendor/do-what-new-snapshot/packages/soul/src/garden/backlog-telemetry.ts`, `vendor/do-what-new-snapshot/packages/soul/src/__tests__/bootstrapping-service.test.ts`, `vendor/do-what-new-snapshot/packages/soul/src/__tests__/session-override-remediation.test.ts`, `vendor/do-what-new-snapshot/packages/soul/src/__tests__/backlog-telemetry.test.ts`
-> - **Target**: `packages/soul/src/garden/`, `packages/soul/src/__tests__/`
+> - **Source**: `vendor/do-what-new-snapshot/packages/soul/src/garden/bootstrapping-service.ts`, `vendor/do-what-new-snapshot/packages/soul/src/garden/session-override-remediation.ts`, `vendor/do-what-new-snapshot/packages/soul/src/garden/backlog-telemetry.ts`, `vendor/do-what-new-snapshot/packages/soul/src/shared/bootstrapping-ids.ts`, `vendor/do-what-new-snapshot/packages/soul/src/__tests__/bootstrapping-service.test.ts`, `vendor/do-what-new-snapshot/packages/soul/src/__tests__/session-override-remediation.test.ts`, `vendor/do-what-new-snapshot/packages/soul/src/__tests__/backlog-telemetry.test.ts`
+> - **Target**: `packages/soul/src/garden/`, `packages/soul/src/shared/`, `packages/soul/src/__tests__/`
 > - **Size**: M
 > - **Prerequisite**: P2-repos-batch-6, P2-svc-session-override, P2-svc-health-journal
 > - **Blocks**: P2-barrel-soul
@@ -32,6 +32,7 @@
 | `vendor/do-what-new-snapshot/packages/soul/src/garden/bootstrapping-service.ts` | `packages/soul/src/garden/bootstrapping-service.ts` | Copy first; only package-name/path rewrites are allowed. |
 | `vendor/do-what-new-snapshot/packages/soul/src/garden/session-override-remediation.ts` | `packages/soul/src/garden/session-override-remediation.ts` | Copy first; only package-name/path rewrites are allowed. |
 | `vendor/do-what-new-snapshot/packages/soul/src/garden/backlog-telemetry.ts` | `packages/soul/src/garden/backlog-telemetry.ts` | Copy first; only package-name/path rewrites are allowed. |
+| `vendor/do-what-new-snapshot/packages/soul/src/shared/bootstrapping-ids.ts` | `packages/soul/src/shared/bootstrapping-ids.ts` | Copy first; only package-name/path rewrites are allowed. |
 | `vendor/do-what-new-snapshot/packages/soul/src/__tests__/bootstrapping-service.test.ts` | `packages/soul/src/__tests__/bootstrapping-service.test.ts` | Copy first; only package-name/path rewrites are allowed. |
 | `vendor/do-what-new-snapshot/packages/soul/src/__tests__/session-override-remediation.test.ts` | `packages/soul/src/__tests__/session-override-remediation.test.ts` | Copy first; only package-name/path rewrites are allowed. |
 | `vendor/do-what-new-snapshot/packages/soul/src/__tests__/backlog-telemetry.test.ts` | `packages/soul/src/__tests__/backlog-telemetry.test.ts` | Copy first; only package-name/path rewrites are allowed. |
@@ -52,7 +53,7 @@ Nothing deferred.
 | AC | Criteria | Evidence |
 |---|---|---|
 | AC1 | All files in §2 are ported per trivial-copy rules | Reviewer compares target files against the cited vendor source paths and adapter points |
-| AC2 | Every source path cited by this card exists before dispatch | `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/packages/soul/src/garden/bootstrapping-service.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/garden/session-override-remediation.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/garden/backlog-telemetry.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/__tests__/bootstrapping-service.test.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/__tests__/session-override-remediation.test.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/__tests__/backlog-telemetry.test.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"` exits 0 |
+| AC2 | Every source path cited by this card exists before dispatch | `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/packages/soul/src/garden/bootstrapping-service.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/garden/session-override-remediation.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/garden/backlog-telemetry.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/shared/bootstrapping-ids.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/__tests__/bootstrapping-service.test.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/__tests__/session-override-remediation.test.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/__tests__/backlog-telemetry.test.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"` exits 0 |
 | AC3 | Build succeeds after this card lands | `rtk pnpm build` is green |
 | AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-soul bootstrapping-service session-override-remediation backlog-telemetry` |
 | AC5 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-2-briefs/reports/task-p2-garden-batch-4.md` exists and cites backlog issues for any deferred scope |
@@ -60,7 +61,7 @@ Nothing deferred.
 
 ## 5. Verification
 
-1. `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/packages/soul/src/garden/bootstrapping-service.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/garden/session-override-remediation.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/garden/backlog-telemetry.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/__tests__/bootstrapping-service.test.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/__tests__/session-override-remediation.test.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/__tests__/backlog-telemetry.test.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"`
+1. `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/packages/soul/src/garden/bootstrapping-service.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/garden/session-override-remediation.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/garden/backlog-telemetry.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/shared/bootstrapping-ids.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/__tests__/bootstrapping-service.test.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/__tests__/session-override-remediation.test.ts\",\"vendor/do-what-new-snapshot/packages/soul/src/__tests__/backlog-telemetry.test.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"`
 2. `rtk pnpm install`
 3. `rtk pnpm build`
 4. `rtk pnpm exec tsc --noEmit -p packages/soul`

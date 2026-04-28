@@ -105,7 +105,7 @@ depends on.
 | P2-garden-batch-1 | Auditor + GardenScheduler |
 | P2-garden-batch-2 | Janitor + Librarian |
 | P2-garden-batch-3 | materialization-router + degradation-pipeline + handoff-gap-handler |
-| P2-garden-batch-4 | bootstrapping + session-override-remediation + backlog-telemetry + remaining smaller roles |
+| P2-garden-batch-4 | bootstrapping + session-override-remediation + backlog-telemetry + bootstrapping ID helper |
 
 ### 2D. Security Defense Stack (2 codex parallel)
 

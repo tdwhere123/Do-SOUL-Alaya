@@ -50,6 +50,7 @@ each Phase Gate.
 | Garden Janitor | `not-started` | `live-event-ready` | P2-garden-batch-2 |
 | Garden Librarian | `not-started` | `live-event-ready` | P2-garden-batch-2 |
 | GardenScheduler | `not-started` | `live-event-ready` | P2-garden-batch-1 |
+| Garden bootstrapping / remediation / backlog telemetry | `implementation-ready` | `live-event-ready` | P2-garden-batch-4 |
 | Soul package skeleton + governance leaves | `schema-ready` | `schema-ready` | P1-soul-skeleton |
 | Soul topology leaves | `implementation-ready` | `implementation-ready` | P1-topology |
 | Permission policy stack | `implementation-ready` | `implementation-ready` | P2-security-1 |
