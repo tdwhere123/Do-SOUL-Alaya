@@ -14,8 +14,9 @@ const sharedAlias = {
 };
 
 function packageProject(name, packageDir) {
+  const packageRoot = path.resolve(rootDir, packageDir);
   const testDir = path.resolve(rootDir, packageDir, "src/__tests__");
-  if (!existsSync(testDir)) {
+  if (!existsSync(path.resolve(packageRoot, "package.json"))) {
     return null;
   }
 
@@ -33,8 +34,9 @@ function packageProject(name, packageDir) {
 }
 
 function appProject(name, appDir) {
+  const appRoot = path.resolve(rootDir, appDir);
   const testDir = path.resolve(rootDir, appDir, "src/__tests__");
-  if (!existsSync(testDir)) {
+  if (!existsSync(path.resolve(appRoot, "package.json"))) {
     return null;
   }
 
