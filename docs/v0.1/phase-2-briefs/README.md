@@ -10,7 +10,7 @@ defense stack (permission policy / zero-day / worker safety / trust
 assessor / stance resolution / constraint proxy), and the embedding
 backfill pipeline.
 
-This is the largest phase with ~30 cards.
+This is the largest phase with 31 cards.
 
 ## Service Wave Ordering (within Phase 2B)
 
@@ -39,23 +39,24 @@ adapt-and-port.
 
 ### 2A. Storage Repos (6 batches, 5-7 codex parallel)
 
-Per review B5, batch-6 was wrong (listed services as repos). Corrected
-listing of all real repos (per upstream
-`vendor/do-what-new-snapshot/packages/storage/src/repos/`):
+Per review B5, batch lists are corrected against the actual vendor
+directory `vendor/do-what-new-snapshot/packages/storage/src/repos/`.
+There are 42 real repo files; every repo file is owned exactly once.
 
 | Card ID | Repos |
 |---|---|
-| P2-repos-batch-1 | memory-entry-repo, evidence-capsule-repo, synthesis-capsule-repo, claim-form-repo, event-log-repo, health-journal-repo |
-| P2-repos-batch-2 | green-status-repo, drift-lease-repo, session-override-repo, orphan-radar-repo, memory-graph-edge-repo, proposal-repo |
-| P2-repos-batch-3 | memory-embedding-repo, global-memory-recall-cache-repo, path-relation-repo, path-graph-snapshot-repo, activation-candidate-repo, synthesis-repo |
-| P2-repos-batch-4 | workspace-repo, run-repo, engine-binding-repo, project-mapping-repo, extension-descriptor-repo, tool-spec-repo |
-| P2-repos-batch-5 | slot-repo, surface-state-repo, signal-repo, canonical-alias-repo, constitutional-fragment-repo, narrative-budget-repo |
-| P2-repos-batch-6 | deferred-obligation-repo, dirty-state-dossier-repo, strong-ref-repo, tool-execution-record-repo, worker-run-repo, node-instance-repo, handoff-gap-repo, cascade-delete, garden-data-ports, bootstrapping-record-repo |
+| P2-repos-batch-1 | memory-entry-repo, evidence-capsule-repo, synthesis-capsule-repo, claim-form-repo, event-log-repo, health-journal-repo, karma-event-repo |
+| P2-repos-batch-2 | global-memory-repo, global-memory-recall-cache-repo, memory-embedding-repo, memory-graph-edge-repo, path-relation-repo, path-graph-snapshot-repo, orphan-radar-repo |
+| P2-repos-batch-3 | workspace-repo, run-repo, engine-binding-repo, project-mapping-anchor-repo, extension-descriptor-repo, config-repo, file-repo |
+| P2-repos-batch-4 | slot-repo, surface-identity-repo, surface-anchor-repo, surface-binding-repo, tool-spec-repo, tool-execution-record-repo, node-instance-repo |
+| P2-repos-batch-5 | green-status-repo, drift-lease-repo, conflict-matrix-repo, cross-cutting-repo, strong-ref-repo, deferred-obligation-repo, dirty-state-dossier-repo |
+| P2-repos-batch-6 | worker-run-repo, handoff-gap-repo, bootstrapping-record-repo, cascade-delete, garden-data-ports, signal-repo, proposal-repo |
 
-Each batch card §2 lists exact source filenames; the batch grouping
-above is a planning hint, not a contract. Card author verifies each
-file exists in `vendor/do-what-new-snapshot/packages/storage/src/repos/`
-during card writing.
+Each batch card §2 lists exact source filenames and source tests.
+Nonexistent stale names such as `session-override-repo`,
+`activation-candidate-repo`, `synthesis-repo`,
+`project-mapping-repo`, `surface-state-repo`,
+`canonical-alias-repo`, and `narrative-budget-repo` are not used.
 
 ### 2B. Core Services (per Service Wave Ordering above)
 
@@ -64,7 +65,7 @@ during card writing.
 | P2-svc-output-shaping | OutputShapingService | 196 | 2B.0 |
 | P2-svc-narrative-budget | NarrativeBudgetService | 188 | 2B.0 |
 | P2-svc-health-journal | HealthJournalService + KarmaEventStore | 6.0K + 1.9K | 2B.0 |
-| P2-svc-event-publisher | EventPublisher + RuntimeEventNormalizer (no SSE — Alaya-internal listeners only, per invariant §11) | ~10K | 2B.0 |
+| P2-svc-event-publisher | EventPublisher + RuntimeEventNormalizer redesigned without SSE transport (Alaya-internal listeners only, per invariant §11) | ~10K | 2B.0 |
 | P2-svc-evidence | EvidenceService | 208 | 2B.1 |
 | P2-svc-signal | SignalService | 319 | 2B.1 |
 | P2-svc-memory | MemoryService | 624 | 2B.1 |
@@ -80,8 +81,8 @@ during card writing.
 
 ### 2B'. Embedding Backfill Pipeline (NEW, per review I2)
 
-| Card ID | Subject |
-|---|---|
+| Card ID | Subject | Port mode | Closing label |
+|---|---|---|---|
 | P2-svc-embedding-pipeline | `packages/core/src/embedding-backfill-handler.ts` + the daemon-side trigger (deferred wiring to Phase 4). Owns the producer side of the embedding index so EmbeddingRecallService is not schema-only at Gate-2. | trivial-copy | live-event-ready |
 
 ### 2C. Garden Engine (4 batches, 4-5 codex parallel)
@@ -118,6 +119,8 @@ depends on.
 (`packages/core/src/index.ts` is updated by P3-core-barrel after
 Phase 3, since P3 services also export through it.)
 
+**Total: 31 cards.**
+
 ## Gate-2 Acceptance
 
 - All Phase 2 cards close with reviewer-pass.
@@ -127,7 +130,7 @@ Phase 3, since P3 services also export through it.)
 - Garden cards pass the `Stateful Mutation Checklist` for Auditor /
   Janitor / Librarian (they mutate durable state).
 - Code-map and runtime-status updated.
-- `pnpm build` succeeds for all Phase 2 packages.
+- `rtk pnpm build` succeeds for all Phase 2 packages.
 
 ## Parallelism Notes
 

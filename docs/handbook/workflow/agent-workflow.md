@@ -59,7 +59,7 @@ loops, or wave-level coordination, also follow
 ## Task-Type Reading Matrix
 
 Every task starts with the "Any" row. Add the matching row based on
-task type. Use `rg`, `sed`, `head`, or `tail` for sectioned reads. Do
+task type. Use RTK-wrapped search/read commands for sectioned reads. Do
 not read files larger than 30 KB in full.
 
 | Task type | Minimum reading (in addition to "Any") |

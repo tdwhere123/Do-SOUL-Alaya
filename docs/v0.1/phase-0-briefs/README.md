@@ -20,17 +20,17 @@ parallel to write task cards.
 | P0-5 | Vendor snapshot of do-what-new memory subset | done | main thread |
 | P0-3 | Rebuild `docs/handbook/*` (12 files) | done | main thread |
 | P0-3e | Rebuild `docs/v0.1/INDEX.md` + 6 phase READMEs | done after this commit | main thread |
-| P0-4 | Dispatch 5 codex to write Phase 1-5 task cards | pending | 5 codex instances in parallel |
+| P0-4 | Write Phase 1-5 task cards | done | Phase 1-5 cards exist; see extraction report |
 | Gate-0 | Style-uniformity review + Phase 0 closure | pending | main thread |
 
 ## Gate-0 Acceptance
 
 - Repo state: only the rebuilt files plus `vendor/do-what-new-snapshot/`.
-  `git ls-files` shows no leftover R1-R9 paths.
+  `rtk git ls-files` shows no leftover R1-R9 paths.
 - `legacy/codex-r1-r9` branch exists and is reachable.
 - `vendor/do-what-new-snapshot/` is committed; `SNAPSHOT_REF.md`
   records the source commit hash.
-- Workspace builds an empty tree without error (`pnpm install` is
+- Workspace builds an empty tree without error (`rtk pnpm install` is
   optional at this stage; no dependencies to install yet).
 - All 12 handbook files exist and pass the drift sweep in
   `docs/handbook/maintenance.md`.

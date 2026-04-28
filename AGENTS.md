@@ -6,8 +6,8 @@
 - Read and write repository files as UTF-8 without BOM.
 - Localized product content, fixtures, and tests may use non-English text
   when the behavior under test requires it.
-- Do not read files larger than 30 KB in full. Use `rg`, `sed`, `head`,
-  or `tail` for targeted section reads.
+- Do not read files larger than 30 KB in full. Use targeted section reads
+  through RTK-wrapped search/read commands.
 
 ## Repository Context
 
@@ -79,8 +79,8 @@ Agents (Codex) implement and review in this repository.
 - Keep changes surgical and inside the approved task scope.
 - Write a short plan before implementing, then verify with the task
   card or handbook guidance.
-- **Build + test is a hard gate.** Do not claim done until `pnpm
-  build` and the relevant `pnpm exec vitest run` both pass, and the
+- **Build + test is a hard gate.** Do not claim done until `rtk pnpm
+  build` and the relevant `rtk pnpm exec vitest run` both pass, and the
   Review Protocol checklist reports zero Blocking / Important findings.
 
 ## Working Style
@@ -90,9 +90,9 @@ Agents (Codex) implement and review in this repository.
 - Source for any port lives in `vendor/do-what-new-snapshot/`. Never
   reference `/home/tdwhere/vibe/do-what-new/` directly.
 - Primary environment is WSL/Linux; prefer standard Linux shell
-  behavior, `rg` for search, and `rtk` wrapping per `RTK.md` when
+  behavior, ripgrep-style search, and `rtk` wrapping per `RTK.md` when
   available.
-- For docs-only work, run targeted `rg` sweeps for changed paths,
+- For docs-only work, run targeted `rtk rg` sweeps for changed paths,
   events, readiness labels, phase gates, and legacy references.
 - If the task card requires a completion report, write it to
   `docs/v0.1/<phase>-briefs/reports/`.
@@ -108,17 +108,17 @@ Package Dependency Direction live in `docs/handbook/invariants.md` and
 ## Commands
 
 ```bash
-pnpm install
-pnpm build
-pnpm test
-pnpm exec vitest run --project @do-soul/alaya-<package>
+rtk pnpm install
+rtk pnpm build
+rtk pnpm test
+rtk pnpm exec vitest run --project @do-soul/alaya-<package>
 
 # All commands below are available only after Phase 4 lands:
-pnpm --dir apps/core-daemon dev      # daemon dev
-pnpm exec alaya doctor               # CLI diagnostic
-pnpm exec alaya install              # install profile
-pnpm exec alaya attach codex         # attach to a target agent
-pnpm exec alaya status               # status report
+rtk pnpm --dir apps/core-daemon dev  # daemon dev
+rtk pnpm exec alaya doctor           # CLI diagnostic
+rtk pnpm exec alaya install          # install profile
+rtk pnpm exec alaya attach codex     # attach to a target agent
+rtk pnpm exec alaya status           # status report
 ```
 
 ## Pointers

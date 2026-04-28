@@ -28,5 +28,5 @@ rtk proxy <cmd>     # Run raw command without filtering
 ```bash
 rtk --version
 rtk gain
-which rtk
+rtk which rtk
 ```

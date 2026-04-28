@@ -6,7 +6,7 @@
     "node": ">=20.19.0"
   },
   "scripts": {
-    "build": "tsc -b packages/protocol packages/core packages/soul packages/engine-gateway packages/storage apps/core-daemon",
+    "build": "node ./scripts/build-existing.mjs",
     "test": "vitest run --config vitest.config.mjs",
     "doctor": "node ./bin/alaya.mjs doctor"
   },

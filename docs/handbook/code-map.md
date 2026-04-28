@@ -59,8 +59,8 @@ P3 / P4 task execution. Refresh this section after each Phase Gate.
 | Core services | `packages/core/src/` | not yet ported (P2-svc-*) |
 | Garden engine | `packages/soul/src/garden/` | not yet ported (P2-garden-batch-*) |
 | Engine gateway | `packages/engine-gateway/src/` | not yet ported (P1-engine-gateway) |
-| Core daemon | `apps/core-daemon/src/` | not yet ported (P4-daemon-core) |
-| CLI shell | `bin/alaya.mjs` | not yet ported (P1-cli-shell) |
+| Core daemon | `apps/core-daemon/src/` | not yet ported (P4-daemon-skeleton + P4-daemon-startup-ordering + P4-sse-strip) |
+| CLI shell | `bin/alaya.mjs` | not yet ported (P4-cli-bridge) |
 
 ## Port Source Mapping (subset)
 
@@ -78,7 +78,7 @@ sources. The high-level mapping is:
 | `packages/engine-gateway/src/*` | `vendor/do-what-new-snapshot/packages/engine-gateway/src/*` |
 | `apps/core-daemon/src/{index,app,garden-runtime}.ts` | `vendor/do-what-new-snapshot/apps/core-daemon/src/<same>` |
 | `apps/core-daemon/src/routes/*.ts` | `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/*.ts` |
-| `bin/alaya.mjs` | `vendor/do-what-new-snapshot/bin/do-what.mjs` (renamed, command names adjusted) |
+| `bin/alaya.mjs` | `n/a` for Alaya-original CLI bridge; upstream `bin/do-what.mjs` only covers removed surfaces |
 
 ## Key Template Files (for port reference)
 

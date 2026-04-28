@@ -24,10 +24,10 @@ attach / status` which are Alaya-original (per invariant §24).
 | P1-storage-shared | `packages/storage/src/repos/shared/{event-log-writer.ts, validators.ts, deep-freeze.ts}` + tests. | `vendor/do-what-new-snapshot/packages/storage/src/repos/shared/` | trivial-copy | implementation-ready |
 | P1-migrations | All 55 SQL migrations (single card; 1:1 file copy). | `vendor/do-what-new-snapshot/packages/storage/src/migrations/` | trivial-copy | implementation-ready |
 | P1-config | Constants + defaults: `dynamics-constants-runtime.ts` only. (See "Files in scope" below; the README previously said "and related" — it is intentionally narrow.) | `vendor/do-what-new-snapshot/packages/core/src/dynamics-constants-runtime.ts` | trivial-copy | schema-ready |
-| P1-core-skeleton | `packages/core/{package.json, tsconfig.json, src/index.ts}`. Core package shell. | `vendor/do-what-new-snapshot/packages/core/{package.json, tsconfig.json}` (trim non-Alaya deps) | adapt-and-port | schema-ready |
+| P1-core-skeleton | `packages/core/{package.json, tsconfig.json, src/index.ts, src/errors.ts, src/shared/}`. Core package shell + utility leaves. | `vendor/do-what-new-snapshot/packages/core/{package.json, tsconfig.json, src/index.ts, src/errors.ts, src/shared/}` (trim non-Alaya deps and future exports) | adapt-and-port | schema-ready |
 | P1-soul-skeleton | `packages/soul/{package.json, tsconfig.json, src/index.ts}` + soul root files (`signal-handler.ts`, `tool-governance-adapter.ts`, `worker-safety-adapter.ts`, `worker-safety-reader.ts`). | `vendor/do-what-new-snapshot/packages/soul/{package.json, tsconfig.json, src/{signal-handler.ts, tool-governance-adapter.ts, worker-safety-adapter.ts, worker-safety-reader.ts, index.ts}}` | trivial-copy | schema-ready |
 | P1-topology | `packages/soul/src/garden/{topology-service.ts, path-graph-snapshotter.ts}`. | `vendor/do-what-new-snapshot/packages/soul/src/garden/{topology-service,path-graph-snapshotter}.ts` | trivial-copy | implementation-ready |
-| P1-engine-gateway-mcp | `packages/engine-gateway/{package.json, tsconfig.json, src/{index.ts, mcp-bridge.ts, provider-registry.ts}}`. **Only the MCP bridge + provider registry skeleton.** Provider adapters (`provider/ai-sdk-*.ts`, `api-conversation-engine.ts`) and `tools/` subdir are deferred to backlog #BL-08 (v0.2 LLM provider integration). | `vendor/do-what-new-snapshot/packages/engine-gateway/src/{index.ts, mcp-bridge.ts, provider-registry.ts}` | adapt-and-port | implementation-ready |
+| P1-engine-gateway-mcp | `packages/engine-gateway/{package.json, tsconfig.json, src/{index.ts, mcp-bridge.ts, provider/provider-registry.ts, provider/provider-types.ts, provider/soul-tool-specs.ts}}`. **Only the MCP bridge + provider registry skeleton.** Provider adapters (`provider/ai-sdk-*.ts`, `api-conversation-engine.ts`) and `tools/` subdir are deferred to backlog #BL-08 (v0.2 LLM provider integration). | `vendor/do-what-new-snapshot/packages/engine-gateway/src/index.ts`, `vendor/do-what-new-snapshot/packages/engine-gateway/src/mcp-bridge.ts`, `vendor/do-what-new-snapshot/packages/engine-gateway/src/provider/provider-registry.ts` | adapt-and-port | implementation-ready |
 
 **Total: 9 cards.** (Earlier README said "~8" — corrected.)
 
@@ -48,7 +48,7 @@ card §2 enumerates:
   by phase)
 - `packages/protocol/src/__tests__/` — recursive
 
-The card §6 records actual file count via `ls | wc -l`. Reviewer spot-
+The card §6 records actual file count with an `rtk`-wrapped count check. Reviewer spot-
 checks ~5 files per subdir. The barrel `src/index.ts` is owned by
 this single card; no Phase 2+ card may modify it without a follow-up
 `barrel-update` card.
@@ -57,9 +57,9 @@ this single card; no Phase 2+ card may modify it without a follow-up
 
 - All 9 Phase 1 cards close with reviewer-pass (zero Blocking /
   Important findings).
-- `pnpm install && pnpm build` succeeds for the workspace.
-- `pnpm test` runs (each package's ported `__tests__/` pass).
-- `pnpm exec tsc --noEmit` passes for every Phase 1 package.
+- `rtk pnpm install && rtk pnpm build` succeeds for the workspace.
+- `rtk pnpm test` runs (each package's ported `__tests__/` pass).
+- `rtk pnpm exec tsc --noEmit` passes for every Phase 1 package.
 - `docs/handbook/code-map.md` and `runtime-status.md` updated to
   reflect actual file counts and readiness labels.
 - `docs/v0.1/INDEX.md` Phase 1 status row marked `done`.

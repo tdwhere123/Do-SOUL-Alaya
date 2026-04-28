@@ -14,7 +14,7 @@ review being a multi-perspective sweep.
 | P5-e2e | Full installation → configure → activate → recall → use → propose → govern → export / backup loop. Replaces what was originally R12 "Full Product Gate". E2E test lives at `apps/core-daemon/src/__tests__/e2e/v0.1-release-loop.test.ts`. | requires-redesign | live-event-ready |
 | P5-benchmark | Activation-mode benchmark on real runtime (Connect / Attach / Gateway). Fixture suite for at least three task families: coding-continuation, review-fix-loop, long-context-recall. Replaces what was originally R10. | requires-redesign | implementation-ready |
 | P5-graph-contract | Graph inspector data contract derived from real PathRelation rows + path-graph snapshots. Read-only; no UI in v0.1. | adapt-and-port | schema-ready |
-| P5-final-review | Findings-first multi-lens review + fix-loop closure. Marks v0.1 as `live-event-ready` / `mcp-consumable` / `cli-consumable` per `docs/handbook/runtime-status.md`. | n/a | n/a |
+| P5-final-review | Findings-first multi-lens review + fix-loop closure. Marks v0.1 as `live-event-ready` / `mcp-consumable` / `cli-consumable` only after evidence supports it. | requires-redesign | mcp-consumable |
 
 ## Prerequisites
 

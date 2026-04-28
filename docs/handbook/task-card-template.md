@@ -150,7 +150,7 @@ a range + count + spot-check format:
 
 - **Source range**: `vendor/do-what-new-snapshot/packages/storage/src/migrations/001-*.sql` through `055-*.sql`
 - **Target range**: `packages/storage/src/migrations/001-*.sql` through `055-*.sql`
-- **Count check**: `ls vendor/do-what-new-snapshot/packages/storage/src/migrations/*.sql | wc -l` MUST equal 55.
+- **Count check**: `rtk find vendor/do-what-new-snapshot/packages/storage/src/migrations -maxdepth 1 -name '*.sql' | rtk wc -l` MUST equal 55.
 - **Mechanical changes**: none (SQL files are content-stable).
 - **Spot-check files for review**:
   - `001-initial.sql`
@@ -179,10 +179,10 @@ restate the closing readiness label from frontmatter.
 ```markdown
 | AC | Criteria | Evidence |
 |---|---|---|
-| AC1 | All files in §2 are copied or adapted per the declared port mode | `git diff vendor/do-what-new-snapshot/<src> packages/<target>` reports only mechanical changes (or matches the Adapter Points table for adapt-and-port) |
-| AC2 | All ported `__tests__/` pass | `pnpm exec vitest run --project @do-soul/alaya-<package>` is green |
-| AC3 | TypeScript compiles | `pnpm exec tsc --noEmit -p packages/<package>` is clean |
-| AC4 | Public exports match source surface | `pnpm exec tsc --noEmit -p packages/<package>` plus `node -e "console.log(Object.keys(require('@do-soul/alaya-<package>')))"` matches the source's exported names |
+| AC1 | All files in §2 are copied or adapted per the declared port mode | `rtk git diff vendor/do-what-new-snapshot/<src> packages/<target>` reports only mechanical changes (or matches the Adapter Points table for adapt-and-port) |
+| AC2 | All ported `__tests__/` pass | `rtk pnpm exec vitest run --project @do-soul/alaya-<package>` is green |
+| AC3 | TypeScript compiles | `rtk pnpm exec tsc --noEmit -p packages/<package>` is clean |
+| AC4 | Public exports match source surface | `rtk pnpm exec tsc --noEmit -p packages/<package>` plus `rtk node -e "console.log(Object.keys(require('@do-soul/alaya-<package>')))"` matches the source's exported names |
 | AC5 | Closing readiness label is `<label>` per §0 | `docs/handbook/runtime-status.md` row updated; INDEX status table updated |
 ```
 
@@ -195,14 +195,14 @@ each test case proves.
 
 Concrete shell commands a reviewer can run to verify §4. Order them
 by build → test → lint → integration. Use absolute paths or
-`pnpm --dir`. If a command requires a package skeleton that this card
+`rtk pnpm --dir`. If a command requires a package skeleton that this card
 itself creates, list the skeleton creation as command 1.
 
 ```markdown
-1. `pnpm install` (root) — installs workspace dependencies
-2. `pnpm exec tsc --noEmit -p packages/<package>`
-3. `pnpm exec vitest run --project @do-soul/alaya-<package>`
-4. `diff -u vendor/do-what-new-snapshot/<src> packages/<target>` — reports only mechanical changes
+1. `rtk pnpm install` (root) — installs workspace dependencies
+2. `rtk pnpm exec tsc --noEmit -p packages/<package>`
+3. `rtk pnpm exec vitest run --project @do-soul/alaya-<package>`
+4. `rtk diff -u vendor/do-what-new-snapshot/<src> packages/<target>` — reports only mechanical changes
 5. (integration only when the card claims `live-event-ready` or above)
 ```
 
@@ -274,7 +274,7 @@ unchanged.
 
 - **Source range**: `vendor/do-what-new-snapshot/packages/protocol/src/*.ts` (root level only, ~41 files including `event-log.ts`, `runtime-port.ts`, `auditor-ports.ts`, `engine-port.ts`, `worker-*-port.ts`, `dynamics-constants.ts`, `consolidation-trigger-budget.ts`, `index.ts`, etc.)
 - **Target range**: `packages/protocol/src/*.ts`
-- **Count check**: `ls vendor/do-what-new-snapshot/packages/protocol/src/*.ts | wc -l` (record actual count in completion report).
+- **Count check**: `rtk find vendor/do-what-new-snapshot/packages/protocol/src -maxdepth 1 -name '*.ts' | rtk wc -l` (record actual count in completion report).
 - **Mechanical changes**: any `import "@do-what/<x>"` rewritten to `@do-soul/alaya-<x>` (none expected at protocol level since it has no internal cross-imports beyond zod).
 
 ### 2.3 packages/protocol/src/soul/
@@ -305,19 +305,19 @@ Nothing deferred.
 
 | AC | Criteria | Evidence |
 |---|---|---|
-| AC1 | All files in §2 ported per trivial-copy rules | `diff -ru vendor/do-what-new-snapshot/packages/protocol packages/protocol -- '*.ts' '*.json'` reports only `name` field rename in package.json |
-| AC2 | Ported `__tests__/` pass | `pnpm exec vitest run --project @do-soul/alaya-protocol` green |
-| AC3 | TypeScript compiles | `pnpm exec tsc --noEmit -p packages/protocol` clean |
-| AC4 | Public exports match source | `node -e "console.log(Object.keys(require('@do-soul/alaya-protocol')).sort())"` matches source's exported names |
+| AC1 | All files in §2 ported per trivial-copy rules | `rtk diff -ru vendor/do-what-new-snapshot/packages/protocol packages/protocol -- '*.ts' '*.json'` reports only `name` field rename in package.json |
+| AC2 | Ported `__tests__/` pass | `rtk pnpm exec vitest run --project @do-soul/alaya-protocol` green |
+| AC3 | TypeScript compiles | `rtk pnpm exec tsc --noEmit -p packages/protocol` clean |
+| AC4 | Public exports match source | `rtk node -e "console.log(Object.keys(require('@do-soul/alaya-protocol')).sort())"` matches source's exported names |
 | AC5 | Closing readiness label is `schema-ready` | `docs/handbook/runtime-status.md` updated; `docs/v0.1/INDEX.md` updated |
 
 ## 5. Verification
 
-1. `pnpm install`
-2. `pnpm exec tsc --noEmit -p packages/protocol`
-3. `pnpm exec vitest run --project @do-soul/alaya-protocol`
-4. `diff -ru vendor/do-what-new-snapshot/packages/protocol/src packages/protocol/src` — review for any unexpected delta
-5. `ls packages/protocol/src/*.ts | wc -l` matches recorded count in §2.2
+1. `rtk pnpm install`
+2. `rtk pnpm exec tsc --noEmit -p packages/protocol`
+3. `rtk pnpm exec vitest run --project @do-soul/alaya-protocol`
+4. `rtk diff -ru vendor/do-what-new-snapshot/packages/protocol/src packages/protocol/src` — review for any unexpected delta
+5. `rtk find packages/protocol/src -maxdepth 1 -name '*.ts' | rtk wc -l` matches recorded count in §2.2
 
 ## 6. Shared File Hazards & Dependencies
 
@@ -341,7 +341,7 @@ Nothing deferred.
 > - **Target**: `packages/core/src/conversation-service.ts`
 > - **Size**: L
 > - **Prerequisite**: P2-svc-memory, P2-svc-recall, P2-svc-evidence, P2-svc-green, P2-svc-governance-lease, P2-svc-session-override, P2-svc-output-shaping
-> - **Blocks**: P4-daemon-core
+> - **Blocks**: P4-daemon-startup-ordering
 > - **Closing readiness label**: live-event-ready
 > - **Owner**: unassigned
 
@@ -399,16 +399,16 @@ removed, keeping only the candidate→recall→govern→durable memory path.
 |---|---|---|
 | AC1 | Adapter Points table is fully filled with concrete source line ranges | reviewer reads §2 |
 | AC2 | Each Adapter Point's deletion is justified by an invariant cite | §2 table inspection |
-| AC3 | Memory-orchestration tests pass; chat-specific tests removed (not skipped) | `pnpm exec vitest run --project @do-soul/alaya-core -t "conversation"` |
-| AC4 | TypeScript compiles | `pnpm exec tsc --noEmit -p packages/core` |
+| AC3 | Memory-orchestration tests pass; chat-specific tests removed (not skipped) | `rtk pnpm exec vitest run --project @do-soul/alaya-core -t "conversation"` |
+| AC4 | TypeScript compiles | `rtk pnpm exec tsc --noEmit -p packages/core` |
 | AC5 | candidate-submit → recall → govern → durable path proven by an integration test | `packages/core/src/__tests__/integration/memory-orchestration.test.ts` exists and is green |
 | AC6 | Closing readiness label is `live-event-ready` | docs updated |
 
 ## 5. Verification
 
-1. `pnpm install`
-2. `pnpm exec tsc --noEmit -p packages/core`
-3. `pnpm exec vitest run --project @do-soul/alaya-core`
+1. `rtk pnpm install`
+2. `rtk pnpm exec tsc --noEmit -p packages/core`
+3. `rtk pnpm exec vitest run --project @do-soul/alaya-core`
 4. Reviewer reads §2 Adapter Points table and confirms each deletion against the cited invariant.
 
 ## 6. Shared File Hazards & Dependencies
@@ -417,7 +417,7 @@ removed, keeping only the candidate→recall→govern→durable memory path.
   No barrel touched.
 
 **Prerequisite**: P2-svc-* (per frontmatter).
-**Blocks**: P4-daemon-core.
+**Blocks**: P4-daemon-startup-ordering.
 ```
 
 ## Worked Example C — requires-redesign (Alaya-original)
@@ -432,7 +432,7 @@ removed, keeping only the candidate→recall→govern→durable memory path.
 > - **Source**: `n/a` (no upstream equivalent)
 > - **Target**: `apps/core-daemon/src/cli-attach.ts` (NEW), `bin/alaya.mjs` (extended)
 > - **Size**: M
-> - **Prerequisite**: P4-daemon-core, P4-cli-bridge
+> - **Prerequisite**: P4-daemon-skeleton, P4-cli-bridge
 > - **Blocks**: Gate-4 demo
 > - **Closing readiness label**: cli-consumable
 > - **Owner**: unassigned
@@ -505,10 +505,10 @@ record of the attach action.
 
 ## 5. Verification
 
-1. `pnpm install`
-2. `pnpm exec tsc --noEmit -p apps/core-daemon`
-3. `pnpm exec vitest run --project @do-soul/alaya-core-daemon -t "cli-attach"`
-4. Manual smoke: `pnpm exec alaya attach codex` in a temp HOME with
+1. `rtk pnpm install`
+2. `rtk pnpm exec tsc --noEmit -p apps/core-daemon`
+3. `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon -t "cli-attach"`
+4. Manual smoke: `rtk pnpm exec alaya attach codex` in a temp HOME with
    the daemon running.
 
 ## 6. Shared File Hazards & Dependencies
@@ -517,7 +517,7 @@ record of the attach action.
   the bin shell). Either dispatch sequentially, or P4-cli-bridge
   exposes a subcommand registration API and this card uses it.
 
-**Prerequisite**: P4-daemon-core, P4-cli-bridge.
+**Prerequisite**: P4-daemon-skeleton, P4-cli-bridge.
 **Blocks**: Gate-4 demo step 2 ("alaya attach codex writes preview
 and on confirm writes config file").
 ```

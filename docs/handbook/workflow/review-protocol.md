@@ -150,7 +150,7 @@ matching re-review pass is.
 Every fix commit (any severity) must include this body. Keep each
 field to 1-3 lines. A missing, blank, or vacuous field ("n/a", "see
 diff", "addressed review") blocks closure; the reviewer must reject
-re-review and request a `git commit --amend` (or a follow-up
+re-review and request a `rtk git commit --amend` (or a follow-up
 `fix(<card-id>):` if the commit is already on a shared branch) before
 acceptance.
 
@@ -178,6 +178,6 @@ Required fields:
     Follow-up: <`none`, a residual-risk note, or a backlog issue
                 number. Deferrals still need a reopener per R2.>
 
-Git note: use a HEREDOC or `git commit -F <file>` when writing the
+Git note: use a HEREDOC or `rtk git commit -F <file>` when writing the
 body so indentation and field order survive. Avoid `-m "…"` multi-line
 strings.

@@ -102,20 +102,18 @@ v0.1 is in active port. The work plan and task cards live under:
 ## Quick start
 
 ```bash
-git clone <repo-url> alaya
-cd alaya
-pnpm install
-pnpm build
-pnpm test
+rtk pnpm install
+rtk pnpm build
+rtk pnpm test
 ```
 
 After Phase 4 (Live transport) is complete:
 
 ```bash
-pnpm exec alaya doctor
-pnpm exec alaya install
-pnpm exec alaya attach codex
-pnpm exec alaya status
+rtk pnpm exec alaya doctor
+rtk pnpm exec alaya install
+rtk pnpm exec alaya attach codex
+rtk pnpm exec alaya status
 ```
 
 ## Architecture invariants

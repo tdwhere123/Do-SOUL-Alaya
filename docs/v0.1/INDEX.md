@@ -25,9 +25,9 @@ Phase 0 → Gate-0
 |---|---|---|---|---|
 | Phase 0 | Reset & Source Mirror | 6 cards (P0-0..P0-5) + P0-3.5 review + P0-3.6 fix | **in progress** | Gate-0 |
 | Phase 1 | Wave 1: Leaves | 9 cards (target) | not-started | Gate-1 |
-| Phase 2 | Wave 2: Services + Garden + Repos + Security | ~32 cards (target) | not-started | Gate-2 |
+| Phase 2 | Wave 2: Services + Garden + Repos + Security | 31 cards (target) | not-started | Gate-2 |
 | Phase 3 | Wave 3: ConversationService + Run Lifecycle | 5 cards (target) | not-started | Gate-3 |
-| Phase 4 | Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI | ~24 cards (target) | not-started | Gate-4 |
+| Phase 4 | Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI | 24 cards (target) | not-started | Gate-4 |
 | Phase 5 | Wave 5: E2E + Benchmark + Graph Contract + Final Review | 4 cards (target) | not-started | Gate-5 |
 
 ## Phase 0 — Reset & Source Mirror
@@ -45,19 +45,18 @@ their detail is in the plan file at
 | P0-5 | Vendor snapshot of do-what-new (memory subset) | done |
 | P0-3 | Rebuild `docs/handbook/*` | done |
 | P0-3e | This file + `phase-{0..5}-briefs/README.md` | in progress |
-| P0-4 | Dispatch 5 codex instances to write Phase 1-5 task cards | pending |
-| Gate-0 | Style-uniformity review + commit Phase 0 closure | pending |
+| P0-4 | Write Phase 1-5 task cards | done |
+| Gate-0 | Style-uniformity review + commit Phase 0 closure | ready for review |
 
 ## Phase Pointers
 
 - [Phase 0](./phase-0-briefs/README.md) — reset execution log
 - [Phase 1](./phase-1-briefs/README.md) — Wave 1 leaves (protocol,
-  migrations, storage shared, config, topology, CLI shell,
-  engine-gateway)
+  migrations, storage shared, config, topology, engine-gateway)
 - [Phase 2](./phase-2-briefs/README.md) — Wave 2 services + Garden +
   repos + security defense
 - [Phase 3](./phase-3-briefs/README.md) — Wave 3 ConversationService
-  + MCP tooling + run lifecycle
+  + MCP discovery + run lifecycle
 - [Phase 4](./phase-4-briefs/README.md) — Wave 4 daemon + routes +
   live MCP transport + real profile mutation + CLI bridge + secrets
 - [Phase 5](./phase-5-briefs/README.md) — Wave 5 E2E + benchmark +

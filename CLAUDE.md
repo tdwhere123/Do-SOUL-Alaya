@@ -6,8 +6,8 @@
 - Read and write repository files as UTF-8 without BOM.
 - Localized product content, fixtures, and tests may use non-English text
   when the behavior under test requires it.
-- Do not read files larger than 30 KB in full. Use `rg`, `sed`, `head`, or
-  `tail` for targeted section reads.
+- Do not read files larger than 30 KB in full. Use targeted section reads
+  through RTK-wrapped search/read commands.
 
 ## Project Context
 
@@ -116,8 +116,8 @@ See `docs/handbook/workflow/review-protocol.md` for severity (Blocking
 - **Think before coding.** State assumptions explicitly. If scope is
   ambiguous, surface interpretations — do not pick one silently.
 - **Surgical changes only.** Touch only files in the task card scope.
-- **Build + test is a hard gate.** Do not claim done until `pnpm
-  build` and the relevant `pnpm exec vitest run` both pass and the
+- **Build + test is a hard gate.** Do not claim done until `rtk pnpm
+  build` and the relevant `rtk pnpm exec vitest run` both pass and the
   Review Protocol checklist reports zero Blocking / Important findings.
 - **Port-first verification.** Each port task card must show that the
   target file logic matches `vendor/do-what-new-snapshot/<src>` byte-
@@ -135,17 +135,17 @@ rules and the Package Dependency Direction live in
 ## Commands
 
 ```bash
-pnpm install
-pnpm build
-pnpm test
-pnpm exec vitest run --project @do-soul/alaya-<package>
+rtk pnpm install
+rtk pnpm build
+rtk pnpm test
+rtk pnpm exec vitest run --project @do-soul/alaya-<package>
 
 # All commands below are available only after Phase 4 lands:
-pnpm --dir apps/core-daemon dev      # daemon dev
-pnpm exec alaya doctor               # CLI diagnostic
-pnpm exec alaya install              # install profile
-pnpm exec alaya attach codex         # attach to a target agent
-pnpm exec alaya status               # status report
+rtk pnpm --dir apps/core-daemon dev  # daemon dev
+rtk pnpm exec alaya doctor           # CLI diagnostic
+rtk pnpm exec alaya install          # install profile
+rtk pnpm exec alaya attach codex     # attach to a target agent
+rtk pnpm exec alaya status           # status report
 ```
 
 ## Pointers

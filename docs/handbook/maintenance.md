@@ -76,8 +76,8 @@ After doc edits, run targeted sweeps for changed symbols, events,
 dependencies, and readiness labels. Useful commands:
 
 ```bash
-rg -n -g '!vendor/**' "schema-ready|implementation-ready|live-event-ready|mcp-consumable|cli-consumable|ready|unblocked" docs AGENTS.md CLAUDE.md README.md
-rg -n -g '!vendor/**' "@do-soul/alaya-(protocol|core|soul|engine-gateway|storage)" docs AGENTS.md CLAUDE.md README.md
-rg -n -g '!vendor/**' "docs/[A-Za-z0-9._-]+\\.md" docs AGENTS.md CLAUDE.md README.md
-find docs -type f -name '*.md' -size +30k -print
+rtk rg -n -g '!vendor/**' "schema-ready|implementation-ready|live-event-ready|mcp-consumable|cli-consumable|ready|unblocked" docs AGENTS.md CLAUDE.md README.md
+rtk rg -n -g '!vendor/**' "@do-soul/alaya-(protocol|core|soul|engine-gateway|storage)" docs AGENTS.md CLAUDE.md README.md
+rtk rg -n -g '!vendor/**' "docs/[A-Za-z0-9._-]+\\.md" docs AGENTS.md CLAUDE.md README.md
+rtk find docs -type f -name '*.md' -size +30k -print
 ```
