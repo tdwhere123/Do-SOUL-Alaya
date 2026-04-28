@@ -550,6 +550,14 @@ describe("phase-0 payload parsing", () => {
       payload: { run_id: "run-1", workspace_id: "workspace-1" }
     },
     {
+      eventType: Phase0EventType.RUN_ENGINE_BINDING_UPDATED,
+      payload: {
+        run_id: "run-1",
+        engine_binding_id: "binding-2",
+        previous_engine_binding_id: "binding-1"
+      }
+    },
+    {
       eventType: Phase0EventType.RUN_MESSAGE_APPENDED,
       payload: {
         run_id: "run-1",
@@ -665,6 +673,24 @@ describe("Phase0EventSchema", () => {
       payload: {
         workspace_id: "workspace-1",
         default_engine_class: "coding_engine"
+      }
+    };
+
+    expect(Phase0EventSchema.parse(event)).toEqual(event);
+  });
+
+  it("accepts a typed run engine-binding-updated event", () => {
+    const event = {
+      ...phase0EventBase,
+      event_id: "event-5",
+      event_type: Phase0EventType.RUN_ENGINE_BINDING_UPDATED,
+      entity_type: "run",
+      entity_id: "run-1",
+      run_id: "run-1",
+      payload: {
+        run_id: "run-1",
+        engine_binding_id: "binding-2",
+        previous_engine_binding_id: null
       }
     };
 

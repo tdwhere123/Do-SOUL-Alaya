@@ -53,7 +53,8 @@ Authorized deviation:
   entry.
 - Updated existing Phase0 enum coverage in
   `packages/protocol/src/__tests__/schemas.test.ts` to include the new event
-  type.
+  type, phase-0 payload parser coverage, and full `Phase0EventSchema` union
+  branch coverage.
 
 No service behavior, runtime wiring, or non-protocol package code was invented.
 
@@ -69,8 +70,12 @@ No service behavior, runtime wiring, or non-protocol package code was invented.
   `rtk pnpm exec tsc --noEmit -p packages/protocol`
 - Targeted tests: PASS.
   `rtk pnpm exec vitest run --project @do-soul/alaya-protocol`
-  passed 59 protocol test files and 505 tests, including
+  passed 59 protocol test files and 507 tests, including
   `packages/protocol/src/__tests__/run-engine-binding-update.test.ts`.
+- Review-fix I1: PASS.
+  `rtk pnpm exec vitest run --project @do-soul/alaya-protocol run-engine-binding-update schemas`
+  covers the copied engine-binding RED test and the Phase0 parser / union
+  branch assertions for `RUN_ENGINE_BINDING_UPDATED`.
 - Parity check: PASS.
   A normalized source/target check reported `pairs: 178`, `missing: []`, and
   `extra: []` after applying the package-alias rewrite and BOM normalization,
