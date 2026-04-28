@@ -7,7 +7,7 @@
 > - **Source**: `vendor/do-what-new-snapshot/packages/core/src/narrative-budget-service.ts`, `vendor/do-what-new-snapshot/packages/core/src/__tests__/narrative-budget-service.test.ts`
 > - **Target**: `packages/core/src/`, `packages/core/src/__tests__/`
 > - **Size**: S
-> - **Prerequisite**: P1-protocol, P1-core-skeleton
+> - **Prerequisite**: P1-protocol, P1-core-skeleton, P2-svc-event-publisher
 > - **Blocks**: P3-conversation
 > - **Closing readiness label**: implementation-ready
 > - **Owner**: unassigned
@@ -65,6 +65,8 @@ Nothing deferred.
 ## 6. Shared File Hazards & Dependencies
 
 - Does not edit `packages/core/src/index.ts`; P3-core-barrel serializes service exports after Phase 3.
+- Source imports `./event-publisher.js`; dispatch only after
+  `P2-svc-event-publisher` has landed.
 
-**Prerequisite**: P1-protocol, P1-core-skeleton.
+**Prerequisite**: P1-protocol, P1-core-skeleton, P2-svc-event-publisher.
 **Blocks**: P3-conversation.
