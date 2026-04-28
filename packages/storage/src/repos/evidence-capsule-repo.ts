@@ -336,4 +336,3 @@ function parseEvidenceHealthState(health: EvidenceHealthState): EvidenceHealthSt
 }
 
 const parseUpdatedAt = parseTimestamp;
-

@@ -34,8 +34,8 @@ were rewritten.
 ## Verification
 
 - Source existence check for the card's 14 cited source/test paths - passed.
-- Parity check against the vendor files after only the package alias rewrite -
-  passed.
+- Parity check against the vendor files after the package alias rewrite and
+  final blank EOF normalization in `conflict-matrix-repo.test.ts` - passed.
 - `rtk pnpm build` - passed.
 - `rtk pnpm exec tsc --noEmit -p packages/storage` - passed.
 - `rtk pnpm exec vitest run --project @do-soul/alaya-storage` - passed; 43
@@ -52,6 +52,8 @@ were rewritten.
 ## Intentional Deviations
 
 - Package alias rewrite only.
+- Removed one final blank EOF line from `conflict-matrix-repo.test.ts` so the
+  integrated diff passes `git diff --check`; source behavior is unchanged.
 - Verification ran on the integrated storage branch because the upstream tests
   instantiate repos from P2-repos-batch-1, P2-repos-batch-3, and
   P2-repos-batch-4. The Phase 2 README now records this execution constraint.

@@ -178,4 +178,3 @@ async function createRepo(): Promise<{
     repo: new SqliteConflictMatrixRepo(database)
   };
 }
-
