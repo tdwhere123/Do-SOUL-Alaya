@@ -12,7 +12,7 @@ describe("doctor status", () => {
     await Promise.all(tempDirs.splice(0).map((entry) => entry.cleanup()));
   });
 
-  it("reports foundation contracts plus R5/R6/R7 runtime-use-proof readiness without claiming product readiness", async () => {
+  it("reports runtime-use-proof plus R8/R9 activation/operations readiness without claiming product readiness", async () => {
     const temp = await createTempDir("alaya-doctor-report-");
     tempDirs.push(temp);
     const runtime = await createAlayaRuntime({ dataDir: temp.path });
@@ -23,6 +23,7 @@ describe("doctor status", () => {
         r1_baseline_ready: true,
         foundation_contracts_ready: true,
         runtime_use_proof_ready: true,
+        activation_operations_ready: true,
         product_ready: false,
         package: {
           status: "ok",
@@ -50,12 +51,27 @@ describe("doctor status", () => {
           status: "ok"
         },
         profile: {
-          status: "not_implemented"
+          status: "ok"
         },
         provider: {
           status: "ok"
         },
         session_trust: {
+          status: "ok"
+        },
+        integration: {
+          status: "ok"
+        },
+        mcp: {
+          status: "ok"
+        },
+        cli_fallback: {
+          status: "ok"
+        },
+        gateway: {
+          status: "ok"
+        },
+        operations: {
           status: "ok"
         }
       });
@@ -91,18 +107,31 @@ describe("doctor status", () => {
     const report = JSON.parse(stdout) as {
       product_ready: boolean;
       runtime_use_proof_ready: boolean;
+      activation_operations_ready: boolean;
       profile: { status: string };
       provider: { status: string };
       recall: { status: string };
       session_trust: { status: string };
+      integration: { status: string };
+      mcp: { status: string };
+      cli_fallback: { status: string };
+      gateway: { status: string };
+      operations: { status: string };
     };
     expect(report.product_ready).toBe(false);
     expect(report.runtime_use_proof_ready).toBe(true);
-    expect(report.profile.status).toBe("not_implemented");
+    expect(report.activation_operations_ready).toBe(true);
+    expect(report.profile.status).toBe("ok");
     expect(report.provider.status).toBe("ok");
     expect(report.recall.status).toBe("ok");
     expect(report.session_trust.status).toBe("ok");
-    expect(stdout).not.toMatch(/secret|token|password/i);
+    expect(report.integration.status).toBe("ok");
+    expect(report.mcp.status).toBe("ok");
+    expect(report.cli_fallback.status).toBe("ok");
+    expect(report.gateway.status).toBe("ok");
+    expect(report.operations.status).toBe("ok");
+    expect(stdout).toContain("secret-ref");
+    expect(stdout).not.toMatch(/raw-secret|authorization|bearer|password=/i);
   });
 
   it("prints structured failure JSON when runtime/storage initialization fails", async () => {
@@ -135,12 +164,14 @@ describe("doctor status", () => {
       r1_baseline_ready: boolean;
       foundation_contracts_ready: boolean;
       runtime_use_proof_ready: boolean;
+      activation_operations_ready: boolean;
       runtime: { status: string; detail: string };
       storage: { status: string; database: string };
     };
     expect(report.r1_baseline_ready).toBe(false);
     expect(report.foundation_contracts_ready).toBe(false);
     expect(report.runtime_use_proof_ready).toBe(false);
+    expect(report.activation_operations_ready).toBe(false);
     expect(report.runtime.status).toBe("failed");
     expect(report.storage.status).toBe("failed");
     expect(report.storage.database).toBe("unavailable");

@@ -54,7 +54,7 @@
 | Product positioning | 本地优先 CLI agent memory core，namespace target，surface direction | 写成已发布包、已实现命令或已接入 agent |
 | Architecture/runtime | 三层四轴、runtime-only durable write、source/evidence/governance | 允许 adapter/provider/UI 直接 durable write |
 | Surface strategy | MCP-first、CLI fallback、Attach/Profile、Gateway、Inspector/benchmark 的边界 | 声称这些 surface 当前可运行 |
-| Runtime status | ALA-R1-R7 runtime readiness、未实现 surface 明确保留 `not-implemented`、build/test gate 只绑定当前 root package/runtime contracts | 声称 MCP/Attach/Profile/Gateway/真实外部 provider adapter/Inspector/full product 已通过或可执行 |
+| Runtime status | ALA-R1-R9 runtime/activation/operations readiness、live daemon/MCP transport/profile write/Gateway runner/Inspector/benchmark 明确保留未实现、build/test gate 只绑定当前 root package/runtime contracts | 声称 live daemon、live MCP transport、真实 profile 文件写入、Gateway runner、真实外部 provider adapter、Inspector、benchmark 或 full product 已通过或可执行 |
 
 若 v0.1 source material 与 handbook/invariants 冲突，finding 至少为 Blocking，除非变更明确保留 handbook 优先级并没有吸收冲突内容。
 

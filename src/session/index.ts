@@ -20,6 +20,7 @@ export {
 } from "./types.js";
 export {
   validateContextDeliveryRecord,
+  validateMemorySessionEvent,
   validateUsageProofRecord
 } from "./validation.js";
 export {

@@ -136,5 +136,218 @@ export {
   deriveTrustSummary,
   recordSessionEvent,
   validateContextDeliveryRecord,
+  validateMemorySessionEvent,
   validateUsageProofRecord
 } from "./session/index.js";
+export type {
+  BuildProfileChangePreviewInput,
+  BuildProjectOverrideChangeRecordInput,
+  EffectiveProfileConfig,
+  ProfileChangePreview,
+  ProfileChangeRecord,
+  ProfileConfigDiffEntry,
+  ProfileConfigMap,
+  ProfileConfigScalar,
+  ProfileConfigSource,
+  ProfileConfigSourceRecord,
+  ProfileConfigValue,
+  ProfileScope,
+  ResolveProfileConfigInput
+} from "./profile/index.js";
+export {
+  buildProfileChangePreview,
+  buildProjectOverrideChangeRecord,
+  profileConfigSources,
+  profileScopes,
+  resolveProfileConfig
+} from "./profile/index.js";
+export type {
+  BuildProfileAttachResultInput,
+  BuildProfileAttachSessionEventMetadataInput,
+  BuildProfileTargetWritePreviewInput,
+  ProfileAttachConflictReport,
+  ProfileAttachDecision,
+  ProfileAttachDecisionInput,
+  ProfileAttachOverallStatus,
+  ProfileAttachRecordStatus,
+  ProfileAttachResult,
+  ProfileAttachResultRecord,
+  ProfileAttachTarget,
+  ProfileAttachTargetSnippet,
+  ProfileAttachWriteResult,
+  ProfileTargetWritePreview
+} from "./profile/attach.js";
+export {
+  buildProfileAttachResult,
+  buildProfileAttachSessionEventMetadata,
+  buildProfileTargetWritePreview,
+  getProfileAttachTargetSnippet,
+  profileAttachDecisions,
+  profileAttachOverallStatuses,
+  profileAttachRecordStatuses,
+  profileAttachTargets,
+  profileAttachTargetSnippets,
+  profileAttachWriteResults
+} from "./profile/attach.js";
+export type {
+  CreateEnvSecretRefInput,
+  CreateLocalFileSecretRefInput,
+  ResolveSecretRefOptions,
+  SecretRef,
+  SecretRefSourceType,
+  SecretResolutionState,
+  SecretResolutionStatus
+} from "./secrets/index.js";
+export {
+  createEnvSecretRef,
+  createLocalFileSecretRef,
+  resolveSecretRef,
+  secretRefSourceTypes,
+  secretResolutionStates
+} from "./secrets/index.js";
+export type {
+  DeriveEmbeddingStatusInput,
+  DeriveProviderStatusInput,
+  EmbeddingEffectiveMode,
+  EmbeddingStatusReport,
+  ProviderStatusAuditContext,
+  ProviderStatusReport,
+  ProviderStatusState
+} from "./provider/status.js";
+export {
+  deriveEmbeddingStatus,
+  deriveProviderStatus,
+  embeddingEffectiveModes,
+  providerStatusStates
+} from "./provider/status.js";
+export type {
+  AlayaIntegrationRuntimeBoundary,
+  IntegrationCapability,
+  IntegrationOperationDescriptor,
+  IntegrationOperationId,
+  IntegrationOperationInputMap,
+  IntegrationOperationResultMap,
+  IntegrationStrictnessMetadata,
+  IntegrationStrictnessMode
+} from "./integration/index.js";
+export {
+  findIntegrationOperationDescriptor,
+  getIntegrationOperationDescriptor,
+  integrationCapabilities,
+  integrationOperationDescriptors,
+  integrationOperationIds,
+  integrationStrictnessModes,
+  invokeIntegrationOperation,
+  listIntegrationOperationDescriptors
+} from "./integration/index.js";
+export type {
+  AlayaMcpSurfaceDescriptor,
+  McpPromptDescriptor,
+  McpResourceClassification,
+  McpResourceClassificationMetadata,
+  McpResourceDescriptor,
+  McpToolDescriptor,
+  McpToolInput,
+  McpToolInvocation,
+  McpToolInvocationResult,
+  McpToolName,
+  McpToolOperationId,
+  McpToolResult,
+  McpTruthPlane
+} from "./mcp/index.js";
+export {
+  alayaMcpSurfaceDescriptor,
+  findMcpResourceDescriptor,
+  findMcpToolDescriptor,
+  invokeMcpTool,
+  listMcpPromptDescriptors,
+  listMcpResourceDescriptors,
+  listMcpToolDescriptors,
+  mcpPromptDescriptors,
+  mcpResourceDescriptors,
+  mcpToolDescriptors
+} from "./mcp/index.js";
+export type {
+  AlayaOperationContract,
+  AlayaOperationName,
+  AlayaOperationPayload,
+  AlayaOperationPayloadMap,
+  AlayaOperationTransport,
+  CliFallbackFailureResponse,
+  CliFallbackResponse,
+  CliFallbackSuccessResponse,
+  NormalizedAlayaOperationRequest,
+  NormalizeCliFallbackRequestInput,
+  NormalizeMcpOperationRequestInput,
+  OperationParityShape
+} from "./cli/fallback.js";
+export {
+  createCliFallbackFailureResponse,
+  createCliFallbackSuccessResponse,
+  InvalidCliFallbackPayloadError,
+  normalizeCliFallbackRequest,
+  normalizeMcpOperationRequest,
+  toOperationParityShape,
+  UnsupportedCliFallbackOperationError
+} from "./cli/fallback.js";
+export type {
+  GatewayBenchmarkProfile,
+  GatewayBypassInput,
+  GatewayBypassResult,
+  GatewayContextEvidenceLink,
+  GatewayEnvelopeInput,
+  GatewayEnvelopeResult,
+  GatewayEvidenceLinks,
+  GatewayModeInput,
+  GatewayModeResolution,
+  GatewayProposalEvidenceLink,
+  GatewayProviderEvidenceLink,
+  GatewaySessionEvidenceLink
+} from "./gateway/index.js";
+export {
+  evaluateGatewayEnvelope,
+  linkGatewayEvidence,
+  resolveGatewayMode
+} from "./gateway/index.js";
+export type {
+  AttachmentStatus,
+  BackupAuditEvent,
+  BackupResult,
+  BackupStorageSnapshot,
+  CreateBackupMetadataInput,
+  CreateOperationsStatusInput,
+  CreatePortableBundleInput,
+  OperationsBackupReadiness,
+  OperationsDataPathStatus,
+  OperationsEmbeddingStatus,
+  OperationsHostPrereqStatus,
+  OperationsProfileScopeStatus,
+  OperationsProfileStatusInput,
+  OperationsProviderStatusInput,
+  OperationsSecretRefReport,
+  OperationsSecretRefStatus,
+  OperationsStatusReport,
+  PortableBackupMetadata,
+  PortableBundle,
+  PortableBundleIntegrity,
+  PortableBundleManifest,
+  PortableBundleManifestCounts,
+  PortableBundleMetadata,
+  PortableBundlePayload,
+  PortableProfileScopeKind,
+  PortableProfileScopeSnapshot,
+  PortableRuntimeArtifactExclusion,
+  PortableSourceRef,
+  ProviderPosture,
+  RuntimeArtifactKind,
+  SecretRefResolutionState as OperationsSecretRefResolutionState,
+  SecretRefSourceType as OperationsSecretRefSourceType
+} from "./operations/index.js";
+export {
+  createBackupMetadata,
+  createOperationsStatusReport,
+  createPortableBundle,
+  deriveProviderPosture,
+  hashPortablePayload,
+  validatePortableBundleForImport
+} from "./operations/index.js";

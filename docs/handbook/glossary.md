@@ -39,6 +39,7 @@
 | R1 基线就绪 | `r1-baseline-ready` | ALA-R1 package/runtime/storage/audit/doctor baseline 已实现并通过当前 gate；不等于完整产品 ready。 |
 | Foundation contracts 就绪 | `foundation-contracts-ready` | ALA-R2/R3/R4 ontology、structure、governance foundation contracts 已通过当前 package gate；不等于 recall/provider/adapter/full product ready。 |
 | Runtime use proof 就绪 | `runtime-use-proof-ready` | ALA-R5/R6/R7 recall/context、provider/proposal、session trust contracts 已通过当前 package gate；不等于 MCP/Attach/Profile/Gateway/full product ready。 |
+| Activation operations contracts 就绪 | `activation-operations-contract-ready` | ALA-R8/R9 integration surface、CLI fallback、Attach/Profile preview/confirm、Gateway envelope、profile/secret/provider status、portable bundle/backup/status contracts 已通过当前 package gate；不等于 live daemon、live MCP transport、真实 profile 文件写入、Gateway runner、Inspector、benchmark 或 full product ready。 |
 | 产品就绪 | `product-ready` | 完整 agent memory core 闭环就绪状态；当前为 false。 |
 | 未实现 | `not-implemented` | 功能尚无当前代码承载，不可宣称可运行。 |
 | 未就绪 | `not-ready` | 不能声明 build/test/run readiness，直到实现面和验证证据存在。 |

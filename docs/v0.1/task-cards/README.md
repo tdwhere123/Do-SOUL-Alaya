@@ -41,12 +41,18 @@ Governance/Promotion 已由
 [ALA-R2/R3/R4 Foundation Contracts Report](../reports/ALA-R2-R3-R4-foundation-contracts-report.md)
 关闭。
 
-R5/R6/R7 review-pending evidence：Recall/Context Assembly、Provider/Proposal、Session
-Audit/Trust 已通过本地验证，正在等待最终 post-fix review acceptance；当前证据见
+R5/R6/R7 dependency evidence：Recall/Context Assembly、Provider/Proposal、Session
+Audit/Trust 已通过本地验证和 R8/R9 前置 dependency gate；当前证据见
 [ALA-R5/R6/R7 Runtime Use Proof Report](../reports/ALA-R5-R6-R7-runtime-use-proof-report.md)
-。该状态只覆盖 runtime use proof contracts；MCP、CLI protocol fallback、
-Attach/Profile、Gateway、真实外部 provider adapter、Inspector、benchmark 与完整产品闭环
-仍未实现。
+。该状态只覆盖 runtime use proof contracts。
+
+R8/R9 closeout：Agent Integration 与 Operations/Portability 已由
+[ALA-R8/R9 Activation Operations Report](../reports/ALA-R8-R9-activation-operations-report.md)
+关闭。该状态覆盖 integration operation descriptors、MCP descriptors、CLI fallback、
+Attach/Profile preview/confirm、Gateway envelope、profile/secret/provider status、portable
+bundle、backup metadata 与 read-only operations status contracts，并已完成 fresh review/fix-loop
+和 final verification。live daemon、live MCP transport、真实 profile 文件写入、Gateway
+runner、真实外部 provider adapter、Inspector、benchmark 与完整产品闭环仍未实现。
 
 根任务卡 schema：
 

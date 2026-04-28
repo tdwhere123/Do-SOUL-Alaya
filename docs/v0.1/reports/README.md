@@ -19,6 +19,14 @@
   Session Audit/Trust runtime contract slice while final post-fix review
   acceptance is pending; does not claim MCP, Attach/Profile, Gateway, real
   external provider adapters, Inspector, benchmark, or full product readiness.
+- [ALA-R8/R9 Activation Operations Report](ALA-R8-R9-activation-operations-report.md) -
+  documents the Agent Integration and Operations/Portability contract slice:
+  integration operation descriptors, MCP descriptors, CLI fallback,
+  Attach/Profile preview/confirm, Gateway envelope, profile/secret/provider
+  status, portable bundle, backup metadata, and read-only operations status;
+  does not claim live daemon, live MCP transport, real profile file mutation,
+  Gateway runner, real external provider adapters, Inspector, benchmark, or
+  full product readiness.
 
 ## Placement Rules
 

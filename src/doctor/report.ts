@@ -25,6 +25,7 @@ export interface DoctorReport {
   readonly r1_baseline_ready: boolean;
   readonly foundation_contracts_ready: boolean;
   readonly runtime_use_proof_ready: boolean;
+  readonly activation_operations_ready: boolean;
   readonly product_ready: false;
   readonly package: DoctorComponent & {
     readonly name: string;
@@ -41,6 +42,11 @@ export interface DoctorReport {
   readonly profile: DoctorComponent;
   readonly provider: DoctorComponent;
   readonly session_trust: DoctorComponent;
+  readonly integration: DoctorComponent;
+  readonly mcp: DoctorComponent;
+  readonly cli_fallback: DoctorComponent;
+  readonly gateway: DoctorComponent;
+  readonly operations: DoctorComponent;
 }
 
 export function createDoctorReport(storage: DoctorStorageReport): DoctorReport {
@@ -50,6 +56,7 @@ export function createDoctorReport(storage: DoctorStorageReport): DoctorReport {
     r1_baseline_ready: true,
     foundation_contracts_ready: true,
     runtime_use_proof_ready: true,
+    activation_operations_ready: true,
     product_ready: false,
     package: {
       status: "ok",
@@ -84,8 +91,8 @@ export function createDoctorReport(storage: DoctorStorageReport): DoctorReport {
       detail: "R5 structured/lexical/path-aware recall, opt-in embedding supplement degradation, and runtime-only context pack contracts are available."
     },
     profile: {
-      status: "not_implemented",
-      detail: "Attach/Profile installer is outside the current runtime contract slice and remains explicit future work."
+      status: "ok",
+      detail: "R8/R9 profile precedence, explicit project override preview/audit, and Attach/Profile preview/confirm result contracts are available; real profile file mutation remains future work."
     },
     provider: {
       status: "ok",
@@ -94,6 +101,26 @@ export function createDoctorReport(storage: DoctorStorageReport): DoctorReport {
     session_trust: {
       status: "ok",
       detail: "R7 session lifecycle, context delivery, usage proof, trust summary, and delivered-is-not-used semantics are available."
+    },
+    integration: {
+      status: "ok",
+      detail: "R8 integration operation descriptors route MCP/CLI-facing requests through the injected runtime boundary without exposing storage internals."
+    },
+    mcp: {
+      status: "ok",
+      detail: "R8 MCP surface descriptors, tool/resource/prompt metadata, and injected runtime operation invocation helpers are available; no live MCP transport/server is claimed."
+    },
+    cli_fallback: {
+      status: "ok",
+      detail: "R8 CLI fallback request normalization, parity shape, and redacted response helpers are available; doctor remains the only executable CLI command."
+    },
+    gateway: {
+      status: "ok",
+      detail: "R8 Gateway envelope and evidence-link helpers default to audit mode, support explicit strict mode, and do not claim durable truth or usage proof."
+    },
+    operations: {
+      status: "ok",
+      detail: "R9 profile, secret-ref, provider status, portable bundle, backup metadata, and read-only operations status contracts are available."
     }
   };
 }
@@ -106,6 +133,7 @@ export function createDoctorFailureReport(error: unknown): DoctorReport {
     r1_baseline_ready: false,
     foundation_contracts_ready: false,
     runtime_use_proof_ready: false,
+    activation_operations_ready: false,
     product_ready: false,
     package: {
       status: "ok",
@@ -142,8 +170,8 @@ export function createDoctorFailureReport(error: unknown): DoctorReport {
       detail: `Runtime use proof readiness unavailable because runtime initialization failed: ${String(redactedError.message)}.`
     },
     profile: {
-      status: "not_implemented",
-      detail: "Attach/Profile installer is outside the current runtime contract slice and remains explicit future work."
+      status: "failed",
+      detail: `Profile and Attach/Profile readiness unavailable because runtime initialization failed: ${String(redactedError.message)}.`
     },
     provider: {
       status: "failed",
@@ -152,6 +180,26 @@ export function createDoctorFailureReport(error: unknown): DoctorReport {
     session_trust: {
       status: "failed",
       detail: `Session trust readiness unavailable because runtime initialization failed: ${String(redactedError.message)}.`
+    },
+    integration: {
+      status: "failed",
+      detail: `Integration operation readiness unavailable because runtime initialization failed: ${String(redactedError.message)}.`
+    },
+    mcp: {
+      status: "failed",
+      detail: `MCP surface readiness unavailable because runtime initialization failed: ${String(redactedError.message)}.`
+    },
+    cli_fallback: {
+      status: "failed",
+      detail: `CLI fallback readiness unavailable because runtime initialization failed: ${String(redactedError.message)}.`
+    },
+    gateway: {
+      status: "failed",
+      detail: `Gateway readiness unavailable because runtime initialization failed: ${String(redactedError.message)}.`
+    },
+    operations: {
+      status: "failed",
+      detail: `Operations readiness unavailable because runtime initialization failed: ${String(redactedError.message)}.`
     }
   };
 }

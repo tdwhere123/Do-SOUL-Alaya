@@ -6,7 +6,7 @@
 - 工程命名空间目标：`@do-soul/alaya`（目标态，不是已发布包事实）。
 - 仓库性质：**reset/extraction 仓库**。旧实现已按计划删除；当前文档用于定义现行架构真相，而非复述历史代码结构。
 - 产品边界：本地优先（local-first）的 CLI agent memory core，可通过同一公共语义接入 Codex、Claude Code 与其它 agent CLI。
-- 运行形态方向：local daemon core 承载 runtime/API、MCP-first 接入、CLI protocol fallback、后台任务与审计；当前仓库已重新引入 ALA-R1 runtime/API、audit、storage baseline、doctor CLI，ALA-R2/R3/R4 foundation contracts，以及 ALA-R5/R6/R7 runtime use proof contracts。daemon、MCP、CLI protocol fallback、Attach/Profile、Gateway、真实外部 provider adapter 与 Inspector 尚未实现。
+- 运行形态方向：local daemon core 承载 runtime/API、MCP-first 接入、CLI protocol fallback、后台任务与审计；当前仓库已重新引入 ALA-R1 runtime/API、audit、storage baseline、doctor CLI，ALA-R2/R3/R4 foundation contracts，ALA-R5/R6/R7 runtime use proof contracts，以及 ALA-R8/R9 activation/operations contracts。live daemon、live MCP transport/server、真实 profile 文件写入 runner、Gateway runner、真实外部 provider adapter、Inspector 与 benchmark 尚未实现。
 
 ## 1. SOUL 三层模型（当前真相）
 
@@ -83,9 +83,9 @@ source/evidence/session
 
 ## 6. 当前阶段约束
 
-- 当前阶段：ALA-R1 到 ALA-R7 runtime contracts 已在 `@do-soul/alaya` 独立边界内落地。
-- 当前仓库有 root package、public runtime API、internal SQLite storage baseline、audit-first mutation helper、Memory Ontology/Evidence、Structure Registry/Paths、Governance/Promotion、Recall/Context、Provider/Proposal、Session Audit/Trust、doctor CLI、build/test/smoke gate。
-- 当前仓库仍没有 daemon、MCP adapter、CLI protocol fallback、Attach/Profile、Gateway、真实外部 provider adapter、Inspector 或 benchmark implementation。
+- 当前阶段：ALA-R1 到 ALA-R9 runtime/activation/operations contracts 已在 `@do-soul/alaya` 独立边界内落地。
+- 当前仓库有 root package、public runtime API、internal SQLite storage baseline、audit-first mutation helper、Memory Ontology/Evidence、Structure Registry/Paths、Governance/Promotion、Recall/Context、Provider/Proposal、Session Audit/Trust、Integration/MCP descriptors、CLI fallback normalization、Attach/Profile preview/confirm contracts、Gateway envelope、Operations/Portability、doctor CLI、build/test/smoke gate。
+- 当前仓库仍没有 daemon、live MCP transport/server、真实 profile 文件写入 runner、Gateway runner、真实外部 provider adapter、Inspector 或 benchmark implementation。
 - 后续实现必须继续在 `@do-soul/alaya` 独立边界内重建，不恢复旧 prototype 文件作为捷径。
 - 本仓库不得依赖 `@do-what/*` 或 `do-what-new/packages/*` 运行时代码。
 

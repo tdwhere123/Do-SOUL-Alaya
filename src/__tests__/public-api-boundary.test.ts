@@ -10,6 +10,16 @@ describe("public API and dependency boundary", () => {
     expect(publicApi.createAlayaRuntime).toEqual(expect.any(Function));
     expect(publicApi.AuditedMutationExecutionError).toEqual(expect.any(Function));
     expect(publicApi.AuditedMutationNotificationError).toEqual(expect.any(Function));
+    expect(publicApi.resolveProfileConfig).toEqual(expect.any(Function));
+    expect(publicApi.buildProfileTargetWritePreview).toEqual(expect.any(Function));
+    expect(publicApi.createEnvSecretRef).toEqual(expect.any(Function));
+    expect(publicApi.deriveProviderStatus).toEqual(expect.any(Function));
+    expect(publicApi.listIntegrationOperationDescriptors).toEqual(expect.any(Function));
+    expect(publicApi.alayaMcpSurfaceDescriptor).toEqual(expect.any(Object));
+    expect(publicApi.normalizeCliFallbackRequest).toEqual(expect.any(Function));
+    expect(publicApi.evaluateGatewayEnvelope).toEqual(expect.any(Function));
+    expect(publicApi.createPortableBundle).toEqual(expect.any(Function));
+    expect(publicApi.createOperationsStatusReport).toEqual(expect.any(Function));
     expect(Object.prototype.hasOwnProperty.call(publicApi, "SqliteAlayaStorage")).toBe(false);
     expect(Object.prototype.hasOwnProperty.call(publicApi, "executeAuditedMutation")).toBe(false);
   });
@@ -46,11 +56,9 @@ describe("public API and dependency boundary", () => {
   it("does not introduce do-what runtime imports in package metadata or source", async () => {
     const files = [
       "package.json",
-      "src/index.ts",
-      "src/runtime/runtime.ts",
-      "src/runtime/audited-mutation.ts",
-      "src/storage/sqlite.ts",
-      "src/cli/doctor.ts"
+      ...(await listSourceFiles("src"))
+        .filter((file) => file.endsWith(".ts"))
+        .filter((file) => !file.includes("/__tests__/"))
     ];
 
     const contents = await Promise.all(files.map((file) => readFile(file, "utf8")));
