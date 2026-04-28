@@ -1,13 +1,61 @@
-// Vitest project shell for Do-SOUL Alaya monorepo.
-// Each package adds its own vitest.config.* under packages/<pkg>/ during port.
-// The workspace entry list is intentionally empty here and grows as P1+ port
-// task cards land each package's test config.
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { defineProject } from "vitest/config";
+
+const rootDir = path.dirname(fileURLToPath(import.meta.url));
+
+const sharedAlias = {
+  "@do-soul/alaya-protocol": path.resolve(rootDir, "packages/protocol/src/index.ts"),
+  "@do-soul/alaya-storage": path.resolve(rootDir, "packages/storage/src/index.ts"),
+  "@do-soul/alaya-core": path.resolve(rootDir, "packages/core/src/index.ts"),
+  "@do-soul/alaya-soul": path.resolve(rootDir, "packages/soul/src/index.ts"),
+  "@do-soul/alaya-engine-gateway": path.resolve(rootDir, "packages/engine-gateway/src/index.ts")
+};
+
+function packageProject(name, packageDir) {
+  const testDir = path.resolve(rootDir, packageDir, "src/__tests__");
+  if (!existsSync(testDir)) {
+    return null;
+  }
+
+  return defineProject({
+    resolve: {
+      alias: sharedAlias
+    },
+    test: {
+      name,
+      environment: "node",
+      include: [path.resolve(testDir, "**/*.{test,spec}.ts")],
+      exclude: ["**/dist/**"]
+    }
+  });
+}
+
+function appProject(name, appDir) {
+  const testDir = path.resolve(rootDir, appDir, "src/__tests__");
+  if (!existsSync(testDir)) {
+    return null;
+  }
+
+  return defineProject({
+    resolve: {
+      alias: sharedAlias
+    },
+    test: {
+      name,
+      environment: "node",
+      include: [path.resolve(testDir, "**/*.{test,spec}.ts")],
+      exclude: ["**/dist/**"]
+    }
+  });
+}
 
 export default [
-  // "packages/protocol/vitest.config.ts",   // populated by P1-protocol
-  // "packages/storage/vitest.config.ts",    // populated by P1-storage-shared / P2-repos-*
-  // "packages/core/vitest.config.ts",       // populated by P2-svc-*
-  // "packages/soul/vitest.config.ts",       // populated by P2-garden-*
-  // "packages/engine-gateway/vitest.config.ts",  // populated by P1-engine-gateway
-  // "apps/core-daemon/vitest.config.ts",         // populated by P4-daemon-skeleton
-];
+  packageProject("@do-soul/alaya-protocol", "packages/protocol"),
+  packageProject("@do-soul/alaya-storage", "packages/storage"),
+  packageProject("@do-soul/alaya-core", "packages/core"),
+  packageProject("@do-soul/alaya-soul", "packages/soul"),
+  packageProject("@do-soul/alaya-engine-gateway", "packages/engine-gateway"),
+  appProject("@do-soul/alaya-core-daemon", "apps/core-daemon")
+].filter(Boolean);
