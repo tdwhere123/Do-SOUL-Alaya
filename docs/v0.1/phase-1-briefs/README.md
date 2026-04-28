@@ -19,7 +19,7 @@ attach / status` which are Alaya-original (per invariant §24).
 
 | Card ID | Subject | Source | Port mode | Closing label |
 |---|---|---|---|---|
-| P1-protocol | All `@do-soul/alaya-protocol` types (root + soul/ + events/ + tests). Includes package skeleton + barrel `src/index.ts`. | `vendor/do-what-new-snapshot/packages/protocol/src/` | trivial-copy | schema-ready |
+| P1-protocol | All `@do-soul/alaya-protocol` types (root + soul/ + events/ + tests). Includes package skeleton + barrel `src/index.ts`. | `vendor/do-what-new-snapshot/packages/protocol/src/` | adapt-and-port | schema-ready |
 | P1-storage-skeleton | `packages/storage/{package.json, tsconfig.json, src/db.ts, src/errors.ts, src/index.ts}`. Storage package shell + DB connection helpers. | `vendor/do-what-new-snapshot/packages/storage/{package.json, tsconfig.json, src/db.ts, src/errors.ts, src/index.ts}` | trivial-copy | schema-ready |
 | P1-storage-shared | `packages/storage/src/repos/shared/{event-log-writer.ts, validators.ts, deep-freeze.ts}` + tests. | `vendor/do-what-new-snapshot/packages/storage/src/repos/shared/` | trivial-copy | implementation-ready |
 | P1-migrations | All 55 SQL migrations (single card; 1:1 file copy). | `vendor/do-what-new-snapshot/packages/storage/src/migrations/` | trivial-copy | implementation-ready |

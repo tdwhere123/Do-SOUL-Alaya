@@ -4,7 +4,7 @@
 
 DONE. The protocol package was copied under the P1-protocol ownership boundary,
 and the copied frozen red engine-binding update test is now green through the
-authorized protocol-schema deviation described below.
+adapt-and-port protocol-schema adapter points described below.
 
 ## Scope Compliance
 
@@ -17,7 +17,7 @@ authorized protocol-schema deviation described below.
 
 ## Port Mode
 
-Port mode: `trivial-copy`.
+Port mode: `adapt-and-port`.
 
 Copied sources:
 
@@ -31,7 +31,7 @@ Targets:
 - `packages/protocol/tsconfig.json`
 - `packages/protocol/src/`
 
-Mechanical rewrites only:
+Mechanical rewrites:
 
 - Rewrote package name `@do-what/protocol` to
   `@do-soul/alaya-protocol`.
@@ -42,7 +42,7 @@ Mechanical rewrites only:
   `packages/protocol/src/__tests__/evidence-capsule.test.ts`, and
   `packages/protocol/src/__tests__/phase-2a-events.test.ts`.
 
-Authorized deviation:
+Adapter points:
 
 - Added `RunUpdateEngineBindingInputSchema` to
   `packages/protocol/src/run.ts`.
@@ -94,10 +94,9 @@ No service behavior, runtime wiring, or non-protocol package code was invented.
 
 ## Intentional Deviations
 
-The only intentional deviation from `trivial-copy` is the authorized
-engine-binding update protocol contract required by the copied frozen red test.
-It is limited to protocol schemas / event contract and does not add runtime
-behavior.
+The only intentional adapt-and-port surface is the engine-binding update
+protocol contract required by the copied frozen red test. It is limited to
+protocol schemas / event contract and does not add runtime behavior.
 
 ## Deferred Issues
 
