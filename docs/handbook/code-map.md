@@ -40,11 +40,13 @@ vendor/
   do-what-new-snapshot/  frozen upstream port reference (read-only)
 ```
 
-## Current Status (Gate-1 complete)
+## Current Status (Phase 2 in progress)
 
-Phase 1 leaves are ported and unit-tested. The daemon, CLI, storage
-repositories, core services, and remaining Garden roles are still owned
-by later phases. Refresh this section after each Phase Gate.
+Phase 1 leaves are ported and unit-tested. Phase 2 storage
+repositories and their package barrel are ported and unit-tested. The
+daemon, CLI, remaining core services, and remaining Garden roles are
+still owned by later phase/card work. Refresh this section after each
+Phase Gate.
 
 | Concern | Primary files | State |
 |---|---|---|
@@ -57,7 +59,7 @@ by later phases. Refresh this section after each Phase Gate.
 | Storage skeleton + DB helpers | `packages/storage/{package.json,tsconfig.json,src/db.ts,src/errors.ts,src/index.ts}` | ported; `schema-ready` (P1-storage-skeleton) |
 | Storage shared utilities | `packages/storage/src/repos/shared/`, `packages/storage/src/__tests__/deep-freeze.test.ts` | ported; `implementation-ready` (P1-storage-shared) |
 | Storage migrations | `packages/storage/src/migrations/` | ported; `implementation-ready` (P1-migrations) |
-| Storage repos | `packages/storage/src/repos/` | not yet ported (P2-repos-batch-*) |
+| Storage repos | `packages/storage/src/repos/`, `packages/storage/src/index.ts`, `packages/storage/src/__tests__/*-repo.test.ts` | ported; `implementation-ready` (P2-repos-batch-* + P2-barrel-storage) |
 | Core skeleton + config leaves | `packages/core/src/{errors.ts,index.ts,shared/,dynamics-constants-runtime.ts}` | ported; `schema-ready` (P1-core-skeleton + P1-config) |
 | Core services | `packages/core/src/` service files | not yet ported (P2-svc-*) |
 | Soul skeleton + topology leaves | `packages/soul/src/{signal-handler.ts,tool-governance-adapter.ts,worker-safety-*.ts,garden/topology-service.ts,garden/path-graph-snapshotter.ts,shared/deep-freeze.ts}` | ported; `implementation-ready` leaves (P1-soul-skeleton + P1-topology) |

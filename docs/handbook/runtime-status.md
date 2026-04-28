@@ -20,7 +20,7 @@ each Phase Gate.
 |---|---|---|---|
 | Phase 0 | Reset, vendor snapshot, handbook, INDEX, task cards | **done** | Gate-0 passed |
 | Phase 1 | Wave 1 leaves: protocol, migrations, storage shared, config, topology, engine-gateway | **done** | Gate-1 passed |
-| Phase 2 | Wave 2: storage repos batches + core services + Garden + security defense | not-started | Gate-2 |
+| Phase 2 | Wave 2: storage repos batches + core services + Garden + security defense | in-progress | Gate-2 |
 | Phase 3 | Wave 3: ConversationService, MCP discovery, run lifecycle, misc services, core barrel | not-started | Gate-3 |
 | Phase 4 | Wave 4: Core daemon, routes, MCP server transport, real profile mutation, CLI bridge, secrets | not-started | Gate-4 (end-to-end demo) |
 | Phase 5 | Wave 5: full E2E, benchmark, graph contract, final review | not-started | Gate-5 (v0.1 release) |
@@ -33,7 +33,7 @@ each Phase Gate.
 | Storage skeleton + DB helpers | `schema-ready` | `schema-ready` | P1-storage-skeleton |
 | Storage shared utilities | `implementation-ready` | `implementation-ready` | P1-storage-shared |
 | SQLite migrations | `implementation-ready` | `implementation-ready` | P1-migrations |
-| Storage repos | `not-started` | `implementation-ready` | P2-repos-batch-* |
+| Storage repos | `implementation-ready` | `implementation-ready` | P2-repos-batch-* + P2-barrel-storage |
 | Core package skeleton + shared utilities | `schema-ready` | `schema-ready` | P1-core-skeleton |
 | Dynamics runtime constants | `schema-ready` | `schema-ready` | P1-config |
 | MemoryService | `not-started` | `live-event-ready` | P2-svc-memory |
