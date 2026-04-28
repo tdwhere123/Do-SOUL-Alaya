@@ -38,6 +38,7 @@ each Phase Gate.
 | Dynamics runtime constants | `schema-ready` | `schema-ready` | P1-config |
 | MemoryService | `not-started` | `live-event-ready` | P2-svc-memory |
 | EvidenceService | `implementation-ready` | `live-event-ready` | P2-svc-evidence |
+| SignalService | `implementation-ready` | `live-event-ready` | P2-svc-signal |
 | RecallService | `not-started` | `live-event-ready` | P2-svc-recall |
 | EmbeddingRecallService | `not-started` | `live-event-ready` | P2-svc-embedding-recall |
 | GreenService (ELIGIBLE/GRACE/REVOKED) | `not-started` | `live-event-ready` | P2-svc-green |
