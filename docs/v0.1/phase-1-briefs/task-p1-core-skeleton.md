@@ -70,7 +70,7 @@ Nothing deferred.
 | AC1 | All files in §2 are ported per adapt-and-port rules | Reviewer compares target files against the cited vendor source paths and adapter points |
 | AC2 | Every source path cited by this card exists before dispatch | `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/packages/core/package.json\",\"vendor/do-what-new-snapshot/packages/core/tsconfig.json\",\"vendor/do-what-new-snapshot/packages/core/src/index.ts\",\"vendor/do-what-new-snapshot/packages/core/src/errors.ts\",\"vendor/do-what-new-snapshot/packages/core/src/shared/actors.ts\",\"vendor/do-what-new-snapshot/packages/core/src/shared/deep-freeze.ts\",\"vendor/do-what-new-snapshot/packages/core/src/shared/event-utils.ts\",\"vendor/do-what-new-snapshot/packages/core/src/shared/extension-descriptor-parsers.ts\",\"vendor/do-what-new-snapshot/packages/core/src/shared/load-or-default-with-workspace-guard.ts\",\"vendor/do-what-new-snapshot/packages/core/src/shared/normalize-unit.ts\",\"vendor/do-what-new-snapshot/packages/core/src/shared/recall-policy.ts\",\"vendor/do-what-new-snapshot/packages/core/src/shared/surface-uri.ts\",\"vendor/do-what-new-snapshot/packages/core/src/shared/time.ts\",\"vendor/do-what-new-snapshot/packages/core/src/shared/validated-activation-candidates.ts\",\"vendor/do-what-new-snapshot/packages/core/src/shared/validators.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"` exits 0 |
 | AC3 | Build succeeds after this card lands | `rtk pnpm build` is green |
-| AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core -t "shared|CoreError|time|validators" --passWithNoTests` |
+| AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core -t "shared|CoreError|time|validators"` |
 | AC5 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-1-briefs/reports/task-p1-core-skeleton.md` exists and cites backlog issues for any deferred scope |
 | AC6 | Closing readiness label is `schema-ready` | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` are updated only after evidence supports the label |
 
@@ -80,7 +80,7 @@ Nothing deferred.
 2. `rtk pnpm install`
 3. `rtk pnpm build`
 4. `rtk pnpm exec tsc --noEmit -p packages/core`
-5. `rtk pnpm exec vitest run --project @do-soul/alaya-core -t "shared|CoreError|time|validators" --passWithNoTests`
+5. `rtk pnpm exec vitest run --project @do-soul/alaya-core -t "shared|CoreError|time|validators"`
 
 ## 6. Shared File Hazards & Dependencies
 

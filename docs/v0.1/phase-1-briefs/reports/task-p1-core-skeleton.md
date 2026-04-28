@@ -61,7 +61,7 @@ Source files copied and adapted from:
 - `rtk pnpm install`: pass.
 - `rtk pnpm build`: pass.
 - `rtk pnpm exec tsc --noEmit -p packages/core`: pass.
-- `rtk pnpm exec vitest run --project @do-soul/alaya-core --passWithNoTests`: pass, 1 file / 4 tests.
+- `rtk pnpm exec vitest run --project @do-soul/alaya-core -t "shared|CoreError|time|validators"`: pass, 2 files / 11 tests after the full Phase 1 core test surface landed.
 - `rtk git diff --check`: pass.
 
 ## Architecture Compliance

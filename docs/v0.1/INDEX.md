@@ -11,7 +11,7 @@ Per-Card Pipeline.
 
 ```text
 Phase 0 → Gate-0
-   → Phase 1 (Wave 1, 12-15 parallel cards) → Gate-1
+   → Phase 1 (Wave 1, 9 cards) → Gate-1
        → Phase 2 (Wave 2, 20-25 parallel cards) → Gate-2
            → Phase 3 (Wave 3, 3-5 parallel cards) → Gate-3
                → Phase 4 (Wave 4, 3-5 parallel cards) → Gate-4
@@ -24,7 +24,7 @@ Phase 0 → Gate-0
 | Phase | Title | Cards | Status | Gate |
 |---|---|---|---|---|
 | Phase 0 | Reset & Source Mirror | 6 cards (P0-0..P0-5) + P0-3.5 review + P0-3.6 fix + P0-4 extraction | **done** | Gate-0 passed |
-| Phase 1 | Wave 1: Leaves | 9 cards (target) | not-started | Gate-1 |
+| Phase 1 | Wave 1: Leaves | 9 cards | **done** | Gate-1 passed |
 | Phase 2 | Wave 2: Services + Garden + Repos + Security | 31 cards (target) | not-started | Gate-2 |
 | Phase 3 | Wave 3: ConversationService + Run Lifecycle | 5 cards (target) | not-started | Gate-3 |
 | Phase 4 | Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI | 24 cards (target) | not-started | Gate-4 |

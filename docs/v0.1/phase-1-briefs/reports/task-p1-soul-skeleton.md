@@ -69,7 +69,7 @@ The following target files match the vendor source after the allowed package-nam
 - `rtk pnpm install`: passed.
 - `rtk pnpm build`: passed.
 - `rtk pnpm exec tsc --noEmit -p packages/soul`: passed.
-- `rtk pnpm exec vitest run --project @do-soul/alaya-soul --passWithNoTests`: passed, 4 files / 23 tests.
+- `rtk pnpm exec vitest run --project @do-soul/alaya-soul`: passed, 6 files / 32 tests after the full Phase 1 soul test surface landed.
 - `rtk pnpm exec vitest run --project @do-soul/alaya-soul signal-handler tool-governance worker-safety`: passed, 4 files / 23 tests.
 - `rtk git diff --check`: passed.
 

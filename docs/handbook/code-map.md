@@ -40,11 +40,11 @@ vendor/
   do-what-new-snapshot/  frozen upstream port reference (read-only)
 ```
 
-## Current Status (Phase 0 complete)
+## Current Status (Gate-1 complete)
 
-Only the monorepo shell is in place. Source files have not been ported
-yet. Each package directory listed above will appear during P1 / P2 /
-P3 / P4 task execution. Refresh this section after each Phase Gate.
+Phase 1 leaves are ported and unit-tested. The daemon, CLI, storage
+repositories, core services, and remaining Garden roles are still owned
+by later phases. Refresh this section after each Phase Gate.
 
 | Concern | Primary files | State |
 |---|---|---|
@@ -53,12 +53,16 @@ P3 / P4 task execution. Refresh this section after each Phase Gate.
 | Handbook | `docs/handbook/*` | present (P0-3) |
 | v0.1 task cards | `docs/v0.1/INDEX.md`, `docs/v0.1/phase-{0..5}-briefs/` | populated by P0-3e + P0-4 |
 | Vendor snapshot | `vendor/do-what-new-snapshot/` | present (frozen at upstream commit `6ed8463`) |
-| Protocol types | `packages/protocol/src/` | not yet ported (P1-protocol) |
-| Storage migrations | `packages/storage/src/migrations/` | not yet ported (P1-migrations) |
+| Protocol types | `packages/protocol/src/` | ported; `schema-ready` (P1-protocol) |
+| Storage skeleton + DB helpers | `packages/storage/{package.json,tsconfig.json,src/db.ts,src/errors.ts,src/index.ts}` | ported; `schema-ready` (P1-storage-skeleton) |
+| Storage shared utilities | `packages/storage/src/repos/shared/`, `packages/storage/src/__tests__/deep-freeze.test.ts` | ported; `implementation-ready` (P1-storage-shared) |
+| Storage migrations | `packages/storage/src/migrations/` | ported; `implementation-ready` (P1-migrations) |
 | Storage repos | `packages/storage/src/repos/` | not yet ported (P2-repos-batch-*) |
-| Core services | `packages/core/src/` | not yet ported (P2-svc-*) |
-| Garden engine | `packages/soul/src/garden/` | not yet ported (P2-garden-batch-*) |
-| Engine gateway | `packages/engine-gateway/src/` | not yet ported (P1-engine-gateway) |
+| Core skeleton + config leaves | `packages/core/src/{errors.ts,index.ts,shared/,dynamics-constants-runtime.ts}` | ported; `schema-ready` (P1-core-skeleton + P1-config) |
+| Core services | `packages/core/src/` service files | not yet ported (P2-svc-*) |
+| Soul skeleton + topology leaves | `packages/soul/src/{signal-handler.ts,tool-governance-adapter.ts,worker-safety-*.ts,garden/topology-service.ts,garden/path-graph-snapshotter.ts,shared/deep-freeze.ts}` | ported; `implementation-ready` leaves (P1-soul-skeleton + P1-topology) |
+| Garden engine | `packages/soul/src/garden/` remaining Garden roles | not yet ported (P2-garden-batch-*) |
+| Engine gateway | `packages/engine-gateway/src/` | MCP/provider skeleton ported; provider adapters deferred (#BL-008) |
 | Core daemon | `apps/core-daemon/src/` | not yet ported (P4-daemon-skeleton + P4-daemon-startup-ordering + P4-sse-strip) |
 | CLI shell | `bin/alaya.mjs` | not yet ported (P4-cli-bridge) |
 

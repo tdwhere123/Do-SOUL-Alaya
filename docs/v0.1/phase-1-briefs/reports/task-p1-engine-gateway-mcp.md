@@ -71,7 +71,7 @@ Ported source files:
 - `rtk pnpm install`: passed.
 - `rtk pnpm build`: passed.
 - `rtk pnpm exec tsc --noEmit -p packages/engine-gateway`: passed.
-- `rtk pnpm exec vitest run --project @do-soul/alaya-engine-gateway --passWithNoTests`:
+- `rtk pnpm exec vitest run --project @do-soul/alaya-engine-gateway`:
   passed, 2 files / 23 tests.
 
 ## Architecture Compliance

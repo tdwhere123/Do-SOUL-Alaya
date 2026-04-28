@@ -117,25 +117,11 @@ rtk pnpm exec tsc --noEmit -p packages/storage
 Result: passed with no output.
 
 ```bash
-rtk pnpm exec vitest run --project @do-soul/alaya-storage --passWithNoTests
+rtk pnpm exec vitest run --project @do-soul/alaya-storage
 ```
 
-Result:
-
-```text
-RUN  v4.1.5 /home/tdwhere/vibe/Do-SOUL Alaya/.worktrees/p1-storage-skeleton
-
-No test files found, exiting with code 0
-
-projects: @do-soul/alaya-storage
-
-|@do-soul/alaya-storage|
-
-include: /home/tdwhere/vibe/Do-SOUL Alaya/.worktrees/p1-storage-skeleton/packages/storage/src/__tests__/**/*.{test,spec}.ts
-exclude:  **/dist/**
-```
-
-Exit code: 0.
+Result after the full Phase 1 storage test surface landed: passed, 2
+files / 3 tests.
 
 ## Architecture Compliance
 
