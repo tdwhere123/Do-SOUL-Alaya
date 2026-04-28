@@ -6,12 +6,23 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-013`.
+sequence. **Next available number**: `#BL-014`.
 
 ## Open Issues
 
-(none yet — Phase 0 has not yet produced any unresolved cross-phase
-issues; new issues land here as Phase 1+ task cards close)
+### #BL-013 — Dedicated Green grace-transition event
+
+**Status**: Open
+**Owner**: `docs/v0.1/phase-2-briefs/task-p2-svc-green.md`
+**Close condition**: Protocol includes a dedicated audited grace-transition
+event and `GreenService.setGrace()` emits that event instead of reusing the
+Green pierced audit payload.
+
+P2-svc-green must keep Phase 2 inside the existing protocol surface, but Alaya
+invariants require EventLog-first auditing for the eligible-to-grace state
+transition. The v0.1 repair uses the existing Green pierced payload with
+`revoke_reason = review_overdue` as an audit envelope while preserving durable
+`green_state = grace` and `revoke_reason = none`.
 
 ## Deferred (post v0.1)
 

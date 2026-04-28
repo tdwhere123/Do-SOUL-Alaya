@@ -90,12 +90,27 @@ function createHarness(options: {
 
   const events: EventLogEntry[] = [...(options.initialEvents ?? [])];
   const warn = vi.fn();
+  const notifyEntry = vi.fn(async (_entry: EventLogEntry) => undefined);
+  const appendEvent = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => {
+    const created: EventLogEntry = {
+      event_id: `event-${events.length + 1}`,
+      created_at: "2026-03-24T00:00:00.000Z",
+      ...entry
+    };
+    events.push(created);
+    return created;
+  });
+  const upsertStatus = vi.fn(async (status: Readonly<GreenStatus>) => {
+    const copy = { ...status };
+    statuses.set(copy.target_object_id, copy);
+    return Object.freeze(copy);
+  });
   const dependencies: GreenServiceDependencies = {
     now: () => "2026-03-24T00:00:00.000Z",
     generateObjectId: createObjectIdGenerator(),
     warn,
     runtimeNotifier: {
-      notifyEntry: vi.fn(async () => undefined)
+      notifyEntry
     },
     greenStatusRepo: {
       findByTargetObjectId: vi.fn(async (targetObjectId: string) => {
@@ -117,11 +132,7 @@ function createHarness(options: {
           .filter((status) => status.workspace_id === workspaceId)
           .map((status) => Object.freeze({ ...status }))
       ),
-      upsert: vi.fn(async (status: Readonly<GreenStatus>) => {
-        const copy = { ...status };
-        statuses.set(copy.target_object_id, copy);
-        return Object.freeze(copy);
-      })
+      upsert: upsertStatus
     },
     memoryRepo: {
       findById: vi.fn(async (objectId: string) =>
@@ -129,15 +140,7 @@ function createHarness(options: {
       )
     },
     eventLogRepo: {
-      append: vi.fn(async (entry) => {
-        const created: EventLogEntry = {
-          event_id: `event-${events.length + 1}`,
-          created_at: "2026-03-24T00:00:00.000Z",
-          ...entry
-        };
-        events.push(created);
-        return created;
-      }),
+      append: appendEvent,
       queryByEntity: vi.fn(async (entityType, entityId) =>
         events.filter((event) => event.entity_type === entityType && event.entity_id === entityId)
       ),
@@ -164,7 +167,10 @@ function createHarness(options: {
     service: new GreenService(dependencies),
     statuses,
     events,
-    warn
+    warn,
+    notifyEntry,
+    appendEvent,
+    upsertStatus
   };
 }
 
@@ -579,19 +585,41 @@ describe("GreenService", () => {
     expect(events.filter((event) => event.event_type === Phase3BEventType.SOUL_GREEN_PIERCED)).toHaveLength(3);
   });
 
-  it("setGrace() changes state without emitting an event", async () => {
-    const { service, statuses, events } = createHarness({
+  it("setGrace() audits and notifies an eligible-to-grace transition", async () => {
+    const { service, statuses, events, notifyEntry, appendEvent, upsertStatus } = createHarness({
       existingStatus: createGreenStatus()
     });
 
-    await service.setGrace({
+    const result = await service.setGrace({
       targetObjectId: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
       workspaceId: "workspace-1",
       until: "2026-03-25T00:00:00.000Z"
     });
 
-    expect(statuses.get("70a0b18b-5f8b-4fd2-a1b0-97ce48113fca")?.green_state).toBe("grace");
-    expect(events).toHaveLength(0);
+    const status = statuses.get("70a0b18b-5f8b-4fd2-a1b0-97ce48113fca");
+    const event = events.at(-1);
+    expect(result?.green_state).toBe("grace");
+    expect(status?.green_state).toBe("grace");
+    expect(status?.revoke_reason).toBe(RevokeReason.NONE);
+    expect(event).toMatchObject({
+      event_type: Phase3BEventType.SOUL_GREEN_PIERCED,
+      entity_type: "green_status",
+      entity_id: "9bc1a292-e9c2-47f9-9c6f-bf6b67c810f3",
+      workspace_id: "workspace-1",
+      run_id: null,
+      caused_by: "system",
+      revision: 0,
+      payload_json: {
+        object_id: "9bc1a292-e9c2-47f9-9c6f-bf6b67c810f3",
+        target_object_id: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+        revoke_reason: RevokeReason.REVIEW_OVERDUE,
+        workspace_id: "workspace-1",
+        occurred_at: "2026-03-24T00:00:00.000Z"
+      }
+    });
+    expect(appendEvent.mock.invocationCallOrder[0]).toBeLessThan(upsertStatus.mock.invocationCallOrder[0]);
+    expect(upsertStatus.mock.invocationCallOrder[0]).toBeLessThan(notifyEntry.mock.invocationCallOrder[0]);
+    expect(notifyEntry).toHaveBeenCalledWith(event);
   });
 
   it("hazard grants use a 7-day validity window", async () => {

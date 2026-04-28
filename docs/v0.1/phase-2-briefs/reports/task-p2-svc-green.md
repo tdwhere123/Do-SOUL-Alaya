@@ -13,6 +13,7 @@
   - `docs/v0.1/phase-2-briefs/task-p2-svc-green.md`
   - `docs/v0.1/phase-2-briefs/reports/task-p2-svc-green.md`
   - `docs/handbook/runtime-status.md`
+  - `docs/handbook/backlog.md`
 
 No shared barrels, root config, storage repos, daemon files, MCP, CLI, GUI, TUI,
 or Phase 3+ surfaces were edited.
@@ -30,6 +31,10 @@ paths. The permitted adaptations are:
 - method call `broadcastEntry(entry)` -> `notifyEntry(entry)`
 - test/comment wording from SSE/broadcast language to in-process notification
   language
+- `setGrace()` now audits the eligible-to-grace state transition before the
+  repository mutation and runtime notification. The upstream source directly
+  upserts this state, but Alaya invariants require EventLog-first mutation
+  ordering for every state change.
 
 ## Parity Evidence
 
@@ -38,8 +43,9 @@ Source existence check passed for:
 - `vendor/do-what-new-snapshot/packages/core/src/green-service.ts`
 - `vendor/do-what-new-snapshot/packages/core/src/__tests__/green-service.test.ts`
 
-The target files match the vendor files after applying only the package alias
-rewrite and the task-card SSE-to-runtime-notifier adapter point.
+The target files match the vendor files after applying the package alias
+rewrite, the task-card SSE-to-runtime-notifier adapter point, and the
+Alaya-specific `setGrace()` audit repair required by invariants §7 and §10.
 
 ## Verification
 
@@ -50,12 +56,16 @@ rewrite and the task-card SSE-to-runtime-notifier adapter point.
 - `rtk pnpm exec tsc --noEmit -p packages/core` - passed
 - `rtk pnpm exec vitest run --project @do-soul/alaya-core -t "GreenService"` - passed; 1 file / 22 tests passed
 - `rtk git diff --check` - passed
+- Post-review rerun after `P2-svc-embedding-recall` boundary repair:
+  `rtk pnpm exec tsc --noEmit -p packages/core` - passed
 
 ## Architecture Compliance
 
 - `@do-soul/alaya-protocol` remains the source of Green status, verification,
   memory, and EventLog protocol types.
-- EventLog append and repository mutation ordering is preserved from the source.
+- EventLog append and repository mutation ordering is preserved from the source
+  where present. The source `setGrace()` direct upsert is intentionally repaired
+  to append an audit row before mutation and notify after persistence.
 - Upstream SSE terminology is removed. Green notification is represented as an
   in-process `runtimeNotifier.notifyEntry` port only.
 - No daemon, MCP, CLI, GUI, TUI, or live SSE surface was introduced.
@@ -66,10 +76,15 @@ rewrite and the task-card SSE-to-runtime-notifier adapter point.
   upstream source contains an SSE broadcaster dependency, and invariant §11
   requires stripping SSE transport while preserving in-process notification
   semantics.
+- `setGrace()` differs from the upstream source to close a state-machine audit
+  gap: the target uses the existing `SOUL_GREEN_PIERCED` payload with
+  `revoke_reason = review_overdue` as the audit envelope, while preserving
+  durable `green_state = grace` and `revoke_reason = none`.
 
 ## Deferred Issues
 
-Nothing deferred.
+- `#BL-013` tracks a future dedicated Green grace-transition event. Phase 2 does
+  not add a new protocol event from this card.
 
 ## Follow-Up Readiness Impact
 

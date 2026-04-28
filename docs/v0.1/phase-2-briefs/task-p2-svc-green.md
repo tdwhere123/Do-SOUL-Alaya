@@ -46,10 +46,14 @@
 |---|---|---|
 | `GreenSseBroadcaster` with `broadcastEntry(entry)` | `GreenRuntimeNotifier` with `notifyEntry(entry)` | Invariant §11 forbids SSE transport; Phase 2 may preserve only in-process notification semantics. |
 | Dependency property `sseBroadcaster` | Dependency property `runtimeNotifier` | Keeps source ordering while removing GUI/TUI SSE terminology. |
+| `setGrace()` direct `greenStatusRepo.upsert(next)` | EventLog append with existing `SOUL_GREEN_PIERCED` audit payload, then `greenStatusRepo.upsert(next)`, then `runtimeNotifier.notifyEntry(event)` | Invariants §7 and §10 require every state-changing write to audit before mutation and notification. A dedicated grace-entered event is outside this card and tracked by `#BL-013`. |
 
 ## 3. Deferred
 
-Nothing deferred.
+- `#BL-013` tracks a future dedicated Green grace-transition event. This card
+  keeps Phase 2 inside the existing protocol surface by auditing the transition
+  with the existing Green pierced payload while preserving the durable
+  `green_state = grace` / `revoke_reason = none` state.
 
 ## 4. Acceptance Criteria
 

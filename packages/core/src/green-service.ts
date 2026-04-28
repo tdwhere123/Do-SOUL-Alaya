@@ -251,10 +251,12 @@ export class GreenService {
     readonly targetObjectId: string;
     readonly workspaceId: string;
     readonly until: string;
+    readonly runId?: string;
   }): Promise<Readonly<GreenStatus> | null> {
     const targetObjectId = parseObjectId(params.targetObjectId);
-    parseNonEmptyString(params.workspaceId, "workspaceId");
+    const workspaceId = parseNonEmptyString(params.workspaceId, "workspaceId");
     parseNonEmptyString(params.until, "until");
+    const runId = params.runId === undefined ? null : parseNonEmptyString(params.runId, "runId");
     const existing = await this.dependencies.greenStatusRepo.findByTargetObjectId(targetObjectId);
 
     if (existing === null) {
@@ -270,8 +272,27 @@ export class GreenService {
       valid_until: params.until,
       last_transition_at: timestamp
     });
+    const revision = await getNextRevision(this.dependencies.eventLogRepo, "green_status", next.object_id);
+    const event = await this.dependencies.eventLogRepo.append({
+      event_type: Phase3BEventType.SOUL_GREEN_PIERCED,
+      entity_type: "green_status",
+      entity_id: next.object_id,
+      workspace_id: workspaceId,
+      run_id: runId,
+      caused_by: "system",
+      revision,
+      payload_json: SoulGreenPiercedPayloadSchema.parse({
+        object_id: next.object_id,
+        target_object_id: targetObjectId,
+        revoke_reason: RevokeReason.REVIEW_OVERDUE,
+        workspace_id: workspaceId,
+        occurred_at: timestamp
+      })
+    });
 
-    return await this.dependencies.greenStatusRepo.upsert(next);
+    const saved = await this.dependencies.greenStatusRepo.upsert(next);
+    await this.dependencies.runtimeNotifier.notifyEntry(event);
+    return saved;
   }
 
   public async reevaluate(params: {
@@ -302,7 +323,12 @@ export class GreenService {
         return "unchanged";
       }
 
-      const grace = await this.setGrace({ targetObjectId, workspaceId, until: graceUntil });
+      const grace = await this.setGrace({
+        targetObjectId,
+        workspaceId,
+        until: graceUntil,
+        runId: params.runId ?? memory.run_id
+      });
       return grace === null ? "unchanged" : "grace";
     }
 
