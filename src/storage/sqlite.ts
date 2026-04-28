@@ -96,6 +96,110 @@ export interface GovernanceRecordWrite {
 
 export interface GovernanceRecordRead extends GovernanceRecordWrite {}
 
+export interface MemoryContentSearchRecord {
+  readonly objectId: string;
+  readonly workspaceId: string;
+  readonly content: string;
+  readonly lexicalScore: number;
+}
+
+export interface ContextPackRecordWrite {
+  readonly contextPackId: string;
+  readonly workspaceId: string;
+  readonly runId: string;
+  readonly queryText: string;
+  readonly includedMemoryIds: readonly string[];
+  readonly payload: JsonObject;
+  readonly replayFingerprint: string;
+  readonly createdAt: string;
+}
+
+export interface ContextPackRecordRead extends ContextPackRecordWrite {}
+
+export interface ProviderDecisionRecordWrite {
+  readonly decisionId: string;
+  readonly workspaceId: string;
+  readonly capability: string;
+  readonly selectedProviderId?: string | null;
+  readonly outcome: string;
+  readonly reason: string;
+  readonly payload: JsonObject;
+  readonly createdAt: string;
+}
+
+export interface ProviderDecisionRecordRead extends ProviderDecisionRecordWrite {}
+
+export interface ProviderDecisionReplayScope {
+  readonly requestFingerprint: string;
+  readonly providersFingerprint: string;
+}
+
+export interface ProposalStorageRecordWrite {
+  readonly proposalId: string;
+  readonly workspaceId: string;
+  readonly providerDecisionId?: string | null;
+  readonly runId?: string | null;
+  readonly status: string;
+  readonly targetId?: string | null;
+  readonly payload: JsonObject;
+  readonly replayFingerprint: string;
+  readonly createdAt: string;
+}
+
+export interface ProposalStorageRecordRead extends ProposalStorageRecordWrite {}
+
+export interface SessionEventRecordWrite {
+  readonly eventId: string;
+  readonly sessionId: string;
+  readonly workspaceId: string;
+  readonly runId: string;
+  readonly eventKind: string;
+  readonly terminal: boolean;
+  readonly payload: JsonObject;
+  readonly occurredAt: string;
+}
+
+export interface SessionEventRecordRead extends SessionEventRecordWrite {}
+
+export interface ContextDeliveryStorageRecordWrite {
+  readonly deliveryId: string;
+  readonly sessionId: string;
+  readonly workspaceId: string;
+  readonly runId: string;
+  readonly contextPackId: string;
+  readonly outcome: string;
+  readonly payload: JsonObject;
+  readonly deliveredAt: string;
+}
+
+export interface ContextDeliveryStorageRecordRead extends ContextDeliveryStorageRecordWrite {}
+
+export interface UsageProofStorageRecordWrite {
+  readonly proofId: string;
+  readonly sessionId: string;
+  readonly workspaceId: string;
+  readonly runId: string;
+  readonly proofKind: string;
+  readonly strength: string;
+  readonly payload: JsonObject;
+  readonly observedAt: string;
+}
+
+export interface UsageProofStorageRecordRead extends UsageProofStorageRecordWrite {}
+
+export interface TrustSummaryStorageRecordWrite {
+  readonly summaryId: string;
+  readonly sessionId: string;
+  readonly workspaceId: string;
+  readonly runId: string;
+  readonly trustState: string;
+  readonly payload: JsonObject;
+  readonly replayFingerprint: string;
+  readonly generatedAt: string;
+}
+
+export interface TrustSummaryStorageRecordRead extends TrustSummaryStorageRecordWrite {}
+
 const databaseFileName = "alaya.sqlite";
 
 const migrations: readonly { id: string; sql: string }[] = [
@@ -198,6 +302,173 @@ const migrations: readonly { id: string; sql: string }[] = [
 
       CREATE INDEX IF NOT EXISTS idx_governance_records_target
         ON governance_records (target_type, target_id);
+    `
+  },
+  {
+    id: "005-recall-context",
+    sql: `
+      CREATE VIRTUAL TABLE IF NOT EXISTS memory_content_fts USING fts5(
+        object_id UNINDEXED,
+        workspace_id UNINDEXED,
+        content,
+        tokenize = 'trigram'
+      );
+
+      INSERT INTO memory_content_fts (rowid, object_id, workspace_id, content)
+      SELECT rowid, object_id, workspace_id, json_extract(payload_json, '$.content')
+      FROM ontology_records
+      WHERE object_kind = 'memory_entry'
+        AND json_extract(payload_json, '$.content') IS NOT NULL;
+
+      CREATE TRIGGER IF NOT EXISTS memory_content_fts_ai
+      AFTER INSERT ON ontology_records
+      WHEN new.object_kind = 'memory_entry'
+      BEGIN
+        INSERT INTO memory_content_fts (rowid, object_id, workspace_id, content)
+        VALUES (new.rowid, new.object_id, new.workspace_id, json_extract(new.payload_json, '$.content'));
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS memory_content_fts_ad
+      AFTER DELETE ON ontology_records
+      WHEN old.object_kind = 'memory_entry'
+      BEGIN
+        DELETE FROM memory_content_fts WHERE rowid = old.rowid;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS memory_content_fts_au
+      AFTER UPDATE OF object_id, workspace_id, payload_json ON ontology_records
+      WHEN old.object_kind = 'memory_entry' OR new.object_kind = 'memory_entry'
+      BEGIN
+        DELETE FROM memory_content_fts WHERE rowid = old.rowid;
+        INSERT INTO memory_content_fts (rowid, object_id, workspace_id, content)
+        SELECT new.rowid, new.object_id, new.workspace_id, json_extract(new.payload_json, '$.content')
+        WHERE new.object_kind = 'memory_entry'
+          AND json_extract(new.payload_json, '$.content') IS NOT NULL;
+      END;
+
+      CREATE TABLE IF NOT EXISTS context_pack_records (
+        context_pack_id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        query_text TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_context_pack_records_workspace_run
+        ON context_pack_records (workspace_id, run_id, created_at, context_pack_id);
+    `
+  },
+  {
+    id: "006-provider-proposal",
+    sql: `
+      CREATE TABLE IF NOT EXISTS provider_decision_records (
+        decision_id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        capability TEXT NOT NULL,
+        selected_provider_id TEXT,
+        outcome TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_provider_decision_records_workspace
+        ON provider_decision_records (workspace_id, created_at, decision_id);
+
+      CREATE TABLE IF NOT EXISTS proposal_records (
+        proposal_id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        provider_decision_id TEXT,
+        status TEXT NOT NULL,
+        target_id TEXT,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_proposal_records_workspace
+        ON proposal_records (workspace_id, created_at, proposal_id);
+
+      CREATE INDEX IF NOT EXISTS idx_proposal_records_provider_decision
+        ON proposal_records (provider_decision_id);
+    `
+  },
+  {
+    id: "007-session-trust",
+    sql: `
+      CREATE TABLE IF NOT EXISTS memory_session_events (
+        event_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        event_kind TEXT NOT NULL,
+        terminal INTEGER NOT NULL CHECK (terminal IN (0, 1)),
+        payload_json TEXT NOT NULL,
+        occurred_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_memory_session_events_session
+        ON memory_session_events (session_id, occurred_at, event_id);
+
+      CREATE TABLE IF NOT EXISTS context_delivery_records (
+        delivery_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        context_pack_id TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        delivered_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_context_delivery_records_session
+        ON context_delivery_records (session_id, delivered_at, delivery_id);
+
+      CREATE TABLE IF NOT EXISTS usage_proof_records (
+        proof_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        proof_kind TEXT NOT NULL,
+        strength TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        observed_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_usage_proof_records_session
+        ON usage_proof_records (session_id, observed_at, proof_id);
+
+      CREATE TABLE IF NOT EXISTS trust_summary_records (
+        summary_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        trust_state TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        generated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_trust_summary_records_session
+        ON trust_summary_records (session_id, generated_at, summary_id);
+    `
+  },
+  {
+    id: "008-runtime-use-proof-lineage-replay",
+    sql: `
+      ALTER TABLE context_pack_records
+        ADD COLUMN included_memory_ids_json TEXT NOT NULL DEFAULT '[]';
+
+      ALTER TABLE context_pack_records
+        ADD COLUMN replay_fingerprint TEXT NOT NULL DEFAULT '';
+
+      ALTER TABLE proposal_records
+        ADD COLUMN run_id TEXT;
+
+      ALTER TABLE proposal_records
+        ADD COLUMN replay_fingerprint TEXT NOT NULL DEFAULT '';
+
+      ALTER TABLE trust_summary_records
+        ADD COLUMN replay_fingerprint TEXT NOT NULL DEFAULT '';
     `
   }
 ];
@@ -388,6 +659,56 @@ export class SqliteAlayaStorage implements AtomicAuditLogWriter {
       )
       .all(objectKind, workspaceId)
       .map(rowToOntologyRecord);
+  }
+
+  public searchMemoryContent(
+    workspaceId: string,
+    queryText: string,
+    limit: number
+  ): readonly MemoryContentSearchRecord[] {
+    const normalizedQuery = queryText.trim();
+    if (normalizedQuery.length === 0 || limit < 1) {
+      return [];
+    }
+
+    const exactStatement = this.database.prepare(
+      `SELECT
+        object_id,
+        workspace_id,
+        content,
+        0 AS lexical_score
+      FROM memory_content_fts
+      WHERE workspace_id = ? AND content LIKE ? ESCAPE '^'
+      ORDER BY object_id ASC
+      LIMIT ?`
+    );
+    const exactRows = mergeSearchRows([], searchTerms(normalizedQuery).flatMap((term) => exactStatement
+      .all(workspaceId, `%${escapeLike(term)}%`, limit)
+      .map(rowToMemoryContentSearchRecord)), limit);
+
+    if ([...normalizedQuery].length < 3) {
+      return exactRows;
+    }
+
+    try {
+      const ftsRows = this.database
+        .prepare(
+          `SELECT
+            object_id,
+            workspace_id,
+            content,
+            bm25(memory_content_fts) AS lexical_score
+          FROM memory_content_fts
+          WHERE workspace_id = ? AND memory_content_fts MATCH ?
+          ORDER BY lexical_score ASC, object_id ASC
+          LIMIT ?`
+        )
+        .all(workspaceId, quoteFtsPhrase(normalizedQuery), limit)
+        .map(rowToMemoryContentSearchRecord);
+      return mergeSearchRows(exactRows, ftsRows, limit);
+    } catch {
+      return exactRows;
+    }
   }
 
   public createPathRelationRecord(record: PathRelationRecordWrite): PathRelationRecordRead {
@@ -603,6 +924,586 @@ export class SqliteAlayaStorage implements AtomicAuditLogWriter {
       .map(rowToGovernanceRecord);
   }
 
+  public findLatestGovernanceRecordForTarget(
+    workspaceId: string,
+    targetId: string,
+    targetType?: string
+  ): GovernanceRecordRead | null {
+    if (targetType !== undefined) {
+      const row = this.database
+        .prepare(
+          `SELECT
+            governance_event_id,
+            workspace_id,
+            target_type,
+            target_id,
+            outcome,
+            reason,
+            payload_json,
+            created_at
+          FROM governance_records
+          WHERE workspace_id = ?
+            AND target_id = ?
+            AND target_type = ?
+          ORDER BY created_at DESC, governance_event_id DESC
+          LIMIT 1`
+        )
+        .get(workspaceId, targetId, targetType);
+      return row === undefined ? null : rowToGovernanceRecord(row);
+    }
+
+    const row = this.database
+      .prepare(
+        `SELECT
+          governance_event_id,
+          workspace_id,
+          target_type,
+          target_id,
+          outcome,
+          reason,
+          payload_json,
+          created_at
+        FROM governance_records
+        WHERE workspace_id = ?
+          AND target_id = ?
+        ORDER BY created_at DESC, governance_event_id DESC
+        LIMIT 1`
+      )
+      .get(workspaceId, targetId);
+    return row === undefined ? null : rowToGovernanceRecord(row);
+  }
+
+  public createContextPackRecord(record: ContextPackRecordWrite): ContextPackRecordRead {
+    this.database.prepare(
+      `INSERT INTO context_pack_records (
+        context_pack_id,
+        workspace_id,
+        run_id,
+        query_text,
+        included_memory_ids_json,
+        payload_json,
+        replay_fingerprint,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      record.contextPackId,
+      record.workspaceId,
+      record.runId,
+      record.queryText,
+      JSON.stringify(record.includedMemoryIds),
+      JSON.stringify(redactJsonObject(record.payload)),
+      record.replayFingerprint,
+      record.createdAt
+    );
+
+    return rowToContextPackRecord(
+      this.database
+        .prepare(
+          `SELECT
+            context_pack_id,
+            workspace_id,
+            run_id,
+            query_text,
+            included_memory_ids_json,
+            payload_json,
+            replay_fingerprint,
+            created_at
+          FROM context_pack_records
+          WHERE context_pack_id = ?
+          LIMIT 1`
+        )
+        .get(record.contextPackId) ?? failMissingRecord("Context pack", record.contextPackId)
+    );
+  }
+
+  public findContextPackRecord(
+    contextPackId: string,
+    workspaceId: string
+  ): ContextPackRecordRead | null {
+    const row = this.database
+      .prepare(
+        `SELECT
+          context_pack_id,
+          workspace_id,
+          run_id,
+          query_text,
+          included_memory_ids_json,
+          payload_json,
+          replay_fingerprint,
+          created_at
+        FROM context_pack_records
+        WHERE context_pack_id = ?
+          AND workspace_id = ?
+        LIMIT 1`
+      )
+      .get(contextPackId, workspaceId);
+    return row === undefined ? null : rowToContextPackRecord(row);
+  }
+
+  public createProviderDecisionRecord(record: ProviderDecisionRecordWrite): ProviderDecisionRecordRead {
+    this.database.prepare(
+      `INSERT INTO provider_decision_records (
+        decision_id,
+        workspace_id,
+        capability,
+        selected_provider_id,
+        outcome,
+        reason,
+        payload_json,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      record.decisionId,
+      record.workspaceId,
+      record.capability,
+      record.selectedProviderId ?? null,
+      record.outcome,
+      record.reason,
+      JSON.stringify(redactJsonObject(record.payload)),
+      record.createdAt
+    );
+
+    return rowToProviderDecisionRecord(
+      this.database
+        .prepare(
+          `SELECT
+            decision_id,
+            workspace_id,
+            capability,
+            selected_provider_id,
+            outcome,
+            reason,
+            payload_json,
+            created_at
+          FROM provider_decision_records
+          WHERE decision_id = ?
+          LIMIT 1`
+        )
+        .get(record.decisionId) ?? failMissingRecord("Provider decision", record.decisionId)
+    );
+  }
+
+  public findProviderDecisionRecord(
+    decisionId: string,
+    workspaceId: string
+  ): ProviderDecisionRecordRead | null {
+    const row = this.database
+      .prepare(
+        `SELECT
+          decision_id,
+          workspace_id,
+          capability,
+          selected_provider_id,
+          outcome,
+          reason,
+          payload_json,
+          created_at
+        FROM provider_decision_records
+        WHERE decision_id = ?
+          AND workspace_id = ?
+        LIMIT 1`
+      )
+      .get(decisionId, workspaceId);
+    return row === undefined ? null : rowToProviderDecisionRecord(row);
+  }
+
+  public findProviderDecisionReplayScope(
+    decisionId: string,
+    workspaceId: string
+  ): ProviderDecisionReplayScope | null {
+    const record = this.findProviderDecisionRecord(decisionId, workspaceId);
+    if (record === null) {
+      return null;
+    }
+    const payload = record.payload as {
+      readonly replay_scope?: {
+        readonly request_fingerprint?: unknown;
+        readonly providers_fingerprint?: unknown;
+      };
+    };
+    const requestFingerprint = payload.replay_scope?.request_fingerprint;
+    const providersFingerprint = payload.replay_scope?.providers_fingerprint;
+    if (typeof requestFingerprint !== "string" || typeof providersFingerprint !== "string") {
+      throw new Error(`Provider decision ${decisionId} is missing replay scope.`);
+    }
+    return {
+      providersFingerprint,
+      requestFingerprint
+    };
+  }
+
+  public createProposalRecord(record: ProposalStorageRecordWrite): ProposalStorageRecordRead {
+    this.database.prepare(
+      `INSERT INTO proposal_records (
+        proposal_id,
+        workspace_id,
+        provider_decision_id,
+        run_id,
+        status,
+        target_id,
+        payload_json,
+        replay_fingerprint,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      record.proposalId,
+      record.workspaceId,
+      record.providerDecisionId ?? null,
+      record.runId ?? null,
+      record.status,
+      record.targetId ?? null,
+      JSON.stringify(redactJsonObject(record.payload)),
+      record.replayFingerprint,
+      record.createdAt
+    );
+
+    return rowToProposalStorageRecord(
+      this.database
+        .prepare(
+          `SELECT
+            proposal_id,
+            workspace_id,
+            provider_decision_id,
+            run_id,
+            status,
+            target_id,
+            payload_json,
+            replay_fingerprint,
+            created_at
+          FROM proposal_records
+          WHERE proposal_id = ?
+          LIMIT 1`
+        )
+        .get(record.proposalId) ?? failMissingRecord("Proposal", record.proposalId)
+    );
+  }
+
+  public findProposalRecord(
+    proposalId: string,
+    workspaceId: string
+  ): ProposalStorageRecordRead | null {
+    const row = this.database
+      .prepare(
+        `SELECT
+          proposal_id,
+          workspace_id,
+          provider_decision_id,
+          run_id,
+          status,
+          target_id,
+          payload_json,
+          replay_fingerprint,
+          created_at
+        FROM proposal_records
+        WHERE proposal_id = ?
+          AND workspace_id = ?
+        LIMIT 1`
+      )
+      .get(proposalId, workspaceId);
+    return row === undefined ? null : rowToProposalStorageRecord(row);
+  }
+
+  public createSessionEventRecord(record: SessionEventRecordWrite): SessionEventRecordRead {
+    this.database.prepare(
+      `INSERT INTO memory_session_events (
+        event_id,
+        session_id,
+        workspace_id,
+        run_id,
+        event_kind,
+        terminal,
+        payload_json,
+        occurred_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      record.eventId,
+      record.sessionId,
+      record.workspaceId,
+      record.runId,
+      record.eventKind,
+      record.terminal ? 1 : 0,
+      JSON.stringify(record.payload),
+      record.occurredAt
+    );
+
+    return rowToSessionEventRecord(
+      this.database
+        .prepare(
+          `SELECT
+            event_id,
+            session_id,
+            workspace_id,
+            run_id,
+            event_kind,
+            terminal,
+            payload_json,
+            occurred_at
+          FROM memory_session_events
+          WHERE event_id = ?
+          LIMIT 1`
+        )
+        .get(record.eventId) ?? failMissingRecord("Session event", record.eventId)
+    );
+  }
+
+  public findSessionEventRecordById(eventId: string): SessionEventRecordRead | null {
+    const row = this.database
+      .prepare(
+        `SELECT
+          event_id,
+          session_id,
+          workspace_id,
+          run_id,
+          event_kind,
+          terminal,
+          payload_json,
+          occurred_at
+        FROM memory_session_events
+        WHERE event_id = ?
+        LIMIT 1`
+      )
+      .get(eventId);
+    return row === undefined ? null : rowToSessionEventRecord(row);
+  }
+
+  public listSessionEventRecords(
+    sessionId: string,
+    scope?: { readonly workspaceId: string; readonly runId: string }
+  ): readonly SessionEventRecordRead[] {
+    if (scope !== undefined) {
+      return this.database
+        .prepare(
+          `SELECT
+            event_id,
+            session_id,
+            workspace_id,
+            run_id,
+            event_kind,
+            terminal,
+            payload_json,
+            occurred_at
+          FROM memory_session_events
+          WHERE session_id = ?
+            AND workspace_id = ?
+            AND run_id = ?
+          ORDER BY occurred_at ASC, event_id ASC`
+        )
+        .all(sessionId, scope.workspaceId, scope.runId)
+        .map(rowToSessionEventRecord);
+    }
+
+    return this.database
+      .prepare(
+        `SELECT
+          event_id,
+          session_id,
+          workspace_id,
+          run_id,
+          event_kind,
+          terminal,
+          payload_json,
+          occurred_at
+        FROM memory_session_events
+        WHERE session_id = ?
+        ORDER BY occurred_at ASC, event_id ASC`
+      )
+      .all(sessionId)
+      .map(rowToSessionEventRecord);
+  }
+
+  public createContextDeliveryRecord(record: ContextDeliveryStorageRecordWrite): ContextDeliveryStorageRecordRead {
+    this.database.prepare(
+      `INSERT INTO context_delivery_records (
+        delivery_id,
+        session_id,
+        workspace_id,
+        run_id,
+        context_pack_id,
+        outcome,
+        payload_json,
+        delivered_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      record.deliveryId,
+      record.sessionId,
+      record.workspaceId,
+      record.runId,
+      record.contextPackId,
+      record.outcome,
+      JSON.stringify(record.payload),
+      record.deliveredAt
+    );
+
+    return rowToContextDeliveryStorageRecord(
+      this.database
+        .prepare(
+          `SELECT
+            delivery_id,
+            session_id,
+            workspace_id,
+            run_id,
+            context_pack_id,
+            outcome,
+            payload_json,
+            delivered_at
+          FROM context_delivery_records
+          WHERE delivery_id = ?
+          LIMIT 1`
+        )
+        .get(record.deliveryId) ?? failMissingRecord("Context delivery", record.deliveryId)
+    );
+  }
+
+  public listContextDeliveryRecords(sessionId: string): readonly ContextDeliveryStorageRecordRead[] {
+    return this.database
+      .prepare(
+        `SELECT
+          delivery_id,
+          session_id,
+          workspace_id,
+          run_id,
+          context_pack_id,
+          outcome,
+          payload_json,
+          delivered_at
+        FROM context_delivery_records
+        WHERE session_id = ?
+        ORDER BY delivered_at ASC, delivery_id ASC`
+      )
+      .all(sessionId)
+      .map(rowToContextDeliveryStorageRecord);
+  }
+
+  public createUsageProofRecord(record: UsageProofStorageRecordWrite): UsageProofStorageRecordRead {
+    this.database.prepare(
+      `INSERT INTO usage_proof_records (
+        proof_id,
+        session_id,
+        workspace_id,
+        run_id,
+        proof_kind,
+        strength,
+        payload_json,
+        observed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      record.proofId,
+      record.sessionId,
+      record.workspaceId,
+      record.runId,
+      record.proofKind,
+      record.strength,
+      JSON.stringify(record.payload),
+      record.observedAt
+    );
+
+    return rowToUsageProofStorageRecord(
+      this.database
+        .prepare(
+          `SELECT
+            proof_id,
+            session_id,
+            workspace_id,
+            run_id,
+            proof_kind,
+            strength,
+            payload_json,
+            observed_at
+          FROM usage_proof_records
+          WHERE proof_id = ?
+          LIMIT 1`
+        )
+        .get(record.proofId) ?? failMissingRecord("Usage proof", record.proofId)
+    );
+  }
+
+  public listUsageProofRecords(sessionId: string): readonly UsageProofStorageRecordRead[] {
+    return this.database
+      .prepare(
+        `SELECT
+          proof_id,
+          session_id,
+          workspace_id,
+          run_id,
+          proof_kind,
+          strength,
+          payload_json,
+          observed_at
+        FROM usage_proof_records
+        WHERE session_id = ?
+        ORDER BY observed_at ASC, proof_id ASC`
+      )
+      .all(sessionId)
+      .map(rowToUsageProofStorageRecord);
+  }
+
+  public createTrustSummaryRecord(record: TrustSummaryStorageRecordWrite): TrustSummaryStorageRecordRead {
+    this.database.prepare(
+      `INSERT INTO trust_summary_records (
+        summary_id,
+        session_id,
+        workspace_id,
+        run_id,
+        trust_state,
+        payload_json,
+        replay_fingerprint,
+        generated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      record.summaryId,
+      record.sessionId,
+      record.workspaceId,
+      record.runId,
+      record.trustState,
+      JSON.stringify(record.payload),
+      record.replayFingerprint,
+      record.generatedAt
+    );
+
+    return rowToTrustSummaryStorageRecord(
+      this.database
+        .prepare(
+          `SELECT
+            summary_id,
+            session_id,
+            workspace_id,
+            run_id,
+            trust_state,
+            payload_json,
+            replay_fingerprint,
+            generated_at
+          FROM trust_summary_records
+          WHERE summary_id = ?
+          LIMIT 1`
+        )
+        .get(record.summaryId) ?? failMissingRecord("Trust summary", record.summaryId)
+    );
+  }
+
+  public findTrustSummaryRecord(
+    summaryId: string,
+    workspaceId: string
+  ): TrustSummaryStorageRecordRead | null {
+    const row = this.database
+      .prepare(
+        `SELECT
+          summary_id,
+          session_id,
+          workspace_id,
+          run_id,
+          trust_state,
+          payload_json,
+          replay_fingerprint,
+          generated_at
+        FROM trust_summary_records
+        WHERE summary_id = ?
+          AND workspace_id = ?
+        LIMIT 1`
+      )
+      .get(summaryId, workspaceId);
+    return row === undefined ? null : rowToTrustSummaryStorageRecord(row);
+  }
+
   public listAppliedMigrations(): readonly AppliedMigration[] {
     return this.database
       .prepare("SELECT id, applied_at FROM alaya_migrations ORDER BY id ASC")
@@ -710,6 +1611,15 @@ function rowToOntologyRecord(row: Record<string, unknown>): OntologyRecordRead {
   };
 }
 
+function rowToMemoryContentSearchRecord(row: Record<string, unknown>): MemoryContentSearchRecord {
+  return {
+    objectId: textColumn(row, "object_id"),
+    workspaceId: textColumn(row, "workspace_id"),
+    content: textColumn(row, "content"),
+    lexicalScore: numberColumn(row, "lexical_score")
+  };
+}
+
 function rowToPathRelationRecord(row: Record<string, unknown>): PathRelationRecordRead {
   return {
     pathId: textColumn(row, "path_id"),
@@ -729,6 +1639,19 @@ function rowToPathRelationRecord(row: Record<string, unknown>): PathRelationReco
   };
 }
 
+function rowToContextPackRecord(row: Record<string, unknown>): ContextPackRecordRead {
+  return {
+    contextPackId: textColumn(row, "context_pack_id"),
+    workspaceId: textColumn(row, "workspace_id"),
+    runId: textColumn(row, "run_id"),
+    queryText: textColumn(row, "query_text"),
+    includedMemoryIds: JSON.parse(textColumn(row, "included_memory_ids_json")) as readonly string[],
+    payload: JSON.parse(textColumn(row, "payload_json")) as JsonObject,
+    replayFingerprint: textColumn(row, "replay_fingerprint"),
+    createdAt: textColumn(row, "created_at")
+  };
+}
+
 function rowToGovernanceRecord(row: Record<string, unknown>): GovernanceRecordRead {
   const targetId = nullableTextColumn(row, "target_id");
   return {
@@ -743,8 +1666,95 @@ function rowToGovernanceRecord(row: Record<string, unknown>): GovernanceRecordRe
   };
 }
 
+function rowToProviderDecisionRecord(row: Record<string, unknown>): ProviderDecisionRecordRead {
+  const selectedProviderId = nullableTextColumn(row, "selected_provider_id");
+  return {
+    decisionId: textColumn(row, "decision_id"),
+    workspaceId: textColumn(row, "workspace_id"),
+    capability: textColumn(row, "capability"),
+    ...(selectedProviderId === null ? {} : { selectedProviderId }),
+    outcome: textColumn(row, "outcome"),
+    reason: textColumn(row, "reason"),
+    payload: JSON.parse(textColumn(row, "payload_json")) as JsonObject,
+    createdAt: textColumn(row, "created_at")
+  };
+}
+
+function rowToProposalStorageRecord(row: Record<string, unknown>): ProposalStorageRecordRead {
+  const providerDecisionId = nullableTextColumn(row, "provider_decision_id");
+  const runId = nullableTextColumn(row, "run_id");
+  const targetId = nullableTextColumn(row, "target_id");
+  return {
+    proposalId: textColumn(row, "proposal_id"),
+    workspaceId: textColumn(row, "workspace_id"),
+    ...(providerDecisionId === null ? {} : { providerDecisionId }),
+    ...(runId === null ? {} : { runId }),
+    status: textColumn(row, "status"),
+    ...(targetId === null ? {} : { targetId }),
+    payload: JSON.parse(textColumn(row, "payload_json")) as JsonObject,
+    replayFingerprint: textColumn(row, "replay_fingerprint"),
+    createdAt: textColumn(row, "created_at")
+  };
+}
+
+function rowToSessionEventRecord(row: Record<string, unknown>): SessionEventRecordRead {
+  return {
+    eventId: textColumn(row, "event_id"),
+    sessionId: textColumn(row, "session_id"),
+    workspaceId: textColumn(row, "workspace_id"),
+    runId: textColumn(row, "run_id"),
+    eventKind: textColumn(row, "event_kind"),
+    terminal: numberColumn(row, "terminal") === 1,
+    payload: JSON.parse(textColumn(row, "payload_json")) as JsonObject,
+    occurredAt: textColumn(row, "occurred_at")
+  };
+}
+
+function rowToContextDeliveryStorageRecord(row: Record<string, unknown>): ContextDeliveryStorageRecordRead {
+  return {
+    deliveryId: textColumn(row, "delivery_id"),
+    sessionId: textColumn(row, "session_id"),
+    workspaceId: textColumn(row, "workspace_id"),
+    runId: textColumn(row, "run_id"),
+    contextPackId: textColumn(row, "context_pack_id"),
+    outcome: textColumn(row, "outcome"),
+    payload: JSON.parse(textColumn(row, "payload_json")) as JsonObject,
+    deliveredAt: textColumn(row, "delivered_at")
+  };
+}
+
+function rowToUsageProofStorageRecord(row: Record<string, unknown>): UsageProofStorageRecordRead {
+  return {
+    proofId: textColumn(row, "proof_id"),
+    sessionId: textColumn(row, "session_id"),
+    workspaceId: textColumn(row, "workspace_id"),
+    runId: textColumn(row, "run_id"),
+    proofKind: textColumn(row, "proof_kind"),
+    strength: textColumn(row, "strength"),
+    payload: JSON.parse(textColumn(row, "payload_json")) as JsonObject,
+    observedAt: textColumn(row, "observed_at")
+  };
+}
+
+function rowToTrustSummaryStorageRecord(row: Record<string, unknown>): TrustSummaryStorageRecordRead {
+  return {
+    summaryId: textColumn(row, "summary_id"),
+    sessionId: textColumn(row, "session_id"),
+    workspaceId: textColumn(row, "workspace_id"),
+    runId: textColumn(row, "run_id"),
+    trustState: textColumn(row, "trust_state"),
+    payload: JSON.parse(textColumn(row, "payload_json")) as JsonObject,
+    replayFingerprint: textColumn(row, "replay_fingerprint"),
+    generatedAt: textColumn(row, "generated_at")
+  };
+}
+
 function failMissingGovernanceRecord(governanceEventId: string): never {
   throw new Error(`Governance record ${governanceEventId} was not found after insert.`);
+}
+
+function failMissingRecord(recordType: string, id: string): never {
+  throw new Error(`${recordType} ${id} was not found after insert.`);
 }
 
 async function loadSqlite(): Promise<SqliteModule> {
@@ -768,4 +1778,48 @@ function nullableTextColumn(row: Record<string, unknown>, key: string): string |
     throw new Error(`Expected SQLite column ${key} to be text or null.`);
   }
   return value;
+}
+
+function numberColumn(row: Record<string, unknown>, key: string): number {
+  const value = row[key];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`Expected SQLite column ${key} to be numeric.`);
+  }
+  return value;
+}
+
+function quoteFtsPhrase(query: string): string {
+  return `"${query.replaceAll("\"", "\"\"")}"`;
+}
+
+function escapeLike(query: string): string {
+  return query.replaceAll("^", "^^").replaceAll("%", "^%").replaceAll("_", "^_");
+}
+
+function searchTerms(query: string): readonly string[] {
+  const matches = query.match(/[\p{L}\p{N}_]+/gu);
+  if (matches === null) {
+    return [query];
+  }
+  return [...new Set(matches.map((entry) => entry.trim()).filter((entry) => entry.length > 0))];
+}
+
+function mergeSearchRows(
+  exactRows: readonly MemoryContentSearchRecord[],
+  ftsRows: readonly MemoryContentSearchRecord[],
+  limit: number
+): readonly MemoryContentSearchRecord[] {
+  const rowsById = new Map<string, MemoryContentSearchRecord>();
+  for (const row of [...exactRows, ...ftsRows]) {
+    const existing = rowsById.get(row.objectId);
+    if (existing === undefined || row.lexicalScore < existing.lexicalScore) {
+      rowsById.set(row.objectId, row);
+    }
+  }
+  return [...rowsById.values()]
+    .sort((left, right) => {
+      const scoreDelta = left.lexicalScore - right.lexicalScore;
+      return scoreDelta === 0 ? left.objectId.localeCompare(right.objectId) : scoreDelta;
+    })
+    .slice(0, limit);
 }

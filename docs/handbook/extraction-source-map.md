@@ -43,7 +43,8 @@
 - handbook 目标是定义当前语义与边界，不回填不存在的历史代码。
 - 工程命名空间目标为 `@do-soul/alaya`。ALA-R1 已引入 root package、
   runtime/API、storage baseline 与 doctor command；ALA-R2/R3/R4 已引入
-  ontology、structure、governance foundation contracts；当前仍没有 MCP、CLI
-  protocol fallback、Attach/Profile、Gateway、recall/provider、Inspector 或
-  benchmark 实现可改。后续新实现应默认采用该目标，除非产品命名再次被显式调整。
+  ontology、structure、governance foundation contracts；ALA-R5/R6/R7 已引入
+  recall/context、provider/proposal、session trust runtime contracts。当前仍没有
+  MCP、CLI protocol fallback、Attach/Profile、Gateway、真实外部 provider adapter、
+  Inspector 或 benchmark 实现可改。后续新实现应默认采用该目标，除非产品命名再次被显式调整。
 - v0.1 是执行规划层；如果 v0.1 内容与 handbook/invariants 冲突，handbook/invariants 优先，并应在实现前返回 `BLOCKED` 或修正规划材料。

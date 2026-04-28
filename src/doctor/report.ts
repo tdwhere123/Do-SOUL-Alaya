@@ -24,6 +24,7 @@ export interface DoctorReport {
   readonly product: "Do-SOUL Alaya";
   readonly r1_baseline_ready: boolean;
   readonly foundation_contracts_ready: boolean;
+  readonly runtime_use_proof_ready: boolean;
   readonly product_ready: false;
   readonly package: DoctorComponent & {
     readonly name: string;
@@ -36,8 +37,10 @@ export interface DoctorReport {
   readonly ontology: DoctorComponent;
   readonly structure: DoctorComponent;
   readonly governance: DoctorComponent;
+  readonly recall: DoctorComponent;
   readonly profile: DoctorComponent;
   readonly provider: DoctorComponent;
+  readonly session_trust: DoctorComponent;
 }
 
 export function createDoctorReport(storage: DoctorStorageReport): DoctorReport {
@@ -46,6 +49,7 @@ export function createDoctorReport(storage: DoctorStorageReport): DoctorReport {
     product: "Do-SOUL Alaya",
     r1_baseline_ready: true,
     foundation_contracts_ready: true,
+    runtime_use_proof_ready: true,
     product_ready: false,
     package: {
       status: "ok",
@@ -55,7 +59,7 @@ export function createDoctorReport(storage: DoctorStorageReport): DoctorReport {
     },
     runtime: {
       status: "ok",
-      detail: "Public runtime port exposes audited R1 decisions plus R2/R3/R4 ontology, structure, manifestation, and governance operations; callback-based mutation orchestration stays internal.",
+      detail: "Public runtime port exposes audited R1 decisions, R2/R3/R4 foundation operations, and R5/R6/R7 recall, provider proposal, and session trust operations; callback-based mutation orchestration stays internal.",
       api: "AlayaRuntimePort"
     },
     storage: {
@@ -75,13 +79,21 @@ export function createDoctorReport(storage: DoctorStorageReport): DoctorReport {
       status: "ok",
       detail: "R4 promotion gate, HITL/operator reason policy, and governance bypass fail-closed signal are available."
     },
+    recall: {
+      status: "ok",
+      detail: "R5 structured/lexical/path-aware recall, opt-in embedding supplement degradation, and runtime-only context pack contracts are available."
+    },
     profile: {
       status: "not_implemented",
-      detail: "Attach/Profile installer is outside the current foundation slice and remains explicit future work."
+      detail: "Attach/Profile installer is outside the current runtime contract slice and remains explicit future work."
     },
     provider: {
-      status: "not_implemented",
-      detail: "Provider, recall, and agent usage proof are outside the current foundation slice and are not implied by doctor."
+      status: "ok",
+      detail: "R6 provider capability selection and proposal-only records are available; concrete external provider adapters remain future integration work."
+    },
+    session_trust: {
+      status: "ok",
+      detail: "R7 session lifecycle, context delivery, usage proof, trust summary, and delivered-is-not-used semantics are available."
     }
   };
 }
@@ -93,6 +105,7 @@ export function createDoctorFailureReport(error: unknown): DoctorReport {
     product: "Do-SOUL Alaya",
     r1_baseline_ready: false,
     foundation_contracts_ready: false,
+    runtime_use_proof_ready: false,
     product_ready: false,
     package: {
       status: "ok",
@@ -124,13 +137,21 @@ export function createDoctorFailureReport(error: unknown): DoctorReport {
       status: "failed",
       detail: `Foundation contract readiness unavailable because runtime initialization failed: ${String(redactedError.message)}.`
     },
+    recall: {
+      status: "failed",
+      detail: `Runtime use proof readiness unavailable because runtime initialization failed: ${String(redactedError.message)}.`
+    },
     profile: {
       status: "not_implemented",
-      detail: "Attach/Profile installer is outside the current foundation slice and remains explicit future work."
+      detail: "Attach/Profile installer is outside the current runtime contract slice and remains explicit future work."
     },
     provider: {
-      status: "not_implemented",
-      detail: "Provider, recall, and agent usage proof are outside the current foundation slice and are not implied by doctor."
+      status: "failed",
+      detail: `Provider/proposal readiness unavailable because runtime initialization failed: ${String(redactedError.message)}.`
+    },
+    session_trust: {
+      status: "failed",
+      detail: `Session trust readiness unavailable because runtime initialization failed: ${String(redactedError.message)}.`
     }
   };
 }

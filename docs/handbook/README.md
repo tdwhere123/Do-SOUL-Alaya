@@ -1,9 +1,9 @@
 # Do-SOUL Alaya Handbook
 
 本手册是 `Do-SOUL Alaya`（namespace target: `@do-soul/alaya`）的稳定真相层。
-当前仓库处于 reset / extraction 后的 ALA-R1-R4 foundation contracts 状态：旧原型实现已被有意删除，`docs/archive/`
+当前仓库处于 reset / extraction 后的 ALA-R1-R7 runtime contracts 状态：旧原型实现已被有意删除，`docs/archive/`
 仅保留历史材料，不代表现行实现；当前实现覆盖 root package、runtime/API、audit、storage baseline、doctor、
-Memory Ontology/Evidence、Structure Registry/Paths、Governance/Promotion。
+Memory Ontology/Evidence、Structure Registry/Paths、Governance/Promotion、Recall/Context、Provider/Proposal、Session Audit/Trust。
 
 Handbook 负责定义当前产品定位、架构不变量、runtime 边界、接入面策略、运行状态和
 agent 工作流。`docs/v0.1/**` 是执行规划与任务材料；其中稳定产品/架构决策可以被吸收进
@@ -40,7 +40,7 @@ handbook，但 v0.1 的执行排序、任务卡和退出条件不能自动升级
 | Product positioning | `architecture.md` | 本地优先 CLI agent memory core，namespace 仍是目标态。 |
 | Runtime and durable truth | `architecture.md` + `invariants.md` | Runtime/API 是 durable write gate；adapter 不直接改 storage。 |
 | Agent surfaces | `surface-strategy.md` | 接入策略是当前产品方向，不代表实现已存在。 |
-| Runtime readiness | `runtime-status.md` | ALA-R1-R4 foundation readiness 与未实现 surface 的边界。 |
+| Runtime readiness | `runtime-status.md` | ALA-R1-R7 runtime readiness 与未实现 surface 的边界。 |
 | Repository layout | `code-map.md` | 只记录当前存在/缺失的路径。 |
 | Workflow and review | `workflow/*.md` | 规定读序、证据纪律、review/fix-loop 和 `BLOCKED` 出口。 |
 

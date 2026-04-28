@@ -28,6 +28,27 @@ import type {
   PromotionDecision,
   PromotionGate
 } from "../governance/index.js";
+import type {
+  AssembleContextPackInput,
+  ContextPack,
+  ContextPackBudget,
+  EmbeddingSupplementCandidate,
+  EmbeddingSupplementConfig,
+  RecallGovernanceState,
+  RecallMemoryRecord,
+  RecallQuery
+} from "../recall/index.js";
+import type {
+  ProposalRecord,
+  ProposalValidationResult,
+  ProviderRegistryEntry,
+  ProviderSelectionRequest,
+  ProviderSelectionResult
+} from "../provider/index.js";
+import type {
+  MemorySessionEvent,
+  TrustSummary
+} from "../session/index.js";
 
 export interface AlayaRuntimeOptions {
   readonly dataDir: string;
@@ -70,11 +91,62 @@ export interface AuditedGovernanceActionInput extends Omit<AuditedMutationInput,
   readonly request: GovernanceActionRequest;
 }
 
+export interface MemoryVisibilityDecision {
+  readonly object_id: string;
+  readonly workspace_id: string;
+  readonly state: RecallGovernanceState;
+  readonly reason: string;
+  readonly decided_at: string;
+  readonly source_refs: readonly string[];
+  readonly evidence_refs: readonly string[];
+}
+
+export interface AuditedMemoryVisibilityInput extends Omit<AuditedMutationInput, "kind" | "target" | "payload"> {
+  readonly decision: MemoryVisibilityDecision;
+}
+
 export interface AuditedGovernanceBypassInput extends Omit<AuditedMutationInput, "kind" | "target" | "payload"> {
   readonly workspaceId: string;
   readonly attemptedMutation: string;
   readonly actorRef: string;
   readonly recoverable?: boolean;
+}
+
+export interface AuditedRecallContextInput extends Omit<AuditedMutationInput, "kind" | "target" | "payload"> {
+  readonly query: RecallQuery;
+  readonly packId?: string | null;
+  readonly budget: ContextPackBudget;
+  readonly embedding?: EmbeddingSupplementConfig | null;
+  readonly embeddingSupplement?: readonly EmbeddingSupplementCandidate[];
+  readonly memoryRecords?: readonly RecallMemoryRecord[];
+  readonly activationCandidates?: readonly ActivationCandidate[];
+}
+
+export interface AuditedContextPackInput extends Omit<AuditedMutationInput, "kind" | "target" | "payload"> {
+  readonly input: AssembleContextPackInput;
+}
+
+export interface AuditedProviderSelectionInput extends Omit<AuditedMutationInput, "kind" | "target" | "payload"> {
+  readonly workspaceId: string;
+  readonly providers: readonly ProviderRegistryEntry[];
+  readonly request: ProviderSelectionRequest;
+}
+
+export interface AuditedProposalRecordInput extends Omit<AuditedMutationInput, "kind" | "target" | "payload"> {
+  readonly workspaceId: string;
+  readonly proposal: ProposalRecord;
+}
+
+export interface AuditedMemorySessionEventInput extends Omit<AuditedMutationInput, "kind" | "target" | "payload"> {
+  readonly event: MemorySessionEvent;
+}
+
+export interface AuditedTrustSummaryInput extends Omit<AuditedMutationInput, "kind" | "target" | "payload"> {
+  readonly summaryId: string;
+  readonly sessionId: string;
+  readonly workspaceId: string;
+  readonly runId: string;
+  readonly generatedAt: string;
 }
 
 export interface AlayaRuntimePort {
@@ -110,9 +182,30 @@ export interface AlayaRuntimePort {
   evaluateGovernanceAction(
     input: AuditedGovernanceActionInput
   ): Promise<AuditedMutationResult<GovernancePolicyDecision>>;
+  recordMemoryVisibility(
+    input: AuditedMemoryVisibilityInput
+  ): Promise<AuditedMutationResult<MemoryVisibilityDecision>>;
   recordGovernanceBypass(
     input: AuditedGovernanceBypassInput
   ): Promise<AuditedMutationResult<GovernanceBypassSignal>>;
+  assembleRecallContext(
+    input: AuditedRecallContextInput
+  ): Promise<AuditedMutationResult<ContextPack>>;
+  recordContextPack(
+    input: AuditedContextPackInput
+  ): Promise<AuditedMutationResult<ContextPack>>;
+  selectProvider(
+    input: AuditedProviderSelectionInput
+  ): Promise<AuditedMutationResult<ProviderSelectionResult>>;
+  recordProposal(
+    input: AuditedProposalRecordInput
+  ): Promise<AuditedMutationResult<ProposalValidationResult>>;
+  recordMemorySessionEvent(
+    input: AuditedMemorySessionEventInput
+  ): Promise<AuditedMutationResult<MemorySessionEvent>>;
+  generateTrustSummary(
+    input: AuditedTrustSummaryInput
+  ): Promise<AuditedMutationResult<TrustSummary>>;
   doctor(): Promise<DoctorReport>;
   close(): Promise<void>;
 }

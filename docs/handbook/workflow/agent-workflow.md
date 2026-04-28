@@ -1,6 +1,6 @@
 # Agent Workflow
 
-本页定义 Do-SOUL Alaya 在当前 reset/extraction + ALA-R1-R4 foundation contracts 阶段的执行纪律。
+本页定义 Do-SOUL Alaya 在当前 reset/extraction + ALA-R1-R7 runtime contracts 阶段的执行纪律。
 默认目标：小步、可验证、严格遵守写入范围。
 
 ## Required Read Order
@@ -37,7 +37,7 @@
 - 任何“当前可运行”声明都必须有当下仓库证据。
 - Archive 只能做背景，不可直接升级为当前事实。
 - v0.1 docs 是执行规划与来源材料；不得用 v0.1 退出条件替代当前 runtime status。
-- 当前实现文件缺失的 surface（MCP、Attach/Profile、Gateway、recall/provider、Inspector 等）不要发明 build/test/CLI/MCP/smoke 命令；只能记录对应 surface 恢复后的 gate 条件。
+- 当前实现文件缺失的 surface（MCP、Attach/Profile、Gateway、真实外部 provider adapter、Inspector 等）不要发明 build/test/CLI/MCP/smoke 命令；只能记录对应 surface 恢复后的 gate 条件。
 - 不恢复旧 prototype source，不导入 `@do-what/*` 或 `do-what-new/packages/*` runtime code。
 - 发现范围冲突、事实冲突、或写入受限时，立即返回 `BLOCKED`。
 - 不用大范围重写；优先修正最小一致面。
@@ -52,7 +52,7 @@
 - targeted `rtk sed` / `rtk nl` evidence reads；
 - 检查 handbook 没有把 v0.1 planning 或 archive 写成实现事实。
 
-ALA-R1-R4 package/runtime foundation contracts 已重新引入，root package 的 build/test/doctor gate 适用。若任务要求未实现 surface 的 build/test/smoke（例如 MCP、Attach/Profile、Gateway、recall/provider、Inspector），报告 `NOT_VERIFIED` 或 `BLOCKED`，不要假造命令。
+ALA-R1-R7 package/runtime contracts 已重新引入，root package 的 build/test/doctor gate 适用。若任务要求未实现 surface 的 build/test/smoke（例如 MCP、Attach/Profile、Gateway、真实外部 provider adapter、Inspector），报告 `NOT_VERIFIED` 或 `BLOCKED`，不要假造命令。
 
 ## BLOCKED Protocol
 

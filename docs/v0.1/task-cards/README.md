@@ -34,9 +34,19 @@ runtime、CLI、MCP、Gateway、Inspector 或 benchmark 已可运行。
 R1 closeout：ALA-R1 runtime truth kernel 已在当前树落地 package/runtime/API、
 audit-first mutation、storage migration baseline、doctor CLI 与 focused tests，并已完成
 review/fix-loop closure。
-该状态只覆盖 R1 baseline；MCP、CLI protocol fallback、Attach/Profile、
-Gateway、full ontology、recall/provider、Inspector、benchmark 与完整产品闭环
-仍未实现。后续 foundation contract work 可从 ALA-R2 / ALA-R3 / ALA-R4 开始。
+该状态只覆盖 R1 baseline。
+
+R2/R3/R4 closeout：Memory Ontology/Evidence、Structure Registry/Paths、
+Governance/Promotion 已由
+[ALA-R2/R3/R4 Foundation Contracts Report](../reports/ALA-R2-R3-R4-foundation-contracts-report.md)
+关闭。
+
+R5/R6/R7 review-pending evidence：Recall/Context Assembly、Provider/Proposal、Session
+Audit/Trust 已通过本地验证，正在等待最终 post-fix review acceptance；当前证据见
+[ALA-R5/R6/R7 Runtime Use Proof Report](../reports/ALA-R5-R6-R7-runtime-use-proof-report.md)
+。该状态只覆盖 runtime use proof contracts；MCP、CLI protocol fallback、
+Attach/Profile、Gateway、真实外部 provider adapter、Inspector、benchmark 与完整产品闭环
+仍未实现。
 
 根任务卡 schema：
 

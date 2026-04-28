@@ -12,7 +12,7 @@ describe("doctor status", () => {
     await Promise.all(tempDirs.splice(0).map((entry) => entry.cleanup()));
   });
 
-  it("reports the R1 package plus R2/R3/R4 foundation contracts without claiming profile/provider readiness", async () => {
+  it("reports foundation contracts plus R5/R6/R7 runtime-use-proof readiness without claiming product readiness", async () => {
     const temp = await createTempDir("alaya-doctor-report-");
     tempDirs.push(temp);
     const runtime = await createAlayaRuntime({ dataDir: temp.path });
@@ -22,6 +22,7 @@ describe("doctor status", () => {
         product: "Do-SOUL Alaya",
         r1_baseline_ready: true,
         foundation_contracts_ready: true,
+        runtime_use_proof_ready: true,
         product_ready: false,
         package: {
           status: "ok",
@@ -45,11 +46,17 @@ describe("doctor status", () => {
         governance: {
           status: "ok"
         },
+        recall: {
+          status: "ok"
+        },
         profile: {
           status: "not_implemented"
         },
         provider: {
-          status: "not_implemented"
+          status: "ok"
+        },
+        session_trust: {
+          status: "ok"
         }
       });
     } finally {
@@ -81,9 +88,20 @@ describe("doctor status", () => {
     ).resolves.toBe(0);
 
     expect(stderr).toBe("");
-    const report = JSON.parse(stdout) as { profile: { status: string }; provider: { status: string } };
+    const report = JSON.parse(stdout) as {
+      product_ready: boolean;
+      runtime_use_proof_ready: boolean;
+      profile: { status: string };
+      provider: { status: string };
+      recall: { status: string };
+      session_trust: { status: string };
+    };
+    expect(report.product_ready).toBe(false);
+    expect(report.runtime_use_proof_ready).toBe(true);
     expect(report.profile.status).toBe("not_implemented");
-    expect(report.provider.status).toBe("not_implemented");
+    expect(report.provider.status).toBe("ok");
+    expect(report.recall.status).toBe("ok");
+    expect(report.session_trust.status).toBe("ok");
     expect(stdout).not.toMatch(/secret|token|password/i);
   });
 
@@ -116,11 +134,13 @@ describe("doctor status", () => {
     const report = JSON.parse(stdout) as {
       r1_baseline_ready: boolean;
       foundation_contracts_ready: boolean;
+      runtime_use_proof_ready: boolean;
       runtime: { status: string; detail: string };
       storage: { status: string; database: string };
     };
     expect(report.r1_baseline_ready).toBe(false);
     expect(report.foundation_contracts_ready).toBe(false);
+    expect(report.runtime_use_proof_ready).toBe(false);
     expect(report.runtime.status).toBe("failed");
     expect(report.storage.status).toBe("failed");
     expect(report.storage.database).toBe("unavailable");

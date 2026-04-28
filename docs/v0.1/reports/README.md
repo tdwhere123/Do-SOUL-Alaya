@@ -14,6 +14,11 @@
   closes the verified Memory Ontology/Evidence, Structure Registry/Paths, and
   Governance/Promotion foundation slice; does not claim MCP, Attach/Profile,
   Gateway, recall/provider, Inspector, benchmark, or full product readiness.
+- [ALA-R5/R6/R7 Runtime Use Proof Report](ALA-R5-R6-R7-runtime-use-proof-report.md) -
+  documents the locally verified Recall/Context, Provider/Proposal, and
+  Session Audit/Trust runtime contract slice while final post-fix review
+  acceptance is pending; does not claim MCP, Attach/Profile, Gateway, real
+  external provider adapters, Inspector, benchmark, or full product readiness.
 
 ## Placement Rules
 

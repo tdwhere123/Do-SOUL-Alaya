@@ -2,7 +2,7 @@
 
 本目录是 Do-SOUL Alaya 当前文档入口。
 
-Do-SOUL Alaya 处于 reset/extraction 后的 ALA-R1-R4 foundation contracts 阶段。handbook 是当前稳定真相；
+Do-SOUL Alaya 处于 reset/extraction 后的 ALA-R1-R7 runtime contract 阶段。handbook 是当前稳定真相；
 `docs/v0.1/` 是第一条产品闭环的执行计划；archive 只保存历史原型材料。
 
 ## Handbook：稳定真相

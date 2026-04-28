@@ -1,7 +1,7 @@
 # Code Map
 
 本页记录当前仓库中“真实存在且可定位”的代码与文档版图。
-当前事实：仓库处于 reset/extraction 后的 ALA-R1-R4 foundation contracts；旧原型实现已删除，当前可执行代码覆盖 root package、runtime/API、audit-first mutation、internal storage migrations、doctor CLI、Memory Ontology/Evidence、Structure Registry/Paths、Governance/Promotion 和 focused tests。
+当前事实：仓库处于 reset/extraction 后的 ALA-R1-R7 runtime contracts；旧原型实现已删除，当前可执行代码覆盖 root package、runtime/API、audit-first mutation、internal storage migrations、doctor CLI、Memory Ontology/Evidence、Structure Registry/Paths、Governance/Promotion、Recall/Context、Provider/Proposal、Session Audit/Trust 和 focused tests。
 
 ## Top Level (Current)
 
@@ -26,6 +26,21 @@ src/
     policy.ts
     promotion-gate.ts
     types.ts
+  provider/
+    index.ts
+  recall/
+    context-pack.ts
+    embedding.ts
+    index.ts
+    lexical.ts
+    path.ts
+    shared.ts
+    types.ts
+  session/
+    index.ts
+    trust.ts
+    types.ts
+    validation.ts
   ontology/
     index.ts
     types.ts
@@ -52,7 +67,11 @@ src/
     helpers.ts
     ontology-runtime.test.ts
     public-api-boundary.test.ts
+    provider-proposal.test.ts
+    recall-context.test.ts
     runtime-port.test.ts
+    runtime-use-proof.test.ts
+    session-trust.test.ts
     storage.test.ts
     structure.test.ts
 docs/
@@ -76,6 +95,7 @@ docs/
       ALA-R0-source-extraction-report.md
       ALA-R1-runtime-truth-kernel-report.md
       ALA-R2-R3-R4-foundation-contracts-report.md
+      ALA-R5-R6-R7-runtime-use-proof-report.md
     task-cards/
       README.md
       ALA-R0 through ALA-R12 root task cards
@@ -92,17 +112,20 @@ docs/
 | Area | Current status | Evidence anchor |
 |---|---|---|
 | Package surface | `r1-baseline-ready` | `package.json` owns `@do-soul/alaya`, build/test scripts, exports, and doctor bins |
-| Runtime/API boundary | `foundation-contracts-ready` | `src/index.ts`, `src/runtime/runtime.ts`, `src/runtime/types.ts` expose `createAlayaRuntime(...)`, `AlayaRuntimePort`, R1 audited decisions, R2 ontology writes, R3 path/manifestation/topology operations, and R4 governance decisions |
+| Runtime/API boundary | `runtime-use-proof-ready` | `src/index.ts`, `src/runtime/runtime.ts`, `src/runtime/types.ts` expose `createAlayaRuntime(...)`, `AlayaRuntimePort`, R1 audited decisions, R2 ontology writes, R3 path/manifestation/topology operations, R4 governance decisions, R5 context assembly and memory visibility governance, R6 provider/proposal records, and R7 session trust operations |
 | Audit-first mutation | `r1-baseline-ready` | `src/runtime/audited-mutation.ts` records intent before mutation, committed after mutation, and notification status after notify |
-| Storage | `foundation-contracts-ready` | `src/storage/sqlite.ts` is internal storage; initializes `alaya.sqlite`, migration metadata, audit events, ontology records, path relations, and governance records |
+| Storage | `runtime-use-proof-ready` | `src/storage/sqlite.ts` is internal storage; initializes `alaya.sqlite`, migration metadata, audit events, ontology records, path relations, governance records, recall FTS/context pack records, provider/proposal records, session trust records, and replay/lineage columns through migration `008` |
 | Ontology/Evidence | `foundation-contracts-ready` | `src/ontology/**` defines Alaya-owned `EvidenceCapsule`, `MemoryEntry`, `SynthesisCapsule`, `ClaimForm` contracts and validators |
 | Structure/Paths | `foundation-contracts-ready` | `src/structure/**` defines `PathRelation`, runtime-only `ActivationCandidate`, manifestation resolver, and read-only topology projection |
 | Governance/Promotion | `foundation-contracts-ready` | `src/governance/**` defines promotion gate, HITL/operator reason policy, and bypass fail-closed signal |
-| Doctor CLI/status | `foundation-contracts-ready` | `src/cli/index.ts`, `src/cli/doctor.ts`, `src/doctor/report.ts` produce doctor JSON through runtime service |
-| Tests | `foundation-contracts-ready` | `src/__tests__/*.test.ts` cover storage init/idempotency, audit success/failures, doctor, public API boundary, ontology rejects, structure behavior, and governance policy |
+| Recall/Context | `runtime-use-proof-ready` | `src/recall/**` defines structured/lexical/path-aware recall merge, opt-in embedding supplement degradation, runtime-owned memory visibility exclusion, runtime-only context pack, replay-safe context pack lineage, exclusions, and data-not-instructions delivery text |
+| Provider/Proposal | `runtime-use-proof-ready` | `src/provider/**` defines provider capability selection, health/degradation semantics, proposal-only records, provider-decision lineage, replay fingerprints, rejected proposal normalization, and background proposal job summaries |
+| Session Audit/Trust | `runtime-use-proof-ready` | `src/session/**` defines session lifecycle events, context delivery records, usage proof records, context-pack/proposal lineage validation, trust summary derivation, and late terminal handling where delivered does not imply used |
+| Doctor CLI/status | `runtime-use-proof-ready` | `src/cli/index.ts`, `src/cli/doctor.ts`, `src/doctor/report.ts` produce doctor JSON through runtime service |
+| Tests | `runtime-use-proof-ready` | `src/__tests__/*.test.ts` cover storage init/idempotency, audit success/failures, doctor, public API boundary, ontology rejects, structure behavior, governance policy, recall/context, provider/proposal, session trust, and runtime use proof integration |
 | Adapters (MCP/CLI protocol/Attach/Profile/Gateway/HTTP/Inspector/Bench) | `not-implemented` | No corresponding implementation directories exist |
-| Recall/provider/session usage proof | `not-implemented` | No recall, provider, context pack, or usage-proof implementation exists |
-| Build/Test wiring | `foundation-contracts-ready` | `tsconfig.json`, `vitest.config.ts`, `pnpm-lock.yaml`, and R1-R4 verification gate |
+| External provider adapters | `not-implemented` | Provider capability/proposal contracts exist, but no concrete external provider SDK adapter is implemented |
+| Build/Test wiring | `runtime-use-proof-ready` | `tsconfig.json`, `vitest.config.ts`, `pnpm-lock.yaml`, and R1-R7 verification gate |
 
 ## Archive Boundary
 
