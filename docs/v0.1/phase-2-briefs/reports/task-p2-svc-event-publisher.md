@@ -42,7 +42,7 @@ redesign:
 - Source existence check for the five cited source/test paths - passed.
 - `rtk pnpm build` - passed.
 - `rtk pnpm exec tsc --noEmit -p packages/core` - passed.
-- `rtk pnpm exec vitest run --project @do-soul/alaya-core -t "EventPublisher|RuntimeEventNormalizer"` - passed; 2 files / 27 tests passed.
+- `rtk pnpm exec vitest run --project @do-soul/alaya-core -t "EventPublisher|RuntimeEventNormalizer"` - passed; 2 files / 28 tests passed.
 
 ## Review Fixes
 
@@ -58,6 +58,10 @@ redesign:
   `RuntimeEventNormalizer` pending-notification retries: retries for the same
   durable entry now single-flight through one in-process `notifyEntry` call, and
   a regression test proves concurrent retry callers do not double-notify.
+- Fixed review Blocking finding B1 for failed pending retry recovery: if a
+  pending retry itself fails, including a synchronous `notifyEntry` throw, the
+  durable entry remains pending and later retryable instead of being pinned to a
+  stale rejected retry promise.
 
 ## Architecture Compliance
 
@@ -74,6 +78,8 @@ redesign:
   a pending in-process notification retry path for the durable entry.
 - Pending runtime normalization retry is single-flight per runtime-event key, so
   concurrent retry callers do not duplicate in-process notification.
+- Failed pending runtime normalization retries restore a retryable pending entry
+  for the same durable EventLog row.
 - No daemon, MCP, CLI, GUI, or TUI surface was introduced.
 
 ## Intentional Deviations
