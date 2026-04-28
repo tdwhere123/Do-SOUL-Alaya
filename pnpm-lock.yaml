@@ -18,6 +18,12 @@ importers:
         specifier: ^4.1.5
         version: 4.1.5(@types/node@22.19.17)(vite@8.0.10(@types/node@22.19.17))
 
+  packages/protocol:
+    dependencies:
+      zod:
+        specifier: ^3.24.2
+        version: 3.25.76
+
 packages:
 
   '@emnapi/core@1.10.0':
@@ -457,6 +463,9 @@ packages:
     engines: {node: '>=8'}
     hasBin: true
 
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+
 snapshots:
 
   '@emnapi/core@1.10.0':
@@ -779,3 +788,5 @@ snapshots:
     dependencies:
       siginfo: 2.0.0
       stackback: 0.0.2
+
+  zod@3.25.76: {}
