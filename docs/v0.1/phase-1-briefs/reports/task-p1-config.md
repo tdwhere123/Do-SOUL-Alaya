@@ -4,9 +4,12 @@
 
 - Task card: `docs/v0.1/phase-1-briefs/task-p1-config.md`
 - Source: `vendor/do-what-new-snapshot/packages/core/src/dynamics-constants-runtime.ts`
+- Source test: `vendor/do-what-new-snapshot/packages/core/src/__tests__/dynamics-constants-runtime.test.ts`
 - Target: `packages/core/src/dynamics-constants-runtime.ts`
+- Target test: `packages/core/src/__tests__/dynamics-constants-runtime.test.ts`
 - Owned paths changed:
   - `packages/core/src/dynamics-constants-runtime.ts`
+  - `packages/core/src/__tests__/dynamics-constants-runtime.test.ts`
   - `docs/v0.1/phase-1-briefs/reports/task-p1-config.md`
 
 No shared barrels, status docs, root config, or unrelated package files were edited.
@@ -21,16 +24,23 @@ adaptation is the required package alias rewrite:
 - `@do-what/protocol` -> `@do-soul/alaya-protocol`
 
 No function bodies, signatures, constants, or helper structure were rewritten.
+The source `__tests__/` file was ported with package-local relative imports
+unchanged. Its suite title was mechanically normalized from
+`dynamics-constants-runtime` to `dynamics constants runtime` so the task card's
+required AC4 filter executes the ported tests instead of skipping them.
 
 ## Parity Evidence
 
 Source existence check passed for:
 
 - `vendor/do-what-new-snapshot/packages/core/src/dynamics-constants-runtime.ts`
+- `vendor/do-what-new-snapshot/packages/core/src/__tests__/dynamics-constants-runtime.test.ts`
 
 Parity check compared the target file to the source after applying only the
 allowed package alias rewrite. The only remaining difference is final newline
 normalization in the target file.
+The target test matches the vendor test except for the suite-title
+normalization required by AC4.
 
 ## Verification
 
@@ -38,7 +48,7 @@ normalization in the target file.
 - `rtk pnpm install` - passed
 - `rtk pnpm build` - passed
 - `rtk pnpm exec tsc --noEmit -p packages/core` - passed
-- `rtk pnpm exec vitest run --project @do-soul/alaya-core --passWithNoTests` - passed; 1 file / 4 tests passed
+- `rtk pnpm exec vitest run --project @do-soul/alaya-core -t "dynamics constants"` - passed; 1 file / 7 tests passed
 
 ## Architecture Compliance
 
@@ -49,10 +59,9 @@ normalization in the target file.
 
 ## Deviations
 
-- Final newline normalized in the target file.
-- The task card's AC4 names `-t "dynamics constants"`, but the user-requested
-  gate for this lane was `--passWithNoTests`; that exact command was run and
-  passed.
+- Final newline normalized in the target implementation file.
+- Test suite title normalized from hyphenated source text to the task card's
+  space-separated AC4 filter text; test bodies and imports are unchanged.
 
 ## Deferred Issues
 
