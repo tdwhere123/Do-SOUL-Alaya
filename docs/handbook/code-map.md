@@ -63,6 +63,7 @@ Phase Gate.
 | Storage repos | `packages/storage/src/repos/`, `packages/storage/src/index.ts`, `packages/storage/src/__tests__/*-repo.test.ts` | ported; `implementation-ready` (P2-repos-batch-* + P2-barrel-storage) |
 | Core skeleton + config leaves | `packages/core/src/{errors.ts,index.ts,shared/,dynamics-constants-runtime.ts}` | ported; `schema-ready` (P1-core-skeleton + P1-config) |
 | Core services | `packages/core/src/` service files | partial: `memory-service.ts`, `evidence-service.ts`, `signal-service.ts`, `green-service.ts`, `governance-lease-service.ts`, `session-override-service.ts`, `embedding-recall-service.ts`, `embedding-backfill-handler.ts`, `event-publisher.ts`, `runtime-event-normalizer.ts`, `output-shaping-service.ts`, `narrative-budget-service.ts`, `health-journal-service.ts`, and `karma-event-store.ts` are ported; remaining P2 service cards are not yet ported |
+| Core security stack | `packages/core/src/{permission-policy/,zero-day-security-layer.ts,constraint-proxy.ts,integration-gate.ts}` | ported; `implementation-ready` (P2-security-1) |
 | Soul skeleton + topology leaves | `packages/soul/src/{signal-handler.ts,tool-governance-adapter.ts,worker-safety-*.ts,garden/topology-service.ts,garden/path-graph-snapshotter.ts,shared/deep-freeze.ts}` | ported; `implementation-ready` leaves (P1-soul-skeleton + P1-topology) |
 | Garden engine | `packages/soul/src/garden/` remaining Garden roles | not yet ported (P2-garden-batch-*) |
 | Engine gateway | `packages/engine-gateway/src/` | MCP/provider skeleton ported; provider adapters deferred (#BL-008) |
@@ -80,6 +81,7 @@ sources. The high-level mapping is:
 | `packages/storage/src/migrations/*.sql` | `vendor/do-what-new-snapshot/packages/storage/src/migrations/*.sql` |
 | `packages/storage/src/repos/*.ts` | `vendor/do-what-new-snapshot/packages/storage/src/repos/*.ts` |
 | `packages/core/src/{memory,evidence,signal,recall,embedding-recall,global-memory-recall,green,governance-lease,session-override,synthesis,proposal,output-shaping,narrative-budget,health-journal}-service.ts` and `embedding-backfill-handler.ts` and `manifestation-resolver.ts` and `event-publisher.ts` and `runtime-event-normalizer.ts` | `vendor/do-what-new-snapshot/packages/core/src/<same filename>` (note: `runtime-event-normalizer.ts`, `event-publisher.ts`, `embedding-backfill-handler.ts`, and `manifestation-resolver.ts` have no `-service.ts` suffix) |
+| `packages/core/src/{permission-policy/,zero-day-security-layer.ts,constraint-proxy.ts,integration-gate.ts}` | `vendor/do-what-new-snapshot/packages/core/src/<same path>` |
 | `packages/core/src/conversation-service.ts` | `vendor/do-what-new-snapshot/packages/core/src/conversation-service.ts` |
 | `packages/soul/src/garden/{auditor,janitor,librarian,scheduler,bootstrapping,materialization-router,topology-service,path-graph-snapshotter}.ts` | `vendor/do-what-new-snapshot/packages/soul/src/garden/<same>` |
 | `packages/engine-gateway/src/*` | `vendor/do-what-new-snapshot/packages/engine-gateway/src/*` |

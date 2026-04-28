@@ -51,7 +51,7 @@ each Phase Gate.
 | GardenScheduler | `not-started` | `live-event-ready` | P2-garden-batch-1 |
 | Soul package skeleton + governance leaves | `schema-ready` | `schema-ready` | P1-soul-skeleton |
 | Soul topology leaves | `implementation-ready` | `implementation-ready` | P1-topology |
-| Permission policy stack | `not-started` | `implementation-ready` | P2-security-1 |
+| Permission policy stack | `implementation-ready` | `implementation-ready` | P2-security-1 |
 | Worker safety / trust | `not-started` | `implementation-ready` | P2-security-2 |
 | ConversationService | `not-started` | `live-event-ready` | P3-conversation |
 | Engine gateway MCP/provider skeleton | `implementation-ready` | `implementation-ready` | P1-engine-gateway-mcp |

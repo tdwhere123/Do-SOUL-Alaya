@@ -56,6 +56,7 @@ remain not-started or in-progress under `phase-2-briefs/README.md`.
 | P2-svc-green | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-green.md) |
 | P2-svc-embedding-recall | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-embedding-recall.md) |
 | P2-svc-embedding-pipeline | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-embedding-pipeline.md) |
+| P2-security-1 | implementation-ready | [report](./phase-2-briefs/reports/task-p2-security-1.md) |
 
 ## Phase 0 — Reset & Source Mirror
 
