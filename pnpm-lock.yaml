@@ -24,6 +24,12 @@ importers:
         specifier: workspace:*
         version: link:../protocol
 
+  packages/engine-gateway:
+    dependencies:
+      '@do-soul/alaya-protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
   packages/protocol:
     dependencies:
       zod:
