@@ -42,7 +42,18 @@ redesign:
 - Source existence check for the five cited source/test paths - passed.
 - `rtk pnpm build` - passed.
 - `rtk pnpm exec tsc --noEmit -p packages/core` - passed.
-- `rtk pnpm exec vitest run --project @do-soul/alaya-core -t "EventPublisher|RuntimeEventNormalizer"` - passed; 2 files / 22 tests passed.
+- `rtk pnpm exec vitest run --project @do-soul/alaya-core -t "EventPublisher|RuntimeEventNormalizer"` - passed; 2 files / 26 tests passed.
+
+## Review Fixes
+
+- Fixed review Blocking finding B1 for `RuntimeEventNormalizer`: notify failure
+  after durable append now throws `RuntimeEventNormalizerPropagationError` with
+  the appended entry attached, and retry re-notifies the pending durable entry
+  instead of appending a duplicate or suppressing notification.
+- Fixed review Important finding I1 for `publishManyWithMutation`: batch
+  propagation failure now exposes the full durable batch through
+  `EventPublisherPropagationError.entries`, and tests cover mutation rollback,
+  partial append rollback, and post-mutation propagation failure.
 
 ## Architecture Compliance
 
@@ -53,7 +64,10 @@ redesign:
 - Mutation failure still deletes unnotified EventLog entries before any
   in-process listener can observe false history.
 - Propagation failure still surfaces `EventPublisherPropagationError` with the
-  durable entry attached so callers know the EventLog append already happened.
+  durable entry attached so callers know the EventLog append already happened;
+  batch propagation failure also exposes the full appended batch.
+- Runtime normalization notify failure surfaces the appended entry and preserves
+  a pending in-process notification retry path for the durable entry.
 - No daemon, MCP, CLI, GUI, or TUI surface was introduced.
 
 ## Intentional Deviations
