@@ -46,10 +46,11 @@ each Phase Gate.
 | GreenService (ELIGIBLE/GRACE/REVOKED) | `implementation-ready` | `live-event-ready` | P2-svc-green |
 | GovernanceLeaseService | `implementation-ready` | `live-event-ready` | P2-svc-governance-lease |
 | SessionOverrideService | `implementation-ready` | `live-event-ready` | P2-svc-session-override |
-| Garden Auditor | `not-started` | `live-event-ready` | P2-garden-batch-1 |
+| Garden Auditor | `implementation-ready` | `live-event-ready` | P2-garden-batch-1 |
 | Garden Janitor | `not-started` | `live-event-ready` | P2-garden-batch-2 |
 | Garden Librarian | `not-started` | `live-event-ready` | P2-garden-batch-2 |
-| GardenScheduler | `not-started` | `live-event-ready` | P2-garden-batch-1 |
+| GardenScheduler | `implementation-ready` | `live-event-ready` | P2-garden-batch-1 |
+| Garden compute providers / local heuristics | `implementation-ready` | `live-event-ready` | P2-garden-batch-1 |
 | Garden bootstrapping / remediation / backlog telemetry | `implementation-ready` | `live-event-ready` | P2-garden-batch-4 |
 | Soul package skeleton + governance leaves | `schema-ready` | `schema-ready` | P1-soul-skeleton |
 | Soul topology leaves | `implementation-ready` | `implementation-ready` | P1-topology |

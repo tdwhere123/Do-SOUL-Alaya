@@ -102,7 +102,7 @@ depends on.
 
 | Card ID | Garden roles |
 |---|---|
-| P2-garden-batch-1 | Auditor + GardenScheduler |
+| P2-garden-batch-1 | Auditor + GardenScheduler + compute providers + compute routing + local heuristics |
 | P2-garden-batch-2 | Janitor + Librarian |
 | P2-garden-batch-3 | materialization-router + degradation-pipeline + handoff-gap-handler |
 | P2-garden-batch-4 | bootstrapping + session-override-remediation + backlog-telemetry + bootstrapping ID helper |
