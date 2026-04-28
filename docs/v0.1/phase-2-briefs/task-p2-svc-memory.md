@@ -3,11 +3,11 @@
 > - **Phase**: 2
 > - **Wave**: 2
 > - **Card ID**: P2-svc-memory
-> - **Port mode**: trivial-copy
-> - **Source**: `vendor/do-what-new-snapshot/packages/core/src/memory-service.ts`, `vendor/do-what-new-snapshot/packages/core/src/__tests__/memory-service.test.ts`
+> - **Port mode**: adapt-and-port
+> - **Source**: `vendor/do-what-new-snapshot/packages/core/src/memory-service.ts`, `vendor/do-what-new-snapshot/packages/core/src/__tests__/memory-service.test.ts`, `vendor/do-what-new-snapshot/packages/core/src/__tests__/mock-types.ts`
 > - **Target**: `packages/core/src/`, `packages/core/src/__tests__/`
 > - **Size**: M
-> - **Prerequisite**: P2-svc-output-shaping, P2-svc-narrative-budget, P2-svc-health-journal, P2-svc-event-publisher, P2-repos-batch-1, P2-svc-evidence
+> - **Prerequisite**: P2-svc-output-shaping, P2-svc-narrative-budget, P2-svc-health-journal, P2-svc-event-publisher, P2-repos-batch-1, P2-svc-evidence, P2-svc-signal
 > - **Blocks**: P2-svc-recall, P2-svc-manifestation, P2-svc-synthesis, P2-svc-proposal, P2-garden-batch-*
 > - **Closing readiness label**: implementation-ready
 > - **Owner**: unassigned
@@ -15,7 +15,8 @@
 ## 0. Charter Authority
 
 `docs/v0.1/phase-2-briefs/README.md` row "P2-svc-memory";
-`docs/handbook/port-protocol.md §1 trivial-copy`.
+`docs/handbook/port-protocol.md §2 adapt-and-port`;
+`docs/handbook/invariants.md §11` forbids SSE transport.
 
 ## 1. Background & Goal
 
@@ -29,15 +30,23 @@
 
 | Source | Target | Port requirement |
 |---|---|---|
-| `vendor/do-what-new-snapshot/packages/core/src/memory-service.ts` | `packages/core/src/memory-service.ts` | Copy first; only package-name/path rewrites are allowed. |
-| `vendor/do-what-new-snapshot/packages/core/src/__tests__/memory-service.test.ts` | `packages/core/src/__tests__/memory-service.test.ts` | Copy first; only package-name/path rewrites are allowed. |
+| `vendor/do-what-new-snapshot/packages/core/src/memory-service.ts` | `packages/core/src/memory-service.ts` | Copy first; package-name rewrite plus the SSE-to-runtime-notifier adapter point in §2.3. |
+| `vendor/do-what-new-snapshot/packages/core/src/__tests__/memory-service.test.ts` | `packages/core/src/__tests__/memory-service.test.ts` | Copy first; package-name rewrite plus the SSE-to-runtime-notifier adapter point in §2.3. |
+| `vendor/do-what-new-snapshot/packages/core/src/__tests__/mock-types.ts` | `packages/core/src/__tests__/mock-types.ts` | Copy first; direct test helper dependency. |
 
 ### 2.2 Port Rules
 
-- Port mode is `trivial-copy`; implementation must follow `docs/handbook/port-protocol.md` for that mode.
+- Port mode is `adapt-and-port`; implementation must follow `docs/handbook/port-protocol.md` for that mode.
 - Rewrite `@do-what/*` imports to `@do-soul/alaya-*` where applicable.
 - Do not edit shared barrels unless this card explicitly owns that barrel.
 - If a cited source path is missing or a source dependency forces files outside §2, return `BLOCKED` instead of expanding scope.
+
+### 2.3 Required Adapter Points
+
+| Source construct | Target construct | Reason |
+|---|---|---|
+| `MemorySseBroadcaster` with `broadcastEntry(entry)` | `MemoryRuntimeNotifier` with `notifyEntry(entry)` | Invariant §11 forbids SSE transport; Phase 2 may preserve only in-process notification semantics. |
+| Dependency property `sseBroadcaster` | Dependency property `runtimeNotifier` | Keeps source ordering while removing GUI/TUI SSE terminology. |
 
 ## 3. Deferred
 
@@ -47,8 +56,8 @@ Nothing deferred.
 
 | AC | Criteria | Evidence |
 |---|---|---|
-| AC1 | All files in §2 are ported per trivial-copy rules | Reviewer compares target files against the cited vendor source paths and adapter points |
-| AC2 | Every source path cited by this card exists before dispatch | `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/packages/core/src/memory-service.ts\",\"vendor/do-what-new-snapshot/packages/core/src/__tests__/memory-service.test.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"` exits 0 |
+| AC1 | All files in §2 are ported per adapt-and-port rules | Reviewer compares target files against the cited vendor source paths and adapter points |
+| AC2 | Every source path cited by this card exists before dispatch | `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/packages/core/src/memory-service.ts\",\"vendor/do-what-new-snapshot/packages/core/src/__tests__/memory-service.test.ts\",\"vendor/do-what-new-snapshot/packages/core/src/__tests__/mock-types.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"` exits 0 |
 | AC3 | Build succeeds after this card lands | `rtk pnpm build` is green |
 | AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core -t "MemoryService"` |
 | AC5 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-2-briefs/reports/task-p2-svc-memory.md` exists and cites backlog issues for any deferred scope |
@@ -56,7 +65,7 @@ Nothing deferred.
 
 ## 5. Verification
 
-1. `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/packages/core/src/memory-service.ts\",\"vendor/do-what-new-snapshot/packages/core/src/__tests__/memory-service.test.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"`
+1. `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/packages/core/src/memory-service.ts\",\"vendor/do-what-new-snapshot/packages/core/src/__tests__/memory-service.test.ts\",\"vendor/do-what-new-snapshot/packages/core/src/__tests__/mock-types.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"`
 2. `rtk pnpm install`
 3. `rtk pnpm build`
 4. `rtk pnpm exec tsc --noEmit -p packages/core`
@@ -66,5 +75,5 @@ Nothing deferred.
 
 - Does not edit `packages/core/src/index.ts`; P3-core-barrel serializes service exports after Phase 3.
 
-**Prerequisite**: P2-svc-output-shaping, P2-svc-narrative-budget, P2-svc-health-journal, P2-svc-event-publisher, P2-repos-batch-1, P2-svc-evidence.
+**Prerequisite**: P2-svc-output-shaping, P2-svc-narrative-budget, P2-svc-health-journal, P2-svc-event-publisher, P2-repos-batch-1, P2-svc-evidence, P2-svc-signal.
 **Blocks**: P2-svc-recall, P2-svc-manifestation, P2-svc-synthesis, P2-svc-proposal, P2-garden-batch-*.

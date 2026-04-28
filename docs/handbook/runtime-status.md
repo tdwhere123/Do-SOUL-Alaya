@@ -36,7 +36,7 @@ each Phase Gate.
 | Storage repos | `implementation-ready` | `implementation-ready` | P2-repos-batch-* + P2-barrel-storage |
 | Core package skeleton + shared utilities | `schema-ready` | `schema-ready` | P1-core-skeleton |
 | Dynamics runtime constants | `schema-ready` | `schema-ready` | P1-config |
-| MemoryService | `not-started` | `live-event-ready` | P2-svc-memory |
+| MemoryService | `implementation-ready` | `live-event-ready` | P2-svc-memory |
 | EvidenceService | `implementation-ready` | `live-event-ready` | P2-svc-evidence |
 | SignalService | `implementation-ready` | `live-event-ready` | P2-svc-signal |
 | RecallService | `not-started` | `live-event-ready` | P2-svc-recall |
