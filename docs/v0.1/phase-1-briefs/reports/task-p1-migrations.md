@@ -6,9 +6,14 @@
 - Closing readiness label: `implementation-ready`
 - Owned targets changed:
   - `packages/storage/src/migrations/*.sql`
+  - `packages/storage/src/__tests__/migration-parity.test.ts`
   - `docs/v0.1/phase-1-briefs/reports/task-p1-migrations.md`
 - No storage barrels, shared status docs, root build/test config, other
   packages, or unrelated files were edited.
+- Shared status-document reflection for Gate-1 remains parent-owned
+  closeout work. This lane records P1-migrations evidence only and does
+  not claim `docs/v0.1/INDEX.md` or `docs/handbook/runtime-status.md`
+  has been completed.
 
 ## Port Mode And Sources
 
@@ -96,7 +101,7 @@ Result: passed with no output.
 Exit code: 0.
 
 ```bash
-rtk pnpm exec vitest run --project @do-soul/alaya-storage --passWithNoTests
+rtk pnpm exec vitest run --project @do-soul/alaya-storage -t "migration"
 ```
 
 Result:
@@ -104,14 +109,12 @@ Result:
 ```text
 RUN  v4.1.5 /home/tdwhere/vibe/Do-SOUL Alaya/.worktrees/p1-migrations
 
-No test files found, exiting with code 0
+ ✓ |@do-soul/alaya-storage| packages/storage/src/__tests__/migration-parity.test.ts (1 test) 14ms
 
-projects: @do-soul/alaya-storage
-
-|@do-soul/alaya-storage|
-
-include: /home/tdwhere/vibe/Do-SOUL Alaya/.worktrees/p1-migrations/packages/storage/src/__tests__/**/*.{test,spec}.ts
-exclude:  **/dist/**
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  21:00:03
+   Duration  209ms (transform 27ms, setup 0ms, import 44ms, tests 14ms, environment 0ms)
 ```
 
 Exit code: 0.
@@ -133,6 +136,9 @@ Exit code: 0.
 - The migration sequence range remains vendor-defined and owned by
   `P1-migrations`: `001` through `055`.
 - No live-ready, MCP-consumable, or CLI-consumable claim is made.
+- Gate-1 status-document updates are deliberately not claimed here;
+  the parent Gate-1 closeout owns shared status reflection after all
+  Phase 1 leaf cards pass review.
 
 ## Deviations
 
@@ -148,12 +154,17 @@ no backlog issue.
 - AC1: satisfied by byte-for-byte checksum parity for all 55 SQL files.
 - AC2: satisfied by source directory existence check.
 - AC3: satisfied by `rtk pnpm build`.
-- AC4: satisfied by storage Vitest project run with `--passWithNoTests`;
-  no storage test files exist in this lane yet.
+- AC4: satisfied by
+  `packages/storage/src/__tests__/migration-parity.test.ts`, which runs
+  under `rtk pnpm exec vitest run --project @do-soul/alaya-storage -t
+  "migration"` and checks filename count/range, exact filename parity,
+  and SHA-256 content parity against the vendor snapshot.
 - AC5: satisfied by this report.
-- AC6: no status-document edits were made because this lane's explicit
-  ownership forbids shared status docs.
-- Review result: zero Blocking findings and zero Important findings.
+- AC6: status-document reflection is parent-owned Gate-1 closeout; this
+  lane intentionally made no shared status-doc edits.
+- Review-fix result: B1 closed by the migration parity test and fresh
+  Vitest evidence; B2 addressed by removing any lane-level claim that
+  shared status docs are complete.
 
 ## Post-Landing Note
 
