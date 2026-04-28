@@ -1,0 +1,157 @@
+import { afterEach, describe, expect, it } from "vitest";
+import { EngineProvider, WorkspaceKind, WorkspaceState } from "@do-what/protocol";
+import { initDatabase } from "../db.js";
+import { SqliteEngineBindingRepo } from "../repos/engine-binding-repo.js";
+import { SqliteWorkspaceRepo } from "../repos/workspace-repo.js";
+
+const databases = new Set<ReturnType<typeof initDatabase>>();
+
+afterEach(() => {
+  for (const database of databases) {
+    database.close();
+  }
+
+  databases.clear();
+});
+
+describe("SqliteEngineBindingRepo", () => {
+  it("upserts and reloads a binding record", async () => {
+    const { workspaceRepo, bindingRepo } = createRepos();
+    await workspaceRepo.create({
+      workspace_id: "ws_alpha",
+      name: "alpha",
+      root_path: "/tmp/alpha",
+      workspace_kind: WorkspaceKind.LOCAL_REPO,
+      default_engine_binding: null,
+      workspace_state: WorkspaceState.ACTIVE
+    });
+
+    const created = await bindingRepo.upsert({
+      binding_id: "binding_alpha",
+      workspace_id: "ws_alpha",
+      provider_type: EngineProvider.OPENAI,
+      base_url: null,
+      api_key: "sk-alpha",
+      model: "gpt-4o-mini",
+      config: {}
+    });
+
+    expect(created).toMatchObject({
+      binding_id: "binding_alpha",
+      workspace_id: "ws_alpha",
+      provider_type: EngineProvider.OPENAI,
+      api_key: "sk-alpha"
+    });
+    await expect(bindingRepo.getById("binding_alpha")).resolves.toMatchObject({
+      binding_id: "binding_alpha",
+      workspace_id: "ws_alpha",
+      model: "gpt-4o-mini"
+    });
+  });
+
+  it("preserves created_at and updates updated_at on repeated upsert", async () => {
+    const { workspaceRepo, bindingRepo } = createRepos();
+    await workspaceRepo.create({
+      workspace_id: "ws_beta",
+      name: "beta",
+      root_path: "/tmp/beta",
+      workspace_kind: WorkspaceKind.LOCAL_REPO,
+      default_engine_binding: null,
+      workspace_state: WorkspaceState.ACTIVE
+    });
+
+    const first = await bindingRepo.upsert({
+      binding_id: "binding_beta",
+      workspace_id: "ws_beta",
+      provider_type: EngineProvider.OPENAI,
+      base_url: null,
+      api_key: "sk-beta",
+      model: "gpt-4o-mini",
+      config: {}
+    });
+    const second = await bindingRepo.upsert({
+      binding_id: "binding_beta",
+      workspace_id: "ws_beta",
+      provider_type: EngineProvider.CUSTOM,
+      base_url: "https://example.test/v1",
+      api_key: "sk-beta-next",
+      model: "custom-model",
+      config: { compatibility: "openai" }
+    });
+
+    expect(second.created_at).toBe(first.created_at);
+    expect(second.updated_at >= first.updated_at).toBe(true);
+    expect(second).toMatchObject({
+      provider_type: EngineProvider.CUSTOM,
+      base_url: "https://example.test/v1",
+      api_key: "sk-beta-next",
+      model: "custom-model"
+    });
+  });
+
+  it("lists bindings by workspace", async () => {
+    const { workspaceRepo, bindingRepo } = createRepos();
+    await workspaceRepo.create({
+      workspace_id: "ws_gamma",
+      name: "gamma",
+      root_path: "/tmp/gamma",
+      workspace_kind: WorkspaceKind.LOCAL_REPO,
+      default_engine_binding: null,
+      workspace_state: WorkspaceState.ACTIVE
+    });
+    await workspaceRepo.create({
+      workspace_id: "ws_delta",
+      name: "delta",
+      root_path: "/tmp/delta",
+      workspace_kind: WorkspaceKind.LOCAL_REPO,
+      default_engine_binding: null,
+      workspace_state: WorkspaceState.ACTIVE
+    });
+
+    await bindingRepo.upsert({
+      binding_id: "binding_gamma_1",
+      workspace_id: "ws_gamma",
+      provider_type: EngineProvider.OPENAI,
+      base_url: null,
+      api_key: "sk-1",
+      model: "gpt-4o-mini",
+      config: {}
+    });
+    await bindingRepo.upsert({
+      binding_id: "binding_delta_1",
+      workspace_id: "ws_delta",
+      provider_type: EngineProvider.OPENAI,
+      base_url: null,
+      api_key: "sk-2",
+      model: "gpt-4o-mini",
+      config: {}
+    });
+    await bindingRepo.upsert({
+      binding_id: "binding_gamma_2",
+      workspace_id: "ws_gamma",
+      provider_type: EngineProvider.ANTHROPIC,
+      base_url: null,
+      api_key: "sk-3",
+      model: "claude-sonnet-4-5",
+      config: { max_tokens: 1024 }
+    });
+
+    await expect(bindingRepo.listByWorkspace("ws_gamma")).resolves.toEqual([
+      expect.objectContaining({ binding_id: "binding_gamma_1" }),
+      expect.objectContaining({ binding_id: "binding_gamma_2" })
+    ]);
+  });
+});
+
+function createRepos(): {
+  readonly workspaceRepo: SqliteWorkspaceRepo;
+  readonly bindingRepo: SqliteEngineBindingRepo;
+} {
+  const database = initDatabase({ filename: ":memory:" });
+  databases.add(database);
+
+  return {
+    workspaceRepo: new SqliteWorkspaceRepo(database),
+    bindingRepo: new SqliteEngineBindingRepo(database)
+  };
+}

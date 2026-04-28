@@ -1,5 +1,30 @@
 node_modules/
+.pnpm-store/
 dist/
-var/
+build/
 coverage/
 *.tsbuildinfo
+.turbo/
+.next/
+.cache/
+
+# Local runtime data
+var/
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Tooling local config
+.worktrees/
+
+# Note: .codex and .claude are KEPT in git per user instruction
+# Note: vendor/do-what-new-snapshot/ is KEPT in git so port task cards
+#       have a stable source reference

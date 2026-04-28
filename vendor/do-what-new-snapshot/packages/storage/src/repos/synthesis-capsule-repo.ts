@@ -1,0 +1,524 @@
+﻿import {
+  PromotionStateSchema,
+  SynthesisCapsuleSchema,
+  SynthesisStatusSchema,
+  type PromotionState,
+  type SynthesisCapsule,
+  type SynthesisStatus
+} from "@do-what/protocol";
+import type { StorageDatabase } from "../db.js";
+import { StorageError } from "../errors.js";
+import { deepFreeze } from "./shared/deep-freeze.js";
+import { parseNonEmptyString, parseTimestamp } from "./shared/validators.js";
+
+export interface SynthesisCapsuleRepo {
+  create(capsule: SynthesisCapsule): Promise<Readonly<SynthesisCapsule>>;
+  findById(objectId: string): Promise<Readonly<SynthesisCapsule> | null>;
+  findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<SynthesisCapsule>[]>;
+  findByTopicKey(workspaceId: string, topicKey: string): Promise<readonly Readonly<SynthesisCapsule>[]>;
+  clearEvidenceRef(objectId: string, evidenceRef: string, updatedAt: string): Promise<Readonly<SynthesisCapsule>>;
+  clearSourceMemoryRef(
+    objectId: string,
+    memoryRef: string,
+    updatedAt: string
+  ): Promise<Readonly<SynthesisCapsule>>;
+  updateStatus(
+    objectId: string,
+    status: SynthesisStatus,
+    updatedAt: string
+  ): Promise<Readonly<SynthesisCapsule>>;
+  updatePromotionState(
+    objectId: string,
+    state: PromotionState,
+    updatedAt: string
+  ): Promise<Readonly<SynthesisCapsule>>;
+  incrementAuthorityRound(objectId: string, updatedAt: string): Promise<Readonly<SynthesisCapsule>>;
+  setCooldownUntil(
+    objectId: string,
+    cooldownUntil: string | null,
+    updatedAt: string
+  ): Promise<Readonly<SynthesisCapsule>>;
+}
+
+const SYNTHESIS_SELECT_COLUMNS = `
+        object_id,
+        object_kind,
+        schema_version,
+        lifecycle_state,
+        created_at,
+        updated_at,
+        created_by,
+        topic_key,
+        synthesis_type,
+        authority_round_count,
+        cooldown_until,
+        promotion_state,
+        summary,
+        evidence_refs,
+        source_memory_refs,
+        workspace_id,
+        run_id,
+        synthesis_status
+`;
+
+interface SynthesisCapsuleRow {
+  readonly object_id: string;
+  readonly object_kind: string;
+  readonly schema_version: number;
+  readonly lifecycle_state: string;
+  readonly created_at: string;
+  readonly updated_at: string;
+  readonly created_by: string;
+  readonly topic_key: string;
+  readonly synthesis_type: string;
+  readonly authority_round_count: number;
+  readonly cooldown_until: string | null;
+  readonly promotion_state: string;
+  readonly summary: string;
+  readonly evidence_refs: string;
+  readonly source_memory_refs: string;
+  readonly workspace_id: string;
+  readonly run_id: string;
+  readonly synthesis_status: string;
+}
+
+export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
+  private readonly createStatement;
+  private readonly findByIdStatement;
+  private readonly findByWorkspaceIdStatement;
+  private readonly findByTopicKeyStatement;
+  private readonly updateEvidenceRefsStatement;
+  private readonly updateSourceMemoryRefsStatement;
+  private readonly updateStatusStatement;
+  private readonly updatePromotionStateStatement;
+  private readonly incrementAuthorityRoundStatement;
+  private readonly setCooldownUntilStatement;
+
+  public constructor(private readonly db: StorageDatabase) {
+    this.createStatement = db.connection.prepare(`
+      INSERT INTO synthesis_capsules (
+        object_id,
+        object_kind,
+        schema_version,
+        lifecycle_state,
+        created_at,
+        updated_at,
+        created_by,
+        topic_key,
+        synthesis_type,
+        authority_round_count,
+        cooldown_until,
+        promotion_state,
+        summary,
+        evidence_refs,
+        source_memory_refs,
+        workspace_id,
+        run_id,
+        synthesis_status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    this.findByIdStatement = db.connection.prepare(`
+      SELECT${SYNTHESIS_SELECT_COLUMNS}
+      FROM synthesis_capsules
+      WHERE object_id = ?
+      LIMIT 1
+    `);
+
+    this.findByWorkspaceIdStatement = db.connection.prepare(`
+      SELECT${SYNTHESIS_SELECT_COLUMNS}
+      FROM synthesis_capsules
+      WHERE workspace_id = ?
+      ORDER BY created_at ASC, object_id ASC
+    `);
+
+    this.findByTopicKeyStatement = db.connection.prepare(`
+      SELECT${SYNTHESIS_SELECT_COLUMNS}
+      FROM synthesis_capsules
+      WHERE workspace_id = ?
+        AND topic_key = ?
+      ORDER BY created_at ASC, object_id ASC
+    `);
+
+    this.updateEvidenceRefsStatement = db.connection.prepare(`
+      UPDATE synthesis_capsules
+      SET evidence_refs = ?, updated_at = ?
+      WHERE object_id = ?
+    `);
+
+    this.updateSourceMemoryRefsStatement = db.connection.prepare(`
+      UPDATE synthesis_capsules
+      SET source_memory_refs = ?, updated_at = ?
+      WHERE object_id = ?
+    `);
+
+    this.updateStatusStatement = db.connection.prepare(`
+      UPDATE synthesis_capsules
+      SET synthesis_status = ?, updated_at = ?
+      WHERE object_id = ?
+    `);
+
+    this.updatePromotionStateStatement = db.connection.prepare(`
+      UPDATE synthesis_capsules
+      SET promotion_state = ?, updated_at = ?
+      WHERE object_id = ?
+    `);
+
+    this.incrementAuthorityRoundStatement = db.connection.prepare(`
+      UPDATE synthesis_capsules
+      SET authority_round_count = authority_round_count + 1, updated_at = ?
+      WHERE object_id = ?
+    `);
+
+    this.setCooldownUntilStatement = db.connection.prepare(`
+      UPDATE synthesis_capsules
+      SET cooldown_until = ?, updated_at = ?
+      WHERE object_id = ?
+    `);
+  }
+
+  public async create(capsule: SynthesisCapsule): Promise<Readonly<SynthesisCapsule>> {
+    const parsedCapsule = parseSynthesisCapsule(capsule);
+
+    try {
+      this.createStatement.run(
+        parsedCapsule.object_id,
+        parsedCapsule.object_kind,
+        parsedCapsule.schema_version,
+        parsedCapsule.lifecycle_state,
+        parsedCapsule.created_at,
+        parsedCapsule.updated_at,
+        parsedCapsule.created_by,
+        parsedCapsule.topic_key,
+        parsedCapsule.synthesis_type,
+        parsedCapsule.authority_round_count,
+        parsedCapsule.cooldown_until,
+        parsedCapsule.promotion_state,
+        parsedCapsule.summary,
+        JSON.stringify(parsedCapsule.evidence_refs),
+        JSON.stringify(parsedCapsule.source_memory_refs),
+        parsedCapsule.workspace_id,
+        parsedCapsule.run_id,
+        parsedCapsule.synthesis_status
+      );
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to create synthesis capsule ${parsedCapsule.object_id}.`,
+        error
+      );
+    }
+
+    return parsedCapsule;
+  }
+
+  public async findById(objectId: string): Promise<Readonly<SynthesisCapsule> | null> {
+    try {
+      const row = this.findByIdStatement.get(objectId) as SynthesisCapsuleRow | undefined;
+      return row === undefined ? null : parseSynthesisCapsuleRow(row);
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", `Failed to load synthesis capsule ${objectId}.`, error);
+    }
+  }
+
+  public async findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<SynthesisCapsule>[]> {
+    try {
+      const rows = this.findByWorkspaceIdStatement.all(workspaceId) as SynthesisCapsuleRow[];
+      return rows.map((row) => parseSynthesisCapsuleRow(row));
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to list synthesis capsules for workspace ${workspaceId}.`,
+        error
+      );
+    }
+  }
+
+  public async findByTopicKey(workspaceId: string, topicKey: string): Promise<readonly Readonly<SynthesisCapsule>[]> {
+    try {
+      const rows = this.findByTopicKeyStatement.all(workspaceId, topicKey) as SynthesisCapsuleRow[];
+      return rows.map((row) => parseSynthesisCapsuleRow(row));
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to list synthesis capsules for topic ${topicKey}.`,
+        error
+      );
+    }
+  }
+
+  public async updateStatus(
+    objectId: string,
+    status: SynthesisStatus,
+    updatedAt: string
+  ): Promise<Readonly<SynthesisCapsule>> {
+    const parsedStatus = parseSynthesisStatus(status);
+    const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+
+    try {
+      const result = this.updateStatusStatement.run(parsedStatus, parsedUpdatedAt, objectId);
+
+      if (result.changes === 0) {
+        throw new StorageError("NOT_FOUND", `Synthesis capsule ${objectId} was not found.`);
+      }
+
+      const updated = await this.findById(objectId);
+
+      if (updated === null) {
+        throw new StorageError("NOT_FOUND", `Synthesis capsule ${objectId} was not found after update.`);
+      }
+
+      return updated;
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError("QUERY_FAILED", `Failed to update status for synthesis ${objectId}.`, error);
+    }
+  }
+
+  public async updatePromotionState(
+    objectId: string,
+    state: PromotionState,
+    updatedAt: string
+  ): Promise<Readonly<SynthesisCapsule>> {
+    const parsedState = parsePromotionState(state);
+    const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+
+    try {
+      const result = this.updatePromotionStateStatement.run(parsedState, parsedUpdatedAt, objectId);
+
+      if (result.changes === 0) {
+        throw new StorageError("NOT_FOUND", `Synthesis capsule ${objectId} was not found.`);
+      }
+
+      const updated = await this.findById(objectId);
+
+      if (updated === null) {
+        throw new StorageError("NOT_FOUND", `Synthesis capsule ${objectId} was not found after update.`);
+      }
+
+      return updated;
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to update promotion state for synthesis ${objectId}.`,
+        error
+      );
+    }
+  }
+
+  public async incrementAuthorityRound(
+    objectId: string,
+    updatedAt: string
+  ): Promise<Readonly<SynthesisCapsule>> {
+    const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+
+    try {
+      const result = this.incrementAuthorityRoundStatement.run(parsedUpdatedAt, objectId);
+
+      if (result.changes === 0) {
+        throw new StorageError("NOT_FOUND", `Synthesis capsule ${objectId} was not found.`);
+      }
+
+      const updated = await this.findById(objectId);
+
+      if (updated === null) {
+        throw new StorageError("NOT_FOUND", `Synthesis capsule ${objectId} was not found after update.`);
+      }
+
+      return updated;
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to increment authority rounds for synthesis ${objectId}.`,
+        error
+      );
+    }
+  }
+
+  public async setCooldownUntil(
+    objectId: string,
+    cooldownUntil: string | null,
+    updatedAt: string
+  ): Promise<Readonly<SynthesisCapsule>> {
+    const parsedCooldownUntil = parseCooldownUntil(cooldownUntil);
+    const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+
+    try {
+      const result = this.setCooldownUntilStatement.run(parsedCooldownUntil, parsedUpdatedAt, objectId);
+
+      if (result.changes === 0) {
+        throw new StorageError("NOT_FOUND", `Synthesis capsule ${objectId} was not found.`);
+      }
+
+      const updated = await this.findById(objectId);
+
+      if (updated === null) {
+        throw new StorageError("NOT_FOUND", `Synthesis capsule ${objectId} was not found after update.`);
+      }
+
+      return updated;
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError("QUERY_FAILED", `Failed to set cooldown for synthesis ${objectId}.`, error);
+    }
+  }
+
+  public async clearEvidenceRef(
+    objectId: string,
+    evidenceRef: string,
+    updatedAt: string
+  ): Promise<Readonly<SynthesisCapsule>> {
+    const synthesis = await this.requireSynthesisCapsule(objectId);
+    const parsedEvidenceRef = parseNonEmptyString(evidenceRef, "evidence ref");
+    const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+    const nextEvidenceRefs = synthesis.evidence_refs.filter((ref) => ref !== parsedEvidenceRef);
+
+    return await this.updateRefs(
+      objectId,
+      nextEvidenceRefs,
+      parsedUpdatedAt,
+      this.updateEvidenceRefsStatement,
+      "synthesis evidence refs"
+    );
+  }
+
+  public async clearSourceMemoryRef(
+    objectId: string,
+    memoryRef: string,
+    updatedAt: string
+  ): Promise<Readonly<SynthesisCapsule>> {
+    const synthesis = await this.requireSynthesisCapsule(objectId);
+    const parsedMemoryRef = parseNonEmptyString(memoryRef, "memory ref");
+    const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+    const nextSourceMemoryRefs = synthesis.source_memory_refs.filter((ref) => ref !== parsedMemoryRef);
+
+    return await this.updateRefs(
+      objectId,
+      nextSourceMemoryRefs,
+      parsedUpdatedAt,
+      this.updateSourceMemoryRefsStatement,
+      "synthesis source memory refs"
+    );
+  }
+
+  private async requireSynthesisCapsule(objectId: string): Promise<Readonly<SynthesisCapsule>> {
+    const synthesis = await this.findById(objectId);
+
+    if (synthesis === null) {
+      throw new StorageError("NOT_FOUND", `Synthesis capsule ${objectId} was not found.`);
+    }
+
+    return synthesis;
+  }
+
+  private async updateRefs(
+    objectId: string,
+    refs: readonly string[],
+    updatedAt: string,
+    statement: { run: (...args: unknown[]) => { changes: number } },
+    description: string
+  ): Promise<Readonly<SynthesisCapsule>> {
+    try {
+      const result = statement.run(JSON.stringify(refs), updatedAt, objectId);
+
+      if (result.changes === 0) {
+        throw new StorageError("NOT_FOUND", `Synthesis capsule ${objectId} was not found.`);
+      }
+
+      const updated = await this.findById(objectId);
+
+      if (updated === null) {
+        throw new StorageError("NOT_FOUND", `Synthesis capsule ${objectId} was not found after update.`);
+      }
+
+      return updated;
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError("QUERY_FAILED", `Failed to update ${description} for synthesis ${objectId}.`, error);
+    }
+  }
+}
+
+function parseSynthesisCapsule(value: SynthesisCapsule): Readonly<SynthesisCapsule> {
+  try {
+    return deepFreeze(SynthesisCapsuleSchema.parse(value));
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate synthesis capsule.", error);
+  }
+}
+
+function parseSynthesisCapsuleRow(row: SynthesisCapsuleRow): Readonly<SynthesisCapsule> {
+  try {
+    return deepFreeze(
+      SynthesisCapsuleSchema.parse({
+        object_id: row.object_id,
+        object_kind: row.object_kind,
+        schema_version: row.schema_version,
+        lifecycle_state: row.lifecycle_state,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        created_by: row.created_by,
+        topic_key: row.topic_key,
+        synthesis_type: row.synthesis_type,
+        authority_round_count: row.authority_round_count,
+        cooldown_until: row.cooldown_until,
+        promotion_state: row.promotion_state,
+        summary: row.summary,
+        evidence_refs: JSON.parse(row.evidence_refs),
+        source_memory_refs: JSON.parse(row.source_memory_refs),
+        workspace_id: row.workspace_id,
+        run_id: row.run_id,
+        synthesis_status: row.synthesis_status
+      })
+    );
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate synthesis capsule row.", error);
+  }
+}
+
+function parseSynthesisStatus(value: SynthesisStatus): SynthesisStatus {
+  try {
+    return SynthesisStatusSchema.parse(value);
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate synthesis status.", error);
+  }
+}
+
+function parsePromotionState(value: PromotionState): PromotionState {
+  try {
+    return PromotionStateSchema.parse(value);
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate promotion state.", error);
+  }
+}
+
+function parseCooldownUntil(value: string | null): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  if (value.trim().length === 0) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate cooldown_until.");
+  }
+
+  return value;
+}
+
+const parseUpdatedAt = parseTimestamp;

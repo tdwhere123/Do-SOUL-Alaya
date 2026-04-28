@@ -1,0 +1,24 @@
+{
+  "name": "@do-what/engine-gateway",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "pnpm exec vitest run --project @do-what/engine-gateway"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.69",
+    "@ai-sdk/openai": "^3.0.52",
+    "@do-what/protocol": "workspace:*",
+    "ai": "^6.0.158",
+    "fast-glob": "^3.3.3"
+  }
+}

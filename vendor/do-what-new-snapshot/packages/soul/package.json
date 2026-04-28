@@ -1,0 +1,14 @@
+{
+  "name": "@do-what/soul",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "test": "pnpm exec vitest run --project @do-what/soul"
+  },
+  "dependencies": {
+    "@do-what/protocol": "workspace:*"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noEmitOnError": true,
+    "forceConsistentCasingInFileNames": true,
+    "moduleDetection": "force",
+    "paths": {
+      "@do-soul/alaya-protocol": ["./packages/protocol/src/index.ts"],
+      "@do-soul/alaya-core": ["./packages/core/src/index.ts"],
+      "@do-soul/alaya-soul": ["./packages/soul/src/index.ts"],
+      "@do-soul/alaya-engine-gateway": ["./packages/engine-gateway/src/index.ts"],
+      "@do-soul/alaya-storage": ["./packages/storage/src/index.ts"]
+    },
+    "types": ["node", "vitest/globals"]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "do-soul-alaya",
+  "private": true,
+  "description": "Do-SOUL Alaya — local-first memory core for CLI agents, ported from do-what-new",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "build": "tsc -b packages/protocol packages/core packages/soul packages/engine-gateway packages/storage apps/core-daemon",
+    "test": "vitest run --config vitest.config.mjs",
+    "doctor": "node ./bin/alaya.mjs doctor"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.5"
+  }
+}
