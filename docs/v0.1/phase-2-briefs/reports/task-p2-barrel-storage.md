@@ -12,14 +12,11 @@ or future Phase 3+ surfaces were edited.
 
 ## Port Mode
 
-Port mode: `adapt-and-port`.
+Port mode: `trivial-copy`.
 
 The target barrel was copied from the vendor source after the six repo batches
-landed in the integrated storage branch. No package-name rewrite was required
-inside this file. The adaptation is contextual rather than behavioral: Alaya
-keeps the existing P1 exports (`StorageError`, `initDatabase`) and adds the
-Phase 2 repo exports from the vendor barrel so source tests importing
-`../index.js` run unchanged.
+landed in the integrated storage branch. No package-name rewrite or code-level
+deviation was required inside this file.
 
 ## Verification
 
