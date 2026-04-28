@@ -52,7 +52,7 @@ each Phase Gate.
 | Soul package skeleton + governance leaves | `schema-ready` | `schema-ready` | P1-soul-skeleton |
 | Soul topology leaves | `implementation-ready` | `implementation-ready` | P1-topology |
 | Permission policy stack | `implementation-ready` | `implementation-ready` | P2-security-1 |
-| Worker safety / trust | `not-started` | `implementation-ready` | P2-security-2 |
+| Worker safety / trust | `implementation-ready` | `implementation-ready` | P2-security-2 |
 | ConversationService | `not-started` | `live-event-ready` | P3-conversation |
 | Engine gateway MCP/provider skeleton | `implementation-ready` | `implementation-ready` | P1-engine-gateway-mcp |
 | MCP tool surface | `not-started` | `mcp-consumable` | P3-mcp-discovery + P4-mcp-tooling + P4-mcp-server |

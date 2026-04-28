@@ -112,7 +112,7 @@ depends on.
 | Card ID | Services |
 |---|---|
 | P2-security-1 | PermissionPolicyService + ZeroDaySecurityLayer + ConstraintProxy |
-| P2-security-2 | WorkerSafetyGate + WorkerTrustAssessor + StanceResolutionService + CrossCuttingPermissionService |
+| P2-security-2 | WorkerSafetyGate + WorkerTrustAssessor + StanceResolutionService + CrossCuttingPermissionService + ToolGovernanceClient |
 
 ### 2E. Barrel Updates (sequential, end of Phase 2)
 
