@@ -29,15 +29,15 @@
 
 | Source | Target | Port requirement |
 |---|---|---|
-| `vendor/do-what-new-snapshot/packages/engine-gateway/package.json` | `packages/engine-gateway/package.json` | Port source behavior and apply only the adapter points listed below. |
-| `vendor/do-what-new-snapshot/packages/engine-gateway/tsconfig.json` | `packages/engine-gateway/tsconfig.json` | Port source behavior and apply only the adapter points listed below. |
-| `vendor/do-what-new-snapshot/packages/engine-gateway/src/index.ts` | `packages/engine-gateway/src/index.ts` | Port source behavior and apply only the adapter points listed below. |
-| `vendor/do-what-new-snapshot/packages/engine-gateway/src/mcp-bridge.ts` | `packages/engine-gateway/src/mcp-bridge.ts` | Port source behavior and apply only the adapter points listed below. |
-| `vendor/do-what-new-snapshot/packages/engine-gateway/src/provider/provider-registry.ts` | `packages/engine-gateway/src/provider/provider-registry.ts` | Port source behavior and apply only the adapter points listed below. |
-| `vendor/do-what-new-snapshot/packages/engine-gateway/src/provider/provider-types.ts` | `packages/engine-gateway/src/provider/provider-types.ts` | Port source behavior and apply only the adapter points listed below. |
-| `vendor/do-what-new-snapshot/packages/engine-gateway/src/provider/soul-tool-specs.ts` | `packages/engine-gateway/src/provider/soul-tool-specs.ts` | Port source behavior and apply only the adapter points listed below. |
-| `vendor/do-what-new-snapshot/packages/engine-gateway/src/__tests__/mcp-bridge.test.ts` | `packages/engine-gateway/src/__tests__/mcp-bridge.test.ts` | Port source behavior and apply only the adapter points listed below. |
-| `vendor/do-what-new-snapshot/packages/engine-gateway/src/__tests__/provider-registry.test.ts` | `packages/engine-gateway/src/__tests__/provider-registry.test.ts` | Port source behavior and apply only the adapter points listed below. |
+| `vendor/do-what-new-snapshot/packages/engine-gateway/package.json` | `packages/engine-gateway/package.json` | Port source metadata; rename package/workspace dependency and remove deferred AI SDK/file-tool dependencies listed below. |
+| `vendor/do-what-new-snapshot/packages/engine-gateway/tsconfig.json` | `packages/engine-gateway/tsconfig.json` | Mechanical copy with package-path rewrites only. |
+| `vendor/do-what-new-snapshot/packages/engine-gateway/src/index.ts` | `packages/engine-gateway/src/index.ts` | Adapt exports to expose only the v0.1 MCP/provider-neutral skeleton listed below. |
+| `vendor/do-what-new-snapshot/packages/engine-gateway/src/mcp-bridge.ts` | `packages/engine-gateway/src/mcp-bridge.ts` | Mechanical import rewrite plus the deferred-tools message adapter listed below. |
+| `vendor/do-what-new-snapshot/packages/engine-gateway/src/provider/provider-registry.ts` | `packages/engine-gateway/src/provider/provider-registry.ts` | Adapt AI SDK adapter construction to the fail-closed registry skeleton listed below. |
+| `vendor/do-what-new-snapshot/packages/engine-gateway/src/provider/provider-types.ts` | `packages/engine-gateway/src/provider/provider-types.ts` | Mechanical import/comment rewrite to Alaya names only. |
+| `vendor/do-what-new-snapshot/packages/engine-gateway/src/provider/soul-tool-specs.ts` | `packages/engine-gateway/src/provider/soul-tool-specs.ts` | Adapt AI SDK tool specs to provider-neutral zod-backed specs listed below. |
+| `vendor/do-what-new-snapshot/packages/engine-gateway/src/__tests__/mcp-bridge.test.ts` | `packages/engine-gateway/src/__tests__/mcp-bridge.test.ts` | Port source routing assertions and adapt expected deferred wording listed below. |
+| `vendor/do-what-new-snapshot/packages/engine-gateway/src/__tests__/provider-registry.test.ts` | `packages/engine-gateway/src/__tests__/provider-registry.test.ts` | Port source API-key assertions and adapt provider-construction assertions to the fail-closed skeleton listed below. |
 
 ### 2.2 Port Rules
 
@@ -50,8 +50,12 @@
 
 | Source area | Change | Justification |
 |---|---|---|
+| `package.json` dependencies | Remove `@ai-sdk/anthropic`, `@ai-sdk/openai`, `ai`, and `fast-glob`; keep only `@do-soul/alaya-protocol` | Provider adapters, AI SDK tool conversion, and file tooling are deferred to #BL-008 |
 | `src/provider/provider-registry.ts` AI SDK adapter imports | Replace with a fail-closed registry skeleton | Provider adapters are deferred to #BL-008 |
+| `src/provider/soul-tool-specs.ts` AI SDK tool shape | Replace `ai` / `@ai-sdk/*` JSON-schema helpers and legacy OpenAI/Anthropic helper exports with provider-neutral `SoulToolSpec` / `ProviderNeutralSchema`; add `readSignalKindCount` | Keeps SOUL tool names and zod schemas available without exposing deferred provider adapters |
+| `src/mcp-bridge.ts` default `toolsHandler` error | Change the default deferred-tools wording from the upstream Phase 0.5 text to `tools.* is deferred to #BL-008.` | Aligns v0.1 operator-facing errors with the explicit Alaya backlog deferral |
 | `src/index.ts` exports | Export only the MCP bridge, provider registry skeleton, provider types, and soul tool specs | Avoid false availability for deferred provider/tool paths |
+| `src/__tests__/*.test.ts` provider/deferred assertions | Keep source routing/API-key coverage, but assert fail-closed provider construction and #BL-008 deferred wording | Tests must match the v0.1 provider-neutral adapter scope instead of the deferred AI SDK path |
 
 ## 3. Deferred
 
