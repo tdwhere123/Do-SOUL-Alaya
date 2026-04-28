@@ -69,10 +69,10 @@ rewrite and the task-card SSE-to-runtime-notifier adapter point.
   upstream source contains an optional SSE broadcaster, and invariant §11
   requires stripping SSE transport while preserving in-process notification
   semantics.
-- Phase 2 README service ordering was corrected so `P2-svc-event-publisher`
-  precedes `P2-svc-narrative-budget`; this fixes the review finding from the
-  narrative-budget card and prevents dispatch from treating those cards as
-  parallel leaves.
+- Cross-card dispatch ordering closure for `P2-svc-narrative-budget` is not
+  health-journal completion evidence; it is recorded in the separate
+  `fix(P2-svc-narrative-budget): align dispatch ordering [review Important]`
+  review-fix commit.
 
 ## Deferred Issues
 

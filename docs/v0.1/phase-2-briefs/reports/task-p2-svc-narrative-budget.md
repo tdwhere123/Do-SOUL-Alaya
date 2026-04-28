@@ -49,6 +49,13 @@ alias rewrite.
 - `rtk pnpm exec vitest run --project @do-soul/alaya-core -t "NarrativeBudgetService"` - passed; 1 file / 7 tests passed
 - `rtk git diff --check` - passed
 
+## Review Fixes
+
+- Fixed review Important finding I1: the Phase 2 README now lists
+  `P2-svc-event-publisher` before `P2-svc-narrative-budget` in both the service
+  ordering block and the service table, and the table marks narrative-budget as
+  `2B.0 follow-on after event-publisher`.
+
 ## Architecture Compliance
 
 - `@do-soul/alaya-protocol` remains the source of narrative budget config and

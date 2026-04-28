@@ -68,9 +68,9 @@ Nonexistent stale names such as `session-override-repo`,
 | Card ID | Service | Approx LOC | Wave |
 |---|---|---|---|
 | P2-svc-output-shaping | OutputShapingService | 196 | 2B.0 |
-| P2-svc-narrative-budget | NarrativeBudgetService | 188 | 2B.0 |
-| P2-svc-health-journal | HealthJournalService + KarmaEventStore | 6.0K + 1.9K | 2B.0 |
 | P2-svc-event-publisher | EventPublisher + RuntimeEventNormalizer redesigned without SSE transport (Alaya-internal listeners only, per invariant §11) | ~10K | 2B.0 |
+| P2-svc-health-journal | HealthJournalService + KarmaEventStore | 6.0K + 1.9K | 2B.0 |
+| P2-svc-narrative-budget | NarrativeBudgetService | 188 | 2B.0 follow-on after event-publisher |
 | P2-svc-evidence | EvidenceService | 208 | 2B.1 |
 | P2-svc-signal | SignalService | 319 | 2B.1 |
 | P2-svc-memory | MemoryService | 624 | 2B.1 |
