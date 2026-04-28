@@ -19,9 +19,9 @@ parallel to write task cards.
 | P0-2 | Rebuild monorepo tooling shell (package.json / tsconfig / vitest / CLAUDE.md / AGENTS.md / README.md) | done | main thread |
 | P0-5 | Vendor snapshot of do-what-new memory subset | done | main thread |
 | P0-3 | Rebuild `docs/handbook/*` (12 files) | done | main thread |
-| P0-3e | Rebuild `docs/v0.1/INDEX.md` + 6 phase READMEs | done after this commit | main thread |
+| P0-3e | Rebuild `docs/v0.1/INDEX.md` + 6 phase READMEs | done | main thread |
 | P0-4 | Write Phase 1-5 task cards | done | Phase 1-5 cards exist; see extraction report |
-| Gate-0 | Style-uniformity review + Phase 0 closure | pending | main thread |
+| Gate-0 | Style-uniformity review + Phase 0 closure | passed | main thread |
 
 ## Gate-0 Acceptance
 

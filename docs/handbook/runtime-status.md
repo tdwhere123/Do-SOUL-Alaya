@@ -18,7 +18,7 @@ each Phase Gate.
 
 | Phase | Scope | Status | Gate |
 |---|---|---|---|
-| Phase 0 | Reset, vendor snapshot, handbook, INDEX, task cards | **in progress** (P0-3 done; P0-3e + P0-4 pending) | Gate-0 |
+| Phase 0 | Reset, vendor snapshot, handbook, INDEX, task cards | **done** | Gate-0 passed |
 | Phase 1 | Wave 1 leaves: protocol, migrations, storage shared, config, topology, engine-gateway | not-started | Gate-1 |
 | Phase 2 | Wave 2: storage repos batches + core services + Garden + security defense | not-started | Gate-2 |
 | Phase 3 | Wave 3: ConversationService, MCP discovery, run lifecycle, misc services, core barrel | not-started | Gate-3 |

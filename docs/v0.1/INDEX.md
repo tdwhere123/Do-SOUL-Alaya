@@ -23,7 +23,7 @@ Phase 0 → Gate-0
 
 | Phase | Title | Cards | Status | Gate |
 |---|---|---|---|---|
-| Phase 0 | Reset & Source Mirror | 6 cards (P0-0..P0-5) + P0-3.5 review + P0-3.6 fix | **in progress** | Gate-0 |
+| Phase 0 | Reset & Source Mirror | 6 cards (P0-0..P0-5) + P0-3.5 review + P0-3.6 fix + P0-4 extraction | **done** | Gate-0 passed |
 | Phase 1 | Wave 1: Leaves | 9 cards (target) | not-started | Gate-1 |
 | Phase 2 | Wave 2: Services + Garden + Repos + Security | 31 cards (target) | not-started | Gate-2 |
 | Phase 3 | Wave 3: ConversationService + Run Lifecycle | 5 cards (target) | not-started | Gate-3 |
@@ -32,9 +32,9 @@ Phase 0 → Gate-0
 
 ## Phase 0 — Reset & Source Mirror
 
-Status: **in progress**. The reset is being executed by Claude Code
+Status: **done**. The reset was executed by the Claude Code
 main thread. Phase 0 task cards are tracked here only as a record;
-their detail is in the plan file at
+their original detail is in the plan file at
 `~/.claude/plans/v0-1-do-what-new-codex-ala-r10-r11-linear-pillow.md`.
 
 | Card | Title | Status |
@@ -44,9 +44,9 @@ their detail is in the plan file at
 | P0-2 | Rebuild monorepo tooling shell | done |
 | P0-5 | Vendor snapshot of do-what-new (memory subset) | done |
 | P0-3 | Rebuild `docs/handbook/*` | done |
-| P0-3e | This file + `phase-{0..5}-briefs/README.md` | in progress |
+| P0-3e | This file + `phase-{0..5}-briefs/README.md` | done |
 | P0-4 | Write Phase 1-5 task cards | done |
-| Gate-0 | Style-uniformity review + commit Phase 0 closure | ready for review |
+| Gate-0 | Style-uniformity review + commit Phase 0 closure | passed |
 
 ## Phase Pointers
 
