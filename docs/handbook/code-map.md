@@ -5,6 +5,21 @@ migrations, or runtime wiring change. For port reference (where things
 live in upstream `do-what-new`), see
 `vendor/do-what-new-snapshot/docs/handbook/code-map.md`.
 
+## Package Naming (authoritative)
+
+| Workspace path | npm name | tsconfig path alias |
+|---|---|---|
+| `packages/protocol/` | `@do-soul/alaya-protocol` | `@do-soul/alaya-protocol` |
+| `packages/storage/` | `@do-soul/alaya-storage` | `@do-soul/alaya-storage` |
+| `packages/core/` | `@do-soul/alaya-core` | `@do-soul/alaya-core` |
+| `packages/soul/` | `@do-soul/alaya-soul` | `@do-soul/alaya-soul` |
+| `packages/engine-gateway/` | `@do-soul/alaya-engine-gateway` | `@do-soul/alaya-engine-gateway` |
+| `apps/core-daemon/` | `@do-soul/alaya-core-daemon` | (private app, no path alias) |
+
+Upstream `@do-what/<x>` maps to `@do-soul/alaya-<x>` for the five
+ported packages above. `apps/core-daemon` has no upstream namespaced
+name change.
+
 ## Project Map (target after port)
 
 ```text
@@ -57,7 +72,7 @@ sources. The high-level mapping is:
 | `packages/protocol/src/*` | `vendor/do-what-new-snapshot/packages/protocol/src/*` |
 | `packages/storage/src/migrations/*.sql` | `vendor/do-what-new-snapshot/packages/storage/src/migrations/*.sql` |
 | `packages/storage/src/repos/*.ts` | `vendor/do-what-new-snapshot/packages/storage/src/repos/*.ts` |
-| `packages/core/src/{memory,evidence,signal,recall,green,governance-lease,session-override,synthesis,proposal,output-shaping,narrative-budget,manifestation-resolver,health-journal,event-publisher,runtime-event-normalizer}-service.ts` | `vendor/do-what-new-snapshot/packages/core/src/<same>` |
+| `packages/core/src/{memory,evidence,signal,recall,green,governance-lease,session-override,synthesis,proposal,output-shaping,narrative-budget,health-journal}-service.ts` and `manifestation-resolver.ts` and `event-publisher.ts` and `runtime-event-normalizer.ts` | `vendor/do-what-new-snapshot/packages/core/src/<same filename>` (note: `runtime-event-normalizer.ts` and `event-publisher.ts` and `manifestation-resolver.ts` have no `-service.ts` suffix) |
 | `packages/core/src/conversation-service.ts` | `vendor/do-what-new-snapshot/packages/core/src/conversation-service.ts` |
 | `packages/soul/src/garden/{auditor,janitor,librarian,scheduler,bootstrapping,materialization-router,topology-service,path-graph-snapshotter}.ts` | `vendor/do-what-new-snapshot/packages/soul/src/garden/<same>` |
 | `packages/engine-gateway/src/*` | `vendor/do-what-new-snapshot/packages/engine-gateway/src/*` |

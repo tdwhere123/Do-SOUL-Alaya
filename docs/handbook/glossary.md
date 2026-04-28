@@ -43,6 +43,22 @@ agent context. Not a second memory layer.
 **ContextPack** — Assembled deliverable for a single recall request:
 included candidates + excluded candidates + degradation reasons.
 
+**ConversationService** *(adapted in Alaya)* — In upstream do-what,
+the orchestration entry point for a chat turn (Memory + Recall +
+Evidence + Green + Governance + OutputShaping). In Alaya, ported
+under `adapt-and-port` with chat-specific orchestration removed
+(worker-dispatch / runtime-adapter / tool-substrate); only the
+candidate→recall→govern→durable memory orchestration is retained.
+See `docs/v0.1/phase-3-briefs/README.md` row P3-conversation.
+
+**RecallQuery** — Per-turn request to RecallService describing what
+the consuming agent needs (subject, scope, dimensions, budgets,
+exclusion reasons it does not want).
+
+**TaskSurfaceBuilder** — Builder that assembles the task-shaped
+context Alaya hands to a worker (run-side); used by run lifecycle
+services. Ported in Phase 3 P3-run-lifecycle.
+
 ## Garden / Maintenance
 
 **Garden** — Fire-and-forget background maintenance subsystem. Runs

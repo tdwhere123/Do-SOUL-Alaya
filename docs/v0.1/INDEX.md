@@ -23,11 +23,11 @@ Phase 0 → Gate-0
 
 | Phase | Title | Cards | Status | Gate |
 |---|---|---|---|---|
-| Phase 0 | Reset & Source Mirror | 6 cards (P0-0..P0-5) | **in progress** | Gate-0 |
-| Phase 1 | Wave 1: Leaves | ~8 cards (target) | not-started | Gate-1 |
-| Phase 2 | Wave 2: Services + Garden + Repos + Security | ~30 cards (target) | not-started | Gate-2 |
-| Phase 3 | Wave 3: ConversationService + MCP + Run Lifecycle | ~5 cards (target) | not-started | Gate-3 |
-| Phase 4 | Wave 4: Daemon + Routes + Live Transport + CLI Bridge | ~10 cards (target) | not-started | Gate-4 |
+| Phase 0 | Reset & Source Mirror | 6 cards (P0-0..P0-5) + P0-3.5 review + P0-3.6 fix | **in progress** | Gate-0 |
+| Phase 1 | Wave 1: Leaves | 9 cards (target) | not-started | Gate-1 |
+| Phase 2 | Wave 2: Services + Garden + Repos + Security | ~32 cards (target) | not-started | Gate-2 |
+| Phase 3 | Wave 3: ConversationService + Run Lifecycle | 5 cards (target) | not-started | Gate-3 |
+| Phase 4 | Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI | ~24 cards (target) | not-started | Gate-4 |
 | Phase 5 | Wave 5: E2E + Benchmark + Graph Contract + Final Review | 4 cards (target) | not-started | Gate-5 |
 
 ## Phase 0 — Reset & Source Mirror
@@ -72,17 +72,21 @@ dedicated barrel-update card after all leaf cards in the wave land.
 
 | File | Owners | Risk | Rule |
 |---|---|---|---|
-| `packages/storage/src/repos/shared/event-log-writer.ts` | 15+ repos | high | Land first in P1 (P1-storage-shared); after that, no wave card writes it |
+| `packages/storage/src/db.ts` | every repo (DB connection) | high | Owned by P1-storage-skeleton; no Phase 2+ card writes it |
+| `packages/storage/src/errors.ts` | every repo | medium | Owned by P1-storage-skeleton |
+| `packages/storage/src/repos/shared/event-log-writer.ts` | 15+ repos | high | Owned by P1-storage-shared; no Phase 2+ card writes it |
 | `packages/storage/src/repos/shared/validators.ts` | 8+ repos | medium | Same as above |
 | `packages/storage/src/repos/shared/deep-freeze.ts` | 3+ repos | low | Same as above |
-| `packages/protocol/src/index.ts` | every protocol type | high | One owner card per phase that adds types; barrel-update card after all type cards land |
-| `packages/storage/src/index.ts` | every repo | high | barrel-update card after all P2 repo batches land |
-| `packages/core/src/index.ts` | every core service | high | barrel-update card at end of Phase 2 |
-| `packages/soul/src/index.ts` | every Garden role | high | barrel-update card at end of Phase 2C |
-| `apps/core-daemon/src/app.ts` | every route | high | one route-registration owner card per Phase 4 batch |
+| `packages/protocol/src/index.ts` | every protocol type | high | Owned by P1-protocol; no Phase 2+ card writes it |
+| `packages/protocol/src/events/*.ts` | every service that emits events | high | Owned by P1-protocol (recursive copy); Phase 2+ services never modify event payload schemas in place — schema changes require a P1-protocol-followup card |
+| `packages/storage/src/index.ts` | every repo | high | barrel-update card P2-barrel-storage after all P2 repo batches land |
+| `packages/core/src/index.ts` | every core service | high | barrel-update card P3-core-barrel at end of Phase 3 |
+| `packages/soul/src/index.ts` | every Garden role | high | barrel-update card P2-barrel-soul at end of Phase 2C |
+| `apps/core-daemon/src/app.ts` | every route | high | route-registration owner card P4-daemon-routes-register sequentially after all 4B routes close |
+| `bin/alaya.mjs` | every CLI subcommand | high | Owned by P4-cli-bridge; subcommand cards (P4-cli-doctor, P4-attach-codex, etc.) register through a subcommand registration API exposed by P4-cli-bridge |
 | `package.json` (workspace root) | rare | high | only Phase 0 cards or explicit follow-up after wave-gate review |
 | `tsconfig.base.json` | rare | high | same as above |
-| Migration sequence numbers (e.g. `055-` and beyond) | every migration card | medium | Sequence numbers assigned by INDEX before dispatch; no two cards may claim the same number |
+| Migration sequence numbers | P1-migrations | medium | All 55 migrations are owned by P1-migrations; no Phase 2+ card may add a new migration without a P1-migrations-followup card |
 | `docs/v0.1/INDEX.md` status table | every card on close | medium | Update via small `docs(<card-id>):` commit per R4 |
 
 ## Readiness Vocabulary

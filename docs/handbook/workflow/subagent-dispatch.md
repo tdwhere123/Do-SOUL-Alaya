@@ -115,6 +115,23 @@ recurring failure pattern appears across two or more cards.
     after DB mutation, breaking the EventLog-first invariant.
 12. **Audit-after-broadcast.** Consumer observed state before the
     audit row landed; violates audit-before-broadcast invariant.
+13. **Architecture-vs-port contradiction.** Port mode declared
+    `trivial-copy` but the source file embeds an architecture detail
+    (e.g. SSE) that an Alaya invariant forbids. Resolution: escalate
+    to `requires-redesign` with §0 charter cite, or update the
+    invariant if the detail is acceptable.
+14. **Ported subsystem with no Alaya consumer.** Source code ported
+    but no Alaya use case calls it (e.g. ConversationService chat
+    paths). Resolution: adapt-and-port with explicit Adapter Points
+    deleting the unused branches, or move to backlog.
+15. **Naming-spec drift.** Card uses an npm name or path alias not
+    listed in `docs/handbook/code-map.md §Package Naming`. Resolution:
+    fix the card, or update code-map first if the name needs to
+    change.
+16. **Misleading availability docs.** A doc lists a command or
+    capability as "available" but the implementing card has not
+    landed. Resolution: annotate the doc with the gating phase or
+    card.
 
 ## When To Stop A Wave
 

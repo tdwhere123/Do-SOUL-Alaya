@@ -109,14 +109,16 @@ Package Dependency Direction live in `docs/handbook/invariants.md` and
 
 ```bash
 pnpm install
+pnpm build
+pnpm test
+pnpm exec vitest run --project @do-soul/alaya-<package>
+
+# All commands below are available only after Phase 4 lands:
 pnpm --dir apps/core-daemon dev      # daemon dev
 pnpm exec alaya doctor               # CLI diagnostic
 pnpm exec alaya install              # install profile
 pnpm exec alaya attach codex         # attach to a target agent
 pnpm exec alaya status               # status report
-pnpm build
-pnpm test
-pnpm exec vitest run --project @do-soul/alaya-<package>
 ```
 
 ## Pointers

@@ -7,6 +7,10 @@ stable source tree that does not drift mid-port.
 ## Source
 
 - Source repository working tree: `/home/tdwhere/vibe/do-what-new`
+  (snapshot-time provenance only; do not reference this absolute path
+  from any task card, code, or commit message — see CLAUDE.md "Source
+  Reference" section. Task cards reference paths under
+  `vendor/do-what-new-snapshot/`.)
 - Source HEAD commit at snapshot time:
   `6ed846341f66ff98bfcddbb940db74cfc10133ca`
 - Source HEAD subject:

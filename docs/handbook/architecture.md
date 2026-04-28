@@ -92,13 +92,53 @@ is enforced by tests.
 State-changing runtime writes follow:
 
 ```text
-EventLog append -> DB update -> consumer notification (MCP or audit)
+EventLog append -> DB update -> audit row -> in-process notification
+                                              (AlayaRuntimePort listeners)
 ```
 
 Audit precedes broadcast. Every state change records an audit row
-before any consumer can observe it. There is no user-facing live event
-stream (no SSE) because there is no surface that consumes one — agents
-poll via MCP tool calls.
+before any consumer can observe it.
+
+**No SSE.** Alaya does not expose an SSE stream because no surface
+consumes one (no GUI, no TUI, no live HTTP client). Daemon-internal
+eventing is in-process via AlayaRuntimePort listeners and the audit
+log. Upstream daemon code under `apps/core-daemon/src/sse/`,
+`runs.ts` TransformStream, `background/bootstrap.ts` SSE pipeline, and
+`event-publisher` SSE chain are all out of scope and must be
+`requires-redesign` cards that strip the SSE transport while preserving
+the EventLog → audit ordering. See `docs/handbook/invariants.md §11`.
+
+External consumers (Codex / Claude Code) interact only through MCP
+tool calls. There is no polling and no streaming; an MCP tool call is
+a request/response, and the response carries whatever data Alaya owes
+the caller (recall results, governance verdict, etc.).
+
+## Daemon Startup Ordering
+
+Daemon startup is sequenced; out-of-order initialization is a Blocking
+review finding:
+
+1. **Storage**: open SQLite, run pending migrations, hand back a
+   `SqliteConnection`.
+2. **Protocol-level types**: ready by virtue of import; no runtime init.
+3. **Core services** (in dependency order, leaf services first):
+   - HealthJournalService, EventPublisher, RuntimeEventNormalizer
+   - EvidenceService, MemoryService, SignalService
+   - GreenService, GovernanceLeaseService, SessionOverrideService
+   - RecallService (needs Memory + Embedding repos)
+   - OutputShapingService, NarrativeBudgetService, ManifestationResolver
+   - SynthesisService, ProposalService
+   - ConversationService (memory-orchestration only; see invariant §20 / port-protocol §2)
+4. **Garden engine**: GardenScheduler started AFTER all services are
+   ready; Garden roles register port adapters at this step.
+5. **Engine gateway**: provider registry + MCP bridge constructed.
+6. **MCP transport**: stdio / HTTP listener bound. From this point,
+   external agents may attach. Tool calls fail-closed if any prior
+   step did not complete.
+7. **CLI bridge**: bin/alaya.mjs subcommands wired.
+
+Each step records an audit row `daemon.startup.<step>.completed`. Tool
+calls that arrive before step 6 receive a fail-closed response.
 
 ## Signal Ingestion
 
