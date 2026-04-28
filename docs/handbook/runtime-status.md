@@ -41,6 +41,7 @@ each Phase Gate.
 | SignalService | `implementation-ready` | `live-event-ready` | P2-svc-signal |
 | RecallService | `not-started` | `live-event-ready` | P2-svc-recall |
 | EmbeddingRecallService | `implementation-ready` | `live-event-ready` | P2-svc-embedding-recall |
+| EmbeddingBackfillHandler | `implementation-ready` | `live-event-ready` | P2-svc-embedding-pipeline |
 | GreenService (ELIGIBLE/GRACE/REVOKED) | `implementation-ready` | `live-event-ready` | P2-svc-green |
 | GovernanceLeaseService | `implementation-ready` | `live-event-ready` | P2-svc-governance-lease |
 | SessionOverrideService | `implementation-ready` | `live-event-ready` | P2-svc-session-override |

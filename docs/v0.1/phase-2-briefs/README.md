@@ -88,7 +88,7 @@ Nonexistent stale names such as `session-override-repo`,
 
 | Card ID | Subject | Port mode | Closing label |
 |---|---|---|---|
-| P2-svc-embedding-pipeline | `packages/core/src/embedding-backfill-handler.ts`; daemon-side trigger wiring is deferred to Phase 4. Owns the producer-side handler for the embedding index so EmbeddingRecallService is not schema-only at Gate-2. | trivial-copy | implementation-ready |
+| P2-svc-embedding-pipeline | `packages/core/src/embedding-backfill-handler.ts`; daemon-side trigger wiring is deferred to Phase 4. Owns the producer-side handler for the embedding index so EmbeddingRecallService is not schema-only at Gate-2. | adapt-and-port | implementation-ready |
 
 ### 2C. Garden Engine (4 batches, 4-5 codex parallel)
 
