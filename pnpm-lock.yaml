@@ -43,6 +43,12 @@ importers:
         specifier: ^7.6.12
         version: 7.6.13
 
+  packages/soul:
+    dependencies:
+      '@do-soul/alaya-protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
 packages:
 
   '@emnapi/core@1.10.0':
