@@ -42,7 +42,7 @@ each Phase Gate.
 | RecallService | `not-started` | `live-event-ready` | P2-svc-recall |
 | EmbeddingRecallService | `not-started` | `live-event-ready` | P2-svc-embedding-recall |
 | GreenService (ELIGIBLE/GRACE/REVOKED) | `not-started` | `live-event-ready` | P2-svc-green |
-| GovernanceLeaseService | `not-started` | `live-event-ready` | P2-svc-governance-lease |
+| GovernanceLeaseService | `implementation-ready` | `live-event-ready` | P2-svc-governance-lease |
 | SessionOverrideService | `not-started` | `live-event-ready` | P2-svc-session-override |
 | Garden Auditor | `not-started` | `live-event-ready` | P2-garden-batch-1 |
 | Garden Janitor | `not-started` | `live-event-ready` | P2-garden-batch-2 |
