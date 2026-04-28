@@ -1,0 +1,744 @@
+import { createHash, randomUUID } from "node:crypto";
+import {
+  HealthEventKind,
+  PhaseCExtensionEventType,
+  RecallEmbeddingSupplementDegradedPayloadSchema,
+  RecallEmbeddingSupplementMergedPayloadSchema,
+  RecallEmbeddingSupplementQueriedPayloadSchema,
+  type EventLogEntry,
+  type HealthJournalRecordPort,
+  type MemoryEntry
+} from "@do-soul/alaya-protocol";
+
+export interface EmbeddingVectorRecord {
+  readonly object_id: string;
+  readonly workspace_id: string;
+  readonly content_hash: string;
+  readonly provider_kind: string;
+  readonly model_id: string;
+  readonly schema_version: number;
+  readonly dimensions: number;
+  readonly embedding: Float32Array;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+export interface EmbeddingProviderPort {
+  readonly providerKind: string;
+  readonly modelId: string;
+  readonly schemaVersion: number;
+  readonly isAvailable: boolean;
+  embedTexts(
+    texts: readonly string[],
+    options: {
+      readonly timeoutMs: number;
+    }
+  ): Promise<readonly Float32Array[]>;
+}
+
+export interface EmbeddingRecallRepoPort {
+  listByObjectIds(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): Promise<readonly Readonly<EmbeddingVectorRecord>[]>;
+}
+
+export interface EmbeddingRecallEventLogPort {
+  append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
+}
+
+export interface EmbeddingSimilarityHint {
+  readonly object_id: string;
+  readonly normalized_similarity: number;
+}
+
+export interface EmbeddingRecallSupplementResult {
+  readonly supplementaryEntries: readonly Readonly<MemoryEntry>[];
+  readonly similarityHintsByObjectId: Readonly<Record<string, Readonly<EmbeddingSimilarityHint>>>;
+}
+
+export interface EmbeddingRecallServiceDependencies {
+  readonly embeddingRepo: EmbeddingRecallRepoPort;
+  readonly provider: EmbeddingProviderPort;
+  readonly eventLogRepo: EmbeddingRecallEventLogPort;
+  readonly healthJournalRecorder?: HealthJournalRecordPort;
+  readonly generateQueryId?: () => string;
+  readonly now?: () => string;
+  readonly warn?: (message: string, meta: Record<string, unknown>) => void;
+}
+
+export type PreparedEmbeddingQuerySnapshot =
+  | {
+      readonly status: "pending";
+    }
+  | {
+      readonly status: "ready";
+      readonly embedding: Float32Array;
+    }
+  | {
+      readonly status: "failed";
+      readonly reason: string;
+    };
+
+export interface PreparedEmbeddingQueryHandle {
+  readonly queryId: string;
+  getSnapshot(): PreparedEmbeddingQuerySnapshot;
+}
+
+interface EmbeddingRecallPrecheckError extends Error {
+  readonly reason: "local_vector_lookup_failed";
+}
+
+const QUERY_TIMEOUT_MS = 250;
+
+const EMPTY_SUPPLEMENT_RESULT: EmbeddingRecallSupplementResult = Object.freeze({
+  supplementaryEntries: Object.freeze([]),
+  similarityHintsByObjectId: Object.freeze({})
+});
+
+export class EmbeddingRecallService {
+  private readonly generateQueryId: () => string;
+  private readonly now: () => string;
+  private readonly warn: (message: string, meta: Record<string, unknown>) => void;
+
+  public constructor(private readonly dependencies: EmbeddingRecallServiceDependencies) {
+    this.generateQueryId = dependencies.generateQueryId ?? (() => `recall-embedding-${randomUUID()}`);
+    this.now = dependencies.now ?? (() => new Date().toISOString());
+    this.warn = dependencies.warn ?? (() => undefined);
+  }
+
+  public prepareQueryEmbedding(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly queryText: string;
+  }): PreparedEmbeddingQueryHandle {
+    const queryId = this.generateQueryId();
+
+    if (!this.dependencies.provider.isAvailable) {
+      return createPreparedEmbeddingQueryHandle(
+        queryId,
+        Object.freeze({
+          status: "failed",
+          reason: "provider_unavailable"
+        })
+      );
+    }
+
+    let snapshot: PreparedEmbeddingQuerySnapshot = Object.freeze({
+      status: "pending"
+    });
+
+    void this.dependencies.provider
+      .embedTexts([params.queryText], {
+        timeoutMs: QUERY_TIMEOUT_MS
+      })
+      .then((embeddings) => {
+        if (embeddings.length !== 1) {
+          throw new Error(`Expected exactly one query embedding, received ${embeddings.length}.`);
+        }
+
+        snapshot = Object.freeze({
+          status: "ready",
+          embedding: new Float32Array(embeddings[0]!)
+        });
+      })
+      .catch(() => {
+        snapshot = Object.freeze({
+          status: "failed",
+          reason: "query_embedding_failed"
+        });
+      });
+
+    return createPreparedEmbeddingQueryHandle(queryId, () => snapshot);
+  }
+
+  public async hasStoredVectors(params: {
+    readonly workspaceId: string;
+    readonly eligibleMemories: readonly Readonly<MemoryEntry>[];
+  }): Promise<boolean> {
+    if (params.eligibleMemories.length === 0) {
+      return false;
+    }
+
+    try {
+      const storedVectors = await this.dependencies.embeddingRepo.listByObjectIds(
+        params.workspaceId,
+        params.eligibleMemories.map((memory) => memory.object_id)
+      );
+      return storedVectors.length > 0;
+    } catch (error) {
+      this.warn("embedding supplement precheck failed", {
+        workspace_id: params.workspaceId,
+        reason: "local_vector_lookup_failed",
+        error: toErrorMessage(error)
+      });
+      throw Object.assign(new Error("embedding supplement precheck failed"), {
+        reason: "local_vector_lookup_failed"
+      } satisfies Pick<EmbeddingRecallPrecheckError, "reason">);
+    }
+  }
+
+  public async recordPrecheckDegraded(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly reason: string;
+    readonly baseCandidateCount: number;
+    readonly fallbackCandidateCount: number;
+  }): Promise<void> {
+    await this.recordDegraded({
+      workspaceId: params.workspaceId,
+      runId: params.runId,
+      queryId: this.generateQueryId(),
+      reason: params.reason,
+      baseCandidateCount: params.baseCandidateCount,
+      fallbackCandidateCount: params.fallbackCandidateCount
+    });
+  }
+
+  public async querySupplement(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly queryText: string;
+    readonly eligibleMemories: readonly Readonly<MemoryEntry>[];
+    readonly baseCandidateIds: readonly string[];
+    readonly maxSupplement: number;
+  }): Promise<EmbeddingRecallSupplementResult> {
+    if (params.maxSupplement <= 0 || params.eligibleMemories.length === 0) {
+      return EMPTY_SUPPLEMENT_RESULT;
+    }
+
+    const queryId = this.generateQueryId();
+    if (!this.dependencies.provider.isAvailable) {
+      await this.recordDegraded({
+        workspaceId: params.workspaceId,
+        runId: params.runId,
+        queryId,
+        reason: "provider_unavailable",
+        baseCandidateCount: params.baseCandidateIds.length,
+        fallbackCandidateCount: params.baseCandidateIds.length
+      });
+      return EMPTY_SUPPLEMENT_RESULT;
+    }
+
+    const storedVectors = await this.loadStoredVectors({
+      workspaceId: params.workspaceId,
+      runId: params.runId,
+      queryId,
+      eligibleMemories: params.eligibleMemories,
+      baseCandidateCount: params.baseCandidateIds.length
+    });
+
+    if (storedVectors === null || storedVectors.length === 0) {
+      return EMPTY_SUPPLEMENT_RESULT;
+    }
+
+    const queryEmbedding = await this.resolveQueryEmbeddingNow({
+      workspaceId: params.workspaceId,
+      runId: params.runId,
+      queryId,
+      queryText: params.queryText,
+      baseCandidateCount: params.baseCandidateIds.length
+    });
+
+    if (queryEmbedding === null) {
+      return EMPTY_SUPPLEMENT_RESULT;
+    }
+
+    return await this.buildSupplementFromQueryEmbedding({
+      workspaceId: params.workspaceId,
+      runId: params.runId,
+      queryId,
+      queryEmbedding,
+      storedVectors,
+      eligibleMemories: params.eligibleMemories,
+      baseCandidateIds: params.baseCandidateIds,
+      maxSupplement: params.maxSupplement
+    });
+  }
+
+  public async querySupplementIfReady(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly eligibleMemories: readonly Readonly<MemoryEntry>[];
+    readonly baseCandidateIds: readonly string[];
+    readonly maxSupplement: number;
+    readonly preparedQuery: PreparedEmbeddingQueryHandle;
+  }): Promise<EmbeddingRecallSupplementResult> {
+    if (params.maxSupplement <= 0 || params.eligibleMemories.length === 0) {
+      return EMPTY_SUPPLEMENT_RESULT;
+    }
+
+    const storedVectors = await this.loadStoredVectors({
+      workspaceId: params.workspaceId,
+      runId: params.runId,
+      queryId: params.preparedQuery.queryId,
+      eligibleMemories: params.eligibleMemories,
+      baseCandidateCount: params.baseCandidateIds.length
+    });
+
+    if (storedVectors === null || storedVectors.length === 0) {
+      return EMPTY_SUPPLEMENT_RESULT;
+    }
+
+    const snapshot = params.preparedQuery.getSnapshot();
+    if (snapshot.status === "pending") {
+      await this.recordDegraded({
+        workspaceId: params.workspaceId,
+        runId: params.runId,
+        queryId: params.preparedQuery.queryId,
+        reason: "query_embedding_pending",
+        baseCandidateCount: params.baseCandidateIds.length,
+        fallbackCandidateCount: params.baseCandidateIds.length
+      });
+      return EMPTY_SUPPLEMENT_RESULT;
+    }
+
+    if (snapshot.status !== "ready") {
+      await this.recordDegraded({
+        workspaceId: params.workspaceId,
+        runId: params.runId,
+        queryId: params.preparedQuery.queryId,
+        reason: snapshot.reason,
+        baseCandidateCount: params.baseCandidateIds.length,
+        fallbackCandidateCount: params.baseCandidateIds.length
+      });
+      return EMPTY_SUPPLEMENT_RESULT;
+    }
+
+    return await this.buildSupplementFromQueryEmbedding({
+      workspaceId: params.workspaceId,
+      runId: params.runId,
+      queryId: params.preparedQuery.queryId,
+      queryEmbedding: snapshot.embedding,
+      storedVectors,
+      eligibleMemories: params.eligibleMemories,
+      baseCandidateIds: params.baseCandidateIds,
+      maxSupplement: params.maxSupplement
+    });
+  }
+
+  private async loadStoredVectors(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly queryId: string;
+    readonly eligibleMemories: readonly Readonly<MemoryEntry>[];
+    readonly baseCandidateCount: number;
+  }): Promise<readonly Readonly<EmbeddingVectorRecord>[] | null> {
+    try {
+      return await this.dependencies.embeddingRepo.listByObjectIds(
+        params.workspaceId,
+        params.eligibleMemories.map((memory) => memory.object_id)
+      );
+    } catch (error) {
+      const message = toErrorMessage(error);
+      this.warn("embedding supplement degraded", {
+        workspace_id: params.workspaceId,
+        run_id: params.runId,
+        reason: "local_vector_lookup_failed",
+        error: message
+      });
+      await this.recordDegraded({
+        workspaceId: params.workspaceId,
+        runId: params.runId,
+        queryId: params.queryId,
+        reason: "local_vector_lookup_failed",
+        baseCandidateCount: params.baseCandidateCount,
+        fallbackCandidateCount: params.baseCandidateCount
+      });
+      return null;
+    }
+  }
+
+  private async resolveQueryEmbeddingNow(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly queryId: string;
+    readonly queryText: string;
+    readonly baseCandidateCount: number;
+  }): Promise<Float32Array | null> {
+    try {
+      const embeddings = await this.dependencies.provider.embedTexts([params.queryText], {
+        timeoutMs: QUERY_TIMEOUT_MS
+      });
+      if (embeddings.length !== 1) {
+        throw new Error(`Expected exactly one query embedding, received ${embeddings.length}.`);
+      }
+
+      return new Float32Array(embeddings[0]!);
+    } catch (error) {
+      const message = toErrorMessage(error);
+      this.warn("embedding supplement degraded", {
+        workspace_id: params.workspaceId,
+        run_id: params.runId,
+        reason: "query_embedding_failed",
+        error: message
+      });
+      await this.recordDegraded({
+        workspaceId: params.workspaceId,
+        runId: params.runId,
+        queryId: params.queryId,
+        reason: "query_embedding_failed",
+        baseCandidateCount: params.baseCandidateCount,
+        fallbackCandidateCount: params.baseCandidateCount
+      });
+      return null;
+    }
+  }
+
+  private async buildSupplementFromQueryEmbedding(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly queryId: string;
+    readonly queryEmbedding: Float32Array;
+    readonly storedVectors: readonly Readonly<EmbeddingVectorRecord>[];
+    readonly eligibleMemories: readonly Readonly<MemoryEntry>[];
+    readonly baseCandidateIds: readonly string[];
+    readonly maxSupplement: number;
+  }): Promise<EmbeddingRecallSupplementResult> {
+    const startedAtEpochMs = Date.now();
+    const eligibleMemoryMap = new Map(
+      params.eligibleMemories.map((memory) => [memory.object_id, memory] as const)
+    );
+    const hints = params.storedVectors
+      .filter(
+        (record) =>
+          record.provider_kind === this.dependencies.provider.providerKind &&
+          record.model_id === this.dependencies.provider.modelId &&
+          record.schema_version === this.dependencies.provider.schemaVersion &&
+          record.dimensions === params.queryEmbedding.length
+      )
+      .flatMap((record) => {
+        const memory = eligibleMemoryMap.get(record.object_id);
+        if (memory === undefined) {
+          return [];
+        }
+
+        if (record.content_hash !== hashMemoryContent(memory.content)) {
+          return [];
+        }
+
+        const normalizedSimilarity = clamp01(
+          cosineSimilarity(params.queryEmbedding, record.embedding)
+        );
+        if (normalizedSimilarity <= 0) {
+          return [];
+        }
+
+        return [
+          Object.freeze({
+            object_id: record.object_id,
+            normalized_similarity: normalizedSimilarity
+          })
+        ];
+      })
+      .sort((left, right) => {
+        const similarityDelta = right.normalized_similarity - left.normalized_similarity;
+        if (similarityDelta !== 0) {
+          return similarityDelta;
+        }
+
+        return left.object_id.localeCompare(right.object_id);
+      });
+
+    const latencyMs = Math.max(0, Date.now() - startedAtEpochMs);
+    await this.appendTelemetrySafely({
+      stage: "queried",
+      workspaceId: params.workspaceId,
+      runId: params.runId,
+      queryId: params.queryId,
+      entry: {
+        event_type: PhaseCExtensionEventType.RECALL_EMBEDDING_SUPPLEMENT_QUERIED,
+        entity_type: "recall_embedding_supplement",
+        entity_id: params.queryId,
+        workspace_id: params.workspaceId,
+        run_id: params.runId,
+        caused_by: "system",
+        revision: 0,
+        payload_json: RecallEmbeddingSupplementQueriedPayloadSchema.parse({
+          workspace_id: params.workspaceId,
+          run_id: params.runId,
+          query_id: params.queryId,
+          requested_limit: params.maxSupplement,
+          returned_candidate_count: hints.length,
+          latency_ms: latencyMs,
+          queried_at: this.now()
+        })
+      }
+    });
+
+    const baseCandidateIdSet = new Set(params.baseCandidateIds);
+    const supplementaryEntries = hints
+      .filter((hint) => !baseCandidateIdSet.has(hint.object_id))
+      .slice(0, params.maxSupplement)
+      .flatMap((hint) => {
+        const memory = eligibleMemoryMap.get(hint.object_id);
+        return memory === undefined ? [] : [memory];
+      });
+
+    await this.appendTelemetrySafely({
+      stage: "merged",
+      workspaceId: params.workspaceId,
+      runId: params.runId,
+      queryId: params.queryId,
+      entry: {
+        event_type: PhaseCExtensionEventType.RECALL_EMBEDDING_SUPPLEMENT_MERGED,
+        entity_type: "recall_embedding_supplement",
+        entity_id: params.queryId,
+        workspace_id: params.workspaceId,
+        run_id: params.runId,
+        caused_by: "system",
+        revision: 0,
+        payload_json: RecallEmbeddingSupplementMergedPayloadSchema.parse({
+          workspace_id: params.workspaceId,
+          run_id: params.runId,
+          query_id: params.queryId,
+          base_candidate_count: params.baseCandidateIds.length,
+          supplement_candidate_count: supplementaryEntries.length,
+          merged_candidate_count: params.baseCandidateIds.length + supplementaryEntries.length,
+          merged_at: this.now()
+        })
+      }
+    });
+
+    return Object.freeze({
+      supplementaryEntries: Object.freeze([...supplementaryEntries]),
+      similarityHintsByObjectId: Object.freeze(
+        Object.fromEntries(hints.map((hint) => [hint.object_id, hint] as const))
+      )
+    });
+  }
+
+  private async recordDegraded(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly queryId: string;
+    readonly reason: string;
+    readonly baseCandidateCount: number;
+    readonly fallbackCandidateCount: number;
+  }): Promise<void> {
+    try {
+      await this.dependencies.eventLogRepo.append({
+        event_type: PhaseCExtensionEventType.RECALL_EMBEDDING_SUPPLEMENT_DEGRADED,
+        entity_type: "recall_embedding_supplement",
+        entity_id: params.queryId,
+        workspace_id: params.workspaceId,
+        run_id: params.runId,
+        caused_by: "system",
+        revision: 0,
+        payload_json: RecallEmbeddingSupplementDegradedPayloadSchema.parse({
+          workspace_id: params.workspaceId,
+          run_id: params.runId,
+          query_id: params.queryId,
+          degradation_reason: params.reason,
+          base_candidate_count: params.baseCandidateCount,
+          fallback_candidate_count: params.fallbackCandidateCount,
+          degraded_at: this.now()
+        })
+      });
+    } catch (error) {
+      this.warn("embedding supplement degraded telemetry failed", {
+        workspace_id: params.workspaceId,
+        run_id: params.runId,
+        query_id: params.queryId,
+        stage: "event_log",
+        error: toErrorMessage(error)
+      });
+    }
+
+    try {
+      await this.dependencies.healthJournalRecorder?.record({
+        event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
+        workspace_id: params.workspaceId,
+        run_id: params.runId,
+        summary: "Embedding supplement degraded to keyword-only recall.",
+        detail_json: {
+          query_id: params.queryId,
+          reason: params.reason,
+          base_candidate_count: params.baseCandidateCount,
+          fallback_candidate_count: params.fallbackCandidateCount,
+          provider_kind: this.dependencies.provider.providerKind,
+          model_id: this.dependencies.provider.modelId,
+          embedding_enabled: this.dependencies.provider.isAvailable
+        }
+      });
+    } catch (error) {
+      this.warn("embedding supplement degraded telemetry failed", {
+        workspace_id: params.workspaceId,
+        run_id: params.runId,
+        query_id: params.queryId,
+        stage: "health_journal",
+        error: toErrorMessage(error)
+      });
+    }
+  }
+
+  private async appendTelemetrySafely(params: {
+    readonly stage: "queried" | "merged";
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly queryId: string;
+    readonly entry: Omit<EventLogEntry, "event_id" | "created_at">;
+  }): Promise<void> {
+    try {
+      await this.dependencies.eventLogRepo.append(params.entry);
+    } catch (error) {
+      this.warn("embedding supplement telemetry failed", {
+        workspace_id: params.workspaceId,
+        run_id: params.runId,
+        query_id: params.queryId,
+        stage: params.stage,
+        error: toErrorMessage(error)
+      });
+    }
+  }
+}
+
+export interface OpenAIEmbeddingClientOptions {
+  readonly apiKey: string | null;
+  readonly model?: string;
+  readonly baseUrl?: string;
+  readonly fetchImpl?: typeof fetch;
+}
+
+export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
+  public readonly providerKind = "openai";
+  public readonly modelId: string;
+  public readonly schemaVersion = 1;
+  public readonly isAvailable: boolean;
+
+  private readonly apiKey: string | null;
+  private readonly baseUrl: string;
+  private readonly fetchImpl: typeof fetch;
+
+  public constructor(options: OpenAIEmbeddingClientOptions) {
+    this.apiKey = options.apiKey;
+    this.modelId = options.model?.trim() || "text-embedding-3-small";
+    this.baseUrl = normalizeBaseUrl(options.baseUrl ?? "https://api.openai.com/v1");
+    this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
+    this.isAvailable = typeof this.apiKey === "string" && this.apiKey.length > 0;
+  }
+
+  public async embedTexts(
+    texts: readonly string[],
+    options: {
+      readonly timeoutMs: number;
+    }
+  ): Promise<readonly Float32Array[]> {
+    if (!this.isAvailable) {
+      throw new Error("OPENAI_API_KEY is not configured for embeddings.");
+    }
+
+    if (texts.length === 0) {
+      return Object.freeze([]);
+    }
+
+    const abortController = new AbortController();
+    const timeoutHandle = setTimeout(() => abortController.abort("embedding-timeout"), options.timeoutMs);
+    timeoutHandle.unref?.();
+
+    try {
+      const response = await this.fetchImpl(`${this.baseUrl}/embeddings`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${this.apiKey}`
+        },
+        body: JSON.stringify({
+          model: this.modelId,
+          input: texts
+        }),
+        signal: abortController.signal
+      });
+
+      if (!response.ok) {
+        throw new Error(`Embedding request failed with status ${response.status}.`);
+      }
+
+      const payload = (await response.json()) as {
+        readonly data?: ReadonlyArray<{
+          readonly embedding?: readonly number[];
+          readonly index?: number;
+        }>;
+      };
+      const data = [...(payload.data ?? [])].sort(
+        (left, right) => (left.index ?? 0) - (right.index ?? 0)
+      );
+
+      if (data.length !== texts.length) {
+        throw new Error(`Embedding request returned ${data.length} vectors for ${texts.length} inputs.`);
+      }
+
+      return Object.freeze(
+        data.map((entry, index) => {
+          if (!Array.isArray(entry.embedding) || entry.embedding.length === 0) {
+            throw new Error(`Embedding response ${index} did not include a valid vector.`);
+          }
+
+          return new Float32Array(entry.embedding);
+        })
+      );
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
+  }
+}
+
+function createPreparedEmbeddingQueryHandle(
+  queryId: string,
+  snapshotOrGetter:
+    | PreparedEmbeddingQuerySnapshot
+    | (() => PreparedEmbeddingQuerySnapshot)
+): PreparedEmbeddingQueryHandle {
+  return {
+    queryId,
+    getSnapshot:
+      typeof snapshotOrGetter === "function"
+        ? snapshotOrGetter
+        : () => snapshotOrGetter
+  };
+}
+
+function normalizeBaseUrl(value: string): string {
+  return value.endsWith("/") ? value.slice(0, -1) : value;
+}
+
+function hashMemoryContent(content: string): string {
+  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
+}
+
+function cosineSimilarity(left: Float32Array, right: Float32Array): number {
+  if (left.length !== right.length || left.length === 0) {
+    return 0;
+  }
+
+  let dot = 0;
+  let leftMagnitude = 0;
+  let rightMagnitude = 0;
+
+  for (let index = 0; index < left.length; index += 1) {
+    const leftValue = left[index] ?? 0;
+    const rightValue = right[index] ?? 0;
+    dot += leftValue * rightValue;
+    leftMagnitude += leftValue * leftValue;
+    rightMagnitude += rightValue * rightValue;
+  }
+
+  if (leftMagnitude === 0 || rightMagnitude === 0) {
+    return 0;
+  }
+
+  return dot / (Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude));
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.min(1, Math.max(0, value));
+}
+
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
