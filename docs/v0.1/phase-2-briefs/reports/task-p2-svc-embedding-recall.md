@@ -14,6 +14,7 @@
     `P2-svc-memory` and satisfies the copied test import.
 - Owned docs changed:
   - `docs/v0.1/phase-2-briefs/reports/task-p2-svc-embedding-recall.md`
+  - `docs/v0.1/INDEX.md`
   - `docs/handbook/runtime-status.md`
   - `docs/handbook/code-map.md`
 
@@ -50,6 +51,8 @@ rewrite and the task-card core/storage test-boundary adapter point.
 - `rtk pnpm exec tsc --noEmit -p packages/core` - passed
 - `rtk pnpm exec vitest run --project @do-soul/alaya-core -t "EmbeddingRecallService"` - passed; 1 file / 7 tests passed
 - `rtk git diff --check` - passed
+- Post-review closeout repair: `docs/v0.1/INDEX.md` now includes the
+  `P2-svc-embedding-recall` implementation-ready row required by AC6.
 
 ## Architecture Compliance
 

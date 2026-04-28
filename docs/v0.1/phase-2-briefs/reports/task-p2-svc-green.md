@@ -12,6 +12,7 @@
 - Owned docs changed:
   - `docs/v0.1/phase-2-briefs/task-p2-svc-green.md`
   - `docs/v0.1/phase-2-briefs/reports/task-p2-svc-green.md`
+  - `docs/v0.1/INDEX.md`
   - `docs/handbook/runtime-status.md`
   - `docs/handbook/backlog.md`
 
@@ -58,6 +59,8 @@ Alaya-specific `setGrace()` audit repair required by invariants §7 and §10.
 - `rtk git diff --check` - passed
 - Post-review rerun after `P2-svc-embedding-recall` boundary repair:
   `rtk pnpm exec tsc --noEmit -p packages/core` - passed
+- Post-review closeout repair: `docs/v0.1/INDEX.md` now includes the
+  `P2-svc-green` implementation-ready row required by AC6.
 
 ## Architecture Compliance
 

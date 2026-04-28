@@ -30,6 +30,32 @@ Phase 0 → Gate-0
 | Phase 4 | Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI | 24 cards (target) | not-started | Gate-4 |
 | Phase 5 | Wave 5: E2E + Benchmark + Graph Contract + Final Review | 4 cards (target) | not-started | Gate-5 |
 
+## Phase 2 — Card Closeout Status
+
+This table tracks Phase 2 cards with completion reports. Omitted Phase 2 cards
+remain not-started or in-progress under `phase-2-briefs/README.md`.
+
+| Card | Readiness | Report |
+|---|---|---|
+| P2-repos-batch-1 | implementation-ready | [report](./phase-2-briefs/reports/task-p2-repos-batch-1.md) |
+| P2-repos-batch-2 | implementation-ready | [report](./phase-2-briefs/reports/task-p2-repos-batch-2.md) |
+| P2-repos-batch-3 | implementation-ready | [report](./phase-2-briefs/reports/task-p2-repos-batch-3.md) |
+| P2-repos-batch-4 | implementation-ready | [report](./phase-2-briefs/reports/task-p2-repos-batch-4.md) |
+| P2-repos-batch-5 | implementation-ready | [report](./phase-2-briefs/reports/task-p2-repos-batch-5.md) |
+| P2-repos-batch-6 | implementation-ready | [report](./phase-2-briefs/reports/task-p2-repos-batch-6.md) |
+| P2-barrel-storage | implementation-ready | [report](./phase-2-briefs/reports/task-p2-barrel-storage.md) |
+| P2-svc-output-shaping | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-output-shaping.md) |
+| P2-svc-event-publisher | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-event-publisher.md) |
+| P2-svc-narrative-budget | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-narrative-budget.md) |
+| P2-svc-health-journal | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-health-journal.md) |
+| P2-svc-evidence | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-evidence.md) |
+| P2-svc-signal | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-signal.md) |
+| P2-svc-memory | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-memory.md) |
+| P2-svc-governance-lease | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-governance-lease.md) |
+| P2-svc-session-override | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-session-override.md) |
+| P2-svc-green | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-green.md) |
+| P2-svc-embedding-recall | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-embedding-recall.md) |
+
 ## Phase 0 — Reset & Source Mirror
 
 Status: **done**. The reset was executed by the Claude Code
