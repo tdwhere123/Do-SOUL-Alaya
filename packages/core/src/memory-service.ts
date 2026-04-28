@@ -570,11 +570,11 @@ function parseUpdateFields(fields: MemoryEntryUpdateFields): MemoryEntryUpdateFi
   }
 
   if (parsed.domain_tags !== undefined) {
-    anotifyrtStringArray(parsed.domain_tags, "domain_tags");
+    assertStringArray(parsed.domain_tags, "domain_tags");
   }
 
   if (parsed.evidence_refs !== undefined) {
-    anotifyrtStringArray(parsed.evidence_refs, "evidence_refs");
+    assertStringArray(parsed.evidence_refs, "evidence_refs");
   }
 
   const parsedStorageTier =
@@ -586,7 +586,7 @@ function parseUpdateFields(fields: MemoryEntryUpdateFields): MemoryEntryUpdateFi
   };
 }
 
-function anotifyrtStringArray(value: readonly string[], field: "domain_tags" | "evidence_refs"): void {
+function assertStringArray(value: readonly string[], field: "domain_tags" | "evidence_refs"): void {
   for (const item of value) {
     if (item.trim().length === 0) {
       throw new CoreError("VALIDATION", `${field} cannot contain empty items`);

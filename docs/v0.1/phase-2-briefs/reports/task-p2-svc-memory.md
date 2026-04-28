@@ -45,17 +45,20 @@ Source existence check passed for:
 - `vendor/do-what-new-snapshot/packages/core/src/__tests__/memory-service.test.ts`
 - `vendor/do-what-new-snapshot/packages/core/src/__tests__/mock-types.ts`
 
-The target files match the vendor files after applying only the package alias
-rewrite and the task-card SSE-to-runtime-notifier adapter point.
+The target implementation follows the vendor implementation after applying the
+package alias rewrite, the task-card SSE-to-runtime-notifier adapter point, and
+the explicit Alaya invariant repair listed in §2.3. The source test file remains
+the base test port and now includes two review-fix regression tests for the
+Alaya invariant repair.
 
 ## Verification
 
 - `rtk node -e "const fs=require('fs');const paths=['vendor/do-what-new-snapshot/packages/core/src/memory-service.ts','vendor/do-what-new-snapshot/packages/core/src/__tests__/memory-service.test.ts','vendor/do-what-new-snapshot/packages/core/src/__tests__/mock-types.ts'];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}console.log('ok source paths exist');"` - passed
-- Normalized vendor parity check - passed
+- Focused source-fidelity check for `assertStringArray` helper naming - passed
 - `rtk pnpm install` - passed
 - `rtk pnpm build` - passed
 - `rtk pnpm exec tsc --noEmit -p packages/core` - passed
-- `rtk pnpm exec vitest run --project @do-soul/alaya-core -t "MemoryService"` - passed; 1 file / 17 tests passed
+- `rtk pnpm exec vitest run --project @do-soul/alaya-core -t "MemoryService"` - passed; 1 file / 19 tests passed
 - `rtk git diff --check` - passed
 
 ## Architecture Compliance
