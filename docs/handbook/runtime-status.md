@@ -39,6 +39,7 @@ each Phase Gate.
 | MemoryService | `implementation-ready` | `live-event-ready` | P2-svc-memory |
 | EvidenceService | `implementation-ready` | `live-event-ready` | P2-svc-evidence |
 | SignalService | `implementation-ready` | `live-event-ready` | P2-svc-signal |
+| GlobalMemoryRecallService | `implementation-ready` | `live-event-ready` | P2-svc-global-recall |
 | RecallService | `not-started` | `live-event-ready` | P2-svc-recall |
 | EmbeddingRecallService | `implementation-ready` | `live-event-ready` | P2-svc-embedding-recall |
 | EmbeddingBackfillHandler | `implementation-ready` | `live-event-ready` | P2-svc-embedding-pipeline |

@@ -51,6 +51,7 @@ remain not-started or in-progress under `phase-2-briefs/README.md`.
 | P2-svc-evidence | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-evidence.md) |
 | P2-svc-signal | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-signal.md) |
 | P2-svc-memory | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-memory.md) |
+| P2-svc-global-recall | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-global-recall.md) |
 | P2-svc-governance-lease | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-governance-lease.md) |
 | P2-svc-session-override | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-session-override.md) |
 | P2-svc-green | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-green.md) |
