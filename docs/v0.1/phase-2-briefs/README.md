@@ -37,11 +37,15 @@ adapt-and-port.
 
 ## Card Groups
 
-### 2A. Storage Repos (6 batches, 5-7 codex parallel)
+### 2A. Storage Repos (6 batches, integrated verification)
 
 Per review B5, batch lists are corrected against the actual vendor
 directory `vendor/do-what-new-snapshot/packages/storage/src/repos/`.
 There are 42 real repo files; every repo file is owned exactly once.
+The source tests cross-instantiate repos from other batches and several
+tests import through the storage barrel, so the batches are owned as
+separate card/report units but must be ported and verified on one
+integrated storage branch with `P2-barrel-storage`.
 
 | Card ID | Repos |
 |---|---|
@@ -134,10 +138,11 @@ Phase 3, since P3 services also export through it.)
 
 ## Parallelism Notes
 
-- 2A repos can run all 6 batches in parallel **only after**
-  P1-storage-shared landed. Batch 6 explicitly includes
-  `garden-data-ports` (review I4), so 2C garden cards depend on
-  batch-6 closing.
+- 2A repo files remain split into 6 ownership batches, but their
+  upstream tests are not parallel-isolated. Port and verify the repo
+  batches with `P2-barrel-storage` on one integrated storage branch.
+  Batch 6 explicitly includes `garden-data-ports` (review I4), so 2C
+  garden cards depend on batch-6 closing.
 - 2B services follow the sub-wave ordering above; 2B.0 first.
 - 2C garden batches wait for 2B.0 + 2B.1 (services that Garden
   consumes) AND batch-6 (garden-data-ports adapter).

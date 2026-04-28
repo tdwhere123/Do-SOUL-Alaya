@@ -1,0 +1,339 @@
+import {
+  EvidenceCapsuleSchema,
+  EvidenceHealthStateSchema,
+  type EvidenceCapsule,
+  type EvidenceHealthState
+} from "@do-soul/alaya-protocol";
+import type { StorageDatabase } from "../db.js";
+import { StorageError } from "../errors.js";
+import { deepFreeze } from "./shared/deep-freeze.js";
+import { parseTimestamp } from "./shared/validators.js";
+
+export interface EvidenceCapsuleRepo {
+  create(capsule: EvidenceCapsule): Promise<Readonly<EvidenceCapsule>>;
+  findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;
+  findByRunId(runId: string): Promise<readonly Readonly<EvidenceCapsule>[]>;
+  findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<EvidenceCapsule>[]>;
+  findByHealth(health: EvidenceHealthState): Promise<readonly Readonly<EvidenceCapsule>[]>;
+  updateHealth(
+    objectId: string,
+    health: EvidenceHealthState,
+    updatedAt: string
+  ): Promise<Readonly<EvidenceCapsule>>;
+}
+
+interface EvidenceCapsuleRow {
+  readonly object_id: string;
+  readonly object_kind: string;
+  readonly schema_version: number;
+  readonly lifecycle_state: string;
+  readonly created_at: string;
+  readonly updated_at: string;
+  readonly created_by: string;
+  readonly evidence_kind: string;
+  readonly semantic_anchor: string;
+  readonly event_anchor: string | null;
+  readonly physical_anchor: string | null;
+  readonly evidence_health_state: string;
+  readonly gist: string;
+  readonly excerpt: string | null;
+  readonly source_hash: string | null;
+  readonly run_id: string;
+  readonly workspace_id: string;
+  readonly surface_id: string | null;
+}
+
+export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
+  private readonly createStatement;
+  private readonly findByIdStatement;
+  private readonly findByRunIdStatement;
+  private readonly findByWorkspaceIdStatement;
+  private readonly findByHealthStatement;
+  private readonly updateHealthStatement;
+
+  public constructor(private readonly db: StorageDatabase) {
+    this.createStatement = db.connection.prepare(`
+      INSERT INTO evidence_capsules (
+        object_id,
+        object_kind,
+        schema_version,
+        lifecycle_state,
+        created_at,
+        updated_at,
+        created_by,
+        evidence_kind,
+        semantic_anchor,
+        event_anchor,
+        physical_anchor,
+        evidence_health_state,
+        gist,
+        excerpt,
+        source_hash,
+        run_id,
+        workspace_id,
+        surface_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    this.findByIdStatement = db.connection.prepare(`
+      SELECT
+        object_id,
+        object_kind,
+        schema_version,
+        lifecycle_state,
+        created_at,
+        updated_at,
+        created_by,
+        evidence_kind,
+        semantic_anchor,
+        event_anchor,
+        physical_anchor,
+        evidence_health_state,
+        gist,
+        excerpt,
+        source_hash,
+        run_id,
+        workspace_id,
+        surface_id
+      FROM evidence_capsules
+      WHERE object_id = ?
+      LIMIT 1
+    `);
+    this.findByRunIdStatement = db.connection.prepare(`
+      SELECT
+        object_id,
+        object_kind,
+        schema_version,
+        lifecycle_state,
+        created_at,
+        updated_at,
+        created_by,
+        evidence_kind,
+        semantic_anchor,
+        event_anchor,
+        physical_anchor,
+        evidence_health_state,
+        gist,
+        excerpt,
+        source_hash,
+        run_id,
+        workspace_id,
+        surface_id
+      FROM evidence_capsules
+      WHERE run_id = ?
+      ORDER BY created_at ASC, object_id ASC
+    `);
+    this.findByWorkspaceIdStatement = db.connection.prepare(`
+      SELECT
+        object_id,
+        object_kind,
+        schema_version,
+        lifecycle_state,
+        created_at,
+        updated_at,
+        created_by,
+        evidence_kind,
+        semantic_anchor,
+        event_anchor,
+        physical_anchor,
+        evidence_health_state,
+        gist,
+        excerpt,
+        source_hash,
+        run_id,
+        workspace_id,
+        surface_id
+      FROM evidence_capsules
+      WHERE workspace_id = ?
+      ORDER BY created_at ASC, object_id ASC
+    `);
+    this.findByHealthStatement = db.connection.prepare(`
+      SELECT
+        object_id,
+        object_kind,
+        schema_version,
+        lifecycle_state,
+        created_at,
+        updated_at,
+        created_by,
+        evidence_kind,
+        semantic_anchor,
+        event_anchor,
+        physical_anchor,
+        evidence_health_state,
+        gist,
+        excerpt,
+        source_hash,
+        run_id,
+        workspace_id,
+        surface_id
+      FROM evidence_capsules
+      WHERE evidence_health_state = ?
+      ORDER BY created_at ASC, object_id ASC
+    `);
+    this.updateHealthStatement = db.connection.prepare(`
+      UPDATE evidence_capsules
+      SET evidence_health_state = ?, updated_at = ?
+      WHERE object_id = ?
+    `);
+  }
+
+  public async create(capsule: EvidenceCapsule): Promise<Readonly<EvidenceCapsule>> {
+    const parsedCapsule = parseEvidenceCapsule(capsule);
+
+    try {
+      this.createStatement.run(
+        parsedCapsule.object_id,
+        parsedCapsule.object_kind,
+        parsedCapsule.schema_version,
+        parsedCapsule.lifecycle_state,
+        parsedCapsule.created_at,
+        parsedCapsule.updated_at,
+        parsedCapsule.created_by,
+        parsedCapsule.evidence_kind,
+        JSON.stringify(parsedCapsule.semantic_anchor),
+        parsedCapsule.event_anchor === null ? null : JSON.stringify(parsedCapsule.event_anchor),
+        parsedCapsule.physical_anchor === null ? null : JSON.stringify(parsedCapsule.physical_anchor),
+        parsedCapsule.evidence_health_state,
+        parsedCapsule.gist,
+        parsedCapsule.excerpt,
+        parsedCapsule.source_hash,
+        parsedCapsule.run_id,
+        parsedCapsule.workspace_id,
+        parsedCapsule.surface_id
+      );
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to create evidence capsule ${parsedCapsule.object_id}.`,
+        error
+      );
+    }
+
+    return parsedCapsule;
+  }
+
+  public async findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null> {
+    try {
+      const row = this.findByIdStatement.get(objectId) as EvidenceCapsuleRow | undefined;
+      return row === undefined ? null : parseEvidenceCapsuleRow(row);
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", `Failed to load evidence capsule ${objectId}.`, error);
+    }
+  }
+
+  public async findByRunId(runId: string): Promise<readonly Readonly<EvidenceCapsule>[]> {
+    try {
+      const rows = this.findByRunIdStatement.all(runId) as EvidenceCapsuleRow[];
+      return rows.map((row) => parseEvidenceCapsuleRow(row));
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", `Failed to list evidence capsules for run ${runId}.`, error);
+    }
+  }
+
+  public async findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<EvidenceCapsule>[]> {
+    try {
+      const rows = this.findByWorkspaceIdStatement.all(workspaceId) as EvidenceCapsuleRow[];
+      return rows.map((row) => parseEvidenceCapsuleRow(row));
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to list evidence capsules for workspace ${workspaceId}.`,
+        error
+      );
+    }
+  }
+
+  public async findByHealth(health: EvidenceHealthState): Promise<readonly Readonly<EvidenceCapsule>[]> {
+    const parsedHealth = parseEvidenceHealthState(health);
+
+    try {
+      const rows = this.findByHealthStatement.all(parsedHealth) as EvidenceCapsuleRow[];
+      return rows.map((row) => parseEvidenceCapsuleRow(row));
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to list evidence capsules by health state ${parsedHealth}.`,
+        error
+      );
+    }
+  }
+
+  public async updateHealth(
+    objectId: string,
+    health: EvidenceHealthState,
+    updatedAt: string
+  ): Promise<Readonly<EvidenceCapsule>> {
+    const parsedHealth = parseEvidenceHealthState(health);
+    const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+
+    try {
+      const result = this.updateHealthStatement.run(parsedHealth, parsedUpdatedAt, objectId);
+
+      if (result.changes === 0) {
+        throw new StorageError("NOT_FOUND", `Evidence capsule ${objectId} was not found.`);
+      }
+
+      const capsule = await this.findById(objectId);
+
+      if (capsule === null) {
+        throw new StorageError("NOT_FOUND", `Evidence capsule ${objectId} was not found after update.`);
+      }
+
+      return capsule;
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError("QUERY_FAILED", `Failed to update evidence health for ${objectId}.`, error);
+    }
+  }
+}
+
+function parseEvidenceCapsule(value: EvidenceCapsule): Readonly<EvidenceCapsule> {
+  try {
+    return deepFreeze(EvidenceCapsuleSchema.parse(value));
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate evidence capsule.", error);
+  }
+}
+
+function parseEvidenceCapsuleRow(row: EvidenceCapsuleRow): Readonly<EvidenceCapsule> {
+  try {
+    return deepFreeze(
+      EvidenceCapsuleSchema.parse({
+        object_id: row.object_id,
+        object_kind: row.object_kind,
+        schema_version: row.schema_version,
+        lifecycle_state: row.lifecycle_state,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        created_by: row.created_by,
+        evidence_kind: row.evidence_kind,
+        semantic_anchor: JSON.parse(row.semantic_anchor),
+        event_anchor: row.event_anchor === null ? null : JSON.parse(row.event_anchor),
+        physical_anchor: row.physical_anchor === null ? null : JSON.parse(row.physical_anchor),
+        evidence_health_state: row.evidence_health_state,
+        gist: row.gist,
+        excerpt: row.excerpt,
+        source_hash: row.source_hash,
+        run_id: row.run_id,
+        workspace_id: row.workspace_id,
+        surface_id: row.surface_id
+      })
+    );
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate evidence capsule row.", error);
+  }
+}
+
+function parseEvidenceHealthState(health: EvidenceHealthState): EvidenceHealthState {
+  try {
+    return EvidenceHealthStateSchema.parse(health);
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate evidence health state.", error);
+  }
+}
+
+const parseUpdatedAt = parseTimestamp;
+
