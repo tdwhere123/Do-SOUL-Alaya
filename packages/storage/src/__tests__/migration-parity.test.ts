@@ -30,6 +30,9 @@ function sha256File(filePath: string): string {
 
 describe("migration parity", () => {
   it("keeps storage migration filenames and content byte-for-byte with the vendor snapshot", () => {
+    expect(fs.existsSync(sourceMigrationsDirectory)).toBe(true);
+    expect(fs.existsSync(targetMigrationsDirectory)).toBe(true);
+
     const sourceFiles = listSqlMigrations(sourceMigrationsDirectory);
     const targetFiles = listSqlMigrations(targetMigrationsDirectory);
 
