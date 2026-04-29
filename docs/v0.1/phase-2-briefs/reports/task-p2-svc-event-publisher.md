@@ -63,6 +63,15 @@ redesign:
   durable entry remains pending and later retryable instead of being pinned to a
   stale rejected retry promise.
 
+## Post-Gate-2 Docs Reconciliation
+
+The task card now mirrors the report-only review-fix outcomes above in
+`docs/v0.1/phase-2-briefs/task-p2-svc-event-publisher.md` §2.4 and AC7:
+batch propagation failure evidence, normalizer pending retry behavior,
+single-flight retry, and failed-retry recovery. This docs-only reconciliation
+addresses post-Gate-2 review finding I3 without runtime, protocol, schema, or
+vendor changes.
+
 ## Architecture Compliance
 
 - Alaya does not introduce SSE transport. Target code/tests contain no
