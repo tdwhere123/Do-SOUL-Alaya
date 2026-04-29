@@ -6,9 +6,17 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-015`.
+sequence. **Next available number**: `#BL-016`.
 
 ## Open Issues
+
+### #BL-015 — Trust state SQL persistence across daemon restart
+
+**Status**: Open
+**Owner**: `docs/v0.1/phase-4-briefs/task-p4-trust-state.md`
+**Close condition**: A new SQLite migration adds `trust_context_delivery` and `trust_usage_proof` tables; `TrustStateRecorder` persists records via a repo and survives daemon restart; `alaya status` numbers are stable across restart.
+
+P4-trust-state v0.1 keeps `ContextDeliveryRecord` / `UsageProofRecord` in process memory. This is acceptable because the Gate-4 demo and `alaya status` exercise a single daemon lifetime. For real long-lived attached agents the records must persist; this requires a migration (sequence number ≥ 056), a new repo, and the §2.5 reduction table moved behind the repo. Defer to v0.2.
 
 ### #BL-013 — Dedicated Green grace-transition event
 
