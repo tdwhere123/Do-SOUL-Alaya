@@ -6,7 +6,7 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-014`.
+sequence. **Next available number**: `#BL-015`.
 
 ## Open Issues
 
@@ -23,6 +23,20 @@ invariants require EventLog-first auditing for the eligible-to-grace state
 transition. The v0.1 repair uses the existing Green pierced payload with
 `revoke_reason = review_overdue` as an audit envelope while preserving durable
 `green_state = grace` and `revoke_reason = none`.
+
+### #BL-014 — Historical Gate-2 R1 wave-close commit hygiene gap
+
+**Status**: Open
+**Owner**: `docs/v0.1/phase-2-briefs/reports/post-gate-2-review.md`
+**Close condition**: A future phase or wave closeout proves that standalone
+review-fix commits survived the merge path, or documents a parent-approved
+exception before closeout while keeping R1/R4 strict.
+
+Post-Gate-2 review findings I1/I2 found that the synthesis/proposal
+SSE-to-runtime-notifier review-fix output was bundled into the historical
+Gate-2 wave-close commit `0aab73f`. The behavior is already verified and no
+history rewrite is planned; this issue tracks prevention so future closeout
+does not silently squash or bundle review-fix commits.
 
 ## Deferred (post v0.1)
 
