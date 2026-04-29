@@ -95,6 +95,15 @@ If you find yourself reaching for `requires-redesign`, stop and ask
 whether the divergence really needs to be in v0.1 or whether it can be
 deferred to v0.2 with a backlog issue.
 
+### Product-Scope Prune Rule
+
+Not every upstream feature should become a deferred Alaya backlog item. If an
+upstream file belongs to an agent-local command surface, GUI/TUI surface,
+runtime adapter, or other integration that is unrelated to the Alaya memory
+plugin core, the default decision is **prune**, not "defer for later." If the
+product relevance is unclear, stop and ask the user before adding it to a task
+card, completion report, or backlog.
+
 ## Anti-Patterns
 
 Reviewers reject the following on sight:
@@ -110,6 +119,8 @@ Reviewers reject the following on sight:
   I also added X").
 - Citing `requires-redesign` without an Alaya invariant or design
   charter to back it.
+- Adding product-unrelated upstream features to the backlog instead of pruning
+  them or asking for a product-scope decision.
 
 ## Source Path Discipline
 
