@@ -7,8 +7,8 @@
 > - **Source**: `n/a`
 > - **Target**: `apps/core-daemon/src/cli/install.ts`, `apps/core-daemon/src/__tests__/cli-install.test.ts`
 > - **Size**: M
-> - **Prerequisite**: P4-cli-bridge, P4-daemon-startup-ordering
-> - **Blocks**: P4-attach-codex, P4-attach-claude, Gate-4 demo
+> - **Prerequisite**: P4-cli-bridge, P4-daemon-startup-ordering, P4-secrets
+> - **Blocks**: P4-attach-codex, P4-attach-claude, P4-cli-detach, Gate-4 demo
 > - **Closing readiness label**: cli-consumable
 > - **Owner**: unassigned
 
@@ -20,9 +20,19 @@
 
 ## 1. Background & Goal
 
-**Background**: This card is part of the v0.1 port-first task-card set and exists to assign exact source ownership before implementation dispatch.
+**Background**: `alaya install` is the first-run interactive setup
+command. It bootstraps every runtime input the daemon needs from a
+fresh machine: durable storage location, provider configuration
+skeleton (with secret-refs, never plaintext keys), embedding feature
+flag, and the initial audit log row. Every subsequent CLI command
+(`attach`, `inspect`, `tools call`, `doctor`) assumes `install` has
+run successfully on the same machine.
 
-**Goal**: Deliver implement alaya install.
+**Goal**: A fresh machine running `rtk pnpm exec alaya install` can
+produce, via interactive prompts, the on-disk state required by the
+daemon at next boot (DB file, config dir, `.env` with secret-refs,
+audit init), and re-running it patches existing values without
+clobbering unset ones.
 
 ## 2. Allowed Scope
 
@@ -40,9 +50,76 @@
 - Do not edit shared barrels unless this card explicitly owns that barrel.
 - If a cited source path is missing or a source dependency forces files outside §2, return `BLOCKED` instead of expanding scope.
 
+### 2.3 Required Behavior
+
+**Config dir resolution.** Use XDG conventions:
+- `${ALAYA_CONFIG_DIR}` when set (escape hatch for tests).
+- Otherwise `${XDG_CONFIG_HOME:-$HOME/.config}/alaya/` on Linux/macOS.
+- Otherwise `%APPDATA%/alaya/` on Windows.
+
+The CLI MUST `mkdir -p` this directory (mode `0700`) before writing
+any file inside it.
+
+**Files written.**
+- `<config-dir>/alaya.toml` — non-secret runtime config (DB path,
+  worktree flag, embedding feature flag, default workspace id).
+  Initial section list: `[storage]`, `[runtime]`, `[embedding]`.
+- `<config-dir>/.env` — secret-ref envelope only. Mode `0600`. Each
+  line is `KEY=<secret-ref>` where `<secret-ref>` follows the syntax
+  defined by P4-secrets §2.3 (`env:NAME` or `file:/abs/path`).
+  Plaintext keys MUST NOT be written here; if the user pastes one,
+  the installer offers to write it to `<config-dir>/secrets/openai`
+  (mode `0600`) and store `file:<path>` in `.env`.
+- `<config-dir>/audit/install-<UTC-iso>.json` — single-line JSON
+  describing the install event for the daemon's audit log to
+  reconcile on next boot.
+
+**Interactive prompts (in order).**
+
+| # | Prompt | Default | Writes to |
+|---|---|---|---|
+| 1 | DB file path | `<config-dir>/alaya.db` | `alaya.toml` `[storage].db_path` |
+| 2 | Enable embedding supplement? (y/N) | `N` | `alaya.toml` `[embedding].enabled` and `.env` `DO_WHAT_ENABLE_EMBEDDING_SUPPLEMENT` |
+| 3 | (only if 2 = y) Embedding provider URL or `keep` to use OpenAI default | `keep` | `alaya.toml` `[embedding].provider_base_url` (omitted when `keep`) |
+| 4 | (only if 2 = y) Embedding model id | `text-embedding-3-small` | `alaya.toml` `[embedding].model_id` |
+| 5 | (only if 2 = y) API key source: `env`, `file`, `paste` | `env` | `.env` `OPENAI_API_KEY=<secret-ref>` |
+| 6 | (only if 2 = y AND 5 = `env`) Env var name | `OPENAI_API_KEY` | `.env` records `env:<name>` |
+| 7 | (only if 2 = y AND 5 = `file`) Path to existing key file | (no default) | `.env` records `file:<path>` |
+| 8 | (only if 2 = y AND 5 = `paste`) Key value | (hidden input) | written to `<config-dir>/secrets/openai` with `0600`, `.env` records `file:<that path>` |
+| 9 | Default workspace id | `default` | `alaya.toml` `[runtime].default_workspace` |
+| 10 | Worktree feature on? (y/N) | `N` | `alaya.toml` `[runtime].worktree_enabled` |
+
+**Re-run mode (patch, do not clobber).** When `alaya.toml` already
+exists, every prompt's default switches to the existing value. If the
+user accepts every default, the only thing written is a fresh audit
+row. Tests MUST prove this idempotency.
+
+**Non-interactive mode.** `alaya install --non-interactive --json
+<inline-json>` accepts the full answer set as a JSON object using the
+same field names as the prompts table. Used by tests and by the
+attach flow if it ever needs to reprovision.
+
+**Failure modes.**
+- Existing config dir with insufficient permissions: print remediation
+  and exit non-zero. Do not attempt to chmod.
+- Pasted key but `<config-dir>/secrets/` cannot be created at `0700`:
+  abort before any `.env` write so partial state is impossible.
+- Any write step fails: write the audit row with `status: "failed"`
+  and the partial state list, then exit non-zero. Reviewers MUST be
+  able to read this audit row to diagnose.
+
+**Out of scope (will be rejected at review).**
+- OS keychain integration (deferred to backlog #BL-009).
+- Non-OpenAI provider templates (deferred; pi-mono integration in
+  v0.2 per #BL-008).
+- Writing any field that does not appear in the prompts table.
+- Calling the daemon process; install operates on filesystem only.
+
 ## 3. Deferred
 
-Nothing deferred.
+- OS keychain support deferred to backlog #BL-009.
+- Non-OpenAI provider templates deferred to backlog #BL-008 (pi-mono
+  integration in v0.2).
 
 ## 4. Acceptance Criteria
 
@@ -67,5 +144,5 @@ Nothing deferred.
 
 No shared-file hazards.
 
-**Prerequisite**: P4-cli-bridge, P4-daemon-startup-ordering.
-**Blocks**: P4-attach-codex, P4-attach-claude, Gate-4 demo.
+**Prerequisite**: P4-cli-bridge, P4-daemon-startup-ordering, P4-secrets.
+**Blocks**: P4-attach-codex, P4-attach-claude, P4-cli-detach, Gate-4 demo.

@@ -7,8 +7,8 @@
 > - **Source**: `n/a`
 > - **Target**: `apps/core-daemon/src/cli/attach-codex.ts`, `apps/core-daemon/src/__tests__/attach-codex.test.ts`
 > - **Size**: M
-> - **Prerequisite**: P4-cli-bridge, P4-profile-mutation, P4-mcp-memory-tools, P4-mcp-server
-> - **Blocks**: Gate-4 demo
+> - **Prerequisite**: P4-cli-bridge, P4-profile-mutation, P4-mcp-memory-tools, P4-mcp-server, P4-cli-inspect
+> - **Blocks**: Gate-4 demo, P4-cli-detach
 > - **Closing readiness label**: cli-consumable
 > - **Owner**: unassigned
 
@@ -49,6 +49,21 @@
   or `soul.propose_memory_update`, and report delivery usage with
   `soul.report_context_usage`.
 - The profile must not mention `memory.*` aliases.
+- Profile mutation is two-step in one command: (1) MCP server entry
+  written to `~/.codex/config.toml` `[mcp_servers.alaya]` block; (2)
+  `/alaya-inspect` slash alias registered in the user's Codex slash
+  command file (path: `~/.codex/slash-commands.toml` or whatever the
+  current Codex install convention is — the implementation MUST
+  detect the active path and document it in the completion report)
+  bound to the shell command `alaya inspect --open`.
+- Both writes are bundled into a single preview + confirm prompt per
+  invariant §23: the preview shows both diffs together, and `[y/N]`
+  applies both atomically (best-effort: if the slash file write
+  fails after the MCP entry write succeeded, the MCP entry MUST be
+  rolled back). Tests prove the rollback path.
+- If the user already has an existing `/alaya-inspect` slash bound
+  to a different command, the preview MUST surface the conflict and
+  the user must explicitly accept the overwrite.
 
 ## 3. Deferred
 
@@ -65,6 +80,7 @@ Nothing deferred.
 | AC5 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-4-briefs/reports/task-p4-attach-codex.md` exists and cites backlog issues for any deferred scope |
 | AC6 | Closing readiness label is `cli-consumable` | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` are updated only after evidence supports the label |
 | AC7 | Codex profile instructions mention the exact public `soul.*` memory tools and exclude `memory.*` aliases | Targeted attach test asserts the rendered profile text |
+| AC8 | `/alaya-inspect` slash alias is registered alongside the MCP entry; preview surfaces both diffs; rollback path is exercised | Targeted attach test injects a slash-write failure after MCP-write success and asserts the MCP entry was reverted |
 
 ## 5. Verification
 
@@ -78,5 +94,5 @@ Nothing deferred.
 
 No shared-file hazards.
 
-**Prerequisite**: P4-cli-bridge, P4-profile-mutation, P4-mcp-memory-tools, P4-mcp-server.
-**Blocks**: Gate-4 demo.
+**Prerequisite**: P4-cli-bridge, P4-profile-mutation, P4-mcp-memory-tools, P4-mcp-server, P4-cli-inspect.
+**Blocks**: Gate-4 demo, P4-cli-detach.
