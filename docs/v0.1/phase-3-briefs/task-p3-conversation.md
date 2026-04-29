@@ -46,23 +46,33 @@ into model-consumable context for P4-mcp-memory-tools.
 
 ### 2.3 Adapter Points
 
-Source file `vendor/.../packages/core/src/conversation-service.ts` is **2133 LOC**. The eight adapter points below cover the chat-specific paths to **delete or adapt**. **All other line ranges port as `trivial-copy`** (namespace rewrite only); reviewer verifies via `diff` against vendor source for any range outside this table. Card author MUST list the exact final imports / public exports kept vs deleted in the completion report.
+Source file `vendor/.../packages/core/src/conversation-service.ts` is **2133 LOC**. The adapter points below cover the chat-specific paths to **delete or adapt**. **All other line ranges port as `trivial-copy`** (namespace rewrite only); reviewer verifies via `diff` against vendor source for any range outside this table. Card author MUST list the exact final imports / public exports kept vs deleted in the completion report.
 
 | # | Source line range | Change | Justification |
 |---|---|---|---|
-| 1 | lines 417-479 interrupt runtime-session branches | Delete or fail closed outside Alaya memory path | No live conversation runtime session surface |
-| 2 | lines 527-545 user-message SSE broadcast branch | Delete SSE broadcast and retain audit behavior | Invariant §11 |
-| 3 | lines 610-668 assistant message completion SSE branch | Delete chat streaming output | Invariant §21 |
-| 4 | lines 715-946 engine streaming generator path | Remove streaming chat path; retain memory orchestration inputs | MCP calls are request/response |
-| 5 | lines 995-1031 message_delta handling | Delete message delta path | No delta consumer |
-| 6 | lines 1259-1310 completed turn threading | Adapt to explicit memory evidence/governance path only | Durable promotion must be explicit |
-| 7 | lines 1784-2114 message-history/assistant prompt helpers | Remove if only used by deleted chat paths | Chat prompt assembly out of scope |
-| 8 | `context-lens-assembler.ts` daemon-preview cache | Retain recall-to-model projection and last-lens preview behavior without adding SSE or GUI consumers | P4-mcp-memory-tools needs a producer for delivery records and model-consumable context |
-| 9 | **all other line ranges in `conversation-service.ts` and `context-lens-assembler.ts`** | trivial-copy — only `@do-what/*` → `@do-soul/alaya-*` import rewrites | Default per port-protocol §1; explicit so reviewer R1 byte-equality check passes |
+| 1 | lines 1-58 imports | Delete engine, runtime-adapter, SSE, file attachment, output-shaping, and system-prompt imports; keep memory/control imports and namespace rewrites | Removed imports belong only to pruned chat execution paths |
+| 2 | lines 60-83 chat/file public DTOs | Delete `SendMessageInput`, `ConversationFileRecord`, `ConversationFileRepoPort`, and `ConversationResponse` exports | Alaya must not expose chat or attachment DTOs from the memory core |
+| 3 | lines 174-210 dependency graph | Remove engine, EventPublisher streaming, run hot state, binding resolver, runtime adapter/factory, MCP allow-list resolver, output shaping, file repo, files directory, and SSE broadcaster dependencies; keep memory orchestration dependencies | No live chat runtime, file attachment, or SSE path in Phase 3 |
+| 4 | lines 213-230 streaming state constants and active runtime session shape | Delete streaming byte/delta constants and active principal runtime-session state | No streaming chat session state in Alaya memory core |
+| 5 | lines 417-479 interrupt runtime-session branches | Delete or fail closed outside Alaya memory path | No live conversation runtime session surface |
+| 6 | lines 527-545 user-message SSE broadcast branch | Delete SSE broadcast and retain audit behavior | Invariant §11 |
+| 7 | lines 610-668 assistant message completion SSE branch | Delete chat streaming output | Invariant §21 |
+| 8 | lines 715-946 engine streaming generator path | Remove streaming chat path; retain memory orchestration inputs | MCP calls are request/response |
+| 9 | lines 995-1031 message_delta handling | Delete message delta path | No delta consumer |
+| 10 | lines 1259-1310 completed turn threading | Adapt to explicit memory evidence/governance path only | Durable promotion must be explicit |
+| 11 | lines 1784-2114 message-history/assistant prompt helpers | Remove if only used by deleted chat paths | Chat prompt assembly out of scope |
+| 12 | `context-lens-assembler.ts` daemon-preview cache | Retain recall-to-model projection and last-lens preview behavior without adding SSE or GUI consumers | P4-mcp-memory-tools needs a producer for delivery records and model-consumable context |
+| 13 | **all other line ranges in `conversation-service.ts` and `context-lens-assembler.ts`** | trivial-copy — only `@do-what/*` → `@do-soul/alaya-*` import rewrites | Default per port-protocol §1; explicit so reviewer R1 byte-equality check passes |
 
 #### Range coverage check
 
-The 8 adapter ranges (1-8) cover approximately lines 417-479, 527-545, 610-668, 715-946, 995-1031, 1259-1310, 1784-2114 — totaling ~970 LOC. The remaining ~1163 LOC must port byte-for-byte modulo namespace rewrites. If the card author finds a chat-specific path outside the listed ranges, they MUST extend this table in a `docs(P3-conversation):` follow-up commit before the implementation commit lands; in-flight scope expansion is rejected at review.
+The adapter ranges cover the source import/public API/dependency declarations
+and the chat-specific method bodies at approximately lines 1-83, 174-230,
+417-479, 527-545, 610-668, 715-946, 995-1031, 1259-1310, and 1784-2114.
+The remaining source must port byte-for-byte modulo namespace rewrites. If the
+card author finds a chat-specific path outside the listed ranges, they MUST
+extend this table in a `docs(P3-conversation):` follow-up commit before the
+implementation commit lands; in-flight scope expansion is rejected at review.
 
 ## 3. Pruned
 

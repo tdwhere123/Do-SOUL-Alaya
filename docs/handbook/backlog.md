@@ -51,18 +51,6 @@ does not silently squash or bundle review-fix commits.
 These are deferrals already known at Phase 0 close. Each is referenced
 from a task card §3 Deferred so reviewers can verify R2 compliance.
 
-- **#BL-001 — Frontend GUI**: not in Alaya scope; consuming agents own
-  their own UI.
-- **#BL-002 — Conversation TUI**: not in Alaya scope; consuming agents
-  own their own UI.
-- **#BL-003 — `apps/tui/` upstream port**: not relevant; Alaya has no
-  TUI.
-- **#BL-005 — `packages/ui-sdk/`**: SSE client SDK, not needed (no
-  surface consumer); upstream pruned from vendor snapshot.
-- **#BL-006 — `packages/surface-runtime/`**: surface state reducer,
-  not needed; upstream pruned.
-- **#BL-007 — Daemon SSE pipeline**: stripped by P4-sse-strip per
-  invariant §11.
 - **#BL-008 — engine-gateway LLM provider adapters**: upstream
   `provider/ai-sdk-*.ts`, `api-conversation-engine.ts`, and `tools/`
   subdir not ported; v0.1 only ports the MCP bridge + provider
@@ -75,9 +63,6 @@ from a task card §3 Deferred so reviewers can verify R2 compliance.
 - **#BL-011 — Cross-workspace global recall cache invalidation**:
   GlobalMemoryRecallService cache will not invalidate cross-workspace;
   v0.1 acceptable for single-workspace agents.
-- **#BL-012 — Inspector UI**: graph data contract is in v0.1
-  (P5-graph-contract) but no UI ships; UI to v0.2.
-
 ## Resolved (short closure summaries)
 
 (none yet)

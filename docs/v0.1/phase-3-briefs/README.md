@@ -13,6 +13,10 @@ on each other and on most of Phase 2. Dispatch starts with
 `P3-misc-foundation`; shared docs, reports, and `packages/core/src/index.ts`
 remain controller-owned.
 
+Status: **done**. Gate-3 passed after all 6 cards had completion reports,
+fresh build/test evidence, forbidden upstream/SSE/chat surface sweeps, and
+review/fix-loop closure. See `reports/gate-3-closeout.md`.
+
 ## Cards
 
 | Card ID | Subject | Port mode | Closing label |

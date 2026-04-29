@@ -40,13 +40,16 @@ vendor/
   do-what-new-snapshot/  frozen upstream port reference (read-only)
 ```
 
-## Current Status (Gate-2 passed)
+## Current Status (Gate-3 passed)
 
 Phase 1 leaves and Phase 2 storage repositories, core services, security
-stack, Garden roles, and owned package barrels are ported and unit-tested as
-implementation-ready. Gate-2 passed with `rtk pnpm build`, `rtk pnpm test`,
-and package-specific core/soul/storage Vitest suites. Phase 3 is the
-implementation-ready orchestration bridge; daemon, CLI, MCP transport, and
+stack, Garden roles, and owned package barrels are ported and unit-tested.
+Phase 3 foundation helpers, MCP discovery services, run lifecycle / serial
+delegation, misc support services, ConversationService memory orchestration,
+ContextLensAssembler, and the core barrel are ported and unit-tested as
+`implementation-ready`. Gate-3 passed with `rtk pnpm build`, `rtk pnpm test`,
+core typecheck, full core Vitest, targeted memory/MCP proof tests, and
+forbidden upstream/SSE/chat surface sweeps. Daemon, CLI, MCP transport, and
 live surface wiring remain Phase 4+ work. Refresh this section after each
 Phase Gate.
 
@@ -63,7 +66,7 @@ Phase Gate.
 | Storage migrations | `packages/storage/src/migrations/` | ported; `implementation-ready` (P1-migrations) |
 | Storage repos | `packages/storage/src/repos/`, `packages/storage/src/index.ts`, `packages/storage/src/__tests__/*-repo.test.ts` | ported; `implementation-ready` (P2-repos-batch-* + P2-barrel-storage) |
 | Core skeleton + config leaves | `packages/core/src/{errors.ts,index.ts,shared/,dynamics-constants-runtime.ts}` | ported; `schema-ready` (P1-core-skeleton + P1-config) |
-| Core services | `packages/core/src/` service files | Phase 2 services are ported: `memory-service.ts`, `evidence-service.ts`, `signal-service.ts`, `global-memory-recall-{port,service}.ts`, `task-surface-builder.ts`, `recall-service.ts`, `manifestation-resolver.ts`, `synthesis-service.ts`, `proposal-service.ts`, `green-service.ts`, `governance-lease-service.ts`, `session-override-service.ts`, `embedding-recall-service.ts`, `embedding-backfill-handler.ts`, `event-publisher.ts`, `runtime-event-normalizer.ts`, `output-shaping-service.ts`, `narrative-budget-service.ts`, `health-journal-service.ts`, and `karma-event-store.ts`; Phase 3 orchestration services are not yet ported |
+| Core services | `packages/core/src/` service files | Phase 2 services are ported: `memory-service.ts`, `evidence-service.ts`, `signal-service.ts`, `global-memory-recall-{port,service}.ts`, `task-surface-builder.ts`, `recall-service.ts`, `manifestation-resolver.ts`, `synthesis-service.ts`, `proposal-service.ts`, `green-service.ts`, `governance-lease-service.ts`, `session-override-service.ts`, `embedding-recall-service.ts`, `embedding-backfill-handler.ts`, `event-publisher.ts`, `runtime-event-normalizer.ts`, `output-shaping-service.ts`, `narrative-budget-service.ts`, `health-journal-service.ts`, and `karma-event-store.ts`; Phase 3 services are ported: `tool-spec-service.ts`, `strong-ref-service.ts`, `dirty-state-panic-service.ts`, `file-path.ts`, `message-history.ts`, `mcp-tool-discovery-service.ts`, `extension-registry-service.ts`, `worker-run-lifecycle-service.ts`, `worker-run-state-machine.ts`, `run-service.ts`, `run-hot-state-service.ts`, `serial-delegation-{service,event-intake,recovery}.ts`, `canonical-alias-service.ts`, `project-mapping-service.ts`, `engine-binding-service.ts`, `workspace-service.ts`, `slot-service.ts`, `surface-service.ts`, `surface-binding-service.ts`, `surface-drift-service.ts`, `target-revalidate-service.ts`, `graph-explore-service.ts`, `constitutional-fragment-service.ts`, `deferred-obligation-service.ts`, `budget-bankruptcy-service.ts`, `arbitration-service.ts`, `claim-service.ts`, `dynamics-service.ts`, `prompt-asset-registry.ts`, `node-template-resolver.ts`, `security-status-service.ts`, `conversation-service.ts`, and `context-lens-assembler.ts` |
 | Core security stack | `packages/core/src/{permission-policy/,ports/,zero-day-security-layer.ts,constraint-proxy.ts,integration-gate.ts,worker-safety-gate.ts,worker-trust-assessor.ts,stance-resolution-service.ts,cross-cutting-permission-service.ts}` | ported; `implementation-ready` (P2-security-1 + P2-security-2) |
 | Soul skeleton + topology leaves | `packages/soul/src/{signal-handler.ts,tool-governance-adapter.ts,worker-safety-*.ts,garden/topology-service.ts,garden/path-graph-snapshotter.ts,shared/deep-freeze.ts}` | ported; `implementation-ready` leaves (P1-soul-skeleton + P1-topology) |
 | Garden engine | `packages/soul/src/garden/`, `packages/soul/src/shared/bootstrapping-ids.ts`, `packages/soul/src/index.ts` | Phase 2 Garden roles are ported and exported: `auditor.ts`, `scheduler.ts`, `compute-provider.ts`, `compute-routing-service.ts`, `local-heuristics.ts`, `janitor.ts`, `librarian.ts`, `materialization-router.ts`, `degradation-pipeline.ts`, `handoff-gap-handler.ts`, `bootstrapping-service.ts`, `session-override-remediation.ts`, `backlog-telemetry.ts`, and `shared/bootstrapping-ids.ts` |

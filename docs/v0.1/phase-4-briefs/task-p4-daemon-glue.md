@@ -4,7 +4,7 @@
 > - **Wave**: 4
 > - **Card ID**: P4-daemon-glue
 > - **Port mode**: adapt-and-port
-> - **Source**: `vendor/do-what-new-snapshot/apps/core-daemon/src/manifestation-context-lens-assembler.ts`, `vendor/do-what-new-snapshot/apps/core-daemon/src/orphan-query.ts`, `vendor/do-what-new-snapshot/apps/core-daemon/src/handoff-gap-adapter.ts`, `vendor/do-what-new-snapshot/apps/core-daemon/src/builtin-conversation-tool-specs.ts`, `vendor/do-what-new-snapshot/apps/core-daemon/src/tool-runtime.ts`, `vendor/do-what-new-snapshot/apps/core-daemon/src/worker-dispatch-constitutional-fragments.ts`
+> - **Source**: `vendor/do-what-new-snapshot/apps/core-daemon/src/manifestation-context-lens-assembler.ts`, `vendor/do-what-new-snapshot/apps/core-daemon/src/orphan-query.ts`, `vendor/do-what-new-snapshot/apps/core-daemon/src/handoff-gap-adapter.ts`, `vendor/do-what-new-snapshot/apps/core-daemon/src/builtin-conversation-tool-specs.ts`, `vendor/do-what-new-snapshot/apps/core-daemon/src/tool-runtime.ts`
 > - **Target**: `apps/core-daemon/src/glue files`
 > - **Size**: M
 > - **Prerequisite**: P4-daemon-startup-ordering, P3-conversation, P3-misc-services
@@ -34,7 +34,6 @@
 | `vendor/do-what-new-snapshot/apps/core-daemon/src/handoff-gap-adapter.ts` | `apps/core-daemon/src/handoff-gap-adapter.ts` | Port source behavior and apply only the adapter points listed below. |
 | `vendor/do-what-new-snapshot/apps/core-daemon/src/builtin-conversation-tool-specs.ts` | `apps/core-daemon/src/builtin-conversation-tool-specs.ts` | Port source behavior and apply only the adapter points listed below. |
 | `vendor/do-what-new-snapshot/apps/core-daemon/src/tool-runtime.ts` | `apps/core-daemon/src/tool-runtime.ts` | Port source behavior and apply only the adapter points listed below. |
-| `vendor/do-what-new-snapshot/apps/core-daemon/src/worker-dispatch-constitutional-fragments.ts` | `apps/core-daemon/src/worker-dispatch-constitutional-fragments.ts` | Port source behavior and apply only the adapter points listed below. |
 
 ### 2.2 Port Rules
 
@@ -43,24 +42,25 @@
 - Do not edit shared barrels unless this card explicitly owns that barrel.
 - If a cited source path is missing or a source dependency forces files outside §2, return `BLOCKED` instead of expanding scope.
 
-## 3. Deferred
+## 3. Pruned
 
-Nothing deferred.
+`worker-dispatch-constitutional-fragments.ts` is product-scope pruned. Alaya
+does not ship upstream chat worker-dispatch prompt assembly.
 
 ## 4. Acceptance Criteria
 
 | AC | Criteria | Evidence |
 |---|---|---|
 | AC1 | All files in §2 are ported per adapt-and-port rules | Reviewer compares target files against the cited vendor source paths and adapter points |
-| AC2 | Every source path cited by this card exists before dispatch | `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/apps/core-daemon/src/manifestation-context-lens-assembler.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/orphan-query.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/handoff-gap-adapter.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/builtin-conversation-tool-specs.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/tool-runtime.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/worker-dispatch-constitutional-fragments.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"` exits 0 |
+| AC2 | Every source path cited by this card exists before dispatch | `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/apps/core-daemon/src/manifestation-context-lens-assembler.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/orphan-query.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/handoff-gap-adapter.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/builtin-conversation-tool-specs.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/tool-runtime.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"` exits 0 |
 | AC3 | Build succeeds after this card lands | `rtk pnpm build` is green |
 | AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon handoff orphan tool-runtime manifestation` |
-| AC5 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-4-briefs/reports/task-p4-daemon-glue.md` exists and cites backlog issues for any deferred scope |
+| AC5 | Completion report captures source files, port mode, verification, deviations, and prune decisions | `docs/v0.1/phase-4-briefs/reports/task-p4-daemon-glue.md` exists and does not defer product-pruned worker-dispatch prompt assembly |
 | AC6 | Closing readiness label is `implementation-ready` | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` are updated only after evidence supports the label |
 
 ## 5. Verification
 
-1. `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/apps/core-daemon/src/manifestation-context-lens-assembler.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/orphan-query.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/handoff-gap-adapter.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/builtin-conversation-tool-specs.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/tool-runtime.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/worker-dispatch-constitutional-fragments.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"`
+1. `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/apps/core-daemon/src/manifestation-context-lens-assembler.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/orphan-query.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/handoff-gap-adapter.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/builtin-conversation-tool-specs.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/tool-runtime.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"`
 2. `rtk pnpm install`
 3. `rtk pnpm build`
 4. `rtk pnpm exec tsc --noEmit -p apps/core-daemon`

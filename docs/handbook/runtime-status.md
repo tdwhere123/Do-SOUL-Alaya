@@ -21,7 +21,7 @@ each Phase Gate.
 | Phase 0 | Reset, vendor snapshot, handbook, INDEX, task cards | **done** | Gate-0 passed |
 | Phase 1 | Wave 1 leaves: protocol, migrations, storage shared, config, topology, engine-gateway | **done** | Gate-1 passed |
 | Phase 2 | Wave 2: storage repos batches + core services + Garden + security defense | **done** | Gate-2 passed |
-| Phase 3 | Wave 3: foundation helpers, ConversationService, MCP discovery, run lifecycle, misc services, core barrel | not-started | Gate-3 |
+| Phase 3 | Wave 3: foundation helpers, ConversationService, MCP discovery, run lifecycle, misc services, core barrel | **done** | Gate-3 passed |
 | Phase 4 | Wave 4: Core daemon, routes, MCP server transport, real profile mutation, CLI bridge, secrets | not-started | Gate-4 (end-to-end demo) |
 | Phase 5 | Wave 5: full E2E, benchmark, graph contract, final review | not-started | Gate-5 (v0.1 release) |
 
@@ -61,10 +61,11 @@ each Phase Gate.
 | Soul topology leaves | `implementation-ready` | `implementation-ready` | P1-topology |
 | Permission policy stack | `implementation-ready` | `implementation-ready` | P2-security-1 |
 | Worker safety / trust | `implementation-ready` | `implementation-ready` | P2-security-2 |
-| ConversationService | `not-started` | `implementation-ready` in P3; `live-event-ready` after Phase 4 daemon/MCP proof | P3-conversation + P4-mcp-memory-tools |
+| ConversationService | `implementation-ready` | `implementation-ready` in P3; `live-event-ready` after Phase 4 daemon/MCP proof | P3-conversation + P4-mcp-memory-tools |
 | Engine gateway MCP/provider skeleton | `implementation-ready` | `implementation-ready` | P1-engine-gateway-mcp |
 | First-party MCP memory tool contract | `schema-ready` | `implementation-ready` | P4-mcp-memory-tools |
-| MCP tool surface | `not-started` | `mcp-consumable` | P3-mcp-discovery + P4-mcp-tooling + P4-mcp-memory-tools + P4-mcp-server + attached-agent proof |
+| MCP discovery services | `implementation-ready` | `implementation-ready` | P3-mcp-discovery |
+| MCP tool surface | `not-started` for daemon transport; discovery services are `implementation-ready` | `mcp-consumable` | P3-mcp-discovery + P4-mcp-tooling + P4-mcp-memory-tools + P4-mcp-server + attached-agent proof |
 | Core daemon | `not-started` | `live-event-ready` | P4-daemon-skeleton + P4-daemon-startup-ordering + P4-sse-strip |
 | Profile mutation (Codex/Claude attach) | `not-started` | `cli-consumable` | P4-profile-mutation |
 | CLI commands (doctor / install / attach / status / tools) | `not-started` | `cli-consumable` | P4-cli-bridge + P4-mcp-memory-tools |
@@ -75,9 +76,9 @@ each Phase Gate.
 
 ## Known Wiring Gaps
 
-Phase 1 and Phase 2 implementation surfaces are ported and unit-tested, but
+Phase 1 through Phase 3 implementation surfaces are ported and unit-tested, but
 they are not wired into daemon, CLI, or MCP runtime surfaces yet. Those
-live-consumption paths belong to Phase 3-4 cards.
+live-consumption paths belong to Phase 4 cards.
 
 ## Gate Definitions
 

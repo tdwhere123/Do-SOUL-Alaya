@@ -26,7 +26,7 @@ Phase 0 → Gate-0
 | Phase 0 | Reset & Source Mirror | 6 cards (P0-0..P0-5) + P0-3.5 review + P0-3.6 fix + P0-4 extraction | **done** | Gate-0 passed |
 | Phase 1 | Wave 1: Leaves | 9 cards | **done** | Gate-1 passed |
 | Phase 2 | Wave 2: Services + Garden + Repos + Security | 32 cards | **done** | Gate-2 passed |
-| Phase 3 | Wave 3: Memory orchestration bridge + run lifecycle | 6 cards | not-started | Gate-3 |
+| Phase 3 | Wave 3: Memory orchestration bridge + run lifecycle | 6 cards | **done** | Gate-3 passed |
 | Phase 4 | Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI | 25 cards (target) | not-started | Gate-4 |
 | Phase 5 | Wave 5: E2E + Benchmark + Graph Contract + Final Review | 4 cards (target) | not-started | Gate-5 |
 
@@ -72,6 +72,21 @@ Post-Gate-2 aggregate review (read-only sub-agent pass; 0 Blocking, 3 Important,
 | P2-garden-batch-3 | implementation-ready | [report](./phase-2-briefs/reports/task-p2-garden-batch-3.md) |
 | P2-garden-batch-2 | implementation-ready | [report](./phase-2-briefs/reports/task-p2-garden-batch-2.md) |
 | P2-barrel-soul | implementation-ready | [report](./phase-2-briefs/reports/task-p2-barrel-soul.md) |
+
+## Phase 3 — Card Closeout Status
+
+This table tracks the 6 Phase 3 cards closed for Gate-3.
+
+Gate-3 closeout evidence: [report](./phase-3-briefs/reports/gate-3-closeout.md).
+
+| Card | Readiness | Report |
+|---|---|---|
+| P3-misc-foundation | implementation-ready | [report](./phase-3-briefs/reports/task-p3-misc-foundation.md) |
+| P3-mcp-discovery | implementation-ready | [report](./phase-3-briefs/reports/task-p3-mcp-discovery.md) |
+| P3-run-lifecycle | implementation-ready | [report](./phase-3-briefs/reports/task-p3-run-lifecycle.md) |
+| P3-misc-services | implementation-ready | [report](./phase-3-briefs/reports/task-p3-misc-services.md) |
+| P3-conversation | implementation-ready | [report](./phase-3-briefs/reports/task-p3-conversation.md) |
+| P3-core-barrel | implementation-ready | [report](./phase-3-briefs/reports/task-p3-core-barrel.md) |
 
 ## Phase 0 — Reset & Source Mirror
 

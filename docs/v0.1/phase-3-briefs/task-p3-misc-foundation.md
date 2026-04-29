@@ -47,6 +47,7 @@ lifecycle, or ConversationService starts.
 | Source point | Upstream behavior | Alaya behavior | Reason |
 |---|---|---|---|
 | `dirty-state-panic-service.ts` `EventPublisher` dependency | Uses upstream `EventPublisher` broadcaster chain | Use the already-ported Alaya `EventPublisher`, whose broadcast leg is `RuntimeNotifier.notifyEntry` | Alaya invariant §11 forbids SSE |
+| `dirty-state-panic-service.ts` `WorkerRunLifecycleService` type import | Source imports the concrete lifecycle service type only to type the `freeze(...)` dependency | Replace with structural `DirtyStatePanicWorkerRunLifecyclePort` exposing `freeze(...)` so this foundation helper does not import the later `P3-run-lifecycle` implementation | Preserves behavior while keeping foundation dependency order |
 | DirtyState tests | May name the mock as broadcast/SSE in upstream assertions | Rename mocks to runtime notifier terms without changing call ordering expectations | Vocabulary must match Alaya runtime notifier |
 
 ## 3. Deferred

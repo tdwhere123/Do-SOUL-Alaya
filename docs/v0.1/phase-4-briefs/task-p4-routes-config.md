@@ -4,8 +4,8 @@
 > - **Wave**: 4
 > - **Card ID**: P4-routes-config
 > - **Port mode**: adapt-and-port
-> - **Source**: `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/config.ts`, `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/project-mapping.ts`, `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/surface-bindings.ts`, `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/surfaces.ts`, `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/slash-commands.ts`, `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/worker-dispatch.ts`, `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/shared.ts`
-> - **Target**: `apps/core-daemon/src/routes/config.ts`, `apps/core-daemon/src/routes/project-mapping.ts`, `apps/core-daemon/src/routes/surface-bindings.ts`, `apps/core-daemon/src/routes/surfaces.ts`, `apps/core-daemon/src/routes/slash-commands.ts`, `apps/core-daemon/src/routes/worker-dispatch.ts`, `apps/core-daemon/src/routes/shared.ts`
+> - **Source**: `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/config.ts`, `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/project-mapping.ts`, `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/surface-bindings.ts`, `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/surfaces.ts`, `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/shared.ts`
+> - **Target**: `apps/core-daemon/src/routes/config.ts`, `apps/core-daemon/src/routes/project-mapping.ts`, `apps/core-daemon/src/routes/surface-bindings.ts`, `apps/core-daemon/src/routes/surfaces.ts`, `apps/core-daemon/src/routes/shared.ts`
 > - **Size**: M
 > - **Prerequisite**: P4-daemon-startup-ordering, P4-sse-strip, P3-core-barrel
 > - **Blocks**: P4-daemon-routes-register
@@ -33,8 +33,6 @@
 | `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/project-mapping.ts` | `apps/core-daemon/src/routes/project-mapping.ts` | Port source behavior and apply only the adapter points listed below. |
 | `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/surface-bindings.ts` | `apps/core-daemon/src/routes/surface-bindings.ts` | Port source behavior and apply only the adapter points listed below. |
 | `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/surfaces.ts` | `apps/core-daemon/src/routes/surfaces.ts` | Port source behavior and apply only the adapter points listed below. |
-| `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/slash-commands.ts` | `apps/core-daemon/src/routes/slash-commands.ts` | Port source behavior and apply only the adapter points listed below. |
-| `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/worker-dispatch.ts` | `apps/core-daemon/src/routes/worker-dispatch.ts` | Port source behavior and apply only the adapter points listed below. |
 | `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/shared.ts` | `apps/core-daemon/src/routes/shared.ts` | Port source behavior and apply only the adapter points listed below. |
 
 ### 2.2 Port Rules
@@ -44,28 +42,31 @@
 - Do not edit shared barrels unless this card explicitly owns that barrel.
 - If a cited source path is missing or a source dependency forces files outside §2, return `BLOCKED` instead of expanding scope.
 
-## 3. Deferred
+## 3. Pruned
 
-Nothing deferred.
+- `routes/slash-commands.ts` is product-scope pruned. Alaya does not expose
+  upstream agent-local slash metadata or dispatch.
+- `routes/worker-dispatch.ts` is product-scope pruned. Alaya v0.1 exposes
+  memory through MCP and plain CLI, not upstream chat worker dispatch routes.
 
 ## 4. Acceptance Criteria
 
 | AC | Criteria | Evidence |
 |---|---|---|
 | AC1 | All files in §2 are ported per adapt-and-port rules | Reviewer compares target files against the cited vendor source paths and adapter points |
-| AC2 | Every source path cited by this card exists before dispatch | `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/config.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/project-mapping.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/surface-bindings.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/surfaces.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/slash-commands.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/worker-dispatch.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/shared.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"` exits 0 |
+| AC2 | Every source path cited by this card exists before dispatch | `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/config.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/project-mapping.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/surface-bindings.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/surfaces.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/shared.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"` exits 0 |
 | AC3 | Build succeeds after this card lands | `rtk pnpm build` is green |
-| AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon config project-mapping surface-bindings surfaces slash-commands worker-dispatch shared` |
-| AC5 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-4-briefs/reports/task-p4-routes-config.md` exists and cites backlog issues for any deferred scope |
+| AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon config project-mapping surface-bindings surfaces shared` |
+| AC5 | Completion report captures source files, port mode, verification, deviations, and prune decisions | `docs/v0.1/phase-4-briefs/reports/task-p4-routes-config.md` exists and does not defer product-pruned slash or chat-worker dispatch routes |
 | AC6 | Closing readiness label is `live-event-ready` | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` are updated only after evidence supports the label |
 
 ## 5. Verification
 
-1. `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/config.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/project-mapping.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/surface-bindings.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/surfaces.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/slash-commands.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/worker-dispatch.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/shared.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"`
+1. `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/config.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/project-mapping.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/surface-bindings.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/surfaces.ts\",\"vendor/do-what-new-snapshot/apps/core-daemon/src/routes/shared.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"`
 2. `rtk pnpm install`
 3. `rtk pnpm build`
 4. `rtk pnpm exec tsc --noEmit -p apps/core-daemon`
-5. `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon config project-mapping surface-bindings surfaces slash-commands worker-dispatch shared`
+5. `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon config project-mapping surface-bindings surfaces shared`
 
 ## 6. Shared File Hazards & Dependencies
 
