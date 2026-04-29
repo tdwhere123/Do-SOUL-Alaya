@@ -103,6 +103,8 @@ Deleted public exports:
 - `ConversationFileRepoPort`
 - `SendMessageInput`
 - `ConversationResponse`
+- `ConversationExecutionStanceResolverParams`
+- `ConversationExecutionStanceResolverPort`
 - streaming/runtime session helper types.
 
 ## Adapter Deviations
@@ -129,6 +131,13 @@ Deleted public exports:
 - Product-Scope Prune Rule: chat execution, runtime adapter integration,
   concrete prompt assembly, file attachments, and streaming tests are pruned,
   not deferred.
+- Post-gate review fix: dropped the orphan `resolveExecutionStance` dependency
+  and its `ConversationExecutionStanceResolverParams` /
+  `ConversationExecutionStanceResolverPort` interfaces, plus the
+  `ActivationCandidate` / `ExecutionStanceResolution` protocol imports they
+  were the sole users of. The execution-stance resolver was only invoked from
+  the streaming/runtime path that this card already failed closed at vendor
+  L715-946, so the surface had no remaining caller in or outside this file.
 
 ## Verification
 

@@ -7,13 +7,11 @@ import {
   HealthEventKind,
   PhaseCExtensionEventType,
   RuntimeMode,
-  type ActivationCandidate,
   type CandidateMemorySignal,
   type ContextLens,
   type ConversationMessage,
   type EventLogEntry,
   type ExecutionStanceModelRef,
-  type ExecutionStanceResolution,
   type GardenProviderKind,
   type HealthJournalRecordPort,
   type Run,
@@ -97,17 +95,6 @@ export interface ConversationBudgetBankruptcyPort {
   getSnapshot(runId: string, now: string): Promise<{ readonly current_mode: RuntimeModeValue }>;
 }
 
-export interface ConversationExecutionStanceResolverParams {
-  readonly workspaceId: string;
-  readonly runId: string;
-  readonly candidates: readonly Readonly<ActivationCandidate>[];
-  readonly modelRef?: ExecutionStanceModelRef | null;
-}
-
-export interface ConversationExecutionStanceResolverPort {
-  resolve(params: Readonly<ConversationExecutionStanceResolverParams>): Promise<Readonly<ExecutionStanceResolution>>;
-}
-
 export interface ConversationServiceDependencies {
   readonly runRepo: ConversationRunRepoPort;
   readonly workspaceRepo: ConversationWorkspaceRepoPort;
@@ -119,7 +106,6 @@ export interface ConversationServiceDependencies {
   readonly sessionOverridePromotion?: ConversationSessionOverridePromotionPort;
   readonly contextLensAssembler?: ConversationContextLensAssemblerPort;
   readonly budgetBankruptcyService?: ConversationBudgetBankruptcyPort;
-  readonly resolveExecutionStance?: ConversationExecutionStanceResolverPort;
   readonly healthJournalRecorder?: HealthJournalRecordPort;
   readonly warn: ConversationWarnPort;
 }
