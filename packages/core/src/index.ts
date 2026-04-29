@@ -1,39 +1,79 @@
-export { CoreError, type CoreErrorCode } from "./errors.js";
-export {
-  DEFAULT_ACTOR,
-  SYSTEM_ACTOR,
-  SYSTEM_WORKSPACE_ID,
-  resolveSystemWorkspaceId
-} from "./shared/actors.js";
-export { deepFreeze } from "./shared/deep-freeze.js";
-export {
-  getNextRevision,
-  isUniqueConstraintError,
-  type EventRevisionLookupPort
-} from "./shared/event-utils.js";
-export {
-  parseExtensionSkillPackage,
-  parseExtensionToolProvider
-} from "./shared/extension-descriptor-parsers.js";
-export {
-  loadOrDefaultWithWorkspaceGuard,
-  type LoadOrDefaultWithWorkspaceGuardInput,
-  type LoadOrDefaultWithWorkspaceGuardResult
-} from "./shared/load-or-default-with-workspace-guard.js";
-export { normalizeUnit } from "./shared/normalize-unit.js";
-export { parseRecallPolicy } from "./shared/recall-policy.js";
-export { SURFACE_URI_PATTERN, parseSurfaceUri } from "./shared/surface-uri.js";
-export {
-  addDuration,
-  ensureIsoDatetime,
-  readClockSnapshot,
-  readNow,
-  systemNow,
-  type NowProvider
-} from "./shared/time.js";
-export { validateActivationCandidates } from "./shared/validated-activation-candidates.js";
-export {
-  normalizeOptionalNonEmptyString,
-  parseNonEmptyString,
-  parseObjectId
-} from "./shared/validators.js";
+export * from "./arbitration-service.js";
+export * from "./budget-bankruptcy-service.js";
+export * from "./canonical-alias-service.js";
+export * from "./claim-service.js";
+export * from "./constitutional-fragment-service.js";
+export * from "./constraint-proxy.js";
+export * from "./context-lens-assembler.js";
+export * from "./conversation-service.js";
+export * from "./cross-cutting-permission-service.js";
+export * from "./deferred-obligation-service.js";
+export * from "./dirty-state-panic-service.js";
+export * from "./dynamics-constants-runtime.js";
+export * from "./dynamics-service.js";
+export * from "./embedding-backfill-handler.js";
+export * from "./embedding-recall-service.js";
+export * from "./engine-binding-service.js";
+export * from "./errors.js";
+export * from "./event-publisher.js";
+export * from "./evidence-service.js";
+export * from "./extension-registry-service.js";
+export * from "./file-path.js";
+export * from "./global-memory-recall-port.js";
+export * from "./global-memory-recall-service.js";
+export * from "./governance-lease-service.js";
+export * from "./graph-explore-service.js";
+export * from "./green-service.js";
+export * from "./health-journal-service.js";
+export * from "./integration-gate.js";
+export * from "./karma-event-store.js";
+export * from "./manifestation-resolver.js";
+export * from "./mcp-tool-discovery-service.js";
+export * from "./memory-service.js";
+export * from "./message-history.js";
+export * from "./narrative-budget-service.js";
+export * from "./node-template-resolver.js";
+export * from "./output-shaping-service.js";
+export * from "./permission-policy/index.js";
+export * from "./project-mapping-service.js";
+export * from "./prompt-asset-registry.js";
+export * from "./proposal-service.js";
+export * from "./recall-service.js";
+export * from "./run-hot-state-service.js";
+export * from "./run-service.js";
+export * from "./runtime-event-normalizer-state.js";
+export * from "./runtime-event-normalizer.js";
+export * from "./security-status-service.js";
+export * from "./serial-delegation-event-intake.js";
+export * from "./serial-delegation-recovery.js";
+export * from "./serial-delegation-service.js";
+export * from "./session-override-service.js";
+export * from "./shared/actors.js";
+export * from "./shared/deep-freeze.js";
+export * from "./shared/event-utils.js";
+export * from "./shared/extension-descriptor-parsers.js";
+export * from "./shared/load-or-default-with-workspace-guard.js";
+export * from "./shared/normalize-unit.js";
+export * from "./shared/recall-policy.js";
+export * from "./shared/surface-uri.js";
+export * from "./shared/time.js";
+export * from "./shared/validated-activation-candidates.js";
+export * from "./shared/validators.js";
+export * from "./signal-service.js";
+export * from "./slot-service.js";
+export * from "./stance-resolution-service.js";
+export * from "./strong-ref-service.js";
+export * from "./surface-binding-service.js";
+export * from "./surface-drift-service.js";
+export * from "./surface-service.js";
+export * from "./synthesis-service.js";
+export * from "./target-revalidate-service.js";
+export * from "./task-surface-builder.js";
+export * from "./tool-spec-service.js";
+export * from "./worker-run-lifecycle-service.js";
+export * from "./worker-run-state-machine.js";
+export * from "./worker-safety-gate.js";
+export * from "./worker-trust-assessor.js";
+export * from "./workspace-service.js";
+export * from "./zero-day-security-layer.js";
+export * from "./ports/tool-governance-client.js";
