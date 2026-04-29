@@ -21,7 +21,7 @@ each Phase Gate.
 | Phase 0 | Reset, vendor snapshot, handbook, INDEX, task cards | **done** | Gate-0 passed |
 | Phase 1 | Wave 1 leaves: protocol, migrations, storage shared, config, topology, engine-gateway | **done** | Gate-1 passed |
 | Phase 2 | Wave 2: storage repos batches + core services + Garden + security defense | **done** | Gate-2 passed |
-| Phase 3 | Wave 3: ConversationService, MCP discovery, run lifecycle, misc services, core barrel | not-started | Gate-3 |
+| Phase 3 | Wave 3: foundation helpers, ConversationService, MCP discovery, run lifecycle, misc services, core barrel | not-started | Gate-3 |
 | Phase 4 | Wave 4: Core daemon, routes, MCP server transport, real profile mutation, CLI bridge, secrets | not-started | Gate-4 (end-to-end demo) |
 | Phase 5 | Wave 5: full E2E, benchmark, graph contract, final review | not-started | Gate-5 (v0.1 release) |
 
@@ -61,7 +61,7 @@ each Phase Gate.
 | Soul topology leaves | `implementation-ready` | `implementation-ready` | P1-topology |
 | Permission policy stack | `implementation-ready` | `implementation-ready` | P2-security-1 |
 | Worker safety / trust | `implementation-ready` | `implementation-ready` | P2-security-2 |
-| ConversationService | `not-started` | `live-event-ready` | P3-conversation |
+| ConversationService | `not-started` | `implementation-ready` in P3; `live-event-ready` after Phase 4 daemon/MCP proof | P3-conversation + P4-mcp-memory-tools |
 | Engine gateway MCP/provider skeleton | `implementation-ready` | `implementation-ready` | P1-engine-gateway-mcp |
 | First-party MCP memory tool contract | `schema-ready` | `implementation-ready` | P4-mcp-memory-tools |
 | MCP tool surface | `not-started` | `mcp-consumable` | P3-mcp-discovery + P4-mcp-tooling + P4-mcp-memory-tools + P4-mcp-server + attached-agent proof |
@@ -88,8 +88,9 @@ live-consumption paths belong to Phase 3-4 cards.
 - **Gate-2**: All Phase 2 services / repos / Garden / security
   ported; integration tests pass on the producer → consumer paths
   inside core.
-- **Gate-3**: ConversationService end-to-end works in unit tests;
-  MCP tooling discovery is functional in tests.
+- **Gate-3**: ConversationService memory orchestration works in unit tests;
+  MCP discovery is functional in tests; Phase 3 closes
+  `implementation-ready`, not `live-event-ready`.
 - **Gate-4**: `rtk pnpm exec alaya install` → `rtk pnpm exec alaya attach codex`
   → MCP `tools/list` shows the full P4-mcp-memory-tools `soul.*`
   catalog → `soul.recall` → `soul.open_pointer` →

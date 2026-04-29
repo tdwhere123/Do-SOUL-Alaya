@@ -7,9 +7,9 @@
 > - **Source**: `vendor/do-what-new-snapshot/packages/core/src/conversation-service.ts`, `vendor/do-what-new-snapshot/packages/core/src/context-lens-assembler.ts`, `vendor/do-what-new-snapshot/packages/core/src/__tests__/conversation-service.test.ts`, `vendor/do-what-new-snapshot/packages/core/src/__tests__/conversation-streaming.test.ts`, `vendor/do-what-new-snapshot/packages/core/src/__tests__/context-lens-assembler.test.ts`
 > - **Target**: `packages/core/src/conversation-service.ts`, `packages/core/src/context-lens-assembler.ts`, `packages/core/src/__tests__/conversation-service.test.ts`, `packages/core/src/__tests__/context-lens-assembler.test.ts`
 > - **Size**: L
-> - **Prerequisite**: Gate-2, P2-svc-memory, P2-svc-recall, P2-svc-evidence, P2-svc-green, P2-svc-governance-lease, P2-svc-session-override, P2-svc-output-shaping
+> - **Prerequisite**: Gate-2, P3-misc-foundation, P3-run-lifecycle, P3-misc-services, P2-svc-memory, P2-svc-recall, P2-svc-evidence, P2-svc-green, P2-svc-governance-lease, P2-svc-session-override, P2-svc-output-shaping
 > - **Blocks**: P4-daemon-startup-ordering, P4-mcp-tooling, P4-mcp-memory-tools
-> - **Closing readiness label**: live-event-ready
+> - **Closing readiness label**: implementation-ready
 > - **Owner**: unassigned
 
 ## 0. Charter Authority
@@ -77,7 +77,7 @@ The 8 adapter ranges (1-8) cover approximately lines 417-479, 527-545, 610-668, 
 | AC3 | Build succeeds after this card lands | `rtk pnpm build` is green |
 | AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core -t "conversation|memory orchestration|context lens"` |
 | AC5 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-3-briefs/reports/task-p3-conversation.md` exists and cites backlog issues for any deferred scope |
-| AC6 | Closing readiness label is `live-event-ready` | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` are updated only after evidence supports the label |
+| AC6 | Closing readiness label is `implementation-ready`; `live-event-ready` waits for Phase 4 daemon/MCP integration proof | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` avoid live-ready wording for Phase 3 alone |
 
 ## 5. Verification
 
@@ -91,5 +91,5 @@ The 8 adapter ranges (1-8) cover approximately lines 417-479, 527-545, 610-668, 
 
 - Does not edit `packages/core/src/index.ts`; P3-core-barrel owns exports.
 
-**Prerequisite**: Gate-2, P2-svc-memory, P2-svc-recall, P2-svc-evidence, P2-svc-green, P2-svc-governance-lease, P2-svc-session-override, P2-svc-output-shaping.
+**Prerequisite**: Gate-2, P3-misc-foundation, P3-run-lifecycle, P3-misc-services, P2-svc-memory, P2-svc-recall, P2-svc-evidence, P2-svc-green, P2-svc-governance-lease, P2-svc-session-override, P2-svc-output-shaping.
 **Blocks**: P4-daemon-startup-ordering, P4-mcp-tooling, P4-mcp-memory-tools.

@@ -7,7 +7,7 @@
 > - **Source**: `vendor/do-what-new-snapshot/packages/core/src/index.ts`
 > - **Target**: `packages/core/src/index.ts`
 > - **Size**: S
-> - **Prerequisite**: P2-svc-*, P2-security-*, P3-conversation, P3-mcp-discovery, P3-run-lifecycle, P3-misc-services
+> - **Prerequisite**: P2-svc-*, P2-security-*, P3-misc-foundation, P3-conversation, P3-mcp-discovery, P3-run-lifecycle, P3-misc-services
 > - **Blocks**: Gate-3, P4-daemon-startup-ordering, P4-routes-*
 > - **Closing readiness label**: implementation-ready
 > - **Owner**: unassigned
@@ -40,6 +40,13 @@ tool handler.
 - Do not edit shared barrels unless this card explicitly owns that barrel.
 - If a cited source path is missing or a source dependency forces files outside §2, return `BLOCKED` instead of expanding scope.
 
+### 2.3 Adapter Points
+
+| Source point | Upstream behavior | Alaya behavior | Reason |
+|---|---|---|---|
+| `vendor/.../packages/core/src/index.ts` exports concrete runtime adapters, tool-substrate, and system-prompt helpers | Upstream core exports chat/runtime adapter surfaces | Export only Alaya-ported public services and test-safe support types; do not export concrete Claude SDK runtime adapters, tool-substrate, or GUI/TUI/chat-only helpers | Alaya surface invariants §21 and Phase 3 scope |
+| SSE-named exported types | Upstream barrel exports `SseBroadcaster` names | Export Alaya `RuntimeNotifier` / runtime-notifier-named ports only where target files provide them | Invariant §11 |
+
 ## 3. Deferred
 
 Nothing deferred.
@@ -68,5 +75,5 @@ Nothing deferred.
 
 - Owns `packages/core/src/index.ts` after P1-core-skeleton.
 
-**Prerequisite**: P2-svc-*, P2-security-*, P3-conversation, P3-mcp-discovery, P3-run-lifecycle, P3-misc-services.
+**Prerequisite**: P2-svc-*, P2-security-*, P3-misc-foundation, P3-conversation, P3-mcp-discovery, P3-run-lifecycle, P3-misc-services.
 **Blocks**: Gate-3, P4-daemon-startup-ordering, P4-routes-*.

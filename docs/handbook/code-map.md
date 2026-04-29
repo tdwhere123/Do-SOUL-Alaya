@@ -45,9 +45,10 @@ vendor/
 Phase 1 leaves and Phase 2 storage repositories, core services, security
 stack, Garden roles, and owned package barrels are ported and unit-tested as
 implementation-ready. Gate-2 passed with `rtk pnpm build`, `rtk pnpm test`,
-and package-specific core/soul/storage Vitest suites. The daemon, CLI, Phase 3
-orchestration services, and live surface wiring are still owned by later
-phase/card work. Refresh this section after each Phase Gate.
+and package-specific core/soul/storage Vitest suites. Phase 3 is the
+implementation-ready orchestration bridge; daemon, CLI, MCP transport, and
+live surface wiring remain Phase 4+ work. Refresh this section after each
+Phase Gate.
 
 | Concern | Primary files | State |
 |---|---|---|
