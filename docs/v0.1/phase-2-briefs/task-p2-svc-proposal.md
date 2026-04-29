@@ -47,6 +47,7 @@
 | `ProposalSseBroadcaster` with `broadcastEntry(entry)` | `ProposalRuntimeNotifier` with `notifyEntry(entry)` | Invariant §11 forbids SSE transport; Phase 2 keeps only in-process runtime notification semantics. |
 | Dependency property `sseBroadcaster` | Dependency property `runtimeNotifier` | Preserves EventLog → repo mutation → notification order without GUI/TUI SSE terminology. |
 | `deferredBroadcastEvents` option/comment wording | `deferredNotificationEvents` option/comment wording | Preserves ordered deferred event emission without transport-specific naming. |
+| Derived internal names in private methods, local variables, comments, and tests | Same SSE-to-runtime-notifier rename family as the rows above | Keeps non-public symbols and regression evidence aligned with the required Alaya notification model. |
 
 ## 3. Deferred
 

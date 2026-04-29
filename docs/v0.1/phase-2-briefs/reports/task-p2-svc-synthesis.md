@@ -24,6 +24,8 @@ Mechanical changes and adapter points:
 - dependency property `sseBroadcaster` -> `runtimeNotifier`
 - method call `broadcastEntry(entry)` -> `notifyEntry(entry)`
 - `deferredBroadcastEvents` -> `deferredNotificationEvents`
+- derived private methods, local variables, comments, and test names follow the
+  same SSE-to-runtime-notifier rename rule.
 
 ## Parity Evidence
 
@@ -58,6 +60,9 @@ package alias rewrite and declared SSE-to-runtime-notifier adapter points.
 - Upstream `SynthesisSseBroadcaster` / `broadcastEntry` naming is intentionally
   replaced by runtime notifier naming because Alaya Phase 2 has no SSE
   transport surface.
+- Derived internal names in private methods, local variables, comments, and
+  tests follow the same runtime-notifier terminology; this documents the
+  post-Gate-2 N1 adapter-point completeness fix.
 
 ## Deferred Issues
 
