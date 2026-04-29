@@ -78,19 +78,28 @@ These rules always win over lower-level docs and task-card convenience.
 
 ## Surface
 
-21. Alaya has **no GUI and no conversation TUI**. The only outward
-    surfaces are MCP (for agent attach) and plain CLI commands
-    (`alaya doctor / install / attach / status / tools list /
-    tools call --json`).
+21. Alaya has **no agent-frontend GUI and no conversation TUI**.
+    Memory-tooling surfaces (Memory Inspector, daemon-config panel)
+    are permitted and MUST stay strictly within memory-domain
+    operations: provider/runtime config, memory ontology inspection,
+    trust-state reporting. Agent-flow UIs (chat turns, coding turns,
+    conversation orchestration, in-app slash dispatch beyond Alaya
+    boot triggers) remain forbidden. The agent-attach surfaces are
+    MCP (for agent attach) and the `alaya` CLI; the Memory Inspector
+    is an additional memory-management surface, not an agent surface,
+    and never participates in agent control flow. Inspector writes
+    are limited to daemon runtime parameters; durable memory writes
+    must still go through the proposal / governance path per §19.
 22. MCP tool surface and CLI fallback share one runtime contract. CLI
     fallback parity with MCP is enforced by tests.
 23. Attach / Profile changes write only after preview + explicit
     confirm. Silent profile mutation is forbidden.
-24. Alaya-original CLI features (install / attach / profile / secrets /
-    operations / trust-state / doctor / status) have no upstream port
-    source and MUST be authored as `requires-redesign` cards with §0
-    citing the relevant Surface / Port invariant (§21-§23) and
-    `docs/handbook/architecture.md §Surface Shape`.
+24. Alaya-original CLI and memory-tooling surfaces (install / attach /
+    detach / profile / secrets / operations / trust-state / doctor /
+    status / inspect / inspector-server / inspector-frontend) have no
+    upstream port source and MUST be authored as `requires-redesign`
+    cards with §0 citing the relevant Surface / Port invariant
+    (§21-§23) and `docs/handbook/architecture.md §Surface Shape`.
 
 ## Port
 

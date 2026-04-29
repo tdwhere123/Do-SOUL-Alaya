@@ -76,18 +76,29 @@ Forbidden:
 
 ## Surface Shape
 
-Alaya has no GUI and no conversation TUI. The outward surfaces are:
+Alaya has no agent-frontend GUI and no conversation TUI. The outward
+surfaces are:
 
-- **MCP server** (in `apps/core-daemon`) — primary surface, consumed
-  by agents like Codex and Claude Code via stdio or HTTP transport.
+- **MCP server** (in `apps/core-daemon`) — primary agent-attach
+  surface, consumed by agents like Codex and Claude Code via stdio or
+  HTTP transport.
 - **CLI commands** (`bin/alaya.mjs` → `apps/core-daemon`) — `alaya
-  doctor`, `alaya install`, `alaya attach <target>`, `alaya status`,
-  `alaya tools list`, `alaya tools call --json`. Used for
-  installation, configuration, diagnostics, and MCP-memory-tool
-  fallback.
+  doctor`, `alaya install`, `alaya attach <target>`, `alaya detach
+  <target>`, `alaya status`, `alaya tools list`, `alaya tools call
+  --json`, `alaya inspect`. Used for installation, configuration,
+  diagnostics, and MCP-memory-tool fallback.
+- **Memory Inspector** (`apps/inspector`) — local-only memory-tooling
+  surface, started on demand via `alaya inspect`. Listens on
+  `127.0.0.1:5174` with a per-launch random token; serves three pages
+  (Provider/Config, Memory Graph, Trust/Status). Inspector writes are
+  limited to daemon runtime parameters per invariant §21; memory
+  ontology writes still go through the proposal / governance path.
+  Not an agent surface; never participates in agent control flow.
 
-Both surfaces share one runtime contract; CLI fallback parity with MCP
-is enforced by tests.
+The MCP server and CLI fallback share one runtime contract; CLI
+fallback parity with MCP is enforced by tests. The Inspector consumes
+daemon HTTP routes only and has its own contract surface (token-based
+auth + JSON over HTTP, no SSE / WebSocket).
 
 ## Runtime Write Model
 
@@ -119,10 +130,12 @@ concrete `RuntimeNotifier` and registers it on `EventPublisher` at
 startup step 3 of `Daemon Startup Ordering` below.
 
 **No SSE.** Alaya does not expose an SSE stream because no surface
-consumes one (no GUI, no TUI, no live HTTP client). Daemon-internal
-eventing is in-process via `RuntimeNotifier` listeners and the audit
-log. Upstream daemon code under `apps/core-daemon/src/sse/`,
-`runs.ts` TransformStream, `background/bootstrap.ts` SSE pipeline, and
+consumes one. The agent-attach surfaces (MCP server + CLI fallback)
+do not stream; the Memory Inspector consumes daemon HTTP routes via
+polling, never via SSE or WebSocket. Daemon-internal eventing remains
+in-process via `RuntimeNotifier` listeners and the audit log.
+Upstream daemon code under `apps/core-daemon/src/sse/`, `runs.ts`
+TransformStream, `background/bootstrap.ts` SSE pipeline, and
 `event-publisher` SSE chain are all out of scope and must be
 `requires-redesign` cards that strip the SSE transport while preserving
 the EventLog → audit ordering. See `docs/handbook/invariants.md §11`.
