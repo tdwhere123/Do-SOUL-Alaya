@@ -43,6 +43,46 @@
 - Do not edit shared barrels unless this card explicitly owns that barrel.
 - If a cited source path is missing or a source dependency forces files outside §2, return `BLOCKED` instead of expanding scope.
 
+### 2.3 Strip Rules and RuntimeNotifier Wiring Contract
+
+The replacement contract is **`RuntimeNotifier`** from `packages/core/src/event-publisher.ts`:
+
+```ts
+export interface RuntimeNotifier {
+  notify(runId: string, event: Phase0Event): void | Promise<void>;
+  notifyEntry(entry: EventLogEntry): void | Promise<void>;
+}
+```
+
+Every SSE removal MUST replace the broadcast leg with `RuntimeNotifier` registration. `notifyEntry` runs after `EventLog.append` + DB mutate; it never runs before. No external HTTP listener is exposed (per invariant §21 / §11).
+
+#### File-by-file before/after table
+
+| Source file | Before | After | Verification |
+|---|---|---|---|
+| `vendor/.../apps/core-daemon/src/sse/sse-manager.ts` (411 LOC) | upstream `SseManager` class implements per-run subscriber registry, EventSource framing, retry/backoff, and HTTP `text/event-stream` body writer | **delete entirely**; do not create `apps/core-daemon/src/sse/`. The directory must remain absent in target | `rtk find apps/core-daemon/src -type d -name sse \| rtk wc -l` outputs `0` |
+| `vendor/.../apps/core-daemon/src/routes/runs.ts` line 1 `import { TransformStream } from "node:stream/web"` | streaming import | **delete** | `rg -n "TransformStream" apps/core-daemon/src/routes/runs.ts` finds 0 |
+| `vendor/.../apps/core-daemon/src/routes/runs.ts` line 25 `import type { SseManager } from "../sse/sse-manager.js"` | sse type import | **delete** | `rg -n "SseManager" apps/core-daemon/src/routes/runs.ts` finds 0 |
+| `vendor/.../apps/core-daemon/src/routes/runs.ts` line 130 `readonly sseManager: SseManager` field on `RunRouteDependencies` | required dep | **delete dependency field**; replace consumers with `runtimeNotifier: RuntimeNotifier` from `packages/core/src/event-publisher.ts` | targeted vitest run; type-check passes |
+| `vendor/.../apps/core-daemon/src/routes/runs.ts` lines ~237 `new TransformStream<Uint8Array, Uint8Array>()` and ~277 `"Content-Type": "text/event-stream"` | SSE GET endpoint at `/runs/:id/events` returning streaming body | **delete the GET endpoint entirely.** Alaya has no SSE consumer (invariant §21). MCP `tools/call` is request/response; no client polls this route | `rg -n "text/event-stream\|TransformStream" apps/core-daemon/src` finds 0 |
+| `vendor/.../apps/core-daemon/src/index.ts` line 177 `import { SseManager } from "./sse/sse-manager.js"` | startup import | **delete** | `rg -n "sse-manager\|SseManager" apps/core-daemon/src/index.ts` finds 0 |
+| `vendor/.../apps/core-daemon/src/index.ts` line 260 `const sseManager = new SseManager(eventLogRepo)` | startup instantiation | **delete**; replace with `const runtimeNotifier: RuntimeNotifier = createRuntimeNotifier(...)` (real implementation owned by P4-daemon-startup-ordering — this card is allowed to introduce a one-line stub `const runtimeNotifier: RuntimeNotifier = { notify: async () => {}, notifyEntry: async () => {} }` and mark it `// TODO(P4-daemon-startup-ordering): replace stub` to keep build green) | `rg -n "RuntimeNotifier" apps/core-daemon/src/index.ts` finds at least one |
+| `vendor/.../apps/core-daemon/src/app.ts` line 49 `import type { SseManager } from "./sse/sse-manager.js"` | type import | **delete** | `rg -n "SseManager" apps/core-daemon/src/app.ts` finds 0 |
+| `vendor/.../apps/core-daemon/src/app.ts` line 149 `readonly sseManager: SseManager` on `AppDependencies` | required dep | **delete dependency field**; downstream daemon-routes-register cards will not pass it | type-check passes; `rg -n "sseManager" apps/core-daemon/src` finds 0 |
+| `vendor/.../apps/core-daemon/src/background/bootstrap.ts` (69 LOC) | upstream contains generic `BackgroundServiceManager` only; **no SSE refs** despite the §0 cite | **port as trivial-copy** (no strip needed). The card README's mention of "SSE pipeline in bootstrap.ts" is incorrect; document this deviation in the completion report | `diff vendor/.../background/bootstrap.ts apps/core-daemon/src/background/bootstrap.ts` shows only namespace rewrites |
+
+#### Ordering invariant
+
+The strip MUST preserve `EventLog.append → DB mutate → audit row → RuntimeNotifier.notifyEntry`. The relative order is enforced by `EventPublisher.publishWithMutation` and is not this card's responsibility to reimplement; this card only replaces the **broadcast leg** (SSE → in-process listener), not the producer.
+
+#### Test scope clarification
+
+Tests under `apps/core-daemon/src/__tests__/` that reference `SseManager` (e.g. `runs-rename-route.test.ts`, `embedding-backfill-runtime.test.ts`) are **owned by the corresponding P4-routes-* card**, not by this card. P4-sse-strip only updates production code under `apps/core-daemon/src/`; reviewers MUST NOT block this card on test-side leftovers, but P4-daemon-routes-register's gate MUST verify zero SSE strings across `apps/core-daemon/src/__tests__/` before final close.
+
+#### Final residue gate
+
+After this card lands, `rg -n "SseManager\|sseManager\|text/event-stream\|EventSource\|TransformStream" apps/core-daemon/src --glob '!__tests__/**'` MUST return zero hits. Verification step 6 enforces this.
+
 ## 3. Deferred
 
 Nothing deferred.
