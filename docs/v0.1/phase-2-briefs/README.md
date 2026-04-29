@@ -10,7 +10,11 @@ defense stack (permission policy / zero-day / worker safety / trust
 assessor / stance resolution / constraint proxy), and the embedding
 backfill pipeline.
 
-This is the largest phase with 31 cards.
+This is the largest phase with 32 cards.
+
+Status: **done**. Gate-2 passed after all 32 cards had completion reports,
+fresh build/test evidence, package import/SSE sweeps, and reviewer fix-loop
+closure. See `reports/gate-2-closeout.md`.
 
 ## Service Wave Ordering (within Phase 2B)
 
@@ -26,6 +30,7 @@ Wave 2B.0 follow-on: narrative-budget after event-publisher
 Wave 2B.1 (depend on 2B.0, parallel up to 6): evidence, signal, memory,
                                               green, governance-lease,
                                               session-override
+Wave 2B.2 prelude: task-surface-builder-prelude before recall
 Wave 2B.2 (depend on 2B.1, parallel up to 4): recall, embedding-recall,
                                               global-recall, manifestation
 Wave 2B.3 (depend on 2B.2, parallel up to 2): synthesis, proposal
@@ -77,6 +82,7 @@ Nonexistent stale names such as `session-override-repo`,
 | P2-svc-green | GreenService (ELIGIBLE/GRACE/REVOKED state machine) | 757 | 2B.1 |
 | P2-svc-governance-lease | GovernanceLeaseService | 408 | 2B.1 |
 | P2-svc-session-override | SessionOverrideService | 359 | 2B.1 |
+| P2-svc-task-surface-builder-prelude | TaskSurfaceBuilder + recall defaults only; no Phase 3 run lifecycle files and no core barrel export | 277 | 2B.2 prelude |
 | P2-svc-recall | RecallService | 1157 | 2B.2 |
 | P2-svc-embedding-recall | EmbeddingRecallService (recall-side query only) | 744 | 2B.2 |
 | P2-svc-global-recall | GlobalMemoryRecallService | 274 | 2B.2 |
@@ -124,7 +130,7 @@ depends on.
 (`packages/core/src/index.ts` is updated by P3-core-barrel after
 Phase 3, since P3 services also export through it.)
 
-**Total: 31 cards.**
+**Total: 32 cards.**
 
 ## Gate-2 Acceptance
 
@@ -145,6 +151,9 @@ Phase 3, since P3 services also export through it.)
   Batch 6 explicitly includes `garden-data-ports` (review I4), so 2C
   garden cards depend on batch-6 closing.
 - 2B services follow the sub-wave ordering above; 2B.0 first.
+  P2-svc-task-surface-builder-prelude serializes immediately before
+  P2-svc-recall so recall can stay `trivial-copy` without starting
+  full Phase 3 run lifecycle work.
 - 2C garden batches wait for 2B.0 + 2B.1 (services that Garden
   consumes) AND batch-6 (garden-data-ports adapter).
 - 2D security cards run in parallel anytime after Phase 1.

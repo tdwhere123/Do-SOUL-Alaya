@@ -78,6 +78,27 @@ exclusion table:
 When two cards collide on a write set, the second card BLOCKS and the
 main thread serializes them.
 
+## Phase Worktree Control
+
+For phase-level work, the main thread owns a dedicated phase controller
+worktree. Sub-agents and codex instances work from that controller plan,
+not from the main checkout.
+
+- The controller worktree is created from the intended base branch
+  before phase implementation starts.
+- Worker worktrees, when used, branch from the same base or from a
+  reviewed controller integration point named by the main thread.
+- Shared files such as phase READMEs, closeout reports, package
+  barrels, root manifests, and status docs remain under controller
+  ownership unless explicitly assigned.
+- Workers return their branch/worktree evidence to the controller. The
+  controller serializes merges, resolves conflicts, and reruns
+  integrated verification.
+- The final phase result merges back to `main` only after review/fix
+  closure and fresh gate verification. After that merge, the main
+  checkout receives its own final verification before any phase gate is
+  marked passed.
+
 ## Failure Modes To Watch
 
 The numbered list below seeds the `Cause Class` field of Review

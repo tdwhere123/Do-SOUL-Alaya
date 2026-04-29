@@ -39,6 +39,13 @@
 - Do not edit shared barrels unless this card explicitly owns that barrel.
 - If a cited source path is missing or a source dependency forces files outside §2, return `BLOCKED` instead of expanding scope.
 
+### 2.3 Adapter Points
+
+| Source construct | Alaya construct | Reason |
+|---|---|---|
+| Graph helper re-export from `@do-what/protocol` | Graph helper re-export from `@do-soul/alaya-protocol` | Preserve upstream public graph constants/parsers using the Alaya protocol package name. |
+| `SoulGraphAggregator` export from `./graph/graph-aggregator.js` | Omit only this file export | The aggregator implementation is not present in the Alaya Phase 2 source set. |
+
 ## 3. Deferred
 
 Nothing deferred.

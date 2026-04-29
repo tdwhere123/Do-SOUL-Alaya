@@ -12,7 +12,7 @@ Per-Card Pipeline.
 ```text
 Phase 0 → Gate-0
    → Phase 1 (Wave 1, 9 cards) → Gate-1
-       → Phase 2 (Wave 2, 20-25 parallel cards) → Gate-2
+       → Phase 2 (Wave 2, 32 cards) → Gate-2
            → Phase 3 (Wave 3, 3-5 parallel cards) → Gate-3
                → Phase 4 (Wave 4, 3-5 parallel cards) → Gate-4
                    → Phase 5 (Wave 5, 1 sequential card) → Gate-5
@@ -25,15 +25,16 @@ Phase 0 → Gate-0
 |---|---|---|---|---|
 | Phase 0 | Reset & Source Mirror | 6 cards (P0-0..P0-5) + P0-3.5 review + P0-3.6 fix + P0-4 extraction | **done** | Gate-0 passed |
 | Phase 1 | Wave 1: Leaves | 9 cards | **done** | Gate-1 passed |
-| Phase 2 | Wave 2: Services + Garden + Repos + Security | 31 cards (target) | in-progress | Gate-2 |
+| Phase 2 | Wave 2: Services + Garden + Repos + Security | 32 cards | **done** | Gate-2 passed |
 | Phase 3 | Wave 3: ConversationService + Run Lifecycle | 5 cards (target) | not-started | Gate-3 |
 | Phase 4 | Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI | 24 cards (target) | not-started | Gate-4 |
 | Phase 5 | Wave 5: E2E + Benchmark + Graph Contract + Final Review | 4 cards (target) | not-started | Gate-5 |
 
 ## Phase 2 — Card Closeout Status
 
-This table tracks Phase 2 cards with completion reports. Omitted Phase 2 cards
-remain not-started or in-progress under `phase-2-briefs/README.md`.
+This table tracks the 32 Phase 2 cards closed for Gate-2.
+
+Gate-2 closeout evidence: [report](./phase-2-briefs/reports/gate-2-closeout.md).
 
 | Card | Readiness | Report |
 |---|---|---|
@@ -61,6 +62,14 @@ remain not-started or in-progress under `phase-2-briefs/README.md`.
 | P2-security-2 | implementation-ready | [report](./phase-2-briefs/reports/task-p2-security-2.md) |
 | P2-garden-batch-1 | implementation-ready | [report](./phase-2-briefs/reports/task-p2-garden-batch-1.md) |
 | P2-garden-batch-4 | implementation-ready | [report](./phase-2-briefs/reports/task-p2-garden-batch-4.md) |
+| P2-svc-task-surface-builder-prelude | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-task-surface-builder-prelude.md) |
+| P2-svc-recall | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-recall.md) |
+| P2-svc-manifestation | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-manifestation.md) |
+| P2-svc-synthesis | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-synthesis.md) |
+| P2-svc-proposal | implementation-ready | [report](./phase-2-briefs/reports/task-p2-svc-proposal.md) |
+| P2-garden-batch-3 | implementation-ready | [report](./phase-2-briefs/reports/task-p2-garden-batch-3.md) |
+| P2-garden-batch-2 | implementation-ready | [report](./phase-2-briefs/reports/task-p2-garden-batch-2.md) |
+| P2-barrel-soul | implementation-ready | [report](./phase-2-briefs/reports/task-p2-barrel-soul.md) |
 
 ## Phase 0 — Reset & Source Mirror
 

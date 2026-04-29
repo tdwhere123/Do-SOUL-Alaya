@@ -40,14 +40,14 @@ vendor/
   do-what-new-snapshot/  frozen upstream port reference (read-only)
 ```
 
-## Current Status (Phase 2 in progress)
+## Current Status (Gate-2 passed)
 
-Phase 1 leaves are ported and unit-tested. Phase 2 storage
-repositories and their package barrel are ported and unit-tested.
-Selected Phase 2 core services have started landing as implementation-ready.
-The daemon, CLI, remaining core services, and remaining Garden roles are
-still owned by later phase/card work. Refresh this section after each
-Phase Gate.
+Phase 1 leaves and Phase 2 storage repositories, core services, security
+stack, Garden roles, and owned package barrels are ported and unit-tested as
+implementation-ready. Gate-2 passed with `rtk pnpm build`, `rtk pnpm test`,
+and package-specific core/soul/storage Vitest suites. The daemon, CLI, Phase 3
+orchestration services, and live surface wiring are still owned by later
+phase/card work. Refresh this section after each Phase Gate.
 
 | Concern | Primary files | State |
 |---|---|---|
@@ -62,10 +62,10 @@ Phase Gate.
 | Storage migrations | `packages/storage/src/migrations/` | ported; `implementation-ready` (P1-migrations) |
 | Storage repos | `packages/storage/src/repos/`, `packages/storage/src/index.ts`, `packages/storage/src/__tests__/*-repo.test.ts` | ported; `implementation-ready` (P2-repos-batch-* + P2-barrel-storage) |
 | Core skeleton + config leaves | `packages/core/src/{errors.ts,index.ts,shared/,dynamics-constants-runtime.ts}` | ported; `schema-ready` (P1-core-skeleton + P1-config) |
-| Core services | `packages/core/src/` service files | partial: `memory-service.ts`, `evidence-service.ts`, `signal-service.ts`, `global-memory-recall-{port,service}.ts`, `green-service.ts`, `governance-lease-service.ts`, `session-override-service.ts`, `embedding-recall-service.ts`, `embedding-backfill-handler.ts`, `event-publisher.ts`, `runtime-event-normalizer.ts`, `output-shaping-service.ts`, `narrative-budget-service.ts`, `health-journal-service.ts`, and `karma-event-store.ts` are ported; remaining P2 service cards are not yet ported |
+| Core services | `packages/core/src/` service files | Phase 2 services are ported: `memory-service.ts`, `evidence-service.ts`, `signal-service.ts`, `global-memory-recall-{port,service}.ts`, `task-surface-builder.ts`, `recall-service.ts`, `manifestation-resolver.ts`, `synthesis-service.ts`, `proposal-service.ts`, `green-service.ts`, `governance-lease-service.ts`, `session-override-service.ts`, `embedding-recall-service.ts`, `embedding-backfill-handler.ts`, `event-publisher.ts`, `runtime-event-normalizer.ts`, `output-shaping-service.ts`, `narrative-budget-service.ts`, `health-journal-service.ts`, and `karma-event-store.ts`; Phase 3 orchestration services are not yet ported |
 | Core security stack | `packages/core/src/{permission-policy/,ports/,zero-day-security-layer.ts,constraint-proxy.ts,integration-gate.ts,worker-safety-gate.ts,worker-trust-assessor.ts,stance-resolution-service.ts,cross-cutting-permission-service.ts}` | ported; `implementation-ready` (P2-security-1 + P2-security-2) |
 | Soul skeleton + topology leaves | `packages/soul/src/{signal-handler.ts,tool-governance-adapter.ts,worker-safety-*.ts,garden/topology-service.ts,garden/path-graph-snapshotter.ts,shared/deep-freeze.ts}` | ported; `implementation-ready` leaves (P1-soul-skeleton + P1-topology) |
-| Garden engine | `packages/soul/src/garden/`, `packages/soul/src/shared/bootstrapping-ids.ts` | partial: `auditor.ts`, `scheduler.ts`, `compute-provider.ts`, `compute-routing-service.ts`, `local-heuristics.ts`, `bootstrapping-service.ts`, `session-override-remediation.ts`, `backlog-telemetry.ts`, and `shared/bootstrapping-ids.ts` are ported; remaining P2 Garden batches are not yet ported |
+| Garden engine | `packages/soul/src/garden/`, `packages/soul/src/shared/bootstrapping-ids.ts`, `packages/soul/src/index.ts` | Phase 2 Garden roles are ported and exported: `auditor.ts`, `scheduler.ts`, `compute-provider.ts`, `compute-routing-service.ts`, `local-heuristics.ts`, `janitor.ts`, `librarian.ts`, `materialization-router.ts`, `degradation-pipeline.ts`, `handoff-gap-handler.ts`, `bootstrapping-service.ts`, `session-override-remediation.ts`, `backlog-telemetry.ts`, and `shared/bootstrapping-ids.ts` |
 | Engine gateway | `packages/engine-gateway/src/` | MCP/provider skeleton ported; provider adapters deferred (#BL-008) |
 | Core daemon | `apps/core-daemon/src/` | not yet ported (P4-daemon-skeleton + P4-daemon-startup-ordering + P4-sse-strip) |
 | CLI shell | `bin/alaya.mjs` | not yet ported (P4-cli-bridge) |
@@ -80,11 +80,11 @@ sources. The high-level mapping is:
 | `packages/protocol/src/*` | `vendor/do-what-new-snapshot/packages/protocol/src/*` |
 | `packages/storage/src/migrations/*.sql` | `vendor/do-what-new-snapshot/packages/storage/src/migrations/*.sql` |
 | `packages/storage/src/repos/*.ts` | `vendor/do-what-new-snapshot/packages/storage/src/repos/*.ts` |
-| `packages/core/src/{memory,evidence,signal,recall,embedding-recall,global-memory-recall,green,governance-lease,session-override,synthesis,proposal,output-shaping,narrative-budget,health-journal}-service.ts` and `embedding-backfill-handler.ts` and `manifestation-resolver.ts` and `event-publisher.ts` and `runtime-event-normalizer.ts` | `vendor/do-what-new-snapshot/packages/core/src/<same filename>` (note: `runtime-event-normalizer.ts`, `event-publisher.ts`, `embedding-backfill-handler.ts`, and `manifestation-resolver.ts` have no `-service.ts` suffix) |
+| `packages/core/src/{memory,evidence,signal,recall,embedding-recall,global-memory-recall,green,governance-lease,session-override,synthesis,proposal,output-shaping,narrative-budget,health-journal}-service.ts` and `task-surface-builder.ts`, `embedding-backfill-handler.ts`, `manifestation-resolver.ts`, `event-publisher.ts`, and `runtime-event-normalizer.ts` | `vendor/do-what-new-snapshot/packages/core/src/<same filename>` (note: `task-surface-builder.ts`, `runtime-event-normalizer.ts`, `event-publisher.ts`, `embedding-backfill-handler.ts`, and `manifestation-resolver.ts` have no `-service.ts` suffix) |
 | `packages/core/src/{permission-policy/,zero-day-security-layer.ts,constraint-proxy.ts,integration-gate.ts}` | `vendor/do-what-new-snapshot/packages/core/src/<same path>` |
 | `packages/core/src/{worker-safety-gate.ts,worker-trust-assessor.ts,stance-resolution-service.ts,cross-cutting-permission-service.ts,ports/tool-governance-client.ts}` | `vendor/do-what-new-snapshot/packages/core/src/<same path>` |
 | `packages/core/src/conversation-service.ts` | `vendor/do-what-new-snapshot/packages/core/src/conversation-service.ts` |
-| `packages/soul/src/garden/{auditor,janitor,librarian,scheduler,bootstrapping-service,session-override-remediation,backlog-telemetry,materialization-router,topology-service,path-graph-snapshotter}.ts` | `vendor/do-what-new-snapshot/packages/soul/src/garden/<same>` |
+| `packages/soul/src/garden/{auditor,janitor,librarian,scheduler,compute-provider,compute-routing-service,local-heuristics,bootstrapping-service,session-override-remediation,backlog-telemetry,materialization-router,degradation-pipeline,handoff-gap-handler,topology-service,path-graph-snapshotter}.ts` | `vendor/do-what-new-snapshot/packages/soul/src/garden/<same>` |
 | `packages/engine-gateway/src/*` | `vendor/do-what-new-snapshot/packages/engine-gateway/src/*` |
 | `apps/core-daemon/src/{index,app,garden-runtime}.ts` | `vendor/do-what-new-snapshot/apps/core-daemon/src/<same>` |
 | `apps/core-daemon/src/routes/*.ts` | `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/*.ts` |

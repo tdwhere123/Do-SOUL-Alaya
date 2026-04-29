@@ -20,7 +20,7 @@ each Phase Gate.
 |---|---|---|---|
 | Phase 0 | Reset, vendor snapshot, handbook, INDEX, task cards | **done** | Gate-0 passed |
 | Phase 1 | Wave 1 leaves: protocol, migrations, storage shared, config, topology, engine-gateway | **done** | Gate-1 passed |
-| Phase 2 | Wave 2: storage repos batches + core services + Garden + security defense | in-progress | Gate-2 |
+| Phase 2 | Wave 2: storage repos batches + core services + Garden + security defense | **done** | Gate-2 passed |
 | Phase 3 | Wave 3: ConversationService, MCP discovery, run lifecycle, misc services, core barrel | not-started | Gate-3 |
 | Phase 4 | Wave 4: Core daemon, routes, MCP server transport, real profile mutation, CLI bridge, secrets | not-started | Gate-4 (end-to-end demo) |
 | Phase 5 | Wave 5: full E2E, benchmark, graph contract, final review | not-started | Gate-5 (v0.1 release) |
@@ -40,17 +40,22 @@ each Phase Gate.
 | EvidenceService | `implementation-ready` | `live-event-ready` | P2-svc-evidence |
 | SignalService | `implementation-ready` | `live-event-ready` | P2-svc-signal |
 | GlobalMemoryRecallService | `implementation-ready` | `live-event-ready` | P2-svc-global-recall |
-| RecallService | `not-started` | `live-event-ready` | P2-svc-recall |
+| TaskSurfaceBuilder | `implementation-ready` | `implementation-ready` | P2-svc-task-surface-builder-prelude |
+| RecallService | `implementation-ready` | `live-event-ready` | P2-svc-recall |
 | EmbeddingRecallService | `implementation-ready` | `live-event-ready` | P2-svc-embedding-recall |
 | EmbeddingBackfillHandler | `implementation-ready` | `live-event-ready` | P2-svc-embedding-pipeline |
+| ManifestationResolver | `implementation-ready` | `live-event-ready` | P2-svc-manifestation |
+| SynthesisService | `implementation-ready` | `live-event-ready` | P2-svc-synthesis |
+| ProposalService | `implementation-ready` | `live-event-ready` | P2-svc-proposal |
 | GreenService (ELIGIBLE/GRACE/REVOKED) | `implementation-ready` | `live-event-ready` | P2-svc-green |
 | GovernanceLeaseService | `implementation-ready` | `live-event-ready` | P2-svc-governance-lease |
 | SessionOverrideService | `implementation-ready` | `live-event-ready` | P2-svc-session-override |
 | Garden Auditor | `implementation-ready` | `live-event-ready` | P2-garden-batch-1 |
-| Garden Janitor | `not-started` | `live-event-ready` | P2-garden-batch-2 |
-| Garden Librarian | `not-started` | `live-event-ready` | P2-garden-batch-2 |
+| Garden Janitor | `implementation-ready` | `live-event-ready` | P2-garden-batch-2 |
+| Garden Librarian | `implementation-ready` | `live-event-ready` | P2-garden-batch-2 |
 | GardenScheduler | `implementation-ready` | `live-event-ready` | P2-garden-batch-1 |
 | Garden compute providers / local heuristics | `implementation-ready` | `live-event-ready` | P2-garden-batch-1 |
+| Garden materialization / degradation / handoff gap | `implementation-ready` | `live-event-ready` | P2-garden-batch-3 |
 | Garden bootstrapping / remediation / backlog telemetry | `implementation-ready` | `live-event-ready` | P2-garden-batch-4 |
 | Soul package skeleton + governance leaves | `schema-ready` | `schema-ready` | P1-soul-skeleton |
 | Soul topology leaves | `implementation-ready` | `implementation-ready` | P1-topology |
@@ -69,9 +74,9 @@ each Phase Gate.
 
 ## Known Wiring Gaps
 
-Phase 1 leaves are ported and unit-tested, but they are not wired into
-daemon, CLI, or MCP runtime surfaces yet. Those live-consumption paths
-belong to Phase 2-4 cards.
+Phase 1 and Phase 2 implementation surfaces are ported and unit-tested, but
+they are not wired into daemon, CLI, or MCP runtime surfaces yet. Those
+live-consumption paths belong to Phase 3-4 cards.
 
 ## Gate Definitions
 

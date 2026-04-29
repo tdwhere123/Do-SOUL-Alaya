@@ -7,7 +7,7 @@
 > - **Source**: `vendor/do-what-new-snapshot/packages/core/src/recall-service.ts`, `vendor/do-what-new-snapshot/packages/core/src/__tests__/recall-service.test.ts`, `vendor/do-what-new-snapshot/packages/core/src/__tests__/recall-global-filter.test.ts`, `vendor/do-what-new-snapshot/packages/core/src/__tests__/recall-8factor.test.ts`
 > - **Target**: `packages/core/src/`, `packages/core/src/__tests__/`
 > - **Size**: L
-> - **Prerequisite**: P2-svc-memory, P2-svc-evidence, P2-repos-batch-2, P2-svc-global-recall, P2-svc-embedding-recall
+> - **Prerequisite**: P2-svc-task-surface-builder-prelude, P2-svc-memory, P2-svc-evidence, P2-repos-batch-2, P2-svc-global-recall, P2-svc-embedding-recall
 > - **Blocks**: P2-svc-manifestation, P2-svc-synthesis, P3-conversation
 > - **Closing readiness label**: implementation-ready
 > - **Owner**: unassigned
@@ -68,5 +68,5 @@ Nothing deferred.
 
 - Does not edit `packages/core/src/index.ts`; P3-core-barrel serializes service exports after Phase 3.
 
-**Prerequisite**: P2-svc-memory, P2-svc-evidence, P2-repos-batch-2, P2-svc-global-recall, P2-svc-embedding-recall.
+**Prerequisite**: P2-svc-task-surface-builder-prelude, P2-svc-memory, P2-svc-evidence, P2-repos-batch-2, P2-svc-global-recall, P2-svc-embedding-recall.
 **Blocks**: P2-svc-manifestation, P2-svc-synthesis, P3-conversation.

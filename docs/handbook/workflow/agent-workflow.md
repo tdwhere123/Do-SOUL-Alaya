@@ -56,6 +56,34 @@ loops, or wave-level coordination, also follow
 7. Do not mark a gate as passed without fresh evidence and a gate
    report.
 
+## Phase Worktree And Merge Pipeline
+
+Phase-level implementation, closeout, or gate work MUST start from an
+isolated project worktree rather than direct edits in the main checkout.
+
+1. Verify the intended base branch, normally `main`, and record its
+   current status before creating the worktree.
+2. Create a phase-owned worktree under the project-local worktree area
+   before implementation begins. Use that worktree as the controller
+   for phase shared files, reports, status docs, and integration.
+3. Dispatch card or wave workers from the phase controller only after
+   the controller freezes scope, dependencies, shared-file ownership,
+   and merge order.
+4. Keep phase work out of the main checkout until the phase controller
+   has passed build, tests, required targeted verification, and
+   review/fix-loop closure.
+5. Merge the completed phase branch back into `main` only after the
+   final reviewer pass reports zero unresolved Blocking or Important
+   findings and the integrated verification evidence is fresh on the
+   phase branch.
+6. After merging, rerun the required gate verification on `main`
+   before marking the phase gate as passed. Evidence from the isolated
+   worktree alone is not enough for a final `main` closeout claim.
+
+Exception: if the user explicitly asks to edit `main` directly for a
+specific phase, record that exception in the closeout report and keep
+all other review, verification, and gate rules intact.
+
 ## Task-Type Reading Matrix
 
 Every task starts with the "Any" row. Add the matching row based on

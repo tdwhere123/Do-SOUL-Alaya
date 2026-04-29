@@ -57,7 +57,8 @@ exclusion reasons it does not want).
 
 **TaskSurfaceBuilder** — Builder that assembles the task-shaped
 context Alaya hands to a worker (run-side); used by run lifecycle
-services. Ported in Phase 3 P3-run-lifecycle.
+services. Ported in Phase 2 `P2-svc-task-surface-builder-prelude`;
+Phase 3 `P3-run-lifecycle` consumes it but does not own it.
 
 ## Garden / Maintenance
 
