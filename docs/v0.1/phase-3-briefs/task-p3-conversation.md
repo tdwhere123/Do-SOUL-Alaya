@@ -46,6 +46,8 @@ into model-consumable context for P4-mcp-memory-tools.
 
 ### 2.3 Adapter Points
 
+Source file `vendor/.../packages/core/src/conversation-service.ts` is **2133 LOC**. The eight adapter points below cover the chat-specific paths to **delete or adapt**. **All other line ranges port as `trivial-copy`** (namespace rewrite only); reviewer verifies via `diff` against vendor source for any range outside this table. Card author MUST list the exact final imports / public exports kept vs deleted in the completion report.
+
 | # | Source line range | Change | Justification |
 |---|---|---|---|
 | 1 | lines 417-479 interrupt runtime-session branches | Delete or fail closed outside Alaya memory path | No live conversation runtime session surface |
@@ -56,6 +58,11 @@ into model-consumable context for P4-mcp-memory-tools.
 | 6 | lines 1259-1310 completed turn threading | Adapt to explicit memory evidence/governance path only | Durable promotion must be explicit |
 | 7 | lines 1784-2114 message-history/assistant prompt helpers | Remove if only used by deleted chat paths | Chat prompt assembly out of scope |
 | 8 | `context-lens-assembler.ts` daemon-preview cache | Retain recall-to-model projection and last-lens preview behavior without adding SSE or GUI consumers | P4-mcp-memory-tools needs a producer for delivery records and model-consumable context |
+| 9 | **all other line ranges in `conversation-service.ts` and `context-lens-assembler.ts`** | trivial-copy — only `@do-what/*` → `@do-soul/alaya-*` import rewrites | Default per port-protocol §1; explicit so reviewer R1 byte-equality check passes |
+
+#### Range coverage check
+
+The 8 adapter ranges (1-8) cover approximately lines 417-479, 527-545, 610-668, 715-946, 995-1031, 1259-1310, 1784-2114 — totaling ~970 LOC. The remaining ~1163 LOC must port byte-for-byte modulo namespace rewrites. If the card author finds a chat-specific path outside the listed ranges, they MUST extend this table in a `docs(P3-conversation):` follow-up commit before the implementation commit lands; in-flight scope expansion is rejected at review.
 
 ## 3. Deferred
 
