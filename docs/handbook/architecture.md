@@ -95,15 +95,32 @@ State-changing runtime writes follow:
 
 ```text
 EventLog append -> DB update -> audit row -> in-process notification
-                                              (AlayaRuntimePort listeners)
+                                              (RuntimeNotifier listeners)
 ```
 
 Audit precedes broadcast. Every state change records an audit row
 before any consumer can observe it.
 
+The in-process notification interface is **`RuntimeNotifier`**, exported
+from `packages/core/src/event-publisher.ts`:
+
+```ts
+export interface RuntimeNotifier {
+  notify(runId: string, event: Phase0Event): void | Promise<void>;
+  notifyEntry(entry: EventLogEntry): void | Promise<void>;
+}
+```
+
+`EventPublisher` calls `notifyEntry` after every successful
+`EventLog.append` + DB mutate, never before. `notify` is reserved for
+already-decoded `Phase0Event` payloads (e.g. run-scoped listeners that
+do not need the full envelope). Phase 4 daemon wiring instantiates one
+concrete `RuntimeNotifier` and registers it on `EventPublisher` at
+startup step 3 of `Daemon Startup Ordering` below.
+
 **No SSE.** Alaya does not expose an SSE stream because no surface
 consumes one (no GUI, no TUI, no live HTTP client). Daemon-internal
-eventing is in-process via AlayaRuntimePort listeners and the audit
+eventing is in-process via `RuntimeNotifier` listeners and the audit
 log. Upstream daemon code under `apps/core-daemon/src/sse/`,
 `runs.ts` TransformStream, `background/bootstrap.ts` SSE pipeline, and
 `event-publisher` SSE chain are all out of scope and must be

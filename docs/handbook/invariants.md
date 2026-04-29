@@ -37,8 +37,10 @@ These rules always win over lower-level docs and task-card convenience.
     before any consumer can observe it.
 11. **Alaya does not run an SSE event stream.** Upstream do-what-new
     uses SSE because it has GUI / TUI consumers; Alaya does not.
-    Daemon-internal eventing is via in-process audit log + AlayaRuntimePort
-    notification only. Any port of `apps/core-daemon/src/sse/`,
+    Daemon-internal eventing is via in-process audit log +
+    `RuntimeNotifier` notification only (interface in
+    `packages/core/src/event-publisher.ts`; producer ownership is
+    P2-svc-event-publisher). Any port of `apps/core-daemon/src/sse/`,
     `runs.ts` SSE TransformStream, `background/bootstrap.ts` SSE
     pipeline, or `event-publisher` SSE chain MUST be `requires-redesign`
     that strips the SSE transport while preserving the EventLog →

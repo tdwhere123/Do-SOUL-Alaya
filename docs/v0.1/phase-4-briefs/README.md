@@ -19,7 +19,7 @@ green" into "actually works for a user".
 |---|---|---|
 | P4-daemon-skeleton | `apps/core-daemon/{package.json, tsconfig.json, src/index.ts, src/app.ts}` skeleton. Strip GUI/TUI references. | adapt-and-port |
 | P4-daemon-startup-ordering | `apps/core-daemon/src/{garden-runtime.ts, daemon-runtime-helpers.ts, worker-runtime-wiring.ts, background/bootstrap.ts}`. Implements daemon startup ordering per `docs/handbook/architecture.md §Daemon Startup Ordering`. SSE pipeline in background/bootstrap.ts is stripped (see P4-sse-strip). | adapt-and-port |
-| P4-sse-strip | **Strip all SSE** from `apps/core-daemon/src/sse/`, `apps/core-daemon/src/routes/runs.ts` (TransformStream block), daemon startup references to upstream `SseManager` and the already-redesigned P2 `EventPublisher` listener boundary per invariant §11. Preserve EventLog → audit ordering; replace SSE notify with `AlayaRuntimePort` listeners. | requires-redesign |
+| P4-sse-strip | **Strip all SSE** from `apps/core-daemon/src/sse/`, `apps/core-daemon/src/routes/runs.ts` (TransformStream block), daemon startup references to upstream `SseManager` and the already-redesigned P2 `EventPublisher` listener boundary per invariant §11. Preserve EventLog → audit ordering; replace SSE notify with `RuntimeNotifier` listeners (interface in `packages/core/src/event-publisher.ts`). | requires-redesign |
 
 ### 4B. Routes (parallel after 4A)
 

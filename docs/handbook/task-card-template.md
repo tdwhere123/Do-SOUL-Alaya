@@ -137,7 +137,7 @@ For requires-redesign, document the Alaya-original design:
   - Print diff to stdout, ask `[y/N]` on stdin.
   - On `y`, write atomically (temp file + rename).
   - On `n`, exit 0 with no mutation.
-  - Audit-record the attach action via AlayaRuntimePort.
+  - Audit-record the attach action via RuntimeNotifier.
 - **Why no upstream port**: do-what-new is a workspace tool; it does
   not attach to other agents. This is a v0.1 Alaya invariant (§20-22).
 ```
@@ -469,7 +469,7 @@ record of the attach action.
   - Print diff to stdout in unified format.
   - Prompt `[y/N]` on stdin (TTY-aware; in non-TTY mode require `--yes`).
   - On confirm: atomic write (temp file + rename); on decline: exit 0.
-  - Always emit an audit row through AlayaRuntimePort with action
+  - Always emit an audit row through RuntimeNotifier with action
     `attach.preview` (always) and `attach.commit` (on confirm).
 - **Behaviors that MUST NOT be present**:
   - Silent mutation without preview.
