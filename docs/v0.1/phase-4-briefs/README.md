@@ -179,15 +179,22 @@ Inside Phase 4:
 4A.1: P4-daemon-skeleton (sequential first)
 4A.2: P4-daemon-startup-ordering, P4-sse-strip (parallel after 4A.1)
 4B + 4C + 4D: parallel after 4A.2 closes where write sets allow
-4E: after P4-mcp-tooling, P4-daemon-services, P4-daemon-glue, P4-cli-bridge, P4-trust-state, P3-conversation, and P3-core-barrel
-4F + 4G: after 4E closes
-4H.server (P4-inspector-server): after 4B routes (config / soul) and P4-cli-inspect close
-4H.frontend (P4-inspector-frontend): after P4-inspector-server closes; Gemini-CLI authoring runs against the closed server contract
+4C.svc-global-recall-cache: parallel with the rest of 4C
+4E: after P4-mcp-tooling, P4-daemon-services, P4-daemon-glue, P4-cli-bridge, P4-trust-state, P3-conversation, and P3-core-barrel close
+4F: after 4E closes
+4H.server (P4-inspector-server): after P4-cli-bridge, P4-secrets, P4-routes-config, P4-routes-soul, P4-trust-state close
+4G's cli-inspect: after P4-inspector-server closes
+4G's attach-codex / attach-claude / cli-doctor / cli-install / cli-status / profile-mutation / operations: after 4E + the relevant 4G internals close (attach-codex/claude need cli-inspect; cli-install needs P4-secrets)
+4G's cli-detach: after attach-codex + attach-claude close
+4H.frontend (P4-inspector-frontend): after P4-inspector-server closes; Gemini-CLI authoring runs against the closed server contract; can run in parallel with 4G's late tail (cli-detach et al.)
 4I: sequential last (after all 4B routes and 4H close)
 ```
 
-Maximum concurrency in 4B+4C+4D+4G: ~10 codex. 4H.frontend is offloaded
-to Gemini CLI so it does not consume a codex slot.
+Maximum concurrency in 4B + 4C + 4D + early 4G: ~10 codex.
+4H.frontend is offloaded to Gemini CLI so it does not consume a codex
+slot. The user-facing critical path through Phase 4 is roughly:
+4A → 4B/4C/4D → 4E → 4F + 4G core → 4H.server → cli-inspect → attach
+→ cli-detach → 4H.frontend → 4I.
 
 ## Risks
 
