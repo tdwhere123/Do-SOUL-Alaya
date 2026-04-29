@@ -27,7 +27,7 @@ Phase 0 → Gate-0
 | Phase 1 | Wave 1: Leaves | 9 cards | **done** | Gate-1 passed |
 | Phase 2 | Wave 2: Services + Garden + Repos + Security | 32 cards | **done** | Gate-2 passed |
 | Phase 3 | Wave 3: ConversationService + Run Lifecycle | 5 cards (target) | not-started | Gate-3 |
-| Phase 4 | Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI | 24 cards (target) | not-started | Gate-4 |
+| Phase 4 | Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI | 25 cards (target) | not-started | Gate-4 |
 | Phase 5 | Wave 5: E2E + Benchmark + Graph Contract + Final Review | 4 cards (target) | not-started | Gate-5 |
 
 ## Phase 2 — Card Closeout Status
@@ -120,6 +120,7 @@ dedicated barrel-update card after all leaf cards in the wave land.
 | `packages/storage/src/repos/shared/validators.ts` | 8+ repos | medium | Same as above |
 | `packages/storage/src/repos/shared/deep-freeze.ts` | 3+ repos | low | Same as above |
 | `packages/protocol/src/index.ts` | every protocol type | high | Owned by P1-protocol; no Phase 2+ card writes it |
+| `packages/protocol/src/soul/mcp-types.ts` | MCP memory tool schema consumers | high | P4-mcp-memory-tools may update this as an explicit protocol-contract follow-up; run protocol schema tests before any daemon or MCP-ready claim |
 | `packages/protocol/src/events/*.ts` | every service that emits events | high | Owned by P1-protocol (recursive copy); Phase 2+ services never modify event payload schemas in place — schema changes require a P1-protocol-followup card |
 | `packages/storage/src/index.ts` | every repo | high | barrel-update card P2-barrel-storage after all P2 repo batches land |
 | `packages/core/src/index.ts` | every core service | high | barrel-update card P3-core-barrel at end of Phase 3 |

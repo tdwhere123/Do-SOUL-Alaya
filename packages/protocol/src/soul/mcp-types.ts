@@ -15,7 +15,8 @@ export const MemorySearchResultSchema = z
     object_id: NonEmptyStringSchema,
     object_kind: NonEmptyStringSchema,
     relevance_score: z.number().min(0).max(1),
-    content_preview: NonEmptyStringSchema
+    content_preview: NonEmptyStringSchema,
+    evidence_pointers: z.array(NonEmptyStringSchema).readonly()
   })
   .readonly();
 
@@ -31,6 +32,7 @@ export const SoulMemorySearchRequestSchema = z
 
 export const SoulMemorySearchResponseSchema = z
   .object({
+    delivery_id: NonEmptyStringSchema,
     results: z.array(MemorySearchResultSchema).readonly(),
     total_count: NonNegativeIntSchema
   })
@@ -115,6 +117,24 @@ export const SoulApplyOverrideResponseSchema = z
   })
   .readonly();
 
+export const SoulContextUsageStateSchema = z.enum(["used", "skipped", "not_applicable"]);
+
+export const SoulReportContextUsageRequestSchema = z
+  .object({
+    delivery_id: NonEmptyStringSchema,
+    usage_state: SoulContextUsageStateSchema,
+    used_object_ids: z.array(NonEmptyStringSchema).readonly().optional(),
+    reason: z.string().nullable().optional()
+  })
+  .readonly();
+
+export const SoulReportContextUsageResponseSchema = z
+  .object({
+    delivery_id: NonEmptyStringSchema,
+    status: z.literal("recorded")
+  })
+  .readonly();
+
 export type MemorySearchResult = z.infer<typeof MemorySearchResultSchema>;
 export type SoulMemorySearchRequest = z.infer<typeof SoulMemorySearchRequestSchema>;
 export type SoulMemorySearchResponse = z.infer<typeof SoulMemorySearchResponseSchema>;
@@ -130,3 +150,6 @@ export type SoulEmitCandidateSignalRequest = z.infer<typeof SoulEmitCandidateSig
 export type SoulEmitCandidateSignalResponse = z.infer<typeof SoulEmitCandidateSignalResponseSchema>;
 export type SoulApplyOverrideRequest = z.infer<typeof SoulApplyOverrideRequestSchema>;
 export type SoulApplyOverrideResponse = z.infer<typeof SoulApplyOverrideResponseSchema>;
+export type SoulContextUsageState = z.infer<typeof SoulContextUsageStateSchema>;
+export type SoulReportContextUsageRequest = z.infer<typeof SoulReportContextUsageRequestSchema>;
+export type SoulReportContextUsageResponse = z.infer<typeof SoulReportContextUsageResponseSchema>;

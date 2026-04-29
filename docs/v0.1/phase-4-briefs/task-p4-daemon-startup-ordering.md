@@ -8,7 +8,7 @@
 > - **Target**: `apps/core-daemon/src/garden-runtime.ts`, `apps/core-daemon/src/daemon-runtime-helpers.ts`, `apps/core-daemon/src/worker-runtime-wiring.ts`, `apps/core-daemon/src/background/bootstrap.ts`, `apps/core-daemon/src/index.ts`
 > - **Size**: L
 > - **Prerequisite**: P4-daemon-skeleton, P4-sse-strip, P3-core-barrel, P2-barrel-storage, P2-barrel-soul, P1-engine-gateway-mcp
-> - **Blocks**: P4-routes-*, P4-daemon-services, P4-daemon-glue, P4-mcp-tooling, P4-mcp-server
+> - **Blocks**: P4-routes-*, P4-daemon-services, P4-daemon-glue, P4-cli-bridge, P4-trust-state, P4-mcp-tooling, P4-mcp-memory-tools, P4-mcp-server
 > - **Closing readiness label**: live-event-ready
 > - **Owner**: unassigned
 
@@ -70,4 +70,4 @@ Nothing deferred.
 - Touches `apps/core-daemon/src/index.ts`; route registration still belongs to P4-daemon-routes-register.
 
 **Prerequisite**: P4-daemon-skeleton, P4-sse-strip, P3-core-barrel, P2-barrel-storage, P2-barrel-soul, P1-engine-gateway-mcp.
-**Blocks**: P4-routes-*, P4-daemon-services, P4-daemon-glue, P4-mcp-tooling, P4-mcp-server.
+**Blocks**: P4-routes-*, P4-daemon-services, P4-daemon-glue, P4-cli-bridge, P4-trust-state, P4-mcp-tooling, P4-mcp-memory-tools, P4-mcp-server.

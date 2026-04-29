@@ -7,8 +7,8 @@
 > - **Source**: `n/a`
 > - **Target**: `apps/core-daemon/src/trust-state.ts`, `apps/core-daemon/src/__tests__/trust-state.test.ts`
 > - **Size**: M
-> - **Prerequisite**: P4-daemon-startup-ordering, P4-mcp-server
-> - **Blocks**: P4-cli-status, Gate-4 demo
+> - **Prerequisite**: P4-daemon-startup-ordering
+> - **Blocks**: P4-mcp-memory-tools, P4-cli-status, Gate-4 demo
 > - **Closing readiness label**: live-event-ready
 > - **Owner**: unassigned
 
@@ -22,7 +22,8 @@
 
 **Background**: This card is part of the v0.1 port-first task-card set and exists to assign exact source ownership before implementation dispatch.
 
-**Goal**: Deliver implement delivered-not-used trust state.
+**Goal**: Deliver implement delivered-not-used trust state for
+ContextDeliveryRecord and UsageProofRecord consumers.
 
 ## 2. Allowed Scope
 
@@ -40,6 +41,15 @@
 - Do not edit shared barrels unless this card explicitly owns that barrel.
 - If a cited source path is missing or a source dependency forces files outside §2, return `BLOCKED` instead of expanding scope.
 
+### 2.3 Required Behavior
+
+- Create ContextDeliveryRecord entries when a memory context pack is
+  delivered to an attached agent.
+- Create UsageProofRecord entries when `soul.report_context_usage`
+  reports `used`, `skipped`, or `not_applicable`.
+- Preserve the invariant that delivery alone never increments used
+  counts.
+
 ## 3. Deferred
 
 Nothing deferred.
@@ -54,6 +64,7 @@ Nothing deferred.
 | AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon -t "trust state"` |
 | AC5 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-4-briefs/reports/task-p4-trust-state.md` exists and cites backlog issues for any deferred scope |
 | AC6 | Closing readiness label is `live-event-ready` | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` are updated only after evidence supports the label |
+| AC7 | Usage proof can be recorded against a prior delivery id without durable memory mutation | Targeted trust-state test asserts delivered, used, skipped, and not-applicable counters separately |
 
 ## 5. Verification
 
@@ -67,5 +78,5 @@ Nothing deferred.
 
 No shared-file hazards.
 
-**Prerequisite**: P4-daemon-startup-ordering, P4-mcp-server.
-**Blocks**: P4-cli-status, Gate-4 demo.
+**Prerequisite**: P4-daemon-startup-ordering.
+**Blocks**: P4-mcp-memory-tools, P4-cli-status, Gate-4 demo.

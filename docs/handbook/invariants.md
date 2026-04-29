@@ -78,7 +78,8 @@ These rules always win over lower-level docs and task-card convenience.
 
 21. Alaya has **no GUI and no conversation TUI**. The only outward
     surfaces are MCP (for agent attach) and plain CLI commands
-    (`alaya doctor / install / attach / status`).
+    (`alaya doctor / install / attach / status / tools list /
+    tools call --json`).
 22. MCP tool surface and CLI fallback share one runtime contract. CLI
     fallback parity with MCP is enforced by tests.
 23. Attach / Profile changes write only after preview + explicit

@@ -11,7 +11,7 @@ review being a multi-perspective sweep.
 
 | Card ID | Subject | Port mode | Closing label |
 |---|---|---|---|
-| P5-e2e | Full installation → configure → activate → recall → use → propose → govern → export / backup loop. Replaces what was originally R12 "Full Product Gate". E2E test lives at `apps/core-daemon/src/__tests__/e2e/v0.1-release-loop.test.ts`. | requires-redesign | live-event-ready |
+| P5-e2e | Full installation → configure → attach → MCP tools/list → recall → open pointer → report usage → propose → govern → export / backup loop. Replaces what was originally R12 "Full Product Gate". E2E test lives at `apps/core-daemon/src/__tests__/e2e/v0.1-release-loop.test.ts`. | requires-redesign | live-event-ready |
 | P5-benchmark | Activation-mode benchmark on real runtime (Connect / Attach / Gateway). Fixture suite for at least three task families: coding-continuation, review-fix-loop, long-context-recall. Replaces what was originally R10. | requires-redesign | implementation-ready |
 | P5-graph-contract | Graph inspector data contract derived from real PathRelation rows + path-graph snapshots. Read-only; no UI in v0.1. | adapt-and-port | schema-ready |
 | P5-final-review | Findings-first multi-lens review + fix-loop closure. Marks v0.1 as `live-event-ready` / `mcp-consumable` / `cli-consumable` only after evidence supports it. | requires-redesign | mcp-consumable |
@@ -27,13 +27,18 @@ Per review I9:
   them it falls back to schema-only and trips R3.
 - **P5-benchmark** depends on Gate-4 closure (real daemon).
 - **P5-e2e** depends on Gate-4 closure and on P5-benchmark having a
-  fixture format the E2E test can reference.
+  fixture format the E2E test can reference. It must also prove the
+  P4-mcp-memory-tools contract through a real attached-agent
+  `tools/list -> soul.recall -> soul.open_pointer ->
+  soul.report_context_usage` chain.
 - **P5-final-review** depends on the above three.
 
 ## Gate-5 (v0.1 release)
 
 - Gate-4 holds (end-to-end demo still works).
-- P5-e2e produces a passing E2E test that exercises the full loop.
+- P5-e2e produces a passing E2E test that exercises the full loop,
+  including MCP memory tool discovery, recall delivery, pointer open,
+  usage proof, proposal, and governance rejection.
 - P5-benchmark produces baseline numbers for at least three
   activation modes on at least three task families.
 - P5-graph-contract: read-only graph derivation works on real data;

@@ -18,6 +18,8 @@ import {
   SoulOpenPointerResponseSchema,
   SoulProposeMemoryUpdateRequestSchema,
   SoulProposeMemoryUpdateResponseSchema,
+  SoulReportContextUsageRequestSchema,
+  SoulReportContextUsageResponseSchema,
   SoulReviewMemoryProposalRequestSchema,
   SoulReviewMemoryProposalResponseSchema,
   TransitionCausedBy,
@@ -148,6 +150,15 @@ describe("MCP tool request/response schemas", () => {
           verdict: "accept",
           reason: "Confirmed by reviewer."
         }
+      },
+      {
+        schema: SoulReportContextUsageRequestSchema,
+        value: {
+          delivery_id: "delivery-1",
+          usage_state: "used",
+          used_object_ids: ["memory-1"],
+          reason: "The final answer cited this memory."
+        }
       }
     ] as const;
 
@@ -168,12 +179,14 @@ describe("MCP tool request/response schemas", () => {
       {
         schema: SoulMemorySearchResponseSchema,
         value: {
+          delivery_id: "delivery-1",
           results: [
             {
               object_id: "memory-1",
               object_kind: "memory_entry",
               relevance_score: 0.91,
-              content_preview: "Use pnpm for monorepo commands."
+              content_preview: "Use pnpm for monorepo commands.",
+              evidence_pointers: ["evidence-1"]
             }
           ],
           total_count: 1
@@ -216,6 +229,13 @@ describe("MCP tool request/response schemas", () => {
         value: {
           proposal_id: "proposal-1",
           resolution_state: "accepted"
+        }
+      },
+      {
+        schema: SoulReportContextUsageResponseSchema,
+        value: {
+          delivery_id: "delivery-1",
+          status: "recorded"
         }
       }
     ] as const;

@@ -21,7 +21,9 @@
 
 **Background**: This card is part of the v0.1 port-first task-card set and exists to assign exact source ownership before implementation dispatch.
 
-**Goal**: Deliver export Phase 2 and Phase 3 core services.
+**Goal**: Deliver export Phase 2 and Phase 3 core services, including
+ConversationService and ContextLensAssembler for the P4 daemon memory
+tool handler.
 
 ## 2. Allowed Scope
 
@@ -52,6 +54,7 @@ Nothing deferred.
 | AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core` |
 | AC5 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-3-briefs/reports/task-p3-core-barrel.md` exists and cites backlog issues for any deferred scope |
 | AC6 | Closing readiness label is `implementation-ready` | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` are updated only after evidence supports the label |
+| AC7 | Barrel exports the recall-to-model producer needed by P4-mcp-memory-tools | P4 daemon imports `ContextLensAssembler` and `ConversationContextLensAssemblerPort` from `@do-soul/alaya-core` without private path imports |
 
 ## 5. Verification
 

@@ -15,7 +15,7 @@ on each other and on most of Phase 2.
 
 | Card ID | Subject | Port mode | Closing label |
 |---|---|---|---|
-| P3-conversation | `packages/core/src/conversation-service.ts` (~2,133 LOC). Adapt-and-port: drop worker-dispatch / tool-substrate / runtime-adapter / chat-specific message threading; retain candidate→recall→govern→durable orchestration. See task-card-template Worked Example B. | adapt-and-port | live-event-ready |
+| P3-conversation | `packages/core/src/conversation-service.ts` (~2,133 LOC) plus `packages/core/src/context-lens-assembler.ts`. Adapt-and-port: drop worker-dispatch / tool-substrate / runtime-adapter / chat-specific message threading; retain candidate→recall→context lens→govern→durable orchestration so P4-mcp-memory-tools has a recall-to-model producer. See task-card-template Worked Example B. | adapt-and-port | live-event-ready |
 | P3-mcp-discovery | `packages/core/src/{mcp-tool-discovery-service.ts, extension-registry-service.ts}`. Dynamic discovery of external MCP tools registered by connected agents. | trivial-copy | implementation-ready |
 | P3-run-lifecycle | `packages/core/src/{worker-run-lifecycle-service.ts, worker-run-state-machine.ts, run-service.ts, run-hot-state-service.ts, serial-delegation-service.ts, serial-delegation-event-intake.ts, serial-delegation-recovery.ts}`. Run / worker coordination skeletons. Depends on P2-svc-task-surface-builder-prelude for the already-ported TaskSurfaceBuilder dependency. Worker code paths used only by ConversationService memory orchestration; chat-specific paths are dropped per P3-conversation. | adapt-and-port | implementation-ready |
 | P3-misc-services | `packages/core/src/{constitutional-fragment-service.ts, canonical-alias-service.ts, project-mapping-service.ts}` + remaining smaller services not assigned to P2 or P4. | trivial-copy | implementation-ready |
@@ -30,8 +30,8 @@ on each other and on most of Phase 2.
 
 - All Phase 3 cards close with reviewer-pass.
 - Full memory-orchestration path (Memory → Recall → Evidence →
-  Green → ContextPack → ConversationService → governance → durable)
-  works in unit + integration tests.
+  Green → ContextLens / ContextPack → ConversationService →
+  governance → durable) works in unit + integration tests.
 - `packages/core/src/index.ts` exports every public symbol the Phase
   4 daemon needs.
 - Code-map and runtime-status updated.

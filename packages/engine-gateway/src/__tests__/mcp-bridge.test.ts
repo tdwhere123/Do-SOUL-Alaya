@@ -303,12 +303,47 @@ describe("McpBridge", () => {
     });
   });
 
-  it("defines provider-neutral SOUL tool specs for apply_override and explore_graph", () => {
+  it("defines provider-neutral SOUL tool specs for the stable public memory surface", () => {
     expect(soulToolDefs.map((toolDef) => toolDef.name)).toEqual([
+      "soul.recall",
+      "soul.open_pointer",
       "soul.emit_candidate_signal",
+      "soul.propose_memory_update",
+      "soul.review_memory_proposal",
       "soul.apply_override",
-      "soul.explore_graph"
+      "soul.explore_graph",
+      "soul.report_context_usage"
     ]);
+  });
+
+  it("allows first-party recall tools through the soul namespace gate", async () => {
+    const recallToolUse = {
+      type: "tool_use",
+      id: "toolu_recall",
+      name: "soul.recall",
+      input: {
+        query: "build command",
+        scope_class: "project",
+        dimension: "procedure",
+        domain_tags: ["repo"],
+        max_results: 5
+      }
+    } satisfies ToolUseBlock;
+    const soulHandler = vi.fn().mockResolvedValue({
+      type: "tool_result",
+      tool_use_id: recallToolUse.id,
+      content: JSON.stringify({
+        delivery_id: "delivery-1",
+        results: [],
+        total_count: 0
+      })
+    });
+    const bridge = new McpBridge({ soulHandler });
+
+    const result = await bridge.executeToolUse(recallToolUse, runtimeContext);
+
+    expect(soulHandler).toHaveBeenCalledWith(recallToolUse, runtimeContext);
+    expect(result.tool_use_id).toBe("toolu_recall");
   });
 
   it("no longer exports openAIMcpTools, anthropicMcpTools, or SOUL_TOOL_DEFS from mcp-bridge", () => {

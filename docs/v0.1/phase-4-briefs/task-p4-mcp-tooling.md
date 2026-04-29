@@ -8,8 +8,8 @@
 > - **Target**: `apps/core-daemon/src/daemon-mcp-tooling.ts`, `apps/core-daemon/src/mcp-runtime-registry.ts`, `apps/core-daemon/src/mcp-catalog.ts`, `apps/core-daemon/src/__tests__/`
 > - **Size**: L
 > - **Prerequisite**: P3-mcp-discovery, P4-daemon-glue, P4-daemon-services
-> - **Blocks**: P4-mcp-server
-> - **Closing readiness label**: mcp-consumable
+> - **Blocks**: P4-mcp-memory-tools
+> - **Closing readiness label**: implementation-ready
 > - **Owner**: unassigned
 
 ## 0. Charter Authority
@@ -21,7 +21,9 @@
 
 **Background**: This card is part of the v0.1 port-first task-card set and exists to assign exact source ownership before implementation dispatch.
 
-**Goal**: Deliver port daemon MCP catalog and runtime registry.
+**Goal**: Deliver port daemon MCP catalog and runtime registry as an
+implementation prerequisite for Alaya's first-party memory tool
+surface. This card does not by itself close `mcp-consumable`.
 
 ## 2. Allowed Scope
 
@@ -56,7 +58,7 @@ Nothing deferred.
 | AC3 | Build succeeds after this card lands | `rtk pnpm build` is green |
 | AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon mcp-runtime tool-runtime` |
 | AC5 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-4-briefs/reports/task-p4-mcp-tooling.md` exists and cites backlog issues for any deferred scope |
-| AC6 | Closing readiness label is `mcp-consumable` | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` are updated only after evidence supports the label |
+| AC6 | Closing readiness label is `implementation-ready`; `mcp-consumable` waits for P4-mcp-memory-tools, P4-mcp-server, and attached-agent proof | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` do not mark this card alone as `mcp-consumable` |
 
 ## 5. Verification
 
@@ -71,4 +73,4 @@ Nothing deferred.
 No shared-file hazards.
 
 **Prerequisite**: P3-mcp-discovery, P4-daemon-glue, P4-daemon-services.
-**Blocks**: P4-mcp-server.
+**Blocks**: P4-mcp-memory-tools.

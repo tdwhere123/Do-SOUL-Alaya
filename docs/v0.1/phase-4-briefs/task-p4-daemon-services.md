@@ -8,7 +8,7 @@
 > - **Target**: `apps/core-daemon/src/services/`, `apps/core-daemon/src/*.ts helpers`
 > - **Size**: L
 > - **Prerequisite**: P4-daemon-startup-ordering
-> - **Blocks**: P4-mcp-server, P4-daemon-routes-register
+> - **Blocks**: P4-mcp-memory-tools, P4-mcp-server, P4-daemon-routes-register
 > - **Closing readiness label**: implementation-ready
 > - **Owner**: unassigned
 
@@ -80,4 +80,4 @@ Nothing deferred.
 No shared-file hazards.
 
 **Prerequisite**: P4-daemon-startup-ordering.
-**Blocks**: P4-mcp-server, P4-daemon-routes-register.
+**Blocks**: P4-mcp-memory-tools, P4-mcp-server, P4-daemon-routes-register.

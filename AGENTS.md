@@ -119,6 +119,8 @@ rtk pnpm exec alaya doctor           # CLI diagnostic
 rtk pnpm exec alaya install          # install profile
 rtk pnpm exec alaya attach codex     # attach to a target agent
 rtk pnpm exec alaya status           # status report
+rtk pnpm exec alaya tools list       # CLI fallback: list MCP memory tools
+rtk pnpm exec alaya tools call --json # CLI fallback: call a memory tool
 ```
 
 ## Pointers

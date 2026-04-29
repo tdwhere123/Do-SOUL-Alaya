@@ -8,7 +8,7 @@
 > - **Target**: `apps/core-daemon/src/glue files`
 > - **Size**: M
 > - **Prerequisite**: P4-daemon-startup-ordering, P3-conversation, P3-misc-services
-> - **Blocks**: P4-mcp-tooling, P4-mcp-server
+> - **Blocks**: P4-mcp-tooling, P4-mcp-memory-tools, P4-mcp-server
 > - **Closing readiness label**: implementation-ready
 > - **Owner**: unassigned
 
@@ -71,4 +71,4 @@ Nothing deferred.
 No shared-file hazards.
 
 **Prerequisite**: P4-daemon-startup-ordering, P3-conversation, P3-misc-services.
-**Blocks**: P4-mcp-tooling, P4-mcp-server.
+**Blocks**: P4-mcp-tooling, P4-mcp-memory-tools, P4-mcp-server.

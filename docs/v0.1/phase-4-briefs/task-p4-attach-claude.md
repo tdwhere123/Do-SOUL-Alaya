@@ -7,7 +7,7 @@
 > - **Source**: `n/a`
 > - **Target**: `apps/core-daemon/src/cli/attach-claude.ts`, `apps/core-daemon/src/__tests__/attach-claude.test.ts`
 > - **Size**: M
-> - **Prerequisite**: P4-cli-bridge, P4-profile-mutation, P4-mcp-server
+> - **Prerequisite**: P4-cli-bridge, P4-profile-mutation, P4-mcp-memory-tools, P4-mcp-server
 > - **Blocks**: Gate-4 demo
 > - **Closing readiness label**: cli-consumable
 > - **Owner**: unassigned
@@ -40,6 +40,16 @@
 - Do not edit shared barrels unless this card explicitly owns that barrel.
 - If a cited source path is missing or a source dependency forces files outside §2, return `BLOCKED` instead of expanding scope.
 
+### 2.3 Required Behavior
+
+- Install profile writes explicit Claude Code operator instructions for
+  the P4-mcp-memory-tools contract: call `soul.recall` before memory-
+  sensitive work, use `soul.open_pointer` before citing recalled
+  evidence, create new memory only through `soul.emit_candidate_signal`
+  or `soul.propose_memory_update`, and report delivery usage with
+  `soul.report_context_usage`.
+- The profile must not mention `memory.*` aliases.
+
 ## 3. Deferred
 
 Nothing deferred.
@@ -54,6 +64,7 @@ Nothing deferred.
 | AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon -t "attach claude"` |
 | AC5 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-4-briefs/reports/task-p4-attach-claude.md` exists and cites backlog issues for any deferred scope |
 | AC6 | Closing readiness label is `cli-consumable` | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` are updated only after evidence supports the label |
+| AC7 | Claude Code profile instructions mention the exact public `soul.*` memory tools and exclude `memory.*` aliases | Targeted attach test asserts the rendered profile text |
 
 ## 5. Verification
 
@@ -67,5 +78,5 @@ Nothing deferred.
 
 No shared-file hazards.
 
-**Prerequisite**: P4-cli-bridge, P4-profile-mutation, P4-mcp-server.
+**Prerequisite**: P4-cli-bridge, P4-profile-mutation, P4-mcp-memory-tools, P4-mcp-server.
 **Blocks**: Gate-4 demo.

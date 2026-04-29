@@ -29,7 +29,8 @@ Important invariants (full set in `docs/handbook/invariants.md`):
   truth.
 - Alaya has **no GUI and no conversation TUI**. Its only surfaces are
   MCP (for agent attach) and plain CLI commands (`alaya doctor`,
-  `alaya install`, `alaya attach <target>`, `alaya status`).
+  `alaya install`, `alaya attach <target>`, `alaya status`,
+  `alaya tools list`, `alaya tools call --json`).
 
 ## Port-First Discipline
 
@@ -146,6 +147,8 @@ rtk pnpm exec alaya doctor           # CLI diagnostic
 rtk pnpm exec alaya install          # install profile
 rtk pnpm exec alaya attach codex     # attach to a target agent
 rtk pnpm exec alaya status           # status report
+rtk pnpm exec alaya tools list       # CLI fallback: list MCP memory tools
+rtk pnpm exec alaya tools call --json # CLI fallback: call a memory tool
 ```
 
 ## Pointers

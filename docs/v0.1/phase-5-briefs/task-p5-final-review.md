@@ -7,7 +7,7 @@
 > - **Source**: `n/a`
 > - **Target**: `docs/v0.1/phase-5-briefs/reports/task-p5-final-review.md`, `docs/handbook/runtime-status.md`, `docs/v0.1/INDEX.md`
 > - **Size**: S
-> - **Prerequisite**: P5-benchmark, P5-graph-contract, P5-e2e
+> - **Prerequisite**: P4-mcp-memory-tools, P5-benchmark, P5-graph-contract, P5-e2e
 > - **Blocks**: v0.1 release
 > - **Closing readiness label**: mcp-consumable
 > - **Owner**: unassigned
@@ -21,7 +21,9 @@
 
 **Background**: This card is part of the v0.1 port-first task-card set and exists to assign exact source ownership before implementation dispatch.
 
-**Goal**: Deliver run final multi-lens v0.1 review and fix-loop.
+**Goal**: Deliver run final multi-lens v0.1 review and fix-loop,
+including a live-path review of the first-party MCP memory tool
+contract and attached-agent proof.
 
 ## 2. Allowed Scope
 
@@ -53,7 +55,8 @@ Nothing deferred.
 | AC3 | Build succeeds after this card lands | `rtk pnpm build` is green |
 | AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon final-review` |
 | AC5 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-5-briefs/reports/task-p5-final-review.md` exists and cites backlog issues for any deferred scope |
-| AC6 | Closing readiness label is `mcp-consumable` | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` are updated only after evidence supports the label |
+| AC6 | Closing readiness label is `mcp-consumable` only after P4-mcp-server plus attached-agent memory-tool proof is fresh | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` cite Gate-4 / P5 evidence for `tools/list`, recall, pointer open, usage proof, proposal, governance, and CLI fallback |
+| AC7 | Final review includes a contract-drift lens for the exact public `soul.*` tools and confirms no `memory.*` alias surfaced | Review report lists the tool names and evidence source |
 
 ## 5. Verification
 
@@ -67,5 +70,5 @@ Nothing deferred.
 
 No shared-file hazards.
 
-**Prerequisite**: P5-benchmark, P5-graph-contract, P5-e2e.
+**Prerequisite**: P4-mcp-memory-tools, P5-benchmark, P5-graph-contract, P5-e2e.
 **Blocks**: v0.1 release.

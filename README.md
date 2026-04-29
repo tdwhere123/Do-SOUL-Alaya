@@ -114,6 +114,8 @@ rtk pnpm exec alaya doctor
 rtk pnpm exec alaya install
 rtk pnpm exec alaya attach codex
 rtk pnpm exec alaya status
+rtk pnpm exec alaya tools list
+rtk pnpm exec alaya tools call --json
 ```
 
 ## Architecture invariants

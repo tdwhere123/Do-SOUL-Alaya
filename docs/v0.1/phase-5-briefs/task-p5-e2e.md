@@ -7,7 +7,7 @@
 > - **Source**: `n/a`
 > - **Target**: `apps/core-daemon/src/__tests__/e2e/v0.1-release-loop.test.ts`, `docs/v0.1/phase-5-briefs/reports/task-p5-e2e.md`
 > - **Size**: M
-> - **Prerequisite**: Gate-4, P5-benchmark, P5-graph-contract
+> - **Prerequisite**: Gate-4, P4-mcp-memory-tools, P5-benchmark, P5-graph-contract
 > - **Blocks**: P5-final-review
 > - **Closing readiness label**: live-event-ready
 > - **Owner**: unassigned
@@ -21,7 +21,8 @@
 
 **Background**: This card is part of the v0.1 port-first task-card set and exists to assign exact source ownership before implementation dispatch.
 
-**Goal**: Deliver implement v0.1 release end-to-end loop.
+**Goal**: Deliver implement v0.1 release end-to-end loop, including
+attached-agent proof of the first-party MCP memory tools.
 
 ## 2. Allowed Scope
 
@@ -39,6 +40,20 @@
 - Do not edit shared barrels unless this card explicitly owns that barrel.
 - If a cited source path is missing or a source dependency forces files outside §2, return `BLOCKED` instead of expanding scope.
 
+### 2.3 Required Behavior
+
+- E2E setup runs `alaya install` and `alaya attach codex` against a
+  real daemon profile.
+- MCP `tools/list` returns the complete P4-mcp-memory-tools `soul.*`
+  catalog.
+- The E2E chain calls `soul.recall`, opens a returned pointer with
+  `soul.open_pointer`, then records `soul.report_context_usage` for
+  the returned `delivery_id`.
+- The chain emits a candidate signal, creates a proposal, rejects it
+  through governance, and proves no direct durable write occurred.
+- CLI fallback parity is covered by `alaya tools list` and
+  `alaya tools call --json` against the same tool contract.
+
 ## 3. Deferred
 
 Nothing deferred.
@@ -53,6 +68,8 @@ Nothing deferred.
 | AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon e2e` |
 | AC5 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-5-briefs/reports/task-p5-e2e.md` exists and cites backlog issues for any deferred scope |
 | AC6 | Closing readiness label is `live-event-ready` | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` are updated only after evidence supports the label |
+| AC7 | E2E proves `tools/list -> soul.recall -> soul.open_pointer -> soul.report_context_usage` on real MCP wiring | E2E assertion records delivery id, opened pointer, and usage-proof state |
+| AC8 | E2E proves candidate/proposal/governance reject without direct durable write | E2E assertion checks proposal state and memory-entry absence or unchanged durable state |
 
 ## 5. Verification
 
@@ -66,5 +83,5 @@ Nothing deferred.
 
 No shared-file hazards.
 
-**Prerequisite**: Gate-4, P5-benchmark, P5-graph-contract.
+**Prerequisite**: Gate-4, P4-mcp-memory-tools, P5-benchmark, P5-graph-contract.
 **Blocks**: P5-final-review.

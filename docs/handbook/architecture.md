@@ -81,8 +81,10 @@ Alaya has no GUI and no conversation TUI. The outward surfaces are:
 - **MCP server** (in `apps/core-daemon`) — primary surface, consumed
   by agents like Codex and Claude Code via stdio or HTTP transport.
 - **CLI commands** (`bin/alaya.mjs` → `apps/core-daemon`) — `alaya
-  doctor`, `alaya install`, `alaya attach <target>`, `alaya status`.
-  Used for installation, configuration, and diagnostic.
+  doctor`, `alaya install`, `alaya attach <target>`, `alaya status`,
+  `alaya tools list`, `alaya tools call --json`. Used for
+  installation, configuration, diagnostics, and MCP-memory-tool
+  fallback.
 
 Both surfaces share one runtime contract; CLI fallback parity with MCP
 is enforced by tests.

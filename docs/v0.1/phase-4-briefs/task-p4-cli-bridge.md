@@ -7,8 +7,8 @@
 > - **Source**: `n/a`
 > - **Target**: `bin/alaya.mjs`, `apps/core-daemon/src/cli/bridge.ts`, `apps/core-daemon/src/__tests__/cli-bridge.test.ts`
 > - **Size**: M
-> - **Prerequisite**: P4-mcp-server
-> - **Blocks**: P4-cli-doctor, P4-cli-install, P4-cli-status, P4-attach-codex, P4-attach-claude, P4-profile-mutation, P4-secrets, P4-trust-state, P4-operations
+> - **Prerequisite**: P4-daemon-startup-ordering
+> - **Blocks**: P4-mcp-memory-tools, P4-cli-doctor, P4-cli-install, P4-cli-status, P4-attach-codex, P4-attach-claude, P4-profile-mutation, P4-secrets, P4-operations
 > - **Closing readiness label**: cli-consumable
 > - **Owner**: unassigned
 
@@ -22,7 +22,9 @@
 
 **Background**: This card is part of the v0.1 port-first task-card set and exists to assign exact source ownership before implementation dispatch.
 
-**Goal**: Deliver implement Alaya CLI subcommand bridge.
+**Goal**: Deliver implement Alaya CLI subcommand bridge, including the
+dispatch hook used later by `alaya tools list` and
+`alaya tools call --json`.
 
 ## 2. Allowed Scope
 
@@ -68,5 +70,5 @@ Nothing deferred.
 
 - Touches `bin/alaya.mjs`; serialize through P4-cli-bridge.
 
-**Prerequisite**: P4-mcp-server.
-**Blocks**: P4-cli-doctor, P4-cli-install, P4-cli-status, P4-attach-codex, P4-attach-claude, P4-profile-mutation, P4-secrets, P4-trust-state, P4-operations.
+**Prerequisite**: P4-daemon-startup-ordering.
+**Blocks**: P4-mcp-memory-tools, P4-cli-doctor, P4-cli-install, P4-cli-status, P4-attach-codex, P4-attach-claude, P4-profile-mutation, P4-secrets, P4-operations.

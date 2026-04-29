@@ -63,10 +63,11 @@ each Phase Gate.
 | Worker safety / trust | `implementation-ready` | `implementation-ready` | P2-security-2 |
 | ConversationService | `not-started` | `live-event-ready` | P3-conversation |
 | Engine gateway MCP/provider skeleton | `implementation-ready` | `implementation-ready` | P1-engine-gateway-mcp |
-| MCP tool surface | `not-started` | `mcp-consumable` | P3-mcp-discovery + P4-mcp-tooling + P4-mcp-server |
+| First-party MCP memory tool contract | `schema-ready` | `implementation-ready` | P4-mcp-memory-tools |
+| MCP tool surface | `not-started` | `mcp-consumable` | P3-mcp-discovery + P4-mcp-tooling + P4-mcp-memory-tools + P4-mcp-server + attached-agent proof |
 | Core daemon | `not-started` | `live-event-ready` | P4-daemon-skeleton + P4-daemon-startup-ordering + P4-sse-strip |
 | Profile mutation (Codex/Claude attach) | `not-started` | `cli-consumable` | P4-profile-mutation |
-| CLI commands (doctor / install / attach / status) | `not-started` | `cli-consumable` | P4-cli-bridge |
+| CLI commands (doctor / install / attach / status / tools) | `not-started` | `cli-consumable` | P4-cli-bridge + P4-mcp-memory-tools |
 | Secret refs (env / local-file) | `not-started` | `live-event-ready` | P4-secrets |
 | Operations (backup, portable, status) | `not-started` | `cli-consumable` | P4-operations |
 | Benchmark harness | `not-started` | `implementation-ready` | P5-benchmark |
@@ -89,9 +90,13 @@ live-consumption paths belong to Phase 3-4 cards.
   inside core.
 - **Gate-3**: ConversationService end-to-end works in unit tests;
   MCP tooling discovery is functional in tests.
-- **Gate-4**: `rtk pnpm exec alaya install` → `rtk pnpm exec alaya attach codex` → MCP tool call
-  → recall → governance gate → Garden background pass; entire flow
-  works against a real daemon.
+- **Gate-4**: `rtk pnpm exec alaya install` → `rtk pnpm exec alaya attach codex`
+  → MCP `tools/list` shows the full P4-mcp-memory-tools `soul.*`
+  catalog → `soul.recall` → `soul.open_pointer` →
+  `soul.report_context_usage` → candidate signal → proposal →
+  governance reject → Garden background pass; entire flow works
+  against a real daemon. `mcp-consumable` requires this attached-agent
+  proof, not P4-mcp-tooling alone.
 - **Gate-5 (v0.1 release)**: Gate-4 plus benchmark fixture run, graph
   contract derived from real PathRelation data, final multi-lens
   review with zero Blocking / Important findings.

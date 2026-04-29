@@ -34,7 +34,7 @@ apps/
   core-daemon/    Hono daemon, MCP server, CLI bridge
 
 bin/
-  alaya.mjs       CLI entry (alaya doctor / install / attach / status)
+  alaya.mjs       CLI entry (alaya doctor / install / attach / status / tools)
 
 vendor/
   do-what-new-snapshot/  frozen upstream port reference (read-only)
@@ -56,7 +56,7 @@ phase/card work. Refresh this section after each Phase Gate.
 | Handbook | `docs/handbook/*` | present (P0-3) |
 | v0.1 task cards | `docs/v0.1/INDEX.md`, `docs/v0.1/phase-{0..5}-briefs/` | populated by P0-3e + P0-4 |
 | Vendor snapshot | `vendor/do-what-new-snapshot/` | present (frozen at upstream commit `6ed8463`) |
-| Protocol types | `packages/protocol/src/` | ported; `schema-ready` (P1-protocol) |
+| Protocol types | `packages/protocol/src/` | ported; `schema-ready` (P1-protocol). `packages/protocol/src/soul/mcp-types.ts` also carries the P4-mcp-memory-tools public `soul.*` memory tool contract seed, including recall delivery metadata and usage-proof schemas. |
 | Storage skeleton + DB helpers | `packages/storage/{package.json,tsconfig.json,src/db.ts,src/errors.ts,src/index.ts}` | ported; `schema-ready` (P1-storage-skeleton) |
 | Storage shared utilities | `packages/storage/src/repos/shared/`, `packages/storage/src/__tests__/deep-freeze.test.ts` | ported; `implementation-ready` (P1-storage-shared) |
 | Storage migrations | `packages/storage/src/migrations/` | ported; `implementation-ready` (P1-migrations) |
@@ -66,7 +66,7 @@ phase/card work. Refresh this section after each Phase Gate.
 | Core security stack | `packages/core/src/{permission-policy/,ports/,zero-day-security-layer.ts,constraint-proxy.ts,integration-gate.ts,worker-safety-gate.ts,worker-trust-assessor.ts,stance-resolution-service.ts,cross-cutting-permission-service.ts}` | ported; `implementation-ready` (P2-security-1 + P2-security-2) |
 | Soul skeleton + topology leaves | `packages/soul/src/{signal-handler.ts,tool-governance-adapter.ts,worker-safety-*.ts,garden/topology-service.ts,garden/path-graph-snapshotter.ts,shared/deep-freeze.ts}` | ported; `implementation-ready` leaves (P1-soul-skeleton + P1-topology) |
 | Garden engine | `packages/soul/src/garden/`, `packages/soul/src/shared/bootstrapping-ids.ts`, `packages/soul/src/index.ts` | Phase 2 Garden roles are ported and exported: `auditor.ts`, `scheduler.ts`, `compute-provider.ts`, `compute-routing-service.ts`, `local-heuristics.ts`, `janitor.ts`, `librarian.ts`, `materialization-router.ts`, `degradation-pipeline.ts`, `handoff-gap-handler.ts`, `bootstrapping-service.ts`, `session-override-remediation.ts`, `backlog-telemetry.ts`, and `shared/bootstrapping-ids.ts` |
-| Engine gateway | `packages/engine-gateway/src/` | MCP/provider skeleton ported; provider adapters deferred (#BL-008) |
+| Engine gateway | `packages/engine-gateway/src/` | MCP/provider skeleton ported; provider adapters deferred (#BL-008). `provider/soul-tool-specs.ts` exposes the stable first-party `soul.*` memory tool names for model-visible specs; daemon handlers are still P4-owned. |
 | Core daemon | `apps/core-daemon/src/` | not yet ported (P4-daemon-skeleton + P4-daemon-startup-ordering + P4-sse-strip) |
 | CLI shell | `bin/alaya.mjs` | not yet ported (P4-cli-bridge) |
 
