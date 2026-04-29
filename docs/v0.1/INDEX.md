@@ -35,6 +35,8 @@ Phase 0 → Gate-0
 This table tracks the 32 Phase 2 cards closed for Gate-2.
 
 Gate-2 closeout evidence: [report](./phase-2-briefs/reports/gate-2-closeout.md).
+Post-Gate-2 aggregate review (read-only sub-agent pass; 0 Blocking, 3 Important, 1 Nice-to-have):
+[post-gate-2-review](./phase-2-briefs/reports/post-gate-2-review.md).
 
 | Card | Readiness | Report |
 |---|---|---|
