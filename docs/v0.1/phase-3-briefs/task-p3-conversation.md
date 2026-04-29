@@ -64,9 +64,12 @@ Source file `vendor/.../packages/core/src/conversation-service.ts` is **2133 LOC
 
 The 8 adapter ranges (1-8) cover approximately lines 417-479, 527-545, 610-668, 715-946, 995-1031, 1259-1310, 1784-2114 — totaling ~970 LOC. The remaining ~1163 LOC must port byte-for-byte modulo namespace rewrites. If the card author finds a chat-specific path outside the listed ranges, they MUST extend this table in a `docs(P3-conversation):` follow-up commit before the implementation commit lands; in-flight scope expansion is rejected at review.
 
-## 3. Deferred
+## 3. Pruned
 
-- Chat-specific orchestration (worker-dispatch, tool-substrate, runtime-adapter integration, message-thread streaming) — deferred to backlog #BL-004.
+- Chat-specific orchestration (worker-dispatch, tool-substrate,
+  runtime-adapter integration, message-thread streaming) is product-scope
+  pruned. Alaya v0.1 exposes memory through MCP and plain CLI, not upstream
+  chat runtime sessions or message threads.
 
 ## 4. Acceptance Criteria
 
@@ -76,7 +79,7 @@ The 8 adapter ranges (1-8) cover approximately lines 417-479, 527-545, 610-668, 
 | AC2 | Every source path cited by this card exists before dispatch | `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/packages/core/src/conversation-service.ts\",\"vendor/do-what-new-snapshot/packages/core/src/context-lens-assembler.ts\",\"vendor/do-what-new-snapshot/packages/core/src/__tests__/conversation-service.test.ts\",\"vendor/do-what-new-snapshot/packages/core/src/__tests__/conversation-streaming.test.ts\",\"vendor/do-what-new-snapshot/packages/core/src/__tests__/context-lens-assembler.test.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"` exits 0 |
 | AC3 | Build succeeds after this card lands | `rtk pnpm build` is green |
 | AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core -t "conversation|memory orchestration|context lens"` |
-| AC5 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-3-briefs/reports/task-p3-conversation.md` exists and cites backlog issues for any deferred scope |
+| AC5 | Completion report captures source files, port mode, verification, deviations, and prune decisions | `docs/v0.1/phase-3-briefs/reports/task-p3-conversation.md` exists and does not defer product-pruned chat runtime scope |
 | AC6 | Closing readiness label is `implementation-ready`; `live-event-ready` waits for Phase 4 daemon/MCP integration proof | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` avoid live-ready wording for Phase 3 alone |
 
 ## 5. Verification

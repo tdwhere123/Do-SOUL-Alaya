@@ -342,7 +342,7 @@ Nothing deferred.
 > - **Size**: L
 > - **Prerequisite**: P2-svc-memory, P2-svc-recall, P2-svc-evidence, P2-svc-green, P2-svc-governance-lease, P2-svc-session-override, P2-svc-output-shaping
 > - **Blocks**: P4-daemon-startup-ordering
-> - **Closing readiness label**: live-event-ready
+> - **Closing readiness label**: implementation-ready
 > - **Owner**: unassigned
 
 ## 0. Charter Authority
@@ -389,9 +389,11 @@ removed, keeping only the candidate→recall→govern→durable memory path.
 - **Target**: same path
 - **Adapter Points**: drop test cases that exercise deleted blocks; keep memory-orchestration test cases.
 
-## 3. Deferred
+## 3. Pruned
 
-- Chat-specific orchestration (worker-dispatch, tool-substrate, runtime-adapter integration) — deferred to backlog #BL-04 (not on Alaya v0.1 roadmap).
+- Chat-specific orchestration (worker-dispatch, tool-substrate,
+  runtime-adapter integration) is product-scope pruned. Alaya memory is
+  consumed through MCP and plain CLI, not upstream chat runtime sessions.
 
 ## 4. Acceptance Criteria
 
@@ -402,7 +404,7 @@ removed, keeping only the candidate→recall→govern→durable memory path.
 | AC3 | Memory-orchestration tests pass; chat-specific tests removed (not skipped) | `rtk pnpm exec vitest run --project @do-soul/alaya-core -t "conversation"` |
 | AC4 | TypeScript compiles | `rtk pnpm exec tsc --noEmit -p packages/core` |
 | AC5 | candidate-submit → recall → govern → durable path proven by an integration test | `packages/core/src/__tests__/integration/memory-orchestration.test.ts` exists and is green |
-| AC6 | Closing readiness label is `live-event-ready` | docs updated |
+| AC6 | Closing readiness label is `implementation-ready`; daemon/MCP live proof waits for Phase 4 | docs updated |
 
 ## 5. Verification
 

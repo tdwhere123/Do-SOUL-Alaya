@@ -60,9 +60,11 @@
 | `serial-delegation-service.ts` StrongRef / DirtyState dependencies | Depends on StrongRef and DirtyState helpers | Depend on the `P3-misc-foundation` ports; do not inline or duplicate them | Prevents shared-helper race and preserves port-first boundaries |
 | Run lifecycle tests | May need scripted runtime test double | Port `test-doubles/scripted-runtime-adapter.ts` as test-only support when required | Keeps source tests instead of replacing them |
 
-## 3. Deferred
+## 3. Pruned
 
-- Chat worker dispatch runtime behavior — deferred to backlog #BL-004.
+- Chat worker dispatch runtime behavior is product-scope pruned. Alaya v0.1
+  exposes memory through MCP and plain CLI, not upstream chat worker dispatch
+  or concrete runtime-adapter sessions.
 
 ## 4. Acceptance Criteria
 
@@ -72,7 +74,7 @@
 | AC2 | Every source path cited by this card exists before dispatch | `rtk node -e "const fs=require('fs');const paths=[\"vendor/do-what-new-snapshot/packages/core/src/worker-run-lifecycle-service.ts\",\"vendor/do-what-new-snapshot/packages/core/src/worker-run-state-machine.ts\",\"vendor/do-what-new-snapshot/packages/core/src/run-service.ts\",\"vendor/do-what-new-snapshot/packages/core/src/run-hot-state-service.ts\",\"vendor/do-what-new-snapshot/packages/core/src/serial-delegation-service.ts\",\"vendor/do-what-new-snapshot/packages/core/src/serial-delegation-event-intake.ts\",\"vendor/do-what-new-snapshot/packages/core/src/serial-delegation-recovery.ts\",\"vendor/do-what-new-snapshot/packages/core/src/test-doubles/scripted-runtime-adapter.ts\",\"vendor/do-what-new-snapshot/packages/core/src/__tests__/worker-run-lifecycle-service.test.ts\",\"vendor/do-what-new-snapshot/packages/core/src/__tests__/worker-run-state-machine.test.ts\",\"vendor/do-what-new-snapshot/packages/core/src/__tests__/run-service.test.ts\",\"vendor/do-what-new-snapshot/packages/core/src/__tests__/run-hot-state-service.test.ts\",\"vendor/do-what-new-snapshot/packages/core/src/__tests__/serial-delegation-service.test.ts\",\"vendor/do-what-new-snapshot/packages/core/src/__tests__/serial-delegation-event-intake.test.ts\",\"vendor/do-what-new-snapshot/packages/core/src/__tests__/serial-delegation-recovery.test.ts\"];const missing=paths.filter(p=>!fs.existsSync(p));if(missing.length){console.error(missing.join('\\n'));process.exit(1);}"` exits 0 |
 | AC3 | Build succeeds after this card lands | `rtk pnpm build` is green |
 | AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core run-service worker-run serial-delegation task-surface` |
-| AC5 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-3-briefs/reports/task-p3-run-lifecycle.md` exists and cites backlog issues for any deferred scope |
+| AC5 | Completion report captures source files, port mode, verification, deviations, and prune decisions | `docs/v0.1/phase-3-briefs/reports/task-p3-run-lifecycle.md` exists and does not defer product-pruned chat runtime scope |
 | AC6 | Closing readiness label is `implementation-ready` | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` are updated only after evidence supports the label |
 
 ## 5. Verification

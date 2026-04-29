@@ -57,10 +57,6 @@ from a task card §3 Deferred so reviewers can verify R2 compliance.
   own their own UI.
 - **#BL-003 — `apps/tui/` upstream port**: not relevant; Alaya has no
   TUI.
-- **#BL-004 — ConversationService chat-specific orchestration**:
-  worker-dispatch / runtime-adapter / tool-substrate paths in upstream
-  ConversationService dropped under P3-conversation adapt-and-port;
-  not on Alaya v0.1 roadmap.
 - **#BL-005 — `packages/ui-sdk/`**: SSE client SDK, not needed (no
   surface consumer); upstream pruned from vendor snapshot.
 - **#BL-006 — `packages/surface-runtime/`**: surface state reducer,

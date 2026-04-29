@@ -128,8 +128,7 @@ Deleted public exports:
   `clearLens`; removed the SSE degraded-event broadcast.
 - Product-Scope Prune Rule: chat execution, runtime adapter integration,
   concrete prompt assembly, file attachments, and streaming tests are pruned,
-  not deferred. The card's existing `#BL-004` remains the tracked issue for
-  chat-specific orchestration.
+  not deferred.
 
 ## Verification
 
@@ -145,10 +144,10 @@ Closing readiness is `implementation-ready`. This card does not claim
 `live-event-ready`, `mcp-consumable`, or `cli-consumable`; daemon/MCP wiring
 and attached-agent proof remain Phase 4 work.
 
-## Deferred Issues
+## Pruned Scope
 
-No new deferred issue. Existing backlog `#BL-004` covers the pruned
-ConversationService chat-specific orchestration.
+No backlog issue. The pruned chat execution paths are outside the Alaya memory
+plugin core.
 
 ## Post-Landing Note
 

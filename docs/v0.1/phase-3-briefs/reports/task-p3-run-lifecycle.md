@@ -59,12 +59,15 @@ committed.
 
 - EventLog-first lifecycle transitions remain in `WorkerRunLifecycleService` through `EventPublisher.publishWithMutation`.
 - Run hot state remains in-process implementation-ready state only; no SSE, daemon, MCP, or CLI surface is introduced by this card.
-- Serial delegation keeps runtime adapter behavior behind the protocol port seam. Chat worker dispatch runtime behavior remains deferred to backlog `#BL-004`.
+- Serial delegation keeps runtime adapter behavior behind the protocol port
+  seam. Chat worker dispatch runtime behavior is product-scope pruned because
+  Alaya exposes memory through MCP and plain CLI, not upstream chat sessions.
 - This card closes as `implementation-ready`; no `live-event-ready`, `mcp-consumable`, or `cli-consumable` claim is made.
 
-## Deferrals
+## Pruned Scope
 
-- Chat-specific worker dispatch runtime behavior remains deferred to backlog `#BL-004`, as required by the task card.
+- Chat-specific worker dispatch runtime behavior is not ported and is not a
+  backlog item. It is outside the Alaya memory plugin core.
 
 ## Follow-Up Readiness Impact
 
