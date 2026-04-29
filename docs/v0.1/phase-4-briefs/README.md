@@ -1,12 +1,19 @@
-# Phase 4 — Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI
+# Phase 4 — Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI + Memory Inspector
 
 Phase 4 lands the runtime body. Daemon entry, route registration,
 first-party MCP memory tools, MCP server with real transport, the
 SSE-strip rewrite of upstream daemon glue, and the **Alaya-original CLI
-features** (install / attach / profile / secrets / operations /
-trust-state / doctor / status / tools fallback) which have no upstream
-source and are all `requires-redesign` per invariant §24 and user
-decision 2026-04-28.
+features** (install / attach / detach / profile / secrets / operations /
+trust-state / doctor / status / inspect / tools fallback) which have no
+upstream source and are all `requires-redesign` per invariant §24 and
+user decision 2026-04-28.
+
+On 2026-04-29 the scope was extended per invariant §21 narrowing and
+the backlog reshape: the **Memory Inspector** (`apps/inspector` server
++ `alaya inspect` CLI + Gemini-CLI-authored frontend), `alaya detach`,
+and the cross-workspace `GlobalMemoryRecallService` cache fix were
+brought into v0.1 from the deferred set (closes backlog #BL-010,
+#BL-011, #BL-012).
 
 This is the phase that turns the v0.1 build from "compiles and tests
 green" into "actually works for a user".
@@ -40,11 +47,12 @@ Each batch card lists exact source file paths under
 `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/` and the
 SSE-strip Adapter Points if the route had SSE.
 
-### 4C. Daemon Auxiliary (parallel after 4A)
+### 4C. Daemon Auxiliary + Service Fixes (parallel after 4A)
 
 Upstream daemon has many auxiliary files outside routes. These were
 missed in the pre-review plan; review B3 caught it. Each gets an owner
-card here.
+card here. Also includes service-level fixes scheduled into v0.1
+during the 2026-04-29 backlog reshape.
 
 | Card ID | Files |
 |---|---|
@@ -52,6 +60,7 @@ card here.
 | P4-daemon-glue | `apps/core-daemon/src/{manifestation-context-lens-assembler.ts, orphan-query.ts, handoff-gap-adapter.ts}` |
 | P4-daemon-middleware | `apps/core-daemon/src/middleware/error-handler.ts` and any other middleware |
 | P4-mcp-tooling | `apps/core-daemon/src/{daemon-mcp-tooling.ts, mcp-runtime-registry.ts, mcp-catalog.ts}` (moved here from Phase 3 per review B2). Upstream daemon MCP catalog and runtime registry only; it is a prerequisite for, not the closure of, Alaya's first-party memory surface. |
+| P4-svc-global-recall-cache | `packages/core/src/global-memory-recall-service.ts` cache invalidation across workspaces. Listens to `memory.created` / `memory.updated` / `memory.deleted` notifier events and invalidates other workspaces' cache entries that reference the affected memory id. Closes backlog #BL-011. |
 
 ### 4D. CLI Bridge + Trust State Prerequisites (after 4A)
 
@@ -81,15 +90,36 @@ task-card-template Worked Example C.
 | Card ID | Subject |
 |---|---|
 | P4-cli-doctor | `alaya doctor` — Alaya runtime + storage + provider health JSON report. Mirrors upstream `doctor:host` report shape but Alaya-internal. |
-| P4-cli-install | `alaya install` — interactive first-run setup (DB path, provider config skeleton, audit init). |
+| P4-cli-install | `alaya install` — interactive first-run setup (DB path, provider config skeleton, secret-ref skeleton, audit init). |
 | P4-cli-status | `alaya status` — daemon up/down, current trust state per attached agent, Garden last-pass timestamp. |
-| P4-attach-codex | `alaya attach codex` — preview + confirm write to `~/.codex/config.toml` MCP server entry. |
-| P4-attach-claude | `alaya attach claude-code` — preview + confirm write to `~/.claude.json` MCP server entry. |
-| P4-profile-mutation | Profile read/write engine that backs `attach`. Audit-recorded preview + confirm + atomic write per invariant §23. |
+| P4-cli-detach | `alaya detach codex` / `alaya detach claude-code` — preview + confirm reverse-attach write that removes the Alaya MCP server entry and the `/alaya-inspect` slash registration from the target agent profile. Closes backlog #BL-010. |
+| P4-cli-inspect | `alaya inspect [--open]` — start `apps/inspector` HTTP server on `127.0.0.1:5174` with a per-launch random token, print the URL with the token query parameter, optionally open the user's default browser. Memory Inspector entry surface. |
+| P4-attach-codex | `alaya attach codex` — preview + confirm write to `~/.codex/config.toml` MCP server entry **and** `/alaya-inspect` slash registration. |
+| P4-attach-claude | `alaya attach claude-code` — preview + confirm write to `~/.claude.json` MCP server entry **and** `/alaya-inspect` slash registration. |
+| P4-profile-mutation | Profile read/write engine that backs `attach` and `detach`. Audit-recorded preview + confirm + atomic write per invariant §23. |
 | P4-secrets | Secret-ref resolution: env adapter + local-file adapter. OS keychain deferred to backlog #BL-009. |
 | P4-operations | Operations command surface: `alaya backup` (local snapshot), `alaya export` (portable bundle), `alaya import` (restore). Audit-recorded. |
 
-### 4H. Daemon Barrel (sequential last)
+### 4H. Memory Inspector (depends on 4B + 4C + 4G P4-cli-inspect)
+
+The Memory Inspector is a local-only memory-tooling surface authorized
+by the 2026-04-29 narrowing of invariant §21. It provides the
+provider/runtime config write surface, the memory-graph viewer, and a
+read-only trust/status mirror; it never participates in agent control
+flow. Closes backlog #BL-012.
+
+Listens on `127.0.0.1:5174` only, with a per-launch random token in
+the URL query string. Inspector writes are limited to daemon runtime
+parameters (provider URL, secret-ref, embedding model id, SoulConfig /
+StrategyConfig / EnvironmentConfig); memory ontology writes still go
+through `soul.propose_memory_update` per invariant §19.
+
+| Card ID | Subject | Port mode |
+|---|---|---|
+| P4-inspector-server | `apps/inspector/{package.json, tsconfig.json, src/server.ts, src/auth.ts, src/routes/*.ts, src/__tests__/*.ts}` HTTP server, token middleware, JSON proxy to daemon HTTP routes (read: graph + trust-state + config; write: config only), static asset hosting for the frontend bundle. | requires-redesign |
+| P4-inspector-frontend | `apps/inspector/web/{package.json, vite.config.ts, src/App.tsx, src/pages/Config.tsx, src/pages/Graph.tsx, src/pages/Status.tsx, src/api.ts}` 3-page SPA. **Implementation explicitly delegated to Gemini CLI.** The Alaya owner authors §0-§3 of the card and reviews the Gemini output for: (a) write paths only hit the Provider/Config endpoints (no memory CRUD), (b) the page does not introduce any agent-flow UI per §21, (c) audit / trust-state flows match the daemon contract. The Gemini handoff process is documented in the card's §2 Required Behavior. | requires-redesign |
+
+### 4I. Daemon Barrel (sequential last)
 
 | Card ID | Subject |
 |---|---|
@@ -101,7 +131,8 @@ End-to-end demo on real daemon (no mocks):
 
 1. `rtk pnpm exec alaya install` — daemon config initialized.
 2. `rtk pnpm exec alaya attach codex` — diff printed, `[y/N]` asked, on
-   `y` writes Codex MCP config atomically.
+   `y` writes Codex MCP config atomically and registers the
+   `/alaya-inspect` slash alias.
 3. From inside Codex, `tools/list` returns the complete first-party
    memory tool set from P4-mcp-memory-tools.
 4. Codex calls `soul.recall`, opens at least one returned pointer with
@@ -120,7 +151,23 @@ End-to-end demo on real daemon (no mocks):
    `rtk pnpm exec alaya tools call --json` prove CLI fallback parity
    with the MCP tool contract.
 10. `rtk pnpm exec alaya doctor` reports green for storage / runtime / MCP
-   transport / Garden.
+    transport / Garden.
+11. `rtk pnpm exec alaya inspect` — Inspector server starts on
+    `127.0.0.1:5174` with a per-launch token; the printed URL opens
+    successfully in a browser. The Provider/Config page can PATCH the
+    `OPENAI_API_KEY` secret-ref and `OPENAI_EMBEDDING_MODEL`, and the
+    daemon's `/embedding-status` flips from `provider_unconfigured`
+    to `embedding_supplement` after a daemon restart. The Memory
+    Graph page renders the P5-graph-contract `soul_graph` payload.
+    The Trust/Status page mirrors `alaya status` output. Requests
+    without the token return 401.
+12. Inserting / updating / deleting a memory in workspace A causes
+    `GlobalMemoryRecallService` cache entries in workspace B that
+    reference that memory id to invalidate within one notifier
+    delivery (closes #BL-011).
+13. `rtk pnpm exec alaya detach codex` — preview shows the entries
+    that will be removed (MCP server + `/alaya-inspect` slash); on
+    `y` writes atomically and Codex no longer sees Alaya tools.
 
 All must pass on a real daemon. Code-map and runtime-status updated.
 
@@ -134,10 +181,13 @@ Inside Phase 4:
 4B + 4C + 4D: parallel after 4A.2 closes where write sets allow
 4E: after P4-mcp-tooling, P4-daemon-services, P4-daemon-glue, P4-cli-bridge, P4-trust-state, P3-conversation, and P3-core-barrel
 4F + 4G: after 4E closes
-4H: sequential last (after all 4B routes close)
+4H.server (P4-inspector-server): after 4B routes (config / soul) and P4-cli-inspect close
+4H.frontend (P4-inspector-frontend): after P4-inspector-server closes; Gemini-CLI authoring runs against the closed server contract
+4I: sequential last (after all 4B routes and 4H close)
 ```
 
-Maximum concurrency in 4B+4C+4D+4G: ~10 codex.
+Maximum concurrency in 4B+4C+4D+4G: ~10 codex. 4H.frontend is offloaded
+to Gemini CLI so it does not consume a codex slot.
 
 ## Risks
 

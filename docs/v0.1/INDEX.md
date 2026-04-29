@@ -27,7 +27,7 @@ Phase 0 → Gate-0
 | Phase 1 | Wave 1: Leaves | 9 cards | **done** | Gate-1 passed |
 | Phase 2 | Wave 2: Services + Garden + Repos + Security | 32 cards | **done** | Gate-2 passed |
 | Phase 3 | Wave 3: Memory orchestration bridge + run lifecycle | 6 cards | **done** | Gate-3 passed |
-| Phase 4 | Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI | 25 cards (target) | not-started | Gate-4 |
+| Phase 4 | Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI + Memory Inspector | 30 cards (target) | not-started | Gate-4 |
 | Phase 5 | Wave 5: E2E + Benchmark + Graph Contract + Final Review | 4 cards (target) | not-started | Gate-5 |
 
 ## Phase 2 — Card Closeout Status
@@ -117,6 +117,7 @@ their original detail is in the plan file at
   + MCP discovery + run lifecycle
 - [Phase 4](./phase-4-briefs/README.md) — Wave 4 daemon + routes +
   live MCP transport + real profile mutation + CLI bridge + secrets
+  + Memory Inspector + cross-workspace recall cache + detach
 - [Phase 5](./phase-5-briefs/README.md) — Wave 5 E2E + benchmark +
   graph contract + final review
 
