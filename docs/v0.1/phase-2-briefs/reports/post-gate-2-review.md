@@ -77,11 +77,17 @@ not behavioral.
 - **Suggested Disposition**: Open backlog issue. The behavior is
   correct (verified by clean diff against vendor + adapter-point map +
   passing tests), so no source-code fix is needed; the gap is in
-  commit history. Phase 3 should adopt a stricter wave-merge policy
-  (per `subagent-dispatch.md` Phase Worktree And Merge Pipeline) that
-  preserves per-card commits, OR the team should accept that wave-close
-  commits are an explicit exception to R1 and document the carve-out
-  in `agent-workflow.md`.
+  commit history. Future phases should adopt a stricter wave-merge policy
+  (per `agent-workflow.md` Phase Worktree And Merge Pipeline) that
+  preserves per-card review-fix commits instead of silently accepting a
+  wave-close carve-out.
+- **Fix-Loop Disposition**: Commit `2dde29d`
+  (`fix(post-gate-2-review): record Gate-2 R1 prevention [review important]`)
+  records prevention without history rewrite or R1 exemption. `#BL-014`
+  tracks the historical Gate-2 gap and `agent-workflow.md` now requires
+  future phase/wave closeout to preserve standalone review-fix commits or
+  document a parent-approved exception before gate closeout while keeping
+  R1/R4 strict.
 
 #### I2 — `P2-svc-proposal` SSE-to-runtime-notifier reclassification bundled into Gate-2 wave commit
 
@@ -100,6 +106,9 @@ not behavioral.
 - **Cause Class**: R1 atomic-fix-commit discipline.
 - **Suggested Disposition**: Same as I1 — single backlog issue covering
   both synthesis and proposal would consolidate the policy decision.
+- **Fix-Loop Disposition**: Same as I1; commit `2dde29d` and `#BL-014`
+  cover both I1 and I2. No runtime/source fix and no history rewrite are
+  planned.
 
 #### I3 — `P2-svc-event-publisher` post-landing docs commits do not co-touch the task card
 
@@ -122,11 +131,14 @@ not behavioral.
   together added 30 lines to the report (2 review-fix evidence
   records + 1 concurrency note + 1 failed-retry note) without
   reflecting any of those review-fix outcomes back into the task card's
-  Acceptance Criteria, Verification, or Adapter Points sections. Either
-  (a) issue a single follow-up `docs(P2-svc-event-publisher):` commit
-  that mirrors the report's review-fix narrative back into the card, or
-  (b) relax R4 to allow report-only post-landing amendments and update
-  `agent-workflow.md`.
+  Acceptance Criteria, Verification, or Adapter Points sections. Issue a
+  single follow-up `docs(P2-svc-event-publisher):` commit that mirrors
+  the report's review-fix narrative back into the card; do not relax R4
+  to allow report-only post-landing amendments.
+- **Fix-Loop Disposition**: Commit `ff3aedd`
+  (`fix(P2-svc-event-publisher): mirror post-landing report fixes [review important]`)
+  chose option (a). The EventPublisher card and report are co-touched in
+  this docs-only fix loop; R4 is not relaxed.
 
 ### Nice-to-have
 
@@ -152,6 +164,11 @@ not behavioral.
   runtime-notifier rename rule as rows 1-3 above." The same gap
   exists in the synthesis card by extension — fix both in one
   `docs(P2-svc-synthesis,P2-svc-proposal):` commit.
+- **Fix-Loop Disposition**: Commit `6181343`
+  (`fix(P2-svc-synthesis,P2-svc-proposal): document derived notifier renames [review nice-to-have]`)
+  fixed both synthesis and proposal cards/reports with one derived
+  internal rename row/note covering private methods, local variables,
+  comments, and tests.
 
 ## Cross-Cutting Observations
 
@@ -170,16 +187,16 @@ These are not Review Findings but are worth surfacing to the team:
    that mechanical-rewrite collapsing is in scope of the proxy and
    document it in `RTK.md`.
 
-2. **Wave-close commits as a structural R1 carve-out.** Both I1 and I2
+2. **Wave-close commits as a structural R1 merge risk.** Both I1 and I2
    stem from the same root: the Gate-2 closeout commit `0aab73f`
    batched together (a) first-time landings for `synthesis-service.ts`,
    `proposal-service.ts`, `recall-service.ts`, `manifestation-resolver.ts`,
    `task-surface-builder.ts` and 4+ Garden files, AND (b) review-fix
    output from the synthesis/proposal SSE-reclassification loop.
    Whether this is acceptable depends on whether the phase worktree
-   merge model preserves per-card commits or squashes them. The team
-   needs to either tighten the merge model or formally exempt
-   wave-close commits from R1, then update `agent-workflow.md`.
+   merge model preserves per-card commits or squashes them. The
+   post-review fix-loop disposition below chooses the stricter merge
+   model and does not formalize an R1 exemption.
 
 3. **All 5 R3 (memory-chain) cards held EventLog-first ordering and
    audit-before-broadcast invariants under fresh inspection.** This is
@@ -204,6 +221,25 @@ These are not Review Findings but are worth surfacing to the team:
    (Finding / Cause / Fix / Verify / Follow-up). R1 commit hygiene is
    solid for the in-execution review-fix loops; the failures are only
    on the Gate-2 closeout edge.
+
+## Post-Review Fix-Loop Disposition
+
+This docs-only fix loop records the disposition of all four post-Gate-2 findings
+without runtime, protocol, schema, or vendor changes. Finding-cluster commit
+evidence: `2dde29d` for I1/I2, `ff3aedd` for I3, and `6181343` for N1.
+
+- **I1/I2**: Disposition is historical R1 commit hygiene gap, no history
+  rewrite. Added backlog issue `#BL-014` and tightened
+  `docs/handbook/workflow/agent-workflow.md` so future phase/wave closeout must
+  confirm standalone review-fix commits survived the merge path, or document a
+  parent-approved exception before gate closeout. R1 and R4 remain strict.
+- **I3**: Disposition is fixed by a single docs update that co-touches the
+  EventPublisher card and report. The card now mirrors the report-only
+  review-fix outcomes: batch propagation failure evidence, normalizer pending
+  retry behavior, single-flight retry, and failed-retry recovery.
+- **N1**: Disposition is fixed by adding one derived internal rename row/note to
+  both synthesis and proposal cards and reports for private methods, local
+  variables, comments, and tests.
 
 ## Verification
 

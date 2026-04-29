@@ -76,6 +76,10 @@ isolated project worktree rather than direct edits in the main checkout.
    final reviewer pass reports zero unresolved Blocking or Important
    findings and the integrated verification evidence is fresh on the
    phase branch.
+   Prevention note: before closeout, confirm review-fix commits remain
+   standalone through the phase/wave merge path. If a parent-approved
+   exception is unavoidable, document it before gate closeout and link
+   the reopener issue; this is not a relaxation of R1 or R4.
 6. After merging, rerun the required gate verification on `main`
    before marking the phase gate as passed. Evidence from the isolated
    worktree alone is not enough for a final `main` closeout claim.
