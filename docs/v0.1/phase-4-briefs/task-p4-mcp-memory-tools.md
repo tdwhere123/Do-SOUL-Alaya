@@ -126,15 +126,15 @@ Nothing deferred.
 
 ## 6. Shared File Hazards & Dependencies
 
-- Touches `packages/protocol/src/soul/mcp-types.ts`; treat as a
-  protocol-contract follow-up and run protocol schema tests before any
-  daemon integration claim.
+- **Owns the protocol-contract migration for `packages/protocol/src/soul/mcp-types.ts`.** This card is the **single explicit Phase 4 carve-out** for the INDEX shared-file table rule "Owned by P1-protocol; no Phase 2+ card writes it." The carve-out is justified by:
+  - The `soul.report_context_usage` request/response schemas (`SoulReportContextUsageRequestSchema`, `SoulReportContextUsageResponseSchema`, `SoulContextUsageStateSchema`) **already exist** in the file as of Gate-2 (ported by P1-protocol). This card may need to refine fields (e.g. add `delivery_id` foreign-key constraint in zod refinements, align with P4-trust-state's `ContextDeliveryRecordSchema`) but MUST NOT remove or rename existing exports without a `P1-protocol-followup` companion card.
+  - Reviewers MUST verify `rtk pnpm exec vitest run --project @do-soul/alaya-protocol -t "mcp"` passes before any daemon integration claim, and that no other Phase 4 card writes `mcp-types.ts`.
 - Does not edit `packages/protocol/src/index.ts`; the existing
-  `mcp-types.ts` barrel export already covers the new schemas.
+  `mcp-types.ts` barrel export already covers the new schemas. (P4-trust-state is the only Phase 4 card that updates the protocol barrel.)
 - Depends on P3-conversation and P3-core-barrel for recall-to-context
   producer exports.
-- Depends on P4-trust-state for ContextDeliveryRecord and
-  UsageProofRecord persistence.
+- Depends on P4-trust-state for `ContextDeliveryRecord` and
+  `UsageProofRecord` schemas (in `packages/protocol/src/soul/trust-state.ts`) and the `TrustStateRecorder` runtime instance.
 - Blocks P4-mcp-server because the server must expose this exact
   catalog through `tools/list` and `tools/call`.
 
