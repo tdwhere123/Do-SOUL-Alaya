@@ -126,7 +126,10 @@ dedicated barrel-update card after all leaf cards in the wave land.
 | `packages/core/src/index.ts` | every core service | high | barrel-update card P3-core-barrel at end of Phase 3 |
 | `packages/soul/src/index.ts` | every Garden role | high | barrel-update card P2-barrel-soul at end of Phase 2C |
 | `apps/core-daemon/src/app.ts` | every route | high | route-registration owner card P4-daemon-routes-register sequentially after all 4B routes close |
-| `bin/alaya.mjs` | every CLI subcommand | high | Owned by P4-cli-bridge; subcommand cards (P4-cli-doctor, P4-attach-codex, etc.) register through a subcommand registration API exposed by P4-cli-bridge |
+| `apps/core-daemon/src/routes/runs.ts` | P4-sse-strip + P4-routes-workspace | high | P4-sse-strip lands first (deletes the SSE GET endpoint and the TransformStream block); P4-routes-workspace serializes after and may NOT re-introduce any SSE / streaming framing |
+| `bin/alaya.mjs` | every CLI subcommand | high | Owned by P4-cli-bridge; subcommand cards (P4-cli-doctor, P4-attach-codex, etc.) register through `AlayaCliBridge.registerSubcommand` per task-p4-cli-bridge §2.3; the §2.3 interface is frozen after P4-cli-bridge lands |
+| `packages/protocol/src/soul/mcp-types.ts` (Phase 4 carve-out) | P4-mcp-memory-tools | high | Single explicit Phase 4 carve-out from the P1-protocol ownership rule; allowed to refine `soul.report_context_usage` related schemas only; any other change requires a P1-protocol-followup companion card |
+| `packages/protocol/src/index.ts` (Phase 4 carve-out) | P4-trust-state | high | Single explicit Phase 4 carve-out for the P1-protocol barrel; adds the new `TrustStateSchema`, `ContextDeliveryRecordSchema`, `UsageProofRecordSchema`, `TrustSummarySchema` exports |
 | `package.json` (workspace root) | rare | high | only Phase 0 cards or explicit follow-up after wave-gate review |
 | `tsconfig.base.json` | rare | high | same as above |
 | Migration sequence numbers | P1-migrations | medium | All 55 migrations are owned by P1-migrations; no Phase 2+ card may add a new migration without a P1-migrations-followup card |
