@@ -46,39 +46,9 @@ Gate-2 wave-close commit `0aab73f`. The behavior is already verified and no
 history rewrite is planned; this issue tracks prevention so future closeout
 does not silently squash or bundle review-fix commits.
 
-### #BL-010 — `alaya detach` reverse-attach command
-
-**Status**: Open (scheduled for v0.1)
-**Owner**: `docs/v0.1/phase-4-briefs/task-p4-cli-detach.md`
-**Close condition**: P4-cli-detach lands; running `alaya detach codex` /
-`alaya detach claude-code` removes the Alaya MCP server entry and any
-`/alaya-inspect` slash registration from the target agent profile after
-preview + explicit confirm; profile-mutation audit row is recorded.
-
-Originally deferred at Phase 0 close. Brought back into v0.1 on
-2026-04-29 because install/uninstall symmetry is part of the user-
-facing Gate-4 demo: a user must be able to undo `alaya attach`.
-Reuses P4-profile-mutation preview-and-confirm for the reverse op.
-
-### #BL-011 — Cross-workspace global recall cache invalidation
-
-**Status**: Open (scheduled for v0.1)
-**Owner**: `docs/v0.1/phase-4-briefs/task-p4-svc-global-recall-cache.md`
-**Close condition**: P4-svc-global-recall-cache lands; mutating a memory
-in workspace A invalidates `GlobalMemoryRecallService` cache entries
-that reference that memory from workspace B; integration test exercises
-the cross-workspace path with a real EventLog -> notifier ->
-cache-invalidate chain.
-
-Originally deferred at Phase 0 close. Brought back into v0.1 on
-2026-04-29 because cross-workspace memory access is part of Alaya's
-core "memory plugin" identity, not a multi-tenant edge case. The
-service itself was ported in P2-svc-global-recall; only the cache-
-invalidation wiring is missing.
-
 ### #BL-012 — Memory Inspector
 
-**Status**: Open (scheduled for v0.1)
+**Status**: Open (server + CLI implemented; frontend pending)
 **Owner**: `docs/v0.1/phase-4-briefs/task-p4-cli-inspect.md`,
 `docs/v0.1/phase-4-briefs/task-p4-inspector-server.md`,
 `docs/v0.1/phase-4-briefs/task-p4-inspector-frontend.md`
@@ -185,7 +155,18 @@ permissions are sufficient.
 
 ## Resolved (short closure summaries)
 
-(none yet)
+### #BL-010 — `alaya detach` reverse-attach command
+
+Resolved by `P4-cli-detach` and `P4-profile-mutation`.
+`alaya detach codex` / `alaya detach claude-code` now use preview,
+explicit confirmation, audit-first profile mutation, and atomic writes
+to remove Alaya MCP and `/alaya-inspect` profile entries.
+
+### #BL-011 — Cross-workspace global recall cache invalidation
+
+Resolved by `P4-svc-global-recall-cache`. Cross-workspace recall cache
+invalidation is wired through the Phase 4 runtime notifier instead of
+SSE and is covered by the Phase 4 non-frontend verification set.
 
 ---
 

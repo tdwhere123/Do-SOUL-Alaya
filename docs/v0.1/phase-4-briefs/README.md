@@ -13,10 +13,20 @@ the backlog reshape: the **Memory Inspector** (`apps/inspector` server
 + `alaya inspect` CLI + Gemini-CLI-authored frontend), `alaya detach`,
 and the cross-workspace `GlobalMemoryRecallService` cache fix were
 brought into v0.1 from the deferred set (closes backlog #BL-010,
-#BL-011, #BL-012).
+#BL-011; #BL-012 closes only after the Inspector frontend lands).
 
 This is the phase that turns the v0.1 build from "compiles and tests
 green" into "actually works for a user".
+
+## Current Status
+
+Non-frontend Phase 4 recovery work is `implementation-ready`; see
+`reports/gate-4-non-frontend-closeout.md` and the per-card reports in
+`reports/task-p4-*.md`.
+
+`P4-inspector-frontend` remains pending Gemini CLI implementation.
+Gate-4 is therefore not passed yet; the remaining closeout requires
+the frontend card, attached-agent MCP proof, and final review.
 
 ## Card Groups
 

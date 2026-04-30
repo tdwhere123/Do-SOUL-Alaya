@@ -15,6 +15,7 @@ live in upstream `do-what-new`), see
 | `packages/soul/` | `@do-soul/alaya-soul` | `@do-soul/alaya-soul` |
 | `packages/engine-gateway/` | `@do-soul/alaya-engine-gateway` | `@do-soul/alaya-engine-gateway` |
 | `apps/core-daemon/` | `@do-soul/alaya-core-daemon` | (private app, no path alias) |
+| `apps/inspector/` | `@do-soul/alaya-inspector` | (private app, no path alias) |
 
 Upstream `@do-what/<x>` maps to `@do-soul/alaya-<x>` for the five
 ported packages above. `apps/core-daemon` has no upstream namespaced
@@ -31,27 +32,27 @@ packages/
   engine-gateway/ @do-soul/alaya-engine-gateway — provider adapters, MCP bridge
 
 apps/
-  core-daemon/    Hono daemon, MCP server, CLI bridge
+  core-daemon/    Hono daemon, routes, MCP server, CLI bridge
+  inspector/      loopback Memory Inspector backend and static host
 
 bin/
-  alaya.mjs       CLI entry (alaya doctor / install / attach / status / tools)
+  alaya.mjs       CLI entry (alaya doctor / install / attach / detach / status / inspect / tools)
 
 vendor/
   do-what-new-snapshot/  frozen upstream port reference (read-only)
 ```
 
-## Current Status (Gate-3 passed)
+## Current Status (Phase 4 non-frontend implementation-ready)
 
 Phase 1 leaves and Phase 2 storage repositories, core services, security
 stack, Garden roles, and owned package barrels are ported and unit-tested.
 Phase 3 foundation helpers, MCP discovery services, run lifecycle / serial
 delegation, misc support services, ConversationService memory orchestration,
 ContextLensAssembler, and the core barrel are ported and unit-tested as
-`implementation-ready`. Gate-3 passed with `rtk pnpm build`, `rtk pnpm test`,
-core typecheck, full core Vitest, targeted memory/MCP proof tests, and
-forbidden upstream/SSE/chat surface sweeps. Daemon, CLI, MCP transport, and
-live surface wiring remain Phase 4+ work. Refresh this section after each
-Phase Gate.
+`implementation-ready`. Phase 4 non-frontend daemon, routes, CLI, MCP, secrets,
+operations, trust-state, and Inspector server work is now
+`implementation-ready`; `P4-inspector-frontend`, attached-agent proof, and final
+review remain Gate-4 closure work. Refresh this section after each Phase Gate.
 
 | Concern | Primary files | State |
 |---|---|---|
@@ -70,9 +71,10 @@ Phase Gate.
 | Core security stack | `packages/core/src/{permission-policy/,ports/,zero-day-security-layer.ts,constraint-proxy.ts,integration-gate.ts,worker-safety-gate.ts,worker-trust-assessor.ts,stance-resolution-service.ts,cross-cutting-permission-service.ts}` | ported; `implementation-ready` (P2-security-1 + P2-security-2) |
 | Soul skeleton + topology leaves | `packages/soul/src/{signal-handler.ts,tool-governance-adapter.ts,worker-safety-*.ts,garden/topology-service.ts,garden/path-graph-snapshotter.ts,shared/deep-freeze.ts}` | ported; `implementation-ready` leaves (P1-soul-skeleton + P1-topology) |
 | Garden engine | `packages/soul/src/garden/`, `packages/soul/src/shared/bootstrapping-ids.ts`, `packages/soul/src/index.ts` | Phase 2 Garden roles are ported and exported: `auditor.ts`, `scheduler.ts`, `compute-provider.ts`, `compute-routing-service.ts`, `local-heuristics.ts`, `janitor.ts`, `librarian.ts`, `materialization-router.ts`, `degradation-pipeline.ts`, `handoff-gap-handler.ts`, `bootstrapping-service.ts`, `session-override-remediation.ts`, `backlog-telemetry.ts`, and `shared/bootstrapping-ids.ts` |
-| Engine gateway | `packages/engine-gateway/src/` | MCP/provider skeleton ported; provider adapters deferred (#BL-008). `provider/soul-tool-specs.ts` exposes the stable first-party `soul.*` memory tool names for model-visible specs; daemon handlers are still P4-owned. |
-| Core daemon | `apps/core-daemon/src/` | not yet ported (P4-daemon-skeleton + P4-daemon-startup-ordering + P4-sse-strip) |
-| CLI shell | `bin/alaya.mjs` | not yet ported (P4-cli-bridge) |
+| Engine gateway | `packages/engine-gateway/src/` | MCP/provider skeleton ported; provider adapters deferred (#BL-008). `provider/soul-tool-specs.ts` exposes the stable first-party `soul.*` memory tool names for model-visible specs; daemon handlers are implemented by P4-mcp-memory-tools. |
+| Core daemon | `apps/core-daemon/src/` | Phase 4 non-frontend daemon surface is `implementation-ready`: Hono app, route registration, middleware, startup composition, runtime notifier, daemon services/glue, MCP tooling, MCP memory tools/server, CLI commands, secrets, profile mutation, operations, and status routes. |
+| CLI shell | `bin/alaya.mjs`, `apps/core-daemon/src/cli/` | Alaya CLI bridge and subcommands are `implementation-ready`: doctor, install, attach Codex, attach Claude Code, detach, status, inspect, tools list/call, backup/export/import. |
+| Memory Inspector backend | `apps/inspector/src/` | Inspector server is `implementation-ready`: loopback Hono server, token middleware, config/graph/status daemon proxy routes, audited runtime embedding config writes, and static bundle host. Frontend bundle remains `P4-inspector-frontend`. |
 
 ## Port Source Mapping (subset)
 
