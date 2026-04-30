@@ -41,6 +41,22 @@
 - Do not edit shared barrels unless this card explicitly owns that barrel.
 - If a cited source path is missing or a source dependency forces files outside §2, return `BLOCKED` instead of expanding scope.
 
+### 2.3 Adapter Matrix And Recovery Guardrails
+
+| Adapter point | Vendor before | Alaya after | Reviewer witness |
+|---|---|---|---|
+| Package identity | `@do-what/core-daemon` package metadata and workspace names | `@do-soul/alaya-core-daemon` names only; dependencies stay vendor-equivalent unless an Alaya package rename requires it | `git diff -- apps/core-daemon/package.json vendor/.../package.json` shows package-name/path changes only |
+| Imports | `@do-what/*` package imports | `@do-soul/alaya-*` imports or equivalent local paths | `rg -n "@do-what/" apps/core-daemon` returns zero |
+| HTTP app seam | Vendor `Hono` app with `cors`, `bodyLimit`, timing-safe request token gate, and typed `CoreDaemonServices` | Same seam retained; later cards may prune forbidden surfaces and SSE only through their own Adapter Matrices | `rg -n "from \"hono\"|bodyLimit|cors|timingSafeEqual" apps/core-daemon/src/app.ts` finds the retained seam |
+| Route services | Vendor typed service bags are visible in `CoreDaemonServices` | Service names may use Alaya package types, but routes must still depend on typed domain service bags | `rg -n "readonly .*Service" apps/core-daemon/src/app.ts` shows explicit service dependencies |
+
+Forbidden in this card:
+
+- Creating `apps/core-daemon/src/daemon-handle.ts` or `apps/core-daemon/src/daemon-service-graph.ts`.
+- Replacing Hono with a custom dispatcher, route loop, or `DaemonRouteHandler`.
+- Adding `context.daemon` as the route dependency boundary.
+- Stubbing missing services to keep this card green.
+
 ## 3. Deferred
 
 Nothing deferred.
@@ -55,6 +71,7 @@ Nothing deferred.
 | AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon --passWithNoTests` |
 | AC5 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-4-briefs/reports/task-p4-daemon-skeleton.md` exists and cites backlog issues for any deferred scope |
 | AC6 | Closing readiness label is `implementation-ready` | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` are updated only after evidence supports the label |
+| AC7 | No recovery-forbidden rewrite artifacts are introduced | `rtk rg -n "daemon-handle|daemon-service-graph|DaemonRouteHandler|context\\.daemon" apps/core-daemon/src` returns zero hits |
 
 ## 5. Verification
 
@@ -63,6 +80,7 @@ Nothing deferred.
 3. `rtk pnpm build`
 4. `rtk pnpm exec tsc --noEmit -p apps/core-daemon`
 5. `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon --passWithNoTests`
+6. `rtk rg -n "daemon-handle|daemon-service-graph|DaemonRouteHandler|context\\.daemon" apps/core-daemon/src`
 
 ## 6. Shared File Hazards & Dependencies
 

@@ -42,6 +42,17 @@
 - Do not edit shared barrels unless this card explicitly owns that barrel.
 - If a cited source path is missing or a source dependency forces files outside §2, return `BLOCKED` instead of expanding scope.
 
+### 2.3 Glue Adapter Matrix And Recovery Guardrails
+
+| Adapter point | Vendor before | Alaya after | Reviewer witness |
+|---|---|---|---|
+| Tool runtime | Vendor `tool-runtime.ts` is the real runtime adapter used by MCP tooling | Port `tool-runtime.ts`; do not replace it with a narrowed memory-only catalog/runtime | `test -f apps/core-daemon/src/tool-runtime.ts` and targeted `tool-runtime` tests pass |
+| Handoff/orphan adapters | Vendor `handoff-gap-adapter.ts` and `orphan-query.ts` hold reusable glue logic | Port them as separate modules; do not inline into routes, MCP handlers, or service composition | `rg -n "handoff-gap-adapter|orphan-query" apps/core-daemon/src` finds imports or tests |
+| Builtin tool specs | Vendor `builtin-conversation-tool-specs.ts` defines shared tool spec metadata | Port the file even if Alaya later prunes chat-only tool exposure; pruning happens at registration, not by deleting the shared source | reviewer compares target to vendor source |
+| Product prune | Vendor `worker-dispatch-constitutional-fragments.ts` is chat-worker prompt assembly | Keep it pruned and do not defer it to backlog; Alaya has no upstream chat worker dispatch surface | completion report states product prune with no backlog deferral |
+
+Forbidden in this card: omitting `tool-runtime.ts`, replacing MCP glue with `mcp-memory-tool-catalog.ts`, moving handoff/orphan logic into `daemon-service-graph.ts`, and creating daemon-wide facade types.
+
 ## 3. Pruned
 
 `worker-dispatch-constitutional-fragments.ts` is product-scope pruned. Alaya
@@ -57,6 +68,7 @@ does not ship upstream chat worker-dispatch prompt assembly.
 | AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon handoff orphan tool-runtime manifestation` |
 | AC5 | Completion report captures source files, port mode, verification, deviations, and prune decisions | `docs/v0.1/phase-4-briefs/reports/task-p4-daemon-glue.md` exists and does not defer product-pruned worker-dispatch prompt assembly |
 | AC6 | Closing readiness label is `implementation-ready` | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` are updated only after evidence supports the label |
+| AC7 | Every §2 glue file exists and no memory-only substitute or service-graph relocation is introduced | `rtk rg -n "mcp-memory-tool-catalog|daemon-service-graph|daemon-handle" apps/core-daemon/src` returns zero hits |
 
 ## 5. Verification
 
@@ -65,6 +77,7 @@ does not ship upstream chat worker-dispatch prompt assembly.
 3. `rtk pnpm build`
 4. `rtk pnpm exec tsc --noEmit -p apps/core-daemon`
 5. `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon handoff orphan tool-runtime manifestation`
+6. `rtk rg -n "mcp-memory-tool-catalog|daemon-service-graph|daemon-handle" apps/core-daemon/src`
 
 ## 6. Shared File Hazards & Dependencies
 

@@ -42,6 +42,17 @@
 - Do not edit shared barrels unless this card explicitly owns that barrel.
 - If a cited source path is missing or a source dependency forces files outside §2, return `BLOCKED` instead of expanding scope.
 
+### 2.3 Route Adapter Matrix And Recovery Guardrails
+
+| Adapter point | Vendor before | Alaya after | Reviewer witness |
+|---|---|---|---|
+| Route registration | Vendor exports `register*Routes(app, services)` functions against Hono | Preserve that shape; final registration stays in P4-daemon-routes-register | `rg -n "export function register|Hono" apps/core-daemon/src/routes/soul.ts apps/core-daemon/src/routes/soul-graph.ts apps/core-daemon/src/routes/garden-backlog.ts apps/core-daemon/src/routes/embedding-status.ts apps/core-daemon/src/routes/slots.ts` |
+| Service dependencies | Vendor soul routes see narrow SOUL, Garden, topology, embedding, and slot services | Preserve typed domain service bags; do not route through a daemon-wide facade or `unknown` getters | no `context.daemon`, `DaemonRouteHandler`, `AlayaDaemonHandle`, or `Promise<unknown>` in these route files |
+| Garden/SOUL semantics | Vendor routes delegate graph, backlog, embedding status, and slot behavior to real services | Port those delegations; do not hardcode status/score placeholders or synthesize graph state in handlers | route tests use service doubles for real service methods, not inline hardcoded data |
+| Product pruning | Vendor GUI/TUI/SSE-only branches may be pruned | Prune only paths forbidden by invariants §11 and §21, and document every prune in the report | completion report lists every pruned source branch |
+
+Forbidden in this card: `DaemonRouteHandler`, `context.daemon`, daemon-wide `unknown` service lookups, hardcoded embedding/dynamics scores, orphan route barrels, `daemon-handle.ts`, and `daemon-service-graph.ts`.
+
 ## 3. Deferred
 
 Nothing deferred.
@@ -56,6 +67,7 @@ Nothing deferred.
 | AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon soul soul-graph garden-backlog embedding-status slots` |
 | AC5 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-4-briefs/reports/task-p4-routes-soul.md` exists and cites backlog issues for any deferred scope |
 | AC6 | Closing readiness label is `live-event-ready` | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` are updated only after evidence supports the label |
+| AC7 | Route files preserve typed service-bag registration and avoid recovery-forbidden artifacts | `rtk rg -n "DaemonRouteHandler|context\\.daemon|AlayaDaemonHandle|daemon-handle|daemon-service-graph|Promise<unknown>" apps/core-daemon/src/routes apps/core-daemon/src` returns zero hits |
 
 ## 5. Verification
 
@@ -64,6 +76,7 @@ Nothing deferred.
 3. `rtk pnpm build`
 4. `rtk pnpm exec tsc --noEmit -p apps/core-daemon`
 5. `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon soul soul-graph garden-backlog embedding-status slots`
+6. `rtk rg -n "DaemonRouteHandler|context\\.daemon|AlayaDaemonHandle|daemon-handle|daemon-service-graph|Promise<unknown>" apps/core-daemon/src/routes apps/core-daemon/src`
 
 ## 6. Shared File Hazards & Dependencies
 
