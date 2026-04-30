@@ -42,6 +42,17 @@
 - Do not edit shared barrels unless this card explicitly owns that barrel.
 - If a cited source path is missing or a source dependency forces files outside §2, return `BLOCKED` instead of expanding scope.
 
+### 2.3 Route Adapter Matrix And Recovery Guardrails
+
+| Adapter point | Vendor before | Alaya after | Reviewer witness |
+|---|---|---|---|
+| Route registration | Vendor exports Hono `register*Routes(app, services)` functions | Preserve Hono route modules; P4-daemon-routes-register owns only final `app.ts` registration | `rg -n "export function register|Hono" apps/core-daemon/src/routes/workspaces.ts apps/core-daemon/src/routes/workspace-files.ts apps/core-daemon/src/routes/runs.ts apps/core-daemon/src/routes/files.ts apps/core-daemon/src/routes/e2e-event-triggers.ts` |
+| Service dependencies | Vendor workspace routes depend on narrow workspace/run/file services | Preserve typed service bags; do not collapse dependencies into `context.daemon` or a daemon handle | no `context.daemon`, `DaemonRouteHandler`, or `AlayaDaemonHandle` in these route files |
+| SSE strip boundary | Vendor `runs.ts` includes SSE route handling | P4-sse-strip owns removing SSE transport only; this card may not reintroduce `text/event-stream`, `TransformStream`, or EventSource semantics | `rg -n "SseManager|sseManager|text/event-stream|EventSource|TransformStream" apps/core-daemon/src/routes/runs.ts` returns zero |
+| E2E trigger scope | Vendor has test-trigger route behavior | Keep trigger routes test-gated exactly as vendor does; no new production feature flag surface outside the vendor shape | reviewer compares e2e-event-triggers target against source |
+
+Forbidden in this card: `DaemonRouteHandler`, `context.daemon`, `daemon-handle.ts`, `daemon-service-graph.ts`, orphan `routes/workspace.ts`, route barrels, and any SSE/streaming framing in `routes/runs.ts`.
+
 ## 3. Deferred
 
 Nothing deferred.
@@ -56,6 +67,7 @@ Nothing deferred.
 | AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon workspaces workspace-files runs files e2e-event-triggers` |
 | AC5 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-4-briefs/reports/task-p4-routes-workspace.md` exists and cites backlog issues for any deferred scope |
 | AC6 | Closing readiness label is `live-event-ready` | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` are updated only after evidence supports the label |
+| AC7 | Route files preserve typed service-bag registration, no orphan workspace route, and no SSE residue | `rtk rg -n "DaemonRouteHandler|context\\.daemon|AlayaDaemonHandle|daemon-handle|daemon-service-graph|SseManager|sseManager|text/event-stream|EventSource|TransformStream" apps/core-daemon/src/routes apps/core-daemon/src` returns zero hits |
 
 ## 5. Verification
 
@@ -64,6 +76,7 @@ Nothing deferred.
 3. `rtk pnpm build`
 4. `rtk pnpm exec tsc --noEmit -p apps/core-daemon`
 5. `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon workspaces workspace-files runs files e2e-event-triggers`
+6. `rtk rg -n "DaemonRouteHandler|context\\.daemon|AlayaDaemonHandle|daemon-handle|daemon-service-graph|SseManager|sseManager|text/event-stream|EventSource|TransformStream" apps/core-daemon/src/routes apps/core-daemon/src`
 
 ## 6. Shared File Hazards & Dependencies
 

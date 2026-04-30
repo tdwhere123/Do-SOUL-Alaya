@@ -51,11 +51,47 @@ export const ToolchainStatusSchema = z
   })
   .readonly();
 
+export const RuntimeEmbeddingConfigSchema = z
+  .object({
+    provider_url: NonEmptyStringSchema.nullable(),
+    secret_ref: NonEmptyStringSchema.nullable(),
+    model_id: NonEmptyStringSchema.nullable(),
+    embedding_enabled: z.boolean()
+  })
+  .readonly();
+
+export const RuntimeEmbeddingConfigPatchSchema = RuntimeEmbeddingConfigSchema.unwrap()
+  .partial()
+  .strict()
+  .readonly();
+
+export const AlayaStatusSchema = z
+  .object({
+    checked_at: NonEmptyStringSchema,
+    daemon: z
+      .object({
+        ready: z.boolean(),
+        startup_steps: z.array(NonEmptyStringSchema).readonly(),
+        principal_coding_engine_available: z.boolean()
+      })
+      .readonly(),
+    mcp: z
+      .object({
+        enrolled_tools: NonNegativeIntSchema,
+        allowed_servers: z.array(NonEmptyStringSchema).readonly()
+      })
+      .readonly()
+  })
+  .readonly();
+
 export type SoulConfig = z.infer<typeof SoulConfigSchema>;
 export type StrategyConfig = z.infer<typeof StrategyConfigSchema>;
 export type EnvironmentVariables = z.infer<typeof EnvironmentVariablesSchema>;
 export type EnvironmentConfig = z.infer<typeof EnvironmentConfigSchema>;
 export type ToolchainStatus = z.infer<typeof ToolchainStatusSchema>;
+export type RuntimeEmbeddingConfig = z.infer<typeof RuntimeEmbeddingConfigSchema>;
+export type RuntimeEmbeddingConfigPatch = z.infer<typeof RuntimeEmbeddingConfigPatchSchema>;
+export type AlayaStatus = z.infer<typeof AlayaStatusSchema>;
 
 export const DEFAULT_SOUL_CONFIG: SoulConfig = {
   memory_consolidation_enabled: true,

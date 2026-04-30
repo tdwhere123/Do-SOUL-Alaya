@@ -38,6 +38,17 @@
 - Do not edit shared barrels unless this card explicitly owns that barrel.
 - If a cited source path is missing or a source dependency forces files outside §2, return `BLOCKED` instead of expanding scope.
 
+### 2.3 Middleware Recovery Guardrails
+
+This is a `trivial-copy` card. The only allowed edits are package-name/path
+rewrites required for Alaya. It must not become a custom framework,
+request-dispatch, auth, CORS, or body-limit rewrite; those seams stay in
+vendor-shaped `app.ts` and P4-daemon-routes-register.
+
+Forbidden in this card: replacing Hono middleware composition, adding a route
+dispatcher, introducing `DaemonRouteHandler`, or moving token/body/CORS behavior
+out of `app.ts`.
+
 ## 3. Deferred
 
 Nothing deferred.
@@ -52,6 +63,7 @@ Nothing deferred.
 | AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon error-handler --passWithNoTests` |
 | AC5 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-4-briefs/reports/task-p4-daemon-middleware.md` exists and cites backlog issues for any deferred scope |
 | AC6 | Closing readiness label is `implementation-ready` | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` are updated only after evidence supports the label |
+| AC7 | Middleware remains a trivial-copy port and no custom dispatcher artifact is introduced | `rtk rg -n "DaemonRouteHandler|context\\.daemon|daemon-handle|daemon-service-graph" apps/core-daemon/src` returns zero hits |
 
 ## 5. Verification
 
@@ -60,6 +72,7 @@ Nothing deferred.
 3. `rtk pnpm build`
 4. `rtk pnpm exec tsc --noEmit -p apps/core-daemon`
 5. `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon error-handler --passWithNoTests`
+6. `rtk rg -n "DaemonRouteHandler|context\\.daemon|daemon-handle|daemon-service-graph" apps/core-daemon/src`
 
 ## 6. Shared File Hazards & Dependencies
 

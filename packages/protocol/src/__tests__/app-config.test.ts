@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  AlayaStatusSchema,
   DEFAULT_ENVIRONMENT_CONFIG,
   DEFAULT_SOUL_CONFIG,
   DEFAULT_STRATEGY_CONFIG,
   EnvironmentConfigSchema,
+  RuntimeEmbeddingConfigPatchSchema,
+  RuntimeEmbeddingConfigSchema,
   SoulConfigSchema,
   StrategyConfigSchema,
   ToolchainStatusSchema
@@ -82,6 +85,43 @@ describe("app config schemas", () => {
       active_worktrees: 2,
       db_path: "/tmp/do-what.sqlite",
       files_dir: "/tmp/do-what-files"
+    });
+  });
+
+  it("exports runtime embedding and Alaya status schemas for Inspector", () => {
+    expect(
+      RuntimeEmbeddingConfigSchema.parse({
+        provider_url: null,
+        secret_ref: "env:OPENAI_API_KEY",
+        model_id: "text-embedding-3-small",
+        embedding_enabled: true
+      })
+    ).toEqual({
+      provider_url: null,
+      secret_ref: "env:OPENAI_API_KEY",
+      model_id: "text-embedding-3-small",
+      embedding_enabled: true
+    });
+
+    expect(RuntimeEmbeddingConfigPatchSchema.safeParse({ embedding_enabled: false }).success).toBe(true);
+    expect(RuntimeEmbeddingConfigPatchSchema.safeParse({ unknown: true }).success).toBe(false);
+
+    expect(
+      AlayaStatusSchema.parse({
+        checked_at: "2026-04-30T00:00:00.000Z",
+        daemon: {
+          ready: true,
+          startup_steps: ["database", "http-app"],
+          principal_coding_engine_available: true
+        },
+        mcp: {
+          enrolled_tools: 2,
+          allowed_servers: ["filesystem"]
+        }
+      })
+    ).toMatchObject({
+      daemon: { ready: true },
+      mcp: { enrolled_tools: 2 }
     });
   });
 });

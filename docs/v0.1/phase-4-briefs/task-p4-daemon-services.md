@@ -52,6 +52,18 @@
 - Do not edit shared barrels unless this card explicitly owns that barrel.
 - If a cited source path is missing or a source dependency forces files outside §2, return `BLOCKED` instead of expanding scope.
 
+### 2.3 Service Adapter Matrix And Recovery Guardrails
+
+| Adapter point | Vendor before | Alaya after | Reviewer witness |
+|---|---|---|---|
+| Service files | Vendor ships seven daemon service files under `apps/core-daemon/src/services/` | Port all seven files with package-name/path adaptations only unless a row below says otherwise | `find apps/core-daemon/src/services -maxdepth 1 -type f` includes every §2.1 service file |
+| Runtime helper files | Vendor helper files are standalone modules used by startup/routes/MCP | Port helper modules as modules; do not inline their logic into startup, routes, or a service graph | `rg -n "from \"./(daemon-defaults|server-options|files-data-dir|zero-day-policies|security-status-bootstrap|budget-wiring|narrative-budget-repo|compute-routing-resolver)" apps/core-daemon/src` finds imports where wired |
+| Evidence/dynamics services | Vendor provides real service behavior through P2/P3 core services and daemon service ports | Compose the real services; no `findById: async () => null`, hardcoded `activation_score`, `retention_score`, or `decay_profile` placeholders | `rtk rg -n "findById: async \\(\\) => null|activation_score: 0\\.9|retention_score: 0\\.9|decay_profile: \\\"stable\\\"" apps/core-daemon/src` returns zero hits |
+| Engine config | Vendor has `WorkspaceEngineConfigRepo` | Port and use `services/workspace-engine-config-repo.ts`; do not hand-write partial adapters in startup/service composition | `rg -n "WorkspaceEngineConfigRepo|workspace-engine-config-repo" apps/core-daemon/src` finds the ported repo and its wiring |
+| Service composition boundary | Vendor startup composes typed services directly | Keep typed services visible to routes/MCP; do not hide them behind `daemon-service-graph.ts` or `unknown` getters | no `daemon-service-graph`, `daemon-handle`, or `Promise<unknown>` in core-daemon source |
+
+Forbidden in this card: service stubs, inline substitute implementations for cited vendor files, `daemon-service-graph.ts`, `daemon-handle.ts`, daemon-wide `unknown` getters, and moving proposal/review handlers into this card's helper files.
+
 ## 3. Deferred
 
 Nothing deferred.
@@ -66,6 +78,7 @@ Nothing deferred.
 | AC4 | Relevant targeted tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon services security-status embedding-status budget` |
 | AC5 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-4-briefs/reports/task-p4-daemon-services.md` exists and cites backlog issues for any deferred scope |
 | AC6 | Closing readiness label is `implementation-ready` | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` are updated only after evidence supports the label |
+| AC7 | Every §2 service/helper file exists and no recovery-forbidden stub or service-graph artifact is introduced | `rtk rg -n "findById: async \\(\\) => null|activation_score: 0\\.9|retention_score: 0\\.9|decay_profile: \\\"stable\\\"|daemon-service-graph|daemon-handle|Promise<unknown>" apps/core-daemon/src` returns zero hits |
 
 ## 5. Verification
 
@@ -74,6 +87,7 @@ Nothing deferred.
 3. `rtk pnpm build`
 4. `rtk pnpm exec tsc --noEmit -p apps/core-daemon`
 5. `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon services security-status embedding-status budget`
+6. `rtk rg -n "findById: async \\(\\) => null|activation_score: 0\\.9|retention_score: 0\\.9|decay_profile: \\\"stable\\\"|daemon-service-graph|daemon-handle|Promise<unknown>" apps/core-daemon/src`
 
 ## 6. Shared File Hazards & Dependencies
 

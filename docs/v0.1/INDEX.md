@@ -27,7 +27,7 @@ Phase 0 → Gate-0
 | Phase 1 | Wave 1: Leaves | 9 cards | **done** | Gate-1 passed |
 | Phase 2 | Wave 2: Services + Garden + Repos + Security | 32 cards | **done** | Gate-2 passed |
 | Phase 3 | Wave 3: Memory orchestration bridge + run lifecycle | 6 cards | **done** | Gate-3 passed |
-| Phase 4 | Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI + Memory Inspector | 30 cards (target) | not-started | Gate-4 |
+| Phase 4 | Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI + Memory Inspector | 30 cards (target) | non-frontend `implementation-ready`; frontend pending | Gate-4 pending |
 | Phase 5 | Wave 5: E2E + Benchmark + Graph Contract + Final Review | 4 cards (target) | not-started | Gate-5 |
 
 ## Phase 2 — Card Closeout Status
@@ -87,6 +87,48 @@ Gate-3 closeout evidence: [report](./phase-3-briefs/reports/gate-3-closeout.md).
 | P3-misc-services | implementation-ready | [report](./phase-3-briefs/reports/task-p3-misc-services.md) |
 | P3-conversation | implementation-ready | [report](./phase-3-briefs/reports/task-p3-conversation.md) |
 | P3-core-barrel | implementation-ready | [report](./phase-3-briefs/reports/task-p3-core-barrel.md) |
+
+## Phase 4 — Non-Frontend Closeout Status
+
+This table tracks the Phase 4 recovery work after the controller
+review reset. `P4-inspector-frontend` remains open and is not claimed
+by the non-frontend closeout.
+
+Non-frontend closeout evidence: [report](./phase-4-briefs/reports/gate-4-non-frontend-closeout.md).
+Historical failure baseline: [review-p4-controller](./phase-4-briefs/reports/review-p4-controller.md).
+
+| Card | Readiness | Report |
+|---|---|---|
+| P4-daemon-skeleton | implementation-ready | [report](./phase-4-briefs/reports/task-p4-daemon-skeleton.md) |
+| P4-daemon-startup-ordering | implementation-ready | [report](./phase-4-briefs/reports/task-p4-daemon-startup-ordering.md) |
+| P4-sse-strip | implementation-ready | [report](./phase-4-briefs/reports/task-p4-sse-strip.md) |
+| P4-routes-memory | implementation-ready | [report](./phase-4-briefs/reports/task-p4-routes-memory.md) |
+| P4-routes-governance | implementation-ready | [report](./phase-4-briefs/reports/task-p4-routes-governance.md) |
+| P4-routes-soul | implementation-ready | [report](./phase-4-briefs/reports/task-p4-routes-soul.md) |
+| P4-routes-workspace | implementation-ready | [report](./phase-4-briefs/reports/task-p4-routes-workspace.md) |
+| P4-routes-config | implementation-ready | [report](./phase-4-briefs/reports/task-p4-routes-config.md) |
+| P4-daemon-services | implementation-ready | [report](./phase-4-briefs/reports/task-p4-daemon-services.md) |
+| P4-daemon-glue | implementation-ready | [report](./phase-4-briefs/reports/task-p4-daemon-glue.md) |
+| P4-daemon-middleware | implementation-ready | [report](./phase-4-briefs/reports/task-p4-daemon-middleware.md) |
+| P4-mcp-tooling | implementation-ready | [report](./phase-4-briefs/reports/task-p4-mcp-tooling.md) |
+| P4-svc-global-recall-cache | implementation-ready | [report](./phase-4-briefs/reports/task-p4-svc-global-recall-cache.md) |
+| P4-cli-bridge | implementation-ready | [report](./phase-4-briefs/reports/task-p4-cli-bridge.md) |
+| P4-trust-state | implementation-ready | [report](./phase-4-briefs/reports/task-p4-trust-state.md) |
+| P4-mcp-memory-tools | implementation-ready | [report](./phase-4-briefs/reports/task-p4-mcp-memory-tools.md) |
+| P4-mcp-server | implementation-ready | [report](./phase-4-briefs/reports/task-p4-mcp-server.md) |
+| P4-cli-doctor | implementation-ready | [report](./phase-4-briefs/reports/task-p4-cli-doctor.md) |
+| P4-cli-install | implementation-ready | [report](./phase-4-briefs/reports/task-p4-cli-install.md) |
+| P4-cli-status | implementation-ready | [report](./phase-4-briefs/reports/task-p4-cli-status.md) |
+| P4-cli-detach | implementation-ready | [report](./phase-4-briefs/reports/task-p4-cli-detach.md) |
+| P4-cli-inspect | implementation-ready | [report](./phase-4-briefs/reports/task-p4-cli-inspect.md) |
+| P4-attach-codex | implementation-ready | [report](./phase-4-briefs/reports/task-p4-attach-codex.md) |
+| P4-attach-claude | implementation-ready | [report](./phase-4-briefs/reports/task-p4-attach-claude.md) |
+| P4-profile-mutation | implementation-ready | [report](./phase-4-briefs/reports/task-p4-profile-mutation.md) |
+| P4-secrets | implementation-ready | [report](./phase-4-briefs/reports/task-p4-secrets.md) |
+| P4-operations | implementation-ready | [report](./phase-4-briefs/reports/task-p4-operations.md) |
+| P4-inspector-server | implementation-ready | [report](./phase-4-briefs/reports/task-p4-inspector-server.md) |
+| P4-daemon-routes-register | implementation-ready | [report](./phase-4-briefs/reports/task-p4-daemon-routes-register.md) |
+| P4-inspector-frontend | not-started | pending Gemini CLI implementation |
 
 ## Phase 0 — Reset & Source Mirror
 

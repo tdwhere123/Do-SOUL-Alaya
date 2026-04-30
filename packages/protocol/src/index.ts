@@ -55,6 +55,7 @@ export * from "./soul/compute-routing.js";
 export * from "./soul/consolidation-types.js";
 export * from "./soul/surface-drift.js";
 export * from "./soul/mcp-types.js";
+export * from "./soul/trust-state.js";
 export * from "./soul/orphan-radar.js";
 export * from "./soul/slot.js";
 export * from "./soul/surface.js";

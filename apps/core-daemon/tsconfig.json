@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/__tests__/**/*.ts"],
+  "references": [
+    { "path": "../../packages/core" },
+    { "path": "../../packages/engine-gateway" },
+    { "path": "../../packages/protocol" },
+    { "path": "../../packages/soul" },
+    { "path": "../../packages/storage" }
+  ]
+}

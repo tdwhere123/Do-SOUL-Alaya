@@ -1,0 +1,16 @@
+{
+  "name": "@do-soul/alaya-inspector",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "dist/server.js",
+  "types": "dist/server.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "test": "pnpm exec vitest run --project @do-soul/alaya-inspector"
+  },
+  "dependencies": {
+    "@do-soul/alaya-protocol": "workspace:*",
+    "@hono/node-server": "^1.13.8",
+    "hono": "^4.6.10"
+  }
+}

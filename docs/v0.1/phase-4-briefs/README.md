@@ -13,10 +13,20 @@ the backlog reshape: the **Memory Inspector** (`apps/inspector` server
 + `alaya inspect` CLI + Gemini-CLI-authored frontend), `alaya detach`,
 and the cross-workspace `GlobalMemoryRecallService` cache fix were
 brought into v0.1 from the deferred set (closes backlog #BL-010,
-#BL-011, #BL-012).
+#BL-011; #BL-012 closes only after the Inspector frontend lands).
 
 This is the phase that turns the v0.1 build from "compiles and tests
 green" into "actually works for a user".
+
+## Current Status
+
+Non-frontend Phase 4 recovery work is `implementation-ready`; see
+`reports/gate-4-non-frontend-closeout.md` and the per-card reports in
+`reports/task-p4-*.md`.
+
+`P4-inspector-frontend` remains pending Gemini CLI implementation.
+Gate-4 is therefore not passed yet; the remaining closeout requires
+the frontend card, attached-agent MCP proof, and final review.
 
 ## Card Groups
 
@@ -195,6 +205,30 @@ Maximum concurrency in 4B + 4C + 4D + early 4G: ~10 codex.
 slot. The user-facing critical path through Phase 4 is roughly:
 4A → 4B/4C/4D → 4E → 4F + 4G core → 4H.server → cli-inspect → attach
 → cli-detach → 4H.frontend → 4I.
+
+### Recovery Execution Notes
+
+The 2026-04-30 `p4-controller` review failed because several
+`adapt-and-port` cards were implemented as clean-room rewrites. The
+recovery pass uses fewer reviewer runs than per-card review, but it
+still gates progress by wave:
+
+1. Wave 0: repair thin §2 Allowed Scope sections and record the
+   blocking review input.
+2. Wave 1: re-port daemon skeleton, SSE strip, startup ordering, and
+   middleware, then run one wave review before routes/services start.
+3. Wave 2: re-port daemon services, daemon glue, route batches, and
+   final route registration, then run one wave review.
+4. Wave 3: keep passing cards intact where possible, apply the
+   single-point CLI / Inspector backend fixes, and re-port MCP tooling
+   only where the review found missing vendor files, then run one wave
+   review.
+5. Wave 4: run integrated build/test/smoke verification and one final
+   Phase 4 review before any merge back to `main`.
+
+Reviewer gates may be batched by wave, but implementation still must
+follow the task-card §2 scope exactly. A wave cannot proceed if the
+previous wave has unresolved Blocking or Important findings.
 
 ## Risks
 

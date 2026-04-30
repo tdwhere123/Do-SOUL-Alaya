@@ -9,6 +9,7 @@ const projectDirs = [
   "packages/engine-gateway",
   "packages/storage",
   "apps/core-daemon",
+  "apps/inspector",
 ];
 
 const projects = projectDirs.filter((dir) => existsSync(join(dir, "tsconfig.json")));
