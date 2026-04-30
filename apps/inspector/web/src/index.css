@@ -44,3 +44,32 @@ body {
 .paper-shadow {
   box-shadow: 2px 2px 10px rgba(88, 110, 117, 0.1);
 }
+
+/* Spotlight (Graph search) — match / adjacent / background */
+svg[data-spotlight-active="true"] g[data-node-id][data-state="background"] {
+  opacity: 0.15;
+  filter: grayscale(0.6);
+  transition: opacity 250ms ease, filter 250ms ease;
+}
+svg[data-spotlight-active="true"] g[data-node-id][data-state="adjacent"] {
+  opacity: 0.85;
+  transition: opacity 250ms ease, filter 250ms ease;
+}
+svg[data-spotlight-active="true"] g[data-node-id][data-state="match"] {
+  opacity: 1;
+  transition: opacity 250ms ease, filter 250ms ease;
+}
+svg[data-spotlight-active="true"] line[data-edge-id][data-state="background"] {
+  opacity: 0.1;
+  transition: opacity 250ms ease;
+}
+svg[data-spotlight-active="true"] line[data-edge-id][data-state="adjacent"] {
+  opacity: 0.7;
+  transition: opacity 250ms ease;
+}
+svg[data-spotlight-active="false"] g[data-node-id],
+svg[data-spotlight-active="false"] line[data-edge-id] {
+  opacity: 1;
+  filter: none;
+  transition: opacity 250ms ease, filter 250ms ease;
+}

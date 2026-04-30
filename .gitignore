@@ -28,3 +28,6 @@ Thumbs.db
 # Note: .codex and .claude are KEPT in git per user instruction
 # Note: vendor/do-what-new-snapshot/ is KEPT in git so port task cards
 #       have a stable source reference
+
+# do-it plugin internal artifacts (per-worktree plan stub for grill hook)
+.do-it/

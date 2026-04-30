@@ -60,5 +60,8 @@ export default [
   packageProject("@do-soul/alaya-soul", "packages/soul"),
   packageProject("@do-soul/alaya-engine-gateway", "packages/engine-gateway"),
   appProject("@do-soul/alaya-core-daemon", "apps/core-daemon"),
-  appProject("@do-soul/alaya-inspector", "apps/inspector")
+  appProject("@do-soul/alaya-inspector", "apps/inspector"),
+  // The inspector web frontend has its own vitest config (jsdom env, RTL setup).
+  // Reference its config file directly so the workspace runner picks it up.
+  path.resolve(rootDir, "apps/inspector/web/vitest.config.ts")
 ].filter(Boolean);
