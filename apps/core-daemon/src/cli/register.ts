@@ -23,6 +23,7 @@ import {
 import { createDetachCommandSpec } from "./detach.js";
 import { createDoctorCommand } from "./doctor.js";
 import { createInstallCommand } from "./install.js";
+import { createInspectCommand } from "./inspect.js";
 import { createOperationCommandSpecs } from "./operations.js";
 import { createStatusCommand } from "./status.js";
 import { createToolsCommand } from "./tools.js";
@@ -43,6 +44,7 @@ export function registerAlayaCliCommands(
     trustStateSummaryProvider: async (agentTarget) => await runtime.services.trustStateRecorder.summarize(agentTarget)
   }));
   bridge.registerSubcommand(createInstallCommand());
+  bridge.registerSubcommand(createInspectCommand());
   bridge.registerSubcommand(createAttachCommand(runtime));
   bridge.registerSubcommand(createDetachCommandSpec({
     auditWriter: createProfileAuditWriter(process.env)

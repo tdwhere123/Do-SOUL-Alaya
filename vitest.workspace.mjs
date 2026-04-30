@@ -59,5 +59,6 @@ export default [
   packageProject("@do-soul/alaya-core", "packages/core"),
   packageProject("@do-soul/alaya-soul", "packages/soul"),
   packageProject("@do-soul/alaya-engine-gateway", "packages/engine-gateway"),
-  appProject("@do-soul/alaya-core-daemon", "apps/core-daemon")
+  appProject("@do-soul/alaya-core-daemon", "apps/core-daemon"),
+  appProject("@do-soul/alaya-inspector", "apps/inspector")
 ].filter(Boolean);

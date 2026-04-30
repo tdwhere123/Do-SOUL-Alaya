@@ -902,6 +902,11 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
         workspaceService: securedWorkspaceService,
         soulGraphService
       },
+      status: {
+        startupStepsProvider: () => startupSteps.map((step) => step.step),
+        principalCodingEngineAvailableProvider: () => principalCodingAvailability.available,
+        mcp: mcpTooling.daemonMcpCatalog
+      },
       projectMapping: {
         workspaceService: securedWorkspaceService,
         projectMappingService
