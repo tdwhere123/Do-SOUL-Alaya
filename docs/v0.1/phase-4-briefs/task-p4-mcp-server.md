@@ -33,6 +33,7 @@ complete first-party memory tool catalog from P4-mcp-memory-tools.
 |---|---|---|
 | `n/a` | `apps/core-daemon/src/mcp-server.ts` | Alaya-specific redesign; tests must prove each behavior listed below. |
 | `n/a` | `apps/core-daemon/src/__tests__/mcp-server.test.ts` | Alaya-specific redesign; tests must prove each behavior listed below. |
+| `n/a` | `apps/core-daemon/src/cli/register.ts` (`createMcpCommand` block only) | Alaya-specific redesign; this card owns the `alaya mcp stdio` CLI subcommand registration that drives `runAlayaMcpStdioServer`. Other subcommand registrations in this file remain owned by P4-cli-bridge §8. |
 
 ### 2.2 Port Rules
 
@@ -50,6 +51,13 @@ complete first-party memory tool catalog from P4-mcp-memory-tools.
   P4-mcp-memory-tools handler and fails closed for unsupported
   namespaces or unavailable startup state.
 - Fail closed until daemon startup step 6 is complete.
+- `alaya mcp stdio` CLI subcommand (registered via
+  `createMcpCommand` in `apps/core-daemon/src/cli/register.ts`) is the
+  process entry point for the stdio transport and MUST share the
+  P4-mcp-memory-tools handler with HTTP transport. Argument shape is
+  exactly `mcp stdio`; any other shape exits `EX_USAGE`. The
+  subcommand requires daemon-ready state and shuts the server down
+  when stdin closes.
 
 ## 3. Deferred
 

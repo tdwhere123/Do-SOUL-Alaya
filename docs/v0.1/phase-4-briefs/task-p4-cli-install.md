@@ -52,6 +52,21 @@ clobbering unset ones.
 
 ### 2.3 Required Behavior
 
+**v0.1 sanctioned narrowing — interactive path deferred.** v0.1 only
+implements the `--non-interactive --json` path. The interactive
+`alaya install` flow described in the prompts table below is the
+target behavior but its TTY layer is intentionally deferred to a
+post-v0.1 follow-up; on v0.1 the CLI MUST exit `EX_USAGE` with a
+single-line stderr `interactive install is not implemented in this
+build; use --non-interactive <json>` and write no files. The JSON
+answer envelope is therefore the explicit confirmation that replaces
+the `[y/N]` confirm gate in v0.1; the audit-precedes-mutation
+ordering required by §10 is preserved by writing the `started` audit
+row before any filesystem write and the `succeeded` / `failed` row
+after. The prompts table below remains the authoritative input
+schema for `--non-interactive --json` and the future interactive
+implementation.
+
 **Config dir resolution.** Use XDG conventions:
 - `${ALAYA_CONFIG_DIR}` when set (escape hatch for tests).
 - Otherwise `${XDG_CONFIG_HOME:-$HOME/.config}/alaya/` on Linux/macOS.
