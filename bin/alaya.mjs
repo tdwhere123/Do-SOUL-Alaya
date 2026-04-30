@@ -7,12 +7,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDirectory, "..");
 const bridgeDistPath = resolve(repoRoot, "apps/core-daemon/dist/cli/bridge.js");
+const registerDistPath = resolve(repoRoot, "apps/core-daemon/dist/cli/register.js");
 const daemonDistPath = resolve(repoRoot, "apps/core-daemon/dist/index.js");
 const SOFTWARE_EXIT_FALLBACK = 70;
 
 export async function loadAlayaCliModules(importModule = defaultImportModule) {
-  const [bridgeModule, daemonModule] = await Promise.all([
+  const [bridgeModule, registerModule, daemonModule] = await Promise.all([
     importModule(bridgeDistPath),
+    importModule(registerDistPath),
     importModule(daemonDistPath)
   ]);
 
@@ -22,11 +24,15 @@ export async function loadAlayaCliModules(importModule = defaultImportModule) {
   if (typeof daemonModule.createAlayaDaemonRuntime !== "function") {
     throw new Error(`Missing createAlayaDaemonRuntime export from ${daemonDistPath}.`);
   }
+  if (typeof registerModule.registerAlayaCliCommands !== "function") {
+    throw new Error(`Missing registerAlayaCliCommands export from ${registerDistPath}.`);
+  }
 
   const softwareExit = toExitCode(bridgeModule.ALAYA_SYSEXITS?.SOFTWARE, SOFTWARE_EXIT_FALLBACK);
 
   return {
     createAlayaCliBridge: bridgeModule.createAlayaCliBridge,
+    registerAlayaCliCommands: registerModule.registerAlayaCliCommands,
     createAlayaDaemonRuntime: daemonModule.createAlayaDaemonRuntime,
     softwareExit
   };
@@ -59,6 +65,7 @@ export async function runAlayaCli(
       stderr,
       isTTY
     });
+    loaded.registerAlayaCliCommands(bridge, runtime);
     const result = await bridge.dispatch(argv);
     return toExitCode(result?.exitCode, softwareExit);
   } catch (error) {

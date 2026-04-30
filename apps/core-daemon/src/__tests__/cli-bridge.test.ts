@@ -244,6 +244,7 @@ describe("cli bridge", () => {
     const stdout = createTextSink();
     const stderr = createTextSink();
     const dispatch = vi.fn(async (): Promise<AlayaCliResult> => ({ exitCode: 73 }));
+    const registerSubcommand = vi.fn();
     const shutdown = vi.fn(async () => {});
     const runtime = {
       startupSteps: [{ step: "http-app" }],
@@ -251,15 +252,15 @@ describe("cli bridge", () => {
     };
     const createAlayaDaemonRuntime = vi.fn(async () => runtime);
     const createAlayaCliBridge = vi.fn(() => ({
-      registerSubcommand: () => {
-        throw new Error("bin must not register subcommands");
-      },
+      registerSubcommand,
       dispatch,
       list: () => []
     }));
+    const registerAlayaCliCommands = vi.fn();
     const loadModules = vi.fn(async () => ({
       createAlayaDaemonRuntime,
       createAlayaCliBridge,
+      registerAlayaCliCommands,
       softwareExit: ALAYA_SYSEXITS.SOFTWARE
     }));
 
@@ -276,6 +277,7 @@ describe("cli bridge", () => {
     expect(exitCode).toBe(73);
     expect(dispatch).toHaveBeenCalledWith(["doctor", "--json"]);
     expect(createAlayaCliBridge).toHaveBeenCalledTimes(1);
+    expect(registerAlayaCliCommands).toHaveBeenCalledTimes(1);
     expect(shutdown).toHaveBeenCalledTimes(1);
     expect(stderr.readText()).toBe("");
   });

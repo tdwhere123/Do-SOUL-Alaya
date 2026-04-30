@@ -1,0 +1,106 @@
+import { describe, expect, it } from "vitest";
+import {
+  Phase1BEventType,
+  ProposalResolutionState,
+  type EventLogEntry,
+  type Proposal
+} from "@do-soul/alaya-protocol";
+import { createMcpMemoryProposalWorkflow } from "../mcp-memory-proposal-workflow.js";
+
+describe("mcp memory governance", () => {
+  it("creates and reviews memory proposals through EventLog and ProposalRepo", async () => {
+    const events: EventLogEntry[] = [];
+    const proposals = new Map<string, Proposal>();
+    const order: string[] = [];
+    let eventCounter = 0;
+    const workflow = createMcpMemoryProposalWorkflow({
+      now: () => "2026-04-30T00:00:00.000Z",
+      generateObjectId: () => "00000000-0000-4000-8000-000000000001",
+      eventLogRepo: {
+        append: async (input) => {
+          order.push(`event:${input.event_type}`);
+          const entry = {
+            event_id: `event-${++eventCounter}`,
+            created_at: "2026-04-30T00:00:00.000Z",
+            ...input
+          } satisfies EventLogEntry;
+          events.push(entry);
+          return entry;
+        },
+        queryByEntity: async (entityType, entityId) =>
+          events.filter((event) => event.entity_type === entityType && event.entity_id === entityId)
+      },
+      proposalRepo: {
+        create: async ({ proposal }) => {
+          order.push("repo:create");
+          proposals.set(proposal.proposal_id, proposal);
+          return proposal;
+        },
+        findById: async (proposalId) => proposals.get(proposalId) ?? null,
+        updateResolution: async (proposalId, state, updatedAt) => {
+          order.push("repo:updateResolution");
+          const existing = proposals.get(proposalId);
+          if (existing === undefined) {
+            throw new Error("missing proposal");
+          }
+          const updated = {
+            ...existing,
+            resolution_state: state,
+            last_updated_at: updatedAt
+          } satisfies Proposal;
+          proposals.set(proposalId, updated);
+          return updated;
+        }
+      },
+      runtimeNotifier: {
+        notifyEntry: async (entry) => {
+          order.push(`notify:${entry.event_type}`);
+        }
+      }
+    });
+
+    const created = await workflow.proposeMemoryUpdate(
+      {
+        target_object_id: "mem1",
+        proposed_changes: { content: "corrected" },
+        reason: "operator correction"
+      },
+      { workspaceId: "ws1", runId: "run1", agentTarget: "codex" }
+    );
+
+    expect(created).toEqual({
+      proposal_id: "00000000-0000-4000-8000-000000000001",
+      status: "created"
+    });
+    expect(order.slice(0, 3)).toEqual([
+      `event:${Phase1BEventType.SOUL_PROPOSAL_CREATED}`,
+      "repo:create",
+      `notify:${Phase1BEventType.SOUL_PROPOSAL_CREATED}`
+    ]);
+    expect(proposals.get(created.proposal_id)?.resolution_state).toBe(ProposalResolutionState.PENDING);
+
+    const reviewed = await workflow.reviewMemoryProposal(
+      {
+        proposal_id: created.proposal_id,
+        verdict: "accept",
+        reason: "confirmed"
+      },
+      { workspaceId: "ws1", runId: "run1", agentTarget: "codex" }
+    );
+
+    expect(reviewed).toEqual({
+      proposal_id: created.proposal_id,
+      resolution_state: ProposalResolutionState.ACCEPTED
+    });
+    expect(events.map((event) => event.event_type)).toEqual([
+      Phase1BEventType.SOUL_PROPOSAL_CREATED,
+      Phase1BEventType.SOUL_REVIEW_CREATED,
+      Phase1BEventType.SOUL_REVIEW_COMPLETED,
+      Phase1BEventType.SOUL_PROPOSAL_RESOLVED
+    ]);
+    expect(proposals.get(created.proposal_id)?.resolution_state).toBe(ProposalResolutionState.ACCEPTED);
+    expect(order.indexOf(`event:${Phase1BEventType.SOUL_REVIEW_CREATED}`)).toBeLessThan(
+      order.indexOf("repo:updateResolution")
+    );
+  });
+});

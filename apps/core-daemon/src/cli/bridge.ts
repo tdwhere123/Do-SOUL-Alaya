@@ -21,6 +21,7 @@ export interface AlayaCliContext {
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
   readonly isTTY: boolean;
+  readonly jsonRequested?: boolean;
   readonly daemon: AlayaCliDaemonRuntime;
 }
 
@@ -144,6 +145,7 @@ export function createAlayaCliBridge(
         stdout,
         stderr,
         isTTY,
+        jsonRequested: parsedFlags.jsonRequested,
         daemon
       };
 

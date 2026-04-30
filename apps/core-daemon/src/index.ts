@@ -139,6 +139,8 @@ import { resolveCoreDaemonFilesDirectory } from "./files-data-dir.js";
 import { createGardenRuntime } from "./garden-runtime.js";
 import { SqliteHandoffGapAdapter } from "./handoff-gap-adapter.js";
 import { createManifestationContextLensAssembler } from "./manifestation-context-lens-assembler.js";
+import { createMcpMemoryProposalWorkflow } from "./mcp-memory-proposal-workflow.js";
+import { createMcpMemoryToolHandler, type McpMemoryToolHandler } from "./mcp-memory-tool-handler.js";
 import { createNarrativeBudgetRepo } from "./narrative-budget-repo.js";
 import { parseZeroDayPoliciesJson } from "./zero-day-policies.js";
 import { createRuntimeNotifier, type AlayaRuntimeNotifier } from "./runtime-notifier.js";
@@ -146,8 +148,8 @@ import { createSecurityStatusBootstrapServices } from "./security-status-bootstr
 import { resolveSecretRef, type ResolveSecretError } from "./secrets.js";
 import { isRemoteDaemonOptInEnabled, resolveDaemonHostFromEnv } from "./server-options.js";
 import { createConfigService } from "./services/config-service.js";
-import { createEmbeddingStatusService } from "./services/embedding-status-service.js";
-import { createEnvironmentStatusService } from "./services/environment-status-service.js";
+import { createEmbeddingStatusService, type EmbeddingStatusService } from "./services/embedding-status-service.js";
+import { createEnvironmentStatusService, type EnvironmentStatusService } from "./services/environment-status-service.js";
 import {
   CORE_DAEMON_ENVIRONMENT_TOOLS,
   derivePrincipalCodingAvailability
@@ -196,6 +198,9 @@ export interface AlayaDaemonRuntimeServices {
     listEnrolledToolIds(): readonly string[];
     refresh(): Promise<void>;
   }>;
+  readonly environmentStatusService: EnvironmentStatusService;
+  readonly embeddingStatusService: EmbeddingStatusService;
+  readonly mcpMemoryToolHandler: McpMemoryToolHandler;
   readonly trustStateRecorder: TrustStateRecorder;
   readonly principalCodingEngineAvailable: boolean;
 }
@@ -757,6 +762,19 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     builtinConversationToolSpecs: getBuiltinConversationToolSpecs()
   });
   trustStateRecorder.markReady();
+  const mcpMemoryToolHandler = createMcpMemoryToolHandler({
+    recallService,
+    memoryService,
+    signalService,
+    graphExploreService,
+    sessionOverrideService,
+    trustStateRecorder,
+    proposalWorkflow: createMcpMemoryProposalWorkflow({
+      eventLogRepo,
+      proposalRepo,
+      runtimeNotifier
+    })
+  });
   recordStartupStep(startupSteps, "mcp-tooling");
 
   const app = createApp({
@@ -961,6 +979,9 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     services: Object.freeze({
       conversationToolCatalog: mcpTooling.conversationToolCatalog,
       daemonMcpCatalog: mcpTooling.daemonMcpCatalog,
+      environmentStatusService,
+      embeddingStatusService,
+      mcpMemoryToolHandler,
       trustStateRecorder,
       principalCodingEngineAvailable: principalCodingAvailability.available
     }),
