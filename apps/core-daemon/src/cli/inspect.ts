@@ -44,6 +44,7 @@ interface InspectArgs {
 const DEFAULT_INSPECTOR_PORT = 5174;
 const READY_LINE = "inspector_ready";
 const SHUTDOWN_TIMEOUT_MS = 2000;
+const ALLOW_FIXED_TOKEN_ENV = "ALAYA_INSPECTOR_ALLOW_FIXED_TOKEN";
 
 export function createInspectCommand(deps: InspectCommandDependencies = {}): AlayaSubcommandSpec<InspectArgs> {
   return {
@@ -64,6 +65,11 @@ async function executeInspect(
   if (!(await checkPortAvailable(args.port))) {
     ctx.stderr.write(`port ${args.port} in use; try alaya inspect --port ${args.port + 1}\n`);
     return { exitCode: ALAYA_SYSEXITS.TEMPFAIL };
+  }
+
+  if (args.token !== null && !fixedTokenOverrideAllowed(ctx.env)) {
+    ctx.stderr.write(`--token is test-only; set ${ALLOW_FIXED_TOKEN_ENV}=1 to allow a fixed Inspector token\n`);
+    return { exitCode: ALAYA_SYSEXITS.USAGE };
   }
 
   const token = args.token ?? (deps.generateToken ?? defaultGenerateToken)();
@@ -136,6 +142,11 @@ function inspectArgsSchema(): AlayaCliArgsSchema<InspectArgs> {
   };
 }
 
+function fixedTokenOverrideAllowed(env: NodeJS.ProcessEnv): boolean {
+  const value = env[ALLOW_FIXED_TOKEN_ENV]?.trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes";
+}
+
 function defaultGenerateToken(): string {
   return randomBytes(32).toString("hex");
 }
@@ -196,15 +207,19 @@ async function waitForInspectorReady(child: InspectorChildProcess, ctx: AlayaCli
 async function waitForChildExitOrSignal(child: InspectorChildProcess): Promise<void> {
   await new Promise<void>((resolve) => {
     let resolved = false;
+    let killTimer: NodeJS.Timeout | undefined;
     const finish = () => {
       if (!resolved) {
         resolved = true;
+        process.off("SIGINT", terminate);
+        process.off("SIGTERM", terminate);
+        if (killTimer !== undefined) clearTimeout(killTimer);
         resolve();
       }
     };
     const terminate = () => {
       child.kill("SIGTERM");
-      setTimeout(() => {
+      killTimer = setTimeout(() => {
         child.kill("SIGKILL");
         finish();
       }, SHUTDOWN_TIMEOUT_MS).unref();

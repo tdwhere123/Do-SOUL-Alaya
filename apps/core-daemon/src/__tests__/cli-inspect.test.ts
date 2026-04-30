@@ -63,7 +63,7 @@ describe("cli inspect", () => {
       }
     });
 
-    const promise = command.handler(createContext(), {
+    const promise = command.handler(createContext({ env: { ALAYA_INSPECTOR_ALLOW_FIXED_TOKEN: "1" } }), {
       open: true,
       port: 5175,
       token: "b".repeat(64)
@@ -80,6 +80,47 @@ describe("cli inspect", () => {
       }
     ]);
     expect(opened).toEqual(["http://127.0.0.1:5175/?token=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]);
+  });
+
+  it("rejects fixed test tokens unless the env gate is enabled", async () => {
+    const stderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
+    const command = createInspectCommand({
+      checkPortAvailable: async () => true
+    });
+
+    const result = await command.handler(createContext({ stderr }), {
+      open: false,
+      port: 5174,
+      token: "c".repeat(64)
+    });
+
+    expect(result.exitCode).toBe(64);
+    expect(stderrChunks.join("")).toContain("ALAYA_INSPECTOR_ALLOW_FIXED_TOKEN=1");
+  });
+
+  it("terminates the inspector child when the CLI receives SIGINT", async () => {
+    const child = new FakeInspectorChild();
+    const command = createInspectCommand({
+      checkPortAvailable: async () => true,
+      generateToken: () => "d".repeat(64),
+      spawnInspector: () => child
+    });
+
+    const promise = command.handler(createContext(), {
+      open: false,
+      port: 5174,
+      token: null
+    });
+    setTimeout(() => child.stdout.write("inspector_ready\n"), 0);
+    setTimeout(() => process.emit("SIGINT", "SIGINT"), 10);
+    setTimeout(() => child.emitExit(0, null), 20);
+    const result = await promise;
+
+    expect(result.exitCode).toBe(0);
+    expect(child.killedSignals).toContain("SIGTERM");
+    expect(child.killedSignals).not.toContain("SIGKILL");
   });
 });
 
