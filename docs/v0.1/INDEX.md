@@ -128,7 +128,7 @@ Historical failure baseline: [review-p4-controller](./phase-4-briefs/reports/rev
 | P4-operations | implementation-ready | [report](./phase-4-briefs/reports/task-p4-operations.md) |
 | P4-inspector-server | implementation-ready | [report](./phase-4-briefs/reports/task-p4-inspector-server.md) |
 | P4-daemon-routes-register | implementation-ready | [report](./phase-4-briefs/reports/task-p4-daemon-routes-register.md) |
-| P4-inspector-frontend | not-started | pending Gemini CLI implementation |
+| P4-inspector-frontend | live-event-ready | [report](./phase-4-briefs/reports/task-p4-inspector-frontend.md) |
 
 ## Phase 0 — Reset & Source Mirror
 

@@ -6,9 +6,44 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-018`.
+sequence. **Next available number**: `#BL-020`.
 
 ## Open Issues
+
+### #BL-018 — attached-agent MCP proof harness
+
+**Status**: Open (Gate-4 blocker)
+**Owner**: unassigned (post-v0.1 alpha 5)
+**Close condition**: A single-process test harness or scripted demo runs
+the full `Gate-4` sequence from `docs/handbook/runtime-status.md:98-104`
+inside one daemon lifetime, capturing per-step stdout. The proof must
+exercise the cross-call delivery state (`soul.recall` →
+`soul.report_context_usage`) and the
+candidate-signal → proposal → governance-reject → Garden background pass
+end-to-end.
+
+Surfaced by the partial Gate-4 MCP proof on 2026-04-30
+(`docs/v0.1/phase-4-briefs/reports/gate-4-mcp-proof.md`). One-shot CLI
+invocations spawn a fresh daemon per call, so `delivery_id` (in-process
+per #BL-015 / `P4-trust-state` v0.1 in-memory note) is not visible
+across calls. The failure is not a frontend or single-card defect; it
+is a v0.1 demo-harness gap.
+
+### #BL-019 — Embedding-supplement paste secret_ref pipeline
+
+**Status**: Open (Inspector v0.2 / paste mode for secret_ref)
+**Owner**: future P4-secrets follow-up card
+**Close condition**: Inspector backend accepts a paste-mode patch that
+writes the supplied value to `<config-dir>/secrets/openai` (mode 0600)
+and returns the resulting `file:` ref. Frontend then surfaces the third
+chip (env / file / paste) per
+`docs/v0.1/phase-4-briefs/task-p4-inspector-frontend.md §2.3 #4`.
+
+Surfaced as a deviation from the Gemini handoff prompt in the
+P4-inspector-frontend completion report. Frontend currently exposes
+env / file only; backend currently rejects paste at
+`apps/inspector/src/config-store.ts:121`. v0.1 §2.5 forbade adding new
+backend routes inside the frontend card.
 
 ### #BL-015 — Trust state SQL persistence across daemon restart
 
@@ -48,7 +83,9 @@ does not silently squash or bundle review-fix commits.
 
 ### #BL-012 — Memory Inspector
 
-**Status**: Open (server + CLI implemented; frontend pending)
+**Status**: **Resolved 2026-04-30** (frontend landed `live-event-ready`;
+see `docs/v0.1/phase-4-briefs/reports/task-p4-inspector-frontend.md` and
+`reports/gate-4-mcp-proof.md`). Gate-4 itself still pending under #BL-018.
 **Owner**: `docs/v0.1/phase-4-briefs/task-p4-cli-inspect.md`,
 `docs/v0.1/phase-4-briefs/task-p4-inspector-server.md`,
 `docs/v0.1/phase-4-briefs/task-p4-inspector-frontend.md`
