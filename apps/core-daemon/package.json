@@ -1,0 +1,22 @@
+{
+  "name": "@do-soul/alaya-core-daemon",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "dev": "node ../../scripts/dev-core-daemon.mjs",
+    "build": "tsc -b",
+    "test": "pnpm exec vitest run --project @do-soul/alaya-core-daemon"
+  },
+  "dependencies": {
+    "@do-soul/alaya-core": "workspace:*",
+    "@do-soul/alaya-engine-gateway": "workspace:*",
+    "@do-soul/alaya-protocol": "workspace:*",
+    "@do-soul/alaya-soul": "workspace:*",
+    "@do-soul/alaya-storage": "workspace:*",
+    "@hono/node-server": "^1.13.8",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "hono": "^4.6.10"
+  }
+}
