@@ -6,7 +6,7 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-016`.
+sequence. **Next available number**: `#BL-018`.
 
 ## Open Issues
 
@@ -96,6 +96,24 @@ surfaces (the Inspector is a memory-management surface, not an agent
 surface). The frontend is a pure-frontend SPA whose implementation is
 explicitly handed off to Gemini CLI; the server, CLI subcommand, and
 auth model are owned by Alaya cards.
+
+### #BL-016 — `Phase*EventType` naming carried over from upstream snapshot
+
+**Status**: Open (post-v0.1 hygiene)
+**Owner**: `packages/protocol/src/events/phase-*.ts` (no card yet)
+**Close condition**: Files in `packages/protocol/src/events/phase-*.ts` are renamed to domain-aligned files (e.g. `soul.ts`, `file.ts`, `approval.ts`, `run.ts`, `engine.ts`); exported `Phase{N}EventType` / `Phase{N}EventTypeSchema` / `Phase{N}EventUnionSchema` and matching `__tests__/phase-*.test.ts` files are renamed; all call sites updated; `rtk pnpm build` and `rtk pnpm exec vitest run` green.
+
+The file and symbol names (`phase-5.ts` → `Phase5EventType`, `phase-3a.ts` → `Phase3aEventType`, etc.) are byte-for-byte trivial-copy from `vendor/do-what-new-snapshot/packages/protocol/src/events/`. They label events by *upstream do-what-new development milestone*, not by domain, so a single phase bucket mixes unrelated event families (e.g. `phase-5.ts` holds both `file.uploaded` and `soul.*`) and the bare number conveys nothing to an Alaya reader. It also visually collides with Alaya's own `docs/v0.1/phase-N` numbering, which means something different.
+
+Renaming is a deliberate adapt-and-port-style change: it diverges from the snapshot and increases future upstream-sync friction, so it cannot ride inside any current trivial-copy port card. Roll into the post-v0.1 hygiene sweep tracked by `#BL-017`.
+
+### #BL-017 — Post-port hygiene sweep (naming, redundancy, file size)
+
+**Status**: Open (post-v0.1 hygiene)
+**Owner**: `packages/*` (no card yet; sweep wave to be opened after the last v0.1 port card lands)
+**Close condition**: A dedicated cleanup wave executes after the final v0.1 port card lands and (a) renames upstream-milestone-named files/symbols to domain-aligned names — covers `#BL-016`; (b) splits inherited oversized single files (>800 lines, e.g. `packages/protocol/src/events/phase-c.ts`) into focused modules per `rules/common/coding-style.md`; (c) removes port residue: unused exports, parallel helper duplicates introduced by adapter shims, dead branches Alaya never exercises; (d) reconciles naming inconsistencies that adapter ports left behind; (e) `docs/handbook/code-map.md` and per-package codemaps updated; (f) full build + vitest green.
+
+The Port-First discipline (`docs/handbook/port-protocol.md`) forbids mid-port refactors that would diverge from `vendor/do-what-new-snapshot/`. As a result v0.1 deliberately accumulates port residue — upstream-milestone naming, oversized inherited files, parallel helpers next to Alaya-native equivalents, exports Alaya never calls. None of these are individually blocking, and folding them into per-card scope would pollute every port card with refactor work. Treat as a single sweep wave executed once port phase is over; the open backlog set should be consolidated and closed in that pass.
 
 ## Out of Alaya Scope (Permanently Rejected)
 
