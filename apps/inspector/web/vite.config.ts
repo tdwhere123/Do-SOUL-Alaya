@@ -13,7 +13,8 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          vendor: ['react', 'react-dom', 'react-router-dom', 'd3'],
+          vendor: ['react', 'react-dom', 'react-router-dom'],
+          d3: ['d3-force', 'd3-selection', 'd3-drag', 'd3-zoom'],
         },
       },
     },

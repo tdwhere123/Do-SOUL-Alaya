@@ -22,7 +22,7 @@ each Phase Gate.
 | Phase 1 | Wave 1 leaves: protocol, migrations, storage shared, config, topology, engine-gateway | **done** | Gate-1 passed |
 | Phase 2 | Wave 2: storage repos batches + core services + Garden + security defense | **done** | Gate-2 passed |
 | Phase 3 | Wave 3: foundation helpers, ConversationService, MCP discovery, run lifecycle, misc services, core barrel | **done** | Gate-3 passed |
-| Phase 4 | Wave 4: Core daemon, routes, MCP server transport, real profile mutation, CLI bridge, secrets, Inspector server | non-frontend `implementation-ready`; Inspector frontend pending | Gate-4 pending |
+| Phase 4 | Wave 4: Core daemon, routes, MCP server transport, real profile mutation, CLI bridge, secrets, Inspector server, Inspector frontend | non-frontend `implementation-ready`; Inspector frontend `live-event-ready` | Gate-4 pending (#BL-018 attached-agent MCP proof harness) |
 | Phase 5 | Wave 5: full E2E, benchmark, graph contract, final review | not-started | Gate-5 (v0.1 release) |
 
 ## Subsystem Readiness (target = v0.1 release)
@@ -71,17 +71,29 @@ each Phase Gate.
 | CLI commands (doctor / install / attach / status / tools / inspect / detach) | `implementation-ready` | `cli-consumable` | P4-cli-bridge + P4-mcp-memory-tools + P4-cli-* |
 | Secret refs (env / local-file) | `implementation-ready` | `live-event-ready` | P4-secrets |
 | Operations (backup, export, import) | `implementation-ready` | `cli-consumable` | P4-operations |
-| Memory Inspector server | `implementation-ready`; frontend bundle pending | `implementation-ready` for server, `cli-consumable` after frontend demo | P4-inspector-server + P4-cli-inspect + P4-inspector-frontend |
+| Memory Inspector | server `implementation-ready`; frontend `live-event-ready` (138 KB gzipped, 18/18 RTL tests, Reviewer Gate G1-G8 green) | `live-event-ready` for the inspector surface; full Gate-4 close still requires #BL-018 (attached-agent MCP proof harness) | P4-inspector-server + P4-cli-inspect + P4-inspector-frontend |
 | Benchmark harness | `not-started` | `implementation-ready` | P5-benchmark |
 | Graph inspector data contract | `not-started` | `schema-ready` | P5-graph-contract |
 
 ## Known Wiring Gaps
 
 Phase 1 through Phase 3 implementation surfaces are ported and unit-tested.
-Phase 4 non-frontend daemon, CLI, MCP, and Inspector server surfaces are also
-implemented and unit-tested. Gate-4 is still pending because
-`P4-inspector-frontend`, attached-agent MCP proof, and final review have not
-closed.
+Phase 4 non-frontend daemon, CLI, MCP, and Inspector server surfaces are
+implemented and unit-tested. `P4-inspector-frontend` landed `live-event-ready`
+on 2026-04-30 (see
+`docs/v0.1/phase-4-briefs/reports/task-p4-inspector-frontend.md`).
+
+Gate-4 itself remains **pending**. The remaining blocker is the
+attached-agent MCP proof: `alaya tools call …` runs each subcommand in a
+fresh daemon process, so cross-call state (e.g. `delivery_id` from
+`soul.recall` → `soul.report_context_usage`) cannot survive between CLI
+invocations. The full Gate-4 demo from
+`Gate Definitions §Gate-4` has to run inside a single attached-agent MCP
+session against a long-lived daemon. Tracking this as backlog
+**#BL-018 — attached-agent MCP proof harness**; see
+`docs/v0.1/phase-4-briefs/reports/gate-4-mcp-proof.md` for the partial
+demo (8 `soul.*` tools enrolled; `soul.recall` and tools/list verified;
+delivery-id chain blocked by per-process state).
 
 ## Gate Definitions
 

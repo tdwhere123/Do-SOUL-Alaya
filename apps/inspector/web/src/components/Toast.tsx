@@ -1,95 +1,147 @@
-import { useEffect, useState } from 'react';
-import { X, Info, AlertTriangle, CheckCircle, AlertCircle } from 'lucide-react';
-import { clsx } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode
+} from "react";
+import { AlertCircle, AlertTriangle, CheckCircle, Info, X } from "lucide-react";
+import { clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
 
-function cn(...inputs: any[]) {
+function cn(...inputs: unknown[]): string {
   return twMerge(clsx(inputs));
 }
 
-export type ToastType = 'info' | 'success' | 'warning' | 'error';
+export type ToastType = "info" | "success" | "warning" | "error";
 
-export interface ToastProps {
-  message: string;
-  type?: ToastType;
-  duration?: number;
-  onClose: () => void;
-  action?: {
-    label: string;
-    onClick: () => void;
+export interface ToastInput {
+  readonly message: string;
+  readonly type?: ToastType;
+  readonly duration?: number;
+  readonly action?: {
+    readonly label: string;
+    readonly onClick: () => void;
   };
 }
 
-const icons = {
-  info: <Info className="w-5 h-5 text-blue-500" />,
-  success: <CheckCircle className="w-5 h-5 text-green-500" />,
-  warning: <AlertTriangle className="w-5 h-5 text-amber-500" />,
-  error: <AlertCircle className="w-5 h-5 text-red-500" />,
+interface ToastEntry extends ToastInput {
+  readonly id: string;
+}
+
+const MAX_VISIBLE = 3;
+const DEDUP_WINDOW_MS = 2000;
+
+const icons: Record<ToastType, ReactNode> = {
+  info: <Info className="w-5 h-5 text-[#92A8B3]" />,
+  success: <CheckCircle className="w-5 h-5 text-[#96AD90]" />,
+  warning: <AlertTriangle className="w-5 h-5 text-[#C9A36F]" />,
+  error: <AlertCircle className="w-5 h-5 text-[#C9ADA7]" />
 };
 
-export default function Toast({ message, type = 'info', duration = 5000, onClose, action }: ToastProps) {
-  const [isVisible, setIsVisible] = useState(true);
+interface ToastContextValue {
+  showToast: (input: ToastInput) => void;
+  dismissToast: (id: string) => void;
+}
+
+const ToastContext = createContext<ToastContextValue | null>(null);
+
+export function ToastProvider({ children }: { children: ReactNode }) {
+  const [toasts, setToasts] = useState<ToastEntry[]>([]);
+  const recentRef = useRef<Map<string, number>>(new Map());
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const showToast = useCallback((input: ToastInput) => {
+    const dedupKey = `${input.type ?? "info"}:${input.message}`;
+    const now = Date.now();
+    const last = recentRef.current.get(dedupKey);
+    if (last !== undefined && now - last < DEDUP_WINDOW_MS) {
+      return;
+    }
+    recentRef.current.set(dedupKey, now);
+
+    const id = `${now}-${Math.random().toString(36).slice(2, 9)}`;
+    setToasts((prev) => {
+      const next = [...prev, { ...input, id }];
+      return next.length > MAX_VISIBLE ? next.slice(next.length - MAX_VISIBLE) : next;
+    });
+  }, []);
+
+  const value = useMemo<ToastContextValue>(
+    () => ({ showToast, dismissToast }),
+    [showToast, dismissToast]
+  );
+
+  return (
+    <ToastContext.Provider value={value}>
+      {children}
+      <div className="fixed bottom-8 right-8 z-[100] flex flex-col gap-2">
+        {toasts.map((toast) => (
+          <ToastItem key={toast.id} toast={toast} onClose={() => dismissToast(toast.id)} />
+        ))}
+      </div>
+    </ToastContext.Provider>
+  );
+}
+
+export function useToasts(): ToastContextValue {
+  const ctx = useContext(ToastContext);
+  if (!ctx) {
+    throw new Error("useToasts() must be used inside <ToastProvider>");
+  }
+  return ctx;
+}
+
+function ToastItem({ toast, onClose }: { toast: ToastEntry; onClose: () => void }) {
+  const [visible, setVisible] = useState(false);
+  const duration = toast.duration ?? 5000;
 
   useEffect(() => {
+    setVisible(true);
     if (duration > 0) {
-      const timer = setTimeout(() => {
-        setIsVisible(false);
-        setTimeout(onClose, 300); // Wait for fade out animation
+      const t = setTimeout(() => {
+        setVisible(false);
+        setTimeout(onClose, 250);
       }, duration);
-      return () => clearTimeout(timer);
+      return () => clearTimeout(t);
     }
+    return undefined;
   }, [duration, onClose]);
 
   return (
     <div
+      role="status"
       className={cn(
-        "fixed bottom-8 right-8 z-[100] flex items-center gap-3 px-4 py-3 bg-beige-50 border border-beige-200 rounded-lg shadow-lg transition-all duration-300 transform",
-        isVisible ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0"
+        "flex items-center gap-3 px-4 py-3 bg-beige-50 border border-beige-200 rounded-lg shadow-lg transition-all duration-250 transform",
+        visible ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0"
       )}
     >
-      <div className="flex-shrink-0">{icons[type]}</div>
-      <div className="flex-1 text-sm font-medium text-ink-600">{message}</div>
-      
-      {action && (
+      <div className="flex-shrink-0">{icons[toast.type ?? "info"]}</div>
+      <div className="flex-1 text-sm font-mono text-ink-700">{toast.message}</div>
+      {toast.action ? (
         <button
-          onClick={action.onClick}
+          onClick={toast.action.onClick}
           className="px-2 py-1 text-xs font-bold uppercase tracking-wider text-ink-600 hover:bg-beige-200 rounded transition-colors"
         >
-          {action.label}
+          {toast.action.label}
         </button>
-      )}
-
+      ) : null}
       <button
         onClick={() => {
-          setIsVisible(false);
-          setTimeout(onClose, 300);
+          setVisible(false);
+          setTimeout(onClose, 250);
         }}
         className="text-ink-700/40 hover:text-ink-700 transition-colors"
+        aria-label="Dismiss notification"
       >
         <X className="w-4 h-4" />
       </button>
     </div>
   );
-}
-
-// Global Toast Manager Hook
-export function useToasts() {
-  const [toasts, setToasts] = useState<(ToastProps & { id: string })[]>([]);
-
-  const showToast = (props: Omit<ToastProps, 'onClose'>) => {
-    const id = Math.random().toString(36).substring(2, 9);
-    setToasts((prev) => [...prev, { ...props, id, onClose: () => hideToast(id) }]);
-  };
-
-  const hideToast = (id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  };
-
-  return { toasts, showToast, hideToast, ToastContainer: () => (
-    <>
-      {toasts.map((toast) => (
-        <Toast key={toast.id} {...toast} />
-      ))}
-    </>
-  )};
 }
