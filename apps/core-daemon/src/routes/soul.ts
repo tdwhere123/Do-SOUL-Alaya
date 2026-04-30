@@ -23,12 +23,12 @@ export interface SoulApprovalActionInput {
 }
 
 interface TopologyAuditPort {
-  appendPathTopologyExploreCompleted(topology: Readonly<TopologyExplorationResult>): Promise< unknown>;
+  appendPathTopologyExploreCompleted(topology: Readonly<TopologyExplorationResult>): Promise<void>;
 }
 
 export interface SoulRouteServices {
   readonly workspaceService: {
-    getById(workspaceId: string): Promise< unknown>;
+    getById(workspaceId: string): Promise<Readonly<{ readonly workspace_id: string }>>;
   };
   readonly topologyAuditService?: TopologyAuditPort;
   readonly graphExploreService?: {

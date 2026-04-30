@@ -16,6 +16,7 @@ import { Phase4BEventTypeSchema } from "./events/phase-4b.js";
 import { Phase4CEventTypeSchema } from "./events/phase-4c.js";
 import { Phase5EventTypeSchema } from "./events/phase-5.js";
 import { StreamingEventTypeSchema } from "./events/message-delta.js";
+import { TrustStateEventTypeSchema } from "./soul/trust-state.js";
 import {
   IsoDatetimeStringSchema,
   NonEmptyStringSchema,
@@ -67,6 +68,7 @@ export const EventTypeSchema = z.union([
   Phase4BEventTypeSchema,
   Phase4CEventTypeSchema,
   Phase5EventTypeSchema,
+  TrustStateEventTypeSchema,
   StreamingEventTypeSchema
 ]);
 

@@ -8,7 +8,7 @@ import { CoreError } from "@do-soul/alaya-core";
 
 export interface SoulGraphRouteServices {
   readonly workspaceService: {
-    getById(workspaceId: string): Promise< unknown>;
+    getById(workspaceId: string): Promise<Readonly<{ readonly workspace_id: string }>>;
   };
   readonly soulGraphService: {
     buildSoulGraph(input: {

@@ -59,7 +59,8 @@ import {
   createGlobalMemoryRecallPort as createCoreGlobalMemoryRecallPort,
   type ConversationServiceDependencies,
   type GlobalMemoryRecallCachePort,
-  type GlobalMemoryRecallPort
+  type GlobalMemoryRecallServicePort,
+  type GlobalMemoryRecallSubscription
 } from "@do-soul/alaya-core";
 import * as StorageModule from "@do-soul/alaya-storage";
 import {
@@ -142,6 +143,7 @@ import { createNarrativeBudgetRepo } from "./narrative-budget-repo.js";
 import { parseZeroDayPoliciesJson } from "./zero-day-policies.js";
 import { createRuntimeNotifier, type AlayaRuntimeNotifier } from "./runtime-notifier.js";
 import { createSecurityStatusBootstrapServices } from "./security-status-bootstrap.js";
+import { resolveSecretRef, type ResolveSecretError } from "./secrets.js";
 import { isRemoteDaemonOptInEnabled, resolveDaemonHostFromEnv } from "./server-options.js";
 import { createConfigService } from "./services/config-service.js";
 import { createEmbeddingStatusService } from "./services/embedding-status-service.js";
@@ -154,6 +156,7 @@ import { createSoulApprovalService } from "./services/soul-approval-service.js";
 import { SoulTopologyAuditService } from "./services/soul-topology-audit-service.js";
 import { SqliteWorkspaceEngineConfigRepo } from "./services/workspace-engine-config-repo.js";
 import { executeConversationToolOrThrow, handleConversationToolUse } from "./tool-runtime.js";
+import { createTrustStateRecorder, type TrustStateRecorder } from "./trust-state.js";
 import { createWorkerRuntimeWiring } from "./worker-runtime-wiring.js";
 import { getBuiltinConversationToolSpecs } from "./builtin-conversation-tool-specs.js";
 
@@ -193,6 +196,7 @@ export interface AlayaDaemonRuntimeServices {
     listEnrolledToolIds(): readonly string[];
     refresh(): Promise<void>;
   }>;
+  readonly trustStateRecorder: TrustStateRecorder;
   readonly principalCodingEngineAvailable: boolean;
 }
 
@@ -298,6 +302,10 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     }),
     pathRelationRepo,
     bootstrappingRecordRepo
+  });
+  const trustStateRecorder = createTrustStateRecorder({
+    eventPublisher,
+    clock: () => new Date().toISOString()
   });
   const toolSpecService = new ToolSpecService({ toolSpecRepo });
   const toolGovernanceClient = new ToolGovernanceClient({
@@ -469,8 +477,16 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
           globalMemoryRepo,
           projectMappingService
         });
+  const globalMemoryRecallService =
+    globalMemoryRepo === null
+      ? undefined
+      : createGlobalMemoryRecallPort({
+          globalMemoryRepo
+        });
+  const globalMemoryRecallInvalidationSubscription: GlobalMemoryRecallSubscription | null =
+    globalMemoryRecallService?.subscribeToInvalidations(runtimeNotifier) ?? null;
   const memoryEmbeddingRepo = createOptionalMemoryEmbeddingRepo(database);
-  const embeddingApiKey = readNonEmptyEnv(process.env.OPENAI_API_KEY);
+  const embeddingApiKey = readOptionalSecretEnv(process.env.OPENAI_API_KEY, "OPENAI_API_KEY");
   const configuredEmbeddingModel = readNonEmptyEnv(process.env.OPENAI_EMBEDDING_MODEL);
   const embeddingModelId = configuredEmbeddingModel ?? (embeddingApiKey === null ? null : DEFAULT_OPENAI_EMBEDDING_MODEL);
   const embeddingSupplementOptInEnabled = process.env.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT === "true";
@@ -518,7 +534,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     ...(globalMemoryRepo === null
       ? {}
       : {
-          globalRecallPort: createGlobalMemoryRecallPort({ globalMemoryRepo }),
+          globalRecallPort: globalMemoryRecallService,
           ...(globalMemoryRecallCacheRepo === null
             ? {}
             : {
@@ -588,7 +604,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   });
   const stancePolicyProvider = createStancePolicyProvider(configRepo);
   const localHeuristicsProvider = new LocalHeuristics();
-  const officialGardenApiKey = readNonEmptyEnv(process.env.OPENAI_API_KEY);
+  const officialGardenApiKey = embeddingApiKey;
   const officialGardenProvider =
     officialGardenApiKey === null
       ? null
@@ -740,6 +756,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     warnLogger,
     builtinConversationToolSpecs: getBuiltinConversationToolSpecs()
   });
+  trustStateRecorder.markReady();
   recordStartupStep(startupSteps, "mcp-tooling");
 
   const app = createApp({
@@ -923,6 +940,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
 
       securityStatusService.close();
       await mcpTooling.daemonMcpRuntimeRegistry.close();
+      globalMemoryRecallInvalidationSubscription?.dispose();
 
       if (server !== null) {
         await closeServer(server);
@@ -943,6 +961,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     services: Object.freeze({
       conversationToolCatalog: mcpTooling.conversationToolCatalog,
       daemonMcpCatalog: mcpTooling.daemonMcpCatalog,
+      trustStateRecorder,
       principalCodingEngineAvailable: principalCodingAvailability.available
     }),
     startHttpServer: async (options: AlayaDaemonListenOptions = {}) => {
@@ -1048,6 +1067,39 @@ function readNonEmptyEnv(value: string | undefined): string | null {
   return trimmed.length === 0 ? null : trimmed;
 }
 
+function readOptionalSecretEnv(value: string | undefined, label: string): string | null {
+  const rawValue = readNonEmptyEnv(value);
+  if (rawValue === null) {
+    return null;
+  }
+
+  if (!rawValue.startsWith("env:") && !rawValue.startsWith("file:")) {
+    return rawValue;
+  }
+
+  const resolved = resolveSecretRef(rawValue);
+  if ("kind" in resolved) {
+    throw new Error(formatSecretResolutionError(label, resolved));
+  }
+
+  return resolved.value;
+}
+
+function formatSecretResolutionError(label: string, error: ResolveSecretError): string {
+  switch (error.kind) {
+    case "malformed":
+      return `${label}: ${error.ref} -> ${error.reason}`;
+    case "env_missing":
+      return `${label}: ${error.ref} -> environment variable ${error.var_name} is not set`;
+    case "file_missing":
+      return `${label}: ${error.ref} -> file not found at ${error.path}`;
+    case "file_unreadable":
+      return `${label}: ${error.ref} -> file unreadable at ${error.path} (${error.cause})`;
+    case "empty":
+      return `${label}: ${error.ref} -> ${error.origin} secret is empty`;
+  }
+}
+
 function createOptionalMemoryEmbeddingRepo(database: StorageDatabase): MemoryEmbeddingRepo | null {
   const RepoCtor = StorageModule.SqliteMemoryEmbeddingRepo;
   if (typeof RepoCtor !== "function" || !supportsPreparedSqliteConnection(database)) {
@@ -1101,7 +1153,7 @@ function createGlobalMemoryRouteService(params: {
 
 function createGlobalMemoryRecallPort(params: {
   readonly globalMemoryRepo: GlobalMemoryRepo;
-}): GlobalMemoryRecallPort {
+}): GlobalMemoryRecallServicePort {
   return createCoreGlobalMemoryRecallPort({
     globalMemorySource: {
       list: async () => await params.globalMemoryRepo.list()
