@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createApp } from "../app.js";
 
 describe("createApp", () => {
@@ -57,5 +57,35 @@ describe("createApp", () => {
         request_token: "secret-token"
       }
     });
+  });
+
+  it("registers typed route service bags on the Hono app", async () => {
+    const patchRuntimeEmbeddingConfig = vi.fn(async (patch: unknown) => patch);
+    const app = createApp({
+      routes: {
+        config: {
+          workspaceService: { getById: vi.fn() } as any,
+          configService: {
+            getSoulConfig: vi.fn(),
+            patchSoulConfig: vi.fn(),
+            getStrategyConfig: vi.fn(),
+            patchStrategyConfig: vi.fn(),
+            getEnvironmentConfig: vi.fn(),
+            patchEnvironmentConfig: vi.fn(),
+            getRuntimeEmbeddingConfig: vi.fn(),
+            patchRuntimeEmbeddingConfig
+          }
+        }
+      }
+    });
+
+    const response = await app.request("/config/runtime/embedding-supplement", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ embedding_enabled: true })
+    });
+
+    expect(response.status).toBe(200);
+    expect(patchRuntimeEmbeddingConfig).toHaveBeenCalledWith({ embedding_enabled: true });
   });
 });

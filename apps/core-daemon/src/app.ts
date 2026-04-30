@@ -3,6 +3,42 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { registerErrorHandler } from "./middleware/error-handler.js";
+import { registerBudgetRoutes, type BudgetRouteServices } from "./routes/budget.js";
+import { registerClaimRoutes, type ClaimRouteServices } from "./routes/claims.js";
+import { registerConfigRoutes, type ConfigRouteServices } from "./routes/config.js";
+import {
+  registerConflictMatrixRoutes,
+  type ConflictMatrixRouteServices
+} from "./routes/conflict-matrix.js";
+import {
+  registerE2eEventTriggerRoutes,
+  type E2eEventTriggerRouteServices
+} from "./routes/e2e-event-triggers.js";
+import { registerEmbeddingStatusRoutes, type EmbeddingStatusRouteServices } from "./routes/embedding-status.js";
+import { registerEvidenceRoutes, type EvidenceRouteServices } from "./routes/evidence.js";
+import { registerFileRoutes, type FileRouteServices } from "./routes/files.js";
+import { registerGardenBacklogRoutes } from "./routes/garden-backlog.js";
+import { registerGlobalMemoryRoutes, type GlobalMemoryRouteServices } from "./routes/global-memory.js";
+import { registerGovernanceRoutes, type GovernanceRouteServices } from "./routes/governance.js";
+import { registerGreenStatusRoutes, type GreenStatusRouteServices } from "./routes/green-status.js";
+import { registerHealthJournalRoutes, type HealthJournalRouteServices } from "./routes/health-journal.js";
+import { registerMemoryRoutes, type MemoryRouteServices } from "./routes/memories.js";
+import { registerOverrideRoutes, type OverrideRouteServices } from "./routes/overrides.js";
+import {
+  registerProjectMappingRoutes,
+  type ProjectMappingRouteServices
+} from "./routes/project-mapping.js";
+import { registerProposalRoutes, type ProposalRouteServices } from "./routes/proposals.js";
+import { registerRecallRoutes, type RecallRouteServices } from "./routes/recall.js";
+import { registerRunRoutes, type RunRouteServices } from "./routes/runs.js";
+import { registerSecurityStatusRoutes, type SecurityStatusRouteServices } from "./routes/security-status.js";
+import { registerSignalRoutes, type SignalRouteServices } from "./routes/signals.js";
+import { registerSlotRoutes, type SlotRouteServices } from "./routes/slots.js";
+import { registerSoulGraphRoutes, type SoulGraphRouteServices } from "./routes/soul-graph.js";
+import { registerSoulRoutes, type SoulRouteServices } from "./routes/soul.js";
+import { registerSynthesisRoutes, type SynthesisRouteServices } from "./routes/syntheses.js";
+import { registerWorkspaceFileRoutes, type WorkspaceFilesRouteServices } from "./routes/workspace-files.js";
+import { registerWorkspaceRoutes, type WorkspaceRouteServices } from "./routes/workspaces.js";
 
 export const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
 
@@ -14,6 +50,37 @@ export interface RequestProtectionConfig {
 
 export interface CoreDaemonServices {
   readonly requestProtection?: RequestProtectionConfig;
+  readonly routes?: CoreDaemonRouteServices;
+}
+
+export interface CoreDaemonRouteServices {
+  readonly budget?: BudgetRouteServices;
+  readonly claims?: ClaimRouteServices;
+  readonly config?: ConfigRouteServices;
+  readonly conflictMatrix?: ConflictMatrixRouteServices;
+  readonly e2eEventTriggers?: E2eEventTriggerRouteServices;
+  readonly embeddingStatus?: EmbeddingStatusRouteServices;
+  readonly evidence?: EvidenceRouteServices;
+  readonly files?: FileRouteServices;
+  readonly gardenBacklog?: Parameters<typeof registerGardenBacklogRoutes>[1];
+  readonly globalMemory?: GlobalMemoryRouteServices;
+  readonly governance?: GovernanceRouteServices;
+  readonly greenStatus?: GreenStatusRouteServices;
+  readonly healthJournal?: HealthJournalRouteServices;
+  readonly memories?: MemoryRouteServices;
+  readonly overrides?: OverrideRouteServices;
+  readonly projectMapping?: ProjectMappingRouteServices;
+  readonly proposals?: ProposalRouteServices;
+  readonly recall?: RecallRouteServices;
+  readonly runs?: RunRouteServices;
+  readonly securityStatus?: SecurityStatusRouteServices;
+  readonly signals?: SignalRouteServices;
+  readonly slots?: SlotRouteServices;
+  readonly soul?: SoulRouteServices;
+  readonly soulGraph?: SoulGraphRouteServices;
+  readonly syntheses?: SynthesisRouteServices;
+  readonly workspaceFiles?: WorkspaceFilesRouteServices;
+  readonly workspaces?: WorkspaceRouteServices;
 }
 
 export function createApp(services: CoreDaemonServices = {}): Hono {
@@ -46,7 +113,7 @@ export function createApp(services: CoreDaemonServices = {}): Hono {
 
         return "";
       },
-      allowHeaders: ["Content-Type", "X-Request-Token", "X-Do-What-Desktop"]
+      allowHeaders: ["Content-Type", "X-Request-Token", "X-Alaya-Desktop"]
     })
   );
 
@@ -60,7 +127,7 @@ export function createApp(services: CoreDaemonServices = {}): Hono {
       }
 
       const origin = normalizeOrigin(context.req.header("origin"));
-      const localOperatorRequest = isLocalOperatorRequest(context.req.header("x-do-what-desktop"));
+      const localOperatorRequest = isLocalOperatorRequest(context.req.header("x-alaya-desktop"));
 
       if (!isAllowedMutatingOrigin(origin, allowedOrigin, localOperatorRequest, allowDesktopOriginlessRequests)) {
         return context.json(
@@ -99,7 +166,7 @@ export function createApp(services: CoreDaemonServices = {}): Hono {
 
     app.get("/session/request-token", (context) => {
       const origin = normalizeOrigin(context.req.header("origin"));
-      const localOperatorRequest = isLocalOperatorRequest(context.req.header("x-do-what-desktop"));
+      const localOperatorRequest = isLocalOperatorRequest(context.req.header("x-alaya-desktop"));
 
       if (!isAllowedRequestTokenOrigin(origin, allowedOrigin, localOperatorRequest, allowDesktopOriginlessRequests)) {
         return context.json(
@@ -133,8 +200,43 @@ export function createApp(services: CoreDaemonServices = {}): Hono {
   });
 
   registerErrorHandler(app);
+  registerConfiguredRoutes(app, services.routes);
 
   return app;
+}
+
+function registerConfiguredRoutes(app: Hono, routes: CoreDaemonRouteServices | undefined): void {
+  if (routes === undefined) {
+    return;
+  }
+
+  if (routes.workspaces !== undefined) registerWorkspaceRoutes(app, routes.workspaces);
+  if (routes.workspaceFiles !== undefined) registerWorkspaceFileRoutes(app, routes.workspaceFiles);
+  if (routes.securityStatus !== undefined) registerSecurityStatusRoutes(app, routes.securityStatus);
+  if (routes.embeddingStatus !== undefined) registerEmbeddingStatusRoutes(app, routes.embeddingStatus);
+  if (routes.runs !== undefined) registerRunRoutes(app, routes.runs);
+  if (routes.signals !== undefined) registerSignalRoutes(app, routes.signals);
+  if (routes.evidence !== undefined) registerEvidenceRoutes(app, routes.evidence);
+  if (routes.gardenBacklog !== undefined) registerGardenBacklogRoutes(app, routes.gardenBacklog);
+  if (routes.memories !== undefined) registerMemoryRoutes(app, routes.memories);
+  if (routes.greenStatus !== undefined) registerGreenStatusRoutes(app, routes.greenStatus);
+  if (routes.healthJournal !== undefined) registerHealthJournalRoutes(app, routes.healthJournal);
+  if (routes.config !== undefined) registerConfigRoutes(app, routes.config);
+  if (routes.overrides !== undefined) registerOverrideRoutes(app, routes.overrides);
+  if (routes.governance !== undefined) registerGovernanceRoutes(app, routes.governance);
+  if (routes.budget !== undefined) registerBudgetRoutes(app, routes.budget);
+  if (routes.slots !== undefined) registerSlotRoutes(app, routes.slots);
+  if (routes.recall !== undefined) registerRecallRoutes(app, routes.recall);
+  if (routes.syntheses !== undefined) registerSynthesisRoutes(app, routes.syntheses);
+  if (routes.claims !== undefined) registerClaimRoutes(app, routes.claims);
+  if (routes.proposals !== undefined) registerProposalRoutes(app, routes.proposals);
+  if (routes.files !== undefined) registerFileRoutes(app, routes.files);
+  if (routes.soul !== undefined) registerSoulRoutes(app, routes.soul);
+  if (routes.soulGraph !== undefined) registerSoulGraphRoutes(app, routes.soulGraph);
+  if (routes.projectMapping !== undefined) registerProjectMappingRoutes(app, routes.projectMapping);
+  if (routes.globalMemory !== undefined) registerGlobalMemoryRoutes(app, routes.globalMemory);
+  if (routes.conflictMatrix !== undefined) registerConflictMatrixRoutes(app, routes.conflictMatrix);
+  if (routes.e2eEventTriggers !== undefined) registerE2eEventTriggerRoutes(app, routes.e2eEventTriggers);
 }
 
 function isProtectedRequest(method: string, path: string, runIdQuery: string | undefined): boolean {
