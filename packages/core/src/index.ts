@@ -72,6 +72,7 @@ export * from "./synthesis-service.js";
 export * from "./target-revalidate-service.js";
 export * from "./task-surface-builder.js";
 export * from "./tool-spec-service.js";
+export * from "./trust-state-service.js";
 export * from "./worker-run-lifecycle-service.js";
 export * from "./worker-run-state-machine.js";
 export * from "./worker-safety-gate.js";

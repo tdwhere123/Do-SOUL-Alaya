@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { rebuildCountersFromEventLog } from "@do-soul/alaya-core";
 import {
   TrustStateEventType,
   type ContextDeliveryRecord,
@@ -165,6 +166,40 @@ describe("trust state recorder", () => {
     await expect(recorder.summarize("codex")).resolves.toMatchObject({
       installed_count: 0
     });
+  });
+
+  it("rebuilds process-local counters from EventLog without publishing new audit rows", async () => {
+    const publishWithMutation = vi.fn(async () => undefined);
+    const recorder = new TrustStateRecorder({
+      eventPublisher: { publishWithMutation },
+      ready: true
+    });
+    const eventLogReader = {
+      queryByType: vi.fn(async (eventType: string) => {
+        switch (eventType) {
+          case TrustStateEventType.TRUST_STATE_INSTALLED_RECORDED:
+            return [
+              buildCounterEvent(eventType, "codex", "installed"),
+              buildCounterEvent(eventType, "codex", "installed")
+            ];
+          case TrustStateEventType.TRUST_STATE_CONFIGURED_RECORDED:
+            return [buildCounterEvent(eventType, "codex", "configured")];
+          case TrustStateEventType.TRUST_STATE_UNVERIFIABLE_RECORDED:
+            return [buildCounterEvent(eventType, "codex", "unverifiable")];
+          default:
+            return [];
+        }
+      })
+    };
+
+    await rebuildCountersFromEventLog(eventLogReader, recorder);
+
+    await expect(recorder.summarize("codex")).resolves.toMatchObject({
+      installed_count: 2,
+      configured_count: 1,
+      unverifiable_count: 1
+    });
+    expect(publishWithMutation).not.toHaveBeenCalled();
   });
 
   it("B7 summarize state reduction is correct", async () => {
@@ -342,5 +377,29 @@ function buildUsageInput(
     reason: null,
     reported_at: USAGE_AT,
     ...overrides
+  };
+}
+
+function buildCounterEvent(
+  eventType: EventLogEntry["event_type"],
+  agentTarget: string,
+  counterName: string
+): EventLogEntry {
+  return {
+    event_id: `${eventType}:${counterName}`,
+    event_type: eventType,
+    entity_type: "trust_state_counter",
+    entity_id: `${agentTarget}:${counterName}`,
+    workspace_id: "trust-state",
+    run_id: null,
+    caused_by: agentTarget,
+    revision: 0,
+    payload_json: {
+      agent_target: agentTarget,
+      counter_name: counterName,
+      session_id: null,
+      recorded_at: "2026-04-30T10:02:00.000Z"
+    },
+    created_at: "2026-04-30T10:02:00.000Z"
   };
 }

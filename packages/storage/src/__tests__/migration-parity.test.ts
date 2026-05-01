@@ -15,7 +15,10 @@ const targetMigrationsDirectory = path.join(repositoryRoot, "packages/storage/sr
 const expectedVendorMigrationCount = 55;
 const expectedFirstMigration = "001-initial.sql";
 const expectedLastMigration = "055-global-memory-recall-cache-global-object-index.sql";
-const expectedAlayaOnlyMigrations = ["056-trust-state-persistence.sql"];
+const expectedAlayaOnlyMigrations = [
+  "056-trust-state-persistence.sql",
+  "057-event-log-orphan-radar.sql"
+];
 
 function listSqlMigrations(directory: string): string[] {
   return fs

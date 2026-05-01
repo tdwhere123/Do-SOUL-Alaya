@@ -212,7 +212,10 @@ async function readExistingInstallConfig(paths: AlayaConfigPaths): Promise<Exist
     model_id: toml === null ? null : readTomlString(toml, "embedding", "model_id"),
     default_workspace: toml === null ? null : readTomlString(toml, "runtime", "default_workspace"),
     worktree_enabled: toml === null ? null : readTomlBoolean(toml, "runtime", "worktree_enabled"),
-    secret_ref: env === null ? null : readEnvValue(env, "OPENAI_API_KEY")
+    secret_ref:
+      env === null
+        ? null
+        : readEnvValue(env, "ALAYA_OPENAI_SECRET_REF") ?? readEnvValue(env, "OPENAI_API_KEY")
   };
 }
 
@@ -288,7 +291,7 @@ function renderAlayaToml(config: ResolvedInstallConfig): string {
 function renderEnvFile(config: ResolvedInstallConfig): string {
   const lines = [`ALAYA_ENABLE_EMBEDDING_SUPPLEMENT=${config.embedding_enabled ? "true" : "false"}`];
   if (config.secret_ref !== null) {
-    lines.push(`OPENAI_API_KEY=${config.secret_ref}`);
+    lines.push(`ALAYA_OPENAI_SECRET_REF=${config.secret_ref}`);
   }
   return `${lines.join("\n")}\n`;
 }

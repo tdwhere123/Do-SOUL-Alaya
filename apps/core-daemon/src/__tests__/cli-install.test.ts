@@ -33,7 +33,7 @@ describe("cli install", () => {
     const auditFiles = await readdir(path.join(configDir, "audit"));
 
     expect(toml).toContain('default_workspace = "work"');
-    expect(env).toContain("OPENAI_API_KEY=file:");
+    expect(env).toContain("ALAYA_OPENAI_SECRET_REF=file:");
     expect(env).not.toContain("sk-test-secret");
     expect(secret.trim()).toBe("sk-test-secret");
     expect(secretStat.mode & 0o777).toBe(0o600);

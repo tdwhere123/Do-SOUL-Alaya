@@ -6,11 +6,16 @@ import {
   TrustSummarySchema,
   type ContextDeliveryRecord,
   type EventLogEntry,
-  type TrustState,
   type TrustSummary,
   type UsageProofRecord,
   UsageProofRecordSchema
 } from "@do-soul/alaya-protocol";
+import {
+  collectCounts,
+  reduceTrustState,
+  type SummaryCounts,
+  type TrustCounterName
+} from "@do-soul/alaya-core";
 
 const DEFAULT_WORKSPACE_ID = "trust-state";
 const DEFAULT_REVISION = 0;
@@ -42,16 +47,6 @@ export interface TrustStateRecorderDependencies {
   readonly clock?: () => string;
   readonly ready?: boolean;
 }
-
-type SummaryCounts = Readonly<{
-  installed_count: number;
-  configured_count: number;
-  delivered_count: number;
-  used_count: number;
-  skipped_count: number;
-  not_applicable_count: number;
-  unverifiable_count: number;
-}>;
 
 export class TrustStateRecorderNotReady extends Error {
   public constructor(message = "TrustStateRecorder is not ready.") {
@@ -95,6 +90,22 @@ export class TrustStateRecorder {
 
   public markReady(): void {
     this.ready = true;
+  }
+
+  public replayCounterIncrement(counterName: TrustCounterName, agent_target: string): void {
+    const target = NonEmptyStringSchema.parse(agent_target);
+
+    switch (counterName) {
+      case "installed":
+        incrementCounter(this.installedCountsByTarget, target);
+        break;
+      case "configured":
+        incrementCounter(this.configuredCountsByTarget, target);
+        break;
+      case "unverifiable":
+        incrementCounter(this.unverifiableCountsByTarget, target);
+        break;
+    }
   }
 
   public async recordDelivery(
@@ -230,7 +241,10 @@ export class TrustStateRecorder {
     const deliveries = await this.repo.listDeliveriesByAgentTarget(target);
     const usages = await this.repo.listUsageByDeliveryIds(deliveries.map((delivery) => delivery.delivery_id));
     const usageByDeliveryId = new Map(usages.map((usage) => [usage.delivery_id, usage]));
-    const counts = collectCounts(deliveries, usageByDeliveryId, target, {
+    const counts: SummaryCounts & Readonly<{
+      last_delivery_at: string | null;
+      last_usage_report_at: string | null;
+    }> = collectCounts(deliveries, usageByDeliveryId, {
       installed_count: this.installedCountsByTarget.get(target) ?? 0,
       configured_count: this.configuredCountsByTarget.get(target) ?? 0,
       unverifiable_count: this.unverifiableCountsByTarget.get(target) ?? 0
@@ -305,137 +319,6 @@ function resolveWorkspaceId(workspaceId: string | null): string {
 
 function incrementCounter(map: Map<string, number>, key: string): void {
   map.set(key, (map.get(key) ?? 0) + 1);
-}
-
-function collectCounts(
-  deliveries: Iterable<Readonly<ContextDeliveryRecord>>,
-  usageByDeliveryId: ReadonlyMap<string, UsageProofRecord>,
-  agentTarget: string,
-  seed: Readonly<{
-    installed_count: number;
-    configured_count: number;
-    unverifiable_count: number;
-  }>
-): SummaryCounts & Readonly<{ last_delivery_at: string | null; last_usage_report_at: string | null }> {
-  let deliveredCount = 0;
-  let usedCount = 0;
-  let skippedCount = 0;
-  let notApplicableCount = 0;
-  let lastDeliveryAt: string | null = null;
-  let lastUsageReportAt: string | null = null;
-
-  for (const delivery of deliveries) {
-    if (delivery.agent_target !== agentTarget) {
-      continue;
-    }
-
-    deliveredCount += 1;
-    lastDeliveryAt = maxIso(lastDeliveryAt, delivery.delivered_at);
-
-    const usage = usageByDeliveryId.get(delivery.delivery_id);
-    if (usage === undefined) {
-      continue;
-    }
-
-    switch (usage.usage_state) {
-      case "used":
-        usedCount += 1;
-        break;
-      case "skipped":
-        skippedCount += 1;
-        break;
-      case "not_applicable":
-        notApplicableCount += 1;
-        break;
-    }
-
-    lastUsageReportAt = maxIso(lastUsageReportAt, usage.reported_at);
-  }
-
-  return {
-    installed_count: seed.installed_count,
-    configured_count: seed.configured_count,
-    delivered_count: deliveredCount,
-    used_count: usedCount,
-    skipped_count: skippedCount,
-    not_applicable_count: notApplicableCount,
-    unverifiable_count: seed.unverifiable_count,
-    last_delivery_at: lastDeliveryAt,
-    last_usage_report_at: lastUsageReportAt
-  };
-}
-
-function reduceTrustState(counts: SummaryCounts): TrustState {
-  if (
-    counts.delivered_count === 0 &&
-    counts.configured_count === 0 &&
-    counts.installed_count === 0
-  ) {
-    return "installed";
-  }
-
-  if (counts.installed_count > 0 && counts.configured_count === 0) {
-    return "installed";
-  }
-
-  if (counts.configured_count > 0 && counts.delivered_count === 0) {
-    return "configured";
-  }
-
-  if (
-    counts.delivered_count > 0 &&
-    counts.used_count === 0 &&
-    counts.skipped_count === 0 &&
-    counts.not_applicable_count === 0 &&
-    counts.unverifiable_count === 0
-  ) {
-    return "delivered";
-  }
-
-  if (counts.used_count > 0 && counts.skipped_count === 0) {
-    return "used";
-  }
-
-  if (
-    counts.skipped_count > 0 &&
-    counts.used_count === 0 &&
-    counts.not_applicable_count === 0
-  ) {
-    return "skipped";
-  }
-
-  if (
-    counts.unverifiable_count > 0 &&
-    counts.used_count === 0 &&
-    counts.skipped_count === 0
-  ) {
-    return "unverifiable";
-  }
-
-  const outcomes = [
-    counts.used_count,
-    counts.skipped_count,
-    counts.not_applicable_count,
-    counts.unverifiable_count
-  ].filter((value) => value > 0).length;
-
-  if (outcomes >= 2) {
-    return "mixed";
-  }
-
-  if (outcomes > 0) {
-    return "mixed";
-  }
-
-  return "installed";
-}
-
-function maxIso(current: string | null, next: string): string {
-  if (current === null) {
-    return next;
-  }
-
-  return Date.parse(next) > Date.parse(current) ? next : current;
 }
 
 class InMemoryTrustStateRepo implements TrustStatePersistenceRepoPort {

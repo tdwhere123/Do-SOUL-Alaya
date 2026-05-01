@@ -774,6 +774,7 @@ vi.mock("@do-soul/alaya-core", () => {
     createGlobalMemoryRecallPort: vi.fn().mockImplementation(() => ({
       recall: vi.fn(async () => [])
     })),
+    rebuildCountersFromEventLog: vi.fn(async () => undefined),
     CrossCuttingPermissionService: makeClass(),
     ClaudeRuntimeAdapter: makeClass(),
     DynamicsService: makeClass(),

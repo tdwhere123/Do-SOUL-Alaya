@@ -15,6 +15,7 @@ const gardenTaskKindValues = [
   "crystallization_scan",
   "pointer_healing",
   "orphan_detection",
+  "event_log_orphan_detection",
   "merge_proposal",
   "path_graph_snapshot",
   "subject_neighbor_detect",
@@ -48,6 +49,7 @@ export const GardenTaskKind = {
   CRYSTALLIZATION_SCAN: "crystallization_scan",
   POINTER_HEALING: "pointer_healing",
   ORPHAN_DETECTION: "orphan_detection",
+  EVENT_LOG_ORPHAN_DETECTION: "event_log_orphan_detection",
   MERGE_PROPOSAL: "merge_proposal",
   PATH_GRAPH_SNAPSHOT: "path_graph_snapshot",
   SUBJECT_NEIGHBOR_DETECT: "subject_neighbor_detect",
@@ -96,7 +98,8 @@ const auditorTaskKinds = Object.freeze([
   GardenTaskKind.BOOTSTRAPPING_SCAN,
   GardenTaskKind.CRYSTALLIZATION_SCAN,
   GardenTaskKind.POINTER_HEALING,
-  GardenTaskKind.ORPHAN_DETECTION
+  GardenTaskKind.ORPHAN_DETECTION,
+  GardenTaskKind.EVENT_LOG_ORPHAN_DETECTION
 ] as const);
 const librarianTaskKinds = Object.freeze([
   ...auditorTaskKinds,

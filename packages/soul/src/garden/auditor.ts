@@ -8,6 +8,8 @@ import {
   type OrphanRadar,
   type OrphanRadarSuggestedActionValue,
   Phase4BEventType,
+  SoulGardenEventLogOrphanDetectedEventType,
+  SoulGardenEventLogOrphanDetectedPayloadSchema,
   type AuditorBootstrappingPort,
   type AuditorEventLogPort,
   type AuditorEvidenceCheckPort,
@@ -81,6 +83,8 @@ export class Auditor {
           return await this.executePointerHealing(task, completedAt);
         case GardenTaskKind.ORPHAN_DETECTION:
           return await this.executeOrphanDetection(task, completedAt);
+        case GardenTaskKind.EVENT_LOG_ORPHAN_DETECTION:
+          return await this.executeEventLogOrphanDetection(task, completedAt);
         case GardenTaskKind.GREEN_MAINTENANCE:
           return await this.executeGreenMaintenance(task, completedAt);
         case GardenTaskKind.BOOTSTRAPPING_SCAN:
@@ -300,6 +304,68 @@ export class Auditor {
       createdRadarIds,
       [`orphan_detection: created ${createdRadarIds.length} orphan radar candidates`]
     );
+    await this.dependencies.scheduler.reportCompletion(result);
+    return result;
+  }
+
+  private async executeEventLogOrphanDetection(
+    task: GardenTaskDescriptor,
+    completedAt: string
+  ): Promise<GardenTaskResult> {
+    const orphanDetectionPort = this.dependencies.orphanDetectionPort;
+
+    if (
+      orphanDetectionPort?.findEventLogOrphans === undefined ||
+      orphanDetectionPort.createEventLogOrphanRadarRecord === undefined
+    ) {
+      const result = this.createSuccessResult(task, completedAt, [], [
+        "event_log_orphan_detection: skipped because orphan detection port is not configured"
+      ]);
+      await this.dependencies.scheduler.reportCompletion(result);
+      return result;
+    }
+
+    const orphanedEvents = await orphanDetectionPort.findEventLogOrphans(task.workspace_id);
+    const batch = orphanedEvents.slice(0, AUDITOR_CONSTANTS.BATCH_SIZE);
+    const expiresAt = new Date(Date.parse(completedAt) + AUDITOR_CONSTANTS.ORPHAN_RADAR_TTL_MS).toISOString();
+    const createdRadarIds: string[] = [];
+
+    for (const orphan of batch) {
+      const radarId = randomUUID();
+      const payload = SoulGardenEventLogOrphanDetectedPayloadSchema.parse({
+        audit_event_id: orphan.audit_event_id,
+        event_type: orphan.event_type,
+        expected_table: orphan.expected_table,
+        detected_at: completedAt
+      });
+
+      await this.dependencies.eventLogRepo?.append({
+        event_type: SoulGardenEventLogOrphanDetectedEventType.SOUL_GARDEN_EVENT_LOG_ORPHAN_DETECTED,
+        entity_type: "orphan_radar",
+        entity_id: radarId,
+        workspace_id: task.workspace_id,
+        run_id: task.run_id,
+        caused_by: this.role,
+        revision: 0,
+        payload_json: payload
+      });
+
+      await orphanDetectionPort.createEventLogOrphanRadarRecord({
+        radar_id: radarId,
+        audit_event_id: orphan.audit_event_id,
+        event_type: orphan.event_type,
+        expected_table: orphan.expected_table,
+        workspace_id: task.workspace_id,
+        detected_at: completedAt,
+        expires_at: expiresAt,
+        requires_review: true
+      });
+      createdRadarIds.push(radarId);
+    }
+
+    const result = this.createSuccessResult(task, completedAt, createdRadarIds, [
+      `event_log_orphan_detection: created ${createdRadarIds.length} event log orphan radar candidates`
+    ]);
     await this.dependencies.scheduler.reportCompletion(result);
     return result;
   }

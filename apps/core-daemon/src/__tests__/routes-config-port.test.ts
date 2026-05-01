@@ -112,7 +112,7 @@ describe("routes-config port batch", () => {
     expect(((await stat(secretPath)).mode & 0o777)).toBe(0o600);
 
     const env = await readFile(harness.paths.envPath, "utf8");
-    expect(env).toContain(`OPENAI_API_KEY=file:${secretPath}`);
+    expect(env).toContain(`ALAYA_OPENAI_SECRET_REF=file:${secretPath}`);
     expect(env).toContain("ALAYA_ENABLE_EMBEDDING_SUPPLEMENT=true");
     expect(env).not.toContain(plaintext);
     expect(JSON.stringify(harness.publishedEvents)).not.toContain(plaintext);

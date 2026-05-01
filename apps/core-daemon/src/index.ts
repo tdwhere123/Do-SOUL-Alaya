@@ -55,6 +55,7 @@ import {
   ToolSpecService,
   WorkspaceService,
   ZeroDaySecurityLayer,
+  rebuildCountersFromEventLog,
   SqliteKarmaEventStore,
   createGlobalMemoryRecallPort as createCoreGlobalMemoryRecallPort,
   type ConversationServiceDependencies,
@@ -501,7 +502,15 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const globalMemoryRecallInvalidationSubscription: GlobalMemoryRecallSubscription | null =
     globalMemoryRecallService?.subscribeToInvalidations(runtimeNotifier) ?? null;
   const memoryEmbeddingRepo = createOptionalMemoryEmbeddingRepo(database);
-  const embeddingApiKey = readOptionalSecretEnv(process.env.OPENAI_API_KEY, "OPENAI_API_KEY");
+  const rawEmbeddingSecretRef =
+    process.env.ALAYA_OPENAI_SECRET_REF ?? process.env.OPENAI_API_KEY;
+  const embeddingApiKey = readOptionalSecretEnv(
+    rawEmbeddingSecretRef,
+    "ALAYA_OPENAI_SECRET_REF"
+  );
+  if (embeddingApiKey !== null) {
+    process.env.OPENAI_API_KEY = embeddingApiKey;
+  }
   const configuredEmbeddingModel = readNonEmptyEnv(process.env.OPENAI_EMBEDDING_MODEL);
   const embeddingModelId = configuredEmbeddingModel ?? (embeddingApiKey === null ? null : DEFAULT_OPENAI_EMBEDDING_MODEL);
   const embeddingSupplementOptInEnabled = process.env.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT === "true";
@@ -770,6 +779,16 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     toolSpecService,
     warnLogger,
     builtinConversationToolSpecs: getBuiltinConversationToolSpecs()
+  });
+  void gardenRuntime.runEventLogOrphanDetection().catch((error) => {
+    warnLogger.warn("event log orphan reconciler failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+  });
+  void rebuildCountersFromEventLog(eventLogRepo, trustStateRecorder).catch((error) => {
+    warnLogger.warn("trust-state counter rebuild failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
   });
   trustStateRecorder.markReady();
   const mcpMemoryToolHandler = createMcpMemoryToolHandler({

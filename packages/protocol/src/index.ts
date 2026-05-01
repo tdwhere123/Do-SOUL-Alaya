@@ -86,6 +86,7 @@ export * from "./events/phase-4a.js";
 export * from "./events/phase-4b.js";
 export * from "./events/phase-4c.js";
 export * from "./events/phase-5.js";
+export * from "./events/event-log-orphan.js";
 export * from "./events/message-delta.js";
 export * from "./engine-binding.js";
 export * from "./engine-port.js";

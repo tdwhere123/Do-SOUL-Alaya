@@ -96,7 +96,7 @@ describe("trust state SQL persistence", () => {
 
     expect(existsSync(databasePath)).toBe(true);
     expect(process.env.DATA_DIR).toBe(dataDir);
-    expect(readMaxSchemaVersion(dataDir)).toBe(56);
+    expect(readMaxSchemaVersion(dataDir)).toBe(57);
     expect(firstStatus).not.toBeNull();
     if (firstStatus === null) {
       throw new Error("first daemon lifetime did not produce a trust status");
@@ -191,7 +191,7 @@ describe("trust state SQL persistence", () => {
     }
   }, INTEGRATION_TEST_TIMEOUT_MS);
 
-  it("keeps installed configured and unverifiable counters in process only across restart", async () => {
+  it("rebuilds installed configured and unverifiable counters from EventLog across restart", async () => {
     const dataDir = await createTempDataDir();
     setDataDir(dataDir);
 
@@ -223,9 +223,9 @@ describe("trust state SQL persistence", () => {
     try {
       await expect(secondRuntime.services.trustStateRecorder.summarize("codex")).resolves.toMatchObject({
         delivered_count: 1,
-        installed_count: 0,
-        configured_count: 0,
-        unverifiable_count: 0
+        installed_count: 1,
+        configured_count: 1,
+        unverifiable_count: 1
       });
     } finally {
       await secondRuntime.shutdown();

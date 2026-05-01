@@ -46,7 +46,7 @@ import {
   type JanitorSchedulerPort,
   type LibrarianSchedulerPort
 } from "@do-soul/alaya-soul";
-import { findOrphanedMemoriesForWorkspace } from "./orphan-query.js";
+import { findEventLogOrphansForWorkspace, findOrphanedMemoriesForWorkspace } from "./orphan-query.js";
 import { BackgroundServiceManager } from "./background/bootstrap.js";
 
 type PathGraphSnapshotRecord = Readonly<PathGraphSnapshot>;
@@ -86,6 +86,7 @@ export function createGardenRuntime(input: {
 }): Readonly<{
   readonly backgroundManager: BackgroundServiceManager;
   readonly backlogTelemetrySource: GardenBacklogTelemetrySource;
+  runEventLogOrphanDetection(): Promise<void>;
   runBackgroundPass(): Promise<void>;
   setBacklogTelemetryObserver(observer: GardenBacklogTelemetryObserver | null): void;
 }> {
@@ -154,6 +155,11 @@ export function createGardenRuntime(input: {
             await findOrphanedMemoriesForWorkspace(input.databaseConnection, workspaceId),
           createOrphanRadarRecord: async (record: Readonly<OrphanRadar>) => {
             await orphanRadarRepo.create(record);
+          },
+          findEventLogOrphans: async (workspaceId: string) =>
+            await findEventLogOrphansForWorkspace(input.databaseConnection, workspaceId),
+          createEventLogOrphanRadarRecord: async (record) => {
+            await orphanRadarRepo.createEventLogOrphan(record);
           }
         }
       : undefined;
@@ -444,6 +450,7 @@ export function createGardenRuntime(input: {
         await enqueueForAllWorkspaces(GardenTaskKind.EVIDENCE_STALENESS_CHECK, GardenTier.TIER_1);
         if (input.orphanDetectionEnabled) {
           await enqueueForAllWorkspaces(GardenTaskKind.ORPHAN_DETECTION, GardenTier.TIER_1);
+          await enqueueForAllWorkspaces(GardenTaskKind.EVENT_LOG_ORPHAN_DETECTION, GardenTier.TIER_1);
         }
       }
     },
@@ -497,6 +504,23 @@ export function createGardenRuntime(input: {
   return Object.freeze({
     backgroundManager,
     backlogTelemetrySource,
+    runEventLogOrphanDetection: async () => {
+      if (!input.orphanDetectionEnabled) {
+        return;
+      }
+
+      await enqueueForAllWorkspaces(GardenTaskKind.EVENT_LOG_ORPHAN_DETECTION, GardenTier.TIER_1);
+
+      while (true) {
+        const task = await gardenScheduler.dispatchNext("auditor");
+        requestBacklogTelemetryCapture("startup:event_log_orphan_detection");
+        if (task === null) {
+          break;
+        }
+
+        await auditor.run(task);
+      }
+    },
     runBackgroundPass: async () => {
       for (const service of backgroundServices) {
         await service.task();

@@ -1,6 +1,10 @@
 import { z } from "zod";
+import {
+  EventLogOrphanExpectedTableSchema,
+  type EventLogOrphanExpectedTable
+} from "./events/event-log-orphan.js";
 import { type EventLogEntry } from "./event-log.js";
-import { NonEmptyStringSchema } from "./schema-primitives.js";
+import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "./schema-primitives.js";
 import { type GardenTaskResult } from "./soul/garden-tier.js";
 import { MemoryDimensionSchema } from "./soul/memory-entry.js";
 import { type OrphanRadar } from "./soul/orphan-radar.js";
@@ -34,6 +38,33 @@ export const OrphanedMemoryRecordSchema = z
   })
   .strict()
   .readonly();
+
+export const EventLogOrphanRecordSchema = z
+  .object({
+    audit_event_id: NonEmptyStringSchema,
+    event_type: NonEmptyStringSchema,
+    expected_table: EventLogOrphanExpectedTableSchema,
+    detected_at: IsoDatetimeStringSchema
+  })
+  .strict()
+  .readonly();
+
+export const EventLogOrphanRadarRecordSchema = z
+  .object({
+    radar_id: NonEmptyStringSchema,
+    audit_event_id: NonEmptyStringSchema,
+    event_type: NonEmptyStringSchema,
+    expected_table: EventLogOrphanExpectedTableSchema,
+    workspace_id: NonEmptyStringSchema,
+    detected_at: IsoDatetimeStringSchema,
+    expires_at: IsoDatetimeStringSchema,
+    requires_review: z.boolean()
+  })
+  .strict()
+  .readonly()
+  .refine((data) => data.expires_at > data.detected_at, {
+    message: "expires_at must be after detected_at"
+  });
 
 export const ExpiringGreenStatusSchema = z
   .object({
@@ -77,6 +108,9 @@ export type StaleMemoryEntry = z.infer<typeof StaleMemoryEntrySchema>;
 export type BrokenPointerRecord = z.infer<typeof BrokenPointerRecordSchema>;
 export type HealablePointerRecord = z.infer<typeof HealablePointerRecordSchema>;
 export type OrphanedMemoryRecord = z.infer<typeof OrphanedMemoryRecordSchema>;
+export type EventLogOrphanRecord = z.infer<typeof EventLogOrphanRecordSchema>;
+export type EventLogOrphanRadarRecord = z.infer<typeof EventLogOrphanRadarRecordSchema>;
+export type { EventLogOrphanExpectedTable };
 export type ExpiringGreenStatus = z.infer<typeof ExpiringGreenStatusSchema>;
 export type ColdStartAssessment = z.infer<typeof ColdStartAssessmentSchema>;
 export type DraftCandidate = z.infer<typeof DraftCandidateSchema>;
@@ -100,6 +134,8 @@ export interface AuditorPointerHealPort {
 export interface AuditorOrphanDetectionPort {
   findOrphanedMemories(workspaceId: string): Promise<readonly OrphanedMemoryRecord[]>;
   createOrphanRadarRecord(record: Readonly<OrphanRadar>): Promise<void>;
+  findEventLogOrphans?(workspaceId: string): Promise<readonly EventLogOrphanRecord[]>;
+  createEventLogOrphanRadarRecord?(record: Readonly<EventLogOrphanRadarRecord>): Promise<void>;
 }
 
 export interface AuditorGreenMaintenancePort {

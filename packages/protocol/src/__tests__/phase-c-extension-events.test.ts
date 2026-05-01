@@ -29,6 +29,7 @@ describe("Phase C extension protocol schemas", () => {
       "crystallization_scan",
       "pointer_healing",
       "orphan_detection",
+      "event_log_orphan_detection",
       "merge_proposal",
       "path_graph_snapshot",
       "subject_neighbor_detect",

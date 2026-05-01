@@ -1,4 +1,9 @@
-import { OrphanRadarSchema, type OrphanRadar } from "@do-soul/alaya-protocol";
+import {
+  EventLogOrphanRadarRecordSchema,
+  OrphanRadarSchema,
+  type EventLogOrphanRadarRecord,
+  type OrphanRadar
+} from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../db.js";
 import { StorageError } from "../errors.js";
 import { deepFreeze } from "./shared/deep-freeze.js";
@@ -8,6 +13,9 @@ const ORPHAN_RADAR_LIST_LIMIT = 200;
 
 export interface OrphanRadarRepo {
   create(record: Readonly<OrphanRadar>): Promise<Readonly<OrphanRadar>>;
+  createEventLogOrphan(
+    record: Readonly<EventLogOrphanRadarRecord>
+  ): Promise<Readonly<EventLogOrphanRadarRecord>>;
   findById(radarId: string): Promise<Readonly<OrphanRadar> | null>;
   findActiveByWorkspaceId(
     workspaceId: string,
@@ -19,7 +27,7 @@ export interface OrphanRadarRepo {
 
 interface OrphanRadarRow {
   readonly radar_id: string;
-  readonly target_memory_id: string;
+  readonly target_memory_id: string | null;
   readonly workspace_id: string;
   readonly suspected_surface_gaps_json: string;
   readonly suggested_action: OrphanRadar["suggested_action"];
@@ -68,6 +76,53 @@ export class SqliteOrphanRadarRepo implements OrphanRadarRepo {
     return parsed;
   }
 
+  public async createEventLogOrphan(
+    record: Readonly<EventLogOrphanRadarRecord>
+  ): Promise<Readonly<EventLogOrphanRadarRecord>> {
+    const parsed = parseEventLogOrphanRecord(record);
+
+    try {
+      this.db.connection
+        .prepare(
+          `INSERT OR IGNORE INTO orphan_radar (
+            radar_id,
+            target_memory_id,
+            target_event_id,
+            target_event_type,
+            expected_table,
+            workspace_id,
+            suspected_surface_gaps_json,
+            suggested_action,
+            confidence,
+            detected_at,
+            expires_at,
+            requires_review
+          ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          parsed.radar_id,
+          parsed.audit_event_id,
+          parsed.event_type,
+          parsed.expected_table,
+          parsed.workspace_id,
+          JSON.stringify([`event_log:${parsed.expected_table}:missing_audit_event_id`]),
+          "re_anchor_candidate",
+          1,
+          parsed.detected_at,
+          parsed.expires_at,
+          parsed.requires_review ? 1 : 0
+        );
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to create EventLog orphan radar ${parsed.radar_id}.`,
+        error
+      );
+    }
+
+    return parsed;
+  }
+
   public async findById(radarId: string): Promise<Readonly<OrphanRadar> | null> {
     const parsedRadarId = parseNonEmptyString(radarId, "radar id");
 
@@ -85,7 +140,7 @@ export class SqliteOrphanRadarRepo implements OrphanRadarRepo {
              expires_at,
              requires_review
            FROM orphan_radar
-           WHERE radar_id = ?
+           WHERE radar_id = ? AND target_event_id IS NULL
            LIMIT 1`
         )
         .get(parsedRadarId) as OrphanRadarRow | undefined;
@@ -117,7 +172,7 @@ export class SqliteOrphanRadarRepo implements OrphanRadarRepo {
              expires_at,
              requires_review
            FROM orphan_radar
-           WHERE workspace_id = ? AND expires_at > ?
+           WHERE workspace_id = ? AND expires_at > ? AND target_event_id IS NULL
            ORDER BY detected_at DESC, radar_id ASC
            LIMIT ${ORPHAN_RADAR_LIST_LIMIT}`
         )
@@ -199,6 +254,27 @@ function parseRecord(record: Readonly<OrphanRadar>): Readonly<OrphanRadar> {
     );
   } catch (error) {
     throw new StorageError("VALIDATION_FAILED", "Failed to validate orphan radar.", error);
+  }
+}
+
+function parseEventLogOrphanRecord(
+  record: Readonly<EventLogOrphanRadarRecord>
+): Readonly<EventLogOrphanRadarRecord> {
+  try {
+    return deepFreeze(
+      EventLogOrphanRadarRecordSchema.parse({
+        radar_id: parseNonEmptyString(record.radar_id, "radar id"),
+        audit_event_id: parseNonEmptyString(record.audit_event_id, "audit event id"),
+        event_type: parseNonEmptyString(record.event_type, "event type"),
+        expected_table: record.expected_table,
+        workspace_id: parseNonEmptyString(record.workspace_id, "workspace id"),
+        detected_at: parseTimestamp(record.detected_at),
+        expires_at: parseTimestamp(record.expires_at),
+        requires_review: record.requires_review
+      })
+    );
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate EventLog orphan radar.", error);
   }
 }
 

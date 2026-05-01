@@ -124,6 +124,48 @@ describe("SqliteOrphanRadarRepo", () => {
     ]);
   });
 
+  it("stores EventLog orphan radar rows without requiring a memory parent", async () => {
+    const { database } = await createRepo();
+    const repo = new SqliteOrphanRadarRepo(database);
+
+    const record = {
+      radar_id: "radar-event-log",
+      audit_event_id: "event-orphan-1",
+      event_type: "memory.delivered",
+      expected_table: "trust_context_delivery",
+      workspace_id: "workspace-1",
+      detected_at: "2026-03-28T00:00:00.000Z",
+      expires_at: "2026-03-30T00:00:00.000Z",
+      requires_review: true
+    } as const;
+
+    await expect(repo.createEventLogOrphan(record)).resolves.toEqual(record);
+    await expect(repo.findById("radar-event-log")).resolves.toBeNull();
+    await expect(repo.findActiveByWorkspaceId("workspace-1", "2026-03-28T12:00:00.000Z")).resolves.toEqual([]);
+
+    const row = database.connection
+      .prepare(
+        `SELECT target_memory_id, target_event_id, target_event_type, expected_table
+         FROM orphan_radar
+         WHERE radar_id = ?`
+      )
+      .get("radar-event-log") as
+      | {
+          readonly target_memory_id: string | null;
+          readonly target_event_id: string;
+          readonly target_event_type: string;
+          readonly expected_table: string;
+        }
+      | undefined;
+
+    expect(row).toEqual({
+      target_memory_id: null,
+      target_event_id: "event-orphan-1",
+      target_event_type: "memory.delivered",
+      expected_table: "trust_context_delivery"
+    });
+  });
+
   it("finds radar rows by target memory and deletes expired rows", async () => {
     const { database, memoryRepo } = await createRepo();
     const repo = new SqliteOrphanRadarRepo(database);
