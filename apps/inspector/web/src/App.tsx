@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from "react-router-dom";
-import { setInspectorToken, setUnauthorizedHandler, setWorkspaceId } from "./api";
+import { getInspectorToken, setInspectorToken, setUnauthorizedHandler, setWorkspaceId } from "./api";
 
 import ConfigPage from "./pages/Config";
 import GraphPage from "./pages/Graph";
@@ -10,7 +10,7 @@ import Layout from "./components/Layout";
 import SessionExpired from "./components/SessionExpired";
 import { ToastProvider } from "./components/Toast";
 
-function AppContent() {
+export function AppContent() {
   const [searchParams] = useSearchParams();
   const [ready, setReady] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -25,6 +25,10 @@ function AppContent() {
       if (workspaceId) {
         setWorkspaceId(workspaceId);
       }
+      setAuthError(null);
+      setReady(true);
+    } else if (getInspectorToken()) {
+      setAuthError(null);
       setReady(true);
     } else {
       setAuthError(
