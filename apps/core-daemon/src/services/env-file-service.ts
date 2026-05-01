@@ -1,6 +1,7 @@
 import { constants as fsConstants } from "node:fs";
-import { chmod, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
+import { lstat, open, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { CoreError } from "@do-soul/alaya-core";
 import {
   RuntimeEmbeddingConfigPatchSchema,
@@ -8,6 +9,12 @@ import {
   type RuntimeEmbeddingConfigPatch
 } from "@do-soul/alaya-protocol";
 import type { AlayaConfigPaths } from "../cli/config-files.js";
+import {
+  ensurePrivateDirectory,
+  isNodeErrorWithCode,
+  syncDirectory,
+  writePrivateTextAtomic
+} from "./private-file-service.js";
 
 export const ALAYA_OPENAI_SECRET_REF_ENV = "ALAYA_OPENAI_SECRET_REF";
 
@@ -101,6 +108,26 @@ export async function applyRuntimeEmbeddingConfigFiles<T>(input: {
   readonly normalized: NormalizedRuntimeEmbeddingConfigPatch;
   readonly generateTempId: () => string;
   readonly persist: () => Promise<T>;
+  readonly lockTimeoutMs?: number;
+  readonly lockRetryMs?: number;
+}): Promise<T> {
+  return await withRuntimeEmbeddingConfigLock(input.paths.envPath, async () =>
+    await withRuntimeEmbeddingFileLock(
+      input.paths.envPath,
+      {
+        timeoutMs: input.lockTimeoutMs,
+        retryMs: input.lockRetryMs
+      },
+      async () => await applyRuntimeEmbeddingConfigFilesLocked(input)
+    )
+  );
+}
+
+async function applyRuntimeEmbeddingConfigFilesLocked<T>(input: {
+  readonly paths: AlayaConfigPaths;
+  readonly normalized: NormalizedRuntimeEmbeddingConfigPatch;
+  readonly generateTempId: () => string;
+  readonly persist: () => Promise<T>;
 }): Promise<T> {
   const previousEnv = await readOptional(input.paths.envPath);
   const previousSecret =
@@ -112,7 +139,7 @@ export async function applyRuntimeEmbeddingConfigFiles<T>(input: {
 
   try {
     if (input.normalized.pastedSecret !== null) {
-      await writeTextAtomic(
+      await writeTextAtomicLocked(
         input.normalized.pastedSecret.path,
         `${trimTrailingLineBreaks(input.normalized.pastedSecret.value)}\n`,
         0o600,
@@ -178,7 +205,7 @@ async function patchRuntimeEmbeddingEnvFile(
     setOrDelete(next, "OPENAI_EMBEDDING_PROVIDER_URL", patch.provider_url);
   }
 
-  await writeTextAtomic(paths.envPath, renderEnv(next), 0o600, generateTempId);
+  await writeTextAtomicLocked(paths.envPath, renderEnv(next), 0o600, generateTempId);
 }
 
 function parseRuntimeEmbeddingConfigPatchWithSecretControls(patch: unknown): RawRuntimeEmbeddingConfigPatch {
@@ -321,12 +348,7 @@ async function restoreTextFile(
     return;
   }
 
-  await writeTextAtomic(filePath, previousContent, mode, generateTempId);
-}
-
-async function ensurePrivateDirectory(directoryPath: string): Promise<void> {
-  await mkdir(directoryPath, { recursive: true, mode: 0o700 });
-  await chmod(directoryPath, 0o700);
+  await writeTextAtomicLocked(filePath, previousContent, mode, generateTempId);
 }
 
 function setOrDelete(map: Map<string, string>, key: string, value: string | null): void {
@@ -338,39 +360,124 @@ function setOrDelete(map: Map<string, string>, key: string, value: string | null
 }
 
 const pathWriteLocks = new Map<string, Promise<unknown>>();
+const runtimeEmbeddingConfigLocks = new Map<string, Promise<unknown>>();
+const RUNTIME_EMBEDDING_CONFIG_LOCK_SUFFIX = ".runtime-embedding.lock";
+const DEFAULT_RUNTIME_EMBEDDING_LOCK_TIMEOUT_MS = 10_000;
+const DEFAULT_RUNTIME_EMBEDDING_LOCK_RETRY_MS = 10;
 
-async function writeTextAtomic(
+async function withRuntimeEmbeddingConfigLock<T>(lockKey: string, operation: () => Promise<T>): Promise<T> {
+  const previous = runtimeEmbeddingConfigLocks.get(lockKey) ?? Promise.resolve();
+  const current = previous.catch(() => undefined).then(operation);
+  runtimeEmbeddingConfigLocks.set(lockKey, current);
+  try {
+    return await current;
+  } finally {
+    if (runtimeEmbeddingConfigLocks.get(lockKey) === current) {
+      runtimeEmbeddingConfigLocks.delete(lockKey);
+    }
+  }
+}
+
+async function withRuntimeEmbeddingFileLock<T>(
+  lockKey: string,
+  options: {
+    readonly timeoutMs?: number;
+    readonly retryMs?: number;
+  },
+  operation: () => Promise<T>
+): Promise<T> {
+  const lockPath = `${lockKey}${RUNTIME_EMBEDDING_CONFIG_LOCK_SUFFIX}`;
+  const lock = await acquireRuntimeEmbeddingFileLock(lockPath, {
+    timeoutMs: options.timeoutMs ?? DEFAULT_RUNTIME_EMBEDDING_LOCK_TIMEOUT_MS,
+    retryMs: options.retryMs ?? DEFAULT_RUNTIME_EMBEDDING_LOCK_RETRY_MS
+  });
+  try {
+    return await operation();
+  } finally {
+    await lock.release();
+  }
+}
+
+async function acquireRuntimeEmbeddingFileLock(
+  lockPath: string,
+  options: {
+    readonly timeoutMs: number;
+    readonly retryMs: number;
+  }
+): Promise<{ readonly release: () => Promise<void> }> {
+  const deadline = Date.now() + Math.max(0, options.timeoutMs);
+  const retryMs = Math.max(1, options.retryMs);
+
+  for (;;) {
+    try {
+      await ensurePrivateDirectory(path.dirname(lockPath));
+      const noFollow = typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0;
+      const handle = await open(
+        lockPath,
+        fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY | noFollow,
+        0o600
+      );
+      let closed = false;
+      try {
+        await handle.writeFile(`${process.pid}\n${new Date().toISOString()}\n`, "utf8");
+        await handle.sync();
+        await handle.close();
+        closed = true;
+        await syncDirectory(path.dirname(lockPath));
+        return {
+          release: async () => {
+            await unlink(lockPath).catch((error) => {
+              if (!isNodeErrorWithCode(error, "ENOENT")) {
+                throw error;
+              }
+            });
+            await syncDirectory(path.dirname(lockPath)).catch(() => undefined);
+          }
+        };
+      } catch (error) {
+        if (!closed) {
+          await handle.close().catch(() => undefined);
+        }
+        await unlink(lockPath).catch(() => undefined);
+        throw error;
+      }
+    } catch (error) {
+      if (!isNodeErrorWithCode(error, "EEXIST")) {
+        throw error;
+      }
+      await assertRuntimeEmbeddingFileLockIsRegular(lockPath);
+      if (Date.now() >= deadline) {
+        throw new CoreError("CONFLICT", "Runtime embedding config write is already in progress");
+      }
+      await sleep(retryMs);
+    }
+  }
+}
+
+async function assertRuntimeEmbeddingFileLockIsRegular(lockPath: string): Promise<void> {
+  try {
+    const stats = await lstat(lockPath);
+    if (!stats.isFile()) {
+      throw new CoreError("CONFLICT", "Runtime embedding config lock is not a regular file");
+    }
+  } catch (error) {
+    if (isNodeErrorWithCode(error, "ENOENT")) {
+      return;
+    }
+    throw error;
+  }
+}
+
+async function writeTextAtomicLocked(
   filePath: string,
   content: string,
   mode: number,
   generateTempId: () => string
 ): Promise<void> {
-  await withPathWriteLock(filePath, async () => {
-    await ensurePrivateDirectory(path.dirname(filePath));
-    const tempPath = `${filePath}.${generateTempId()}.tmp`;
-    const noFollow = typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0;
-    const handle = await open(
-      tempPath,
-      fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY | noFollow,
-      mode
-    );
-    let closed = false;
-    try {
-      await handle.writeFile(content, "utf8");
-      await handle.sync();
-      await handle.close();
-      closed = true;
-      await rename(tempPath, filePath);
-      await chmod(filePath, mode);
-      await syncDirectory(path.dirname(filePath));
-    } catch (error) {
-      if (!closed) {
-        await handle.close().catch(() => undefined);
-      }
-      await unlink(tempPath).catch(() => undefined);
-      throw error;
-    }
-  });
+  await withPathWriteLock(
+    filePath,
+    async () => await writePrivateTextAtomic(filePath, content, mode, generateTempId)
+  );
 }
 
 async function withPathWriteLock<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
@@ -386,28 +493,10 @@ async function withPathWriteLock<T>(filePath: string, operation: () => Promise<T
   }
 }
 
-async function syncDirectory(directoryPath: string): Promise<void> {
-  try {
-    const handle = await open(directoryPath, fsConstants.O_RDONLY);
-    try {
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-  } catch {
-    // Some filesystems do not support fsync on directories; the file write
-    // remains exclusive and atomic even when the directory sync is unavailable.
-  }
-}
-
 function trimTrailingLineBreaks(value: string): string {
   return value.replace(/[\r\n]+$/u, "");
 }
 
 function invalidRuntimeEmbeddingPatch(): CoreError {
   return new CoreError("VALIDATION", "Invalid runtime embedding config patch");
-}
-
-function isNodeErrorWithCode(error: unknown, code: string): boolean {
-  return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === code;
 }

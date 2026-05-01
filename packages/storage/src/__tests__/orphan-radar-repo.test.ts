@@ -166,6 +166,34 @@ describe("SqliteOrphanRadarRepo", () => {
     });
   });
 
+  it("rejects duplicate EventLog orphan radar rows for the same audit event", async () => {
+    const { database } = await createRepo();
+    const repo = new SqliteOrphanRadarRepo(database);
+
+    const first = {
+      radar_id: "radar-event-log-1",
+      audit_event_id: "event-orphan-duplicate",
+      event_type: "memory.delivered",
+      expected_table: "trust_context_delivery",
+      workspace_id: "workspace-1",
+      detected_at: "2026-03-28T00:00:00.000Z",
+      expires_at: "2026-03-30T00:00:00.000Z",
+      requires_review: true
+    } as const;
+    const duplicate = {
+      ...first,
+      radar_id: "radar-event-log-2"
+    } as const;
+
+    await expect(repo.createEventLogOrphan(first)).resolves.toEqual(first);
+    await expect(repo.createEventLogOrphan(duplicate)).rejects.toMatchObject({ code: "CONFLICT" });
+
+    const rows = database.connection
+      .prepare("SELECT radar_id FROM orphan_radar WHERE target_event_id = ? ORDER BY radar_id ASC")
+      .all("event-orphan-duplicate") as Array<{ readonly radar_id: string }>;
+    expect(rows).toEqual([{ radar_id: "radar-event-log-1" }]);
+  });
+
   it("finds radar rows by target memory and deletes expired rows", async () => {
     const { database, memoryRepo } = await createRepo();
     const repo = new SqliteOrphanRadarRepo(database);

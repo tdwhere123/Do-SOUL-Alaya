@@ -159,4 +159,8 @@ export interface AuditorSchedulerPort {
 
 export interface AuditorEventLogPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  publishWithMutation<T>(
+    entry: Omit<EventLogEntry, "event_id" | "created_at">,
+    mutate: (entry: EventLogEntry) => Promise<T>
+  ): Promise<T>;
 }

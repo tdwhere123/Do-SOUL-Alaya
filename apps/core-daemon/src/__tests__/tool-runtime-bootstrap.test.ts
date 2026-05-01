@@ -1,3 +1,6 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   PhaseCExtensionEventType,
@@ -377,7 +380,9 @@ describe("daemon tool runtime bootstrap", () => {
   });
 
   it("wires the official_api garden provider through bootstrap and routing without an ad-hoc model env surface", async () => {
-    process.env.OPENAI_API_KEY = "sk-official";
+    delete process.env.OPENAI_API_KEY;
+    process.env.ALAYA_OPENAI_SECRET_REF = "env:ALAYA_TEST_OPENAI_KEY";
+    process.env.ALAYA_TEST_OPENAI_KEY = "sk-official";
     process.env.OFFICIAL_GARDEN_MODEL = "ignored-override";
 
     await bootDaemonRuntime();
@@ -386,6 +391,7 @@ describe("daemon tool runtime bootstrap", () => {
       apiKey: "sk-official",
       model: "gpt-4.1-mini"
     });
+    expect(process.env.OPENAI_API_KEY).toBeUndefined();
     expect(hoisted.conversationServiceDeps?.gardenComputeProvider).toBe(hoisted.officialGardenProviderInstance);
     expect(hoisted.computeRoutingServiceDeps).toMatchObject({
       providers: expect.arrayContaining([
@@ -397,6 +403,87 @@ describe("daemon tool runtime bootstrap", () => {
         })
       ])
     });
+  });
+
+  it("loads embedding secret-ref config from the Alaya config-dir .env during daemon bootstrap", async () => {
+    const configDir = await mkdtemp(path.join(tmpdir(), "alaya-daemon-config-env-"));
+    await writeFile(
+      path.join(configDir, ".env"),
+      [
+        "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT=true",
+        "ALAYA_OPENAI_SECRET_REF=env:ALAYA_TEST_OPENAI_KEY",
+        "OPENAI_EMBEDDING_MODEL=text-embedding-3-large",
+        "OPENAI_EMBEDDING_PROVIDER_URL=https://embedding.example.test/v1",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    process.env.ALAYA_CONFIG_DIR = configDir;
+    process.env.ALAYA_TEST_OPENAI_KEY = "sk-config-file";
+    delete process.env.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT;
+    delete process.env.ALAYA_OPENAI_SECRET_REF;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_EMBEDDING_MODEL;
+    delete process.env.OPENAI_EMBEDDING_PROVIDER_URL;
+
+    await bootDaemonRuntime();
+
+    expect(hoisted.officialGardenProviderCtor).toHaveBeenCalledWith({
+      apiKey: "sk-config-file",
+      model: "gpt-4.1-mini"
+    });
+    expect(hoisted.computeRoutingServiceDeps).toMatchObject({
+      providers: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "official_api",
+          adapter: "garden.official_api"
+        })
+      ])
+    });
+  });
+
+  it("ignores a raw OPENAI_API_KEY when the Alaya secret-ref env is absent", async () => {
+    delete process.env.ALAYA_OPENAI_SECRET_REF;
+    process.env.OPENAI_API_KEY = "sk-legacy-global";
+
+    await bootDaemonRuntime();
+
+    expect(hoisted.officialGardenProviderCtor).not.toHaveBeenCalled();
+    expect(hoisted.computeRoutingServiceDeps).toMatchObject({
+      providers: [
+        expect.objectContaining({
+          kind: "stub",
+          adapter: "garden.local_heuristics"
+        })
+      ]
+    });
+  });
+
+  it("waits for trust counter EventLog replay before daemon bootstrap completes", async () => {
+    const replayGate = createDeferred<void>();
+    let bootSettled = false;
+    hoisted.rebuildCountersFromEventLog.mockImplementationOnce(async () => {
+      await replayGate.promise;
+    });
+
+    const bootPromise = bootDaemonRuntime().then((runtime) => {
+      bootSettled = true;
+      return runtime;
+    });
+    await waitUntil(() => hoisted.rebuildCountersFromEventLog.mock.calls.length > 0);
+
+    expect(bootSettled).toBe(false);
+    replayGate.resolve();
+    await bootPromise;
+    expect(hoisted.rebuildCountersFromEventLog).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails daemon bootstrap instead of marking trust state ready when counter replay rejects", async () => {
+    hoisted.rebuildCountersFromEventLog.mockRejectedValueOnce(new Error("replay failed"));
+
+    await expect(bootDaemonRuntime()).rejects.toThrow("replay failed");
+
+    expect(hoisted.rebuildCountersFromEventLog).toHaveBeenCalledTimes(1);
   });
 
   it("syncs write_file and exec_shell conversation tool specs during daemon bootstrap", async () => {
@@ -668,4 +755,14 @@ async function bootStartedDaemonRuntime(): Promise<{ shutdown(): Promise<void>; 
   const runtime = await bootDaemonRuntime();
   await runtime.startHttpServer();
   return runtime;
+}
+
+async function waitUntil(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (condition()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error("condition was not met");
 }

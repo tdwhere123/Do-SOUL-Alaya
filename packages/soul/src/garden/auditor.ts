@@ -21,6 +21,7 @@ import {
   type BrokenPointerRecord,
   type ColdStartAssessment,
   type DraftCandidate,
+  type EventLogEntry,
   type ExpiringGreenStatus,
   SoulAuditorPointerHealedPayloadSchema,
   SoulOrphanRadarReportedPayloadSchema,
@@ -283,18 +284,21 @@ export class Auditor {
         confidence: orphan.orphan_confidence
       });
 
-      await this.dependencies.eventLogRepo?.append({
-        event_type: Phase4BEventType.SOUL_ORPHAN_RADAR_REPORTED,
-        entity_type: "orphan_radar",
-        entity_id: radarId,
-        workspace_id: task.workspace_id,
-        run_id: task.run_id,
-        caused_by: this.role,
-        revision: 0,
-        payload_json: payload
-      });
-
-      await orphanDetectionPort.createOrphanRadarRecord(radarRecord);
+      await this.publishEventLogMutation(
+        {
+          event_type: Phase4BEventType.SOUL_ORPHAN_RADAR_REPORTED,
+          entity_type: "orphan_radar",
+          entity_id: radarId,
+          workspace_id: task.workspace_id,
+          run_id: task.run_id,
+          caused_by: this.role,
+          revision: 0,
+          payload_json: payload
+        },
+        async () => {
+          await orphanDetectionPort.createOrphanRadarRecord(radarRecord);
+        }
+      );
       createdRadarIds.push(radarId);
     }
 
@@ -325,7 +329,9 @@ export class Auditor {
       return result;
     }
 
-    const orphanedEvents = await orphanDetectionPort.findEventLogOrphans(task.workspace_id);
+    const findEventLogOrphans = orphanDetectionPort.findEventLogOrphans;
+    const createEventLogOrphanRadarRecord = orphanDetectionPort.createEventLogOrphanRadarRecord;
+    const orphanedEvents = await findEventLogOrphans(task.workspace_id);
     const batch = orphanedEvents.slice(0, AUDITOR_CONSTANTS.BATCH_SIZE);
     const expiresAt = new Date(Date.parse(completedAt) + AUDITOR_CONSTANTS.ORPHAN_RADAR_TTL_MS).toISOString();
     const createdRadarIds: string[] = [];
@@ -339,27 +345,30 @@ export class Auditor {
         detected_at: completedAt
       });
 
-      await this.dependencies.eventLogRepo?.append({
-        event_type: SoulGardenEventLogOrphanDetectedEventType.SOUL_GARDEN_EVENT_LOG_ORPHAN_DETECTED,
-        entity_type: "orphan_radar",
-        entity_id: radarId,
-        workspace_id: task.workspace_id,
-        run_id: task.run_id,
-        caused_by: this.role,
-        revision: 0,
-        payload_json: payload
-      });
-
-      await orphanDetectionPort.createEventLogOrphanRadarRecord({
-        radar_id: radarId,
-        audit_event_id: orphan.audit_event_id,
-        event_type: orphan.event_type,
-        expected_table: orphan.expected_table,
-        workspace_id: task.workspace_id,
-        detected_at: completedAt,
-        expires_at: expiresAt,
-        requires_review: true
-      });
+      await this.publishEventLogMutation(
+        {
+          event_type: SoulGardenEventLogOrphanDetectedEventType.SOUL_GARDEN_EVENT_LOG_ORPHAN_DETECTED,
+          entity_type: "orphan_radar",
+          entity_id: radarId,
+          workspace_id: task.workspace_id,
+          run_id: task.run_id,
+          caused_by: this.role,
+          revision: 0,
+          payload_json: payload
+        },
+        async () => {
+          await createEventLogOrphanRadarRecord({
+            radar_id: radarId,
+            audit_event_id: orphan.audit_event_id,
+            event_type: orphan.event_type,
+            expected_table: orphan.expected_table,
+            workspace_id: task.workspace_id,
+            detected_at: completedAt,
+            expires_at: expiresAt,
+            requires_review: true
+          });
+        }
+      );
       createdRadarIds.push(radarId);
     }
 
@@ -368,6 +377,18 @@ export class Auditor {
     ]);
     await this.dependencies.scheduler.reportCompletion(result);
     return result;
+  }
+
+  private async publishEventLogMutation<T>(
+    entry: Omit<EventLogEntry, "event_id" | "created_at">,
+    mutate: (entry: EventLogEntry | null) => Promise<T>
+  ): Promise<T> {
+    const eventLogRepo = this.dependencies.eventLogRepo;
+    if (eventLogRepo === undefined) {
+      return await mutate(null);
+    }
+
+    return await eventLogRepo.publishWithMutation(entry, async (eventLogEntry) => await mutate(eventLogEntry));
   }
 
   private async executeGreenMaintenance(task: GardenTaskDescriptor, completedAt: string): Promise<GardenTaskResult> {

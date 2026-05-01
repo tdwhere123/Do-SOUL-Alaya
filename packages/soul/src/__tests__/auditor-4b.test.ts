@@ -5,6 +5,7 @@ import {
   HealthEventKind,
   Phase4BEventType,
   SoulGardenEventLogOrphanDetectedEventType,
+  type EventLogEntry,
   type OrphanRadar,
   type GardenTaskDescriptor
 } from "@do-soul/alaya-protocol";
@@ -49,13 +50,7 @@ describe("Auditor 4B", () => {
     const healthJournal = {
       record: vi.fn(async () => undefined)
     };
-    const eventLogRepo = {
-      append: vi.fn(async (entry) => ({
-        event_id: `event-${entry.entity_id}`,
-        created_at: "2026-03-28T10:00:00.000Z",
-        ...entry
-      }))
-    };
+    const eventLogRepo = createTransactionalEventLogRepo();
     const auditor = new Auditor({
       evidenceCheckPort: { findMemoriesWithStaleEvidence: vi.fn(async () => []) },
       pointerHealthPort: { findBrokenPointers: vi.fn(async () => []) },
@@ -211,13 +206,7 @@ describe("Auditor 4B", () => {
     const scheduler = {
       reportCompletion: vi.fn(async () => undefined)
     };
-    const eventLogRepo = {
-      append: vi.fn(async (entry) => ({
-        event_id: `event-${entry.entity_id}`,
-        created_at: "2026-03-28T10:00:00.000Z",
-        ...entry
-      }))
-    };
+    const eventLogRepo = createTransactionalEventLogRepo();
     const auditor = new Auditor({
       evidenceCheckPort: { findMemoriesWithStaleEvidence: vi.fn(async () => []) },
       pointerHealthPort: { findBrokenPointers: vi.fn(async () => []) },
@@ -271,13 +260,7 @@ describe("Auditor 4B", () => {
     const scheduler = {
       reportCompletion: vi.fn(async () => undefined)
     };
-    const eventLogRepo = {
-      append: vi.fn(async (entry) => ({
-        event_id: `event-${entry.entity_id}`,
-        created_at: "2026-03-28T10:00:00.000Z",
-        ...entry
-      }))
-    };
+    const eventLogRepo = createTransactionalEventLogRepo();
     const auditor = new Auditor({
       evidenceCheckPort: { findMemoriesWithStaleEvidence: vi.fn(async () => []) },
       pointerHealthPort: { findBrokenPointers: vi.fn(async () => []) },
@@ -324,17 +307,7 @@ describe("Auditor 4B", () => {
     const scheduler = {
       reportCompletion: vi.fn(async () => undefined)
     };
-    const eventLogRepo = {
-      append: vi.fn(async (entry) => {
-        const persisted = {
-          event_id: `event-${entry.entity_id}`,
-          created_at: "2026-03-28T10:00:00.000Z",
-          ...entry
-        };
-        appendedEvents.push(persisted);
-        return persisted;
-      })
-    };
+    const eventLogRepo = createTransactionalEventLogRepo(appendedEvents);
     const orphanDetectionPort = {
       findOrphanedMemories: vi.fn(async () => [
         {
@@ -417,17 +390,7 @@ describe("Auditor 4B", () => {
     const scheduler = {
       reportCompletion: vi.fn(async () => undefined)
     };
-    const eventLogRepo = {
-      append: vi.fn(async (entry) => {
-        const persisted = {
-          event_id: `event-${entry.entity_id}`,
-          created_at: "2026-05-01T10:00:00.000Z",
-          ...entry
-        };
-        appendedEvents.push(persisted);
-        return persisted;
-      })
-    };
+    const eventLogRepo = createTransactionalEventLogRepo(appendedEvents, "2026-05-01T10:00:00.000Z");
     const orphanDetectionPort = {
       findOrphanedMemories: vi.fn(async () => []),
       createOrphanRadarRecord: vi.fn(async () => undefined),
@@ -526,6 +489,66 @@ describe("Auditor 4B", () => {
     ]);
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
+
+  it("rolls back the EventLog orphan audit event when radar persistence fails", async () => {
+    randomUuidMock.mockReset();
+    randomUuidMock.mockReturnValueOnce("uuid-event-radar-rollback");
+    const appendedEvents: unknown[] = [];
+    const scheduler = {
+      reportCompletion: vi.fn(async () => undefined)
+    };
+    const eventLogRepo = createTransactionalEventLogRepo(appendedEvents, "2026-05-01T10:00:00.000Z");
+    const orphanDetectionPort = {
+      findOrphanedMemories: vi.fn(async () => []),
+      createOrphanRadarRecord: vi.fn(async () => undefined),
+      findEventLogOrphans: vi.fn(async () => [
+        {
+          audit_event_id: "audit-delivery-rollback",
+          event_type: "memory.delivered",
+          expected_table: "trust_context_delivery",
+          detected_at: "2026-05-01T09:00:00.000Z"
+        }
+      ]),
+      createEventLogOrphanRadarRecord: vi.fn(async () => {
+        throw new Error("radar insert failed");
+      })
+    };
+    const auditor = new Auditor({
+      evidenceCheckPort: { findMemoriesWithStaleEvidence: vi.fn(async () => []) },
+      pointerHealthPort: { findBrokenPointers: vi.fn(async () => []) },
+      pointerHealPort: {
+        findHealablePointers: vi.fn(async () => []),
+        clearEvidenceRef: vi.fn(async () => undefined),
+        clearMemoryRef: vi.fn(async () => undefined),
+        clearSynthesisRef: vi.fn(async () => undefined)
+      },
+      orphanDetectionPort,
+      greenMaintenancePort: {
+        findExpiringGreenStatuses: vi.fn(async () => []),
+        renewGreenPassiveStable: vi.fn(async () => undefined),
+        requestActiveVerification: vi.fn(async () => undefined),
+        revokeGreen: vi.fn(async () => undefined)
+      },
+      bootstrappingPort: {
+        assessColdStart: vi.fn(async () => ({ is_cold_start: false, memory_count: 10, claim_count: 10 })),
+        generateDraftCandidates: vi.fn(async () => []),
+        findHighFrequencyPatterns: vi.fn(async () => []),
+        createSynthesisCandidate: vi.fn(async () => ({ candidate_id: "candidate-1" })),
+        hasPendingSynthesisCandidate: vi.fn(async () => false)
+      },
+      scheduler,
+      eventLogRepo,
+      now: () => "2026-05-01T10:00:00.000Z"
+    });
+
+    const result = await auditor.run(createTask({ task_kind: GardenTaskKind.EVENT_LOG_ORPHAN_DETECTION }));
+
+    expect(result.success).toBe(false);
+    expect(appendedEvents).toEqual([]);
+    expect(eventLogRepo.publishWithMutation).toHaveBeenCalledTimes(1);
+    expect(orphanDetectionPort.createEventLogOrphanRadarRecord).toHaveBeenCalledTimes(1);
+    expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
+  });
 });
 
 function createTask(overrides: Partial<GardenTaskDescriptor> = {}): GardenTaskDescriptor {
@@ -539,5 +562,38 @@ function createTask(overrides: Partial<GardenTaskDescriptor> = {}): GardenTaskDe
     priority: 10,
     created_at: "2026-03-28T10:00:00.000Z",
     ...overrides
+  };
+}
+
+function createTransactionalEventLogRepo(
+  appendedEvents: unknown[] = [],
+  createdAt = "2026-03-28T10:00:00.000Z"
+) {
+  const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry> => {
+    const persisted = {
+      event_id: `event-${entry.entity_id}`,
+      created_at: createdAt,
+      ...entry
+    } as EventLogEntry;
+    appendedEvents.push(persisted);
+    return persisted;
+  });
+
+  return {
+    append,
+    publishWithMutation: vi.fn(
+      async <T>(
+        entry: Omit<EventLogEntry, "event_id" | "created_at">,
+        mutate: (entry: EventLogEntry) => Promise<T>
+      ): Promise<T> => {
+        const persisted = await append(entry);
+        try {
+          return await mutate(persisted);
+        } catch (error) {
+          appendedEvents.pop();
+          throw error;
+        }
+      }
+    )
   };
 }

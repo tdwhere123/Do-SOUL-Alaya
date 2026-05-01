@@ -292,6 +292,7 @@ const hoisted = vi.hoisted(() => {
       execute: hoisted.toolHotPathExecute
     };
   });
+  const rebuildCountersFromEventLog = vi.fn(async () => undefined);
   const computeRoutingRoute = vi.fn(async () => ({
     decision_id: "decision-1",
     workspace_id: "workspace-1",
@@ -490,6 +491,7 @@ const hoisted = vi.hoisted(() => {
     claimServiceCtor,
     conversationToolExecutorCtor,
     conversationServiceDeps: null as MockConversationServiceDeps | null,
+    rebuildCountersFromEventLog,
     localHeuristicsCtor,
     localHeuristicsInstance,
     officialGardenProviderCtor,
@@ -530,6 +532,12 @@ const hoisted = vi.hoisted(() => {
 const ORIGINAL_ALAYA_MCP_TOOL_CATALOG_JSON = process.env.ALAYA_MCP_TOOL_CATALOG_JSON;
 const ORIGINAL_ALAYA_ALLOWED_MCP_SERVERS = process.env.ALAYA_ALLOWED_MCP_SERVERS;
 const ORIGINAL_ALAYA_MCP_SERVER_CONFIG_JSON = process.env.ALAYA_MCP_SERVER_CONFIG_JSON;
+const ORIGINAL_ALAYA_CONFIG_DIR = process.env.ALAYA_CONFIG_DIR;
+const ORIGINAL_ALAYA_ENABLE_EMBEDDING_SUPPLEMENT = process.env.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT;
+const ORIGINAL_ALAYA_OPENAI_SECRET_REF = process.env.ALAYA_OPENAI_SECRET_REF;
+const ORIGINAL_ALAYA_TEST_OPENAI_KEY = process.env.ALAYA_TEST_OPENAI_KEY;
+const ORIGINAL_OPENAI_EMBEDDING_MODEL = process.env.OPENAI_EMBEDDING_MODEL;
+const ORIGINAL_OPENAI_EMBEDDING_PROVIDER_URL = process.env.OPENAI_EMBEDDING_PROVIDER_URL;
 const ORIGINAL_OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const ORIGINAL_OFFICIAL_GARDEN_MODEL = process.env.OFFICIAL_GARDEN_MODEL;
 
@@ -774,7 +782,7 @@ vi.mock("@do-soul/alaya-core", () => {
     createGlobalMemoryRecallPort: vi.fn().mockImplementation(() => ({
       recall: vi.fn(async () => [])
     })),
-    rebuildCountersFromEventLog: vi.fn(async () => undefined),
+    rebuildCountersFromEventLog: hoisted.rebuildCountersFromEventLog,
     CrossCuttingPermissionService: makeClass(),
     ClaudeRuntimeAdapter: makeClass(),
     DynamicsService: makeClass(),
@@ -1122,6 +1130,8 @@ export function resetToolRuntimeWiringState(): void {
   hoisted.conversationToolExecutorDeps = null;
   hoisted.conversationServiceDeps = null;
   hoisted.officialGardenProviderDeps = null;
+  hoisted.rebuildCountersFromEventLog.mockReset();
+  hoisted.rebuildCountersFromEventLog.mockImplementation(async () => undefined);
 
   if (ORIGINAL_ALAYA_MCP_TOOL_CATALOG_JSON === undefined) {
     delete process.env.ALAYA_MCP_TOOL_CATALOG_JSON;
@@ -1139,6 +1149,42 @@ export function resetToolRuntimeWiringState(): void {
     delete process.env.ALAYA_MCP_SERVER_CONFIG_JSON;
   } else {
     process.env.ALAYA_MCP_SERVER_CONFIG_JSON = ORIGINAL_ALAYA_MCP_SERVER_CONFIG_JSON;
+  }
+
+  if (ORIGINAL_ALAYA_CONFIG_DIR === undefined) {
+    delete process.env.ALAYA_CONFIG_DIR;
+  } else {
+    process.env.ALAYA_CONFIG_DIR = ORIGINAL_ALAYA_CONFIG_DIR;
+  }
+
+  if (ORIGINAL_ALAYA_ENABLE_EMBEDDING_SUPPLEMENT === undefined) {
+    delete process.env.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT;
+  } else {
+    process.env.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT = ORIGINAL_ALAYA_ENABLE_EMBEDDING_SUPPLEMENT;
+  }
+
+  if (ORIGINAL_ALAYA_OPENAI_SECRET_REF === undefined) {
+    delete process.env.ALAYA_OPENAI_SECRET_REF;
+  } else {
+    process.env.ALAYA_OPENAI_SECRET_REF = ORIGINAL_ALAYA_OPENAI_SECRET_REF;
+  }
+
+  if (ORIGINAL_ALAYA_TEST_OPENAI_KEY === undefined) {
+    delete process.env.ALAYA_TEST_OPENAI_KEY;
+  } else {
+    process.env.ALAYA_TEST_OPENAI_KEY = ORIGINAL_ALAYA_TEST_OPENAI_KEY;
+  }
+
+  if (ORIGINAL_OPENAI_EMBEDDING_MODEL === undefined) {
+    delete process.env.OPENAI_EMBEDDING_MODEL;
+  } else {
+    process.env.OPENAI_EMBEDDING_MODEL = ORIGINAL_OPENAI_EMBEDDING_MODEL;
+  }
+
+  if (ORIGINAL_OPENAI_EMBEDDING_PROVIDER_URL === undefined) {
+    delete process.env.OPENAI_EMBEDDING_PROVIDER_URL;
+  } else {
+    process.env.OPENAI_EMBEDDING_PROVIDER_URL = ORIGINAL_OPENAI_EMBEDDING_PROVIDER_URL;
   }
 
   if (ORIGINAL_OPENAI_API_KEY === undefined) {

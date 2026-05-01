@@ -8,9 +8,9 @@
 Gate-4 is **passed**. The single-daemon MCP proof harness resolves
 `#BL-018`, Inspector config writes now proxy the daemon and resolve
 `#BL-019`, and trust delivery/usage persistence resolves `#BL-015` for
-delivery/usage records.
-`#BL-020` remains open for installed / configured / unverifiable counter
-persistence and is not part of the Gate-4 close condition.
+delivery/usage records. Installed / configured / unverifiable counter
+restart stability is closed by `#BL-020` through EventLog-backed startup
+replay before recorder readiness.
 
 | Close condition | State | Authority |
 |---|---|---|
@@ -18,6 +18,7 @@ persistence and is not part of the Gate-4 close condition.
 | Attached-agent MCP proof | Closed 2026-05-01 | `reports/gate-4-mcp-proof.md` |
 | Paste-mode secret-ref repair | Closed 2026-05-01 | `#BL-019`, daemon config-route tests, Inspector routes, and `EmbeddingSupplementForm` tests |
 | Trust delivery/usage restart durability | Closed 2026-05-01 | `#BL-015`, storage repo tests, migration parity, and `trust-state-persistence.test.ts` |
+| Trust counter restart durability | Closed 2026-05-01 | `#BL-020`, EventLog-backed counter replay, and `trust-state-persistence.test.ts` |
 
 ## Fresh Evidence
 
@@ -48,8 +49,8 @@ health-journal entry.
 - `#BL-015` resolved for delivery/usage persistence: SQLite rows survive
   daemon restart, duplicate records conflict instead of overwrite, and
   EventLog mutation rollback is covered.
-- `#BL-020` open: installed/configured/unverifiable trust counters
-  remain process-local.
+- `#BL-020` resolved: installed/configured/unverifiable trust counters
+  are replayed from EventLog before the recorder is marked ready.
 - `#BL-013` resolved: `GreenService.setGrace()` emits
   `soul.green.grace_entered`.
 - `#BL-014` remains open: this batch corrected a docs reference, but
@@ -60,6 +61,4 @@ health-journal entry.
 ## Remaining Release Work
 
 Phase 5 is now unblocked by Gate-4. Remaining release work is the Phase
-5 benchmark, graph contract, full E2E loop, and final review. `#BL-020`
-is a follow-up durability issue outside the resolved `#BL-015`
-delivery/usage close condition.
+5 benchmark, graph contract, full E2E loop, and final review.

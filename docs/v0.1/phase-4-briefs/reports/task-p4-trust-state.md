@@ -20,8 +20,9 @@
   `publishWithMutation(entry)` callback so SQL delivery / usage rows can
   persist the exact EventLog id as `audit_event_id`. This vendor
   divergence is recorded by #BL-021 and `docs/handbook/port-protocol.md`.
-- Installed / configured / unverifiable counter persistence is tracked
-  separately by #BL-020.
+- Installed / configured / unverifiable counter persistence was tracked
+  separately by #BL-020 and is now closed by EventLog-backed startup
+  replay before recorder readiness.
 
 ## Verification
 
@@ -33,4 +34,5 @@
 This card closes as `live-event-ready`. Delivery / usage restart
 proof exists in
 `apps/core-daemon/src/__tests__/trust-state-persistence.test.ts`, and
-the durability closeout for delivery/usage is resolved.
+installed / configured / unverifiable counters are rebuilt from
+EventLog before recorder readiness.

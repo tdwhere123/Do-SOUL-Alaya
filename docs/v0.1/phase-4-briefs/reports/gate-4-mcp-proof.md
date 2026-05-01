@@ -60,8 +60,8 @@ rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon trust-state-persis
 That test proves runtime recall plus usage survives daemon restart and
 keeps `alaya status --agent codex` delivery/usage counts stable. The
 `#BL-015` issue is closed for delivery/usage durability; installed /
-configured / unverifiable counter persistence remains tracked by
-`#BL-020`.
+configured / unverifiable counter restart stability is closed separately
+by `#BL-020` through EventLog replay before recorder readiness.
 
 ## Readiness
 

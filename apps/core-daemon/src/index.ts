@@ -1,5 +1,6 @@
 import { serve, type ServerType } from "@hono/node-server";
 import { randomBytes, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -153,6 +154,8 @@ import { isRemoteDaemonOptInEnabled, resolveDaemonHostFromEnv } from "./server-o
 import { createConfigService } from "./services/config-service.js";
 import { createEmbeddingStatusService, type EmbeddingStatusService } from "./services/embedding-status-service.js";
 import { createEnvironmentStatusService, type EnvironmentStatusService } from "./services/environment-status-service.js";
+import { parseEnv } from "./services/env-file-service.js";
+import { isNodeErrorWithCode } from "./services/private-file-service.js";
 import {
   CORE_DAEMON_ENVIRONMENT_TOOLS,
   derivePrincipalCodingAvailability
@@ -234,6 +237,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const runtimeNotifier = createRuntimeNotifier();
   const requestProtection = createRequestProtection();
   const remoteDaemonOptInEnabled = isRemoteDaemonOptInEnabled(process.env);
+  const configPaths = resolveAlayaConfigPaths(resolveAlayaConfigDir({ env: process.env }));
+  const configEnv = await loadConfigEnv(configPaths.envPath);
   const dbPath = resolveDatabasePath();
   const filesDirectory = resolveCoreDaemonFilesDirectory();
   const database = initDatabase({ filename: dbPath });
@@ -316,7 +321,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const configService = createConfigService({
     configRepo,
     eventPublisher,
-    configPathsProvider: () => resolveAlayaConfigPaths(resolveAlayaConfigDir({ env: process.env }))
+    configPathsProvider: () => configPaths
   });
   const trustStateRecorder = createTrustStateRecorder({
     eventPublisher,
@@ -502,18 +507,18 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const globalMemoryRecallInvalidationSubscription: GlobalMemoryRecallSubscription | null =
     globalMemoryRecallService?.subscribeToInvalidations(runtimeNotifier) ?? null;
   const memoryEmbeddingRepo = createOptionalMemoryEmbeddingRepo(database);
-  const rawEmbeddingSecretRef =
-    process.env.ALAYA_OPENAI_SECRET_REF ?? process.env.OPENAI_API_KEY;
-  const embeddingApiKey = readOptionalSecretEnv(
+  const rawEmbeddingSecretRef = readConfigEnvValue(configEnv, "ALAYA_OPENAI_SECRET_REF");
+  const embeddingApiKey = readOptionalSecretRef(
     rawEmbeddingSecretRef,
     "ALAYA_OPENAI_SECRET_REF"
   );
-  if (embeddingApiKey !== null) {
-    process.env.OPENAI_API_KEY = embeddingApiKey;
-  }
-  const configuredEmbeddingModel = readNonEmptyEnv(process.env.OPENAI_EMBEDDING_MODEL);
+  const configuredEmbeddingModel = readNonEmptyEnv(readConfigEnvValue(configEnv, "OPENAI_EMBEDDING_MODEL"));
+  const configuredEmbeddingProviderUrl = readNonEmptyEnv(
+    readConfigEnvValue(configEnv, "OPENAI_EMBEDDING_PROVIDER_URL")
+  );
   const embeddingModelId = configuredEmbeddingModel ?? (embeddingApiKey === null ? null : DEFAULT_OPENAI_EMBEDDING_MODEL);
-  const embeddingSupplementOptInEnabled = process.env.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT === "true";
+  const embeddingSupplementOptInEnabled =
+    readConfigEnvValue(configEnv, "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT") === "true";
   const recallPolicyEmbeddingEnabled = false;
   const embeddingStatusService = createEmbeddingStatusService({
     embeddingEnabled: embeddingSupplementOptInEnabled,
@@ -528,7 +533,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       ? null
       : new OpenAIEmbeddingClient({
           apiKey: embeddingApiKey,
-          model: configuredEmbeddingModel ?? undefined
+          model: configuredEmbeddingModel ?? undefined,
+          baseUrl: configuredEmbeddingProviderUrl ?? undefined
         });
   const embeddingRecallService =
     memoryEmbeddingRepo === null || embeddingProvider === null
@@ -785,11 +791,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       error: error instanceof Error ? error.message : String(error)
     });
   });
-  void rebuildCountersFromEventLog(eventLogRepo, trustStateRecorder).catch((error) => {
-    warnLogger.warn("trust-state counter rebuild failed", {
-      error: error instanceof Error ? error.message : String(error)
-    });
-  });
+  await rebuildCountersFromEventLog(eventLogRepo, trustStateRecorder);
   trustStateRecorder.markReady();
   const mcpMemoryToolHandler = createMcpMemoryToolHandler({
     recallService,
@@ -1123,6 +1125,21 @@ function createGardenBacklogThresholds(): GardenBacklogThresholds {
   };
 }
 
+async function loadConfigEnv(envPath: string): Promise<ReadonlyMap<string, string>> {
+  try {
+    return parseEnv(await readFile(envPath, "utf8"));
+  } catch (error) {
+    if (isNodeErrorWithCode(error, "ENOENT")) {
+      return new Map();
+    }
+    throw error;
+  }
+}
+
+function readConfigEnvValue(configEnv: ReadonlyMap<string, string>, key: string): string | undefined {
+  return process.env[key] ?? configEnv.get(key);
+}
+
 function readNonEmptyEnv(value: string | undefined): string | null {
   if (typeof value !== "string") {
     return null;
@@ -1132,14 +1149,10 @@ function readNonEmptyEnv(value: string | undefined): string | null {
   return trimmed.length === 0 ? null : trimmed;
 }
 
-function readOptionalSecretEnv(value: string | undefined, label: string): string | null {
+function readOptionalSecretRef(value: string | undefined, label: string): string | null {
   const rawValue = readNonEmptyEnv(value);
   if (rawValue === null) {
     return null;
-  }
-
-  if (!rawValue.startsWith("env:") && !rawValue.startsWith("file:")) {
-    return rawValue;
   }
 
   const resolved = resolveSecretRef(rawValue);

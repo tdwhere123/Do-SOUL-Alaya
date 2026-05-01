@@ -9,21 +9,23 @@ implementation-ready
 | target | source | mode |
 |---|---|---|
 | `packages/protocol/src/events/phase-3b.ts` | n/a (Alaya-original `soul.green.grace_entered`) | additions only |
-| `packages/protocol/src/events/phase-4a.ts` | n/a (Alaya-original trust counter events) | additions only |
+| `packages/protocol/src/soul/trust-state.ts` | n/a (Alaya-original trust counter events) | additions only |
+| `packages/protocol/src/event-log.ts` | n/a (Alaya-original EventLog union registration) | additions only |
 
 ## Section 3 Allowed Scope
 
 This card authorizes adding `soul.green.grace_entered` to
-`phase-3b.ts` and three trust counter events to `phase-4a.ts`.
+`phase-3b.ts` and three trust counter events to the trust-state event
+schema plus the global EventLog union.
 
 ## Section 4 AC
 
 | AC | Criteria |
 |---|---|
 | AC1 | `soul.green.grace_entered` is present in the Phase 3B event schema and union. |
-| AC2 | Three trust counter events are present in the Phase 4A event schema and union. |
+| AC2 | Three trust counter events are present in `packages/protocol/src/soul/trust-state.ts` and the global EventLog event schema. |
 | AC3 | Zod parse round-trips succeed for the new grace and trust counter event payloads. |
-| AC4 | Existing Phase 3B and Phase 4A events continue to parse without schema regression. |
+| AC4 | Existing Phase 3B, Phase 4A, and trust-state events continue to parse without schema regression. |
 
 ## Section 5 Verify
 

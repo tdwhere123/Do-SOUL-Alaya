@@ -43,6 +43,7 @@ import { createAlayaMcpServer } from "../mcp-server.js";
 const tempDirs: string[] = [];
 const originalDataDir = process.env.DATA_DIR;
 const originalOpenAiApiKey = process.env.OPENAI_API_KEY;
+const originalAlayaOpenAiSecretRef = process.env.ALAYA_OPENAI_SECRET_REF;
 const originalEmbeddingSupplementOptIn = process.env.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT;
 const originalAlayaConfigDir = process.env.ALAYA_CONFIG_DIR;
 const originalCodexHome = process.env.CODEX_HOME;
@@ -61,6 +62,7 @@ describe("Gate-4 attached-agent MCP proof", () => {
   it("drives the full soul.* memory sequence through one daemon runtime and MCP transport", async () => {
     const dataDir = await createTempDataDir();
     process.env.DATA_DIR = dataDir;
+    process.env.ALAYA_OPENAI_SECRET_REF = "env:OPENAI_API_KEY";
     process.env.OPENAI_API_KEY = "test-openai-key";
     process.env.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT = "false";
     process.env.ALAYA_CONFIG_DIR = join(dataDir, "config");
@@ -442,6 +444,12 @@ function restoreProcessEnv(): void {
     delete process.env.OPENAI_API_KEY;
   } else {
     process.env.OPENAI_API_KEY = originalOpenAiApiKey;
+  }
+
+  if (originalAlayaOpenAiSecretRef === undefined) {
+    delete process.env.ALAYA_OPENAI_SECRET_REF;
+  } else {
+    process.env.ALAYA_OPENAI_SECRET_REF = originalAlayaOpenAiSecretRef;
   }
 
   if (originalEmbeddingSupplementOptIn === undefined) {

@@ -105,10 +105,11 @@ and nothing else.
 The `PATCH /api/config/runtime/embedding-supplement` path is a thin
 Inspector proxy. The daemon owns `.env` envelope resolution, pasted
 secret normalization, secret-file writes, config mutation, and the
-EventLog audit row because `OPENAI_API_KEY` and friends are
-*daemon-process-global* (not workspace-scoped). After the daemon write,
-the response includes `{"requires_daemon_restart": true}` so the SPA can
-prompt the user.
+EventLog audit row because provider secrets are daemon-only runtime
+configuration. Resolved plaintext is passed directly to daemon provider
+instances and is never forwarded to the Inspector child process. After
+the daemon write, the response includes
+`{"requires_daemon_restart": true}` so the SPA can prompt the user.
 
 **No other writes.** Memory CRUD, governance overrides, attach /
 detach mutation, secret rotation beyond the embedding-supplement
@@ -184,8 +185,9 @@ panel — all forbidden in v0.1 per invariant §21 narrowed wording
   as a low-risk shared edit, not a barrel update.
 - The `<config-dir>/.env` file is jointly owned by P4-cli-install
   (creator) and this card (PATCH path). Concurrent write protection
-  is delegated to the shared helper in `apps/core-daemon/src/secrets.ts`
-  per P4-secrets §2.3.
+  is delegated to the shared helper in
+  `apps/core-daemon/src/services/env-file-service.ts`, while secret-ref
+  grammar and resolution remain owned by P4-secrets §2.3.
 
 **Prerequisite**: P4-cli-bridge, P4-secrets, P4-routes-config, P4-routes-soul, P4-trust-state. P4-daemon-routes-register is a runtime prerequisite for the Gate-4 step-11 integration demo, not a code-level prerequisite for this card; the Inspector server can be implemented and unit-tested with a stub daemon before route registration lands.
 **Blocks**: P4-cli-inspect, P4-inspector-frontend, Gate-4 demo (step 11).

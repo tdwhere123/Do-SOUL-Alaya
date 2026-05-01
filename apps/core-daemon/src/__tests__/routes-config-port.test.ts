@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, stat, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Hono } from "hono";
@@ -17,6 +17,7 @@ import {
 } from "@do-soul/alaya-storage";
 import { registerConfigRoutes } from "../routes/config.js";
 import { createConfigService } from "../services/config-service.js";
+import { applyRuntimeEmbeddingConfigFiles } from "../services/env-file-service.js";
 import { resolveAlayaConfigPaths, type AlayaConfigPaths } from "../cli/config-files.js";
 
 describe("routes-config port batch", () => {
@@ -240,6 +241,59 @@ describe("routes-config port batch", () => {
     expect(harness.publishedEvents).toHaveLength(0);
   });
 
+  it("rejects a symlinked secrets directory before writing pasted plaintext", async () => {
+    const harness = await createServiceHarness();
+    const leakDir = await mkdtemp(path.join(tmpdir(), "daemon-secret-leak-"));
+    await symlink(leakDir, harness.paths.secretsDir);
+
+    await expect(
+      harness.service.patchRuntimeEmbeddingConfig({
+        secret_ref_mode: "paste",
+        secret_value: "sk-test-plaintext-secret"
+      })
+    ).rejects.toThrow("Private config path is not a directory");
+
+    await expect(readdir(leakDir)).resolves.toEqual([]);
+    await expect(harness.service.getRuntimeEmbeddingConfig()).resolves.toEqual({
+      provider_url: null,
+      secret_ref: null,
+      model_id: null,
+      embedding_enabled: false
+    });
+    expect(harness.publishedEvents).toHaveLength(0);
+  });
+
+  it("rejects a symlinked config directory before runtime env writes", async () => {
+    const parentDir = await mkdtemp(path.join(tmpdir(), "daemon-config-parent-"));
+    const leakDir = await mkdtemp(path.join(tmpdir(), "daemon-config-leak-"));
+    const configDir = path.join(parentDir, "config-link");
+    await symlink(leakDir, configDir);
+    const paths = resolveAlayaConfigPaths(configDir);
+    const persist = vi.fn(async () => ({
+      provider_url: null,
+      secret_ref: null,
+      model_id: null,
+      embedding_enabled: true
+    }));
+
+    await expect(
+      applyRuntimeEmbeddingConfigFiles({
+        paths,
+        normalized: {
+          patch: { embedding_enabled: true },
+          pastedSecret: null
+        },
+        generateTempId: () => "config-link",
+        persist,
+        lockTimeoutMs: 20,
+        lockRetryMs: 1
+      })
+    ).rejects.toThrow("Private config path is not a directory");
+
+    expect(persist).not.toHaveBeenCalled();
+    await expect(readdir(leakDir)).resolves.toEqual([]);
+  });
+
   it("cleans pasted secrets and env writes when config persistence rejects the mutation", async () => {
     const failingRepo = createMemoryConfigRepo();
     const patch = vi.fn(async () => {
@@ -265,6 +319,130 @@ describe("routes-config port batch", () => {
     await expect(readFile(harness.paths.envPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     expect(harness.publishedEvents).toHaveLength(0);
     expect(patch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let an earlier rollback clobber a later paste write for the same config files", async () => {
+    const backingRepo = createMemoryConfigRepo();
+    const firstPersistStarted = createDeferred<void>();
+    const firstPersistCanFail = createDeferred<void>();
+    let patchCalls = 0;
+    const patch = vi.fn(
+      async <T extends Record<string, unknown>>(
+        key: string,
+        partial: Partial<T>,
+        defaults: T
+      ): Promise<T> => {
+        patchCalls += 1;
+        if (patchCalls === 1) {
+          firstPersistStarted.resolve();
+          await firstPersistCanFail.promise;
+          throw new Error("first persist failed");
+        }
+        return await backingRepo.patch(key, partial, defaults);
+      }
+    );
+    const harness = await createServiceHarness({
+      repo: {
+        ...backingRepo,
+        patch
+      }
+    });
+    const secretPath = path.join(harness.paths.secretsDir, "openai");
+
+    const first = harness.service.patchRuntimeEmbeddingConfig({
+      embedding_enabled: true,
+      secret_ref_mode: "paste",
+      secret_value: "sk-first-secret"
+    });
+    await firstPersistStarted.promise;
+    const second = harness.service.patchRuntimeEmbeddingConfig({
+      embedding_enabled: true,
+      secret_ref_mode: "paste",
+      secret_value: "sk-second-secret"
+    });
+
+    firstPersistCanFail.resolve();
+    await expect(first).rejects.toThrow("first persist failed");
+    await expect(second).resolves.toMatchObject({
+      embedding_enabled: true,
+      secret_ref: `file:${secretPath}`
+    });
+
+    await expect(readFile(secretPath, "utf8")).resolves.toBe("sk-second-secret\n");
+    await expect(readFile(harness.paths.envPath, "utf8")).resolves.toContain(
+      `ALAYA_OPENAI_SECRET_REF=file:${secretPath}`
+    );
+    expect(harness.publishedEvents).toHaveLength(1);
+  });
+
+  it("honors an OS-visible runtime config lock before snapshotting files", async () => {
+    const configDir = await mkdtemp(path.join(tmpdir(), "daemon-config-lock-"));
+    const paths = resolveAlayaConfigPaths(configDir);
+    const lockPath = `${paths.envPath}.runtime-embedding.lock`;
+    const persist = vi.fn(async () => ({
+      provider_url: null,
+      secret_ref: null,
+      model_id: null,
+      embedding_enabled: true
+    }));
+    await mkdir(paths.configDir, { recursive: true, mode: 0o700 });
+    await writeFile(lockPath, `${process.pid}\n2026-05-01T00:00:00.000Z\n`, {
+      mode: 0o600
+    });
+
+    try {
+      await expect(
+        applyRuntimeEmbeddingConfigFiles({
+          paths,
+          normalized: {
+            patch: { embedding_enabled: true },
+            pastedSecret: null
+          },
+          generateTempId: () => "locked",
+          persist,
+          lockTimeoutMs: 20,
+          lockRetryMs: 1
+        })
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+    } finally {
+      await unlink(lockPath).catch(() => undefined);
+    }
+
+    expect(persist).not.toHaveBeenCalled();
+    await expect(readFile(paths.envPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("does not remove stale-looking runtime config locks while waiting", async () => {
+    const configDir = await mkdtemp(path.join(tmpdir(), "daemon-config-stale-lock-"));
+    const paths = resolveAlayaConfigPaths(configDir);
+    const lockPath = `${paths.envPath}.runtime-embedding.lock`;
+    const lockContent = "999999999\n2026-05-01T00:00:00.000Z\n";
+    const persist = vi.fn(async () => ({
+      provider_url: null,
+      secret_ref: null,
+      model_id: null,
+      embedding_enabled: true
+    }));
+    await mkdir(paths.configDir, { recursive: true, mode: 0o700 });
+    await writeFile(lockPath, lockContent, { mode: 0o600 });
+
+    await expect(
+      applyRuntimeEmbeddingConfigFiles({
+        paths,
+        normalized: {
+          patch: { embedding_enabled: true },
+          pastedSecret: null
+        },
+        generateTempId: () => "stale-locked",
+        persist,
+        lockTimeoutMs: 20,
+        lockRetryMs: 1
+      })
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    expect(persist).not.toHaveBeenCalled();
+    await expect(readFile(lockPath, "utf8")).resolves.toBe(lockContent);
+    await unlink(lockPath).catch(() => undefined);
   });
 
   it("round-trips soul, strategy, and environment patches through real SqliteConfigRepo without mocking the service", async () => {
@@ -432,4 +610,19 @@ function createMemoryConfigRepo(): ConfigRepo {
       return next;
     }
   };
+}
+
+function createDeferred<T>(): {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T | PromiseLike<T>) => void;
+  readonly reject: (reason?: unknown) => void;
+} {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve;
+    reject = innerReject;
+  });
+
+  return { promise, resolve, reject };
 }

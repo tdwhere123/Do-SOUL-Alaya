@@ -110,23 +110,27 @@ a resolved secret never appears in any persisted artifact.
 **Error model.** `resolveSecretRef` is **fail-fast at boot**: if any
 required secret-ref returns a `ResolveSecretError`, the daemon entry
 prints a single human-readable remediation line per failure
-(`OPENAI_API_KEY: env:OPENAI_API_KEY -> environment variable not
-set`) and exits non-zero **before** the HTTP server, MCP server, or
-Garden start. Optional secrets (e.g. embedding API key when the
-embedding feature flag is off) MUST short-circuit before
+(`ALAYA_OPENAI_SECRET_REF: env:OPENAI_API_KEY -> environment variable
+OPENAI_API_KEY is not set`) and exits non-zero **before** the HTTP
+server, MCP server, or Garden start. Optional secrets (e.g. embedding
+API key when the embedding feature flag is off) MUST short-circuit before
 `resolveSecretRef` is called; they do not become errors when absent.
 
 **Logging hygiene.** No log line, no error message, and no audit
 record may include the resolved plaintext value. The error model
 returns the *ref* and a diagnostic, never the value.
 
-**Where secret-ref strings are stored.** Secret-ref strings are
-stored in the `<config-dir>/.env` file owned by P4-cli-install (one
+**Where secret-ref strings are stored.** The daemon startup source of
+truth for embedding provider boot is the `<config-dir>/.env` file
+owned by P4-cli-install and the daemon-owned runtime PATCH path (one
 per line, `KEY=secret-ref`). The daemon entry reads `.env`,
-constructs the per-secret `ref`, and calls `resolveSecretRef`. SQLite
-`app_config` does NOT hold secret-refs in v0.1; if a future card
-needs workspace-scoped provider overrides, it must extend the schema
-and the resolver in a follow-up card.
+constructs the per-secret `ref`, and calls `resolveSecretRef`.
+Inspector-facing runtime config also stores the non-plaintext
+`secret_ref` string in SQLite `app_config` so GET/PATCH responses can
+show the current envelope without reading or returning the resolved
+secret value. SQLite, EventLog, audit, and notifier payloads MUST NOT
+hold resolved plaintext. Workspace-scoped provider overrides remain out
+of v0.1 scope and require a follow-up card.
 
 ## 3. Deferred
 

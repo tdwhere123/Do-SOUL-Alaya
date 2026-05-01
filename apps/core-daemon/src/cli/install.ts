@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
   buildInstallAuditPath,
@@ -13,6 +13,10 @@ import {
   type AlayaCliResult,
   type AlayaSubcommandSpec
 } from "./bridge.js";
+import {
+  ensurePrivateDirectory,
+  writePrivateTextAtomic
+} from "../services/private-file-service.js";
 
 export interface InstallAnswers {
   readonly db_path?: string;
@@ -63,10 +67,11 @@ async function executeInstall(
   const startedAt = clock();
   const auditPath = buildInstallAuditPath(paths, startedAt);
   const partialState: string[] = [];
+  let auditInitialized = false;
 
   try {
-    await mkdir(paths.configDir, { recursive: true, mode: 0o700 });
-    await mkdir(paths.auditDir, { recursive: true, mode: 0o700 });
+    await ensurePrivateDirectory(paths.configDir);
+    await ensurePrivateDirectory(paths.auditDir);
     await writeInstallAudit(auditPath, {
       status: "started",
       started_at: startedAt,
@@ -75,24 +80,25 @@ async function executeInstall(
       partial_state: [],
       error: null
     });
+    auditInitialized = true;
 
     const existing = await readExistingInstallConfig(paths);
     const resolved = resolveInstallAnswers(args.answers, existing, paths);
 
     if (resolved.pasted_secret !== null) {
-      await mkdir(paths.secretsDir, { recursive: true, mode: 0o700 });
-      await writeTextAtomic(resolved.pasted_secret.path, `${resolved.pasted_secret.value.trimEnd()}\n`, 0o600);
+      await ensurePrivateDirectory(paths.secretsDir);
+      await writePrivateTextAtomic(resolved.pasted_secret.path, `${resolved.pasted_secret.value.trimEnd()}\n`, 0o600);
       partialState.push(resolved.pasted_secret.path);
     }
 
     const nextToml = renderAlayaToml(resolved);
     const nextEnv = renderEnvFile(resolved);
     if (normalizeFile(await readOptional(paths.tomlPath)) !== normalizeFile(nextToml)) {
-      await writeTextAtomic(paths.tomlPath, nextToml, 0o600);
+      await writePrivateTextAtomic(paths.tomlPath, nextToml, 0o600);
       partialState.push(paths.tomlPath);
     }
     if (normalizeFile(await readOptional(paths.envPath)) !== normalizeFile(nextEnv)) {
-      await writeTextAtomic(paths.envPath, nextEnv, 0o600);
+      await writePrivateTextAtomic(paths.envPath, nextEnv, 0o600);
       partialState.push(paths.envPath);
     }
 
@@ -118,14 +124,16 @@ async function executeInstall(
       }
     };
   } catch (error) {
-    await writeInstallAudit(auditPath, {
-      status: "failed",
-      started_at: startedAt,
-      finished_at: clock(),
-      config_dir: paths.configDir,
-      partial_state: partialState,
-      error: sanitizeInstallError(error)
-    }).catch(() => undefined);
+    if (auditInitialized) {
+      await writeInstallAudit(auditPath, {
+        status: "failed",
+        started_at: startedAt,
+        finished_at: clock(),
+        config_dir: paths.configDir,
+        partial_state: partialState,
+        error: sanitizeInstallError(error)
+      }).catch(() => undefined);
+    }
     ctx.stderr.write(`${sanitizeInstallError(error)}\n`);
     return { exitCode: ALAYA_SYSEXITS.CANTCREAT };
   }
@@ -212,10 +220,7 @@ async function readExistingInstallConfig(paths: AlayaConfigPaths): Promise<Exist
     model_id: toml === null ? null : readTomlString(toml, "embedding", "model_id"),
     default_workspace: toml === null ? null : readTomlString(toml, "runtime", "default_workspace"),
     worktree_enabled: toml === null ? null : readTomlBoolean(toml, "runtime", "worktree_enabled"),
-    secret_ref:
-      env === null
-        ? null
-        : readEnvValue(env, "ALAYA_OPENAI_SECRET_REF") ?? readEnvValue(env, "OPENAI_API_KEY")
+    secret_ref: env === null ? null : readEnvValue(env, "ALAYA_OPENAI_SECRET_REF")
   };
 }
 
@@ -293,6 +298,10 @@ function renderEnvFile(config: ResolvedInstallConfig): string {
   if (config.secret_ref !== null) {
     lines.push(`ALAYA_OPENAI_SECRET_REF=${config.secret_ref}`);
   }
+  lines.push(`OPENAI_EMBEDDING_MODEL=${config.model_id}`);
+  if (config.provider_base_url !== null) {
+    lines.push(`OPENAI_EMBEDDING_PROVIDER_URL=${config.provider_base_url}`);
+  }
   return `${lines.join("\n")}\n`;
 }
 
@@ -307,14 +316,7 @@ async function writeInstallAudit(
     readonly error: string | null;
   }>
 ): Promise<void> {
-  await writeTextAtomic(auditPath, `${JSON.stringify({ audit_version: 1, ...input })}\n`, 0o600);
-}
-
-async function writeTextAtomic(filePath: string, content: string, mode: number): Promise<void> {
-  await mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
-  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tempPath, content, { mode, encoding: "utf8" });
-  await rename(tempPath, filePath);
+  await writePrivateTextAtomic(auditPath, `${JSON.stringify({ audit_version: 1, ...input })}\n`, 0o600);
 }
 
 async function readOptional(filePath: string): Promise<string | null> {

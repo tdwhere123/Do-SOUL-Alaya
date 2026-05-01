@@ -94,10 +94,10 @@ any file inside it.
 | # | Prompt | Default | Writes to |
 |---|---|---|---|
 | 1 | DB file path | `<config-dir>/alaya.db` | `alaya.toml` `[storage].db_path` |
-| 2 | Enable embedding supplement? (y/N) | `N` | `alaya.toml` `[embedding].enabled` and `.env` `DO_WHAT_ENABLE_EMBEDDING_SUPPLEMENT` |
-| 3 | (only if 2 = y) Embedding provider URL or `keep` to use OpenAI default | `keep` | `alaya.toml` `[embedding].provider_base_url` (omitted when `keep`) |
-| 4 | (only if 2 = y) Embedding model id | `text-embedding-3-small` | `alaya.toml` `[embedding].model_id` |
-| 5 | (only if 2 = y) API key source: `env`, `file`, `paste` | `env` | `.env` `OPENAI_API_KEY=<secret-ref>` |
+| 2 | Enable embedding supplement? (y/N) | `N` | `alaya.toml` `[embedding].enabled` and `.env` `ALAYA_ENABLE_EMBEDDING_SUPPLEMENT` |
+| 3 | (only if 2 = y) Embedding provider URL or `keep` to use OpenAI default | `keep` | `alaya.toml` `[embedding].provider_base_url` (omitted when `keep`) and `.env` `OPENAI_EMBEDDING_PROVIDER_URL` when set |
+| 4 | (only if 2 = y) Embedding model id | `text-embedding-3-small` | `alaya.toml` `[embedding].model_id` and `.env` `OPENAI_EMBEDDING_MODEL` |
+| 5 | (only if 2 = y) API key source: `env`, `file`, `paste` | `env` | `.env` `ALAYA_OPENAI_SECRET_REF=<secret-ref>` |
 | 6 | (only if 2 = y AND 5 = `env`) Env var name | `OPENAI_API_KEY` | `.env` records `env:<name>` |
 | 7 | (only if 2 = y AND 5 = `file`) Path to existing key file | (no default) | `.env` records `file:<path>` |
 | 8 | (only if 2 = y AND 5 = `paste`) Key value | (hidden input) | written to `<config-dir>/secrets/openai` with `0600`, `.env` records `file:<that path>` |

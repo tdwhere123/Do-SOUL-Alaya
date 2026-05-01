@@ -22,7 +22,7 @@ const allowedBl014References = [
   },
   {
     file: "docs/v0.1/phase-4-briefs/README.md",
-    line: "Open follow-up issues after this repair are `#BL-020`, `#BL-014`, and"
+    line: "Open follow-up issues after this repair are `#BL-014` and the post-port"
   },
   {
     file: "docs/v0.1/phase-4-briefs/reports/gate-4-closeout.md",

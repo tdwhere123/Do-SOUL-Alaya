@@ -45,6 +45,7 @@ const DEFAULT_INSPECTOR_PORT = 5174;
 const READY_LINE = "inspector_ready";
 const SHUTDOWN_TIMEOUT_MS = 2000;
 const ALLOW_FIXED_TOKEN_ENV = "ALAYA_INSPECTOR_ALLOW_FIXED_TOKEN";
+const INSPECTOR_CHILD_ENV_KEYS = ["ALAYA_DAEMON_URL"] as const;
 
 export function createInspectCommand(deps: InspectCommandDependencies = {}): AlayaSubcommandSpec<InspectArgs> {
   return {
@@ -157,14 +158,22 @@ function defaultInspectorEntryPath(): string {
 
 function defaultSpawnInspector(input: SpawnInspectorInput): InspectorChildProcess {
   return spawnChildProcess(process.execPath, [input.inspectorEntryPath], {
-    env: {
-      ...process.env,
-      ...input.env,
-      ALAYA_INSPECTOR_TOKEN: input.token,
-      ALAYA_INSPECTOR_PORT: String(input.port)
-    },
+    env: buildInspectorChildEnv(input),
     stdio: ["ignore", "pipe", "pipe"]
   });
+}
+
+export function buildInspectorChildEnv(input: SpawnInspectorInput): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of INSPECTOR_CHILD_ENV_KEYS) {
+    const value = input.env[key];
+    if (value !== undefined) {
+      env[key] = value;
+    }
+  }
+  env.ALAYA_INSPECTOR_TOKEN = input.token;
+  env.ALAYA_INSPECTOR_PORT = String(input.port);
+  return env;
 }
 
 async function waitForInspectorReady(child: InspectorChildProcess, ctx: AlayaCliContext): Promise<void> {

@@ -16,20 +16,6 @@ Status: Open
 Description: Migration 056 (trust-state-persistence.sql) and trust-state-repo.ts were delivered under task-p4-trust-state.md without a proper Phase-1 carve-out card. This entry authorizes task-p1-migrations-followup-trust-state-056.md as the governing card going forward.
 Interlocks: task-p1-migrations-followup-trust-state-056.md
 
-### #BL-020 — Trust installed/configured/unverifiable counter persistence
-
-**Status**: Open
-**Owner**: `apps/core-daemon/src/trust-state.ts` plus a future storage
-follow-up card
-**Close condition**: `recordInstalled`, `recordConfigured`, and
-`recordUnverifiable` persist through SQLite and survive daemon restart
-with `alaya status --agent <target>` counts unchanged.
-
-`#BL-015` is scoped to delivery / usage-proof durability only. The
-installed / configured / unverifiable counters still live in process
-memory and must not be described as restart-stable until this issue
-lands.
-
 ### #BL-014 — Historical Gate-2 R1 wave-close commit hygiene gap
 
 **Status**: Open (prevention remains active)
@@ -177,7 +163,18 @@ records now raise storage conflicts instead of overwriting rows, so
 `publishWithMutation(entry)` rolls the EventLog entry back on duplicate
 persistence. `trust-state-persistence.test.ts` proves delivery / usage
 counts survive daemon restart. Installed / configured / unverifiable
-counter persistence remains intentionally tracked by `#BL-020`.
+counter restart stability is closed separately by `#BL-020` through
+EventLog replay before recorder readiness.
+
+### #BL-020 — Trust installed/configured/unverifiable counter persistence
+
+Resolved by EventLog-backed startup replay in
+`packages/core/src/trust-state-service.ts` and
+`apps/core-daemon/src/index.ts`. `recordInstalled`, `recordConfigured`,
+and `recordUnverifiable` remain runtime projections, but daemon startup
+replays their SQLite EventLog rows before the trust recorder is marked
+ready, keeping `alaya status --agent <target>` counts stable across
+restart.
 
 ### #BL-012 — Memory Inspector
 

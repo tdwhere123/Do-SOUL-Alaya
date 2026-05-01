@@ -75,8 +75,8 @@ export class TrustStateRecorder {
   private readonly clock: () => string;
   private ready: boolean;
 
-  // v0.1 persists delivery/usage records only. These counters remain
-  // process-local by design until backlog #BL-020 adds durable storage.
+  // Counter maps are runtime projections. Daemon startup replays their
+  // EventLog rows before markReady so status remains restart-stable.
   private readonly installedCountsByTarget = new Map<string, number>();
   private readonly configuredCountsByTarget = new Map<string, number>();
   private readonly unverifiableCountsByTarget = new Map<string, number>();

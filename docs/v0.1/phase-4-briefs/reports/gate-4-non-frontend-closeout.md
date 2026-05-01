@@ -93,8 +93,9 @@ No frontend review is claimed here.
 
 2026-05-01 amendment: `P4-trust-state` delivery/usage records have a
 SQL-backed persistence path, and `#BL-015` is resolved for
-delivery/usage durability. Installed/configured/unverifiable counters
-remain in-process and are tracked separately by `#BL-020`.
+delivery/usage durability. Installed/configured/unverifiable counter
+restart stability is resolved by `#BL-020` through EventLog-backed
+startup replay before recorder readiness.
 
 `P4-inspector-frontend` landed, and Inspector config-write live
 readiness is closed by `#BL-019`.

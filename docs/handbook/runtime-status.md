@@ -92,11 +92,8 @@ creation, governance reject, a Garden background pass with EventLog and
 health-journal evidence, `alaya status`, and `alaya doctor` in one daemon
 lifetime using the MCP SDK in-memory transport.
 
-Remaining non-blocking follow-up after Gate-4:
-
-- `#BL-020`: installed / configured / unverifiable trust counters are
-  still process-local; this is not part of the resolved `#BL-015`
-  delivery / usage close condition.
+Remaining non-blocking follow-up after Gate-4: none for the resolved
+trust-state delivery / usage and counter restart-stability repairs.
 
 Remaining v0.1 release work is Phase 5: benchmark fixtures, graph
 contract, full E2E, final review, and the post-port hygiene sweep only

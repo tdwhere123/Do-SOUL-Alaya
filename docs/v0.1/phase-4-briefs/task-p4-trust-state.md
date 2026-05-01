@@ -52,7 +52,8 @@ ContextDeliveryRecord and UsageProofRecord consumers.
   backlog #BL-015; the follow-up repair added migration
   `056-trust-state-persistence.sql` and closed #BL-015 for
   delivery/usage durability. Installed / configured / unverifiable
-  counter persistence is tracked separately by `#BL-020`.
+  counter persistence was tracked separately by `#BL-020` and is now
+  closed by EventLog-backed startup replay before recorder readiness.
 - **EventPublisher divergence**: the #BL-015 repair intentionally keeps
   `publishWithMutation(event, mutate(entry))` instead of the vendor
   zero-argument callback so delivery / usage rows can store the exact
@@ -162,12 +163,13 @@ Computed deterministically from counts; ties broken by row order (first match wi
 | `unverifiable_count > 0 && used_count == 0 && skipped_count == 0` | `unverifiable` |
 | any other combination of `used + skipped + not_applicable + unverifiable > 0` with at least two distinct outcomes | `mixed` |
 
-## 3. Deferred
+## 3. Repaired Follow-Ups
 
 - **#BL-015** SQL persistence of delivery / usage trust records across
   daemon restart. Resolved by the 2026-05-01 repair.
-- **#BL-020** SQL persistence of installed / configured /
-  unverifiable trust counters across daemon restart.
+- **#BL-020** restart stability of installed / configured /
+  unverifiable trust counters. Resolved by EventLog-backed startup replay
+  before recorder readiness.
 
 ## 4. Acceptance Criteria
 

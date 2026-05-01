@@ -168,7 +168,15 @@ export function createGardenRuntime(input: {
       (await input.eventPublisher.publish({
         ...entry,
         event_type: entry.event_type as EventType
-      })) as EventLogEntry
+      })) as EventLogEntry,
+    publishWithMutation: async (entry, mutate) =>
+      await input.eventPublisher.publishWithMutation(
+        {
+          ...entry,
+          event_type: entry.event_type as EventType
+        },
+        mutate
+      )
   };
   const auditorSchedulerPort = {
     reportCompletion: (

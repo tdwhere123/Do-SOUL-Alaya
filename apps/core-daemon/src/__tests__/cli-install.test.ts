@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, stat } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -20,6 +20,8 @@ describe("cli install", () => {
         embedding_enabled: true,
         api_key_source: "paste",
         pasted_key: "sk-test-secret",
+        provider_base_url: "https://embedding.example.test/v1",
+        model_id: "text-embedding-3-large",
         default_workspace: "work",
         worktree_enabled: true
       }
@@ -33,7 +35,11 @@ describe("cli install", () => {
     const auditFiles = await readdir(path.join(configDir, "audit"));
 
     expect(toml).toContain('default_workspace = "work"');
+    expect(toml).toContain('provider_base_url = "https://embedding.example.test/v1"');
+    expect(toml).toContain('model_id = "text-embedding-3-large"');
     expect(env).toContain("ALAYA_OPENAI_SECRET_REF=file:");
+    expect(env).toContain("OPENAI_EMBEDDING_PROVIDER_URL=https://embedding.example.test/v1");
+    expect(env).toContain("OPENAI_EMBEDDING_MODEL=text-embedding-3-large");
     expect(env).not.toContain("sk-test-secret");
     expect(secret.trim()).toBe("sk-test-secret");
     expect(secretStat.mode & 0o777).toBe(0o600);
@@ -76,6 +82,52 @@ describe("cli install", () => {
     expect(await readFile(path.join(configDir, ".env"), "utf8")).toBe(envBefore);
     const auditFiles = await readdir(path.join(configDir, "audit"));
     expect(auditFiles).toHaveLength(2);
+  });
+
+  it("rejects a symlinked secrets directory before writing pasted plaintext", async () => {
+    const configDir = await mkdtemp(path.join(tmpdir(), "alaya-install-symlink-"));
+    const leakDir = await mkdtemp(path.join(tmpdir(), "alaya-install-leak-"));
+    await symlink(leakDir, path.join(configDir, "secrets"));
+    const command = createInstallCommand({
+      configDirResolver: () => configDir,
+      clock: createClock()
+    });
+
+    const result = await command.handler(createContext(), {
+      nonInteractive: true,
+      answers: {
+        embedding_enabled: true,
+        api_key_source: "paste",
+        pasted_key: "sk-install-secret"
+      }
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(await readdir(leakDir)).toEqual([]);
+    await expect(readFile(path.join(configDir, ".env"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects a symlinked config directory before writing install artifacts", async () => {
+    const parentDir = await mkdtemp(path.join(tmpdir(), "alaya-install-parent-"));
+    const leakDir = await mkdtemp(path.join(tmpdir(), "alaya-install-config-leak-"));
+    const configDir = path.join(parentDir, "config-link");
+    await symlink(leakDir, configDir);
+    const command = createInstallCommand({
+      configDirResolver: () => configDir,
+      clock: createClock()
+    });
+
+    const result = await command.handler(createContext(), {
+      nonInteractive: true,
+      answers: {
+        embedding_enabled: true,
+        api_key_source: "paste",
+        pasted_key: "sk-install-secret"
+      }
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(await readdir(leakDir)).toEqual([]);
   });
 });
 

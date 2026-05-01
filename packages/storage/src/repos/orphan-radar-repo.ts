@@ -82,7 +82,7 @@ export class SqliteOrphanRadarRepo implements OrphanRadarRepo {
     const parsed = parseEventLogOrphanRecord(record);
 
     try {
-      this.db.connection
+      const result = this.db.connection
         .prepare(
           `INSERT OR IGNORE INTO orphan_radar (
             radar_id,
@@ -112,7 +112,16 @@ export class SqliteOrphanRadarRepo implements OrphanRadarRepo {
           parsed.expires_at,
           parsed.requires_review ? 1 : 0
         );
+      if (result.changes !== 1) {
+        throw new StorageError(
+          "CONFLICT",
+          `EventLog orphan radar already exists for audit event ${parsed.audit_event_id}.`
+        );
+      }
     } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to create EventLog orphan radar ${parsed.radar_id}.`,

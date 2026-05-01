@@ -1,7 +1,11 @@
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { createInspectCommand, type InspectorChildProcess } from "../cli/inspect.js";
+import {
+  buildInspectorChildEnv,
+  createInspectCommand,
+  type InspectorChildProcess
+} from "../cli/inspect.js";
 import type { AlayaCliContext } from "../cli/bridge.js";
 
 describe("cli inspect", () => {
@@ -80,6 +84,26 @@ describe("cli inspect", () => {
       }
     ]);
     expect(opened).toEqual(["http://127.0.0.1:5175/?token=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]);
+  });
+
+  it("builds a minimal inspector child env without provider secrets", () => {
+    const env = buildInspectorChildEnv({
+      port: 5175,
+      token: "b".repeat(64),
+      inspectorEntryPath: "/tmp/inspector.js",
+      env: {
+        ALAYA_DAEMON_URL: "http://127.0.0.1:3000",
+        ALAYA_OPENAI_SECRET_REF: "file:/tmp/secret",
+        OPENAI_API_KEY: "sk-secret",
+        PATH: "/usr/bin"
+      }
+    });
+
+    expect(env).toEqual({
+      ALAYA_DAEMON_URL: "http://127.0.0.1:3000",
+      ALAYA_INSPECTOR_TOKEN: "b".repeat(64),
+      ALAYA_INSPECTOR_PORT: "5175"
+    });
   });
 
   it("rejects fixed test tokens unless the env gate is enabled", async () => {

@@ -13,7 +13,7 @@ describe("alaya operations", () => {
     const dbPath = path.join(configDir, "alaya.db");
     await mkdir(paths.configDir, { recursive: true });
     await writeFile(paths.tomlPath, `[storage]\ndb_path = "${dbPath}"\n`, "utf8");
-    await writeFile(paths.envPath, "OPENAI_API_KEY=env:OPENAI_API_KEY\n", "utf8");
+    await writeFile(paths.envPath, "ALAYA_OPENAI_SECRET_REF=env:OPENAI_API_KEY\n", "utf8");
     await writeFile(dbPath, "sqlite-bytes");
 
     const service = createAlayaOperationsService({

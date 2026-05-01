@@ -27,8 +27,9 @@ which asserts Garden EventLog and health-journal evidence. The
 Inspector config-write path is `live-event-ready`, and trust-state
 delivery/usage durability is SQL-backed and verified.
 
-Open follow-up issues after this repair are `#BL-020`, `#BL-014`, and
-the post-port hygiene sweep tracked by `#BL-016` / `#BL-017`.
+Open follow-up issues after this repair are `#BL-014` and the post-port
+hygiene sweep tracked by `#BL-016` / `#BL-017`; `#BL-020` is resolved
+by EventLog-backed startup replay.
 
 ## Card Groups
 
@@ -174,9 +175,10 @@ that depend on the graph contract remain Phase 5 release work.
 11. `rtk pnpm exec alaya inspect` — Inspector server starts on
     `127.0.0.1:5174` with a per-launch token; the printed URL opens
     successfully in a browser. The Provider/Config page can PATCH the
-    `OPENAI_API_KEY` secret-ref and `OPENAI_EMBEDDING_MODEL`, and the
-    daemon's `/embedding-status` flips from `provider_unconfigured`
-    to `embedding_supplement` after a daemon restart. The Memory
+    `ALAYA_OPENAI_SECRET_REF` secret-ref and
+    `OPENAI_EMBEDDING_MODEL`, and the daemon's `/embedding-status`
+    flips from `provider_unconfigured` to `embedding_supplement`
+    after a daemon restart. The Memory
     Graph page renders the P5-graph-contract `soul_graph` payload.
     The Trust/Status page mirrors `alaya status` output. Requests
     without the token return 401.
