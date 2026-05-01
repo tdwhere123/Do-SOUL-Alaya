@@ -190,8 +190,10 @@ describe("inspector routes", () => {
     await writeFile(path.join(staticRoot, "assets", "app.js"), "console.log('ok');", "utf8");
     const app = createInspectorApp({ token: "token", staticRoot });
 
+    expect((await app.request("/")).status).toBe(401);
+    expect((await app.request("/api/status")).status).toBe(401);
     expect(await (await app.request("/?token=token")).text()).toContain("<html>ok</html>");
-    expect(await (await app.request("/assets/app.js?token=token")).text()).toContain("console.log");
+    expect(await (await app.request("/assets/app.js")).text()).toContain("console.log");
     expect((await app.request("/..%2F..%2Fetc%2Fpasswd?token=token")).status).toBe(404);
 
     const missingApp = createInspectorApp({

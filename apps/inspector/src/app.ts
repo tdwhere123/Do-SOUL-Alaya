@@ -39,7 +39,7 @@ export function createInspectorApp(options: InspectorAppOptions): Hono {
     console.error("[inspector] sanitized route error", summarizeInspectorError(error, status));
     return context.json({ error: status === 400 ? "invalid_request" : "internal_error" }, status);
   });
-  app.use("*", createInspectorAuthMiddleware(options.token));
+  app.use("*", createInspectorAuthMiddleware(options.token, { publicPathPrefixes: ["/assets/"] }));
 
   const proxyOptions = {
     daemonUrl: options.daemonUrl ?? "http://127.0.0.1:5173",

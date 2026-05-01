@@ -1,13 +1,23 @@
 import { timingSafeEqual } from "node:crypto";
 import type { Context, MiddlewareHandler, Next } from "hono";
 
-export function createInspectorAuthMiddleware(token: string): MiddlewareHandler {
+export interface InspectorAuthOptions {
+  readonly publicPathPrefixes?: readonly string[];
+}
+
+export function createInspectorAuthMiddleware(token: string, options: InspectorAuthOptions = {}): MiddlewareHandler {
   const expectedToken = normalizeToken(token);
   if (expectedToken === null) {
     throw new Error("inspector_token_missing");
   }
+  const publicPathPrefixes = options.publicPathPrefixes ?? [];
 
   return async (context: Context, next: Next) => {
+    if (isPublicPath(context.req.path, publicPathPrefixes)) {
+      await next();
+      return;
+    }
+
     const providedToken = normalizeToken(
       context.req.query("token") ?? context.req.header("x-alaya-inspector-token")
     );
@@ -33,4 +43,8 @@ export function constantTimeTokenEqual(provided: string, expected: string): bool
 function normalizeToken(value: string | undefined): string | null {
   const trimmed = value?.trim() ?? "";
   return trimmed.length === 0 ? null : trimmed;
+}
+
+function isPublicPath(pathname: string, prefixes: readonly string[]): boolean {
+  return prefixes.some((prefix) => pathname.startsWith(prefix));
 }
