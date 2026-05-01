@@ -15,9 +15,21 @@ Phase 0 → Gate-0
        → Phase 2 (Wave 2, 32 cards) → Gate-2
            → Phase 3 (Wave 3, 3-4 parallel workers after foundation) → Gate-3
                → Phase 4 (Wave 4, 3-5 parallel cards) → Gate-4
-                   → Phase 5 (Wave 5, 1 sequential card) → Gate-5
-                       → v0.1 release
+                   → Phase 5 (Wave 5, 3 sequential cards) → Gate-5
+                       → v0.1.0 release
+                           → Phase 6 (Wave 6, 5 cards, post-release) → Gate-6
+                               → v0.1.1 release
 ```
+
+`v0.1` ships in two steps inside the same release line:
+
+- `v0.1.0` = Gate-5: clean minimum-viable memory core. No marketing
+  numbers. README has no benchmark table.
+- `v0.1.1` = Gate-6: Phase 6 marketing benchmark wave lands. README
+  gets a single-run leaderboard table (alaya / mem0 / no-memory) on a
+  user-supplied OpenRouter model. Numbers are filled in by the user
+  after running the harness; the harness, adapter, and README template
+  are the deliverables.
 
 ## Phase Summary
 
@@ -28,7 +40,8 @@ Phase 0 → Gate-0
 | Phase 2 | Wave 2: Services + Garden + Repos + Security | 32 cards | **done** | Gate-2 passed |
 | Phase 3 | Wave 3: Memory orchestration bridge + run lifecycle | 6 cards | **done** | Gate-3 passed |
 | Phase 4 | Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI + Memory Inspector | 30 cards (target) | MCP surface `mcp-consumable`; trust delivery/usage durability + Inspector config-write `live-event-ready` after Round 3 followup cards | Gate-4 passed |
-| Phase 5 | Wave 5: E2E + Benchmark + Graph Contract + Final Review | 4 cards (target) | not-started | Gate-5 |
+| Phase 5 | Wave 5: E2E + Graph Contract + Final Review (release acceptance) | 3 cards (target) | not-started | Gate-5 |
+| Phase 6 | Wave 6: Marketing benchmark harness + adapter + baselines + resume + README template | 5 cards (target) | not-started | Gate-6 |
 
 ## Phase 2 — Card Closeout Status
 
@@ -160,8 +173,11 @@ their original detail is in the plan file at
 - [Phase 4](./phase-4-briefs/README.md) — Wave 4 daemon + routes +
   live MCP transport + real profile mutation + CLI bridge + secrets
   + Memory Inspector + cross-workspace recall cache + detach
-- [Phase 5](./phase-5-briefs/README.md) — Wave 5 E2E + benchmark +
-  graph contract + final review
+- [Phase 5](./phase-5-briefs/README.md) — Wave 5 E2E + graph contract
+  + final review (release acceptance for v0.1.0)
+- [Phase 6](./phase-6-briefs/README.md) — Wave 6 marketing benchmark
+  wave (harness + adapter + baselines + resume + README template) for
+  v0.1.1
 
 ## Shared File Conflict Table
 

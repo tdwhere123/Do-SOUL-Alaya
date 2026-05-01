@@ -73,7 +73,7 @@ each Phase Gate.
 | Secret refs (env / local-file / paste-to-file) | `live-event-ready`; Inspector writes proxy daemon runtime config and are audited through EventLog | `live-event-ready` | P4-secrets + #BL-019 repair |
 | Operations (backup, export, import) | `implementation-ready` | `cli-consumable` | P4-operations |
 | Memory Inspector | `live-event-ready`; server/frontend exist, token-gated routes pass, and Provider/Config writes proxy daemon runtime config | `live-event-ready` for the inspector surface | P4-inspector-server + P4-cli-inspect + P4-inspector-frontend + #BL-019 repair |
-| Benchmark harness | `not-started` | `implementation-ready` | P5-benchmark |
+| Marketing benchmark harness | `not-started` | `implementation-ready` | P6-bench-adapter + P6-bench-harness + P6-bench-baselines + P6-bench-resume + P6-bench-readme (Phase 6, post-v0.1.0; ships in v0.1.1) |
 | Graph inspector data contract | `not-started` | `schema-ready` | P5-graph-contract |
 
 ## Known Wiring Gaps

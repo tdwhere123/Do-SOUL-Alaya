@@ -6,11 +6,29 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-023`.
+sequence. **Next available number**: `#BL-024`.
 
 ## Open Issues
 
-### #BL-022 -- P1-migrations-followup carve-out for 056
+### #BL-023 — Marketing surface (e.g. xiaohongshu) may attract non-engineering users
+
+**Status**: Open (product-positioning watch, not a v0.1 blocker)
+**Owner**: `docs/v0.1/phase-6-briefs/README.md` (Phase 6 marketing wave)
+**Close condition**: Either (a) marketing surfaces explicitly target
+engineers / CLI-tool users only and the README onboarding remains
+CLI-first, OR (b) Alaya grows a non-CLI surface (which today violates
+invariant §21 "Alaya has no GUI and no conversation TUI"); in the
+latter case the invariant change must come first via a documented
+charter amendment.
+
+Phase 6 lands a marketing benchmark wave aimed at GitHub README
+visibility. The user has signaled intent to also publish on consumer
+surfaces such as xiaohongshu. Those surfaces reach non-engineering
+audiences who cannot install or operate Alaya (no GUI / no TUI; CLI +
+MCP only). Without an explicit "engineers only" framing in the
+marketing copy, this risks support load from users who cannot succeed
+with the product as shipped. Track here so Phase 6 / future marketing
+efforts cite this issue when scoping copy or surface choices.
 
 Status: Open
 Description: Migration 056 (trust-state-persistence.sql) and trust-state-repo.ts were delivered under task-p4-trust-state.md without a proper Phase-1 carve-out card. This entry authorizes task-p1-migrations-followup-trust-state-056.md as the governing card going forward.

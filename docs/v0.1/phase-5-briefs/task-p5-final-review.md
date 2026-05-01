@@ -7,7 +7,7 @@
 > - **Source**: `n/a`
 > - **Target**: `docs/v0.1/phase-5-briefs/reports/task-p5-final-review.md`, `docs/handbook/runtime-status.md`, `docs/v0.1/INDEX.md`
 > - **Size**: S
-> - **Prerequisite**: P4-mcp-memory-tools, P5-benchmark, P5-graph-contract, P5-e2e
+> - **Prerequisite**: P4-mcp-memory-tools, P5-graph-contract, P5-e2e
 > - **Blocks**: v0.1 release
 > - **Closing readiness label**: mcp-consumable
 > - **Owner**: unassigned
@@ -114,5 +114,5 @@ Nothing deferred.
 
 No shared-file hazards.
 
-**Prerequisite**: P4-mcp-memory-tools, P5-benchmark, P5-graph-contract, P5-e2e.
-**Blocks**: v0.1 release.
+**Prerequisite**: P4-mcp-memory-tools, P5-graph-contract, P5-e2e.
+**Blocks**: v0.1.0 release (Gate-5).

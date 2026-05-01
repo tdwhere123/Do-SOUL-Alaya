@@ -7,7 +7,7 @@
 > - **Source**: `n/a`
 > - **Target**: `apps/core-daemon/src/__tests__/e2e/v0.1-release-loop.test.ts`, `docs/v0.1/phase-5-briefs/reports/task-p5-e2e.md`
 > - **Size**: M
-> - **Prerequisite**: Gate-4 passed, P4-mcp-memory-tools, P5-benchmark, P5-graph-contract
+> - **Prerequisite**: Gate-4 passed, P4-mcp-memory-tools, P5-graph-contract
 > - **Blocks**: P5-final-review
 > - **Closing readiness label**: live-event-ready
 > - **Owner**: unassigned
@@ -83,5 +83,5 @@ Nothing deferred.
 
 No shared-file hazards.
 
-**Prerequisite**: Gate-4 passed, P4-mcp-memory-tools, P5-benchmark, P5-graph-contract.
+**Prerequisite**: Gate-4 passed, P4-mcp-memory-tools, P5-graph-contract.
 **Blocks**: P5-final-review.
