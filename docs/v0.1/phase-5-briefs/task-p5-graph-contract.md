@@ -7,7 +7,7 @@
 > - **Source**: `vendor/do-what-new-snapshot/packages/core/src/graph-explore-service.ts`, `vendor/do-what-new-snapshot/packages/core/src/__tests__/graph-explore-service.test.ts`, `vendor/do-what-new-snapshot/packages/soul/src/garden/path-graph-snapshotter.ts`, `vendor/do-what-new-snapshot/packages/storage/src/repos/path-relation-repo.ts`, `vendor/do-what-new-snapshot/packages/storage/src/repos/path-graph-snapshot-repo.ts`
 > - **Target**: `packages/core/src/graph-contract-service.ts`, `packages/core/src/__tests__/graph-contract-service.test.ts`, `docs/v0.1/phase-5-briefs/reports/task-p5-graph-contract.md`
 > - **Size**: M
-> - **Prerequisite**: P1-topology, P2-repos-batch-2, P2-garden-batch-3, Gate-4
+> - **Prerequisite**: P1-topology, P2-repos-batch-2, P2-garden-batch-3, Gate-4 passed
 > - **Blocks**: P5-e2e, P5-final-review
 > - **Closing readiness label**: schema-ready
 > - **Owner**: unassigned
@@ -69,5 +69,5 @@ Nothing deferred.
 
 No shared-file hazards.
 
-**Prerequisite**: P1-topology, P2-repos-batch-2, P2-garden-batch-3, Gate-4.
+**Prerequisite**: P1-topology, P2-repos-batch-2, P2-garden-batch-3, Gate-4 passed.
 **Blocks**: P5-e2e, P5-final-review.

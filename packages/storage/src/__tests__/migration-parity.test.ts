@@ -12,9 +12,10 @@ const sourceMigrationsDirectory = path.join(
 );
 const targetMigrationsDirectory = path.join(repositoryRoot, "packages/storage/src/migrations");
 
-const expectedMigrationCount = 55;
+const expectedVendorMigrationCount = 55;
 const expectedFirstMigration = "001-initial.sql";
 const expectedLastMigration = "055-global-memory-recall-cache-global-object-index.sql";
+const expectedAlayaOnlyMigrations = ["056-trust-state-persistence.sql"];
 
 function listSqlMigrations(directory: string): string[] {
   return fs
@@ -36,13 +37,13 @@ describe("migration parity", () => {
     const sourceFiles = listSqlMigrations(sourceMigrationsDirectory);
     const targetFiles = listSqlMigrations(targetMigrationsDirectory);
 
-    expect(sourceFiles).toHaveLength(expectedMigrationCount);
-    expect(targetFiles).toHaveLength(expectedMigrationCount);
+    expect(sourceFiles).toHaveLength(expectedVendorMigrationCount);
+    expect(targetFiles).toHaveLength(expectedVendorMigrationCount + expectedAlayaOnlyMigrations.length);
     expect(sourceFiles[0]).toBe(expectedFirstMigration);
     expect(sourceFiles.at(-1)).toBe(expectedLastMigration);
     expect(targetFiles[0]).toBe(expectedFirstMigration);
-    expect(targetFiles.at(-1)).toBe(expectedLastMigration);
-    expect(targetFiles).toEqual(sourceFiles);
+    expect(targetFiles.slice(0, sourceFiles.length)).toEqual(sourceFiles);
+    expect(targetFiles.slice(sourceFiles.length)).toEqual(expectedAlayaOnlyMigrations);
 
     const mismatches = sourceFiles.filter((fileName) => {
       const sourceHash = sha256File(path.join(sourceMigrationsDirectory, fileName));

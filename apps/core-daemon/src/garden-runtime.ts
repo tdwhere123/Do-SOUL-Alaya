@@ -86,6 +86,7 @@ export function createGardenRuntime(input: {
 }): Readonly<{
   readonly backgroundManager: BackgroundServiceManager;
   readonly backlogTelemetrySource: GardenBacklogTelemetrySource;
+  runBackgroundPass(): Promise<void>;
   setBacklogTelemetryObserver(observer: GardenBacklogTelemetryObserver | null): void;
 }> {
   const schedulerEventLogPort: GardenSchedulerEventLogPort = {
@@ -428,7 +429,7 @@ export function createGardenRuntime(input: {
     }
   };
 
-  const backgroundManager = new BackgroundServiceManager([
+  const backgroundServices = [
     {
       name: "Janitor",
       intervalMs: 300_000,
@@ -490,11 +491,30 @@ export function createGardenRuntime(input: {
         }
       }
     }
-  ]);
+  ];
+  const backgroundManager = new BackgroundServiceManager(backgroundServices);
 
   return Object.freeze({
     backgroundManager,
     backlogTelemetrySource,
+    runBackgroundPass: async () => {
+      for (const service of backgroundServices) {
+        await service.task();
+      }
+      const workspaces = await input.workspaceRepo.list();
+      for (const workspace of workspaces) {
+        await healthJournalPort.record({
+          event_kind: HealthEventKind.GARDEN_BACKLOG,
+          workspace_id: workspace.workspace_id,
+          run_id: null,
+          summary: "Garden background pass completed",
+          detail_json: {
+            service_count: backgroundServices.length,
+            services: backgroundServices.map((service) => service.name)
+          }
+        });
+      }
+    },
     setBacklogTelemetryObserver: (observer: GardenBacklogTelemetryObserver | null) => {
       backlogTelemetryObserver = observer;
     }

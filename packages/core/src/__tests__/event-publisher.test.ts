@@ -258,6 +258,12 @@ describe("EventPublisher", () => {
         recorded.push("apply");
       })
     };
+    const runtimeNotifier = {
+      notify: vi.fn(),
+      notifyEntry: vi.fn(async () => {
+        recorded.push("notify");
+      })
+    };
     const publisher = new EventPublisher({
       eventLogRepo: {
         append: vi.fn(async () => {
@@ -267,12 +273,7 @@ describe("EventPublisher", () => {
         deleteById: vi.fn()
       },
       runHotStateService: runHotStateService as any,
-      runtimeNotifier: {
-        notify: vi.fn(),
-        notifyEntry: vi.fn(async () => {
-          recorded.push("notify");
-        })
-      }
+      runtimeNotifier
     });
 
     const result = await publisher.publishWithMutation(
@@ -295,6 +296,53 @@ describe("EventPublisher", () => {
     expect(result).toBe("ok");
     expect(recorded).toEqual(["append", "mutate", "notify"]);
     expect(runHotStateService.apply).not.toHaveBeenCalled();
+  });
+
+  it("passes the appended EventLog entry to mutation callbacks", async () => {
+    const entry = createEventLogEntry({
+      event_type: "worker.state_changed",
+      entity_type: "worker_run",
+      entity_id: "worker-1",
+      workspace_id: "ws-1",
+      run_id: "run-1",
+      caused_by: "worker_lifecycle",
+      revision: 0,
+      payload_json: WorkerStateChangedPayloadSchema.parse({
+        workerId: "worker-1",
+        state: "frozen",
+        previousState: "active"
+      })
+    });
+    const mutate = vi.fn(async (auditEntry: EventLogEntry) => auditEntry.event_id);
+    const publisher = new EventPublisher({
+      eventLogRepo: {
+        append: vi.fn(async () => entry),
+        deleteById: vi.fn()
+      },
+      runHotStateService: { apply: vi.fn() } as any,
+      runtimeNotifier: {
+        notify: vi.fn(),
+        notifyEntry: vi.fn()
+      }
+    });
+
+    await expect(
+      publisher.publishWithMutation(
+        {
+          event_type: entry.event_type,
+          entity_type: entry.entity_type,
+          entity_id: entry.entity_id,
+          workspace_id: entry.workspace_id,
+          run_id: entry.run_id,
+          caused_by: entry.caused_by,
+          revision: entry.revision,
+          payload_json: entry.payload_json
+        },
+        mutate
+      )
+    ).resolves.toBe(entry.event_id);
+
+    expect(mutate).toHaveBeenCalledWith(entry);
   });
 
   it("deletes an unnotified event-log entry when mutation fails", async () => {
@@ -323,6 +371,12 @@ describe("EventPublisher", () => {
         recorded.push("apply");
       })
     };
+    const runtimeNotifier = {
+      notify: vi.fn(),
+      notifyEntry: vi.fn(async () => {
+        recorded.push("notify");
+      })
+    };
     const publisher = new EventPublisher({
       eventLogRepo: {
         append: vi.fn(async () => {
@@ -332,12 +386,7 @@ describe("EventPublisher", () => {
         deleteById
       },
       runHotStateService: runHotStateService as any,
-      runtimeNotifier: {
-        notify: vi.fn(),
-        notifyEntry: vi.fn(async () => {
-          recorded.push("notify");
-        })
-      }
+      runtimeNotifier
     });
 
     await expect(
@@ -362,6 +411,7 @@ describe("EventPublisher", () => {
     expect(recorded).toEqual(["append", "mutate", "delete"]);
     expect(deleteById).toHaveBeenCalledWith(entry.event_id);
     expect(runHotStateService.apply).not.toHaveBeenCalled();
+    expect(runtimeNotifier.notifyEntry).not.toHaveBeenCalled();
   });
 
   it("deletes every unnotified batch entry when publishManyWithMutation mutation fails", async () => {

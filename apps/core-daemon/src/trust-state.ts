@@ -16,16 +16,29 @@ const DEFAULT_WORKSPACE_ID = "trust-state";
 const DEFAULT_REVISION = 0;
 const DELIVERY_ENTITY_TYPE = "trust_context_delivery";
 const USAGE_ENTITY_TYPE = "trust_usage_proof";
+const COUNTER_ENTITY_TYPE = "trust_state_counter";
 const PLACEHOLDER_AUDIT_EVENT_ID = "pending";
 
 type TrustEventInput = Omit<EventLogEntry, "event_id" | "created_at">;
 
 interface TrustStateEventPublisherPort {
-  publish(input: TrustEventInput): Promise<Readonly<EventLogEntry>>;
+  publishWithMutation<T>(
+    input: TrustEventInput,
+    mutate: (entry: EventLogEntry) => Promise<T>
+  ): Promise<T>;
+}
+
+export interface TrustStatePersistenceRepoPort {
+  createDelivery(record: ContextDeliveryRecord): Promise<Readonly<ContextDeliveryRecord>>;
+  createUsage(record: UsageProofRecord): Promise<Readonly<UsageProofRecord>>;
+  findDeliveryById(deliveryId: string): Promise<Readonly<ContextDeliveryRecord> | null>;
+  listDeliveriesByAgentTarget(agentTarget: string): Promise<readonly Readonly<ContextDeliveryRecord>[]>;
+  listUsageByDeliveryIds(deliveryIds: readonly string[]): Promise<readonly Readonly<UsageProofRecord>[]>;
 }
 
 export interface TrustStateRecorderDependencies {
   readonly eventPublisher: TrustStateEventPublisherPort;
+  readonly repo?: TrustStatePersistenceRepoPort;
   readonly clock?: () => string;
   readonly ready?: boolean;
 }
@@ -63,17 +76,19 @@ export class TrustStateUnverifiableRequiresDeliveryError extends Error {
 
 export class TrustStateRecorder {
   private readonly eventPublisher: TrustStateEventPublisherPort;
+  private readonly repo: TrustStatePersistenceRepoPort;
   private readonly clock: () => string;
   private ready: boolean;
 
-  private readonly deliveriesById = new Map<string, ContextDeliveryRecord>();
-  private readonly usageByDeliveryId = new Map<string, UsageProofRecord>();
+  // v0.1 persists delivery/usage records only. These counters remain
+  // process-local by design until backlog #BL-020 adds durable storage.
   private readonly installedCountsByTarget = new Map<string, number>();
   private readonly configuredCountsByTarget = new Map<string, number>();
   private readonly unverifiableCountsByTarget = new Map<string, number>();
 
   public constructor(deps: TrustStateRecorderDependencies) {
     this.eventPublisher = deps.eventPublisher;
+    this.repo = deps.repo ?? new InMemoryTrustStateRepo();
     this.clock = deps.clock ?? (() => new Date().toISOString());
     this.ready = deps.ready ?? false;
   }
@@ -91,29 +106,31 @@ export class TrustStateRecorder {
       ...input,
       audit_event_id: PLACEHOLDER_AUDIT_EVENT_ID
     });
-    const auditEntry = await this.eventPublisher.publish({
-      event_type: TrustStateEventType.MEMORY_DELIVERED,
-      entity_type: DELIVERY_ENTITY_TYPE,
-      entity_id: draftRecord.delivery_id,
-      workspace_id: resolveWorkspaceId(draftRecord.workspace_id),
-      run_id: draftRecord.run_id,
-      caused_by: draftRecord.agent_target,
-      revision: DEFAULT_REVISION,
-      payload_json: {
-        delivery_id: draftRecord.delivery_id,
-        agent_target: draftRecord.agent_target,
-        delivered_object_ids: draftRecord.delivered_object_ids,
-        delivered_at: draftRecord.delivered_at,
-        recorded_at: this.nowIso()
+    return await this.eventPublisher.publishWithMutation(
+      {
+        event_type: TrustStateEventType.MEMORY_DELIVERED,
+        entity_type: DELIVERY_ENTITY_TYPE,
+        entity_id: draftRecord.delivery_id,
+        workspace_id: resolveWorkspaceId(draftRecord.workspace_id),
+        run_id: draftRecord.run_id,
+        caused_by: draftRecord.agent_target,
+        revision: DEFAULT_REVISION,
+        payload_json: {
+          delivery_id: draftRecord.delivery_id,
+          agent_target: draftRecord.agent_target,
+          delivered_object_ids: draftRecord.delivered_object_ids,
+          delivered_at: draftRecord.delivered_at,
+          recorded_at: this.nowIso()
+        }
+      },
+      async (auditEntry) => {
+        const finalRecord = ContextDeliveryRecordSchema.parse({
+          ...draftRecord,
+          audit_event_id: auditEntry.event_id
+        });
+        return await this.repo.createDelivery(finalRecord);
       }
-    });
-
-    const finalRecord = ContextDeliveryRecordSchema.parse({
-      ...draftRecord,
-      audit_event_id: auditEntry.event_id
-    });
-    this.deliveriesById.set(finalRecord.delivery_id, finalRecord);
-    return finalRecord;
+    );
   }
 
   public async recordUsage(
@@ -121,8 +138,8 @@ export class TrustStateRecorder {
   ): Promise<UsageProofRecord> {
     this.assertReady();
 
-    const linkedDelivery = this.deliveriesById.get(input.delivery_id);
-    if (linkedDelivery === undefined) {
+    const linkedDelivery = await this.repo.findDeliveryById(input.delivery_id);
+    if (linkedDelivery === null) {
       throw new TrustStateUnknownDeliveryError(input.delivery_id);
     }
 
@@ -130,60 +147,90 @@ export class TrustStateRecorder {
       ...input,
       audit_event_id: PLACEHOLDER_AUDIT_EVENT_ID
     });
-    const auditEntry = await this.eventPublisher.publish({
-      event_type: TrustStateEventType.MEMORY_USAGE_REPORTED,
-      entity_type: USAGE_ENTITY_TYPE,
-      entity_id: draftRecord.delivery_id,
-      workspace_id: resolveWorkspaceId(linkedDelivery.workspace_id),
-      run_id: linkedDelivery.run_id,
-      caused_by: linkedDelivery.agent_target,
-      revision: DEFAULT_REVISION,
-      payload_json: {
-        delivery_id: draftRecord.delivery_id,
-        usage_state: draftRecord.usage_state,
-        used_object_ids: draftRecord.used_object_ids,
-        reason: draftRecord.reason,
-        reported_at: draftRecord.reported_at,
-        recorded_at: this.nowIso()
+    return await this.eventPublisher.publishWithMutation(
+      {
+        event_type: TrustStateEventType.MEMORY_USAGE_REPORTED,
+        entity_type: USAGE_ENTITY_TYPE,
+        entity_id: draftRecord.delivery_id,
+        workspace_id: resolveWorkspaceId(linkedDelivery.workspace_id),
+        run_id: linkedDelivery.run_id,
+        caused_by: linkedDelivery.agent_target,
+        revision: DEFAULT_REVISION,
+        payload_json: {
+          delivery_id: draftRecord.delivery_id,
+          usage_state: draftRecord.usage_state,
+          used_object_ids: draftRecord.used_object_ids,
+          reason: draftRecord.reason,
+          reported_at: draftRecord.reported_at,
+          recorded_at: this.nowIso()
+        }
+      },
+      async (auditEntry) => {
+        const finalRecord = UsageProofRecordSchema.parse({
+          ...draftRecord,
+          audit_event_id: auditEntry.event_id
+        });
+        return await this.repo.createUsage(finalRecord);
       }
-    });
-
-    const finalRecord = UsageProofRecordSchema.parse({
-      ...draftRecord,
-      audit_event_id: auditEntry.event_id
-    });
-    this.usageByDeliveryId.set(finalRecord.delivery_id, finalRecord);
-    return finalRecord;
+    );
   }
 
   public async recordInstalled(agent_target: string): Promise<void> {
     this.assertReady();
     const target = NonEmptyStringSchema.parse(agent_target);
-    incrementCounter(this.installedCountsByTarget, target);
+    await this.recordCounter({
+      eventType: TrustStateEventType.TRUST_STATE_INSTALLED_RECORDED,
+      counterName: "installed",
+      target,
+      mutate: () => {
+        // Process-local counter; durable persistence is tracked by #BL-020.
+        incrementCounter(this.installedCountsByTarget, target);
+      }
+    });
   }
 
   public async recordConfigured(agent_target: string): Promise<void> {
     this.assertReady();
     const target = NonEmptyStringSchema.parse(agent_target);
-    incrementCounter(this.configuredCountsByTarget, target);
+    await this.recordCounter({
+      eventType: TrustStateEventType.TRUST_STATE_CONFIGURED_RECORDED,
+      counterName: "configured",
+      target,
+      mutate: () => {
+        // Process-local counter; durable persistence is tracked by #BL-020.
+        incrementCounter(this.configuredCountsByTarget, target);
+      }
+    });
   }
 
   public async recordUnverifiable(agent_target: string, session_id: string): Promise<void> {
     this.assertReady();
     const target = NonEmptyStringSchema.parse(agent_target);
-    NonEmptyStringSchema.parse(session_id);
+    const sessionId = NonEmptyStringSchema.parse(session_id);
 
-    if (!hasDeliveryForTarget(this.deliveriesById.values(), target)) {
+    if ((await this.repo.listDeliveriesByAgentTarget(target)).length === 0) {
       throw new TrustStateUnverifiableRequiresDeliveryError(target);
     }
 
-    incrementCounter(this.unverifiableCountsByTarget, target);
+    await this.recordCounter({
+      eventType: TrustStateEventType.TRUST_STATE_UNVERIFIABLE_RECORDED,
+      counterName: "unverifiable",
+      target,
+      sessionId,
+      mutate: () => {
+        // Process-local counter; durable persistence is tracked by #BL-020.
+        incrementCounter(this.unverifiableCountsByTarget, target);
+      }
+    });
   }
 
   public async summarize(agent_target: string): Promise<TrustSummary> {
     this.assertReady();
     const target = NonEmptyStringSchema.parse(agent_target);
-    const counts = collectCounts(this.deliveriesById.values(), this.usageByDeliveryId, target, {
+    const deliveries = await this.repo.listDeliveriesByAgentTarget(target);
+    const usages = await this.repo.listUsageByDeliveryIds(deliveries.map((delivery) => delivery.delivery_id));
+    const usageByDeliveryId = new Map(usages.map((usage) => [usage.delivery_id, usage]));
+    const counts = collectCounts(deliveries, usageByDeliveryId, target, {
       installed_count: this.installedCountsByTarget.get(target) ?? 0,
       configured_count: this.configuredCountsByTarget.get(target) ?? 0,
       unverifiable_count: this.unverifiableCountsByTarget.get(target) ?? 0
@@ -213,6 +260,39 @@ export class TrustStateRecorder {
   private nowIso(): string {
     return IsoDatetimeStringSchema.parse(this.clock());
   }
+
+  private async recordCounter(input: {
+    readonly eventType:
+      | typeof TrustStateEventType.TRUST_STATE_INSTALLED_RECORDED
+      | typeof TrustStateEventType.TRUST_STATE_CONFIGURED_RECORDED
+      | typeof TrustStateEventType.TRUST_STATE_UNVERIFIABLE_RECORDED;
+    readonly counterName: "installed" | "configured" | "unverifiable";
+    readonly target: string;
+    readonly sessionId?: string;
+    readonly mutate: () => void;
+  }): Promise<void> {
+    const recordedAt = this.nowIso();
+    await this.eventPublisher.publishWithMutation(
+      {
+        event_type: input.eventType,
+        entity_type: COUNTER_ENTITY_TYPE,
+        entity_id: `${input.target}:${input.counterName}`,
+        workspace_id: DEFAULT_WORKSPACE_ID,
+        run_id: null,
+        caused_by: input.target,
+        revision: DEFAULT_REVISION,
+        payload_json: {
+          agent_target: input.target,
+          counter_name: input.counterName,
+          session_id: input.sessionId ?? null,
+          recorded_at: recordedAt
+        }
+      },
+      async () => {
+        input.mutate();
+      }
+    );
+  }
 }
 
 export function createTrustStateRecorder(deps: TrustStateRecorderDependencies): TrustStateRecorder {
@@ -227,20 +307,8 @@ function incrementCounter(map: Map<string, number>, key: string): void {
   map.set(key, (map.get(key) ?? 0) + 1);
 }
 
-function hasDeliveryForTarget(
-  deliveries: IterableIterator<ContextDeliveryRecord>,
-  agentTarget: string
-): boolean {
-  for (const delivery of deliveries) {
-    if (delivery.agent_target === agentTarget) {
-      return true;
-    }
-  }
-  return false;
-}
-
 function collectCounts(
-  deliveries: IterableIterator<ContextDeliveryRecord>,
+  deliveries: Iterable<Readonly<ContextDeliveryRecord>>,
   usageByDeliveryId: ReadonlyMap<string, UsageProofRecord>,
   agentTarget: string,
   seed: Readonly<{
@@ -368,4 +436,36 @@ function maxIso(current: string | null, next: string): string {
   }
 
   return Date.parse(next) > Date.parse(current) ? next : current;
+}
+
+class InMemoryTrustStateRepo implements TrustStatePersistenceRepoPort {
+  private readonly deliveriesById = new Map<string, ContextDeliveryRecord>();
+  private readonly usageByDeliveryId = new Map<string, UsageProofRecord>();
+
+  public async createDelivery(record: ContextDeliveryRecord): Promise<Readonly<ContextDeliveryRecord>> {
+    const parsed = ContextDeliveryRecordSchema.parse(record);
+    this.deliveriesById.set(parsed.delivery_id, parsed);
+    return parsed;
+  }
+
+  public async createUsage(record: UsageProofRecord): Promise<Readonly<UsageProofRecord>> {
+    const parsed = UsageProofRecordSchema.parse(record);
+    this.usageByDeliveryId.set(parsed.delivery_id, parsed);
+    return parsed;
+  }
+
+  public async findDeliveryById(deliveryId: string): Promise<Readonly<ContextDeliveryRecord> | null> {
+    return this.deliveriesById.get(NonEmptyStringSchema.parse(deliveryId)) ?? null;
+  }
+
+  public async listDeliveriesByAgentTarget(agentTarget: string): Promise<readonly Readonly<ContextDeliveryRecord>[]> {
+    const target = NonEmptyStringSchema.parse(agentTarget);
+    return [...this.deliveriesById.values()].filter((delivery) => delivery.agent_target === target);
+  }
+
+  public async listUsageByDeliveryIds(deliveryIds: readonly string[]): Promise<readonly Readonly<UsageProofRecord>[]> {
+    return deliveryIds
+      .map((deliveryId) => this.usageByDeliveryId.get(NonEmptyStringSchema.parse(deliveryId)))
+      .filter((usage): usage is UsageProofRecord => usage !== undefined);
+  }
 }

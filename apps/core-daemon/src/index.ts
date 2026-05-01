@@ -100,6 +100,7 @@ import {
   SqliteSynthesisCapsuleRepo,
   SqliteToolExecutionRecordRepo,
   SqliteToolSpecRepo,
+  SqliteTrustStateRepo,
   SqliteWorkerRunRepo,
   SqliteWorkspaceRepo,
   createGardenBackgroundDataPorts,
@@ -135,6 +136,7 @@ import {
   createTargetCurrencyCheckPort,
   createWarnLogger
 } from "./daemon-runtime-helpers.js";
+import { resolveAlayaConfigDir, resolveAlayaConfigPaths } from "./cli/config-files.js";
 import { resolveCoreDaemonFilesDirectory } from "./files-data-dir.js";
 import { createGardenRuntime } from "./garden-runtime.js";
 import { SqliteHandoffGapAdapter } from "./handoff-gap-adapter.js";
@@ -184,6 +186,8 @@ export interface AlayaDaemonRuntime {
   readonly runtimeNotifier: AlayaRuntimeNotifier;
   readonly startupSteps: readonly DaemonStartupStepRecord[];
   readonly services: AlayaDaemonRuntimeServices;
+  startBackgroundServices(): void;
+  runGardenBackgroundPass(): Promise<void>;
   startHttpServer(options?: AlayaDaemonListenOptions): Promise<AlayaDaemonServer>;
   shutdown(): Promise<void>;
 }
@@ -265,6 +269,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const toolSpecRepo = new SqliteToolSpecRepo(database);
   const toolExecutionRecordRepo = new SqliteToolExecutionRecordRepo(database);
   const extensionDescriptorRepo = new SqliteExtensionDescriptorRepo(database);
+  const trustStateRepo = new SqliteTrustStateRepo(database);
   const strongRefRepo = new SqliteStrongRefRepo(database);
   const pathRelationRepo = new SqlitePathRelationRepo(database);
   const pathGraphSnapshotRepo = new SqlitePathGraphSnapshotRepo(database);
@@ -275,7 +280,6 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const sqliteHandoffGapRepo = new SqliteHandoffGapRepo(database);
   recordStartupStep(startupSteps, "repositories");
 
-  const configService = createConfigService({ configRepo });
   const environmentStatusService = createEnvironmentStatusService({
     toolNames: CORE_DAEMON_ENVIRONMENT_TOOLS,
     getDatabasePath: () => database.filename,
@@ -308,8 +312,14 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     pathRelationRepo,
     bootstrappingRecordRepo
   });
+  const configService = createConfigService({
+    configRepo,
+    eventPublisher,
+    configPathsProvider: () => resolveAlayaConfigPaths(resolveAlayaConfigDir({ env: process.env }))
+  });
   const trustStateRecorder = createTrustStateRecorder({
     eventPublisher,
+    repo: trustStateRepo,
     clock: () => new Date().toISOString()
   });
   const toolSpecService = new ToolSpecService({ toolSpecRepo });
@@ -945,6 +955,16 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   let backgroundStarted = false;
   let shuttingDown: Promise<void> | null = null;
 
+  const startBackgroundServices = (): void => {
+    if (backgroundStarted) {
+      return;
+    }
+
+    gardenBacklogTelemetryService.start();
+    gardenRuntime.backgroundManager.start();
+    backgroundStarted = true;
+  };
+
   const shutdown = async (): Promise<void> => {
     if (shuttingDown !== null) {
       return await shuttingDown;
@@ -990,12 +1010,12 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       trustStateRecorder,
       principalCodingEngineAvailable: principalCodingAvailability.available
     }),
+    startBackgroundServices,
+    runGardenBackgroundPass: async () => {
+      await gardenRuntime.runBackgroundPass();
+    },
     startHttpServer: async (options: AlayaDaemonListenOptions = {}) => {
-      if (!backgroundStarted) {
-        gardenBacklogTelemetryService.start();
-        gardenRuntime.backgroundManager.start();
-        backgroundStarted = true;
-      }
+      startBackgroundServices();
 
       if (server !== null) {
         throw new Error("Alaya daemon HTTP server is already running.");

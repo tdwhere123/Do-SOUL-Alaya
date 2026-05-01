@@ -7,7 +7,7 @@
 > - **Source**: `n/a`
 > - **Target**: `apps/core-daemon/src/benchmark/`, `apps/core-daemon/src/__tests__/benchmark.test.ts`, `docs/v0.1/phase-5-briefs/reports/task-p5-benchmark.md`
 > - **Size**: M
-> - **Prerequisite**: Gate-4
+> - **Prerequisite**: Gate-4 passed
 > - **Blocks**: P5-e2e, P5-final-review
 > - **Closing readiness label**: implementation-ready
 > - **Owner**: unassigned
@@ -67,5 +67,5 @@ Nothing deferred.
 
 No shared-file hazards.
 
-**Prerequisite**: Gate-4.
+**Prerequisite**: Gate-4 passed.
 **Blocks**: P5-e2e, P5-final-review.

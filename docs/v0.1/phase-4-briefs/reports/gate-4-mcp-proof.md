@@ -1,72 +1,74 @@
-# Gate-4 attached-agent MCP proof — partial report
+# Gate-4 attached-agent MCP proof report
 
-> Generated: 2026-04-30
-> Authority: `docs/handbook/runtime-status.md:98-104` Gate-4 definition.
+> Generated: 2026-05-01
+> Authority: `docs/handbook/runtime-status.md` Gate-4 definition.
 
-## What ran
+## What Ran
 
-Driven through `node bin/alaya.mjs <subcmd>` against the local worktree
-(no remote daemon, no GUI):
+Fresh proof:
 
-| Step | Command | Result |
-|---|---|---|
-| 1 | `alaya doctor --json` | `overall=degraded` (provider not configured), startup ready, all 6 steps complete, MCP transport ready, garden healthy |
-| 2 | `alaya status --json` | daemon up; both `codex` and `claude-code` trust rows in state `installed` |
-| 3 | `alaya tools list --json` | 8 `soul.*` tools enrolled: `soul.recall`, `soul.open_pointer`, `soul.emit_candidate_signal`, `soul.propose_memory_update`, `soul.review_memory_proposal`, `soul.apply_override`, `soul.explore_graph`, `soul.report_context_usage` |
-| 4 | `alaya tools call soul.recall '{"query":"hello","max_results":3,"scope_class":"project","dimension":"fact","domain_tags":[]}' --json` | OK; returned fresh `delivery_id` and empty result set (DB had no facts) |
-| 5 | `alaya tools call soul.report_context_usage '{"delivery_id":"<id from step 4>",...}' --json` | **FAIL — `INTERNAL: Unknown delivery_id`** |
+```bash
+rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon gate4-attached-agent-mcp-proof
+```
 
-## Wiring gap (blocker for full Gate-4 close)
+Result: 1 file passed, 1 test passed.
 
-Each `alaya tools call …` invocation spawns a fresh daemon process and tears
-it down on exit. `delivery_id` is in-process state (matches `#BL-018` /
-`P4-trust-state` v0.1 in-process note in `docs/handbook/backlog.md:19`).
-This means the recall→report_context_usage pair cannot be exercised through
-single-shot CLI process invocations — the chain must run inside a single
-attached-agent MCP session over the long-lived daemon transport.
+The harness boots one daemon runtime with an isolated `DATA_DIR`,
+`ALAYA_CONFIG_DIR`, `HOME`, and `CODEX_HOME`; starts daemon background
+services without binding a TCP listener; attaches an MCP SDK client to
+`createAlayaMcpServer()` through `InMemoryTransport`; and drives all
+Gate-4 memory operations without spawning a second daemon.
 
-**Consequence**: the spec'd Gate-4 demo path
-(`docs/handbook/runtime-status.md:98-104`) requires a real attached agent
-(codex or claude-code) consuming the MCP server with a persistent daemon.
-That requires:
+## Transcript
 
-1. Real codex / claude-code installation with MCP attach.
-2. A long-lived `alaya daemon` process — currently provided by Inspector
-   server flow but not by the one-shot CLI flow.
-3. Either: (a) a soak-style integration test harness that boots the daemon
-   once and drives MCP calls in-process, or (b) the Gate-4 demo run is
-   captured live with an actual attached agent.
+| Step | Evidence |
+|---|---|
+| `alaya install --non-interactive --json` | OK; writes isolated config under the test `ALAYA_CONFIG_DIR`. |
+| `alaya attach codex --yes --json` | OK; writes isolated Codex profile files and records installed/configured trust state. |
+| MCP `tools/list` | Lists the full first-party `soul.*` catalog, including `soul.recall`, `soul.open_pointer`, `soul.report_context_usage`, `soul.emit_candidate_signal`, `soul.propose_memory_update`, and `soul.review_memory_proposal`. |
+| `soul.recall` | OK; returns one seeded memory object and a `delivery_id` inside the same daemon lifetime. |
+| `soul.open_pointer` | OK; opens the recalled memory object. |
+| `soul.report_context_usage` | OK; records `usage_state=used` against the `delivery_id` from `soul.recall`. |
+| `soul.emit_candidate_signal` | OK; emits a model-tool candidate signal for the attached-agent proof. |
+| `soul.propose_memory_update` | OK; creates a governance proposal for the recalled memory object. |
+| `soul.review_memory_proposal` | OK; rejects the proposal and returns `resolution_state=rejected`. |
+| Garden background pass | OK; runs one deterministic Garden background pass inside the same daemon runtime and asserts Garden task dispatched/completed EventLog entries plus a Garden health-journal entry. |
+| `alaya status --agent codex --json` | OK; reports `installed_count=1`, `configured_count=1`, `delivered_count=1`, `used_count=1`, `skipped_count=0`, `not_applicable_count=0`. |
+| `alaya doctor --workspace workspace-1 --json` | OK; reports runtime ready, storage writable, MCP transport ready, and Garden healthy. |
 
-## What this report DOES prove
+## Closed Gap
 
-- All 8 `soul.*` MCP tools are enrolled and reachable (item 3).
-- `soul.recall` accepts the spec'd input shape and returns a delivery
-  envelope (item 4).
-- Daemon startup ordering, storage, garden, and MCP transport bootstrap
-  are all green (items 1, 2).
+The 2026-04-30 partial report proved `tools/list` and `soul.recall`, but
+failed at `soul.report_context_usage` because each `alaya tools call`
+spawned a fresh daemon process. That lost the in-process `delivery_id`
+state.
 
-## What this report does NOT prove (deferred)
+This proof closes that gap by keeping one daemon runtime alive across
+all MCP calls. The same `delivery_id` produced by `soul.recall` is
+accepted by `soul.report_context_usage`, and `alaya status` observes the
+resulting delivered/used counts.
 
-- Cross-call delivery state (`recall → report_context_usage`).
-- Candidate signal → proposal → governance reject → Garden background pass
-  end-to-end across a single daemon lifetime.
-- Real attached-agent (codex / claude-code) runtime invocation.
+## Related Repair
 
-## Backlog impact
+`#BL-015` addresses the durable version of the same failure mode for
+delivery / usage records:
 
-Add #BL-018 — "attached-agent MCP proof harness":
-- Requirement: a test harness or scripted demo that spins up the daemon
-  once, drives the full Gate-4 sequence in one process, captures stdout
-  per step.
-- Authority: §Gate Definitions in `docs/handbook/runtime-status.md`.
-- Blocks: Gate-4 close.
+```bash
+rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon trust-state-persistence
+```
 
-Until #BL-018 is resolved, **Gate-4 cannot be closed end-to-end**, even
-though P4-inspector-frontend (this card) is independently complete.
+That test proves runtime recall plus usage survives daemon restart and
+keeps `alaya status --agent codex` delivery/usage counts stable. The
+`#BL-015` issue is closed for delivery/usage durability; installed /
+configured / unverifiable counter persistence remains tracked by
+`#BL-020`.
 
-## Frontend-only Gate-4 close
+## Readiness
 
-P4-inspector-frontend AC1–AC8 + Reviewer Gate G1–G8 are all green via
-`apps/inspector/web/scripts/gate-check.sh` and the vitest run. That card
-flips to `live-event-ready` independently. Gate-4 itself remains
-`pending` until #BL-018 closes.
+- `#BL-018` is resolved.
+- The first-party MCP memory surface is `mcp-consumable` through the
+  single-daemon MCP proof harness.
+- Gate-4 passed after the `#BL-015` and `#BL-019` review fixes were
+  verified.
+- Phase 5 still owns the release-level E2E, benchmark fixture, graph
+  contract, final review, and any post-port hygiene execution.

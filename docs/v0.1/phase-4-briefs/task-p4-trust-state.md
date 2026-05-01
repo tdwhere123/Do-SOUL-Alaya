@@ -45,7 +45,17 @@ ContextDeliveryRecord and UsageProofRecord consumers.
 - Rewrite `@do-what/*` imports to `@do-soul/alaya-*` where applicable.
 - Do not edit shared barrels unless this card explicitly owns that barrel; this card is the single explicit exception that updates `packages/protocol/src/index.ts` to export the new schemas.
 - If a cited source path is missing or a source dependency forces files outside §2, return `BLOCKED` instead of expanding scope.
-- **Persistence is in-memory only** for v0.1. SQL durability across daemon restart is deferred to backlog #BL-014; do not add a SQLite migration in this card (the migration sequence is owned by P1-migrations per INDEX shared-file table).
+- **Original P4 scope** kept persistence in-memory only. SQL durability
+  for delivery / usage records across daemon restart was deferred to
+  backlog #BL-015; the follow-up repair added migration
+  `056-trust-state-persistence.sql` and closed #BL-015 for
+  delivery/usage durability. Installed / configured / unverifiable
+  counter persistence is tracked separately by `#BL-020`.
+- **EventPublisher divergence**: the #BL-015 repair intentionally keeps
+  `publishWithMutation(event, mutate(entry))` instead of the vendor
+  zero-argument callback so delivery / usage rows can store the exact
+  EventLog `event_id` as `audit_event_id`. The divergence is registered
+  by `#BL-021` and `docs/handbook/port-protocol.md`.
 
 ### 2.3 Schema Contract (in `packages/protocol`)
 
@@ -107,7 +117,8 @@ export type TrustSummary = z.infer<typeof TrustSummarySchema>;
 
 `TrustStateRecorder` is constructed at daemon startup step 3 (after EventPublisher is ready) and consumed at step 6 (before MCP transport binds).
 
-**Recorder API** (no SQL; in-memory `Map<delivery_id, ContextDeliveryRecord>` + `Map<delivery_id, UsageProofRecord>`):
+**Recorder API** (the original P4 implementation used in-memory maps;
+the #BL-015 follow-up now backs delivery/usage records with SQLite):
 
 ```ts
 class TrustStateRecorder {
@@ -124,8 +135,8 @@ class TrustStateRecorder {
 
 | # | Behavior | Test name |
 |---|---|---|
-| B1 | `recordDelivery` calls `EventPublisher.publish` with event_type `memory.delivered`; the returned record's `audit_event_id` MUST equal the EventLog entry id | `records delivery via EventPublisher` |
-| B2 | `recordUsage` calls `EventPublisher.publish` with event_type `memory.usage_reported`; rejects if `delivery_id` is unknown to the recorder | `recordUsage rejects unknown delivery_id` |
+| B1 | `recordDelivery` calls `EventPublisher.publishWithMutation` with event_type `memory.delivered`; the returned record's `audit_event_id` MUST equal the EventLog entry id | `records delivery via EventPublisher` |
+| B2 | `recordUsage` calls `EventPublisher.publishWithMutation` with event_type `memory.usage_reported`; rejects if `delivery_id` is unknown to the recorder | `recordUsage rejects unknown delivery_id` |
 | B3 | Multiple `recordDelivery` calls with different `delivery_id` accumulate; `summarize().delivered_count` reflects total | `delivered_count accumulates across calls` |
 | B4 | `recordDelivery` followed by no `recordUsage` does NOT increment `used_count` (the load-bearing §20 invariant) | `delivered does not imply used` |
 | B5 | `recordUsage` with `usage_state: "used"` increments `used_count` only (not `delivered_count` again) | `usage report does not double-count delivery` |
@@ -151,7 +162,10 @@ Computed deterministically from counts; ties broken by row order (first match wi
 
 ## 3. Deferred
 
-- **#BL-015** SQL persistence of trust records across daemon restart. The backlog entry exists; v0.1 implementation is in-memory only.
+- **#BL-015** SQL persistence of delivery / usage trust records across
+  daemon restart. Resolved by the 2026-05-01 repair.
+- **#BL-020** SQL persistence of installed / configured /
+  unverifiable trust counters across daemon restart.
 
 ## 4. Acceptance Criteria
 
@@ -162,7 +176,7 @@ Computed deterministically from counts; ties broken by row order (first match wi
 | AC3 | Build succeeds after this card lands | `rtk pnpm build` is green |
 | AC4 | Protocol schema tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-protocol -t "trust state"` |
 | AC5 | Daemon recorder tests pass | `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon -t "trust state"` |
-| AC6 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-4-briefs/reports/task-p4-trust-state.md` exists and cites backlog #BL-015 |
+| AC6 | Completion report captures source files, port mode, verification, deviations, and deferrals | `docs/v0.1/phase-4-briefs/reports/task-p4-trust-state.md` exists and cites backlog #BL-015 / #BL-020 |
 | AC7 | Closing readiness label is `live-event-ready` | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` are updated only after evidence supports the label |
 | AC8 | All 9 behaviors B1-B9 from §2.4 each have at least one matching test | grep test names against the §2.4 table |
 | AC9 | The state reduction table §2.5 is exhaustively tested with one test per row | grep test names against the §2.5 table; every row appears |
@@ -180,7 +194,10 @@ Computed deterministically from counts; ties broken by row order (first match wi
 ## 6. Shared File Hazards & Dependencies
 
 - **Owns** the `packages/protocol/src/index.ts` barrel exception for the new trust schemas. INDEX shared-file table line for `packages/protocol/src/index.ts` is "Owned by P1-protocol; no Phase 2+ card writes it." This card is the explicit, single-shot Phase 4 carve-out. Reviewer must verify no other Phase 4 card writes that file.
-- Imports `EventPublisher` from `packages/core/src/event-publisher.ts` (P2-svc-event-publisher); does not modify it.
+- Imports `EventPublisher` from `packages/core/src/event-publisher.ts`
+  (P2-svc-event-publisher). The #BL-015 repair changed the mutation
+  callback to receive the appended `EventLogEntry`; #BL-021 records this
+  as the explicit vendor divergence.
 - Imports `SoulContextUsageStateSchema` from `packages/protocol/src/soul/mcp-types.ts` (already exported by P1-protocol).
 
 **Prerequisite**: P4-daemon-startup-ordering.

@@ -147,11 +147,30 @@ describe("Phase 4A protocol schemas", () => {
       entry_id: "entry-1",
       event_kind: HealthEventKind.EVIDENCE_FAILURE,
       workspace_id: "workspace-1",
-      occurred_at: validTimestamp
+      occurred_at: validTimestamp,
+      change_summary: {
+        fields_changed: ["embedding_enabled", "secret_ref"],
+        secret_ref_kind: "file"
+      }
     } as const;
     expect(parsePhase4AEventPayload(Phase4AEventType.SOUL_HEALTH_JOURNAL_RECORDED, recordedPayload)).toEqual(
       recordedPayload
     );
+  });
+
+  it("rejects health journal change summaries that expose secret values", () => {
+    expect(() =>
+      parsePhase4AEventPayload(Phase4AEventType.SOUL_HEALTH_JOURNAL_RECORDED, {
+        entry_id: "entry-1",
+        event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
+        workspace_id: "workspace-1",
+        occurred_at: validTimestamp,
+        change_summary: {
+          fields_changed: ["secret_ref"],
+          secret_ref_kind: "sk-test-plaintext-secret"
+        }
+      })
+    ).toThrow();
   });
 
   it("keeps Phase4AEventTypeSchema aligned with the exported event constants", () => {

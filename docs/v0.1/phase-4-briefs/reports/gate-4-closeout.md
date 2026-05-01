@@ -1,86 +1,64 @@
-# Gate-4 Closeout — partial close (2026-04-30)
+# Gate-4 Closeout Status (2026-05-01)
 
 > Gate definition: `docs/handbook/runtime-status.md §Gate Definitions Gate-4`.
-> Authority: this report consolidates the three close conditions into one
-> place; readers cross-link to the per-card reports below.
+> Primary proof: `reports/gate-4-mcp-proof.md`.
 
-## TL;DR
+## Verdict
 
-Gate-4 is **not** fully closed in v0.1-alpha.4. One of the three close
-conditions is independently complete; the other two are blocked on a
-single missing test/demo harness, tracked as `#BL-018`.
+Gate-4 is **passed**. The single-daemon MCP proof harness resolves
+`#BL-018`, Inspector config writes now proxy the daemon and resolve
+`#BL-019`, and trust delivery/usage persistence resolves `#BL-015`.
+`#BL-020` remains open for installed / configured / unverifiable counter
+persistence and is not part of the Gate-4 close condition.
 
-| # | Close condition | State | Authority |
-|---|---|---|---|
-| 1 | `P4-inspector-frontend` live-event-ready | **CLOSED 2026-04-30** | `reports/task-p4-inspector-frontend.md` |
-| 2 | attached-agent MCP proof | **BLOCKED** by `#BL-018` | `reports/gate-4-mcp-proof.md` |
-| 3 | final review (zero Blocking / zero Important) | **CLOSED for the inspector card**; **BLOCKED for #2** | `reports/task-p4-inspector-frontend.md §Findings` |
+| Close condition | State | Authority |
+|---|---|---|
+| Inspector surface live-event-ready | Closed 2026-05-01 | Inspector daemon proxy, EventLog audit, backend route tests, and web chip tests |
+| Attached-agent MCP proof | Closed 2026-05-01 | `reports/gate-4-mcp-proof.md` |
+| Paste-mode secret-ref repair | Closed 2026-05-01 | `#BL-019`, daemon config-route tests, Inspector routes, and `EmbeddingSupplementForm` tests |
+| Trust delivery/usage restart durability | Closed 2026-05-01 | `#BL-015`, storage repo tests, migration parity, and `trust-state-persistence.test.ts` |
 
-## What landed (this closeout window)
+## Fresh Evidence
 
-- **ui-orbs / p4-recovery-controller worktrees deleted** — the team
-  picked the Ink & Fiber Gemini variant over the Orbs variant after the
-  2026-04-30 owner review; `p4-recovery-controller` had already been
-  merged into main.
-- **P4-inspector-frontend implementation pass** on `feat/ui-ink`:
-  - 3 routes + spotlight Memory Graph + dirty-tracked Config + healthy
-    Status indicator.
-  - `RuntimeEmbeddingConfig` exposed as a sub-form on the Config page,
-    closing the long-standing user complaint of "no place to fill in
-    the embedding API key".
-  - 18/18 RTL tests green; backend 8/8 still green; Reviewer Gate
-    G1–G8 all green; built bundle 138 KB gzipped (budget 500 KB).
-- **Documents flipped**:
-  - `docs/v0.1/INDEX.md` row for `P4-inspector-frontend` →
-    `live-event-ready`.
-  - `docs/handbook/runtime-status.md` Phase 4 row + Memory Inspector
-    subsystem row + Known Wiring Gaps section all updated.
-  - `docs/handbook/backlog.md` `#BL-012` → Resolved; new `#BL-018`
-    (attached-agent MCP proof harness) and `#BL-019`
-    (embedding-supplement paste secret_ref pipeline) opened.
+```bash
+rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon gate4-attached-agent-mcp-proof
+rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon trust-state-persistence
+rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon routes-config-port app embedding-status trust-state trust-state-persistence gate4-attached-agent-mcp-proof
+rtk pnpm exec vitest run --project @do-soul/alaya-inspector routes
+rtk pnpm exec vitest run --project @do-soul/alaya-inspector-web EmbeddingSupplementForm
+rtk pnpm exec vitest run --project @do-soul/alaya-storage trust-state-repo migration-parity
+```
 
-## Why Gate-4 is not yet fully closed
+The proof harness runs `alaya install`, `alaya attach codex`, MCP
+`tools/list`, `soul.recall`, `soul.open_pointer`,
+`soul.report_context_usage`, `soul.emit_candidate_signal`, proposal
+creation, governance reject, one Garden background pass, `alaya status`,
+and `alaya doctor` in one daemon lifetime. The Garden step asserts
+Garden task dispatched/completed EventLog entries and a Garden
+health-journal entry.
 
-The Gate-4 spec (`docs/handbook/runtime-status.md:98-104`) requires the
-full sequence `alaya install → alaya attach codex → tools/list shows the
-full soul.* catalog → soul.recall → soul.open_pointer →
-soul.report_context_usage → candidate signal → proposal → governance
-reject → Garden background pass` to run **end-to-end against a real
-daemon**.
+## Backlog Changes
 
-We were able to validate items 1–4 of that sequence offline (see
-`reports/gate-4-mcp-proof.md`). The break is at `soul.recall` →
-`soul.report_context_usage`: each `alaya tools call …` invocation spawns
-a fresh daemon, so the `delivery_id` from `soul.recall` is unknown to
-the next process. That's not a bug in the contract — it's the v0.1
-trust-state in-memory choice plus the lack of a single-process Gate-4
-demo harness.
+- `#BL-018` resolved: attached-agent MCP proof harness exists,
+  exercises the cross-call delivery state, and asserts Garden evidence.
+- `#BL-019` resolved: Inspector embedding supplement reads/writes proxy
+  daemon truth, paste writes are hardened, and the daemon records the
+  config write through EventLog.
+- `#BL-015` resolved for delivery/usage persistence: SQLite rows survive
+  daemon restart, duplicate records conflict instead of overwrite, and
+  EventLog mutation rollback is covered.
+- `#BL-020` open: installed/configured/unverifiable trust counters
+  remain process-local.
+- `#BL-013` resolved: `GreenService.setGrace()` emits
+  `soul.green.grace_entered`.
+- `#BL-014` remains open: this batch corrected a docs reference, but
+  commit-history prevention still needs a future wave-close proof.
+- `#BL-016` / `#BL-017` remain open and frozen until the final v0.1 port
+  card lands.
 
-The fix is a focused harness/test that:
+## Remaining Release Work
 
-1. Boots the daemon once.
-2. Drives the seven-step sequence in-process (or via a single MCP
-   session against the running daemon).
-3. Captures stdout per step into a deterministic transcript.
-
-That work is `#BL-018`. It does NOT require any new schema, route, or
-service — only a new test harness or scripted demo wrapper.
-
-## Next-up follow-ups
-
-- `#BL-018` — attached-agent MCP proof harness (Gate-4 blocker).
-- `#BL-019` — embedding-supplement paste secret_ref pipeline (Inspector
-  v0.2; deviation from card §2.3 #4).
-- Optional `/schedule` agent in 1–2 weeks: re-check if `#BL-018`
-  landed and post the Gate-4 transcript to a closeout amendment of this
-  file.
-
-## Reference
-
-- `~/.claude/plans/feat-ui-ink-gate-4-inherited-moon.md` — approved
-  execution plan that produced this closeout.
-- `apps/inspector/web/scripts/gate-check.sh` — reproducible Reviewer
-  Gate G2/G3/G4/G5 self-check.
-- `docs/v0.1/phase-4-briefs/task-p4-inspector-frontend.md` — card.
-- `docs/superpowers/specs/2024-05-20-ink-ui.md` — visual contract the
-  frontend implements.
+Phase 5 is now unblocked by Gate-4. Remaining release work is the Phase
+5 benchmark, graph contract, full E2E loop, and final review. `#BL-020`
+is a follow-up durability issue outside the resolved `#BL-015`
+delivery/usage close condition.

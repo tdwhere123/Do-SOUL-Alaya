@@ -7,6 +7,7 @@ import {
   MemoryDimension,
   Phase3BEventType,
   RevokeReason,
+  SoulGreenGraceEnteredPayloadSchema,
   SoulGreenGrantedPayloadSchema,
   SoulGreenPiercedPayloadSchema,
   SoulSessionOverrideAppliedPayloadSchema,
@@ -252,11 +253,13 @@ export class GreenService {
     readonly workspaceId: string;
     readonly until: string;
     readonly runId?: string;
+    readonly reason?: "valid_until_expired" | "manual";
   }): Promise<Readonly<GreenStatus> | null> {
     const targetObjectId = parseObjectId(params.targetObjectId);
     const workspaceId = parseNonEmptyString(params.workspaceId, "workspaceId");
     parseNonEmptyString(params.until, "until");
     const runId = params.runId === undefined ? null : parseNonEmptyString(params.runId, "runId");
+    const reason = params.reason ?? "manual";
     const existing = await this.dependencies.greenStatusRepo.findByTargetObjectId(targetObjectId);
 
     if (existing === null) {
@@ -274,17 +277,20 @@ export class GreenService {
     });
     const revision = await getNextRevision(this.dependencies.eventLogRepo, "green_status", next.object_id);
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase3BEventType.SOUL_GREEN_PIERCED,
+      event_type: Phase3BEventType.SOUL_GREEN_GRACE_ENTERED,
       entity_type: "green_status",
       entity_id: next.object_id,
       workspace_id: workspaceId,
       run_id: runId,
       caused_by: "system",
       revision,
-      payload_json: SoulGreenPiercedPayloadSchema.parse({
+      payload_json: SoulGreenGraceEnteredPayloadSchema.parse({
         object_id: next.object_id,
         target_object_id: targetObjectId,
-        revoke_reason: RevokeReason.REVIEW_OVERDUE,
+        valid_until: params.until,
+        prior_green_state: existing.green_state,
+        prior_valid_until: existing.valid_until,
+        reason,
         workspace_id: workspaceId,
         occurred_at: timestamp
       })
@@ -327,7 +333,8 @@ export class GreenService {
         targetObjectId,
         workspaceId,
         until: graceUntil,
-        runId: params.runId ?? memory.run_id
+        runId: params.runId ?? memory.run_id,
+        reason: "valid_until_expired"
       });
       return grace === null ? "unchanged" : "grace";
     }

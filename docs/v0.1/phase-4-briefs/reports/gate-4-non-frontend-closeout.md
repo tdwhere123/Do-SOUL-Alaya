@@ -11,7 +11,13 @@ recall cache invalidation, and the Inspector server.
 
 Out of scope: `P4-inspector-frontend`. The frontend card remains
 unimplemented and is still delegated to Gemini CLI by its task card.
-This report therefore does not claim Gate-4 passed.
+This report therefore did not claim Gate-4 passed at the time.
+
+2026-05-01 amendment: the frontend card, attached-agent MCP proof,
+trust delivery/usage persistence repair, and Inspector daemon-proxy
+config repair have since landed. Current Gate-4 status lives in
+`reports/gate-4-closeout.md` and `reports/gate-4-mcp-proof.md`; Gate-4
+passed after `#BL-015` and `#BL-019` were verified.
 
 Historical baseline: `review-p4-controller.md` remains the failure
 report for the previous controller implementation. The recovery work
@@ -24,7 +30,7 @@ composition.
 
 Phase 4 non-frontend status: `implementation-ready`.
 
-Gate-4 status: pending.
+Gate-4 status at the time of this report: pending.
 
 Remaining Gate-4 closure work:
 
@@ -85,8 +91,10 @@ No frontend review is claimed here.
 
 ## Residual Risk
 
-`P4-trust-state` keeps records in memory for v0.1. SQL persistence is
-tracked by #BL-015 and remains deferred to v0.2.
+2026-05-01 amendment: `P4-trust-state` delivery/usage records have a
+SQL-backed persistence path, and `#BL-015` is resolved for
+delivery/usage durability. Installed/configured/unverifiable counters
+remain in-process and are tracked separately by `#BL-020`.
 
-`P4-inspector-frontend` remains open, so #BL-012 is only partially
-closed by this non-frontend report.
+`P4-inspector-frontend` landed, and Inspector config-write live
+readiness is closed by `#BL-019`.

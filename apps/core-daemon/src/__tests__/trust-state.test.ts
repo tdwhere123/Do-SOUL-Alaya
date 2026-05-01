@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ContextDeliveryRecord, EventLogEntry, UsageProofRecord } from "@do-soul/alaya-protocol";
+import {
+  TrustStateEventType,
+  type ContextDeliveryRecord,
+  type EventLogEntry,
+  type UsageProofRecord
+} from "@do-soul/alaya-protocol";
 import {
   TrustStateRecorder,
   TrustStateRecorderNotReady,
@@ -15,26 +20,27 @@ type UsageInput = Omit<UsageProofRecord, "audit_event_id">;
 
 describe("trust state recorder", () => {
   it("B1 records delivery via EventPublisher", async () => {
-    const { recorder, publish } = createRecorder({
+    const { recorder, publishWithMutation } = createRecorder({
       ready: true,
       clock: vi.fn(() => "2026-04-30T10:02:00.000Z")
     });
 
     const record = await recorder.recordDelivery(buildDeliveryInput("delivery-1"));
 
-    expect(publish).toHaveBeenCalledTimes(1);
-    expect(publish).toHaveBeenCalledWith(
+    expect(publishWithMutation).toHaveBeenCalledTimes(1);
+    expect(publishWithMutation).toHaveBeenCalledWith(
       expect.objectContaining({
         event_type: "memory.delivered",
         entity_type: "trust_context_delivery",
         entity_id: "delivery-1"
-      })
+      }),
+      expect.any(Function)
     );
     expect(record.audit_event_id).toBe("event-1");
   });
 
   it("B2 recordUsage rejects unknown delivery_id", async () => {
-    const { recorder, publish } = createRecorder({ ready: true });
+    const { recorder, publishWithMutation } = createRecorder({ ready: true });
 
     await expect(
       recorder.recordUsage({
@@ -46,7 +52,7 @@ describe("trust state recorder", () => {
       })
     ).rejects.toBeInstanceOf(TrustStateUnknownDeliveryError);
 
-    expect(publish).not.toHaveBeenCalled();
+    expect(publishWithMutation).not.toHaveBeenCalled();
   });
 
   it("B3 delivered_count accumulates across calls", async () => {
@@ -91,6 +97,74 @@ describe("trust state recorder", () => {
     await recorder.recordUnverifiable("codex", "session-2");
     const summary = await recorder.summarize("codex");
     expect(summary.unverifiable_count).toBe(1);
+  });
+
+  it("audits installed configured and unverifiable counters before mutating process-local state", async () => {
+    const { recorder, publishWithMutation } = createRecorder({
+      ready: true,
+      clock: vi.fn(() => "2026-04-30T10:02:00.000Z")
+    });
+
+    await recorder.recordDelivery(buildDeliveryInput("delivery-1"));
+    await recorder.recordInstalled("codex");
+    await recorder.recordConfigured("codex");
+    await recorder.recordUnverifiable("codex", "session-1");
+
+    const counterEvents = publishWithMutation.mock.calls
+      .map((call) => call[0])
+      .filter((entry) => entry.entity_type === "trust_state_counter");
+    expect(counterEvents).toEqual([
+      expect.objectContaining({
+        event_type: TrustStateEventType.TRUST_STATE_INSTALLED_RECORDED,
+        entity_id: "codex:installed",
+        payload_json: expect.objectContaining({
+          agent_target: "codex",
+          counter_name: "installed",
+          session_id: null,
+          recorded_at: "2026-04-30T10:02:00.000Z"
+        })
+      }),
+      expect.objectContaining({
+        event_type: TrustStateEventType.TRUST_STATE_CONFIGURED_RECORDED,
+        entity_id: "codex:configured",
+        payload_json: expect.objectContaining({
+          agent_target: "codex",
+          counter_name: "configured",
+          session_id: null
+        })
+      }),
+      expect.objectContaining({
+        event_type: TrustStateEventType.TRUST_STATE_UNVERIFIABLE_RECORDED,
+        entity_id: "codex:unverifiable",
+        payload_json: expect.objectContaining({
+          agent_target: "codex",
+          counter_name: "unverifiable",
+          session_id: "session-1"
+        })
+      })
+    ]);
+
+    await expect(recorder.summarize("codex")).resolves.toMatchObject({
+      installed_count: 1,
+      configured_count: 1,
+      unverifiable_count: 1
+    });
+  });
+
+  it("does not mutate process-local counters when audit publication fails", async () => {
+    const publishWithMutation = vi.fn(async () => {
+      throw new Error("audit append failed");
+    });
+    const recorder = new TrustStateRecorder({
+      eventPublisher: { publishWithMutation },
+      ready: true
+    });
+
+    await expect(recorder.recordInstalled("codex")).rejects.toThrow("audit append failed");
+
+    await expect(recorder.summarize("codex")).resolves.toMatchObject({
+      installed_count: 0
+    });
   });
 
   it("B7 summarize state reduction is correct", async () => {
@@ -174,7 +248,7 @@ describe("trust state recorder", () => {
       .fn<() => string>()
       .mockReturnValueOnce("2026-04-30T10:03:00.000Z")
       .mockReturnValueOnce("2026-04-30T10:04:00.000Z");
-    const { recorder, publish } = createRecorder({ ready: true, clock });
+    const { recorder, publishWithMutation } = createRecorder({ ready: true, clock });
 
     const delivery = await recorder.recordDelivery(buildDeliveryInput("delivery-1"));
     const usage = await recorder.recordUsage(buildUsageInput("delivery-1", "used"));
@@ -182,7 +256,7 @@ describe("trust state recorder", () => {
     expect(delivery.delivered_at).toBe(DELIVERY_AT);
     expect(usage.reported_at).toBe(USAGE_AT);
     expect(clock).toHaveBeenCalledTimes(2);
-    expect(publish.mock.calls[0]?.[0]).toEqual(
+    expect(publishWithMutation.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         payload_json: expect.objectContaining({
           delivered_at: DELIVERY_AT,
@@ -190,7 +264,7 @@ describe("trust state recorder", () => {
         })
       })
     );
-    expect(publish.mock.calls[1]?.[0]).toEqual(
+    expect(publishWithMutation.mock.calls[1]?.[0]).toEqual(
       expect.objectContaining({
         payload_json: expect.objectContaining({
           reported_at: USAGE_AT,
@@ -210,25 +284,35 @@ describe("trust state recorder", () => {
   });
 });
 
-function createRecorder(options: { ready: boolean; clock?: () => string }) {
+function createRecorder(options: {
+  ready: boolean;
+  clock?: () => string;
+  publishWithMutation?: ReturnType<typeof vi.fn>;
+}) {
   let counter = 0;
-  const publish = vi.fn(
-    async (entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<Readonly<EventLogEntry>> => {
-      counter += 1;
-      return {
-        event_id: `event-${counter}`,
-        created_at: "2026-04-30T10:05:00.000Z",
-        ...entry
-      };
-    }
-  );
+  const publishWithMutation =
+    options.publishWithMutation ??
+    vi.fn(
+      async <T>(
+        entry: Omit<EventLogEntry, "event_id" | "created_at">,
+        mutate: (entry: EventLogEntry) => Promise<T>
+      ): Promise<T> => {
+        counter += 1;
+        const persisted = {
+          event_id: `event-${counter}`,
+          created_at: "2026-04-30T10:05:00.000Z",
+          ...entry
+        };
+        return await mutate(persisted);
+      }
+    );
 
   const recorder = new TrustStateRecorder({
-    eventPublisher: { publish },
+    eventPublisher: { publishWithMutation },
     ready: options.ready,
     clock: options.clock
   });
-  return { recorder, publish };
+  return { recorder, publishWithMutation };
 }
 
 function buildDeliveryInput(

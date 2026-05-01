@@ -13,9 +13,9 @@
 - Provides token-authenticated loopback HTTP proxy routes for config,
   graph, and status, plus static bundle hosting for the future
   frontend.
-- `PATCH /api/config/runtime/embedding-supplement` writes the shared
-  `.env` envelope atomically and audits without plaintext secret
-  values.
+- `PATCH /api/config/runtime/embedding-supplement` is an Inspector proxy;
+  the daemon writes the shared `.env` envelope atomically and audits
+  without plaintext secret values.
 - Missing frontend bundle returns an explicit 503 JSON error.
 
 ## Verification

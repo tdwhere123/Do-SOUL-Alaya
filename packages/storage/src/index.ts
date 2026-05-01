@@ -177,6 +177,10 @@ export {
   SqliteConfigRepo,
   type ConfigRepo
 } from "./repos/config-repo.js";
+export {
+  SqliteTrustStateRepo,
+  type TrustStateRepo
+} from "./repos/trust-state-repo.js";
 
 export { SqliteHandoffGapRepo } from "./repos/handoff-gap-repo.js";
 export {

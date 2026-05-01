@@ -158,6 +158,8 @@ function createRuntime(): AlayaDaemonRuntime {
       },
       principalCodingEngineAvailable: true
     },
+    startBackgroundServices: () => {},
+    runGardenBackgroundPass: async () => {},
     startHttpServer: async () => ({
       hostname: "127.0.0.1",
       port: 3000,

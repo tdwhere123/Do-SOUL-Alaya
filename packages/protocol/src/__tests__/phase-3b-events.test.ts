@@ -16,6 +16,7 @@ describe("Phase 3B event schemas", () => {
       "soul.session_override.promoted",
       "soul.green.granted",
       "soul.green.pierced",
+      "soul.green.grace_entered",
       "soul.verification.completed",
       "soul.governance_lease.acquired",
       "soul.governance_lease.released",
@@ -75,6 +76,20 @@ describe("Phase 3B event schemas", () => {
     } as const;
     expect(parsePhase3BEventPayload(Phase3BEventType.SOUL_GREEN_PIERCED, greenPiercedPayload)).toEqual(
       greenPiercedPayload
+    );
+
+    const greenGraceEnteredPayload = {
+      object_id: "green-1",
+      target_object_id: "memory-1",
+      valid_until: "2026-03-25T00:00:00.000Z",
+      prior_green_state: "eligible",
+      prior_valid_until: "2026-03-24T00:00:00.000Z",
+      reason: "valid_until_expired",
+      workspace_id: "workspace-1",
+      occurred_at: validTimestamp
+    } as const;
+    expect(parsePhase3BEventPayload(Phase3BEventType.SOUL_GREEN_GRACE_ENTERED, greenGraceEnteredPayload)).toEqual(
+      greenGraceEnteredPayload
     );
 
     const verificationPayload = {
@@ -161,6 +176,30 @@ describe("Phase 3B event schemas", () => {
     ).toThrow();
   });
 
+  it("requires grace-entry prior state and reason fields", () => {
+    expect(() =>
+      parsePhase3BEventPayload(Phase3BEventType.SOUL_GREEN_GRACE_ENTERED, {
+        object_id: "green-1",
+        target_object_id: "memory-1",
+        valid_until: "2026-03-25T00:00:00.000Z",
+        workspace_id: "workspace-1",
+        occurred_at: validTimestamp
+      })
+    ).toThrow();
+    expect(() =>
+      parsePhase3BEventPayload(Phase3BEventType.SOUL_GREEN_GRACE_ENTERED, {
+        object_id: "green-1",
+        target_object_id: "memory-1",
+        valid_until: "2026-03-25T00:00:00.000Z",
+        prior_green_state: "eligible",
+        prior_valid_until: null,
+        reason: "review_overdue",
+        workspace_id: "workspace-1",
+        occurred_at: validTimestamp
+      })
+    ).toThrow();
+  });
+
   it("discriminates correctly on type", () => {
     const event = {
       type: Phase3BEventType.SOUL_GREEN_GRANTED,
@@ -184,6 +223,9 @@ describe("Phase 3B event schemas", () => {
     );
     expect(EventTypeSchema.parse(Phase3BEventType.SOUL_GREEN_GRANTED)).toBe(
       Phase3BEventType.SOUL_GREEN_GRANTED
+    );
+    expect(EventTypeSchema.parse(Phase3BEventType.SOUL_GREEN_GRACE_ENTERED)).toBe(
+      Phase3BEventType.SOUL_GREEN_GRACE_ENTERED
     );
   });
 });

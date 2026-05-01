@@ -22,5 +22,5 @@
 
 ## Readiness Impact
 
-This command closes as `implementation-ready`; persisted trust-state
-history remains #BL-015.
+This command closes as `implementation-ready`; persisted delivery/usage
+trust-state history later landed under #BL-015.

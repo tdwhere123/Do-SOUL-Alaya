@@ -97,21 +97,18 @@ and nothing else.
 | PATCH | `/api/config/:wsId/strategy` | `PATCH /workspaces/:wsId/config/strategy` | partial `StrategyConfig` |
 | GET | `/api/config/:wsId/environment` | `GET /workspaces/:wsId/config/environment` | `EnvironmentConfig` |
 | PATCH | `/api/config/:wsId/environment` | `PATCH /workspaces/:wsId/config/environment` | partial `EnvironmentConfig` |
-| GET | `/api/config/:wsId/embedding-supplement` | `GET /workspaces/:wsId/embedding-status` | `EmbeddingStatus` |
-| PATCH | `/api/config/runtime/embedding-supplement` | (writes to `<config-dir>/.env` via shared P4-secrets helper; daemon restart required) | `{ provider_url?, model_id?, secret_ref?, embedding_enabled? }` |
+| GET | `/api/config/:wsId/embedding-supplement` | `GET /config/runtime/embedding-supplement` | `RuntimeEmbeddingConfig` |
+| PATCH | `/api/config/runtime/embedding-supplement` | `PATCH /config/runtime/embedding-supplement` | `{ provider_url?, model_id?, secret_ref?, embedding_enabled?, requires_daemon_restart }` |
 | GET | `/api/graph/:wsId` | `GET /workspaces/:wsId/soul/graph` | `SoulGraph` |
 | GET | `/api/status` | `GET /status` | `AlayaStatus` |
 
-The `PATCH /api/config/runtime/embedding-supplement` path is the
-only Inspector-side write that bypasses the daemon HTTP API: it
-writes the `.env` envelope file owned by P4-cli-install, because
-`OPENAI_API_KEY` and friends are *daemon-process-global* (not
-workspace-scoped). The implementation MUST use the same
-`<config-dir>/.env` resolution as P4-cli-install (single source of
-truth helper) and MUST write through the same atomic-write +
-audit-row codepath that P4-profile-mutation provides for agent
-profiles. After the write, the response includes
-`{"requires_daemon_restart": true}` so the SPA can prompt the user.
+The `PATCH /api/config/runtime/embedding-supplement` path is a thin
+Inspector proxy. The daemon owns `.env` envelope resolution, pasted
+secret normalization, secret-file writes, config mutation, and the
+EventLog audit row because `OPENAI_API_KEY` and friends are
+*daemon-process-global* (not workspace-scoped). After the daemon write,
+the response includes `{"requires_daemon_restart": true}` so the SPA can
+prompt the user.
 
 **No other writes.** Memory CRUD, governance overrides, attach /
 detach mutation, secret rotation beyond the embedding-supplement
@@ -164,7 +161,7 @@ panel — all forbidden in v0.1 per invariant §21 narrowed wording
 | AC7 | Token middleware is constant-time and missing-token returns 401 | Auth tests assert both branches; timing-sensitive comparison call is verified by code inspection in review |
 | AC8 | Bind to `127.0.0.1` only is enforced | Test asserts the listener does not respond on a non-loopback interface |
 | AC9 | Frozen route surface contains exactly the table in §2.3 | Test enumerates registered routes and asserts the set equals the table |
-| AC10 | The embedding-supplement PATCH path writes `.env` atomically and never includes plaintext key in audit | Integration test seeds `<config-dir>/.env`, performs PATCH, asserts file contents are correct + audit row carries only the secret-ref string + response includes `requires_daemon_restart: true` |
+| AC10 | The daemon-owned embedding-supplement PATCH writes `.env` atomically and never includes plaintext key in audit | Integration test seeds `<config-dir>/.env`, performs Inspector PATCH through the daemon proxy, asserts file contents are correct + audit row carries only the secret-ref string + response includes `requires_daemon_restart: true` |
 | AC11 | Static handler rejects path traversal | Test asserts `GET /../../etc/passwd` returns 404 |
 | AC12 | Missing frontend bundle does not crash the server | Test deletes `apps/inspector/web/dist/index.html`, asserts server starts and `GET /` returns 503 |
 

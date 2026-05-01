@@ -87,13 +87,18 @@ Note: a separate finding raised by the MCP-proof phase
 proof harness**; that is OUT OF SCOPE for this card per §2.5 (forbids
 new server-side routes / harnesses).
 
+2026-05-01 update: `#BL-018` is resolved by
+`gate4-attached-agent-mcp-proof.test.ts`.
+
 ## Deviations from card §2.3 prompt
 
-1. **secret_ref `paste` mode dropped** — card §2.3 #4 mentioned a "paste"
-   secret-source. Inspector backend `apps/inspector/src/config-store.ts:121`
-   only accepts `env:` / `file:` prefixes (paste would require new server
-   logic prohibited by §2.5). Frontend exposes env/file chip selector
-   only. Filed as backlog #BL-019 (paste secret pipeline) for v0.2.
+1. **secret_ref `paste` mode originally deferred, then repaired** — card
+   §2.3 #4 mentioned a "paste" secret-source. The first frontend landing
+   exposed env/file only, so backlog `#BL-019` tracked the missing paste
+   pipeline. The 2026-05-01 repair moved embedding-supplement config
+   truth to the daemon: Inspector now proxies GET/PATCH to daemon routes,
+   paste writes produce a sanitized `file:` ref, the daemon records the
+   write through EventLog, and the frontend exposes env/file/paste chips.
 2. **react-router `useBlocker`** — card permitted "react-query OR plain
    useEffect; choose one and document the choice." This SPA uses plain
    `useEffect` + `<BrowserRouter>`. `useBlocker` requires data-router
@@ -117,6 +122,9 @@ $ bash apps/inspector/web/scripts/gate-check.sh
 
 ## Closing label
 
-`live-event-ready` (this card alone). Gate-4 itself remains pending
-until #BL-018 (attached-agent MCP proof harness) lands; see
+`live-event-ready` (this card alone). At report time, Gate-4 itself was
+pending until #BL-018 (attached-agent MCP proof harness) landed; see
 `reports/gate-4-mcp-proof.md`.
+
+2026-05-01 update: #BL-019 paste mode and #BL-018 attached-agent proof
+have both landed. Gate-4 is closed by `reports/gate-4-closeout.md`.

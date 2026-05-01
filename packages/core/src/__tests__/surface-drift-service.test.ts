@@ -86,8 +86,8 @@ describe("SurfaceDriftService", () => {
       eventPublisher: createEventPublisher({
         publishWithMutation: vi.fn(async (event, mutate) => {
           order.push("event_log");
-          createEventLogEntry(event);
-          return await mutate();
+          const entry = createEventLogEntry(event);
+          return await mutate(entry);
         })
       })
     });
@@ -135,8 +135,8 @@ describe("SurfaceDriftService", () => {
     });
     const publishWithMutationSpy = vi.fn(async (event, mutate) => {
       order.push("event_log");
-      createEventLogEntry(event);
-      return await mutate();
+      const entry = createEventLogEntry(event);
+          return await mutate(entry);
     });
     const service = new SurfaceDriftService({
       now: () => "2026-04-20T08:01:00.000Z",
@@ -175,7 +175,7 @@ describe("SurfaceDriftService", () => {
       findActiveById: vi.fn(async () => null),
       delete: vi.fn(async () => {})
     });
-    const publishWithMutationSpy = vi.fn(async (_event, mutate) => await mutate());
+    const publishWithMutationSpy = vi.fn(async (_event, mutate) => await mutate(createEventLogEntry(_event)));
     const service = new SurfaceDriftService({
       leaseRepo: repo,
       eventPublisher: createEventPublisher({ publishWithMutation: publishWithMutationSpy })
@@ -203,7 +203,7 @@ describe("SurfaceDriftService", () => {
       leaseRepo: repo,
       eventPublisher: createEventPublisher({
         publish: publishSpy,
-        publishWithMutation: vi.fn(async (_event, mutate) => await mutate())
+        publishWithMutation: vi.fn(async (_event, mutate) => await mutate(createEventLogEntry(_event)))
       })
     });
 
@@ -258,7 +258,7 @@ describe("SurfaceDriftService", () => {
       eventPublisher: createEventPublisher({
         publish: publishSpy,
         publishWithMutation: vi.fn(async (_event, mutate) => {
-          await mutate();
+          await mutate(createEventLogEntry(_event));
           throw new EventPublisherPropagationError(
             propagatedReleaseEntry,
             new Error("notify failed")
@@ -277,7 +277,7 @@ describe("SurfaceDriftService", () => {
     const repo = createLeaseRepo({
       findActiveById: vi.fn(async () => createLease())
     });
-    const publishWithMutationSpy = vi.fn(async (_event, mutate) => await mutate());
+    const publishWithMutationSpy = vi.fn(async (_event, mutate) => await mutate(createEventLogEntry(_event)));
     const service = new SurfaceDriftService({
       leaseRepo: repo,
       eventPublisher: createEventPublisher({ publishWithMutation: publishWithMutationSpy })
@@ -372,7 +372,7 @@ describe("SurfaceDriftService", () => {
         })
       }),
       eventPublisher: createEventPublisher({
-        publishWithMutation: vi.fn(async (_event, mutate) => await mutate())
+        publishWithMutation: vi.fn(async (_event, mutate) => await mutate(createEventLogEntry(_event)))
       })
     });
 
@@ -413,7 +413,7 @@ function createEventPublisher(overrides: Partial<{
   publish: (event: Omit<EventLogEntry, "event_id" | "created_at">) => Promise<EventLogEntry>;
   publishWithMutation: <T>(
     event: Omit<EventLogEntry, "event_id" | "created_at">,
-    mutate: () => Promise<T>
+    mutate: (entry: EventLogEntry) => Promise<T>
   ) => Promise<T>;
 }> = {}) {
   return {
@@ -426,13 +426,13 @@ function createEventPublisher(overrides: Partial<{
       overrides.publishWithMutation ??
       (vi.fn(async <T>(
         event: Omit<EventLogEntry, "event_id" | "created_at">,
-        mutate: () => Promise<T>
+        mutate: (entry: EventLogEntry) => Promise<T>
       ) => {
-        createEventLogEntry(event);
-        return await mutate();
+        const entry = createEventLogEntry(event);
+        return await mutate(entry);
       }) as <T>(
         event: Omit<EventLogEntry, "event_id" | "created_at">,
-        mutate: () => Promise<T>
+        mutate: (entry: EventLogEntry) => Promise<T>
       ) => Promise<T>)
   };
 }

@@ -60,7 +60,14 @@ export const SoulHealthJournalRecordedPayloadSchema = z
     entry_id: NonEmptyStringSchema,
     event_kind: HealthEventKindSchema,
     workspace_id: NonEmptyStringSchema,
-    occurred_at: IsoDatetimeStringSchema
+    occurred_at: IsoDatetimeStringSchema,
+    change_summary: z
+      .object({
+        fields_changed: z.array(NonEmptyStringSchema).readonly(),
+        secret_ref_kind: z.enum(["env", "file"]).nullable().optional()
+      })
+      .readonly()
+      .optional()
   })
   .readonly();
 

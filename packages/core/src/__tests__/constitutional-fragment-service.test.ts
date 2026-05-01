@@ -135,7 +135,7 @@ describe("ConstitutionalFragmentService", () => {
         created_at: FIXED_NOW
       });
     const publishWithMutationImpl: Pick<EventPublisher, "publishWithMutation">["publishWithMutation"] =
-      async (_event, mutate) => await mutate();
+      async (_event, mutate) => await mutate(existingEntry);
     const publishWithMutation = vi.fn(publishWithMutationImpl);
     const eventLogReader = {
       queryByEntity: vi.fn(async (entityType: string, entityId: string) =>
@@ -377,7 +377,7 @@ describe("ConstitutionalFragmentService", () => {
       created_at: FIXED_NOW
     });
     const publishWithMutationImpl: Pick<EventPublisher, "publishWithMutation">["publishWithMutation"] =
-      async (_event, mutate) => await mutate();
+      async (_event, mutate) => await mutate(existingEntry);
     const publishWithMutation = vi.fn(publishWithMutationImpl);
     const service = new ConstitutionalFragmentService({
       fragmentStore: store,

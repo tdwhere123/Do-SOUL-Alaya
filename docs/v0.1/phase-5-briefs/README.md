@@ -25,7 +25,9 @@ Per review I9:
   P2-garden-batch-3 (path-graph-snapshotter wiring) being
   `live-event-ready`. The card consumes real path snapshots; without
   them it falls back to schema-only and trips R3.
-- **P5-benchmark** depends on Gate-4 closure (real daemon).
+- **P5-benchmark** depends on Gate-4 closure. Gate-4 passed on
+  2026-05-01 after the MCP proof harness, Inspector config-write repair,
+  and trust delivery/usage durability repair were verified.
 - **P5-e2e** depends on Gate-4 closure and on P5-benchmark having a
   fixture format the E2E test can reference. It must also prove the
   P4-mcp-memory-tools contract through a real attached-agent
@@ -49,7 +51,7 @@ Per review I9:
 
 ## Parallelism Notes
 
-- P5-graph-contract can start in parallel with P5-benchmark once
+- P5-graph-contract can start in parallel with P5-benchmark only after
   Gate-4 closes (different write sets).
 - P5-e2e runs after both above land (it composes their fixtures).
 - P5-final-review may dispatch multiple reviewer perspectives in

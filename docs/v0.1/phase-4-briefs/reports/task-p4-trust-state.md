@@ -12,7 +12,16 @@
 
 - Implements delivered-not-used trust state reduction for configured,
   delivered, used, skipped, unverifiable, and mixed states.
-- SQL persistence is deferred to #BL-015.
+- SQL persistence for delivery / usage records was deferred to #BL-015
+  in the original card. A 2026-05-01 follow-up repair added the
+  migration and repo path, and closed #BL-015 for delivery/usage
+  durability after parent verification.
+- The #BL-015 repair keeps the Alaya-specific
+  `publishWithMutation(entry)` callback so SQL delivery / usage rows can
+  persist the exact EventLog id as `audit_event_id`. This vendor
+  divergence is recorded by #BL-021 and `docs/handbook/port-protocol.md`.
+- Installed / configured / unverifiable counter persistence is tracked
+  separately by #BL-020.
 
 ## Verification
 
@@ -21,5 +30,7 @@
 
 ## Readiness Impact
 
-This card closes as `implementation-ready`; restart-stable persistence
-remains #BL-015.
+This card closes as `implementation-ready`. Delivery / usage restart
+proof exists in
+`apps/core-daemon/src/__tests__/trust-state-persistence.test.ts`, and
+the durability closeout for delivery/usage is resolved.

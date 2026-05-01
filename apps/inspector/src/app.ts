@@ -2,7 +2,6 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { createInspectorAuthMiddleware } from "./auth.js";
-import { resolveInspectorConfigPaths } from "./config-store.js";
 import { registerInspectorConfigRoutes } from "./routes/config.js";
 import { registerInspectorGraphRoutes } from "./routes/graph.js";
 import { registerInspectorStatusRoutes } from "./routes/status.js";
@@ -35,21 +34,41 @@ export interface InspectorAppOptions {
 
 export function createInspectorApp(options: InspectorAppOptions): Hono {
   const app = new Hono();
+  app.onError((error, context) => {
+    const status = isClientInputError(error) ? 400 : 500;
+    console.error("[inspector] sanitized route error", summarizeInspectorError(error, status));
+    return context.json({ error: status === 400 ? "invalid_request" : "internal_error" }, status);
+  });
   app.use("*", createInspectorAuthMiddleware(options.token));
 
   const proxyOptions = {
     daemonUrl: options.daemonUrl ?? "http://127.0.0.1:5173",
     fetchImpl: options.fetchImpl
   };
-  registerInspectorConfigRoutes(app, {
-    ...proxyOptions,
-    configPathsProvider: () => resolveInspectorConfigPaths(options.env),
-    clock: options.clock
-  });
+  registerInspectorConfigRoutes(app, proxyOptions);
   registerInspectorGraphRoutes(app, proxyOptions);
   registerInspectorStatusRoutes(app, proxyOptions);
   registerInspectorStaticRoutes(app, {
     staticRoot: options.staticRoot ?? defaultStaticRoot
   });
   return app;
+}
+
+function isClientInputError(error: unknown): boolean {
+  return error instanceof SyntaxError || (error instanceof Error && error.name === "ZodError");
+}
+
+function summarizeInspectorError(
+  error: unknown,
+  status: number
+): {
+  readonly name: string;
+  readonly status: number;
+  readonly messageRedacted: true;
+} {
+  return {
+    name: error instanceof Error ? error.name : "NonError",
+    status,
+    messageRedacted: true
+  };
 }

@@ -682,6 +682,13 @@ vi.mock("@do-soul/alaya-storage", async () => {
       findToolProviders: vi.fn(async () => []),
       findToolProviderByToolId: vi.fn(async () => null)
     }),
+    SqliteTrustStateRepo: makeRepo({
+      createDelivery: vi.fn(async (record: unknown) => record),
+      createUsage: vi.fn(async (record: unknown) => record),
+      findDeliveryById: vi.fn(async () => null),
+      listDeliveriesByAgentTarget: vi.fn(async () => []),
+      listUsageByDeliveryIds: vi.fn(async () => [])
+    }),
     SqliteStrongRefRepo: makeRepo(),
     SqlitePathRelationRepo: makeRepo({
       findActive: vi.fn(async () => [])

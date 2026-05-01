@@ -4,12 +4,18 @@ import { SoulContextUsageStateSchema } from "./mcp-types.js";
 
 export const TrustStateEventType = {
   MEMORY_DELIVERED: "memory.delivered",
-  MEMORY_USAGE_REPORTED: "memory.usage_reported"
+  MEMORY_USAGE_REPORTED: "memory.usage_reported",
+  TRUST_STATE_INSTALLED_RECORDED: "trust_state.installed.recorded",
+  TRUST_STATE_CONFIGURED_RECORDED: "trust_state.configured.recorded",
+  TRUST_STATE_UNVERIFIABLE_RECORDED: "trust_state.unverifiable.recorded"
 } as const;
 
 export const TrustStateEventTypeSchema = z.enum([
   TrustStateEventType.MEMORY_DELIVERED,
-  TrustStateEventType.MEMORY_USAGE_REPORTED
+  TrustStateEventType.MEMORY_USAGE_REPORTED,
+  TrustStateEventType.TRUST_STATE_INSTALLED_RECORDED,
+  TrustStateEventType.TRUST_STATE_CONFIGURED_RECORDED,
+  TrustStateEventType.TRUST_STATE_UNVERIFIABLE_RECORDED
 ]);
 
 export const TrustStateSchema = z.enum([

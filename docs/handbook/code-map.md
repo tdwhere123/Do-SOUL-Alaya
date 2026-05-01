@@ -42,17 +42,20 @@ vendor/
   do-what-new-snapshot/  frozen upstream port reference (read-only)
 ```
 
-## Current Status (Phase 4 non-frontend implementation-ready)
+## Current Status (Gate-4 passed)
 
 Phase 1 leaves and Phase 2 storage repositories, core services, security
 stack, Garden roles, and owned package barrels are ported and unit-tested.
 Phase 3 foundation helpers, MCP discovery services, run lifecycle / serial
 delegation, misc support services, ConversationService memory orchestration,
 ContextLensAssembler, and the core barrel are ported and unit-tested as
-`implementation-ready`. Phase 4 non-frontend daemon, routes, CLI, MCP, secrets,
-operations, trust-state, and Inspector server work is now
-`implementation-ready`; `P4-inspector-frontend`, attached-agent proof, and final
-review remain Gate-4 closure work. Refresh this section after each Phase Gate.
+`implementation-ready`. Phase 4 daemon, routes, CLI, MCP, secrets,
+operations, trust-state, Inspector server, Inspector frontend, and the
+attached-agent proof have landed. The MCP memory surface is
+`mcp-consumable` through the single-daemon proof harness, including
+Garden EventLog and health-journal evidence. The Inspector config-write
+path and trust delivery/usage durability review fixes are verified, so
+Gate-4 passed on 2026-05-01. Refresh this section after each Phase Gate.
 
 | Concern | Primary files | State |
 |---|---|---|
@@ -64,17 +67,17 @@ review remain Gate-4 closure work. Refresh this section after each Phase Gate.
 | Protocol types | `packages/protocol/src/` | ported; `schema-ready` (P1-protocol). `packages/protocol/src/soul/mcp-types.ts` also carries the P4-mcp-memory-tools public `soul.*` memory tool contract seed, including recall delivery metadata and usage-proof schemas. |
 | Storage skeleton + DB helpers | `packages/storage/{package.json,tsconfig.json,src/db.ts,src/errors.ts,src/index.ts}` | ported; `schema-ready` (P1-storage-skeleton) |
 | Storage shared utilities | `packages/storage/src/repos/shared/`, `packages/storage/src/__tests__/deep-freeze.test.ts` | ported; `implementation-ready` (P1-storage-shared) |
-| Storage migrations | `packages/storage/src/migrations/` | ported; `implementation-ready` (P1-migrations) |
-| Storage repos | `packages/storage/src/repos/`, `packages/storage/src/index.ts`, `packages/storage/src/__tests__/*-repo.test.ts` | ported; `implementation-ready` (P2-repos-batch-* + P2-barrel-storage) |
+| Storage migrations | `packages/storage/src/migrations/` | ported; `implementation-ready` (P1-migrations) plus Alaya follow-up `056-trust-state-persistence.sql` |
+| Storage repos | `packages/storage/src/repos/`, `packages/storage/src/index.ts`, `packages/storage/src/__tests__/*-repo.test.ts` | ported; `implementation-ready` (P2-repos-batch-* + P2-barrel-storage) plus Alaya-original `trust-state-repo.ts` |
 | Core skeleton + config leaves | `packages/core/src/{errors.ts,index.ts,shared/,dynamics-constants-runtime.ts}` | ported; `schema-ready` (P1-core-skeleton + P1-config) |
 | Core services | `packages/core/src/` service files | Phase 2 services are ported: `memory-service.ts`, `evidence-service.ts`, `signal-service.ts`, `global-memory-recall-{port,service}.ts`, `task-surface-builder.ts`, `recall-service.ts`, `manifestation-resolver.ts`, `synthesis-service.ts`, `proposal-service.ts`, `green-service.ts`, `governance-lease-service.ts`, `session-override-service.ts`, `embedding-recall-service.ts`, `embedding-backfill-handler.ts`, `event-publisher.ts`, `runtime-event-normalizer.ts`, `output-shaping-service.ts`, `narrative-budget-service.ts`, `health-journal-service.ts`, and `karma-event-store.ts`; Phase 3 services are ported: `tool-spec-service.ts`, `strong-ref-service.ts`, `dirty-state-panic-service.ts`, `file-path.ts`, `message-history.ts`, `mcp-tool-discovery-service.ts`, `extension-registry-service.ts`, `worker-run-lifecycle-service.ts`, `worker-run-state-machine.ts`, `run-service.ts`, `run-hot-state-service.ts`, `serial-delegation-{service,event-intake,recovery}.ts`, `canonical-alias-service.ts`, `project-mapping-service.ts`, `engine-binding-service.ts`, `workspace-service.ts`, `slot-service.ts`, `surface-service.ts`, `surface-binding-service.ts`, `surface-drift-service.ts`, `target-revalidate-service.ts`, `graph-explore-service.ts`, `constitutional-fragment-service.ts`, `deferred-obligation-service.ts`, `budget-bankruptcy-service.ts`, `arbitration-service.ts`, `claim-service.ts`, `dynamics-service.ts`, `prompt-asset-registry.ts`, `node-template-resolver.ts`, `security-status-service.ts`, `conversation-service.ts`, and `context-lens-assembler.ts` |
 | Core security stack | `packages/core/src/{permission-policy/,ports/,zero-day-security-layer.ts,constraint-proxy.ts,integration-gate.ts,worker-safety-gate.ts,worker-trust-assessor.ts,stance-resolution-service.ts,cross-cutting-permission-service.ts}` | ported; `implementation-ready` (P2-security-1 + P2-security-2) |
 | Soul skeleton + topology leaves | `packages/soul/src/{signal-handler.ts,tool-governance-adapter.ts,worker-safety-*.ts,garden/topology-service.ts,garden/path-graph-snapshotter.ts,shared/deep-freeze.ts}` | ported; `implementation-ready` leaves (P1-soul-skeleton + P1-topology) |
 | Garden engine | `packages/soul/src/garden/`, `packages/soul/src/shared/bootstrapping-ids.ts`, `packages/soul/src/index.ts` | Phase 2 Garden roles are ported and exported: `auditor.ts`, `scheduler.ts`, `compute-provider.ts`, `compute-routing-service.ts`, `local-heuristics.ts`, `janitor.ts`, `librarian.ts`, `materialization-router.ts`, `degradation-pipeline.ts`, `handoff-gap-handler.ts`, `bootstrapping-service.ts`, `session-override-remediation.ts`, `backlog-telemetry.ts`, and `shared/bootstrapping-ids.ts` |
 | Engine gateway | `packages/engine-gateway/src/` | MCP/provider skeleton ported; provider adapters deferred (#BL-008). `provider/soul-tool-specs.ts` exposes the stable first-party `soul.*` memory tool names for model-visible specs; daemon handlers are implemented by P4-mcp-memory-tools. |
-| Core daemon | `apps/core-daemon/src/` | Phase 4 non-frontend daemon surface is `implementation-ready`: Hono app, route registration, middleware, startup composition, runtime notifier, daemon services/glue, MCP tooling, MCP memory tools/server, CLI commands, secrets, profile mutation, operations, and status routes. |
+| Core daemon | `apps/core-daemon/src/` | Phase 4 daemon surface is implemented: Hono app, route registration, middleware, startup composition, runtime notifier, daemon services/glue, MCP tooling, MCP memory tools/server, CLI commands, secrets, profile mutation, operations, status routes, trust-state delivery/usage persistence, and attached-agent MCP proof. |
 | CLI shell | `bin/alaya.mjs`, `apps/core-daemon/src/cli/` | Alaya CLI bridge and subcommands are `implementation-ready`: doctor, install, attach Codex, attach Claude Code, detach, status, inspect, tools list/call, backup/export/import. |
-| Memory Inspector backend | `apps/inspector/src/` | Inspector server is `implementation-ready`: loopback Hono server, token middleware, config/graph/status daemon proxy routes, audited runtime embedding config writes, and static bundle host. Frontend bundle remains `P4-inspector-frontend`. |
+| Memory Inspector backend | `apps/inspector/src/` | Inspector server is `live-event-ready`: loopback Hono server, token middleware, config/graph/status routes, daemon-proxied embedding supplement reads/writes, paste-to-file secret refs, sanitized route errors, and static bundle host. Config writes are audited through the daemon EventLog path. |
 
 ## Port Source Mapping (subset)
 

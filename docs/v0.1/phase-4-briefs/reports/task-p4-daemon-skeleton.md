@@ -22,4 +22,5 @@
 
 ## Readiness Impact
 
-This card closes as `implementation-ready`; Gate-4 remains pending.
+This card closes as `implementation-ready`; Gate-4 later passed on
+2026-05-01.

@@ -39,12 +39,15 @@ export class EventPublisher {
 
   public async publishWithMutation<T>(
     eventInput: Omit<EventLogEntry, "event_id" | "created_at">,
-    mutate: () => Promise<T>
+    mutate: (entry: EventLogEntry) => Promise<T>
   ): Promise<T> {
+    // The mutation receives the appended entry so durable records can store the
+    // exact audit_event_id while still rolling back the unnotified EventLog row
+    // if persistence rejects the mutation.
     const entry = await this.appendToEventLog(eventInput);
     let result: T;
     try {
-      result = await mutate();
+      result = await mutate(entry);
     } catch (mutateError) {
       // The row was never notified, so replaying it later would create false
       // runtime history for in-process runtime listeners. Remove it before rethrowing.

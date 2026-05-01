@@ -585,7 +585,7 @@ describe("GreenService", () => {
     expect(events.filter((event) => event.event_type === Phase3BEventType.SOUL_GREEN_PIERCED)).toHaveLength(3);
   });
 
-  it("setGrace() audits and notifies an eligible-to-grace transition", async () => {
+  it("setGrace() audits and notifies an eligible-to-grace transition with dedicated grace event", async () => {
     const { service, statuses, events, notifyEntry, appendEvent, upsertStatus } = createHarness({
       existingStatus: createGreenStatus()
     });
@@ -602,7 +602,7 @@ describe("GreenService", () => {
     expect(status?.green_state).toBe("grace");
     expect(status?.revoke_reason).toBe(RevokeReason.NONE);
     expect(event).toMatchObject({
-      event_type: Phase3BEventType.SOUL_GREEN_PIERCED,
+      event_type: Phase3BEventType.SOUL_GREEN_GRACE_ENTERED,
       entity_type: "green_status",
       entity_id: "9bc1a292-e9c2-47f9-9c6f-bf6b67c810f3",
       workspace_id: "workspace-1",
@@ -612,14 +612,52 @@ describe("GreenService", () => {
       payload_json: {
         object_id: "9bc1a292-e9c2-47f9-9c6f-bf6b67c810f3",
         target_object_id: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
-        revoke_reason: RevokeReason.REVIEW_OVERDUE,
+        valid_until: "2026-03-25T00:00:00.000Z",
+        prior_green_state: "eligible",
+        prior_valid_until: "2026-04-23T00:00:00.000Z",
+        reason: "manual",
         workspace_id: "workspace-1",
         occurred_at: "2026-03-24T00:00:00.000Z"
       }
     });
+    expect(
+      events.some(
+        (candidate) =>
+          candidate.event_type === Phase3BEventType.SOUL_GREEN_PIERCED &&
+          (candidate.payload_json as Record<string, unknown>).revoke_reason === RevokeReason.REVIEW_OVERDUE
+      )
+    ).toBe(false);
     expect(appendEvent.mock.invocationCallOrder[0]).toBeLessThan(upsertStatus.mock.invocationCallOrder[0]);
     expect(upsertStatus.mock.invocationCallOrder[0]).toBeLessThan(notifyEntry.mock.invocationCallOrder[0]);
     expect(notifyEntry).toHaveBeenCalledWith(event);
+  });
+
+  it("reevaluate() marks grace entered because valid_until expired", async () => {
+    const { service, events } = createHarness({
+      memory: createMemoryEntry({ dimension: MemoryDimension.FACT }),
+      existingStatus: createGreenStatus({
+        green_state: "eligible",
+        valid_until: "2026-03-23T00:00:00.000Z"
+      })
+    });
+
+    await expect(
+      service.reevaluate({
+        targetObjectId: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+        workspaceId: "workspace-1",
+        runId: "run-1"
+      })
+    ).resolves.toBe("grace");
+
+    expect(events.at(-1)).toMatchObject({
+      event_type: Phase3BEventType.SOUL_GREEN_GRACE_ENTERED,
+      run_id: "run-1",
+      payload_json: {
+        prior_green_state: "eligible",
+        prior_valid_until: "2026-03-23T00:00:00.000Z",
+        reason: "valid_until_expired"
+      }
+    });
   });
 
   it("hazard grants use a 7-day validity window", async () => {

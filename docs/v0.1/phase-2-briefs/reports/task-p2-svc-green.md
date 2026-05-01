@@ -80,14 +80,15 @@ Alaya-specific `setGrace()` audit repair required by invariants §7 and §10.
   requires stripping SSE transport while preserving in-process notification
   semantics.
 - `setGrace()` differs from the upstream source to close a state-machine audit
-  gap: the target uses the existing `SOUL_GREEN_PIERCED` payload with
-  `revoke_reason = review_overdue` as the audit envelope, while preserving
-  durable `green_state = grace` and `revoke_reason = none`.
+  gap: the target now emits the dedicated `SOUL_GREEN_GRACE_ENTERED`
+  payload with `prior_green_state`, `prior_valid_until`, and `reason`,
+  while preserving durable `green_state = grace` and
+  `revoke_reason = none`.
 
 ## Deferred Issues
 
-- `#BL-013` tracks a future dedicated Green grace-transition event. Phase 2 does
-  not add a new protocol event from this card.
+- `#BL-013` is resolved by the 2026-05-01 review-fix follow-up. No
+  Green grace-transition event work remains deferred from this card.
 
 ## Follow-Up Readiness Impact
 

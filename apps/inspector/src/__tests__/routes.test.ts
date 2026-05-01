@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { mkdtemp } from "node:fs/promises";
@@ -21,7 +21,7 @@ describe("inspector routes", () => {
     ]);
   });
 
-  it("proxies config, graph, and status routes to daemon HTTP without importing daemon code", async () => {
+  it("proxies config, graph, status, and embedding-supplement routes to daemon HTTP without importing daemon code", async () => {
     const calls: { url: string; method: string; body: string | null }[] = [];
     const app = createInspectorApp({
       token: "token",
@@ -38,6 +38,15 @@ describe("inspector routes", () => {
     });
 
     await app.request("/api/config/ws1/soul?token=token");
+    await app.request("/api/config/ws1/embedding-supplement?token=token");
+    await app.request("/api/config/runtime/embedding-supplement?token=token", {
+      method: "PATCH",
+      body: JSON.stringify({
+        secret_ref_mode: "paste",
+        secret_value: "sk-test-plaintext-secret"
+      }),
+      headers: { "content-type": "application/json" }
+    });
     await app.request("/api/config/ws1/strategy?token=token", {
       method: "PATCH",
       body: JSON.stringify({ auto_approve_readonly: true }),
@@ -48,6 +57,12 @@ describe("inspector routes", () => {
 
     expect(calls).toEqual([
       { url: "http://daemon.local/workspaces/ws1/config/soul", method: "GET", body: null },
+      { url: "http://daemon.local/config/runtime/embedding-supplement", method: "GET", body: null },
+      {
+        url: "http://daemon.local/config/runtime/embedding-supplement",
+        method: "PATCH",
+        body: "{\"secret_ref_mode\":\"paste\",\"secret_value\":\"sk-test-plaintext-secret\"}"
+      },
       {
         url: "http://daemon.local/workspaces/ws1/config/strategy",
         method: "PATCH",
@@ -56,6 +71,53 @@ describe("inspector routes", () => {
       { url: "http://daemon.local/workspaces/ws1/soul/graph", method: "GET", body: null },
       { url: "http://daemon.local/status", method: "GET", body: null }
     ]);
+  });
+
+  it("loads embedding-supplement config from the daemon runtime config endpoint", async () => {
+    const app = createInspectorApp({
+      token: "token",
+      daemonUrl: "http://daemon.local",
+      staticRoot: await mkdtemp(path.join(tmpdir(), "inspector-static-")),
+      fetchImpl: async (input) => {
+        if (String(input).endsWith("/workspaces/ws1/embedding-status")) {
+          return Response.json({
+            success: true,
+            data: {
+              workspace_id: "ws1",
+              embedding_enabled: false,
+              provider_configured: false,
+              model_id: "text-embedding-3-small",
+              storage_available: true,
+              effective_mode: "keyword_only",
+              degraded_reason: null,
+              checked_at: "2026-05-01T00:00:00.000Z"
+            }
+          });
+        }
+        return Response.json({
+          success: true,
+          data: {
+            provider_url: "https://embedding.example.test/v1",
+            secret_ref: "file:/home/alaya/.config/alaya/secrets/openai",
+            model_id: "text-embedding-3-small",
+            embedding_enabled: true
+          }
+        });
+      }
+    });
+
+    const response = await app.request("/api/config/ws1/embedding-supplement?token=token");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      success: true,
+      data: {
+        provider_url: "https://embedding.example.test/v1",
+        secret_ref: "file:/home/alaya/.config/alaya/secrets/openai",
+        model_id: "text-embedding-3-small",
+        embedding_enabled: true
+      }
+    });
   });
 
   it("sanitizes daemon upstream errors", async () => {
@@ -71,40 +133,54 @@ describe("inspector routes", () => {
     expect(await response.json()).toEqual({ error: "daemon_503" });
   });
 
-  it("writes runtime embedding supplement env and audit without plaintext keys", async () => {
-    const configDir = await mkdtemp(path.join(tmpdir(), "inspector-config-"));
-    await writeFile(path.join(configDir, ".env"), "OPENAI_API_KEY=env:OLD\n", "utf8");
+  it("sanitizes daemon validation errors for embedding paste requests", async () => {
+    const plaintext = "sk-test-leaked-secret";
     const app = createInspectorApp({
       token: "token",
-      env: { ALAYA_CONFIG_DIR: configDir },
-      clock: () => "2026-04-30T00:00:00.000Z"
+      daemonUrl: "http://daemon.local",
+      fetchImpl: async () => Response.json({ error: `validation failed: ${plaintext}` }, { status: 400 })
     });
 
     const response = await app.request("/api/config/runtime/embedding-supplement?token=token", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        embedding_enabled: true,
-        secret_ref: "env:OPENAI_API_KEY",
-        model_id: "text-embedding-3-small"
+        secret_ref_mode: "paste",
+        secret_value: plaintext
       })
     });
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      success: true,
-      requires_daemon_restart: true
+    expect(response.status).toBe(400);
+    const bodyText = await response.text();
+    expect(bodyText).toBe("{\"error\":\"daemon_400\"}");
+    expect(bodyText).not.toContain(plaintext);
+    expect(bodyText).not.toContain("validation failed");
+  });
+
+  it("sanitizes local handler errors without echoing stack or plaintext", async () => {
+    const plaintext = "sk-test-plaintext-secret";
+    const app = createInspectorApp({
+      token: "token",
+      daemonUrl: "http://daemon.local",
+      fetchImpl: async () => {
+        throw new Error(`boom ${plaintext}`);
+      }
     });
-    const env = await readFile(path.join(configDir, ".env"), "utf8");
-    expect(env).toContain("ALAYA_ENABLE_EMBEDDING_SUPPLEMENT=true");
-    expect(env).toContain("OPENAI_API_KEY=env:OPENAI_API_KEY");
-    expect(env).not.toContain("sk-");
-    const audit = await readFile(
-      path.join(configDir, "audit", "inspector-embedding-2026-04-30T00-00-00.000Z.json"),
-      "utf8"
-    );
-    expect(audit).toContain("env:OPENAI_API_KEY");
-    expect(audit).not.toContain("sk-");
+
+    const response = await app.request("/api/config/runtime/embedding-supplement?token=token", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        secret_ref_mode: "paste",
+        secret_value: plaintext
+      })
+    });
+
+    expect(response.status).toBe(500);
+    const bodyText = await response.text();
+    expect(bodyText).toBe("{\"error\":\"internal_error\"}");
+    expect(bodyText).not.toContain(plaintext);
+    expect(bodyText).not.toContain("Error:");
   });
 
   it("serves static files, rejects traversal, and tolerates a missing frontend bundle", async () => {

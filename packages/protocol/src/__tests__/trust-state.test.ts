@@ -14,10 +14,22 @@ const REPORTED_AT = "2026-04-30T00:01:00.000Z";
 
 describe("trust state schemas", () => {
   it("registers trust-state event types in the global EventType schema", () => {
-    expect(TrustStateEventTypeSchema.options).toEqual(["memory.delivered", "memory.usage_reported"]);
-    expect(EventTypeSchema.parse(TrustStateEventType.MEMORY_DELIVERED)).toBe("memory.delivered");
-    expect(EventTypeSchema.parse(TrustStateEventType.MEMORY_USAGE_REPORTED)).toBe(
-      "memory.usage_reported"
+    const expected = [
+      "memory.delivered",
+      "memory.usage_reported",
+      "trust_state.installed.recorded",
+      "trust_state.configured.recorded",
+      "trust_state.unverifiable.recorded"
+    ];
+
+    expect(TrustStateEventTypeSchema.options).toEqual(expected);
+    for (const eventType of expected) {
+      expect(EventTypeSchema.parse(eventType)).toBe(eventType);
+    }
+    expect(TrustStateEventType.TRUST_STATE_INSTALLED_RECORDED).toBe("trust_state.installed.recorded");
+    expect(TrustStateEventType.TRUST_STATE_CONFIGURED_RECORDED).toBe("trust_state.configured.recorded");
+    expect(TrustStateEventType.TRUST_STATE_UNVERIFIABLE_RECORDED).toBe(
+      "trust_state.unverifiable.recorded"
     );
   });
 

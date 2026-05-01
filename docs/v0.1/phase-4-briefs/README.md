@@ -20,13 +20,15 @@ green" into "actually works for a user".
 
 ## Current Status
 
-Non-frontend Phase 4 recovery work is `implementation-ready`; see
-`reports/gate-4-non-frontend-closeout.md` and the per-card reports in
-`reports/task-p4-*.md`.
+Phase 4 passed Gate-4 on 2026-05-01. Non-frontend recovery work is
+`implementation-ready`; the first-party MCP memory surface is
+`mcp-consumable` through `gate4-attached-agent-mcp-proof.test.ts`,
+which asserts Garden EventLog and health-journal evidence. The
+Inspector config-write path is `live-event-ready`, and trust-state
+delivery/usage durability is SQL-backed and verified.
 
-`P4-inspector-frontend` remains pending Gemini CLI implementation.
-Gate-4 is therefore not passed yet; the remaining closeout requires
-the frontend card, attached-agent MCP proof, and final review.
+Open follow-up issues after this repair are `#BL-020`, `#BL-014`, and
+the post-port hygiene sweep tracked by `#BL-016` / `#BL-017`.
 
 ## Card Groups
 
@@ -139,6 +141,13 @@ through `soul.propose_memory_update` per invariant §19.
 
 End-to-end demo on real daemon (no mocks):
 
+Current authority for Gate-4 truth is `docs/handbook/runtime-status.md`
+plus `reports/gate-4-closeout.md` and `reports/gate-4-mcp-proof.md`.
+Gate-4 passed after the attached-agent MCP proof, Inspector config-write
+repair, and trust delivery/usage durability repair were verified. The
+older checklist below is retained as the phase planning checklist; items
+that depend on the graph contract remain Phase 5 release work.
+
 1. `rtk pnpm exec alaya install` — daemon config initialized.
 2. `rtk pnpm exec alaya attach codex` — diff printed, `[y/N]` asked, on
    `y` writes Codex MCP config atomically and registers the
@@ -179,7 +188,8 @@ End-to-end demo on real daemon (no mocks):
     that will be removed (MCP server + `/alaya-inspect` slash); on
     `y` writes atomically and Codex no longer sees Alaya tools.
 
-All must pass on a real daemon. Code-map and runtime-status updated.
+Gate-4 proof must pass on a real daemon path. Code-map and
+runtime-status are updated after each gate closeout.
 
 ## Parallelism Notes
 

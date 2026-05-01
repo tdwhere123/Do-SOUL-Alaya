@@ -6,70 +6,27 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-020`.
+sequence. **Next available number**: `#BL-022`.
 
 ## Open Issues
 
-### #BL-018 — attached-agent MCP proof harness
-
-**Status**: Open (Gate-4 blocker)
-**Owner**: unassigned (post-v0.1 alpha 5)
-**Close condition**: A single-process test harness or scripted demo runs
-the full `Gate-4` sequence from `docs/handbook/runtime-status.md:98-104`
-inside one daemon lifetime, capturing per-step stdout. The proof must
-exercise the cross-call delivery state (`soul.recall` →
-`soul.report_context_usage`) and the
-candidate-signal → proposal → governance-reject → Garden background pass
-end-to-end.
-
-Surfaced by the partial Gate-4 MCP proof on 2026-04-30
-(`docs/v0.1/phase-4-briefs/reports/gate-4-mcp-proof.md`). One-shot CLI
-invocations spawn a fresh daemon per call, so `delivery_id` (in-process
-per #BL-015 / `P4-trust-state` v0.1 in-memory note) is not visible
-across calls. The failure is not a frontend or single-card defect; it
-is a v0.1 demo-harness gap.
-
-### #BL-019 — Embedding-supplement paste secret_ref pipeline
-
-**Status**: Open (Inspector v0.2 / paste mode for secret_ref)
-**Owner**: future P4-secrets follow-up card
-**Close condition**: Inspector backend accepts a paste-mode patch that
-writes the supplied value to `<config-dir>/secrets/openai` (mode 0600)
-and returns the resulting `file:` ref. Frontend then surfaces the third
-chip (env / file / paste) per
-`docs/v0.1/phase-4-briefs/task-p4-inspector-frontend.md §2.3 #4`.
-
-Surfaced as a deviation from the Gemini handoff prompt in the
-P4-inspector-frontend completion report. Frontend currently exposes
-env / file only; backend currently rejects paste at
-`apps/inspector/src/config-store.ts:121`. v0.1 §2.5 forbade adding new
-backend routes inside the frontend card.
-
-### #BL-015 — Trust state SQL persistence across daemon restart
+### #BL-020 — Trust installed/configured/unverifiable counter persistence
 
 **Status**: Open
-**Owner**: `docs/v0.1/phase-4-briefs/task-p4-trust-state.md`
-**Close condition**: A new SQLite migration adds `trust_context_delivery` and `trust_usage_proof` tables; `TrustStateRecorder` persists records via a repo and survives daemon restart; `alaya status` numbers are stable across restart.
+**Owner**: `apps/core-daemon/src/trust-state.ts` plus a future storage
+follow-up card
+**Close condition**: `recordInstalled`, `recordConfigured`, and
+`recordUnverifiable` persist through SQLite and survive daemon restart
+with `alaya status --agent <target>` counts unchanged.
 
-P4-trust-state v0.1 keeps `ContextDeliveryRecord` / `UsageProofRecord` in process memory. This is acceptable because the Gate-4 demo and `alaya status` exercise a single daemon lifetime. For real long-lived attached agents the records must persist; this requires a migration (sequence number ≥ 056), a new repo, and the §2.5 reduction table moved behind the repo. Defer to v0.2.
-
-### #BL-013 — Dedicated Green grace-transition event
-
-**Status**: Open
-**Owner**: `docs/v0.1/phase-2-briefs/task-p2-svc-green.md`
-**Close condition**: Protocol includes a dedicated audited grace-transition
-event and `GreenService.setGrace()` emits that event instead of reusing the
-Green pierced audit payload.
-
-P2-svc-green must keep Phase 2 inside the existing protocol surface, but Alaya
-invariants require EventLog-first auditing for the eligible-to-grace state
-transition. The v0.1 repair uses the existing Green pierced payload with
-`revoke_reason = review_overdue` as an audit envelope while preserving durable
-`green_state = grace` and `revoke_reason = none`.
+`#BL-015` is scoped to delivery / usage-proof durability only. The
+installed / configured / unverifiable counters still live in process
+memory and must not be described as restart-stable until this issue
+lands.
 
 ### #BL-014 — Historical Gate-2 R1 wave-close commit hygiene gap
 
-**Status**: Open
+**Status**: Open (prevention remains active)
 **Owner**: `docs/v0.1/phase-2-briefs/reports/post-gate-2-review.md`
 **Close condition**: A future phase or wave closeout proves that standalone
 review-fix commits survived the merge path, or documents a parent-approved
@@ -81,28 +38,10 @@ Gate-2 wave-close commit `0aab73f`. The behavior is already verified and no
 history rewrite is planned; this issue tracks prevention so future closeout
 does not silently squash or bundle review-fix commits.
 
-### #BL-012 — Memory Inspector
-
-**Status**: **Resolved 2026-04-30** (frontend landed `live-event-ready`;
-see `docs/v0.1/phase-4-briefs/reports/task-p4-inspector-frontend.md` and
-`reports/gate-4-mcp-proof.md`). Gate-4 itself still pending under #BL-018.
-**Owner**: `docs/v0.1/phase-4-briefs/task-p4-cli-inspect.md`,
-`docs/v0.1/phase-4-briefs/task-p4-inspector-server.md`,
-`docs/v0.1/phase-4-briefs/task-p4-inspector-frontend.md`
-**Close condition**: All three Inspector cards land; `alaya inspect`
-spins up `apps/inspector` on `127.0.0.1:5174` with a per-launch token;
-the three pages (Provider/Config, Memory Graph, Trust/Status) render
-and the Provider/Config page can PATCH the daemon's runtime config
-through token-authenticated HTTP. Frontend implementation is delegated
-to Gemini CLI per the P4-inspector-frontend §0 explicit handoff.
-
-Originally deferred at Phase 0 close as "graph data contract is in
-v0.1 (P5-graph-contract) but no UI ships". Brought back into v0.1 on
-2026-04-29 after invariant §21 was narrowed to permit memory-tooling
-surfaces (the Inspector is a memory-management surface, not an agent
-surface). The frontend is a pure-frontend SPA whose implementation is
-explicitly handed off to Gemini CLI; the server, CLI subcommand, and
-auth model are owned by Alaya cards.
+2026-05-01 repair note: the unrelated P4-trust-state backlog reference
+drift was corrected from `#BL-014` to `#BL-015`. This does not close
+`#BL-014`; closure still requires commit-history evidence from a future
+wave closeout.
 
 ### #BL-016 — `Phase*EventType` naming carried over from upstream snapshot
 
@@ -121,6 +60,10 @@ Renaming is a deliberate adapt-and-port-style change: it diverges from the snaps
 **Close condition**: A dedicated cleanup wave executes after the final v0.1 port card lands and (a) renames upstream-milestone-named files/symbols to domain-aligned names — covers `#BL-016`; (b) splits inherited oversized single files (>800 lines, e.g. `packages/protocol/src/events/phase-c.ts`) into focused modules per `rules/common/coding-style.md`; (c) removes port residue: unused exports, parallel helper duplicates introduced by adapter shims, dead branches Alaya never exercises; (d) reconciles naming inconsistencies that adapter ports left behind; (e) `docs/handbook/code-map.md` and per-package codemaps updated; (f) full build + vitest green.
 
 The Port-First discipline (`docs/handbook/port-protocol.md`) forbids mid-port refactors that would diverge from `vendor/do-what-new-snapshot/`. As a result v0.1 deliberately accumulates port residue — upstream-milestone naming, oversized inherited files, parallel helpers next to Alaya-native equivalents, exports Alaya never calls. None of these are individually blocking, and folding them into per-card scope would pollute every port card with refactor work. Treat as a single sweep wave executed once port phase is over; the open backlog set should be consolidated and closed in that pass.
+
+Frozen implementation plan: `docs/v0.1/post-port-hygiene-plan.md`.
+Do not execute it before `P5-graph-contract` and the final v0.1 port
+card land.
 
 ## Out of Alaya Scope (Permanently Rejected)
 
@@ -191,6 +134,68 @@ build where env variables and `~/.config/alaya/.env` with strict file
 permissions are sufficient.
 
 ## Resolved (short closure summaries)
+
+### #BL-021 — EventPublisher mutation audit-id handoff
+
+Resolved by explicitly documenting and synchronizing Alaya's
+`publishWithMutation(entry)` divergence from the vendor snapshot. The
+upstream `EventPublisher` mutation callback is zero-argument, but Alaya
+trust-state persistence must store the exact EventLog `event_id` as
+`audit_event_id` in the delivery / usage SQL rows before notification.
+All local publisher ports now accept the appended entry, and the
+divergence is registered in `docs/handbook/port-protocol.md`.
+
+### #BL-019 — Embedding-supplement paste secret_ref pipeline
+
+Resolved by the daemon-owned embedding-supplement config path:
+Inspector GET/PATCH routes proxy the daemon, paste mode writes a
+sanitized `file:` ref under the Alaya config secret directory, Windows
+paste mode is rejected, fixed error responses avoid plaintext secret
+leaks, and the daemon publishes the config write through EventLog as a
+`soul.health_journal.recorded` `embedding_supplement` audit entry.
+Regression coverage lives in Inspector route tests, Inspector web tests,
+and core-daemon config-route tests.
+
+### #BL-015 — Trust state SQL persistence across daemon restart
+
+Resolved for delivery / usage records by
+`packages/storage/src/migrations/056-trust-state-persistence.sql`,
+`packages/storage/src/repos/trust-state-repo.ts`, and
+`apps/core-daemon/src/trust-state.ts`. Duplicate delivery / usage
+records now raise storage conflicts instead of overwriting rows, so
+`publishWithMutation(entry)` rolls the EventLog entry back on duplicate
+persistence. `trust-state-persistence.test.ts` proves delivery / usage
+counts survive daemon restart. Installed / configured / unverifiable
+counter persistence remains intentionally tracked by `#BL-020`.
+
+### #BL-012 — Memory Inspector
+
+Resolved by `P4-cli-inspect`, `P4-inspector-server`, and
+`P4-inspector-frontend`, with the `#BL-019` repair closing the remaining
+config-write live path. `alaya inspect` starts the local token-gated
+Inspector, the SPA has the Provider/Config, Memory Graph, and
+Trust/Status pages, and runtime config writes proxy the daemon rather
+than mutating Inspector-local truth.
+
+### #BL-013 — Dedicated Green grace-transition event
+
+Resolved by `soul.green.grace_entered` in
+`packages/protocol/src/events/phase-3b.ts` and `GreenService.setGrace()`.
+The payload includes `prior_green_state`, `prior_valid_until`, and
+`reason`, and `setGrace()` no longer emits the legacy
+`soul.green.pierced` / `review_overdue` envelope.
+
+### #BL-018 — attached-agent MCP proof harness
+
+Resolved by
+`apps/core-daemon/src/__tests__/gate4-attached-agent-mcp-proof.test.ts`.
+The harness keeps one daemon runtime alive for install, attach, MCP
+`tools/list`, recall, pointer open, usage report, candidate signal,
+proposal, governance reject, Garden background pass, status, and doctor.
+The Garden step now asserts EventLog dispatched/completed entries plus a
+health-journal entry. This resolves the MCP proof harness gap only; it
+contributes to the Gate-4 passed proof after the `#BL-015` and
+`#BL-019` review fixes landed.
 
 ### #BL-010 — `alaya detach` reverse-attach command
 

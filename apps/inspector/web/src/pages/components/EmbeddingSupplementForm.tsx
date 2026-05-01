@@ -11,11 +11,16 @@ interface PatchResult {
   readonly data?: unknown;
 }
 
-type SecretRefMode = "env" | "file";
+type SecretRefMode = "env" | "file" | "paste";
 
 interface ParsedSecretRef {
   readonly mode: SecretRefMode;
   readonly value: string;
+}
+
+interface RuntimeEmbeddingConfigEnvelope {
+  readonly success?: boolean;
+  readonly data?: RuntimeEmbeddingConfig;
 }
 
 const ENV_NAME_RE = /^[A-Z_][A-Z0-9_]*$/;
@@ -57,9 +62,10 @@ export default function EmbeddingSupplementForm({ onRequiresRestart }: Props) {
     let cancelled = false;
     const load = async () => {
       try {
-        const data = await apiFetch<RuntimeEmbeddingConfig>(
+        const envelope = await apiFetch<RuntimeEmbeddingConfig | RuntimeEmbeddingConfigEnvelope>(
           `/config/${workspaceId}/embedding-supplement`
         );
+        const data = unwrapRuntimeEmbeddingConfig(envelope);
         if (cancelled) return;
         setInitial(data);
         setProviderUrl(data.provider_url ?? "");
@@ -86,17 +92,16 @@ export default function EmbeddingSupplementForm({ onRequiresRestart }: Props) {
 
   const dirty = useMemo(() => {
     if (!initial) return false;
-    const builtRef = buildSecretRef(secretMode, secretValue);
+    const builtRef = secretMode === "paste" ? initial.secret_ref : buildSecretRef(secretMode, secretValue);
     return (
       (initial.provider_url ?? "") !== providerUrl ||
       (initial.model_id ?? "") !== modelId ||
       initial.embedding_enabled !== embeddingEnabled ||
-      (initial.secret_ref ?? null) !== builtRef
+      (secretMode === "paste" ? secretValue !== "" : (initial.secret_ref ?? null) !== builtRef)
     );
   }, [initial, providerUrl, modelId, embeddingEnabled, secretMode, secretValue]);
 
   const handleSave = async () => {
-    const builtRef = buildSecretRef(secretMode, secretValue);
     if (secretValue !== "") {
       const validation = validateSecretValue(secretMode, secretValue);
       if (validation) {
@@ -108,15 +113,17 @@ export default function EmbeddingSupplementForm({ onRequiresRestart }: Props) {
 
     setSaving(true);
     try {
+      const secretPatch = buildSecretPatch(secretMode, secretValue);
       const result = await apiFetch<PatchResult>("/config/runtime/embedding-supplement", {
         method: "PATCH",
         body: {
           provider_url: providerUrl === "" ? null : providerUrl,
           model_id: modelId === "" ? null : modelId,
           embedding_enabled: embeddingEnabled,
-          secret_ref: builtRef
+          ...secretPatch
         }
       });
+      const sanitized = unwrapRuntimeEmbeddingConfig(result.data);
       showToast({
         message: "Embedding supplement patched · daemon restart pending",
         type: "success"
@@ -125,11 +132,15 @@ export default function EmbeddingSupplementForm({ onRequiresRestart }: Props) {
         onRequiresRestart();
       }
       setInitial({
-        provider_url: providerUrl === "" ? null : providerUrl,
-        model_id: modelId === "" ? null : modelId,
-        embedding_enabled: embeddingEnabled,
-        secret_ref: builtRef
+        provider_url: sanitized?.provider_url ?? (providerUrl === "" ? null : providerUrl),
+        model_id: sanitized?.model_id ?? (modelId === "" ? null : modelId),
+        embedding_enabled: sanitized?.embedding_enabled ?? embeddingEnabled,
+        secret_ref: sanitized?.secret_ref ?? secretPatch.secret_ref ?? null
       });
+      const returnedRef = sanitized?.secret_ref ?? secretPatch.secret_ref ?? null;
+      const parsed = parseSecretRef(returnedRef);
+      setSecretMode(parsed.mode);
+      setSecretValue(parsed.value);
     } catch (err) {
       if ((err as ApiError).status === 401) return;
       showToast({
@@ -194,7 +205,7 @@ export default function EmbeddingSupplementForm({ onRequiresRestart }: Props) {
       <FieldRow label="secret ref">
         <div className="flex flex-col items-end gap-2">
           <div className="flex items-center gap-1 text-[10px] uppercase tracking-widest">
-            {(["env", "file"] as const).map((mode) => (
+            {(["env", "file", "paste"] as const).map((mode) => (
               <button
                 key={mode}
                 type="button"
@@ -222,14 +233,20 @@ export default function EmbeddingSupplementForm({ onRequiresRestart }: Props) {
               </button>
             ) : null}
             <input
-              type="text"
+              type={secretMode === "paste" ? "password" : "text"}
               value={
                 secretMode === "file" && !revealFile && secretValue
                   ? maskFilePath(secretValue)
                   : secretValue
               }
               onChange={(e) => setSecretValue(e.target.value)}
-              placeholder={secretMode === "env" ? "OPENAI_API_KEY" : "/etc/alaya/secrets/openai"}
+              placeholder={
+                secretMode === "env"
+                  ? "OPENAI_API_KEY"
+                  : secretMode === "file"
+                    ? "/etc/alaya/secrets/openai"
+                    : "paste API key"
+              }
               className={clsx(
                 "bg-transparent border-b outline-none text-sm font-mono text-right py-1 min-w-[260px]",
                 validationError
@@ -246,6 +263,11 @@ export default function EmbeddingSupplementForm({ onRequiresRestart }: Props) {
           </div>
           {validationError ? (
             <span className="text-[10px] text-[#C9ADA7]">{validationError}</span>
+          ) : null}
+          {secretMode === "paste" ? (
+            <span className="max-w-[260px] text-right text-[10px] text-ink-700/40">
+              Paste is stored as a local file secret and returned as file:.
+            </span>
           ) : null}
         </div>
       </FieldRow>
@@ -288,9 +310,29 @@ function FieldRow({
   );
 }
 
-function buildSecretRef(mode: SecretRefMode, value: string): string | null {
+function buildSecretRef(mode: Exclude<SecretRefMode, "paste">, value: string): string | null {
   if (value === "") return null;
   return `${mode}:${value}`;
+}
+
+function buildSecretPatch(mode: SecretRefMode, value: string): {
+  readonly secret_ref?: string | null;
+  readonly secret_ref_mode?: SecretRefMode;
+  readonly secret_value?: string | null;
+} {
+  if (value === "") {
+    return { secret_ref: null };
+  }
+  if (mode === "paste") {
+    return {
+      secret_ref_mode: "paste",
+      secret_value: value
+    };
+  }
+  return {
+    secret_ref_mode: mode,
+    secret_value: value
+  };
 }
 
 function validateSecretValue(mode: SecretRefMode, value: string): string | null {
@@ -303,6 +345,22 @@ function validateSecretValue(mode: SecretRefMode, value: string): string | null 
     if (!value.startsWith("/")) {
       return "file path must be absolute (start with /)";
     }
+  } else if (mode === "paste") {
+    if (value.trim().length === 0) {
+      return "pasted key is required";
+    }
   }
   return null;
+}
+
+function unwrapRuntimeEmbeddingConfig(value: unknown): RuntimeEmbeddingConfig {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "data" in value &&
+    typeof (value as RuntimeEmbeddingConfigEnvelope).data === "object"
+  ) {
+    return (value as RuntimeEmbeddingConfigEnvelope).data as RuntimeEmbeddingConfig;
+  }
+  return value as RuntimeEmbeddingConfig;
 }

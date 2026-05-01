@@ -1,12 +1,14 @@
 import { z } from "zod";
 import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../schema-primitives.js";
 import { GovernanceLeasePiercingConditionKindSchema } from "../soul/governance-lease.js";
+import { GreenStateSchema } from "../soul/green-status.js";
 
 const phase3BEventTypeValues = [
   "soul.session_override.applied",
   "soul.session_override.promoted",
   "soul.green.granted",
   "soul.green.pierced",
+  "soul.green.grace_entered",
   "soul.verification.completed",
   "soul.governance_lease.acquired",
   "soul.governance_lease.released",
@@ -18,6 +20,7 @@ export const Phase3BEventType = {
   SOUL_SESSION_OVERRIDE_PROMOTED: "soul.session_override.promoted",
   SOUL_GREEN_GRANTED: "soul.green.granted",
   SOUL_GREEN_PIERCED: "soul.green.pierced",
+  SOUL_GREEN_GRACE_ENTERED: "soul.green.grace_entered",
   SOUL_VERIFICATION_COMPLETED: "soul.verification.completed",
   SOUL_GOVERNANCE_LEASE_ACQUIRED: "soul.governance_lease.acquired",
   SOUL_GOVERNANCE_LEASE_RELEASED: "soul.governance_lease.released",
@@ -73,6 +76,19 @@ export const SoulGreenPiercedPayloadSchema = z
   })
   .readonly();
 
+export const SoulGreenGraceEnteredPayloadSchema = z
+  .object({
+    object_id: NonEmptyStringSchema,
+    target_object_id: NonEmptyStringSchema,
+    valid_until: IsoDatetimeStringSchema,
+    prior_green_state: GreenStateSchema,
+    prior_valid_until: IsoDatetimeStringSchema.nullable(),
+    reason: z.enum(["valid_until_expired", "manual"]),
+    workspace_id: NonEmptyStringSchema,
+    occurred_at: IsoDatetimeStringSchema
+  })
+  .readonly();
+
 export const SoulVerificationCompletedPayloadSchema = z
   .object({
     target_object_id: NonEmptyStringSchema,
@@ -116,6 +132,7 @@ const phase3BPayloadSchemas = {
   [Phase3BEventType.SOUL_SESSION_OVERRIDE_PROMOTED]: SoulSessionOverridePromotedPayloadSchema,
   [Phase3BEventType.SOUL_GREEN_GRANTED]: SoulGreenGrantedPayloadSchema,
   [Phase3BEventType.SOUL_GREEN_PIERCED]: SoulGreenPiercedPayloadSchema,
+  [Phase3BEventType.SOUL_GREEN_GRACE_ENTERED]: SoulGreenGraceEnteredPayloadSchema,
   [Phase3BEventType.SOUL_VERIFICATION_COMPLETED]: SoulVerificationCompletedPayloadSchema,
   [Phase3BEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED]: SoulGovernanceLeaseAcquiredPayloadSchema,
   [Phase3BEventType.SOUL_GOVERNANCE_LEASE_RELEASED]: SoulGovernanceLeaseReleasedPayloadSchema,
@@ -145,6 +162,10 @@ const SoulGreenPiercedEventObjectSchema = createPhase3BEventObjectSchema(
   Phase3BEventType.SOUL_GREEN_PIERCED,
   SoulGreenPiercedPayloadSchema
 );
+const SoulGreenGraceEnteredEventObjectSchema = createPhase3BEventObjectSchema(
+  Phase3BEventType.SOUL_GREEN_GRACE_ENTERED,
+  SoulGreenGraceEnteredPayloadSchema
+);
 const SoulVerificationCompletedEventObjectSchema = createPhase3BEventObjectSchema(
   Phase3BEventType.SOUL_VERIFICATION_COMPLETED,
   SoulVerificationCompletedPayloadSchema
@@ -166,6 +187,7 @@ export const SoulSessionOverrideAppliedEventSchema = SoulSessionOverrideAppliedE
 export const SoulSessionOverridePromotedEventSchema = SoulSessionOverridePromotedEventObjectSchema.readonly();
 export const SoulGreenGrantedEventSchema = SoulGreenGrantedEventObjectSchema.readonly();
 export const SoulGreenPiercedEventSchema = SoulGreenPiercedEventObjectSchema.readonly();
+export const SoulGreenGraceEnteredEventSchema = SoulGreenGraceEnteredEventObjectSchema.readonly();
 export const SoulVerificationCompletedEventSchema = SoulVerificationCompletedEventObjectSchema.readonly();
 export const SoulGovernanceLeaseAcquiredEventSchema = SoulGovernanceLeaseAcquiredEventObjectSchema.readonly();
 export const SoulGovernanceLeaseReleasedEventSchema = SoulGovernanceLeaseReleasedEventObjectSchema.readonly();
@@ -177,6 +199,7 @@ export const Phase3BEventUnionSchema = z
     SoulSessionOverridePromotedEventObjectSchema,
     SoulGreenGrantedEventObjectSchema,
     SoulGreenPiercedEventObjectSchema,
+    SoulGreenGraceEnteredEventObjectSchema,
     SoulVerificationCompletedEventObjectSchema,
     SoulGovernanceLeaseAcquiredEventObjectSchema,
     SoulGovernanceLeaseReleasedEventObjectSchema,

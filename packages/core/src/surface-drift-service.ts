@@ -42,7 +42,7 @@ export interface DriftLeaseRepoPort {
 
 export interface SurfaceDriftEventPublisherPort {
   publish(event: SurfaceDriftEventInput): Promise<Readonly<EventLogEntry>>;
-  publishWithMutation<T>(event: SurfaceDriftEventInput, mutate: () => Promise<T>): Promise<T>;
+  publishWithMutation<T>(event: SurfaceDriftEventInput, mutate: (entry: EventLogEntry) => Promise<T>): Promise<T>;
 }
 
 export interface SurfaceDriftServiceDependencies {

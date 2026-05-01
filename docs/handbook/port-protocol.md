@@ -104,6 +104,26 @@ plugin core, the default decision is **prune**, not "defer for later." If the
 product relevance is unclear, stop and ask the user before adding it to a task
 card, completion report, or backlog.
 
+## Registered v0.1 Divergences
+
+These are intentional, reviewed deviations from the vendor snapshot.
+They are not precedent for new clean-room rewrites.
+
+### #BL-021 — EventPublisher mutation audit-id handoff
+
+- Source: `vendor/do-what-new-snapshot/packages/core/src/event-publisher.ts`
+- Target: `packages/core/src/event-publisher.ts`
+- Vendor shape: `publishWithMutation(event, mutate: () => Promise<T>)`
+- Alaya shape: `publishWithMutation(event, mutate: (entry: EventLogEntry) => Promise<T>)`
+- Reason: Alaya's trust-state SQL rows must persist the exact EventLog
+  `event_id` as `audit_event_id` inside the same rollback window as
+  delivery / usage persistence. Returning to the vendor shape would
+  require a manual publish / rollback path and would weaken the
+  EventLog-first storage contract.
+- Synchronization requirement: every local publisher port that exposes
+  `publishWithMutation` must keep the `entry` callback argument in its
+  type and tests.
+
 ## Anti-Patterns
 
 Reviewers reject the following on sight:

@@ -22,7 +22,7 @@ each Phase Gate.
 | Phase 1 | Wave 1 leaves: protocol, migrations, storage shared, config, topology, engine-gateway | **done** | Gate-1 passed |
 | Phase 2 | Wave 2: storage repos batches + core services + Garden + security defense | **done** | Gate-2 passed |
 | Phase 3 | Wave 3: foundation helpers, ConversationService, MCP discovery, run lifecycle, misc services, core barrel | **done** | Gate-3 passed |
-| Phase 4 | Wave 4: Core daemon, routes, MCP server transport, real profile mutation, CLI bridge, secrets, Inspector server, Inspector frontend | non-frontend `implementation-ready`; Inspector frontend `live-event-ready` | Gate-4 pending (#BL-018 attached-agent MCP proof harness) |
+| Phase 4 | Wave 4: Core daemon, routes, MCP server transport, real profile mutation, CLI bridge, secrets, Inspector server, Inspector frontend | MCP memory surface `mcp-consumable`; Inspector config-write and trust delivery/usage durability fixes verified | Gate-4 passed 2026-05-01 |
 | Phase 5 | Wave 5: full E2E, benchmark, graph contract, final review | not-started | Gate-5 (v0.1 release) |
 
 ## Subsystem Readiness (target = v0.1 release)
@@ -65,35 +65,41 @@ each Phase Gate.
 | Engine gateway MCP/provider skeleton | `implementation-ready` | `implementation-ready` | P1-engine-gateway-mcp |
 | First-party MCP memory tool contract | `implementation-ready` | `implementation-ready` | P4-mcp-memory-tools |
 | MCP discovery services | `implementation-ready` | `implementation-ready` | P3-mcp-discovery |
-| MCP tool surface | daemon transport and `soul.*` handlers are `implementation-ready`; attached-agent proof pending | `mcp-consumable` | P3-mcp-discovery + P4-mcp-tooling + P4-mcp-memory-tools + P4-mcp-server + attached-agent proof |
+| MCP tool surface | `mcp-consumable` via single-daemon attached-agent MCP harness | `mcp-consumable` | P3-mcp-discovery + P4-mcp-tooling + P4-mcp-memory-tools + P4-mcp-server + Gate-4 proof harness |
 | Core daemon | `implementation-ready` | `live-event-ready` | P4-daemon-skeleton + P4-daemon-startup-ordering + P4-sse-strip |
 | Profile mutation (Codex/Claude attach) | `implementation-ready` | `cli-consumable` | P4-profile-mutation |
 | CLI commands (doctor / install / attach / status / tools / inspect / detach) | `implementation-ready` | `cli-consumable` | P4-cli-bridge + P4-mcp-memory-tools + P4-cli-* |
-| Secret refs (env / local-file) | `implementation-ready` | `live-event-ready` | P4-secrets |
+| Secret refs (env / local-file / paste-to-file) | `live-event-ready`; Inspector writes proxy daemon runtime config and are audited through EventLog | `live-event-ready` | P4-secrets + #BL-019 repair |
 | Operations (backup, export, import) | `implementation-ready` | `cli-consumable` | P4-operations |
-| Memory Inspector | server `implementation-ready`; frontend `live-event-ready` (138 KB gzipped, 18/18 RTL tests, Reviewer Gate G1-G8 green) | `live-event-ready` for the inspector surface; full Gate-4 close still requires #BL-018 (attached-agent MCP proof harness) | P4-inspector-server + P4-cli-inspect + P4-inspector-frontend |
+| Memory Inspector | `live-event-ready`; server/frontend exist, token-gated routes pass, and Provider/Config writes proxy daemon runtime config | `live-event-ready` for the inspector surface | P4-inspector-server + P4-cli-inspect + P4-inspector-frontend + #BL-019 repair |
 | Benchmark harness | `not-started` | `implementation-ready` | P5-benchmark |
 | Graph inspector data contract | `not-started` | `schema-ready` | P5-graph-contract |
 
 ## Known Wiring Gaps
 
 Phase 1 through Phase 3 implementation surfaces are ported and unit-tested.
-Phase 4 non-frontend daemon, CLI, MCP, and Inspector server surfaces are
-implemented and unit-tested. `P4-inspector-frontend` landed `live-event-ready`
-on 2026-04-30 (see
-`docs/v0.1/phase-4-briefs/reports/task-p4-inspector-frontend.md`).
+Phase 4 daemon, CLI, MCP, Inspector server, and Inspector frontend surfaces are
+implemented and tested. Gate-4 passed on 2026-05-01 after the attached-agent
+MCP proof, Inspector config-write repair, and trust delivery/usage durability
+repair all passed targeted verification.
 
-Gate-4 itself remains **pending**. The remaining blocker is the
-attached-agent MCP proof: `alaya tools call …` runs each subcommand in a
-fresh daemon process, so cross-call state (e.g. `delivery_id` from
-`soul.recall` → `soul.report_context_usage`) cannot survive between CLI
-invocations. The full Gate-4 demo from
-`Gate Definitions §Gate-4` has to run inside a single attached-agent MCP
-session against a long-lived daemon. Tracking this as backlog
-**#BL-018 — attached-agent MCP proof harness**; see
-`docs/v0.1/phase-4-briefs/reports/gate-4-mcp-proof.md` for the partial
-demo (8 `soul.*` tools enrolled; `soul.recall` and tools/list verified;
-delivery-id chain blocked by per-process state).
+`apps/core-daemon/src/__tests__/gate4-attached-agent-mcp-proof.test.ts`
+now resolves `#BL-018`: it runs `alaya install`, `alaya attach codex`,
+MCP `tools/list`, `soul.recall`, `soul.open_pointer`,
+`soul.report_context_usage`, `soul.emit_candidate_signal`, proposal
+creation, governance reject, a Garden background pass with EventLog and
+health-journal evidence, `alaya status`, and `alaya doctor` in one daemon
+lifetime using the MCP SDK in-memory transport.
+
+Remaining non-blocking follow-up after Gate-4:
+
+- `#BL-020`: installed / configured / unverifiable trust counters are
+  still process-local; this is not part of the resolved `#BL-015`
+  delivery / usage close condition.
+
+Remaining v0.1 release work is Phase 5: benchmark fixtures, graph
+contract, full E2E, final review, and the post-port hygiene sweep only
+after the final v0.1 port card lands.
 
 ## Gate Definitions
 
@@ -112,8 +118,10 @@ delivery-id chain blocked by per-process state).
   catalog → `soul.recall` → `soul.open_pointer` →
   `soul.report_context_usage` → candidate signal → proposal →
   governance reject → Garden background pass; entire flow works
-  against a real daemon. `mcp-consumable` requires this attached-agent
-  proof, not P4-mcp-tooling alone.
+  against a real daemon and asserts Garden EventLog + health-journal
+  evidence. `mcp-consumable` requires this attached-agent proof, not
+  P4-mcp-tooling alone. Current proof:
+  `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon gate4-attached-agent-mcp-proof`.
 - **Gate-5 (v0.1 release)**: Gate-4 plus benchmark fixture run, graph
   contract derived from real PathRelation data, final multi-lens
   review with zero Blocking / Important findings.

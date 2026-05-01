@@ -26,4 +26,4 @@
 ## Readiness Impact
 
 This card closes as `implementation-ready`; attached-agent Gate-4
-proof remains pending.
+proof later landed on 2026-05-01.

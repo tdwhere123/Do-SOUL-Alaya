@@ -23,5 +23,5 @@
 
 ## Readiness Impact
 
-This registration card closes as `implementation-ready`; Gate-4
-attached-agent proof remains pending.
+This registration card closes as `implementation-ready`. Gate-4
+attached-agent proof later landed on 2026-05-01.
