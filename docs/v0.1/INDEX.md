@@ -27,7 +27,7 @@ Phase 0 → Gate-0
 | Phase 1 | Wave 1: Leaves | 9 cards | **done** | Gate-1 passed |
 | Phase 2 | Wave 2: Services + Garden + Repos + Security | 32 cards | **done** | Gate-2 passed |
 | Phase 3 | Wave 3: Memory orchestration bridge + run lifecycle | 6 cards | **done** | Gate-3 passed |
-| Phase 4 | Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI + Memory Inspector | 30 cards (target) | MCP proof `mcp-consumable`; Inspector/trust review fixes verified | Gate-4 passed |
+| Phase 4 | Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI + Memory Inspector | 30 cards (target) | MCP surface `mcp-consumable`; trust delivery/usage durability + Inspector config-write `live-event-ready` after Round 3 followup cards | Gate-4 passed |
 | Phase 5 | Wave 5: E2E + Benchmark + Graph Contract + Final Review | 4 cards (target) | not-started | Gate-5 |
 
 ## Phase 2 — Card Closeout Status
@@ -113,7 +113,7 @@ Historical failure baseline: [review-p4-controller](./phase-4-briefs/reports/rev
 | P4-mcp-tooling | implementation-ready | [report](./phase-4-briefs/reports/task-p4-mcp-tooling.md) |
 | P4-svc-global-recall-cache | implementation-ready | [report](./phase-4-briefs/reports/task-p4-svc-global-recall-cache.md) |
 | P4-cli-bridge | implementation-ready | [report](./phase-4-briefs/reports/task-p4-cli-bridge.md) |
-| P4-trust-state | implementation-ready | [report](./phase-4-briefs/reports/task-p4-trust-state.md) |
+| P4-trust-state | live-event-ready | [report](./phase-4-briefs/reports/task-p4-trust-state.md) |
 | P4-mcp-memory-tools | implementation-ready | [report](./phase-4-briefs/reports/task-p4-mcp-memory-tools.md) |
 | P4-mcp-server | implementation-ready | [report](./phase-4-briefs/reports/task-p4-mcp-server.md) |
 | P4-cli-doctor | implementation-ready | [report](./phase-4-briefs/reports/task-p4-cli-doctor.md) |
@@ -124,9 +124,9 @@ Historical failure baseline: [review-p4-controller](./phase-4-briefs/reports/rev
 | P4-attach-codex | implementation-ready | [report](./phase-4-briefs/reports/task-p4-attach-codex.md) |
 | P4-attach-claude | implementation-ready | [report](./phase-4-briefs/reports/task-p4-attach-claude.md) |
 | P4-profile-mutation | implementation-ready | [report](./phase-4-briefs/reports/task-p4-profile-mutation.md) |
-| P4-secrets | implementation-ready | [report](./phase-4-briefs/reports/task-p4-secrets.md) |
+| P4-secrets | live-event-ready | [report](./phase-4-briefs/reports/task-p4-secrets.md) |
 | P4-operations | implementation-ready | [report](./phase-4-briefs/reports/task-p4-operations.md) |
-| P4-inspector-server | implementation-ready | [report](./phase-4-briefs/reports/task-p4-inspector-server.md) |
+| P4-inspector-server | live-event-ready | [report](./phase-4-briefs/reports/task-p4-inspector-server.md) |
 | P4-daemon-routes-register | implementation-ready | [report](./phase-4-briefs/reports/task-p4-daemon-routes-register.md) |
 | P4-inspector-frontend | live-event-ready | [report](./phase-4-briefs/reports/task-p4-inspector-frontend.md) |
 

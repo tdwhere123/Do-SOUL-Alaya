@@ -69,6 +69,7 @@ each Phase Gate.
 | Core daemon | `implementation-ready` | `live-event-ready` | P4-daemon-skeleton + P4-daemon-startup-ordering + P4-sse-strip |
 | Profile mutation (Codex/Claude attach) | `implementation-ready` | `cli-consumable` | P4-profile-mutation |
 | CLI commands (doctor / install / attach / status / tools / inspect / detach) | `implementation-ready` | `cli-consumable` | P4-cli-bridge + P4-mcp-memory-tools + P4-cli-* |
+| Trust state delivery / usage | `live-event-ready`; SQL-backed delivery and usage records survive daemon restart | `live-event-ready` | P4-trust-state + #BL-015 repair |
 | Secret refs (env / local-file / paste-to-file) | `live-event-ready`; Inspector writes proxy daemon runtime config and are audited through EventLog | `live-event-ready` | P4-secrets + #BL-019 repair |
 | Operations (backup, export, import) | `implementation-ready` | `cli-consumable` | P4-operations |
 | Memory Inspector | `live-event-ready`; server/frontend exist, token-gated routes pass, and Provider/Config writes proxy daemon runtime config | `live-event-ready` for the inspector surface | P4-inspector-server + P4-cli-inspect + P4-inspector-frontend + #BL-019 repair |

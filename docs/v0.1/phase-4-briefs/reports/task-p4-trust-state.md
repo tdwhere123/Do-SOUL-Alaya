@@ -30,7 +30,7 @@
 
 ## Readiness Impact
 
-This card closes as `implementation-ready`. Delivery / usage restart
+This card closes as `live-event-ready`. Delivery / usage restart
 proof exists in
 `apps/core-daemon/src/__tests__/trust-state-persistence.test.ts`, and
 the durability closeout for delivery/usage is resolved.

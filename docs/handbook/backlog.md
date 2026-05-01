@@ -6,9 +6,15 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-022`.
+sequence. **Next available number**: `#BL-023`.
 
 ## Open Issues
+
+### #BL-022 -- P1-migrations-followup carve-out for 056
+
+Status: Open
+Description: Migration 056 (trust-state-persistence.sql) and trust-state-repo.ts were delivered under task-p4-trust-state.md without a proper Phase-1 carve-out card. This entry authorizes task-p1-migrations-followup-trust-state-056.md as the governing card going forward.
+Interlocks: task-p1-migrations-followup-trust-state-056.md
 
 ### #BL-020 — Trust installed/configured/unverifiable counter persistence
 
@@ -42,6 +48,8 @@ does not silently squash or bundle review-fix commits.
 drift was corrected from `#BL-014` to `#BL-015`. This does not close
 `#BL-014`; closure still requires commit-history evidence from a future
 wave closeout.
+This round of repairs touched document references but did not close this
+item.
 
 ### #BL-016 — `Phase*EventType` naming carried over from upstream snapshot
 
@@ -61,9 +69,8 @@ Renaming is a deliberate adapt-and-port-style change: it diverges from the snaps
 
 The Port-First discipline (`docs/handbook/port-protocol.md`) forbids mid-port refactors that would diverge from `vendor/do-what-new-snapshot/`. As a result v0.1 deliberately accumulates port residue — upstream-milestone naming, oversized inherited files, parallel helpers next to Alaya-native equivalents, exports Alaya never calls. None of these are individually blocking, and folding them into per-card scope would pollute every port card with refactor work. Treat as a single sweep wave executed once port phase is over; the open backlog set should be consolidated and closed in that pass.
 
-Frozen implementation plan: `docs/v0.1/post-port-hygiene-plan.md`.
-Do not execute it before `P5-graph-contract` and the final v0.1 port
-card land.
+Do not execute the sweep before `P5-graph-contract` and the final v0.1
+port card land.
 
 ## Out of Alaya Scope (Permanently Rejected)
 
@@ -133,9 +140,11 @@ production-grade key management; v0.1 is a single-user local-first
 build where env variables and `~/.config/alaya/.env` with strict file
 permissions are sufficient.
 
-## Resolved (short closure summaries)
+## Registered Divergences
 
-### #BL-021 — EventPublisher mutation audit-id handoff
+### Accepted divergences (registered, not closed)
+
+#### #BL-021 — EventPublisher mutation audit-id handoff
 
 Resolved by explicitly documenting and synchronizing Alaya's
 `publishWithMutation(entry)` divergence from the vendor snapshot. The
@@ -144,6 +153,8 @@ trust-state persistence must store the exact EventLog `event_id` as
 `audit_event_id` in the delivery / usage SQL rows before notification.
 All local publisher ports now accept the appended entry, and the
 divergence is registered in `docs/handbook/port-protocol.md`.
+
+## Resolved (short closure summaries)
 
 ### #BL-019 — Embedding-supplement paste secret_ref pipeline
 
@@ -156,7 +167,7 @@ leaks, and the daemon publishes the config write through EventLog as a
 Regression coverage lives in Inspector route tests, Inspector web tests,
 and core-daemon config-route tests.
 
-### #BL-015 — Trust state SQL persistence across daemon restart
+### #BL-015 -- Trust state SQL persistence (delivery/usage records)
 
 Resolved for delivery / usage records by
 `packages/storage/src/migrations/056-trust-state-persistence.sql`,

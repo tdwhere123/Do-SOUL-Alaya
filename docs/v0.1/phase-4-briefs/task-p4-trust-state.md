@@ -38,6 +38,8 @@ ContextDeliveryRecord and UsageProofRecord consumers.
 | `n/a` | `packages/protocol/src/__tests__/trust-state.test.ts` | Schema parse/serialize tests for each record + each state enum value. |
 | `n/a` | `apps/core-daemon/src/trust-state.ts` | In-memory `TrustStateRecorder` class implementing the §2.3 behavior contract. |
 | `n/a` | `apps/core-daemon/src/__tests__/trust-state.test.ts` | Tests proving every §2.3 acceptance behavior. |
+| `n/a` | `packages/storage/src/migrations/056-trust-state-persistence.sql` | New forward-only SQLite migration for `trust_context_delivery` and `trust_usage_proof` tables; authorized by `task-p1-migrations-followup-trust-state-056.md` and `#BL-022`. |
+| `n/a` | `packages/storage/src/repos/trust-state-repo.ts` | New `TrustStatePersistenceRepoPort` implementation backing the recorder; authorized by `task-p1-migrations-followup-trust-state-056.md` and `#BL-022`. |
 
 ### 2.2 Port Rules
 
@@ -180,6 +182,7 @@ Computed deterministically from counts; ties broken by row order (first match wi
 | AC7 | Closing readiness label is `live-event-ready` | `docs/handbook/runtime-status.md` and `docs/v0.1/INDEX.md` are updated only after evidence supports the label |
 | AC8 | All 9 behaviors B1-B9 from §2.4 each have at least one matching test | grep test names against the §2.4 table |
 | AC9 | The state reduction table §2.5 is exhaustively tested with one test per row | grep test names against the §2.5 table; every row appears |
+| AC10 | SQL migration `056-trust-state-persistence.sql` exists and `trust-state-repo.ts` exports a `TrustStateRepo` type, closing the loop with `#BL-022` | `rtk node -e "const fs=require('fs');for(const p of ['packages/storage/src/migrations/056-trust-state-persistence.sql','packages/storage/src/repos/trust-state-repo.ts']){if(!fs.existsSync(p)){process.exit(1)}};"` and `rtk rg -n "export .*TrustStateRepo" packages/storage/src/repos/trust-state-repo.ts` |
 
 ## 5. Verification
 

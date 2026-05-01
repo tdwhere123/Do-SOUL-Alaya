@@ -7,7 +7,8 @@
 
 Gate-4 is **passed**. The single-daemon MCP proof harness resolves
 `#BL-018`, Inspector config writes now proxy the daemon and resolve
-`#BL-019`, and trust delivery/usage persistence resolves `#BL-015`.
+`#BL-019`, and trust delivery/usage persistence resolves `#BL-015` for
+delivery/usage records.
 `#BL-020` remains open for installed / configured / unverifiable counter
 persistence and is not part of the Gate-4 close condition.
 
