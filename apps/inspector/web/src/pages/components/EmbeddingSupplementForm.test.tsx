@@ -99,6 +99,107 @@ describe("EmbeddingSupplementForm", () => {
     );
   });
 
+  it("surfaces a toast when the initial GET fails with a network error", async () => {
+    fetchMock.mockRejectedValue(new Error("network down"));
+    renderForm();
+
+    await waitFor(() =>
+      expect(screen.getByText(/Failed to load embedding config: network down/i)).toBeTruthy()
+    );
+    expect(screen.getByRole("status")).toBeTruthy();
+  });
+
+  it("surfaces a toast when the patch returns 500", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          provider_url: null,
+          model_id: null,
+          secret_ref: null,
+          embedding_enabled: false
+        })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ message: "internal server error" }, 500)
+      );
+
+    const { onRestart } = renderForm();
+    await waitFor(() => screen.getByPlaceholderText("OPENAI_API_KEY"));
+
+    await act(async () => {
+      await userEvent.type(
+        screen.getByPlaceholderText("OPENAI_API_KEY"),
+        "OPENAI_API_KEY"
+      );
+      await userEvent.click(
+        screen.getByRole("button", { name: /commit embedding/i })
+      );
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText(/Failed to patch embedding/i)).toBeTruthy()
+    );
+    expect(onRestart).not.toHaveBeenCalled();
+  });
+
+  it("ignores a second click on the commit button while a save is already in flight", async () => {
+    let resolvePatch: (response: Response) => void = () => undefined;
+    const pendingPatch = new Promise<Response>((resolve) => {
+      resolvePatch = resolve;
+    });
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          provider_url: null,
+          model_id: null,
+          secret_ref: null,
+          embedding_enabled: false
+        })
+      )
+      .mockReturnValueOnce(pendingPatch);
+
+    const { onRestart } = renderForm();
+    await waitFor(() => screen.getByPlaceholderText("OPENAI_API_KEY"));
+
+    const commitButton = screen.getByRole("button", { name: /commit embedding/i });
+    await act(async () => {
+      await userEvent.type(
+        screen.getByPlaceholderText("OPENAI_API_KEY"),
+        "OPENAI_API_KEY"
+      );
+    });
+
+    await act(async () => {
+      await userEvent.click(commitButton);
+    });
+    expect((commitButton as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      await userEvent.click(commitButton);
+    });
+
+    await act(async () => {
+      resolvePatch(
+        jsonResponse({
+          success: true,
+          requires_daemon_restart: true,
+          data: {
+            provider_url: null,
+            model_id: null,
+            secret_ref: "env:OPENAI_API_KEY",
+            embedding_enabled: false
+          }
+        })
+      );
+    });
+
+    await waitFor(() => expect(onRestart).toHaveBeenCalledOnce());
+    const patchCalls = fetchMock.mock.calls.filter(
+      ([, init]) => (init as RequestInit | undefined)?.method === "PATCH"
+    );
+    expect(patchCalls).toHaveLength(1);
+  });
+
   it("submits paste mode and switches to returned file ref without displaying plaintext", async () => {
     const plaintext = "sk-test-plaintext-secret";
     fetchMock

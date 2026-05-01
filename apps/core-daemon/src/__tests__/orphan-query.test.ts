@@ -69,20 +69,23 @@ describe("orphan query", () => {
       .prepare("UPDATE event_log SET created_at = ? WHERE event_id IN (?, ?)")
       .run("2000-01-01T00:00:00.000Z", deliveryEvent.event_id, usageEvent.event_id);
 
-    await expect(findEventLogOrphansForWorkspace(database.connection, "workspace-1")).resolves.toEqual([
-      {
-        audit_event_id: deliveryEvent.event_id,
-        event_type: TrustStateEventType.MEMORY_DELIVERED,
-        expected_table: "trust_context_delivery",
-        detected_at: "2000-01-01T00:00:00.000Z"
-      },
-      {
-        audit_event_id: usageEvent.event_id,
-        event_type: TrustStateEventType.MEMORY_USAGE_REPORTED,
-        expected_table: "trust_usage_proof",
-        detected_at: "2000-01-01T00:00:00.000Z"
-      }
-    ]);
+    await expect(findEventLogOrphansForWorkspace(database.connection, "workspace-1")).resolves.toEqual(
+      expect.arrayContaining([
+        {
+          audit_event_id: deliveryEvent.event_id,
+          event_type: TrustStateEventType.MEMORY_DELIVERED,
+          expected_table: "trust_context_delivery",
+          detected_at: "2000-01-01T00:00:00.000Z"
+        },
+        {
+          audit_event_id: usageEvent.event_id,
+          event_type: TrustStateEventType.MEMORY_USAGE_REPORTED,
+          expected_table: "trust_usage_proof",
+          detected_at: "2000-01-01T00:00:00.000Z"
+        }
+      ])
+    );
+    await expect(findEventLogOrphansForWorkspace(database.connection, "workspace-1")).resolves.toHaveLength(2);
 
     await orphanRadarRepo.createEventLogOrphan({
       radar_id: "radar-usage",

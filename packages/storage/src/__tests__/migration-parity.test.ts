@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { initDatabase } from "../db.js";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(currentDirectory, "../../../..");
@@ -56,5 +57,53 @@ describe("migration parity", () => {
     });
 
     expect(mismatches).toEqual([]);
+  });
+
+  it("exposes the trust-state tables and event-log orphan radar shape after migrations 056 and 057", () => {
+    const database = initDatabase();
+    try {
+      const tableRows = database.connection
+        .prepare(
+          `SELECT name FROM sqlite_master
+           WHERE type='table'
+             AND name IN ('trust_context_delivery', 'trust_usage_proof', 'orphan_radar')
+           ORDER BY name`
+        )
+        .all() as ReadonlyArray<Readonly<{ name: string }>>;
+      expect(tableRows.map((row) => row.name)).toEqual([
+        "orphan_radar",
+        "trust_context_delivery",
+        "trust_usage_proof"
+      ]);
+
+      const deliveryIndexes = database.connection
+        .prepare(`PRAGMA index_list('trust_context_delivery')`)
+        .all() as ReadonlyArray<Readonly<{ name: string }>>;
+      expect(deliveryIndexes.map((row) => row.name)).toEqual(
+        expect.arrayContaining(["idx_trust_context_delivery_agent_target_delivered_at"])
+      );
+
+      const orphanColumns = database.connection
+        .prepare(`PRAGMA table_info('orphan_radar')`)
+        .all() as ReadonlyArray<Readonly<{ name: string }>>;
+      const columnNames = orphanColumns.map((row) => row.name);
+      expect(columnNames).toEqual(
+        expect.arrayContaining([
+          "target_memory_id",
+          "target_event_id",
+          "target_event_type",
+          "expected_table"
+        ])
+      );
+
+      const orphanIndexes = database.connection
+        .prepare(`PRAGMA index_list('orphan_radar')`)
+        .all() as ReadonlyArray<Readonly<{ name: string }>>;
+      expect(orphanIndexes.map((row) => row.name)).toEqual(
+        expect.arrayContaining(["idx_orphan_radar_target_event"])
+      );
+    } finally {
+      database.close();
+    }
   });
 });

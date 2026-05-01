@@ -267,6 +267,79 @@ describe("routes-config port batch", () => {
     expect(patch).toHaveBeenCalledTimes(1);
   });
 
+  it("round-trips soul, strategy, and environment patches through real SqliteConfigRepo without mocking the service", async () => {
+    const database = initDatabase();
+    try {
+      const configDir = await mkdtemp(path.join(tmpdir(), "daemon-config-section-"));
+      const paths = resolveAlayaConfigPaths(configDir);
+      const eventLogRepo = new SqliteEventLogRepo(database);
+      const configService = createConfigService({
+        configRepo: new SqliteConfigRepo(database),
+        eventPublisher: new EventPublisher({
+          eventLogRepo,
+          runHotStateService: { apply: vi.fn() },
+          runtimeNotifier: { notify: vi.fn(), notifyEntry: vi.fn() }
+        }),
+        configPathsProvider: () => paths,
+        clock: () => "2026-05-01T00:00:00.000Z",
+        generateAuditId: () => "audit-section-live"
+      });
+      const app = new Hono();
+      registerConfigRoutes(app, {
+        workspaceService: { getById: vi.fn(async () => undefined) },
+        configService
+      } as any);
+
+      const soulPatch = await app.request("/workspaces/ws-section/config/soul", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ memory_hard_cap: 4096, auto_checkpoint: false })
+      });
+      expect(soulPatch.status).toBe(200);
+      const soulGet = await app.request("/workspaces/ws-section/config/soul");
+      expect(soulGet.status).toBe(200);
+      const soulRound = (await soulGet.json()) as {
+        data: { memory_hard_cap: number; auto_checkpoint: boolean };
+      };
+      expect(soulRound.data.memory_hard_cap).toBe(4096);
+      expect(soulRound.data.auto_checkpoint).toBe(false);
+
+      const strategyPatch = await app.request("/workspaces/ws-section/config/strategy", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ require_bash_approval: false, auto_approve_readonly: true })
+      });
+      expect(strategyPatch.status).toBe(200);
+      const strategyGet = await app.request("/workspaces/ws-section/config/strategy");
+      const strategyRound = (await strategyGet.json()) as {
+        data: { require_bash_approval: boolean; auto_approve_readonly: boolean };
+      };
+      expect(strategyRound.data.require_bash_approval).toBe(false);
+      expect(strategyRound.data.auto_approve_readonly).toBe(true);
+
+      const environmentPatch = await app.request("/workspaces/ws-section/config/environment", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ worktree_enabled: true, env_vars: { ALAYA_DEBUG: "1" } })
+      });
+      expect(environmentPatch.status).toBe(200);
+      const environmentGet = await app.request("/workspaces/ws-section/config/environment");
+      const environmentRound = (await environmentGet.json()) as {
+        data: { worktree_enabled: boolean; env_vars: Record<string, string> };
+      };
+      expect(environmentRound.data.worktree_enabled).toBe(true);
+      expect(environmentRound.data.env_vars).toEqual({ ALAYA_DEBUG: "1" });
+
+      const events = await eventLogRepo.queryByEntity(
+        "runtime_config",
+        "runtime:embedding-supplement"
+      );
+      expect(events).toHaveLength(0);
+    } finally {
+      database.close();
+    }
+  });
+
   it("serializes same-path paste writes without exposing plaintext in responses", async () => {
     const harness = await createServiceHarness();
     const secretPath = path.join(harness.paths.secretsDir, "openai");

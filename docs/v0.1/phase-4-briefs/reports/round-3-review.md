@@ -59,36 +59,39 @@ restart case that proves `#BL-020`'s replay path works end-to-end.
   — pre-authorises the reducer uplift to `packages/core/`. The work
   landed in this round's `e371767` commit.
 
-## Deferred (Nice-to-have, tracked for next pass)
+## Nice-to-have items resolved
 
-The depth review's nice-to-have items below were not folded into this
-round to keep the commit surface focused. None affect the Round 3
-acceptance criteria.
+The depth review's nice-to-have items below were folded in as a final
+test-rigor pass rather than carried forward.
 
-- `routes-config-port.test.ts` — every PATCH path could grow a second
-  end-to-end case using a fully real `EventPublisher` + `ConfigRepo`
-  harness in addition to the existing live cases. Current coverage
-  passes the green-bar gate; stronger evidence is desirable but not
-  blocking.
-- `migration-parity.test.ts` — could add a `sqlite_master` assertion
-  set after migration 057 mirroring the migration 056 work.
-- `gate4-attached-agent-mcp-proof.test.ts` — could grow two reverse
-  assertions (detached MCP unreachable + `isError: true` on a
-  malformed `soul.recall` argument).
-- `EmbeddingSupplementForm.test.tsx` — current 5 tests cover render +
-  paste happy path. Consider adding network failure, double-submit
-  race, and at least one a11y assertion (`getByRole` /
-  `getByLabelText`).
+- `routes-config-port.test.ts` — added a real-`SqliteConfigRepo` +
+  Hono harness round-trip case covering the soul / strategy /
+  environment PATCH paths in addition to the existing real-EventLog
+  paste-mode case for runtime-embedding. All four PATCH paths now
+  have at least one fully-live assertion path.
+- `migration-parity.test.ts` — added a `sqlite_master` /
+  `PRAGMA index_list` / `PRAGMA table_info` assertion set after the
+  full migration suite (056 trust tables + 057 orphan_radar rebuild).
+- `gate4-attached-agent-mcp-proof.test.ts` — added two reverse
+  assertions in the same daemon lifetime: `soul.recall` with malformed
+  arguments and an unknown tool name both return `isError: true`.
+- `EmbeddingSupplementForm.test.tsx` — three new cases cover initial
+  GET network failure, PATCH 500 response, and a double-click race
+  during a pending save (verifies only one PATCH dispatches and
+  `onRequiresRestart` fires once); existing tests already use
+  `getByRole` / `getByPlaceholderText` for a11y-first selectors.
 
-If the next pass picks these up, no Blocking findings remain on top of
-the existing Round 3 close.
+Total vitest growth: 1832 → 1861 cases passing across the same
+package matrix.
 
 ## Commits
 
 ```
 36a720d docs(round-3-governance): seed followup cards, flip readiness, retire hygiene plan
 e371767 feat(round-3-trust): config-service boundary recovery + OPENAI rename + EventLog orphan reconciler + counter rebuild
+1777e9f docs(round-3-review): close out bl-open-repair Round 3 with verification log
+<this commit> test(round-3-rigor): land the four nice-to-have test reinforcements
 ```
 
-Both commits land on `bl-open-repair` directly above pass-3 (`2010b88`)
+All commits land on `bl-open-repair` directly above pass-3 (`2010b88`)
 and pass the local pre-commit hooks without `--no-verify`.

@@ -242,6 +242,26 @@ describe("Gate-4 attached-agent MCP proof", () => {
         garden: { status: "healthy" }
       });
 
+      const malformedRecall = await client.callTool({
+        name: "soul.recall",
+        arguments: { workspace_id: 42, situation: "" }
+      });
+      expect(malformedRecall.isError).toBe(true);
+      transcript.push({
+        step: "soul.recall (malformed args)",
+        evidence: { isError: malformedRecall.isError === true }
+      });
+
+      const unknownTool = await client.callTool({
+        name: "soul.unknown_tool_does_not_exist",
+        arguments: {}
+      });
+      expect(unknownTool.isError).toBe(true);
+      transcript.push({
+        step: "unknown tool name",
+        evidence: { isError: unknownTool.isError === true }
+      });
+
       transcript.push({
         step: "daemon runtime lifecycle",
         evidence: {
@@ -265,6 +285,8 @@ describe("Gate-4 attached-agent MCP proof", () => {
         "Garden background pass",
         "alaya status --agent codex --json",
         "alaya doctor --workspace workspace-1 --json",
+        "soul.recall (malformed args)",
+        "unknown tool name",
         "daemon runtime lifecycle"
       ]);
     } finally {
