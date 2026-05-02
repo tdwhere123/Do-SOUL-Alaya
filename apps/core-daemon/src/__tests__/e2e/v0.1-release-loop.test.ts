@@ -20,6 +20,7 @@ import {
   WorkspaceKind,
   WorkspaceState,
   type MemoryEntry,
+  type Proposal,
   type SoulEmitCandidateSignalResponse,
   type SoulMemorySearchResponse,
   type SoulOpenPointerResponse,
@@ -45,6 +46,9 @@ import { registerAlayaCliCommands } from "../../cli/register.js";
 import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "../../index.js";
 import { createAlayaMcpServer } from "../../mcp-server.js";
 
+const PRIMARY_MEMORY_ID = "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca";
+const FOREIGN_MEMORY_ID = "8b6718fc-5d1f-4a1a-9a67-f6509fa6b8b3";
+const FOREIGN_PROPOSAL_ID = "44bce795-d51c-49e8-8e60-22195c98b6ab";
 const tempDirs: string[] = [];
 const originalDataDir = process.env.DATA_DIR;
 const originalOpenAiApiKey = process.env.OPENAI_API_KEY;
@@ -185,6 +189,16 @@ describe("P5 v0.1 release loop E2E", () => {
         content: { content: "Use pnpm for all workspace commands." }
       });
 
+      const foreignPointer = await client.callTool({
+        name: "soul.open_pointer",
+        arguments: { object_id: FOREIGN_MEMORY_ID }
+      });
+      transcript.push({
+        step: "soul.open_pointer (foreign workspace)",
+        evidence: { isError: foreignPointer.isError === true }
+      });
+      expect(foreignPointer.isError).toBe(true);
+
       const usage = await callTool<SoulReportContextUsageResponse>(client, "soul.report_context_usage", {
         delivery_id: recall.delivery_id,
         usage_state: "used",
@@ -237,6 +251,20 @@ describe("P5 v0.1 release loop E2E", () => {
         proposal_id: proposal.proposal_id,
         resolution_state: ProposalResolutionState.REJECTED
       });
+
+      const foreignReview = await client.callTool({
+        name: "soul.review_memory_proposal",
+        arguments: {
+          proposal_id: FOREIGN_PROPOSAL_ID,
+          verdict: "reject",
+          reason: "Foreign workspace proposal must not be reviewable."
+        }
+      });
+      transcript.push({
+        step: "soul.review_memory_proposal (foreign workspace)",
+        evidence: { isError: foreignReview.isError === true }
+      });
+      expect(foreignReview.isError).toBe(true);
 
       const postReject = await readReleaseEvidence(dataDir, {
         deliveryId: recall.delivery_id,
@@ -328,6 +356,34 @@ describe("P5 v0.1 release loop E2E", () => {
       expect(exportBundle.kind).toBe("export");
       expect(exportBundle.storage.db_base64.length).toBeGreaterThan(0);
 
+      const hostileDbPath = join(dataDir, "hostile.db");
+      const hostileImportPath = join(dataDir, "hostile-import.json");
+      await writeFile(
+        hostileImportPath,
+        JSON.stringify({
+          ...backupBundle,
+          config: {
+            ...backupBundle.config,
+            alaya_toml: `[storage]\ndb_path = "${hostileDbPath}"\n`
+          },
+          storage: {
+            ...backupBundle.storage,
+            db_path: hostileDbPath
+          }
+        }),
+        "utf8"
+      );
+      const hostileImport = await dispatchCli(runtime, ["import", hostileImportPath, "--yes", "--json"]);
+      transcript.push({ step: "alaya import hostile db_path --json", evidence: hostileImport.json });
+      expect(hostileImport.exitCode).toBe(0);
+      expect(
+        (hostileImport.json as { readonly restored_paths: readonly string[] }).restored_paths
+      ).toContain(join(dataDir, "alaya.db"));
+      expect(
+        (hostileImport.json as { readonly restored_paths: readonly string[] }).restored_paths
+      ).not.toContain(hostileDbPath);
+      await expect(readFile(hostileDbPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+
       transcript.push({
         step: "daemon runtime lifecycle",
         evidence: {
@@ -346,16 +402,19 @@ describe("P5 v0.1 release loop E2E", () => {
         "soul.recall",
         "soul.open_pointer",
         "alaya tools call soul.open_pointer --json",
+        "soul.open_pointer (foreign workspace)",
         "soul.report_context_usage",
         "soul.emit_candidate_signal",
         "soul.propose_memory_update",
         "soul.review_memory_proposal",
+        "soul.review_memory_proposal (foreign workspace)",
         "durable evidence after governance reject",
         "Garden background pass",
         "alaya status --agent codex --json",
         "alaya doctor --workspace workspace-1 --json",
         "alaya backup --output --json",
         "alaya export --output --json",
+        "alaya import hostile db_path --json",
         "daemon runtime lifecycle"
       ]);
     } finally {
@@ -500,6 +559,7 @@ async function seedReleaseFixtureAtDbPath(dbPath: string): Promise<void> {
     const workspaceRepo = new SqliteWorkspaceRepo(database);
     const runRepo = new SqliteRunRepo(database);
     const memoryRepo = new SqliteMemoryEntryRepo(database);
+    const proposalRepo = new SqliteProposalRepo(database);
 
     await workspaceRepo.create({
       workspace_id: "workspace-1",
@@ -521,6 +581,38 @@ async function seedReleaseFixtureAtDbPath(dbPath: string): Promise<void> {
       current_surface_id: null
     });
     await memoryRepo.create(createMemoryEntry());
+    await workspaceRepo.create({
+      workspace_id: "workspace-2",
+      name: "workspace two",
+      root_path: "/tmp/alaya-workspace-2",
+      workspace_kind: WorkspaceKind.LOCAL_REPO,
+      default_engine_binding: null,
+      workspace_state: WorkspaceState.ACTIVE
+    });
+    await runRepo.create({
+      run_id: "run-2",
+      workspace_id: "workspace-2",
+      title: "P5 release loop foreign run",
+      goal: null,
+      run_mode: RunMode.CHAT,
+      engine_binding_id: null,
+      engine_class: null,
+      run_state: RunState.IDLE,
+      current_surface_id: null
+    });
+    await memoryRepo.create(
+      createMemoryEntry({
+        object_id: FOREIGN_MEMORY_ID,
+        content: "Foreign workspace memory must not be opened from workspace one.",
+        workspace_id: "workspace-2",
+        run_id: "run-2"
+      })
+    );
+    await proposalRepo.create({
+      proposal: createProposal(),
+      workspace_id: "workspace-2",
+      run_id: "run-2"
+    });
   } finally {
     database.close();
   }
@@ -609,18 +701,20 @@ async function readGardenEvidence(dataDir: string): Promise<
 async function readOperationBundle(path: string): Promise<
   Readonly<{
     kind: "backup" | "export";
+    config: Readonly<{ alaya_toml: string | null; env_file: string | null }>;
     storage: Readonly<{ db_path: string | null; db_base64: string }>;
   }>
 > {
   return JSON.parse(await readFile(path, "utf8")) as {
     kind: "backup" | "export";
+    config: { alaya_toml: string | null; env_file: string | null };
     storage: { db_path: string | null; db_base64: string };
   };
 }
 
 function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
-    object_id: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+    object_id: PRIMARY_MEMORY_ID,
     object_kind: "memory_entry",
     schema_version: 1,
     lifecycle_state: "active",
@@ -649,6 +743,33 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
     reinforcement_count: 0,
     contradiction_count: 0,
     superseded_by: null,
+    ...overrides
+  };
+}
+
+function createProposal(overrides: Partial<Proposal> = {}): Proposal {
+  return {
+    runtime_id: FOREIGN_PROPOSAL_ID,
+    object_kind: "proposal",
+    task_surface_ref: null,
+    expires_at: null,
+    derived_from: FOREIGN_MEMORY_ID,
+    retention_policy: "session_only",
+    proposal_id: FOREIGN_PROPOSAL_ID,
+    dossier_ref: null,
+    recommended_option_id: null,
+    proposal_options: [
+      {
+        option_id: `memory_update_${FOREIGN_PROPOSAL_ID}`,
+        option_kind: "request_confirmation",
+        preserves_protected_constraints: true,
+        dropped_candidates: [],
+        unresolved_after_apply: [],
+        requires_confirmation: true
+      }
+    ],
+    resolution_state: ProposalResolutionState.PENDING,
+    last_updated_at: "2026-05-02T00:00:00.000Z",
     ...overrides
   };
 }
