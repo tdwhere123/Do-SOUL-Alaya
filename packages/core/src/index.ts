@@ -22,6 +22,7 @@ export * from "./file-path.js";
 export * from "./global-memory-recall-port.js";
 export * from "./global-memory-recall-service.js";
 export * from "./garden-backlog-telemetry-service.js";
+export * from "./graph-contract-service.js";
 export * from "./governance-lease-service.js";
 export * from "./graph-explore-service.js";
 export * from "./green-service.js";
