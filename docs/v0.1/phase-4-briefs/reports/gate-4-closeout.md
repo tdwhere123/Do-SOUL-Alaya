@@ -60,5 +60,6 @@ health-journal entry.
 
 ## Remaining Release Work
 
-Phase 5 is now unblocked by Gate-4. Remaining release work is the Phase
-5 benchmark, graph contract, full E2E loop, and final review.
+Phase 5 is now unblocked by Gate-4. Superseded by the Phase 5
+preflight: Gate-5 release work is the graph contract, full E2E loop, and
+final review. The benchmark moved to Phase 6 / Gate-6 / v0.1.1.
