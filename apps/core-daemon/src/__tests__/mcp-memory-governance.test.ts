@@ -27,12 +27,6 @@ describe("mcp memory governance", () => {
           events.push(entry);
           return entry;
         },
-        deleteById: async (eventId) => {
-          const index = events.findIndex((event) => event.event_id === eventId);
-          if (index >= 0) {
-            events.splice(index, 1);
-          }
-        },
         queryByEntity: async (entityType, entityId) =>
           events.filter((event) => event.entity_type === entityType && event.entity_id === entityId)
       },
@@ -44,19 +38,34 @@ describe("mcp memory governance", () => {
         },
         findById: async (proposalId) => proposals.get(proposalId)?.proposal ?? null,
         findScopedById: async (proposalId) => proposals.get(proposalId) ?? null,
-        updatePendingResolution: async (proposalId, state, updatedAt) => {
-          order.push("repo:updatePendingResolution");
+        updatePendingResolutionWithEvents: async (proposalId, state, updatedAt, resolutionEvents) => {
+          order.push("repo:updatePendingResolutionWithEvents");
           const existing = proposals.get(proposalId);
           if (existing === undefined) {
             throw new Error("missing proposal");
           }
+          const storedEvents = resolutionEvents.map((event) => {
+            order.push(`event:${event.event_type}`);
+            const entry = {
+              event_id: `event-${++eventCounter}`,
+              created_at: "2026-04-30T00:00:00.000Z",
+              revision: events.filter(
+                (existingEvent) =>
+                  existingEvent.entity_type === event.entity_type &&
+                  existingEvent.entity_id === event.entity_id
+              ).length,
+              ...event
+            } satisfies EventLogEntry;
+            events.push(entry);
+            return entry;
+          });
           const updated = {
             ...existing.proposal,
             resolution_state: state,
             last_updated_at: updatedAt
           } satisfies Proposal;
           proposals.set(proposalId, { ...existing, proposal: updated });
-          return updated;
+          return { proposal: updated, events: storedEvents };
         }
       },
       runtimeNotifier: {
@@ -106,14 +115,13 @@ describe("mcp memory governance", () => {
       Phase1BEventType.SOUL_PROPOSAL_RESOLVED
     ]);
     expect(proposals.get(created.proposal_id)?.proposal.resolution_state).toBe(ProposalResolutionState.ACCEPTED);
-    expect(order.indexOf(`event:${Phase1BEventType.SOUL_REVIEW_CREATED}`)).toBeLessThan(
-      order.indexOf("repo:updatePendingResolution")
+    expect(order.indexOf("repo:updatePendingResolutionWithEvents")).toBeLessThan(
+      order.indexOf(`notify:${Phase1BEventType.SOUL_REVIEW_CREATED}`)
     );
   });
 
-  it("rolls back duplicate review events when pending-state CAS loses", async () => {
+  it("prevents duplicate durable review events when concurrent review loses pending-state CAS", async () => {
     const events: EventLogEntry[] = [];
-    const deletedEventIds: string[] = [];
     const proposal = createProposal();
     let storedProposal = proposal;
     let eventCounter = 0;
@@ -131,13 +139,6 @@ describe("mcp memory governance", () => {
           events.push(entry);
           return entry;
         },
-        deleteById: async (eventId) => {
-          deletedEventIds.push(eventId);
-          const index = events.findIndex((event) => event.event_id === eventId);
-          if (index >= 0) {
-            events.splice(index, 1);
-          }
-        },
         queryByEntity: async (entityType, entityId) =>
           events.filter((event) => event.entity_type === entityType && event.entity_id === entityId)
       },
@@ -149,18 +150,32 @@ describe("mcp memory governance", () => {
           workspace_id: "ws1",
           run_id: "run1"
         }),
-        updatePendingResolution: async (_proposalId, state, updatedAt) => {
+        updatePendingResolutionWithEvents: async (_proposalId, state, updatedAt, resolutionEvents) => {
           if (storedProposal.resolution_state !== ProposalResolutionState.PENDING) {
             throw Object.assign(new Error(`Proposal is already ${storedProposal.resolution_state}.`), {
               code: "CONFLICT"
             });
           }
+          const storedEvents = resolutionEvents.map((event) => {
+            const entry = {
+              event_id: `event-${++eventCounter}`,
+              created_at: "2026-04-30T00:00:00.000Z",
+              revision: events.filter(
+                (existingEvent) =>
+                  existingEvent.entity_type === event.entity_type &&
+                  existingEvent.entity_id === event.entity_id
+              ).length,
+              ...event
+            } satisfies EventLogEntry;
+            events.push(entry);
+            return entry;
+          });
           storedProposal = {
             ...storedProposal,
             resolution_state: state,
             last_updated_at: updatedAt
           };
-          return storedProposal;
+          return { proposal: storedProposal, events: storedEvents };
         }
       },
       runtimeNotifier: {
@@ -196,7 +211,6 @@ describe("mcp memory governance", () => {
       Phase1BEventType.SOUL_REVIEW_COMPLETED,
       Phase1BEventType.SOUL_PROPOSAL_RESOLVED
     ]);
-    expect(deletedEventIds).toHaveLength(0);
     expect(notifyEntry).toHaveBeenCalledTimes(3);
     expect(storedProposal.resolution_state).toBe(ProposalResolutionState.ACCEPTED);
   });
@@ -217,9 +231,6 @@ describe("mcp memory governance", () => {
           events.push(entry);
           return entry;
         },
-        deleteById: async () => {
-          throw new Error("delete should not run for a scope mismatch");
-        },
         queryByEntity: async () => events
       },
       proposalRepo: {
@@ -230,7 +241,7 @@ describe("mcp memory governance", () => {
           workspace_id: "ws2",
           run_id: "run2"
         }),
-        updatePendingResolution: async () => {
+        updatePendingResolutionWithEvents: async () => {
           throw new Error("update should not run for a scope mismatch");
         }
       },

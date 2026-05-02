@@ -24,9 +24,10 @@ import type {
 
 export interface McpMemoryProposalWorkflowEventLogRepo {
   append(event: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
-  deleteById(eventId: string): Promise<void>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
 }
+
+type ProposalResolutionEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
 export interface McpMemoryProposalWorkflowProposalRepo {
   create(input: {
@@ -40,11 +41,15 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     readonly workspace_id: string;
     readonly run_id: string | null;
   }> | null>;
-  updatePendingResolution(
+  updatePendingResolutionWithEvents(
     proposalId: string,
     state: Proposal["resolution_state"],
-    updatedAt: string
-  ): Promise<Readonly<Proposal>>;
+    updatedAt: string,
+    events: readonly ProposalResolutionEventInput[]
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly events: readonly EventLogEntry[];
+  }>>;
 }
 
 export interface McpMemoryProposalWorkflowRuntimeNotifier {
@@ -145,38 +150,28 @@ export function createMcpMemoryProposalWorkflow(
       input.verdict === "accept"
         ? ProposalResolutionState.ACCEPTED
         : ProposalResolutionState.REJECTED;
-    const next = createRevisionCursor(await nextRevision(proposal.proposal_id));
-
-    const appendedEvents: EventLogEntry[] = [];
-    let reviewCreated: EventLogEntry;
-    let reviewCompleted: EventLogEntry;
-    let resolved: EventLogEntry;
-    let updated: Readonly<Proposal>;
-
-    try {
-      reviewCreated = await appendAndTrack(appendedEvents, {
+    const reviewEvents: ProposalResolutionEventInput[] = [
+      {
         event_type: Phase1BEventType.SOUL_REVIEW_CREATED,
         entity_type: "proposal",
         entity_id: proposal.proposal_id,
         workspace_id: context.workspaceId,
         run_id: context.runId,
         caused_by: context.agentTarget,
-        revision: next(),
         payload_json: SoulReviewCreatedPayloadSchema.parse({
           object_id: proposal.runtime_id,
           object_kind: proposal.object_kind,
           workspace_id: context.workspaceId,
           run_id: context.runId
         })
-      });
-      reviewCompleted = await appendAndTrack(appendedEvents, {
+      },
+      {
         event_type: Phase1BEventType.SOUL_REVIEW_COMPLETED,
         entity_type: "proposal",
         entity_id: proposal.proposal_id,
         workspace_id: context.workspaceId,
         run_id: context.runId,
         caused_by: context.agentTarget,
-        revision: next(),
         payload_json: SoulReviewCompletedPayloadSchema.parse({
           object_id: proposal.runtime_id,
           object_kind: proposal.object_kind,
@@ -189,15 +184,14 @@ export function createMcpMemoryProposalWorkflow(
           evidence_refs: null,
           occurred_at: reviewedAt
         })
-      });
-      resolved = await appendAndTrack(appendedEvents, {
+      },
+      {
         event_type: Phase1BEventType.SOUL_PROPOSAL_RESOLVED,
         entity_type: "proposal",
         entity_id: proposal.proposal_id,
         workspace_id: context.workspaceId,
         run_id: context.runId,
         caused_by: context.agentTarget,
-        revision: next(),
         payload_json: SoulProposalResolvedPayloadSchema.parse({
           object_id: proposal.runtime_id,
           object_kind: proposal.object_kind,
@@ -210,32 +204,30 @@ export function createMcpMemoryProposalWorkflow(
           evidence_refs: null,
           occurred_at: reviewedAt
         })
-      });
+      }
+    ];
+    let resolved: Readonly<{
+      readonly proposal: Readonly<Proposal>;
+      readonly events: readonly EventLogEntry[];
+    }>;
 
-      updated = await deps.proposalRepo.updatePendingResolution(proposal.proposal_id, toState, reviewedAt);
+    try {
+      resolved = await deps.proposalRepo.updatePendingResolutionWithEvents(
+        proposal.proposal_id,
+        toState,
+        reviewedAt,
+        reviewEvents
+      );
     } catch (error) {
-      await rollbackAppendedEvents(appendedEvents);
       throw normalizeResolutionError(error);
     }
-    await deps.runtimeNotifier.notifyEntry(reviewCreated);
-    await deps.runtimeNotifier.notifyEntry(reviewCompleted);
-    await deps.runtimeNotifier.notifyEntry(resolved);
-    return { proposal_id: updated.proposal_id, resolution_state: updated.resolution_state };
-  }
-
-  async function appendAndTrack(
-    appendedEvents: EventLogEntry[],
-    event: Omit<EventLogEntry, "event_id" | "created_at">
-  ): Promise<EventLogEntry> {
-    const entry = await deps.eventLogRepo.append(event);
-    appendedEvents.push(entry);
-    return entry;
-  }
-
-  async function rollbackAppendedEvents(appendedEvents: readonly EventLogEntry[]): Promise<void> {
-    for (const entry of [...appendedEvents].reverse()) {
-      await deps.eventLogRepo.deleteById(entry.event_id);
+    for (const event of resolved.events) {
+      await deps.runtimeNotifier.notifyEntry(event);
     }
+    return {
+      proposal_id: resolved.proposal.proposal_id,
+      resolution_state: resolved.proposal.resolution_state
+    };
   }
 
   async function nextRevision(proposalId: string): Promise<number> {
@@ -277,11 +269,6 @@ function assertProposalContext(
   if (scopedProposal.workspace_id !== workspaceId || scopedProposal.run_id !== runId) {
     throw createWorkflowError("NOT_FOUND", "Proposal not found in current workspace/run context.");
   }
-}
-
-function createRevisionCursor(firstRevision: number): () => number {
-  let revision = firstRevision;
-  return () => revision++;
 }
 
 function createWorkflowError(code: "NOT_FOUND" | "VALIDATION", message: string): Error & { readonly code: string } {
