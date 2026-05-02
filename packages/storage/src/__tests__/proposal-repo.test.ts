@@ -182,11 +182,39 @@ describe("SqliteProposalRepo", () => {
     expect(updated.last_updated_at).toBe("2026-03-21T03:00:00.000Z");
   });
 
+  it("updates pending proposal resolution only once", async () => {
+    const { repo } = createRepo();
+    const proposal = createProposal();
+    await repo.create({ proposal, workspace_id: "workspace-1", run_id: "run-1" });
+
+    const updated = await repo.updatePendingResolution(
+      proposal.proposal_id,
+      "accepted",
+      "2026-03-21T03:00:00.000Z"
+    );
+
+    expect(updated.resolution_state).toBe("accepted");
+    await expect(
+      repo.updatePendingResolution(proposal.proposal_id, "rejected", "2026-03-21T04:00:00.000Z")
+    ).rejects.toMatchObject({
+      code: "CONFLICT"
+    });
+    await expect(repo.findById(proposal.proposal_id)).resolves.toMatchObject({
+      resolution_state: "accepted",
+      last_updated_at: "2026-03-21T03:00:00.000Z"
+    });
+  });
+
   it("throws not found when updating a missing proposal", async () => {
     const { repo } = createRepo();
 
     await expect(
       repo.updateResolution("missing-proposal", "accepted", "2026-03-21T03:00:00.000Z")
+    ).rejects.toMatchObject({
+      code: "NOT_FOUND"
+    });
+    await expect(
+      repo.updatePendingResolution("missing-proposal", "accepted", "2026-03-21T03:00:00.000Z")
     ).rejects.toMatchObject({
       code: "NOT_FOUND"
     });

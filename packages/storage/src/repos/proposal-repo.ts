@@ -33,6 +33,11 @@ export interface ProposalRepo {
     state: ProposalResolutionState,
     updatedAt: string
   ): Promise<Readonly<Proposal>>;
+  updatePendingResolution(
+    proposalId: string,
+    state: ProposalResolutionState,
+    updatedAt: string
+  ): Promise<Readonly<Proposal>>;
 }
 
 const PROPOSAL_SELECT_COLUMNS = `
@@ -77,6 +82,7 @@ export class SqliteProposalRepo implements ProposalRepo {
   private readonly findPendingStatement;
   private readonly findPendingByRunIdStatement;
   private readonly updateResolutionStatement;
+  private readonly updatePendingResolutionStatement;
 
   public constructor(private readonly db: StorageDatabase) {
     this.createStatement = db.connection.prepare(`
@@ -131,6 +137,12 @@ export class SqliteProposalRepo implements ProposalRepo {
       UPDATE proposals
       SET resolution_state = ?, last_updated_at = ?
       WHERE proposal_id = ?
+    `);
+
+    this.updatePendingResolutionStatement = db.connection.prepare(`
+      UPDATE proposals
+      SET resolution_state = ?, last_updated_at = ?
+      WHERE proposal_id = ? AND resolution_state = 'pending'
     `);
   }
 
@@ -265,6 +277,50 @@ export class SqliteProposalRepo implements ProposalRepo {
       }
 
       throw new StorageError("QUERY_FAILED", `Failed to update proposal ${parsedProposalId}.`, error);
+    }
+  }
+
+  public async updatePendingResolution(
+    proposalId: string,
+    state: ProposalResolutionState,
+    updatedAt: string
+  ): Promise<Readonly<Proposal>> {
+    const parsedProposalId = parseProposalId(proposalId);
+    const parsedState = parseProposalResolutionState(state);
+    const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+
+    try {
+      const result = this.updatePendingResolutionStatement.run(parsedState, parsedUpdatedAt, parsedProposalId);
+
+      if (result.changes === 0) {
+        const existing = await this.findById(parsedProposalId);
+        if (existing === null) {
+          throw new StorageError("NOT_FOUND", `Proposal ${parsedProposalId} was not found.`);
+        }
+
+        throw new StorageError(
+          "CONFLICT",
+          `Proposal ${parsedProposalId} is already ${existing.resolution_state}.`
+        );
+      }
+
+      const updated = await this.findById(parsedProposalId);
+
+      if (updated === null) {
+        throw new StorageError("NOT_FOUND", `Proposal ${parsedProposalId} was not found after update.`);
+      }
+
+      return updated;
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to update pending proposal ${parsedProposalId}.`,
+        error
+      );
     }
   }
 }

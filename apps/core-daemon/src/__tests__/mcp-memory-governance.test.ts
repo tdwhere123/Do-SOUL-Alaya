@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   Phase1BEventType,
   ProposalResolutionState,
@@ -27,6 +27,12 @@ describe("mcp memory governance", () => {
           events.push(entry);
           return entry;
         },
+        deleteById: async (eventId) => {
+          const index = events.findIndex((event) => event.event_id === eventId);
+          if (index >= 0) {
+            events.splice(index, 1);
+          }
+        },
         queryByEntity: async (entityType, entityId) =>
           events.filter((event) => event.entity_type === entityType && event.entity_id === entityId)
       },
@@ -38,8 +44,8 @@ describe("mcp memory governance", () => {
         },
         findById: async (proposalId) => proposals.get(proposalId)?.proposal ?? null,
         findScopedById: async (proposalId) => proposals.get(proposalId) ?? null,
-        updateResolution: async (proposalId, state, updatedAt) => {
-          order.push("repo:updateResolution");
+        updatePendingResolution: async (proposalId, state, updatedAt) => {
+          order.push("repo:updatePendingResolution");
           const existing = proposals.get(proposalId);
           if (existing === undefined) {
             throw new Error("missing proposal");
@@ -101,8 +107,98 @@ describe("mcp memory governance", () => {
     ]);
     expect(proposals.get(created.proposal_id)?.proposal.resolution_state).toBe(ProposalResolutionState.ACCEPTED);
     expect(order.indexOf(`event:${Phase1BEventType.SOUL_REVIEW_CREATED}`)).toBeLessThan(
-      order.indexOf("repo:updateResolution")
+      order.indexOf("repo:updatePendingResolution")
     );
+  });
+
+  it("rolls back duplicate review events when pending-state CAS loses", async () => {
+    const events: EventLogEntry[] = [];
+    const deletedEventIds: string[] = [];
+    const proposal = createProposal();
+    let storedProposal = proposal;
+    let eventCounter = 0;
+    const notifyEntry = vi.fn(async () => {});
+    const workflow = createMcpMemoryProposalWorkflow({
+      now: () => "2026-04-30T00:00:00.000Z",
+      generateObjectId: () => proposal.proposal_id,
+      eventLogRepo: {
+        append: async (input) => {
+          const entry = {
+            event_id: `event-${++eventCounter}`,
+            created_at: "2026-04-30T00:00:00.000Z",
+            ...input
+          } satisfies EventLogEntry;
+          events.push(entry);
+          return entry;
+        },
+        deleteById: async (eventId) => {
+          deletedEventIds.push(eventId);
+          const index = events.findIndex((event) => event.event_id === eventId);
+          if (index >= 0) {
+            events.splice(index, 1);
+          }
+        },
+        queryByEntity: async (entityType, entityId) =>
+          events.filter((event) => event.entity_type === entityType && event.entity_id === entityId)
+      },
+      proposalRepo: {
+        create: async () => proposal,
+        findById: async () => storedProposal,
+        findScopedById: async () => ({
+          proposal: storedProposal,
+          workspace_id: "ws1",
+          run_id: "run1"
+        }),
+        updatePendingResolution: async (_proposalId, state, updatedAt) => {
+          if (storedProposal.resolution_state !== ProposalResolutionState.PENDING) {
+            throw Object.assign(new Error(`Proposal is already ${storedProposal.resolution_state}.`), {
+              code: "CONFLICT"
+            });
+          }
+          storedProposal = {
+            ...storedProposal,
+            resolution_state: state,
+            last_updated_at: updatedAt
+          };
+          return storedProposal;
+        }
+      },
+      runtimeNotifier: {
+        notifyEntry
+      }
+    });
+
+    const results = await Promise.allSettled([
+      workflow.reviewMemoryProposal(
+        {
+          proposal_id: proposal.proposal_id,
+          verdict: "accept",
+          reason: "first reviewer"
+        },
+        { workspaceId: "ws1", runId: "run1", agentTarget: "codex" }
+      ),
+      workflow.reviewMemoryProposal(
+        {
+          proposal_id: proposal.proposal_id,
+          verdict: "reject",
+          reason: "duplicate reviewer"
+        },
+        { workspaceId: "ws1", runId: "run1", agentTarget: "codex" }
+      )
+    ]);
+
+    expect(results.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"]);
+    expect(results.find((result) => result.status === "rejected")).toMatchObject({
+      reason: { code: "VALIDATION" }
+    });
+    expect(events.map((event) => event.event_type)).toEqual([
+      Phase1BEventType.SOUL_REVIEW_CREATED,
+      Phase1BEventType.SOUL_REVIEW_COMPLETED,
+      Phase1BEventType.SOUL_PROPOSAL_RESOLVED
+    ]);
+    expect(deletedEventIds).toHaveLength(0);
+    expect(notifyEntry).toHaveBeenCalledTimes(3);
+    expect(storedProposal.resolution_state).toBe(ProposalResolutionState.ACCEPTED);
   });
 
   it("rejects proposal reviews outside the stored workspace and run context", async () => {
@@ -121,6 +217,9 @@ describe("mcp memory governance", () => {
           events.push(entry);
           return entry;
         },
+        deleteById: async () => {
+          throw new Error("delete should not run for a scope mismatch");
+        },
         queryByEntity: async () => events
       },
       proposalRepo: {
@@ -131,7 +230,7 @@ describe("mcp memory governance", () => {
           workspace_id: "ws2",
           run_id: "run2"
         }),
-        updateResolution: async () => {
+        updatePendingResolution: async () => {
           throw new Error("update should not run for a scope mismatch");
         }
       },
