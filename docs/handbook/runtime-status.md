@@ -23,7 +23,7 @@ each Phase Gate.
 | Phase 2 | Wave 2: storage repos batches + core services + Garden + security defense | **done** | Gate-2 passed |
 | Phase 3 | Wave 3: foundation helpers, ConversationService, MCP discovery, run lifecycle, misc services, core barrel | **done** | Gate-3 passed |
 | Phase 4 | Wave 4: Core daemon, routes, MCP server transport, real profile mutation, CLI bridge, secrets, Inspector server, Inspector frontend | MCP memory surface `mcp-consumable`; Inspector config-write and trust delivery/usage durability fixes verified | Gate-4 passed 2026-05-01 |
-| Phase 5 | Wave 5: full E2E, benchmark, graph contract, final review | not-started | Gate-5 (v0.1 release) |
+| Phase 5 | Wave 5: full E2E, graph contract, final review | **done**: graph contract `schema-ready`; release E2E `live-event-ready`; final review `mcp-consumable` | Gate-5 passed 2026-05-02 |
 
 ## Subsystem Readiness (target = v0.1 release)
 
@@ -68,13 +68,13 @@ each Phase Gate.
 | MCP tool surface | `mcp-consumable` via single-daemon attached-agent MCP harness | `mcp-consumable` | P3-mcp-discovery + P4-mcp-tooling + P4-mcp-memory-tools + P4-mcp-server + Gate-4 proof harness |
 | Core daemon | `implementation-ready` | `live-event-ready` | P4-daemon-skeleton + P4-daemon-startup-ordering + P4-sse-strip |
 | Profile mutation (Codex/Claude attach) | `implementation-ready` | `cli-consumable` | P4-profile-mutation |
-| CLI commands (doctor / install / attach / status / tools / inspect / detach) | `implementation-ready` | `cli-consumable` | P4-cli-bridge + P4-mcp-memory-tools + P4-cli-* |
+| CLI commands (doctor / install / attach / status / tools / inspect / detach) | mixed: install, attach, status, doctor, and tools list/call are proven by release E2E; inspect/detach remain covered by targeted command tests only | `cli-consumable` | P4-cli-bridge + P4-mcp-memory-tools + P4-cli-* + P5-e2e |
 | Trust state delivery / usage | `live-event-ready`; SQL-backed delivery and usage records survive daemon restart | `live-event-ready` | P4-trust-state + #BL-015 repair |
 | Secret refs (env / local-file / paste-to-file) | `live-event-ready`; Inspector writes proxy daemon runtime config and are audited through EventLog | `live-event-ready` | P4-secrets + #BL-019 repair |
-| Operations (backup, export, import) | `implementation-ready` | `cli-consumable` | P4-operations |
+| Operations (backup, export, import) | mixed: backup/export are proven by release E2E; import remains covered by targeted operations tests only | `cli-consumable` | P4-operations + P5-e2e |
 | Memory Inspector | `live-event-ready`; server/frontend exist, token-gated routes pass, and Provider/Config writes proxy daemon runtime config | `live-event-ready` for the inspector surface | P4-inspector-server + P4-cli-inspect + P4-inspector-frontend + #BL-019 repair |
 | Marketing benchmark harness | `not-started` | `implementation-ready` | P6-bench-adapter + P6-bench-harness + P6-bench-baselines + P6-bench-resume + P6-bench-readme (Phase 6, post-v0.1.0; ships in v0.1.1) |
-| Graph inspector data contract | `not-started` | `schema-ready` | P5-graph-contract |
+| Graph inspector data contract | `schema-ready`; read-only contract derives from active PathRelation data, no live route | `schema-ready` | P5-graph-contract |
 
 ## Known Wiring Gaps
 
@@ -95,9 +95,22 @@ lifetime using the MCP SDK in-memory transport.
 Remaining non-blocking follow-up after Gate-4: none for the resolved
 trust-state delivery / usage and counter restart-stability repairs.
 
-Remaining v0.1 release work is Phase 5: benchmark fixtures, graph
-contract, full E2E, final review, and the post-port hygiene sweep only
-after the final v0.1 port card lands.
+P5-graph-contract is `schema-ready`: `GraphContractService` derives a
+read-only path graph payload from active PathRelation data, with no live
+daemon, MCP, CLI, or Inspector route. P5-e2e is `live-event-ready`: the
+release loop proves install, attach, MCP memory tools, CLI tools parity,
+candidate signal, proposal reject, Garden pass, status/doctor, backup, and
+export in one daemon lifetime. P5-final-review is `mcp-consumable`: the
+four-perspective review/fix loop closed with zero Blocking / Important
+findings for the MCP/CLI release path. Gate-5 / v0.1.0 passed on
+2026-05-02.
+
+The post-port hygiene sweep tracked by `#BL-017` is now startable as a
+dedicated post-v0.1 hygiene wave and was not executed inside Phase 5.
+Benchmark fixtures belong to Phase 6 / Gate-6 / v0.1.1 and are not a
+Gate-5 requirement. The older HTTP proposal review route transaction
+hardening is tracked by `#BL-024`; it is not part of Gate-5 MCP/CLI
+release acceptance.
 
 ## Gate Definitions
 
@@ -120,6 +133,7 @@ after the final v0.1 port card lands.
   evidence. `mcp-consumable` requires this attached-agent proof, not
   P4-mcp-tooling alone. Current proof:
   `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon gate4-attached-agent-mcp-proof`.
-- **Gate-5 (v0.1 release)**: Gate-4 plus benchmark fixture run, graph
-  contract derived from real PathRelation data, final multi-lens
-  review with zero Blocking / Important findings.
+- **Gate-5 (v0.1.0 release)**: Gate-4 plus graph contract derived
+  from real PathRelation data, full E2E proof, and final multi-lens
+  review with zero Blocking / Important findings. Benchmark fixtures
+  are Phase 6 / Gate-6 / v0.1.1 scope.

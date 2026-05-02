@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { RetentionPolicy, type Proposal } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../db.js";
-import { SqliteProposalRepo } from "../repos/proposal-repo.js";
+import { Phase1BEventType, RetentionPolicy, type Proposal } from "@do-soul/alaya-protocol";
+import { initDatabase, type StorageDatabase } from "../db.js";
+import { SqliteProposalRepo, type ProposalResolutionEventInput } from "../repos/proposal-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
@@ -54,6 +54,11 @@ describe("SqliteProposalRepo", () => {
     ).resolves.toEqual(proposal);
 
     await expect(repo.findById(proposal.proposal_id)).resolves.toEqual(proposal);
+    await expect(repo.findScopedById(proposal.proposal_id)).resolves.toEqual({
+      proposal,
+      workspace_id: "workspace-1",
+      run_id: "run-1"
+    });
   });
 
   it("lists all and pending proposals by workspace", async () => {
@@ -177,14 +182,91 @@ describe("SqliteProposalRepo", () => {
     expect(updated.last_updated_at).toBe("2026-03-21T03:00:00.000Z");
   });
 
-  it("throws not found when updating a missing proposal", async () => {
+  it("updates pending proposal resolution only once", async () => {
     const { repo } = createRepo();
+    const proposal = createProposal();
+    await repo.create({ proposal, workspace_id: "workspace-1", run_id: "run-1" });
+
+    const updated = await repo.updatePendingResolution(
+      proposal.proposal_id,
+      "accepted",
+      "2026-03-21T03:00:00.000Z"
+    );
+
+    expect(updated.resolution_state).toBe("accepted");
+    await expect(
+      repo.updatePendingResolution(proposal.proposal_id, "rejected", "2026-03-21T04:00:00.000Z")
+    ).rejects.toMatchObject({
+      code: "CONFLICT"
+    });
+    await expect(repo.findById(proposal.proposal_id)).resolves.toMatchObject({
+      resolution_state: "accepted",
+      last_updated_at: "2026-03-21T03:00:00.000Z"
+    });
+  });
+
+  it("atomically stores pending proposal resolution with review events", async () => {
+    const { repo, database } = createRepo();
+    const proposal = createProposal();
+    await repo.create({ proposal, workspace_id: "workspace-1", run_id: "run-1" });
+
+    const result = await repo.updatePendingResolutionWithEvents(
+      proposal.proposal_id,
+      "accepted",
+      "2026-03-21T03:00:00.000Z",
+      createReviewEvents(proposal)
+    );
+
+    expect(result.proposal.resolution_state).toBe("accepted");
+    expect(result.events.map((event) => event.event_type)).toEqual([
+      Phase1BEventType.SOUL_REVIEW_CREATED,
+      Phase1BEventType.SOUL_REVIEW_COMPLETED,
+      Phase1BEventType.SOUL_PROPOSAL_RESOLVED
+    ]);
+    expect(countProposalEvents(database, proposal.proposal_id)).toBe(3);
+
+    await expect(
+      repo.updatePendingResolutionWithEvents(
+        proposal.proposal_id,
+        "rejected",
+        "2026-03-21T04:00:00.000Z",
+        createReviewEvents(proposal)
+      )
+    ).rejects.toMatchObject({
+      code: "CONFLICT"
+    });
+    expect(countProposalEvents(database, proposal.proposal_id)).toBe(3);
+    await expect(repo.findById(proposal.proposal_id)).resolves.toMatchObject({
+      resolution_state: "accepted",
+      last_updated_at: "2026-03-21T03:00:00.000Z"
+    });
+  });
+
+  it("throws not found when updating a missing proposal", async () => {
+    const { repo, database } = createRepo();
+    const proposal = createProposal();
 
     await expect(
       repo.updateResolution("missing-proposal", "accepted", "2026-03-21T03:00:00.000Z")
     ).rejects.toMatchObject({
       code: "NOT_FOUND"
     });
+    await expect(
+      repo.updatePendingResolution("missing-proposal", "accepted", "2026-03-21T03:00:00.000Z")
+    ).rejects.toMatchObject({
+      code: "NOT_FOUND"
+    });
+    await expect(
+      repo.updatePendingResolutionWithEvents(
+        "missing-proposal",
+        "accepted",
+        "2026-03-21T03:00:00.000Z",
+        createReviewEvents(proposal)
+      )
+    ).rejects.toMatchObject({
+      code: "NOT_FOUND"
+    });
+    expect(countProposalEvents(database, proposal.proposal_id)).toBe(0);
   });
 
   it("returns immutable proposals", async () => {
@@ -201,11 +283,66 @@ describe("SqliteProposalRepo", () => {
   });
 });
 
-function createRepo(): { readonly repo: SqliteProposalRepo } {
+function createRepo(): { readonly repo: SqliteProposalRepo; readonly database: StorageDatabase } {
   const database = initDatabase({ filename: ":memory:" });
   databases.add(database);
 
   return {
-    repo: new SqliteProposalRepo(database)
+    repo: new SqliteProposalRepo(database),
+    database
   };
+}
+
+function createReviewEvents(proposal: Proposal): readonly ProposalResolutionEventInput[] {
+  return [
+    {
+      event_type: Phase1BEventType.SOUL_REVIEW_CREATED,
+      entity_type: "proposal",
+      entity_id: proposal.proposal_id,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      caused_by: "codex",
+      payload_json: {
+        object_id: proposal.runtime_id,
+        object_kind: proposal.object_kind,
+        workspace_id: "workspace-1",
+        run_id: "run-1"
+      }
+    },
+    {
+      event_type: Phase1BEventType.SOUL_REVIEW_COMPLETED,
+      entity_type: "proposal",
+      entity_id: proposal.proposal_id,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      caused_by: "codex",
+      payload_json: {
+        object_id: proposal.runtime_id,
+        object_kind: proposal.object_kind,
+        from_state: "pending",
+        to_state: "accepted"
+      }
+    },
+    {
+      event_type: Phase1BEventType.SOUL_PROPOSAL_RESOLVED,
+      entity_type: "proposal",
+      entity_id: proposal.proposal_id,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      caused_by: "codex",
+      payload_json: {
+        object_id: proposal.runtime_id,
+        object_kind: proposal.object_kind,
+        from_state: "pending",
+        to_state: "accepted"
+      }
+    }
+  ];
+}
+
+function countProposalEvents(database: StorageDatabase, proposalId: string): number {
+  const row = database.connection
+    .prepare("SELECT COUNT(*) AS count FROM event_log WHERE entity_type = 'proposal' AND entity_id = ?")
+    .get(proposalId) as { readonly count: number };
+  return row.count;
 }

@@ -4,6 +4,15 @@ import {
   NonEmptyStringSchema,
   NonNegativeIntSchema
 } from "../schema-primitives.js";
+import { PathGraphSnapshotSchema } from "./path-graph-snapshot.js";
+import {
+  DirectionBiasSchema,
+  PathAnchorRefSchema,
+  PathEffectVectorSchema,
+  PathGovernanceClassSchema,
+  PathRelationSchema,
+  StabilityClassSchema
+} from "./path-relation.js";
 
 const soulGraphNodeKindValues = ["signal", "memory", "scope", "projection"] as const;
 const soulGraphEdgeKindValues = ["references", "belongs_to", "derived_from"] as const;
@@ -53,6 +62,84 @@ export const SoulGraphSchema = z
     truncated: z.boolean(),
     node_total: NonNegativeIntSchema,
     edge_total: NonNegativeIntSchema
+  })
+  .strict()
+  .readonly();
+
+const soulPathGraphTrendDirectionValues = ["growing", "shrinking", "stable"] as const;
+const soulPathGraphStrengthTrendDirectionValues = ["increasing", "decreasing", "stable"] as const;
+
+export const SoulPathGraphTrendDirectionSchema = z.enum(soulPathGraphTrendDirectionValues);
+export const SoulPathGraphStrengthTrendDirectionSchema = z.enum(
+  soulPathGraphStrengthTrendDirectionValues
+);
+
+export const SoulPathGraphNodeSchema = z
+  .object({
+    id: NonEmptyStringSchema,
+    anchor: PathAnchorRefSchema,
+    label: NonEmptyStringSchema,
+    out_degree: NonNegativeIntSchema,
+    in_degree: NonNegativeIntSchema
+  })
+  .strict()
+  .readonly();
+
+export const SoulPathGraphEdgeSchema = z
+  .object({
+    id: NonEmptyStringSchema,
+    source_id: NonEmptyStringSchema,
+    target_id: NonEmptyStringSchema,
+    source_anchor: PathAnchorRefSchema,
+    target_anchor: PathAnchorRefSchema,
+    relation_kind: NonEmptyStringSchema,
+    strength: z.number().finite(),
+    direction_bias: DirectionBiasSchema,
+    stability_class: StabilityClassSchema,
+    governance_class: PathGovernanceClassSchema,
+    effect_vector: PathEffectVectorSchema,
+    relation: PathRelationSchema,
+    created_at: IsoDatetimeStringSchema,
+    updated_at: IsoDatetimeStringSchema
+  })
+  .strict()
+  .readonly();
+
+export const SoulPathGraphTopologySchema = z
+  .object({
+    total_nodes: NonNegativeIntSchema,
+    total_edges: NonNegativeIntSchema,
+    max_out_degree: NonNegativeIntSchema,
+    max_in_degree: NonNegativeIntSchema,
+    avg_degree: z.number().finite().nonnegative(),
+    strongly_connected_components: NonNegativeIntSchema
+  })
+  .strict()
+  .readonly();
+
+export const SoulPathGraphSnapshotTrendSchema = z
+  .object({
+    snapshot_count: NonNegativeIntSchema,
+    latest_snapshot_id: NonEmptyStringSchema,
+    baseline_snapshot_id: NonEmptyStringSchema,
+    latest_snapshot_at: IsoDatetimeStringSchema,
+    baseline_snapshot_at: IsoDatetimeStringSchema,
+    edge_count_trend: SoulPathGraphTrendDirectionSchema,
+    avg_strength_trend: SoulPathGraphStrengthTrendDirectionSchema,
+    latest_snapshot: PathGraphSnapshotSchema
+  })
+  .strict()
+  .readonly();
+
+export const SoulPathGraphContractSchema = z
+  .object({
+    contract_version: z.literal(1),
+    workspace_id: NonEmptyStringSchema,
+    generated_at: IsoDatetimeStringSchema,
+    nodes: z.array(SoulPathGraphNodeSchema).readonly(),
+    edges: z.array(SoulPathGraphEdgeSchema).readonly(),
+    topology: SoulPathGraphTopologySchema,
+    snapshot_trend: SoulPathGraphSnapshotTrendSchema.optional()
   })
   .strict()
   .readonly();
@@ -110,3 +197,12 @@ export type SoulGraphOriginPlane = z.infer<typeof SoulGraphOriginPlaneSchema>;
 export type SoulGraphNode = z.infer<typeof SoulGraphNodeSchema>;
 export type SoulGraphEdge = z.infer<typeof SoulGraphEdgeSchema>;
 export type SoulGraph = z.infer<typeof SoulGraphSchema>;
+export type SoulPathGraphTrendDirection = z.infer<typeof SoulPathGraphTrendDirectionSchema>;
+export type SoulPathGraphStrengthTrendDirection = z.infer<
+  typeof SoulPathGraphStrengthTrendDirectionSchema
+>;
+export type SoulPathGraphNode = z.infer<typeof SoulPathGraphNodeSchema>;
+export type SoulPathGraphEdge = z.infer<typeof SoulPathGraphEdgeSchema>;
+export type SoulPathGraphTopology = z.infer<typeof SoulPathGraphTopologySchema>;
+export type SoulPathGraphSnapshotTrend = z.infer<typeof SoulPathGraphSnapshotTrendSchema>;
+export type SoulPathGraphContract = z.infer<typeof SoulPathGraphContractSchema>;

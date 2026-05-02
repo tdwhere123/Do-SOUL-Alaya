@@ -61,6 +61,7 @@ export {
 export {
   SqliteProposalRepo,
   type ProposalCreateInput,
+  type ProposalResolutionEventInput,
   type ProposalRepo
 } from "./repos/proposal-repo.js";
 export {

@@ -3,7 +3,7 @@
 ## Scope Compliance
 
 - Card: `docs/v0.1/phase-4-briefs/task-p4-svc-global-recall-cache.md`
-- Port mode: `requires-redesign`
+- Port mode: `adapt-and-port`
 - Source / target: `packages/core/src/global-memory-recall-service.ts`
   cache invalidation wiring through the Phase 4 runtime notifier.
 - Commit: `7813749`.

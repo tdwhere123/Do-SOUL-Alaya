@@ -6,6 +6,7 @@ import {
   buildOperationAuditPath,
   type AlayaConfigPaths
 } from "./cli/config-files.js";
+import { parseStorageDbPathFromToml, resolveConfiguredDatabasePath } from "./storage-config.js";
 
 export type OperationName = "backup" | "export" | "import";
 
@@ -146,8 +147,21 @@ export function createAlayaOperationsService(
 
       const restoredPaths: string[] = [];
       try {
+        const restoreDbPath =
+          bundle.storage.db_base64 === null
+            ? null
+            : await resolveConfiguredDatabasePath(deps.configPaths, {
+                env: {},
+                fallbackPath: path.join(deps.configPaths.configDir, "alaya.db")
+              });
         if (bundle.config.alaya_toml !== null) {
-          await writeTextAtomic(deps.configPaths.tomlPath, bundle.config.alaya_toml, 0o600);
+          await writeTextAtomic(
+            deps.configPaths.tomlPath,
+            restoreDbPath === null
+              ? bundle.config.alaya_toml
+              : replaceStorageDbPathInToml(bundle.config.alaya_toml, restoreDbPath),
+            0o600
+          );
           restoredPaths.push(deps.configPaths.tomlPath);
         }
         if (bundle.config.env_file !== null) {
@@ -156,10 +170,7 @@ export function createAlayaOperationsService(
         }
 
         if (bundle.storage.db_base64 !== null) {
-          const dbPath = bundle.storage.db_path;
-          if (!dbPath) {
-            throw new AlayaOperationError("DATAERR", "Bundle contains DB payload but no db_path.");
-          }
+          const dbPath = restoreDbPath!;
           const dbBytes = Buffer.from(bundle.storage.db_base64, "base64");
           await writeBufferAtomic(dbPath, dbBytes, 0o600);
           restoredPaths.push(dbPath);
@@ -259,7 +270,7 @@ async function buildBundle(
 ): Promise<OperationsBundle> {
   const tomlContent = await readOptionalUtf8(configPaths.tomlPath);
   const envContent = await readOptionalUtf8(configPaths.envPath);
-  const dbPath = tomlContent === null ? null : parseDbPathFromToml(tomlContent);
+  const dbPath = tomlContent === null ? null : parseStorageDbPathFromToml(tomlContent);
   const dbBytes =
     dbPath === null ? null : await readOptionalBuffer(dbPath);
 
@@ -410,45 +421,6 @@ async function readOptionalBuffer(filePath: string): Promise<Buffer | null> {
   }
 }
 
-function parseDbPathFromToml(tomlContent: string): string | null {
-  const lines = tomlContent.split(/\r?\n/u);
-  let section: string | null = null;
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (line.length === 0 || line.startsWith("#")) {
-      continue;
-    }
-    const sectionMatch = line.match(/^\[(.+)\]$/u);
-    if (sectionMatch) {
-      section = sectionMatch[1]?.trim() ?? null;
-      continue;
-    }
-
-    if (section !== "storage") {
-      continue;
-    }
-
-    const kvMatch = line.match(/^db_path\s*=\s*(.+)$/u);
-    if (!kvMatch || kvMatch[1] === undefined) {
-      continue;
-    }
-    return parseTomlStringLiteral(kvMatch[1]);
-  }
-  return null;
-}
-
-function parseTomlStringLiteral(rawValue: string): string | null {
-  const trimmed = rawValue.trim();
-  if (!trimmed.startsWith("\"") || !trimmed.endsWith("\"")) {
-    return null;
-  }
-  const body = trimmed.slice(1, -1);
-  return body
-    .replaceAll("\\\\", "\\")
-    .replaceAll("\\\"", "\"")
-    .replaceAll("\\n", "\n");
-}
-
 function nullableString(value: unknown, field: string): string | null {
   if (value === null) {
     return null;
@@ -457,6 +429,57 @@ function nullableString(value: unknown, field: string): string | null {
     throw new AlayaOperationError("DATAERR", `${field} must be string or null.`);
   }
   return value;
+}
+
+function replaceStorageDbPathInToml(tomlContent: string, dbPath: string): string {
+  const lines = tomlContent.split(/\r?\n/u);
+  const output: string[] = [];
+  let section: string | null = null;
+  let storageSectionSeen = false;
+  let storageDbPathWritten = false;
+
+  for (const rawLine of lines) {
+    const sectionMatch = rawLine.trim().match(/^\[(.+)\]$/u);
+    if (sectionMatch !== null) {
+      if (section === "storage" && !storageDbPathWritten) {
+        output.push(`db_path = ${quoteTomlString(dbPath)}`);
+        storageDbPathWritten = true;
+      }
+      section = sectionMatch[1]?.trim() ?? null;
+      if (section === "storage") {
+        storageSectionSeen = true;
+      }
+      output.push(rawLine);
+      continue;
+    }
+
+    if (section === "storage" && rawLine.trim().match(/^db_path\s*=/u)) {
+      if (!storageDbPathWritten) {
+        output.push(`db_path = ${quoteTomlString(dbPath)}`);
+        storageDbPathWritten = true;
+      }
+      continue;
+    }
+
+    output.push(rawLine);
+  }
+
+  if (storageSectionSeen && !storageDbPathWritten) {
+    output.push(`db_path = ${quoteTomlString(dbPath)}`);
+  }
+
+  if (!storageSectionSeen) {
+    if (output.length > 0 && output.at(-1) !== "") {
+      output.push("");
+    }
+    output.push("[storage]", `db_path = ${quoteTomlString(dbPath)}`);
+  }
+
+  return `${output.join("\n").replace(/\n+$/u, "")}\n`;
+}
+
+function quoteTomlString(value: string): string {
+  return `"${value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}"`;
 }
 
 function normalizeOptionalPath(value: string | null | undefined): string | null {

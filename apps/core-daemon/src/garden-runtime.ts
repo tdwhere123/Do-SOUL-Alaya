@@ -68,6 +68,10 @@ export interface GardenBacklogTelemetrySource {
   ): ReturnType<GardenScheduler["acknowledgeBacklogWarningTransition"]>;
 }
 
+export interface GardenRuntimeStatus {
+  readonly last_pass_at: string | null;
+}
+
 export function createGardenRuntime(input: {
   readonly databaseConnection: StorageDatabase["connection"];
   readonly backlogThresholds: GardenBacklogThresholds;
@@ -86,6 +90,7 @@ export function createGardenRuntime(input: {
 }): Readonly<{
   readonly backgroundManager: BackgroundServiceManager;
   readonly backlogTelemetrySource: GardenBacklogTelemetrySource;
+  getStatus(): GardenRuntimeStatus;
   runEventLogOrphanDetection(): Promise<void>;
   runBackgroundPass(): Promise<void>;
   setBacklogTelemetryObserver(observer: GardenBacklogTelemetryObserver | null): void;
@@ -508,10 +513,14 @@ export function createGardenRuntime(input: {
     }
   ];
   const backgroundManager = new BackgroundServiceManager(backgroundServices);
+  let lastBackgroundPassAt: string | null = null;
 
   return Object.freeze({
     backgroundManager,
     backlogTelemetrySource,
+    getStatus: () => ({
+      last_pass_at: lastBackgroundPassAt
+    }),
     runEventLogOrphanDetection: async () => {
       if (!input.orphanDetectionEnabled) {
         return;
@@ -533,6 +542,7 @@ export function createGardenRuntime(input: {
       for (const service of backgroundServices) {
         await service.task();
       }
+      lastBackgroundPassAt = new Date().toISOString();
       const workspaces = await input.workspaceRepo.list();
       for (const workspace of workspaces) {
         await healthJournalPort.record({

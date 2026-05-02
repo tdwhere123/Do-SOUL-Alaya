@@ -70,5 +70,7 @@ by `#BL-020` through EventLog replay before recorder readiness.
   single-daemon MCP proof harness.
 - Gate-4 passed after the `#BL-015` and `#BL-019` review fixes were
   verified.
-- Phase 5 still owns the release-level E2E, benchmark fixture, graph
-  contract, final review, and any post-port hygiene execution.
+- Superseded by the Phase 5 preflight: Gate-5 owns release-level E2E,
+  graph contract, and final review. Benchmark work moved to Phase
+  6 / Gate-6 / v0.1.1, and post-port hygiene starts only after Gate-5
+  closes v0.1.0.

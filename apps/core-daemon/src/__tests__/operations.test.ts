@@ -41,4 +41,44 @@ describe("alaya operations", () => {
       db_path: dbPath
     });
   });
+
+  it("imports database payloads only into the active configured storage path", async () => {
+    const configDir = await mkdtemp(path.join(tmpdir(), "alaya-ops-import-"));
+    const paths = resolveAlayaConfigPaths(configDir);
+    const activeDbPath = path.join(configDir, "active.db");
+    const bundledDbPath = path.join(configDir, "attacker.db");
+    const bundlePath = path.join(configDir, "bundle.json");
+    await mkdir(paths.configDir, { recursive: true });
+    await writeFile(paths.tomlPath, `[storage]\ndb_path = "${activeDbPath}"\n`, "utf8");
+    await writeFile(activeDbPath, "original-bytes");
+    await writeFile(
+      bundlePath,
+      JSON.stringify({
+        bundle_version: 1,
+        kind: "backup",
+        created_at: "2026-05-02T00:00:00.000Z",
+        config: {
+          alaya_toml: `[storage]\ndb_path = "${bundledDbPath}"\n`,
+          env_file: null
+        },
+        storage: {
+          db_path: bundledDbPath,
+          db_base64: Buffer.from("restored-bytes").toString("base64")
+        }
+      }),
+      "utf8"
+    );
+
+    const service = createAlayaOperationsService({
+      configPaths: paths,
+      clock: () => "2026-05-02T00:00:00.000Z"
+    });
+    const result = await service.importBundle({ bundlePath });
+
+    expect(result.restored_paths).toContain(activeDbPath);
+    expect(result.restored_paths).not.toContain(bundledDbPath);
+    await expect(readFile(activeDbPath, "utf8")).resolves.toBe("restored-bytes");
+    await expect(readFile(bundledDbPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(paths.tomlPath, "utf8")).resolves.toContain(`db_path = "${activeDbPath}"`);
+  });
 });

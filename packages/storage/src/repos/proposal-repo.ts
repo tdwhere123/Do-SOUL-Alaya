@@ -1,11 +1,17 @@
 import {
   ProposalResolutionStateSchema,
   ProposalSchema,
+  type EventLogEntry,
   type Proposal,
   type ProposalResolutionState
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../db.js";
 import { StorageError } from "../errors.js";
+import {
+  getEventLogWriter,
+  insertEventLogEntry,
+  type EventLogDraftInput
+} from "./shared/event-log-writer.js";
 import { deepFreeze } from "./shared/deep-freeze.js";
 import { parseNonEmptyString, parseNullableString, parseTimestamp } from "./shared/validators.js";
 
@@ -15,9 +21,18 @@ export interface ProposalCreateInput {
   readonly run_id: string | null;
 }
 
+export interface ScopedProposal {
+  readonly proposal: Readonly<Proposal>;
+  readonly workspace_id: string;
+  readonly run_id: string | null;
+}
+
+export type ProposalResolutionEventInput = EventLogDraftInput;
+
 export interface ProposalRepo {
   create(input: ProposalCreateInput): Promise<Readonly<Proposal>>;
   findById(proposalId: string): Promise<Readonly<Proposal> | null>;
+  findScopedById(proposalId: string): Promise<Readonly<ScopedProposal> | null>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<Proposal>[]>;
   findPending(workspaceId: string): Promise<readonly Readonly<Proposal>[]>;
   findPendingByRunId(runId: string): Promise<Readonly<Proposal> | null>;
@@ -26,6 +41,20 @@ export interface ProposalRepo {
     state: ProposalResolutionState,
     updatedAt: string
   ): Promise<Readonly<Proposal>>;
+  updatePendingResolution(
+    proposalId: string,
+    state: ProposalResolutionState,
+    updatedAt: string
+  ): Promise<Readonly<Proposal>>;
+  updatePendingResolutionWithEvents(
+    proposalId: string,
+    state: ProposalResolutionState,
+    updatedAt: string,
+    events: readonly ProposalResolutionEventInput[]
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly events: readonly EventLogEntry[];
+  }>>;
 }
 
 const PROPOSAL_SELECT_COLUMNS = `
@@ -70,6 +99,8 @@ export class SqliteProposalRepo implements ProposalRepo {
   private readonly findPendingStatement;
   private readonly findPendingByRunIdStatement;
   private readonly updateResolutionStatement;
+  private readonly updatePendingResolutionStatement;
+  private readonly eventLogWriter;
 
   public constructor(private readonly db: StorageDatabase) {
     this.createStatement = db.connection.prepare(`
@@ -125,6 +156,14 @@ export class SqliteProposalRepo implements ProposalRepo {
       SET resolution_state = ?, last_updated_at = ?
       WHERE proposal_id = ?
     `);
+
+    this.updatePendingResolutionStatement = db.connection.prepare(`
+      UPDATE proposals
+      SET resolution_state = ?, last_updated_at = ?
+      WHERE proposal_id = ? AND resolution_state = 'pending'
+    `);
+
+    this.eventLogWriter = getEventLogWriter(db.connection);
   }
 
   public async create(input: ProposalCreateInput): Promise<Readonly<Proposal>> {
@@ -164,6 +203,21 @@ export class SqliteProposalRepo implements ProposalRepo {
     try {
       const row = this.findByIdStatement.get(proposalId) as ProposalRow | undefined;
       return row === undefined ? null : parseProposalRow(row);
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", `Failed to load proposal ${proposalId}.`, error);
+    }
+  }
+
+  public async findScopedById(proposalId: string): Promise<Readonly<ScopedProposal> | null> {
+    try {
+      const row = this.findByIdStatement.get(proposalId) as ProposalRow | undefined;
+      return row === undefined
+        ? null
+        : deepFreeze({
+            proposal: parseProposalRow(row),
+            workspace_id: row.workspace_id,
+            run_id: row.run_id
+          });
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to load proposal ${proposalId}.`, error);
     }
@@ -244,6 +298,108 @@ export class SqliteProposalRepo implements ProposalRepo {
 
       throw new StorageError("QUERY_FAILED", `Failed to update proposal ${parsedProposalId}.`, error);
     }
+  }
+
+  public async updatePendingResolution(
+    proposalId: string,
+    state: ProposalResolutionState,
+    updatedAt: string
+  ): Promise<Readonly<Proposal>> {
+    const parsedProposalId = parseProposalId(proposalId);
+    const parsedState = parseProposalResolutionState(state);
+    const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+
+    try {
+      const result = this.updatePendingResolutionStatement.run(parsedState, parsedUpdatedAt, parsedProposalId);
+
+      if (result.changes === 0) {
+        const existing = await this.findById(parsedProposalId);
+        if (existing === null) {
+          throw new StorageError("NOT_FOUND", `Proposal ${parsedProposalId} was not found.`);
+        }
+
+        throw new StorageError(
+          "CONFLICT",
+          `Proposal ${parsedProposalId} is already ${existing.resolution_state}.`
+        );
+      }
+
+      const updated = await this.findById(parsedProposalId);
+
+      if (updated === null) {
+        throw new StorageError("NOT_FOUND", `Proposal ${parsedProposalId} was not found after update.`);
+      }
+
+      return updated;
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to update pending proposal ${parsedProposalId}.`,
+        error
+      );
+    }
+  }
+
+  public async updatePendingResolutionWithEvents(
+    proposalId: string,
+    state: ProposalResolutionState,
+    updatedAt: string,
+    events: readonly ProposalResolutionEventInput[]
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly events: readonly EventLogEntry[];
+  }>> {
+    const parsedProposalId = parseProposalId(proposalId);
+    const parsedState = parseProposalResolutionState(state);
+    const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+
+    try {
+      return this.db.connection.transaction(() => {
+        const storedEvents = events.map((event) => insertEventLogEntry(this.eventLogWriter, event));
+        const result = this.updatePendingResolutionStatement.run(
+          parsedState,
+          parsedUpdatedAt,
+          parsedProposalId
+        );
+
+        if (result.changes === 0) {
+          throw this.createPendingResolutionFailure(parsedProposalId);
+        }
+
+        const row = this.findByIdStatement.get(parsedProposalId) as ProposalRow | undefined;
+        if (row === undefined) {
+          throw new StorageError("NOT_FOUND", `Proposal ${parsedProposalId} was not found after update.`);
+        }
+
+        return deepFreeze({
+          proposal: parseProposalRow(row),
+          events: storedEvents
+        });
+      })();
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to update pending proposal ${parsedProposalId} with review events.`,
+        error
+      );
+    }
+  }
+
+  private createPendingResolutionFailure(proposalId: string): StorageError {
+    const row = this.findByIdStatement.get(proposalId) as ProposalRow | undefined;
+    if (row === undefined) {
+      return new StorageError("NOT_FOUND", `Proposal ${proposalId} was not found.`);
+    }
+
+    return new StorageError("CONFLICT", `Proposal ${proposalId} is already ${row.resolution_state}.`);
   }
 }
 

@@ -6,9 +6,29 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-024`.
+sequence. **Next available number**: `#BL-025`.
 
 ## Open Issues
+
+### #BL-024 — HTTP proposal review needs a shared transaction boundary
+
+**Status**: Open (post-Gate-5 hardening; not a v0.1.0 blocker)
+**Owner**: `packages/core/src/proposal-service.ts` +
+`apps/core-daemon/src/routes/proposals.ts` (no card yet)
+**Close condition**: If the HTTP `/proposals/:id/review` route remains
+exposed as a supported surface, proposal review must resolve proposal,
+claim, synthesis, karma, and review EventLog writes inside one explicit
+unit of work, or the route must be removed/disabled from supported runtime
+surfaces. Verification must include replay/concurrency and partial-failure
+coverage.
+
+P5-final-review fixed the MCP release path by moving
+`soul.review_memory_proposal` review events plus pending-state CAS into one
+storage-owned SQLite transaction. The older HTTP proposal review route is a
+broader path: it appends review events, applies claim/synthesis side effects,
+then updates proposal resolution outside one shared transaction. Gate-5
+release acceptance is scoped to MCP/CLI, so this is tracked as hardening
+rather than a v0.1.0 blocker.
 
 ### #BL-023 — Marketing surface (e.g. xiaohongshu) may attract non-engineering users
 
@@ -67,14 +87,22 @@ Renaming is a deliberate adapt-and-port-style change: it diverges from the snaps
 
 ### #BL-017 — Post-port hygiene sweep (naming, redundancy, file size)
 
-**Status**: Open (post-v0.1 hygiene)
-**Owner**: `packages/*` (no card yet; sweep wave to be opened after the last v0.1 port card lands)
-**Close condition**: A dedicated cleanup wave executes after the final v0.1 port card lands and (a) renames upstream-milestone-named files/symbols to domain-aligned names — covers `#BL-016`; (b) splits inherited oversized single files (>800 lines, e.g. `packages/protocol/src/events/phase-c.ts`) into focused modules per `rules/common/coding-style.md`; (c) removes port residue: unused exports, parallel helper duplicates introduced by adapter shims, dead branches Alaya never exercises; (d) reconciles naming inconsistencies that adapter ports left behind; (e) `docs/handbook/code-map.md` and per-package codemaps updated; (f) full build + vitest green.
+**Status**: Open (post-v0.1 hygiene; startable after Gate-5)
+**Owner**: `packages/*` (no card yet; dedicated post-v0.1 hygiene wave)
+**Close condition**: A dedicated cleanup wave executes after Gate-5 /
+v0.1.0 and (a) renames upstream-milestone-named files/symbols to
+domain-aligned names — covers `#BL-016`; (b) splits inherited oversized
+single files (>800 lines, e.g. `packages/protocol/src/events/phase-c.ts`)
+into focused modules per `rules/common/coding-style.md`; (c) removes port
+residue: unused exports, parallel helper duplicates introduced by adapter
+shims, dead branches Alaya never exercises; (d) reconciles naming
+inconsistencies that adapter ports left behind; (e) `docs/handbook/code-map.md`
+and per-package codemaps updated; (f) full build + vitest green.
 
 The Port-First discipline (`docs/handbook/port-protocol.md`) forbids mid-port refactors that would diverge from `vendor/do-what-new-snapshot/`. As a result v0.1 deliberately accumulates port residue — upstream-milestone naming, oversized inherited files, parallel helpers next to Alaya-native equivalents, exports Alaya never calls. None of these are individually blocking, and folding them into per-card scope would pollute every port card with refactor work. Treat as a single sweep wave executed once port phase is over; the open backlog set should be consolidated and closed in that pass.
 
-Do not execute the sweep before `P5-graph-contract` and the final v0.1
-port card land.
+Do not execute the sweep inside Phase 5. After Gate-5 closeout this issue is
+startable as a dedicated post-v0.1 hygiene wave, not as a release blocker.
 
 ## Out of Alaya Scope (Permanently Rejected)
 

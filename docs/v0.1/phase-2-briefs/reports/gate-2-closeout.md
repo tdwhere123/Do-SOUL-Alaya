@@ -74,6 +74,7 @@ Deferred to later phases:
   service barrel exports.
 - Phase 4: daemon, routes, MCP server transport, CLI bridge, profile mutation,
   secrets, and live operator surfaces.
-- Phase 5: final E2E, benchmark, graph contract, and release review.
+- Phase 5: final E2E, graph contract, and release review. Superseded by
+  Phase 5 preflight: benchmark moved to Phase 6 / Gate-6 / v0.1.1.
 
 No Phase 2 Blocking or Important review finding remains open.

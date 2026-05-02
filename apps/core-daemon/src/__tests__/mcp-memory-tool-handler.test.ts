@@ -76,6 +76,23 @@ describe("mcp memory tool handler", () => {
     });
   });
 
+  it("does not open memory pointers outside the caller workspace", async () => {
+    const deps = createDeps();
+    deps.memoryService.findById = vi.fn(async () => createMemory({ workspace_id: "ws2" }));
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const result = await handler.call({
+      toolName: "soul.open_pointer",
+      arguments: { object_id: "mem1" },
+      context
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "NOT_FOUND" }
+    });
+  });
+
   it("records usage proof against an existing delivery", async () => {
     const deps = createDeps();
     const handler = createMcpMemoryToolHandler(deps);
@@ -191,7 +208,7 @@ function createDeps(): McpMemoryToolHandlerDependencies {
   };
 }
 
-function createMemory(): MemoryEntry {
+function createMemory(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
     object_id: "mem1",
     object_kind: "memory_entry",
@@ -221,6 +238,7 @@ function createMemory(): MemoryEntry {
     last_hit_at: null,
     reinforcement_count: 0,
     contradiction_count: 0,
-    superseded_by: null
+    superseded_by: null,
+    ...overrides
   };
 }

@@ -24,15 +24,16 @@ review being a multi-perspective sweep.
 
 Per review I9:
 
-- **P5-graph-contract** depends on P1-topology + P2-repos-batch-3
+- **P5-graph-contract** depends on P1-topology + P2-repos-batch-2
   (path-relation-repo + path-graph-snapshot-repo) +
   P2-garden-batch-3 (path-graph-snapshotter wiring) being
-  `live-event-ready`. The card consumes real path snapshots; without
-  them it falls back to schema-only and trips R3.
-- **P5-e2e** depends on Gate-4 closure. It must also prove the
-  P4-mcp-memory-tools contract through a real attached-agent
-  `tools/list -> soul.recall -> soul.open_pointer ->
-  soul.report_context_usage` chain.
+  `implementation-ready`. The card derives a read-only schema-ready
+  contract from active path relations and optional snapshot history;
+  it must not claim Inspector or daemon live wiring.
+- **P5-e2e** depends on Gate-4 closure and must start only after
+  P5-graph-contract closes. It must also prove the P4-mcp-memory-tools
+  contract through a real attached-agent `tools/list -> soul.recall ->
+  soul.open_pointer -> soul.report_context_usage` chain.
 - **P5-final-review** depends on the above two.
 
 ## Gate-5 (v0.1.0 release)
@@ -52,8 +53,9 @@ benchmark numbers are the deliverable of Phase 6 / Gate-6 / `v0.1.1`.
 
 ## Parallelism Notes
 
-- P5-graph-contract can start in parallel with P5-e2e only after
-  Gate-4 closes (different write sets).
+- P5-graph-contract runs before P5-e2e so the E2E card consumes the
+  frozen schema-ready graph contract rather than racing a contract
+  change.
 - P5-final-review runs after both above land.
 - P5-final-review may dispatch multiple reviewer perspectives in
   parallel (security / port-discipline / live-path / docs-drift)

@@ -5,7 +5,7 @@
 > - **Card ID**: P5-final-review
 > - **Port mode**: requires-redesign
 > - **Source**: `n/a`
-> - **Target**: `docs/v0.1/phase-5-briefs/reports/task-p5-final-review.md`, `docs/handbook/runtime-status.md`, `docs/v0.1/INDEX.md`
+> - **Target**: `apps/core-daemon/src/__tests__/final-review-status.test.ts`, `docs/v0.1/phase-5-briefs/reports/task-p5-final-review.md`, `docs/handbook/runtime-status.md`, `docs/v0.1/INDEX.md`
 > - **Size**: S
 > - **Prerequisite**: P4-mcp-memory-tools, P5-graph-contract, P5-e2e
 > - **Blocks**: v0.1 release
@@ -31,6 +31,7 @@ contract and attached-agent proof.
 
 | Source | Target | Port requirement |
 |---|---|---|
+| `n/a` | `apps/core-daemon/src/__tests__/final-review-status.test.ts` | Alaya-specific redesign; regression test for final-review docs/status and public tool contract claims. |
 | `n/a` | `docs/v0.1/phase-5-briefs/reports/task-p5-final-review.md` | Alaya-specific redesign; tests must prove each behavior listed below. |
 | `n/a` | `docs/handbook/runtime-status.md` | Alaya-specific redesign; tests must prove each behavior listed below. |
 | `n/a` | `docs/v0.1/INDEX.md` | Alaya-specific redesign; tests must prove each behavior listed below. |
@@ -112,7 +113,11 @@ Nothing deferred.
 
 ## 6. Shared File Hazards & Dependencies
 
-No shared-file hazards.
+`apps/core-daemon/src/__tests__/final-review-status.test.ts` is the only
+code/test file owned by this card. It exists because no current
+`final-review` vitest filter matches a real test. The test must remain a
+docs/status and public tool-contract regression check; it must not become a
+replacement for the four-perspective review.
 
 **Prerequisite**: P4-mcp-memory-tools, P5-graph-contract, P5-e2e.
 **Blocks**: v0.1.0 release (Gate-5).

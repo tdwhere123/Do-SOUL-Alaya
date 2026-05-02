@@ -138,8 +138,13 @@ import {
   createTargetCurrencyCheckPort,
   createWarnLogger
 } from "./daemon-runtime-helpers.js";
-import { resolveAlayaConfigDir, resolveAlayaConfigPaths } from "./cli/config-files.js";
+import {
+  resolveAlayaConfigDir,
+  resolveAlayaConfigPaths,
+  type AlayaConfigPaths
+} from "./cli/config-files.js";
 import { resolveCoreDaemonFilesDirectory } from "./files-data-dir.js";
+import { resolveConfiguredDatabasePath } from "./storage-config.js";
 import { createGardenRuntime } from "./garden-runtime.js";
 import { SqliteHandoffGapAdapter } from "./handoff-gap-adapter.js";
 import { createManifestationContextLensAssembler } from "./manifestation-context-lens-assembler.js";
@@ -210,6 +215,9 @@ export interface AlayaDaemonRuntimeServices {
   readonly embeddingStatusService: EmbeddingStatusService;
   readonly mcpMemoryToolHandler: McpMemoryToolHandler;
   readonly trustStateRecorder: TrustStateRecorder;
+  readonly gardenStatus: Readonly<{
+    getStatus(): Readonly<{ readonly last_pass_at: string | null }>;
+  }>;
   readonly principalCodingEngineAvailable: boolean;
 }
 
@@ -239,7 +247,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const remoteDaemonOptInEnabled = isRemoteDaemonOptInEnabled(process.env);
   const configPaths = resolveAlayaConfigPaths(resolveAlayaConfigDir({ env: process.env }));
   const configEnv = await loadConfigEnv(configPaths.envPath);
-  const dbPath = resolveDatabasePath();
+  const dbPath = await resolveDatabasePath(configPaths);
   const filesDirectory = resolveCoreDaemonFilesDirectory();
   const database = initDatabase({ filename: dbPath });
   recordStartupStep(startupSteps, "database");
@@ -1029,6 +1037,9 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       embeddingStatusService,
       mcpMemoryToolHandler,
       trustStateRecorder,
+      gardenStatus: {
+        getStatus: () => gardenRuntime.getStatus()
+      },
       principalCodingEngineAvailable: principalCodingAvailability.available
     }),
     startBackgroundServices,
@@ -1096,10 +1107,11 @@ function recordStartupStep(
   });
 }
 
-function resolveDatabasePath(): string {
-  return process.env.DATA_DIR
-    ? join(process.env.DATA_DIR, "alaya.db")
-    : join(__dirname, "data", "alaya.db");
+async function resolveDatabasePath(configPaths: AlayaConfigPaths): Promise<string> {
+  return await resolveConfiguredDatabasePath(configPaths, {
+    env: process.env,
+    fallbackPath: join(__dirname, "data", "alaya.db")
+  });
 }
 
 function parsePort(value: string | undefined, fallback: number): number {
