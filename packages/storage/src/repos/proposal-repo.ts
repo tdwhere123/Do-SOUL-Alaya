@@ -15,9 +15,16 @@ export interface ProposalCreateInput {
   readonly run_id: string | null;
 }
 
+export interface ScopedProposal {
+  readonly proposal: Readonly<Proposal>;
+  readonly workspace_id: string;
+  readonly run_id: string | null;
+}
+
 export interface ProposalRepo {
   create(input: ProposalCreateInput): Promise<Readonly<Proposal>>;
   findById(proposalId: string): Promise<Readonly<Proposal> | null>;
+  findScopedById(proposalId: string): Promise<Readonly<ScopedProposal> | null>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<Proposal>[]>;
   findPending(workspaceId: string): Promise<readonly Readonly<Proposal>[]>;
   findPendingByRunId(runId: string): Promise<Readonly<Proposal> | null>;
@@ -164,6 +171,21 @@ export class SqliteProposalRepo implements ProposalRepo {
     try {
       const row = this.findByIdStatement.get(proposalId) as ProposalRow | undefined;
       return row === undefined ? null : parseProposalRow(row);
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", `Failed to load proposal ${proposalId}.`, error);
+    }
+  }
+
+  public async findScopedById(proposalId: string): Promise<Readonly<ScopedProposal> | null> {
+    try {
+      const row = this.findByIdStatement.get(proposalId) as ProposalRow | undefined;
+      return row === undefined
+        ? null
+        : deepFreeze({
+            proposal: parseProposalRow(row),
+            workspace_id: row.workspace_id,
+            run_id: row.run_id
+          });
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to load proposal ${proposalId}.`, error);
     }

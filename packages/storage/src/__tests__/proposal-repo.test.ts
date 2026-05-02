@@ -54,6 +54,11 @@ describe("SqliteProposalRepo", () => {
     ).resolves.toEqual(proposal);
 
     await expect(repo.findById(proposal.proposal_id)).resolves.toEqual(proposal);
+    await expect(repo.findScopedById(proposal.proposal_id)).resolves.toEqual({
+      proposal,
+      workspace_id: "workspace-1",
+      run_id: "run-1"
+    });
   });
 
   it("lists all and pending proposals by workspace", async () => {

@@ -10,7 +10,7 @@ import { createMcpMemoryProposalWorkflow } from "../mcp-memory-proposal-workflow
 describe("mcp memory governance", () => {
   it("creates and reviews memory proposals through EventLog and ProposalRepo", async () => {
     const events: EventLogEntry[] = [];
-    const proposals = new Map<string, Proposal>();
+    const proposals = new Map<string, { proposal: Proposal; workspace_id: string; run_id: string | null }>();
     const order: string[] = [];
     let eventCounter = 0;
     const workflow = createMcpMemoryProposalWorkflow({
@@ -31,12 +31,13 @@ describe("mcp memory governance", () => {
           events.filter((event) => event.entity_type === entityType && event.entity_id === entityId)
       },
       proposalRepo: {
-        create: async ({ proposal }) => {
+        create: async ({ proposal, workspace_id, run_id }) => {
           order.push("repo:create");
-          proposals.set(proposal.proposal_id, proposal);
+          proposals.set(proposal.proposal_id, { proposal, workspace_id, run_id });
           return proposal;
         },
-        findById: async (proposalId) => proposals.get(proposalId) ?? null,
+        findById: async (proposalId) => proposals.get(proposalId)?.proposal ?? null,
+        findScopedById: async (proposalId) => proposals.get(proposalId) ?? null,
         updateResolution: async (proposalId, state, updatedAt) => {
           order.push("repo:updateResolution");
           const existing = proposals.get(proposalId);
@@ -44,11 +45,11 @@ describe("mcp memory governance", () => {
             throw new Error("missing proposal");
           }
           const updated = {
-            ...existing,
+            ...existing.proposal,
             resolution_state: state,
             last_updated_at: updatedAt
           } satisfies Proposal;
-          proposals.set(proposalId, updated);
+          proposals.set(proposalId, { ...existing, proposal: updated });
           return updated;
         }
       },
@@ -77,7 +78,7 @@ describe("mcp memory governance", () => {
       "repo:create",
       `notify:${Phase1BEventType.SOUL_PROPOSAL_CREATED}`
     ]);
-    expect(proposals.get(created.proposal_id)?.resolution_state).toBe(ProposalResolutionState.PENDING);
+    expect(proposals.get(created.proposal_id)?.proposal.resolution_state).toBe(ProposalResolutionState.PENDING);
 
     const reviewed = await workflow.reviewMemoryProposal(
       {
@@ -98,9 +99,85 @@ describe("mcp memory governance", () => {
       Phase1BEventType.SOUL_REVIEW_COMPLETED,
       Phase1BEventType.SOUL_PROPOSAL_RESOLVED
     ]);
-    expect(proposals.get(created.proposal_id)?.resolution_state).toBe(ProposalResolutionState.ACCEPTED);
+    expect(proposals.get(created.proposal_id)?.proposal.resolution_state).toBe(ProposalResolutionState.ACCEPTED);
     expect(order.indexOf(`event:${Phase1BEventType.SOUL_REVIEW_CREATED}`)).toBeLessThan(
       order.indexOf("repo:updateResolution")
     );
   });
+
+  it("rejects proposal reviews outside the stored workspace and run context", async () => {
+    const events: EventLogEntry[] = [];
+    const proposal = createProposal();
+    const workflow = createMcpMemoryProposalWorkflow({
+      now: () => "2026-04-30T00:00:00.000Z",
+      generateObjectId: () => proposal.proposal_id,
+      eventLogRepo: {
+        append: async (input) => {
+          const entry = {
+            event_id: `event-${events.length + 1}`,
+            created_at: "2026-04-30T00:00:00.000Z",
+            ...input
+          } satisfies EventLogEntry;
+          events.push(entry);
+          return entry;
+        },
+        queryByEntity: async () => events
+      },
+      proposalRepo: {
+        create: async () => proposal,
+        findById: async () => proposal,
+        findScopedById: async () => ({
+          proposal,
+          workspace_id: "ws2",
+          run_id: "run2"
+        }),
+        updateResolution: async () => {
+          throw new Error("update should not run for a scope mismatch");
+        }
+      },
+      runtimeNotifier: {
+        notifyEntry: async () => {
+          throw new Error("notify should not run for a scope mismatch");
+        }
+      }
+    });
+
+    await expect(
+      workflow.reviewMemoryProposal(
+        {
+          proposal_id: proposal.proposal_id,
+          verdict: "reject",
+          reason: "wrong workspace"
+        },
+        { workspaceId: "ws1", runId: "run1", agentTarget: "codex" }
+      )
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(events).toEqual([]);
+  });
 });
+
+function createProposal(): Proposal {
+  return {
+    runtime_id: "00000000-0000-4000-8000-000000000001",
+    object_kind: "proposal",
+    task_surface_ref: null,
+    expires_at: null,
+    derived_from: "mem1",
+    retention_policy: "session_only",
+    proposal_id: "00000000-0000-4000-8000-000000000001",
+    dossier_ref: null,
+    recommended_option_id: null,
+    proposal_options: [
+      {
+        option_id: "memory_update_00000000-0000-4000-8000-000000000001",
+        option_kind: "request_confirmation",
+        preserves_protected_constraints: true,
+        dropped_candidates: [],
+        unresolved_after_apply: [],
+        requires_confirmation: true
+      }
+    ],
+    resolution_state: ProposalResolutionState.PENDING,
+    last_updated_at: "2026-04-30T00:00:00.000Z"
+  };
+}

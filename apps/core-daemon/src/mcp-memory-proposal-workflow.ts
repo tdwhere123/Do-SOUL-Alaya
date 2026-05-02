@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   ControlPlaneObjectKind,
+  NonEmptyStringSchema,
   Phase1BEventType,
   ProposalOptionKind,
   ProposalResolutionState,
@@ -33,6 +34,11 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     readonly run_id: string | null;
   }): Promise<Readonly<Proposal>>;
   findById(proposalId: string): Promise<Readonly<Proposal> | null>;
+  findScopedById(proposalId: string): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly workspace_id: string;
+    readonly run_id: string | null;
+  }> | null>;
   updateResolution(
     proposalId: string,
     state: Proposal["resolution_state"],
@@ -121,10 +127,12 @@ export function createMcpMemoryProposalWorkflow(
     input: SoulReviewMemoryProposalRequest,
     context: McpMemoryToolCallContext
   ): Promise<Readonly<{ proposal_id: string; resolution_state: Proposal["resolution_state"] }>> {
-    const proposal = await deps.proposalRepo.findById(input.proposal_id);
-    if (proposal === null) {
+    const scopedProposal = await deps.proposalRepo.findScopedById(input.proposal_id);
+    if (scopedProposal === null) {
       throw createWorkflowError("NOT_FOUND", `Proposal not found: ${input.proposal_id}`);
     }
+    assertProposalContext(scopedProposal, context);
+    const proposal = scopedProposal.proposal;
     if (proposal.resolution_state !== ProposalResolutionState.PENDING) {
       throw createWorkflowError("VALIDATION", `Proposal is already ${proposal.resolution_state}`);
     }
@@ -204,6 +212,20 @@ export function createMcpMemoryProposalWorkflow(
   async function nextRevision(proposalId: string): Promise<number> {
     const events = await deps.eventLogRepo.queryByEntity("proposal", proposalId);
     return events.length + 1;
+  }
+}
+
+function assertProposalContext(
+  scopedProposal: Readonly<{
+    readonly workspace_id: string;
+    readonly run_id: string | null;
+  }>,
+  context: McpMemoryToolCallContext
+): void {
+  const workspaceId = NonEmptyStringSchema.parse(context.workspaceId);
+  const runId = context.runId === null ? null : NonEmptyStringSchema.parse(context.runId);
+  if (scopedProposal.workspace_id !== workspaceId || scopedProposal.run_id !== runId) {
+    throw createWorkflowError("NOT_FOUND", "Proposal not found in current workspace/run context.");
   }
 }
 
