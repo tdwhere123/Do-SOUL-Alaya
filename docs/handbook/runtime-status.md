@@ -23,7 +23,7 @@ each Phase Gate.
 | Phase 2 | Wave 2: storage repos batches + core services + Garden + security defense | **done** | Gate-2 passed |
 | Phase 3 | Wave 3: foundation helpers, ConversationService, MCP discovery, run lifecycle, misc services, core barrel | **done** | Gate-3 passed |
 | Phase 4 | Wave 4: Core daemon, routes, MCP server transport, real profile mutation, CLI bridge, secrets, Inspector server, Inspector frontend | MCP memory surface `mcp-consumable`; Inspector config-write and trust delivery/usage durability fixes verified | Gate-4 passed 2026-05-01 |
-| Phase 5 | Wave 5: full E2E, graph contract, final review | not-started | Gate-5 (v0.1 release) |
+| Phase 5 | Wave 5: full E2E, graph contract, final review | P5-graph-contract `schema-ready`; E2E and final review pending | Gate-5 (v0.1 release) |
 
 ## Subsystem Readiness (target = v0.1 release)
 
@@ -74,7 +74,7 @@ each Phase Gate.
 | Operations (backup, export, import) | `implementation-ready` | `cli-consumable` | P4-operations |
 | Memory Inspector | `live-event-ready`; server/frontend exist, token-gated routes pass, and Provider/Config writes proxy daemon runtime config | `live-event-ready` for the inspector surface | P4-inspector-server + P4-cli-inspect + P4-inspector-frontend + #BL-019 repair |
 | Marketing benchmark harness | `not-started` | `implementation-ready` | P6-bench-adapter + P6-bench-harness + P6-bench-baselines + P6-bench-resume + P6-bench-readme (Phase 6, post-v0.1.0; ships in v0.1.1) |
-| Graph inspector data contract | `not-started` | `schema-ready` | P5-graph-contract |
+| Graph inspector data contract | `schema-ready`; read-only contract derives from active PathRelation data, no live route | `schema-ready` | P5-graph-contract |
 
 ## Known Wiring Gaps
 
@@ -95,10 +95,12 @@ lifetime using the MCP SDK in-memory transport.
 Remaining non-blocking follow-up after Gate-4: none for the resolved
 trust-state delivery / usage and counter restart-stability repairs.
 
-Remaining v0.1.0 release work is Phase 5: graph contract, full E2E,
-final review, and the post-port hygiene sweep only after the final
-v0.1 port card lands. Benchmark fixtures belong to Phase 6 / Gate-6 /
-v0.1.1 and are not a Gate-5 requirement.
+P5-graph-contract is `schema-ready`: `GraphContractService` derives a
+read-only path graph payload from active PathRelation data, with no live
+daemon, MCP, CLI, or Inspector route. Remaining v0.1.0 release work is
+Phase 5 full E2E, final review, and the post-port hygiene sweep only after
+the final v0.1 port card lands. Benchmark fixtures belong to Phase 6 /
+Gate-6 / v0.1.1 and are not a Gate-5 requirement.
 
 ## Gate Definitions
 
