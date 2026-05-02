@@ -288,6 +288,8 @@ describe("P5 v0.1 release loop E2E", () => {
       const trust = (status.json as { readonly trust: readonly TrustSummary[] }).trust[0];
       transcript.push({ step: "alaya status --agent codex --json", evidence: status.json });
       expect(status.exitCode).toBe(0);
+      expect((status.json as { readonly garden: { readonly last_pass_at: string | null } }).garden.last_pass_at)
+        .not.toBeNull();
       expect(trust).toMatchObject({
         agent_target: "codex",
         installed_count: 1,
@@ -305,7 +307,7 @@ describe("P5 v0.1 release loop E2E", () => {
         overall: "green",
         startup: { ready: true },
         mcp: { transport: "ready" },
-        garden: { status: "healthy" }
+        garden: { status: "healthy", last_pass_at: expect.any(String) }
       });
 
       const backupPath = join(dataDir, "release-backup.json");
@@ -415,15 +417,19 @@ describe("P5 v0.1 release loop E2E", () => {
         "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca"
       ]);
 
+      await runtime.runGardenBackgroundPass();
+
       const status = await dispatchCli(runtime, ["status", "--agent", "codex", "--json"]);
       expect(status.exitCode).toBe(0);
       expect(status.json).toMatchObject({
-        daemon: { up: true }
+        daemon: { up: true },
+        garden: { last_pass_at: expect.any(String) }
       });
 
       const doctor = await dispatchCli(runtime, ["doctor", "--workspace", "workspace-1", "--json"]);
       expect(doctor.exitCode).toBe(0);
       expect(doctor.json).toMatchObject({
+        garden: { status: "healthy", last_pass_at: expect.any(String) },
         storage: {
           db_path: configuredDbPath,
           exists: true,

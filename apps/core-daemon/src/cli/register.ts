@@ -38,10 +38,18 @@ export function registerAlayaCliCommands(
     getMcpHealth: async () => ({
       transport: "ready",
       enrolled_tools: runtime.services.daemonMcpCatalog.listEnrolledToolIds().length
-    })
+    }),
+    getGardenHealth: async () => {
+      const gardenStatus = runtime.services.gardenStatus.getStatus();
+      return {
+        status: gardenStatus.last_pass_at === null ? "degraded" : "healthy",
+        last_pass_at: gardenStatus.last_pass_at
+      };
+    }
   }));
   bridge.registerSubcommand(createStatusCommand({
-    trustStateSummaryProvider: async (agentTarget) => await runtime.services.trustStateRecorder.summarize(agentTarget)
+    trustStateSummaryProvider: async (agentTarget) => await runtime.services.trustStateRecorder.summarize(agentTarget),
+    getGardenStatus: async () => runtime.services.gardenStatus.getStatus()
   }));
   bridge.registerSubcommand(createInstallCommand());
   bridge.registerSubcommand(createInspectCommand());

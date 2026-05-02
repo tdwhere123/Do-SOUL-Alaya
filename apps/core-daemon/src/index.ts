@@ -215,6 +215,9 @@ export interface AlayaDaemonRuntimeServices {
   readonly embeddingStatusService: EmbeddingStatusService;
   readonly mcpMemoryToolHandler: McpMemoryToolHandler;
   readonly trustStateRecorder: TrustStateRecorder;
+  readonly gardenStatus: Readonly<{
+    getStatus(): Readonly<{ readonly last_pass_at: string | null }>;
+  }>;
   readonly principalCodingEngineAvailable: boolean;
 }
 
@@ -1034,6 +1037,9 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       embeddingStatusService,
       mcpMemoryToolHandler,
       trustStateRecorder,
+      gardenStatus: {
+        getStatus: () => gardenRuntime.getStatus()
+      },
       principalCodingEngineAvailable: principalCodingAvailability.available
     }),
     startBackgroundServices,
