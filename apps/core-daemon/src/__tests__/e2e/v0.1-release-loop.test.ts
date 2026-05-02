@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -362,6 +362,94 @@ describe("P5 v0.1 release loop E2E", () => {
       await runtime.shutdown();
     }
   }, RELEASE_LOOP_TIMEOUT_MS);
+
+  it("uses installed config storage when DATA_DIR differs", async () => {
+    const dataDir = await createTempDataDir();
+    const configDir = join(dataDir, "config");
+    const configuredDbPath = join(dataDir, "configured-storage", "alaya.db");
+    const misleadingDataDir = join(dataDir, "misleading-data-dir");
+    process.env.DATA_DIR = misleadingDataDir;
+    process.env.ALAYA_OPENAI_SECRET_REF = "env:OPENAI_API_KEY";
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    process.env.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT = "false";
+    process.env.ALAYA_CONFIG_DIR = configDir;
+    process.env.CODEX_HOME = join(dataDir, "codex-home");
+    process.env.HOME = join(dataDir, "home");
+    await mkdir(configDir, { recursive: true });
+    await writeFile(
+      join(configDir, "alaya.toml"),
+      `[storage]\ndb_path = "${configuredDbPath}"\n`,
+      "utf8"
+    );
+    await seedReleaseFixtureAtDbPath(configuredDbPath);
+
+    const runtime = await createAlayaDaemonRuntime();
+    runtime.startBackgroundServices();
+    const server = createAlayaMcpServer({
+      memoryToolHandler: runtime.services.mcpMemoryToolHandler,
+      contextProvider: () => ({
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        agentTarget: "codex",
+        surfaceId: "p5-config-storage"
+      })
+    });
+    const client = new Client(
+      { name: "p5-config-storage", version: "test" },
+      { capabilities: {} }
+    );
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const recall = await callTool<SoulMemorySearchResponse>(client, "soul.recall", {
+        query: "pnpm workspace commands",
+        scope_class: ScopeClass.PROJECT,
+        dimension: MemoryDimension.PREFERENCE,
+        domain_tags: null,
+        max_results: 3
+      });
+      expect(recall.results.map((result) => result.object_id)).toEqual([
+        "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca"
+      ]);
+
+      const status = await dispatchCli(runtime, ["status", "--agent", "codex", "--json"]);
+      expect(status.exitCode).toBe(0);
+      expect(status.json).toMatchObject({
+        daemon: { up: true }
+      });
+
+      const doctor = await dispatchCli(runtime, ["doctor", "--workspace", "workspace-1", "--json"]);
+      expect(doctor.exitCode).toBe(0);
+      expect(doctor.json).toMatchObject({
+        storage: {
+          db_path: configuredDbPath,
+          exists: true,
+          writable: true
+        }
+      });
+
+      const backupPath = join(dataDir, "configured-backup.json");
+      const backup = await dispatchCli(runtime, ["backup", "--output", backupPath, "--json"]);
+      const backupBundle = await readOperationBundle(backupPath);
+      expect(backup.exitCode).toBe(0);
+      expect(backupBundle.storage.db_path).toBe(configuredDbPath);
+      expect(backupBundle.storage.db_base64.length).toBeGreaterThan(0);
+
+      const exportPath = join(dataDir, "configured-export.json");
+      const exportResult = await dispatchCli(runtime, ["export", "--output", exportPath, "--json"]);
+      const exportBundle = await readOperationBundle(exportPath);
+      expect(exportResult.exitCode).toBe(0);
+      expect(exportBundle.storage.db_path).toBe(configuredDbPath);
+      expect(exportBundle.storage.db_base64.length).toBeGreaterThan(0);
+    } finally {
+      await client.close();
+      await server.close();
+      await runtime.shutdown();
+    }
+  }, RELEASE_LOOP_TIMEOUT_MS);
 });
 
 async function callTool<TOutput>(
@@ -397,7 +485,11 @@ async function dispatchCli(
 }
 
 async function seedReleaseFixture(dataDir: string): Promise<void> {
-  const database = initDatabase({ filename: join(dataDir, "alaya.db") });
+  await seedReleaseFixtureAtDbPath(join(dataDir, "alaya.db"));
+}
+
+async function seedReleaseFixtureAtDbPath(dbPath: string): Promise<void> {
+  const database = initDatabase({ filename: dbPath });
   try {
     const workspaceRepo = new SqliteWorkspaceRepo(database);
     const runRepo = new SqliteRunRepo(database);
@@ -511,12 +603,12 @@ async function readGardenEvidence(dataDir: string): Promise<
 async function readOperationBundle(path: string): Promise<
   Readonly<{
     kind: "backup" | "export";
-    storage: Readonly<{ db_base64: string }>;
+    storage: Readonly<{ db_path: string | null; db_base64: string }>;
   }>
 > {
   return JSON.parse(await readFile(path, "utf8")) as {
     kind: "backup" | "export";
-    storage: { db_base64: string };
+    storage: { db_path: string | null; db_base64: string };
   };
 }
 
