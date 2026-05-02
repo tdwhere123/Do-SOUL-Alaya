@@ -5,7 +5,7 @@
 > - **Card ID**: P5-graph-contract
 > - **Port mode**: adapt-and-port
 > - **Source**: `vendor/do-what-new-snapshot/packages/soul/src/garden/topology-service.ts`, `vendor/do-what-new-snapshot/packages/soul/src/garden/path-graph-snapshotter.ts`, `vendor/do-what-new-snapshot/packages/storage/src/repos/path-relation-repo.ts`, `vendor/do-what-new-snapshot/packages/storage/src/repos/path-graph-snapshot-repo.ts`
-> - **Target**: `packages/protocol/src/soul/graph.ts`, `packages/protocol/src/__tests__/soul-graph.test.ts`, `packages/core/src/graph-contract-service.ts`, `packages/core/src/__tests__/graph-contract-service.test.ts`, `docs/v0.1/phase-5-briefs/reports/task-p5-graph-contract.md`
+> - **Target**: `packages/protocol/src/soul/graph.ts`, `packages/protocol/src/__tests__/soul-graph.test.ts`, `packages/core/src/graph-contract-service.ts`, `packages/core/src/__tests__/graph-contract-service.test.ts`, `packages/core/src/index.ts`, `docs/v0.1/phase-5-briefs/reports/task-p5-graph-contract.md`
 > - **Size**: M
 > - **Prerequisite**: P1-topology, P2-repos-batch-2, P2-garden-batch-3, Gate-4 passed
 > - **Blocks**: P5-e2e, P5-final-review
@@ -36,6 +36,7 @@ future Inspector consumer; it does not wire a daemon route or UI.
 | `vendor/do-what-new-snapshot/packages/storage/src/repos/path-relation-repo.ts` | read-only dependency; owned by `P2-repos-batch-2` | Use as behavior evidence only; do not write this file in P5. |
 | `vendor/do-what-new-snapshot/packages/storage/src/repos/path-graph-snapshot-repo.ts` | read-only dependency; owned by `P2-repos-batch-2` | Use as behavior evidence only; do not write this file in P5. |
 | existing `packages/protocol/src/soul/graph.ts` | same file | Extend the existing graph schema only if `SoulGraphSchema` cannot preserve required PathRelation fields; keep the addition minimal and zod-only. |
+| existing `packages/core/src/index.ts` | same file | Add only the `graph-contract-service` export so future consumers can import the schema-ready service through `@do-soul/alaya-core`. |
 
 ### 2.2 Port Rules
 
@@ -89,10 +90,11 @@ Nothing deferred.
 
 ## 6. Shared File Hazards & Dependencies
 
-`packages/protocol/src/soul/graph.ts` is authorized for the minimal schema
-extension described above. Do not edit `packages/protocol/src/index.ts`;
-the root protocol barrel already exports this file. Do not edit daemon,
-Inspector, storage, soul, or package-root manifests.
+`packages/protocol/src/soul/graph.ts` and `packages/core/src/index.ts`
+are authorized only for the minimal schema/service exports described
+above. Do not edit `packages/protocol/src/index.ts`; the root protocol
+barrel already exports `soul/graph.ts`. Do not edit daemon, Inspector,
+storage, soul, or package-root manifests.
 
 **Prerequisite**: P1-topology, P2-repos-batch-2, P2-garden-batch-3, Gate-4 passed.
 **Blocks**: P5-e2e, P5-final-review.
