@@ -40,7 +40,7 @@ Phase 0 → Gate-0
 | Phase 2 | Wave 2: Services + Garden + Repos + Security | 32 cards | **done** | Gate-2 passed |
 | Phase 3 | Wave 3: Memory orchestration bridge + run lifecycle | 6 cards | **done** | Gate-3 passed |
 | Phase 4 | Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI + Memory Inspector | 30 cards (target) | MCP surface `mcp-consumable`; trust delivery/usage durability + Inspector config-write `live-event-ready` after Round 3 followup cards | Gate-4 passed |
-| Phase 5 | Wave 5: E2E + Graph Contract + Final Review (release acceptance) | 3 cards (target) | P5-graph-contract `schema-ready`; P5-e2e `live-event-ready`; final review pending | Gate-5 |
+| Phase 5 | Wave 5: E2E + Graph Contract + Final Review (release acceptance) | 3 cards (target) | **done**: graph contract `schema-ready`; release E2E `live-event-ready`; final review `mcp-consumable` | Gate-5 passed |
 | Phase 6 | Wave 6: Marketing benchmark harness + adapter + baselines + resume + README template | 5 cards (target) | not-started | Gate-6 |
 
 ## Phase 2 — Card Closeout Status
@@ -147,11 +147,13 @@ Historical failure baseline: [review-p4-controller](./phase-4-briefs/reports/rev
 
 This table tracks the three sequential Phase 5 release-acceptance cards.
 
+Gate-5 closeout evidence: [report](./phase-5-briefs/reports/gate-5-closeout.md).
+
 | Card | Readiness | Report |
 |---|---|---|
 | P5-graph-contract | schema-ready | [report](./phase-5-briefs/reports/task-p5-graph-contract.md) |
 | P5-e2e | live-event-ready | [report](./phase-5-briefs/reports/task-p5-e2e.md) |
-| P5-final-review | pending | pending |
+| P5-final-review | mcp-consumable | [report](./phase-5-briefs/reports/task-p5-final-review.md) |
 
 ## Phase 0 — Reset & Source Mirror
 

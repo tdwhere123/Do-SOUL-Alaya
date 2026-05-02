@@ -23,7 +23,7 @@ each Phase Gate.
 | Phase 2 | Wave 2: storage repos batches + core services + Garden + security defense | **done** | Gate-2 passed |
 | Phase 3 | Wave 3: foundation helpers, ConversationService, MCP discovery, run lifecycle, misc services, core barrel | **done** | Gate-3 passed |
 | Phase 4 | Wave 4: Core daemon, routes, MCP server transport, real profile mutation, CLI bridge, secrets, Inspector server, Inspector frontend | MCP memory surface `mcp-consumable`; Inspector config-write and trust delivery/usage durability fixes verified | Gate-4 passed 2026-05-01 |
-| Phase 5 | Wave 5: full E2E, graph contract, final review | P5-graph-contract `schema-ready`; P5-e2e `live-event-ready`; final review pending | Gate-5 (v0.1 release) |
+| Phase 5 | Wave 5: full E2E, graph contract, final review | **done**: graph contract `schema-ready`; release E2E `live-event-ready`; final review `mcp-consumable` | Gate-5 passed 2026-05-02 |
 
 ## Subsystem Readiness (target = v0.1 release)
 
@@ -100,11 +100,17 @@ read-only path graph payload from active PathRelation data, with no live
 daemon, MCP, CLI, or Inspector route. P5-e2e is `live-event-ready`: the
 release loop proves install, attach, MCP memory tools, CLI tools parity,
 candidate signal, proposal reject, Garden pass, status/doctor, backup, and
-export in one daemon lifetime. Remaining v0.1.0 release work is Phase 5
-final review. The post-port hygiene sweep tracked by `#BL-017` starts only
-after `P5-final-review` closes and Gate-5 / v0.1.0 has landed; it is not
-executed inside Phase 5. Benchmark fixtures belong to Phase 6 / Gate-6 /
-v0.1.1 and are not a Gate-5 requirement.
+export in one daemon lifetime. P5-final-review is `mcp-consumable`: the
+four-perspective review/fix loop closed with zero Blocking / Important
+findings for the MCP/CLI release path. Gate-5 / v0.1.0 passed on
+2026-05-02.
+
+The post-port hygiene sweep tracked by `#BL-017` is now startable as a
+dedicated post-v0.1 hygiene wave and was not executed inside Phase 5.
+Benchmark fixtures belong to Phase 6 / Gate-6 / v0.1.1 and are not a
+Gate-5 requirement. The older HTTP proposal review route transaction
+hardening is tracked by `#BL-024`; it is not part of Gate-5 MCP/CLI
+release acceptance.
 
 ## Gate Definitions
 
