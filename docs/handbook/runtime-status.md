@@ -23,7 +23,7 @@ each Phase Gate.
 | Phase 2 | Wave 2: storage repos batches + core services + Garden + security defense | **done** | Gate-2 passed |
 | Phase 3 | Wave 3: foundation helpers, ConversationService, MCP discovery, run lifecycle, misc services, core barrel | **done** | Gate-3 passed |
 | Phase 4 | Wave 4: Core daemon, routes, MCP server transport, real profile mutation, CLI bridge, secrets, Inspector server, Inspector frontend | MCP memory surface `mcp-consumable`; Inspector config-write and trust delivery/usage durability fixes verified | Gate-4 passed 2026-05-01 |
-| Phase 5 | Wave 5: full E2E, benchmark, graph contract, final review | not-started | Gate-5 (v0.1 release) |
+| Phase 5 | Wave 5: full E2E, graph contract, final review | not-started | Gate-5 (v0.1 release) |
 
 ## Subsystem Readiness (target = v0.1 release)
 
@@ -95,9 +95,10 @@ lifetime using the MCP SDK in-memory transport.
 Remaining non-blocking follow-up after Gate-4: none for the resolved
 trust-state delivery / usage and counter restart-stability repairs.
 
-Remaining v0.1 release work is Phase 5: benchmark fixtures, graph
-contract, full E2E, final review, and the post-port hygiene sweep only
-after the final v0.1 port card lands.
+Remaining v0.1.0 release work is Phase 5: graph contract, full E2E,
+final review, and the post-port hygiene sweep only after the final
+v0.1 port card lands. Benchmark fixtures belong to Phase 6 / Gate-6 /
+v0.1.1 and are not a Gate-5 requirement.
 
 ## Gate Definitions
 
@@ -120,6 +121,7 @@ after the final v0.1 port card lands.
   evidence. `mcp-consumable` requires this attached-agent proof, not
   P4-mcp-tooling alone. Current proof:
   `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon gate4-attached-agent-mcp-proof`.
-- **Gate-5 (v0.1 release)**: Gate-4 plus benchmark fixture run, graph
-  contract derived from real PathRelation data, final multi-lens
-  review with zero Blocking / Important findings.
+- **Gate-5 (v0.1.0 release)**: Gate-4 plus graph contract derived
+  from real PathRelation data, full E2E proof, and final multi-lens
+  review with zero Blocking / Important findings. Benchmark fixtures
+  are Phase 6 / Gate-6 / v0.1.1 scope.
