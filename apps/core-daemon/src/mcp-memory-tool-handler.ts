@@ -150,7 +150,7 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
           case "soul.recall":
             return ok(toolName, await recall(SoulMemorySearchRequestSchema.parse(rawArguments), context));
           case "soul.open_pointer":
-            return ok(toolName, await openPointer(SoulOpenPointerRequestSchema.parse(rawArguments)));
+            return ok(toolName, await openPointer(SoulOpenPointerRequestSchema.parse(rawArguments), context));
           case "soul.emit_candidate_signal":
             return ok(toolName, await emitCandidateSignal(SoulEmitCandidateSignalRequestSchema.parse(rawArguments), context));
           case "soul.propose_memory_update":
@@ -216,9 +216,9 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     });
   }
 
-  async function openPointer(request: SoulOpenPointerRequest) {
+  async function openPointer(request: SoulOpenPointerRequest, context: McpMemoryToolCallContext) {
     const memory = await deps.memoryService.findById(request.object_id);
-    if (memory === null) {
+    if (memory === null || memory.workspace_id !== context.workspaceId) {
       throw new ToolNotFoundError(`Memory object not found: ${request.object_id}`);
     }
 
