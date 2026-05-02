@@ -68,13 +68,14 @@ Renaming is a deliberate adapt-and-port-style change: it diverges from the snaps
 ### #BL-017 — Post-port hygiene sweep (naming, redundancy, file size)
 
 **Status**: Open (post-v0.1 hygiene)
-**Owner**: `packages/*` (no card yet; sweep wave to be opened after the last v0.1 port card lands)
-**Close condition**: A dedicated cleanup wave executes after the final v0.1 port card lands and (a) renames upstream-milestone-named files/symbols to domain-aligned names — covers `#BL-016`; (b) splits inherited oversized single files (>800 lines, e.g. `packages/protocol/src/events/phase-c.ts`) into focused modules per `rules/common/coding-style.md`; (c) removes port residue: unused exports, parallel helper duplicates introduced by adapter shims, dead branches Alaya never exercises; (d) reconciles naming inconsistencies that adapter ports left behind; (e) `docs/handbook/code-map.md` and per-package codemaps updated; (f) full build + vitest green.
+**Owner**: `packages/*` (no card yet; sweep wave to be opened only after `P5-final-review` closes Gate-5 / v0.1.0)
+**Close condition**: A dedicated cleanup wave executes after `P5-final-review` closes Gate-5 / v0.1.0 and (a) renames upstream-milestone-named files/symbols to domain-aligned names — covers `#BL-016`; (b) splits inherited oversized single files (>800 lines, e.g. `packages/protocol/src/events/phase-c.ts`) into focused modules per `rules/common/coding-style.md`; (c) removes port residue: unused exports, parallel helper duplicates introduced by adapter shims, dead branches Alaya never exercises; (d) reconciles naming inconsistencies that adapter ports left behind; (e) `docs/handbook/code-map.md` and per-package codemaps updated; (f) full build + vitest green.
 
 The Port-First discipline (`docs/handbook/port-protocol.md`) forbids mid-port refactors that would diverge from `vendor/do-what-new-snapshot/`. As a result v0.1 deliberately accumulates port residue — upstream-milestone naming, oversized inherited files, parallel helpers next to Alaya-native equivalents, exports Alaya never calls. None of these are individually blocking, and folding them into per-card scope would pollute every port card with refactor work. Treat as a single sweep wave executed once port phase is over; the open backlog set should be consolidated and closed in that pass.
 
-Do not execute the sweep before `P5-graph-contract` and the final v0.1
-port card land.
+Do not execute the sweep inside Phase 5 or before `P5-final-review` closes
+Gate-5 / v0.1.0. At Gate-5 closeout this issue becomes startable as a
+dedicated post-v0.1 hygiene wave, not as a release blocker.
 
 ## Out of Alaya Scope (Permanently Rejected)
 

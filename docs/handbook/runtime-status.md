@@ -101,9 +101,10 @@ daemon, MCP, CLI, or Inspector route. P5-e2e is `live-event-ready`: the
 release loop proves install, attach, MCP memory tools, CLI tools parity,
 candidate signal, proposal reject, Garden pass, status/doctor, backup, and
 export in one daemon lifetime. Remaining v0.1.0 release work is Phase 5
-final review and the post-port hygiene sweep only after the final v0.1 port
-card lands. Benchmark fixtures belong to Phase 6 / Gate-6 / v0.1.1 and are
-not a Gate-5 requirement.
+final review. The post-port hygiene sweep tracked by `#BL-017` starts only
+after `P5-final-review` closes and Gate-5 / v0.1.0 has landed; it is not
+executed inside Phase 5. Benchmark fixtures belong to Phase 6 / Gate-6 /
+v0.1.1 and are not a Gate-5 requirement.
 
 ## Gate Definitions
 
