@@ -79,8 +79,8 @@ export function createAlayaCliBridge(
   daemon: AlayaCliDaemonRuntime,
   options: AlayaCliBridgeOptions = {}
 ): AlayaCliBridge {
-  const entries: AlayaSubcommandSpec<any>[] = [];
-  const byName = new Map<string, AlayaSubcommandSpec<any>>();
+  const entries: AlayaSubcommandSpec<unknown>[] = [];
+  const byName = new Map<string, AlayaSubcommandSpec<unknown>>();
   const cwd = options.cwd ?? process.cwd();
   const env = options.env ?? process.env;
   const stdin = options.stdin ?? process.stdin;
@@ -94,8 +94,14 @@ export function createAlayaCliBridge(
       if (byName.has(spec.name)) {
         throw new DuplicateSubcommandError(spec.name);
       }
-      entries.push(spec);
-      byName.set(spec.name, spec);
+      // The public registerSubcommand signature is generic over each
+      // caller's TArgs, but the bridge's internal store unifies entries as
+      // AlayaSubcommandSpec<unknown>. The cast is the single boundary
+      // between "caller-known TArgs" and "bridge-erased unknown"; the
+      // dispatch path only uses `argsSchema.safeParse` to recover TArgs.
+      const erased = spec as unknown as AlayaSubcommandSpec<unknown>;
+      entries.push(erased);
+      byName.set(spec.name, erased);
     },
 
     dispatch: async (argv) => {
