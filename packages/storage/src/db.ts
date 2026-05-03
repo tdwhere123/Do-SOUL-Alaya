@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import BetterSqlite3 from "better-sqlite3";
-import { StorageError } from "./errors.js";
+import { StorageError, type StorageErrorCode } from "./errors.js";
 
 export type SqliteConnection = InstanceType<typeof BetterSqlite3>;
 
@@ -50,6 +50,15 @@ export function initDatabase(options: InitDatabaseOptions = {}): StorageDatabase
 
   try {
     database.pragma("foreign_keys = ON");
+    // SQLite hardening for concurrent + crash-safe local-first usage.
+    // WAL is silently ignored on :memory: databases, so no branch is needed.
+    // - journal_mode=WAL: readers no longer block writers.
+    // - busy_timeout=5000: 5s wait window before SQLITE_BUSY surfaces, reducing
+    //   spurious failures when a daemon write coincides with a CLI read.
+    // - synchronous=NORMAL: durable enough for WAL while halving fsync cost.
+    database.pragma("journal_mode = WAL");
+    database.pragma("busy_timeout = 5000");
+    database.pragma("synchronous = NORMAL");
     runMigrations(database);
   } catch (error) {
     database.close();
