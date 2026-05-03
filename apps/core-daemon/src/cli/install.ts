@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir, unlink } from "node:fs/promises";
 import path from "node:path";
 import {
   buildInstallAuditPath,
@@ -39,6 +39,13 @@ export interface InstallCommandDependencies {
 interface InstallArgs {
   readonly nonInteractive: boolean;
   readonly answers: InstallAnswers | null;
+  readonly force: boolean;
+}
+
+interface PartialStateEntry {
+  readonly path: string;
+  // beforeContent === undefined means the file did not exist before; rollback unlinks.
+  readonly beforeContent: string | undefined;
 }
 
 export function createInstallCommand(deps: InstallCommandDependencies = {}): AlayaSubcommandSpec<InstallArgs> {
@@ -66,12 +73,24 @@ async function executeInstall(
   const paths = resolveAlayaConfigPaths(configDir);
   const startedAt = clock();
   const auditPath = buildInstallAuditPath(paths, startedAt);
-  const partialState: string[] = [];
+  const partialState: PartialStateEntry[] = [];
   let auditInitialized = false;
 
   try {
     await ensurePrivateDirectory(paths.configDir);
     await ensurePrivateDirectory(paths.auditDir);
+
+    if (!args.force) {
+      const blocking = await detectBlockingPriorAudit(paths);
+      if (blocking !== null) {
+        ctx.stderr.write(
+          `previous install audit ${blocking.fileName} reports status="${blocking.status}"; ` +
+            `partial_state may be unrecovered. Re-run with --force to override.\n`
+        );
+        return { exitCode: ALAYA_SYSEXITS.TEMPFAIL };
+      }
+    }
+
     await writeInstallAudit(auditPath, {
       status: "started",
       started_at: startedAt,
@@ -87,19 +106,22 @@ async function executeInstall(
 
     if (resolved.pasted_secret !== null) {
       await ensurePrivateDirectory(paths.secretsDir);
+      const secretBefore = await readOptional(resolved.pasted_secret.path);
       await writePrivateTextAtomic(resolved.pasted_secret.path, `${resolved.pasted_secret.value.trimEnd()}\n`, 0o600);
-      partialState.push(resolved.pasted_secret.path);
+      partialState.push({ path: resolved.pasted_secret.path, beforeContent: secretBefore ?? undefined });
     }
 
     const nextToml = renderAlayaToml(resolved);
     const nextEnv = renderEnvFile(resolved);
-    if (normalizeFile(await readOptional(paths.tomlPath)) !== normalizeFile(nextToml)) {
+    const tomlBefore = await readOptional(paths.tomlPath);
+    if (normalizeFile(tomlBefore) !== normalizeFile(nextToml)) {
       await writePrivateTextAtomic(paths.tomlPath, nextToml, 0o600);
-      partialState.push(paths.tomlPath);
+      partialState.push({ path: paths.tomlPath, beforeContent: tomlBefore ?? undefined });
     }
-    if (normalizeFile(await readOptional(paths.envPath)) !== normalizeFile(nextEnv)) {
+    const envBefore = await readOptional(paths.envPath);
+    if (normalizeFile(envBefore) !== normalizeFile(nextEnv)) {
       await writePrivateTextAtomic(paths.envPath, nextEnv, 0o600);
-      partialState.push(paths.envPath);
+      partialState.push({ path: paths.envPath, beforeContent: envBefore ?? undefined });
     }
 
     await writeInstallAudit(auditPath, {
@@ -107,7 +129,7 @@ async function executeInstall(
       started_at: startedAt,
       finished_at: clock(),
       config_dir: paths.configDir,
-      partial_state: partialState,
+      partial_state: partialState.map((entry) => entry.path),
       error: null
     });
     if (ctx.jsonRequested !== true) {
@@ -124,19 +146,75 @@ async function executeInstall(
       }
     };
   } catch (error) {
+    const rollbackErrors = await rollbackPartialState(partialState);
     if (auditInitialized) {
       await writeInstallAudit(auditPath, {
         status: "failed",
         started_at: startedAt,
         finished_at: clock(),
         config_dir: paths.configDir,
-        partial_state: partialState,
-        error: sanitizeInstallError(error)
+        partial_state: partialState.map((entry) => entry.path),
+        error: sanitizeInstallError(error),
+        rollback_errors: rollbackErrors.length > 0 ? rollbackErrors : undefined
       }).catch(() => undefined);
     }
     ctx.stderr.write(`${sanitizeInstallError(error)}\n`);
     return { exitCode: ALAYA_SYSEXITS.CANTCREAT };
   }
+}
+
+async function rollbackPartialState(partialState: readonly PartialStateEntry[]): Promise<string[]> {
+  const errors: string[] = [];
+  for (let i = partialState.length - 1; i >= 0; i -= 1) {
+    const entry = partialState[i]!;
+    try {
+      if (entry.beforeContent === undefined) {
+        await unlink(entry.path).catch((err) => {
+          if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+            return;
+          }
+          throw err;
+        });
+      } else {
+        await writePrivateTextAtomic(entry.path, entry.beforeContent, 0o600);
+      }
+    } catch (rollbackError) {
+      errors.push(`${entry.path}: ${sanitizeInstallError(rollbackError)}`);
+    }
+  }
+  return errors;
+}
+
+async function detectBlockingPriorAudit(
+  paths: AlayaConfigPaths
+): Promise<{ readonly fileName: string; readonly status: string } | null> {
+  let entries: string[];
+  try {
+    entries = await readdir(paths.auditDir);
+  } catch (error) {
+    if (error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+  const installFiles = entries.filter((name) => name.startsWith("install-") && name.endsWith(".json")).sort();
+  if (installFiles.length === 0) {
+    return null;
+  }
+  const latest = installFiles[installFiles.length - 1]!;
+  const content = await readFile(path.join(paths.auditDir, latest), "utf8").catch(() => null);
+  if (content === null) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(content) as { readonly status?: unknown };
+    if (parsed.status === "started" || parsed.status === "failed") {
+      return { fileName: latest, status: parsed.status };
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function installArgsSchema(): AlayaCliArgsSchema<InstallArgs> {
@@ -150,7 +228,7 @@ function installArgsSchema(): AlayaCliArgsSchema<InstallArgs> {
       }
 
       if (input.length === 0) {
-        return { success: true, data: { nonInteractive: false, answers: null } };
+        return { success: true, data: { nonInteractive: false, answers: null, force: false } };
       }
 
       const tokens = [...input];
@@ -158,13 +236,18 @@ function installArgsSchema(): AlayaCliArgsSchema<InstallArgs> {
       if (nonInteractiveIndex < 0) {
         return {
           success: false,
-          error: { issues: [{ path: [], message: "Usage: install --non-interactive [--json] <answers-json>" }] }
+          error: { issues: [{ path: [], message: "Usage: install --non-interactive [--json] [--force] <answers-json>" }] }
         };
       }
       tokens.splice(nonInteractiveIndex, 1);
       const jsonIndex = tokens.indexOf("--json");
       if (jsonIndex >= 0) {
         tokens.splice(jsonIndex, 1);
+      }
+      const forceIndex = tokens.indexOf("--force");
+      const force = forceIndex >= 0;
+      if (force) {
+        tokens.splice(forceIndex, 1);
       }
       if (tokens.length !== 1) {
         return {
@@ -178,7 +261,7 @@ function installArgsSchema(): AlayaCliArgsSchema<InstallArgs> {
         if (!isRecord(parsed)) {
           throw new Error("answers must be an object");
         }
-        return { success: true, data: { nonInteractive: true, answers: parsed as InstallAnswers } };
+        return { success: true, data: { nonInteractive: true, answers: parsed as InstallAnswers, force } };
       } catch (error) {
         return {
           success: false,
@@ -314,6 +397,7 @@ async function writeInstallAudit(
     readonly config_dir: string;
     readonly partial_state: readonly string[];
     readonly error: string | null;
+    readonly rollback_errors?: readonly string[];
   }>
 ): Promise<void> {
   await writePrivateTextAtomic(auditPath, `${JSON.stringify({ audit_version: 1, ...input })}\n`, 0o600);
