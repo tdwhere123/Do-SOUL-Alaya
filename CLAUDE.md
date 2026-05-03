@@ -141,27 +141,16 @@ rules and the Package Dependency Direction live in
 
 ## Commands
 
+The full CLI surface (11 verbs) and the Quickstart live in `README.md`
+(§CLI commands, §Quickstart). Outside of those, agent contributors only
+need a few extras:
+
 ```bash
 rtk pnpm install
 rtk pnpm build
 rtk pnpm test
 rtk pnpm exec vitest run --project @do-soul/alaya-<package>
-
-# CLI surface (post Gate-4 / Gate-5; requires `rtk pnpm build` first):
 rtk pnpm --dir apps/core-daemon dev   # daemon dev
-rtk pnpm alaya doctor                 # CLI diagnostic
-rtk pnpm alaya install                # install profile
-rtk pnpm alaya attach codex           # attach to Codex
-rtk pnpm alaya attach claude-code     # attach to Claude Code
-rtk pnpm alaya detach codex           # reverse attach
-rtk pnpm alaya status                 # status report
-rtk pnpm alaya inspect                # Memory Inspector loopback (memory-tooling surface)
-rtk pnpm alaya tools list             # CLI fallback: list MCP memory tools
-rtk pnpm alaya tools call <tool> '<json>' --json  # CLI fallback: call one tool
-rtk pnpm alaya backup --output <path>             # portable bundle
-rtk pnpm alaya export --output <path>             # portable export
-rtk pnpm alaya import --bundle <path>             # restore from bundle
-rtk pnpm alaya mcp stdio              # daemon MCP stdio server
 ```
 
 `rtk pnpm alaya` is a root npm script (`scripts.alaya = "node ./bin/alaya.mjs"`).
