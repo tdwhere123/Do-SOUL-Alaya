@@ -28,9 +28,17 @@ export interface ScopedProposal {
 }
 
 export type ProposalResolutionEventInput = EventLogDraftInput;
+export type ProposalCreationEventInput = EventLogDraftInput;
 
 export interface ProposalRepo {
   create(input: ProposalCreateInput): Promise<Readonly<Proposal>>;
+  createProposalWithEvents(
+    input: ProposalCreateInput,
+    events: readonly ProposalCreationEventInput[]
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly events: readonly EventLogEntry[];
+  }>>;
   findById(proposalId: string): Promise<Readonly<Proposal> | null>;
   findScopedById(proposalId: string): Promise<Readonly<ScopedProposal> | null>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<Proposal>[]>;
@@ -197,6 +205,55 @@ export class SqliteProposalRepo implements ProposalRepo {
     }
 
     return parsedProposal;
+  }
+
+  public async createProposalWithEvents(
+    input: ProposalCreateInput,
+    events: readonly ProposalCreationEventInput[]
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly events: readonly EventLogEntry[];
+  }>> {
+    const parsedProposal = parseProposal(input.proposal);
+    const parsedWorkspaceId = parseWorkspaceId(input.workspace_id);
+    const parsedRunId = parseRunId(input.run_id);
+
+    try {
+      return this.db.connection.transaction(() => {
+        const storedEvents = events.map((event) => insertEventLogEntry(this.eventLogWriter, event));
+        this.createStatement.run(
+          parsedProposal.runtime_id,
+          parsedProposal.object_kind,
+          parsedProposal.proposal_id,
+          parsedProposal.task_surface_ref,
+          parsedProposal.derived_from,
+          parsedProposal.retention_policy,
+          parsedProposal.dossier_ref,
+          parsedProposal.recommended_option_id,
+          JSON.stringify(parsedProposal.proposal_options),
+          parsedProposal.resolution_state,
+          parsedProposal.expires_at,
+          parsedProposal.last_updated_at,
+          parsedWorkspaceId,
+          parsedRunId
+        );
+
+        return deepFreeze({
+          proposal: parsedProposal,
+          events: storedEvents
+        });
+      })();
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to create proposal ${parsedProposal.proposal_id} with creation events.`,
+        error
+      );
+    }
   }
 
   public async findById(proposalId: string): Promise<Readonly<Proposal> | null> {

@@ -242,6 +242,50 @@ describe("SqliteProposalRepo", () => {
     });
   });
 
+  it("atomically stores proposal row and creation events in one transaction", async () => {
+    const { repo, database } = createRepo();
+    const proposal = createProposal();
+
+    const result = await repo.createProposalWithEvents(
+      { proposal, workspace_id: "workspace-1", run_id: "run-1" },
+      createCreationEvents(proposal)
+    );
+
+    expect(result.proposal).toEqual(proposal);
+    expect(result.events.map((event) => event.event_type)).toEqual([
+      Phase1BEventType.SOUL_PROPOSAL_CREATED
+    ]);
+    expect(result.events[0]?.revision).toBe(0);
+    expect(countProposalEvents(database, proposal.proposal_id)).toBe(1);
+    await expect(repo.findById(proposal.proposal_id)).resolves.toEqual(proposal);
+  });
+
+  it("rolls back creation events when the proposal row insert fails", async () => {
+    const { repo, database } = createRepo();
+    const proposal = createProposal();
+
+    // Pre-insert the proposal row so the inner INSERT collides on PRIMARY KEY (proposal_id).
+    await repo.create({ proposal, workspace_id: "workspace-1", run_id: "run-1" });
+    expect(countProposalEvents(database, proposal.proposal_id)).toBe(0);
+
+    await expect(
+      repo.createProposalWithEvents(
+        {
+          proposal: createProposal({ last_updated_at: "2026-03-22T00:00:00.000Z" }),
+          workspace_id: "workspace-1",
+          run_id: "run-1"
+        },
+        createCreationEvents(proposal)
+      )
+    ).rejects.toMatchObject({ code: "QUERY_FAILED" });
+
+    // Transaction should have rolled back the EventLog draft so no ghost events remain.
+    expect(countProposalEvents(database, proposal.proposal_id)).toBe(0);
+    await expect(repo.findById(proposal.proposal_id)).resolves.toMatchObject({
+      last_updated_at: "2026-03-21T00:00:00.000Z"
+    });
+  });
+
   it("throws not found when updating a missing proposal", async () => {
     const { repo, database } = createRepo();
     const proposal = createProposal();
@@ -291,6 +335,25 @@ function createRepo(): { readonly repo: SqliteProposalRepo; readonly database: S
     repo: new SqliteProposalRepo(database),
     database
   };
+}
+
+function createCreationEvents(proposal: Proposal): readonly ProposalResolutionEventInput[] {
+  return [
+    {
+      event_type: Phase1BEventType.SOUL_PROPOSAL_CREATED,
+      entity_type: "proposal",
+      entity_id: proposal.proposal_id,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      caused_by: "codex",
+      payload_json: {
+        object_id: proposal.runtime_id,
+        object_kind: proposal.object_kind,
+        workspace_id: "workspace-1",
+        run_id: "run-1"
+      }
+    }
+  ];
 }
 
 function createReviewEvents(proposal: Proposal): readonly ProposalResolutionEventInput[] {
