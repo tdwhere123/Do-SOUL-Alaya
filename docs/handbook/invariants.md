@@ -90,6 +90,14 @@ These rules always win over lower-level docs and task-card convenience.
     and never participates in agent control flow. Inspector writes
     are limited to daemon runtime parameters; durable memory writes
     must still go through the proposal / governance path per §19.
+21a. Public-facing copy (README, marketing surfaces, leaderboard
+    disclosure, blog posts) must describe Alaya as a memory plane for
+    CLI agents (Codex / Claude Code / similar) and must not invite
+    non-engineering users to install or operate Alaya. Surfaces that
+    reach a non-engineering audience (e.g. xiaohongshu) require either
+    a separate consumer-facing product or a charter amendment to §21
+    before publication. (Added 2026-05-03 in p5-system-review-r1;
+    closes `#BL-023`.)
 22. MCP tool surface and CLI fallback share one runtime contract. CLI
     fallback parity with MCP is enforced by tests.
 23. Attach / Profile changes write only after preview + explicit
@@ -116,6 +124,36 @@ These rules always win over lower-level docs and task-card convenience.
     `docs/handbook/task-card-template.md` is authoritative. Cards that
     deviate from its section order, frontmatter fields, or naming
     conventions are rejected at review.
+
+## Defense-against-recurrence (added 2026-05-03 in p5-system-review-r1)
+
+The following three invariants were extracted from the Cause Class
+Aggregation step of `p5-system-review-r1`. Each was a Cause Class that
+appeared in ≥2 independent findings; abstracting them here is the
+required防复发 step per `docs/handbook/workflow/review-protocol.md`
+§Cause Class Aggregation.
+
+29. **Default Scope Invariant.** All Alaya-redesign / clean-room
+    storage paths, MCP tool inputs, HTTP routes, and resource access
+    code MUST be workspace-scoped and caller-context-bound by default.
+    Code that exposes object access without a workspace check, or that
+    accepts payload-supplied scope overriding the trusted call context,
+    is **Blocking by default** at review. Patches must fix at the
+    service or storage layer, not at the handler boundary.
+30. **Fix at Source.** When a security or scoping defect is discovered
+    in code reachable from multiple surfaces (MCP, HTTP, CLI), the fix
+    MUST land at the deepest shared point — typically a service or
+    repo method — not at one handler. Symptom-fix at a single handler
+    boundary while another surface still calls the unsafe primitive is
+    **Blocking by default**.
+31. **Single-Source Concurrency.** Any read-modify-write that needs
+    serialization MUST be performed inside a single SQLite
+    `connection.transaction(...)` (or equivalent storage-owned atomic
+    primitive). In-process locks (`Map<string, Promise<void>>`,
+    semaphores) are not acceptable substitutes for correctness; they
+    may exist as defense-in-depth only with explicit comments and a
+    test that runs without them. Multi-process correctness must come
+    from storage-level CAS.
 
 ## Docs
 
