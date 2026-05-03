@@ -5,6 +5,9 @@
   "engines": {
     "node": ">=20.19.0"
   },
+  "bin": {
+    "alaya": "./bin/alaya.mjs"
+  },
   "scripts": {
     "build": "node ./scripts/build-existing.mjs",
     "test": "vitest run --config vitest.config.mjs",

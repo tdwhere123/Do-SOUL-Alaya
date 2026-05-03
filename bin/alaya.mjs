@@ -19,13 +19,13 @@ export async function loadAlayaCliModules(importModule = defaultImportModule) {
   ]);
 
   if (typeof bridgeModule.createAlayaCliBridge !== "function") {
-    throw new Error(`Missing createAlayaCliBridge export from ${bridgeDistPath}.`);
+    throw new Error(`Cannot find module "${bridgeDistPath}". Run \`rtk pnpm build\` first.`);
   }
   if (typeof daemonModule.createAlayaDaemonRuntime !== "function") {
-    throw new Error(`Missing createAlayaDaemonRuntime export from ${daemonDistPath}.`);
+    throw new Error(`Cannot find module "${daemonDistPath}". Run \`rtk pnpm build\` first.`);
   }
   if (typeof registerModule.registerAlayaCliCommands !== "function") {
-    throw new Error(`Missing registerAlayaCliCommands export from ${registerDistPath}.`);
+    throw new Error(`Cannot find module "${registerDistPath}". Run \`rtk pnpm build\` first.`);
   }
 
   const softwareExit = toExitCode(bridgeModule.ALAYA_SYSEXITS?.SOFTWARE, SOFTWARE_EXIT_FALLBACK);

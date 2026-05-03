@@ -1,9 +1,16 @@
 {
   "name": "@do-soul/alaya-core-daemon",
   "version": "0.0.1",
+  "private": true,
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "bin": {
+    "alaya": "../../bin/alaya.mjs"
+  },
   "scripts": {
     "dev": "node ../../scripts/dev-core-daemon.mjs",
     "build": "tsc -b",
