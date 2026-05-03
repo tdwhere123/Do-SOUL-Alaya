@@ -82,19 +82,45 @@ async function executeDetach(
   const applyOptions: ProfileMutationApplyOptions = {
     fs: deps.fs,
     auditWriter: deps.auditWriter,
-    allowConflicts: true,
+    allowConflicts: false,
     nowIso: deps.nowIso
   };
   const confirm = deps.confirm ?? confirmProfileMutation;
 
   try {
     const plan = await buildDetachProfileMutationPlan(target, { env: ctx.env, fs: deps.fs });
+    const searchedPaths = [...plan.paths.slashPathCandidates];
+    const conflictOperations = plan.operations.filter((operation) => operation.conflict !== undefined);
+    if (conflictOperations.length > 0) {
+      const message = conflictOperations
+        .map((operation) => operation.conflict!.message)
+        .join("; ");
+      ctx.stderr.write(`${message}\n`);
+      return {
+        exitCode: ALAYA_SYSEXITS.NOPERM,
+        json: {
+          ok: false,
+          target,
+          changed: false,
+          searched: searchedPaths,
+          conflicts: conflictOperations.map((operation) => ({
+            path: operation.path,
+            message: operation.conflict!.message,
+            existing_command: operation.conflict!.existingCommand
+          }))
+        }
+      };
+    }
     const hasChanges = plan.operations.some((operation) => operation.changed);
     if (!hasChanges) {
       if (ctx.jsonRequested !== true) {
         ctx.stdout.write("nothing to detach\n");
+        ctx.stdout.write(`searched paths: ${searchedPaths.join(", ")}\n`);
       }
-      return { exitCode: ALAYA_SYSEXITS.OK, json: { ok: true, target, changed: false } };
+      return {
+        exitCode: ALAYA_SYSEXITS.OK,
+        json: { ok: true, target, changed: false, searched: searchedPaths }
+      };
     }
 
     if (ctx.jsonRequested !== true) {
@@ -108,6 +134,7 @@ async function executeDetach(
           target,
           changed: false,
           dry_run: true,
+          searched: searchedPaths,
           changed_paths: plan.operations.filter((operation) => operation.changed).map((operation) => operation.path)
         }
       };
@@ -117,7 +144,10 @@ async function executeDetach(
       if (ctx.jsonRequested !== true) {
         ctx.stdout.write("canceled\n");
       }
-      return { exitCode: ALAYA_SYSEXITS.OK, json: { ok: true, target, changed: false, canceled: true } };
+      return {
+        exitCode: ALAYA_SYSEXITS.OK,
+        json: { ok: true, target, changed: false, canceled: true, searched: searchedPaths }
+      };
     }
 
     const result = await applyProfileMutationPlan(plan, applyOptions);
@@ -130,6 +160,7 @@ async function executeDetach(
         ok: true,
         target,
         changed: result.changed,
+        searched: searchedPaths,
         changed_paths: result.auditRow?.changed_paths ?? [],
         records: result.auditRow?.records ?? []
       }
