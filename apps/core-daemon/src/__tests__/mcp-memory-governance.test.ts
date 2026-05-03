@@ -36,6 +36,26 @@ describe("mcp memory governance", () => {
           proposals.set(proposal.proposal_id, { proposal, workspace_id, run_id });
           return proposal;
         },
+        createProposalWithEvents: async ({ proposal, workspace_id, run_id }, creationEvents) => {
+          order.push("repo:createProposalWithEvents");
+          proposals.set(proposal.proposal_id, { proposal, workspace_id, run_id });
+          const storedEvents = creationEvents.map((event) => {
+            order.push(`event:${event.event_type}`);
+            const entry = {
+              event_id: `event-${++eventCounter}`,
+              created_at: "2026-04-30T00:00:00.000Z",
+              revision: events.filter(
+                (existingEvent) =>
+                  existingEvent.entity_type === event.entity_type &&
+                  existingEvent.entity_id === event.entity_id
+              ).length + 1,
+              ...event
+            } satisfies EventLogEntry;
+            events.push(entry);
+            return entry;
+          });
+          return { proposal, events: storedEvents };
+        },
         findById: async (proposalId) => proposals.get(proposalId)?.proposal ?? null,
         findScopedById: async (proposalId) => proposals.get(proposalId) ?? null,
         updatePendingResolutionWithEvents: async (proposalId, state, updatedAt, resolutionEvents) => {
@@ -89,8 +109,8 @@ describe("mcp memory governance", () => {
       status: "created"
     });
     expect(order.slice(0, 3)).toEqual([
+      "repo:createProposalWithEvents",
       `event:${Phase1BEventType.SOUL_PROPOSAL_CREATED}`,
-      "repo:create",
       `notify:${Phase1BEventType.SOUL_PROPOSAL_CREATED}`
     ]);
     expect(proposals.get(created.proposal_id)?.proposal.resolution_state).toBe(ProposalResolutionState.PENDING);
@@ -144,6 +164,23 @@ describe("mcp memory governance", () => {
       },
       proposalRepo: {
         create: async () => proposal,
+        createProposalWithEvents: async (input, creationEvents) => {
+          const storedEvents = creationEvents.map((event) => {
+            const entry = {
+              event_id: `event-${++eventCounter}`,
+              created_at: "2026-04-30T00:00:00.000Z",
+              revision: events.filter(
+                (existingEvent) =>
+                  existingEvent.entity_type === event.entity_type &&
+                  existingEvent.entity_id === event.entity_id
+              ).length + 1,
+              ...event
+            } satisfies EventLogEntry;
+            events.push(entry);
+            return entry;
+          });
+          return { proposal: input.proposal, events: storedEvents };
+        },
         findById: async () => storedProposal,
         findScopedById: async () => ({
           proposal: storedProposal,
@@ -235,6 +272,9 @@ describe("mcp memory governance", () => {
       },
       proposalRepo: {
         create: async () => proposal,
+        createProposalWithEvents: async () => {
+          throw new Error("create should not run for a scope mismatch test");
+        },
         findById: async () => proposal,
         findScopedById: async () => ({
           proposal,
