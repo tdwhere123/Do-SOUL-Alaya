@@ -1,3 +1,5 @@
+import { soulToolJsonSchemas } from "@do-soul/alaya-protocol";
+
 export const ALAYA_MEMORY_TOOL_NAMES = Object.freeze([
   "soul.recall",
   "soul.open_pointer",
@@ -11,12 +13,12 @@ export const ALAYA_MEMORY_TOOL_NAMES = Object.freeze([
 
 export type AlayaMemoryToolName = (typeof ALAYA_MEMORY_TOOL_NAMES)[number];
 
-export type JsonObjectSchema = Readonly<{
-  readonly type: "object";
-  readonly properties?: Readonly<Record<string, object>>;
-  readonly required?: readonly string[];
-  readonly additionalProperties?: boolean;
-}>;
+/**
+ * MCP tool input schema. Derived from `@do-soul/alaya-protocol`
+ * `soulToolJsonSchemas` (zod → JSON Schema, p5-system-review-r3 MR-I04)
+ * so external clients see the exact same bounds the runtime enforces.
+ */
+export type JsonObjectSchema = Readonly<Record<string, unknown>>;
 
 export interface AlayaMemoryToolDefinition {
   readonly name: AlayaMemoryToolName;
@@ -49,31 +51,6 @@ const descriptionByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.
     "Report whether recalled context for a delivery was used, skipped, or not applicable. Supports delivered-vs-used trust state."
 });
 
-export function listAlayaMemoryTools(): readonly AlayaMemoryToolDefinition[] {
-  return ALAYA_MEMORY_TOOL_NAMES.map((name) =>
-    Object.freeze({
-      name,
-      description: descriptionByName[name],
-      inputSchema: inputSchemaByToolName[name],
-      annotations: annotationByToolName[name]
-    })
-  );
-}
-
-export function hasAlayaMemoryToolName(value: string): value is AlayaMemoryToolName {
-  return (ALAYA_MEMORY_TOOL_NAMES as readonly string[]).includes(value);
-}
-
-const stringSchema = Object.freeze({ type: "string" });
-const nullableStringSchema = Object.freeze({ anyOf: [{ type: "string" }, { type: "null" }] });
-const stringArraySchema = Object.freeze({ type: "array", items: { type: "string" } });
-const nullableStringArraySchema = Object.freeze({
-  anyOf: [stringArraySchema, { type: "null" }]
-});
-const objectSchema = Object.freeze({ type: "object", additionalProperties: true });
-const numberSchema = Object.freeze({ type: "number" });
-const integerSchema = Object.freeze({ type: "integer", minimum: 0 });
-
 const readOnlyAnnotation = Object.freeze({
   readOnlyHint: true,
   destructiveHint: false,
@@ -88,109 +65,6 @@ const writeAnnotation = Object.freeze({
   openWorldHint: false
 });
 
-const inputSchemaByToolName: Record<AlayaMemoryToolName, JsonObjectSchema> = Object.freeze({
-  "soul.recall": Object.freeze({
-    type: "object",
-    additionalProperties: false,
-    required: ["query", "max_results"],
-    properties: {
-      query: stringSchema,
-      scope_class: nullableStringSchema,
-      dimension: nullableStringSchema,
-      domain_tags: nullableStringArraySchema,
-      max_results: integerSchema
-    }
-  }),
-  "soul.open_pointer": Object.freeze({
-    type: "object",
-    additionalProperties: false,
-    required: ["object_id"],
-    properties: {
-      object_id: stringSchema
-    }
-  }),
-  "soul.emit_candidate_signal": Object.freeze({
-    type: "object",
-    additionalProperties: false,
-    required: [
-      "workspace_id",
-      "run_id",
-      "surface_id",
-      "signal_kind",
-      "object_kind",
-      "scope_hint",
-      "domain_tags",
-      "confidence",
-      "evidence_refs",
-      "raw_payload"
-    ],
-    properties: {
-      workspace_id: stringSchema,
-      run_id: stringSchema,
-      surface_id: nullableStringSchema,
-      signal_kind: stringSchema,
-      object_kind: stringSchema,
-      scope_hint: nullableStringSchema,
-      domain_tags: stringArraySchema,
-      confidence: numberSchema,
-      evidence_refs: stringArraySchema,
-      raw_payload: objectSchema
-    }
-  }),
-  "soul.propose_memory_update": Object.freeze({
-    type: "object",
-    additionalProperties: false,
-    required: ["target_object_id", "proposed_changes", "reason"],
-    properties: {
-      target_object_id: stringSchema,
-      proposed_changes: objectSchema,
-      reason: stringSchema
-    }
-  }),
-  "soul.review_memory_proposal": Object.freeze({
-    type: "object",
-    additionalProperties: false,
-    required: ["proposal_id", "verdict"],
-    properties: {
-      proposal_id: stringSchema,
-      verdict: Object.freeze({ type: "string", enum: ["accept", "reject"] }),
-      reason: nullableStringSchema
-    }
-  }),
-  "soul.apply_override": Object.freeze({
-    type: "object",
-    additionalProperties: false,
-    required: ["target_object", "correction"],
-    properties: {
-      target_object: stringSchema,
-      correction: stringSchema,
-      priority: integerSchema
-    }
-  }),
-  "soul.explore_graph": Object.freeze({
-    type: "object",
-    additionalProperties: false,
-    required: ["memory_id", "workspace_id"],
-    properties: {
-      memory_id: stringSchema,
-      workspace_id: stringSchema,
-      edge_types: stringArraySchema,
-      direction: Object.freeze({ type: "string", enum: ["inbound", "outbound", "both"] })
-    }
-  }),
-  "soul.report_context_usage": Object.freeze({
-    type: "object",
-    additionalProperties: false,
-    required: ["delivery_id", "usage_state"],
-    properties: {
-      delivery_id: stringSchema,
-      usage_state: Object.freeze({ type: "string", enum: ["used", "skipped", "not_applicable"] }),
-      used_object_ids: stringArraySchema,
-      reason: nullableStringSchema
-    }
-  })
-});
-
 const annotationByToolName: Record<AlayaMemoryToolName, AlayaMemoryToolDefinition["annotations"]> =
   Object.freeze({
     "soul.recall": readOnlyAnnotation,
@@ -202,3 +76,18 @@ const annotationByToolName: Record<AlayaMemoryToolName, AlayaMemoryToolDefinitio
     "soul.explore_graph": readOnlyAnnotation,
     "soul.report_context_usage": writeAnnotation
   });
+
+export function listAlayaMemoryTools(): readonly AlayaMemoryToolDefinition[] {
+  return ALAYA_MEMORY_TOOL_NAMES.map((name) =>
+    Object.freeze({
+      name,
+      description: descriptionByName[name],
+      inputSchema: soulToolJsonSchemas[name],
+      annotations: annotationByToolName[name]
+    })
+  );
+}
+
+export function hasAlayaMemoryToolName(value: string): value is AlayaMemoryToolName {
+  return (ALAYA_MEMORY_TOOL_NAMES as readonly string[]).includes(value);
+}

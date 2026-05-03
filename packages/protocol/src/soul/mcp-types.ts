@@ -179,3 +179,59 @@ export type SoulApplyOverrideResponse = z.infer<typeof SoulApplyOverrideResponse
 export type SoulContextUsageState = z.infer<typeof SoulContextUsageStateSchema>;
 export type SoulReportContextUsageRequest = z.infer<typeof SoulReportContextUsageRequestSchema>;
 export type SoulReportContextUsageResponse = z.infer<typeof SoulReportContextUsageResponseSchema>;
+
+/**
+ * MCP tool input schemas, derived from the zod request schemas above
+ * (p5-system-review-r3 MR-I04). Single source of truth: external MCP
+ * clients see the same constraints zod enforces at parse time, so a
+ * 100MB query is rejected by both the catalog-published shape and the
+ * runtime parser.
+ *
+ * The previous implementation maintained a hand-written JSON Schema
+ * dictionary in `apps/core-daemon/src/mcp-memory-tool-catalog.ts`
+ * (`inputSchemaByToolName`) which silently drifted from the zod schemas
+ * and weakened the public surface (no maxLength / maxItems / strict
+ * additionalProperties). That dictionary is now derived here.
+ */
+import { zodToJsonSchema } from "zod-to-json-schema";
+
+type SoulToolName =
+  | "soul.recall"
+  | "soul.open_pointer"
+  | "soul.emit_candidate_signal"
+  | "soul.propose_memory_update"
+  | "soul.review_memory_proposal"
+  | "soul.apply_override"
+  | "soul.explore_graph"
+  | "soul.report_context_usage";
+
+const soulToolRequestSchemas: Record<SoulToolName, z.ZodTypeAny> = {
+  "soul.recall": SoulMemorySearchRequestSchema,
+  "soul.open_pointer": SoulOpenPointerRequestSchema,
+  "soul.emit_candidate_signal": SoulEmitCandidateSignalRequestSchema,
+  "soul.propose_memory_update": SoulProposeMemoryUpdateRequestSchema,
+  "soul.review_memory_proposal": SoulReviewMemoryProposalRequestSchema,
+  "soul.apply_override": SoulApplyOverrideRequestSchema,
+  "soul.explore_graph": SoulExploreGraphRequestSchema,
+  "soul.report_context_usage": SoulReportContextUsageRequestSchema
+};
+
+function deriveJsonSchema(schema: z.ZodTypeAny): Record<string, unknown> {
+  const result = zodToJsonSchema(schema, { target: "openApi3", $refStrategy: "none" }) as Record<string, unknown>;
+  // Strip the JSON Schema metadata fields that MCP clients do not need;
+  // they would otherwise leak the upstream draft URI and inflate every
+  // tools/list payload.
+  delete result["$schema"];
+  delete result["definitions"];
+  return result;
+}
+
+export const soulToolJsonSchemas: Readonly<Record<SoulToolName, Readonly<Record<string, unknown>>>> =
+  Object.freeze(
+    Object.fromEntries(
+      (Object.keys(soulToolRequestSchemas) as SoulToolName[]).map((name) => [
+        name,
+        Object.freeze(deriveJsonSchema(soulToolRequestSchemas[name]))
+      ])
+    ) as Record<SoulToolName, Readonly<Record<string, unknown>>>
+  );
