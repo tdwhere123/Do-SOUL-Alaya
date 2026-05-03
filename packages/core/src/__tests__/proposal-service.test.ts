@@ -563,11 +563,15 @@ describe("ProposalService", () => {
       reviewed_at: "2026-03-21T02:00:00.000Z"
     });
 
-    // reviewCreated must come before the claim lifecycle event in notification order.
-    const reviewCreatedIdx = notificationOrder.indexOf("soul.review.created");
-    const claimTransitionIdx = notificationOrder.indexOf("soul.claim.lifecycle_changed");
-    expect(reviewCreatedIdx).toBeGreaterThanOrEqual(0);
-    expect(claimTransitionIdx).toBeGreaterThanOrEqual(0);
-    expect(reviewCreatedIdx).toBeLessThan(claimTransitionIdx);
+    // Full notification order on accept path must be:
+    //   soul.review.created → soul.claim.lifecycle_changed → soul.review.completed → soul.proposal.resolved
+    // (P5-system-review-r1 MR-B04: ProposalService/ClaimService property name drift caused
+    // claim.lifecycle_changed to fire before review.created at runtime; covered here.)
+    expect(notificationOrder).toEqual([
+      "soul.review.created",
+      "soul.claim.lifecycle_changed",
+      "soul.review.completed",
+      "soul.proposal.resolved"
+    ]);
   });
 });

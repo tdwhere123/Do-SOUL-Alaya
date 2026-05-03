@@ -56,7 +56,7 @@ export interface ClaimServiceClaimFormRepoPort {
 }
 
 export interface ClaimServiceSlotServicePort {
-  onClaimActivated(claim: Readonly<ClaimForm>, deferredBroadcastEvents?: EventLogEntry[]): Promise<SlotElectionResult>;
+  onClaimActivated(claim: Readonly<ClaimForm>, deferredNotificationEvents?: EventLogEntry[]): Promise<SlotElectionResult>;
 }
 
 export interface ClaimRuntimeNotifierPort {
@@ -160,7 +160,7 @@ export class ClaimService {
     causedBy: TransitionCausedByType,
     options: {
       readonly skipSlotElection?: boolean;
-      readonly deferredBroadcastEvents?: EventLogEntry[];
+      readonly deferredNotificationEvents?: EventLogEntry[];
     } = {}
   ): Promise<Readonly<ClaimForm>> {
     const parsedObjectId = parseObjectId(objectId);
@@ -187,7 +187,7 @@ export class ClaimService {
     }
 
     const updated = await this.applyLifecycleTransition(
-      existing, parsedNewState, parsedReason, parsedCausedBy, options.deferredBroadcastEvents
+      existing, parsedNewState, parsedReason, parsedCausedBy, options.deferredNotificationEvents
     );
 
     if (shouldRunSlotElection) {
@@ -195,7 +195,7 @@ export class ClaimService {
         throw new CoreError("CONFLICT", "Slot service is required for claim activation");
       }
 
-      const election = await slotService.onClaimActivated(updated, options.deferredBroadcastEvents);
+      const election = await slotService.onClaimActivated(updated, options.deferredNotificationEvents);
 
       if (election.decision === "contested") {
         const contested = await this.applyLifecycleTransition(
@@ -203,10 +203,10 @@ export class ClaimService {
           ClaimLifecycleState.CONTESTED,
           "slot_conflict_review_required",
           TransitionCausedBy.SYSTEM,
-          options.deferredBroadcastEvents
+          options.deferredNotificationEvents
         );
 
-        await this.emitContestedEvent(contested, election.slot.winner_claim_id, options.deferredBroadcastEvents);
+        await this.emitContestedEvent(contested, election.slot.winner_claim_id, options.deferredNotificationEvents);
         return contested;
       }
     }
@@ -231,7 +231,7 @@ export class ClaimService {
     newState: ClaimLifecycleStateType,
     reason: string,
     causedBy: TransitionCausedByType,
-    deferredBroadcastEvents?: EventLogEntry[]
+    deferredNotificationEvents?: EventLogEntry[]
   ): Promise<Readonly<ClaimForm>> {
     const occurredAt = this.now();
     const revision = await this.getNextRevision("claim_form", existing.object_id);
@@ -263,8 +263,8 @@ export class ClaimService {
       occurredAt
     );
 
-    if (deferredBroadcastEvents !== undefined) {
-      deferredBroadcastEvents.push(event);
+    if (deferredNotificationEvents !== undefined) {
+      deferredNotificationEvents.push(event);
     } else {
       await this.dependencies.runtimeNotifier.notifyEntry(event);
     }
@@ -275,7 +275,7 @@ export class ClaimService {
   private async emitContestedEvent(
     claim: Readonly<ClaimForm>,
     contestedBy: string | null,
-    deferredBroadcastEvents?: EventLogEntry[]
+    deferredNotificationEvents?: EventLogEntry[]
   ): Promise<void> {
     const revision = await this.getNextRevision("claim_form", claim.object_id);
     const event = await this.dependencies.eventLogRepo.append({
@@ -296,8 +296,8 @@ export class ClaimService {
       })
     });
 
-    if (deferredBroadcastEvents !== undefined) {
-      deferredBroadcastEvents.push(event);
+    if (deferredNotificationEvents !== undefined) {
+      deferredNotificationEvents.push(event);
     } else {
       await this.dependencies.runtimeNotifier.notifyEntry(event);
     }
