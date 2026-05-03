@@ -39,6 +39,10 @@ const allowedBl014References = [
   {
     file: "docs/v0.1/phase-4-briefs/reports/round-3-review.md",
     line: "| `#BL-014` / `#BL-015` / `#BL-021` wording inconsistencies | `#BL-014` keeps Open status with an explicit note that this round touched documentation references but did not close the issue. `#BL-015` title narrowed to delivery/usage records. `#BL-021` moved under a new \"Accepted divergences (registered, not closed)\" subsection in `backlog.md`, semantically aligned with `port-protocol.md:104`'s Registered Divergences section. |"
+  },
+  {
+    file: "docs/v0.1/phase-5-briefs/reports/p5-system-review-round-3.md",
+    line: "#BL-014 (atomic commit hygiene; proven by this very wave)"
   }
 ];
 

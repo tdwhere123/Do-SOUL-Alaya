@@ -148,7 +148,43 @@ moving scope binding to the MCP handler boundary, adding
 closing the cached connection), and writing `command="node"` plus an
 absolute path to `bin/alaya.mjs` into Codex / Claude profiles.
 
-The end-to-end verification gate at HEAD `384c2d4` runs clean:
+**Round 3 (`p5-system-review-r3`).** The user pushed back on Round 2's
+"follow-up wave" framing because parking nine Round 1 Important findings
+violates the "backlog 不是问题归宿" preference. Round 3 walked each
+remaining Important either to a fix, an invariant, or an explicit v0.2
+deferral with a written close condition. Nine Round 3 atomic commits
+(`4aa5de1`, `d63ab97`, `bb3e02c`, `30ad2a0`, `dfdc909`, `60f2ec9`,
+`78d8a91`, plus this one) closed all but one Important; the lone
+deferral is `#BL-022` (EventPublisher atomic port + EventLog revision
+transaction) — appropriate to ship alongside the v0.2 transaction model
+rewrite rather than retrofit into v0.1, with the user on the record.
+Highlights:
+- MR-I05: `SoulOpenPointerResponse.content` is now a typed projection of
+  six fields; MemoryEntry internals (lifecycle_state, created_by,
+  storage_tier, workspace_id) no longer leak.
+- MR-I03 + MR-I04: `BoundedString` primitives applied across MCP request
+  schemas (query 4096 / id 256 / reason 16384 / arrays 1000 / evidence
+  arrays 100); the catalog now derives `inputSchema` from zod via
+  `zod-to-json-schema` so external clients see the same bounds the
+  runtime enforces.
+- MR-I11: `alaya doctor` reports `storage.schema_ok` (persisted vs known
+  max migration version) so an operator can tell apart "db file exists"
+  from "db is fully migrated for this binary".
+- MR-I06: shutdown now drains in-flight HTTP handlers (lifecycle
+  middleware returns 503 once SIGTERM/SIGINT lands; `database.close()`
+  waits for the in-flight counter to reach zero with a 30s deadline).
+- MR-I16 / MR-I20 / MR-N09: evidence-lock test renamed and given one
+  behavior assertion, the `mixed:` readiness cells split into the proper
+  vocabulary (`cli-consumable` subset vs `implementation-ready` subset),
+  and three `expect.toBeDefined()` weak assertions were upgraded to
+  interface-shape assertions.
+
+Backlog Open count is 0. The only remaining items are the three v0.2
+deferrals (`#BL-008` pi-mono, `#BL-009` keychain, `#BL-022` EventPublisher
+port) and the seven `#BL-001..#BL-007` ADR-style out-of-scope entries.
+
+The end-to-end verification gate at HEAD `78d8a91` runs clean (same
+shape as Round 2):
 `rtk pnpm install`, `rtk pnpm build`, `rtk pnpm exec vitest run` (248 files
 / 1916 tests pass), `rtk pnpm alaya doctor`, `rtk pnpm alaya install --non-interactive`,
 `rtk pnpm alaya attach codex --yes`, `rtk pnpm alaya status`, `rtk pnpm alaya tools list`,
