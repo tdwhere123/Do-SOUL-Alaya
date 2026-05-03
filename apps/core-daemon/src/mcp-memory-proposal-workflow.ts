@@ -28,6 +28,7 @@ export interface McpMemoryProposalWorkflowEventLogRepo {
 }
 
 type ProposalResolutionEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
+type ProposalCreationEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
 export interface McpMemoryProposalWorkflowProposalRepo {
   create(input: {
@@ -35,6 +36,17 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     readonly workspace_id: string;
     readonly run_id: string | null;
   }): Promise<Readonly<Proposal>>;
+  createProposalWithEvents(
+    input: {
+      readonly proposal: Proposal;
+      readonly workspace_id: string;
+      readonly run_id: string | null;
+    },
+    events: readonly ProposalCreationEventInput[]
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly events: readonly EventLogEntry[];
+  }>>;
   findById(proposalId: string): Promise<Readonly<Proposal> | null>;
   findScopedById(proposalId: string): Promise<Readonly<{
     readonly proposal: Readonly<Proposal>;
@@ -69,12 +81,10 @@ export function createMcpMemoryProposalWorkflow(
 ): NonNullable<McpMemoryToolHandlerDependencies["proposalWorkflow"]> {
   const now = deps.now ?? (() => new Date().toISOString());
   const generateObjectId = deps.generateObjectId ?? randomUUID;
-  const proposalReviewLocks = new Map<string, Promise<void>>();
 
   return {
     proposeMemoryUpdate: async (input, context) => await proposeMemoryUpdate(input, context),
-    reviewMemoryProposal: async (input, context) =>
-      await withProposalReviewLock(input.proposal_id, async () => await reviewMemoryProposal(input, context))
+    reviewMemoryProposal: async (input, context) => await reviewMemoryProposal(input, context)
   };
 
   async function proposeMemoryUpdate(
@@ -107,28 +117,35 @@ export function createMcpMemoryProposalWorkflow(
       last_updated_at: timestamp
     });
 
-    const event = await deps.eventLogRepo.append({
-      event_type: Phase1BEventType.SOUL_PROPOSAL_CREATED,
-      entity_type: "proposal",
-      entity_id: proposal.proposal_id,
-      workspace_id: context.workspaceId,
-      run_id: context.runId,
-      caused_by: context.agentTarget,
-      revision: await nextRevision(proposal.proposal_id),
-      payload_json: SoulProposalCreatedPayloadSchema.parse({
-        object_id: proposal.runtime_id,
-        object_kind: proposal.object_kind,
+    const creationEvents: ProposalCreationEventInput[] = [
+      {
+        event_type: Phase1BEventType.SOUL_PROPOSAL_CREATED,
+        entity_type: "proposal",
+        entity_id: proposal.proposal_id,
+        workspace_id: context.workspaceId,
+        run_id: context.runId,
+        caused_by: context.agentTarget,
+        payload_json: SoulProposalCreatedPayloadSchema.parse({
+          object_id: proposal.runtime_id,
+          object_kind: proposal.object_kind,
+          workspace_id: context.workspaceId,
+          run_id: context.runId
+        })
+      }
+    ];
+
+    const created = await deps.proposalRepo.createProposalWithEvents(
+      {
+        proposal,
         workspace_id: context.workspaceId,
         run_id: context.runId
-      })
-    });
-    const created = await deps.proposalRepo.create({
-      proposal,
-      workspace_id: context.workspaceId,
-      run_id: context.runId
-    });
-    await deps.runtimeNotifier.notifyEntry(event);
-    return { proposal_id: created.proposal_id, status: "created" };
+      },
+      creationEvents
+    );
+    for (const event of created.events) {
+      await deps.runtimeNotifier.notifyEntry(event);
+    }
+    return { proposal_id: created.proposal.proposal_id, status: "created" };
   }
 
   async function reviewMemoryProposal(
@@ -230,31 +247,6 @@ export function createMcpMemoryProposalWorkflow(
     };
   }
 
-  async function nextRevision(proposalId: string): Promise<number> {
-    const events = await deps.eventLogRepo.queryByEntity("proposal", proposalId);
-    return events.length + 1;
-  }
-
-  async function withProposalReviewLock<T>(proposalId: string, work: () => Promise<T>): Promise<T> {
-    const previous = proposalReviewLocks.get(proposalId) ?? Promise.resolve();
-    let releaseCurrent!: () => void;
-    const current = new Promise<void>((resolve) => {
-      releaseCurrent = resolve;
-    });
-    const tail = previous.catch(() => undefined).then(async () => await current);
-    proposalReviewLocks.set(proposalId, tail);
-
-    await previous.catch(() => undefined);
-
-    try {
-      return await work();
-    } finally {
-      releaseCurrent();
-      if (proposalReviewLocks.get(proposalId) === tail) {
-        proposalReviewLocks.delete(proposalId);
-      }
-    }
-  }
 }
 
 function assertProposalContext(
