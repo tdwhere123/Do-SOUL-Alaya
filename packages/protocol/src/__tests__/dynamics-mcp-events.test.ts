@@ -196,10 +196,19 @@ describe("MCP tool request/response schemas", () => {
       {
         schema: SoulOpenPointerResponseSchema,
         value: {
+          // p5-system-review-r3 MR-I05: content is now an explicit
+          // projection (object_id / object_kind / schema_version /
+          // content / domain_tags / evidence_refs); MemoryEntry
+          // internals (lifecycle_state, created_by, ...) no longer leak.
           object_id: "memory-1",
           object_kind: "memory_entry",
           content: {
-            summary: "Use pnpm for workspace commands."
+            object_id: "memory-1",
+            object_kind: "memory_entry",
+            schema_version: 1,
+            content: "Use pnpm for workspace commands.",
+            domain_tags: [],
+            evidence_refs: []
           }
         }
       },

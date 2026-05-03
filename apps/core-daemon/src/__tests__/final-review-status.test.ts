@@ -67,8 +67,11 @@ describe("P5 final-review status", () => {
     expect(runtimeStatus).toContain("#BL-024");
     expect(runtimeStatus).not.toContain("Remaining v0.1.0 release work is Phase 5");
 
-    expect(backlog).toContain("### #BL-024");
-    expect(backlog).toContain("startable after Gate-5");
+    // #BL-024 / #BL-017 were Resolved in p5-system-review-r1+r2 (commits
+    // 0fa309b removes the HTTP route; 964e12a closes the backlog entries
+    // and lands the phase-to-domain stop-gap mapping).
+    expect(backlog).toContain("### #BL-024 — Resolved");
+    expect(backlog).toContain("### #BL-017 — Resolved");
   });
 });
 

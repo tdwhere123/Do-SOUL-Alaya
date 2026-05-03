@@ -44,11 +44,25 @@ export const SoulOpenPointerRequestSchema = z
   })
   .readonly();
 
+// Public projection: only the fields agents may read. MemoryEntry internals
+// (lifecycle_state, created_by, storage_tier, workspace_id, ...) are not
+// exposed (p5-system-review-r3 MR-I05 / invariants §29 Default Scope).
+export const SoulOpenPointerContentSchema = z
+  .object({
+    object_id: NonEmptyStringSchema,
+    object_kind: NonEmptyStringSchema,
+    schema_version: z.number().int().min(1),
+    content: z.string().nullable(),
+    domain_tags: z.array(NonEmptyStringSchema).readonly(),
+    evidence_refs: z.array(NonEmptyStringSchema).readonly()
+  })
+  .readonly();
+
 export const SoulOpenPointerResponseSchema = z
   .object({
     object_id: NonEmptyStringSchema,
     object_kind: NonEmptyStringSchema,
-    content: z.record(z.unknown()).readonly()
+    content: SoulOpenPointerContentSchema
   })
   .readonly();
 

@@ -234,10 +234,20 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       throw new ToolNotFoundError(`Memory object not found: ${request.object_id}`);
     }
 
+    // Explicit projection: do not spread MemoryEntry. Internal fields
+    // (lifecycle_state, created_by, storage_tier, workspace_id, ...) must
+    // not leak to the attached agent (p5-system-review-r3 MR-I05).
     return SoulOpenPointerResponseSchema.parse({
       object_id: memory.object_id,
       object_kind: memory.object_kind,
-      content: { ...memory }
+      content: {
+        object_id: memory.object_id,
+        object_kind: memory.object_kind,
+        schema_version: memory.schema_version,
+        content: memory.content ?? null,
+        domain_tags: memory.domain_tags ?? [],
+        evidence_refs: memory.evidence_refs ?? []
+      }
     });
   }
 

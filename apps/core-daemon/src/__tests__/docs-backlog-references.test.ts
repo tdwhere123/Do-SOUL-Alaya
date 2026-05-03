@@ -7,18 +7,14 @@ const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(currentDirectory, "../../../..");
 const docsRoot = path.join(repositoryRoot, "docs");
 
+// Resolved 2026-05-03 by p5-system-review-r2 commit 964e12a; the only
+// remaining live reference is the Resolved header. Historical references
+// in older Phase-2 / Phase-4 reports are preserved as point-in-time
+// records and remain in the allowed set.
 const allowedBl014References = [
   {
     file: "docs/handbook/backlog.md",
-    line: "### #BL-014 — Historical Gate-2 R1 wave-close commit hygiene gap"
-  },
-  {
-    file: "docs/handbook/backlog.md",
-    line: "drift was corrected from `#BL-014` to `#BL-015`. This does not close"
-  },
-  {
-    file: "docs/handbook/backlog.md",
-    line: "`#BL-014`; closure still requires commit-history evidence from a future"
+    line: "### #BL-014 — Resolved (atomic fix-commit hygiene proven by p5-system-review-r1+r2)"
   },
   {
     file: "docs/v0.1/phase-4-briefs/README.md",
