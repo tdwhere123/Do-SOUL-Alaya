@@ -4,3 +4,25 @@ export const NonEmptyStringSchema = z.string().min(1);
 export const IsoDatetimeStringSchema = z.string().datetime();
 export const NonNegativeIntSchema = z.number().int().nonnegative();
 export const PositiveIntSchema = z.number().int().positive();
+
+/**
+ * Bounded string primitives. p5-system-review-r3 MR-I03: attached
+ * agents are an external boundary (anything reachable through MCP
+ * stdio); zod must reject oversized payloads at parse time so the
+ * daemon does not OOM on a 100 MB query or a 1 GB nested record.
+ *
+ * The numbers below are deliberately pragmatic, not minimal:
+ *   - id-shaped fields (object_id, proposal_id, delivery_id, run_id):
+ *     up to 256 chars (UUID + optional workspace/run prefix).
+ *   - free-text query / search input: 4096 chars (about a long prompt).
+ *   - reason / explanation prose: 16384 chars (~4-5 paragraphs).
+ *   - generic short labels (slugs, signal kinds): 1024 chars.
+ */
+export const BoundedString = (max: number) => z.string().min(1).max(max);
+export const BoundedIdSchema = BoundedString(256);
+export const BoundedQuerySchema = BoundedString(4096);
+export const BoundedReasonSchema = BoundedString(16384);
+export const BoundedLabelSchema = BoundedString(1024);
+
+export const BOUNDED_DEFAULT_ARRAY_MAX = 1000;
+export const BOUNDED_EVIDENCE_ARRAY_MAX = 100;

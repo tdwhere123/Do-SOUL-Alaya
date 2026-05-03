@@ -97,6 +97,15 @@ const MemoryEntryMutableFieldsBaseSchema = z.object({
 
 export const MemoryEntryMutableFieldsSchema = MemoryEntryMutableFieldsBaseSchema.readonly();
 
+/**
+ * Strict variant for the public MCP `soul.propose_memory_update`
+ * surface: rejects unknown keys at parse time so attached agents
+ * cannot smuggle silent fields into proposals
+ * (p5-system-review-r3 MR-I03).
+ */
+export const PublicMemoryEntryMutableFieldsSchema =
+  MemoryEntryMutableFieldsBaseSchema.strict().readonly();
+
 
 export const MemoryEntryRepoUpdateFieldsSchema = MemoryEntryMutableFieldsBaseSchema.extend({
   updated_at: IsoDatetimeStringSchema

@@ -139,8 +139,11 @@ describe("MCP tool request/response schemas", () => {
       {
         schema: SoulProposeMemoryUpdateRequestSchema,
         value: {
+          // p5-system-review-r3 MR-I03: proposed_changes is now
+          // PublicMemoryEntryMutableFieldsSchema (strict). Allowed
+          // keys: content, domain_tags, evidence_refs, storage_tier.
           target_object_id: "memory-1",
-          proposed_changes: { summary: "Use pnpm for scripts." },
+          proposed_changes: { content: "Use pnpm for scripts." },
           reason: "Align build docs with workspace tooling."
         }
       },

@@ -1,12 +1,21 @@
 import { z } from "zod";
 import { EmitCandidateSignalRequestSchema, EmitCandidateSignalResponseSchema } from "../candidate-memory-signal.js";
-import { NonEmptyStringSchema, NonNegativeIntSchema } from "../schema-primitives.js";
+import {
+  BOUNDED_DEFAULT_ARRAY_MAX,
+  BOUNDED_EVIDENCE_ARRAY_MAX,
+  BoundedIdSchema,
+  BoundedLabelSchema,
+  BoundedQuerySchema,
+  BoundedReasonSchema,
+  NonEmptyStringSchema,
+  NonNegativeIntSchema
+} from "../schema-primitives.js";
 import {
   GraphExploreDirSchema,
   GraphNeighborSchema,
   MemoryGraphEdgeTypeSchema
 } from "./memory-graph.js";
-import { MemoryDimensionSchema } from "./memory-entry.js";
+import { MemoryDimensionSchema, PublicMemoryEntryMutableFieldsSchema } from "./memory-entry.js";
 import { ScopeClassSchema } from "./object-kind.js";
 import { ProposalResolutionStateSchema } from "./proposal.js";
 
@@ -22,11 +31,11 @@ export const MemorySearchResultSchema = z
 
 export const SoulMemorySearchRequestSchema = z
   .object({
-    query: NonEmptyStringSchema,
+    query: BoundedQuerySchema,
     scope_class: ScopeClassSchema.nullable(),
     dimension: MemoryDimensionSchema.nullable(),
-    domain_tags: z.array(NonEmptyStringSchema).readonly().nullable(),
-    max_results: NonNegativeIntSchema
+    domain_tags: z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().nullable(),
+    max_results: NonNegativeIntSchema.max(1000)
   })
   .readonly();
 
@@ -40,7 +49,7 @@ export const SoulMemorySearchResponseSchema = z
 
 export const SoulOpenPointerRequestSchema = z
   .object({
-    object_id: NonEmptyStringSchema
+    object_id: BoundedIdSchema
   })
   .readonly();
 
@@ -68,12 +77,12 @@ export const SoulOpenPointerResponseSchema = z
 
 export const SoulExploreGraphRequestSchema = z
   .object({
-    memory_id: NonEmptyStringSchema,
+    memory_id: BoundedIdSchema,
     // workspace_id intentionally omitted from the public MCP schema:
     // the daemon binds workspace from the trusted MCP call context per
     // invariants §29 Default Scope and p5-system-review-r2 F-r2-001.
     // Adding workspace_id here would re-open the scope-spoofing path.
-    edge_types: z.array(MemoryGraphEdgeTypeSchema).readonly().optional(),
+    edge_types: z.array(MemoryGraphEdgeTypeSchema).max(BOUNDED_EVIDENCE_ARRAY_MAX).readonly().optional(),
     direction: GraphExploreDirSchema.optional()
   })
   .readonly();
@@ -88,9 +97,9 @@ export const SoulExploreGraphResponseSchema = z
 
 export const SoulProposeMemoryUpdateRequestSchema = z
   .object({
-    target_object_id: NonEmptyStringSchema,
-    proposed_changes: z.record(z.unknown()).readonly(),
-    reason: NonEmptyStringSchema
+    target_object_id: BoundedIdSchema,
+    proposed_changes: PublicMemoryEntryMutableFieldsSchema,
+    reason: BoundedReasonSchema
   })
   .readonly();
 
@@ -103,9 +112,9 @@ export const SoulProposeMemoryUpdateResponseSchema = z
 
 export const SoulReviewMemoryProposalRequestSchema = z
   .object({
-    proposal_id: NonEmptyStringSchema,
+    proposal_id: BoundedIdSchema,
     verdict: z.enum(["accept", "reject"]),
-    reason: z.string().nullable()
+    reason: BoundedReasonSchema.nullable()
   })
   .readonly();
 
@@ -121,9 +130,9 @@ export const SoulEmitCandidateSignalResponseSchema = EmitCandidateSignalResponse
 
 export const SoulApplyOverrideRequestSchema = z
   .object({
-    target_object: NonEmptyStringSchema,
-    correction: NonEmptyStringSchema,
-    priority: NonNegativeIntSchema.optional()
+    target_object: BoundedIdSchema,
+    correction: BoundedReasonSchema,
+    priority: NonNegativeIntSchema.max(1000).optional()
   })
   .readonly();
 
@@ -138,10 +147,10 @@ export const SoulContextUsageStateSchema = z.enum(["used", "skipped", "not_appli
 
 export const SoulReportContextUsageRequestSchema = z
   .object({
-    delivery_id: NonEmptyStringSchema,
+    delivery_id: BoundedIdSchema,
     usage_state: SoulContextUsageStateSchema,
-    used_object_ids: z.array(NonEmptyStringSchema).readonly().optional(),
-    reason: z.string().nullable().optional()
+    used_object_ids: z.array(BoundedIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+    reason: BoundedReasonSchema.nullable().optional()
   })
   .readonly();
 
