@@ -36,7 +36,7 @@ apps/
   inspector/      loopback Memory Inspector backend and static host
 
 bin/
-  alaya.mjs       CLI entry (alaya doctor / install / attach / detach / status / inspect / tools)
+  alaya.mjs       CLI entry (alaya doctor / install / attach / detach / status / inspect / tools / backup / export / import / mcp)
 
 vendor/
   do-what-new-snapshot/  frozen upstream port reference (read-only)

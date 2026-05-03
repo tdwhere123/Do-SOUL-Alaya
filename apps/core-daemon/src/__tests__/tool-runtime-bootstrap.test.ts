@@ -50,7 +50,7 @@ describe("daemon tool runtime bootstrap", () => {
         await bootStartedDaemonRuntime();
         const backlogTelemetryService = hoisted.gardenBacklogTelemetryServices[0];
 
-        expect(backlogTelemetryService).toBeDefined();
+        expect(backlogTelemetryService).toMatchObject({ stop: expect.any(Function), start: expect.any(Function) });
 
         signalHandlers.get("SIGTERM")?.();
         await Promise.resolve();
@@ -101,7 +101,7 @@ describe("daemon tool runtime bootstrap", () => {
         await bootStartedDaemonRuntime();
 
         const backlogTelemetryService = hoisted.gardenBacklogTelemetryServices[0];
-        expect(backlogTelemetryService).toBeDefined();
+        expect(backlogTelemetryService).toMatchObject({ stop: expect.any(Function), start: expect.any(Function) });
 
         signalHandlers.get("SIGTERM")?.();
         await Promise.resolve();

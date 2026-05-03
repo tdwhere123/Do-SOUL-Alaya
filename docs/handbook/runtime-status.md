@@ -68,10 +68,12 @@ each Phase Gate.
 | MCP tool surface | `mcp-consumable` via single-daemon attached-agent MCP harness | `mcp-consumable` | P3-mcp-discovery + P4-mcp-tooling + P4-mcp-memory-tools + P4-mcp-server + Gate-4 proof harness |
 | Core daemon | `implementation-ready` | `live-event-ready` | P4-daemon-skeleton + P4-daemon-startup-ordering + P4-sse-strip |
 | Profile mutation (Codex/Claude attach) | `implementation-ready` | `cli-consumable` | P4-profile-mutation |
-| CLI commands (doctor / install / attach / status / tools / inspect / detach) | mixed: install, attach, status, doctor, and tools list/call are proven by release E2E; inspect/detach remain covered by targeted command tests only | `cli-consumable` | P4-cli-bridge + P4-mcp-memory-tools + P4-cli-* + P5-e2e |
+| CLI commands (install / attach / status / doctor / tools list / tools call) | `cli-consumable` (proven by release E2E) | `cli-consumable` | P4-cli-bridge + P4-mcp-memory-tools + P4-cli-install + P4-cli-attach + P4-cli-status + P4-cli-doctor + P5-e2e |
+| CLI commands (inspect / detach / backup / export / import / mcp stdio) | `implementation-ready` (covered by targeted command tests only) | `cli-consumable` | P4-cli-inspect + P4-cli-detach + P4-operations + P4-mcp-server |
 | Trust state delivery / usage | `live-event-ready`; SQL-backed delivery and usage records survive daemon restart | `live-event-ready` | P4-trust-state + #BL-015 repair |
 | Secret refs (env / local-file / paste-to-file) | `live-event-ready`; Inspector writes proxy daemon runtime config and are audited through EventLog | `live-event-ready` | P4-secrets + #BL-019 repair |
-| Operations (backup, export, import) | mixed: backup/export are proven by release E2E; import remains covered by targeted operations tests only | `cli-consumable` | P4-operations + P5-e2e |
+| Operations (backup / export) | `cli-consumable` (proven by release E2E) | `cli-consumable` | P4-operations + P5-e2e |
+| Operations (import) | `implementation-ready` (covered by targeted operations tests only) | `cli-consumable` | P4-operations |
 | Memory Inspector | `live-event-ready`; server/frontend exist, token-gated routes pass, and Provider/Config writes proxy daemon runtime config | `live-event-ready` for the inspector surface | P4-inspector-server + P4-cli-inspect + P4-inspector-frontend + #BL-019 repair |
 | Marketing benchmark harness | `not-started` | `implementation-ready` | P6-bench-adapter + P6-bench-harness + P6-bench-baselines + P6-bench-resume + P6-bench-readme (Phase 6, post-v0.1.0; ships in v0.1.1) |
 | Graph inspector data contract | `schema-ready`; read-only contract derives from active PathRelation data, no live route | `schema-ready` | P5-graph-contract |

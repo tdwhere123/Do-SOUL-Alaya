@@ -2,7 +2,13 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { ALAYA_MEMORY_TOOL_NAMES } from "../mcp-memory-tool-catalog.js";
+import { soulToolJsonSchemas } from "@do-soul/alaya-protocol";
+import { ALAYA_MEMORY_TOOL_NAMES, listAlayaMemoryTools } from "../mcp-memory-tool-catalog.js";
+
+// p5-system-review-r3 MR-I16: this file was renamed from
+// final-review-status.test.ts to make its purpose explicit. Most cases
+// lock evidence (docs ↔ docs); the last case is a behavior assertion
+// that exercises real code paths so the file is not pure docs prose.
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(currentDirectory, "../../../..");
@@ -72,6 +78,22 @@ describe("P5 final-review status", () => {
     // and lands the phase-to-domain stop-gap mapping).
     expect(backlog).toContain("### #BL-024 — Resolved");
     expect(backlog).toContain("### #BL-017 — Resolved");
+  });
+
+  // p5-system-review-r3 MR-I16: behavior assertion (not docs↔docs).
+  // The MCP catalog must publish exactly the eight tool names the rest
+  // of the report claims, with input schemas derived from zod (so an
+  // attacker-controlled payload longer than the documented bound is
+  // rejected at parse time). If `soulToolJsonSchemas` ever drifts from
+  // ALAYA_MEMORY_TOOL_NAMES this test fails the same Round 1 way the
+  // hand-written catalog used to drift silently.
+  it("publishes the eight named tools through the zod-derived catalog", () => {
+    const definitions = listAlayaMemoryTools();
+    expect(definitions.map((definition) => definition.name)).toEqual([...expectedMemoryTools]);
+    for (const definition of definitions) {
+      expect(soulToolJsonSchemas[definition.name]).toBe(definition.inputSchema);
+      expect((definition.inputSchema as { type?: string }).type).toBe("object");
+    }
   });
 });
 
