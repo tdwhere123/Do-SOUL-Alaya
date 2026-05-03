@@ -10,45 +10,35 @@ sequence. **Next available number**: `#BL-025`.
 
 ## Open Issues
 
-### #BL-024 — HTTP proposal review needs a shared transaction boundary
+## Recently Resolved by p5-system-review-r1 (2026-05-03)
 
-**Status**: Open (post-Gate-5 hardening; not a v0.1.0 blocker)
-**Owner**: `packages/core/src/proposal-service.ts` +
-`apps/core-daemon/src/routes/proposals.ts` (no card yet)
-**Close condition**: If the HTTP `/proposals/:id/review` route remains
-exposed as a supported surface, proposal review must resolve proposal,
-claim, synthesis, karma, and review EventLog writes inside one explicit
-unit of work, or the route must be removed/disabled from supported runtime
-surfaces. Verification must include replay/concurrency and partial-failure
-coverage.
+These three issues were closed in the same wave per the user preference
+"backlog 不能长期存在; 每条都给出根因 + 切实修复"。
 
-P5-final-review fixed the MCP release path by moving
-`soul.review_memory_proposal` review events plus pending-state CAS into one
-storage-owned SQLite transaction. The older HTTP proposal review route is a
-broader path: it appends review events, applies claim/synthesis side effects,
-then updates proposal resolution outside one shared transaction. Gate-5
-release acceptance is scoped to MCP/CLI, so this is tracked as hardening
-rather than a v0.1.0 blocker.
+### #BL-024 — Resolved (route removed)
 
-### #BL-023 — Marketing surface (e.g. xiaohongshu) may attract non-engineering users
+The HTTP `POST /proposals/:id/review` (and sibling `GET /proposals/:id`,
+`GET /memories/:id`) routes were removed from the daemon HTTP surface in
+commit `0fa309b` (`fix(routes): remove HTTP proposal review + memory
+read endpoints [system-review-r1]`). v0.1.0 release surface is MCP +
+CLI only (CLAUDE.md §Project Context, invariant §21). Pinned by
+`apps/core-daemon/src/__tests__/routes-{proposals,memories}.test.ts` so
+a future re-introduction must update assertions explicitly. Inspector
+and any future HTTP entry must route through the same storage-owned
+atomic path used by MCP review (see `proposalRepo.updatePendingResolutionWithEvents`)
+before re-exposing review over HTTP.
 
-**Status**: Open (product-positioning watch, not a v0.1 blocker)
-**Owner**: `docs/v0.1/phase-6-briefs/README.md` (Phase 6 marketing wave)
-**Close condition**: Either (a) marketing surfaces explicitly target
-engineers / CLI-tool users only and the README onboarding remains
-CLI-first, OR (b) Alaya grows a non-CLI surface (which today violates
-invariant §21 "Alaya has no GUI and no conversation TUI"); in the
-latter case the invariant change must come first via a documented
-charter amendment.
+### #BL-023 — Resolved (converted to invariant §21a)
 
-Phase 6 lands a marketing benchmark wave aimed at GitHub README
-visibility. The user has signaled intent to also publish on consumer
-surfaces such as xiaohongshu. Those surfaces reach non-engineering
-audiences who cannot install or operate Alaya (no GUI / no TUI; CLI +
-MCP only). Without an explicit "engineers only" framing in the
-marketing copy, this risks support load from users who cannot succeed
-with the product as shipped. Track here so Phase 6 / future marketing
-efforts cite this issue when scoping copy or surface choices.
+Promoted from "watch item" to a hard rule by adding `invariants.md
+§21a` (Public-facing copy must describe Alaya as a memory plane for
+CLI agents and must not invite non-engineering users; non-engineering
+surfaces require a separate consumer product or a §21 charter
+amendment before publication). README and CLAUDE.md updated to lead
+with audience prologue and engineer-only framing in p5-system-review-r1.
+Marketing surfaces (xiaohongshu, blog posts, leaderboard disclosure)
+are now governed by §21a as a hard invariant rather than a backlog
+watch item.
 
 Status: Open
 Description: Migration 056 (trust-state-persistence.sql) and trust-state-repo.ts were delivered under task-p4-trust-state.md without a proper Phase-1 carve-out card. This entry authorizes task-p1-migrations-followup-trust-state-056.md as the governing card going forward.
@@ -92,12 +82,23 @@ Renaming is a deliberate adapt-and-port-style change: it diverges from the snaps
 **Close condition**: A dedicated cleanup wave executes after Gate-5 /
 v0.1.0 and (a) renames upstream-milestone-named files/symbols to
 domain-aligned names — covers `#BL-016`; (b) splits inherited oversized
-single files (>800 lines, e.g. `packages/protocol/src/events/phase-c.ts`)
-into focused modules per `rules/common/coding-style.md`; (c) removes port
-residue: unused exports, parallel helper duplicates introduced by adapter
-shims, dead branches Alaya never exercises; (d) reconciles naming
-inconsistencies that adapter ports left behind; (e) `docs/handbook/code-map.md`
-and per-package codemaps updated; (f) full build + vitest green.
+single files (>800 source lines) into focused modules per
+`rules/common/coding-style.md`. The actual top offenders measured
+2026-05-03 in p5-system-review-r1 are
+`packages/storage/src/repos/memory-entry-repo.ts` (1210 lines),
+`packages/core/src/recall-service.ts` (1157),
+`packages/storage/src/repos/garden-data-ports.ts` (1050),
+`packages/core/src/serial-delegation-recovery.ts` (827), and
+`packages/core/src/green-service.ts` (790, near boundary).
+Phase-named files (`packages/protocol/src/events/phase-c.ts` is 786
+lines, under the threshold) are rolled into (a) for renaming rather
+than (b) for splitting unless they cross 800 after rename — they are
+byte-for-byte trivial-copy and dominated by enum tables.
+(c) removes port residue: unused exports, parallel helper duplicates
+introduced by adapter shims, dead branches Alaya never exercises;
+(d) reconciles naming inconsistencies that adapter ports left behind;
+(e) `docs/handbook/code-map.md` and per-package codemaps updated;
+(f) full build + vitest green.
 
 The Port-First discipline (`docs/handbook/port-protocol.md`) forbids mid-port refactors that would diverge from `vendor/do-what-new-snapshot/`. As a result v0.1 deliberately accumulates port residue — upstream-milestone naming, oversized inherited files, parallel helpers next to Alaya-native equivalents, exports Alaya never calls. None of these are individually blocking, and folding them into per-card scope would pollute every port card with refactor work. Treat as a single sweep wave executed once port phase is over; the open backlog set should be consolidated and closed in that pass.
 
