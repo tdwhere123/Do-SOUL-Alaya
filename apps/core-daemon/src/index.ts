@@ -127,7 +127,7 @@ import {
   SoulWorkerSafetyReader,
   TopologyService
 } from "@do-soul/alaya-soul";
-import { createApp, type CoreDaemonServices, type RequestProtectionConfig } from "./app.js";
+import { createApp, type CoreDaemonLifecycleState, type CoreDaemonServices, type RequestProtectionConfig } from "./app.js";
 import { createBudgetProposalPort } from "./budget-wiring.js";
 import { createComputeRoutingExecutionStanceResolver } from "./compute-routing-resolver.js";
 import { defaultBootstrappingTemplates, defaultCanonicalAliasMap } from "./daemon-defaults.js";
@@ -816,6 +816,15 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   });
   recordStartupStep(startupSteps, "mcp-tooling");
 
+  // p5-system-review-r3 MR-I06: shared lifecycle state lets shutdown stop
+  // accepting new requests and wait for in-flight handlers to finish before
+  // closing the database. Mutable on purpose; initialised here, mutated by
+  // shutdown() below.
+  const lifecycleState: CoreDaemonLifecycleState = {
+    drainState: { isDraining: false },
+    inFlight: { count: 0 }
+  };
+
   const app = createApp({
     requestProtection: {
       allowedOrigin: requestProtection.allowedOrigin,
@@ -977,7 +986,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   } as unknown as CoreDaemonServices & {
     readonly principalCodingEngineAvailable: boolean;
     readonly listServerHardConstraints: typeof listServerHardConstraints;
-  });
+  }, lifecycleState);
   recordStartupStep(startupSteps, "http-app");
 
   let server: ServerType | null = null;
@@ -1000,8 +1009,27 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     }
 
     shuttingDown = (async () => {
+      // p5-system-review-r3 MR-I06: stop accepting new requests immediately
+      // (subsequent requests get 503 from the lifecycle middleware in app.ts)
+      // and wait for in-flight handlers to drain before closing the database
+      // and tearing down the server. Without this, server.close() only waits
+      // for socket idle, leaving handler async chains writing to a closed db.
+      lifecycleState.drainState.isDraining = true;
+
+      const drainDeadline = Date.now() + 30_000;
+      while (lifecycleState.inFlight.count > 0 && Date.now() < drainDeadline) {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 25);
+        });
+      }
+      if (lifecycleState.inFlight.count > 0) {
+        warnLogger.warn("daemon shutdown drain timed out with in-flight requests", {
+          inFlight: lifecycleState.inFlight.count
+        });
+      }
+
       if (backgroundStarted) {
-        await gardenRuntime.backgroundManager.stop({ timeoutMs: null });
+        await gardenRuntime.backgroundManager.stop({ timeoutMs: 30_000 });
         gardenRuntime.setBacklogTelemetryObserver(null);
         const telemetryStopResult = await gardenBacklogTelemetryService.stop();
         if (telemetryStopResult === "timed_out") {

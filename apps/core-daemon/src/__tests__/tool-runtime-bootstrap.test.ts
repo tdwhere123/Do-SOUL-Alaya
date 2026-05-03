@@ -56,7 +56,7 @@ describe("daemon tool runtime bootstrap", () => {
         await Promise.resolve();
 
         expect(hoisted.backgroundManagerStop).toHaveBeenCalledTimes(1);
-        expect(hoisted.backgroundManagerStop).toHaveBeenCalledWith({ timeoutMs: null });
+        expect(hoisted.backgroundManagerStop).toHaveBeenCalledWith({ timeoutMs: 30_000 });
         expect(backlogTelemetryService!.stop).not.toHaveBeenCalled();
         expect(hoisted.mcpRuntimeClose).not.toHaveBeenCalled();
         expect(hoisted.serverClose).not.toHaveBeenCalled();
@@ -107,7 +107,7 @@ describe("daemon tool runtime bootstrap", () => {
         await Promise.resolve();
 
         expect(hoisted.backgroundManagerStop).toHaveBeenCalledTimes(1);
-        expect(hoisted.backgroundManagerStop).toHaveBeenCalledWith({ timeoutMs: null });
+        expect(hoisted.backgroundManagerStop).toHaveBeenCalledWith({ timeoutMs: 30_000 });
         expect(backlogTelemetryService!.stop).not.toHaveBeenCalled();
 
         stopGate.resolve();
@@ -198,7 +198,7 @@ describe("daemon tool runtime bootstrap", () => {
         }
       ]);
       const shutdown = async (): Promise<void> => {
-        await backgroundManager.stop({ timeoutMs: null });
+        await backgroundManager.stop({ timeoutMs: 30_000 });
         backlogTelemetryObserver = null;
         await telemetryService.stop();
       };
@@ -711,6 +711,12 @@ describe("daemon tool runtime bootstrap", () => {
     expect(vi.mocked(appModule.createApp)).toHaveBeenCalledWith(
       expect.objectContaining({
         principalCodingEngineAvailable: false
+      }),
+      // p5-system-review-r3 MR-I06: createApp now also receives a lifecycle
+      // state object so shutdown can drain in-flight requests before closing.
+      expect.objectContaining({
+        drainState: expect.objectContaining({ isDraining: false }),
+        inFlight: expect.objectContaining({ count: 0 })
       })
     );
   });

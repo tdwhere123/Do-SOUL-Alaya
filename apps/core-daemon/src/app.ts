@@ -85,8 +85,46 @@ export interface CoreDaemonRouteServices {
   readonly workspaces?: WorkspaceRouteServices;
 }
 
-export function createApp(services: CoreDaemonServices = {}): Hono {
+/**
+ * Shared mutable lifecycle state injected by index.ts so that shutdown
+ * can stop accepting new requests while waiting for in-flight handlers
+ * to finish (p5-system-review-r3 MR-I06).
+ *
+ * `isDraining` flips to true when SIGTERM/SIGINT arrives; the drain
+ * middleware returns 503 for any new request so a process-orchestrator
+ * cannot wedge an EventLog mid-write during shutdown.
+ *
+ * `inFlight.count` is incremented at request start and decremented in
+ * a finally block; shutdown awaits it reaching zero (with a timeout).
+ */
+export interface CoreDaemonLifecycleState {
+  readonly drainState: { isDraining: boolean };
+  readonly inFlight: { count: number };
+}
+
+export function createApp(
+  services: CoreDaemonServices = {},
+  lifecycle?: CoreDaemonLifecycleState
+): Hono {
   const app = new Hono();
+
+  if (lifecycle !== undefined) {
+    app.use("*", async (context, next) => {
+      if (lifecycle.drainState.isDraining) {
+        return context.json(
+          { success: false, error: "daemon is draining" },
+          503
+        );
+      }
+      lifecycle.inFlight.count += 1;
+      try {
+        await next();
+      } finally {
+        lifecycle.inFlight.count -= 1;
+      }
+    });
+  }
+
   const allowedOrigin =
     services.requestProtection?.allowedOrigin ?? process.env.ALLOWED_ORIGIN ?? "http://localhost:5173";
   const allowDesktopOriginlessRequests =
