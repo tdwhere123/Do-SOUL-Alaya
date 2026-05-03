@@ -149,20 +149,25 @@ rtk pnpm exec vitest run --project @do-soul/alaya-<package>
 
 # CLI surface (post Gate-4 / Gate-5; requires `rtk pnpm build` first):
 rtk pnpm --dir apps/core-daemon dev   # daemon dev
-rtk pnpm exec alaya doctor            # CLI diagnostic
-rtk pnpm exec alaya install           # install profile
-rtk pnpm exec alaya attach codex      # attach to Codex
-rtk pnpm exec alaya attach claude-code  # attach to Claude Code
-rtk pnpm exec alaya detach codex      # reverse attach
-rtk pnpm exec alaya status            # status report
-rtk pnpm exec alaya inspect           # Memory Inspector loopback (memory-tooling surface)
-rtk pnpm exec alaya tools list        # CLI fallback: list MCP memory tools
-rtk pnpm exec alaya tools call <tool> '<json>' --json  # CLI fallback: call one tool
-rtk pnpm exec alaya backup --output <path>             # portable bundle
-rtk pnpm exec alaya export --output <path>             # portable export
-rtk pnpm exec alaya import --bundle <path>             # restore from bundle
-rtk pnpm exec alaya mcp stdio         # daemon MCP stdio server
+rtk pnpm alaya doctor                 # CLI diagnostic
+rtk pnpm alaya install                # install profile
+rtk pnpm alaya attach codex           # attach to Codex
+rtk pnpm alaya attach claude-code     # attach to Claude Code
+rtk pnpm alaya detach codex           # reverse attach
+rtk pnpm alaya status                 # status report
+rtk pnpm alaya inspect                # Memory Inspector loopback (memory-tooling surface)
+rtk pnpm alaya tools list             # CLI fallback: list MCP memory tools
+rtk pnpm alaya tools call <tool> '<json>' --json  # CLI fallback: call one tool
+rtk pnpm alaya backup --output <path>             # portable bundle
+rtk pnpm alaya export --output <path>             # portable export
+rtk pnpm alaya import --bundle <path>             # restore from bundle
+rtk pnpm alaya mcp stdio              # daemon MCP stdio server
 ```
+
+`rtk pnpm alaya` is a root npm script (`scripts.alaya = "node ./bin/alaya.mjs"`).
+pnpm does not auto-expose private root bins to `node_modules/.bin/`, so
+`pnpm exec alaya` will not work in-repo. Use `pnpm link --global` to add
+`alaya` to PATH outside the monorepo.
 
 ## Pointers
 

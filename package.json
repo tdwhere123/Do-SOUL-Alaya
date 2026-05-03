@@ -11,6 +11,7 @@
   "scripts": {
     "build": "node ./scripts/build-existing.mjs",
     "test": "vitest run --config vitest.config.mjs",
+    "alaya": "node ./bin/alaya.mjs",
     "doctor": "node ./bin/alaya.mjs doctor"
   },
   "devDependencies": {

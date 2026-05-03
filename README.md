@@ -128,20 +128,27 @@ rtk pnpm test
 CLI surface (post Gate-4 / Gate-5):
 
 ```bash
-rtk pnpm exec alaya doctor                            # diagnostic
-rtk pnpm exec alaya install                           # install profile
-rtk pnpm exec alaya attach codex                      # attach Codex
-rtk pnpm exec alaya attach claude-code                # attach Claude Code
-rtk pnpm exec alaya detach codex                      # reverse attach
-rtk pnpm exec alaya status                            # daemon + trust state
-rtk pnpm exec alaya inspect                           # Memory Inspector loopback (memory-tooling surface, not an agent surface)
-rtk pnpm exec alaya tools list                        # list MCP memory tools
-rtk pnpm exec alaya tools call soul.recall '<json>' --json   # call one tool
-rtk pnpm exec alaya backup --output <path>            # portable bundle
-rtk pnpm exec alaya export --output <path>            # portable export
-rtk pnpm exec alaya import --bundle <path>            # restore from bundle
-rtk pnpm exec alaya mcp stdio                         # daemon MCP stdio server
+rtk pnpm alaya doctor                            # diagnostic
+rtk pnpm alaya install                           # install profile
+rtk pnpm alaya attach codex                      # attach Codex
+rtk pnpm alaya attach claude-code                # attach Claude Code
+rtk pnpm alaya detach codex                      # reverse attach
+rtk pnpm alaya status                            # daemon + trust state
+rtk pnpm alaya inspect                           # Memory Inspector loopback (memory-tooling surface, not an agent surface)
+rtk pnpm alaya tools list                        # list MCP memory tools
+rtk pnpm alaya tools call soul.recall \
+  '{"query":"hello","scope_class":"project","dimension":"fact","domain_tags":[],"max_results":5}' \
+  --json                                         # call one tool (run `tools list` for required fields per tool)
+rtk pnpm alaya backup --output <path>            # portable bundle
+rtk pnpm alaya export --output <path>            # portable export
+rtk pnpm alaya import --bundle <path>            # restore from bundle
+rtk pnpm alaya mcp stdio                         # daemon MCP stdio server
 ```
+
+Outside this monorepo, install Alaya into your PATH via `pnpm link --global`
+or use `node /<repo-abs>/bin/alaya.mjs <subcommand>` directly. The `alaya`
+bin is declared in `package.json` for global link / future publish; pnpm
+does not auto-expose private root bins to `node_modules/.bin/`.
 
 ## Architecture invariants
 
