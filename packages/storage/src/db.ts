@@ -156,6 +156,42 @@ function runMigrations(database: SqliteConnection): void {
   }
 }
 
+/**
+ * Read-only schema-version probe for diagnostic surfaces (alaya doctor).
+ * Returns the persisted max migration version vs the binary's known max,
+ * so doctor can report `schema_ok: true` only when the running binary's
+ * migration set fully matches the database. Does not run migrations or
+ * mutate state. p5-system-review-r3 MR-I11.
+ */
+export function getCurrentSchemaSummary(
+  database: StorageDatabase
+): Readonly<{
+  readonly persistedMaxVersion: number | null;
+  readonly knownMaxVersion: number;
+  readonly schemaOk: boolean;
+}> {
+  const migrationsDirectory = resolveMigrationsDirectory();
+  const migrationFiles = fs
+    .readdirSync(migrationsDirectory, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".sql"))
+    .map((entry) => entry.name);
+  const knownMaxVersion = computeKnownMaxVersion(migrationFiles);
+  let persistedMaxVersion: number | null = null;
+  try {
+    const row = database.connection
+      .prepare("SELECT MAX(version) AS max_version FROM schema_version")
+      .get() as { max_version: number | null } | undefined;
+    persistedMaxVersion = row?.max_version ?? null;
+  } catch {
+    persistedMaxVersion = null;
+  }
+  return {
+    persistedMaxVersion,
+    knownMaxVersion,
+    schemaOk: persistedMaxVersion === knownMaxVersion && knownMaxVersion > 0
+  };
+}
+
 function computeKnownMaxVersion(migrationFiles: readonly string[]): number {
   let maxVersion = 0;
   for (const fileName of migrationFiles) {

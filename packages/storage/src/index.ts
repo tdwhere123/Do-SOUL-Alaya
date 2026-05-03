@@ -1,5 +1,5 @@
 export { StorageError, type StorageErrorCode } from "./errors.js";
-export { initDatabase, StorageDatabase, type InitDatabaseOptions } from "./db.js";
+export { initDatabase, StorageDatabase, getCurrentSchemaSummary, type InitDatabaseOptions } from "./db.js";
 export {
   SqliteWorkspaceRepo,
   type WorkspaceCreateInput,

@@ -2,6 +2,7 @@ import { once } from "node:events";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Readable, Writable } from "node:stream";
+import { getCurrentSchemaSummary, initDatabase } from "@do-soul/alaya-storage";
 import type { AlayaDaemonRuntime } from "../index.js";
 import { runAlayaMcpStdioServer } from "../mcp-server.js";
 import type { ProfileMutationAuditRow, ProfileMutationAuditWriter } from "../profile-mutation.js";
@@ -44,6 +45,18 @@ export function registerAlayaCliCommands(
       return {
         status: gardenStatus.last_pass_at === null ? "degraded" : "healthy",
         last_pass_at: gardenStatus.last_pass_at
+      };
+    },
+    // p5-system-review-r3 MR-I11: schema_ok needs the live db. initDatabase
+    // is per-filename cached in alaya-storage, so reusing it here returns
+    // the connection the runtime already holds; we never close it.
+    getSchemaSummary: async (dbPath) => {
+      const database = initDatabase({ filename: dbPath });
+      const summary = getCurrentSchemaSummary(database);
+      return {
+        persistedMaxVersion: summary.persistedMaxVersion,
+        knownMaxVersion: summary.knownMaxVersion,
+        schemaOk: summary.schemaOk
       };
     }
   }));

@@ -8,6 +8,15 @@ export interface DoctorCommandDependencies {
   readonly getEmbeddingStatus?: (workspaceId: string) => Promise<EmbeddingStatus>;
   readonly getMcpHealth?: () => Promise<Readonly<{ transport: "ready" | "not_ready"; enrolled_tools: number }>>;
   readonly getGardenHealth?: () => Promise<Readonly<{ status: "healthy" | "degraded"; last_pass_at: string | null }>>;
+  /**
+   * Optional schema readiness probe (p5-system-review-r3 MR-I11). When
+   * provided, doctor reports `storage.schema_ok` so an operator can
+   * tell apart "db file exists and is writable" from "db is fully
+   * migrated for this binary".
+   */
+  readonly getSchemaSummary?: (
+    dbPath: string
+  ) => Promise<Readonly<{ persistedMaxVersion: number | null; knownMaxVersion: number; schemaOk: boolean }>>;
   readonly startupStepsProvider?: (
     context: Pick<AlayaCliContext, "daemon">
   ) => readonly DaemonStartupStepRecord[];
@@ -33,6 +42,9 @@ interface DoctorReport {
     db_path: string;
     exists: boolean;
     writable: boolean;
+    schema_ok: boolean | null;
+    schema_version_persisted: number | null;
+    schema_version_expected: number | null;
   }>;
   readonly provider: Readonly<{
     workspace_id: string;
@@ -77,7 +89,7 @@ export function createDoctorCommand(
       const daemonReady = missingSteps.length === 0;
 
       const toolchainStatus = await deps.getToolchainStatus();
-      const storage = await inspectStorage(toolchainStatus.db_path);
+      const storage = await inspectStorage(toolchainStatus.db_path, deps.getSchemaSummary);
       const workspaceId = args.workspaceId ?? deps.defaultWorkspaceId ?? "default";
       const embeddingStatus = deps.getEmbeddingStatus
         ? await deps.getEmbeddingStatus(workspaceId)
@@ -97,7 +109,8 @@ export function createDoctorCommand(
 
       const checks = {
         runtime: daemonReady ? "pass" : "fail",
-        storage: storage.exists && storage.writable ? "pass" : "fail",
+        storage:
+          storage.exists && storage.writable && storage.schema_ok !== false ? "pass" : "fail",
         provider: embeddingStatus === null || embeddingStatus.provider_configured ? "pass" : "fail",
         mcp: mcp.transport === "ready" ? "pass" : "fail",
         garden: garden.status === "healthy" ? "pass" : "fail"
@@ -178,38 +191,70 @@ function doctorArgsSchema(): AlayaCliArgsSchema<DoctorArgs> {
   };
 }
 
-async function inspectStorage(dbPath: string): Promise<DoctorReport["storage"]> {
+async function inspectStorage(
+  dbPath: string,
+  getSchemaSummary?: DoctorCommandDependencies["getSchemaSummary"]
+): Promise<DoctorReport["storage"]> {
   const normalizedPath = dbPath.trim();
+  const emptyStorage = (existsValue: boolean, writableValue: boolean): DoctorReport["storage"] => ({
+    db_path: normalizedPath.length === 0 ? dbPath : normalizedPath,
+    exists: existsValue,
+    writable: writableValue,
+    schema_ok: null,
+    schema_version_persisted: null,
+    schema_version_expected: null
+  });
+
   if (normalizedPath.length === 0) {
-    return {
-      db_path: dbPath,
-      exists: false,
-      writable: false
-    };
+    return emptyStorage(false, false);
   }
 
   try {
     await access(normalizedPath, fsConstants.F_OK);
   } catch {
+    return emptyStorage(false, false);
+  }
+
+  let writable = true;
+  try {
+    await access(normalizedPath, fsConstants.W_OK);
+  } catch {
+    writable = false;
+  }
+
+  if (!writable) {
+    return emptyStorage(true, false);
+  }
+
+  if (getSchemaSummary === undefined) {
     return {
       db_path: normalizedPath,
-      exists: false,
-      writable: false
+      exists: true,
+      writable: true,
+      schema_ok: null,
+      schema_version_persisted: null,
+      schema_version_expected: null
     };
   }
 
   try {
-    await access(normalizedPath, fsConstants.W_OK);
+    const summary = await getSchemaSummary(normalizedPath);
     return {
       db_path: normalizedPath,
       exists: true,
-      writable: true
+      writable: true,
+      schema_ok: summary.schemaOk,
+      schema_version_persisted: summary.persistedMaxVersion,
+      schema_version_expected: summary.knownMaxVersion
     };
   } catch {
     return {
       db_path: normalizedPath,
       exists: true,
-      writable: false
+      writable: true,
+      schema_ok: false,
+      schema_version_persisted: null,
+      schema_version_expected: null
     };
   }
 }
@@ -219,6 +264,14 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport):
   stream.write(`runtime ready: ${report.startup.ready ? "yes" : "no"}\n`);
   stream.write(`storage db path: ${report.storage.db_path}\n`);
   stream.write(`storage writable: ${report.storage.writable ? "yes" : "no"}\n`);
+  if (report.storage.schema_ok !== null) {
+    stream.write(
+      `storage schema_ok: ${report.storage.schema_ok ? "yes" : "no"}` +
+        ` (persisted=${report.storage.schema_version_persisted ?? "none"}, expected=${
+          report.storage.schema_version_expected ?? "?"
+        })\n`
+    );
+  }
   stream.write(`mcp transport: ${report.mcp.transport}\n`);
   stream.write(`garden status: ${report.garden.status}\n`);
   if (report.provider.embedding !== null) {
