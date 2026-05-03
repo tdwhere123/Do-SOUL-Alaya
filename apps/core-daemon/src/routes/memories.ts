@@ -8,6 +8,12 @@ export interface MemoryRouteServices {
   readonly memoryService: MemoryService;
 }
 
+// HTTP route surface intentionally omits GET /memories/:id.
+// v0.1.0 release surface is MCP + CLI only (see CLAUDE.md "no GUI" invariant).
+// Per-memory read flows through:
+//   - MCP: soul.open_pointer (mcp-memory-tool-handler, workspace-scoped)
+//   - CLI fallback: alaya tools call --json '{"name":"soul.open_pointer", ...}'
+// Removed in p5-system-review-r1 (MR-B02: route-layer cross-workspace leak).
 export function registerMemoryRoutes(app: Hono, services: MemoryRouteServices): void {
   app.get("/workspaces/:wsId/memories", async (context) => {
     const workspaceId = context.req.param("wsId");
@@ -28,16 +34,6 @@ export function registerMemoryRoutes(app: Hono, services: MemoryRouteServices): 
 
     const memories = await services.memoryService.findByRunId(runId);
     return context.json({ success: true, data: memories }, 200);
-  });
-
-  app.get("/memories/:id", async (context) => {
-    const memory = await services.memoryService.findById(context.req.param("id"));
-
-    if (memory === null) {
-      throw new CoreError("NOT_FOUND", "Memory entry not found");
-    }
-
-    return context.json({ success: true, data: memory }, 200);
   });
 }
 

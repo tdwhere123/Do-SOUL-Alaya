@@ -127,7 +127,7 @@ describe("routes-memory port batch", () => {
     expect(services.synthesisService.findById).toHaveBeenCalledWith("s1");
   });
 
-  it("registerProposalRoutes normalizes review payload and delegates review", async () => {
+  it("registerProposalRoutes no longer exposes POST /proposals/:id/review (p5-system-review-r1 MR-B01)", async () => {
     const app = new Hono();
     const services = {
       workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },
@@ -135,7 +135,9 @@ describe("routes-memory port batch", () => {
         findByWorkspaceId: vi.fn(),
         findPending: vi.fn(),
         findById: vi.fn(),
-        review: vi.fn(async () => ({ proposal_id: "p1", resolution_state: "accepted" }))
+        review: vi.fn(async () => {
+          throw new Error("review must not be reachable from HTTP");
+        })
       }
     };
     registerProposalRoutes(app, services as any);
@@ -152,19 +154,8 @@ describe("routes-memory port batch", () => {
       })
     });
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      success: true,
-      data: { proposal_id: "p1", resolution_state: "accepted" }
-    });
-    expect(services.proposalService.review).toHaveBeenCalledWith(
-      "p1",
-      expect.objectContaining({
-        action: "accepted",
-        note: "ship it",
-        reviewed_by: "reviewer-1"
-      })
-    );
+    expect(response.status).toBe(404);
+    expect(services.proposalService.review).not.toHaveBeenCalled();
   });
 
   it("registerGlobalMemoryRoutes parses filters and applies default accepted_by", async () => {
