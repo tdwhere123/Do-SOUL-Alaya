@@ -6,7 +6,9 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-025`.
+sequence. **Next available number**: `#BL-025` (`#BL-022` taken by
+p5-system-review-r3 EventPublisher v0.2 deferral; `#BL-023`/`#BL-024`
+were resolved in r1 / r2).
 
 ## Open Issues
 
@@ -151,6 +153,31 @@ P4-secrets v0.1 supports env + local-file adapters only. Keychain is
 production-grade key management; v0.1 is a single-user local-first
 build where env variables and `~/.config/alaya/.env` with strict file
 permissions are sufficient.
+
+### #BL-022 — EventPublisher port atomicity + EventLog revision transaction
+
+**Status**: Deferred to v0.2 (user-confirmed in p5-system-review-r3)
+**Close condition**: v0.2 transaction model adds
+`EventPublisherEventLogRepoPort.appendManyWithMutation(eventInputs, mutate)`
+where `mutate` is a *synchronous* callback wrapped in a single
+`connection.transaction(...)`; EventLog revision computation moves
+inside that transaction (replacing the current `getNextRevision` async
+read-modify-write window in `packages/storage/src/repos/event-log-repo.ts`);
+`SqliteEventLogRepo` provides the implementation; the ~12 service
+callers migrate from `publishWithMutation` to the atomic port.
+
+Until v0.2 lands the new shape:
+- correctness is backed by SQLite CAS plus the
+  `unique(entity_type, entity_id, revision)` index (migration 028);
+- the registered `EventPublisher mutation audit-id divergence` in
+  `#BL-021` documents the gap;
+- p5-system-review-r3 explicitly chose to defer rather than retrofit
+  because the port shape forces every existing `mutate` implementation
+  to become synchronous (no `await` allowed inside the transaction
+  callback) and that migration is appropriate as part of the v0.2
+  transaction-model rewrite, not a v0.1 patch.
+
+Originally raised in `p5-system-review-r1` as MR-I07 + MR-I09.
 
 ## Registered Divergences
 
