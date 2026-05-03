@@ -69,7 +69,7 @@ describe("mcp memory tool handler", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(deps.memoryService.findById).toHaveBeenCalledWith("mem1");
+    expect(deps.memoryService.findByIdScoped).toHaveBeenCalledWith("mem1", context.workspaceId);
     expect(result.ok && result.output).toMatchObject({
       object_id: "mem1",
       object_kind: "memory_entry"
@@ -78,7 +78,8 @@ describe("mcp memory tool handler", () => {
 
   it("does not open memory pointers outside the caller workspace", async () => {
     const deps = createDeps();
-    deps.memoryService.findById = vi.fn(async () => createMemory({ workspace_id: "ws2" }));
+    // F-r2-002: handler now uses findByIdScoped; foreign workspace returns null.
+    deps.memoryService.findByIdScoped = vi.fn(async (_objectId: string, _workspaceId: string) => null);
     const handler = createMcpMemoryToolHandler(deps);
 
     const result = await handler.call({
@@ -184,7 +185,11 @@ function createDeps(): McpMemoryToolHandlerDependencies {
       }))
     },
     memoryService: {
-      findById: vi.fn(async () => createMemory())
+      findById: vi.fn(async () => createMemory()),
+      findByIdScoped: vi.fn(async (_objectId: string, workspaceId: string) => {
+        const entry = createMemory();
+        return entry.workspace_id === workspaceId ? entry : null;
+      })
     },
     signalService: {
       receiveSignal: vi.fn(async (signal: CandidateMemorySignal) => ({ signal }))

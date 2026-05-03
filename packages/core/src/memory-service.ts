@@ -435,6 +435,26 @@ export class MemoryService {
     return this.dependencies.memoryEntryRepo.findById(objectId);
   }
 
+  /**
+   * Workspace-scoped lookup. Per invariants §29 (Default Scope) + §30
+   * (Fix at Source), MCP/CLI surfaces MUST use this method instead of
+   * `findById` so cross-workspace leak (p5-system-review-r1 MR-B02 /
+   * Round 2 F-r2-002) cannot recur at any handler boundary.
+   * Returns null when the object exists in a different workspace —
+   * indistinguishable from "not found", which is the intended privacy
+   * surface.
+   */
+  public async findByIdScoped(
+    objectId: string,
+    workspaceId: string
+  ): Promise<Readonly<MemoryEntry> | null> {
+    const entry = await this.dependencies.memoryEntryRepo.findById(objectId);
+    if (entry === null || entry.workspace_id !== workspaceId) {
+      return null;
+    }
+    return entry;
+  }
+
   public findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<MemoryEntry>[]> {
     return this.dependencies.memoryEntryRepo.findByWorkspaceId(workspaceId);
   }

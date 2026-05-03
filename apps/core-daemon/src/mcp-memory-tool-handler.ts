@@ -66,6 +66,10 @@ export interface McpMemoryToolHandlerDependencies {
   };
   readonly memoryService: {
     findById(objectId: string): Promise<Readonly<MemoryEntry> | null>;
+    findByIdScoped(
+      objectId: string,
+      workspaceId: string
+    ): Promise<Readonly<MemoryEntry> | null>;
   };
   readonly signalService: {
     receiveSignal(signal: CandidateMemorySignal): Promise<Readonly<{
@@ -217,8 +221,16 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
   }
 
   async function openPointer(request: SoulOpenPointerRequest, context: McpMemoryToolCallContext) {
-    const memory = await deps.memoryService.findById(request.object_id);
-    if (memory === null || memory.workspace_id !== context.workspaceId) {
+    // SECURITY (p5-system-review-r2 F-r2-002 / invariants §30 Fix at Source):
+    // Use the scoped service method so cross-workspace lookup is blocked at
+    // the service layer, not just at this handler. Any future caller of
+    // memoryService.findById must take the same precaution; new MCP/CLI
+    // surfaces should call findByIdScoped.
+    const memory = await deps.memoryService.findByIdScoped(
+      request.object_id,
+      context.workspaceId
+    );
+    if (memory === null) {
       throw new ToolNotFoundError(`Memory object not found: ${request.object_id}`);
     }
 
