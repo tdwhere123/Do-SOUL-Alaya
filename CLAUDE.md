@@ -27,10 +27,16 @@ Important invariants (full set in `docs/handbook/invariants.md`):
 - Embedding is a recall supplement; it never decides durable truth.
 - LLMs and connected agents propose candidates; Alaya decides durable
   truth.
-- Alaya has **no GUI and no conversation TUI**. Its only surfaces are
-  MCP (for agent attach) and plain CLI commands (`alaya doctor`,
-  `alaya install`, `alaya attach <target>`, `alaya status`,
-  `alaya tools list`, `alaya tools call --json`).
+- Alaya has **no agent-frontend GUI and no conversation TUI**. Agent
+  surfaces are MCP (for agent attach) and the `alaya` CLI
+  (`doctor / install / attach / detach / status / inspect / tools list /
+  tools call --json / backup / export / import / mcp stdio`). The
+  Memory Inspector is an additional memory-tooling loopback surface,
+  not an agent surface, and never participates in agent control flow.
+- Public-facing copy must describe Alaya as a memory plane for CLI
+  agents (Codex / Claude Code / similar) and must not invite
+  non-engineering users to install or operate Alaya. See
+  invariants §21a.
 
 ## Port-First Discipline
 
@@ -141,14 +147,21 @@ rtk pnpm build
 rtk pnpm test
 rtk pnpm exec vitest run --project @do-soul/alaya-<package>
 
-# All commands below are available only after Phase 4 lands:
-rtk pnpm --dir apps/core-daemon dev  # daemon dev
-rtk pnpm exec alaya doctor           # CLI diagnostic
-rtk pnpm exec alaya install          # install profile
-rtk pnpm exec alaya attach codex     # attach to a target agent
-rtk pnpm exec alaya status           # status report
-rtk pnpm exec alaya tools list       # CLI fallback: list MCP memory tools
-rtk pnpm exec alaya tools call --json # CLI fallback: call a memory tool
+# CLI surface (post Gate-4 / Gate-5; requires `rtk pnpm build` first):
+rtk pnpm --dir apps/core-daemon dev   # daemon dev
+rtk pnpm exec alaya doctor            # CLI diagnostic
+rtk pnpm exec alaya install           # install profile
+rtk pnpm exec alaya attach codex      # attach to Codex
+rtk pnpm exec alaya attach claude-code  # attach to Claude Code
+rtk pnpm exec alaya detach codex      # reverse attach
+rtk pnpm exec alaya status            # status report
+rtk pnpm exec alaya inspect           # Memory Inspector loopback (memory-tooling surface)
+rtk pnpm exec alaya tools list        # CLI fallback: list MCP memory tools
+rtk pnpm exec alaya tools call <tool> '<json>' --json  # CLI fallback: call one tool
+rtk pnpm exec alaya backup --output <path>             # portable bundle
+rtk pnpm exec alaya export --output <path>             # portable export
+rtk pnpm exec alaya import --bundle <path>             # restore from bundle
+rtk pnpm exec alaya mcp stdio         # daemon MCP stdio server
 ```
 
 ## Pointers
