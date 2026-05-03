@@ -311,9 +311,12 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     request: SoulExploreGraphRequest,
     context: McpMemoryToolCallContext
   ) {
+    // SECURITY (p5-system-review-r2 F-r2-001 / invariants §29 Default Scope):
+    // workspace is server-bound from the trusted MCP call context; payload
+    // cannot redirect graph exploration to a foreign workspace.
     const neighbors = await deps.graphExploreService.exploreOneHop(
       request.memory_id,
-      request.workspace_id,
+      context.workspaceId,
       {
         ...(request.edge_types === undefined ? {} : { edgeTypes: request.edge_types }),
         ...(request.direction === undefined ? {} : { direction: request.direction }),

@@ -55,7 +55,10 @@ export const SoulOpenPointerResponseSchema = z
 export const SoulExploreGraphRequestSchema = z
   .object({
     memory_id: NonEmptyStringSchema,
-    workspace_id: NonEmptyStringSchema,
+    // workspace_id intentionally omitted from the public MCP schema:
+    // the daemon binds workspace from the trusted MCP call context per
+    // invariants §29 Default Scope and p5-system-review-r2 F-r2-001.
+    // Adding workspace_id here would re-open the scope-spoofing path.
     edge_types: z.array(MemoryGraphEdgeTypeSchema).readonly().optional(),
     direction: GraphExploreDirSchema.optional()
   })
