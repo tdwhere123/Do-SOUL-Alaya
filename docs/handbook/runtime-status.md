@@ -108,9 +108,54 @@ findings for the MCP/CLI release path. Gate-5 / v0.1.0 passed on
 The post-port hygiene sweep tracked by `#BL-017` is now startable as a
 dedicated post-v0.1 hygiene wave and was not executed inside Phase 5.
 Benchmark fixtures belong to Phase 6 / Gate-6 / v0.1.1 and are not a
-Gate-5 requirement. The older HTTP proposal review route transaction
-hardening is tracked by `#BL-024`; it is not part of Gate-5 MCP/CLI
-release acceptance.
+Gate-5 requirement.
+
+## Phase 5 system-level review (post-Gate-5, 2026-05-03)
+
+After Gate-5 the user requested a deeper system-level review than the
+four-perspective Gate-5 final-review covered. The work was tracked under
+`p5-system-review-r1` and `p5-system-review-r2`.
+
+**Round 1 (`p5-system-review-r1`).** Ten reviewers (architect, red-team,
+sql-pro, install-release, pr-review, test-automator, plan-challenger,
+documentation-engineer, typescript-pro, codex external) ran in parallel
+and surfaced 11 Blocking / 21 Important / 11 Nice-to-have findings after
+deduplication. The merged report is at
+`docs/v0.1/phase-5-briefs/reports/p5-system-review-round-1.md`. Twenty-two
+atomic commits closed the Round 1 Blocking set (HTTP proposal review +
+memory read endpoints removed; `soul.emit_candidate_signal` scope bound to
+MCP context; ProposalService/ClaimService `deferredNotificationEvents`
+property name unified; MCP proposal create path atomized via
+`createProposalWithEvents`; runtime-notifier listener exceptions isolated;
+SQLite WAL + busy_timeout + version-ahead guard added; install plan/apply
+/rollback with prior-audit guard; review-protocol §Cause Class
+Aggregation + invariants §21a / §29-31 added; `#BL-024`, `#BL-023`,
+`#BL-017` close paths declared in `docs/handbook/backlog.md`).
+
+**Round 2 (`p5-system-review-r2`).** A Codex external sanity check
+(`docs/v0.1/phase-5-briefs/reports/p5-system-review-round-2.md`) confirmed
+Round 1 closures and surfaced 4 residual Blocking findings: F-r2-001
+(`soul.explore_graph` payload-spoofable workspace), F-r2-002 (`open_pointer`
+fixed at handler boundary, not at `MemoryService` source), F-r2-003 (install
+did not actually run schema migrations before claiming success), F-r2-004
+(attach wrote bare `command = "alaya"` which pnpm did not expose to PATH).
+Six atomic commits (`6299c95`, `be96a14`, `2d5366c`, `ee8c95f`, `384c2d4`,
+plus `4f507d3` adding the root `pnpm alaya` npm script) closed all four,
+moving scope binding to the MCP handler boundary, adding
+`MemoryService.findByIdScoped`, calling `initDatabase` from install (without
+closing the cached connection), and writing `command="node"` plus an
+absolute path to `bin/alaya.mjs` into Codex / Claude profiles.
+
+The end-to-end verification gate at HEAD `384c2d4` runs clean:
+`rtk pnpm install`, `rtk pnpm build`, `rtk pnpm exec vitest run` (248 files
+/ 1916 tests pass), `rtk pnpm alaya doctor`, `rtk pnpm alaya install --non-interactive`,
+`rtk pnpm alaya attach codex --yes`, `rtk pnpm alaya status`, `rtk pnpm alaya tools list`,
+and `rtk pnpm alaya tools call soul.recall '<full-json>' --json` all
+succeed. Convergence rule (Blocking + Important double-zero) is met for
+the system-review wave; remaining Important items (bounded zod schemas,
+DRY MCP catalog from zod, `SoulOpenPointerResponse` projection,
+shutdown drain, doctor `schema_ok`, EventPublisher port extension) are
+non-blocking and tracked for a follow-up wave.
 
 ## Gate Definitions
 
