@@ -450,7 +450,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const sessionOverrideService = new SessionOverrideService({ eventLogRepo });
   const proposalService = new ProposalService({
     proposalRepo,
-    claimService: claimService as never,
+    claimService,
     synthesisService,
     eventLogRepo,
     karmaEventStore: createKarmaEventStore(karmaEventRepo, warnLogger),
