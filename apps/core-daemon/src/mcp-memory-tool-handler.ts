@@ -231,11 +231,23 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
 
   async function emitCandidateSignal(
     request: SoulEmitCandidateSignalRequest,
-    _context: McpMemoryToolCallContext
+    context: McpMemoryToolCallContext
   ) {
+    // SECURITY (p5-system-review-r1 MR-B03 / invariants §29 Default Scope):
+    // Trusted MCP call context overrides any payload-supplied scope. The
+    // attached agent (LLM) cannot redirect signals to a foreign workspace
+    // by spoofing workspace_id / run_id / surface_id in the request body.
+    if (context.runId === null) {
+      throw new ToolValidationError(
+        "soul.emit_candidate_signal requires a runId in the MCP call context."
+      );
+    }
     const signal = CandidateMemorySignalSchema.parse({
       signal_id: `signal_${generateId()}`,
       ...request,
+      workspace_id: context.workspaceId,
+      run_id: context.runId,
+      surface_id: context.surfaceId ?? null,
       source: SignalSource.MODEL_TOOL,
       created_at: now()
     });
