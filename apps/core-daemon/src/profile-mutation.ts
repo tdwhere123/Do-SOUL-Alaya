@@ -1,5 +1,5 @@
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import path, { dirname, join } from "node:path";
 import { soulToolDefs } from "@do-soul/alaya-engine-gateway";
 
 export type ProfileTarget = "codex" | "claude-code";
@@ -99,6 +99,34 @@ export const ALAYA_SLASH_ALIAS = "/alaya-inspect";
 export const ALAYA_SLASH_COMMAND = "alaya inspect --open";
 export const ALAYA_MCP_COMMAND = "alaya";
 export const ALAYA_MCP_ARGS = Object.freeze(["mcp", "stdio"] as const);
+
+/**
+ * Resolve the launcher pair (command, args) that attach writes into user
+ * Codex / Claude profiles for spawning Alaya as an MCP stdio server.
+ *
+ * v0.1.0 default: node <repo-abs>/bin/alaya.mjs mcp stdio (always
+ * spawnable; does not require `alaya` on PATH). The user can override
+ * by exporting ALAYA_MCP_LAUNCHER=<command-or-path> before running
+ * `alaya attach <target>` — useful after `pnpm link --global`.
+ *
+ * p5-system-review-r2 F-r2-004: previously attach wrote bare
+ * command="alaya" which is not on PATH (pnpm does not auto-expose
+ * private root bins), so spawning the MCP server always failed.
+ */
+export function resolveAlayaMcpLauncher(
+  env: NodeJS.ProcessEnv = process.env,
+  repoRoot: string = path.resolve(import.meta.dirname, "..", "..", "..")
+): { readonly command: string; readonly args: readonly string[] } {
+  const override = env.ALAYA_MCP_LAUNCHER?.trim();
+  if (override !== undefined && override.length > 0) {
+    const tokens = override.split(/\s+/u);
+    const cmd = tokens[0] ?? ALAYA_MCP_COMMAND;
+    const extraArgs = tokens.slice(1);
+    return { command: cmd, args: [...extraArgs, ...ALAYA_MCP_ARGS] };
+  }
+  const binPath = path.resolve(repoRoot, "bin", "alaya.mjs");
+  return { command: "node", args: [binPath, ...ALAYA_MCP_ARGS] };
+}
 export const PROFILE_MUTATION_CONFIRM_PROMPT = "Apply profile mutation changes? [y/N] ";
 export const PUBLIC_SOUL_TOOL_NAMES = Object.freeze(soulToolDefs.map((toolDef) => toolDef.name));
 
@@ -381,11 +409,12 @@ function upsertMcpEntry(target: ProfileTarget, before: string | undefined): stri
 
   const parsed = parseJsonObject(before, ".claude.json");
   const currentMcpServers = isRecord(parsed.mcpServers) ? parsed.mcpServers : {};
+  const launcher = resolveAlayaMcpLauncher();
   parsed.mcpServers = {
     ...currentMcpServers,
     alaya: {
-      command: ALAYA_MCP_COMMAND,
-      args: [...ALAYA_MCP_ARGS],
+      command: launcher.command,
+      args: [...launcher.args],
       operatorInstructions: ALAYA_OPERATOR_INSTRUCTIONS
     }
   };
@@ -513,10 +542,11 @@ function buildDetachConflict(existingCommand: string | undefined): ProfileMutati
 }
 
 function renderCodexMcpBlock(): string {
+  const launcher = resolveAlayaMcpLauncher();
   return [
     "[mcp_servers.alaya]",
-    `command = ${JSON.stringify(ALAYA_MCP_COMMAND)}`,
-    `args = ${JSON.stringify([...ALAYA_MCP_ARGS])}`,
+    `command = ${JSON.stringify(launcher.command)}`,
+    `args = ${JSON.stringify([...launcher.args])}`,
     `operator_instructions = ${JSON.stringify(ALAYA_OPERATOR_INSTRUCTIONS)}`
   ].join("\n");
 }
