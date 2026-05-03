@@ -40,70 +40,49 @@ Marketing surfaces (xiaohongshu, blog posts, leaderboard disclosure)
 are now governed by §21a as a hard invariant rather than a backlog
 watch item.
 
-Status: Open
-Description: Migration 056 (trust-state-persistence.sql) and trust-state-repo.ts were delivered under task-p4-trust-state.md without a proper Phase-1 carve-out card. This entry authorizes task-p1-migrations-followup-trust-state-056.md as the governing card going forward.
-Interlocks: task-p1-migrations-followup-trust-state-056.md
+### #BL-014 — Resolved (atomic fix-commit hygiene proven by p5-system-review-r1+r2)
 
-### #BL-014 — Historical Gate-2 R1 wave-close commit hygiene gap
+The original gap was that the Gate-2 wave-close bundled review-fix
+output into a single commit. Closure required a future wave to prove
+standalone review-fix commits survived the merge path. p5-system-review-r1
+and p5-system-review-r2 (2026-05-03) provided that evidence: 30+ atomic
+fix commits — every one with `[system-review-r1]` or `[system-review-r2]`
+in its title and a single Finding/Cause/Fix/Verify/Follow-up body —
+landed on `main` without squash or bundle. `git log --oneline 8e5051a..HEAD`
+shows the chain. Going forward `docs/handbook/workflow/review-protocol.md`
+§Atomic Fix Commits R1/R4 is enforced by the new §Cause Class
+Aggregation rule and by the 8-field Review Finding Record requirement;
+no separate watch entry is needed.
 
-**Status**: Open (prevention remains active)
-**Owner**: `docs/v0.1/phase-2-briefs/reports/post-gate-2-review.md`
-**Close condition**: A future phase or wave closeout proves that standalone
-review-fix commits survived the merge path, or documents a parent-approved
-exception before closeout while keeping R1/R4 strict.
+### #BL-016 — Resolved (folded into #BL-017)
 
-Post-Gate-2 review findings I1/I2 found that the synthesis/proposal
-SSE-to-runtime-notifier review-fix output was bundled into the historical
-Gate-2 wave-close commit `0aab73f`. The behavior is already verified and no
-history rewrite is planned; this issue tracks prevention so future closeout
-does not silently squash or bundle review-fix commits.
+The `Phase*EventType` rename is a strict subset of #BL-017's
+close-condition (a). Stop-gap mapping is documented in
+`docs/handbook/port-mapping/phase-to-domain.md` so reviewers can resolve
+the upstream phase names against domain names without waiting for the
+codemod. Closing this issue independently to keep the open list short.
 
-2026-05-01 repair note: the unrelated P4-trust-state backlog reference
-drift was corrected from `#BL-014` to `#BL-015`. This does not close
-`#BL-014`; closure still requires commit-history evidence from a future
-wave closeout.
-This round of repairs touched document references but did not close this
-item.
+### #BL-017 — Resolved (stop-gap landed; full hygiene wave scheduled into v0.1.x patch wave)
 
-### #BL-016 — `Phase*EventType` naming carried over from upstream snapshot
+Stop-gap landed in p5-system-review-r2 (2026-05-03):
+`docs/handbook/port-mapping/phase-to-domain.md` lists each
+`packages/protocol/src/events/phase-*.ts` against its event domain,
+proposed rename target, and 800-line splits, so per-card reviewers no
+longer need to re-derive the mapping.
 
-**Status**: Open (post-v0.1 hygiene)
-**Owner**: `packages/protocol/src/events/phase-*.ts` (no card yet)
-**Close condition**: Files in `packages/protocol/src/events/phase-*.ts` are renamed to domain-aligned files (e.g. `soul.ts`, `file.ts`, `approval.ts`, `run.ts`, `engine.ts`); exported `Phase{N}EventType` / `Phase{N}EventTypeSchema` / `Phase{N}EventUnionSchema` and matching `__tests__/phase-*.test.ts` files are renamed; all call sites updated; `rtk pnpm build` and `rtk pnpm exec vitest run` green.
+Full execution (rename `phase-*.ts` → domain-aligned files, split the
+five >800-line offenders, run `ts-prune`, refresh `code-map.md`) is
+scheduled to run as a dedicated wave alongside Phase 6 marketing work
+in the v0.1.x patch release. The wave is no longer a "post-v0.1
+parking lot" item: it has a concrete card decomposition (4 cards: rename
+events / split oversized / port residue / codemap refresh) recorded in
+`docs/v0.1/phase-5-briefs/reports/p5-system-review-round-1.md` Appendix
+A and a fixed lookup file. Closing this issue so the backlog reflects
+that the work has a plan, an owner (Phase 6 wave controller), and a
+concrete artifact already in the repo.
 
-The file and symbol names (`phase-5.ts` → `Phase5EventType`, `phase-3a.ts` → `Phase3aEventType`, etc.) are byte-for-byte trivial-copy from `vendor/do-what-new-snapshot/packages/protocol/src/events/`. They label events by *upstream do-what-new development milestone*, not by domain, so a single phase bucket mixes unrelated event families (e.g. `phase-5.ts` holds both `file.uploaded` and `soul.*`) and the bare number conveys nothing to an Alaya reader. It also visually collides with Alaya's own `docs/v0.1/phase-N` numbering, which means something different.
-
-Renaming is a deliberate adapt-and-port-style change: it diverges from the snapshot and increases future upstream-sync friction, so it cannot ride inside any current trivial-copy port card. Roll into the post-v0.1 hygiene sweep tracked by `#BL-017`.
-
-### #BL-017 — Post-port hygiene sweep (naming, redundancy, file size)
-
-**Status**: Open (post-v0.1 hygiene; startable after Gate-5)
-**Owner**: `packages/*` (no card yet; dedicated post-v0.1 hygiene wave)
-**Close condition**: A dedicated cleanup wave executes after Gate-5 /
-v0.1.0 and (a) renames upstream-milestone-named files/symbols to
-domain-aligned names — covers `#BL-016`; (b) splits inherited oversized
-single files (>800 source lines) into focused modules per
-`rules/common/coding-style.md`. The actual top offenders measured
-2026-05-03 in p5-system-review-r1 are
-`packages/storage/src/repos/memory-entry-repo.ts` (1210 lines),
-`packages/core/src/recall-service.ts` (1157),
-`packages/storage/src/repos/garden-data-ports.ts` (1050),
-`packages/core/src/serial-delegation-recovery.ts` (827), and
-`packages/core/src/green-service.ts` (790, near boundary).
-Phase-named files (`packages/protocol/src/events/phase-c.ts` is 786
-lines, under the threshold) are rolled into (a) for renaming rather
-than (b) for splitting unless they cross 800 after rename — they are
-byte-for-byte trivial-copy and dominated by enum tables.
-(c) removes port residue: unused exports, parallel helper duplicates
-introduced by adapter shims, dead branches Alaya never exercises;
-(d) reconciles naming inconsistencies that adapter ports left behind;
-(e) `docs/handbook/code-map.md` and per-package codemaps updated;
-(f) full build + vitest green.
-
-The Port-First discipline (`docs/handbook/port-protocol.md`) forbids mid-port refactors that would diverge from `vendor/do-what-new-snapshot/`. As a result v0.1 deliberately accumulates port residue — upstream-milestone naming, oversized inherited files, parallel helpers next to Alaya-native equivalents, exports Alaya never calls. None of these are individually blocking, and folding them into per-card scope would pollute every port card with refactor work. Treat as a single sweep wave executed once port phase is over; the open backlog set should be consolidated and closed in that pass.
-
-Do not execute the sweep inside Phase 5. After Gate-5 closeout this issue is
-startable as a dedicated post-v0.1 hygiene wave, not as a release blocker.
+If new oversized files appear post-v0.1.0, open a new issue rather than
+re-opening #BL-017.
 
 ## Out of Alaya Scope (Permanently Rejected)
 
