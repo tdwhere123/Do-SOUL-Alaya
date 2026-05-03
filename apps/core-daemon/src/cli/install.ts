@@ -1,5 +1,6 @@
-import { readFile, readdir, unlink } from "node:fs/promises";
+import { mkdir, readFile, readdir, unlink } from "node:fs/promises";
 import path from "node:path";
+import { initDatabase } from "@do-soul/alaya-storage";
 import {
   buildInstallAuditPath,
   resolveAlayaConfigDir,
@@ -124,6 +125,11 @@ async function executeInstall(
       partialState.push({ path: paths.envPath, beforeContent: envBefore ?? undefined });
     }
 
+    // p5-system-review-r2 F-r2-003: open the configured SQLite DB and run
+    // migrations now, so install reports readiness honestly. If migration
+    // fails the catch branch unwinds the toml/env writes.
+    await ensureSchemaReady(resolved.db_path);
+
     await writeInstallAudit(auditPath, {
       status: "succeeded",
       started_at: startedAt,
@@ -161,6 +167,28 @@ async function executeInstall(
     ctx.stderr.write(`${sanitizeInstallError(error)}\n`);
     return { exitCode: ALAYA_SYSEXITS.CANTCREAT };
   }
+}
+
+/**
+ * Open the configured SQLite database and apply schema migrations.
+ * Wrapper exists so install can report a real "schema ready" outcome
+ * (p5-system-review-r2 F-r2-003) without leaking better-sqlite3 details
+ * to install.ts.
+ *
+ * Importantly we do NOT close the database here: `initDatabase` is
+ * cached per filename, and a long-running daemon process may already
+ * hold the same StorageDatabase instance (e.g. the e2e harness boots a
+ * runtime before invoking install). Closing the cached instance would
+ * invalidate that runtime's prepared statements and surface as
+ * "Failed to compute next event log revision" on the next mutation.
+ * The cache itself owns the connection lifecycle.
+ */
+async function ensureSchemaReady(dbPath: string): Promise<void> {
+  const dir = path.dirname(dbPath);
+  if (dir.length > 0 && dbPath !== ":memory:") {
+    await mkdir(dir, { recursive: true });
+  }
+  initDatabase({ filename: dbPath });
 }
 
 async function rollbackPartialState(partialState: readonly PartialStateEntry[]): Promise<string[]> {
