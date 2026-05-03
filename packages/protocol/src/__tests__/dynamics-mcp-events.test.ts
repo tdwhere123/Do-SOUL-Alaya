@@ -129,8 +129,9 @@ describe("MCP tool request/response schemas", () => {
       {
         schema: SoulExploreGraphRequestSchema,
         value: {
+          // p5-system-review-r2 F-r2-001: workspace_id removed from public schema;
+          // bound from MCP call context server-side per invariants §29.
           memory_id: "memory-1",
-          workspace_id: "workspace-1",
           edge_types: ["supports", "incompatible_with"],
           direction: "both"
         }

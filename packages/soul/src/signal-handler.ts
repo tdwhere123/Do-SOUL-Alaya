@@ -131,13 +131,16 @@ export class SoulSignalHandler {
             return createErrorToolResult(toolUse.id, "Graph explore not available");
           }
 
+          // SECURITY (p5-system-review-r2 F-r2-001 / invariants §29):
+          // workspace bound from trusted runtime context, never from tool payload.
+          const context = requireRuntimeContext(runtimeContext);
           const input = SoulExploreGraphRequestSchema.parse(toolUse.input);
           const direction = input.direction ?? "both";
 
-          const neighbors = await this.dependencies.graphExplorePort.exploreOneHop(input.memory_id, input.workspace_id, {
+          const neighbors = await this.dependencies.graphExplorePort.exploreOneHop(input.memory_id, context.workspace_id, {
             edgeTypes: input.edge_types,
             direction,
-            runId: runtimeContext?.run_id ?? null
+            runId: context.run_id
           });
 
           return {
