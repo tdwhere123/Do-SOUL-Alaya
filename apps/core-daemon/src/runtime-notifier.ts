@@ -115,6 +115,12 @@ async function notifyAll<TValue>(listeners: ReadonlySet<(value: TValue) => void 
   }
 
   for (const listener of [...listeners]) {
-    await listener(value);
+    try {
+      await listener(value);
+    } catch (error) {
+      console.warn("[runtime-notifier] listener threw; continuing fan-out", {
+        error: error instanceof Error ? { name: error.name, message: error.message } : String(error)
+      });
+    }
   }
 }
