@@ -102,6 +102,26 @@ function runMigrations(database: SqliteConnection): void {
     )
   `);
 
+  // Forward-compatibility guard: if the database was previously written by a
+  // newer Alaya release whose migration set extends past what this binary
+  // ships, refuse to open it. Running missing-but-newer migrations would be
+  // impossible (we don't have the SQL), and continuing as if nothing happened
+  // would let an older binary mutate a newer schema. Best to fail loudly so
+  // the operator either upgrades the binary or restores a matching backup.
+  const knownMaxVersion = computeKnownMaxVersion(migrationFiles);
+  const persistedMaxVersionRow = database
+    .prepare("SELECT MAX(version) AS max_version FROM schema_version")
+    .get() as Readonly<{ max_version: number | null }> | undefined;
+  const persistedMaxVersion = persistedMaxVersionRow?.max_version ?? null;
+
+  if (persistedMaxVersion !== null && persistedMaxVersion > knownMaxVersion) {
+    throw new StorageError(
+      "STORAGE_VERSION_AHEAD" as StorageErrorCode,
+      `Database schema version ${persistedMaxVersion} is ahead of this binary's known max ${knownMaxVersion}. ` +
+        "Upgrade Alaya or restore a database matching this version."
+    );
+  }
+
   const isAppliedStatement = database.prepare(
     "SELECT 1 FROM schema_version WHERE version = ? LIMIT 1"
   );
@@ -134,6 +154,21 @@ function runMigrations(database: SqliteConnection): void {
       throw new StorageError("MIGRATION_FAILED", `Failed to apply migration ${fileName}`, error);
     }
   }
+}
+
+function computeKnownMaxVersion(migrationFiles: readonly string[]): number {
+  let maxVersion = 0;
+  for (const fileName of migrationFiles) {
+    const versionMatch = /^(\d+)-.+\.sql$/.exec(fileName);
+    if (versionMatch === null) {
+      continue;
+    }
+    const version = Number(versionMatch[1]);
+    if (Number.isFinite(version) && version > maxVersion) {
+      maxVersion = version;
+    }
+  }
+  return maxVersion;
 }
 
 function resolveMigrationsDirectory(): string {
