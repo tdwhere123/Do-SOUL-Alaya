@@ -8,6 +8,18 @@ import {
 } from "@do-soul/alaya-protocol";
 import { StorageError, type StorageDatabase } from "@do-soul/alaya-storage";
 
+// Minimal structural type matching the surface of better-sqlite3's
+// `Statement` that this repo actually exercises (`run` and `get`). Using a
+// structural shape avoids taking a direct dependency on `better-sqlite3`
+// from `apps/core-daemon` while still capturing the runtime contract that
+// `StorageDatabase#connection.prepare(...)` returns. This replaces the
+// previous `any` fields, restoring real type-checking on prepared statement
+// usage in `ensureStatements()`.
+interface PreparedStatement {
+  run(...params: readonly unknown[]): { readonly changes: number; readonly lastInsertRowid: number | bigint };
+  get(...params: readonly unknown[]): unknown;
+}
+
 interface WorkspaceRow {
   readonly workspace_id: string;
   readonly name: string;
@@ -40,10 +52,10 @@ export interface SqliteWorkspaceEngineConfigRepoOptions {
 }
 
 export class SqliteWorkspaceEngineConfigRepo implements WorkspaceEngineConfigRepoPort {
-  private upsertBindingStatement: any = null;
-  private updateWorkspaceStatement: any = null;
-  private getWorkspaceByIdStatement: any = null;
-  private getBindingByIdStatement: any = null;
+  private upsertBindingStatement: PreparedStatement | null = null;
+  private updateWorkspaceStatement: PreparedStatement | null = null;
+  private getWorkspaceByIdStatement: PreparedStatement | null = null;
+  private getBindingByIdStatement: PreparedStatement | null = null;
 
   public constructor(
     private readonly db: StorageDatabase,
@@ -121,17 +133,22 @@ export class SqliteWorkspaceEngineConfigRepo implements WorkspaceEngineConfigRep
   }
 
   private ensureStatements(): {
-    readonly upsertBinding: any;
-    readonly updateWorkspace: any;
-    readonly getWorkspaceById: any;
-    readonly getBindingById: any;
+    readonly upsertBinding: PreparedStatement;
+    readonly updateWorkspace: PreparedStatement;
+    readonly getWorkspaceById: PreparedStatement;
+    readonly getBindingById: PreparedStatement;
   } {
-    if (this.upsertBindingStatement !== null) {
+    if (
+      this.upsertBindingStatement !== null &&
+      this.updateWorkspaceStatement !== null &&
+      this.getWorkspaceByIdStatement !== null &&
+      this.getBindingByIdStatement !== null
+    ) {
       return {
         upsertBinding: this.upsertBindingStatement,
-        updateWorkspace: this.updateWorkspaceStatement!,
-        getWorkspaceById: this.getWorkspaceByIdStatement!,
-        getBindingById: this.getBindingByIdStatement!
+        updateWorkspace: this.updateWorkspaceStatement,
+        getWorkspaceById: this.getWorkspaceByIdStatement,
+        getBindingById: this.getBindingByIdStatement
       };
     }
 
