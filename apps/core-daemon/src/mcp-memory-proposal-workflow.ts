@@ -14,6 +14,8 @@ import {
   TransitionCausedBy,
   type EventLogEntry,
   type Proposal,
+  type SoulListPendingProposalsRequest,
+  type SoulPendingProposalSummary,
   type SoulProposeMemoryUpdateRequest,
   type SoulReviewMemoryProposalRequest
 } from "@do-soul/alaya-protocol";
@@ -35,12 +37,18 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     readonly proposal: Proposal;
     readonly workspace_id: string;
     readonly run_id: string | null;
+    readonly target_object_kind?: string;
+    readonly proposed_change_summary?: string;
+    readonly created_at?: string;
   }): Promise<Readonly<Proposal>>;
   createProposalWithEvents(
     input: {
       readonly proposal: Proposal;
       readonly workspace_id: string;
       readonly run_id: string | null;
+      readonly target_object_kind?: string;
+      readonly proposed_change_summary?: string;
+      readonly created_at?: string;
     },
     events: readonly ProposalCreationEventInput[]
   ): Promise<Readonly<{
@@ -52,12 +60,27 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     readonly proposal: Readonly<Proposal>;
     readonly workspace_id: string;
     readonly run_id: string | null;
+    // A1 — null until the proposal is reviewed. The workflow does not
+    // depend on this field (it is informational for callers), so legacy
+    // test fakes that omit it remain compatible via the optional shape.
+    readonly reviewer_identity?: string | null;
   }> | null>;
+  // A1 (HITL daemon backbone) — pending-queue projection. The repo
+  // already enforces workspace scoping; the workflow simply forwards
+  // since/limit through.
+  findPendingSummaries(
+    workspaceId: string,
+    options?: {
+      readonly since?: string | null;
+      readonly limit?: number;
+    }
+  ): Promise<readonly Readonly<SoulPendingProposalSummary>[]>;
   updatePendingResolutionWithEvents(
     proposalId: string,
     state: Proposal["resolution_state"],
     updatedAt: string,
-    events: readonly ProposalResolutionEventInput[]
+    events: readonly ProposalResolutionEventInput[],
+    options?: { readonly reviewerIdentity?: string }
   ): Promise<Readonly<{
     readonly proposal: Readonly<Proposal>;
     readonly events: readonly EventLogEntry[];
@@ -84,7 +107,8 @@ export function createMcpMemoryProposalWorkflow(
 
   return {
     proposeMemoryUpdate: async (input, context) => await proposeMemoryUpdate(input, context),
-    reviewMemoryProposal: async (input, context) => await reviewMemoryProposal(input, context)
+    reviewMemoryProposal: async (input, context) => await reviewMemoryProposal(input, context),
+    listPendingProposals: async (input, context) => await listPendingProposals(input, context)
   };
 
   async function proposeMemoryUpdate(
@@ -138,7 +162,14 @@ export function createMcpMemoryProposalWorkflow(
       {
         proposal,
         workspace_id: context.workspaceId,
-        run_id: context.runId
+        run_id: context.runId,
+        // A1 — store HITL projection metadata so soul.list_pending_proposals
+        // can serve a useful summary without joining event_log payloads.
+        // The MCP-driven proposeMemoryUpdate path always targets memory
+        // entries; the reason text is the agent-supplied change summary.
+        target_object_kind: "memory_entry",
+        proposed_change_summary: input.reason,
+        created_at: timestamp
       },
       creationEvents
     );
@@ -167,6 +198,11 @@ export function createMcpMemoryProposalWorkflow(
       input.verdict === "accept"
         ? ProposalResolutionState.ACCEPTED
         : ProposalResolutionState.REJECTED;
+    // A1 (HITL daemon backbone) — review-related event_log rows record
+    // reviewer_identity in caused_by so the audit trail names the human
+    // (or principal) who approved/rejected, not just the surface that
+    // delivered the call. The propose path keeps caused_by=agentTarget
+    // because that is who *created* the proposal.
     const reviewEvents: ProposalResolutionEventInput[] = [
       {
         event_type: MemoryGovernanceEventType.SOUL_REVIEW_CREATED,
@@ -174,7 +210,7 @@ export function createMcpMemoryProposalWorkflow(
         entity_id: proposal.proposal_id,
         workspace_id: context.workspaceId,
         run_id: context.runId,
-        caused_by: context.agentTarget,
+        caused_by: input.reviewer_identity,
         payload_json: SoulReviewCreatedPayloadSchema.parse({
           object_id: proposal.runtime_id,
           object_kind: proposal.object_kind,
@@ -188,7 +224,7 @@ export function createMcpMemoryProposalWorkflow(
         entity_id: proposal.proposal_id,
         workspace_id: context.workspaceId,
         run_id: context.runId,
-        caused_by: context.agentTarget,
+        caused_by: input.reviewer_identity,
         payload_json: SoulReviewCompletedPayloadSchema.parse({
           object_id: proposal.runtime_id,
           object_kind: proposal.object_kind,
@@ -208,7 +244,7 @@ export function createMcpMemoryProposalWorkflow(
         entity_id: proposal.proposal_id,
         workspace_id: context.workspaceId,
         run_id: context.runId,
-        caused_by: context.agentTarget,
+        caused_by: input.reviewer_identity,
         payload_json: SoulProposalResolvedPayloadSchema.parse({
           object_id: proposal.runtime_id,
           object_kind: proposal.object_kind,
@@ -233,7 +269,8 @@ export function createMcpMemoryProposalWorkflow(
         proposal.proposal_id,
         toState,
         reviewedAt,
-        reviewEvents
+        reviewEvents,
+        { reviewerIdentity: input.reviewer_identity }
       );
     } catch (error) {
       throw normalizeResolutionError(error);
@@ -244,6 +281,26 @@ export function createMcpMemoryProposalWorkflow(
     return {
       proposal_id: resolved.proposal.proposal_id,
       resolution_state: resolved.proposal.resolution_state
+    };
+  }
+
+  async function listPendingProposals(
+    input: SoulListPendingProposalsRequest,
+    _context: McpMemoryToolCallContext
+  ): Promise<Readonly<{
+    readonly proposals: readonly Readonly<SoulPendingProposalSummary>[];
+    readonly total_count: number;
+  }>> {
+    // Workspace identity is enforced by the handler before calling in
+    // (request.workspace_id must equal context.workspaceId), so the
+    // workflow can trust input.workspace_id here.
+    const summaries = await deps.proposalRepo.findPendingSummaries(input.workspace_id, {
+      since: input.since ?? null,
+      limit: input.limit ?? 50
+    });
+    return {
+      proposals: summaries,
+      total_count: summaries.length
     };
   }
 
