@@ -110,12 +110,19 @@ export const SoulProposeMemoryUpdateResponseSchema = z
   })
   .readonly();
 
+// A1 (HITL daemon backbone) — reviewer_identity is required so every
+// review record carries an explicit non-empty reviewer string. This is
+// distinct from the MCP call context's agent_target: the agent_target
+// names which agent surface drove the call, while reviewer_identity
+// names the human or principal that approved/rejected the proposal.
 export const SoulReviewMemoryProposalRequestSchema = z
   .object({
     proposal_id: BoundedIdSchema,
     verdict: z.enum(["accept", "reject"]),
-    reason: BoundedReasonSchema.nullable()
+    reason: BoundedReasonSchema.nullable(),
+    reviewer_identity: BoundedIdSchema
   })
+  .strict()
   .readonly();
 
 export const SoulReviewMemoryProposalResponseSchema = z
@@ -123,6 +130,40 @@ export const SoulReviewMemoryProposalResponseSchema = z
     proposal_id: NonEmptyStringSchema,
     resolution_state: ProposalResolutionStateSchema
   })
+  .readonly();
+
+// A1 (HITL daemon backbone) — surfaces the existing
+// ProposalRepo.findPending(workspaceId) query through MCP so attached
+// agents and the alaya CLI can poll pending proposals without
+// side-channel SQL access. Projection-only: returns a summary suitable
+// for HITL UIs; the full proposal record is reachable through
+// soul.open_pointer when needed.
+export const SoulPendingProposalSummarySchema = z
+  .object({
+    proposal_id: NonEmptyStringSchema,
+    target_object_id: NonEmptyStringSchema,
+    target_object_kind: NonEmptyStringSchema,
+    created_at: z.string().datetime(),
+    proposed_change_summary: z.string()
+  })
+  .strict()
+  .readonly();
+
+export const SoulListPendingProposalsRequestSchema = z
+  .object({
+    workspace_id: BoundedIdSchema,
+    since: z.string().datetime().nullable().optional(),
+    limit: z.number().int().min(1).max(100).optional()
+  })
+  .strict()
+  .readonly();
+
+export const SoulListPendingProposalsResponseSchema = z
+  .object({
+    proposals: z.array(SoulPendingProposalSummarySchema).readonly(),
+    total_count: NonNegativeIntSchema
+  })
+  .strict()
   .readonly();
 
 export const SoulEmitCandidateSignalRequestSchema = EmitCandidateSignalRequestSchema;
@@ -172,6 +213,9 @@ export type SoulProposeMemoryUpdateRequest = z.infer<typeof SoulProposeMemoryUpd
 export type SoulProposeMemoryUpdateResponse = z.infer<typeof SoulProposeMemoryUpdateResponseSchema>;
 export type SoulReviewMemoryProposalRequest = z.infer<typeof SoulReviewMemoryProposalRequestSchema>;
 export type SoulReviewMemoryProposalResponse = z.infer<typeof SoulReviewMemoryProposalResponseSchema>;
+export type SoulPendingProposalSummary = z.infer<typeof SoulPendingProposalSummarySchema>;
+export type SoulListPendingProposalsRequest = z.infer<typeof SoulListPendingProposalsRequestSchema>;
+export type SoulListPendingProposalsResponse = z.infer<typeof SoulListPendingProposalsResponseSchema>;
 export type SoulEmitCandidateSignalRequest = z.infer<typeof SoulEmitCandidateSignalRequestSchema>;
 export type SoulEmitCandidateSignalResponse = z.infer<typeof SoulEmitCandidateSignalResponseSchema>;
 export type SoulApplyOverrideRequest = z.infer<typeof SoulApplyOverrideRequestSchema>;
@@ -201,6 +245,7 @@ type SoulToolName =
   | "soul.emit_candidate_signal"
   | "soul.propose_memory_update"
   | "soul.review_memory_proposal"
+  | "soul.list_pending_proposals"
   | "soul.apply_override"
   | "soul.explore_graph"
   | "soul.report_context_usage";
@@ -211,6 +256,7 @@ const soulToolRequestSchemas: Record<SoulToolName, z.ZodTypeAny> = {
   "soul.emit_candidate_signal": SoulEmitCandidateSignalRequestSchema,
   "soul.propose_memory_update": SoulProposeMemoryUpdateRequestSchema,
   "soul.review_memory_proposal": SoulReviewMemoryProposalRequestSchema,
+  "soul.list_pending_proposals": SoulListPendingProposalsRequestSchema,
   "soul.apply_override": SoulApplyOverrideRequestSchema,
   "soul.explore_graph": SoulExploreGraphRequestSchema,
   "soul.report_context_usage": SoulReportContextUsageRequestSchema
