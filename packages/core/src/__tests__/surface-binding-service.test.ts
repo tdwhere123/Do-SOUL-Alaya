@@ -76,8 +76,7 @@ function createDependencies(seed?: {
     readonly many: unknown[][];
   };
   readonly eventPublisher: {
-    readonly publishWithMutation: ReturnType<typeof vi.fn>;
-    readonly publishManyWithMutation: ReturnType<typeof vi.fn>;
+    readonly appendManyWithMutation: ReturnType<typeof vi.fn>;
   };
   readonly warnSpy: ReturnType<typeof vi.fn>;
   readonly driftService: {
@@ -121,19 +120,29 @@ function createDependencies(seed?: {
       alerted_at: "2026-03-22T01:00:00.000Z"
     }))
   };
+  // Single fake appendManyWithMutation handles both 1-event and N-event
+  // call sites: `single`/`many` buckets disambiguate them post-hoc by the
+  // batch length so existing assertions keep working.
   const eventPublisher = {
-    publishWithMutation: vi.fn(async (event, mutate) => {
-      order.push("event_publish");
-      publishedEvents.single.push(event);
-      const result = await mutate();
-      order.push("event_propagate");
-      return result;
-    }),
-    publishManyWithMutation: vi.fn(async (events, mutate) => {
-      order.push("event_publish_many");
-      publishedEvents.many.push([...events]);
-      const result = await mutate();
-      order.push("event_propagate_many");
+    appendManyWithMutation: vi.fn(async (events: readonly any[], mutate: (entries: any[]) => any) => {
+      if (events.length === 1) {
+        order.push("event_publish");
+        publishedEvents.single.push(events[0]);
+      } else {
+        order.push("event_publish_many");
+        publishedEvents.many.push([...events]);
+      }
+      const persisted = events.map((event, idx) => ({
+        ...event,
+        event_id: `evt_${idx}`,
+        created_at: "2026-03-22T01:00:00.000Z"
+      }));
+      const result = mutate(persisted);
+      if (events.length === 1) {
+        order.push("event_propagate");
+      } else {
+        order.push("event_propagate_many");
+      }
       return result;
     })
   };
@@ -151,6 +160,12 @@ function createDependencies(seed?: {
     now: () => "2026-03-22T01:00:00.000Z",
     surfaceBindingRepo: {
       create: vi.fn(async (binding, bindingId) => {
+        order.push("binding_create");
+        const record = Object.freeze({ binding_id: bindingId, binding: Object.freeze({ ...binding }) });
+        bindingStore.set(bindingId, record);
+        return record;
+      }),
+      createSync: vi.fn((binding, bindingId) => {
         order.push("binding_create");
         const record = Object.freeze({ binding_id: bindingId, binding: Object.freeze({ ...binding }) });
         bindingStore.set(bindingId, record);
@@ -209,7 +224,52 @@ function createDependencies(seed?: {
         bindingStore.set(bindingId, updated);
         return updated;
       }),
+      updateStateSync: vi.fn((bindingId, bindingState, updatedAt) => {
+        order.push("binding_update");
+        const existing = bindingStore.get(bindingId);
+
+        if (existing === undefined) {
+          throw new Error(`missing binding ${bindingId}`);
+        }
+
+        const updated = Object.freeze({
+          binding_id: bindingId,
+          binding: Object.freeze({
+            ...existing.binding,
+            binding_state: bindingState,
+            updated_at: updatedAt
+          })
+        });
+        bindingStore.set(bindingId, updated);
+        return updated;
+      }),
       cascadeDetachBySurfaceId: vi.fn(async (surfaceId, workspaceId, updatedAt) => {
+        order.push("binding_cascade_detach");
+
+        const detached: BindingRecord[] = [];
+
+        for (const [bindingId, existing] of bindingStore.entries()) {
+          if (
+            existing.binding.surface_id === surfaceId &&
+            existing.binding.workspace_id === workspaceId &&
+            existing.binding.binding_state !== BindingState.DETACHED
+          ) {
+            const updated = Object.freeze({
+              binding_id: bindingId,
+              binding: Object.freeze({
+                ...existing.binding,
+                binding_state: BindingState.DETACHED,
+                updated_at: updatedAt
+              })
+            });
+            bindingStore.set(bindingId, updated);
+            detached.push(updated);
+          }
+        }
+
+        return detached;
+      }),
+      cascadeDetachBySurfaceIdSync: vi.fn((surfaceId, workspaceId, updatedAt) => {
         order.push("binding_cascade_detach");
 
         const detached: BindingRecord[] = [];
@@ -270,7 +330,7 @@ describe("SurfaceBindingService", () => {
     expect(order).toEqual(["event_publish", "binding_create", "event_propagate"]);
     expect(created.binding_id).toBe(BINDING_ID_1);
     expect(created.binding.binding_state).toBe(BindingState.ACTIVE);
-    expect(eventPublisher.publishWithMutation).toHaveBeenCalledTimes(1);
+    expect(eventPublisher.appendManyWithMutation).toHaveBeenCalledTimes(1);
     expect(publishedEvents.single[0]).toMatchObject({
       event_type: SurfaceEventType.SOUL_SURFACE_BINDING_CREATED,
       entity_type: "surface_binding",
@@ -436,9 +496,9 @@ describe("SurfaceBindingService", () => {
       }
     };
 
-    (dependencies.surfaceBindingRepo.create as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      uniqueConstraintError as unknown as Error
-    );
+    (dependencies.surfaceBindingRepo.createSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      throw uniqueConstraintError as unknown as Error;
+    });
 
     const service = new SurfaceBindingService(dependencies);
 
@@ -463,7 +523,7 @@ describe("SurfaceBindingService", () => {
 
     expect(order).toEqual(["event_publish", "binding_update", "event_propagate"]);
     expect(updated.binding.binding_state).toBe(BindingState.STALE);
-    expect(eventPublisher.publishWithMutation).toHaveBeenCalledTimes(1);
+    expect(eventPublisher.appendManyWithMutation).toHaveBeenCalledTimes(1);
     expect(publishedEvents.single[0]).toMatchObject({
       event_type: SurfaceEventType.SOUL_SURFACE_BINDING_STATE_CHANGED,
       entity_type: "surface_binding",
@@ -608,7 +668,7 @@ describe("SurfaceBindingService", () => {
     );
     expect(dependencies.surfaceBindingRepo.findBySurfaceId).not.toHaveBeenCalled();
     expect(order).toEqual(["event_publish_many", "binding_cascade_detach", "event_propagate_many"]);
-    expect(eventPublisher.publishManyWithMutation).toHaveBeenCalledTimes(1);
+    expect(eventPublisher.appendManyWithMutation).toHaveBeenCalledTimes(1);
     expect(publishedEvents.many).toHaveLength(1);
     expect(publishedEvents.many[0]).toHaveLength(2);
     expect(

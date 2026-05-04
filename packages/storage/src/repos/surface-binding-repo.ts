@@ -16,6 +16,8 @@ export interface SurfaceBindingRecord {
 
 export interface SurfaceBindingRepo {
   create(binding: Readonly<SurfaceBinding>, bindingId: string): Promise<Readonly<SurfaceBindingRecord>>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  createSync(binding: Readonly<SurfaceBinding>, bindingId: string): Readonly<SurfaceBindingRecord>;
   findByBindingId(bindingId: string): Promise<Readonly<SurfaceBindingRecord> | null>;
   findByObjectId(objectId: string, workspaceId: string): Promise<readonly Readonly<SurfaceBindingRecord>[]>;
   findPrimaryBinding(objectId: string, workspaceId: string): Promise<Readonly<SurfaceBindingRecord> | null>;
@@ -30,11 +32,23 @@ export interface SurfaceBindingRepo {
     bindingState: BindingState,
     updatedAt: string
   ): Promise<Readonly<SurfaceBindingRecord>>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  updateStateSync(
+    bindingId: string,
+    bindingState: BindingState,
+    updatedAt: string
+  ): Readonly<SurfaceBindingRecord>;
   cascadeDetachBySurfaceId(
     surfaceId: string,
     workspaceId: string,
     updatedAt: string
   ): Promise<readonly Readonly<SurfaceBindingRecord>[]>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  cascadeDetachBySurfaceIdSync(
+    surfaceId: string,
+    workspaceId: string,
+    updatedAt: string
+  ): readonly Readonly<SurfaceBindingRecord>[];
 }
 
 const SURFACE_BINDING_SELECT_COLUMNS = `
@@ -163,6 +177,14 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
     binding: Readonly<SurfaceBinding>,
     bindingId: string
   ): Promise<Readonly<SurfaceBindingRecord>> {
+    return this.createSync(binding, bindingId);
+  }
+
+  /** Synchronous variant for atomic publish + mutation (#BL-022). */
+  public createSync(
+    binding: Readonly<SurfaceBinding>,
+    bindingId: string
+  ): Readonly<SurfaceBindingRecord> {
     const parsedBinding = parseSurfaceBinding(binding);
     const parsedBindingId = parseNonEmptyString(bindingId, "binding id");
 
@@ -305,6 +327,15 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
     bindingState: BindingState,
     updatedAt: string
   ): Promise<Readonly<SurfaceBindingRecord>> {
+    return this.updateStateSync(bindingId, bindingState, updatedAt);
+  }
+
+  /** Synchronous variant for atomic publish + mutation (#BL-022). */
+  public updateStateSync(
+    bindingId: string,
+    bindingState: BindingState,
+    updatedAt: string
+  ): Readonly<SurfaceBindingRecord> {
     const parsedBindingId = parseNonEmptyString(bindingId, "binding id");
     const parsedBindingState = parseBindingState(bindingState);
     const parsedUpdatedAt = parseTimestamp(updatedAt);
@@ -316,13 +347,13 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
         throw new StorageError("NOT_FOUND", `Surface binding ${parsedBindingId} was not found.`);
       }
 
-      const updated = await this.findByBindingId(parsedBindingId);
+      const row = this.findByBindingIdStatement.get(parsedBindingId) as SurfaceBindingRow | undefined;
 
-      if (updated === null) {
+      if (row === undefined) {
         throw new StorageError("NOT_FOUND", `Surface binding ${parsedBindingId} was not found after update.`);
       }
 
-      return updated;
+      return parseSurfaceBindingRow(row);
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
@@ -341,36 +372,55 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
     workspaceId: string,
     updatedAt: string
   ): Promise<readonly Readonly<SurfaceBindingRecord>[]> {
+    // Legacy async callers still need their own transaction wrapper; the new
+    // sync sibling assumes the caller already opened one (e.g. via
+    // EventPublisher.appendManyWithMutation -> repo.transactional()).
+    return this.db.connection.transaction(() =>
+      this.cascadeDetachBySurfaceIdSync(surfaceId, workspaceId, updatedAt)
+    )();
+  }
+
+  /**
+   * Synchronous variant for atomic publish + mutation (#BL-022). When called
+   * from inside `EventPublisher.appendManyWithMutation`, the outer
+   * `transactional()` wrapper already opens a SQLite transaction, so we run
+   * the row read/update without our own `db.connection.transaction(...)`.
+   * Better-sqlite3's `transaction()` is reentrant via SAVEPOINT but unwrapping
+   * keeps the call shape identical to the other Sync siblings.
+   */
+  public cascadeDetachBySurfaceIdSync(
+    surfaceId: string,
+    workspaceId: string,
+    updatedAt: string
+  ): readonly Readonly<SurfaceBindingRecord>[] {
     const parsedSurfaceId = parseNonEmptyString(surfaceId, "surface id");
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
     const parsedUpdatedAt = parseTimestamp(updatedAt);
 
     try {
-      return this.db.connection.transaction(() => {
-        const rows = this.findDetachableBySurfaceIdStatement.all(
-          parsedSurfaceId,
-          parsedWorkspaceId
-        ) as SurfaceBindingRow[];
+      const rows = this.findDetachableBySurfaceIdStatement.all(
+        parsedSurfaceId,
+        parsedWorkspaceId
+      ) as SurfaceBindingRow[];
 
-        if (rows.length === 0) {
-          return [];
-        }
+      if (rows.length === 0) {
+        return [];
+      }
 
-        const targetBindingIds = rows.map((row) => row.binding_id);
+      const targetBindingIds = rows.map((row) => row.binding_id);
 
-        this.cascadeDetachStatement.run(parsedUpdatedAt, parsedSurfaceId, parsedWorkspaceId);
+      this.cascadeDetachStatement.run(parsedUpdatedAt, parsedSurfaceId, parsedWorkspaceId);
 
-        const updatedRows = this.findDetachedBySurfaceIdStatement.all(
-          parsedSurfaceId,
-          parsedWorkspaceId
-        ) as SurfaceBindingRow[];
-        const rowById = new Map(updatedRows.map((row) => [row.binding_id, row]));
+      const updatedRows = this.findDetachedBySurfaceIdStatement.all(
+        parsedSurfaceId,
+        parsedWorkspaceId
+      ) as SurfaceBindingRow[];
+      const rowById = new Map(updatedRows.map((row) => [row.binding_id, row]));
 
-        return targetBindingIds
-          .map((bindingId) => rowById.get(bindingId))
-          .filter((row): row is SurfaceBindingRow => row !== undefined)
-          .map((row) => parseSurfaceBindingRow(row));
-      })();
+      return targetBindingIds
+        .map((bindingId) => rowById.get(bindingId))
+        .filter((row): row is SurfaceBindingRow => row !== undefined)
+        .map((row) => parseSurfaceBindingRow(row));
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
