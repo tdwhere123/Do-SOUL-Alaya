@@ -5,8 +5,8 @@ import {
   GardenTaskKind,
   GardenTier,
   HealthEventKind,
-  PhaseCEventType,
-  parsePhaseCEventPayload,
+  RuntimeGovernanceEventType,
+  parseRuntimeGovernanceEventPayload,
   type AuditorEventLogPort,
   type AuditorOrphanDetectionPort,
   type EventLogEntry,
@@ -296,13 +296,13 @@ export function createGardenRuntime(input: {
 
     await input.eventPublisher.publishWithMutation(
       {
-        event_type: PhaseCEventType.PATH_GRAPH_SNAPSHOT_CREATED,
+        event_type: RuntimeGovernanceEventType.PATH_GRAPH_SNAPSHOT_CREATED,
         entity_type: "path_graph_snapshot",
         entity_id: snapshot.snapshot_id,
         workspace_id: workspaceId,
         run_id: null,
         caused_by: "garden-path-graph-snapshotter",
-        payload_json: parsePhaseCEventPayload(PhaseCEventType.PATH_GRAPH_SNAPSHOT_CREATED, {
+        payload_json: parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.PATH_GRAPH_SNAPSHOT_CREATED, {
           snapshot_id: snapshot.snapshot_id,
           workspace_id: snapshot.workspace_id,
           total_active_paths: snapshot.total_active_paths,

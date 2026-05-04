@@ -5,7 +5,7 @@ import {
   ConstitutionalFragmentRegistrationSchema,
   ConstitutionalFragmentRegisteredPayloadSchema,
   ConstitutionalFragmentSchema,
-  PhaseCEventType,
+  RuntimeGovernanceEventType,
   listConstitutionalFragmentIdentityParts,
   type ConstitutionalFragment,
   type ConstitutionalFragmentCategory,
@@ -160,7 +160,7 @@ export class ConstitutionalFragmentService {
     const events = await this.deps.eventLogReader.queryByEntity("constitutional_fragment", fragmentId);
     const registrationEvent = [...events]
       .reverse()
-      .find((event) => event.event_type === PhaseCEventType.CONSTITUTIONAL_FRAGMENT_REGISTERED);
+      .find((event) => event.event_type === RuntimeGovernanceEventType.CONSTITUTIONAL_FRAGMENT_REGISTERED);
 
     if (registrationEvent === undefined) {
       return null;
@@ -252,7 +252,7 @@ function createConstitutionalFragmentRegisteredEvent(
   fragment: Readonly<ConstitutionalFragment>
 ): Omit<EventLogEntry, "event_id" | "created_at"> {
   return Object.freeze({
-    event_type: PhaseCEventType.CONSTITUTIONAL_FRAGMENT_REGISTERED,
+    event_type: RuntimeGovernanceEventType.CONSTITUTIONAL_FRAGMENT_REGISTERED,
     entity_type: "constitutional_fragment",
     entity_id: fragment.fragment_id,
     workspace_id: fragment.workspace_id,

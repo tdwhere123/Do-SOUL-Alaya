@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  PhaseCExtensionEventType,
+  ComputeRecallGardenEventType,
   type EventLogEntry,
   type GardenBacklogSnapshot,
   type HealthJournalRecordInput
@@ -231,7 +231,7 @@ describe("daemon tool runtime bootstrap", () => {
         expect(pendingTransition).toBeNull();
         expect(eventLogRepo.append).toHaveBeenCalledWith(
           expect.objectContaining({
-            event_type: PhaseCExtensionEventType.GARDEN_BACKLOG_WARNING
+            event_type: ComputeRecallGardenEventType.GARDEN_BACKLOG_WARNING
           })
         );
       } finally {

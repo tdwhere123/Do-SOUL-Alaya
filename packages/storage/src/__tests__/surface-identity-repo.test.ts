@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { Phase2BEventType, SurfaceStatus, WorkspaceKind, WorkspaceState, type SurfaceIdentity } from "@do-soul/alaya-protocol";
+import { SurfaceEventType, SurfaceStatus, WorkspaceKind, WorkspaceState, type SurfaceIdentity } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../db.js";
 import { SqliteSurfaceIdentityRepo } from "../repos/surface-identity-repo.js";
 import { SqliteWorkspaceRepo } from "../repos/workspace-repo.js";
@@ -57,7 +57,7 @@ describe("SqliteSurfaceIdentityRepo", () => {
     const { database, repo } = await createRepo();
 
     const created = await repo.createWithEvent(createSurfaceIdentity(), {
-      event_type: Phase2BEventType.SOUL_SURFACE_CREATED,
+      event_type: SurfaceEventType.SOUL_SURFACE_CREATED,
       entity_type: "surface_identity",
       entity_id: SURFACE_OBJECT_ID_1,
       workspace_id: "workspace-1",
@@ -87,7 +87,7 @@ describe("SqliteSurfaceIdentityRepo", () => {
     const { repo } = await createRepo();
 
     const created = await repo.createWithEvent(createSurfaceIdentity(), {
-      event_type: Phase2BEventType.SOUL_SURFACE_CREATED,
+      event_type: SurfaceEventType.SOUL_SURFACE_CREATED,
       entity_type: "surface_identity",
       entity_id: SURFACE_OBJECT_ID_1,
       workspace_id: "workspace-1",
@@ -109,7 +109,7 @@ describe("SqliteSurfaceIdentityRepo", () => {
       SurfaceStatus.WEAKLY_BOUND,
       "2026-03-21T01:00:00.000Z",
       {
-        event_type: Phase2BEventType.SOUL_SURFACE_STATUS_CHANGED,
+        event_type: SurfaceEventType.SOUL_SURFACE_STATUS_CHANGED,
         entity_type: "surface_identity",
         entity_id: SURFACE_OBJECT_ID_1,
         workspace_id: "workspace-1",

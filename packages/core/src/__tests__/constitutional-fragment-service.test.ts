@@ -5,7 +5,7 @@ import {
   ConstitutionalFragmentSchema,
   ConstitutionalFragmentRegistrationSchema,
   EventLogEntrySchema,
-  PhaseCEventType,
+  RuntimeGovernanceEventType,
   type ConstitutionalFragment,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
@@ -94,7 +94,7 @@ describe("ConstitutionalFragmentService", () => {
     expect(EventLogEntrySchema.parse(eventLogEntries[0])).toEqual(eventLogEntries[0]);
     expect(eventLogEntries[0]).toEqual(
       expect.objectContaining({
-        event_type: PhaseCEventType.CONSTITUTIONAL_FRAGMENT_REGISTERED,
+        event_type: RuntimeGovernanceEventType.CONSTITUTIONAL_FRAGMENT_REGISTERED,
         entity_type: "constitutional_fragment",
         entity_id: "constitutional://workspace-1/hard_constraint/system",
         workspace_id: "workspace-1",
@@ -117,7 +117,7 @@ describe("ConstitutionalFragmentService", () => {
     const store = createStore();
     const existingEntry = EventLogEntrySchema.parse({
       event_id: "event-1",
-      event_type: PhaseCEventType.CONSTITUTIONAL_FRAGMENT_REGISTERED,
+      event_type: RuntimeGovernanceEventType.CONSTITUTIONAL_FRAGMENT_REGISTERED,
       entity_type: "constitutional_fragment",
       entity_id: "constitutional://workspace-1/hard_constraint/system.worker_dispatch",
       workspace_id: "workspace-1",
@@ -205,7 +205,7 @@ describe("ConstitutionalFragmentService", () => {
     const publishedEvents: EventLogEntry[] = [
       EventLogEntrySchema.parse({
         event_id: "event-1",
-        event_type: PhaseCEventType.CONSTITUTIONAL_FRAGMENT_REGISTERED,
+        event_type: RuntimeGovernanceEventType.CONSTITUTIONAL_FRAGMENT_REGISTERED,
         entity_type: "constitutional_fragment",
         entity_id: previousId,
         workspace_id: "workspace-1",
@@ -252,7 +252,7 @@ describe("ConstitutionalFragmentService", () => {
     expect(publishedEvents).toHaveLength(2);
     expect(publishedEvents[1]).toEqual(
       expect.objectContaining({
-        event_type: PhaseCEventType.CONSTITUTIONAL_FRAGMENT_REGISTERED,
+        event_type: RuntimeGovernanceEventType.CONSTITUTIONAL_FRAGMENT_REGISTERED,
         entity_id: nextId,
         workspace_id: "workspace-1"
       })
@@ -359,7 +359,7 @@ describe("ConstitutionalFragmentService", () => {
     const store = createStore();
     const existingEntry = EventLogEntrySchema.parse({
       event_id: "event-1",
-      event_type: PhaseCEventType.CONSTITUTIONAL_FRAGMENT_REGISTERED,
+      event_type: RuntimeGovernanceEventType.CONSTITUTIONAL_FRAGMENT_REGISTERED,
       entity_type: "constitutional_fragment",
       entity_id: stableId,
       workspace_id: "workspace-1",

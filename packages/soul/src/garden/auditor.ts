@@ -7,7 +7,7 @@ import {
   MemoryDimension,
   type OrphanRadar,
   type OrphanRadarSuggestedActionValue,
-  Phase4BEventType,
+  GraphAuditorEventType,
   SoulGardenEventLogOrphanDetectedEventType,
   SoulGardenEventLogOrphanDetectedPayloadSchema,
   type AuditorBootstrappingPort,
@@ -188,7 +188,7 @@ export class Auditor {
       });
 
       await this.dependencies.eventLogRepo?.append({
-        event_type: Phase4BEventType.SOUL_AUDITOR_POINTER_HEALED,
+        event_type: GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED,
         entity_type: pointer.source_object_kind,
         entity_id: pointer.source_object_id,
         workspace_id: task.workspace_id,
@@ -286,7 +286,7 @@ export class Auditor {
 
       await this.publishEventLogMutation(
         {
-          event_type: Phase4BEventType.SOUL_ORPHAN_RADAR_REPORTED,
+          event_type: GraphAuditorEventType.SOUL_ORPHAN_RADAR_REPORTED,
           entity_type: "orphan_radar",
           entity_id: radarId,
           workspace_id: task.workspace_id,

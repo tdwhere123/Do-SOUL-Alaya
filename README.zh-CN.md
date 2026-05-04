@@ -448,8 +448,9 @@ Do-SOUL Alaya/
 - `bench-resume` —— 恢复机制
 - `bench-readme` —— leaderboard 模板（这份 README 在这一步会补上真实数字）
 
-外加 `#BL-017` hygiene wave（重命名 `phase-*.ts`、拆分五个超大文件、
-清 `ts-prune` 残留、刷 code-map）。
+`#BL-017` hygiene wave 已在 Gate-5 后执行：protocol `phase-*.ts`
+event 文件和符号已改成 domain 命名，8 个列明的超大 production 文件已拆分，
+unused-code 检查通过固定版本 `knip` 可复现，code-map 已刷新。
 
 **目前没有 leaderboard。** 这份 README 在 v0.1.1 落地之前**不会**显示
 任何 benchmark 数字。
@@ -494,12 +495,12 @@ rewrite**。这是有意为之，读代码前最好先理解清楚。
 
 **坦诚承认的 tradeoff：**
 
-- 一些上游的 tech-debt 跟着进来了（`phase-*.ts` 之类的命名、过大的
-  文件）。已经登记为 `#BL-017`，跟 Phase 6 同船在 v0.1.x 的 hygiene
-  wave 里收掉。
+- 一些上游的 tech-debt 曾经跟着 v0.1.0 发布进来（`phase-*.ts`
+  命名、过大的 port 文件）。`#BL-017` 已在 post-port hygiene wave
+  里收掉，且没有改变 durable contract。
 - v0.1 阶段我们选的是速度优先而非局部最优。第一次值得做大重构的
-  时间点是 Gate-5 close —— 而那个时机我们正好通过 `#BL-017` wave
-  顺手获得了。
+  时间点是 Gate-5 close；`#BL-017` wave 已在稳定 release baseline
+  上执行。
 
 ## 贡献
 

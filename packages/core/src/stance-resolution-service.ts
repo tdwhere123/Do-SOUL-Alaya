@@ -5,7 +5,7 @@ import {
   ExecutionStanceResolutionSchema,
   ExecutionVerificationAttentionOrder,
   ManifestationPreference,
-  PhaseCEventType,
+  RuntimeGovernanceEventType,
   StancePolicyEvaluatedPayloadSchema,
   StanceResolutionChangedPayloadSchema,
   type ActivationCandidate,
@@ -95,7 +95,7 @@ export class StanceResolutionService {
 
     await Promise.all([
       this.deps.eventLogWriter.append({
-        event_type: PhaseCEventType.STANCE_POLICY_EVALUATED,
+        event_type: RuntimeGovernanceEventType.STANCE_POLICY_EVALUATED,
         entity_type: "stance_policy",
         entity_id: loadedPolicy?.policy_id ?? `${params.workspaceId}:implicit-default`,
         workspace_id: params.workspaceId,
@@ -111,7 +111,7 @@ export class StanceResolutionService {
         })
       }),
       this.deps.eventLogWriter.append({
-        event_type: PhaseCEventType.STANCE_RESOLUTION_CHANGED,
+        event_type: RuntimeGovernanceEventType.STANCE_RESOLUTION_CHANGED,
         entity_type: "stance_resolution",
         entity_id: resolution.resolution_id,
         workspace_id: params.workspaceId,

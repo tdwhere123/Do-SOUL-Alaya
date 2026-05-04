@@ -6,7 +6,7 @@ import {
   DEFAULT_STRATEGY_CONFIG,
   EnvironmentConfigSchema,
   HealthEventKind,
-  Phase4AEventType,
+  GardenEventType,
   RuntimeEmbeddingConfigSchema,
   SoulConfigSchema,
   SoulHealthJournalRecordedPayloadSchema,
@@ -199,7 +199,7 @@ async function patchRuntimeEmbeddingConfig(input: {
 
   return await input.eventPublisher.publishWithMutation(
     {
-      event_type: Phase4AEventType.SOUL_HEALTH_JOURNAL_RECORDED,
+      event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
       entity_type: RUNTIME_EMBEDDING_ENTITY_TYPE,
       entity_id: RUNTIME_EMBEDDING_ENTITY_ID,
       workspace_id: RUNTIME_CONFIG_WORKSPACE_ID,

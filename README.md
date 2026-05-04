@@ -473,8 +473,10 @@ Five task cards, all currently `not-started`:
 - `bench-readme` — leaderboard template (this README will gain real
   numbers here).
 
-Plus the `#BL-017` hygiene wave: rename `phase-*.ts` files, split the
-five oversized files, prune `ts-prune` residue, refresh code-map.
+The `#BL-017` hygiene wave has executed after Gate-5: protocol
+`phase-*.ts` event files and symbols now use domain names, the eight
+listed oversized production files were split, unused-code checking is
+reproducible through pinned `knip`, and the code map was refreshed.
 
 **There is no leaderboard yet.** This README will not display benchmark
 numbers until v0.1.1 lands.
@@ -523,12 +525,13 @@ The discipline (`docs/handbook/port-protocol.md`):
 
 **The tradeoff, stated honestly:**
 
-- Some upstream tech-debt rides along (file naming `phase-*.ts`,
-  oversized files). Tracked as `#BL-017`; scheduled into a v0.1.x
-  hygiene wave alongside Phase 6.
+- Some upstream tech-debt rode along for the v0.1.0 release, especially
+  misleading `phase-*.ts` event names and oversized port files. `#BL-017`
+  closed that debt in the post-port hygiene wave without changing
+  durable contracts.
 - We chose velocity over local optimality at v0.1. The first day a
-  refactor would have made sense was Gate-5 close — at which point
-  we get it for free via the `#BL-017` wave.
+  refactor made sense was Gate-5 close, when the `#BL-017` wave could
+  execute against a stable release baseline.
 
 ## Contributing
 

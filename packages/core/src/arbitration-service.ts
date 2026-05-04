@@ -4,7 +4,7 @@ import {
   ConflictEdgeType,
   ConflictEdgeTypeSchema,
   ConflictMatrixEdgeSchema,
-  Phase2AEventType,
+  SlotEventType,
   SoulConflictMatrixEdgeCreatedPayloadSchema,
   SoulSlotWinnerChangedPayloadSchema,
   TransitionCausedBy,
@@ -181,7 +181,7 @@ export class ArbitrationService {
 
     const revision = await this.getNextRevision("conflict_matrix_edge", edge.object_id);
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase2AEventType.SOUL_CONFLICT_MATRIX_EDGE_CREATED,
+      event_type: SlotEventType.SOUL_CONFLICT_MATRIX_EDGE_CREATED,
       entity_type: "conflict_matrix_edge",
       entity_id: edge.object_id,
       workspace_id: edge.workspace_id,
@@ -484,7 +484,7 @@ export class ArbitrationService {
     const timestamp = this.now();
     const revision = await this.getNextRevision("slot", slot.object_id);
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase2AEventType.SOUL_SLOT_WINNER_CHANGED,
+      event_type: SlotEventType.SOUL_SLOT_WINNER_CHANGED,
       entity_type: "slot",
       entity_id: slot.object_id,
       workspace_id: slot.workspace_id,

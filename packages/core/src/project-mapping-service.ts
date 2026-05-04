@@ -3,7 +3,7 @@ import {
   ConfirmationPolicy,
   ObjectKind,
   ObjectLifecycleState,
-  Phase4CEventType,
+  ProjectMappingEventType,
   ProjectMappingState,
   SoulProjectMappingStateChangedPayloadSchema,
   SoulProjectMappingSuggestedPayloadSchema,
@@ -182,7 +182,7 @@ export class ProjectMappingService {
     // EventLog-first is intentional: project-mapping writes are at-least-once. If repo persistence
     // fails after append, reconciliation should treat the EventLog as the source of truth.
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase4CEventType.PROJECT_MAPPING_SUGGESTED,
+      event_type: ProjectMappingEventType.PROJECT_MAPPING_SUGGESTED,
       entity_type: ObjectKind.PROJECT_MAPPING_ANCHOR,
       entity_id: anchor.object_id,
       workspace_id: workspaceId,
@@ -484,7 +484,7 @@ export class ProjectMappingService {
     // EventLog-first is intentional: project-mapping transitions are at-least-once. If repo
     // persistence fails after append, recovery should replay from the EventLog entry.
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase4CEventType.PROJECT_MAPPING_STATE_CHANGED,
+      event_type: ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED,
       entity_type: ObjectKind.PROJECT_MAPPING_ANCHOR,
       entity_id: anchor.object_id,
       workspace_id: anchor.workspace_id,

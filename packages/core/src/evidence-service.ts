@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   EvidenceCapsuleSchema,
   EvidenceHealthStateSchema,
-  Phase1BEventType,
+  MemoryGovernanceEventType,
   SoulEvidenceCreatedPayloadSchema,
   SoulEvidenceHealthChangedPayloadSchema,
   TransitionCausedBySchema,
@@ -77,7 +77,7 @@ export class EvidenceService {
     });
 
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase1BEventType.SOUL_EVIDENCE_CREATED,
+      event_type: MemoryGovernanceEventType.SOUL_EVIDENCE_CREATED,
       entity_type: "evidence_capsule",
       entity_id: evidence.object_id,
       workspace_id: evidence.workspace_id,
@@ -118,7 +118,7 @@ export class EvidenceService {
 
     const occurredAt = this.now();
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase1BEventType.SOUL_EVIDENCE_HEALTH_CHANGED,
+      event_type: MemoryGovernanceEventType.SOUL_EVIDENCE_HEALTH_CHANGED,
       entity_type: "evidence_capsule",
       entity_id: existing.object_id,
       workspace_id: existing.workspace_id,

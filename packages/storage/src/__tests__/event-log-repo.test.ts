@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  Phase0EventType,
+  WorkspaceRunEventType,
   RunMode,
   RunState,
   WorkspaceKind,
@@ -26,7 +26,7 @@ describe("SqliteEventLogRepo", () => {
     const { eventLogRepo } = await createEventLogRepos();
 
     const event = await eventLogRepo.append({
-      event_type: Phase0EventType.WORKSPACE_CREATED,
+      event_type: WorkspaceRunEventType.WORKSPACE_CREATED,
       entity_type: "workspace",
       entity_id: "ws_events",
       workspace_id: "ws_events",
@@ -49,7 +49,7 @@ describe("SqliteEventLogRepo", () => {
   it("queryByRun returns only matching run events", async () => {
     const { eventLogRepo } = await createEventLogRepos();
     await eventLogRepo.append({
-      event_type: Phase0EventType.RUN_CREATED,
+      event_type: WorkspaceRunEventType.RUN_CREATED,
       entity_type: "run",
       entity_id: "run_target",
       workspace_id: "ws_events",
@@ -64,7 +64,7 @@ describe("SqliteEventLogRepo", () => {
       }
     });
     await eventLogRepo.append({
-      event_type: Phase0EventType.RUN_CREATED,
+      event_type: WorkspaceRunEventType.RUN_CREATED,
       entity_type: "run",
       entity_id: "run_other",
       workspace_id: "ws_events",
@@ -88,7 +88,7 @@ describe("SqliteEventLogRepo", () => {
   it("queryByEntity returns only matching entity events", async () => {
     const { eventLogRepo } = await createEventLogRepos();
     await eventLogRepo.append({
-      event_type: Phase0EventType.WORKSPACE_CREATED,
+      event_type: WorkspaceRunEventType.WORKSPACE_CREATED,
       entity_type: "workspace",
       entity_id: "ws_match",
       workspace_id: "ws_match",
@@ -102,7 +102,7 @@ describe("SqliteEventLogRepo", () => {
       }
     });
     await eventLogRepo.append({
-      event_type: Phase0EventType.WORKSPACE_CREATED,
+      event_type: WorkspaceRunEventType.WORKSPACE_CREATED,
       entity_type: "workspace",
       entity_id: "ws_other",
       workspace_id: "ws_other",
@@ -125,7 +125,7 @@ describe("SqliteEventLogRepo", () => {
   it("queryByType returns only matching event types", async () => {
     const { eventLogRepo } = await createEventLogRepos();
     await eventLogRepo.append({
-      event_type: Phase0EventType.WORKSPACE_CREATED,
+      event_type: WorkspaceRunEventType.WORKSPACE_CREATED,
       entity_type: "workspace",
       entity_id: "ws_type",
       workspace_id: "ws_type",
@@ -139,7 +139,7 @@ describe("SqliteEventLogRepo", () => {
       }
     });
     await eventLogRepo.append({
-      event_type: Phase0EventType.RUN_CREATED,
+      event_type: WorkspaceRunEventType.RUN_CREATED,
       entity_type: "run",
       entity_id: "run_type",
       workspace_id: "ws_type",
@@ -154,16 +154,16 @@ describe("SqliteEventLogRepo", () => {
       }
     });
 
-    const events = await eventLogRepo.queryByType(Phase0EventType.RUN_CREATED);
+    const events = await eventLogRepo.queryByType(WorkspaceRunEventType.RUN_CREATED);
 
     expect(events).toHaveLength(1);
-    expect(events[0]?.event_type).toBe(Phase0EventType.RUN_CREATED);
+    expect(events[0]?.event_type).toBe(WorkspaceRunEventType.RUN_CREATED);
   });
 
   it("returns multiple matching events in append order", async () => {
     const { eventLogRepo } = await createEventLogRepos();
     await eventLogRepo.append({
-      event_type: Phase0EventType.RUN_MESSAGE_APPENDED,
+      event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
       entity_type: "run",
       entity_id: "run_order",
       workspace_id: "ws_events",
@@ -178,7 +178,7 @@ describe("SqliteEventLogRepo", () => {
       }
     });
     await eventLogRepo.append({
-      event_type: Phase0EventType.ENGINE_RESPONSE_RECEIVED,
+      event_type: WorkspaceRunEventType.ENGINE_RESPONSE_RECEIVED,
       entity_type: "run",
       entity_id: "run_order",
       workspace_id: "ws_events",
@@ -197,8 +197,8 @@ describe("SqliteEventLogRepo", () => {
 
     expect(events).toHaveLength(2);
     expect(events.map((event) => event.event_type)).toEqual([
-      Phase0EventType.RUN_MESSAGE_APPENDED,
-      Phase0EventType.ENGINE_RESPONSE_RECEIVED
+      WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
+      WorkspaceRunEventType.ENGINE_RESPONSE_RECEIVED
     ]);
   });
 
@@ -206,7 +206,7 @@ describe("SqliteEventLogRepo", () => {
     const { eventLogRepo } = await createEventLogRepos();
 
     const first = await eventLogRepo.append({
-      event_type: Phase0EventType.RUN_MESSAGE_APPENDED,
+      event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
       entity_type: "run",
       entity_id: "run_order",
       workspace_id: "ws_events",
@@ -221,7 +221,7 @@ describe("SqliteEventLogRepo", () => {
       }
     });
     await eventLogRepo.append({
-      event_type: Phase0EventType.RUN_MESSAGE_APPENDED,
+      event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
       entity_type: "run",
       entity_id: "run_order",
       workspace_id: "ws_events",
@@ -236,7 +236,7 @@ describe("SqliteEventLogRepo", () => {
       }
     });
     await eventLogRepo.append({
-      event_type: Phase0EventType.ENGINE_RESPONSE_RECEIVED,
+      event_type: WorkspaceRunEventType.ENGINE_RESPONSE_RECEIVED,
       entity_type: "run",
       entity_id: "run_order",
       workspace_id: "ws_events",
@@ -261,7 +261,7 @@ describe("SqliteEventLogRepo", () => {
     const { eventLogRepo } = await createEventLogRepos();
 
     await eventLogRepo.append({
-      event_type: Phase0EventType.RUN_MESSAGE_APPENDED,
+      event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
       entity_type: "run",
       entity_id: "run_order",
       workspace_id: "ws_events",
@@ -276,7 +276,7 @@ describe("SqliteEventLogRepo", () => {
       }
     });
     await eventLogRepo.append({
-      event_type: Phase0EventType.ENGINE_RESPONSE_RECEIVED,
+      event_type: WorkspaceRunEventType.ENGINE_RESPONSE_RECEIVED,
       entity_type: "run",
       entity_id: "run_order",
       workspace_id: "ws_events",
@@ -300,7 +300,7 @@ describe("SqliteEventLogRepo", () => {
     const { eventLogRepo } = await createEventLogRepos();
 
     const first = await eventLogRepo.append({
-      event_type: Phase0EventType.RUN_MESSAGE_APPENDED,
+      event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
       entity_type: "run",
       entity_id: "run_order",
       workspace_id: "ws_events",
@@ -315,7 +315,7 @@ describe("SqliteEventLogRepo", () => {
       }
     });
     const second = await eventLogRepo.append({
-      event_type: Phase0EventType.RUN_MESSAGE_APPENDED,
+      event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
       entity_type: "run",
       entity_id: "run_order",
       workspace_id: "ws_events",
@@ -330,7 +330,7 @@ describe("SqliteEventLogRepo", () => {
       }
     });
     const third = await eventLogRepo.append({
-      event_type: Phase0EventType.ENGINE_RESPONSE_RECEIVED,
+      event_type: WorkspaceRunEventType.ENGINE_RESPONSE_RECEIVED,
       entity_type: "run",
       entity_id: "run_order",
       workspace_id: "ws_events",
@@ -359,7 +359,7 @@ describe("SqliteEventLogRepo", () => {
     const { eventLogRepo } = await createEventLogRepos();
 
     const first = await eventLogRepo.append({
-      event_type: Phase0EventType.RUN_MESSAGE_APPENDED,
+      event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
       entity_type: "run",
       entity_id: "run_order",
       workspace_id: "ws_events",
@@ -374,7 +374,7 @@ describe("SqliteEventLogRepo", () => {
       }
     });
     const second = await eventLogRepo.append({
-      event_type: Phase0EventType.ENGINE_RESPONSE_RECEIVED,
+      event_type: WorkspaceRunEventType.ENGINE_RESPONSE_RECEIVED,
       entity_type: "run",
       entity_id: "run_order",
       workspace_id: "ws_events",
@@ -459,7 +459,7 @@ describe("SqliteEventLogRepo", () => {
     const { eventLogRepo } = await createEventLogRepos();
 
     await eventLogRepo.append({
-      event_type: Phase0EventType.WORKSPACE_CREATED,
+      event_type: WorkspaceRunEventType.WORKSPACE_CREATED,
       entity_type: "workspace",
       entity_id: "ws_events",
       workspace_id: "ws_events",
@@ -473,7 +473,7 @@ describe("SqliteEventLogRepo", () => {
       }
     });
     await eventLogRepo.append({
-      event_type: Phase0EventType.WORKSPACE_CREATED,
+      event_type: WorkspaceRunEventType.WORKSPACE_CREATED,
       entity_type: "workspace",
       entity_id: "ws_other",
       workspace_id: "ws_other",
@@ -497,7 +497,7 @@ describe("SqliteEventLogRepo", () => {
     const { eventLogRepo } = await createEventLogRepos();
 
     const first = await eventLogRepo.append({
-      event_type: Phase0EventType.WORKSPACE_CREATED,
+      event_type: WorkspaceRunEventType.WORKSPACE_CREATED,
       entity_type: "workspace",
       entity_id: "ws_events",
       workspace_id: "ws_events",
@@ -512,7 +512,7 @@ describe("SqliteEventLogRepo", () => {
     });
 
     await eventLogRepo.append({
-      event_type: Phase0EventType.WORKSPACE_DELETED,
+      event_type: WorkspaceRunEventType.WORKSPACE_DELETED,
       entity_type: "workspace",
       entity_id: "ws_events",
       workspace_id: "ws_events",
@@ -527,14 +527,14 @@ describe("SqliteEventLogRepo", () => {
     const replay = await eventLogRepo.queryByWorkspaceAfterEventId("ws_events", first.event_id);
 
     expect(replay).toHaveLength(1);
-    expect(replay[0]?.event_type).toBe(Phase0EventType.WORKSPACE_DELETED);
+    expect(replay[0]?.event_type).toBe(WorkspaceRunEventType.WORKSPACE_DELETED);
   });
 
   it("getLatestWorkspaceEventId returns the latest workspace event", async () => {
     const { eventLogRepo } = await createEventLogRepos();
 
     await eventLogRepo.append({
-      event_type: Phase0EventType.WORKSPACE_CREATED,
+      event_type: WorkspaceRunEventType.WORKSPACE_CREATED,
       entity_type: "workspace",
       entity_id: "ws_events",
       workspace_id: "ws_events",
@@ -549,7 +549,7 @@ describe("SqliteEventLogRepo", () => {
     });
 
     const deleted = await eventLogRepo.append({
-      event_type: Phase0EventType.WORKSPACE_DELETED,
+      event_type: WorkspaceRunEventType.WORKSPACE_DELETED,
       entity_type: "workspace",
       entity_id: "ws_events",
       workspace_id: "ws_events",

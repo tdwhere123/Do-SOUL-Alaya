@@ -6,8 +6,8 @@ import {
   MemoryDimension,
   ObjectKind,
   OriginTier,
-  Phase3AEventType,
-  Phase3CEventType,
+  RecallContextEventType,
+  BudgetEventType,
   PrecedenceBasis,
   RetentionPolicy,
   RuntimeMode,
@@ -115,7 +115,7 @@ describe("context lens assembler", () => {
 
     expect(dependencies.eventLogRepo.append).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase3AEventType.SOUL_CONTEXT_LENS_ASSEMBLED,
+        event_type: RecallContextEventType.SOUL_CONTEXT_LENS_ASSEMBLED,
         entity_type: "context_lens",
         run_id: "run-1",
         workspace_id: "workspace-1",
@@ -529,7 +529,7 @@ describe("context lens assembler", () => {
     expect(degradationPipeline.assess).not.toHaveBeenCalled();
     expect(
       dependencies.eventLogRepo.append.mock.calls.some(
-        ([entry]) => entry.event_type === Phase3CEventType.SOUL_BUDGET_DEGRADED
+        ([entry]) => entry.event_type === BudgetEventType.SOUL_BUDGET_DEGRADED
       )
     ).toBe(false);
   });
@@ -600,7 +600,7 @@ describe("context lens assembler", () => {
     );
     expect(
       dependencies.eventLogRepo.append.mock.calls.some(
-        ([entry]) => entry.event_type === Phase3CEventType.SOUL_BUDGET_DEGRADED
+        ([entry]) => entry.event_type === BudgetEventType.SOUL_BUDGET_DEGRADED
       )
     ).toBe(false);
   });
@@ -698,7 +698,7 @@ describe("context lens assembler", () => {
     );
     const degradedEntry = appendedEntries.find(
       (entry: Omit<EventLogEntry, "event_id" | "created_at">) =>
-        entry.event_type === Phase3CEventType.SOUL_BUDGET_DEGRADED
+        entry.event_type === BudgetEventType.SOUL_BUDGET_DEGRADED
     );
 
     expect(degradedEntry).toBeDefined();
@@ -821,7 +821,7 @@ describe("context lens assembler", () => {
     expect((warn.mock.calls[0]?.[1] as { tokensAfter: number }).tokensAfter).toBeGreaterThan(20);
     expect(
       dependencies.eventLogRepo.append.mock.calls.some(
-        ([entry]) => entry.event_type === Phase3CEventType.SOUL_BUDGET_DEGRADED
+        ([entry]) => entry.event_type === BudgetEventType.SOUL_BUDGET_DEGRADED
       )
     ).toBe(true);
   });
@@ -890,7 +890,7 @@ describe("context lens assembler", () => {
 
     expect(dependencies.eventLogRepo.append).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase3CEventType.SOUL_BUDGET_DEGRADED
+        event_type: BudgetEventType.SOUL_BUDGET_DEGRADED
       })
     );
     expect(bankruptcyService.declare).toHaveBeenCalledWith(

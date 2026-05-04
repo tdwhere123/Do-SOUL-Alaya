@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   HealthEventKindSchema,
-  Phase4AEventType,
+  GardenEventType,
   SoulHealthJournalRecordedPayloadSchema,
   type EventLogEntry,
   type HealthJournalEntry,
@@ -66,7 +66,7 @@ export class HealthJournalService implements HealthJournalRecordPort {
     const revision = await getNextRevision(this.dependencies.eventLogRepo, "health_journal", entryId);
 
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase4AEventType.SOUL_HEALTH_JOURNAL_RECORDED,
+      event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
       entity_type: "health_journal",
       entity_id: entryId,
       workspace_id: normalizedEntry.workspace_id,

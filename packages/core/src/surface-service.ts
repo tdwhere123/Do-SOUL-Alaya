@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   canonicalGovernanceSubject,
-  Phase2BEventType,
+  SurfaceEventType,
   SoulSurfaceAnchorCreatedPayloadSchema,
   SoulSurfaceAnchorDeletedPayloadSchema,
   SoulSurfaceCreatedPayloadSchema,
@@ -158,7 +158,7 @@ export class SurfaceService {
     });
 
     const event: SurfaceEventDraft = {
-      event_type: Phase2BEventType.SOUL_SURFACE_CREATED,
+      event_type: SurfaceEventType.SOUL_SURFACE_CREATED,
       entity_type: "surface_identity",
       entity_id: identity.object_id,
       workspace_id: identity.workspace_id,
@@ -242,7 +242,7 @@ export class SurfaceService {
     try {
       const occurredAt = this.now();
       const event: SurfaceEventDraft = {
-        event_type: Phase2BEventType.SOUL_SURFACE_STATUS_CHANGED,
+        event_type: SurfaceEventType.SOUL_SURFACE_STATUS_CHANGED,
         entity_type: "surface_identity",
         entity_id: existing.object_id,
         workspace_id: existing.workspace_id,
@@ -335,7 +335,7 @@ export class SurfaceService {
     });
 
     const event: SurfaceEventDraft = {
-      event_type: Phase2BEventType.SOUL_SURFACE_ANCHOR_CREATED,
+      event_type: SurfaceEventType.SOUL_SURFACE_ANCHOR_CREATED,
       entity_type: "surface_anchor",
       entity_id: anchor.object_id,
       workspace_id: anchor.workspace_id,
@@ -368,7 +368,7 @@ export class SurfaceService {
     }
 
     const event: SurfaceEventDraft = {
-      event_type: Phase2BEventType.SOUL_SURFACE_ANCHOR_DELETED,
+      event_type: SurfaceEventType.SOUL_SURFACE_ANCHOR_DELETED,
       entity_type: "surface_anchor",
       entity_id: existing.object_id,
       workspace_id: existing.workspace_id,

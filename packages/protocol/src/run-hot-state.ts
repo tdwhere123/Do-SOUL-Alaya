@@ -6,9 +6,9 @@ import {
   ToolCallCompletedStatusKindSchema,
   WorkerStateChangedStateSchema,
   WorkerStateChangedSuspendReasonSchema
-} from "./events/phase-a1.js";
-import { WorkerIntegrationStatusPayloadSchema } from "./events/phase-a3.js";
-import { SoulInteractionRiskLevelSchema } from "./events/phase-5.js";
+} from "./events/tool-worker.js";
+import { WorkerIntegrationStatusPayloadSchema } from "./events/worker-runtime.js";
+import { SoulInteractionRiskLevelSchema } from "./events/file-approval.js";
 
 const engineStatusValues = ["idle", "streaming", "error"] as const;
 

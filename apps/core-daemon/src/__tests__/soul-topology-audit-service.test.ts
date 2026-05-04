@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EventLogEntry, TopologyExplorationResult } from "@do-soul/alaya-protocol";
-import { Phase4BEventType } from "@do-soul/alaya-protocol";
+import { GraphAuditorEventType } from "@do-soul/alaya-protocol";
 import { SoulTopologyAuditService } from "../services/soul-topology-audit-service.js";
 
 describe("SoulTopologyAuditService", () => {
@@ -25,7 +25,7 @@ describe("SoulTopologyAuditService", () => {
 
     expect(append).toHaveBeenCalledTimes(1);
     expect(append).toHaveBeenCalledWith({
-      event_type: Phase4BEventType.SOUL_GRAPH_EXPLORE_COMPLETED,
+      event_type: GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED,
       entity_type: "workspace",
       entity_id: "workspace-1",
       workspace_id: "workspace-1",

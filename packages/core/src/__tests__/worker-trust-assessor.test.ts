@@ -1,6 +1,6 @@
 import {
   DelegatedWorkerRunSchema,
-  PhaseBEventType,
+  ObligationTrustNarrativeEventType,
   WorkerTrustAssessmentSchema,
   type DelegatedWorkerRun
 } from "@do-soul/alaya-protocol";
@@ -94,7 +94,7 @@ describe("WorkerTrustAssessor", () => {
     expect(publish).toHaveBeenCalledTimes(cases.length);
     expect(publish).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        event_type: PhaseBEventType.WORKER_TRUST_ASSESSED,
+        event_type: ObligationTrustNarrativeEventType.WORKER_TRUST_ASSESSED,
         entity_type: "worker_run",
         entity_id: "worker-run-1",
         workspace_id: "workspace-1",

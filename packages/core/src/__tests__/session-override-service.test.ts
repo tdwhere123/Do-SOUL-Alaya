@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Phase0EventType, Phase3BEventType, type EventLogEntry } from "@do-soul/alaya-protocol";
+import { WorkspaceRunEventType, GreenGovernanceEventType, type EventLogEntry } from "@do-soul/alaya-protocol";
 import { SessionOverrideService } from "../session-override-service.js";
 import type { TestMock } from "./mock-types.js";
 
@@ -46,7 +46,7 @@ describe("SessionOverrideService", () => {
     await expect(service.getActiveFor("run-1")).resolves.toEqual([override]);
     expect(appendSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase3BEventType.SOUL_SESSION_OVERRIDE_APPLIED,
+        event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
         entity_type: "session_override",
         entity_id: override.runtime_id,
         workspace_id: "workspace-1",
@@ -238,7 +238,7 @@ describe("SessionOverrideService", () => {
     const eventLogRepo = createEventLogRepo({
       queryByRun: vi.fn(async () => [
         createEventLogEntry({
-          event_type: Phase3BEventType.SOUL_SESSION_OVERRIDE_APPLIED,
+          event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
           entity_type: "session_override",
           entity_id: "00000000-0000-4000-8000-000000000123",
           workspace_id: "workspace-1",
@@ -327,7 +327,7 @@ describe("SessionOverrideService", () => {
       eventLogRepo: createEventLogRepo({
         queryByRun: vi.fn(async () => [
           createEventLogEntry({
-            event_type: Phase0EventType.RUN_MESSAGE_APPENDED,
+            event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
             entity_type: "message",
             entity_id: "msg_user_1",
             workspace_id: "workspace-1",

@@ -3,7 +3,7 @@ import {
   GardenTaskKind,
   GardenTier,
   HealthEventKind,
-  Phase4BEventType,
+  GraphAuditorEventType,
   SoulGardenEventLogOrphanDetectedEventType,
   type EventLogEntry,
   type OrphanRadar,
@@ -86,7 +86,7 @@ describe("Auditor 4B", () => {
     expect(eventLogRepo.append).toHaveBeenCalledTimes(3);
     expect(eventLogRepo.append).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase4BEventType.SOUL_AUDITOR_POINTER_HEALED,
+        event_type: GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED,
         payload_json: expect.objectContaining({
           source_object_id: "memory-1",
           source_object_kind: "memory_entry",
@@ -356,7 +356,7 @@ describe("Auditor 4B", () => {
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
     expect(appendedEvents).toEqual([
       expect.objectContaining({
-        event_type: Phase4BEventType.SOUL_ORPHAN_RADAR_REPORTED,
+        event_type: GraphAuditorEventType.SOUL_ORPHAN_RADAR_REPORTED,
         entity_type: "orphan_radar",
         workspace_id: "workspace-1",
         payload_json: expect.objectContaining({

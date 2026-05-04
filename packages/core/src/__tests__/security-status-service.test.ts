@@ -1,8 +1,8 @@
 import {
-  PhaseCEventType,
+  RuntimeGovernanceEventType,
   WorkerBaselineLockSchema,
   SecurityStatusContractSchema,
-  parsePhaseCEventPayload,
+  parseRuntimeGovernanceEventPayload,
   ZeroDayPolicySchema,
   type EventLogEntry,
   type SecurityStatusContract,
@@ -64,7 +64,7 @@ describe("SecurityStatusService", () => {
 
     expect(publishedEvents).toHaveLength(1);
     expect(publishedEvents[0]).toMatchObject({
-      event_type: PhaseCEventType.SECURITY_PASSTHROUGH_STATUS_CHANGED,
+      event_type: RuntimeGovernanceEventType.SECURITY_PASSTHROUGH_STATUS_CHANGED,
       entity_type: "workspace",
       entity_id: "workspace-1",
       workspace_id: "workspace-1",
@@ -72,8 +72,8 @@ describe("SecurityStatusService", () => {
       caused_by: "system"
     });
     expect(
-      parsePhaseCEventPayload(
-        PhaseCEventType.SECURITY_PASSTHROUGH_STATUS_CHANGED,
+      parseRuntimeGovernanceEventPayload(
+        RuntimeGovernanceEventType.SECURITY_PASSTHROUGH_STATUS_CHANGED,
         publishedEvents[0]!.payload_json
       )
     ).toEqual({
@@ -138,8 +138,8 @@ describe("SecurityStatusService", () => {
 
     expect(publishedEvents).toHaveLength(2);
     expect(
-      parsePhaseCEventPayload(
-        PhaseCEventType.SECURITY_PASSTHROUGH_STATUS_CHANGED,
+      parseRuntimeGovernanceEventPayload(
+        RuntimeGovernanceEventType.SECURITY_PASSTHROUGH_STATUS_CHANGED,
         publishedEvents[1]!.payload_json
       )
     ).toEqual({
@@ -172,7 +172,7 @@ describe("SecurityStatusService", () => {
     expect(publish).toHaveBeenCalledTimes(1);
     expect(publish).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: PhaseCEventType.SECURITY_PASSTHROUGH_STATUS_CHANGED,
+        event_type: RuntimeGovernanceEventType.SECURITY_PASSTHROUGH_STATUS_CHANGED,
         payload_json: expect.objectContaining({
           workspace_id: "workspace-1",
           reason: "workspace_initialized"
@@ -280,7 +280,7 @@ describe("SecurityStatusService", () => {
 
     expect(publishedEvents).toEqual([
       expect.objectContaining({
-        event_type: PhaseCEventType.SECURITY_PASSTHROUGH_INITIALIZATION_FAILED,
+        event_type: RuntimeGovernanceEventType.SECURITY_PASSTHROUGH_INITIALIZATION_FAILED,
         entity_type: "workspace",
         entity_id: "workspace-1",
         workspace_id: "workspace-1",

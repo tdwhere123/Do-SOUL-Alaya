@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
 import {
   RunUpdateEngineBindingInputSchema,
   RunEngineBindingUpdatedPayloadSchema,
-  // RUN_ENGINE_BINDING_UPDATED must be a member of Phase0EventType or a new
+  // RUN_ENGINE_BINDING_UPDATED must be a member of WorkspaceRunEventType or a new
   // event-type enum introduced alongside the feature.
 } from "@do-soul/alaya-protocol";
 

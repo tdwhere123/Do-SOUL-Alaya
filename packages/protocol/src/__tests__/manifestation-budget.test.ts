@@ -7,9 +7,9 @@ import {
   ManifestationEscalationDecidedPayloadSchema,
   ManifestationLevel,
   ManifestationLevelSchema,
-  PhaseCEventType,
-  PhaseCEventUnionSchema,
-  parsePhaseCEventPayload
+  RuntimeGovernanceEventType,
+  RuntimeGovernanceEventUnionSchema,
+  parseRuntimeGovernanceEventPayload
 } from "../index.js";
 
 const NOW = "2026-04-17T00:00:00.000Z";
@@ -100,27 +100,27 @@ describe("manifestation budget contracts", () => {
       decisionPayload
     );
     expect(
-      parsePhaseCEventPayload(PhaseCEventType.MANIFESTATION_BUDGET_EVALUATED, budgetPayload)
+      parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.MANIFESTATION_BUDGET_EVALUATED, budgetPayload)
     ).toEqual(budgetPayload);
     expect(
-      parsePhaseCEventPayload(PhaseCEventType.MANIFESTATION_ESCALATION_DECIDED, decisionPayload)
+      parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.MANIFESTATION_ESCALATION_DECIDED, decisionPayload)
     ).toEqual(decisionPayload);
     expect(
-      PhaseCEventUnionSchema.parse({
-        type: PhaseCEventType.MANIFESTATION_BUDGET_EVALUATED,
+      RuntimeGovernanceEventUnionSchema.parse({
+        type: RuntimeGovernanceEventType.MANIFESTATION_BUDGET_EVALUATED,
         payload: budgetPayload
       })
     ).toEqual({
-      type: PhaseCEventType.MANIFESTATION_BUDGET_EVALUATED,
+      type: RuntimeGovernanceEventType.MANIFESTATION_BUDGET_EVALUATED,
       payload: budgetPayload
     });
     expect(
-      PhaseCEventUnionSchema.parse({
-        type: PhaseCEventType.MANIFESTATION_ESCALATION_DECIDED,
+      RuntimeGovernanceEventUnionSchema.parse({
+        type: RuntimeGovernanceEventType.MANIFESTATION_ESCALATION_DECIDED,
         payload: decisionPayload
       })
     ).toEqual({
-      type: PhaseCEventType.MANIFESTATION_ESCALATION_DECIDED,
+      type: RuntimeGovernanceEventType.MANIFESTATION_ESCALATION_DECIDED,
       payload: decisionPayload
     });
   });

@@ -1,6 +1,6 @@
 import type { EventLogEntry, RuntimeEvent } from "@do-soul/alaya-protocol";
 import {
-  PhaseA3EventType,
+  WorkerRuntimeEventType,
   WorkerMessageDeltaPayloadSchema,
   WorkerPatchEmittedPayloadSchema,
   WorkerPermissionRequestedPayloadSchema,
@@ -199,7 +199,7 @@ export class RuntimeEventNormalizer {
       case "session_started":
         return this.createEntry(
           context,
-          PhaseA3EventType.WORKER_SESSION_STARTED,
+          WorkerRuntimeEventType.WORKER_SESSION_STARTED,
           WorkerSessionStartedPayloadSchema.parse({
             sessionId: event.session_id,
             emittedAt: event.emitted_at
@@ -208,7 +208,7 @@ export class RuntimeEventNormalizer {
       case "session_finished":
         return this.createEntry(
           context,
-          PhaseA3EventType.WORKER_SESSION_FINISHED,
+          WorkerRuntimeEventType.WORKER_SESSION_FINISHED,
           WorkerSessionFinishedPayloadSchema.parse({
             sessionId: event.session_id,
             emittedAt: event.emitted_at,
@@ -219,7 +219,7 @@ export class RuntimeEventNormalizer {
       case "message_delta":
         return this.createEntry(
           context,
-          PhaseA3EventType.WORKER_MESSAGE_DELTA,
+          WorkerRuntimeEventType.WORKER_MESSAGE_DELTA,
           WorkerMessageDeltaPayloadSchema.parse({
             sessionId: event.session_id,
             workerRunId: context.workerRunId,
@@ -231,7 +231,7 @@ export class RuntimeEventNormalizer {
       case "tool_call_started":
         return this.createEntry(
           context,
-          PhaseA3EventType.WORKER_TOOL_CALL_STARTED,
+          WorkerRuntimeEventType.WORKER_TOOL_CALL_STARTED,
           WorkerToolCallStartedPayloadSchema.parse({
             sessionId: event.session_id,
             emittedAt: event.emitted_at,
@@ -242,7 +242,7 @@ export class RuntimeEventNormalizer {
       case "tool_call_finished":
         return this.createEntry(
           context,
-          PhaseA3EventType.WORKER_TOOL_CALL_FINISHED,
+          WorkerRuntimeEventType.WORKER_TOOL_CALL_FINISHED,
           WorkerToolCallFinishedPayloadSchema.parse({
             sessionId: event.session_id,
             emittedAt: event.emitted_at,
@@ -255,7 +255,7 @@ export class RuntimeEventNormalizer {
       case "permission_requested":
         return this.createEntry(
           context,
-          PhaseA3EventType.WORKER_PERMISSION_REQUESTED,
+          WorkerRuntimeEventType.WORKER_PERMISSION_REQUESTED,
           WorkerPermissionRequestedPayloadSchema.parse({
             sessionId: event.session_id,
             emittedAt: event.emitted_at,
@@ -267,7 +267,7 @@ export class RuntimeEventNormalizer {
       case "patch_emitted":
         return this.createEntry(
           context,
-          PhaseA3EventType.WORKER_PATCH_EMITTED,
+          WorkerRuntimeEventType.WORKER_PATCH_EMITTED,
           WorkerPatchEmittedPayloadSchema.parse({
             sessionId: event.session_id,
             emittedAt: event.emitted_at,
@@ -278,7 +278,7 @@ export class RuntimeEventNormalizer {
       case "runtime_error":
         return this.createEntry(
           context,
-          PhaseA3EventType.WORKER_RUNTIME_ERROR,
+          WorkerRuntimeEventType.WORKER_RUNTIME_ERROR,
           WorkerRuntimeErrorPayloadSchema.parse({
             sessionId: event.session_id,
             emittedAt: event.emitted_at,

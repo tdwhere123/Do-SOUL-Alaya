@@ -1,7 +1,7 @@
 import {
   NarrativeConsolidationTriggeredPayloadSchema,
   NarrativeBudgetExceededPayloadSchema,
-  PhaseBEventType,
+  ObligationTrustNarrativeEventType,
   type EventLogEntry,
   type NarrativeBudgetConfig
 } from "@do-soul/alaya-protocol";
@@ -109,7 +109,7 @@ export class NarrativeBudgetService {
 
     for (let index = events.length - 1; index >= 0; index -= 1) {
       const event = events[index];
-      if (event?.event_type !== PhaseBEventType.NARRATIVE_CONSOLIDATION_TRIGGERED) {
+      if (event?.event_type !== ObligationTrustNarrativeEventType.NARRATIVE_CONSOLIDATION_TRIGGERED) {
         continue;
       }
 
@@ -146,7 +146,7 @@ function createBudgetExceededEvent(params: {
   readonly maxCount: number;
 }): Omit<EventLogEntry, "event_id" | "created_at"> {
   return {
-    event_type: PhaseBEventType.NARRATIVE_BUDGET_EXCEEDED,
+    event_type: ObligationTrustNarrativeEventType.NARRATIVE_BUDGET_EXCEEDED,
     entity_type: "run",
     entity_id: params.runId,
     workspace_id: params.workspaceId,
@@ -171,7 +171,7 @@ function createConsolidationTriggeredEvent(params: {
   readonly digestCountBefore: number;
 }): Omit<EventLogEntry, "event_id" | "created_at"> {
   return {
-    event_type: PhaseBEventType.NARRATIVE_CONSOLIDATION_TRIGGERED,
+    event_type: ObligationTrustNarrativeEventType.NARRATIVE_CONSOLIDATION_TRIGGERED,
     entity_type: "run",
     entity_id: params.runId,
     workspace_id: params.workspaceId,

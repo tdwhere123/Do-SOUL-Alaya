@@ -1,5 +1,5 @@
 import {
-  PhaseA1EventType,
+  ToolWorkerEventType,
   WorkerStateChangedPayloadSchema,
   WorkerStateChangedSuspendReasonSchema,
   type DelegatedWorkerRun,
@@ -122,7 +122,7 @@ export class WorkerRunLifecycleService {
     payload: WorkerStateChangedPayload
   ): Omit<EventLogEntry, "event_id" | "created_at"> {
     return {
-      event_type: PhaseA1EventType.WORKER_STATE_CHANGED,
+      event_type: ToolWorkerEventType.WORKER_STATE_CHANGED,
       entity_type: "worker_run",
       entity_id: workerRun.worker_run_id,
       workspace_id: workerRun.workspace_id,

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { Phase2BEventType, SurfaceAnchorKind, SurfaceStatus, WorkspaceKind, WorkspaceState, type SurfaceAnchor } from "@do-soul/alaya-protocol";
+import { SurfaceEventType, SurfaceAnchorKind, SurfaceStatus, WorkspaceKind, WorkspaceState, type SurfaceAnchor } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../db.js";
 import { SqliteSurfaceAnchorRepo } from "../repos/surface-anchor-repo.js";
 import { SqliteSurfaceIdentityRepo } from "../repos/surface-identity-repo.js";
@@ -59,7 +59,7 @@ describe("SqliteSurfaceAnchorRepo", () => {
     const { database, anchorRepo } = await createRepo();
 
     const created = await anchorRepo.createWithEvent(createSurfaceAnchor(), {
-      event_type: Phase2BEventType.SOUL_SURFACE_ANCHOR_CREATED,
+      event_type: SurfaceEventType.SOUL_SURFACE_ANCHOR_CREATED,
       entity_type: "surface_anchor",
       entity_id: ANCHOR_OBJECT_ID_1,
       workspace_id: "workspace-1",
@@ -89,7 +89,7 @@ describe("SqliteSurfaceAnchorRepo", () => {
     const { anchorRepo } = await createRepo();
 
     const created = await anchorRepo.createWithEvent(createSurfaceAnchor(), {
-      event_type: Phase2BEventType.SOUL_SURFACE_ANCHOR_CREATED,
+      event_type: SurfaceEventType.SOUL_SURFACE_ANCHOR_CREATED,
       entity_type: "surface_anchor",
       entity_id: ANCHOR_OBJECT_ID_1,
       workspace_id: "workspace-1",
@@ -107,7 +107,7 @@ describe("SqliteSurfaceAnchorRepo", () => {
     });
 
     const deleted = await anchorRepo.deleteWithEvent(ANCHOR_OBJECT_ID_1, {
-      event_type: Phase2BEventType.SOUL_SURFACE_ANCHOR_DELETED,
+      event_type: SurfaceEventType.SOUL_SURFACE_ANCHOR_DELETED,
       entity_type: "surface_anchor",
       entity_id: ANCHOR_OBJECT_ID_1,
       workspace_id: "workspace-1",

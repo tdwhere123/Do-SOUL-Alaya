@@ -18,7 +18,7 @@ const allowedBl014References = [
   },
   {
     file: "docs/v0.1/phase-4-briefs/README.md",
-    line: "Open follow-up issues after this repair are `#BL-014` and the post-port"
+    line: "`#BL-014` through p5-system-review atomic fix-commit evidence,"
   },
   {
     file: "docs/v0.1/phase-4-briefs/reports/gate-4-closeout.md",

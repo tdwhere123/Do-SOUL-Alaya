@@ -1,0 +1,58 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "include": ["files", "dependencies", "unlisted", "unresolved"],
+  "ignore": ["vendor/**", "dist/**", "coverage/**"],
+  "ignoreWorkspaces": ["vendor/**"],
+  "entry": [
+    "bin/alaya.mjs",
+    "scripts/*.mjs",
+    "vitest.config.mjs",
+    "vitest.workspace.mjs"
+  ],
+  "project": [
+    "bin/**/*.mjs",
+    "scripts/**/*.mjs",
+    "vitest*.mjs",
+    "tsconfig.base.json"
+  ],
+  "workspaces": {
+    "packages/protocol": {
+      "entry": ["src/index.ts", "src/__tests__/**/*.test.ts"],
+      "project": ["src/**/*.ts", "tsconfig.json"]
+    },
+    "packages/storage": {
+      "entry": ["src/index.ts", "src/__tests__/**/*.test.ts"],
+      "project": ["src/**/*.ts", "tsconfig.json"]
+    },
+    "packages/core": {
+      "entry": ["src/index.ts", "src/__tests__/**/*.test.ts"],
+      "project": ["src/**/*.ts", "tsconfig.json"]
+    },
+    "packages/soul": {
+      "entry": ["src/index.ts", "src/__tests__/**/*.test.ts"],
+      "project": ["src/**/*.ts", "tsconfig.json"]
+    },
+    "packages/engine-gateway": {
+      "entry": ["src/index.ts", "src/__tests__/**/*.test.ts"],
+      "project": ["src/**/*.ts", "tsconfig.json"]
+    },
+    "apps/core-daemon": {
+      "entry": ["src/index.ts", "src/__tests__/**/*.test.ts"],
+      "project": ["src/**/*.ts", "tsconfig.json"]
+    },
+    "apps/inspector": {
+      "entry": ["src/app.ts", "src/server.ts", "src/__tests__/**/*.test.ts"],
+      "project": ["src/**/*.ts", "tsconfig.json"]
+    },
+    "apps/inspector/web": {
+      "entry": [
+        "src/main.tsx",
+        "src/**/*.test.ts",
+        "src/**/*.test.tsx",
+        "vite.config.ts",
+        "vitest.config.ts"
+      ],
+      "project": ["src/**/*.{ts,tsx}", "*.ts", "tsconfig*.json"]
+    }
+  }
+}

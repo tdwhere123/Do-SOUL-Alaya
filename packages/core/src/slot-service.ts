@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   ClaimFormSchema,
-  Phase2AEventType,
+  SlotEventType,
   SlotSchema,
   SoulSlotCreatedPayloadSchema,
   SoulSlotWinnerChangedPayloadSchema,
@@ -317,7 +317,7 @@ export class SlotService {
 
     const revision = await this.getNextRevision("slot", slot.object_id);
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase2AEventType.SOUL_SLOT_CREATED,
+      event_type: SlotEventType.SOUL_SLOT_CREATED,
       entity_type: "slot",
       entity_id: slot.object_id,
       workspace_id: slot.workspace_id,
@@ -357,7 +357,7 @@ export class SlotService {
 
     const revision = await this.getNextRevision("slot", slot.object_id);
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase2AEventType.SOUL_SLOT_WINNER_CHANGED,
+      event_type: SlotEventType.SOUL_SLOT_WINNER_CHANGED,
       entity_type: "slot",
       entity_id: slot.object_id,
       workspace_id: slot.workspace_id,

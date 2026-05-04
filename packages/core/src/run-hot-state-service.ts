@@ -1,9 +1,9 @@
 import {
   EngineStatus,
-  Phase0EventType,
+  WorkspaceRunEventType,
   StreamingEventType,
   type EventLogEntry,
-  type Phase0Event,
+  type WorkspaceRunEvent,
   type Run,
   type RunHotState
 } from "@do-soul/alaya-protocol";
@@ -44,7 +44,7 @@ export class RunHotStateService {
     return snapshot;
   }
 
-  public async apply(event: Phase0Event): Promise<void> {
+  public async apply(event: WorkspaceRunEvent): Promise<void> {
     if (event.run_id === null) {
       return;
     }
@@ -152,8 +152,8 @@ async function findLastMessageAt(
     const event = events[index];
 
     if (
-      event.event_type === Phase0EventType.RUN_MESSAGE_APPENDED ||
-      event.event_type === Phase0EventType.ENGINE_RESPONSE_RECEIVED ||
+      event.event_type === WorkspaceRunEventType.RUN_MESSAGE_APPENDED ||
+      event.event_type === WorkspaceRunEventType.ENGINE_RESPONSE_RECEIVED ||
       event.event_type === StreamingEventType.MESSAGE_COMPLETED
     ) {
       return event.created_at;

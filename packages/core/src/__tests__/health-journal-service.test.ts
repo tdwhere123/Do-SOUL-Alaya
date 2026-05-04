@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { HealthEventKind, Phase4AEventType, type EventLogEntry, type HealthJournalEntry } from "@do-soul/alaya-protocol";
+import { HealthEventKind, GardenEventType, type EventLogEntry, type HealthJournalEntry } from "@do-soul/alaya-protocol";
 import { HealthJournalService } from "../health-journal-service.js";
 
 describe("HealthJournalService", () => {
@@ -65,7 +65,7 @@ describe("HealthJournalService", () => {
 
     expect(eventLogRepo.append).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase4AEventType.SOUL_HEALTH_JOURNAL_RECORDED,
+        event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
         entity_type: "health_journal",
         entity_id: "entry-1",
         workspace_id: "workspace-1",

@@ -9,7 +9,7 @@ import {
   FormationKind,
   HealthEventKind,
   MemoryDimension,
-  Phase4AEventType,
+  GardenEventType,
   ProposalResolutionState,
   RunMode,
   RunState,
@@ -683,8 +683,8 @@ async function readGardenEvidence(dataDir: string): Promise<
   const eventLogRepo = new SqliteEventLogRepo(database);
   const healthJournalRepo = new SqliteHealthJournalRepo(database);
   const [dispatched, completed, healthEntries] = await Promise.all([
-    eventLogRepo.queryByType(Phase4AEventType.SOUL_GARDEN_TASK_DISPATCHED),
-    eventLogRepo.queryByType(Phase4AEventType.SOUL_GARDEN_TASK_COMPLETED),
+    eventLogRepo.queryByType(GardenEventType.SOUL_GARDEN_TASK_DISPATCHED),
+    eventLogRepo.queryByType(GardenEventType.SOUL_GARDEN_TASK_COMPLETED),
     healthJournalRepo.findByWorkspace("workspace-1", {
       kind: HealthEventKind.GARDEN_BACKLOG,
       limit: 10

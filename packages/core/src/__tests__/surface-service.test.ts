@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  Phase2BEventType,
+  SurfaceEventType,
   SurfaceAnchorKind,
   SurfaceStatus,
   TransitionCausedBy,
@@ -259,7 +259,7 @@ describe("SurfaceService", () => {
 
     expect(order).toEqual(["event_log", "repo_create"]);
     expect(created.surface_id).toBe("surface://main");
-    expect(events.map((event) => event.event_type)).toEqual([Phase2BEventType.SOUL_SURFACE_CREATED]);
+    expect(events.map((event) => event.event_type)).toEqual([SurfaceEventType.SOUL_SURFACE_CREATED]);
     expect(events[0]?.revision).toBe(0);
     expect(notifySpy).toHaveBeenCalledTimes(1);
   });
@@ -297,7 +297,7 @@ describe("SurfaceService", () => {
 
     expect(order).toEqual(["event_log", "repo_update"]);
     expect(updated.surface_status).toBe(SurfaceStatus.WEAKLY_BOUND);
-    expect(events[0]?.event_type).toBe(Phase2BEventType.SOUL_SURFACE_STATUS_CHANGED);
+    expect(events[0]?.event_type).toBe(SurfaceEventType.SOUL_SURFACE_STATUS_CHANGED);
     expect(events[0]?.revision).toBe(0);
     expect(notifySpy).toHaveBeenCalledTimes(1);
     expect(cascaderSpy).not.toHaveBeenCalled();
@@ -467,7 +467,7 @@ describe("SurfaceService", () => {
 
     expect(order).toEqual(["event_log", "anchor_create"]);
     expect(anchor.surface_id).toBe("surface://main");
-    expect(events[0]?.event_type).toBe(Phase2BEventType.SOUL_SURFACE_ANCHOR_CREATED);
+    expect(events[0]?.event_type).toBe(SurfaceEventType.SOUL_SURFACE_ANCHOR_CREATED);
     expect(events[0]?.revision).toBe(0);
   });
 
@@ -481,7 +481,7 @@ describe("SurfaceService", () => {
     await service.removeAnchor(ANCHOR_OBJECT_ID, "reviewer-1");
 
     expect(order).toEqual(["event_log", "anchor_delete"]);
-    expect(events[0]?.event_type).toBe(Phase2BEventType.SOUL_SURFACE_ANCHOR_DELETED);
+    expect(events[0]?.event_type).toBe(SurfaceEventType.SOUL_SURFACE_ANCHOR_DELETED);
     expect(events[0]?.caused_by).toBe("reviewer-1");
     await expect(dependencies.surfaceAnchorRepo.findById(ANCHOR_OBJECT_ID)).resolves.toBeNull();
   });

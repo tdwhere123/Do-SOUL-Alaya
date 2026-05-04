@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  Phase1BEventType,
+  MemoryGovernanceEventType,
   PromotionState,
   PromotionStateSchema,
   SoulSynthesisCreatedPayloadSchema,
@@ -118,7 +118,7 @@ export class SynthesisService {
 
     const revision = await this.getNextRevision("synthesis_capsule", synthesis.object_id);
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase1BEventType.SOUL_SYNTHESIS_CREATED,
+      event_type: MemoryGovernanceEventType.SOUL_SYNTHESIS_CREATED,
       entity_type: "synthesis_capsule",
       entity_id: synthesis.object_id,
       workspace_id: synthesis.workspace_id,
@@ -160,7 +160,7 @@ export class SynthesisService {
     const occurredAt = this.now();
     const revision = await this.getNextRevision("synthesis_capsule", existing.object_id);
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase1BEventType.SOUL_SYNTHESIS_STATUS_CHANGED,
+      event_type: MemoryGovernanceEventType.SOUL_SYNTHESIS_STATUS_CHANGED,
       entity_type: "synthesis_capsule",
       entity_id: existing.object_id,
       workspace_id: existing.workspace_id,
@@ -217,7 +217,7 @@ export class SynthesisService {
 
     const revision = await this.getNextRevision("synthesis_capsule", existing.object_id);
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase1BEventType.SOUL_SYNTHESIS_PROMOTED,
+      event_type: MemoryGovernanceEventType.SOUL_SYNTHESIS_PROMOTED,
       entity_type: "synthesis_capsule",
       entity_id: existing.object_id,
       workspace_id: existing.workspace_id,
@@ -279,7 +279,7 @@ export class SynthesisService {
     const occurredAt = this.now();
     const revision = await this.getNextRevision("synthesis_capsule", existing.object_id);
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase1BEventType.SOUL_SYNTHESIS_PROMOTED,
+      event_type: MemoryGovernanceEventType.SOUL_SYNTHESIS_PROMOTED,
       entity_type: "synthesis_capsule",
       entity_id: existing.object_id,
       workspace_id: existing.workspace_id,

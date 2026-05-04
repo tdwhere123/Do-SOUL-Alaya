@@ -4,7 +4,7 @@ import {
   GovernanceLeasePiercingConditionKind as GovernanceLeasePiercingConditionKindValue,
   GovernanceLeaseSchema,
   GovernanceLeasePiercingConditionKindSchema,
-  Phase3BEventType,
+  GreenGovernanceEventType,
   RetentionPolicy,
   SoulGovernanceLeaseAcquiredPayloadSchema,
   SoulGovernanceLeaseReleasedPayloadSchema,
@@ -12,7 +12,7 @@ import {
   type EventLogEntry,
   type GovernanceLease,
   type GovernanceLeasePiercingConditionKind,
-  type Phase3BEventTypeValue,
+  type GreenGovernanceEventTypeValue,
   type PiercingCondition
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
@@ -92,7 +92,7 @@ export class GovernanceLeaseService {
     this.clearExpiredAt(occurredAt);
     const revision = await getNextRevision(this.dependencies.eventLogRepo, "governance_lease", lease.runtime_id);
     await this.dependencies.eventLogRepo.append({
-      event_type: Phase3BEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED,
+      event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED,
       entity_type: "governance_lease",
       entity_id: lease.runtime_id,
       workspace_id: workspaceId,
@@ -127,7 +127,7 @@ export class GovernanceLeaseService {
     const occurredAt = readNow(this.dependencies.now);
     const revision = await getNextRevision(this.dependencies.eventLogRepo, "governance_lease", active.lease.runtime_id);
     await this.dependencies.eventLogRepo.append({
-      event_type: Phase3BEventType.SOUL_GOVERNANCE_LEASE_RELEASED,
+      event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_RELEASED,
       entity_type: "governance_lease",
       entity_id: active.lease.runtime_id,
       workspace_id: active.workspaceId,
@@ -165,7 +165,7 @@ export class GovernanceLeaseService {
     const occurredAt = readNow(this.dependencies.now);
     const revision = await getNextRevision(this.dependencies.eventLogRepo, "governance_lease", active.runtime_id);
     await this.dependencies.eventLogRepo.append({
-      event_type: Phase3BEventType.SOUL_GOVERNANCE_LEASE_PIERCED,
+      event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_PIERCED,
       entity_type: "governance_lease",
       entity_id: active.runtime_id,
       workspace_id: workspaceId,
@@ -280,11 +280,11 @@ export class GovernanceLeaseService {
         continue;
       }
 
-      if (event.event_type === Phase3BEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED) {
+      if (event.event_type === GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED) {
         const parsed = parsePersistedGovernanceLeasePayload(
           SoulGovernanceLeaseAcquiredPayloadSchema,
           event,
-          Phase3BEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED
+          GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED
         );
 
         active = {
@@ -304,11 +304,11 @@ export class GovernanceLeaseService {
         continue;
       }
 
-      if (event.event_type === Phase3BEventType.SOUL_GOVERNANCE_LEASE_RELEASED) {
+      if (event.event_type === GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_RELEASED) {
         const parsed = parsePersistedGovernanceLeasePayload(
           SoulGovernanceLeaseReleasedPayloadSchema,
           event,
-          Phase3BEventType.SOUL_GOVERNANCE_LEASE_RELEASED
+          GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_RELEASED
         );
         if (active?.lease.lease_id === parsed.lease_id) {
           active = null;
@@ -316,11 +316,11 @@ export class GovernanceLeaseService {
         continue;
       }
 
-      if (event.event_type === Phase3BEventType.SOUL_GOVERNANCE_LEASE_PIERCED) {
+      if (event.event_type === GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_PIERCED) {
         const parsed = parsePersistedGovernanceLeasePayload(
           SoulGovernanceLeasePiercedPayloadSchema,
           event,
-          Phase3BEventType.SOUL_GOVERNANCE_LEASE_PIERCED
+          GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_PIERCED
         );
         if (active?.lease.lease_id === parsed.lease_id) {
           active = null;
@@ -364,7 +364,7 @@ function parsePersistedGovernanceLeasePayload<T>(
     parse(value: unknown): T;
   },
   event: Readonly<EventLogEntry>,
-  eventType: Phase3BEventTypeValue
+  eventType: GreenGovernanceEventTypeValue
 ): T {
   try {
     return schema.parse(event.payload_json);

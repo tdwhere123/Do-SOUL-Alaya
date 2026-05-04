@@ -1,7 +1,7 @@
 import { CoreError } from "@do-soul/alaya-core";
 import {
-  Phase5EventType,
-  parsePhase5EventPayload,
+  FileApprovalEventType,
+  parseFileApprovalEventPayload,
   type EventLogEntry,
   type SoulApprovalRequestedPayload
 } from "@do-soul/alaya-protocol";
@@ -53,7 +53,7 @@ async function resolveSoulApproval(
   const approvalState = getApprovalState(runEvents, input.approvalId);
   const resolvedAt = now();
   const entry = await dependencies.eventLogRepo.append({
-    event_type: Phase5EventType.SOUL_APPROVAL_RESOLVED,
+    event_type: FileApprovalEventType.SOUL_APPROVAL_RESOLVED,
     entity_type: "approval",
     entity_id: input.approvalId,
     workspace_id: run.workspace_id,
@@ -101,12 +101,12 @@ function getApprovalState(runEvents: readonly EventLogEntry[], approvalId: strin
       maxRevision = event.revision;
     }
 
-    if (event.event_type === Phase5EventType.SOUL_APPROVAL_REQUESTED) {
+    if (event.event_type === FileApprovalEventType.SOUL_APPROVAL_REQUESTED) {
       approvalRequest = parseApprovalRequestedPayload(event);
       continue;
     }
 
-    if (event.event_type === Phase5EventType.SOUL_APPROVAL_RESOLVED) {
+    if (event.event_type === FileApprovalEventType.SOUL_APPROVAL_RESOLVED) {
       validateApprovalResolvedPayload(event);
       throw new CoreError("CONFLICT", "Approval has already been resolved");
     }
@@ -124,7 +124,7 @@ function getApprovalState(runEvents: readonly EventLogEntry[], approvalId: strin
 
 function parseApprovalRequestedPayload(event: EventLogEntry): SoulApprovalRequestedPayload {
   try {
-    return parsePhase5EventPayload(Phase5EventType.SOUL_APPROVAL_REQUESTED, toPayloadRecord(event));
+    return parseFileApprovalEventPayload(FileApprovalEventType.SOUL_APPROVAL_REQUESTED, toPayloadRecord(event));
   } catch (error) {
     throw new CoreError("VALIDATION", "Invalid SOUL approval requested payload", { cause: error });
   }
@@ -132,7 +132,7 @@ function parseApprovalRequestedPayload(event: EventLogEntry): SoulApprovalReques
 
 function validateApprovalResolvedPayload(event: EventLogEntry): void {
   try {
-    parsePhase5EventPayload(Phase5EventType.SOUL_APPROVAL_RESOLVED, toPayloadRecord(event));
+    parseFileApprovalEventPayload(FileApprovalEventType.SOUL_APPROVAL_RESOLVED, toPayloadRecord(event));
   } catch (error) {
     throw new CoreError("VALIDATION", "Invalid SOUL approval resolved payload", { cause: error });
   }

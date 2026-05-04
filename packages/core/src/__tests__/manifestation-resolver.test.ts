@@ -4,7 +4,7 @@ import {
   ManifestationLevel,
   PathGovernanceClass,
   RetentionPolicy,
-  PhaseCEventType,
+  RuntimeGovernanceEventType,
   serializePathAnchorRef,
   type ActivationCandidate,
   type EventLogEntry,
@@ -90,7 +90,7 @@ describe("ManifestationResolver", () => {
     expect(deps.eventLogWriter.append).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        event_type: PhaseCEventType.MANIFESTATION_BUDGET_EVALUATED,
+        event_type: RuntimeGovernanceEventType.MANIFESTATION_BUDGET_EVALUATED,
         workspace_id: "workspace-1",
         run_id: "run-1",
         caused_by: "deterministic_rule",
@@ -109,7 +109,7 @@ describe("ManifestationResolver", () => {
     expect(deps.eventLogWriter.append).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        event_type: PhaseCEventType.MANIFESTATION_ESCALATION_DECIDED,
+        event_type: RuntimeGovernanceEventType.MANIFESTATION_ESCALATION_DECIDED,
         workspace_id: "workspace-1",
         run_id: "run-1",
         caused_by: "deterministic_rule",

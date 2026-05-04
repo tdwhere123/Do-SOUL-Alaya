@@ -5,7 +5,7 @@ import {
   ComputeProviderCallFailedPayloadSchema,
   ComputeProviderCallStartedPayloadSchema,
   HealthEventKind,
-  PhaseCExtensionEventType,
+  ComputeRecallGardenEventType,
   RuntimeMode,
   type CandidateMemorySignal,
   type ContextLens,
@@ -391,7 +391,7 @@ export class ConversationService {
 
     try {
       await this.dependencies.eventLogRepo.append({
-        event_type: PhaseCExtensionEventType.COMPUTE_PROVIDER_CALL_STARTED,
+        event_type: ComputeRecallGardenEventType.COMPUTE_PROVIDER_CALL_STARTED,
         entity_type: "compute_provider_call",
         entity_id: callId,
         workspace_id: input.workspace.workspace_id,
@@ -443,7 +443,7 @@ export class ConversationService {
 
     try {
       await this.dependencies.eventLogRepo.append({
-        event_type: PhaseCExtensionEventType.COMPUTE_PROVIDER_CALL_COMPLETED,
+        event_type: ComputeRecallGardenEventType.COMPUTE_PROVIDER_CALL_COMPLETED,
         entity_type: "compute_provider_call",
         entity_id: providerCall.callId,
         workspace_id: input.workspace.workspace_id,
@@ -501,7 +501,7 @@ export class ConversationService {
 
     try {
       await this.dependencies.eventLogRepo.append({
-        event_type: PhaseCExtensionEventType.COMPUTE_PROVIDER_CALL_FAILED,
+        event_type: ComputeRecallGardenEventType.COMPUTE_PROVIDER_CALL_FAILED,
         entity_type: "compute_provider_call",
         entity_id: providerCall.callId,
         workspace_id: input.workspace.workspace_id,

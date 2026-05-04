@@ -1,10 +1,5 @@
 import {
-  MemoryDimensionSchema,
-  MemoryEntrySchema,
-  ObjectLifecycleStateSchema,
-  ScopeClassSchema,
   StorageTier,
-  StorageTierSchema,
   type MemoryDimension,
   type MemoryEntry,
   type MemoryEntryRepoUpdateFields as ProtocolMemoryEntryRepoUpdateFields,
@@ -12,8 +7,31 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../db.js";
 import { StorageError } from "../errors.js";
-import { deepFreeze } from "./shared/deep-freeze.js";
-import { parseNonEmptyString, parseTimestamp } from "./shared/validators.js";
+import {
+  buildObjectIdFilterSql,
+  countQueryCodepoints,
+  createShortKeywordMatcher,
+  mergeKeywordSearchRows,
+  normalizeKeywordSearchObjectIds,
+  tokenizeFtsQuery,
+  type ExactKeywordCandidateRow,
+  type ExactKeywordSearchRow,
+  type FtsKeywordSearchRow
+} from "./memory-entry-keyword-search.js";
+import {
+  MEMORY_ENTRY_SELECT_COLUMNS,
+  parseDynamicsUpdateFields,
+  parseLifecycleState,
+  parseMemoryDimension,
+  parseMemoryEntry,
+  parseMemoryEntryRow,
+  parseScopeClass,
+  parseStorageTier,
+  parseUpdatedAt,
+  parseUpdateFields,
+  type MemoryEntryRow
+} from "./memory-entry-row-mapper.js";
+import { parseNonEmptyString } from "./shared/validators.js";
 
 export type MemoryEntryRepoUpdateFields = ProtocolMemoryEntryRepoUpdateFields;
 export interface MemoryEntryRepoDynamicsUpdateFields {
@@ -76,68 +94,6 @@ export interface MemoryEntryRepo {
   ): Promise<Readonly<MemoryEntry>>;
   archive(objectId: string, updatedAt: string): Promise<Readonly<MemoryEntry>>;
   hardDeleteTombstoned(objectId: string): Promise<void>;
-}
-const MEMORY_ENTRY_SELECT_COLUMNS = `
-        object_id,
-        object_kind,
-        schema_version,
-        lifecycle_state,
-        created_at,
-        updated_at,
-        created_by,
-        dimension,
-        source_kind,
-        formation_kind,
-        scope_class,
-        content,
-        domain_tags,
-        evidence_refs,
-        workspace_id,
-        run_id,
-        surface_id,
-        storage_tier,
-        activation_score,
-        retention_score,
-        manifestation_state,
-        retention_state,
-        decay_profile,
-        confidence,
-        last_used_at,
-        last_hit_at,
-        reinforcement_count,
-        contradiction_count,
-        superseded_by
-`;
-interface MemoryEntryRow {
-  readonly object_id: string;
-  readonly object_kind: string;
-  readonly schema_version: number;
-  readonly lifecycle_state: string;
-  readonly created_at: string;
-  readonly updated_at: string;
-  readonly created_by: string;
-  readonly dimension: string;
-  readonly source_kind: string;
-  readonly formation_kind: string;
-  readonly scope_class: string;
-  readonly content: string;
-  readonly domain_tags: string;
-  readonly evidence_refs: string;
-  readonly workspace_id: string;
-  readonly run_id: string;
-  readonly surface_id: string | null;
-  readonly storage_tier: string;
-  readonly activation_score: number | null;
-  readonly retention_score: number | null;
-  readonly manifestation_state: string | null;
-  readonly retention_state: string | null;
-  readonly decay_profile: string | null;
-  readonly confidence: number | null;
-  readonly last_used_at: string | null;
-  readonly last_hit_at: string | null;
-  readonly reinforcement_count: number | null;
-  readonly contradiction_count: number | null;
-  readonly superseded_by: string | null;
 }
 
 export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
@@ -836,375 +792,3 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     ) as readonly FtsKeywordSearchRow[];
   }
 }
-
-interface ExactKeywordCandidateRow {
-  readonly object_id: string;
-  readonly content: string;
-}
-
-interface ExactKeywordSearchRow {
-  readonly object_id: string;
-  readonly matched_token_count: number;
-}
-
-interface FtsKeywordSearchRow {
-  readonly object_id: string;
-  readonly raw_rank: number;
-}
-
-function buildObjectIdFilterSql(
-  objectIds: readonly string[] | undefined,
-  columnName = "object_id"
-): Readonly<{ sql: string; params: readonly string[] }> {
-  if (objectIds === undefined || objectIds.length === 0) {
-    return Object.freeze({
-      sql: "",
-      params: []
-    });
-  }
-
-  return Object.freeze({
-    sql: `AND ${columnName} IN (${objectIds.map(() => "?").join(", ")})`,
-    params: objectIds
-  });
-}
-
-function normalizeKeywordSearchObjectIds(objectIds: readonly string[]): readonly string[] {
-  return Object.freeze(
-    [...new Set(objectIds.map((objectId) => objectId.trim()).filter((objectId) => objectId.length > 0))]
-  );
-}
-
-function mergeKeywordSearchRows(
-  exactRows: readonly ExactKeywordSearchRow[],
-  trigramRows: readonly FtsKeywordSearchRow[],
-  limit: number
-): readonly Readonly<MemoryEntryKeywordSearchResult>[] {
-  const exactScores = buildGroupedOrdinalScores(exactRows, (row) => row.matched_token_count);
-  const trigramScores = buildGroupedOrdinalScores(trigramRows, (row) => row.raw_rank);
-  const byObjectId = new Map<
-    string,
-    Readonly<MemoryEntryKeywordSearchResult & { sourcePriority: number; sourceOrder: number }>
-  >();
-
-  exactRows.forEach((row, index) => {
-    const normalizedRank = exactScores[index] ?? 0;
-    byObjectId.set(
-      row.object_id,
-      Object.freeze({
-        object_id: row.object_id,
-        normalized_rank: normalizedRank,
-        sourcePriority: 0,
-        sourceOrder: index
-      })
-    );
-  });
-
-  trigramRows.forEach((row, index) => {
-    const normalizedRank = trigramScores[index] ?? 0;
-    const existing = byObjectId.get(row.object_id);
-
-    if (
-      existing !== undefined &&
-      (existing.normalized_rank > normalizedRank ||
-        (existing.normalized_rank === normalizedRank && existing.sourcePriority <= 1))
-    ) {
-      return;
-    }
-
-    byObjectId.set(
-      row.object_id,
-      Object.freeze({
-        object_id: row.object_id,
-        normalized_rank: normalizedRank,
-        sourcePriority: 1,
-        sourceOrder: index
-      })
-    );
-  });
-
-  return Object.freeze(
-    [...byObjectId.values()]
-      .sort((left, right) => {
-        const scoreDelta = right.normalized_rank - left.normalized_rank;
-        if (scoreDelta !== 0) {
-          return scoreDelta;
-        }
-
-        const sourceDelta = left.sourcePriority - right.sourcePriority;
-        if (sourceDelta !== 0) {
-          return sourceDelta;
-        }
-
-        const orderDelta = left.sourceOrder - right.sourceOrder;
-        if (orderDelta !== 0) {
-          return orderDelta;
-        }
-
-        return left.object_id.localeCompare(right.object_id);
-      })
-      .slice(0, limit)
-      .map((row) =>
-        Object.freeze({
-          object_id: row.object_id,
-          normalized_rank: row.normalized_rank
-        })
-      )
-  );
-}
-
-function buildGroupedOrdinalScores<T>(
-  rows: readonly T[],
-  getGroupValue: (row: T) => number
-): readonly number[] {
-  if (rows.length === 0) {
-    return [];
-  }
-
-  const scores = new Array<number>(rows.length);
-  let groupStart = 0;
-
-  while (groupStart < rows.length) {
-    const groupValue = getGroupValue(rows[groupStart]!);
-    let groupEnd = groupStart + 1;
-
-    while (groupEnd < rows.length && getGroupValue(rows[groupEnd]!) === groupValue) {
-      groupEnd += 1;
-    }
-
-    let total = 0;
-    for (let index = groupStart; index < groupEnd; index += 1) {
-      total += (rows.length - index) / rows.length;
-    }
-
-    const score = total / (groupEnd - groupStart);
-    for (let index = groupStart; index < groupEnd; index += 1) {
-      scores[index] = score;
-    }
-
-    groupStart = groupEnd;
-  }
-
-  return Object.freeze(scores);
-}
-
-function parseMemoryEntry(value: MemoryEntry): Readonly<MemoryEntry> {
-  try {
-    return deepFreeze(MemoryEntrySchema.parse(value));
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to validate memory entry.", error);
-  }
-}
-
-function parseMemoryEntryRow(row: MemoryEntryRow): Readonly<MemoryEntry> {
-  try {
-    return deepFreeze(
-      MemoryEntrySchema.parse({
-        object_id: row.object_id,
-        object_kind: row.object_kind,
-        schema_version: row.schema_version,
-        lifecycle_state: row.lifecycle_state,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-        created_by: row.created_by,
-        dimension: row.dimension,
-        source_kind: row.source_kind,
-        formation_kind: row.formation_kind,
-        scope_class: row.scope_class,
-        content: row.content,
-        domain_tags: JSON.parse(row.domain_tags),
-        evidence_refs: JSON.parse(row.evidence_refs),
-        workspace_id: row.workspace_id,
-        run_id: row.run_id,
-        surface_id: row.surface_id,
-        storage_tier: row.storage_tier,
-        activation_score: row.activation_score,
-        retention_score: row.retention_score,
-        manifestation_state: row.manifestation_state,
-        retention_state: row.retention_state,
-        decay_profile: row.decay_profile,
-        confidence: row.confidence,
-        last_used_at: row.last_used_at,
-        last_hit_at: row.last_hit_at,
-        reinforcement_count: row.reinforcement_count,
-        contradiction_count: row.contradiction_count,
-        superseded_by: row.superseded_by
-      })
-    );
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to validate memory entry row.", error);
-  }
-}
-
-function parseMemoryDimension(value: MemoryDimension): MemoryDimension {
-  try {
-    return MemoryDimensionSchema.parse(value);
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to validate memory dimension.", error);
-  }
-}
-
-function parseScopeClass(value: ScopeClass): ScopeClass {
-  try {
-    return ScopeClassSchema.parse(value);
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to validate scope class.", error);
-  }
-}
-
-function parseStorageTier(value: StorageTier): StorageTier {
-  try {
-    return StorageTierSchema.parse(value);
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to validate storage tier.", error);
-  }
-}
-
-function parseUpdateFields(fields: MemoryEntryRepoUpdateFields): MemoryEntryRepoUpdateFields {
-  const updatedAt = parseUpdatedAt(fields.updated_at);
-
-  if (fields.content !== undefined && fields.content.trim().length === 0) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to validate memory content.");
-  }
-
-  if (fields.domain_tags !== undefined) {
-    parseStringArray(fields.domain_tags, "domain_tags");
-  }
-
-  if (fields.evidence_refs !== undefined) {
-    parseStringArray(fields.evidence_refs, "evidence_refs");
-  }
-
-  const parsedStorageTier =
-    fields.storage_tier === undefined ? undefined : parseStorageTier(fields.storage_tier);
-
-  return {
-    ...fields,
-    updated_at: updatedAt,
-    storage_tier: parsedStorageTier
-  };
-}
-
-function parseDynamicsUpdateFields(
-  fields: MemoryEntryRepoDynamicsUpdateFields
-): MemoryEntryRepoDynamicsUpdateFields {
-  if (!Number.isFinite(fields.activation_score) || fields.activation_score < 0 || fields.activation_score > 1) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to validate activation_score.");
-  }
-
-  if (!Number.isFinite(fields.retention_score) || fields.retention_score < 0 || fields.retention_score > 1) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to validate retention_score.");
-  }
-
-  if (
-    fields.manifestation_state !== "hidden" &&
-    fields.manifestation_state !== "hint" &&
-    fields.manifestation_state !== "excerpt" &&
-    fields.manifestation_state !== "full_eligible"
-  ) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to validate manifestation_state.");
-  }
-
-  if (fields.retention_state !== undefined && fields.retention_state !== null) {
-    parseRetentionState(fields.retention_state);
-  }
-
-  if (fields.last_used_at !== undefined) {
-    parseTimestamp(fields.last_used_at);
-  }
-
-  if (fields.last_hit_at !== undefined) {
-    parseTimestamp(fields.last_hit_at);
-  }
-
-  if (fields.reinforcement_count !== undefined) {
-    if (!Number.isInteger(fields.reinforcement_count) || fields.reinforcement_count < 0) {
-      throw new StorageError("VALIDATION_FAILED", "Failed to validate reinforcement_count.");
-    }
-  }
-
-  if (fields.contradiction_count !== undefined) {
-    if (!Number.isInteger(fields.contradiction_count) || fields.contradiction_count < 0) {
-      throw new StorageError("VALIDATION_FAILED", "Failed to validate contradiction_count.");
-    }
-  }
-
-  if (fields.superseded_by !== undefined) {
-    parseNonEmptyString(fields.superseded_by, "superseded_by");
-  }
-
-  return fields;
-}
-
-const parseUpdatedAt = parseTimestamp;
-
-function parseLifecycleState(value: MemoryEntry["lifecycle_state"]): MemoryEntry["lifecycle_state"] {
-  try {
-    return ObjectLifecycleStateSchema.parse(value);
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to validate lifecycle_state.", error);
-  }
-}
-
-function parseRetentionState(value: NonNullable<MemoryEntry["retention_state"]>): NonNullable<MemoryEntry["retention_state"]> {
-  if (
-    value === "working" ||
-    value === "consolidated" ||
-    value === "canon" ||
-    value === "archived" ||
-    value === "tombstoned"
-  ) {
-    return value;
-  }
-
-  throw new StorageError("VALIDATION_FAILED", "Failed to validate retention_state.");
-}
-
-function parseStringArray(value: readonly string[], field: "domain_tags" | "evidence_refs"): void {
-  for (const item of value) {
-    if (item.trim().length === 0) {
-      throw new StorageError("VALIDATION_FAILED", `Failed to validate ${field}.`);
-    }
-  }
-}
-
-const MAX_FTS_QUERY_TOKENS = 32;
-
-function tokenizeFtsQuery(queryText: string): readonly string[] {
-  const tokens = Array.from(
-    new Set(
-      queryText
-        .trim()
-        .split(/\s+/u)
-        .map((token) => token.replace(/\0/gu, "").replace(/[":*]/gu, "").trim())
-        .filter((token) => token.length > 0)
-    )
-  );
-
-  return Object.freeze(tokens.slice(0, MAX_FTS_QUERY_TOKENS));
-}
-
-function countQueryCodepoints(value: string): number {
-  return Array.from(value).length;
-}
-
-function createShortKeywordMatcher(token: string): (content: string) => boolean {
-  if (shouldMatchShortWordByTokenBoundary(token)) {
-    const pattern = new RegExp(`(^|[^\\p{L}\\p{N}_])${escapeRegex(token)}($|[^\\p{L}\\p{N}_])`, "iu");
-    return (content) => pattern.test(content);
-  }
-
-  const normalizedToken = token.toLocaleLowerCase();
-  return (content) => content.toLocaleLowerCase().includes(normalizedToken);
-}
-
-function shouldMatchShortWordByTokenBoundary(token: string): boolean {
-  return SHORT_WORD_TOKEN_PATTERN.test(token) && !SHORT_CJK_TOKEN_PATTERN.test(token);
-}
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-}
-
-const SHORT_CJK_TOKEN_PATTERN = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
-const SHORT_WORD_TOKEN_PATTERN = /^[\p{L}\p{N}_]+$/u;

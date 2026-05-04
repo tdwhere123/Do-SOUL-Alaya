@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   ManifestationPreference,
-  PhaseCEventType,
+  RuntimeGovernanceEventType,
   type ActivationCandidate,
   type ExecutionStanceResolution
 } from "@do-soul/alaya-protocol";
@@ -36,7 +36,7 @@ describe("StanceResolutionService", () => {
     expect(deps.eventLogWriter.append).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        event_type: PhaseCEventType.STANCE_POLICY_EVALUATED,
+        event_type: RuntimeGovernanceEventType.STANCE_POLICY_EVALUATED,
         entity_type: "stance_policy",
         entity_id: "workspace-default:implicit-default",
         workspace_id: "workspace-default",
@@ -54,7 +54,7 @@ describe("StanceResolutionService", () => {
     expect(deps.eventLogWriter.append).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        event_type: PhaseCEventType.STANCE_RESOLUTION_CHANGED,
+        event_type: RuntimeGovernanceEventType.STANCE_RESOLUTION_CHANGED,
         entity_type: "stance_resolution",
         entity_id: "resolution-001",
         workspace_id: "workspace-default",

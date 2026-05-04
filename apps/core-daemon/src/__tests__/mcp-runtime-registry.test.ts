@@ -7,7 +7,7 @@ import {
   ToolSpecService
 } from "@do-soul/alaya-core";
 import {
-  PhaseCEventType,
+  RuntimeGovernanceEventType,
   type McpServerInfo,
   type ToolProvider,
   type ToolProviderToolSpec,
@@ -967,11 +967,11 @@ describe("daemon conversation tool catalog", () => {
 
     await waitForCondition(() =>
       notifyEntrySpy.mock.calls.some(
-        ([entry]) => entry.event_type === PhaseCEventType.EXTENSION_TOOL_DISCOVERED
+        ([entry]) => entry.event_type === RuntimeGovernanceEventType.EXTENSION_TOOL_DISCOVERED
       )
     );
 
-    await expect(eventLogRepo.queryByType(PhaseCEventType.EXTENSION_TOOL_DISCOVERED)).resolves.toEqual([
+    await expect(eventLogRepo.queryByType(RuntimeGovernanceEventType.EXTENSION_TOOL_DISCOVERED)).resolves.toEqual([
       expect.objectContaining({
         workspace_id: "system",
         entity_type: "extension_provider",
@@ -992,7 +992,7 @@ describe("daemon conversation tool catalog", () => {
     );
     expect(notifyEntrySpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: PhaseCEventType.EXTENSION_TOOL_DISCOVERED
+        event_type: RuntimeGovernanceEventType.EXTENSION_TOOL_DISCOVERED
       })
     );
   });

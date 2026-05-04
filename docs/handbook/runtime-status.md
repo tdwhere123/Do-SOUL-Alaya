@@ -107,10 +107,13 @@ four-perspective review/fix loop closed with zero Blocking / Important
 findings for the MCP/CLI release path. Gate-5 / v0.1.0 passed on
 2026-05-02.
 
-The post-port hygiene sweep tracked by `#BL-017` is now startable as a
-dedicated post-v0.1 hygiene wave and was not executed inside Phase 5.
-Benchmark fixtures belong to Phase 6 / Gate-6 / v0.1.1 and are not a
-Gate-5 requirement.
+The post-port hygiene sweep tracked by `#BL-017` executed after Gate-5
+as a dedicated v0.1.x cleanup wave. It renamed protocol event source
+files and symbols to domain names, split the listed oversized production
+TypeScript files, and added reproducible `knip` unused-code checking
+without changing event strings, storage schemas, MCP/CLI wire contracts,
+or durable EventLog data. Benchmark fixtures belong to Phase 6 / Gate-6
+/ v0.1.1 and are not a Gate-5 requirement.
 
 ## Phase 5 system-level review (post-Gate-5, 2026-05-03)
 

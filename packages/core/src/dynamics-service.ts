@@ -1,7 +1,7 @@
 import {
   DYNAMICS_CONSTANTS,
   FORMATION_CONFIDENCE_MAP,
-  Phase1BEventType,
+  MemoryGovernanceEventType,
   SoulMemoryManifestationChangedPayloadSchema,
   SoulMemoryRetentionUpdatedPayloadSchema,
   SoulMemoryStateChangedPayloadSchema,
@@ -199,7 +199,7 @@ export class DynamicsService {
 
     if (hasScoreChanged(previousRetention, retentionScore)) {
       const retentionEvent = await this.dependencies.eventLogRepo.append({
-        event_type: Phase1BEventType.SOUL_MEMORY_RETENTION_UPDATED,
+        event_type: MemoryGovernanceEventType.SOUL_MEMORY_RETENTION_UPDATED,
         entity_type: "memory_entry",
         entity_id: updated.object_id,
         workspace_id: updated.workspace_id,
@@ -225,7 +225,7 @@ export class DynamicsService {
 
     if (previousRetentionState !== retentionState) {
       const stateChangedEvent = await this.dependencies.eventLogRepo.append({
-        event_type: Phase1BEventType.SOUL_MEMORY_STATE_CHANGED,
+        event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
         entity_type: "memory_entry",
         entity_id: updated.object_id,
         workspace_id: updated.workspace_id,
@@ -250,7 +250,7 @@ export class DynamicsService {
 
     if (previousManifestation !== manifestationState) {
       const manifestationEvent = await this.dependencies.eventLogRepo.append({
-        event_type: Phase1BEventType.SOUL_MEMORY_MANIFESTATION_CHANGED,
+        event_type: MemoryGovernanceEventType.SOUL_MEMORY_MANIFESTATION_CHANGED,
         entity_type: "memory_entry",
         entity_id: updated.object_id,
         workspace_id: updated.workspace_id,
@@ -401,7 +401,7 @@ export class DynamicsService {
 
       if (hasScoreChanged(previousRetention, retentionScore)) {
         const retentionEvent = await this.dependencies.eventLogRepo.append({
-          event_type: Phase1BEventType.SOUL_MEMORY_RETENTION_UPDATED,
+          event_type: MemoryGovernanceEventType.SOUL_MEMORY_RETENTION_UPDATED,
           entity_type: "memory_entry",
           entity_id: updated.object_id,
           workspace_id: updated.workspace_id,
@@ -427,7 +427,7 @@ export class DynamicsService {
 
       if (previousRetentionState !== retentionState) {
         const stateChangedEvent = await this.dependencies.eventLogRepo.append({
-          event_type: Phase1BEventType.SOUL_MEMORY_STATE_CHANGED,
+          event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
           entity_type: "memory_entry",
           entity_id: updated.object_id,
           workspace_id: updated.workspace_id,
@@ -452,7 +452,7 @@ export class DynamicsService {
 
       if (previousManifestation !== manifestationState) {
         const manifestationEvent = await this.dependencies.eventLogRepo.append({
-          event_type: Phase1BEventType.SOUL_MEMORY_MANIFESTATION_CHANGED,
+          event_type: MemoryGovernanceEventType.SOUL_MEMORY_MANIFESTATION_CHANGED,
           entity_type: "memory_entry",
           entity_id: updated.object_id,
           workspace_id: updated.workspace_id,

@@ -1,178 +1,75 @@
 import { randomUUID } from "node:crypto";
 import {
-  BankruptcyKind,
   ControlPlaneObjectKind,
   DYNAMICS_CONSTANTS,
-  MemoryDimension,
-  Phase3AEventType,
-  ProjectMappingState,
+  RecallContextEventType,
   RecallCandidateSchema,
   RetentionPolicy,
   SoulRecallCompletedPayloadSchema,
   StorageTier,
-  type BudgetSnapshot,
-  type EventLogEntry,
   type FineAssessmentConfig,
-  type ManifestationState,
   type MemoryDimension as MemoryDimensionType,
   type MemoryEntry,
-  type ProjectMappingAnchor,
   type RecallCandidate,
-  type RecallOriginPlane,
   type RecallPolicy,
-  ScopeClass,
-  type Slot,
-  type StorageTier as StorageTierType,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
-import type {
-  GlobalMemoryRecallCachePort,
-  GlobalMemoryRecallPort
-} from "./global-memory-recall-port.js";
-import type {
-  EmbeddingRecallSupplementResult,
-  PreparedEmbeddingQueryHandle
-} from "./embedding-recall-service.js";
+import type { PreparedEmbeddingQueryHandle } from "./embedding-recall-service.js";
 import { loadGlobalRecallCandidates } from "./global-memory-recall-service.js";
 import { STRATEGY_RECALL_DEFAULTS, type NodeStrategy } from "./task-surface-builder.js";
-import { CoreError } from "./errors.js";
+import {
+  EMBEDDING_SIMILARITY_WEIGHT,
+  applySimilarityBoost,
+  assertActivationWeightsSumToOne,
+  assignManifestation,
+  buildRecallCandidateDedupeKey,
+  classifyGlobalCandidate,
+  classifyProjectMappingCandidate,
+  clamp01,
+  compareEffectiveScores,
+  compareMemoryEntries,
+  compareRecallCandidates,
+  createContentPreview,
+  estimateTokens,
+  getGlobalRecallLimit,
+  isClaimLikeDimension,
+  isProtectedDimension,
+  mapBudgetPenalty,
+  matchesConfiguredCoarseFilter,
+  matchesDeterministicFilter,
+  matchesPrecomputedRankFilter,
+  normalizeActivationScore,
+  normalizeGraphSupport,
+  normalizeQueryText,
+  parseEmbeddingPrecheckReason,
+  toErrorMessage
+} from "./recall-service-helpers.js";
+import type {
+  CoarseRecallCandidate,
+  RecallResult,
+  RecallServiceDependencies,
+  RecallServiceWarnPort,
+  RecallSupplementaryData
+} from "./recall-service-types.js";
 import { getNextRevision } from "./shared/event-utils.js";
 import { parseRecallPolicy } from "./shared/recall-policy.js";
 
-export interface KeywordSearchResult {
-  readonly object_id: string;
-  readonly normalized_rank: number;
-}
-
-export interface RecallServiceMemoryRepoPort {
-  findByWorkspaceId(workspaceId: string, tier?: StorageTierType): Promise<readonly Readonly<MemoryEntry>[]>;
-  findByDimension(workspaceId: string, dimension: MemoryDimensionType): Promise<readonly Readonly<MemoryEntry>[]>;
-  findByScopeClass(workspaceId: string, scopeClass: ScopeClass): Promise<readonly Readonly<MemoryEntry>[]>;
-  searchByKeyword?(workspaceId: string, queryText: string, limit: number): Promise<readonly KeywordSearchResult[]>;
-  searchByKeywordWithinObjectIds?(
-    workspaceId: string,
-    queryText: string,
-    limit: number,
-    objectIds: readonly string[]
-  ): Promise<readonly KeywordSearchResult[]>;
-}
-
-export interface RecallServiceSlotRepoPort {
-  findByWorkspace(workspaceId: string): Promise<readonly Readonly<Slot>[]>;
-}
-
-export interface RecallServiceEventLogRepoPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
-  queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
-}
-
-export interface RecallServiceGraphSupportPort {
-  countInboundSupports(memoryId: string, workspaceId: string): Promise<number>;
-}
-
-export interface RecallServiceBudgetPenaltyPort {
-  getSnapshot(runId: string): Promise<Readonly<BudgetSnapshot>>;
-}
-
-export interface RecallServiceProjectMappingPort {
-  findByWorkspace(workspaceId: string): Promise<readonly Readonly<ProjectMappingAnchor>[]>;
-  ensureSuggestedAnchors?(
-    globalObjectIds: readonly string[],
-    workspaceId: string,
-    createdBy: string
-  ): Promise<readonly Readonly<ProjectMappingAnchor>[]>;
-}
-
-export interface RecallServiceClaimResolverPort {
-  findByIds(objectIds: readonly string[]): Promise<readonly Readonly<{
-    readonly object_id: string;
-    readonly source_object_refs: readonly string[];
-  }>[]>;
-}
-
-export interface RecallServiceEmbeddingRecallPort {
-  hasStoredVectors?(params: {
-    readonly workspaceId: string;
-    readonly eligibleMemories: readonly Readonly<MemoryEntry>[];
-  }): Promise<boolean>;
-  recordPrecheckDegraded?(params: {
-    readonly workspaceId: string;
-    readonly runId: string | null;
-    readonly reason: string;
-    readonly baseCandidateCount: number;
-    readonly fallbackCandidateCount: number;
-  }): Promise<void>;
-  prepareQueryEmbedding?(params: {
-    readonly workspaceId: string;
-    readonly runId: string | null;
-    readonly queryText: string;
-  }): PreparedEmbeddingQueryHandle;
-  querySupplementIfReady?(params: {
-    readonly workspaceId: string;
-    readonly runId: string | null;
-    readonly eligibleMemories: readonly Readonly<MemoryEntry>[];
-    readonly baseCandidateIds: readonly string[];
-    readonly maxSupplement: number;
-    readonly preparedQuery: PreparedEmbeddingQueryHandle;
-  }): Promise<EmbeddingRecallSupplementResult>;
-  querySupplement(params: {
-    readonly workspaceId: string;
-    readonly runId: string | null;
-    readonly queryText: string;
-    readonly eligibleMemories: readonly Readonly<MemoryEntry>[];
-    readonly baseCandidateIds: readonly string[];
-    readonly maxSupplement: number;
-  }): Promise<EmbeddingRecallSupplementResult>;
-}
-
-export interface RecallServiceDependencies {
-  readonly memoryRepo: RecallServiceMemoryRepoPort;
-  readonly slotRepo: RecallServiceSlotRepoPort;
-  readonly eventLogRepo: RecallServiceEventLogRepoPort;
-  readonly graphSupportPort?: RecallServiceGraphSupportPort;
-  readonly budgetPenaltyPort?: RecallServiceBudgetPenaltyPort;
-  readonly projectMappingPort?: RecallServiceProjectMappingPort;
-  readonly globalRecallPort?: GlobalMemoryRecallPort;
-  readonly globalRecallCachePort?: GlobalMemoryRecallCachePort;
-  readonly claimResolverPort?: RecallServiceClaimResolverPort;
-  readonly embeddingRecallService?: RecallServiceEmbeddingRecallPort;
-  readonly generateRuntimeId?: () => string;
-  readonly now?: () => string;
-  readonly warn?: RecallServiceWarnPort;
-}
-
-export type { RecallCandidate } from "@do-soul/alaya-protocol";
-
-export interface RecallResult {
-  readonly candidates: readonly Readonly<RecallCandidate>[];
-  readonly total_scanned: number;
-  readonly coarse_filter_count: number;
-  readonly fine_assessment_count: number;
-  readonly working_projection: null;
-}
-
-interface RecallSupplementaryData {
-  readonly ftsRanks: Readonly<Record<string, number>>;
-  readonly graphSupportCounts: Readonly<Record<string, number>>;
-  readonly budgetPenaltyFactor: number;
-}
-
-interface CoarseRecallCandidate {
-  readonly entry: Readonly<MemoryEntry>;
-  readonly isAdvisory?: boolean;
-  readonly originPlane?: RecallOriginPlane;
-}
-
-export interface RecallServiceWarnPort {
-  (message: string, meta: Record<string, unknown>): void;
-}
-
-const CLAIM_LIKE_DIMENSIONS = new Set<MemoryDimensionType>([
-  MemoryDimension.CONSTRAINT,
-  MemoryDimension.PREFERENCE,
-  MemoryDimension.PROCEDURE
-]);
-const EMBEDDING_SIMILARITY_WEIGHT = 0.8;
+export { classifyGlobalCandidate } from "./recall-service-helpers.js";
+export type {
+  KeywordSearchResult,
+  RecallCandidate,
+  RecallResult,
+  RecallServiceBudgetPenaltyPort,
+  RecallServiceClaimResolverPort,
+  RecallServiceDependencies,
+  RecallServiceEmbeddingRecallPort,
+  RecallServiceEventLogRepoPort,
+  RecallServiceGraphSupportPort,
+  RecallServiceMemoryRepoPort,
+  RecallServiceProjectMappingPort,
+  RecallServiceSlotRepoPort,
+  RecallServiceWarnPort
+} from "./recall-service-types.js";
 
 export class RecallService {
   private readonly generateRuntimeId: () => string;
@@ -286,7 +183,7 @@ export class RecallService {
     const occurredAt = this.now();
 
     await this.dependencies.eventLogRepo.append({
-      event_type: Phase3AEventType.SOUL_RECALL_COMPLETED,
+      event_type: RecallContextEventType.SOUL_RECALL_COMPLETED,
       entity_type: "task_object_surface",
       entity_id: params.taskSurface.runtime_id,
       workspace_id: params.workspaceId,
@@ -811,7 +708,7 @@ export class RecallService {
     const budgetPenalty = supplementaryData.budgetPenaltyFactor;
     const conflictPenalty =
       config.conflict_awareness &&
-      CLAIM_LIKE_DIMENSIONS.has(entry.dimension) &&
+      isClaimLikeDimension(entry.dimension) &&
       !winnerMemoryIds.has(entry.object_id)
         ? 1
         : 0;
@@ -868,290 +765,4 @@ export class RecallService {
       ...(candidate.isAdvisory === undefined ? {} : { is_advisory: candidate.isAdvisory })
     });
   }
-}
-
-function buildRecallCandidateDedupeKey(candidate: Readonly<CoarseRecallCandidate>): string {
-  return `${candidate.originPlane ?? "workspace_local"}:${candidate.entry.object_id}`;
-}
-
-function parseEmbeddingPrecheckReason(error: unknown): string | null {
-  if (typeof error !== "object" || error === null || !("reason" in error)) {
-    return null;
-  }
-
-  return typeof error.reason === "string" && error.reason.trim().length > 0
-    ? error.reason
-    : null;
-}
-
-function compareMemoryEntries(left: Readonly<MemoryEntry>, right: Readonly<MemoryEntry>): number {
-  const activationDelta = normalizeActivationScore(right.activation_score) - normalizeActivationScore(left.activation_score);
-
-  if (activationDelta !== 0) {
-    return activationDelta;
-  }
-
-  const createdAtComparison = left.created_at.localeCompare(right.created_at);
-  if (createdAtComparison !== 0) {
-    return createdAtComparison;
-  }
-
-  return left.object_id.localeCompare(right.object_id);
-}
-
-function compareEffectiveScores(
-  left: Readonly<CoarseRecallCandidate & { effectiveScore: number }>,
-  right: Readonly<CoarseRecallCandidate & { effectiveScore: number }>
-): number {
-  const scoreDelta = left.effectiveScore - right.effectiveScore;
-
-  if (scoreDelta !== 0) {
-    return scoreDelta;
-  }
-
-  return compareMemoryEntries(right.entry, left.entry);
-}
-
-function compareRecallCandidates(
-  left: Readonly<RecallCandidate>,
-  right: Readonly<RecallCandidate>
-): number {
-  const relevanceDelta = right.relevance_score - left.relevance_score;
-  if (relevanceDelta !== 0) {
-    return relevanceDelta;
-  }
-
-  const activationDelta = right.activation_score - left.activation_score;
-  if (activationDelta !== 0) {
-    return activationDelta;
-  }
-
-  return left.object_id.localeCompare(right.object_id);
-}
-
-function applySimilarityBoost(
-  candidate: Readonly<RecallCandidate>,
-  similarityHint: Readonly<{
-    readonly normalized_similarity: number;
-  }> | undefined
-): Readonly<RecallCandidate> {
-  if (similarityHint === undefined) {
-    return candidate;
-  }
-
-  return RecallCandidateSchema.parse({
-    ...candidate,
-    relevance_score: clamp01(
-      candidate.relevance_score +
-        clamp01(similarityHint.normalized_similarity) * EMBEDDING_SIMILARITY_WEIGHT
-    )
-  });
-}
-
-function normalizeActivationScore(value: number | null): number {
-  return value ?? 0;
-}
-
-function normalizeGraphSupport(count: number): number {
-  return Math.min(Math.max(count, 0), 3) / 3;
-}
-
-function normalizeQueryText(value: string): string | null {
-  const trimmed = value.trim();
-  return trimmed.length === 0 ? null : trimmed;
-}
-
-function mapBudgetPenalty(snapshot: Readonly<BudgetSnapshot>): number {
-  switch (snapshot.bankruptcy_kind) {
-    case BankruptcyKind.NONE:
-      return 0;
-    case BankruptcyKind.SOFT:
-      return 0.3;
-    case BankruptcyKind.HARD:
-      return 1;
-    default:
-      return 0;
-  }
-}
-
-function getGlobalRecallLimit(policy: Readonly<RecallPolicy>): number {
-  const semanticSupplementLimit = policy.coarse_filter.semantic_supplement.enabled
-    ? policy.coarse_filter.semantic_supplement.max_supplement
-    : 0;
-
-  return Math.max(
-    1,
-    policy.coarse_filter.precomputed_rank.max_candidates,
-    policy.fine_assessment.budgets.max_entries,
-    semanticSupplementLimit
-  );
-}
-
-function clamp01(value: number): number {
-  return Math.min(1, Math.max(0, value));
-}
-
-function isProtectedDimension(value: MemoryDimensionType): boolean {
-  return value === MemoryDimension.CONSTRAINT || value === MemoryDimension.HAZARD;
-}
-
-export function classifyGlobalCandidate(
-  entry: { readonly global_object_id: string },
-  anchorMap: ReadonlyMap<string, Readonly<ProjectMappingAnchor>>
-): Readonly<{
-  include: boolean;
-  reason: "adopted" | "no_anchor" | `not_adopted:${ProjectMappingState}`;
-  anchor_state: ProjectMappingState | null;
-}> {
-  const anchor = anchorMap.get(entry.global_object_id);
-
-  if (anchor === undefined) {
-    return Object.freeze({
-      include: false,
-      reason: "no_anchor",
-      anchor_state: null
-    });
-  }
-
-  if (
-    anchor.mapping_state === ProjectMappingState.ACCEPTED ||
-    anchor.mapping_state === ProjectMappingState.ADAPTED
-  ) {
-    return Object.freeze({
-      include: true,
-      reason: "adopted",
-      anchor_state: anchor.mapping_state
-    });
-  }
-
-  return Object.freeze({
-    include: false,
-    reason: `not_adopted:${anchor.mapping_state}`,
-    anchor_state: anchor.mapping_state
-  });
-}
-
-function classifyProjectMappingCandidate(
-  entry: Readonly<MemoryEntry>,
-  anchorMap: ReadonlyMap<string, Readonly<ProjectMappingAnchor>>,
-  projectMappingPort: RecallServiceDependencies["projectMappingPort"]
-): Readonly<{ include: boolean; isAdvisory?: boolean }> {
-  if (projectMappingPort === undefined || entry.scope_class === ScopeClass.PROJECT) {
-    return Object.freeze({ include: true });
-  }
-
-  const anchor = anchorMap.get(entry.object_id);
-
-  if (anchor === undefined) {
-    return Object.freeze({ include: true, isAdvisory: true });
-  }
-
-  if (
-    anchor.mapping_state === ProjectMappingState.REJECTED ||
-    anchor.mapping_state === ProjectMappingState.NOT_APPLICABLE
-  ) {
-    return Object.freeze({ include: false });
-  }
-
-  if (
-    anchor.mapping_state === ProjectMappingState.ACCEPTED ||
-    anchor.mapping_state === ProjectMappingState.ADAPTED
-  ) {
-    return Object.freeze({ include: true, isAdvisory: false });
-  }
-
-  return Object.freeze({ include: true, isAdvisory: true });
-}
-
-function hasTagOverlap(source: readonly string[], filter: readonly string[]): boolean {
-  const filterSet = new Set(filter);
-  return source.some((tag) => filterSet.has(tag));
-}
-
-function matchesConfiguredCoarseFilter(
-  entry: Readonly<MemoryEntry>,
-  config: Readonly<RecallPolicy>["coarse_filter"]
-): boolean {
-  if (isProtectedDimension(entry.dimension)) {
-    return true;
-  }
-
-  return matchesDeterministicFilter(entry, config) && matchesPrecomputedRankFilter(entry, config);
-}
-
-function matchesDeterministicFilter(
-  entry: Readonly<MemoryEntry>,
-  config: Readonly<RecallPolicy>["coarse_filter"]
-): boolean {
-  const scopePass =
-    config.deterministic_match.scope_filter === null ||
-    config.deterministic_match.scope_filter.includes(entry.scope_class);
-  const dimensionPass =
-    config.deterministic_match.dimension_filter === null ||
-    config.deterministic_match.dimension_filter.includes(entry.dimension);
-  const domainPass =
-    config.deterministic_match.domain_tag_filter === null ||
-    hasTagOverlap(entry.domain_tags, config.deterministic_match.domain_tag_filter);
-
-  return scopePass && dimensionPass && domainPass;
-}
-
-function matchesPrecomputedRankFilter(
-  entry: Readonly<MemoryEntry>,
-  config: Readonly<RecallPolicy>["coarse_filter"]
-): boolean {
-  return (
-    config.precomputed_rank.min_activation_score === null ||
-    normalizeActivationScore(entry.activation_score) >= config.precomputed_rank.min_activation_score
-  );
-}
-
-function estimateTokens(content: string): number {
-  return Math.ceil(content.length / 4);
-}
-
-function createContentPreview(
-  content: string,
-  manifestation?: ManifestationState,
-  originPlane?: RecallOriginPlane
-): string {
-  if (originPlane === "global" && manifestation === "full_eligible") {
-    return content;
-  }
-
-  if (content.length <= 160) {
-    return content;
-  }
-
-  return `${content.slice(0, 157)}...`;
-}
-
-function assignManifestation(activationScore: number): ManifestationState {
-  if (activationScore < DYNAMICS_CONSTANTS.manifestation_thresholds.hidden_max) {
-    return "hidden";
-  }
-
-  if (activationScore < DYNAMICS_CONSTANTS.manifestation_thresholds.hint_max) {
-    return "hint";
-  }
-
-  if (activationScore < DYNAMICS_CONSTANTS.manifestation_thresholds.excerpt_max) {
-    return "excerpt";
-  }
-
-  return "full_eligible";
-}
-
-function assertActivationWeightsSumToOne(
-  weights: Readonly<Record<keyof typeof DYNAMICS_CONSTANTS.activation_weights_phase4b, number>>
-): void {
-  const sum = Object.values(weights).reduce((total, weight) => total + weight, 0);
-
-  if (Math.abs(sum - 1) > Number.EPSILON) {
-    throw new CoreError("VALIDATION", `activation_weights_phase4b must sum to 1.0, got ${sum}`);
-  }
-}
-
-function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

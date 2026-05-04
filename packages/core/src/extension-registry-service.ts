@@ -2,7 +2,7 @@ import {
   ExtensionDescriptorRegisteredPayloadSchema,
   ExtensionDescriptorRegistrationCompensationFailedPayloadSchema,
   ExtensionDescriptorRegistrationRevertedPayloadSchema,
-  PhaseCEventType,
+  RuntimeGovernanceEventType,
   ToolSpecSchema,
   type EventLogEntry,
   type SkillPackage,
@@ -333,7 +333,7 @@ export class ExtensionRegistryService {
     );
 
     return {
-      event_type: PhaseCEventType.EXTENSION_DESCRIPTOR_REGISTERED,
+      event_type: RuntimeGovernanceEventType.EXTENSION_DESCRIPTOR_REGISTERED,
       entity_type: "extension_descriptor",
       entity_id: input.descriptor_id,
       workspace_id: this.systemWorkspaceId,
@@ -361,7 +361,7 @@ export class ExtensionRegistryService {
     );
 
     return {
-      event_type: PhaseCEventType.EXTENSION_DESCRIPTOR_REGISTRATION_REVERTED,
+      event_type: RuntimeGovernanceEventType.EXTENSION_DESCRIPTOR_REGISTRATION_REVERTED,
       entity_type: "extension_descriptor",
       entity_id: input.descriptor_id,
       workspace_id: this.systemWorkspaceId,
@@ -389,7 +389,7 @@ export class ExtensionRegistryService {
     );
 
     return {
-      event_type: PhaseCEventType.EXTENSION_DESCRIPTOR_REGISTRATION_COMPENSATION_FAILED,
+      event_type: RuntimeGovernanceEventType.EXTENSION_DESCRIPTOR_REGISTRATION_COMPENSATION_FAILED,
       entity_type: "extension_descriptor",
       entity_id: input.descriptor_id,
       workspace_id: this.systemWorkspaceId,

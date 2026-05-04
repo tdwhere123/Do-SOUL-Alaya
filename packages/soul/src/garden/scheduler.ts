@@ -4,8 +4,8 @@ import {
   type GardenBacklogQueueDepthByTier,
   type GardenBacklogSnapshot,
   type GardenBacklogWarningTransition,
-  Phase4AEventType,
-  parsePhase4AEventPayload,
+  GardenEventType,
+  parseGardenEventPayload,
   type GardenRoleValue,
   type GardenTaskDescriptor,
   type GardenTaskResult,
@@ -108,12 +108,12 @@ export class GardenScheduler {
 
       const nextQueue = removeQueueIndex(this.queue, index);
       await this.eventLog.append({
-        event_type: Phase4AEventType.SOUL_GARDEN_TASK_DISPATCHED,
+        event_type: GardenEventType.SOUL_GARDEN_TASK_DISPATCHED,
         entity_type: "garden_task",
         entity_id: task.task_id,
         workspace_id: task.workspace_id,
         run_id: task.run_id,
-        payload: parsePhase4AEventPayload(Phase4AEventType.SOUL_GARDEN_TASK_DISPATCHED, {
+        payload: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_DISPATCHED, {
           task_id: task.task_id,
           task_kind: task.task_kind,
           role,
@@ -134,12 +134,12 @@ export class GardenScheduler {
     const nowIso = this.now();
 
     await this.eventLog.append({
-      event_type: Phase4AEventType.SOUL_GARDEN_TASK_COMPLETED,
+      event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
       entity_type: "garden_task",
       entity_id: result.task_id,
       workspace_id: result.workspace_id,
       run_id: null,
-      payload: parsePhase4AEventPayload(Phase4AEventType.SOUL_GARDEN_TASK_COMPLETED, {
+      payload: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
         task_id: result.task_id,
         task_kind: result.task_kind,
         role: result.role,
@@ -269,12 +269,12 @@ export class GardenScheduler {
     occurredAt: string
   ): Promise<void> {
     await this.eventLog.append({
-      event_type: Phase4AEventType.SOUL_GARDEN_TIER_VIOLATION_REJECTED,
+      event_type: GardenEventType.SOUL_GARDEN_TIER_VIOLATION_REJECTED,
       entity_type: "garden_task",
       entity_id: task.task_id,
       workspace_id: task.workspace_id,
       run_id: task.run_id,
-      payload: parsePhase4AEventPayload(Phase4AEventType.SOUL_GARDEN_TIER_VIOLATION_REJECTED, {
+      payload: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TIER_VIOLATION_REJECTED, {
         task_id: task.task_id,
         task_kind: task.task_kind,
         required_tier: task.required_tier,

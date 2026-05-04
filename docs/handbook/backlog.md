@@ -58,33 +58,35 @@ no separate watch entry is needed.
 
 ### #BL-016 — Resolved (folded into #BL-017)
 
-The `Phase*EventType` rename is a strict subset of #BL-017's
-close-condition (a). Stop-gap mapping is documented in
-`docs/handbook/port-mapping/phase-to-domain.md` so reviewers can resolve
-the upstream phase names against domain names without waiting for the
-codemod. Closing this issue independently to keep the open list short.
+The `Phase*EventType` rename was a strict subset of #BL-017's
+close-condition (a), and #BL-017 has now executed that rename. Current
+mapping is documented in `docs/handbook/port-mapping/phase-to-domain.md`
+so reviewers can resolve vendor snapshot phase names against current
+Alaya domain names.
 
-### #BL-017 — Resolved (stop-gap landed; full hygiene wave scheduled into v0.1.x patch wave)
+### #BL-017 — Resolved (post-port hygiene wave executed)
 
-Stop-gap landed in p5-system-review-r2 (2026-05-03):
-`docs/handbook/port-mapping/phase-to-domain.md` lists each
-`packages/protocol/src/events/phase-*.ts` against its event domain,
-proposed rename target, and 800-line splits, so per-card reviewers no
-longer need to re-derive the mapping.
+Stop-gap mapping landed in p5-system-review-r2 (2026-05-03), then the
+dedicated post-port hygiene wave executed the full close path:
 
-Full execution (rename `phase-*.ts` → domain-aligned files, split the
-five >800-line offenders, run `ts-prune`, refresh `code-map.md`) is
-scheduled to run as a dedicated wave alongside Phase 6 marketing work
-in the v0.1.x patch release. The wave is no longer a "post-v0.1
-parking lot" item: it has a concrete card decomposition (4 cards: rename
-events / split oversized / port residue / codemap refresh) recorded in
-`docs/v0.1/phase-5-briefs/reports/p5-system-review-round-1.md` Appendix
-A and a fixed lookup file. Closing this issue so the backlog reflects
-that the work has a plan, an owner (Phase 6 wave controller), and a
-concrete artifact already in the repo.
+- `packages/protocol/src/events/phase-*.ts` files, `Phase*` event
+  symbols, parser helpers, protocol event tests, root exports, and
+  downstream imports were renamed to domain-aligned names without
+  changing enum string values.
+- The eight listed production TypeScript files over the 800-line
+  threshold were split into adjacent helper modules while preserving
+  public runtime behavior.
+- Root unused-code checking is now reproducible through pinned `knip`
+  and `rtk pnpm run hygiene:unused`; only command-proven unused
+  dependency residue was removed.
+- `docs/handbook/code-map.md`,
+  `docs/handbook/port-mapping/phase-to-domain.md`, and the post-port
+  hygiene closeout report now record the executed layout.
 
-If new oversized files appear post-v0.1.0, open a new issue rather than
-re-opening #BL-017.
+Closeout evidence lives at
+`docs/v0.1/post-port-hygiene-briefs/reports/post-port-hygiene-closeout.md`.
+If new oversized files or unused-code residue appear after this wave,
+open a new issue rather than re-opening #BL-017.
 
 ## Out of Alaya Scope (Permanently Rejected)
 

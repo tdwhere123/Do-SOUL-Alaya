@@ -3,7 +3,7 @@ import {
   DriftAlertSchema,
   DriftClassificationSchema,
   GovernanceDriftLeaseSchema,
-  PhaseCEventType,
+  RuntimeGovernanceEventType,
   SurfaceDriftOperationTypeSchema,
   SurfaceDriftAlertPayloadSchema,
   SurfaceDriftDetectedPayloadSchema,
@@ -81,7 +81,7 @@ export class SurfaceDriftService {
     });
 
     await this.dependencies.eventPublisher.publish({
-      event_type: PhaseCEventType.SURFACE_DRIFT_DETECTED,
+      event_type: RuntimeGovernanceEventType.SURFACE_DRIFT_DETECTED,
       entity_type: "surface_drift",
       entity_id: classification.drift_id,
       workspace_id: classification.workspace_id,
@@ -125,7 +125,7 @@ export class SurfaceDriftService {
 
     return await this.dependencies.eventPublisher.publishWithMutation(
       {
-        event_type: PhaseCEventType.SURFACE_DRIFT_LEASE_ACQUIRED,
+        event_type: RuntimeGovernanceEventType.SURFACE_DRIFT_LEASE_ACQUIRED,
         entity_type: "surface_drift_lease",
         entity_id: lease.lease_id,
         workspace_id: lease.workspace_id,
@@ -188,7 +188,7 @@ export class SurfaceDriftService {
     try {
       await this.dependencies.eventPublisher.publishWithMutation(
         {
-          event_type: PhaseCEventType.SURFACE_DRIFT_LEASE_RELEASED,
+          event_type: RuntimeGovernanceEventType.SURFACE_DRIFT_LEASE_RELEASED,
           entity_type: "surface_drift_lease",
           entity_id: existingLease.lease_id,
           workspace_id: existingLease.workspace_id,
@@ -236,7 +236,7 @@ export class SurfaceDriftService {
     });
 
     await this.dependencies.eventPublisher.publish({
-      event_type: PhaseCEventType.SURFACE_DRIFT_ALERT,
+      event_type: RuntimeGovernanceEventType.SURFACE_DRIFT_ALERT,
       entity_type: "surface_drift_alert",
       entity_id: alert.alert_id,
       workspace_id: alert.workspace_id,
@@ -263,7 +263,7 @@ export class SurfaceDriftService {
   ): Promise<void> {
     try {
       await this.dependencies.eventPublisher.publish({
-        event_type: PhaseCEventType.SURFACE_DRIFT_LEASE_RELEASE_FAILED,
+        event_type: RuntimeGovernanceEventType.SURFACE_DRIFT_LEASE_RELEASE_FAILED,
         entity_type: "surface_drift_lease",
         entity_id: lease.lease_id,
         workspace_id: lease.workspace_id,

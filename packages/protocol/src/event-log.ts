@@ -1,20 +1,20 @@
 import { z } from "zod";
-import { Phase05EventTypeSchema } from "./events/phase-0.5.js";
-import { PhaseA1EventTypeSchema } from "./events/phase-a1.js";
-import { PhaseA3EventTypeSchema } from "./events/phase-a3.js";
-import { PhaseBEventTypeSchema } from "./events/phase-b.js";
-import { PhaseCEventTypeSchema } from "./events/phase-c.js";
-import { PhaseCExtensionEventTypeSchema } from "./events/phase-c-extension.js";
-import { Phase1BEventTypeSchema } from "./events/phase-1b.js";
-import { Phase2AEventTypeSchema } from "./events/phase-2a.js";
-import { Phase2BEventTypeSchema } from "./events/phase-2b.js";
-import { Phase3AEventTypeSchema } from "./events/phase-3a.js";
-import { Phase3BEventTypeSchema } from "./events/phase-3b.js";
-import { Phase3CEventTypeSchema } from "./events/phase-3c.js";
-import { Phase4AEventTypeSchema } from "./events/phase-4a.js";
-import { Phase4BEventTypeSchema } from "./events/phase-4b.js";
-import { Phase4CEventTypeSchema } from "./events/phase-4c.js";
-import { Phase5EventTypeSchema } from "./events/phase-5.js";
+import { SignalEventTypeSchema } from "./events/signal.js";
+import { ToolWorkerEventTypeSchema } from "./events/tool-worker.js";
+import { WorkerRuntimeEventTypeSchema } from "./events/worker-runtime.js";
+import { ObligationTrustNarrativeEventTypeSchema } from "./events/obligation-trust-narrative.js";
+import { RuntimeGovernanceEventTypeSchema } from "./events/runtime-governance.js";
+import { ComputeRecallGardenEventTypeSchema } from "./events/compute-recall-garden.js";
+import { MemoryGovernanceEventTypeSchema } from "./events/memory-governance.js";
+import { SlotEventTypeSchema } from "./events/slot.js";
+import { SurfaceEventTypeSchema } from "./events/surface.js";
+import { RecallContextEventTypeSchema } from "./events/recall-context.js";
+import { GreenGovernanceEventTypeSchema } from "./events/green-governance.js";
+import { BudgetEventTypeSchema } from "./events/budget.js";
+import { GardenEventTypeSchema } from "./events/garden.js";
+import { GraphAuditorEventTypeSchema } from "./events/graph-auditor.js";
+import { ProjectMappingEventTypeSchema } from "./events/project-mapping.js";
+import { FileApprovalEventTypeSchema } from "./events/file-approval.js";
 import { SoulGardenEventLogOrphanDetectedEventTypeSchema } from "./events/event-log-orphan.js";
 import { StreamingEventTypeSchema } from "./events/message-delta.js";
 import { TrustStateEventTypeSchema } from "./soul/trust-state.js";
@@ -24,7 +24,7 @@ import {
   NonNegativeIntSchema
 } from "./schema-primitives.js";
 
-const phase0EventTypeValues = [
+const workspaceRunEventTypeValues = [
   "workspace.created",
   "workspace.deleted",
   "workspace.engine_binding.updated",
@@ -37,7 +37,7 @@ const phase0EventTypeValues = [
   "engine.response.received"
 ] as const;
 
-export const Phase0EventType = {
+export const WorkspaceRunEventType = {
   WORKSPACE_CREATED: "workspace.created",
   WORKSPACE_DELETED: "workspace.deleted",
   WORKSPACE_ENGINE_BINDING_UPDATED: "workspace.engine_binding.updated",
@@ -50,25 +50,25 @@ export const Phase0EventType = {
   ENGINE_RESPONSE_RECEIVED: "engine.response.received"
 } as const;
 
-export const Phase0EventTypeSchema = z.enum(phase0EventTypeValues);
+export const WorkspaceRunEventTypeSchema = z.enum(workspaceRunEventTypeValues);
 export const EventTypeSchema = z.union([
-  Phase0EventTypeSchema,
-  Phase05EventTypeSchema,
-  PhaseA1EventTypeSchema,
-  PhaseA3EventTypeSchema,
-  PhaseBEventTypeSchema,
-  PhaseCEventTypeSchema,
-  PhaseCExtensionEventTypeSchema,
-  Phase1BEventTypeSchema,
-  Phase2AEventTypeSchema,
-  Phase2BEventTypeSchema,
-  Phase3AEventTypeSchema,
-  Phase3BEventTypeSchema,
-  Phase3CEventTypeSchema,
-  Phase4AEventTypeSchema,
-  Phase4BEventTypeSchema,
-  Phase4CEventTypeSchema,
-  Phase5EventTypeSchema,
+  WorkspaceRunEventTypeSchema,
+  SignalEventTypeSchema,
+  ToolWorkerEventTypeSchema,
+  WorkerRuntimeEventTypeSchema,
+  ObligationTrustNarrativeEventTypeSchema,
+  RuntimeGovernanceEventTypeSchema,
+  ComputeRecallGardenEventTypeSchema,
+  MemoryGovernanceEventTypeSchema,
+  SlotEventTypeSchema,
+  SurfaceEventTypeSchema,
+  RecallContextEventTypeSchema,
+  GreenGovernanceEventTypeSchema,
+  BudgetEventTypeSchema,
+  GardenEventTypeSchema,
+  GraphAuditorEventTypeSchema,
+  ProjectMappingEventTypeSchema,
+  FileApprovalEventTypeSchema,
   SoulGardenEventLogOrphanDetectedEventTypeSchema,
   TrustStateEventTypeSchema,
   StreamingEventTypeSchema
@@ -77,7 +77,7 @@ export const EventTypeSchema = z.union([
 /**
  * EventLogEntry validates the envelope shape only — event_type is validated against the full
  * union, but payload_json is stored as an opaque record. Payload structure is intentionally
- * validated by each phase's parse helpers (e.g. parsePhase4BEventPayload) at the consumer
+ * validated by each phase's parse helpers (e.g. parseGraphAuditorEventPayload) at the consumer
  * boundary, not here. Adding discriminated union validation here would couple this schema to
  * every event phase and violate the open/closed principle.
  */
@@ -94,6 +94,6 @@ export const EventLogEntrySchema = z.object({
   created_at: IsoDatetimeStringSchema
 }).readonly();
 
-export type Phase0EventType = z.infer<typeof Phase0EventTypeSchema>;
+export type WorkspaceRunEventType = z.infer<typeof WorkspaceRunEventTypeSchema>;
 export type EventType = z.infer<typeof EventTypeSchema>;
 export type EventLogEntry = z.infer<typeof EventLogEntrySchema>;

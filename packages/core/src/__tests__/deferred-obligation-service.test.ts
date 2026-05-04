@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { PhaseBEventType, type DeferredObligation, type EventLogEntry } from "@do-soul/alaya-protocol";
+import { ObligationTrustNarrativeEventType, type DeferredObligation, type EventLogEntry } from "@do-soul/alaya-protocol";
 import { CoreError } from "../errors.js";
 import {
   DeferredObligationService,
@@ -50,7 +50,7 @@ describe("DeferredObligationService", () => {
     });
     expect(harness.events).toHaveLength(1);
     expect(harness.events[0]).toMatchObject({
-      event_type: PhaseBEventType.OBLIGATION_CREATED,
+      event_type: ObligationTrustNarrativeEventType.OBLIGATION_CREATED,
       entity_type: "deferred_obligation",
       entity_id: "obligation-1",
       workspace_id: "workspace-1",
@@ -81,7 +81,7 @@ describe("DeferredObligationService", () => {
     });
     expect(harness.events).toHaveLength(1);
     expect(harness.events[0]).toMatchObject({
-      event_type: PhaseBEventType.OBLIGATION_FULFILLED,
+      event_type: ObligationTrustNarrativeEventType.OBLIGATION_FULFILLED,
       entity_type: "deferred_obligation",
       entity_id: "obligation-1",
       payload_json: {
@@ -105,7 +105,7 @@ describe("DeferredObligationService", () => {
     expect(expired.fulfilled_at).toBeUndefined();
     expect(harness.events).toHaveLength(1);
     expect(harness.events[0]).toMatchObject({
-      event_type: PhaseBEventType.OBLIGATION_EXPIRED,
+      event_type: ObligationTrustNarrativeEventType.OBLIGATION_EXPIRED,
       entity_type: "deferred_obligation",
       entity_id: "obligation-1",
       payload_json: {

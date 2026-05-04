@@ -1,7 +1,7 @@
 import {
   type ActivationCandidate,
   ComputeProviderRoutedPayloadSchema,
-  PhaseCEventType,
+  RuntimeGovernanceEventType,
   type ComputeRoutingDecision,
   type EventLogEntry,
   type ExecutionStanceModelRef,
@@ -56,7 +56,7 @@ export function createComputeRoutingExecutionStanceResolver(
       });
 
       await deps.eventLogWriter.append({
-        event_type: PhaseCEventType.COMPUTE_PROVIDER_ROUTED,
+        event_type: RuntimeGovernanceEventType.COMPUTE_PROVIDER_ROUTED,
         entity_type: "compute_provider_route",
         entity_id: decision.decision_id,
         workspace_id: params.workspaceId,

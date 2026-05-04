@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import {
   BootstrappingPathsPlantedPayloadSchema,
   EngineBindingInputSchema,
-  PhaseCEventType,
-  Phase0EventType,
+  RuntimeGovernanceEventType,
+  WorkspaceRunEventType,
   WorkspaceCreatedPayloadSchema,
   WorkspaceEngineConfigSchema,
   WorkspaceEngineBindingUpdatedPayloadSchema,
@@ -194,7 +194,7 @@ export class WorkspaceService {
 
     await this.dependencies.eventPublisher.publishWithMutation(
       {
-        event_type: Phase0EventType.WORKSPACE_DELETED,
+        event_type: WorkspaceRunEventType.WORKSPACE_DELETED,
         entity_type: "workspace",
         entity_id: workspace.workspace_id,
         workspace_id: workspace.workspace_id,
@@ -219,7 +219,7 @@ export class WorkspaceService {
 
     return await this.dependencies.eventPublisher.publishWithMutation(
       {
-        event_type: Phase0EventType.WORKSPACE_DEFAULT_ENGINE_CLASS_UPDATED,
+        event_type: WorkspaceRunEventType.WORKSPACE_DEFAULT_ENGINE_CLASS_UPDATED,
         entity_type: "workspace",
         entity_id: workspace.workspace_id,
         workspace_id: workspace.workspace_id,
@@ -256,7 +256,7 @@ export class WorkspaceService {
     return await this.dependencies.eventPublisher.publishManyWithMutation(
       [
         {
-          event_type: Phase0EventType.WORKSPACE_ENGINE_BINDING_UPDATED,
+          event_type: WorkspaceRunEventType.WORKSPACE_ENGINE_BINDING_UPDATED,
           entity_type: "workspace",
           entity_id: workspace.workspace_id,
           workspace_id: workspace.workspace_id,
@@ -272,7 +272,7 @@ export class WorkspaceService {
           })
         },
         {
-          event_type: Phase0EventType.WORKSPACE_DEFAULT_ENGINE_CLASS_UPDATED,
+          event_type: WorkspaceRunEventType.WORKSPACE_DEFAULT_ENGINE_CLASS_UPDATED,
           entity_type: "workspace",
           entity_id: workspace.workspace_id,
           workspace_id: workspace.workspace_id,
@@ -329,7 +329,7 @@ export class WorkspaceService {
     readonly workspaceKind: Workspace["workspace_kind"];
   }) {
     return {
-      event_type: Phase0EventType.WORKSPACE_CREATED,
+      event_type: WorkspaceRunEventType.WORKSPACE_CREATED,
       entity_type: "workspace",
       entity_id: input.workspaceId,
       workspace_id: input.workspaceId,
@@ -346,7 +346,7 @@ export class WorkspaceService {
 
   private buildBootstrappingPathsPlantedEvent(record: Readonly<BootstrappingRecord>) {
     return {
-      event_type: PhaseCEventType.BOOTSTRAPPING_PATHS_PLANTED,
+      event_type: RuntimeGovernanceEventType.BOOTSTRAPPING_PATHS_PLANTED,
       entity_type: "workspace",
       entity_id: record.workspace_id,
       workspace_id: record.workspace_id,

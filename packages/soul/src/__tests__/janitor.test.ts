@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { GardenRole, GardenTaskKind, GardenTier, Phase4AEventType, type GardenTaskDescriptor } from "@do-soul/alaya-protocol";
+import { GardenRole, GardenTaskKind, GardenTier, GardenEventType, type GardenTaskDescriptor } from "@do-soul/alaya-protocol";
 import {
   JANITOR_CONSTANTS,
   Janitor,
@@ -116,14 +116,14 @@ describe("Janitor", () => {
     expect(eventLog.append).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        event_type: Phase4AEventType.SOUL_GARDEN_TASK_DISPATCHED,
+        event_type: GardenEventType.SOUL_GARDEN_TASK_DISPATCHED,
         entity_id: "task-janitor"
       })
     );
     expect(eventLog.append).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        event_type: Phase4AEventType.SOUL_GARDEN_TASK_COMPLETED,
+        event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
         entity_id: "task-janitor"
       })
     );

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   CrossCuttingState,
-  Phase2BEventType,
+  SurfaceEventType,
   SurfaceStatus,
   WorkspaceKind,
   WorkspaceState,
@@ -105,7 +105,7 @@ describe("SqliteCrossCuttingPermissionRepo", () => {
     const { database, repo } = await createRepo();
 
     const result = await repo.createWithEvent(createPermission(), PERMISSION_ID_1, {
-      event_type: Phase2BEventType.SOUL_CROSS_CUTTING_STATE_CHANGED,
+      event_type: SurfaceEventType.SOUL_CROSS_CUTTING_STATE_CHANGED,
       entity_type: "cross_cutting_permission",
       entity_id: PERMISSION_ID_1,
       workspace_id: "workspace-1",
@@ -124,7 +124,7 @@ describe("SqliteCrossCuttingPermissionRepo", () => {
     });
 
     expect(result.record.permission_id).toBe(PERMISSION_ID_1);
-    expect(result.event.event_type).toBe(Phase2BEventType.SOUL_CROSS_CUTTING_STATE_CHANGED);
+    expect(result.event.event_type).toBe(SurfaceEventType.SOUL_CROSS_CUTTING_STATE_CHANGED);
     expect(result.event.revision).toBe(0);
 
     const eventCount = database.connection
@@ -138,7 +138,7 @@ describe("SqliteCrossCuttingPermissionRepo", () => {
     const { repo } = await createRepo();
 
     const created = await repo.createWithEvent(createPermission(), PERMISSION_ID_1, {
-      event_type: Phase2BEventType.SOUL_CROSS_CUTTING_STATE_CHANGED,
+      event_type: SurfaceEventType.SOUL_CROSS_CUTTING_STATE_CHANGED,
       entity_type: "cross_cutting_permission",
       entity_id: PERMISSION_ID_1,
       workspace_id: "workspace-1",
@@ -162,7 +162,7 @@ describe("SqliteCrossCuttingPermissionRepo", () => {
       ["surface://main"],
       "2026-03-22T01:00:00.000Z",
       {
-        event_type: Phase2BEventType.SOUL_CROSS_CUTTING_STATE_CHANGED,
+        event_type: SurfaceEventType.SOUL_CROSS_CUTTING_STATE_CHANGED,
         entity_type: "cross_cutting_permission",
         entity_id: PERMISSION_ID_1,
         workspace_id: "workspace-1",
@@ -192,7 +192,7 @@ describe("SqliteCrossCuttingPermissionRepo", () => {
 
     await expect(
       repo.createWithEvent(createPermission({ object_id: "claim://object-1" }), PERMISSION_ID_2, {
-        event_type: Phase2BEventType.SOUL_CROSS_CUTTING_STATE_CHANGED,
+        event_type: SurfaceEventType.SOUL_CROSS_CUTTING_STATE_CHANGED,
         entity_type: "cross_cutting_permission",
         entity_id: PERMISSION_ID_2,
         workspace_id: "workspace-1",

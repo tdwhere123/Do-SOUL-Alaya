@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   ClaimLifecycleState,
   DYNAMICS_CONSTANTS,
-  Phase1BEventType,
+  MemoryGovernanceEventType,
   PromotionState,
   ProposalOptionKind,
   ProposalResolutionState,
@@ -184,11 +184,11 @@ export class ProposalService {
       last_updated_at: timestamp
     });
 
-    ensurePhase1BProposal(proposal);
+    ensureMemoryGovernanceProposal(proposal);
 
     const revision = await this.getNextRevision("proposal", proposal.proposal_id);
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase1BEventType.SOUL_PROPOSAL_CREATED,
+      event_type: MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED,
       entity_type: "proposal",
       entity_id: proposal.proposal_id,
       workspace_id: synthesis.workspace_id,
@@ -228,7 +228,7 @@ export class ProposalService {
     );
 
     const reviewCreated = await this.dependencies.eventLogRepo.append({
-      event_type: Phase1BEventType.SOUL_REVIEW_CREATED,
+      event_type: MemoryGovernanceEventType.SOUL_REVIEW_CREATED,
       entity_type: "proposal",
       entity_id: context.proposal.proposal_id,
       workspace_id: context.synthesis.workspace_id,
@@ -259,7 +259,7 @@ export class ProposalService {
     }
 
     const reviewCompleted = await this.dependencies.eventLogRepo.append({
-      event_type: Phase1BEventType.SOUL_REVIEW_COMPLETED,
+      event_type: MemoryGovernanceEventType.SOUL_REVIEW_COMPLETED,
       entity_type: "proposal",
       entity_id: context.proposal.proposal_id,
       workspace_id: context.synthesis.workspace_id,
@@ -281,7 +281,7 @@ export class ProposalService {
     });
 
     const resolved = await this.dependencies.eventLogRepo.append({
-      event_type: Phase1BEventType.SOUL_PROPOSAL_RESOLVED,
+      event_type: MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED,
       entity_type: "proposal",
       entity_id: context.proposal.proposal_id,
       workspace_id: context.synthesis.workspace_id,
@@ -336,7 +336,7 @@ export class ProposalService {
     }
 
     ensurePendingProposal(proposal);
-    ensurePhase1BProposal(proposal);
+    ensureMemoryGovernanceProposal(proposal);
 
     const synthesisId = parseReferenceId(proposal.derived_from, "derived_from");
     const claimDraftId = parseReferenceId(proposal.recommended_option_id, "recommended_option_id");
@@ -539,7 +539,7 @@ function ensureSharedWorkspace(synthesisWorkspaceId: string, claimWorkspaceId: s
   }
 }
 
-function ensurePhase1BProposal(proposal: Proposal): void {
+function ensureMemoryGovernanceProposal(proposal: Proposal): void {
   if (proposal.dossier_ref !== null) {
     throw new CoreError("VALIDATION", "dossier_ref must be null in Phase 1B");
   }

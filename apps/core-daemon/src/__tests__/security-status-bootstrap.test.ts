@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { PhaseCEventType, type EventLogEntry } from "@do-soul/alaya-protocol";
+import { RuntimeGovernanceEventType, type EventLogEntry } from "@do-soul/alaya-protocol";
 import { EventPublisherPropagationError } from "@do-soul/alaya-core";
 import { withSecurityStatusWorkspaceService } from "../security-status-bootstrap.js";
 
 function createPropagationError(): EventPublisherPropagationError {
   const entry: EventLogEntry = {
     event_id: "event-1",
-    event_type: PhaseCEventType.SECURITY_PASSTHROUGH_STATUS_CHANGED,
+    event_type: RuntimeGovernanceEventType.SECURITY_PASSTHROUGH_STATUS_CHANGED,
     entity_type: "workspace",
     entity_id: "workspace-1",
     workspace_id: "workspace-1",

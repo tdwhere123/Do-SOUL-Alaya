@@ -4,7 +4,7 @@ import {
   GardenTaskKind,
   GardenTier,
   HealthEventKind,
-  Phase4AEventType,
+  GardenEventType,
   type GardenTaskDescriptor
 } from "@do-soul/alaya-protocol";
 import * as gardenExports from "../garden/index.js";
@@ -308,14 +308,14 @@ describe("Librarian", () => {
     expect(eventLog.append).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        event_type: Phase4AEventType.SOUL_GARDEN_TASK_DISPATCHED,
+        event_type: GardenEventType.SOUL_GARDEN_TASK_DISPATCHED,
         entity_id: "task-librarian"
       })
     );
     expect(eventLog.append).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        event_type: Phase4AEventType.SOUL_GARDEN_TASK_COMPLETED,
+        event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
         entity_id: "task-librarian"
       })
     );

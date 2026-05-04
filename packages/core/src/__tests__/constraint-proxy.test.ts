@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { PhaseBEventType, type DeferredObligation, type EventLogEntry } from "@do-soul/alaya-protocol";
+import { ObligationTrustNarrativeEventType, type DeferredObligation, type EventLogEntry } from "@do-soul/alaya-protocol";
 import { ConstraintProxy } from "../constraint-proxy.js";
 import type { EventPublisher } from "../event-publisher.js";
 
@@ -69,7 +69,7 @@ describe("ConstraintProxy", () => {
     });
     expect(publish).toHaveBeenCalledTimes(1);
     expect(publishedEvents[0]).toMatchObject({
-      event_type: PhaseBEventType.OBLIGATION_VIOLATION_BLOCKED,
+      event_type: ObligationTrustNarrativeEventType.OBLIGATION_VIOLATION_BLOCKED,
       entity_type: "run",
       entity_id: "run-1",
       workspace_id: "workspace-1",

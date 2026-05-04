@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { Phase0EventType, RunMode, RunState, WorkspaceKind, WorkspaceState } from "@do-soul/alaya-protocol";
+import { WorkspaceRunEventType, RunMode, RunState, WorkspaceKind, WorkspaceState } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../db.js";
 import { SqliteEventLogRepo } from "../repos/event-log-repo.js";
 import { SqliteRunRepo } from "../repos/run-repo.js";
@@ -44,7 +44,7 @@ describe("storage integration flow", () => {
       current_surface_id: null
     });
     await eventLogRepo.append({
-      event_type: Phase0EventType.RUN_CREATED,
+      event_type: WorkspaceRunEventType.RUN_CREATED,
       entity_type: "run",
       entity_id: run.run_id,
       workspace_id: workspace.workspace_id,
@@ -70,7 +70,7 @@ describe("storage integration flow", () => {
     const events = await eventLogRepo.queryByRun("run_flow");
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
-      event_type: Phase0EventType.RUN_CREATED,
+      event_type: WorkspaceRunEventType.RUN_CREATED,
       entity_id: "run_flow",
       workspace_id: "ws_flow"
     });

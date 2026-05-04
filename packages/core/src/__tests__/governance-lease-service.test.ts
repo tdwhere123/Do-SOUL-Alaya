@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   GovernanceLeasePiercingConditionKind,
-  Phase3BEventType,
+  GreenGovernanceEventType,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
 import { GovernanceLeaseService } from "../governance-lease-service.js";
@@ -45,7 +45,7 @@ describe("GovernanceLeaseService", () => {
     await expect(service.getActive("run-1")).resolves.toEqual(lease);
     expect(appendSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase3BEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED,
+        event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED,
         entity_type: "governance_lease",
         entity_id: lease.runtime_id,
         workspace_id: "workspace-1",
@@ -79,7 +79,7 @@ describe("GovernanceLeaseService", () => {
     await expect(service.isHeld("run-1")).resolves.toBe(false);
     expect(appendSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase3BEventType.SOUL_GOVERNANCE_LEASE_RELEASED,
+        event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_RELEASED,
         entity_type: "governance_lease",
         run_id: "run-1",
         workspace_id: "workspace-1",
@@ -142,7 +142,7 @@ describe("GovernanceLeaseService", () => {
     await expect(service.getActive("run-1")).resolves.toBeNull();
     expect(appendSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase3BEventType.SOUL_GOVERNANCE_LEASE_PIERCED,
+        event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_PIERCED,
         entity_type: "governance_lease",
         workspace_id: "workspace-1",
         run_id: "run-1",
@@ -277,7 +277,7 @@ describe("GovernanceLeaseService", () => {
       eventLogRepo: createEventLogRepo({
         queryByRun: vi.fn(async () => [
           createEventLogEntry({
-            event_type: Phase3BEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED,
+            event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED,
             entity_type: "governance_lease",
             entity_id: "lease-bad",
             workspace_id: "workspace-1",
@@ -305,7 +305,7 @@ describe("GovernanceLeaseService", () => {
     const queryDeferred = createDeferred<readonly EventLogEntry[]>();
     const staleEvents = Object.freeze([
       createEventLogEntry({
-        event_type: Phase3BEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED,
+        event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED,
         entity_type: "governance_lease",
         entity_id: "99999999-9999-4999-8999-999999999999",
         workspace_id: "workspace-1",

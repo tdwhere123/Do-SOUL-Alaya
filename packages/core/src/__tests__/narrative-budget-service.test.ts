@@ -1,4 +1,4 @@
-import { NarrativeBudgetConfigSchema, PhaseBEventType } from "@do-soul/alaya-protocol";
+import { NarrativeBudgetConfigSchema, ObligationTrustNarrativeEventType } from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
 import { NarrativeBudgetService } from "../narrative-budget-service.js";
 
@@ -60,7 +60,7 @@ describe("NarrativeBudgetService", () => {
     expect(result.withinLimits).toBe(false);
     expect(publish).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: PhaseBEventType.NARRATIVE_BUDGET_EXCEEDED,
+        event_type: ObligationTrustNarrativeEventType.NARRATIVE_BUDGET_EXCEEDED,
         entity_type: "run",
         entity_id: "run-1",
         workspace_id: "workspace-1",
@@ -102,7 +102,7 @@ describe("NarrativeBudgetService", () => {
     expect(result.withinLimits).toBe(false);
     expect(publish).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: PhaseBEventType.NARRATIVE_BUDGET_EXCEEDED,
+        event_type: ObligationTrustNarrativeEventType.NARRATIVE_BUDGET_EXCEEDED,
         payload_json: expect.objectContaining({
           current_count: 9,
           max_count: 8
@@ -165,7 +165,7 @@ describe("NarrativeBudgetService", () => {
 
     expect(publish).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: PhaseBEventType.NARRATIVE_CONSOLIDATION_TRIGGERED,
+        event_type: ObligationTrustNarrativeEventType.NARRATIVE_CONSOLIDATION_TRIGGERED,
         entity_type: "run",
         entity_id: "run-1",
         workspace_id: "workspace-1",
@@ -235,7 +235,7 @@ describe("NarrativeBudgetService", () => {
     expect(publish).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        event_type: PhaseBEventType.NARRATIVE_CONSOLIDATION_TRIGGERED,
+        event_type: ObligationTrustNarrativeEventType.NARRATIVE_CONSOLIDATION_TRIGGERED,
         payload_json: expect.objectContaining({
           digest_count_before: 6
         })
