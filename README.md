@@ -8,357 +8,423 @@
 
 # Do-SOUL Alaya
 
-### *The local-first memory plane for CLI coding agents.*
+### *A local-first memory plane for CLI coding agents.*
 
-Codex, Claude Code, or any MCP-compatible agent attach over MCP and get
-durable, evidence-backed memory across sessions. No chat UI. No telemetry.
-No cloud. Just a SQLite file you own.
-
-[![status](https://img.shields.io/badge/status-v0.1.0-blue?style=flat-square)](#status--roadmap)
+[![status](https://img.shields.io/badge/status-v0.1.0-blue?style=flat-square)](#where-this-is-going)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-1917%20passing-success?style=flat-square)](#status--roadmap)
+[![tests](https://img.shields.io/badge/tests-1917%20passing-success?style=flat-square)](#where-this-is-going)
 [![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#quickstart)
 [![pnpm](https://img.shields.io/badge/pnpm-%E2%89%A59-F69220?style=flat-square&logo=pnpm&logoColor=white)](#quickstart)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](#architecture)
-[![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57?style=flat-square&logo=sqlite&logoColor=white)](#architecture)
-[![MCP](https://img.shields.io/badge/MCP-stdio-7B61FF?style=flat-square)](#mcp-tool-surface)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](#architecture-at-a-glance)
+[![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57?style=flat-square&logo=sqlite&logoColor=white)](#architecture-at-a-glance)
+[![MCP](https://img.shields.io/badge/MCP-stdio-7B61FF?style=flat-square)](#surfaces-mcp--cli)
 
+[**The problem**](#the-problem) ·
+[**Design grammar**](#how-i-think-about-memory) ·
+[**Memory's lifecycle**](#memorys-lifecycle) ·
+[**Architecture**](#architecture-at-a-glance) ·
 [**Quickstart**](#quickstart) ·
-[**What it is**](#what-alaya-is) ·
-[**vs alternatives**](#alaya-vs-alternatives) ·
-[**Architecture**](#architecture) ·
-[**Roadmap**](#status--roadmap)
+[**Roadmap**](#where-this-is-going)
 
 </div>
 
 ---
 
-> **The problem.** A CLI coding agent forgets everything when the session
-> ends. Two agents on the same project don't share what they learned.
-> Pasting context manually scales to roughly one project before it stops
-> working.
->
-> **What Alaya does.** It runs next to your agent as a *memory plane*:
-> durable capsules with evidence, governance gates, recall over multiple
-> paths, and a Garden of background roles that audits and compacts memory
-> while you work. The agent proposes; Alaya decides what becomes truth.
+## The problem
 
-This repository is a **port** of the memory subsystem from the sibling
-project [`do-what-new`](https://github.com/tdwhere123) — frozen at
-`vendor/do-what-new-snapshot/`. v0.1.0 is the first release where the
-ported subsystem is wired end-to-end and exposed through CLI + MCP.
+A CLI coding agent's memory is a session: it forgets when the
+terminal closes. Two agents on the same project don't share what
+they learned. Pasting context manually scales to about one project
+before it stops working.
 
----
+You can patch this with a vector database, but a vector DB answers
+*"what's similar to this string"* — not *"what is true about this
+project"*. Similarity is not truth. Embedding is not evidence. A
+recall that ranks by cosine distance can be fluent, confident, and
+wrong, and the agent will follow it.
 
-## Why Alaya
+Memory is not a single problem. It has phases — **perception,
+governance, durability, recall, receipt, maintenance** — and each
+phase has its own failure mode. If perception writes durable, the
+agent can hallucinate truth in. If recall trusts embedding over
+evidence, similarity defeats fact. If maintenance touches durable
+directly, audit dies. **Alaya is the discipline applied to each
+phase separately, with one source-of-truth invariant tying them
+together.**
 
-- **Local-first by design.** A single SQLite file on your disk, in a format
-  `sqlite3` opens. No SaaS, no auth dance, no cloud round-trip on the recall
-  path.
-- **Evidence-gated, not embedding-gated.** Durable memory needs a source.
-  Embedding is a recall *supplement*, never a truth oracle — if it disagrees
-  with evidence, evidence wins.
-- **Agent proposes, Alaya decides.** The LLM emits *candidates*; governance
-  (Promotion Gate, HITL when needed) decides what becomes durable. There is
-  no path that lets the agent silently overwrite truth.
-- **MCP and CLI, not GUI.** 8 `soul.*` MCP tools and 11 CLI verbs over the
-  same runtime. Attach over MCP, script over CLI, audit everything in
-  between.
-- **Test coverage that is actually load-bearing.** 1917 tests across 248
-  files. Every fix in the v0.1.0 system review went through atomic
-  re-review before merging.
-- **Port-first, not vibe-rewrite.** The hard parts — governance, EventLog,
-  Garden, recall — are ported byte-for-byte from a memory subsystem that
-  has been hardening upstream for cycles. We did not re-derive what
-  already worked.
+It runs next to your agent — over MCP for attach, over a CLI for
+scripting — and stores everything in one SQLite file you own. No
+chat UI. No telemetry. No cloud round-trip on the recall path.
 
 ---
 
-## Alaya vs alternatives
+## How I think about memory
 
-|  | Alaya | Vector DB (chroma / qdrant / pgvector) | RAG framework (langchain / llamaindex memory) | Chat history / context files |
-|---|---|---|---|---|
-| Truth model | Evidence-gated, governed | Similarity-only | Pipeline-defined | Flat — no model |
-| Who decides what is durable | Governance gate | Whoever writes the index | Whoever calls `.add()` | Whoever last edited the file |
-| Cross-session continuity | Yes (EventLog + capsules) | Depends on caller | Depends on caller | Manual paste |
-| Agent integration | MCP stdio + CLI | Library SDKs | Library SDKs | None |
-| Auditability | EventLog + per-mutation audit | Index logs (varies) | Tracing (varies) | `git log`, if you commit them |
-| Storage | SQLite (one file you own) | Server / managed cluster | Pluggable (often hosted) | Plain files |
-| GUI dependency | None — no chat UI | Optional dashboard | Often a notebook / app | None |
-| Learning curve | High invariants, low ops | Low invariants, low ops | Medium invariants, varies | Zero |
+Two coordinates organise the whole system. They are the design
+grammar — every section below refers back to them.
 
-Alaya is the right tool when you want **durable, defended memory** for an
-agent — not when you want fast similarity search over documents. Use a
-vector DB for the latter; you can compose the two.
+**Three layers** — what the runtime actually moves through:
 
----
+| Layer | What lives here | Examples |
+|---|---|---|
+| **Memory Ontology** | Durable semantic truth | `EvidenceCapsule`, `MemoryEntry`, `SynthesisCapsule`, `ClaimForm` |
+| **Structure Registry** | Routing, binding, arbitration, visibility | `PathRelation`, `ConflictMatrix`, `ManifestationDecision` |
+| **Runtime Control** | Per-turn assembly, gates, projection | `RecallQuery`, `ActivationCandidate`, `ContextPack`, `TrustSummary` |
 
-## Table of contents
+**Four axes** — where truth lives:
 
-- [Why Alaya](#why-alaya)
-- [Alaya vs alternatives](#alaya-vs-alternatives)
-- [What Alaya is](#what-alaya-is)
-- [What Alaya is *not*](#what-alaya-is-not)
-- [Audience](#audience)
-- [Why local-first](#why-local-first)
-- [Architecture](#architecture)
-- [MCP tool surface](#mcp-tool-surface)
-- [CLI commands](#cli-commands)
-- [Quickstart](#quickstart)
-- [Project layout](#project-layout)
-- [Status & roadmap](#status--roadmap)
-- [How this codebase came to be](#how-this-codebase-came-to-be)
-- [Contributing](#contributing)
-- [Acknowledgments](#acknowledgments)
-- [License](#license)
+- **Object** — *what* is remembered (faceted stable units; time, situation, risk, obligation are *facets* of objects, not external labels).
+- **Path** — learnable conditional relations between objects. *Recall, prediction, and reminder are runtime manifestations of paths, not independent subsystems.*
+- **Evidence** — what supports a claim and how that support decays (object evidence + path plasticity: reinforcement, weakening, redirection, retirement).
+- **Governance** — who wins, what conflicts, what needs review, what becomes stale; also the maximum effect a learned path may exert in a single turn.
+
+**The single invariant that keeps memory from rotting:**
+
+> An object, index, or state is source-of-truth on **exactly one** axis.
+> Other axes may reference it, but never silently replace it.
+
+This is the rule that lets recall (Path axis) reach into evidence
+(Evidence axis) and ontology (Object axis) without quietly mutating
+either. Every phase below honours it explicitly — and the places
+where v0.1 doesn't yet honour it as cleanly as it could are called
+out in the [Roadmap](#where-this-is-going).
 
 ---
 
-## What Alaya is
+## Memory's lifecycle
 
-A *memory plane* that sits next to a CLI coding agent and owns its
-long-lived memory: project facts, decisions, evidence, the relationships
-between objects. Two ideas drive every design choice.
-
-**Truth versus view.** Memory ontology is durable truth. Anything you can
-query — recall results, projections, the Memory Inspector view — is a
-view, not truth. Views can drift and be wrong; the underlying capsule is
-what anyone has to defend.
-
-**Agent proposes; Alaya decides.** The connected agent (LLM) emits
-*candidates*: "this fact should be remembered", "this evidence updates
-that capsule". Candidates enter governance — Promotion Gate, HITL when
-needed — and only become durable memory after the gate accepts them.
-There is no "auto-write whatever the agent said" path.
-
-What ships in v0.1.0:
-
-- An **evidence-backed memory ontology** — `MemoryEntry`, `EvidenceCapsule`,
-  `SynthesisCapsule`, `ClaimForm` — gated for durable truth.
-- **Multi-path recall** — lexical, FTS, path-aware, embedding (optional
-  supplement).
-- **Governed promotion** — Promotion Gate, HITL, Green status state machine.
-- **Session trust** — the *delivered ≠ used* invariant tracked end-to-end.
-- **Garden self-maintenance** — Auditor / Janitor / Librarian + Scheduler,
-  fire-and-forget.
-- **Profile, secret, import / export, portable backup** operations.
-- An **MCP server** (`alaya mcp stdio`) exposing 8 `soul.*` tools, with a
-  CLI fallback for the same surface.
-- A **Memory Inspector** SPA (`alaya inspect`) for memory tooling — *not*
-  an agent surface.
-
-## What Alaya is *not*
-
-Stated bluntly so you can decide quickly whether Alaya fits.
-
-- **Not a chat product.** You don't talk to Alaya. The agent does.
-- **Not a conversation TUI.** No prompt loop, no history viewer.
-- **Not a vector database.** Embedding is a recall supplement; it never
-  decides durable truth. Evidence wins.
-- **Not an agent autopilot.** Alaya never runs the agent, never generates
-  code, never speaks to a model on its own. Garden is bounded background
-  maintenance, not autonomous reasoning.
-- **Not for end users.** See the next section.
-
-## Audience
-
-Alaya is built for **engineers running a CLI coding agent**:
-
-- You drive Codex, Claude Code, or a similar agent from a terminal.
-- You write code or operate a system where the agent's memory across
-  sessions is a real bottleneck.
-- You're comfortable with `pnpm`, Node 20+, SQLite, MCP transport.
-
-Per project invariant §21a (`docs/handbook/invariants.md`):
-
-> Public-facing copy (README, marketing surfaces, leaderboard disclosure,
-> blog posts) must describe Alaya as a memory plane for CLI agents
-> (Codex / Claude Code / similar) and must not invite non-engineering
-> users to install or operate Alaya.
-
-If a non-engineer in your life is asking about Alaya, the right answer is
-"this is not for you yet" — not a workaround. A separate consumer-facing
-product, or a charter amendment, is required before that audience.
-
-## Why local-first
-
-The memory plane is one SQLite file (WAL-mode, busy-timeout tuned, ~57
-ordered migrations).
-
-- **You own the data.** It is on your disk, in a format you can open with
-  `sqlite3` and inspect by hand. No SaaS lock-in.
-- **It works offline.** Recall, propose, and governance need no network.
-  The optional embedding supplement is configurable and off by default in
-  v0.1.0.
-- **It is portable.** `alaya backup` / `export` / `import` produce signed
-  bundles you can move between machines.
-- **It is auditable.** Governance, configuration, import / export, backup,
-  and session-trust changes all write to the EventLog — append-only,
-  the source of truth for state replay.
-
-## Architecture
-
-### Runtime data flow
+Six phases. Each phase is an answer to a specific failure mode I've
+seen in agent-memory systems that ignore the design grammar above.
 
 ```mermaid
 flowchart LR
-    subgraph Agent["CLI coding agent (your side)"]
-        AGT[Codex / Claude Code / …]
-    end
+    P["1 · Perception<br/>感知"] --> G["2 · Governance<br/>治理"]
+    G --> D["3 · Durability<br/>沉淀"]
+    D --> R["4 · Recall<br/>召回"]
+    R --> Re["5 · Receipt<br/>回执"]
+    Re -.feeds.-> M["6 · Maintenance<br/>维护"]
+    M -.proposes back to.-> G
 
-    subgraph AlayaSurface["Alaya agent surfaces"]
-        MCP["MCP stdio server<br/>(alaya mcp stdio)"]
-        CLI["alaya CLI<br/>(tools call --json fallback)"]
-    end
-
-    subgraph Daemon["apps/core-daemon"]
-        ROUTES["Hono HTTP routes<br/>(workspace / config / files / ...)"]
-        TOOLHANDLER["MCP memory tool handler<br/>(8 soul.* tools)"]
-    end
-
-    subgraph Core["packages/core (truth boundary)"]
-        MS["MemoryService"]
-        PS["ProposalService"]
-        CS["ClaimService"]
-        ES["EvidenceService / GreenService /<br/>GovernanceLeaseService / ..."]
-    end
-
-    subgraph Storage["packages/storage"]
-        EL["EventLog<br/>(append-only)"]
-        DB["SQLite<br/>(better-sqlite3, WAL)"]
-        REPOS[("30+ Repos behind<br/>SqliteConnection")]
-    end
-
-    subgraph Soul["packages/soul (Garden)"]
-        AUD["Auditor"]
-        JAN["Janitor"]
-        LIB["Librarian"]
-        SCH["GardenScheduler<br/>(fire-and-forget)"]
-    end
-
-    AGT -->|MCP stdio| MCP
-    AGT -->|optional fallback| CLI
-    MCP --> TOOLHANDLER
-    CLI --> TOOLHANDLER
-    TOOLHANDLER --> MS
-    TOOLHANDLER --> PS
-    ROUTES --> MS
-    ROUTES --> CS
-    MS --> EL
-    PS --> EL
-    CS --> EL
-    ES --> EL
-    EL --> DB
-    DB --> REPOS
-    EL -.broadcast.-> SCH
-    SCH --> AUD & JAN & LIB
-    AUD -.proposes.-> PS
-    JAN -.demotes hot/cold.-> MS
-    LIB -.compacts paths.-> MS
+    classDef ph fill:#f6f8fa,stroke:#6e7781,color:#1f2328,font-size:12px
+    P:::ph
+    G:::ph
+    D:::ph
+    R:::ph
+    Re:::ph
+    M:::ph
 ```
 
-The daemon is the only place writes happen. Agents never touch the
-database directly; they go through MCP / CLI → daemon → service →
-EventLog → DB. Garden roles read EventLog projections and emit new
-proposals (e.g. evidence staleness audit) — they never bypass the
-governance path.
+Read the diagram as: an agent perceives → governance decides → the
+decision lands durably → later turns recall it → the agent reports
+whether the recall was used → maintenance audits, compacts, and
+proposes corrections back through governance. Nothing skips
+governance to write durable.
 
-### Package dependency direction
+### 1. Perception (感知)
+
+**What happens.** The agent emits a *candidate signal* — *"I think
+this matters"* — via `soul.emit_candidate_signal`. The signal is
+persisted (so it survives the turn) but does **not** mutate ontology
+truth. A triage step decides: low confidence + no evidence →
+deferred; otherwise → may flow into the proposal pipeline.
+
+**Failure mode this prevents.** If the agent could write durable
+truth at perception, every fluent-but-wrong assertion would become
+fact. The model's confidence would become the truth model.
+
+**Design choice.** Signal is proposal, not fact. Triage at the
+boundary, not at recall. The signal record is durable on the
+**Runtime Control** layer; ontology truth (Memory Ontology layer,
+Object / Evidence axes) is untouched until later phases say so.
+
+*Code anchors:* `packages/core/src/signal-service.ts:80-130`,
+`packages/core/src/signal-service.ts:270-283` (the triage gate).
+
+### 2. Governance (治理)
+
+**What happens.** Triaged signals can become `Proposal`s with
+`resolution_state: PENDING`. A reviewer (an agent that a human has
+instructed to review, or a scripted role) calls
+`soul.review_memory_proposal` with `accept` or `reject`. Acceptance
+cascades into Synthesis promotion, Claim activation, and a karma
+record on the affected object.
+
+**Failure mode this prevents.** *"The agent said so"* is not a
+governance argument. Without an explicit accept step, every patch
+becomes a silent merge.
+
+**Design choice.** Propose / review is a separate pair of MCP tools
+on the **Governance axis**. Promotion bookkeeping (Synthesis state,
+Claim lifecycle, karma) lives on the **Memory Ontology** layer and
+**Object** axis but only changes through the proposal-resolution
+path.
+
+*Honest note for v0.1:* there is no daemon-side human-review queue
+or inbox. Review flows through the same MCP surface as proposing —
+i.e. HITL is *agent-orchestrated*, not *daemon-orchestrated*. Making
+HITL daemon-side is on the [Roadmap](#where-this-is-going).
+
+*Code anchors:*
+`apps/core-daemon/src/mcp-memory-proposal-workflow.ts:90-248`,
+`packages/core/src/proposal-service.ts:218-317`.
+
+### 3. Durability (沉淀)
+
+**What happens.** When governance accepts, the change goes through a
+fixed pipeline: **EventLog append → DB mutation → in-process notify**.
+EventLog is append-only and is the audit-of-record. The DB is the
+queryable projection of the EventLog. Notify is in-process fan-out
+to background listeners (Garden, etc.) — *not* SSE, *not* a network
+broadcast.
+
+**Failure mode this prevents.** DB-first writes mean the audit log
+chases the database — and the gap between them is exactly where
+untraceable state slips in. EventLog-first means *audit precedes
+broadcast*: no listener ever sees a state the EventLog cannot
+replay.
+
+**Design choice.** A single `EventPublisher.publishWithMutation()`
+boundary. Durable writes always pair an EventLog row with the DB
+mutation; consumers downstream subscribe to the notification, not to
+the DB. Lives on the **Memory Ontology** layer (durable truth) plus
+**Runtime Control** (the dispatch).
+
+*Honest gap:* the append + mutation pair is not yet wrapped in a
+single transaction. v0.1 mitigates with SQLite CAS plus a unique
+index on `(entity_type, entity_id, revision)`, which prevents
+collision but leaves a small race window. Tightening this is on the
+[Roadmap](#where-this-is-going).
+
+*Code anchors:* `packages/core/src/event-publisher.ts:40-62`,
+`packages/storage/src/repos/event-log-repo.ts:69-118`.
+
+### 4. Recall (召回)
+
+**What happens.** `soul.recall` runs four strategies in a fixed
+order:
+
+1. **Coarse filter** — deterministic match (scope / dimension /
+   domain tags) plus precomputed activation rank on HOT-tier
+   memories.
+2. **FTS supplement** — full-text search inside the filtered set.
+3. **Fine assessment** — budget-aware ranking with a weighted score
+   (`activation × base + relevance + graph support − budget penalty
+   − conflict penalty`).
+4. **Embedding supplement** — *additive boost only*, never
+   override.
+
+The agent receives a `delivery_id` plus result entries and pointers.
+Internal plumbing (the full `ContextPack` projection) stays inside
+Alaya.
+
+**Failure mode this prevents.** The most seductive failure of any
+agent-memory system is letting embedding decide truth. Cosine
+distance is fluent and confident, and it is also inversion-shaped:
+a similar phrasing of a *contradicting* fact still scores high.
+
+**Design choice.** Embedding cannot override the lexical / FTS /
+path ranking — it can only add a clamped, weighted boost
+(similarity ∈ [0, 1], weight 0.8) on top of the base score. If the
+embedding service is missing, misconfigured, or returns nothing,
+recall falls back to lexical without raising. Recall lives on the
+**Path axis** (recall *is* a runtime manifestation of paths) and
+the **Runtime Control** layer.
+
+*Code anchors:* `packages/core/src/recall-service.ts:189-315`
+(orchestration), `packages/core/src/recall-service.ts:501-581` (the
+embedding-supplement merge — proof the boost is additive, never
+overriding).
+
+### 5. Receipt (回执)
+
+**What happens.** After a delivery, the agent reports
+`used | skipped | not_applicable` via `soul.report_context_usage`.
+Alaya appends a `MEMORY_USAGE_REPORTED` EventLog entry and stores a
+`UsageProofRecord` linked to the original `delivery_id`. This feeds
+the `TrustSummary` calculation that quantifies *delivered ≠ used*.
+
+**Failure mode this prevents.** Without receipts, *delivered*
+silently inflates into *useful*. Recall stats look great because
+nothing is ever marked unused; the system congratulates itself on
+work the agent ignored.
+
+**Design choice.** Receipt is **advisory** (fire-and-forget) — the
+agent can skip it, and Alaya degrades to a "delivered" trust state
+without erroring. Lives on the **Evidence axis** as control-plane
+evidence, **Runtime Control** layer.
+
+*Honest gap for v0.1:* receipts feed `TrustSummary` but **do not yet
+feed Path-axis plasticity** (reinforcement / weakening / redirection
+/ retirement). Wiring that feedback loop is a named optimisation
+target on the [Roadmap](#where-this-is-going).
+
+*Code anchors:* `apps/core-daemon/src/trust-state.ts:147-187`,
+`packages/protocol/src/soul/mcp-types.ts:146` (the three-state enum).
+
+### 6. Maintenance (维护)
+
+**What happens.** Garden runs as a fire-and-forget background system
+with four roles, scheduled by tier:
+
+- **Auditor** — evidence staleness check, pointer health, orphan detection.
+- **Janitor** — TTL cleanup, hot/warm tier demotion, dormant marking, tombstone GC.
+- **Librarian** — merge detection, template clustering, neighbour discovery, path compression.
+- **Scheduler** — owns the queue, tier prioritisation, cooling periods, task accounting.
+
+**Failure mode this prevents.** A maintenance system that writes
+durable directly bypasses governance. A maintenance system that
+runs synchronously to recall destroys the recall budget the moment
+the dataset grows. Garden does neither.
+
+**Design choice.** Garden roles never write durable directly.
+Janitor and Auditor call narrow maintenance ports that still go
+through `EventPublisher.publishWithMutation()`, so the EventLog
+remains the audit. Librarian only emits *proposals* back through
+Governance — which is why the lifecycle diagram shows the dotted
+arrow from Maintenance back to Governance, never to Durability.
+Garden is *fire-and-forget* by invariant: if Garden is slow, recall
+is not slow with it.
+
+*Code anchors:* `packages/soul/src/garden/auditor.ts:62-89`,
+`packages/soul/src/garden/janitor.ts:83-120`,
+`packages/soul/src/garden/librarian.ts`,
+`apps/core-daemon/src/garden-runtime.ts:98-111` (Scheduler EventLog wiring).
+
+---
+
+## Architecture at a glance
+
+The packages map onto the design grammar — each one owns a specific
+layer / axis combination, and the dependency direction prevents the
+truth boundary from leaking.
 
 ```mermaid
 graph TD
-    PROTO["@do-soul/alaya-protocol<br/>(zod-only leaf)"]
-    STOR["@do-soul/alaya-storage"]
-    GW["@do-soul/alaya-engine-gateway<br/>(provider routing only)"]
-    CORE["@do-soul/alaya-core<br/>(truth boundary)"]
-    SOUL["@do-soul/alaya-soul<br/>(Garden + reflection)"]
-    DAEMON["apps/core-daemon"]
-    INSPECTOR["apps/inspector"]
+    subgraph Surfaces["Agent-facing surfaces"]
+        MCPS["MCP stdio<br/>(alaya mcp stdio)"]
+        CLIS["alaya CLI<br/>(11 verbs · MCP fallback)"]
+    end
 
-    PROTO --> STOR
-    PROTO --> GW
-    PROTO --> CORE
-    STOR --> CORE
-    GW --> CORE
-    CORE --> SOUL
-    CORE --> DAEMON
-    SOUL --> DAEMON
-    DAEMON -.spawns.-> INSPECTOR
+    subgraph Daemon["apps/core-daemon — wiring + dispatch"]
+        TH["MCP tool handler<br/>(8 soul.* tools)"]
+        BG["BackgroundServiceManager<br/>(Garden runtime · fire-and-forget)"]
+        NOTI["InProcessRuntimeNotifier"]
+    end
+
+    subgraph Core["packages/core — TRUTH BOUNDARY"]
+        SS["SignalService<br/>(Perception · Runtime Control)"]
+        PROP["ProposalService<br/>(Governance · Structure Registry)"]
+        EP["EventPublisher<br/>(Durability · all-axis dispatch)"]
+        REC["RecallService<br/>(Recall · Path · Runtime Control)"]
+        TR["TrustStateRecorder<br/>(Receipt · Evidence)"]
+    end
+
+    subgraph Soul["packages/soul — Garden"]
+        AUD["Auditor"]
+        JAN["Janitor"]
+        LIB["Librarian"]
+        SCH["GardenScheduler"]
+    end
+
+    subgraph StorageBox["packages/storage — durable projection"]
+        EL["EventLog<br/>(append-only audit)"]
+        DB["SQLite (WAL)<br/>+ ~57 migrations"]
+    end
+
+    PROTO["packages/protocol<br/>(zod-only leaf · all schemas)"]
+
+    MCPS --> TH
+    CLIS --> TH
+    TH --> SS
+    TH --> PROP
+    TH --> REC
+    TH --> TR
+    SS --> EP
+    PROP --> EP
+    REC --> EL
+    TR --> EP
+    EP --> EL
+    EL --> DB
+    EP -.notify.-> NOTI
+    NOTI -.feeds.-> BG
+    BG --> SCH
+    SCH --> AUD & JAN & LIB
+    LIB -.proposals only.-> PROP
+
+    PROTO -. zod schemas .-> Core
+    PROTO -. zod schemas .-> Soul
+    PROTO -. zod schemas .-> StorageBox
 ```
 
 Rules enforced by tests in CI:
 
-- `@do-soul/alaya-protocol` depends only on `zod`. It is the leaf.
-- All domain types come from `@do-soul/alaya-protocol` — no parallel type
-  definitions in core, storage, or daemon.
-- `core` is the truth boundary; storage is mechanical persistence behind
-  it; storage does not decide truth.
-- State transitions follow **EventLog → DB update → broadcast**, never
+- `packages/protocol` depends only on `zod` — it is the leaf; every
+  other package consumes its types.
+- `packages/core` is the truth boundary. Storage is mechanical
+  persistence behind it; storage does not decide truth.
+- State transitions follow **EventLog → DB update → notify**, never
   DB-first.
-- Garden runs fire-and-forget relative to the request path. Slow Garden
-  work cannot block recall.
+- Garden runs fire-and-forget; slow Garden work cannot block recall.
+- `packages/engine-gateway` does provider routing only — no business
+  logic, no path back into core.
 
-### SOUL three-layer model
+---
 
-| Layer | Purpose | Key objects |
+## Surfaces: MCP + CLI
+
+Two surfaces over one runtime. The agent attaches via MCP; humans
+script via CLI. Both go through the same daemon and the same truth
+boundary.
+
+### MCP tools (8 `soul.*`)
+
+All schema-bounded; `maxLength`, `maxItems`, `additionalProperties:
+false` are derived from the zod request schemas and enforced both
+at parse time and in the published catalog.
+
+| Tool | Phase | Mutating? |
 |---|---|---|
-| Memory Ontology | What is remembered long-term | `EvidenceCapsule`, `MemoryEntry`, `SynthesisCapsule`, `ClaimForm` |
-| Structure Registry | How objects are located and bound | `PathRelation`, `ActivationCandidate`, `ManifestationDecision` |
-| Runtime Control Plane | How memory is assembled per turn | `RecallQuery`, `ContextPack`, `TrustSummary` |
-
-## MCP tool surface
-
-Eight tools, all schema-bounded — `maxLength`, `maxItems`,
-`additionalProperties: false` are derived from the zod request schemas
-and enforced both at parse time and in the published catalog.
-
-| Tool | Purpose | Mutating? |
-|---|---|---|
-| `soul.recall` | Hybrid recall: lexical + FTS + path-aware + (optional) embedding supplement | no |
-| `soul.open_pointer` | Read a memory object by id, public projection only | no |
-| `soul.explore_graph` | Walk neighbours of a memory node by edge type / direction; workspace bound from MCP context | no |
-| `soul.emit_candidate_signal` | Submit a candidate signal — the agent's "I think this matters" | yes (proposal-side) |
-| `soul.propose_memory_update` | Propose a typed mutation to a memory entry | yes (proposal-side) |
-| `soul.review_memory_proposal` | Resolve a proposal: accept or reject (HITL or governance role) | yes |
-| `soul.apply_override` | Session-scoped override on a target object | yes (session-scope) |
-| `soul.report_context_usage` | Close the loop on a recall delivery: used / skipped / not_applicable | yes (audit) |
-
-Proposing or applying an override never modifies durable memory by
-itself — it goes through the governance path (Promotion Gate / HITL).
-Recall and graph exploration are read-only.
+| `soul.recall` | Recall | no |
+| `soul.open_pointer` | Recall (read by id) | no |
+| `soul.explore_graph` | Recall (one-hop neighbours) | no |
+| `soul.emit_candidate_signal` | Perception | yes (proposal-side) |
+| `soul.propose_memory_update` | Governance entry | yes (proposal-side) |
+| `soul.review_memory_proposal` | Governance resolution | yes |
+| `soul.apply_override` | Runtime Control (session-scoped, never durable) | yes (session-scope) |
+| `soul.report_context_usage` | Receipt | yes (audit) |
 
 `alaya tools list --json` and `alaya tools call <tool> '<json>' --json`
-are the CLI fallback for the same surface, useful for scripting outside
-the agent runtime.
+are the CLI fallback for the same surface — useful for scripting
+outside the agent runtime.
 
-## CLI commands
-
-Eleven verbs in total. All require a prior `pnpm build`.
+### CLI commands (11 verbs)
 
 | Command | Purpose | Mutating? | Audit log? |
 |---|---|---|---|
 | `alaya doctor` | Diagnose env, storage health, schema version, daemon reachability | no | no |
-| `alaya install` | Plan / apply / rollback an install profile (db path, embedding, engine binding) | yes | yes |
-| `alaya attach codex` | Add `mcpServers.alaya` to `~/.codex/config.toml` (preview → confirm → apply) | yes | yes |
-| `alaya attach claude-code` | Add `mcpServers.alaya` to `~/.claude.json` (preview → confirm → apply) | yes | yes |
+| `alaya install` | Plan / apply / rollback an install profile | yes | yes |
+| `alaya attach codex` | Add `mcpServers.alaya` to `~/.codex/config.toml` | yes | yes |
+| `alaya attach claude-code` | Add `mcpServers.alaya` to `~/.claude.json` | yes | yes |
 | `alaya detach codex` / `detach claude-code` | Reverse the corresponding attach atomically | yes | yes |
-| `alaya status` | Daemon health and trust-state summary | no | no |
-| `alaya inspect` | Open the Memory Inspector SPA on loopback (memory-tooling surface) | no | no |
-| `alaya tools list` | List MCP tool catalog (CLI fallback for `tools/list`) | no | no |
-| `alaya tools call <tool> '<json>'` | Invoke a tool from CLI; useful for scripts and CI | varies | varies |
+| `alaya status` | Daemon health + trust-state summary | no | no |
+| `alaya inspect` | Open the Memory Inspector SPA on loopback (memory-tooling, *not* an agent surface) | no | no |
+| `alaya tools list` | List the MCP tool catalog | no | no |
+| `alaya tools call <tool> '<json>'` | Invoke a tool from CLI | varies | varies |
 | `alaya backup --output <path>` | Portable backup bundle (signed) | no | yes |
 | `alaya export --output <path>` / `import --bundle <path>` | Portable export / restore | export: no, import: yes | yes |
-| `alaya mcp stdio` | Run the daemon's MCP stdio server (this is what `attach` wires up) | no | no |
+| `alaya mcp stdio` | Run the daemon's MCP stdio server (what `attach` wires up) | no | no |
 
-Every mutating verb supports preview before write. `attach` and `detach`
-are atomic. The audit log lives at `~/.config/alaya/audit/`, so you can
-always retrace what changed and when.
+Every mutating verb supports preview before write. `attach` and
+`detach` are atomic. The audit log lives at
+`~/.config/alaya/audit/`.
+
+---
 
 ## Quickstart
 
-You don't need anything beyond `git`, Node 20+, and pnpm 9+. The `rtk`
-references in `CLAUDE.md` are a Claude Code optimisation; bare `pnpm`
-works the same.
+You don't need anything beyond `git`, Node 20+, and pnpm 9+. The
+`rtk` references in `CLAUDE.md` are a Claude Code optimisation; bare
+`pnpm` works the same.
 
 ```bash
 # 1) Clone
@@ -400,19 +466,23 @@ pnpm alaya tools call soul.recall \
 #   Expect: { "delivery_id": "...", "results": [...], "total_count": <int> }
 ```
 
-After step 7 your agent sees Alaya as an MCP server on its next start,
-and the 8 `soul.*` tools become callable from inside the agent.
+After step 7 your agent sees Alaya as an MCP server on its next
+start, and the 8 `soul.*` tools become callable from inside the
+agent.
 
 **If a step fails:**
 
-- `pnpm alaya doctor` tells you which check failed (env, storage, daemon,
-  mcp transport). It is the first place to look.
-- `pnpm alaya install --plan-only '<json>'` shows the diff before apply.
-- `pnpm alaya detach codex` (or `claude-code`) atomically reverses the
-  attach and writes its own audit entry.
-- Storage problems leave `alaya.db.shm` / `alaya.db.wal` files — that is
-  WAL working state, not corruption. `alaya doctor` warns when the
-  schema version diverges.
+- `pnpm alaya doctor` tells you which check failed (env, storage,
+  daemon, MCP transport). It is the first place to look.
+- `pnpm alaya install --plan-only '<json>'` shows the diff before
+  apply.
+- `pnpm alaya detach codex` (or `claude-code`) atomically reverses
+  the attach and writes its own audit entry.
+- Storage problems leave `alaya.db.shm` / `alaya.db.wal` files —
+  that is WAL working state, not corruption. `alaya doctor` warns
+  when the schema version diverges.
+
+---
 
 ## Project layout
 
@@ -424,148 +494,99 @@ Do-SOUL Alaya/
 ├── packages/
 │   ├── alaya-protocol/          zod schemas (truth boundary leaf)
 │   ├── alaya-storage/           SQLite + ~57 ordered migrations
-│   ├── alaya-core/              services (memory / proposal / claim / evidence / green / ...)
-│   ├── alaya-soul/              Garden roles + reflection
-│   └── alaya-engine-gateway/    provider routing (no business logic)
+│   ├── alaya-core/              services (signal / proposal / claim / evidence / recall / trust / ...)
+│   ├── alaya-soul/              Garden roles (Auditor / Janitor / Librarian / Scheduler)
+│   └── alaya-engine-gateway/    provider routing only (no business logic)
 ├── docs/
-│   ├── handbook/                dev navigation hub
-│   │   ├── README.md
-│   │   ├── invariants.md
-│   │   ├── port-protocol.md
-│   │   ├── code-map.md
-│   │   ├── runtime-status.md
-│   │   ├── backlog.md
-│   │   └── workflow/            agent-workflow / review-protocol / subagent-dispatch
-│   └── v0.1/                    port task cards (INDEX.md is the entry)
-├── vendor/
-│   └── do-what-new-snapshot/    frozen upstream source (port-first reference)
+│   └── handbook/                invariants, code-map, runtime-status, workflow
 ├── bin/alaya.mjs                CLI shim (used by `pnpm alaya …`)
 ├── README.md / README.zh-CN.md
-├── CLAUDE.md                    instructions for the agent contributor
+├── CLAUDE.md                    instructions for agent contributors
 └── LICENSE
 ```
 
-## Status & roadmap
+---
 
-This section is honest about what is and isn't done. Prefer the table
-below to any "production-ready" badge.
+## Where this is going
 
-### v0.1.0 — Released
+Three forward-looking goals. The system ships today; these are the
+threads I'm pulling next.
 
-- HEAD `ac87e16`, released 2026-05-03.
-- Gate-5 closed; **p5-system-review** converged after 3 rounds (~37
-  atomic fix-commits).
-- 248 test files, **1917 tests passing**.
-- 11 CLI subcommands all wired.
-- 8 `soul.*` MCP tools all wired.
-- **Open backlog: 0.**
-- Defense invariants added: §21a (audience), §29 (Default Scope), §30
-  (Fix at Source), §31 (Single-Source Concurrency).
+### 1. Architecture cleanup at the small grain
 
-### v0.1.1 — Planned (Phase 6 marketing benchmark wave)
+The shape is right. The fit at the joinery is not yet uniform.
+Concrete items I'm tracking:
 
-Five task cards, all currently `not-started`:
+- **Atomic durability** — wrap `EventPublisher` append + mutation
+  in a single `connection.transaction()`. Closes the small race
+  window currently masked by the unique-revision index.
+- **Daemon-side review inbox** — make HITL daemon-orchestrated, not
+  agent-orchestrated. A pending-proposals queue with explicit
+  reviewer assignment, instead of relying on the same MCP tool
+  used to propose.
+- **File-shape hygiene** — split a handful of oversized service
+  files; rename intent-anonymous files to intent-named ones. None
+  of this changes behaviour; it lowers the cost of every future
+  change.
 
-- `bench-adapter` — provider adapter to a user-chosen OpenRouter model.
-- `bench-harness` — evaluation framework.
-- `bench-baselines` — baseline comparisons.
-- `bench-resume` — resume mechanism.
-- `bench-readme` — leaderboard template (this README will gain real
-  numbers here).
+### 2. Optimising the load-bearing parts (recall first)
 
-Plus the `#BL-017` hygiene wave: rename `phase-*.ts` files, split the
-five oversized files, prune `ts-prune` residue, refresh code-map.
+Recall is the surface where Alaya is most visibly judged. Three
+threads:
 
-**There is no leaderboard yet.** This README will not display benchmark
-numbers until v0.1.1 lands.
+- **Path-axis plasticity** — wire `soul.report_context_usage`
+  receipts into reinforcement / weakening / redirection /
+  retirement on Path. Today receipts feed `TrustSummary` only; the
+  plasticity loop is designed but not yet closed.
+- **Embedding strategy** — keep "supplement, never oracle" but
+  experiment with the boost weight, the supplement cap, and
+  per-domain calibration.
+- **Recall budget shaping** — make the budget penalty schedule
+  reflect actual agent context-window cost, not a static constant.
 
-### v0.2 — Deferred (with explicit close conditions)
+### 3. `pi-mono` integration → memory-centric agent
 
-| Issue | What's deferred | Close condition |
-|---|---|---|
-| `#BL-008` | `pi-mono` integration (replaces upstream `provider/ai-sdk-*.ts` routing) | v0.2 routes synthesis / proposal scoring / reflection through `pi-mono`. |
-| `#BL-009` | OS keychain support | macOS Keychain / Linux libsecret / Windows Credential Manager adapter; `secret-ref` syntax extends to `keychain:<service>:<account>`. |
-| `#BL-022` | EventPublisher atomicity + EventLog revision transaction | New `EventPublisherEventLogRepoPort.appendManyWithMutation` (sync mutate inside a single `connection.transaction()`); EventLog revision computed inside the transaction; ~12 callers migrated. |
+The longer-term vision is a *memory-centric agent* — one whose
+inner loop is built around reading and writing memory, not around
+chat. The short-term step in that direction is integrating
+[`pi-mono`](https://github.com/badlogic/pi-mono) as the LLM
+provider abstraction. `packages/engine-gateway` becomes a `pi-mono`
+client; synthesis, proposal scoring, and reflection all route
+through one clean provider boundary instead of bespoke
+`provider/ai-sdk-*.ts` adapters.
 
-Until then, `#BL-022` is mitigated by SQLite CAS and the
-`unique(entity_type, entity_id, revision)` index from migration 028,
-plus the registered divergence in invariants §"EventPublisher mutation
-audit-id divergence" (`#BL-021`).
+Once that boundary is clean, building the memory-centric agent on
+top of it is a much smaller step than it would be today.
 
-## How this codebase came to be
-
-Alaya is a **port** of the memory subsystem of `do-what-new`, **not a
-clean-room rewrite**. This is intentional and worth understanding before
-you read the code.
-
-The frozen upstream snapshot lives at `vendor/do-what-new-snapshot/` —
-see `vendor/do-what-new-snapshot/SNAPSHOT_REF.md` for the source commit
-hash and stability assurance.
-
-The discipline (`docs/handbook/port-protocol.md`):
-
-- **trivial-copy** (default): copy file as-is, change package name and
-  import paths only.
-- **adapt-and-port** (limited): allowed when the target interface
-  differs (e.g. `SqliteConnection` injection); every adapter point is
-  listed in the task card.
-- **requires-redesign** (rare): default-prohibited; needs explicit user
-  approval and a Charter Authority cite.
-
-**Why port-first instead of rewrite:**
-
-- The upstream subsystem has been hardened across release cycles inside
-  `do-what-new`. Re-deriving its decisions from scratch would have cost
-  months of latent-bug rediscovery.
-- The Alaya-specific surfaces (CLI, install / attach / detach, doctor,
-  Memory Inspector, profile / audit) *are* greenfield — they wrap the
-  ported core, they do not replace it.
-
-**The tradeoff, stated honestly:**
-
-- Some upstream tech-debt rides along (file naming `phase-*.ts`,
-  oversized files). Tracked as `#BL-017`; scheduled into a v0.1.x
-  hygiene wave alongside Phase 6.
-- We chose velocity over local optimality at v0.1. The first day a
-  refactor would have made sense was Gate-5 close — at which point
-  we get it for free via the `#BL-017` wave.
+---
 
 ## Contributing
 
-PRs from outside contributors are welcome but must respect Port-First
-discipline. Specifically:
+PRs are welcome. Before opening one:
 
-1. Read the entry docs in this order:
-   `docs/handbook/README.md` → `docs/handbook/invariants.md` →
-   `docs/handbook/port-protocol.md` → `docs/v0.1/INDEX.md` → the task
-   card you intend to take.
-2. For changes inside `packages/*` or `apps/core-daemon/src/`, your PR
-   must show the file logic matches `vendor/do-what-new-snapshot/<src>`
-   byte-for-byte (trivial-copy) or list every adapter point
-   (adapt-and-port).
-3. Don't write a "better" reimplementation of an existing
-   `vendor/do-what-new-snapshot/` file. That kind of PR will be declined
-   regardless of code quality.
-4. `pnpm build` and `pnpm test` must both pass; the Review Protocol
-   checklist (`docs/handbook/workflow/review-protocol.md`) must report
-   zero Blocking / Important findings.
+1. Read `docs/handbook/invariants.md` — the architecture
+   non-negotiables (truth boundary, axes, EventLog ordering, Garden
+   isolation).
+2. Run `pnpm build` and `pnpm test` locally; both must be green.
+3. For changes inside `packages/*` or `apps/core-daemon/src/`, keep
+   the change surgical to the area named in your PR description.
+   Don't refactor adjacent files in the same PR.
+4. New behaviour needs at least one test that fails before your
+   change and passes after.
 
-For Alaya-original surfaces (CLI, install / attach / detach, Memory
-Inspector frontend) the path is different — those are
-`requires-redesign` cards. See invariant §24.
+For larger structural changes (a new MCP tool, a new Garden role, a
+new axis interaction) — open an issue first to align on shape.
+
+---
 
 ## Acknowledgments
 
-- [`do-what-new`](https://github.com/tdwhere123) — upstream project; the
-  memory subsystem here is its port.
-- [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) — local
-  SQLite driver.
+- [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) — local SQLite driver.
 - [`Hono`](https://hono.dev) — HTTP framework for the daemon.
-- [`zod`](https://zod.dev) and
-  [`zod-to-json-schema`](https://github.com/StefanTerdell/zod-to-json-schema)
-  — single source of truth for the public MCP catalog.
-- [`Vitest`](https://vitest.dev), [`pnpm`](https://pnpm.io),
-  [`tsup`](https://tsup.egoist.dev), and the Model Context Protocol spec.
+- [`zod`](https://zod.dev) and [`zod-to-json-schema`](https://github.com/StefanTerdell/zod-to-json-schema) — single source of truth for the public MCP catalog.
+- [`Vitest`](https://vitest.dev), [`pnpm`](https://pnpm.io), [`tsup`](https://tsup.egoist.dev), and the Model Context Protocol spec.
+
+---
 
 ## License
 

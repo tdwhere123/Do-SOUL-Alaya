@@ -8,533 +8,543 @@
 
 # Do-SOUL Alaya
 
-### *给 CLI 编码 agent 用的本地优先记忆面。*
+### *给 CLI 编码 agent 的本地优先记忆平面。*
 
-Codex、Claude Code、任何 MCP 兼容的 agent 通过 MCP 接入，就能拿到跨会话
-的、有证据支撑的持久记忆。没有聊天 UI，没有埋点，没有云。只有一个你
-自己掌控的 SQLite 文件。
-
-[![status](https://img.shields.io/badge/status-v0.1.0-blue?style=flat-square)](#状态与路线图)
+[![status](https://img.shields.io/badge/status-v0.1.0-blue?style=flat-square)](#接下来的方向)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-1917%20passing-success?style=flat-square)](#状态与路线图)
+[![tests](https://img.shields.io/badge/tests-1917%20passing-success?style=flat-square)](#接下来的方向)
 [![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#快速开始)
 [![pnpm](https://img.shields.io/badge/pnpm-%E2%89%A59-F69220?style=flat-square&logo=pnpm&logoColor=white)](#快速开始)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](#架构)
-[![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57?style=flat-square&logo=sqlite&logoColor=white)](#架构)
-[![MCP](https://img.shields.io/badge/MCP-stdio-7B61FF?style=flat-square)](#mcp-工具面)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](#架构总览)
+[![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57?style=flat-square&logo=sqlite&logoColor=white)](#架构总览)
+[![MCP](https://img.shields.io/badge/MCP-stdio-7B61FF?style=flat-square)](#对外面mcp--cli)
 
+[**问题**](#问题) ·
+[**设计语法**](#关于记忆的思考方式) ·
+[**记忆的生命周期**](#记忆的生命周期) ·
+[**架构**](#架构总览) ·
 [**快速开始**](#快速开始) ·
-[**它是什么**](#alaya-是什么) ·
-[**对比同类**](#alaya-与同类对比) ·
-[**架构**](#架构) ·
-[**路线图**](#状态与路线图)
+[**路线图**](#接下来的方向)
 
 </div>
 
 ---
 
-> **要解决的问题。** CLI 编码 agent 一旦会话结束就把所有东西忘了。
-> 同一个项目里两个 agent 之间也不共享它们各自学到的东西。手工粘贴
-> 上下文这条路，能撑过的项目数量大概是一个，再多就崩。
->
-> **Alaya 做什么。** 它在你 agent 旁边跑，提供一层 *记忆面*：带证据
-> 的持久 capsule、治理 gate、多路径 recall，以及一个由后台角色组成的
-> Garden，在你工作的同时审计、压缩记忆。Agent 提议、Alaya 决定什么
-> 才能成为真相。
+## 问题
 
-本仓库是 [`do-what-new`](https://github.com/tdwhere123) 项目记忆子系统
-的 **port**，上游冻结快照位于 `vendor/do-what-new-snapshot/`。v0.1.0 是
-第一个把这个 port 端到端接通、并通过 CLI + MCP 暴露出来的版本。
+CLI 编码 agent 的"记忆"其实是一次会话——终端关掉，记忆就没了。两
+个 agent 在同一个项目上各干各的，谁也不知道对方学到了什么。手动复
+制粘贴上下文，能撑过一个项目就不错了。
 
----
+你可以塞一个向量数据库进去打补丁。但向量库回答的是 *"和这串文字相
+似的是什么"*，而不是 *"关于这个项目，什么是真的"*。**相似不等于真
+相，向量不等于证据。** 一个按余弦距离排序的召回，可以流畅、自信、
+而且错——agent 会照着错的去执行。
 
-## Alaya 的卖点
+记忆不是单一问题。它有阶段——**感知、治理、沉淀、召回、回执、维
+护**——每个阶段都有自己的失败模式。感知阶段如果直接写 durable，
+agent 就能凭幻觉造真相；召回阶段如果让 embedding 压过证据，相似
+就战胜了事实；维护阶段如果绕过治理直接动 durable，审计就死了。
+**Alaya 做的是：把每个阶段的纪律分开守，再用一条"真相归属"的不变
+量把它们串起来。**
 
-- **本地优先是设计前提。** 一个 SQLite 文件，就在你硬盘上，随时可以用
-  `sqlite3` 打开。无 SaaS 锁定，无 auth dance，recall 路径上不绕云。
-- **靠证据 gating，不靠 embedding gating。** 持久记忆必须有源。Embedding
-  只是 recall 的 *补充*，永远不是真相裁定者 —— 它和证据冲突时，证据赢。
-- **Agent 提议、Alaya 决定。** LLM 发出的是 *候选*；治理流程
-  （Promotion Gate、必要时 HITL）决定什么变成持久记忆。**绝不存在**
-  agent 一句话就能静默覆盖真相的路径。
-- **MCP + CLI，不是 GUI。** 8 个 `soul.*` MCP 工具加 11 个 CLI 动词
-  共享同一个 runtime。MCP 接入、CLI 脚本化、所有动作都进审计。
-- **测试是真担活的。** 248 个文件、1917 个 test。v0.1.0 的 system
-  review 里每一个 fix-loop 都走了原子 re-review 才合并。
-- **Port-first，不是 vibe rewrite。** 治理、EventLog、Garden、recall
-  这些硬部分，**字节级** port 自一个已经在上游打磨过多个 release 周期
-  的子系统。我们没有去重新 derive 已经能跑的东西。
+它就跑在你的 agent 旁边——通过 MCP attach、通过 CLI 脚本——所有
+东西落在一个你自己的 SQLite 文件里。没有聊天界面、没有遥测、召
+回路径上没有任何云端往返。
 
 ---
 
-## Alaya 与同类对比
+## 关于记忆的思考方式
 
-|  | Alaya | 向量数据库（chroma / qdrant / pgvector） | RAG 框架（langchain / llamaindex memory） | 聊天历史 / 上下文文件 |
-|---|---|---|---|---|
-| 真相模型 | 证据驱动、被治理 | 仅相似度 | pipeline 决定 | 没有模型 —— 文件就是文件 |
-| 谁决定什么是持久 | 治理 gate | 谁写索引谁说了算 | 谁调 `.add()` 谁说了算 | 谁最后改的文件谁说了算 |
-| 跨会话连续性 | 是（EventLog + capsule） | 取决于调用方 | 取决于调用方 | 手工粘贴 |
-| Agent 集成 | MCP stdio + CLI | 库 SDK | 库 SDK | 无 |
-| 可审计性 | EventLog + 每次 mutation 审计 | 索引日志（视实现） | tracing（视实现） | 提交了的话 `git log` |
-| 存储 | SQLite（你掌控的一个文件） | server / 托管集群 | 可插拔（常见为托管） | 普通文件 |
-| GUI 依赖 | 无 —— 没有聊天 UI | 可选 dashboard | 常见是 notebook / app | 无 |
-| 学习曲线 | 不变式多、运维少 | 不变式少、运维少 | 不变式中、视实现 | 零 |
+两组坐标支撑起整个系统。它们就是设计语法——下文每一段都会回头引
+用这两组。
 
-Alaya 的对位是 **agent 的持久、可被防卫的记忆**，**不是**文档相似度
-搜索。后者用向量库；两者可以组合。
+**三层** —— 运行时实际穿过的层：
 
----
+| 层 | 这一层装的是 | 例子 |
+|---|---|---|
+| **Memory Ontology（记忆本体）** | 持久的语义真相 | `EvidenceCapsule`、`MemoryEntry`、`SynthesisCapsule`、`ClaimForm` |
+| **Structure Registry（结构注册）** | 路由、绑定、仲裁、可见性 | `PathRelation`、`ConflictMatrix`、`ManifestationDecision` |
+| **Runtime Control（运行时控制）** | per-turn 装配、网关、投影 | `RecallQuery`、`ActivationCandidate`、`ContextPack`、`TrustSummary` |
 
-## 目录
+**四轴** —— 真相归属：
 
-- [Alaya 的卖点](#alaya-的卖点)
-- [Alaya 与同类对比](#alaya-与同类对比)
-- [Alaya 是什么](#alaya-是什么)
-- [Alaya 不是什么](#alaya-不是什么)
-- [面向哪些用户](#面向哪些用户)
-- [为什么坚持本地优先](#为什么坚持本地优先)
-- [架构](#架构)
-- [MCP 工具面](#mcp-工具面)
-- [CLI 命令](#cli-命令)
-- [快速开始](#快速开始)
-- [项目目录结构](#项目目录结构)
-- [状态与路线图](#状态与路线图)
-- [这套代码是怎么来的](#这套代码是怎么来的)
-- [贡献](#贡献)
-- [致谢](#致谢)
-- [License](#license)
+- **Object 轴** —— *记什么*：稳定的、带 facets 的语义单元；时间、情境、风险、责任都是对象的 *facet*，不是外挂标签。
+- **Path 轴** —— 对象之间可学习的条件关系。**召回、预测、提醒，全部是 path 在运行时的"显化"，而不是独立子系统。**
+- **Evidence 轴** —— 一个 claim 由什么支撑、支撑如何衰减（包含对象证据 + path 的可塑性：reinforcement / weakening / redirection / retirement）。
+- **Governance 轴** —— 谁赢、谁冲突、谁要复审、谁过期；同时也限制一条学到的 path 在单一 turn 里能施加的最大影响。
+
+**让记忆不腐烂的那条不变量：**
+
+> 一个 object / index / state 只能在 **唯一一根轴** 上做 source-of-truth。
+> 其它轴可以引用它，但不能默默替换它。
+
+正是这条规则，让召回（Path 轴）可以伸进证据（Evidence 轴）和本体
+（Object 轴），而不会偷偷修改它们。下面六个阶段，每一段都明确地
+遵守这条不变量——而 v0.1 里还没遵守得足够干净的地方，全部在
+[路线图](#接下来的方向) 里点名。
 
 ---
 
-## Alaya 是什么
+## 记忆的生命周期
 
-CLI 编码 agent 旁边的一层 *记忆面*，持有它的长期记忆：项目事实、
-决策、证据、对象之间的关系。两条核心理念决定了所有设计。
-
-**真相 vs 视图。** 记忆本体（memory ontology）才是持久真相。所有你
-能查到的 —— recall 结果、各种投影、Memory Inspector 看到的画面 ——
-都是 **视图**，不是真相。视图可能漂移、可能错；底下的 capsule 才是
-要替它扛事的部分。
-
-**Agent 提议，Alaya 决定。** 接入的 agent（LLM）只发 *候选*：
-"这个事实应该被记住"、"这条证据更新了那个 capsule"。候选要进治理
-（Promotion Gate、必要时 HITL），过了才会变成持久记忆。**不存在**
-"agent 说啥就自动写入" 的路径。
-
-v0.1.0 已就位的能力：
-
-- 带证据的 **记忆本体** —— `MemoryEntry`、`EvidenceCapsule`、
-  `SynthesisCapsule`、`ClaimForm`，对持久真相做 gating
-- **多路径召回** —— 词法、FTS、路径感知、embedding（可选 supplement）
-- **被治理的晋升** —— Promotion Gate、HITL、Green 状态状态机
-- **会话信任** —— *delivered ≠ used* 不变式贯穿端到端
-- **Garden 自维护** —— Auditor / Janitor / Librarian + Scheduler，
-  fire-and-forget
-- **Profile / 密钥 / 导入导出 / 可移植备份** 操作集合
-- 一个 **MCP server**（`alaya mcp stdio`）暴露 8 个 `soul.*` 工具，
-  外加 CLI fallback 走同一面
-- 一个 **Memory Inspector** SPA（`alaya inspect`），用于记忆工具化 ——
-  *不是* agent 接入面
-
-## Alaya 不是什么
-
-直白讲清楚，便于你立刻判断 Alaya 适不适合你。
-
-- **不是聊天产品。** 你不跟 Alaya 说话，agent 才跟它说话。
-- **不是对话 TUI。** 没有 prompt loop、没有历史回看 UI。
-- **不是向量数据库。** Embedding 是 recall 的 *补充*，**永远不决定**
-  持久真相。证据赢。
-- **不是 agent autopilot。** Alaya 不跑 agent、不生成代码、自己也不
-  调任何模型。Garden 是被框死的后台维护，不是自主推理。
-- **不给最终用户用。** 见下一节。
-
-## 面向哪些用户
-
-Alaya 的设计目标用户是 **跑 CLI 编码 agent 的工程师**：
-
-- 你从终端驱动 Codex、Claude Code 或类似 agent。
-- 你写代码 / 操作系统时，agent 跨会话的"记忆"对你是真痛点。
-- 你能熟练用 `pnpm`、Node 20+、SQLite、MCP transport。
-
-按项目不变式 §21a（`docs/handbook/invariants.md`）：
-
-> 公开文案（README、营销介绍、leaderboard 披露、博客）必须把 Alaya
-> 描述为面向 CLI agent（Codex / Claude Code / 类似）的记忆面，**不得
-> 邀请非工程用户安装或运营 Alaya**。
-
-如果你身边有非工程师在问 Alaya，**正确答案是"这个目前不是给你的"**，
-而不是绕个 workaround 让他能跑起来。要触达非工程用户得开一个独立
-的消费者产品，或者先改 §21 charter。
-
-## 为什么坚持本地优先
-
-整个记忆面就是一个 SQLite 文件（WAL 模式、busy-timeout 已调，~57 条
-有序 migration）。
-
-- **数据归属于你。** 它在你自己的磁盘上，是一个你随时可以用
-  `sqlite3` 打开手动检查的格式。无 SaaS 锁定。
-- **可离线跑。** Recall、propose、governance 不需要任何网络。可选的
-  embedding supplement 可以配，但 v0.1.0 默认关闭。
-- **可移植。** `alaya backup` / `export` / `import` 产出可签名的捆绑
-  包，可以在不同机器之间搬。
-- **可审计。** 治理、配置、import / export、备份、会话信任的每一处
-  变更都写进 EventLog —— 它是 append-only 的，是状态回放的真相之源。
-
-## 架构
-
-### 运行时数据流
+六个阶段。每一个阶段都是对一种具体失败模式的回答——这些失败模式
+都是我在那些忽略上述设计语法的 agent-memory 系统里反复看到的。
 
 ```mermaid
 flowchart LR
-    subgraph Agent["CLI 编码 agent（你这一侧）"]
-        AGT[Codex / Claude Code / …]
-    end
+    P["1 · 感知<br/>Perception"] --> G["2 · 治理<br/>Governance"]
+    G --> D["3 · 沉淀<br/>Durability"]
+    D --> R["4 · 召回<br/>Recall"]
+    R --> Re["5 · 回执<br/>Receipt"]
+    Re -.反馈给.-> M["6 · 维护<br/>Maintenance"]
+    M -.提案回到.-> G
 
-    subgraph AlayaSurface["Alaya agent 接入面"]
-        MCP["MCP stdio server<br/>(alaya mcp stdio)"]
-        CLI["alaya CLI<br/>(tools call --json fallback)"]
-    end
-
-    subgraph Daemon["apps/core-daemon"]
-        ROUTES["Hono HTTP routes<br/>(workspace / config / files / ...)"]
-        TOOLHANDLER["MCP memory tool handler<br/>(8 个 soul.* 工具)"]
-    end
-
-    subgraph Core["packages/core (truth boundary)"]
-        MS["MemoryService"]
-        PS["ProposalService"]
-        CS["ClaimService"]
-        ES["EvidenceService / GreenService /<br/>GovernanceLeaseService / ..."]
-    end
-
-    subgraph Storage["packages/storage"]
-        EL["EventLog<br/>(append-only)"]
-        DB["SQLite<br/>(better-sqlite3, WAL)"]
-        REPOS[("30+ Repos behind<br/>SqliteConnection")]
-    end
-
-    subgraph Soul["packages/soul (Garden)"]
-        AUD["Auditor"]
-        JAN["Janitor"]
-        LIB["Librarian"]
-        SCH["GardenScheduler<br/>(fire-and-forget)"]
-    end
-
-    AGT -->|MCP stdio| MCP
-    AGT -->|可选 fallback| CLI
-    MCP --> TOOLHANDLER
-    CLI --> TOOLHANDLER
-    TOOLHANDLER --> MS
-    TOOLHANDLER --> PS
-    ROUTES --> MS
-    ROUTES --> CS
-    MS --> EL
-    PS --> EL
-    CS --> EL
-    ES --> EL
-    EL --> DB
-    DB --> REPOS
-    EL -.广播.-> SCH
-    SCH --> AUD & JAN & LIB
-    AUD -.提议.-> PS
-    JAN -.热/冷降级.-> MS
-    LIB -.路径压缩.-> MS
+    classDef ph fill:#f6f8fa,stroke:#6e7781,color:#1f2328,font-size:12px
+    P:::ph
+    G:::ph
+    D:::ph
+    R:::ph
+    Re:::ph
+    M:::ph
 ```
 
-写入只发生在 daemon 这一处。Agent 永远不直接碰数据库；它走
-MCP / CLI → daemon → service → EventLog → DB。Garden 角色读 EventLog
-投影、产出新的 proposal（比如证据陈旧度审计），但**绝不绕开治理路径**。
+读法：agent 感知到 → 治理来决定 → 决定落成持久 → 后续的 turn 召
+回 → agent 回报这次召回有没有用上 → 维护去审计、压缩、把发现的问
+题作为"提案"再丢回治理。**没有任何路径可以绕开治理写 durable。**
 
-### 包依赖方向
+### 1. 感知 (Perception)
+
+**这一步在做什么。** Agent 通过 `soul.emit_candidate_signal` 发
+出一个 *candidate signal*——*"我觉得这条值得记"*。信号会被持久
+化（这样它能跨过这一 turn），但 **不会** 修改本体真相。一个
+triage（分诊）步骤决定它的去向：低置信度 + 无证据 → 暂缓；否
+则 → 可能流入 proposal 通道。
+
+**这一步不这么做会出什么问题。** 如果感知阶段就能写 durable，那
+么任何"流畅但错"的断言都会变成事实。模型的自信，就成了系统的真
+相模型。
+
+**设计选择。** 信号即 proposal，不是 fact。把分诊放在边界，而不
+是放到召回时再去补救。信号本身在 **Runtime Control 层** 是持久
+的；本体真相（Memory Ontology 层 / Object · Evidence 轴）在后
+续阶段同意之前完全不动。
+
+*代码锚点：* `packages/core/src/signal-service.ts:80-130`、
+`packages/core/src/signal-service.ts:270-283`（分诊门）。
+
+### 2. 治理 (Governance)
+
+**这一步在做什么。** 经过分诊的信号可以变成 `Proposal`，状态为
+`PENDING`。Reviewer（一个被人指示去复审的 agent，或脚本化的角
+色）调用 `soul.review_memory_proposal`，给出 `accept` 或
+`reject`。Accept 会级联到 Synthesis 晋升、Claim 激活、以及对受
+影响 object 的 karma 记录。
+
+**这一步不这么做会出什么问题。** *"agent 说的"* 不是治理论据。
+没有显式的 accept 步骤，每一次修改都会变成静默 merge。
+
+**设计选择。** Propose / review 是两个独立的 MCP 工具，落在
+**Governance 轴** 上。晋升过程中的状态记账（Synthesis 状态、
+Claim 生命周期、karma）落在 **Memory Ontology 层 / Object 轴**，
+但只通过 proposal-resolution 这条路径才会变。
+
+*v0.1 的诚实说明：* 目前 daemon 这一侧 **没有** 人审专用的待办队
+列或收件箱——review 走的是和 propose 同一个 MCP 通道，也就是说
+HITL 是 *agent 编排* 的，不是 *daemon 编排* 的。把 HITL 做成
+daemon-side 在 [路线图](#接下来的方向) 里。
+
+*代码锚点：*
+`apps/core-daemon/src/mcp-memory-proposal-workflow.ts:90-248`、
+`packages/core/src/proposal-service.ts:218-317`。
+
+### 3. 沉淀 (Durability)
+
+**这一步在做什么。** 治理一旦 accept，变更走一条固定流水线：
+**EventLog append → DB 写入 → 进程内 notify**。EventLog 仅追加，
+是"审计的总账"；DB 是 EventLog 的可查询投影；notify 是进程内对
+后台 listener 的 fan-out（Garden 等）——**不是 SSE，不是网络广
+播**。
+
+**这一步不这么做会出什么问题。** DB-first 的写法意味着审计在追
+赶数据库——而那段缝隙，正是不可追溯状态溜进去的地方。EventLog-
+first 意味着 *audit precedes broadcast*：任何 listener 都不会看
+到 EventLog 无法回放的状态。
+
+**设计选择。** 一个统一的边界
+`EventPublisher.publishWithMutation()`。Durable 写入永远把一行
+EventLog 和 DB 修改成对出现；下游 consumer 订阅的是 notify，不
+是 DB。落在 **Memory Ontology 层（durable truth）+ Runtime
+Control（dispatch）**。
+
+*诚实的差距：* append + mutation 这一对目前还没被包进单一事务。
+v0.1 用 SQLite CAS + `(entity_type, entity_id, revision)` 唯一
+索引来缓解，能防碰撞，但留下一个很小的竞态窗口。把这块收紧在
+[路线图](#接下来的方向) 里。
+
+*代码锚点：* `packages/core/src/event-publisher.ts:40-62`、
+`packages/storage/src/repos/event-log-repo.ts:69-118`。
+
+### 4. 召回 (Recall)
+
+**这一步在做什么。** `soul.recall` 按固定顺序跑四个策略：
+
+1. **Coarse filter（粗筛）** —— 确定性匹配（scope / dimension / domain tags）+ HOT 分层上的预计算激活分。
+2. **FTS 补充** —— 在已筛集合内做全文检索补充。
+3. **Fine assessment（精排）** —— 预算感知的加权排序：`activation × base + relevance + graph support − budget penalty − conflict penalty`。
+4. **Embedding 补充** —— **只做加性 boost，不能 override**。
+
+Agent 收到的是 `delivery_id` 加结果项 + pointers；内部的
+`ContextPack` 投影留在 Alaya 内部，不外送。
+
+**这一步不这么做会出什么问题。** 任何 agent-memory 系统最诱人的
+失败方式，就是让 embedding 决定真相。余弦距离很流畅、很自信，而
+且它是"反向也成立"的——一句意思相反但措辞相似的句子，分数照样
+高。
+
+**设计选择。** Embedding 不能 override 词法 / FTS / path 的排
+序——只能在 base 分数之上加一个被 clamp 过的、加权过的 boost
+（similarity ∈ [0, 1]，权重 0.8）。Embedding 服务缺失、配置错、
+返回为空，召回都会静默回退到词法路径，不抛错。Recall 落在
+**Path 轴**（召回 *本身* 就是 path 在运行时的显化）和 **Runtime
+Control 层**。
+
+*代码锚点：* `packages/core/src/recall-service.ts:189-315`（编
+排）、`packages/core/src/recall-service.ts:501-581`（embedding-
+supplement merge —— 用代码证明 boost 是加性的，永远不 override）。
+
+### 5. 回执 (Receipt)
+
+**这一步在做什么。** Delivery 之后，agent 通过
+`soul.report_context_usage` 回报
+`used | skipped | not_applicable`。Alaya append 一行
+`MEMORY_USAGE_REPORTED` EventLog，并保存一条 `UsageProofRecord`，
+关联回原来的 `delivery_id`。这条数据进入 `TrustSummary` 的计
+算——量化"*delivered ≠ used*"。
+
+**这一步不这么做会出什么问题。** 没有回执，*"delivered"* 会悄悄
+膨胀成 *"useful"*。召回的统计数据会显得很漂亮，因为没有任何东西
+被标为没用过；系统在为 agent 根本没用上的工作给自己鼓掌。
+
+**设计选择。** Receipt 是 **advisory（即发即忘）**——agent 可
+以不报，Alaya 会退化到 `delivered` 这个 trust 状态，不会报错。
+落在 **Evidence 轴**（作为 control-plane 证据）+ **Runtime
+Control 层**。
+
+*v0.1 的诚实差距：* 回执目前喂给 `TrustSummary`，但 **还没喂给
+Path 轴的可塑性**（reinforcement / weakening / redirection /
+retirement）。把这条反馈环接上是 [路线图](#接下来的方向) 里点名
+的优化项。
+
+*代码锚点：* `apps/core-daemon/src/trust-state.ts:147-187`、
+`packages/protocol/src/soul/mcp-types.ts:146`（三态 enum）。
+
+### 6. 维护 (Maintenance)
+
+**这一步在做什么。** Garden 是一个即发即忘的后台系统，按 tier 调
+度四个角色：
+
+- **Auditor** —— 证据陈旧检查、pointer 健康度、孤儿检测。
+- **Janitor** —— TTL 清理、热/温分层降级、休眠标记、墓碑 GC。
+- **Librarian** —— 合并检测、模板聚类、邻居发现、path 压缩。
+- **Scheduler** —— 拥有队列、tier 优先级、冷却期、任务记账。
+
+**这一步不这么做会出什么问题。** 一个直接写 durable 的维护系统，
+等于绕过了治理；一个和召回同步跑的维护系统，等数据集长大就会把召
+回的预算吃光。Garden 哪个都不做。
+
+**设计选择。** Garden 角色 **永远不直接写 durable**。Janitor 和
+Auditor 调用窄口径的 maintenance ports，最终也是走
+`EventPublisher.publishWithMutation()`，所以 EventLog 仍然是审
+计源。Librarian 只生成 *proposals*，把发现的问题再丢回 Governance
+——这正是生命周期图里 Maintenance 的虚线箭头回到 Governance、而
+*不是* 回到 Durability 的原因。Garden 是不变量级别的"即发即忘"：
+**Garden 慢了，召回也不会跟着慢。**
+
+*代码锚点：* `packages/soul/src/garden/auditor.ts:62-89`、
+`packages/soul/src/garden/janitor.ts:83-120`、
+`packages/soul/src/garden/librarian.ts`、
+`apps/core-daemon/src/garden-runtime.ts:98-111`（Scheduler 的
+EventLog 接线）。
+
+---
+
+## 架构总览
+
+各个 package 干净地映射到设计语法上——每一个都拥有特定的
+"层 / 轴"组合，而依赖方向防止 truth boundary 被泄漏。
 
 ```mermaid
 graph TD
-    PROTO["@do-soul/alaya-protocol<br/>(zod-only 叶子)"]
-    STOR["@do-soul/alaya-storage"]
-    GW["@do-soul/alaya-engine-gateway<br/>(只做 provider 路由)"]
-    CORE["@do-soul/alaya-core<br/>(truth boundary)"]
-    SOUL["@do-soul/alaya-soul<br/>(Garden + 反思)"]
-    DAEMON["apps/core-daemon"]
-    INSPECTOR["apps/inspector"]
+    subgraph Surfaces["对外面"]
+        MCPS["MCP stdio<br/>(alaya mcp stdio)"]
+        CLIS["alaya CLI<br/>(11 个动词 · MCP 兜底)"]
+    end
 
-    PROTO --> STOR
-    PROTO --> GW
-    PROTO --> CORE
-    STOR --> CORE
-    GW --> CORE
-    CORE --> SOUL
-    CORE --> DAEMON
-    SOUL --> DAEMON
-    DAEMON -.spawn.-> INSPECTOR
+    subgraph Daemon["apps/core-daemon —— 接线 + 派发"]
+        TH["MCP tool handler<br/>(8 个 soul.* 工具)"]
+        BG["BackgroundServiceManager<br/>(Garden runtime · 即发即忘)"]
+        NOTI["InProcessRuntimeNotifier"]
+    end
+
+    subgraph Core["packages/core —— 真相边界"]
+        SS["SignalService<br/>(感知 · Runtime Control)"]
+        PROP["ProposalService<br/>(治理 · Structure Registry)"]
+        EP["EventPublisher<br/>(沉淀 · 跨轴派发)"]
+        REC["RecallService<br/>(召回 · Path · Runtime Control)"]
+        TR["TrustStateRecorder<br/>(回执 · Evidence)"]
+    end
+
+    subgraph Soul["packages/soul —— Garden"]
+        AUD["Auditor"]
+        JAN["Janitor"]
+        LIB["Librarian"]
+        SCH["GardenScheduler"]
+    end
+
+    subgraph StorageBox["packages/storage —— durable 投影"]
+        EL["EventLog<br/>(append-only · 审计)"]
+        DB["SQLite (WAL)<br/>+ ~57 个迁移"]
+    end
+
+    PROTO["packages/protocol<br/>(zod-only 叶子 · 所有 schema)"]
+
+    MCPS --> TH
+    CLIS --> TH
+    TH --> SS
+    TH --> PROP
+    TH --> REC
+    TH --> TR
+    SS --> EP
+    PROP --> EP
+    REC --> EL
+    TR --> EP
+    EP --> EL
+    EL --> DB
+    EP -.notify.-> NOTI
+    NOTI -.feeds.-> BG
+    BG --> SCH
+    SCH --> AUD & JAN & LIB
+    LIB -.只走 proposal.-> PROP
+
+    PROTO -. zod schemas .-> Core
+    PROTO -. zod schemas .-> Soul
+    PROTO -. zod schemas .-> StorageBox
 ```
 
-CI 测试强制：
+CI 测试强制的规则：
 
-- `@do-soul/alaya-protocol` 只依赖 `zod`，是叶子。
-- 所有领域类型都来自 `@do-soul/alaya-protocol` —— `core`、`storage`、
-  daemon 里**不存在**平行类型定义。
-- `core` 是 truth boundary；storage 是它后面的机械持久化；storage
-  **不决定真相**。
-- 状态变更走 **EventLog → DB 更新 → 广播**，绝不允许 DB-first。
-- Garden 相对请求路径是 fire-and-forget。慢的 Garden 工作不能阻塞
-  recall。
+- `packages/protocol` 只依赖 `zod`——它是叶子，所有其它 package
+  都消费它的类型。
+- `packages/core` 是真相边界。Storage 是它后面的机械化持久层；
+  storage 不决定真相。
+- 状态变更遵循 **EventLog → DB 写 → notify**，永远不是 DB-first。
+- Garden 即发即忘；慢任务不能阻塞召回。
+- `packages/engine-gateway` 只做 provider 路由——没有业务逻辑、
+  没有反向回到 core 的路径。
 
-### SOUL 三层模型
+---
 
-| 层 | 用途 | 关键对象 |
+## 对外面：MCP + CLI
+
+两个对外面，一套 runtime。Agent 走 MCP attach；人走 CLI 脚本。
+两个面都通过同一个 daemon、同一个真相边界。
+
+### MCP 工具（8 个 `soul.*`）
+
+全部 schema-bounded；`maxLength`、`maxItems`、
+`additionalProperties: false` 都是从 zod 请求 schema 派生的，在
+解析时和发布的目录里都强制执行。
+
+| Tool | 阶段 | 修改 durable？ |
 |---|---|---|
-| Memory Ontology | 长期记什么 | `EvidenceCapsule`、`MemoryEntry`、`SynthesisCapsule`、`ClaimForm` |
-| Structure Registry | 对象怎么定位 / 绑定 | `PathRelation`、`ActivationCandidate`、`ManifestationDecision` |
-| Runtime Control Plane | 每一轮怎么组装记忆 | `RecallQuery`、`ContextPack`、`TrustSummary` |
+| `soul.recall` | 召回 | 否 |
+| `soul.open_pointer` | 召回（按 id 读） | 否 |
+| `soul.explore_graph` | 召回（一跳邻居） | 否 |
+| `soul.emit_candidate_signal` | 感知 | 是（proposal-side） |
+| `soul.propose_memory_update` | 治理入口 | 是（proposal-side） |
+| `soul.review_memory_proposal` | 治理裁决 | 是 |
+| `soul.apply_override` | Runtime Control（session 局部，永远不进 durable） | 是（session-scope） |
+| `soul.report_context_usage` | 回执 | 是（audit） |
 
-## MCP 工具面
+`alaya tools list --json` 和 `alaya tools call <tool> '<json>' --json`
+是同一套接口的 CLI 兜底——用来在 agent runtime 之外做脚本化。
 
-8 个工具，每个都有 schema 上限 —— `maxLength`、`maxItems`、
-`additionalProperties: false` 由 zod 请求 schema 派生，并在 parse 期
-与发布的 catalog 里**双向强制**。
+### CLI 命令（11 个动词）
 
-| 工具 | 用途 | 是否会 mutate？ |
-|---|---|---|
-| `soul.recall` | 混合召回：词法 + FTS + 路径感知 +（可选）embedding 补充 | 否 |
-| `soul.open_pointer` | 按 id 读一个记忆对象，仅返回公开投影 | 否 |
-| `soul.explore_graph` | 按边类型 / 方向遍历某记忆节点的邻居；workspace 由 MCP context 绑定 | 否 |
-| `soul.emit_candidate_signal` | 提交一个候选信号 —— agent 的"我觉得这个值得记一下" | 是（提议侧） |
-| `soul.propose_memory_update` | 对一条 memory entry 提出有类型的修改提议 | 是（提议侧） |
-| `soul.review_memory_proposal` | 仲裁一条 proposal：accept / reject（HITL 或治理角色） | 是 |
-| `soul.apply_override` | 对某对象施加会话内的 override | 是（会话作用域） |
-| `soul.report_context_usage` | 闭环一次 recall 投递的使用结果：used / skipped / not_applicable | 是（审计） |
-
-提议或施加 override **本身永远不会**直接修改持久记忆，它们都得走治理
-路径（Promotion Gate / HITL）。Recall 与图遍历是只读的。
-
-`alaya tools list --json` 与 `alaya tools call <tool> '<json>' --json`
-是同一面在 CLI 的 fallback，方便在 agent runtime 之外做脚本调用。
-
-## CLI 命令
-
-总共 11 个动词。所有动词都需要先跑过 `pnpm build`。
-
-| 命令 | 用途 | 是否会 mutate？ | 是否写审计？ |
+| 命令 | 用途 | 修改？ | 审计日志？ |
 |---|---|---|---|
-| `alaya doctor` | 诊断环境、存储健康度、schema 版本、daemon 是否可达 | 否 | 否 |
-| `alaya install` | install profile 的 plan / apply / rollback（db 路径、embedding、engine 绑定） | 是 | 是 |
-| `alaya attach codex` | 把 `mcpServers.alaya` 写进 `~/.codex/config.toml`（preview → confirm → apply） | 是 | 是 |
-| `alaya attach claude-code` | 把 `mcpServers.alaya` 写进 `~/.claude.json`（preview → confirm → apply） | 是 | 是 |
-| `alaya detach codex` / `detach claude-code` | 原子地反向撤销对应的 attach | 是 | 是 |
-| `alaya status` | daemon 健康 + 信任状态摘要 | 否 | 否 |
-| `alaya inspect` | 在 loopback 打开 Memory Inspector SPA（记忆工具化面） | 否 | 否 |
-| `alaya tools list` | 列 MCP 工具目录（CLI 走 `tools/list` 的 fallback） | 否 | 否 |
-| `alaya tools call <tool> '<json>'` | 从 CLI 调一个工具；适合脚本与 CI | 视工具 | 视工具 |
-| `alaya backup --output <path>` | 可移植备份包（带签名） | 否 | 是 |
-| `alaya export --output <path>` / `import --bundle <path>` | 可移植导出 / 还原 | export 否，import 是 | 是 |
-| `alaya mcp stdio` | 跑 daemon 的 MCP stdio server（这是 `attach` 实际接到的命令） | 否 | 否 |
+| `alaya doctor` | 诊断环境、storage 健康、schema 版本、daemon 可达性 | 否 | 否 |
+| `alaya install` | 规划 / 应用 / 回滚一份安装 profile | 是 | 是 |
+| `alaya attach codex` | 给 `~/.codex/config.toml` 写 `mcpServers.alaya` | 是 | 是 |
+| `alaya attach claude-code` | 给 `~/.claude.json` 写 `mcpServers.alaya` | 是 | 是 |
+| `alaya detach codex` / `detach claude-code` | 原子地反向解除对应的 attach | 是 | 是 |
+| `alaya status` | Daemon 健康 + trust-state 摘要 | 否 | 否 |
+| `alaya inspect` | 在 loopback 上打开 Memory Inspector SPA（memory-tooling，*不是* agent surface） | 否 | 否 |
+| `alaya tools list` | 列 MCP 工具目录 | 否 | 否 |
+| `alaya tools call <tool> '<json>'` | 从 CLI 调一个工具 | 视情况 | 视情况 |
+| `alaya backup --output <path>` | 可携带备份包（已签名） | 否 | 是 |
+| `alaya export --output <path>` / `import --bundle <path>` | 可携带导出 / 导入 | 导出否 / 导入是 | 是 |
+| `alaya mcp stdio` | 跑 daemon 的 MCP stdio 服务（attach 接的就是这个） | 否 | 否 |
 
-每个 mutating 动词都支持 preview-before-write。`attach` 与 `detach`
-是原子的。审计日志在 `~/.config/alaya/audit/`，可以随时回查改了什么、
-什么时候改的。
+每个会修改的动词都支持先 preview 再写。`attach` 和 `detach` 是
+原子的。审计日志在 `~/.config/alaya/audit/`。
+
+---
 
 ## 快速开始
 
-除了 `git`、Node 20+ 与 pnpm 9+ 之外不需要任何额外依赖。`CLAUDE.md`
-里出现的 `rtk` 是 Claude Code 上下文里的可选优化；裸 `pnpm` 也可以
-跑通。
+不需要 `git`、Node 20+、pnpm 9+ 之外的任何东西。`CLAUDE.md` 里
+的 `rtk` 引用是 Claude Code 的 token 优化，纯 `pnpm` 同样能跑。
 
 ```bash
-# 1) Clone
+# 1) clone
 git clone https://github.com/tdwhere123/Do-SOUL-Alaya.git
 cd Do-SOUL-Alaya
 
-# 2) 检查宿主版本
+# 2) 检查宿主依赖
 node --version    # >= 20.19.0
 pnpm --version    # >= 9
 
-# 3) 安装 workspace 依赖
+# 3) 装依赖
 pnpm install
 
-# 4) 构建（编译每个包；产出 apps/core-daemon/dist/）
+# 4) build（编译每个 package；产物在 apps/core-daemon/dist/）
 pnpm build
 
-# 5) Doctor —— 验证 env、storage schema_ok、daemon 是否可达
+# 5) doctor —— 验证环境、storage schema_ok、daemon 可达性
 pnpm alaya doctor
-#   预期: checks.environment = ok, storage.schema_ok = true（已配置时）。
-#   fresh clone 时 garden 可能是 `degraded`，doctor 退出码 75 —— 这只是
-#   提示性状态，不是 hard failure。daemon 起来之后（attach 把它接到 agent）
-#   garden 会变 ok。
+#   期望：checks.environment = ok，storage.schema_ok = true（已配置情况下）
+#   全新 clone 时，daemon 没起，garden 状态会读到 `degraded`，
+#   doctor 退码 75。这是 advisory，不是硬错。
 
-# 6) install profile —— 在你给的路径创建 alaya.db，并写入审计日志
+# 6) install 一份 profile —— 在指定路径建 alaya.db 并写 audit log
 pnpm alaya install --non-interactive '{"db_path":"./alaya.db","embedding_enabled":false}'
-#   如果你已经在 ~/.config/alaya/ 下有 config，跳过这步即可。
+#   如果 ~/.config/alaya/ 下已有配置，可以跳过这步。
 
-# 7) Attach 到你的 agent —— 写入 ~/.claude.json（或 ~/.codex/config.toml）
-pnpm alaya attach claude-code      # preview → confirm → apply
-#   想撤销随时: pnpm alaya detach claude-code
+# 7) attach 你的 agent —— 写 ~/.claude.json（或 ~/.codex/config.toml）
+pnpm alaya attach claude-code      # preview，确认，再 apply
+#   随时可以用 `pnpm alaya detach claude-code` 干净撤销。
 
-# 8) 第一次工具调用 —— 端到端验 MCP 面
+# 8) 第一次 tool call —— 端到端验证 MCP 接口
 pnpm alaya tools list --json | jq '.tools | length'
-#   预期: 8
+#   期望：8
 
 pnpm alaya tools call soul.recall \
   '{"query":"hello","scope_class":null,"dimension":null,"domain_tags":null,"max_results":5}' \
   --json
-#   预期: { "delivery_id": "...", "results": [...], "total_count": <int> }
+#   期望：{ "delivery_id": "...", "results": [...], "total_count": <int> }
 ```
 
-第 7 步之后，下一次启动 agent 时它就会把 Alaya 当作 MCP server 看到；
-agent 内部就可以调那 8 个 `soul.*` 工具了。
+走完第 7 步，agent 下次启动就会把 Alaya 当 MCP server 看，8 个
+`soul.*` 工具在 agent 内部就可以调了。
 
-**任何一步出错时：**
+**某一步失败时：**
 
-- `pnpm alaya doctor` 会告诉你哪一项 check 失败（env、storage、daemon、
-  mcp transport）。这是排查的第一站。
-- `pnpm alaya install --plan-only '<json>'` 在 apply 之前先看 diff。
-- `pnpm alaya detach codex`（或 `claude-code`）原子地反向撤销 attach；
-  自带审计条目。
-- 存储跑过会留 `alaya.db.shm` / `alaya.db.wal` —— 那是 WAL 工作状态，
-  不是损坏。`alaya doctor` 会在 schema 版本对不上时告警。
+- `pnpm alaya doctor` 会告诉你具体哪一项检查失败（环境、storage、
+  daemon、MCP 传输）——第一站。
+- `pnpm alaya install --plan-only '<json>'` 在 apply 前看 diff。
+- `pnpm alaya detach codex`（或 `claude-code`）原子撤销 attach，
+  并写自己的审计条目。
+- Storage 看上去出问题时，`alaya.db.shm` / `alaya.db.wal` 是 WAL
+  正在工作，不是损坏。`alaya doctor` 会在 schema 版本对不上时
+  告警。
 
-## 项目目录结构
+---
+
+## 仓库布局
 
 ```
 Do-SOUL Alaya/
 ├── apps/
 │   ├── core-daemon/             Hono HTTP + MCP stdio + CLI 入口
-│   └── inspector/               Memory Inspector SPA（loopback 记忆工具化，**不是** agent 面）
+│   └── inspector/               Memory Inspector SPA（loopback memory-tooling，不是 agent surface）
 ├── packages/
-│   ├── alaya-protocol/          zod schemas（truth boundary 叶子）
-│   ├── alaya-storage/           SQLite + ~57 条有序 migration
-│   ├── alaya-core/              services（memory / proposal / claim / evidence / green / ...）
-│   ├── alaya-soul/              Garden 角色 + 反思
-│   └── alaya-engine-gateway/    provider 路由（无业务逻辑）
+│   ├── alaya-protocol/          zod schema（真相边界的叶子）
+│   ├── alaya-storage/           SQLite + ~57 个有序迁移
+│   ├── alaya-core/              services（signal / proposal / claim / evidence / recall / trust / ...）
+│   ├── alaya-soul/              Garden 角色（Auditor / Janitor / Librarian / Scheduler）
+│   └── alaya-engine-gateway/    只做 provider 路由（没有业务逻辑）
 ├── docs/
-│   ├── handbook/                开发者文档导航
-│   │   ├── README.md
-│   │   ├── invariants.md
-│   │   ├── port-protocol.md
-│   │   ├── code-map.md
-│   │   ├── runtime-status.md
-│   │   ├── backlog.md
-│   │   └── workflow/            agent-workflow / review-protocol / subagent-dispatch
-│   └── v0.1/                    port 任务卡（INDEX.md 是入口）
-├── vendor/
-│   └── do-what-new-snapshot/    冻结的上游源（port-first 的参照）
-├── bin/alaya.mjs                CLI shim（`pnpm alaya …` 调它）
+│   └── handbook/                invariants、code-map、runtime-status、workflow
+├── bin/alaya.mjs                CLI shim（`pnpm alaya …` 用的就是它）
 ├── README.md / README.zh-CN.md
 ├── CLAUDE.md                    给 agent 贡献者的指引
 └── LICENSE
 ```
 
-## 状态与路线图
+---
 
-这一节实事求是 —— 哪些做完了、哪些没做，写清楚。**不要被任何
-"production-ready" badge 误导**。
+## 接下来的方向
 
-### v0.1.0 —— 已发布
+三个前向目标。系统今天已经在跑了；这是我接下来要继续拽的线头。
 
-- HEAD `ac87e16`，发布日 2026-05-03
-- Gate-5 已 close；**p5-system-review** 经 3 轮收敛（~37 条 atomic fix-commits）
-- 248 个测试文件、**1917 个测试通过**
-- 11 个 CLI 子命令全部接通
-- 8 个 `soul.*` MCP 工具全部接通
-- **Open backlog: 0**
-- 防御性不变式入册：§21a（受众）、§29（默认作用域）、§30（在源头修复）、§31（单一并发源）
+### 1. 架构层面的细节优化
 
-### v0.1.1 —— 规划中（Phase 6 marketing benchmark wave）
+形是对的；接缝处的贴合还没完全统一。具体在跟进的事：
 
-5 张 task card，全部当前 `not-started`：
+- **沉淀阶段的原子性** —— 把 `EventPublisher` 的 append +
+  mutation 包进单一 `connection.transaction()`。关掉那个目前靠
+  唯一索引兜底的小竞态窗口。
+- **Daemon 端的人审收件箱** —— 把 HITL 从 *agent 编排* 升级成
+  *daemon 编排*：一个待审 proposals 队列，能显式分配 reviewer，
+  而不是和 propose 共用同一个 MCP 工具。
+- **文件形态卫生** —— 拆几个长得过大的 service 文件，把意图模糊
+  的文件名换成意图明确的。这一类不改行为，只为后续每一次改动减
+  低成本。
 
-- `bench-adapter` —— 接到用户选定的 OpenRouter 模型
-- `bench-harness` —— 评测框架
-- `bench-baselines` —— baseline 数据
-- `bench-resume` —— 恢复机制
-- `bench-readme` —— leaderboard 模板（这份 README 在这一步会补上真实数字）
+### 2. 关键路径的优化（首先是召回）
 
-外加 `#BL-017` hygiene wave（重命名 `phase-*.ts`、拆分五个超大文件、
-清 `ts-prune` 残留、刷 code-map）。
+召回是 Alaya 最显眼、最容易被评判的那一面。三个线头：
 
-**目前没有 leaderboard。** 这份 README 在 v0.1.1 落地之前**不会**显示
-任何 benchmark 数字。
+- **Path 轴可塑性** —— 把 `soul.report_context_usage` 的回执接
+  进 reinforcement / weakening / redirection / retirement。今
+  天回执只喂 `TrustSummary`，可塑性这条反馈环虽然设计好了但还
+  没接通。
+- **Embedding 策略** —— 保持"补充而非裁判"，但去做实验：boost
+  权重、补充上限、按 domain 标定。
+- **召回预算成形** —— 让 budget penalty 的衰减计划反映 agent 真
+  实的上下文窗口成本，而不是一个静态常数。
 
-### v0.2 —— 已 deferred（每条都有显式 close condition）
+### 3. 接 `pi-mono` → 以记忆为核心的 agent
 
-| 编号 | 推迟内容 | 关闭条件 |
-|---|---|---|
-| `#BL-008` | `pi-mono` 集成（替代上游 `provider/ai-sdk-*.ts` 路由） | v0.2 把 synthesis / proposal scoring / reflection 路由经过 `pi-mono`。 |
-| `#BL-009` | OS keychain 支持 | 加 macOS Keychain / Linux libsecret / Windows Credential Manager 适配；`secret-ref` 语法扩展到 `keychain:<service>:<account>`。 |
-| `#BL-022` | EventPublisher 原子化 + EventLog revision 进事务 | 新增 `EventPublisherEventLogRepoPort.appendManyWithMutation`（同步 mutate 包在单个 `connection.transaction()`）；EventLog revision 计算挪进事务内；约 12 个调用点迁移。 |
+更长期的愿景是 **以记忆为核心的 agent**——它的内循环是围绕"读
+和写记忆"展开的，而不是围绕聊天。朝这个方向的第一个短期步骤是把
+[`pi-mono`](https://github.com/badlogic/pi-mono) 接进来作为 LLM
+provider 抽象。`packages/engine-gateway` 变成一个 `pi-mono` 客
+户端；synthesis、proposal scoring、reflection 全部走一个干净的
+provider 边界，而不是各种 `provider/ai-sdk-*.ts` 适配器。
 
-在 v0.2 落地之前，`#BL-022` 用 SQLite CAS + migration 028 加的
-`unique(entity_type, entity_id, revision)` 索引兜底，外加 invariants
-§"EventPublisher mutation audit-id divergence"（`#BL-021`）显式登记
-divergence。
+那条边界一旦干净，把"以记忆为核心的 agent"搭在上面，比今天小得
+多。
 
-## 这套代码是怎么来的
-
-Alaya 是 `do-what-new` 项目记忆子系统的 **port**，**不是 clean-room
-rewrite**。这是有意为之，读代码前最好先理解清楚。
-
-冻结的上游快照在 `vendor/do-what-new-snapshot/` ——
-`vendor/do-what-new-snapshot/SNAPSHOT_REF.md` 里写明了源 commit hash
-跟稳定性承诺。
-
-纪律（详见 `docs/handbook/port-protocol.md`）：
-
-- **trivial-copy**（默认）：原样拷文件，只改 package 名 / import 路径。
-- **adapt-and-port**（受限）：仅当目标接口不同（比如要注入
-  `SqliteConnection`）才允许；每个 adapter 点都列在 task card 里。
-- **requires-redesign**（少见）：默认禁止；需要用户显式批准 + Charter
-  Authority 引用。
-
-**为什么坚持 port-first 而非重写：**
-
-- 上游子系统在 `do-what-new` 里已经被多个发布周期打磨过了。从零
-  re-derive 它的所有决策，会损失数月去逐个重新发现潜伏 bug。
-- Alaya 独有的接入面（CLI、install / attach / detach、doctor、Memory
-  Inspector、profile / audit）**确实**是 greenfield —— 但它们包在
-  port 好的核心外面，并不替代核心。
-
-**坦诚承认的 tradeoff：**
-
-- 一些上游的 tech-debt 跟着进来了（`phase-*.ts` 之类的命名、过大的
-  文件）。已经登记为 `#BL-017`，跟 Phase 6 同船在 v0.1.x 的 hygiene
-  wave 里收掉。
-- v0.1 阶段我们选的是速度优先而非局部最优。第一次值得做大重构的
-  时间点是 Gate-5 close —— 而那个时机我们正好通过 `#BL-017` wave
-  顺手获得了。
+---
 
 ## 贡献
 
-欢迎外部 PR，但必须遵守 Port-First 纪律。具体地：
+欢迎 PR。开 PR 之前：
 
-1. 按这个顺序读入门文档：
-   `docs/handbook/README.md` → `docs/handbook/invariants.md` →
-   `docs/handbook/port-protocol.md` → `docs/v0.1/INDEX.md` → 你打算
-   认领的具体 task card。
-2. 涉及 `packages/*` 或 `apps/core-daemon/src/` 的改动，PR 必须证明
-   目标文件逻辑与 `vendor/do-what-new-snapshot/<src>` 字节相同
-   （trivial-copy），或列出每一个 adapter 点（adapt-and-port）。
-3. 不要写一个"更好的"重新实现去替换
-   `vendor/do-what-new-snapshot/` 里已有的文件 —— 这种 PR 不论代码
-   质量如何都会被拒。
-4. `pnpm build` 跟 `pnpm test` 必须双绿；Review Protocol checklist
-   （`docs/handbook/workflow/review-protocol.md`）必须报告 0 条
-   Blocking / Important。
+1. 先读 `docs/handbook/invariants.md`——架构上的不可让步项
+   （真相边界、轴、EventLog 顺序、Garden 隔离）。
+2. 本地跑 `pnpm build` 和 `pnpm test`，必须都绿。
+3. 改 `packages/*` 或 `apps/core-daemon/src/` 的时候，把改动收
+   敛在 PR 描述里点名的范围内——不要在同一个 PR 里顺手重构邻
+   近文件。
+4. 新行为至少要带一个测试：在你的修改之前会失败、之后会通过。
 
-对于 Alaya 独有的接入面（CLI、install / attach / detach、Memory
-Inspector 前端）路径不同 —— 那些是 `requires-redesign` 卡。详见
-不变式 §24。
+涉及更大结构（新增一个 MCP 工具、新增一个 Garden 角色、新增一种
+跨轴交互）——先开 issue 对齐形态。
+
+---
 
 ## 致谢
 
-- [`do-what-new`](https://github.com/tdwhere123) —— 上游项目；这里
-  的记忆子系统是它的 port。
-- [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) ——
-  本地 SQLite 驱动。
-- [`Hono`](https://hono.dev) —— daemon 的 HTTP 框架。
-- [`zod`](https://zod.dev) 与
-  [`zod-to-json-schema`](https://github.com/StefanTerdell/zod-to-json-schema)
-  —— 公开 MCP catalog 的 single source of truth。
-- [`Vitest`](https://vitest.dev)、[`pnpm`](https://pnpm.io)、
-  [`tsup`](https://tsup.egoist.dev)，以及 Model Context Protocol 规范。
+- [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) —— 本地 SQLite 驱动。
+- [`Hono`](https://hono.dev) —— daemon 用的 HTTP 框架。
+- [`zod`](https://zod.dev) 与 [`zod-to-json-schema`](https://github.com/StefanTerdell/zod-to-json-schema) —— 公开 MCP 目录的单一真相源。
+- [`Vitest`](https://vitest.dev)、[`pnpm`](https://pnpm.io)、[`tsup`](https://tsup.egoist.dev)，以及 Model Context Protocol 规范。
+
+---
 
 ## License
 
