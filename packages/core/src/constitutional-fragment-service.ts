@@ -24,6 +24,12 @@ export interface ConstitutionalFragmentStorePort {
     fragmentId: ConstitutionalFragment["fragment_id"]
   ): Promise<Readonly<ConstitutionalFragment> | null>;
   register(fragment: ConstitutionalFragment): Promise<Readonly<ConstitutionalFragment>>;
+  /**
+   * Sync sibling for use inside `EventPublisher.appendManyWithMutation`
+   * (#BL-022). The hydrate path that runs the registration mutation in the
+   * same transaction as the EventLog append needs a synchronous insert.
+   */
+  registerSync(fragment: ConstitutionalFragment): Readonly<ConstitutionalFragment>;
   findByWorkspace(workspaceId: string): Promise<readonly Readonly<ConstitutionalFragment>[]>;
   findByCategory(
     workspaceId: string,
@@ -37,7 +43,7 @@ export interface ConstitutionalFragmentEventLogReaderPort {
 
 export interface ConstitutionalFragmentServiceDependencies {
   readonly fragmentStore: ConstitutionalFragmentStorePort;
-  readonly eventPublisher: Pick<EventPublisher, "publishWithMutation">;
+  readonly eventPublisher: Pick<EventPublisher, "appendManyWithMutation">;
   readonly eventLogReader?: ConstitutionalFragmentEventLogReaderPort;
   readonly now?: () => string;
   readonly generateFragmentId?: (
@@ -106,12 +112,10 @@ export class ConstitutionalFragmentService {
       this.resolveFragmentId(parsedRequest),
       readNow(this.deps.now)
     );
-    const stored = await this.deps.eventPublisher.publishWithMutation(
-      createConstitutionalFragmentRegisteredEvent(fragment),
-      async () => await this.hydrate(fragment)
+    return await this.deps.eventPublisher.appendManyWithMutation(
+      [createConstitutionalFragmentRegisteredEvent(fragment)],
+      () => this.hydrateSync(fragment)
     );
-
-    return stored;
   }
 
   public async listForWorkspace(
@@ -147,6 +151,12 @@ export class ConstitutionalFragmentService {
     fragment: ConstitutionalFragment
   ): Promise<Readonly<ConstitutionalFragment>> {
     return parseFragment(await this.deps.fragmentStore.register(parseFragment(fragment)));
+  }
+
+  private hydrateSync(
+    fragment: ConstitutionalFragment
+  ): Readonly<ConstitutionalFragment> {
+    return parseFragment(this.deps.fragmentStore.registerSync(parseFragment(fragment)));
   }
 
   private async loadFromDurableRegistration(
