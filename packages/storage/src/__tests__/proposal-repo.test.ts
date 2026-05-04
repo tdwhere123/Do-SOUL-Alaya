@@ -54,10 +54,12 @@ describe("SqliteProposalRepo", () => {
     ).resolves.toEqual(proposal);
 
     await expect(repo.findById(proposal.proposal_id)).resolves.toEqual(proposal);
+    // A1: ScopedProposal now carries reviewer_identity (null until reviewed).
     await expect(repo.findScopedById(proposal.proposal_id)).resolves.toEqual({
       proposal,
       workspace_id: "workspace-1",
-      run_id: "run-1"
+      run_id: "run-1",
+      reviewer_identity: null
     });
   });
 
