@@ -22,7 +22,8 @@ const gardenTaskKindValues = [
   "path_compression",
   "template_candidate",
   "synthesis_review",
-  "embedding_backfill"
+  "embedding_backfill",
+  "path_plasticity_update"
 ] as const;
 
 export const GardenRole = {
@@ -56,7 +57,8 @@ export const GardenTaskKind = {
   PATH_COMPRESSION: "path_compression",
   TEMPLATE_CANDIDATE: "template_candidate",
   SYNTHESIS_REVIEW: "synthesis_review",
-  EMBEDDING_BACKFILL: "embedding_backfill"
+  EMBEDDING_BACKFILL: "embedding_backfill",
+  PATH_PLASTICITY_UPDATE: "path_plasticity_update"
 } as const;
 
 export const GardenRoleSchema = z.enum(gardenRoleValues);
@@ -99,7 +101,8 @@ const auditorTaskKinds = Object.freeze([
   GardenTaskKind.CRYSTALLIZATION_SCAN,
   GardenTaskKind.POINTER_HEALING,
   GardenTaskKind.ORPHAN_DETECTION,
-  GardenTaskKind.EVENT_LOG_ORPHAN_DETECTION
+  GardenTaskKind.EVENT_LOG_ORPHAN_DETECTION,
+  GardenTaskKind.PATH_PLASTICITY_UPDATE
 ] as const);
 const librarianTaskKinds = Object.freeze([
   ...auditorTaskKinds,

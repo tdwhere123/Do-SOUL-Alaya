@@ -19,6 +19,7 @@ import { loadGlobalRecallCandidates } from "./global-memory-recall-service.js";
 import { STRATEGY_RECALL_DEFAULTS, type NodeStrategy } from "./task-surface-builder.js";
 import {
   EMBEDDING_SIMILARITY_WEIGHT,
+  PATH_PLASTICITY_WEIGHT,
   applySimilarityBoost,
   assertActivationWeightsSumToOne,
   assignManifestation,
@@ -388,10 +389,34 @@ export class RecallService {
       budgetPenaltyFactor = mapBudgetPenalty(snapshot);
     }
 
+    let plasticityFactors: Readonly<Record<string, number>> = Object.freeze({});
+    if (this.dependencies.pathPlasticityPort !== undefined && params.candidates.length > 0) {
+      try {
+        const strengthMap = await this.dependencies.pathPlasticityPort.getStrengthByMemoryId(
+          params.workspaceId,
+          params.candidates.map((candidate) => candidate.object_id)
+        );
+        plasticityFactors = Object.freeze(
+          Object.fromEntries(
+            [...strengthMap.entries()].map(([memoryId, strength]) => [memoryId, clamp01(strength)])
+          )
+        );
+      } catch (error) {
+        // Plasticity is a recall supplement; a port failure must not block
+        // the recall request. Fall back to no plasticity boost.
+        this.warn("path plasticity port lookup failed", {
+          workspace_id: params.workspaceId,
+          candidate_count: params.candidates.length,
+          error: toErrorMessage(error)
+        });
+      }
+    }
+
     return Object.freeze({
       ftsRanks: params.coarseFtsRanks,
       graphSupportCounts: Object.freeze(graphSupportCounts),
-      budgetPenaltyFactor
+      budgetPenaltyFactor,
+      plasticityFactors
     });
   }
 
@@ -706,6 +731,10 @@ export class RecallService {
     const relevanceFactor = supplementaryData.ftsRanks[entry.object_id] ?? 0;
     const graphSupportFactor = normalizeGraphSupport(supplementaryData.graphSupportCounts[entry.object_id] ?? 0);
     const budgetPenalty = supplementaryData.budgetPenaltyFactor;
+    // PathPlasticity is supplementary, like the embedding similarity hint:
+    // it boosts the score additively but the final value is still clamp01,
+    // so a small plasticity boost cannot override a large lexical-rank gap.
+    const plasticityFactor = clamp01(supplementaryData.plasticityFactors[entry.object_id] ?? 0);
     const conflictPenalty =
       config.conflict_awareness &&
       isClaimLikeDimension(entry.dimension) &&
@@ -722,7 +751,8 @@ export class RecallService {
     return clamp01(
       activationScore * baseWeight +
         relevanceFactor * weights.relevance +
-        graphSupportFactor * weights.graph_support -
+        graphSupportFactor * weights.graph_support +
+        plasticityFactor * PATH_PLASTICITY_WEIGHT -
         budgetPenalty * weights.budget_penalty -
         conflictPenalty * weights.conflict_penalty
     );

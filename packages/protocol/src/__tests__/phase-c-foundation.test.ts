@@ -232,7 +232,12 @@ describe("Phase C shared-contract foundation", () => {
       stable_to_pinned_support_count: 50,
       retirement_cooldown_ms: 7 * 24 * 3600 * 1000,
       consolidation_fuse_max_retries: 3,
-      consolidation_fuse_cooldown_ms: 60_000
+      consolidation_fuse_cooldown_ms: 60_000,
+      // A3: feedback-loop-specific tuning (see DYNAMICS_CONSTANTS comment).
+      strength_floor: 0,
+      strength_ceiling: 1,
+      retirement_strength_threshold: 0.05,
+      retirement_inactivity_ms: 30 * 24 * 3600 * 1000
     });
     expect(Object.isFrozen(DYNAMICS_CONSTANTS.path_plasticity)).toBe(true);
   });

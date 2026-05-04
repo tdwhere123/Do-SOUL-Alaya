@@ -53,7 +53,19 @@ export const DYNAMICS_CONSTANTS = Object.freeze({
     stable_to_pinned_support_count: 50,
     retirement_cooldown_ms: 7 * 24 * 3600 * 1000,
     consolidation_fuse_max_retries: 3,
-    consolidation_fuse_cooldown_ms: 60_000
+    consolidation_fuse_cooldown_ms: 60_000,
+    // A3: feedback-loop-specific tuning. The reinforcement_increment /
+    // weakening_decrement above stay authoritative for delta math; these
+    // additional constants only cover concerns the existing keys do not
+    // describe (clamping, retirement preconditions). The 30-day inactivity
+    // window (vs the 7-day retirement_cooldown_ms above) is intentional:
+    // retirement_cooldown_ms is the post-retirement re-arm window, while
+    // retirement_inactivity_ms is the inactivity required to *trigger*
+    // retirement on a strength<=threshold path.
+    strength_floor: 0,
+    strength_ceiling: 1,
+    retirement_strength_threshold: 0.05,
+    retirement_inactivity_ms: 30 * 24 * 3600 * 1000
   })
 } as const);
 
