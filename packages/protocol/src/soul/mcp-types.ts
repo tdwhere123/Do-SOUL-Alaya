@@ -149,9 +149,16 @@ export const SoulPendingProposalSummarySchema = z
   .strict()
   .readonly();
 
+// A1 fix-loop (finding-2): workspace_id intentionally omitted, mirroring
+// SoulExploreGraphRequestSchema. The daemon binds workspace from the
+// trusted MCP call context (invariants §29 Default Scope; F-r2-001).
+// Re-publishing workspace_id here would force every attached agent to
+// learn its own workspace and pass it back, opening a prompt-inject
+// vector ("now pass workspace_id=foreign") even though the runtime
+// guard catches the spoof. Public surface stays consistent with every
+// other write tool that elides workspace_id.
 export const SoulListPendingProposalsRequestSchema = z
   .object({
-    workspace_id: BoundedIdSchema,
     since: z.string().datetime().nullable().optional(),
     limit: z.number().int().min(1).max(100).optional()
   })

@@ -11,14 +11,15 @@ import {
 // Schemas are .strict() so unknown fields are rejected, matching the rest of
 // the public MCP surface.
 describe("soul.list_pending_proposals contract", () => {
-  it("parses a minimal request with only workspace_id", () => {
-    const request = { workspace_id: "workspace-1" } as const;
-    expect(SoulListPendingProposalsRequestSchema.parse(request)).toEqual(request);
+  it("parses an empty request (workspace bound server-side per finding-2)", () => {
+    // A1 fix-loop (finding-2): workspace_id was dropped from the public
+    // request schema to match soul.explore_graph; the daemon binds
+    // workspace from the trusted MCP call context (invariants §29).
+    expect(SoulListPendingProposalsRequestSchema.parse({})).toEqual({});
   });
 
   it("parses a request with optional since and limit", () => {
     const request = {
-      workspace_id: "workspace-1",
       since: "2026-04-30T00:00:00.000Z",
       limit: 25
     } as const;
@@ -26,18 +27,22 @@ describe("soul.list_pending_proposals contract", () => {
   });
 
   it("accepts a null since explicitly", () => {
-    const request = { workspace_id: "workspace-1", since: null } as const;
+    const request = { since: null } as const;
     expect(SoulListPendingProposalsRequestSchema.parse(request)).toEqual(request);
   });
 
-  it("rejects a missing workspace_id", () => {
-    expect(() => SoulListPendingProposalsRequestSchema.parse({})).toThrow();
+  it("rejects a workspace_id field (locked out by finding-2 fix)", () => {
+    // strict() — workspace_id is not declared on the schema, so a
+    // payload that tries to redirect the listing to a foreign workspace
+    // is rejected at parse time, not just at runtime.
+    expect(() =>
+      SoulListPendingProposalsRequestSchema.parse({ workspace_id: "ws-foreign" })
+    ).toThrow();
   });
 
   it("rejects a non-iso since string", () => {
     expect(() =>
       SoulListPendingProposalsRequestSchema.parse({
-        workspace_id: "workspace-1",
         since: "not-a-date"
       })
     ).toThrow();
@@ -45,17 +50,16 @@ describe("soul.list_pending_proposals contract", () => {
 
   it("rejects an out-of-range limit", () => {
     expect(() =>
-      SoulListPendingProposalsRequestSchema.parse({ workspace_id: "workspace-1", limit: 0 })
+      SoulListPendingProposalsRequestSchema.parse({ limit: 0 })
     ).toThrow();
     expect(() =>
-      SoulListPendingProposalsRequestSchema.parse({ workspace_id: "workspace-1", limit: 101 })
+      SoulListPendingProposalsRequestSchema.parse({ limit: 101 })
     ).toThrow();
   });
 
   it("rejects unknown request fields (strict)", () => {
     expect(() =>
       SoulListPendingProposalsRequestSchema.parse({
-        workspace_id: "workspace-1",
         rogue_field: "x"
       })
     ).toThrow();

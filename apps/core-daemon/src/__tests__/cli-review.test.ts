@@ -40,10 +40,14 @@ describe("alaya review (A1)", () => {
     const result = await command.handler(createContext({ stdout }), parsed.data);
     expect(result.exitCode).toBe(ALAYA_SYSEXITS.OK);
     expect(stdoutChunks.join("")).toContain("prop-1");
+    // A1 fix-loop (finding-2): workspace_id no longer in the request
+    // payload; it is bound from the McpMemoryToolCallContext that the
+    // CLI builds from defaultWorkspaceId / env / overrides.
     expect(handler.call).toHaveBeenCalledWith(
       expect.objectContaining({
         toolName: "soul.list_pending_proposals",
-        arguments: { workspace_id: "ws1", limit: 10 }
+        arguments: { limit: 10 },
+        context: expect.objectContaining({ workspaceId: "ws1" })
       })
     );
   });

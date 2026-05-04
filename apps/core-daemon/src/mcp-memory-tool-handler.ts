@@ -333,16 +333,11 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     if (deps.proposalWorkflow === undefined) {
       throw new ToolUnavailableError("Memory proposal workflow is not available.");
     }
-    // SECURITY (invariants §29 Default Scope, p5-system-review-r2 F-r2-001):
-    // even though the request schema accepts workspace_id (so the CLI/
-    // Inspector callers can pass it explicitly), the handler enforces
-    // that it matches the trusted MCP call context. An attached agent
-    // cannot redirect the listing to a foreign workspace.
-    if (request.workspace_id !== context.workspaceId) {
-      throw new ToolValidationError(
-        "soul.list_pending_proposals workspace_id must match the MCP call context."
-      );
-    }
+    // A1 fix-loop (finding-2): workspace_id has been removed from the
+    // public request schema; workspace is bound from the trusted MCP
+    // call context. The previous handler-level "must match" guard is
+    // therefore unnecessary — the workflow reads context.workspaceId
+    // directly. Pattern matches soul.explore_graph.
     const result = await deps.proposalWorkflow.listPendingProposals(request, context);
     return SoulListPendingProposalsResponseSchema.parse({
       proposals: result.proposals,

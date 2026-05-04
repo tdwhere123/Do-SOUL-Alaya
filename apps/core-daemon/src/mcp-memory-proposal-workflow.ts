@@ -286,15 +286,16 @@ export function createMcpMemoryProposalWorkflow(
 
   async function listPendingProposals(
     input: SoulListPendingProposalsRequest,
-    _context: McpMemoryToolCallContext
+    context: McpMemoryToolCallContext
   ): Promise<Readonly<{
     readonly proposals: readonly Readonly<SoulPendingProposalSummary>[];
     readonly total_count: number;
   }>> {
-    // Workspace identity is enforced by the handler before calling in
-    // (request.workspace_id must equal context.workspaceId), so the
-    // workflow can trust input.workspace_id here.
-    const summaries = await deps.proposalRepo.findPendingSummaries(input.workspace_id, {
+    // A1 fix-loop (finding-2): workspace_id is server-bound from the
+    // trusted MCP call context (invariants §29 Default Scope) and is
+    // no longer present on the request schema. The workflow forwards
+    // context.workspaceId — never input — to the repo.
+    const summaries = await deps.proposalRepo.findPendingSummaries(context.workspaceId, {
       since: input.since ?? null,
       limit: input.limit ?? 50
     });

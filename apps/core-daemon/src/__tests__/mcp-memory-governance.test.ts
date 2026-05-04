@@ -505,7 +505,9 @@ describe("mcp memory governance — soul.list_pending_proposals (A1)", () => {
     });
 
     const result = await workflow.listPendingProposals(
-      { workspace_id: "ws1", since: "2026-04-30T00:00:00.000Z", limit: 10 },
+      // A1 fix-loop (finding-2): workspace_id no longer in the request
+      // payload; sourced from the trusted MCP call context.
+      { since: "2026-04-30T00:00:00.000Z", limit: 10 },
       { workspaceId: "ws1", runId: null, agentTarget: "cli" }
     );
 

@@ -47,7 +47,10 @@ export function registerProposalRoutes(app: Hono, services: ProposalRouteService
     const since = context.req.query("since") ?? undefined;
     const limitRaw = context.req.query("limit");
     const limit = limitRaw === undefined ? undefined : Number.parseInt(limitRaw, 10);
-    const args: Record<string, unknown> = { workspace_id: workspaceId };
+    // A1 fix-loop (finding-2): workspace is bound server-side from the
+    // McpMemoryToolCallContext below; the request body no longer carries
+    // workspace_id (mirrors soul.explore_graph).
+    const args: Record<string, unknown> = {};
     if (since !== undefined) args.since = since;
     if (limit !== undefined && Number.isFinite(limit)) args.limit = limit;
 

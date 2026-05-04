@@ -39,13 +39,13 @@ describe("mcp memory tool handler — soul.list_pending_proposals (A1)", () => {
 
     const result = await handler.call({
       toolName: "soul.list_pending_proposals",
-      arguments: { workspace_id: "ws1", limit: 25 },
+      arguments: { limit: 25 },
       context
     });
 
     expect(result.ok).toBe(true);
     expect(listPendingProposals).toHaveBeenCalledWith(
-      { workspace_id: "ws1", limit: 25 },
+      { limit: 25 },
       context
     );
     expect(result.ok && result.output).toEqual({
@@ -54,7 +54,11 @@ describe("mcp memory tool handler — soul.list_pending_proposals (A1)", () => {
     });
   });
 
-  it("rejects a workspace mismatch between payload and trusted call context", async () => {
+  it("rejects a workspace_id payload field at schema parse time (A1 finding-2)", async () => {
+    // workspace_id is no longer declared on the request schema; .strict()
+    // rejects it at parse time. An attached agent that tries to spoof a
+    // foreign workspace via the payload fails closed before reaching the
+    // workflow.
     const listPendingProposals = vi.fn();
     const deps = createDeps({ listPendingProposals });
     const handler = createMcpMemoryToolHandler(deps);
@@ -77,7 +81,7 @@ describe("mcp memory tool handler — soul.list_pending_proposals (A1)", () => {
 
     const result = await handler.call({
       toolName: "soul.list_pending_proposals",
-      arguments: { workspace_id: "ws1" },
+      arguments: {},
       context
     });
 
