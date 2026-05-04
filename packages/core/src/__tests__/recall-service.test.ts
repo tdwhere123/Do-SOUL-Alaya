@@ -1467,7 +1467,7 @@ describe("RecallService", () => {
   it("does not let plasticity alone override a base lexical/activation rank inversion (mirror of the embedding-supplement contract)", async () => {
     // Strong-activation lexical baseline vs weak-activation candidate with
     // moderate plasticity. The lexical baseline must still win because the
-    // 0.3-cap plasticity boost cannot close a 0.85 → 0.05 activation gap.
+    // 0.15-cap plasticity boost cannot close a 0.85 → 0.05 activation gap.
     const memories = [
       createMemoryEntry({
         object_id: "memory-strong-lexical",
@@ -1504,6 +1504,50 @@ describe("RecallService", () => {
     });
 
     expect(result.candidates[0]?.object_id).toBe("memory-strong-lexical");
+  });
+
+  it("preserves base lexical ordering on a moderate gap (activation 0.7 vs 0.4) — fully-plastic weaker candidate cannot flip the rank under PATH_PLASTICITY_WEIGHT=0.15", async () => {
+    // I3-fix locking test. Activation contribution gap = (0.7 - 0.4) *
+    // 0.7 = 0.21 (the activation-weight base sums to 0.70). Max plasticity
+    // boost gap = (1.0 - 0.0) * 0.15 = 0.15. Since 0.21 > 0.15, the
+    // stronger-activation candidate must rank first even when the weaker
+    // candidate is fully plastic and the stronger has zero plasticity.
+    const memories = [
+      createMemoryEntry({
+        object_id: "memory-strong-baseline",
+        dimension: MemoryDimension.PROCEDURE,
+        activation_score: 0.7,
+        content: "Strong activation baseline procedure."
+      }),
+      createMemoryEntry({
+        object_id: "memory-moderate-but-plastic",
+        dimension: MemoryDimension.PROCEDURE,
+        activation_score: 0.4,
+        content: "Moderate baseline, fully plastic."
+      })
+    ];
+    const { dependencies } = createDependencies(memories);
+    const plasticityPort = {
+      getStrengthByMemoryId: vi.fn(
+        async (_workspaceId: string, _memoryIds: readonly string[]) =>
+          new Map<string, number>([
+            ["memory-strong-baseline", 0.0],
+            ["memory-moderate-but-plastic", 1.0]
+          ])
+      )
+    };
+    const service = new RecallService({
+      ...dependencies,
+      pathPlasticityPort: plasticityPort
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze"
+    });
+
+    expect(result.candidates[0]?.object_id).toBe("memory-strong-baseline");
   });
 
   it("falls back to no plasticity boost when the path plasticity port throws — recall must not break on a plasticity failure", async () => {

@@ -200,6 +200,14 @@ export const PathRelationWeakenedPayloadSchema = z
     previous_strength: z.number(),
     new_strength: z.number(),
     reason: NonEmptyStringSchema,
+    // Optional, A3: counts the number of contradiction signals (e.g.
+    // not_applicable receipts) attributed to this weakening event. Mirrors
+    // PathRelationReinforcedPayloadSchema.support_events_count so an
+    // audit-only replayer can reconstruct contradiction totals from the
+    // event log without reading the durable PathRelation row. Optional to
+    // preserve backward compatibility with pre-A3 events that did not carry
+    // this field.
+    contradiction_events_count: NonNegativeIntSchema.optional(),
     weakened_at: IsoDatetimeStringSchema
   })
   .strict()

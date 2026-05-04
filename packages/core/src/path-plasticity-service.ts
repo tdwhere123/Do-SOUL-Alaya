@@ -1,4 +1,5 @@
 import {
+  DYNAMICS_CONSTANTS,
   PathPlasticityStateSchema,
   RuntimeGovernanceEventType,
   parseRuntimeGovernanceEventPayload,
@@ -12,23 +13,36 @@ import { EventPublisher } from "./event-publisher.js";
 import { getNextRevision } from "./shared/event-utils.js";
 
 /**
- * Plasticity tuning constants. These are intentionally simple in v0.1 — the
- * goal is "measurable, audited delta" rather than tuned reinforcement curves.
+ * Plasticity tuning constants. Derived authoritatively from
+ * `DYNAMICS_CONSTANTS.path_plasticity` in `@do-soul/alaya-protocol` so that
+ * a future tuner only has to edit one location. The asymmetric magnitudes
+ * (used > skipped) reflect the domain rationale: a `used` receipt is rarer
+ * evidence than a `skipped` non-use, so each used signal weighs more.
+ *
+ * Note: PathPlasticityService converts `weakening_decrement` (which is
+ * negative in the dynamics constants) into a positive magnitude here so the
+ * delta math reads naturally as `previous + used*UsedDelta - skipped*SkippedDelta`.
  */
-export const PATH_PLASTICITY_CONSTANTS = {
-  USED_DELTA: 0.05,
-  SKIPPED_DELTA: 0.05,
-  STRENGTH_FLOOR: 0,
-  STRENGTH_CEILING: 1,
-  RETIREMENT_STRENGTH_THRESHOLD: 0.05,
-  RETIREMENT_INACTIVITY_MS: 30 * 86_400_000
-} as const;
+export const PATH_PLASTICITY_CONSTANTS = Object.freeze({
+  USED_DELTA: DYNAMICS_CONSTANTS.path_plasticity.reinforcement_increment,
+  SKIPPED_DELTA: Math.abs(DYNAMICS_CONSTANTS.path_plasticity.weakening_decrement),
+  STRENGTH_FLOOR: DYNAMICS_CONSTANTS.path_plasticity.strength_floor,
+  STRENGTH_CEILING: DYNAMICS_CONSTANTS.path_plasticity.strength_ceiling,
+  RETIREMENT_STRENGTH_THRESHOLD: DYNAMICS_CONSTANTS.path_plasticity.retirement_strength_threshold,
+  RETIREMENT_INACTIVITY_MS: DYNAMICS_CONSTANTS.path_plasticity.retirement_inactivity_ms
+} as const);
 
 export interface UsageProofReaderPort {
   /**
-   * Returns recent usage records reported on or after `sinceIso`, scoped to
-   * the given workspace. Implementation may join through TrustStateRepo or
-   * directly query the EventLog — the service does not care which.
+   * Returns recent usage records reported strictly AFTER `sinceIso` (i.e.
+   * `record.reported_at > sinceIso`, exclusive). Scoped to the given
+   * workspace. Implementation may join through TrustStateRepo or directly
+   * query the EventLog — the service does not care which.
+   *
+   * Exclusive comparison is intentional (Q4): a tick that processes records
+   * up to-and-including `T` then advances its watermark to `T`; the next
+   * tick starts strictly after `T` to avoid double-counting the boundary
+   * record across two ticks.
    */
   listRecentUsage(
     workspaceId: string,
@@ -82,6 +96,16 @@ export interface PathPlasticityComputeResult {
  *
  * The service is invoked from a Garden role (background tier). It MUST NOT
  * be called on the recall request path.
+ *
+ * Plasticity ops covered by this v0.1 service (3/4):
+ *   - reinforcement (used → +USED_DELTA strength)
+ *   - weakening (skipped → -SKIPPED_DELTA strength)
+ *   - retirement (strength <= threshold + inactivity → emit retired event)
+ *
+ * TODO(v0.2): direction_bias plasticity (redirection op) — needs an
+ * asymmetric usage signal between source/target anchors so the service can
+ * decide whether to flip `source_to_target` ↔ `target_to_source` or move to
+ * `bidirectional`. Deferred per A3 review I5.
  */
 export class PathPlasticityService {
   private readonly now: () => string;
@@ -91,8 +115,9 @@ export class PathPlasticityService {
   }
 
   /**
-   * Reads UsageProofRecord rows reported since `sinceIso`, computes per-path
-   * deltas, and publishes Phase-C events that mutate the PathRelation rows.
+   * Reads UsageProofRecord rows reported strictly after `sinceIso`,
+   * computes per-path deltas, and publishes Phase-C events that mutate the
+   * PathRelation rows.
    *
    * Returns counts for observability.
    */
@@ -109,38 +134,48 @@ export class PathPlasticityService {
       return Object.freeze({ reinforced: 0, weakened: 0, retired: 0, affectedPathIds: [] });
     }
 
-    // Aggregate {used | skipped | not_applicable} counts per object_id so a
-    // single path with multiple receipts in this window receives a single,
-    // bounded delta rather than N separate audit events.
-    const objectAggregates = await this.aggregateObjectUsage(usageRecords);
+    // B1 dedup: aggregate per-path, not per-object. A single PathRelation P
+    // whose source_anchor and target_anchor both appear in one usage
+    // receipt R must count as exactly ONE reinforcement of P — not two —
+    // because the agent reported one logical use of the path. Naive
+    // per-object aggregation followed by anchor lookup double-counts P
+    // because findByAnchor returns P under BOTH the source-anchor and the
+    // target-anchor object_id keys.
+    //
+    // We resolve receipts → paths first (deduping P within each receipt),
+    // then aggregate counts across receipts.
+    const pathAggregates = await this.aggregatePathUsage(
+      params.workspaceId,
+      usageRecords
+    );
 
     const affected = new Set<string>();
     let reinforced = 0;
     let weakened = 0;
     let retired = 0;
 
-    for (const [objectId, counts] of objectAggregates.entries()) {
-      const anchorRef: PathAnchorRef = Object.freeze({
-        kind: "object",
-        object_id: objectId
-      });
-      const paths = await this.dependencies.pathRelationRepo.findByAnchor(
-        params.workspaceId,
-        anchorRef
-      );
+    for (const { path, counts } of pathAggregates.values()) {
+      // I7: skip paths that have already been retired in a prior tick. The
+      // schema does not encode "retired" as a status enum, so we infer
+      // retirement from the audit log (any prior PATH_RELATION_RETIRED
+      // event for this entity). A retired path should not re-emit further
+      // plasticity events; otherwise the audit log would carry duplicate
+      // retirement noise and the durable strength would keep being
+      // re-clamped at zero.
+      if (await this.isAlreadyRetired(path.path_id)) {
+        continue;
+      }
 
-      for (const path of paths) {
-        const outcome = await this.applyDeltasForPath(path, counts);
-        if (outcome === "reinforced") {
-          reinforced += 1;
-          affected.add(path.path_id);
-        } else if (outcome === "weakened") {
-          weakened += 1;
-          affected.add(path.path_id);
-        } else if (outcome === "retired") {
-          retired += 1;
-          affected.add(path.path_id);
-        }
+      const outcome = await this.applyDeltasForPath(path, counts);
+      if (outcome === "reinforced") {
+        reinforced += 1;
+        affected.add(path.path_id);
+      } else if (outcome === "weakened") {
+        weakened += 1;
+        affected.add(path.path_id);
+      } else if (outcome === "retired") {
+        retired += 1;
+        affected.add(path.path_id);
       }
     }
 
@@ -152,51 +187,103 @@ export class PathPlasticityService {
     });
   }
 
-  private async aggregateObjectUsage(
+  private async aggregatePathUsage(
+    workspaceId: string,
     usageRecords: readonly Readonly<UsageProofRecord>[]
-  ): Promise<ReadonlyMap<string, ObjectUsageCounts>> {
-    const aggregates = new Map<string, ObjectUsageCounts>();
+  ): Promise<ReadonlyMap<string, PathAggregate>> {
+    const pathAggregates = new Map<string, PathAggregate>();
+
+    // I8: dedupe receipts by their durable identifier (audit_event_id) so
+    // the aggregator stays idempotent within a single call even if the
+    // reader returns the same record twice (overlapping ticks, buggy
+    // watermark, etc.). Cross-tick dedup must come from the daemon's
+    // high-water-mark in `sinceIso`; this in-memory set guards the service
+    // boundary.
+    const seenAuditEventIds = new Set<string>();
 
     for (const record of usageRecords) {
+      if (seenAuditEventIds.has(record.audit_event_id)) {
+        continue;
+      }
+      seenAuditEventIds.add(record.audit_event_id);
+
+      // Resolve which object_ids this receipt counts against.
+      let targetObjectIds: readonly string[];
       if (record.usage_state === "used") {
-        for (const objectId of record.used_object_ids) {
-          const counts = aggregates.get(objectId) ?? blankCounts();
-          aggregates.set(objectId, { ...counts, used: counts.used + 1, lastReportedAt: maxIso(counts.lastReportedAt, record.reported_at) });
+        targetObjectIds = record.used_object_ids;
+      } else if (record.usage_state === "skipped" || record.usage_state === "not_applicable") {
+        // skipped / not_applicable receipts weight every memory the agent
+        // had in hand — not just the ones cited as used.
+        targetObjectIds =
+          record.used_object_ids.length > 0
+            ? record.used_object_ids
+            : (await this.dependencies.usageProofReader.findDeliveredObjectIds(
+                record.delivery_id
+              )) ?? [];
+      } else {
+        continue;
+      }
+
+      // B1 dedup: collect the set of UNIQUE PathRelation rows touched by
+      // this receipt. findByAnchor returns the same path twice when both
+      // its anchors appear in the receipt; we must count the receipt as a
+      // single logical signal against the path, not one per anchor.
+      const pathsTouchedByReceipt = new Map<string, Readonly<PathRelation>>();
+      for (const objectId of targetObjectIds) {
+        const anchorRef: PathAnchorRef = Object.freeze({
+          kind: "object",
+          object_id: objectId
+        });
+        const paths = await this.dependencies.pathRelationRepo.findByAnchor(
+          workspaceId,
+          anchorRef
+        );
+        for (const path of paths) {
+          if (!pathsTouchedByReceipt.has(path.path_id)) {
+            pathsTouchedByReceipt.set(path.path_id, path);
+          }
         }
-      } else if (record.usage_state === "skipped") {
-        // A skipped delivery weakens every object the agent had in hand —
-        // not just the ones the agent cited as used. used_object_ids is
-        // expected to be empty for skipped, so we resolve through delivery.
-        const targets = record.used_object_ids.length > 0
-          ? record.used_object_ids
-          : (await this.dependencies.usageProofReader.findDeliveredObjectIds(record.delivery_id)) ?? [];
-        for (const objectId of targets) {
-          const counts = aggregates.get(objectId) ?? blankCounts();
-          aggregates.set(objectId, { ...counts, skipped: counts.skipped + 1, lastReportedAt: maxIso(counts.lastReportedAt, record.reported_at) });
+      }
+
+      // Apply the receipt's signal once per unique path.
+      for (const [pathId, path] of pathsTouchedByReceipt.entries()) {
+        const existing = pathAggregates.get(pathId);
+        const counts: MutableObjectUsageCounts = existing?.counts ?? {
+          used: 0,
+          skipped: 0,
+          notApplicable: 0,
+          lastReportedAt: null
+        };
+        if (record.usage_state === "used") {
+          counts.used += 1;
+        } else if (record.usage_state === "skipped") {
+          counts.skipped += 1;
+        } else if (record.usage_state === "not_applicable") {
+          counts.notApplicable += 1;
         }
-      } else if (record.usage_state === "not_applicable") {
-        // not_applicable does not move strength but it counts as a
-        // contradiction signal against every targeted object.
-        const targets = record.used_object_ids.length > 0
-          ? record.used_object_ids
-          : (await this.dependencies.usageProofReader.findDeliveredObjectIds(record.delivery_id)) ?? [];
-        for (const objectId of targets) {
-          const counts = aggregates.get(objectId) ?? blankCounts();
-          aggregates.set(objectId, {
-            ...counts,
-            notApplicable: counts.notApplicable + 1,
-            lastReportedAt: maxIso(counts.lastReportedAt, record.reported_at)
-          });
+        counts.lastReportedAt = maxIsoNullable(counts.lastReportedAt, record.reported_at);
+        if (existing === undefined) {
+          pathAggregates.set(pathId, { path, counts });
         }
       }
     }
 
-    return aggregates;
+    return pathAggregates;
+  }
+
+  private async isAlreadyRetired(pathId: string): Promise<boolean> {
+    const events = await this.dependencies.eventLogRepo.queryByEntity(
+      "path_relation",
+      pathId
+    );
+    return events.some(
+      (event) => event.event_type === RuntimeGovernanceEventType.PATH_RELATION_RETIRED
+    );
   }
 
   private async applyDeltasForPath(
     path: Readonly<PathRelation>,
-    counts: ObjectUsageCounts
+    counts: MutableObjectUsageCounts
   ): Promise<"reinforced" | "weakened" | "retired" | "none"> {
     const previousStrength = path.plasticity_state.strength;
     const usedDelta = counts.used * PATH_PLASTICITY_CONSTANTS.USED_DELTA;
@@ -209,6 +296,17 @@ export class PathPlasticityService {
     // record the contradiction, but classify the publication as "weakened" so
     // it shows up in the audit log under the correct phase-C type.
     const netDelta = proposedStrength - previousStrength;
+
+    // Verification-gap fix: retirement must be re-checked even when
+    // netDelta == 0. A path stuck at strength == 0 with skipped receipts
+    // arriving (clamped to no further movement) would otherwise never
+    // retire under the previous gating. We split the retirement check from
+    // the netDelta < 0 branch and run it whenever the path is currently at
+    // (or below) the retirement strength threshold AND has been inactive
+    // longer than the inactivity window.
+    const retirementEligible =
+      proposedStrength <= PATH_PLASTICITY_CONSTANTS.RETIREMENT_STRENGTH_THRESHOLD &&
+      this.isInactive(path.plasticity_state.last_reinforced_at, occurredAt);
 
     if (netDelta > 0) {
       const nextSupportCount =
@@ -239,10 +337,7 @@ export class PathPlasticityService {
         path.plasticity_state.contradiction_events_count + counts.notApplicable;
       // Retirement: weak path with no recent reinforcement → emit
       // PathRelationRetired instead of PathRelationWeakened.
-      if (
-        nextStrength <= PATH_PLASTICITY_CONSTANTS.RETIREMENT_STRENGTH_THRESHOLD &&
-        this.isInactive(path.plasticity_state.last_reinforced_at, occurredAt)
-      ) {
+      if (retirementEligible) {
         const nextPlasticity = parsePlasticityState({
           ...path.plasticity_state,
           strength: nextStrength,
@@ -270,6 +365,7 @@ export class PathPlasticityService {
         previousStrength,
         nextStrength,
         nextPlasticity,
+        contradictionEventsCount: nextContradictionCount,
         reason: counts.skipped > 0 ? "skipped_usage" : "contradiction_only",
         occurredAt
       });
@@ -292,10 +388,31 @@ export class PathPlasticityService {
         previousStrength,
         nextStrength: previousStrength,
         nextPlasticity,
+        contradictionEventsCount: nextContradictionCount,
         reason: "not_applicable_recurrence",
         occurredAt
       });
       return "weakened";
+    }
+
+    // netDelta === 0, no contradiction signal. Verification-gap fix:
+    // re-check retirement here too. A path sitting at strength == 0 with
+    // a `skipped` receipt that produces no further drop (clamped at the
+    // floor) still triggers retirement when inactivity passes the window.
+    if (retirementEligible && counts.skipped > 0) {
+      const nextPlasticity = parsePlasticityState({
+        ...path.plasticity_state,
+        strength: proposedStrength,
+        last_weakened_at: occurredAt
+      });
+      await this.publishRetired({
+        path,
+        finalStrength: proposedStrength,
+        nextPlasticity,
+        reason: "strength_below_threshold_and_inactive",
+        occurredAt
+      });
+      return "retired";
     }
 
     return "none";
@@ -358,6 +475,7 @@ export class PathPlasticityService {
     readonly previousStrength: number;
     readonly nextStrength: number;
     readonly nextPlasticity: Readonly<PathPlasticityState>;
+    readonly contradictionEventsCount: number;
     readonly reason: string;
     readonly occurredAt: string;
   }): Promise<void> {
@@ -372,6 +490,7 @@ export class PathPlasticityService {
         path_id: params.path.path_id,
         previous_strength: params.previousStrength,
         new_strength: params.nextStrength,
+        contradiction_events_count: params.contradictionEventsCount,
         reason: params.reason,
         weakened_at: params.occurredAt
       }
@@ -440,15 +559,16 @@ export class PathPlasticityService {
   }
 }
 
-interface ObjectUsageCounts {
-  readonly used: number;
-  readonly skipped: number;
-  readonly notApplicable: number;
-  readonly lastReportedAt: string | null;
+interface MutableObjectUsageCounts {
+  used: number;
+  skipped: number;
+  notApplicable: number;
+  lastReportedAt: string | null;
 }
 
-function blankCounts(): ObjectUsageCounts {
-  return { used: 0, skipped: 0, notApplicable: 0, lastReportedAt: null };
+interface PathAggregate {
+  readonly path: Readonly<PathRelation>;
+  readonly counts: MutableObjectUsageCounts;
 }
 
 function clampStrength(value: number): number {
@@ -458,11 +578,14 @@ function clampStrength(value: number): number {
   );
 }
 
-function maxIso(current: string | null, next: string): string {
-  if (current === null) {
-    return next;
+function maxIsoNullable(left: string | null, right: string | null): string | null {
+  if (left === null) {
+    return right;
   }
-  return Date.parse(next) > Date.parse(current) ? next : current;
+  if (right === null) {
+    return left;
+  }
+  return Date.parse(right) > Date.parse(left) ? right : left;
 }
 
 function parsePlasticityState(value: PathPlasticityState): Readonly<PathPlasticityState> {
