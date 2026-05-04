@@ -183,20 +183,39 @@ function createService(options: CreateServiceOptions): RunService {
     },
     runRepo: {
       create: runRepoCreate,
+      // Sync sibling for appendManyWithMutation flow (#BL-022).
+      createSync: vi.fn((input) =>
+        createRun({
+          ...input,
+          created_at: "2026-04-15T00:00:00.000Z",
+          last_active_at: "2026-04-15T00:00:00.000Z"
+        })
+      ),
       getById: vi.fn(async () => null),
       listByWorkspace: vi.fn(async () => []),
       delete: vi.fn(async () => undefined),
+      deleteSync: vi.fn(),
       update: vi.fn(async (_id, patch) =>
         createRun({
           ...patch
         })
-      )
+      ),
+      updateSync: vi.fn((_id, patch) => createRun({ ...patch }))
     },
     bindingRepo: {
       getById: vi.fn(async (id) => bindingById[id] ?? null)
     },
     eventPublisher: {
-      publishWithMutation: vi.fn(async (_event, mutate) => await mutate())
+      // RunService now uses the atomic appendManyWithMutation primitive
+      // (#BL-022). Mock executes the sync mutate against the first batch entry.
+      appendManyWithMutation: vi.fn(async (inputs, mutate) => {
+        const persisted = inputs.map((entry: any, idx: number) => ({
+          event_id: `evt_${idx}`,
+          created_at: "2026-04-15T00:00:00.000Z",
+          ...entry
+        }));
+        return mutate(persisted);
+      })
     } as any,
     isPrincipalCodingEngineAvailable: options.isPrincipalCodingEngineAvailable
   });

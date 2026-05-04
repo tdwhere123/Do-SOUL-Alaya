@@ -18,6 +18,8 @@ import { parseNonEmptyString } from "./shared/validators.js";
 export interface DeferredObligationRepoPort {
   getById(obligationId: string): Promise<Readonly<DeferredObligation> | null>;
   create(obligation: DeferredObligation): Promise<Readonly<DeferredObligation>>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  createSync(obligation: DeferredObligation): Readonly<DeferredObligation>;
   updateState(
     obligationId: string,
     expectedState: DeferredObligationState,
@@ -26,6 +28,15 @@ export interface DeferredObligationRepoPort {
       readonly fulfilledAt?: string;
     }
   ): Promise<Readonly<DeferredObligation>>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  updateStateSync(
+    obligationId: string,
+    expectedState: DeferredObligationState,
+    nextState: DeferredObligationState,
+    options?: {
+      readonly fulfilledAt?: string;
+    }
+  ): Readonly<DeferredObligation>;
   findActiveByRun(runId: string): Promise<readonly Readonly<DeferredObligation>[]>;
   findActiveByWorkspace(workspaceId: string): Promise<readonly Readonly<DeferredObligation>[]>;
   findExpired(now: string): Promise<readonly Readonly<DeferredObligation>[]>;
@@ -77,18 +88,20 @@ export class DeferredObligationService {
       expires_at: obligation.expires_at
     });
 
-    return this.deps.eventPublisher.publishWithMutation(
-      {
-        event_type: ObligationTrustNarrativeEventType.OBLIGATION_CREATED,
-        entity_type: "deferred_obligation",
-        entity_id: obligation.obligation_id,
-        workspace_id: obligation.workspace_id,
-        run_id: obligation.source_run_id,
-        caused_by: "deferred_obligation_service",
-        revision: 0,
-        payload_json: payload
-      },
-      async () => await this.deps.repo.create(obligation)
+    return this.deps.eventPublisher.appendManyWithMutation(
+      [
+        {
+          event_type: ObligationTrustNarrativeEventType.OBLIGATION_CREATED,
+          entity_type: "deferred_obligation",
+          entity_id: obligation.obligation_id,
+          workspace_id: obligation.workspace_id,
+          run_id: obligation.source_run_id,
+          caused_by: "deferred_obligation_service",
+          revision: 0,
+          payload_json: payload
+        }
+      ],
+      () => this.deps.repo.createSync(obligation)
     );
   }
 
@@ -101,19 +114,21 @@ export class DeferredObligationService {
       fulfilled_at: fulfilledAt
     });
 
-    return this.deps.eventPublisher.publishWithMutation(
-      {
-        event_type: ObligationTrustNarrativeEventType.OBLIGATION_FULFILLED,
-        entity_type: "deferred_obligation",
-        entity_id: parsedObligationId,
-        workspace_id: snapshot.workspace_id,
-        run_id: snapshot.source_run_id,
-        caused_by: "deferred_obligation_service",
-        revision: 0,
-        payload_json: payload
-      },
-      async () =>
-        await this.deps.repo.updateState(parsedObligationId, "pending", "fulfilled", {
+    return this.deps.eventPublisher.appendManyWithMutation(
+      [
+        {
+          event_type: ObligationTrustNarrativeEventType.OBLIGATION_FULFILLED,
+          entity_type: "deferred_obligation",
+          entity_id: parsedObligationId,
+          workspace_id: snapshot.workspace_id,
+          run_id: snapshot.source_run_id,
+          caused_by: "deferred_obligation_service",
+          revision: 0,
+          payload_json: payload
+        }
+      ],
+      () =>
+        this.deps.repo.updateStateSync(parsedObligationId, "pending", "fulfilled", {
           fulfilledAt
         })
     );
@@ -136,18 +151,20 @@ export class DeferredObligationService {
       expired_at: now
     });
 
-    return this.deps.eventPublisher.publishWithMutation(
-      {
-        event_type: ObligationTrustNarrativeEventType.OBLIGATION_EXPIRED,
-        entity_type: "deferred_obligation",
-        entity_id: parsedObligationId,
-        workspace_id: snapshot.workspace_id,
-        run_id: snapshot.source_run_id,
-        caused_by: "deferred_obligation_service",
-        revision: 0,
-        payload_json: payload
-      },
-      async () => await this.deps.repo.updateState(parsedObligationId, "pending", "expired")
+    return this.deps.eventPublisher.appendManyWithMutation(
+      [
+        {
+          event_type: ObligationTrustNarrativeEventType.OBLIGATION_EXPIRED,
+          entity_type: "deferred_obligation",
+          entity_id: parsedObligationId,
+          workspace_id: snapshot.workspace_id,
+          run_id: snapshot.source_run_id,
+          caused_by: "deferred_obligation_service",
+          revision: 0,
+          payload_json: payload
+        }
+      ],
+      () => this.deps.repo.updateStateSync(parsedObligationId, "pending", "expired")
     );
   }
 
