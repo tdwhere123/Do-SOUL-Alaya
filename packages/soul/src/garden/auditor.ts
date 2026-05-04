@@ -35,6 +35,10 @@ import {
   type OrphanedMemoryRecord,
   type StaleMemoryEntry
 } from "@do-soul/alaya-protocol";
+import {
+  resolvePathPlasticitySinceIso,
+  type PathPlasticityComputePort
+} from "./path-plasticity-task.js";
 
 export const AUDITOR_CONSTANTS = {
   COLD_START_MEMORY_THRESHOLD: 10,
@@ -53,6 +57,7 @@ export interface AuditorDependencies {
   readonly orphanDetectionPort?: AuditorOrphanDetectionPort;
   readonly greenMaintenancePort: AuditorGreenMaintenancePort;
   readonly bootstrappingPort: AuditorBootstrappingPort;
+  readonly pathPlasticityPort?: PathPlasticityComputePort;
   readonly scheduler: AuditorSchedulerPort;
   readonly eventLogRepo?: AuditorEventLogPort;
   readonly healthJournal?: HealthJournalRecordPort;
@@ -92,6 +97,8 @@ export class Auditor {
           return await this.executeBootstrappingScan(task, completedAt);
         case GardenTaskKind.CRYSTALLIZATION_SCAN:
           return await this.executeCrystallizationScan(task, completedAt);
+        case GardenTaskKind.PATH_PLASTICITY_UPDATE:
+          return await this.executePathPlasticityUpdate(task, completedAt);
         default:
           throw new Error(`Auditor does not handle task kind: ${task.task_kind}`);
       }
@@ -475,6 +482,33 @@ export class Auditor {
         patterns.length,
         AUDITOR_CONSTANTS.BATCH_SIZE
       )} high-frequency patterns`
+    ]);
+    await this.dependencies.scheduler.reportCompletion(result);
+    return result;
+  }
+
+  private async executePathPlasticityUpdate(
+    task: GardenTaskDescriptor,
+    completedAt: string
+  ): Promise<GardenTaskResult> {
+    const pathPlasticityPort = this.dependencies.pathPlasticityPort;
+
+    if (pathPlasticityPort === undefined) {
+      const result = this.createSuccessResult(task, completedAt, [], [
+        "path_plasticity_update: skipped because path plasticity port is not configured"
+      ]);
+      await this.dependencies.scheduler.reportCompletion(result);
+      return result;
+    }
+
+    const sinceIso = resolvePathPlasticitySinceIso(task.target_object_refs, completedAt);
+    const computed = await pathPlasticityPort.computeAndApplyPlasticity({
+      workspaceId: task.workspace_id,
+      sinceIso
+    });
+
+    const result = this.createSuccessResult(task, completedAt, computed.affectedPathIds, [
+      `path_plasticity_update: reinforced=${computed.reinforced} weakened=${computed.weakened} retired=${computed.retired} since=${sinceIso}`
     ]);
     await this.dependencies.scheduler.reportCompletion(result);
     return result;
