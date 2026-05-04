@@ -11,7 +11,19 @@ import { deepFreeze } from "./shared/deep-freeze.js";
 
 export interface TrustStateRepo {
   createDelivery(record: ContextDeliveryRecord): Promise<Readonly<ContextDeliveryRecord>>;
+  /**
+   * Synchronous variant of `createDelivery` for use inside
+   * `EventPublisher.appendManyWithMutation` (#BL-022). Optional so existing
+   * mocks that only implement the async path do not need updating.
+   */
+  createDeliverySync?(record: ContextDeliveryRecord): Readonly<ContextDeliveryRecord>;
   createUsage(record: UsageProofRecord): Promise<Readonly<UsageProofRecord>>;
+  /**
+   * Synchronous variant of `createUsage` for use inside
+   * `EventPublisher.appendManyWithMutation` (#BL-022). Optional so existing
+   * mocks that only implement the async path do not need updating.
+   */
+  createUsageSync?(record: UsageProofRecord): Readonly<UsageProofRecord>;
   findDeliveryById(deliveryId: string): Promise<Readonly<ContextDeliveryRecord> | null>;
   listDeliveriesByAgentTarget(agentTarget: string): Promise<readonly Readonly<ContextDeliveryRecord>[]>;
   listUsageByDeliveryIds(deliveryIds: readonly string[]): Promise<readonly Readonly<UsageProofRecord>[]>;
@@ -96,6 +108,11 @@ export class SqliteTrustStateRepo implements TrustStateRepo {
   }
 
   public async createDelivery(record: ContextDeliveryRecord): Promise<Readonly<ContextDeliveryRecord>> {
+    return this.createDeliverySync(record);
+  }
+
+  /** Synchronous variant for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
+  public createDeliverySync(record: ContextDeliveryRecord): Readonly<ContextDeliveryRecord> {
     const parsed = ContextDeliveryRecordSchema.parse(record);
     try {
       this.createDeliveryStatement.run(
@@ -117,6 +134,11 @@ export class SqliteTrustStateRepo implements TrustStateRepo {
   }
 
   public async createUsage(record: UsageProofRecord): Promise<Readonly<UsageProofRecord>> {
+    return this.createUsageSync(record);
+  }
+
+  /** Synchronous variant for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
+  public createUsageSync(record: UsageProofRecord): Readonly<UsageProofRecord> {
     const parsed = UsageProofRecordSchema.parse(record);
     try {
       this.createUsageStatement.run(
