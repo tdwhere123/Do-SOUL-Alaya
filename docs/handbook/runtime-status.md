@@ -157,10 +157,11 @@ violates the "backlog 不是问题归宿" preference. Round 3 walked each
 remaining Important either to a fix, an invariant, or an explicit v0.2
 deferral with a written close condition. Nine Round 3 atomic commits
 (`4aa5de1`, `d63ab97`, `bb3e02c`, `30ad2a0`, `dfdc909`, `60f2ec9`,
-`78d8a91`, plus this one) closed all but one Important; the lone
-deferral is `#BL-022` (EventPublisher atomic port + EventLog revision
-transaction) — appropriate to ship alongside the v0.2 transaction model
-rewrite rather than retrofit into v0.1, with the user on the record.
+`78d8a91`, plus this one) closed all but one Important; the remaining
+deferral was `#BL-022` (EventPublisher atomic port + EventLog revision
+transaction). v0.1-closeout-a2 retroactively closed `#BL-022` rather
+than ship the deferral — see `backlog.md` for the full migration
+commit chain.
 Highlights:
 - MR-I05: `SoulOpenPointerResponse.content` is now a typed projection of
   six fields; MemoryEntry internals (lifecycle_state, created_by,
@@ -182,9 +183,10 @@ Highlights:
   and three `expect.toBeDefined()` weak assertions were upgraded to
   interface-shape assertions.
 
-Backlog Open count is 0. The only remaining items are the three v0.2
-deferrals (`#BL-008` pi-mono, `#BL-009` keychain, `#BL-022` EventPublisher
-port) and the seven `#BL-001..#BL-007` ADR-style out-of-scope entries.
+Backlog Open count is 0. The only remaining items are the two v0.2
+deferrals (`#BL-008` pi-mono, `#BL-009` keychain) and the seven
+`#BL-001..#BL-007` ADR-style out-of-scope entries. (`#BL-022`
+EventPublisher atomic port closed in v0.1-closeout-a2.)
 
 The end-to-end verification gate at HEAD `78d8a91` runs clean (same
 shape as Round 2):
