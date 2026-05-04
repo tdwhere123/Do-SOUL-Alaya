@@ -6,11 +6,83 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-025` (`#BL-022` was opened by
+sequence. **Next available number**: `#BL-027` (`#BL-022` was opened by
 p5-system-review-r3 as an EventPublisher v0.2 deferral and closed in
-v0.1-closeout-a2; `#BL-023`/`#BL-024` were resolved in r1 / r2).
+v0.1-closeout-a2; `#BL-023`/`#BL-024` were resolved in r1 / r2;
+`#BL-025` and `#BL-026` were opened in v0.1-closeout-a2 as the two
+non-behavioural EventPublisher cleanups deferred to v0.2).
 
 ## Open Issues
+
+### #BL-025 — Drop required-but-ignored `revision` from `EventPublisher` input shape
+
+**Opened by**: v0.1-closeout-a2 (BL-022 fix-loop, i3)
+
+**Symptom**: `EventPublisher.publish` / `appendManyWithMutation` /
+`EventPublisherEventLogRepoPort.append` all type `event_input` as
+`Omit<EventLogEntry, "event_id" | "created_at">`, which still requires
+the caller to supply `revision`. After #BL-022 the revision is computed
+inside the SQLite transaction by `MAX(revision) + 1` and the
+caller-supplied value is silently overwritten. ~50 source call sites and
+~50 test fixtures pass ceremonial `revision: 0` / `revision,` /
+`revision: revisionCursor()` for no effect.
+
+**Why deferred (not closed in v0.1)**: behavioural fix for #BL-022 is
+already shipped — the race window is gone. The remaining work is purely
+type ergonomics: introduce `EventPublisherInput =
+Omit<EventLogEntry, "event_id" | "created_at" | "revision">` and remove
+the now-dead `revision: ...` lines + dead `getNextRevision()` /
+`revisionCursor()` calls. Mechanical surface ≈ 100 sites; an A2
+in-flight regex pass corrupted ~50 type expressions before being
+reverted (see `.do-it/findings/a2.md` finding-8). v0.2 should redo this
+with file-by-file `Edit` calls, not regex.
+
+**Close condition**:
+
+- `EventPublisherInput` type alias added to
+  `packages/core/src/event-publisher.ts` and exported.
+- All `eventLogRepo.append` / `publish` / `publishWithMutation` /
+  `publishManyWithMutation` / `appendManyWithMutation` callers stop
+  passing `revision` (search:
+  `rg '^\s+revision[:,]' packages/ apps/` returns 0 outside
+  `event-publisher.ts` / `event-log-repo.ts`).
+- Dead revision-source helpers (`getNextRevision`, `revisionCursor`,
+  `nextRevision`, `maxRevision` locals) removed where they were used
+  only to populate the dropped field.
+- `pnpm exec tsc --noEmit -p packages/core/tsconfig.json` clean.
+- All vitest projects green.
+
+### #BL-026 — Migrate `AuditorEventLogPort` adapter off legacy `publishWithMutation`
+
+**Opened by**: v0.1-closeout-a2 (BL-022 fix-loop, i1)
+
+**Symptom**: `apps/core-daemon/src/garden-runtime.ts` wires the soul-
+side Auditor (`packages/soul/src/garden/auditor.ts`) through an
+`AuditorEventLogPort` adapter that still exposes the legacy
+`publishWithMutation(event, async () => …)` signature. The legacy path
+has the BL-022 race the rest of the runtime no longer has — the only
+in-tree producer keeping it alive is this single adapter. The auditor's
+direct write site (path-graph snapshot) IS migrated, so no auditor-
+issued event currently runs through the legacy path; but the adapter
+shape forces `publishWithMutation` to remain on `EventPublisher`.
+
+**Why deferred (not closed in v0.1)**: closing requires changing
+`AuditorEventLogPort` shape across all auditor port consumers in
+`packages/soul/`, which sits in a different package boundary than
+A2's nominal scope. Changing it inside A2 would have made the diff
+cross-package and increased D2 review surface for no behavioural gain
+(the actual race-prone write site is migrated).
+
+**Close condition**:
+
+- `AuditorEventLogPort` exposes `appendManyWithMutation` (sync mutate)
+  instead of `publishWithMutation`.
+- `apps/core-daemon/src/garden-runtime.ts` adapter rewritten to call
+  through `appendManyWithMutation`.
+- `EventPublisher.publishWithMutation` and `publishManyWithMutation`
+  deleted (currently `@deprecated` and unused outside the auditor
+  adapter).
+- All vitest projects green.
 
 ## Recently Resolved by p5-system-review-r1 (2026-05-03)
 

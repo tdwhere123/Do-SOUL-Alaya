@@ -129,6 +129,15 @@ export class EventPublisher {
     return mutateResult;
   }
 
+  /**
+   * @deprecated Use `appendManyWithMutation` instead. See #BL-022 closure.
+   *
+   * Legacy async-mutate path; the append + mutation pair is not wrapped in a
+   * single SQLite transaction. New producer code MUST use
+   * `appendManyWithMutation`. Retained only for the `AuditorEventLogPort`
+   * adapter wired in `apps/core-daemon/src/garden-runtime.ts`, pending the
+   * v0.2 migration tracked as #BL-026.
+   */
   public async publishWithMutation<T>(
     eventInput: Omit<EventLogEntry, "event_id" | "created_at">,
     mutate: (entry: EventLogEntry) => Promise<T>
@@ -154,6 +163,15 @@ export class EventPublisher {
     return result;
   }
 
+  /**
+   * @deprecated Use `appendManyWithMutation` instead. See #BL-022 closure.
+   *
+   * Legacy async-mutate path; the append + mutation pair is not wrapped in a
+   * single SQLite transaction. New producer code MUST use
+   * `appendManyWithMutation`. No in-tree caller remains; retained only as a
+   * symmetric companion to `publishWithMutation` for the `AuditorEventLogPort`
+   * adapter, pending the v0.2 migration tracked as #BL-026.
+   */
   public async publishManyWithMutation<T>(
     eventInputs: readonly Omit<EventLogEntry, "event_id" | "created_at">[],
     mutate: () => Promise<T>
