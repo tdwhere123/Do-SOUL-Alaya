@@ -70,55 +70,70 @@ export class SqliteWorkspaceEngineConfigRepo implements WorkspaceEngineConfigRep
     readonly workspace: Workspace;
     readonly binding: EngineBindingRecord;
   }> {
+    // Legacy async callers still need their own transaction wrapper; the new
+    // sync sibling assumes the caller already opened one (e.g. via
+    // EventPublisher.appendManyWithMutation -> repo.transactional()).
+    return this.db.connection.transaction(() =>
+      this.upsertConversationBindingAndSetDefaultEngineClassSync(input)
+    )();
+  }
+
+  /** Synchronous variant for atomic publish + mutation (#BL-022). */
+  public upsertConversationBindingAndSetDefaultEngineClassSync(input: {
+    readonly workspace_id: string;
+    readonly binding_id: string;
+    readonly binding: EngineBindingInput;
+  }): {
+    readonly workspace: Workspace;
+    readonly binding: EngineBindingRecord;
+  } {
     const now = this.options.now?.() ?? new Date().toISOString();
     const statements = this.ensureStatements();
 
     try {
-      return this.db.connection.transaction(() => {
-        statements.upsertBinding.run(
-          input.binding_id,
-          input.workspace_id,
-          input.binding.provider_type,
-          input.binding.base_url,
-          input.binding.api_key,
-          input.binding.model,
-          JSON.stringify(input.binding.config),
-          input.binding.enable_tools !== undefined ? (input.binding.enable_tools ? 1 : 0) : null,
-          now,
-          now
+      statements.upsertBinding.run(
+        input.binding_id,
+        input.workspace_id,
+        input.binding.provider_type,
+        input.binding.base_url,
+        input.binding.api_key,
+        input.binding.model,
+        JSON.stringify(input.binding.config),
+        input.binding.enable_tools !== undefined ? (input.binding.enable_tools ? 1 : 0) : null,
+        now,
+        now
+      );
+      this.options.onAfterBindingUpsert?.();
+
+      const workspaceUpdate = statements.updateWorkspace.run(input.binding_id, input.workspace_id);
+      if (workspaceUpdate.changes === 0) {
+        throw new StorageError("NOT_FOUND", `Workspace ${input.workspace_id} was not found.`);
+      }
+
+      const workspaceRow = statements.getWorkspaceById.get(input.workspace_id) as WorkspaceRow | undefined;
+      if (workspaceRow === undefined) {
+        throw new StorageError("NOT_FOUND", `Workspace ${input.workspace_id} was not found after update.`);
+      }
+
+      const bindingRow = statements.getBindingById.get(input.binding_id) as EngineBindingRow | undefined;
+      if (bindingRow === undefined) {
+        throw new StorageError("NOT_FOUND", `Engine binding ${input.binding_id} was not found after upsert.`);
+      }
+
+      const workspace = parseWorkspace(workspaceRow);
+      const binding = parseEngineBinding(bindingRow);
+
+      if (binding.workspace_id !== workspace.workspace_id) {
+        throw new StorageError(
+          "QUERY_FAILED",
+          `Engine binding ${binding.binding_id} does not belong to workspace ${workspace.workspace_id}.`
         );
-        this.options.onAfterBindingUpsert?.();
+      }
 
-        const workspaceUpdate = statements.updateWorkspace.run(input.binding_id, input.workspace_id);
-        if (workspaceUpdate.changes === 0) {
-          throw new StorageError("NOT_FOUND", `Workspace ${input.workspace_id} was not found.`);
-        }
-
-        const workspaceRow = statements.getWorkspaceById.get(input.workspace_id) as WorkspaceRow | undefined;
-        if (workspaceRow === undefined) {
-          throw new StorageError("NOT_FOUND", `Workspace ${input.workspace_id} was not found after update.`);
-        }
-
-        const bindingRow = statements.getBindingById.get(input.binding_id) as EngineBindingRow | undefined;
-        if (bindingRow === undefined) {
-          throw new StorageError("NOT_FOUND", `Engine binding ${input.binding_id} was not found after upsert.`);
-        }
-
-        const workspace = parseWorkspace(workspaceRow);
-        const binding = parseEngineBinding(bindingRow);
-
-        if (binding.workspace_id !== workspace.workspace_id) {
-          throw new StorageError(
-            "QUERY_FAILED",
-            `Engine binding ${binding.binding_id} does not belong to workspace ${workspace.workspace_id}.`
-          );
-        }
-
-        return {
-          workspace,
-          binding
-        };
-      })();
+      return {
+        workspace,
+        binding
+      };
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
