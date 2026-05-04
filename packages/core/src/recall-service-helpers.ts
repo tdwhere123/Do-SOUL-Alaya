@@ -24,6 +24,15 @@ const CLAIM_LIKE_DIMENSIONS = new Set<MemoryDimensionType>([
   MemoryDimension.PROCEDURE
 ]);
 export const EMBEDDING_SIMILARITY_WEIGHT = 0.8;
+/**
+ * Additive weight applied to PathPlasticityState.strength inside the
+ * fine-assessment score. Plasticity is a recall *supplement*: it can boost a
+ * memory's relevance, but the overall score is still clamped to [0, 1] and
+ * the base lexical/FTS rank still drives ordering when two candidates have
+ * similar plasticity. Mirrors the "embedding is supplement, never oracle"
+ * pattern.
+ */
+export const PATH_PLASTICITY_WEIGHT = 0.3;
 
 
 export function buildRecallCandidateDedupeKey(candidate: Readonly<CoarseRecallCandidate>): string {

@@ -70,6 +70,22 @@ export interface RecallServiceClaimResolverPort {
   }>[]>;
 }
 
+/**
+ * Optional port that returns the strongest PathPlasticityState.strength
+ * across all path relations anchored on each memory entry. Implementations
+ * are expected to read precomputed PathRelation rows; the recall service
+ * does not compute paths itself.
+ *
+ * The map's value range is [0, 1]. Memories without an entry are treated as
+ * having no plasticity boost.
+ */
+export interface RecallServicePathPlasticityPort {
+  getStrengthByMemoryId(
+    workspaceId: string,
+    memoryIds: readonly string[]
+  ): Promise<ReadonlyMap<string, number>>;
+}
+
 export interface RecallServiceEmbeddingRecallPort {
   hasStoredVectors?(params: {
     readonly workspaceId: string;
@@ -116,6 +132,7 @@ export interface RecallServiceDependencies {
   readonly globalRecallCachePort?: GlobalMemoryRecallCachePort;
   readonly claimResolverPort?: RecallServiceClaimResolverPort;
   readonly embeddingRecallService?: RecallServiceEmbeddingRecallPort;
+  readonly pathPlasticityPort?: RecallServicePathPlasticityPort;
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;
   readonly warn?: RecallServiceWarnPort;
@@ -133,6 +150,7 @@ export interface RecallSupplementaryData {
   readonly ftsRanks: Readonly<Record<string, number>>;
   readonly graphSupportCounts: Readonly<Record<string, number>>;
   readonly budgetPenaltyFactor: number;
+  readonly plasticityFactors: Readonly<Record<string, number>>;
 }
 
 export interface CoarseRecallCandidate {

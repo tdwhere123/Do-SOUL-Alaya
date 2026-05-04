@@ -1411,4 +1411,131 @@ describe("RecallService", () => {
       })
     );
   });
+
+  it("ranks a high-plasticity candidate above an equivalent low-plasticity candidate", async () => {
+    // Two memories with identical activation scores but different plasticity
+    // strengths. The high-plasticity one must rank first.
+    const memories = [
+      createMemoryEntry({
+        object_id: "memory-low-plasticity",
+        dimension: MemoryDimension.PROCEDURE,
+        activation_score: 0.5,
+        content: "Lower-plasticity procedure baseline."
+      }),
+      createMemoryEntry({
+        object_id: "memory-high-plasticity",
+        dimension: MemoryDimension.PROCEDURE,
+        activation_score: 0.5,
+        content: "Higher-plasticity procedure baseline."
+      })
+    ];
+    const { dependencies } = createDependencies(memories);
+    const plasticityPort = {
+      getStrengthByMemoryId: vi.fn(
+        async (_workspaceId: string, _memoryIds: readonly string[]) =>
+          new Map<string, number>([
+            ["memory-low-plasticity", 0.0],
+            ["memory-high-plasticity", 0.9]
+          ])
+      )
+    };
+    const service = new RecallService({
+      ...dependencies,
+      pathPlasticityPort: plasticityPort
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze"
+    });
+
+    expect(plasticityPort.getStrengthByMemoryId).toHaveBeenCalled();
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
+      "memory-high-plasticity",
+      "memory-low-plasticity"
+    ]);
+    const highCandidate = result.candidates.find(
+      (candidate) => candidate.object_id === "memory-high-plasticity"
+    );
+    const lowCandidate = result.candidates.find(
+      (candidate) => candidate.object_id === "memory-low-plasticity"
+    );
+    expect(highCandidate?.relevance_score).toBeGreaterThan(lowCandidate?.relevance_score ?? 0);
+  });
+
+  it("does not let plasticity alone override a base lexical/activation rank inversion (mirror of the embedding-supplement contract)", async () => {
+    // Strong-activation lexical baseline vs weak-activation candidate with
+    // moderate plasticity. The lexical baseline must still win because the
+    // 0.3-cap plasticity boost cannot close a 0.85 → 0.05 activation gap.
+    const memories = [
+      createMemoryEntry({
+        object_id: "memory-strong-lexical",
+        dimension: MemoryDimension.PROCEDURE,
+        activation_score: 0.85,
+        content: "Strong lexical baseline procedure."
+      }),
+      createMemoryEntry({
+        object_id: "memory-weak-but-plastic",
+        dimension: MemoryDimension.PROCEDURE,
+        activation_score: 0.05,
+        content: "Weak baseline, but heavily reinforced by plasticity."
+      })
+    ];
+    const { dependencies } = createDependencies(memories);
+    const plasticityPort = {
+      getStrengthByMemoryId: vi.fn(
+        async (_workspaceId: string, _memoryIds: readonly string[]) =>
+          new Map<string, number>([
+            ["memory-strong-lexical", 0.0],
+            ["memory-weak-but-plastic", 1.0]
+          ])
+      )
+    };
+    const service = new RecallService({
+      ...dependencies,
+      pathPlasticityPort: plasticityPort
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze"
+    });
+
+    expect(result.candidates[0]?.object_id).toBe("memory-strong-lexical");
+  });
+
+  it("falls back to no plasticity boost when the path plasticity port throws — recall must not break on a plasticity failure", async () => {
+    const memories = [
+      createMemoryEntry({
+        object_id: "memory-x",
+        activation_score: 0.5,
+        content: "Resilient memory."
+      })
+    ];
+    const { dependencies, warnSpy } = createDependencies(memories);
+    const plasticityPort = {
+      getStrengthByMemoryId: vi.fn(async () => {
+        throw new Error("plasticity port unavailable");
+      })
+    };
+    const service = new RecallService({
+      ...dependencies,
+      pathPlasticityPort: plasticityPort
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze"
+    });
+
+    expect(result.candidates.length).toBe(1);
+    expect(result.candidates[0]?.object_id).toBe("memory-x");
+    expect(warnSpy).toHaveBeenCalledWith(
+      "path plasticity port lookup failed",
+      expect.objectContaining({ workspace_id: "workspace-1" })
+    );
+  });
 });
