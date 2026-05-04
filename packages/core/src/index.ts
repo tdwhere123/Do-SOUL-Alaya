@@ -38,6 +38,7 @@ export * from "./node-template-resolver.js";
 export * from "./output-shaping-service.js";
 export * from "./permission-policy/index.js";
 export * from "./ports/tool-governance-client.js";
+export * from "./path-plasticity-service.js";
 export * from "./project-mapping-service.js";
 export * from "./prompt-asset-registry.js";
 export * from "./proposal-service.js";
