@@ -566,6 +566,26 @@ The threads I'll pull there:
   reflect actual agent context-window cost rather than a static
   constant.
 
+Concrete v0.2 backlog cards opened during the v0.1 closeout (close
+conditions live in `docs/handbook/backlog.md`):
+
+- **`#BL-025`** — Drop the required-but-ignored `revision` field
+  from `EventPublisherInput` across ~50 source sites and ~50 test
+  fixtures (purely type-ergonomics; the BL-022 race is already
+  closed in v0.1).
+- **`#BL-026`** — Migrate the soul-side `AuditorEventLogPort`
+  adapter off the legacy `publishWithMutation` / `publishManyWithMutation`
+  signature so those `@deprecated` methods can be deleted.
+- **Path-plasticity follow-ups** — move the `PATH_PLASTICITY_UPDATE`
+  task from Auditor (TIER_1) to Librarian (TIER_2) for strict tier
+  alignment; wire `direction_bias` redirection on top of the
+  reinforcement / weakening / retirement that v0.1 ships; add
+  `PathLifecycle.status: "active" | "retired"` so the per-tick audit-
+  log scan goes away.
+- **Sync-first repo pattern** — retire the parallel `*Sync` sibling
+  methods A2 added by making the primary repo methods sync and
+  async-wrapping only at I/O boundaries.
+
 ### P3. Vendor cleanup (post-v0.1.0 tag)
 
 `vendor/do-what-new-snapshot/` was a temporary port reference, not

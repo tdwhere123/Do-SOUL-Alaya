@@ -188,6 +188,37 @@ deferrals (`#BL-008` pi-mono, `#BL-009` keychain) and the seven
 `#BL-001..#BL-007` ADR-style out-of-scope entries. (`#BL-022`
 EventPublisher atomic port closed in v0.1-closeout-a2.)
 
+## v0.1-closeout lessons (parallel A1/A2/A3 sub-agent dispatch)
+
+Two recurring failure shapes surfaced across the parallel A1/A2/A3
+sub-agent waves and are worth pinning so the next multi-card closeout
+does not pay the same cost:
+
+- **Test-shape pin vs behaviour pin.** A1's
+  `final-review-evidence-locks` doc-cite loop, A2's workspace-service
+  `Promise.all` parallel-insert assertion, and A2's
+  `routes-config-port` "persist callback IS the SQL boundary" test all
+  pinned implementation shape (catalog count, async ordering, callback
+  layering) instead of the contract the test was named for. Any catalog
+  growth, atomicity migration, or transaction-shape change broke
+  unrelated tests purely because the test pinned `how`, not `what`.
+  Future tests must assert observable contract — not call shape, not
+  ordering, not async-vs-sync.
+- **Prompt-shape vs codebase-shape.** A1's prompt asserted a
+  `proposal_reviews` table that didn't exist; A3's prompt asserted
+  `PathPlasticityStateSchema` was already exported (it was declared but
+  not exported) and didn't include `garden-tier.ts` in the may-modify
+  list (adding a new task kind requires that file). Per-card prompts
+  that drifted from disk truth forced sub-agents to re-derive the shape
+  mid-implementation. Future multi-card briefs must include a
+  `verified-files-and-symbols` block produced by `rg`/`Read` immediately
+  before dispatch, not from the planner's mental model.
+
+Both lessons are process-level — neither requires a code change in
+v0.1-closeout. They are pinned here so the v0.1.x maintenance waves and
+v0.2 planning agents can reference them at the source rather than
+re-discovering them from `.do-it/findings/{a1,a2,a3}.md`.
+
 The end-to-end verification gate at HEAD `78d8a91` runs clean (same
 shape as Round 2):
 `rtk pnpm install`, `rtk pnpm build`, `rtk pnpm exec vitest run` (248 files

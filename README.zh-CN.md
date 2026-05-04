@@ -525,6 +525,25 @@ fix-loop 纪律收。只有当某张卡自己的退出条件成立、且综合 r
 - **召回预算成形** —— 让 budget penalty 的衰减计划反映 agent
   真实的上下文窗口成本，而不是一个静态常数。
 
+v0.1 closeout 期间开出的具体 v0.2 backlog 卡（详细关闭条件见
+`docs/handbook/backlog.md`）：
+
+- **`#BL-025`** —— 把 `EventPublisherInput` 那个"必填但被静默
+  覆盖"的 `revision` 字段从 ~50 处 source 调用 + ~50 处测试夹具
+  里去掉（纯类型 ergonomics；BL-022 的实际竞争窗口在 v0.1 已经
+  关掉了）。
+- **`#BL-026`** —— 把 soul 端的 `AuditorEventLogPort` 适配器从
+  `publishWithMutation` / `publishManyWithMutation` 这俩 legacy
+  签名上迁移走，让那两个 `@deprecated` 方法可以删除。
+- **Path 可塑性的 follow-up** —— 把 `PATH_PLASTICITY_UPDATE` 任
+  务从 Auditor (TIER_1) 挪到 Librarian (TIER_2) 严格对齐分层；在
+  v0.1 已交付的 reinforcement / weakening / retirement 之上，补
+  上 `direction_bias` redirection；给 `PathLifecycle` 加上
+  `status: "active" | "retired"`，让每 tick 的 audit-log 扫描可
+  以下线。
+- **Sync-first 的 repo 模式** —— 把 A2 加的那批并列 `*Sync` 兄
+  弟方法回收掉：让主方法变成同步、只在 I/O 边界包一层 async。
+
 ### P3. Vendor 清理（v0.1.0 tag 之后）
 
 `vendor/do-what-new-snapshot/` 是临时的 port 参照，不是永久依
