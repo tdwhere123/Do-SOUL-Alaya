@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Phase5EventType } from "@do-soul/alaya-protocol";
+import { FileApprovalEventType } from "@do-soul/alaya-protocol";
 import { createSoulApprovalService } from "../services/soul-approval-service.js";
 
 describe("SoulApprovalService", () => {
@@ -150,7 +150,7 @@ describe("SoulApprovalService", () => {
     });
 
     expect(eventLogRepo.append).toHaveBeenCalledWith({
-      event_type: Phase5EventType.SOUL_APPROVAL_RESOLVED,
+      event_type: FileApprovalEventType.SOUL_APPROVAL_RESOLVED,
       entity_type: "approval",
       entity_id: "approval-1",
       workspace_id: "ws-1",
@@ -170,7 +170,7 @@ describe("SoulApprovalService", () => {
     });
     expect(runtimeNotifier.notifyEntry).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase5EventType.SOUL_APPROVAL_RESOLVED,
+        event_type: FileApprovalEventType.SOUL_APPROVAL_RESOLVED,
         entity_id: "approval-1",
         run_id: "run-1"
       })
@@ -339,7 +339,7 @@ function createApprovalRequestedEvent(options: {
 }) {
   return {
     event_id: `event-requested-${options.approvalId}`,
-    event_type: Phase5EventType.SOUL_APPROVAL_REQUESTED,
+    event_type: FileApprovalEventType.SOUL_APPROVAL_REQUESTED,
     entity_type: "approval",
     entity_id: options.approvalId,
     workspace_id: "ws-1",
@@ -367,7 +367,7 @@ function createApprovalResolvedEvent(options: {
 }) {
   return {
     event_id: `event-resolved-${options.approvalId}`,
-    event_type: Phase5EventType.SOUL_APPROVAL_RESOLVED,
+    event_type: FileApprovalEventType.SOUL_APPROVAL_RESOLVED,
     entity_type: "approval",
     entity_id: options.approvalId,
     workspace_id: "ws-1",

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  Phase4BEventType,
+  GraphAuditorEventType,
   type EventLogEntry,
   type MemoryGraphEdge,
   type MemoryGraphEdgeTypeValue
@@ -74,7 +74,7 @@ describe("GraphExploreService", () => {
     });
     expect(append).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase4BEventType.SOUL_GRAPH_EDGE_CREATED,
+        event_type: GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED,
         entity_type: "memory_graph_edge",
         entity_id: "edge_generated",
         workspace_id: "workspace-1",
@@ -156,7 +156,7 @@ describe("GraphExploreService", () => {
     ]);
     expect(append).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase4BEventType.SOUL_GRAPH_EXPLORE_COMPLETED,
+        event_type: GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED,
         entity_type: "memory_entry",
         entity_id: "memory-a",
         payload_json: expect.objectContaining({

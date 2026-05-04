@@ -3,7 +3,7 @@ import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import type { Hono } from "hono";
 import {
-  Phase5EventType,
+  FileApprovalEventType,
   type EventLogEntry,
   type FileRecord,
   type FileUploadResponse,
@@ -307,7 +307,7 @@ async function persistFileRecord(
   }
 
   const created = await services.fileRepo.createWithEvent(record, {
-    event_type: Phase5EventType.FILE_UPLOADED,
+    event_type: FileApprovalEventType.FILE_UPLOADED,
     entity_type: "file",
     entity_id: record.file_id,
     workspace_id: record.workspace_id,

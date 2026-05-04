@@ -1,8 +1,8 @@
 import { CoreError } from "@do-soul/alaya-core";
 import {
   DirtyStatePanicPayloadSchema,
-  Phase5EventType,
-  PhaseBEventType,
+  FileApprovalEventType,
+  ObligationTrustNarrativeEventType,
   SoulApprovalRequestedPayloadSchema,
   type DirtyStatePanicPayload,
   type EventLogEntry,
@@ -58,7 +58,7 @@ export function registerE2eEventTriggerRoutes(
 
     const payload = parseSoulApprovalRequestedPayload(payloadInput);
     const entry = await appendAndBroadcast(services, {
-      event_type: Phase5EventType.SOUL_APPROVAL_REQUESTED,
+      event_type: FileApprovalEventType.SOUL_APPROVAL_REQUESTED,
       entity_type: "approval",
       entity_id: payload.approval_id,
       workspace_id: run.workspace_id,
@@ -105,7 +105,7 @@ export function registerE2eEventTriggerRoutes(
       affected_entity_count: affectedEntityCount
     });
     const entry = await appendAndBroadcast(services, {
-      event_type: PhaseBEventType.DIRTY_STATE_PANIC,
+      event_type: ObligationTrustNarrativeEventType.DIRTY_STATE_PANIC,
       entity_type: "worker_run",
       entity_id: payload.worker_run_id,
       workspace_id: run.workspace_id,

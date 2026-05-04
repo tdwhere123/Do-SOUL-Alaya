@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { Phase1BEventType, RetentionPolicy, type Proposal } from "@do-soul/alaya-protocol";
+import { MemoryGovernanceEventType, RetentionPolicy, type Proposal } from "@do-soul/alaya-protocol";
 import { initDatabase, type StorageDatabase } from "../db.js";
 import { SqliteProposalRepo, type ProposalResolutionEventInput } from "../repos/proposal-repo.js";
 
@@ -219,9 +219,9 @@ describe("SqliteProposalRepo", () => {
 
     expect(result.proposal.resolution_state).toBe("accepted");
     expect(result.events.map((event) => event.event_type)).toEqual([
-      Phase1BEventType.SOUL_REVIEW_CREATED,
-      Phase1BEventType.SOUL_REVIEW_COMPLETED,
-      Phase1BEventType.SOUL_PROPOSAL_RESOLVED
+      MemoryGovernanceEventType.SOUL_REVIEW_CREATED,
+      MemoryGovernanceEventType.SOUL_REVIEW_COMPLETED,
+      MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED
     ]);
     expect(countProposalEvents(database, proposal.proposal_id)).toBe(3);
 
@@ -253,7 +253,7 @@ describe("SqliteProposalRepo", () => {
 
     expect(result.proposal).toEqual(proposal);
     expect(result.events.map((event) => event.event_type)).toEqual([
-      Phase1BEventType.SOUL_PROPOSAL_CREATED
+      MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED
     ]);
     expect(result.events[0]?.revision).toBe(0);
     expect(countProposalEvents(database, proposal.proposal_id)).toBe(1);
@@ -340,7 +340,7 @@ function createRepo(): { readonly repo: SqliteProposalRepo; readonly database: S
 function createCreationEvents(proposal: Proposal): readonly ProposalResolutionEventInput[] {
   return [
     {
-      event_type: Phase1BEventType.SOUL_PROPOSAL_CREATED,
+      event_type: MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED,
       entity_type: "proposal",
       entity_id: proposal.proposal_id,
       workspace_id: "workspace-1",
@@ -359,7 +359,7 @@ function createCreationEvents(proposal: Proposal): readonly ProposalResolutionEv
 function createReviewEvents(proposal: Proposal): readonly ProposalResolutionEventInput[] {
   return [
     {
-      event_type: Phase1BEventType.SOUL_REVIEW_CREATED,
+      event_type: MemoryGovernanceEventType.SOUL_REVIEW_CREATED,
       entity_type: "proposal",
       entity_id: proposal.proposal_id,
       workspace_id: "workspace-1",
@@ -373,7 +373,7 @@ function createReviewEvents(proposal: Proposal): readonly ProposalResolutionEven
       }
     },
     {
-      event_type: Phase1BEventType.SOUL_REVIEW_COMPLETED,
+      event_type: MemoryGovernanceEventType.SOUL_REVIEW_COMPLETED,
       entity_type: "proposal",
       entity_id: proposal.proposal_id,
       workspace_id: "workspace-1",
@@ -387,7 +387,7 @@ function createReviewEvents(proposal: Proposal): readonly ProposalResolutionEven
       }
     },
     {
-      event_type: Phase1BEventType.SOUL_PROPOSAL_RESOLVED,
+      event_type: MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED,
       entity_type: "proposal",
       entity_id: proposal.proposal_id,
       workspace_id: "workspace-1",

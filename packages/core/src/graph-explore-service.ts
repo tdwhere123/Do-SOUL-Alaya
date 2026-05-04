@@ -3,7 +3,7 @@ import {
   GraphNeighborSchema,
   MemoryGraphEdgeSchema,
   MemoryGraphEdgeTypeSchema,
-  Phase4BEventType,
+  GraphAuditorEventType,
   SoulGraphEdgeCreatedPayloadSchema,
   SoulGraphExploreCompletedPayloadSchema,
   type EventLogEntry,
@@ -111,7 +111,7 @@ export class GraphExploreService {
     });
 
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase4BEventType.SOUL_GRAPH_EDGE_CREATED,
+      event_type: GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED,
       entity_type: "memory_graph_edge",
       entity_id: edge.edge_id,
       workspace_id: workspaceId,
@@ -180,7 +180,7 @@ export class GraphExploreService {
     }
 
     await this.dependencies.eventLogRepo.append({
-      event_type: Phase4BEventType.SOUL_GRAPH_EXPLORE_COMPLETED,
+      event_type: GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED,
       entity_type: "memory_entry",
       entity_id: parsedMemoryId,
       workspace_id: parsedWorkspaceId,

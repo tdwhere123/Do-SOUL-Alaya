@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   BindingState,
   CrossCuttingState,
-  Phase2BEventType,
+  SurfaceEventType,
   type CrossCuttingPermission,
   type GovernanceDriftLease,
   type SurfaceBinding
@@ -272,7 +272,7 @@ describe("SurfaceBindingService", () => {
     expect(created.binding.binding_state).toBe(BindingState.ACTIVE);
     expect(eventPublisher.publishWithMutation).toHaveBeenCalledTimes(1);
     expect(publishedEvents.single[0]).toMatchObject({
-      event_type: Phase2BEventType.SOUL_SURFACE_BINDING_CREATED,
+      event_type: SurfaceEventType.SOUL_SURFACE_BINDING_CREATED,
       entity_type: "surface_binding",
       entity_id: BINDING_ID_1,
       workspace_id: "workspace-1",
@@ -465,7 +465,7 @@ describe("SurfaceBindingService", () => {
     expect(updated.binding.binding_state).toBe(BindingState.STALE);
     expect(eventPublisher.publishWithMutation).toHaveBeenCalledTimes(1);
     expect(publishedEvents.single[0]).toMatchObject({
-      event_type: Phase2BEventType.SOUL_SURFACE_BINDING_STATE_CHANGED,
+      event_type: SurfaceEventType.SOUL_SURFACE_BINDING_STATE_CHANGED,
       entity_type: "surface_binding",
       entity_id: BINDING_ID_1,
       caused_by: "reviewer-1",
@@ -615,7 +615,7 @@ describe("SurfaceBindingService", () => {
       publishedEvents.many[0].every(
         (event) =>
           (event as { readonly event_type?: string }).event_type ===
-          Phase2BEventType.SOUL_SURFACE_BINDING_STATE_CHANGED
+          SurfaceEventType.SOUL_SURFACE_BINDING_STATE_CHANGED
       )
     ).toBe(true);
 

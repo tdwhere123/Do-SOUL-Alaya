@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  PhaseCEventType,
+  RuntimeGovernanceEventType,
   type EventLogEntry,
   type DriftClassification,
   type GovernanceDriftLease
@@ -57,7 +57,7 @@ describe("SurfaceDriftService", () => {
     });
     expect(publishSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: PhaseCEventType.SURFACE_DRIFT_DETECTED,
+        event_type: RuntimeGovernanceEventType.SURFACE_DRIFT_DETECTED,
         entity_type: "surface_drift",
         entity_id: "drift-1",
         workspace_id: "workspace-1",
@@ -151,7 +151,7 @@ describe("SurfaceDriftService", () => {
     expect(repo.delete).toHaveBeenCalledWith("lease-1");
     expect(publishWithMutationSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: PhaseCEventType.SURFACE_DRIFT_LEASE_RELEASED,
+        event_type: RuntimeGovernanceEventType.SURFACE_DRIFT_LEASE_RELEASED,
         entity_type: "surface_drift_lease",
         entity_id: "lease-1",
         workspace_id: "workspace-1",
@@ -210,7 +210,7 @@ describe("SurfaceDriftService", () => {
     await expect(service.releaseLease("lease-1", "workspace-1", "user")).resolves.toBeUndefined();
     expect(publishSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: PhaseCEventType.SURFACE_DRIFT_LEASE_RELEASE_FAILED,
+        event_type: RuntimeGovernanceEventType.SURFACE_DRIFT_LEASE_RELEASE_FAILED,
         entity_type: "surface_drift_lease",
         entity_id: "lease-1",
         workspace_id: "workspace-1",
@@ -232,7 +232,7 @@ describe("SurfaceDriftService", () => {
       createEventLogEntry(event)
     );
     const propagatedReleaseEntry = createEventLogEntry({
-      event_type: PhaseCEventType.SURFACE_DRIFT_LEASE_RELEASED,
+      event_type: RuntimeGovernanceEventType.SURFACE_DRIFT_LEASE_RELEASED,
       entity_type: "surface_drift_lease",
       entity_id: "lease-1",
       workspace_id: "workspace-1",
@@ -353,7 +353,7 @@ describe("SurfaceDriftService", () => {
     });
     expect(publishSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: PhaseCEventType.SURFACE_DRIFT_ALERT,
+        event_type: RuntimeGovernanceEventType.SURFACE_DRIFT_ALERT,
         entity_type: "surface_drift_alert",
         entity_id: "alert-1",
         workspace_id: "workspace-1"

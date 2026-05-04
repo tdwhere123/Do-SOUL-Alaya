@@ -6,8 +6,8 @@ import {
   ContextLensSchema,
   EnforcementLevel,
   ObjectKind,
-  Phase3AEventType,
-  Phase3CEventType,
+  RecallContextEventType,
+  BudgetEventType,
   RetentionPolicy,
   RuntimeMode,
   ScopeClass,
@@ -221,7 +221,7 @@ export class ContextLensAssembler {
 
     const revision = await getNextRevision(this.dependencies.eventLogRepo, "context_lens", contextLens.runtime_id);
     await this.dependencies.eventLogRepo.append({
-      event_type: Phase3AEventType.SOUL_CONTEXT_LENS_ASSEMBLED,
+      event_type: RecallContextEventType.SOUL_CONTEXT_LENS_ASSEMBLED,
       entity_type: "context_lens",
       entity_id: contextLens.runtime_id,
       workspace_id: params.run.workspace_id,
@@ -350,7 +350,7 @@ export class ContextLensAssembler {
         contextLens.runtime_id
       );
       const degradedEvent = await this.dependencies.eventLogRepo.append({
-        event_type: Phase3CEventType.SOUL_BUDGET_DEGRADED,
+        event_type: BudgetEventType.SOUL_BUDGET_DEGRADED,
         entity_type: "context_lens",
         entity_id: contextLens.runtime_id,
         workspace_id: params.run.workspace_id,

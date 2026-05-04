@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   FormationKind,
   MemoryDimension,
-  Phase3BEventType,
+  GreenGovernanceEventType,
   RevokeReason,
   ScopeClass,
   SourceKind,
@@ -190,7 +190,7 @@ describe("GreenService", () => {
 
     expect(status.green_state).toBe("eligible");
     expect(statuses.get(status.target_object_id)?.green_state).toBe("eligible");
-    expect(events.at(-1)?.event_type).toBe(Phase3BEventType.SOUL_GREEN_GRANTED);
+    expect(events.at(-1)?.event_type).toBe(GreenGovernanceEventType.SOUL_GREEN_GRANTED);
   });
 
   it("grant() rejects inactive lifecycle entries", async () => {
@@ -237,7 +237,7 @@ describe("GreenService", () => {
     });
 
     expect(statuses.get("70a0b18b-5f8b-4fd2-a1b0-97ce48113fca")?.green_state).toBe("revoked");
-    expect(events.at(-1)?.event_type).toBe(Phase3BEventType.SOUL_GREEN_PIERCED);
+    expect(events.at(-1)?.event_type).toBe(GreenGovernanceEventType.SOUL_GREEN_PIERCED);
   });
 
   it("reevaluate() auto-grants preference memories with evidence", async () => {
@@ -287,7 +287,7 @@ describe("GreenService", () => {
       existingStatus: createGreenStatus(),
       initialEvents: [
         createEvent({
-          event_type: Phase3BEventType.SOUL_SESSION_OVERRIDE_APPLIED,
+          event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
           entity_type: "session_override",
           entity_id: "override-open",
           payload_json: {
@@ -318,7 +318,7 @@ describe("GreenService", () => {
     const { service } = createHarness({
       initialEvents: [
         createEvent({
-          event_type: Phase3BEventType.SOUL_SESSION_OVERRIDE_APPLIED,
+          event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
           entity_type: "session_override",
           entity_id: "override-expired",
           payload_json: {
@@ -348,7 +348,7 @@ describe("GreenService", () => {
       existingStatus: createGreenStatus(),
       initialEvents: [
         createEvent({
-          event_type: Phase3BEventType.SOUL_SESSION_OVERRIDE_APPLIED,
+          event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
           entity_type: "session_override",
           entity_id: "override-rejected",
           payload_json: {
@@ -363,7 +363,7 @@ describe("GreenService", () => {
           }
         }),
         createEvent({
-          event_type: Phase3BEventType.SOUL_SESSION_OVERRIDE_PROMOTED,
+          event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_PROMOTED,
           entity_type: "session_override",
           entity_id: "override-rejected",
           payload_json: {
@@ -392,7 +392,7 @@ describe("GreenService", () => {
       existingStatus: createGreenStatus(),
       initialEvents: [
         createEvent({
-          event_type: Phase3BEventType.SOUL_GREEN_PIERCED,
+          event_type: GreenGovernanceEventType.SOUL_GREEN_PIERCED,
           entity_type: "green_status",
           entity_id: "green-security-event",
           payload_json: {
@@ -422,7 +422,7 @@ describe("GreenService", () => {
       initialEvents: [
         createEvent({
           workspace_id: "workspace-2",
-          event_type: Phase3BEventType.SOUL_SESSION_OVERRIDE_APPLIED,
+          event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
           entity_type: "session_override",
           entity_id: "override-other-workspace",
           payload_json: {
@@ -554,7 +554,7 @@ describe("GreenService", () => {
     });
 
     expect(result.verdict).toBe("go");
-    const verificationEvent = events.filter((event) => event.event_type === Phase3BEventType.SOUL_VERIFICATION_COMPLETED).at(-1);
+    const verificationEvent = events.filter((event) => event.event_type === GreenGovernanceEventType.SOUL_VERIFICATION_COMPLETED).at(-1);
     expect((verificationEvent?.payload_json as Record<string, unknown>).consecutive_no_go_count).toBe(0);
   });
 
@@ -582,7 +582,7 @@ describe("GreenService", () => {
     });
 
     expect(result.micro_correction_hint).toBe("max retries reached");
-    expect(events.filter((event) => event.event_type === Phase3BEventType.SOUL_GREEN_PIERCED)).toHaveLength(3);
+    expect(events.filter((event) => event.event_type === GreenGovernanceEventType.SOUL_GREEN_PIERCED)).toHaveLength(3);
   });
 
   it("setGrace() audits and notifies an eligible-to-grace transition with dedicated grace event", async () => {
@@ -602,7 +602,7 @@ describe("GreenService", () => {
     expect(status?.green_state).toBe("grace");
     expect(status?.revoke_reason).toBe(RevokeReason.NONE);
     expect(event).toMatchObject({
-      event_type: Phase3BEventType.SOUL_GREEN_GRACE_ENTERED,
+      event_type: GreenGovernanceEventType.SOUL_GREEN_GRACE_ENTERED,
       entity_type: "green_status",
       entity_id: "9bc1a292-e9c2-47f9-9c6f-bf6b67c810f3",
       workspace_id: "workspace-1",
@@ -623,7 +623,7 @@ describe("GreenService", () => {
     expect(
       events.some(
         (candidate) =>
-          candidate.event_type === Phase3BEventType.SOUL_GREEN_PIERCED &&
+          candidate.event_type === GreenGovernanceEventType.SOUL_GREEN_PIERCED &&
           (candidate.payload_json as Record<string, unknown>).revoke_reason === RevokeReason.REVIEW_OVERDUE
       )
     ).toBe(false);
@@ -650,7 +650,7 @@ describe("GreenService", () => {
     ).resolves.toBe("grace");
 
     expect(events.at(-1)).toMatchObject({
-      event_type: Phase3BEventType.SOUL_GREEN_GRACE_ENTERED,
+      event_type: GreenGovernanceEventType.SOUL_GREEN_GRACE_ENTERED,
       run_id: "run-1",
       payload_json: {
         prior_green_state: "eligible",

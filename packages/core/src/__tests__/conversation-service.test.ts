@@ -3,7 +3,7 @@ import {
   RuntimeMode,
   RunMode,
   RunState,
-  Phase0EventType,
+  WorkspaceRunEventType,
   WorkspaceKind,
   WorkspaceState,
   type CandidateMemorySignal,
@@ -254,7 +254,7 @@ describe("ConversationService", () => {
       queryByRun: vi.fn(async () => [
         {
           event_id: "event-user",
-          event_type: Phase0EventType.RUN_MESSAGE_APPENDED,
+          event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
           entity_type: "message",
           entity_id: "msg-user",
           workspace_id: "workspace-1",

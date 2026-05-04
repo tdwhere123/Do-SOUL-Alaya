@@ -1,6 +1,6 @@
 import {
-  Phase4BEventType,
-  parsePhase4BEventPayload,
+  GraphAuditorEventType,
+  parseGraphAuditorEventPayload,
   type EventLogEntry,
   type TopologyExplorationResult
 } from "@do-soul/alaya-protocol";
@@ -26,13 +26,13 @@ export class SoulTopologyAuditService {
     const workspaceId = topology.workspace_id;
 
     return await this.deps.eventLogRepo.append({
-      event_type: Phase4BEventType.SOUL_GRAPH_EXPLORE_COMPLETED,
+      event_type: GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED,
       entity_type: "workspace",
       entity_id: workspaceId,
       workspace_id: workspaceId,
       run_id: null,
       caused_by: "system",
-      payload_json: parsePhase4BEventPayload(Phase4BEventType.SOUL_GRAPH_EXPLORE_COMPLETED, {
+      payload_json: parseGraphAuditorEventPayload(GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED, {
         exploration_kind: "path_topology",
         workspace_id: workspaceId,
         total_nodes: topology.total_nodes,

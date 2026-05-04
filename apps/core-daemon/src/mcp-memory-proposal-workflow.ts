@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   ControlPlaneObjectKind,
   NonEmptyStringSchema,
-  Phase1BEventType,
+  MemoryGovernanceEventType,
   ProposalOptionKind,
   ProposalResolutionState,
   ProposalSchema,
@@ -119,7 +119,7 @@ export function createMcpMemoryProposalWorkflow(
 
     const creationEvents: ProposalCreationEventInput[] = [
       {
-        event_type: Phase1BEventType.SOUL_PROPOSAL_CREATED,
+        event_type: MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED,
         entity_type: "proposal",
         entity_id: proposal.proposal_id,
         workspace_id: context.workspaceId,
@@ -169,7 +169,7 @@ export function createMcpMemoryProposalWorkflow(
         : ProposalResolutionState.REJECTED;
     const reviewEvents: ProposalResolutionEventInput[] = [
       {
-        event_type: Phase1BEventType.SOUL_REVIEW_CREATED,
+        event_type: MemoryGovernanceEventType.SOUL_REVIEW_CREATED,
         entity_type: "proposal",
         entity_id: proposal.proposal_id,
         workspace_id: context.workspaceId,
@@ -183,7 +183,7 @@ export function createMcpMemoryProposalWorkflow(
         })
       },
       {
-        event_type: Phase1BEventType.SOUL_REVIEW_COMPLETED,
+        event_type: MemoryGovernanceEventType.SOUL_REVIEW_COMPLETED,
         entity_type: "proposal",
         entity_id: proposal.proposal_id,
         workspace_id: context.workspaceId,
@@ -203,7 +203,7 @@ export function createMcpMemoryProposalWorkflow(
         })
       },
       {
-        event_type: Phase1BEventType.SOUL_PROPOSAL_RESOLVED,
+        event_type: MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED,
         entity_type: "proposal",
         entity_id: proposal.proposal_id,
         workspace_id: context.workspaceId,

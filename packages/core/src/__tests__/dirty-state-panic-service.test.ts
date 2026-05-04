@@ -5,7 +5,7 @@ import type {
   EventLogEntry,
   DirtyStatePanicTrigger
 } from "@do-soul/alaya-protocol";
-import { PhaseBEventType } from "@do-soul/alaya-protocol";
+import { ObligationTrustNarrativeEventType } from "@do-soul/alaya-protocol";
 import { CoreError } from "../errors.js";
 import {
   DirtyStatePanicService,
@@ -136,7 +136,7 @@ describe("DirtyStatePanicService", () => {
     });
 
     expect(publishWithMutation).toHaveBeenCalledWith({
-      event_type: PhaseBEventType.DIRTY_STATE_PANIC,
+      event_type: ObligationTrustNarrativeEventType.DIRTY_STATE_PANIC,
       entity_type: "worker_run",
       entity_id: "worker-run-1",
       workspace_id: "workspace-1",

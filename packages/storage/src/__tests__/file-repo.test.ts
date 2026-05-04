@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  Phase5EventType,
+  FileApprovalEventType,
   RunMode,
   RunState,
   WorkspaceKind,
@@ -72,7 +72,7 @@ describe("SqliteFileRepo", () => {
     const record = createFileRecord();
 
     const result = await repo.createWithEvent(record, {
-      event_type: Phase5EventType.FILE_UPLOADED,
+      event_type: FileApprovalEventType.FILE_UPLOADED,
       entity_type: "file",
       entity_id: record.file_id,
       workspace_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -93,7 +93,7 @@ describe("SqliteFileRepo", () => {
       .get(record.file_id) as { readonly revision: number } | undefined;
 
     expect(result.record).toEqual(record);
-    expect(result.event.event_type).toBe(Phase5EventType.FILE_UPLOADED);
+    expect(result.event.event_type).toBe(FileApprovalEventType.FILE_UPLOADED);
     expect(result.event.revision).toBe(0);
     expect(eventRow?.revision).toBe(0);
   });
@@ -110,7 +110,7 @@ describe("SqliteFileRepo", () => {
           storage_path: "11111111-1111-4111-8111-111111111111.md"
         }),
         {
-          event_type: Phase5EventType.FILE_UPLOADED,
+          event_type: FileApprovalEventType.FILE_UPLOADED,
           entity_type: "file",
           entity_id: "22222222-2222-4222-8222-222222222222",
           workspace_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",

@@ -3,7 +3,7 @@ import {
   CrossCuttingPermissionSchema,
   CrossCuttingState,
   CrossCuttingStateSchema,
-  Phase2BEventType,
+  SurfaceEventType,
   SoulCrossCuttingStateChangedPayloadSchema,
   type CrossCuttingPermission,
   type CrossCuttingState as CrossCuttingStateType,
@@ -196,7 +196,7 @@ export class CrossCuttingPermissionService {
     readonly causedBy: string;
   }): CrossCuttingEventDraft {
     return {
-      event_type: Phase2BEventType.SOUL_CROSS_CUTTING_STATE_CHANGED,
+      event_type: SurfaceEventType.SOUL_CROSS_CUTTING_STATE_CHANGED,
       entity_type: "cross_cutting_permission",
       entity_id: input.permissionId,
       workspace_id: input.permission.workspace_id,

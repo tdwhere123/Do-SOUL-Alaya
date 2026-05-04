@@ -22,13 +22,13 @@ import {
   EmitCandidateSignalResponseSchema,
   EventLogEntrySchema,
   FileToolErrorSchema,
-  parsePhase0EventPayload,
-  parsePhase05EventPayload,
-  Phase0EventBaseSchema,
-  Phase0EventSchema,
-  Phase0EventType,
-  Phase05EventSchema,
-  Phase05EventType,
+  parseWorkspaceRunEventPayload,
+  parseSignalEventPayload,
+  WorkspaceRunEventBaseSchema,
+  WorkspaceRunEventSchema,
+  WorkspaceRunEventType,
+  SignalEventSchema,
+  SignalEventType,
   ListDirectoryToolInputSchema,
   ListDirectoryToolResultSchema,
   ReadFileToolInputSchema,
@@ -52,7 +52,7 @@ import {
   WorkspaceKind,
   WorkspaceSchema,
   type CandidateMemorySignal,
-  type Phase0Event
+  type WorkspaceRunEvent
 } from "../index.js";
 
 type IfEquals<X, Y, A = true, B = false> =
@@ -64,15 +64,15 @@ type IsReadonlyProperty<T, K extends keyof T> = IfEquals<
   true
 >;
 type AssertTrue<T extends true> = T;
-type _Phase0EventReadonlyChecks = [
-  AssertTrue<IsReadonlyProperty<Phase0Event, "event_id">>,
-  AssertTrue<IsReadonlyProperty<Phase0Event, "entity_type">>,
-  AssertTrue<IsReadonlyProperty<Phase0Event, "entity_id">>,
-  AssertTrue<IsReadonlyProperty<Phase0Event, "workspace_id">>,
-  AssertTrue<IsReadonlyProperty<Phase0Event, "run_id">>,
-  AssertTrue<IsReadonlyProperty<Phase0Event, "caused_by">>,
-  AssertTrue<IsReadonlyProperty<Phase0Event, "revision">>,
-  AssertTrue<IsReadonlyProperty<Phase0Event, "created_at">>
+type _WorkspaceRunEventReadonlyChecks = [
+  AssertTrue<IsReadonlyProperty<WorkspaceRunEvent, "event_id">>,
+  AssertTrue<IsReadonlyProperty<WorkspaceRunEvent, "entity_type">>,
+  AssertTrue<IsReadonlyProperty<WorkspaceRunEvent, "entity_id">>,
+  AssertTrue<IsReadonlyProperty<WorkspaceRunEvent, "workspace_id">>,
+  AssertTrue<IsReadonlyProperty<WorkspaceRunEvent, "run_id">>,
+  AssertTrue<IsReadonlyProperty<WorkspaceRunEvent, "caused_by">>,
+  AssertTrue<IsReadonlyProperty<WorkspaceRunEvent, "revision">>,
+  AssertTrue<IsReadonlyProperty<WorkspaceRunEvent, "created_at">>
 ];
 type _CandidateMemorySignalReadonlyChecks = [
   AssertTrue<IsReadonlyProperty<CandidateMemorySignal, "signal_id">>,
@@ -137,7 +137,7 @@ const runBase = {
 
 const eventLogEntryBase = {
   event_id: "event-1",
-  event_type: Phase0EventType.WORKSPACE_CREATED,
+  event_type: WorkspaceRunEventType.WORKSPACE_CREATED,
   entity_type: "workspace",
   entity_id: "workspace-1",
   workspace_id: "workspace-1",
@@ -218,7 +218,7 @@ describe("enum coverage", () => {
   });
 
   it("exports the expected event, provider, engine error, and finish reason values", () => {
-    expect(Object.values(Phase0EventType)).toEqual([
+    expect(Object.values(WorkspaceRunEventType)).toEqual([
       "workspace.created",
       "workspace.deleted",
       "workspace.engine_binding.updated",
@@ -230,7 +230,7 @@ describe("enum coverage", () => {
       "run.message.appended",
       "engine.response.received"
     ]);
-    expect(Object.values(Phase05EventType)).toEqual([
+    expect(Object.values(SignalEventType)).toEqual([
       "soul.signal.emitted",
       "soul.signal.normalized",
       "soul.signal.triaged",
@@ -451,7 +451,7 @@ describe("EventLogEntrySchema", () => {
     const runEvent = {
       ...eventLogEntryBase,
       event_id: "event-2",
-      event_type: Phase0EventType.RUN_MESSAGE_APPENDED,
+      event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
       entity_type: "run",
       entity_id: "run-1",
       run_id: "run-1",
@@ -467,11 +467,11 @@ describe("EventLogEntrySchema", () => {
     expect(EventLogEntrySchema.parse(runEvent)).toEqual(runEvent);
   });
 
-  it("accepts a phase-0.5 signal event entry", () => {
+  it("accepts a signal event entry", () => {
     const signalEvent = {
       ...eventLogEntryBase,
       event_id: "event-3",
-      event_type: Phase05EventType.SOUL_SIGNAL_EMITTED,
+      event_type: SignalEventType.SOUL_SIGNAL_EMITTED,
       entity_type: "candidate_memory_signal",
       entity_id: "signal-1",
       run_id: "run-1",
@@ -492,7 +492,7 @@ describe("EventLogEntrySchema", () => {
     expect(EventLogEntrySchema.safeParse(without(eventLogEntryBase, "event_id")).success).toBe(false);
   });
 
-  it("rejects an invalid phase-0 event type", () => {
+  it("rejects an invalid workspace-run event type", () => {
     expect(EventLogEntrySchema.safeParse({ ...eventLogEntryBase, event_type: "engine.error" }).success).toBe(false);
   });
 
@@ -505,10 +505,10 @@ describe("EventLogEntrySchema", () => {
   });
 });
 
-describe("phase-0 payload parsing", () => {
+describe("workspace-run payload parsing", () => {
   const validPayloads = [
     {
-      eventType: Phase0EventType.WORKSPACE_CREATED,
+      eventType: WorkspaceRunEventType.WORKSPACE_CREATED,
       payload: {
         workspace_id: "workspace-1",
         name: "Workspace One",
@@ -516,11 +516,11 @@ describe("phase-0 payload parsing", () => {
       }
     },
     {
-      eventType: Phase0EventType.WORKSPACE_DELETED,
+      eventType: WorkspaceRunEventType.WORKSPACE_DELETED,
       payload: { workspace_id: "workspace-1" }
     },
     {
-      eventType: Phase0EventType.WORKSPACE_ENGINE_BINDING_UPDATED,
+      eventType: WorkspaceRunEventType.WORKSPACE_ENGINE_BINDING_UPDATED,
       payload: {
         workspace_id: "workspace-1",
         binding_id: "binding-1",
@@ -530,14 +530,14 @@ describe("phase-0 payload parsing", () => {
       }
     },
     {
-      eventType: Phase0EventType.WORKSPACE_DEFAULT_ENGINE_CLASS_UPDATED,
+      eventType: WorkspaceRunEventType.WORKSPACE_DEFAULT_ENGINE_CLASS_UPDATED,
       payload: {
         workspace_id: "workspace-1",
         default_engine_class: "conversation_engine"
       }
     },
     {
-      eventType: Phase0EventType.RUN_CREATED,
+      eventType: WorkspaceRunEventType.RUN_CREATED,
       payload: {
         run_id: "run-1",
         workspace_id: "workspace-1",
@@ -546,11 +546,11 @@ describe("phase-0 payload parsing", () => {
       }
     },
     {
-      eventType: Phase0EventType.RUN_DELETED,
+      eventType: WorkspaceRunEventType.RUN_DELETED,
       payload: { run_id: "run-1", workspace_id: "workspace-1" }
     },
     {
-      eventType: Phase0EventType.RUN_ENGINE_BINDING_UPDATED,
+      eventType: WorkspaceRunEventType.RUN_ENGINE_BINDING_UPDATED,
       payload: {
         run_id: "run-1",
         engine_binding_id: "binding-2",
@@ -558,7 +558,7 @@ describe("phase-0 payload parsing", () => {
       }
     },
     {
-      eventType: Phase0EventType.RUN_MESSAGE_APPENDED,
+      eventType: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
       payload: {
         run_id: "run-1",
         role: "assistant",
@@ -567,7 +567,7 @@ describe("phase-0 payload parsing", () => {
       }
     },
     {
-      eventType: Phase0EventType.ENGINE_RESPONSE_RECEIVED,
+      eventType: WorkspaceRunEventType.ENGINE_RESPONSE_RECEIVED,
       payload: {
         run_id: "run-1",
         message_id: "message-2",
@@ -578,12 +578,12 @@ describe("phase-0 payload parsing", () => {
   ] as const;
 
   it.each(validPayloads)("parses $eventType payloads", ({ eventType, payload }) => {
-    expect(parsePhase0EventPayload(eventType, payload)).toEqual(payload);
+    expect(parseWorkspaceRunEventPayload(eventType, payload)).toEqual(payload);
   });
 
   it("rejects a mismatched payload for the event type", () => {
     expect(() =>
-      parsePhase0EventPayload(Phase0EventType.RUN_CREATED, {
+      parseWorkspaceRunEventPayload(WorkspaceRunEventType.RUN_CREATED, {
         workspace_id: "workspace-1"
       })
     ).toThrow();
@@ -591,7 +591,7 @@ describe("phase-0 payload parsing", () => {
 
   it("rejects a payload with the wrong enum value", () => {
     expect(() =>
-      parsePhase0EventPayload(Phase0EventType.RUN_MESSAGE_APPENDED, {
+      parseWorkspaceRunEventPayload(WorkspaceRunEventType.RUN_MESSAGE_APPENDED, {
         run_id: "run-1",
         role: "system",
         content: "Nope",
@@ -602,7 +602,7 @@ describe("phase-0 payload parsing", () => {
 
   it("rejects an empty message_id", () => {
     expect(() =>
-      parsePhase0EventPayload(Phase0EventType.ENGINE_RESPONSE_RECEIVED, {
+      parseWorkspaceRunEventPayload(WorkspaceRunEventType.ENGINE_RESPONSE_RECEIVED, {
         run_id: "run-1",
         message_id: "",
         content: "Done",
@@ -613,7 +613,7 @@ describe("phase-0 payload parsing", () => {
 
   it("rejects an invalid finish_reason", () => {
     expect(() =>
-      parsePhase0EventPayload(Phase0EventType.ENGINE_RESPONSE_RECEIVED, {
+      parseWorkspaceRunEventPayload(WorkspaceRunEventType.ENGINE_RESPONSE_RECEIVED, {
         run_id: "run-1",
         message_id: "message-2",
         content: "Done",
@@ -623,11 +623,11 @@ describe("phase-0 payload parsing", () => {
   });
 });
 
-describe("Phase0EventSchema", () => {
-  const phase0EventBase = without(without(eventLogEntryBase, "event_type"), "payload_json");
+describe("WorkspaceRunEventSchema", () => {
+  const workspaceRunEventBase = without(without(eventLogEntryBase, "event_type"), "payload_json");
   const workspaceEvent = {
-    ...phase0EventBase,
-    event_type: Phase0EventType.WORKSPACE_CREATED,
+    ...workspaceRunEventBase,
+    event_type: WorkspaceRunEventType.WORKSPACE_CREATED,
     payload: {
       workspace_id: "workspace-1",
       name: "Workspace One",
@@ -636,7 +636,7 @@ describe("Phase0EventSchema", () => {
   };
 
   it("accepts the readonly base schema", () => {
-    expect(Phase0EventBaseSchema.parse(phase0EventBase)).toEqual(phase0EventBase);
+    expect(WorkspaceRunEventBaseSchema.parse(workspaceRunEventBase)).toEqual(workspaceRunEventBase);
   });
 
   it("accepts an exported child event schema", () => {
@@ -645,9 +645,9 @@ describe("Phase0EventSchema", () => {
 
   it("accepts a typed engine response event", () => {
     const event = {
-      ...phase0EventBase,
+      ...workspaceRunEventBase,
       event_id: "event-3",
-      event_type: Phase0EventType.ENGINE_RESPONSE_RECEIVED,
+      event_type: WorkspaceRunEventType.ENGINE_RESPONSE_RECEIVED,
       entity_type: "run",
       entity_id: "run-1",
       run_id: "run-1",
@@ -659,14 +659,14 @@ describe("Phase0EventSchema", () => {
       }
     };
 
-    expect(Phase0EventSchema.parse(event)).toEqual(event);
+    expect(WorkspaceRunEventSchema.parse(event)).toEqual(event);
   });
 
   it("accepts a typed workspace default-engine-class-updated event", () => {
     const event = {
-      ...phase0EventBase,
+      ...workspaceRunEventBase,
       event_id: "event-4",
-      event_type: Phase0EventType.WORKSPACE_DEFAULT_ENGINE_CLASS_UPDATED,
+      event_type: WorkspaceRunEventType.WORKSPACE_DEFAULT_ENGINE_CLASS_UPDATED,
       entity_type: "workspace",
       entity_id: "workspace-1",
       run_id: null,
@@ -676,14 +676,14 @@ describe("Phase0EventSchema", () => {
       }
     };
 
-    expect(Phase0EventSchema.parse(event)).toEqual(event);
+    expect(WorkspaceRunEventSchema.parse(event)).toEqual(event);
   });
 
   it("accepts a typed run engine-binding-updated event", () => {
     const event = {
-      ...phase0EventBase,
+      ...workspaceRunEventBase,
       event_id: "event-5",
-      event_type: Phase0EventType.RUN_ENGINE_BINDING_UPDATED,
+      event_type: WorkspaceRunEventType.RUN_ENGINE_BINDING_UPDATED,
       entity_type: "run",
       entity_id: "run-1",
       run_id: "run-1",
@@ -694,25 +694,25 @@ describe("Phase0EventSchema", () => {
       }
     };
 
-    expect(Phase0EventSchema.parse(event)).toEqual(event);
+    expect(WorkspaceRunEventSchema.parse(event)).toEqual(event);
   });
 
   it("rejects an event with a mismatched payload", () => {
-    const result = Phase0EventSchema.safeParse({
-      ...phase0EventBase,
-      event_type: Phase0EventType.WORKSPACE_CREATED,
+    const result = WorkspaceRunEventSchema.safeParse({
+      ...workspaceRunEventBase,
+      event_type: WorkspaceRunEventType.WORKSPACE_CREATED,
       payload: { workspace_id: "workspace-1" }
     });
     expect(result.success).toBe(false);
   });
 
   it("rejects an event without payload", () => {
-    const result = Phase0EventSchema.safeParse(without(workspaceEvent, "payload"));
+    const result = WorkspaceRunEventSchema.safeParse(without(workspaceEvent, "payload"));
     expect(result.success).toBe(false);
   });
 
   it("rejects a negative revision", () => {
-    const result = Phase0EventSchema.safeParse({
+    const result = WorkspaceRunEventSchema.safeParse({
       ...workspaceEvent,
       revision: -1
     });
@@ -720,7 +720,7 @@ describe("Phase0EventSchema", () => {
   });
 
   it("rejects an invalid created_at timestamp", () => {
-    const result = Phase0EventSchema.safeParse({
+    const result = WorkspaceRunEventSchema.safeParse({
       ...workspaceEvent,
       created_at: invalidTimestamp
     });
@@ -833,10 +833,10 @@ describe("EmitCandidateSignalResponseSchema", () => {
   });
 });
 
-describe("phase-0.5 payload parsing", () => {
+describe("signal payload parsing", () => {
   const validPayloads = [
     {
-      eventType: Phase05EventType.SOUL_SIGNAL_EMITTED,
+      eventType: SignalEventType.SOUL_SIGNAL_EMITTED,
       payload: {
         signal_id: "signal-1",
         workspace_id: "workspace-1",
@@ -847,7 +847,7 @@ describe("phase-0.5 payload parsing", () => {
       }
     },
     {
-      eventType: Phase05EventType.SOUL_SIGNAL_NORMALIZED,
+      eventType: SignalEventType.SOUL_SIGNAL_NORMALIZED,
       payload: {
         signal_id: "signal-1",
         workspace_id: "workspace-1",
@@ -859,7 +859,7 @@ describe("phase-0.5 payload parsing", () => {
       }
     },
     {
-      eventType: Phase05EventType.SOUL_SIGNAL_TRIAGED,
+      eventType: SignalEventType.SOUL_SIGNAL_TRIAGED,
       payload: {
         signal_id: "signal-1",
         workspace_id: "workspace-1",
@@ -870,12 +870,12 @@ describe("phase-0.5 payload parsing", () => {
   ] as const;
 
   it.each(validPayloads)("parses $eventType payloads", ({ eventType, payload }) => {
-    expect(parsePhase05EventPayload(eventType, payload)).toEqual(payload);
+    expect(parseSignalEventPayload(eventType, payload)).toEqual(payload);
   });
 
   it("rejects a mismatched emitted payload", () => {
     expect(() =>
-      parsePhase05EventPayload(Phase05EventType.SOUL_SIGNAL_EMITTED, {
+      parseSignalEventPayload(SignalEventType.SOUL_SIGNAL_EMITTED, {
         signal_id: "signal-1",
         workspace_id: "workspace-1",
         run_id: "run-1",
@@ -886,7 +886,7 @@ describe("phase-0.5 payload parsing", () => {
 
   it("rejects an invalid triage result", () => {
     expect(() =>
-      parsePhase05EventPayload(Phase05EventType.SOUL_SIGNAL_TRIAGED, {
+      parseSignalEventPayload(SignalEventType.SOUL_SIGNAL_TRIAGED, {
         signal_id: "signal-1",
         workspace_id: "workspace-1",
         run_id: "run-1",
@@ -896,8 +896,8 @@ describe("phase-0.5 payload parsing", () => {
   });
 });
 
-describe("Phase05EventSchema", () => {
-  const phase05EventBase = {
+describe("SignalEventSchema", () => {
+  const signalEventBase = {
     event_id: "event-5",
     entity_type: "candidate_memory_signal",
     entity_id: "signal-1",
@@ -910,8 +910,8 @@ describe("Phase05EventSchema", () => {
 
   it("accepts an emitted event", () => {
     const event = {
-      ...phase05EventBase,
-      event_type: Phase05EventType.SOUL_SIGNAL_EMITTED,
+      ...signalEventBase,
+      event_type: SignalEventType.SOUL_SIGNAL_EMITTED,
       payload: {
         signal_id: "signal-1",
         workspace_id: "workspace-1",
@@ -922,14 +922,14 @@ describe("Phase05EventSchema", () => {
       }
     };
 
-    expect(Phase05EventSchema.parse(event)).toEqual(event);
+    expect(SignalEventSchema.parse(event)).toEqual(event);
   });
 
   it("accepts a normalized event", () => {
     const event = {
-      ...phase05EventBase,
+      ...signalEventBase,
       event_id: "event-6",
-      event_type: Phase05EventType.SOUL_SIGNAL_NORMALIZED,
+      event_type: SignalEventType.SOUL_SIGNAL_NORMALIZED,
       payload: {
         signal_id: "signal-1",
         workspace_id: "workspace-1",
@@ -940,14 +940,14 @@ describe("Phase05EventSchema", () => {
       }
     };
 
-    expect(Phase05EventSchema.parse(event)).toEqual(event);
+    expect(SignalEventSchema.parse(event)).toEqual(event);
   });
 
   it("accepts a triaged event", () => {
     const event = {
-      ...phase05EventBase,
+      ...signalEventBase,
       event_id: "event-7",
-      event_type: Phase05EventType.SOUL_SIGNAL_TRIAGED,
+      event_type: SignalEventType.SOUL_SIGNAL_TRIAGED,
       payload: {
         signal_id: "signal-1",
         workspace_id: "workspace-1",
@@ -956,13 +956,13 @@ describe("Phase05EventSchema", () => {
       }
     };
 
-    expect(Phase05EventSchema.parse(event)).toEqual(event);
+    expect(SignalEventSchema.parse(event)).toEqual(event);
   });
 
   it("rejects a mismatched payload", () => {
-    const result = Phase05EventSchema.safeParse({
-      ...phase05EventBase,
-      event_type: Phase05EventType.SOUL_SIGNAL_NORMALIZED,
+    const result = SignalEventSchema.safeParse({
+      ...signalEventBase,
+      event_type: SignalEventType.SOUL_SIGNAL_NORMALIZED,
       payload: {
         signal_id: "signal-1",
         workspace_id: "workspace-1",
@@ -976,8 +976,8 @@ describe("Phase05EventSchema", () => {
 
   it("rejects an event without payload", () => {
     const emittedEvent = {
-      ...phase05EventBase,
-      event_type: Phase05EventType.SOUL_SIGNAL_EMITTED,
+      ...signalEventBase,
+      event_type: SignalEventType.SOUL_SIGNAL_EMITTED,
       payload: {
         signal_id: "signal-1",
         workspace_id: "workspace-1",
@@ -988,7 +988,7 @@ describe("Phase05EventSchema", () => {
       }
     };
 
-    expect(Phase05EventSchema.safeParse(without(emittedEvent, "payload")).success).toBe(false);
+    expect(SignalEventSchema.safeParse(without(emittedEvent, "payload")).success).toBe(false);
   });
 });
 

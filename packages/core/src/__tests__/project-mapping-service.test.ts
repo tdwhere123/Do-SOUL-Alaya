@@ -4,7 +4,7 @@ import {
   ConfirmationPolicy,
   MemoryDimension,
   ObjectLifecycleState,
-  Phase4CEventType,
+  ProjectMappingEventType,
   ProjectMappingState,
   ScopeClass,
   type EventLogEntry,
@@ -230,7 +230,7 @@ describe("ProjectMappingService", () => {
     expect(createdAnchors).toHaveLength(1);
     expect(append).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase4CEventType.PROJECT_MAPPING_SUGGESTED,
+        event_type: ProjectMappingEventType.PROJECT_MAPPING_SUGGESTED,
         entity_type: "project_mapping_anchor",
         entity_id: "mapping-generated",
         payload_json: expect.objectContaining({
@@ -293,7 +293,7 @@ describe("ProjectMappingService", () => {
     expect(anchor.accepted_by).toBeNull();
     expect(appendSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase4CEventType.PROJECT_MAPPING_STATE_CHANGED,
+        event_type: ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED,
         entity_id: rejectedAnchor.object_id,
         payload_json: expect.objectContaining({
           from_state: ProjectMappingState.REJECTED,
@@ -342,7 +342,7 @@ describe("ProjectMappingService", () => {
     expect(anchor.mapping_state).toBe(ProjectMappingState.PROBATIONARY);
     expect(appendSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase4CEventType.PROJECT_MAPPING_STATE_CHANGED,
+        event_type: ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED,
         payload_json: expect.objectContaining({
           from_state: ProjectMappingState.SUGGESTED,
           to_state: ProjectMappingState.PROBATIONARY
@@ -760,7 +760,7 @@ describe("ProjectMappingService", () => {
     await expect(service.suggest("memory-1", "workspace-1", "user_action")).rejects.toThrow("insert failed");
     expect(append).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase4CEventType.PROJECT_MAPPING_SUGGESTED
+        event_type: ProjectMappingEventType.PROJECT_MAPPING_SUGGESTED
       })
     );
   });
@@ -790,7 +790,7 @@ describe("ProjectMappingService", () => {
     await expect(service.reject(anchor.object_id)).rejects.toThrow("update failed");
     expect(append).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase4CEventType.PROJECT_MAPPING_STATE_CHANGED,
+        event_type: ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED,
         entity_id: anchor.object_id
       })
     );
@@ -866,7 +866,7 @@ describe("ProjectMappingService", () => {
     ]);
     expect(appendSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase4CEventType.PROJECT_MAPPING_SUGGESTED,
+        event_type: ProjectMappingEventType.PROJECT_MAPPING_SUGGESTED,
         payload_json: expect.objectContaining({
           global_object_id: "global-created",
           workspace_id: "workspace-1",
@@ -977,7 +977,7 @@ describe("ProjectMappingService", () => {
     });
     expect(appendSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase4CEventType.PROJECT_MAPPING_STATE_CHANGED,
+        event_type: ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED,
         entity_id: rejectedAnchor.object_id,
         payload_json: expect.objectContaining({
           from_state: ProjectMappingState.REJECTED,
@@ -1087,7 +1087,7 @@ describe("ProjectMappingService", () => {
     expect(appendSpy).toHaveBeenCalledTimes(1);
     expect(appendSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase4CEventType.PROJECT_MAPPING_STATE_CHANGED,
+        event_type: ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED,
         entity_id: rejectedAnchor.object_id,
         payload_json: expect.objectContaining({
           from_state: ProjectMappingState.REJECTED,

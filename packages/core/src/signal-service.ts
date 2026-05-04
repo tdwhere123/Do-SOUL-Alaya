@@ -1,6 +1,6 @@
 import {
   CandidateMemorySignalSchema,
-  Phase05EventType,
+  SignalEventType,
   SignalState,
   SoulSignalEmittedPayloadSchema,
   SoulSignalMaterializedPayloadSchema,
@@ -108,7 +108,7 @@ export class SignalService {
     const triagedState = mapTriageResultToSignalState(triageResult);
     const triagedRevision = await this.getNextRevision("candidate_memory_signal", storedSignal.signal_id);
     const triagedEvent = await this.dependencies.eventLogRepo.append({
-      event_type: Phase05EventType.SOUL_SIGNAL_TRIAGED,
+      event_type: SignalEventType.SOUL_SIGNAL_TRIAGED,
       entity_type: "candidate_memory_signal",
       entity_id: storedSignal.signal_id,
       workspace_id: storedSignal.workspace_id,
@@ -163,8 +163,8 @@ export class SignalService {
     const matRevision = await this.getNextRevision("candidate_memory_signal", triagedSignal.signal_id);
     const matEvent = await this.dependencies.eventLogRepo.append({
       event_type: materialization.success
-        ? Phase05EventType.SOUL_SIGNAL_MATERIALIZED
-        : Phase05EventType.SOUL_SIGNAL_MATERIALIZATION_FAILED,
+        ? SignalEventType.SOUL_SIGNAL_MATERIALIZED
+        : SignalEventType.SOUL_SIGNAL_MATERIALIZATION_FAILED,
       entity_type: "candidate_memory_signal",
       entity_id: triagedSignal.signal_id,
       workspace_id: triagedSignal.workspace_id,
@@ -220,7 +220,7 @@ export class SignalService {
       // second event corrects the record. Consumers should treat the latest as authoritative.
       const deferredRevision = await this.getNextRevision("candidate_memory_signal", triagedSignal.signal_id);
       const deferredEvent = await this.dependencies.eventLogRepo.append({
-        event_type: Phase05EventType.SOUL_SIGNAL_TRIAGED,
+        event_type: SignalEventType.SOUL_SIGNAL_TRIAGED,
         entity_type: "candidate_memory_signal",
         entity_id: triagedSignal.signal_id,
         workspace_id: triagedSignal.workspace_id,

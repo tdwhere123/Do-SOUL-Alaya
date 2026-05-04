@@ -1,7 +1,7 @@
 import {
-  Phase0EventSchema,
+  WorkspaceRunEventSchema,
   type EventLogEntry,
-  type Phase0Event
+  type WorkspaceRunEvent
 } from "@do-soul/alaya-protocol";
 import type { RuntimeNotifier } from "@do-soul/alaya-core";
 
@@ -9,7 +9,7 @@ export interface RuntimeNotifierSubscription {
   dispose(): void;
 }
 
-export type RuntimeEventListener = (event: Phase0Event) => void | Promise<void>;
+export type RuntimeEventListener = (event: WorkspaceRunEvent) => void | Promise<void>;
 export type RuntimeEntryListener = (entry: EventLogEntry) => void | Promise<void>;
 
 export interface AlayaRuntimeNotifier extends RuntimeNotifier {
@@ -56,7 +56,7 @@ class InProcessRuntimeNotifier implements AlayaRuntimeNotifier {
     });
   }
 
-  public async notify(runId: string, event: Phase0Event): Promise<void> {
+  public async notify(runId: string, event: WorkspaceRunEvent): Promise<void> {
     await notifyAll(this.runListeners.get(runId), event);
   }
 
@@ -65,7 +65,7 @@ class InProcessRuntimeNotifier implements AlayaRuntimeNotifier {
     await notifyAll(this.workspaceListeners.get(entry.workspace_id), entry);
 
     if (entry.run_id !== null) {
-      const event = Phase0EventSchema.safeParse({
+      const event = WorkspaceRunEventSchema.safeParse({
         event_id: entry.event_id,
         event_type: entry.event_type,
         entity_type: entry.entity_type,

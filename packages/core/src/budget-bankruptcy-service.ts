@@ -7,7 +7,7 @@ import {
   BudgetBankruptcyStateSchema,
   BudgetSnapshotSchema,
   ControlPlaneObjectKind,
-  Phase3CEventType,
+  BudgetEventType,
   ProposalOptionKind,
   ProposalResolutionState,
   RetentionPolicy,
@@ -189,7 +189,7 @@ export class BudgetBankruptcyService {
     const recommendedOptionId =
       options.find((option) => option.preserves_protected_constraints)?.option_id ?? null;
     const declaredEvent = await this.dependencies.eventLogRepo.append({
-      event_type: Phase3CEventType.SOUL_BUDGET_BANKRUPTCY_DECLARED,
+      event_type: BudgetEventType.SOUL_BUDGET_BANKRUPTCY_DECLARED,
       entity_type: "bankruptcy_dossier",
       entity_id: dossier.runtime_id,
       workspace_id: workspaceId,
@@ -233,7 +233,7 @@ export class BudgetBankruptcyService {
 
       const resolvedAt = ensureIsoDatetime(this.now(), "now");
       const resolvedEvent = await this.dependencies.eventLogRepo.append({
-        event_type: Phase3CEventType.SOUL_BUDGET_BANKRUPTCY_RESOLVED,
+        event_type: BudgetEventType.SOUL_BUDGET_BANKRUPTCY_RESOLVED,
         entity_type: "bankruptcy_dossier",
         entity_id: dossier.runtime_id,
         workspace_id: workspaceId,
@@ -310,7 +310,7 @@ export class BudgetBankruptcyService {
     const resolutionState =
       action === "accept" ? ProposalResolutionState.ACCEPTED : ProposalResolutionState.REJECTED;
     const resolvedEvent = await this.dependencies.eventLogRepo.append({
-      event_type: Phase3CEventType.SOUL_BUDGET_BANKRUPTCY_RESOLVED,
+      event_type: BudgetEventType.SOUL_BUDGET_BANKRUPTCY_RESOLVED,
       entity_type: "bankruptcy_dossier",
       entity_id: entry.dossier.runtime_id,
       workspace_id: workspaceId,
@@ -461,7 +461,7 @@ export class BudgetBankruptcyService {
     const events = await this.dependencies.eventLogRepo.queryByEntity("bankruptcy_dossier", dossierRef);
     const declaredEvent = [...events]
       .reverse()
-      .find((event) => event.event_type === Phase3CEventType.SOUL_BUDGET_BANKRUPTCY_DECLARED);
+      .find((event) => event.event_type === BudgetEventType.SOUL_BUDGET_BANKRUPTCY_DECLARED);
 
     if (declaredEvent === undefined) {
       throw new CoreError("NOT_FOUND", "Bankruptcy declaration audit record was not found");

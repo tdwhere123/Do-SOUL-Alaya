@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Phase3AEventType, RunMode, type EventLogEntry } from "@do-soul/alaya-protocol";
+import { RecallContextEventType, RunMode, type EventLogEntry } from "@do-soul/alaya-protocol";
 import { STRATEGY_RECALL_DEFAULTS, TaskSurfaceBuilder } from "../task-surface-builder.js";
 
 function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at">): EventLogEntry {
@@ -56,7 +56,7 @@ describe("TaskSurfaceBuilder", () => {
     expect(taskSurface.context_refs).toEqual(["context-1"]);
     expect(appendSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase3AEventType.SOUL_TASK_SURFACE_CREATED,
+        event_type: RecallContextEventType.SOUL_TASK_SURFACE_CREATED,
         entity_type: "task_object_surface",
         entity_id: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
         revision: 0

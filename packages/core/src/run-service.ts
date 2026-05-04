@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   EngineBindingRecordSchema,
-  Phase0EventType,
+  WorkspaceRunEventType,
   RunMode,
   RunRenameInputSchema,
   RunSchema,
@@ -107,7 +107,7 @@ export class RunService {
 
     return this.dependencies.eventPublisher.publishWithMutation(
       {
-        event_type: Phase0EventType.RUN_CREATED,
+        event_type: WorkspaceRunEventType.RUN_CREATED,
         entity_type: "run",
         entity_id: runId,
         workspace_id: workspace.workspace_id,
@@ -161,7 +161,7 @@ export class RunService {
 
     return this.dependencies.eventPublisher.publishWithMutation(
       {
-        event_type: Phase0EventType.RUN_RENAMED,
+        event_type: WorkspaceRunEventType.RUN_RENAMED,
         entity_type: "run",
         entity_id: run.run_id,
         workspace_id: run.workspace_id,
@@ -183,7 +183,7 @@ export class RunService {
 
     await this.dependencies.eventPublisher.publishWithMutation(
       {
-        event_type: Phase0EventType.RUN_DELETED,
+        event_type: WorkspaceRunEventType.RUN_DELETED,
         entity_type: "run",
         entity_id: run.run_id,
         workspace_id: run.workspace_id,

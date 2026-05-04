@@ -3,7 +3,7 @@ import {
   GardenRole,
   GardenTaskKind,
   GardenTier,
-  Phase4AEventType,
+  GardenEventType,
   type GardenTaskDescriptor,
   type GardenTaskResult
 } from "@do-soul/alaya-protocol";
@@ -25,7 +25,7 @@ describe("GardenScheduler", () => {
     expect(task?.task_id).toBe("task-janitor");
     expect(eventLog.append).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase4AEventType.SOUL_GARDEN_TASK_DISPATCHED,
+        event_type: GardenEventType.SOUL_GARDEN_TASK_DISPATCHED,
         entity_id: "task-janitor"
       })
     );
@@ -52,7 +52,7 @@ describe("GardenScheduler", () => {
 
     expect(eventLog.append).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase4AEventType.SOUL_GARDEN_TIER_VIOLATION_REJECTED,
+        event_type: GardenEventType.SOUL_GARDEN_TIER_VIOLATION_REJECTED,
         entity_id: "task-tier-1"
       })
     );
@@ -333,7 +333,7 @@ describe("GardenScheduler", () => {
 
     expect(eventLog.append).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase4AEventType.SOUL_GARDEN_TASK_COMPLETED,
+        event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
         entity_id: "task-2"
       })
     );

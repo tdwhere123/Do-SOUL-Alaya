@@ -1,21 +1,6 @@
-import { serve, type ServerType } from "@hono/node-server";
-import { randomBytes, randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  AcceptedBy,
-  ComputeProviderPriority,
-  DEFAULT_SOUL_CONFIG,
-  ProjectMappingState,
-  type AgentRuntimePort,
-  type EngineBinding,
-  type EngineBindingSummary,
-  type EventLogEntry,
-  type GlobalMemoryEntry,
-  type GardenBacklogThresholds,
-  type SoulGraph
-} from "@do-soul/alaya-protocol";
+import { ComputeProviderPriority } from "@do-soul/alaya-protocol";
 import {
   ArbitrationService,
   BudgetBankruptcyService,
@@ -23,11 +8,8 @@ import {
   ClaimService,
   ConversationService,
   ContextLensAssembler,
-  CoreError,
   CrossCuttingPermissionService,
   DynamicsService,
-  EmbeddingBackfillHandler,
-  EmbeddingRecallService,
   EngineBindingService,
   EvidenceService,
   GardenBacklogTelemetryService,
@@ -37,7 +19,6 @@ import {
   HealthJournalService,
   MemoryService,
   NarrativeBudgetService,
-  OpenAIEmbeddingClient,
   ProjectMappingService,
   ProposalService,
   RecallService,
@@ -57,14 +38,9 @@ import {
   WorkspaceService,
   ZeroDaySecurityLayer,
   rebuildCountersFromEventLog,
-  SqliteKarmaEventStore,
-  createGlobalMemoryRecallPort as createCoreGlobalMemoryRecallPort,
   type ConversationServiceDependencies,
-  type GlobalMemoryRecallCachePort,
-  type GlobalMemoryRecallServicePort,
   type GlobalMemoryRecallSubscription
 } from "@do-soul/alaya-core";
-import * as StorageModule from "@do-soul/alaya-storage";
 import {
   SqliteBootstrappingRecordRepo,
   SqliteClaimFormRepo,
@@ -79,8 +55,6 @@ import {
   SqliteEvidenceCapsuleRepo,
   SqliteExtensionDescriptorRepo,
   SqliteFileRepo,
-  SqliteGlobalMemoryRecallCacheRepo,
-  SqliteGlobalMemoryRepo,
   SqliteGreenStatusRepo,
   SqliteHealthJournalRepo,
   SqliteHandoffGapRepo,
@@ -106,11 +80,7 @@ import {
   SqliteWorkerRunRepo,
   SqliteWorkspaceRepo,
   createGardenBackgroundDataPorts,
-  initDatabase,
-  type GlobalMemoryRecallCacheRepo,
-  type GlobalMemoryRepo,
-  type MemoryEmbeddingRepo,
-  type StorageDatabase
+  initDatabase
 } from "@do-soul/alaya-storage";
 import {
   ComputeRoutingService,
@@ -120,47 +90,57 @@ import {
   MaterializationRouter,
   OFFICIAL_API_GARDEN_MODEL,
   OfficialApiGardenProvider,
-  SessionOverrideRemediation,
   SoulSignalHandler,
   SoulToolGovernanceAdapter,
   SoulWorkerSafetyAdapter,
   SoulWorkerSafetyReader,
   TopologyService
 } from "@do-soul/alaya-soul";
-import { createApp, type CoreDaemonLifecycleState, type CoreDaemonServices, type RequestProtectionConfig } from "./app.js";
+import { createCoreDaemonApp } from "./daemon-app-composition.js";
+import { createDaemonEmbeddingRuntime } from "./daemon-embedding-runtime.js";
+import { createDaemonMcpMemoryToolHandler } from "./daemon-mcp-memory-handler.js";
 import { createBudgetProposalPort } from "./budget-wiring.js";
 import { createComputeRoutingExecutionStanceResolver } from "./compute-routing-resolver.js";
 import { defaultBootstrappingTemplates, defaultCanonicalAliasMap } from "./daemon-defaults.js";
 import { bootstrapDaemonMcpTooling } from "./daemon-mcp-tooling.js";
 import {
-  createManifestationBudgetConfigProvider,
   createStancePolicyProvider,
   createTargetCurrencyCheckPort,
   createWarnLogger
 } from "./daemon-runtime-helpers.js";
+import { createCoreDaemonLifecycleState, createDaemonLifecycleControls } from "./daemon-runtime-lifecycle.js";
 import {
-  resolveAlayaConfigDir,
-  resolveAlayaConfigPaths,
-  type AlayaConfigPaths
-} from "./cli/config-files.js";
+  createAlayaConversationEngine,
+  createConversationToolExecutor,
+  createEngineBindingTester,
+  createGardenBacklogThresholds,
+  createGlobalMemoryRecallCachePort,
+  createGlobalMemoryRecallPort,
+  createGlobalMemoryRouteService,
+  createKarmaEventStore,
+  createOptionalGlobalMemoryRecallCacheRepo,
+  createOptionalGlobalMemoryRepo,
+  createRequestProtection,
+  createSoulGraphService,
+  createUnavailableRuntimeAdapter,
+  listServerHardConstraints,
+  loadConfigEnv,
+  patchArbitrationClaimService,
+  recordStartupStep,
+  resolveDatabasePath
+} from "./daemon-runtime-support.js";
+import { resolveAlayaConfigDir, resolveAlayaConfigPaths, type AlayaConfigPaths } from "./cli/config-files.js";
 import { resolveCoreDaemonFilesDirectory } from "./files-data-dir.js";
-import { resolveConfiguredDatabasePath } from "./storage-config.js";
 import { createGardenRuntime } from "./garden-runtime.js";
 import { SqliteHandoffGapAdapter } from "./handoff-gap-adapter.js";
 import { createManifestationContextLensAssembler } from "./manifestation-context-lens-assembler.js";
-import { createMcpMemoryProposalWorkflow } from "./mcp-memory-proposal-workflow.js";
-import { createMcpMemoryToolHandler, type McpMemoryToolHandler } from "./mcp-memory-tool-handler.js";
 import { createNarrativeBudgetRepo } from "./narrative-budget-repo.js";
 import { parseZeroDayPoliciesJson } from "./zero-day-policies.js";
-import { createRuntimeNotifier, type AlayaRuntimeNotifier } from "./runtime-notifier.js";
+import { createRuntimeNotifier } from "./runtime-notifier.js";
 import { createSecurityStatusBootstrapServices } from "./security-status-bootstrap.js";
-import { resolveSecretRef, type ResolveSecretError } from "./secrets.js";
-import { isRemoteDaemonOptInEnabled, resolveDaemonHostFromEnv } from "./server-options.js";
+import { isRemoteDaemonOptInEnabled } from "./server-options.js";
 import { createConfigService } from "./services/config-service.js";
-import { createEmbeddingStatusService, type EmbeddingStatusService } from "./services/embedding-status-service.js";
-import { createEnvironmentStatusService, type EnvironmentStatusService } from "./services/environment-status-service.js";
-import { parseEnv } from "./services/env-file-service.js";
-import { isNodeErrorWithCode } from "./services/private-file-service.js";
+import { createEnvironmentStatusService } from "./services/environment-status-service.js";
 import {
   CORE_DAEMON_ENVIRONMENT_TOOLS,
   derivePrincipalCodingAvailability
@@ -168,73 +148,17 @@ import {
 import { createSoulApprovalService } from "./services/soul-approval-service.js";
 import { SoulTopologyAuditService } from "./services/soul-topology-audit-service.js";
 import { SqliteWorkspaceEngineConfigRepo } from "./services/workspace-engine-config-repo.js";
-import { executeConversationToolOrThrow, handleConversationToolUse } from "./tool-runtime.js";
-import { createTrustStateRecorder, type TrustStateRecorder } from "./trust-state.js";
+import { createTrustStateRecorder } from "./trust-state.js";
 import { createWorkerRuntimeWiring } from "./worker-runtime-wiring.js";
 import { getBuiltinConversationToolSpecs } from "./builtin-conversation-tool-specs.js";
+import type {
+  AlayaDaemonListenOptions,
+  AlayaDaemonRuntime,
+  AlayaDaemonServer,
+  DaemonStartupStepRecord
+} from "./daemon-runtime-types.js";
 
-type StartupStep =
-  | "database"
-  | "repositories"
-  | "core-services"
-  | "garden-runtime"
-  | "mcp-tooling"
-  | "http-app";
-
-type GlobalMemoryListFilters = Parameters<GlobalMemoryRepo["list"]>[0];
-type MemoryEntryRecord = Awaited<ReturnType<SqliteMemoryEntryRepo["findByWorkspaceId"]>>[number];
-
-export interface DaemonStartupStepRecord {
-  readonly step: StartupStep;
-  readonly completedAt: string;
-}
-
-export interface AlayaDaemonRuntime {
-  readonly app: ReturnType<typeof createApp>;
-  readonly requestProtection: RequestProtectionConfig;
-  readonly runtimeNotifier: AlayaRuntimeNotifier;
-  readonly startupSteps: readonly DaemonStartupStepRecord[];
-  readonly services: AlayaDaemonRuntimeServices;
-  startBackgroundServices(): void;
-  runGardenBackgroundPass(): Promise<void>;
-  startHttpServer(options?: AlayaDaemonListenOptions): Promise<AlayaDaemonServer>;
-  shutdown(): Promise<void>;
-}
-
-export interface AlayaDaemonRuntimeServices {
-  readonly conversationToolCatalog: Readonly<{
-    getSpecs(): readonly Readonly<{ readonly tool_id: string; readonly description: string }>[];
-    hasToolName(toolName: string): boolean;
-  }>;
-  readonly daemonMcpCatalog: Readonly<{
-    listAllowedServerNames(): readonly string[];
-    listEnrolledToolIds(): readonly string[];
-    refresh(): Promise<void>;
-  }>;
-  readonly environmentStatusService: EnvironmentStatusService;
-  readonly embeddingStatusService: EmbeddingStatusService;
-  readonly mcpMemoryToolHandler: McpMemoryToolHandler;
-  readonly trustStateRecorder: TrustStateRecorder;
-  readonly gardenStatus: Readonly<{
-    getStatus(): Readonly<{ readonly last_pass_at: string | null }>;
-  }>;
-  readonly principalCodingEngineAvailable: boolean;
-}
-
-export interface AlayaDaemonListenOptions {
-  readonly hostname?: string;
-  readonly port?: number;
-}
-
-export interface AlayaDaemonServer {
-  readonly hostname: string;
-  readonly port: number;
-  close(): Promise<void>;
-}
-
-const DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small";
-const GARDEN_BACKLOG_REARM_RATIO = 0.7;
-const GARDEN_BACKLOG_SNAPSHOT_INTERVAL_MS = 60_000;
+export type { AlayaDaemonListenOptions, AlayaDaemonRuntime, AlayaDaemonRuntimeServices, AlayaDaemonServer, DaemonStartupStepRecord } from "./daemon-runtime-types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..", "..");
@@ -247,7 +171,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const remoteDaemonOptInEnabled = isRemoteDaemonOptInEnabled(process.env);
   const configPaths = resolveAlayaConfigPaths(resolveAlayaConfigDir({ env: process.env }));
   const configEnv = await loadConfigEnv(configPaths.envPath);
-  const dbPath = await resolveDatabasePath(configPaths);
+  const dbPath = await resolveDatabasePath(configPaths, join(__dirname, "data", "alaya.db"));
   const filesDirectory = resolveCoreDaemonFilesDirectory();
   const database = initDatabase({ filename: dbPath });
   recordStartupStep(startupSteps, "database");
@@ -514,55 +438,19 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
         });
   const globalMemoryRecallInvalidationSubscription: GlobalMemoryRecallSubscription | null =
     globalMemoryRecallService?.subscribeToInvalidations(runtimeNotifier) ?? null;
-  const memoryEmbeddingRepo = createOptionalMemoryEmbeddingRepo(database);
-  const rawEmbeddingSecretRef = readConfigEnvValue(configEnv, "ALAYA_OPENAI_SECRET_REF");
-  const embeddingApiKey = readOptionalSecretRef(
-    rawEmbeddingSecretRef,
-    "ALAYA_OPENAI_SECRET_REF"
-  );
-  const configuredEmbeddingModel = readNonEmptyEnv(readConfigEnvValue(configEnv, "OPENAI_EMBEDDING_MODEL"));
-  const configuredEmbeddingProviderUrl = readNonEmptyEnv(
-    readConfigEnvValue(configEnv, "OPENAI_EMBEDDING_PROVIDER_URL")
-  );
-  const embeddingModelId = configuredEmbeddingModel ?? (embeddingApiKey === null ? null : DEFAULT_OPENAI_EMBEDDING_MODEL);
-  const embeddingSupplementOptInEnabled =
-    readConfigEnvValue(configEnv, "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT") === "true";
-  const recallPolicyEmbeddingEnabled = false;
-  const embeddingStatusService = createEmbeddingStatusService({
-    embeddingEnabled: embeddingSupplementOptInEnabled,
-    recallPolicyEmbeddingEnabled,
-    providerConfigured: embeddingApiKey !== null,
-    modelId: embeddingModelId,
-    storageAvailable: memoryEmbeddingRepo !== null,
-    degradationSource: healthJournalService
+  const {
+    embeddingApiKey,
+    embeddingStatusService,
+    embeddingRecallService,
+    embeddingBackfillHandler
+  } = createDaemonEmbeddingRuntime({
+    database,
+    configEnv,
+    eventLogRepo,
+    healthJournalService,
+    memoryEntryRepo,
+    warn: warnLogger.warn
   });
-  const embeddingProvider =
-    memoryEmbeddingRepo === null || !embeddingSupplementOptInEnabled || embeddingApiKey === null
-      ? null
-      : new OpenAIEmbeddingClient({
-          apiKey: embeddingApiKey,
-          model: configuredEmbeddingModel ?? undefined,
-          baseUrl: configuredEmbeddingProviderUrl ?? undefined
-        });
-  const embeddingRecallService =
-    memoryEmbeddingRepo === null || embeddingProvider === null
-      ? undefined
-      : new EmbeddingRecallService({
-          embeddingRepo: memoryEmbeddingRepo,
-          provider: embeddingProvider,
-          eventLogRepo,
-          healthJournalRecorder: healthJournalService,
-          warn: warnLogger.warn
-        });
-  const embeddingBackfillHandler =
-    memoryEmbeddingRepo === null || embeddingProvider === null
-      ? undefined
-      : new EmbeddingBackfillHandler({
-          memoryRepo: memoryEntryRepo,
-          memoryEmbeddingRepo,
-          provider: embeddingProvider,
-          warn: warnLogger.warn
-        });
   const recallService = new RecallService({
     memoryRepo: memoryEntryRepo,
     slotRepo,
@@ -748,13 +636,6 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     workerRunRepo,
     zeroDaySecurityLayer
   });
-  const listServerHardConstraints = async (_workspaceId: string) =>
-    Object.freeze([
-      Object.freeze({
-        ref: "constraint://worker-dispatch",
-        content: "Never mutate files outside approved workspace roots."
-      })
-    ]);
   recordStartupStep(startupSteps, "core-services");
 
   const gardenBacklogThresholds = createGardenBacklogThresholds();
@@ -801,257 +682,86 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   });
   await rebuildCountersFromEventLog(eventLogRepo, trustStateRecorder);
   trustStateRecorder.markReady();
-  const mcpMemoryToolHandler = createMcpMemoryToolHandler({
+  const mcpMemoryToolHandler = createDaemonMcpMemoryToolHandler({
     recallService,
     memoryService,
     signalService,
     graphExploreService,
     sessionOverrideService,
     trustStateRecorder,
-    proposalWorkflow: createMcpMemoryProposalWorkflow({
-      eventLogRepo,
-      proposalRepo,
-      runtimeNotifier
-    })
+    eventLogRepo,
+    proposalRepo,
+    runtimeNotifier
   });
   recordStartupStep(startupSteps, "mcp-tooling");
 
-  // p5-system-review-r3 MR-I06: shared lifecycle state lets shutdown stop
-  // accepting new requests and wait for in-flight handlers to finish before
-  // closing the database. Mutable on purpose; initialised here, mutated by
-  // shutdown() below.
-  const lifecycleState: CoreDaemonLifecycleState = {
-    drainState: { isDraining: false },
-    inFlight: { count: 0 }
-  };
+  const lifecycleState = createCoreDaemonLifecycleState();
 
-  const app = createApp({
-    requestProtection: {
-      allowedOrigin: requestProtection.allowedOrigin,
-      requestToken: requestProtection.requestToken,
-      allowDesktopOriginlessRequests: !remoteDaemonOptInEnabled
-    },
-    routes: {
-      workspaces: {
-        workspaceService: securedWorkspaceService,
-        engineBindingService,
-        workspaceGitBindingRepo: workspaceRepo
-      },
-      workspaceFiles: {
-        workspaceService: securedWorkspaceService,
-        runService,
-        workerRunRepo,
-        toolExecutionRecordRepo,
-        gitBindingValidation: {
-          currentWorkingDirectory: repoRoot
-        }
-      },
-      securityStatus: {
-        workspaceService: securedWorkspaceService,
-        securityStatusService
-      },
-      embeddingStatus: {
-        workspaceService: securedWorkspaceService,
-        embeddingStatusService
-      },
-      runs: {
-        runService,
-        conversationService,
-        runHotStateService,
-        eventLogRepo,
-        governanceLeaseService,
-        sessionOverrideService,
-        budgetBankruptcyService,
-        contextLensAssembler,
-        warn: warnLogger.warn
-      },
-      signals: {
-        runService,
-        signalService
-      },
-      evidence: {
-        workspaceService: securedWorkspaceService,
-        runService,
-        evidenceService
-      },
-      gardenBacklog: {
-        gardenBacklogTelemetryService
-      },
-      memories: {
-        workspaceService: securedWorkspaceService,
-        runService,
-        memoryService
-      },
-      greenStatus: {
-        workspaceService: securedWorkspaceService,
-        greenService
-      },
-      healthJournal: {
-        workspaceService: securedWorkspaceService,
-        healthJournalService
-      },
-      config: {
-        workspaceService: securedWorkspaceService,
-        configService,
-        environmentStatusService
-      },
-      overrides: {
-        sessionOverrideService,
-        runService
-      },
-      governance: {
-        greenService,
-        sessionOverrideService,
-        governanceLeaseService,
-        runService
-      },
-      budget: {
-        budgetBankruptcyService,
-        runService
-      },
-      slots: {
-        workspaceService: securedWorkspaceService,
-        slotService,
-        arbitrationService
-      },
-      recall: {
-        recallService,
-        taskSurfaceBuilder,
-        runService,
-        workspaceService: securedWorkspaceService
-      },
-      syntheses: {
-        workspaceService: securedWorkspaceService,
-        synthesisService
-      },
-      claims: {
-        workspaceService: securedWorkspaceService,
-        claimService
-      },
-      proposals: {
-        workspaceService: securedWorkspaceService,
-        proposalService
-      },
-      files: {
-        workspaceService: securedWorkspaceService,
-        runService,
-        fileRepo,
-        runtimeNotifier,
-        filesDirectory
-      },
-      soul: {
-        workspaceService: securedWorkspaceService,
-        topologyAuditService,
-        graphExploreService,
-        topologyService,
-        approvalService: soulApprovalService
-      },
-      soulGraph: {
-        workspaceService: securedWorkspaceService,
-        soulGraphService
-      },
-      status: {
-        startupStepsProvider: () => startupSteps.map((step) => step.step),
-        principalCodingEngineAvailableProvider: () => principalCodingAvailability.available,
-        mcp: mcpTooling.daemonMcpCatalog
-      },
-      projectMapping: {
-        workspaceService: securedWorkspaceService,
-        projectMappingService
-      },
-      ...(globalMemoryService === undefined
-        ? {}
-        : {
-            globalMemory: {
-              workspaceService: securedWorkspaceService,
-              globalMemoryService
-            }
-          }),
-      conflictMatrix: {
-        workspaceService: securedWorkspaceService,
-        arbitrationService
-      },
-      ...(process.env.ALAYA_ENABLE_E2E_EVENT_TRIGGERS === "1"
-        ? {
-            e2eEventTriggers: {
-              runService,
-              eventLogRepo,
-              runtimeNotifier
-            }
-          }
-        : {})
-    },
+  const app = createCoreDaemonApp({
+    requestProtection,
+    remoteDaemonOptInEnabled,
+    lifecycleState,
+    startupSteps,
     principalCodingEngineAvailable: principalCodingAvailability.available,
-    listServerHardConstraints
-  } as unknown as CoreDaemonServices & {
-    readonly principalCodingEngineAvailable: boolean;
-    readonly listServerHardConstraints: typeof listServerHardConstraints;
-  }, lifecycleState);
+    repoRoot,
+    filesDirectory,
+    env: process.env,
+    listServerHardConstraints,
+    workspaceService: securedWorkspaceService,
+    engineBindingService,
+    workspaceGitBindingRepo: workspaceRepo,
+    runService,
+    workerRunRepo,
+    toolExecutionRecordRepo,
+    securityStatusService,
+    embeddingStatusService,
+    conversationService,
+    runHotStateService,
+    eventLogRepo,
+    governanceLeaseService,
+    sessionOverrideService,
+    budgetBankruptcyService,
+    contextLensAssembler,
+    signalService,
+    evidenceService,
+    gardenBacklogTelemetryService,
+    memoryService,
+    greenService,
+    healthJournalService,
+    configService,
+    environmentStatusService,
+    slotService,
+    arbitrationService,
+    recallService,
+    taskSurfaceBuilder,
+    synthesisService,
+    claimService,
+    proposalService,
+    fileRepo,
+    runtimeNotifier,
+    topologyAuditService,
+    graphExploreService,
+    topologyService,
+    soulApprovalService,
+    soulGraphService,
+    projectMappingService,
+    globalMemoryService,
+    mcp: mcpTooling.daemonMcpCatalog,
+    warn: warnLogger.warn
+  });
   recordStartupStep(startupSteps, "http-app");
 
-  let server: ServerType | null = null;
-  let backgroundStarted = false;
-  let shuttingDown: Promise<void> | null = null;
-
-  const startBackgroundServices = (): void => {
-    if (backgroundStarted) {
-      return;
-    }
-
-    gardenBacklogTelemetryService.start();
-    gardenRuntime.backgroundManager.start();
-    backgroundStarted = true;
-  };
-
-  const shutdown = async (): Promise<void> => {
-    if (shuttingDown !== null) {
-      return await shuttingDown;
-    }
-
-    shuttingDown = (async () => {
-      // p5-system-review-r3 MR-I06: stop accepting new requests immediately
-      // (subsequent requests get 503 from the lifecycle middleware in app.ts)
-      // and wait for in-flight handlers to drain before closing the database
-      // and tearing down the server. Without this, server.close() only waits
-      // for socket idle, leaving handler async chains writing to a closed db.
-      lifecycleState.drainState.isDraining = true;
-
-      const drainDeadline = Date.now() + 30_000;
-      while (lifecycleState.inFlight.count > 0 && Date.now() < drainDeadline) {
-        await new Promise<void>((resolve) => {
-          setTimeout(resolve, 25);
-        });
-      }
-      if (lifecycleState.inFlight.count > 0) {
-        warnLogger.warn("daemon shutdown drain timed out with in-flight requests", {
-          inFlight: lifecycleState.inFlight.count
-        });
-      }
-
-      if (backgroundStarted) {
-        await gardenRuntime.backgroundManager.stop({ timeoutMs: 30_000 });
-        gardenRuntime.setBacklogTelemetryObserver(null);
-        const telemetryStopResult = await gardenBacklogTelemetryService.stop();
-        if (telemetryStopResult === "timed_out") {
-          warnLogger.warn("garden backlog telemetry shutdown timed out", {});
-        }
-        backgroundStarted = false;
-      }
-
-      securityStatusService.close();
-      await mcpTooling.daemonMcpRuntimeRegistry.close();
-      globalMemoryRecallInvalidationSubscription?.dispose();
-
-      if (server !== null) {
-        await closeServer(server);
-        server = null;
-      }
-
-      database.close();
-    })();
-
-    return await shuttingDown;
-  };
+  const lifecycleControls = createDaemonLifecycleControls({
+    app,
+    lifecycleState,
+    warnLogger,
+    gardenBacklogTelemetryService,
+    gardenRuntime,
+    securityStatusService,
+    daemonMcpRuntimeRegistry: mcpTooling.daemonMcpRuntimeRegistry,
+    globalMemoryRecallInvalidationSubscription,
+    database
+  });
 
   return Object.freeze({
     app,
@@ -1070,468 +780,16 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       },
       principalCodingEngineAvailable: principalCodingAvailability.available
     }),
-    startBackgroundServices,
-    runGardenBackgroundPass: async () => {
-      await gardenRuntime.runBackgroundPass();
-    },
-    startHttpServer: async (options: AlayaDaemonListenOptions = {}) => {
-      startBackgroundServices();
-
-      if (server !== null) {
-        throw new Error("Alaya daemon HTTP server is already running.");
-      }
-
-      const hostname = options.hostname ?? resolveDaemonHostFromEnv(process.env);
-      const port = options.port ?? parsePort(process.env.PORT, 3000);
-      server = serve({
-        fetch: app.fetch,
-        hostname,
-        port
-      });
-
-      process.on("SIGTERM", () => {
-        void shutdown();
-      });
-      process.on("SIGINT", () => {
-        void shutdown();
-      });
-
-      warnLogger.warn("core daemon listening", {
-        host: hostname,
-        port,
-        url: `http://${hostname}:${port}`
-      });
-
-      return Object.freeze({
-        hostname,
-        port,
-        close: shutdown
-      });
-    },
-    shutdown
+    startBackgroundServices: lifecycleControls.startBackgroundServices,
+    runGardenBackgroundPass: lifecycleControls.runGardenBackgroundPass,
+    startHttpServer: lifecycleControls.startHttpServer,
+    shutdown: lifecycleControls.shutdown
   });
 }
 
 export async function startDaemon(options: AlayaDaemonListenOptions = {}): Promise<AlayaDaemonServer> {
   const runtime = await createAlayaDaemonRuntime();
   return await runtime.startHttpServer(options);
-}
-
-function createRequestProtection(): RequestProtectionConfig {
-  return Object.freeze({
-    allowedOrigin: process.env.ALLOWED_ORIGIN ?? "http://localhost:5173",
-    requestToken: process.env.ALAYA_REQUEST_TOKEN ?? randomBytes(32).toString("hex"),
-    allowDesktopOriginlessRequests: true
-  });
-}
-
-function recordStartupStep(
-  startupSteps: DaemonStartupStepRecord[],
-  step: DaemonStartupStepRecord["step"]
-): void {
-  startupSteps.push({
-    step,
-    completedAt: new Date().toISOString()
-  });
-}
-
-async function resolveDatabasePath(configPaths: AlayaConfigPaths): Promise<string> {
-  return await resolveConfiguredDatabasePath(configPaths, {
-    env: process.env,
-    fallbackPath: join(__dirname, "data", "alaya.db")
-  });
-}
-
-function parsePort(value: string | undefined, fallback: number): number {
-  if (value === undefined || value.trim().length === 0) {
-    return fallback;
-  }
-
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 65_535) {
-    throw new Error(`Invalid daemon port: ${value}`);
-  }
-
-  return parsed;
-}
-
-function createGardenBacklogThresholds(): GardenBacklogThresholds {
-  const warningQueueDepth = DEFAULT_SOUL_CONFIG.garden_backlog_soft_limit;
-
-  return {
-    warning_queue_depth: warningQueueDepth,
-    warning_rearm_depth: Math.max(0, Math.floor(warningQueueDepth * GARDEN_BACKLOG_REARM_RATIO)),
-    snapshot_interval_ms: GARDEN_BACKLOG_SNAPSHOT_INTERVAL_MS
-  };
-}
-
-async function loadConfigEnv(envPath: string): Promise<ReadonlyMap<string, string>> {
-  try {
-    return parseEnv(await readFile(envPath, "utf8"));
-  } catch (error) {
-    if (isNodeErrorWithCode(error, "ENOENT")) {
-      return new Map();
-    }
-    throw error;
-  }
-}
-
-function readConfigEnvValue(configEnv: ReadonlyMap<string, string>, key: string): string | undefined {
-  return process.env[key] ?? configEnv.get(key);
-}
-
-function readNonEmptyEnv(value: string | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length === 0 ? null : trimmed;
-}
-
-function readOptionalSecretRef(value: string | undefined, label: string): string | null {
-  const rawValue = readNonEmptyEnv(value);
-  if (rawValue === null) {
-    return null;
-  }
-
-  const resolved = resolveSecretRef(rawValue);
-  if ("kind" in resolved) {
-    throw new Error(formatSecretResolutionError(label, resolved));
-  }
-
-  return resolved.value;
-}
-
-function formatSecretResolutionError(label: string, error: ResolveSecretError): string {
-  switch (error.kind) {
-    case "malformed":
-      return `${label}: ${error.ref} -> ${error.reason}`;
-    case "env_missing":
-      return `${label}: ${error.ref} -> environment variable ${error.var_name} is not set`;
-    case "file_missing":
-      return `${label}: ${error.ref} -> file not found at ${error.path}`;
-    case "file_unreadable":
-      return `${label}: ${error.ref} -> file unreadable at ${error.path} (${error.cause})`;
-    case "empty":
-      return `${label}: ${error.ref} -> ${error.origin} secret is empty`;
-  }
-}
-
-function createOptionalMemoryEmbeddingRepo(database: StorageDatabase): MemoryEmbeddingRepo | null {
-  const RepoCtor = StorageModule.SqliteMemoryEmbeddingRepo;
-  if (typeof RepoCtor !== "function" || !supportsPreparedSqliteConnection(database)) {
-    return null;
-  }
-
-  return new RepoCtor(database);
-}
-
-function createOptionalGlobalMemoryRepo(database: StorageDatabase): GlobalMemoryRepo | null {
-  if (!supportsPreparedSqliteConnection(database)) {
-    return null;
-  }
-
-  return new SqliteGlobalMemoryRepo(database);
-}
-
-function createOptionalGlobalMemoryRecallCacheRepo(
-  database: StorageDatabase
-): GlobalMemoryRecallCacheRepo | null {
-  if (!supportsPreparedSqliteConnection(database)) {
-    return null;
-  }
-
-  return new SqliteGlobalMemoryRecallCacheRepo(database);
-}
-
-function supportsPreparedSqliteConnection(database: StorageDatabase): boolean {
-  return typeof database.connection.prepare === "function";
-}
-
-function createGlobalMemoryRouteService(params: {
-  readonly globalMemoryRepo: GlobalMemoryRepo;
-  readonly projectMappingService: ProjectMappingService;
-}) {
-  return {
-    list: async (input: { readonly dimension?: string; readonly scope_class?: string; readonly limit: number }) => {
-      const entries = await params.globalMemoryRepo.list({
-        ...(input.dimension === undefined ? {} : { dimension: input.dimension }),
-        ...(input.scope_class === undefined ? {} : { scope_class: input.scope_class })
-      } as GlobalMemoryListFilters);
-
-      return input.limit >= entries.length ? entries : entries.slice(0, input.limit);
-    },
-    adopt: async (
-      globalObjectId: string,
-      input: { readonly workspace_id: string; readonly accepted_by?: AcceptedBy }
-    ) => await adoptGlobalMemoryEntry(params.globalMemoryRepo, params.projectMappingService, globalObjectId, input)
-  };
-}
-
-function createGlobalMemoryRecallPort(params: {
-  readonly globalMemoryRepo: GlobalMemoryRepo;
-}): GlobalMemoryRecallServicePort {
-  return createCoreGlobalMemoryRecallPort({
-    globalMemorySource: {
-      list: async () => await params.globalMemoryRepo.list()
-    }
-  });
-}
-
-function createGlobalMemoryRecallCachePort(params: {
-  readonly globalMemoryRecallCacheRepo: GlobalMemoryRecallCacheRepo;
-  readonly now?: () => string;
-}): GlobalMemoryRecallCachePort {
-  const now = params.now ?? (() => new Date().toISOString());
-
-  return {
-    recordClassifications: async (records) => {
-      const updatedAt = now();
-      await params.globalMemoryRecallCacheRepo.upsertMany(
-        records.map((record) => ({
-          workspace_id: record.workspaceId,
-          global_object_id: record.globalObjectId,
-          classification: record.classification,
-          updated_at: updatedAt
-        }))
-      );
-    }
-  };
-}
-
-async function adoptGlobalMemoryEntry(
-  globalMemoryRepo: GlobalMemoryRepo,
-  projectMappingService: ProjectMappingService,
-  globalObjectId: string,
-  input: { readonly workspace_id: string; readonly accepted_by?: AcceptedBy }
-) {
-  const entry = (await globalMemoryRepo.findByGlobalObjectId(globalObjectId)) as Readonly<GlobalMemoryEntry> | null;
-
-  if (entry === null) {
-    throw new CoreError("NOT_FOUND", `Global memory ${globalObjectId} was not found.`);
-  }
-
-  const acceptedBy = input.accepted_by ?? AcceptedBy.USER;
-  const anchor = await projectMappingService.ensureAdoptableAnchor(
-    entry.global_object_id,
-    input.workspace_id,
-    acceptedBy
-  );
-
-  if (anchor.mapping_state === ProjectMappingState.ACCEPTED) {
-    return anchor;
-  }
-
-  return await projectMappingService.accept(anchor.object_id, acceptedBy);
-}
-
-function createSoulGraphService(input: {
-  readonly memoryEntryRepo: SqliteMemoryEntryRepo;
-  readonly memoryGraphEdgeRepo: SqliteMemoryGraphEdgeRepo;
-}) {
-  return {
-    buildSoulGraph: async ({
-      workspaceId,
-      limit
-    }: {
-      readonly workspaceId: string;
-      readonly depth: number;
-      readonly limit: number;
-    }): Promise<SoulGraph> => {
-      const memories = await input.memoryEntryRepo.findByWorkspaceId(workspaceId);
-      const edges = await input.memoryGraphEdgeRepo.findByWorkspace(workspaceId);
-      const limitedMemories = memories.slice(0, limit);
-      const memoryIds = new Set(limitedMemories.map((memory: MemoryEntryRecord) => memory.object_id));
-      const limitedEdges = edges
-        .filter((edge) => memoryIds.has(edge.source_memory_id) && memoryIds.has(edge.target_memory_id))
-        .slice(0, limit);
-
-      return {
-        workspace_id: workspaceId,
-        nodes: limitedMemories.map((memory: MemoryEntryRecord) => ({
-          id: memory.object_id,
-          kind: "memory",
-          label: memory.content.slice(0, 80),
-          summary: memory.content,
-          workspace_id: memory.workspace_id,
-          created_at: memory.created_at,
-          origin_plane: "project"
-        })),
-        edges: limitedEdges.map((edge) => ({
-          id: edge.edge_id,
-          kind: "references",
-          source_id: edge.source_memory_id,
-          target_id: edge.target_memory_id,
-          created_at: edge.created_at
-        })),
-        truncated: memories.length > limitedMemories.length || edges.length > limitedEdges.length,
-        node_total: memories.length,
-        edge_total: edges.length
-      };
-    }
-  };
-}
-
-function createConversationToolExecutor(input: {
-  readonly eventLogRepo: SqliteEventLogRepo;
-  readonly runtimeNotifier: AlayaRuntimeNotifier;
-  readonly toolExecutionRecordRepo: SqliteToolExecutionRecordRepo;
-  readonly toolGovernanceClient: ToolGovernanceClient;
-  readonly targetRevalidateService: unknown;
-  readonly strongRefService: StrongRefService;
-  readonly canonicalAliasService: CanonicalAliasService;
-}) {
-  void input.toolGovernanceClient;
-  void input.targetRevalidateService;
-  void input.strongRefService;
-  void input.canonicalAliasService;
-
-  return {
-    execute: async (request: {
-      readonly toolId: string;
-      readonly rawInput: unknown;
-      readonly runtimeContext: { readonly run_id: string; readonly workspace_id: string };
-      readonly workspaceRoot: string;
-      readonly affectedPathRoots?: readonly string[];
-      readonly handler: (context: { readonly writableRoots: readonly string[] }, rawInput?: unknown) => Promise< unknown>;
-    }) => {
-      const startedAt = new Date().toISOString();
-      const result = await request.handler(
-        { writableRoots: [request.workspaceRoot] },
-        request.rawInput
-      );
-      const endedAt = new Date().toISOString();
-      const executionId = randomUUID();
-      const affectedPaths = request.affectedPathRoots ?? [];
-
-      await input.toolExecutionRecordRepo.insert({
-        execution_id: executionId,
-        tool_id: request.toolId,
-        requested_by: "principal",
-        requesting_run_id: request.runtimeContext.run_id,
-        governance_decision_ref: "fast-path://recorded",
-        permission_result: "allow",
-        executed: true,
-        started_at: startedAt,
-        ended_at: endedAt,
-        result_summary: summarizeToolResult(result),
-        rollback_status: "none",
-        affected_paths: affectedPaths
-      });
-      const event = await input.eventLogRepo.append({
-        event_type: "tool_call.completed",
-        entity_type: "tool_call",
-        entity_id: executionId,
-        workspace_id: request.runtimeContext.workspace_id,
-        run_id: request.runtimeContext.run_id,
-        caused_by: "principal",
-        revision: 0,
-        payload_json: {
-          tool_call_id: executionId,
-          tool_id: request.toolId,
-          permission_result: "allow",
-          executed: true,
-          affected_paths: affectedPaths,
-          result_summary: summarizeToolResult(result)
-        }
-      });
-      await input.runtimeNotifier.notifyEntry(event);
-
-      return { result };
-    }
-  };
-}
-
-function summarizeToolResult(result: unknown): string {
-  if (typeof result === "object" && result !== null && "ok" in result) {
-    return (result as { readonly ok?: boolean }).ok === false ? "error" : "ok";
-  }
-
-  return "ok";
-}
-
-function createAlayaConversationEngine() {
-  return {
-    sendMessage: async () => ({
-      message: {
-        role: "assistant" as const,
-        content: "Alaya does not execute chat turns; use MCP memory tools.",
-        message_id: randomUUID()
-      },
-      finish_reason: "stop" as const
-    }),
-    streamMessage: async function* () {}
-  };
-}
-
-function createEngineBindingTester() {
-  return {
-    testBinding: async (binding: EngineBinding): Promise<EngineBindingSummary & { readonly available_models: readonly string[] }> => ({
-      provider_type: binding.provider,
-      base_url: binding.base_url ?? null,
-      model: binding.model,
-      available_models: []
-    })
-  };
-}
-
-function createUnavailableRuntimeAdapter(): AgentRuntimePort {
-  return {
-    kind: "unavailable",
-    getCapabilities: () => ({
-      supports_resume: false,
-      supports_interrupt: false,
-      supports_streaming_updates: false,
-      supports_tool_events: false,
-      supports_permission_requests: false,
-      supports_artifact_events: false,
-      supports_terminal_events: false
-    }),
-    createSession: async () => {
-      throw new Error("Principal runtime adapter is not configured.");
-    },
-    prompt: async () => {
-      throw new Error("Principal runtime adapter is not configured.");
-    },
-    cancel: async (sessionId: string) => ({
-      session_id: sessionId,
-      status: "not_found",
-      message: "Principal runtime adapter is not configured."
-    }),
-    onEvent: () => () => undefined
-  };
-}
-
-function createKarmaEventStore(karmaEventRepo: SqliteKarmaEventRepo, warnLogger: ReturnType<typeof createWarnLogger>) {
-  return new SqliteKarmaEventStore(karmaEventRepo, warnLogger);
-}
-
-function patchArbitrationClaimService(arbitrationService: ArbitrationService, claimService: ClaimService): void {
-  const dependencies = (arbitrationService as unknown as { dependencies?: { claimService?: ClaimService } }).dependencies;
-  if (dependencies !== undefined) {
-    dependencies.claimService = claimService;
-  }
-}
-
-async function closeServer(server: ServerType): Promise<void> {
-  const close = server.close.bind(server) as (callback?: (error?: Error) => void) => void;
-
-  if (close.length === 0) {
-    close();
-    return;
-  }
-
-  await new Promise<void>((resolveClose, rejectClose) => {
-    close((error?: Error) => {
-      if (error !== undefined) {
-        rejectClose(error);
-        return;
-      }
-
-      resolveClose();
-    });
-  });
 }
 
 if (process.argv[1] !== undefined && import.meta.url === new URL(process.argv[1], "file://").href) {

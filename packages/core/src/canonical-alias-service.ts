@@ -4,7 +4,7 @@ import {
   CanonicalAliasDomain,
   CanonicalizationAliasResolvedPayloadSchema,
   CanonicalizationAppliedPayloadSchema,
-  PhaseCEventType,
+  RuntimeGovernanceEventType,
   PATH_ANCHOR_DIGEST_ALIAS_DOMAIN_BY_KIND,
   type PathAnchorDigestKind,
   canonicalGovernanceSubject,
@@ -100,7 +100,7 @@ export class CanonicalAliasService {
       }
 
       eventInputs.push({
-        event_type: PhaseCEventType.CANONICALIZATION_APPLIED,
+        event_type: RuntimeGovernanceEventType.CANONICALIZATION_APPLIED,
         entity_type: context.entityType,
         entity_id: context.entityId,
         workspace_id: context.workspaceId,
@@ -118,7 +118,7 @@ export class CanonicalAliasService {
 
       if (resolution.aliasEntry !== undefined) {
         eventInputs.push({
-          event_type: PhaseCEventType.CANONICALIZATION_ALIAS_RESOLVED,
+          event_type: RuntimeGovernanceEventType.CANONICALIZATION_ALIAS_RESOLVED,
           entity_type: context.entityType,
           entity_id: context.entityId,
           workspace_id: context.workspaceId,

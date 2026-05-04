@@ -4,7 +4,7 @@ import {
   MemoryDimension,
   MemoryEntrySchema,
   ObjectLifecycleStateSchema,
-  Phase1BEventType,
+  MemoryGovernanceEventType,
   SoulMemoryArchivedPayloadSchema,
   SoulMemoryCreatedPayloadSchema,
   SoulMemoryStateChangedPayloadSchema,
@@ -177,7 +177,7 @@ export class MemoryService {
 
     const revision = await this.getNextRevision("memory_entry", memoryEntry.object_id);
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase1BEventType.SOUL_MEMORY_CREATED,
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_CREATED,
       entity_type: "memory_entry",
       entity_id: memoryEntry.object_id,
       workspace_id: memoryEntry.workspace_id,
@@ -237,7 +237,7 @@ export class MemoryService {
     const occurredAt = this.now();
     const revision = await this.getNextRevision("memory_entry", existing.object_id);
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase1BEventType.SOUL_MEMORY_UPDATED,
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_UPDATED,
       entity_type: "memory_entry",
       entity_id: existing.object_id,
       workspace_id: existing.workspace_id,
@@ -296,7 +296,7 @@ export class MemoryService {
 
     const nextRevision = await this.getNextRevision("memory_entry", existing.object_id);
     const archivedEvent = await this.dependencies.eventLogRepo.append({
-      event_type: Phase1BEventType.SOUL_MEMORY_ARCHIVED,
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_ARCHIVED,
       entity_type: "memory_entry",
       entity_id: existing.object_id,
       workspace_id: existing.workspace_id,
@@ -307,7 +307,7 @@ export class MemoryService {
     });
 
     const stateChangedEvent = await this.dependencies.eventLogRepo.append({
-      event_type: Phase1BEventType.SOUL_MEMORY_STATE_CHANGED,
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
       entity_type: "memory_entry",
       entity_id: existing.object_id,
       workspace_id: existing.workspace_id,
@@ -353,7 +353,7 @@ export class MemoryService {
     const occurredAt = this.now();
     const revision = await this.getNextRevision("memory_entry", existing.object_id);
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase1BEventType.SOUL_MEMORY_STATE_CHANGED,
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
       entity_type: "memory_entry",
       entity_id: existing.object_id,
       workspace_id: existing.workspace_id,
@@ -406,7 +406,7 @@ export class MemoryService {
     const occurredAt = this.now();
     const revision = await this.getNextRevision("memory_entry", existing.object_id);
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase1BEventType.SOUL_MEMORY_STATE_CHANGED,
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
       entity_type: "memory_entry",
       entity_id: existing.object_id,
       workspace_id: existing.workspace_id,

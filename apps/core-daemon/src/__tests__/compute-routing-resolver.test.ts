@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   ComputeProviderPriority,
-  PhaseCEventType,
+  RuntimeGovernanceEventType,
   type EventLogEntry,
   type ExecutionStanceResolution
 } from "@do-soul/alaya-protocol";
@@ -73,7 +73,7 @@ describe("createComputeRoutingExecutionStanceResolver", () => {
 
     expect(route).toHaveBeenCalledWith("workspace-1");
     expect(append).toHaveBeenCalledWith({
-      event_type: PhaseCEventType.COMPUTE_PROVIDER_ROUTED,
+      event_type: RuntimeGovernanceEventType.COMPUTE_PROVIDER_ROUTED,
       entity_type: "compute_provider_route",
       entity_id: "decision-001",
       workspace_id: "workspace-1",

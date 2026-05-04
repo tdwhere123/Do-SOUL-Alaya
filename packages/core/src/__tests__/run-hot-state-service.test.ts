@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { EngineStatus, Phase0EventType, StreamingEventType, type EventLogEntry, type Run } from "@do-soul/alaya-protocol";
+import { EngineStatus, WorkspaceRunEventType, StreamingEventType, type EventLogEntry, type Run } from "@do-soul/alaya-protocol";
 import { RunHotStateService } from "../run-hot-state-service.js";
 
 function createEvent(entry: Partial<EventLogEntry> & Pick<EventLogEntry, "event_type" | "entity_type" | "entity_id">): EventLogEntry {
@@ -39,7 +39,7 @@ describe("RunHotStateService", () => {
     const run = createRun();
     const eventLog = [
       createEvent({
-        event_type: Phase0EventType.RUN_MESSAGE_APPENDED,
+        event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
         entity_type: "message",
         entity_id: "msg-user-1",
         created_at: "2026-04-12T00:00:05.000Z",
@@ -132,7 +132,7 @@ describe("RunHotStateService", () => {
 
     await service.apply({
       event_id: "evt-run-created",
-      event_type: Phase0EventType.RUN_CREATED,
+      event_type: WorkspaceRunEventType.RUN_CREATED,
       entity_type: "run",
       entity_id: "run-1",
       workspace_id: "workspace-1",
@@ -156,7 +156,7 @@ describe("RunHotStateService", () => {
 
     await service.apply({
       event_id: "evt-message-appended",
-      event_type: Phase0EventType.RUN_MESSAGE_APPENDED,
+      event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
       entity_type: "message",
       entity_id: "msg-user-1",
       workspace_id: "workspace-1",
@@ -180,7 +180,7 @@ describe("RunHotStateService", () => {
 
     await service.apply({
       event_id: "evt-engine-response",
-      event_type: Phase0EventType.ENGINE_RESPONSE_RECEIVED,
+      event_type: WorkspaceRunEventType.ENGINE_RESPONSE_RECEIVED,
       entity_type: "message",
       entity_id: "msg-asst-1",
       workspace_id: "workspace-1",
@@ -204,7 +204,7 @@ describe("RunHotStateService", () => {
 
     await service.apply({
       event_id: "evt-run-deleted",
-      event_type: Phase0EventType.RUN_DELETED,
+      event_type: WorkspaceRunEventType.RUN_DELETED,
       entity_type: "run",
       entity_id: "run-1",
       workspace_id: "workspace-1",

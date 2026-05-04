@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   HealthEventKind,
-  PhaseCExtensionEventType,
+  ComputeRecallGardenEventType,
   RecallEmbeddingSupplementDegradedPayloadSchema,
   RecallEmbeddingSupplementMergedPayloadSchema,
   RecallEmbeddingSupplementQueriedPayloadSchema,
@@ -448,7 +448,7 @@ export class EmbeddingRecallService {
       runId: params.runId,
       queryId: params.queryId,
       entry: {
-        event_type: PhaseCExtensionEventType.RECALL_EMBEDDING_SUPPLEMENT_QUERIED,
+        event_type: ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_QUERIED,
         entity_type: "recall_embedding_supplement",
         entity_id: params.queryId,
         workspace_id: params.workspaceId,
@@ -482,7 +482,7 @@ export class EmbeddingRecallService {
       runId: params.runId,
       queryId: params.queryId,
       entry: {
-        event_type: PhaseCExtensionEventType.RECALL_EMBEDDING_SUPPLEMENT_MERGED,
+        event_type: ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_MERGED,
         entity_type: "recall_embedding_supplement",
         entity_id: params.queryId,
         workspace_id: params.workspaceId,
@@ -519,7 +519,7 @@ export class EmbeddingRecallService {
   }): Promise<void> {
     try {
       await this.dependencies.eventLogRepo.append({
-        event_type: PhaseCExtensionEventType.RECALL_EMBEDDING_SUPPLEMENT_DEGRADED,
+        event_type: ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_DEGRADED,
         entity_type: "recall_embedding_supplement",
         entity_id: params.queryId,
         workspace_id: params.workspaceId,

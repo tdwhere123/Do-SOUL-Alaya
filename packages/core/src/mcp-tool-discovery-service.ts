@@ -1,7 +1,7 @@
 import {
   ExtensionToolDiscoveredPayloadSchema,
   McpServerInfoSchema,
-  PhaseCEventType,
+  RuntimeGovernanceEventType,
   ToolProviderToolSpecSchema,
   type EventLogEntry,
   type McpServerInfo,
@@ -151,7 +151,7 @@ export class McpToolDiscoveryService {
       })
     );
     const entry = await this.deps.eventLogWriter.append({
-      event_type: PhaseCEventType.EXTENSION_TOOL_DISCOVERED,
+      event_type: RuntimeGovernanceEventType.EXTENSION_TOOL_DISCOVERED,
       entity_type: "extension_provider",
       entity_id: provider.provider_id,
       workspace_id: resolveSystemWorkspaceId(this.deps.defaultWorkspaceId),

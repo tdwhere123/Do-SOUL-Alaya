@@ -3,7 +3,7 @@ import {
   ControlPlaneObjectKind,
   MemoryDimension,
   ObjectLifecycleState,
-  Phase3AEventType,
+  RecallContextEventType,
   ProjectMappingState,
   RetentionPolicy,
   ScopeClass,
@@ -1404,7 +1404,7 @@ describe("RecallService", () => {
 
     expect(appendSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase3AEventType.SOUL_RECALL_COMPLETED,
+        event_type: RecallContextEventType.SOUL_RECALL_COMPLETED,
         entity_type: "task_object_surface",
         entity_id: createTaskSurface().runtime_id,
         run_id: "run-1"

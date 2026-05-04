@@ -6,7 +6,7 @@ import {
   ManifestationEscalationDecidedPayloadSchema,
   ManifestationLevel,
   PathGovernanceClass,
-  PhaseCEventType,
+  RuntimeGovernanceEventType,
   listPathAnchorRefContextRefs,
   type ActivationCandidate,
   type EventLogEntry,
@@ -112,7 +112,7 @@ export class ManifestationResolver {
     );
 
     await this.deps.eventLogWriter.append({
-      event_type: PhaseCEventType.MANIFESTATION_BUDGET_EVALUATED,
+      event_type: RuntimeGovernanceEventType.MANIFESTATION_BUDGET_EVALUATED,
       entity_type: "manifestation_budget",
       entity_id: params.runId,
       workspace_id: params.workspaceId,
@@ -133,7 +133,7 @@ export class ManifestationResolver {
     // Keep the live path append order explicit: consumers should never observe
     // a decision batch before the aggregate budget evaluation for the same run.
     await this.deps.eventLogWriter.append({
-      event_type: PhaseCEventType.MANIFESTATION_ESCALATION_DECIDED,
+      event_type: RuntimeGovernanceEventType.MANIFESTATION_ESCALATION_DECIDED,
       entity_type: "manifestation_decision_batch",
       entity_id: params.runId,
       workspace_id: params.workspaceId,

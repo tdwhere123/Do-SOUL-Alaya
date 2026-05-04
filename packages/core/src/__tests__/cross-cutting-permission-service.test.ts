@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   CrossCuttingState,
-  Phase2BEventType,
+  SurfaceEventType,
   type CrossCuttingPermission,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
@@ -161,7 +161,7 @@ describe("CrossCuttingPermissionService", () => {
     expect(order).toEqual(["event_log", "permission_create"]);
     expect(created.permission_id).toBe(PERMISSION_ID_1);
     expect(created.permission.cross_cutting_state).toBe(CrossCuttingState.NONE);
-    expect(events[0]?.event_type).toBe(Phase2BEventType.SOUL_CROSS_CUTTING_STATE_CHANGED);
+    expect(events[0]?.event_type).toBe(SurfaceEventType.SOUL_CROSS_CUTTING_STATE_CHANGED);
     expect(events[0]?.payload_json).toMatchObject({ from_state: null, to_state: CrossCuttingState.NONE });
     expect(events[0]?.revision).toBe(0);
     expect(notifySpy).toHaveBeenCalledTimes(1);

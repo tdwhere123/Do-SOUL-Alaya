@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import {
   HealthEventKind,
-  Phase4AEventType,
+  GardenEventType,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
 import { EventPublisher } from "@do-soul/alaya-core";
@@ -77,7 +77,7 @@ describe("routes-config port batch", () => {
     });
     expect(harness.publishedEvents).toHaveLength(1);
     expect(harness.publishedEvents[0]).toMatchObject({
-      event_type: Phase4AEventType.SOUL_HEALTH_JOURNAL_RECORDED,
+      event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
       entity_type: "runtime_config",
       entity_id: "runtime:embedding-supplement",
       caused_by: "inspector",
@@ -170,7 +170,7 @@ describe("routes-config port batch", () => {
       const events = await eventLogRepo.queryByEntity("runtime_config", "runtime:embedding-supplement");
       expect(events).toHaveLength(1);
       expect(events[0]).toMatchObject({
-        event_type: Phase4AEventType.SOUL_HEALTH_JOURNAL_RECORDED,
+        event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
         caused_by: "inspector",
         payload_json: {
           entry_id: "audit-live",

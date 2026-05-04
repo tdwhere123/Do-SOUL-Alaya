@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  Phase0EventType,
+  WorkspaceRunEventType,
   RunCreatedPayloadSchema,
   RunMessageAppendedPayloadSchema,
   WorkerStateChangedPayloadSchema,
@@ -69,7 +69,7 @@ describe("EventPublisher", () => {
   it("still applies Phase 0 run hot state updates for legacy events", async () => {
     const recorded: string[] = [];
     const entry = createEventLogEntry({
-      event_type: Phase0EventType.RUN_CREATED,
+      event_type: WorkspaceRunEventType.RUN_CREATED,
       entity_type: "run",
       entity_id: "run-1",
       workspace_id: "ws-1",
@@ -120,7 +120,7 @@ describe("EventPublisher", () => {
     expect(recorded).toEqual(["append", "apply", "notify"]);
     expect(runHotStateService.apply).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase0EventType.RUN_CREATED,
+        event_type: WorkspaceRunEventType.RUN_CREATED,
         run_id: "run-1"
       })
     );
@@ -179,7 +179,7 @@ describe("EventPublisher", () => {
   it("keeps append mutate propagate ordering for Phase 0 mutation flows", async () => {
     const recorded: string[] = [];
     const entry = createEventLogEntry({
-      event_type: Phase0EventType.RUN_MESSAGE_APPENDED,
+      event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
       entity_type: "message",
       entity_id: "msg-1",
       workspace_id: "ws-1",

@@ -5,7 +5,7 @@ import {
   ObligationCreatedPayloadSchema,
   ObligationExpiredPayloadSchema,
   ObligationFulfilledPayloadSchema,
-  PhaseBEventType,
+  ObligationTrustNarrativeEventType,
   type DeferredObligation,
   type DeferredObligationKind,
   type DeferredObligationState,
@@ -79,7 +79,7 @@ export class DeferredObligationService {
 
     return this.deps.eventPublisher.publishWithMutation(
       {
-        event_type: PhaseBEventType.OBLIGATION_CREATED,
+        event_type: ObligationTrustNarrativeEventType.OBLIGATION_CREATED,
         entity_type: "deferred_obligation",
         entity_id: obligation.obligation_id,
         workspace_id: obligation.workspace_id,
@@ -103,7 +103,7 @@ export class DeferredObligationService {
 
     return this.deps.eventPublisher.publishWithMutation(
       {
-        event_type: PhaseBEventType.OBLIGATION_FULFILLED,
+        event_type: ObligationTrustNarrativeEventType.OBLIGATION_FULFILLED,
         entity_type: "deferred_obligation",
         entity_id: parsedObligationId,
         workspace_id: snapshot.workspace_id,
@@ -138,7 +138,7 @@ export class DeferredObligationService {
 
     return this.deps.eventPublisher.publishWithMutation(
       {
-        event_type: PhaseBEventType.OBLIGATION_EXPIRED,
+        event_type: ObligationTrustNarrativeEventType.OBLIGATION_EXPIRED,
         entity_type: "deferred_obligation",
         entity_id: parsedObligationId,
         workspace_id: snapshot.workspace_id,

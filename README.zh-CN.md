@@ -492,7 +492,7 @@ Do-SOUL Alaya/
 > 了，把所有原本要 deferred 的东西都纳进收尾范围。release 框架
 > 等下面这些卡全部关闭后才会回来 —— 不会提前。
 
-### P1. 收尾 v0.1 —— 六张卡正在做
+### P1. 收尾 v0.1 —— closeout cards
 
 | 卡 | 关闭的事 | Backlog |
 |---|---|---|
@@ -501,12 +501,11 @@ Do-SOUL Alaya/
 | **A3** Path 轴可塑性反馈环 | 新建 `PathPlasticityService` 消费 `MEMORY_USAGE_REPORTED` → 发 Phase-C 事件 → `RecallService` 把可塑性纳入打分 | 新卡 |
 | **B1** `pi-mono` 集成 | `packages/engine-gateway` 变成 `pi-mono` 客户端；synthesis / proposal scoring / reflection 走一个干净的 provider 边界 | `#BL-008` |
 | **B2** OS keychain 支持 | `keychain:<service>:<account>` secret-ref 语法；macOS Keychain + Linux libsecret 适配器（Windows 走 mock） | `#BL-009` |
-| **C1** 文件形态卫生 wave | 把 `phase-*.ts` 重命名成意图明确的；拆掉过大的文件；`ts-prune` 清理；刷新 `code-map.md` | `#BL-017` |
+| **C1** 文件形态卫生 wave | 已落地：protocol `phase-*.ts` 文件/符号已改为 domain 命名；超大文件已拆分；固定版本 `knip` unused-code 检查已接入；`code-map.md` 已刷新 | `#BL-017` 已关闭 |
 
-工作在隔离的 `v0.1-closeout` worktree 里跑，每张卡都按 review +
-fix-loop 纪律收。`main` 只在每张卡的退出条件全部成立、且综合多
-lens review 报告 zero Blocking / Important 后，才看到最终 merge
-+ `v0.1.0` tag。
+剩余 closeout 工作都在隔离 worktree 里跑，每张卡都按 review +
+fix-loop 纪律收。只有当某张卡自己的退出条件成立、且综合 review
+报告 zero Blocking / Important 后，`main` 才接收这张卡的 merge。
 
 ### P2. v0.1 之后 —— 走向以记忆为核心的 agent
 

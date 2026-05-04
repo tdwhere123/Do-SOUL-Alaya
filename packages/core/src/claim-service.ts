@@ -3,7 +3,7 @@ import {
   ClaimFormSchema,
   ClaimLifecycleState,
   ClaimLifecycleStateSchema,
-  Phase1BEventType,
+  MemoryGovernanceEventType,
   SoulClaimContestedPayloadSchema,
   SoulClaimCreatedPayloadSchema,
   SoulClaimLifecycleChangedPayloadSchema,
@@ -236,7 +236,7 @@ export class ClaimService {
     const occurredAt = this.now();
     const revision = await this.getNextRevision("claim_form", existing.object_id);
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase1BEventType.SOUL_CLAIM_LIFECYCLE_CHANGED,
+      event_type: MemoryGovernanceEventType.SOUL_CLAIM_LIFECYCLE_CHANGED,
       entity_type: "claim_form",
       entity_id: existing.object_id,
       workspace_id: existing.workspace_id,
@@ -279,7 +279,7 @@ export class ClaimService {
   ): Promise<void> {
     const revision = await this.getNextRevision("claim_form", claim.object_id);
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase1BEventType.SOUL_CLAIM_CONTESTED,
+      event_type: MemoryGovernanceEventType.SOUL_CLAIM_CONTESTED,
       entity_type: "claim_form",
       entity_id: claim.object_id,
       workspace_id: claim.workspace_id,
@@ -336,7 +336,7 @@ function createClaimCreatedEventInput(
   revision: number
 ): Omit<EventLogEntry, "event_id" | "created_at"> {
   return {
-    event_type: Phase1BEventType.SOUL_CLAIM_CREATED,
+    event_type: MemoryGovernanceEventType.SOUL_CLAIM_CREATED,
     entity_type: "claim_form",
     entity_id: claim.object_id,
     workspace_id: claim.workspace_id,

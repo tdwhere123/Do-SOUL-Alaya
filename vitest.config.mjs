@@ -9,10 +9,5 @@ export default defineConfig({
       ? { projects }
       : { include: ["__no_tests__/**/*.test.ts"], passWithNoTests: true }),
     reporters: ["default"],
-    coverage: {
-      enabled: false,
-      provider: "v8",
-      reporter: ["text", "html"],
-    },
   },
 });

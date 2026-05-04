@@ -3,7 +3,7 @@ import {
   BankruptcyAction,
   BankruptcyKind,
   BankruptcyTriggerKind,
-  Phase3CEventType,
+  BudgetEventType,
   ProposalResolutionState,
   RuntimeMode,
   type EventLogEntry,
@@ -20,7 +20,7 @@ type EventLogQueryByEntityMock = TestMock<
 type BroadcastEntryMock = TestMock<(entry: EventLogEntry) => Promise<void>>;
 
 describe("BudgetBankruptcyService", () => {
-  it("declares a soft bankruptcy, persists the proposal, updates current mode, and broadcasts both phase-3c events", async () => {
+  it("declares a soft bankruptcy, persists the proposal, updates current mode, and broadcasts both budget events", async () => {
     const dependencies = createDependencies();
     const service = new BudgetBankruptcyService(dependencies);
 
@@ -42,8 +42,8 @@ describe("BudgetBankruptcyService", () => {
       })
     );
     expect(dependencies.runtimeNotifier.notifyEntry.mock.calls.map(([entry]) => entry.event_type)).toEqual([
-      Phase3CEventType.SOUL_BUDGET_BANKRUPTCY_DECLARED,
-      Phase3CEventType.SOUL_BUDGET_BANKRUPTCY_RESOLVED
+      BudgetEventType.SOUL_BUDGET_BANKRUPTCY_DECLARED,
+      BudgetEventType.SOUL_BUDGET_BANKRUPTCY_RESOLVED
     ]);
   });
 
@@ -63,7 +63,7 @@ describe("BudgetBankruptcyService", () => {
     expect(dependencies.proposalPort.update).not.toHaveBeenCalled();
     expect(
       dependencies.runtimeNotifier.notifyEntry.mock.calls.filter(
-        ([entry]) => entry.event_type === Phase3CEventType.SOUL_BUDGET_BANKRUPTCY_RESOLVED
+        ([entry]) => entry.event_type === BudgetEventType.SOUL_BUDGET_BANKRUPTCY_RESOLVED
       )
     ).toHaveLength(0);
   });
@@ -126,7 +126,7 @@ describe("BudgetBankruptcyService", () => {
     expect(dependencies.proposalPort.create).toHaveBeenCalledTimes(1);
     expect(
       dependencies.eventLogRepo.append.mock.calls.filter(
-        ([entry]) => entry.event_type === Phase3CEventType.SOUL_BUDGET_BANKRUPTCY_DECLARED
+        ([entry]) => entry.event_type === BudgetEventType.SOUL_BUDGET_BANKRUPTCY_DECLARED
       )
     ).toHaveLength(1);
     expect(firstResult.proposal.proposal_id).toBe("proposal-race");
@@ -210,7 +210,7 @@ describe("BudgetBankruptcyService", () => {
           entityType === "bankruptcy_dossier" && entityId === "00000000-0000-4000-8000-000000000998"
             ? [
                 createEventLogEntry({
-                  event_type: Phase3CEventType.SOUL_BUDGET_BANKRUPTCY_DECLARED,
+                  event_type: BudgetEventType.SOUL_BUDGET_BANKRUPTCY_DECLARED,
                   entity_type: "bankruptcy_dossier",
                   entity_id: "00000000-0000-4000-8000-000000000998",
                   workspace_id: "workspace-1",
@@ -278,7 +278,7 @@ describe("BudgetBankruptcyService", () => {
           entityType === "bankruptcy_dossier" && entityId === "00000000-0000-4000-8000-000000000998"
             ? [
                 createEventLogEntry({
-                  event_type: Phase3CEventType.SOUL_BUDGET_BANKRUPTCY_DECLARED,
+                  event_type: BudgetEventType.SOUL_BUDGET_BANKRUPTCY_DECLARED,
                   entity_type: "bankruptcy_dossier",
                   entity_id: "00000000-0000-4000-8000-000000000998",
                   workspace_id: "workspace-1",

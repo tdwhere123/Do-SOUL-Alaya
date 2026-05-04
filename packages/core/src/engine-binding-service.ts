@@ -3,7 +3,7 @@ import {
   EngineBindingInputSchema,
   EngineError,
   EngineErrorKind,
-  Phase0EventType,
+  WorkspaceRunEventType,
   WorkspaceEngineBindingUpdatedPayloadSchema,
   type EngineBinding,
   type EngineBindingInput,
@@ -58,7 +58,7 @@ export class EngineBindingService {
 
     return this.dependencies.eventPublisher.publishWithMutation(
       {
-        event_type: Phase0EventType.WORKSPACE_ENGINE_BINDING_UPDATED,
+        event_type: WorkspaceRunEventType.WORKSPACE_ENGINE_BINDING_UPDATED,
         entity_type: "workspace",
         entity_id: workspace.workspace_id,
         workspace_id: workspace.workspace_id,

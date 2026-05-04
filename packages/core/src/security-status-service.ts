@@ -1,5 +1,5 @@
 import {
-  PhaseCEventType,
+  RuntimeGovernanceEventType,
   SecurityPassthroughInitializationFailedPayloadSchema,
   SecurityPassthroughStatusChangedPayloadSchema,
   type EventLogEntry,
@@ -130,7 +130,7 @@ function createStatusChangedEvent(
   reason: string
 ): Omit<EventLogEntry, "event_id" | "created_at"> {
   return {
-    event_type: PhaseCEventType.SECURITY_PASSTHROUGH_STATUS_CHANGED,
+    event_type: RuntimeGovernanceEventType.SECURITY_PASSTHROUGH_STATUS_CHANGED,
     entity_type: "workspace",
     entity_id: status.workspace_id,
     workspace_id: status.workspace_id,
@@ -156,7 +156,7 @@ function createInitializationFailedEvent(
   errorCode?: string | null
 ): Omit<EventLogEntry, "event_id" | "created_at"> {
   return {
-    event_type: PhaseCEventType.SECURITY_PASSTHROUGH_INITIALIZATION_FAILED,
+    event_type: RuntimeGovernanceEventType.SECURITY_PASSTHROUGH_INITIALIZATION_FAILED,
     entity_type: "workspace",
     entity_id: workspaceId,
     workspace_id: workspaceId,

@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
   ControlPlaneObjectKind,
-  Phase0EventType,
-  Phase3BEventType,
+  WorkspaceRunEventType,
+  GreenGovernanceEventType,
   RetentionPolicy,
   RunMessageAppendedPayloadSchema,
   SessionOverrideSchema,
@@ -77,7 +77,7 @@ export class SessionOverrideService {
 
     const revision = await getNextRevision(this.dependencies.eventLogRepo, "session_override", override.runtime_id);
     await this.dependencies.eventLogRepo.append({
-      event_type: Phase3BEventType.SOUL_SESSION_OVERRIDE_APPLIED,
+      event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
       entity_type: "session_override",
       entity_id: override.runtime_id,
       workspace_id: workspaceId,
@@ -143,7 +143,7 @@ export class SessionOverrideService {
     for (let index = events.length - 1; index >= 0; index -= 1) {
       const event = events[index];
 
-      if (event.event_type !== Phase0EventType.RUN_MESSAGE_APPENDED) {
+      if (event.event_type !== WorkspaceRunEventType.RUN_MESSAGE_APPENDED) {
         continue;
       }
 
@@ -227,7 +227,7 @@ export class SessionOverrideService {
   private async rehydrateFromEventLog(runId: string): Promise<readonly Readonly<SessionOverride>[]> {
     const events = await this.dependencies.eventLogRepo.queryByRun(runId);
     const overrides = events
-      .filter((event) => event.event_type === Phase3BEventType.SOUL_SESSION_OVERRIDE_APPLIED)
+      .filter((event) => event.event_type === GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED)
       .flatMap((event) => {
         const parsed = SoulSessionOverrideAppliedPayloadSchema.safeParse(event.payload_json);
 

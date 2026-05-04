@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   HealthEventKind,
   MemoryDimension,
-  PhaseCExtensionEventType,
+  ComputeRecallGardenEventType,
   ScopeClass,
   type EventLogEntry,
   type HealthJournalRecordInput,
@@ -72,8 +72,8 @@ describe("EmbeddingRecallService", () => {
       result.similarityHintsByObjectId["memory-2"]!.normalized_similarity
     ).toBeGreaterThan(result.similarityHintsByObjectId["memory-1"]!.normalized_similarity);
     expect(appendSpy.mock.calls.map(([entry]) => entry.event_type)).toEqual([
-      PhaseCExtensionEventType.RECALL_EMBEDDING_SUPPLEMENT_QUERIED,
-      PhaseCExtensionEventType.RECALL_EMBEDDING_SUPPLEMENT_MERGED
+      ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_QUERIED,
+      ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_MERGED
     ]);
     expect(appendSpy.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
@@ -153,8 +153,8 @@ describe("EmbeddingRecallService", () => {
       object_id: "memory-2"
     });
     expect(appendSpy.mock.calls.map(([entry]) => entry.event_type)).toEqual([
-      PhaseCExtensionEventType.RECALL_EMBEDDING_SUPPLEMENT_QUERIED,
-      PhaseCExtensionEventType.RECALL_EMBEDDING_SUPPLEMENT_MERGED
+      ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_QUERIED,
+      ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_MERGED
     ]);
   });
 
@@ -210,7 +210,7 @@ describe("EmbeddingRecallService", () => {
     });
     expect(appendSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: PhaseCExtensionEventType.RECALL_EMBEDDING_SUPPLEMENT_DEGRADED,
+        event_type: ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_DEGRADED,
         payload_json: expect.objectContaining({
           query_id: "prepared-query-pending",
           degradation_reason: "query_embedding_pending",
@@ -267,7 +267,7 @@ describe("EmbeddingRecallService", () => {
     expect(appendSpy).toHaveBeenCalledTimes(1);
     expect(appendSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: PhaseCExtensionEventType.RECALL_EMBEDDING_SUPPLEMENT_DEGRADED,
+        event_type: ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_DEGRADED,
         payload_json: expect.objectContaining({
           query_id: "query-unavailable",
           degradation_reason: "provider_unavailable",
@@ -335,7 +335,7 @@ describe("EmbeddingRecallService", () => {
     expect(result.similarityHintsByObjectId).toEqual({});
     expect(appendSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: PhaseCExtensionEventType.RECALL_EMBEDDING_SUPPLEMENT_DEGRADED,
+        event_type: ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_DEGRADED,
         payload_json: expect.objectContaining({
           query_id: "query-error",
           degradation_reason: "query_embedding_failed",
@@ -366,7 +366,7 @@ describe("EmbeddingRecallService", () => {
       .mockResolvedValue({
         event_id: "event-merged",
         created_at: "2026-04-23T00:00:00.000Z",
-        event_type: PhaseCExtensionEventType.RECALL_EMBEDDING_SUPPLEMENT_MERGED,
+        event_type: ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_MERGED,
         entity_type: "recall_embedding_supplement",
         entity_id: "query-telemetry-fail",
         workspace_id: "workspace-1",

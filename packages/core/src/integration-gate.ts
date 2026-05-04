@@ -1,5 +1,5 @@
 import {
-  PhaseA3EventType,
+  WorkerRuntimeEventType,
   RuntimeCapabilitiesSchema,
   WorkerIntegrationStatusPayloadSchema,
   type DelegatedWorkerRun,
@@ -8,7 +8,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { EventPublisherPropagationError, type EventPublisher } from "./event-publisher.js";
 
-export const WORKER_INTEGRATION_STATUS_EVENT_TYPE = PhaseA3EventType.WORKER_INTEGRATION_STATUS;
+export const WORKER_INTEGRATION_STATUS_EVENT_TYPE = WorkerRuntimeEventType.WORKER_INTEGRATION_STATUS;
 
 const DEFAULT_CRITICAL_MISMATCHES = ["supports_streaming_updates"] as const;
 

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   ControlPlaneObjectKind,
   MemoryDimension,
-  Phase3AEventType,
+  RecallContextEventType,
   RetentionPolicy,
   RunMode,
   ScopeClass,
@@ -191,7 +191,7 @@ export class TaskSurfaceBuilder {
 
     const revision = await getNextRevision(this.dependencies.eventLogRepo, "task_object_surface", runtimeId);
     await this.dependencies.eventLogRepo.append({
-      event_type: Phase3AEventType.SOUL_TASK_SURFACE_CREATED,
+      event_type: RecallContextEventType.SOUL_TASK_SURFACE_CREATED,
       entity_type: "task_object_surface",
       entity_id: runtimeId,
       workspace_id: params.run.workspace_id,

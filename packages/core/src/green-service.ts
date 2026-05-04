@@ -5,7 +5,7 @@ import {
   GreenState,
   GreenStatusSchema,
   MemoryDimension,
-  Phase3BEventType,
+  GreenGovernanceEventType,
   RevokeReason,
   SoulGreenGraceEnteredPayloadSchema,
   SoulGreenGrantedPayloadSchema,
@@ -171,7 +171,7 @@ export class GreenService {
     });
     const revision = await getNextRevision(this.dependencies.eventLogRepo, "green_status", status.object_id);
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase3BEventType.SOUL_GREEN_GRANTED,
+      event_type: GreenGovernanceEventType.SOUL_GREEN_GRANTED,
       entity_type: "green_status",
       entity_id: status.object_id,
       workspace_id: workspaceId,
@@ -227,7 +227,7 @@ export class GreenService {
     });
     const revision = await getNextRevision(this.dependencies.eventLogRepo, "green_status", next.object_id);
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase3BEventType.SOUL_GREEN_PIERCED,
+      event_type: GreenGovernanceEventType.SOUL_GREEN_PIERCED,
       entity_type: "green_status",
       entity_id: next.object_id,
       workspace_id: workspaceId,
@@ -277,7 +277,7 @@ export class GreenService {
     });
     const revision = await getNextRevision(this.dependencies.eventLogRepo, "green_status", next.object_id);
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase3BEventType.SOUL_GREEN_GRACE_ENTERED,
+      event_type: GreenGovernanceEventType.SOUL_GREEN_GRACE_ENTERED,
       entity_type: "green_status",
       entity_id: next.object_id,
       workspace_id: workspaceId,
@@ -449,7 +449,7 @@ export class GreenService {
       verificationResult.runtime_id
     );
     const event = await this.dependencies.eventLogRepo.append({
-      event_type: Phase3BEventType.SOUL_VERIFICATION_COMPLETED,
+      event_type: GreenGovernanceEventType.SOUL_VERIFICATION_COMPLETED,
       entity_type: "verification_result",
       entity_id: verificationResult.runtime_id,
       workspace_id: workspaceId,
@@ -562,10 +562,10 @@ export class GreenService {
   private async hasOpenCorrection(targetObjectId: string, workspaceId: string): Promise<boolean> {
     const workspaceEvents = await this.dependencies.eventLogRepo.queryByWorkspace(workspaceId);
     const appliedEvents = workspaceEvents.filter(
-      (entry) => entry.event_type === Phase3BEventType.SOUL_SESSION_OVERRIDE_APPLIED
+      (entry) => entry.event_type === GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED
     );
     const promotedEvents = workspaceEvents.filter(
-      (entry) => entry.event_type === Phase3BEventType.SOUL_SESSION_OVERRIDE_PROMOTED
+      (entry) => entry.event_type === GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_PROMOTED
     );
     const promotedOverrideIds = new Set(
       promotedEvents
@@ -602,7 +602,7 @@ export class GreenService {
     const workspaceEvents = await this.dependencies.eventLogRepo.queryByWorkspace(workspaceId);
     return workspaceEvents.some(
       (entry) =>
-        entry.event_type === Phase3BEventType.SOUL_GREEN_PIERCED &&
+        entry.event_type === GreenGovernanceEventType.SOUL_GREEN_PIERCED &&
         hasTargetObjectId(entry.payload_json, targetObjectId) &&
         hasSecurityHitRevokeReason(entry.payload_json)
     );

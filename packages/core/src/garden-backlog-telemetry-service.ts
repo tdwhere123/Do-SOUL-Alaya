@@ -1,7 +1,7 @@
 import {
   GardenBacklogThresholdsSchema,
-  PhaseCExtensionEventType,
-  parsePhaseCExtensionEventPayload,
+  ComputeRecallGardenEventType,
+  parseComputeRecallGardenEventPayload,
   type EventLogEntry,
   type GardenBacklogSnapshot,
   type GardenBacklogThresholds,
@@ -302,7 +302,7 @@ export class GardenBacklogTelemetryService {
     let entry: EventLogEntry;
     try {
       entry = await this.appendEvent(
-        PhaseCExtensionEventType.GARDEN_BACKLOG_TELEMETRY_SNAPSHOT,
+        ComputeRecallGardenEventType.GARDEN_BACKLOG_TELEMETRY_SNAPSHOT,
         payload
       );
     } catch (error) {
@@ -356,7 +356,7 @@ export class GardenBacklogTelemetryService {
       let entry: EventLogEntry;
       try {
         entry = await this.appendEvent(
-          PhaseCExtensionEventType.GARDEN_BACKLOG_WARNING,
+          ComputeRecallGardenEventType.GARDEN_BACKLOG_WARNING,
           eventPayload
         );
       } catch (error) {
@@ -399,8 +399,8 @@ export class GardenBacklogTelemetryService {
 
   private async appendEvent(
     eventType:
-      | typeof PhaseCExtensionEventType.GARDEN_BACKLOG_TELEMETRY_SNAPSHOT
-      | typeof PhaseCExtensionEventType.GARDEN_BACKLOG_WARNING,
+      | typeof ComputeRecallGardenEventType.GARDEN_BACKLOG_TELEMETRY_SNAPSHOT
+      | typeof ComputeRecallGardenEventType.GARDEN_BACKLOG_WARNING,
     payload: Record<string, unknown>
   ): Promise<EventLogEntry> {
     const revision = await getNextRevision(
@@ -416,7 +416,7 @@ export class GardenBacklogTelemetryService {
       run_id: null,
       caused_by: SYSTEM_ACTOR,
       revision,
-      payload_json: parsePhaseCExtensionEventPayload(eventType, payload)
+      payload_json: parseComputeRecallGardenEventPayload(eventType, payload)
     });
   }
 

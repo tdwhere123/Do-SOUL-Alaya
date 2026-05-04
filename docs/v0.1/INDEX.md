@@ -190,6 +190,8 @@ their original detail is in the plan file at
 - [Phase 6](./phase-6-briefs/README.md) — Wave 6 marketing benchmark
   wave (harness + adapter + baselines + resume + README template) for
   v0.1.1
+- [Post-port hygiene](./post-port-hygiene-briefs/README.md) — executed
+  `#BL-017` source-level cleanup after Gate-5
 
 ## Shared File Conflict Table
 

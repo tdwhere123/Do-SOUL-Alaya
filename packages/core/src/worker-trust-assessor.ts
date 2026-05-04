@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  PhaseBEventType,
+  ObligationTrustNarrativeEventType,
   WorkerTrustAssessmentSchema,
   WorkerTrustAssessedPayloadSchema,
   type DelegatedWorkerRun,
@@ -118,7 +118,7 @@ function createTrustAssessedEvent(
   assessment: Readonly<WorkerTrustAssessment>
 ): Omit<EventLogEntry, "event_id" | "created_at"> {
   return {
-    event_type: PhaseBEventType.WORKER_TRUST_ASSESSED,
+    event_type: ObligationTrustNarrativeEventType.WORKER_TRUST_ASSESSED,
     entity_type: "worker_run",
     entity_id: workerRun.worker_run_id,
     workspace_id: workerRun.workspace_id,

@@ -27,9 +27,10 @@ which asserts Garden EventLog and health-journal evidence. The
 Inspector config-write path is `live-event-ready`, and trust-state
 delivery/usage durability is SQL-backed and verified.
 
-Open follow-up issues after this repair are `#BL-014` and the post-port
-hygiene sweep tracked by `#BL-016` / `#BL-017`; `#BL-020` is resolved
-by EventLog-backed startup replay.
+The follow-up issues that were open after this repair are now resolved:
+`#BL-014` through p5-system-review atomic fix-commit evidence,
+`#BL-016` folded into `#BL-017`, and `#BL-017` by the post-port hygiene
+wave. `#BL-020` is resolved by EventLog-backed startup replay.
 
 ## Card Groups
 

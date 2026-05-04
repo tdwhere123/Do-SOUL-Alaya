@@ -1,8 +1,8 @@
 import {
-  Phase0EventType,
+  WorkspaceRunEventType,
   StreamingEventType,
   MessageCompletedEventSchema,
-  parsePhase0EventPayload,
+  parseWorkspaceRunEventPayload,
   type ConversationMessage,
   type EnginePortMessage,
   type EventLogEntry
@@ -20,8 +20,8 @@ export function rebuildConversationMessages(events: readonly EventLogEntry[]): C
 
   for (const event of events) {
     switch (event.event_type) {
-      case Phase0EventType.RUN_MESSAGE_APPENDED: {
-        const payload = parsePhase0EventPayload(event.event_type, event.payload_json);
+      case WorkspaceRunEventType.RUN_MESSAGE_APPENDED: {
+        const payload = parseWorkspaceRunEventPayload(event.event_type, event.payload_json);
         const fileIds = payload.file_ids?.filter((id) => id.length > 0);
         messages.push({
           message_id: payload.message_id,
@@ -31,8 +31,8 @@ export function rebuildConversationMessages(events: readonly EventLogEntry[]): C
         });
         break;
       }
-      case Phase0EventType.ENGINE_RESPONSE_RECEIVED: {
-        const payload = parsePhase0EventPayload(event.event_type, event.payload_json);
+      case WorkspaceRunEventType.ENGINE_RESPONSE_RECEIVED: {
+        const payload = parseWorkspaceRunEventPayload(event.event_type, event.payload_json);
         messages.push({
           message_id: payload.message_id,
           role: "assistant",

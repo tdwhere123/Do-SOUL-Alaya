@@ -2,7 +2,7 @@ import {
   IsoDatetimeStringSchema,
   ObligationBlockedOperationSchema,
   ObligationViolationBlockedPayloadSchema,
-  PhaseBEventType,
+  ObligationTrustNarrativeEventType,
   type ObligationBlockedOperation,
   type DeferredObligation,
   type EventLogEntry
@@ -49,7 +49,7 @@ export class ConstraintProxy {
     });
 
     await this.deps.eventPublisher.publish({
-      event_type: PhaseBEventType.OBLIGATION_VIOLATION_BLOCKED,
+      event_type: ObligationTrustNarrativeEventType.OBLIGATION_VIOLATION_BLOCKED,
       entity_type: "run",
       entity_id: parsedRunId,
       workspace_id: parsedWorkspaceId,

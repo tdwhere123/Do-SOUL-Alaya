@@ -8,7 +8,7 @@ import {
   type DriftAlert,
   type DriftClassification,
   type GovernanceDriftLease,
-  Phase2BEventType,
+  SurfaceEventType,
   SoulSurfaceBindingCreatedPayloadSchema,
   SoulSurfaceBindingStateChangedPayloadSchema,
   SurfaceBindingSchema,
@@ -198,7 +198,7 @@ export class SurfaceBindingService {
     try {
       const occurredAt = this.now();
       const event: SurfaceBindingEventDraft = {
-        event_type: Phase2BEventType.SOUL_SURFACE_BINDING_STATE_CHANGED,
+        event_type: SurfaceEventType.SOUL_SURFACE_BINDING_STATE_CHANGED,
         entity_type: "surface_binding",
       entity_id: existing.binding_id,
       workspace_id: existing.binding.workspace_id,
@@ -260,7 +260,7 @@ export class SurfaceBindingService {
 
     const occurredAt = this.now();
     const events: SurfaceBindingEventDraft[] = detachTargets.map((target) => ({
-      event_type: Phase2BEventType.SOUL_SURFACE_BINDING_STATE_CHANGED,
+      event_type: SurfaceEventType.SOUL_SURFACE_BINDING_STATE_CHANGED,
       entity_type: "surface_binding",
       entity_id: target.binding_id,
       workspace_id: target.binding.workspace_id,
@@ -385,7 +385,7 @@ export class SurfaceBindingService {
     binding: Readonly<SurfaceBinding>
   ): SurfaceBindingEventDraft {
     return {
-      event_type: Phase2BEventType.SOUL_SURFACE_BINDING_CREATED,
+      event_type: SurfaceEventType.SOUL_SURFACE_BINDING_CREATED,
       entity_type: "surface_binding",
       entity_id: bindingId,
       workspace_id: binding.workspace_id,

@@ -3,7 +3,7 @@ import {
   EnforcementLevel,
   MemoryDimension,
   OriginTier,
-  Phase3BEventType,
+  GreenGovernanceEventType,
   PrecedenceBasis,
   ScopeClass,
   SoulSessionOverrideAppliedPayloadSchema,
@@ -222,7 +222,7 @@ export class SessionOverrideRemediation {
   ): Promise<void> {
     const revision = await getNextRevision(this.dependencies.eventLogRepo, "session_override", override.runtime_id);
     await this.dependencies.eventLogRepo.append({
-      event_type: Phase3BEventType.SOUL_SESSION_OVERRIDE_PROMOTED,
+      event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_PROMOTED,
       entity_type: "session_override",
       entity_id: override.runtime_id,
       workspace_id: workspaceId,
@@ -241,7 +241,7 @@ export class SessionOverrideRemediation {
 
   private async hasPromotionAudit(overrideId: string): Promise<boolean> {
     const events = await this.dependencies.eventLogRepo.queryByEntity("session_override", overrideId);
-    return events.some((event) => event.event_type === Phase3BEventType.SOUL_SESSION_OVERRIDE_PROMOTED);
+    return events.some((event) => event.event_type === GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_PROMOTED);
   }
 
   private async resolvePromotionDimension(
@@ -291,7 +291,7 @@ export class SessionOverrideRemediation {
     const events = await this.dependencies.eventLogRepo.queryByWorkspace(workspaceId);
     const matchingRuns = new Set(
       events.flatMap((event) => {
-        if (event.event_type !== Phase3BEventType.SOUL_SESSION_OVERRIDE_APPLIED || event.run_id === null) {
+        if (event.event_type !== GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED || event.run_id === null) {
           return [];
         }
 

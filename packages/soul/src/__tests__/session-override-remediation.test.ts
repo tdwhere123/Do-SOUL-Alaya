@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { MemoryDimension, Phase3BEventType, RetentionPolicy, type EventLogEntry, type SessionOverride } from "@do-soul/alaya-protocol";
+import { MemoryDimension, GreenGovernanceEventType, RetentionPolicy, type EventLogEntry, type SessionOverride } from "@do-soul/alaya-protocol";
 import { SessionOverrideRemediation } from "../garden/session-override-remediation.js";
 
 describe("SessionOverrideRemediation", () => {
@@ -23,7 +23,7 @@ describe("SessionOverrideRemediation", () => {
     expect(deps.claimService.create).not.toHaveBeenCalled();
     expect(deps.eventLogRepo.append).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase3BEventType.SOUL_SESSION_OVERRIDE_PROMOTED,
+        event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_PROMOTED,
         payload_json: expect.objectContaining({
           promotion_outcome: "durable",
           dimension: MemoryDimension.PREFERENCE
@@ -104,7 +104,7 @@ describe("SessionOverrideRemediation", () => {
     expect(deps.memoryService.create).not.toHaveBeenCalled();
     expect(deps.eventLogRepo.append).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase3BEventType.SOUL_SESSION_OVERRIDE_PROMOTED,
+        event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_PROMOTED,
         payload_json: expect.objectContaining({
           promotion_outcome: "not_promoted"
         })
@@ -128,7 +128,7 @@ describe("SessionOverrideRemediation", () => {
     expect(deps.memoryService.create).not.toHaveBeenCalled();
     expect(deps.eventLogRepo.append).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: Phase3BEventType.SOUL_SESSION_OVERRIDE_PROMOTED,
+        event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_PROMOTED,
         payload_json: expect.objectContaining({
           promotion_outcome: "not_promoted"
         })
@@ -230,7 +230,7 @@ describe("SessionOverrideRemediation", () => {
                 {
                   event_id: "event-existing",
                   created_at: "2026-03-24T00:00:00.000Z",
-                  event_type: Phase3BEventType.SOUL_SESSION_OVERRIDE_PROMOTED,
+                  event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_PROMOTED,
                   entity_type: "session_override",
                   entity_id: "override-complete",
                   workspace_id: "workspace-1",
@@ -303,7 +303,7 @@ describe("SessionOverrideRemediation", () => {
         {
           event_id: "event-repeat-1",
           created_at: "2026-03-24T00:00:00.000Z",
-          event_type: Phase3BEventType.SOUL_SESSION_OVERRIDE_APPLIED,
+          event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
           entity_type: "session_override",
           entity_id: "override-repeat-1",
           workspace_id: "workspace-1",
@@ -324,7 +324,7 @@ describe("SessionOverrideRemediation", () => {
         {
           event_id: "event-repeat-2",
           created_at: "2026-03-24T00:05:00.000Z",
-          event_type: Phase3BEventType.SOUL_SESSION_OVERRIDE_APPLIED,
+          event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
           entity_type: "session_override",
           entity_id: "override-repeat-2",
           workspace_id: "workspace-1",
@@ -373,7 +373,7 @@ describe("SessionOverrideRemediation", () => {
         {
           event_id: "event-repeat-1",
           created_at: "2026-03-24T00:00:00.000Z",
-          event_type: Phase3BEventType.SOUL_SESSION_OVERRIDE_APPLIED,
+          event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
           entity_type: "session_override",
           entity_id: "override-repeat-1",
           workspace_id: "workspace-1",
@@ -394,7 +394,7 @@ describe("SessionOverrideRemediation", () => {
         {
           event_id: "event-repeat-malformed",
           created_at: "2026-03-24T00:05:00.000Z",
-          event_type: Phase3BEventType.SOUL_SESSION_OVERRIDE_APPLIED,
+          event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
           entity_type: "session_override",
           entity_id: "override-repeat-malformed",
           workspace_id: "workspace-1",

@@ -3,10 +3,10 @@ import {
   DYNAMICS_CONSTANTS,
   EventTypeSchema,
   MemoryDimension,
-  Phase05EventType,
-  Phase0EventType,
-  Phase1BEventType,
-  Phase1BEventTypeSchema,
+  SignalEventType,
+  WorkspaceRunEventType,
+  MemoryGovernanceEventType,
+  MemoryGovernanceEventTypeSchema,
   ScopeClass,
   SoulEmitCandidateSignalRequestSchema,
   SoulEmitCandidateSignalResponseSchema,
@@ -25,7 +25,7 @@ import {
   TransitionCausedBy,
   TransitionCausedBySchema,
   TransitionRecordSchema,
-  parsePhase1BEventPayload
+  parseMemoryGovernanceEventPayload
 } from "../index.js";
 
 const validTimestamp = "2026-03-20T00:00:00.000Z";
@@ -44,7 +44,7 @@ const transitionBase = {
 } as const;
 
 function transitionPayloadFor(eventType: string): Record<string, unknown> {
-  if (eventType === Phase1BEventType.SOUL_MEMORY_RETENTION_UPDATED) {
+  if (eventType === MemoryGovernanceEventType.SOUL_MEMORY_RETENTION_UPDATED) {
     return {
       ...transitionBase,
       retention_score: 0.88
@@ -279,11 +279,11 @@ describe("MCP tool request/response schemas", () => {
 describe("EventType and TransitionRecord", () => {
   it("includes Phase 0 + Phase 0.5 + Phase 1B+ event types", () => {
     const eventTypes = [
-      Phase0EventType.RUN_CREATED,
-      Phase05EventType.SOUL_SIGNAL_EMITTED,
-      Phase1BEventType.SOUL_EVIDENCE_CREATED,
-      Phase1BEventType.SOUL_MEMORY_STATE_CHANGED,
-      Phase1BEventType.SOUL_REVIEW_COMPLETED
+      WorkspaceRunEventType.RUN_CREATED,
+      SignalEventType.SOUL_SIGNAL_EMITTED,
+      MemoryGovernanceEventType.SOUL_EVIDENCE_CREATED,
+      MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
+      MemoryGovernanceEventType.SOUL_REVIEW_COMPLETED
     ] as const;
 
     for (const eventType of eventTypes) {
@@ -306,26 +306,26 @@ describe("EventType and TransitionRecord", () => {
 
   it("requires TransitionRecord fields for transition events", () => {
     const transitionEventTypes = [
-      Phase1BEventType.SOUL_EVIDENCE_HEALTH_CHANGED,
-      Phase1BEventType.SOUL_MEMORY_STATE_CHANGED,
-      Phase1BEventType.SOUL_MEMORY_RETENTION_UPDATED,
-      Phase1BEventType.SOUL_MEMORY_MANIFESTATION_CHANGED,
-      Phase1BEventType.SOUL_SYNTHESIS_PROMOTED,
-      Phase1BEventType.SOUL_CLAIM_LIFECYCLE_CHANGED,
-      Phase1BEventType.SOUL_CLAIM_WON,
-      Phase1BEventType.SOUL_CLAIM_SUPERSEDED,
-      Phase1BEventType.SOUL_PROPOSAL_RESOLVED,
-      Phase1BEventType.SOUL_REVIEW_COMPLETED
+      MemoryGovernanceEventType.SOUL_EVIDENCE_HEALTH_CHANGED,
+      MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
+      MemoryGovernanceEventType.SOUL_MEMORY_RETENTION_UPDATED,
+      MemoryGovernanceEventType.SOUL_MEMORY_MANIFESTATION_CHANGED,
+      MemoryGovernanceEventType.SOUL_SYNTHESIS_PROMOTED,
+      MemoryGovernanceEventType.SOUL_CLAIM_LIFECYCLE_CHANGED,
+      MemoryGovernanceEventType.SOUL_CLAIM_WON,
+      MemoryGovernanceEventType.SOUL_CLAIM_SUPERSEDED,
+      MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED,
+      MemoryGovernanceEventType.SOUL_REVIEW_COMPLETED
     ] as const;
 
     for (const eventType of transitionEventTypes) {
       const validPayload = transitionPayloadFor(eventType);
-      expect(parsePhase1BEventPayload(eventType, validPayload)).toEqual(validPayload);
+      expect(parseMemoryGovernanceEventPayload(eventType, validPayload)).toEqual(validPayload);
 
       const missingFromState = { ...validPayload };
       delete missingFromState.from_state;
 
-      expect(() => parsePhase1BEventPayload(eventType, missingFromState)).toThrow();
+      expect(() => parseMemoryGovernanceEventPayload(eventType, missingFromState)).toThrow();
     }
   });
 
@@ -335,7 +335,7 @@ describe("EventType and TransitionRecord", () => {
     expect(TransitionCausedBySchema.options).toEqual(expectedValues);
   });
 
-  it("keeps Phase1BEventType enum complete and closed", () => {
+  it("keeps MemoryGovernanceEventType enum complete and closed", () => {
     const expectedValues = [
       "soul.evidence.created",
       "soul.evidence.health_changed",
@@ -358,11 +358,11 @@ describe("EventType and TransitionRecord", () => {
       "soul.review.created",
       "soul.review.completed"
     ];
-    expect(Object.values(Phase1BEventType)).toEqual(expectedValues);
-    expect(Phase1BEventTypeSchema.options).toEqual(expectedValues);
+    expect(Object.values(MemoryGovernanceEventType)).toEqual(expectedValues);
+    expect(MemoryGovernanceEventTypeSchema.options).toEqual(expectedValues);
   });
 
   it("keeps Phase 0 event types backward-compatible in EventType union", () => {
-    expect(EventTypeSchema.parse(Phase0EventType.WORKSPACE_CREATED)).toBe(Phase0EventType.WORKSPACE_CREATED);
+    expect(EventTypeSchema.parse(WorkspaceRunEventType.WORKSPACE_CREATED)).toBe(WorkspaceRunEventType.WORKSPACE_CREATED);
   });
 });

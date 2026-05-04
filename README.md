@@ -529,7 +529,7 @@ Do-SOUL Alaya/
 > track to be deferred. The release framing returns when the cards
 > below close — not before.
 
-### P1. Closing v0.1 — six cards in flight
+### P1. Closing v0.1 — closeout cards
 
 | Card | What it closes | Backlog |
 |---|---|---|
@@ -538,12 +538,12 @@ Do-SOUL Alaya/
 | **A3** Path-axis plasticity loop | New `PathPlasticityService` consumes `MEMORY_USAGE_REPORTED` → emits Phase-C events → `RecallService` factors plasticity into score | new card |
 | **B1** `pi-mono` integration | `packages/engine-gateway` becomes a `pi-mono` client; synthesis / proposal scoring / reflection route through one clean provider boundary | `#BL-008` |
 | **B2** OS keychain support | `keychain:<service>:<account>` secret-ref syntax; macOS Keychain + Linux libsecret adapters (Windows mocked) | `#BL-009` |
-| **C1** File-shape hygiene wave | Rename `phase-*.ts` → domain-aligned files; split oversized files; `ts-prune` cleanup; refresh `code-map.md` | `#BL-017` |
+| **C1** File-shape hygiene wave | Landed: protocol `phase-*.ts` files/symbols now use domain names; oversized files are split; `knip` unused-code checking is pinned; `code-map.md` is refreshed | `#BL-017` closed |
 
-The work runs in an isolated `v0.1-closeout` worktree with per-card
-review + fix-loop discipline. `main` only sees the final merge +
-the `v0.1.0` tag when every card's exit criterion holds and the
-integrated multi-lens review reports zero Blocking / Important.
+Remaining closeout work runs in isolated worktrees with per-card review
++ fix-loop discipline. `main` only sees a card merge when that card's
+exit criterion holds and the integrated review reports zero Blocking /
+Important.
 
 ### P2. After v0.1 — toward a memory-centric agent
 

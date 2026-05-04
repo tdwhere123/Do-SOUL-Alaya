@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  Phase1BEventType,
+  MemoryGovernanceEventType,
   ProposalResolutionState,
   type EventLogEntry,
   type Proposal
@@ -110,8 +110,8 @@ describe("mcp memory governance", () => {
     });
     expect(order.slice(0, 3)).toEqual([
       "repo:createProposalWithEvents",
-      `event:${Phase1BEventType.SOUL_PROPOSAL_CREATED}`,
-      `notify:${Phase1BEventType.SOUL_PROPOSAL_CREATED}`
+      `event:${MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED}`,
+      `notify:${MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED}`
     ]);
     expect(proposals.get(created.proposal_id)?.proposal.resolution_state).toBe(ProposalResolutionState.PENDING);
 
@@ -129,14 +129,14 @@ describe("mcp memory governance", () => {
       resolution_state: ProposalResolutionState.ACCEPTED
     });
     expect(events.map((event) => event.event_type)).toEqual([
-      Phase1BEventType.SOUL_PROPOSAL_CREATED,
-      Phase1BEventType.SOUL_REVIEW_CREATED,
-      Phase1BEventType.SOUL_REVIEW_COMPLETED,
-      Phase1BEventType.SOUL_PROPOSAL_RESOLVED
+      MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED,
+      MemoryGovernanceEventType.SOUL_REVIEW_CREATED,
+      MemoryGovernanceEventType.SOUL_REVIEW_COMPLETED,
+      MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED
     ]);
     expect(proposals.get(created.proposal_id)?.proposal.resolution_state).toBe(ProposalResolutionState.ACCEPTED);
     expect(order.indexOf("repo:updatePendingResolutionWithEvents")).toBeLessThan(
-      order.indexOf(`notify:${Phase1BEventType.SOUL_REVIEW_CREATED}`)
+      order.indexOf(`notify:${MemoryGovernanceEventType.SOUL_REVIEW_CREATED}`)
     );
   });
 
@@ -244,9 +244,9 @@ describe("mcp memory governance", () => {
       reason: { code: "VALIDATION" }
     });
     expect(events.map((event) => event.event_type)).toEqual([
-      Phase1BEventType.SOUL_REVIEW_CREATED,
-      Phase1BEventType.SOUL_REVIEW_COMPLETED,
-      Phase1BEventType.SOUL_PROPOSAL_RESOLVED
+      MemoryGovernanceEventType.SOUL_REVIEW_CREATED,
+      MemoryGovernanceEventType.SOUL_REVIEW_COMPLETED,
+      MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED
     ]);
     expect(notifyEntry).toHaveBeenCalledTimes(3);
     expect(storedProposal.resolution_state).toBe(ProposalResolutionState.ACCEPTED);

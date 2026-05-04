@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  PhaseA1EventType,
+  ToolWorkerEventType,
   type DelegatedWorkerRun,
   type EventLogEntry,
   type WorkerRunState,
@@ -132,7 +132,7 @@ describe("WorkerRunLifecycleService", () => {
     expect(getCurrent()?.state).toBe("active");
     expect(publishedEvents).toHaveLength(1);
     expect(publishedEvents[0]).toMatchObject({
-      event_type: PhaseA1EventType.WORKER_STATE_CHANGED,
+      event_type: ToolWorkerEventType.WORKER_STATE_CHANGED,
       entity_type: "worker_run",
       entity_id: "worker_1",
       workspace_id: "ws_1",

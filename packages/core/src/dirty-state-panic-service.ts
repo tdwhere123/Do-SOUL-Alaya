@@ -4,7 +4,7 @@ import {
   DirtyStateDossierSchema,
   DirtyStatePanicPayloadSchema,
   DirtyStatePanicTriggerSchema,
-  PhaseBEventType,
+  ObligationTrustNarrativeEventType,
   type AffectedDataScopeEntry,
   type DelegatedWorkerRun,
   type DirtyStateDossier,
@@ -122,7 +122,7 @@ export class DirtyStatePanicService {
     });
 
     return {
-      event_type: PhaseBEventType.DIRTY_STATE_PANIC,
+      event_type: ObligationTrustNarrativeEventType.DIRTY_STATE_PANIC,
       entity_type: "worker_run",
       entity_id: dossier.worker_run_id,
       workspace_id: dossier.workspace_id,

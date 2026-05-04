@@ -1,4 +1,4 @@
-import { Phase0EventSchema, type EventLogEntry, type Phase0Event } from "@do-soul/alaya-protocol";
+import { WorkspaceRunEventSchema, type EventLogEntry, type WorkspaceRunEvent } from "@do-soul/alaya-protocol";
 
 export interface EventPublisherEventLogRepoPort {
   append(event: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
@@ -6,12 +6,12 @@ export interface EventPublisherEventLogRepoPort {
 }
 
 export interface RuntimeNotifier {
-  notify(runId: string, event: Phase0Event): void | Promise<void>;
+  notify(runId: string, event: WorkspaceRunEvent): void | Promise<void>;
   notifyEntry(entry: EventLogEntry): void | Promise<void>;
 }
 
 export interface RunHotStateApplierPort {
-  apply(event: Phase0Event): void | Promise<void>;
+  apply(event: WorkspaceRunEvent): void | Promise<void>;
 }
 
 export interface EventPublisherDependencies {
@@ -124,7 +124,7 @@ export class EventPublisher {
   }
 
   private async propagate(entry: EventLogEntry): Promise<void> {
-    const phase0Candidate = Phase0EventSchema.safeParse({
+    const workspaceRunCandidate = WorkspaceRunEventSchema.safeParse({
       event_id: entry.event_id,
       event_type: entry.event_type,
       entity_type: entry.entity_type,
@@ -137,8 +137,8 @@ export class EventPublisher {
       payload: entry.payload_json
     });
 
-    if (phase0Candidate.success) {
-      await this.dependencies.runHotStateService.apply(phase0Candidate.data);
+    if (workspaceRunCandidate.success) {
+      await this.dependencies.runHotStateService.apply(workspaceRunCandidate.data);
     }
 
     // notifyEntry handles both run-scoped and workspace-scoped in-process listeners.
