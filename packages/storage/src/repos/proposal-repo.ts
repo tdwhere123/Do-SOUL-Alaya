@@ -75,10 +75,17 @@ export interface ProposalRepo {
     options?: FindPendingSummariesOptions
   ): Promise<readonly Readonly<PendingProposalSummary>[]>;
   findPendingByRunId(runId: string): Promise<Readonly<Proposal> | null>;
+  // A1 fix-loop (finding-5): reviewerIdentity is optional at the repo
+  // boundary so legacy callers (claim-promotion flows, fixtures) keep
+  // compiling, but every code path that should write
+  // resolution_state ∈ ('accepted','rejected') now passes it. The
+  // SqliteProposalRepo writes the column when present and leaves it
+  // untouched when omitted.
   updateResolution(
     proposalId: string,
     state: ProposalResolutionState,
-    updatedAt: string
+    updatedAt: string,
+    reviewerIdentity?: string
   ): Promise<Readonly<Proposal>>;
   updatePendingResolution(
     proposalId: string,
@@ -148,6 +155,7 @@ export class SqliteProposalRepo implements ProposalRepo {
   private readonly findPendingStatement;
   private readonly findPendingByRunIdStatement;
   private readonly updateResolutionStatement;
+  private readonly updateResolutionWithIdentityStatement;
   private readonly updatePendingResolutionStatement;
   private readonly updatePendingResolutionWithIdentityStatement;
   private readonly eventLogWriter;
@@ -211,6 +219,14 @@ export class SqliteProposalRepo implements ProposalRepo {
     this.updateResolutionStatement = db.connection.prepare(`
       UPDATE proposals
       SET resolution_state = ?, last_updated_at = ?
+      WHERE proposal_id = ?
+    `);
+
+    // A1 fix-loop (finding-5): companion statement for the legacy
+    // updateResolution path that also persists reviewer_identity.
+    this.updateResolutionWithIdentityStatement = db.connection.prepare(`
+      UPDATE proposals
+      SET resolution_state = ?, last_updated_at = ?, reviewer_identity = ?
       WHERE proposal_id = ?
     `);
 
@@ -448,14 +464,31 @@ export class SqliteProposalRepo implements ProposalRepo {
   public async updateResolution(
     proposalId: string,
     state: ProposalResolutionState,
-    updatedAt: string
+    updatedAt: string,
+    reviewerIdentity?: string
   ): Promise<Readonly<Proposal>> {
     const parsedProposalId = parseProposalId(proposalId);
     const parsedState = parseProposalResolutionState(state);
     const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+    // A1 fix-loop (finding-5): persist reviewer_identity through the
+    // legacy update path. Empty/whitespace identities are rejected;
+    // when omitted, the column is left untouched (back-compat for
+    // claim-promotion / auto-applied bankruptcy paths).
+    const parsedReviewerIdentity =
+      reviewerIdentity === undefined
+        ? undefined
+        : parseNonEmptyString(reviewerIdentity, "reviewer_identity");
 
     try {
-      const result = this.updateResolutionStatement.run(parsedState, parsedUpdatedAt, parsedProposalId);
+      const result =
+        parsedReviewerIdentity === undefined
+          ? this.updateResolutionStatement.run(parsedState, parsedUpdatedAt, parsedProposalId)
+          : this.updateResolutionWithIdentityStatement.run(
+              parsedState,
+              parsedUpdatedAt,
+              parsedReviewerIdentity,
+              parsedProposalId
+            );
 
       if (result.changes === 0) {
         throw new StorageError("NOT_FOUND", `Proposal ${parsedProposalId} was not found.`);
