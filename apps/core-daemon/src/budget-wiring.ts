@@ -49,7 +49,14 @@ export function createBudgetProposalPort(
       return await params.proposalRepo.create({
         proposal,
         workspace_id: input.workspaceId,
-        run_id: input.runId
+        run_id: input.runId,
+        // A1 fix-loop (finding-3): bankruptcy-derived proposals target
+        // a bankruptcy_dossier, not a memory_entry. Without this
+        // override the Inspector pending queue would mislabel the row
+        // as `memory_entry → <id>`, risking a wrong accept/reject
+        // decision.
+        target_object_kind: "bankruptcy_dossier",
+        proposed_change_summary: `Bankruptcy resolution: ${input.dossierRef}`
       });
     },
     update: async (

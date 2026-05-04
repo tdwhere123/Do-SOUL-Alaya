@@ -141,7 +141,7 @@ rules and the Package Dependency Direction live in
 
 ## Commands
 
-The full CLI surface (11 verbs) and the Quickstart live in `README.md`
+The full CLI surface (12 verbs) and the Quickstart live in `README.md`
 (§CLI commands, §Quickstart). Outside of those, agent contributors only
 need a few extras:
 

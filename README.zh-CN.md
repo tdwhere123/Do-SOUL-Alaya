@@ -288,11 +288,11 @@ EventLog 接线）。
 graph TD
     subgraph Surfaces["对外面"]
         MCPS["MCP stdio<br/>(alaya mcp stdio)"]
-        CLIS["alaya CLI<br/>(11 个动词 · MCP 兜底)"]
+        CLIS["alaya CLI<br/>(12 个动词 · MCP 兜底)"]
     end
 
     subgraph Daemon["apps/core-daemon —— 接线 + 派发"]
-        TH["MCP tool handler<br/>(8 个 soul.* 工具)"]
+        TH["MCP tool handler<br/>(9 个 soul.* 工具)"]
         BG["BackgroundServiceManager<br/>(Garden runtime · 即发即忘)"]
         NOTI["InProcessRuntimeNotifier"]
     end
@@ -360,7 +360,7 @@ CI 测试强制的规则：
 两个对外面，一套 runtime。Agent 走 MCP attach；人走 CLI 脚本。
 两个面都通过同一个 daemon、同一个真相边界。
 
-### MCP 工具（8 个 `soul.*`）
+### MCP 工具（9 个 `soul.*`）
 
 全部 schema-bounded；`maxLength`、`maxItems`、
 `additionalProperties: false` 都是从 zod 请求 schema 派生的，在
@@ -374,13 +374,14 @@ CI 测试强制的规则：
 | `soul.emit_candidate_signal` | 感知 | 是（proposal-side） |
 | `soul.propose_memory_update` | 治理入口 | 是（proposal-side） |
 | `soul.review_memory_proposal` | 治理裁决 | 是 |
+| `soul.list_pending_proposals` | 治理分诊（HITL 队列） | 否 |
 | `soul.apply_override` | Runtime Control（session 局部，永远不进 durable） | 是（session-scope） |
 | `soul.report_context_usage` | 回执 | 是（audit） |
 
 `alaya tools list --json` 和 `alaya tools call <tool> '<json>' --json`
 是同一套接口的 CLI 兜底——用来在 agent runtime 之外做脚本化。
 
-### CLI 命令（11 个动词）
+### CLI 命令（12 个动词）
 
 | 命令 | 用途 | 修改？ | 审计日志？ |
 |---|---|---|---|
@@ -393,6 +394,7 @@ CI 测试强制的规则：
 | `alaya inspect` | 在 loopback 上打开 Memory Inspector SPA（memory-tooling，*不是* agent surface） | 否 | 否 |
 | `alaya tools list` | 列 MCP 工具目录 | 否 | 否 |
 | `alaya tools call <tool> '<json>'` | 从 CLI 调一个工具 | 视情况 | 视情况 |
+| `alaya review pending\|accept\|reject` | 查看并裁决 HITL proposal 队列（Memory Inspector 的 CLI 兜底） | accept / reject：是 | 是 |
 | `alaya backup --output <path>` | 可携带备份包（已签名） | 否 | 是 |
 | `alaya export --output <path>` / `import --bundle <path>` | 可携带导出 / 导入 | 导出否 / 导入是 | 是 |
 | `alaya mcp stdio` | 跑 daemon 的 MCP stdio 服务（attach 接的就是这个） | 否 | 否 |
@@ -438,7 +440,7 @@ pnpm alaya attach claude-code      # preview，确认，再 apply
 
 # 8) 第一次 tool call —— 端到端验证 MCP 接口
 pnpm alaya tools list --json | jq '.tools | length'
-#   期望：8
+#   期望：9
 
 pnpm alaya tools call soul.recall \
   '{"query":"hello","scope_class":null,"dimension":null,"domain_tags":null,"max_results":5}' \
@@ -446,7 +448,7 @@ pnpm alaya tools call soul.recall \
 #   期望：{ "delivery_id": "...", "results": [...], "total_count": <int> }
 ```
 
-走完第 7 步，agent 下次启动就会把 Alaya 当 MCP server 看，8 个
+走完第 7 步，agent 下次启动就会把 Alaya 当 MCP server 看，9 个
 `soul.*` 工具在 agent 内部就可以调了。
 
 **某一步失败时：**

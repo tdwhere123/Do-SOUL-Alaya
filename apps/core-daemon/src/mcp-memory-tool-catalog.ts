@@ -6,6 +6,7 @@ export const ALAYA_MEMORY_TOOL_NAMES = Object.freeze([
   "soul.emit_candidate_signal",
   "soul.propose_memory_update",
   "soul.review_memory_proposal",
+  "soul.list_pending_proposals",
   "soul.apply_override",
   "soul.explore_graph",
   "soul.report_context_usage"
@@ -42,7 +43,9 @@ const descriptionByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.
   "soul.propose_memory_update":
     "Submit a proposed durable memory update for governance review. This does not directly write durable memory.",
   "soul.review_memory_proposal":
-    "Accept or reject a pending memory proposal while preserving an explicit governance trace.",
+    "Accept or reject a pending memory proposal while preserving an explicit governance trace. Requires reviewer_identity so the review record names who approved or rejected the change.",
+  "soul.list_pending_proposals":
+    "List proposals in the pending state for a workspace. Read-only; use before soul.review_memory_proposal so the agent can present a current queue to the human reviewer.",
   "soul.apply_override":
     "Apply an immediate session-only correction when the user explicitly says the current assumption/tool/behavior is wrong and should be replaced for this run.",
   "soul.explore_graph":
@@ -72,6 +75,7 @@ const annotationByToolName: Record<AlayaMemoryToolName, AlayaMemoryToolDefinitio
     "soul.emit_candidate_signal": writeAnnotation,
     "soul.propose_memory_update": writeAnnotation,
     "soul.review_memory_proposal": writeAnnotation,
+    "soul.list_pending_proposals": readOnlyAnnotation,
     "soul.apply_override": writeAnnotation,
     "soul.explore_graph": readOnlyAnnotation,
     "soul.report_context_usage": writeAnnotation

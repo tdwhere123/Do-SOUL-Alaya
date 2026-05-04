@@ -65,6 +65,7 @@ describe("profile mutation", () => {
       "soul.emit_candidate_signal",
       "soul.propose_memory_update",
       "soul.review_memory_proposal",
+      "soul.list_pending_proposals",
       "soul.apply_override",
       "soul.explore_graph",
       "soul.report_context_usage"

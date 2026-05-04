@@ -41,14 +41,28 @@ export interface ProposalServiceProposalRepoPort {
     readonly proposal: Proposal;
     readonly workspace_id: string;
     readonly run_id: string | null;
+    // A1 fix-loop (finding-3): synthesis-derived proposals must label
+    // the target object kind correctly; the repo defaults to
+    // 'memory_entry' for legacy callers that omit it. The proposed
+    // change summary surfaces in the Inspector queue without having to
+    // join event_log payloads.
+    readonly target_object_kind?: string;
+    readonly proposed_change_summary?: string;
   }): Promise<Readonly<Proposal>>;
   findById(proposalId: string): Promise<Readonly<Proposal> | null>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<Proposal>[]>;
   findPending(workspaceId: string): Promise<readonly Readonly<Proposal>[]>;
+  // A1 fix-loop (finding-5): legacy review path persists the
+  // reviewer_identity on the proposals row so audit replay can tie the
+  // resolution back to the human (or principal) who decided. The arg
+  // is required at the service layer (parseReviewAction enforces
+  // non-empty reviewed_by); the port accepts an optional 4th arg so
+  // existing test fixtures need only opt in where they care.
   updateResolution(
     proposalId: string,
     state: ProposalResolutionStateType,
-    updatedAt: string
+    updatedAt: string,
+    reviewerIdentity?: string
   ): Promise<Readonly<Proposal>>;
 }
 
@@ -206,7 +220,13 @@ export class ProposalService {
     const created = await this.dependencies.proposalRepo.create({
       proposal,
       workspace_id: synthesis.workspace_id,
-      run_id: synthesis.run_id
+      run_id: synthesis.run_id,
+      // A1 fix-loop (finding-3): synthesis-promotion proposals target a
+      // synthesis_capsule, not a memory_entry. The Inspector pending
+      // queue now shows the correct kind label without an event_log
+      // join.
+      target_object_kind: "synthesis_capsule",
+      proposed_change_summary: synthesis.summary
     });
 
     // notifyEntry handles null run_id correctly (workspace-only notification).
@@ -302,10 +322,17 @@ export class ProposalService {
       })
     });
 
+    // A1 fix-loop (finding-5): the legacy synthesis-promotion review
+    // path now persists the reviewer_identity on the proposals row so
+    // audit replay matches the new MCP review path. Without this
+    // backfill, a future caller of proposalService.review would land a
+    // resolved row with reviewer_identity = NULL, breaking the "every
+    // accepted/rejected row names a reviewer" invariant.
     const updated = await this.dependencies.proposalRepo.updateResolution(
       context.proposal.proposal_id,
       resolutionState,
-      parsedAction.reviewed_at
+      parsedAction.reviewed_at,
+      parsedAction.reviewed_by
     );
 
     // Notify all deferred events in EventLog insertion order:

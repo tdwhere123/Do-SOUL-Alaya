@@ -316,11 +316,11 @@ truth boundary from leaking.
 graph TD
     subgraph Surfaces["Agent-facing surfaces"]
         MCPS["MCP stdio<br/>(alaya mcp stdio)"]
-        CLIS["alaya CLI<br/>(11 verbs · MCP fallback)"]
+        CLIS["alaya CLI<br/>(12 verbs · MCP fallback)"]
     end
 
     subgraph Daemon["apps/core-daemon — wiring + dispatch"]
-        TH["MCP tool handler<br/>(8 soul.* tools)"]
+        TH["MCP tool handler<br/>(9 soul.* tools)"]
         BG["BackgroundServiceManager<br/>(Garden runtime · fire-and-forget)"]
         NOTI["InProcessRuntimeNotifier"]
     end
@@ -390,7 +390,7 @@ Two surfaces over one runtime. The agent attaches via MCP; humans
 script via CLI. Both go through the same daemon and the same truth
 boundary.
 
-### MCP tools (8 `soul.*`)
+### MCP tools (9 `soul.*`)
 
 All schema-bounded; `maxLength`, `maxItems`, `additionalProperties:
 false` are derived from the zod request schemas and enforced both
@@ -404,6 +404,7 @@ at parse time and in the published catalog.
 | `soul.emit_candidate_signal` | Perception | yes (proposal-side) |
 | `soul.propose_memory_update` | Governance entry | yes (proposal-side) |
 | `soul.review_memory_proposal` | Governance resolution | yes |
+| `soul.list_pending_proposals` | Governance triage (HITL queue) | no |
 | `soul.apply_override` | Runtime Control (session-scoped, never durable) | yes (session-scope) |
 | `soul.report_context_usage` | Receipt | yes (audit) |
 
@@ -411,7 +412,7 @@ at parse time and in the published catalog.
 are the CLI fallback for the same surface — useful for scripting
 outside the agent runtime.
 
-### CLI commands (11 verbs)
+### CLI commands (12 verbs)
 
 | Command | Purpose | Mutating? | Audit log? |
 |---|---|---|---|
@@ -424,6 +425,7 @@ outside the agent runtime.
 | `alaya inspect` | Open the Memory Inspector SPA on loopback (memory-tooling, *not* an agent surface) | no | no |
 | `alaya tools list` | List the MCP tool catalog | no | no |
 | `alaya tools call <tool> '<json>'` | Invoke a tool from CLI | varies | varies |
+| `alaya review pending\|accept\|reject` | Inspect and resolve the HITL proposal queue (CLI fallback for the Memory Inspector) | accept / reject: yes | yes |
 | `alaya backup --output <path>` | Portable backup bundle (signed) | no | yes |
 | `alaya export --output <path>` / `import --bundle <path>` | Portable export / restore | export: no, import: yes | yes |
 | `alaya mcp stdio` | Run the daemon's MCP stdio server (what `attach` wires up) | no | no |
@@ -472,7 +474,7 @@ pnpm alaya attach claude-code      # preview, confirm, then apply
 
 # 8) First tool call — verify the MCP surface end-to-end
 pnpm alaya tools list --json | jq '.tools | length'
-#   Expect: 8
+#   Expect: 9
 
 pnpm alaya tools call soul.recall \
   '{"query":"hello","scope_class":null,"dimension":null,"domain_tags":null,"max_results":5}' \
@@ -481,7 +483,7 @@ pnpm alaya tools call soul.recall \
 ```
 
 After step 7 your agent sees Alaya as an MCP server on its next
-start, and the 8 `soul.*` tools become callable from inside the
+start, and the 9 `soul.*` tools become callable from inside the
 agent.
 
 **If a step fails:**

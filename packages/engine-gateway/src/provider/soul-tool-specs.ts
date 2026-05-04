@@ -3,6 +3,7 @@ import {
   SoulApplyOverrideRequestSchema,
   SoulEmitCandidateSignalRequestSchema,
   SoulExploreGraphRequestSchema,
+  SoulListPendingProposalsRequestSchema,
   SoulMemorySearchRequestSchema,
   SoulOpenPointerRequestSchema,
   SoulProposeMemoryUpdateRequestSchema,
@@ -50,8 +51,14 @@ export const soulToolDefs: readonly SoulToolSpec[] = [
   {
     name: "soul.review_memory_proposal",
     description:
-      "Accept or reject a pending memory proposal while preserving an explicit governance trace.",
+      "Accept or reject a pending memory proposal while preserving an explicit governance trace. Requires reviewer_identity so the review record names who approved or rejected the change.",
     parametersSchema: SoulReviewMemoryProposalRequestSchema
+  },
+  {
+    name: "soul.list_pending_proposals",
+    description:
+      "List proposals in the pending state for a workspace. Read-only; use before soul.review_memory_proposal so the agent can present a current queue to the human reviewer.",
+    parametersSchema: SoulListPendingProposalsRequestSchema
   },
   {
     name: "soul.apply_override",

@@ -737,6 +737,9 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     synthesisService,
     claimService,
     proposalService,
+    // A1 (HITL daemon backbone) — Inspector loopback HTTP routes need
+    // the same MCP handler that attached agents call.
+    mcpMemoryToolHandler,
     fileRepo,
     runtimeNotifier,
     topologyAuditService,

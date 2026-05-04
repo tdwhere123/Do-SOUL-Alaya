@@ -18,7 +18,11 @@ const expectedFirstMigration = "001-initial.sql";
 const expectedLastMigration = "055-global-memory-recall-cache-global-object-index.sql";
 const expectedAlayaOnlyMigrations = [
   "056-trust-state-persistence.sql",
-  "057-event-log-orphan-radar.sql"
+  "057-event-log-orphan-radar.sql",
+  // A1 (HITL daemon backbone): adds reviewer_identity + HITL summary
+  // projection columns (target_object_kind, proposed_change_summary,
+  // created_at) to the proposals table.
+  "058-reviewer-identity.sql"
 ];
 
 function listSqlMigrations(directory: string): string[] {

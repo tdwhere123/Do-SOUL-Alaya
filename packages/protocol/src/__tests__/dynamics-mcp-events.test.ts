@@ -150,9 +150,12 @@ describe("MCP tool request/response schemas", () => {
       {
         schema: SoulReviewMemoryProposalRequestSchema,
         value: {
+          // A1 (HITL daemon backbone): reviewer_identity is required so
+          // every review record carries an explicit reviewer string.
           proposal_id: "proposal-1",
           verdict: "accept",
-          reason: "Confirmed by reviewer."
+          reason: "Confirmed by reviewer.",
+          reviewer_identity: "user:alice"
         }
       },
       {

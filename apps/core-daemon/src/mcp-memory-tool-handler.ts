@@ -13,6 +13,8 @@ import {
   SoulEmitCandidateSignalResponseSchema,
   SoulExploreGraphRequestSchema,
   SoulExploreGraphResponseSchema,
+  SoulListPendingProposalsRequestSchema,
+  SoulListPendingProposalsResponseSchema,
   SoulMemorySearchRequestSchema,
   SoulMemorySearchResponseSchema,
   SoulOpenPointerRequestSchema,
@@ -33,6 +35,8 @@ import {
   type SoulApplyOverrideRequest,
   type SoulEmitCandidateSignalRequest,
   type SoulExploreGraphRequest,
+  type SoulListPendingProposalsRequest,
+  type SoulPendingProposalSummary,
   type SoulMemorySearchRequest,
   type SoulOpenPointerRequest,
   type SoulProposeMemoryUpdateRequest,
@@ -109,6 +113,17 @@ export interface McpMemoryToolHandlerDependencies {
       input: SoulReviewMemoryProposalRequest,
       context: McpMemoryToolCallContext
     ): Promise<Readonly<{ readonly proposal_id: string; readonly resolution_state: Proposal["resolution_state"] }>>;
+    // A1 (HITL daemon backbone) — projects the workspace-scoped pending
+    // queue. The handler enforces workspace via the trusted MCP call
+    // context; the request payload's workspace_id is rejected if it
+    // does not match (SECURITY: invariants §29 Default Scope).
+    listPendingProposals(
+      input: SoulListPendingProposalsRequest,
+      context: McpMemoryToolCallContext
+    ): Promise<Readonly<{
+      readonly proposals: readonly Readonly<SoulPendingProposalSummary>[];
+      readonly total_count: number;
+    }>>;
   };
   readonly now?: () => string;
   readonly generateId?: () => string;
@@ -161,6 +176,8 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
             return ok(toolName, await proposeMemoryUpdate(SoulProposeMemoryUpdateRequestSchema.parse(rawArguments), context));
           case "soul.review_memory_proposal":
             return ok(toolName, await reviewMemoryProposal(SoulReviewMemoryProposalRequestSchema.parse(rawArguments), context));
+          case "soul.list_pending_proposals":
+            return ok(toolName, await listPendingProposals(SoulListPendingProposalsRequestSchema.parse(rawArguments), context));
           case "soul.apply_override":
             return ok(toolName, await applyOverride(SoulApplyOverrideRequestSchema.parse(rawArguments), context));
           case "soul.explore_graph":
@@ -306,6 +323,25 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
         request.verdict === "accept" && reviewed.resolution_state === ProposalResolutionState.PENDING
           ? ProposalResolutionState.ACCEPTED
           : reviewed.resolution_state
+    });
+  }
+
+  async function listPendingProposals(
+    request: SoulListPendingProposalsRequest,
+    context: McpMemoryToolCallContext
+  ) {
+    if (deps.proposalWorkflow === undefined) {
+      throw new ToolUnavailableError("Memory proposal workflow is not available.");
+    }
+    // A1 fix-loop (finding-2): workspace_id has been removed from the
+    // public request schema; workspace is bound from the trusted MCP
+    // call context. The previous handler-level "must match" guard is
+    // therefore unnecessary — the workflow reads context.workspaceId
+    // directly. Pattern matches soul.explore_graph.
+    const result = await deps.proposalWorkflow.listPendingProposals(request, context);
+    return SoulListPendingProposalsResponseSchema.parse({
+      proposals: result.proposals,
+      total_count: result.total_count
     });
   }
 
