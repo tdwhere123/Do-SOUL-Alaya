@@ -21,6 +21,7 @@ import {
 import type {
   EmbeddingBackfillHandler,
   EventPublisher,
+  PathPlasticityService,
   StrongRefService
 } from "@do-soul/alaya-core";
 import {
@@ -84,6 +85,7 @@ export function createGardenRuntime(input: {
   readonly orphanRadarRepo: SqliteOrphanRadarRepo | null;
   readonly pathGraphSnapshotRepo: SqlitePathGraphSnapshotRepo;
   readonly pathRelationRepo: SqlitePathRelationRepo;
+  readonly pathPlasticityService?: Pick<PathPlasticityService, "computeAndApplyPlasticity">;
   readonly embeddingBackfillHandler?: Pick<EmbeddingBackfillHandler, "handle">;
   readonly strongRefService: StrongRefService;
   readonly workspaceRepo: SqliteWorkspaceRepo;
@@ -194,6 +196,9 @@ export function createGardenRuntime(input: {
     greenMaintenancePort: input.gardenDataPorts.greenMaintenancePort,
     bootstrappingPort: input.gardenDataPorts.bootstrappingPort,
     orphanDetectionPort,
+    ...(input.pathPlasticityService === undefined
+      ? {}
+      : { pathPlasticityPort: input.pathPlasticityService }),
     scheduler: auditorSchedulerPort,
     healthJournal: healthJournalPort,
     eventLogRepo: auditorEventLogPort
@@ -465,6 +470,11 @@ export function createGardenRuntime(input: {
           await enqueueForAllWorkspaces(GardenTaskKind.ORPHAN_DETECTION, GardenTier.TIER_1);
           await enqueueForAllWorkspaces(GardenTaskKind.EVENT_LOG_ORPHAN_DETECTION, GardenTier.TIER_1);
         }
+        // A3: Garden-driven plasticity tick. Soft-skips inside the Auditor
+        // when pathPlasticityService is not wired (test daemons), so it is
+        // safe to enqueue unconditionally here. The Auditor lookback
+        // window defaults to 24h (see resolvePathPlasticitySinceIso).
+        await enqueueForAllWorkspaces(GardenTaskKind.PATH_PLASTICITY_UPDATE, GardenTier.TIER_1);
       }
     },
     {
