@@ -110,7 +110,7 @@ export const PathEffectVectorSchema = z
   .strict()
   .readonly();
 
-const PathPlasticityStateSchema = z
+export const PathPlasticityStateSchema = z
   .object({
     strength: z.number(),
     direction_bias: DirectionBiasSchema,
@@ -175,3 +175,4 @@ export type ManifestationPreference = z.infer<typeof ManifestationPreferenceSche
 export type PathAnchorRef = z.infer<typeof PathAnchorRefSchema>;
 export type PathEffectVector = z.infer<typeof PathEffectVectorSchema>;
 export type PathRelation = z.infer<typeof PathRelationSchema>;
+export type PathPlasticityState = z.infer<typeof PathPlasticityStateSchema>;

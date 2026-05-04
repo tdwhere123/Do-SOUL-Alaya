@@ -36,7 +36,8 @@ describe("Phase C extension protocol schemas", () => {
       "path_compression",
       "template_candidate",
       "synthesis_review",
-      "embedding_backfill"
+      "embedding_backfill",
+      "path_plasticity_update"
     ]);
     expect(GardenTaskKindSchema.parse("embedding_backfill")).toBe("embedding_backfill");
     expect(GardenTaskKind.EMBEDDING_BACKFILL).toBe("embedding_backfill");
@@ -49,6 +50,21 @@ describe("Phase C extension protocol schemas", () => {
     expect(
       GARDEN_ROLE_PERMISSIONS[GardenRole.JANITOR].allowed_task_kinds
     ).not.toContain(GardenTaskKind.EMBEDDING_BACKFILL);
+
+    // A3: path_plasticity_update is a TIER_1 Auditor task (also reachable by
+    // the Librarian via the librarian = auditor + extras inheritance) and
+    // never the Janitor.
+    expect(GardenTaskKindSchema.parse("path_plasticity_update")).toBe("path_plasticity_update");
+    expect(GardenTaskKind.PATH_PLASTICITY_UPDATE).toBe("path_plasticity_update");
+    expect(
+      GARDEN_ROLE_PERMISSIONS[GardenRole.AUDITOR].allowed_task_kinds
+    ).toContain(GardenTaskKind.PATH_PLASTICITY_UPDATE);
+    expect(
+      GARDEN_ROLE_PERMISSIONS[GardenRole.LIBRARIAN].allowed_task_kinds
+    ).toContain(GardenTaskKind.PATH_PLASTICITY_UPDATE);
+    expect(
+      GARDEN_ROLE_PERMISSIONS[GardenRole.JANITOR].allowed_task_kinds
+    ).not.toContain(GardenTaskKind.PATH_PLASTICITY_UPDATE);
 
     expect(Object.values(HealthEventKind)).toEqual([
       "bankruptcy",
