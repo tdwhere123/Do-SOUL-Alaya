@@ -10,7 +10,7 @@
 
 ### *A local-first memory plane for CLI coding agents.*
 
-[![status](https://img.shields.io/badge/status-v0.1.0-blue?style=flat-square)](#where-this-is-going)
+[![status](https://img.shields.io/badge/status-v0.1--rc%20(closing)-orange?style=flat-square)](#where-this-is-going)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![tests](https://img.shields.io/badge/tests-1917%20passing-success?style=flat-square)](#where-this-is-going)
 [![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#quickstart)
@@ -159,10 +159,16 @@ Claim lifecycle, karma) lives on the **Memory Ontology** layer and
 **Object** axis but only changes through the proposal-resolution
 path.
 
-*Honest note for v0.1:* there is no daemon-side human-review queue
-or inbox. Review flows through the same MCP surface as proposing —
-i.e. HITL is *agent-orchestrated*, not *daemon-orchestrated*. Making
-HITL daemon-side is on the [Roadmap](#where-this-is-going).
+*In flight (closing in v0.1):* the daemon does not yet expose a
+pending-proposals queue, and review records do not yet carry a
+reviewer identity — review flows through the same MCP surface as
+proposing, which means HITL is *agent-orchestrated* rather than
+*daemon-orchestrated*. The minimal daemon backbone
+(`soul.list_pending_proposals`, `alaya review` CLI verbs,
+`reviewer_identity` on review record) is the **A1** card in the
+[v0.1 closeout](#where-this-is-going). Full review-inbox UX
+(reviewer assignment, deadlines, escalation) is a v0.2 enhancement
+card.
 
 *Code anchors:*
 `apps/core-daemon/src/mcp-memory-proposal-workflow.ts:90-248`,
@@ -189,11 +195,14 @@ mutation; consumers downstream subscribe to the notification, not to
 the DB. Lives on the **Memory Ontology** layer (durable truth) plus
 **Runtime Control** (the dispatch).
 
-*Honest gap:* the append + mutation pair is not yet wrapped in a
-single transaction. v0.1 mitigates with SQLite CAS plus a unique
-index on `(entity_type, entity_id, revision)`, which prevents
-collision but leaves a small race window. Tightening this is on the
-[Roadmap](#where-this-is-going).
+*In flight (closing in v0.1):* the append + mutation pair is not
+yet wrapped in a single transaction; SQLite CAS plus a unique index
+on `(entity_type, entity_id, revision)` keeps the data consistent
+but leaves a small race window. Tracked as **#BL-022** — the
+`appendManyWithMutation` port lands inside one
+`connection.transaction()` and the ~12 callers migrate to a sync
+mutate callback. This is the **A2** card in the
+[v0.1 closeout](#where-this-is-going).
 
 *Code anchors:* `packages/core/src/event-publisher.ts:40-62`,
 `packages/storage/src/repos/event-log-repo.ts:69-118`.
@@ -253,10 +262,15 @@ agent can skip it, and Alaya degrades to a "delivered" trust state
 without erroring. Lives on the **Evidence axis** as control-plane
 evidence, **Runtime Control** layer.
 
-*Honest gap for v0.1:* receipts feed `TrustSummary` but **do not yet
-feed Path-axis plasticity** (reinforcement / weakening / redirection
-/ retirement). Wiring that feedback loop is a named optimisation
-target on the [Roadmap](#where-this-is-going).
+*In flight (closing in v0.1):* receipts feed `TrustSummary` but
+**do not yet feed Path-axis plasticity** (reinforcement / weakening
+/ redirection / retirement). The schema fields and Phase-C events
+already exist (`packages/protocol/src/soul/path-relation.ts:113-124`,
+`packages/protocol/src/events/phase-c.ts`); only the consumer
+service is missing. Wiring the feedback loop — a new
+`PathPlasticityService` plus a Garden tier that processes recent
+`UsageProofRecord`s — is the **A3** card in the
+[v0.1 closeout](#where-this-is-going).
 
 *Code anchors:* `apps/core-daemon/src/trust-state.ts:147-187`,
 `packages/protocol/src/soul/mcp-types.ts:146` (the three-state enum).
@@ -509,54 +523,55 @@ Do-SOUL Alaya/
 
 ## Where this is going
 
-Three forward-looking goals. The system ships today; these are the
-threads I'm pulling next.
+> **Status note (2026-05-04).** v0.1 was prematurely framed as
+> released. After re-reading the structural gaps in the lifecycle
+> chapter above, I reopened v0.1 to absorb everything that was on
+> track to be deferred. The release framing returns when the cards
+> below close — not before.
 
-### 1. Architecture cleanup at the small grain
+### P1. Closing v0.1 — six cards in flight
 
-The shape is right. The fit at the joinery is not yet uniform.
-Concrete items I'm tracking:
+| Card | What it closes | Backlog |
+|---|---|---|
+| **A1** Daemon HITL backbone | `soul.list_pending_proposals` MCP tool · `alaya review pending\|accept\|reject` CLI · `reviewer_identity` on review record · Inspector "Pending" view | new card |
+| **A2** EventPublisher atomic transaction | `appendManyWithMutation` inside one `connection.transaction()`; ~12 callers migrate to sync mutate; closes the race window | `#BL-022` |
+| **A3** Path-axis plasticity loop | New `PathPlasticityService` consumes `MEMORY_USAGE_REPORTED` → emits Phase-C events → `RecallService` factors plasticity into score | new card |
+| **B1** `pi-mono` integration | `packages/engine-gateway` becomes a `pi-mono` client; synthesis / proposal scoring / reflection route through one clean provider boundary | `#BL-008` |
+| **B2** OS keychain support | `keychain:<service>:<account>` secret-ref syntax; macOS Keychain + Linux libsecret adapters (Windows mocked) | `#BL-009` |
+| **C1** File-shape hygiene wave | Rename `phase-*.ts` → domain-aligned files; split oversized files; `ts-prune` cleanup; refresh `code-map.md` | `#BL-017` |
 
-- **Atomic durability** — wrap `EventPublisher` append + mutation
-  in a single `connection.transaction()`. Closes the small race
-  window currently masked by the unique-revision index.
-- **Daemon-side review inbox** — make HITL daemon-orchestrated, not
-  agent-orchestrated. A pending-proposals queue with explicit
-  reviewer assignment, instead of relying on the same MCP tool
-  used to propose.
-- **File-shape hygiene** — split a handful of oversized service
-  files; rename intent-anonymous files to intent-named ones. None
-  of this changes behaviour; it lowers the cost of every future
-  change.
+The work runs in an isolated `v0.1-closeout` worktree with per-card
+review + fix-loop discipline. `main` only sees the final merge +
+the `v0.1.0` tag when every card's exit criterion holds and the
+integrated multi-lens review reports zero Blocking / Important.
 
-### 2. Optimising the load-bearing parts (recall first)
+### P2. After v0.1 — toward a memory-centric agent
 
-Recall is the surface where Alaya is most visibly judged. Three
-threads:
+Once `pi-mono` is the provider boundary (B1) and Path-axis
+plasticity is closing the recall feedback loop (A3), the longer
+arc is a *memory-centric agent* — one whose inner loop is built
+around reading and writing memory rather than around chat.
 
-- **Path-axis plasticity** — wire `soul.report_context_usage`
-  receipts into reinforcement / weakening / redirection /
-  retirement on Path. Today receipts feed `TrustSummary` only; the
-  plasticity loop is designed but not yet closed.
-- **Embedding strategy** — keep "supplement, never oracle" but
-  experiment with the boost weight, the supplement cap, and
+The threads I'll pull there:
+
+- **Full review-inbox UX** — assignment, deadlines, escalation,
+  multi-reviewer quorum. The minimal HITL backbone (A1) is the
+  scaffold; this is the team-workflow surface on top.
+- **Embedding strategy refinement** — keep "supplement, never
+  oracle"; experiment with boost weight, supplement cap, and
   per-domain calibration.
-- **Recall budget shaping** — make the budget penalty schedule
-  reflect actual agent context-window cost, not a static constant.
+- **Recall budget shaping** — let the budget-penalty schedule
+  reflect actual agent context-window cost rather than a static
+  constant.
 
-### 3. `pi-mono` integration → memory-centric agent
+### P3. Vendor cleanup (post-v0.1.0 tag)
 
-The longer-term vision is a *memory-centric agent* — one whose
-inner loop is built around reading and writing memory, not around
-chat. The short-term step in that direction is integrating
-[`pi-mono`](https://github.com/badlogic/pi-mono) as the LLM
-provider abstraction. `packages/engine-gateway` becomes a `pi-mono`
-client; synthesis, proposal scoring, and reflection all route
-through one clean provider boundary instead of bespoke
-`provider/ai-sdk-*.ts` adapters.
-
-Once that boundary is clean, building the memory-centric agent on
-top of it is a much smaller step than it would be today.
+`vendor/do-what-new-snapshot/` was a temporary port reference, not
+a permanent dependency. After v0.1.0 tags, it gets removed in its
+own short-lived worktree, and the port-protocol scaffolding in
+`CLAUDE.md` / `docs/handbook/port-protocol.md` /
+`docs/handbook/task-card-template.md` is rewritten as historical
+context.
 
 ---
 
