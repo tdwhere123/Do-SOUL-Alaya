@@ -15,7 +15,26 @@ export type EventLogAppendInput = Omit<EventLogEntry, "event_id" | "created_at" 
 
 export interface EventLogRepo {
   append(event: EventLogAppendInput): Promise<EventLogEntry>;
+  /**
+   * Synchronous append used by `EventPublisher.appendManyWithMutation` so that
+   * MAX(revision)+1 computation and the INSERT live in the same SQLite
+   * transaction as the caller's mutation. Closes #BL-022 by removing the
+   * async read-modify-write window between revision selection and INSERT.
+   */
+  appendSync(event: EventLogAppendInput): EventLogEntry;
   deleteById(eventId: string): Promise<void>;
+  /**
+   * Synchronous deleteById sibling used by transactional rollback paths.
+   */
+  deleteByIdSync(eventId: string): void;
+  /**
+   * Run `fn` inside a single SQLite `connection.transaction(...)`. The
+   * callback must be synchronous because better-sqlite3 transactions
+   * commit immediately on return; awaiting inside `fn` would commit before
+   * the awaited work completes. See #BL-022 close condition in
+   * `docs/handbook/backlog.md`.
+   */
+  transactional<T>(fn: () => T): T;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
   queryByRun(runId: string): Promise<readonly EventLogEntry[]>;
   queryByRunCursorState(
@@ -255,8 +274,14 @@ export class SqliteEventLogRepo implements EventLogRepo {
   }
 
   public async append(event: EventLogAppendInput): Promise<EventLogEntry> {
+    return this.appendSync(event);
+  }
+
+  public appendSync(event: EventLogAppendInput): EventLogEntry {
     // Always auto-compute revision so the unique index on (entity_type, entity_id, revision) is
     // never violated by callers that hardcode revision: 0 or supply stale MAX+1 values.
+    // When invoked inside `transactional(...)` the SELECT MAX + INSERT pair is atomic, closing
+    // the read-modify-write race window noted by #BL-022.
     const revision = this.computeNextRevision(event.entity_type, event.entity_id);
 
     const entry = parseEventLogEntry({
@@ -287,11 +312,23 @@ export class SqliteEventLogRepo implements EventLogRepo {
   }
 
   public async deleteById(eventId: string): Promise<void> {
+    this.deleteByIdSync(eventId);
+  }
+
+  public deleteByIdSync(eventId: string): void {
     try {
       this.deleteByIdStatement.run(eventId);
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to delete event log entry.", error);
     }
+  }
+
+  public transactional<T>(fn: () => T): T {
+    // better-sqlite3 transactions are synchronous; if `fn` returns a Promise the
+    // BEGIN/COMMIT pair completes before the awaited work, which is incorrect.
+    // Callers that need async work must do it outside the transaction.
+    const txn = this.db.connection.transaction(fn);
+    return txn();
   }
 
   public async queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]> {

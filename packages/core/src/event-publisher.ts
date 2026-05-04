@@ -2,7 +2,26 @@ import { WorkspaceRunEventSchema, type EventLogEntry, type WorkspaceRunEvent } f
 
 export interface EventPublisherEventLogRepoPort {
   append(event: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  /**
+   * Synchronous append for use inside `appendManyWithMutation` so MAX(revision)
+   * computation and the INSERT live inside the same `connection.transaction(...)`
+   * as the caller's mutation. Closes the BL-022 race window where revision was
+   * selected async and the INSERT relied on the unique index for serialization.
+   *
+   * Optional only so legacy mocks that exercise the async `publishWithMutation`
+   * path can still construct a publisher; calling `appendManyWithMutation`
+   * without an implementation throws synchronously.
+   */
+  appendSync?(event: Omit<EventLogEntry, "event_id" | "created_at">): EventLogEntry;
   deleteById(eventId: string): Promise<void>;
+  deleteByIdSync?(eventId: string): void;
+  /**
+   * Wrap `fn` in a single SQLite transaction. `fn` must be synchronous; an
+   * `await` inside the function would commit the transaction before the awaited
+   * work completes, defeating atomicity. Optional for the same reason as
+   * `appendSync`.
+   */
+  transactional?<T>(fn: () => T): T;
 }
 
 export interface RuntimeNotifier {
@@ -36,6 +55,79 @@ export class EventPublisherPropagationError extends Error {
 
 export class EventPublisher {
   public constructor(private readonly dependencies: EventPublisherDependencies) {}
+
+  /**
+   * Append one or more EventLog rows AND run a synchronous mutation in a single
+   * SQLite transaction. Closes #BL-022: previously the EventLog row was
+   * appended outside the transaction and the unique index on
+   * (entity_type, entity_id, revision) was load-bearing for concurrency
+   * correctness. With this method the index becomes belt-and-suspenders.
+   *
+   * Closes #BL-021: the mutate callback receives the persisted entries with
+   * their final `event_id`, so trust-state-style records can persist
+   * `audit_event_id` exactly once with no divergence between the EventLog row
+   * and the consumer's row.
+   *
+   * Constraints:
+   *   - `mutate` MUST be synchronous. Any `await` inside it would commit the
+   *     transaction before the awaited work resolves.
+   *   - Async preparation (FS reads, network calls, queries via async-only
+   *     repos) MUST happen before this call; pass results in via closure.
+   *   - Notifications (runHotState + runtimeNotifier) run AFTER the
+   *     transaction commits. If notification throws, the rows are already
+   *     durable; the caller receives `EventPublisherPropagationError` and the
+   *     final-listener pattern (existing) handles replay.
+   */
+  public async appendManyWithMutation<T>(
+    eventInputs: readonly Omit<EventLogEntry, "event_id" | "created_at">[],
+    mutate: (entries: readonly EventLogEntry[]) => T
+  ): Promise<T> {
+    if (eventInputs.length === 0) {
+      // No events to append; still run the mutation for parity with the
+      // legacy `publishManyWithMutation` empty-batch behavior. There is no
+      // transaction needed because there is nothing to roll back atomically.
+      return mutate([]);
+    }
+
+    const repo = this.dependencies.eventLogRepo;
+    if (repo.transactional === undefined || repo.appendSync === undefined) {
+      throw new Error(
+        "EventPublisher.appendManyWithMutation requires a repo with transactional() and appendSync(); " +
+          "wire SqliteEventLogRepo or supply the equivalents in tests."
+      );
+    }
+    const { entries, mutateResult } = repo.transactional<{
+      entries: EventLogEntry[];
+      mutateResult: T;
+    }>(() => {
+      const collected: EventLogEntry[] = [];
+      for (const input of eventInputs) {
+        collected.push(repo.appendSync!(input));
+      }
+      const result = mutate(collected);
+      if (result instanceof Promise || typeof (result as { then?: unknown })?.then === "function") {
+        // A Promise return means the caller used `async () => ...` or returned
+        // a thenable. The transaction would commit before the promise resolves,
+        // breaking the atomicity guarantee. Throwing here triggers a SQLite
+        // rollback so no half-committed EventLog row escapes.
+        throw new Error(
+          "appendManyWithMutation: mutate callback must be synchronous. " +
+            "Move any awaitable work outside of appendManyWithMutation."
+        );
+      }
+      return { entries: collected, mutateResult: result };
+    });
+
+    for (const entry of entries) {
+      try {
+        await this.propagate(entry);
+      } catch (propagateError) {
+        throw new EventPublisherPropagationError(entry, propagateError, entries);
+      }
+    }
+
+    return mutateResult;
+  }
 
   public async publishWithMutation<T>(
     eventInput: Omit<EventLogEntry, "event_id" | "created_at">,
