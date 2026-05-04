@@ -255,6 +255,163 @@ describe("mcp memory governance", () => {
     expect(storedProposal.resolution_state).toBe(ProposalResolutionState.ACCEPTED);
   });
 
+  it("allows human reviewer (runId: null) to review a proposal stored with a non-null run_id (A1 finding-1)", async () => {
+    // A1 fix-loop (finding-1): the Inspector POST and `alaya review`
+    // CLI always pass runId: null. Before the fix, assertProposalContext
+    // rejected this with NOT_FOUND because the stored proposal carried
+    // the agent's run_id (e.g. "run-1") and strict equality required
+    // null === "run-1" → false. Locking the loosened semantics here so
+    // a regression of the strict check fails this assertion.
+    const events: EventLogEntry[] = [];
+    const proposal = createProposal();
+    let storedProposal = proposal;
+    let eventCounter = 0;
+    const workflow = createMcpMemoryProposalWorkflow({
+      now: () => "2026-04-30T00:00:00.000Z",
+      generateObjectId: () => proposal.proposal_id,
+      eventLogRepo: {
+        append: async () => {
+          throw new Error("append must not be called from review path");
+        },
+        queryByEntity: async () => []
+      },
+      proposalRepo: {
+        create: async () => proposal,
+        createProposalWithEvents: async () => {
+          throw new Error("create not exercised in this test");
+        },
+        findById: async () => storedProposal,
+        // Stored proposal carries run_id "run-agent" (the agent run that
+        // produced it via soul.propose_memory_update), workspace "ws1".
+        findScopedById: async () => ({
+          proposal: storedProposal,
+          workspace_id: "ws1",
+          run_id: "run-agent"
+        }),
+        updatePendingResolutionWithEvents: async (_proposalId, state, updatedAt, resolutionEvents) => {
+          const storedEvents = resolutionEvents.map((event) => {
+            const entry = {
+              event_id: `event-${++eventCounter}`,
+              created_at: "2026-04-30T00:00:00.000Z",
+              revision: 1,
+              ...event
+            } satisfies EventLogEntry;
+            events.push(entry);
+            return entry;
+          });
+          storedProposal = {
+            ...storedProposal,
+            resolution_state: state,
+            last_updated_at: updatedAt
+          };
+          return { proposal: storedProposal, events: storedEvents };
+        }
+      },
+      runtimeNotifier: { notifyEntry: async () => {} }
+    });
+
+    const reviewed = await workflow.reviewMemoryProposal(
+      {
+        proposal_id: proposal.proposal_id,
+        verdict: "accept",
+        reason: "human reviewer in Inspector",
+        reviewer_identity: "user:alice"
+      },
+      // Human-reviewer surface: runId === null. Workspace matches.
+      { workspaceId: "ws1", runId: null, agentTarget: "inspector" }
+    );
+
+    expect(reviewed.resolution_state).toBe(ProposalResolutionState.ACCEPTED);
+    expect(events).toHaveLength(3);
+  });
+
+  it("still rejects human reviewer when workspace does not match (finding-1 — workspace check stays strict)", async () => {
+    const proposal = createProposal();
+    const workflow = createMcpMemoryProposalWorkflow({
+      now: () => "2026-04-30T00:00:00.000Z",
+      generateObjectId: () => proposal.proposal_id,
+      eventLogRepo: {
+        append: async () => {
+          throw new Error("append must not be called");
+        },
+        queryByEntity: async () => []
+      },
+      proposalRepo: {
+        create: async () => proposal,
+        createProposalWithEvents: async () => {
+          throw new Error("create not exercised");
+        },
+        findById: async () => proposal,
+        findScopedById: async () => ({
+          proposal,
+          workspace_id: "ws-other",
+          run_id: "run-agent"
+        }),
+        updatePendingResolutionWithEvents: async () => {
+          throw new Error("update should not run for workspace mismatch");
+        }
+      },
+      runtimeNotifier: { notifyEntry: async () => {} }
+    });
+
+    await expect(
+      workflow.reviewMemoryProposal(
+        {
+          proposal_id: proposal.proposal_id,
+          verdict: "accept",
+          reason: "wrong ws",
+          reviewer_identity: "user:bob"
+        },
+        { workspaceId: "ws1", runId: null, agentTarget: "inspector" }
+      )
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("still requires run match when call context carries a non-null runId (finding-1 — agent context stays strict)", async () => {
+    // When an attached agent itself drives the review call, runId is
+    // non-null and strict equality must still hold so an agent in run A
+    // cannot review a proposal scoped to run B.
+    const proposal = createProposal();
+    const workflow = createMcpMemoryProposalWorkflow({
+      now: () => "2026-04-30T00:00:00.000Z",
+      generateObjectId: () => proposal.proposal_id,
+      eventLogRepo: {
+        append: async () => {
+          throw new Error("append must not be called");
+        },
+        queryByEntity: async () => []
+      },
+      proposalRepo: {
+        create: async () => proposal,
+        createProposalWithEvents: async () => {
+          throw new Error("create not exercised");
+        },
+        findById: async () => proposal,
+        findScopedById: async () => ({
+          proposal,
+          workspace_id: "ws1",
+          run_id: "run-stored"
+        }),
+        updatePendingResolutionWithEvents: async () => {
+          throw new Error("update should not run for run mismatch");
+        }
+      },
+      runtimeNotifier: { notifyEntry: async () => {} }
+    });
+
+    await expect(
+      workflow.reviewMemoryProposal(
+        {
+          proposal_id: proposal.proposal_id,
+          verdict: "accept",
+          reason: "wrong run",
+          reviewer_identity: "user:agent"
+        },
+        { workspaceId: "ws1", runId: "run-other", agentTarget: "codex" }
+      )
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
   it("rejects proposal reviews outside the stored workspace and run context", async () => {
     const events: EventLogEntry[] = [];
     const proposal = createProposal();

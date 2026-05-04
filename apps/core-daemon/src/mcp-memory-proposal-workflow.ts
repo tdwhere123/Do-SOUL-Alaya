@@ -313,9 +313,30 @@ function assertProposalContext(
   }>,
   context: McpMemoryToolCallContext
 ): void {
+  // A1 fix-loop (finding-1): the original strict check required
+  //   scopedProposal.run_id === context.runId
+  // even when the call came in from the human-reviewer surfaces (the
+  // Inspector POST and `alaya review accept`), which always pass
+  // runId: null. That made every proposal created via
+  // soul.propose_memory_update — i.e. every proposal carrying the
+  // attached agent's run_id — unreviewable through Inspector or CLI,
+  // since the human surface cannot know the agent's run id.
+  //
+  // Decision (Q1, pre-approved by main thread): when context.runId is
+  // null, treat the call as a workspace-scope-only review and only
+  // require workspace match. When context.runId is non-null (i.e. the
+  // call is itself running inside an agent run, e.g. an attached agent
+  // reviewing its own proposal), keep the strict workspace+run match
+  // so an agent in run A cannot review a proposal created in run B.
   const workspaceId = NonEmptyStringSchema.parse(context.workspaceId);
-  const runId = context.runId === null ? null : NonEmptyStringSchema.parse(context.runId);
-  if (scopedProposal.workspace_id !== workspaceId || scopedProposal.run_id !== runId) {
+  if (scopedProposal.workspace_id !== workspaceId) {
+    throw createWorkflowError("NOT_FOUND", "Proposal not found in current workspace/run context.");
+  }
+  if (context.runId === null) {
+    return;
+  }
+  const runId = NonEmptyStringSchema.parse(context.runId);
+  if (scopedProposal.run_id !== runId) {
     throw createWorkflowError("NOT_FOUND", "Proposal not found in current workspace/run context.");
   }
 }
