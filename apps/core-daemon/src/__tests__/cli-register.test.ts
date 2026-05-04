@@ -23,6 +23,9 @@ describe("cli registration", () => {
       "attach",
       "detach",
       "tools",
+      // A1 (HITL daemon backbone) — `alaya review pending|accept|reject`
+      // routes through the same MCP handler attached agents use.
+      "review",
       "mcp",
       "backup",
       "export",
