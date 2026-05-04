@@ -294,25 +294,27 @@ export function createGardenRuntime(input: {
   ): Promise<PathGraphSnapshotRecord> => {
     const snapshot = await pathGraphSnapshotter.buildSnapshot(workspaceId, previousSnapshot);
 
-    await input.eventPublisher.publishWithMutation(
-      {
-        event_type: RuntimeGovernanceEventType.PATH_GRAPH_SNAPSHOT_CREATED,
-        entity_type: "path_graph_snapshot",
-        entity_id: snapshot.snapshot_id,
-        workspace_id: workspaceId,
-        run_id: null,
-        caused_by: "garden-path-graph-snapshotter",
-        payload_json: parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.PATH_GRAPH_SNAPSHOT_CREATED, {
-          snapshot_id: snapshot.snapshot_id,
-          workspace_id: snapshot.workspace_id,
-          total_active_paths: snapshot.total_active_paths,
-          total_retired_paths: snapshot.total_retired_paths,
-          snapshot_at: snapshot.snapshot_at
-        }),
-        revision: 1
-      },
-      async () => {
-        await input.pathGraphSnapshotRepo.create(snapshot);
+    await input.eventPublisher.appendManyWithMutation(
+      [
+        {
+          event_type: RuntimeGovernanceEventType.PATH_GRAPH_SNAPSHOT_CREATED,
+          entity_type: "path_graph_snapshot",
+          entity_id: snapshot.snapshot_id,
+          workspace_id: workspaceId,
+          run_id: null,
+          caused_by: "garden-path-graph-snapshotter",
+          payload_json: parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.PATH_GRAPH_SNAPSHOT_CREATED, {
+            snapshot_id: snapshot.snapshot_id,
+            workspace_id: snapshot.workspace_id,
+            total_active_paths: snapshot.total_active_paths,
+            total_retired_paths: snapshot.total_retired_paths,
+            snapshot_at: snapshot.snapshot_at
+          }),
+          revision: 1
+        }
+      ],
+      () => {
+        input.pathGraphSnapshotRepo.createSync(snapshot);
       }
     );
 
