@@ -9,12 +9,20 @@ export type WorkspaceCreateInput = Omit<Workspace, "created_at" | "archived_at" 
 
 export interface WorkspaceRepo {
   create(data: WorkspaceCreateInput): Promise<Workspace>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  createSync?(data: WorkspaceCreateInput): Workspace;
   getById(id: string): Promise<Workspace | null>;
   list(): Promise<readonly Workspace[]>;
   delete(id: string): Promise<void>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  deleteSync?(id: string): void;
   updateRepoPath(id: string, repoPath: Workspace["repo_path"]): Promise<Workspace>;
   updateDefaultEngineBinding(id: string, bindingId: string | null): Promise<Workspace>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  updateDefaultEngineBindingSync?(id: string, bindingId: string | null): Workspace;
   updateDefaultEngineClass(id: string, engineClass: Workspace["default_engine_class"]): Promise<Workspace>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  updateDefaultEngineClassSync?(id: string, engineClass: Workspace["default_engine_class"]): Workspace;
 }
 
 interface WorkspaceRow {
@@ -104,6 +112,11 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
   }
 
   public async create(data: WorkspaceCreateInput): Promise<Workspace> {
+    return this.createSync(data);
+  }
+
+  /** Synchronous variant for atomic publish + mutation (#BL-022). */
+  public createSync(data: WorkspaceCreateInput): Workspace {
     const workspace = parseWorkspace({
       ...data,
       repo_path: data.repo_path ?? null,
@@ -151,6 +164,11 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
   }
 
   public async delete(id: string): Promise<void> {
+    this.deleteSync(id);
+  }
+
+  /** Synchronous variant for atomic publish + mutation (#BL-022). */
+  public deleteSync(id: string): void {
     cascadeDeleteWorkspace(this.db.connection, id);
   }
 
@@ -179,6 +197,11 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
   }
 
   public async updateDefaultEngineBinding(id: string, bindingId: string | null): Promise<Workspace> {
+    return this.updateDefaultEngineBindingSync(id, bindingId);
+  }
+
+  /** Synchronous variant for atomic publish + mutation (#BL-022). */
+  public updateDefaultEngineBindingSync(id: string, bindingId: string | null): Workspace {
     try {
       const result = this.updateDefaultEngineBindingStatement.run(bindingId, id);
 
@@ -186,13 +209,13 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
         throw new StorageError("NOT_FOUND", `Workspace ${id} was not found.`);
       }
 
-      const workspace = await this.getById(id);
+      const row = this.getByIdStatement.get(id) as WorkspaceRow | undefined;
 
-      if (workspace === null) {
+      if (row === undefined) {
         throw new StorageError("NOT_FOUND", `Workspace ${id} was not found after update.`);
       }
 
-      return workspace;
+      return parseWorkspace(row);
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
@@ -206,6 +229,14 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
     id: string,
     engineClass: Workspace["default_engine_class"]
   ): Promise<Workspace> {
+    return this.updateDefaultEngineClassSync(id, engineClass);
+  }
+
+  /** Synchronous variant for atomic publish + mutation (#BL-022). */
+  public updateDefaultEngineClassSync(
+    id: string,
+    engineClass: Workspace["default_engine_class"]
+  ): Workspace {
     try {
       const result = this.updateDefaultEngineClassStatement.run(engineClass ?? null, id);
 
@@ -213,13 +244,13 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
         throw new StorageError("NOT_FOUND", `Workspace ${id} was not found.`);
       }
 
-      const workspace = await this.getById(id);
+      const row = this.getByIdStatement.get(id) as WorkspaceRow | undefined;
 
-      if (workspace === null) {
+      if (row === undefined) {
         throw new StorageError("NOT_FOUND", `Workspace ${id} was not found after update.`);
       }
 
-      return workspace;
+      return parseWorkspace(row);
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;

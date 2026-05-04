@@ -31,18 +31,32 @@ type SurfaceDriftEventInput = Omit<EventLogEntry, "event_id" | "created_at">;
 
 export interface DriftLeaseRepoPort {
   create(lease: Readonly<GovernanceDriftLease>): Promise<Readonly<GovernanceDriftLease>>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  createSync(lease: Readonly<GovernanceDriftLease>): Readonly<GovernanceDriftLease>;
   findActive(workspaceId: string): Promise<readonly Readonly<GovernanceDriftLease>[]>;
   findActiveById(
     workspaceId: string,
     leaseId: string
   ): Promise<Readonly<GovernanceDriftLease> | null>;
   delete(leaseId: string): Promise<void>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  deleteSync(leaseId: string): void;
   deleteExpired(beforeDate: string): Promise<number>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  deleteExpiredSync(beforeDate: string): number;
 }
 
 export interface SurfaceDriftEventPublisherPort {
   publish(event: SurfaceDriftEventInput): Promise<Readonly<EventLogEntry>>;
-  publishWithMutation<T>(event: SurfaceDriftEventInput, mutate: (entry: EventLogEntry) => Promise<T>): Promise<T>;
+  /**
+   * Atomic append + sync mutation (#BL-022). Surface-drift lease acquire/release
+   * uses this to keep the EventLog row and the lease repo write in a single
+   * SQLite transaction.
+   */
+  appendManyWithMutation<T>(
+    inputs: readonly SurfaceDriftEventInput[],
+    mutate: (entries: readonly EventLogEntry[]) => T
+  ): Promise<T>;
 }
 
 export interface SurfaceDriftServiceDependencies {
@@ -123,28 +137,30 @@ export class SurfaceDriftService {
       granted_at: grantedAt
     });
 
-    return await this.dependencies.eventPublisher.publishWithMutation(
-      {
-        event_type: RuntimeGovernanceEventType.SURFACE_DRIFT_LEASE_ACQUIRED,
-        entity_type: "surface_drift_lease",
-        entity_id: lease.lease_id,
-        workspace_id: lease.workspace_id,
-        run_id: null,
-        caused_by: grantedTo,
-        revision: 0,
-        payload_json: SurfaceDriftLeaseAcquiredPayloadSchema.parse({
-          lease_id: lease.lease_id,
+    return await this.dependencies.eventPublisher.appendManyWithMutation(
+      [
+        {
+          event_type: RuntimeGovernanceEventType.SURFACE_DRIFT_LEASE_ACQUIRED,
+          entity_type: "surface_drift_lease",
+          entity_id: lease.lease_id,
           workspace_id: lease.workspace_id,
-          operation_type: lease.operation_type,
-          granted_to: lease.granted_to,
-          expires_at: lease.expires_at,
-          granted_at: lease.granted_at
-        })
-      },
-      async () => {
+          run_id: null,
+          caused_by: grantedTo,
+          revision: 0,
+          payload_json: SurfaceDriftLeaseAcquiredPayloadSchema.parse({
+            lease_id: lease.lease_id,
+            workspace_id: lease.workspace_id,
+            operation_type: lease.operation_type,
+            granted_to: lease.granted_to,
+            expires_at: lease.expires_at,
+            granted_at: lease.granted_at
+          })
+        }
+      ],
+      () => {
         try {
-          await this.dependencies.leaseRepo.deleteExpired(grantedAt);
-          return await this.dependencies.leaseRepo.create(lease);
+          this.dependencies.leaseRepo.deleteExpiredSync(grantedAt);
+          return this.dependencies.leaseRepo.createSync(lease);
         } catch (error) {
           if (isConflictError(error)) {
             throw new CoreError(
@@ -186,26 +202,28 @@ export class SurfaceDriftService {
 
     const releasedAt = readNow(this.dependencies.now);
     try {
-      await this.dependencies.eventPublisher.publishWithMutation(
-        {
-          event_type: RuntimeGovernanceEventType.SURFACE_DRIFT_LEASE_RELEASED,
-          entity_type: "surface_drift_lease",
-          entity_id: existingLease.lease_id,
-          workspace_id: existingLease.workspace_id,
-          run_id: null,
-          caused_by: parsedReleasedBy,
-          revision: 0,
-          payload_json: SurfaceDriftLeaseReleasedPayloadSchema.parse({
-            lease_id: existingLease.lease_id,
+      await this.dependencies.eventPublisher.appendManyWithMutation(
+        [
+          {
+            event_type: RuntimeGovernanceEventType.SURFACE_DRIFT_LEASE_RELEASED,
+            entity_type: "surface_drift_lease",
+            entity_id: existingLease.lease_id,
             workspace_id: existingLease.workspace_id,
-            operation_type: existingLease.operation_type,
-            granted_to: existingLease.granted_to,
-            released_by: parsedReleasedBy,
-            released_at: releasedAt
-          })
-        },
-        async () => {
-          await this.dependencies.leaseRepo.delete(parsedLeaseId);
+            run_id: null,
+            caused_by: parsedReleasedBy,
+            revision: 0,
+            payload_json: SurfaceDriftLeaseReleasedPayloadSchema.parse({
+              lease_id: existingLease.lease_id,
+              workspace_id: existingLease.workspace_id,
+              operation_type: existingLease.operation_type,
+              granted_to: existingLease.granted_to,
+              released_by: parsedReleasedBy,
+              released_at: releasedAt
+            })
+          }
+        ],
+        () => {
+          this.dependencies.leaseRepo.deleteSync(parsedLeaseId);
         }
       );
     } catch (error) {

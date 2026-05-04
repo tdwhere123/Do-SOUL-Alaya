@@ -2429,6 +2429,7 @@ function createHarness(
     readonly getById: TestMock;
     readonly deleteIfState: TestMock;
     readonly updateState: TestMock;
+    readonly updateStateSync: TestMock;
     readonly insertIfNoActiveForPrincipal: TestMock;
   };
   readonly publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at">>;
@@ -2457,6 +2458,34 @@ function createHarness(
   const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at">> = [];
   const runtimeAdapter = options.runtimeAdapter ?? new ScriptedRuntimeAdapter(events);
 
+  const updateStateImpl = (
+    workerRunId: string,
+    expectedState: DelegatedWorkerRun["state"],
+    nextState: DelegatedWorkerRun["state"],
+    updatedAt: string
+  ): DelegatedWorkerRun => {
+    const current = workerStore.get(workerRunId);
+
+    if (current === undefined) {
+      throw new CoreError("NOT_FOUND", `Worker run ${workerRunId} not found`);
+    }
+
+    if (current.state !== expectedState) {
+      throw new CoreError(
+        "CONFLICT",
+        `Worker run ${workerRunId} changed concurrently: expected ${expectedState}, found ${current.state}`
+      );
+    }
+
+    const updated = Object.freeze({
+      ...current,
+      state: nextState,
+      updated_at: updatedAt
+    });
+    workerStore.set(workerRunId, updated);
+    return updated;
+  };
+
   const repo = {
     getById: vi.fn(async (workerRunId: string) => workerStore.get(workerRunId) ?? null),
     deleteIfState: vi.fn(async (workerRunId: string, expectedState: DelegatedWorkerRun["state"]) => {
@@ -2482,27 +2511,17 @@ function createHarness(
         nextState: DelegatedWorkerRun["state"],
         updatedAt: string
       ) => {
-        const current = workerStore.get(workerRunId);
-
-        if (current === undefined) {
-          throw new CoreError("NOT_FOUND", `Worker run ${workerRunId} not found`);
-        }
-
-        if (current.state !== expectedState) {
-          throw new CoreError(
-            "CONFLICT",
-            `Worker run ${workerRunId} changed concurrently: expected ${expectedState}, found ${current.state}`
-          );
-        }
-
-        const updated = Object.freeze({
-          ...current,
-          state: nextState,
-          updated_at: updatedAt
-        });
-        workerStore.set(workerRunId, updated);
-        return updated;
+        return updateStateImpl(workerRunId, expectedState, nextState, updatedAt);
       }
+    ),
+    // Sync sibling required by appendManyWithMutation-based migration (#BL-022).
+    updateStateSync: vi.fn(
+      (
+        workerRunId: string,
+        expectedState: DelegatedWorkerRun["state"],
+        nextState: DelegatedWorkerRun["state"],
+        updatedAt: string
+      ) => updateStateImpl(workerRunId, expectedState, nextState, updatedAt)
     ),
     insertIfNoActiveForPrincipal: vi.fn(async (principalRunId: string, run: DelegatedWorkerRun) => {
       const hasInFlightWorker = [...workerStore.values()].some(
@@ -2539,6 +2558,23 @@ function createHarness(
       ) => {
         publishedEvents.push(event);
         return await mutate();
+      }
+    ),
+    // WorkerRunLifecycleService now uses appendManyWithMutation (#BL-022).
+    appendManyWithMutation: vi.fn(
+      async (
+        events: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at">>,
+        mutate: (entries: readonly EventLogEntry[]) => DelegatedWorkerRun
+      ) => {
+        for (const event of events) {
+          publishedEvents.push(event);
+        }
+        const persisted = events.map((event, idx) => ({
+          ...event,
+          event_id: `event-${publishedEvents.length - events.length + idx}`,
+          created_at: FIXED_NOW
+        })) as EventLogEntry[];
+        return mutate(persisted);
       }
     )
   } as unknown as EventPublisher;

@@ -11,36 +11,53 @@ import {
 } from "@do-soul/alaya-protocol";
 import { EngineBindingService } from "../engine-binding-service.js";
 
+// Helper: in-test publisher that simulates the appendManyWithMutation contract
+// (sync mutate, batch-array first arg) used by EngineBindingService after #BL-022.
+function fakeAppendManyWithMutation(publishedEvents?: Array<any>) {
+  return vi.fn(async (events: any[], mutate: (entries: any[]) => any) => {
+    if (publishedEvents) {
+      for (const event of events) publishedEvents.push(event);
+    }
+    const persisted = events.map((event, idx) => ({
+      ...event,
+      event_id: `evt_${idx}`,
+      created_at: "2026-03-18T00:00:00.000Z"
+    }));
+    return mutate(persisted);
+  });
+}
+
 describe("EngineBindingService", () => {
   it("saves a workspace binding, records an event, and points the workspace default binding at it", async () => {
     let defaultBindingId: string | null = null;
     const savedRecords = new Map<string, any>();
     const publishedEvents: Array<any> = [];
+    const upsertImpl = (record: any) => {
+      const saved = {
+        ...record,
+        created_at: "2026-03-18T00:00:00.000Z",
+        updated_at: "2026-03-18T00:00:00.000Z"
+      };
+      savedRecords.set(saved.binding_id, saved);
+      return saved;
+    };
+    const updateDefaultBindingImpl = (_id: string, bindingId: string | null) => {
+      defaultBindingId = bindingId;
+      return createWorkspace({ default_engine_binding: defaultBindingId });
+    };
     const service = new EngineBindingService({
       workspaceRepo: {
         getById: vi.fn(async () => createWorkspace({ default_engine_binding: defaultBindingId })),
-        updateDefaultEngineBinding: vi.fn(async (_id, bindingId) => {
-          defaultBindingId = bindingId;
-          return createWorkspace({ default_engine_binding: defaultBindingId });
-        })
+        updateDefaultEngineBinding: vi.fn(async (id, bindingId) => updateDefaultBindingImpl(id, bindingId)),
+        updateDefaultEngineBindingSync: vi.fn(updateDefaultBindingImpl)
       },
       bindingRepo: {
-        upsert: vi.fn(async (record) => {
-          const saved = {
-            ...record,
-            created_at: "2026-03-18T00:00:00.000Z",
-            updated_at: "2026-03-18T00:00:00.000Z"
-          };
-          savedRecords.set(saved.binding_id, saved);
-          return saved;
-        }),
+        upsert: vi.fn(async (record) => upsertImpl(record)),
+        upsertSync: vi.fn(upsertImpl),
         getById: vi.fn(async (id) => savedRecords.get(id) ?? null)
       },
       eventPublisher: {
-        publishWithMutation: vi.fn(async (event, mutate) => {
-          publishedEvents.push(event);
-          return await mutate();
-        })
+        appendManyWithMutation: fakeAppendManyWithMutation(publishedEvents)
       } as any,
       engineTester: {
         testBinding: vi.fn(async () => ({
@@ -87,28 +104,32 @@ describe("EngineBindingService", () => {
   it("creates a fresh binding id for each workspace binding update and preserves older rows", async () => {
     let defaultBindingId: string | null = null;
     const savedRecords = new Map<string, any>();
+    const upsertImpl = (record: any) => {
+      const persisted = {
+        ...record,
+        created_at: "2026-03-18T00:00:00.000Z",
+        updated_at: "2026-03-18T00:00:00.000Z"
+      };
+      savedRecords.set(persisted.binding_id, persisted);
+      return persisted;
+    };
+    const updateDefaultBindingImpl = (_id: string, bindingId: string | null) => {
+      defaultBindingId = bindingId;
+      return createWorkspace({ default_engine_binding: defaultBindingId });
+    };
     const service = new EngineBindingService({
       workspaceRepo: {
         getById: vi.fn(async () => createWorkspace({ default_engine_binding: defaultBindingId })),
-        updateDefaultEngineBinding: vi.fn(async (_id, bindingId) => {
-          defaultBindingId = bindingId;
-          return createWorkspace({ default_engine_binding: defaultBindingId });
-        })
+        updateDefaultEngineBinding: vi.fn(async (id, bindingId) => updateDefaultBindingImpl(id, bindingId)),
+        updateDefaultEngineBindingSync: vi.fn(updateDefaultBindingImpl)
       },
       bindingRepo: {
-        upsert: vi.fn(async (record) => {
-          const persisted = {
-            ...record,
-            created_at: "2026-03-18T00:00:00.000Z",
-            updated_at: "2026-03-18T00:00:00.000Z"
-          };
-          savedRecords.set(persisted.binding_id, persisted);
-          return persisted;
-        }),
+        upsert: vi.fn(async (record) => upsertImpl(record)),
+        upsertSync: vi.fn(upsertImpl),
         getById: vi.fn(async (id) => savedRecords.get(id) ?? null)
       },
       eventPublisher: {
-        publishWithMutation: vi.fn(async (_event, mutate) => await mutate())
+        appendManyWithMutation: fakeAppendManyWithMutation()
       } as any,
       engineTester: {
         testBinding: vi.fn()
@@ -159,14 +180,16 @@ describe("EngineBindingService", () => {
     const service = new EngineBindingService({
       workspaceRepo: {
         getById: vi.fn(async () => workspace),
-        updateDefaultEngineBinding: vi.fn()
+        updateDefaultEngineBinding: vi.fn(),
+        updateDefaultEngineBindingSync: vi.fn()
       },
       bindingRepo: {
         upsert: vi.fn(),
+        upsertSync: vi.fn(),
         getById: vi.fn()
       },
       eventPublisher: {
-        publishWithMutation: vi.fn()
+        appendManyWithMutation: vi.fn()
       } as any,
       engineTester
     });
