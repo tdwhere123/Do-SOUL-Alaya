@@ -296,13 +296,13 @@ describe("routes-config port batch", () => {
 
   it("cleans pasted secrets and env writes when config persistence rejects the mutation", async () => {
     const failingRepo = createMemoryConfigRepo();
-    const patch = vi.fn(async () => {
+    const patchSync = vi.fn(() => {
       throw new Error("repo write failed");
     });
     const harness = await createServiceHarness({
       repo: {
         ...failingRepo,
-        patch
+        patchSync
       }
     });
     const secretPath = path.join(harness.paths.secretsDir, "openai");
@@ -318,34 +318,32 @@ describe("routes-config port batch", () => {
     await expect(readFile(secretPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(harness.paths.envPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     expect(harness.publishedEvents).toHaveLength(0);
-    expect(patch).toHaveBeenCalledTimes(1);
+    expect(patchSync).toHaveBeenCalledTimes(1);
   });
 
   it("does not let an earlier rollback clobber a later paste write for the same config files", async () => {
+    // Gate the first call's atomic publish so the second call queues on the
+    // FS lock; when the first call's persist throws, applyRuntimeEmbeddingConfigFiles
+    // restores the FS files, then the second call proceeds and writes its own
+    // pasted secret. Mirrors the prior design where the gate lived in the
+    // (async) repo.patch override; under #BL-022 the repo write is sync so we
+    // gate at the publish boundary instead.
     const backingRepo = createMemoryConfigRepo();
-    const firstPersistStarted = createDeferred<void>();
-    const firstPersistCanFail = createDeferred<void>();
-    let patchCalls = 0;
-    const patch = vi.fn(
-      async <T extends Record<string, unknown>>(
-        key: string,
-        partial: Partial<T>,
-        defaults: T
-      ): Promise<T> => {
-        patchCalls += 1;
-        if (patchCalls === 1) {
-          firstPersistStarted.resolve();
-          await firstPersistCanFail.promise;
-          throw new Error("first persist failed");
-        }
-        return await backingRepo.patch(key, partial, defaults);
+    const firstPublishStarted = createDeferred<void>();
+    const firstPublishCanFail = createDeferred<void>();
+    let publishCalls = 0;
+    const harness = await createServiceHarness({ repo: backingRepo });
+    const realAppend = harness.appendManyWithMutation
+      .getMockImplementation()!
+      .bind(harness.appendManyWithMutation);
+    harness.appendManyWithMutation.mockImplementation(async (events: any, mutate: any) => {
+      publishCalls += 1;
+      if (publishCalls === 1) {
+        firstPublishStarted.resolve();
+        await firstPublishCanFail.promise;
+        throw new Error("first persist failed");
       }
-    );
-    const harness = await createServiceHarness({
-      repo: {
-        ...backingRepo,
-        patch
-      }
+      return await realAppend(events, mutate);
     });
     const secretPath = path.join(harness.paths.secretsDir, "openai");
 
@@ -354,14 +352,14 @@ describe("routes-config port batch", () => {
       secret_ref_mode: "paste",
       secret_value: "sk-first-secret"
     });
-    await firstPersistStarted.promise;
+    await firstPublishStarted.promise;
     const second = harness.service.patchRuntimeEmbeddingConfig({
       embedding_enabled: true,
       secret_ref_mode: "paste",
       secret_value: "sk-second-secret"
     });
 
-    firstPersistCanFail.resolve();
+    firstPublishCanFail.resolve();
     await expect(first).rejects.toThrow("first persist failed");
     await expect(second).resolves.toMatchObject({
       embedding_enabled: true,
@@ -550,27 +548,38 @@ async function createServiceHarness(options: {
   readonly service: ReturnType<typeof createConfigService>;
   readonly paths: AlayaConfigPaths;
   readonly publishedEvents: EventLogEntry[];
+  readonly appendManyWithMutation: ReturnType<typeof vi.fn>;
+  // Back-compat alias so older test bodies that grep for `publishWithMutation`
+  // still resolve to the same spy. New tests should reach for
+  // `appendManyWithMutation` directly.
   readonly publishWithMutation: ReturnType<typeof vi.fn>;
 }> {
   const repo = options.repo ?? createMemoryConfigRepo();
   const configDir = await mkdtemp(path.join(tmpdir(), "daemon-config-"));
   const paths = resolveAlayaConfigPaths(configDir);
   const publishedEvents: EventLogEntry[] = [];
-  const publishWithMutation = vi.fn(
+  const appendManyWithMutation = vi.fn(
     async <T>(
-      event: Omit<EventLogEntry, "event_id" | "created_at">,
-      mutate: (entry: EventLogEntry) => Promise<T>
+      events: readonly Omit<EventLogEntry, "event_id" | "created_at">[],
+      mutate: (entries: readonly EventLogEntry[]) => T
     ): Promise<T> => {
-      const entry = {
-        ...event,
-        event_id: `event-${publishedEvents.length + 1}`,
-        created_at: "2026-05-01T00:00:00.000Z"
-      } as EventLogEntry;
-      publishedEvents.push(entry);
+      const persisted = events.map(
+        (event, idx) =>
+          ({
+            ...event,
+            event_id: `event-${publishedEvents.length + idx + 1}`,
+            created_at: "2026-05-01T00:00:00.000Z"
+          }) as EventLogEntry
+      );
+      // Snapshot length before the mutate so a thrown mutate cleanly rolls
+      // back the appended rows (mirrors EventPublisher.appendManyWithMutation
+      // transactional semantics in tests that don't wire a real publisher).
+      const before = publishedEvents.length;
+      publishedEvents.push(...persisted);
       try {
-        return await mutate(entry);
+        return mutate(persisted);
       } catch (error) {
-        publishedEvents.pop();
+        publishedEvents.length = before;
         throw error;
       }
     }
@@ -579,7 +588,7 @@ async function createServiceHarness(options: {
   return {
     service: createConfigService({
       configRepo: repo,
-      eventPublisher: { publishWithMutation },
+      eventPublisher: { appendManyWithMutation },
       configPathsProvider: () => paths,
       clock: () => "2026-05-01T00:00:00.000Z",
       platform: options.platform,
@@ -588,27 +597,40 @@ async function createServiceHarness(options: {
     }),
     paths,
     publishedEvents,
-    publishWithMutation
+    appendManyWithMutation,
+    publishWithMutation: appendManyWithMutation
   };
 }
 
 function createMemoryConfigRepo(): ConfigRepo {
   const values = new Map<string, unknown>();
+  const getSync = <T,>(key: string): T | null => (values.get(key) as T | undefined) ?? null;
+  const setSync = <T,>(key: string, value: T): void => {
+    values.set(key, value);
+  };
+  const patchSync = <T extends Record<string, unknown>>(
+    key: string,
+    partial: Partial<T>,
+    defaults: T
+  ): T => {
+    const current = getSync<T>(key) ?? defaults;
+    const next = { ...current, ...partial } as T;
+    setSync(key, next);
+    return next;
+  };
   return {
-    get: async <T>(key: string): Promise<T | null> => (values.get(key) as T | undefined) ?? null,
+    get: async <T>(key: string): Promise<T | null> => getSync<T>(key),
+    getSync,
     set: async <T>(key: string, value: T): Promise<void> => {
-      values.set(key, value);
+      setSync(key, value);
     },
+    setSync,
     patch: async <T extends Record<string, unknown>>(
       key: string,
       partial: Partial<T>,
       defaults: T
-    ): Promise<T> => {
-      const current = (values.get(key) as T | undefined) ?? defaults;
-      const next = { ...current, ...partial } as T;
-      values.set(key, next);
-      return next;
-    }
+    ): Promise<T> => patchSync(key, partial, defaults),
+    patchSync
   };
 }
 
