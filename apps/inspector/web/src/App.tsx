@@ -4,6 +4,7 @@ import { getInspectorToken, setInspectorToken, setUnauthorizedHandler, setWorksp
 
 import ConfigPage from "./pages/Config";
 import GraphPage from "./pages/Graph";
+import ProposalsPage from "./pages/Proposals";
 import StatusPage from "./pages/Status";
 
 import Layout from "./components/Layout";
@@ -78,6 +79,7 @@ export function AppContent() {
       <Route element={<Layout />}>
         <Route path="/config" element={<ConfigPage />} />
         <Route path="/graph" element={<GraphPage />} />
+        <Route path="/proposals" element={<ProposalsPage />} />
         <Route path="/status" element={<StatusPage />} />
         <Route path="/" element={<Navigate to="/config" replace />} />
       </Route>
