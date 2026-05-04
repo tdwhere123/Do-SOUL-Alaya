@@ -5,17 +5,22 @@ import {
   DirtyStatePanicPayloadSchema,
   DirtyStatePanicTriggerSchema,
   ObligationTrustNarrativeEventType,
+  ToolWorkerEventType,
+  WorkerStateChangedPayloadSchema,
   type AffectedDataScopeEntry,
   type DelegatedWorkerRun,
   type DirtyStateDossier,
   type DirtyStatePanicTrigger,
-  type EventLogEntry
+  type EventLogEntry,
+  type WorkerRunState
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
 import type { EventPublisher } from "./event-publisher.js";
+import { assertWorkerTransition } from "./worker-run-state-machine.js";
 
 export interface DirtyStateDossierRepoPort {
-  create(dossier: DirtyStateDossier): Promise<Readonly<DirtyStateDossier>>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  createSync(dossier: DirtyStateDossier): Readonly<DirtyStateDossier>;
   deleteById(dossierId: string): Promise<void>;
   findByWorkspace(workspaceId: string): Promise<readonly Readonly<DirtyStateDossier>[]>;
   findByWorkerRun(workerRunId: string): Promise<readonly Readonly<DirtyStateDossier>[]>;
@@ -23,21 +28,24 @@ export interface DirtyStateDossierRepoPort {
 
 export interface DirtyStatePanicWorkerRunRepoPort {
   getById(workerRunId: string): Promise<Readonly<DelegatedWorkerRun> | null>;
-}
-
-export interface DirtyStatePanicWorkerRunLifecyclePort {
-  freeze(
+  /**
+   * Sync sibling for atomic publish + mutation (#BL-022). The dirty-state
+   * panic transitions the worker_run to `frozen` inside the same SQLite
+   * transaction as the dossier insert and both EventLog rows
+   * (panic + worker.state_changed).
+   */
+  updateStateSync(
     workerRunId: string,
-    panicSource: string,
-    summary: string
-  ): Promise<Readonly<DelegatedWorkerRun>>;
+    expectedState: WorkerRunState,
+    nextState: WorkerRunState,
+    updatedAt: string
+  ): Readonly<DelegatedWorkerRun>;
 }
 
 export interface DirtyStatePanicServiceDependencies {
   readonly workerRunRepo: DirtyStatePanicWorkerRunRepoPort;
-  readonly eventPublisher: Pick<EventPublisher, "publishWithMutation">;
+  readonly eventPublisher: Pick<EventPublisher, "appendManyWithMutation">;
   readonly dossierRepo: DirtyStateDossierRepoPort;
-  readonly workerRunLifecycle: DirtyStatePanicWorkerRunLifecyclePort;
   readonly generateDossierId?: () => string;
   readonly now?: () => string;
 }
@@ -54,22 +62,30 @@ export class DirtyStatePanicService {
   }): Promise<Readonly<DirtyStateDossier>> {
     const workerRun = await this.requireWorkerRun(params.workerRunId);
     const dossier = this.buildDossier(workerRun, params);
-    return await this.deps.eventPublisher.publishWithMutation(
-      this.buildPanicEvent(dossier),
-      async () => {
-        const persisted = await this.deps.dossierRepo.create(dossier);
+    // Validate the worker_run -> frozen transition before opening the
+    // transaction so a dossier is never inserted for a transition that
+    // worker-run-state-machine would refuse.
+    assertWorkerTransition(workerRun.state, "frozen");
+    const panicEvent = this.buildPanicEvent(dossier);
+    const stateChangedEvent = this.buildWorkerStateChangedEvent(workerRun, dossier);
+    const updatedAt = dossier.created_at;
 
-        try {
-          await this.deps.workerRunLifecycle.freeze(
-            workerRun.worker_run_id,
-            dossier.panic_source,
-            dossier.panic_summary
-          );
-        } catch (freezeError) {
-          await this.deps.dossierRepo.deleteById(dossier.dossier_id);
-          throw freezeError;
-        }
-
+    // Atomic: panic + worker.state_changed EventLog rows, dossier INSERT,
+    // and worker_run state UPDATE all commit (or roll back) as one SQLite
+    // transaction. Replaces the prior nested
+    // `publishWithMutation(panicEvent, () => publishWithMutation(stateChangedEvent, ...))`
+    // pattern flagged by finding-2 — nested publish broke the
+    // single-transaction guarantee.
+    return await this.deps.eventPublisher.appendManyWithMutation(
+      [panicEvent, stateChangedEvent],
+      () => {
+        const persisted = this.deps.dossierRepo.createSync(dossier);
+        this.deps.workerRunRepo.updateStateSync(
+          workerRun.worker_run_id,
+          workerRun.state,
+          "frozen",
+          updatedAt
+        );
         return persisted;
       }
     );
@@ -106,6 +122,30 @@ export class DirtyStatePanicService {
       affected_data_scope: parseAffectedScope(params.affectedScope),
       created_at: this.resolveNow()
     });
+  }
+
+  private buildWorkerStateChangedEvent(
+    workerRun: Readonly<DelegatedWorkerRun>,
+    dossier: Readonly<DirtyStateDossier>
+  ): Omit<EventLogEntry, "event_id" | "created_at"> {
+    const payload = WorkerStateChangedPayloadSchema.parse({
+      workerId: workerRun.worker_run_id,
+      state: "frozen",
+      previousState: workerRun.state,
+      panicSource: dossier.panic_source,
+      panicSummary: dossier.panic_summary
+    });
+
+    return {
+      event_type: ToolWorkerEventType.WORKER_STATE_CHANGED,
+      entity_type: "worker_run",
+      entity_id: workerRun.worker_run_id,
+      workspace_id: workerRun.workspace_id,
+      run_id: workerRun.principal_run_id,
+      caused_by: "worker_lifecycle",
+      revision: 0,
+      payload_json: payload
+    };
   }
 
   private buildPanicEvent(

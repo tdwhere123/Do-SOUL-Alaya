@@ -19,6 +19,13 @@ export interface WorkerRunRepo {
     nextState: WorkerRunState,
     updatedAt: string
   ): Promise<Readonly<DelegatedWorkerRun>>;
+  /** Synchronous variant for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
+  updateStateSync?(
+    workerRunId: string,
+    expectedState: WorkerRunState,
+    nextState: WorkerRunState,
+    updatedAt: string
+  ): Readonly<DelegatedWorkerRun>;
   insert(run: DelegatedWorkerRun): Promise<Readonly<DelegatedWorkerRun>>;
   insertIfNoActiveForPrincipal(
     principalRunId: string,
@@ -321,6 +328,16 @@ export class SqliteWorkerRunRepo implements WorkerRunRepo {
     nextState: WorkerRunState,
     updatedAt: string
   ): Promise<Readonly<DelegatedWorkerRun>> {
+    return this.updateStateSync(workerRunId, expectedState, nextState, updatedAt);
+  }
+
+  /** Synchronous variant for atomic publish + mutation (#BL-022). */
+  public updateStateSync(
+    workerRunId: string,
+    expectedState: WorkerRunState,
+    nextState: WorkerRunState,
+    updatedAt: string
+  ): Readonly<DelegatedWorkerRun> {
     const parsedWorkerRunId = parseNonEmptyString(workerRunId, "worker run id");
     const parsedExpectedState = WorkerRunStateSchema.parse(expectedState);
     const parsedNextState = WorkerRunStateSchema.parse(nextState);
@@ -350,16 +367,16 @@ export class SqliteWorkerRunRepo implements WorkerRunRepo {
       );
     }
 
-    const updated = await this.getById(parsedWorkerRunId);
+    const row = this.getByIdStatement.get(parsedWorkerRunId) as WorkerRunRow | undefined;
 
-    if (updated === null) {
+    if (row === undefined) {
       throw new StorageError(
         "NOT_FOUND",
         `Worker run ${parsedWorkerRunId} was not found after update.`
       );
     }
 
-    return updated;
+    return this.mapRowToDomain(row);
   }
 
   public async findActiveByPrincipalRunId(

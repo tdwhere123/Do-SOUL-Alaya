@@ -15,6 +15,8 @@ interface PathGraphSnapshotRow {
 
 export interface PathGraphSnapshotRepo {
   create(snapshot: PathGraphSnapshot): Promise<Readonly<PathGraphSnapshot>>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  createSync(snapshot: PathGraphSnapshot): Readonly<PathGraphSnapshot>;
   findLatest(workspaceId: string): Promise<Readonly<PathGraphSnapshot> | null>;
   findHistory(workspaceId: string, limit: number): Promise<readonly Readonly<PathGraphSnapshot>[]>;
   deleteOlderThan(workspaceId: string, beforeDate: string): Promise<number>;
@@ -75,6 +77,11 @@ export class SqlitePathGraphSnapshotRepo implements PathGraphSnapshotRepo {
   }
 
   public async create(snapshot: PathGraphSnapshot): Promise<Readonly<PathGraphSnapshot>> {
+    return this.createSync(snapshot);
+  }
+
+  /** Synchronous variant for atomic publish + mutation (#BL-022). */
+  public createSync(snapshot: PathGraphSnapshot): Readonly<PathGraphSnapshot> {
     const parsedSnapshot = parsePathGraphSnapshot(snapshot);
 
     try {
@@ -92,15 +99,26 @@ export class SqlitePathGraphSnapshotRepo implements PathGraphSnapshotRepo {
       );
     }
 
-    const persistedSnapshot = await this.findById(parsedSnapshot.snapshot_id);
-    if (persistedSnapshot === null) {
+    let row: PathGraphSnapshotRow | undefined;
+    try {
+      row = this.findByIdStatement.get(parsedSnapshot.snapshot_id) as
+        | PathGraphSnapshotRow
+        | undefined;
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to load path graph snapshot ${parsedSnapshot.snapshot_id}.`,
+        error
+      );
+    }
+    if (row === undefined) {
       throw new StorageError(
         "QUERY_FAILED",
         `Inserted path graph snapshot ${parsedSnapshot.snapshot_id} could not be reloaded.`
       );
     }
 
-    return persistedSnapshot;
+    return parsePathGraphSnapshotRow(row);
   }
 
   public async findLatest(workspaceId: string): Promise<Readonly<PathGraphSnapshot> | null> {

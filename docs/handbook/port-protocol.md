@@ -109,20 +109,13 @@ card, completion report, or backlog.
 These are intentional, reviewed deviations from the vendor snapshot.
 They are not precedent for new clean-room rewrites.
 
-### #BL-021 — EventPublisher mutation audit-id handoff
-
-- Source: `vendor/do-what-new-snapshot/packages/core/src/event-publisher.ts`
-- Target: `packages/core/src/event-publisher.ts`
-- Vendor shape: `publishWithMutation(event, mutate: () => Promise<T>)`
-- Alaya shape: `publishWithMutation(event, mutate: (entry: EventLogEntry) => Promise<T>)`
-- Reason: Alaya's trust-state SQL rows must persist the exact EventLog
-  `event_id` as `audit_event_id` inside the same rollback window as
-  delivery / usage persistence. Returning to the vendor shape would
-  require a manual publish / rollback path and would weaken the
-  EventLog-first storage contract.
-- Synchronization requirement: every local publisher port that exposes
-  `publishWithMutation` must keep the `entry` callback argument in its
-  type and tests.
+(No active divergences. `#BL-021` was retired by the v0.1-closeout-a2
+EventPublisher rework: `appendManyWithMutation(eventInputs, mutate)`
+now hands the persisted `EventLogEntry[]` to a synchronous mutate
+callback inside a single SQLite transaction, so trust-state and other
+recorders persist the exact `event_id` without needing a per-port
+audit-id callback divergence. See `#BL-022` closure entry in
+`backlog.md` for the full migration commit chain.)
 
 ## Anti-Patterns
 

@@ -59,8 +59,7 @@ export function createWorkerRuntimeWiring(input: {
   const dirtyStatePanicService = new DirtyStatePanicService({
     workerRunRepo: input.workerRunRepo,
     eventPublisher: input.eventPublisher,
-    dossierRepo: input.dirtyStateDossierRepo,
-    workerRunLifecycle: workerRunLifecycleService
+    dossierRepo: input.dirtyStateDossierRepo
   });
   const workerSafetyGate = new WorkerSafetyGate({
     safetyPort: input.workerSafetyPort

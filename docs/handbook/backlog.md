@@ -6,11 +6,83 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-025` (`#BL-022` taken by
-p5-system-review-r3 EventPublisher v0.2 deferral; `#BL-023`/`#BL-024`
-were resolved in r1 / r2).
+sequence. **Next available number**: `#BL-027` (`#BL-022` was opened by
+p5-system-review-r3 as an EventPublisher v0.2 deferral and closed in
+v0.1-closeout-a2; `#BL-023`/`#BL-024` were resolved in r1 / r2;
+`#BL-025` and `#BL-026` were opened in v0.1-closeout-a2 as the two
+non-behavioural EventPublisher cleanups deferred to v0.2).
 
 ## Open Issues
+
+### #BL-025 — Drop required-but-ignored `revision` from `EventPublisher` input shape
+
+**Opened by**: v0.1-closeout-a2 (BL-022 fix-loop, i3)
+
+**Symptom**: `EventPublisher.publish` / `appendManyWithMutation` /
+`EventPublisherEventLogRepoPort.append` all type `event_input` as
+`Omit<EventLogEntry, "event_id" | "created_at">`, which still requires
+the caller to supply `revision`. After #BL-022 the revision is computed
+inside the SQLite transaction by `MAX(revision) + 1` and the
+caller-supplied value is silently overwritten. ~50 source call sites and
+~50 test fixtures pass ceremonial `revision: 0` / `revision,` /
+`revision: revisionCursor()` for no effect.
+
+**Why deferred (not closed in v0.1)**: behavioural fix for #BL-022 is
+already shipped — the race window is gone. The remaining work is purely
+type ergonomics: introduce `EventPublisherInput =
+Omit<EventLogEntry, "event_id" | "created_at" | "revision">` and remove
+the now-dead `revision: ...` lines + dead `getNextRevision()` /
+`revisionCursor()` calls. Mechanical surface ≈ 100 sites; an A2
+in-flight regex pass corrupted ~50 type expressions before being
+reverted (see `.do-it/findings/a2.md` finding-8). v0.2 should redo this
+with file-by-file `Edit` calls, not regex.
+
+**Close condition**:
+
+- `EventPublisherInput` type alias added to
+  `packages/core/src/event-publisher.ts` and exported.
+- All `eventLogRepo.append` / `publish` / `publishWithMutation` /
+  `publishManyWithMutation` / `appendManyWithMutation` callers stop
+  passing `revision` (search:
+  `rg '^\s+revision[:,]' packages/ apps/` returns 0 outside
+  `event-publisher.ts` / `event-log-repo.ts`).
+- Dead revision-source helpers (`getNextRevision`, `revisionCursor`,
+  `nextRevision`, `maxRevision` locals) removed where they were used
+  only to populate the dropped field.
+- `pnpm exec tsc --noEmit -p packages/core/tsconfig.json` clean.
+- All vitest projects green.
+
+### #BL-026 — Migrate `AuditorEventLogPort` adapter off legacy `publishWithMutation`
+
+**Opened by**: v0.1-closeout-a2 (BL-022 fix-loop, i1)
+
+**Symptom**: `apps/core-daemon/src/garden-runtime.ts` wires the soul-
+side Auditor (`packages/soul/src/garden/auditor.ts`) through an
+`AuditorEventLogPort` adapter that still exposes the legacy
+`publishWithMutation(event, async () => …)` signature. The legacy path
+has the BL-022 race the rest of the runtime no longer has — the only
+in-tree producer keeping it alive is this single adapter. The auditor's
+direct write site (path-graph snapshot) IS migrated, so no auditor-
+issued event currently runs through the legacy path; but the adapter
+shape forces `publishWithMutation` to remain on `EventPublisher`.
+
+**Why deferred (not closed in v0.1)**: closing requires changing
+`AuditorEventLogPort` shape across all auditor port consumers in
+`packages/soul/`, which sits in a different package boundary than
+A2's nominal scope. Changing it inside A2 would have made the diff
+cross-package and increased D2 review surface for no behavioural gain
+(the actual race-prone write site is migrated).
+
+**Close condition**:
+
+- `AuditorEventLogPort` exposes `appendManyWithMutation` (sync mutate)
+  instead of `publishWithMutation`.
+- `apps/core-daemon/src/garden-runtime.ts` adapter rewritten to call
+  through `appendManyWithMutation`.
+- `EventPublisher.publishWithMutation` and `publishManyWithMutation`
+  deleted (currently `@deprecated` and unused outside the auditor
+  adapter).
+- All vitest projects green.
 
 ## Recently Resolved by p5-system-review-r1 (2026-05-03)
 
@@ -156,46 +228,58 @@ production-grade key management; v0.1 is a single-user local-first
 build where env variables and `~/.config/alaya/.env` with strict file
 permissions are sufficient.
 
+## Resolved (short closure summaries)
+
 ### #BL-022 — EventPublisher port atomicity + EventLog revision transaction
 
-**Status**: Deferred to v0.2 (user-confirmed in p5-system-review-r3)
-**Close condition**: v0.2 transaction model adds
-`EventPublisherEventLogRepoPort.appendManyWithMutation(eventInputs, mutate)`
-where `mutate` is a *synchronous* callback wrapped in a single
-`connection.transaction(...)`; EventLog revision computation moves
-inside that transaction (replacing the current `getNextRevision` async
-read-modify-write window in `packages/storage/src/repos/event-log-repo.ts`);
-`SqliteEventLogRepo` provides the implementation; the ~12 service
-callers migrate from `publishWithMutation` to the atomic port.
+**Status**: Closed in v0.1-closeout-a2 (2026-05-04).
 
-Until v0.2 lands the new shape:
-- correctness is backed by SQLite CAS plus the
-  `unique(entity_type, entity_id, revision)` index (migration 028);
-- the registered `EventPublisher mutation audit-id divergence` in
-  `#BL-021` documents the gap;
-- p5-system-review-r3 explicitly chose to defer rather than retrofit
-  because the port shape forces every existing `mutate` implementation
-  to become synchronous (no `await` allowed inside the transaction
-  callback) and that migration is appropriate as part of the v0.2
-  transaction-model rewrite, not a v0.1 patch.
+`EventPublisher.appendManyWithMutation(eventInputs, mutate)` was added
+in commit `4dcf177` as the atomic primitive: the EventLog row append(s)
+and the synchronous mutate callback both run inside a single
+`SqliteEventLogRepo.transactional()` wrapper, so a throw from mutate
+triggers SQLite rollback and removes the unnotified EventLog rows
+within the same transaction. The unique index on
+`(entity_type, entity_id, revision)` becomes belt-and-suspenders
+instead of being load-bearing for concurrency correctness.
+
+The mutate callback now receives the persisted entries with their
+final `event_id`, so trust-state-style records persist `audit_event_id`
+exactly once with no divergence between EventLog row and consumer row.
+This also retired the `#BL-021` registered divergence (see
+`port-protocol.md` Registered v0.1 Divergences).
+
+All in-tree producer call sites migrated:
+
+- `dccdae4` — trust-state recorder (delivery/usage/counter)
+- `ae237aa` — run-service / worker-run-lifecycle / deferred-obligation
+- `327639e` — engine-binding / surface-drift services
+- `5961376` — constitutional-fragment-service
+- `3543c35` — claim-service
+- `e2f02c1` — surface-binding-service
+- `660268a` — garden-runtime path-graph snapshot
+- `a5e7e8b` — dirty-state-panic-service (collapses prior nested
+  publishWithMutation that broke single-transaction semantics)
+- `e5d8576` — runtime-embedding config (FS write outside the
+  transaction; SQL patch atomic via the new primitive — see
+  `.do-it/findings/a2.md` finding-1)
+- `9cf6bf0` — workspace-service (all five publish sites; bootstrap
+  branch sequentializes path-relation inserts inside the transaction
+  per `.do-it/findings/a2.md`)
+- `6ae6dbd` — tsc-strict gaps in test fixtures + DirtyStatePanic
+  daemon wiring cleanup
+
+`EventPublisher.publishWithMutation` and `publishManyWithMutation` are
+retained on the publisher class for the `auditorEventLogPort` in
+`apps/core-daemon/src/garden-runtime.ts:177`. The soul-side `Auditor`
+consumes that as an async `AuditorEventLogPort.publishWithMutation`
+port and migrating the soul Auditor to a sync mutate is a separate
+v0.2 cleanup. The BL-022 race for the path-graph-snapshot caller
+(the only direct producer in garden-runtime.ts) is closed.
 
 Originally raised in `p5-system-review-r1` as MR-I07 + MR-I09.
 
-## Registered Divergences
 
-### Accepted divergences (registered, not closed)
-
-#### #BL-021 — EventPublisher mutation audit-id handoff
-
-Resolved by explicitly documenting and synchronizing Alaya's
-`publishWithMutation(entry)` divergence from the vendor snapshot. The
-upstream `EventPublisher` mutation callback is zero-argument, but Alaya
-trust-state persistence must store the exact EventLog `event_id` as
-`audit_event_id` in the delivery / usage SQL rows before notification.
-All local publisher ports now accept the appended entry, and the
-divergence is registered in `docs/handbook/port-protocol.md`.
-
-## Resolved (short closure summaries)
 
 ### #BL-019 — Embedding-supplement paste secret_ref pipeline
 

@@ -13,7 +13,9 @@ interface Harness {
   readonly repo: DeferredObligationRepoPort & {
     readonly getById: ReturnType<typeof vi.fn>;
     readonly create: ReturnType<typeof vi.fn>;
+    readonly createSync: ReturnType<typeof vi.fn>;
     readonly updateState: ReturnType<typeof vi.fn>;
+    readonly updateStateSync: ReturnType<typeof vi.fn>;
     readonly findActiveByRun: ReturnType<typeof vi.fn>;
     readonly findActiveByWorkspace: ReturnType<typeof vi.fn>;
     readonly findExpired: ReturnType<typeof vi.fn>;
@@ -76,7 +78,7 @@ describe("DeferredObligationService", () => {
 
     expect(fulfilled.state).toBe("fulfilled");
     expect(fulfilled.fulfilled_at).toBe(FIXED_NOW);
-    expect(harness.repo.updateState).toHaveBeenCalledWith("obligation-1", "pending", "fulfilled", {
+    expect(harness.repo.updateStateSync).toHaveBeenCalledWith("obligation-1", "pending", "fulfilled", {
       fulfilledAt: FIXED_NOW
     });
     expect(harness.events).toHaveLength(1);
@@ -151,45 +153,47 @@ function createHarness(seed: readonly DeferredObligation[] = []): Harness {
   );
   const events: Array<Omit<EventLogEntry, "event_id" | "created_at">> = [];
 
+  const createImpl = (obligation: DeferredObligation): DeferredObligation => {
+    const created = Object.freeze({ ...obligation });
+    store.set(created.obligation_id, created);
+    return created;
+  };
+  const updateStateImpl = (
+    obligationId: string,
+    expectedState: DeferredObligation["state"],
+    nextState: DeferredObligation["state"],
+    options?: {
+      readonly fulfilledAt?: string;
+    }
+  ): DeferredObligation => {
+    const existing = store.get(obligationId);
+
+    if (existing === undefined) {
+      throw new CoreError("NOT_FOUND", `Deferred obligation ${obligationId} not found`);
+    }
+
+    if (existing.state !== expectedState) {
+      throw new CoreError(
+        "CONFLICT",
+        `Deferred obligation ${obligationId} state mismatch: expected ${expectedState}, found ${existing.state}`
+      );
+    }
+
+    const updated = Object.freeze({
+      ...existing,
+      state: nextState,
+      fulfilled_at: nextState === "fulfilled" ? options?.fulfilledAt ?? FIXED_NOW : undefined
+    });
+    store.set(obligationId, updated);
+    return updated;
+  };
+
   const repo = {
     getById: vi.fn(async (obligationId: string) => store.get(obligationId) ?? null),
-    create: vi.fn(async (obligation: DeferredObligation) => {
-      const created = Object.freeze({ ...obligation });
-      store.set(created.obligation_id, created);
-      return created;
-    }),
-    updateState: vi.fn(
-      async (
-        obligationId: string,
-        expectedState: DeferredObligation["state"],
-        nextState: DeferredObligation["state"],
-        options?: {
-          readonly fulfilledAt?: string;
-        }
-      ) => {
-        const existing = store.get(obligationId);
-
-        if (existing === undefined) {
-          throw new CoreError("NOT_FOUND", `Deferred obligation ${obligationId} not found`);
-        }
-
-        if (existing.state !== expectedState) {
-          throw new CoreError(
-            "CONFLICT",
-            `Deferred obligation ${obligationId} state mismatch: expected ${expectedState}, found ${existing.state}`
-          );
-        }
-
-        const updated = Object.freeze({
-          ...existing,
-          state: nextState,
-          fulfilled_at:
-            nextState === "fulfilled" ? options?.fulfilledAt ?? FIXED_NOW : undefined
-        });
-        store.set(obligationId, updated);
-        return updated;
-      }
-    ),
+    create: vi.fn(async (obligation: DeferredObligation) => createImpl(obligation)),
+    createSync: vi.fn(createImpl),
+    updateState: vi.fn(async (...args: Parameters<typeof updateStateImpl>) => updateStateImpl(...args)),
+    updateStateSync: vi.fn(updateStateImpl),
     findActiveByRun: vi.fn(async (runId: string) =>
       [...store.values()].filter((obligation) => {
         return obligation.source_run_id === runId && obligation.state === "pending";
@@ -209,18 +213,26 @@ function createHarness(seed: readonly DeferredObligation[] = []): Harness {
 
   const publishWithMutation = vi.fn(
     async (
-      eventInput: Omit<EventLogEntry, "event_id" | "created_at">,
-      mutate: () => Promise<DeferredObligation>
+      eventInputs: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at">>,
+      mutate: (entries: readonly EventLogEntry[]) => DeferredObligation
     ) => {
-      events.push(eventInput);
-      return await mutate();
+      for (const event of eventInputs) {
+        events.push(event);
+      }
+      const persisted = eventInputs.map((entry, idx) => ({
+        event_id: `evt_${idx}`,
+        created_at: FIXED_NOW,
+        ...entry
+      }));
+      return mutate(persisted);
     }
   );
 
   const service = new DeferredObligationService({
     repo,
     eventPublisher: {
-      publishWithMutation
+      // Migrated to atomic appendManyWithMutation (#BL-022).
+      appendManyWithMutation: publishWithMutation
     } as unknown as EventPublisher,
     now: () => FIXED_NOW,
     generateObligationId: () => "obligation-1"

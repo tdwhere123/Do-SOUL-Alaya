@@ -34,10 +34,25 @@ export interface WorkspaceRepoPort {
     readonly default_engine_class: Workspace["default_engine_class"];
     readonly workspace_state: Workspace["workspace_state"];
   }): Promise<Workspace>;
+  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
+  createSync(data: {
+    readonly workspace_id: string;
+    readonly name: string;
+    readonly root_path: string;
+    readonly workspace_kind: Workspace["workspace_kind"];
+    readonly repo_path?: Workspace["repo_path"];
+    readonly default_engine_binding: Workspace["default_engine_binding"];
+    readonly default_engine_class: Workspace["default_engine_class"];
+    readonly workspace_state: Workspace["workspace_state"];
+  }): Workspace;
   getById(id: string): Promise<Workspace | null>;
   list(): Promise<readonly Workspace[]>;
   delete(id: string): Promise<void>;
+  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
+  deleteSync(id: string): void;
   updateDefaultEngineClass(id: string, engineClass: Workspace["default_engine_class"]): Promise<Workspace>;
+  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
+  updateDefaultEngineClassSync(id: string, engineClass: Workspace["default_engine_class"]): Workspace;
 }
 
 export interface WorkspaceRunRepoPort {
@@ -53,6 +68,15 @@ export interface WorkspaceEngineConfigRepoPort {
     readonly workspace: Workspace;
     readonly binding: EngineBindingRecord;
   }>;
+  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
+  upsertConversationBindingAndSetDefaultEngineClassSync(input: {
+    readonly workspace_id: string;
+    readonly binding_id: string;
+    readonly binding: EngineBindingInput;
+  }): {
+    readonly workspace: Workspace;
+    readonly binding: EngineBindingRecord;
+  };
 }
 
 export interface WorkspaceBootstrappingPlannerPort {
@@ -64,11 +88,17 @@ export interface WorkspaceBootstrappingPlannerPort {
 
 export interface WorkspacePathRelationRepoPort {
   create(relation: PathRelation): Promise<Readonly<PathRelation>>;
+  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
+  createSync(relation: PathRelation): Readonly<PathRelation>;
 }
 
 export interface WorkspaceBootstrappingRecordRepoPort {
   create(record: BootstrappingRecord): Promise<Readonly<BootstrappingRecord>>;
+  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
+  createSync(record: BootstrappingRecord): Readonly<BootstrappingRecord>;
   findByWorkspace(workspaceId: string): Promise<Readonly<BootstrappingRecord> | null>;
+  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
+  findByWorkspaceSync(workspaceId: string): Readonly<BootstrappingRecord> | null;
 }
 
 export interface WorkspaceServiceDependencies {
@@ -97,17 +127,16 @@ export class WorkspaceService {
     const parsed = parseCreateWorkspaceInput(input);
     const workspaceId = `ws_${randomUUID()}`;
     const bootstrappingDeps = this.resolveBootstrappingDependencies();
-    const createWorkspaceMutation = () =>
-      this.dependencies.workspaceRepo.create({
-        workspace_id: workspaceId,
-        name: parsed.name,
-        root_path: parsed.root_path,
-        workspace_kind: parsed.workspace_kind,
-        repo_path: parsed.repo_path ?? null,
-        default_engine_binding: parsed.default_engine_binding ?? null,
-        default_engine_class: null,
-        workspace_state: WorkspaceState.ACTIVE
-      });
+    const createWorkspaceArgs = {
+      workspace_id: workspaceId,
+      name: parsed.name,
+      root_path: parsed.root_path,
+      workspace_kind: parsed.workspace_kind,
+      repo_path: parsed.repo_path ?? null,
+      default_engine_binding: parsed.default_engine_binding ?? null,
+      default_engine_class: null,
+      workspace_state: WorkspaceState.ACTIVE
+    } as const;
     const workspaceCreatedEvent = this.buildWorkspaceCreatedEvent({
       workspaceId,
       name: parsed.name,
@@ -115,12 +144,16 @@ export class WorkspaceService {
     });
 
     if (bootstrappingDeps === null) {
-      return await this.dependencies.eventPublisher.publishWithMutation(
-        workspaceCreatedEvent,
-        createWorkspaceMutation
+      return await this.dependencies.eventPublisher.appendManyWithMutation(
+        [workspaceCreatedEvent],
+        () => this.dependencies.workspaceRepo.createSync(createWorkspaceArgs)
       );
     }
 
+    // Pre-compute the bootstrap plan outside the SQLite transaction so its
+    // async planner stays async. The findByWorkspace check inside the mutate
+    // remains idempotent and now uses `findByWorkspaceSync` so the whole
+    // mutate is synchronous.
     const existingBootstrappingRecord = await bootstrappingDeps.bootstrappingRecordRepo.findByWorkspace(
       workspaceId
     );
@@ -133,40 +166,27 @@ export class WorkspaceService {
         ? [workspaceCreatedEvent]
         : [workspaceCreatedEvent, this.buildBootstrappingPathsPlantedEvent(bootstrapPlan.record)];
 
-    return await this.dependencies.eventPublisher.publishManyWithMutation(events, async () => {
-      let createdWorkspace: Workspace | null = null;
+    return await this.dependencies.eventPublisher.appendManyWithMutation(events, () => {
+      // All four mutations (workspace.create, bootstrap.findByWorkspace,
+      // path_relations.create xN, bootstrap.create) commit (or roll back)
+      // in one SQLite transaction. The prior async manual rollback of
+      // workspace.delete on bootstrap failure is no longer needed — any
+      // throw inside this callback triggers the SQLite rollback, undoing
+      // the workspace insert atomically.
+      const createdWorkspace = this.dependencies.workspaceRepo.createSync(createWorkspaceArgs);
+      const persistedBootstrappingRecord =
+        bootstrappingDeps.bootstrappingRecordRepo.findByWorkspaceSync(createdWorkspace.workspace_id);
 
-      try {
-        createdWorkspace = await createWorkspaceMutation();
-        const persistedBootstrappingRecord =
-          await bootstrappingDeps.bootstrappingRecordRepo.findByWorkspace(createdWorkspace.workspace_id);
-
-        if (persistedBootstrappingRecord !== null || bootstrapPlan === null) {
-          return createdWorkspace;
-        }
-
-        await Promise.all(
-          bootstrapPlan.relations.map(
-            async (relation) => await bootstrappingDeps.pathRelationRepo.create(relation)
-          )
-        );
-
-        await bootstrappingDeps.bootstrappingRecordRepo.create(bootstrapPlan.record);
+      if (persistedBootstrappingRecord !== null || bootstrapPlan === null) {
         return createdWorkspace;
-      } catch (error) {
-        if (createdWorkspace !== null) {
-          try {
-            await this.dependencies.workspaceRepo.delete(createdWorkspace.workspace_id);
-          } catch (rollbackError) {
-            throw new AggregateError(
-              [error, rollbackError],
-              `Workspace bootstrap rollback failed for ${createdWorkspace.workspace_id}.`
-            );
-          }
-        }
-
-        throw error;
       }
+
+      for (const relation of bootstrapPlan.relations) {
+        bootstrappingDeps.pathRelationRepo.createSync(relation);
+      }
+
+      bootstrappingDeps.bootstrappingRecordRepo.createSync(bootstrapPlan.record);
+      return createdWorkspace;
     });
   }
 
@@ -192,20 +212,24 @@ export class WorkspaceService {
       throw new CoreError("CONFLICT", "Workspace has active runs");
     }
 
-    await this.dependencies.eventPublisher.publishWithMutation(
-      {
-        event_type: WorkspaceRunEventType.WORKSPACE_DELETED,
-        entity_type: "workspace",
-        entity_id: workspace.workspace_id,
-        workspace_id: workspace.workspace_id,
-        run_id: null,
-        caused_by: "user_action",
-        revision: 0,
-        payload_json: WorkspaceDeletedPayloadSchema.parse({
-          workspace_id: workspace.workspace_id
-        })
-      },
-      () => this.dependencies.workspaceRepo.delete(workspace.workspace_id)
+    await this.dependencies.eventPublisher.appendManyWithMutation(
+      [
+        {
+          event_type: WorkspaceRunEventType.WORKSPACE_DELETED,
+          entity_type: "workspace",
+          entity_id: workspace.workspace_id,
+          workspace_id: workspace.workspace_id,
+          run_id: null,
+          caused_by: "user_action",
+          revision: 0,
+          payload_json: WorkspaceDeletedPayloadSchema.parse({
+            workspace_id: workspace.workspace_id
+          })
+        }
+      ],
+      () => {
+        this.dependencies.workspaceRepo.deleteSync(workspace.workspace_id);
+      }
     );
 
     return workspace;
@@ -217,21 +241,23 @@ export class WorkspaceService {
   ): Promise<Workspace> {
     const workspace = await this.getById(workspaceId);
 
-    return await this.dependencies.eventPublisher.publishWithMutation(
-      {
-        event_type: WorkspaceRunEventType.WORKSPACE_DEFAULT_ENGINE_CLASS_UPDATED,
-        entity_type: "workspace",
-        entity_id: workspace.workspace_id,
-        workspace_id: workspace.workspace_id,
-        run_id: null,
-        caused_by: "user_action",
-        revision: 0,
-        payload_json: WorkspaceDefaultEngineClassUpdatedPayloadSchema.parse({
+    return await this.dependencies.eventPublisher.appendManyWithMutation(
+      [
+        {
+          event_type: WorkspaceRunEventType.WORKSPACE_DEFAULT_ENGINE_CLASS_UPDATED,
+          entity_type: "workspace",
+          entity_id: workspace.workspace_id,
           workspace_id: workspace.workspace_id,
-          default_engine_class: engineClass ?? null
-        })
-      },
-      () => this.dependencies.workspaceRepo.updateDefaultEngineClass(workspace.workspace_id, engineClass ?? null)
+          run_id: null,
+          caused_by: "user_action",
+          revision: 0,
+          payload_json: WorkspaceDefaultEngineClassUpdatedPayloadSchema.parse({
+            workspace_id: workspace.workspace_id,
+            default_engine_class: engineClass ?? null
+          })
+        }
+      ],
+      () => this.dependencies.workspaceRepo.updateDefaultEngineClassSync(workspace.workspace_id, engineClass ?? null)
     );
   }
 
@@ -253,7 +279,7 @@ export class WorkspaceService {
     const parsedBinding = parseEngineBindingInput(bindingInput);
     const bindingId = `binding_${randomUUID()}`;
 
-    return await this.dependencies.eventPublisher.publishManyWithMutation(
+    return await this.dependencies.eventPublisher.appendManyWithMutation(
       [
         {
           event_type: WorkspaceRunEventType.WORKSPACE_ENGINE_BINDING_UPDATED,
@@ -286,7 +312,7 @@ export class WorkspaceService {
         }
       ],
       () =>
-        this.dependencies.engineConfigRepo!.upsertConversationBindingAndSetDefaultEngineClass({
+        this.dependencies.engineConfigRepo!.upsertConversationBindingAndSetDefaultEngineClassSync({
           workspace_id: workspace.workspace_id,
           binding_id: bindingId,
           binding: parsedBinding

@@ -134,9 +134,9 @@ describe("ConstitutionalFragmentService", () => {
         }),
         created_at: FIXED_NOW
       });
-    const publishWithMutationImpl: Pick<EventPublisher, "publishWithMutation">["publishWithMutation"] =
-      async (_event, mutate) => await mutate(existingEntry);
-    const publishWithMutation = vi.fn(publishWithMutationImpl);
+    const appendManyWithMutationImpl: Pick<EventPublisher, "appendManyWithMutation">["appendManyWithMutation"] =
+      async (_events, mutate) => mutate([existingEntry]);
+    const appendManyWithMutation = vi.fn(appendManyWithMutationImpl);
     const eventLogReader = {
       queryByEntity: vi.fn(async (entityType: string, entityId: string) =>
         entityType === "constitutional_fragment" && entityId === existingEntry.entity_id
@@ -147,8 +147,8 @@ describe("ConstitutionalFragmentService", () => {
     const service = new ConstitutionalFragmentService({
       fragmentStore: store,
       eventPublisher: {
-        publishWithMutation:
-          publishWithMutation as Pick<EventPublisher, "publishWithMutation">["publishWithMutation"]
+        appendManyWithMutation:
+          appendManyWithMutation as Pick<EventPublisher, "appendManyWithMutation">["appendManyWithMutation"]
       },
       eventLogReader,
       now: () => FIXED_LATER,
@@ -180,7 +180,7 @@ describe("ConstitutionalFragmentService", () => {
       "constitutional_fragment",
       "constitutional://workspace-1/hard_constraint/system.worker_dispatch"
     );
-    expect(publishWithMutation).not.toHaveBeenCalled();
+    expect(appendManyWithMutation).not.toHaveBeenCalled();
     await expect(service.listForWorkspace("workspace-1")).resolves.toEqual([hydrated]);
   });
 
@@ -261,29 +261,24 @@ describe("ConstitutionalFragmentService", () => {
 
   it("coalesces concurrent ensureRegistered calls so a static fragment emits one audit event", async () => {
     const registeredFragments = new Map<string, ConstitutionalFragment>();
-    let releaseFirstRegister: (() => void) | undefined;
-    const firstRegisterBlocked = new Promise<void>((resolve) => {
-      releaseFirstRegister = resolve;
-    });
     let registerCalls = 0;
+    const registerImpl = (fragment: ConstitutionalFragment): Readonly<ConstitutionalFragment> => {
+      const parsed = ConstitutionalFragmentSchema.parse(fragment);
+      registerCalls += 1;
+
+      const existing = registeredFragments.get(parsed.fragment_id);
+      if (existing !== undefined) {
+        expect(existing).toEqual(parsed);
+        return existing;
+      }
+
+      registeredFragments.set(parsed.fragment_id, parsed);
+      return parsed;
+    };
     const store: ConstitutionalFragmentStorePort = {
       findById: async (fragmentId) => registeredFragments.get(fragmentId) ?? null,
-      register: async (fragment) => {
-        const parsed = ConstitutionalFragmentSchema.parse(fragment);
-        registerCalls += 1;
-        if (registerCalls === 1) {
-          await firstRegisterBlocked;
-        }
-
-        const existing = registeredFragments.get(parsed.fragment_id);
-        if (existing !== undefined) {
-          expect(existing).toEqual(parsed);
-          return existing;
-        }
-
-        registeredFragments.set(parsed.fragment_id, parsed);
-        return parsed;
-      },
+      register: async (fragment) => registerImpl(fragment),
+      registerSync: registerImpl,
       findByWorkspace: async (workspaceId) =>
         Object.freeze(
           [...registeredFragments.values()].filter((fragment) => fragment.workspace_id === workspaceId)
@@ -296,9 +291,24 @@ describe("ConstitutionalFragmentService", () => {
         )
     };
     const eventLogEntries: EventLogEntry[] = [];
+    let releaseFirstPropagate: (() => void) | undefined;
+    let firstPropagateGate: Promise<void> | null = new Promise<void>((resolve) => {
+      releaseFirstPropagate = resolve;
+    });
     const service = new ConstitutionalFragmentService({
       fragmentStore: store,
-      eventPublisher: createEventPublisher(eventLogEntries),
+      // Gate on propagate (post-transaction) so the first
+      // appendManyWithMutation stays pending while the second ensureRegistered
+      // call observes the in-flight registration map and coalesces.
+      eventPublisher: createEventPublisher(eventLogEntries, {
+        beforeReturn: async () => {
+          if (firstPropagateGate !== null) {
+            const gate = firstPropagateGate;
+            firstPropagateGate = null;
+            await gate;
+          }
+        }
+      }),
       now: () => FIXED_NOW,
       generateFragmentId: ({ workspace_id, category, authority_source }) =>
         parseFragmentId(`constitutional://${workspace_id}/${category}/${authority_source}`)
@@ -319,7 +329,7 @@ describe("ConstitutionalFragmentService", () => {
     await Promise.resolve();
     expect(eventLogEntries).toHaveLength(1);
 
-    releaseFirstRegister?.();
+    releaseFirstPropagate?.();
     const [left, right] = await Promise.all([first, second]);
 
     expect(left).toEqual(right);
@@ -376,14 +386,14 @@ describe("ConstitutionalFragmentService", () => {
       }),
       created_at: FIXED_NOW
     });
-    const publishWithMutationImpl: Pick<EventPublisher, "publishWithMutation">["publishWithMutation"] =
-      async (_event, mutate) => await mutate(existingEntry);
-    const publishWithMutation = vi.fn(publishWithMutationImpl);
+    const appendManyWithMutationImpl: Pick<EventPublisher, "appendManyWithMutation">["appendManyWithMutation"] =
+      async (_events, mutate) => mutate([existingEntry]);
+    const appendManyWithMutation = vi.fn(appendManyWithMutationImpl);
     const service = new ConstitutionalFragmentService({
       fragmentStore: store,
       eventPublisher: {
-        publishWithMutation:
-          publishWithMutation as Pick<EventPublisher, "publishWithMutation">["publishWithMutation"]
+        appendManyWithMutation:
+          appendManyWithMutation as Pick<EventPublisher, "appendManyWithMutation">["appendManyWithMutation"]
       },
       eventLogReader: {
         queryByEntity: vi.fn(async () => [existingEntry])
@@ -405,7 +415,7 @@ describe("ConstitutionalFragmentService", () => {
       code: "CONFLICT",
       message: expect.stringContaining("content")
     });
-    expect(publishWithMutation).not.toHaveBeenCalled();
+    expect(appendManyWithMutation).not.toHaveBeenCalled();
     await expect(service.listForWorkspace("workspace-1")).resolves.toEqual([]);
   });
 });
@@ -413,23 +423,26 @@ describe("ConstitutionalFragmentService", () => {
 function createStore(): ConstitutionalFragmentStorePort {
   const fragments: ConstitutionalFragment[] = [];
 
+  const registerImpl = (fragment: ConstitutionalFragment): Readonly<ConstitutionalFragment> => {
+    const parsed = ConstitutionalFragmentSchema.parse(fragment);
+    const existingIndex = fragments.findIndex(
+      (candidate) => candidate.fragment_id === parsed.fragment_id
+    );
+
+    if (existingIndex >= 0) {
+      expect(fragments[existingIndex]).toEqual(parsed);
+      return fragments[existingIndex];
+    }
+
+    fragments.push(parsed);
+    return parsed;
+  };
+
   return {
     findById: async (fragmentId) =>
       fragments.find((fragment) => fragment.fragment_id === fragmentId) ?? null,
-    register: async (fragment) => {
-      const parsed = ConstitutionalFragmentSchema.parse(fragment);
-      const existingIndex = fragments.findIndex(
-        (candidate) => candidate.fragment_id === parsed.fragment_id
-      );
-
-      if (existingIndex >= 0) {
-        expect(fragments[existingIndex]).toEqual(parsed);
-        return fragments[existingIndex];
-      }
-
-      fragments.push(parsed);
-      return parsed;
-    },
+    register: async (fragment) => registerImpl(fragment),
+    registerSync: registerImpl,
     findByWorkspace: async (workspaceId) =>
       Object.freeze(
         fragments.filter((fragment) => fragment.workspace_id === workspaceId)
@@ -444,14 +457,29 @@ function createStore(): ConstitutionalFragmentStorePort {
   };
 }
 
-function createEventPublisher(entries: EventLogEntry[]): Pick<EventPublisher, "publishWithMutation"> {
+function createEventPublisher(
+  entries: EventLogEntry[],
+  options: { readonly beforeReturn?: () => Promise<void> } = {}
+): Pick<EventPublisher, "appendManyWithMutation"> {
+  const buildEntry = (event: Omit<EventLogEntry, "event_id" | "created_at">): EventLogEntry =>
+    EventLogEntrySchema.parse({
+      ...event,
+      event_id: `event-${entries.length + 1}`,
+      created_at: FIXED_NOW
+    });
+
+  // In-memory adapter mimicking better-sqlite3 transactional semantics so
+  // EventPublisher.appendManyWithMutation can run mutate synchronously and
+  // we can still inject async gating between transaction commit and the
+  // post-commit `await this.propagate(entry)`.
   const eventLogRepo = {
     append: vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => {
-      const entry = EventLogEntrySchema.parse({
-        ...event,
-        event_id: `event-${entries.length + 1}`,
-        created_at: FIXED_NOW
-      });
+      const entry = buildEntry(event);
+      entries.push(entry);
+      return entry;
+    }),
+    appendSync: vi.fn((event: Omit<EventLogEntry, "event_id" | "created_at">) => {
+      const entry = buildEntry(event);
       entries.push(entry);
       return entry;
     }),
@@ -460,8 +488,17 @@ function createEventPublisher(entries: EventLogEntry[]): Pick<EventPublisher, "p
       if (index >= 0) {
         entries.splice(index, 1);
       }
-    })
+    }),
+    deleteByIdSync: vi.fn((eventId: string) => {
+      const index = entries.findIndex((entry) => entry.event_id === eventId);
+      if (index >= 0) {
+        entries.splice(index, 1);
+      }
+    }),
+    transactional: <T,>(fn: () => T): T => fn()
   };
+
+  const propagate = options.beforeReturn ?? (async () => undefined);
   const publisher = new EventPublisher({
     eventLogRepo,
     runHotStateService: {
@@ -469,12 +506,14 @@ function createEventPublisher(entries: EventLogEntry[]): Pick<EventPublisher, "p
     } as unknown as ConstructorParameters<typeof EventPublisher>[0]["runHotStateService"],
     runtimeNotifier: {
       notify: vi.fn(async () => undefined),
-      notifyEntry: vi.fn(async () => undefined)
+      notifyEntry: vi.fn(async () => {
+        await propagate();
+      })
     }
   });
 
   return {
-    publishWithMutation: publisher.publishWithMutation.bind(publisher)
+    appendManyWithMutation: publisher.appendManyWithMutation.bind(publisher)
   };
 }
 

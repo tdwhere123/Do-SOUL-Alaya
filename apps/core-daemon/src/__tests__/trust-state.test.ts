@@ -30,11 +30,13 @@ describe("trust state recorder", () => {
 
     expect(publishWithMutation).toHaveBeenCalledTimes(1);
     expect(publishWithMutation).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event_type: "memory.delivered",
-        entity_type: "trust_context_delivery",
-        entity_id: "delivery-1"
-      }),
+      [
+        expect.objectContaining({
+          event_type: "memory.delivered",
+          entity_type: "trust_context_delivery",
+          entity_id: "delivery-1"
+        })
+      ],
       expect.any(Function)
     );
     expect(record.audit_event_id).toBe("event-1");
@@ -111,8 +113,9 @@ describe("trust state recorder", () => {
     await recorder.recordConfigured("codex");
     await recorder.recordUnverifiable("codex", "session-1");
 
+    // Each call's first arg is now the BATCH array; flatten and filter.
     const counterEvents = publishWithMutation.mock.calls
-      .map((call) => call[0])
+      .flatMap((call) => call[0] as ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at">>)
       .filter((entry) => entry.entity_type === "trust_state_counter");
     expect(counterEvents).toEqual([
       expect.objectContaining({
@@ -153,11 +156,11 @@ describe("trust state recorder", () => {
   });
 
   it("does not mutate process-local counters when audit publication fails", async () => {
-    const publishWithMutation = vi.fn(async () => {
+    const appendManyWithMutation = vi.fn(async () => {
       throw new Error("audit append failed");
     });
     const recorder = new TrustStateRecorder({
-      eventPublisher: { publishWithMutation },
+      eventPublisher: { appendManyWithMutation },
       ready: true
     });
 
@@ -169,9 +172,9 @@ describe("trust state recorder", () => {
   });
 
   it("rebuilds process-local counters from EventLog without publishing new audit rows", async () => {
-    const publishWithMutation = vi.fn(async () => undefined);
+    const appendManyWithMutation = vi.fn(async () => undefined);
     const recorder = new TrustStateRecorder({
-      eventPublisher: { publishWithMutation },
+      eventPublisher: { appendManyWithMutation },
       ready: true
     });
     const eventLogReader = {
@@ -199,7 +202,7 @@ describe("trust state recorder", () => {
       configured_count: 1,
       unverifiable_count: 1
     });
-    expect(publishWithMutation).not.toHaveBeenCalled();
+    expect(appendManyWithMutation).not.toHaveBeenCalled();
   });
 
   it("B7 summarize state reduction is correct", async () => {
@@ -291,7 +294,8 @@ describe("trust state recorder", () => {
     expect(delivery.delivered_at).toBe(DELIVERY_AT);
     expect(usage.reported_at).toBe(USAGE_AT);
     expect(clock).toHaveBeenCalledTimes(2);
-    expect(publishWithMutation.mock.calls[0]?.[0]).toEqual(
+    // First arg is the BATCH array; we expect a single-event batch.
+    expect(publishWithMutation.mock.calls[0]?.[0]?.[0]).toEqual(
       expect.objectContaining({
         payload_json: expect.objectContaining({
           delivered_at: DELIVERY_AT,
@@ -299,7 +303,7 @@ describe("trust state recorder", () => {
         })
       })
     );
-    expect(publishWithMutation.mock.calls[1]?.[0]).toEqual(
+    expect(publishWithMutation.mock.calls[1]?.[0]?.[0]).toEqual(
       expect.objectContaining({
         payload_json: expect.objectContaining({
           reported_at: USAGE_AT,
@@ -322,32 +326,37 @@ describe("trust state recorder", () => {
 function createRecorder(options: {
   ready: boolean;
   clock?: () => string;
-  publishWithMutation?: ReturnType<typeof vi.fn>;
+  appendManyWithMutation?: ReturnType<typeof vi.fn>;
 }) {
   let counter = 0;
-  const publishWithMutation =
-    options.publishWithMutation ??
+  const appendManyWithMutation =
+    options.appendManyWithMutation ??
     vi.fn(
       async <T>(
-        entry: Omit<EventLogEntry, "event_id" | "created_at">,
-        mutate: (entry: EventLogEntry) => Promise<T>
+        inputs: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at">>,
+        mutate: (entries: readonly EventLogEntry[]) => T
       ): Promise<T> => {
-        counter += 1;
-        const persisted = {
-          event_id: `event-${counter}`,
-          created_at: "2026-04-30T10:05:00.000Z",
-          ...entry
-        };
-        return await mutate(persisted);
+        const persisted = inputs.map((entry) => {
+          counter += 1;
+          return {
+            event_id: `event-${counter}`,
+            created_at: "2026-04-30T10:05:00.000Z",
+            ...entry
+          };
+        });
+        return mutate(persisted);
       }
     );
 
   const recorder = new TrustStateRecorder({
-    eventPublisher: { publishWithMutation },
+    eventPublisher: { appendManyWithMutation },
     ready: options.ready,
     clock: options.clock
   });
-  return { recorder, publishWithMutation };
+  // For backward-compatible test assertions referencing `.publishWithMutation`,
+  // expose `appendManyWithMutation` under both names (call shape is the
+  // batched form: first arg is an array, second is a sync mutate).
+  return { recorder, publishWithMutation: appendManyWithMutation, appendManyWithMutation };
 }
 
 function buildDeliveryInput(

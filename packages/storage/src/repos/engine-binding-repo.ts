@@ -6,6 +6,8 @@ export type EngineBindingRecordCreateInput = Omit<EngineBindingRecord, "created_
 
 export interface EngineBindingRepo {
   upsert(data: EngineBindingRecordCreateInput): Promise<EngineBindingRecord>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  upsertSync?(data: EngineBindingRecordCreateInput): EngineBindingRecord;
   getById(id: string): Promise<EngineBindingRecord | null>;
   listByWorkspace(workspaceId: string): Promise<readonly EngineBindingRecord[]>;
 }
@@ -87,7 +89,13 @@ export class SqliteEngineBindingRepo implements EngineBindingRepo {
   }
 
   public async upsert(data: EngineBindingRecordCreateInput): Promise<EngineBindingRecord> {
-    const existing = await this.getById(data.binding_id);
+    return this.upsertSync(data);
+  }
+
+  /** Synchronous variant for atomic publish + mutation (#BL-022). */
+  public upsertSync(data: EngineBindingRecordCreateInput): EngineBindingRecord {
+    const existingRow = this.getByIdStatement.get(data.binding_id) as EngineBindingRow | undefined;
+    const existing = existingRow === undefined ? null : parseEngineBindingRecord(existingRow);
     const now = new Date().toISOString();
     const record = parseEngineBindingRecord({
       ...data,

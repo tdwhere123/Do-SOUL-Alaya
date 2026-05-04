@@ -12,6 +12,8 @@ import { parseNonEmptyString } from "./shared/validators.js";
 
 export interface PathRelationRepo {
   create(relation: PathRelation): Promise<Readonly<PathRelation>>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  createSync(relation: PathRelation): Readonly<PathRelation>;
   update(
     pathId: string,
     updates: Partial<
@@ -156,6 +158,11 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
   }
 
   public async create(relation: PathRelation): Promise<Readonly<PathRelation>> {
+    return this.createSync(relation);
+  }
+
+  /** Synchronous variant for atomic publish + mutation (#BL-022). */
+  public createSync(relation: PathRelation): Readonly<PathRelation> {
     const parsedRelation = parsePathRelation(relation);
 
     try {
@@ -179,16 +186,25 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
       );
     }
 
-    const inserted = await this.findById(parsedRelation.path_id);
+    let row: PathRelationRow | undefined;
+    try {
+      row = this.findByIdStatement.get(parsedRelation.path_id) as PathRelationRow | undefined;
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to load path relation ${parsedRelation.path_id}.`,
+        error
+      );
+    }
 
-    if (inserted === null) {
+    if (row === undefined) {
       throw new StorageError(
         "NOT_FOUND",
         `Path relation ${parsedRelation.path_id} was not found after insert.`
       );
     }
 
-    return inserted;
+    return parsePathRelationRow(row);
   }
 
   public async update(
