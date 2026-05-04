@@ -170,6 +170,10 @@ describe("ClaimService", () => {
           order.push("repo_create");
           return Object.freeze({ ...claim });
         }),
+        createSync: vi.fn((claim) => {
+          order.push("repo_create");
+          return Object.freeze({ ...claim });
+        }),
         findById: vi.fn(async () => null),
         findByWorkspaceId: vi.fn(async () => []),
         findByStatus: vi.fn(async () => []),
@@ -276,6 +280,7 @@ describe("ClaimService", () => {
       },
       claimFormRepo: {
         create: vi.fn(async (claim) => claim),
+        createSync: vi.fn((claim) => claim),
         findById: vi.fn(async () => existing),
         findByWorkspaceId: vi.fn(async () => []),
         findByStatus: vi.fn(async () => []),
@@ -305,6 +310,7 @@ describe("ClaimService", () => {
     const { dependencies } = createDependencies({
       claimFormRepo: {
         create: vi.fn(async (claim) => claim),
+        createSync: vi.fn((claim) => claim),
         findById: vi.fn(async () => existing),
         findByWorkspaceId: vi.fn(async () => []),
         findByStatus: vi.fn(async () => []),
@@ -358,6 +364,7 @@ describe("ClaimService", () => {
       },
       claimFormRepo: {
         create: vi.fn(async (claim) => claim),
+        createSync: vi.fn((claim) => claim),
         findById: vi.fn(async () => existing),
         findByWorkspaceId: vi.fn(async () => []),
         findByStatus: vi.fn(async () => []),
@@ -403,6 +410,7 @@ describe("ClaimService", () => {
       slotService: undefined,
       claimFormRepo: {
         create: vi.fn(async (claim) => claim),
+        createSync: vi.fn((claim) => claim),
         findById: vi.fn(async () => existing),
         findByWorkspaceId: vi.fn(async () => []),
         findByStatus: vi.fn(async () => []),
@@ -429,6 +437,7 @@ describe("ClaimService", () => {
     const { dependencies } = createDependencies({
       claimFormRepo: {
         create: vi.fn(async (claim) => claim),
+        createSync: vi.fn((claim) => claim),
         findById: vi.fn(async () => existing),
         findByWorkspaceId: vi.fn(async () => []),
         findByStatus: vi.fn(async () => []),

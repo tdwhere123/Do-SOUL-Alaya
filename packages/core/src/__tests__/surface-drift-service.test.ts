@@ -6,7 +6,7 @@ import {
   type GovernanceDriftLease
 } from "@do-soul/alaya-protocol";
 import { EventPublisherPropagationError } from "../event-publisher.js";
-import { SurfaceDriftService } from "../surface-drift-service.js";
+import { SurfaceDriftService, type SurfaceDriftEventPublisherPort } from "../surface-drift-service.js";
 
 function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at">): EventLogEntry {
   return {
@@ -87,7 +87,9 @@ describe("SurfaceDriftService", () => {
       eventPublisher: createEventPublisher({
         appendManyWithMutation: vi.fn(async (inputs, mutate) => {
           order.push("event_log");
-          const entries = inputs.map((input) => createEventLogEntry(input));
+          const entries = inputs.map((input: Omit<EventLogEntry, "event_id" | "created_at">) =>
+            createEventLogEntry(input)
+          );
           return mutate(entries);
         })
       })

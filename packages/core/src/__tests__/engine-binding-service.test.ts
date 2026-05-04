@@ -242,10 +242,12 @@ describe("EngineBindingService", () => {
     const service = new EngineBindingService({
       workspaceRepo: {
         getById: vi.fn(async () => workspace),
-        updateDefaultEngineBinding: vi.fn()
+        updateDefaultEngineBinding: vi.fn(),
+        updateDefaultEngineBindingSync: vi.fn()
       },
       bindingRepo: {
         upsert: vi.fn(),
+        upsertSync: vi.fn(),
         getById: vi.fn(async (id) => records.get(id) ?? null)
       },
       eventPublisher: {
@@ -301,10 +303,12 @@ describe("EngineBindingService", () => {
     const service = new EngineBindingService({
       workspaceRepo: {
         getById: vi.fn(async () => workspace),
-        updateDefaultEngineBinding: vi.fn()
+        updateDefaultEngineBinding: vi.fn(),
+        updateDefaultEngineBindingSync: vi.fn()
       },
       bindingRepo: {
         upsert: vi.fn(),
+        upsertSync: vi.fn(),
         getById: vi.fn(async (id) => records.get(id) ?? null)
       },
       eventPublisher: {
@@ -343,10 +347,12 @@ describe("EngineBindingService", () => {
     const service = new EngineBindingService({
       workspaceRepo: {
         getById: vi.fn(async () => createWorkspace()),
-        updateDefaultEngineBinding: vi.fn()
+        updateDefaultEngineBinding: vi.fn(),
+        updateDefaultEngineBindingSync: vi.fn()
       },
       bindingRepo: {
         upsert: vi.fn(),
+        upsertSync: vi.fn(),
         getById: vi.fn(async () => foreignBinding)
       },
       eventPublisher: {
@@ -383,10 +389,12 @@ describe("EngineBindingService", () => {
     const service = new EngineBindingService({
       workspaceRepo: {
         getById: vi.fn(async () => createWorkspace({ default_engine_binding: foreignBinding.binding_id })),
-        updateDefaultEngineBinding: vi.fn()
+        updateDefaultEngineBinding: vi.fn(),
+        updateDefaultEngineBindingSync: vi.fn()
       },
       bindingRepo: {
         upsert: vi.fn(),
+        upsertSync: vi.fn(),
         getById: vi.fn(async () => foreignBinding)
       },
       eventPublisher: {
@@ -407,10 +415,12 @@ describe("EngineBindingService", () => {
     const service = new EngineBindingService({
       workspaceRepo: {
         getById: vi.fn(async () => createWorkspace()),
-        updateDefaultEngineBinding: vi.fn()
+        updateDefaultEngineBinding: vi.fn(),
+        updateDefaultEngineBindingSync: vi.fn()
       },
       bindingRepo: {
         upsert: vi.fn(),
+        upsertSync: vi.fn(),
         getById: vi.fn(async () => null)
       },
       eventPublisher: {
