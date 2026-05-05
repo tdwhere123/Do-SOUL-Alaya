@@ -571,21 +571,43 @@ Concrete v0.2 backlog cards opened during the v0.1 closeout (close
 conditions live in `docs/handbook/backlog.md`):
 
 - **`#BL-025`** — Drop the required-but-ignored `revision` field
-  from `EventPublisherInput` across ~50 source sites and ~50 test
-  fixtures (purely type-ergonomics; the BL-022 race is already
-  closed in v0.1).
+  (planned, see `#BL-025`) from `EventPublisherInput` across ~50
+  source sites and ~50 test fixtures (purely type-ergonomics; the
+  BL-022 race is already closed in v0.1).
 - **`#BL-026`** — Migrate the soul-side `AuditorEventLogPort`
-  adapter off the legacy `publishWithMutation` / `publishManyWithMutation`
-  signature so those `@deprecated` methods can be deleted.
-- **Path-plasticity follow-ups** — move the `PATH_PLASTICITY_UPDATE`
-  task from Auditor (TIER_1) to Librarian (TIER_2) for strict tier
-  alignment; wire `direction_bias` redirection on top of the
-  reinforcement / weakening / retirement that v0.1 ships; add
-  `PathLifecycle.status: "active" | "retired"` so the per-tick audit-
-  log scan goes away.
-- **Sync-first repo pattern** — retire the parallel `*Sync` sibling
-  methods A2 added by making the primary repo methods sync and
-  async-wrapping only at I/O boundaries.
+  adapter off the legacy `publishWithMutation` /
+  `publishManyWithMutation` signature so those `@deprecated`
+  methods (and the port-shape lying about
+  `appendSync?` / `transactional?`) can be deleted.
+- **`#BL-027`** — Full review-inbox UX (assignment + deadlines +
+  escalation + multi-reviewer quorum) on top of the minimal HITL
+  daemon backbone A1 shipped, including binding `reviewer_identity`
+  server-side from a session credential rather than accepting it
+  verbatim from the agent (closes invariants §21b limit).
+- **`#BL-028`** — Move `PATH_PLASTICITY_UPDATE` from Auditor (TIER_1)
+  to Librarian (TIER_2) for strict tier alignment with the glossary
+  ConsolidationLoop entry.
+- **`#BL-029`** — Wire `direction_bias` redirection (the fourth
+  named plasticity op) on top of the reinforcement / weakening /
+  retirement that v0.1 ships.
+- **`#BL-030`** — Add `PathLifecycle.status: "active" | "retired"`
+  so the per-tick audit-log scan + the recall adapter's
+  strength-based retirement inference both go away.
+- **`#BL-031`** — Sync-first repo pattern — retire the parallel
+  `*Sync` sibling methods A2 added by making the primary repo
+  methods sync and async-wrapping only at I/O boundaries.
+- **`#BL-032`** — Workspace-and-type-scoped EventLog query for
+  path-plasticity (kill the in-memory filter that blocks the
+  Auditor tier on a busy workspace).
+- **`#BL-033`** — Batched `findByAnchors` for the recall plasticity
+  port (kill N×M round-trips on the recall hot path).
+- **`#BL-034`** — Review-surface contract-parity test covering MCP /
+  Inspector HTTP / `alaya review` CLI in one integration test.
+- **`#BL-035`** — Durabilize the path-plasticity per-workspace
+  watermark via SQL so daemon restarts do not re-use the 24h
+  lookback once.
+- **`#BL-036`** — Dedupe pending `PATH_PLASTICITY_UPDATE` enqueues
+  via a `Set<workspaceId>` mirror of the embedding-backfill pattern.
 
 ### P3. Vendor cleanup (post-v0.1.0 tag)
 

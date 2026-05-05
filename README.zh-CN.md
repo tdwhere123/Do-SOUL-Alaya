@@ -531,21 +531,41 @@ fix-loop 纪律收。只有当某张卡自己的退出条件成立、且综合 r
 v0.1 closeout 期间开出的具体 v0.2 backlog 卡（详细关闭条件见
 `docs/handbook/backlog.md`）：
 
-- **`#BL-025`** —— 把 `EventPublisherInput` 那个"必填但被静默
-  覆盖"的 `revision` 字段从 ~50 处 source 调用 + ~50 处测试夹具
-  里去掉（纯类型 ergonomics；BL-022 的实际竞争窗口在 v0.1 已经
-  关掉了）。
+- **`#BL-025`** —— 把 `EventPublisherInput`（计划中的类型，参见
+  `#BL-025`）那个"必填但被静默覆盖"的 `revision` 字段从 ~50 处
+  source 调用 + ~50 处测试夹具里去掉（纯类型 ergonomics；BL-022
+  的实际竞争窗口在 v0.1 已经关掉了）。
 - **`#BL-026`** —— 把 soul 端的 `AuditorEventLogPort` 适配器从
   `publishWithMutation` / `publishManyWithMutation` 这俩 legacy
-  签名上迁移走，让那两个 `@deprecated` 方法可以删除。
-- **Path 可塑性的 follow-up** —— 把 `PATH_PLASTICITY_UPDATE` 任
-  务从 Auditor (TIER_1) 挪到 Librarian (TIER_2) 严格对齐分层；在
-  v0.1 已交付的 reinforcement / weakening / retirement 之上，补
-  上 `direction_bias` redirection；给 `PathLifecycle` 加上
-  `status: "active" | "retired"`，让每 tick 的 audit-log 扫描可
-  以下线。
-- **Sync-first 的 repo 模式** —— 把 A2 加的那批并列 `*Sync` 兄
-  弟方法回收掉：让主方法变成同步、只在 I/O 边界包一层 async。
+  签名上迁移走，让那两个 `@deprecated` 方法（以及那个把
+  `appendSync?` / `transactional?` 误标为可选的 port shape）可以
+  删除。
+- **`#BL-027`** —— 在 A1 落地的最小 HITL daemon 骨架之上做完整
+  review-inbox UX（assignment / deadline / escalation / 多 reviewer
+  quorum），并把 `reviewer_identity` 从 agent 自报字段升级为后端
+  从 session credential 绑定（关掉 invariants §21b 的限制）。
+- **`#BL-028`** —— 把 `PATH_PLASTICITY_UPDATE` 任务从 Auditor
+  (TIER_1) 挪到 Librarian (TIER_2)，严格对齐 glossary 里
+  ConsolidationLoop 的分层。
+- **`#BL-029`** —— 在 v0.1 交付的 reinforcement / weakening /
+  retirement 之上接入 `direction_bias` redirection（第四种 plasticity
+  op）。
+- **`#BL-030`** —— 给 `PathLifecycle` 加 `status: "active" | "retired"`
+  字段，把每 tick 的 audit-log 扫描和 recall 端基于 strength 的
+  retirement 推断都下掉。
+- **`#BL-031`** —— Sync-first 的 repo 模式 —— 把 A2 加的那批并列
+  `*Sync` 兄弟方法回收掉：让主方法变成同步、只在 I/O 边界包一层
+  async。
+- **`#BL-032`** —— 给 path-plasticity 加 EventLog 的工作区+类型
+  组合查询（消掉那个把 Auditor 整 tier 卡住的内存过滤）。
+- **`#BL-033`** —— 在 recall 的 plasticity port 上做批量
+  `findByAnchors`，干掉 recall 热路径上的 N×M 来回。
+- **`#BL-034`** —— 一个 review-surface contract-parity 测试，覆盖
+  MCP / Inspector HTTP / `alaya review` CLI 三条路。
+- **`#BL-035`** —— 把 path-plasticity 每工作区的 watermark 落进
+  SQL，让 daemon 重启不再用一次 24h lookback。
+- **`#BL-036`** —— 用 `Set<workspaceId>` 镜像 embedding-backfill
+  的去重模式，给 pending 的 `PATH_PLASTICITY_UPDATE` 加 enqueue 去重。
 
 ### P3. Vendor 清理（v0.1.0 tag 之后）
 
