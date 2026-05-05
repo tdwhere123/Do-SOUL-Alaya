@@ -244,15 +244,20 @@ export function createSoulGraphService(input: {
       return {
         workspace_id: workspaceId,
         nodes: [
-          ...limitedMemories.map((memory: MemoryEntryRecord) => ({
-            id: memory.object_id,
-            kind: "memory" as const,
-            label: memory.content.slice(0, 80),
-            summary: memory.content,
-            workspace_id: memory.workspace_id,
-            created_at: memory.created_at,
-            origin_plane: "project" as const
-          })),
+          ...limitedMemories.map((memory: MemoryEntryRecord) => {
+            const label = deriveMemoryNodeLabel(memory.content);
+            const summary = deriveMemoryNodeSummary(memory.content, label);
+            const node: SoulGraph["nodes"][number] = {
+              id: memory.object_id,
+              kind: "memory",
+              label,
+              workspace_id: memory.workspace_id,
+              created_at: memory.created_at,
+              scope_id: memory.scope_class,
+              origin_plane: memory.scope_class === "project" ? "project" : "global"
+            };
+            return summary === undefined ? node : { ...node, summary };
+          }),
           ...tagProjection.nodes
         ],
         edges: [
@@ -277,12 +282,17 @@ function buildDomainTagProjection(memories: readonly MemoryEntryRecord[]): {
   readonly nodes: readonly SoulGraph["nodes"][number][];
   readonly edges: readonly SoulGraph["edges"][number][];
 } {
-  const tagCounts = new Map<string, number>();
+  const tagMembers = new Map<string, MemoryEntryRecord[]>();
   const tagEdges: SoulGraph["edges"][number][] = [];
 
   for (const memory of memories) {
     for (const tag of uniqueDomainTags(memory)) {
-      tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
+      let members = tagMembers.get(tag);
+      if (!members) {
+        members = [];
+        tagMembers.set(tag, members);
+      }
+      members.push(memory);
       tagEdges.push({
         id: `domain_tag:${memory.object_id}:${tag}`,
         kind: "belongs_to",
@@ -294,15 +304,61 @@ function buildDomainTagProjection(memories: readonly MemoryEntryRecord[]): {
   }
 
   return {
-    nodes: [...tagCounts.entries()].map(([tag, count]) => ({
+    nodes: [...tagMembers.entries()].map(([tag, members]) => ({
       id: domainTagNodeId(tag),
       kind: "scope",
       label: `#${tag}`,
-      summary: `Domain tag shared by ${count} memory entr${count === 1 ? "y" : "ies"}.`,
+      summary: deriveDomainTagSummary(members),
+      scope_id: `domain_tag:${tag}`,
       origin_plane: "project"
     })),
     edges: tagEdges
   };
+}
+
+const MEMORY_NODE_LABEL_MAX = 80;
+const MEMORY_NODE_SUMMARY_MAX = 280;
+const DOMAIN_TAG_SAMPLE_LIMIT = 3;
+const DOMAIN_TAG_SAMPLE_LABEL_MAX = 32;
+
+function deriveMemoryNodeLabel(content: string): string {
+  const firstLine = content.split(/\r?\n/, 1)[0]?.trim() ?? "";
+  if (firstLine.length > 0) {
+    return truncateWithEllipsis(firstLine, MEMORY_NODE_LABEL_MAX);
+  }
+  const fallback = content.trim();
+  if (fallback.length === 0) {
+    return "(empty)";
+  }
+  return truncateWithEllipsis(fallback, MEMORY_NODE_LABEL_MAX);
+}
+
+function deriveMemoryNodeSummary(content: string, label: string): string | undefined {
+  const trimmed = content.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  if (trimmed === label) {
+    return undefined;
+  }
+  return truncateWithEllipsis(trimmed, MEMORY_NODE_SUMMARY_MAX);
+}
+
+function deriveDomainTagSummary(members: readonly MemoryEntryRecord[]): string {
+  const count = members.length;
+  const sample = members
+    .slice(0, DOMAIN_TAG_SAMPLE_LIMIT)
+    .map((m) => truncateWithEllipsis(deriveMemoryNodeLabel(m.content), DOMAIN_TAG_SAMPLE_LABEL_MAX))
+    .join(" · ");
+  const noun = count === 1 ? "memory" : "memories";
+  return sample.length > 0 ? `${count} ${noun} · ${sample}` : `${count} ${noun}`;
+}
+
+function truncateWithEllipsis(value: string, max: number): string {
+  if (value.length <= max) {
+    return value;
+  }
+  return `${value.slice(0, max - 1)}…`;
 }
 
 function uniqueDomainTags(memory: MemoryEntryRecord): readonly string[] {
