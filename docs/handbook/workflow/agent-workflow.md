@@ -1,42 +1,33 @@
 # Agent Workflow
 
-This is the maintained execution workflow for task-card and phase-
-planning work in Alaya v0.1. For parallel task work, repeated fix
-loops, or wave-level coordination, also follow
+This is the maintained execution workflow for task-card and
+multi-card initiative work in Alaya. For parallel task work, repeated
+fix loops, or wave-level coordination, also follow
 [`subagent-dispatch.md`](./subagent-dispatch.md).
 
 ## Per-Card Pipeline
 
-1. Read `docs/v0.1/INDEX.md`.
-2. Read the relevant task card. If a phase is README-only, read the
-   phase README and split a task card or get explicit user scope
-   before implementing code.
-3. Read `docs/handbook/invariants.md`.
-4. Read `docs/handbook/port-protocol.md` (every Phase 1+ task card is
-   a port).
-5. Read the affected handbook pages.
-6. Freeze scope from task card sections 2, 3, 4, and 5. For README-
-   only phases, freeze only the relevant task row, key deliverables,
-   cross-task constraints, and gate checklist.
-7. For live-path or multi-package work, map the real producer and
+1. Read the relevant task card or PR brief. If the work area only has
+   a README and no card, read the README and split a task card or
+   get explicit user scope before implementing code.
+2. Read `docs/handbook/invariants.md`.
+3. Read the affected handbook pages.
+4. Freeze scope from the card's §2-§5. For README-only initiatives,
+   freeze only the relevant task row, key deliverables, cross-task
+   constraints, and gate checklist.
+5. For live-path or multi-package work, map the real producer and
    consumer path before dispatching a worker. If the task mutates
    durable state, runtime lifecycle, or live MCP / CLI surface state,
    run the Stateful Mutation Checklist before implementation and
    again before closeout.
-8. Confirm the source files in `vendor/do-what-new-snapshot/` exist
-   and match what the task card claims. If they do not, return
-   `BLOCKED` with the missing paths.
-9. Write or update tests first when practical. For port tasks, port
-   the source `__tests__/` first, then port the implementation.
-10. Implement the smallest change that satisfies the task card. For
-    port tasks, copy first; rewrite is rejected (see
-    `port-protocol.md`).
-11. Verify using the task card section 6 commands. For README-only
-    phase edits, verify against the phase gate checklist and run
-    targeted documentation sweeps.
-12. Write the completion report if the card requires one (under
-    `docs/v0.1/<phase>-briefs/reports/`).
-13. Run a targeted doc/code consistency sweep for changed contracts.
+6. Write or update tests first when practical.
+7. Implement the smallest change that satisfies the card.
+8. Verify using the card's §5 commands. For README-only initiative
+   edits, verify against the gate checklist and run targeted
+   documentation sweeps.
+9. Write the completion report if the card requires one (under the
+   initiative's `reports/` directory).
+10. Run a targeted doc/code consistency sweep for changed contracts.
 
 ## Per-Wave Pipeline
 
@@ -96,10 +87,10 @@ not read files larger than 30 KB in full.
 
 | Task type | Minimum reading (in addition to "Any") |
 | --- | --- |
-| Any | `docs/v0.1/INDEX.md`, the relevant task card or phase README, `docs/handbook/invariants.md`, `docs/handbook/port-protocol.md`, this file, `docs/handbook/backlog.md` for the touched area |
-| Backend port (`packages/protocol`, `packages/storage`, `packages/core`, `packages/soul`, `packages/engine-gateway`, `apps/core-daemon`) | `docs/handbook/code-map.md`, `docs/handbook/runtime-status.md`, the matching `vendor/do-what-new-snapshot/<source>` files, the upstream `vendor/do-what-new-snapshot/docs/handbook/code-map.md` |
-| Docs / phase README / task brief | `docs/handbook/maintenance.md`, the relevant phase README, upstream and downstream phase READMEs that share the contract or readiness gate |
-| Review | the diff or changed files, `docs/handbook/workflow/review-protocol.md`, the source file in `vendor/do-what-new-snapshot/` for port verification |
+| Any | the relevant task card or initiative README, `docs/handbook/invariants.md`, this file, `docs/handbook/backlog.md` for the touched area |
+| Backend (`packages/protocol`, `packages/storage`, `packages/core`, `packages/soul`, `packages/engine-gateway`, `apps/core-daemon`) | `docs/handbook/code-map.md`, `docs/handbook/runtime-status.md` |
+| Docs / initiative README / task brief | `docs/handbook/maintenance.md`, the relevant initiative README, upstream and downstream READMEs that share the contract or readiness gate |
+| Review | the diff or changed files, `docs/handbook/workflow/review-protocol.md` |
 
 ## Stateful Mutation Checklist
 
@@ -178,9 +169,10 @@ findings must pass through reviewer mode a second time. A sub-agent's
 full producer → consumer → surface chain works. Silencing the local
 error site without tracing the live path is not acceptance.
 
-**D3. Verify-before-port.** Before authoring a port card, confirm the
-source file exists at the cited `vendor/do-what-new-snapshot/` path
-and that the source still matches what the task card describes.
+**D3. Verify-before-act.** Before authoring a card that depends on
+the current state of a file, contract, or external system, confirm
+that state is still what you think it is. Stale assumptions are a
+common failure mode in multi-day work.
 
 **D4. Two-layer agent workflow.** For multi-card or parallel work, the
 main thread freezes scope first, then dispatches sub-agents (or codex
@@ -200,7 +192,6 @@ should receive:
 - allowed files or packages,
 - required verification commands,
 - architecture constraints from `invariants.md`,
-- port-mode constraints from `port-protocol.md`,
 - expected output format.
 
 Sub-agents must not expand scope or rewrite future-phase contracts.
@@ -210,10 +201,9 @@ paths instead of silently shipping a foundation-only slice.
 
 ## Completion Report Minimum
 
-Reports under `docs/v0.1/<phase>-briefs/reports/` must include:
+Reports under `docs/<initiative>/reports/` must include:
 
 - scope compliance,
-- port mode used and which source files were copied,
 - build and test evidence,
 - architecture compliance,
 - intentional deviations,

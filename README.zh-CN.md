@@ -570,14 +570,6 @@ v0.1 closeout 期间开出的具体 v0.2 backlog 卡（详细关闭条件见
 - **`#BL-036`** —— 用 `Set<workspaceId>` 镜像 embedding-backfill
   的去重模式，给 pending 的 `PATH_PLASTICITY_UPDATE` 加 enqueue 去重。
 
-### P3. Vendor 清理（v0.1.0 tag 之后）
-
-`vendor/do-what-new-snapshot/` 是临时的 port 参照，不是永久依
-赖。v0.1.0 tag 落地之后，单独开短命 worktree 把它删掉，并把
-`CLAUDE.md` / `docs/handbook/port-protocol.md` /
-`docs/handbook/task-card-template.md` 里那套 port-protocol 脚手
-架重写为历史背景。
-
 ---
 
 ## 贡献

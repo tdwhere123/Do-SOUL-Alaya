@@ -1,11 +1,18 @@
-# Do-SOUL Alaya v0.1 — Task Card Index
+# Do-SOUL Alaya v0.1 — Task Card Index (Historical)
 
-This is the active v0.1 task-card work area. v0.1 is a **port** of the
-memory subsystem of `do-what-new` into the Alaya monorepo, with
-port-first discipline (see `docs/handbook/port-protocol.md`).
-
-For required read order, follow `docs/handbook/workflow/agent-workflow.md`
-Per-Card Pipeline.
+> **Status: historical port record.** v0.1.0 shipped on 2026-05-05.
+> The phase-{0..5} task cards under `phase-*-briefs/` are preserved
+> as a record of how the memory subsystem was ported from
+> `do-what-new`, but they cite paths into
+> `vendor/do-what-new-snapshot/` which has since been removed by the
+> Phase E vendor cleanup. The upstream commit the snapshot was
+> frozen at — `6ed846341f66ff98bfcddbb940db74cfc10133ca` (2026-04-28)
+> — is recorded in `CLAUDE.md` §Project Genealogy and in
+> `docs/archive/port-protocol-historical.md`. For source verification
+> against any specific port use `git log` against the v0.1.0 tag.
+>
+> Forward work happens under `docs/handbook/backlog.md` and normal
+> PR/issue flow; new work cards do not need port-mode framing.
 
 ## Phase Order
 
@@ -229,10 +236,13 @@ See `docs/handbook/runtime-status.md` for definitions:
 `not-started`, `schema-ready`, `implementation-ready`,
 `live-event-ready`, `mcp-consumable`, `cli-consumable`.
 
-## Source Of Truth Reminder
+## Source Of Truth Reminder (Historical)
 
-- Port reference: `vendor/do-what-new-snapshot/`
-- Source commit: see `vendor/do-what-new-snapshot/SNAPSHOT_REF.md`
-- Port discipline: `docs/handbook/port-protocol.md`
-- Per-card workflow: `docs/handbook/workflow/agent-workflow.md`
-- Reviewer mode: `docs/handbook/workflow/review-protocol.md`
+- Port reference: `vendor/do-what-new-snapshot/` — **removed in Phase E.**
+- Source commit: `6ed846341f66ff98bfcddbb940db74cfc10133ca` (recorded in
+  `CLAUDE.md` §Project Genealogy and
+  `docs/archive/port-protocol-historical.md`).
+- Port discipline: `docs/archive/port-protocol-historical.md` (archived
+  after v0.1.0).
+- Per-card workflow (still active for new work): `docs/handbook/workflow/agent-workflow.md`
+- Reviewer mode (still active): `docs/handbook/workflow/review-protocol.md`

@@ -4,10 +4,10 @@
 
 - `docs/handbook/`: maintained implementation handbook (Alaya's own
   rules and maps).
-- `docs/v0.1/`: active v0.1 task cards, phase READMEs, completion
-  reports.
-- `vendor/do-what-new-snapshot/`: frozen upstream source reference;
-  read-only, not Alaya truth.
+- `docs/v0.1/`: historical v0.1 port-era task cards, phase READMEs,
+  completion reports (preserved as record after v0.1.0).
+- `docs/archive/`: retired-but-preserved discipline documents
+  (port-protocol, port-era task-card template).
 - Root `README.md`, `CLAUDE.md`, `AGENTS.md`: project entry points
   only — they delegate detail to the handbook.
 
@@ -41,28 +41,7 @@ When contracts change:
 - Update interface signatures.
 - Update enum values.
 - Update acceptance criteria and test expectations.
-- Update downstream phase assumptions.
-- If the contract was already ported from upstream, note the
-  divergence in `port-protocol.md` Anti-Patterns or escalate to
-  `requires-redesign` with an Alaya invariant cite.
-
-## Vendor Snapshot Maintenance
-
-The vendor snapshot is frozen by design. Refresh only when:
-
-- A port wave needs upstream changes that landed after the snapshot
-  commit.
-- An upstream bug fix is required for a port task to function.
-
-To refresh:
-
-1. Update `Source HEAD commit` in
-   `vendor/do-what-new-snapshot/SNAPSHOT_REF.md`.
-2. Re-run the rsync used in P0-5 (see plan file in
-   `~/.claude/plans/`).
-3. Note any deltas in a follow-up section of `SNAPSHOT_REF.md` so port
-   task cards can re-verify their referenced files.
-4. Commit as `chore(vendor): refresh do-what-new snapshot to <commit>`.
+- Update downstream consumer assumptions.
 
 ## Large File Rule
 
@@ -76,8 +55,8 @@ After doc edits, run targeted sweeps for changed symbols, events,
 dependencies, and readiness labels. Useful commands:
 
 ```bash
-rtk rg -n -g '!vendor/**' "schema-ready|implementation-ready|live-event-ready|mcp-consumable|cli-consumable|ready|unblocked" docs AGENTS.md CLAUDE.md README.md
-rtk rg -n -g '!vendor/**' "@do-soul/alaya-(protocol|core|soul|engine-gateway|storage)" docs AGENTS.md CLAUDE.md README.md
-rtk rg -n -g '!vendor/**' "docs/[A-Za-z0-9._-]+\\.md" docs AGENTS.md CLAUDE.md README.md
+rtk rg -n "schema-ready|implementation-ready|live-event-ready|mcp-consumable|cli-consumable|ready|unblocked" docs AGENTS.md CLAUDE.md README.md
+rtk rg -n "@do-soul/alaya-(protocol|core|soul|engine-gateway|storage)" docs AGENTS.md CLAUDE.md README.md
+rtk rg -n "docs/[A-Za-z0-9._-]+\\.md" docs AGENTS.md CLAUDE.md README.md
 rtk find docs -type f -name '*.md' -size +30k -print
 ```

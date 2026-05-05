@@ -11,13 +11,12 @@
 
 ## Project Context
 
-Do-SOUL Alaya is a **local-first memory plane for CLI agents**. It is
-a port (not a clean-room rewrite) of the memory plugin system from the
-sibling project `do-what-new`. The package namespace is `@do-soul/alaya-*`
-and the consuming agents are Codex, Claude Code, and similar CLI tools
-that attach over MCP or via plain CLI commands. (Use "memory plane"
-in public-facing copy per invariants §21a; "memory core" was the
-pre-v0.1-closeout phrasing and is retired.)
+Do-SOUL Alaya is a **local-first memory plane for CLI agents**. The
+package namespace is `@do-soul/alaya-*` and the consuming agents are
+Codex, Claude Code, and similar CLI tools that attach over MCP or via
+plain CLI commands. (Use "memory plane" in public-facing copy per
+invariants §21a; "memory core" was the pre-v0.1-closeout phrasing and
+is retired.)
 
 Important invariants (full set in `docs/handbook/invariants.md`):
 
@@ -41,47 +40,21 @@ Important invariants (full set in `docs/handbook/invariants.md`):
   non-engineering users to install or operate Alaya. See
   invariants §21a.
 
-## Port-First Discipline
+## Project Genealogy
 
-This is the single most important rule for v0.1 work:
+Alaya v0.1 was ported (not clean-room rewritten) from the sibling
+project `do-what-new`, frozen at upstream commit
+`6ed846341f66ff98bfcddbb940db74cfc10133ca` (snapshotted 2026-04-28).
+The port wave closed with v0.1.0 and the working snapshot directory
+has been removed. For port-time archaeology see
+`docs/archive/port-protocol-historical.md` and the historical task
+cards under `docs/v0.1/phase-*-briefs/` (their `vendor/...` paths
+point to the removed snapshot — use `git log` against the v0.1.0 tag
+for source verification when needed).
 
-> **Port first; do not clean-room rewrite.**
-
-The full memory plugin system already exists at
-`vendor/do-what-new-snapshot/`. Port task cards directly copy or adapt
-that code into `packages/*` and `apps/core-daemon/`. The discipline is
-detailed in `docs/handbook/port-protocol.md`:
-
-- **trivial-copy** (default): copy file as-is, only change package
-  name / import paths
-- **adapt-and-port** (limited): allowed only when target interface
-  differs (e.g. SqliteConnection injection); must list every adapter
-  point in the task card §2 Allowed Scope
-- **requires-redesign** (rare): default-prohibited; needs explicit user
-  approval and a Charter Authority cite
-
-Anti-patterns that will be rejected at review:
-
-- Writing a "better" reimplementation of an existing
-  `vendor/do-what-new-snapshot/packages/<x>/<file>.ts`
-- Creating a parallel contract layer instead of using the ported real
-  code
-- Skipping `vendor/do-what-new-snapshot/packages/<x>/__tests__/` and
-  writing your own test set
-- Splitting the source logic into "your-own-style" smaller helpers when
-  copy-paste would have worked
-
-## Source Reference
-
-All port task cards reference:
-
-- `vendor/do-what-new-snapshot/` — frozen snapshot, source of truth for
-  v0.1 port. See `vendor/do-what-new-snapshot/SNAPSHOT_REF.md` for the
-  source commit hash and stability assurance.
-
-Never reference the absolute path
-`/home/tdwhere/vibe/do-what-new/<...>` from a task card or commit
-message — the snapshot is the contract.
+Work on `main` after v0.1.0 is normal forward development; the
+port-mode framework (`trivial-copy` / `adapt-and-port` /
+`requires-redesign`) is no longer load-bearing.
 
 ## Before You Code
 
@@ -91,11 +64,10 @@ Read in this order:
 2. `README.md`
 3. `docs/handbook/README.md`
 4. `docs/handbook/invariants.md`
-5. `docs/handbook/port-protocol.md`
-6. `docs/handbook/workflow/agent-workflow.md` — includes the Task-Type
+5. `docs/handbook/workflow/agent-workflow.md` — includes the Task-Type
    Reading Matrix; pick the row for your task type
-7. `docs/v0.1/INDEX.md`
-8. The specific task card you are working on
+6. `docs/handbook/backlog.md` for the area you are touching
+7. The specific task or PR scope you are working on
 
 ## Plan Mode And Language
 
@@ -125,14 +97,10 @@ See `docs/handbook/workflow/review-protocol.md` for severity (Blocking
 
 - **Think before coding.** State assumptions explicitly. If scope is
   ambiguous, surface interpretations — do not pick one silently.
-- **Surgical changes only.** Touch only files in the task card scope.
+- **Surgical changes only.** Touch only files in the PR or task scope.
 - **Build + test is a hard gate.** Do not claim done until `rtk pnpm
   build` and the relevant `rtk pnpm exec vitest run` both pass and the
   Review Protocol checklist reports zero Blocking / Important findings.
-- **Port-first verification.** Each port task card must show that the
-  target file logic matches `vendor/do-what-new-snapshot/<src>` byte-
-  for-byte for trivial-copy, or via a documented adapter list for
-  adapt-and-port.
 
 ## Architecture (one line)
 
@@ -166,8 +134,6 @@ pnpm does not auto-expose private root bins to `node_modules/.bin/`, so
 - `docs/handbook/README.md` — maintained documentation entry point
 - `docs/handbook/invariants.md` — architecture non-negotiables and
   Package Dependency Direction
-- `docs/handbook/port-protocol.md` — Port-First discipline (the
-  v0.1-specific rule)
 - `docs/handbook/code-map.md` — current code ownership, Project Map
 - `docs/handbook/runtime-status.md` — current runtime status and wiring
   gaps
@@ -178,9 +144,9 @@ pnpm does not auto-expose private root bins to `node_modules/.bin/`, so
 - `docs/handbook/workflow/subagent-dispatch.md` — dispatch policy,
   failure modes
 - `docs/handbook/backlog.md` — unresolved issues
-- `docs/v0.1/INDEX.md` — active v0.1 task cards and phase status
-- `vendor/do-what-new-snapshot/SNAPSHOT_REF.md` — frozen source
-  reference
+- `docs/v0.1/INDEX.md` — historical v0.1 task-card index (port era)
+- `docs/archive/port-protocol-historical.md` — retired Port-First
+  discipline (kept for archaeology)
 
 ## Generated Paths
 

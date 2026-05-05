@@ -398,9 +398,9 @@ no separate watch entry is needed.
 
 The `Phase*EventType` rename was a strict subset of #BL-017's
 close-condition (a), and #BL-017 has now executed that rename. Current
-mapping is documented in `docs/handbook/port-mapping/phase-to-domain.md`
-so reviewers can resolve vendor snapshot phase names against current
-Alaya domain names.
+mapping is documented in `docs/archive/phase-to-domain-mapping-historical.md`
+so reviewers can resolve upstream phase names against current Alaya domain
+names.
 
 ### #BL-017 — Resolved (post-port hygiene wave executed)
 
@@ -418,7 +418,7 @@ dedicated post-port hygiene wave executed the full close path:
   and `rtk pnpm run hygiene:unused`; only command-proven unused
   dependency residue was removed.
 - `docs/handbook/code-map.md`,
-  `docs/handbook/port-mapping/phase-to-domain.md`, and the post-port
+  `docs/archive/phase-to-domain-mapping-historical.md`, and the post-port
   hygiene closeout report now record the executed layout.
 
 Closeout evidence lives at

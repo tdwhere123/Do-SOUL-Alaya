@@ -612,15 +612,6 @@ conditions live in `docs/handbook/backlog.md`):
 - **`#BL-036`** — Dedupe pending `PATH_PLASTICITY_UPDATE` enqueues
   via a `Set<workspaceId>` mirror of the embedding-backfill pattern.
 
-### P3. Vendor cleanup (post-v0.1.0 tag)
-
-`vendor/do-what-new-snapshot/` was a temporary port reference, not
-a permanent dependency. After v0.1.0 tags, it gets removed in its
-own short-lived worktree, and the port-protocol scaffolding in
-`CLAUDE.md` / `docs/handbook/port-protocol.md` /
-`docs/handbook/task-card-template.md` is rewritten as historical
-context.
-
 ---
 
 ## Contributing

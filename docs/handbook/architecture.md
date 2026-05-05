@@ -133,12 +133,11 @@ startup step 3 of `Daemon Startup Ordering` below.
 consumes one. The agent-attach surfaces (MCP server + CLI fallback)
 do not stream; the Memory Inspector consumes daemon HTTP routes via
 polling, never via SSE or WebSocket. Daemon-internal eventing remains
-in-process via `RuntimeNotifier` listeners and the audit log.
-Upstream daemon code under `apps/core-daemon/src/sse/`, `runs.ts`
-TransformStream, `background/bootstrap.ts` SSE pipeline, and
-`event-publisher` SSE chain are all out of scope and must be
-`requires-redesign` cards that strip the SSE transport while preserving
-the EventLog → audit ordering. See `docs/handbook/invariants.md §11`.
+in-process via `RuntimeNotifier` listeners and the audit log. The
+upstream do-what-new SSE pipeline (`apps/core-daemon/src/sse/`,
+`runs.ts` TransformStream, `background/bootstrap.ts` SSE pipeline,
+and the `event-publisher` SSE chain) was stripped during the v0.1
+port and must stay stripped — see `docs/handbook/invariants.md §11`.
 
 External consumers (Codex / Claude Code) interact only through MCP
 tool calls. There is no polling and no streaming; an MCP tool call is
@@ -160,7 +159,7 @@ review finding:
    - RecallService (needs Memory + Embedding repos)
    - OutputShapingService, NarrativeBudgetService, ManifestationResolver
    - SynthesisService, ProposalService
-   - ConversationService (memory-orchestration only; see invariant §20 / port-protocol §2)
+   - ConversationService (memory-orchestration only; chat-specific orchestration was removed during the v0.1 port — see invariant §20)
 4. **Garden engine**: GardenScheduler started AFTER all services are
    ready; Garden roles register port adapters at this step.
 5. **Engine gateway**: provider registry + MCP bridge constructed.
@@ -210,8 +209,6 @@ can prove.
 
 - Current invariants: `docs/handbook/invariants.md`
 - Current code map: `docs/handbook/code-map.md`
-- Port discipline: `docs/handbook/port-protocol.md`
 - Current runtime status: `docs/handbook/runtime-status.md`
-- v0.1 task cards: `docs/v0.1/INDEX.md`
-- Upstream code map (port reference):
-  `vendor/do-what-new-snapshot/docs/handbook/code-map.md`
+- Historical port-era task cards: `docs/v0.1/INDEX.md`
+- Retired port discipline: `docs/archive/port-protocol-historical.md`

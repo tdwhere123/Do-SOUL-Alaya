@@ -11,10 +11,9 @@
 
 ## Repository Context
 
-Do-SOUL Alaya is a **local-first memory core for CLI agents**, ported
-from the sibling project `do-what-new`. It exposes itself only via MCP
-(for agent attach) and plain CLI commands. There is no GUI and no
-conversation TUI.
+Do-SOUL Alaya is a **local-first memory plane for CLI agents**. It
+exposes itself only via MCP (for agent attach) and plain CLI commands.
+There is no GUI and no conversation TUI.
 
 - Memory objects are ontology; surfaces, scopes, paths, and projections
   route or filter them — they are not truth.
@@ -23,50 +22,42 @@ conversation TUI.
 - Signal ingestion is dual-track: explicit candidate signal emission and
   post-turn Garden heuristic extraction.
 
-## Port-First Discipline
+## Project Genealogy
 
-> **Port first; do not clean-room rewrite.**
-
-The full memory plugin system already exists at
-`vendor/do-what-new-snapshot/`. Each task card MUST cite which source
-files it is porting and which port mode it uses (`trivial-copy` /
-`adapt-and-port` / `requires-redesign`). See
-`docs/handbook/port-protocol.md` for the rules.
-
-If you find yourself "rewriting" instead of "copying", stop. Either the
-task card has the wrong port mode, or you are about to produce
-unnecessary contract scaffolding (the same failure mode that triggered
-this v0.1 reset).
+Alaya is a port (not a clean-room rewrite) of the memory plugin system
+from the sibling project `do-what-new`. The frozen source reference used
+for v0.1 work was upstream commit
+`6ed846341f66ff98bfcddbb940db74cfc10133ca` (snapshot date 2026-04-28).
+That snapshot (`vendor/do-what-new-snapshot/`) has been removed after
+v0.1.0 shipped; the port-protocol scaffolding is archived at
+`docs/archive/port-protocol-historical.md`. Post-v0.1.0 work is normal
+forward development — no port mode, no vendor reference.
 
 ## Before You Code
 
 Read in this order:
 
 1. `RTK.md` for repository command wrapping rules when available.
-2. `docs/v0.1/INDEX.md`
-3. The task card or phase README you are touching
-4. `docs/handbook/invariants.md`
-5. `docs/handbook/port-protocol.md`
-6. `docs/handbook/workflow/agent-workflow.md` — includes the Task-Type
+2. The task card or initiative README you are touching
+3. `docs/handbook/invariants.md`
+4. `docs/handbook/workflow/agent-workflow.md` — includes the Task-Type
    Reading Matrix; pick the row for your task type (Backend / Docs /
    Review) and add its required reads
-7. `docs/handbook/backlog.md` when touching an area with tracked issues
+5. `docs/handbook/backlog.md` when touching an area with tracked issues
 
 ## Role Framing
 
 Agents (Codex) implement and review in this repository.
 
 - Default to implementation, debugging, and verification when the user
-  gives a build, port, or fix task.
+  gives a build or fix task.
 - When the user asks for review, switch to reviewer mode and report
   findings **first**, ordered by severity, with precise file
   references:
   - **Blocking**: architecture violation, unmet acceptance criteria,
-    broken build or test, data or state risk, port logic divergence
-    from source.
+    broken build or test, data or state risk.
   - **Important**: likely bug, regression, missing meaningful
-    coverage, misleading status, or unjustified port-mode escalation
-    (e.g. used adapt-and-port when trivial-copy would have worked).
+    coverage, or misleading status.
   - **Nice-to-have**: optional cleanup or follow-up.
 - A worker's `DONE` is not acceptance. Only a fresh reviewer pass
   closes the loop. See `docs/handbook/workflow/review-protocol.md` for
@@ -87,15 +78,13 @@ Agents (Codex) implement and review in this repository.
 
 - Task card sections 2, 3, 4, and 5 define scope; section 6 defines
   verification.
-- Source for any port lives in `vendor/do-what-new-snapshot/`. Never
-  reference `/home/tdwhere/vibe/do-what-new/` directly.
 - Primary environment is WSL/Linux; prefer standard Linux shell
   behavior, ripgrep-style search, and `rtk` wrapping per `RTK.md` when
   available.
 - For docs-only work, run targeted `rtk rg` sweeps for changed paths,
   events, readiness labels, phase gates, and legacy references.
 - If the task card requires a completion report, write it to
-  `docs/v0.1/<phase>-briefs/reports/`.
+  `docs/<initiative>/reports/`.
 
 ## Architecture (one line)
 
@@ -113,7 +102,6 @@ rtk pnpm build
 rtk pnpm test
 rtk pnpm exec vitest run --project @do-soul/alaya-<package>
 
-# All commands below are available only after Phase 4 lands:
 rtk pnpm --dir apps/core-daemon dev  # daemon dev
 rtk pnpm exec alaya doctor           # CLI diagnostic
 rtk pnpm exec alaya install          # install profile
@@ -127,7 +115,6 @@ rtk pnpm exec alaya tools call --json # CLI fallback: call a memory tool
 
 - `docs/handbook/README.md` — maintained documentation entry point
 - `docs/handbook/invariants.md` — architecture non-negotiables
-- `docs/handbook/port-protocol.md` — Port-First discipline
 - `docs/handbook/code-map.md` — current code ownership, Project Map
 - `docs/handbook/runtime-status.md` — current runtime status and wiring
   gaps
@@ -137,6 +124,6 @@ rtk pnpm exec alaya tools call --json # CLI fallback: call a memory tool
 - `docs/handbook/workflow/subagent-dispatch.md` — dispatch policy
 - `docs/handbook/backlog.md` — tracked issues
 - `docs/handbook/maintenance.md` — doc-edit protocol
-- `docs/v0.1/INDEX.md` — active task cards and phase status
-- `vendor/do-what-new-snapshot/SNAPSHOT_REF.md` — frozen source
-  reference
+- `docs/v0.1/INDEX.md` — historical port record (Phase E banner)
+- `CLAUDE.md §Project Genealogy` — upstream commit reference and port
+  lineage
