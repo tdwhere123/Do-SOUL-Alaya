@@ -42,6 +42,9 @@ type CreateCoreDaemonAppInput = Readonly<{
   synthesisService: unknown;
   claimService: unknown;
   proposalService: unknown;
+  // A1 (HITL daemon backbone) — Inspector loopback HTTP routes call
+  // the same MCP handler that attached agents use.
+  mcpMemoryToolHandler: unknown;
   fileRepo: unknown;
   runtimeNotifier: unknown;
   topologyAuditService: unknown;
@@ -161,7 +164,8 @@ export function createCoreDaemonApp(input: CreateCoreDaemonAppInput): ReturnType
       },
       proposals: {
         workspaceService: input.workspaceService,
-        proposalService: input.proposalService
+        proposalService: input.proposalService,
+        mcpMemoryToolHandler: input.mcpMemoryToolHandler
       },
       files: {
         workspaceService: input.workspaceService,

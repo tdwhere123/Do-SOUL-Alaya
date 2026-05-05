@@ -132,6 +132,10 @@ import {
 import { resolveAlayaConfigDir, resolveAlayaConfigPaths, type AlayaConfigPaths } from "./cli/config-files.js";
 import { resolveCoreDaemonFilesDirectory } from "./files-data-dir.js";
 import { createGardenRuntime } from "./garden-runtime.js";
+import {
+  createPathPlasticityService,
+  createRecallPathPlasticityPort
+} from "./path-plasticity-runtime.js";
 import { SqliteHandoffGapAdapter } from "./handoff-gap-adapter.js";
 import { createManifestationContextLensAssembler } from "./manifestation-context-lens-assembler.js";
 import { createNarrativeBudgetRepo } from "./narrative-budget-repo.js";
@@ -451,12 +455,16 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     memoryEntryRepo,
     warn: warnLogger.warn
   });
+  const recallPathPlasticityPort = createRecallPathPlasticityPort({
+    pathRelationRepo
+  });
   const recallService = new RecallService({
     memoryRepo: memoryEntryRepo,
     slotRepo,
     eventLogRepo,
     graphSupportPort: graphExploreService,
     projectMappingPort: projectMappingService,
+    pathPlasticityPort: recallPathPlasticityPort,
     ...(globalMemoryRepo === null
       ? {}
       : {
@@ -639,6 +647,12 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   recordStartupStep(startupSteps, "core-services");
 
   const gardenBacklogThresholds = createGardenBacklogThresholds();
+  const pathPlasticityService = createPathPlasticityService({
+    eventLogRepo,
+    trustStateRepo,
+    pathRelationRepo,
+    eventPublisher
+  });
   const gardenRuntime = createGardenRuntime({
     databaseConnection: database.connection,
     backlogThresholds: gardenBacklogThresholds,
@@ -651,6 +665,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     orphanRadarRepo,
     pathGraphSnapshotRepo,
     pathRelationRepo,
+    pathPlasticityService,
     embeddingBackfillHandler,
     strongRefService,
     workspaceRepo
@@ -737,6 +752,9 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     synthesisService,
     claimService,
     proposalService,
+    // A1 (HITL daemon backbone) — Inspector loopback HTTP routes need
+    // the same MCP handler that attached agents call.
+    mcpMemoryToolHandler,
     fileRepo,
     runtimeNotifier,
     topologyAuditService,

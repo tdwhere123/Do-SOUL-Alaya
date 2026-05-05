@@ -23,6 +23,13 @@ export interface WorkerRunRepoPort {
     nextState: WorkerRunState,
     updatedAt: string
   ): Promise<Readonly<DelegatedWorkerRun>>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  updateStateSync(
+    workerRunId: string,
+    expectedState: WorkerRunState,
+    nextState: WorkerRunState,
+    updatedAt: string
+  ): Readonly<DelegatedWorkerRun>;
 }
 
 export interface WorkerRunLifecycleServiceDependencies {
@@ -99,10 +106,15 @@ export class WorkerRunLifecycleService {
       ...extras
     });
 
-    return this.dependencies.eventPublisher.publishWithMutation(
-      this.buildStateChangedEvent(snapshot, payload),
-      async () =>
-        this.dependencies.repo.updateState(snapshot.worker_run_id, snapshot.state, nextState, updatedAt)
+    return this.dependencies.eventPublisher.appendManyWithMutation(
+      [this.buildStateChangedEvent(snapshot, payload)],
+      () =>
+        this.dependencies.repo.updateStateSync(
+          snapshot.worker_run_id,
+          snapshot.state,
+          nextState,
+          updatedAt
+        )
     );
   }
 

@@ -157,10 +157,11 @@ violates the "backlog 不是问题归宿" preference. Round 3 walked each
 remaining Important either to a fix, an invariant, or an explicit v0.2
 deferral with a written close condition. Nine Round 3 atomic commits
 (`4aa5de1`, `d63ab97`, `bb3e02c`, `30ad2a0`, `dfdc909`, `60f2ec9`,
-`78d8a91`, plus this one) closed all but one Important; the lone
-deferral is `#BL-022` (EventPublisher atomic port + EventLog revision
-transaction) — appropriate to ship alongside the v0.2 transaction model
-rewrite rather than retrofit into v0.1, with the user on the record.
+`78d8a91`, plus this one) closed all but one Important; the remaining
+deferral was `#BL-022` (EventPublisher atomic port + EventLog revision
+transaction). v0.1-closeout-a2 retroactively closed `#BL-022` rather
+than ship the deferral — see `backlog.md` for the full migration
+commit chain.
 Highlights:
 - MR-I05: `SoulOpenPointerResponse.content` is now a typed projection of
   six fields; MemoryEntry internals (lifecycle_state, created_by,
@@ -182,9 +183,81 @@ Highlights:
   and three `expect.toBeDefined()` weak assertions were upgraded to
   interface-shape assertions.
 
-Backlog Open count is 0. The only remaining items are the three v0.2
-deferrals (`#BL-008` pi-mono, `#BL-009` keychain, `#BL-022` EventPublisher
-port) and the seven `#BL-001..#BL-007` ADR-style out-of-scope entries.
+Backlog Open count is 0. The only remaining items are the two v0.2
+deferrals (`#BL-008` pi-mono, `#BL-009` keychain) and the seven
+`#BL-001..#BL-007` ADR-style out-of-scope entries. (`#BL-022`
+EventPublisher atomic port closed in v0.1-closeout-a2.)
+
+## v0.1-closeout lessons (parallel A1/A2/A3 sub-agent dispatch)
+
+Two recurring failure shapes surfaced across the parallel A1/A2/A3
+sub-agent waves and are worth pinning so the next multi-card closeout
+does not pay the same cost:
+
+- **Test-shape pin vs behaviour pin.** A1's
+  `final-review-evidence-locks` doc-cite loop, A2's workspace-service
+  `Promise.all` parallel-insert assertion, and A2's
+  `routes-config-port` "persist callback IS the SQL boundary" test all
+  pinned implementation shape (catalog count, async ordering, callback
+  layering) instead of the contract the test was named for. Any catalog
+  growth, atomicity migration, or transaction-shape change broke
+  unrelated tests purely because the test pinned `how`, not `what`.
+  Future tests must assert observable contract — not call shape, not
+  ordering, not async-vs-sync.
+- **Prompt-shape vs codebase-shape.** A1's prompt asserted a
+  `proposal_reviews` table that didn't exist; A3's prompt asserted
+  `PathPlasticityStateSchema` was already exported (it was declared but
+  not exported) and didn't include `garden-tier.ts` in the may-modify
+  list (adding a new task kind requires that file). Per-card prompts
+  that drifted from disk truth forced sub-agents to re-derive the shape
+  mid-implementation. Future multi-card briefs must include a
+  `verified-files-and-symbols` block produced by `rg`/`Read` immediately
+  before dispatch, not from the planner's mental model.
+
+Both lessons are process-level — neither requires a code change in
+v0.1-closeout. They are pinned here so the v0.1.x maintenance waves and
+v0.2 planning agents can reference them at the source rather than
+re-discovering them from `.do-it/findings/{a1,a2,a3}.md`.
+
+## v0.1.0 Release (2026-05-05)
+
+The `v0.1-closeout` integration branch landed on `main` after a
+6-lens D2 multi-lens review (reviewer / red-team / spec-compliance /
+domain-language / architect / Codex) plus a 2-round Codex-only
+fix-loop converged on zero Blocking and zero Important findings.
+The release diff vs. the previous `v0.1.0` framing absorbs:
+
+- **A1** — HITL daemon backbone (`soul.list_pending_proposals` MCP
+  tool, `alaya review pending|accept|reject` CLI, `reviewer_identity`
+  on review records, Inspector "Pending Proposals" view).
+- **A2** — `EventPublisher.appendManyWithMutation` atomic primitive +
+  14 producer migrations, closing `#BL-022`. Legacy
+  `publishWithMutation` / `publishManyWithMutation` are
+  `@deprecated` and survive only for one auditor adapter (`#BL-026`).
+- **A3** — Path-axis plasticity feedback loop:
+  `PathPlasticityService` consumes `MEMORY_USAGE_REPORTED` →
+  emits `PathRelationReinforced/Weakened/Retired` runtime-governance
+  events → `RecallService` factors a plasticity weight into recall
+  scoring. Three of the four named plasticity ops shipped
+  (reinforcement / weakening / retirement); `direction_bias`
+  redirection is `#BL-029`.
+- **C1** — Post-port hygiene wave: protocol `phase-*.ts` → domain
+  names (e.g. `events/runtime-governance.ts`); oversized files split;
+  `knip` unused-export check pinned; `code-map.md` refreshed.
+
+D2 fix-loop additionally closed five red-team / architect / codex
+findings inline (cross-workspace recall poisoning via
+`soul.report_context_usage` (`B3`), cross-tick reapplication of
+plasticity receipts via in-process watermark (`B2`), CLI review
+`ALAYA_RUN_ID` override, Inspector POST `null` body TypeError,
+`assertProposalContext` over-loosening, `proposed_changes.content`
+size cap, etc.) and opened ten v0.2 backlog cards
+(`#BL-027`..`#BL-036`) for the remaining deferrals — each with
+explicit close conditions per `feedback_no_backlog`.
+
+End-to-end verification at the merge commit:
+`rtk pnpm build` exit 0; `rtk pnpm test` 258 test files / 1996 tests
+green. Convergence rule (Blocking + Important double-zero) holds.
 
 The end-to-end verification gate at HEAD `78d8a91` runs clean (same
 shape as Round 2):

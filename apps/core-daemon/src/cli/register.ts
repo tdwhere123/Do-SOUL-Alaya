@@ -26,6 +26,7 @@ import { createDoctorCommand } from "./doctor.js";
 import { createInstallCommand } from "./install.js";
 import { createInspectCommand } from "./inspect.js";
 import { createOperationCommandSpecs } from "./operations.js";
+import { createReviewCommand } from "./review.js";
 import { createStatusCommand } from "./status.js";
 import { createToolsCommand } from "./tools.js";
 
@@ -71,6 +72,12 @@ export function registerAlayaCliCommands(
     auditWriter: createProfileAuditWriter(process.env)
   }));
   bridge.registerSubcommand(createToolsCommand({
+    handler: runtime.services.mcpMemoryToolHandler
+  }));
+  // A1 (HITL daemon backbone) — `alaya review pending|accept|reject`
+  // routes through the same MCP handler attached agents use, so the
+  // CLI fallback and Codex/Claude attach surfaces share one code path.
+  bridge.registerSubcommand(createReviewCommand({
     handler: runtime.services.mcpMemoryToolHandler
   }));
   bridge.registerSubcommand(createMcpCommand(runtime));

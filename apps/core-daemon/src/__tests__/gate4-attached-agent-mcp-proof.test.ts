@@ -198,7 +198,8 @@ describe("Gate-4 attached-agent MCP proof", () => {
       const review = await callTool<SoulReviewMemoryProposalResponse>(client, "soul.review_memory_proposal", {
         proposal_id: proposal.proposal_id,
         verdict: "reject",
-        reason: "Gate-4 proof rejects the synthetic proposal."
+        reason: "Gate-4 proof rejects the synthetic proposal.",
+        reviewer_identity: "user:gate4-proof"
       });
       transcript.push({ step: "soul.review_memory_proposal", evidence: review });
       expect(review).toEqual({

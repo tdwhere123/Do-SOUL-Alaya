@@ -244,7 +244,8 @@ describe("P5 v0.1 release loop E2E", () => {
       const review = await callTool<SoulReviewMemoryProposalResponse>(client, "soul.review_memory_proposal", {
         proposal_id: proposal.proposal_id,
         verdict: "reject",
-        reason: "P5 release-loop rejects the synthetic proposal."
+        reason: "P5 release-loop rejects the synthetic proposal.",
+        reviewer_identity: "user:p5-release-loop"
       });
       transcript.push({ step: "soul.review_memory_proposal", evidence: review });
       expect(review).toEqual({
@@ -257,7 +258,8 @@ describe("P5 v0.1 release loop E2E", () => {
         arguments: {
           proposal_id: FOREIGN_PROPOSAL_ID,
           verdict: "reject",
-          reason: "Foreign workspace proposal must not be reviewable."
+          reason: "Foreign workspace proposal must not be reviewable.",
+          reviewer_identity: "user:p5-release-loop"
         }
       });
       transcript.push({
@@ -611,7 +613,8 @@ async function seedReleaseFixtureAtDbPath(dbPath: string): Promise<void> {
     await proposalRepo.create({
       proposal: createProposal(),
       workspace_id: "workspace-2",
-      run_id: "run-2"
+      run_id: "run-2",
+      target_object_kind: "memory_entry"
     });
   } finally {
     database.close();

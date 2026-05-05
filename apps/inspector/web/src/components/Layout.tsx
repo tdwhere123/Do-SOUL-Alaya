@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { Cpu, Network, Activity } from "lucide-react";
+import { Activity, CheckSquare, Cpu, Network } from "lucide-react";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
@@ -10,6 +10,8 @@ function cn(...inputs: unknown[]): string {
 const NAV_ITEMS = [
   { to: "/config", label: "Configuration", icon: <Cpu className="w-4 h-4" /> },
   { to: "/graph", label: "Memory Graph", icon: <Network className="w-4 h-4" /> },
+  // A1 (HITL daemon backbone) — Pending Proposals tooling-loopback view.
+  { to: "/proposals", label: "Pending Proposals", icon: <CheckSquare className="w-4 h-4" /> },
   { to: "/status", label: "System Status", icon: <Activity className="w-4 h-4" /> }
 ];
 

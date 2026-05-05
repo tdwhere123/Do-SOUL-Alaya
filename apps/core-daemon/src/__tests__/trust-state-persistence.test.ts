@@ -96,7 +96,10 @@ describe("trust state SQL persistence", () => {
 
     expect(existsSync(databasePath)).toBe(true);
     expect(process.env.DATA_DIR).toBe(dataDir);
-    expect(readMaxSchemaVersion(dataDir)).toBe(57);
+    // A1 (HITL daemon backbone) bumps the migration set to 058
+    // (058-reviewer-identity.sql adds reviewer_identity + HITL summary
+    // projection columns to the proposals table).
+    expect(readMaxSchemaVersion(dataDir)).toBe(58);
     expect(firstStatus).not.toBeNull();
     if (firstStatus === null) {
       throw new Error("first daemon lifetime did not produce a trust status");

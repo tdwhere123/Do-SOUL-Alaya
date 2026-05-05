@@ -23,13 +23,19 @@ const SQLITE_CONSTRAINT_UNIQUE = "SQLITE_CONSTRAINT_UNIQUE";
 
 export interface DriftLeaseRepo {
   create(lease: Readonly<GovernanceDriftLease>): Promise<Readonly<GovernanceDriftLease>>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  createSync?(lease: Readonly<GovernanceDriftLease>): Readonly<GovernanceDriftLease>;
   findActive(workspaceId: string): Promise<readonly Readonly<GovernanceDriftLease>[]>;
   findActiveById(
     workspaceId: string,
     leaseId: string
   ): Promise<Readonly<GovernanceDriftLease> | null>;
   delete(leaseId: string): Promise<void>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  deleteSync?(leaseId: string): void;
   deleteExpired(beforeDate: string): Promise<number>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  deleteExpiredSync?(beforeDate: string): number;
 }
 
 export class SqliteDriftLeaseRepo implements DriftLeaseRepo {
@@ -98,6 +104,11 @@ export class SqliteDriftLeaseRepo implements DriftLeaseRepo {
   }
 
   public async create(lease: Readonly<GovernanceDriftLease>): Promise<Readonly<GovernanceDriftLease>> {
+    return this.createSync(lease);
+  }
+
+  /** Synchronous variant for atomic publish + mutation (#BL-022). */
+  public createSync(lease: Readonly<GovernanceDriftLease>): Readonly<GovernanceDriftLease> {
     const parsedLease = parseDriftLease(lease);
 
     try {
@@ -167,6 +178,11 @@ export class SqliteDriftLeaseRepo implements DriftLeaseRepo {
   }
 
   public async delete(leaseId: string): Promise<void> {
+    this.deleteSync(leaseId);
+  }
+
+  /** Synchronous variant for atomic publish + mutation (#BL-022). */
+  public deleteSync(leaseId: string): void {
     const parsedLeaseId = parseNonEmptyString(leaseId, "lease id");
 
     try {
@@ -177,6 +193,11 @@ export class SqliteDriftLeaseRepo implements DriftLeaseRepo {
   }
 
   public async deleteExpired(beforeDate: string): Promise<number> {
+    return this.deleteExpiredSync(beforeDate);
+  }
+
+  /** Synchronous variant for atomic publish + mutation (#BL-022). */
+  public deleteExpiredSync(beforeDate: string): number {
     const parsedBeforeDate = parseTimestamp(beforeDate);
 
     try {

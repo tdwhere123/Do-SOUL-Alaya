@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { createInspectorAuthMiddleware } from "./auth.js";
 import { registerInspectorConfigRoutes } from "./routes/config.js";
 import { registerInspectorGraphRoutes } from "./routes/graph.js";
+import { registerInspectorProposalRoutes } from "./routes/proposals.js";
 import { registerInspectorStatusRoutes } from "./routes/status.js";
 import { registerInspectorStaticRoutes } from "./static.js";
 
@@ -17,7 +18,11 @@ export const INSPECTOR_ROUTE_SURFACE = Object.freeze([
   "GET /api/config/:workspaceId/embedding-supplement",
   "PATCH /api/config/runtime/embedding-supplement",
   "GET /api/graph/:workspaceId",
-  "GET /api/status"
+  "GET /api/status",
+  // A1 (HITL daemon backbone) — Inspector loopback for the new
+  // pending-proposals listing tool plus accept/reject.
+  "GET /api/proposals/:workspaceId/pending",
+  "POST /api/proposals/:workspaceId/:proposalId/review"
 ] as const);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -48,6 +53,7 @@ export function createInspectorApp(options: InspectorAppOptions): Hono {
   registerInspectorConfigRoutes(app, proxyOptions);
   registerInspectorGraphRoutes(app, proxyOptions);
   registerInspectorStatusRoutes(app, proxyOptions);
+  registerInspectorProposalRoutes(app, proxyOptions);
   registerInspectorStaticRoutes(app, {
     staticRoot: options.staticRoot ?? defaultStaticRoot
   });

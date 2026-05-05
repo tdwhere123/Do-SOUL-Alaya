@@ -11,6 +11,8 @@ import { parseNonEmptyString, parseTimestamp } from "./shared/validators.js";
 
 export interface ClaimFormRepo {
   create(claim: ClaimForm): Promise<Readonly<ClaimForm>>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  createSync(claim: ClaimForm): Readonly<ClaimForm>;
   findById(objectId: string): Promise<Readonly<ClaimForm> | null>;
   findByIds(objectIds: readonly string[]): Promise<readonly Readonly<ClaimForm>[]>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<ClaimForm>[]>;
@@ -155,6 +157,11 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
   }
 
   public async create(claim: ClaimForm): Promise<Readonly<ClaimForm>> {
+    return this.createSync(claim);
+  }
+
+  /** Synchronous variant for atomic publish + mutation (#BL-022). */
+  public createSync(claim: ClaimForm): Readonly<ClaimForm> {
     const parsedClaim = parseClaimForm(claim);
 
     try {

@@ -17,7 +17,11 @@ describe("inspector routes", () => {
       "GET /api/config/:workspaceId/embedding-supplement",
       "PATCH /api/config/runtime/embedding-supplement",
       "GET /api/graph/:workspaceId",
-      "GET /api/status"
+      "GET /api/status",
+      // A1 (HITL daemon backbone) — Inspector loopback for the new
+      // pending-proposals listing tool plus accept/reject.
+      "GET /api/proposals/:workspaceId/pending",
+      "POST /api/proposals/:workspaceId/:proposalId/review"
     ]);
   });
 
@@ -203,5 +207,49 @@ describe("inspector routes", () => {
     const missingResponse = await missingApp.request("/?token=token");
     expect(missingResponse.status).toBe(503);
     expect(await missingResponse.json()).toEqual({ error: "frontend_bundle_missing" });
+  });
+
+  // A1 (HITL daemon backbone) — Inspector forwards proposal review
+  // calls to the daemon's workspace-scoped HTTP wrapper around the MCP
+  // handler. The Inspector backend itself never imports daemon code.
+  it("proxies pending-proposals listing and accept/reject through to the daemon", async () => {
+    const calls: { url: string; method: string; body: string | null }[] = [];
+    const app = createInspectorApp({
+      token: "token",
+      daemonUrl: "http://daemon.local",
+      staticRoot: await mkdtemp(path.join(tmpdir(), "inspector-static-")),
+      fetchImpl: async (input, init) => {
+        calls.push({
+          url: String(input),
+          method: init?.method ?? "GET",
+          body: init?.body === undefined ? null : String(init.body)
+        });
+        return Response.json({ success: true, data: { ok: true } });
+      }
+    });
+
+    await app.request("/api/proposals/ws1/pending?token=token&limit=10");
+    await app.request("/api/proposals/ws1/prop-1/review?token=token", {
+      method: "POST",
+      body: JSON.stringify({
+        verdict: "accept",
+        reason: "looks right",
+        reviewer_identity: "user:alice"
+      }),
+      headers: { "content-type": "application/json" }
+    });
+
+    expect(calls).toEqual([
+      {
+        url: "http://daemon.local/workspaces/ws1/proposals/pending?limit=10",
+        method: "GET",
+        body: null
+      },
+      {
+        url: "http://daemon.local/workspaces/ws1/proposals/prop-1/review",
+        method: "POST",
+        body: "{\"verdict\":\"accept\",\"reason\":\"looks right\",\"reviewer_identity\":\"user:alice\"}"
+      }
+    ]);
   });
 });

@@ -37,9 +37,9 @@ export interface AppConfigService {
 }
 
 interface ConfigEventPublisher {
-  publishWithMutation<T>(
-    eventInput: Omit<EventLogEntry, "event_id" | "created_at">,
-    mutate: (entry: EventLogEntry) => Promise<T>
+  appendManyWithMutation<T>(
+    eventInputs: readonly Omit<EventLogEntry, "event_id" | "created_at">[],
+    mutate: (entries: readonly EventLogEntry[]) => T
   ): Promise<T>;
 }
 
@@ -197,38 +197,56 @@ async function patchRuntimeEmbeddingConfig(input: {
   const occurredAt = parseIsoTimestamp(input.clock());
   const auditEntryId = input.generateAuditId();
 
-  return await input.eventPublisher.publishWithMutation(
-    {
-      event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
-      entity_type: RUNTIME_EMBEDDING_ENTITY_TYPE,
-      entity_id: RUNTIME_EMBEDDING_ENTITY_ID,
-      workspace_id: RUNTIME_CONFIG_WORKSPACE_ID,
-      run_id: null,
-      caused_by: "inspector",
-      revision: DEFAULT_REVISION,
-      payload_json: SoulHealthJournalRecordedPayloadSchema.parse({
-        entry_id: auditEntryId,
-        event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
-        workspace_id: RUNTIME_CONFIG_WORKSPACE_ID,
-        occurred_at: occurredAt,
-        change_summary: buildRuntimeEmbeddingChangeSummary(normalized)
-      })
-    },
-    async () =>
-      await applyRuntimeEmbeddingConfigFiles({
-        paths: input.paths,
-        normalized,
-        generateTempId: input.generateTempId,
-        persist: async () => {
-          const next = await input.repo.patch(
+  // Per .do-it/findings/a2.md finding-1: the FS write half of this operation
+  // (env file + optional pasted secret) is genuinely async and cannot live
+  // inside a SQLite transaction. The structure is now:
+  //
+  //   1. applyRuntimeEmbeddingConfigFiles writes the FS files inside its
+  //      cross-process lock and snapshots the previous content.
+  //   2. The persist callback runs the atomic publish + sync SQL patch via
+  //      EventPublisher.appendManyWithMutation. If publish/SQL throws inside
+  //      this callback, applyRuntimeEmbeddingConfigFiles' built-in
+  //      restore-on-throw cleans up the FS files atomically with the
+  //      EventLog rollback. End-state: behaves as a single transaction
+  //      across FS + EventLog + SQL even though FS is not part of the
+  //      SQLite transaction itself.
+  //
+  // This preserves the prior FS/SQL rollback contract while closing BL-022
+  // for the runtime-config SQL row.
+  return await applyRuntimeEmbeddingConfigFiles({
+    paths: input.paths,
+    normalized,
+    generateTempId: input.generateTempId,
+    persist: async () =>
+      await input.eventPublisher.appendManyWithMutation(
+        [
+          {
+            event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
+            entity_type: RUNTIME_EMBEDDING_ENTITY_TYPE,
+            entity_id: RUNTIME_EMBEDDING_ENTITY_ID,
+            workspace_id: RUNTIME_CONFIG_WORKSPACE_ID,
+            run_id: null,
+            caused_by: "inspector",
+            revision: DEFAULT_REVISION,
+            payload_json: SoulHealthJournalRecordedPayloadSchema.parse({
+              entry_id: auditEntryId,
+              event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
+              workspace_id: RUNTIME_CONFIG_WORKSPACE_ID,
+              occurred_at: occurredAt,
+              change_summary: buildRuntimeEmbeddingChangeSummary(normalized)
+            })
+          }
+        ],
+        () => {
+          const next = input.repo.patchSync(
             RUNTIME_EMBEDDING_CONFIG_KEY,
             normalized.patch,
             DEFAULT_RUNTIME_EMBEDDING_CONFIG
           );
           return RuntimeEmbeddingConfigSchema.parse(next);
         }
-      })
-  );
+      )
+  });
 }
 
 function buildRuntimeEmbeddingChangeSummary(normalized: NormalizedRuntimeEmbeddingConfigPatch): {

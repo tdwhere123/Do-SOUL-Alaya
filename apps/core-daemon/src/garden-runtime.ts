@@ -21,6 +21,7 @@ import {
 import type {
   EmbeddingBackfillHandler,
   EventPublisher,
+  PathPlasticityService,
   StrongRefService
 } from "@do-soul/alaya-core";
 import {
@@ -48,6 +49,10 @@ import {
 } from "@do-soul/alaya-soul";
 import { findEventLogOrphansForWorkspace, findOrphanedMemoriesForWorkspace } from "./orphan-query.js";
 import { BackgroundServiceManager } from "./background/bootstrap.js";
+import {
+  createPathPlasticityWatermarkRegistry,
+  type PathPlasticityWatermarkRegistry
+} from "./path-plasticity-runtime.js";
 
 type PathGraphSnapshotRecord = Readonly<PathGraphSnapshot>;
 
@@ -84,6 +89,7 @@ export function createGardenRuntime(input: {
   readonly orphanRadarRepo: SqliteOrphanRadarRepo | null;
   readonly pathGraphSnapshotRepo: SqlitePathGraphSnapshotRepo;
   readonly pathRelationRepo: SqlitePathRelationRepo;
+  readonly pathPlasticityService?: Pick<PathPlasticityService, "computeAndApplyPlasticity">;
   readonly embeddingBackfillHandler?: Pick<EmbeddingBackfillHandler, "handle">;
   readonly strongRefService: StrongRefService;
   readonly workspaceRepo: SqliteWorkspaceRepo;
@@ -95,6 +101,13 @@ export function createGardenRuntime(input: {
   runBackgroundPass(): Promise<void>;
   setBacklogTelemetryObserver(observer: GardenBacklogTelemetryObserver | null): void;
 }> {
+  // D2 MERGED-B2 (codex-B2): per-workspace watermark for PATH_PLASTICITY_UPDATE
+  // so the same MEMORY_USAGE_REPORTED receipt is not reapplied every tick.
+  // See `path-plasticity-runtime.ts` createPathPlasticityWatermarkRegistry
+  // docstring for v0.1 in-process semantics + v0.2 #BL-035 durabilization.
+  const pathPlasticityWatermark: PathPlasticityWatermarkRegistry =
+    createPathPlasticityWatermarkRegistry();
+
   const schedulerEventLogPort: GardenSchedulerEventLogPort = {
     append: async (entry) => {
       await input.eventPublisher.publish({
@@ -194,6 +207,9 @@ export function createGardenRuntime(input: {
     greenMaintenancePort: input.gardenDataPorts.greenMaintenancePort,
     bootstrappingPort: input.gardenDataPorts.bootstrappingPort,
     orphanDetectionPort,
+    ...(input.pathPlasticityService === undefined
+      ? {}
+      : { pathPlasticityPort: input.pathPlasticityService }),
     scheduler: auditorSchedulerPort,
     healthJournal: healthJournalPort,
     eventLogRepo: auditorEventLogPort
@@ -294,25 +310,27 @@ export function createGardenRuntime(input: {
   ): Promise<PathGraphSnapshotRecord> => {
     const snapshot = await pathGraphSnapshotter.buildSnapshot(workspaceId, previousSnapshot);
 
-    await input.eventPublisher.publishWithMutation(
-      {
-        event_type: RuntimeGovernanceEventType.PATH_GRAPH_SNAPSHOT_CREATED,
-        entity_type: "path_graph_snapshot",
-        entity_id: snapshot.snapshot_id,
-        workspace_id: workspaceId,
-        run_id: null,
-        caused_by: "garden-path-graph-snapshotter",
-        payload_json: parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.PATH_GRAPH_SNAPSHOT_CREATED, {
-          snapshot_id: snapshot.snapshot_id,
-          workspace_id: snapshot.workspace_id,
-          total_active_paths: snapshot.total_active_paths,
-          total_retired_paths: snapshot.total_retired_paths,
-          snapshot_at: snapshot.snapshot_at
-        }),
-        revision: 1
-      },
-      async () => {
-        await input.pathGraphSnapshotRepo.create(snapshot);
+    await input.eventPublisher.appendManyWithMutation(
+      [
+        {
+          event_type: RuntimeGovernanceEventType.PATH_GRAPH_SNAPSHOT_CREATED,
+          entity_type: "path_graph_snapshot",
+          entity_id: snapshot.snapshot_id,
+          workspace_id: workspaceId,
+          run_id: null,
+          caused_by: "garden-path-graph-snapshotter",
+          payload_json: parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.PATH_GRAPH_SNAPSHOT_CREATED, {
+            snapshot_id: snapshot.snapshot_id,
+            workspace_id: snapshot.workspace_id,
+            total_active_paths: snapshot.total_active_paths,
+            total_retired_paths: snapshot.total_retired_paths,
+            snapshot_at: snapshot.snapshot_at
+          }),
+          revision: 1
+        }
+      ],
+      () => {
+        input.pathGraphSnapshotRepo.createSync(snapshot);
       }
     );
 
@@ -465,6 +483,24 @@ export function createGardenRuntime(input: {
           await enqueueForAllWorkspaces(GardenTaskKind.ORPHAN_DETECTION, GardenTier.TIER_1);
           await enqueueForAllWorkspaces(GardenTaskKind.EVENT_LOG_ORPHAN_DETECTION, GardenTier.TIER_1);
         }
+        // A3: Garden-driven plasticity tick. Soft-skips inside the Auditor
+        // when pathPlasticityService is not wired (test daemons), so it is
+        // safe to enqueue unconditionally here.
+        //
+        // D2 MERGED-B2: pass the per-workspace watermark as
+        // target_object_refs[0] (an ISO timestamp). The Soul
+        // `resolvePathPlasticitySinceIso` helper uses it as the lookback
+        // start, so each tick processes records strictly in
+        // `(prior watermark, nowAtEnqueue]`. First tick on each workspace
+        // bootstraps from `now - 24h`. The registry is process-local; v0.2
+        // #BL-035 will durabilize it via SQL.
+        await enqueueForAllWorkspaces(
+          GardenTaskKind.PATH_PLASTICITY_UPDATE,
+          GardenTier.TIER_1,
+          (workspaceId) => [
+            pathPlasticityWatermark.getAndAdvance(workspaceId, new Date().toISOString())
+          ]
+        );
       }
     },
     {

@@ -49,6 +49,8 @@ export interface SurfaceBindingServiceCrossCuttingPermissionLookupRecord {
 
 export interface SurfaceBindingServiceSurfaceBindingRepoPort {
   create(binding: Readonly<SurfaceBinding>, bindingId: string): Promise<Readonly<SurfaceBindingRecordView>>;
+  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
+  createSync(binding: Readonly<SurfaceBinding>, bindingId: string): Readonly<SurfaceBindingRecordView>;
   findByBindingId(bindingId: string): Promise<Readonly<SurfaceBindingRecordView> | null>;
   findByObjectId(objectId: string, workspaceId: string): Promise<readonly Readonly<SurfaceBindingRecordView>[]>;
   findPrimaryBinding(objectId: string, workspaceId: string): Promise<Readonly<SurfaceBindingRecordView> | null>;
@@ -63,11 +65,23 @@ export interface SurfaceBindingServiceSurfaceBindingRepoPort {
     bindingState: BindingStateType,
     updatedAt: string
   ): Promise<Readonly<SurfaceBindingRecordView>>;
+  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
+  updateStateSync(
+    bindingId: string,
+    bindingState: BindingStateType,
+    updatedAt: string
+  ): Readonly<SurfaceBindingRecordView>;
   cascadeDetachBySurfaceId(
     surfaceId: string,
     workspaceId: string,
     updatedAt: string
   ): Promise<readonly Readonly<SurfaceBindingRecordView>[]>;
+  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
+  cascadeDetachBySurfaceIdSync(
+    surfaceId: string,
+    workspaceId: string,
+    updatedAt: string
+  ): readonly Readonly<SurfaceBindingRecordView>[];
 }
 
 export interface SurfaceBindingServiceCrossCuttingLookupPort {
@@ -78,7 +92,7 @@ export interface SurfaceBindingServiceCrossCuttingLookupPort {
 }
 
 export interface SurfaceBindingEventPublisherPort
-  extends Pick<EventPublisher, "publishManyWithMutation" | "publishWithMutation"> {}
+  extends Pick<EventPublisher, "appendManyWithMutation"> {}
 
 export interface SurfaceBindingServiceDependencies {
   readonly surfaceBindingRepo: SurfaceBindingServiceSurfaceBindingRepoPort;
@@ -217,8 +231,8 @@ export class SurfaceBindingService {
         })
       };
 
-      const updated = await this.requireEventPublisher().publishWithMutation(event, async () =>
-        await this.dependencies.surfaceBindingRepo.updateState(
+      const updated = await this.requireEventPublisher().appendManyWithMutation([event], () =>
+        this.dependencies.surfaceBindingRepo.updateStateSync(
           existing.binding_id,
           parsedNewState,
           occurredAt
@@ -279,8 +293,8 @@ export class SurfaceBindingService {
       })
     }));
 
-    await this.requireEventPublisher().publishManyWithMutation(events, async () =>
-      await this.dependencies.surfaceBindingRepo.cascadeDetachBySurfaceId(
+    await this.requireEventPublisher().appendManyWithMutation(events, () =>
+      this.dependencies.surfaceBindingRepo.cascadeDetachBySurfaceIdSync(
         parsedSurfaceId,
         parsedWorkspaceId,
         occurredAt
@@ -411,8 +425,8 @@ export class SurfaceBindingService {
     event: SurfaceBindingEventDraft
   ): Promise<Readonly<SurfaceBindingRecordView>> {
     try {
-      return await this.requireEventPublisher().publishWithMutation(event, async () =>
-        await this.dependencies.surfaceBindingRepo.create(binding, bindingId)
+      return await this.requireEventPublisher().appendManyWithMutation([event], () =>
+        this.dependencies.surfaceBindingRepo.createSync(binding, bindingId)
       );
     } catch (error) {
       if (isUniqueConstraintError(error)) {

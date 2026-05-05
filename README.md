@@ -10,9 +10,9 @@
 
 ### *A local-first memory plane for CLI coding agents.*
 
-[![status](https://img.shields.io/badge/status-v0.1--rc%20(closing)-orange?style=flat-square)](#where-this-is-going)
+[![status](https://img.shields.io/badge/status-v0.1.0-success?style=flat-square)](#where-this-is-going)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-1917%20passing-success?style=flat-square)](#where-this-is-going)
+[![tests](https://img.shields.io/badge/tests-1996%20passing-success?style=flat-square)](#where-this-is-going)
 [![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#quickstart)
 [![pnpm](https://img.shields.io/badge/pnpm-%E2%89%A59-F69220?style=flat-square&logo=pnpm&logoColor=white)](#quickstart)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](#architecture-at-a-glance)
@@ -159,16 +159,15 @@ Claim lifecycle, karma) lives on the **Memory Ontology** layer and
 **Object** axis but only changes through the proposal-resolution
 path.
 
-*In flight (closing in v0.1):* the daemon does not yet expose a
-pending-proposals queue, and review records do not yet carry a
-reviewer identity — review flows through the same MCP surface as
-proposing, which means HITL is *agent-orchestrated* rather than
-*daemon-orchestrated*. The minimal daemon backbone
-(`soul.list_pending_proposals`, `alaya review` CLI verbs,
-`reviewer_identity` on review record) is the **A1** card in the
-[v0.1 closeout](#where-this-is-going). Full review-inbox UX
-(reviewer assignment, deadlines, escalation) is a v0.2 enhancement
-card.
+*Closed in v0.1-closeout (A1):* the daemon now exposes a
+pending-proposals queue (`soul.list_pending_proposals` MCP tool),
+review records carry an explicit `reviewer_identity` (migration
+`058-reviewer-identity.sql`), the `alaya review pending|accept|reject`
+CLI verbs are wired, and the Inspector surfaces the queue. HITL is
+now *daemon-orchestrated* through one workflow contract shared by
+the MCP, HTTP loopback, and CLI surfaces. Full review-inbox UX
+(reviewer assignment, deadlines, escalation, multi-reviewer quorum)
+is `#BL-027` in [where this is going](#where-this-is-going).
 
 *Code anchors:*
 `apps/core-daemon/src/mcp-memory-proposal-workflow.ts:90-248`,
@@ -195,14 +194,14 @@ mutation; consumers downstream subscribe to the notification, not to
 the DB. Lives on the **Memory Ontology** layer (durable truth) plus
 **Runtime Control** (the dispatch).
 
-*In flight (closing in v0.1):* the append + mutation pair is not
-yet wrapped in a single transaction; SQLite CAS plus a unique index
-on `(entity_type, entity_id, revision)` keeps the data consistent
-but leaves a small race window. Tracked as **#BL-022** — the
-`appendManyWithMutation` port lands inside one
-`connection.transaction()` and the ~12 callers migrate to a sync
-mutate callback. This is the **A2** card in the
-[v0.1 closeout](#where-this-is-going).
+*Closed in v0.1-closeout (A2):* the append + mutation pair now lives
+inside a single `connection.transaction()` via the new
+`appendManyWithMutation` boundary on `EventPublisher`. The unique
+`(entity_type, entity_id, revision)` index stays as belt-and-suspenders
+but is no longer load-bearing. All 14 producer services migrated; the
+legacy `publishWithMutation` / `publishManyWithMutation` are
+`@deprecated` and survive only for one auditor adapter (tracked as
+`#BL-026`). `#BL-022` is closed.
 
 *Code anchors:* `packages/core/src/event-publisher.ts:40-62`,
 `packages/storage/src/repos/event-log-repo.ts:69-118`.
@@ -262,15 +261,17 @@ agent can skip it, and Alaya degrades to a "delivered" trust state
 without erroring. Lives on the **Evidence axis** as control-plane
 evidence, **Runtime Control** layer.
 
-*In flight (closing in v0.1):* receipts feed `TrustSummary` but
-**do not yet feed Path-axis plasticity** (reinforcement / weakening
-/ redirection / retirement). The schema fields and Phase-C events
-already exist (`packages/protocol/src/soul/path-relation.ts:113-124`,
-`packages/protocol/src/events/phase-c.ts`); only the consumer
-service is missing. Wiring the feedback loop — a new
-`PathPlasticityService` plus a Garden tier that processes recent
-`UsageProofRecord`s — is the **A3** card in the
-[v0.1 closeout](#where-this-is-going).
+*Closed in v0.1-closeout (A3):* receipts now feed Path-axis plasticity
+through a new `PathPlasticityService`
+(`packages/core/src/path-plasticity-service.ts`) consumed by the
+Garden Auditor's `path_plasticity_update` task kind. The schema fields
+were already present
+(`packages/protocol/src/soul/path-relation.ts:113-124`); the consumer
+service emits the corresponding `PathRelationReinforced/Weakened/Retired`
+events from `packages/protocol/src/events/runtime-governance.ts` and
+`RecallService` factors a plasticity weight into recall scoring. v0.1
+ships three of the four named ops (reinforcement, weakening, retirement);
+`direction_bias` redirection is `#BL-029`.
 
 *Code anchors:* `apps/core-daemon/src/trust-state.ts:147-187`,
 `packages/protocol/src/soul/mcp-types.ts:146` (the three-state enum).
@@ -316,11 +317,11 @@ truth boundary from leaking.
 graph TD
     subgraph Surfaces["Agent-facing surfaces"]
         MCPS["MCP stdio<br/>(alaya mcp stdio)"]
-        CLIS["alaya CLI<br/>(11 verbs · MCP fallback)"]
+        CLIS["alaya CLI<br/>(12 verbs · MCP fallback)"]
     end
 
     subgraph Daemon["apps/core-daemon — wiring + dispatch"]
-        TH["MCP tool handler<br/>(8 soul.* tools)"]
+        TH["MCP tool handler<br/>(9 soul.* tools)"]
         BG["BackgroundServiceManager<br/>(Garden runtime · fire-and-forget)"]
         NOTI["InProcessRuntimeNotifier"]
     end
@@ -390,7 +391,7 @@ Two surfaces over one runtime. The agent attaches via MCP; humans
 script via CLI. Both go through the same daemon and the same truth
 boundary.
 
-### MCP tools (8 `soul.*`)
+### MCP tools (9 `soul.*`)
 
 All schema-bounded; `maxLength`, `maxItems`, `additionalProperties:
 false` are derived from the zod request schemas and enforced both
@@ -404,6 +405,7 @@ at parse time and in the published catalog.
 | `soul.emit_candidate_signal` | Perception | yes (proposal-side) |
 | `soul.propose_memory_update` | Governance entry | yes (proposal-side) |
 | `soul.review_memory_proposal` | Governance resolution | yes |
+| `soul.list_pending_proposals` | Governance triage (HITL queue) | no |
 | `soul.apply_override` | Runtime Control (session-scoped, never durable) | yes (session-scope) |
 | `soul.report_context_usage` | Receipt | yes (audit) |
 
@@ -411,7 +413,7 @@ at parse time and in the published catalog.
 are the CLI fallback for the same surface — useful for scripting
 outside the agent runtime.
 
-### CLI commands (11 verbs)
+### CLI commands (12 verbs)
 
 | Command | Purpose | Mutating? | Audit log? |
 |---|---|---|---|
@@ -424,6 +426,7 @@ outside the agent runtime.
 | `alaya inspect` | Open the Memory Inspector SPA on loopback (memory-tooling, *not* an agent surface) | no | no |
 | `alaya tools list` | List the MCP tool catalog | no | no |
 | `alaya tools call <tool> '<json>'` | Invoke a tool from CLI | varies | varies |
+| `alaya review pending\|accept\|reject` | Inspect and resolve the HITL proposal queue (CLI fallback for the Memory Inspector) | accept / reject: yes | yes |
 | `alaya backup --output <path>` | Portable backup bundle (signed) | no | yes |
 | `alaya export --output <path>` / `import --bundle <path>` | Portable export / restore | export: no, import: yes | yes |
 | `alaya mcp stdio` | Run the daemon's MCP stdio server (what `attach` wires up) | no | no |
@@ -472,7 +475,7 @@ pnpm alaya attach claude-code      # preview, confirm, then apply
 
 # 8) First tool call — verify the MCP surface end-to-end
 pnpm alaya tools list --json | jq '.tools | length'
-#   Expect: 8
+#   Expect: 9
 
 pnpm alaya tools call soul.recall \
   '{"query":"hello","scope_class":null,"dimension":null,"domain_tags":null,"max_results":5}' \
@@ -481,7 +484,7 @@ pnpm alaya tools call soul.recall \
 ```
 
 After step 7 your agent sees Alaya as an MCP server on its next
-start, and the 8 `soul.*` tools become callable from inside the
+start, and the 9 `soul.*` tools become callable from inside the
 agent.
 
 **If a step fails:**
@@ -523,22 +526,25 @@ Do-SOUL Alaya/
 
 ## Where this is going
 
-> **Status note (2026-05-04).** v0.1 was prematurely framed as
-> released. After re-reading the structural gaps in the lifecycle
-> chapter above, I reopened v0.1 to absorb everything that was on
-> track to be deferred. The release framing returns when the cards
-> below close — not before.
+> **Status note (2026-05-05).** v0.1.0 released. v0.1 was originally
+> framed as released on 2026-05-03, then reopened to absorb three
+> structural gaps the first release pass had deferred (HITL daemon
+> backbone A1, EventPublisher atomic transaction A2, path-axis
+> plasticity loop A3) plus the C1 hygiene wave. All four landed
+> through `v0.1-closeout`, passed a 6-lens D2 multi-lens review
+> + a 2-round Codex fix-loop, and merged to `main` here. v0.2 work
+> continues against the backlog cards below.
 
-### P1. Closing v0.1 — closeout cards
+### P1. Closed in v0.1 — closeout cards
 
 | Card | What it closes | Backlog |
 |---|---|---|
-| **A1** Daemon HITL backbone | `soul.list_pending_proposals` MCP tool · `alaya review pending\|accept\|reject` CLI · `reviewer_identity` on review record · Inspector "Pending" view | new card |
-| **A2** EventPublisher atomic transaction | `appendManyWithMutation` inside one `connection.transaction()`; ~12 callers migrate to sync mutate; closes the race window | `#BL-022` |
-| **A3** Path-axis plasticity loop | New `PathPlasticityService` consumes `MEMORY_USAGE_REPORTED` → emits Phase-C events → `RecallService` factors plasticity into score | new card |
+| **A1** Landed: Daemon HITL backbone | `soul.list_pending_proposals` MCP tool · `alaya review pending\|accept\|reject` CLI · `reviewer_identity` on review record · Inspector "Pending Proposals" view | new card |
+| **A2** Landed: EventPublisher atomic transaction | `appendManyWithMutation` inside one `connection.transaction()`; 14 callers migrated to sync mutate; closes the race window | `#BL-022` closed |
+| **A3** Landed: Path-axis plasticity loop | New `PathPlasticityService` consumes `MEMORY_USAGE_REPORTED` → emits `PathRelationReinforced/Weakened/Retired` runtime-governance events → `RecallService` factors plasticity into score | new card |
 | **B1** `pi-mono` integration | `packages/engine-gateway` becomes a `pi-mono` client; synthesis / proposal scoring / reflection route through one clean provider boundary | `#BL-008` |
 | **B2** OS keychain support | `keychain:<service>:<account>` secret-ref syntax; macOS Keychain + Linux libsecret adapters (Windows mocked) | `#BL-009` |
-| **C1** File-shape hygiene wave | Landed: protocol `phase-*.ts` files/symbols now use domain names; oversized files are split; `knip` unused-code checking is pinned; `code-map.md` is refreshed | `#BL-017` closed |
+| **C1** Landed: File-shape hygiene wave | protocol `phase-*.ts` files/symbols now use domain names (e.g. `events/runtime-governance.ts`); oversized files are split; `knip` unused-code checking is pinned; `code-map.md` is refreshed | `#BL-017` closed |
 
 Remaining closeout work runs in isolated worktrees with per-card review
 + fix-loop discipline. `main` only sees a card merge when that card's
@@ -563,6 +569,48 @@ The threads I'll pull there:
 - **Recall budget shaping** — let the budget-penalty schedule
   reflect actual agent context-window cost rather than a static
   constant.
+
+Concrete v0.2 backlog cards opened during the v0.1 closeout (close
+conditions live in `docs/handbook/backlog.md`):
+
+- **`#BL-025`** — Drop the required-but-ignored `revision` field
+  (planned, see `#BL-025`) from `EventPublisherInput` across ~50
+  source sites and ~50 test fixtures (purely type-ergonomics; the
+  BL-022 race is already closed in v0.1).
+- **`#BL-026`** — Migrate the soul-side `AuditorEventLogPort`
+  adapter off the legacy `publishWithMutation` /
+  `publishManyWithMutation` signature so those `@deprecated`
+  methods (and the port-shape lying about
+  `appendSync?` / `transactional?`) can be deleted.
+- **`#BL-027`** — Full review-inbox UX (assignment + deadlines +
+  escalation + multi-reviewer quorum) on top of the minimal HITL
+  daemon backbone A1 shipped, including binding `reviewer_identity`
+  server-side from a session credential rather than accepting it
+  verbatim from the agent (closes invariants §21b limit).
+- **`#BL-028`** — Move `PATH_PLASTICITY_UPDATE` from Auditor (TIER_1)
+  to Librarian (TIER_2) for strict tier alignment with the glossary
+  ConsolidationLoop entry.
+- **`#BL-029`** — Wire `direction_bias` redirection (the fourth
+  named plasticity op) on top of the reinforcement / weakening /
+  retirement that v0.1 ships.
+- **`#BL-030`** — Add `PathLifecycle.status: "active" | "retired"`
+  so the per-tick audit-log scan + the recall adapter's
+  strength-based retirement inference both go away.
+- **`#BL-031`** — Sync-first repo pattern — retire the parallel
+  `*Sync` sibling methods A2 added by making the primary repo
+  methods sync and async-wrapping only at I/O boundaries.
+- **`#BL-032`** — Workspace-and-type-scoped EventLog query for
+  path-plasticity (kill the in-memory filter that blocks the
+  Auditor tier on a busy workspace).
+- **`#BL-033`** — Batched `findByAnchors` for the recall plasticity
+  port (kill N×M round-trips on the recall hot path).
+- **`#BL-034`** — Review-surface contract-parity test covering MCP /
+  Inspector HTTP / `alaya review` CLI in one integration test.
+- **`#BL-035`** — Durabilize the path-plasticity per-workspace
+  watermark via SQL so daemon restarts do not re-use the 24h
+  lookback once.
+- **`#BL-036`** — Dedupe pending `PATH_PLASTICITY_UPDATE` enqueues
+  via a `Set<workspaceId>` mirror of the embedding-backfill pattern.
 
 ### P3. Vendor cleanup (post-v0.1.0 tag)
 

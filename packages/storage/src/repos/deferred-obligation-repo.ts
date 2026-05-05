@@ -13,6 +13,8 @@ import { parseNonEmptyString } from "./shared/validators.js";
 export interface DeferredObligationRepo {
   getById(obligationId: string): Promise<Readonly<DeferredObligation> | null>;
   create(obligation: DeferredObligation): Promise<Readonly<DeferredObligation>>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  createSync?(obligation: DeferredObligation): Readonly<DeferredObligation>;
   updateState(
     obligationId: string,
     expectedState: DeferredObligationState,
@@ -21,6 +23,15 @@ export interface DeferredObligationRepo {
       readonly fulfilledAt?: string;
     }
   ): Promise<Readonly<DeferredObligation>>;
+  /** Sync sibling for atomic publish + mutation (#BL-022). */
+  updateStateSync?(
+    obligationId: string,
+    expectedState: DeferredObligationState,
+    nextState: DeferredObligationState,
+    options?: {
+      readonly fulfilledAt?: string;
+    }
+  ): Readonly<DeferredObligation>;
   findActiveByRun(runId: string): Promise<readonly Readonly<DeferredObligation>[]>;
   findActiveByWorkspace(workspaceId: string): Promise<readonly Readonly<DeferredObligation>[]>;
   findExpired(now: string): Promise<readonly Readonly<DeferredObligation>[]>;
@@ -129,6 +140,11 @@ export class SqliteDeferredObligationRepo implements DeferredObligationRepo {
   }
 
   public async create(obligation: DeferredObligation): Promise<Readonly<DeferredObligation>> {
+    return this.createSync(obligation);
+  }
+
+  /** Synchronous variant for atomic publish + mutation (#BL-022). */
+  public createSync(obligation: DeferredObligation): Readonly<DeferredObligation> {
     const parsed = parseDeferredObligation(obligation);
 
     try {
@@ -152,7 +168,7 @@ export class SqliteDeferredObligationRepo implements DeferredObligationRepo {
       );
     }
 
-    const inserted = await this.getById(parsed.obligation_id);
+    const inserted = this.readByIdSync(parsed.obligation_id);
 
     if (inserted === null) {
       throw new StorageError(
@@ -164,6 +180,19 @@ export class SqliteDeferredObligationRepo implements DeferredObligationRepo {
     return inserted;
   }
 
+  private readByIdSync(obligationId: string): Readonly<DeferredObligation> | null {
+    try {
+      const row = this.getByIdStatement.get(obligationId) as DeferredObligationRow | undefined;
+      return row === undefined ? null : this.mapRowToDomain(row);
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to load deferred obligation ${obligationId}.`,
+        error
+      );
+    }
+  }
+
   public async updateState(
     obligationId: string,
     expectedState: DeferredObligationState,
@@ -172,6 +201,18 @@ export class SqliteDeferredObligationRepo implements DeferredObligationRepo {
       readonly fulfilledAt?: string;
     }
   ): Promise<Readonly<DeferredObligation>> {
+    return this.updateStateSync(obligationId, expectedState, nextState, options);
+  }
+
+  /** Synchronous variant for atomic publish + mutation (#BL-022). */
+  public updateStateSync(
+    obligationId: string,
+    expectedState: DeferredObligationState,
+    nextState: DeferredObligationState,
+    options?: {
+      readonly fulfilledAt?: string;
+    }
+  ): Readonly<DeferredObligation> {
     const parsedObligationId = parseNonEmptyString(obligationId, "obligation id");
     const parsedExpectedState = DeferredObligationStateSchema.parse(expectedState);
     const parsedNextState = DeferredObligationStateSchema.parse(nextState);
@@ -197,7 +238,7 @@ export class SqliteDeferredObligationRepo implements DeferredObligationRepo {
     }
 
     if (changes === 0) {
-      const existing = await this.getById(parsedObligationId);
+      const existing = this.readByIdSync(parsedObligationId);
 
       if (existing === null) {
         throw new StorageError(
@@ -212,7 +253,7 @@ export class SqliteDeferredObligationRepo implements DeferredObligationRepo {
       );
     }
 
-    const updated = await this.getById(parsedObligationId);
+    const updated = this.readByIdSync(parsedObligationId);
 
     if (updated === null) {
       throw new StorageError(

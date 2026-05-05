@@ -27,15 +27,25 @@ const PLACEHOLDER_AUDIT_EVENT_ID = "pending";
 type TrustEventInput = Omit<EventLogEntry, "event_id" | "created_at">;
 
 interface TrustStateEventPublisherPort {
-  publishWithMutation<T>(
-    input: TrustEventInput,
-    mutate: (entry: EventLogEntry) => Promise<T>
+  /**
+   * Atomic append + sync mutation primitive (#BL-022). Trust-state migrated
+   * to this in A2 so audit_event_id is captured inside the same SQLite
+   * transaction as the delivery / usage row, eliminating the orphan-window
+   * formerly registered as #BL-021.
+   */
+  appendManyWithMutation<T>(
+    inputs: readonly TrustEventInput[],
+    mutate: (entries: readonly EventLogEntry[]) => T
   ): Promise<T>;
 }
 
 export interface TrustStatePersistenceRepoPort {
   createDelivery(record: ContextDeliveryRecord): Promise<Readonly<ContextDeliveryRecord>>;
+  /** Synchronous variant required by `appendManyWithMutation`-based recorder methods. */
+  createDeliverySync(record: ContextDeliveryRecord): Readonly<ContextDeliveryRecord>;
   createUsage(record: UsageProofRecord): Promise<Readonly<UsageProofRecord>>;
+  /** Synchronous variant required by `appendManyWithMutation`-based recorder methods. */
+  createUsageSync(record: UsageProofRecord): Readonly<UsageProofRecord>;
   findDeliveryById(deliveryId: string): Promise<Readonly<ContextDeliveryRecord> | null>;
   listDeliveriesByAgentTarget(agentTarget: string): Promise<readonly Readonly<ContextDeliveryRecord>[]>;
   listUsageByDeliveryIds(deliveryIds: readonly string[]): Promise<readonly Readonly<UsageProofRecord>[]>;
@@ -56,6 +66,12 @@ export class TrustStateRecorderNotReady extends Error {
 }
 
 export class TrustStateUnknownDeliveryError extends Error {
+  // D2 codex-fixloop-B3 follow-up: classify as NOT_FOUND so the MCP handler
+  // returns 404 (not 500 INTERNAL) for both legitimate unknown-delivery
+  // and the cross-workspace mismatch (MERGED-B3) which throws the same
+  // error. Both cases observably present as 404 — no information leak
+  // between the two scenarios for an attacker probing delivery_ids.
+  public readonly code = "NOT_FOUND" as const;
   public constructor(public readonly deliveryId: string) {
     super(`Unknown delivery_id: ${deliveryId}`);
     this.name = "TrustStateUnknownDeliveryError";
@@ -117,35 +133,41 @@ export class TrustStateRecorder {
       ...input,
       audit_event_id: PLACEHOLDER_AUDIT_EVENT_ID
     });
-    return await this.eventPublisher.publishWithMutation(
-      {
-        event_type: TrustStateEventType.MEMORY_DELIVERED,
-        entity_type: DELIVERY_ENTITY_TYPE,
-        entity_id: draftRecord.delivery_id,
-        workspace_id: resolveWorkspaceId(draftRecord.workspace_id),
-        run_id: draftRecord.run_id,
-        caused_by: draftRecord.agent_target,
-        revision: DEFAULT_REVISION,
-        payload_json: {
-          delivery_id: draftRecord.delivery_id,
-          agent_target: draftRecord.agent_target,
-          delivered_object_ids: draftRecord.delivered_object_ids,
-          delivered_at: draftRecord.delivered_at,
-          recorded_at: this.nowIso()
+    return await this.eventPublisher.appendManyWithMutation(
+      [
+        {
+          event_type: TrustStateEventType.MEMORY_DELIVERED,
+          entity_type: DELIVERY_ENTITY_TYPE,
+          entity_id: draftRecord.delivery_id,
+          workspace_id: resolveWorkspaceId(draftRecord.workspace_id),
+          run_id: draftRecord.run_id,
+          caused_by: draftRecord.agent_target,
+          revision: DEFAULT_REVISION,
+          payload_json: {
+            delivery_id: draftRecord.delivery_id,
+            agent_target: draftRecord.agent_target,
+            delivered_object_ids: draftRecord.delivered_object_ids,
+            delivered_at: draftRecord.delivered_at,
+            recorded_at: this.nowIso()
+          }
         }
-      },
-      async (auditEntry) => {
+      ],
+      (entries) => {
+        // Atomic with the EventLog INSERT (#BL-022); audit_event_id is the
+        // exact persisted event_id (#BL-021 closure).
+        const auditEntry = entries[0];
         const finalRecord = ContextDeliveryRecordSchema.parse({
           ...draftRecord,
           audit_event_id: auditEntry.event_id
         });
-        return await this.repo.createDelivery(finalRecord);
+        return this.repo.createDeliverySync(finalRecord);
       }
     );
   }
 
   public async recordUsage(
-    input: Omit<UsageProofRecord, "audit_event_id">
+    input: Omit<UsageProofRecord, "audit_event_id">,
+    options?: { readonly expectedWorkspaceId?: string }
   ): Promise<UsageProofRecord> {
     this.assertReady();
 
@@ -154,34 +176,54 @@ export class TrustStateRecorder {
       throw new TrustStateUnknownDeliveryError(input.delivery_id);
     }
 
+    // Cross-workspace guard (D2 MERGED-B3): when the caller supplies a
+    // workspace context, refuse to record usage against a delivery from a
+    // different workspace. Without this guard, an attached agent in
+    // `attacker_ws` could call `soul.report_context_usage` with any
+    // `delivery_id` it observed (e.g. via SSE) and write a
+    // `MEMORY_USAGE_REPORTED` row that flows into A3 plasticity in
+    // `victim_ws`. The error mirrors UnknownDelivery so cross-workspace
+    // probes leak no observable difference vs unknown deliveries.
+    if (
+      options?.expectedWorkspaceId !== undefined &&
+      linkedDelivery.workspace_id !== options.expectedWorkspaceId
+    ) {
+      throw new TrustStateUnknownDeliveryError(input.delivery_id);
+    }
+
     const draftRecord = UsageProofRecordSchema.parse({
       ...input,
       audit_event_id: PLACEHOLDER_AUDIT_EVENT_ID
     });
-    return await this.eventPublisher.publishWithMutation(
-      {
-        event_type: TrustStateEventType.MEMORY_USAGE_REPORTED,
-        entity_type: USAGE_ENTITY_TYPE,
-        entity_id: draftRecord.delivery_id,
-        workspace_id: resolveWorkspaceId(linkedDelivery.workspace_id),
-        run_id: linkedDelivery.run_id,
-        caused_by: linkedDelivery.agent_target,
-        revision: DEFAULT_REVISION,
-        payload_json: {
-          delivery_id: draftRecord.delivery_id,
-          usage_state: draftRecord.usage_state,
-          used_object_ids: draftRecord.used_object_ids,
-          reason: draftRecord.reason,
-          reported_at: draftRecord.reported_at,
-          recorded_at: this.nowIso()
+    return await this.eventPublisher.appendManyWithMutation(
+      [
+        {
+          event_type: TrustStateEventType.MEMORY_USAGE_REPORTED,
+          entity_type: USAGE_ENTITY_TYPE,
+          entity_id: draftRecord.delivery_id,
+          workspace_id: resolveWorkspaceId(linkedDelivery.workspace_id),
+          run_id: linkedDelivery.run_id,
+          caused_by: linkedDelivery.agent_target,
+          revision: DEFAULT_REVISION,
+          payload_json: {
+            delivery_id: draftRecord.delivery_id,
+            usage_state: draftRecord.usage_state,
+            used_object_ids: draftRecord.used_object_ids,
+            reason: draftRecord.reason,
+            reported_at: draftRecord.reported_at,
+            recorded_at: this.nowIso()
+          }
         }
-      },
-      async (auditEntry) => {
+      ],
+      (entries) => {
+        // Atomic with the EventLog INSERT (#BL-022); audit_event_id is the
+        // exact persisted event_id (#BL-021 closure).
+        const auditEntry = entries[0];
         const finalRecord = UsageProofRecordSchema.parse({
           ...draftRecord,
           audit_event_id: auditEntry.event_id
         });
-        return await this.repo.createUsage(finalRecord);
+        return this.repo.createUsageSync(finalRecord);
       }
     );
   }
@@ -286,23 +328,26 @@ export class TrustStateRecorder {
     readonly mutate: () => void;
   }): Promise<void> {
     const recordedAt = this.nowIso();
-    await this.eventPublisher.publishWithMutation(
-      {
-        event_type: input.eventType,
-        entity_type: COUNTER_ENTITY_TYPE,
-        entity_id: `${input.target}:${input.counterName}`,
-        workspace_id: DEFAULT_WORKSPACE_ID,
-        run_id: null,
-        caused_by: input.target,
-        revision: DEFAULT_REVISION,
-        payload_json: {
-          agent_target: input.target,
-          counter_name: input.counterName,
-          session_id: input.sessionId ?? null,
-          recorded_at: recordedAt
+    await this.eventPublisher.appendManyWithMutation(
+      [
+        {
+          event_type: input.eventType,
+          entity_type: COUNTER_ENTITY_TYPE,
+          entity_id: `${input.target}:${input.counterName}`,
+          workspace_id: DEFAULT_WORKSPACE_ID,
+          run_id: null,
+          caused_by: input.target,
+          revision: DEFAULT_REVISION,
+          payload_json: {
+            agent_target: input.target,
+            counter_name: input.counterName,
+            session_id: input.sessionId ?? null,
+            recorded_at: recordedAt
+          }
         }
-      },
-      async () => {
+      ],
+      () => {
+        // Counter mutate is in-process map mutation, already synchronous.
         input.mutate();
       }
     );
@@ -326,12 +371,20 @@ class InMemoryTrustStateRepo implements TrustStatePersistenceRepoPort {
   private readonly usageByDeliveryId = new Map<string, UsageProofRecord>();
 
   public async createDelivery(record: ContextDeliveryRecord): Promise<Readonly<ContextDeliveryRecord>> {
+    return this.createDeliverySync(record);
+  }
+
+  public createDeliverySync(record: ContextDeliveryRecord): Readonly<ContextDeliveryRecord> {
     const parsed = ContextDeliveryRecordSchema.parse(record);
     this.deliveriesById.set(parsed.delivery_id, parsed);
     return parsed;
   }
 
   public async createUsage(record: UsageProofRecord): Promise<Readonly<UsageProofRecord>> {
+    return this.createUsageSync(record);
+  }
+
+  public createUsageSync(record: UsageProofRecord): Readonly<UsageProofRecord> {
     const parsed = UsageProofRecordSchema.parse(record);
     this.usageByDeliveryId.set(parsed.delivery_id, parsed);
     return parsed;

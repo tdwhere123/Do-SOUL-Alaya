@@ -80,6 +80,12 @@ export {
   type PathGraphSnapshotterDependencies
 } from "./path-graph-snapshotter.js";
 export {
+  PATH_PLASTICITY_TASK_DEFAULTS,
+  resolvePathPlasticitySinceIso,
+  type PathPlasticityComputePort,
+  type PathPlasticityComputeResult
+} from "./path-plasticity-task.js";
+export {
   TopologyService,
   type TopologyServiceDependencies
 } from "./topology-service.js";

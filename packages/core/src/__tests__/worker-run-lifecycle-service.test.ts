@@ -15,6 +15,7 @@ const FIXED_NOW = "2026-04-10T12:00:00.000Z";
 type MutableWorkerRepo = WorkerRunRepoPort & {
   readonly getById: ReturnType<typeof vi.fn>;
   readonly updateState: ReturnType<typeof vi.fn>;
+  readonly updateStateSync: ReturnType<typeof vi.fn>;
 };
 
 function createWorkerRun(overrides: Partial<DelegatedWorkerRun> = {}): DelegatedWorkerRun {
@@ -59,50 +60,63 @@ function createHarness(
   const workerStore = new Map<string, DelegatedWorkerRun>([[seed.worker_run_id, seed]]);
   const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at">> = [];
 
+  const updateStateImpl = (
+    workerRunId: string,
+    expectedState: WorkerRunState,
+    nextState: WorkerRunState,
+    updatedAt: string
+  ): DelegatedWorkerRun => {
+    const existing = workerStore.get(workerRunId);
+
+    if (existing === undefined) {
+      throw new Error(`missing worker ${workerRunId}`);
+    }
+
+    if (existing.state !== expectedState) {
+      throw new CoreError(
+        "CONFLICT",
+        `Worker run ${workerRunId} changed concurrently: expected ${expectedState}, found ${existing.state}`
+      );
+    }
+
+    const updated = Object.freeze({
+      ...existing,
+      state: nextState,
+      updated_at: updatedAt
+    });
+    workerStore.set(workerRunId, updated);
+    return updated;
+  };
+
   const repo: MutableWorkerRepo = {
     getById: vi.fn(async (workerRunId: string) => workerStore.get(workerRunId) ?? null),
-    updateState: vi.fn(
-      async (
-        workerRunId: string,
-        expectedState: WorkerRunState,
-        nextState: WorkerRunState,
-        updatedAt: string
-      ) => {
-      const existing = workerStore.get(workerRunId);
-
-      if (existing === undefined) {
-        throw new Error(`missing worker ${workerRunId}`);
-      }
-
-      if (existing.state !== expectedState) {
-        throw new CoreError(
-          "CONFLICT",
-          `Worker run ${workerRunId} changed concurrently: expected ${expectedState}, found ${existing.state}`
-        );
-      }
-
-      const updated = Object.freeze({
-        ...existing,
-        state: nextState,
-        updated_at: updatedAt
-      });
-      workerStore.set(workerRunId, updated);
-      return updated;
-    })
+    updateState: vi.fn(async (...args: Parameters<typeof updateStateImpl>) => updateStateImpl(...args)),
+    updateStateSync: vi.fn(updateStateImpl)
   };
 
   const publishWithMutation = vi.fn(
-    async (event: Omit<EventLogEntry, "event_id" | "created_at">, mutate: () => Promise<DelegatedWorkerRun>) => {
-      publishedEvents.push(event);
+    async (
+      events: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at">>,
+      mutate: (entries: readonly EventLogEntry[]) => DelegatedWorkerRun
+    ) => {
+      for (const event of events) {
+        publishedEvents.push(event);
+      }
       options.beforeMutate?.();
-      return await mutate();
+      const persisted = events.map((event, idx) => ({
+        event_id: `evt_${idx}`,
+        created_at: FIXED_NOW,
+        ...event
+      }));
+      return mutate(persisted);
     }
   );
 
   const service = new WorkerRunLifecycleService({
     repo,
     eventPublisher: {
-      publishWithMutation
+      // WorkerRunLifecycleService now uses appendManyWithMutation (#BL-022).
+      appendManyWithMutation: publishWithMutation
     } as unknown as EventPublisher,
     now: () => FIXED_NOW
   });
@@ -324,40 +338,55 @@ describe("WorkerRunLifecycleService", () => {
     const workerStore = new Map<string, DelegatedWorkerRun>([[seed.worker_run_id, seed]]);
     const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at">> = [];
 
+    const updateStateImpl = (
+      workerRunId: string,
+      expectedState: WorkerRunState,
+      nextState: WorkerRunState,
+      updatedAt: string
+    ): DelegatedWorkerRun => {
+      const existing = workerStore.get(workerRunId);
+      if (existing === undefined) {
+        throw new Error(`missing worker ${workerRunId}`);
+      }
+      if (existing.state !== expectedState) {
+        throw new CoreError(
+          "CONFLICT",
+          `Worker run ${workerRunId} changed concurrently: expected ${expectedState}, found ${existing.state}`
+        );
+      }
+      const updated = Object.freeze({
+        ...existing,
+        state: nextState,
+        updated_at: updatedAt
+      });
+      workerStore.set(workerRunId, updated);
+      return updated;
+    };
+
     const repo: MutableWorkerRepo = {
       getById: vi.fn(async (workerRunId: string) => workerStore.get(workerRunId) ?? null),
-      updateState: vi.fn(
-        async (
-          workerRunId: string,
-          expectedState: WorkerRunState,
-          nextState: WorkerRunState,
-          updatedAt: string
-        ) => {
-        const existing = workerStore.get(workerRunId);
-        if (existing === undefined) {
-          throw new Error(`missing worker ${workerRunId}`);
-        }
-        if (existing.state !== expectedState) {
-          throw new CoreError(
-            "CONFLICT",
-            `Worker run ${workerRunId} changed concurrently: expected ${expectedState}, found ${existing.state}`
-          );
-        }
-        const updated = Object.freeze({
-          ...existing,
-          state: nextState,
-          updated_at: updatedAt
-        });
-        workerStore.set(workerRunId, updated);
-        return updated;
-      })
+      updateState: vi.fn(async (...args: Parameters<typeof updateStateImpl>) => updateStateImpl(...args)),
+      updateStateSync: vi.fn(updateStateImpl)
     };
 
     const eventPublisher = {
-      publishWithMutation: vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">, mutate: () => Promise<DelegatedWorkerRun>) => {
-        publishedEvents.push(event);
-        return await mutate();
-      })
+      // WorkerRunLifecycleService now uses appendManyWithMutation (#BL-022).
+      appendManyWithMutation: vi.fn(
+        async (
+          events: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at">>,
+          mutate: (entries: readonly EventLogEntry[]) => DelegatedWorkerRun
+        ) => {
+          for (const event of events) {
+            publishedEvents.push(event);
+          }
+          const persisted = events.map((event, idx) => ({
+            event_id: `evt_${idx}`,
+            created_at: FIXED_NOW,
+            ...event
+          }));
+          return mutate(persisted);
+        }
+      )
     } as unknown as EventPublisher;
 
     const firstService = new WorkerRunLifecycleService({

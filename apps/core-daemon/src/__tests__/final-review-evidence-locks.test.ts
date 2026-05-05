@@ -19,6 +19,7 @@ const expectedMemoryTools = [
   "soul.emit_candidate_signal",
   "soul.propose_memory_update",
   "soul.review_memory_proposal",
+  "soul.list_pending_proposals",
   "soul.apply_override",
   "soul.explore_graph",
   "soul.report_context_usage"
@@ -48,7 +49,16 @@ describe("P5 final-review status", () => {
     expect(finalReview).toContain("Blocking: 0");
     expect(finalReview).toContain("Important: 0");
     expect(finalReview).toContain("No legacy `memory.*` tools");
-    for (const toolName of expectedMemoryTools) {
+    // P5 final-review docs were frozen at the eight v0.1.0-release tools
+    // (the seven write/read surfaces plus soul.report_context_usage).
+    // A1 (HITL daemon backbone) added soul.list_pending_proposals after
+    // the report was sealed; the doc cite-loop here only checks the
+    // pre-A1 set, so the existing evidence stays a stable lock.
+    // The catalog-equality test above already pins the full A1 set.
+    const preA1MemoryTools = expectedMemoryTools.filter(
+      (toolName) => toolName !== "soul.list_pending_proposals"
+    );
+    for (const toolName of preA1MemoryTools) {
       expect(finalReview).toContain(`\`${toolName}\``);
     }
     expect(finalReview).toContain("#BL-024");

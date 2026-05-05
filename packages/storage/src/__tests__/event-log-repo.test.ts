@@ -564,6 +564,77 @@ describe("SqliteEventLogRepo", () => {
     await expect(eventLogRepo.getLatestWorkspaceEventId("ws_events")).resolves.toBe(deleted.event_id);
   });
 
+  describe("transactional + appendSync (closes #BL-022)", () => {
+    it("appendSync rolls back the row when transactional() callback throws", async () => {
+      const { eventLogRepo } = await createEventLogRepos();
+      expect(() =>
+        eventLogRepo.transactional(() => {
+          eventLogRepo.appendSync({
+            event_type: WorkspaceRunEventType.WORKSPACE_CREATED,
+            entity_type: "workspace",
+            entity_id: "ws_rollback_atomic",
+            workspace_id: "ws_events",
+            run_id: null,
+            caused_by: "user_action",
+            payload_json: {
+              workspace_id: "ws_rollback_atomic",
+              name: "rollback",
+              workspace_kind: WorkspaceKind.LOCAL_REPO
+            }
+          });
+          throw new Error("synthetic-rollback");
+        })
+      ).toThrow("synthetic-rollback");
+
+      await expect(
+        eventLogRepo.queryByEntity("workspace", "ws_rollback_atomic")
+      ).resolves.toEqual([]);
+    });
+
+    it("appendSync inside transactional() computes revision atomically with the INSERT", async () => {
+      const { eventLogRepo } = await createEventLogRepos();
+      // Three sequential appends inside one transaction — revisions must be 0,1,2.
+      const entries = eventLogRepo.transactional(() => {
+        const out = [];
+        for (let i = 0; i < 3; i++) {
+          out.push(
+            eventLogRepo.appendSync({
+              event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
+              entity_type: "message",
+              entity_id: "msg-atomic",
+              workspace_id: "ws_events",
+              run_id: "run_order",
+              caused_by: "user_action",
+              payload_json: {
+                run_id: "run_order",
+                role: "user",
+                content: `m${i}`,
+                message_id: `msg-atomic-${i}`
+              }
+            })
+          );
+        }
+        return out;
+      });
+      expect(entries.map((e) => e.revision)).toEqual([0, 1, 2]);
+      // event_ids unique, persisted, queryable
+      const persisted = await eventLogRepo.queryByEntity("message", "msg-atomic");
+      expect(persisted.map((e) => e.event_id).sort()).toEqual(
+        entries.map((e) => e.event_id).sort()
+      );
+    });
+
+    it("transactional() refuses an async callback (returning a Promise) by throwing", async () => {
+      const { eventLogRepo } = await createEventLogRepos();
+      // better-sqlite3 itself throws if the wrapped function returns a Promise.
+      // We rely on this to prevent silent atomicity loss when callers
+      // accidentally pass an async fn.
+      expect(() =>
+        eventLogRepo.transactional((() =>
+          Promise.resolve("nope")) as unknown as () => unknown)
+      ).toThrow();
+    });
+  });
 });
 
 async function createEventLogRepos(): Promise<{

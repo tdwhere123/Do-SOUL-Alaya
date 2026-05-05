@@ -1023,6 +1023,14 @@ vi.mock("@do-soul/alaya-core", () => {
     }),
     WorkerRunLifecycleService: makeClass(),
     ZeroDaySecurityLayer: makeClass(),
+    PathPlasticityService: makeClass({
+      computeAndApplyPlasticity: vi.fn(async () => ({
+        reinforced: 0,
+        weakened: 0,
+        retired: 0,
+        affectedPathIds: []
+      }))
+    }),
     WorkspaceService: makeClass()
   };
 });

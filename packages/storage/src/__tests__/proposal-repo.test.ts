@@ -49,15 +49,18 @@ describe("SqliteProposalRepo", () => {
       repo.create({
         proposal,
         workspace_id: "workspace-1",
-        run_id: "run-1"
+        run_id: "run-1",
+        target_object_kind: "memory_entry"
       })
     ).resolves.toEqual(proposal);
 
     await expect(repo.findById(proposal.proposal_id)).resolves.toEqual(proposal);
+    // A1: ScopedProposal now carries reviewer_identity (null until reviewed).
     await expect(repo.findScopedById(proposal.proposal_id)).resolves.toEqual({
       proposal,
       workspace_id: "workspace-1",
-      run_id: "run-1"
+      run_id: "run-1",
+      reviewer_identity: null
     });
   });
 
@@ -81,16 +84,17 @@ describe("SqliteProposalRepo", () => {
       last_updated_at: "2026-03-21T02:00:00.000Z"
     });
 
-    await repo.create({ proposal: firstPending, workspace_id: "workspace-1", run_id: "run-1" });
-    await repo.create({ proposal: accepted, workspace_id: "workspace-1", run_id: "run-1" });
-    await repo.create({ proposal: secondPending, workspace_id: "workspace-1", run_id: "run-2" });
+    await repo.create({ proposal: firstPending, workspace_id: "workspace-1", run_id: "run-1", target_object_kind: "memory_entry" });
+    await repo.create({ proposal: accepted, workspace_id: "workspace-1", run_id: "run-1", target_object_kind: "memory_entry" });
+    await repo.create({ proposal: secondPending, workspace_id: "workspace-1", run_id: "run-2", target_object_kind: "memory_entry" });
     await repo.create({
       proposal: createProposal({
         runtime_id: "27a93344-32c1-48cc-80c9-f41a898f2ade",
         proposal_id: "27a93344-32c1-48cc-80c9-f41a898f2ade"
       }),
       workspace_id: "workspace-2",
-      run_id: "run-3"
+      run_id: "run-3",
+      target_object_kind: "memory_entry"
     });
 
     const allRows = await repo.findByWorkspaceId("workspace-1");
@@ -124,7 +128,8 @@ describe("SqliteProposalRepo", () => {
         last_updated_at: "2026-03-21T03:00:00.000Z"
       }),
       workspace_id: "workspace-1",
-      run_id: "run-1"
+      run_id: "run-1",
+      target_object_kind: "memory_entry"
     });
     await repo.create({
       proposal: createProposal({
@@ -134,7 +139,8 @@ describe("SqliteProposalRepo", () => {
         last_updated_at: "2026-03-21T05:00:00.000Z"
       }),
       workspace_id: "workspace-1",
-      run_id: "run-1"
+      run_id: "run-1",
+      target_object_kind: "memory_entry"
     });
     await repo.create({
       proposal: createProposal({
@@ -145,12 +151,14 @@ describe("SqliteProposalRepo", () => {
         last_updated_at: "2026-03-21T06:00:00.000Z"
       }),
       workspace_id: "workspace-1",
-      run_id: "run-1"
+      run_id: "run-1",
+      target_object_kind: "memory_entry"
     });
     await repo.create({
       proposal: latestBankruptcy,
       workspace_id: "workspace-1",
-      run_id: "run-1"
+      run_id: "run-1",
+      target_object_kind: "memory_entry"
     });
     await repo.create({
       proposal: createProposal({
@@ -160,7 +168,8 @@ describe("SqliteProposalRepo", () => {
         last_updated_at: "2026-03-21T07:00:00.000Z"
       }),
       workspace_id: "workspace-1",
-      run_id: "run-2"
+      run_id: "run-2",
+      target_object_kind: "memory_entry"
     });
 
     await expect(repo.findPendingByRunId("run-1")).resolves.toEqual(latestBankruptcy);
@@ -170,7 +179,7 @@ describe("SqliteProposalRepo", () => {
   it("updates proposal resolution state", async () => {
     const { repo } = createRepo();
     const proposal = createProposal();
-    await repo.create({ proposal, workspace_id: "workspace-1", run_id: "run-1" });
+    await repo.create({ proposal, workspace_id: "workspace-1", run_id: "run-1", target_object_kind: "memory_entry" });
 
     const updated = await repo.updateResolution(
       proposal.proposal_id,
@@ -185,7 +194,7 @@ describe("SqliteProposalRepo", () => {
   it("updates pending proposal resolution only once", async () => {
     const { repo } = createRepo();
     const proposal = createProposal();
-    await repo.create({ proposal, workspace_id: "workspace-1", run_id: "run-1" });
+    await repo.create({ proposal, workspace_id: "workspace-1", run_id: "run-1", target_object_kind: "memory_entry" });
 
     const updated = await repo.updatePendingResolution(
       proposal.proposal_id,
@@ -208,7 +217,7 @@ describe("SqliteProposalRepo", () => {
   it("atomically stores pending proposal resolution with review events", async () => {
     const { repo, database } = createRepo();
     const proposal = createProposal();
-    await repo.create({ proposal, workspace_id: "workspace-1", run_id: "run-1" });
+    await repo.create({ proposal, workspace_id: "workspace-1", run_id: "run-1", target_object_kind: "memory_entry" });
 
     const result = await repo.updatePendingResolutionWithEvents(
       proposal.proposal_id,
@@ -247,7 +256,7 @@ describe("SqliteProposalRepo", () => {
     const proposal = createProposal();
 
     const result = await repo.createProposalWithEvents(
-      { proposal, workspace_id: "workspace-1", run_id: "run-1" },
+      { proposal, workspace_id: "workspace-1", run_id: "run-1", target_object_kind: "memory_entry" },
       createCreationEvents(proposal)
     );
 
@@ -265,7 +274,7 @@ describe("SqliteProposalRepo", () => {
     const proposal = createProposal();
 
     // Pre-insert the proposal row so the inner INSERT collides on PRIMARY KEY (proposal_id).
-    await repo.create({ proposal, workspace_id: "workspace-1", run_id: "run-1" });
+    await repo.create({ proposal, workspace_id: "workspace-1", run_id: "run-1", target_object_kind: "memory_entry" });
     expect(countProposalEvents(database, proposal.proposal_id)).toBe(0);
 
     await expect(
@@ -273,7 +282,8 @@ describe("SqliteProposalRepo", () => {
         {
           proposal: createProposal({ last_updated_at: "2026-03-22T00:00:00.000Z" }),
           workspace_id: "workspace-1",
-          run_id: "run-1"
+          run_id: "run-1",
+          target_object_kind: "memory_entry"
         },
         createCreationEvents(proposal)
       )
@@ -318,7 +328,8 @@ describe("SqliteProposalRepo", () => {
     const created = await repo.create({
       proposal: createProposal(),
       workspace_id: "workspace-1",
-      run_id: "run-1"
+      run_id: "run-1",
+      target_object_kind: "memory_entry"
     });
 
     expect(() => {

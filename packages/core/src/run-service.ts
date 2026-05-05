@@ -27,10 +27,26 @@ export interface RunRepoPort {
     readonly run_state: Run["run_state"];
     readonly current_surface_id: Run["current_surface_id"];
   }): Promise<Run>;
+  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
+  createSync(data: {
+    readonly run_id: string;
+    readonly workspace_id: string;
+    readonly title: Run["title"];
+    readonly goal: Run["goal"];
+    readonly run_mode: Run["run_mode"];
+    readonly engine_binding_id: Run["engine_binding_id"];
+    readonly engine_class: Run["engine_class"];
+    readonly run_state: Run["run_state"];
+    readonly current_surface_id: Run["current_surface_id"];
+  }): Run;
   getById(id: string): Promise<Run | null>;
   listByWorkspace(workspaceId: string): Promise<readonly Run[]>;
   delete(id: string): Promise<void>;
+  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
+  deleteSync(id: string): void;
   update(id: string, patch: Partial<Run>): Promise<Run>;
+  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
+  updateSync(id: string, patch: Partial<Run>): Run;
 }
 
 export interface RunWorkspaceRepoPort {
@@ -105,24 +121,26 @@ export class RunService {
       persistedBindingId = await this.resolveWorkspaceOwnedConversationBinding(parsed.engine_binding_id, workspace);
     }
 
-    return this.dependencies.eventPublisher.publishWithMutation(
-      {
-        event_type: WorkspaceRunEventType.RUN_CREATED,
-        entity_type: "run",
-        entity_id: runId,
-        workspace_id: workspace.workspace_id,
-        run_id: runId,
-        caused_by: "user_action",
-        revision: 0,
-        payload_json: RunCreatedPayloadSchema.parse({
-          run_id: runId,
+    return this.dependencies.eventPublisher.appendManyWithMutation(
+      [
+        {
+          event_type: WorkspaceRunEventType.RUN_CREATED,
+          entity_type: "run",
+          entity_id: runId,
           workspace_id: workspace.workspace_id,
-          run_mode: runMode,
-          title: runTitle
-        })
-      },
+          run_id: runId,
+          caused_by: "user_action",
+          revision: 0,
+          payload_json: RunCreatedPayloadSchema.parse({
+            run_id: runId,
+            workspace_id: workspace.workspace_id,
+            run_mode: runMode,
+            title: runTitle
+          })
+        }
+      ],
       () =>
-        this.dependencies.runRepo.create({
+        this.dependencies.runRepo.createSync({
           run_id: runId,
           workspace_id: workspace.workspace_id,
           title: runTitle,
@@ -159,43 +177,47 @@ export class RunService {
       throw new CoreError("NOT_FOUND", "Run not found");
     }
 
-    return this.dependencies.eventPublisher.publishWithMutation(
-      {
-        event_type: WorkspaceRunEventType.RUN_RENAMED,
-        entity_type: "run",
-        entity_id: run.run_id,
-        workspace_id: run.workspace_id,
-        run_id: run.run_id,
-        caused_by: "user_action",
-        revision: 0,
-        payload_json: RunRenamedPayloadSchema.parse({
+    return this.dependencies.eventPublisher.appendManyWithMutation(
+      [
+        {
+          event_type: WorkspaceRunEventType.RUN_RENAMED,
+          entity_type: "run",
+          entity_id: run.run_id,
+          workspace_id: run.workspace_id,
           run_id: run.run_id,
-          title: parsed.title,
-          previous_title: run.title
-        })
-      },
-      () => this.dependencies.runRepo.update(run.run_id, { title: parsed.title })
+          caused_by: "user_action",
+          revision: 0,
+          payload_json: RunRenamedPayloadSchema.parse({
+            run_id: run.run_id,
+            title: parsed.title,
+            previous_title: run.title
+          })
+        }
+      ],
+      () => this.dependencies.runRepo.updateSync(run.run_id, { title: parsed.title })
     );
   }
 
   public async delete(runId: string): Promise<Run> {
     const run = await this.getById(runId);
 
-    await this.dependencies.eventPublisher.publishWithMutation(
-      {
-        event_type: WorkspaceRunEventType.RUN_DELETED,
-        entity_type: "run",
-        entity_id: run.run_id,
-        workspace_id: run.workspace_id,
-        run_id: run.run_id,
-        caused_by: "user_action",
-        revision: 0,
-        payload_json: RunDeletedPayloadSchema.parse({
+    await this.dependencies.eventPublisher.appendManyWithMutation(
+      [
+        {
+          event_type: WorkspaceRunEventType.RUN_DELETED,
+          entity_type: "run",
+          entity_id: run.run_id,
+          workspace_id: run.workspace_id,
           run_id: run.run_id,
-          workspace_id: run.workspace_id
-        })
-      },
-      () => this.dependencies.runRepo.delete(run.run_id)
+          caused_by: "user_action",
+          revision: 0,
+          payload_json: RunDeletedPayloadSchema.parse({
+            run_id: run.run_id,
+            workspace_id: run.workspace_id
+          })
+        }
+      ],
+      () => this.dependencies.runRepo.deleteSync(run.run_id)
     );
 
     return run;

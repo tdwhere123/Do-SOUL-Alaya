@@ -334,7 +334,7 @@ async function loadSnapshotCacheEntry(
  *   is the delta).
  * - If lastEventId is present in allEvents, returns all events after it.
  * - If lastEventId is NOT present in allEvents (cursor-loss: the event was
- *   deleted, e.g. by a publishWithMutation rollback), returns null to signal
+ *   deleted, e.g. by an EventPublisher rollback), returns null to signal
  *   to the caller that the cache must be evicted and rebuilt from empty state.
  *   Returning all events as a delta in this case would apply events on top of
  *   cached surface state that already incorporates contributions from the now-

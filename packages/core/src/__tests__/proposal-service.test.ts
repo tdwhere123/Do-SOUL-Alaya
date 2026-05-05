@@ -329,10 +329,14 @@ describe("ProposalService", () => {
       "review",
       expect.objectContaining({ deferredNotificationEvents: expect.any(Array) })
     );
+    // A1 fix-loop (finding-5): legacy review path now persists
+    // reviewer_identity through updateResolution's optional 4th arg so
+    // every accepted/rejected row names the reviewer in audit replay.
     expect(proposalUpdateSpy).toHaveBeenCalledWith(
       "24c607da-7544-47a7-a28e-d649071f77f5",
       "accepted",
-      "2026-03-21T02:00:00.000Z"
+      "2026-03-21T02:00:00.000Z",
+      "user"
     );
 
     const karmaEvents = karmaStore.findByObjectId("memory-1");
@@ -390,10 +394,13 @@ describe("ProposalService", () => {
         deferredNotificationEvents: expect.any(Array)
       })
     );
+    // A1 fix-loop (finding-5): reviewer_identity threaded into the
+    // legacy update path; reviewed_by ("user") becomes the 4th arg.
     expect(proposalUpdateSpy).toHaveBeenCalledWith(
       "24c607da-7544-47a7-a28e-d649071f77f5",
       "rejected",
-      "2026-03-21T03:00:00.000Z"
+      "2026-03-21T03:00:00.000Z",
+      "user"
     );
 
     const karmaEvents = karmaStore.findByObjectId("memory-1");

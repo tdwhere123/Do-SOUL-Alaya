@@ -19,16 +19,51 @@ export interface ProposalCreateInput {
   readonly proposal: Proposal;
   readonly workspace_id: string;
   readonly run_id: string | null;
+  // D2 MERGED-I19 (architect-I2): `target_object_kind` is now REQUIRED.
+  // Migration `058-reviewer-identity.sql` left
+  // `target_object_kind TEXT NOT NULL DEFAULT 'memory_entry'` as a
+  // one-time backfill for pre-A1 rows; the default would silently
+  // mislabel future inserts that omit the column. Type-system
+  // enforcement is cheaper than dropping the SQL default (SQLite has
+  // no `ALTER COLUMN ... DROP DEFAULT`). All three current production
+  // callers pass it explicitly: `'memory_entry'` for
+  // `soul.propose_memory_update` (mcp-memory-proposal-workflow.ts),
+  // `'synthesis_capsule'` for `ProposalService.createFromSynthesisPromotion`
+  // (proposal-service.ts), and `'bankruptcy_dossier'` for the budget
+  // bankruptcy path (budget-wiring.ts).
+  readonly target_object_kind: string;
+  readonly proposed_change_summary?: string;
+  readonly created_at?: string;
 }
 
 export interface ScopedProposal {
   readonly proposal: Readonly<Proposal>;
   readonly workspace_id: string;
   readonly run_id: string | null;
+  // A1 — null until the proposal is reviewed; carries the explicit
+  // reviewer identity once review_memory_proposal completes.
+  readonly reviewer_identity: string | null;
+}
+
+export interface PendingProposalSummary {
+  readonly proposal_id: string;
+  readonly target_object_id: string;
+  readonly target_object_kind: string;
+  readonly created_at: string;
+  readonly proposed_change_summary: string;
+}
+
+export interface FindPendingSummariesOptions {
+  readonly since?: string | null;
+  readonly limit?: number;
 }
 
 export type ProposalResolutionEventInput = EventLogDraftInput;
 export type ProposalCreationEventInput = EventLogDraftInput;
+
+export interface UpdatePendingResolutionOptions {
+  readonly reviewerIdentity?: string;
+}
 
 export interface ProposalRepo {
   create(input: ProposalCreateInput): Promise<Readonly<Proposal>>;
@@ -43,11 +78,22 @@ export interface ProposalRepo {
   findScopedById(proposalId: string): Promise<Readonly<ScopedProposal> | null>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<Proposal>[]>;
   findPending(workspaceId: string): Promise<readonly Readonly<Proposal>[]>;
+  findPendingSummaries(
+    workspaceId: string,
+    options?: FindPendingSummariesOptions
+  ): Promise<readonly Readonly<PendingProposalSummary>[]>;
   findPendingByRunId(runId: string): Promise<Readonly<Proposal> | null>;
+  // A1 fix-loop (finding-5): reviewerIdentity is optional at the repo
+  // boundary so legacy callers (claim-promotion flows, fixtures) keep
+  // compiling, but every code path that should write
+  // resolution_state ∈ ('accepted','rejected') now passes it. The
+  // SqliteProposalRepo writes the column when present and leaves it
+  // untouched when omitted.
   updateResolution(
     proposalId: string,
     state: ProposalResolutionState,
-    updatedAt: string
+    updatedAt: string,
+    reviewerIdentity?: string
   ): Promise<Readonly<Proposal>>;
   updatePendingResolution(
     proposalId: string,
@@ -58,7 +104,8 @@ export interface ProposalRepo {
     proposalId: string,
     state: ProposalResolutionState,
     updatedAt: string,
-    events: readonly ProposalResolutionEventInput[]
+    events: readonly ProposalResolutionEventInput[],
+    options?: UpdatePendingResolutionOptions
   ): Promise<Readonly<{
     readonly proposal: Readonly<Proposal>;
     readonly events: readonly EventLogEntry[];
@@ -79,7 +126,11 @@ const PROPOSAL_SELECT_COLUMNS = `
         expires_at,
         last_updated_at,
         workspace_id,
-        run_id
+        run_id,
+        reviewer_identity,
+        target_object_kind,
+        proposed_change_summary,
+        created_at
 `;
 
 interface ProposalRow {
@@ -98,6 +149,11 @@ interface ProposalRow {
   // Scope metadata — available for workspace validation, not exposed in domain type.
   readonly workspace_id: string;
   readonly run_id: string | null;
+  // A1 — review identity + HITL summary projection columns.
+  readonly reviewer_identity: string | null;
+  readonly target_object_kind: string;
+  readonly proposed_change_summary: string;
+  readonly created_at: string | null;
 }
 
 export class SqliteProposalRepo implements ProposalRepo {
@@ -107,10 +163,16 @@ export class SqliteProposalRepo implements ProposalRepo {
   private readonly findPendingStatement;
   private readonly findPendingByRunIdStatement;
   private readonly updateResolutionStatement;
+  private readonly updateResolutionWithIdentityStatement;
   private readonly updatePendingResolutionStatement;
+  private readonly updatePendingResolutionWithIdentityStatement;
   private readonly eventLogWriter;
 
   public constructor(private readonly db: StorageDatabase) {
+    // A1 — INSERT now also writes the HITL projection columns
+    // (target_object_kind, proposed_change_summary, created_at).
+    // Defaults from migration 058 keep legacy callers compatible if
+    // they pass undefined for those fields.
     this.createStatement = db.connection.prepare(`
       INSERT INTO proposals (
         runtime_id,
@@ -126,8 +188,11 @@ export class SqliteProposalRepo implements ProposalRepo {
         expires_at,
         last_updated_at,
         workspace_id,
-        run_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        run_id,
+        target_object_kind,
+        proposed_change_summary,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     this.findByIdStatement = db.connection.prepare(`
@@ -165,9 +230,23 @@ export class SqliteProposalRepo implements ProposalRepo {
       WHERE proposal_id = ?
     `);
 
+    // A1 fix-loop (finding-5): companion statement for the legacy
+    // updateResolution path that also persists reviewer_identity.
+    this.updateResolutionWithIdentityStatement = db.connection.prepare(`
+      UPDATE proposals
+      SET resolution_state = ?, last_updated_at = ?, reviewer_identity = ?
+      WHERE proposal_id = ?
+    `);
+
     this.updatePendingResolutionStatement = db.connection.prepare(`
       UPDATE proposals
       SET resolution_state = ?, last_updated_at = ?
+      WHERE proposal_id = ? AND resolution_state = 'pending'
+    `);
+
+    this.updatePendingResolutionWithIdentityStatement = db.connection.prepare(`
+      UPDATE proposals
+      SET resolution_state = ?, last_updated_at = ?, reviewer_identity = ?
       WHERE proposal_id = ? AND resolution_state = 'pending'
     `);
 
@@ -178,6 +257,9 @@ export class SqliteProposalRepo implements ProposalRepo {
     const parsedProposal = parseProposal(input.proposal);
     const parsedWorkspaceId = parseWorkspaceId(input.workspace_id);
     const parsedRunId = parseRunId(input.run_id);
+    const targetObjectKind = parseNonEmptyString(input.target_object_kind, "target_object_kind");
+    const proposedChangeSummary = input.proposed_change_summary ?? "";
+    const createdAt = input.created_at ?? parsedProposal.last_updated_at;
 
     try {
       this.createStatement.run(
@@ -194,7 +276,10 @@ export class SqliteProposalRepo implements ProposalRepo {
         parsedProposal.expires_at,
         parsedProposal.last_updated_at,
         parsedWorkspaceId,
-        parsedRunId
+        parsedRunId,
+        targetObjectKind,
+        proposedChangeSummary,
+        createdAt
       );
     } catch (error) {
       throw new StorageError(
@@ -217,6 +302,9 @@ export class SqliteProposalRepo implements ProposalRepo {
     const parsedProposal = parseProposal(input.proposal);
     const parsedWorkspaceId = parseWorkspaceId(input.workspace_id);
     const parsedRunId = parseRunId(input.run_id);
+    const targetObjectKind = parseNonEmptyString(input.target_object_kind, "target_object_kind");
+    const proposedChangeSummary = input.proposed_change_summary ?? "";
+    const createdAt = input.created_at ?? parsedProposal.last_updated_at;
 
     try {
       return this.db.connection.transaction(() => {
@@ -235,7 +323,10 @@ export class SqliteProposalRepo implements ProposalRepo {
           parsedProposal.expires_at,
           parsedProposal.last_updated_at,
           parsedWorkspaceId,
-          parsedRunId
+          parsedRunId,
+          targetObjectKind,
+          proposedChangeSummary,
+          createdAt
         );
 
         return deepFreeze({
@@ -273,7 +364,8 @@ export class SqliteProposalRepo implements ProposalRepo {
         : deepFreeze({
             proposal: parseProposalRow(row),
             workspace_id: row.workspace_id,
-            run_id: row.run_id
+            run_id: row.run_id,
+            reviewer_identity: row.reviewer_identity
           });
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to load proposal ${proposalId}.`, error);
@@ -310,6 +402,63 @@ export class SqliteProposalRepo implements ProposalRepo {
     }
   }
 
+  // A1 (HITL daemon backbone) — projects pending rows into the
+  // soul.list_pending_proposals summary shape. Built dynamically so the
+  // optional since / limit filters compose; the underlying findPending
+  // result is already workspace-scoped to keep the SECURITY invariant.
+  public async findPendingSummaries(
+    workspaceId: string,
+    options: FindPendingSummariesOptions = {}
+  ): Promise<readonly Readonly<PendingProposalSummary>[]> {
+    const parsedWorkspaceId = parseWorkspaceId(workspaceId);
+    const since = options.since ?? null;
+    const limit = options.limit ?? null;
+
+    let sql = `
+      SELECT${PROPOSAL_SELECT_COLUMNS}
+      FROM proposals
+      WHERE workspace_id = ? AND resolution_state = 'pending'
+    `;
+    const params: (string | number)[] = [parsedWorkspaceId];
+    if (since !== null) {
+      // D2 MERGED-I2 (reviewer-I3): exclusive `>` cursor semantics.
+      // HITL pollers pass the timestamp of their most-recent record as
+      // `since`; an inclusive `>=` returns the boundary record on every
+      // subsequent poll. Mirrors A3's deliberate exclusive `>` choice
+      // for usage records (see path-plasticity-runtime.ts docstring).
+      sql += " AND created_at > ?";
+      params.push(since);
+    }
+    sql += " ORDER BY created_at DESC, proposal_id DESC";
+    if (limit !== null) {
+      sql += " LIMIT ?";
+      params.push(limit);
+    }
+
+    try {
+      const rows = this.db.connection.prepare(sql).all(...params) as ProposalRow[];
+      return rows.map((row) =>
+        deepFreeze({
+          proposal_id: row.proposal_id,
+          // derived_from is nullable in the proposals schema; for the
+          // MCP-driven proposeMemoryUpdate path it is always populated
+          // with the target memory id, so falling back to runtime_id
+          // keeps the projection total even for legacy/edge rows.
+          target_object_id: row.derived_from ?? row.runtime_id,
+          target_object_kind: row.target_object_kind,
+          created_at: row.created_at ?? row.last_updated_at,
+          proposed_change_summary: row.proposed_change_summary
+        })
+      );
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to list pending proposal summaries for workspace ${parsedWorkspaceId}.`,
+        error
+      );
+    }
+  }
+
   public async findPendingByRunId(runId: string): Promise<Readonly<Proposal> | null> {
     const parsedRunId = parseNonEmptyString(runId, "run_id");
 
@@ -328,14 +477,31 @@ export class SqliteProposalRepo implements ProposalRepo {
   public async updateResolution(
     proposalId: string,
     state: ProposalResolutionState,
-    updatedAt: string
+    updatedAt: string,
+    reviewerIdentity?: string
   ): Promise<Readonly<Proposal>> {
     const parsedProposalId = parseProposalId(proposalId);
     const parsedState = parseProposalResolutionState(state);
     const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+    // A1 fix-loop (finding-5): persist reviewer_identity through the
+    // legacy update path. Empty/whitespace identities are rejected;
+    // when omitted, the column is left untouched (back-compat for
+    // claim-promotion / auto-applied bankruptcy paths).
+    const parsedReviewerIdentity =
+      reviewerIdentity === undefined
+        ? undefined
+        : parseNonEmptyString(reviewerIdentity, "reviewer_identity");
 
     try {
-      const result = this.updateResolutionStatement.run(parsedState, parsedUpdatedAt, parsedProposalId);
+      const result =
+        parsedReviewerIdentity === undefined
+          ? this.updateResolutionStatement.run(parsedState, parsedUpdatedAt, parsedProposalId)
+          : this.updateResolutionWithIdentityStatement.run(
+              parsedState,
+              parsedUpdatedAt,
+              parsedReviewerIdentity,
+              parsedProposalId
+            );
 
       if (result.changes === 0) {
         throw new StorageError("NOT_FOUND", `Proposal ${parsedProposalId} was not found.`);
@@ -405,7 +571,8 @@ export class SqliteProposalRepo implements ProposalRepo {
     proposalId: string,
     state: ProposalResolutionState,
     updatedAt: string,
-    events: readonly ProposalResolutionEventInput[]
+    events: readonly ProposalResolutionEventInput[],
+    options: UpdatePendingResolutionOptions = {}
   ): Promise<Readonly<{
     readonly proposal: Readonly<Proposal>;
     readonly events: readonly EventLogEntry[];
@@ -413,15 +580,26 @@ export class SqliteProposalRepo implements ProposalRepo {
     const parsedProposalId = parseProposalId(proposalId);
     const parsedState = parseProposalResolutionState(state);
     const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+    // A1 — empty/whitespace identities are rejected; if the caller did
+    // not pass reviewerIdentity (legacy callers, e.g. claim-promotion
+    // flows), the column is left untouched.
+    const reviewerIdentity =
+      options.reviewerIdentity === undefined
+        ? undefined
+        : parseNonEmptyString(options.reviewerIdentity, "reviewer_identity");
 
     try {
       return this.db.connection.transaction(() => {
         const storedEvents = events.map((event) => insertEventLogEntry(this.eventLogWriter, event));
-        const result = this.updatePendingResolutionStatement.run(
-          parsedState,
-          parsedUpdatedAt,
-          parsedProposalId
-        );
+        const result =
+          reviewerIdentity === undefined
+            ? this.updatePendingResolutionStatement.run(parsedState, parsedUpdatedAt, parsedProposalId)
+            : this.updatePendingResolutionWithIdentityStatement.run(
+                parsedState,
+                parsedUpdatedAt,
+                reviewerIdentity,
+                parsedProposalId
+              );
 
         if (result.changes === 0) {
           throw this.createPendingResolutionFailure(parsedProposalId);

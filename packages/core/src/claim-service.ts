@@ -44,6 +44,8 @@ export interface ClaimServiceEventLogRepoPort {
 
 export interface ClaimServiceClaimFormRepoPort {
   create(claim: ClaimForm): Promise<Readonly<ClaimForm>>;
+  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
+  createSync(claim: ClaimForm): Readonly<ClaimForm>;
   findById(objectId: string): Promise<Readonly<ClaimForm> | null>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<ClaimForm>[]>;
   findByStatus(workspaceId: string, status: ClaimLifecycleStateType): Promise<readonly Readonly<ClaimForm>[]>;
@@ -68,7 +70,7 @@ export interface ClaimServiceDependencies {
   readonly eventLogRepo: ClaimServiceEventLogRepoPort;
   readonly runtimeNotifier: ClaimRuntimeNotifierPort;
   readonly canonicalAliasService?: Pick<CanonicalAliasService, "planGovernanceSubjectCanonicalization">;
-  readonly eventPublisher?: Pick<EventPublisher, "publishManyWithMutation">;
+  readonly eventPublisher?: Pick<EventPublisher, "appendManyWithMutation">;
   readonly slotService?: ClaimServiceSlotServicePort;
   readonly generateObjectId?: () => string;
   readonly now?: () => string;
@@ -129,9 +131,9 @@ export class ClaimService {
     );
 
     if (canonicalizationPlan !== undefined && this.dependencies.eventPublisher !== undefined) {
-      return await this.dependencies.eventPublisher.publishManyWithMutation(
+      return await this.dependencies.eventPublisher.appendManyWithMutation(
         [...canonicalizationPlan.eventInputs, claimCreatedEventInput],
-        async () => await this.dependencies.claimFormRepo.create(claim)
+        () => this.dependencies.claimFormRepo.createSync(claim)
       );
     }
 

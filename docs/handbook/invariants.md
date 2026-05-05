@@ -98,6 +98,18 @@ These rules always win over lower-level docs and task-card convenience.
     a separate consumer-facing product or a charter amendment to §21
     before publication. (Added 2026-05-03 in p5-system-review-r1;
     closes `#BL-023`.)
+21b. `reviewer_identity` on review records (`proposals.reviewer_identity`
+    column, `caused_by` field on `SOUL_REVIEW_*` /
+    `SOUL_PROPOSAL_RESOLVED` event_log rows, `reviewer_identity`
+    request field on `soul.review_memory_proposal`) is in v0.1 an
+    **agent-asserted attestation, not an authenticated principal**.
+    The MCP / Inspector / CLI surfaces accept it verbatim as a
+    `BoundedIdSchema` string with no signature verification. Operators
+    reading these audit rows MUST treat the value as "the agent / human
+    attested to this identity" rather than "the runtime verified this
+    identity". v0.2 (`#BL-027` full review-inbox UX) will bind it
+    server-side from a pre-shared session credential. (Added in
+    v0.1-closeout D2 MERGED-I21 / red-team-I1.)
 22. MCP tool surface and CLI fallback share one runtime contract. CLI
     fallback parity with MCP is enforced by tests.
 23. Attach / Profile changes write only after preview + explicit
