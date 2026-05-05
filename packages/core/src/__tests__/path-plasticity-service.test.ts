@@ -856,6 +856,49 @@ describe("PathPlasticityService", () => {
       support_events_count: 5
     });
   });
+
+  it("preserves support_events_count on mixed receipts that net-zero into retirement (D2 codex-fixloop-I1)", async () => {
+    // Mixed receipt aggregate: 1 used (0.1) + 2 skipped (0.05 × 2 = 0.1)
+    // = strength net delta 0. Path is at floor strength, has been
+    // inactive for the retirement window, has a skipped receipt → enters
+    // the `retirementEligible && counts.skipped > 0` branch with
+    // counts.used > 0. Pre-fix the retirement branch dropped the used
+    // tally; post-fix it carries it forward into the retirement record.
+    const path = createPath({
+      path_id: "path-zero-retire-1",
+      plasticity_state: {
+        // At floor strength + last_reinforced_at = long ago → eligible.
+        strength: 0,
+        direction_bias: "bidirectional_asymmetric",
+        stability_class: "volatile",
+        support_events_count: 4,
+        contradiction_events_count: 0,
+        last_reinforced_at: "2025-01-01T00:00:00.000Z",
+        last_weakened_at: undefined
+      }
+    });
+    const harness = buildHarness({
+      pathsByObjectId: { "obj-target": [path] },
+      usageRecords: [
+        createUsageRecord({ usage_state: "used", used_object_ids: ["obj-target"] }),
+        createUsageRecord({ usage_state: "skipped", used_object_ids: [] }),
+        createUsageRecord({ usage_state: "skipped", used_object_ids: [] })
+      ],
+      deliveredObjectIdsByDeliveryId: { "delivery-1": ["obj-target"] }
+    });
+
+    const result = await harness.service.computeAndApplyPlasticity({
+      workspaceId: "workspace-1",
+      sinceIso: "2026-05-03T00:00:00.000Z"
+    });
+
+    expect(result.retired).toBe(1);
+    const updated = harness.repoUpdates.find((entry) => entry.pathId === "path-zero-retire-1");
+    expect(updated?.updates.plasticity_state).toMatchObject({
+      // 4 (prior) + 1 (this tick's 'used' receipt) = 5
+      support_events_count: 5
+    });
+  });
 });
 
 // Suppress unused-import warnings for fixtures not used in every test.

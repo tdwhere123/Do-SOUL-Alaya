@@ -66,6 +66,12 @@ export class TrustStateRecorderNotReady extends Error {
 }
 
 export class TrustStateUnknownDeliveryError extends Error {
+  // D2 codex-fixloop-B3 follow-up: classify as NOT_FOUND so the MCP handler
+  // returns 404 (not 500 INTERNAL) for both legitimate unknown-delivery
+  // and the cross-workspace mismatch (MERGED-B3) which throws the same
+  // error. Both cases observably present as 404 — no information leak
+  // between the two scenarios for an attacker probing delivery_ids.
+  public readonly code = "NOT_FOUND" as const;
   public constructor(public readonly deliveryId: string) {
     super(`Unknown delivery_id: ${deliveryId}`);
     this.name = "TrustStateUnknownDeliveryError";

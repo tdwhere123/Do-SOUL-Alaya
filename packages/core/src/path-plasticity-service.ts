@@ -413,10 +413,18 @@ export class PathPlasticityService {
     // re-check retirement here too. A path sitting at strength == 0 with
     // a `skipped` receipt that produces no further drop (clamped at the
     // floor) still triggers retirement when inactivity passes the window.
+    // D2 codex-fixloop-I1: mixed receipts can also reach this branch with
+    // counts.used > 0 (e.g. {used: 1, skipped: 2} = 0.1 - 0.1 = 0). Carry
+    // the support tally forward in the retirement nextPlasticity so the
+    // last record on the path before retirement reflects every used
+    // receipt that contributed.
     if (retirementEligible && counts.skipped > 0) {
+      const nextSupportCount =
+        path.plasticity_state.support_events_count + counts.used;
       const nextPlasticity = parsePlasticityState({
         ...path.plasticity_state,
         strength: proposedStrength,
+        support_events_count: nextSupportCount,
         last_weakened_at: occurredAt
       });
       await this.publishRetired({

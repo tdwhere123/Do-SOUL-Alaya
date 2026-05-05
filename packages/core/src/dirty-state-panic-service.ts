@@ -72,10 +72,9 @@ export class DirtyStatePanicService {
 
     // Atomic: panic + worker.state_changed EventLog rows, dossier INSERT,
     // and worker_run state UPDATE all commit (or roll back) as one SQLite
-    // transaction. Replaces the prior nested
-    // `publishWithMutation(panicEvent, () => publishWithMutation(stateChangedEvent, ...))`
-    // pattern flagged by finding-2 — nested publish broke the
-    // single-transaction guarantee.
+    // transaction (see #BL-022 closure). Replaces the prior nested
+    // legacy-publish pattern flagged by A2 finding-2 — nested publish
+    // broke the single-transaction guarantee.
     return await this.deps.eventPublisher.appendManyWithMutation(
       [panicEvent, stateChangedEvent],
       () => {
