@@ -29,6 +29,10 @@ interface GraphNode extends SimulationNodeDatum {
   kind: string;
   label: string;
   summary?: string;
+  scope_id?: string;
+  workspace_id?: string;
+  created_at?: string;
+  origin_plane?: "project" | "global";
   degree?: number;
 }
 
@@ -337,20 +341,31 @@ export default function GraphPage() {
       };
     };
 
-    const observer = new ResizeObserver((entries) => {
-      const rect = entries[0]?.contentRect;
-      if (!rect || rect.width <= 0 || rect.height <= 0) return;
+    const ensureRender = (rawWidth: number, rawHeight: number) => {
+      // Headless contexts (jsdom, SSR) report 0×0; downstream effects still need
+      // a populated SVG, so fall back to a sane viewport-sized box.
+      const width = rawWidth > 0 ? rawWidth : 800;
+      const height = rawHeight > 0 ? rawHeight : 600;
       if (
-        Math.abs(rect.width - lastWidth) < 1 &&
-        Math.abs(rect.height - lastHeight) < 1
+        Math.abs(width - lastWidth) < 1 &&
+        Math.abs(height - lastHeight) < 1
       )
         return;
-      lastWidth = rect.width;
-      lastHeight = rect.height;
+      lastWidth = width;
+      lastHeight = height;
       cleanup?.();
-      cleanup = renderForBox(rect.width, rect.height);
+      cleanup = renderForBox(width, height);
+    };
+
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (!rect) return;
+      ensureRender(rect.width, rect.height);
     });
     observer.observe(svgElement);
+
+    const initialRect = svgElement.getBoundingClientRect();
+    ensureRender(initialRect.width, initialRect.height);
 
     return () => {
       observer.disconnect();
@@ -544,6 +559,7 @@ function DetailDrawer({ node, onClose, onFocusSubgraph, onCopyCli }: DetailDrawe
   const cliCommand = node
     ? `alaya tools call --json soul.open_pointer '{"pointer_id":"${node.id}"}'`
     : "";
+  const kindColor = node ? NODE_COLOR[node.kind] ?? "#586E75" : "#586E75";
 
   return (
     <div
@@ -555,63 +571,106 @@ function DetailDrawer({ node, onClose, onFocusSubgraph, onCopyCli }: DetailDrawe
       aria-label="Node details"
     >
       {node ? (
-        <div className="h-full flex flex-col p-6 font-mono overflow-y-auto">
-          <div className="flex justify-between items-start mb-8">
-            <div className="flex flex-col">
-              <span className="text-[10px] text-ink-700/60 uppercase tracking-widest mb-1">
+        <div className="relative h-full flex flex-col p-6 pl-7 font-mono overflow-y-auto">
+          <div
+            className="absolute left-0 top-0 bottom-0 w-1"
+            style={{ backgroundColor: kindColor }}
+            aria-hidden
+          />
+
+          <div className="flex justify-between items-start mb-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span
+                className="px-2 py-0.5 text-[10px] uppercase tracking-widest rounded text-ink-700"
+                style={{ backgroundColor: `${kindColor}33` }}
+              >
                 {node.kind}
               </span>
-              <h2 className="text-xl font-bold text-ink-600 break-words">
-                {node.label}
-              </h2>
+              {node.origin_plane === "global" ? (
+                <span className="px-2 py-0.5 text-[10px] uppercase tracking-widest rounded bg-[#D4AF37]/20 text-[#7A5A0F]">
+                  global
+                </span>
+              ) : null}
             </div>
             <button
               onClick={onClose}
-              className="p-1 hover:bg-beige-200 rounded transition-colors"
+              className="p-1 hover:bg-beige-200 rounded transition-colors -mr-1"
               aria-label="Close detail drawer"
             >
               <X className="w-5 h-5 text-ink-700/40" />
             </button>
           </div>
 
-          <div className="space-y-6 flex-1">
-            <section>
+          <h2 className="text-lg font-bold text-ink-600 break-words leading-tight mb-5">
+            {node.label}
+          </h2>
+
+          {node.summary ? (
+            <section className="mb-6">
               <h4 className="text-[10px] uppercase text-ink-700/40 mb-2 tracking-widest">
                 Summary
               </h4>
-              <p className="text-sm text-ink-700 leading-relaxed italic">
-                "{node.summary ?? "No summary available for this node."}"
+              <p className="text-sm text-ink-700 leading-relaxed whitespace-pre-wrap max-h-[36vh] overflow-y-auto pr-1">
+                {node.summary}
               </p>
             </section>
+          ) : null}
 
-            <section>
-              <h4 className="text-[10px] uppercase text-ink-700/40 mb-2 tracking-widest">
-                Metadata
-              </h4>
-              <div className="bg-beige-100 p-3 rounded text-xs space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-ink-700/60">ID:</span>
-                  <span className="text-ink-700 select-all">{node.id}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-ink-700/60">Connections:</span>
-                  <span className="text-ink-700">{node.degree ?? 0}</span>
-                </div>
-              </div>
-            </section>
-
-            <section>
-              <h4 className="text-[10px] uppercase text-ink-700/40 mb-2 tracking-widest">
-                Spotlight
-              </h4>
+          <section className="mb-6">
+            <h4 className="text-[10px] uppercase text-ink-700/40 mb-2 tracking-widest">
+              Metadata
+            </h4>
+            <dl className="bg-beige-100 p-3 rounded text-xs grid grid-cols-[5rem_1fr_auto] gap-x-3 gap-y-2 items-baseline">
+              <dt className="text-ink-700/60">id</dt>
+              <dd className="text-ink-700 break-all select-all">{node.id}</dd>
               <button
-                onClick={() => onFocusSubgraph(node.id)}
-                className="text-xs font-mono text-ink-600 underline hover:text-ink-700"
+                onClick={() => onCopyCli(node.id)}
+                className="text-ink-700/40 hover:text-ink-700"
+                aria-label="Copy node id"
               >
-                Focus 1-hop subgraph around this node →
+                <Copy className="w-3 h-3" />
               </button>
-            </section>
-          </div>
+
+              <dt className="text-ink-700/60">scope</dt>
+              <dd className="text-ink-700 break-all col-span-2">
+                {node.scope_id ?? <span className="text-ink-700/30">—</span>}
+              </dd>
+
+              <dt className="text-ink-700/60">workspace</dt>
+              <dd className="text-ink-700 break-all col-span-2">
+                {node.workspace_id ?? <span className="text-ink-700/30">—</span>}
+              </dd>
+
+              <dt className="text-ink-700/60">created</dt>
+              <dd className="text-ink-700 col-span-2" title={node.created_at}>
+                {node.created_at ? (
+                  formatRelativeTime(node.created_at)
+                ) : (
+                  <span className="text-ink-700/30">—</span>
+                )}
+              </dd>
+
+              <dt className="text-ink-700/60">degree</dt>
+              <dd className="text-ink-700 col-span-2">
+                {node.degree ?? 0}{" "}
+                <span className="text-ink-700/40">
+                  connection{node.degree === 1 ? "" : "s"}
+                </span>
+              </dd>
+            </dl>
+          </section>
+
+          <section className="mb-6">
+            <h4 className="text-[10px] uppercase text-ink-700/40 mb-2 tracking-widest">
+              Spotlight
+            </h4>
+            <button
+              onClick={() => onFocusSubgraph(node.id)}
+              className="text-xs font-mono text-ink-600 underline hover:text-ink-700"
+            >
+              Focus 1-hop subgraph around this node →
+            </button>
+          </section>
 
           <div className="mt-auto pt-6 border-t border-beige-200">
             <button
@@ -627,6 +686,27 @@ function DetailDrawer({ node, onClose, onFocusSubgraph, onCopyCli }: DetailDrawe
       ) : null}
     </div>
   );
+}
+
+function formatRelativeTime(iso: string): string {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return iso;
+  const diffMs = Date.now() - then;
+  if (diffMs < 0) return "in the future";
+  const sec = Math.round(diffMs / 1000);
+  if (sec < 45) return "just now";
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 36) return `${hr}h ago`;
+  const day = Math.round(hr / 24);
+  if (day < 14) return `${day}d ago`;
+  const wk = Math.round(day / 7);
+  if (wk < 9) return `${wk}w ago`;
+  const mo = Math.round(day / 30);
+  if (mo < 12) return `${mo}mo ago`;
+  const yr = Math.round(day / 365);
+  return `${yr}y ago`;
 }
 
 function extractId(endpoint: string | number | GraphNode): string {
