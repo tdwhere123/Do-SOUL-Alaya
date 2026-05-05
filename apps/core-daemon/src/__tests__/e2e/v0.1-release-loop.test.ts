@@ -613,7 +613,8 @@ async function seedReleaseFixtureAtDbPath(dbPath: string): Promise<void> {
     await proposalRepo.create({
       proposal: createProposal(),
       workspace_id: "workspace-2",
-      run_id: "run-2"
+      run_id: "run-2",
+      target_object_kind: "memory_entry"
     });
   } finally {
     database.close();

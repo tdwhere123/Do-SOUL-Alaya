@@ -19,11 +19,19 @@ export interface ProposalCreateInput {
   readonly proposal: Proposal;
   readonly workspace_id: string;
   readonly run_id: string | null;
-  // A1 (HITL daemon backbone) — these are optional so legacy callers
-  // (claim/synthesis-driven proposals; existing fixtures) keep working
-  // unchanged. The MCP-driven proposeMemoryUpdate path always supplies
-  // them so the soul.list_pending_proposals projection is populated.
-  readonly target_object_kind?: string;
+  // D2 MERGED-I19 (architect-I2): `target_object_kind` is now REQUIRED.
+  // Migration `058-reviewer-identity.sql` left
+  // `target_object_kind TEXT NOT NULL DEFAULT 'memory_entry'` as a
+  // one-time backfill for pre-A1 rows; the default would silently
+  // mislabel future inserts that omit the column. Type-system
+  // enforcement is cheaper than dropping the SQL default (SQLite has
+  // no `ALTER COLUMN ... DROP DEFAULT`). All three current production
+  // callers pass it explicitly: `'memory_entry'` for
+  // `soul.propose_memory_update` (mcp-memory-proposal-workflow.ts),
+  // `'synthesis_capsule'` for `ProposalService.createFromSynthesisPromotion`
+  // (proposal-service.ts), and `'bankruptcy_dossier'` for the budget
+  // bankruptcy path (budget-wiring.ts).
+  readonly target_object_kind: string;
   readonly proposed_change_summary?: string;
   readonly created_at?: string;
 }
@@ -249,7 +257,7 @@ export class SqliteProposalRepo implements ProposalRepo {
     const parsedProposal = parseProposal(input.proposal);
     const parsedWorkspaceId = parseWorkspaceId(input.workspace_id);
     const parsedRunId = parseRunId(input.run_id);
-    const targetObjectKind = input.target_object_kind ?? "memory_entry";
+    const targetObjectKind = parseNonEmptyString(input.target_object_kind, "target_object_kind");
     const proposedChangeSummary = input.proposed_change_summary ?? "";
     const createdAt = input.created_at ?? parsedProposal.last_updated_at;
 
@@ -294,7 +302,7 @@ export class SqliteProposalRepo implements ProposalRepo {
     const parsedProposal = parseProposal(input.proposal);
     const parsedWorkspaceId = parseWorkspaceId(input.workspace_id);
     const parsedRunId = parseRunId(input.run_id);
-    const targetObjectKind = input.target_object_kind ?? "memory_entry";
+    const targetObjectKind = parseNonEmptyString(input.target_object_kind, "target_object_kind");
     const proposedChangeSummary = input.proposed_change_summary ?? "";
     const createdAt = input.created_at ?? parsedProposal.last_updated_at;
 
