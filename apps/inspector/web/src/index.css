@@ -73,3 +73,12 @@ svg[data-spotlight-active="false"] line[data-edge-id] {
   filter: none;
   transition: opacity 250ms ease, filter 250ms ease;
 }
+
+/* Selection ring: visible only on the currently selected node. */
+g[data-node-id] circle.node-ring {
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+g[data-node-id][data-selected="true"] circle.node-ring {
+  opacity: 1;
+}
