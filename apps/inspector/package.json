@@ -1,7 +1,16 @@
 {
   "name": "@do-soul/alaya-inspector",
-  "version": "0.0.1",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Memory Inspector loopback server for Do-SOUL Alaya — local-only memory tooling, NOT an agent surface.",
+  "license": "MIT",
+  "homepage": "https://github.com/tdwhere123/Do-SOUL-Alaya",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tdwhere123/Do-SOUL-Alaya.git",
+    "directory": "apps/inspector"
+  },
+  "publishConfig": { "access": "public" },
+  "files": ["dist/", "web/dist/"],
   "type": "module",
   "main": "dist/server.js",
   "types": "dist/server.d.ts",

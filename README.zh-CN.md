@@ -291,7 +291,7 @@ EventLog 接线）。
 graph TD
     subgraph Surfaces["对外面"]
         MCPS["MCP stdio<br/>(alaya mcp stdio)"]
-        CLIS["alaya CLI<br/>(12 个动词 · MCP 兜底)"]
+        CLIS["alaya CLI<br/>(13 个动词 · MCP 兜底)"]
     end
 
     subgraph Daemon["apps/core-daemon —— 接线 + 派发"]
@@ -384,7 +384,7 @@ CI 测试强制的规则：
 `alaya tools list --json` 和 `alaya tools call <tool> '<json>' --json`
 是同一套接口的 CLI 兜底——用来在 agent runtime 之外做脚本化。
 
-### CLI 命令（12 个动词）
+### CLI 命令（13 个动词）
 
 | 命令 | 用途 | 修改？ | 审计日志？ |
 |---|---|---|---|
@@ -395,6 +395,7 @@ CI 测试强制的规则：
 | `alaya detach codex` / `detach claude-code` | 原子地反向解除对应的 attach | 是 | 是 |
 | `alaya status` | Daemon 健康 + trust-state 摘要 | 否 | 否 |
 | `alaya inspect` | 在 loopback 上打开 Memory Inspector SPA（memory-tooling，*不是* agent surface） | 否 | 否 |
+| `alaya update [--check] [--yes]` | 检查并安装 npm 上 `@do-soul/alaya` 的最新版 | 是（npm 全局） | 否 |
 | `alaya tools list` | 列 MCP 工具目录 | 否 | 否 |
 | `alaya tools call <tool> '<json>'` | 从 CLI 调一个工具 | 视情况 | 视情况 |
 | `alaya review pending\|accept\|reject` | 查看并裁决 HITL proposal 队列（Memory Inspector 的 CLI 兜底） | accept / reject：是 | 是 |
@@ -409,8 +410,27 @@ CI 测试强制的规则：
 
 ## 快速开始
 
-不需要 `git`、Node 20+、pnpm 9+ 之外的任何东西。`CLAUDE.md` 里
-的 `rtk` 引用是 Claude Code 的 token 优化，纯 `pnpm` 同样能跑。
+### 方式 A —— 从 npm 安装（推荐）
+
+> **状态**：npm 包 `@do-soul/alaya` 从首个 `v0.1.x` tag release 起开始发布。
+> 如果 `npm view @do-soul/alaya version` 返回 404，说明还没发布过，
+> 请改用方式 B。
+
+```bash
+npm install -g @do-soul/alaya
+alaya doctor
+
+# 传绝对路径——shell 在 alaya 启动前展开 ~。
+alaya install --non-interactive "$(printf '{"db_path":"%s/.config/alaya/alaya.db","embedding_enabled":false}' "$HOME")"
+alaya attach claude-code
+```
+
+后续升级：`alaya update`（或 `npm install -g @do-soul/alaya@latest`）。
+
+### 方式 B —— 从源码构建
+
+需要 `git`、Node 20+、pnpm 9+。`CLAUDE.md` 里的 `rtk` 引用是
+Claude Code 的 token 优化，纯 `pnpm` 同样能跑。
 
 ```bash
 # 1) clone

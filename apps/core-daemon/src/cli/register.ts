@@ -25,6 +25,7 @@ import { createDetachCommandSpec } from "./detach.js";
 import { createDoctorCommand } from "./doctor.js";
 import { createInstallCommand } from "./install.js";
 import { createInspectCommand } from "./inspect.js";
+import { createUpdateCommand } from "./update.js";
 import { createOperationCommandSpecs } from "./operations.js";
 import { createReviewCommand } from "./review.js";
 import { createStatusCommand } from "./status.js";
@@ -67,6 +68,7 @@ export function registerAlayaCliCommands(
   }));
   bridge.registerSubcommand(createInstallCommand());
   bridge.registerSubcommand(createInspectCommand());
+  bridge.registerSubcommand(createUpdateCommand());
   bridge.registerSubcommand(createAttachCommand(runtime));
   bridge.registerSubcommand(createDetachCommandSpec({
     auditWriter: createProfileAuditWriter(process.env)

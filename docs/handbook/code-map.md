@@ -12,8 +12,8 @@ migrations, or runtime wiring change.
 | `packages/core/` | `@do-soul/alaya-core` | `@do-soul/alaya-core` |
 | `packages/soul/` | `@do-soul/alaya-soul` | `@do-soul/alaya-soul` |
 | `packages/engine-gateway/` | `@do-soul/alaya-engine-gateway` | `@do-soul/alaya-engine-gateway` |
-| `apps/core-daemon/` | `@do-soul/alaya-core-daemon` | (private app, no path alias) |
-| `apps/inspector/` | `@do-soul/alaya-inspector` | (private app, no path alias) |
+| `apps/core-daemon/` | `@do-soul/alaya` (publish name; vitest project label still `@do-soul/alaya-core-daemon`) | (no path alias) |
+| `apps/inspector/` | `@do-soul/alaya-inspector` | (no path alias) |
 
 Upstream `@do-what/<x>` maps historically to `@do-soul/alaya-<x>` for
 the five ported packages above (port-era mapping; the upstream

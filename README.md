@@ -317,7 +317,7 @@ truth boundary from leaking.
 graph TD
     subgraph Surfaces["Agent-facing surfaces"]
         MCPS["MCP stdio<br/>(alaya mcp stdio)"]
-        CLIS["alaya CLI<br/>(12 verbs · MCP fallback)"]
+        CLIS["alaya CLI<br/>(13 verbs · MCP fallback)"]
     end
 
     subgraph Daemon["apps/core-daemon — wiring + dispatch"]
@@ -413,7 +413,7 @@ at parse time and in the published catalog.
 are the CLI fallback for the same surface — useful for scripting
 outside the agent runtime.
 
-### CLI commands (12 verbs)
+### CLI commands (13 verbs)
 
 | Command | Purpose | Mutating? | Audit log? |
 |---|---|---|---|
@@ -424,6 +424,7 @@ outside the agent runtime.
 | `alaya detach codex` / `detach claude-code` | Reverse the corresponding attach atomically | yes | yes |
 | `alaya status` | Daemon health + trust-state summary | no | no |
 | `alaya inspect` | Open the Memory Inspector SPA on loopback (memory-tooling, *not* an agent surface) | no | no |
+| `alaya update [--check] [--yes]` | Check for and install the latest npm release of `@do-soul/alaya` | yes (npm global) | no |
 | `alaya tools list` | List the MCP tool catalog | no | no |
 | `alaya tools call <tool> '<json>'` | Invoke a tool from CLI | varies | varies |
 | `alaya review pending\|accept\|reject` | Inspect and resolve the HITL proposal queue (CLI fallback for the Memory Inspector) | accept / reject: yes | yes |
@@ -439,9 +440,28 @@ Every mutating verb supports preview before write. `attach` and
 
 ## Quickstart
 
-You don't need anything beyond `git`, Node 20+, and pnpm 9+. The
-`rtk` references in `CLAUDE.md` are a Claude Code optimisation; bare
-`pnpm` works the same.
+### Option A — install from npm (recommended)
+
+> **Status:** the npm package `@do-soul/alaya` is published from the
+> first `v0.1.x` tagged release onward. If `npm view @do-soul/alaya
+> version` returns 404, the project has not yet been published — fall
+> back to Option B.
+
+```bash
+npm install -g @do-soul/alaya
+alaya doctor
+
+# Pass an absolute db_path — your shell expands ~ before alaya runs.
+alaya install --non-interactive "$(printf '{"db_path":"%s/.config/alaya/alaya.db","embedding_enabled":false}' "$HOME")"
+alaya attach claude-code
+```
+
+Subsequent updates: `alaya update` (or `npm install -g @do-soul/alaya@latest`).
+
+### Option B — build from source
+
+You need `git`, Node 20+, and pnpm 9+. The `rtk` references in
+`CLAUDE.md` are a Claude Code optimisation; bare `pnpm` works the same.
 
 ```bash
 # 1) Clone

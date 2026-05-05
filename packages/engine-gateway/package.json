@@ -1,7 +1,16 @@
 {
   "name": "@do-soul/alaya-engine-gateway",
-  "version": "0.0.1",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Compute engine gateway for Do-SOUL Alaya — provider abstraction and routing stance.",
+  "license": "MIT",
+  "homepage": "https://github.com/tdwhere123/Do-SOUL-Alaya",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tdwhere123/Do-SOUL-Alaya.git",
+    "directory": "packages/engine-gateway"
+  },
+  "publishConfig": { "access": "public" },
+  "files": ["dist/"],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

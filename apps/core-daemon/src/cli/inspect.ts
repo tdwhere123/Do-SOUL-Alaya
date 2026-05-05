@@ -153,7 +153,7 @@ function defaultGenerateToken(): string {
 }
 
 function defaultInspectorEntryPath(): string {
-  return fileURLToPath(new URL("../../../inspector/dist/server.js", import.meta.url));
+  return fileURLToPath(import.meta.resolve("@do-soul/alaya-inspector/dist/server.js"));
 }
 
 function defaultSpawnInspector(input: SpawnInspectorInput): InspectorChildProcess {

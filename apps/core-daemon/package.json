@@ -1,7 +1,22 @@
 {
-  "name": "@do-soul/alaya-core-daemon",
-  "version": "0.0.1",
-  "private": true,
+  "name": "@do-soul/alaya",
+  "version": "0.1.0",
+  "description": "Local-first memory plane for CLI agents (Codex, Claude Code, similar). Provides MCP attach surface and the alaya CLI (13 verbs).",
+  "license": "MIT",
+  "homepage": "https://github.com/tdwhere123/Do-SOUL-Alaya",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tdwhere123/Do-SOUL-Alaya.git",
+    "directory": "apps/core-daemon"
+  },
+  "keywords": ["mcp", "memory", "agent", "claude-code", "codex", "alaya", "local-first"],
+  "publishConfig": { "access": "public" },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map",
+    "bin/"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -9,7 +24,7 @@
     "node": ">=20.19.0"
   },
   "bin": {
-    "alaya": "../../bin/alaya.mjs"
+    "alaya": "./bin/alaya.mjs"
   },
   "scripts": {
     "dev": "node ../../scripts/dev-core-daemon.mjs",
@@ -19,6 +34,7 @@
   "dependencies": {
     "@do-soul/alaya-core": "workspace:*",
     "@do-soul/alaya-engine-gateway": "workspace:*",
+    "@do-soul/alaya-inspector": "workspace:*",
     "@do-soul/alaya-protocol": "workspace:*",
     "@do-soul/alaya-soul": "workspace:*",
     "@do-soul/alaya-storage": "workspace:*",

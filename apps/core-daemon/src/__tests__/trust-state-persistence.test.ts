@@ -30,6 +30,7 @@ import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "../index.js";
 
 const tempDirs: string[] = [];
 const originalDataDir = process.env.DATA_DIR;
+const originalConfigDir = process.env.ALAYA_CONFIG_DIR;
 const INTEGRATION_TEST_TIMEOUT_MS = 30_000;
 
 interface AuditLinkRow {
@@ -369,13 +370,22 @@ async function createTempDataDir(): Promise<string> {
 
 function setDataDir(dataDir: string): void {
   process.env.DATA_DIR = dataDir;
+  // Override ALAYA_CONFIG_DIR so any user-installed alaya.toml on the
+  // host machine cannot leak through resolveConfiguredDatabasePath
+  // (which prefers TOML db_path over DATA_DIR).
+  process.env.ALAYA_CONFIG_DIR = dataDir;
 }
 
 function restoreDataDir(): void {
   if (originalDataDir === undefined) {
     delete process.env.DATA_DIR;
-    return;
+  } else {
+    process.env.DATA_DIR = originalDataDir;
   }
 
-  process.env.DATA_DIR = originalDataDir;
+  if (originalConfigDir === undefined) {
+    delete process.env.ALAYA_CONFIG_DIR;
+  } else {
+    process.env.ALAYA_CONFIG_DIR = originalConfigDir;
+  }
 }

@@ -25,4 +25,34 @@ const result = spawnSync(
   { stdio: "inherit" },
 );
 
-process.exit(result.status ?? 1);
+if (result.status !== 0) {
+  process.exit(result.status ?? 1);
+}
+
+// Storage migrations are SQL files that tsc does not copy. Without this,
+// published @do-soul/alaya-storage cannot bootstrap a fresh DB.
+const copyMigrations = spawnSync(
+  process.execPath,
+  ["./scripts/copy-migrations.mjs"],
+  { stdio: "inherit" },
+);
+
+if (copyMigrations.status !== 0) {
+  process.exit(copyMigrations.status ?? 1);
+}
+
+// Inspector SPA frontend lives in apps/inspector/web — separate Vite build.
+// Without it, npm-installed @do-soul/alaya-inspector serves an empty bundle.
+const inspectorWebDir = "apps/inspector/web";
+if (existsSync(join(inspectorWebDir, "package.json"))) {
+  const inspectorWebBuild = spawnSync(
+    "pnpm",
+    ["--dir", inspectorWebDir, "build"],
+    { stdio: "inherit" },
+  );
+  if (inspectorWebBuild.status !== 0) {
+    process.exit(inspectorWebBuild.status ?? 1);
+  }
+}
+
+process.exit(0);

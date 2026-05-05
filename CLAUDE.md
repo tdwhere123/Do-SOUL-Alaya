@@ -29,9 +29,9 @@ Important invariants (full set in `docs/handbook/invariants.md`):
 - LLMs and connected agents propose candidates; Alaya decides durable
   truth.
 - Alaya has **no agent-frontend GUI and no conversation TUI**. Agent
-  surfaces are MCP (for agent attach) and the `alaya` CLI (12 verbs:
-  `doctor / install / attach / detach / status / inspect / tools list /
-  tools call --json / backup / export / import / mcp stdio /
+  surfaces are MCP (for agent attach) and the `alaya` CLI (13 verbs:
+  `doctor / install / attach / detach / status / inspect / update /
+  tools list / tools call --json / backup / export / import / mcp stdio /
   review pending|accept|reject`). The Memory Inspector is an additional
   memory-tooling loopback surface, not an agent surface, and never
   participates in agent control flow.
@@ -112,7 +112,7 @@ rules and the Package Dependency Direction live in
 
 ## Commands
 
-The full CLI surface (12 verbs) and the Quickstart live in `README.md`
+The full CLI surface (13 verbs) and the Quickstart live in `README.md`
 (§CLI commands, §Quickstart). Outside of those, agent contributors only
 need a few extras:
 

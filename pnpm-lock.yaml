@@ -29,6 +29,9 @@ importers:
       '@do-soul/alaya-engine-gateway':
         specifier: workspace:*
         version: link:../../packages/engine-gateway
+      '@do-soul/alaya-inspector':
+        specifier: workspace:*
+        version: link:../inspector
       '@do-soul/alaya-protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -178,7 +181,7 @@ importers:
         specifier: workspace:*
         version: link:../protocol
       better-sqlite3:
-        specifier: ^12.8.0
+        specifier: 12.9.0
         version: 12.9.0
     devDependencies:
       '@types/better-sqlite3':

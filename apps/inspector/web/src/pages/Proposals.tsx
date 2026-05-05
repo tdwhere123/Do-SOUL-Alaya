@@ -73,7 +73,7 @@ export default function ProposalsPage() {
     async (proposalId: string, verdict: "accept" | "reject") => {
       const trimmedReviewer = reviewer.trim();
       if (trimmedReviewer.length === 0) {
-        showToast({ kind: "error", message: "Reviewer identity is required." });
+        showToast({ type: "error", message: "Reviewer identity is required." });
         return;
       }
       const workspaceId = getWorkspaceId();
@@ -92,7 +92,7 @@ export default function ProposalsPage() {
           }
         );
         showToast({
-          kind: "success",
+          type: "success",
           message: `Proposal ${proposalId} ${envelope.data?.resolution_state ?? verdict}.`
         });
         await refresh();
@@ -101,7 +101,7 @@ export default function ProposalsPage() {
           throw err;
         }
         showToast({
-          kind: "error",
+          type: "error",
           message: err instanceof Error ? err.message : "review failed"
         });
       } finally {

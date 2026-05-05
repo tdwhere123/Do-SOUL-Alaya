@@ -1,7 +1,16 @@
 {
   "name": "@do-soul/alaya-storage",
-  "version": "0.0.1",
-  "private": true,
+  "version": "0.1.0",
+  "description": "SQLite storage layer for Do-SOUL Alaya — repos, migrations, EventLog.",
+  "license": "MIT",
+  "homepage": "https://github.com/tdwhere123/Do-SOUL-Alaya",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tdwhere123/Do-SOUL-Alaya.git",
+    "directory": "packages/storage"
+  },
+  "publishConfig": { "access": "public" },
+  "files": ["dist/"],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -9,12 +18,12 @@
     "node": ">=20.19.0"
   },
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && node ../../scripts/copy-migrations.mjs",
     "test": "pnpm exec vitest run --project @do-soul/alaya-storage"
   },
   "dependencies": {
     "@do-soul/alaya-protocol": "workspace:*",
-    "better-sqlite3": "^12.8.0"
+    "better-sqlite3": "12.9.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12"
