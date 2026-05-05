@@ -116,7 +116,7 @@ function deriveTrustLevel(presentFactorCount: number): WorkerTrustLevel {
 function createTrustAssessedEvent(
   workerRun: Readonly<DelegatedWorkerRun>,
   assessment: Readonly<WorkerTrustAssessment>
-): Omit<EventLogEntry, "event_id" | "created_at"> {
+): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
   return {
     event_type: ObligationTrustNarrativeEventType.WORKER_TRUST_ASSESSED,
     entity_type: "worker_run",
@@ -124,7 +124,6 @@ function createTrustAssessedEvent(
     workspace_id: workerRun.workspace_id,
     run_id: workerRun.principal_run_id,
     caused_by: "system",
-    revision: 0,
     payload_json: WorkerTrustAssessedPayloadSchema.parse({
       assessment_id: assessment.assessment_id,
       worker_run_id: assessment.worker_run_id,

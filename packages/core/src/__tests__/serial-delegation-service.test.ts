@@ -2429,10 +2429,9 @@ function createHarness(
     readonly getById: TestMock;
     readonly deleteIfState: TestMock;
     readonly updateState: TestMock;
-    readonly updateStateSync: TestMock;
     readonly insertIfNoActiveForPrincipal: TestMock;
   };
-  readonly publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at">>;
+  readonly publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>;
   readonly runtimeAdapter: AgentRuntimePort;
   readonly eventNormalizer: {
     readonly normalize: RuntimeNormalizeMock;
@@ -2455,7 +2454,7 @@ function createHarness(
   const workerStore = new Map<string, DelegatedWorkerRun>(
     (options.existingRuns ?? []).map((run) => [run.worker_run_id, Object.freeze({ ...run })])
   );
-  const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at">> = [];
+  const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
   const runtimeAdapter = options.runtimeAdapter ?? new ScriptedRuntimeAdapter(events);
 
   const updateStateImpl = (
@@ -2505,17 +2504,6 @@ function createHarness(
       workerStore.delete(workerRunId);
     }),
     updateState: vi.fn(
-      async (
-        workerRunId: string,
-        expectedState: DelegatedWorkerRun["state"],
-        nextState: DelegatedWorkerRun["state"],
-        updatedAt: string
-      ) => {
-        return updateStateImpl(workerRunId, expectedState, nextState, updatedAt);
-      }
-    ),
-    // Sync sibling required by appendManyWithMutation-based migration (#BL-022).
-    updateStateSync: vi.fn(
       (
         workerRunId: string,
         expectedState: DelegatedWorkerRun["state"],
@@ -2543,27 +2531,18 @@ function createHarness(
   };
 
   const eventPublisher = {
-    publish: vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => {
+    publish: vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
       publishedEvents.push(event);
       return {
         ...event,
         event_id: `event-${publishedEvents.length}`,
-        created_at: FIXED_NOW
+        created_at: FIXED_NOW,
+        revision: publishedEvents.length
       } satisfies EventLogEntry;
     }),
-    publishWithMutation: vi.fn(
-      async (
-        event: Omit<EventLogEntry, "event_id" | "created_at">,
-        mutate: () => Promise<DelegatedWorkerRun>
-      ) => {
-        publishedEvents.push(event);
-        return await mutate();
-      }
-    ),
-    // WorkerRunLifecycleService now uses appendManyWithMutation (#BL-022).
     appendManyWithMutation: vi.fn(
       async (
-        events: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at">>,
+        events: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>,
         mutate: (entries: readonly EventLogEntry[]) => DelegatedWorkerRun
       ) => {
         for (const event of events) {
@@ -2572,7 +2551,8 @@ function createHarness(
         const persisted = events.map((event, idx) => ({
           ...event,
           event_id: `event-${publishedEvents.length - events.length + idx}`,
-          created_at: FIXED_NOW
+          created_at: FIXED_NOW,
+          revision: idx
         })) as EventLogEntry[];
         return mutate(persisted);
       }

@@ -31,7 +31,6 @@ describe("RuntimeEventNormalizer", () => {
         workspace_id: "ws-1",
         run_id: "run-1",
         caused_by: "worker",
-        revision: 0,
         payload_json: {
           sessionId: "session-1",
           emittedAt: event.emitted_at
@@ -49,7 +48,7 @@ describe("RuntimeEventNormalizer", () => {
       session_id: "session-1"
     });
     const appendSpy = vi.fn(
-      async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => createEventLogEntry(entry)
+      async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry)
     );
     const notifyEntry = vi
       .fn<(entry: EventLogEntry) => Promise<void>>()
@@ -82,7 +81,7 @@ describe("RuntimeEventNormalizer", () => {
     });
     let releaseRetry!: () => void;
     const appendSpy = vi.fn(
-      async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => createEventLogEntry(entry)
+      async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry)
     );
     const notifyEntry = vi
       .fn<(entry: EventLogEntry) => Promise<void>>()
@@ -126,7 +125,7 @@ describe("RuntimeEventNormalizer", () => {
       session_id: "session-1"
     });
     const appendSpy = vi.fn(
-      async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => createEventLogEntry(entry)
+      async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry)
     );
     const notifyEntry = vi
       .fn<(entry: EventLogEntry) => void | Promise<void>>()
@@ -208,7 +207,7 @@ describe("RuntimeEventNormalizer", () => {
   it("reserves message_delta dedup before awaiting IO so concurrent duplicates do not double-append", async () => {
     let releaseAppend!: () => void;
     const appendSpy = vi.fn(
-      async (entry: Omit<EventLogEntry, "event_id" | "created_at">) =>
+      async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) =>
         await new Promise<EventLogEntry>((resolve) => {
           releaseAppend = () => resolve(createEventLogEntry(entry));
         })
@@ -244,7 +243,7 @@ describe("RuntimeEventNormalizer", () => {
       result_summary: "done"
     });
     const appendSpy = vi.fn(
-      async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => createEventLogEntry(entry)
+      async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry)
     );
     const notifyEntry = vi
       .fn<(entry: EventLogEntry) => Promise<void>>()
@@ -281,7 +280,7 @@ describe("RuntimeEventNormalizer", () => {
       result_summary: "done"
     });
     const appendSpy = vi
-      .fn<(entry: Omit<EventLogEntry, "event_id" | "created_at">) => Promise<EventLogEntry>>()
+      .fn<(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => Promise<EventLogEntry>>()
       .mockRejectedValueOnce(new Error("append exploded"))
       .mockImplementationOnce(async (entry) => createEventLogEntry(entry));
     const notifyEntry = vi.fn(async () => undefined);
@@ -323,7 +322,7 @@ describe("RuntimeEventNormalizer", () => {
       result_summary: "done"
     });
     const appendSpy = vi.fn(
-      async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => createEventLogEntry(entry)
+      async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry)
     );
     const notifyEntry = vi
       .fn<(entry: EventLogEntry) => Promise<void>>()
@@ -457,7 +456,6 @@ describe("RuntimeEventNormalizer", () => {
         workspace_id: "ws-1",
         run_id: "run-1",
         caused_by: "worker",
-        revision: 0,
         payload_json: {
           sessionId: "session-1",
           emittedAt: event.emitted_at,
@@ -558,7 +556,6 @@ describe("RuntimeEventNormalizer", () => {
         workspace_id: "ws-1",
         run_id: "run-1",
         caused_by: "worker",
-        revision: 0,
         payload_json: expectedPayload
       })
     );
@@ -589,7 +586,7 @@ describe("RuntimeEventNormalizer", () => {
   });
 
   it("retries a pending message_delta notification without appending a duplicate", async () => {
-    const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => createEventLogEntry(entry));
+    const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry));
     const notifyEntry = vi.fn(async (_entry: EventLogEntry) => undefined);
     notifyEntry.mockRejectedValueOnce(new Error("notify failed"));
     const normalizer = new RuntimeEventNormalizer({
@@ -621,7 +618,7 @@ describe("RuntimeEventNormalizer", () => {
 });
 
 function createHarness(operations: string[]) {
-  const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => {
+  const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
     operations.push(`append:${entry.event_type}`);
     return createEventLogEntry(entry);
   });
@@ -636,10 +633,11 @@ function createHarness(operations: string[]) {
   return { normalizer, appendSpy, notifyEntry };
 }
 
-function createEventLogEntry(input: Omit<EventLogEntry, "event_id" | "created_at">): EventLogEntry {
+function createEventLogEntry(input: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry {
   return {
     event_id: `evt_${input.event_type}`,
     created_at: "2026-04-13T12:00:01.000Z",
+    revision: 0,
     ...input
   };
 }

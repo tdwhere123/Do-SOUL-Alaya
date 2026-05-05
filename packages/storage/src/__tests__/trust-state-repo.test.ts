@@ -50,6 +50,41 @@ describe("SqliteTrustStateRepo", () => {
     ]);
   });
 
+  it("persists and reloads per-anchor usage proof signals", async () => {
+    const repo = createRepo();
+
+    await repo.createDelivery({
+      delivery_id: "delivery-directional",
+      agent_target: "codex",
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      delivered_object_ids: ["memory-source", "memory-target"],
+      delivered_at: "2026-04-30T10:00:00.000Z",
+      audit_event_id: "event-delivery-directional"
+    });
+    await repo.createUsage({
+      delivery_id: "delivery-directional",
+      usage_state: "used",
+      used_object_ids: ["memory-target"],
+      per_anchor_usage: [{ object_id: "memory-target", anchor_role: "target" }],
+      reason: "target anchor cited",
+      reported_at: "2026-04-30T10:01:00.000Z",
+      audit_event_id: "event-usage-directional"
+    });
+
+    await expect(repo.listUsageByDeliveryIds(["delivery-directional"])).resolves.toEqual([
+      {
+        delivery_id: "delivery-directional",
+        usage_state: "used",
+        used_object_ids: ["memory-target"],
+        per_anchor_usage: [{ object_id: "memory-target", anchor_role: "target" }],
+        reason: "target anchor cited",
+        reported_at: "2026-04-30T10:01:00.000Z",
+        audit_event_id: "event-usage-directional"
+      }
+    ]);
+  });
+
   it("rejects duplicate delivery_id without replacing the original audit_event_id", async () => {
     const repo = createRepo();
 
@@ -63,7 +98,7 @@ describe("SqliteTrustStateRepo", () => {
       audit_event_id: "event-delivery-original"
     });
 
-    await expect(
+    expect(() =>
       repo.createDelivery({
         delivery_id: "delivery-duplicate",
         agent_target: "codex",
@@ -73,10 +108,10 @@ describe("SqliteTrustStateRepo", () => {
         delivered_at: "2026-04-30T10:02:00.000Z",
         audit_event_id: "event-delivery-replacement"
       })
-    ).rejects.toMatchObject({
+    ).toThrowError(expect.objectContaining({
       code: "CONFLICT",
       message: "Trust delivery delivery-duplicate already exists."
-    });
+    }));
 
     await expect(repo.findDeliveryById("delivery-duplicate")).resolves.toMatchObject({
       delivery_id: "delivery-duplicate",
@@ -98,7 +133,7 @@ describe("SqliteTrustStateRepo", () => {
       audit_event_id: "event-delivery-audit-reused"
     });
 
-    await expect(
+    expect(() =>
       repo.createDelivery({
         delivery_id: "delivery-audit-reuse",
         agent_target: "codex",
@@ -108,10 +143,10 @@ describe("SqliteTrustStateRepo", () => {
         delivered_at: "2026-04-30T10:02:00.000Z",
         audit_event_id: "event-delivery-audit-reused"
       })
-    ).rejects.toMatchObject({
+    ).toThrowError(expect.objectContaining({
       code: "CONFLICT",
       message: "Trust delivery delivery-audit-reuse already uses audit event event-delivery-audit-reused."
-    });
+    }));
   });
 
   it("rejects duplicate usage proof without replacing the original audit_event_id", async () => {
@@ -135,7 +170,7 @@ describe("SqliteTrustStateRepo", () => {
       audit_event_id: "event-usage-original"
     });
 
-    await expect(
+    expect(() =>
       repo.createUsage({
         delivery_id: "delivery-usage-duplicate",
         usage_state: "skipped",
@@ -144,10 +179,10 @@ describe("SqliteTrustStateRepo", () => {
         reported_at: "2026-04-30T10:02:00.000Z",
         audit_event_id: "event-usage-replacement"
       })
-    ).rejects.toMatchObject({
+    ).toThrowError(expect.objectContaining({
       code: "CONFLICT",
       message: "Trust usage proof for delivery delivery-usage-duplicate already exists."
-    });
+    }));
 
     await expect(repo.listUsageByDeliveryIds(["delivery-usage-duplicate"])).resolves.toEqual([
       {
@@ -191,7 +226,7 @@ describe("SqliteTrustStateRepo", () => {
       audit_event_id: "event-usage-audit-reused"
     });
 
-    await expect(
+    expect(() =>
       repo.createUsage({
         delivery_id: "delivery-usage-audit-reuse",
         usage_state: "used",
@@ -200,11 +235,11 @@ describe("SqliteTrustStateRepo", () => {
         reported_at: "2026-04-30T10:03:00.000Z",
         audit_event_id: "event-usage-audit-reused"
       })
-    ).rejects.toMatchObject({
+    ).toThrowError(expect.objectContaining({
       code: "CONFLICT",
       message:
         "Trust usage proof for delivery delivery-usage-audit-reuse already uses audit event event-usage-audit-reused."
-    });
+    }));
   });
 
   it("creates a covering index for agent-target delivery listing order", () => {

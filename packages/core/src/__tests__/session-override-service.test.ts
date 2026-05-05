@@ -3,10 +3,11 @@ import { WorkspaceRunEventType, GreenGovernanceEventType, type EventLogEntry } f
 import { SessionOverrideService } from "../session-override-service.js";
 import type { TestMock } from "./mock-types.js";
 
-function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at">): EventLogEntry {
+function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry {
   return {
     event_id: `event-${event.event_type}`,
     created_at: "2026-03-24T00:00:00.000Z",
+    revision: 0,
     ...event
   };
 }
@@ -14,7 +15,7 @@ function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at
 describe("SessionOverrideService", () => {
   it("applies an override, appends audit event before store mutation, and returns an active override", async () => {
     let service!: SessionOverrideService;
-    const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => {
+    const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
       await expect(service.getActiveFor("run-1")).resolves.toEqual([]);
       return createEventLogEntry(event);
     });
@@ -51,7 +52,6 @@ describe("SessionOverrideService", () => {
         entity_id: override.runtime_id,
         workspace_id: "workspace-1",
         run_id: "run-1",
-        revision: 0,
         payload_json: expect.objectContaining({
           override_id: override.runtime_id,
           target_object: "memory:build-style",
@@ -165,7 +165,7 @@ describe("SessionOverrideService", () => {
       return appendedEvents.filter((entry) => entry.run_id === runId);
     });
     const eventLogRepo = {
-      append: vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => {
+      append: vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
         const entry = createEventLogEntry(event);
         appendedEvents.push(entry);
         return entry;
@@ -244,7 +244,6 @@ describe("SessionOverrideService", () => {
           workspace_id: "workspace-1",
           run_id: "run-1",
           caused_by: "user_action",
-          revision: 0,
           payload_json: {
             override_id: "00000000-0000-4000-8000-000000000123",
             target_object: "memory:a",
@@ -333,7 +332,6 @@ describe("SessionOverrideService", () => {
             workspace_id: "workspace-1",
             run_id: "run-1",
             caused_by: "user_action",
-            revision: 0,
             payload_json: {
               run_id: "run-1",
               role: "user",

@@ -392,6 +392,24 @@ describe("Auditor", () => {
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
+  it("does not handle path_plasticity_update after the Gate-5F owner move", async () => {
+    const { auditor, scheduler } = createAuditor();
+
+    const result = await auditor.run(
+      createTask({
+        task_kind: GardenTaskKind.PATH_PLASTICITY_UPDATE,
+        required_tier: GardenTier.TIER_2
+      })
+    );
+
+    expect(result).toMatchObject({
+      task_kind: GardenTaskKind.PATH_PLASTICITY_UPDATE,
+      success: false,
+      error_message: "Auditor does not handle task kind: path_plasticity_update"
+    });
+    expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
+  });
+
   it("limits crystallization processing to the first batch of patterns", async () => {
     const patterns: HighFrequencyPattern[] = Array.from(
       { length: AUDITOR_CONSTANTS.BATCH_SIZE + 3 },

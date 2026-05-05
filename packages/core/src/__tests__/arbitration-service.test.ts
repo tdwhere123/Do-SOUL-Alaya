@@ -123,11 +123,12 @@ function createDependencies(seed: {
 
   const broadcastSpy = vi.fn(async () => {});
 
-  const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => {
+  const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
     order.push("event_log");
     const event = {
       event_id: `event-${eventLog.length + 1}`,
       created_at: "2026-03-21T02:00:00.000Z",
+      revision: 0,
       ...entry
     };
     eventLog.push(event);

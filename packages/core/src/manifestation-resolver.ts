@@ -24,7 +24,7 @@ export interface ManifestationBudgetConfigProviderPort {
 }
 
 export interface ManifestationResolverEventLogWriterPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
 }
 
 export interface ManifestationResolverDependencies {
@@ -118,7 +118,6 @@ export class ManifestationResolver {
       workspace_id: params.workspaceId,
       run_id: params.runId,
       caused_by: "deterministic_rule",
-      revision: 0,
       payload_json: ManifestationBudgetEvaluatedPayloadSchema.parse({
         workspace_id: params.workspaceId,
         run_id: params.runId,
@@ -139,7 +138,6 @@ export class ManifestationResolver {
       workspace_id: params.workspaceId,
       run_id: params.runId,
       caused_by: "deterministic_rule",
-      revision: 0,
       payload_json: ManifestationEscalationDecidedPayloadSchema.parse({
         workspace_id: params.workspaceId,
         run_id: params.runId,

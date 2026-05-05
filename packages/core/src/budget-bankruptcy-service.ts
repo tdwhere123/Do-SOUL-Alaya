@@ -27,7 +27,6 @@ import {
   type RuntimeMode as RuntimeModeValue
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
-import { getNextRevision } from "./shared/event-utils.js";
 import { parseNonEmptyString } from "./shared/validators.js";
 
 type ActiveBankruptcyKind = Exclude<BankruptcyKindValue, "none">;
@@ -39,7 +38,7 @@ interface BankruptcyStoreEntry {
 }
 
 export interface BudgetBankruptcyServiceEventLogPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
 }
 
@@ -195,7 +194,6 @@ export class BudgetBankruptcyService {
       workspace_id: workspaceId,
       run_id: runId,
       caused_by: "system",
-      revision: await getNextRevision(this.dependencies.eventLogRepo, "bankruptcy_dossier", dossier.runtime_id),
       payload_json: SoulBudgetBankruptcyDeclaredPayloadSchema.parse({
         bankruptcy_id: initialState.bankruptcy_id,
         bankruptcy_kind: initialState.bankruptcy_kind,
@@ -239,7 +237,6 @@ export class BudgetBankruptcyService {
         workspace_id: workspaceId,
         run_id: runId,
         caused_by: "system",
-        revision: await getNextRevision(this.dependencies.eventLogRepo, "bankruptcy_dossier", dossier.runtime_id),
         payload_json: SoulBudgetBankruptcyResolvedPayloadSchema.parse({
           bankruptcy_id: state.bankruptcy_id,
           proposal_id: proposal.proposal_id,
@@ -316,11 +313,6 @@ export class BudgetBankruptcyService {
       workspace_id: workspaceId,
       run_id: runId,
       caused_by: "user",
-      revision: await getNextRevision(
-        this.dependencies.eventLogRepo,
-        "bankruptcy_dossier",
-        entry.dossier.runtime_id
-      ),
       payload_json: SoulBudgetBankruptcyResolvedPayloadSchema.parse({
         bankruptcy_id: entry.state.bankruptcy_id,
         proposal_id: proposal.proposal_id,

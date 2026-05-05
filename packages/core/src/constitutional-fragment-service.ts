@@ -260,7 +260,7 @@ function createFragment(
 
 function createConstitutionalFragmentRegisteredEvent(
   fragment: Readonly<ConstitutionalFragment>
-): Omit<EventLogEntry, "event_id" | "created_at"> {
+): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
   return Object.freeze({
     event_type: RuntimeGovernanceEventType.CONSTITUTIONAL_FRAGMENT_REGISTERED,
     entity_type: "constitutional_fragment",
@@ -268,7 +268,6 @@ function createConstitutionalFragmentRegisteredEvent(
     workspace_id: fragment.workspace_id,
     run_id: null,
     caused_by: SYSTEM_ACTOR,
-    revision: 0,
     payload_json: parseRegisteredPayload(fragment)
   });
 }

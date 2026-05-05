@@ -24,7 +24,8 @@ Phase 0 → Gate-0
                → Phase 4 (Wave 4, 3-5 parallel cards) → Gate-4
                    → Phase 5 (Wave 5, 3 sequential cards) → Gate-5
                        → v0.1.0 release
-                           → Phase 6 (Wave 6, 5 cards, post-release) → Gate-6
+                           → Gate-5F (Open backlog closeout)
+                               → Phase 6 (Wave 6, 5 cards, post-release) → Gate-6
                                → v0.1.1 release
 ```
 
@@ -48,6 +49,7 @@ Phase 0 → Gate-0
 | Phase 3 | Wave 3: Memory orchestration bridge + run lifecycle | 6 cards | **done** | Gate-3 passed |
 | Phase 4 | Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI + Memory Inspector | 30 cards (target) | MCP surface `mcp-consumable`; trust delivery/usage durability + Inspector config-write `live-event-ready` after Round 3 followup cards | Gate-4 passed |
 | Phase 5 | Wave 5: E2E + Graph Contract + Final Review (release acceptance) | 3 cards (target) | **done**: graph contract `schema-ready`; release E2E `live-event-ready`; final review `mcp-consumable` | Gate-5 passed |
+| Gate-5F | Post-Gate-5 backlog closeout | 5 cards + closeout | **done**: `#BL-025`..`#BL-036` resolved; final review clean; full verification passed | Gate-5F passed |
 | Phase 6 | Wave 6: Marketing benchmark harness + adapter + baselines + resume + README template | 5 cards (target) | not-started | Gate-6 |
 
 ## Phase 2 — Card Closeout Status
@@ -162,6 +164,22 @@ Gate-5 closeout evidence: [report](./phase-5-briefs/reports/gate-5-closeout.md).
 | P5-e2e | live-event-ready | [report](./phase-5-briefs/reports/task-p5-e2e.md) |
 | P5-final-review | mcp-consumable | [report](./phase-5-briefs/reports/task-p5-final-review.md) |
 
+## Gate-5F — Open Backlog Closeout
+
+This table tracks the post-Gate-5 closeout wave that blocks Phase 6 until
+all current Open backlog items `#BL-025` through `#BL-036` are resolved.
+
+Gate-5F closeout evidence: [report](./phase-5-followup-briefs/reports/gate-5f-closeout.md).
+
+| Card | Backlog | Status | Report |
+|---|---|---|---|
+| 5F-A-event-state | `#BL-025`, `#BL-031`, `#BL-026` | review-clean | [report](./phase-5-followup-briefs/reports/task-5f-a-event-state.md) |
+| 5F-B-reviewer-inbox | `#BL-027`, `#BL-034` | review-clean | [report](./phase-5-followup-briefs/reports/task-5f-b-reviewer-inbox.md) |
+| 5F-C-path-foundation | `#BL-030`, `#BL-032`, `#BL-035`, `#BL-033` | review-clean | [report](./phase-5-followup-briefs/reports/task-5f-c-path-foundation.md) |
+| 5F-D-garden-queue | `#BL-028`, `#BL-036` | review-clean | [report](./phase-5-followup-briefs/reports/task-5f-d-garden-queue.md) |
+| 5F-E-redirection | `#BL-029` | review-clean | [report](./phase-5-followup-briefs/reports/task-5f-e-redirection.md) |
+| 5F-closeout | `#BL-025`..`#BL-036` | passed | [report](./phase-5-followup-briefs/reports/gate-5f-closeout.md) |
+
 ## Phase 0 — Reset & Source Mirror
 
 Status: **done**. The reset was executed by the Claude Code
@@ -194,6 +212,8 @@ their original detail is in the plan file at
   + Memory Inspector + cross-workspace recall cache + detach
 - [Phase 5](./phase-5-briefs/README.md) — Wave 5 E2E + graph contract
   + final review (release acceptance for v0.1.0)
+- [Gate-5F follow-up](./phase-5-followup-briefs/README.md) — Open
+  backlog closeout for `#BL-025` through `#BL-036`; blocks Phase 6
 - [Phase 6](./phase-6-briefs/README.md) — Wave 6 marketing benchmark
   wave (harness + adapter + baselines + resume + README template) for
   v0.1.1

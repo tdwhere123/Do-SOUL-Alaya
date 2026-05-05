@@ -42,7 +42,7 @@ function createEvidenceInput(overrides: Partial<EvidenceCapsuleInput> = {}): Evi
 describe("EvidenceService", () => {
   it("writes soul.evidence.created before persistence and runtime notification", async () => {
     const order: string[] = [];
-    const appendedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at">> = [];
+    const appendedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
     const store = new Map<string, EvidenceCapsule>();
 
     const service = new EvidenceService({
@@ -55,6 +55,7 @@ describe("EvidenceService", () => {
           return {
             event_id: "event-1",
             created_at: "2026-03-20T01:00:00.000Z",
+            revision: 0,
             ...event
           };
         })
@@ -101,7 +102,7 @@ describe("EvidenceService", () => {
 
   it("writes soul.evidence.health_changed and updates repo health", async () => {
     const order: string[] = [];
-    const appendedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at">> = [];
+    const appendedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
 
     const existing: EvidenceCapsule = Object.freeze({
       object_id: "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
@@ -137,6 +138,7 @@ describe("EvidenceService", () => {
           return {
             event_id: "event-2",
             created_at: "2026-03-20T02:00:00.000Z",
+            revision: 0,
             ...event
           };
         })
@@ -206,6 +208,7 @@ describe("EvidenceService", () => {
         append: vi.fn(async (event) => ({
           event_id: "event-immutable",
           created_at: "2026-03-20T01:00:00.000Z",
+          revision: 0,
           ...event
         }))
       },

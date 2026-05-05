@@ -121,10 +121,11 @@ describe("ConversationService", () => {
     };
     const eventLogRepo = {
       queryByRun: vi.fn(async () => []),
-      append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => {
+      append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
         const saved = {
           event_id: `event-${eventLogEntries.length + 1}`,
           created_at: "2026-04-29T00:00:00.000Z",
+          revision: 0,
           ...entry
         };
         eventLogEntries.push(saved);
@@ -301,9 +302,10 @@ function createService(
     },
     eventLogRepo: {
       queryByRun: vi.fn(async () => []),
-      append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+      append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
         event_id: "event-1",
         created_at: "2026-04-29T00:00:00.000Z",
+        revision: 0,
         ...entry
       }))
     },

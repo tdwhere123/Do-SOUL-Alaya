@@ -19,7 +19,8 @@ function fakeAppendManyWithMutation(publishedEvents?: Array<unknown>) {
     const persisted = events.map((event, idx) => ({
       ...event,
       event_id: `evt_${idx}`,
-      created_at: "2026-04-20T00:00:00.000Z"
+      created_at: "2026-04-20T00:00:00.000Z",
+      revision: idx
     }));
     return mutate(persisted);
   });
@@ -29,14 +30,11 @@ describe("WorkspaceService", () => {
   it("bootstraps conservative path relations during workspace creation", async () => {
     const appendManyWithMutation = fakeAppendManyWithMutation();
     const pathRelationRepo = {
-      create: vi.fn(async (relation: PathRelation) => relation),
-      createSync: vi.fn((relation: PathRelation) => relation)
+      create: vi.fn((relation: PathRelation) => relation)
     };
     const bootstrappingRecordRepo = {
-      findByWorkspace: vi.fn(async () => null),
-      findByWorkspaceSync: vi.fn(() => null),
-      create: vi.fn(async (record: BootstrappingRecord) => record),
-      createSync: vi.fn((record: BootstrappingRecord) => record)
+      findByWorkspace: vi.fn(() => null),
+      create: vi.fn((record: BootstrappingRecord) => record)
     };
     const bootstrappingPlanner = {
       planBootstrap: vi.fn(async (workspaceId: string) => ({
@@ -52,16 +50,11 @@ describe("WorkspaceService", () => {
     };
     const service = new WorkspaceService({
       workspaceRepo: {
-        create: vi.fn(async (input) => createWorkspace(input)),
-        createSync: vi.fn((input) => createWorkspace(input)),
+        create: vi.fn((input) => createWorkspace(input)),
         getById: vi.fn(async () => null),
         list: vi.fn(async () => []),
-        delete: vi.fn(async () => undefined),
-        deleteSync: vi.fn(() => undefined),
-        updateDefaultEngineClass: vi.fn(async () => {
-          throw new Error("not used");
-        }),
-        updateDefaultEngineClassSync: vi.fn(() => {
+        delete: vi.fn(() => undefined),
+        updateDefaultEngineClass: vi.fn(() => {
           throw new Error("not used");
         })
       },
@@ -85,15 +78,15 @@ describe("WorkspaceService", () => {
     expect(created.name).toBe("alpha");
     expect(bootstrappingRecordRepo.findByWorkspace).toHaveBeenCalledWith(created.workspace_id);
     expect(bootstrappingPlanner.planBootstrap).toHaveBeenCalledWith(created.workspace_id);
-    expect(pathRelationRepo.createSync).toHaveBeenCalledTimes(1);
-    expect(bootstrappingRecordRepo.createSync).toHaveBeenCalledTimes(1);
+    expect(pathRelationRepo.create).toHaveBeenCalledTimes(1);
+    expect(bootstrappingRecordRepo.create).toHaveBeenCalledTimes(1);
     expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
   });
 
   it("rolls back persisted workspace state when bootstrapping record persistence fails", async () => {
     // Under #BL-022 the rollback is implicit: the entire mutate runs inside
     // EventPublisher.appendManyWithMutation's SQLite transaction, so a throw
-    // from any sync repo call (e.g. bootstrappingRecordRepo.createSync)
+    // from any sync repo call (e.g. bootstrappingRecordRepo.create)
     // automatically rolls back the workspace insert. The fake publisher
     // mirrors this by surfacing the throw without any explicit cleanup
     // hook, so we just assert that the failure propagates and that the
@@ -111,31 +104,21 @@ describe("WorkspaceService", () => {
     const workspaceCreateSync = vi.fn(() => persistedWorkspace);
     const appendManyWithMutation = fakeAppendManyWithMutation();
     const pathRelationRepo = {
-      create: vi.fn(async (relation: PathRelation) => relation),
-      createSync: vi.fn((relation: PathRelation) => relation)
+      create: vi.fn((relation: PathRelation) => relation)
     };
     const bootstrappingRecordRepo = {
-      findByWorkspace: vi.fn(async () => null),
-      findByWorkspaceSync: vi.fn(() => null),
-      create: vi.fn(async () => {
-        throw new Error("not used");
-      }),
-      createSync: vi.fn(() => {
+      findByWorkspace: vi.fn(() => null),
+      create: vi.fn(() => {
         throw new Error("simulated-bootstrapping-record-create-failure");
       })
     };
     const service = new WorkspaceService({
       workspaceRepo: {
-        create: vi.fn(async () => persistedWorkspace),
-        createSync: workspaceCreateSync,
+        create: workspaceCreateSync,
         getById: vi.fn(async () => null),
         list: vi.fn(async () => []),
-        delete: vi.fn(async () => undefined),
-        deleteSync: vi.fn(() => undefined),
-        updateDefaultEngineClass: vi.fn(async () => {
-          throw new Error("not used");
-        }),
-        updateDefaultEngineClassSync: vi.fn(() => {
+        delete: vi.fn(() => undefined),
+        updateDefaultEngineClass: vi.fn(() => {
           throw new Error("not used");
         })
       },
@@ -166,8 +149,8 @@ describe("WorkspaceService", () => {
     ).rejects.toThrow("simulated-bootstrapping-record-create-failure");
 
     expect(workspaceCreateSync).toHaveBeenCalledTimes(1);
-    expect(pathRelationRepo.createSync).toHaveBeenCalledTimes(1);
-    expect(bootstrappingRecordRepo.createSync).toHaveBeenCalledTimes(1);
+    expect(pathRelationRepo.create).toHaveBeenCalledTimes(1);
+    expect(bootstrappingRecordRepo.create).toHaveBeenCalledTimes(1);
     expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
   });
 
@@ -175,7 +158,7 @@ describe("WorkspaceService", () => {
     // Under #BL-022 the path-relation creates are now sync inserts inside
     // the SQLite transaction, so they execute sequentially in plan order
     // rather than as a Promise.all batch. This test pins that the plan
-    // order is preserved and that bootstrappingRecordRepo.createSync
+    // order is preserved and that bootstrappingRecordRepo.create
     // runs only after both path relations are inserted.
     const order: string[] = [];
     const firstRelation = createPathRelation({
@@ -185,36 +168,28 @@ describe("WorkspaceService", () => {
       path_id: "path-bootstrap-2"
     });
     const pathRelationRepo = {
-      create: vi.fn(async (relation: PathRelation) => relation),
-      createSync: vi.fn((relation: PathRelation) => {
+      create: vi.fn((relation: PathRelation) => {
         order.push(`path:${relation.path_id}`);
         return relation;
       })
     };
     const bootstrappingRecordRepo = {
-      findByWorkspace: vi.fn(async () => null),
-      findByWorkspaceSync: vi.fn(() => null),
-      create: vi.fn(async (record: BootstrappingRecord) => record),
-      createSync: vi.fn((record: BootstrappingRecord) => {
+      findByWorkspace: vi.fn(() => null),
+      create: vi.fn((record: BootstrappingRecord) => {
         order.push("bootstrap_record");
         return record;
       })
     };
     const service = new WorkspaceService({
       workspaceRepo: {
-        create: vi.fn(async (input) => createWorkspace(input)),
-        createSync: vi.fn((input) => {
+        create: vi.fn((input) => {
           order.push("workspace");
           return createWorkspace(input);
         }),
         getById: vi.fn(async () => null),
         list: vi.fn(async () => []),
-        delete: vi.fn(async () => undefined),
-        deleteSync: vi.fn(() => undefined),
-        updateDefaultEngineClass: vi.fn(async () => {
-          throw new Error("not used");
-        }),
-        updateDefaultEngineClassSync: vi.fn(() => {
+        delete: vi.fn(() => undefined),
+        updateDefaultEngineClass: vi.fn(() => {
           throw new Error("not used");
         })
       },

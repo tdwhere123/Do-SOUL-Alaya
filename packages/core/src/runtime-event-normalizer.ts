@@ -13,7 +13,7 @@ import {
 import { RuntimeEventNormalizerState } from "./runtime-event-normalizer-state.js";
 
 export interface NormalizerEventLogRepoPort {
-  append(event: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
 }
 
 export interface NormalizerRuntimeNotifierPort {
@@ -194,7 +194,7 @@ export class RuntimeEventNormalizer {
   private buildEntry(
     event: RuntimeEvent,
     context: NormalizerContext
-  ): Omit<EventLogEntry, "event_id" | "created_at"> {
+  ): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
     switch (event.type) {
       case "session_started":
         return this.createEntry(
@@ -295,7 +295,7 @@ export class RuntimeEventNormalizer {
     context: NormalizerContext,
     eventType: EventLogEntry["event_type"],
     payload: Record<string, unknown>
-  ): Omit<EventLogEntry, "event_id" | "created_at"> {
+  ): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
     return {
       event_type: eventType,
       entity_type: "worker_run",
@@ -303,7 +303,6 @@ export class RuntimeEventNormalizer {
       workspace_id: context.workspaceId,
       run_id: context.principalRunId,
       caused_by: "worker",
-      revision: 0,
       payload_json: payload
     };
   }

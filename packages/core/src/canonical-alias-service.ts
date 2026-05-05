@@ -23,7 +23,7 @@ interface ResolvedAliasValue {
 }
 
 export interface CanonicalAliasEventPublisherPort {
-  publish(eventInput: Omit<EventLogEntry, "event_id" | "created_at">): Promise<Readonly<EventLogEntry>>;
+  publish(eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): Promise<Readonly<EventLogEntry>>;
 }
 
 export interface GovernanceSubjectCanonicalizationContext {
@@ -37,7 +37,7 @@ export interface GovernanceSubjectCanonicalizationContext {
 
 export interface GovernanceSubjectCanonicalizationPlan {
   readonly governanceSubject: GovernanceSubject;
-  readonly eventInputs: readonly Omit<EventLogEntry, "event_id" | "created_at">[];
+  readonly eventInputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[];
   readonly nextRevision: number;
 }
 
@@ -91,7 +91,7 @@ export class CanonicalAliasService {
     qualifiers: Record<string, string>,
     context: GovernanceSubjectCanonicalizationContext
   ): GovernanceSubjectCanonicalizationPlan {
-    const eventInputs: Omit<EventLogEntry, "event_id" | "created_at">[] = [];
+    const eventInputs: Omit<EventLogEntry, "event_id" | "created_at" | "revision">[] = [];
     let nextRevision = context.startingRevision ?? 0;
 
     const appendResolvedValueEvents = (rawInput: string, aliasDomain: string, resolution: ResolvedAliasValue) => {
@@ -106,7 +106,6 @@ export class CanonicalAliasService {
         workspace_id: context.workspaceId,
         run_id: context.runId,
         caused_by: context.causedBy,
-        revision: nextRevision++,
         payload_json: CanonicalizationAppliedPayloadSchema.parse({
           input: rawInput,
           canonical: resolution.canonical,
@@ -115,6 +114,7 @@ export class CanonicalAliasService {
           applied_at: this.now()
         })
       });
+      nextRevision += 1;
 
       if (resolution.aliasEntry !== undefined) {
         eventInputs.push({
@@ -124,7 +124,6 @@ export class CanonicalAliasService {
           workspace_id: context.workspaceId,
           run_id: context.runId,
           caused_by: context.causedBy,
-          revision: nextRevision++,
           payload_json: CanonicalizationAliasResolvedPayloadSchema.parse({
             alias: rawInput,
             canonical: resolution.canonical,
@@ -133,6 +132,7 @@ export class CanonicalAliasService {
             resolved_at: this.now()
           })
         });
+        nextRevision += 1;
       }
     };
 

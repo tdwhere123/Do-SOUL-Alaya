@@ -22,13 +22,6 @@ export interface WorkerRunRepoPort {
     expectedState: WorkerRunState,
     nextState: WorkerRunState,
     updatedAt: string
-  ): Promise<Readonly<DelegatedWorkerRun>>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  updateStateSync(
-    workerRunId: string,
-    expectedState: WorkerRunState,
-    nextState: WorkerRunState,
-    updatedAt: string
   ): Readonly<DelegatedWorkerRun>;
 }
 
@@ -109,7 +102,7 @@ export class WorkerRunLifecycleService {
     return this.dependencies.eventPublisher.appendManyWithMutation(
       [this.buildStateChangedEvent(snapshot, payload)],
       () =>
-        this.dependencies.repo.updateStateSync(
+        this.dependencies.repo.updateState(
           snapshot.worker_run_id,
           snapshot.state,
           nextState,
@@ -132,7 +125,7 @@ export class WorkerRunLifecycleService {
   private buildStateChangedEvent(
     workerRun: Readonly<DelegatedWorkerRun>,
     payload: WorkerStateChangedPayload
-  ): Omit<EventLogEntry, "event_id" | "created_at"> {
+  ): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
     return {
       event_type: ToolWorkerEventType.WORKER_STATE_CHANGED,
       entity_type: "worker_run",
@@ -140,7 +133,6 @@ export class WorkerRunLifecycleService {
       workspace_id: workerRun.workspace_id,
       run_id: workerRun.principal_run_id,
       caused_by: "worker_lifecycle",
-      revision: 0,
       payload_json: payload
     };
   }

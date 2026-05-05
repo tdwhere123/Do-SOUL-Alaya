@@ -12,19 +12,8 @@ import { parseNonEmptyString } from "./shared/validators.js";
 
 export interface DeferredObligationRepo {
   getById(obligationId: string): Promise<Readonly<DeferredObligation> | null>;
-  create(obligation: DeferredObligation): Promise<Readonly<DeferredObligation>>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  createSync?(obligation: DeferredObligation): Readonly<DeferredObligation>;
+  create(obligation: DeferredObligation): Readonly<DeferredObligation>;
   updateState(
-    obligationId: string,
-    expectedState: DeferredObligationState,
-    nextState: DeferredObligationState,
-    options?: {
-      readonly fulfilledAt?: string;
-    }
-  ): Promise<Readonly<DeferredObligation>>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  updateStateSync?(
     obligationId: string,
     expectedState: DeferredObligationState,
     nextState: DeferredObligationState,
@@ -139,12 +128,7 @@ export class SqliteDeferredObligationRepo implements DeferredObligationRepo {
     }
   }
 
-  public async create(obligation: DeferredObligation): Promise<Readonly<DeferredObligation>> {
-    return this.createSync(obligation);
-  }
-
-  /** Synchronous variant for atomic publish + mutation (#BL-022). */
-  public createSync(obligation: DeferredObligation): Readonly<DeferredObligation> {
+  public create(obligation: DeferredObligation): Readonly<DeferredObligation> {
     const parsed = parseDeferredObligation(obligation);
 
     try {
@@ -168,7 +152,7 @@ export class SqliteDeferredObligationRepo implements DeferredObligationRepo {
       );
     }
 
-    const inserted = this.readByIdSync(parsed.obligation_id);
+    const inserted = this.readById(parsed.obligation_id);
 
     if (inserted === null) {
       throw new StorageError(
@@ -180,7 +164,7 @@ export class SqliteDeferredObligationRepo implements DeferredObligationRepo {
     return inserted;
   }
 
-  private readByIdSync(obligationId: string): Readonly<DeferredObligation> | null {
+  private readById(obligationId: string): Readonly<DeferredObligation> | null {
     try {
       const row = this.getByIdStatement.get(obligationId) as DeferredObligationRow | undefined;
       return row === undefined ? null : this.mapRowToDomain(row);
@@ -193,19 +177,7 @@ export class SqliteDeferredObligationRepo implements DeferredObligationRepo {
     }
   }
 
-  public async updateState(
-    obligationId: string,
-    expectedState: DeferredObligationState,
-    nextState: DeferredObligationState,
-    options?: {
-      readonly fulfilledAt?: string;
-    }
-  ): Promise<Readonly<DeferredObligation>> {
-    return this.updateStateSync(obligationId, expectedState, nextState, options);
-  }
-
-  /** Synchronous variant for atomic publish + mutation (#BL-022). */
-  public updateStateSync(
+  public updateState(
     obligationId: string,
     expectedState: DeferredObligationState,
     nextState: DeferredObligationState,
@@ -238,7 +210,7 @@ export class SqliteDeferredObligationRepo implements DeferredObligationRepo {
     }
 
     if (changes === 0) {
-      const existing = this.readByIdSync(parsedObligationId);
+      const existing = this.readById(parsedObligationId);
 
       if (existing === null) {
         throw new StorageError(
@@ -253,7 +225,7 @@ export class SqliteDeferredObligationRepo implements DeferredObligationRepo {
       );
     }
 
-    const updated = this.readByIdSync(parsedObligationId);
+    const updated = this.readById(parsedObligationId);
 
     if (updated === null) {
       throw new StorageError(

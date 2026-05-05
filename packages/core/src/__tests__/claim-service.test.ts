@@ -82,9 +82,10 @@ function createDependencies(overrides: Partial<ClaimServiceDependencies> = {}): 
   readonly broadcastSpy: ReturnType<typeof vi.fn>;
   readonly slotElectionSpy: ReturnType<typeof vi.fn>;
 } {
-  const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+  const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
     event_id: `event-${event.event_type}-${Math.random()}`,
     created_at: "2026-03-21T00:00:00.000Z",
+    revision: 0,
     ...event
   }));
   const queryByEntitySpy = vi.fn(async () => [] as readonly EventLogEntry[]);
@@ -114,8 +115,7 @@ function createDependencies(overrides: Partial<ClaimServiceDependencies> = {}): 
     now: () => "2026-03-21T01:00:00.000Z",
     generateObjectId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
     claimFormRepo: {
-      create: vi.fn(async (claim) => Object.freeze({ ...claim })),
-      createSync: vi.fn((claim) => Object.freeze({ ...claim })),
+      create: vi.fn((claim) => Object.freeze({ ...claim })),
       findById: vi.fn(async () => createClaimForm()),
       findByWorkspaceId: vi.fn(async () => []),
       findByStatus: vi.fn(async () => []),
@@ -157,6 +157,7 @@ describe("ClaimService", () => {
           return {
             event_id: "event-created",
             created_at: "2026-03-21T01:00:00.000Z",
+            revision: 0,
             ...event
           };
         }),
@@ -166,11 +167,7 @@ describe("ClaimService", () => {
         })
       },
       claimFormRepo: {
-        create: vi.fn(async (claim) => {
-          order.push("repo_create");
-          return Object.freeze({ ...claim });
-        }),
-        createSync: vi.fn((claim) => {
+        create: vi.fn((claim) => {
           order.push("repo_create");
           return Object.freeze({ ...claim });
         }),
@@ -187,24 +184,25 @@ describe("ClaimService", () => {
     const service = new ClaimService(dependencies);
     const created = await service.create(createClaimInput());
 
-    expect(order).toEqual(["event_query", "event_log", "repo_create"]);
+    expect(order).toEqual(["event_log", "repo_create"]);
     expect(created.claim_status).toBe(ClaimLifecycleState.DRAFT);
     expect(created.governance_subject.canonical_key).toBe("code_style::language=typescript");
     expect(broadcastSpy).toHaveBeenCalledTimes(1);
   });
 
   it("batches canonicalization events with claim creation on the live create path", async () => {
-    const publishedBatches: Array<readonly Omit<EventLogEntry, "event_id" | "created_at">[]> = [];
+    const publishedBatches: Array<readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[]> = [];
     const appendManyWithMutation = vi.fn(
       async (
-        events: readonly Omit<EventLogEntry, "event_id" | "created_at">[],
+        events: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
         mutate: (entries: readonly EventLogEntry[]) => Readonly<ClaimForm>
       ) => {
         publishedBatches.push(events);
         const persisted = events.map((event, idx) => ({
           ...event,
           event_id: `evt_${idx}`,
-          created_at: "2026-03-21T01:00:00.000Z"
+          created_at: "2026-03-21T01:00:00.000Z",
+          revision: idx
         }));
         return mutate(persisted);
       }
@@ -275,12 +273,12 @@ describe("ClaimService", () => {
         append: vi.fn(async (event) => ({
           event_id: "event-lifecycle",
           created_at: "2026-03-21T02:00:00.000Z",
+          revision: 0,
           ...event
         }))
       },
       claimFormRepo: {
-        create: vi.fn(async (claim) => claim),
-        createSync: vi.fn((claim) => claim),
+        create: vi.fn((claim) => claim),
         findById: vi.fn(async () => existing),
         findByWorkspaceId: vi.fn(async () => []),
         findByStatus: vi.fn(async () => []),
@@ -309,8 +307,7 @@ describe("ClaimService", () => {
 
     const { dependencies } = createDependencies({
       claimFormRepo: {
-        create: vi.fn(async (claim) => claim),
-        createSync: vi.fn((claim) => claim),
+        create: vi.fn((claim) => claim),
         findById: vi.fn(async () => existing),
         findByWorkspaceId: vi.fn(async () => []),
         findByStatus: vi.fn(async () => []),
@@ -324,6 +321,7 @@ describe("ClaimService", () => {
         append: vi.fn(async (event) => ({
           event_id: "event-lifecycle",
           created_at: "2026-03-21T03:00:00.000Z",
+          revision: 0,
           ...event
         }))
       }
@@ -343,9 +341,10 @@ describe("ClaimService", () => {
 
   it("marks claim as contested when slot election requires review", async () => {
     const existing = createClaimForm({ claim_status: ClaimLifecycleState.DRAFT });
-    const contestedAppendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+    const contestedAppendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       event_id: `event-${event.event_type}-${Math.random()}`,
       created_at: "2026-03-21T00:00:00.000Z",
+      revision: 0,
       ...event
     }));
 
@@ -363,8 +362,7 @@ describe("ClaimService", () => {
         }))
       },
       claimFormRepo: {
-        create: vi.fn(async (claim) => claim),
-        createSync: vi.fn((claim) => claim),
+        create: vi.fn((claim) => claim),
         findById: vi.fn(async () => existing),
         findByWorkspaceId: vi.fn(async () => []),
         findByStatus: vi.fn(async () => []),
@@ -409,8 +407,7 @@ describe("ClaimService", () => {
     const { dependencies } = createDependencies({
       slotService: undefined,
       claimFormRepo: {
-        create: vi.fn(async (claim) => claim),
-        createSync: vi.fn((claim) => claim),
+        create: vi.fn((claim) => claim),
         findById: vi.fn(async () => existing),
         findByWorkspaceId: vi.fn(async () => []),
         findByStatus: vi.fn(async () => []),
@@ -436,8 +433,7 @@ describe("ClaimService", () => {
 
     const { dependencies } = createDependencies({
       claimFormRepo: {
-        create: vi.fn(async (claim) => claim),
-        createSync: vi.fn((claim) => claim),
+        create: vi.fn((claim) => claim),
         findById: vi.fn(async () => existing),
         findByWorkspaceId: vi.fn(async () => []),
         findByStatus: vi.fn(async () => []),

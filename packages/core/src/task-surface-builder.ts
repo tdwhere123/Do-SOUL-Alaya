@@ -16,7 +16,6 @@ import {
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
-import { getNextRevision } from "./shared/event-utils.js";
 
 export type NodeStrategy = "chat" | "analyze" | "build" | "govern";
 
@@ -25,7 +24,7 @@ export interface TaskSurfaceBuilderSurfaceRepoPort {
 }
 
 export interface TaskSurfaceBuilderEventLogRepoPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
 }
 
@@ -188,8 +187,6 @@ export class TaskSurfaceBuilder {
       display_name: displayName,
       context_refs: Object.freeze([...(params.contextRefs ?? [])])
     });
-
-    const revision = await getNextRevision(this.dependencies.eventLogRepo, "task_object_surface", runtimeId);
     await this.dependencies.eventLogRepo.append({
       event_type: RecallContextEventType.SOUL_TASK_SURFACE_CREATED,
       entity_type: "task_object_surface",
@@ -197,7 +194,6 @@ export class TaskSurfaceBuilder {
       workspace_id: params.run.workspace_id,
       run_id: params.run.run_id,
       caused_by: "system",
-      revision,
       payload_json: SoulTaskSurfaceCreatedPayloadSchema.parse({
         runtime_id: runtimeId,
         object_kind: taskSurface.object_kind,

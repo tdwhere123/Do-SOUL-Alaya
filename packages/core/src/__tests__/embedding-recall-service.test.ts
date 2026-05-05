@@ -14,9 +14,10 @@ import type { TestMock } from "./mock-types.js";
 
 describe("EmbeddingRecallService", () => {
   it("queries the local vector table, emits telemetry, and returns additive candidates plus similarity hints", async () => {
-    const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+    const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       event_id: `event-${entry.event_type}`,
       created_at: "2026-04-23T00:00:00.000Z",
+      revision: 0,
       ...entry
     }));
     const healthJournal = {
@@ -98,9 +99,10 @@ describe("EmbeddingRecallService", () => {
   });
 
   it("uses a prepared query embedding when it is ready by merge time", async () => {
-    const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+    const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       event_id: `event-${entry.event_type}`,
       created_at: "2026-04-23T00:00:00.000Z",
+      revision: 0,
       ...entry
     }));
     const service = new EmbeddingRecallService({
@@ -159,9 +161,10 @@ describe("EmbeddingRecallService", () => {
   });
 
   it("records degraded fallback when the prepared query embedding is not ready by merge time", async () => {
-    const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+    const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       event_id: `event-${entry.event_type}`,
       created_at: "2026-04-23T00:00:00.000Z",
+      revision: 0,
       ...entry
     }));
     const healthJournal = {
@@ -231,9 +234,10 @@ describe("EmbeddingRecallService", () => {
   });
 
   it("degrades to keyword-only recall when the embedding provider is unavailable", async () => {
-    const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+    const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       event_id: `event-${entry.event_type}`,
       created_at: "2026-04-23T00:00:00.000Z",
+      revision: 0,
       ...entry
     }));
     const healthJournal = {
@@ -289,9 +293,10 @@ describe("EmbeddingRecallService", () => {
   });
 
   it("degrades to keyword-only recall when query embedding generation fails", async () => {
-    const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+    const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       event_id: `event-${entry.event_type}`,
       created_at: "2026-04-23T00:00:00.000Z",
+      revision: 0,
       ...entry
     }));
     const healthJournal = {
@@ -366,13 +371,13 @@ describe("EmbeddingRecallService", () => {
       .mockResolvedValue({
         event_id: "event-merged",
         created_at: "2026-04-23T00:00:00.000Z",
+        revision: 0,
         event_type: ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_MERGED,
         entity_type: "recall_embedding_supplement",
         entity_id: "query-telemetry-fail",
         workspace_id: "workspace-1",
         run_id: "run-1",
         caused_by: "system",
-        revision: 0,
         payload_json: {}
       });
     const warn = vi.fn();
@@ -484,7 +489,7 @@ describe("EmbeddingRecallService", () => {
 });
 
 type EmbeddingRecallAppendSpy = (
-  entry: Omit<EventLogEntry, "event_id" | "created_at">
+  entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
 ) => Promise<EventLogEntry>;
 
 function createProvider(overrides: {

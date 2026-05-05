@@ -37,7 +37,7 @@ export interface GraphExploreServiceEdgeRepoPort {
 }
 
 export interface GraphExploreServiceEventLogRepoPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
 }
 
 export interface GraphExploreServiceRuntimeNotifierPort {
@@ -117,7 +117,6 @@ export class GraphExploreService {
       workspace_id: workspaceId,
       run_id: params.runId ?? null,
       caused_by: "system",
-      revision: 0,
       payload_json: SoulGraphEdgeCreatedPayloadSchema.parse({
         edge_id: edge.edge_id,
         source_memory_id: sourceMemoryId,
@@ -186,7 +185,6 @@ export class GraphExploreService {
       workspace_id: parsedWorkspaceId,
       run_id: options.runId ?? null,
       caused_by: "system",
-      revision: 0,
       payload_json: SoulGraphExploreCompletedPayloadSchema.parse({
         exploration_kind: "memory_neighbors",
         source_memory_id: parsedMemoryId,

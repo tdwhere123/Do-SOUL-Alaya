@@ -1,12 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  WorkspaceRunEventType,
   RunCreatedPayloadSchema,
   RunMessageAppendedPayloadSchema,
   WorkerStateChangedPayloadSchema,
+  WorkspaceRunEventType,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
-import { EventPublisher, EventPublisherPropagationError } from "../event-publisher.js";
+import {
+  EventPublisher,
+  EventPublisherPropagationError,
+  type EventPublisherEventLogRepoPort,
+  type EventPublisherInput
+} from "../event-publisher.js";
 
 describe("EventPublisher", () => {
   it("publishes A1 worker lifecycle events without requiring Phase 0 parsing", async () => {
@@ -29,7 +34,6 @@ describe("EventPublisher", () => {
       workspace_id: "ws-1",
       run_id: "run-1",
       caused_by: "system",
-      revision: 0,
       payload_json: WorkerStateChangedPayloadSchema.parse({
         workerId: "worker-1",
         state: "active",
@@ -37,29 +41,12 @@ describe("EventPublisher", () => {
       })
     });
     const publisher = new EventPublisher({
-      eventLogRepo: {
-        append: vi.fn(async () => {
-          recorded.push("append");
-          return entry;
-        }),
-        deleteById: vi.fn()
-      },
-      runHotStateService: runHotStateService as any,
-      runtimeNotifier: runtimeNotifier
+      eventLogRepo: createSingleEntryRepo(entry, recorded),
+      runHotStateService,
+      runtimeNotifier
     });
 
-    await expect(
-      publisher.publish({
-        event_type: entry.event_type,
-        entity_type: entry.entity_type,
-        entity_id: entry.entity_id,
-        workspace_id: entry.workspace_id,
-        run_id: entry.run_id,
-        caused_by: entry.caused_by,
-        revision: entry.revision,
-        payload_json: entry.payload_json
-      })
-    ).resolves.toEqual(entry);
+    await expect(publisher.publish(toEventInput(entry))).resolves.toEqual(entry);
 
     expect(recorded).toEqual(["append", "notify"]);
     expect(runHotStateService.apply).not.toHaveBeenCalled();
@@ -75,7 +62,6 @@ describe("EventPublisher", () => {
       workspace_id: "ws-1",
       run_id: "run-1",
       caused_by: "user_action",
-      revision: 0,
       payload_json: RunCreatedPayloadSchema.parse({
         run_id: "run-1",
         workspace_id: "ws-1",
@@ -95,27 +81,12 @@ describe("EventPublisher", () => {
       })
     };
     const publisher = new EventPublisher({
-      eventLogRepo: {
-        append: vi.fn(async () => {
-          recorded.push("append");
-          return entry;
-        }),
-        deleteById: vi.fn()
-      },
-      runHotStateService: runHotStateService as any,
-      runtimeNotifier: runtimeNotifier
+      eventLogRepo: createSingleEntryRepo(entry, recorded),
+      runHotStateService,
+      runtimeNotifier
     });
 
-    await publisher.publish({
-      event_type: entry.event_type,
-      entity_type: entry.entity_type,
-      entity_id: entry.entity_id,
-      workspace_id: entry.workspace_id,
-      run_id: entry.run_id,
-      caused_by: entry.caused_by,
-      revision: entry.revision,
-      payload_json: entry.payload_json
-    });
+    await publisher.publish(toEventInput(entry));
 
     expect(recorded).toEqual(["append", "apply", "notify"]);
     expect(runHotStateService.apply).toHaveBeenCalledWith(
@@ -135,7 +106,6 @@ describe("EventPublisher", () => {
       workspace_id: "ws-1",
       run_id: "run-1",
       caused_by: "system",
-      revision: 0,
       payload_json: {
         workerRunId: "worker-1",
         level: "soft_stale",
@@ -144,13 +114,10 @@ describe("EventPublisher", () => {
       }
     });
     const publisher = new EventPublisher({
-      eventLogRepo: {
-        append: vi.fn(async () => entry),
-        deleteById: vi.fn()
-      },
+      eventLogRepo: createSingleEntryRepo(entry),
       runHotStateService: {
         apply: vi.fn(async () => undefined)
-      } as any,
+      },
       runtimeNotifier: {
         notify: vi.fn(),
         notifyEntry: vi.fn(async () => {
@@ -159,18 +126,7 @@ describe("EventPublisher", () => {
       }
     });
 
-    await expect(
-      publisher.publish({
-        event_type: entry.event_type,
-        entity_type: entry.entity_type,
-        entity_id: entry.entity_id,
-        workspace_id: entry.workspace_id,
-        run_id: entry.run_id,
-        caused_by: entry.caused_by,
-        revision: entry.revision,
-        payload_json: entry.payload_json
-      })
-    ).rejects.toMatchObject({
+    await expect(publisher.publish(toEventInput(entry))).rejects.toMatchObject({
       name: "EventPublisherPropagationError",
       entry
     });
@@ -185,7 +141,6 @@ describe("EventPublisher", () => {
       workspace_id: "ws-1",
       run_id: "run-1",
       caused_by: "user_action",
-      revision: 0,
       payload_json: RunMessageAppendedPayloadSchema.parse({
         run_id: "run-1",
         role: "user",
@@ -194,18 +149,12 @@ describe("EventPublisher", () => {
       })
     });
     const publisher = new EventPublisher({
-      eventLogRepo: {
-        append: vi.fn(async () => {
-          recorded.push("append");
-          return entry;
-        }),
-        deleteById: vi.fn()
-      },
+      eventLogRepo: createSingleEntryRepo(entry, recorded),
       runHotStateService: {
         apply: vi.fn(async () => {
           recorded.push("apply");
         })
-      } as any,
+      },
       runtimeNotifier: {
         notify: vi.fn(),
         notifyEntry: vi.fn(async () => {
@@ -214,22 +163,10 @@ describe("EventPublisher", () => {
       }
     });
 
-    const result = await publisher.publishWithMutation(
-      {
-        event_type: entry.event_type,
-        entity_type: entry.entity_type,
-        entity_id: entry.entity_id,
-        workspace_id: entry.workspace_id,
-        run_id: entry.run_id,
-        caused_by: entry.caused_by,
-        revision: entry.revision,
-        payload_json: entry.payload_json
-      },
-      async () => {
-        recorded.push("mutate");
-        return "ok";
-      }
-    );
+    const result = await publisher.appendManyWithMutation([toEventInput(entry)], () => {
+      recorded.push("mutate");
+      return "ok";
+    });
 
     expect(result).toBe("ok");
     expect(recorded).toEqual(["append", "mutate", "apply", "notify"]);
@@ -244,7 +181,6 @@ describe("EventPublisher", () => {
       workspace_id: "ws-1",
       run_id: "run-1",
       caused_by: "worker_lifecycle",
-      revision: 0,
       payload_json: WorkerStateChangedPayloadSchema.parse({
         workerId: "worker-1",
         state: "frozen",
@@ -265,40 +201,22 @@ describe("EventPublisher", () => {
       })
     };
     const publisher = new EventPublisher({
-      eventLogRepo: {
-        append: vi.fn(async () => {
-          recorded.push("append");
-          return entry;
-        }),
-        deleteById: vi.fn()
-      },
-      runHotStateService: runHotStateService as any,
+      eventLogRepo: createSingleEntryRepo(entry, recorded),
+      runHotStateService,
       runtimeNotifier
     });
 
-    const result = await publisher.publishWithMutation(
-      {
-        event_type: entry.event_type,
-        entity_type: entry.entity_type,
-        entity_id: entry.entity_id,
-        workspace_id: entry.workspace_id,
-        run_id: entry.run_id,
-        caused_by: entry.caused_by,
-        revision: entry.revision,
-        payload_json: entry.payload_json
-      },
-      async () => {
-        recorded.push("mutate");
-        return "ok";
-      }
-    );
+    const result = await publisher.appendManyWithMutation([toEventInput(entry)], () => {
+      recorded.push("mutate");
+      return "ok";
+    });
 
     expect(result).toBe("ok");
     expect(recorded).toEqual(["append", "mutate", "notify"]);
     expect(runHotStateService.apply).not.toHaveBeenCalled();
   });
 
-  it("passes the appended EventLog entry to mutation callbacks", async () => {
+  it("passes the appended EventLog entries to mutation callbacks", async () => {
     const entry = createEventLogEntry({
       event_type: "worker.state_changed",
       entity_type: "worker_run",
@@ -306,115 +224,28 @@ describe("EventPublisher", () => {
       workspace_id: "ws-1",
       run_id: "run-1",
       caused_by: "worker_lifecycle",
-      revision: 0,
       payload_json: WorkerStateChangedPayloadSchema.parse({
         workerId: "worker-1",
         state: "frozen",
         previousState: "active"
       })
     });
-    const mutate = vi.fn(async (auditEntry: EventLogEntry) => auditEntry.event_id);
+    const mutate = vi.fn((entries: readonly EventLogEntry[]) => entries[0]?.event_id);
     const publisher = new EventPublisher({
-      eventLogRepo: {
-        append: vi.fn(async () => entry),
-        deleteById: vi.fn()
-      },
-      runHotStateService: { apply: vi.fn() } as any,
+      eventLogRepo: createSingleEntryRepo(entry),
+      runHotStateService: { apply: vi.fn() },
       runtimeNotifier: {
         notify: vi.fn(),
         notifyEntry: vi.fn()
       }
     });
 
-    await expect(
-      publisher.publishWithMutation(
-        {
-          event_type: entry.event_type,
-          entity_type: entry.entity_type,
-          entity_id: entry.entity_id,
-          workspace_id: entry.workspace_id,
-          run_id: entry.run_id,
-          caused_by: entry.caused_by,
-          revision: entry.revision,
-          payload_json: entry.payload_json
-        },
-        mutate
-      )
-    ).resolves.toBe(entry.event_id);
+    await expect(publisher.appendManyWithMutation([toEventInput(entry)], mutate)).resolves.toBe(entry.event_id);
 
-    expect(mutate).toHaveBeenCalledWith(entry);
+    expect(mutate).toHaveBeenCalledWith([entry]);
   });
 
-  it("deletes an unnotified event-log entry when mutation fails", async () => {
-    const recorded: string[] = [];
-    const entry = createEventLogEntry({
-      event_type: "worker.state_changed",
-      entity_type: "worker_run",
-      entity_id: "worker-1",
-      workspace_id: "ws-1",
-      run_id: "run-1",
-      caused_by: "worker_lifecycle",
-      revision: 0,
-      payload_json: WorkerStateChangedPayloadSchema.parse({
-        workerId: "worker-1",
-        state: "aborted",
-        previousState: "active",
-        abortReason: "timeout",
-        rollbackAttempted: true
-      })
-    });
-    const deleteById = vi.fn(async () => {
-      recorded.push("delete");
-    });
-    const runHotStateService = {
-      apply: vi.fn(async () => {
-        recorded.push("apply");
-      })
-    };
-    const runtimeNotifier = {
-      notify: vi.fn(),
-      notifyEntry: vi.fn(async () => {
-        recorded.push("notify");
-      })
-    };
-    const publisher = new EventPublisher({
-      eventLogRepo: {
-        append: vi.fn(async () => {
-          recorded.push("append");
-          return entry;
-        }),
-        deleteById
-      },
-      runHotStateService: runHotStateService as any,
-      runtimeNotifier
-    });
-
-    await expect(
-      publisher.publishWithMutation(
-        {
-          event_type: entry.event_type,
-          entity_type: entry.entity_type,
-          entity_id: entry.entity_id,
-          workspace_id: entry.workspace_id,
-          run_id: entry.run_id,
-          caused_by: entry.caused_by,
-          revision: entry.revision,
-          payload_json: entry.payload_json
-        },
-        async () => {
-          recorded.push("mutate");
-          throw new Error("write failed");
-        }
-      )
-    ).rejects.toThrow("write failed");
-
-    expect(recorded).toEqual(["append", "mutate", "delete"]);
-    expect(deleteById).toHaveBeenCalledWith(entry.event_id);
-    expect(runHotStateService.apply).not.toHaveBeenCalled();
-    expect(runtimeNotifier.notifyEntry).not.toHaveBeenCalled();
-  });
-
-  it("deletes every unnotified batch entry when publishManyWithMutation mutation fails", async () => {
+  it("exposes the full durable batch when propagation fails", async () => {
     const recorded: string[] = [];
     const entries = [
       createEventLogEntry({
@@ -424,7 +255,6 @@ describe("EventPublisher", () => {
         workspace_id: "ws-1",
         run_id: "run-1",
         caused_by: "worker_lifecycle",
-        revision: 0,
         payload_json: WorkerStateChangedPayloadSchema.parse({
           workerId: "worker-1",
           state: "frozen",
@@ -438,7 +268,6 @@ describe("EventPublisher", () => {
         workspace_id: "ws-1",
         run_id: "run-1",
         caused_by: "worker_lifecycle",
-        revision: 0,
         payload_json: WorkerStateChangedPayloadSchema.parse({
           workerId: "worker-2",
           state: "aborted",
@@ -447,169 +276,9 @@ describe("EventPublisher", () => {
         })
       })
     ];
-    let nextEntry = 0;
-    const deleteById = vi.fn(async (eventId: string) => {
-      recorded.push(`delete:${eventId}`);
-    });
-    const notifyEntry = vi.fn(async () => {
-      recorded.push("notify");
-    });
     const publisher = new EventPublisher({
-      eventLogRepo: {
-        append: vi.fn(async () => {
-          const entry = entries[nextEntry];
-          if (entry === undefined) {
-            throw new Error("unexpected append");
-          }
-          nextEntry += 1;
-          recorded.push(`append:${entry.event_id}`);
-          return entry;
-        }),
-        deleteById
-      },
-      runHotStateService: { apply: vi.fn(async () => undefined) } as any,
-      runtimeNotifier: {
-        notify: vi.fn(),
-        notifyEntry
-      }
-    });
-
-    await expect(
-      publisher.publishManyWithMutation(entries.map(toEventInput), async () => {
-        recorded.push("mutate");
-        throw new Error("mutation failed");
-      })
-    ).rejects.toThrow("mutation failed");
-
-    expect(recorded).toEqual([
-      "append:evt_worker-1",
-      "append:evt_worker-2",
-      "mutate",
-      "delete:evt_worker-1",
-      "delete:evt_worker-2"
-    ]);
-    expect(deleteById).toHaveBeenCalledTimes(2);
-    expect(notifyEntry).not.toHaveBeenCalled();
-  });
-
-  it("rolls back already appended batch entries when a later append fails", async () => {
-    const recorded: string[] = [];
-    const entry = createEventLogEntry({
-      event_type: "worker.state_changed",
-      entity_type: "worker_run",
-      entity_id: "worker-1",
-      workspace_id: "ws-1",
-      run_id: "run-1",
-      caused_by: "worker_lifecycle",
-      revision: 0,
-      payload_json: WorkerStateChangedPayloadSchema.parse({
-        workerId: "worker-1",
-        state: "frozen",
-        previousState: "active"
-      })
-    });
-    const secondInput = {
-      ...toEventInput(entry),
-      entity_id: "worker-2",
-      payload_json: WorkerStateChangedPayloadSchema.parse({
-        workerId: "worker-2",
-        state: "aborted",
-        previousState: "active"
-      })
-    };
-    const deleteById = vi.fn(async (eventId: string) => {
-      recorded.push(`delete:${eventId}`);
-    });
-    const mutate = vi.fn(async () => {
-      recorded.push("mutate");
-      return "ok";
-    });
-    const notifyEntry = vi.fn(async () => {
-      recorded.push("notify");
-    });
-    let appendCount = 0;
-    const publisher = new EventPublisher({
-      eventLogRepo: {
-        append: vi.fn(async () => {
-          appendCount += 1;
-          if (appendCount === 1) {
-            recorded.push(`append:${entry.event_id}`);
-            return entry;
-          }
-
-          recorded.push("append:failed");
-          throw new Error("append failed");
-        }),
-        deleteById
-      },
-      runHotStateService: { apply: vi.fn(async () => undefined) } as any,
-      runtimeNotifier: {
-        notify: vi.fn(),
-        notifyEntry
-      }
-    });
-
-    await expect(publisher.publishManyWithMutation([toEventInput(entry), secondInput], mutate)).rejects.toThrow(
-      "append failed"
-    );
-
-    expect(recorded).toEqual(["append:evt_worker-1", "append:failed", "delete:evt_worker-1"]);
-    expect(deleteById).toHaveBeenCalledWith(entry.event_id);
-    expect(mutate).not.toHaveBeenCalled();
-    expect(notifyEntry).not.toHaveBeenCalled();
-  });
-
-  it("exposes the full durable batch when publishManyWithMutation propagation fails", async () => {
-    const recorded: string[] = [];
-    const entries = [
-      createEventLogEntry({
-        event_type: "worker.state_changed",
-        entity_type: "worker_run",
-        entity_id: "worker-1",
-        workspace_id: "ws-1",
-        run_id: "run-1",
-        caused_by: "worker_lifecycle",
-        revision: 0,
-        payload_json: WorkerStateChangedPayloadSchema.parse({
-          workerId: "worker-1",
-          state: "frozen",
-          previousState: "active"
-        })
-      }),
-      createEventLogEntry({
-        event_type: "worker.state_changed",
-        entity_type: "worker_run",
-        entity_id: "worker-2",
-        workspace_id: "ws-1",
-        run_id: "run-1",
-        caused_by: "worker_lifecycle",
-        revision: 0,
-        payload_json: WorkerStateChangedPayloadSchema.parse({
-          workerId: "worker-2",
-          state: "aborted",
-          previousState: "active",
-          abortReason: "timeout"
-        })
-      })
-    ];
-    let nextEntry = 0;
-    const deleteById = vi.fn(async (eventId: string) => {
-      recorded.push(`delete:${eventId}`);
-    });
-    const publisher = new EventPublisher({
-      eventLogRepo: {
-        append: vi.fn(async () => {
-          const entry = entries[nextEntry];
-          if (entry === undefined) {
-            throw new Error("unexpected append");
-          }
-          nextEntry += 1;
-          recorded.push(`append:${entry.event_id}`);
-          return entry;
-        }),
-        deleteById
-      },
-      runHotStateService: { apply: vi.fn(async () => undefined) } as any,
+      eventLogRepo: createQueuedRepo(entries, recorded),
+      runHotStateService: { apply: vi.fn(async () => undefined) },
       runtimeNotifier: {
         notify: vi.fn(),
         notifyEntry: vi.fn(async (entry: EventLogEntry) => {
@@ -622,7 +291,7 @@ describe("EventPublisher", () => {
     });
 
     const rejection = await publisher
-      .publishManyWithMutation(entries.map(toEventInput), async () => {
+      .appendManyWithMutation(entries.map(toEventInput), () => {
         recorded.push("mutate");
         return "ok";
       })
@@ -641,21 +310,19 @@ describe("EventPublisher", () => {
       "notify:evt_worker-1",
       "notify:evt_worker-2"
     ]);
-    expect(deleteById).not.toHaveBeenCalled();
   });
 });
 
-function createEventLogEntry(
-  input: Omit<EventLogEntry, "event_id" | "created_at">
-): EventLogEntry {
+function createEventLogEntry(input: EventPublisherInput, revision = 0): EventLogEntry {
   return {
+    ...input,
+    revision,
     event_id: `evt_${input.entity_id}`,
-    created_at: "2026-04-10T00:00:00.000Z",
-    ...input
+    created_at: "2026-04-10T00:00:00.000Z"
   };
 }
 
-function toEventInput(entry: EventLogEntry): Omit<EventLogEntry, "event_id" | "created_at"> {
+function toEventInput(entry: EventLogEntry): EventPublisherInput {
   return {
     event_type: entry.event_type,
     entity_type: entry.entity_type,
@@ -663,7 +330,37 @@ function toEventInput(entry: EventLogEntry): Omit<EventLogEntry, "event_id" | "c
     workspace_id: entry.workspace_id,
     run_id: entry.run_id,
     caused_by: entry.caused_by,
-    revision: entry.revision,
     payload_json: entry.payload_json
+  };
+}
+
+function createSingleEntryRepo(entry: EventLogEntry, recorded: string[] = []): EventPublisherEventLogRepoPort {
+  return {
+    append: vi.fn(() => {
+      recorded.push("append");
+      return entry;
+    }),
+    deleteById: vi.fn(),
+    transactional: <T>(fn: () => T): T => fn()
+  };
+}
+
+function createQueuedRepo(
+  entries: readonly EventLogEntry[],
+  recorded: string[] = []
+): EventPublisherEventLogRepoPort {
+  let nextEntry = 0;
+  return {
+    append: vi.fn(() => {
+      const entry = entries[nextEntry];
+      if (entry === undefined) {
+        throw new Error("unexpected append");
+      }
+      nextEntry += 1;
+      recorded.push(`append:${entry.event_id}`);
+      return entry;
+    }),
+    deleteById: vi.fn(),
+    transactional: <T>(fn: () => T): T => fn()
   };
 }

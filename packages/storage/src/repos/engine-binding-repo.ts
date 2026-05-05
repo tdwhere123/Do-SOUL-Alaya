@@ -5,9 +5,7 @@ import { StorageError } from "../errors.js";
 export type EngineBindingRecordCreateInput = Omit<EngineBindingRecord, "created_at" | "updated_at">;
 
 export interface EngineBindingRepo {
-  upsert(data: EngineBindingRecordCreateInput): Promise<EngineBindingRecord>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  upsertSync?(data: EngineBindingRecordCreateInput): EngineBindingRecord;
+  upsert(data: EngineBindingRecordCreateInput): EngineBindingRecord;
   getById(id: string): Promise<EngineBindingRecord | null>;
   listByWorkspace(workspaceId: string): Promise<readonly EngineBindingRecord[]>;
 }
@@ -88,12 +86,7 @@ export class SqliteEngineBindingRepo implements EngineBindingRepo {
     `);
   }
 
-  public async upsert(data: EngineBindingRecordCreateInput): Promise<EngineBindingRecord> {
-    return this.upsertSync(data);
-  }
-
-  /** Synchronous variant for atomic publish + mutation (#BL-022). */
-  public upsertSync(data: EngineBindingRecordCreateInput): EngineBindingRecord {
+  public upsert(data: EngineBindingRecordCreateInput): EngineBindingRecord {
     const existingRow = this.getByIdStatement.get(data.binding_id) as EngineBindingRow | undefined;
     const existing = existingRow === undefined ? null : parseEngineBindingRecord(existingRow);
     const now = new Date().toISOString();

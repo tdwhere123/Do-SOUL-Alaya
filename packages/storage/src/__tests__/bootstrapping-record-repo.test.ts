@@ -19,8 +19,8 @@ describe("SqliteBootstrappingRecordRepo", () => {
     const record = createBootstrappingRecord();
     await createWorkspace(workspaceRepo, record.workspace_id);
 
-    await expect(repo.create(record)).resolves.toEqual(record);
-    await expect(repo.findByWorkspace(record.workspace_id)).resolves.toEqual(record);
+    expect(repo.create(record)).toEqual(record);
+    expect(repo.findByWorkspace(record.workspace_id)).toEqual(record);
 
     const appliedVersion = database.connection
       .prepare("SELECT version FROM schema_version WHERE version = 46 LIMIT 1")
@@ -32,7 +32,7 @@ describe("SqliteBootstrappingRecordRepo", () => {
   it("returns null when a workspace has no bootstrapping record", async () => {
     const { repo } = createRepo();
 
-    await expect(repo.findByWorkspace("workspace-missing")).resolves.toBeNull();
+    expect(repo.findByWorkspace("workspace-missing")).toBeNull();
   });
 
   it("rejects a second record for the same workspace", async () => {
@@ -40,15 +40,15 @@ describe("SqliteBootstrappingRecordRepo", () => {
     await createWorkspace(workspaceRepo, "workspace-1");
     await repo.create(createBootstrappingRecord());
 
-    await expect(
+    expect(() =>
       repo.create(
         createBootstrappingRecord({
           record_id: "bootstrap-record-2"
         })
       )
-    ).rejects.toMatchObject({
+    ).toThrowError(expect.objectContaining({
       code: "QUERY_FAILED"
-    });
+    }));
   });
 
   it("deletes bootstrapping records when the owning workspace is deleted", async () => {
@@ -71,7 +71,7 @@ describe("SqliteBootstrappingRecordRepo", () => {
 
     await workspaceRepo.delete(workspaceId);
 
-    await expect(repo.findByWorkspace(workspaceId)).resolves.toBeNull();
+    expect(repo.findByWorkspace(workspaceId)).toBeNull();
   });
 
   it("returns the persisted bootstrapping record after create", async () => {
@@ -92,8 +92,8 @@ describe("SqliteBootstrappingRecordRepo", () => {
       END;
     `);
 
-    await expect(repo.create(record)).resolves.toEqual(persistedRecord);
-    await expect(repo.findByWorkspace(record.workspace_id)).resolves.toEqual(persistedRecord);
+    expect(repo.create(record)).toEqual(persistedRecord);
+    expect(repo.findByWorkspace(record.workspace_id)).toEqual(persistedRecord);
   });
 });
 

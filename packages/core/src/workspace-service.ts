@@ -33,26 +33,11 @@ export interface WorkspaceRepoPort {
     readonly default_engine_binding: Workspace["default_engine_binding"];
     readonly default_engine_class: Workspace["default_engine_class"];
     readonly workspace_state: Workspace["workspace_state"];
-  }): Promise<Workspace>;
-  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
-  createSync(data: {
-    readonly workspace_id: string;
-    readonly name: string;
-    readonly root_path: string;
-    readonly workspace_kind: Workspace["workspace_kind"];
-    readonly repo_path?: Workspace["repo_path"];
-    readonly default_engine_binding: Workspace["default_engine_binding"];
-    readonly default_engine_class: Workspace["default_engine_class"];
-    readonly workspace_state: Workspace["workspace_state"];
   }): Workspace;
   getById(id: string): Promise<Workspace | null>;
   list(): Promise<readonly Workspace[]>;
-  delete(id: string): Promise<void>;
-  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
-  deleteSync(id: string): void;
-  updateDefaultEngineClass(id: string, engineClass: Workspace["default_engine_class"]): Promise<Workspace>;
-  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
-  updateDefaultEngineClassSync(id: string, engineClass: Workspace["default_engine_class"]): Workspace;
+  delete(id: string): void;
+  updateDefaultEngineClass(id: string, engineClass: Workspace["default_engine_class"]): Workspace;
 }
 
 export interface WorkspaceRunRepoPort {
@@ -61,15 +46,6 @@ export interface WorkspaceRunRepoPort {
 
 export interface WorkspaceEngineConfigRepoPort {
   upsertConversationBindingAndSetDefaultEngineClass(input: {
-    readonly workspace_id: string;
-    readonly binding_id: string;
-    readonly binding: EngineBindingInput;
-  }): Promise<{
-    readonly workspace: Workspace;
-    readonly binding: EngineBindingRecord;
-  }>;
-  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
-  upsertConversationBindingAndSetDefaultEngineClassSync(input: {
     readonly workspace_id: string;
     readonly binding_id: string;
     readonly binding: EngineBindingInput;
@@ -87,18 +63,12 @@ export interface WorkspaceBootstrappingPlannerPort {
 }
 
 export interface WorkspacePathRelationRepoPort {
-  create(relation: PathRelation): Promise<Readonly<PathRelation>>;
-  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
-  createSync(relation: PathRelation): Readonly<PathRelation>;
+  create(relation: PathRelation): Readonly<PathRelation>;
 }
 
 export interface WorkspaceBootstrappingRecordRepoPort {
-  create(record: BootstrappingRecord): Promise<Readonly<BootstrappingRecord>>;
-  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
-  createSync(record: BootstrappingRecord): Readonly<BootstrappingRecord>;
-  findByWorkspace(workspaceId: string): Promise<Readonly<BootstrappingRecord> | null>;
-  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
-  findByWorkspaceSync(workspaceId: string): Readonly<BootstrappingRecord> | null;
+  create(record: BootstrappingRecord): Readonly<BootstrappingRecord>;
+  findByWorkspace(workspaceId: string): Readonly<BootstrappingRecord> | null;
 }
 
 export interface WorkspaceServiceDependencies {
@@ -146,13 +116,13 @@ export class WorkspaceService {
     if (bootstrappingDeps === null) {
       return await this.dependencies.eventPublisher.appendManyWithMutation(
         [workspaceCreatedEvent],
-        () => this.dependencies.workspaceRepo.createSync(createWorkspaceArgs)
+        () => this.dependencies.workspaceRepo.create(createWorkspaceArgs)
       );
     }
 
     // Pre-compute the bootstrap plan outside the SQLite transaction so its
     // async planner stays async. The findByWorkspace check inside the mutate
-    // remains idempotent and now uses `findByWorkspaceSync` so the whole
+    // remains idempotent and now uses `findByWorkspace` so the whole
     // mutate is synchronous.
     const existingBootstrappingRecord = await bootstrappingDeps.bootstrappingRecordRepo.findByWorkspace(
       workspaceId
@@ -173,19 +143,19 @@ export class WorkspaceService {
       // workspace.delete on bootstrap failure is no longer needed — any
       // throw inside this callback triggers the SQLite rollback, undoing
       // the workspace insert atomically.
-      const createdWorkspace = this.dependencies.workspaceRepo.createSync(createWorkspaceArgs);
+      const createdWorkspace = this.dependencies.workspaceRepo.create(createWorkspaceArgs);
       const persistedBootstrappingRecord =
-        bootstrappingDeps.bootstrappingRecordRepo.findByWorkspaceSync(createdWorkspace.workspace_id);
+        bootstrappingDeps.bootstrappingRecordRepo.findByWorkspace(createdWorkspace.workspace_id);
 
       if (persistedBootstrappingRecord !== null || bootstrapPlan === null) {
         return createdWorkspace;
       }
 
       for (const relation of bootstrapPlan.relations) {
-        bootstrappingDeps.pathRelationRepo.createSync(relation);
+        bootstrappingDeps.pathRelationRepo.create(relation);
       }
 
-      bootstrappingDeps.bootstrappingRecordRepo.createSync(bootstrapPlan.record);
+      bootstrappingDeps.bootstrappingRecordRepo.create(bootstrapPlan.record);
       return createdWorkspace;
     });
   }
@@ -221,14 +191,13 @@ export class WorkspaceService {
           workspace_id: workspace.workspace_id,
           run_id: null,
           caused_by: "user_action",
-          revision: 0,
           payload_json: WorkspaceDeletedPayloadSchema.parse({
             workspace_id: workspace.workspace_id
           })
         }
       ],
       () => {
-        this.dependencies.workspaceRepo.deleteSync(workspace.workspace_id);
+        this.dependencies.workspaceRepo.delete(workspace.workspace_id);
       }
     );
 
@@ -250,14 +219,13 @@ export class WorkspaceService {
           workspace_id: workspace.workspace_id,
           run_id: null,
           caused_by: "user_action",
-          revision: 0,
           payload_json: WorkspaceDefaultEngineClassUpdatedPayloadSchema.parse({
             workspace_id: workspace.workspace_id,
             default_engine_class: engineClass ?? null
           })
         }
       ],
-      () => this.dependencies.workspaceRepo.updateDefaultEngineClassSync(workspace.workspace_id, engineClass ?? null)
+      () => this.dependencies.workspaceRepo.updateDefaultEngineClass(workspace.workspace_id, engineClass ?? null)
     );
   }
 
@@ -288,7 +256,6 @@ export class WorkspaceService {
           workspace_id: workspace.workspace_id,
           run_id: null,
           caused_by: "user_action",
-          revision: 0,
           payload_json: WorkspaceEngineBindingUpdatedPayloadSchema.parse({
             workspace_id: workspace.workspace_id,
             binding_id: bindingId,
@@ -304,7 +271,6 @@ export class WorkspaceService {
           workspace_id: workspace.workspace_id,
           run_id: null,
           caused_by: "user_action",
-          revision: 0,
           payload_json: WorkspaceDefaultEngineClassUpdatedPayloadSchema.parse({
             workspace_id: workspace.workspace_id,
             default_engine_class: "conversation_engine"
@@ -312,7 +278,7 @@ export class WorkspaceService {
         }
       ],
       () =>
-        this.dependencies.engineConfigRepo!.upsertConversationBindingAndSetDefaultEngineClassSync({
+        this.dependencies.engineConfigRepo!.upsertConversationBindingAndSetDefaultEngineClass({
           workspace_id: workspace.workspace_id,
           binding_id: bindingId,
           binding: parsedBinding
@@ -361,7 +327,6 @@ export class WorkspaceService {
       workspace_id: input.workspaceId,
       run_id: null,
       caused_by: "user_action",
-      revision: 0,
       payload_json: WorkspaceCreatedPayloadSchema.parse({
         workspace_id: input.workspaceId,
         name: input.name,
@@ -378,7 +343,6 @@ export class WorkspaceService {
       workspace_id: record.workspace_id,
       run_id: null,
       caused_by: "system",
-      revision: 0,
       payload_json: BootstrappingPathsPlantedPayloadSchema.parse({
         record_id: record.record_id,
         workspace_id: record.workspace_id,

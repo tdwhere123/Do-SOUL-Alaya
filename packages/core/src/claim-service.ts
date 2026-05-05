@@ -38,14 +38,12 @@ export type ClaimFormInput = Omit<
 };
 
 export interface ClaimServiceEventLogRepoPort {
-  append(event: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
 }
 
 export interface ClaimServiceClaimFormRepoPort {
-  create(claim: ClaimForm): Promise<Readonly<ClaimForm>>;
-  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
-  createSync(claim: ClaimForm): Readonly<ClaimForm>;
+  create(claim: ClaimForm): Readonly<ClaimForm>;
   findById(objectId: string): Promise<Readonly<ClaimForm> | null>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<ClaimForm>[]>;
   findByStatus(workspaceId: string, status: ClaimLifecycleStateType): Promise<readonly Readonly<ClaimForm>[]>;
@@ -125,15 +123,12 @@ export class ClaimService {
       claim_status: ClaimLifecycleState.DRAFT
     });
 
-    const claimCreatedEventInput = createClaimCreatedEventInput(
-      claim,
-      canonicalizationPlan?.nextRevision ?? (await this.getNextRevision("claim_form", claim.object_id))
-    );
+    const claimCreatedEventInput = createClaimCreatedEventInput(claim);
 
     if (canonicalizationPlan !== undefined && this.dependencies.eventPublisher !== undefined) {
       return await this.dependencies.eventPublisher.appendManyWithMutation(
         [...canonicalizationPlan.eventInputs, claimCreatedEventInput],
-        () => this.dependencies.claimFormRepo.createSync(claim)
+        () => this.dependencies.claimFormRepo.create(claim)
       );
     }
 
@@ -236,7 +231,6 @@ export class ClaimService {
     deferredNotificationEvents?: EventLogEntry[]
   ): Promise<Readonly<ClaimForm>> {
     const occurredAt = this.now();
-    const revision = await this.getNextRevision("claim_form", existing.object_id);
     const event = await this.dependencies.eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_CLAIM_LIFECYCLE_CHANGED,
       entity_type: "claim_form",
@@ -244,7 +238,6 @@ export class ClaimService {
       workspace_id: existing.workspace_id,
       run_id: null,
       caused_by: causedBy,
-      revision,
       payload_json: SoulClaimLifecycleChangedPayloadSchema.parse({
         object_id: existing.object_id,
         object_kind: existing.object_kind,
@@ -279,7 +272,6 @@ export class ClaimService {
     contestedBy: string | null,
     deferredNotificationEvents?: EventLogEntry[]
   ): Promise<void> {
-    const revision = await this.getNextRevision("claim_form", claim.object_id);
     const event = await this.dependencies.eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_CLAIM_CONTESTED,
       entity_type: "claim_form",
@@ -287,7 +279,6 @@ export class ClaimService {
       workspace_id: claim.workspace_id,
       run_id: null,
       caused_by: TransitionCausedBy.SYSTEM,
-      revision,
       payload_json: SoulClaimContestedPayloadSchema.parse({
         object_id: claim.object_id,
         object_kind: claim.object_kind,
@@ -305,16 +296,6 @@ export class ClaimService {
     }
   }
 
-  private async getNextRevision(entityType: string, entityId: string): Promise<number> {
-    const events = await this.dependencies.eventLogRepo.queryByEntity(entityType, entityId);
-
-    if (events.length === 0) {
-      return 0;
-    }
-
-    const maxRevision = events.reduce((max, event) => Math.max(max, event.revision), 0);
-    return maxRevision + 1;
-  }
 }
 
 function parseClaimForm(value: ClaimForm): ClaimForm {
@@ -333,10 +314,7 @@ function parseGovernanceSubject(domain: string, qualifiers: Record<string, strin
   }
 }
 
-function createClaimCreatedEventInput(
-  claim: Readonly<ClaimForm>,
-  revision: number
-): Omit<EventLogEntry, "event_id" | "created_at"> {
+function createClaimCreatedEventInput(claim: Readonly<ClaimForm>): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
   return {
     event_type: MemoryGovernanceEventType.SOUL_CLAIM_CREATED,
     entity_type: "claim_form",
@@ -344,7 +322,6 @@ function createClaimCreatedEventInput(
     workspace_id: claim.workspace_id,
     run_id: null,
     caused_by: claim.created_by,
-    revision,
     payload_json: SoulClaimCreatedPayloadSchema.parse({
       object_id: claim.object_id,
       object_kind: claim.object_kind,

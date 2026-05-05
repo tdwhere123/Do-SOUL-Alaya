@@ -7,13 +7,13 @@ const FIXED_NOW = "2026-04-15T12:00:00.000Z";
 
 describe("ConstraintProxy", () => {
   it("passes silently when there are no active obligations", async () => {
-    const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at">> = [];
+    const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
     const proxy = new ConstraintProxy({
       obligationLookup: {
         findActiveByRun: vi.fn(async () => [])
       },
       eventPublisher: {
-        publish: vi.fn(async (eventInput: Omit<EventLogEntry, "event_id" | "created_at">) => {
+        publish: vi.fn(async (eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
           publishedEvents.push(eventInput);
           return {
             ...eventInput,
@@ -44,8 +44,8 @@ describe("ConstraintProxy", () => {
         expires_at: "2026-04-16T12:00:00.000Z"
       }
     ];
-    const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at">> = [];
-    const publish = vi.fn(async (eventInput: Omit<EventLogEntry, "event_id" | "created_at">) => {
+    const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
+    const publish = vi.fn(async (eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
       publishedEvents.push(eventInput);
       return {
         ...eventInput,

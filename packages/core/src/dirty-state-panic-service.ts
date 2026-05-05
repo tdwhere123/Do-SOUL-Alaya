@@ -20,7 +20,7 @@ import { assertWorkerTransition } from "./worker-run-state-machine.js";
 
 export interface DirtyStateDossierRepoPort {
   /** Sync sibling for atomic publish + mutation (#BL-022). */
-  createSync(dossier: DirtyStateDossier): Readonly<DirtyStateDossier>;
+  create(dossier: DirtyStateDossier): Readonly<DirtyStateDossier>;
   deleteById(dossierId: string): Promise<void>;
   findByWorkspace(workspaceId: string): Promise<readonly Readonly<DirtyStateDossier>[]>;
   findByWorkerRun(workerRunId: string): Promise<readonly Readonly<DirtyStateDossier>[]>;
@@ -34,7 +34,7 @@ export interface DirtyStatePanicWorkerRunRepoPort {
    * transaction as the dossier insert and both EventLog rows
    * (panic + worker.state_changed).
    */
-  updateStateSync(
+  updateState(
     workerRunId: string,
     expectedState: WorkerRunState,
     nextState: WorkerRunState,
@@ -78,8 +78,8 @@ export class DirtyStatePanicService {
     return await this.deps.eventPublisher.appendManyWithMutation(
       [panicEvent, stateChangedEvent],
       () => {
-        const persisted = this.deps.dossierRepo.createSync(dossier);
-        this.deps.workerRunRepo.updateStateSync(
+        const persisted = this.deps.dossierRepo.create(dossier);
+        this.deps.workerRunRepo.updateState(
           workerRun.worker_run_id,
           workerRun.state,
           "frozen",
@@ -126,7 +126,7 @@ export class DirtyStatePanicService {
   private buildWorkerStateChangedEvent(
     workerRun: Readonly<DelegatedWorkerRun>,
     dossier: Readonly<DirtyStateDossier>
-  ): Omit<EventLogEntry, "event_id" | "created_at"> {
+  ): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
     const payload = WorkerStateChangedPayloadSchema.parse({
       workerId: workerRun.worker_run_id,
       state: "frozen",
@@ -142,14 +142,13 @@ export class DirtyStatePanicService {
       workspace_id: workerRun.workspace_id,
       run_id: workerRun.principal_run_id,
       caused_by: "worker_lifecycle",
-      revision: 0,
       payload_json: payload
     };
   }
 
   private buildPanicEvent(
     dossier: Readonly<DirtyStateDossier>
-  ): Omit<EventLogEntry, "event_id" | "created_at"> {
+  ): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
     const payload = DirtyStatePanicPayloadSchema.parse({
       dossier_id: dossier.dossier_id,
       worker_run_id: dossier.worker_run_id,
@@ -167,7 +166,6 @@ export class DirtyStatePanicService {
       workspace_id: dossier.workspace_id,
       run_id: dossier.principal_run_id,
       caused_by: "dirty_state_panic",
-      revision: 0,
       payload_json: payload
     };
   }

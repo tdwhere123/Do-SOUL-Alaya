@@ -151,7 +151,7 @@ describe("SqliteRunRepo", () => {
   it("create surfaces a storage error when the workspace is missing", async () => {
     const { runRepo } = createRunRepos();
 
-    await expect(
+    expect(() =>
       runRepo.create({
         run_id: "run_missing_workspace",
         workspace_id: "ws_unknown",
@@ -163,7 +163,7 @@ describe("SqliteRunRepo", () => {
         run_state: RunState.IDLE,
         current_surface_id: null
       })
-    ).rejects.toBeInstanceOf(StorageError);
+    ).toThrow(StorageError);
   });
 
   it("updateState throws not found for a missing run", async () => {

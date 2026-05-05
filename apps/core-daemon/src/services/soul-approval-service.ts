@@ -59,7 +59,6 @@ async function resolveSoulApproval(
     workspace_id: run.workspace_id,
     run_id: run.run_id,
     caused_by: input.causedBy,
-    revision: approvalState.maxRevision + 1,
     payload_json: {
       message_id: approvalState.approvalRequest.message_id,
       approval_id: input.approvalId,
@@ -87,18 +86,12 @@ async function resolveSoulApproval(
 
 function getApprovalState(runEvents: readonly EventLogEntry[], approvalId: string): {
   readonly approvalRequest: SoulApprovalRequestedPayload;
-  readonly maxRevision: number;
 } {
   let approvalRequest: SoulApprovalRequestedPayload | null = null;
-  let maxRevision = -1;
 
   for (const event of runEvents) {
     if (event.entity_type !== "approval" || event.entity_id !== approvalId) {
       continue;
-    }
-
-    if (event.revision > maxRevision) {
-      maxRevision = event.revision;
     }
 
     if (event.event_type === FileApprovalEventType.SOUL_APPROVAL_REQUESTED) {
@@ -117,8 +110,7 @@ function getApprovalState(runEvents: readonly EventLogEntry[], approvalId: strin
   }
 
   return {
-    approvalRequest,
-    maxRevision
+    approvalRequest
   };
 }
 

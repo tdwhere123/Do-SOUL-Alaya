@@ -2,17 +2,18 @@ import { describe, expect, it, vi } from "vitest";
 import { RecallContextEventType, RunMode, type EventLogEntry } from "@do-soul/alaya-protocol";
 import { STRATEGY_RECALL_DEFAULTS, TaskSurfaceBuilder } from "../task-surface-builder.js";
 
-function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at">): EventLogEntry {
+function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry {
   return {
     event_id: `event-${event.event_type}`,
     created_at: "2026-03-23T00:00:00.000Z",
+    revision: 0,
     ...event
   };
 }
 
 describe("TaskSurfaceBuilder", () => {
   it("build returns valid TaskObjectSurface and emits event", async () => {
-    const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => createEventLogEntry(event));
+    const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(event));
     const builder = new TaskSurfaceBuilder({
       now: () => "2026-03-23T00:00:00.000Z",
       generateRuntimeId: () => "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
@@ -58,8 +59,7 @@ describe("TaskSurfaceBuilder", () => {
       expect.objectContaining({
         event_type: RecallContextEventType.SOUL_TASK_SURFACE_CREATED,
         entity_type: "task_object_surface",
-        entity_id: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
-        revision: 0
+        entity_id: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca"
       })
     );
   });

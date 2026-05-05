@@ -144,7 +144,7 @@ function createBudgetExceededEvent(params: {
   readonly maxBytes: number;
   readonly currentCount: number;
   readonly maxCount: number;
-}): Omit<EventLogEntry, "event_id" | "created_at"> {
+}): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
   return {
     event_type: ObligationTrustNarrativeEventType.NARRATIVE_BUDGET_EXCEEDED,
     entity_type: "run",
@@ -152,7 +152,6 @@ function createBudgetExceededEvent(params: {
     workspace_id: params.workspaceId,
     run_id: params.runId,
     caused_by: "system",
-    revision: 0,
     payload_json: NarrativeBudgetExceededPayloadSchema.parse({
       workspace_id: params.workspaceId,
       run_id: params.runId,
@@ -169,7 +168,7 @@ function createConsolidationTriggeredEvent(params: {
   readonly runId: string;
   readonly triggerReason: string;
   readonly digestCountBefore: number;
-}): Omit<EventLogEntry, "event_id" | "created_at"> {
+}): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
   return {
     event_type: ObligationTrustNarrativeEventType.NARRATIVE_CONSOLIDATION_TRIGGERED,
     entity_type: "run",
@@ -177,7 +176,6 @@ function createConsolidationTriggeredEvent(params: {
     workspace_id: params.workspaceId,
     run_id: params.runId,
     caused_by: "system",
-    revision: 0,
     payload_json: NarrativeConsolidationTriggeredPayloadSchema.parse({
       workspace_id: params.workspaceId,
       run_id: params.runId,

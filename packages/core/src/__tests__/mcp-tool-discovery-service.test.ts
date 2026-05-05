@@ -35,11 +35,12 @@ describe("McpToolDiscoveryService", () => {
       return provider;
     });
     const appendedEntries: EventLogEntry[] = [];
-    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => {
+    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
       const persisted = {
         ...entry,
         event_id: `event-${appendedEntries.length + 1}`,
-        created_at: validTimestamp
+        created_at: validTimestamp,
+      revision: 0
       } satisfies EventLogEntry;
       appendedEntries.push(persisted);
       return persisted;
@@ -116,11 +117,12 @@ describe("McpToolDiscoveryService", () => {
         ])
       },
       eventLogWriter: {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => {
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
           const persisted = {
             ...entry,
             event_id: "event-1",
-            created_at: validTimestamp
+            created_at: validTimestamp,
+          revision: 0
           } satisfies EventLogEntry;
           appendedEntries.push(persisted);
           return persisted;
@@ -205,11 +207,12 @@ describe("McpToolDiscoveryService", () => {
       return provider;
     });
     const appendedEntries: EventLogEntry[] = [];
-    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => {
+    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
       const persisted = {
         ...entry,
         event_id: `event-${appendedEntries.length + 1}`,
-        created_at: validTimestamp
+        created_at: validTimestamp,
+      revision: 0
       } satisfies EventLogEntry;
       appendedEntries.push(persisted);
       return persisted;
@@ -281,11 +284,12 @@ describe("McpToolDiscoveryService", () => {
       return provider;
     });
     const appendedEntries: EventLogEntry[] = [];
-    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => {
+    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
       const persisted = {
         ...entry,
         event_id: `event-${appendedEntries.length + 1}`,
-        created_at: validTimestamp
+        created_at: validTimestamp,
+      revision: 0
       } satisfies EventLogEntry;
       appendedEntries.push(persisted);
       return persisted;
@@ -365,11 +369,12 @@ describe("McpToolDiscoveryService", () => {
       return provider;
     });
     const appendedEntries: EventLogEntry[] = [];
-    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => {
+    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
       const persisted = {
         ...entry,
         event_id: `event-${appendedEntries.length + 1}`,
-        created_at: validTimestamp
+        created_at: validTimestamp,
+      revision: 0
       } satisfies EventLogEntry;
       appendedEntries.push(persisted);
       firstAppendCompleted.resolve();
@@ -438,11 +443,12 @@ describe("McpToolDiscoveryService", () => {
       return provider;
     });
     const appendedEntries: EventLogEntry[] = [];
-    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => {
+    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
       const persisted = {
         ...entry,
         event_id: `event-${appendedEntries.length + 1}`,
-        created_at: validTimestamp
+        created_at: validTimestamp,
+      revision: 0
       } satisfies EventLogEntry;
       appendedEntries.push(persisted);
       return persisted;
@@ -551,10 +557,11 @@ describe("McpToolDiscoveryService", () => {
         listServerTools
       },
       eventLogWriter: {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
           ...entry,
           event_id: "event-1",
-          created_at: validTimestamp
+          created_at: validTimestamp,
+          revision: 0
         }))
       },
       now: () => validTimestamp

@@ -101,7 +101,8 @@ let body: Record<string, unknown>;
       proposal_id: proposalId,
       verdict: body.verdict,
       reason: body.reason ?? null,
-      reviewer_identity: body.reviewer_identity
+      reviewer_identity: body.reviewer_identity,
+      reviewer_token: body.reviewer_token
     };
     const result = await services.mcpMemoryToolHandler.call({
       toolName: "soul.review_memory_proposal",

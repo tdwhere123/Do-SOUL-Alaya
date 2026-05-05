@@ -81,7 +81,7 @@ export interface SessionOverrideRemediationWarnPort {
 }
 
 export interface SessionOverrideRemediationEventLogPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
   queryByWorkspace(workspaceId: string): Promise<readonly EventLogEntry[]>;
 }
@@ -220,7 +220,6 @@ export class SessionOverrideRemediation {
     outcome: PromotionOutcome,
     occurredAt: string
   ): Promise<void> {
-    const revision = await getNextRevision(this.dependencies.eventLogRepo, "session_override", override.runtime_id);
     await this.dependencies.eventLogRepo.append({
       event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_PROMOTED,
       entity_type: "session_override",
@@ -228,7 +227,6 @@ export class SessionOverrideRemediation {
       workspace_id: workspaceId,
       run_id: runId,
       caused_by: "system",
-      revision,
       payload_json: SoulSessionOverridePromotedPayloadSchema.parse({
         override_id: override.runtime_id,
         target_object: override.target_object.trim().length === 0 ? "unlocatable_target" : override.target_object,
@@ -418,19 +416,4 @@ function toClaimEnforcementLevel(dimension: MemoryDimensionValue): ClaimForm["en
 
 function normalizeTriggerValue(value: string): string {
   return value.trim().toLowerCase();
-}
-
-async function getNextRevision(
-  lookup: SessionOverrideRemediationEventLogPort,
-  entityType: string,
-  entityId: string
-): Promise<number> {
-  const events = await lookup.queryByEntity(entityType, entityId);
-
-  if (events.length === 0) {
-    return 0;
-  }
-
-  const maxRevision = events.reduce((max, event) => Math.max(max, event.revision), 0);
-  return maxRevision + 1;
 }

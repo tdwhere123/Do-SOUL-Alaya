@@ -128,7 +128,7 @@ type ObservedSecurityStatus = Readonly<{
 function createStatusChangedEvent(
   status: Readonly<SecurityStatusContract>,
   reason: string
-): Omit<EventLogEntry, "event_id" | "created_at"> {
+): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
   return {
     event_type: RuntimeGovernanceEventType.SECURITY_PASSTHROUGH_STATUS_CHANGED,
     entity_type: "workspace",
@@ -136,7 +136,6 @@ function createStatusChangedEvent(
     workspace_id: status.workspace_id,
     run_id: null,
     caused_by: SYSTEM_ACTOR,
-    revision: 0,
     payload_json: SecurityPassthroughStatusChangedPayloadSchema.parse({
       workspace_id: status.workspace_id,
       posture: status.posture,
@@ -154,7 +153,7 @@ function createInitializationFailedEvent(
   failedAt: string,
   reason?: string | null,
   errorCode?: string | null
-): Omit<EventLogEntry, "event_id" | "created_at"> {
+): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
   return {
     event_type: RuntimeGovernanceEventType.SECURITY_PASSTHROUGH_INITIALIZATION_FAILED,
     entity_type: "workspace",
@@ -162,7 +161,6 @@ function createInitializationFailedEvent(
     workspace_id: workspaceId,
     run_id: null,
     caused_by: SYSTEM_ACTOR,
-    revision: 0,
     payload_json: SecurityPassthroughInitializationFailedPayloadSchema.parse({
       workspace_id: workspaceId,
       operation,

@@ -84,14 +84,14 @@ describe("SqliteWorkerRunRepo", () => {
 
     await repo.insert(run);
 
-    await expect(
+    expect(
       repo.updateState(
         run.worker_run_id,
         "init",
         "active",
         "2026-04-13T10:10:00.000Z"
       )
-    ).resolves.toEqual({
+    ).toEqual({
       ...run,
       state: "active",
       updated_at: "2026-04-13T10:10:00.000Z"
@@ -104,17 +104,17 @@ describe("SqliteWorkerRunRepo", () => {
 
     await repo.insert(run);
 
-    await expect(
+    expect(() =>
       repo.updateState(
         run.worker_run_id,
         "active",
         "completed",
         "2026-04-13T10:10:00.000Z"
       )
-    ).rejects.toMatchObject({
+    ).toThrowError(expect.objectContaining({
       name: "StorageError",
       code: "CONFLICT"
-    });
+    }));
   });
 
   it("deletes a worker run only when the expected state matches", async () => {

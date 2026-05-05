@@ -19,7 +19,10 @@ import {
 } from "../soul/execution-stance.js";
 import { ManifestationLevelSchema } from "../soul/manifestation-budget.js";
 import { OutputShapingResultSchema } from "../soul/output-shaping.js";
-import { PathGovernanceClassSchema } from "../soul/path-relation.js";
+import {
+  DirectionBiasSchema,
+  PathGovernanceClassSchema
+} from "../soul/path-relation.js";
 import { SecurityPostureSchema } from "../soul/security-status.js";
 import {
   DriftSeveritySchema,
@@ -37,6 +40,7 @@ const runtimeGovernanceEventTypeValues = [
   "path.relation_created",
   "path.relation_reinforced",
   "path.relation_weakened",
+  "path.relation_redirected",
   "path.relation_retired",
   "path.consolidation_completed",
   "path.consolidation_fused",
@@ -70,6 +74,7 @@ export const RuntimeGovernanceEventType = {
   PATH_RELATION_CREATED: "path.relation_created",
   PATH_RELATION_REINFORCED: "path.relation_reinforced",
   PATH_RELATION_WEAKENED: "path.relation_weakened",
+  PATH_RELATION_REDIRECTED: "path.relation_redirected",
   PATH_RELATION_RETIRED: "path.relation_retired",
   PATH_CONSOLIDATION_COMPLETED: "path.consolidation_completed",
   PATH_CONSOLIDATION_FUSED: "path.consolidation_fused",
@@ -209,6 +214,18 @@ export const PathRelationWeakenedPayloadSchema = z
     // this field.
     contradiction_events_count: NonNegativeIntSchema.optional(),
     weakened_at: IsoDatetimeStringSchema
+  })
+  .strict()
+  .readonly();
+
+export const PathRelationRedirectedPayloadSchema = z
+  .object({
+    path_id: NonEmptyStringSchema,
+    previous_direction_bias: DirectionBiasSchema,
+    new_direction_bias: DirectionBiasSchema,
+    source_usage_count: NonNegativeIntSchema,
+    target_usage_count: NonNegativeIntSchema,
+    redirected_at: IsoDatetimeStringSchema
   })
   .strict()
   .readonly();
@@ -471,6 +488,7 @@ const runtimeGovernancePayloadSchemas = {
   [RuntimeGovernanceEventType.PATH_RELATION_CREATED]: PathRelationCreatedPayloadSchema,
   [RuntimeGovernanceEventType.PATH_RELATION_REINFORCED]: PathRelationReinforcedPayloadSchema,
   [RuntimeGovernanceEventType.PATH_RELATION_WEAKENED]: PathRelationWeakenedPayloadSchema,
+  [RuntimeGovernanceEventType.PATH_RELATION_REDIRECTED]: PathRelationRedirectedPayloadSchema,
   [RuntimeGovernanceEventType.PATH_RELATION_RETIRED]: PathRelationRetiredPayloadSchema,
   [RuntimeGovernanceEventType.SURFACE_DRIFT_DETECTED]: SurfaceDriftDetectedPayloadSchema,
   [RuntimeGovernanceEventType.SURFACE_DRIFT_LEASE_ACQUIRED]: SurfaceDriftLeaseAcquiredPayloadSchema,
@@ -549,6 +567,10 @@ const PathRelationReinforcedEventObjectSchema = createRuntimeGovernanceEventObje
 const PathRelationWeakenedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
   RuntimeGovernanceEventType.PATH_RELATION_WEAKENED,
   PathRelationWeakenedPayloadSchema
+);
+const PathRelationRedirectedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
+  RuntimeGovernanceEventType.PATH_RELATION_REDIRECTED,
+  PathRelationRedirectedPayloadSchema
 );
 const PathRelationRetiredEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
   RuntimeGovernanceEventType.PATH_RELATION_RETIRED,
@@ -646,6 +668,7 @@ export const BootstrappingPathsPlantedEventSchema =
 export const PathRelationCreatedEventSchema = PathRelationCreatedEventObjectSchema.readonly();
 export const PathRelationReinforcedEventSchema = PathRelationReinforcedEventObjectSchema.readonly();
 export const PathRelationWeakenedEventSchema = PathRelationWeakenedEventObjectSchema.readonly();
+export const PathRelationRedirectedEventSchema = PathRelationRedirectedEventObjectSchema.readonly();
 export const PathRelationRetiredEventSchema = PathRelationRetiredEventObjectSchema.readonly();
 export const SurfaceDriftDetectedEventSchema = SurfaceDriftDetectedEventObjectSchema.readonly();
 export const SurfaceDriftLeaseAcquiredEventSchema =
@@ -693,6 +716,7 @@ export const RuntimeGovernanceEventUnionSchema = z
     PathRelationCreatedEventObjectSchema,
     PathRelationReinforcedEventObjectSchema,
     PathRelationWeakenedEventObjectSchema,
+    PathRelationRedirectedEventObjectSchema,
     PathRelationRetiredEventObjectSchema,
     SurfaceDriftDetectedEventObjectSchema,
     SurfaceDriftLeaseAcquiredEventObjectSchema,
@@ -748,6 +772,7 @@ export type BootstrappingPathsPlantedPayload = z.infer<
 export type PathRelationCreatedPayload = z.infer<typeof PathRelationCreatedPayloadSchema>;
 export type PathRelationReinforcedPayload = z.infer<typeof PathRelationReinforcedPayloadSchema>;
 export type PathRelationWeakenedPayload = z.infer<typeof PathRelationWeakenedPayloadSchema>;
+export type PathRelationRedirectedPayload = z.infer<typeof PathRelationRedirectedPayloadSchema>;
 export type PathRelationRetiredPayload = z.infer<typeof PathRelationRetiredPayloadSchema>;
 export type SurfaceDriftDetectedPayload = z.infer<typeof SurfaceDriftDetectedPayloadSchema>;
 export type SurfaceDriftLeaseAcquiredPayload = z.infer<typeof SurfaceDriftLeaseAcquiredPayloadSchema>;

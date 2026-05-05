@@ -17,19 +17,8 @@ import { parseNonEmptyString } from "./shared/validators.js";
 
 export interface DeferredObligationRepoPort {
   getById(obligationId: string): Promise<Readonly<DeferredObligation> | null>;
-  create(obligation: DeferredObligation): Promise<Readonly<DeferredObligation>>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  createSync(obligation: DeferredObligation): Readonly<DeferredObligation>;
+  create(obligation: DeferredObligation): Readonly<DeferredObligation>;
   updateState(
-    obligationId: string,
-    expectedState: DeferredObligationState,
-    nextState: DeferredObligationState,
-    options?: {
-      readonly fulfilledAt?: string;
-    }
-  ): Promise<Readonly<DeferredObligation>>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  updateStateSync(
     obligationId: string,
     expectedState: DeferredObligationState,
     nextState: DeferredObligationState,
@@ -97,11 +86,10 @@ export class DeferredObligationService {
           workspace_id: obligation.workspace_id,
           run_id: obligation.source_run_id,
           caused_by: "deferred_obligation_service",
-          revision: 0,
           payload_json: payload
         }
       ],
-      () => this.deps.repo.createSync(obligation)
+      () => this.deps.repo.create(obligation)
     );
   }
 
@@ -123,12 +111,11 @@ export class DeferredObligationService {
           workspace_id: snapshot.workspace_id,
           run_id: snapshot.source_run_id,
           caused_by: "deferred_obligation_service",
-          revision: 0,
           payload_json: payload
         }
       ],
       () =>
-        this.deps.repo.updateStateSync(parsedObligationId, "pending", "fulfilled", {
+        this.deps.repo.updateState(parsedObligationId, "pending", "fulfilled", {
           fulfilledAt
         })
     );
@@ -160,11 +147,10 @@ export class DeferredObligationService {
           workspace_id: snapshot.workspace_id,
           run_id: snapshot.source_run_id,
           caused_by: "deferred_obligation_service",
-          revision: 0,
           payload_json: payload
         }
       ],
-      () => this.deps.repo.updateStateSync(parsedObligationId, "pending", "expired")
+      () => this.deps.repo.updateState(parsedObligationId, "pending", "expired")
     );
   }
 

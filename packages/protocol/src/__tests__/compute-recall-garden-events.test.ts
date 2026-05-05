@@ -51,14 +51,13 @@ describe("Phase C extension protocol schemas", () => {
       GARDEN_ROLE_PERMISSIONS[GardenRole.JANITOR].allowed_task_kinds
     ).not.toContain(GardenTaskKind.EMBEDDING_BACKFILL);
 
-    // A3: path_plasticity_update is a TIER_1 Auditor task (also reachable by
-    // the Librarian via the librarian = auditor + extras inheritance) and
-    // never the Janitor.
+    // Gate-5F 5F-D: path_plasticity_update belongs to the TIER_2 Librarian,
+    // not the Auditor or Janitor.
     expect(GardenTaskKindSchema.parse("path_plasticity_update")).toBe("path_plasticity_update");
     expect(GardenTaskKind.PATH_PLASTICITY_UPDATE).toBe("path_plasticity_update");
     expect(
       GARDEN_ROLE_PERMISSIONS[GardenRole.AUDITOR].allowed_task_kinds
-    ).toContain(GardenTaskKind.PATH_PLASTICITY_UPDATE);
+    ).not.toContain(GardenTaskKind.PATH_PLASTICITY_UPDATE);
     expect(
       GARDEN_ROLE_PERMISSIONS[GardenRole.LIBRARIAN].allowed_task_kinds
     ).toContain(GardenTaskKind.PATH_PLASTICITY_UPDATE);

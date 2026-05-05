@@ -159,13 +159,7 @@ function createDependencies(seed?: {
     })(),
     now: () => "2026-03-22T01:00:00.000Z",
     surfaceBindingRepo: {
-      create: vi.fn(async (binding, bindingId) => {
-        order.push("binding_create");
-        const record = Object.freeze({ binding_id: bindingId, binding: Object.freeze({ ...binding }) });
-        bindingStore.set(bindingId, record);
-        return record;
-      }),
-      createSync: vi.fn((binding, bindingId) => {
+      create: vi.fn((binding, bindingId) => {
         order.push("binding_create");
         const record = Object.freeze({ binding_id: bindingId, binding: Object.freeze({ ...binding }) });
         bindingStore.set(bindingId, record);
@@ -205,7 +199,7 @@ function createDependencies(seed?: {
       findByWorkspace: vi.fn(async (workspaceId) =>
         [...bindingStore.values()].filter((record) => record.binding.workspace_id === workspaceId)
       ),
-      updateState: vi.fn(async (bindingId, bindingState, updatedAt) => {
+      updateState: vi.fn((bindingId, bindingState, updatedAt) => {
         order.push("binding_update");
         const existing = bindingStore.get(bindingId);
 
@@ -224,52 +218,7 @@ function createDependencies(seed?: {
         bindingStore.set(bindingId, updated);
         return updated;
       }),
-      updateStateSync: vi.fn((bindingId, bindingState, updatedAt) => {
-        order.push("binding_update");
-        const existing = bindingStore.get(bindingId);
-
-        if (existing === undefined) {
-          throw new Error(`missing binding ${bindingId}`);
-        }
-
-        const updated = Object.freeze({
-          binding_id: bindingId,
-          binding: Object.freeze({
-            ...existing.binding,
-            binding_state: bindingState,
-            updated_at: updatedAt
-          })
-        });
-        bindingStore.set(bindingId, updated);
-        return updated;
-      }),
-      cascadeDetachBySurfaceId: vi.fn(async (surfaceId, workspaceId, updatedAt) => {
-        order.push("binding_cascade_detach");
-
-        const detached: BindingRecord[] = [];
-
-        for (const [bindingId, existing] of bindingStore.entries()) {
-          if (
-            existing.binding.surface_id === surfaceId &&
-            existing.binding.workspace_id === workspaceId &&
-            existing.binding.binding_state !== BindingState.DETACHED
-          ) {
-            const updated = Object.freeze({
-              binding_id: bindingId,
-              binding: Object.freeze({
-                ...existing.binding,
-                binding_state: BindingState.DETACHED,
-                updated_at: updatedAt
-              })
-            });
-            bindingStore.set(bindingId, updated);
-            detached.push(updated);
-          }
-        }
-
-        return detached;
-      }),
-      cascadeDetachBySurfaceIdSync: vi.fn((surfaceId, workspaceId, updatedAt) => {
+      cascadeDetachBySurfaceId: vi.fn((surfaceId, workspaceId, updatedAt) => {
         order.push("binding_cascade_detach");
 
         const detached: BindingRecord[] = [];
@@ -496,7 +445,7 @@ describe("SurfaceBindingService", () => {
       }
     };
 
-    (dependencies.surfaceBindingRepo.createSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+    (dependencies.surfaceBindingRepo.create as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
       throw uniqueConstraintError as unknown as Error;
     });
 

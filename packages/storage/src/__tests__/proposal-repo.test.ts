@@ -60,7 +60,8 @@ describe("SqliteProposalRepo", () => {
       proposal,
       workspace_id: "workspace-1",
       run_id: "run-1",
-      reviewer_identity: null
+      reviewer_identity: null,
+      reviewer_assignment: null
     });
   });
 

@@ -6,7 +6,7 @@ import {
 } from "@do-soul/alaya-protocol";
 
 type ConfigRepoPort = {
-  get<TValue>(key: string): Promise<TValue | null>;
+  get<TValue>(key: string): TValue | null | Promise<TValue | null>;
 };
 
 type CurrencyRecord = Readonly<{

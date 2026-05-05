@@ -1,7 +1,8 @@
 # Phase 6 — Wave 6: Marketing Benchmark Wave (post-v0.1.0)
 
 Phase 6 closes **v0.1.1** by adding a single-run marketing leaderboard
-to the v0.1 README. It runs **after** Gate-5 / `v0.1.0` releases.
+to the v0.1 README. It runs **after** Gate-5 / `v0.1.0` releases and
+Gate-5F has closed the current Open backlog.
 
 The wave delivers a benchmark **harness** plus an **OpenAI-compatible
 adapter** so the user can run the comparison themselves against any
@@ -41,25 +42,30 @@ in place with placeholders the user fills in after their run.
 ```
 Gate-5 (v0.1.0 ships)
   │
-  └─> P6-bench-adapter
+  └─> Gate-5F (Open backlog `#BL-025`..`#BL-036` closes)
         │
-        ├─> P6-bench-harness
-        │     │
-        │     └─> P6-bench-baselines
-        │           │
-        │           └─> P6-bench-resume
-        │                 │
-        │                 └─> P6-bench-readme
-        │
-        (alternatively: harness, baselines, resume can be split
-         into a 2-stage parallel block once adapter lands; the
-         README card always sequences last)
+        └─> P6-bench-adapter
+              │
+              ├─> P6-bench-harness
+              │     │
+              │     └─> P6-bench-baselines
+              │           │
+              │           └─> P6-bench-resume
+              │                 │
+              │                 └─> P6-bench-readme
+              │
+              (alternatively: harness, baselines, resume can be split
+               into a 2-stage parallel block once adapter lands; the
+               README card always sequences last)
 ```
 
 ## Prerequisites
 
 - **Gate-5 passed** (v0.1.0 released; this is non-negotiable — the
   marketing wave is for an already-shipped product).
+- **Gate-5F passed**: backlog Open count for `#BL-025` through
+  `#BL-036` is zero, final review has zero Blocking / Important
+  findings, and the full verification gate passes.
 - Existing `OPENAI_*` config rename from Round 3 must be intact (the
   adapter reuses these names rather than introducing new env vars).
 
@@ -139,5 +145,5 @@ results), the table is removed from the README, not partially shipped.
   executed in two waves once P6-bench-adapter lands:
   Wave-A: `harness` → Wave-B: `baselines` + `resume` in parallel →
   P6-bench-readme last.
-- All Phase 6 cards are sequential with respect to Gate-5; none of them
-  may start until v0.1.0 has been tagged.
+- All Phase 6 cards are sequential with respect to Gate-5F; none of them
+  may start until Gate-5F has passed.

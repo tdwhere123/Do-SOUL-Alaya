@@ -6,15 +6,9 @@ interface ConfigRow {
 }
 
 export interface ConfigRepo {
-  get<T>(key: string): Promise<T | null>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  getSync<T>(key: string): T | null;
-  set<T>(key: string, value: T): Promise<void>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  setSync<T>(key: string, value: T): void;
-  patch<T extends Record<string, unknown>>(key: string, partial: Partial<T>, defaults: T): Promise<T>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  patchSync<T extends Record<string, unknown>>(key: string, partial: Partial<T>, defaults: T): T;
+  get<T>(key: string): T | null;
+  set<T>(key: string, value: T): void;
+  patch<T extends Record<string, unknown>>(key: string, partial: Partial<T>, defaults: T): T;
 }
 
 export class SqliteConfigRepo implements ConfigRepo {
@@ -38,12 +32,7 @@ export class SqliteConfigRepo implements ConfigRepo {
     `);
   }
 
-  public async get<T>(key: string): Promise<T | null> {
-    return this.getSync<T>(key);
-  }
-
-  /** Synchronous variant for atomic publish + mutation (#BL-022). */
-  public getSync<T>(key: string): T | null {
+  public get<T>(key: string): T | null {
     try {
       const row = this.getStatement.get(key) as ConfigRow | undefined;
 
@@ -57,12 +46,7 @@ export class SqliteConfigRepo implements ConfigRepo {
     }
   }
 
-  public async set<T>(key: string, value: T): Promise<void> {
-    this.setSync(key, value);
-  }
-
-  /** Synchronous variant for atomic publish + mutation (#BL-022). */
-  public setSync<T>(key: string, value: T): void {
+  public set<T>(key: string, value: T): void {
     try {
       this.upsertStatement.run(key, JSON.stringify(value), new Date().toISOString());
     } catch (error) {
@@ -70,18 +54,13 @@ export class SqliteConfigRepo implements ConfigRepo {
     }
   }
 
-  public async patch<T extends Record<string, unknown>>(key: string, partial: Partial<T>, defaults: T): Promise<T> {
-    return this.patchSync(key, partial, defaults);
-  }
-
-  /** Synchronous variant for atomic publish + mutation (#BL-022). */
-  public patchSync<T extends Record<string, unknown>>(key: string, partial: Partial<T>, defaults: T): T {
-    const current = this.getSync<T>(key) ?? defaults;
+  public patch<T extends Record<string, unknown>>(key: string, partial: Partial<T>, defaults: T): T {
+    const current = this.get<T>(key) ?? defaults;
     const next = {
       ...current,
       ...partial
     } as T;
-    this.setSync(key, next);
+    this.set(key, next);
     return next;
   }
 }

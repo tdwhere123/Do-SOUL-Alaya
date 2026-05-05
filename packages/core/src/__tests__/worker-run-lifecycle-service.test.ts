@@ -15,7 +15,6 @@ const FIXED_NOW = "2026-04-10T12:00:00.000Z";
 type MutableWorkerRepo = WorkerRunRepoPort & {
   readonly getById: ReturnType<typeof vi.fn>;
   readonly updateState: ReturnType<typeof vi.fn>;
-  readonly updateStateSync: ReturnType<typeof vi.fn>;
 };
 
 function createWorkerRun(overrides: Partial<DelegatedWorkerRun> = {}): DelegatedWorkerRun {
@@ -58,7 +57,7 @@ function createHarness(
   } = {}
 ) {
   const workerStore = new Map<string, DelegatedWorkerRun>([[seed.worker_run_id, seed]]);
-  const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at">> = [];
+  const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
 
   const updateStateImpl = (
     workerRunId: string,
@@ -90,13 +89,12 @@ function createHarness(
 
   const repo: MutableWorkerRepo = {
     getById: vi.fn(async (workerRunId: string) => workerStore.get(workerRunId) ?? null),
-    updateState: vi.fn(async (...args: Parameters<typeof updateStateImpl>) => updateStateImpl(...args)),
-    updateStateSync: vi.fn(updateStateImpl)
+    updateState: vi.fn(updateStateImpl)
   };
 
-  const publishWithMutation = vi.fn(
+  const appendManyWithMutation = vi.fn(
     async (
-      events: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at">>,
+      events: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>,
       mutate: (entries: readonly EventLogEntry[]) => DelegatedWorkerRun
     ) => {
       for (const event of events) {
@@ -106,6 +104,7 @@ function createHarness(
       const persisted = events.map((event, idx) => ({
         event_id: `evt_${idx}`,
         created_at: FIXED_NOW,
+        revision: 0,
         ...event
       }));
       return mutate(persisted);
@@ -116,7 +115,7 @@ function createHarness(
     repo,
     eventPublisher: {
       // WorkerRunLifecycleService now uses appendManyWithMutation (#BL-022).
-      appendManyWithMutation: publishWithMutation
+      appendManyWithMutation: appendManyWithMutation
     } as unknown as EventPublisher,
     now: () => FIXED_NOW
   });
@@ -124,7 +123,7 @@ function createHarness(
   return {
     service,
     repo,
-    publishWithMutation,
+    appendManyWithMutation,
     publishedEvents,
     getCurrent: () => workerStore.get(seed.worker_run_id) ?? null,
     setState: (state: WorkerRunState) => {
@@ -160,7 +159,7 @@ describe("WorkerRunLifecycleService", () => {
   });
 
   it("completes active -> completed and rejects repeated completion without writing a second event", async () => {
-    const { service, publishWithMutation, publishedEvents, getCurrent } = createHarness(
+    const { service, appendManyWithMutation, publishedEvents, getCurrent } = createHarness(
       createWorkerRun({ state: "active" })
     );
 
@@ -177,7 +176,7 @@ describe("WorkerRunLifecycleService", () => {
       code: "VALIDATION",
       message: "Illegal worker state transition: completed -> completed"
     });
-    expect(publishWithMutation).toHaveBeenCalledTimes(1);
+    expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
   });
 
   it("suspends active -> suspended for all supported suspend reasons", async () => {
@@ -285,13 +284,13 @@ describe("WorkerRunLifecycleService", () => {
   });
 
   it("rejects illegal transitions without writing any EventLog entry", async () => {
-    const { service, publishWithMutation } = createHarness(createWorkerRun({ state: "init" }));
+    const { service, appendManyWithMutation } = createHarness(createWorkerRun({ state: "init" }));
 
     await expect(
       service.complete("worker_1", ["handoff_1"])
     ).rejects.toBeInstanceOf(CoreError);
 
-    expect(publishWithMutation).not.toHaveBeenCalled();
+    expect(appendManyWithMutation).not.toHaveBeenCalled();
   });
 
   it("reloads snapshot on every call instead of using in-memory cached state", async () => {
@@ -336,7 +335,7 @@ describe("WorkerRunLifecycleService", () => {
   it("supports resumable progression across service instances against shared durable state", async () => {
     const seed = createWorkerRun({ state: "active" });
     const workerStore = new Map<string, DelegatedWorkerRun>([[seed.worker_run_id, seed]]);
-    const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at">> = [];
+    const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
 
     const updateStateImpl = (
       workerRunId: string,
@@ -365,15 +364,14 @@ describe("WorkerRunLifecycleService", () => {
 
     const repo: MutableWorkerRepo = {
       getById: vi.fn(async (workerRunId: string) => workerStore.get(workerRunId) ?? null),
-      updateState: vi.fn(async (...args: Parameters<typeof updateStateImpl>) => updateStateImpl(...args)),
-      updateStateSync: vi.fn(updateStateImpl)
+      updateState: vi.fn(updateStateImpl)
     };
 
     const eventPublisher = {
       // WorkerRunLifecycleService now uses appendManyWithMutation (#BL-022).
       appendManyWithMutation: vi.fn(
         async (
-          events: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at">>,
+          events: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>,
           mutate: (entries: readonly EventLogEntry[]) => DelegatedWorkerRun
         ) => {
           for (const event of events) {
@@ -382,6 +380,7 @@ describe("WorkerRunLifecycleService", () => {
           const persisted = events.map((event, idx) => ({
             event_id: `evt_${idx}`,
             created_at: FIXED_NOW,
+            revision: 0,
             ...event
           }));
           return mutate(persisted);

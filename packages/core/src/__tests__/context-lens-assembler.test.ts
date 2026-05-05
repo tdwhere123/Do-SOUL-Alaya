@@ -694,10 +694,10 @@ describe("context lens assembler", () => {
     expect(result.contextLens.lens_entries.some((entry) => entry.object_kind === ObjectKind.MEMORY_ENTRY)).toBe(false);
 
     const appendedEntries = dependencies.eventLogRepo.append.mock.calls.map(
-      (call) => call[0] as Omit<EventLogEntry, "event_id" | "created_at">
+      (call) => call[0] as Omit<EventLogEntry, "event_id" | "created_at" | "revision">
     );
     const degradedEntry = appendedEntries.find(
-      (entry: Omit<EventLogEntry, "event_id" | "created_at">) =>
+      (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) =>
         entry.event_type === BudgetEventType.SOUL_BUDGET_DEGRADED
     );
 
@@ -945,9 +945,10 @@ function createDependencies(
   const claim = createClaimForm();
   const claimById = new Map<string, ClaimForm>([[claim.object_id, claim]]);
   const eventLogRepo = {
-    append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+    append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       event_id: "evt-context-lens-1",
       created_at: NOW,
+      revision: 0,
       ...entry
     })),
     queryByEntity: vi.fn(async () => [])

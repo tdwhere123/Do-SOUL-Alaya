@@ -43,6 +43,7 @@ export interface ScopedProposal {
   // A1 — null until the proposal is reviewed; carries the explicit
   // reviewer identity once review_memory_proposal completes.
   readonly reviewer_identity: string | null;
+  readonly reviewer_assignment: Readonly<ProposalReviewerAssignment> | null;
 }
 
 export interface PendingProposalSummary {
@@ -51,11 +52,32 @@ export interface PendingProposalSummary {
   readonly target_object_kind: string;
   readonly created_at: string;
   readonly proposed_change_summary: string;
+  readonly assigned_reviewer_identity: string | null;
+  readonly assigned_at: string | null;
+  readonly deadline_at: string | null;
+  readonly is_overdue: boolean;
+}
+
+export interface ProposalReviewerAssignmentInput {
+  readonly proposal_id: string;
+  readonly reviewer_identity: string;
+  readonly assigned_at: string;
+  readonly deadline_at?: string | null;
+  readonly escalation_after_ms?: number | null;
+}
+
+export interface ProposalReviewerAssignment {
+  readonly proposal_id: string;
+  readonly reviewer_identity: string;
+  readonly assigned_at: string;
+  readonly deadline_at: string | null;
+  readonly escalation_after_ms: number | null;
 }
 
 export interface FindPendingSummariesOptions {
   readonly since?: string | null;
   readonly limit?: number;
+  readonly now?: string;
 }
 
 export type ProposalResolutionEventInput = EventLogDraftInput;
@@ -65,11 +87,16 @@ export interface UpdatePendingResolutionOptions {
   readonly reviewerIdentity?: string;
 }
 
+export interface CreateProposalWithEventsOptions {
+  readonly reviewerAssignment?: ProposalReviewerAssignmentInput;
+}
+
 export interface ProposalRepo {
   create(input: ProposalCreateInput): Promise<Readonly<Proposal>>;
   createProposalWithEvents(
     input: ProposalCreateInput,
-    events: readonly ProposalCreationEventInput[]
+    events: readonly ProposalCreationEventInput[],
+    options?: CreateProposalWithEventsOptions
   ): Promise<Readonly<{
     readonly proposal: Readonly<Proposal>;
     readonly events: readonly EventLogEntry[];
@@ -83,6 +110,8 @@ export interface ProposalRepo {
     options?: FindPendingSummariesOptions
   ): Promise<readonly Readonly<PendingProposalSummary>[]>;
   findPendingByRunId(runId: string): Promise<Readonly<Proposal> | null>;
+  assignReviewer(input: ProposalReviewerAssignmentInput): Promise<Readonly<ProposalReviewerAssignment>>;
+  findReviewerAssignment(proposalId: string): Promise<Readonly<ProposalReviewerAssignment> | null>;
   // A1 fix-loop (finding-5): reviewerIdentity is optional at the repo
   // boundary so legacy callers (claim-promotion flows, fixtures) keep
   // compiling, but every code path that should write
@@ -156,12 +185,29 @@ interface ProposalRow {
   readonly created_at: string | null;
 }
 
+interface ProposalReviewerAssignmentRow {
+  readonly proposal_id: string;
+  readonly reviewer_identity: string;
+  readonly assigned_at: string;
+  readonly deadline_at: string | null;
+  readonly escalation_after_ms: number | null;
+}
+
+interface PendingProposalSummaryRow extends ProposalRow {
+  readonly assigned_reviewer_identity: string | null;
+  readonly assigned_at: string | null;
+  readonly deadline_at: string | null;
+  readonly is_overdue: 0 | 1;
+}
+
 export class SqliteProposalRepo implements ProposalRepo {
   private readonly createStatement;
   private readonly findByIdStatement;
   private readonly findByWorkspaceIdStatement;
   private readonly findPendingStatement;
   private readonly findPendingByRunIdStatement;
+  private readonly assignReviewerStatement;
+  private readonly findReviewerAssignmentStatement;
   private readonly updateResolutionStatement;
   private readonly updateResolutionWithIdentityStatement;
   private readonly updatePendingResolutionStatement;
@@ -221,6 +267,33 @@ export class SqliteProposalRepo implements ProposalRepo {
       FROM proposals
       WHERE run_id = ? AND resolution_state = 'pending' AND dossier_ref IS NOT NULL
       ORDER BY last_updated_at DESC, proposal_id DESC
+      LIMIT 1
+    `);
+
+    this.assignReviewerStatement = db.connection.prepare(`
+      INSERT INTO proposal_reviewer_assignments (
+        proposal_id,
+        reviewer_identity,
+        assigned_at,
+        deadline_at,
+        escalation_after_ms
+      ) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(proposal_id) DO UPDATE SET
+        reviewer_identity = excluded.reviewer_identity,
+        assigned_at = excluded.assigned_at,
+        deadline_at = excluded.deadline_at,
+        escalation_after_ms = excluded.escalation_after_ms
+    `);
+
+    this.findReviewerAssignmentStatement = db.connection.prepare(`
+      SELECT
+        proposal_id,
+        reviewer_identity,
+        assigned_at,
+        deadline_at,
+        escalation_after_ms
+      FROM proposal_reviewer_assignments
+      WHERE proposal_id = ?
       LIMIT 1
     `);
 
@@ -294,7 +367,8 @@ export class SqliteProposalRepo implements ProposalRepo {
 
   public async createProposalWithEvents(
     input: ProposalCreateInput,
-    events: readonly ProposalCreationEventInput[]
+    events: readonly ProposalCreationEventInput[],
+    options: CreateProposalWithEventsOptions = {}
   ): Promise<Readonly<{
     readonly proposal: Readonly<Proposal>;
     readonly events: readonly EventLogEntry[];
@@ -305,6 +379,10 @@ export class SqliteProposalRepo implements ProposalRepo {
     const targetObjectKind = parseNonEmptyString(input.target_object_kind, "target_object_kind");
     const proposedChangeSummary = input.proposed_change_summary ?? "";
     const createdAt = input.created_at ?? parsedProposal.last_updated_at;
+    const reviewerAssignment =
+      options.reviewerAssignment === undefined
+        ? undefined
+        : parseProposalReviewerAssignment(options.reviewerAssignment);
 
     try {
       return this.db.connection.transaction(() => {
@@ -328,6 +406,9 @@ export class SqliteProposalRepo implements ProposalRepo {
           proposedChangeSummary,
           createdAt
         );
+        if (reviewerAssignment !== undefined) {
+          this.insertReviewerAssignment(reviewerAssignment);
+        }
 
         return deepFreeze({
           proposal: parsedProposal,
@@ -359,13 +440,18 @@ export class SqliteProposalRepo implements ProposalRepo {
   public async findScopedById(proposalId: string): Promise<Readonly<ScopedProposal> | null> {
     try {
       const row = this.findByIdStatement.get(proposalId) as ProposalRow | undefined;
+      const assignment =
+        row === undefined
+          ? null
+          : this.findReviewerAssignmentRow(row.proposal_id);
       return row === undefined
         ? null
         : deepFreeze({
             proposal: parseProposalRow(row),
             workspace_id: row.workspace_id,
             run_id: row.run_id,
-            reviewer_identity: row.reviewer_identity
+            reviewer_identity: row.reviewer_identity,
+            reviewer_assignment: assignment
           });
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to load proposal ${proposalId}.`, error);
@@ -413,30 +499,58 @@ export class SqliteProposalRepo implements ProposalRepo {
     const parsedWorkspaceId = parseWorkspaceId(workspaceId);
     const since = options.since ?? null;
     const limit = options.limit ?? null;
+    const referenceTime = parseTimestamp(options.now ?? new Date().toISOString());
 
     let sql = `
-      SELECT${PROPOSAL_SELECT_COLUMNS}
-      FROM proposals
-      WHERE workspace_id = ? AND resolution_state = 'pending'
+      SELECT
+        p.runtime_id,
+        p.object_kind,
+        p.proposal_id,
+        p.task_surface_ref,
+        p.derived_from,
+        p.retention_policy,
+        p.dossier_ref,
+        p.recommended_option_id,
+        p.proposal_options,
+        p.resolution_state,
+        p.expires_at,
+        p.last_updated_at,
+        p.workspace_id,
+        p.run_id,
+        p.reviewer_identity,
+        p.target_object_kind,
+        p.proposed_change_summary,
+        p.created_at,
+        a.reviewer_identity AS assigned_reviewer_identity,
+        a.assigned_at AS assigned_at,
+        a.deadline_at AS deadline_at,
+        CASE
+          WHEN a.deadline_at IS NOT NULL AND a.deadline_at < ? THEN 1
+          ELSE 0
+        END AS is_overdue
+      FROM proposals p
+      LEFT JOIN proposal_reviewer_assignments a
+        ON a.proposal_id = p.proposal_id
+      WHERE p.workspace_id = ? AND p.resolution_state = 'pending'
     `;
-    const params: (string | number)[] = [parsedWorkspaceId];
+    const params: (string | number)[] = [referenceTime, parsedWorkspaceId];
     if (since !== null) {
       // D2 MERGED-I2 (reviewer-I3): exclusive `>` cursor semantics.
       // HITL pollers pass the timestamp of their most-recent record as
       // `since`; an inclusive `>=` returns the boundary record on every
       // subsequent poll. Mirrors A3's deliberate exclusive `>` choice
       // for usage records (see path-plasticity-runtime.ts docstring).
-      sql += " AND created_at > ?";
+      sql += " AND p.created_at > ?";
       params.push(since);
     }
-    sql += " ORDER BY created_at DESC, proposal_id DESC";
+    sql += " ORDER BY p.created_at DESC, p.proposal_id DESC";
     if (limit !== null) {
       sql += " LIMIT ?";
       params.push(limit);
     }
 
     try {
-      const rows = this.db.connection.prepare(sql).all(...params) as ProposalRow[];
+      const rows = this.db.connection.prepare(sql).all(...params) as PendingProposalSummaryRow[];
       return rows.map((row) =>
         deepFreeze({
           proposal_id: row.proposal_id,
@@ -447,7 +561,11 @@ export class SqliteProposalRepo implements ProposalRepo {
           target_object_id: row.derived_from ?? row.runtime_id,
           target_object_kind: row.target_object_kind,
           created_at: row.created_at ?? row.last_updated_at,
-          proposed_change_summary: row.proposed_change_summary
+          proposed_change_summary: row.proposed_change_summary,
+          assigned_reviewer_identity: row.assigned_reviewer_identity,
+          assigned_at: row.assigned_at,
+          deadline_at: row.deadline_at,
+          is_overdue: row.is_overdue === 1
         })
       );
     } catch (error) {
@@ -469,6 +587,47 @@ export class SqliteProposalRepo implements ProposalRepo {
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to load pending bankruptcy proposal for run ${parsedRunId}.`,
+        error
+      );
+    }
+  }
+
+  public async assignReviewer(input: ProposalReviewerAssignmentInput): Promise<Readonly<ProposalReviewerAssignment>> {
+    const assignment = parseProposalReviewerAssignment(input);
+
+    try {
+      this.insertReviewerAssignment(assignment);
+      const stored = this.findReviewerAssignmentRow(assignment.proposal_id);
+      if (stored === null) {
+        throw new StorageError(
+          "NOT_FOUND",
+          `Reviewer assignment for proposal ${assignment.proposal_id} was not found after write.`
+        );
+      }
+      return stored;
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to assign reviewer for proposal ${assignment.proposal_id}.`,
+        error
+      );
+    }
+  }
+
+  public async findReviewerAssignment(
+    proposalId: string
+  ): Promise<Readonly<ProposalReviewerAssignment> | null> {
+    const parsedProposalId = parseProposalId(proposalId);
+
+    try {
+      return this.findReviewerAssignmentRow(parsedProposalId);
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to load reviewer assignment for proposal ${parsedProposalId}.`,
         error
       );
     }
@@ -636,6 +795,23 @@ export class SqliteProposalRepo implements ProposalRepo {
 
     return new StorageError("CONFLICT", `Proposal ${proposalId} is already ${row.resolution_state}.`);
   }
+
+  private insertReviewerAssignment(assignment: ProposalReviewerAssignment): void {
+    this.assignReviewerStatement.run(
+      assignment.proposal_id,
+      assignment.reviewer_identity,
+      assignment.assigned_at,
+      assignment.deadline_at,
+      assignment.escalation_after_ms
+    );
+  }
+
+  private findReviewerAssignmentRow(proposalId: string): Readonly<ProposalReviewerAssignment> | null {
+    const row = this.findReviewerAssignmentStatement.get(proposalId) as
+      | ProposalReviewerAssignmentRow
+      | undefined;
+    return row === undefined ? null : parseProposalReviewerAssignmentRow(row);
+  }
 }
 
 function parseProposal(value: Proposal): Readonly<Proposal> {
@@ -677,6 +853,36 @@ function parseProposalRow(row: ProposalRow): Readonly<Proposal> {
   }
 }
 
+function parseProposalReviewerAssignment(
+  input: ProposalReviewerAssignmentInput
+): Readonly<ProposalReviewerAssignment> {
+  return deepFreeze({
+    proposal_id: parseProposalId(input.proposal_id),
+    reviewer_identity: parseNonEmptyString(input.reviewer_identity, "reviewer_identity"),
+    assigned_at: parseTimestamp(input.assigned_at),
+    deadline_at: parseNullableTimestamp(input.deadline_at ?? null),
+    escalation_after_ms: parseNullableNonNegativeInteger(
+      input.escalation_after_ms ?? null,
+      "escalation_after_ms"
+    )
+  });
+}
+
+function parseProposalReviewerAssignmentRow(
+  row: ProposalReviewerAssignmentRow
+): Readonly<ProposalReviewerAssignment> {
+  return deepFreeze({
+    proposal_id: parseProposalId(row.proposal_id),
+    reviewer_identity: parseNonEmptyString(row.reviewer_identity, "reviewer_identity"),
+    assigned_at: parseTimestamp(row.assigned_at),
+    deadline_at: parseNullableTimestamp(row.deadline_at),
+    escalation_after_ms: parseNullableNonNegativeInteger(
+      row.escalation_after_ms,
+      "escalation_after_ms"
+    )
+  });
+}
+
 function parseProposalResolutionState(state: ProposalResolutionState): ProposalResolutionState {
   try {
     return ProposalResolutionStateSchema.parse(state);
@@ -695,6 +901,20 @@ function parseWorkspaceId(value: string): string {
 
 function parseRunId(value: string | null): string | null {
   return parseNullableString(value, "run_id");
+}
+
+function parseNullableTimestamp(value: string | null): string | null {
+  return value === null ? null : parseTimestamp(value);
+}
+
+function parseNullableNonNegativeInteger(value: number | null, field: string): number | null {
+  if (value === null) {
+    return null;
+  }
+  if (!Number.isInteger(value) || value < 0) {
+    throw new StorageError("VALIDATION_FAILED", `Failed to validate ${field}.`);
+  }
+  return value;
 }
 
 const parseUpdatedAt = parseTimestamp;

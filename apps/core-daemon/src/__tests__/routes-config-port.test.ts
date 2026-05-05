@@ -197,7 +197,7 @@ describe("routes-config port batch", () => {
         secret_value: "sk-test-plaintext-secret"
       })
     ).rejects.toThrow("paste mode is not supported on win32");
-    expect(harness.publishWithMutation).not.toHaveBeenCalled();
+    expect(harness.appendManyWithMutation).not.toHaveBeenCalled();
   });
 
   it("rejects empty paste and bogus secret modes before EventLog mutation", async () => {
@@ -208,7 +208,7 @@ describe("routes-config port batch", () => {
         secret_value: ""
       })
     ).rejects.toThrow("Invalid runtime embedding config patch");
-    expect(emptyHarness.publishWithMutation).not.toHaveBeenCalled();
+    expect(emptyHarness.appendManyWithMutation).not.toHaveBeenCalled();
 
     const bogusHarness = await createServiceHarness();
     await expect(
@@ -217,7 +217,7 @@ describe("routes-config port batch", () => {
         secret_value: "sk-test-plaintext-secret"
       })
     ).rejects.toThrow("Invalid runtime embedding config patch");
-    expect(bogusHarness.publishWithMutation).not.toHaveBeenCalled();
+    expect(bogusHarness.appendManyWithMutation).not.toHaveBeenCalled();
   });
 
   it("uses exclusive temp files so a pre-existing temp symlink blocks secret writes", async () => {
@@ -296,13 +296,13 @@ describe("routes-config port batch", () => {
 
   it("cleans pasted secrets and env writes when config persistence rejects the mutation", async () => {
     const failingRepo = createMemoryConfigRepo();
-    const patchSync = vi.fn(() => {
+    const patch = vi.fn(() => {
       throw new Error("repo write failed");
     });
     const harness = await createServiceHarness({
       repo: {
         ...failingRepo,
-        patchSync
+        patch
       }
     });
     const secretPath = path.join(harness.paths.secretsDir, "openai");
@@ -318,7 +318,7 @@ describe("routes-config port batch", () => {
     await expect(readFile(secretPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(harness.paths.envPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     expect(harness.publishedEvents).toHaveLength(0);
-    expect(patchSync).toHaveBeenCalledTimes(1);
+    expect(patch).toHaveBeenCalledTimes(1);
   });
 
   it("does not let an earlier rollback clobber a later paste write for the same config files", async () => {
@@ -549,10 +549,6 @@ async function createServiceHarness(options: {
   readonly paths: AlayaConfigPaths;
   readonly publishedEvents: EventLogEntry[];
   readonly appendManyWithMutation: ReturnType<typeof vi.fn>;
-  // Back-compat alias so older test bodies that grep for `publishWithMutation`
-  // still resolve to the same spy. New tests should reach for
-  // `appendManyWithMutation` directly.
-  readonly publishWithMutation: ReturnType<typeof vi.fn>;
 }> {
   const repo = options.repo ?? createMemoryConfigRepo();
   const configDir = await mkdtemp(path.join(tmpdir(), "daemon-config-"));
@@ -560,7 +556,7 @@ async function createServiceHarness(options: {
   const publishedEvents: EventLogEntry[] = [];
   const appendManyWithMutation = vi.fn(
     async <T>(
-      events: readonly Omit<EventLogEntry, "event_id" | "created_at">[],
+      events: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
       mutate: (entries: readonly EventLogEntry[]) => T
     ): Promise<T> => {
       const persisted = events.map(
@@ -568,7 +564,8 @@ async function createServiceHarness(options: {
           ({
             ...event,
             event_id: `event-${publishedEvents.length + idx + 1}`,
-            created_at: "2026-05-01T00:00:00.000Z"
+            created_at: "2026-05-01T00:00:00.000Z",
+            revision: publishedEvents.length + idx + 1
           }) as EventLogEntry
       );
       // Snapshot length before the mutate so a thrown mutate cleanly rolls
@@ -597,40 +594,39 @@ async function createServiceHarness(options: {
     }),
     paths,
     publishedEvents,
-    appendManyWithMutation,
-    publishWithMutation: appendManyWithMutation
+    appendManyWithMutation
   };
 }
 
 function createMemoryConfigRepo(): ConfigRepo {
   const values = new Map<string, unknown>();
-  const getSync = <T,>(key: string): T | null => (values.get(key) as T | undefined) ?? null;
-  const setSync = <T,>(key: string, value: T): void => {
+  const get = <T,>(key: string): T | null => (values.get(key) as T | undefined) ?? null;
+  const set = <T,>(key: string, value: T): void => {
     values.set(key, value);
   };
-  const patchSync = <T extends Record<string, unknown>>(
+  const patch = <T extends Record<string, unknown>>(
     key: string,
     partial: Partial<T>,
     defaults: T
   ): T => {
-    const current = getSync<T>(key) ?? defaults;
+    const current = get<T>(key) ?? defaults;
     const next = { ...current, ...partial } as T;
-    setSync(key, next);
+    set(key, next);
     return next;
   };
   return {
-    get: async <T>(key: string): Promise<T | null> => getSync<T>(key),
-    getSync,
+    get: async <T>(key: string): Promise<T | null> => get<T>(key),
+    get,
     set: async <T>(key: string, value: T): Promise<void> => {
-      setSync(key, value);
+      set(key, value);
     },
-    setSync,
+    set,
     patch: async <T extends Record<string, unknown>>(
       key: string,
       partial: Partial<T>,
       defaults: T
-    ): Promise<T> => patchSync(key, partial, defaults),
-    patchSync
+    ): Promise<T> => patch(key, partial, defaults),
+    patch
   };
 }
 

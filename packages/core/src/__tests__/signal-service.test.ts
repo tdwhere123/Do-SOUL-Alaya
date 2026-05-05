@@ -37,6 +37,7 @@ describe("SignalService", () => {
           const stored: EventLogEntry = {
             event_id: `evt_${storedEvents.length + 1}`,
             created_at: `2026-03-18T00:00:0${storedEvents.length + 1}.000Z`,
+            revision: storedEvents.length,
             ...event
           };
           storedEvents.push(stored);
@@ -98,6 +99,7 @@ describe("SignalService", () => {
         append: vi.fn(async (event) => ({
           event_id: "evt_1",
           created_at: "2026-03-18T00:00:01.000Z",
+          revision: 0,
           ...event
         })),
         queryByEntity: vi.fn(async () => [])
@@ -136,6 +138,7 @@ describe("SignalService", () => {
         append: vi.fn(async (event) => ({
           event_id: "evt_1",
           created_at: "2026-03-18T00:00:01.000Z",
+          revision: 0,
           ...event
         })),
         queryByEntity: vi.fn(async () => [])
@@ -183,6 +186,7 @@ describe("SignalService", () => {
         append: vi.fn(async (event) => ({
           event_id: "evt_1",
           created_at: "2026-03-18T00:00:01.000Z",
+          revision: 0,
           ...event
         })),
         queryByEntity: vi.fn(async () => [])
@@ -258,6 +262,7 @@ describe("SignalService", () => {
           return {
             event_id: `evt_${appendCallCount}`,
             created_at: "2026-03-18T00:00:00.000Z",
+            revision: 0,
             ...event
           };
         }),

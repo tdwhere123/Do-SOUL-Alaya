@@ -31,7 +31,6 @@ import {
   type VerifiedBy as VerifiedByType
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
-import { getNextRevision } from "./shared/event-utils.js";
 import { parseNonEmptyString, parseObjectId } from "./shared/validators.js";
 
 const LOW_SIGNAL_REASONS = new Set<RevokeReasonType>([RevokeReason.REVIEW_OVERDUE, RevokeReason.NONE]);
@@ -68,7 +67,7 @@ export interface GreenServiceMemoryRepoPort {
 }
 
 export interface GreenServiceEventLogRepoPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
   queryByWorkspace(workspaceId: string): Promise<readonly EventLogEntry[]>;
   queryByType(eventType: string): Promise<readonly EventLogEntry[]>;
@@ -169,7 +168,6 @@ export class GreenService {
       last_transition_at: timestamp,
       workspace_id: workspaceId
     });
-    const revision = await getNextRevision(this.dependencies.eventLogRepo, "green_status", status.object_id);
     const event = await this.dependencies.eventLogRepo.append({
       event_type: GreenGovernanceEventType.SOUL_GREEN_GRANTED,
       entity_type: "green_status",
@@ -177,7 +175,6 @@ export class GreenService {
       workspace_id: workspaceId,
       run_id: memory.run_id,
       caused_by: "system",
-      revision,
       payload_json: SoulGreenGrantedPayloadSchema.parse({
         object_id: status.object_id,
         target_object_id: targetObjectId,
@@ -225,7 +222,6 @@ export class GreenService {
       revoke_reason: params.reason,
       last_transition_at: timestamp
     });
-    const revision = await getNextRevision(this.dependencies.eventLogRepo, "green_status", next.object_id);
     const event = await this.dependencies.eventLogRepo.append({
       event_type: GreenGovernanceEventType.SOUL_GREEN_PIERCED,
       entity_type: "green_status",
@@ -233,7 +229,6 @@ export class GreenService {
       workspace_id: workspaceId,
       run_id: params.runId ?? memory.run_id,
       caused_by: "system",
-      revision,
       payload_json: SoulGreenPiercedPayloadSchema.parse({
         object_id: next.object_id,
         target_object_id: targetObjectId,
@@ -275,7 +270,6 @@ export class GreenService {
       valid_until: params.until,
       last_transition_at: timestamp
     });
-    const revision = await getNextRevision(this.dependencies.eventLogRepo, "green_status", next.object_id);
     const event = await this.dependencies.eventLogRepo.append({
       event_type: GreenGovernanceEventType.SOUL_GREEN_GRACE_ENTERED,
       entity_type: "green_status",
@@ -283,7 +277,6 @@ export class GreenService {
       workspace_id: workspaceId,
       run_id: runId,
       caused_by: "system",
-      revision,
       payload_json: SoulGreenGraceEnteredPayloadSchema.parse({
         object_id: next.object_id,
         target_object_id: targetObjectId,
@@ -443,11 +436,6 @@ export class GreenService {
       micro_correction_hint: hint,
       necessary_patch: params.necessaryPatch
     });
-    const revision = await getNextRevision(
-      this.dependencies.eventLogRepo,
-      "verification_result",
-      verificationResult.runtime_id
-    );
     const event = await this.dependencies.eventLogRepo.append({
       event_type: GreenGovernanceEventType.SOUL_VERIFICATION_COMPLETED,
       entity_type: "verification_result",
@@ -455,7 +443,6 @@ export class GreenService {
       workspace_id: workspaceId,
       run_id: memory.run_id,
       caused_by: "system",
-      revision,
       payload_json: SoulVerificationCompletedPayloadSchema.parse({
         target_object_id: targetObjectId,
         verdict: verificationResult.verdict,

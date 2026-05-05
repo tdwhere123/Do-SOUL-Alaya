@@ -104,6 +104,7 @@ describe("mcp memory tool handler", () => {
         delivery_id: "delivery_1",
         usage_state: "used",
         used_object_ids: ["mem1"],
+        per_anchor_usage: [{ object_id: "mem1", anchor_role: "target" }],
         reason: "cited"
       },
       context
@@ -115,6 +116,7 @@ describe("mcp memory tool handler", () => {
         delivery_id: "delivery_1",
         usage_state: "used",
         used_object_ids: ["mem1"],
+        per_anchor_usage: [{ object_id: "mem1", anchor_role: "target" }],
         reason: "cited"
       }),
       // D2 MERGED-B3: handler now passes the call-context workspace as
@@ -123,6 +125,36 @@ describe("mcp memory tool handler", () => {
       // row is appended.
       { expectedWorkspaceId: context.workspaceId }
     );
+  });
+
+  it("maps trust-state usage validation failures to MCP validation errors", async () => {
+    const deps = createDeps();
+    deps.trustStateRecorder.recordUsage = vi.fn(async () => {
+      const error = new Error("Per-anchor usage references object_id that was not delivered: mem2");
+      (error as Error & { code: "VALIDATION" }).code = "VALIDATION";
+      throw error;
+    });
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const result = await handler.call({
+      toolName: "soul.report_context_usage",
+      arguments: {
+        delivery_id: "delivery_1",
+        usage_state: "used",
+        used_object_ids: ["mem1"],
+        per_anchor_usage: [{ object_id: "mem2", anchor_role: "target" }],
+        reason: "spoofed"
+      },
+      context
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "VALIDATION",
+        message: "Per-anchor usage references object_id that was not delivered: mem2"
+      }
+    });
   });
 
   it("fails closed for unsupported tools and invalid input", async () => {

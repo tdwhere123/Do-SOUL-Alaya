@@ -174,8 +174,8 @@ describe("SqliteDriftLeaseRepo", () => {
     });
 
     const [firstResult, secondResult] = await Promise.allSettled([
-      repo.create(createLease({ lease_id: "lease-1", granted_to: "user-1" })),
-      repo.create(createLease({ lease_id: "lease-2", granted_to: "user-2" }))
+      Promise.resolve().then(() => repo.create(createLease({ lease_id: "lease-1", granted_to: "user-1" }))),
+      Promise.resolve().then(() => repo.create(createLease({ lease_id: "lease-2", granted_to: "user-2" })))
     ]);
 
     expect(firstResult.status).toBe("fulfilled");

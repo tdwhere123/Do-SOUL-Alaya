@@ -18,13 +18,12 @@ import {
 } from "@do-soul/alaya-core";
 
 const DEFAULT_WORKSPACE_ID = "trust-state";
-const DEFAULT_REVISION = 0;
 const DELIVERY_ENTITY_TYPE = "trust_context_delivery";
 const USAGE_ENTITY_TYPE = "trust_usage_proof";
 const COUNTER_ENTITY_TYPE = "trust_state_counter";
 const PLACEHOLDER_AUDIT_EVENT_ID = "pending";
 
-type TrustEventInput = Omit<EventLogEntry, "event_id" | "created_at">;
+type TrustEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
 interface TrustStateEventPublisherPort {
   /**
@@ -40,12 +39,8 @@ interface TrustStateEventPublisherPort {
 }
 
 export interface TrustStatePersistenceRepoPort {
-  createDelivery(record: ContextDeliveryRecord): Promise<Readonly<ContextDeliveryRecord>>;
-  /** Synchronous variant required by `appendManyWithMutation`-based recorder methods. */
-  createDeliverySync(record: ContextDeliveryRecord): Readonly<ContextDeliveryRecord>;
-  createUsage(record: UsageProofRecord): Promise<Readonly<UsageProofRecord>>;
-  /** Synchronous variant required by `appendManyWithMutation`-based recorder methods. */
-  createUsageSync(record: UsageProofRecord): Readonly<UsageProofRecord>;
+  createDelivery(record: ContextDeliveryRecord): Readonly<ContextDeliveryRecord>;
+  createUsage(record: UsageProofRecord): Readonly<UsageProofRecord>;
   findDeliveryById(deliveryId: string): Promise<Readonly<ContextDeliveryRecord> | null>;
   listDeliveriesByAgentTarget(agentTarget: string): Promise<readonly Readonly<ContextDeliveryRecord>[]>;
   listUsageByDeliveryIds(deliveryIds: readonly string[]): Promise<readonly Readonly<UsageProofRecord>[]>;
@@ -82,6 +77,15 @@ export class TrustStateUnverifiableRequiresDeliveryError extends Error {
   public constructor(public readonly agentTarget: string) {
     super(`Cannot record unverifiable trust state without prior delivery for agent ${agentTarget}.`);
     this.name = "TrustStateUnverifiableRequiresDeliveryError";
+  }
+}
+
+export class TrustStateInvalidUsageProofError extends Error {
+  public readonly code = "VALIDATION" as const;
+
+  public constructor(message: string) {
+    super(message);
+    this.name = "TrustStateInvalidUsageProofError";
   }
 }
 
@@ -142,7 +146,6 @@ export class TrustStateRecorder {
           workspace_id: resolveWorkspaceId(draftRecord.workspace_id),
           run_id: draftRecord.run_id,
           caused_by: draftRecord.agent_target,
-          revision: DEFAULT_REVISION,
           payload_json: {
             delivery_id: draftRecord.delivery_id,
             agent_target: draftRecord.agent_target,
@@ -160,7 +163,7 @@ export class TrustStateRecorder {
           ...draftRecord,
           audit_event_id: auditEntry.event_id
         });
-        return this.repo.createDeliverySync(finalRecord);
+        return this.repo.createDelivery(finalRecord);
       }
     );
   }
@@ -195,6 +198,7 @@ export class TrustStateRecorder {
       ...input,
       audit_event_id: PLACEHOLDER_AUDIT_EVENT_ID
     });
+    validateUsageProofAgainstDelivery(draftRecord, linkedDelivery);
     return await this.eventPublisher.appendManyWithMutation(
       [
         {
@@ -204,11 +208,13 @@ export class TrustStateRecorder {
           workspace_id: resolveWorkspaceId(linkedDelivery.workspace_id),
           run_id: linkedDelivery.run_id,
           caused_by: linkedDelivery.agent_target,
-          revision: DEFAULT_REVISION,
           payload_json: {
             delivery_id: draftRecord.delivery_id,
             usage_state: draftRecord.usage_state,
             used_object_ids: draftRecord.used_object_ids,
+            ...(draftRecord.per_anchor_usage === undefined
+              ? {}
+              : { per_anchor_usage: draftRecord.per_anchor_usage }),
             reason: draftRecord.reason,
             reported_at: draftRecord.reported_at,
             recorded_at: this.nowIso()
@@ -223,7 +229,7 @@ export class TrustStateRecorder {
           ...draftRecord,
           audit_event_id: auditEntry.event_id
         });
-        return this.repo.createUsageSync(finalRecord);
+        return this.repo.createUsage(finalRecord);
       }
     );
   }
@@ -337,7 +343,6 @@ export class TrustStateRecorder {
           workspace_id: DEFAULT_WORKSPACE_ID,
           run_id: null,
           caused_by: input.target,
-          revision: DEFAULT_REVISION,
           payload_json: {
             agent_target: input.target,
             counter_name: input.counterName,
@@ -366,25 +371,46 @@ function incrementCounter(map: Map<string, number>, key: string): void {
   map.set(key, (map.get(key) ?? 0) + 1);
 }
 
+function validateUsageProofAgainstDelivery(
+  record: Readonly<UsageProofRecord>,
+  delivery: Readonly<ContextDeliveryRecord>
+): void {
+  const deliveredObjectIds = new Set(delivery.delivered_object_ids);
+  for (const objectId of record.used_object_ids) {
+    if (!deliveredObjectIds.has(objectId)) {
+      throw new TrustStateInvalidUsageProofError(
+        `Usage proof references object_id that was not delivered: ${objectId}`
+      );
+    }
+  }
+
+  const usedObjectIds = new Set(record.used_object_ids);
+  for (const usage of record.per_anchor_usage ?? []) {
+    if (!deliveredObjectIds.has(usage.object_id)) {
+      throw new TrustStateInvalidUsageProofError(
+        `Per-anchor usage references object_id that was not delivered: ${usage.object_id}`
+      );
+    }
+
+    if (record.usage_state === "used" && !usedObjectIds.has(usage.object_id)) {
+      throw new TrustStateInvalidUsageProofError(
+        `Per-anchor usage references object_id that was not reported as used: ${usage.object_id}`
+      );
+    }
+  }
+}
+
 class InMemoryTrustStateRepo implements TrustStatePersistenceRepoPort {
   private readonly deliveriesById = new Map<string, ContextDeliveryRecord>();
   private readonly usageByDeliveryId = new Map<string, UsageProofRecord>();
 
-  public async createDelivery(record: ContextDeliveryRecord): Promise<Readonly<ContextDeliveryRecord>> {
-    return this.createDeliverySync(record);
-  }
-
-  public createDeliverySync(record: ContextDeliveryRecord): Readonly<ContextDeliveryRecord> {
+  public createDelivery(record: ContextDeliveryRecord): Readonly<ContextDeliveryRecord> {
     const parsed = ContextDeliveryRecordSchema.parse(record);
     this.deliveriesById.set(parsed.delivery_id, parsed);
     return parsed;
   }
 
-  public async createUsage(record: UsageProofRecord): Promise<Readonly<UsageProofRecord>> {
-    return this.createUsageSync(record);
-  }
-
-  public createUsageSync(record: UsageProofRecord): Readonly<UsageProofRecord> {
+  public createUsage(record: UsageProofRecord): Readonly<UsageProofRecord> {
     const parsed = UsageProofRecordSchema.parse(record);
     this.usageByDeliveryId.set(parsed.delivery_id, parsed);
     return parsed;

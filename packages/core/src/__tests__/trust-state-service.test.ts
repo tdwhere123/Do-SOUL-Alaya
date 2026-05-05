@@ -252,11 +252,11 @@ function buildEvent(
     workspace_id: "trust-state",
     run_id: null,
     caused_by: agentTarget,
-    revision: 0,
     payload_json: {
       agent_target: agentTarget,
       counter_name: counterName
     },
+    revision: 0,
     created_at: "2026-05-01T00:00:00.000Z"
   };
 }

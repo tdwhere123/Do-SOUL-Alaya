@@ -12,10 +12,10 @@ import { parseNonEmptyString, parseTimestamp } from "./shared/validators.js";
 const ORPHAN_RADAR_LIST_LIMIT = 200;
 
 export interface OrphanRadarRepo {
-  create(record: Readonly<OrphanRadar>): Promise<Readonly<OrphanRadar>>;
+  create(record: Readonly<OrphanRadar>): Readonly<OrphanRadar>;
   createEventLogOrphan(
     record: Readonly<EventLogOrphanRadarRecord>
-  ): Promise<Readonly<EventLogOrphanRadarRecord>>;
+  ): Readonly<EventLogOrphanRadarRecord>;
   findById(radarId: string): Promise<Readonly<OrphanRadar> | null>;
   findActiveByWorkspaceId(
     workspaceId: string,
@@ -40,7 +40,7 @@ interface OrphanRadarRow {
 export class SqliteOrphanRadarRepo implements OrphanRadarRepo {
   public constructor(private readonly db: StorageDatabase) {}
 
-  public async create(record: Readonly<OrphanRadar>): Promise<Readonly<OrphanRadar>> {
+  public create(record: Readonly<OrphanRadar>): Readonly<OrphanRadar> {
     const parsed = parseRecord(record);
 
     try {
@@ -76,9 +76,9 @@ export class SqliteOrphanRadarRepo implements OrphanRadarRepo {
     return parsed;
   }
 
-  public async createEventLogOrphan(
+  public createEventLogOrphan(
     record: Readonly<EventLogOrphanRadarRecord>
-  ): Promise<Readonly<EventLogOrphanRadarRecord>> {
+  ): Readonly<EventLogOrphanRadarRecord> {
     const parsed = parseEventLogOrphanRecord(record);
 
     try {

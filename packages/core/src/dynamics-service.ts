@@ -61,7 +61,7 @@ export interface DynamicsServiceKarmaEventRepoPort {
 }
 
 export interface DynamicsServiceEventLogRepoPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
 }
 
@@ -191,10 +191,6 @@ export class DynamicsService {
       },
       now
     );
-
-    const revisionCursor = this.createRevisionCursor(
-      await this.getNextRevision("memory_entry", updated.object_id)
-    );
     const events: EventLogEntry[] = [];
 
     if (hasScoreChanged(previousRetention, retentionScore)) {
@@ -205,7 +201,6 @@ export class DynamicsService {
         workspace_id: updated.workspace_id,
         run_id: updated.run_id,
         caused_by: TransitionCausedBy.SYSTEM,
-        revision: revisionCursor(),
         payload_json: SoulMemoryRetentionUpdatedPayloadSchema.parse({
           object_id: updated.object_id,
           object_kind: updated.object_kind,
@@ -231,7 +226,6 @@ export class DynamicsService {
         workspace_id: updated.workspace_id,
         run_id: updated.run_id,
         caused_by: TransitionCausedBy.SYSTEM,
-        revision: revisionCursor(),
         payload_json: SoulMemoryStateChangedPayloadSchema.parse({
           object_id: updated.object_id,
           object_kind: updated.object_kind,
@@ -256,7 +250,6 @@ export class DynamicsService {
         workspace_id: updated.workspace_id,
         run_id: updated.run_id,
         caused_by: TransitionCausedBy.SYSTEM,
-        revision: revisionCursor(),
         payload_json: SoulMemoryManifestationChangedPayloadSchema.parse({
           object_id: updated.object_id,
           object_kind: updated.object_kind,
@@ -393,10 +386,6 @@ export class DynamicsService {
       );
 
       updatedCount += 1;
-
-      const revisionCursor = this.createRevisionCursor(
-        await this.getNextRevision("memory_entry", updated.object_id)
-      );
       const events: EventLogEntry[] = [];
 
       if (hasScoreChanged(previousRetention, retentionScore)) {
@@ -407,7 +396,6 @@ export class DynamicsService {
           workspace_id: updated.workspace_id,
           run_id: updated.run_id,
           caused_by: TransitionCausedBy.SYSTEM,
-          revision: revisionCursor(),
           payload_json: SoulMemoryRetentionUpdatedPayloadSchema.parse({
             object_id: updated.object_id,
             object_kind: updated.object_kind,
@@ -433,7 +421,6 @@ export class DynamicsService {
           workspace_id: updated.workspace_id,
           run_id: updated.run_id,
           caused_by: TransitionCausedBy.SYSTEM,
-          revision: revisionCursor(),
           payload_json: SoulMemoryStateChangedPayloadSchema.parse({
             object_id: updated.object_id,
             object_kind: updated.object_kind,
@@ -458,7 +445,6 @@ export class DynamicsService {
           workspace_id: updated.workspace_id,
           run_id: updated.run_id,
           caused_by: TransitionCausedBy.SYSTEM,
-          revision: revisionCursor(),
           payload_json: SoulMemoryManifestationChangedPayloadSchema.parse({
             object_id: updated.object_id,
             object_kind: updated.object_kind,
@@ -533,27 +519,6 @@ export class DynamicsService {
       createdAt: memory.created_at,
       now
     });
-  }
-
-  private async getNextRevision(entityType: string, entityId: string): Promise<number> {
-    const events = await this.dependencies.eventLogRepo.queryByEntity(entityType, entityId);
-
-    if (events.length === 0) {
-      return 0;
-    }
-
-    const maxRevision = events.reduce((max, entry) => Math.max(max, entry.revision), 0);
-    return maxRevision + 1;
-  }
-
-  private createRevisionCursor(startRevision: number): () => number {
-    let current = startRevision;
-
-    return () => {
-      const revision = current;
-      current += 1;
-      return revision;
-    };
   }
 
   private async broadcastEvents(events: readonly EventLogEntry[]): Promise<void> {

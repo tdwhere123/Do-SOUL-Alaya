@@ -5,28 +5,14 @@ import { StorageError } from "../errors.js";
 
 /**
  * Caller-facing input for appending an event.
- * `revision` may be supplied for compatibility with existing callers but is
- * always ignored — SqliteEventLogRepo auto-computes MAX(revision)+1 so that
- * the unique index on (entity_type, entity_id, revision) is never violated.
+ * `revision` is owned by SqliteEventLogRepo and computed as
+ * MAX(revision)+1 inside the current SQLite transaction.
  */
-export type EventLogAppendInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision"> & {
-  readonly revision?: number;
-};
+export type EventLogAppendInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
 export interface EventLogRepo {
-  append(event: EventLogAppendInput): Promise<EventLogEntry>;
-  /**
-   * Synchronous append used by `EventPublisher.appendManyWithMutation` so that
-   * MAX(revision)+1 computation and the INSERT live in the same SQLite
-   * transaction as the caller's mutation. Closes #BL-022 by removing the
-   * async read-modify-write window between revision selection and INSERT.
-   */
-  appendSync(event: EventLogAppendInput): EventLogEntry;
-  deleteById(eventId: string): Promise<void>;
-  /**
-   * Synchronous deleteById sibling used by transactional rollback paths.
-   */
-  deleteByIdSync(eventId: string): void;
+  append(event: EventLogAppendInput): EventLogEntry;
+  deleteById(eventId: string): void;
   /**
    * Run `fn` inside a single SQLite `connection.transaction(...)`. The
    * callback must be synchronous because better-sqlite3 transactions
@@ -46,6 +32,12 @@ export interface EventLogRepo {
     readonly latestEventId: string | null;
   }>;
   queryByWorkspace(workspaceId: string): Promise<readonly EventLogEntry[]>;
+  queryByWorkspaceAndType(
+    workspaceId: string,
+    eventType: string,
+    sinceIso?: string,
+    untilIso?: string
+  ): Promise<readonly EventLogEntry[]>;
   queryByRunAfterEventId(runId: string, lastEventId: string): Promise<readonly EventLogEntry[]>;
   queryByWorkspaceAfterEventId(workspaceId: string, lastEventId: string): Promise<readonly EventLogEntry[]>;
   queryByType(eventType: string): Promise<readonly EventLogEntry[]>;
@@ -92,6 +84,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
   private readonly queryByRunStatement;
   private readonly queryByRunCursorStateStatement;
   private readonly queryByWorkspaceStatement;
+  private readonly queryByWorkspaceAndTypeStatement;
   private readonly queryByRunAfterEventIdStatement;
   private readonly queryByWorkspaceAfterEventIdStatement;
   private readonly queryByTypeStatement;
@@ -192,6 +185,39 @@ export class SqliteEventLogRepo implements EventLogRepo {
       WHERE workspace_id = ?
       ORDER BY created_at ASC, rowid ASC
     `);
+    this.queryByWorkspaceAndTypeStatement = db.connection.prepare(`
+      SELECT
+        event_id,
+        event_type,
+        entity_type,
+        entity_id,
+        workspace_id,
+        run_id,
+        caused_by,
+        revision,
+        payload_json,
+        created_at
+      FROM event_log
+      WHERE workspace_id = ?
+        AND event_type = ?
+        AND (
+          ? IS NULL
+          OR CASE
+            WHEN json_type(payload_json, '$.reported_at') = 'text'
+              THEN json_extract(payload_json, '$.reported_at')
+            ELSE created_at
+          END > ?
+        )
+        AND (
+          ? IS NULL
+          OR CASE
+            WHEN json_type(payload_json, '$.reported_at') = 'text'
+              THEN json_extract(payload_json, '$.reported_at')
+            ELSE created_at
+          END <= ?
+        )
+      ORDER BY created_at ASC, rowid ASC
+    `);
     this.queryByRunAfterEventIdStatement = db.connection.prepare(`
       SELECT
         event_id,
@@ -273,11 +299,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
     `);
   }
 
-  public async append(event: EventLogAppendInput): Promise<EventLogEntry> {
-    return this.appendSync(event);
-  }
-
-  public appendSync(event: EventLogAppendInput): EventLogEntry {
+  public append(event: EventLogAppendInput): EventLogEntry {
     // Always auto-compute revision so the unique index on (entity_type, entity_id, revision) is
     // never violated by callers that hardcode revision: 0 or supply stale MAX+1 values.
     // When invoked inside `transactional(...)` the SELECT MAX + INSERT pair is atomic, closing
@@ -311,11 +333,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
     return entry;
   }
 
-  public async deleteById(eventId: string): Promise<void> {
-    this.deleteByIdSync(eventId);
-  }
-
-  public deleteByIdSync(eventId: string): void {
+  public deleteById(eventId: string): void {
     try {
       this.deleteByIdStatement.run(eventId);
     } catch (error) {
@@ -383,6 +401,29 @@ export class SqliteEventLogRepo implements EventLogRepo {
       return rows.map((row) => parseEventLogEntryRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to query event log by workspace.", error);
+    }
+  }
+
+  public async queryByWorkspaceAndType(
+    workspaceId: string,
+    eventType: string,
+    sinceIso?: string,
+    untilIso?: string
+  ): Promise<readonly EventLogEntry[]> {
+    try {
+      const since = sinceIso ?? null;
+      const until = untilIso ?? null;
+      const rows = this.queryByWorkspaceAndTypeStatement.all(
+        workspaceId,
+        eventType,
+        since,
+        since,
+        until,
+        until
+      ) as EventLogRow[];
+      return rows.map((row) => parseEventLogEntryRow(row));
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to query event log by workspace and type.", error);
     }
   }
 

@@ -15,9 +15,7 @@ export interface SurfaceBindingRecord {
 }
 
 export interface SurfaceBindingRepo {
-  create(binding: Readonly<SurfaceBinding>, bindingId: string): Promise<Readonly<SurfaceBindingRecord>>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  createSync(binding: Readonly<SurfaceBinding>, bindingId: string): Readonly<SurfaceBindingRecord>;
+  create(binding: Readonly<SurfaceBinding>, bindingId: string): Readonly<SurfaceBindingRecord>;
   findByBindingId(bindingId: string): Promise<Readonly<SurfaceBindingRecord> | null>;
   findByObjectId(objectId: string, workspaceId: string): Promise<readonly Readonly<SurfaceBindingRecord>[]>;
   findPrimaryBinding(objectId: string, workspaceId: string): Promise<Readonly<SurfaceBindingRecord> | null>;
@@ -31,20 +29,8 @@ export interface SurfaceBindingRepo {
     bindingId: string,
     bindingState: BindingState,
     updatedAt: string
-  ): Promise<Readonly<SurfaceBindingRecord>>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  updateStateSync(
-    bindingId: string,
-    bindingState: BindingState,
-    updatedAt: string
   ): Readonly<SurfaceBindingRecord>;
   cascadeDetachBySurfaceId(
-    surfaceId: string,
-    workspaceId: string,
-    updatedAt: string
-  ): Promise<readonly Readonly<SurfaceBindingRecord>[]>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  cascadeDetachBySurfaceIdSync(
     surfaceId: string,
     workspaceId: string,
     updatedAt: string
@@ -173,15 +159,7 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
     `);
   }
 
-  public async create(
-    binding: Readonly<SurfaceBinding>,
-    bindingId: string
-  ): Promise<Readonly<SurfaceBindingRecord>> {
-    return this.createSync(binding, bindingId);
-  }
-
-  /** Synchronous variant for atomic publish + mutation (#BL-022). */
-  public createSync(
+  public create(
     binding: Readonly<SurfaceBinding>,
     bindingId: string
   ): Readonly<SurfaceBindingRecord> {
@@ -322,16 +300,7 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
     }
   }
 
-  public async updateState(
-    bindingId: string,
-    bindingState: BindingState,
-    updatedAt: string
-  ): Promise<Readonly<SurfaceBindingRecord>> {
-    return this.updateStateSync(bindingId, bindingState, updatedAt);
-  }
-
-  /** Synchronous variant for atomic publish + mutation (#BL-022). */
-  public updateStateSync(
+  public updateState(
     bindingId: string,
     bindingState: BindingState,
     updatedAt: string
@@ -367,28 +336,7 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
     }
   }
 
-  public async cascadeDetachBySurfaceId(
-    surfaceId: string,
-    workspaceId: string,
-    updatedAt: string
-  ): Promise<readonly Readonly<SurfaceBindingRecord>[]> {
-    // Legacy async callers still need their own transaction wrapper; the new
-    // sync sibling assumes the caller already opened one (e.g. via
-    // EventPublisher.appendManyWithMutation -> repo.transactional()).
-    return this.db.connection.transaction(() =>
-      this.cascadeDetachBySurfaceIdSync(surfaceId, workspaceId, updatedAt)
-    )();
-  }
-
-  /**
-   * Synchronous variant for atomic publish + mutation (#BL-022). When called
-   * from inside `EventPublisher.appendManyWithMutation`, the outer
-   * `transactional()` wrapper already opens a SQLite transaction, so we run
-   * the row read/update without our own `db.connection.transaction(...)`.
-   * Better-sqlite3's `transaction()` is reentrant via SAVEPOINT but unwrapping
-   * keeps the call shape identical to the other Sync siblings.
-   */
-  public cascadeDetachBySurfaceIdSync(
+  public cascadeDetachBySurfaceId(
     surfaceId: string,
     workspaceId: string,
     updatedAt: string

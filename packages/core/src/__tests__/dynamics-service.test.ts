@@ -70,10 +70,11 @@ function createHarness(memoryEntries: readonly MemoryEntry[], options: { readonl
   const karmaEvents: KarmaEvent[] = [];
   const appendedEvents: EventLogEntry[] = [];
   const notifyEntrySpy = vi.fn(async () => {});
-  const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => {
+  const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
     const created: EventLogEntry = {
       event_id: `event-${appendedEvents.length + 1}`,
       created_at: "2026-03-23T00:00:00.000Z",
+      revision: 0,
       ...entry
     };
     appendedEvents.push(created);

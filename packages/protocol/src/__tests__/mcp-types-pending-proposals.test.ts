@@ -73,7 +73,11 @@ describe("soul.list_pending_proposals contract", () => {
           target_object_id: "mem-1",
           target_object_kind: "memory_entry",
           created_at: "2026-04-30T00:00:00.000Z",
-          proposed_change_summary: "Switch from npm to pnpm."
+          proposed_change_summary: "Switch from npm to pnpm.",
+          assigned_reviewer_identity: "user:local-reviewer",
+          assigned_at: "2026-04-30T00:00:00.000Z",
+          deadline_at: "2026-05-01T00:00:00.000Z",
+          is_overdue: false
         }
       ],
       total_count: 1
@@ -91,6 +95,10 @@ describe("soul.list_pending_proposals contract", () => {
             target_object_kind: "memory_entry",
             created_at: "2026-04-30T00:00:00.000Z",
             proposed_change_summary: "Switch from npm to pnpm.",
+            assigned_reviewer_identity: null,
+            assigned_at: null,
+            deadline_at: null,
+            is_overdue: false,
             secret_field: "leak"
           }
         ],
@@ -106,7 +114,8 @@ describe("soul.review_memory_proposal reviewer_identity contract", () => {
       proposal_id: "prop-1",
       verdict: "accept",
       reason: "Confirmed by reviewer.",
-      reviewer_identity: "user:alice"
+      reviewer_identity: "user:alice",
+      reviewer_token: "token-local"
     } as const;
     expect(SoulReviewMemoryProposalRequestSchema.parse(request)).toEqual(request);
   });

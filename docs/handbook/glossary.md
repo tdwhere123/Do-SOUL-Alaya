@@ -80,10 +80,9 @@ neighbour consolidation.
 `POINTER_HEALING`, etc.).
 
 **ConsolidationLoop** — Garden's primary mechanism for path plasticity
-maintenance. v0.1 ships under the Auditor (TIER_1) task kind
-`path_plasticity_update` rather than the Librarian (TIER_2) — the
-off-recall-request-path constraint is satisfied either way; v0.2
-`#BL-028` realigns to the Librarian for strict tier alignment.
+maintenance. Gate-5F owns this through the Librarian (TIER_2)
+`path_plasticity_update` task, keeping the work off the recall request
+path while matching the role that owns path consolidation.
 
 ## Governance
 
@@ -117,13 +116,14 @@ NOT interchangeable:
 - `reviewer_identity` (proposals row) — the proposal-side projection
   of `caused_by` for the review event chain. Persisted on the
   `proposals.reviewer_identity` column once the proposal resolves.
-  IMPORTANT: in v0.1 this is an **agent-asserted attestation, not an
-  authenticated principal**. The MCP / Inspector / CLI surfaces accept
-  it verbatim as a `BoundedIdSchema` string with no signature
-  verification. v0.2 (`#BL-027`) binds it server-side from a
-  pre-shared session credential. An operator reading this column should
-  treat it as "the agent / human attested to this identity" rather
-  than "the runtime verified this identity".
+  IMPORTANT: in v0.1 this has two trust modes. When
+  `ALAYA_REVIEWER_TOKEN` and `ALAYA_REVIEWER_IDENTITY` are configured,
+  the daemon binds it server-side and rejects missing, bad, or
+  mismatched reviewer tokens. When local binding is not configured, the
+  MCP / Inspector / CLI surfaces accept it as an agent / human
+  attestation, not an authenticated principal. Operators reading this
+  column should distinguish "the runtime verified this identity" from
+  "the reviewer attested to this identity".
 - `agent_target` (MCP call context) — the MCP transport surface that
   delivered the call (`"codex"`, `"claude-code"`, `"inspector"`,
   `"cli"`, ...). The runtime trusts this only as transport-level
@@ -178,17 +178,10 @@ becomes durable directly; flows through the Promotion Gate.
 
 ## Storage *(Alaya v0.1 specific)*
 
-**`*Sync` repo siblings** — Synchronous variants of repo methods
-(`createSync`, `updateStateSync`, `patchSync`, `deleteSync`,
-`updateSync`, `appendSync`, ...) introduced by A2 to support
-`appendManyWithMutation`'s sync-mutate-callback contract. They live
-on every repo whose entity participates in atomic publish + mutation
-(`event-log`, `claim-form`, `bootstrapping-record`,
-`deferred-obligation`, `dirty-state-dossier`, `drift-lease`, `run`,
-`path-graph-snapshot`, `path-relation`, `surface-binding`, `config`).
-This is an **interim pattern** — `#BL-031` retires it by making the
-primary repo methods synchronous and async-wrapping only at I/O
-boundaries.
+**Sync-first repo methods** — Storage repos expose synchronous primary
+methods for SQLite-backed durable mutation. Gate-5F retired the
+parallel `*Sync` sibling pattern from A2; async wrapping now belongs at
+I/O boundaries rather than inside SQLite repo APIs.
 
 ## Port Vocabulary *(Historical, retired after v0.1.0)*
 

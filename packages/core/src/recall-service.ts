@@ -52,7 +52,6 @@ import type {
   RecallServiceWarnPort,
   RecallSupplementaryData
 } from "./recall-service-types.js";
-import { getNextRevision } from "./shared/event-utils.js";
 import { parseRecallPolicy } from "./shared/recall-policy.js";
 
 export { classifyGlobalCandidate } from "./recall-service-helpers.js";
@@ -176,11 +175,6 @@ export class RecallService {
       supplementaryData,
       preparedEmbeddingQuery
     });
-    const revision = await getNextRevision(
-      this.dependencies.eventLogRepo,
-      "task_object_surface",
-      params.taskSurface.runtime_id
-    );
     const occurredAt = this.now();
 
     await this.dependencies.eventLogRepo.append({
@@ -190,7 +184,6 @@ export class RecallService {
       workspace_id: params.workspaceId,
       run_id: params.runId ?? null,
       caused_by: "system",
-      revision,
       payload_json: SoulRecallCompletedPayloadSchema.parse({
         task_surface_ref: params.taskSurface.runtime_id,
         node_strategy: params.strategy,

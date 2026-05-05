@@ -69,8 +69,9 @@ describe("GlobalMemoryRecallService cross-workspace invalidation", () => {
       listenerSawAuditRow = auditRows.some((row) => row.event_id === entry.event_id);
     });
 
-    await eventPublisher.publishWithMutation(
-      createMemoryEventInput({
+    await eventPublisher.appendManyWithMutation(
+      [
+        createMemoryEventInput({
         event_type: "soul.memory.updated",
         workspace_id: "workspace-a",
         entity_id: "memory-shared-1",
@@ -78,8 +79,9 @@ describe("GlobalMemoryRecallService cross-workspace invalidation", () => {
           workspace_id: "workspace-a",
           memory_id: "memory-shared-1"
         }
-      }),
-      async () => undefined
+        })
+      ],
+      () => undefined
     );
 
     expect(listenerSawAuditRow).toBe(true);
@@ -161,8 +163,9 @@ describe("GlobalMemoryRecallService cross-workspace invalidation", () => {
       })
     ]);
 
-    await eventPublisher.publishWithMutation(
-      createMemoryEventInput({
+    await eventPublisher.appendManyWithMutation(
+      [
+        createMemoryEventInput({
         event_type: "soul.memory.updated",
         workspace_id: "workspace-a",
         entity_id: "memory-shared-2",
@@ -170,8 +173,9 @@ describe("GlobalMemoryRecallService cross-workspace invalidation", () => {
           workspace_id: "workspace-a",
           object_id: "memory-shared-2"
         }
-      }),
-      async () => undefined
+        })
+      ],
+      () => undefined
     );
 
     const refreshed = await service.recall({
@@ -255,17 +259,18 @@ function createEventPublisher(input: {
 }): EventPublisher {
   return new EventPublisher({
     eventLogRepo: {
-      append: vi.fn(async (event) => {
+      append: vi.fn((event) => {
         const entry = createEventLogEntry(event, input.auditRows.length + 1);
         input.auditRows.push(entry);
         return entry;
       }),
-      deleteById: vi.fn(async (eventId: string) => {
+      deleteById: vi.fn((eventId: string) => {
         const index = input.auditRows.findIndex((row) => row.event_id === eventId);
         if (index >= 0) {
           input.auditRows.splice(index, 1);
         }
-      })
+      }),
+      transactional: <T>(fn: () => T): T => fn()
     },
     runHotStateService: {
       apply: vi.fn(async () => undefined)
@@ -275,17 +280,18 @@ function createEventPublisher(input: {
 }
 
 function createEventLogEntry(
-  event: Omit<EventLogEntry, "event_id" | "created_at">,
+  event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">,
   revision: number
 ): EventLogEntry {
   return {
     ...event,
     event_id: `event-${revision}`,
-    created_at: `2026-04-30T00:00:0${revision}.000Z`
+    created_at: `2026-04-30T00:00:0${revision}.000Z`,
+    revision
   };
 }
 
-function createMemoryEventInput(overrides: Partial<Omit<EventLogEntry, "event_id" | "created_at">>): Omit<EventLogEntry, "event_id" | "created_at"> {
+function createMemoryEventInput(overrides: Partial<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
   return {
     event_type: "soul.memory.updated",
     entity_type: "memory_entry",
@@ -293,7 +299,6 @@ function createMemoryEventInput(overrides: Partial<Omit<EventLogEntry, "event_id
     workspace_id: "workspace-a",
     run_id: null,
     caused_by: "system",
-    revision: 1,
     payload_json: {
       workspace_id: "workspace-a",
       memory_id: "memory-shared"

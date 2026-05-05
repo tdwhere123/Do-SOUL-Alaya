@@ -34,7 +34,7 @@ export interface ConversationWorkspaceRepoPort {
 
 export interface ConversationEventLogRepoPort {
   queryByRun(runId: string): Promise<readonly EventLogEntry[]>;
-  append?(event: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append?(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
 }
 
 export interface ConversationGardenComputeProviderPort {
@@ -397,7 +397,6 @@ export class ConversationService {
         workspace_id: input.workspace.workspace_id,
         run_id: input.run.run_id,
         caused_by: "system",
-        revision: 0,
         payload_json: ComputeProviderCallStartedPayloadSchema.parse({
           workspace_id: input.workspace.workspace_id,
           run_id: input.run.run_id,
@@ -449,7 +448,6 @@ export class ConversationService {
         workspace_id: input.workspace.workspace_id,
         run_id: input.run.run_id,
         caused_by: "system",
-        revision: 0,
         payload_json: ComputeProviderCallCompletedPayloadSchema.parse({
           workspace_id: input.workspace.workspace_id,
           run_id: input.run.run_id,
@@ -507,7 +505,6 @@ export class ConversationService {
         workspace_id: input.workspace.workspace_id,
         run_id: input.run.run_id,
         caused_by: "system",
-        revision: 0,
         payload_json: ComputeProviderCallFailedPayloadSchema.parse({
           workspace_id: input.workspace.workspace_id,
           run_id: input.run.run_id,

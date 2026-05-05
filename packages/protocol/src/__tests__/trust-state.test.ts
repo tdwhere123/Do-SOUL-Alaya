@@ -85,6 +85,9 @@ describe("trust state schemas", () => {
         delivery_id: "delivery-1",
         usage_state: state,
         used_object_ids: state === "used" ? ["memory-1"] : [],
+        ...(state === "used"
+          ? { per_anchor_usage: [{ object_id: "memory-1", anchor_role: "target" }] }
+          : {}),
         reason: null,
         reported_at: REPORTED_AT,
         audit_event_id: "event-usage-1"
@@ -92,6 +95,9 @@ describe("trust state schemas", () => {
 
       expect(record.usage_state).toBe(state);
       expect(record.reported_at).toBe(REPORTED_AT);
+      if (state === "used") {
+        expect(record.per_anchor_usage).toEqual([{ object_id: "memory-1", anchor_role: "target" }]);
+      }
     }
   });
 

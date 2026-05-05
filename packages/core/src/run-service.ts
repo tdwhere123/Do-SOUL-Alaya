@@ -26,27 +26,11 @@ export interface RunRepoPort {
     readonly engine_class: Run["engine_class"];
     readonly run_state: Run["run_state"];
     readonly current_surface_id: Run["current_surface_id"];
-  }): Promise<Run>;
-  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
-  createSync(data: {
-    readonly run_id: string;
-    readonly workspace_id: string;
-    readonly title: Run["title"];
-    readonly goal: Run["goal"];
-    readonly run_mode: Run["run_mode"];
-    readonly engine_binding_id: Run["engine_binding_id"];
-    readonly engine_class: Run["engine_class"];
-    readonly run_state: Run["run_state"];
-    readonly current_surface_id: Run["current_surface_id"];
   }): Run;
   getById(id: string): Promise<Run | null>;
   listByWorkspace(workspaceId: string): Promise<readonly Run[]>;
-  delete(id: string): Promise<void>;
-  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
-  deleteSync(id: string): void;
-  update(id: string, patch: Partial<Run>): Promise<Run>;
-  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
-  updateSync(id: string, patch: Partial<Run>): Run;
+  delete(id: string): void;
+  update(id: string, patch: Partial<Run>): Run;
 }
 
 export interface RunWorkspaceRepoPort {
@@ -130,7 +114,6 @@ export class RunService {
           workspace_id: workspace.workspace_id,
           run_id: runId,
           caused_by: "user_action",
-          revision: 0,
           payload_json: RunCreatedPayloadSchema.parse({
             run_id: runId,
             workspace_id: workspace.workspace_id,
@@ -140,7 +123,7 @@ export class RunService {
         }
       ],
       () =>
-        this.dependencies.runRepo.createSync({
+        this.dependencies.runRepo.create({
           run_id: runId,
           workspace_id: workspace.workspace_id,
           title: runTitle,
@@ -186,7 +169,6 @@ export class RunService {
           workspace_id: run.workspace_id,
           run_id: run.run_id,
           caused_by: "user_action",
-          revision: 0,
           payload_json: RunRenamedPayloadSchema.parse({
             run_id: run.run_id,
             title: parsed.title,
@@ -194,7 +176,7 @@ export class RunService {
           })
         }
       ],
-      () => this.dependencies.runRepo.updateSync(run.run_id, { title: parsed.title })
+      () => this.dependencies.runRepo.update(run.run_id, { title: parsed.title })
     );
   }
 
@@ -210,14 +192,13 @@ export class RunService {
           workspace_id: run.workspace_id,
           run_id: run.run_id,
           caused_by: "user_action",
-          revision: 0,
           payload_json: RunDeletedPayloadSchema.parse({
             run_id: run.run_id,
             workspace_id: run.workspace_id
           })
         }
       ],
-      () => this.dependencies.runRepo.deleteSync(run.run_id)
+      () => this.dependencies.runRepo.delete(run.run_id)
     );
 
     return run;

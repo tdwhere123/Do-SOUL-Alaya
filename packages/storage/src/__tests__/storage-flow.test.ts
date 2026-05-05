@@ -50,7 +50,6 @@ describe("storage integration flow", () => {
       workspace_id: workspace.workspace_id,
       run_id: run.run_id,
       caused_by: "user_action",
-      revision: 0,
       payload_json: {
         run_id: run.run_id,
         workspace_id: workspace.workspace_id,

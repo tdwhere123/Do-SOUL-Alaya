@@ -8,10 +8,11 @@ import {
 import { EventPublisherPropagationError } from "../event-publisher.js";
 import { SurfaceDriftService, type SurfaceDriftEventPublisherPort } from "../surface-drift-service.js";
 
-function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at">): EventLogEntry {
+function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry {
   return {
     event_id: `event-${event.event_type}-${event.entity_id}`,
     created_at: "2026-04-20T08:00:00.000Z",
+    revision: 0,
     ...event
   };
 }
@@ -31,7 +32,7 @@ function createLease(overrides: Partial<GovernanceDriftLease> = {}): GovernanceD
 
 describe("SurfaceDriftService", () => {
   it("classifies governance-critical drift and appends drift_detected event", async () => {
-    const publishSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) =>
+    const publishSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) =>
       createEventLogEntry(event)
     );
     const service = new SurfaceDriftService({
@@ -60,8 +61,7 @@ describe("SurfaceDriftService", () => {
         event_type: RuntimeGovernanceEventType.SURFACE_DRIFT_DETECTED,
         entity_type: "surface_drift",
         entity_id: "drift-1",
-        workspace_id: "workspace-1",
-        revision: 0
+        workspace_id: "workspace-1"
       })
     );
   });
@@ -70,11 +70,11 @@ describe("SurfaceDriftService", () => {
     const order: string[] = [];
     const repo = createLeaseRepo({
       // Sync siblings observe the in-transaction call order post-#BL-022.
-      deleteExpiredSync: vi.fn(() => {
+      deleteExpired: vi.fn(() => {
         order.push("repo_delete_expired");
         return 0;
       }),
-      createSync: vi.fn((lease) => {
+      create: vi.fn((lease) => {
         order.push("repo_create");
         return lease;
       })
@@ -87,7 +87,7 @@ describe("SurfaceDriftService", () => {
       eventPublisher: createEventPublisher({
         appendManyWithMutation: vi.fn(async (inputs, mutate) => {
           order.push("event_log");
-          const entries = inputs.map((input: Omit<EventLogEntry, "event_id" | "created_at">) =>
+          const entries = inputs.map((input: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) =>
             createEventLogEntry(input)
           );
           return mutate(entries);
@@ -118,7 +118,7 @@ describe("SurfaceDriftService", () => {
     const service = new SurfaceDriftService({
       leaseRepo: createLeaseRepo({
         findActiveById: vi.fn(async () => createLease()),
-        deleteSync: deleteSyncSpy
+        delete: deleteSyncSpy
       }),
       eventPublisher: createEventPublisher()
     });
@@ -132,7 +132,7 @@ describe("SurfaceDriftService", () => {
     const order: string[] = [];
     const repo = createLeaseRepo({
       findActiveById: vi.fn(async () => createLease()),
-      deleteSync: vi.fn(() => {
+      delete: vi.fn(() => {
         order.push("repo_delete");
       })
     });
@@ -151,7 +151,7 @@ describe("SurfaceDriftService", () => {
 
     expect(order).toEqual(["event_log", "repo_delete"]);
     expect(repo.findActiveById).toHaveBeenCalledWith("workspace-1", "lease-1");
-    expect(repo.deleteSync).toHaveBeenCalledWith("lease-1");
+    expect(repo.delete).toHaveBeenCalledWith("lease-1");
     expect(appendManyWithMutationSpy).toHaveBeenCalledWith(
       [
         expect.objectContaining({
@@ -160,7 +160,6 @@ describe("SurfaceDriftService", () => {
           entity_id: "lease-1",
           workspace_id: "workspace-1",
           caused_by: "user",
-          revision: 0,
           payload_json: {
             lease_id: "lease-1",
             workspace_id: "workspace-1",
@@ -178,7 +177,7 @@ describe("SurfaceDriftService", () => {
   it("returns without event when the lease is already missing", async () => {
     const repo = createLeaseRepo({
       findActiveById: vi.fn(async () => null),
-      deleteSync: vi.fn()
+      delete: vi.fn()
     });
     const appendManyWithMutationSpy = vi.fn(async (inputs: any, mutate: any) => {
       const entries = inputs.map((input: any) => createEventLogEntry(input));
@@ -192,17 +191,17 @@ describe("SurfaceDriftService", () => {
     await service.releaseLease("lease-1", "workspace-1", "user");
 
     expect(repo.findActiveById).toHaveBeenCalledTimes(1);
-    expect(repo.deleteSync).not.toHaveBeenCalled();
+    expect(repo.delete).not.toHaveBeenCalled();
     expect(appendManyWithMutationSpy).not.toHaveBeenCalled();
   });
 
   it("records a lease release failure witness instead of throwing when durable cleanup fails", async () => {
-    const publishSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) =>
+    const publishSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) =>
       createEventLogEntry(event)
     );
     const repo = createLeaseRepo({
       findActiveById: vi.fn(async () => createLease()),
-      deleteSync: vi.fn(() => {
+      delete: vi.fn(() => {
         throw new Error("delete failed");
       })
     });
@@ -239,7 +238,7 @@ describe("SurfaceDriftService", () => {
   });
 
   it("preserves propagation failures without emitting a false lease release failure witness", async () => {
-    const publishSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) =>
+    const publishSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) =>
       createEventLogEntry(event)
     );
     const propagatedReleaseEntry = createEventLogEntry({
@@ -249,7 +248,6 @@ describe("SurfaceDriftService", () => {
       workspace_id: "workspace-1",
       run_id: null,
       caused_by: "user",
-      revision: 0,
       payload_json: {
         lease_id: "lease-1",
         workspace_id: "workspace-1",
@@ -261,7 +259,7 @@ describe("SurfaceDriftService", () => {
     });
     const repo = createLeaseRepo({
       findActiveById: vi.fn(async () => createLease()),
-      deleteSync: vi.fn()
+      delete: vi.fn()
     });
     const service = new SurfaceDriftService({
       now: () => "2026-04-20T08:01:00.000Z",
@@ -302,7 +300,7 @@ describe("SurfaceDriftService", () => {
       code: "OBLIGATION_VIOLATION",
       message: "Only user may release drift lease lease-1."
     });
-    expect(repo.deleteSync).not.toHaveBeenCalled();
+    expect(repo.delete).not.toHaveBeenCalled();
     expect(appendManyWithMutationSpy).not.toHaveBeenCalled();
   });
 
@@ -325,7 +323,7 @@ describe("SurfaceDriftService", () => {
   });
 
   it("alerts only on governance-critical drift", async () => {
-    const publishSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) =>
+    const publishSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) =>
       createEventLogEntry(event)
     );
     const service = new SurfaceDriftService({
@@ -382,7 +380,7 @@ describe("SurfaceDriftService", () => {
       now: () => "2026-04-20T08:00:00.000Z",
       generateId: () => "lease-1",
       leaseRepo: createLeaseRepo({
-        createSync: vi.fn(() => {
+        create: vi.fn(() => {
           throw repoConflict;
         })
       }),
@@ -409,42 +407,28 @@ describe("SurfaceDriftService", () => {
 });
 
 function createLeaseRepo(overrides: Partial<{
-  create: (lease: Readonly<GovernanceDriftLease>) => Promise<Readonly<GovernanceDriftLease>>;
+  create: (lease: Readonly<GovernanceDriftLease>) => Readonly<GovernanceDriftLease>;
   findActive: (workspaceId: string) => Promise<readonly Readonly<GovernanceDriftLease>[]>;
   findActiveById: (
     workspaceId: string,
     leaseId: string
   ) => Promise<Readonly<GovernanceDriftLease> | null>;
-  delete: (leaseId: string) => Promise<void>;
-  deleteExpired: (beforeDate: string) => Promise<number>;
-  // Sync overrides for tests that care about ordering — those tests after
-  // #BL-022 should hand a sync override so the spy fires synchronously inside
-  // the transaction. If the test only supplies the async variant, we surface
-  // a NOT_IMPLEMENTED via the sync sibling so the test fails loudly.
-  createSync?: (lease: Readonly<GovernanceDriftLease>) => Readonly<GovernanceDriftLease>;
-  deleteSync?: (leaseId: string) => void;
-  deleteExpiredSync?: (beforeDate: string) => number;
+  delete: (leaseId: string) => void;
+  deleteExpired: (beforeDate: string) => number;
 }> = {}) {
-  const create = overrides.create ?? vi.fn(async (lease) => lease);
-  const del = overrides.delete ?? vi.fn(async () => {});
-  const deleteExpired = overrides.deleteExpired ?? vi.fn(async () => 0);
-
   return {
-    create,
-    createSync: overrides.createSync ?? vi.fn((lease: Readonly<GovernanceDriftLease>) => lease),
+    create: overrides.create ?? vi.fn((lease: Readonly<GovernanceDriftLease>) => lease),
     findActive: overrides.findActive ?? vi.fn(async () => []),
     findActiveById: overrides.findActiveById ?? vi.fn(async () => null),
-    delete: del,
-    deleteSync: overrides.deleteSync ?? vi.fn(),
-    deleteExpired,
-    deleteExpiredSync: overrides.deleteExpiredSync ?? vi.fn(() => 0)
+    delete: overrides.delete ?? vi.fn(),
+    deleteExpired: overrides.deleteExpired ?? vi.fn(() => 0)
   };
 }
 
 function createEventPublisher(overrides: Partial<{
-  publish: (event: Omit<EventLogEntry, "event_id" | "created_at">) => Promise<EventLogEntry>;
+  publish: (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => Promise<EventLogEntry>;
   appendManyWithMutation: (
-    inputs: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at">>,
+    inputs: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>,
     mutate: (entries: readonly EventLogEntry[]) => unknown
   ) => Promise<unknown>;
 }> = {}): SurfaceDriftEventPublisherPort {
@@ -458,7 +442,7 @@ function createEventPublisher(overrides: Partial<{
   return {
     publish:
       overrides.publish ??
-      (async (event: Omit<EventLogEntry, "event_id" | "created_at">) => createEventLogEntry(event)),
+      (async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(event)),
     appendManyWithMutation: appendMany as unknown as SurfaceDriftEventPublisherPort["appendManyWithMutation"]
   };
 }

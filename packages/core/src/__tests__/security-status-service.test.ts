@@ -16,10 +16,11 @@ const FIXED_NOW = "2026-04-15T08:00:00.000Z";
 
 describe("SecurityStatusService", () => {
   it("returns a surface-consumable status contract for the workspace", async () => {
-    const publish = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+    const publish = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       ...entry,
       event_id: "event-1",
-      created_at: FIXED_NOW
+      created_at: FIXED_NOW,
+          revision: 0
     }));
     const service = new SecurityStatusService({
       zeroDayLayer: new ZeroDaySecurityLayer({
@@ -42,19 +43,20 @@ describe("SecurityStatusService", () => {
   });
 
   it("publishes security.passthrough_status_changed when the workspace posture changes", async () => {
-    const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at">> = [];
+    const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
     const service = new SecurityStatusService({
       zeroDayLayer: new ZeroDaySecurityLayer({
         loadPolicies: async () => [],
         now: () => FIXED_NOW
       }),
       eventPublisher: {
-        publish: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => {
+        publish: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
           publishedEvents.push(entry);
           return {
             ...entry,
             event_id: `event-${publishedEvents.length}`,
-            created_at: FIXED_NOW
+            created_at: FIXED_NOW,
+            revision: publishedEvents.length
           };
         })
       }
@@ -89,7 +91,7 @@ describe("SecurityStatusService", () => {
   it("emits a new status when zero-day policy reevaluation observes a posture change", async () => {
     let policies: readonly ZeroDayPolicy[] = [];
     let now = FIXED_NOW;
-    const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at">> = [];
+    const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
     const zeroDayLayer = new ZeroDaySecurityLayer({
       loadPolicies: async () => policies,
       now: () => now,
@@ -98,12 +100,13 @@ describe("SecurityStatusService", () => {
     const service = new SecurityStatusService({
       zeroDayLayer,
       eventPublisher: {
-        publish: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => {
+        publish: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
           publishedEvents.push(entry);
           return {
             ...entry,
             event_id: `event-${publishedEvents.length}`,
-            created_at: FIXED_NOW
+            created_at: FIXED_NOW,
+            revision: publishedEvents.length
           };
         })
       }
@@ -153,10 +156,11 @@ describe("SecurityStatusService", () => {
   });
 
   it("initializes workspace baseline security only once and emits the initial posture once", async () => {
-    const publish = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+    const publish = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       ...entry,
       event_id: "event-1",
-      created_at: FIXED_NOW
+      created_at: FIXED_NOW,
+          revision: 0
     }));
     const service = new SecurityStatusService({
       zeroDayLayer: new ZeroDaySecurityLayer({
@@ -183,10 +187,11 @@ describe("SecurityStatusService", () => {
 
   it("does not re-emit workspace_initialized after initialization tracking expires", async () => {
     let now = FIXED_NOW;
-    const publish = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+    const publish = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       ...entry,
       event_id: "event-1",
-      created_at: FIXED_NOW
+      created_at: FIXED_NOW,
+          revision: 0
     }));
     const service = new SecurityStatusService({
       zeroDayLayer: new ZeroDaySecurityLayer({
@@ -215,10 +220,11 @@ describe("SecurityStatusService", () => {
     });
     let observer: ((status: SecurityStatusContract, reason: string) => Promise<void> | void) | undefined;
     const unsubscribe = vi.fn();
-    const publish = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+    const publish = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       ...entry,
       event_id: "event-1",
-      created_at: FIXED_NOW
+      created_at: FIXED_NOW,
+          revision: 0
     }));
     const service = new SecurityStatusService({
       zeroDayLayer: {
@@ -244,19 +250,20 @@ describe("SecurityStatusService", () => {
   });
 
   it("publishes a bootstrap failure witness with optional diagnostics when workspace security initialization fails", async () => {
-    const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at">> = [];
+    const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
     const service = new SecurityStatusService({
       zeroDayLayer: new ZeroDaySecurityLayer({
         loadPolicies: async () => [],
         now: () => FIXED_NOW
       }),
       eventPublisher: {
-        publish: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => {
+        publish: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
           publishedEvents.push(entry);
           return {
             ...entry,
             event_id: `event-${publishedEvents.length}`,
-            created_at: FIXED_NOW
+            created_at: FIXED_NOW,
+            revision: publishedEvents.length
           };
         })
       }
@@ -316,10 +323,11 @@ describe("SecurityStatusService", () => {
         subscribeStatusEvaluations
       },
       eventPublisher: {
-        publish: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+        publish: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
           ...entry,
           event_id: "event-1",
-          created_at: FIXED_NOW
+          created_at: FIXED_NOW,
+          revision: 0
         }))
       }
     });

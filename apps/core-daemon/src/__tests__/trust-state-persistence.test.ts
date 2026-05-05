@@ -30,7 +30,7 @@ import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "../index.js";
 
 const tempDirs: string[] = [];
 const originalDataDir = process.env.DATA_DIR;
-const originalConfigDir = process.env.ALAYA_CONFIG_DIR;
+const originalAlayaConfigDir = process.env.ALAYA_CONFIG_DIR;
 const INTEGRATION_TEST_TIMEOUT_MS = 30_000;
 
 interface AuditLinkRow {
@@ -65,7 +65,7 @@ describe("trust state SQL persistence", () => {
         firstRuntime,
         "soul.recall",
         {
-          query: "pnpm workspace commands",
+          query: "Use pnpm for all workspace commands.",
           scope_class: ScopeClass.PROJECT,
           dimension: MemoryDimension.PREFERENCE,
           domain_tags: null,
@@ -97,10 +97,7 @@ describe("trust state SQL persistence", () => {
 
     expect(existsSync(databasePath)).toBe(true);
     expect(process.env.DATA_DIR).toBe(dataDir);
-    // A1 (HITL daemon backbone) bumps the migration set to 058
-    // (058-reviewer-identity.sql adds reviewer_identity + HITL summary
-    // projection columns to the proposals table).
-    expect(readMaxSchemaVersion(dataDir)).toBe(58);
+    expect(readMaxSchemaVersion(dataDir)).toBe(62);
     expect(firstStatus).not.toBeNull();
     if (firstStatus === null) {
       throw new Error("first daemon lifetime did not produce a trust status");
@@ -383,9 +380,10 @@ function restoreDataDir(): void {
     process.env.DATA_DIR = originalDataDir;
   }
 
-  if (originalConfigDir === undefined) {
+  if (originalAlayaConfigDir === undefined) {
     delete process.env.ALAYA_CONFIG_DIR;
-  } else {
-    process.env.ALAYA_CONFIG_DIR = originalConfigDir;
+    return;
   }
+
+  process.env.ALAYA_CONFIG_DIR = originalAlayaConfigDir;
 }

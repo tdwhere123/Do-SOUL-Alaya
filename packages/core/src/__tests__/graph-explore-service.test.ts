@@ -7,10 +7,11 @@ import {
 } from "@do-soul/alaya-protocol";
 import { GraphExploreService } from "../graph-explore-service.js";
 
-function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at">): EventLogEntry {
+function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry {
   return {
     event_id: `event-${event.event_type}-${event.entity_id}`,
     created_at: "2026-03-28T10:00:00.000Z",
+    revision: 0,
     ...event
   };
 }
@@ -40,7 +41,7 @@ describe("GraphExploreService", () => {
       countInboundSupports: vi.fn(async () => 0),
       delete: vi.fn(async () => undefined)
     };
-    const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => {
+    const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
       expect(persisted).toBe(false);
       return createEventLogEntry(event);
     });
@@ -116,7 +117,7 @@ describe("GraphExploreService", () => {
   });
 
   it("explores one-hop neighbors in both directions by default and emits an explore event", async () => {
-    const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) =>
+    const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) =>
       createEventLogEntry(event)
     );
     const service = new GraphExploreService({
@@ -171,7 +172,7 @@ describe("GraphExploreService", () => {
   });
 
   it("returns an empty neighbor list without emitting an explore event when no edges match", async () => {
-    const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) =>
+    const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) =>
       createEventLogEntry(event)
     );
     const service = new GraphExploreService({

@@ -24,7 +24,7 @@ describe("SqliteConfigRepo", () => {
       auto_checkpoint: true
     });
 
-    await expect(repo.get("workspace:ws-1:soul")).resolves.toEqual({
+    expect(repo.get("workspace:ws-1:soul")).toEqual({
       memory_consolidation_enabled: true,
       local_heuristics_enabled: false,
       garden_backlog_soft_limit: 42,
@@ -36,13 +36,13 @@ describe("SqliteConfigRepo", () => {
   it("returns null when a config key is missing", async () => {
     const repo = createRepo();
 
-    await expect(repo.get("workspace:missing:strategy")).resolves.toBeNull();
+    expect(repo.get("workspace:missing:strategy")).toBeNull();
   });
 
   it("patches shallowly against defaults when the key does not yet exist", async () => {
     const repo = createRepo();
 
-    await expect(
+    expect(
       repo.patch(
         "workspace:ws-1:strategy",
         {
@@ -55,7 +55,7 @@ describe("SqliteConfigRepo", () => {
           auto_approve_readonly: false
         }
       )
-    ).resolves.toEqual({
+    ).toEqual({
       require_bash_approval: true,
       require_write_approval: true,
       require_network_approval: true,
@@ -73,7 +73,7 @@ describe("SqliteConfigRepo", () => {
       worktree_enabled: false
     });
 
-    await expect(
+    expect(
       repo.patch(
         "workspace:ws-1:environment",
         {
@@ -84,7 +84,7 @@ describe("SqliteConfigRepo", () => {
           worktree_enabled: false
         }
       )
-    ).resolves.toEqual({
+    ).toEqual({
       env_vars: {
         NODE_ENV: "development"
       },

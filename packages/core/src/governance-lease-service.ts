@@ -17,7 +17,6 @@ import {
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
 import { SYSTEM_ACTOR } from "./shared/actors.js";
-import { getNextRevision } from "./shared/event-utils.js";
 import { addDuration, readNow } from "./shared/time.js";
 import { normalizeOptionalNonEmptyString, parseNonEmptyString } from "./shared/validators.js";
 
@@ -39,7 +38,7 @@ const HIGH_SIGNAL_PIERCING_CONDITIONS: readonly Readonly<PiercingCondition>[] = 
 ]);
 
 export interface GovernanceLeaseServiceEventLogPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
   queryByRun(runId: string): Promise<readonly EventLogEntry[]>;
 }
@@ -90,7 +89,6 @@ export class GovernanceLeaseService {
     });
 
     this.clearExpiredAt(occurredAt);
-    const revision = await getNextRevision(this.dependencies.eventLogRepo, "governance_lease", lease.runtime_id);
     await this.dependencies.eventLogRepo.append({
       event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED,
       entity_type: "governance_lease",
@@ -98,7 +96,6 @@ export class GovernanceLeaseService {
       workspace_id: workspaceId,
       run_id: runId,
       caused_by: SYSTEM_ACTOR,
-      revision,
       payload_json: SoulGovernanceLeaseAcquiredPayloadSchema.parse({
         lease_id: lease.lease_id,
         holder: lease.holder,
@@ -125,7 +122,6 @@ export class GovernanceLeaseService {
     }
 
     const occurredAt = readNow(this.dependencies.now);
-    const revision = await getNextRevision(this.dependencies.eventLogRepo, "governance_lease", active.lease.runtime_id);
     await this.dependencies.eventLogRepo.append({
       event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_RELEASED,
       entity_type: "governance_lease",
@@ -133,7 +129,6 @@ export class GovernanceLeaseService {
       workspace_id: active.workspaceId,
       run_id: parsedRunId,
       caused_by: SYSTEM_ACTOR,
-      revision,
       payload_json: SoulGovernanceLeaseReleasedPayloadSchema.parse({
         lease_id: active.lease.lease_id,
         run_id: parsedRunId,
@@ -163,7 +158,6 @@ export class GovernanceLeaseService {
     }
 
     const occurredAt = readNow(this.dependencies.now);
-    const revision = await getNextRevision(this.dependencies.eventLogRepo, "governance_lease", active.runtime_id);
     await this.dependencies.eventLogRepo.append({
       event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_PIERCED,
       entity_type: "governance_lease",
@@ -171,7 +165,6 @@ export class GovernanceLeaseService {
       workspace_id: workspaceId,
       run_id: runId,
       caused_by: SYSTEM_ACTOR,
-      revision,
       payload_json: SoulGovernanceLeasePiercedPayloadSchema.parse({
         lease_id: active.lease_id,
         piercing_condition_kind: conditionKind,

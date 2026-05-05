@@ -80,9 +80,10 @@ function createDependencies(overrides: Partial<SynthesisServiceDependencies> = {
   readonly memoryFindByIdSpy: ReturnType<typeof vi.fn>;
   readonly notifySpy: ReturnType<typeof vi.fn>;
 } {
-  const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+  const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
     event_id: `event-${event.event_type}`,
     created_at: "2026-03-21T00:00:00.000Z",
+    revision: 0,
     ...event
   }));
   const queryByEntitySpy = vi.fn(async () => [] as readonly EventLogEntry[]);
@@ -148,6 +149,7 @@ describe("SynthesisService", () => {
           return {
             event_id: "event-created",
             created_at: "2026-03-21T01:00:00.000Z",
+            revision: 0,
             ...event
           };
         }),
@@ -187,7 +189,7 @@ describe("SynthesisService", () => {
     const service = new SynthesisService(dependencies);
     const created = await service.create(createSynthesisInput());
 
-    expect(order).toEqual(["event_query", "event_log", "repo_create", "notify"]);
+    expect(order).toEqual(["event_log", "repo_create", "notify"]);
     expect(created.object_id).toBe("85b3671a-d8d8-4848-9e5c-07d0a89f5ae9");
   });
 
@@ -244,6 +246,7 @@ describe("SynthesisService", () => {
           return {
             event_id: "event-status",
             created_at: "2026-03-21T02:00:00.000Z",
+            revision: 0,
             ...event
           };
         })
@@ -282,7 +285,7 @@ describe("SynthesisService", () => {
       TransitionCausedBy.REVIEW
     );
 
-    expect(order).toEqual(["event_query", "event_log", "repo_update", "notify"]);
+    expect(order).toEqual(["event_log", "repo_update", "notify"]);
     expect(updated.synthesis_status).toBe(SynthesisStatus.STABLE);
   });
 
@@ -321,6 +324,7 @@ describe("SynthesisService", () => {
         append: vi.fn(async (event) => ({
           event_id: "event-promoted",
           created_at: "2026-03-21T03:00:00.000Z",
+          revision: 0,
           ...event
         }))
       },
@@ -412,6 +416,7 @@ describe("SynthesisService", () => {
         append: vi.fn(async (event) => ({
           event_id: "event-promoted",
           created_at: "2026-03-21T03:00:00.000Z",
+          revision: 0,
           ...event
         }))
       },

@@ -6,11 +6,7 @@ import {
 } from "@do-soul/alaya-protocol";
 
 export interface SoulTopologyAuditEventLogRepo {
-  append(
-    entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision"> & {
-      readonly revision?: number;
-    }
-  ): Promise<EventLogEntry>;
+  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
 }
 
 export interface SoulTopologyAuditServiceDependencies {

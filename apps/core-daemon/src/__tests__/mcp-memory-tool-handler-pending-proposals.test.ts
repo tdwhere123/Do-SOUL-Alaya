@@ -28,7 +28,11 @@ describe("mcp memory tool handler — soul.list_pending_proposals (A1)", () => {
       target_object_id: "mem-1",
       target_object_kind: "memory_entry",
       created_at: "2026-04-30T00:00:00.000Z",
-      proposed_change_summary: "Switch to pnpm"
+      proposed_change_summary: "Switch to pnpm",
+      assigned_reviewer_identity: "user:local-reviewer",
+      assigned_at: "2026-04-30T00:00:00.000Z",
+      deadline_at: null,
+      is_overdue: false
     };
     const listPendingProposals = vi.fn(async () => ({
       proposals: [summary],

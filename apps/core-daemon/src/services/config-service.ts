@@ -38,7 +38,7 @@ export interface AppConfigService {
 
 interface ConfigEventPublisher {
   appendManyWithMutation<T>(
-    eventInputs: readonly Omit<EventLogEntry, "event_id" | "created_at">[],
+    eventInputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
     mutate: (entries: readonly EventLogEntry[]) => T
   ): Promise<T>;
 }
@@ -51,7 +51,6 @@ const RUNTIME_EMBEDDING_CONFIG_KEY = "runtime:embedding-supplement";
 const RUNTIME_EMBEDDING_ENTITY_TYPE = "runtime_config";
 const RUNTIME_EMBEDDING_ENTITY_ID = "runtime:embedding-supplement";
 const RUNTIME_CONFIG_WORKSPACE_ID = "runtime";
-const DEFAULT_REVISION = 0;
 const RUNTIME_EMBEDDING_CONFIG_FIELDS = [
   "provider_url",
   "secret_ref",
@@ -227,7 +226,6 @@ async function patchRuntimeEmbeddingConfig(input: {
             workspace_id: RUNTIME_CONFIG_WORKSPACE_ID,
             run_id: null,
             caused_by: "inspector",
-            revision: DEFAULT_REVISION,
             payload_json: SoulHealthJournalRecordedPayloadSchema.parse({
               entry_id: auditEntryId,
               event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
@@ -238,7 +236,7 @@ async function patchRuntimeEmbeddingConfig(input: {
           }
         ],
         () => {
-          const next = input.repo.patchSync(
+          const next = input.repo.patch(
             RUNTIME_EMBEDDING_CONFIG_KEY,
             normalized.patch,
             DEFAULT_RUNTIME_EMBEDDING_CONFIG

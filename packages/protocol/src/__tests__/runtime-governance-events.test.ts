@@ -18,6 +18,7 @@ import {
   PathConsolidationFusedPayloadSchema,
   PathGraphSnapshotCreatedPayloadSchema,
   PathRelationCreatedPayloadSchema,
+  PathRelationRedirectedPayloadSchema,
   PathRelationReinforcedPayloadSchema,
   PathRelationRetiredPayloadSchema,
   PathRelationWeakenedPayloadSchema,
@@ -54,6 +55,7 @@ describe("Phase C event registry", () => {
       "path.relation_created",
       "path.relation_reinforced",
       "path.relation_weakened",
+      "path.relation_redirected",
       "path.relation_retired",
       "path.consolidation_completed",
       "path.consolidation_fused",
@@ -139,6 +141,14 @@ describe("Phase C event registry", () => {
       retirement_reason: "cooldown_expired",
       final_strength: 0.05,
       retired_at: validTimestamp
+    } as const;
+    const redirectedPayload = {
+      path_id: "path-1",
+      previous_direction_bias: "target_to_source",
+      new_direction_bias: "source_to_target",
+      source_usage_count: 0,
+      target_usage_count: 2,
+      redirected_at: validTimestamp
     } as const;
     const driftDetectedPayload = {
       drift_id: "drift-1",
@@ -313,6 +323,7 @@ describe("Phase C event registry", () => {
     expect(PathRelationCreatedPayloadSchema.parse(pathCreatedPayload)).toEqual(pathCreatedPayload);
     expect(PathRelationReinforcedPayloadSchema.parse(reinforcedPayload)).toEqual(reinforcedPayload);
     expect(PathRelationWeakenedPayloadSchema.parse(weakenedPayload)).toEqual(weakenedPayload);
+    expect(PathRelationRedirectedPayloadSchema.parse(redirectedPayload)).toEqual(redirectedPayload);
     expect(PathRelationRetiredPayloadSchema.parse(retiredPayload)).toEqual(retiredPayload);
     expect(SurfaceDriftDetectedPayloadSchema.parse(driftDetectedPayload)).toEqual(driftDetectedPayload);
     expect(SurfaceDriftLeaseAcquiredPayloadSchema.parse(driftLeaseAcquiredPayload)).toEqual(
@@ -412,6 +423,9 @@ describe("Phase C event registry", () => {
     ).toEqual(reinforcedPayload);
     expect(parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.PATH_RELATION_WEAKENED, weakenedPayload)).toEqual(
       weakenedPayload
+    );
+    expect(parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.PATH_RELATION_REDIRECTED, redirectedPayload)).toEqual(
+      redirectedPayload
     );
     expect(parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.PATH_RELATION_RETIRED, retiredPayload)).toEqual(
       retiredPayload
@@ -560,6 +574,15 @@ describe("Phase C event registry", () => {
     ).toEqual({
       type: RuntimeGovernanceEventType.PATH_RELATION_CREATED,
       payload: pathCreatedPayload
+    });
+    expect(
+      RuntimeGovernanceEventUnionSchema.parse({
+        type: RuntimeGovernanceEventType.PATH_RELATION_REDIRECTED,
+        payload: redirectedPayload
+      })
+    ).toEqual({
+      type: RuntimeGovernanceEventType.PATH_RELATION_REDIRECTED,
+      payload: redirectedPayload
     });
     expect(
       RuntimeGovernanceEventUnionSchema.parse({

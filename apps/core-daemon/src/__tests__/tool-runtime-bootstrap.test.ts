@@ -160,7 +160,7 @@ describe("daemon tool runtime bootstrap", () => {
         })
       };
       const eventLogRepo = {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) =>
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) =>
           createEventLogEntry(entry)
         ),
         queryByEntity: vi.fn(async () => [])
@@ -354,7 +354,6 @@ describe("daemon tool runtime bootstrap", () => {
       workspace_id: "workspace-1",
       run_id: "run-1",
       caused_by: "deterministic_rule",
-      revision: 0,
       payload_json: {
         decision_id: "decision-1",
         workspace_id: "workspace-1",
@@ -723,7 +722,7 @@ describe("daemon tool runtime bootstrap", () => {
 });
 
 function createEventLogEntry(
-  entry: Omit<EventLogEntry, "event_id" | "created_at">
+  entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
 ): EventLogEntry {
   return {
     ...entry,

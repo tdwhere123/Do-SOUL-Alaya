@@ -9,9 +9,9 @@ import { EventPublisher, type EventPublisherEventLogRepoPort } from "../event-pu
 /**
  * In-memory fake repo that simulates better-sqlite3 transaction semantics:
  * - `transactional(fn)` runs `fn` synchronously; if `fn` throws, all rows
- *   appended via `appendSync` since BEGIN are removed.
- * - `appendSync` allocates a new event_id and persists the row immediately.
- * - `deleteByIdSync` removes a row.
+ *   appended via `append` since BEGIN are removed.
+ * - `append` allocates a new event_id and persists the row immediately.
+ * - `deleteById` removes a row.
  *
  * This mirrors the storage-layer semantics tested separately in
  * `packages/storage/src/__tests__/event-log-repo.test.ts`.
@@ -23,7 +23,7 @@ function buildFakeRepo(): EventPublisherEventLogRepoPort & {
   let nextId = 0;
   let savepointStart: number | null = null;
 
-  const buildEntry = (input: Omit<EventLogEntry, "event_id" | "created_at">): EventLogEntry => {
+  const buildEntry = (input: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry => {
     const revision = rows.filter(
       (row) => row.entity_type === input.entity_type && row.entity_id === input.entity_id
     ).length;
@@ -37,23 +37,12 @@ function buildFakeRepo(): EventPublisherEventLogRepoPort & {
 
   return {
     rows,
-    async append(input) {
+    append(input) {
       const entry = buildEntry(input);
       rows.push(entry);
       return entry;
     },
-    appendSync(input) {
-      const entry = buildEntry(input);
-      rows.push(entry);
-      return entry;
-    },
-    async deleteById(eventId) {
-      const index = rows.findIndex((row) => row.event_id === eventId);
-      if (index !== -1) {
-        rows.splice(index, 1);
-      }
-    },
-    deleteByIdSync(eventId) {
+    deleteById(eventId) {
       const index = rows.findIndex((row) => row.event_id === eventId);
       if (index !== -1) {
         rows.splice(index, 1);
@@ -93,7 +82,6 @@ describe("EventPublisher.appendManyWithMutation (atomic)", () => {
       workspace_id: "ws-1",
       run_id: "run-1",
       caused_by: "worker_lifecycle",
-      revision: 0,
       payload_json: WorkerStateChangedPayloadSchema.parse({
         workerId: "worker-rollback-1",
         state: "frozen",
@@ -107,9 +95,8 @@ describe("EventPublisher.appendManyWithMutation (atomic)", () => {
       })
     ).rejects.toThrow("synthetic mutate failure");
 
-    // Without the transaction the row would survive (legacy publishWithMutation
-    // only deleted via deleteById after the fact, leaving a window where a
-    // crash between INSERT and DELETE leaves orphan rows).
+    // Without the transaction the row would survive if a crash landed between
+    // INSERT and compensation.
     expect(repo.rows).toEqual([]);
   });
 
@@ -131,7 +118,6 @@ describe("EventPublisher.appendManyWithMutation (atomic)", () => {
           workspace_id: "ws-1",
           run_id: "run-audit-1",
           caused_by: "user_action",
-          revision: 0,
           payload_json: {
             run_id: "run-audit-1",
             workspace_id: "ws-1",
@@ -177,7 +163,6 @@ describe("EventPublisher.appendManyWithMutation (atomic)", () => {
             workspace_id: "ws-1",
             run_id: "run-1",
             caused_by: "worker_lifecycle",
-            revision: 0,
             payload_json: WorkerStateChangedPayloadSchema.parse({
               workerId: "worker-propagate-1",
               state: "active",
@@ -191,6 +176,78 @@ describe("EventPublisher.appendManyWithMutation (atomic)", () => {
 
     // Transaction committed before propagation, so the row is durable.
     expect(repo.rows).toHaveLength(1);
+  });
+
+  it("committed/detached mutation returns after commit when propagation never settles", async () => {
+    const repo = buildFakeRepo();
+    const notifyEntry = vi.fn(() => new Promise<void>(() => undefined));
+    const publisher = new EventPublisher({
+      eventLogRepo: repo,
+      runHotStateService: { apply: vi.fn() },
+      runtimeNotifier: {
+        notify: vi.fn(),
+        notifyEntry
+      }
+    });
+
+    const result = publisher.appendManyWithMutationAndDetachPropagation(
+      [
+        {
+          event_type: "worker.state_changed",
+          entity_type: "worker_run",
+          entity_id: "worker-detached-1",
+          workspace_id: "ws-1",
+          run_id: "run-1",
+          caused_by: "worker_lifecycle",
+          payload_json: WorkerStateChangedPayloadSchema.parse({
+            workerId: "worker-detached-1",
+            state: "active",
+            previousState: "init"
+          })
+        }
+      ],
+      () => "committed"
+    );
+
+    expect(result).toBe("committed");
+    expect(repo.rows).toHaveLength(1);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(notifyEntry).toHaveBeenCalledTimes(1);
+  });
+
+  it("committed/detached mutation still rolls back when the synchronous mutate throws", () => {
+    const repo = buildFakeRepo();
+    const publisher = new EventPublisher({
+      eventLogRepo: repo,
+      runHotStateService: { apply: vi.fn() },
+      runtimeNotifier: { notify: vi.fn(), notifyEntry: vi.fn() }
+    });
+
+    expect(() =>
+      publisher.appendManyWithMutationAndDetachPropagation(
+        [
+          {
+            event_type: "worker.state_changed",
+            entity_type: "worker_run",
+            entity_id: "worker-detached-rollback-1",
+            workspace_id: "ws-1",
+            run_id: "run-1",
+            caused_by: "worker_lifecycle",
+            payload_json: WorkerStateChangedPayloadSchema.parse({
+              workerId: "worker-detached-rollback-1",
+              state: "active",
+              previousState: "init"
+            })
+          }
+        ],
+        () => {
+          throw new Error("synthetic detached mutate failure");
+        }
+      )
+    ).toThrow("synthetic detached mutate failure");
+
+    expect(repo.rows).toEqual([]);
   });
 
   it("rejects an accidentally-async mutate callback so atomicity cannot silently break", async () => {
@@ -211,7 +268,6 @@ describe("EventPublisher.appendManyWithMutation (atomic)", () => {
             workspace_id: "ws-1",
             run_id: "run-1",
             caused_by: "worker_lifecycle",
-            revision: 0,
             payload_json: WorkerStateChangedPayloadSchema.parse({
               workerId: "worker-async-bad",
               state: "active",
@@ -245,7 +301,6 @@ describe("EventPublisher.appendManyWithMutation (atomic)", () => {
         workspace_id: "ws-1",
         run_id: "run-1",
         caused_by: "worker_lifecycle",
-        revision: 0,
         payload_json: WorkerStateChangedPayloadSchema.parse({
           workerId: entityId,
           state: "active",
@@ -278,6 +333,23 @@ describe("EventPublisher.appendManyWithMutation (atomic)", () => {
       return "no-op";
     });
     expect(result).toBe("no-op");
+    expect(repo.rows).toEqual([]);
+  });
+
+  it("rejects an accidentally-async empty-batch mutate callback", async () => {
+    const repo = buildFakeRepo();
+    const publisher = new EventPublisher({
+      eventLogRepo: repo,
+      runHotStateService: { apply: vi.fn() },
+      runtimeNotifier: { notify: vi.fn(), notifyEntry: vi.fn() }
+    });
+
+    await expect(
+      publisher.appendManyWithMutation(
+        [],
+        (async () => "should-not-commit") as unknown as () => string
+      )
+    ).rejects.toThrow(/must be synchronous/);
     expect(repo.rows).toEqual([]);
   });
 });

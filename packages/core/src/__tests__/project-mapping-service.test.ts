@@ -86,17 +86,22 @@ function createDependencies(overrides: Partial<ProjectMappingServiceDependencies
   const anchors = new Map<string, ProjectMappingAnchor>();
   const memoryEntries = new Map<string, MemoryEntry>([["memory-1", createMemoryEntry()]]);
   const createdAnchors: ProjectMappingAnchor[] = [];
+  let appendedEventCount = 0;
   const stateUpdates: Array<{
     readonly objectId: string;
     readonly newState: ProjectMappingAnchor["mapping_state"];
     readonly acceptedBy: ProjectMappingAnchor["accepted_by"];
     readonly transitionedAt: string;
   }> = [];
-  const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => ({
-    event_id: `event-${event.entity_id}-${event.revision}`,
-    created_at: "2026-03-28T01:00:00.000Z",
-    ...event
-  }));
+  const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
+    appendedEventCount += 1;
+    return {
+      event_id: `event-${event.entity_id}-${appendedEventCount}`,
+      created_at: "2026-03-28T01:00:00.000Z",
+      revision: appendedEventCount,
+      ...event
+    };
+  });
   const queryByEntitySpy = vi.fn(async () => [] as readonly EventLogEntry[]);
 
   const dependencies: ProjectMappingServiceDependencies = {
@@ -189,11 +194,12 @@ function createDependencies(overrides: Partial<ProjectMappingServiceDependencies
 describe("ProjectMappingService", () => {
   it("suggests a new anchor and appends the suggestion event before persisting it", async () => {
     const order: string[] = [];
-    const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => {
+    const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
       order.push("event_log");
       return {
         event_id: "event-suggested",
         created_at: "2026-03-28T01:00:00.000Z",
+        revision: 0,
         ...event
       };
     });
@@ -217,7 +223,7 @@ describe("ProjectMappingService", () => {
 
     const anchor = await service.suggest("memory-1", "workspace-1", "user_action");
 
-    expect(order).toEqual(["event_query", "event_log", "repo_create"]);
+    expect(order).toEqual(["event_log", "repo_create"]);
     expect(anchor).toMatchObject({
       object_id: "mapping-generated",
       global_object_id: "memory-1",
@@ -359,9 +365,10 @@ describe("ProjectMappingService", () => {
       createAnchor({ object_id: "mapping-strict", global_object_id: "memory-strict" })
     );
     const updateState = vi.fn(async () => {});
-    const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+    const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       event_id: `event-${event.entity_id}`,
       created_at: "2026-03-28T01:00:00.000Z",
+      revision: 0,
       ...event
     }));
     const { dependencies } = createDependencies({
@@ -738,9 +745,10 @@ describe("ProjectMappingService", () => {
   });
 
   it("keeps the suggestion event when persistence fails after EventLog append", async () => {
-    const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+    const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       event_id: "event-suggested",
       created_at: "2026-03-28T01:00:00.000Z",
+      revision: 0,
       ...event
     }));
     const { dependencies } = createDependencies({
@@ -767,9 +775,10 @@ describe("ProjectMappingService", () => {
 
   it("keeps the transition event when state persistence fails after EventLog append", async () => {
     const anchor = Object.freeze(createAnchor({ object_id: "mapping-transition-fail" }));
-    const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+    const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       event_id: "event-transition",
       created_at: "2026-03-28T01:00:00.000Z",
+      revision: 0,
       ...event
     }));
     const { dependencies } = createDependencies({

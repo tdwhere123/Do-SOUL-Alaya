@@ -103,9 +103,10 @@ function createDependencies(overrides: Partial<MemoryServiceDependencies> = {}):
   readonly repoArchiveSpy: TestMock;
   readonly repoFindByScopeClassSpy: TestMock;
 } {
-  const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+  const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
     event_id: `event-${event.event_type}`,
     created_at: "2026-03-21T00:00:00.000Z",
+    revision: 0,
     ...event
   }));
   const queryByEntitySpy = vi.fn(async () => [] as readonly EventLogEntry[]);
@@ -168,7 +169,7 @@ function createDependencies(overrides: Partial<MemoryServiceDependencies> = {}):
 describe("MemoryService", () => {
   it("writes soul.memory.created before persistence and runtime notification with computed revision", async () => {
     const order: string[] = [];
-    const appendEvents: Array<Omit<EventLogEntry, "event_id" | "created_at">> = [];
+    const appendEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
 
     const { dependencies, queryByEntitySpy } = createDependencies({
       eventLogRepo: {
@@ -178,6 +179,7 @@ describe("MemoryService", () => {
           return {
             event_id: "event-1",
             created_at: "2026-03-21T01:00:00.000Z",
+            revision: 0,
             ...event
           };
         }),
@@ -213,11 +215,10 @@ describe("MemoryService", () => {
     const service = new MemoryService(dependencies);
     const created = await service.create(createMemoryInput());
 
-    expect(order).toEqual(["event_query", "event_log", "repo_create", "notify"]);
+    expect(order).toEqual(["event_log", "repo_create", "notify"]);
     expect(created.object_id).toBe("85b3671a-d8d8-4848-9e5c-07d0a89f5ae9");
     expect(appendEvents[0]).toMatchObject({
-      event_type: "soul.memory.created",
-      revision: 0
+      event_type: "soul.memory.created"
     });
   });
 
@@ -300,11 +301,12 @@ describe("MemoryService", () => {
     const order: string[] = [];
     const existing = createMemoryEntry();
 
-    const updateAppendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => {
+    const updateAppendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
       order.push("event_log");
       return {
         event_id: "event-updated",
         created_at: "2026-03-21T02:00:00.000Z",
+        revision: 0,
         ...event
       };
     });
@@ -356,12 +358,12 @@ describe("MemoryService", () => {
       "manual_update"
     );
 
-    expect(order).toEqual(["event_query", "event_log", "repo_update", "notify"]);
+    expect(order).toEqual(["event_log", "repo_update", "notify"]);
     expect(updated.content).toBe("Updated content");
     expect(updated.storage_tier).toBe(StorageTier.COLD);
 
     const emitted = updateAppendSpy.mock.calls[0][0];
-    expect(emitted.revision).toBe(5);
+    expect(emitted).not.toHaveProperty("revision");
     expect(emitted.event_type).toBe("soul.memory.updated");
   });
 
@@ -582,11 +584,13 @@ describe("MemoryService", () => {
           return createEventLogHistory(6);
         }),
         append: vi.fn(async (event) => {
-          revisions.push(event.revision);
+          const persistedRevision = revisions.length + 7;
+          revisions.push(persistedRevision);
           order.push(`event:${event.event_type}`);
           return {
             event_id: `event-${event.event_type}`,
             created_at: "2026-03-21T03:00:00.000Z",
+            revision: persistedRevision,
             ...event
           };
         })
@@ -627,7 +631,6 @@ describe("MemoryService", () => {
 
     expect(revisions).toEqual([7, 8]);
     expect(order).toEqual([
-      "event_query",
       "event:soul.memory.archived",
       "event:soul.memory.state_changed",
       "repo_archive",

@@ -182,9 +182,7 @@ function createService(options: CreateServiceOptions): RunService {
       getById: vi.fn(async () => workspace)
     },
     runRepo: {
-      create: runRepoCreate,
-      // Sync sibling for appendManyWithMutation flow (#BL-022).
-      createSync: vi.fn((input) =>
+      create: vi.fn((input) =>
         createRun({
           ...input,
           created_at: "2026-04-15T00:00:00.000Z",
@@ -193,14 +191,8 @@ function createService(options: CreateServiceOptions): RunService {
       ),
       getById: vi.fn(async () => null),
       listByWorkspace: vi.fn(async () => []),
-      delete: vi.fn(async () => undefined),
-      deleteSync: vi.fn(),
-      update: vi.fn(async (_id, patch) =>
-        createRun({
-          ...patch
-        })
-      ),
-      updateSync: vi.fn((_id, patch) => createRun({ ...patch }))
+      delete: vi.fn(),
+      update: vi.fn((_id, patch) => createRun({ ...patch }))
     },
     bindingRepo: {
       getById: vi.fn(async (id) => bindingById[id] ?? null)
@@ -212,6 +204,7 @@ function createService(options: CreateServiceOptions): RunService {
         const persisted = inputs.map((entry: any, idx: number) => ({
           event_id: `evt_${idx}`,
           created_at: "2026-04-15T00:00:00.000Z",
+          revision: 0,
           ...entry
         }));
         return mutate(persisted);

@@ -20,7 +20,7 @@ describe("SqliteDeferredObligationRepo", () => {
     const { repo } = await createRepos();
     const obligation = createObligation();
 
-    await expect(repo.create(obligation)).resolves.toEqual(obligation);
+    expect(repo.create(obligation)).toEqual(obligation);
 
     const found = await repo.getById(obligation.obligation_id);
     expect(found).toEqual(obligation);
@@ -38,9 +38,9 @@ describe("SqliteDeferredObligationRepo", () => {
     expect(fulfilled.state).toBe("fulfilled");
     expect(fulfilled.fulfilled_at).toBe("2026-04-15T10:30:00.000Z");
 
-    await expect(
+    expect(() =>
       repo.updateState(obligation.obligation_id, "pending", "expired")
-    ).rejects.toMatchObject({ code: "CONFLICT" });
+    ).toThrowError(expect.objectContaining({ code: "CONFLICT" }));
   });
 
   it("returns run/workspace active sets and expired pending obligations", async () => {

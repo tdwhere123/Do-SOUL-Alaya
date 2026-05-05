@@ -1,6 +1,7 @@
 import {
   ContextDeliveryRecordSchema,
   NonEmptyStringSchema,
+  SoulContextPerAnchorUsageSchema,
   UsageProofRecordSchema,
   type ContextDeliveryRecord,
   type UsageProofRecord
@@ -10,20 +11,8 @@ import { StorageError } from "../errors.js";
 import { deepFreeze } from "./shared/deep-freeze.js";
 
 export interface TrustStateRepo {
-  createDelivery(record: ContextDeliveryRecord): Promise<Readonly<ContextDeliveryRecord>>;
-  /**
-   * Synchronous variant of `createDelivery` for use inside
-   * `EventPublisher.appendManyWithMutation` (#BL-022). Optional so existing
-   * mocks that only implement the async path do not need updating.
-   */
-  createDeliverySync?(record: ContextDeliveryRecord): Readonly<ContextDeliveryRecord>;
-  createUsage(record: UsageProofRecord): Promise<Readonly<UsageProofRecord>>;
-  /**
-   * Synchronous variant of `createUsage` for use inside
-   * `EventPublisher.appendManyWithMutation` (#BL-022). Optional so existing
-   * mocks that only implement the async path do not need updating.
-   */
-  createUsageSync?(record: UsageProofRecord): Readonly<UsageProofRecord>;
+  createDelivery(record: ContextDeliveryRecord): Readonly<ContextDeliveryRecord>;
+  createUsage(record: UsageProofRecord): Readonly<UsageProofRecord>;
   findDeliveryById(deliveryId: string): Promise<Readonly<ContextDeliveryRecord> | null>;
   listDeliveriesByAgentTarget(agentTarget: string): Promise<readonly Readonly<ContextDeliveryRecord>[]>;
   listUsageByDeliveryIds(deliveryIds: readonly string[]): Promise<readonly Readonly<UsageProofRecord>[]>;
@@ -43,6 +32,7 @@ interface UsageRow {
   readonly delivery_id: string;
   readonly usage_state: string;
   readonly used_object_ids_json: string;
+  readonly per_anchor_usage_json: string;
   readonly reason: string | null;
   readonly reported_at: string;
   readonly audit_event_id: string;
@@ -72,10 +62,11 @@ export class SqliteTrustStateRepo implements TrustStateRepo {
         delivery_id,
         usage_state,
         used_object_ids_json,
+        per_anchor_usage_json,
         reason,
         reported_at,
         audit_event_id
-      ) VALUES (?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
     this.findDeliveryByIdStatement = db.connection.prepare(`
@@ -107,12 +98,7 @@ export class SqliteTrustStateRepo implements TrustStateRepo {
     `);
   }
 
-  public async createDelivery(record: ContextDeliveryRecord): Promise<Readonly<ContextDeliveryRecord>> {
-    return this.createDeliverySync(record);
-  }
-
-  /** Synchronous variant for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
-  public createDeliverySync(record: ContextDeliveryRecord): Readonly<ContextDeliveryRecord> {
+  public createDelivery(record: ContextDeliveryRecord): Readonly<ContextDeliveryRecord> {
     const parsed = ContextDeliveryRecordSchema.parse(record);
     try {
       this.createDeliveryStatement.run(
@@ -133,18 +119,14 @@ export class SqliteTrustStateRepo implements TrustStateRepo {
     return deepFreeze(parsed);
   }
 
-  public async createUsage(record: UsageProofRecord): Promise<Readonly<UsageProofRecord>> {
-    return this.createUsageSync(record);
-  }
-
-  /** Synchronous variant for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
-  public createUsageSync(record: UsageProofRecord): Readonly<UsageProofRecord> {
+  public createUsage(record: UsageProofRecord): Readonly<UsageProofRecord> {
     const parsed = UsageProofRecordSchema.parse(record);
     try {
       this.createUsageStatement.run(
         parsed.delivery_id,
         parsed.usage_state,
         JSON.stringify(parsed.used_object_ids),
+        JSON.stringify(parsed.per_anchor_usage ?? []),
         parsed.reason,
         parsed.reported_at,
         parsed.audit_event_id
@@ -191,6 +173,7 @@ export class SqliteTrustStateRepo implements TrustStateRepo {
             delivery_id,
             usage_state,
             used_object_ids_json,
+            per_anchor_usage_json,
             reason,
             reported_at,
             audit_event_id
@@ -221,11 +204,13 @@ function parseDeliveryRow(row: DeliveryRow): Readonly<ContextDeliveryRecord> {
 }
 
 function parseUsageRow(row: UsageRow): Readonly<UsageProofRecord> {
+  const perAnchorUsage = parseJsonPerAnchorUsageArray(row.per_anchor_usage_json);
   return deepFreeze(
     UsageProofRecordSchema.parse({
       delivery_id: row.delivery_id,
       usage_state: row.usage_state,
       used_object_ids: parseJsonStringArray(row.used_object_ids_json),
+      ...(perAnchorUsage.length === 0 ? {} : { per_anchor_usage: perAnchorUsage }),
       reason: row.reason,
       reported_at: row.reported_at,
       audit_event_id: row.audit_event_id
@@ -236,6 +221,15 @@ function parseUsageRow(row: UsageRow): Readonly<UsageProofRecord> {
 function parseJsonStringArray(value: string): readonly string[] {
   const parsed = JSON.parse(value) as unknown;
   return Array.isArray(parsed) ? parsed.map((item) => NonEmptyStringSchema.parse(item)) : [];
+}
+
+function parseJsonPerAnchorUsageArray(
+  value: string
+): NonNullable<UsageProofRecord["per_anchor_usage"]> {
+  const parsed = JSON.parse(value) as unknown;
+  return Array.isArray(parsed)
+    ? parsed.map((item) => SoulContextPerAnchorUsageSchema.parse(item))
+    : [];
 }
 
 function isSqliteConstraintError(error: unknown): boolean {

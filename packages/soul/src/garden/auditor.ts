@@ -35,10 +35,6 @@ import {
   type OrphanedMemoryRecord,
   type StaleMemoryEntry
 } from "@do-soul/alaya-protocol";
-import {
-  resolvePathPlasticitySinceIso,
-  type PathPlasticityComputePort
-} from "./path-plasticity-task.js";
 
 export const AUDITOR_CONSTANTS = {
   COLD_START_MEMORY_THRESHOLD: 10,
@@ -57,7 +53,6 @@ export interface AuditorDependencies {
   readonly orphanDetectionPort?: AuditorOrphanDetectionPort;
   readonly greenMaintenancePort: AuditorGreenMaintenancePort;
   readonly bootstrappingPort: AuditorBootstrappingPort;
-  readonly pathPlasticityPort?: PathPlasticityComputePort;
   readonly scheduler: AuditorSchedulerPort;
   readonly eventLogRepo?: AuditorEventLogPort;
   readonly healthJournal?: HealthJournalRecordPort;
@@ -97,8 +92,6 @@ export class Auditor {
           return await this.executeBootstrappingScan(task, completedAt);
         case GardenTaskKind.CRYSTALLIZATION_SCAN:
           return await this.executeCrystallizationScan(task, completedAt);
-        case GardenTaskKind.PATH_PLASTICITY_UPDATE:
-          return await this.executePathPlasticityUpdate(task, completedAt);
         default:
           throw new Error(`Auditor does not handle task kind: ${task.task_kind}`);
       }
@@ -194,33 +187,35 @@ export class Auditor {
         task_id: task.task_id
       });
 
-      await this.dependencies.eventLogRepo?.append({
-        event_type: GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED,
-        entity_type: pointer.source_object_kind,
-        entity_id: pointer.source_object_id,
-        workspace_id: task.workspace_id,
-        run_id: task.run_id,
-        caused_by: this.role,
-        revision: 0,
-        payload_json: payload
-      });
-
-      switch (pointer.ref_kind) {
-        case "evidence_ref":
-          await pointerHealPort.clearEvidenceRef(pointer.source_object_id, pointer.broken_ref, task.task_id);
-          break;
-        case "memory_ref":
-          await pointerHealPort.clearMemoryRef(pointer.source_object_id, pointer.broken_ref, task.task_id);
-          break;
-        case "synthesis_ref":
-          await pointerHealPort.clearSynthesisRef(pointer.source_object_id, pointer.broken_ref, task.task_id);
-          break;
-        case "source_object_ref":
-          // Claim source_object_refs can point to memory or synthesis IDs.
-          // When the referenced ID is missing we cannot prove which one it
-          // originally targeted, so healing requires a follow-up review step.
-          break;
-      }
+      await this.publishEventLogMutation(
+        {
+          event_type: GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED,
+          entity_type: pointer.source_object_kind,
+          entity_id: pointer.source_object_id,
+          workspace_id: task.workspace_id,
+          run_id: task.run_id,
+          caused_by: this.role,
+          payload_json: payload
+        },
+        () => {
+          switch (pointer.ref_kind) {
+            case "evidence_ref":
+              pointerHealPort.clearEvidenceRef(pointer.source_object_id, pointer.broken_ref, task.task_id);
+              break;
+            case "memory_ref":
+              pointerHealPort.clearMemoryRef(pointer.source_object_id, pointer.broken_ref, task.task_id);
+              break;
+            case "synthesis_ref":
+              pointerHealPort.clearSynthesisRef(pointer.source_object_id, pointer.broken_ref, task.task_id);
+              break;
+            case "source_object_ref":
+              // Claim source_object_refs can point to memory or synthesis IDs.
+              // When the referenced ID is missing we cannot prove which one it
+              // originally targeted, so healing requires a follow-up review step.
+              break;
+          }
+        }
+      );
     }
 
     if (batch.length > 0) {
@@ -299,11 +294,10 @@ export class Auditor {
           workspace_id: task.workspace_id,
           run_id: task.run_id,
           caused_by: this.role,
-          revision: 0,
           payload_json: payload
         },
-        async () => {
-          await orphanDetectionPort.createOrphanRadarRecord(radarRecord);
+        () => {
+          orphanDetectionPort.createOrphanRadarRecord(radarRecord);
         }
       );
       createdRadarIds.push(radarId);
@@ -360,11 +354,10 @@ export class Auditor {
           workspace_id: task.workspace_id,
           run_id: task.run_id,
           caused_by: this.role,
-          revision: 0,
           payload_json: payload
         },
-        async () => {
-          await createEventLogOrphanRadarRecord({
+        () => {
+          createEventLogOrphanRadarRecord({
             radar_id: radarId,
             audit_event_id: orphan.audit_event_id,
             event_type: orphan.event_type,
@@ -387,15 +380,15 @@ export class Auditor {
   }
 
   private async publishEventLogMutation<T>(
-    entry: Omit<EventLogEntry, "event_id" | "created_at">,
-    mutate: (entry: EventLogEntry | null) => Promise<T>
+    entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">,
+    mutate: (entry: EventLogEntry | null) => T
   ): Promise<T> {
     const eventLogRepo = this.dependencies.eventLogRepo;
     if (eventLogRepo === undefined) {
-      return await mutate(null);
+      return mutate(null);
     }
 
-    return await eventLogRepo.publishWithMutation(entry, async (eventLogEntry) => await mutate(eventLogEntry));
+    return await eventLogRepo.appendManyWithMutation([entry], ([eventLogEntry]) => mutate(eventLogEntry ?? null));
   }
 
   private async executeGreenMaintenance(task: GardenTaskDescriptor, completedAt: string): Promise<GardenTaskResult> {
@@ -482,33 +475,6 @@ export class Auditor {
         patterns.length,
         AUDITOR_CONSTANTS.BATCH_SIZE
       )} high-frequency patterns`
-    ]);
-    await this.dependencies.scheduler.reportCompletion(result);
-    return result;
-  }
-
-  private async executePathPlasticityUpdate(
-    task: GardenTaskDescriptor,
-    completedAt: string
-  ): Promise<GardenTaskResult> {
-    const pathPlasticityPort = this.dependencies.pathPlasticityPort;
-
-    if (pathPlasticityPort === undefined) {
-      const result = this.createSuccessResult(task, completedAt, [], [
-        "path_plasticity_update: skipped because path plasticity port is not configured"
-      ]);
-      await this.dependencies.scheduler.reportCompletion(result);
-      return result;
-    }
-
-    const sinceIso = resolvePathPlasticitySinceIso(task.target_object_refs, completedAt);
-    const computed = await pathPlasticityPort.computeAndApplyPlasticity({
-      workspaceId: task.workspace_id,
-      sinceIso
-    });
-
-    const result = this.createSuccessResult(task, completedAt, computed.affectedPathIds, [
-      `path_plasticity_update: reinforced=${computed.reinforced} weakened=${computed.weakened} retired=${computed.retired} since=${sinceIso}`
     ]);
     await this.dependencies.scheduler.reportCompletion(result);
     return result;

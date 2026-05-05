@@ -12,7 +12,7 @@ import {
 import { BudgetBankruptcyService } from "../budget-bankruptcy-service.js";
 import type { TestMock } from "./mock-types.js";
 
-type EventLogDraft = Omit<EventLogEntry, "event_id" | "created_at">;
+type EventLogDraft = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 type EventLogAppendMock = TestMock<(entry: EventLogDraft) => Promise<EventLogEntry>>;
 type EventLogQueryByEntityMock = TestMock<
   (entityType: string, entityId: string) => Promise<readonly EventLogEntry[]>
@@ -216,7 +216,6 @@ describe("BudgetBankruptcyService", () => {
                   workspace_id: "workspace-1",
                   run_id: "run-1",
                   caused_by: "system",
-                  revision: 0,
                   payload_json: {
                     bankruptcy_id: "00000000-0000-4000-8000-000000000999",
                     bankruptcy_kind: "hard",
@@ -284,7 +283,6 @@ describe("BudgetBankruptcyService", () => {
                   workspace_id: "workspace-1",
                   run_id: "run-1",
                   caused_by: "system",
-                  revision: 0,
                   payload_json: {
                     bankruptcy_id: "00000000-0000-4000-8000-000000000999",
                     bankruptcy_kind: "hard",
@@ -422,8 +420,9 @@ function createEventLogRepo(overrides: Partial<{
 
 function createEventLogEntry(entry: EventLogDraft): EventLogEntry {
   return {
-    event_id: `event-${entry.event_type}-${entry.entity_id}-${entry.revision}`,
+    event_id: `event-${entry.event_type}-${entry.entity_id}`,
     created_at: "2026-03-26T00:00:00.000Z",
+    revision: 0,
     ...entry
   };
 }

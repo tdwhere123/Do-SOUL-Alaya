@@ -11,7 +11,7 @@ import {
 } from "@do-soul/alaya-protocol";
 
 export interface SignalServiceEventLogRepoPort {
-  append(event: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
 }
 
@@ -79,7 +79,6 @@ export class SignalService {
 
   public async receiveSignal(signal: CandidateMemorySignal): Promise<SignalServiceReceiveResult> {
     const parsedSignal = CandidateMemorySignalSchema.parse(signal);
-    const emittedRevision = await this.getNextRevision("candidate_memory_signal", parsedSignal.signal_id);
     const emittedEvent = await this.dependencies.eventLogRepo.append({
       event_type: "soul.signal.emitted",
       entity_type: "candidate_memory_signal",
@@ -87,7 +86,6 @@ export class SignalService {
       workspace_id: parsedSignal.workspace_id,
       run_id: parsedSignal.run_id,
       caused_by: parsedSignal.source,
-      revision: emittedRevision,
       payload_json: SoulSignalEmittedPayloadSchema.parse({
         signal_id: parsedSignal.signal_id,
         workspace_id: parsedSignal.workspace_id,
@@ -106,7 +104,6 @@ export class SignalService {
 
     const triageResult = this.evaluateTriage(storedSignal);
     const triagedState = mapTriageResultToSignalState(triageResult);
-    const triagedRevision = await this.getNextRevision("candidate_memory_signal", storedSignal.signal_id);
     const triagedEvent = await this.dependencies.eventLogRepo.append({
       event_type: SignalEventType.SOUL_SIGNAL_TRIAGED,
       entity_type: "candidate_memory_signal",
@@ -114,7 +111,6 @@ export class SignalService {
       workspace_id: storedSignal.workspace_id,
       run_id: storedSignal.run_id,
       caused_by: "deterministic_rule",
-      revision: triagedRevision,
       payload_json: SoulSignalTriagedPayloadSchema.parse({
         signal_id: storedSignal.signal_id,
         workspace_id: storedSignal.workspace_id,
@@ -159,8 +155,6 @@ export class SignalService {
         error
       });
     }
-
-    const matRevision = await this.getNextRevision("candidate_memory_signal", triagedSignal.signal_id);
     const matEvent = await this.dependencies.eventLogRepo.append({
       event_type: materialization.success
         ? SignalEventType.SOUL_SIGNAL_MATERIALIZED
@@ -170,7 +164,6 @@ export class SignalService {
       workspace_id: triagedSignal.workspace_id,
       run_id: triagedSignal.run_id,
       caused_by: "materialization_router",
-      revision: matRevision,
       payload_json: SoulSignalMaterializedPayloadSchema.parse({
         signal_id: triagedSignal.signal_id,
         workspace_id: triagedSignal.workspace_id,
@@ -218,7 +211,6 @@ export class SignalService {
       // Emit a corrective triage event so EventLog/runtime notification consumers see the final state.
       // The initial triaged event was notified with triage_result "accepted"; this
       // second event corrects the record. Consumers should treat the latest as authoritative.
-      const deferredRevision = await this.getNextRevision("candidate_memory_signal", triagedSignal.signal_id);
       const deferredEvent = await this.dependencies.eventLogRepo.append({
         event_type: SignalEventType.SOUL_SIGNAL_TRIAGED,
         entity_type: "candidate_memory_signal",
@@ -226,7 +218,6 @@ export class SignalService {
         workspace_id: triagedSignal.workspace_id,
         run_id: triagedSignal.run_id,
         caused_by: "materialization_router",
-        revision: deferredRevision,
         payload_json: SoulSignalTriagedPayloadSchema.parse({
           signal_id: triagedSignal.signal_id,
           workspace_id: triagedSignal.workspace_id,
@@ -281,17 +272,6 @@ export class SignalService {
     }
 
     return "accepted";
-  }
-
-  private async getNextRevision(entityType: string, entityId: string): Promise<number> {
-    const events = await this.dependencies.eventLogRepo.queryByEntity(entityType, entityId);
-
-    if (events.length === 0) {
-      return 0;
-    }
-
-    const maxRevision = events.reduce((max, event) => Math.max(max, event.revision), 0);
-    return maxRevision + 1;
   }
 }
 

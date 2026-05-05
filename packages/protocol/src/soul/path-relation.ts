@@ -17,6 +17,7 @@ const pathGovernanceClassValues = [
   "recall_allowed",
   "strictly_governed"
 ] as const;
+const pathLifecycleStatusValues = ["active", "retired"] as const;
 const manifestationPreferenceValues = ["stance_bias", "dialogue_nudge", "lens_entry"] as const;
 
 export const StabilityClass = {
@@ -39,6 +40,11 @@ export const PathGovernanceClass = {
   STRICTLY_GOVERNED: "strictly_governed"
 } as const;
 
+export const PathLifecycleStatus = {
+  ACTIVE: "active",
+  RETIRED: "retired"
+} as const;
+
 export const ManifestationPreference = {
   STANCE_BIAS: "stance_bias",
   DIALOGUE_NUDGE: "dialogue_nudge",
@@ -48,6 +54,7 @@ export const ManifestationPreference = {
 export const StabilityClassSchema = z.enum(stabilityClassValues);
 export const DirectionBiasSchema = z.enum(directionBiasValues);
 export const PathGovernanceClassSchema = z.enum(pathGovernanceClassValues);
+export const PathLifecycleStatusSchema = z.enum(pathLifecycleStatusValues);
 export const ManifestationPreferenceSchema = z.enum(manifestationPreferenceValues);
 
 const ObjectPathAnchorRefSchema = z
@@ -125,6 +132,7 @@ export const PathPlasticityStateSchema = z
 
 const PathLifecycleSchema = z
   .object({
+    status: PathLifecycleStatusSchema.optional(),
     retirement_rule: NonEmptyStringSchema,
     cooldown_rule: NonEmptyStringSchema.optional(),
     override_rule: NonEmptyStringSchema.optional()
@@ -171,6 +179,7 @@ export const PathRelationSchema = z
 export type StabilityClass = z.infer<typeof StabilityClassSchema>;
 export type DirectionBias = z.infer<typeof DirectionBiasSchema>;
 export type PathGovernanceClass = z.infer<typeof PathGovernanceClassSchema>;
+export type PathLifecycleStatus = z.infer<typeof PathLifecycleStatusSchema>;
 export type ManifestationPreference = z.infer<typeof ManifestationPreferenceSchema>;
 export type PathAnchorRef = z.infer<typeof PathAnchorRefSchema>;
 export type PathEffectVector = z.infer<typeof PathEffectVectorSchema>;

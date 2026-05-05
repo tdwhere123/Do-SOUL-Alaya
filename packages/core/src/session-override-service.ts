@@ -11,11 +11,10 @@ import {
   type SessionOverride
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
-import { getNextRevision } from "./shared/event-utils.js";
 import { parseNonEmptyString } from "./shared/validators.js";
 
 export interface SessionOverrideServiceEventLogPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
   queryByRun(runId: string): Promise<readonly EventLogEntry[]>;
 }
@@ -74,8 +73,6 @@ export class SessionOverrideService {
       correction,
       priority
     });
-
-    const revision = await getNextRevision(this.dependencies.eventLogRepo, "session_override", override.runtime_id);
     await this.dependencies.eventLogRepo.append({
       event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
       entity_type: "session_override",
@@ -83,7 +80,6 @@ export class SessionOverrideService {
       workspace_id: workspaceId,
       run_id: runId,
       caused_by: "user_action",
-      revision,
       payload_json: SoulSessionOverrideAppliedPayloadSchema.parse({
         override_id: override.runtime_id,
         target_object: override.target_object,
