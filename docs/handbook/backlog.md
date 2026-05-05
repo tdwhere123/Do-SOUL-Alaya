@@ -513,7 +513,8 @@ The mutate callback now receives the persisted entries with their
 final `event_id`, so trust-state-style records persist `audit_event_id`
 exactly once with no divergence between EventLog row and consumer row.
 This also retired the `#BL-021` registered divergence (see
-`port-protocol.md` Registered v0.1 Divergences).
+`docs/archive/port-protocol-historical.md` Registered v0.1
+Divergences — the port-protocol page was archived after v0.1.0).
 
 All in-tree producer call sites migrated:
 

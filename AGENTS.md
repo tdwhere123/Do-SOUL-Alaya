@@ -24,14 +24,13 @@ There is no GUI and no conversation TUI.
 
 ## Project Genealogy
 
-Alaya is a port (not a clean-room rewrite) of the memory plugin system
-from the sibling project `do-what-new`. The frozen source reference used
-for v0.1 work was upstream commit
-`6ed846341f66ff98bfcddbb940db74cfc10133ca` (snapshot date 2026-04-28).
-That snapshot (`vendor/do-what-new-snapshot/`) has been removed after
-v0.1.0 shipped; the port-protocol scaffolding is archived at
-`docs/archive/port-protocol-historical.md`. Post-v0.1.0 work is normal
-forward development — no port mode, no vendor reference.
+Alaya v0.1 was ported (not clean-room rewritten) from the sibling
+project `do-what-new`, frozen at upstream commit
+`6ed846341f66ff98bfcddbb940db74cfc10133ca` (snapshotted 2026-04-28).
+The port wave closed with v0.1.0 and the working snapshot
+(`vendor/do-what-new-snapshot/`) has been removed. Port-era discipline
+is archived at `docs/archive/port-protocol-historical.md`. Post-v0.1.0
+work is normal forward development — no port mode, no vendor reference.
 
 ## Before You Code
 

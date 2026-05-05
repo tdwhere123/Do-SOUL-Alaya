@@ -12,7 +12,7 @@
 
 [![status](https://img.shields.io/badge/status-v0.1.0-success?style=flat-square)](#接下来的方向)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-1996%20passing-success?style=flat-square)](#接下来的方向)
+[![tests](https://img.shields.io/badge/tests-1994%20passing-success?style=flat-square)](#接下来的方向)
 [![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#快速开始)
 [![pnpm](https://img.shields.io/badge/pnpm-%E2%89%A59-F69220?style=flat-square&logo=pnpm&logoColor=white)](#快速开始)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](#架构总览)
@@ -507,9 +507,13 @@ Do-SOUL Alaya/
 | **A1** 已落地：Daemon HITL 骨架 | `soul.list_pending_proposals` MCP 工具 · `alaya review pending\|accept\|reject` CLI · review record 上加 `reviewer_identity` · Inspector "Pending Proposals" 视图 | 新卡 |
 | **A2** 已落地：EventPublisher 原子事务 | `appendManyWithMutation` 落进单一 `connection.transaction()`；14 个调用点改成同步 mutate；关掉竞态窗口 | `#BL-022` 已关闭 |
 | **A3** 已落地：Path 轴可塑性反馈环 | 新建 `PathPlasticityService` 消费 `MEMORY_USAGE_REPORTED` → 发 `PathRelationReinforced/Weakened/Retired` runtime-governance 事件 → `RecallService` 把可塑性纳入打分 | 新卡 |
-| **B1** `pi-mono` 集成 | `packages/engine-gateway` 变成 `pi-mono` 客户端；synthesis / proposal scoring / reflection 走一个干净的 provider 边界 | `#BL-008` |
-| **B2** OS keychain 支持 | `keychain:<service>:<account>` secret-ref 语法；macOS Keychain + Linux libsecret 适配器（Windows 走 mock） | `#BL-009` |
 | **C1** 已落地：文件形态卫生 wave | protocol `phase-*.ts` 文件/符号已改为 domain 命名（如 `events/runtime-governance.ts`）；超大文件已拆分；固定版本 `knip` unused-code 检查已接入；`code-map.md` 已刷新 | `#BL-017` 已关闭 |
+
+closeout 里原本计划要做的两项更大改动 —— `pi-mono` provider
+整合 (`#BL-008`)、OS keychain 支持 (`#BL-009`) —— 在 closeout 期间
+被重新下推到 v0.2，因为它们的范围超出了 closeout 窗口能干净吸收的
+程度。两张卡都仍在 `docs/handbook/backlog.md` 里跟踪，close
+condition 写得明确。
 
 剩余 closeout 工作都在隔离 worktree 里跑，每张卡都按 review +
 fix-loop 纪律收。只有当某张卡自己的退出条件成立、且综合 review
