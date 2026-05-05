@@ -1,6 +1,17 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { MemoryGovernanceEventType, RetentionPolicy, type Proposal } from "@do-soul/alaya-protocol";
+import {
+  FormationKind,
+  MemoryDimension,
+  MemoryGovernanceEventType,
+  RetentionPolicy,
+  ScopeClass,
+  SourceKind,
+  StorageTier,
+  type MemoryEntry,
+  type Proposal
+} from "@do-soul/alaya-protocol";
 import { initDatabase, type StorageDatabase } from "../db.js";
+import { SqliteMemoryEntryRepo } from "../repos/memory-entry-repo.js";
 import { SqliteProposalRepo, type ProposalResolutionEventInput } from "../repos/proposal-repo.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
@@ -40,6 +51,41 @@ function createProposal(overrides: Partial<Proposal> = {}): Proposal {
   };
 }
 
+function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
+  return {
+    object_id: "f8b2124d-4954-4ea0-a77e-ad4b137ed8ee",
+    object_kind: "memory_entry",
+    schema_version: 1,
+    lifecycle_state: "active",
+    created_at: "2026-03-21T00:00:00.000Z",
+    updated_at: "2026-03-21T00:00:00.000Z",
+    created_by: "test",
+    dimension: MemoryDimension.PREFERENCE,
+    source_kind: SourceKind.USER,
+    formation_kind: FormationKind.EXPLICIT,
+    scope_class: ScopeClass.PROJECT,
+    content: "Use npm for workspace commands.",
+    domain_tags: ["tooling"],
+    evidence_refs: ["evidence-1"],
+    workspace_id: "workspace-1",
+    run_id: "run-1",
+    surface_id: null,
+    storage_tier: StorageTier.HOT,
+    activation_score: 0.9,
+    retention_score: 0.9,
+    manifestation_state: "excerpt",
+    retention_state: "working",
+    decay_profile: "stable",
+    confidence: 1,
+    last_used_at: null,
+    last_hit_at: null,
+    reinforcement_count: 0,
+    contradiction_count: 0,
+    superseded_by: null,
+    ...overrides
+  };
+}
+
 describe("SqliteProposalRepo", () => {
   it("creates and loads proposal by proposal id", async () => {
     const { repo } = createRepo();
@@ -61,7 +107,41 @@ describe("SqliteProposalRepo", () => {
       workspace_id: "workspace-1",
       run_id: "run-1",
       reviewer_identity: null,
-      reviewer_assignment: null
+      reviewer_assignment: null,
+      proposed_changes: null
+    });
+  });
+
+  it("stores proposed memory changes only on the scoped proposal projection", async () => {
+    const { repo } = createRepo();
+    const proposal = createProposal();
+
+    await repo.createProposalWithEvents(
+      {
+        proposal,
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        target_object_kind: "memory_entry",
+        proposed_change_summary: "Switch to pnpm",
+        proposed_changes: {
+          content: "Use pnpm for workspace commands.",
+          domain_tags: ["tooling"],
+          evidence_refs: ["evidence-1"]
+        }
+      },
+      createCreationEvents(proposal)
+    );
+
+    await expect(repo.findById(proposal.proposal_id)).resolves.toEqual(proposal);
+    await expect(repo.findScopedById(proposal.proposal_id)).resolves.toMatchObject({
+      proposal,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      proposed_changes: {
+        content: "Use pnpm for workspace commands.",
+        domain_tags: ["tooling"],
+        evidence_refs: ["evidence-1"]
+      }
     });
   });
 
@@ -270,6 +350,96 @@ describe("SqliteProposalRepo", () => {
     await expect(repo.findById(proposal.proposal_id)).resolves.toEqual(proposal);
   });
 
+  it("atomically accepts a proposal, applies memory changes, and writes audit events", async () => {
+    const { repo, database } = createRepo();
+    const memoryRepo = new SqliteMemoryEntryRepo(database);
+    const proposal = createProposal();
+    await memoryRepo.create(createMemoryEntry());
+    await repo.create({
+      proposal,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_kind: "memory_entry",
+      proposed_change_summary: "Apply accepted patch",
+      proposed_changes: { content: "Use pnpm for workspace commands." }
+    });
+
+    const result = await repo.acceptPendingMemoryUpdateWithEvents(
+      proposal.proposal_id,
+      "2026-03-21T03:00:00.000Z",
+      createReviewEvents(proposal),
+      {
+        target_object_id: proposal.derived_from ?? "",
+        workspace_id: "workspace-1",
+        proposed_changes: { content: "Use pnpm for workspace commands." },
+        updated_at: "2026-03-21T03:00:00.000Z",
+        caused_by: `proposal_accept:${proposal.proposal_id}`
+      },
+      { reviewerIdentity: "user:alice" }
+    );
+
+    expect(result.proposal.resolution_state).toBe("accepted");
+    expect(result.memory).toMatchObject({
+      object_id: proposal.derived_from,
+      content: "Use pnpm for workspace commands.",
+      updated_at: "2026-03-21T03:00:00.000Z"
+    });
+    expect(result.events.map((event) => event.event_type)).toEqual([
+      MemoryGovernanceEventType.SOUL_REVIEW_CREATED,
+      MemoryGovernanceEventType.SOUL_REVIEW_COMPLETED,
+      MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED,
+      MemoryGovernanceEventType.SOUL_MEMORY_UPDATED
+    ]);
+    expect(countProposalEvents(database, proposal.proposal_id)).toBe(3);
+    expect(countMemoryUpdatedEvents(database, proposal.derived_from ?? "")).toBe(1);
+    const memoryEvent = result.events.at(-1);
+    expect(memoryEvent).toMatchObject({
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_UPDATED,
+      entity_type: "memory_entry",
+      entity_id: proposal.derived_from,
+      caused_by: `proposal_accept:${proposal.proposal_id}`
+    });
+    expect(memoryEvent?.payload_json).toMatchObject({
+      updated_fields: ["content"]
+    });
+  });
+
+  it("rolls back proposal review events and resolution when accepted memory apply fails", async () => {
+    const { repo, database } = createRepo();
+    const proposal = createProposal();
+    await repo.create({
+      proposal,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_kind: "memory_entry",
+      proposed_change_summary: "Apply accepted patch",
+      proposed_changes: { content: "Use pnpm for workspace commands." }
+    });
+
+    await expect(
+      repo.acceptPendingMemoryUpdateWithEvents(
+        proposal.proposal_id,
+        "2026-03-21T03:00:00.000Z",
+        createReviewEvents(proposal),
+        {
+          target_object_id: proposal.derived_from ?? "",
+          workspace_id: "workspace-1",
+          proposed_changes: { content: "Use pnpm for workspace commands." },
+          updated_at: "2026-03-21T03:00:00.000Z",
+          caused_by: `proposal_accept:${proposal.proposal_id}`
+        },
+        { reviewerIdentity: "user:alice" }
+      )
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    expect(countProposalEvents(database, proposal.proposal_id)).toBe(0);
+    expect(countMemoryUpdatedEvents(database, proposal.derived_from ?? "")).toBe(0);
+    await expect(repo.findById(proposal.proposal_id)).resolves.toMatchObject({
+      resolution_state: "pending",
+      last_updated_at: "2026-03-21T00:00:00.000Z"
+    });
+  });
+
   it("rolls back creation events when the proposal row insert fails", async () => {
     const { repo, database } = createRepo();
     const proposal = createProposal();
@@ -419,5 +589,14 @@ function countProposalEvents(database: StorageDatabase, proposalId: string): num
   const row = database.connection
     .prepare("SELECT COUNT(*) AS count FROM event_log WHERE entity_type = 'proposal' AND entity_id = ?")
     .get(proposalId) as { readonly count: number };
+  return row.count;
+}
+
+function countMemoryUpdatedEvents(database: StorageDatabase, memoryId: string): number {
+  const row = database.connection
+    .prepare(
+      "SELECT COUNT(*) AS count FROM event_log WHERE event_type = ? AND entity_type = 'memory_entry' AND entity_id = ?"
+    )
+    .get(MemoryGovernanceEventType.SOUL_MEMORY_UPDATED, memoryId) as { readonly count: number };
   return row.count;
 }

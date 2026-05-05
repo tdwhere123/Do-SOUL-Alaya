@@ -257,6 +257,27 @@ export class MemoryService {
     return updated;
   }
 
+  public async validateUpdate(
+    objectId: string,
+    fields: MemoryEntryUpdateFields
+  ): Promise<void> {
+    const parsedObjectId = parseObjectId(objectId);
+    const parsedFields = parseUpdateFields(fields);
+
+    if (parsedFields.evidence_refs !== undefined) {
+      await this.validateEvidenceRefs(parsedFields.evidence_refs);
+    }
+
+    const existing = await this.dependencies.memoryEntryRepo.findById(parsedObjectId);
+    if (existing === null) {
+      throw new CoreError("NOT_FOUND", "Memory entry not found");
+    }
+
+    if (existing.lifecycle_state === "archived") {
+      throw new CoreError("VALIDATION", "Memory entry is archived and cannot be updated");
+    }
+  }
+
   public async archive(
     objectId: string,
     reason: string,

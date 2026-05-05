@@ -50,7 +50,8 @@ async function executeToolsCommand(
     const tools = listAlayaMemoryTools();
     if (ctx.jsonRequested !== true) {
       for (const tool of tools) {
-        ctx.stdout.write(`${tool.name}\t${tool.description}\n`);
+        const mode = tool.annotations.readOnlyHint ? "read-only" : "stateful";
+        ctx.stdout.write(`${tool.name}\t${mode}\t${tool.description}\n`);
       }
     }
     return {
@@ -63,11 +64,21 @@ async function executeToolsCommand(
     ctx.stderr.write("tools call requires a tool name\n");
     return { exitCode: ALAYA_SYSEXITS.USAGE };
   }
+  const callContext = buildCallContext(ctx, args, deps);
+  if (
+    args.toolName === "soul.review_memory_proposal" &&
+    isHumanReviewerAgentTarget(callContext.agentTarget)
+  ) {
+    ctx.stderr.write(
+      "tools call cannot impersonate human reviewer surfaces; use alaya review for proposal review.\n"
+    );
+    return { exitCode: ALAYA_SYSEXITS.USAGE };
+  }
 
   const result = await deps.handler.call({
     toolName: args.toolName,
     arguments: args.input,
-    context: buildCallContext(ctx, args, deps)
+    context: callContext
   });
 
   if (!result.ok) {
@@ -87,6 +98,10 @@ async function executeToolsCommand(
     exitCode: ALAYA_SYSEXITS.OK,
     json: result.output
   };
+}
+
+function isHumanReviewerAgentTarget(agentTarget: string): boolean {
+  return agentTarget === "cli" || agentTarget === "inspector";
 }
 
 function toolsArgsSchema(): AlayaCliArgsSchema<ToolsArgs> {
@@ -230,6 +245,6 @@ function buildCallContext(
       args.contextOverrides.agentTarget ??
       deps.defaultAgentTarget ??
       ctx.env.ALAYA_AGENT_TARGET ??
-      "cli"
+      "tools-cli"
   };
 }

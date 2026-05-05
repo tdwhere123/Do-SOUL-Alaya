@@ -25,7 +25,7 @@ Phase 0 → Gate-0
                    → Phase 5 (Wave 5, 3 sequential cards) → Gate-5
                        → v0.1.0 release
                            → Gate-5F (Open backlog closeout)
-                               → Phase 6 (Wave 6, 5 cards, post-release) → Gate-6
+                               → Phase 6 (Wave 6, MCP Agent-Use Protocol + Trustworthy Memory Loop) → Gate-6
                                → v0.1.1 release
 ```
 
@@ -33,11 +33,11 @@ Phase 0 → Gate-0
 
 - `v0.1.0` = Gate-5: clean minimum-viable memory core. No marketing
   numbers. README has no benchmark table.
-- `v0.1.1` = Gate-6: Phase 6 marketing benchmark wave lands. README
-  gets a single-run leaderboard table (alaya / mem0 / no-memory) on a
-  user-supplied OpenRouter model. Numbers are filled in by the user
-  after running the harness; the harness, adapter, and README template
-  are the deliverables.
+- `v0.1.1` = Gate-6: Phase 6 MCP Agent-Use Protocol and Trustworthy
+  Memory Loop proof lands. Active truth is tools-only MCP/CLI agent
+  use, accept-as-apply governance, recall explainability, and live
+  agent-path verification. Legacy benchmark cards are archived
+  artifacts only, not acceptance criteria.
 
 ## Phase Summary
 
@@ -50,7 +50,7 @@ Phase 0 → Gate-0
 | Phase 4 | Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI + Memory Inspector | 30 cards (target) | MCP surface `mcp-consumable`; trust delivery/usage durability + Inspector config-write `live-event-ready` after Round 3 followup cards | Gate-4 passed |
 | Phase 5 | Wave 5: E2E + Graph Contract + Final Review (release acceptance) | 3 cards (target) | **done**: graph contract `schema-ready`; release E2E `live-event-ready`; final review `mcp-consumable` | Gate-5 passed |
 | Gate-5F | Post-Gate-5 backlog closeout | 5 cards + closeout | **done**: `#BL-025`..`#BL-036` resolved; final review clean; full verification passed | Gate-5F passed |
-| Phase 6 | Wave 6: Marketing benchmark harness + adapter + baselines + resume + README template | 5 cards (target) | not-started | Gate-6 |
+| Phase 6 | Wave 6: MCP Agent-Use Protocol + Trustworthy Memory Loop | 6 active slices + archived benchmark cards | mcp-consumable / live-event-ready target | Gate-6 |
 
 ## Phase 2 — Card Closeout Status
 
@@ -214,9 +214,9 @@ their original detail is in the plan file at
   + final review (release acceptance for v0.1.0)
 - [Gate-5F follow-up](./phase-5-followup-briefs/README.md) — Open
   backlog closeout for `#BL-025` through `#BL-036`; blocks Phase 6
-- [Phase 6](./phase-6-briefs/README.md) — Wave 6 marketing benchmark
-  wave (harness + adapter + baselines + resume + README template) for
-  v0.1.1
+- [Phase 6](./phase-6-briefs/README.md) — Wave 6: MCP
+  Agent-Use Protocol + Trustworthy Memory Loop active plan; benchmark
+  cards archived-only
 - [Post-port hygiene](./post-port-hygiene-briefs/README.md) — executed
   `#BL-017` source-level cleanup after Gate-5
 

@@ -16,6 +16,7 @@
     "doctor": "node ./bin/alaya.mjs doctor"
   },
   "devDependencies": {
+    "@do-soul/alaya": "workspace:*",
     "@types/node": "^22.10.2",
     "knip": "6.11.0",
     "typescript": "^5.7.3",

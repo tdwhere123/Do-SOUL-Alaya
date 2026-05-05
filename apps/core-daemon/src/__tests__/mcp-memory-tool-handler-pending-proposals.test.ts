@@ -29,6 +29,7 @@ describe("mcp memory tool handler — soul.list_pending_proposals (A1)", () => {
       target_object_kind: "memory_entry",
       created_at: "2026-04-30T00:00:00.000Z",
       proposed_change_summary: "Switch to pnpm",
+      proposed_changes: { content: "Use pnpm for workspace commands." },
       assigned_reviewer_identity: "user:local-reviewer",
       assigned_at: "2026-04-30T00:00:00.000Z",
       deadline_at: null,
@@ -164,7 +165,8 @@ function createDeps(options: CreateDepsOptions = {}): McpMemoryToolHandlerDepend
     },
     memoryService: {
       findById: vi.fn(async () => createMemory()),
-      findByIdScoped: vi.fn(async () => createMemory())
+      findByIdScoped: vi.fn(async () => createMemory()),
+      update: vi.fn(async (_objectId, fields) => createMemory(fields))
     },
     signalService: {
       receiveSignal: vi.fn(async (signal: CandidateMemorySignal) => ({ signal }))

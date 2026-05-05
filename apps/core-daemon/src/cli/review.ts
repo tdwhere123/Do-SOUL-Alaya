@@ -98,9 +98,12 @@ async function runPending(
     if (summaries === undefined || summaries.length === 0) {
       ctx.stdout.write("(no pending proposals)\n");
     } else {
+      ctx.stdout.write(
+        "proposal_id\ttarget_kind\ttarget_id\tcreated_at\treviewer\tdeadline\tqueue_state\tchange_summary\tproposed_changes\n"
+      );
       for (const summary of summaries) {
         ctx.stdout.write(
-          `${formatCell(summary.proposal_id)}\t${formatCell(summary.target_object_kind)}\t${formatCell(summary.target_object_id)}\t${formatCell(summary.created_at)}\t${formatCell(summary.assigned_reviewer_identity)}\t${formatCell(summary.deadline_at)}\t${formatOverdue(summary.is_overdue)}\t${formatCell(summary.proposed_change_summary)}\n`
+          `${formatCell(summary.proposal_id)}\t${formatCell(summary.target_object_kind)}\t${formatCell(summary.target_object_id)}\t${formatCell(summary.created_at)}\t${formatCell(summary.assigned_reviewer_identity)}\t${formatCell(summary.deadline_at)}\t${formatOverdue(summary.is_overdue)}\t${formatCell(summary.proposed_change_summary)}\t${formatJsonCell(summary.proposed_changes)}\n`
         );
       }
     }
@@ -178,7 +181,10 @@ async function runReview(
   }
 
   if (ctx.jsonRequested !== true) {
-    ctx.stdout.write(`${JSON.stringify(result.output)}\n`);
+    const output = result.output as { resolution_state?: string; proposal_id?: string };
+    const durableApplyState =
+      output.resolution_state === "accepted" ? "durable_apply=applied" : "durable_apply=not-requested";
+    ctx.stdout.write(`${JSON.stringify(result.output)} ${durableApplyState}\n`);
   }
   return {
     exitCode: ALAYA_SYSEXITS.OK,
@@ -208,6 +214,10 @@ function normalizeOptionalString(value: string | undefined): string | null {
 
 function formatCell(value: unknown): string {
   return typeof value === "string" && value.length > 0 ? value : "-";
+}
+
+function formatJsonCell(value: unknown): string {
+  return value === null || value === undefined ? "-" : JSON.stringify(value);
 }
 
 function formatOverdue(value: unknown): string {

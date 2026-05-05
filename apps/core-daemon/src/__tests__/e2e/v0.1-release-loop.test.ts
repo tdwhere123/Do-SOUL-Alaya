@@ -57,6 +57,8 @@ const originalEmbeddingSupplementOptIn = process.env.ALAYA_ENABLE_EMBEDDING_SUPP
 const originalAlayaConfigDir = process.env.ALAYA_CONFIG_DIR;
 const originalCodexHome = process.env.CODEX_HOME;
 const originalHome = process.env.HOME;
+const originalReviewerIdentity = process.env.ALAYA_REVIEWER_IDENTITY;
+const originalReviewerToken = process.env.ALAYA_REVIEWER_TOKEN;
 const RELEASE_LOOP_TIMEOUT_MS = 45_000;
 
 afterEach(async () => {
@@ -77,6 +79,8 @@ describe("P5 v0.1 release loop E2E", () => {
     process.env.ALAYA_CONFIG_DIR = join(dataDir, "config");
     process.env.CODEX_HOME = join(dataDir, "codex-home");
     process.env.HOME = join(dataDir, "home");
+    process.env.ALAYA_REVIEWER_IDENTITY = "user:p5-release-loop";
+    process.env.ALAYA_REVIEWER_TOKEN = "p5-release-review-token";
     await seedReleaseFixture(dataDir);
 
     const runtime = await createAlayaDaemonRuntime();
@@ -245,7 +249,8 @@ describe("P5 v0.1 release loop E2E", () => {
         proposal_id: proposal.proposal_id,
         verdict: "reject",
         reason: "P5 release-loop rejects the synthetic proposal.",
-        reviewer_identity: "user:p5-release-loop"
+        reviewer_identity: "user:p5-release-loop",
+        reviewer_token: "p5-release-review-token"
       });
       transcript.push({ step: "soul.review_memory_proposal", evidence: review });
       expect(review).toEqual({
@@ -824,5 +829,17 @@ function restoreProcessEnv(): void {
     delete process.env.HOME;
   } else {
     process.env.HOME = originalHome;
+  }
+
+  if (originalReviewerIdentity === undefined) {
+    delete process.env.ALAYA_REVIEWER_IDENTITY;
+  } else {
+    process.env.ALAYA_REVIEWER_IDENTITY = originalReviewerIdentity;
+  }
+
+  if (originalReviewerToken === undefined) {
+    delete process.env.ALAYA_REVIEWER_TOKEN;
+  } else {
+    process.env.ALAYA_REVIEWER_TOKEN = originalReviewerToken;
   }
 }

@@ -13,6 +13,7 @@ each Phase Gate.
 | `live-event-ready` | wired into daemon; producer / consumer path proven by an integration or E2E test |
 | `mcp-consumable` | exposed as an MCP tool / resource and proven to work for at least one connected agent (Codex or Claude Code) |
 | `cli-consumable` | exposed via CLI command and proven by at least one E2E run |
+| `docs-truth-ready` | cross-doc contract wording is aligned and matches current runtime/governance behavior |
 
 ## v0.1 Phase Status
 
@@ -76,7 +77,10 @@ each Phase Gate.
 | Operations (backup / export) | `cli-consumable` (proven by release E2E) | `cli-consumable` | P4-operations + P5-e2e |
 | Operations (import) | `implementation-ready` (covered by targeted operations tests only) | `cli-consumable` | P4-operations |
 | Memory Inspector | `live-event-ready`; server/frontend exist, token-gated routes pass, and Provider/Config writes proxy daemon runtime config | `live-event-ready` for the inspector surface | P4-inspector-server + P4-cli-inspect + P4-inspector-frontend + #BL-019 repair |
-| Marketing benchmark harness | `not-started` | `implementation-ready` | P6-bench-adapter + P6-bench-harness + P6-bench-baselines + P6-bench-resume + P6-bench-readme (Phase 6, post-v0.1.0; ships in v0.1.1) |
+| MCP Agent-Use Protocol | `mcp-consumable`; live proof covers tool discovery, ordered MCP calls, CLI fallback, pointer open, usage receipt, proposal review, durable update, and post-apply recall | `mcp-consumable` | P6-agent-use-protocol + P6-live-agent-proof |
+| Trustworthy Memory Loop | `live-event-ready`; accepted memory proposals validate through `MemoryService.validateUpdate`, apply inside an atomic proposal/storage transaction, reject leaves durable memory unchanged, and audit evidence remains in EventLog / repo projections | `live-event-ready` | P6-governance-accept-apply |
+| Recall explainability + operator control | `schema-ready`; recall results expose selection reason, source channels, score factors, budget state, response strategy mix, and degradation reason; CLI/status names control-plane states distinctly | `schema-ready` | P6-recall-explainability + P6-operator-control |
+| Cross-surface Phase 6 contract parity docs | `docs-truth-ready` | `docs-truth-ready` | P6-contract-parity-reset |
 | Graph inspector data contract | `schema-ready`; read-only contract derives from active PathRelation data, no live route | `schema-ready` | P5-graph-contract |
 
 ## Known Wiring Gaps
@@ -113,8 +117,9 @@ as a dedicated v0.1.x cleanup wave. It renamed protocol event source
 files and symbols to domain names, split the listed oversized production
 TypeScript files, and added reproducible `knip` unused-code checking
 without changing event strings, storage schemas, MCP/CLI wire contracts,
-or durable EventLog data. Benchmark fixtures belong to Phase 6 / Gate-6
-/ v0.1.1 and are not a Gate-5 requirement.
+or durable EventLog data. Phase 6 / Gate-6 / v0.1.1 active acceptance is
+MCP agent-use proof plus trustworthy memory-loop runtime behavior;
+legacy benchmark fixtures are archived-only and not an active gate.
 
 ## Phase 5 system-level review (post-Gate-5, 2026-05-03)
 
@@ -186,7 +191,9 @@ Highlights:
 
 Backlog Open count for `#BL-025` through `#BL-036` is zero after the
 Gate-5F implementation cards. Gate-5F aggregate final review and full
-verification have passed; Phase 6 remains not-started.
+verification have passed; Phase 6 is an MCP agent-use and trustworthy
+memory-loop proof wave with `mcp-consumable` / `live-event-ready` as
+the active acceptance target.
 
 ## v0.1-closeout lessons (parallel A1/A2/A3 sub-agent dispatch)
 
@@ -296,7 +303,11 @@ non-blocking and tracked for a follow-up wave.
 - **Gate-5 (v0.1.0 release)**: Gate-4 plus graph contract derived
   from real PathRelation data, full E2E proof, and final multi-lens
   review with zero Blocking / Important findings. Benchmark fixtures
-  are Phase 6 / Gate-6 / v0.1.1 scope.
+  are archived Phase 6 artifacts and not active Gate-6 acceptance.
+- **Gate-6 (v0.1.1 MCP agent-use proof)**: Gate-5F plus tools-only MCP
+  instructions, strengthened attach/install profile text, accept-as-apply
+  proposal governance, recall explainability fields, operator-state CLI
+  language, and a live agent-path harness.
 - **Gate-5F (backlog closeout)**: backlog items `#BL-025` through
   `#BL-036` resolved; final review reported zero Blocking / Important
   findings; `rtk pnpm build`,

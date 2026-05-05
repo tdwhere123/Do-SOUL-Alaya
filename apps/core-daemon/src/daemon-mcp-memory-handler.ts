@@ -33,6 +33,7 @@ export function createDaemonMcpMemoryToolHandler(input: {
       eventLogRepo: input.eventLogRepo,
       proposalRepo: input.proposalRepo,
       runtimeNotifier: input.runtimeNotifier,
+      memoryService: input.memoryService,
       reviewerIdentityBinding:
         input.reviewerIdentityBinding ?? createReviewerIdentityBindingFromEnv(process.env)
     })

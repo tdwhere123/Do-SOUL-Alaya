@@ -5,9 +5,9 @@ inspector data contract derived from real `PathRelation` data, and a
 final multi-lens review. This is the **release acceptance** phase: it
 proves the plugin is architecturally complete and works end-to-end.
 
-The previous P5-benchmark card has been moved to Phase 6 as a
-dedicated marketing wave (`v0.1.1`). See `docs/v0.1/INDEX.md` Phase
-Order for the two-step v0.1 release shape.
+The previous P5-benchmark card is archived as future evidence-harness
+material. Active Phase 6 is the MCP Agent-Use Protocol + Trustworthy
+Memory Loop (`v0.1.1`), not a marketing benchmark wave.
 
 Phase 5 is mostly sequential (1 codex at a time), with the final
 review being a multi-perspective sweep.
@@ -48,8 +48,9 @@ Per review I9:
 - `docs/handbook/runtime-status.md` reflects v0.1.0 ready.
 - `docs/handbook/backlog.md` lists any deferred-to-v0.1.1 / v0.2 items.
 
-Gate-5 does **not** require benchmark numbers in the README. Marketing
-benchmark numbers are the deliverable of Phase 6 / Gate-6 / `v0.1.1`.
+Gate-5 does **not** require benchmark numbers in the README. Active
+Phase 6 / Gate-6 / `v0.1.1` proves the MCP agent-use loop and
+accept-as-apply governance path; benchmark cards remain archived.
 
 ## Parallelism Notes
 

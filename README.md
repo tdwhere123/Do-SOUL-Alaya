@@ -132,8 +132,8 @@ deferred; otherwise → may flow into the proposal pipeline.
 truth at perception, every fluent-but-wrong assertion would become
 fact. The model's confidence would become the truth model.
 
-**Design choice.** Signal is proposal, not fact. Triage at the
-boundary, not at recall. The signal record is durable on the
+**Design choice.** Signal is candidate input, not proposal or fact.
+Triage at the boundary, not at recall. The signal record is durable on the
 **Runtime Control** layer; ontology truth (Memory Ontology layer,
 Object / Evidence axes) is untouched until later phases say so.
 
@@ -146,8 +146,9 @@ Object / Evidence axes) is untouched until later phases say so.
 `resolution_state: PENDING`. A reviewer (an agent that a human has
 instructed to review, or a scripted role) calls
 `soul.review_memory_proposal` with `accept` or `reject`. Acceptance
-cascades into Synthesis promotion, Claim activation, and a karma
-record on the affected object.
+applies the accepted `proposed_changes` through the controlled durable
+memory service and leaves an EventLog / proposal audit trail. Reject
+records the decision but leaves durable memory untouched.
 
 **Failure mode this prevents.** *"The agent said so"* is not a
 governance argument. Without an explicit accept step, every patch
@@ -172,8 +173,9 @@ HTTP / CLI review parity. Full team quorum and escalation product
 workflows are outside the v0.1 local-first closeout.
 
 *Code anchors:*
-`apps/core-daemon/src/mcp-memory-proposal-workflow.ts:90-248`,
-`packages/core/src/proposal-service.ts:218-317`.
+`apps/core-daemon/src/mcp-memory-proposal-workflow.ts`,
+`packages/core/src/memory-service.ts`,
+`packages/storage/src/migrations/063-proposal-memory-update-patch.sql`.
 
 ### 3. Durability (沉淀)
 
@@ -222,9 +224,11 @@ order:
 4. **Embedding supplement** — *additive boost only*, never
    override.
 
-The agent receives a `delivery_id` plus result entries and pointers.
-Internal plumbing (the full `ContextPack` projection) stays inside
-Alaya.
+The agent receives a `delivery_id` plus result entries, pointers, and
+stable explanation metadata: `selection_reason`, `source_channels`,
+`score_factors`, `budget_state`, response-level `strategy_mix`, and an
+optional `degradation_reason`. Internal plumbing (the full
+`ContextPack` projection) stays inside Alaya.
 
 **Failure mode this prevents.** The most seductive failure of any
 agent-memory system is letting embedding decide truth. Cosine
@@ -500,6 +504,8 @@ pnpm alaya tools call soul.recall \
   '{"query":"hello","scope_class":null,"dimension":null,"domain_tags":null,"max_results":5}' \
   --json
 #   Expect: { "delivery_id": "...", "results": [...], "total_count": <int> }
+#   Each result includes selection_reason/source_channels/score_factors/budget_state;
+#   the response includes strategy_mix and optional degradation_reason.
 ```
 
 After step 7 your agent sees Alaya as an MCP server on its next
@@ -584,8 +590,11 @@ around reading and writing memory rather than around chat.
 
 The threads I'll pull there:
 
-- **Provider and benchmark integration** — pi-mono as the provider
-  boundary plus repeatable benchmark fixtures.
+- **MCP Agent-Use Protocol hardening** — one explicit operator path
+  from attach/profile/server wiring to memory-tool usage semantics.
+- **Trustworthy Memory Loop hardening** — keep the domain sequence
+  explicit: candidate signal -> proposal -> accepted proposal ->
+  durable memory application -> recall delivery -> usage receipt.
 - **Embedding strategy refinement** — keep "supplement, never
   oracle"; experiment with boost weight, supplement cap, and
   per-domain calibration.
@@ -595,7 +604,9 @@ The threads I'll pull there:
 
 Gate-5F, not v0.2, owns the closeout backlog `#BL-025` through
 `#BL-036`. It runs after Gate-5 and before Phase 6; Gate-5F has
-passed, and Phase 6 remains not-started.
+passed, and Phase 6 is now an MCP agent-use proof wave (MCP Agent-Use
+Protocol + Trustworthy Memory Loop), not an active
+benchmark-acceptance wave.
 
 Concrete Gate-5F closeout cards (closure evidence lives in
 `docs/handbook/backlog.md` and

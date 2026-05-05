@@ -194,10 +194,36 @@ describe("MCP tool request/response schemas", () => {
               object_kind: "memory_entry",
               relevance_score: 0.91,
               content_preview: "Use pnpm for monorepo commands.",
-              evidence_pointers: ["evidence-1"]
+              evidence_pointers: ["evidence-1"],
+              selection_reason: "Selected by lexical and activation ranking.",
+              source_channels: ["workspace_local", "keyword"],
+              score_factors: {
+                activation: 0.8,
+                relevance: 0.91,
+                graph_support: 0,
+                path_plasticity: 0,
+                budget_penalty: 0
+              },
+              budget_state: {
+                token_estimate: 8,
+                max_entries: 3,
+                max_total_tokens: 2000,
+                remaining_entries: 2,
+                remaining_tokens: 1992,
+                within_budget: true
+              }
             }
           ],
-          total_count: 1
+          total_count: 1,
+          strategy_mix: {
+            deterministic_match: true,
+            precomputed_rank: true,
+            semantic_supplement: true,
+            graph_support: true,
+            path_plasticity: true,
+            global_recall: true
+          },
+          degradation_reason: null
         }
       },
       {

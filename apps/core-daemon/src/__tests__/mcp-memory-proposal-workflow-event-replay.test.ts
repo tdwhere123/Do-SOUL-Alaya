@@ -48,7 +48,8 @@ describe("mcp memory proposal workflow — event_log audit replay (A1 finding-6)
       generateObjectId: () => "11111111-2222-4222-8222-333333333333",
       eventLogRepo,
       proposalRepo,
-      runtimeNotifier: { notifyEntry: async () => {} }
+      runtimeNotifier: { notifyEntry: async () => {} },
+      memoryService: createMemoryApplyPort()
     });
 
     const created = await workflow.proposeMemoryUpdate(
@@ -64,13 +65,13 @@ describe("mcp memory proposal workflow — event_log audit replay (A1 finding-6)
     const reviewed = await workflow.reviewMemoryProposal(
       {
         proposal_id: created.proposal_id,
-        verdict: "accept",
+        verdict: "reject",
         reason: "looks right",
         reviewer_identity: reviewerIdentity
       },
-      { workspaceId: "ws-replay", runId: "run-1", agentTarget: "codex" }
+      { workspaceId: "ws-replay", runId: "run-1", agentTarget: "cli" }
     );
-    expect(reviewed.resolution_state).toBe(ProposalResolutionState.ACCEPTED);
+    expect(reviewed.resolution_state).toBe(ProposalResolutionState.REJECTED);
 
     // Read event_log back via the repo (audit replay surface) and
     // assert the caused_by invariant on every SOUL_REVIEW_* row.
@@ -104,7 +105,8 @@ describe("mcp memory proposal workflow — event_log audit replay (A1 finding-6)
       generateObjectId: () => "44444444-5555-4555-8555-666666666666",
       eventLogRepo,
       proposalRepo,
-      runtimeNotifier: { notifyEntry: async () => {} }
+      runtimeNotifier: { notifyEntry: async () => {} },
+      memoryService: createMemoryApplyPort()
     });
 
     const created = await workflow.proposeMemoryUpdate(
@@ -155,6 +157,14 @@ function createDb(): StorageDatabase {
   const database = initDatabase({ filename: ":memory:" });
   databases.add(database);
   return database;
+}
+
+function createMemoryApplyPort() {
+  return {
+    findByIdScoped: async (objectId: string, _workspaceId: string) => ({ object_id: objectId }),
+    validateUpdate: async () => {},
+    update: async (objectId: string) => ({ object_id: objectId })
+  };
 }
 
 // Suppress unused-import lints when the EventLogEntry / Proposal types

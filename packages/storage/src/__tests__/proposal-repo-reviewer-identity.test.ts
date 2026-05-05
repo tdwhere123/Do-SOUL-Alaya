@@ -31,6 +31,7 @@ describe("proposal-repo reviewer_identity (A1)", () => {
       run_id: "run-1",
       target_object_kind: "memory_entry",
       proposed_change_summary: "Switch to pnpm",
+      proposed_changes: { content: "Use pnpm for workspace commands." },
       created_at: "2026-04-30T00:00:00.000Z"
     });
 
@@ -56,6 +57,7 @@ describe("proposal-repo reviewer_identity (A1)", () => {
       run_id: "run-1",
       target_object_kind: "memory_entry",
       proposed_change_summary: "Switch to pnpm",
+      proposed_changes: { content: "Use pnpm for workspace commands." },
       created_at: "2026-04-30T00:00:00.000Z"
     });
 
@@ -67,6 +69,7 @@ describe("proposal-repo reviewer_identity (A1)", () => {
       target_object_kind: "memory_entry",
       created_at: "2026-04-30T00:00:00.000Z",
       proposed_change_summary: "Switch to pnpm",
+      proposed_changes: { content: "Use pnpm for workspace commands." },
       assigned_reviewer_identity: null,
       assigned_at: null,
       deadline_at: null,

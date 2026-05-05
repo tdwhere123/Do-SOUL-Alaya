@@ -98,7 +98,7 @@ Close evidence: `5F-C-path-foundation`.
 ### #BL-033 - Resolved (batched recall plasticity lookup)
 
 Recall plasticity uses batched anchor lookup for candidate memories and
-exposes telemetry so the benchmark wave can observe the cost.
+exposes telemetry so future evidence harnesses can observe the cost.
 
 Close evidence: `5F-C-path-foundation`.
 

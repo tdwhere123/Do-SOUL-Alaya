@@ -18,6 +18,22 @@ import {
 import { MemoryDimensionSchema, PublicMemoryEntryMutableFieldsSchema } from "./memory-entry.js";
 import { ScopeClassSchema } from "./object-kind.js";
 import { ProposalResolutionStateSchema } from "./proposal.js";
+import {
+  RecallBudgetStateSchema,
+  RecallScoreFactorsSchema
+} from "./recall-candidate.js";
+
+export const SoulRecallStrategyMixSchema = z
+  .object({
+    deterministic_match: z.boolean(),
+    precomputed_rank: z.boolean(),
+    semantic_supplement: z.boolean(),
+    graph_support: z.boolean(),
+    path_plasticity: z.boolean(),
+    global_recall: z.boolean()
+  })
+  .strict()
+  .readonly();
 
 export const MemorySearchResultSchema = z
   .object({
@@ -25,7 +41,11 @@ export const MemorySearchResultSchema = z
     object_kind: NonEmptyStringSchema,
     relevance_score: z.number().min(0).max(1),
     content_preview: NonEmptyStringSchema,
-    evidence_pointers: z.array(NonEmptyStringSchema).readonly()
+    evidence_pointers: z.array(NonEmptyStringSchema).readonly(),
+    selection_reason: BoundedReasonSchema,
+    source_channels: z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
+    score_factors: RecallScoreFactorsSchema,
+    budget_state: RecallBudgetStateSchema
   })
   .readonly();
 
@@ -43,7 +63,9 @@ export const SoulMemorySearchResponseSchema = z
   .object({
     delivery_id: NonEmptyStringSchema,
     results: z.array(MemorySearchResultSchema).readonly(),
-    total_count: NonNegativeIntSchema
+    total_count: NonNegativeIntSchema,
+    strategy_mix: SoulRecallStrategyMixSchema,
+    degradation_reason: BoundedReasonSchema.nullable().optional()
   })
   .readonly();
 
@@ -146,6 +168,7 @@ export const SoulPendingProposalSummarySchema = z
     target_object_kind: NonEmptyStringSchema,
     created_at: z.string().datetime(),
     proposed_change_summary: z.string(),
+    proposed_changes: PublicMemoryEntryMutableFieldsSchema.nullable(),
     assigned_reviewer_identity: NonEmptyStringSchema.nullable(),
     assigned_at: z.string().datetime().nullable(),
     deadline_at: z.string().datetime().nullable(),
@@ -226,6 +249,7 @@ export const SoulReportContextUsageResponseSchema = z
   .readonly();
 
 export type MemorySearchResult = z.infer<typeof MemorySearchResultSchema>;
+export type SoulRecallStrategyMix = z.infer<typeof SoulRecallStrategyMixSchema>;
 export type SoulMemorySearchRequest = z.infer<typeof SoulMemorySearchRequestSchema>;
 export type SoulMemorySearchResponse = z.infer<typeof SoulMemorySearchResponseSchema>;
 export type SoulOpenPointerRequest = z.infer<typeof SoulOpenPointerRequestSchema>;

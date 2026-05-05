@@ -1,7 +1,12 @@
 import {
+  MemoryGovernanceEventType,
   ProposalResolutionStateSchema,
   ProposalSchema,
+  PublicMemoryEntryMutableFieldsSchema,
+  SoulMemoryUpdatedPayloadSchema,
   type EventLogEntry,
+  type MemoryEntry,
+  type MemoryEntryMutableFields,
   type Proposal,
   type ProposalResolutionState
 } from "@do-soul/alaya-protocol";
@@ -13,6 +18,12 @@ import {
   type EventLogDraftInput
 } from "./shared/event-log-writer.js";
 import { deepFreeze } from "./shared/deep-freeze.js";
+import {
+  MEMORY_ENTRY_SELECT_COLUMNS,
+  parseMemoryEntryRow,
+  parseUpdateFields,
+  type MemoryEntryRow
+} from "./memory-entry-row-mapper.js";
 import { parseNonEmptyString, parseNullableString, parseTimestamp } from "./shared/validators.js";
 
 export interface ProposalCreateInput {
@@ -33,6 +44,7 @@ export interface ProposalCreateInput {
   // bankruptcy path (budget-wiring.ts).
   readonly target_object_kind: string;
   readonly proposed_change_summary?: string;
+  readonly proposed_changes?: MemoryEntryMutableFields | null;
   readonly created_at?: string;
 }
 
@@ -44,6 +56,10 @@ export interface ScopedProposal {
   // reviewer identity once review_memory_proposal completes.
   readonly reviewer_identity: string | null;
   readonly reviewer_assignment: Readonly<ProposalReviewerAssignment> | null;
+  // Phase 6 — scoped governance payload. Stored for accept-as-apply
+  // workflow only; intentionally not exposed through the public Proposal
+  // domain projection returned by findById/findPending.
+  readonly proposed_changes: Readonly<MemoryEntryMutableFields> | null;
 }
 
 export interface PendingProposalSummary {
@@ -52,6 +68,7 @@ export interface PendingProposalSummary {
   readonly target_object_kind: string;
   readonly created_at: string;
   readonly proposed_change_summary: string;
+  readonly proposed_changes: Readonly<MemoryEntryMutableFields> | null;
   readonly assigned_reviewer_identity: string | null;
   readonly assigned_at: string | null;
   readonly deadline_at: string | null;
@@ -85,6 +102,14 @@ export type ProposalCreationEventInput = EventLogDraftInput;
 
 export interface UpdatePendingResolutionOptions {
   readonly reviewerIdentity?: string;
+}
+
+export interface AcceptedMemoryUpdateInput {
+  readonly target_object_id: string;
+  readonly workspace_id: string;
+  readonly proposed_changes: MemoryEntryMutableFields;
+  readonly updated_at: string;
+  readonly caused_by: string;
 }
 
 export interface CreateProposalWithEventsOptions {
@@ -139,6 +164,17 @@ export interface ProposalRepo {
     readonly proposal: Readonly<Proposal>;
     readonly events: readonly EventLogEntry[];
   }>>;
+  acceptPendingMemoryUpdateWithEvents(
+    proposalId: string,
+    updatedAt: string,
+    events: readonly ProposalResolutionEventInput[],
+    memoryUpdate: AcceptedMemoryUpdateInput,
+    options?: UpdatePendingResolutionOptions
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly memory: Readonly<MemoryEntry>;
+    readonly events: readonly EventLogEntry[];
+  }>>;
 }
 
 const PROPOSAL_SELECT_COLUMNS = `
@@ -159,6 +195,7 @@ const PROPOSAL_SELECT_COLUMNS = `
         reviewer_identity,
         target_object_kind,
         proposed_change_summary,
+        proposed_changes,
         created_at
 `;
 
@@ -182,6 +219,7 @@ interface ProposalRow {
   readonly reviewer_identity: string | null;
   readonly target_object_kind: string;
   readonly proposed_change_summary: string;
+  readonly proposed_changes: string | null;
   readonly created_at: string | null;
 }
 
@@ -212,6 +250,8 @@ export class SqliteProposalRepo implements ProposalRepo {
   private readonly updateResolutionWithIdentityStatement;
   private readonly updatePendingResolutionStatement;
   private readonly updatePendingResolutionWithIdentityStatement;
+  private readonly findMemoryEntryByIdStatement;
+  private readonly updateMemoryEntryStatement;
   private readonly eventLogWriter;
 
   public constructor(private readonly db: StorageDatabase) {
@@ -237,8 +277,9 @@ export class SqliteProposalRepo implements ProposalRepo {
         run_id,
         target_object_kind,
         proposed_change_summary,
+        proposed_changes,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     this.findByIdStatement = db.connection.prepare(`
@@ -323,6 +364,24 @@ export class SqliteProposalRepo implements ProposalRepo {
       WHERE proposal_id = ? AND resolution_state = 'pending'
     `);
 
+    this.findMemoryEntryByIdStatement = db.connection.prepare(`
+      SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
+      FROM memory_entries
+      WHERE object_id = ?
+      LIMIT 1
+    `);
+
+    this.updateMemoryEntryStatement = db.connection.prepare(`
+      UPDATE memory_entries
+      SET
+        content = COALESCE(?, content),
+        domain_tags = COALESCE(?, domain_tags),
+        evidence_refs = COALESCE(?, evidence_refs),
+        storage_tier = COALESCE(?, storage_tier),
+        updated_at = ?
+      WHERE object_id = ?
+    `);
+
     this.eventLogWriter = getEventLogWriter(db.connection);
   }
 
@@ -332,6 +391,7 @@ export class SqliteProposalRepo implements ProposalRepo {
     const parsedRunId = parseRunId(input.run_id);
     const targetObjectKind = parseNonEmptyString(input.target_object_kind, "target_object_kind");
     const proposedChangeSummary = input.proposed_change_summary ?? "";
+    const proposedChanges = serializeProposedChanges(input.proposed_changes ?? null);
     const createdAt = input.created_at ?? parsedProposal.last_updated_at;
 
     try {
@@ -352,6 +412,7 @@ export class SqliteProposalRepo implements ProposalRepo {
         parsedRunId,
         targetObjectKind,
         proposedChangeSummary,
+        proposedChanges,
         createdAt
       );
     } catch (error) {
@@ -378,6 +439,7 @@ export class SqliteProposalRepo implements ProposalRepo {
     const parsedRunId = parseRunId(input.run_id);
     const targetObjectKind = parseNonEmptyString(input.target_object_kind, "target_object_kind");
     const proposedChangeSummary = input.proposed_change_summary ?? "";
+    const proposedChanges = serializeProposedChanges(input.proposed_changes ?? null);
     const createdAt = input.created_at ?? parsedProposal.last_updated_at;
     const reviewerAssignment =
       options.reviewerAssignment === undefined
@@ -404,6 +466,7 @@ export class SqliteProposalRepo implements ProposalRepo {
           parsedRunId,
           targetObjectKind,
           proposedChangeSummary,
+          proposedChanges,
           createdAt
         );
         if (reviewerAssignment !== undefined) {
@@ -451,7 +514,8 @@ export class SqliteProposalRepo implements ProposalRepo {
             workspace_id: row.workspace_id,
             run_id: row.run_id,
             reviewer_identity: row.reviewer_identity,
-            reviewer_assignment: assignment
+            reviewer_assignment: assignment,
+            proposed_changes: parseProposedChanges(row.proposed_changes)
           });
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to load proposal ${proposalId}.`, error);
@@ -520,6 +584,7 @@ export class SqliteProposalRepo implements ProposalRepo {
         p.reviewer_identity,
         p.target_object_kind,
         p.proposed_change_summary,
+        p.proposed_changes,
         p.created_at,
         a.reviewer_identity AS assigned_reviewer_identity,
         a.assigned_at AS assigned_at,
@@ -562,6 +627,7 @@ export class SqliteProposalRepo implements ProposalRepo {
           target_object_kind: row.target_object_kind,
           created_at: row.created_at ?? row.last_updated_at,
           proposed_change_summary: row.proposed_change_summary,
+          proposed_changes: parseProposedChanges(row.proposed_changes),
           assigned_reviewer_identity: row.assigned_reviewer_identity,
           assigned_at: row.assigned_at,
           deadline_at: row.deadline_at,
@@ -787,6 +853,136 @@ export class SqliteProposalRepo implements ProposalRepo {
     }
   }
 
+  public async acceptPendingMemoryUpdateWithEvents(
+    proposalId: string,
+    updatedAt: string,
+    events: readonly ProposalResolutionEventInput[],
+    memoryUpdate: AcceptedMemoryUpdateInput,
+    options: UpdatePendingResolutionOptions = {}
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly memory: Readonly<MemoryEntry>;
+    readonly events: readonly EventLogEntry[];
+  }>> {
+    const parsedProposalId = parseProposalId(proposalId);
+    const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+    const reviewerIdentity =
+      options.reviewerIdentity === undefined
+        ? undefined
+        : parseNonEmptyString(options.reviewerIdentity, "reviewer_identity");
+    const parsedMemoryUpdate = parseAcceptedMemoryUpdateInput(memoryUpdate);
+
+    try {
+      return this.db.connection.transaction(() => {
+        const existingMemoryRow = this.findMemoryEntryByIdStatement.get(
+          parsedMemoryUpdate.target_object_id
+        ) as MemoryEntryRow | undefined;
+        if (existingMemoryRow === undefined) {
+          throw new StorageError(
+            "NOT_FOUND",
+            `Memory entry ${parsedMemoryUpdate.target_object_id} was not found.`
+          );
+        }
+        const existingMemory = parseMemoryEntryRow(existingMemoryRow);
+        if (existingMemory.workspace_id !== parsedMemoryUpdate.workspace_id) {
+          throw new StorageError(
+            "NOT_FOUND",
+            `Memory entry ${parsedMemoryUpdate.target_object_id} was not found in workspace ${parsedMemoryUpdate.workspace_id}.`
+          );
+        }
+        if (existingMemory.lifecycle_state === "archived") {
+          throw new StorageError(
+            "VALIDATION_FAILED",
+            `Memory entry ${parsedMemoryUpdate.target_object_id} is archived and cannot be updated.`
+          );
+        }
+
+        const storedReviewEvents = events.map((event) => insertEventLogEntry(this.eventLogWriter, event));
+        const acceptedState = "accepted" satisfies ProposalResolutionState;
+        const result =
+          reviewerIdentity === undefined
+            ? this.updatePendingResolutionStatement.run(
+                acceptedState,
+                parsedUpdatedAt,
+                parsedProposalId
+              )
+            : this.updatePendingResolutionWithIdentityStatement.run(
+                acceptedState,
+                parsedUpdatedAt,
+                reviewerIdentity,
+                parsedProposalId
+              );
+
+        if (result.changes === 0) {
+          throw this.createPendingResolutionFailure(parsedProposalId);
+        }
+
+        const parsedFields = parsedMemoryUpdate.proposed_changes;
+        const memoryEvent = insertEventLogEntry(this.eventLogWriter, {
+          event_type: MemoryGovernanceEventType.SOUL_MEMORY_UPDATED,
+          entity_type: "memory_entry",
+          entity_id: existingMemory.object_id,
+          workspace_id: existingMemory.workspace_id,
+          run_id: existingMemory.run_id,
+          caused_by: parsedMemoryUpdate.caused_by,
+          payload_json: SoulMemoryUpdatedPayloadSchema.parse({
+            object_id: existingMemory.object_id,
+            object_kind: existingMemory.object_kind,
+            workspace_id: existingMemory.workspace_id,
+            run_id: existingMemory.run_id,
+            updated_fields: toUpdatedFieldNames(parsedMemoryUpdate.proposed_changes)
+          })
+        });
+        const memoryResult = this.updateMemoryEntryStatement.run(
+          parsedFields.content ?? null,
+          parsedFields.domain_tags === undefined ? null : JSON.stringify(parsedFields.domain_tags),
+          parsedFields.evidence_refs === undefined ? null : JSON.stringify(parsedFields.evidence_refs),
+          parsedFields.storage_tier ?? null,
+          parsedFields.updated_at,
+          parsedMemoryUpdate.target_object_id
+        );
+        if (memoryResult.changes === 0) {
+          throw new StorageError(
+            "NOT_FOUND",
+            `Memory entry ${parsedMemoryUpdate.target_object_id} was not found during update.`
+          );
+        }
+
+        const updatedMemoryRow = this.findMemoryEntryByIdStatement.get(
+          parsedMemoryUpdate.target_object_id
+        ) as MemoryEntryRow | undefined;
+        if (updatedMemoryRow === undefined) {
+          throw new StorageError(
+            "NOT_FOUND",
+            `Memory entry ${parsedMemoryUpdate.target_object_id} was not found after update.`
+          );
+        }
+        const updatedMemory = parseMemoryEntryRow(updatedMemoryRow);
+
+        const proposalRow = this.findByIdStatement.get(parsedProposalId) as ProposalRow | undefined;
+        if (proposalRow === undefined) {
+          throw new StorageError("NOT_FOUND", `Proposal ${parsedProposalId} was not found after update.`);
+        }
+
+        return deepFreeze({
+          proposal: parseProposalRow(proposalRow),
+          memory: updatedMemory,
+          events: [...storedReviewEvents, memoryEvent]
+        });
+      })();
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to accept proposal ${parsedProposalId} with durable memory update.`,
+        error
+      );
+    }
+  }
+
   private createPendingResolutionFailure(proposalId: string): StorageError {
     const row = this.findByIdStatement.get(proposalId) as ProposalRow | undefined;
     if (row === undefined) {
@@ -851,6 +1047,79 @@ function parseProposalRow(row: ProposalRow): Readonly<Proposal> {
   } catch (error) {
     throw new StorageError("VALIDATION_FAILED", "Failed to validate proposal row.", error);
   }
+}
+
+function serializeProposedChanges(
+  value: MemoryEntryMutableFields | null
+): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  try {
+    return JSON.stringify(PublicMemoryEntryMutableFieldsSchema.parse(value));
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate proposal proposed_changes.", error);
+  }
+}
+
+function parseProposedChanges(value: string | null): Readonly<MemoryEntryMutableFields> | null {
+  if (value === null) {
+    return null;
+  }
+
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(value);
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to parse proposal proposed_changes JSON.", error);
+  }
+
+  try {
+    return deepFreeze(PublicMemoryEntryMutableFieldsSchema.parse(parsedJson));
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate proposal proposed_changes row.", error);
+  }
+}
+
+function parseAcceptedMemoryUpdateInput(
+  input: AcceptedMemoryUpdateInput
+): Readonly<{
+  readonly target_object_id: string;
+  readonly workspace_id: string;
+  readonly proposed_changes: MemoryEntryMutableFields & { readonly updated_at: string };
+  readonly caused_by: string;
+}> {
+  const parsedChanges = parseUpdateFields({
+    ...PublicMemoryEntryMutableFieldsSchema.parse(input.proposed_changes),
+    updated_at: parseUpdatedAt(input.updated_at)
+  });
+
+  return deepFreeze({
+    target_object_id: parseNonEmptyString(input.target_object_id, "target_object_id"),
+    workspace_id: parseWorkspaceId(input.workspace_id),
+    proposed_changes: parsedChanges,
+    caused_by: parseNonEmptyString(input.caused_by, "caused_by")
+  });
+}
+
+function toUpdatedFieldNames(fields: MemoryEntryMutableFields): string[] {
+  const updatedFields: string[] = [];
+
+  if (fields.content !== undefined) {
+    updatedFields.push("content");
+  }
+  if (fields.domain_tags !== undefined) {
+    updatedFields.push("domain_tags");
+  }
+  if (fields.evidence_refs !== undefined) {
+    updatedFields.push("evidence_refs");
+  }
+  if (fields.storage_tier !== undefined) {
+    updatedFields.push("storage_tier");
+  }
+
+  return updatedFields;
 }
 
 function parseProposalReviewerAssignment(
