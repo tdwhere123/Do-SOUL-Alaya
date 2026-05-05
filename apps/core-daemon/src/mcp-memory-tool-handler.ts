@@ -102,7 +102,10 @@ export interface McpMemoryToolHandlerDependencies {
   };
   readonly trustStateRecorder: {
     recordDelivery(input: Omit<ContextDeliveryRecord, "audit_event_id">): Promise<ContextDeliveryRecord>;
-    recordUsage(input: Omit<UsageProofRecord, "audit_event_id">): Promise<UsageProofRecord>;
+    recordUsage(
+      input: Omit<UsageProofRecord, "audit_event_id">,
+      options?: { readonly expectedWorkspaceId?: string }
+    ): Promise<UsageProofRecord>;
   };
   readonly proposalWorkflow?: {
     proposeMemoryUpdate(
@@ -390,15 +393,18 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
 
   async function reportContextUsage(
     request: SoulReportContextUsageRequest,
-    _context: McpMemoryToolCallContext
+    context: McpMemoryToolCallContext
   ) {
-    await deps.trustStateRecorder.recordUsage({
-      delivery_id: request.delivery_id,
-      usage_state: request.usage_state,
-      used_object_ids: request.used_object_ids ?? [],
-      reason: request.reason ?? null,
-      reported_at: now()
-    });
+    await deps.trustStateRecorder.recordUsage(
+      {
+        delivery_id: request.delivery_id,
+        usage_state: request.usage_state,
+        used_object_ids: request.used_object_ids ?? [],
+        reason: request.reason ?? null,
+        reported_at: now()
+      },
+      { expectedWorkspaceId: context.workspaceId }
+    );
     return SoulReportContextUsageResponseSchema.parse({
       delivery_id: request.delivery_id,
       status: "recorded"

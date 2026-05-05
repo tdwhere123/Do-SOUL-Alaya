@@ -58,6 +58,53 @@ describe("trust state recorder", () => {
     expect(publishWithMutation).not.toHaveBeenCalled();
   });
 
+  it("D2 MERGED-B3 recordUsage rejects cross-workspace delivery when expectedWorkspaceId mismatches", async () => {
+    // The delivery belongs to workspace-1; an attacker calling
+    // soul.report_context_usage from workspace-attacker passes
+    // expectedWorkspaceId='workspace-attacker'. The recorder must refuse
+    // and write nothing — same observable as unknown-delivery so probes
+    // leak no info.
+    const { recorder, publishWithMutation } = createRecorder({ ready: true });
+    await recorder.recordDelivery(buildDeliveryInput("delivery-victim"));
+    publishWithMutation.mockClear();
+
+    await expect(
+      recorder.recordUsage(
+        {
+          delivery_id: "delivery-victim",
+          usage_state: "used",
+          used_object_ids: ["memory-1"],
+          reason: null,
+          reported_at: USAGE_AT
+        },
+        { expectedWorkspaceId: "workspace-attacker" }
+      )
+    ).rejects.toBeInstanceOf(TrustStateUnknownDeliveryError);
+
+    expect(publishWithMutation).not.toHaveBeenCalled();
+  });
+
+  it("D2 MERGED-B3 recordUsage proceeds when expectedWorkspaceId matches the linked delivery", async () => {
+    const { recorder } = createRecorder({ ready: true });
+    await recorder.recordDelivery(buildDeliveryInput("delivery-aligned"));
+
+    await expect(
+      recorder.recordUsage(
+        {
+          delivery_id: "delivery-aligned",
+          usage_state: "used",
+          used_object_ids: ["memory-1"],
+          reason: null,
+          reported_at: USAGE_AT
+        },
+        { expectedWorkspaceId: "workspace-1" }
+      )
+    ).resolves.toMatchObject({
+      delivery_id: "delivery-aligned",
+      usage_state: "used"
+    });
+  });
+
   it("B3 delivered_count accumulates across calls", async () => {
     const { recorder } = createRecorder({ ready: true });
 

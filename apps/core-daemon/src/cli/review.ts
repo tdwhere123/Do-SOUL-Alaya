@@ -293,6 +293,12 @@ function buildCallContext(
   args: ReviewArgs,
   deps: ReviewCommandDependencies
 ): McpMemoryToolCallContext {
+  // D2 MERGED-I3: the `alaya review` verbs ARE the human-reviewer surface
+  // — they MUST default to `runId: null` regardless of `ALAYA_RUN_ID`.
+  // Reading the env var here re-opens the failure A1's fix-loop closed
+  // (a human reviewer cannot review run-scoped proposals because the
+  // strict run check rejects them). Only an explicit `--run` argument
+  // changes the runId; otherwise we ignore the env entirely.
   return {
     workspaceId:
       args.contextOverrides.workspaceId ??
@@ -302,7 +308,7 @@ function buildCallContext(
     runId:
       args.contextOverrides.runId !== undefined
         ? args.contextOverrides.runId
-        : deps.defaultRunId ?? ctx.env.ALAYA_RUN_ID ?? null,
+        : null,
     agentTarget:
       args.contextOverrides.agentTarget ??
       deps.defaultAgentTarget ??

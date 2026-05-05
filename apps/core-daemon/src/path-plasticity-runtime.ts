@@ -152,7 +152,7 @@ export function createPathPlasticityService(deps: {
   const pathRelationRepoPort: PathPlasticityRepoPort = {
     findByAnchor: (workspaceId, anchorRef) =>
       deps.pathRelationRepo.findByAnchor(workspaceId, anchorRef),
-    update: (pathId, updates) => deps.pathRelationRepo.update(pathId, updates)
+    updateSync: (pathId, updates) => deps.pathRelationRepo.updateSync(pathId, updates)
   };
   return new PathPlasticityService({
     usageProofReader,

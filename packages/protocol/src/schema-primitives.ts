@@ -23,6 +23,11 @@ export const BoundedIdSchema = BoundedString(256);
 export const BoundedQuerySchema = BoundedString(4096);
 export const BoundedReasonSchema = BoundedString(16384);
 export const BoundedLabelSchema = BoundedString(1024);
+/** Memory entry content body. 65536 chars covers long-form notes
+ * (a few research paper sections) without giving any single MCP call
+ * the ability to pin daemon memory with arbitrarily large strings.
+ * Added per D2 MERGED-I6 (red-team-I4). */
+export const BoundedContentSchema = BoundedString(65536);
 
 export const BOUNDED_DEFAULT_ARRAY_MAX = 1000;
 export const BOUNDED_EVIDENCE_ARRAY_MAX = 100;

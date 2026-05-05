@@ -1,5 +1,14 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../schema-primitives.js";
+import {
+  BOUNDED_DEFAULT_ARRAY_MAX,
+  BOUNDED_EVIDENCE_ARRAY_MAX,
+  BoundedContentSchema,
+  BoundedIdSchema,
+  BoundedLabelSchema,
+  IsoDatetimeStringSchema,
+  NonEmptyStringSchema,
+  NonNegativeIntSchema
+} from "../schema-primitives.js";
 import { PersistentObjectEnvelopeSchema } from "./envelope.js";
 import { ScopeClassSchema } from "./object-kind.js";
 
@@ -89,9 +98,21 @@ export const ManifestationStateSchema = z.enum(manifestationStateValues);
 export const RetentionStateSchema = z.enum(retentionStateValues);
 export const StorageTierSchema = z.enum(storageTierValues);
 const MemoryEntryMutableFieldsBaseSchema = z.object({
-  content: NonEmptyStringSchema.optional(),
-  domain_tags: z.array(NonEmptyStringSchema).readonly().optional(),
-  evidence_refs: z.array(NonEmptyStringSchema).readonly().optional(),
+  // D2 MERGED-I6 (red-team-I4): bound `content` + element bounds on
+  // `domain_tags` / `evidence_refs` so a single MCP call cannot pin the
+  // daemon with a 100MB string field. The default-array max keeps the
+  // tag list from itself becoming an unbounded amplifier.
+  content: BoundedContentSchema.optional(),
+  domain_tags: z
+    .array(BoundedLabelSchema)
+    .max(BOUNDED_DEFAULT_ARRAY_MAX)
+    .readonly()
+    .optional(),
+  evidence_refs: z
+    .array(BoundedIdSchema)
+    .max(BOUNDED_EVIDENCE_ARRAY_MAX)
+    .readonly()
+    .optional(),
   storage_tier: StorageTierSchema.optional()
 });
 

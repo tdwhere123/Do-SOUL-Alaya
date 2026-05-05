@@ -9,11 +9,19 @@ export interface ProposalRouteServices {
   // workspace-scoped HTTP wrappers around the same MCP handler that
   // attached agents call. The wrappers exist on the daemon HTTP plane
   // (not the agent control plane): they are workspace-scoped at the
-  // URL level, so the prior MR-B01 concern (non-atomic + no workspace
+  // URL level, so the prior `#BL-024` concern (non-atomic + no workspace
   // scoping in the removed POST /proposals/:id/review route) does not
-  // re-open. CLI + MCP remain the canonical agent surfaces; the HTTP
-  // surface here is for the Inspector tooling-loopback only.
-  readonly mcpMemoryToolHandler?: McpMemoryToolHandler;
+  // re-open. Per invariant §21 (Inspector loopback only) the durable
+  // promotion still routes through `proposalRepo.updatePendingResolutionWithEvents`
+  // via the same MCP handler attached agents use; this HTTP wrapper does
+  // not own the storage-atomic path.
+  //
+  // D2 MERGED-I7: required (not optional) — production wiring always
+  // constructs the handler in `apps/core-daemon/src/index.ts`, so the
+  // 503 fallback was dead code that masked any future wiring drop. If
+  // a refactor accidentally drops the wiring, the type system now
+  // catches it instead of letting the route 503 silently.
+  readonly mcpMemoryToolHandler: McpMemoryToolHandler;
 }
 
 // HTTP route surface for proposals:
@@ -41,10 +49,7 @@ export function registerProposalRoutes(app: Hono, services: ProposalRouteService
   app.get("/workspaces/:wsId/proposals/pending", async (context) => {
     const workspaceId = context.req.param("wsId");
     await services.workspaceService.getById(workspaceId);
-    if (services.mcpMemoryToolHandler === undefined) {
-      return context.json({ success: false, error: "memory tool handler unavailable" }, 503);
-    }
-    const since = context.req.query("since") ?? undefined;
+const since = context.req.query("since") ?? undefined;
     const limitRaw = context.req.query("limit");
     const limit = limitRaw === undefined ? undefined : Number.parseInt(limitRaw, 10);
     // A1 fix-loop (finding-2): workspace is bound server-side from the
@@ -74,12 +79,21 @@ export function registerProposalRoutes(app: Hono, services: ProposalRouteService
     const workspaceId = context.req.param("wsId");
     const proposalId = context.req.param("proposalId");
     await services.workspaceService.getById(workspaceId);
-    if (services.mcpMemoryToolHandler === undefined) {
-      return context.json({ success: false, error: "memory tool handler unavailable" }, 503);
-    }
-    let body: Record<string, unknown>;
+let body: Record<string, unknown>;
     try {
-      body = (await context.req.json()) as Record<string, unknown>;
+      const parsed: unknown = await context.req.json();
+      // D2 MERGED-I4: JSON `null` / arrays / scalars all parse cleanly but
+      // would throw a TypeError on property access (`body.verdict`)
+      // before the existing `result.error.code === "VALIDATION"` mapping
+      // can return a 400. Reject the boundary case explicitly so the
+      // HTTP trust boundary returns 400 instead of leaking a 500.
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return context.json(
+          { success: false, error: "invalid JSON body" },
+          400
+        );
+      }
+      body = parsed as Record<string, unknown>;
     } catch {
       return context.json({ success: false, error: "invalid JSON body" }, 400);
     }

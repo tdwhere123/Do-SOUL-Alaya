@@ -160,12 +160,28 @@ export class TrustStateRecorder {
   }
 
   public async recordUsage(
-    input: Omit<UsageProofRecord, "audit_event_id">
+    input: Omit<UsageProofRecord, "audit_event_id">,
+    options?: { readonly expectedWorkspaceId?: string }
   ): Promise<UsageProofRecord> {
     this.assertReady();
 
     const linkedDelivery = await this.repo.findDeliveryById(input.delivery_id);
     if (linkedDelivery === null) {
+      throw new TrustStateUnknownDeliveryError(input.delivery_id);
+    }
+
+    // Cross-workspace guard (D2 MERGED-B3): when the caller supplies a
+    // workspace context, refuse to record usage against a delivery from a
+    // different workspace. Without this guard, an attached agent in
+    // `attacker_ws` could call `soul.report_context_usage` with any
+    // `delivery_id` it observed (e.g. via SSE) and write a
+    // `MEMORY_USAGE_REPORTED` row that flows into A3 plasticity in
+    // `victim_ws`. The error mirrors UnknownDelivery so cross-workspace
+    // probes leak no observable difference vs unknown deliveries.
+    if (
+      options?.expectedWorkspaceId !== undefined &&
+      linkedDelivery.workspace_id !== options.expectedWorkspaceId
+    ) {
       throw new TrustStateUnknownDeliveryError(input.delivery_id);
     }
 

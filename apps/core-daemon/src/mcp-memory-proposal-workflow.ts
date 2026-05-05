@@ -307,6 +307,18 @@ export function createMcpMemoryProposalWorkflow(
 
 }
 
+/**
+ * The set of `agentTarget` values that identify the human-reviewer
+ * surfaces (Inspector loopback + `alaya review` CLI). Only callers in
+ * this set are allowed to review run-scoped proposals with
+ * `runId: null`. Any other agent-attached caller still needs strict
+ * workspace+run match.
+ */
+const HUMAN_REVIEWER_AGENT_TARGETS: ReadonlySet<string> = new Set([
+  "inspector",
+  "cli"
+]);
+
 function assertProposalContext(
   scopedProposal: Readonly<{
     readonly workspace_id: string;
@@ -320,20 +332,32 @@ function assertProposalContext(
   // Inspector POST and `alaya review accept`), which always pass
   // runId: null. That made every proposal created via
   // soul.propose_memory_update — i.e. every proposal carrying the
-  // attached agent's run_id — unreviewable through Inspector or CLI,
-  // since the human surface cannot know the agent's run id.
+  // attached agent's run_id — unreviewable through Inspector or CLI.
   //
-  // Decision (Q1, pre-approved by main thread): when context.runId is
-  // null, treat the call as a workspace-scope-only review and only
-  // require workspace match. When context.runId is non-null (i.e. the
-  // call is itself running inside an agent run, e.g. an attached agent
-  // reviewing its own proposal), keep the strict workspace+run match
-  // so an agent in run A cannot review a proposal created in run B.
+  // D2 MERGED-I5 (red-team-I3): the original loosening was too broad.
+  // Any MCP caller whose context resolves to runId=null (e.g. an
+  // attached agent calling `soul.review_memory_proposal` without a
+  // run binding) could review any pending proposal in its workspace,
+  // not just human reviewers. Re-tighten by gating the loosening on
+  // `agentTarget ∈ HUMAN_REVIEWER_AGENT_TARGETS` (Inspector + CLI).
+  // Other surfaces still need strict workspace+run match.
   const workspaceId = NonEmptyStringSchema.parse(context.workspaceId);
   if (scopedProposal.workspace_id !== workspaceId) {
     throw createWorkflowError("NOT_FOUND", "Proposal not found in current workspace/run context.");
   }
+  const isHumanReviewerSurface = HUMAN_REVIEWER_AGENT_TARGETS.has(context.agentTarget);
+  if (context.runId === null && isHumanReviewerSurface) {
+    return;
+  }
   if (context.runId === null) {
+    // Non-human caller with no runId is treated as a strict mismatch:
+    // the proposal MUST also have run_id=null.
+    if (scopedProposal.run_id !== null) {
+      throw createWorkflowError(
+        "NOT_FOUND",
+        "Proposal not found in current workspace/run context."
+      );
+    }
     return;
   }
   const runId = NonEmptyStringSchema.parse(context.runId);
