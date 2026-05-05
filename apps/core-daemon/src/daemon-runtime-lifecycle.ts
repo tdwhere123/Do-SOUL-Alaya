@@ -43,6 +43,7 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
 }> {
   let server: ServerType | null = null;
   let backgroundStarted = false;
+  let startupBackgroundPass: Promise<void> | null = null;
   let shuttingDown: Promise<void> | null = null;
 
   const startBackgroundServices = (): void => {
@@ -53,6 +54,17 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
     input.gardenBacklogTelemetryService.start();
     input.gardenRuntime.backgroundManager.start();
     backgroundStarted = true;
+    const startupPass = input.gardenRuntime.runBackgroundPass().catch((error) => {
+      input.warnLogger.warn("garden startup background pass failed", {
+        error: error instanceof Error ? error.message : String(error)
+      });
+    });
+    startupBackgroundPass = startupPass;
+    void startupPass.finally(() => {
+      if (startupBackgroundPass === startupPass) {
+        startupBackgroundPass = null;
+      }
+    });
   };
 
   const shutdown = async (): Promise<void> => {
@@ -82,6 +94,9 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
 
       if (backgroundStarted) {
         await input.gardenRuntime.backgroundManager.stop({ timeoutMs: 30_000 });
+        if (startupBackgroundPass !== null) {
+          await startupBackgroundPass;
+        }
         input.gardenRuntime.setBacklogTelemetryObserver(null);
         const telemetryStopResult = await input.gardenBacklogTelemetryService.stop();
         if (telemetryStopResult === "timed_out") {
@@ -108,6 +123,9 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
   return Object.freeze({
     startBackgroundServices,
     runGardenBackgroundPass: async () => {
+      if (startupBackgroundPass !== null) {
+        await startupBackgroundPass;
+      }
       await input.gardenRuntime.runBackgroundPass();
     },
     startHttpServer: async (options: AlayaDaemonListenOptions = {}) => {

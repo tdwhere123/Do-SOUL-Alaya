@@ -674,7 +674,10 @@ vi.mock("@do-soul/alaya-storage", async () => {
     SqliteCrossCuttingPermissionRepo: makeRepo(),
     SqliteProposalRepo: makeRepo(),
     SqliteGreenStatusRepo: makeRepo(),
-    SqliteHealthJournalRepo: makeRepo(),
+    SqliteHealthJournalRepo: makeRepo({
+      append: vi.fn(async () => undefined),
+      findByWorkspace: vi.fn(async () => [])
+    }),
     SqliteFileRepo: makeRepo(),
     SqliteKarmaEventRepo: makeRepo(),
     SqliteConfigRepo: makeRepo(),

@@ -281,7 +281,17 @@ recall scoring.
 ### 6. Maintenance (维护)
 
 **What happens.** Garden runs as a fire-and-forget background system
-with four roles, scheduled by tier:
+under the daemon/MCP process the user actually starts. In normal use,
+`alaya attach <agent>` writes the profile, the agent launches
+`alaya mcp stdio`, and that MCP process starts Garden, runs one startup
+background pass, then keeps four periodic roles alive until the process
+exits:
+
+The default workspace is the directory that launched the CLI/MCP process.
+`--workspace` and `ALAYA_WORKSPACE_ID` are explicit overrides; otherwise
+Alaya registers the current directory as a stable local workspace so
+recall, proposals, usage receipts, and Garden cleanup stay scoped to the
+project you opened.
 
 - **Auditor** — evidence staleness check, pointer health, orphan detection.
 - **Janitor** — TTL cleanup, hot/warm tier demotion, dormant marking, tombstone GC.
@@ -485,8 +495,8 @@ pnpm build
 pnpm alaya doctor
 #   Expect: checks.environment = ok, storage.schema_ok = true (when configured).
 #   On a fresh clone, garden status reads `degraded` until the daemon is up
-#   (the agent starts it via attach); doctor exits 75 in that case. That is
-#   advisory, not a hard failure.
+#   or an attached agent has launched `alaya mcp stdio`; doctor exits 75 in
+#   that case. That is advisory, not a hard failure.
 
 # 6) Install profile — creates alaya.db at the path you pass and writes audit log
 pnpm alaya install --non-interactive '{"db_path":"./alaya.db","embedding_enabled":false}'
@@ -495,6 +505,9 @@ pnpm alaya install --non-interactive '{"db_path":"./alaya.db","embedding_enabled
 # 7) Attach to your agent — writes ~/.claude.json (or ~/.codex/config.toml)
 pnpm alaya attach claude-code      # preview, confirm, then apply
 #   Use `pnpm alaya detach claude-code` at any time to undo cleanly.
+#   On the next agent session, the MCP process starts Garden automatically.
+#   If no ALAYA_WORKSPACE_ID is set, Alaya registers the agent's launch
+#   directory as the current local workspace.
 
 # 8) First tool call — verify the MCP surface end-to-end
 pnpm alaya tools list --json | jq '.tools | length'

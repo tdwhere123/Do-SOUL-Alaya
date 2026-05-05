@@ -259,8 +259,16 @@ bias 一起纳入召回评分。
 
 ### 6. 维护 (Maintenance)
 
-**这一步在做什么。** Garden 是一个即发即忘的后台系统，按 tier 调
-度四个角色：
+**这一步在做什么。** Garden 是一个即发即忘的后台系统，跟着用户实
+际启动的 daemon/MCP 进程跑。正常路径是：`alaya attach <agent>` 写
+入 profile，agent 启动时拉起 `alaya mcp stdio`，这个 MCP 进程启动
+Garden，先跑一次启动清理 pass，然后按 tier 周期调度四个角色，直到
+进程退出：
+
+默认 workspace 就是启动 CLI/MCP 进程的当前目录。`--workspace` 和
+`ALAYA_WORKSPACE_ID` 是显式覆盖；否则 Alaya 会把当前目录登记成一
+个稳定的 local workspace，让 recall、proposal、usage receipt 和
+Garden 清理都落在你打开的这个项目上。
 
 - **Auditor** —— 证据陈旧检查、pointer 健康度、孤儿检测。
 - **Janitor** —— TTL 清理、热/温分层降级、休眠标记、墓碑 GC。
@@ -456,8 +464,9 @@ pnpm build
 # 5) doctor —— 验证环境、storage schema_ok、daemon 可达性
 pnpm alaya doctor
 #   期望：checks.environment = ok，storage.schema_ok = true（已配置情况下）
-#   全新 clone 时，daemon 没起，garden 状态会读到 `degraded`，
-#   doctor 退码 75。这是 advisory，不是硬错。
+#   全新 clone 时，daemon 没起、也还没有 agent 拉起 `alaya mcp stdio`，
+#   garden 状态会读到 `degraded`，doctor 退码 75。这是 advisory，
+#   不是硬错。
 
 # 6) install 一份 profile —— 在指定路径建 alaya.db 并写 audit log
 pnpm alaya install --non-interactive '{"db_path":"./alaya.db","embedding_enabled":false}'
@@ -466,6 +475,9 @@ pnpm alaya install --non-interactive '{"db_path":"./alaya.db","embedding_enabled
 # 7) attach 你的 agent —— 写 ~/.claude.json（或 ~/.codex/config.toml）
 pnpm alaya attach claude-code      # preview，确认，再 apply
 #   随时可以用 `pnpm alaya detach claude-code` 干净撤销。
+#   下一次 agent 会话启动 MCP 进程时，Garden 会自动启动。
+#   如果没有设置 ALAYA_WORKSPACE_ID，Alaya 会把 agent 的启动目录
+#   登记成当前 local workspace。
 
 # 8) 第一次 tool call —— 端到端验证 MCP 接口
 pnpm alaya tools list --json | jq '.tools | length'

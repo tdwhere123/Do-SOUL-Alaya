@@ -3,6 +3,7 @@ import {
   GardenRole,
   GardenTaskKind,
   GardenTier,
+  HealthEventKind,
   type GardenTaskDescriptor,
   type GardenTaskResult,
   type GardenTierValue,
@@ -248,13 +249,60 @@ describe("garden runtime path plasticity queue", () => {
       workspace_id: "workspace-1"
     });
   });
+
+  it("updates Garden status after scheduled background services complete", async () => {
+    const runtime = createGardenRuntime(createRuntimeInput({
+      computeAndApplyPlasticity: vi.fn(async () => ({
+        reinforced: 0,
+        weakened: 0,
+        retired: 0,
+        affectedPathIds: []
+      }))
+    }));
+
+    expect(runtime.getStatus().last_pass_at).toBeNull();
+
+    await getService(runtime, "Janitor").task();
+
+    expect(runtime.getStatus().last_pass_at).toEqual(expect.any(String));
+  });
+
+  it("records a default-workspace Garden pass when no workspaces exist yet", async () => {
+    const healthJournalAppend = vi.fn(async () => undefined);
+    const runtime = createGardenRuntime(createRuntimeInput({
+      computeAndApplyPlasticity: vi.fn(async () => ({
+        reinforced: 0,
+        weakened: 0,
+        retired: 0,
+        affectedPathIds: []
+      })),
+      healthJournalRepo: {
+        append: healthJournalAppend
+      } as unknown as GardenRuntimeInput["healthJournalRepo"],
+      workspaceRepo: {
+        list: vi.fn(async () => [])
+      } as unknown as GardenRuntimeInput["workspaceRepo"]
+    }));
+
+    await runtime.runBackgroundPass();
+
+    expect(healthJournalAppend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_kind: HealthEventKind.GARDEN_BACKLOG,
+        workspace_id: "default",
+        summary: "Garden background pass completed"
+      })
+    );
+  });
 });
 
 function createRuntimeInput(options: {
   readonly computeAndApplyPlasticity: NonNullable<
     GardenRuntimeInput["pathPlasticityService"]
   >["computeAndApplyPlasticity"];
+  readonly healthJournalRepo?: GardenRuntimeInput["healthJournalRepo"];
   readonly pathPlasticityWatermarkRepo?: GardenRuntimeInput["pathPlasticityWatermarkRepo"];
+  readonly workspaceRepo?: GardenRuntimeInput["workspaceRepo"];
 }): GardenRuntimeInput {
   let latestSnapshot: PathGraphSnapshot | null = null;
   const publish = vi.fn(async (entry: Record<string, unknown>) => ({
@@ -289,9 +337,11 @@ function createRuntimeInput(options: {
       )
     } as unknown as GardenRuntimeInput["eventPublisher"],
     gardenDataPorts: createGardenDataPorts(),
-    healthJournalRepo: {
-      append: vi.fn(async () => undefined)
-    } as unknown as GardenRuntimeInput["healthJournalRepo"],
+    healthJournalRepo:
+      options.healthJournalRepo ??
+      ({
+        append: vi.fn(async () => undefined)
+      } as unknown as GardenRuntimeInput["healthJournalRepo"]),
     handoffGapRepo: {
       findExpiredObjectsByWorkspace: vi.fn(async () => []),
       deleteById: vi.fn()
@@ -318,9 +368,11 @@ function createRuntimeInput(options: {
     strongRefService: {
       isProtected: vi.fn(async () => false)
     } as unknown as GardenRuntimeInput["strongRefService"],
-    workspaceRepo: {
-      list: vi.fn(async () => [{ workspace_id: "workspace-1" }])
-    } as unknown as GardenRuntimeInput["workspaceRepo"]
+    workspaceRepo:
+      options.workspaceRepo ??
+      ({
+        list: vi.fn(async () => [{ workspace_id: "workspace-1" }])
+      } as unknown as GardenRuntimeInput["workspaceRepo"])
   };
 }
 

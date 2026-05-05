@@ -27,6 +27,8 @@ proposal, review, durable apply, recall, usage, and audit evidence.
 | P6-governance-accept-apply | Persist `proposed_changes`; make `soul.review_memory_proposal(accept)` apply the accepted patch through controlled durable memory service code. | live-event-ready |
 | P6-recall-explainability | Return stable recall explanation fields: result-level selection reason, source channels, score factors, budget state; response-level strategy mix and degradation reason. | schema-ready |
 | P6-operator-control | Keep CLI/status/tool descriptions distinct for candidate signal, proposal, accepted proposal, durable memory application, recall delivery, and usage receipt. | cli-consumable |
+| P6-garden-startup-cleanup-loop | Make the real attach path (`alaya mcp stdio`) start Garden maintenance, run an initial cleanup pass, keep periodic Janitor/Auditor/Librarian/Scheduler work fire-and-forget, and stop with the daemon/MCP process. | live-event-ready |
+| P6-cwd-workspace-startup | Default attached MCP and CLI fallback calls to the current launch directory, register that directory as a stable local workspace, and keep `--workspace` / `ALAYA_WORKSPACE_ID` as explicit overrides. | cli-consumable |
 | P6-live-agent-proof | Add a deterministic agent-path harness that proves tool discovery, ordered MCP calls, usage receipt, proposal review, durable update, and explainable recall in one daemon lifetime. | live-event-ready |
 | P6-contract-parity-reset | Align README, README.zh-CN, v0.1 INDEX, runtime-status, and glossary to one source of truth for Phase 6 acceptance. | docs-truth-ready |
 
@@ -55,6 +57,15 @@ proposal, review, durable apply, recall, usage, and audit evidence.
   pre-task recall, pointer open, usage receipt, candidate signal,
   memory proposal, explicit review, durable memory application, and
   post-apply recall explainability.
+- The normal user startup path is complete: `alaya attach <agent>`
+  writes the MCP profile; the agent launches `alaya mcp stdio`; that
+  MCP process starts Garden, triggers one initial cleanup pass, leaves
+  periodic cleanup on background intervals, and shuts those services
+  down when the MCP process exits.
+- Workspace startup is current-directory first: absent an explicit
+  `--workspace` or `ALAYA_WORKSPACE_ID`, attached MCP and CLI fallback
+  calls derive a stable local workspace from the process cwd and register
+  it before memory tools or Garden startup run.
 - `soul.review_memory_proposal(accept)` is accept-as-apply for
   proposals created by `soul.propose_memory_update`; reject leaves
   durable memory untouched.

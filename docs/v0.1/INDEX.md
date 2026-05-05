@@ -35,8 +35,9 @@ Phase 0 → Gate-0
   numbers. README has no benchmark table.
 - `v0.1.1` = Gate-6: Phase 6 MCP Agent-Use Protocol and Trustworthy
   Memory Loop proof lands. Active truth is tools-only MCP/CLI agent
-  use, accept-as-apply governance, recall explainability, and live
-  agent-path verification. Legacy benchmark cards are archived
+  use, cwd-derived local workspace startup, attach-started Garden
+  maintenance, accept-as-apply governance, recall explainability, and
+  live agent-path verification. Legacy benchmark cards are archived
   artifacts only, not acceptance criteria.
 
 ## Phase Summary
@@ -50,7 +51,7 @@ Phase 0 → Gate-0
 | Phase 4 | Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI + Memory Inspector | 30 cards (target) | MCP surface `mcp-consumable`; trust delivery/usage durability + Inspector config-write `live-event-ready` after Round 3 followup cards | Gate-4 passed |
 | Phase 5 | Wave 5: E2E + Graph Contract + Final Review (release acceptance) | 3 cards (target) | **done**: graph contract `schema-ready`; release E2E `live-event-ready`; final review `mcp-consumable` | Gate-5 passed |
 | Gate-5F | Post-Gate-5 backlog closeout | 5 cards + closeout | **done**: `#BL-025`..`#BL-036` resolved; final review clean; full verification passed | Gate-5F passed |
-| Phase 6 | Wave 6: MCP Agent-Use Protocol + Trustworthy Memory Loop | 6 active slices + archived benchmark cards | mcp-consumable / live-event-ready target | Gate-6 |
+| Phase 6 | Wave 6: MCP Agent-Use Protocol + Trustworthy Memory Loop | 8 active slices + archived benchmark cards | mcp-consumable / live-event-ready target | Gate-6 |
 
 ## Phase 2 — Card Closeout Status
 

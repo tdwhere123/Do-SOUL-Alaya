@@ -77,6 +77,8 @@ each Phase Gate.
 | Operations (backup / export) | `cli-consumable` (proven by release E2E) | `cli-consumable` | P4-operations + P5-e2e |
 | Operations (import) | `implementation-ready` (covered by targeted operations tests only) | `cli-consumable` | P4-operations |
 | Memory Inspector | `live-event-ready`; server/frontend exist, token-gated routes pass, and Provider/Config writes proxy daemon runtime config | `live-event-ready` for the inspector surface | P4-inspector-server + P4-cli-inspect + P4-inspector-frontend + #BL-019 repair |
+| Current-directory workspace startup | `cli-consumable`; absent `--workspace` or `ALAYA_WORKSPACE_ID`, attached MCP stdio and CLI fallback calls derive and register a stable local workspace from process cwd before invoking memory tools or Garden startup | `cli-consumable` | P6-cwd-workspace-startup |
+| Garden startup / cleanup loop | `live-event-ready`; HTTP daemon and attached MCP stdio start Garden services, trigger one startup background pass, then leave Janitor/Auditor/Librarian/Scheduler on intervals until shutdown drains them | `live-event-ready` | P2-garden-batch-* + P4-mcp-server + P6-garden-startup-cleanup-loop |
 | MCP Agent-Use Protocol | `mcp-consumable`; live proof covers tool discovery, ordered MCP calls, CLI fallback, pointer open, usage receipt, proposal review, durable update, and post-apply recall | `mcp-consumable` | P6-agent-use-protocol + P6-live-agent-proof |
 | Trustworthy Memory Loop | `live-event-ready`; accepted memory proposals validate through `MemoryService.validateUpdate`, apply inside an atomic proposal/storage transaction, reject leaves durable memory unchanged, and audit evidence remains in EventLog / repo projections | `live-event-ready` | P6-governance-accept-apply |
 | Recall explainability + operator control | `schema-ready`; recall results expose selection reason, source channels, score factors, budget state, response strategy mix, and degradation reason; CLI/status names control-plane states distinctly | `schema-ready` | P6-recall-explainability + P6-operator-control |
@@ -307,7 +309,8 @@ non-blocking and tracked for a follow-up wave.
 - **Gate-6 (v0.1.1 MCP agent-use proof)**: Gate-5F plus tools-only MCP
   instructions, strengthened attach/install profile text, accept-as-apply
   proposal governance, recall explainability fields, operator-state CLI
-  language, and a live agent-path harness.
+  language, cwd-derived workspace startup, attach-started Garden
+  cleanup, and a live agent-path harness.
 - **Gate-5F (backlog closeout)**: backlog items `#BL-025` through
   `#BL-036` resolved; final review reported zero Blocking / Important
   findings; `rtk pnpm build`,

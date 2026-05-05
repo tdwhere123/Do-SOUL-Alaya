@@ -10,6 +10,7 @@ import {
   WorkspaceDefaultEngineClassUpdatedPayloadSchema,
   WorkspaceDeletedPayloadSchema,
   WorkspaceCreateInputSchema,
+  WorkspaceKind,
   WorkspaceSchema,
   WorkspaceState,
   type BootstrappingRecord,
@@ -96,6 +97,38 @@ export class WorkspaceService {
   public async create(input: unknown): Promise<Workspace> {
     const parsed = parseCreateWorkspaceInput(input);
     const workspaceId = `ws_${randomUUID()}`;
+    return await this.createWithId(parsed, workspaceId);
+  }
+
+  public async ensureLocalWorkspace(input: {
+    readonly workspaceId: string;
+    readonly name: string;
+    readonly rootPath: string;
+    readonly repoPath?: string | null;
+  }): Promise<Workspace> {
+    const workspaceId = parseRequiredString(input.workspaceId, "workspace_id");
+    const rootPath = parseRequiredString(input.rootPath, "root_path");
+    const existing = await this.dependencies.workspaceRepo.getById(workspaceId);
+    if (existing !== null) {
+      return existing;
+    }
+
+    return await this.createWithId(
+      {
+        name: input.name,
+        root_path: rootPath,
+        workspace_kind: WorkspaceKind.LOCAL_REPO,
+        repo_path: input.repoPath ?? rootPath,
+        default_engine_binding: null
+      },
+      workspaceId
+    );
+  }
+
+  private async createWithId(
+    parsed: CreateWorkspaceInput,
+    workspaceId: string
+  ): Promise<Workspace> {
     const bootstrappingDeps = this.resolveBootstrappingDependencies();
     const createWorkspaceArgs = {
       workspace_id: workspaceId,
@@ -360,6 +393,13 @@ function parseCreateWorkspaceInput(input: unknown): CreateWorkspaceInput {
   } catch (error) {
     throw new CoreError("VALIDATION", "Invalid request body", { cause: error });
   }
+}
+
+function parseRequiredString(value: string, field: string): string {
+  if (value.trim().length === 0) {
+    throw new CoreError("VALIDATION", `${field} is required`);
+  }
+  return value;
 }
 
 function parseEngineBindingInput(input: unknown): EngineBindingInput {

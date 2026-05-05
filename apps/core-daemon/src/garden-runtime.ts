@@ -66,6 +66,7 @@ type RuntimeGardenScheduler = GardenScheduler & {
 const PATH_GRAPH_SNAPSHOT_INTERVAL_MS = 900_000;
 const PATH_GRAPH_HISTORY_REVIEW_LIMIT = 2;
 const PATH_GRAPH_SNAPSHOT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const DEFAULT_GARDEN_STATUS_WORKSPACE_ID = "default";
 const JANITOR_RUNTIME_TASK_KINDS = [
   GardenTaskKind.TTL_CLEANUP,
   GardenTaskKind.HOT_INDEX_DEMOTION,
@@ -561,12 +562,18 @@ export function createGardenRuntime(input: {
     }
   };
 
+  let lastBackgroundPassAt: string | null = null;
+  const markBackgroundPassCompleted = (): void => {
+    lastBackgroundPassAt = new Date().toISOString();
+  };
+
   const backgroundServices = [
     {
       name: "Janitor",
       intervalMs: 300_000,
       task: async () => {
         await enqueueForAllWorkspaces(GardenTaskKind.TTL_CLEANUP, GardenTier.TIER_0);
+        markBackgroundPassCompleted();
       }
     },
     {
@@ -578,6 +585,7 @@ export function createGardenRuntime(input: {
           await enqueueForAllWorkspaces(GardenTaskKind.ORPHAN_DETECTION, GardenTier.TIER_1);
           await enqueueForAllWorkspaces(GardenTaskKind.EVENT_LOG_ORPHAN_DETECTION, GardenTier.TIER_1);
         }
+        markBackgroundPassCompleted();
       }
     },
     {
@@ -594,6 +602,7 @@ export function createGardenRuntime(input: {
           GardenTier.TIER_2,
           (workspaceId) => [workspaceId]
         );
+        markBackgroundPassCompleted();
       }
     },
     {
@@ -626,11 +635,11 @@ export function createGardenRuntime(input: {
 
           await handler.run(task);
         }
+        markBackgroundPassCompleted();
       }
     }
   ];
   const backgroundManager = new BackgroundServiceManager(backgroundServices);
-  let lastBackgroundPassAt: string | null = null;
 
   return Object.freeze({
     backgroundManager,
@@ -662,12 +671,16 @@ export function createGardenRuntime(input: {
       for (const service of backgroundServices) {
         await service.task();
       }
-      lastBackgroundPassAt = new Date().toISOString();
+      markBackgroundPassCompleted();
       const workspaces = await input.workspaceRepo.list();
-      for (const workspace of workspaces) {
+      const workspaceIds =
+        workspaces.length === 0
+          ? [DEFAULT_GARDEN_STATUS_WORKSPACE_ID]
+          : workspaces.map((workspace) => workspace.workspace_id);
+      for (const workspaceId of workspaceIds) {
         await healthJournalPort.record({
           event_kind: HealthEventKind.GARDEN_BACKLOG,
-          workspace_id: workspace.workspace_id,
+          workspace_id: workspaceId,
           run_id: null,
           summary: "Garden background pass completed",
           detail_json: {

@@ -1,5 +1,5 @@
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createAlayaCliBridge } from "../cli/bridge.js";
 import { registerAlayaCliCommands } from "../cli/register.js";
 import type { AlayaDaemonRuntime } from "../index.js";
@@ -85,10 +85,45 @@ describe("cli registration", () => {
     expect(result.exitCode).toBe(0);
     expect(stdoutChunks.join("")).toBe("{\"object_id\":\"mem1\"}\n");
   });
+
+  it("starts Garden background services when the attached MCP stdio transport runs", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const startBackgroundServices = vi.fn();
+    const ensureLocalWorkspace = vi.fn(async () => undefined);
+    const baseRuntime = createRuntime();
+    const runtime = createRuntime({
+      startBackgroundServices,
+      services: {
+        ...baseRuntime.services,
+        workspaceService: { ensureLocalWorkspace }
+      }
+    });
+    const bridge = createAlayaCliBridge(runtime, {
+      cwd: "/tmp/alaya-project",
+      stdin,
+      stdout,
+      stderr,
+      isTTY: false
+    });
+    registerAlayaCliCommands(bridge, runtime);
+
+    stdin.end();
+    const result = await bridge.dispatch(["mcp", "stdio"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(ensureLocalWorkspace).toHaveBeenCalledWith({
+      workspaceId: expect.stringMatching(/^local_[a-f0-9]{16}$/),
+      name: "alaya-project",
+      rootPath: "/tmp/alaya-project"
+    });
+    expect(startBackgroundServices).toHaveBeenCalledTimes(1);
+  });
 });
 
-function createRuntime(): AlayaDaemonRuntime {
-  return {
+function createRuntime(overrides: Partial<AlayaDaemonRuntime> = {}): AlayaDaemonRuntime {
+  const runtime: AlayaDaemonRuntime = {
     app: {} as AlayaDaemonRuntime["app"],
     requestProtection: {
       allowedOrigin: "http://localhost:5173",
@@ -160,6 +195,9 @@ function createRuntime(): AlayaDaemonRuntime {
         recordDelivery: async (input) => ({ ...input, audit_event_id: "event1" }),
         recordUsage: async (input) => ({ ...input, audit_event_id: "event2" })
       },
+      workspaceService: {
+        ensureLocalWorkspace: async () => undefined
+      },
       principalCodingEngineAvailable: true
     },
     startBackgroundServices: () => {},
@@ -170,5 +208,10 @@ function createRuntime(): AlayaDaemonRuntime {
       close: async () => {}
     }),
     shutdown: async () => {}
+  };
+
+  return {
+    ...runtime,
+    ...overrides
   };
 }

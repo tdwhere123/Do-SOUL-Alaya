@@ -1,5 +1,5 @@
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createToolsCommand } from "../cli/tools.js";
 import type { AlayaCliContext } from "../cli/bridge.js";
 import { ALAYA_SYSEXITS } from "../cli/bridge.js";
@@ -52,6 +52,65 @@ describe("alaya tools", () => {
     expect(result.exitCode).toBe(0);
     expect(result.json).toEqual({ object_id: "mem1" });
     expect(chunks.join("")).toContain("\"mem1\"");
+  });
+
+  it("defaults tools calls to a registered cwd-derived local workspace", async () => {
+    let observedWorkspaceId: string | null = null;
+    const ensureLocalWorkspace = vi.fn(async () => undefined);
+    const command = createToolsCommand({
+      handler: {
+        call: async ({ context, toolName }) => {
+          observedWorkspaceId = context.workspaceId;
+          return {
+            ok: true,
+            tool_name: toolName,
+            output: { workspace_id: context.workspaceId }
+          };
+        }
+      },
+      ensureLocalWorkspace: { ensureLocalWorkspace }
+    });
+    const parsed = command.argsSchema.safeParse([
+      "call",
+      "soul.recall",
+      "{\"query\":\"hello\"}"
+    ]);
+
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+
+    const result = await command.handler(createContext({ cwd: "/tmp/alaya-project" }), parsed.data);
+
+    expect(result.exitCode).toBe(0);
+    expect(observedWorkspaceId).toMatch(/^local_[a-f0-9]{16}$/);
+    expect(ensureLocalWorkspace).toHaveBeenCalledWith({
+      workspaceId: observedWorkspaceId,
+      name: "alaya-project",
+      rootPath: "/tmp/alaya-project"
+    });
+  });
+
+  it("does not register cwd when an explicit workspace override is provided", async () => {
+    const ensureLocalWorkspace = vi.fn(async () => undefined);
+    const command = createToolsCommand({
+      handler: createHandler(),
+      ensureLocalWorkspace: { ensureLocalWorkspace }
+    });
+    const parsed = command.argsSchema.safeParse([
+      "call",
+      "soul.open_pointer",
+      "{\"object_id\":\"mem1\"}",
+      "--workspace",
+      "workspace-explicit"
+    ]);
+
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+
+    const result = await command.handler(createContext({ cwd: "/tmp/alaya-project" }), parsed.data);
+
+    expect(result.exitCode).toBe(0);
+    expect(ensureLocalWorkspace).not.toHaveBeenCalled();
   });
 
   it("declares requiresDaemonReady === false so it can run without the daemon", () => {

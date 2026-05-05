@@ -83,6 +83,56 @@ describe("WorkspaceService", () => {
     expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
   });
 
+  it("ensures a deterministic local workspace id without creating duplicates", async () => {
+    const appendManyWithMutation = fakeAppendManyWithMutation();
+    const persistedWorkspace = createWorkspace({
+      workspace_id: "local_abcd",
+      name: "repo",
+      root_path: "/tmp/repo",
+      workspace_kind: WorkspaceKind.LOCAL_REPO,
+      repo_path: "/tmp/repo",
+      default_engine_binding: null,
+      default_engine_class: null,
+      workspace_state: WorkspaceState.ACTIVE
+    });
+    const workspaceRepo = {
+      create: vi.fn(() => persistedWorkspace),
+      getById: vi.fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(persistedWorkspace),
+      list: vi.fn(async () => []),
+      delete: vi.fn(() => undefined),
+      updateDefaultEngineClass: vi.fn(() => {
+        throw new Error("not used");
+      })
+    };
+    const service = new WorkspaceService({
+      workspaceRepo,
+      runRepo: {
+        listByWorkspace: vi.fn(async () => [])
+      },
+      eventPublisher: {
+        appendManyWithMutation
+      } as any
+    });
+
+    const first = await service.ensureLocalWorkspace({
+      workspaceId: "local_abcd",
+      name: "repo",
+      rootPath: "/tmp/repo"
+    });
+    const second = await service.ensureLocalWorkspace({
+      workspaceId: "local_abcd",
+      name: "repo",
+      rootPath: "/tmp/repo"
+    });
+
+    expect(first.workspace_id).toBe("local_abcd");
+    expect(second).toBe(persistedWorkspace);
+    expect(workspaceRepo.create).toHaveBeenCalledTimes(1);
+    expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
+  });
+
   it("rolls back persisted workspace state when bootstrapping record persistence fails", async () => {
     // Under #BL-022 the rollback is implicit: the entire mutate runs inside
     // EventPublisher.appendManyWithMutation's SQLite transaction, so a throw

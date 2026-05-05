@@ -1,6 +1,6 @@
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ComputeProviderPriority } from "@do-soul/alaya-protocol";
+import { ComputeProviderPriority, HealthEventKind } from "@do-soul/alaya-protocol";
 import {
   ArbitrationService,
   BudgetBankruptcyService,
@@ -167,6 +167,7 @@ export type { AlayaDaemonListenOptions, AlayaDaemonRuntime, AlayaDaemonRuntimeSe
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..", "..");
+const DEFAULT_GARDEN_STATUS_WORKSPACE_ID = "default";
 
 export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const startupSteps: DaemonStartupStepRecord[] = [];
@@ -686,6 +687,11 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     warn: warnLogger.warn
   });
   gardenRuntime.setBacklogTelemetryObserver(gardenBacklogTelemetryService);
+  const initialGardenLastPassAt = await resolvePersistedGardenLastPassAt({
+    healthJournalRepo,
+    workspaceRepo,
+    warn: warnLogger.warn
+  });
   recordStartupStep(startupSteps, "garden-runtime");
 
   const mcpTooling = await bootstrapDaemonMcpTooling({
@@ -800,8 +806,14 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       embeddingStatusService,
       mcpMemoryToolHandler,
       trustStateRecorder,
+      workspaceService: securedWorkspaceService,
       gardenStatus: {
-        getStatus: () => gardenRuntime.getStatus()
+        getStatus: () => {
+          const current = gardenRuntime.getStatus();
+          return {
+            last_pass_at: current.last_pass_at ?? initialGardenLastPassAt
+          };
+        }
       },
       principalCodingEngineAvailable: principalCodingAvailability.available
     }),
@@ -810,6 +822,39 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     startHttpServer: lifecycleControls.startHttpServer,
     shutdown: lifecycleControls.shutdown
   });
+}
+
+async function resolvePersistedGardenLastPassAt(input: {
+  readonly healthJournalRepo: SqliteHealthJournalRepo;
+  readonly workspaceRepo: SqliteWorkspaceRepo;
+  readonly warn: (message: string, meta: Record<string, unknown>) => void;
+}): Promise<string | null> {
+  try {
+    let latest: string | null = null;
+    const workspaces = await input.workspaceRepo.list();
+    const workspaceIds = new Set<string>([DEFAULT_GARDEN_STATUS_WORKSPACE_ID]);
+    for (const workspace of workspaces) {
+      workspaceIds.add(workspace.workspace_id);
+    }
+    for (const workspaceId of workspaceIds) {
+      const [entry] = await input.healthJournalRepo.findByWorkspace(workspaceId, {
+        kind: HealthEventKind.GARDEN_BACKLOG,
+        limit: 1
+      });
+      if (entry === undefined) {
+        continue;
+      }
+      if (latest === null || entry.created_at > latest) {
+        latest = entry.created_at;
+      }
+    }
+    return latest;
+  } catch (error) {
+    input.warn("garden persisted status lookup failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return null;
+  }
 }
 
 export async function startDaemon(options: AlayaDaemonListenOptions = {}): Promise<AlayaDaemonServer> {

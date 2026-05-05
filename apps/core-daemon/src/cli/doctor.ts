@@ -3,6 +3,7 @@ import type { EmbeddingStatus, ToolchainStatus } from "@do-soul/alaya-protocol";
 import type { DaemonStartupStepRecord } from "../index.js";
 import type { PathPlasticityLookupTelemetrySnapshot } from "../path-plasticity-runtime.js";
 import { ALAYA_SYSEXITS, type AlayaCliArgsSchema, type AlayaCliContext, type AlayaSubcommandSpec } from "./bridge.js";
+import { resolveCliWorkspaceContext } from "./workspace-context.js";
 
 export interface DoctorCommandDependencies {
   readonly getToolchainStatus: () => Promise<ToolchainStatus>;
@@ -97,7 +98,11 @@ export function createDoctorCommand(
 
       const toolchainStatus = await deps.getToolchainStatus();
       const storage = await inspectStorage(toolchainStatus.db_path, deps.getSchemaSummary);
-      const workspaceId = args.workspaceId ?? deps.defaultWorkspaceId ?? "default";
+      const workspaceId = resolveCliWorkspaceContext(
+        ctx,
+        args.workspaceId,
+        deps.defaultWorkspaceId
+      ).workspaceId;
       const embeddingStatus = deps.getEmbeddingStatus
         ? await deps.getEmbeddingStatus(workspaceId)
         : null;

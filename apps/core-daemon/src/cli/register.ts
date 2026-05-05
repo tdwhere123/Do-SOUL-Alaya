@@ -31,6 +31,10 @@ import { createOperationCommandSpecs } from "./operations.js";
 import { createReviewCommand } from "./review.js";
 import { createStatusCommand } from "./status.js";
 import { createToolsCommand } from "./tools.js";
+import {
+  ensureImplicitLocalWorkspace,
+  resolveCliWorkspaceContext
+} from "./workspace-context.js";
 
 export function registerAlayaCliCommands(
   bridge: AlayaCliBridge,
@@ -79,13 +83,15 @@ export function registerAlayaCliCommands(
     auditWriter: createProfileAuditWriter(process.env)
   }));
   bridge.registerSubcommand(createToolsCommand({
-    handler: runtime.services.mcpMemoryToolHandler
+    handler: runtime.services.mcpMemoryToolHandler,
+    ensureLocalWorkspace: runtime.services.workspaceService
   }));
   // A1 (HITL daemon backbone) — `alaya review pending|accept|reject`
   // routes through the same MCP handler attached agents use, so the
   // CLI fallback and Codex/Claude attach surfaces share one code path.
   bridge.registerSubcommand(createReviewCommand({
-    handler: runtime.services.mcpMemoryToolHandler
+    handler: runtime.services.mcpMemoryToolHandler,
+    ensureLocalWorkspace: runtime.services.workspaceService
   }));
   bridge.registerSubcommand(createMcpCommand(runtime));
   for (const command of createOperationCommandSpecs()) {
@@ -195,10 +201,14 @@ function createMcpCommand(runtime: AlayaDaemonRuntime): AlayaSubcommandSpec<read
         return { exitCode: ALAYA_SYSEXITS.USAGE };
       }
 
+      const workspaceContext = resolveCliWorkspaceContext(ctx);
+      await ensureImplicitLocalWorkspace(workspaceContext, runtime.services.workspaceService);
+      runtime.startBackgroundServices();
+
       const server = await runAlayaMcpStdioServer({
         memoryToolHandler: runtime.services.mcpMemoryToolHandler,
         contextProvider: () => ({
-          workspaceId: ctx.env.ALAYA_WORKSPACE_ID ?? "default",
+          workspaceId: workspaceContext.workspaceId,
           runId: ctx.env.ALAYA_RUN_ID ?? null,
           agentTarget: ctx.env.ALAYA_AGENT_TARGET ?? "mcp"
         }),

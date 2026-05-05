@@ -9,6 +9,11 @@ import {
   type AlayaCliResult,
   type AlayaSubcommandSpec
 } from "./bridge.js";
+import {
+  ensureImplicitLocalWorkspace,
+  type EnsureLocalWorkspacePort,
+  resolveCliWorkspaceContext
+} from "./workspace-context.js";
 
 // A1 (HITL daemon backbone) — `alaya review` is a CLI fallback for the
 // same MCP handler attached agents use. Each verb routes through the
@@ -24,6 +29,7 @@ export interface ReviewCommandDependencies {
   readonly defaultAgentTarget?: string;
   readonly defaultReviewerIdentity?: string;
   readonly defaultReviewerToken?: string;
+  readonly ensureLocalWorkspace?: EnsureLocalWorkspacePort;
 }
 
 interface ReviewArgs {
@@ -67,7 +73,7 @@ async function runPending(
   args: ReviewArgs,
   deps: ReviewCommandDependencies
 ): Promise<AlayaCliResult> {
-  const callContext = buildCallContext(ctx, args, deps);
+  const callContext = await buildCallContext(ctx, args, deps);
   // A1 fix-loop (finding-2): workspace_id is bound server-side from
   // callContext.workspaceId; no longer placed in the request body
   // (mirrors soul.explore_graph schema discipline).
@@ -124,7 +130,7 @@ async function runReview(
     return { exitCode: ALAYA_SYSEXITS.USAGE };
   }
 
-  const callContext = buildCallContext(ctx, args, deps);
+  const callContext = await buildCallContext(ctx, args, deps);
   let reviewerBinding: { readonly token: string; readonly identity: string } | null;
   try {
     reviewerBinding = resolveReviewerBinding(ctx, deps);
@@ -348,22 +354,25 @@ function parseReviewArgs(input: readonly string[]):
   };
 }
 
-function buildCallContext(
+async function buildCallContext(
   ctx: AlayaCliContext,
   args: ReviewArgs,
   deps: ReviewCommandDependencies
-): McpMemoryToolCallContext {
+): Promise<McpMemoryToolCallContext> {
   // D2 MERGED-I3 / Gate-5F: the `alaya review` verbs ARE the
   // human-reviewer surface. They MUST default to `runId: null` and
   // `agentTarget: "cli"` regardless of attach-session env such as
   // ALAYA_RUN_ID / ALAYA_AGENT_TARGET. Only explicit CLI/dependency
   // overrides change the review context.
+  const workspaceContext = resolveCliWorkspaceContext(
+    ctx,
+    args.contextOverrides.workspaceId,
+    deps.defaultWorkspaceId
+  );
+  await ensureImplicitLocalWorkspace(workspaceContext, deps.ensureLocalWorkspace);
+
   return {
-    workspaceId:
-      args.contextOverrides.workspaceId ??
-      deps.defaultWorkspaceId ??
-      ctx.env.ALAYA_WORKSPACE_ID ??
-      "default",
+    workspaceId: workspaceContext.workspaceId,
     runId:
       args.contextOverrides.runId !== undefined
         ? args.contextOverrides.runId

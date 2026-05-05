@@ -12,12 +12,18 @@ import {
   type AlayaCliResult,
   type AlayaSubcommandSpec
 } from "./bridge.js";
+import {
+  ensureImplicitLocalWorkspace,
+  type EnsureLocalWorkspacePort,
+  resolveCliWorkspaceContext
+} from "./workspace-context.js";
 
 export interface ToolsCommandDependencies {
   readonly handler: McpMemoryToolHandler;
   readonly defaultWorkspaceId?: string;
   readonly defaultRunId?: string | null;
   readonly defaultAgentTarget?: string;
+  readonly ensureLocalWorkspace?: EnsureLocalWorkspacePort;
 }
 
 interface ToolsArgs {
@@ -64,7 +70,7 @@ async function executeToolsCommand(
     ctx.stderr.write("tools call requires a tool name\n");
     return { exitCode: ALAYA_SYSEXITS.USAGE };
   }
-  const callContext = buildCallContext(ctx, args, deps);
+  const callContext = await buildCallContext(ctx, args, deps);
   if (
     args.toolName === "soul.review_memory_proposal" &&
     isHumanReviewerAgentTarget(callContext.agentTarget)
@@ -226,17 +232,20 @@ function parseContextOptions(input: readonly string[]):
   };
 }
 
-function buildCallContext(
+async function buildCallContext(
   ctx: AlayaCliContext,
   args: ToolsArgs,
   deps: ToolsCommandDependencies
-): McpMemoryToolCallContext {
+): Promise<McpMemoryToolCallContext> {
+  const workspaceContext = resolveCliWorkspaceContext(
+    ctx,
+    args.contextOverrides.workspaceId,
+    deps.defaultWorkspaceId
+  );
+  await ensureImplicitLocalWorkspace(workspaceContext, deps.ensureLocalWorkspace);
+
   return {
-    workspaceId:
-      args.contextOverrides.workspaceId ??
-      deps.defaultWorkspaceId ??
-      ctx.env.ALAYA_WORKSPACE_ID ??
-      "default",
+    workspaceId: workspaceContext.workspaceId,
     runId:
       args.contextOverrides.runId !== undefined
         ? args.contextOverrides.runId

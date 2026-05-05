@@ -62,8 +62,15 @@ Phase 3 `P3-run-lifecycle` consumes it but does not own it.
 
 ## Garden / Maintenance
 
-**Garden** — Fire-and-forget background maintenance subsystem. Runs
-the Auditor, Janitor, and Librarian roles on a Scheduler.
+**Garden** — Fire-and-forget background maintenance subsystem. The
+HTTP daemon and the attached MCP stdio process start it; it runs one
+startup background pass, then keeps Auditor, Janitor, Librarian, and
+Scheduler work on intervals until that daemon/MCP process exits.
+
+**Current-directory workspace** — Default workspace used by CLI fallback
+and attached MCP when neither `--workspace` nor `ALAYA_WORKSPACE_ID` is
+set. Alaya derives a stable local workspace id from the process cwd and
+registers that root before memory tools or Garden startup run.
 
 **Auditor** — Garden role: scans for evidence staleness
 (`EVIDENCE_STALE`), orphan detection (OrphanRadar), pointer healing
