@@ -213,16 +213,30 @@ describe("inspector routes", () => {
   // calls to the daemon's workspace-scoped HTTP wrapper around the MCP
   // handler. The Inspector backend itself never imports daemon code.
   it("proxies pending-proposals listing and accept/reject through to the daemon", async () => {
-    const calls: { url: string; method: string; body: string | null }[] = [];
+    const calls: {
+      url: string;
+      method: string;
+      body: string | null;
+      requestToken: string | null;
+      desktop: string | null;
+    }[] = [];
     const app = createInspectorApp({
       token: "token",
       daemonUrl: "http://daemon.local",
       staticRoot: await mkdtemp(path.join(tmpdir(), "inspector-static-")),
+      env: {
+        ALAYA_REQUEST_TOKEN: "daemon-request-token",
+        ALAYA_REVIEWER_TOKEN: "review-token",
+        ALAYA_REVIEWER_IDENTITY: "user:local-reviewer"
+      },
       fetchImpl: async (input, init) => {
+        const headers = new Headers(init?.headers);
         calls.push({
           url: String(input),
           method: init?.method ?? "GET",
-          body: init?.body === undefined ? null : String(init.body)
+          body: init?.body === undefined ? null : String(init.body),
+          requestToken: headers.get("x-request-token"),
+          desktop: headers.get("x-alaya-desktop")
         });
         return Response.json({ success: true, data: { ok: true } });
       }
@@ -234,7 +248,7 @@ describe("inspector routes", () => {
       body: JSON.stringify({
         verdict: "accept",
         reason: "looks right",
-        reviewer_identity: "user:alice"
+        reviewer_identity: "user:payload"
       }),
       headers: { "content-type": "application/json" }
     });
@@ -243,12 +257,16 @@ describe("inspector routes", () => {
       {
         url: "http://daemon.local/workspaces/ws1/proposals/pending?limit=10",
         method: "GET",
-        body: null
+        body: null,
+        requestToken: null,
+        desktop: null
       },
       {
         url: "http://daemon.local/workspaces/ws1/proposals/prop-1/review",
         method: "POST",
-        body: "{\"verdict\":\"accept\",\"reason\":\"looks right\",\"reviewer_identity\":\"user:alice\"}"
+        body: "{\"verdict\":\"accept\",\"reason\":\"looks right\",\"reviewer_identity\":\"user:local-reviewer\",\"reviewer_token\":\"review-token\"}",
+        requestToken: "daemon-request-token",
+        desktop: "1"
       }
     ]);
   });

@@ -64,7 +64,6 @@ export function registerE2eEventTriggerRoutes(
       workspace_id: run.workspace_id,
       run_id: run.run_id,
       caused_by: "e2e_event_trigger",
-      revision: 0,
       payload_json: payload
     });
 
@@ -111,7 +110,6 @@ export function registerE2eEventTriggerRoutes(
       workspace_id: run.workspace_id,
       run_id: run.run_id,
       caused_by: "e2e_event_trigger",
-      revision: 0,
       payload_json: payload
     });
 
@@ -132,7 +130,7 @@ export function registerE2eEventTriggerRoutes(
 
 async function appendAndBroadcast(
   services: E2eEventTriggerRouteServices,
-  event: Omit<EventLogEntry, "event_id" | "created_at">
+  event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
 ): Promise<EventLogEntry> {
   const entry = await services.eventLogRepo.append(event);
   await services.runtimeNotifier.notifyEntry(entry);

@@ -34,7 +34,21 @@ export function registerInspectorProposalRoutes(app: Hono, options: InspectorPro
     return await proxyDaemonJson(context, options, {
       method: "POST",
       path: `/workspaces/${encodeURIComponent(workspaceId)}/proposals/${encodeURIComponent(proposalId)}/review`,
-      body
+      body: bindReviewerIdentity(body, options)
     });
   });
+}
+
+function bindReviewerIdentity(body: unknown, options: InspectorProxyOptions): unknown {
+  if (options.reviewerToken === undefined || options.reviewerIdentity === undefined) {
+    return body;
+  }
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return body;
+  }
+  return {
+    ...body,
+    reviewer_identity: options.reviewerIdentity,
+    reviewer_token: options.reviewerToken
+  };
 }

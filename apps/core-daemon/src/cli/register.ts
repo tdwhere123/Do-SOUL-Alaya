@@ -25,6 +25,7 @@ import { createDetachCommandSpec } from "./detach.js";
 import { createDoctorCommand } from "./doctor.js";
 import { createInstallCommand } from "./install.js";
 import { createInspectCommand } from "./inspect.js";
+import { defaultRecallPathPlasticityLookupTelemetry } from "../path-plasticity-runtime.js";
 import { createOperationCommandSpecs } from "./operations.js";
 import { createReviewCommand } from "./review.js";
 import { createStatusCommand } from "./status.js";
@@ -48,6 +49,8 @@ export function registerAlayaCliCommands(
         last_pass_at: gardenStatus.last_pass_at
       };
     },
+    getPathPlasticityLookupTelemetry: () =>
+      defaultRecallPathPlasticityLookupTelemetry.snapshot(),
     // p5-system-review-r3 MR-I11: schema_ok needs the live db. initDatabase
     // is per-filename cached in alaya-storage, so reusing it here returns
     // the connection the runtime already holds; we never close it.

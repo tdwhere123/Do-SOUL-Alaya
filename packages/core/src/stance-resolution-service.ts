@@ -25,7 +25,7 @@ export interface StancePolicyProviderPort {
 }
 
 export interface StanceResolutionEventLogWriterPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
 }
 
 export interface StanceResolutionDependencies {
@@ -101,7 +101,6 @@ export class StanceResolutionService {
         workspace_id: params.workspaceId,
         run_id: params.runId,
         caused_by: "deterministic_rule",
-        revision: INITIAL_STANCE_EVENT_REVISION,
         payload_json: StancePolicyEvaluatedPayloadSchema.parse({
           workspace_id: params.workspaceId,
           policy_id: loadedPolicy?.policy_id ?? null,
@@ -117,7 +116,6 @@ export class StanceResolutionService {
         workspace_id: params.workspaceId,
         run_id: params.runId,
         caused_by: "deterministic_rule",
-        revision: INITIAL_STANCE_EVENT_REVISION,
         payload_json: StanceResolutionChangedPayloadSchema.parse({
           resolution_id: resolution.resolution_id,
           workspace_id: params.workspaceId,

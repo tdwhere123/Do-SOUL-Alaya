@@ -49,7 +49,7 @@ describe("SqliteClaimFormRepo", () => {
     const { repo } = await createRepo();
     const claim = createClaimForm();
 
-    await expect(repo.create(claim)).resolves.toEqual(claim);
+    expect(repo.create(claim)).toEqual(claim);
     await expect(repo.findById(claim.object_id)).resolves.toEqual(claim);
   });
 

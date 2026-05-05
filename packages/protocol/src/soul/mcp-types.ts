@@ -120,7 +120,8 @@ export const SoulReviewMemoryProposalRequestSchema = z
     proposal_id: BoundedIdSchema,
     verdict: z.enum(["accept", "reject"]),
     reason: BoundedReasonSchema.nullable(),
-    reviewer_identity: BoundedIdSchema
+    reviewer_identity: BoundedIdSchema,
+    reviewer_token: BoundedIdSchema.optional()
   })
   .strict()
   .readonly();
@@ -144,7 +145,11 @@ export const SoulPendingProposalSummarySchema = z
     target_object_id: NonEmptyStringSchema,
     target_object_kind: NonEmptyStringSchema,
     created_at: z.string().datetime(),
-    proposed_change_summary: z.string()
+    proposed_change_summary: z.string(),
+    assigned_reviewer_identity: NonEmptyStringSchema.nullable(),
+    assigned_at: z.string().datetime().nullable(),
+    deadline_at: z.string().datetime().nullable(),
+    is_overdue: z.boolean()
   })
   .strict()
   .readonly();
@@ -193,11 +198,22 @@ export const SoulApplyOverrideResponseSchema = z
 
 export const SoulContextUsageStateSchema = z.enum(["used", "skipped", "not_applicable"]);
 
+export const SoulContextUsageAnchorRoleSchema = z.enum(["source", "target"]);
+
+export const SoulContextPerAnchorUsageSchema = z
+  .object({
+    object_id: BoundedIdSchema,
+    anchor_role: SoulContextUsageAnchorRoleSchema
+  })
+  .strict()
+  .readonly();
+
 export const SoulReportContextUsageRequestSchema = z
   .object({
     delivery_id: BoundedIdSchema,
     usage_state: SoulContextUsageStateSchema,
     used_object_ids: z.array(BoundedIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+    per_anchor_usage: z.array(SoulContextPerAnchorUsageSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
     reason: BoundedReasonSchema.nullable().optional()
   })
   .readonly();
@@ -228,6 +244,8 @@ export type SoulEmitCandidateSignalResponse = z.infer<typeof SoulEmitCandidateSi
 export type SoulApplyOverrideRequest = z.infer<typeof SoulApplyOverrideRequestSchema>;
 export type SoulApplyOverrideResponse = z.infer<typeof SoulApplyOverrideResponseSchema>;
 export type SoulContextUsageState = z.infer<typeof SoulContextUsageStateSchema>;
+export type SoulContextUsageAnchorRole = z.infer<typeof SoulContextUsageAnchorRoleSchema>;
+export type SoulContextPerAnchorUsage = z.infer<typeof SoulContextPerAnchorUsageSchema>;
 export type SoulReportContextUsageRequest = z.infer<typeof SoulReportContextUsageRequestSchema>;
 export type SoulReportContextUsageResponse = z.infer<typeof SoulReportContextUsageResponseSchema>;
 

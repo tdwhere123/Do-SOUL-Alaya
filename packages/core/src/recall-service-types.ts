@@ -42,7 +42,7 @@ export interface RecallServiceSlotRepoPort {
 }
 
 export interface RecallServiceEventLogRepoPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
 }
 
@@ -71,9 +71,10 @@ export interface RecallServiceClaimResolverPort {
 }
 
 /**
- * Optional port that returns the strongest PathPlasticityState.strength
- * across all path relations anchored on each memory entry. Implementations
- * are expected to read precomputed PathRelation rows; the recall service
+ * Optional port that returns the strongest direction-eligible
+ * PathPlasticityState.strength across all path relations anchored on each
+ * memory entry. Implementations are expected to read precomputed
+ * PathRelation rows and apply direction_bias filtering; the recall service
  * does not compute paths itself.
  *
  * The map's value range is [0, 1]. Memories without an entry are treated as

@@ -126,11 +126,12 @@ function createDependencies(seedSlots: readonly Slot[] = []): {
       })
     },
     eventLogRepo: {
-      append: vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => {
+      append: vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
         order.push("event_log");
         const created = {
           event_id: `event-${events.length + 1}`,
           created_at: "2026-03-21T01:00:00.000Z",
+          revision: 0,
           ...event
         };
         events.push(created);

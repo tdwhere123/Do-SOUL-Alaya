@@ -9,7 +9,7 @@ describe("HealthJournalService", () => {
       generateEntryId: () => "entry-1",
       now: () => "2026-03-27T00:00:00.000Z",
       eventLogRepo: {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => {
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
           calls.push(`event:${entry.entity_id}`);
           return createEventLogEntry(entry);
         }),
@@ -37,7 +37,7 @@ describe("HealthJournalService", () => {
 
   it("writes the expected event and repo payload", async () => {
     const eventLogRepo = {
-      append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => createEventLogEntry(entry)),
+      append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry)),
       queryByEntity: vi.fn(async () => [])
     };
     const repo = {
@@ -100,7 +100,7 @@ describe("HealthJournalService", () => {
     };
     const service = new HealthJournalService({
       eventLogRepo: {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => createEventLogEntry(entry)),
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry)),
         queryByEntity: vi.fn(async () => [])
       },
       repo
@@ -129,7 +129,7 @@ describe("HealthJournalService", () => {
     };
     const service = new HealthJournalService({
       eventLogRepo: {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => createEventLogEntry(entry)),
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry)),
         queryByEntity: vi.fn(async () => [])
       },
       repo
@@ -145,7 +145,7 @@ describe("HealthJournalService", () => {
       generateEntryId: () => "entry-1",
       now: () => "2026-03-27T00:00:00.000Z",
       eventLogRepo: {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => createEventLogEntry(entry)),
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry)),
         queryByEntity: vi.fn(async () => [])
       },
       repo: {
@@ -168,10 +168,11 @@ describe("HealthJournalService", () => {
   });
 });
 
-function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at">): EventLogEntry {
+function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry {
   return {
     event_id: `event-${event.entity_id}`,
     created_at: "2026-03-27T00:00:00.000Z",
+    revision: 0,
     ...event
   };
 }

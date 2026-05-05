@@ -48,7 +48,7 @@ export interface ExtensionRegistryDependencies {
   readonly extensionStore: ExtensionStorePort;
   readonly toolSpecService: ExtensionRegistryToolSpecPort;
   readonly eventLogWriter: {
-    append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+    append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   };
   readonly runtimeNotifier?: {
     notifyEntry(entry: EventLogEntry): void | Promise<void>;
@@ -321,7 +321,7 @@ export class ExtensionRegistryService {
     readonly descriptor_id: string;
     readonly name: string;
     readonly source: ToolProvider["source"] | SkillPackage["source"];
-  }): Omit<EventLogEntry, "event_id" | "created_at"> {
+  }): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
     const payload = deepFreeze(
       ExtensionDescriptorRegisteredPayloadSchema.parse({
         descriptor_type: input.descriptor_type,
@@ -339,7 +339,6 @@ export class ExtensionRegistryService {
       workspace_id: this.systemWorkspaceId,
       run_id: null,
       caused_by: SYSTEM_ACTOR,
-      revision: 0,
       payload_json: payload
     };
   }
@@ -350,7 +349,7 @@ export class ExtensionRegistryService {
       readonly descriptor_id: string;
     },
     originalEventId: string
-  ): Omit<EventLogEntry, "event_id" | "created_at"> {
+  ): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
     const payload = deepFreeze(
       ExtensionDescriptorRegistrationRevertedPayloadSchema.parse({
         descriptor_type: input.descriptor_type,
@@ -367,7 +366,6 @@ export class ExtensionRegistryService {
       workspace_id: this.systemWorkspaceId,
       run_id: null,
       caused_by: SYSTEM_ACTOR,
-      revision: 0,
       payload_json: payload
     };
   }
@@ -378,7 +376,7 @@ export class ExtensionRegistryService {
       readonly descriptor_id: string;
     },
     originalEventId: string
-  ): Omit<EventLogEntry, "event_id" | "created_at"> {
+  ): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
     const payload = deepFreeze(
       ExtensionDescriptorRegistrationCompensationFailedPayloadSchema.parse({
         descriptor_type: input.descriptor_type,
@@ -395,7 +393,6 @@ export class ExtensionRegistryService {
       workspace_id: this.systemWorkspaceId,
       run_id: null,
       caused_by: SYSTEM_ACTOR,
-      revision: 0,
       payload_json: payload
     };
   }

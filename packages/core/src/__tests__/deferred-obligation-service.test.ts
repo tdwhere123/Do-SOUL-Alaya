@@ -13,15 +13,13 @@ interface Harness {
   readonly repo: DeferredObligationRepoPort & {
     readonly getById: ReturnType<typeof vi.fn>;
     readonly create: ReturnType<typeof vi.fn>;
-    readonly createSync: ReturnType<typeof vi.fn>;
     readonly updateState: ReturnType<typeof vi.fn>;
-    readonly updateStateSync: ReturnType<typeof vi.fn>;
     readonly findActiveByRun: ReturnType<typeof vi.fn>;
     readonly findActiveByWorkspace: ReturnType<typeof vi.fn>;
     readonly findExpired: ReturnType<typeof vi.fn>;
   };
-  readonly events: Array<Omit<EventLogEntry, "event_id" | "created_at">>;
-  readonly publishWithMutation: ReturnType<typeof vi.fn>;
+  readonly events: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>;
+  readonly appendManyWithMutation: ReturnType<typeof vi.fn>;
   readonly service: DeferredObligationService;
   getById(obligationId: string): Readonly<DeferredObligation> | null;
 }
@@ -78,7 +76,7 @@ describe("DeferredObligationService", () => {
 
     expect(fulfilled.state).toBe("fulfilled");
     expect(fulfilled.fulfilled_at).toBe(FIXED_NOW);
-    expect(harness.repo.updateStateSync).toHaveBeenCalledWith("obligation-1", "pending", "fulfilled", {
+    expect(harness.repo.updateState).toHaveBeenCalledWith("obligation-1", "pending", "fulfilled", {
       fulfilledAt: FIXED_NOW
     });
     expect(harness.events).toHaveLength(1);
@@ -151,7 +149,7 @@ function createHarness(seed: readonly DeferredObligation[] = []): Harness {
   const store = new Map<string, DeferredObligation>(
     seed.map((obligation) => [obligation.obligation_id, Object.freeze({ ...obligation })])
   );
-  const events: Array<Omit<EventLogEntry, "event_id" | "created_at">> = [];
+  const events: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
 
   const createImpl = (obligation: DeferredObligation): DeferredObligation => {
     const created = Object.freeze({ ...obligation });
@@ -190,10 +188,8 @@ function createHarness(seed: readonly DeferredObligation[] = []): Harness {
 
   const repo = {
     getById: vi.fn(async (obligationId: string) => store.get(obligationId) ?? null),
-    create: vi.fn(async (obligation: DeferredObligation) => createImpl(obligation)),
-    createSync: vi.fn(createImpl),
-    updateState: vi.fn(async (...args: Parameters<typeof updateStateImpl>) => updateStateImpl(...args)),
-    updateStateSync: vi.fn(updateStateImpl),
+    create: vi.fn(createImpl),
+    updateState: vi.fn(updateStateImpl),
     findActiveByRun: vi.fn(async (runId: string) =>
       [...store.values()].filter((obligation) => {
         return obligation.source_run_id === runId && obligation.state === "pending";
@@ -211,9 +207,9 @@ function createHarness(seed: readonly DeferredObligation[] = []): Harness {
     )
   } satisfies DeferredObligationRepoPort;
 
-  const publishWithMutation = vi.fn(
+  const appendManyWithMutation = vi.fn(
     async (
-      eventInputs: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at">>,
+      eventInputs: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>,
       mutate: (entries: readonly EventLogEntry[]) => DeferredObligation
     ) => {
       for (const event of eventInputs) {
@@ -222,6 +218,7 @@ function createHarness(seed: readonly DeferredObligation[] = []): Harness {
       const persisted = eventInputs.map((entry, idx) => ({
         event_id: `evt_${idx}`,
         created_at: FIXED_NOW,
+        revision: 0,
         ...entry
       }));
       return mutate(persisted);
@@ -232,7 +229,7 @@ function createHarness(seed: readonly DeferredObligation[] = []): Harness {
     repo,
     eventPublisher: {
       // Migrated to atomic appendManyWithMutation (#BL-022).
-      appendManyWithMutation: publishWithMutation
+      appendManyWithMutation: appendManyWithMutation
     } as unknown as EventPublisher,
     now: () => FIXED_NOW,
     generateObligationId: () => "obligation-1"
@@ -241,7 +238,7 @@ function createHarness(seed: readonly DeferredObligation[] = []): Harness {
   return {
     repo,
     events,
-    publishWithMutation,
+    appendManyWithMutation,
     service,
     getById: (obligationId: string) => store.get(obligationId) ?? null
   };

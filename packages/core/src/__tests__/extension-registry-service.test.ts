@@ -98,11 +98,12 @@ function createRegistryHarness(input: {
   const deleteToolSpec = vi.fn(async (toolId: string) => {
     toolSpecStore.delete(toolId);
   });
-  const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => {
+  const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
     const persisted = {
       ...entry,
       event_id: `event-${appendedEvents.length + 1}`,
-      created_at: validTimestamp
+      created_at: validTimestamp,
+      revision: appendedEvents.length
     } satisfies EventLogEntry;
     appendedEvents.push(persisted);
     return persisted;
@@ -156,11 +157,12 @@ describe("ExtensionRegistryService", () => {
     const register = vi.fn(async (spec: ToolSpec) => spec);
     const update = vi.fn(async (spec: ToolSpec) => spec);
     const appendedEvents: EventLogEntry[] = [];
-    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => {
+    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
       const persisted = {
         ...entry,
         event_id: `event-${appendedEvents.length + 1}`,
-        created_at: validTimestamp
+        created_at: validTimestamp,
+      revision: 0
       } satisfies EventLogEntry;
       appendedEvents.push(persisted);
       return persisted;
@@ -236,11 +238,12 @@ describe("ExtensionRegistryService", () => {
         delete: vi.fn(async () => undefined)
       },
       eventLogWriter: {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => {
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
           const persisted = {
             ...entry,
             event_id: "event-1",
-            created_at: validTimestamp
+            created_at: validTimestamp,
+          revision: 0
           } satisfies EventLogEntry;
           appendedEvents.push(persisted);
           return persisted;
@@ -305,11 +308,12 @@ describe("ExtensionRegistryService", () => {
         delete: vi.fn(async () => undefined)
       },
       eventLogWriter: {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => {
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
           const persisted = {
             ...entry,
             event_id: `event-${appendedEvents.length + 1}`,
-            created_at: validTimestamp
+            created_at: validTimestamp,
+          revision: 0
           } satisfies EventLogEntry;
           appendedEvents.push(persisted);
           return persisted;
@@ -397,10 +401,11 @@ describe("ExtensionRegistryService", () => {
         delete: vi.fn(async () => undefined)
       },
       eventLogWriter: {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
           ...entry,
           event_id: "event-1",
-          created_at: validTimestamp
+          created_at: validTimestamp,
+          revision: 0
         }))
       },
       runtimeNotifier: { notifyEntry: vi.fn(async () => undefined) },
@@ -435,10 +440,11 @@ describe("ExtensionRegistryService", () => {
         delete: vi.fn(async () => undefined)
       },
       eventLogWriter: {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
           ...entry,
           event_id: "event-1",
-          created_at: validTimestamp
+          created_at: validTimestamp,
+          revision: 0
         }))
       },
       buildToolSpecForProviderTool: (registeredProvider, tool) =>
@@ -549,10 +555,11 @@ describe("ExtensionRegistryService", () => {
         delete: vi.fn(async () => undefined)
       },
       eventLogWriter: {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
           ...entry,
           event_id: "event-1",
-          created_at: validTimestamp
+          created_at: validTimestamp,
+          revision: 0
         }))
       },
       now: () => validTimestamp,
@@ -610,10 +617,11 @@ describe("ExtensionRegistryService", () => {
         delete: vi.fn(async () => undefined)
       },
       eventLogWriter: {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
           ...entry,
           event_id: "event-1",
-          created_at: validTimestamp
+          created_at: validTimestamp,
+          revision: 0
         }))
       },
       now: () => validTimestamp,
@@ -656,10 +664,11 @@ describe("ExtensionRegistryService", () => {
         delete: vi.fn(async () => undefined)
       },
       eventLogWriter: {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
           ...entry,
           event_id: "event-1",
-          created_at: validTimestamp
+          created_at: validTimestamp,
+          revision: 0
         }))
       },
       now: () => validTimestamp,
@@ -811,10 +820,11 @@ describe("ExtensionRegistryService", () => {
         delete: vi.fn(async () => undefined)
       },
       eventLogWriter: {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
           ...entry,
           event_id: "event-1",
-          created_at: validTimestamp
+          created_at: validTimestamp,
+          revision: 0
         }))
       },
       runtimeNotifier: { notifyEntry: vi.fn(async () => undefined) },
@@ -841,10 +851,11 @@ describe("ExtensionRegistryService", () => {
 
   it("appends a compensation event when provider persistence fails after EventLog append", async () => {
     const provider = createProvider();
-    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       ...entry,
       event_id: "event-rollback-provider",
-      created_at: validTimestamp
+      created_at: validTimestamp,
+          revision: 0
     }));
     const notifyEntry = vi.fn(async () => undefined);
 
@@ -1008,10 +1019,11 @@ describe("ExtensionRegistryService", () => {
       tool_ids: ["mcp__filesystem__read_file"],
       registered_at: validTimestamp
     };
-    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       ...entry,
       event_id: "event-rollback-skill",
-      created_at: validTimestamp
+      created_at: validTimestamp,
+          revision: 0
     }));
     const notifyEntry = vi.fn(async () => undefined);
 

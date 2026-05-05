@@ -18,15 +18,11 @@ import type { EventPublisher } from "./event-publisher.js";
 
 export interface EngineBindingWorkspaceRepoPort {
   getById(id: string): Promise<Workspace | null>;
-  updateDefaultEngineBinding(id: string, bindingId: string | null): Promise<Workspace>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  updateDefaultEngineBindingSync(id: string, bindingId: string | null): Workspace;
+  updateDefaultEngineBinding(id: string, bindingId: string | null): Workspace;
 }
 
 export interface EngineBindingRepoPort {
-  upsert(data: Omit<EngineBindingRecord, "created_at" | "updated_at">): Promise<EngineBindingRecord>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  upsertSync(data: Omit<EngineBindingRecord, "created_at" | "updated_at">): EngineBindingRecord;
+  upsert(data: Omit<EngineBindingRecord, "created_at" | "updated_at">): EngineBindingRecord;
   getById(id: string): Promise<EngineBindingRecord | null>;
 }
 
@@ -69,7 +65,6 @@ export class EngineBindingService {
           workspace_id: workspace.workspace_id,
           run_id: null,
           caused_by: "user_action",
-          revision: 0,
           payload_json: WorkspaceEngineBindingUpdatedPayloadSchema.parse({
             workspace_id: workspace.workspace_id,
             binding_id: bindingId,
@@ -82,7 +77,7 @@ export class EngineBindingService {
       () => {
         // Both writes are sync better-sqlite3 ops; the publish/upsert/binding
         // update now happens inside a single transaction (#BL-022).
-        const record = this.dependencies.bindingRepo.upsertSync({
+        const record = this.dependencies.bindingRepo.upsert({
           binding_id: bindingId,
           workspace_id: workspace.workspace_id,
           provider_type: parsed.provider_type,
@@ -92,7 +87,7 @@ export class EngineBindingService {
           config: parsed.config,
           enable_tools: parsed.enable_tools
         });
-        this.dependencies.workspaceRepo.updateDefaultEngineBindingSync(
+        this.dependencies.workspaceRepo.updateDefaultEngineBinding(
           workspace.workspace_id,
           bindingId
         );

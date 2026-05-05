@@ -18,13 +18,6 @@ export interface WorkerRunRepo {
     expectedState: WorkerRunState,
     nextState: WorkerRunState,
     updatedAt: string
-  ): Promise<Readonly<DelegatedWorkerRun>>;
-  /** Synchronous variant for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
-  updateStateSync?(
-    workerRunId: string,
-    expectedState: WorkerRunState,
-    nextState: WorkerRunState,
-    updatedAt: string
   ): Readonly<DelegatedWorkerRun>;
   insert(run: DelegatedWorkerRun): Promise<Readonly<DelegatedWorkerRun>>;
   insertIfNoActiveForPrincipal(
@@ -322,17 +315,7 @@ export class SqliteWorkerRunRepo implements WorkerRunRepo {
     );
   }
 
-  public async updateState(
-    workerRunId: string,
-    expectedState: WorkerRunState,
-    nextState: WorkerRunState,
-    updatedAt: string
-  ): Promise<Readonly<DelegatedWorkerRun>> {
-    return this.updateStateSync(workerRunId, expectedState, nextState, updatedAt);
-  }
-
-  /** Synchronous variant for atomic publish + mutation (#BL-022). */
-  public updateStateSync(
+  public updateState(
     workerRunId: string,
     expectedState: WorkerRunState,
     nextState: WorkerRunState,

@@ -160,6 +160,43 @@ describe("GardenScheduler", () => {
     });
   });
 
+  it("dispatches matching task kinds without lower-role tier rejection", async () => {
+    const { eventLog, scheduler } = createScheduler();
+    scheduler.enqueue(
+      createTask({
+        task_id: "task-plasticity",
+        task_kind: GardenTaskKind.PATH_PLASTICITY_UPDATE,
+        required_tier: GardenTier.TIER_2,
+        priority: 50
+      })
+    );
+    scheduler.enqueue(
+      createTask({
+        task_id: "task-janitor",
+        task_kind: GardenTaskKind.TTL_CLEANUP,
+        required_tier: GardenTier.TIER_0,
+        priority: 40
+      })
+    );
+
+    await expect(
+      scheduler.dispatchNextMatchingTaskKind(GardenRole.JANITOR, [GardenTaskKind.TTL_CLEANUP])
+    ).resolves.toMatchObject({ task_id: "task-janitor" });
+    expect(scheduler.queueDepth).toBe(1);
+    expect(eventLog.append).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: GardenEventType.SOUL_GARDEN_TIER_VIOLATION_REJECTED,
+        entity_id: "task-plasticity"
+      })
+    );
+
+    await expect(
+      scheduler.dispatchNextMatchingTaskKind(GardenRole.LIBRARIAN, [
+        GardenTaskKind.PATH_PLASTICITY_UPDATE
+      ])
+    ).resolves.toMatchObject({ task_id: "task-plasticity" });
+  });
+
   it("orders queued tasks by priority desc, created_at asc, then task_id asc", async () => {
     const { scheduler } = createScheduler();
     scheduler.enqueue(createTask({ task_id: "task-c", priority: 10, created_at: "2026-03-27T00:00:02.000Z" }));

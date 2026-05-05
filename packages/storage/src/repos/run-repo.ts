@@ -6,18 +6,12 @@ import { cascadeDeleteRun } from "./cascade-delete.js";
 export type RunCreateInput = Omit<Run, "created_at" | "last_active_at">;
 
 export interface RunRepo {
-  create(data: RunCreateInput): Promise<Run>;
-  /** Synchronous variant for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
-  createSync?(data: RunCreateInput): Run;
+  create(data: RunCreateInput): Run;
   getById(id: string): Promise<Run | null>;
   listByWorkspace(workspaceId: string): Promise<readonly Run[]>;
-  delete(id: string): Promise<void>;
-  /** Synchronous variant for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
-  deleteSync?(id: string): void;
+  delete(id: string): void;
   updateState(id: string, state: RunState): Promise<Run>;
-  update(id: string, patch: Partial<Run>): Promise<Run>;
-  /** Synchronous variant for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
-  updateSync?(id: string, patch: Partial<Run>): Run;
+  update(id: string, patch: Partial<Run>): Run;
 }
 
 interface RunRow {
@@ -105,12 +99,7 @@ export class SqliteRunRepo implements RunRepo {
     `);
   }
 
-  public async create(data: RunCreateInput): Promise<Run> {
-    return this.createSync(data);
-  }
-
-  /** Synchronous variant for atomic publish + mutation (#BL-022). */
-  public createSync(data: RunCreateInput): Run {
+  public create(data: RunCreateInput): Run {
     const now = new Date().toISOString();
     const run = parseRun({
       ...data,
@@ -157,12 +146,7 @@ export class SqliteRunRepo implements RunRepo {
     }
   }
 
-  public async delete(id: string): Promise<void> {
-    this.deleteSync(id);
-  }
-
-  /** Synchronous variant for atomic publish + mutation (#BL-022). */
-  public deleteSync(id: string): void {
+  public delete(id: string): void {
     cascadeDeleteRun(this.db.connection, id);
   }
 
@@ -193,12 +177,7 @@ export class SqliteRunRepo implements RunRepo {
     }
   }
 
-  public async update(id: string, patch: Partial<Run>): Promise<Run> {
-    return this.updateSync(id, patch);
-  }
-
-  /** Synchronous variant for atomic publish + mutation (#BL-022). */
-  public updateSync(id: string, patch: Partial<Run>): Run {
+  public update(id: string, patch: Partial<Run>): Run {
     try {
       if (patch.title !== undefined) {
         const result = this.updateTitleStatement.run(patch.title, id);

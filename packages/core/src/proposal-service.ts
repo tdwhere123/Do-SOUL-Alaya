@@ -32,7 +32,7 @@ export interface ReviewAction {
 }
 
 export interface ProposalServiceEventLogRepoPort {
-  append(event: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
 }
 
@@ -199,8 +199,6 @@ export class ProposalService {
     });
 
     ensureMemoryGovernanceProposal(proposal);
-
-    const revision = await this.getNextRevision("proposal", proposal.proposal_id);
     const event = await this.dependencies.eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED,
       entity_type: "proposal",
@@ -208,7 +206,6 @@ export class ProposalService {
       workspace_id: synthesis.workspace_id,
       run_id: synthesis.run_id,
       caused_by: TransitionCausedBy.SYSTEM,
-      revision,
       payload_json: SoulProposalCreatedPayloadSchema.parse({
         object_id: proposal.runtime_id,
         object_kind: proposal.object_kind,
@@ -243,10 +240,6 @@ export class ProposalService {
     const parsedAction = parseReviewAction(action);
 
     const context = await this.loadReviewContext(parsedProposalId);
-    const nextRevision = this.createRevisionCursor(
-      await this.getNextRevision("proposal", context.proposal.proposal_id)
-    );
-
     const reviewCreated = await this.dependencies.eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_REVIEW_CREATED,
       entity_type: "proposal",
@@ -254,7 +247,6 @@ export class ProposalService {
       workspace_id: context.synthesis.workspace_id,
       run_id: context.synthesis.run_id,
       caused_by: parsedAction.reviewed_by,
-      revision: nextRevision(),
       payload_json: SoulReviewCreatedPayloadSchema.parse({
         object_id: context.proposal.runtime_id,
         object_kind: context.proposal.object_kind,
@@ -285,7 +277,6 @@ export class ProposalService {
       workspace_id: context.synthesis.workspace_id,
       run_id: context.synthesis.run_id,
       caused_by: parsedAction.reviewed_by,
-      revision: nextRevision(),
       payload_json: SoulReviewCompletedPayloadSchema.parse({
         object_id: context.proposal.runtime_id,
         object_kind: context.proposal.object_kind,
@@ -307,7 +298,6 @@ export class ProposalService {
       workspace_id: context.synthesis.workspace_id,
       run_id: context.synthesis.run_id,
       caused_by: parsedAction.reviewed_by,
-      revision: nextRevision(),
       payload_json: SoulProposalResolvedPayloadSchema.parse({
         object_id: context.proposal.runtime_id,
         object_kind: context.proposal.object_kind,
@@ -479,31 +469,10 @@ export class ProposalService {
     }
   }
 
-  private createRevisionCursor(startRevision: number): () => number {
-    let currentRevision = startRevision;
-
-    return () => {
-      const revision = currentRevision;
-      currentRevision += 1;
-      return revision;
-    };
-  }
-
   private async notifyDeferredEvents(events: readonly EventLogEntry[]): Promise<void> {
     for (const event of events) {
       await this.dependencies.runtimeNotifier.notifyEntry(event);
     }
-  }
-
-  private async getNextRevision(entityType: string, entityId: string): Promise<number> {
-    const events = await this.dependencies.eventLogRepo.queryByEntity(entityType, entityId);
-
-    if (events.length === 0) {
-      return 0;
-    }
-
-    const maxRevision = events.reduce((max, event) => Math.max(max, event.revision), 0);
-    return maxRevision + 1;
   }
 }
 

@@ -164,6 +164,7 @@ describe("MCP tool request/response schemas", () => {
           delivery_id: "delivery-1",
           usage_state: "used",
           used_object_ids: ["memory-1"],
+          per_anchor_usage: [{ object_id: "memory-1", anchor_role: "target" }],
           reason: "The final answer cited this memory."
         }
       }

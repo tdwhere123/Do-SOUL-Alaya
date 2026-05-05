@@ -26,6 +26,7 @@ import type {
 } from "@do-soul/alaya-core";
 import {
   createGardenBackgroundDataPorts,
+  type PathPlasticityWatermarkRepo,
   type SqliteEventLogRepo,
   type SqliteHandoffGapRepo,
   type SqliteHealthJournalRepo,
@@ -55,10 +56,42 @@ import {
 } from "./path-plasticity-runtime.js";
 
 type PathGraphSnapshotRecord = Readonly<PathGraphSnapshot>;
+type RuntimeGardenScheduler = GardenScheduler & {
+  dispatchNextMatchingTaskKind(
+    role: Parameters<GardenScheduler["dispatchNext"]>[0],
+    taskKinds: readonly GardenTaskKindValue[]
+  ): ReturnType<GardenScheduler["dispatchNext"]>;
+};
 
 const PATH_GRAPH_SNAPSHOT_INTERVAL_MS = 900_000;
 const PATH_GRAPH_HISTORY_REVIEW_LIMIT = 2;
 const PATH_GRAPH_SNAPSHOT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const JANITOR_RUNTIME_TASK_KINDS = [
+  GardenTaskKind.TTL_CLEANUP,
+  GardenTaskKind.HOT_INDEX_DEMOTION,
+  GardenTaskKind.DORMANT_DEMOTION,
+  GardenTaskKind.TOMBSTONE_GC
+] as const satisfies readonly GardenTaskKindValue[];
+const AUDITOR_RUNTIME_TASK_KINDS = [
+  GardenTaskKind.EVIDENCE_STALENESS_CHECK,
+  GardenTaskKind.POINTER_HEALTH_CHECK,
+  GardenTaskKind.GREEN_MAINTENANCE,
+  GardenTaskKind.BOOTSTRAPPING_SCAN,
+  GardenTaskKind.CRYSTALLIZATION_SCAN,
+  GardenTaskKind.POINTER_HEALING,
+  GardenTaskKind.ORPHAN_DETECTION,
+  GardenTaskKind.EVENT_LOG_ORPHAN_DETECTION
+] as const satisfies readonly GardenTaskKindValue[];
+const LIBRARIAN_RUNTIME_TASK_KINDS = [
+  GardenTaskKind.MERGE_PROPOSAL,
+  GardenTaskKind.PATH_GRAPH_SNAPSHOT,
+  GardenTaskKind.SUBJECT_NEIGHBOR_DETECT,
+  GardenTaskKind.PATH_COMPRESSION,
+  GardenTaskKind.TEMPLATE_CANDIDATE,
+  GardenTaskKind.SYNTHESIS_REVIEW,
+  GardenTaskKind.EMBEDDING_BACKFILL,
+  GardenTaskKind.PATH_PLASTICITY_UPDATE
+] as const satisfies readonly GardenTaskKindValue[];
 
 export interface GardenBacklogTelemetryObserver {
   capture(): Promise<void>;
@@ -89,6 +122,7 @@ export function createGardenRuntime(input: {
   readonly orphanRadarRepo: SqliteOrphanRadarRepo | null;
   readonly pathGraphSnapshotRepo: SqlitePathGraphSnapshotRepo;
   readonly pathRelationRepo: SqlitePathRelationRepo;
+  readonly pathPlasticityWatermarkRepo?: PathPlasticityWatermarkRepo;
   readonly pathPlasticityService?: Pick<PathPlasticityService, "computeAndApplyPlasticity">;
   readonly embeddingBackfillHandler?: Pick<EmbeddingBackfillHandler, "handle">;
   readonly strongRefService: StrongRefService;
@@ -101,12 +135,12 @@ export function createGardenRuntime(input: {
   runBackgroundPass(): Promise<void>;
   setBacklogTelemetryObserver(observer: GardenBacklogTelemetryObserver | null): void;
 }> {
-  // D2 MERGED-B2 (codex-B2): per-workspace watermark for PATH_PLASTICITY_UPDATE
-  // so the same MEMORY_USAGE_REPORTED receipt is not reapplied every tick.
-  // See `path-plasticity-runtime.ts` createPathPlasticityWatermarkRegistry
-  // docstring for v0.1 in-process semantics + v0.2 #BL-035 durabilization.
   const pathPlasticityWatermark: PathPlasticityWatermarkRegistry =
-    createPathPlasticityWatermarkRegistry();
+    createPathPlasticityWatermarkRegistry({
+      ...(input.pathPlasticityWatermarkRepo === undefined
+        ? {}
+        : { watermarkRepo: input.pathPlasticityWatermarkRepo })
+    });
 
   const schedulerEventLogPort: GardenSchedulerEventLogPort = {
     append: async (entry) => {
@@ -117,8 +151,7 @@ export function createGardenRuntime(input: {
         workspace_id: entry.workspace_id,
         run_id: entry.run_id,
         caused_by: "garden-scheduler",
-        payload_json: entry.payload,
-        revision: 1
+        payload_json: entry.payload
       });
     }
   };
@@ -137,8 +170,10 @@ export function createGardenRuntime(input: {
     },
     healthJournalPort
   );
+  const runtimeGardenScheduler = gardenScheduler as RuntimeGardenScheduler;
   let backlogTelemetryObserver: GardenBacklogTelemetryObserver | null = null;
   const pendingEmbeddingBackfillWorkspaces = new Set<string>();
+  const pendingPathPlasticityWorkspaces = new Set<string>();
   const pathGraphSnapshotter = new PathGraphSnapshotter({
     pathRelationRepo: input.pathRelationRepo
   });
@@ -171,13 +206,13 @@ export function createGardenRuntime(input: {
       ? {
           findOrphanedMemories: async (workspaceId: string) =>
             await findOrphanedMemoriesForWorkspace(input.databaseConnection, workspaceId),
-          createOrphanRadarRecord: async (record: Readonly<OrphanRadar>) => {
-            await orphanRadarRepo.create(record);
+          createOrphanRadarRecord: (record: Readonly<OrphanRadar>) => {
+            orphanRadarRepo.create(record);
           },
           findEventLogOrphans: async (workspaceId: string) =>
             await findEventLogOrphansForWorkspace(input.databaseConnection, workspaceId),
-          createEventLogOrphanRadarRecord: async (record) => {
-            await orphanRadarRepo.createEventLogOrphan(record);
+          createEventLogOrphanRadarRecord: (record) => {
+            orphanRadarRepo.createEventLogOrphan(record);
           }
         }
       : undefined;
@@ -187,15 +222,35 @@ export function createGardenRuntime(input: {
         ...entry,
         event_type: entry.event_type as EventType
       })) as EventLogEntry,
-    publishWithMutation: async (entry, mutate) =>
-      await input.eventPublisher.publishWithMutation(
-        {
+    appendManyWithMutation: async (entries, mutate) =>
+      await input.eventPublisher.appendManyWithMutation(
+        entries.map((entry) => ({
           ...entry,
           event_type: entry.event_type as EventType
-        },
+        })),
         mutate
       )
   };
+  const pathPlasticityPort =
+    input.pathPlasticityService === undefined
+      ? undefined
+      : {
+          computeAndApplyPlasticity: input.pathPlasticityService.computeAndApplyPlasticity.bind(
+            input.pathPlasticityService
+          ),
+          markProcessed: (params: {
+            readonly workspaceId: string;
+            readonly processedThroughIso: string;
+            readonly processedAuditEventId?: string | null;
+          }) => {
+            pathPlasticityWatermark.markProcessed(
+              params.workspaceId,
+              params.processedThroughIso,
+              params.processedAuditEventId ?? null,
+              new Date().toISOString()
+            );
+          }
+        };
   const auditorSchedulerPort = {
     reportCompletion: (
       result: Parameters<GardenScheduler["reportCompletion"]>[0]
@@ -207,9 +262,6 @@ export function createGardenRuntime(input: {
     greenMaintenancePort: input.gardenDataPorts.greenMaintenancePort,
     bootstrappingPort: input.gardenDataPorts.bootstrappingPort,
     orphanDetectionPort,
-    ...(input.pathPlasticityService === undefined
-      ? {}
-      : { pathPlasticityPort: input.pathPlasticityService }),
     scheduler: auditorSchedulerPort,
     healthJournal: healthJournalPort,
     eventLogRepo: auditorEventLogPort
@@ -223,6 +275,12 @@ export function createGardenRuntime(input: {
     neighborPort: input.gardenDataPorts.neighborPort,
     compressionPort: input.gardenDataPorts.compressionPort,
     synthesisPort: input.gardenDataPorts.synthesisPort,
+    ...(pathPlasticityPort === undefined ? {} : { pathPlasticityPort }),
+    pathPlasticityPendingPort: {
+      clearPendingWorkspace: (workspaceId: string) => {
+        pendingPathPlasticityWorkspaces.delete(workspaceId);
+      }
+    },
     scheduler: librarianSchedulerPort,
     healthJournal: healthJournalPort
   });
@@ -253,7 +311,7 @@ export function createGardenRuntime(input: {
   const enqueueForAllWorkspaces = async (
     taskKind: GardenTaskKindValue,
     requiredTier: GardenTierValue,
-    resolveTargetObjectRefs: (workspaceId: string) => readonly string[] = () => []
+    resolveTargetObjectRefs: (workspaceId: string, nowIso: string) => readonly string[] = () => []
   ): Promise<void> => {
     const workspaces = await input.workspaceRepo.list();
     const nowIso = new Date().toISOString();
@@ -264,7 +322,7 @@ export function createGardenRuntime(input: {
         required_tier: requiredTier,
         workspace_id: workspace.workspace_id,
         run_id: null,
-        target_object_refs: resolveTargetObjectRefs(workspace.workspace_id),
+        target_object_refs: resolveTargetObjectRefs(workspace.workspace_id, nowIso),
         priority: 10,
         created_at: nowIso
       });
@@ -304,6 +362,44 @@ export function createGardenRuntime(input: {
     }
   };
 
+  const enqueuePathPlasticityForAllWorkspaces = async (): Promise<void> => {
+    const workspaces = await input.workspaceRepo.list();
+    const nowIso = new Date().toISOString();
+    let enqueuedCount = 0;
+
+    for (const workspace of workspaces) {
+      if (pendingPathPlasticityWorkspaces.has(workspace.workspace_id)) {
+        continue;
+      }
+
+      const targetObjectRefs = [
+        pathPlasticityWatermark.getSince(workspace.workspace_id, nowIso),
+        nowIso
+      ];
+      pendingPathPlasticityWorkspaces.add(workspace.workspace_id);
+      try {
+        gardenScheduler.enqueue({
+          task_id: randomUUID(),
+          task_kind: GardenTaskKind.PATH_PLASTICITY_UPDATE,
+          required_tier: GardenTier.TIER_2,
+          workspace_id: workspace.workspace_id,
+          run_id: null,
+          target_object_refs: targetObjectRefs,
+          priority: 10,
+          created_at: nowIso
+        });
+        enqueuedCount += 1;
+      } catch (error) {
+        pendingPathPlasticityWorkspaces.delete(workspace.workspace_id);
+        throw error;
+      }
+    }
+
+    if (enqueuedCount > 0) {
+      requestBacklogTelemetryCapture(`enqueue:${GardenTaskKind.PATH_PLASTICITY_UPDATE}`);
+    }
+  };
+
   const persistPathGraphSnapshotForWorkspace = async (
     workspaceId: string,
     previousSnapshot: PathGraphSnapshotRecord | null
@@ -325,12 +421,11 @@ export function createGardenRuntime(input: {
             total_active_paths: snapshot.total_active_paths,
             total_retired_paths: snapshot.total_retired_paths,
             snapshot_at: snapshot.snapshot_at
-          }),
-          revision: 1
+          })
         }
       ],
       () => {
-        input.pathGraphSnapshotRepo.createSync(snapshot);
+        input.pathGraphSnapshotRepo.create(snapshot);
       }
     );
 
@@ -483,24 +578,6 @@ export function createGardenRuntime(input: {
           await enqueueForAllWorkspaces(GardenTaskKind.ORPHAN_DETECTION, GardenTier.TIER_1);
           await enqueueForAllWorkspaces(GardenTaskKind.EVENT_LOG_ORPHAN_DETECTION, GardenTier.TIER_1);
         }
-        // A3: Garden-driven plasticity tick. Soft-skips inside the Auditor
-        // when pathPlasticityService is not wired (test daemons), so it is
-        // safe to enqueue unconditionally here.
-        //
-        // D2 MERGED-B2: pass the per-workspace watermark as
-        // target_object_refs[0] (an ISO timestamp). The Soul
-        // `resolvePathPlasticitySinceIso` helper uses it as the lookback
-        // start, so each tick processes records strictly in
-        // `(prior watermark, nowAtEnqueue]`. First tick on each workspace
-        // bootstraps from `now - 24h`. The registry is process-local; v0.2
-        // #BL-035 will durabilize it via SQL.
-        await enqueueForAllWorkspaces(
-          GardenTaskKind.PATH_PLASTICITY_UPDATE,
-          GardenTier.TIER_1,
-          (workspaceId) => [
-            pathPlasticityWatermark.getAndAdvance(workspaceId, new Date().toISOString())
-          ]
-        );
       }
     },
     {
@@ -511,6 +588,7 @@ export function createGardenRuntime(input: {
         if (input.embeddingBackfillHandler !== undefined) {
           await enqueueEmbeddingBackfillForAllWorkspaces();
         }
+        await enqueuePathPlasticityForAllWorkspaces();
         await enqueueForAllWorkspaces(
           GardenTaskKind.PATH_GRAPH_SNAPSHOT,
           GardenTier.TIER_2,
@@ -522,12 +600,15 @@ export function createGardenRuntime(input: {
       name: "GardenScheduler",
       intervalMs: 60_000,
       task: async () => {
-        for (const [role, handler] of [
-          ["janitor", janitor],
-          ["auditor", auditor],
-          ["librarian", librarian]
+        for (const [role, handler, runtimeTaskKinds] of [
+          [GardenRole.JANITOR, janitor, JANITOR_RUNTIME_TASK_KINDS],
+          [GardenRole.AUDITOR, auditor, AUDITOR_RUNTIME_TASK_KINDS],
+          [GardenRole.LIBRARIAN, librarian, LIBRARIAN_RUNTIME_TASK_KINDS]
         ] as const) {
-          const task = await gardenScheduler.dispatchNext(role);
+          const task = await runtimeGardenScheduler.dispatchNextMatchingTaskKind(
+            role,
+            runtimeTaskKinds
+          );
           requestBacklogTelemetryCapture(`dispatch:${role}`);
           if (task === null) {
             continue;
@@ -565,7 +646,10 @@ export function createGardenRuntime(input: {
       await enqueueForAllWorkspaces(GardenTaskKind.EVENT_LOG_ORPHAN_DETECTION, GardenTier.TIER_1);
 
       while (true) {
-        const task = await gardenScheduler.dispatchNext("auditor");
+        const task = await runtimeGardenScheduler.dispatchNextMatchingTaskKind(
+          GardenRole.AUDITOR,
+          [GardenTaskKind.EVENT_LOG_ORPHAN_DETECTION]
+        );
         requestBacklogTelemetryCapture("startup:event_log_orphan_detection");
         if (task === null) {
           break;

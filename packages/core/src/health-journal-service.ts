@@ -9,7 +9,6 @@ import {
   type HealthJournalRecordPort
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
-import { getNextRevision } from "./shared/event-utils.js";
 import { parseNonEmptyString } from "./shared/validators.js";
 
 export interface HealthJournalServiceRepoPort {
@@ -32,7 +31,7 @@ export interface HealthJournalServiceRepoPort {
 }
 
 export interface HealthJournalServiceEventLogPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
 }
 
@@ -63,7 +62,6 @@ export class HealthJournalService implements HealthJournalRecordPort {
     const createdAt = ensureIsoDatetime(this.now(), "now");
     const entryId = parseNonEmptyString(this.generateEntryId(), "entry_id");
     const normalizedEntry = normalizeRecordInput(entry);
-    const revision = await getNextRevision(this.dependencies.eventLogRepo, "health_journal", entryId);
 
     const event = await this.dependencies.eventLogRepo.append({
       event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
@@ -72,7 +70,6 @@ export class HealthJournalService implements HealthJournalRecordPort {
       workspace_id: normalizedEntry.workspace_id,
       run_id: normalizedEntry.run_id,
       caused_by: "system",
-      revision,
       payload_json: SoulHealthJournalRecordedPayloadSchema.parse({
         entry_id: entryId,
         event_kind: normalizedEntry.event_kind,

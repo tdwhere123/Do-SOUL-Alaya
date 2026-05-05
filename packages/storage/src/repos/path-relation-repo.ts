@@ -11,20 +11,22 @@ import { deepFreeze } from "./shared/deep-freeze.js";
 import { parseNonEmptyString } from "./shared/validators.js";
 
 export interface PathRelationRepo {
-  create(relation: PathRelation): Promise<Readonly<PathRelation>>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  createSync(relation: PathRelation): Readonly<PathRelation>;
+  create(relation: PathRelation): Readonly<PathRelation>;
   update(
     pathId: string,
     updates: Partial<
       Pick<PathRelation, "effect_vector" | "plasticity_state" | "lifecycle" | "legitimacy" | "updated_at">
     >
-  ): Promise<Readonly<PathRelation>>;
+  ): Readonly<PathRelation>;
   findById(pathId: string): Promise<Readonly<PathRelation> | null>;
   findByWorkspace(workspaceId: string): Promise<readonly Readonly<PathRelation>[]>;
   findByAnchor(
     workspaceId: string,
     anchorRef: PathAnchorRef
+  ): Promise<readonly Readonly<PathRelation>[]>;
+  findByAnchors(
+    workspaceId: string,
+    anchorRefs: readonly PathAnchorRef[]
   ): Promise<readonly Readonly<PathRelation>[]>;
   findActive(workspaceId: string): Promise<readonly Readonly<PathRelation>[]>;
   delete(pathId: string): Promise<void>;
@@ -50,15 +52,19 @@ const TARGET_ANCHOR_KEY_SQL =
 
 const WAVE_1_ACTIVE_LIFECYCLE_SQL = `CASE
       WHEN json_valid(lifecycle_json) = 0 THEN 0
-      WHEN json_type(lifecycle_json, '$.retirement_rule') != 'text' THEN 0
+      WHEN json_type(lifecycle_json, '$.retirement_rule') IS NULL
+        OR json_type(lifecycle_json, '$.retirement_rule') != 'text' THEN 0
       WHEN json_type(lifecycle_json, '$.cooldown_rule') IS NOT NULL
         AND json_type(lifecycle_json, '$.cooldown_rule') != 'text' THEN 0
       WHEN json_type(lifecycle_json, '$.override_rule') IS NOT NULL
         AND json_type(lifecycle_json, '$.override_rule') != 'text' THEN 0
+      WHEN json_type(lifecycle_json, '$.status') IS NOT NULL
+        AND json_type(lifecycle_json, '$.status') != 'text' THEN 0
+      WHEN COALESCE(json_extract(lifecycle_json, '$.status'), 'active') != 'active' THEN 0
       WHEN EXISTS (
         SELECT 1
         FROM json_each(lifecycle_json)
-        WHERE key NOT IN ('retirement_rule', 'cooldown_rule', 'override_rule')
+        WHERE key NOT IN ('status', 'retirement_rule', 'cooldown_rule', 'override_rule')
       ) THEN 0
       ELSE 1
     END`;
@@ -75,6 +81,10 @@ interface PathRelationRow {
   readonly created_at: string;
   readonly updated_at: string;
 }
+
+type PathLifecycleWithStatus = PathRelation["lifecycle"] & {
+  readonly status?: "active" | "retired";
+};
 
 export class SqlitePathRelationRepo implements PathRelationRepo {
   private readonly createStatement;
@@ -157,12 +167,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
     `);
   }
 
-  public async create(relation: PathRelation): Promise<Readonly<PathRelation>> {
-    return this.createSync(relation);
-  }
-
-  /** Synchronous variant for atomic publish + mutation (#BL-022). */
-  public createSync(relation: PathRelation): Readonly<PathRelation> {
+  public create(relation: PathRelation): Readonly<PathRelation> {
     const parsedRelation = parsePathRelation(relation);
 
     try {
@@ -207,21 +212,12 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
     return parsePathRelationRow(row);
   }
 
-  public async update(
-    pathId: string,
-    updates: Partial<
-      Pick<PathRelation, "effect_vector" | "plasticity_state" | "lifecycle" | "legitimacy" | "updated_at">
-    >
-  ): Promise<Readonly<PathRelation>> {
-    return this.updateSync(pathId, updates);
-  }
-
-  /** Synchronous variant for atomic publish + mutation (#BL-022).
+  /**
    * Required by `PathPlasticityService` so that `appendManyWithMutation`
    * can wrap the EventLog row and the `path_relation` mutation in one
    * SQLite transaction (closes the BL-022 race for path-relation writes).
    */
-  public updateSync(
+  public update(
     pathId: string,
     updates: Partial<
       Pick<PathRelation, "effect_vector" | "plasticity_state" | "lifecycle" | "legitimacy" | "updated_at">
@@ -352,6 +348,45 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
     }
   }
 
+  public async findByAnchors(
+    workspaceId: string,
+    anchorRefs: readonly PathAnchorRef[]
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
+    const anchorKeys = [...new Set(anchorRefs.map((anchorRef) => serializePathAnchorRef(parsePathAnchorRef(anchorRef))))];
+
+    if (anchorKeys.length === 0) {
+      return deepFreeze([]);
+    }
+
+    const placeholders = anchorKeys.map(() => "?").join(", ");
+    const statement = this.db.connection.prepare(`
+      SELECT${PATH_RELATION_SELECT_COLUMNS}
+      FROM path_relations
+      WHERE workspace_id = ?
+        AND (
+          ${SOURCE_ANCHOR_KEY_SQL} IN (${placeholders})
+          OR ${TARGET_ANCHOR_KEY_SQL} IN (${placeholders})
+        )
+      ORDER BY created_at ASC, path_id ASC
+    `);
+
+    try {
+      const rows = statement.all(
+        parsedWorkspaceId,
+        ...anchorKeys,
+        ...anchorKeys
+      ) as PathRelationRow[];
+      return parsePathRelationRows(rows, { dedupe: true });
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError("QUERY_FAILED", "Failed to list path relations by anchors.", error);
+    }
+  }
+
   public async findActive(workspaceId: string): Promise<readonly Readonly<PathRelation>[]> {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
@@ -427,11 +462,21 @@ function parsePathRelationRow(row: PathRelationRow): Readonly<PathRelation> {
       row.plasticity_state_json,
       "plasticity_state"
     ),
-    lifecycle: parseJsonField<PathRelation["lifecycle"]>(row.lifecycle_json, "lifecycle"),
+    lifecycle: normalizeLifecycle(parseJsonField<PathRelation["lifecycle"]>(row.lifecycle_json, "lifecycle")),
     legitimacy: parseJsonField<PathRelation["legitimacy"]>(row.legitimacy_json, "legitimacy"),
     created_at: row.created_at,
     updated_at: row.updated_at
   });
+}
+
+function normalizeLifecycle(lifecycle: PathRelation["lifecycle"]): PathRelation["lifecycle"] {
+  const lifecycleWithStatus = lifecycle as PathLifecycleWithStatus;
+  return {
+    status: lifecycleWithStatus.status ?? "active",
+    retirement_rule: lifecycle.retirement_rule,
+    ...(lifecycle.cooldown_rule === undefined ? {} : { cooldown_rule: lifecycle.cooldown_rule }),
+    ...(lifecycle.override_rule === undefined ? {} : { override_rule: lifecycle.override_rule })
+  } as PathRelation["lifecycle"];
 }
 
 function parsePathRelationRows(

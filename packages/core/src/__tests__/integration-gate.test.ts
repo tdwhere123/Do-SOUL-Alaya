@@ -109,13 +109,13 @@ describe("IntegrationGate", () => {
             {
               event_id: "event-1",
               created_at: FIXED_NOW,
+              revision: 0,
               event_type: WORKER_INTEGRATION_STATUS_EVENT_TYPE,
               entity_type: "worker_run",
               entity_id: workerRun.worker_run_id,
               workspace_id: workerRun.workspace_id,
               run_id: workerRun.principal_run_id,
               caused_by: "system",
-              revision: 0,
               payload_json: decisionPayload
             },
             new Error("broadcast exploded")
@@ -149,16 +149,17 @@ function createHarness(): {
   readonly eventPublisher: {
     readonly publish: TestMock;
   };
-  readonly publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at">>;
+  readonly publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>;
 } {
-  const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at">> = [];
+  const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
   const eventPublisher = {
-    publish: vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => {
+    publish: vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
       publishedEvents.push(event);
       return {
         ...event,
         event_id: `event-${publishedEvents.length}`,
-        created_at: FIXED_NOW
+        created_at: FIXED_NOW,
+      revision: 0
       } satisfies EventLogEntry;
     })
   };

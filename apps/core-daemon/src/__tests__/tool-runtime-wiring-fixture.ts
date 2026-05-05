@@ -711,6 +711,10 @@ vi.mock("@do-soul/alaya-storage", async () => {
       findHistory: vi.fn(async () => []),
       deleteOlderThan: vi.fn(async () => 0)
     }),
+    SqlitePathPlasticityWatermarkRepo: makeRepo({
+      findByWorkspaceId: vi.fn(() => null),
+      upsert: vi.fn((record: unknown) => record)
+    }),
     SqliteDriftLeaseRepo: makeRepo({
       create: vi.fn(async (lease: unknown) => lease),
       findActive: vi.fn(async () => []),
@@ -1070,6 +1074,7 @@ vi.mock("@do-soul/alaya-soul", async () => {
     GardenScheduler: makeClass({
       enqueue: vi.fn(),
       dispatchNext: vi.fn(async () => null),
+      dispatchNextMatchingTaskKind: vi.fn(async () => null),
       reportCompletion: vi.fn(async () => undefined),
       getBacklogSnapshot: vi.fn(() => ({
         workspace_id: null,

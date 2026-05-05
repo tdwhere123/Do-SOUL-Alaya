@@ -16,10 +16,9 @@ import {
   type ProjectMappingState as ProjectMappingStateType
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
-import { getNextRevision } from "./shared/event-utils.js";
 
 export interface ProjectMappingServiceEventLogRepoPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
 }
 
@@ -173,12 +172,6 @@ export class ProjectMappingService {
       last_transition_at: timestamp
     });
 
-    const revision = await getNextRevision(
-      this.dependencies.eventLogRepo,
-      ObjectKind.PROJECT_MAPPING_ANCHOR,
-      anchor.object_id
-    );
-
     // EventLog-first is intentional: project-mapping writes are at-least-once. If repo persistence
     // fails after append, reconciliation should treat the EventLog as the source of truth.
     const event = await this.dependencies.eventLogRepo.append({
@@ -188,7 +181,6 @@ export class ProjectMappingService {
       workspace_id: workspaceId,
       run_id: null,
       caused_by: createdBy,
-      revision,
       payload_json: SoulProjectMappingSuggestedPayloadSchema.parse({
         mapping_id: anchor.object_id,
         global_object_id: globalObjectId,
@@ -475,11 +467,6 @@ export class ProjectMappingService {
   ): Promise<Readonly<ProjectMappingAnchor>> {
     const fromState = this.resolveFromState(anchor.mapping_state, options);
     const transitionedAt = this.now();
-    const revision = await getNextRevision(
-      this.dependencies.eventLogRepo,
-      ObjectKind.PROJECT_MAPPING_ANCHOR,
-      anchor.object_id
-    );
 
     // EventLog-first is intentional: project-mapping transitions are at-least-once. If repo
     // persistence fails after append, recovery should replay from the EventLog entry.
@@ -490,7 +477,6 @@ export class ProjectMappingService {
       workspace_id: anchor.workspace_id,
       run_id: null,
       caused_by: options.causedBy,
-      revision,
       payload_json: SoulProjectMappingStateChangedPayloadSchema.parse({
         mapping_id: anchor.object_id,
         global_object_id: anchor.global_object_id,

@@ -304,6 +304,7 @@ function createDependencies(input: {
       append: vi.fn(async (entry: Record<string, unknown>) => ({
         event_id: `event-${Math.random()}`,
         created_at: NOW,
+        revision: 0,
         ...entry
       }))
     }

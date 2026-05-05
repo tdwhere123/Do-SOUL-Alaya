@@ -44,7 +44,7 @@ export interface EmbeddingRecallRepoPort {
 }
 
 export interface EmbeddingRecallEventLogPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
 }
 
@@ -454,7 +454,6 @@ export class EmbeddingRecallService {
         workspace_id: params.workspaceId,
         run_id: params.runId,
         caused_by: "system",
-        revision: 0,
         payload_json: RecallEmbeddingSupplementQueriedPayloadSchema.parse({
           workspace_id: params.workspaceId,
           run_id: params.runId,
@@ -488,7 +487,6 @@ export class EmbeddingRecallService {
         workspace_id: params.workspaceId,
         run_id: params.runId,
         caused_by: "system",
-        revision: 0,
         payload_json: RecallEmbeddingSupplementMergedPayloadSchema.parse({
           workspace_id: params.workspaceId,
           run_id: params.runId,
@@ -525,7 +523,6 @@ export class EmbeddingRecallService {
         workspace_id: params.workspaceId,
         run_id: params.runId,
         caused_by: "system",
-        revision: 0,
         payload_json: RecallEmbeddingSupplementDegradedPayloadSchema.parse({
           workspace_id: params.workspaceId,
           run_id: params.runId,
@@ -578,7 +575,7 @@ export class EmbeddingRecallService {
     readonly workspaceId: string;
     readonly runId: string | null;
     readonly queryId: string;
-    readonly entry: Omit<EventLogEntry, "event_id" | "created_at">;
+    readonly entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
   }): Promise<void> {
     try {
       await this.dependencies.eventLogRepo.append(params.entry);

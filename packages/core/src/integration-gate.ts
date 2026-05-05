@@ -141,7 +141,7 @@ function collectMismatches(
 function createIntegrationStatusEvent(
   workerRun: Readonly<DelegatedWorkerRun>,
   decision: IntegrationGateDecision
-): Omit<EventLogEntry, "event_id" | "created_at"> {
+): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
   return {
     event_type: WORKER_INTEGRATION_STATUS_EVENT_TYPE,
     entity_type: "worker_run",
@@ -149,7 +149,6 @@ function createIntegrationStatusEvent(
     workspace_id: workerRun.workspace_id,
     run_id: workerRun.principal_run_id,
     caused_by: "system",
-    revision: 0,
     payload_json: WorkerIntegrationStatusPayloadSchema.parse({
       workerRunId: decision.workerRunId,
       level: decision.level,

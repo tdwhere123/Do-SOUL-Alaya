@@ -3,13 +3,14 @@ import {
   PathPlasticityStateSchema,
   RuntimeGovernanceEventType,
   parseRuntimeGovernanceEventPayload,
+  type DirectionBias,
   type EventLogEntry,
   type PathAnchorRef,
   type PathPlasticityState,
   type PathRelation,
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
-import { EventPublisher } from "./event-publisher.js";
+import { EventPublisher, type EventPublisherInput } from "./event-publisher.js";
 
 /**
  * Plasticity tuning constants. Derived authoritatively from
@@ -33,10 +34,10 @@ export const PATH_PLASTICITY_CONSTANTS = Object.freeze({
 
 export interface UsageProofReaderPort {
   /**
-   * Returns recent usage records reported strictly AFTER `sinceIso` (i.e.
-   * `record.reported_at > sinceIso`, exclusive). Scoped to the given
-   * workspace. Implementation may join through TrustStateRepo or directly
-   * query the EventLog — the service does not care which.
+   * Returns recent usage records reported strictly AFTER `sinceIso` and,
+   * when supplied, at or before `untilIso`. Scoped to the given workspace.
+   * Implementation may join through TrustStateRepo or directly query the
+   * EventLog — the service does not care which.
    *
    * Exclusive comparison is intentional (Q4): a tick that processes records
    * up to-and-including `T` then advances its watermark to `T`; the next
@@ -45,7 +46,8 @@ export interface UsageProofReaderPort {
    */
   listRecentUsage(
     workspaceId: string,
-    sinceIso: string
+    sinceIso: string,
+    untilIso?: string
   ): Promise<readonly Readonly<UsageProofRecord>[]>;
 
   /**
@@ -62,15 +64,17 @@ export interface PathPlasticityRepoPort {
   ): Promise<readonly Readonly<PathRelation>[]>;
   /** Synchronous variant required by `appendManyWithMutation`'s
    * sync-mutate contract (see #BL-022 closure / event-publisher.ts). The
-   * three plasticity publishers below wrap append + mutation in one
-   * SQLite transaction via this port. */
-  updateSync(
+   * plasticity batch publisher below wraps append + mutation in one SQLite
+   * transaction via this port. */
+  update(
     pathId: string,
-    updates: Partial<
-      Pick<PathRelation, "effect_vector" | "plasticity_state" | "lifecycle" | "legitimacy" | "updated_at">
-    >
+    updates: PathPlasticityRepoUpdate
   ): Readonly<PathRelation>;
 }
+
+type PathPlasticityRepoUpdate = Partial<
+  Pick<PathRelation, "effect_vector" | "plasticity_state" | "lifecycle" | "legitimacy" | "updated_at">
+>;
 
 export interface PathPlasticityServiceDependencies {
   readonly usageProofReader: UsageProofReaderPort;
@@ -102,15 +106,11 @@ export interface PathPlasticityComputeResult {
  * The service is invoked from a Garden role (background tier). It MUST NOT
  * be called on the recall request path.
  *
- * Plasticity ops covered by this v0.1 service (3/4):
+ * Plasticity ops covered by this service:
  *   - reinforcement (used → +USED_DELTA strength)
  *   - weakening (skipped → -SKIPPED_DELTA strength)
+ *   - redirection (source/target anchor usage → direction_bias)
  *   - retirement (strength <= threshold + inactivity → emit retired event)
- *
- * TODO(v0.2): direction_bias plasticity (redirection op) — needs an
- * asymmetric usage signal between source/target anchors so the service can
- * decide whether to flip `source_to_target` ↔ `target_to_source` or move to
- * `bidirectional`. Deferred per A3 review I5.
  */
 export class PathPlasticityService {
   private readonly now: () => string;
@@ -120,7 +120,7 @@ export class PathPlasticityService {
   }
 
   /**
-   * Reads UsageProofRecord rows reported strictly after `sinceIso`,
+   * Reads UsageProofRecord rows reported inside `(sinceIso, untilIso]`,
    * computes per-path deltas, and publishes runtime-governance events that
    * mutate the PathRelation rows.
    *
@@ -129,11 +129,17 @@ export class PathPlasticityService {
   public async computeAndApplyPlasticity(params: {
     readonly workspaceId: string;
     readonly sinceIso: string;
+    readonly untilIso?: string;
+    readonly abortSignal?: AbortSignal;
+    readonly onMutationBoundaryEntered?: () => void;
   }): Promise<PathPlasticityComputeResult> {
+    throwIfPathPlasticityAborted(params.abortSignal);
     const usageRecords = await this.dependencies.usageProofReader.listRecentUsage(
       params.workspaceId,
-      params.sinceIso
+      params.sinceIso,
+      params.untilIso
     );
+    throwIfPathPlasticityAborted(params.abortSignal);
 
     if (usageRecords.length === 0) {
       return Object.freeze({ reinforced: 0, weakened: 0, retired: 0, affectedPathIds: [] });
@@ -151,38 +157,53 @@ export class PathPlasticityService {
     // then aggregate counts across receipts.
     const pathAggregates = await this.aggregatePathUsage(
       params.workspaceId,
-      usageRecords
+      usageRecords,
+      params.abortSignal
     );
+    throwIfPathPlasticityAborted(params.abortSignal);
 
     const affected = new Set<string>();
     let reinforced = 0;
     let weakened = 0;
     let retired = 0;
+    const mutationPlans: PathPlasticityMutationPlan[] = [];
 
     for (const { path, counts } of pathAggregates.values()) {
-      // I7: skip paths that have already been retired in a prior tick. The
-      // schema does not encode "retired" as a status enum, so we infer
-      // retirement from the audit log (any prior PATH_RELATION_RETIRED
-      // event for this entity). A retired path should not re-emit further
-      // plasticity events; otherwise the audit log would carry duplicate
-      // retirement noise and the durable strength would keep being
-      // re-clamped at zero.
-      if (await this.isAlreadyRetired(path.path_id)) {
+      // Retired paths are durable lifecycle state, not a strength heuristic
+      // or a per-tick audit-log lookup.
+      if (isRetiredPath(path)) {
         continue;
       }
 
-      const outcome = await this.applyDeltasForPath(path, counts);
-      if (outcome === "reinforced") {
+      const plan = this.planDeltasForPath(
+        path,
+        counts,
+        params.abortSignal
+      );
+      if (plan === null) {
+        continue;
+      }
+
+      mutationPlans.push(plan);
+      if (plan.outcome === "reinforced") {
         reinforced += 1;
-        affected.add(path.path_id);
-      } else if (outcome === "weakened") {
+        affected.add(plan.pathId);
+      } else if (plan.outcome === "weakened") {
         weakened += 1;
-        affected.add(path.path_id);
-      } else if (outcome === "retired") {
+        affected.add(plan.pathId);
+      } else if (plan.outcome === "retired") {
         retired += 1;
-        affected.add(path.path_id);
+        affected.add(plan.pathId);
+      } else if (plan.outcome === "redirected") {
+        affected.add(plan.pathId);
       }
     }
+
+    this.applyMutationPlans(
+      mutationPlans,
+      params.abortSignal,
+      params.onMutationBoundaryEntered
+    );
 
     return Object.freeze({
       reinforced,
@@ -194,7 +215,8 @@ export class PathPlasticityService {
 
   private async aggregatePathUsage(
     workspaceId: string,
-    usageRecords: readonly Readonly<UsageProofRecord>[]
+    usageRecords: readonly Readonly<UsageProofRecord>[],
+    abortSignal?: AbortSignal
   ): Promise<ReadonlyMap<string, PathAggregate>> {
     const pathAggregates = new Map<string, PathAggregate>();
 
@@ -207,6 +229,7 @@ export class PathPlasticityService {
     const seenAuditEventIds = new Set<string>();
 
     for (const record of usageRecords) {
+      throwIfPathPlasticityAborted(abortSignal);
       if (seenAuditEventIds.has(record.audit_event_id)) {
         continue;
       }
@@ -215,7 +238,10 @@ export class PathPlasticityService {
       // Resolve which object_ids this receipt counts against.
       let targetObjectIds: readonly string[];
       if (record.usage_state === "used") {
-        targetObjectIds = record.used_object_ids;
+        targetObjectIds = uniqueStrings([
+          ...record.used_object_ids,
+          ...(record.per_anchor_usage ?? []).map((usage) => usage.object_id)
+        ]);
       } else if (record.usage_state === "skipped" || record.usage_state === "not_applicable") {
         // skipped / not_applicable receipts weight every memory the agent
         // had in hand — not just the ones cited as used.
@@ -225,6 +251,7 @@ export class PathPlasticityService {
             : (await this.dependencies.usageProofReader.findDeliveredObjectIds(
                 record.delivery_id
               )) ?? [];
+        throwIfPathPlasticityAborted(abortSignal);
       } else {
         continue;
       }
@@ -235,6 +262,7 @@ export class PathPlasticityService {
       // single logical signal against the path, not one per anchor.
       const pathsTouchedByReceipt = new Map<string, Readonly<PathRelation>>();
       for (const objectId of targetObjectIds) {
+        throwIfPathPlasticityAborted(abortSignal);
         const anchorRef: PathAnchorRef = Object.freeze({
           kind: "object",
           object_id: objectId
@@ -243,6 +271,7 @@ export class PathPlasticityService {
           workspaceId,
           anchorRef
         );
+        throwIfPathPlasticityAborted(abortSignal);
         for (const path of paths) {
           if (!pathsTouchedByReceipt.has(path.path_id)) {
             pathsTouchedByReceipt.set(path.path_id, path);
@@ -257,6 +286,8 @@ export class PathPlasticityService {
           used: 0,
           skipped: 0,
           notApplicable: 0,
+          sourceAnchorUsage: 0,
+          targetAnchorUsage: 0,
           lastReportedAt: null
         };
         if (record.usage_state === "used") {
@@ -271,30 +302,103 @@ export class PathPlasticityService {
           pathAggregates.set(pathId, { path, counts });
         }
       }
+
+      const directionalUsage = await this.resolveDirectionalPathUsage(
+        workspaceId,
+        record,
+        abortSignal
+      );
+      for (const [pathId, usage] of directionalUsage.entries()) {
+        const existing = pathAggregates.get(pathId);
+        const counts: MutableObjectUsageCounts = existing?.counts ?? {
+          used: 0,
+          skipped: 0,
+          notApplicable: 0,
+          sourceAnchorUsage: 0,
+          targetAnchorUsage: 0,
+          lastReportedAt: null
+        };
+        if (usage.sourceUsed) {
+          counts.sourceAnchorUsage += 1;
+        }
+        if (usage.targetUsed) {
+          counts.targetAnchorUsage += 1;
+        }
+        counts.lastReportedAt = maxIsoNullable(counts.lastReportedAt, record.reported_at);
+        if (existing === undefined) {
+          pathAggregates.set(pathId, { path: usage.path, counts });
+        }
+      }
     }
 
     return pathAggregates;
   }
 
-  private async isAlreadyRetired(pathId: string): Promise<boolean> {
-    const events = await this.dependencies.eventLogRepo.queryByEntity(
-      "path_relation",
-      pathId
-    );
-    return events.some(
-      (event) => event.event_type === RuntimeGovernanceEventType.PATH_RELATION_RETIRED
-    );
+  private async resolveDirectionalPathUsage(
+    workspaceId: string,
+    record: Readonly<UsageProofRecord>,
+    abortSignal?: AbortSignal
+  ): Promise<ReadonlyMap<string, DirectionalPathUsage>> {
+    const perAnchorUsage = record.per_anchor_usage ?? [];
+    if (record.usage_state !== "used" || perAnchorUsage.length === 0) {
+      return new Map();
+    }
+
+    const directionalUsage = new Map<string, MutableDirectionalPathUsage>();
+    for (const usage of perAnchorUsage) {
+      throwIfPathPlasticityAborted(abortSignal);
+      const paths = await this.dependencies.pathRelationRepo.findByAnchor(
+        workspaceId,
+        Object.freeze({ kind: "object", object_id: usage.object_id })
+      );
+      throwIfPathPlasticityAborted(abortSignal);
+      for (const path of paths) {
+        const matchesSource =
+          usage.anchor_role === "source" &&
+          isObjectAnchor(path.anchors.source_anchor, usage.object_id);
+        const matchesTarget =
+          usage.anchor_role === "target" &&
+          isObjectAnchor(path.anchors.target_anchor, usage.object_id);
+        if (!matchesSource && !matchesTarget) {
+          continue;
+        }
+        const existing = directionalUsage.get(path.path_id) ?? {
+          path,
+          sourceUsed: false,
+          targetUsed: false
+        };
+        directionalUsage.set(path.path_id, {
+          path,
+          sourceUsed: existing.sourceUsed || matchesSource,
+          targetUsed: existing.targetUsed || matchesTarget
+        });
+      }
+    }
+
+    return directionalUsage;
   }
 
-  private async applyDeltasForPath(
+  private planDeltasForPath(
     path: Readonly<PathRelation>,
-    counts: MutableObjectUsageCounts
-  ): Promise<"reinforced" | "weakened" | "retired" | "none"> {
+    counts: MutableObjectUsageCounts,
+    abortSignal?: AbortSignal
+  ): PathPlasticityMutationPlan | null {
+    throwIfPathPlasticityAborted(abortSignal);
     const previousStrength = path.plasticity_state.strength;
     const usedDelta = counts.used * PATH_PLASTICITY_CONSTANTS.USED_DELTA;
     const skippedDelta = counts.skipped * PATH_PLASTICITY_CONSTANTS.SKIPPED_DELTA;
     const proposedStrength = clampStrength(previousStrength + usedDelta - skippedDelta);
     const occurredAt = this.now();
+    const nextDirectionBias = selectDirectionBias(
+      path.plasticity_state.direction_bias,
+      counts
+    );
+    const redirection = createRedirectionPublication(
+      path.plasticity_state.direction_bias,
+      nextDirectionBias,
+      counts,
+      occurredAt
+    );
 
     // Determine whether this aggregate net-reinforces or net-weakens. If the
     // net delta is zero AND there is a contradiction signal, we still want to
@@ -321,19 +425,20 @@ export class PathPlasticityService {
       const nextPlasticity = parsePlasticityState({
         ...path.plasticity_state,
         strength: proposedStrength,
+        direction_bias: nextDirectionBias,
         support_events_count: nextSupportCount,
         contradiction_events_count: nextContradictionCount,
         last_reinforced_at: occurredAt
       });
-      await this.publishReinforced({
+      return this.createReinforcedPlan({
         path,
         previousStrength,
         nextStrength: proposedStrength,
         nextPlasticity,
         supportEventsCount: nextSupportCount,
-        occurredAt
+        occurredAt,
+        ...(redirection === undefined ? {} : { redirection })
       });
-      return "reinforced";
     }
 
     if (netDelta < 0) {
@@ -348,37 +453,39 @@ export class PathPlasticityService {
         const nextPlasticity = parsePlasticityState({
           ...path.plasticity_state,
           strength: nextStrength,
+          direction_bias: nextDirectionBias,
           support_events_count: nextSupportCount,
           contradiction_events_count: nextContradictionCount,
           last_weakened_at: occurredAt
         });
-        await this.publishRetired({
+        return this.createRetiredPlan({
           path,
           finalStrength: nextStrength,
           nextPlasticity,
           reason: "strength_below_threshold_and_inactive",
-          occurredAt
+          occurredAt,
+          ...(redirection === undefined ? {} : { redirection })
         });
-        return "retired";
       }
 
       const nextPlasticity = parsePlasticityState({
         ...path.plasticity_state,
         strength: nextStrength,
+        direction_bias: nextDirectionBias,
         support_events_count: nextSupportCount,
         contradiction_events_count: nextContradictionCount,
         last_weakened_at: occurredAt
       });
-      await this.publishWeakened({
+      return this.createWeakenedPlan({
         path,
         previousStrength,
         nextStrength,
         nextPlasticity,
         contradictionEventsCount: nextContradictionCount,
         reason: counts.skipped > 0 ? "skipped_usage" : "contradiction_only",
-        occurredAt
+        occurredAt,
+        ...(redirection === undefined ? {} : { redirection })
       });
-      return "weakened";
     }
 
     if (counts.notApplicable > 0) {
@@ -393,20 +500,21 @@ export class PathPlasticityService {
         path.plasticity_state.contradiction_events_count + counts.notApplicable;
       const nextPlasticity = parsePlasticityState({
         ...path.plasticity_state,
+        direction_bias: nextDirectionBias,
         support_events_count: nextSupportCount,
         contradiction_events_count: nextContradictionCount,
         last_weakened_at: occurredAt
       });
-      await this.publishWeakened({
+      return this.createWeakenedPlan({
         path,
         previousStrength,
         nextStrength: previousStrength,
         nextPlasticity,
         contradictionEventsCount: nextContradictionCount,
         reason: "not_applicable_recurrence",
-        occurredAt
+        occurredAt,
+        ...(redirection === undefined ? {} : { redirection })
       });
-      return "weakened";
     }
 
     // netDelta === 0, no contradiction signal. Verification-gap fix:
@@ -424,20 +532,34 @@ export class PathPlasticityService {
       const nextPlasticity = parsePlasticityState({
         ...path.plasticity_state,
         strength: proposedStrength,
+        direction_bias: nextDirectionBias,
         support_events_count: nextSupportCount,
         last_weakened_at: occurredAt
       });
-      await this.publishRetired({
+      return this.createRetiredPlan({
         path,
         finalStrength: proposedStrength,
         nextPlasticity,
         reason: "strength_below_threshold_and_inactive",
-        occurredAt
+        occurredAt,
+        ...(redirection === undefined ? {} : { redirection })
       });
-      return "retired";
     }
 
-    return "none";
+    if (redirection !== undefined) {
+      const nextPlasticity = parsePlasticityState({
+        ...path.plasticity_state,
+        direction_bias: nextDirectionBias
+      });
+      return this.createRedirectedPlan({
+        path,
+        nextPlasticity,
+        redirection,
+        occurredAt
+      });
+    }
+
+    return null;
   }
 
   private isInactive(lastReinforcedAt: string | undefined, nowIso: string): boolean {
@@ -448,14 +570,37 @@ export class PathPlasticityService {
     return elapsedMs >= PATH_PLASTICITY_CONSTANTS.RETIREMENT_INACTIVITY_MS;
   }
 
-  private async publishReinforced(params: {
+  private applyMutationPlans(
+    plans: readonly PathPlasticityMutationPlan[],
+    abortSignal?: AbortSignal,
+    onMutationBoundaryEntered?: () => void
+  ): void {
+    if (plans.length === 0) {
+      return;
+    }
+
+    throwIfPathPlasticityAborted(abortSignal);
+    onMutationBoundaryEntered?.();
+    throwIfPathPlasticityAborted(abortSignal);
+    this.dependencies.eventPublisher.appendManyWithMutationAndDetachPropagation(
+      plans.flatMap((plan) => plan.eventInputs),
+      () => {
+        for (const plan of plans) {
+          this.dependencies.pathRelationRepo.update(plan.pathId, plan.updates);
+        }
+      }
+    );
+  }
+
+  private createReinforcedPlan(params: {
     readonly path: Readonly<PathRelation>;
     readonly previousStrength: number;
     readonly nextStrength: number;
     readonly nextPlasticity: Readonly<PathPlasticityState>;
     readonly supportEventsCount: number;
+    readonly redirection?: RedirectionPublication;
     readonly occurredAt: string;
-  }): Promise<void> {
+  }): PathPlasticityMutationPlan {
     const payload = parseRuntimeGovernanceEventPayload(
       RuntimeGovernanceEventType.PATH_RELATION_REINFORCED,
       {
@@ -467,8 +612,11 @@ export class PathPlasticityService {
       }
     );
 
-    await this.dependencies.eventPublisher.appendManyWithMutation(
-      [
+    return Object.freeze({
+      pathId: params.path.path_id,
+      outcome: "reinforced",
+      eventInputs: Object.freeze([
+        ...this.createRedirectionInputs(params.path, params.redirection),
         {
           event_type: RuntimeGovernanceEventType.PATH_RELATION_REINFORCED,
           entity_type: "path_relation",
@@ -476,28 +624,27 @@ export class PathPlasticityService {
           workspace_id: params.path.workspace_id,
           run_id: null,
           caused_by: "system",
-          revision: 0,
           payload_json: payload as unknown as Record<string, unknown>
         }
-      ],
-      () => {
-        this.dependencies.pathRelationRepo.updateSync(params.path.path_id, {
-          plasticity_state: params.nextPlasticity,
-          updated_at: params.occurredAt
-        });
-      }
-    );
+      ]),
+      updates: Object.freeze({
+        plasticity_state: params.nextPlasticity,
+        lifecycle: withLifecycleStatus(params.path.lifecycle, "active"),
+        updated_at: params.occurredAt
+      })
+    });
   }
 
-  private async publishWeakened(params: {
+  private createWeakenedPlan(params: {
     readonly path: Readonly<PathRelation>;
     readonly previousStrength: number;
     readonly nextStrength: number;
     readonly nextPlasticity: Readonly<PathPlasticityState>;
     readonly contradictionEventsCount: number;
     readonly reason: string;
+    readonly redirection?: RedirectionPublication;
     readonly occurredAt: string;
-  }): Promise<void> {
+  }): PathPlasticityMutationPlan {
     const payload = parseRuntimeGovernanceEventPayload(
       RuntimeGovernanceEventType.PATH_RELATION_WEAKENED,
       {
@@ -510,8 +657,11 @@ export class PathPlasticityService {
       }
     );
 
-    await this.dependencies.eventPublisher.appendManyWithMutation(
-      [
+    return Object.freeze({
+      pathId: params.path.path_id,
+      outcome: "weakened",
+      eventInputs: Object.freeze([
+        ...this.createRedirectionInputs(params.path, params.redirection),
         {
           event_type: RuntimeGovernanceEventType.PATH_RELATION_WEAKENED,
           entity_type: "path_relation",
@@ -519,26 +669,25 @@ export class PathPlasticityService {
           workspace_id: params.path.workspace_id,
           run_id: null,
           caused_by: "system",
-          revision: 0,
           payload_json: payload as unknown as Record<string, unknown>
         }
-      ],
-      () => {
-        this.dependencies.pathRelationRepo.updateSync(params.path.path_id, {
-          plasticity_state: params.nextPlasticity,
-          updated_at: params.occurredAt
-        });
-      }
-    );
+      ]),
+      updates: Object.freeze({
+        plasticity_state: params.nextPlasticity,
+        lifecycle: withLifecycleStatus(params.path.lifecycle, "active"),
+        updated_at: params.occurredAt
+      })
+    });
   }
 
-  private async publishRetired(params: {
+  private createRetiredPlan(params: {
     readonly path: Readonly<PathRelation>;
     readonly finalStrength: number;
     readonly nextPlasticity: Readonly<PathPlasticityState>;
     readonly reason: string;
+    readonly redirection?: RedirectionPublication;
     readonly occurredAt: string;
-  }): Promise<void> {
+  }): PathPlasticityMutationPlan {
     const payload = parseRuntimeGovernanceEventPayload(
       RuntimeGovernanceEventType.PATH_RELATION_RETIRED,
       {
@@ -549,8 +698,11 @@ export class PathPlasticityService {
       }
     );
 
-    await this.dependencies.eventPublisher.appendManyWithMutation(
-      [
+    return Object.freeze({
+      pathId: params.path.path_id,
+      outcome: "retired",
+      eventInputs: Object.freeze([
+        ...this.createRedirectionInputs(params.path, params.redirection),
         {
           event_type: RuntimeGovernanceEventType.PATH_RELATION_RETIRED,
           entity_type: "path_relation",
@@ -558,17 +710,66 @@ export class PathPlasticityService {
           workspace_id: params.path.workspace_id,
           run_id: null,
           caused_by: "system",
-          revision: 0,
           payload_json: payload as unknown as Record<string, unknown>
         }
-      ],
-      () => {
-        this.dependencies.pathRelationRepo.updateSync(params.path.path_id, {
-          plasticity_state: params.nextPlasticity,
-          updated_at: params.occurredAt
-        });
+      ]),
+      updates: Object.freeze({
+        plasticity_state: params.nextPlasticity,
+        lifecycle: withLifecycleStatus(params.path.lifecycle, "retired"),
+        updated_at: params.occurredAt
+      })
+    });
+  }
+
+  private createRedirectedPlan(params: {
+    readonly path: Readonly<PathRelation>;
+    readonly nextPlasticity: Readonly<PathPlasticityState>;
+    readonly redirection: RedirectionPublication;
+    readonly occurredAt: string;
+  }): PathPlasticityMutationPlan {
+    return Object.freeze({
+      pathId: params.path.path_id,
+      outcome: "redirected",
+      eventInputs: this.createRedirectionInputs(params.path, params.redirection),
+      updates: Object.freeze({
+        plasticity_state: params.nextPlasticity,
+        lifecycle: withLifecycleStatus(params.path.lifecycle, "active"),
+        updated_at: params.occurredAt
+      })
+    });
+  }
+
+  private createRedirectionInputs(
+    path: Readonly<PathRelation>,
+    redirection: RedirectionPublication | undefined
+  ): readonly EventPublisherInput[] {
+    if (redirection === undefined) {
+      return [];
+    }
+
+    const payload = parseRuntimeGovernanceEventPayload(
+      RuntimeGovernanceEventType.PATH_RELATION_REDIRECTED,
+      {
+        path_id: path.path_id,
+        previous_direction_bias: redirection.previousDirectionBias,
+        new_direction_bias: redirection.newDirectionBias,
+        source_usage_count: redirection.sourceUsageCount,
+        target_usage_count: redirection.targetUsageCount,
+        redirected_at: redirection.occurredAt
       }
     );
+
+    return [
+      {
+        event_type: RuntimeGovernanceEventType.PATH_RELATION_REDIRECTED,
+        entity_type: "path_relation",
+        entity_id: path.path_id,
+        workspace_id: path.workspace_id,
+        run_id: null,
+        caused_by: "system",
+        payload_json: payload as unknown as Record<string, unknown>
+      }
+    ];
   }
 }
 
@@ -576,12 +777,39 @@ interface MutableObjectUsageCounts {
   used: number;
   skipped: number;
   notApplicable: number;
+  sourceAnchorUsage: number;
+  targetAnchorUsage: number;
   lastReportedAt: string | null;
 }
 
 interface PathAggregate {
   readonly path: Readonly<PathRelation>;
   readonly counts: MutableObjectUsageCounts;
+}
+
+interface DirectionalPathUsage {
+  readonly path: Readonly<PathRelation>;
+  readonly sourceUsed: boolean;
+  readonly targetUsed: boolean;
+}
+
+type MutableDirectionalPathUsage = DirectionalPathUsage;
+
+interface RedirectionPublication {
+  readonly previousDirectionBias: DirectionBias;
+  readonly newDirectionBias: DirectionBias;
+  readonly sourceUsageCount: number;
+  readonly targetUsageCount: number;
+  readonly occurredAt: string;
+}
+
+type PathPlasticityMutationOutcome = "reinforced" | "weakened" | "retired" | "redirected";
+
+interface PathPlasticityMutationPlan {
+  readonly pathId: string;
+  readonly outcome: PathPlasticityMutationOutcome;
+  readonly eventInputs: readonly EventPublisherInput[];
+  readonly updates: Readonly<PathPlasticityRepoUpdate>;
 }
 
 function clampStrength(value: number): number {
@@ -603,4 +831,83 @@ function maxIsoNullable(left: string | null, right: string | null): string | nul
 
 function parsePlasticityState(value: PathPlasticityState): Readonly<PathPlasticityState> {
   return PathPlasticityStateSchema.parse(value);
+}
+
+function selectDirectionBias(
+  current: DirectionBias,
+  counts: Readonly<MutableObjectUsageCounts>
+): DirectionBias {
+  if (counts.sourceAnchorUsage > 0 && counts.targetAnchorUsage > 0) {
+    return "bidirectional_asymmetric";
+  }
+  if (counts.targetAnchorUsage > 0) {
+    return "source_to_target";
+  }
+  if (counts.sourceAnchorUsage > 0) {
+    return "target_to_source";
+  }
+  return current;
+}
+
+function createRedirectionPublication(
+  previousDirectionBias: DirectionBias,
+  newDirectionBias: DirectionBias,
+  counts: Readonly<MutableObjectUsageCounts>,
+  occurredAt: string
+): RedirectionPublication | undefined {
+  if (previousDirectionBias === newDirectionBias) {
+    return undefined;
+  }
+  return {
+    previousDirectionBias,
+    newDirectionBias,
+    sourceUsageCount: counts.sourceAnchorUsage,
+    targetUsageCount: counts.targetAnchorUsage,
+    occurredAt
+  };
+}
+
+function isRetiredPath(path: Readonly<PathRelation>): boolean {
+  return (path.lifecycle as PathLifecycleWithStatus).status === "retired";
+}
+
+function isObjectAnchor(anchor: PathAnchorRef, objectId: string): boolean {
+  return anchor.kind === "object" && anchor.object_id === objectId;
+}
+
+function uniqueStrings(values: readonly string[]): readonly string[] {
+  return [...new Set(values)];
+}
+
+function withLifecycleStatus(
+  lifecycle: PathRelation["lifecycle"],
+  status: NonNullable<PathLifecycleWithStatus["status"]>
+): PathRelation["lifecycle"] {
+  return {
+    ...lifecycle,
+    status
+  } as PathRelation["lifecycle"];
+}
+
+type PathLifecycleWithStatus = PathRelation["lifecycle"] & {
+  readonly status?: "active" | "retired";
+};
+
+function throwIfPathPlasticityAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted !== true) {
+    return;
+  }
+
+  const reason = signal.reason;
+  if (reason instanceof Error) {
+    throw reason;
+  }
+
+  const error = new Error(
+    typeof reason === "string" && reason.length > 0
+      ? reason
+      : "Path plasticity compute aborted."
+  );
+  error.name = "AbortError";
+  throw error;
 }

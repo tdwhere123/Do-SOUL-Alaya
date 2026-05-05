@@ -81,6 +81,30 @@ export class GardenScheduler {
    * higher-priority tier violation and stops there.
    */
   public async dispatchNext(role: GardenRoleValue): Promise<GardenTaskDescriptor | null> {
+    return await this.dispatchNextInternal(role, {
+      matchesTaskKind: () => true,
+      rejectTierViolations: true
+    });
+  }
+
+  public async dispatchNextMatchingTaskKind(
+    role: GardenRoleValue,
+    taskKinds: readonly GardenTaskDescriptor["task_kind"][]
+  ): Promise<GardenTaskDescriptor | null> {
+    const allowedTaskKinds = new Set<GardenTaskDescriptor["task_kind"]>(taskKinds);
+    return await this.dispatchNextInternal(role, {
+      matchesTaskKind: (task) => allowedTaskKinds.has(task.task_kind),
+      rejectTierViolations: false
+    });
+  }
+
+  private async dispatchNextInternal(
+    role: GardenRoleValue,
+    options: {
+      readonly matchesTaskKind: (task: GardenTaskDescriptor) => boolean;
+      readonly rejectTierViolations: boolean;
+    }
+  ): Promise<GardenTaskDescriptor | null> {
     const roleTier = GARDEN_ROLE_TIER_MAP[role];
     const nowIso = this.now();
     this.pruneExpiredCoolingEntries(nowIso);
@@ -91,9 +115,17 @@ export class GardenScheduler {
         continue;
       }
 
+      if (!options.matchesTaskKind(task)) {
+        continue;
+      }
+
       // Tier violations are intentionally fail-fast for the current dispatch pass:
       // reject and remove the highest-priority invalid task, then let the caller retry.
       if (TIER_ORDER[task.required_tier] > TIER_ORDER[roleTier]) {
+        if (!options.rejectTierViolations) {
+          continue;
+        }
+
         const nextQueue = removeQueueIndex(this.queue, index);
         await this.appendTierViolationEvent(task, roleTier, nowIso);
         this.replaceQueue(nextQueue, nowIso);

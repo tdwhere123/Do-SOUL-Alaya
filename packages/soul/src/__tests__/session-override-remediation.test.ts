@@ -513,7 +513,7 @@ function createDeps(
       create: vi.fn(async () => ({ object_kind: "claim_form", object_id: "claim-1" }))
     },
     eventLogRepo: {
-      append: vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => {
+      append: vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
         const stored: EventLogEntry = {
           event_id: `event-${storedEvents.length + 1}`,
           created_at: "2026-03-24T00:00:00.000Z",

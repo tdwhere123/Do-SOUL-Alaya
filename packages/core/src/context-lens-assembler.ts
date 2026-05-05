@@ -33,7 +33,6 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { RecallCandidate, RecallResult } from "./recall-service.js";
 import type { NodeStrategy } from "./task-surface-builder.js";
-import { getNextRevision } from "./shared/event-utils.js";
 
 const MAX_LENS_STORE_SIZE = 200;
 
@@ -74,7 +73,7 @@ export interface LensAssemblerMemoryRepoPort {
 }
 
 export interface LensAssemblerEventLogRepoPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
 }
 
@@ -218,8 +217,6 @@ export class ContextLensAssembler {
       contextLens = degradationApplication.contextLens;
       workingProjection = degradationApplication.workingProjection;
     }
-
-    const revision = await getNextRevision(this.dependencies.eventLogRepo, "context_lens", contextLens.runtime_id);
     await this.dependencies.eventLogRepo.append({
       event_type: RecallContextEventType.SOUL_CONTEXT_LENS_ASSEMBLED,
       entity_type: "context_lens",
@@ -227,7 +224,6 @@ export class ContextLensAssembler {
       workspace_id: params.run.workspace_id,
       run_id: params.run.run_id,
       caused_by: "system",
-      revision,
       payload_json: SoulContextLensAssembledPayloadSchema.parse({
         runtime_id: contextLens.runtime_id,
         task_surface_ref: taskSurface.runtime_id,
@@ -343,12 +339,6 @@ export class ContextLensAssembler {
         params.activeOverrides
       );
       tokensAfterDegradation = workingProjection.total_token_estimate;
-
-      const degradedRevision = await getNextRevision(
-        this.dependencies.eventLogRepo,
-        "context_lens",
-        contextLens.runtime_id
-      );
       const degradedEvent = await this.dependencies.eventLogRepo.append({
         event_type: BudgetEventType.SOUL_BUDGET_DEGRADED,
         entity_type: "context_lens",
@@ -356,7 +346,6 @@ export class ContextLensAssembler {
         workspace_id: params.run.workspace_id,
         run_id: params.run.run_id,
         caused_by: "system",
-        revision: degradedRevision,
         payload_json: SoulBudgetDegradedPayloadSchema.parse({
           run_id: params.run.run_id,
           workspace_id: params.run.workspace_id,

@@ -27,7 +27,7 @@ export type EvidenceCapsuleInput = Omit<
 >;
 
 export interface EvidenceServiceEventLogRepoPort {
-  append(event: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
 }
 
 export interface EvidenceServiceEvidenceCapsuleRepoPort {
@@ -83,7 +83,6 @@ export class EvidenceService {
       workspace_id: evidence.workspace_id,
       run_id: evidence.run_id,
       caused_by: evidence.created_by,
-      revision: 0,
       payload_json: SoulEvidenceCreatedPayloadSchema.parse({
         object_id: evidence.object_id,
         object_kind: evidence.object_kind,
@@ -124,7 +123,6 @@ export class EvidenceService {
       workspace_id: existing.workspace_id,
       run_id: existing.run_id,
       caused_by: parsedCausedBy,
-      revision: 1,
       payload_json: SoulEvidenceHealthChangedPayloadSchema.parse({
         object_id: existing.object_id,
         object_kind: existing.object_kind,

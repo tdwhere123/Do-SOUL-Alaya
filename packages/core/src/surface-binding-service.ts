@@ -35,7 +35,7 @@ const SURFACE_BINDING_GOVERNANCE_SUBJECT = canonicalGovernanceSubject("surface_g
   entity: "binding"
 }).canonical_key;
 
-type SurfaceBindingEventDraft = Omit<EventLogEntry, "event_id" | "created_at">;
+type SurfaceBindingEventDraft = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
 export interface SurfaceBindingRecordView {
   readonly binding_id: string;
@@ -48,9 +48,7 @@ export interface SurfaceBindingServiceCrossCuttingPermissionLookupRecord {
 }
 
 export interface SurfaceBindingServiceSurfaceBindingRepoPort {
-  create(binding: Readonly<SurfaceBinding>, bindingId: string): Promise<Readonly<SurfaceBindingRecordView>>;
-  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
-  createSync(binding: Readonly<SurfaceBinding>, bindingId: string): Readonly<SurfaceBindingRecordView>;
+  create(binding: Readonly<SurfaceBinding>, bindingId: string): Readonly<SurfaceBindingRecordView>;
   findByBindingId(bindingId: string): Promise<Readonly<SurfaceBindingRecordView> | null>;
   findByObjectId(objectId: string, workspaceId: string): Promise<readonly Readonly<SurfaceBindingRecordView>[]>;
   findPrimaryBinding(objectId: string, workspaceId: string): Promise<Readonly<SurfaceBindingRecordView> | null>;
@@ -64,20 +62,8 @@ export interface SurfaceBindingServiceSurfaceBindingRepoPort {
     bindingId: string,
     bindingState: BindingStateType,
     updatedAt: string
-  ): Promise<Readonly<SurfaceBindingRecordView>>;
-  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
-  updateStateSync(
-    bindingId: string,
-    bindingState: BindingStateType,
-    updatedAt: string
   ): Readonly<SurfaceBindingRecordView>;
   cascadeDetachBySurfaceId(
-    surfaceId: string,
-    workspaceId: string,
-    updatedAt: string
-  ): Promise<readonly Readonly<SurfaceBindingRecordView>[]>;
-  /** Sync sibling for use inside `EventPublisher.appendManyWithMutation` (#BL-022). */
-  cascadeDetachBySurfaceIdSync(
     surfaceId: string,
     workspaceId: string,
     updatedAt: string
@@ -218,7 +204,6 @@ export class SurfaceBindingService {
       workspace_id: existing.binding.workspace_id,
       run_id: null,
       caused_by: parsedCausedBy,
-      revision: 0,
       payload_json: SoulSurfaceBindingStateChangedPayloadSchema.parse({
           binding_id: existing.binding_id,
           object_id: existing.binding.object_id,
@@ -232,7 +217,7 @@ export class SurfaceBindingService {
       };
 
       const updated = await this.requireEventPublisher().appendManyWithMutation([event], () =>
-        this.dependencies.surfaceBindingRepo.updateStateSync(
+        this.dependencies.surfaceBindingRepo.updateState(
           existing.binding_id,
           parsedNewState,
           occurredAt
@@ -280,7 +265,6 @@ export class SurfaceBindingService {
       workspace_id: target.binding.workspace_id,
       run_id: null,
       caused_by: SYSTEM_ACTOR,
-      revision: 0,
       payload_json: SoulSurfaceBindingStateChangedPayloadSchema.parse({
         binding_id: target.binding_id,
         object_id: target.binding.object_id,
@@ -294,7 +278,7 @@ export class SurfaceBindingService {
     }));
 
     await this.requireEventPublisher().appendManyWithMutation(events, () =>
-      this.dependencies.surfaceBindingRepo.cascadeDetachBySurfaceIdSync(
+      this.dependencies.surfaceBindingRepo.cascadeDetachBySurfaceId(
         parsedSurfaceId,
         parsedWorkspaceId,
         occurredAt
@@ -405,7 +389,6 @@ export class SurfaceBindingService {
       workspace_id: binding.workspace_id,
       run_id: null,
       caused_by: binding.created_by,
-      revision: 0,
       payload_json: SoulSurfaceBindingCreatedPayloadSchema.parse({
         binding_id: bindingId,
         object_id: binding.object_id,
@@ -426,7 +409,7 @@ export class SurfaceBindingService {
   ): Promise<Readonly<SurfaceBindingRecordView>> {
     try {
       return await this.requireEventPublisher().appendManyWithMutation([event], () =>
-        this.dependencies.surfaceBindingRepo.createSync(binding, bindingId)
+        this.dependencies.surfaceBindingRepo.create(binding, bindingId)
       );
     } catch (error) {
       if (isUniqueConstraintError(error)) {

@@ -27,23 +27,17 @@ import { normalizeOptionalNonEmptyString, parseNonEmptyString } from "./shared/v
 
 export const DEFAULT_SURFACE_DRIFT_LEASE_TTL_MS = 5 * 60 * 1000;
 
-type SurfaceDriftEventInput = Omit<EventLogEntry, "event_id" | "created_at">;
+type SurfaceDriftEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
 export interface DriftLeaseRepoPort {
-  create(lease: Readonly<GovernanceDriftLease>): Promise<Readonly<GovernanceDriftLease>>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  createSync(lease: Readonly<GovernanceDriftLease>): Readonly<GovernanceDriftLease>;
+  create(lease: Readonly<GovernanceDriftLease>): Readonly<GovernanceDriftLease>;
   findActive(workspaceId: string): Promise<readonly Readonly<GovernanceDriftLease>[]>;
   findActiveById(
     workspaceId: string,
     leaseId: string
   ): Promise<Readonly<GovernanceDriftLease> | null>;
-  delete(leaseId: string): Promise<void>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  deleteSync(leaseId: string): void;
-  deleteExpired(beforeDate: string): Promise<number>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  deleteExpiredSync(beforeDate: string): number;
+  delete(leaseId: string): void;
+  deleteExpired(beforeDate: string): number;
 }
 
 export interface SurfaceDriftEventPublisherPort {
@@ -101,7 +95,6 @@ export class SurfaceDriftService {
       workspace_id: classification.workspace_id,
       run_id: null,
       caused_by: SYSTEM_ACTOR,
-      revision: 0,
       payload_json: SurfaceDriftDetectedPayloadSchema.parse({
         drift_id: classification.drift_id,
         workspace_id: classification.workspace_id,
@@ -146,7 +139,6 @@ export class SurfaceDriftService {
           workspace_id: lease.workspace_id,
           run_id: null,
           caused_by: grantedTo,
-          revision: 0,
           payload_json: SurfaceDriftLeaseAcquiredPayloadSchema.parse({
             lease_id: lease.lease_id,
             workspace_id: lease.workspace_id,
@@ -159,8 +151,8 @@ export class SurfaceDriftService {
       ],
       () => {
         try {
-          this.dependencies.leaseRepo.deleteExpiredSync(grantedAt);
-          return this.dependencies.leaseRepo.createSync(lease);
+          this.dependencies.leaseRepo.deleteExpired(grantedAt);
+          return this.dependencies.leaseRepo.create(lease);
         } catch (error) {
           if (isConflictError(error)) {
             throw new CoreError(
@@ -211,7 +203,6 @@ export class SurfaceDriftService {
             workspace_id: existingLease.workspace_id,
             run_id: null,
             caused_by: parsedReleasedBy,
-            revision: 0,
             payload_json: SurfaceDriftLeaseReleasedPayloadSchema.parse({
               lease_id: existingLease.lease_id,
               workspace_id: existingLease.workspace_id,
@@ -223,7 +214,7 @@ export class SurfaceDriftService {
           }
         ],
         () => {
-          this.dependencies.leaseRepo.deleteSync(parsedLeaseId);
+          this.dependencies.leaseRepo.delete(parsedLeaseId);
         }
       );
     } catch (error) {
@@ -260,7 +251,6 @@ export class SurfaceDriftService {
       workspace_id: alert.workspace_id,
       run_id: null,
       caused_by: SYSTEM_ACTOR,
-      revision: 0,
       payload_json: SurfaceDriftAlertPayloadSchema.parse({
         alert_id: alert.alert_id,
         drift_id: alert.drift_id,
@@ -287,7 +277,6 @@ export class SurfaceDriftService {
         workspace_id: lease.workspace_id,
         run_id: null,
         caused_by: releasedBy,
-        revision: 0,
         payload_json: SurfaceDriftLeaseReleaseFailedPayloadSchema.parse({
           lease_id: lease.lease_id,
           workspace_id: lease.workspace_id,

@@ -126,16 +126,16 @@ export interface AuditorPointerHealthPort {
 
 export interface AuditorPointerHealPort {
   findHealablePointers(workspaceId: string): Promise<readonly HealablePointerRecord[]>;
-  clearEvidenceRef(sourceObjectId: string, brokenRef: string, taskId: string): Promise<void>;
-  clearMemoryRef(sourceObjectId: string, brokenRef: string, taskId: string): Promise<void>;
-  clearSynthesisRef(sourceObjectId: string, brokenRef: string, taskId: string): Promise<void>;
+  clearEvidenceRef(sourceObjectId: string, brokenRef: string, taskId: string): void;
+  clearMemoryRef(sourceObjectId: string, brokenRef: string, taskId: string): void;
+  clearSynthesisRef(sourceObjectId: string, brokenRef: string, taskId: string): void;
 }
 
 export interface AuditorOrphanDetectionPort {
   findOrphanedMemories(workspaceId: string): Promise<readonly OrphanedMemoryRecord[]>;
-  createOrphanRadarRecord(record: Readonly<OrphanRadar>): Promise<void>;
+  createOrphanRadarRecord(record: Readonly<OrphanRadar>): void;
   findEventLogOrphans?(workspaceId: string): Promise<readonly EventLogOrphanRecord[]>;
-  createEventLogOrphanRadarRecord?(record: Readonly<EventLogOrphanRadarRecord>): Promise<void>;
+  createEventLogOrphanRadarRecord?(record: Readonly<EventLogOrphanRadarRecord>): void;
 }
 
 export interface AuditorGreenMaintenancePort {
@@ -158,9 +158,9 @@ export interface AuditorSchedulerPort {
 }
 
 export interface AuditorEventLogPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
-  publishWithMutation<T>(
-    entry: Omit<EventLogEntry, "event_id" | "created_at">,
-    mutate: (entry: EventLogEntry) => Promise<T>
+  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
+  appendManyWithMutation<T>(
+    entries: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+    mutate: (entries: readonly EventLogEntry[]) => T
   ): Promise<T>;
 }

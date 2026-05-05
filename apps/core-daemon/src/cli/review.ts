@@ -23,6 +23,7 @@ export interface ReviewCommandDependencies {
   readonly defaultRunId?: string | null;
   readonly defaultAgentTarget?: string;
   readonly defaultReviewerIdentity?: string;
+  readonly defaultReviewerToken?: string;
 }
 
 interface ReviewArgs {
@@ -92,14 +93,14 @@ async function runPending(
   }
 
   if (ctx.jsonRequested !== true) {
-    const summaries = (result.output as { proposals?: readonly Record<string, string>[] })
+    const summaries = (result.output as { proposals?: readonly Record<string, unknown>[] })
       .proposals;
     if (summaries === undefined || summaries.length === 0) {
       ctx.stdout.write("(no pending proposals)\n");
     } else {
       for (const summary of summaries) {
         ctx.stdout.write(
-          `${summary.proposal_id}\t${summary.target_object_kind}\t${summary.target_object_id}\t${summary.created_at}\t${summary.proposed_change_summary}\n`
+          `${formatCell(summary.proposal_id)}\t${formatCell(summary.target_object_kind)}\t${formatCell(summary.target_object_id)}\t${formatCell(summary.created_at)}\t${formatCell(summary.assigned_reviewer_identity)}\t${formatCell(summary.deadline_at)}\t${formatOverdue(summary.is_overdue)}\t${formatCell(summary.proposed_change_summary)}\n`
         );
       }
     }
@@ -121,7 +122,23 @@ async function runReview(
   }
 
   const callContext = buildCallContext(ctx, args, deps);
+  let reviewerBinding: { readonly token: string; readonly identity: string } | null;
+  try {
+    reviewerBinding = resolveReviewerBinding(ctx, deps);
+  } catch (error) {
+    ctx.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    return { exitCode: ALAYA_SYSEXITS.USAGE };
+  }
+  if (
+    reviewerBinding !== null &&
+    args.reviewerIdentity !== null &&
+    args.reviewerIdentity !== reviewerBinding.identity
+  ) {
+    ctx.stderr.write("reviewer identity does not match ALAYA_REVIEWER_IDENTITY.\n");
+    return { exitCode: ALAYA_SYSEXITS.USAGE };
+  }
   const reviewerIdentity =
+    reviewerBinding?.identity ??
     args.reviewerIdentity ??
     deps.defaultReviewerIdentity ??
     ctx.env.ALAYA_REVIEWER_IDENTITY ??
@@ -133,14 +150,19 @@ async function runReview(
     return { exitCode: ALAYA_SYSEXITS.USAGE };
   }
 
+  const reviewArguments: Record<string, unknown> = {
+    proposal_id: args.proposalId,
+    verdict: args.action === "accept" ? "accept" : "reject",
+    reason: args.reason,
+    reviewer_identity: reviewerIdentity
+  };
+  if (reviewerBinding !== null) {
+    reviewArguments.reviewer_token = reviewerBinding.token;
+  }
+
   const result = await deps.handler.call({
     toolName: "soul.review_memory_proposal",
-    arguments: {
-      proposal_id: args.proposalId,
-      verdict: args.action === "accept" ? "accept" : "reject",
-      reason: args.reason,
-      reviewer_identity: reviewerIdentity
-    },
+    arguments: reviewArguments,
     context: callContext
   });
 
@@ -162,6 +184,34 @@ async function runReview(
     exitCode: ALAYA_SYSEXITS.OK,
     json: result.output
   };
+}
+
+function resolveReviewerBinding(
+  ctx: AlayaCliContext,
+  deps: ReviewCommandDependencies
+): { readonly token: string; readonly identity: string } | null {
+  const token = normalizeOptionalString(deps.defaultReviewerToken ?? ctx.env.ALAYA_REVIEWER_TOKEN);
+  if (token === null) {
+    return null;
+  }
+  const identity = normalizeOptionalString(deps.defaultReviewerIdentity ?? ctx.env.ALAYA_REVIEWER_IDENTITY);
+  if (identity === null) {
+    throw new Error("ALAYA_REVIEWER_TOKEN and ALAYA_REVIEWER_IDENTITY must be configured together.");
+  }
+  return { token, identity };
+}
+
+function normalizeOptionalString(value: string | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized === undefined || normalized.length === 0 ? null : normalized;
+}
+
+function formatCell(value: unknown): string {
+  return typeof value === "string" && value.length > 0 ? value : "-";
+}
+
+function formatOverdue(value: unknown): string {
+  return value === true ? "overdue" : "open";
 }
 
 function reviewArgsSchema(): AlayaCliArgsSchema<ReviewArgs> {
@@ -293,12 +343,11 @@ function buildCallContext(
   args: ReviewArgs,
   deps: ReviewCommandDependencies
 ): McpMemoryToolCallContext {
-  // D2 MERGED-I3: the `alaya review` verbs ARE the human-reviewer surface
-  // — they MUST default to `runId: null` regardless of `ALAYA_RUN_ID`.
-  // Reading the env var here re-opens the failure A1's fix-loop closed
-  // (a human reviewer cannot review run-scoped proposals because the
-  // strict run check rejects them). Only an explicit `--run` argument
-  // changes the runId; otherwise we ignore the env entirely.
+  // D2 MERGED-I3 / Gate-5F: the `alaya review` verbs ARE the
+  // human-reviewer surface. They MUST default to `runId: null` and
+  // `agentTarget: "cli"` regardless of attach-session env such as
+  // ALAYA_RUN_ID / ALAYA_AGENT_TARGET. Only explicit CLI/dependency
+  // overrides change the review context.
   return {
     workspaceId:
       args.contextOverrides.workspaceId ??
@@ -312,7 +361,6 @@ function buildCallContext(
     agentTarget:
       args.contextOverrides.agentTarget ??
       deps.defaultAgentTarget ??
-      ctx.env.ALAYA_AGENT_TARGET ??
       "cli"
   };
 }

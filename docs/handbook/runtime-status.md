@@ -24,6 +24,7 @@ each Phase Gate.
 | Phase 3 | Wave 3: foundation helpers, ConversationService, MCP discovery, run lifecycle, misc services, core barrel | **done** | Gate-3 passed |
 | Phase 4 | Wave 4: Core daemon, routes, MCP server transport, real profile mutation, CLI bridge, secrets, Inspector server, Inspector frontend | MCP memory surface `mcp-consumable`; Inspector config-write and trust delivery/usage durability fixes verified | Gate-4 passed 2026-05-01 |
 | Phase 5 | Wave 5: full E2E, graph contract, final review | **done**: graph contract `schema-ready`; release E2E `live-event-ready`; final review `mcp-consumable` | Gate-5 passed 2026-05-02 |
+| Gate-5F | Post-Gate-5 backlog closeout | **done**: `#BL-025`..`#BL-036` resolved; aggregate final review clean; full verification passed | Gate-5F passed |
 
 ## Subsystem Readiness (target = v0.1 release)
 
@@ -183,10 +184,9 @@ Highlights:
   and three `expect.toBeDefined()` weak assertions were upgraded to
   interface-shape assertions.
 
-Backlog Open count is 0. The only remaining items are the two v0.2
-deferrals (`#BL-008` pi-mono, `#BL-009` keychain) and the seven
-`#BL-001..#BL-007` ADR-style out-of-scope entries. (`#BL-022`
-EventPublisher atomic port closed in v0.1-closeout-a2.)
+Backlog Open count for `#BL-025` through `#BL-036` is zero after the
+Gate-5F implementation cards. Gate-5F aggregate final review and full
+verification have passed; Phase 6 remains not-started.
 
 ## v0.1-closeout lessons (parallel A1/A2/A3 sub-agent dispatch)
 
@@ -232,15 +232,14 @@ The release diff vs. the previous `v0.1.0` framing absorbs:
   on review records, Inspector "Pending Proposals" view).
 - **A2** — `EventPublisher.appendManyWithMutation` atomic primitive +
   14 producer migrations, closing `#BL-022`. Legacy
-  `publishWithMutation` / `publishManyWithMutation` are
-  `@deprecated` and survive only for one auditor adapter (`#BL-026`).
+  `publishWithMutation` / `publishManyWithMutation` survived only until
+  Gate-5F, which removed the final Garden adapter dependency (`#BL-026`).
 - **A3** — Path-axis plasticity feedback loop:
   `PathPlasticityService` consumes `MEMORY_USAGE_REPORTED` →
   emits `PathRelationReinforced/Weakened/Retired` runtime-governance
   events → `RecallService` factors a plasticity weight into recall
-  scoring. Three of the four named plasticity ops shipped
-  (reinforcement / weakening / retirement); `direction_bias`
-  redirection is `#BL-029`.
+  scoring. Gate-5F later wired the fourth named plasticity op,
+  `direction_bias` redirection (`#BL-029`).
 - **C1** — Post-port hygiene wave: protocol `phase-*.ts` → domain
   names (e.g. `events/runtime-governance.ts`); oversized files split;
   `knip` unused-export check pinned; `code-map.md` refreshed.
@@ -251,9 +250,9 @@ findings inline (cross-workspace recall poisoning via
 plasticity receipts via in-process watermark (`B2`), CLI review
 `ALAYA_RUN_ID` override, Inspector POST `null` body TypeError,
 `assertProposalContext` over-loosening, `proposed_changes.content`
-size cap, etc.) and opened ten v0.2 backlog cards
-(`#BL-027`..`#BL-036`) for the remaining deferrals — each with
-explicit close conditions per `feedback_no_backlog`.
+size cap, etc.) and opened ten Gate-5F backlog cards
+(`#BL-027`..`#BL-036`) for Gate-5F — each with explicit close
+conditions per `feedback_no_backlog`, and each resolved before Phase 6.
 
 End-to-end verification at the merge commit:
 `rtk pnpm build` exit 0; `rtk pnpm test` 258 test files / 1996 tests
@@ -298,3 +297,8 @@ non-blocking and tracked for a follow-up wave.
   from real PathRelation data, full E2E proof, and final multi-lens
   review with zero Blocking / Important findings. Benchmark fixtures
   are Phase 6 / Gate-6 / v0.1.1 scope.
+- **Gate-5F (backlog closeout)**: backlog items `#BL-025` through
+  `#BL-036` resolved; final review reported zero Blocking / Important
+  findings; `rtk pnpm build`,
+  `rtk pnpm exec tsc --noEmit -p packages/core/tsconfig.json`, and
+  `rtk pnpm test` passed on the integrated branch.

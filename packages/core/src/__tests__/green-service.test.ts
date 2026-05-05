@@ -91,10 +91,11 @@ function createHarness(options: {
   const events: EventLogEntry[] = [...(options.initialEvents ?? [])];
   const warn = vi.fn();
   const notifyEntry = vi.fn(async (_entry: EventLogEntry) => undefined);
-  const appendEvent = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">) => {
+  const appendEvent = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
     const created: EventLogEntry = {
       event_id: `event-${events.length + 1}`,
       created_at: "2026-03-24T00:00:00.000Z",
+      revision: 0,
       ...entry
     };
     events.push(created);
@@ -608,7 +609,6 @@ describe("GreenService", () => {
       workspace_id: "workspace-1",
       run_id: null,
       caused_by: "system",
-      revision: 0,
       payload_json: {
         object_id: "9bc1a292-e9c2-47f9-9c6f-bf6b67c810f3",
         target_object_id: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",

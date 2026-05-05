@@ -99,15 +99,16 @@ These rules always win over lower-level docs and task-card convenience.
 21b. `reviewer_identity` on review records (`proposals.reviewer_identity`
     column, `caused_by` field on `SOUL_REVIEW_*` /
     `SOUL_PROPOSAL_RESOLVED` event_log rows, `reviewer_identity`
-    request field on `soul.review_memory_proposal`) is in v0.1 an
-    **agent-asserted attestation, not an authenticated principal**.
-    The MCP / Inspector / CLI surfaces accept it verbatim as a
-    `BoundedIdSchema` string with no signature verification. Operators
-    reading these audit rows MUST treat the value as "the agent / human
-    attested to this identity" rather than "the runtime verified this
-    identity". v0.2 (`#BL-027` full review-inbox UX) will bind it
-    server-side from a pre-shared session credential. (Added in
-    v0.1-closeout D2 MERGED-I21 / red-team-I1.)
+    request field on `soul.review_memory_proposal`) has two v0.1
+    trust modes. When `ALAYA_REVIEWER_TOKEN` and
+    `ALAYA_REVIEWER_IDENTITY` are configured, the daemon binds review
+    identity server-side and rejects missing, bad, or mismatched
+    reviewer tokens; payload identity cannot override the configured
+    identity. When local binding is not configured, the field remains
+    an agent-asserted attestation and operators MUST treat it as "the
+    agent / human attested to this identity" rather than "the runtime
+    verified this identity". (Added in v0.1-closeout D2 MERGED-I21 /
+    red-team-I1; updated by Gate-5F `#BL-027`.)
 22. MCP tool surface and CLI fallback share one runtime contract. CLI
     fallback parity with MCP is enforced by tests.
 23. Attach / Profile changes write only after preview + explicit

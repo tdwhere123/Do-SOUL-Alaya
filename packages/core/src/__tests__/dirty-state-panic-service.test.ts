@@ -52,7 +52,7 @@ function createWorkerRun(overrides: Partial<DelegatedWorkerRun> = {}): Delegated
 // Helper: in-test publisher that simulates the appendManyWithMutation contract
 // (sync mutate, batch-array first arg) used by DirtyStatePanicService after #BL-022.
 function fakeAppendManyWithMutation(
-  publishedEvents?: Array<EventLogEntry | Omit<EventLogEntry, "event_id" | "created_at">>
+  publishedEvents?: Array<EventLogEntry | Omit<EventLogEntry, "event_id" | "created_at" | "revision">>
 ): ReturnType<typeof vi.fn> {
   return vi.fn(async (events: any[], mutate: (entries: any[]) => any) => {
     if (publishedEvents) {
@@ -92,7 +92,7 @@ describe("DirtyStatePanicService", () => {
 
     const workerRunRepo = {
       getById: vi.fn(async (workerRunId: string) => workerStore.get(workerRunId) ?? null),
-      updateStateSync: vi.fn(
+      updateState: vi.fn(
         (workerRunId: string, _expected: string, nextState: string, updatedAt: string) => {
           const current = workerStore.get(workerRunId);
           if (current === undefined) {
@@ -108,9 +108,9 @@ describe("DirtyStatePanicService", () => {
         }
       )
     };
-    const publishedEvents: Array<EventLogEntry | Omit<EventLogEntry, "event_id" | "created_at">> = [];
+    const publishedEvents: Array<EventLogEntry | Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
     const appendManyWithMutation = fakeAppendManyWithMutation(publishedEvents);
-    const createSync = vi.fn((dossier: DirtyStateDossier) => dossier);
+    const create = vi.fn((dossier: DirtyStateDossier) => dossier);
 
     const service = new DirtyStatePanicService({
       workerRunRepo,
@@ -119,7 +119,7 @@ describe("DirtyStatePanicService", () => {
           appendManyWithMutation as unknown as DirtyStatePanicServiceDependencies["eventPublisher"]["appendManyWithMutation"]
       },
       dossierRepo: {
-        createSync,
+        create,
         deleteById: vi.fn(async () => undefined),
         findByWorkspace: vi.fn(),
         findByWorkerRun: vi.fn()
@@ -157,7 +157,6 @@ describe("DirtyStatePanicService", () => {
       workspace_id: "workspace-1",
       run_id: "principal-run-1",
       caused_by: "dirty_state_panic",
-      revision: 0,
       payload_json: {
         dossier_id: "dossier-1",
         worker_run_id: "worker-run-1",
@@ -181,15 +180,15 @@ describe("DirtyStatePanicService", () => {
         panicSummary: "active hard_stop refs: policy-hard-stop"
       })
     });
-    expect(createSync).toHaveBeenCalledWith(dossier);
-    expect(workerRunRepo.updateStateSync).toHaveBeenCalledWith(
+    expect(create).toHaveBeenCalledWith(dossier);
+    expect(workerRunRepo.updateState).toHaveBeenCalledWith(
       "worker-run-1",
       "init",
       "frozen",
       FIXED_NOW
     );
-    expect(createSync.mock.invocationCallOrder[0]).toBeLessThan(
-      workerRunRepo.updateStateSync.mock.invocationCallOrder[0]!
+    expect(create.mock.invocationCallOrder[0]).toBeLessThan(
+      workerRunRepo.updateState.mock.invocationCallOrder[0]!
     );
 
     expect(workerStore.get("worker-run-1")?.state).toBe("frozen");
@@ -197,20 +196,20 @@ describe("DirtyStatePanicService", () => {
   });
 
   it("rejects an invalid worker_run -> frozen transition before opening the transaction", async () => {
-    const createSync = vi.fn((dossier: DirtyStateDossier) => dossier);
-    const updateStateSync = vi.fn();
+    const create = vi.fn((dossier: DirtyStateDossier) => dossier);
+    const updateState = vi.fn();
     const appendManyWithMutation = vi.fn();
     const service = new DirtyStatePanicService({
       workerRunRepo: {
         getById: vi.fn(async () => createWorkerRun({ state: "frozen" })),
-        updateStateSync
+        updateState
       },
       eventPublisher: {
         appendManyWithMutation:
           appendManyWithMutation as unknown as DirtyStatePanicServiceDependencies["eventPublisher"]["appendManyWithMutation"]
       },
       dossierRepo: {
-        createSync,
+        create,
         deleteById: vi.fn(async () => undefined),
         findByWorkspace: vi.fn(),
         findByWorkerRun: vi.fn()
@@ -235,8 +234,8 @@ describe("DirtyStatePanicService", () => {
     });
 
     expect(appendManyWithMutation).not.toHaveBeenCalled();
-    expect(createSync).not.toHaveBeenCalled();
-    expect(updateStateSync).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(updateState).not.toHaveBeenCalled();
   });
 
   it("accepts every B-8 panic trigger enum", async () => {
@@ -252,14 +251,14 @@ describe("DirtyStatePanicService", () => {
     const service = new DirtyStatePanicService({
       workerRunRepo: {
         getById: vi.fn(async () => createWorkerRun()),
-        updateStateSync: vi.fn(() => createWorkerRun({ state: "frozen" }))
+        updateState: vi.fn(() => createWorkerRun({ state: "frozen" }))
       },
       eventPublisher: {
         appendManyWithMutation:
           appendManyWithMutation as unknown as DirtyStatePanicServiceDependencies["eventPublisher"]["appendManyWithMutation"]
       },
       dossierRepo: {
-        createSync: vi.fn((dossier: DirtyStateDossier) => dossier),
+        create: vi.fn((dossier: DirtyStateDossier) => dossier),
         deleteById: vi.fn(async () => undefined),
         findByWorkspace: vi.fn(),
         findByWorkerRun: vi.fn()
@@ -285,13 +284,13 @@ describe("DirtyStatePanicService", () => {
     const service = new DirtyStatePanicService({
       workerRunRepo: {
         getById: vi.fn(async () => null),
-        updateStateSync: vi.fn()
+        updateState: vi.fn()
       },
       eventPublisher: {
         appendManyWithMutation: vi.fn()
       },
       dossierRepo: {
-        createSync: vi.fn(),
+        create: vi.fn(),
         deleteById: vi.fn(),
         findByWorkspace: vi.fn(),
         findByWorkerRun: vi.fn()

@@ -63,6 +63,7 @@ import {
   SqliteMemoryGraphEdgeRepo,
   SqliteOrphanRadarRepo,
   SqlitePathGraphSnapshotRepo,
+  SqlitePathPlasticityWatermarkRepo,
   SqlitePathRelationRepo,
   SqliteProjectMappingAnchorRepo,
   SqliteProposalRepo,
@@ -214,6 +215,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const trustStateRepo = new SqliteTrustStateRepo(database);
   const strongRefRepo = new SqliteStrongRefRepo(database);
   const pathRelationRepo = new SqlitePathRelationRepo(database);
+  const pathPlasticityWatermarkRepo = new SqlitePathPlasticityWatermarkRepo(database);
   const pathGraphSnapshotRepo = new SqlitePathGraphSnapshotRepo(database);
   const deferredObligationRepo = new SqliteDeferredObligationRepo(database);
   const dirtyStateDossierRepo = new SqliteDirtyStateDossierRepo(database);
@@ -665,6 +667,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     orphanRadarRepo,
     pathGraphSnapshotRepo,
     pathRelationRepo,
+    pathPlasticityWatermarkRepo,
     pathPlasticityService,
     embeddingBackfillHandler,
     strongRefService,

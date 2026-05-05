@@ -6,10 +6,11 @@ import {
 } from "@do-soul/alaya-protocol";
 import { GovernanceLeaseService } from "../governance-lease-service.js";
 
-function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at">): EventLogEntry {
+function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry {
   return {
     event_id: `event-${event.event_type}-${event.entity_id}`,
     created_at: "2026-03-25T00:00:00.000Z",
+    revision: 0,
     ...event
   };
 }
@@ -17,7 +18,7 @@ function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at
 describe("GovernanceLeaseService", () => {
   it("acquires a lease, appends the audit event before store mutation, and exposes the active lease", async () => {
     let service!: GovernanceLeaseService;
-    const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => {
+    const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
       await expect(service.getActive("run-1")).resolves.toBeNull();
       return createEventLogEntry(event);
     });
@@ -50,7 +51,6 @@ describe("GovernanceLeaseService", () => {
         entity_id: lease.runtime_id,
         workspace_id: "workspace-1",
         run_id: "run-1",
-        revision: 0,
         payload_json: expect.objectContaining({
           lease_id: lease.lease_id,
           holder: lease.holder,
@@ -61,7 +61,7 @@ describe("GovernanceLeaseService", () => {
   });
 
   it("releases a held lease by appending a release event", async () => {
-    const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => createEventLogEntry(event));
+    const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(event));
     const service = new GovernanceLeaseService({
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
@@ -92,7 +92,7 @@ describe("GovernanceLeaseService", () => {
   });
 
   it("rejects an empty runId when releasing a lease", async () => {
-    const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => createEventLogEntry(event));
+    const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(event));
     const service = new GovernanceLeaseService({
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
@@ -119,7 +119,7 @@ describe("GovernanceLeaseService", () => {
   });
 
   it("pierces an active lease and appends the pierced audit event", async () => {
-    const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => createEventLogEntry(event));
+    const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(event));
     const service = new GovernanceLeaseService({
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
@@ -156,7 +156,7 @@ describe("GovernanceLeaseService", () => {
   });
 
   it("rejects unsupported piercing conditions without mutating the active lease", async () => {
-    const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => createEventLogEntry(event));
+    const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(event));
     const service = new GovernanceLeaseService({
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
@@ -244,7 +244,7 @@ describe("GovernanceLeaseService", () => {
   });
 
   it("does not rehydrate expired leases after restart or emit release events for them", async () => {
-    const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => createEventLogEntry(event));
+    const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(event));
     const eventLogRepo = createEventLogRepo({ append: appendSpy });
     const firstService = new GovernanceLeaseService({
       now: () => "2026-03-25T00:00:00.000Z",
@@ -283,7 +283,6 @@ describe("GovernanceLeaseService", () => {
             workspace_id: "workspace-1",
             run_id: "run-1",
             caused_by: "system",
-            revision: 0,
             payload_json: {
               lease_id: "",
               holder: "run:run-1:turn:lease-bad",
@@ -311,7 +310,6 @@ describe("GovernanceLeaseService", () => {
         workspace_id: "workspace-1",
         run_id: "run-1",
         caused_by: "system",
-        revision: 0,
         payload_json: {
           lease_id: "99999999-9999-4999-8999-999999999999",
           holder: "run:run-1:turn:99999999-9999-4999-8999-999999999999",
@@ -344,7 +342,7 @@ describe("GovernanceLeaseService", () => {
 });
 
 function createEventLogRepo(overrides: Partial<{
-  append: (event: Omit<EventLogEntry, "event_id" | "created_at">) => Promise<EventLogEntry>;
+  append: (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => Promise<EventLogEntry>;
   queryByRun: (runId: string) => Promise<readonly EventLogEntry[]>;
   queryByEntity: (entityType: string, entityId: string) => Promise<readonly EventLogEntry[]>;
 }> = {}) {
@@ -353,7 +351,7 @@ function createEventLogRepo(overrides: Partial<{
   return {
     append:
       overrides.append ??
-      vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => {
+      vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
         const entry = createEventLogEntry(event);
         appendedEvents.push(entry);
         return entry;

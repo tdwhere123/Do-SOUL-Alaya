@@ -132,9 +132,10 @@ function createDependencies(
   readonly appendSpy: ReturnType<typeof vi.fn>;
   readonly warnSpy: ReturnType<typeof vi.fn>;
 } {
-  const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+  const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
     event_id: `event-${event.event_type}`,
     created_at: "2026-03-23T00:00:00.000Z",
+    revision: 0,
     ...event
   }));
   const warnSpy = vi.fn();

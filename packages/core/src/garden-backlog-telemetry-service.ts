@@ -9,7 +9,6 @@ import {
   type HealthJournalRecordPort
 } from "@do-soul/alaya-protocol";
 import { SYSTEM_ACTOR, resolveSystemWorkspaceId } from "./shared/actors.js";
-import { getNextRevision } from "./shared/event-utils.js";
 import type { RuntimeNotifier } from "./event-publisher.js";
 
 const GARDEN_BACKLOG_ENTITY_TYPE = "garden_backlog";
@@ -29,7 +28,7 @@ export interface GardenBacklogTelemetrySchedulerPort {
 }
 
 export interface GardenBacklogTelemetryEventLogPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
 }
 
@@ -403,11 +402,6 @@ export class GardenBacklogTelemetryService {
       | typeof ComputeRecallGardenEventType.GARDEN_BACKLOG_WARNING,
     payload: Record<string, unknown>
   ): Promise<EventLogEntry> {
-    const revision = await getNextRevision(
-      this.deps.eventLogRepo,
-      GARDEN_BACKLOG_ENTITY_TYPE,
-      GARDEN_BACKLOG_ENTITY_ID
-    );
     return await this.deps.eventLogRepo.append({
       event_type: eventType,
       entity_type: GARDEN_BACKLOG_ENTITY_TYPE,
@@ -415,7 +409,6 @@ export class GardenBacklogTelemetryService {
       workspace_id: this.systemWorkspaceId,
       run_id: null,
       caused_by: SYSTEM_ACTOR,
-      revision,
       payload_json: parseComputeRecallGardenEventPayload(eventType, payload)
     });
   }

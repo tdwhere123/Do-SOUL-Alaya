@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import {
   ControlPlaneObjectKind,
   NonEmptyStringSchema,
@@ -25,7 +25,7 @@ import type {
 } from "./mcp-memory-tool-handler.js";
 
 export interface McpMemoryProposalWorkflowEventLogRepo {
-  append(event: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
 }
 
@@ -50,7 +50,16 @@ export interface McpMemoryProposalWorkflowProposalRepo {
       readonly proposed_change_summary?: string;
       readonly created_at?: string;
     },
-    events: readonly ProposalCreationEventInput[]
+    events: readonly ProposalCreationEventInput[],
+    options?: {
+      readonly reviewerAssignment?: {
+        readonly proposal_id: string;
+        readonly reviewer_identity: string;
+        readonly assigned_at: string;
+        readonly deadline_at?: string | null;
+        readonly escalation_after_ms?: number | null;
+      };
+    }
   ): Promise<Readonly<{
     readonly proposal: Readonly<Proposal>;
     readonly events: readonly EventLogEntry[];
@@ -64,6 +73,7 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     // depend on this field (it is informational for callers), so legacy
     // test fakes that omit it remain compatible via the optional shape.
     readonly reviewer_identity?: string | null;
+    readonly reviewer_assignment?: Readonly<{ readonly reviewer_identity: string }> | null;
   }> | null>;
   // A1 (HITL daemon backbone) — pending-queue projection. The repo
   // already enforces workspace scoping; the workflow simply forwards
@@ -73,6 +83,7 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     options?: {
       readonly since?: string | null;
       readonly limit?: number;
+      readonly now?: string;
     }
   ): Promise<readonly Readonly<SoulPendingProposalSummary>[]>;
   updatePendingResolutionWithEvents(
@@ -91,10 +102,16 @@ export interface McpMemoryProposalWorkflowRuntimeNotifier {
   notifyEntry(entry: EventLogEntry): void | Promise<void>;
 }
 
+export interface ReviewerIdentityBinding {
+  readonly token: string;
+  readonly identity: string;
+}
+
 export interface McpMemoryProposalWorkflowDependencies {
   readonly eventLogRepo: McpMemoryProposalWorkflowEventLogRepo;
   readonly proposalRepo: McpMemoryProposalWorkflowProposalRepo;
   readonly runtimeNotifier: McpMemoryProposalWorkflowRuntimeNotifier;
+  readonly reviewerIdentityBinding?: ReviewerIdentityBinding;
   readonly now?: () => string;
   readonly generateObjectId?: () => string;
 }
@@ -158,6 +175,17 @@ export function createMcpMemoryProposalWorkflow(
       }
     ];
 
+    const reviewerAssignment =
+      deps.reviewerIdentityBinding === undefined
+        ? undefined
+        : {
+            proposal_id: proposal.proposal_id,
+            reviewer_identity: deps.reviewerIdentityBinding.identity,
+            assigned_at: timestamp,
+            deadline_at: proposal.expires_at,
+            escalation_after_ms: null
+          };
+
     const created = await deps.proposalRepo.createProposalWithEvents(
       {
         proposal,
@@ -171,7 +199,8 @@ export function createMcpMemoryProposalWorkflow(
         proposed_change_summary: input.reason,
         created_at: timestamp
       },
-      creationEvents
+      creationEvents,
+      reviewerAssignment === undefined ? undefined : { reviewerAssignment }
     );
     for (const event of created.events) {
       await deps.runtimeNotifier.notifyEntry(event);
@@ -193,6 +222,8 @@ export function createMcpMemoryProposalWorkflow(
       throw createWorkflowError("VALIDATION", `Proposal is already ${proposal.resolution_state}`);
     }
 
+    const reviewerIdentity = resolveReviewerIdentity(input, deps.reviewerIdentityBinding);
+    assertReviewerAssignment(scopedProposal, reviewerIdentity);
     const reviewedAt = now();
     const toState =
       input.verdict === "accept"
@@ -210,7 +241,7 @@ export function createMcpMemoryProposalWorkflow(
         entity_id: proposal.proposal_id,
         workspace_id: context.workspaceId,
         run_id: context.runId,
-        caused_by: input.reviewer_identity,
+        caused_by: reviewerIdentity,
         payload_json: SoulReviewCreatedPayloadSchema.parse({
           object_id: proposal.runtime_id,
           object_kind: proposal.object_kind,
@@ -224,7 +255,7 @@ export function createMcpMemoryProposalWorkflow(
         entity_id: proposal.proposal_id,
         workspace_id: context.workspaceId,
         run_id: context.runId,
-        caused_by: input.reviewer_identity,
+        caused_by: reviewerIdentity,
         payload_json: SoulReviewCompletedPayloadSchema.parse({
           object_id: proposal.runtime_id,
           object_kind: proposal.object_kind,
@@ -244,7 +275,7 @@ export function createMcpMemoryProposalWorkflow(
         entity_id: proposal.proposal_id,
         workspace_id: context.workspaceId,
         run_id: context.runId,
-        caused_by: input.reviewer_identity,
+        caused_by: reviewerIdentity,
         payload_json: SoulProposalResolvedPayloadSchema.parse({
           object_id: proposal.runtime_id,
           object_kind: proposal.object_kind,
@@ -270,7 +301,7 @@ export function createMcpMemoryProposalWorkflow(
         toState,
         reviewedAt,
         reviewEvents,
-        { reviewerIdentity: input.reviewer_identity }
+        { reviewerIdentity }
       );
     } catch (error) {
       throw normalizeResolutionError(error);
@@ -297,7 +328,8 @@ export function createMcpMemoryProposalWorkflow(
     // context.workspaceId — never input — to the repo.
     const summaries = await deps.proposalRepo.findPendingSummaries(context.workspaceId, {
       since: input.since ?? null,
-      limit: input.limit ?? 50
+      limit: input.limit ?? 50,
+      now: now()
     });
     return {
       proposals: summaries,
@@ -318,6 +350,44 @@ const HUMAN_REVIEWER_AGENT_TARGETS: ReadonlySet<string> = new Set([
   "inspector",
   "cli"
 ]);
+
+function resolveReviewerIdentity(
+  input: SoulReviewMemoryProposalRequest,
+  binding: ReviewerIdentityBinding | undefined
+): string {
+  if (binding === undefined) {
+    return input.reviewer_identity;
+  }
+
+  if (!matchesReviewerToken(input.reviewer_token, binding.token)) {
+    throw createWorkflowError("VALIDATION", "Invalid reviewer token.");
+  }
+  if (input.reviewer_identity !== binding.identity) {
+    throw createWorkflowError("VALIDATION", "Reviewer identity does not match server-bound reviewer.");
+  }
+  return binding.identity;
+}
+
+function assertReviewerAssignment(
+  scopedProposal: Readonly<{
+    readonly reviewer_assignment?: Readonly<{ readonly reviewer_identity: string }> | null;
+  }>,
+  reviewerIdentity: string
+): void {
+  const assignment = scopedProposal.reviewer_assignment ?? null;
+  if (assignment !== null && assignment.reviewer_identity !== reviewerIdentity) {
+    throw createWorkflowError("VALIDATION", "Proposal is assigned to a different reviewer.");
+  }
+}
+
+function matchesReviewerToken(providedToken: string | undefined, expectedToken: string): boolean {
+  if (providedToken === undefined || providedToken.length === 0) {
+    return false;
+  }
+  const provided = Buffer.from(providedToken);
+  const expected = Buffer.from(expectedToken);
+  return provided.length === expected.length && timingSafeEqual(provided, expected);
+}
 
 function assertProposalContext(
   scopedProposal: Readonly<{

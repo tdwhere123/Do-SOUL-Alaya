@@ -35,7 +35,7 @@ describe("SqliteDirtyStateDossierRepo", () => {
     const { database, repo } = createRepo();
     const dossier = createDossier();
 
-    await expect(repo.create(dossier)).resolves.toEqual(dossier);
+    expect(repo.create(dossier)).toEqual(dossier);
 
     const rawRow = database.connection
       .prepare(

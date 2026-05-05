@@ -55,9 +55,8 @@ export class ConstraintProxy {
       workspace_id: parsedWorkspaceId,
       run_id: parsedRunId,
       caused_by: "constraint_proxy",
-      revision: 0,
       payload_json: payload
-    } satisfies Omit<EventLogEntry, "event_id" | "created_at">);
+    } satisfies Omit<EventLogEntry, "event_id" | "created_at" | "revision">);
 
     throw new CoreError(
       "OBLIGATION_VIOLATION",

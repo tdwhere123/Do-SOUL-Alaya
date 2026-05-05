@@ -14,9 +14,7 @@ interface PathGraphSnapshotRow {
 }
 
 export interface PathGraphSnapshotRepo {
-  create(snapshot: PathGraphSnapshot): Promise<Readonly<PathGraphSnapshot>>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  createSync(snapshot: PathGraphSnapshot): Readonly<PathGraphSnapshot>;
+  create(snapshot: PathGraphSnapshot): Readonly<PathGraphSnapshot>;
   findLatest(workspaceId: string): Promise<Readonly<PathGraphSnapshot> | null>;
   findHistory(workspaceId: string, limit: number): Promise<readonly Readonly<PathGraphSnapshot>[]>;
   deleteOlderThan(workspaceId: string, beforeDate: string): Promise<number>;
@@ -76,12 +74,7 @@ export class SqlitePathGraphSnapshotRepo implements PathGraphSnapshotRepo {
     `);
   }
 
-  public async create(snapshot: PathGraphSnapshot): Promise<Readonly<PathGraphSnapshot>> {
-    return this.createSync(snapshot);
-  }
-
-  /** Synchronous variant for atomic publish + mutation (#BL-022). */
-  public createSync(snapshot: PathGraphSnapshot): Readonly<PathGraphSnapshot> {
+  public create(snapshot: PathGraphSnapshot): Readonly<PathGraphSnapshot> {
     const parsedSnapshot = parsePathGraphSnapshot(snapshot);
 
     try {

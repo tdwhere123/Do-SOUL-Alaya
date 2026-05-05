@@ -18,6 +18,7 @@ import {
   type MergeCandidate,
   type NeighborGroup
 } from "../garden/librarian.js";
+import type { PathPlasticityComputePort } from "../garden/path-plasticity-task.js";
 import * as soulExports from "../index.js";
 
 describe("Librarian", () => {
@@ -224,6 +225,49 @@ describe("Librarian", () => {
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
+  it("executes path plasticity as a Librarian task and clears the pending workspace marker", async () => {
+    const computeAndApplyPlasticity = vi.fn(async () => ({
+      reinforced: 1,
+      weakened: 0,
+      retired: 0,
+      affectedPathIds: ["path-1"]
+    }));
+    const markProcessed = vi.fn(async () => undefined);
+    const clearPendingWorkspace = vi.fn(async () => undefined);
+    const { librarian, scheduler } = createLibrarian({
+      pathPlasticityPort: { computeAndApplyPlasticity, markProcessed },
+      clearPendingWorkspace
+    });
+
+    const result = await librarian.run(
+      createTask({
+        task_kind: GardenTaskKind.PATH_PLASTICITY_UPDATE,
+        target_object_refs: ["2026-03-26T00:00:00.000Z", "2026-03-27T00:00:00.000Z"]
+      })
+    );
+
+    expect(result).toMatchObject({
+      success: true,
+      role: GardenRole.LIBRARIAN,
+      tier: GardenTier.TIER_2,
+      objects_affected: ["path-1"]
+    });
+    expect(computeAndApplyPlasticity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "workspace-1",
+        sinceIso: "2026-03-26T00:00:00.000Z",
+        untilIso: "2026-03-27T00:00:00.000Z"
+      })
+    );
+    expect(markProcessed).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      processedThroughIso: "2026-03-27T00:00:00.000Z",
+      processedAuditEventId: null
+    });
+    expect(clearPendingWorkspace).toHaveBeenCalledWith("workspace-1");
+    expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
+  });
+
   it("reports completion with success = true across all supported task kinds", async () => {
     const { librarian, scheduler } = createLibrarian();
     const taskKinds = [
@@ -231,7 +275,8 @@ describe("Librarian", () => {
       GardenTaskKind.SUBJECT_NEIGHBOR_DETECT,
       GardenTaskKind.PATH_COMPRESSION,
       GardenTaskKind.TEMPLATE_CANDIDATE,
-      GardenTaskKind.SYNTHESIS_REVIEW
+      GardenTaskKind.SYNTHESIS_REVIEW,
+      GardenTaskKind.PATH_PLASTICITY_UPDATE
     ] as const;
 
     for (const taskKind of taskKinds) {
@@ -348,6 +393,8 @@ function createLibrarian(options: {
   }[];
   readonly pendingSubjects?: readonly string[];
   readonly findMergeCandidates?: (workspaceId: string) => Promise<readonly MergeCandidate[]>;
+  readonly pathPlasticityPort?: PathPlasticityComputePort;
+  readonly clearPendingWorkspace?: (workspaceId: string) => Promise<void>;
   readonly schedulerOverride?: { reportCompletion(result: Awaited<ReturnType<Librarian["run"]>>): Promise<void> };
 } = {}) {
   const mergePort = {
@@ -397,6 +444,10 @@ function createLibrarian(options: {
       neighborPort,
       compressionPort,
       synthesisPort,
+      ...(options.pathPlasticityPort === undefined ? {} : { pathPlasticityPort: options.pathPlasticityPort }),
+      ...(options.clearPendingWorkspace === undefined
+        ? {}
+        : { pathPlasticityPendingPort: { clearPendingWorkspace: options.clearPendingWorkspace } }),
       scheduler,
       healthJournal,
       now: () => "2026-03-27T00:00:00.000Z"

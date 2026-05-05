@@ -105,9 +105,10 @@ function createDependencies(overrides: Partial<ProposalServiceDependencies> = {}
   readonly warnSpy: ReturnType<typeof vi.fn>;
   readonly notifySpy: ReturnType<typeof vi.fn>;
 } {
-  const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+  const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
     event_id: `event-${event.event_type}`,
     created_at: "2026-03-21T00:00:00.000Z",
+    revision: 0,
     ...event
   }));
   const queryByEntitySpy = vi.fn(async () => [] as readonly EventLogEntry[]);
@@ -188,6 +189,7 @@ describe("ProposalService", () => {
           return {
             event_id: "event-created",
             created_at: "2026-03-21T01:00:00.000Z",
+            revision: 0,
             ...event
           };
         })
@@ -212,7 +214,7 @@ describe("ProposalService", () => {
       "590b6f34-7ea5-4f9b-ae74-fe8d4f5af96a"
     );
 
-    expect(order).toEqual(["event_query", "event_log", "repo_create"]);
+    expect(order).toEqual(["event_log", "repo_create"]);
     expect(created).toMatchObject({
       object_kind: "proposal",
       resolution_state: "pending",
@@ -271,9 +273,10 @@ describe("ProposalService", () => {
   });
 
   it("accept review transitions claim+synthesis and records karma gain", async () => {
-    const reviewAppendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => ({
+    const reviewAppendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       event_id: `event-${event.event_type}`,
       created_at: "2026-03-21T00:00:00.000Z",
+      revision: 0,
       ...event
     }));
 
@@ -349,22 +352,19 @@ describe("ProposalService", () => {
     expect(reviewAppendSpy).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        event_type: "soul.review.created",
-        revision: 5
+        event_type: "soul.review.created"
       })
     );
     expect(reviewAppendSpy).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        event_type: "soul.review.completed",
-        revision: 6
+        event_type: "soul.review.completed"
       })
     );
     expect(reviewAppendSpy).toHaveBeenNthCalledWith(
       3,
       expect.objectContaining({
-        event_type: "soul.proposal.resolved",
-        revision: 7
+        event_type: "soul.proposal.resolved"
       })
     );
   });

@@ -52,4 +52,4 @@ All commands passed on 2026-05-02 in `p5-controller`. The full suite covered
 
 - `#BL-017` executed after Gate-5 as a dedicated post-v0.1 hygiene wave.
 - `#BL-024` tracks the broader HTTP proposal review transaction hardening risk.
-- Phase 6 may start the v0.1.1 benchmark wave.
+- Gate-5F must pass before Phase 6 may start the v0.1.1 benchmark wave.

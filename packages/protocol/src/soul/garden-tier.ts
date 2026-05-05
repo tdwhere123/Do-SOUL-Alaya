@@ -101,8 +101,7 @@ const auditorTaskKinds = Object.freeze([
   GardenTaskKind.CRYSTALLIZATION_SCAN,
   GardenTaskKind.POINTER_HEALING,
   GardenTaskKind.ORPHAN_DETECTION,
-  GardenTaskKind.EVENT_LOG_ORPHAN_DETECTION,
-  GardenTaskKind.PATH_PLASTICITY_UPDATE
+  GardenTaskKind.EVENT_LOG_ORPHAN_DETECTION
 ] as const);
 const librarianTaskKinds = Object.freeze([
   ...auditorTaskKinds,
@@ -112,7 +111,8 @@ const librarianTaskKinds = Object.freeze([
   GardenTaskKind.PATH_COMPRESSION,
   GardenTaskKind.TEMPLATE_CANDIDATE,
   GardenTaskKind.SYNTHESIS_REVIEW,
-  GardenTaskKind.EMBEDDING_BACKFILL
+  GardenTaskKind.EMBEDDING_BACKFILL,
+  GardenTaskKind.PATH_PLASTICITY_UPDATE
 ] as const);
 
 export const GARDEN_ROLE_PERMISSIONS = Object.freeze({

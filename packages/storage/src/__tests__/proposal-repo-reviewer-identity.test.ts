@@ -17,6 +17,7 @@ afterEach(() => {
 //   target_object_kind ('memory_entry' default for back-compat)
 //   proposed_change_summary (text)
 //   created_at (TEXT; backfilled from last_updated_at for pre-A1 rows)
+//   proposal_reviewer_assignments (local reviewer + optional deadline)
 // findPending and findScopedById now project these so the
 // soul.list_pending_proposals MCP tool and the Inspector can show a
 // HITL queue without joining event_log payloads.
@@ -65,7 +66,51 @@ describe("proposal-repo reviewer_identity (A1)", () => {
       target_object_id: proposal.derived_from,
       target_object_kind: "memory_entry",
       created_at: "2026-04-30T00:00:00.000Z",
-      proposed_change_summary: "Switch to pnpm"
+      proposed_change_summary: "Switch to pnpm",
+      assigned_reviewer_identity: null,
+      assigned_at: null,
+      deadline_at: null,
+      is_overdue: false
+    });
+  });
+
+  it("projects local reviewer assignment deadline and overdue state", async () => {
+    const { repo } = createRepo();
+    const proposal = createProposal();
+    await repo.create({
+      proposal,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_kind: "memory_entry",
+      proposed_change_summary: "Switch to pnpm",
+      created_at: "2026-04-30T00:00:00.000Z"
+    });
+
+    await repo.assignReviewer({
+      proposal_id: proposal.proposal_id,
+      reviewer_identity: "user:local-reviewer",
+      assigned_at: "2026-04-30T00:05:00.000Z",
+      deadline_at: "2026-04-30T01:00:00.000Z",
+      escalation_after_ms: null
+    });
+
+    const scoped = await repo.findScopedById(proposal.proposal_id);
+    expect(scoped?.reviewer_assignment).toEqual({
+      proposal_id: proposal.proposal_id,
+      reviewer_identity: "user:local-reviewer",
+      assigned_at: "2026-04-30T00:05:00.000Z",
+      deadline_at: "2026-04-30T01:00:00.000Z",
+      escalation_after_ms: null
+    });
+
+    const summaries = await repo.findPendingSummaries("workspace-1", {
+      now: "2026-04-30T01:30:00.000Z"
+    });
+    expect(summaries[0]).toMatchObject({
+      assigned_reviewer_identity: "user:local-reviewer",
+      assigned_at: "2026-04-30T00:05:00.000Z",
+      deadline_at: "2026-04-30T01:00:00.000Z",
+      is_overdue: true
     });
   });
 

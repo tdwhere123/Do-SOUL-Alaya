@@ -11,7 +11,7 @@ import {
   type PathPlasticityRepoPort,
   type UsageProofReaderPort
 } from "../path-plasticity-service.js";
-import { EventPublisher } from "../event-publisher.js";
+import { EventPublisher, type RuntimeNotifier } from "../event-publisher.js";
 
 const NOW_ISO = "2026-05-04T12:00:00.000Z";
 const PAST_REINFORCED_ISO = "2026-04-01T12:00:00.000Z"; // > 30 days before NOW
@@ -85,7 +85,6 @@ function createEventLogEntry(
     workspace_id: "workspace-1",
     run_id: null,
     caused_by: "system",
-    revision: 0,
     payload_json: {},
     created_at: NOW_ISO
   } as const;
@@ -105,20 +104,28 @@ interface Harness {
   };
   readonly pathRepo: {
     findByAnchor: ReturnType<typeof vi.fn>;
-    updateSync: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
   };
+  readonly getPath: (pathId: string) => Readonly<PathRelation> | undefined;
 }
 
 function buildHarness(params: {
   readonly usageRecords: readonly UsageProofRecord[];
   readonly pathsByObjectId: Readonly<Record<string, readonly PathRelation[]>>;
   readonly deliveredObjectIdsByDeliveryId?: Readonly<Record<string, readonly string[]>>;
+  readonly runtimeNotifier?: Partial<RuntimeNotifier>;
 }): Harness {
   const publishedEvents: EventLogEntry[] = [];
   const repoUpdates: { pathId: string; updates: Partial<PathRelation> }[] = [];
+  const pathStateById = new Map<string, PathRelation>();
+  for (const path of Object.values(params.pathsByObjectId).flat()) {
+    pathStateById.set(path.path_id, path);
+  }
 
-  let savepointStart: number | null = null;
-  const buildEntry = (input: Omit<EventLogEntry, "event_id" | "created_at">): EventLogEntry => {
+  let eventSavepointStart: number | null = null;
+  let repoUpdateSavepointStart: number | null = null;
+  let pathStateSavepoint: Map<string, PathRelation> | null = null;
+  const buildEntry = (input: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry => {
     const revision = publishedEvents.filter(
       (row) => row.entity_type === input.entity_type && row.entity_id === input.entity_id
     ).length;
@@ -130,38 +137,42 @@ function buildHarness(params: {
     };
   };
   const eventLogRepo = {
-    append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry> => {
+    append: vi.fn((entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry => {
       const persisted = buildEntry(entry);
       publishedEvents.push(persisted);
       return persisted;
     }),
-    appendSync: vi.fn((entry: Omit<EventLogEntry, "event_id" | "created_at">): EventLogEntry => {
-      const persisted = buildEntry(entry);
-      publishedEvents.push(persisted);
-      return persisted;
-    }),
-    deleteById: vi.fn(async (eventId: string): Promise<void> => {
-      const index = publishedEvents.findIndex((event) => event.event_id === eventId);
-      if (index >= 0) {
-        publishedEvents.splice(index, 1);
-      }
-    }),
-    deleteByIdSync: vi.fn((eventId: string): void => {
+    deleteById: vi.fn((eventId: string): void => {
       const index = publishedEvents.findIndex((event) => event.event_id === eventId);
       if (index >= 0) {
         publishedEvents.splice(index, 1);
       }
     }),
     transactional: <T,>(fn: () => T): T => {
-      savepointStart = publishedEvents.length;
+      eventSavepointStart = publishedEvents.length;
+      repoUpdateSavepointStart = repoUpdates.length;
+      pathStateSavepoint = new Map(pathStateById);
       try {
         const result = fn();
-        savepointStart = null;
+        eventSavepointStart = null;
+        repoUpdateSavepointStart = null;
+        pathStateSavepoint = null;
         return result;
       } catch (error) {
-        if (savepointStart !== null) {
-          publishedEvents.splice(savepointStart);
-          savepointStart = null;
+        if (eventSavepointStart !== null) {
+          publishedEvents.splice(eventSavepointStart);
+          eventSavepointStart = null;
+        }
+        if (repoUpdateSavepointStart !== null) {
+          repoUpdates.splice(repoUpdateSavepointStart);
+          repoUpdateSavepointStart = null;
+        }
+        if (pathStateSavepoint !== null) {
+          pathStateById.clear();
+          for (const [pathId, path] of pathStateSavepoint.entries()) {
+            pathStateById.set(pathId, path);
+          }
+          pathStateSavepoint = null;
         }
         throw error;
       }
@@ -171,9 +182,9 @@ function buildHarness(params: {
     })
   };
   const runHotState = { apply: vi.fn(async () => undefined) };
-  const runtimeNotifier = {
-    notify: vi.fn(),
-    notifyEntry: vi.fn()
+  const runtimeNotifier: RuntimeNotifier = {
+    notify: params.runtimeNotifier?.notify ?? vi.fn(() => undefined),
+    notifyEntry: params.runtimeNotifier?.notifyEntry ?? vi.fn(() => undefined)
   };
 
   const eventPublisher = new EventPublisher({
@@ -184,24 +195,26 @@ function buildHarness(params: {
 
   const pathRepo: PathPlasticityRepoPort & {
     findByAnchor: ReturnType<typeof vi.fn>;
-    updateSync: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
   } = {
     findByAnchor: vi.fn(async (_workspaceId: string, anchorRef) => {
       if (anchorRef.kind !== "object") {
         return [];
       }
-      return params.pathsByObjectId[anchorRef.object_id] ?? [];
+      return (params.pathsByObjectId[anchorRef.object_id] ?? []).map(
+        (path) => pathStateById.get(path.path_id) ?? path
+      );
     }),
-    updateSync: vi.fn((pathId, updates) => {
+    update: vi.fn((pathId, updates) => {
       repoUpdates.push({ pathId, updates });
-      // Return a synthetic next-state path; service does not consume the
-      // return value beyond the contract type.
-      const original = Object.values(params.pathsByObjectId).flat().find((path) => path.path_id === pathId);
-      return {
+      const original = pathStateById.get(pathId) ?? createPath({ path_id: pathId });
+      const updatedPath = {
         ...(original ?? createPath({ path_id: pathId })),
         ...(updates as Partial<PathRelation>),
         updated_at: updates.updated_at ?? NOW_ISO
       } as Readonly<PathRelation>;
+      pathStateById.set(pathId, updatedPath as PathRelation);
+      return updatedPath;
     })
   };
 
@@ -223,7 +236,14 @@ function buildHarness(params: {
     now: () => NOW_ISO
   });
 
-  return { service, publishedEvents, repoUpdates, usageReader, pathRepo };
+  return {
+    service,
+    publishedEvents,
+    repoUpdates,
+    usageReader,
+    pathRepo,
+    getPath: (pathId) => pathStateById.get(pathId)
+  };
 }
 
 describe("PathPlasticityService", () => {
@@ -275,6 +295,150 @@ describe("PathPlasticityService", () => {
     });
   });
 
+  it("emits PathRelationRedirected before reinforcement and mutates direction_bias when target-anchor usage reverses the current bias", async () => {
+    const path = createPath({
+      plasticity_state: {
+        strength: 0.4,
+        direction_bias: "target_to_source",
+        stability_class: "normal",
+        support_events_count: 0,
+        contradiction_events_count: 0
+      }
+    });
+    const harness = buildHarness({
+      usageRecords: [
+        createUsageRecord({
+          used_object_ids: [],
+          per_anchor_usage: [{ object_id: "obj-target", anchor_role: "target" }]
+        })
+      ],
+      pathsByObjectId: { "obj-target": [path] }
+    });
+
+    const result = await harness.service.computeAndApplyPlasticity({
+      workspaceId: "workspace-1",
+      sinceIso: "2026-05-03T00:00:00.000Z"
+    });
+
+    expect(result.reinforced).toBe(1);
+    expect(result.affectedPathIds).toEqual(["path-1"]);
+    expect(harness.publishedEvents.map((event) => event.event_type)).toEqual([
+      RuntimeGovernanceEventType.PATH_RELATION_REDIRECTED,
+      RuntimeGovernanceEventType.PATH_RELATION_REINFORCED
+    ]);
+    expect(harness.publishedEvents[0]?.payload_json).toMatchObject({
+      path_id: "path-1",
+      previous_direction_bias: "target_to_source",
+      new_direction_bias: "source_to_target",
+      source_usage_count: 0,
+      target_usage_count: 1,
+      redirected_at: NOW_ISO
+    });
+    expect(harness.repoUpdates).toHaveLength(1);
+    expect(harness.repoUpdates[0]?.updates.plasticity_state).toMatchObject({
+      strength: 0.4 + PATH_PLASTICITY_CONSTANTS.USED_DELTA,
+      direction_bias: "source_to_target",
+      support_events_count: 1
+    });
+  });
+
+  it.each([
+    {
+      name: "source-anchor usage selects target_to_source",
+      initialBias: "source_to_target",
+      perAnchorUsage: [{ object_id: "obj-source", anchor_role: "source" }],
+      expectedBias: "target_to_source",
+      sourceUsageCount: 1,
+      targetUsageCount: 0
+    },
+    {
+      name: "balanced source and target usage selects bidirectional_asymmetric",
+      initialBias: "source_to_target",
+      perAnchorUsage: [
+        { object_id: "obj-source", anchor_role: "source" },
+        { object_id: "obj-target", anchor_role: "target" }
+      ],
+      expectedBias: "bidirectional_asymmetric",
+      sourceUsageCount: 1,
+      targetUsageCount: 1
+    }
+  ] as const)("redirects direction_bias when $name", async (row) => {
+    const path = createPath({
+      plasticity_state: {
+        strength: 0.4,
+        direction_bias: row.initialBias,
+        stability_class: "normal",
+        support_events_count: 0,
+        contradiction_events_count: 0
+      }
+    });
+    const harness = buildHarness({
+      usageRecords: [
+        createUsageRecord({
+          used_object_ids: [],
+          per_anchor_usage: row.perAnchorUsage
+        })
+      ],
+      pathsByObjectId: {
+        "obj-source": [path],
+        "obj-target": [path]
+      }
+    });
+
+    await harness.service.computeAndApplyPlasticity({
+      workspaceId: "workspace-1",
+      sinceIso: "2026-05-03T00:00:00.000Z"
+    });
+
+    const redirectedEvent = harness.publishedEvents.find(
+      (event) => event.event_type === RuntimeGovernanceEventType.PATH_RELATION_REDIRECTED
+    );
+    expect(redirectedEvent?.payload_json).toMatchObject({
+      previous_direction_bias: row.initialBias,
+      new_direction_bias: row.expectedBias,
+      source_usage_count: row.sourceUsageCount,
+      target_usage_count: row.targetUsageCount
+    });
+    expect(harness.repoUpdates[0]?.updates.plasticity_state).toMatchObject({
+      direction_bias: row.expectedBias
+    });
+  });
+
+  it("does not emit PathRelationRedirected when per-anchor usage agrees with the current bias", async () => {
+    const path = createPath({
+      plasticity_state: {
+        strength: 0.4,
+        direction_bias: "source_to_target",
+        stability_class: "normal",
+        support_events_count: 0,
+        contradiction_events_count: 0
+      }
+    });
+    const harness = buildHarness({
+      usageRecords: [
+        createUsageRecord({
+          used_object_ids: ["obj-target"],
+          per_anchor_usage: [{ object_id: "obj-target", anchor_role: "target" }]
+        })
+      ],
+      pathsByObjectId: { "obj-target": [path] }
+    });
+
+    await harness.service.computeAndApplyPlasticity({
+      workspaceId: "workspace-1",
+      sinceIso: "2026-05-03T00:00:00.000Z"
+    });
+
+    expect(
+      harness.publishedEvents.some(
+        (event) => event.event_type === RuntimeGovernanceEventType.PATH_RELATION_REDIRECTED
+      )
+    ).toBe(false);
+    expect(harness.repoUpdates[0]?.updates.plasticity_state).toMatchObject({
+      direction_bias: "source_to_target"
+    });
+  });
+
   it("emits PathRelationWeakened and decrements strength when a delivery is `skipped`", async () => {
     const path = createPath({ plasticity_state: { strength: 0.5, direction_bias: "source_to_target", stability_class: "normal", support_events_count: 0, contradiction_events_count: 0 } });
     const harness = buildHarness({
@@ -306,6 +470,9 @@ describe("PathPlasticityService", () => {
     expect(harness.repoUpdates[0]?.updates.plasticity_state).toMatchObject({
       strength: 0.5 - PATH_PLASTICITY_CONSTANTS.SKIPPED_DELTA,
       last_weakened_at: NOW_ISO
+    });
+    expect(harness.repoUpdates[0]?.updates.lifecycle).toMatchObject({
+      status: "active"
     });
   });
 
@@ -342,6 +509,9 @@ describe("PathPlasticityService", () => {
       path_id: "path-1",
       retirement_reason: "strength_below_threshold_and_inactive",
       retired_at: NOW_ISO
+    });
+    expect(harness.repoUpdates[0]?.updates.lifecycle).toMatchObject({
+      status: "retired"
     });
   });
 
@@ -558,13 +728,13 @@ describe("PathPlasticityService", () => {
     expect(harness.repoUpdates).toHaveLength(0);
   });
 
-  it("ignores receipts against a path that has already been retired in a prior tick — no duplicate retired event, no further updates", async () => {
-    // Pre-seed the event log with a PATH_RELATION_RETIRED event for the
-    // path. The service must read this and skip the path entirely on the
-    // current tick. A second skipped receipt against the same path MUST
-    // NOT produce another retired event (or any event at all).
+  it("ignores receipts against a path whose lifecycle status is already retired — no duplicate retired event, no further updates", async () => {
     const retiredPath = createPath({
       path_id: "path-already-retired",
+      lifecycle: {
+        status: "retired",
+        retirement_rule: "default"
+      } as unknown as PathRelation["lifecycle"],
       plasticity_state: {
         strength: 0,
         direction_bias: "source_to_target",
@@ -581,26 +751,6 @@ describe("PathPlasticityService", () => {
       deliveredObjectIdsByDeliveryId: { "delivery-1": ["obj-target"] }
     });
 
-    // Pre-seed the audit log with a prior PATH_RELATION_RETIRED event for
-    // this path — simulating a previous tick that retired the path.
-    harness.publishedEvents.push({
-      event_id: "evt-prior-retired",
-      event_type: RuntimeGovernanceEventType.PATH_RELATION_RETIRED,
-      entity_type: "path_relation",
-      entity_id: "path-already-retired",
-      workspace_id: "workspace-1",
-      run_id: null,
-      caused_by: "system",
-      revision: 0,
-      payload_json: {
-        path_id: "path-already-retired",
-        retirement_reason: "strength_below_threshold_and_inactive",
-        final_strength: 0,
-        retired_at: PAST_REINFORCED_ISO
-      },
-      created_at: PAST_REINFORCED_ISO
-    } as EventLogEntry);
-
     const result = await harness.service.computeAndApplyPlasticity({
       workspaceId: "workspace-1",
       sinceIso: "2026-05-03T00:00:00.000Z"
@@ -610,13 +760,7 @@ describe("PathPlasticityService", () => {
     expect(result.reinforced).toBe(0);
     expect(result.weakened).toBe(0);
     expect(result.retired).toBe(0);
-    // No NEW events appended beyond the pre-seeded one.
-    const newRetiredEvents = harness.publishedEvents.filter(
-      (event) =>
-        event.event_type === RuntimeGovernanceEventType.PATH_RELATION_RETIRED &&
-        event.event_id !== "evt-prior-retired"
-    );
-    expect(newRetiredEvents).toHaveLength(0);
+    expect(harness.publishedEvents).toHaveLength(0);
     // No durable repo updates.
     expect(harness.repoUpdates).toHaveLength(0);
   });
@@ -662,6 +806,9 @@ describe("PathPlasticityService", () => {
       path_id: "path-stuck-at-zero",
       retirement_reason: "strength_below_threshold_and_inactive",
       final_strength: 0
+    });
+    expect(harness.repoUpdates[0]?.updates.lifecycle).toMatchObject({
+      status: "retired"
     });
   });
 
@@ -769,9 +916,9 @@ describe("PathPlasticityService", () => {
     });
   });
 
-  it("rolls back the runtime-governance EventLog row when pathRelationRepo.updateSync throws (#BL-022 atomicity for path_relation writes)", async () => {
+  it("rolls back the runtime-governance EventLog row when pathRelationRepo.update throws (#BL-022 atomicity for path_relation writes)", async () => {
     // The post-D2 fix migrated path-plasticity publishers from the legacy
-    // async-mutate `publishWithMutation` to atomic `appendManyWithMutation`.
+    // async mutate helper to atomic `appendManyWithMutation`.
     // This test pins the BL-022 closure for path_relation writes: if the
     // SQL mutate raises after the EventLog row has been appended-in-
     // transaction, the row must be rolled back so audit log + durable state
@@ -791,7 +938,7 @@ describe("PathPlasticityService", () => {
     });
 
     const failure = new Error("synthetic SQL failure inside transaction");
-    harness.pathRepo.updateSync.mockImplementationOnce(() => {
+    harness.pathRepo.update.mockImplementationOnce(() => {
       throw failure;
     });
 
@@ -808,6 +955,216 @@ describe("PathPlasticityService", () => {
       (event) => event.event_type === RuntimeGovernanceEventType.PATH_RELATION_REINFORCED
     );
     expect(reinforcedRows).toEqual([]);
+  });
+
+  it("rolls back a whole usage window when a later path update throws, then applies the receipt once on retry", async () => {
+    const pathA = createPath({
+      path_id: "path-batch-a",
+      anchors: {
+        source_anchor: { kind: "object", object_id: "obj-a-source" },
+        target_anchor: { kind: "object", object_id: "obj-a" }
+      }
+    });
+    const pathB = createPath({
+      path_id: "path-batch-b",
+      anchors: {
+        source_anchor: { kind: "object", object_id: "obj-b-source" },
+        target_anchor: { kind: "object", object_id: "obj-b" }
+      }
+    });
+    const harness = buildHarness({
+      pathsByObjectId: {
+        "obj-a": [pathA],
+        "obj-b": [pathB]
+      },
+      usageRecords: [
+        createUsageRecord({
+          delivery_id: "delivery-batch-rollback",
+          usage_state: "used",
+          used_object_ids: ["obj-a", "obj-b"],
+          reported_at: "2026-05-03T01:00:00.000Z"
+        })
+      ]
+    });
+    const defaultUpdate = harness.pathRepo.update.getMockImplementation();
+    if (defaultUpdate === undefined) {
+      throw new Error("test harness pathRepo.update must have a default implementation");
+    }
+    const failure = new Error("synthetic second path update failure");
+    harness.pathRepo.update
+      .mockImplementationOnce(defaultUpdate)
+      .mockImplementationOnce(() => {
+        throw failure;
+      });
+
+    await expect(
+      harness.service.computeAndApplyPlasticity({
+        workspaceId: "workspace-1",
+        sinceIso: "2026-05-03T00:00:00.000Z",
+        untilIso: "2026-05-03T02:00:00.000Z"
+      })
+    ).rejects.toThrow(failure);
+
+    expect(harness.repoUpdates).toEqual([]);
+    expect(harness.publishedEvents).toEqual([]);
+    expect(harness.getPath("path-batch-a")?.plasticity_state.strength).toBe(0.5);
+    expect(harness.getPath("path-batch-b")?.plasticity_state.strength).toBe(0.5);
+
+    const result = await harness.service.computeAndApplyPlasticity({
+      workspaceId: "workspace-1",
+      sinceIso: "2026-05-03T00:00:00.000Z",
+      untilIso: "2026-05-03T02:00:00.000Z"
+    });
+
+    expect(result).toMatchObject({
+      reinforced: 2,
+      weakened: 0,
+      retired: 0,
+      affectedPathIds: ["path-batch-a", "path-batch-b"]
+    });
+    expect(harness.repoUpdates.map((update) => update.pathId)).toEqual([
+      "path-batch-a",
+      "path-batch-b"
+    ]);
+    expect(harness.publishedEvents.map((event) => event.entity_id)).toEqual([
+      "path-batch-a",
+      "path-batch-b"
+    ]);
+    expect(harness.publishedEvents).toHaveLength(2);
+    expect(harness.getPath("path-batch-a")?.plasticity_state.strength).toBeCloseTo(
+      0.5 + PATH_PLASTICITY_CONSTANTS.USED_DELTA,
+      10
+    );
+    expect(harness.getPath("path-batch-b")?.plasticity_state.strength).toBeCloseTo(
+      0.5 + PATH_PLASTICITY_CONSTANTS.USED_DELTA,
+      10
+    );
+    expect(harness.getPath("path-batch-a")?.plasticity_state.support_events_count).toBe(1);
+    expect(harness.getPath("path-batch-b")?.plasticity_state.support_events_count).toBe(1);
+  });
+
+  it("does not apply late path mutations after the compute abort signal fires", async () => {
+    const path = createPath({ path_id: "path-abort-late-1" });
+    const harness = buildHarness({
+      pathsByObjectId: { "obj-target": [path] },
+      usageRecords: [
+        createUsageRecord({
+          delivery_id: "delivery-abort-late",
+          usage_state: "used",
+          used_object_ids: ["obj-target"],
+          reported_at: "2026-05-03T01:00:00.000Z"
+        })
+      ],
+      deliveredObjectIdsByDeliveryId: { "delivery-abort-late": ["obj-target"] }
+    });
+    let resolveLookupStarted!: () => void;
+    let resolveLookup!: (paths: readonly Readonly<PathRelation>[]) => void;
+    const lookupStarted = new Promise<void>((resolve) => {
+      resolveLookupStarted = resolve;
+    });
+    const lookupResult = new Promise<readonly Readonly<PathRelation>[]>((resolve) => {
+      resolveLookup = resolve;
+    });
+    harness.pathRepo.findByAnchor.mockImplementationOnce(async () => {
+      resolveLookupStarted();
+      return await lookupResult;
+    });
+
+    const controller = new AbortController();
+    const compute = harness.service.computeAndApplyPlasticity({
+      workspaceId: "workspace-1",
+      sinceIso: "2026-05-03T00:00:00.000Z",
+      untilIso: "2026-05-03T02:00:00.000Z",
+      abortSignal: controller.signal
+    });
+
+    await lookupStarted;
+    controller.abort(new Error("path_plasticity_update timed out after 5ms"));
+    resolveLookup([path]);
+
+    await expect(compute).rejects.toThrow("path_plasticity_update timed out after 5ms");
+    expect(harness.repoUpdates).toEqual([]);
+    expect(harness.publishedEvents).toEqual([]);
+  });
+
+  it("treats EventPublisher post-commit propagation failure as durable path plasticity success", async () => {
+    const path = createPath({ path_id: "path-propagation-committed-1" });
+    const notifyEntry = vi.fn(async () => {
+      throw new Error("notify exploded after commit");
+    });
+    const harness = buildHarness({
+      pathsByObjectId: { "obj-target": [path] },
+      usageRecords: [
+        createUsageRecord({
+          delivery_id: "delivery-propagation-committed",
+          usage_state: "used",
+          used_object_ids: ["obj-target"],
+          reported_at: "2026-05-03T01:00:00.000Z"
+        })
+      ],
+      deliveredObjectIdsByDeliveryId: { "delivery-propagation-committed": ["obj-target"] },
+      runtimeNotifier: { notifyEntry }
+    });
+    const onMutationBoundaryEntered = vi.fn();
+
+    const result = await harness.service.computeAndApplyPlasticity({
+      workspaceId: "workspace-1",
+      sinceIso: "2026-05-03T00:00:00.000Z",
+      untilIso: "2026-05-03T02:00:00.000Z",
+      onMutationBoundaryEntered
+    });
+
+    expect(result).toMatchObject({
+      reinforced: 1,
+      weakened: 0,
+      retired: 0,
+      affectedPathIds: ["path-propagation-committed-1"]
+    });
+    expect(onMutationBoundaryEntered).toHaveBeenCalledTimes(1);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(notifyEntry).toHaveBeenCalledTimes(1);
+    expect(harness.repoUpdates).toHaveLength(1);
+    expect(harness.publishedEvents).toHaveLength(1);
+  });
+
+  it("returns after durable path mutation when post-commit propagation never settles", async () => {
+    const path = createPath({ path_id: "path-propagation-hung-1" });
+    const notifyEntry = vi.fn(() => new Promise<void>(() => undefined));
+    const harness = buildHarness({
+      pathsByObjectId: { "obj-target": [path] },
+      usageRecords: [
+        createUsageRecord({
+          delivery_id: "delivery-propagation-hung",
+          usage_state: "used",
+          used_object_ids: ["obj-target"],
+          reported_at: "2026-05-03T01:00:00.000Z"
+        })
+      ],
+      deliveredObjectIdsByDeliveryId: { "delivery-propagation-hung": ["obj-target"] },
+      runtimeNotifier: { notifyEntry }
+    });
+    const onMutationBoundaryEntered = vi.fn();
+
+    const result = await harness.service.computeAndApplyPlasticity({
+      workspaceId: "workspace-1",
+      sinceIso: "2026-05-03T00:00:00.000Z",
+      untilIso: "2026-05-03T02:00:00.000Z",
+      onMutationBoundaryEntered
+    });
+
+    expect(result).toMatchObject({
+      reinforced: 1,
+      weakened: 0,
+      retired: 0,
+      affectedPathIds: ["path-propagation-hung-1"]
+    });
+    expect(onMutationBoundaryEntered).toHaveBeenCalledTimes(1);
+    expect(harness.repoUpdates).toHaveLength(1);
+    expect(harness.publishedEvents).toHaveLength(1);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(notifyEntry).toHaveBeenCalledTimes(1);
   });
 
   it("preserves support_events_count on mixed receipts that net-weaken (D2 reviewer-I2)", async () => {

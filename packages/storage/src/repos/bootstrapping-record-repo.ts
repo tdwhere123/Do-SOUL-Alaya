@@ -13,12 +13,8 @@ interface BootstrappingRecordRow {
 }
 
 export interface BootstrappingRecordRepo {
-  create(record: BootstrappingRecord): Promise<Readonly<BootstrappingRecord>>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  createSync(record: BootstrappingRecord): Readonly<BootstrappingRecord>;
-  findByWorkspace(workspaceId: string): Promise<Readonly<BootstrappingRecord> | null>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  findByWorkspaceSync(workspaceId: string): Readonly<BootstrappingRecord> | null;
+  create(record: BootstrappingRecord): Readonly<BootstrappingRecord>;
+  findByWorkspace(workspaceId: string): Readonly<BootstrappingRecord> | null;
 }
 
 const BOOTSTRAPPING_RECORD_SELECT_COLUMNS = `
@@ -52,12 +48,7 @@ export class SqliteBootstrappingRecordRepo implements BootstrappingRecordRepo {
     `);
   }
 
-  public async create(record: BootstrappingRecord): Promise<Readonly<BootstrappingRecord>> {
-    return this.createSync(record);
-  }
-
-  /** Synchronous variant for atomic publish + mutation (#BL-022). */
-  public createSync(record: BootstrappingRecord): Readonly<BootstrappingRecord> {
+  public create(record: BootstrappingRecord): Readonly<BootstrappingRecord> {
     const parsedRecord = parseBootstrappingRecord(record);
 
     try {
@@ -76,7 +67,7 @@ export class SqliteBootstrappingRecordRepo implements BootstrappingRecordRepo {
       );
     }
 
-    const persistedRecord = this.findByWorkspaceSync(parsedRecord.workspace_id);
+    const persistedRecord = this.findByWorkspace(parsedRecord.workspace_id);
     if (persistedRecord === null) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -87,14 +78,7 @@ export class SqliteBootstrappingRecordRepo implements BootstrappingRecordRepo {
     return persistedRecord;
   }
 
-  public async findByWorkspace(
-    workspaceId: string
-  ): Promise<Readonly<BootstrappingRecord> | null> {
-    return this.findByWorkspaceSync(workspaceId);
-  }
-
-  /** Synchronous variant for atomic publish + mutation (#BL-022). */
-  public findByWorkspaceSync(workspaceId: string): Readonly<BootstrappingRecord> | null {
+  public findByWorkspace(workspaceId: string): Readonly<BootstrappingRecord> | null {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {

@@ -165,9 +165,11 @@ review records carry an explicit `reviewer_identity` (migration
 `058-reviewer-identity.sql`), the `alaya review pending|accept|reject`
 CLI verbs are wired, and the Inspector surfaces the queue. HITL is
 now *daemon-orchestrated* through one workflow contract shared by
-the MCP, HTTP loopback, and CLI surfaces. Full review-inbox UX
-(reviewer assignment, deadlines, escalation, multi-reviewer quorum)
-is `#BL-027` in [where this is going](#where-this-is-going).
+the MCP, HTTP loopback, and CLI surfaces. Gate-5F closes the local
+reviewer inbox layer: assignment, deadline/overdue projection,
+configured server-bound local reviewer identity, and MCP / Inspector
+HTTP / CLI review parity. Full team quorum and escalation product
+workflows are outside the v0.1 local-first closeout.
 
 *Code anchors:*
 `apps/core-daemon/src/mcp-memory-proposal-workflow.ts:90-248`,
@@ -188,8 +190,8 @@ untraceable state slips in. EventLog-first means *audit precedes
 broadcast*: no listener ever sees a state the EventLog cannot
 replay.
 
-**Design choice.** A single `EventPublisher.publishWithMutation()`
-boundary. Durable writes always pair an EventLog row with the DB
+**Design choice.** A single `EventPublisher.appendManyWithMutation()`
+boundary. Durable writes always pair EventLog rows with the DB
 mutation; consumers downstream subscribe to the notification, not to
 the DB. Lives on the **Memory Ontology** layer (durable truth) plus
 **Runtime Control** (the dispatch).
@@ -198,10 +200,9 @@ the DB. Lives on the **Memory Ontology** layer (durable truth) plus
 inside a single `connection.transaction()` via the new
 `appendManyWithMutation` boundary on `EventPublisher`. The unique
 `(entity_type, entity_id, revision)` index stays as belt-and-suspenders
-but is no longer load-bearing. All 14 producer services migrated; the
-legacy `publishWithMutation` / `publishManyWithMutation` are
-`@deprecated` and survive only for one auditor adapter (tracked as
-`#BL-026`). `#BL-022` is closed.
+but is no longer load-bearing. All producer services migrated, and
+Gate-5F removed the legacy `publishWithMutation` /
+`publishManyWithMutation` APIs. `#BL-022` and `#BL-026` are closed.
 
 *Code anchors:* `packages/core/src/event-publisher.ts:40-62`,
 `packages/storage/src/repos/event-log-repo.ts:69-118`.
@@ -261,17 +262,14 @@ agent can skip it, and Alaya degrades to a "delivered" trust state
 without erroring. Lives on the **Evidence axis** as control-plane
 evidence, **Runtime Control** layer.
 
-*Closed in v0.1-closeout (A3):* receipts now feed Path-axis plasticity
-through a new `PathPlasticityService`
-(`packages/core/src/path-plasticity-service.ts`) consumed by the
-Garden Auditor's `path_plasticity_update` task kind. The schema fields
-were already present
-(`packages/protocol/src/soul/path-relation.ts:113-124`); the consumer
-service emits the corresponding `PathRelationReinforced/Weakened/Retired`
-events from `packages/protocol/src/events/runtime-governance.ts` and
-`RecallService` factors a plasticity weight into recall scoring. v0.1
-ships three of the four named ops (reinforcement, weakening, retirement);
-`direction_bias` redirection is `#BL-029`.
+*Closed in v0.1-closeout (A3 + Gate-5F):* receipts now feed Path-axis
+plasticity through `PathPlasticityService`
+(`packages/core/src/path-plasticity-service.ts`). Gate-5F moved the
+background task to the Garden Librarian and wired the fourth named
+plasticity op: `direction_bias` redirection. The service emits durable
+`PathRelationReinforced/Weakened/Retired/Redirected` runtime-governance
+events and `RecallService` factors plasticity plus direction bias into
+recall scoring.
 
 *Code anchors:* `apps/core-daemon/src/trust-state.ts:147-187`,
 `packages/protocol/src/soul/mcp-types.ts:146` (the three-state enum).
@@ -292,13 +290,14 @@ runs synchronously to recall destroys the recall budget the moment
 the dataset grows. Garden does neither.
 
 **Design choice.** Garden roles never write durable directly.
-Janitor and Auditor call narrow maintenance ports that still go
-through `EventPublisher.publishWithMutation()`, so the EventLog
-remains the audit. Librarian only emits *proposals* back through
-Governance — which is why the lifecycle diagram shows the dotted
-arrow from Maintenance back to Governance, never to Durability.
-Garden is *fire-and-forget* by invariant: if Garden is slow, recall
-is not slow with it.
+Janitor, Auditor, and Librarian call narrow maintenance ports that go
+through EventLog-first publisher boundaries (`appendManyWithMutation`
+or detached propagation for durable background repair), so the EventLog
+remains the audit. Librarian also emits *proposals* back through
+Governance — which is why the lifecycle diagram shows the dotted arrow
+from Maintenance back to Governance, never to Durability. Garden is
+*fire-and-forget* by invariant: if Garden is slow, recall is not slow
+with it.
 
 *Code anchors:* `packages/soul/src/garden/auditor.ts:62-89`,
 `packages/soul/src/garden/janitor.ts:83-120`,
@@ -532,8 +531,9 @@ Do-SOUL Alaya/
 > backbone A1, EventPublisher atomic transaction A2, path-axis
 > plasticity loop A3) plus the C1 hygiene wave. All four landed
 > through `v0.1-closeout`, passed a 6-lens D2 multi-lens review
-> + a 2-round Codex fix-loop, and merged to `main` here. v0.2 work
-> continues against the backlog cards below.
+> + a 2-round Codex fix-loop, and merged to `main` here. Gate-5F then
+> pulled the current closeout backlog (`#BL-025`..`#BL-036`) back into
+> v0.1 ownership before Phase 6.
 
 ### P1. Closed in v0.1 — closeout cards
 
@@ -551,10 +551,9 @@ their scope grew beyond what the closeout window could absorb cleanly.
 Both remain tracked with explicit close conditions in
 `docs/handbook/backlog.md`.
 
-Remaining closeout work runs in isolated worktrees with per-card review
-+ fix-loop discipline. `main` only sees a card merge when that card's
-exit criterion holds and the integrated review reports zero Blocking /
-Important.
+Gate-5F closeout work ran in isolated worktrees with per-card review
+and fix-loop discipline. The implementation cards are review-clean,
+the aggregate final review is clean, and full verification passed.
 
 ### P2. After v0.1 — toward a memory-centric agent
 
@@ -565,9 +564,8 @@ around reading and writing memory rather than around chat.
 
 The threads I'll pull there:
 
-- **Full review-inbox UX** — assignment, deadlines, escalation,
-  multi-reviewer quorum. The minimal HITL backbone (A1) is the
-  scaffold; this is the team-workflow surface on top.
+- **Provider and benchmark integration** — pi-mono as the provider
+  boundary plus repeatable benchmark fixtures.
 - **Embedding strategy refinement** — keep "supplement, never
   oracle"; experiment with boost weight, supplement cap, and
   per-domain calibration.
@@ -575,23 +573,24 @@ The threads I'll pull there:
   reflect actual agent context-window cost rather than a static
   constant.
 
-Concrete v0.2 backlog cards opened during the v0.1 closeout (close
-conditions live in `docs/handbook/backlog.md`):
+Gate-5F, not v0.2, owns the closeout backlog `#BL-025` through
+`#BL-036`. It runs after Gate-5 and before Phase 6; Gate-5F has
+passed, and Phase 6 remains not-started.
 
-- **`#BL-025`** — Drop the required-but-ignored `revision` field
-  (planned, see `#BL-025`) from `EventPublisherInput` across ~50
-  source sites and ~50 test fixtures (purely type-ergonomics; the
-  BL-022 race is already closed in v0.1).
+Concrete Gate-5F closeout cards (closure evidence lives in
+`docs/handbook/backlog.md` and
+`docs/v0.1/phase-5-followup-briefs/`):
+
+- **`#BL-025`** — Drop the required-but-ignored `revision` field from
+  `EventPublisherInput` across source sites and tests.
 - **`#BL-026`** — Migrate the soul-side `AuditorEventLogPort`
   adapter off the legacy `publishWithMutation` /
-  `publishManyWithMutation` signature so those `@deprecated`
-  methods (and the port-shape lying about
-  `appendSync?` / `transactional?`) can be deleted.
-- **`#BL-027`** — Full review-inbox UX (assignment + deadlines +
-  escalation + multi-reviewer quorum) on top of the minimal HITL
-  daemon backbone A1 shipped, including binding `reviewer_identity`
-  server-side from a session credential rather than accepting it
-  verbatim from the agent (closes invariants §21b limit).
+  `publishManyWithMutation` signature so those deprecated methods can
+  be deleted.
+- **`#BL-027`** — Local reviewer inbox: assignment, deadlines,
+  overdue state, configured server-bound local reviewer identity, and default
+  single-reviewer approval. Full team quorum and escalation product
+  workflows remain outside this v0.1 local-first closeout.
 - **`#BL-028`** — Move `PATH_PLASTICITY_UPDATE` from Auditor (TIER_1)
   to Librarian (TIER_2) for strict tier alignment with the glossary
   ConsolidationLoop entry.

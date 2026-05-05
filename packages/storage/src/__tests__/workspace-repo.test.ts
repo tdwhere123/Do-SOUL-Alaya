@@ -88,7 +88,7 @@ describe("SqliteWorkspaceRepo", () => {
   it("delete is idempotent for a missing workspace", async () => {
     const workspaceRepo = createWorkspaceRepo();
 
-    await expect(workspaceRepo.delete("ws_missing")).resolves.toBeUndefined();
+    expect(workspaceRepo.delete("ws_missing")).toBeUndefined();
   });
 
   it("updates the workspace default_engine_binding", async () => {

@@ -116,8 +116,8 @@ describe("SqliteOrphanRadarRepo", () => {
       expires_at: "2026-03-27T12:00:00.000Z"
     });
 
-    await expect(repo.create(active)).resolves.toEqual(active);
-    await expect(repo.create(expired)).resolves.toEqual(expired);
+    expect(repo.create(active)).toEqual(active);
+    expect(repo.create(expired)).toEqual(expired);
     await expect(repo.findById("radar-1")).resolves.toEqual(active);
     await expect(repo.findActiveByWorkspaceId("workspace-1", "2026-03-28T12:00:00.000Z")).resolves.toEqual([
       active
@@ -139,7 +139,7 @@ describe("SqliteOrphanRadarRepo", () => {
       requires_review: true
     } as const;
 
-    await expect(repo.createEventLogOrphan(record)).resolves.toEqual(record);
+    expect(repo.createEventLogOrphan(record)).toEqual(record);
     await expect(repo.findById("radar-event-log")).resolves.toBeNull();
     await expect(repo.findActiveByWorkspaceId("workspace-1", "2026-03-28T12:00:00.000Z")).resolves.toEqual([]);
 
@@ -185,8 +185,8 @@ describe("SqliteOrphanRadarRepo", () => {
       radar_id: "radar-event-log-2"
     } as const;
 
-    await expect(repo.createEventLogOrphan(first)).resolves.toEqual(first);
-    await expect(repo.createEventLogOrphan(duplicate)).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(repo.createEventLogOrphan(first)).toEqual(first);
+    expect(() => repo.createEventLogOrphan(duplicate)).toThrowError(expect.objectContaining({ code: "CONFLICT" }));
 
     const rows = database.connection
       .prepare("SELECT radar_id FROM orphan_radar WHERE target_event_id = ? ORDER BY radar_id ASC")
@@ -278,17 +278,17 @@ describe("SqliteOrphanRadarRepo", () => {
     const { database } = await createRepo();
     const repo = new SqliteOrphanRadarRepo(database);
 
-    await expect(
+    expect(() =>
       repo.create(
         createOrphanRadar({
           radar_id: "radar-missing-parent",
           target_memory_id: createMemoryId(900)
         })
       )
-    ).rejects.toMatchObject({
+    ).toThrowError(expect.objectContaining({
       name: "StorageError",
       code: "QUERY_FAILED"
-    });
+    }));
   });
 
   it("cascades orphan radar deletion when the target memory is removed", async () => {

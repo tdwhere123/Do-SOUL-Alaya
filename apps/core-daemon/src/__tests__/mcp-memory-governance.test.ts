@@ -255,6 +255,56 @@ describe("mcp memory governance", () => {
     expect(storedProposal.resolution_state).toBe(ProposalResolutionState.ACCEPTED);
   });
 
+  it("assigns new local proposals to the configured single reviewer", async () => {
+    const proposalId = "00000000-0000-4000-8000-000000000001";
+    let capturedAssignment: unknown;
+    const workflow = createMcpMemoryProposalWorkflow({
+      now: () => "2026-04-30T00:00:00.000Z",
+      generateObjectId: () => proposalId,
+      reviewerIdentityBinding: {
+        token: "review-token",
+        identity: "user:server-reviewer"
+      },
+      eventLogRepo: {
+        append: async () => {
+          throw new Error("append must not be called");
+        },
+        queryByEntity: async () => []
+      },
+      proposalRepo: {
+        create: async ({ proposal }) => proposal,
+        createProposalWithEvents: async ({ proposal }, _creationEvents, options) => {
+          capturedAssignment = options?.reviewerAssignment;
+          return { proposal, events: [] };
+        },
+        findById: async () => null,
+        findScopedById: async () => null,
+        findPendingSummaries: async () => [],
+        updatePendingResolutionWithEvents: async () => {
+          throw new Error("updatePendingResolutionWithEvents must not be called");
+        }
+      },
+      runtimeNotifier: { notifyEntry: async () => {} }
+    });
+
+    await workflow.proposeMemoryUpdate(
+      {
+        target_object_id: "mem1",
+        proposed_changes: { content: "corrected" },
+        reason: "operator correction"
+      },
+      { workspaceId: "ws1", runId: "run1", agentTarget: "codex" }
+    );
+
+    expect(capturedAssignment).toEqual({
+      proposal_id: proposalId,
+      reviewer_identity: "user:server-reviewer",
+      assigned_at: "2026-04-30T00:00:00.000Z",
+      deadline_at: null,
+      escalation_after_ms: null
+    });
+  });
+
   it("allows human reviewer (runId: null) to review a proposal stored with a non-null run_id (A1 finding-1)", async () => {
     // A1 fix-loop (finding-1): the Inspector POST and `alaya review`
     // CLI always pass runId: null. Before the fix, assertProposalContext
@@ -475,7 +525,11 @@ describe("mcp memory governance — soul.list_pending_proposals (A1)", () => {
         target_object_id: "mem-1",
         target_object_kind: "memory_entry",
         created_at: "2026-04-30T00:00:00.000Z",
-        proposed_change_summary: "Switch to pnpm"
+        proposed_change_summary: "Switch to pnpm",
+        assigned_reviewer_identity: "user:local-reviewer",
+        assigned_at: "2026-04-30T00:00:00.000Z",
+        deadline_at: null,
+        is_overdue: false
       }
     ]);
     const workflow = createMcpMemoryProposalWorkflow({
@@ -515,7 +569,8 @@ describe("mcp memory governance — soul.list_pending_proposals (A1)", () => {
     expect(result.proposals).toHaveLength(1);
     expect(findPendingSummaries).toHaveBeenCalledWith("ws1", {
       since: "2026-04-30T00:00:00.000Z",
-      limit: 10
+      limit: 10,
+      now: "2026-04-30T00:00:00.000Z"
     });
   });
 
@@ -577,6 +632,90 @@ describe("mcp memory governance — soul.list_pending_proposals (A1)", () => {
     // All three review-related event_log rows record the reviewer identity
     // in caused_by so the audit trail names who approved/rejected.
     expect(eventCausedBy).toEqual(["user:alice", "user:alice", "user:alice"]);
+  });
+
+  it("binds configured reviewer identity from token and rejects payload identity override", async () => {
+    const proposal = createProposal();
+    let storedProposal = proposal;
+    const eventCausedBy: string[] = [];
+    let captureReviewerIdentity: string | undefined;
+    let updateCalls = 0;
+    const workflow = createMcpMemoryProposalWorkflow({
+      now: () => "2026-04-30T00:00:00.000Z",
+      generateObjectId: () => proposal.proposal_id,
+      reviewerIdentityBinding: {
+        token: "review-token",
+        identity: "user:server-reviewer"
+      },
+      eventLogRepo: {
+        append: async () => {
+          throw new Error("append must not be called");
+        },
+        queryByEntity: async () => []
+      },
+      proposalRepo: {
+        create: async () => proposal,
+        createProposalWithEvents: async () => {
+          throw new Error("create not exercised in this test");
+        },
+        findById: async () => storedProposal,
+        findScopedById: async () => ({
+          proposal: storedProposal,
+          workspace_id: "ws1",
+          run_id: "run1",
+          reviewer_assignment: { reviewer_identity: "user:server-reviewer" }
+        }),
+        findPendingSummaries: async () => [],
+        updatePendingResolutionWithEvents: async (_proposalId, state, updatedAt, events, options) => {
+          updateCalls += 1;
+          captureReviewerIdentity = options?.reviewerIdentity;
+          for (const event of events) {
+            if (event.caused_by !== null) {
+              eventCausedBy.push(event.caused_by);
+            }
+          }
+          storedProposal = {
+            ...storedProposal,
+            resolution_state: state,
+            last_updated_at: updatedAt
+          };
+          return { proposal: storedProposal, events: [] };
+        }
+      },
+      runtimeNotifier: { notifyEntry: async () => {} }
+    });
+
+    await expect(
+      workflow.reviewMemoryProposal(
+        {
+          proposal_id: proposal.proposal_id,
+          verdict: "accept",
+          reason: "payload spoof",
+          reviewer_identity: "user:payload",
+          reviewer_token: "review-token"
+        },
+        { workspaceId: "ws1", runId: "run1", agentTarget: "codex" }
+      )
+    ).rejects.toMatchObject({ code: "VALIDATION" });
+    expect(updateCalls).toBe(0);
+
+    await workflow.reviewMemoryProposal(
+      {
+        proposal_id: proposal.proposal_id,
+        verdict: "accept",
+        reason: "server-bound reviewer",
+        reviewer_identity: "user:server-reviewer",
+        reviewer_token: "review-token"
+      },
+      { workspaceId: "ws1", runId: "run1", agentTarget: "codex" }
+    );
+
+    expect(captureReviewerIdentity).toBe("user:server-reviewer");
+    expect(eventCausedBy).toEqual([
+      "user:server-reviewer",
+      "user:server-reviewer",
+      "user:server-reviewer"
+    ]);
   });
 });
 

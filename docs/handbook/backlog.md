@@ -9,346 +9,120 @@ Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
 sequence. **Next available number**: `#BL-037` (`#BL-022` was opened by
 p5-system-review-r3 as an EventPublisher v0.2 deferral and closed in
 v0.1-closeout-a2; `#BL-023`/`#BL-024` were resolved in r1 / r2;
-`#BL-025` and `#BL-026` were opened in v0.1-closeout-a2 as the two
-non-behavioural EventPublisher cleanups deferred to v0.2;
-`#BL-027`..`#BL-036` were opened in v0.1-closeout D2 fix-loop as
-the v0.2 follow-ups for review-inbox UX, plasticity hardening,
-performance, parity tests, and watermark durabilization).
-
-## Open Issues
-
-### #BL-025 — Drop required-but-ignored `revision` from `EventPublisher` input shape
-
-**Opened by**: v0.1-closeout-a2 (BL-022 fix-loop, i3)
-
-**Symptom**: `EventPublisher.publish` / `appendManyWithMutation` /
-`EventPublisherEventLogRepoPort.append` all type `event_input` as
-`Omit<EventLogEntry, "event_id" | "created_at">`, which still requires
-the caller to supply `revision`. After #BL-022 the revision is computed
-inside the SQLite transaction by `MAX(revision) + 1` and the
-caller-supplied value is silently overwritten. ~50 source call sites and
-~50 test fixtures pass ceremonial `revision: 0` / `revision,` /
-`revision: revisionCursor()` for no effect.
-
-**Why deferred (not closed in v0.1)**: behavioural fix for #BL-022 is
-already shipped — the race window is gone. The remaining work is purely
-type ergonomics: introduce `EventPublisherInput =
-Omit<EventLogEntry, "event_id" | "created_at" | "revision">` and remove
-the now-dead `revision: ...` lines + dead `getNextRevision()` /
-`revisionCursor()` calls. Mechanical surface ≈ 100 sites; an A2
-in-flight regex pass corrupted ~50 type expressions before being
-reverted (see `.do-it/findings/a2.md` finding-8). v0.2 should redo this
-with file-by-file `Edit` calls, not regex.
-
-**Close condition**:
-
-- `EventPublisherInput` type alias added to
-  `packages/core/src/event-publisher.ts` and exported.
-- All `eventLogRepo.append` / `publish` / `publishWithMutation` /
-  `publishManyWithMutation` / `appendManyWithMutation` callers stop
-  passing `revision` (search:
-  `rg '^\s+revision[:,]' packages/ apps/` returns 0 outside
-  `event-publisher.ts` / `event-log-repo.ts`).
-- Dead revision-source helpers (`getNextRevision`, `revisionCursor`,
-  `nextRevision`, `maxRevision` locals) removed where they were used
-  only to populate the dropped field.
-- `pnpm exec tsc --noEmit -p packages/core/tsconfig.json` clean.
-- All vitest projects green.
-
-### #BL-026 — Migrate `AuditorEventLogPort` adapter off legacy `publishWithMutation`
-
-**Opened by**: v0.1-closeout-a2 (BL-022 fix-loop, i1)
-
-**Symptom**: `apps/core-daemon/src/garden-runtime.ts` wires the soul-
-side Auditor (`packages/soul/src/garden/auditor.ts`) through an
-`AuditorEventLogPort` adapter that still exposes the legacy
-`publishWithMutation(event, async () => …)` signature. The legacy path
-has the BL-022 race the rest of the runtime no longer has — the only
-in-tree producer keeping it alive is this single adapter. The auditor's
-direct write site (path-graph snapshot) IS migrated, so no auditor-
-issued event currently runs through the legacy path; but the adapter
-shape forces `publishWithMutation` to remain on `EventPublisher`.
-
-**Why deferred (not closed in v0.1)**: closing requires changing
-`AuditorEventLogPort` shape across all auditor port consumers in
-`packages/soul/`, which sits in a different package boundary than
-A2's nominal scope. Changing it inside A2 would have made the diff
-cross-package and increased D2 review surface for no behavioural gain
-(the actual race-prone write site is migrated).
-
-**Close condition**:
-
-- `AuditorEventLogPort` exposes `appendManyWithMutation` (sync mutate)
-  instead of `publishWithMutation`.
-- `apps/core-daemon/src/garden-runtime.ts` adapter rewritten to call
-  through `appendManyWithMutation`.
-- `EventPublisher.publishWithMutation` and `publishManyWithMutation`
-  deleted (currently `@deprecated` and unused outside the auditor
-  adapter).
-- D2 architect-I3 follow-up: when the legacy methods are deleted, also
-  remove the `?` from `EventPublisherEventLogRepoPort.appendSync?` /
-  `deleteByIdSync?` / `transactional?` so the port shape stops lying
-  about what real implementations must provide.
-- All vitest projects green.
-
-### #BL-027 — Full review-inbox UX (assignment + deadlines + escalation + multi-reviewer quorum + reviewer-identity attestation)
-
-**Opened by**: v0.1-closeout D2 (spec-compliance-B-2 / red-team-I1)
-
-**Symptom**: A1 shipped the minimal HITL daemon backbone
-(`soul.list_pending_proposals`, `alaya review pending|accept|reject`,
-`reviewer_identity` on review records) but defers the team-workflow
-surface: there is no reviewer-assignment table, no deadline policy,
-no escalation chain, no multi-reviewer quorum, and `reviewer_identity`
-is an agent-asserted free string (red-team-I1, see invariants §21b).
-
-**Why deferred (not closed in v0.1)**: the v0.1 plan §A1 line 184-186
-explicitly scoped this card as "the team-workflow surface on top of
-the minimal backbone, deferred to v0.2 as an enhancement card with
-explicit close conditions".
-
-**Close condition**:
-
-- New schema: `proposal_reviewer_assignments`
-  (`proposal_id` PK, `reviewer_identity`, `deadline_at`,
-  `assigned_at`, `escalation_after_ms`).
-- `alaya review` gains `--assign <id>`, `--deadline <iso>`,
-  `--escalate-after <duration>` flags.
-- Quorum policy is configurable per workspace
-  (single-reviewer / N-of-M / consensus).
-- `reviewer_identity` is bound server-side from a pre-shared
-  CLI/Inspector session credential rather than accepted verbatim from
-  the MCP request — invariants §21b is updated to "authenticated
-  principal, not just attestation".
-- Inspector "Pending Proposals" view gains assignment + deadline
-  columns.
-- All vitest projects green; e2e exercises an assignment + escalation
-  cycle.
-
-### #BL-028 — Move `PATH_PLASTICITY_UPDATE` task from Auditor (TIER_1) to Librarian (TIER_2)
-
-**Opened by**: v0.1-closeout D2 (spec-compliance-I-1 + A3 finding-3 +
-domain-language-I-3)
-
-**Symptom**: A3 placed `path_plasticity_update` in `auditorTaskKinds`
-(TIER_1) rather than `librarianTaskKinds` (TIER_2). The
-off-recall-request-path constraint is satisfied either way (both tiers
-run as Garden-dispatched background workers), but the spec preference
-and glossary §82 ConsolidationLoop entry both name Librarian as the
-owner.
-
-**Why deferred (not closed in v0.1)**: TIER_1 placement is defensible
-and the production behaviour is identical for v0.1's serial Garden
-dispatch.
-
-**Close condition**:
-
-- `garden-tier.ts` `librarianTaskKinds` includes
-  `PATH_PLASTICITY_UPDATE`; `auditorTaskKinds` no longer includes it.
-- `auditor.ts` no longer schedules the task; `librarian.ts` does.
-- `path-plasticity-task.ts` registered on the Librarian dispatch path.
-- glossary §82 ConsolidationLoop note pointing at this card is
-  removed.
-- All vitest projects green.
-
-### #BL-029 — Wire `direction_bias` redirection consumer for path plasticity
-
-**Opened by**: v0.1-closeout D2 (spec-compliance-B-2 + A3 deferred-followup-2)
-
-**Symptom**: invariant §13 names four plasticity ops
-(reinforcement / weakening / redirection / retirement). v0.1 ships
-three; redirection (`direction_bias` swaps among
-`source_to_target` / `target_to_source` / `bidirectional_asymmetric`)
-is unwired. A `TODO(v0.2)` comment lives in the
-`PathPlasticityService` class docstring referencing this deferral.
-
-**Why deferred (not closed in v0.1)**: redirection needs an asymmetric
-source/target usage signal that does not exist yet — the current
-`UsageProofRecord` shape lists `used_object_ids` but does not
-distinguish source vs target asymmetry. v0.2 would add a per-anchor
-usage signal and a redirection branch in `applyDeltasForPath`.
-
-**Close condition**:
-
-- Protocol change: `UsageProofRecord.per_anchor_usage` (or similar)
-  carries the source vs target signal.
-- `PathPlasticityService.applyDeltasForPath` emits
-  `PATH_RELATION_REDIRECTED` events (new event type added to
-  `runtime-governance.ts`) with the new `direction_bias` value.
-- `PathRelationRepoPort.updateSync` already accepts the field; no
-  storage migration needed.
-- Recall-side adapter understands the new direction_bias values.
-- All vitest projects green.
-
-### #BL-030 — `PathLifecycle.status` enum + retire recall's strength-based retirement inference
-
-**Opened by**: v0.1-closeout D2 (spec-compliance-B-2 + A3 deferred-followup-3
-+ reviewer-I4 + codex-I1)
-
-**Symptom**: v0.1 does NOT encode "retired" as an explicit status field
-on `PathLifecycle`. Both
-`PathPlasticityService.isAlreadyRetired` and the daemon's
-`createRecallPathPlasticityPort.isRetiredPath` infer retirement from
-`strength <= 0 && last_weakened_at !== undefined`, then
-`isAlreadyRetired` queries the audit log per affected path per tick to
-disambiguate. The write-side can produce `strength <= 0 +
-last_weakened_at` for non-retired weakened paths (codex-I1), so the
-read-side and the audit/state machine can disagree.
-
-**Why deferred (not closed in v0.1)**: closing requires schema change
-+ recall adapter rewrite + service rewrite. v0.1 ships the inference
-heuristic with documented limits (see service docstring + audit-log
-fallback).
-
-**Close condition**:
-
-- New `PathLifecycle.status: "active" | "retired"` field added via
-  storage migration.
-- `PathPlasticityService` writes `status: "retired"` when emitting
-  `PATH_RELATION_RETIRED` events.
-- `PathPlasticityService.isAlreadyRetired` reads
-  `path.lifecycle.status === "retired"` instead of querying the audit
-  log per tick (closes reviewer-I4 unbounded-`queryByEntity` perf hit).
-- `createRecallPathPlasticityPort.isRetiredPath` reads the same field
-  instead of inferring from `strength + last_weakened_at` (closes
-  codex-I1 read-side / write-side divergence).
-- All vitest projects green.
-
-### #BL-031 — Sync-first repo pattern (retire `*Sync` siblings)
-
-**Opened by**: v0.1-closeout D2 (spec-compliance-B-2 +
-collected-root-cause RC-1 / df-4 + domain-language-I-5)
-
-**Symptom**: A2 added `*Sync` sibling methods on 11 storage repos
-(`event-log`, `claim-form`, `bootstrapping-record`,
-`deferred-obligation`, `dirty-state-dossier`, `drift-lease`, `run`,
-`path-graph-snapshot`, `path-relation`, `surface-binding`, `config`)
-to support `appendManyWithMutation`'s sync-mutate-callback contract.
-This is an interim pattern: better-sqlite3 is synchronous; the
-async-by-default repo shape was a port artefact.
-
-**Why deferred (not closed in v0.1)**: the right cleanup is to make
-the primary repo methods sync and async-wrap only at I/O boundaries
-— a 30+ file mechanical refactor that is its own card, not a
-fix-loop bundle.
-
-**Close condition**:
-
-- Each `*Sync` method in `packages/storage/src/repos/*` removed.
-- The primary methods become sync.
-- Async wrapping limited to genuine I/O boundaries (file writes,
-  network, etc.).
-- `EventPublisher.appendManyWithMutation` accepts the renamed
-  primaries directly (no more `appendSync` callsite).
-- glossary §Storage `*Sync` entry removed.
-- All vitest projects green.
-
-### #BL-032 — Workspace-and-type-scoped EventLog query for path-plasticity (retire in-memory filter)
-
-**Opened by**: v0.1-closeout D2 (red-team-I2)
-
-**Symptom**: `apps/core-daemon/src/path-plasticity-runtime.ts:64-95`
-`createUsageProofReader` calls
-`eventLogRepo.queryByWorkspace(workspaceId)` and filters
-`event_type !== MEMORY_USAGE_REPORTED` in JS. The Garden scheduler is
-single-flight per role; a workspace with N events that takes
-T_workspace seconds blocks the Auditor's other work for the same tick.
-Each row is materialised including `JSON.parse` of `payload_json`,
-adding memory pressure that scales with workspace event volume.
-
-**Close condition**:
-
-- New `SqliteEventLogRepo.queryByWorkspaceAndType(workspaceId,
-  eventType, sinceIso)` method that pushes the filter into SQL.
-- `createUsageProofReader.listRecentUsage` uses the new method.
-- Garden-level wall-clock budget on the path-plasticity task so a
-  single workspace cannot block the Auditor indefinitely.
-- All vitest projects green.
-
-### #BL-033 — Batched `findByAnchors` for the recall plasticity port (kill N×M round-trips)
-
-**Opened by**: v0.1-closeout D2 (architect-I1)
-
-**Symptom**:
-`apps/core-daemon/src/path-plasticity-runtime.ts:182-213`
-`getStrengthByMemoryId` loops over every recall candidate memory id
-and calls `pathRelationRepo.findByAnchor(workspaceId, {kind: "object",
-object_id: memoryId})` per id. For workspaces with hundreds of recall
-candidates this adds hundreds of SQLite round-trips on every
-`soul.recall` call.
-
-**Close condition**:
-
-- New `SqlitePathRelationRepo.findByAnchors(workspaceId,
-  refs: readonly PathAnchorRef[])` batched method.
-- Recall plasticity port calls it once per request.
-- A telemetry hook (count, p99) on the plasticity port pinned in
-  `doctor` so the next benchmark wave sees the cost concretely.
-- All vitest projects green.
-
-### #BL-034 — Review-surface contract-parity test (MCP / Inspector HTTP / `alaya review` CLI)
-
-**Opened by**: v0.1-closeout D2 (architect-I4)
-
-**Symptom**: Three surfaces (MCP attached agent, Inspector HTTP,
-`alaya review` CLI) all converge on the same
-`soul.review_memory_proposal` handler. There is no test asserting
-they produce identical response shapes for identical inputs. A future
-change to the handler's response shape can ripple to three call sites
-silently (e.g. CLI rendering `undefined` for a missing field).
-
-**Close condition**:
-
-- One integration test under `apps/core-daemon/src/__tests__/`
-  drives `soul.review_memory_proposal` via (a) MCP transport,
-  (b) HTTP POST `/workspaces/:wsId/proposals/:proposalId/review`,
-  (c) CLI bridge.
-- Asserts identical response shape on all three (sans transport
-  envelope).
-- All vitest projects green.
-
-### #BL-035 — Durabilize the path-plasticity per-workspace watermark via SQL
-
-**Opened by**: v0.1-closeout D2 (codex-B2 follow-up after MERGED-B2 fix)
-
-**Symptom**: D2 MERGED-B2 closed the cross-tick reapplication defect
-with an in-process `PathPlasticityWatermarkRegistry` map. Across daemon
-restarts the registry resets and re-uses the 24h lookback once,
-re-applying receipts in that window. Bounded but not zero.
-
-**Close condition**:
-
-- New storage table `path_plasticity_watermark`
-  (`workspace_id` PK, `last_processed_reported_at` NOT NULL,
-  `last_processed_audit_event_id` NULL, `updated_at` NOT NULL).
-- Migration adds the table + a non-destructive backfill for existing
-  workspaces (initial value = `now - 24h` or
-  `MAX(reported_at WHERE plasticity_event_for_workspace)`).
-- `PathPlasticityWatermarkRegistry` reads from + writes to the table
-  on each `getAndAdvance` call.
-- Across restart: the registry restarts from the persisted watermark,
-  not `now - 24h`. Zero reapplication.
-- All vitest projects green.
-
-### #BL-036 — Dedupe pending `PATH_PLASTICITY_UPDATE` enqueues (`pendingPlasticityWorkspaces` Set)
-
-**Opened by**: v0.1-closeout D2 (red-team-N4 upgraded after MERGED-B2)
-
-**Symptom**: `apps/core-daemon/src/garden-runtime.ts`
-`enqueueForAllWorkspaces` does not deduplicate
-`PATH_PLASTICITY_UPDATE` enqueues. If a workspace's previous tick
-has not yet completed (e.g. because of `#BL-032`'s O(N) scan), a
-second descriptor queues, then a third, etc. The watermark advance
-mitigates the wasted work (each subsequent tick sees a smaller
-window) but the queue still grows.
-
-**Close condition**:
-
-- `pendingPlasticityWorkspaces: Set<string>` mirroring the
-  embedding-backfill dedup pattern.
-- Cleared in `auditor.ts` finally branch after the auditor's
-  `executePathPlasticityUpdate` returns or throws.
-- All vitest projects green.
+`#BL-025` through `#BL-036` were opened by the v0.1-closeout A2 and
+D2 fix-loops, then resolved by Gate-5F under
+`docs/v0.1/phase-5-followup-briefs/` before Phase 6).
+
+## No Open Issues
+
+There are no cross-phase unresolved issues in this backlog after the
+Gate-5F implementation closeout. Gate-5F itself still requires the
+aggregate final review and full verification gate before Phase 6 may
+start; that gate is tracked in
+`docs/v0.1/phase-5-followup-briefs/reports/gate-5f-closeout.md`.
+
+## Resolved by Gate-5F (2026-05-05)
+
+### #BL-025 - Resolved (EventPublisher input revision removed)
+
+`EventPublisherInput` now excludes `revision`, producer call sites no
+longer pass ceremonial revision fields, and dead revision-only helpers
+were removed from live producer/test surfaces. Durable EventLog
+repositories still own persisted revision assignment inside the SQLite
+transaction.
+
+Close evidence: `5F-A-event-state`.
+
+### #BL-026 - Resolved (legacy EventPublisher mutation APIs removed)
+
+The soul-side Garden EventLog adapter uses the sync-first batched
+mutation path, and `EventPublisher.publishWithMutation` /
+`publishManyWithMutation` were removed from live code.
+
+Close evidence: `5F-A-event-state`.
+
+### #BL-027 - Resolved (local reviewer inbox)
+
+The local reviewer inbox has assignment, deadline / overdue projection,
+and configured server-bound reviewer identity via
+`ALAYA_REVIEWER_TOKEN` + `ALAYA_REVIEWER_IDENTITY`. When those env vars
+are not configured, reviewer identity remains an operator-visible local
+attestation per invariant 21b. The v0.1 policy remains default
+single-reviewer approval; team quorum and escalation product workflows
+remain outside this local-first release.
+
+Close evidence: `5F-B-reviewer-inbox`.
+
+### #BL-028 - Resolved (Path plasticity owned by Librarian)
+
+`PATH_PLASTICITY_UPDATE` is scheduled and executed through the
+Librarian / TIER_2 Garden path. Auditor remains focused on audit and
+staleness work.
+
+Close evidence: `5F-D-garden-queue`.
+
+### #BL-029 - Resolved (direction-bias redirection consumer)
+
+Trust usage proofs now carry `per_anchor_usage`, path plasticity emits
+durable `PATH_RELATION_REDIRECTED` events, path relations persist the
+new `direction_bias`, and recall respects that direction. The live
+proof covers `soul.recall -> soul.report_context_usage -> Garden pass
+-> PathRelation mutation -> later soul.recall`.
+
+Close evidence: `5F-E-redirection`.
+
+### #BL-030 - Resolved (explicit PathLifecycle status)
+
+`PathLifecycle.status` is durable and recall reads the same retired
+state the writer produces, removing the old strength-based retirement
+inference.
+
+Close evidence: `5F-C-path-foundation`.
+
+### #BL-031 - Resolved (sync-first storage repos)
+
+Storage repos use sync-first primary methods instead of parallel
+`*Sync` siblings. Async wrapping remains only at the boundaries that
+actually need it.
+
+Close evidence: `5F-A-event-state`.
+
+### #BL-032 - Resolved (scoped EventLog query for path plasticity)
+
+Path plasticity reads memory-usage events through a workspace-and-type
+scoped EventLog query instead of materialising a whole workspace event
+stream and filtering in memory.
+
+Close evidence: `5F-C-path-foundation`.
+
+### #BL-033 - Resolved (batched recall plasticity lookup)
+
+Recall plasticity uses batched anchor lookup for candidate memories and
+exposes telemetry so the benchmark wave can observe the cost.
+
+Close evidence: `5F-C-path-foundation`.
+
+### #BL-034 - Resolved (review-surface parity)
+
+The shared review handler has parity coverage across MCP, Inspector
+HTTP, and `alaya review` CLI surfaces.
+
+Close evidence: `5F-B-reviewer-inbox`.
+
+### #BL-035 - Resolved (durable path-plasticity watermark)
+
+The path-plasticity watermark is stored in SQL and survives daemon
+restart, avoiding cross-restart receipt reapplication.
+
+Close evidence: `5F-C-path-foundation`.
+
+### #BL-036 - Resolved (pending path-plasticity enqueue dedupe)
+
+Garden maintains a pending-workspace dedupe set for
+`PATH_PLASTICITY_UPDATE` enqueues and clears it when the Librarian task
+finishes.
+
+Close evidence: `5F-D-garden-queue`.
 
 ## Recently Resolved by p5-system-review-r1 (2026-05-03)
 
@@ -536,13 +310,10 @@ All in-tree producer call sites migrated:
 - `6ae6dbd` — tsc-strict gaps in test fixtures + DirtyStatePanic
   daemon wiring cleanup
 
-`EventPublisher.publishWithMutation` and `publishManyWithMutation` are
-retained on the publisher class for the `auditorEventLogPort` in
-`apps/core-daemon/src/garden-runtime.ts:177`. The soul-side `Auditor`
-consumes that as an async `AuditorEventLogPort.publishWithMutation`
-port and migrating the soul Auditor to a sync mutate is a separate
-v0.2 cleanup. The BL-022 race for the path-graph-snapshot caller
-(the only direct producer in garden-runtime.ts) is closed.
+Gate-5F later removed `EventPublisher.publishWithMutation` and
+`publishManyWithMutation` after moving the final Garden adapter to the
+sync-first batched mutation boundary. The BL-022 race for the
+path-graph-snapshot caller remains closed.
 
 Originally raised in `p5-system-review-r1` as MR-I07 + MR-I09.
 
@@ -633,7 +404,7 @@ When adding an issue, use this shape:
 ```
 ### #BL-NNN — <one-line title>
 
-**Status**: Open | Deferred | Resolved
+**Status**: <Open or Deferred or Resolved>
 **Owner**: <docs path or task ID>
 **Close condition**: <what acceptance test must pass>
 

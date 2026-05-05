@@ -3,6 +3,7 @@ import {
   WorkspaceRunEventType,
   RunMode,
   RunState,
+  TrustStateEventType,
   WorkspaceKind,
   WorkspaceState
 } from "@do-soul/alaya-protocol";
@@ -32,7 +33,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_events",
       run_id: null,
       caused_by: "user_action",
-      revision: 0,
       payload_json: {
         workspace_id: "ws_events",
         name: "events",
@@ -55,7 +55,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_events",
       run_id: "run_target",
       caused_by: "user_action",
-      revision: 0,
       payload_json: {
         run_id: "run_target",
         workspace_id: "ws_events",
@@ -70,7 +69,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_events",
       run_id: "run_other",
       caused_by: "user_action",
-      revision: 0,
       payload_json: {
         run_id: "run_other",
         workspace_id: "ws_events",
@@ -94,7 +92,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_match",
       run_id: null,
       caused_by: "user_action",
-      revision: 0,
       payload_json: {
         workspace_id: "ws_match",
         name: "match",
@@ -108,7 +105,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_other",
       run_id: null,
       caused_by: "user_action",
-      revision: 0,
       payload_json: {
         workspace_id: "ws_other",
         name: "other",
@@ -131,7 +127,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_type",
       run_id: null,
       caused_by: "user_action",
-      revision: 0,
       payload_json: {
         workspace_id: "ws_type",
         name: "type",
@@ -145,7 +140,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_type",
       run_id: "run_type",
       caused_by: "user_action",
-      revision: 0,
       payload_json: {
         run_id: "run_type",
         workspace_id: "ws_type",
@@ -169,7 +163,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_events",
       run_id: "run_order",
       caused_by: "user_action",
-      revision: 0,
       payload_json: {
         run_id: "run_order",
         role: "user",
@@ -184,7 +177,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_events",
       run_id: "run_order",
       caused_by: "engine",
-      revision: 1,
       payload_json: {
         run_id: "run_order",
         message_id: "msg_2",
@@ -212,7 +204,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_events",
       run_id: "run_order",
       caused_by: "user_action",
-      revision: 0,
       payload_json: {
         run_id: "run_order",
         role: "user",
@@ -227,7 +218,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_events",
       run_id: "run_order",
       caused_by: "user_action",
-      revision: 1,
       payload_json: {
         run_id: "run_order",
         role: "user",
@@ -242,7 +232,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_events",
       run_id: "run_order",
       caused_by: "engine",
-      revision: 2,
       payload_json: {
         run_id: "run_order",
         message_id: "msg_3",
@@ -267,7 +256,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_events",
       run_id: "run_order",
       caused_by: "user_action",
-      revision: 0,
       payload_json: {
         run_id: "run_order",
         role: "user",
@@ -282,7 +270,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_events",
       run_id: "run_order",
       caused_by: "engine",
-      revision: 1,
       payload_json: {
         run_id: "run_order",
         message_id: "msg_2",
@@ -306,7 +293,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_events",
       run_id: "run_order",
       caused_by: "user_action",
-      revision: 0,
       payload_json: {
         run_id: "run_order",
         role: "user",
@@ -321,7 +307,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_events",
       run_id: "run_order",
       caused_by: "user_action",
-      revision: 1,
       payload_json: {
         run_id: "run_order",
         role: "user",
@@ -336,7 +321,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_events",
       run_id: "run_order",
       caused_by: "engine",
-      revision: 2,
       payload_json: {
         run_id: "run_order",
         message_id: "msg_3",
@@ -365,7 +349,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_events",
       run_id: "run_order",
       caused_by: "user_action",
-      revision: 0,
       payload_json: {
         run_id: "run_order",
         role: "user",
@@ -380,7 +363,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_events",
       run_id: "run_order",
       caused_by: "engine",
-      revision: 1,
       payload_json: {
         run_id: "run_order",
         message_id: "msg_2",
@@ -454,6 +436,98 @@ describe("SqliteEventLogRepo", () => {
     expect(workspaceReplayPlan.some((row) => row.detail.includes("USE TEMP B-TREE FOR ORDER BY"))).toBe(true);
   });
 
+  it("queryByWorkspaceAndType pushes workspace, type, and since filtering into SQL for usage proofs", async () => {
+    const { database, eventLogRepo } = await createEventLogRepos();
+    await eventLogRepo.append({
+      event_type: TrustStateEventType.MEMORY_USAGE_REPORTED,
+      entity_type: "trust_usage_proof",
+      entity_id: "delivery-old",
+      workspace_id: "ws_events",
+      run_id: null,
+      caused_by: "test",
+      payload_json: {
+        delivery_id: "delivery-old",
+        usage_state: "used",
+        used_object_ids: ["memory-1"],
+        reason: null,
+        reported_at: "2026-05-04T09:00:00.000Z"
+      }
+    });
+    await eventLogRepo.append({
+      event_type: WorkspaceRunEventType.WORKSPACE_CREATED,
+      entity_type: "workspace",
+      entity_id: "ws_events",
+      workspace_id: "ws_events",
+      run_id: null,
+      caused_by: "test",
+      payload_json: {
+        workspace_id: "ws_events",
+        name: "events",
+        workspace_kind: WorkspaceKind.LOCAL_REPO
+      }
+    });
+    await eventLogRepo.append({
+      event_type: TrustStateEventType.MEMORY_USAGE_REPORTED,
+      entity_type: "trust_usage_proof",
+      entity_id: "delivery-new",
+      workspace_id: "ws_events",
+      run_id: null,
+      caused_by: "test",
+      payload_json: {
+        delivery_id: "delivery-new",
+        usage_state: "used",
+        used_object_ids: ["memory-2"],
+        reason: null,
+        reported_at: "2026-05-04T11:00:00.000Z"
+      }
+    });
+    await eventLogRepo.append({
+      event_type: TrustStateEventType.MEMORY_USAGE_REPORTED,
+      entity_type: "trust_usage_proof",
+      entity_id: "delivery-after-window",
+      workspace_id: "ws_events",
+      run_id: null,
+      caused_by: "test",
+      payload_json: {
+        delivery_id: "delivery-after-window",
+        usage_state: "used",
+        used_object_ids: ["memory-3"],
+        reason: null,
+        reported_at: "2026-05-04T12:30:00.000Z"
+      }
+    });
+
+    const events = await eventLogRepo.queryByWorkspaceAndType(
+      "ws_events",
+      TrustStateEventType.MEMORY_USAGE_REPORTED,
+      "2026-05-04T10:00:00.000Z",
+      "2026-05-04T12:00:00.000Z"
+    );
+
+    expect(events.map((event) => event.entity_id)).toEqual(["delivery-new"]);
+
+    const queryPlan = database.connection
+      .prepare(
+        `
+          EXPLAIN QUERY PLAN
+          SELECT event_id
+          FROM event_log
+          WHERE workspace_id = ?
+            AND event_type = ?
+            AND created_at > ?
+          ORDER BY created_at ASC, rowid ASC
+        `
+      )
+      .all("ws_events", TrustStateEventType.MEMORY_USAGE_REPORTED, "2026-05-04T10:00:00.000Z") as Array<{
+      readonly detail: string;
+    }>;
+    expect(
+      queryPlan.some((row) =>
+        row.detail.includes("SEARCH event_log USING INDEX idx_event_log_workspace_type_created")
+      )
+    ).toBe(true);
+  });
+
 
   it("queryByWorkspace returns only matching workspace events", async () => {
     const { eventLogRepo } = await createEventLogRepos();
@@ -465,7 +539,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_events",
       run_id: null,
       caused_by: "user_action",
-      revision: 0,
       payload_json: {
         workspace_id: "ws_events",
         name: "events",
@@ -479,7 +552,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_other",
       run_id: null,
       caused_by: "user_action",
-      revision: 0,
       payload_json: {
         workspace_id: "ws_other",
         name: "other",
@@ -503,7 +575,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_events",
       run_id: null,
       caused_by: "user_action",
-      revision: 0,
       payload_json: {
         workspace_id: "ws_events",
         name: "events",
@@ -518,7 +589,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_events",
       run_id: null,
       caused_by: "user_action",
-      revision: 1,
       payload_json: {
         workspace_id: "ws_events"
       }
@@ -540,7 +610,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_events",
       run_id: null,
       caused_by: "user_action",
-      revision: 0,
       payload_json: {
         workspace_id: "ws_events",
         name: "events",
@@ -555,7 +624,6 @@ describe("SqliteEventLogRepo", () => {
       workspace_id: "ws_events",
       run_id: null,
       caused_by: "user_action",
-      revision: 1,
       payload_json: {
         workspace_id: "ws_events"
       }
@@ -564,12 +632,12 @@ describe("SqliteEventLogRepo", () => {
     await expect(eventLogRepo.getLatestWorkspaceEventId("ws_events")).resolves.toBe(deleted.event_id);
   });
 
-  describe("transactional + appendSync (closes #BL-022)", () => {
-    it("appendSync rolls back the row when transactional() callback throws", async () => {
+  describe("transactional + append (closes #BL-022)", () => {
+    it("append rolls back the row when transactional() callback throws", async () => {
       const { eventLogRepo } = await createEventLogRepos();
       expect(() =>
         eventLogRepo.transactional(() => {
-          eventLogRepo.appendSync({
+          eventLogRepo.append({
             event_type: WorkspaceRunEventType.WORKSPACE_CREATED,
             entity_type: "workspace",
             entity_id: "ws_rollback_atomic",
@@ -591,14 +659,14 @@ describe("SqliteEventLogRepo", () => {
       ).resolves.toEqual([]);
     });
 
-    it("appendSync inside transactional() computes revision atomically with the INSERT", async () => {
+    it("append inside transactional() computes revision atomically with the INSERT", async () => {
       const { eventLogRepo } = await createEventLogRepos();
       // Three sequential appends inside one transaction — revisions must be 0,1,2.
       const entries = eventLogRepo.transactional(() => {
         const out = [];
         for (let i = 0; i < 3; i++) {
           out.push(
-            eventLogRepo.appendSync({
+            eventLogRepo.append({
               event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
               entity_type: "message",
               entity_id: "msg-atomic",

@@ -156,7 +156,6 @@ describe("SoulApprovalService", () => {
       workspace_id: "ws-1",
       run_id: "run-1",
       caused_by: "user_action",
-      revision: 1,
       payload_json: {
         message_id: "msg-request-1",
         approval_id: "approval-1",
@@ -217,7 +216,6 @@ describe("SoulApprovalService", () => {
 
     expect(eventLogRepo.append).toHaveBeenCalledWith(
       expect.objectContaining({
-        revision: 8,
         payload_json: expect.objectContaining({
           message_id: "msg-request-latest",
           description: "Latest approval request"
@@ -263,7 +261,6 @@ describe("SoulApprovalService", () => {
 
     expect(eventLogRepo.append).toHaveBeenCalledWith(
       expect.objectContaining({
-        revision: 599_999,
         payload_json: expect.objectContaining({
           message_id: "msg-request-299999",
           description: "Approval request 299999"

@@ -36,7 +36,7 @@ export type SynthesisCapsuleInput = Omit<
 >;
 
 export interface SynthesisServiceEventLogRepoPort {
-  append(event: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
 }
 
@@ -115,8 +115,6 @@ export class SynthesisService {
       this.validateEvidenceRefs(synthesis.evidence_refs),
       this.validateSourceMemoryRefs(synthesis.source_memory_refs)
     ]);
-
-    const revision = await this.getNextRevision("synthesis_capsule", synthesis.object_id);
     const event = await this.dependencies.eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_SYNTHESIS_CREATED,
       entity_type: "synthesis_capsule",
@@ -124,7 +122,6 @@ export class SynthesisService {
       workspace_id: synthesis.workspace_id,
       run_id: synthesis.run_id,
       caused_by: synthesis.created_by,
-      revision,
       payload_json: SoulSynthesisCreatedPayloadSchema.parse({
         object_id: synthesis.object_id,
         object_kind: synthesis.object_kind,
@@ -158,7 +155,6 @@ export class SynthesisService {
     ensureValidStatusTransition(existing.synthesis_status, parsedStatus);
 
     const occurredAt = this.now();
-    const revision = await this.getNextRevision("synthesis_capsule", existing.object_id);
     const event = await this.dependencies.eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_SYNTHESIS_STATUS_CHANGED,
       entity_type: "synthesis_capsule",
@@ -166,7 +162,6 @@ export class SynthesisService {
       workspace_id: existing.workspace_id,
       run_id: existing.run_id,
       caused_by: parsedCausedBy,
-      revision,
       payload_json: SoulSynthesisStatusChangedPayloadSchema.parse({
         object_id: existing.object_id,
         object_kind: existing.object_kind,
@@ -214,8 +209,6 @@ export class SynthesisService {
 
     const occurredAt = this.now();
     ensurePromotionRequestAllowed(existing, occurredAt);
-
-    const revision = await this.getNextRevision("synthesis_capsule", existing.object_id);
     const event = await this.dependencies.eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_SYNTHESIS_PROMOTED,
       entity_type: "synthesis_capsule",
@@ -223,7 +216,6 @@ export class SynthesisService {
       workspace_id: existing.workspace_id,
       run_id: existing.run_id,
       caused_by: TransitionCausedBy.SYSTEM,
-      revision,
       payload_json: SoulSynthesisPromotedPayloadSchema.parse({
         object_id: existing.object_id,
         object_kind: existing.object_kind,
@@ -277,7 +269,6 @@ export class SynthesisService {
     }
 
     const occurredAt = this.now();
-    const revision = await this.getNextRevision("synthesis_capsule", existing.object_id);
     const event = await this.dependencies.eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_SYNTHESIS_PROMOTED,
       entity_type: "synthesis_capsule",
@@ -285,7 +276,6 @@ export class SynthesisService {
       workspace_id: existing.workspace_id,
       run_id: existing.run_id,
       caused_by: parsedCausedBy,
-      revision,
       payload_json: SoulSynthesisPromotedPayloadSchema.parse({
         object_id: existing.object_id,
         object_kind: existing.object_kind,
@@ -376,17 +366,6 @@ export class SynthesisService {
     if (firstMissing !== undefined) {
       throw new CoreError("VALIDATION", `Source memory reference not found: ${firstMissing.sourceMemoryRef}`);
     }
-  }
-
-  private async getNextRevision(entityType: string, entityId: string): Promise<number> {
-    const events = await this.dependencies.eventLogRepo.queryByEntity(entityType, entityId);
-
-    if (events.length === 0) {
-      return 0;
-    }
-
-    const maxRevision = events.reduce((max, event) => Math.max(max, event.revision), 0);
-    return maxRevision + 1;
   }
 }
 

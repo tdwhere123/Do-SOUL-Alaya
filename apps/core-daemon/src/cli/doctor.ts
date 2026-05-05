@@ -1,6 +1,7 @@
 import { access, constants as fsConstants } from "node:fs/promises";
 import type { EmbeddingStatus, ToolchainStatus } from "@do-soul/alaya-protocol";
 import type { DaemonStartupStepRecord } from "../index.js";
+import type { PathPlasticityLookupTelemetrySnapshot } from "../path-plasticity-runtime.js";
 import { ALAYA_SYSEXITS, type AlayaCliArgsSchema, type AlayaCliContext, type AlayaSubcommandSpec } from "./bridge.js";
 
 export interface DoctorCommandDependencies {
@@ -8,6 +9,9 @@ export interface DoctorCommandDependencies {
   readonly getEmbeddingStatus?: (workspaceId: string) => Promise<EmbeddingStatus>;
   readonly getMcpHealth?: () => Promise<Readonly<{ transport: "ready" | "not_ready"; enrolled_tools: number }>>;
   readonly getGardenHealth?: () => Promise<Readonly<{ status: "healthy" | "degraded"; last_pass_at: string | null }>>;
+  readonly getPathPlasticityLookupTelemetry?: () =>
+    | Readonly<PathPlasticityLookupTelemetrySnapshot>
+    | Promise<Readonly<PathPlasticityLookupTelemetrySnapshot>>;
   /**
    * Optional schema readiness probe (p5-system-review-r3 MR-I11). When
    * provided, doctor reports `storage.schema_ok` so an operator can
@@ -59,6 +63,9 @@ interface DoctorReport {
     status: "healthy" | "degraded";
     last_pass_at: string | null;
   }>;
+  readonly recall: Readonly<{
+    readonly path_plasticity_lookup: Readonly<PathPlasticityLookupTelemetrySnapshot>;
+  }>;
   readonly checks: Readonly<Record<"runtime" | "storage" | "provider" | "mcp" | "garden", DoctorCheckStatus>>;
 }
 
@@ -106,6 +113,14 @@ export function createDoctorCommand(
             status: daemonReady ? "healthy" : "degraded",
             last_pass_at: null
           } as const);
+      const pathPlasticityLookupTelemetry =
+        (await deps.getPathPlasticityLookupTelemetry?.()) ??
+        ({
+          lookup_count: 0,
+          sample_count: 0,
+          duration_p99_ms: null,
+          window_size: 128
+        } satisfies PathPlasticityLookupTelemetrySnapshot);
 
       const checks = {
         runtime: daemonReady ? "pass" : "fail",
@@ -136,6 +151,9 @@ export function createDoctorCommand(
         },
         mcp,
         garden,
+        recall: {
+          path_plasticity_lookup: pathPlasticityLookupTelemetry
+        },
         checks
       };
 
@@ -274,6 +292,12 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport):
   }
   stream.write(`mcp transport: ${report.mcp.transport}\n`);
   stream.write(`garden status: ${report.garden.status}\n`);
+  stream.write(
+    `recall path plasticity lookup: count=${report.recall.path_plasticity_lookup.lookup_count}` +
+      ` p99_ms=${report.recall.path_plasticity_lookup.duration_p99_ms ?? "n/a"}` +
+      ` samples=${report.recall.path_plasticity_lookup.sample_count}` +
+      ` window=${report.recall.path_plasticity_lookup.window_size}\n`
+  );
   if (report.provider.embedding !== null) {
     stream.write(
       `embedding mode: ${report.provider.embedding.effective_mode} (provider_configured=${report.provider.embedding.provider_configured ? "yes" : "no"})\n`

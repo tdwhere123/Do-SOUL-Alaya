@@ -3,6 +3,9 @@ import type { Context } from "hono";
 export interface InspectorProxyOptions {
   readonly daemonUrl: string;
   readonly fetchImpl?: typeof fetch;
+  readonly daemonRequestToken?: string;
+  readonly reviewerToken?: string;
+  readonly reviewerIdentity?: string;
 }
 
 export async function proxyDaemonJson(
@@ -19,9 +22,20 @@ export async function proxyDaemonJson(
 ): Promise<Response> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const daemonUrl = new URL(request.path, normalizeBaseUrl(options.daemonUrl));
+  const headers = new Headers();
+  let hasHeaders = false;
+  if (request.body !== undefined) {
+    headers.set("content-type", "application/json");
+    hasHeaders = true;
+  }
+  if (request.method !== "GET" && options.daemonRequestToken !== undefined) {
+    headers.set("x-request-token", options.daemonRequestToken);
+    headers.set("x-alaya-desktop", "1");
+    hasHeaders = true;
+  }
   const response = await fetchImpl(daemonUrl, {
     method: request.method,
-    headers: request.body === undefined ? undefined : { "content-type": "application/json" },
+    headers: hasHeaders ? headers : undefined,
     body: request.body === undefined ? undefined : JSON.stringify(request.body)
   });
 

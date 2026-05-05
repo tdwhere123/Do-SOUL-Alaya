@@ -124,16 +124,16 @@ describe("ConstitutionalFragmentService", () => {
       run_id: null,
       caused_by: "system",
       revision: 0,
-        payload_json: ConstitutionalFragmentRegisteredPayloadSchema.parse({
-          fragment_id: "constitutional://workspace-1/hard_constraint/system.worker_dispatch",
-          workspace_id: "workspace-1",
-          category: "hard_constraint",
-          authority_source: "system.worker_dispatch",
-          registered_at: FIXED_NOW,
-          content_sha256: hashContent("Never mutate files outside approved workspace roots.")
-        }),
-        created_at: FIXED_NOW
-      });
+      payload_json: ConstitutionalFragmentRegisteredPayloadSchema.parse({
+        fragment_id: "constitutional://workspace-1/hard_constraint/system.worker_dispatch",
+        workspace_id: "workspace-1",
+        category: "hard_constraint",
+        authority_source: "system.worker_dispatch",
+        registered_at: FIXED_NOW,
+        content_sha256: hashContent("Never mutate files outside approved workspace roots.")
+      }),
+      created_at: FIXED_NOW
+    });
     const appendManyWithMutationImpl: Pick<EventPublisher, "appendManyWithMutation">["appendManyWithMutation"] =
       async (_events, mutate) => mutate([existingEntry]);
     const appendManyWithMutation = vi.fn(appendManyWithMutationImpl);
@@ -461,11 +461,12 @@ function createEventPublisher(
   entries: EventLogEntry[],
   options: { readonly beforeReturn?: () => Promise<void> } = {}
 ): Pick<EventPublisher, "appendManyWithMutation"> {
-  const buildEntry = (event: Omit<EventLogEntry, "event_id" | "created_at">): EventLogEntry =>
+  const buildEntry = (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry =>
     EventLogEntrySchema.parse({
       ...event,
       event_id: `event-${entries.length + 1}`,
-      created_at: FIXED_NOW
+      created_at: FIXED_NOW,
+      revision: entries.length
     });
 
   // In-memory adapter mimicking better-sqlite3 transactional semantics so
@@ -473,23 +474,12 @@ function createEventPublisher(
   // we can still inject async gating between transaction commit and the
   // post-commit `await this.propagate(entry)`.
   const eventLogRepo = {
-    append: vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at">) => {
+    append: vi.fn((event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
       const entry = buildEntry(event);
       entries.push(entry);
       return entry;
     }),
-    appendSync: vi.fn((event: Omit<EventLogEntry, "event_id" | "created_at">) => {
-      const entry = buildEntry(event);
-      entries.push(entry);
-      return entry;
-    }),
-    deleteById: vi.fn(async (eventId: string) => {
-      const index = entries.findIndex((entry) => entry.event_id === eventId);
-      if (index >= 0) {
-        entries.splice(index, 1);
-      }
-    }),
-    deleteByIdSync: vi.fn((eventId: string) => {
+    deleteById: vi.fn((eventId: string) => {
       const index = entries.findIndex((entry) => entry.event_id === eventId);
       if (index >= 0) {
         entries.splice(index, 1);

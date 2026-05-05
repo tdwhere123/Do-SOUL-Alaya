@@ -62,24 +62,7 @@ export class SqliteWorkspaceEngineConfigRepo implements WorkspaceEngineConfigRep
     private readonly options: SqliteWorkspaceEngineConfigRepoOptions = {}
   ) {}
 
-  public async upsertConversationBindingAndSetDefaultEngineClass(input: {
-    readonly workspace_id: string;
-    readonly binding_id: string;
-    readonly binding: EngineBindingInput;
-  }): Promise<{
-    readonly workspace: Workspace;
-    readonly binding: EngineBindingRecord;
-  }> {
-    // Legacy async callers still need their own transaction wrapper; the new
-    // sync sibling assumes the caller already opened one (e.g. via
-    // EventPublisher.appendManyWithMutation -> repo.transactional()).
-    return this.db.connection.transaction(() =>
-      this.upsertConversationBindingAndSetDefaultEngineClassSync(input)
-    )();
-  }
-
-  /** Synchronous variant for atomic publish + mutation (#BL-022). */
-  public upsertConversationBindingAndSetDefaultEngineClassSync(input: {
+  public upsertConversationBindingAndSetDefaultEngineClass(input: {
     readonly workspace_id: string;
     readonly binding_id: string;
     readonly binding: EngineBindingInput;

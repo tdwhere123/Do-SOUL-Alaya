@@ -27,7 +27,7 @@ export interface McpToolDiscoveryDependencies {
   };
   readonly mcpToolCatalog: McpToolCatalogPort;
   readonly eventLogWriter: {
-    append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+    append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   };
   readonly runtimeNotifier?: {
     notifyEntry(entry: EventLogEntry): void | Promise<void>;
@@ -157,7 +157,6 @@ export class McpToolDiscoveryService {
       workspace_id: resolveSystemWorkspaceId(this.deps.defaultWorkspaceId),
       run_id: null,
       caused_by: SYSTEM_ACTOR,
-      revision: 0,
       payload_json: payload
     });
     await this.deps.runtimeNotifier?.notifyEntry(entry);

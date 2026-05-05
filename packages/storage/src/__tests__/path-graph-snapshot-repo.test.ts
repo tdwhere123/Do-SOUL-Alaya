@@ -27,8 +27,8 @@ describe("SqlitePathGraphSnapshotRepo", () => {
       paths_created_since_last: 1
     });
 
-    await expect(repo.create(older)).resolves.toEqual(older);
-    await expect(repo.create(newer)).resolves.toEqual(newer);
+    expect(repo.create(older)).toEqual(older);
+    expect(repo.create(newer)).toEqual(newer);
     await expect(repo.findLatest("workspace-1")).resolves.toEqual(newer);
     await expect(repo.findHistory("workspace-1", 5)).resolves.toEqual([newer, older]);
     await expect(repo.findHistory("workspace-1", 1)).resolves.toEqual([newer]);
@@ -74,7 +74,7 @@ describe("SqlitePathGraphSnapshotRepo", () => {
       END;
     `);
 
-    await expect(repo.create(snapshot)).resolves.toEqual(persistedSnapshot);
+    expect(repo.create(snapshot)).toEqual(persistedSnapshot);
     await expect(repo.findLatest(snapshot.workspace_id)).resolves.toEqual(persistedSnapshot);
   });
 });

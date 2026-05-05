@@ -93,6 +93,11 @@ export {
   type PathRelationRepo
 } from "./repos/path-relation-repo.js";
 export {
+  SqlitePathPlasticityWatermarkRepo,
+  type PathPlasticityWatermarkRecord,
+  type PathPlasticityWatermarkRepo
+} from "./repos/path-plasticity-watermark-repo.js";
+export {
   SqliteBootstrappingRecordRepo,
   type BootstrappingRecordRepo
 } from "./repos/bootstrapping-record-repo.js";

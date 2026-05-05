@@ -109,9 +109,10 @@ function createDependencies(
     pending_proposal: null
   }));
   const append = vi.fn(
-    async (entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry> => ({
+    async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): Promise<EventLogEntry> => ({
       event_id: `event-${entry.event_type}`,
       created_at: "2026-03-23T00:00:00.000Z",
+      revision: 0,
       ...entry
     })
   );

@@ -40,9 +40,9 @@ describe("Auditor 4B", () => {
           ref_kind: "synthesis_ref"
         }
       ]),
-      clearEvidenceRef: vi.fn(async () => undefined),
-      clearMemoryRef: vi.fn(async () => undefined),
-      clearSynthesisRef: vi.fn(async () => undefined)
+      clearEvidenceRef: vi.fn(() => undefined),
+      clearMemoryRef: vi.fn(() => undefined),
+      clearSynthesisRef: vi.fn(() => undefined)
     };
     const scheduler = {
       reportCompletion: vi.fn(async () => undefined)
@@ -83,6 +83,7 @@ describe("Auditor 4B", () => {
     expect(pointerHealPort.clearEvidenceRef).toHaveBeenCalledWith("memory-1", "evidence-missing", "task-1");
     expect(pointerHealPort.clearMemoryRef).toHaveBeenCalledWith("synthesis-1", "memory-missing", "task-1");
     expect(pointerHealPort.clearSynthesisRef).toHaveBeenCalledWith("claim-1", "synthesis-missing", "task-1");
+    expect(eventLogRepo.appendManyWithMutation).toHaveBeenCalledTimes(3);
     expect(eventLogRepo.append).toHaveBeenCalledTimes(3);
     expect(eventLogRepo.append).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -142,9 +143,9 @@ describe("Auditor 4B", () => {
       pointerHealthPort: { findBrokenPointers: vi.fn(async () => []) },
       pointerHealPort: {
         findHealablePointers: vi.fn(async () => []),
-        clearEvidenceRef: vi.fn(async () => undefined),
-        clearMemoryRef: vi.fn(async () => undefined),
-        clearSynthesisRef: vi.fn(async () => undefined)
+        clearEvidenceRef: vi.fn(() => undefined),
+        clearMemoryRef: vi.fn(() => undefined),
+        clearSynthesisRef: vi.fn(() => undefined)
       },
       orphanDetectionPort,
       greenMaintenancePort: {
@@ -212,9 +213,9 @@ describe("Auditor 4B", () => {
       pointerHealthPort: { findBrokenPointers: vi.fn(async () => []) },
       pointerHealPort: {
         findHealablePointers: vi.fn(async () => []),
-        clearEvidenceRef: vi.fn(async () => undefined),
-        clearMemoryRef: vi.fn(async () => undefined),
-        clearSynthesisRef: vi.fn(async () => undefined)
+        clearEvidenceRef: vi.fn(() => undefined),
+        clearMemoryRef: vi.fn(() => undefined),
+        clearSynthesisRef: vi.fn(() => undefined)
       },
       greenMaintenancePort: {
         findExpiringGreenStatuses: vi.fn(async () => []),
@@ -266,9 +267,9 @@ describe("Auditor 4B", () => {
       pointerHealthPort: { findBrokenPointers: vi.fn(async () => []) },
       pointerHealPort: {
         findHealablePointers: vi.fn(async () => []),
-        clearEvidenceRef: vi.fn(async () => undefined),
-        clearMemoryRef: vi.fn(async () => undefined),
-        clearSynthesisRef: vi.fn(async () => undefined)
+        clearEvidenceRef: vi.fn(() => undefined),
+        clearMemoryRef: vi.fn(() => undefined),
+        clearSynthesisRef: vi.fn(() => undefined)
       },
       orphanDetectionPort,
       greenMaintenancePort: {
@@ -327,9 +328,9 @@ describe("Auditor 4B", () => {
       pointerHealthPort: { findBrokenPointers: vi.fn(async () => []) },
       pointerHealPort: {
         findHealablePointers: vi.fn(async () => []),
-        clearEvidenceRef: vi.fn(async () => undefined),
-        clearMemoryRef: vi.fn(async () => undefined),
-        clearSynthesisRef: vi.fn(async () => undefined)
+        clearEvidenceRef: vi.fn(() => undefined),
+        clearMemoryRef: vi.fn(() => undefined),
+        clearSynthesisRef: vi.fn(() => undefined)
       },
       orphanDetectionPort,
       greenMaintenancePort: {
@@ -393,7 +394,7 @@ describe("Auditor 4B", () => {
     const eventLogRepo = createTransactionalEventLogRepo(appendedEvents, "2026-05-01T10:00:00.000Z");
     const orphanDetectionPort = {
       findOrphanedMemories: vi.fn(async () => []),
-      createOrphanRadarRecord: vi.fn(async () => undefined),
+      createOrphanRadarRecord: vi.fn(() => undefined),
       findEventLogOrphans: vi.fn(async () => [
         {
           audit_event_id: "audit-delivery-1",
@@ -417,9 +418,9 @@ describe("Auditor 4B", () => {
       pointerHealthPort: { findBrokenPointers: vi.fn(async () => []) },
       pointerHealPort: {
         findHealablePointers: vi.fn(async () => []),
-        clearEvidenceRef: vi.fn(async () => undefined),
-        clearMemoryRef: vi.fn(async () => undefined),
-        clearSynthesisRef: vi.fn(async () => undefined)
+        clearEvidenceRef: vi.fn(() => undefined),
+        clearMemoryRef: vi.fn(() => undefined),
+        clearSynthesisRef: vi.fn(() => undefined)
       },
       orphanDetectionPort,
       greenMaintenancePort: {
@@ -509,7 +510,7 @@ describe("Auditor 4B", () => {
           detected_at: "2026-05-01T09:00:00.000Z"
         }
       ]),
-      createEventLogOrphanRadarRecord: vi.fn(async () => {
+      createEventLogOrphanRadarRecord: vi.fn(() => {
         throw new Error("radar insert failed");
       })
     };
@@ -518,9 +519,9 @@ describe("Auditor 4B", () => {
       pointerHealthPort: { findBrokenPointers: vi.fn(async () => []) },
       pointerHealPort: {
         findHealablePointers: vi.fn(async () => []),
-        clearEvidenceRef: vi.fn(async () => undefined),
-        clearMemoryRef: vi.fn(async () => undefined),
-        clearSynthesisRef: vi.fn(async () => undefined)
+        clearEvidenceRef: vi.fn(() => undefined),
+        clearMemoryRef: vi.fn(() => undefined),
+        clearSynthesisRef: vi.fn(() => undefined)
       },
       orphanDetectionPort,
       greenMaintenancePort: {
@@ -545,7 +546,7 @@ describe("Auditor 4B", () => {
 
     expect(result.success).toBe(false);
     expect(appendedEvents).toEqual([]);
-    expect(eventLogRepo.publishWithMutation).toHaveBeenCalledTimes(1);
+    expect(eventLogRepo.appendManyWithMutation).toHaveBeenCalledTimes(1);
     expect(orphanDetectionPort.createEventLogOrphanRadarRecord).toHaveBeenCalledTimes(1);
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
@@ -569,10 +570,11 @@ function createTransactionalEventLogRepo(
   appendedEvents: unknown[] = [],
   createdAt = "2026-03-28T10:00:00.000Z"
 ) {
-  const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry> => {
+  const append = vi.fn((entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry => {
     const persisted = {
       event_id: `event-${entry.entity_id}`,
       created_at: createdAt,
+      revision: 0,
       ...entry
     } as EventLogEntry;
     appendedEvents.push(persisted);
@@ -581,16 +583,21 @@ function createTransactionalEventLogRepo(
 
   return {
     append,
-    publishWithMutation: vi.fn(
+    appendManyWithMutation: vi.fn(
       async <T>(
-        entry: Omit<EventLogEntry, "event_id" | "created_at">,
-        mutate: (entry: EventLogEntry) => Promise<T>
+        entries: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+        mutate: (entries: readonly EventLogEntry[]) => T
       ): Promise<T> => {
-        const persisted = await append(entry);
+        const startLength = appendedEvents.length;
+        const persisted = entries.map((entry) => append(entry));
         try {
-          return await mutate(persisted);
+          const result = mutate(persisted);
+          if (result instanceof Promise || typeof (result as { readonly then?: unknown })?.then === "function") {
+            throw new Error("test appendManyWithMutation mutate callback must be synchronous");
+          }
+          return result;
         } catch (error) {
-          appendedEvents.pop();
+          appendedEvents.splice(startLength);
           throw error;
         }
       }

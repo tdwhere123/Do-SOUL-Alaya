@@ -44,7 +44,7 @@ export interface SlotServiceSlotRepoPort {
 }
 
 export interface SlotServiceEventLogRepoPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
 }
 
@@ -314,8 +314,6 @@ export class SlotService {
       flip_conditions: defaultFlipConditions,
       workspace_id: claim.workspace_id
     });
-
-    const revision = await this.getNextRevision("slot", slot.object_id);
     const event = await this.dependencies.eventLogRepo.append({
       event_type: SlotEventType.SOUL_SLOT_CREATED,
       entity_type: "slot",
@@ -323,7 +321,6 @@ export class SlotService {
       workspace_id: slot.workspace_id,
       run_id: null,
       caused_by: slot.created_by,
-      revision,
       payload_json: SoulSlotCreatedPayloadSchema.parse({
         object_id: slot.object_id,
         object_kind: slot.object_kind,
@@ -354,8 +351,6 @@ export class SlotService {
   ): Promise<Readonly<Slot>> {
     const now = this.now();
     const parsedCausedBy = parseTransitionCausedBy(causedBy);
-
-    const revision = await this.getNextRevision("slot", slot.object_id);
     const event = await this.dependencies.eventLogRepo.append({
       event_type: SlotEventType.SOUL_SLOT_WINNER_CHANGED,
       entity_type: "slot",
@@ -363,7 +358,6 @@ export class SlotService {
       workspace_id: slot.workspace_id,
       run_id: null,
       caused_by: parsedCausedBy,
-      revision,
       payload_json: SoulSlotWinnerChangedPayloadSchema.parse({
         object_id: slot.object_id,
         object_kind: slot.object_kind,
@@ -385,17 +379,6 @@ export class SlotService {
       await this.dependencies.runtimeNotifier.notifyEntry(event);
     }
     return updated;
-  }
-
-  private async getNextRevision(entityType: string, entityId: string): Promise<number> {
-    const events = await this.dependencies.eventLogRepo.queryByEntity(entityType, entityId);
-
-    if (events.length === 0) {
-      return 0;
-    }
-
-    const maxRevision = events.reduce((max, event) => Math.max(max, event.revision), 0);
-    return maxRevision + 1;
   }
 }
 

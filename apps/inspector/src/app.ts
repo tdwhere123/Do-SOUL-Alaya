@@ -39,6 +39,7 @@ export interface InspectorAppOptions {
 
 export function createInspectorApp(options: InspectorAppOptions): Hono {
   const app = new Hono();
+  const env = options.env ?? process.env;
   app.onError((error, context) => {
     const status = isClientInputError(error) ? 400 : 500;
     console.error("[inspector] sanitized route error", summarizeInspectorError(error, status));
@@ -48,7 +49,10 @@ export function createInspectorApp(options: InspectorAppOptions): Hono {
 
   const proxyOptions = {
     daemonUrl: options.daemonUrl ?? "http://127.0.0.1:5173",
-    fetchImpl: options.fetchImpl
+    fetchImpl: options.fetchImpl,
+    daemonRequestToken: normalizeOptionalSecret(env.ALAYA_REQUEST_TOKEN),
+    reviewerToken: normalizeOptionalSecret(env.ALAYA_REVIEWER_TOKEN),
+    reviewerIdentity: normalizeOptionalSecret(env.ALAYA_REVIEWER_IDENTITY)
   };
   registerInspectorConfigRoutes(app, proxyOptions);
   registerInspectorGraphRoutes(app, proxyOptions);
@@ -58,6 +62,11 @@ export function createInspectorApp(options: InspectorAppOptions): Hono {
     staticRoot: options.staticRoot ?? defaultStaticRoot
   });
   return app;
+}
+
+function normalizeOptionalSecret(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized === undefined || normalized.length === 0 ? undefined : normalized;
 }
 
 function isClientInputError(error: unknown): boolean {

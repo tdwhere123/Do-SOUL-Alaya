@@ -61,7 +61,7 @@ describe("SqliteSurfaceBindingRepo", () => {
     const { database, repo } = await createRepo();
     const binding = createSurfaceBinding();
 
-    await expect(repo.create(binding, BINDING_ID_1)).resolves.toMatchObject({
+    expect(repo.create(binding, BINDING_ID_1)).toMatchObject({
       binding_id: BINDING_ID_1,
       binding
     });
@@ -111,12 +111,12 @@ describe("SqliteSurfaceBindingRepo", () => {
 
     await repo.create(createSurfaceBinding({ surface_id: "surface://main", is_primary: true }), BINDING_ID_1);
 
-    await expect(
+    expect(() =>
       repo.create(
         createSurfaceBinding({ surface_id: "surface://secondary", is_primary: true }),
         BINDING_ID_2
       )
-    ).rejects.toMatchObject({ code: "QUERY_FAILED" });
+    ).toThrowError(expect.objectContaining({ code: "QUERY_FAILED" }));
   });
 
   it("findDetachableBySurfaceId excludes detached bindings", async () => {
@@ -147,9 +147,9 @@ describe("SqliteSurfaceBindingRepo", () => {
     expect(updated.binding.binding_state).toBe(BindingState.STALE);
     expect(updated.binding.updated_at).toBe("2026-03-22T01:00:00.000Z");
 
-    await expect(
+    expect(() =>
       repo.updateState(BINDING_ID_2, BindingState.ACTIVE, "2026-03-22T01:00:00.000Z")
-    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    ).toThrowError(expect.objectContaining({ code: "NOT_FOUND" }));
     expect(countSurfaceBindingEvents(database)).toBe(0);
   });
 

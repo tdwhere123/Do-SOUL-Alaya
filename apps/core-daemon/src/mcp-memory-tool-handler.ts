@@ -400,6 +400,9 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
         delivery_id: request.delivery_id,
         usage_state: request.usage_state,
         used_object_ids: request.used_object_ids ?? [],
+        ...(request.per_anchor_usage === undefined
+          ? {}
+          : { per_anchor_usage: request.per_anchor_usage }),
         reason: request.reason ?? null,
         reported_at: now()
       },

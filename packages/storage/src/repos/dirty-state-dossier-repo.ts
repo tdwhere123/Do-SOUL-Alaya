@@ -17,9 +17,7 @@ interface DirtyStateDossierRow {
 }
 
 export interface DirtyStateDossierRepo {
-  create(dossier: DirtyStateDossier): Promise<Readonly<DirtyStateDossier>>;
-  /** Sync sibling for atomic publish + mutation (#BL-022). */
-  createSync(dossier: DirtyStateDossier): Readonly<DirtyStateDossier>;
+  create(dossier: DirtyStateDossier): Readonly<DirtyStateDossier>;
   deleteById(dossierId: string): Promise<void>;
   findByWorkspace(workspaceId: string): Promise<readonly Readonly<DirtyStateDossier>[]>;
   findByWorkerRun(workerRunId: string): Promise<readonly Readonly<DirtyStateDossier>[]>;
@@ -85,12 +83,7 @@ export class SqliteDirtyStateDossierRepo implements DirtyStateDossierRepo {
     `);
   }
 
-  public async create(dossier: DirtyStateDossier): Promise<Readonly<DirtyStateDossier>> {
-    return this.createSync(dossier);
-  }
-
-  /** Synchronous variant for atomic publish + mutation (#BL-022). */
-  public createSync(dossier: DirtyStateDossier): Readonly<DirtyStateDossier> {
+  public create(dossier: DirtyStateDossier): Readonly<DirtyStateDossier> {
     const parsed = parseDirtyStateDossier(dossier);
 
     try {

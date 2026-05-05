@@ -52,7 +52,7 @@ export type MemoryEntryUpdateFields = MemoryEntryMutableFields;
 export type MemoryEntryRepoUpdateFields = ProtocolMemoryEntryRepoUpdateFields;
 
 export interface MemoryServiceEventLogRepoPort {
-  append(event: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
+  append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
 }
 
@@ -174,8 +174,6 @@ export class MemoryService {
     });
 
     await this.validateEvidenceRefs(memoryEntry.evidence_refs);
-
-    const revision = await this.getNextRevision("memory_entry", memoryEntry.object_id);
     const event = await this.dependencies.eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_CREATED,
       entity_type: "memory_entry",
@@ -183,7 +181,6 @@ export class MemoryService {
       workspace_id: memoryEntry.workspace_id,
       run_id: memoryEntry.run_id,
       caused_by: memoryEntry.created_by,
-      revision,
       payload_json: SoulMemoryCreatedPayloadSchema.parse({
         object_id: memoryEntry.object_id,
         object_kind: memoryEntry.object_kind,
@@ -235,7 +232,6 @@ export class MemoryService {
 
     const updatedFields = toUpdatedFieldNames(parsedFields);
     const occurredAt = this.now();
-    const revision = await this.getNextRevision("memory_entry", existing.object_id);
     const event = await this.dependencies.eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_UPDATED,
       entity_type: "memory_entry",
@@ -243,7 +239,6 @@ export class MemoryService {
       workspace_id: existing.workspace_id,
       run_id: existing.run_id,
       caused_by: parsedReason,
-      revision,
       payload_json: SoulMemoryUpdatedPayloadSchema.parse({
         object_id: existing.object_id,
         object_kind: existing.object_kind,
@@ -293,8 +288,6 @@ export class MemoryService {
       evidence_refs: null,
       occurred_at: occurredAt
     } as const;
-
-    const nextRevision = await this.getNextRevision("memory_entry", existing.object_id);
     const archivedEvent = await this.dependencies.eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_ARCHIVED,
       entity_type: "memory_entry",
@@ -302,7 +295,6 @@ export class MemoryService {
       workspace_id: existing.workspace_id,
       run_id: existing.run_id,
       caused_by: parsedCausedBy,
-      revision: nextRevision,
       payload_json: SoulMemoryArchivedPayloadSchema.parse(transitionPayload)
     });
 
@@ -313,7 +305,6 @@ export class MemoryService {
       workspace_id: existing.workspace_id,
       run_id: existing.run_id,
       caused_by: parsedCausedBy,
-      revision: nextRevision + 1,
       payload_json: SoulMemoryStateChangedPayloadSchema.parse(transitionPayload)
     });
 
@@ -351,7 +342,6 @@ export class MemoryService {
     }
 
     const occurredAt = this.now();
-    const revision = await this.getNextRevision("memory_entry", existing.object_id);
     const event = await this.dependencies.eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
       entity_type: "memory_entry",
@@ -359,7 +349,6 @@ export class MemoryService {
       workspace_id: existing.workspace_id,
       run_id: existing.run_id,
       caused_by: parsedCausedBy,
-      revision,
       payload_json: SoulMemoryStateChangedPayloadSchema.parse({
         object_id: existing.object_id,
         object_kind: existing.object_kind,
@@ -404,7 +393,6 @@ export class MemoryService {
     }
 
     const occurredAt = this.now();
-    const revision = await this.getNextRevision("memory_entry", existing.object_id);
     const event = await this.dependencies.eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
       entity_type: "memory_entry",
@@ -412,7 +400,6 @@ export class MemoryService {
       workspace_id: existing.workspace_id,
       run_id: existing.run_id,
       caused_by: parsedCausedBy,
-      revision,
       payload_json: SoulMemoryStateChangedPayloadSchema.parse({
         object_id: existing.object_id,
         object_kind: existing.object_kind,
@@ -506,17 +493,6 @@ export class MemoryService {
     if (firstMissing !== undefined) {
       throw new CoreError("VALIDATION", `Evidence reference not found: ${firstMissing.evidenceRef}`);
     }
-  }
-
-  private async getNextRevision(entityType: string, entityId: string): Promise<number> {
-    const events = await this.dependencies.eventLogRepo.queryByEntity(entityType, entityId);
-
-    if (events.length === 0) {
-      return 0;
-    }
-
-    const maxRevision = events.reduce((max, event) => Math.max(max, event.revision), 0);
-    return maxRevision + 1;
   }
 }
 

@@ -35,17 +35,23 @@ describe("SqlitePathRelationRepo", () => {
       updated_at: "2026-04-17T00:01:00.000Z"
     });
 
-    await expect(repo.create(first)).resolves.toEqual(first);
-    await expect(repo.create(second)).resolves.toEqual(second);
-    await expect(repo.findById(first.path_id)).resolves.toEqual(first);
-    await expect(repo.findByWorkspace(first.workspace_id)).resolves.toEqual([first, second]);
+    expect(repo.create(first)).toEqual(withActiveLifecycle(first));
+    expect(repo.create(second)).toEqual(withActiveLifecycle(second));
+    await expect(repo.findById(first.path_id)).resolves.toEqual(withActiveLifecycle(first));
+    await expect(repo.findByWorkspace(first.workspace_id)).resolves.toEqual([
+      withActiveLifecycle(first),
+      withActiveLifecycle(second)
+    ]);
     await expect(
       repo.findByAnchor(first.workspace_id, {
         kind: "object",
         object_id: "object-1"
       })
-    ).resolves.toEqual([first, second]);
-    await expect(repo.findActive(first.workspace_id)).resolves.toEqual([first, second]);
+    ).resolves.toEqual([withActiveLifecycle(first), withActiveLifecycle(second)]);
+    await expect(repo.findActive(first.workspace_id)).resolves.toEqual([
+      withActiveLifecycle(first),
+      withActiveLifecycle(second)
+    ]);
   });
 
   it("scopes anchor lookups to a single workspace", async () => {
@@ -68,13 +74,13 @@ describe("SqlitePathRelationRepo", () => {
         kind: "object",
         object_id: "object-1"
       })
-    ).resolves.toEqual([workspaceOneRelation]);
+    ).resolves.toEqual([withActiveLifecycle(workspaceOneRelation)]);
     await expect(
       repo.findByAnchor("workspace-2", {
         kind: "object",
         object_id: "object-1"
       })
-    ).resolves.toEqual([workspaceTwoRelation]);
+    ).resolves.toEqual([withActiveLifecycle(workspaceTwoRelation)]);
   });
 
   it("findByAnchor ignores unrelated malformed workspace rows", async () => {
@@ -104,7 +110,7 @@ describe("SqlitePathRelationRepo", () => {
         kind: "object",
         object_id: "object-1"
       })
-    ).resolves.toEqual([matchingRelation]);
+    ).resolves.toEqual([withActiveLifecycle(matchingRelation)]);
   });
 
   it("finds path relations for every PathAnchorRef variant", async () => {
@@ -223,8 +229,53 @@ describe("SqlitePathRelationRepo", () => {
     }
 
     for (const entry of cases) {
-      await expect(repo.findByAnchor("workspace-1", entry.anchor)).resolves.toEqual([entry.relation]);
+      await expect(repo.findByAnchor("workspace-1", entry.anchor)).resolves.toEqual([
+        withActiveLifecycle(entry.relation)
+      ]);
     }
+  });
+
+  it("findByAnchors batches anchor lookups, dedupes dual-anchor rows, and keeps workspace scope", async () => {
+    const { repo, database } = createRepo();
+    seedWorkspace(database, "workspace-2");
+    const dualAnchorRelation = createPathRelationFixture({
+      path_id: "path-dual-anchor",
+      anchors: {
+        source_anchor: { kind: "object", object_id: "object-source" },
+        target_anchor: { kind: "object", object_id: "object-target" }
+      }
+    });
+    const neighboringRelation = createPathRelationFixture({
+      path_id: "path-neighbor",
+      anchors: {
+        source_anchor: { kind: "object", object_id: "object-other" },
+        target_anchor: { kind: "object", object_id: "object-target" }
+      },
+      created_at: "2026-04-17T00:01:00.000Z",
+      updated_at: "2026-04-17T00:01:00.000Z"
+    });
+    const otherWorkspaceRelation = createPathRelationFixture({
+      path_id: "path-other-workspace",
+      workspace_id: "workspace-2",
+      anchors: {
+        source_anchor: { kind: "object", object_id: "object-source" },
+        target_anchor: { kind: "object", object_id: "object-target" }
+      }
+    });
+
+    repo.create(dualAnchorRelation);
+    repo.create(neighboringRelation);
+    repo.create(otherWorkspaceRelation);
+
+    await expect(
+      repo.findByAnchors("workspace-1", [
+        { kind: "object", object_id: "object-source" },
+        { kind: "object", object_id: "object-target" }
+      ])
+    ).resolves.toEqual([
+      withActiveLifecycle(dualAnchorRelation),
+      withActiveLifecycle(neighboringRelation)
+    ]);
   });
 
   it("reuses the shared protocol anchor serializer on both the SQL and caller lookup paths", async () => {
@@ -258,15 +309,17 @@ describe("SqlitePathRelationRepo", () => {
 
     expect(row.anchor_key).toBe(serializePathAnchorRef(anchor));
     expect(serializePathAnchorRef(anchor)).toBe(JSON.stringify(["time_concern", "object-shared-time", "next_week"]));
-    await expect(repo.findByAnchor("workspace-1", anchor)).resolves.toEqual([relation]);
+    await expect(repo.findByAnchor("workspace-1", anchor)).resolves.toEqual([
+      withActiveLifecycle(relation)
+    ]);
   });
 
   it("updates mutable contract sections without changing anchors or constitution", async () => {
     const { repo } = createRepo();
     const relation = createPathRelationFixture();
-    await repo.create(relation);
+    repo.create(relation);
 
-    const updated = await repo.update(relation.path_id, {
+    const updated = repo.update(relation.path_id, {
       effect_vector: {
         ...relation.effect_vector,
         salience: 0.9
@@ -284,7 +337,7 @@ describe("SqlitePathRelationRepo", () => {
     });
 
     expect(updated).toEqual({
-      ...relation,
+      ...withActiveLifecycle(relation),
       effect_vector: {
         ...relation.effect_vector,
         salience: 0.9
@@ -308,7 +361,7 @@ describe("SqlitePathRelationRepo", () => {
     const { repo, database } = createRepo();
     const relation = createPathRelationFixture();
 
-    await repo.create(relation);
+    repo.create(relation);
     insertRawPathRelationRow(database, {
       pathId: "path-future-only-active",
       lifecycleJson: JSON.stringify({
@@ -317,14 +370,23 @@ describe("SqlitePathRelationRepo", () => {
       createdAt: "2026-04-17T00:02:00.000Z",
       updatedAt: "2026-04-17T00:02:00.000Z"
     });
+    insertRawPathRelationRow(database, {
+      pathId: "path-retired",
+      lifecycleJson: JSON.stringify({
+        status: "retired",
+        retirement_rule: "retire_after_cooldown"
+      }),
+      createdAt: "2026-04-17T00:03:00.000Z",
+      updatedAt: "2026-04-17T00:03:00.000Z"
+    });
 
-    await expect(repo.findActive("workspace-1")).resolves.toEqual([relation]);
+    await expect(repo.findActive("workspace-1")).resolves.toEqual([withActiveLifecycle(relation)]);
   });
 
   it("deletes path relations", async () => {
     const { repo } = createRepo();
     const relation = createPathRelationFixture();
-    await repo.create(relation);
+    repo.create(relation);
 
     await repo.delete(relation.path_id);
 
@@ -345,6 +407,16 @@ function createRepo(): {
     database,
     repo: new SqlitePathRelationRepo(database)
   };
+}
+
+function withActiveLifecycle(relation: PathRelation): PathRelation {
+  return {
+    ...relation,
+    lifecycle: {
+      status: "active",
+      ...relation.lifecycle
+    }
+  } as PathRelation;
 }
 
 function seedWorkspace(database: StorageDatabase, workspaceId: string): void {

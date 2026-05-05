@@ -18,6 +18,7 @@ import {
   ObjectKindSchema,
   PathAnchorRefSchema,
   PathGovernanceClass,
+  PathLifecycleStatus,
   PathRelationSchema,
   StabilityClass
 } from "../index.js";
@@ -101,6 +102,7 @@ describe("Phase C shared-contract foundation", () => {
         last_weakened_at: validTimestamp
       },
       lifecycle: {
+        status: PathLifecycleStatus.ACTIVE,
         retirement_rule: "retire_after_cooldown",
         cooldown_rule: "7d_without_support",
         override_rule: "manual_override"

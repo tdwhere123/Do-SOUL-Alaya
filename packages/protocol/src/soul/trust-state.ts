@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { NonEmptyStringSchema } from "../schema-primitives.js";
-import { SoulContextUsageStateSchema } from "./mcp-types.js";
+import {
+  SoulContextPerAnchorUsageSchema,
+  SoulContextUsageStateSchema
+} from "./mcp-types.js";
 
 export const TrustStateEventType = {
   MEMORY_DELIVERED: "memory.delivered",
@@ -45,6 +48,7 @@ export const UsageProofRecordSchema = z
     delivery_id: NonEmptyStringSchema,
     usage_state: SoulContextUsageStateSchema,
     used_object_ids: z.array(NonEmptyStringSchema).readonly(),
+    per_anchor_usage: z.array(SoulContextPerAnchorUsageSchema).readonly().optional(),
     reason: z.string().nullable(),
     reported_at: z.string().datetime(),
     audit_event_id: NonEmptyStringSchema

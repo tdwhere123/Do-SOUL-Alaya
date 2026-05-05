@@ -1,27 +1,16 @@
 import { WorkspaceRunEventSchema, type EventLogEntry, type WorkspaceRunEvent } from "@do-soul/alaya-protocol";
 
+export type EventPublisherInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
+
 export interface EventPublisherEventLogRepoPort {
-  append(event: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry>;
-  /**
-   * Synchronous append for use inside `appendManyWithMutation` so MAX(revision)
-   * computation and the INSERT live inside the same `connection.transaction(...)`
-   * as the caller's mutation. Closes the BL-022 race window where revision was
-   * selected async and the INSERT relied on the unique index for serialization.
-   *
-   * Optional only so legacy mocks that exercise the async `publishWithMutation`
-   * path can still construct a publisher; calling `appendManyWithMutation`
-   * without an implementation throws synchronously.
-   */
-  appendSync?(event: Omit<EventLogEntry, "event_id" | "created_at">): EventLogEntry;
-  deleteById(eventId: string): Promise<void>;
-  deleteByIdSync?(eventId: string): void;
+  append(event: EventPublisherInput): EventLogEntry;
+  deleteById(eventId: string): void;
   /**
    * Wrap `fn` in a single SQLite transaction. `fn` must be synchronous; an
    * `await` inside the function would commit the transaction before the awaited
-   * work completes, defeating atomicity. Optional for the same reason as
-   * `appendSync`.
+   * work completes, defeating atomicity.
    */
-  transactional?<T>(fn: () => T): T;
+  transactional<T>(fn: () => T): T;
 }
 
 export interface RuntimeNotifier {
@@ -79,44 +68,10 @@ export class EventPublisher {
    *     final-listener pattern (existing) handles replay.
    */
   public async appendManyWithMutation<T>(
-    eventInputs: readonly Omit<EventLogEntry, "event_id" | "created_at">[],
+    eventInputs: readonly EventPublisherInput[],
     mutate: (entries: readonly EventLogEntry[]) => T
   ): Promise<T> {
-    if (eventInputs.length === 0) {
-      // No events to append; still run the mutation for parity with the
-      // legacy `publishManyWithMutation` empty-batch behavior. There is no
-      // transaction needed because there is nothing to roll back atomically.
-      return mutate([]);
-    }
-
-    const repo = this.dependencies.eventLogRepo;
-    if (repo.transactional === undefined || repo.appendSync === undefined) {
-      throw new Error(
-        "EventPublisher.appendManyWithMutation requires a repo with transactional() and appendSync(); " +
-          "wire SqliteEventLogRepo or supply the equivalents in tests."
-      );
-    }
-    const { entries, mutateResult } = repo.transactional<{
-      entries: EventLogEntry[];
-      mutateResult: T;
-    }>(() => {
-      const collected: EventLogEntry[] = [];
-      for (const input of eventInputs) {
-        collected.push(repo.appendSync!(input));
-      }
-      const result = mutate(collected);
-      if (result instanceof Promise || typeof (result as { then?: unknown })?.then === "function") {
-        // A Promise return means the caller used `async () => ...` or returned
-        // a thenable. The transaction would commit before the promise resolves,
-        // breaking the atomicity guarantee. Throwing here triggers a SQLite
-        // rollback so no half-committed EventLog row escapes.
-        throw new Error(
-          "appendManyWithMutation: mutate callback must be synchronous. " +
-            "Move any awaitable work outside of appendManyWithMutation."
-        );
-      }
-      return { entries: collected, mutateResult: result };
-    });
+    const { entries, mutateResult } = this.appendManyInTransaction(eventInputs, mutate);
 
     for (const entry of entries) {
       try {
@@ -130,88 +85,27 @@ export class EventPublisher {
   }
 
   /**
-   * @deprecated Use `appendManyWithMutation` instead. See #BL-022 closure.
+   * Append + mutate atomically, return immediately after the transaction
+   * commits, and run propagation as detached best-effort work.
    *
-   * Legacy async-mutate path; the append + mutation pair is not wrapped in a
-   * single SQLite transaction. New producer code MUST use
-   * `appendManyWithMutation`. Retained only for the `AuditorEventLogPort`
-   * adapter wired in `apps/core-daemon/src/garden-runtime.ts`, pending the
-   * v0.2 migration tracked as #BL-026.
+   * This is intentionally separate from `appendManyWithMutation`: most callers
+   * need propagation errors to surface. Background durable-repair tasks such
+   * as path plasticity need the opposite post-commit behavior: once rows are
+   * durable, caller-side progress markers must be allowed to advance even if
+   * in-process listeners are slow, reject, or never settle.
    */
-  public async publishWithMutation<T>(
-    eventInput: Omit<EventLogEntry, "event_id" | "created_at">,
-    mutate: (entry: EventLogEntry) => Promise<T>
-  ): Promise<T> {
-    // The mutation receives the appended entry so durable records can store the
-    // exact audit_event_id while still rolling back the unnotified EventLog row
-    // if persistence rejects the mutation.
-    const entry = await this.appendToEventLog(eventInput);
-    let result: T;
-    try {
-      result = await mutate(entry);
-    } catch (mutateError) {
-      // The row was never notified, so replaying it later would create false
-      // runtime history for in-process runtime listeners. Remove it before rethrowing.
-      await this.rollbackUnnotifiedEntries([entry]);
-      throw mutateError;
-    }
-    try {
-      await this.propagate(entry);
-    } catch (propagateError) {
-      throw new EventPublisherPropagationError(entry, propagateError);
-    }
-    return result;
-  }
-
-  /**
-   * @deprecated Use `appendManyWithMutation` instead. See #BL-022 closure.
-   *
-   * Legacy async-mutate path; the append + mutation pair is not wrapped in a
-   * single SQLite transaction. New producer code MUST use
-   * `appendManyWithMutation`. No in-tree caller remains; retained only as a
-   * symmetric companion to `publishWithMutation` for the `AuditorEventLogPort`
-   * adapter, pending the v0.2 migration tracked as #BL-026.
-   */
-  public async publishManyWithMutation<T>(
-    eventInputs: readonly Omit<EventLogEntry, "event_id" | "created_at">[],
-    mutate: () => Promise<T>
-  ): Promise<T> {
-    if (eventInputs.length === 0) {
-      return await mutate();
-    }
-
-    const entries: EventLogEntry[] = [];
-    try {
-      for (const eventInput of eventInputs) {
-        entries.push(await this.appendToEventLog(eventInput));
-      }
-    } catch (appendError) {
-      if (entries.length > 0) {
-        await this.rollbackUnnotifiedEntries(entries);
-      }
-      throw appendError;
-    }
-
-    let result: T;
-    try {
-      result = await mutate();
-    } catch (mutateError) {
-      await this.rollbackUnnotifiedEntries(entries);
-      throw mutateError;
-    }
-
+  public appendManyWithMutationAndDetachPropagation<T>(
+    eventInputs: readonly EventPublisherInput[],
+    mutate: (entries: readonly EventLogEntry[]) => T
+  ): T {
+    const { entries, mutateResult } = this.appendManyInTransaction(eventInputs, mutate);
     for (const entry of entries) {
-      try {
-        await this.propagate(entry);
-      } catch (propagateError) {
-        throw new EventPublisherPropagationError(entry, propagateError, entries);
-      }
+      void this.propagate(entry).catch(() => undefined);
     }
-
-    return result;
+    return mutateResult;
   }
 
-  public async publish(eventInput: Omit<EventLogEntry, "event_id" | "created_at">): Promise<Readonly<EventLogEntry>> {
+  public async publish(eventInput: EventPublisherInput): Promise<Readonly<EventLogEntry>> {
     const entry = await this.appendToEventLog(eventInput);
     try {
       await this.propagate(entry);
@@ -222,15 +116,37 @@ export class EventPublisher {
   }
 
   private async appendToEventLog(
-    eventInput: Omit<EventLogEntry, "event_id" | "created_at">
+    eventInput: EventPublisherInput
   ): Promise<EventLogEntry> {
-    return await this.dependencies.eventLogRepo.append(eventInput);
+    return this.dependencies.eventLogRepo.append(eventInput);
   }
 
-  private async rollbackUnnotifiedEntries(entries: readonly EventLogEntry[]): Promise<void> {
-    for (const entry of entries) {
-      await this.dependencies.eventLogRepo.deleteById(entry.event_id);
+  private appendManyInTransaction<T>(
+    eventInputs: readonly EventPublisherInput[],
+    mutate: (entries: readonly EventLogEntry[]) => T
+  ): { readonly entries: readonly EventLogEntry[]; readonly mutateResult: T } {
+    if (eventInputs.length === 0) {
+      // No events to append; still run the mutation for parity with the
+      // prior empty-batch behavior. There is no transaction needed because
+      // there is nothing to roll back atomically.
+      const result = mutate([]);
+      assertSynchronousMutationResult(result);
+      return { entries: [], mutateResult: result };
     }
+
+    const repo = this.dependencies.eventLogRepo;
+    return repo.transactional<{
+      entries: EventLogEntry[];
+      mutateResult: T;
+    }>(() => {
+      const collected: EventLogEntry[] = [];
+      for (const input of eventInputs) {
+        collected.push(repo.append(input));
+      }
+      const result = mutate(collected);
+      assertSynchronousMutationResult(result);
+      return { entries: collected, mutateResult: result };
+    });
   }
 
   private async propagate(entry: EventLogEntry): Promise<void> {
@@ -253,5 +169,14 @@ export class EventPublisher {
 
     // notifyEntry handles both run-scoped and workspace-scoped in-process listeners.
     await this.dependencies.runtimeNotifier.notifyEntry(entry);
+  }
+}
+
+function assertSynchronousMutationResult(result: unknown): void {
+  if (result instanceof Promise || typeof (result as { readonly then?: unknown })?.then === "function") {
+    throw new Error(
+      "appendManyWithMutation: mutate callback must be synchronous. " +
+        "Move any awaitable work outside of appendManyWithMutation."
+    );
   }
 }

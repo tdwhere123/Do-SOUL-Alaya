@@ -319,7 +319,6 @@ export function createConversationToolExecutor(input: {
         workspace_id: request.runtimeContext.workspace_id,
         run_id: request.runtimeContext.run_id,
         caused_by: "principal",
-        revision: 0,
         payload_json: {
           tool_call_id: executionId,
           tool_id: request.toolId,

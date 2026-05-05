@@ -8,6 +8,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   TrustStateRecorder,
+  TrustStateInvalidUsageProofError,
   TrustStateRecorderNotReady,
   TrustStateUnknownDeliveryError,
   TrustStateUnverifiableRequiresDeliveryError
@@ -21,15 +22,15 @@ type UsageInput = Omit<UsageProofRecord, "audit_event_id">;
 
 describe("trust state recorder", () => {
   it("B1 records delivery via EventPublisher", async () => {
-    const { recorder, publishWithMutation } = createRecorder({
+    const { recorder, appendManyWithMutation } = createRecorder({
       ready: true,
       clock: vi.fn(() => "2026-04-30T10:02:00.000Z")
     });
 
     const record = await recorder.recordDelivery(buildDeliveryInput("delivery-1"));
 
-    expect(publishWithMutation).toHaveBeenCalledTimes(1);
-    expect(publishWithMutation).toHaveBeenCalledWith(
+    expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
+    expect(appendManyWithMutation).toHaveBeenCalledWith(
       [
         expect.objectContaining({
           event_type: "memory.delivered",
@@ -43,7 +44,7 @@ describe("trust state recorder", () => {
   });
 
   it("B2 recordUsage rejects unknown delivery_id", async () => {
-    const { recorder, publishWithMutation } = createRecorder({ ready: true });
+    const { recorder, appendManyWithMutation } = createRecorder({ ready: true });
 
     await expect(
       recorder.recordUsage({
@@ -55,7 +56,7 @@ describe("trust state recorder", () => {
       })
     ).rejects.toBeInstanceOf(TrustStateUnknownDeliveryError);
 
-    expect(publishWithMutation).not.toHaveBeenCalled();
+    expect(appendManyWithMutation).not.toHaveBeenCalled();
   });
 
   it("D2 MERGED-B3 recordUsage rejects cross-workspace delivery when expectedWorkspaceId mismatches", async () => {
@@ -64,9 +65,9 @@ describe("trust state recorder", () => {
     // expectedWorkspaceId='workspace-attacker'. The recorder must refuse
     // and write nothing — same observable as unknown-delivery so probes
     // leak no info.
-    const { recorder, publishWithMutation } = createRecorder({ ready: true });
+    const { recorder, appendManyWithMutation } = createRecorder({ ready: true });
     await recorder.recordDelivery(buildDeliveryInput("delivery-victim"));
-    publishWithMutation.mockClear();
+    appendManyWithMutation.mockClear();
 
     await expect(
       recorder.recordUsage(
@@ -81,7 +82,7 @@ describe("trust state recorder", () => {
       )
     ).rejects.toBeInstanceOf(TrustStateUnknownDeliveryError);
 
-    expect(publishWithMutation).not.toHaveBeenCalled();
+    expect(appendManyWithMutation).not.toHaveBeenCalled();
   });
 
   it("D2 MERGED-B3 recordUsage proceeds when expectedWorkspaceId matches the linked delivery", async () => {
@@ -102,6 +103,107 @@ describe("trust state recorder", () => {
     ).resolves.toMatchObject({
       delivery_id: "delivery-aligned",
       usage_state: "used"
+    });
+  });
+
+  it("records per-anchor usage in the MEMORY_USAGE_REPORTED audit payload", async () => {
+    const { recorder, appendManyWithMutation } = createRecorder({ ready: true });
+    await recorder.recordDelivery(buildDeliveryInput("delivery-directional"));
+    appendManyWithMutation.mockClear();
+
+    const usage = await recorder.recordUsage(
+      buildUsageInput("delivery-directional", "used", {
+        per_anchor_usage: [{ object_id: "memory-1", anchor_role: "target" }]
+      }),
+      { expectedWorkspaceId: "workspace-1" }
+    );
+
+    expect(usage.per_anchor_usage).toEqual([{ object_id: "memory-1", anchor_role: "target" }]);
+    expect(appendManyWithMutation.mock.calls[0]?.[0]?.[0]).toEqual(
+      expect.objectContaining({
+        event_type: TrustStateEventType.MEMORY_USAGE_REPORTED,
+        payload_json: expect.objectContaining({
+          delivery_id: "delivery-directional",
+          per_anchor_usage: [{ object_id: "memory-1", anchor_role: "target" }]
+        })
+      })
+    );
+  });
+
+  it("rejects per-anchor usage for objects outside the linked delivery before persistence", async () => {
+    const { recorder, appendManyWithMutation } = createRecorder({ ready: true });
+    await recorder.recordDelivery(
+      buildDeliveryInput("delivery-anchor-undelivered", {
+        delivered_object_ids: ["memory-a"]
+      })
+    );
+    appendManyWithMutation.mockClear();
+
+    await expect(
+      recorder.recordUsage(
+        buildUsageInput("delivery-anchor-undelivered", "used", {
+          used_object_ids: ["memory-a"],
+          per_anchor_usage: [{ object_id: "memory-b", anchor_role: "target" }]
+        }),
+        { expectedWorkspaceId: "workspace-1" }
+      )
+    ).rejects.toBeInstanceOf(TrustStateInvalidUsageProofError);
+
+    expect(appendManyWithMutation).not.toHaveBeenCalled();
+    await expect(recorder.summarize("codex")).resolves.toMatchObject({
+      delivered_count: 1,
+      used_count: 0
+    });
+  });
+
+  it("rejects used per-anchor usage that was delivered but not reported as used", async () => {
+    const { recorder, appendManyWithMutation } = createRecorder({ ready: true });
+    await recorder.recordDelivery(
+      buildDeliveryInput("delivery-anchor-not-used", {
+        delivered_object_ids: ["memory-a", "memory-b"]
+      })
+    );
+    appendManyWithMutation.mockClear();
+
+    await expect(
+      recorder.recordUsage(
+        buildUsageInput("delivery-anchor-not-used", "used", {
+          used_object_ids: ["memory-a"],
+          per_anchor_usage: [{ object_id: "memory-b", anchor_role: "target" }]
+        }),
+        { expectedWorkspaceId: "workspace-1" }
+      )
+    ).rejects.toBeInstanceOf(TrustStateInvalidUsageProofError);
+
+    expect(appendManyWithMutation).not.toHaveBeenCalled();
+    await expect(recorder.summarize("codex")).resolves.toMatchObject({
+      delivered_count: 1,
+      used_count: 0
+    });
+  });
+
+  it("rejects used_object_ids outside the linked delivery before persistence", async () => {
+    const { recorder, appendManyWithMutation } = createRecorder({ ready: true });
+    await recorder.recordDelivery(
+      buildDeliveryInput("delivery-used-undelivered", {
+        delivered_object_ids: ["memory-a"]
+      })
+    );
+    appendManyWithMutation.mockClear();
+
+    await expect(
+      recorder.recordUsage(
+        buildUsageInput("delivery-used-undelivered", "used", {
+          used_object_ids: ["memory-b"]
+        }),
+        { expectedWorkspaceId: "workspace-1" }
+      )
+    ).rejects.toBeInstanceOf(TrustStateInvalidUsageProofError);
+
+    expect(appendManyWithMutation).not.toHaveBeenCalled();
+    await expect(recorder.summarize("codex")).resolves.toMatchObject({
+      delivered_count: 1,
+      used_count: 0
     });
   });
 
@@ -150,7 +252,7 @@ describe("trust state recorder", () => {
   });
 
   it("audits installed configured and unverifiable counters before mutating process-local state", async () => {
-    const { recorder, publishWithMutation } = createRecorder({
+    const { recorder, appendManyWithMutation } = createRecorder({
       ready: true,
       clock: vi.fn(() => "2026-04-30T10:02:00.000Z")
     });
@@ -161,8 +263,8 @@ describe("trust state recorder", () => {
     await recorder.recordUnverifiable("codex", "session-1");
 
     // Each call's first arg is now the BATCH array; flatten and filter.
-    const counterEvents = publishWithMutation.mock.calls
-      .flatMap((call) => call[0] as ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at">>)
+    const counterEvents = appendManyWithMutation.mock.calls
+      .flatMap((call) => call[0] as ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>)
       .filter((entry) => entry.entity_type === "trust_state_counter");
     expect(counterEvents).toEqual([
       expect.objectContaining({
@@ -333,7 +435,7 @@ describe("trust state recorder", () => {
       .fn<() => string>()
       .mockReturnValueOnce("2026-04-30T10:03:00.000Z")
       .mockReturnValueOnce("2026-04-30T10:04:00.000Z");
-    const { recorder, publishWithMutation } = createRecorder({ ready: true, clock });
+    const { recorder, appendManyWithMutation } = createRecorder({ ready: true, clock });
 
     const delivery = await recorder.recordDelivery(buildDeliveryInput("delivery-1"));
     const usage = await recorder.recordUsage(buildUsageInput("delivery-1", "used"));
@@ -342,7 +444,7 @@ describe("trust state recorder", () => {
     expect(usage.reported_at).toBe(USAGE_AT);
     expect(clock).toHaveBeenCalledTimes(2);
     // First arg is the BATCH array; we expect a single-event batch.
-    expect(publishWithMutation.mock.calls[0]?.[0]?.[0]).toEqual(
+    expect(appendManyWithMutation.mock.calls[0]?.[0]?.[0]).toEqual(
       expect.objectContaining({
         payload_json: expect.objectContaining({
           delivered_at: DELIVERY_AT,
@@ -350,7 +452,7 @@ describe("trust state recorder", () => {
         })
       })
     );
-    expect(publishWithMutation.mock.calls[1]?.[0]?.[0]).toEqual(
+    expect(appendManyWithMutation.mock.calls[1]?.[0]?.[0]).toEqual(
       expect.objectContaining({
         payload_json: expect.objectContaining({
           reported_at: USAGE_AT,
@@ -380,7 +482,7 @@ function createRecorder(options: {
     options.appendManyWithMutation ??
     vi.fn(
       async <T>(
-        inputs: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at">>,
+        inputs: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>,
         mutate: (entries: readonly EventLogEntry[]) => T
       ): Promise<T> => {
         const persisted = inputs.map((entry) => {
@@ -388,6 +490,7 @@ function createRecorder(options: {
           return {
             event_id: `event-${counter}`,
             created_at: "2026-04-30T10:05:00.000Z",
+            revision: counter,
             ...entry
           };
         });
@@ -400,10 +503,7 @@ function createRecorder(options: {
     ready: options.ready,
     clock: options.clock
   });
-  // For backward-compatible test assertions referencing `.publishWithMutation`,
-  // expose `appendManyWithMutation` under both names (call shape is the
-  // batched form: first arg is an array, second is a sync mutate).
-  return { recorder, publishWithMutation: appendManyWithMutation, appendManyWithMutation };
+  return { recorder, appendManyWithMutation };
 }
 
 function buildDeliveryInput(

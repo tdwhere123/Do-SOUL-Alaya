@@ -11,6 +11,14 @@ import {
   type HealthJournalRecordPort
 } from "@do-soul/alaya-protocol";
 import type { GraphEdgeCreationPort } from "./materialization-router.js";
+import {
+  PATH_PLASTICITY_TASK_DEFAULTS,
+  resolvePathPlasticitySinceIso,
+  resolvePathPlasticityUntilIso,
+  runPathPlasticityWithinBudget,
+  type PathPlasticityComputePort,
+  type PathPlasticityPendingPort
+} from "./path-plasticity-task.js";
 
 export const LIBRARIAN_CONSTANTS = {
   MERGE_THRESHOLD: 0.85,
@@ -94,6 +102,9 @@ export interface LibrarianDependencies {
   readonly scheduler: LibrarianSchedulerPort;
   readonly healthJournal?: HealthJournalRecordPort;
   readonly graphEdgePort?: GraphEdgeCreationPort;
+  readonly pathPlasticityPort?: PathPlasticityComputePort;
+  readonly pathPlasticityPendingPort?: PathPlasticityPendingPort;
+  readonly pathPlasticityBudgetMs?: number;
   readonly now?: () => string;
 }
 
@@ -108,6 +119,9 @@ export class Librarian {
   private readonly scheduler: LibrarianSchedulerPort;
   private readonly healthJournal: HealthJournalRecordPort | null;
   private readonly graphEdgePort: GraphEdgeCreationPort | null;
+  private readonly pathPlasticityPort: PathPlasticityComputePort | null;
+  private readonly pathPlasticityPendingPort: PathPlasticityPendingPort | null;
+  private readonly pathPlasticityBudgetMs: number;
   private readonly now: () => string;
 
   public constructor(deps: LibrarianDependencies) {
@@ -118,6 +132,10 @@ export class Librarian {
     this.scheduler = deps.scheduler;
     this.healthJournal = deps.healthJournal ?? null;
     this.graphEdgePort = deps.graphEdgePort ?? null;
+    this.pathPlasticityPort = deps.pathPlasticityPort ?? null;
+    this.pathPlasticityPendingPort = deps.pathPlasticityPendingPort ?? null;
+    this.pathPlasticityBudgetMs =
+      deps.pathPlasticityBudgetMs ?? PATH_PLASTICITY_TASK_DEFAULTS.MAX_EXECUTION_MS;
     this.now = deps.now ?? (() => new Date().toISOString());
   }
 
@@ -136,6 +154,8 @@ export class Librarian {
           return await this.executeTemplateCandidate(task, completedAt);
         case GardenTaskKind.SYNTHESIS_REVIEW:
           return await this.executeSynthesisReview(task, completedAt);
+        case GardenTaskKind.PATH_PLASTICITY_UPDATE:
+          return await this.executePathPlasticityUpdate(task, completedAt);
         default:
           throw new Error(`Librarian does not handle task kind: ${task.task_kind}`);
       }
@@ -301,6 +321,50 @@ export class Librarian {
     ]);
     await this.scheduler.reportCompletion(result);
     return result;
+  }
+
+  private async executePathPlasticityUpdate(
+    task: GardenTaskDescriptor,
+    completedAt: string
+  ): Promise<GardenTaskResult> {
+    try {
+      const pathPlasticityPort = this.pathPlasticityPort;
+
+      if (pathPlasticityPort === null) {
+        const result = this.createSuccessResult(task, completedAt, [], [
+          "path_plasticity_update: skipped because path plasticity port is not configured"
+        ]);
+        await this.scheduler.reportCompletion(result);
+        return result;
+      }
+
+      const sinceIso = resolvePathPlasticitySinceIso(task.target_object_refs, completedAt);
+      const untilIso = resolvePathPlasticityUntilIso(task.target_object_refs, completedAt);
+      const computed = await runPathPlasticityWithinBudget(
+        (abortSignal, onMutationBoundaryEntered) => pathPlasticityPort.computeAndApplyPlasticity({
+          workspaceId: task.workspace_id,
+          sinceIso,
+          untilIso,
+          abortSignal,
+          onMutationBoundaryEntered
+        }),
+        this.pathPlasticityBudgetMs,
+        "path_plasticity_update"
+      );
+      await pathPlasticityPort.markProcessed?.({
+        workspaceId: task.workspace_id,
+        processedThroughIso: untilIso,
+        processedAuditEventId: null
+      });
+
+      const result = this.createSuccessResult(task, completedAt, computed.affectedPathIds, [
+        `path_plasticity_update: reinforced=${computed.reinforced} weakened=${computed.weakened} retired=${computed.retired} since=${sinceIso} until=${untilIso} budget_ms=${this.pathPlasticityBudgetMs}`
+      ]);
+      await this.scheduler.reportCompletion(result);
+      return result;
+    } finally {
+      await this.pathPlasticityPendingPort?.clearPendingWorkspace(task.workspace_id);
+    }
   }
 
   private createSuccessResult(

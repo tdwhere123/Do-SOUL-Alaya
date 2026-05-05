@@ -27,7 +27,7 @@ describe("createComputeRoutingExecutionStanceResolver", () => {
     }));
     const append = vi.fn(
       async (
-        entry: Omit<EventLogEntry, "event_id" | "created_at">
+        entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
       ): Promise<EventLogEntry> => ({
         event_id: "event-1",
         created_at: NOW,
@@ -79,7 +79,6 @@ describe("createComputeRoutingExecutionStanceResolver", () => {
       workspace_id: "workspace-1",
       run_id: "run-1",
       caused_by: "deterministic_rule",
-      revision: 0,
       payload_json: {
         decision_id: "decision-001",
         workspace_id: "workspace-1",
