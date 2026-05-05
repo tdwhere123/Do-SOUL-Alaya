@@ -137,6 +137,23 @@ describe("inspector routes", () => {
     expect(await response.json()).toEqual({ error: "daemon_503" });
   });
 
+  it("returns daemon unavailable when the daemon fetch fails", async () => {
+    const app = createInspectorApp({
+      token: "token",
+      daemonUrl: "http://daemon.local",
+      fetchImpl: async () => {
+        throw Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:5173"), {
+          code: "ECONNREFUSED"
+        });
+      }
+    });
+
+    const response = await app.request("/api/graph/ws1?token=token");
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "daemon_unavailable" });
+  });
+
   it("sanitizes daemon validation errors for embedding paste requests", async () => {
     const plaintext = "sk-test-leaked-secret";
     const app = createInspectorApp({
@@ -161,7 +178,7 @@ describe("inspector routes", () => {
     expect(bodyText).not.toContain("validation failed");
   });
 
-  it("sanitizes local handler errors without echoing stack or plaintext", async () => {
+  it("sanitizes daemon fetch failures without echoing stack or plaintext", async () => {
     const plaintext = "sk-test-plaintext-secret";
     const app = createInspectorApp({
       token: "token",
@@ -180,9 +197,9 @@ describe("inspector routes", () => {
       })
     });
 
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(503);
     const bodyText = await response.text();
-    expect(bodyText).toBe("{\"error\":\"internal_error\"}");
+    expect(bodyText).toBe("{\"error\":\"daemon_unavailable\"}");
     expect(bodyText).not.toContain(plaintext);
     expect(bodyText).not.toContain("Error:");
   });

@@ -37,7 +37,11 @@ export async function proxyDaemonJson(
     method: request.method,
     headers: hasHeaders ? headers : undefined,
     body: request.body === undefined ? undefined : JSON.stringify(request.body)
-  });
+  }).catch(() => null);
+
+  if (response === null) {
+    return context.json({ error: "daemon_unavailable" }, 503);
+  }
 
   if (!response.ok) {
     return context.json({ error: `daemon_${response.status}` }, response.status as 400 | 401 | 403 | 404 | 409 | 422 | 500 | 503);

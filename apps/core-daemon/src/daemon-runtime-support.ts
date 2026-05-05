@@ -239,31 +239,87 @@ export function createSoulGraphService(input: {
       const limitedEdges = edges
         .filter((edge) => memoryIds.has(edge.source_memory_id) && memoryIds.has(edge.target_memory_id))
         .slice(0, limit);
+      const tagProjection = buildDomainTagProjection(limitedMemories);
 
       return {
         workspace_id: workspaceId,
-        nodes: limitedMemories.map((memory: MemoryEntryRecord) => ({
-          id: memory.object_id,
-          kind: "memory",
-          label: memory.content.slice(0, 80),
-          summary: memory.content,
-          workspace_id: memory.workspace_id,
-          created_at: memory.created_at,
-          origin_plane: "project"
-        })),
-        edges: limitedEdges.map((edge) => ({
-          id: edge.edge_id,
-          kind: "references",
-          source_id: edge.source_memory_id,
-          target_id: edge.target_memory_id,
-          created_at: edge.created_at
-        })),
+        nodes: [
+          ...limitedMemories.map((memory: MemoryEntryRecord) => ({
+            id: memory.object_id,
+            kind: "memory" as const,
+            label: memory.content.slice(0, 80),
+            summary: memory.content,
+            workspace_id: memory.workspace_id,
+            created_at: memory.created_at,
+            origin_plane: "project" as const
+          })),
+          ...tagProjection.nodes
+        ],
+        edges: [
+          ...limitedEdges.map((edge) => ({
+            id: edge.edge_id,
+            kind: "references" as const,
+            source_id: edge.source_memory_id,
+            target_id: edge.target_memory_id,
+            created_at: edge.created_at
+          })),
+          ...tagProjection.edges
+        ],
         truncated: memories.length > limitedMemories.length || edges.length > limitedEdges.length,
-        node_total: memories.length,
-        edge_total: edges.length
+        node_total: memories.length + countUniqueDomainTags(memories),
+        edge_total: edges.length + countDomainTagEdges(memories)
       };
     }
   };
+}
+
+function buildDomainTagProjection(memories: readonly MemoryEntryRecord[]): {
+  readonly nodes: readonly SoulGraph["nodes"][number][];
+  readonly edges: readonly SoulGraph["edges"][number][];
+} {
+  const tagCounts = new Map<string, number>();
+  const tagEdges: SoulGraph["edges"][number][] = [];
+
+  for (const memory of memories) {
+    for (const tag of uniqueDomainTags(memory)) {
+      tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
+      tagEdges.push({
+        id: `domain_tag:${memory.object_id}:${tag}`,
+        kind: "belongs_to",
+        source_id: memory.object_id,
+        target_id: domainTagNodeId(tag),
+        created_at: memory.created_at
+      });
+    }
+  }
+
+  return {
+    nodes: [...tagCounts.entries()].map(([tag, count]) => ({
+      id: domainTagNodeId(tag),
+      kind: "scope",
+      label: `#${tag}`,
+      summary: `Domain tag shared by ${count} memory entr${count === 1 ? "y" : "ies"}.`,
+      origin_plane: "project"
+    })),
+    edges: tagEdges
+  };
+}
+
+function uniqueDomainTags(memory: MemoryEntryRecord): readonly string[] {
+  const tags = Array.isArray(memory.domain_tags) ? memory.domain_tags : [];
+  return [...new Set(tags.map((tag) => tag.trim()).filter((tag) => tag.length > 0))];
+}
+
+function countUniqueDomainTags(memories: readonly MemoryEntryRecord[]): number {
+  return new Set(memories.flatMap((memory) => uniqueDomainTags(memory))).size;
+}
+
+function countDomainTagEdges(memories: readonly MemoryEntryRecord[]): number {
+  return memories.reduce((count, memory) => count + uniqueDomainTags(memory).length, 0);
+}
+
+function domainTagNodeId(tag: string): string {
+  return `scope:domain_tag:${tag}`;
 }
 
 export function createConversationToolExecutor(input: {

@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildInspectorChildEnv,
   createInspectCommand,
@@ -20,6 +20,7 @@ describe("cli inspect", () => {
     const command = createInspectCommand({
       checkPortAvailable: async () => true,
       generateToken: () => "a".repeat(64),
+      startDaemonServer: async () => fakeDaemonServer(),
       spawnInspector: () => child
     });
 
@@ -63,6 +64,7 @@ describe("cli inspect", () => {
     const opened: string[] = [];
     const command = createInspectCommand({
       checkPortAvailable: async () => true,
+      startDaemonServer: async () => fakeDaemonServer(),
       spawnInspector: (input) => {
         spawned.push(input);
         return child;
@@ -91,6 +93,136 @@ describe("cli inspect", () => {
       }
     ]);
     expect(opened).toEqual(["http://127.0.0.1:5175/?token=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]);
+  });
+
+  it("starts a loopback daemon and passes its URL to the inspector child", async () => {
+    const child = new FakeInspectorChild();
+    const daemonStarts: unknown[] = [];
+    const daemonCloses: string[] = [];
+    const spawned: unknown[] = [];
+    const command = createInspectCommand({
+      checkPortAvailable: async () => true,
+      generateToken: () => "e".repeat(64),
+      startDaemonServer: async (options) => {
+        daemonStarts.push(options);
+        return {
+          hostname: "127.0.0.1",
+          port: 5173,
+          close: async () => {
+            daemonCloses.push("closed");
+          }
+        };
+      },
+      spawnInspector: (input) => {
+        spawned.push(input);
+        return child;
+      }
+    });
+
+    const promise = command.handler(createContext(), {
+      open: false,
+      port: 5174,
+      token: null
+    });
+    setTimeout(() => child.stdout.write("inspector_ready\n"), 0);
+    setTimeout(() => child.emitExit(0, null), 10);
+    const result = await promise;
+
+    expect(result.exitCode).toBe(0);
+    expect(daemonStarts).toEqual([{ hostname: "127.0.0.1", port: 5173 }]);
+    expect(spawned).toMatchObject([
+      {
+        env: {
+          ALAYA_DAEMON_URL: "http://127.0.0.1:5173"
+        }
+      }
+    ]);
+    expect(daemonCloses).toEqual(["closed"]);
+  });
+
+  it("fails instead of starting a standalone inspector when no daemon is managed", async () => {
+    const stderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
+    const spawnInspector = vi.fn(() => new FakeInspectorChild());
+    const command = createInspectCommand({
+      checkPortAvailable: async () => true,
+      generateToken: () => "f".repeat(64),
+      spawnInspector
+    });
+
+    const result = await command.handler(createContext({ stderr }), {
+      open: false,
+      port: 5174,
+      token: null
+    });
+
+    expect(result.exitCode).toBe(70);
+    expect(spawnInspector).not.toHaveBeenCalled();
+    expect(stderrChunks.join("")).toContain("requires a managed daemon");
+  });
+
+  it("binds to an existing daemon only after the daemon status probe passes", async () => {
+    const child = new FakeInspectorChild();
+    const stderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
+    const startDaemonServer = vi.fn(async () => fakeDaemonServer());
+    const spawned: unknown[] = [];
+    const command = createInspectCommand({
+      checkPortAvailable: async (port) => port !== 5173,
+      generateToken: () => "1".repeat(64),
+      probeDaemon: async () => true,
+      startDaemonServer,
+      spawnInspector: (input) => {
+        spawned.push(input);
+        return child;
+      }
+    });
+
+    const promise = command.handler(createContext({ stderr }), {
+      open: false,
+      port: 5174,
+      token: null
+    });
+    setTimeout(() => child.stdout.write("inspector_ready\n"), 0);
+    setTimeout(() => child.emitExit(0, null), 10);
+    const result = await promise;
+
+    expect(result.exitCode).toBe(0);
+    expect(startDaemonServer).not.toHaveBeenCalled();
+    expect(spawned).toMatchObject([
+      {
+        env: {
+          ALAYA_DAEMON_URL: "http://127.0.0.1:5173"
+        }
+      }
+    ]);
+    expect(stderrChunks.join("")).toContain("using existing daemon");
+  });
+
+  it("refuses to bind Inspector to an occupied non-Alaya daemon port", async () => {
+    const stderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
+    const spawnInspector = vi.fn(() => new FakeInspectorChild());
+    const command = createInspectCommand({
+      checkPortAvailable: async (port) => port !== 5173,
+      generateToken: () => "2".repeat(64),
+      probeDaemon: async () => false,
+      startDaemonServer: async () => fakeDaemonServer(),
+      spawnInspector
+    });
+
+    const result = await command.handler(createContext({ stderr }), {
+      open: false,
+      port: 5174,
+      token: null
+    });
+
+    expect(result.exitCode).toBe(70);
+    expect(spawnInspector).not.toHaveBeenCalled();
+    expect(stderrChunks.join("")).toContain("does not answer as Alaya");
   });
 
   it("prefers Windows browser bridge candidates when running in WSL", () => {
@@ -172,6 +304,7 @@ describe("cli inspect", () => {
     const command = createInspectCommand({
       checkPortAvailable: async () => true,
       generateToken: () => "d".repeat(64),
+      startDaemonServer: async () => fakeDaemonServer(),
       spawnInspector: () => child
     });
 
@@ -225,5 +358,13 @@ function createContext(overrides: Partial<AlayaCliContext> = {}): AlayaCliContex
     isTTY: false,
     daemon: { startupSteps: [] },
     ...overrides
+  };
+}
+
+function fakeDaemonServer() {
+  return {
+    hostname: "127.0.0.1",
+    port: 5173,
+    close: async () => {}
   };
 }

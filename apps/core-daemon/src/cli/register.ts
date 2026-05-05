@@ -70,7 +70,9 @@ export function registerAlayaCliCommands(
     getGardenStatus: async () => runtime.services.gardenStatus.getStatus()
   }));
   bridge.registerSubcommand(createInstallCommand());
-  bridge.registerSubcommand(createInspectCommand());
+  bridge.registerSubcommand(createInspectCommand({
+    startDaemonServer: async (options) => await runtime.startHttpServer(options)
+  }));
   bridge.registerSubcommand(createUpdateCommand());
   bridge.registerSubcommand(createAttachCommand(runtime));
   bridge.registerSubcommand(createDetachCommandSpec({

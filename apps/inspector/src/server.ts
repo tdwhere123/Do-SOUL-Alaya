@@ -28,10 +28,16 @@ export async function startInspectorServer(options: InspectorServerOptions = {})
     process.exitCode = 2;
     throw new Error("inspector_token_missing");
   }
+  const daemonUrl = env.ALAYA_DAEMON_URL?.trim();
+  if (!daemonUrl) {
+    stderr.write("inspector_daemon_url_missing\n");
+    process.exitCode = 2;
+    throw new Error("inspector_daemon_url_missing");
+  }
 
   const app = createInspectorApp({
     token,
-    daemonUrl: env.ALAYA_DAEMON_URL ?? "http://127.0.0.1:5173",
+    daemonUrl,
     env
   });
   const server = serve({
@@ -45,7 +51,11 @@ export async function startInspectorServer(options: InspectorServerOptions = {})
 
 if (process.argv[1] !== undefined && process.argv[1].endsWith("/server.js")) {
   await startInspectorServer().catch((error) => {
-    if (!(error instanceof Error && error.message === "inspector_token_missing")) {
+    const isStartupConfigError =
+      error instanceof Error &&
+      (error.message === "inspector_token_missing" ||
+        error.message === "inspector_daemon_url_missing");
+    if (!isStartupConfigError) {
       process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
       process.exitCode = 1;
     }

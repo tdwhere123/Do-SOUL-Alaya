@@ -29,7 +29,7 @@ describe("cli detach", () => {
 
     expect(result.exitCode).toBe(0);
     expect(fs.files.get("/tmp/home/.codex/config.toml")).not.toContain("alaya");
-    expect(fs.files.get("/tmp/home/.codex/slash-commands.toml")).not.toContain("alaya inspect --open");
+    expect(fs.files.get("/tmp/home/.codex/slash-commands.toml")).not.toContain("inspect --open");
     expect(auditWriter.rows).toHaveLength(1);
     expect(result.json).toMatchObject({
       ok: true,
@@ -78,7 +78,7 @@ describe("cli detach", () => {
     });
     await applyProfileMutationPlan(setupPlan, { fs, allowConflicts: true });
     const tamperedSlash = (fs.files.get("/tmp/home/.codex/slash-commands.toml") ?? "").replace(
-      'command = "alaya inspect --open"',
+      /^command = ".*inspect --open"$/mu,
       'command = "do not touch"'
     );
     fs.files.set("/tmp/home/.codex/slash-commands.toml", tamperedSlash);
@@ -113,7 +113,7 @@ describe("cli detach", () => {
       fs
     });
     await applyProfileMutationPlan(setupPlan, { fs, allowConflicts: true });
-    expect(fs.files.get(customSlashPath)).toContain("alaya inspect --open");
+    expect(fs.files.get(customSlashPath)).toContain("inspect --open");
 
     const auditWriter = new MemoryProfileAuditWriter();
     const command = createDetachCommandSpec({
@@ -128,7 +128,7 @@ describe("cli detach", () => {
     expect(result.exitCode).toBe(0);
     // Without the env override, default slash candidates are searched, missing the custom file;
     // the alias drift remains untouched on the custom path so the operator can detect it.
-    expect(fs.files.get(customSlashPath)).toContain("alaya inspect --open");
+    expect(fs.files.get(customSlashPath)).toContain("inspect --open");
     expect(result.json).toMatchObject({
       ok: true,
       target: "codex",

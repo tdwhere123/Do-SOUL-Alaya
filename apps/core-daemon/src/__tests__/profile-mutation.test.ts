@@ -7,6 +7,7 @@ import {
   buildDetachProfileMutationPlan,
   PUBLIC_SOUL_TOOL_NAMES,
   renderProfileMutationPreview,
+  resolveAlayaSlashCommand,
   resolveProfilePaths,
   type ProfileMutationAuditRow,
   type ProfileMutationAuditWriter,
@@ -117,6 +118,22 @@ describe("profile mutation", () => {
     expect(preview).toContain("claude-code MCP server entry");
     expect(preview).toContain("claude-code /alaya-inspect slash alias");
     expect(preview).toContain(ALAYA_SLASH_COMMAND);
+  });
+
+  it("renders the slash alias through an absolute node launcher", async () => {
+    expect(resolveAlayaSlashCommand({}, "/tmp/Do SOUL Alaya")).toBe(
+      "node '/tmp/Do SOUL Alaya/bin/alaya.mjs' inspect --open"
+    );
+
+    const fs = new MemoryProfileFs();
+    const plan = await buildAttachProfileMutationPlan("codex", {
+      env: { HOME: "/tmp/home" },
+      fs
+    });
+    const slashAfter = plan.operations.find((operation) => operation.recordKind === "slash_alias")?.after ?? "";
+
+    expect(slashAfter).toMatch(/command = "node '.+\/bin\/alaya\.mjs' inspect --open"/u);
+    expect(slashAfter).not.toContain('command = "alaya inspect --open"');
   });
 
   it("rolls back first write if second write fails", async () => {

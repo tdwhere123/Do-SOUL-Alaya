@@ -28,7 +28,8 @@ describe("attach codex", () => {
 
     expect(result.exitCode).toBe(0);
     expect(fs.files.get("/tmp/home/.codex/config.toml")).toContain("[mcp_servers.alaya]");
-    expect(fs.files.get("/tmp/home/.codex/slash-commands.toml")).toContain("alaya inspect --open");
+    expect(fs.files.get("/tmp/home/.codex/slash-commands.toml")).toContain("bin/alaya.mjs");
+    expect(fs.files.get("/tmp/home/.codex/slash-commands.toml")).toContain("inspect --open");
     expect(auditWriter.rows).toHaveLength(1);
     expect(trustStateRecorder.recordInstalled).toHaveBeenCalledWith("codex");
     expect(trustStateRecorder.recordConfigured).toHaveBeenCalledWith("codex");

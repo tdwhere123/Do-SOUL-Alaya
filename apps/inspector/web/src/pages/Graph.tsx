@@ -39,6 +39,11 @@ interface GraphLink extends SimulationLinkDatum<GraphNode> {
 
 type SpotlightState = "match" | "adjacent" | "background";
 
+interface SoulGraphEnvelope {
+  readonly success: boolean;
+  readonly data: SoulGraph;
+}
+
 const NODE_COLOR: Record<string, string> = {
   signal: "#96AD90",
   memory: "#92A8B3",
@@ -67,12 +72,13 @@ export default function GraphPage() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const result = await apiFetch<SoulGraph>(
+        const result = await apiFetch<SoulGraph | SoulGraphEnvelope>(
           `/graph/${workspaceId ?? "default"}`
         );
         if (cancelled) return;
-        const nodes: GraphNode[] = result.nodes.map((n) => ({ ...n }));
-        const links: GraphLink[] = result.edges.map((e) => ({
+        const graph = unwrapSoulGraph(result);
+        const nodes: GraphNode[] = (graph.nodes ?? []).map((n) => ({ ...n }));
+        const links: GraphLink[] = (graph.edges ?? []).map((e) => ({
           id: e.id,
           kind: e.kind,
           source: e.source_id,
@@ -420,6 +426,24 @@ interface DetailDrawerProps {
   readonly onClose: () => void;
   readonly onFocusSubgraph: (id: string) => void;
   readonly onCopyCli: (text: string) => void;
+}
+
+function unwrapSoulGraph(value: SoulGraph | SoulGraphEnvelope): SoulGraph {
+  if (isSoulGraphEnvelope(value)) {
+    return value.data;
+  }
+
+  return value;
+}
+
+function isSoulGraphEnvelope(value: SoulGraph | SoulGraphEnvelope): value is SoulGraphEnvelope {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "data" in value &&
+    typeof value.data === "object" &&
+    value.data !== null
+  );
 }
 
 function DetailDrawer({ node, onClose, onFocusSubgraph, onCopyCli }: DetailDrawerProps) {

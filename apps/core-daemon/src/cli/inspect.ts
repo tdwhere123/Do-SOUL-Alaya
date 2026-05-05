@@ -14,9 +14,22 @@ import {
 export interface InspectCommandDependencies {
   readonly generateToken?: () => string;
   readonly spawnInspector?: (input: SpawnInspectorInput) => InspectorChildProcess;
+  readonly startDaemonServer?: (options: InspectDaemonListenOptions) => Promise<InspectDaemonServer>;
+  readonly probeDaemon?: (url: string) => Promise<boolean>;
   readonly checkPortAvailable?: (port: number) => Promise<boolean>;
   readonly openUrl?: (url: string) => Promise<void>;
   readonly inspectorEntryPath?: string;
+}
+
+export interface InspectDaemonListenOptions {
+  readonly hostname?: string;
+  readonly port?: number;
+}
+
+export interface InspectDaemonServer {
+  readonly hostname: string;
+  readonly port: number;
+  close(): Promise<void>;
 }
 
 export interface SpawnInspectorInput {
@@ -53,6 +66,8 @@ interface InspectArgs {
 }
 
 const DEFAULT_INSPECTOR_PORT = 5174;
+const DEFAULT_DAEMON_HOST = "127.0.0.1";
+const DEFAULT_DAEMON_PORT = 5173;
 const READY_LINE = "inspector_ready";
 const SHUTDOWN_TIMEOUT_MS = 2000;
 const ALLOW_FIXED_TOKEN_ENV = "ALAYA_INSPECTOR_ALLOW_FIXED_TOKEN";
@@ -86,14 +101,18 @@ async function executeInspect(
 
   const token = args.token ?? (deps.generateToken ?? defaultGenerateToken)();
   const url = `http://127.0.0.1:${args.port}/?token=${token}`;
-  const child = (deps.spawnInspector ?? defaultSpawnInspector)({
-    port: args.port,
-    token,
-    inspectorEntryPath: deps.inspectorEntryPath ?? defaultInspectorEntryPath(),
-    env: ctx.env
-  });
+  let child: InspectorChildProcess | null = null;
+  let startedDaemon: InspectDaemonServer | null = null;
 
   try {
+    const daemon = await ensureDaemonForInspector(ctx, deps, checkPortAvailable);
+    startedDaemon = daemon.startedDaemon;
+    child = (deps.spawnInspector ?? defaultSpawnInspector)({
+      port: args.port,
+      token,
+      inspectorEntryPath: deps.inspectorEntryPath ?? defaultInspectorEntryPath(),
+      env: { ...ctx.env, ALAYA_DAEMON_URL: daemon.url }
+    });
     await waitForInspectorReady(child, ctx);
     ctx.stdout.write(`${url}\n`);
     if (args.open) {
@@ -104,10 +123,52 @@ async function executeInspect(
     await waitForChildExitOrSignal(child);
     return { exitCode: ALAYA_SYSEXITS.OK, json: { url, port: args.port } };
   } catch (error) {
-    child.kill("SIGTERM");
+    child?.kill("SIGTERM");
     ctx.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     return { exitCode: ALAYA_SYSEXITS.SOFTWARE };
+  } finally {
+    if (startedDaemon !== null) {
+      await startedDaemon.close().catch((error) => {
+        ctx.stderr.write(`failed to stop Inspector daemon: ${describeError(error)}\n`);
+      });
+    }
   }
+}
+
+async function ensureDaemonForInspector(
+  ctx: AlayaCliContext,
+  deps: InspectCommandDependencies,
+  checkPortAvailable: (port: number) => Promise<boolean>
+): Promise<{ readonly url: string; readonly startedDaemon: InspectDaemonServer | null }> {
+  const configuredUrl = ctx.env.ALAYA_DAEMON_URL?.trim();
+  if (configuredUrl !== undefined && configuredUrl.length > 0) {
+    return { url: configuredUrl, startedDaemon: null };
+  }
+
+  const fallbackUrl = `http://${DEFAULT_DAEMON_HOST}:${DEFAULT_DAEMON_PORT}`;
+  if (deps.startDaemonServer === undefined) {
+    throw new Error("Inspector requires a managed daemon; start it through `alaya inspect` or set ALAYA_DAEMON_URL explicitly.");
+  }
+
+  if (!(await checkPortAvailable(DEFAULT_DAEMON_PORT))) {
+    const daemonAvailable = await (deps.probeDaemon ?? defaultProbeDaemon)(fallbackUrl);
+    if (!daemonAvailable) {
+      throw new Error(
+        `daemon port ${DEFAULT_DAEMON_PORT} is in use but does not answer as Alaya; stop that process or set ALAYA_DAEMON_URL explicitly.`
+      );
+    }
+    ctx.stderr.write(`daemon port ${DEFAULT_DAEMON_PORT} is in use; using existing daemon at ${fallbackUrl}\n`);
+    return { url: fallbackUrl, startedDaemon: null };
+  }
+
+  const startedDaemon = await deps.startDaemonServer({
+    hostname: DEFAULT_DAEMON_HOST,
+    port: DEFAULT_DAEMON_PORT
+  });
+  return {
+    url: `http://${startedDaemon.hostname}:${startedDaemon.port}`,
+    startedDaemon
+  };
 }
 
 function inspectArgsSchema(): AlayaCliArgsSchema<InspectArgs> {
@@ -260,6 +321,21 @@ async function defaultCheckPortAvailable(port: number): Promise<boolean> {
       server.close(() => resolve(true));
     });
   });
+}
+
+async function defaultProbeDaemon(url: string): Promise<boolean> {
+  try {
+    const response = await fetch(new URL("/status", normalizeBaseUrl(url)), {
+      method: "GET"
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeBaseUrl(value: string): string {
+  return value.endsWith("/") ? value : `${value}/`;
 }
 
 async function defaultOpenUrl(url: string): Promise<void> {

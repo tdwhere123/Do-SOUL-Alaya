@@ -57,6 +57,21 @@ describe("GraphPage", () => {
     vi.unstubAllGlobals();
   });
 
+  it("renders graph data from the daemon success envelope", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true, data: SAMPLE_GRAPH }), {
+        status: 200
+      })
+    );
+
+    const { container } = renderGraph();
+
+    await waitFor(() => {
+      expect(container.querySelector("g[data-node-id='n1']")).toBeTruthy();
+    });
+    expect(screen.queryByText("Graph Error")).toBeNull();
+  });
+
   it("applies match/adjacent/background spotlight states based on search term", async () => {
     const { container } = renderGraph();
     await waitFor(() => container.querySelector("g[data-node-id='n1']"));

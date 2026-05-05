@@ -96,9 +96,11 @@ export class ProfileMutationError extends Error {
 
 export const SUPPORTED_PROFILE_TARGETS = Object.freeze(["codex", "claude-code"] as const);
 export const ALAYA_SLASH_ALIAS = "/alaya-inspect";
-export const ALAYA_SLASH_COMMAND = "alaya inspect --open";
+export const ALAYA_LEGACY_SLASH_COMMAND = "alaya inspect --open";
 export const ALAYA_MCP_COMMAND = "alaya";
 export const ALAYA_MCP_ARGS = Object.freeze(["mcp", "stdio"] as const);
+export const ALAYA_SLASH_ARGS = Object.freeze(["inspect", "--open"] as const);
+export const ALAYA_SLASH_COMMAND = resolveAlayaSlashCommand();
 
 /**
  * Resolve the launcher pair (command, args) that attach writes into user
@@ -127,6 +129,19 @@ export function resolveAlayaMcpLauncher(
   const binPath = path.resolve(repoRoot, "bin", "alaya.mjs");
   return { command: "node", args: [binPath, ...ALAYA_MCP_ARGS] };
 }
+
+export function resolveAlayaSlashCommand(
+  env: NodeJS.ProcessEnv = process.env,
+  repoRoot: string = path.resolve(import.meta.dirname, "..", "..", "..")
+): string {
+  const override = env.ALAYA_SLASH_LAUNCHER?.trim();
+  if (override !== undefined && override.length > 0) {
+    return [override, ...ALAYA_SLASH_ARGS].join(" ");
+  }
+
+  const binPath = path.resolve(repoRoot, "bin", "alaya.mjs");
+  return ["node", shellQuote(binPath), ...ALAYA_SLASH_ARGS].join(" ");
+}
 export const PROFILE_MUTATION_CONFIRM_PROMPT = "Apply profile mutation changes? [y/N] ";
 export const PUBLIC_SOUL_TOOL_NAMES = Object.freeze(soulToolDefs.map((toolDef) => toolDef.name));
 
@@ -142,12 +157,13 @@ export async function buildAttachProfileMutationPlan(
   target: ProfileTarget,
   options: ProfileMutationBuildOptions = {}
 ): Promise<ProfileMutationPlan> {
+  const env = options.env ?? process.env;
   const fs = options.fs ?? createNodeProfileMutationFs();
-  const paths = await resolveProfilePaths(target, { env: options.env, fs });
+  const paths = await resolveProfilePaths(target, { env, fs });
   const mcpBefore = await fs.readText(paths.mcpConfigPath);
   const slashBefore = await fs.readText(paths.slashCommandsPath);
-  const mcpAfter = upsertMcpEntry(target, mcpBefore);
-  const slashResult = upsertSlashAlias(target, slashBefore);
+  const mcpAfter = upsertMcpEntry(target, mcpBefore, env);
+  const slashResult = upsertSlashAlias(target, slashBefore, env);
 
   return {
     target,
@@ -182,12 +198,13 @@ export async function buildDetachProfileMutationPlan(
   target: ProfileTarget,
   options: ProfileMutationBuildOptions = {}
 ): Promise<ProfileMutationPlan> {
+  const env = options.env ?? process.env;
   const fs = options.fs ?? createNodeProfileMutationFs();
-  const paths = await resolveProfilePaths(target, { env: options.env, fs });
+  const paths = await resolveProfilePaths(target, { env, fs });
   const mcpBefore = await fs.readText(paths.mcpConfigPath);
   const slashBefore = await fs.readText(paths.slashCommandsPath);
   const mcpRemoval = removeMcpEntry(target, mcpBefore);
-  const slashRemoval = removeSlashAlias(target, slashBefore);
+  const slashRemoval = removeSlashAlias(target, slashBefore, env);
 
   return {
     target,
@@ -401,15 +418,15 @@ async function restoreOperationBefore(fs: ProfileMutationFs, operation: ProfileM
   await fs.writeTextAtomic(operation.path, operation.before, 0o600);
 }
 
-function upsertMcpEntry(target: ProfileTarget, before: string | undefined): string {
+function upsertMcpEntry(target: ProfileTarget, before: string | undefined, env: NodeJS.ProcessEnv): string {
   if (target === "codex") {
     const withoutExisting = removeTomlBlock(before ?? "", "[mcp_servers.alaya]");
-    return appendTomlBlock(withoutExisting, renderCodexMcpBlock());
+    return appendTomlBlock(withoutExisting, renderCodexMcpBlock(env));
   }
 
   const parsed = parseJsonObject(before, ".claude.json");
   const currentMcpServers = isRecord(parsed.mcpServers) ? parsed.mcpServers : {};
-  const launcher = resolveAlayaMcpLauncher();
+  const launcher = resolveAlayaMcpLauncher(env);
   parsed.mcpServers = {
     ...currentMcpServers,
     alaya: {
@@ -453,16 +470,18 @@ function removeMcpEntry(
 
 function upsertSlashAlias(
   target: ProfileTarget,
-  before: string | undefined
+  before: string | undefined,
+  env: NodeJS.ProcessEnv
 ): { readonly content: string; readonly conflict?: ProfileMutationConflict } {
+  const slashCommand = resolveAlayaSlashCommand(env);
   if (target === "codex") {
     const existingCommand = extractCodexSlashCommand(before ?? "");
     return {
       content: appendTomlBlock(
         removeTomlBlock(before ?? "", "[slash_commands.alaya-inspect]"),
-        renderCodexSlashBlock()
+        renderCodexSlashBlock(slashCommand)
       ),
-      conflict: buildAttachConflict(existingCommand)
+      conflict: buildAttachConflict(existingCommand, slashCommand)
     };
   }
 
@@ -474,21 +493,23 @@ function upsertSlashAlias(
   parsed.commands = {
     ...currentCommands,
     [ALAYA_SLASH_ALIAS]: {
-      command: ALAYA_SLASH_COMMAND,
+      command: slashCommand,
       description: "Open the Alaya Memory Inspector."
     }
   };
 
   return {
     content: `${JSON.stringify(parsed, null, 2)}\n`,
-    conflict: buildAttachConflict(existingCommand)
+    conflict: buildAttachConflict(existingCommand, slashCommand)
   };
 }
 
 function removeSlashAlias(
   target: ProfileTarget,
-  before: string | undefined
+  before: string | undefined,
+  env: NodeJS.ProcessEnv
 ): { readonly content: string | undefined; readonly changed: boolean; readonly conflict?: ProfileMutationConflict } {
+  const slashCommand = resolveAlayaSlashCommand(env);
   if (before === undefined || before.trim().length === 0) {
     return { content: before, changed: false };
   }
@@ -499,7 +520,7 @@ function removeSlashAlias(
     return {
       content: after,
       changed: normalizeFileText(after) !== normalizeFileText(before),
-      conflict: buildDetachConflict(existingCommand)
+      conflict: buildDetachConflict(existingCommand, slashCommand)
     };
   }
 
@@ -517,12 +538,15 @@ function removeSlashAlias(
   return {
     content: `${JSON.stringify(parsed, null, 2)}\n`,
     changed: true,
-    conflict: buildDetachConflict(existingCommand)
+    conflict: buildDetachConflict(existingCommand, slashCommand)
   };
 }
 
-function buildAttachConflict(existingCommand: string | undefined): ProfileMutationConflict | undefined {
-  if (existingCommand === undefined || existingCommand === ALAYA_SLASH_COMMAND) {
+function buildAttachConflict(
+  existingCommand: string | undefined,
+  currentCommand: string
+): ProfileMutationConflict | undefined {
+  if (existingCommand === undefined || isManagedSlashCommand(existingCommand, currentCommand)) {
     return undefined;
   }
   return {
@@ -531,8 +555,11 @@ function buildAttachConflict(existingCommand: string | undefined): ProfileMutati
   };
 }
 
-function buildDetachConflict(existingCommand: string | undefined): ProfileMutationConflict | undefined {
-  if (existingCommand === undefined || existingCommand === ALAYA_SLASH_COMMAND) {
+function buildDetachConflict(
+  existingCommand: string | undefined,
+  currentCommand: string
+): ProfileMutationConflict | undefined {
+  if (existingCommand === undefined || isManagedSlashCommand(existingCommand, currentCommand)) {
     return undefined;
   }
   return {
@@ -541,8 +568,12 @@ function buildDetachConflict(existingCommand: string | undefined): ProfileMutati
   };
 }
 
-function renderCodexMcpBlock(): string {
-  const launcher = resolveAlayaMcpLauncher();
+function isManagedSlashCommand(existingCommand: string, currentCommand: string): boolean {
+  return existingCommand === currentCommand || existingCommand === ALAYA_LEGACY_SLASH_COMMAND;
+}
+
+function renderCodexMcpBlock(env: NodeJS.ProcessEnv): string {
+  const launcher = resolveAlayaMcpLauncher(env);
   return [
     "[mcp_servers.alaya]",
     `command = ${JSON.stringify(launcher.command)}`,
@@ -551,10 +582,10 @@ function renderCodexMcpBlock(): string {
   ].join("\n");
 }
 
-function renderCodexSlashBlock(): string {
+function renderCodexSlashBlock(slashCommand: string): string {
   return [
     "[slash_commands.alaya-inspect]",
-    `command = ${JSON.stringify(ALAYA_SLASH_COMMAND)}`,
+    `command = ${JSON.stringify(slashCommand)}`,
     `description = ${JSON.stringify("Open the Alaya Memory Inspector.")}`
   ].join("\n");
 }
@@ -723,4 +754,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
+}
+
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9_/:=+.,@%-]+$/u.test(value)) {
+    return value;
+  }
+
+  return `'${value.replace(/'/gu, "'\\''")}'`;
 }
