@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import EmbeddingSupplementForm from "./EmbeddingSupplementForm";
-import { ToastProvider } from "../../components/Toast";
-import { setInspectorToken, setWorkspaceId } from "../../api";
+import { ToastProvider } from "./Toast";
+import { setInspectorToken, setWorkspaceId } from "../api";
 
 function renderForm() {
   const onRestart = vi.fn();

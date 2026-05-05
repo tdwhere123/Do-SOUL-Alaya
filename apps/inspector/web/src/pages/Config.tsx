@@ -3,7 +3,7 @@ import { Cpu, Globe, KeyRound, RotateCcw, Save, ShieldCheck, X } from "lucide-re
 import { clsx } from "clsx";
 import { apiFetch, getWorkspaceId, type ApiError } from "../api";
 import { useToasts } from "../components/Toast";
-import EmbeddingSupplementForm from "./components/EmbeddingSupplementForm";
+import EmbeddingSupplementForm from "../components/EmbeddingSupplementForm";
 
 interface PatchResult {
   readonly success?: boolean;

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Eye, EyeOff, Save } from "lucide-react";
 import { clsx } from "clsx";
-import { apiFetch, getWorkspaceId, type ApiError } from "../../api";
-import { useToasts } from "../../components/Toast";
+import { apiFetch, getWorkspaceId, type ApiError } from "../api";
+import { useToasts } from "./Toast";
 import type { RuntimeEmbeddingConfig } from "@do-soul/alaya-protocol";
 
 interface PatchResult {

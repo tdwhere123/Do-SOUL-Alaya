@@ -5,8 +5,7 @@ import {
   useRef,
   useState
 } from "react";
-import { Copy, Search, Terminal, X } from "lucide-react";
-import { clsx } from "clsx";
+import { Search, X } from "lucide-react";
 import { drag, type D3DragEvent } from "d3-drag";
 import {
   forceCenter,
@@ -15,49 +14,19 @@ import {
   forceManyBody,
   forceSimulation,
   type Simulation,
-  type SimulationLinkDatum,
-  type SimulationNodeDatum
 } from "d3-force";
 import { select } from "d3-selection";
 import { zoom, zoomIdentity } from "d3-zoom";
 import { apiFetch, getWorkspaceId, type ApiError } from "../api";
 import { useToasts } from "../components/Toast";
+import { DetailDrawer } from "../components/DetailDrawer";
+import type { GraphNode, GraphLink, SpotlightState } from "../types/graph";
+import { extractId, nodeRadius, NODE_COLOR } from "../utils/graph";
 import type { SoulGraph } from "@do-soul/alaya-protocol";
-
-interface GraphNode extends SimulationNodeDatum {
-  id: string;
-  kind: string;
-  label: string;
-  summary?: string;
-  scope_id?: string;
-  workspace_id?: string;
-  created_at?: string;
-  origin_plane?: "project" | "global";
-  degree?: number;
-}
-
-interface GraphLink extends SimulationLinkDatum<GraphNode> {
-  id: string;
-  kind: string;
-}
-
-type SpotlightState = "match" | "adjacent" | "background";
 
 interface SoulGraphEnvelope {
   readonly success: boolean;
   readonly data: SoulGraph;
-}
-
-const NODE_COLOR: Record<string, string> = {
-  signal: "#96AD90",
-  memory: "#92A8B3",
-  scope: "#C9ADA7",
-  projection: "#D4AF37"
-};
-
-// Caps degree-driven size variance so a 30-degree hub does not balloon to 70px.
-function nodeRadius(d: GraphNode): number {
-  return 8 + Math.min(6, Math.log2((d.degree ?? 0) + 1) * 2);
 }
 
 export default function GraphPage() {
@@ -530,13 +499,6 @@ export default function GraphPage() {
   );
 }
 
-interface DetailDrawerProps {
-  readonly node: GraphNode | null;
-  readonly onClose: () => void;
-  readonly onFocusSubgraph: (id: string) => void;
-  readonly onCopyCli: (text: string) => void;
-}
-
 function unwrapSoulGraph(value: SoulGraph | SoulGraphEnvelope): SoulGraph {
   if (isSoulGraphEnvelope(value)) {
     return value.data;
@@ -553,164 +515,4 @@ function isSoulGraphEnvelope(value: SoulGraph | SoulGraphEnvelope): value is Sou
     typeof value.data === "object" &&
     value.data !== null
   );
-}
-
-function DetailDrawer({ node, onClose, onFocusSubgraph, onCopyCli }: DetailDrawerProps) {
-  const cliCommand = node
-    ? `alaya tools call --json soul.open_pointer '{"pointer_id":"${node.id}"}'`
-    : "";
-  const kindColor = node ? NODE_COLOR[node.kind] ?? "#586E75" : "#586E75";
-
-  return (
-    <div
-      className={clsx(
-        "absolute right-0 top-0 h-full w-96 bg-beige-50 border-l border-beige-200 shadow-2xl transition-transform duration-300 transform",
-        node ? "translate-x-0" : "translate-x-full"
-      )}
-      role="complementary"
-      aria-label="Node details"
-    >
-      {node ? (
-        <div className="relative h-full flex flex-col p-6 pl-7 font-mono overflow-y-auto">
-          <div
-            className="absolute left-0 top-0 bottom-0 w-1"
-            style={{ backgroundColor: kindColor }}
-            aria-hidden
-          />
-
-          <div className="flex justify-between items-start mb-4">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span
-                className="px-2 py-0.5 text-[10px] uppercase tracking-widest rounded text-ink-700"
-                style={{ backgroundColor: `${kindColor}33` }}
-              >
-                {node.kind}
-              </span>
-              {node.origin_plane === "global" ? (
-                <span className="px-2 py-0.5 text-[10px] uppercase tracking-widest rounded bg-[#D4AF37]/20 text-[#7A5A0F]">
-                  global
-                </span>
-              ) : null}
-            </div>
-            <button
-              onClick={onClose}
-              className="p-1 hover:bg-beige-200 rounded transition-colors -mr-1"
-              aria-label="Close detail drawer"
-            >
-              <X className="w-5 h-5 text-ink-700/40" />
-            </button>
-          </div>
-
-          <h2 className="text-lg font-bold text-ink-600 break-words leading-tight mb-5">
-            {node.label}
-          </h2>
-
-          {node.summary ? (
-            <section className="mb-6">
-              <h4 className="text-[10px] uppercase text-ink-700/40 mb-2 tracking-widest">
-                Summary
-              </h4>
-              <p className="text-sm text-ink-700 leading-relaxed whitespace-pre-wrap max-h-[36vh] overflow-y-auto pr-1">
-                {node.summary}
-              </p>
-            </section>
-          ) : null}
-
-          <section className="mb-6">
-            <h4 className="text-[10px] uppercase text-ink-700/40 mb-2 tracking-widest">
-              Metadata
-            </h4>
-            <dl className="bg-beige-100 p-3 rounded text-xs grid grid-cols-[5rem_1fr_auto] gap-x-3 gap-y-2 items-baseline">
-              <dt className="text-ink-700/60">id</dt>
-              <dd className="text-ink-700 break-all select-all">{node.id}</dd>
-              <button
-                onClick={() => onCopyCli(node.id)}
-                className="text-ink-700/40 hover:text-ink-700"
-                aria-label="Copy node id"
-              >
-                <Copy className="w-3 h-3" />
-              </button>
-
-              <dt className="text-ink-700/60">scope</dt>
-              <dd className="text-ink-700 break-all col-span-2">
-                {node.scope_id ?? <span className="text-ink-700/30">—</span>}
-              </dd>
-
-              <dt className="text-ink-700/60">workspace</dt>
-              <dd className="text-ink-700 break-all col-span-2">
-                {node.workspace_id ?? <span className="text-ink-700/30">—</span>}
-              </dd>
-
-              <dt className="text-ink-700/60">created</dt>
-              <dd className="text-ink-700 col-span-2" title={node.created_at}>
-                {node.created_at ? (
-                  formatRelativeTime(node.created_at)
-                ) : (
-                  <span className="text-ink-700/30">—</span>
-                )}
-              </dd>
-
-              <dt className="text-ink-700/60">degree</dt>
-              <dd className="text-ink-700 col-span-2">
-                {node.degree ?? 0}{" "}
-                <span className="text-ink-700/40">
-                  connection{node.degree === 1 ? "" : "s"}
-                </span>
-              </dd>
-            </dl>
-          </section>
-
-          <section className="mb-6">
-            <h4 className="text-[10px] uppercase text-ink-700/40 mb-2 tracking-widest">
-              Spotlight
-            </h4>
-            <button
-              onClick={() => onFocusSubgraph(node.id)}
-              className="text-xs font-mono text-ink-600 underline hover:text-ink-700"
-            >
-              Focus 1-hop subgraph around this node →
-            </button>
-          </section>
-
-          <div className="mt-auto pt-6 border-t border-beige-200">
-            <button
-              onClick={() => onCopyCli(cliCommand)}
-              className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-ink-600 text-beige-50 rounded hover:bg-ink-700 transition-colors text-xs font-bold uppercase tracking-widest"
-            >
-              <Terminal className="w-4 h-4" />
-              Open in CLI
-              <Copy className="w-3 h-3 ml-auto opacity-60" />
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function formatRelativeTime(iso: string): string {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return iso;
-  const diffMs = Date.now() - then;
-  if (diffMs < 0) return "in the future";
-  const sec = Math.round(diffMs / 1000);
-  if (sec < 45) return "just now";
-  const min = Math.round(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.round(min / 60);
-  if (hr < 36) return `${hr}h ago`;
-  const day = Math.round(hr / 24);
-  if (day < 14) return `${day}d ago`;
-  const wk = Math.round(day / 7);
-  if (wk < 9) return `${wk}w ago`;
-  const mo = Math.round(day / 30);
-  if (mo < 12) return `${mo}mo ago`;
-  const yr = Math.round(day / 365);
-  return `${yr}y ago`;
-}
-
-function extractId(endpoint: string | number | GraphNode): string {
-  if (typeof endpoint === "string") return endpoint;
-  if (typeof endpoint === "number") return String(endpoint);
-  return endpoint.id;
 }

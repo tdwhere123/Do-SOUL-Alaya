@@ -18,7 +18,7 @@
     "node": ">=20.19.0"
   },
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && pnpm --dir web build",
     "test": "pnpm exec vitest run --project @do-soul/alaya-inspector"
   },
   "dependencies": {
