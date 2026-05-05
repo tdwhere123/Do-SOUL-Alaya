@@ -4,6 +4,9 @@ import { describe, expect, it } from "vitest";
 import {
   buildInspectorChildEnv,
   createInspectCommand,
+  openCommandCandidates,
+  openUrlWithSpawn,
+  type BrowserOpenerChildProcess,
   type InspectorChildProcess
 } from "../cli/inspect.js";
 import type { AlayaCliContext } from "../cli/bridge.js";
@@ -53,6 +56,9 @@ describe("cli inspect", () => {
 
   it("passes token and loopback port to the inspector child and treats open as best effort", async () => {
     const child = new FakeInspectorChild();
+    const stderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
     const spawned: unknown[] = [];
     const opened: string[] = [];
     const command = createInspectCommand({
@@ -67,7 +73,7 @@ describe("cli inspect", () => {
       }
     });
 
-    const promise = command.handler(createContext({ env: { ALAYA_INSPECTOR_ALLOW_FIXED_TOKEN: "1" } }), {
+    const promise = command.handler(createContext({ env: { ALAYA_INSPECTOR_ALLOW_FIXED_TOKEN: "1" }, stderr }), {
       open: true,
       port: 5175,
       token: "b".repeat(64)
@@ -77,6 +83,7 @@ describe("cli inspect", () => {
     const result = await promise;
 
     expect(result.exitCode).toBe(0);
+    expect(stderrChunks.join("")).toContain("could not open browser automatically");
     expect(spawned).toMatchObject([
       {
         port: 5175,
@@ -84,6 +91,42 @@ describe("cli inspect", () => {
       }
     ]);
     expect(opened).toEqual(["http://127.0.0.1:5175/?token=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]);
+  });
+
+  it("prefers Windows browser bridge candidates when running in WSL", () => {
+    expect(
+      openCommandCandidates("http://127.0.0.1:5174/?token=t", {
+        os: "linux",
+        env: { WSL_DISTRO_NAME: "Ubuntu" }
+      })
+    ).toEqual([
+      ["wslview", ["http://127.0.0.1:5174/?token=t"]],
+      ["cmd.exe", ["/c", "start", "", "http://127.0.0.1:5174/?token=t"]],
+      ["xdg-open", ["http://127.0.0.1:5174/?token=t"]]
+    ]);
+  });
+
+  it("falls back to the next browser opener when the first command is missing", async () => {
+    const attempts: string[] = [];
+
+    await openUrlWithSpawn("http://127.0.0.1:5174/?token=t", {
+      env: { WSL_INTEROP: "/run/WSL/1_interop" },
+      os: "linux",
+      spawnBrowser: (command) => {
+        attempts.push(command);
+        const child = new FakeBrowserOpenerChild();
+        setTimeout(() => {
+          if (command === "wslview") {
+            child.emit("error", Object.assign(new Error("missing wslview"), { code: "ENOENT" }));
+            return;
+          }
+          child.emit("spawn");
+        }, 0);
+        return child;
+      }
+    });
+
+    expect(attempts).toEqual(["wslview", "cmd.exe"]);
   });
 
   it("builds a minimal inspector child env without provider secrets", () => {
@@ -160,6 +203,14 @@ class FakeInspectorChild extends EventEmitter implements InspectorChildProcess {
 
   public emitExit(code: number | null, signal: NodeJS.Signals | null): void {
     this.emit("exit", code, signal);
+  }
+}
+
+class FakeBrowserOpenerChild extends EventEmitter implements BrowserOpenerChildProcess {
+  public unrefCalled = false;
+
+  public unref(): void {
+    this.unrefCalled = true;
   }
 }
 

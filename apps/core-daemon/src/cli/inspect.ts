@@ -1,7 +1,7 @@
 import { spawn as spawnChildProcess, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
-import { platform } from "node:os";
+import { platform, release } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   ALAYA_SYSEXITS,
@@ -34,6 +34,17 @@ export interface InspectorChildProcess {
   once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
   once(event: "error", listener: (error: Error) => void): this;
 }
+
+export interface BrowserOpenerChildProcess {
+  unref(): void;
+  once(event: "spawn", listener: () => void): this;
+  once(event: "error", listener: (error: Error) => void): this;
+}
+
+export type BrowserOpenerSpawn = (
+  command: string,
+  args: readonly string[]
+) => BrowserOpenerChildProcess;
 
 interface InspectArgs {
   readonly open: boolean;
@@ -86,7 +97,9 @@ async function executeInspect(
     await waitForInspectorReady(child, ctx);
     ctx.stdout.write(`${url}\n`);
     if (args.open) {
-      await (deps.openUrl ?? defaultOpenUrl)(url).catch(() => undefined);
+      await (deps.openUrl ?? defaultOpenUrl)(url).catch((error) => {
+        ctx.stderr.write(`could not open browser automatically; copy the printed URL manually (${describeError(error)})\n`);
+      });
     }
     await waitForChildExitOrSignal(child);
     return { exitCode: ALAYA_SYSEXITS.OK, json: { url, port: args.port } };
@@ -250,17 +263,90 @@ async function defaultCheckPortAvailable(port: number): Promise<boolean> {
 }
 
 async function defaultOpenUrl(url: string): Promise<void> {
-  const [command, args] = openCommand(url);
-  const child = spawnChildProcess(command, args, {
-    detached: true,
-    stdio: "ignore"
+  await openUrlWithSpawn(url, {
+    spawnBrowser: (command, args) =>
+      spawnChildProcess(command, [...args], {
+        detached: true,
+        stdio: "ignore"
+      })
   });
-  child.unref();
 }
 
-function openCommand(url: string): readonly [string, readonly string[]] {
-  const os = platform();
-  if (os === "darwin") return ["open", [url]];
-  if (os === "win32") return ["cmd", ["/c", "start", "", url]];
-  return ["xdg-open", [url]];
+export async function openUrlWithSpawn(
+  url: string,
+  options: {
+    readonly env?: NodeJS.ProcessEnv;
+    readonly os?: NodeJS.Platform;
+    readonly osRelease?: string;
+    readonly spawnBrowser?: BrowserOpenerSpawn;
+  } = {}
+): Promise<void> {
+  const candidates = openCommandCandidates(url, options);
+  const spawnBrowser = options.spawnBrowser ?? ((command, args) => spawnChildProcess(command, [...args], {
+    detached: true,
+    stdio: "ignore"
+  }));
+  const errors: string[] = [];
+
+  for (const [command, args] of candidates) {
+    try {
+      await spawnBrowserCandidate(spawnBrowser, command, args);
+      return;
+    } catch (error) {
+      errors.push(`${command}: ${describeError(error)}`);
+    }
+  }
+
+  throw new Error(`no browser opener worked (${errors.join("; ")})`);
+}
+
+export function openCommandCandidates(
+  url: string,
+  options: {
+    readonly env?: NodeJS.ProcessEnv;
+    readonly os?: NodeJS.Platform;
+    readonly osRelease?: string;
+  } = {}
+): readonly (readonly [string, readonly string[]])[] {
+  const os = options.os ?? platform();
+  if (os === "darwin") return [["open", [url]]];
+  if (os === "win32") return [["cmd", ["/c", "start", "", url]]];
+  if (os === "linux" && isWslEnvironment(options.env ?? process.env, options.osRelease ?? release())) {
+    return [
+      ["wslview", [url]],
+      ["cmd.exe", ["/c", "start", "", url]],
+      ["xdg-open", [url]]
+    ];
+  }
+  return [["xdg-open", [url]]];
+}
+
+async function spawnBrowserCandidate(
+  spawnBrowser: BrowserOpenerSpawn,
+  command: string,
+  args: readonly string[]
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawnBrowser(command, args);
+    child.once("spawn", () => {
+      child.unref();
+      resolve();
+    });
+    child.once("error", reject);
+  });
+}
+
+function isWslEnvironment(env: NodeJS.ProcessEnv, osRelease: string): boolean {
+  return (
+    env.WSL_DISTRO_NAME !== undefined ||
+    env.WSL_INTEROP !== undefined ||
+    osRelease.toLowerCase().includes("microsoft")
+  );
+}
+
+function describeError(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message.trim();
+  }
+  return String(error);
 }
