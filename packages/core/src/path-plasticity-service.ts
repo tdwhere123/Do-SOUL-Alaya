@@ -10,7 +10,6 @@ import {
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
 import { EventPublisher } from "./event-publisher.js";
-import { getNextRevision } from "./shared/event-utils.js";
 
 /**
  * Plasticity tuning constants. Derived authoritatively from
@@ -61,12 +60,16 @@ export interface PathPlasticityRepoPort {
     workspaceId: string,
     anchorRef: PathAnchorRef
   ): Promise<readonly Readonly<PathRelation>[]>;
-  update(
+  /** Synchronous variant required by `appendManyWithMutation`'s
+   * sync-mutate contract (see #BL-022 closure / event-publisher.ts). The
+   * three plasticity publishers below wrap append + mutation in one
+   * SQLite transaction via this port. */
+  updateSync(
     pathId: string,
     updates: Partial<
       Pick<PathRelation, "effect_vector" | "plasticity_state" | "lifecycle" | "legitimacy" | "updated_at">
     >
-  ): Promise<Readonly<PathRelation>>;
+  ): Readonly<PathRelation>;
 }
 
 export interface PathPlasticityServiceDependencies {
@@ -89,8 +92,10 @@ export interface PathPlasticityComputeResult {
 /**
  * PathPlasticityService translates recent UsageProofRecord rows into
  * PathRelation strength deltas. Each delta is published through the
- * EventPublisher boundary as a Phase-C path-relation reinforcement,
- * weakening, or retirement event so that the audit log records every change
+ * EventPublisher boundary as a runtime-governance path-relation reinforcement,
+ * weakening, or retirement event (see
+ * `packages/protocol/src/events/runtime-governance.ts`) so that the audit
+ * log records every change
  * and the durable PathRelation row reflects the new plasticity_state only
  * after the audit event has been appended.
  *
@@ -116,8 +121,8 @@ export class PathPlasticityService {
 
   /**
    * Reads UsageProofRecord rows reported strictly after `sinceIso`,
-   * computes per-path deltas, and publishes Phase-C events that mutate the
-   * PathRelation rows.
+   * computes per-path deltas, and publishes runtime-governance events that
+   * mutate the PathRelation rows.
    *
    * Returns counts for observability.
    */
@@ -333,6 +338,8 @@ export class PathPlasticityService {
 
     if (netDelta < 0) {
       const nextStrength = proposedStrength;
+      const nextSupportCount =
+        path.plasticity_state.support_events_count + counts.used;
       const nextContradictionCount =
         path.plasticity_state.contradiction_events_count + counts.notApplicable;
       // Retirement: weak path with no recent reinforcement → emit
@@ -341,6 +348,7 @@ export class PathPlasticityService {
         const nextPlasticity = parsePlasticityState({
           ...path.plasticity_state,
           strength: nextStrength,
+          support_events_count: nextSupportCount,
           contradiction_events_count: nextContradictionCount,
           last_weakened_at: occurredAt
         });
@@ -357,6 +365,7 @@ export class PathPlasticityService {
       const nextPlasticity = parsePlasticityState({
         ...path.plasticity_state,
         strength: nextStrength,
+        support_events_count: nextSupportCount,
         contradiction_events_count: nextContradictionCount,
         last_weakened_at: occurredAt
       });
@@ -376,10 +385,15 @@ export class PathPlasticityService {
       // Pure not_applicable signal — record the contradiction increment via a
       // weakened event with zero strength delta so the audit log carries a
       // trace, even though strength itself does not change.
+      // Mixed-receipt fix: include any `used` count in support_events_count
+      // even when the tick net-weakens or net-zeros (per D2 reviewer-I2).
+      const nextSupportCount =
+        path.plasticity_state.support_events_count + counts.used;
       const nextContradictionCount =
         path.plasticity_state.contradiction_events_count + counts.notApplicable;
       const nextPlasticity = parsePlasticityState({
         ...path.plasticity_state,
+        support_events_count: nextSupportCount,
         contradiction_events_count: nextContradictionCount,
         last_weakened_at: occurredAt
       });
@@ -434,11 +448,6 @@ export class PathPlasticityService {
     readonly supportEventsCount: number;
     readonly occurredAt: string;
   }): Promise<void> {
-    const revision = await getNextRevision(
-      this.dependencies.eventLogRepo,
-      "path_relation",
-      params.path.path_id
-    );
     const payload = parseRuntimeGovernanceEventPayload(
       RuntimeGovernanceEventType.PATH_RELATION_REINFORCED,
       {
@@ -450,19 +459,21 @@ export class PathPlasticityService {
       }
     );
 
-    await this.dependencies.eventPublisher.publishWithMutation(
-      {
-        event_type: RuntimeGovernanceEventType.PATH_RELATION_REINFORCED,
-        entity_type: "path_relation",
-        entity_id: params.path.path_id,
-        workspace_id: params.path.workspace_id,
-        run_id: null,
-        caused_by: "system",
-        revision,
-        payload_json: payload as unknown as Record<string, unknown>
-      },
-      async () => {
-        await this.dependencies.pathRelationRepo.update(params.path.path_id, {
+    await this.dependencies.eventPublisher.appendManyWithMutation(
+      [
+        {
+          event_type: RuntimeGovernanceEventType.PATH_RELATION_REINFORCED,
+          entity_type: "path_relation",
+          entity_id: params.path.path_id,
+          workspace_id: params.path.workspace_id,
+          run_id: null,
+          caused_by: "system",
+          revision: 0,
+          payload_json: payload as unknown as Record<string, unknown>
+        }
+      ],
+      () => {
+        this.dependencies.pathRelationRepo.updateSync(params.path.path_id, {
           plasticity_state: params.nextPlasticity,
           updated_at: params.occurredAt
         });
@@ -479,11 +490,6 @@ export class PathPlasticityService {
     readonly reason: string;
     readonly occurredAt: string;
   }): Promise<void> {
-    const revision = await getNextRevision(
-      this.dependencies.eventLogRepo,
-      "path_relation",
-      params.path.path_id
-    );
     const payload = parseRuntimeGovernanceEventPayload(
       RuntimeGovernanceEventType.PATH_RELATION_WEAKENED,
       {
@@ -496,19 +502,21 @@ export class PathPlasticityService {
       }
     );
 
-    await this.dependencies.eventPublisher.publishWithMutation(
-      {
-        event_type: RuntimeGovernanceEventType.PATH_RELATION_WEAKENED,
-        entity_type: "path_relation",
-        entity_id: params.path.path_id,
-        workspace_id: params.path.workspace_id,
-        run_id: null,
-        caused_by: "system",
-        revision,
-        payload_json: payload as unknown as Record<string, unknown>
-      },
-      async () => {
-        await this.dependencies.pathRelationRepo.update(params.path.path_id, {
+    await this.dependencies.eventPublisher.appendManyWithMutation(
+      [
+        {
+          event_type: RuntimeGovernanceEventType.PATH_RELATION_WEAKENED,
+          entity_type: "path_relation",
+          entity_id: params.path.path_id,
+          workspace_id: params.path.workspace_id,
+          run_id: null,
+          caused_by: "system",
+          revision: 0,
+          payload_json: payload as unknown as Record<string, unknown>
+        }
+      ],
+      () => {
+        this.dependencies.pathRelationRepo.updateSync(params.path.path_id, {
           plasticity_state: params.nextPlasticity,
           updated_at: params.occurredAt
         });
@@ -523,11 +531,6 @@ export class PathPlasticityService {
     readonly reason: string;
     readonly occurredAt: string;
   }): Promise<void> {
-    const revision = await getNextRevision(
-      this.dependencies.eventLogRepo,
-      "path_relation",
-      params.path.path_id
-    );
     const payload = parseRuntimeGovernanceEventPayload(
       RuntimeGovernanceEventType.PATH_RELATION_RETIRED,
       {
@@ -538,19 +541,21 @@ export class PathPlasticityService {
       }
     );
 
-    await this.dependencies.eventPublisher.publishWithMutation(
-      {
-        event_type: RuntimeGovernanceEventType.PATH_RELATION_RETIRED,
-        entity_type: "path_relation",
-        entity_id: params.path.path_id,
-        workspace_id: params.path.workspace_id,
-        run_id: null,
-        caused_by: "system",
-        revision,
-        payload_json: payload as unknown as Record<string, unknown>
-      },
-      async () => {
-        await this.dependencies.pathRelationRepo.update(params.path.path_id, {
+    await this.dependencies.eventPublisher.appendManyWithMutation(
+      [
+        {
+          event_type: RuntimeGovernanceEventType.PATH_RELATION_RETIRED,
+          entity_type: "path_relation",
+          entity_id: params.path.path_id,
+          workspace_id: params.path.workspace_id,
+          run_id: null,
+          caused_by: "system",
+          revision: 0,
+          payload_json: payload as unknown as Record<string, unknown>
+        }
+      ],
+      () => {
+        this.dependencies.pathRelationRepo.updateSync(params.path.path_id, {
           plasticity_state: params.nextPlasticity,
           updated_at: params.occurredAt
         });

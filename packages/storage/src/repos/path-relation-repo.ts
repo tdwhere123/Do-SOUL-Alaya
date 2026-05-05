@@ -213,12 +213,34 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
       Pick<PathRelation, "effect_vector" | "plasticity_state" | "lifecycle" | "legitimacy" | "updated_at">
     >
   ): Promise<Readonly<PathRelation>> {
-    const parsedPathId = parseNonEmptyString(pathId, "path id");
-    const existing = await this.findById(parsedPathId);
+    return this.updateSync(pathId, updates);
+  }
 
-    if (existing === null) {
+  /** Synchronous variant for atomic publish + mutation (#BL-022).
+   * Required by `PathPlasticityService` so that `appendManyWithMutation`
+   * can wrap the EventLog row and the `path_relation` mutation in one
+   * SQLite transaction (closes the BL-022 race for path-relation writes).
+   */
+  public updateSync(
+    pathId: string,
+    updates: Partial<
+      Pick<PathRelation, "effect_vector" | "plasticity_state" | "lifecycle" | "legitimacy" | "updated_at">
+    >
+  ): Readonly<PathRelation> {
+    const parsedPathId = parseNonEmptyString(pathId, "path id");
+
+    let existingRow: PathRelationRow | undefined;
+    try {
+      existingRow = this.findByIdStatement.get(parsedPathId) as PathRelationRow | undefined;
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", `Failed to load path relation ${parsedPathId}.`, error);
+    }
+
+    if (existingRow === undefined) {
       throw new StorageError("NOT_FOUND", `Path relation ${parsedPathId} was not found.`);
     }
+
+    const existing = parsePathRelationRow(existingRow);
 
     const nextRelation = parsePathRelation({
       ...existing,
@@ -254,16 +276,25 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
       );
     }
 
-    const updated = await this.findById(parsedPathId);
+    let updatedRow: PathRelationRow | undefined;
+    try {
+      updatedRow = this.findByIdStatement.get(parsedPathId) as PathRelationRow | undefined;
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to reload path relation ${parsedPathId} after update.`,
+        error
+      );
+    }
 
-    if (updated === null) {
+    if (updatedRow === undefined) {
       throw new StorageError(
         "NOT_FOUND",
         `Path relation ${parsedPathId} was not found after update.`
       );
     }
 
-    return updated;
+    return parsePathRelationRow(updatedRow);
   }
 
   public async findById(pathId: string): Promise<Readonly<PathRelation> | null> {

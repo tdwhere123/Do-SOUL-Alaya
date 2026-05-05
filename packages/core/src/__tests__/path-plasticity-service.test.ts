@@ -105,7 +105,7 @@ interface Harness {
   };
   readonly pathRepo: {
     findByAnchor: ReturnType<typeof vi.fn>;
-    update: ReturnType<typeof vi.fn>;
+    updateSync: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -117,13 +117,26 @@ function buildHarness(params: {
   const publishedEvents: EventLogEntry[] = [];
   const repoUpdates: { pathId: string; updates: Partial<PathRelation> }[] = [];
 
+  let savepointStart: number | null = null;
+  const buildEntry = (input: Omit<EventLogEntry, "event_id" | "created_at">): EventLogEntry => {
+    const revision = publishedEvents.filter(
+      (row) => row.entity_type === input.entity_type && row.entity_id === input.entity_id
+    ).length;
+    return {
+      ...input,
+      revision,
+      event_id: `evt-${publishedEvents.length + 1}`,
+      created_at: NOW_ISO
+    };
+  };
   const eventLogRepo = {
     append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at">): Promise<EventLogEntry> => {
-      const persisted: EventLogEntry = {
-        event_id: `evt-${publishedEvents.length + 1}`,
-        created_at: NOW_ISO,
-        ...entry
-      };
+      const persisted = buildEntry(entry);
+      publishedEvents.push(persisted);
+      return persisted;
+    }),
+    appendSync: vi.fn((entry: Omit<EventLogEntry, "event_id" | "created_at">): EventLogEntry => {
+      const persisted = buildEntry(entry);
       publishedEvents.push(persisted);
       return persisted;
     }),
@@ -133,6 +146,26 @@ function buildHarness(params: {
         publishedEvents.splice(index, 1);
       }
     }),
+    deleteByIdSync: vi.fn((eventId: string): void => {
+      const index = publishedEvents.findIndex((event) => event.event_id === eventId);
+      if (index >= 0) {
+        publishedEvents.splice(index, 1);
+      }
+    }),
+    transactional: <T,>(fn: () => T): T => {
+      savepointStart = publishedEvents.length;
+      try {
+        const result = fn();
+        savepointStart = null;
+        return result;
+      } catch (error) {
+        if (savepointStart !== null) {
+          publishedEvents.splice(savepointStart);
+          savepointStart = null;
+        }
+        throw error;
+      }
+    },
     queryByEntity: vi.fn(async (_entityType: string, entityId: string): Promise<readonly EventLogEntry[]> => {
       return publishedEvents.filter((event) => event.entity_id === entityId);
     })
@@ -151,7 +184,7 @@ function buildHarness(params: {
 
   const pathRepo: PathPlasticityRepoPort & {
     findByAnchor: ReturnType<typeof vi.fn>;
-    update: ReturnType<typeof vi.fn>;
+    updateSync: ReturnType<typeof vi.fn>;
   } = {
     findByAnchor: vi.fn(async (_workspaceId: string, anchorRef) => {
       if (anchorRef.kind !== "object") {
@@ -159,7 +192,7 @@ function buildHarness(params: {
       }
       return params.pathsByObjectId[anchorRef.object_id] ?? [];
     }),
-    update: vi.fn(async (pathId, updates) => {
+    updateSync: vi.fn((pathId, updates) => {
       repoUpdates.push({ pathId, updates });
       // Return a synthetic next-state path; service does not consume the
       // return value beyond the contract type.
@@ -733,6 +766,94 @@ describe("PathPlasticityService", () => {
     );
     expect(weakenedEvent?.payload_json).toMatchObject({
       contradiction_events_count: 3
+    });
+  });
+
+  it("rolls back the runtime-governance EventLog row when pathRelationRepo.updateSync throws (#BL-022 atomicity for path_relation writes)", async () => {
+    // The post-D2 fix migrated path-plasticity publishers from the legacy
+    // async-mutate `publishWithMutation` to atomic `appendManyWithMutation`.
+    // This test pins the BL-022 closure for path_relation writes: if the
+    // SQL mutate raises after the EventLog row has been appended-in-
+    // transaction, the row must be rolled back so audit log + durable state
+    // stay consistent.
+    const path = createPath({ path_id: "path-roll-1" });
+    const harness = buildHarness({
+      pathsByObjectId: { "obj-target": [path] },
+      usageRecords: [
+        createUsageRecord({
+          delivery_id: "delivery-roll",
+          usage_state: "used",
+          used_object_ids: ["obj-target"],
+          reported_at: "2026-05-03T01:00:00.000Z"
+        })
+      ],
+      deliveredObjectIdsByDeliveryId: { "delivery-roll": ["obj-target"] }
+    });
+
+    const failure = new Error("synthetic SQL failure inside transaction");
+    harness.pathRepo.updateSync.mockImplementationOnce(() => {
+      throw failure;
+    });
+
+    await expect(
+      harness.service.computeAndApplyPlasticity({
+        workspaceId: "workspace-1",
+        sinceIso: "2026-05-03T00:00:00.000Z"
+      })
+    ).rejects.toThrow(failure);
+
+    // The PATH_RELATION_REINFORCED row appended inside the transaction must
+    // be rolled back; nothing is durable.
+    const reinforcedRows = harness.publishedEvents.filter(
+      (event) => event.event_type === RuntimeGovernanceEventType.PATH_RELATION_REINFORCED
+    );
+    expect(reinforcedRows).toEqual([]);
+  });
+
+  it("preserves support_events_count on mixed receipts that net-weaken (D2 reviewer-I2)", async () => {
+    // Mixed receipt aggregate: 2 used + 5 skipped → strength net-weakens
+    // but the 2 'used' receipts still count as support evidence. Pre-fix
+    // the weakened branch dropped `counts.used` from `support_events_count`,
+    // so the cumulative support tally lost the increment whenever any tick
+    // net-weakened.
+    const path = createPath({
+      path_id: "path-mixed-1",
+      plasticity_state: {
+        strength: 0.5,
+        direction_bias: "bidirectional_asymmetric",
+        stability_class: "volatile",
+        support_events_count: 3,
+        contradiction_events_count: 0,
+        last_reinforced_at: NOW_ISO,
+        last_weakened_at: undefined
+      }
+    });
+    const harness = buildHarness({
+      pathsByObjectId: { "obj-target": [path] },
+      usageRecords: [
+        // 2 'used'
+        createUsageRecord({ usage_state: "used", used_object_ids: ["obj-target"] }),
+        createUsageRecord({ usage_state: "used", used_object_ids: ["obj-target"] }),
+        // 5 'skipped' for the same delivery
+        createUsageRecord({ usage_state: "skipped", used_object_ids: [] }),
+        createUsageRecord({ usage_state: "skipped", used_object_ids: [] }),
+        createUsageRecord({ usage_state: "skipped", used_object_ids: [] }),
+        createUsageRecord({ usage_state: "skipped", used_object_ids: [] }),
+        createUsageRecord({ usage_state: "skipped", used_object_ids: [] })
+      ],
+      deliveredObjectIdsByDeliveryId: { "delivery-1": ["obj-target"] }
+    });
+
+    const result = await harness.service.computeAndApplyPlasticity({
+      workspaceId: "workspace-1",
+      sinceIso: "2026-05-03T00:00:00.000Z"
+    });
+
+    expect(result.weakened).toBe(1);
+    const updated = harness.repoUpdates.find((entry) => entry.pathId === "path-mixed-1");
+    expect(updated?.updates.plasticity_state).toMatchObject({
+      // 3 (prior) + 2 (this tick's 'used' receipts) = 5
+      support_events_count: 5
     });
   });
 });
