@@ -7,6 +7,7 @@ coverage/
 .turbo/
 .next/
 .cache/
+.claude/
 
 # Local runtime data
 var/
@@ -32,3 +33,4 @@ Thumbs.db
 
 # do-it plugin internal artifacts (per-worktree plan stub for grill hook)
 .do-it/
+
