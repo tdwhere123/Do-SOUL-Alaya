@@ -80,7 +80,10 @@ neighbour consolidation.
 `POINTER_HEALING`, etc.).
 
 **ConsolidationLoop** — Garden's primary mechanism for path plasticity
-maintenance.
+maintenance. v0.1 ships under the Auditor (TIER_1) task kind
+`path_plasticity_update` rather than the Librarian (TIER_2) — the
+off-recall-request-path constraint is satisfied either way; v0.2
+`#BL-028` realigns to the Librarian for strict tier alignment.
 
 ## Governance
 
@@ -100,6 +103,31 @@ governance/recall decision is wrong, override it for this session".
 
 **HITL** — Human-In-The-Loop. High-risk candidates require explicit
 human approval before promotion to durable memory.
+
+**Reviewer Identity Trio** *(Alaya v0.1 audit-trail vocabulary)* —
+Three actor-shaped fields appear on review-related rows and they are
+NOT interchangeable:
+
+- `caused_by` (event_log) — the audit-trail principal-of-action for
+  one EventLog row. Carries different values depending on event kind:
+  on `SOUL_PROPOSAL_CREATED` it is the proposing agent's `agent_target`
+  (e.g. `"codex"`); on `SOUL_REVIEW_CREATED` / `SOUL_REVIEW_COMPLETED`
+  / `SOUL_PROPOSAL_RESOLVED` it is the `reviewer_identity` value
+  asserted by the human reviewer (e.g. `"user:alice"`).
+- `reviewer_identity` (proposals row) — the proposal-side projection
+  of `caused_by` for the review event chain. Persisted on the
+  `proposals.reviewer_identity` column once the proposal resolves.
+  IMPORTANT: in v0.1 this is an **agent-asserted attestation, not an
+  authenticated principal**. The MCP / Inspector / CLI surfaces accept
+  it verbatim as a `BoundedIdSchema` string with no signature
+  verification. v0.2 (`#BL-027`) binds it server-side from a
+  pre-shared session credential. An operator reading this column should
+  treat it as "the agent / human attested to this identity" rather
+  than "the runtime verified this identity".
+- `agent_target` (MCP call context) — the MCP transport surface that
+  delivered the call (`"codex"`, `"claude-code"`, `"inspector"`,
+  `"cli"`, ...). The runtime trusts this only as transport-level
+  routing metadata.
 
 ## Trust And Session
 
@@ -147,6 +175,20 @@ decides durable truth.
 
 **ProposalRecord** — Output from the agent / LLM proposal route. Never
 becomes durable directly; flows through the Promotion Gate.
+
+## Storage *(Alaya v0.1 specific)*
+
+**`*Sync` repo siblings** — Synchronous variants of repo methods
+(`createSync`, `updateStateSync`, `patchSync`, `deleteSync`,
+`updateSync`, `appendSync`, ...) introduced by A2 to support
+`appendManyWithMutation`'s sync-mutate-callback contract. They live
+on every repo whose entity participates in atomic publish + mutation
+(`event-log`, `claim-form`, `bootstrapping-record`,
+`deferred-obligation`, `dirty-state-dossier`, `drift-lease`, `run`,
+`path-graph-snapshot`, `path-relation`, `surface-binding`, `config`).
+This is an **interim pattern** — `#BL-031` retires it by making the
+primary repo methods synchronous and async-wrapping only at I/O
+boundaries.
 
 ## Port Vocabulary *(Alaya v0.1 specific)*
 

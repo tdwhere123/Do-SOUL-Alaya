@@ -159,16 +159,15 @@ Claim lifecycle, karma) lives on the **Memory Ontology** layer and
 **Object** axis but only changes through the proposal-resolution
 path.
 
-*In flight (closing in v0.1):* the daemon does not yet expose a
-pending-proposals queue, and review records do not yet carry a
-reviewer identity — review flows through the same MCP surface as
-proposing, which means HITL is *agent-orchestrated* rather than
-*daemon-orchestrated*. The minimal daemon backbone
-(`soul.list_pending_proposals`, `alaya review` CLI verbs,
-`reviewer_identity` on review record) is the **A1** card in the
-[v0.1 closeout](#where-this-is-going). Full review-inbox UX
-(reviewer assignment, deadlines, escalation) is a v0.2 enhancement
-card.
+*Closed in v0.1-closeout (A1):* the daemon now exposes a
+pending-proposals queue (`soul.list_pending_proposals` MCP tool),
+review records carry an explicit `reviewer_identity` (migration
+`058-reviewer-identity.sql`), the `alaya review pending|accept|reject`
+CLI verbs are wired, and the Inspector surfaces the queue. HITL is
+now *daemon-orchestrated* through one workflow contract shared by
+the MCP, HTTP loopback, and CLI surfaces. Full review-inbox UX
+(reviewer assignment, deadlines, escalation, multi-reviewer quorum)
+is `#BL-027` in [where this is going](#where-this-is-going).
 
 *Code anchors:*
 `apps/core-daemon/src/mcp-memory-proposal-workflow.ts:90-248`,
@@ -195,14 +194,14 @@ mutation; consumers downstream subscribe to the notification, not to
 the DB. Lives on the **Memory Ontology** layer (durable truth) plus
 **Runtime Control** (the dispatch).
 
-*In flight (closing in v0.1):* the append + mutation pair is not
-yet wrapped in a single transaction; SQLite CAS plus a unique index
-on `(entity_type, entity_id, revision)` keeps the data consistent
-but leaves a small race window. Tracked as **#BL-022** — the
-`appendManyWithMutation` port lands inside one
-`connection.transaction()` and the ~12 callers migrate to a sync
-mutate callback. This is the **A2** card in the
-[v0.1 closeout](#where-this-is-going).
+*Closed in v0.1-closeout (A2):* the append + mutation pair now lives
+inside a single `connection.transaction()` via the new
+`appendManyWithMutation` boundary on `EventPublisher`. The unique
+`(entity_type, entity_id, revision)` index stays as belt-and-suspenders
+but is no longer load-bearing. All 14 producer services migrated; the
+legacy `publishWithMutation` / `publishManyWithMutation` are
+`@deprecated` and survive only for one auditor adapter (tracked as
+`#BL-026`). `#BL-022` is closed.
 
 *Code anchors:* `packages/core/src/event-publisher.ts:40-62`,
 `packages/storage/src/repos/event-log-repo.ts:69-118`.
@@ -262,15 +261,17 @@ agent can skip it, and Alaya degrades to a "delivered" trust state
 without erroring. Lives on the **Evidence axis** as control-plane
 evidence, **Runtime Control** layer.
 
-*In flight (closing in v0.1):* receipts feed `TrustSummary` but
-**do not yet feed Path-axis plasticity** (reinforcement / weakening
-/ redirection / retirement). The schema fields and Phase-C events
-already exist (`packages/protocol/src/soul/path-relation.ts:113-124`,
-`packages/protocol/src/events/phase-c.ts`); only the consumer
-service is missing. Wiring the feedback loop — a new
-`PathPlasticityService` plus a Garden tier that processes recent
-`UsageProofRecord`s — is the **A3** card in the
-[v0.1 closeout](#where-this-is-going).
+*Closed in v0.1-closeout (A3):* receipts now feed Path-axis plasticity
+through a new `PathPlasticityService`
+(`packages/core/src/path-plasticity-service.ts`) consumed by the
+Garden Auditor's `path_plasticity_update` task kind. The schema fields
+were already present
+(`packages/protocol/src/soul/path-relation.ts:113-124`); the consumer
+service emits the corresponding `PathRelationReinforced/Weakened/Retired`
+events from `packages/protocol/src/events/runtime-governance.ts` and
+`RecallService` factors a plasticity weight into recall scoring. v0.1
+ships three of the four named ops (reinforcement, weakening, retirement);
+`direction_bias` redirection is `#BL-029`.
 
 *Code anchors:* `apps/core-daemon/src/trust-state.ts:147-187`,
 `packages/protocol/src/soul/mcp-types.ts:146` (the three-state enum).
@@ -535,12 +536,12 @@ Do-SOUL Alaya/
 
 | Card | What it closes | Backlog |
 |---|---|---|
-| **A1** Daemon HITL backbone | `soul.list_pending_proposals` MCP tool · `alaya review pending\|accept\|reject` CLI · `reviewer_identity` on review record · Inspector "Pending" view | new card |
-| **A2** EventPublisher atomic transaction | `appendManyWithMutation` inside one `connection.transaction()`; ~12 callers migrate to sync mutate; closes the race window | `#BL-022` |
-| **A3** Path-axis plasticity loop | New `PathPlasticityService` consumes `MEMORY_USAGE_REPORTED` → emits Phase-C events → `RecallService` factors plasticity into score | new card |
+| **A1** Landed: Daemon HITL backbone | `soul.list_pending_proposals` MCP tool · `alaya review pending\|accept\|reject` CLI · `reviewer_identity` on review record · Inspector "Pending Proposals" view | new card |
+| **A2** Landed: EventPublisher atomic transaction | `appendManyWithMutation` inside one `connection.transaction()`; 14 callers migrated to sync mutate; closes the race window | `#BL-022` closed |
+| **A3** Landed: Path-axis plasticity loop | New `PathPlasticityService` consumes `MEMORY_USAGE_REPORTED` → emits `PathRelationReinforced/Weakened/Retired` runtime-governance events → `RecallService` factors plasticity into score | new card |
 | **B1** `pi-mono` integration | `packages/engine-gateway` becomes a `pi-mono` client; synthesis / proposal scoring / reflection route through one clean provider boundary | `#BL-008` |
 | **B2** OS keychain support | `keychain:<service>:<account>` secret-ref syntax; macOS Keychain + Linux libsecret adapters (Windows mocked) | `#BL-009` |
-| **C1** File-shape hygiene wave | Landed: protocol `phase-*.ts` files/symbols now use domain names; oversized files are split; `knip` unused-code checking is pinned; `code-map.md` is refreshed | `#BL-017` closed |
+| **C1** Landed: File-shape hygiene wave | protocol `phase-*.ts` files/symbols now use domain names (e.g. `events/runtime-governance.ts`); oversized files are split; `knip` unused-code checking is pinned; `code-map.md` is refreshed | `#BL-017` closed |
 
 Remaining closeout work runs in isolated worktrees with per-card review
 + fix-loop discipline. `main` only sees a card merge when that card's

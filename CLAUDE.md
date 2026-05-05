@@ -11,11 +11,13 @@
 
 ## Project Context
 
-Do-SOUL Alaya is a **local-first memory core for CLI agents**. It is a
-port (not a clean-room rewrite) of the memory plugin system from the
+Do-SOUL Alaya is a **local-first memory plane for CLI agents**. It is
+a port (not a clean-room rewrite) of the memory plugin system from the
 sibling project `do-what-new`. The package namespace is `@do-soul/alaya-*`
 and the consuming agents are Codex, Claude Code, and similar CLI tools
-that attach over MCP or via plain CLI commands.
+that attach over MCP or via plain CLI commands. (Use "memory plane"
+in public-facing copy per invariants §21a; "memory core" was the
+pre-v0.1-closeout phrasing and is retired.)
 
 Important invariants (full set in `docs/handbook/invariants.md`):
 
@@ -28,11 +30,12 @@ Important invariants (full set in `docs/handbook/invariants.md`):
 - LLMs and connected agents propose candidates; Alaya decides durable
   truth.
 - Alaya has **no agent-frontend GUI and no conversation TUI**. Agent
-  surfaces are MCP (for agent attach) and the `alaya` CLI
-  (`doctor / install / attach / detach / status / inspect / tools list /
-  tools call --json / backup / export / import / mcp stdio`). The
-  Memory Inspector is an additional memory-tooling loopback surface,
-  not an agent surface, and never participates in agent control flow.
+  surfaces are MCP (for agent attach) and the `alaya` CLI (12 verbs:
+  `doctor / install / attach / detach / status / inspect / tools list /
+  tools call --json / backup / export / import / mcp stdio /
+  review pending|accept|reject`). The Memory Inspector is an additional
+  memory-tooling loopback surface, not an agent surface, and never
+  participates in agent control flow.
 - Public-facing copy must describe Alaya as a memory plane for CLI
   agents (Codex / Claude Code / similar) and must not invite
   non-engineering users to install or operate Alaya. See

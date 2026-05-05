@@ -413,7 +413,12 @@ export class SqliteProposalRepo implements ProposalRepo {
     `;
     const params: (string | number)[] = [parsedWorkspaceId];
     if (since !== null) {
-      sql += " AND created_at >= ?";
+      // D2 MERGED-I2 (reviewer-I3): exclusive `>` cursor semantics.
+      // HITL pollers pass the timestamp of their most-recent record as
+      // `since`; an inclusive `>=` returns the boundary record on every
+      // subsequent poll. Mirrors A3's deliberate exclusive `>` choice
+      // for usage records (see path-plasticity-runtime.ts docstring).
+      sql += " AND created_at > ?";
       params.push(since);
     }
     sql += " ORDER BY created_at DESC, proposal_id DESC";
