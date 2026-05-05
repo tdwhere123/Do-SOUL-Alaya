@@ -142,10 +142,16 @@ async function normalizeAgentTargets(
 
 function writeHumanSummary(stream: NodeJS.WritableStream, report: StatusReport): void {
   stream.write(`daemon up: ${report.daemon.up ? "yes" : "no"}\n`);
+  stream.write(
+    "memory governance: candidate signals and pending proposals are review inputs; durable memory changes only after accepted proposal apply.\n"
+  );
   for (const trust of report.trust) {
     stream.write(
       `${trust.agent_target}: state=${trust.state} delivered=${trust.delivered_count} used=${trust.used_count} skipped=${trust.skipped_count} not_applicable=${trust.not_applicable_count} unverifiable=${trust.unverifiable_count}\n`
     );
   }
+  stream.write(
+    "trust counters above track delivery/usage evidence and are distinct from pending proposal queue state.\n"
+  );
   stream.write(`garden last pass: ${report.garden.last_pass_at ?? "n/a"}\n`);
 }

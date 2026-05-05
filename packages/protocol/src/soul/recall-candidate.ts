@@ -1,11 +1,42 @@
 import { z } from "zod";
-import { NonEmptyStringSchema, NonNegativeIntSchema } from "../schema-primitives.js";
+import {
+  BOUNDED_DEFAULT_ARRAY_MAX,
+  BoundedLabelSchema,
+  BoundedReasonSchema,
+  NonEmptyStringSchema,
+  NonNegativeIntSchema
+} from "../schema-primitives.js";
 import { ManifestationStateSchema, MemoryDimensionSchema } from "./memory-entry.js";
 import { ScopeClassSchema } from "./object-kind.js";
 
 const recallOriginPlaneValues = ["workspace_local", "global"] as const;
 
 export const RecallOriginPlaneSchema = z.enum(recallOriginPlaneValues);
+
+export const RecallScoreFactorsSchema = z
+  .object({
+    activation: z.number().min(0).max(1),
+    relevance: z.number().min(0).max(1),
+    graph_support: z.number().min(0).max(1).optional(),
+    path_plasticity: z.number().min(0).max(1).optional(),
+    budget_penalty: z.number().min(0).max(1).optional(),
+    embedding_similarity: z.number().min(0).max(1).optional(),
+    conflict_penalty: z.number().min(0).max(1).optional()
+  })
+  .strict()
+  .readonly();
+
+export const RecallBudgetStateSchema = z
+  .object({
+    token_estimate: NonNegativeIntSchema,
+    max_entries: NonNegativeIntSchema,
+    max_total_tokens: NonNegativeIntSchema,
+    remaining_entries: NonNegativeIntSchema.nullable(),
+    remaining_tokens: NonNegativeIntSchema.nullable(),
+    within_budget: z.boolean()
+  })
+  .strict()
+  .readonly();
 
 export const RecallCandidateSchema = z
   .object({
@@ -19,10 +50,16 @@ export const RecallCandidateSchema = z
     dimension: MemoryDimensionSchema,
     scope_class: ScopeClassSchema,
     origin_plane: RecallOriginPlaneSchema.default("workspace_local"),
-    is_advisory: z.boolean().optional()
+    is_advisory: z.boolean().optional(),
+    selection_reason: BoundedReasonSchema.optional(),
+    source_channels: z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+    score_factors: RecallScoreFactorsSchema.optional(),
+    budget_state: RecallBudgetStateSchema.optional()
   })
   .strict()
   .readonly();
 
 export type RecallOriginPlane = z.infer<typeof RecallOriginPlaneSchema>;
+export type RecallScoreFactors = z.infer<typeof RecallScoreFactorsSchema>;
+export type RecallBudgetState = z.infer<typeof RecallBudgetStateSchema>;
 export type RecallCandidate = z.infer<typeof RecallCandidateSchema>;

@@ -33,8 +33,20 @@ describe("mcp memory tool catalog", () => {
     const daemonCatalog = listAlayaMemoryTools();
 
     expect(daemonCatalog.map((tool) => tool.name)).toEqual(soulToolDefs.map((tool) => tool.name));
+    expect(new Set(daemonCatalog.map((tool) => tool.name)).size).toBe(daemonCatalog.length);
     for (const tool of daemonCatalog) {
-      expect(tool.description).toBe(soulToolDefs.find((spec) => spec.name === tool.name)?.description);
+      const providerDescription = soulToolDefs.find((spec) => spec.name === tool.name)?.description;
+      expect(providerDescription).toBeDefined();
+      expect(tool.description.startsWith(`${providerDescription} `)).toBe(true);
     }
+    expect(daemonCatalog.find((tool) => tool.name === "soul.propose_memory_update")?.description).toContain(
+      "pending proposal"
+    );
+    expect(daemonCatalog.find((tool) => tool.name === "soul.review_memory_proposal")?.description).toContain(
+      "accept triggers apply"
+    );
+    expect(daemonCatalog.find((tool) => tool.name === "soul.list_pending_proposals")?.description).toContain(
+      "not durable memory writes"
+    );
   });
 });

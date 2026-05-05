@@ -103,6 +103,21 @@ governance/recall decision is wrong, override it for this session".
 **HITL** — Human-In-The-Loop. High-risk candidates require explicit
 human approval before promotion to durable memory.
 
+**Candidate Signal** — An explicit runtime signal (`soul.emit_candidate_signal`)
+that marks memory relevance for follow-up processing. It is not durable
+memory and does not bypass governance.
+
+**Proposal** — A structured governance request
+(`soul.propose_memory_update`) that asks a reviewer to approve a
+controlled durable memory update.
+
+**Accepted Proposal** — A proposal that has passed review/governance
+and is authorized for promotion application.
+
+**Durable Memory Application** — The audited state transition that
+materializes an accepted proposal into durable memory records. This is
+the durable boundary; earlier steps are advisory.
+
 **Reviewer Identity Trio** *(Alaya v0.1 audit-trail vocabulary)* —
 Three actor-shaped fields appear on review-related rows and they are
 NOT interchangeable:
@@ -145,10 +160,18 @@ pack to this agent at this time".
 **UsageProofRecord** — Audit row: "the agent emitted explicit proof of
 how it used the delivered context".
 
+**Recall Delivery** — Runtime action where Alaya returns recall/context
+to an attached agent over MCP/CLI contract surfaces.
+
+**Usage Receipt** — Runtime-recorded usage acknowledgment
+(`soul.report_context_usage`) linked to prior recall delivery. Receipt
+evidences usage reporting, not automatic durable promotion.
+
 ## Surface
 
-**MCP Surface** — Alaya's primary outward surface. Tools / resources /
-prompts exposed via Model Context Protocol.
+**MCP Surface** — Alaya's primary outward surface. Alaya exposes
+first-party memory tools only; it does not expose MCP prompts or
+resources in v0.1.
 
 **CLI Fallback** — Plain command-line fallback that shares the same
 runtime contract as MCP. Tested for parity.

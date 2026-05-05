@@ -167,11 +167,13 @@ function createReviewHandler(): McpMemoryToolHandler {
         proposal: storedProposal,
         workspace_id: "ws1",
         run_id: null,
-        reviewer_assignment: { reviewer_identity: "user:server-reviewer" }
+        reviewer_assignment: { reviewer_identity: "user:server-reviewer" },
+        proposed_changes: { content: "approved locally" }
       }),
       findPendingSummaries: async () => [],
-      updatePendingResolutionWithEvents: async (_proposalId, state, updatedAt, events, options) => {
+      acceptPendingMemoryUpdateWithEvents: async (_proposalId, updatedAt, events, memoryUpdate, options) => {
         expect(options?.reviewerIdentity).toBe("user:server-reviewer");
+        expect(memoryUpdate.caused_by).toBe(`proposal_accept:${proposal.proposal_id}`);
         expect(events.map((event) => event.caused_by)).toEqual([
           "user:server-reviewer",
           "user:server-reviewer",
@@ -179,7 +181,7 @@ function createReviewHandler(): McpMemoryToolHandler {
         ]);
         storedProposal = {
           ...storedProposal,
-          resolution_state: state,
+          resolution_state: "accepted",
           last_updated_at: updatedAt
         };
         return {
@@ -191,9 +193,17 @@ function createReviewHandler(): McpMemoryToolHandler {
             revision: index + 1
           }))
         };
+      },
+      updatePendingResolutionWithEvents: async () => {
+        throw new Error("reject path not exercised in this test");
       }
     },
-    runtimeNotifier: { notifyEntry: async () => {} }
+    runtimeNotifier: { notifyEntry: async () => {} },
+    memoryService: {
+      findByIdScoped: async (objectId: string) => ({ object_id: objectId }),
+      validateUpdate: async () => {},
+      update: async (objectId: string, fields) => createParityMemoryEntry({ object_id: objectId, ...fields })
+    }
   });
 
   return createMcpMemoryToolHandler({
@@ -227,7 +237,9 @@ function createBaseDeps(): Omit<McpMemoryToolHandlerDependencies, "proposalWorkf
     },
     memoryService: {
       findById: async () => null,
-      findByIdScoped: async () => null
+      findByIdScoped: async () => null,
+      validateUpdate: async () => {},
+      update: async (_objectId, fields) => createParityMemoryEntry(fields)
     },
     signalService: {
       receiveSignal: async (signal: CandidateMemorySignal) => ({ signal })
@@ -288,6 +300,41 @@ function createProposal(): Proposal {
     ],
     resolution_state: ProposalResolutionState.PENDING,
     last_updated_at: "2026-04-30T00:00:00.000Z"
+  };
+}
+
+function createParityMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
+  return {
+    object_id: "mem-1",
+    object_kind: "memory_entry",
+    schema_version: 1,
+    lifecycle_state: "active",
+    created_at: "2026-04-30T00:00:00.000Z",
+    updated_at: "2026-04-30T00:00:00.000Z",
+    created_by: "test",
+    dimension: "preference",
+    source_kind: "user",
+    formation_kind: "explicit",
+    scope_class: "project",
+    content: "approved locally",
+    domain_tags: [],
+    evidence_refs: [],
+    workspace_id: "ws1",
+    run_id: null,
+    surface_id: null,
+    storage_tier: "hot",
+    activation_score: 0.9,
+    retention_score: 0.9,
+    manifestation_state: "excerpt",
+    retention_state: "working",
+    decay_profile: "stable",
+    confidence: 1,
+    last_used_at: null,
+    last_hit_at: null,
+    reinforcement_count: 0,
+    contradiction_count: 0,
+    superseded_by: null,
+    ...overrides
   };
 }
 

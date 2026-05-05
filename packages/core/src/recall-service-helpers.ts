@@ -111,12 +111,34 @@ export function applySimilarityBoost(
     return candidate;
   }
 
+  const normalizedSimilarity = clamp01(similarityHint.normalized_similarity);
+  const relevanceScore = clamp01(
+    candidate.relevance_score +
+      normalizedSimilarity * EMBEDDING_SIMILARITY_WEIGHT
+  );
+  const previousFactors = candidate.score_factors ?? {
+    activation: candidate.activation_score,
+    relevance: candidate.relevance_score
+  };
+  const sourceChannels = new Set(candidate.source_channels ?? [
+    "ranked_recall",
+    candidate.origin_plane
+  ]);
+  sourceChannels.add("semantic_supplement");
+
   return RecallCandidateSchema.parse({
     ...candidate,
-    relevance_score: clamp01(
-      candidate.relevance_score +
-        clamp01(similarityHint.normalized_similarity) * EMBEDDING_SIMILARITY_WEIGHT
-    )
+    relevance_score: relevanceScore,
+    score_factors: {
+      ...previousFactors,
+      relevance: relevanceScore,
+      embedding_similarity: normalizedSimilarity
+    },
+    source_channels: [...sourceChannels],
+    selection_reason:
+      candidate.selection_reason === undefined
+        ? undefined
+        : `${candidate.selection_reason.replace(/\.$/, "")}; embedding similarity ${normalizedSimilarity.toFixed(3)}.`
   });
 }
 

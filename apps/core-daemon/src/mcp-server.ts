@@ -25,6 +25,13 @@ export interface AlayaMcpStdioServer {
   close(): Promise<void>;
 }
 
+export const ALAYA_MCP_SERVER_INSTRUCTIONS = [
+  "This MCP server exposes tools only (no prompts, no resources).",
+  "Use the soul.* memory tools as a governed loop: recall -> open pointer -> respond -> report usage.",
+  "When new durable memory may be needed, emit candidate signals first, then propose updates for review.",
+  "Durable memory mutates only through accepted proposal apply; rejected proposals do not mutate durable memory."
+].join(" ");
+
 export function createAlayaMcpServer(options: AlayaMcpServerOptions): Server {
   const tools = options.tools ?? listAlayaMemoryTools();
   const server = new Server(
@@ -36,7 +43,7 @@ export function createAlayaMcpServer(options: AlayaMcpServerOptions): Server {
       capabilities: {
         tools: {}
       },
-      instructions: "Use the soul.* memory tools for Alaya memory recall, pointer open, proposals, overrides, graph exploration, and usage proof."
+      instructions: ALAYA_MCP_SERVER_INSTRUCTIONS
     }
   );
 

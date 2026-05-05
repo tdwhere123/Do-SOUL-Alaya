@@ -55,4 +55,48 @@ describe("Recall candidate protocol schema", () => {
 
     expect(() => RecallOriginPlaneSchema.parse("remote")).toThrow();
   });
+
+  it("accepts optional stable explainability metadata", () => {
+    expect(
+      RecallCandidateSchema.parse({
+        object_id: "memory-3",
+        object_kind: "memory_entry",
+        activation_score: 0.7,
+        relevance_score: 0.64,
+        content_preview: "Report recall usage after using memory.",
+        token_estimate: 7,
+        manifestation: "excerpt",
+        dimension: MemoryDimension.PROCEDURE,
+        scope_class: ScopeClass.PROJECT,
+        selection_reason: "Selected by lexical and activation ranking.",
+        source_channels: ["workspace_local", "keyword"],
+        score_factors: {
+          activation: 0.7,
+          relevance: 0.64,
+          graph_support: 0,
+          path_plasticity: 0,
+          budget_penalty: 0
+        },
+        budget_state: {
+          token_estimate: 7,
+          max_entries: 5,
+          max_total_tokens: 2000,
+          remaining_entries: 4,
+          remaining_tokens: 1993,
+          within_budget: true
+        }
+      })
+    ).toMatchObject({
+      selection_reason: "Selected by lexical and activation ranking.",
+      source_channels: ["workspace_local", "keyword"],
+      score_factors: {
+        activation: 0.7,
+        relevance: 0.64
+      },
+      budget_state: {
+        token_estimate: 7,
+        within_budget: true
+      }
+    });
+  });
 });

@@ -60,6 +60,7 @@ export {
 } from "./repos/claim-form-repo.js";
 export {
   SqliteProposalRepo,
+  type AcceptedMemoryUpdateInput,
   type ProposalCreateInput,
   type ProposalResolutionEventInput,
   type ProposalRepo

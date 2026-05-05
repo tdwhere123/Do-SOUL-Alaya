@@ -34,6 +34,7 @@ describe("alaya review (A1)", () => {
               target_object_kind: "memory_entry",
               created_at: "2026-04-30T00:00:00.000Z",
               proposed_change_summary: "Switch to pnpm",
+              proposed_changes: { content: "Use pnpm for workspace commands." },
               assigned_reviewer_identity: "user:local-reviewer",
               assigned_at: "2026-04-30T00:00:00.000Z",
               deadline_at: null,
@@ -57,6 +58,9 @@ describe("alaya review (A1)", () => {
     const result = await command.handler(createContext({ stdout }), parsed.data);
     expect(result.exitCode).toBe(ALAYA_SYSEXITS.OK);
     const output = stdoutChunks.join("");
+    expect(output).toContain(
+      "proposal_id\ttarget_kind\ttarget_id\tcreated_at\treviewer\tdeadline\tqueue_state\tchange_summary\tproposed_changes"
+    );
     expect(output).toContain("prop-1");
     expect(output).toContain("user:local-reviewer\t-\topen");
     // A1 fix-loop (finding-2): workspace_id no longer in the request
@@ -107,8 +111,12 @@ describe("alaya review (A1)", () => {
       handler: handlerWithReview,
       defaultWorkspaceId: "ws1"
     });
-    const acceptResult = await acceptCommand.handler(createContext({}), acceptCall.data);
+    const acceptStdout = new PassThrough();
+    const acceptStdoutChunks: string[] = [];
+    acceptStdout.on("data", (chunk) => acceptStdoutChunks.push(chunk.toString()));
+    const acceptResult = await acceptCommand.handler(createContext({ stdout: acceptStdout }), acceptCall.data);
     expect(acceptResult.exitCode).toBe(ALAYA_SYSEXITS.OK);
+    expect(acceptStdoutChunks.join("")).toContain("durable_apply=applied");
     expect(handlerWithReview.call).toHaveBeenCalledWith(
       expect.objectContaining({
         toolName: "soul.review_memory_proposal",
@@ -182,6 +190,7 @@ describe("alaya review (A1)", () => {
     const proposal = createProposal();
     let storedProposal = proposal;
     let updateCalls = 0;
+    const updateMemory = vi.fn(async () => ({ object_id: "mem1" }));
     const workflow = createMcpMemoryProposalWorkflow({
       now: () => "2026-04-30T00:00:00.000Z",
       generateObjectId: () => proposal.proposal_id,
@@ -200,15 +209,21 @@ describe("alaya review (A1)", () => {
         findScopedById: async () => ({
           proposal: storedProposal,
           workspace_id: "ws1",
-          run_id: "run-from-agent"
+          run_id: "run-from-agent",
+          target_object_id: "mem1",
+          proposed_changes: { content: "approved update" }
         }),
         findPendingSummaries: async () => [],
-        updatePendingResolutionWithEvents: async (_proposalId, state, updatedAt, events, options) => {
+        updatePendingResolutionWithEvents: async () => {
+          throw new Error("reject path not exercised in this test");
+        },
+        acceptPendingMemoryUpdateWithEvents: async (_proposalId, updatedAt, events, memoryUpdate, options) => {
           updateCalls += 1;
           expect(options?.reviewerIdentity).toBe("user:alice");
+          expect(memoryUpdate.caused_by).toBe(`proposal_accept:${proposal.proposal_id}`);
           storedProposal = {
             ...storedProposal,
-            resolution_state: state,
+            resolution_state: ProposalResolutionState.ACCEPTED,
             last_updated_at: updatedAt
           };
           return {
@@ -221,6 +236,11 @@ describe("alaya review (A1)", () => {
             }))
           };
         }
+      },
+      memoryService: {
+        findByIdScoped: async () => ({ object_id: "mem1" }),
+        validateUpdate: async () => {},
+        update: updateMemory
       },
       runtimeNotifier: { notifyEntry: async () => {} }
     });
@@ -270,6 +290,7 @@ describe("alaya review (A1)", () => {
 
     expect(result.exitCode).toBe(ALAYA_SYSEXITS.OK);
     expect(updateCalls).toBe(1);
+    expect(updateMemory).not.toHaveBeenCalled();
     expect(handler.call).toHaveBeenCalledWith(
       expect.objectContaining({
         context: expect.objectContaining({

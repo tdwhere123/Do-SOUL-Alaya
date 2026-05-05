@@ -146,11 +146,12 @@ export const PROFILE_MUTATION_CONFIRM_PROMPT = "Apply profile mutation changes? 
 export const PUBLIC_SOUL_TOOL_NAMES = Object.freeze(soulToolDefs.map((toolDef) => toolDef.name));
 
 export const ALAYA_OPERATOR_INSTRUCTIONS = [
+  "This server is tools-only for soul.* memory operations; do not expect MCP prompts/resources.",
   `Use only these public SOUL memory tools: ${PUBLIC_SOUL_TOOL_NAMES.join(", ")}.`,
-  "Call soul.recall before memory-sensitive work.",
-  "Use soul.open_pointer before citing recalled evidence.",
-  "Create new memory only through soul.emit_candidate_signal or soul.propose_memory_update.",
-  "Report delivery usage with soul.report_context_usage."
+  "Agent loop: soul.recall -> soul.open_pointer -> respond -> soul.report_context_usage.",
+  "When you detect possible durable memory, call soul.emit_candidate_signal first; signal emission is candidate-only and not durable by itself.",
+  "For durable edits, call soul.propose_memory_update, then soul.list_pending_proposals and soul.review_memory_proposal with explicit reviewer approval.",
+  "Accepted proposals trigger durable-memory apply; rejected proposals keep durable memory unchanged."
 ].join(" ");
 
 export async function buildAttachProfileMutationPlan(

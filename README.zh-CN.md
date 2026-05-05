@@ -125,10 +125,10 @@ triage（分诊）步骤决定它的去向：低置信度 + 无证据 → 暂缓
 么任何"流畅但错"的断言都会变成事实。模型的自信，就成了系统的真
 相模型。
 
-**设计选择。** 信号即 proposal，不是 fact。把分诊放在边界，而不
-是放到召回时再去补救。信号本身在 **Runtime Control 层** 是持久
-的；本体真相（Memory Ontology 层 / Object · Evidence 轴）在后
-续阶段同意之前完全不动。
+**设计选择。** 信号是 candidate input，不是 proposal，也不是
+fact。把分诊放在边界，而不是放到召回时再去补救。信号本身在
+**Runtime Control 层** 是持久的；本体真相（Memory Ontology 层 /
+Object · Evidence 轴）在后续阶段同意之前完全不动。
 
 *代码锚点：* `packages/core/src/signal-service.ts:80-130`、
 `packages/core/src/signal-service.ts:270-283`（分诊门）。
@@ -138,8 +138,9 @@ triage（分诊）步骤决定它的去向：低置信度 + 无证据 → 暂缓
 **这一步在做什么。** 经过分诊的信号可以变成 `Proposal`，状态为
 `PENDING`。Reviewer（一个被人指示去复审的 agent，或脚本化的角
 色）调用 `soul.review_memory_proposal`，给出 `accept` 或
-`reject`。Accept 会级联到 Synthesis 晋升、Claim 激活、以及对受
-影响 object 的 karma 记录。
+`reject`。Accept 会把已接受的 `proposed_changes` 交给受控的
+durable memory service 去应用，并留下 EventLog / proposal 审计
+链；Reject 只记录裁决，不触碰 durable memory。
 
 **这一步不这么做会出什么问题。** *"agent 说的"* 不是治理论据。
 没有显式的 accept 步骤，每一次修改都会变成静默 merge。
@@ -161,8 +162,9 @@ MCP / Inspector HTTP / CLI 三条 review 路径的 parity。完整团队
 quorum 和 escalation 产品流不属于 v0.1 local-first closeout。
 
 *代码锚点：*
-`apps/core-daemon/src/mcp-memory-proposal-workflow.ts:90-248`、
-`packages/core/src/proposal-service.ts:218-317`。
+`apps/core-daemon/src/mcp-memory-proposal-workflow.ts`、
+`packages/core/src/memory-service.ts`、
+`packages/storage/src/migrations/063-proposal-memory-update-patch.sql`。
 
 ### 3. 沉淀 (Durability)
 
@@ -203,8 +205,11 @@ revision)` 唯一索引仍然保留作为兜底，但已不再是承载 invarian
 3. **Fine assessment（精排）** —— 预算感知的加权排序：`activation × base + relevance + graph support − budget penalty − conflict penalty`。
 4. **Embedding 补充** —— **只做加性 boost，不能 override**。
 
-Agent 收到的是 `delivery_id` 加结果项 + pointers；内部的
-`ContextPack` 投影留在 Alaya 内部，不外送。
+Agent 收到的是 `delivery_id` 加结果项 + pointers，以及稳定的解释
+字段：`selection_reason`、`source_channels`、`score_factors`、
+`budget_state`、响应级别的 `strategy_mix` 和可选
+`degradation_reason`。内部的 `ContextPack` 投影留在 Alaya 内部，
+不外送。
 
 **这一步不这么做会出什么问题。** 任何 agent-memory 系统最诱人的
 失败方式，就是让 embedding 决定真相。余弦距离很流畅、很自信，而
@@ -470,6 +475,8 @@ pnpm alaya tools call soul.recall \
   '{"query":"hello","scope_class":null,"dimension":null,"domain_tags":null,"max_results":5}' \
   --json
 #   期望：{ "delivery_id": "...", "results": [...], "total_count": <int> }
+#   每条 result 带 selection_reason/source_channels/score_factors/budget_state；
+#   response 带 strategy_mix 和可选 degradation_reason。
 ```
 
 走完第 7 步，agent 下次启动就会把 Alaya 当 MCP server 看，9 个
@@ -548,8 +555,11 @@ full verification 也已通过。
 
 那时候要继续拽的线头：
 
-- **Provider 和 benchmark 集成** —— pi-mono 作为 provider 边界，
-  再加可重复的 benchmark fixtures。
+- **MCP Agent-Use Protocol 加固** —— 把 attach/profile/server 到
+  memory tools 的操作路径写成单一真相。
+- **Trustworthy Memory Loop 加固** —— 明确并固化这条序列：
+  candidate signal -> proposal -> accepted proposal -> durable memory
+  application -> recall delivery -> usage receipt。
 - **Embedding 策略调优** —— 保持"补充而非裁判"；做实验：boost
   权重、补充上限、按 domain 标定。
 - **召回预算成形** —— 让 budget penalty 的衰减计划反映 agent
@@ -557,7 +567,9 @@ full verification 也已通过。
 
 Gate-5F（不是 v0.2）负责 closeout backlog `#BL-025` 到
 `#BL-036`。它位于 Gate-5 之后、Phase 6 之前；Gate-5F 已经通过，
-Phase 6 仍然是 not-started。
+Phase 6 现在是 MCP agent-use proof wave（MCP Agent-Use Protocol +
+Trustworthy Memory Loop），不再把
+benchmark 作为 active acceptance。
 
 具体 Gate-5F closeout 卡（关闭证据见
 `docs/handbook/backlog.md` 和

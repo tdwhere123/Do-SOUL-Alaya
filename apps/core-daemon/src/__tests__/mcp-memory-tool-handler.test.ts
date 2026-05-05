@@ -226,7 +226,8 @@ function createDeps(): McpMemoryToolHandlerDependencies {
       findByIdScoped: vi.fn(async (_objectId: string, workspaceId: string) => {
         const entry = createMemory();
         return entry.workspace_id === workspaceId ? entry : null;
-      })
+      }),
+      update: vi.fn(async (_objectId, fields) => createMemory(fields))
     },
     signalService: {
       receiveSignal: vi.fn(async (signal: CandidateMemorySignal) => ({ signal }))

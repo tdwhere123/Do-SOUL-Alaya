@@ -33,7 +33,7 @@ export interface AlayaMemoryToolDefinition {
   }>;
 }
 
-const descriptionByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.freeze({
+const providerBaseDescriptionByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.freeze({
   "soul.recall":
     "Recall relevant durable memory for the current task. Returns ranked candidates, evidence pointers, and a delivery id for later usage proof.",
   "soul.open_pointer":
@@ -52,6 +52,39 @@ const descriptionByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.
     "Inspect one-hop memory graph neighbors for an existing memory entry. Read-only; does not create or mutate edges.",
   "soul.report_context_usage":
     "Report whether recalled context for a delivery was used, skipped, or not applicable. Supports delivered-vs-used trust state."
+});
+
+const loopSuffixByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.freeze({
+  "soul.recall":
+    "Start memory-sensitive turns here; use the returned delivery_id later in soul.report_context_usage.",
+  "soul.open_pointer":
+    "Use this before citing memory content so evidence is grounded in retrieved objects.",
+  "soul.emit_candidate_signal":
+    "This records candidate intent only; it does not create or mutate durable memory entries.",
+  "soul.propose_memory_update":
+    "This creates a pending proposal for governance; durable memory remains unchanged until acceptance apply.",
+  "soul.review_memory_proposal":
+    "Use only after listing pending proposals and obtaining explicit reviewer approval; accept triggers apply, reject preserves memory as-is.",
+  "soul.list_pending_proposals":
+    "Review queues represent governance state only; pending items are not durable memory writes.",
+  "soul.apply_override":
+    "Session-only correction for the current run; it does not promote durable memory by itself.",
+  "soul.explore_graph":
+    "Inspection aid for related memories; keep write actions on proposal/candidate tools.",
+  "soul.report_context_usage":
+    "Close the delivery loop by marking used/skipped/not_applicable so trust state stays explicit."
+});
+
+const descriptionByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.freeze({
+  "soul.recall": `${providerBaseDescriptionByName["soul.recall"]} ${loopSuffixByName["soul.recall"]}`,
+  "soul.open_pointer": `${providerBaseDescriptionByName["soul.open_pointer"]} ${loopSuffixByName["soul.open_pointer"]}`,
+  "soul.emit_candidate_signal": `${providerBaseDescriptionByName["soul.emit_candidate_signal"]} ${loopSuffixByName["soul.emit_candidate_signal"]}`,
+  "soul.propose_memory_update": `${providerBaseDescriptionByName["soul.propose_memory_update"]} ${loopSuffixByName["soul.propose_memory_update"]}`,
+  "soul.review_memory_proposal": `${providerBaseDescriptionByName["soul.review_memory_proposal"]} ${loopSuffixByName["soul.review_memory_proposal"]}`,
+  "soul.list_pending_proposals": `${providerBaseDescriptionByName["soul.list_pending_proposals"]} ${loopSuffixByName["soul.list_pending_proposals"]}`,
+  "soul.apply_override": `${providerBaseDescriptionByName["soul.apply_override"]} ${loopSuffixByName["soul.apply_override"]}`,
+  "soul.explore_graph": `${providerBaseDescriptionByName["soul.explore_graph"]} ${loopSuffixByName["soul.explore_graph"]}`,
+  "soul.report_context_usage": `${providerBaseDescriptionByName["soul.report_context_usage"]} ${loopSuffixByName["soul.report_context_usage"]}`
 });
 
 const readOnlyAnnotation = Object.freeze({

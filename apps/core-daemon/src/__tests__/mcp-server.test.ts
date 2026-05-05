@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  ALAYA_MCP_SERVER_INSTRUCTIONS,
   callAlayaMcpMemoryTool,
+  createAlayaMcpServer,
   createAlayaMcpToolsResult
 } from "../mcp-server.js";
 import type { McpMemoryToolHandler } from "../mcp-memory-tool-handler.js";
@@ -63,5 +65,25 @@ describe("mcp server", () => {
       ok: false,
       error: { code: "UNKNOWN_TOOL" }
     });
+  });
+
+  it("pins tools-only MCP server instructions for the full memory loop", () => {
+    const handler: McpMemoryToolHandler = {
+      call: async () => ({
+        ok: true,
+        tool_name: "soul.recall",
+        output: { delivery_id: "d1", results: [], total_count: 0 }
+      })
+    };
+    createAlayaMcpServer({
+      memoryToolHandler: handler,
+      contextProvider: () => ({ workspaceId: "ws1", runId: null, agentTarget: "codex" })
+    });
+
+    expect(ALAYA_MCP_SERVER_INSTRUCTIONS).toContain("tools only");
+    expect(ALAYA_MCP_SERVER_INSTRUCTIONS).toContain("no prompts, no resources");
+    expect(ALAYA_MCP_SERVER_INSTRUCTIONS).toContain("recall -> open pointer");
+    expect(ALAYA_MCP_SERVER_INSTRUCTIONS).toContain("candidate signals");
+    expect(ALAYA_MCP_SERVER_INSTRUCTIONS).toContain("accepted proposal apply");
   });
 });

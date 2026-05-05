@@ -1,6 +1,7 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import {
   ControlPlaneObjectKind,
+  PublicMemoryEntryMutableFieldsSchema,
   NonEmptyStringSchema,
   MemoryGovernanceEventType,
   ProposalOptionKind,
@@ -12,6 +13,7 @@ import {
   SoulReviewCompletedPayloadSchema,
   SoulReviewCreatedPayloadSchema,
   TransitionCausedBy,
+  type MemoryEntryMutableFields,
   type EventLogEntry,
   type Proposal,
   type SoulListPendingProposalsRequest,
@@ -38,6 +40,7 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     readonly workspace_id: string;
     readonly run_id: string | null;
     readonly target_object_kind?: string;
+    readonly proposed_changes?: MemoryEntryMutableFields | null;
     readonly proposed_change_summary?: string;
     readonly created_at?: string;
   }): Promise<Readonly<Proposal>>;
@@ -47,6 +50,7 @@ export interface McpMemoryProposalWorkflowProposalRepo {
       readonly workspace_id: string;
       readonly run_id: string | null;
       readonly target_object_kind?: string;
+      readonly proposed_changes?: MemoryEntryMutableFields | null;
       readonly proposed_change_summary?: string;
       readonly created_at?: string;
     },
@@ -74,6 +78,11 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     // test fakes that omit it remain compatible via the optional shape.
     readonly reviewer_identity?: string | null;
     readonly reviewer_assignment?: Readonly<{ readonly reviewer_identity: string }> | null;
+    // Phase 6 MCP/runtime patch is expected to add durable apply context.
+    // Keep optional for compatibility with legacy storage fakes; accept
+    // path returns NEEDS_CONTEXT when unavailable.
+    readonly target_object_id?: string | null;
+    readonly proposed_changes?: Readonly<MemoryEntryMutableFields> | null;
   }> | null>;
   // A1 (HITL daemon backbone) — pending-queue projection. The repo
   // already enforces workspace scoping; the workflow simply forwards
@@ -86,6 +95,22 @@ export interface McpMemoryProposalWorkflowProposalRepo {
       readonly now?: string;
     }
   ): Promise<readonly Readonly<SoulPendingProposalSummary>[]>;
+  acceptPendingMemoryUpdateWithEvents?(
+    proposalId: string,
+    updatedAt: string,
+    events: readonly ProposalResolutionEventInput[],
+    memoryUpdate: {
+      readonly target_object_id: string;
+      readonly workspace_id: string;
+      readonly proposed_changes: MemoryEntryMutableFields;
+      readonly updated_at: string;
+      readonly caused_by: string;
+    },
+    options?: { readonly reviewerIdentity?: string }
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly events: readonly EventLogEntry[];
+  }>>;
   updatePendingResolutionWithEvents(
     proposalId: string,
     state: Proposal["resolution_state"],
@@ -111,6 +136,21 @@ export interface McpMemoryProposalWorkflowDependencies {
   readonly eventLogRepo: McpMemoryProposalWorkflowEventLogRepo;
   readonly proposalRepo: McpMemoryProposalWorkflowProposalRepo;
   readonly runtimeNotifier: McpMemoryProposalWorkflowRuntimeNotifier;
+  readonly memoryService?: Readonly<{
+    findByIdScoped(
+      objectId: string,
+      workspaceId: string
+    ): Promise<Readonly<{ readonly object_id: string }> | null>;
+    update(
+      objectId: string,
+      fields: MemoryEntryMutableFields,
+      reason: string
+    ): Promise<Readonly<{ readonly object_id: string }>>;
+    validateUpdate?(
+      objectId: string,
+      fields: MemoryEntryMutableFields
+    ): Promise<void>;
+  }>;
   readonly reviewerIdentityBinding?: ReviewerIdentityBinding;
   readonly now?: () => string;
   readonly generateObjectId?: () => string;
@@ -196,6 +236,7 @@ export function createMcpMemoryProposalWorkflow(
         // The MCP-driven proposeMemoryUpdate path always targets memory
         // entries; the reason text is the agent-supplied change summary.
         target_object_kind: "memory_entry",
+        proposed_changes: input.proposed_changes,
         proposed_change_summary: input.reason,
         created_at: timestamp
       },
@@ -222,6 +263,7 @@ export function createMcpMemoryProposalWorkflow(
       throw createWorkflowError("VALIDATION", `Proposal is already ${proposal.resolution_state}`);
     }
 
+    assertReviewCallerIsAllowed(context, deps.reviewerIdentityBinding);
     const reviewerIdentity = resolveReviewerIdentity(input, deps.reviewerIdentityBinding);
     assertReviewerAssignment(scopedProposal, reviewerIdentity);
     const reviewedAt = now();
@@ -229,6 +271,10 @@ export function createMcpMemoryProposalWorkflow(
       input.verdict === "accept"
         ? ProposalResolutionState.ACCEPTED
         : ProposalResolutionState.REJECTED;
+    const acceptedMemoryUpdate =
+      input.verdict === "accept"
+        ? await prepareAcceptedProposalApply(scopedProposal, context)
+        : undefined;
     // A1 (HITL daemon backbone) — review-related event_log rows record
     // reviewer_identity in caused_by so the audit trail names the human
     // (or principal) who approved/rejected, not just the surface that
@@ -296,13 +342,22 @@ export function createMcpMemoryProposalWorkflow(
     }>;
 
     try {
-      resolved = await deps.proposalRepo.updatePendingResolutionWithEvents(
-        proposal.proposal_id,
-        toState,
-        reviewedAt,
-        reviewEvents,
-        { reviewerIdentity }
-      );
+      resolved =
+        acceptedMemoryUpdate === undefined
+          ? await deps.proposalRepo.updatePendingResolutionWithEvents(
+              proposal.proposal_id,
+              toState,
+              reviewedAt,
+              reviewEvents,
+              { reviewerIdentity }
+            )
+          : await acceptProposalWithDurableMemoryUpdate(
+              proposal.proposal_id,
+              reviewedAt,
+              reviewEvents,
+              acceptedMemoryUpdate,
+              reviewerIdentity
+            );
     } catch (error) {
       throw normalizeResolutionError(error);
     }
@@ -337,6 +392,87 @@ export function createMcpMemoryProposalWorkflow(
     };
   }
 
+  async function prepareAcceptedProposalApply(
+    scopedProposal: Readonly<{
+      readonly proposal: Readonly<Proposal>;
+      readonly workspace_id: string;
+      readonly target_object_id?: string | null;
+      readonly proposed_changes?: Readonly<MemoryEntryMutableFields> | null;
+    }>,
+    context: McpMemoryToolCallContext
+  ): Promise<Readonly<{
+    readonly target_object_id: string;
+    readonly workspace_id: string;
+    readonly proposed_changes: MemoryEntryMutableFields;
+    readonly caused_by: string;
+  }>> {
+    const memoryService = deps.memoryService;
+    if (memoryService === undefined) {
+      throw createWorkflowError(
+        "NEEDS_CONTEXT",
+        "Memory apply port is unavailable; wire memoryService into MCP proposal workflow."
+      );
+    }
+
+    const proposalId = scopedProposal.proposal.proposal_id;
+    const targetObjectId = resolveProposalTargetObjectId(scopedProposal, proposalId);
+    const proposedChanges = resolveProposalChanges(scopedProposal, proposalId);
+    const scopedTarget = await memoryService.findByIdScoped(targetObjectId, context.workspaceId);
+    if (scopedTarget === null) {
+      throw createWorkflowError(
+        "NOT_FOUND",
+        `Target memory object not found in workspace: ${targetObjectId}`
+      );
+    }
+    if (memoryService.validateUpdate === undefined) {
+      throw createWorkflowError(
+        "NEEDS_CONTEXT",
+        "Memory update validation port is unavailable; wire MemoryService.validateUpdate into MCP proposal workflow."
+      );
+    }
+    await memoryService.validateUpdate(targetObjectId, proposedChanges);
+
+    return {
+      target_object_id: targetObjectId,
+      workspace_id: context.workspaceId,
+      proposed_changes: proposedChanges,
+      caused_by: `proposal_accept:${proposalId}`
+    };
+  }
+
+  async function acceptProposalWithDurableMemoryUpdate(
+    proposalId: string,
+    reviewedAt: string,
+    reviewEvents: readonly ProposalResolutionEventInput[],
+    memoryUpdate: Readonly<{
+      readonly target_object_id: string;
+      readonly workspace_id: string;
+      readonly proposed_changes: MemoryEntryMutableFields;
+      readonly caused_by: string;
+    }>,
+    reviewerIdentity: string
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly events: readonly EventLogEntry[];
+  }>> {
+    if (deps.proposalRepo.acceptPendingMemoryUpdateWithEvents === undefined) {
+      throw createWorkflowError(
+        "NEEDS_CONTEXT",
+        "Atomic proposal accept + memory apply port is unavailable."
+      );
+    }
+
+    return await deps.proposalRepo.acceptPendingMemoryUpdateWithEvents(
+      proposalId,
+      reviewedAt,
+      reviewEvents,
+      {
+        ...memoryUpdate,
+        updated_at: reviewedAt
+      },
+      { reviewerIdentity }
+    );
+  }
 }
 
 /**
@@ -350,6 +486,20 @@ const HUMAN_REVIEWER_AGENT_TARGETS: ReadonlySet<string> = new Set([
   "inspector",
   "cli"
 ]);
+
+function assertReviewCallerIsAllowed(
+  context: McpMemoryToolCallContext,
+  binding: ReviewerIdentityBinding | undefined
+): void {
+  if (binding !== undefined || HUMAN_REVIEWER_AGENT_TARGETS.has(context.agentTarget)) {
+    return;
+  }
+
+  throw createWorkflowError(
+    "VALIDATION",
+    "Review requires a human reviewer surface (Inspector/alaya review) or a configured reviewer token."
+  );
+}
 
 function resolveReviewerIdentity(
   input: SoulReviewMemoryProposalRequest,
@@ -436,14 +586,52 @@ function assertProposalContext(
   }
 }
 
-function createWorkflowError(code: "NOT_FOUND" | "VALIDATION", message: string): Error & { readonly code: string } {
+function createWorkflowError(
+  code: "NOT_FOUND" | "VALIDATION" | "NEEDS_CONTEXT",
+  message: string
+): Error & { readonly code: string } {
   const error = new Error(message) as Error & { code: string };
   error.code = code;
   return error;
 }
 
+function resolveProposalTargetObjectId(
+  scopedProposal: Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly target_object_id?: string | null;
+  }>,
+  proposalId: string
+): string {
+  const targetObjectId = scopedProposal.target_object_id ?? scopedProposal.proposal.derived_from;
+  if (targetObjectId === null || targetObjectId === undefined || targetObjectId.trim().length === 0) {
+    throw createWorkflowError(
+      "NEEDS_CONTEXT",
+      `Proposal ${proposalId} is missing target_object_id/derived_from for accept-as-apply.`
+    );
+  }
+  return NonEmptyStringSchema.parse(targetObjectId);
+}
+
+function resolveProposalChanges(
+  scopedProposal: Readonly<{
+    readonly proposed_changes?: Readonly<MemoryEntryMutableFields> | null;
+  }>,
+  proposalId: string
+): MemoryEntryMutableFields {
+  if (scopedProposal.proposed_changes === undefined || scopedProposal.proposed_changes === null) {
+    throw createWorkflowError(
+      "NEEDS_CONTEXT",
+      `Proposal ${proposalId} does not expose proposed_changes yet.`
+    );
+  }
+  return PublicMemoryEntryMutableFieldsSchema.parse(scopedProposal.proposed_changes);
+}
+
 function normalizeResolutionError(error: unknown): unknown {
   if (error instanceof Error && "code" in error && error.code === "CONFLICT") {
+    return createWorkflowError("VALIDATION", error.message);
+  }
+  if (error instanceof Error && "code" in error && error.code === "VALIDATION_FAILED") {
     return createWorkflowError("VALIDATION", error.message);
   }
 

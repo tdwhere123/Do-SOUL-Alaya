@@ -72,6 +72,11 @@ describe("profile mutation", () => {
       "soul.report_context_usage"
     ]);
     expect(ALAYA_OPERATOR_INSTRUCTIONS).not.toContain("memory.");
+    expect(ALAYA_OPERATOR_INSTRUCTIONS).toContain("tools-only");
+    expect(ALAYA_OPERATOR_INSTRUCTIONS).toContain("prompts/resources");
+    expect(ALAYA_OPERATOR_INSTRUCTIONS).toContain("soul.recall -> soul.open_pointer -> respond -> soul.report_context_usage");
+    expect(ALAYA_OPERATOR_INSTRUCTIONS).toContain("soul.list_pending_proposals");
+    expect(ALAYA_OPERATOR_INSTRUCTIONS).toContain("Accepted proposals trigger durable-memory apply");
     for (const toolName of PUBLIC_SOUL_TOOL_NAMES) {
       expect(ALAYA_OPERATOR_INSTRUCTIONS).toContain(toolName);
     }

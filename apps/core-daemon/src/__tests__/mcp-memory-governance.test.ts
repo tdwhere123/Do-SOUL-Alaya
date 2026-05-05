@@ -3,6 +3,7 @@ import {
   MemoryGovernanceEventType,
   ProposalResolutionState,
   type EventLogEntry,
+  type MemoryEntryMutableFields,
   type Proposal
 } from "@do-soul/alaya-protocol";
 import { createMcpMemoryProposalWorkflow } from "../mcp-memory-proposal-workflow.js";
@@ -10,7 +11,15 @@ import { createMcpMemoryProposalWorkflow } from "../mcp-memory-proposal-workflow
 describe("mcp memory governance", () => {
   it("creates and reviews memory proposals through EventLog and ProposalRepo", async () => {
     const events: EventLogEntry[] = [];
-    const proposals = new Map<string, { proposal: Proposal; workspace_id: string; run_id: string | null }>();
+    const proposals = new Map<
+      string,
+      {
+        proposal: Proposal;
+        workspace_id: string;
+        run_id: string | null;
+        proposed_changes: Readonly<MemoryEntryMutableFields> | null;
+      }
+    >();
     const order: string[] = [];
     let eventCounter = 0;
     const workflow = createMcpMemoryProposalWorkflow({
@@ -31,14 +40,24 @@ describe("mcp memory governance", () => {
           events.filter((event) => event.entity_type === entityType && event.entity_id === entityId)
       },
       proposalRepo: {
-        create: async ({ proposal, workspace_id, run_id }) => {
+        create: async ({ proposal, workspace_id, run_id, proposed_changes }) => {
           order.push("repo:create");
-          proposals.set(proposal.proposal_id, { proposal, workspace_id, run_id });
+          proposals.set(proposal.proposal_id, {
+            proposal,
+            workspace_id,
+            run_id,
+            proposed_changes: proposed_changes ?? null
+          });
           return proposal;
         },
-        createProposalWithEvents: async ({ proposal, workspace_id, run_id }, creationEvents) => {
+        createProposalWithEvents: async ({ proposal, workspace_id, run_id, proposed_changes }, creationEvents) => {
           order.push("repo:createProposalWithEvents");
-          proposals.set(proposal.proposal_id, { proposal, workspace_id, run_id });
+          proposals.set(proposal.proposal_id, {
+            proposal,
+            workspace_id,
+            run_id,
+            proposed_changes: proposed_changes ?? null
+          });
           const storedEvents = creationEvents.map((event) => {
             order.push(`event:${event.event_type}`);
             const entry = {
@@ -58,6 +77,35 @@ describe("mcp memory governance", () => {
         },
         findById: async (proposalId) => proposals.get(proposalId)?.proposal ?? null,
         findScopedById: async (proposalId) => proposals.get(proposalId) ?? null,
+        acceptPendingMemoryUpdateWithEvents: async (proposalId, updatedAt, resolutionEvents, _memoryUpdate, options) => {
+          order.push("repo:acceptPendingMemoryUpdateWithEvents");
+          const existing = proposals.get(proposalId);
+          if (existing === undefined) {
+            throw new Error("missing proposal");
+          }
+          const storedEvents = resolutionEvents.map((event) => {
+            order.push(`event:${event.event_type}`);
+            const entry = {
+              event_id: `event-${++eventCounter}`,
+              created_at: "2026-04-30T00:00:00.000Z",
+              revision: events.filter(
+                (existingEvent) =>
+                  existingEvent.entity_type === event.entity_type &&
+                  existingEvent.entity_id === event.entity_id
+              ).length,
+              ...event
+            } satisfies EventLogEntry;
+            events.push(entry);
+            return entry;
+          });
+          const updated = {
+            ...existing.proposal,
+            resolution_state: ProposalResolutionState.ACCEPTED,
+            last_updated_at: updatedAt
+          } satisfies Proposal;
+          proposals.set(proposalId, { ...existing, proposal: updated });
+          return { proposal: updated, events: storedEvents };
+        },
         updatePendingResolutionWithEvents: async (proposalId, state, updatedAt, resolutionEvents) => {
           order.push("repo:updatePendingResolutionWithEvents");
           const existing = proposals.get(proposalId);
@@ -92,7 +140,8 @@ describe("mcp memory governance", () => {
         notifyEntry: async (entry) => {
           order.push(`notify:${entry.event_type}`);
         }
-      }
+      },
+      memoryService: createMemoryApplyPort()
     });
 
     const created = await workflow.proposeMemoryUpdate(
@@ -122,7 +171,7 @@ describe("mcp memory governance", () => {
         reason: "confirmed",
         reviewer_identity: "user:reviewer-1"
       },
-      { workspaceId: "ws1", runId: "run1", agentTarget: "codex" }
+      { workspaceId: "ws1", runId: "run1", agentTarget: "cli" }
     );
 
     expect(reviewed).toEqual({
@@ -136,7 +185,7 @@ describe("mcp memory governance", () => {
       MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED
     ]);
     expect(proposals.get(created.proposal_id)?.proposal.resolution_state).toBe(ProposalResolutionState.ACCEPTED);
-    expect(order.indexOf("repo:updatePendingResolutionWithEvents")).toBeLessThan(
+    expect(order.indexOf("repo:acceptPendingMemoryUpdateWithEvents")).toBeLessThan(
       order.indexOf(`notify:${MemoryGovernanceEventType.SOUL_REVIEW_CREATED}`)
     );
   });
@@ -186,8 +235,36 @@ describe("mcp memory governance", () => {
         findScopedById: async () => ({
           proposal: storedProposal,
           workspace_id: "ws1",
-          run_id: "run1"
+          run_id: "run1",
+          proposed_changes: { content: "corrected" }
         }),
+        acceptPendingMemoryUpdateWithEvents: async (_proposalId, updatedAt, resolutionEvents) => {
+          if (storedProposal.resolution_state !== ProposalResolutionState.PENDING) {
+            throw Object.assign(new Error(`Proposal is already ${storedProposal.resolution_state}.`), {
+              code: "CONFLICT"
+            });
+          }
+          const storedEvents = resolutionEvents.map((event) => {
+            const entry = {
+              event_id: `event-${++eventCounter}`,
+              created_at: "2026-04-30T00:00:00.000Z",
+              revision: events.filter(
+                (existingEvent) =>
+                  existingEvent.entity_type === event.entity_type &&
+                  existingEvent.entity_id === event.entity_id
+              ).length,
+              ...event
+            } satisfies EventLogEntry;
+            events.push(entry);
+            return entry;
+          });
+          storedProposal = {
+            ...storedProposal,
+            resolution_state: ProposalResolutionState.ACCEPTED,
+            last_updated_at: updatedAt
+          };
+          return { proposal: storedProposal, events: storedEvents };
+        },
         updatePendingResolutionWithEvents: async (_proposalId, state, updatedAt, resolutionEvents) => {
           if (storedProposal.resolution_state !== ProposalResolutionState.PENDING) {
             throw Object.assign(new Error(`Proposal is already ${storedProposal.resolution_state}.`), {
@@ -218,7 +295,8 @@ describe("mcp memory governance", () => {
       },
       runtimeNotifier: {
         notifyEntry
-      }
+      },
+      memoryService: createMemoryApplyPort()
     });
 
     const results = await Promise.allSettled([
@@ -229,7 +307,7 @@ describe("mcp memory governance", () => {
           reason: "first reviewer",
           reviewer_identity: "user:first"
         },
-        { workspaceId: "ws1", runId: "run1", agentTarget: "codex" }
+        { workspaceId: "ws1", runId: "run1", agentTarget: "cli" }
       ),
       workflow.reviewMemoryProposal(
         {
@@ -238,7 +316,7 @@ describe("mcp memory governance", () => {
           reason: "duplicate reviewer",
           reviewer_identity: "user:second"
         },
-        { workspaceId: "ws1", runId: "run1", agentTarget: "codex" }
+        { workspaceId: "ws1", runId: "run1", agentTarget: "cli" }
       )
     ]);
 
@@ -252,7 +330,8 @@ describe("mcp memory governance", () => {
       MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED
     ]);
     expect(notifyEntry).toHaveBeenCalledTimes(3);
-    expect(storedProposal.resolution_state).toBe(ProposalResolutionState.ACCEPTED);
+    const fulfilled = results.find((result) => result.status === "fulfilled");
+    expect(storedProposal.resolution_state).toBe(fulfilled?.value.resolution_state);
   });
 
   it("assigns new local proposals to the configured single reviewer", async () => {
@@ -336,8 +415,27 @@ describe("mcp memory governance", () => {
         findScopedById: async () => ({
           proposal: storedProposal,
           workspace_id: "ws1",
-          run_id: "run-agent"
+          run_id: "run-agent",
+          proposed_changes: { content: "corrected" }
         }),
+        acceptPendingMemoryUpdateWithEvents: async (_proposalId, updatedAt, resolutionEvents) => {
+          const storedEvents = resolutionEvents.map((event) => {
+            const entry = {
+              event_id: `event-${++eventCounter}`,
+              created_at: "2026-04-30T00:00:00.000Z",
+              revision: 1,
+              ...event
+            } satisfies EventLogEntry;
+            events.push(entry);
+            return entry;
+          });
+          storedProposal = {
+            ...storedProposal,
+            resolution_state: ProposalResolutionState.ACCEPTED,
+            last_updated_at: updatedAt
+          };
+          return { proposal: storedProposal, events: storedEvents };
+        },
         updatePendingResolutionWithEvents: async (_proposalId, state, updatedAt, resolutionEvents) => {
           const storedEvents = resolutionEvents.map((event) => {
             const entry = {
@@ -357,7 +455,8 @@ describe("mcp memory governance", () => {
           return { proposal: storedProposal, events: storedEvents };
         }
       },
-      runtimeNotifier: { notifyEntry: async () => {} }
+      runtimeNotifier: { notifyEntry: async () => {} },
+      memoryService: createMemoryApplyPort()
     });
 
     const reviewed = await workflow.reviewMemoryProposal(
@@ -462,6 +561,107 @@ describe("mcp memory governance", () => {
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
+  it("rejects unbound attached-agent review even when workspace and run match", async () => {
+    const proposal = createProposal();
+    const workflow = createMcpMemoryProposalWorkflow({
+      now: () => "2026-04-30T00:00:00.000Z",
+      generateObjectId: () => proposal.proposal_id,
+      eventLogRepo: {
+        append: async () => {
+          throw new Error("append must not be called");
+        },
+        queryByEntity: async () => []
+      },
+      proposalRepo: {
+        create: async () => proposal,
+        createProposalWithEvents: async () => {
+          throw new Error("create not exercised");
+        },
+        findById: async () => proposal,
+        findScopedById: async () => ({
+          proposal,
+          workspace_id: "ws1",
+          run_id: "run1",
+          proposed_changes: { content: "corrected" }
+        }),
+        findPendingSummaries: async () => [],
+        updatePendingResolutionWithEvents: async () => {
+          throw new Error("update should not run for unbound attached agent");
+        }
+      },
+      runtimeNotifier: { notifyEntry: async () => {} },
+      memoryService: createMemoryApplyPort()
+    });
+
+    await expect(
+      workflow.reviewMemoryProposal(
+        {
+          proposal_id: proposal.proposal_id,
+          verdict: "accept",
+          reason: "self accept",
+          reviewer_identity: "user:agent"
+        },
+        { workspaceId: "ws1", runId: "run1", agentTarget: "codex" }
+      )
+    ).rejects.toMatchObject({ code: "VALIDATION" });
+  });
+
+  it("runs MemoryService update validation before atomic accept-as-apply", async () => {
+    const proposal = createProposal();
+    const acceptWrite = vi.fn();
+    const workflow = createMcpMemoryProposalWorkflow({
+      now: () => "2026-04-30T00:00:00.000Z",
+      generateObjectId: () => proposal.proposal_id,
+      eventLogRepo: {
+        append: async () => {
+          throw new Error("append must not be called");
+        },
+        queryByEntity: async () => []
+      },
+      proposalRepo: {
+        create: async () => proposal,
+        createProposalWithEvents: async () => {
+          throw new Error("create not exercised");
+        },
+        findById: async () => proposal,
+        findScopedById: async () => ({
+          proposal,
+          workspace_id: "ws1",
+          run_id: "run1",
+          proposed_changes: { evidence_refs: ["missing-evidence"] }
+        }),
+        findPendingSummaries: async () => [],
+        acceptPendingMemoryUpdateWithEvents: acceptWrite,
+        updatePendingResolutionWithEvents: async () => {
+          throw new Error("reject path not exercised");
+        }
+      },
+      runtimeNotifier: { notifyEntry: async () => {} },
+      memoryService: {
+        findByIdScoped: async (objectId: string) => ({ object_id: objectId }),
+        validateUpdate: async () => {
+          throw Object.assign(new Error("Evidence reference not found: missing-evidence"), {
+            code: "VALIDATION"
+          });
+        },
+        update: async (objectId: string) => ({ object_id: objectId })
+      }
+    });
+
+    await expect(
+      workflow.reviewMemoryProposal(
+        {
+          proposal_id: proposal.proposal_id,
+          verdict: "accept",
+          reason: "bad evidence",
+          reviewer_identity: "user:alice"
+        },
+        { workspaceId: "ws1", runId: "run1", agentTarget: "cli" }
+      )
+    ).rejects.toMatchObject({ code: "VALIDATION" });
+    expect(acceptWrite).not.toHaveBeenCalled();
+  });
+
   it("rejects proposal reviews outside the stored workspace and run context", async () => {
     const events: EventLogEntry[] = [];
     const proposal = createProposal();
@@ -526,6 +726,7 @@ describe("mcp memory governance — soul.list_pending_proposals (A1)", () => {
         target_object_kind: "memory_entry",
         created_at: "2026-04-30T00:00:00.000Z",
         proposed_change_summary: "Switch to pnpm",
+        proposed_changes: { content: "Use pnpm for workspace commands." },
         assigned_reviewer_identity: "user:local-reviewer",
         assigned_at: "2026-04-30T00:00:00.000Z",
         deadline_at: null,
@@ -597,10 +798,11 @@ describe("mcp memory governance — soul.list_pending_proposals (A1)", () => {
         findScopedById: async () => ({
           proposal: storedProposal,
           workspace_id: "ws1",
-          run_id: "run1"
+          run_id: "run1",
+          proposed_changes: { content: "corrected" }
         }),
         findPendingSummaries: async () => [],
-        updatePendingResolutionWithEvents: async (_proposalId, state, updatedAt, events, options) => {
+        acceptPendingMemoryUpdateWithEvents: async (_proposalId, updatedAt, events, _memoryUpdate, options) => {
           captureReviewerIdentity = options?.reviewerIdentity;
           for (const event of events) {
             if (event.caused_by !== null) {
@@ -609,13 +811,17 @@ describe("mcp memory governance — soul.list_pending_proposals (A1)", () => {
           }
           storedProposal = {
             ...storedProposal,
-            resolution_state: state,
+            resolution_state: ProposalResolutionState.ACCEPTED,
             last_updated_at: updatedAt
           };
           return { proposal: storedProposal, events: [] };
+        },
+        updatePendingResolutionWithEvents: async () => {
+          throw new Error("reject path not exercised in this test");
         }
       },
-      runtimeNotifier: { notifyEntry: async () => {} }
+      runtimeNotifier: { notifyEntry: async () => {} },
+      memoryService: createMemoryApplyPort()
     });
 
     await workflow.reviewMemoryProposal(
@@ -625,7 +831,7 @@ describe("mcp memory governance — soul.list_pending_proposals (A1)", () => {
         reason: "looks right",
         reviewer_identity: "user:alice"
       },
-      { workspaceId: "ws1", runId: "run1", agentTarget: "codex" }
+      { workspaceId: "ws1", runId: "run1", agentTarget: "cli" }
     );
 
     expect(captureReviewerIdentity).toBe("user:alice");
@@ -663,10 +869,11 @@ describe("mcp memory governance — soul.list_pending_proposals (A1)", () => {
           proposal: storedProposal,
           workspace_id: "ws1",
           run_id: "run1",
-          reviewer_assignment: { reviewer_identity: "user:server-reviewer" }
+          reviewer_assignment: { reviewer_identity: "user:server-reviewer" },
+          proposed_changes: { content: "corrected" }
         }),
         findPendingSummaries: async () => [],
-        updatePendingResolutionWithEvents: async (_proposalId, state, updatedAt, events, options) => {
+        acceptPendingMemoryUpdateWithEvents: async (_proposalId, updatedAt, events, _memoryUpdate, options) => {
           updateCalls += 1;
           captureReviewerIdentity = options?.reviewerIdentity;
           for (const event of events) {
@@ -676,13 +883,17 @@ describe("mcp memory governance — soul.list_pending_proposals (A1)", () => {
           }
           storedProposal = {
             ...storedProposal,
-            resolution_state: state,
+            resolution_state: ProposalResolutionState.ACCEPTED,
             last_updated_at: updatedAt
           };
           return { proposal: storedProposal, events: [] };
+        },
+        updatePendingResolutionWithEvents: async () => {
+          throw new Error("reject path not exercised in this test");
         }
       },
-      runtimeNotifier: { notifyEntry: async () => {} }
+      runtimeNotifier: { notifyEntry: async () => {} },
+      memoryService: createMemoryApplyPort()
     });
 
     await expect(
@@ -742,5 +953,17 @@ function createProposal(): Proposal {
     ],
     resolution_state: ProposalResolutionState.PENDING,
     last_updated_at: "2026-04-30T00:00:00.000Z"
+  };
+}
+
+function createMemoryApplyPort() {
+  return {
+    findByIdScoped: async (objectId: string, _workspaceId: string) => ({ object_id: objectId }),
+    validateUpdate: async () => {},
+    update: async (
+      objectId: string,
+      _fields: MemoryEntryMutableFields,
+      _reason: string
+    ) => ({ object_id: objectId })
   };
 }

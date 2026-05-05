@@ -48,6 +48,8 @@ const originalEmbeddingSupplementOptIn = process.env.ALAYA_ENABLE_EMBEDDING_SUPP
 const originalAlayaConfigDir = process.env.ALAYA_CONFIG_DIR;
 const originalCodexHome = process.env.CODEX_HOME;
 const originalHome = process.env.HOME;
+const originalReviewerIdentity = process.env.ALAYA_REVIEWER_IDENTITY;
+const originalReviewerToken = process.env.ALAYA_REVIEWER_TOKEN;
 const INTEGRATION_TEST_TIMEOUT_MS = 30_000;
 
 afterEach(async () => {
@@ -68,6 +70,8 @@ describe("Gate-4 attached-agent MCP proof", () => {
     process.env.ALAYA_CONFIG_DIR = join(dataDir, "config");
     process.env.CODEX_HOME = join(dataDir, "codex-home");
     process.env.HOME = join(dataDir, "home");
+    process.env.ALAYA_REVIEWER_IDENTITY = "user:gate4-proof";
+    process.env.ALAYA_REVIEWER_TOKEN = "gate4-review-token";
     await seedRecallFixture(dataDir);
 
     const runtime = await createAlayaDaemonRuntime();
@@ -199,7 +203,8 @@ describe("Gate-4 attached-agent MCP proof", () => {
         proposal_id: proposal.proposal_id,
         verdict: "reject",
         reason: "Gate-4 proof rejects the synthetic proposal.",
-        reviewer_identity: "user:gate4-proof"
+        reviewer_identity: "user:gate4-proof",
+        reviewer_token: "gate4-review-token"
       });
       transcript.push({ step: "soul.review_memory_proposal", evidence: review });
       expect(review).toEqual({
@@ -475,5 +480,17 @@ function restoreProcessEnv(): void {
     delete process.env.HOME;
   } else {
     process.env.HOME = originalHome;
+  }
+
+  if (originalReviewerIdentity === undefined) {
+    delete process.env.ALAYA_REVIEWER_IDENTITY;
+  } else {
+    process.env.ALAYA_REVIEWER_IDENTITY = originalReviewerIdentity;
+  }
+
+  if (originalReviewerToken === undefined) {
+    delete process.env.ALAYA_REVIEWER_TOKEN;
+  } else {
+    process.env.ALAYA_REVIEWER_TOKEN = originalReviewerToken;
   }
 }
