@@ -219,6 +219,46 @@ v0.1-closeout. They are pinned here so the v0.1.x maintenance waves and
 v0.2 planning agents can reference them at the source rather than
 re-discovering them from `.do-it/findings/{a1,a2,a3}.md`.
 
+## v0.1.0 Release (2026-05-05)
+
+The `v0.1-closeout` integration branch landed on `main` after a
+6-lens D2 multi-lens review (reviewer / red-team / spec-compliance /
+domain-language / architect / Codex) plus a 2-round Codex-only
+fix-loop converged on zero Blocking and zero Important findings.
+The release diff vs. the previous `v0.1.0` framing absorbs:
+
+- **A1** — HITL daemon backbone (`soul.list_pending_proposals` MCP
+  tool, `alaya review pending|accept|reject` CLI, `reviewer_identity`
+  on review records, Inspector "Pending Proposals" view).
+- **A2** — `EventPublisher.appendManyWithMutation` atomic primitive +
+  14 producer migrations, closing `#BL-022`. Legacy
+  `publishWithMutation` / `publishManyWithMutation` are
+  `@deprecated` and survive only for one auditor adapter (`#BL-026`).
+- **A3** — Path-axis plasticity feedback loop:
+  `PathPlasticityService` consumes `MEMORY_USAGE_REPORTED` →
+  emits `PathRelationReinforced/Weakened/Retired` runtime-governance
+  events → `RecallService` factors a plasticity weight into recall
+  scoring. Three of the four named plasticity ops shipped
+  (reinforcement / weakening / retirement); `direction_bias`
+  redirection is `#BL-029`.
+- **C1** — Post-port hygiene wave: protocol `phase-*.ts` → domain
+  names (e.g. `events/runtime-governance.ts`); oversized files split;
+  `knip` unused-export check pinned; `code-map.md` refreshed.
+
+D2 fix-loop additionally closed five red-team / architect / codex
+findings inline (cross-workspace recall poisoning via
+`soul.report_context_usage` (`B3`), cross-tick reapplication of
+plasticity receipts via in-process watermark (`B2`), CLI review
+`ALAYA_RUN_ID` override, Inspector POST `null` body TypeError,
+`assertProposalContext` over-loosening, `proposed_changes.content`
+size cap, etc.) and opened ten v0.2 backlog cards
+(`#BL-027`..`#BL-036`) for the remaining deferrals — each with
+explicit close conditions per `feedback_no_backlog`.
+
+End-to-end verification at the merge commit:
+`rtk pnpm build` exit 0; `rtk pnpm test` 258 test files / 1996 tests
+green. Convergence rule (Blocking + Important double-zero) holds.
+
 The end-to-end verification gate at HEAD `78d8a91` runs clean (same
 shape as Round 2):
 `rtk pnpm install`, `rtk pnpm build`, `rtk pnpm exec vitest run` (248 files

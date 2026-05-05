@@ -10,9 +10,9 @@
 
 ### *A local-first memory plane for CLI coding agents.*
 
-[![status](https://img.shields.io/badge/status-v0.1--rc%20(closing)-orange?style=flat-square)](#where-this-is-going)
+[![status](https://img.shields.io/badge/status-v0.1.0-success?style=flat-square)](#where-this-is-going)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-1917%20passing-success?style=flat-square)](#where-this-is-going)
+[![tests](https://img.shields.io/badge/tests-1996%20passing-success?style=flat-square)](#where-this-is-going)
 [![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#quickstart)
 [![pnpm](https://img.shields.io/badge/pnpm-%E2%89%A59-F69220?style=flat-square&logo=pnpm&logoColor=white)](#quickstart)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](#architecture-at-a-glance)
@@ -526,13 +526,16 @@ Do-SOUL Alaya/
 
 ## Where this is going
 
-> **Status note (2026-05-04).** v0.1 was prematurely framed as
-> released. After re-reading the structural gaps in the lifecycle
-> chapter above, I reopened v0.1 to absorb everything that was on
-> track to be deferred. The release framing returns when the cards
-> below close — not before.
+> **Status note (2026-05-05).** v0.1.0 released. v0.1 was originally
+> framed as released on 2026-05-03, then reopened to absorb three
+> structural gaps the first release pass had deferred (HITL daemon
+> backbone A1, EventPublisher atomic transaction A2, path-axis
+> plasticity loop A3) plus the C1 hygiene wave. All four landed
+> through `v0.1-closeout`, passed a 6-lens D2 multi-lens review
+> + a 2-round Codex fix-loop, and merged to `main` here. v0.2 work
+> continues against the backlog cards below.
 
-### P1. Closing v0.1 — closeout cards
+### P1. Closed in v0.1 — closeout cards
 
 | Card | What it closes | Backlog |
 |---|---|---|

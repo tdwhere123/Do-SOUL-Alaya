@@ -10,9 +10,9 @@
 
 ### *给 CLI 编码 agent 的本地优先记忆平面。*
 
-[![status](https://img.shields.io/badge/status-v0.1--rc%20(closing)-orange?style=flat-square)](#接下来的方向)
+[![status](https://img.shields.io/badge/status-v0.1.0-success?style=flat-square)](#接下来的方向)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-1917%20passing-success?style=flat-square)](#接下来的方向)
+[![tests](https://img.shields.io/badge/tests-1996%20passing-success?style=flat-square)](#接下来的方向)
 [![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#快速开始)
 [![pnpm](https://img.shields.io/badge/pnpm-%E2%89%A59-F69220?style=flat-square&logo=pnpm&logoColor=white)](#快速开始)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](#架构总览)
@@ -492,12 +492,15 @@ Do-SOUL Alaya/
 
 ## 接下来的方向
 
-> **状态说明（2026-05-04）。** v0.1 之前被过早地写成了"已发布"。
-> 重新审视上面生命周期章节里那些结构性差距之后，我把 v0.1 重开
-> 了，把所有原本要 deferred 的东西都纳进收尾范围。release 框架
-> 等下面这些卡全部关闭后才会回来 —— 不会提前。
+> **状态说明（2026-05-05）。** v0.1.0 已发布。v0.1 一开始（2026-05-03）
+> 被过早写成了"已发布"，后来我把它重开，把第一轮 release 里被 deferred
+> 的三处结构性差距 —— HITL daemon 骨架 (A1)、EventPublisher 原子事务
+> (A2)、Path 轴可塑性反馈环 (A3) —— 加上 C1 hygiene wave 一起纳进收尾
+> 范围。这四张卡都通过 `v0.1-closeout` 落地，过了 6-lens D2 多智能体复审
+> + 2 轮 Codex fix-loop，已合入 `main`。v0.2 工作继续按下面这些 backlog
+> 卡推进。
 
-### P1. 收尾 v0.1 —— closeout cards
+### P1. v0.1 已收口 —— closeout cards
 
 | 卡 | 关闭的事 | Backlog |
 |---|---|---|
