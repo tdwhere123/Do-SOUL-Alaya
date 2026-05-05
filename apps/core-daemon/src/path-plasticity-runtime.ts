@@ -18,7 +18,7 @@ import type {
 /**
  * Daemon-side wiring for the A3 path-axis plasticity feedback loop.
  *
- * Provides three pieces:
+ * Provides four pieces:
  *
  *   1. `createUsageProofReader` — adapts the existing event log + trust
  *      state repository to the `UsageProofReaderPort` contract that
@@ -40,6 +40,20 @@ import type {
  *      reads the resulting strengths (read). Both sides run off the
  *      request path (the read is cached at fine-assessment time and the
  *      write runs in Garden).
+ *
+ *   4. `createPathPlasticityWatermarkRegistry` — closes D2 MERGED-B2
+ *      (codex-B2). The Garden Auditor was enqueueing PATH_PLASTICITY_UPDATE
+ *      with empty `target_object_refs`, so every tick fell back to
+ *      `now - 24h`. Per-call audit_event_id dedup did NOT survive across
+ *      ticks, so a single MEMORY_USAGE_REPORTED receipt inside the rolling
+ *      24h window was reapplied every Auditor interval (~48 reapplications
+ *      in 24h), saturating strength to ceiling or hammering paths to
+ *      retirement from one durable receipt. The registry maintains a
+ *      per-workspace high-water mark that advances at enqueue time, so
+ *      each tick processes records strictly in `(prior, nowAtEnqueue]`.
+ *      In v0.1 the registry is in-process (resets at daemon restart with
+ *      a 24h lookback for first tick); v0.2 will durabilize the watermark
+ *      via a dedicated table (see #BL-035).
  */
 
 interface MemoryUsageReportedPayload {
@@ -161,6 +175,46 @@ export function createPathPlasticityService(deps: {
     eventLogRepo: deps.eventLogRepo,
     ...(deps.now === undefined ? {} : { now: deps.now })
   });
+}
+
+/**
+ * In-process per-workspace high-water mark for the path-plasticity
+ * Auditor task. Closes D2 MERGED-B2: the prior daemon enqueued
+ * PATH_PLASTICITY_UPDATE without a watermark, so every Auditor tick
+ * processed the rolling 24h window and reapplied each receipt 48 times.
+ *
+ * Contract:
+ *   - First tick on a workspace returns `nowIso - initialLookbackMs`
+ *     (default 24h) and stores `nowIso` as the new watermark.
+ *   - Subsequent ticks return the prior watermark and store `nowIso`.
+ *   - Each receipt is therefore picked up by at most one tick within a
+ *     single daemon process. (Across daemon restarts the registry resets
+ *     and re-uses the 24h lookback, capped at one re-application per
+ *     receipt per restart. v0.2 #BL-035 durabilizes via SQL.)
+ *
+ * Advance happens at enqueue time, not after task completion. A failed
+ * task drops its window once; this is fail-safe (under-process rather
+ * than over-process) and avoids needing a callback path from the
+ * Garden auditor back into the daemon.
+ */
+export interface PathPlasticityWatermarkRegistry {
+  getAndAdvance(workspaceId: string, nowIso: string): string;
+}
+
+export function createPathPlasticityWatermarkRegistry(opts?: {
+  readonly initialLookbackMs?: number;
+}): PathPlasticityWatermarkRegistry {
+  const lookbackMs = opts?.initialLookbackMs ?? 24 * 60 * 60 * 1000;
+  const watermarks = new Map<string, string>();
+  return {
+    getAndAdvance(workspaceId: string, nowIso: string): string {
+      const prior = watermarks.get(workspaceId);
+      const sinceIso =
+        prior ?? new Date(Date.parse(nowIso) - lookbackMs).toISOString();
+      watermarks.set(workspaceId, nowIso);
+      return sinceIso;
+    }
+  };
 }
 
 /**

@@ -49,6 +49,10 @@ import {
 } from "@do-soul/alaya-soul";
 import { findEventLogOrphansForWorkspace, findOrphanedMemoriesForWorkspace } from "./orphan-query.js";
 import { BackgroundServiceManager } from "./background/bootstrap.js";
+import {
+  createPathPlasticityWatermarkRegistry,
+  type PathPlasticityWatermarkRegistry
+} from "./path-plasticity-runtime.js";
 
 type PathGraphSnapshotRecord = Readonly<PathGraphSnapshot>;
 
@@ -97,6 +101,13 @@ export function createGardenRuntime(input: {
   runBackgroundPass(): Promise<void>;
   setBacklogTelemetryObserver(observer: GardenBacklogTelemetryObserver | null): void;
 }> {
+  // D2 MERGED-B2 (codex-B2): per-workspace watermark for PATH_PLASTICITY_UPDATE
+  // so the same MEMORY_USAGE_REPORTED receipt is not reapplied every tick.
+  // See `path-plasticity-runtime.ts` createPathPlasticityWatermarkRegistry
+  // docstring for v0.1 in-process semantics + v0.2 #BL-035 durabilization.
+  const pathPlasticityWatermark: PathPlasticityWatermarkRegistry =
+    createPathPlasticityWatermarkRegistry();
+
   const schedulerEventLogPort: GardenSchedulerEventLogPort = {
     append: async (entry) => {
       await input.eventPublisher.publish({
@@ -474,9 +485,22 @@ export function createGardenRuntime(input: {
         }
         // A3: Garden-driven plasticity tick. Soft-skips inside the Auditor
         // when pathPlasticityService is not wired (test daemons), so it is
-        // safe to enqueue unconditionally here. The Auditor lookback
-        // window defaults to 24h (see resolvePathPlasticitySinceIso).
-        await enqueueForAllWorkspaces(GardenTaskKind.PATH_PLASTICITY_UPDATE, GardenTier.TIER_1);
+        // safe to enqueue unconditionally here.
+        //
+        // D2 MERGED-B2: pass the per-workspace watermark as
+        // target_object_refs[0] (an ISO timestamp). The Soul
+        // `resolvePathPlasticitySinceIso` helper uses it as the lookback
+        // start, so each tick processes records strictly in
+        // `(prior watermark, nowAtEnqueue]`. First tick on each workspace
+        // bootstraps from `now - 24h`. The registry is process-local; v0.2
+        // #BL-035 will durabilize it via SQL.
+        await enqueueForAllWorkspaces(
+          GardenTaskKind.PATH_PLASTICITY_UPDATE,
+          GardenTier.TIER_1,
+          (workspaceId) => [
+            pathPlasticityWatermark.getAndAdvance(workspaceId, new Date().toISOString())
+          ]
+        );
       }
     },
     {
