@@ -1,9 +1,7 @@
 # Code Map
 
 Current implementation locations. Refresh when packages, routes, repos,
-migrations, or runtime wiring change. For port reference (where things
-live in upstream `do-what-new`), see
-`vendor/do-what-new-snapshot/docs/handbook/code-map.md`.
+migrations, or runtime wiring change.
 
 ## Package Naming (authoritative)
 
@@ -17,9 +15,10 @@ live in upstream `do-what-new`), see
 | `apps/core-daemon/` | `@do-soul/alaya-core-daemon` | (private app, no path alias) |
 | `apps/inspector/` | `@do-soul/alaya-inspector` | (private app, no path alias) |
 
-Upstream `@do-what/<x>` maps to `@do-soul/alaya-<x>` for the five
-ported packages above. `apps/core-daemon` has no upstream namespaced
-name change.
+Upstream `@do-what/<x>` maps historically to `@do-soul/alaya-<x>` for
+the five ported packages above (port-era mapping; the upstream
+namespace no longer appears in source). `apps/core-daemon` was not
+namespaced upstream.
 
 ## Project Map (target after port)
 
@@ -37,9 +36,6 @@ apps/
 
 bin/
   alaya.mjs       CLI entry (alaya doctor / install / attach / detach / status / inspect / tools / backup / export / import / mcp)
-
-vendor/
-  do-what-new-snapshot/  frozen upstream port reference (read-only)
 ```
 
 ## Current Status (Gate-5 passed + post-port hygiene executed)
@@ -66,7 +62,7 @@ and root unused-code checking is reproducible through `knip`.
 | Project instructions | `CLAUDE.md`, `AGENTS.md`, `README.md`, `RTK.md` | present |
 | Handbook | `docs/handbook/*` | present (P0-3) |
 | v0.1 task cards | `docs/v0.1/INDEX.md`, `docs/v0.1/phase-{0..5}-briefs/` | populated by P0-3e + P0-4 |
-| Vendor snapshot | `vendor/do-what-new-snapshot/` | present (frozen at upstream commit `6ed8463`) |
+| Project genealogy | `CLAUDE.md` §Project Genealogy + `docs/archive/port-protocol-historical.md` | port closed at upstream commit `6ed8463`; snapshot directory removed by Phase E vendor cleanup |
 | Protocol types | `packages/protocol/src/` | ported; `schema-ready` (P1-protocol). Post-port hygiene renamed former `events/phase-*` modules and `Phase*` event symbols to domain names such as `workspace-run`, `memory-governance`, `runtime-governance`, and `compute-recall-garden`, preserving event string values. `packages/protocol/src/soul/mcp-types.ts` also carries the P4-mcp-memory-tools public `soul.*` memory tool contract seed, including recall delivery metadata and usage-proof schemas. |
 | Storage skeleton + DB helpers | `packages/storage/{package.json,tsconfig.json,src/db.ts,src/errors.ts,src/index.ts}` | ported; `schema-ready` (P1-storage-skeleton) |
 | Storage shared utilities | `packages/storage/src/repos/shared/`, `packages/storage/src/__tests__/deep-freeze.test.ts` | ported; `implementation-ready` (P1-storage-shared) |
@@ -82,34 +78,11 @@ and root unused-code checking is reproducible through `knip`.
 | CLI shell | `bin/alaya.mjs`, `apps/core-daemon/src/cli/` | Alaya CLI bridge and subcommands are `implementation-ready`: doctor, install, attach Codex, attach Claude Code, detach, status, inspect, tools list/call, backup/export/import. |
 | Memory Inspector backend | `apps/inspector/src/` | P4-inspector-server is `live-event-ready`: loopback Hono server, token middleware, config/graph/status routes, daemon-proxied embedding supplement reads/writes, paste-to-file secret refs, sanitized route errors, and static bundle host. Config writes are audited through the daemon EventLog path. |
 
-## Port Source Mapping (subset)
+## Port Source Mapping (Historical)
 
-For the full mapping, every Phase 1+ task card lists its specific
-sources. The high-level mapping is:
-
-| Alaya target | Upstream source |
-|---|---|
-| `packages/protocol/src/*` | `vendor/do-what-new-snapshot/packages/protocol/src/*` |
-| `packages/storage/src/migrations/*.sql` | `vendor/do-what-new-snapshot/packages/storage/src/migrations/*.sql` |
-| `packages/storage/src/repos/*.ts` | `vendor/do-what-new-snapshot/packages/storage/src/repos/*.ts` |
-| `packages/core/src/{memory,evidence,signal,recall,embedding-recall,global-memory-recall,green,governance-lease,session-override,synthesis,proposal,output-shaping,narrative-budget,health-journal}-service.ts` and `task-surface-builder.ts`, `embedding-backfill-handler.ts`, `manifestation-resolver.ts`, `event-publisher.ts`, and `runtime-event-normalizer.ts` | `vendor/do-what-new-snapshot/packages/core/src/<same filename>` (note: `task-surface-builder.ts`, `runtime-event-normalizer.ts`, `event-publisher.ts`, `embedding-backfill-handler.ts`, and `manifestation-resolver.ts` have no `-service.ts` suffix) |
-| `packages/core/src/{permission-policy/,zero-day-security-layer.ts,constraint-proxy.ts,integration-gate.ts}` | `vendor/do-what-new-snapshot/packages/core/src/<same path>` |
-| `packages/core/src/{worker-safety-gate.ts,worker-trust-assessor.ts,stance-resolution-service.ts,cross-cutting-permission-service.ts,ports/tool-governance-client.ts}` | `vendor/do-what-new-snapshot/packages/core/src/<same path>` |
-| `packages/core/src/conversation-service.ts` | `vendor/do-what-new-snapshot/packages/core/src/conversation-service.ts` |
-| `packages/soul/src/garden/{auditor,janitor,librarian,scheduler,compute-provider,compute-routing-service,local-heuristics,bootstrapping-service,session-override-remediation,backlog-telemetry,materialization-router,degradation-pipeline,handoff-gap-handler,topology-service,path-graph-snapshotter}.ts` | `vendor/do-what-new-snapshot/packages/soul/src/garden/<same>` |
-| `packages/engine-gateway/src/*` | `vendor/do-what-new-snapshot/packages/engine-gateway/src/*` |
-| `apps/core-daemon/src/{index,app,garden-runtime}.ts` | `vendor/do-what-new-snapshot/apps/core-daemon/src/<same>` |
-| `apps/core-daemon/src/routes/*.ts` | `vendor/do-what-new-snapshot/apps/core-daemon/src/routes/*.ts` |
-| `bin/alaya.mjs` | `n/a` for Alaya-original CLI bridge; upstream `bin/do-what.mjs` only covers removed surfaces |
-
-## Key Template Files (for port reference)
-
-When porting a service, look at these upstream examples first:
-
-| Pattern | Template upstream file |
-|---|---|
-| Service shape with port + audit | `vendor/do-what-new-snapshot/packages/core/src/memory-service.ts` |
-| Repo pattern over `SqliteConnection` | `vendor/do-what-new-snapshot/packages/storage/src/repos/memory-entry-repo.ts` |
-| Garden role with scheduler hook | `vendor/do-what-new-snapshot/packages/soul/src/garden/auditor.ts` |
-| Migration with FTS upgrade | `vendor/do-what-new-snapshot/packages/storage/src/migrations/049-memory-fts-trigram-upgrade.sql` |
-| Daemon route registration | `vendor/do-what-new-snapshot/apps/core-daemon/src/app.ts` |
+The v0.1 port mapping (which Alaya files came from which upstream
+`vendor/do-what-new-snapshot/` paths) is preserved in the historical
+task cards under `docs/v0.1/phase-*-briefs/`. The vendor snapshot
+itself has been removed by Phase E vendor cleanup; for any specific
+file's port lineage, run `git log --follow <path>` against the
+v0.1.0 tag.

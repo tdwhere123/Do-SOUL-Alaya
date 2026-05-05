@@ -1,2 +1,0 @@
-CREATE INDEX IF NOT EXISTS idx_global_memory_recall_cache_global_object_id
-ON global_memory_recall_cache(global_object_id);

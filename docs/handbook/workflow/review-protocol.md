@@ -11,11 +11,10 @@ For parallel or repeated-failure work, also follow
 Report findings before summaries:
 
 - **Blocking**: unmet acceptance criteria, broken build/test,
-  architecture violation, data/state risk, port logic divergence from
-  source, or execution-changing doc contradiction.
+  architecture violation, data/state risk, or execution-changing doc
+  contradiction.
 - **Important**: likely bug, regression, missing meaningful coverage,
-  misleading status/docs, or unjustified port-mode escalation
-  (e.g. `adapt-and-port` used where `trivial-copy` would have worked).
+  or misleading status/docs.
 - **Nice-to-have**: low-risk cleanup (redundant code, dead branches,
   minor readability loss).
 
@@ -29,8 +28,6 @@ issue per R2.
 - cite the file and line range for every finding,
 - cite the acceptance-criteria row when the reviewed artifact has
   one,
-- for port tasks, cite the source file under
-  `vendor/do-what-new-snapshot/` against which the port is verified,
 - for diff-only, handbook, workflow, or other reviews without an AC
   table, cite the governing document section, rule, or diff context
   that establishes the requirement,
@@ -61,8 +58,8 @@ Required fields:
     Observed:       <what currently happens / what the diff shows is
                     wrong.>
     Expected:       <what should happen instead. Cite the invariant,
-                    AC row, port-protocol rule, or source-file
-                    location that establishes the expectation.>
+                    AC row, or governing document section that
+                    establishes the expectation.>
     Repro / Witness:<minimum repro steps, an asserting test case that
                     currently fails, or a concrete scenario that would
                     expose the bug if exercised. "Inspection only" is
@@ -73,14 +70,10 @@ Required fields:
 
 ## Read Before Reviewing
 
-- relevant task card or phase README,
+- relevant task card or initiative README,
 - relevant diff or changed files,
 - `docs/handbook/invariants.md`,
-- `docs/handbook/port-protocol.md` (every Phase 1+ review is a port
-  review),
-- affected handbook page,
-- the source file under `vendor/do-what-new-snapshot/` for port
-  verification.
+- affected handbook page.
 
 ## Checklist
 
@@ -90,11 +83,6 @@ Required fields:
 - imports, exports, routes, and event names are real,
 - non-trivial behavior has runnable tests,
 - docs, readiness labels, and dependency language agree,
-- **port verification**: target file matches source in
-  `vendor/do-what-new-snapshot/` per the card's declared port mode,
-- **port-mode justification**: any `adapt-and-port` lists every
-  adapter point in §2; any `requires-redesign` cites an Alaya
-  invariant in §0,
 - for stateful mutation tasks, the diff satisfies the
   [Stateful Mutation Checklist](./agent-workflow.md#stateful-mutation-checklist)
   with evidence for EventLog-first ordering, audit-before-broadcast,

@@ -12,7 +12,7 @@
 
 [![status](https://img.shields.io/badge/status-v0.1.0-success?style=flat-square)](#where-this-is-going)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-1996%20passing-success?style=flat-square)](#where-this-is-going)
+[![tests](https://img.shields.io/badge/tests-1994%20passing-success?style=flat-square)](#where-this-is-going)
 [![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#quickstart)
 [![pnpm](https://img.shields.io/badge/pnpm-%E2%89%A59-F69220?style=flat-square&logo=pnpm&logoColor=white)](#quickstart)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](#architecture-at-a-glance)
@@ -542,9 +542,14 @@ Do-SOUL Alaya/
 | **A1** Landed: Daemon HITL backbone | `soul.list_pending_proposals` MCP tool · `alaya review pending\|accept\|reject` CLI · `reviewer_identity` on review record · Inspector "Pending Proposals" view | new card |
 | **A2** Landed: EventPublisher atomic transaction | `appendManyWithMutation` inside one `connection.transaction()`; 14 callers migrated to sync mutate; closes the race window | `#BL-022` closed |
 | **A3** Landed: Path-axis plasticity loop | New `PathPlasticityService` consumes `MEMORY_USAGE_REPORTED` → emits `PathRelationReinforced/Weakened/Retired` runtime-governance events → `RecallService` factors plasticity into score | new card |
-| **B1** `pi-mono` integration | `packages/engine-gateway` becomes a `pi-mono` client; synthesis / proposal scoring / reflection route through one clean provider boundary | `#BL-008` |
-| **B2** OS keychain support | `keychain:<service>:<account>` secret-ref syntax; macOS Keychain + Linux libsecret adapters (Windows mocked) | `#BL-009` |
 | **C1** Landed: File-shape hygiene wave | protocol `phase-*.ts` files/symbols now use domain names (e.g. `events/runtime-governance.ts`); oversized files are split; `knip` unused-code checking is pinned; `code-map.md` is refreshed | `#BL-017` closed |
+
+The two larger items originally planned for closeout — `pi-mono`
+provider integration (`#BL-008`) and OS keychain support
+(`#BL-009`) — were re-deferred to v0.2 during the closeout because
+their scope grew beyond what the closeout window could absorb cleanly.
+Both remain tracked with explicit close conditions in
+`docs/handbook/backlog.md`.
 
 Remaining closeout work runs in isolated worktrees with per-card review
 + fix-loop discipline. `main` only sees a card merge when that card's
@@ -611,15 +616,6 @@ conditions live in `docs/handbook/backlog.md`):
   lookback once.
 - **`#BL-036`** — Dedupe pending `PATH_PLASTICITY_UPDATE` enqueues
   via a `Set<workspaceId>` mirror of the embedding-backfill pattern.
-
-### P3. Vendor cleanup (post-v0.1.0 tag)
-
-`vendor/do-what-new-snapshot/` was a temporary port reference, not
-a permanent dependency. After v0.1.0 tags, it gets removed in its
-own short-lived worktree, and the port-protocol scaffolding in
-`CLAUDE.md` / `docs/handbook/port-protocol.md` /
-`docs/handbook/task-card-template.md` is rewritten as historical
-context.
 
 ---
 

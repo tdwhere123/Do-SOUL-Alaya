@@ -43,16 +43,12 @@ sub-agent runtime. Use it when:
   context window to coordinate other things,
 - multiple cards can run in parallel and the main thread wants to
   fan out,
-- the work is mechanical port (trivial-copy heavy) and codex's strong
-  literal-execution profile matches the task.
+- the work is mechanical and codex's strong literal-execution profile
+  matches the task.
 
 Each dispatched codex instance receives the **Sub-Agent Contract**
 from `agent-workflow.md` plus:
 
-- The exact source path under `vendor/do-what-new-snapshot/` for
-  every file the card ports.
-- The required port mode (`trivial-copy` / `adapt-and-port` /
-  `requires-redesign`) and the §2 enumeration if non-default.
 - The output destination (`packages/<x>/...` or
   `apps/core-daemon/...`).
 - The list of shared files the card MUST NOT touch (barrels,
@@ -116,40 +112,20 @@ recurring failure pattern appears across two or more cards.
 5. **Live-ready over-claim.** Card claimed `live-event-ready` /
    `mcp-consumable` / `cli-consumable` without integration evidence
    (violates R5).
-6. **Port-mode escalation without justification.** Card declared
-   `adapt-and-port` or `requires-redesign` without enumerating
-   adapter points or citing an Alaya invariant (violates
-   `port-protocol.md`).
-7. **Self-rewrite under trivial-copy.** Card declared `trivial-copy`
-   but rewrote the function body or split helpers (the failure mode
-   that triggered the v0.1 reset).
-8. **Source path drift.** Card cited a `vendor/do-what-new-snapshot/`
-   path that no longer exists or no longer matches the card text;
-   reviewer must verify before accepting.
-9. **Barrel collision.** Two cards in the same wave both wrote to a
+6. **Barrel collision.** Two cards in the same wave both wrote to a
    barrel file; merge produced silent conflicts.
-10. **Idempotent overwrite under deletion.** A repo's "upsert" path
-    overwrote a row that should have been treated as deleted; common
-    in port adaptation when the source uses a different lifecycle
-    flag.
-11. **EventLog reorder under retry.** Retry path appended EventLog
-    after DB mutation, breaking the EventLog-first invariant.
-12. **Audit-after-broadcast.** Consumer observed state before the
-    audit row landed; violates audit-before-broadcast invariant.
-13. **Architecture-vs-port contradiction.** Port mode declared
-    `trivial-copy` but the source file embeds an architecture detail
-    (e.g. SSE) that an Alaya invariant forbids. Resolution: escalate
-    to `requires-redesign` with §0 charter cite, or update the
-    invariant if the detail is acceptable.
-14. **Ported subsystem with no Alaya consumer.** Source code ported
-    but no Alaya use case calls it (e.g. ConversationService chat
-    paths). Resolution: adapt-and-port with explicit Adapter Points
-    deleting the unused branches, or move to backlog.
-15. **Naming-spec drift.** Card uses an npm name or path alias not
+7. **Idempotent overwrite under deletion.** A repo's "upsert" path
+   overwrote a row that should have been treated as deleted; the
+   source uses a different lifecycle flag.
+8. **EventLog reorder under retry.** Retry path appended EventLog
+   after DB mutation, breaking the EventLog-first invariant.
+9. **Audit-after-broadcast.** Consumer observed state before the
+   audit row landed; violates audit-before-broadcast invariant.
+10. **Naming-spec drift.** Card uses an npm name or path alias not
     listed in `docs/handbook/code-map.md §Package Naming`. Resolution:
     fix the card, or update code-map first if the name needs to
     change.
-16. **Misleading availability docs.** A doc lists a command or
+11. **Misleading availability docs.** A doc lists a command or
     capability as "available" but the implementing card has not
     landed. Resolution: annotate the doc with the gating phase or
     card.
@@ -163,8 +139,6 @@ Halt the wave (do not dispatch the next card) when:
 - Two cards from the same wave produced incompatible contract
   changes (different field shapes for the same protocol type).
 - The shared-utils or barrel-update card has not landed yet.
-- The vendor snapshot moved (rare; see
-  `docs/handbook/maintenance.md` Vendor Snapshot Maintenance).
 
 Resume only after the blocking condition closes through reviewer
 mode.

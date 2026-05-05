@@ -36,15 +36,13 @@ These rules always win over lower-level docs and task-card convenience.
 10. Audit precedes broadcast. Every state change records an audit row
     before any consumer can observe it.
 11. **Alaya does not run an SSE event stream.** Upstream do-what-new
-    uses SSE because it has GUI / TUI consumers; Alaya does not.
+    used SSE because it had GUI / TUI consumers; Alaya does not.
     Daemon-internal eventing is via in-process audit log +
     `RuntimeNotifier` notification only (interface in
-    `packages/core/src/event-publisher.ts`; producer ownership is
-    P2-svc-event-publisher). Any port of `apps/core-daemon/src/sse/`,
-    `runs.ts` SSE TransformStream, `background/bootstrap.ts` SSE
-    pipeline, or `event-publisher` SSE chain MUST be `requires-redesign`
-    that strips the SSE transport while preserving the EventLog →
-    audit ordering.
+    `packages/core/src/event-publisher.ts`). Any new daemon code paths
+    (e.g. `apps/core-daemon/src/sse/`, route streaming TransformStream,
+    background bootstrap, event-publisher chain) must keep the SSE
+    transport stripped while preserving the EventLog → audit ordering.
 
 ## SOUL
 
@@ -116,26 +114,21 @@ These rules always win over lower-level docs and task-card convenience.
     confirm. Silent profile mutation is forbidden.
 24. Alaya-original CLI and memory-tooling surfaces (install / attach /
     detach / profile / secrets / operations / trust-state / doctor /
-    status / inspect / inspector-server / inspector-frontend) have no
-    upstream port source and MUST be authored as `requires-redesign`
-    cards with §0 citing the relevant Surface / Port invariant
-    (§21-§23) and `docs/handbook/architecture.md §Surface Shape`.
+    status / inspect / inspector-server / inspector-frontend) are
+    Alaya-original (no upstream equivalent) and any new work in these
+    areas MUST cite the relevant Surface invariant (§21-§23) and
+    `docs/handbook/architecture.md §Surface Shape` for design
+    authority.
 
-## Port
+## Port (Historical, retired after v0.1.0)
 
-25. Source for any v0.1 port lives in `vendor/do-what-new-snapshot/`.
-    Task cards must reference vendor paths and never the absolute
-    `/home/tdwhere/vibe/do-what-new/` path.
-26. Port mode is one of `trivial-copy` / `adapt-and-port` /
-    `requires-redesign`. The default is `trivial-copy`. Escalation
-    requires task-card-level justification per
-    `docs/handbook/port-protocol.md`.
-27. Self-rewriting in place of porting is rejected at review (the
-    failure mode that triggered the v0.1 reset).
-28. The **task-card template** at
-    `docs/handbook/task-card-template.md` is authoritative. Cards that
-    deviate from its section order, frontmatter fields, or naming
-    conventions are rejected at review.
+The v0.1-specific port invariants (vendor snapshot as source of
+truth, `trivial-copy` / `adapt-and-port` / `requires-redesign` port
+modes, no-self-rewrite rule) closed with v0.1.0 and the vendor
+snapshot was removed by Phase E vendor cleanup. See
+`docs/archive/port-protocol-historical.md` and `CLAUDE.md` §Project
+Genealogy for the upstream commit pinned at port time. New work uses
+the lightweight template at `docs/handbook/task-card-template.md`.
 
 ## Defense-against-recurrence (added 2026-05-03 in p5-system-review-r1)
 
@@ -169,7 +162,10 @@ required防复发 step per `docs/handbook/workflow/review-protocol.md`
 
 ## Docs
 
-29. `docs/v0.1/` is the active task-card work area.
-30. `docs/handbook/` is the maintained implementation handbook.
-31. `vendor/do-what-new-snapshot/` is read-only port reference, not
-    Alaya source truth.
+32. `docs/v0.1/` is the historical v0.1 port-era task-card record
+    (v0.1.0 shipped 2026-05-05). New work tracking lives in
+    `docs/handbook/backlog.md` and PR descriptions.
+33. `docs/handbook/` is the maintained implementation handbook.
+34. `docs/archive/` holds retired-but-preserved discipline documents
+    (port-protocol, port-era task-card template). They are
+    archaeology, not active rules.

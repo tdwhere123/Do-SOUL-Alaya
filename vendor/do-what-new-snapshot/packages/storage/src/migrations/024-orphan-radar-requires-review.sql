@@ -1,1 +1,0 @@
-ALTER TABLE orphan_radar ADD COLUMN requires_review INTEGER NOT NULL DEFAULT 1;

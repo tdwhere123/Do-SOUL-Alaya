@@ -18,7 +18,7 @@ each Phase Gate.
 
 | Phase | Scope | Status | Gate |
 |---|---|---|---|
-| Phase 0 | Reset, vendor snapshot, handbook, INDEX, task cards | **done** | Gate-0 passed |
+| Phase 0 | Reset, port-source snapshot, handbook, INDEX, task cards | **done** | Gate-0 passed |
 | Phase 1 | Wave 1 leaves: protocol, migrations, storage shared, config, topology, engine-gateway | **done** | Gate-1 passed |
 | Phase 2 | Wave 2: storage repos batches + core services + Garden + security defense | **done** | Gate-2 passed |
 | Phase 3 | Wave 3: foundation helpers, ConversationService, MCP discovery, run lifecycle, misc services, core barrel | **done** | Gate-3 passed |
@@ -274,7 +274,9 @@ non-blocking and tracked for a follow-up wave.
 ## Gate Definitions
 
 - **Gate-0**: Handbook complete, INDEX complete, task cards written for
-  all of Phase 1-5, vendor snapshot frozen, monorepo shell in place.
+  all of Phase 1-5, port-source snapshot frozen at upstream commit
+  `6ed846341f66ff98bfcddbb940db74cfc10133ca`, monorepo shell in place.
+  (Snapshot directory removed after v0.1.0 by Phase E vendor cleanup.)
 - **Gate-1**: All Phase 1 leaves ported and `rtk pnpm build` + `rtk pnpm test`
   pass.
 - **Gate-2**: All Phase 2 services / repos / Garden / security

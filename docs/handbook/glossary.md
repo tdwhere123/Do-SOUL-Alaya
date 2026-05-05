@@ -1,8 +1,8 @@
 # Glossary
 
-Vocabulary used across Alaya handbook, task cards, and code. Terms are
-inherited from upstream `do-what-new` SOUL where applicable; Alaya-
-specific terms are flagged.
+Vocabulary used across Alaya handbook, task cards, and code. Terms
+were inherited from upstream `do-what-new` SOUL during the v0.1 port
+where applicable; Alaya-specific terms are flagged.
 
 ## Core SOUL Vocabulary
 
@@ -43,13 +43,13 @@ agent context. Not a second memory layer.
 **ContextPack** — Assembled deliverable for a single recall request:
 included candidates + excluded candidates + degradation reasons.
 
-**ConversationService** *(adapted in Alaya)* — In upstream do-what,
-the orchestration entry point for a chat turn (Memory + Recall +
-Evidence + Green + Governance + OutputShaping). In Alaya, ported
-under `adapt-and-port` with chat-specific orchestration removed
-(worker-dispatch / runtime-adapter / tool-substrate); only the
-candidate→recall→govern→durable memory orchestration is retained.
-See `docs/v0.1/phase-3-briefs/README.md` row P3-conversation.
+**ConversationService** *(adapted in Alaya)* — Upstream do-what used
+this as the orchestration entry point for a chat turn (Memory +
+Recall + Evidence + Green + Governance + OutputShaping). Alaya
+retains only the candidate→recall→govern→durable memory orchestration;
+chat-specific orchestration (worker-dispatch / runtime-adapter /
+tool-substrate) was dropped during the v0.1 port. See historical
+card `docs/v0.1/phase-3-briefs/README.md` row P3-conversation.
 
 **RecallQuery** — Per-turn request to RecallService describing what
 the consuming agent needs (subject, scope, dimensions, budgets,
@@ -190,23 +190,14 @@ This is an **interim pattern** — `#BL-031` retires it by making the
 primary repo methods synchronous and async-wrapping only at I/O
 boundaries.
 
-## Port Vocabulary *(Alaya v0.1 specific)*
+## Port Vocabulary *(Historical, retired after v0.1.0)*
 
-**Port** — Copy a file from `vendor/do-what-new-snapshot/` into the
-Alaya tree, possibly with mechanical adaptation. Defined in
-`docs/handbook/port-protocol.md`.
-
-**trivial-copy** — Direct file copy, only mechanical changes
-(import paths, package names). Default port mode.
-
-**adapt-and-port** — File copy with limited interface adaptation.
-Requires §2 enumeration of every adapter point.
-
-**requires-redesign** — Rare; needs explicit user approval and an
-Alaya invariant cite.
-
-**Vendor Snapshot** — Frozen upstream source at
-`vendor/do-what-new-snapshot/`. See `SNAPSHOT_REF.md` for source commit.
+The `Port` / `trivial-copy` / `adapt-and-port` / `requires-redesign`
+/ `Vendor Snapshot` terminology was load-bearing only during the v0.1
+port wave. Definitions are preserved at
+`docs/archive/port-protocol-historical.md` for reading port-era task
+cards under `docs/v0.1/phase-*-briefs/`. Forward (post-v0.1.0) work
+does not use these terms.
 
 ## Workflow
 

@@ -26,8 +26,9 @@ Thumbs.db
 .worktrees/
 
 # Note: .codex and .claude are KEPT in git per user instruction
-# Note: vendor/do-what-new-snapshot/ is KEPT in git so port task cards
-#       have a stable source reference
+# Note: vendor/do-what-new-snapshot/ was the v0.1 port-time source
+#       reference; removed by Phase E vendor cleanup after v0.1.0.
+#       See CLAUDE.md §Project Genealogy for the upstream commit hash.
 
 # do-it plugin internal artifacts (per-worktree plan stub for grill hook)
 .do-it/
