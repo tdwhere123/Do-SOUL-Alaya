@@ -187,6 +187,16 @@ runtime contract as MCP. Tested for parity.
 Code) is configured to use Alaya as its memory plane. Always
 preview-then-confirm; no silent profile mutation.
 
+**Slash Boot Trigger** — A host CLI command such as `/alaya-inspect`
+that opens an Alaya operator surface. It is a convenience launcher for
+`alaya inspect --open`, not a memory tool and not a durable memory
+write path.
+
+**Host Slash Registry** — The host application's own mechanism for
+recognizing slash commands. Alaya can write managed profile entries,
+but recognition must be proven against the concrete host and version
+before the trigger is called consumable.
+
 ## Recall
 
 **Lexical Recall** — BM25 / FTS-based search.

@@ -94,6 +94,13 @@ surfaces are:
   limited to daemon runtime parameters per invariant §21; memory
   ontology writes still go through the proposal / governance path.
   Not an agent surface; never participates in agent control flow.
+- **Slash boot trigger** (`/alaya-inspect`) — optional host-native
+  convenience that should launch `alaya inspect --open` and therefore
+  Memory Inspector. It is not an Alaya MCP tool, not an MCP prompt, and
+  not a Codex skill. `alaya attach <target>` may write an Alaya-managed
+  host profile entry for this trigger, but actual recognition belongs
+  to the host CLI's own slash-command system and must be proven per
+  host/version before claiming it as consumable.
 
 The MCP server and CLI fallback share one runtime contract; CLI
 fallback parity with MCP is enforced by tests. The Inspector consumes

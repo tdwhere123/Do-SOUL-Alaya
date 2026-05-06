@@ -69,7 +69,8 @@ each Phase Gate.
 | MCP discovery services | `implementation-ready` | `implementation-ready` | P3-mcp-discovery |
 | MCP tool surface | `mcp-consumable` via single-daemon attached-agent MCP harness | `mcp-consumable` | P3-mcp-discovery + P4-mcp-tooling + P4-mcp-memory-tools + P4-mcp-server + Gate-4 proof harness |
 | Core daemon | `implementation-ready` | `live-event-ready` | P4-daemon-skeleton + P4-daemon-startup-ordering + P4-sse-strip |
-| Profile mutation (Codex/Claude attach) | `implementation-ready` | `cli-consumable` | P4-profile-mutation |
+| Profile mutation (Codex/Claude attach) | MCP profile entries are `cli-consumable`; Alaya-managed slash profile entries are written but host recognition is tracked separately | `cli-consumable` for MCP attach | P4-profile-mutation |
+| Slash boot trigger (`/alaya-inspect`) | `implementation-ready`; attach writes the managed trigger, but Codex host recognition for custom slash commands is not proven | host-proven `cli-consumable` | P4-profile-mutation + #BL-037 |
 | CLI commands (install / attach / status / doctor / tools list / tools call) | `cli-consumable` (proven by release E2E) | `cli-consumable` | P4-cli-bridge + P4-mcp-memory-tools + P4-cli-install + P4-cli-attach + P4-cli-status + P4-cli-doctor + P5-e2e |
 | CLI commands (inspect / detach / backup / export / import / mcp stdio) | `implementation-ready` (covered by targeted command tests only) | `cli-consumable` | P4-cli-inspect + P4-cli-detach + P4-operations + P4-mcp-server |
 | Trust state delivery / usage | `live-event-ready`; SQL-backed delivery and usage records survive daemon restart | `live-event-ready` | P4-trust-state + #BL-015 repair |

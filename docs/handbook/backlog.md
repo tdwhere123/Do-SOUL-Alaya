@@ -6,20 +6,35 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-037` (`#BL-022` was opened by
+sequence. **Next available number**: `#BL-038` (`#BL-022` was opened by
 p5-system-review-r3 as an EventPublisher v0.2 deferral and closed in
 v0.1-closeout-a2; `#BL-023`/`#BL-024` were resolved in r1 / r2;
 `#BL-025` through `#BL-036` were opened by the v0.1-closeout A2 and
 D2 fix-loops, then resolved by Gate-5F under
 `docs/v0.1/phase-5-followup-briefs/` before Phase 6).
 
-## No Open Issues
+## Open Issues
 
-There are no cross-phase unresolved issues in this backlog after the
-Gate-5F implementation closeout. Gate-5F itself still requires the
-aggregate final review and full verification gate before Phase 6 may
-start; that gate is tracked in
-`docs/v0.1/phase-5-followup-briefs/reports/gate-5f-closeout.md`.
+### #BL-037 - Codex `/alaya-inspect` host recognition proof
+
+`alaya attach codex` writes an Alaya-managed
+`[slash_commands.alaya-inspect]` profile entry that launches
+`node <repo>/bin/alaya.mjs inspect --open`. Current project truth proves
+the profile mutation and the CLI launcher shape, but does not yet prove
+that the active Codex CLI version recognizes that custom slash registry
+inside the conversation composer.
+
+Close condition:
+
+- Confirm the supported Codex extension path for a fixed
+  `/alaya-inspect` command, or document that Codex does not support
+  third-party fixed slash triggers in the target version.
+- If supported, update profile mutation to write the documented format
+  and add an interactive or host-level proof that `/alaya-inspect`
+  appears and dispatches to Memory Inspector.
+- If unsupported, remove the `cli-consumable` expectation for Codex
+  host slash recognition and keep `alaya inspect --open` plus MCP/CLI
+  fallback as the supported path.
 
 ## Resolved by Gate-5F (2026-05-05)
 

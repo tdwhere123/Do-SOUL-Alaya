@@ -43,6 +43,24 @@ Reading Matrix`. Do not treat this page as a second workflow table.
 - `task-card-template.md` is the post-v0.1.0 lightweight task-card
   template for non-trivial work.
 
+## Operator Discussion Baseline
+
+Use these boundaries before opening new planning threads:
+
+- `architecture.md` owns the surface model: MCP is the agent memory
+  surface, CLI is the fallback/operator surface, and Memory Inspector
+  is memory tooling only.
+- `runtime-status.md` owns readiness labels. Do not infer
+  `mcp-consumable`, `cli-consumable`, or host slash-command support
+  from source code or profile-file writes alone.
+- `/alaya-inspect` is a fixed host slash boot trigger for Memory
+  Inspector, not an MCP tool, MCP prompt, or Codex skill. Host
+  recognition is tracked separately from Alaya writing a profile entry.
+- Install mode matters: a source checkout uses the absolute
+  `node <repo>/bin/alaya.mjs ...` launcher written by attach, while a
+  global npm install depends on the package existing on npm and being
+  on PATH.
+
 ## Project Genealogy (Historical)
 
 Alaya v0.1 was ported from the sibling project `do-what-new`
