@@ -5,6 +5,8 @@ import {
   applyProfileMutationPlan,
   buildAttachProfileMutationPlan,
   buildDetachProfileMutationPlan,
+  detectAttachedProfileInstructionsDrift,
+  extractAttachedOperatorInstructions,
   PUBLIC_SOUL_TOOL_NAMES,
   renderProfileMutationPreview,
   resolveAlayaMcpLauncher,
@@ -305,5 +307,100 @@ describe("profile mutation", () => {
       allowConflicts: true
     });
     expect(success.changed).toBe(true);
+  });
+});
+
+describe("attached profile instructions drift detection (C3)", () => {
+  it("extracts codex operator_instructions from a JSON-encoded toml value", () => {
+    const stale = "soul.recall -> respond. (legacy v0.0.9 text)";
+    const codexProfile = `
+[mcp_servers.alaya]
+command = "node"
+args = ["bin/alaya.mjs", "mcp", "stdio"]
+operator_instructions = ${JSON.stringify(stale)}
+`;
+    expect(extractAttachedOperatorInstructions("codex", codexProfile)).toBe(stale);
+  });
+
+  it("extracts claude-code operatorInstructions from .claude.json mcpServers", () => {
+    const stale = "old loop description";
+    const claudeProfile = JSON.stringify({
+      mcpServers: {
+        alaya: {
+          command: "node",
+          args: ["bin/alaya.mjs", "mcp", "stdio"],
+          operatorInstructions: stale
+        }
+      }
+    });
+    expect(extractAttachedOperatorInstructions("claude-code", claudeProfile)).toBe(stale);
+  });
+
+  it("returns undefined when content is missing or has no alaya entry", () => {
+    expect(extractAttachedOperatorInstructions("codex", undefined)).toBeUndefined();
+    expect(extractAttachedOperatorInstructions("codex", "")).toBeUndefined();
+    expect(extractAttachedOperatorInstructions("codex", "[other]\nfoo=1\n")).toBeUndefined();
+    expect(extractAttachedOperatorInstructions("claude-code", "{}")).toBeUndefined();
+    expect(extractAttachedOperatorInstructions("claude-code", "{\"mcpServers\":{}}")).toBeUndefined();
+  });
+
+  it("reports absent when host profile has no alaya entry", async () => {
+    const fs = new MemoryProfileFs();
+    const report = await detectAttachedProfileInstructionsDrift("codex", {
+      env: { HOME: "/tmp/home" },
+      fs
+    });
+    expect(report.status).toBe("absent");
+    expect(report.attached_preview).toBeNull();
+  });
+
+  it("reports in_sync when attached instructions match current source", async () => {
+    const fs = new MemoryProfileFs();
+    // Seed the codex profile with a freshly-attached entry.
+    const plan = await buildAttachProfileMutationPlan("codex", {
+      env: { HOME: "/tmp/home" },
+      fs
+    });
+    await applyProfileMutationPlan(plan, { fs });
+
+    const report = await detectAttachedProfileInstructionsDrift("codex", {
+      env: { HOME: "/tmp/home" },
+      fs
+    });
+    expect(report.status).toBe("in_sync");
+    expect(report.attached_preview).toBeNull();
+  });
+
+  it("reports drifted when attached instructions differ from current source", async () => {
+    const fs = new MemoryProfileFs();
+    // Pre-seed a stale entry directly (simulating an older attach).
+    const stalePath = "/tmp/home/.codex/config.toml";
+    fs.files.set(
+      stalePath,
+      `[mcp_servers.alaya]\ncommand = "node"\nargs = ["x"]\noperator_instructions = ${JSON.stringify("old text from a prior release")}\n`
+    );
+    const report = await detectAttachedProfileInstructionsDrift("codex", {
+      env: { HOME: "/tmp/home" },
+      fs
+    });
+    expect(report.status).toBe("drifted");
+    expect(report.attached_preview).toBe("old text from a prior release");
+    expect(report.profile_path).toBe(stalePath);
+  });
+
+  it("truncates long attached_preview to 120 chars in drift reports", async () => {
+    const fs = new MemoryProfileFs();
+    const long = "x".repeat(500);
+    fs.files.set(
+      "/tmp/home/.codex/config.toml",
+      `[mcp_servers.alaya]\noperator_instructions = ${JSON.stringify(long)}\n`
+    );
+    const report = await detectAttachedProfileInstructionsDrift("codex", {
+      env: { HOME: "/tmp/home" },
+      fs
+    });
+    expect(report.status).toBe("drifted");
+    expect(report.attached_preview?.length).toBe(120);
+    expect(report.attached_preview?.endsWith("…")).toBe(true);
   });
 });

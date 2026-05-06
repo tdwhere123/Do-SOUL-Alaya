@@ -161,6 +161,110 @@ export const ALAYA_OPERATOR_INSTRUCTIONS = [
   "Accepted proposals trigger durable-memory apply; rejected proposals keep durable memory unchanged."
 ].join(" ");
 
+export type ProfileInstructionsDriftStatus =
+  | "absent"            // host profile file or alaya entry not present
+  | "in_sync"           // attached entry's instructions match current source
+  | "drifted";          // attached entry exists but instructions differ from source
+
+export interface ProfileInstructionsDriftReport {
+  readonly target: ProfileTarget;
+  readonly profile_path: string;
+  readonly status: ProfileInstructionsDriftStatus;
+  /** Truncated current value from the host profile (≤120 chars) for diagnosis. */
+  readonly attached_preview: string | null;
+}
+
+/**
+ * Extract the operator_instructions value Alaya wrote to a host profile, if
+ * any. Returns undefined when the profile file is missing, has no Alaya
+ * entry, or the entry has no instructions field.
+ */
+export function extractAttachedOperatorInstructions(
+  target: ProfileTarget,
+  content: string | undefined
+): string | undefined {
+  if (content === undefined || content.trim().length === 0) {
+    return undefined;
+  }
+  if (target === "codex") {
+    const block = extractTomlBlock(content, "[mcp_servers.alaya]");
+    if (block === undefined) {
+      return undefined;
+    }
+    // operator_instructions = "..." — value is JSON-encoded so it can span
+    // a single double-quoted string with escapes (matches renderCodexMcpBlock).
+    const match = /^\s*operator_instructions\s*=\s*(".*")\s*$/mu.exec(block);
+    if (match === null) {
+      return undefined;
+    }
+    try {
+      return JSON.parse(match[1]) as string;
+    } catch {
+      return undefined;
+    }
+  }
+
+  // claude-code: parse JSON, walk mcpServers.alaya.operatorInstructions.
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = parseJsonObject(content, ".claude.json");
+  } catch {
+    return undefined;
+  }
+  const mcpServers = parsed.mcpServers;
+  if (!isRecord(mcpServers)) {
+    return undefined;
+  }
+  const alayaEntry = mcpServers.alaya;
+  if (!isRecord(alayaEntry)) {
+    return undefined;
+  }
+  const value = alayaEntry.operatorInstructions;
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * Read the active host profile and report whether the attached
+ * operator_instructions are in sync with the current source value.
+ *
+ * Why this exists: source-side `ALAYA_OPERATOR_INSTRUCTIONS` evolves between
+ * releases. `alaya attach` already overwrites the entry on re-run, but
+ * operators don't always know to re-attach after `alaya update`. doctor
+ * surfaces drift so the operator sees a clear hint to refresh.
+ */
+export async function detectAttachedProfileInstructionsDrift(
+  target: ProfileTarget,
+  options: ProfileMutationBuildOptions = {}
+): Promise<ProfileInstructionsDriftReport> {
+  const env = options.env ?? process.env;
+  const fs = options.fs ?? createNodeProfileMutationFs();
+  const paths = await resolveProfilePaths(target, { env, fs });
+  const content = await fs.readText(paths.mcpConfigPath);
+  const attached = extractAttachedOperatorInstructions(target, content);
+  if (attached === undefined) {
+    return {
+      target,
+      profile_path: paths.mcpConfigPath,
+      status: "absent",
+      attached_preview: null
+    };
+  }
+  if (attached === ALAYA_OPERATOR_INSTRUCTIONS) {
+    return {
+      target,
+      profile_path: paths.mcpConfigPath,
+      status: "in_sync",
+      attached_preview: null
+    };
+  }
+  return {
+    target,
+    profile_path: paths.mcpConfigPath,
+    status: "drifted",
+    attached_preview: attached.length > 120 ? `${attached.slice(0, 119)}…` : attached
+  };
+}
+
 export async function buildAttachProfileMutationPlan(
   target: ProfileTarget,
   options: ProfileMutationBuildOptions = {}

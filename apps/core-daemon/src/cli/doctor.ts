@@ -2,6 +2,11 @@ import { access, constants as fsConstants } from "node:fs/promises";
 import type { EmbeddingStatus, ToolchainStatus } from "@do-soul/alaya-protocol";
 import type { DaemonStartupStepRecord } from "../index.js";
 import type { PathPlasticityLookupTelemetrySnapshot } from "../path-plasticity-runtime.js";
+import {
+  detectAttachedProfileInstructionsDrift,
+  type ProfileInstructionsDriftReport,
+  type ProfileTarget
+} from "../profile-mutation.js";
 import { ALAYA_SYSEXITS, type AlayaCliArgsSchema, type AlayaCliContext, type AlayaSubcommandSpec } from "./bridge.js";
 import { resolveCliWorkspaceContext } from "./workspace-context.js";
 
@@ -67,8 +72,11 @@ interface DoctorReport {
   readonly recall: Readonly<{
     readonly path_plasticity_lookup: Readonly<PathPlasticityLookupTelemetrySnapshot>;
   }>;
+  readonly attached_profiles: ReadonlyArray<ProfileInstructionsDriftReport>;
   readonly checks: Readonly<Record<"runtime" | "storage" | "provider" | "mcp" | "garden", DoctorCheckStatus>>;
 }
+
+const PROFILE_TARGETS: readonly ProfileTarget[] = ["codex", "claude-code"];
 
 const STARTUP_STEPS = [
   "database",
@@ -127,6 +135,27 @@ export function createDoctorCommand(
           window_size: 128
         } satisfies PathPlasticityLookupTelemetrySnapshot);
 
+      // C3: detect drift between source ALAYA_OPERATOR_INSTRUCTIONS and the
+      // value Alaya wrote into host MCP profiles on a prior `alaya attach`.
+      // Operators don't always re-attach after `alaya update`, so we surface
+      // the divergence here with a concrete refresh hint.
+      const attachedProfiles = await Promise.all(
+        PROFILE_TARGETS.map(async (target) => {
+          try {
+            return await detectAttachedProfileInstructionsDrift(target);
+          } catch {
+            // HOME unset / unreadable profile path — treat as "absent" rather
+            // than failing doctor. Resolve a placeholder report.
+            return {
+              target,
+              profile_path: "",
+              status: "absent",
+              attached_preview: null
+            } as const satisfies ProfileInstructionsDriftReport;
+          }
+        })
+      );
+
       const checks = {
         runtime: daemonReady ? "pass" : "fail",
         storage:
@@ -159,6 +188,7 @@ export function createDoctorCommand(
         recall: {
           path_plasticity_lookup: pathPlasticityLookupTelemetry
         },
+        attached_profiles: attachedProfiles,
         checks
       };
 
@@ -307,5 +337,19 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport):
     stream.write(
       `embedding mode: ${report.provider.embedding.effective_mode} (provider_configured=${report.provider.embedding.provider_configured ? "yes" : "no"})\n`
     );
+  }
+  for (const profile of report.attached_profiles) {
+    if (profile.status === "drifted") {
+      stream.write(
+        `attached profile (${profile.target}): instructions DRIFTED — ` +
+          `host file is older than current source. ` +
+          `Run \`alaya attach ${profile.target}\` to refresh ` +
+          `(${profile.profile_path}).\n`
+      );
+    } else if (profile.status === "in_sync") {
+      stream.write(`attached profile (${profile.target}): in sync\n`);
+    }
+    // status === "absent" is silent — the user may have intentionally not
+    // attached this target.
   }
 }
