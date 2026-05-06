@@ -218,12 +218,35 @@ function createMcpCommand(runtime: AlayaDaemonRuntime): AlayaSubcommandSpec<read
       }
       runtime.startBackgroundServices();
 
+      // gate-6-delta B1: the MCP stdio surface is an attached-agent
+      // boundary; it must never advertise itself as a human-reviewer
+      // surface ("inspector" / "cli"). An attacker controlling launch
+      // env who set ALAYA_AGENT_TARGET=cli would otherwise get
+      // assertProposalContext's runId-null loosening at
+      // mcp-memory-proposal-workflow.ts:568-571 and could accept any
+      // pending proposal in the workspace. The other agent-attached
+      // surfaces apply equivalent guards at their boundaries
+      // (cli/review.ts:378-408 pins "cli", cli/tools.ts:82-90 rejects
+      // human-reviewer targets), so per invariants §30 we fix at
+      // source by sanitising the env here.
+      const requestedAgentTarget = ctx.env.ALAYA_AGENT_TARGET;
+      const isHumanReviewerSpoof =
+        requestedAgentTarget === "cli" || requestedAgentTarget === "inspector";
+      if (isHumanReviewerSpoof) {
+        ctx.stderr.write(
+          `Ignoring ALAYA_AGENT_TARGET=${requestedAgentTarget}: MCP stdio cannot impersonate human-reviewer surfaces.\n`
+        );
+      }
+      const resolvedAgentTarget = isHumanReviewerSpoof
+        ? "mcp"
+        : (requestedAgentTarget ?? "mcp");
+
       const server = await runAlayaMcpStdioServer({
         memoryToolHandler: runtime.services.mcpMemoryToolHandler,
         contextProvider: () => ({
           workspaceId: workspaceContext.workspaceId,
           runId: trustedRunId.runId,
-          agentTarget: ctx.env.ALAYA_AGENT_TARGET ?? "mcp"
+          agentTarget: resolvedAgentTarget
         }),
         stdin: ctx.stdin as unknown as Readable,
         stdout: ctx.stdout as unknown as Writable
