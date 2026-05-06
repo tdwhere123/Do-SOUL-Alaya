@@ -143,6 +143,255 @@ describe("proposal review inspector cli parity", () => {
   });
 });
 
+// gate-6-delta I2: the original parity test only proves the success
+// path. Error-shape parity across MCP / Inspector HTTP / CLI was
+// claimed but not verified. These cases drive each surface through
+// the same workflow with an injected failure and assert error.code +
+// error.message identity. Per-surface transport severity (HTTP
+// status, CLI exit code) intentionally differs by design and is
+// asserted as deterministic-per-surface, not equal across surfaces.
+
+interface ReviewParitySurfaces {
+  readonly mcp: { readonly ok: false; readonly error: { readonly code: string; readonly message: string } };
+  readonly inspector: { readonly status: number; readonly body: { readonly error?: { readonly code?: string; readonly message?: string } } };
+  readonly cli: { readonly exitCode: number; readonly stderr: string; readonly json: unknown };
+}
+
+async function runReviewParityScenario(
+  buildHandler: () => McpMemoryToolHandler
+): Promise<ReviewParitySurfaces> {
+  const mcpResult = await callAlayaMcpMemoryTool(
+    {
+      memoryToolHandler: buildHandler(),
+      contextProvider: () => ({ workspaceId: "ws1", runId: null, agentTarget: "codex" })
+    },
+    "soul.review_memory_proposal",
+    reviewerArgs
+  );
+  const mcpEnvelope = mcpResult.structuredContent as ReviewParitySurfaces["mcp"];
+
+  const daemonApp = createApp({
+    requestProtection: {
+      allowedOrigin: "http://localhost:5173",
+      requestToken: "daemon-request-token"
+    },
+    routes: {
+      proposals: {
+        workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws1" })) } as any,
+        proposalService: {
+          findByWorkspaceId: vi.fn(async () => []),
+          findPending: vi.fn(async () => [])
+        } as any,
+        mcpMemoryToolHandler: buildHandler()
+      }
+    }
+  });
+  const inspectorApp = createInspectorApp({
+    token: "inspector-token",
+    daemonUrl: "http://daemon.local",
+    env: {
+      ALAYA_REQUEST_TOKEN: "daemon-request-token",
+      ALAYA_REVIEWER_TOKEN: "review-token",
+      ALAYA_REVIEWER_IDENTITY: "user:server-reviewer"
+    },
+    fetchImpl: async (input, init) => {
+      const url = new URL(String(input));
+      return await daemonApp.request(`${url.pathname}${url.search}`, {
+        method: init?.method,
+        headers: init?.headers,
+        body: init?.body
+      });
+    }
+  });
+  const inspectorResponse = await inspectorApp.request(
+    "/api/proposals/ws1/prop-1/review?token=inspector-token",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        verdict: reviewerArgs.verdict,
+        reason: reviewerArgs.reason,
+        reviewer_identity: "user:server-reviewer"
+      })
+    }
+  );
+  const inspectorBody = (await inspectorResponse.json()) as ReviewParitySurfaces["inspector"]["body"];
+
+  const cliCommand = createReviewCommand({
+    handler: buildHandler(),
+    defaultWorkspaceId: "ws1",
+    defaultReviewerIdentity: "user:server-reviewer",
+    defaultReviewerToken: "review-token"
+  });
+  const parsedCli = cliCommand.argsSchema.safeParse(["accept", "prop-1", "--reason", "approved locally"]);
+  if (!parsedCli.success) {
+    throw new Error("CLI args parse failed in test setup");
+  }
+  const cliStderrChunks: string[] = [];
+  const cliCtx = createContext();
+  cliCtx.stderr.on("data", (chunk: Buffer) => cliStderrChunks.push(chunk.toString("utf8")));
+  const cliResult = await cliCommand.handler(cliCtx, parsedCli.data);
+
+  return {
+    mcp: mcpEnvelope,
+    inspector: { status: inspectorResponse.status, body: inspectorBody },
+    cli: {
+      exitCode: cliResult.exitCode,
+      stderr: cliStderrChunks.join(""),
+      json: cliResult.json
+    }
+  };
+}
+
+function createErrorReviewHandler(
+  scenario:
+    | { readonly kind: "proposal_not_found" }
+    | { readonly kind: "already_resolved" }
+    | { readonly kind: "target_memory_missing" }
+    | { readonly kind: "validate_update_rejected"; readonly message: string }
+): McpMemoryToolHandler {
+  const proposal = createProposal();
+  const acceptedProposal: Proposal = {
+    ...proposal,
+    resolution_state: ProposalResolutionState.ACCEPTED
+  };
+  const proposalWorkflow = createMcpMemoryProposalWorkflow({
+    now: () => "2026-04-30T00:00:00.000Z",
+    generateObjectId: () => "prop-1",
+    reviewerIdentityBinding: {
+      token: "review-token",
+      identity: "user:server-reviewer"
+    },
+    eventLogRepo: {
+      append: async () => {
+        throw new Error("append must not be called on the error path");
+      },
+      queryByEntity: async () => []
+    },
+    proposalRepo: {
+      create: async () => proposal,
+      createProposalWithEvents: async () => ({ proposal, events: [] }),
+      findById: async () => proposal,
+      findScopedById: async () => {
+        if (scenario.kind === "proposal_not_found") {
+          return null;
+        }
+        const base = {
+          workspace_id: "ws1",
+          run_id: null as string | null,
+          reviewer_assignment: { reviewer_identity: "user:server-reviewer" },
+          proposed_changes: { content: "approved locally" }
+        };
+        if (scenario.kind === "already_resolved") {
+          return { ...base, proposal: acceptedProposal };
+        }
+        return { ...base, proposal };
+      },
+      findPendingSummaries: async () => [],
+      acceptPendingMemoryUpdateWithEvents: async () => {
+        throw new Error("acceptPendingMemoryUpdateWithEvents must not be reached on the error path");
+      },
+      updatePendingResolutionWithEvents: async () => {
+        throw new Error("updatePendingResolutionWithEvents must not be reached on the error path");
+      }
+    },
+    runtimeNotifier: { notifyEntry: async () => {} },
+    memoryService: {
+      findByIdScoped: async () => {
+        if (scenario.kind === "target_memory_missing") {
+          return null;
+        }
+        return { object_id: "mem-1" };
+      },
+      validateUpdate: async () => {
+        if (scenario.kind === "validate_update_rejected") {
+          const error = new Error(scenario.message) as Error & { code: string };
+          error.code = "VALIDATION";
+          throw error;
+        }
+      },
+      update: async (objectId: string, fields) =>
+        createParityMemoryEntry({ object_id: objectId, ...fields })
+    }
+  });
+  return createMcpMemoryToolHandler({
+    ...createBaseDeps(),
+    proposalWorkflow
+  });
+}
+
+describe("proposal review error parity (gate-6-delta I2)", () => {
+  it("returns identical NOT_FOUND envelope across MCP, Inspector HTTP, and CLI when proposal_id is unknown", async () => {
+    const { mcp, inspector, cli } = await runReviewParityScenario(() =>
+      createErrorReviewHandler({ kind: "proposal_not_found" })
+    );
+
+    expect(mcp.ok).toBe(false);
+    expect(mcp.error.code).toBe("NOT_FOUND");
+    const expectedMessage = "Proposal not found: prop-1";
+    expect(mcp.error.message).toBe(expectedMessage);
+
+    expect(inspector.body.error?.code).toBe(mcp.error.code);
+    expect(inspector.body.error?.message).toBe(mcp.error.message);
+    expect([404, 400]).toContain(inspector.status);
+
+    expect(cli.exitCode).not.toBe(ALAYA_SYSEXITS.OK);
+    expect(cli.stderr).toContain("NOT_FOUND");
+    expect(cli.stderr).toContain(expectedMessage);
+  });
+
+  it("returns identical VALIDATION envelope when the proposal is already accepted", async () => {
+    const { mcp, inspector, cli } = await runReviewParityScenario(() =>
+      createErrorReviewHandler({ kind: "already_resolved" })
+    );
+
+    expect(mcp.ok).toBe(false);
+    expect(mcp.error.code).toBe("VALIDATION");
+    expect(mcp.error.message).toContain("already accepted");
+
+    expect(inspector.body.error?.code).toBe(mcp.error.code);
+    expect(inspector.body.error?.message).toBe(mcp.error.message);
+
+    expect(cli.exitCode).not.toBe(ALAYA_SYSEXITS.OK);
+    expect(cli.stderr).toContain("VALIDATION");
+    expect(cli.stderr).toContain("already accepted");
+  });
+
+  it("returns identical NOT_FOUND envelope when the target memory is missing in the workspace", async () => {
+    const { mcp, inspector, cli } = await runReviewParityScenario(() =>
+      createErrorReviewHandler({ kind: "target_memory_missing" })
+    );
+
+    expect(mcp.ok).toBe(false);
+    expect(mcp.error.code).toBe("NOT_FOUND");
+    expect(mcp.error.message).toContain("Target memory object not found");
+
+    expect(inspector.body.error?.code).toBe(mcp.error.code);
+    expect(inspector.body.error?.message).toBe(mcp.error.message);
+
+    expect(cli.exitCode).not.toBe(ALAYA_SYSEXITS.OK);
+    expect(cli.stderr).toContain("NOT_FOUND");
+  });
+
+  it("returns identical VALIDATION envelope when validateUpdate rejects (e.g. archived memory)", async () => {
+    const message = "Cannot update archived memory entry mem-1.";
+    const { mcp, inspector, cli } = await runReviewParityScenario(() =>
+      createErrorReviewHandler({ kind: "validate_update_rejected", message })
+    );
+
+    expect(mcp.ok).toBe(false);
+    expect(mcp.error.code).toBe("VALIDATION");
+    expect(mcp.error.message).toBe(message);
+
+    expect(inspector.body.error?.code).toBe(mcp.error.code);
+    expect(inspector.body.error?.message).toBe(mcp.error.message);
+
+    expect(cli.exitCode).not.toBe(ALAYA_SYSEXITS.OK);
+    expect(cli.stderr).toContain("VALIDATION");
+    expect(cli.stderr).toContain(message);
+  });
+});
+
 function createReviewHandler(): McpMemoryToolHandler {
   const proposal = createProposal();
   let storedProposal = proposal;
