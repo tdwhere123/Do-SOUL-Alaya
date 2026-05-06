@@ -139,4 +139,23 @@ describe("GraphPage", () => {
     // edit drawer opens (G8): read-only graph never enters an edit affordance.
     expect(screen.queryByRole("textbox", { name: /edit/i })).toBeNull();
   });
+
+  it("sets a viewBox so the simulation coord system is decoupled from CSS pixels", async () => {
+    // Regression: pre-fix, the SVG had no viewBox, so a simulation centred at
+    // (width/2, height/2) of an 800×600 fallback rendered into the upper-left
+    // quadrant of a larger actual SVG. With viewBox + preserveAspectRatio, the
+    // sim coord system stretches/letterboxes to match the actual render area.
+    const { container } = renderGraph();
+    await waitFor(() => container.querySelector("g[data-node-id='n1']"));
+    // Select the graph SVG specifically (lucide icons render their own SVGs
+    // earlier in the DOM, so a bare `svg` selector picks the Search icon).
+    const svg = container.querySelector(
+      "svg[data-spotlight-active]"
+    ) as SVGSVGElement | null;
+    expect(svg).not.toBeNull();
+    const viewBox = svg!.getAttribute("viewBox");
+    expect(viewBox).toBeTruthy();
+    expect(viewBox).toMatch(/^0 0 \d+(\.\d+)? \d+(\.\d+)?$/);
+    expect(svg!.getAttribute("preserveAspectRatio")).toBe("xMidYMid meet");
+  });
 });
