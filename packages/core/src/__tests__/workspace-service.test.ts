@@ -8,6 +8,26 @@ import {
 } from "@do-soul/alaya-protocol";
 import { WorkspaceService } from "../workspace-service.js";
 
+// Duck-typed shape that mirrors @do-soul/alaya-storage StorageError
+// without importing the storage package — core may not depend on
+// storage per the Package Dependency Direction (invariants §<dep-dir>).
+// Real SqliteWorkspaceRepo behavior is exercised end-to-end by the
+// daemon-level integration test
+// `apps/core-daemon/src/__tests__/workspace-concurrent-ensure.test.ts`.
+function createDuplicateKeyError(workspaceId: string, cause?: unknown): Error & {
+  readonly code: string;
+} {
+  const error = new Error(`Workspace ${workspaceId} already exists.`) as Error & {
+    code: string;
+    cause?: unknown;
+  };
+  error.code = "DUPLICATE_KEY";
+  if (cause !== undefined) {
+    error.cause = cause;
+  }
+  return error;
+}
+
 // Helper: in-test publisher that simulates the appendManyWithMutation
 // contract (sync mutate, batch-array first arg) used by WorkspaceService
 // after #BL-022.
@@ -145,11 +165,15 @@ describe("WorkspaceService", () => {
       default_engine_class: null,
       workspace_state: WorkspaceState.ACTIVE
     });
-    const duplicateWorkspaceError = {
-      cause: {
-        message: "UNIQUE constraint failed: workspaces.workspace_id"
-      }
-    };
+    // gate-6-delta I3/N3: SqliteWorkspaceRepo.create now surfaces a
+    // structured DUPLICATE_KEY StorageError on UNIQUE collisions so
+    // the service branches on error.code, not on the underlying
+    // sqlite driver message string. Use a duck-typed error here to
+    // keep core test-isolation from the storage package.
+    const duplicateWorkspaceError = createDuplicateKeyError(
+      "local_abcd",
+      new Error("UNIQUE constraint failed: workspaces.workspace_id")
+    );
     const workspaceRepo = {
       create: vi.fn(() => {
         throw duplicateWorkspaceError;
@@ -184,6 +208,68 @@ describe("WorkspaceService", () => {
     expect(workspaceRepo.create).toHaveBeenCalledTimes(1);
     expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
   });
+
+  // gate-6-delta I3/N3: prove the duplicate-walk also catches a
+  // wrapped DUPLICATE_KEY (e.g. surfaced by an EventPublisher that
+  // re-wraps the cause). String-matching the sqlite UNIQUE message
+  // would silently fail here.
+  it("re-reads local workspace when DUPLICATE_KEY arrives via a wrapped cause", async () => {
+    const appendManyWithMutation = fakeAppendManyWithMutation();
+    const persistedWorkspace = createWorkspace({
+      workspace_id: "local_abcd",
+      name: "repo",
+      root_path: "/tmp/repo",
+      workspace_kind: WorkspaceKind.LOCAL_REPO,
+      repo_path: "/tmp/repo",
+      default_engine_binding: null,
+      default_engine_class: null,
+      workspace_state: WorkspaceState.ACTIVE
+    });
+    const innerDuplicateError = createDuplicateKeyError(
+      "local_abcd",
+      new Error("UNIQUE constraint failed: workspaces.workspace_id")
+    );
+    const wrappedError = new Error("EventPublisher mutation failed");
+    (wrappedError as { cause?: unknown }).cause = innerDuplicateError;
+
+    const workspaceRepo = {
+      create: vi.fn(() => {
+        throw wrappedError;
+      }),
+      getById: vi.fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(persistedWorkspace),
+      list: vi.fn(async () => []),
+      delete: vi.fn(() => undefined),
+      updateDefaultEngineClass: vi.fn(() => {
+        throw new Error("not used");
+      })
+    };
+    const service = new WorkspaceService({
+      workspaceRepo,
+      runRepo: {
+        listByWorkspace: vi.fn(async () => [])
+      },
+      eventPublisher: {
+        appendManyWithMutation
+      } as any
+    });
+
+    const ensured = await service.ensureLocalWorkspace({
+      workspaceId: "local_abcd",
+      name: "repo",
+      rootPath: "/tmp/repo"
+    });
+
+    expect(ensured).toBe(persistedWorkspace);
+    expect(workspaceRepo.getById).toHaveBeenCalledTimes(2);
+  });
+
+  // The real-SQLite concurrent integration test for this scenario
+  // lives in
+  // `apps/core-daemon/src/__tests__/workspace-concurrent-ensure.test.ts`
+  // — the core package may not import @do-soul/alaya-storage per the
+  // Package Dependency Direction.
 
   it("rolls back persisted workspace state when bootstrapping record persistence fails", async () => {
     // Under #BL-022 the rollback is implicit: the entire mutate runs inside

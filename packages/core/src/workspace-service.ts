@@ -423,12 +423,18 @@ function parseEngineBindingInput(input: unknown): EngineBindingInput {
   }
 }
 
+// gate-6-delta I3/N3: prefer the structured DUPLICATE_KEY surfaced by
+// SqliteWorkspaceRepo.create. Walk a few cause levels so future
+// intermediary wrappers (transactional repos, EventPublisher) cannot
+// silently bury the code by re-wrapping the StorageError.
 function isWorkspaceIdDuplicateCreateError(error: unknown): boolean {
-  const directMessage = (error as { readonly message?: unknown })?.message;
-  const causeMessage = (error as { readonly cause?: { readonly message?: unknown } })?.cause?.message;
-  return [directMessage, causeMessage].some(
-    (message) =>
-      typeof message === "string" &&
-      message.includes("UNIQUE constraint failed: workspaces.workspace_id")
-  );
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {
+    const codeValue = (current as { readonly code?: unknown }).code;
+    if (codeValue === "DUPLICATE_KEY") {
+      return true;
+    }
+    current = (current as { readonly cause?: unknown }).cause;
+  }
+  return false;
 }

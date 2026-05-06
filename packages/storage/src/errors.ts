@@ -5,7 +5,12 @@ export type StorageErrorCode =
   | "QUERY_FAILED"
   | "VALIDATION_FAILED"
   | "CONFLICT"
-  | "NOT_FOUND";
+  | "NOT_FOUND"
+  // gate-6-delta I3/N3: surfaces a UNIQUE-constraint collision so
+  // callers (e.g. WorkspaceService.ensureLocalWorkspace) can branch on
+  // a structured code rather than string-matching the underlying
+  // sqlite driver message.
+  | "DUPLICATE_KEY";
 
 export class StorageError extends Error {
   public readonly code: StorageErrorCode;

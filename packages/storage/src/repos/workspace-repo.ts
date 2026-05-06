@@ -3,6 +3,32 @@ import type { StorageDatabase } from "../db.js";
 import { StorageError } from "../errors.js";
 import { cascadeDeleteWorkspace } from "./cascade-delete.js";
 
+// gate-6-delta I3/N3: walk the underlying better-sqlite3 error
+// (and any wrapped causes) to detect a UNIQUE-constraint collision
+// on a specific qualified column. Driver typically sets `code` to
+// "SQLITE_CONSTRAINT_UNIQUE" and includes the constraint string in
+// the message; the cause walk handles eventual error-wrapping by
+// upstream layers.
+function isUniqueConstraintError(error: unknown, qualifiedColumn: string): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {
+    const codeValue = (current as { readonly code?: unknown }).code;
+    const messageValue = (current as { readonly message?: unknown }).message;
+    const isUniqueCode =
+      typeof codeValue === "string" && codeValue.startsWith("SQLITE_CONSTRAINT");
+    const matchesColumn =
+      typeof messageValue === "string" && messageValue.includes(qualifiedColumn);
+    if (isUniqueCode && matchesColumn) {
+      return true;
+    }
+    if (matchesColumn && typeof messageValue === "string" && messageValue.includes("UNIQUE")) {
+      return true;
+    }
+    current = (current as { readonly cause?: unknown }).cause;
+  }
+  return false;
+}
+
 export type WorkspaceCreateInput = Omit<Workspace, "created_at" | "archived_at" | "repo_path"> & {
   readonly repo_path?: Workspace["repo_path"];
 };
@@ -126,6 +152,17 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
         workspace.archived_at
       );
     } catch (error) {
+      // gate-6-delta I3/N3: surface UNIQUE-collisions on workspace_id
+      // as a structured DUPLICATE_KEY so WorkspaceService.ensureLocalWorkspace
+      // can re-read the existing row without string-matching the
+      // sqlite driver message at the service boundary.
+      if (isUniqueConstraintError(error, "workspaces.workspace_id")) {
+        throw new StorageError(
+          "DUPLICATE_KEY",
+          `Workspace ${workspace.workspace_id} already exists.`,
+          error
+        );
+      }
       throw new StorageError("QUERY_FAILED", "Failed to create workspace.", error);
     }
 
