@@ -805,6 +805,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       environmentStatusService,
       embeddingStatusService,
       mcpMemoryToolHandler,
+      runService,
       trustStateRecorder,
       workspaceService: securedWorkspaceService,
       gardenStatus: {

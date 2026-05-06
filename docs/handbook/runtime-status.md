@@ -306,11 +306,15 @@ non-blocking and tracked for a follow-up wave.
   from real PathRelation data, full E2E proof, and final multi-lens
   review with zero Blocking / Important findings. Benchmark fixtures
   are archived Phase 6 artifacts and not active Gate-6 acceptance.
-- **Gate-6 (v0.1.1 MCP agent-use proof)**: Gate-5F plus tools-only MCP
-  instructions, strengthened attach/install profile text, accept-as-apply
-  proposal governance, recall explainability fields, operator-state CLI
-  language, cwd-derived workspace startup, attach-started Garden
-  cleanup, and a live agent-path harness.
+- **Gate-6 (v0.1.1 MCP agent-use proof)**: passed 2026-05-06 for release
+  acceptance, with evidence in
+  `docs/v0.1/phase-6-briefs/reports/gate-6-closeout.md`. Gate-5F plus
+  tools-only MCP instructions, strengthened attach/install profile text,
+  accept-as-apply proposal governance, recall explainability fields,
+  operator-state CLI language, cwd-derived workspace startup,
+  attach-started Garden cleanup, package/profile proof, and a live
+  agent-path harness are covered; npm publish/version stamping remains a
+  separate release operation.
 - **Gate-5F (backlog closeout)**: backlog items `#BL-025` through
   `#BL-036` resolved; final review reported zero Blocking / Important
   findings; `rtk pnpm build`,

@@ -7,6 +7,7 @@ import {
   buildDetachProfileMutationPlan,
   PUBLIC_SOUL_TOOL_NAMES,
   renderProfileMutationPreview,
+  resolveAlayaMcpLauncher,
   resolveAlayaSlashCommand,
   resolveProfilePaths,
   type ProfileMutationAuditRow,
@@ -139,6 +140,58 @@ describe("profile mutation", () => {
 
     expect(slashAfter).toMatch(/command = "node '.+\/bin\/alaya\.mjs' inspect --open"/u);
     expect(slashAfter).not.toContain('command = "alaya inspect --open"');
+  });
+
+  it("resolves repo source layout launchers to the checkout root bin", () => {
+    const sourceDir = "/tmp/Do SOUL Alaya/apps/core-daemon/src";
+
+    expect(resolveAlayaMcpLauncher({}, { importMetaDirname: sourceDir })).toEqual({
+      command: "node",
+      args: ["/tmp/Do SOUL Alaya/bin/alaya.mjs", "mcp", "stdio"]
+    });
+    expect(resolveAlayaSlashCommand({}, { importMetaDirname: sourceDir })).toBe(
+      "node '/tmp/Do SOUL Alaya/bin/alaya.mjs' inspect --open"
+    );
+  });
+
+  it("resolves repo built layout launchers to the checkout root bin", () => {
+    const distDir = "/tmp/Do SOUL Alaya/apps/core-daemon/dist";
+
+    expect(resolveAlayaMcpLauncher({}, { importMetaDirname: distDir })).toEqual({
+      command: "node",
+      args: ["/tmp/Do SOUL Alaya/bin/alaya.mjs", "mcp", "stdio"]
+    });
+    expect(resolveAlayaSlashCommand({}, { importMetaDirname: distDir })).toBe(
+      "node '/tmp/Do SOUL Alaya/bin/alaya.mjs' inspect --open"
+    );
+  });
+
+  it("resolves installed package dist layout launchers to the package bin", () => {
+    const distDir = "/tmp/install root/node_modules/@do-soul/alaya/dist";
+
+    expect(resolveAlayaMcpLauncher({}, { importMetaDirname: distDir })).toEqual({
+      command: "node",
+      args: ["/tmp/install root/node_modules/@do-soul/alaya/bin/alaya.mjs", "mcp", "stdio"]
+    });
+    expect(resolveAlayaSlashCommand({}, { importMetaDirname: distDir })).toBe(
+      "node '/tmp/install root/node_modules/@do-soul/alaya/bin/alaya.mjs' inspect --open"
+    );
+  });
+
+  it("preserves explicit launcher env overrides", () => {
+    expect(
+      resolveAlayaMcpLauncher({
+        ALAYA_MCP_LAUNCHER: "custom-alaya --profile package"
+      })
+    ).toEqual({
+      command: "custom-alaya",
+      args: ["--profile", "package", "mcp", "stdio"]
+    });
+    expect(
+      resolveAlayaSlashCommand({
+        ALAYA_SLASH_LAUNCHER: "custom-alaya --profile package"
+      })
+    ).toBe("custom-alaya --profile package inspect --open");
   });
 
   it("rolls back first write if second write fails", async () => {

@@ -606,8 +606,9 @@ The threads I'll pull there:
 - **MCP Agent-Use Protocol hardening** — one explicit operator path
   from attach/profile/server wiring to memory-tool usage semantics.
 - **Trustworthy Memory Loop hardening** — keep the domain sequence
-  explicit: candidate signal -> proposal -> accepted proposal ->
-  durable memory application -> recall delivery -> usage receipt.
+  explicit: recall delivery -> usage receipt -> candidate signal ->
+  proposal -> accepted proposal -> durable memory application ->
+  post-apply recall / usage proof.
 - **Embedding strategy refinement** — keep "supplement, never
   oracle"; experiment with boost weight, supplement cap, and
   per-domain calibration.

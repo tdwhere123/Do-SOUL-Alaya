@@ -186,6 +186,42 @@ describe("alaya review (A1)", () => {
     );
   });
 
+  it("rejects a foreign --run override before review reaches the handler", async () => {
+    const stderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
+    const handler = createHandler({
+      "soul.review_memory_proposal": () => ({
+        ok: true,
+        tool_name: "soul.review_memory_proposal",
+        output: { proposal_id: "prop-1", resolution_state: "accepted" }
+      })
+    });
+    const command = createReviewCommand({
+      handler,
+      defaultWorkspaceId: "workspace-1",
+      runService: createRunLookup({ "run-foreign": "workspace-2" })
+    });
+    const parsed = command.argsSchema.safeParse([
+      "accept",
+      "prop-1",
+      "--reviewer",
+      "user:alice",
+      "--run",
+      "run-foreign"
+    ]);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+
+    const result = await command.handler(createContext({ stderr }), parsed.data);
+
+    expect(result.exitCode).toBe(ALAYA_SYSEXITS.DATAERR);
+    expect(stderrChunks.join("")).toContain(
+      "--run run-foreign belongs to workspace workspace-2, not workspace-1."
+    );
+    expect(handler.call).not.toHaveBeenCalled();
+  });
+
   it("keeps CLI human-reviewer context when ALAYA_AGENT_TARGET points at an attached agent", async () => {
     const proposal = createProposal();
     let storedProposal = proposal;
@@ -355,6 +391,14 @@ function createProposal(): Proposal {
     ],
     resolution_state: ProposalResolutionState.PENDING,
     last_updated_at: "2026-04-30T00:00:00.000Z"
+  };
+}
+
+function createRunLookup(workspaceByRun: Record<string, string>) {
+  return {
+    getById: vi.fn(async (runId: string) => ({
+      workspace_id: workspaceByRun[runId] ?? "workspace-missing"
+    }))
   };
 }
 

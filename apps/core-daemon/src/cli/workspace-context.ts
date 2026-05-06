@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { CoreError } from "@do-soul/alaya-core";
 import type { AlayaCliContext } from "./bridge.js";
 
 export interface ResolvedCliWorkspaceContext {
@@ -17,6 +18,10 @@ export interface EnsureLocalWorkspacePort {
     readonly name: string;
     readonly rootPath: string;
   }): Promise<unknown>;
+}
+
+export interface RunWorkspaceLookupPort {
+  getById(runId: string): Promise<Readonly<{ readonly workspace_id: string }>>;
 }
 
 export function resolveCliWorkspaceContext(
@@ -60,6 +65,47 @@ export async function ensureImplicitLocalWorkspace(
   }
 
   await port.ensureLocalWorkspace(workspaceContext.implicitLocalWorkspace);
+}
+
+export async function resolveTrustedCliRunId(input: {
+  readonly runId: string | null | undefined;
+  readonly workspaceId: string;
+  readonly runService?: RunWorkspaceLookupPort | null;
+  readonly sourceLabel: string;
+}): Promise<
+  | { readonly ok: true; readonly runId: string | null }
+  | { readonly ok: false; readonly message: string }
+> {
+  const runId = normalizeOptionalWorkspaceId(input.runId);
+  if (runId === null) {
+    return { ok: true, runId: null };
+  }
+
+  if (input.runService === undefined || input.runService === null) {
+    return {
+      ok: false,
+      message: `${input.sourceLabel} ${runId} cannot be trusted without run lookup service.`
+    };
+  }
+
+  try {
+    const run = await input.runService.getById(runId);
+    if (run.workspace_id !== input.workspaceId) {
+      return {
+        ok: false,
+        message: `${input.sourceLabel} ${runId} belongs to workspace ${run.workspace_id}, not ${input.workspaceId}.`
+      };
+    }
+    return { ok: true, runId };
+  } catch (error) {
+    if (!(error instanceof CoreError && error.code === "NOT_FOUND")) {
+      throw error;
+    }
+    return {
+      ok: false,
+      message: `${input.sourceLabel} ${runId} was not found for workspace ${input.workspaceId}.`
+    };
+  }
 }
 
 function deriveLocalWorkspaceId(rootPath: string): string {

@@ -404,6 +404,123 @@ describe("SqliteProposalRepo", () => {
     });
   });
 
+  it("rejects accepting one proposal while applying a different memory target", async () => {
+    const { repo, database } = createRepo();
+    const memoryRepo = new SqliteMemoryEntryRepo(database);
+    const firstMemory = createMemoryEntry();
+    const secondMemory = createMemoryEntry({
+      object_id: "11111111-1111-4111-8111-111111111111",
+      content: "Keep npm for workspace commands."
+    });
+    const firstProposal = createProposal({
+      proposal_id: "22222222-2222-4222-8222-222222222222",
+      runtime_id: "22222222-2222-4222-8222-222222222222",
+      derived_from: firstMemory.object_id,
+      recommended_option_id: "22222222-2222-4222-8222-222222222223"
+    });
+    const secondProposal = createProposal({
+      proposal_id: "33333333-3333-4333-8333-333333333333",
+      runtime_id: "33333333-3333-4333-8333-333333333333",
+      derived_from: secondMemory.object_id,
+      recommended_option_id: "33333333-3333-4333-8333-333333333334"
+    });
+    await memoryRepo.create(firstMemory);
+    await memoryRepo.create(secondMemory);
+    await repo.create({
+      proposal: firstProposal,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_kind: "memory_entry",
+      proposed_change_summary: "Apply accepted patch",
+      proposed_changes: { content: "Use pnpm for workspace commands." }
+    });
+    await repo.create({
+      proposal: secondProposal,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_kind: "memory_entry",
+      proposed_change_summary: "Apply accepted patch",
+      proposed_changes: { content: "Use yarn for workspace commands." }
+    });
+
+    await expect(
+      repo.acceptPendingMemoryUpdateWithEvents(
+        firstProposal.proposal_id,
+        "2026-03-21T03:00:00.000Z",
+        createReviewEvents(firstProposal),
+        {
+          target_object_id: secondMemory.object_id,
+          workspace_id: "workspace-1",
+          proposed_changes: { content: "Use yarn for workspace commands." },
+          updated_at: "2026-03-21T03:00:00.000Z",
+          caused_by: `proposal_accept:${firstProposal.proposal_id}`
+        },
+        { reviewerIdentity: "user:alice" }
+      )
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    expect(countProposalEvents(database, firstProposal.proposal_id)).toBe(0);
+    expect(countMemoryUpdatedEvents(database, secondMemory.object_id)).toBe(0);
+    await expect(repo.findById(firstProposal.proposal_id)).resolves.toMatchObject({
+      resolution_state: "pending",
+      last_updated_at: "2026-03-21T00:00:00.000Z"
+    });
+    await expect(repo.findById(secondProposal.proposal_id)).resolves.toMatchObject({
+      resolution_state: "pending",
+      last_updated_at: "2026-03-21T00:00:00.000Z"
+    });
+    await expect(memoryRepo.findById(firstMemory.object_id)).resolves.toMatchObject({
+      content: "Use npm for workspace commands.",
+      updated_at: "2026-03-21T00:00:00.000Z"
+    });
+    await expect(memoryRepo.findById(secondMemory.object_id)).resolves.toMatchObject({
+      content: "Keep npm for workspace commands.",
+      updated_at: "2026-03-21T00:00:00.000Z"
+    });
+  });
+
+  it("rejects accepting a proposal with caller-supplied proposed changes that differ from storage", async () => {
+    const { repo, database } = createRepo();
+    const memoryRepo = new SqliteMemoryEntryRepo(database);
+    const proposal = createProposal();
+    await memoryRepo.create(createMemoryEntry());
+    await repo.create({
+      proposal,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_kind: "memory_entry",
+      proposed_change_summary: "Apply accepted patch",
+      proposed_changes: { content: "Use pnpm for workspace commands." }
+    });
+
+    await expect(
+      repo.acceptPendingMemoryUpdateWithEvents(
+        proposal.proposal_id,
+        "2026-03-21T03:00:00.000Z",
+        createReviewEvents(proposal),
+        {
+          target_object_id: proposal.derived_from ?? "",
+          workspace_id: "workspace-1",
+          proposed_changes: { content: "Use yarn for workspace commands." },
+          updated_at: "2026-03-21T03:00:00.000Z",
+          caused_by: `proposal_accept:${proposal.proposal_id}`
+        },
+        { reviewerIdentity: "user:alice" }
+      )
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    expect(countProposalEvents(database, proposal.proposal_id)).toBe(0);
+    expect(countMemoryUpdatedEvents(database, proposal.derived_from ?? "")).toBe(0);
+    await expect(repo.findById(proposal.proposal_id)).resolves.toMatchObject({
+      resolution_state: "pending",
+      last_updated_at: "2026-03-21T00:00:00.000Z"
+    });
+    await expect(memoryRepo.findById(proposal.derived_from ?? "")).resolves.toMatchObject({
+      content: "Use npm for workspace commands.",
+      updated_at: "2026-03-21T00:00:00.000Z"
+    });
+  });
+
   it("rolls back proposal review events and resolution when accepted memory apply fails", async () => {
     const { repo, database } = createRepo();
     const proposal = createProposal();

@@ -34,7 +34,8 @@ describe("alaya tools", () => {
     const command = createToolsCommand({
       handler,
       defaultWorkspaceId: "ws1",
-      defaultAgentTarget: "codex"
+      defaultAgentTarget: "codex",
+      runService: createRunLookup({ run1: "ws1" })
     });
     const parsed = command.argsSchema.safeParse([
       "call",
@@ -164,6 +165,73 @@ describe("alaya tools", () => {
     expect(result.json).toMatchObject({ ok: false, error: { code: "UNKNOWN_TOOL" } });
   });
 
+  it("rejects a foreign ALAYA_RUN_ID before stateful tools reach the handler", async () => {
+    const stderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
+    const handler = { call: vi.fn(async () => ({
+      ok: true,
+      tool_name: "soul.emit_candidate_signal",
+      output: { signal_id: "sig-1" }
+    } as const)) };
+    const command = createToolsCommand({
+      handler,
+      defaultWorkspaceId: "workspace-1",
+      runService: createRunLookup({ "run-foreign": "workspace-2" })
+    });
+    const parsed = command.argsSchema.safeParse([
+      "call",
+      "soul.emit_candidate_signal",
+      "{}"
+    ]);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+
+    const result = await command.handler(
+      createContext({ stderr, env: { ALAYA_RUN_ID: "run-foreign" } }),
+      parsed.data
+    );
+
+    expect(result.exitCode).toBe(ALAYA_SYSEXITS.DATAERR);
+    expect(stderrChunks.join("")).toContain(
+      "ALAYA_RUN_ID run-foreign belongs to workspace workspace-2, not workspace-1."
+    );
+    expect(handler.call).not.toHaveBeenCalled();
+  });
+
+  it("rejects a foreign --run override before stateful tools reach the handler", async () => {
+    const stderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
+    const handler = { call: vi.fn(async () => ({
+      ok: true,
+      tool_name: "soul.apply_override",
+      output: { override_id: "override-1" }
+    } as const)) };
+    const command = createToolsCommand({
+      handler,
+      defaultWorkspaceId: "workspace-1",
+      runService: createRunLookup({ "run-foreign": "workspace-2" })
+    });
+    const parsed = command.argsSchema.safeParse([
+      "call",
+      "soul.apply_override",
+      "{}",
+      "--run",
+      "run-foreign"
+    ]);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+
+    const result = await command.handler(createContext({ stderr }), parsed.data);
+
+    expect(result.exitCode).toBe(ALAYA_SYSEXITS.DATAERR);
+    expect(stderrChunks.join("")).toContain(
+      "--run run-foreign belongs to workspace workspace-2, not workspace-1."
+    );
+    expect(handler.call).not.toHaveBeenCalled();
+  });
+
   it("maps non-validation handler errors to SOFTWARE (70)", async () => {
     const stderr = new PassThrough();
     const stderrChunks: string[] = [];
@@ -260,6 +328,14 @@ function createHandler(): McpMemoryToolHandler {
         output: { object_id: "mem1" }
       };
     }
+  };
+}
+
+function createRunLookup(workspaceByRun: Record<string, string>) {
+  return {
+    getById: vi.fn(async (runId: string) => ({
+      workspace_id: workspaceByRun[runId] ?? "workspace-missing"
+    }))
   };
 }
 

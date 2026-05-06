@@ -12,6 +12,8 @@ import {
 import {
   ensureImplicitLocalWorkspace,
   type EnsureLocalWorkspacePort,
+  type RunWorkspaceLookupPort,
+  resolveTrustedCliRunId,
   resolveCliWorkspaceContext
 } from "./workspace-context.js";
 
@@ -30,6 +32,7 @@ export interface ReviewCommandDependencies {
   readonly defaultReviewerIdentity?: string;
   readonly defaultReviewerToken?: string;
   readonly ensureLocalWorkspace?: EnsureLocalWorkspacePort;
+  readonly runService?: RunWorkspaceLookupPort;
 }
 
 interface ReviewArgs {
@@ -73,7 +76,12 @@ async function runPending(
   args: ReviewArgs,
   deps: ReviewCommandDependencies
 ): Promise<AlayaCliResult> {
-  const callContext = await buildCallContext(ctx, args, deps);
+  const callContextResult = await buildCallContext(ctx, args, deps);
+  if (!callContextResult.ok) {
+    ctx.stderr.write(`${callContextResult.message}\n`);
+    return { exitCode: ALAYA_SYSEXITS.DATAERR };
+  }
+  const callContext = callContextResult.context;
   // A1 fix-loop (finding-2): workspace_id is bound server-side from
   // callContext.workspaceId; no longer placed in the request body
   // (mirrors soul.explore_graph schema discipline).
@@ -130,7 +138,12 @@ async function runReview(
     return { exitCode: ALAYA_SYSEXITS.USAGE };
   }
 
-  const callContext = await buildCallContext(ctx, args, deps);
+  const callContextResult = await buildCallContext(ctx, args, deps);
+  if (!callContextResult.ok) {
+    ctx.stderr.write(`${callContextResult.message}\n`);
+    return { exitCode: ALAYA_SYSEXITS.DATAERR };
+  }
+  const callContext = callContextResult.context;
   let reviewerBinding: { readonly token: string; readonly identity: string } | null;
   try {
     reviewerBinding = resolveReviewerBinding(ctx, deps);
@@ -358,7 +371,10 @@ async function buildCallContext(
   ctx: AlayaCliContext,
   args: ReviewArgs,
   deps: ReviewCommandDependencies
-): Promise<McpMemoryToolCallContext> {
+): Promise<
+  | { readonly ok: true; readonly context: McpMemoryToolCallContext }
+  | { readonly ok: false; readonly message: string }
+> {
   // D2 MERGED-I3 / Gate-5F: the `alaya review` verbs ARE the
   // human-reviewer surface. They MUST default to `runId: null` and
   // `agentTarget: "cli"` regardless of attach-session env such as
@@ -370,16 +386,39 @@ async function buildCallContext(
     deps.defaultWorkspaceId
   );
   await ensureImplicitLocalWorkspace(workspaceContext, deps.ensureLocalWorkspace);
+  const requestedRun = resolveRequestedRunId(args, deps);
+  const trustedRunId = await resolveTrustedCliRunId({
+    runId: requestedRun.runId,
+    workspaceId: workspaceContext.workspaceId,
+    runService: deps.runService,
+    sourceLabel: requestedRun.sourceLabel
+  });
+  if (!trustedRunId.ok) {
+    return trustedRunId;
+  }
 
   return {
-    workspaceId: workspaceContext.workspaceId,
-    runId:
-      args.contextOverrides.runId !== undefined
-        ? args.contextOverrides.runId
-        : null,
-    agentTarget:
-      args.contextOverrides.agentTarget ??
-      deps.defaultAgentTarget ??
-      "cli"
+    ok: true,
+    context: {
+      workspaceId: workspaceContext.workspaceId,
+      runId: trustedRunId.runId,
+      agentTarget:
+        args.contextOverrides.agentTarget ??
+        deps.defaultAgentTarget ??
+        "cli"
+    }
   };
+}
+
+function resolveRequestedRunId(
+  args: ReviewArgs,
+  deps: ReviewCommandDependencies
+): { readonly runId: string | null | undefined; readonly sourceLabel: string } {
+  if (args.contextOverrides.runId !== undefined) {
+    return { runId: args.contextOverrides.runId, sourceLabel: "--run" };
+  }
+  if (deps.defaultRunId !== undefined && deps.defaultRunId !== null) {
+    return { runId: deps.defaultRunId, sourceLabel: "defaultRunId" };
+  }
+  return { runId: null, sourceLabel: "review-run" };
 }

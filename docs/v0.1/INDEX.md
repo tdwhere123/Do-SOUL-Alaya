@@ -51,7 +51,7 @@ Phase 0 → Gate-0
 | Phase 4 | Wave 4: Daemon + Routes + MCP Server + Alaya-Original CLI + Memory Inspector | 30 cards (target) | MCP surface `mcp-consumable`; trust delivery/usage durability + Inspector config-write `live-event-ready` after Round 3 followup cards | Gate-4 passed |
 | Phase 5 | Wave 5: E2E + Graph Contract + Final Review (release acceptance) | 3 cards (target) | **done**: graph contract `schema-ready`; release E2E `live-event-ready`; final review `mcp-consumable` | Gate-5 passed |
 | Gate-5F | Post-Gate-5 backlog closeout | 5 cards + closeout | **done**: `#BL-025`..`#BL-036` resolved; final review clean; full verification passed | Gate-5F passed |
-| Phase 6 | Wave 6: MCP Agent-Use Protocol + Trustworthy Memory Loop | 8 active slices + archived benchmark cards | mcp-consumable / live-event-ready target | Gate-6 |
+| Phase 6 | Wave 6: MCP Agent-Use Protocol + Trustworthy Memory Loop | 8 active slices + archived benchmark cards | **done**: Gate-6 acceptance closed; MCP/CLI loop, cwd workspace startup, attach-started Garden, accept-as-apply governance, recall explainability, package/profile proof, and docs parity verified | Gate-6 passed |
 
 ## Phase 2 — Card Closeout Status
 
@@ -216,8 +216,9 @@ their original detail is in the plan file at
 - [Gate-5F follow-up](./phase-5-followup-briefs/README.md) — Open
   backlog closeout for `#BL-025` through `#BL-036`; blocks Phase 6
 - [Phase 6](./phase-6-briefs/README.md) — Wave 6: MCP
-  Agent-Use Protocol + Trustworthy Memory Loop active plan; benchmark
-  cards archived-only
+  Agent-Use Protocol + Trustworthy Memory Loop closeout; benchmark cards
+  archived-only; evidence in
+  [Gate-6 closeout](./phase-6-briefs/reports/gate-6-closeout.md)
 - [Post-port hygiene](./post-port-hygiene-briefs/README.md) — executed
   `#BL-017` source-level cleanup after Gate-5
 

@@ -570,8 +570,9 @@ full verification 也已通过。
 - **MCP Agent-Use Protocol 加固** —— 把 attach/profile/server 到
   memory tools 的操作路径写成单一真相。
 - **Trustworthy Memory Loop 加固** —— 明确并固化这条序列：
-  candidate signal -> proposal -> accepted proposal -> durable memory
-  application -> recall delivery -> usage receipt。
+  recall delivery -> usage receipt -> candidate signal -> proposal ->
+  accepted proposal -> durable memory application -> post-apply recall /
+  usage proof。
 - **Embedding 策略调优** —— 保持"补充而非裁判"；做实验：boost
   权重、补充上限、按 domain 标定。
 - **召回预算成形** —— 让 budget penalty 的衰减计划反映 agent

@@ -874,6 +874,15 @@ export class SqliteProposalRepo implements ProposalRepo {
 
     try {
       return this.db.connection.transaction(() => {
+        const proposalRow = this.findByIdStatement.get(parsedProposalId) as ProposalRow | undefined;
+        if (proposalRow === undefined) {
+          throw new StorageError("NOT_FOUND", `Proposal ${parsedProposalId} was not found.`);
+        }
+        if (proposalRow.resolution_state !== "pending") {
+          throw this.createPendingResolutionFailure(parsedProposalId);
+        }
+        assertAcceptedMemoryUpdateMatchesProposal(proposalRow, parsedMemoryUpdate);
+
         const existingMemoryRow = this.findMemoryEntryByIdStatement.get(
           parsedMemoryUpdate.target_object_id
         ) as MemoryEntryRow | undefined;
@@ -959,13 +968,13 @@ export class SqliteProposalRepo implements ProposalRepo {
         }
         const updatedMemory = parseMemoryEntryRow(updatedMemoryRow);
 
-        const proposalRow = this.findByIdStatement.get(parsedProposalId) as ProposalRow | undefined;
-        if (proposalRow === undefined) {
+        const updatedProposalRow = this.findByIdStatement.get(parsedProposalId) as ProposalRow | undefined;
+        if (updatedProposalRow === undefined) {
           throw new StorageError("NOT_FOUND", `Proposal ${parsedProposalId} was not found after update.`);
         }
 
         return deepFreeze({
-          proposal: parseProposalRow(proposalRow),
+          proposal: parseProposalRow(updatedProposalRow),
           memory: updatedMemory,
           events: [...storedReviewEvents, memoryEvent]
         });
@@ -1101,6 +1110,57 @@ function parseAcceptedMemoryUpdateInput(
     proposed_changes: parsedChanges,
     caused_by: parseNonEmptyString(input.caused_by, "caused_by")
   });
+}
+
+function assertAcceptedMemoryUpdateMatchesProposal(
+  row: ProposalRow,
+  update: ReturnType<typeof parseAcceptedMemoryUpdateInput>
+): void {
+  if (
+    row.workspace_id !== update.workspace_id ||
+    row.target_object_kind !== "memory_entry" ||
+    row.derived_from !== update.target_object_id
+  ) {
+    throw createAcceptedMemoryUpdateMismatch(row.proposal_id);
+  }
+
+  const storedChanges = parseProposedChanges(row.proposed_changes);
+  if (
+    storedChanges === null ||
+    !proposedChangesMatch(storedChanges, update.proposed_changes)
+  ) {
+    throw createAcceptedMemoryUpdateMismatch(row.proposal_id);
+  }
+}
+
+function createAcceptedMemoryUpdateMismatch(proposalId: string): StorageError {
+  return new StorageError(
+    "CONFLICT",
+    `Accepted memory update does not match proposal ${proposalId}.`
+  );
+}
+
+function proposedChangesMatch(
+  stored: Readonly<MemoryEntryMutableFields>,
+  supplied: Readonly<MemoryEntryMutableFields>
+): boolean {
+  return (
+    stored.content === supplied.content &&
+    stringArraysMatch(stored.domain_tags, supplied.domain_tags) &&
+    stringArraysMatch(stored.evidence_refs, supplied.evidence_refs) &&
+    stored.storage_tier === supplied.storage_tier
+  );
+}
+
+function stringArraysMatch(
+  left: readonly string[] | undefined,
+  right: readonly string[] | undefined
+): boolean {
+  if (left === undefined || right === undefined) {
+    return left === right;
+  }
+
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function toUpdatedFieldNames(fields: MemoryEntryMutableFields): string[] {

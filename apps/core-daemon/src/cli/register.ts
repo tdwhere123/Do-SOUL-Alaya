@@ -33,6 +33,7 @@ import { createStatusCommand } from "./status.js";
 import { createToolsCommand } from "./tools.js";
 import {
   ensureImplicitLocalWorkspace,
+  resolveTrustedCliRunId,
   resolveCliWorkspaceContext
 } from "./workspace-context.js";
 
@@ -84,14 +85,16 @@ export function registerAlayaCliCommands(
   }));
   bridge.registerSubcommand(createToolsCommand({
     handler: runtime.services.mcpMemoryToolHandler,
-    ensureLocalWorkspace: runtime.services.workspaceService
+    ensureLocalWorkspace: runtime.services.workspaceService,
+    runService: runtime.services.runService
   }));
   // A1 (HITL daemon backbone) — `alaya review pending|accept|reject`
   // routes through the same MCP handler attached agents use, so the
   // CLI fallback and Codex/Claude attach surfaces share one code path.
   bridge.registerSubcommand(createReviewCommand({
     handler: runtime.services.mcpMemoryToolHandler,
-    ensureLocalWorkspace: runtime.services.workspaceService
+    ensureLocalWorkspace: runtime.services.workspaceService,
+    runService: runtime.services.runService
   }));
   bridge.registerSubcommand(createMcpCommand(runtime));
   for (const command of createOperationCommandSpecs()) {
@@ -203,13 +206,23 @@ function createMcpCommand(runtime: AlayaDaemonRuntime): AlayaSubcommandSpec<read
 
       const workspaceContext = resolveCliWorkspaceContext(ctx);
       await ensureImplicitLocalWorkspace(workspaceContext, runtime.services.workspaceService);
+      const trustedRunId = await resolveTrustedCliRunId({
+        runId: ctx.env.ALAYA_RUN_ID,
+        workspaceId: workspaceContext.workspaceId,
+        runService: runtime.services.runService,
+        sourceLabel: "ALAYA_RUN_ID"
+      });
+      if (!trustedRunId.ok) {
+        ctx.stderr.write(`${trustedRunId.message}\n`);
+        return { exitCode: ALAYA_SYSEXITS.DATAERR };
+      }
       runtime.startBackgroundServices();
 
       const server = await runAlayaMcpStdioServer({
         memoryToolHandler: runtime.services.mcpMemoryToolHandler,
         contextProvider: () => ({
           workspaceId: workspaceContext.workspaceId,
-          runId: ctx.env.ALAYA_RUN_ID ?? null,
+          runId: trustedRunId.runId,
           agentTarget: ctx.env.ALAYA_AGENT_TARGET ?? "mcp"
         }),
         stdin: ctx.stdin as unknown as Readable,

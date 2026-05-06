@@ -5,7 +5,7 @@ import type { EmbeddingStatusService } from "./services/embedding-status-service
 import type { EnvironmentStatusService } from "./services/environment-status-service.js";
 import type { McpMemoryToolHandler } from "./mcp-memory-tool-handler.js";
 import type { TrustStateRecorder } from "./trust-state.js";
-import type { WorkspaceService } from "@do-soul/alaya-core";
+import type { RunService, WorkspaceService } from "@do-soul/alaya-core";
 
 export type StartupStep =
   | "database"
@@ -45,6 +45,7 @@ export interface AlayaDaemonRuntimeServices {
   readonly environmentStatusService: EnvironmentStatusService;
   readonly embeddingStatusService: EmbeddingStatusService;
   readonly mcpMemoryToolHandler: McpMemoryToolHandler;
+  readonly runService: Pick<RunService, "getById">;
   readonly trustStateRecorder: TrustStateRecorder;
   readonly workspaceService: Pick<WorkspaceService, "ensureLocalWorkspace">;
   readonly gardenStatus: Readonly<{

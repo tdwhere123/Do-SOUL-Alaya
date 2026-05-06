@@ -15,6 +15,8 @@ import {
 import {
   ensureImplicitLocalWorkspace,
   type EnsureLocalWorkspacePort,
+  type RunWorkspaceLookupPort,
+  resolveTrustedCliRunId,
   resolveCliWorkspaceContext
 } from "./workspace-context.js";
 
@@ -24,6 +26,7 @@ export interface ToolsCommandDependencies {
   readonly defaultRunId?: string | null;
   readonly defaultAgentTarget?: string;
   readonly ensureLocalWorkspace?: EnsureLocalWorkspacePort;
+  readonly runService?: RunWorkspaceLookupPort;
 }
 
 interface ToolsArgs {
@@ -70,7 +73,12 @@ async function executeToolsCommand(
     ctx.stderr.write("tools call requires a tool name\n");
     return { exitCode: ALAYA_SYSEXITS.USAGE };
   }
-  const callContext = await buildCallContext(ctx, args, deps);
+  const callContextResult = await buildCallContext(ctx, args, deps);
+  if (!callContextResult.ok) {
+    ctx.stderr.write(`${callContextResult.message}\n`);
+    return { exitCode: ALAYA_SYSEXITS.DATAERR };
+  }
+  const callContext = callContextResult.context;
   if (
     args.toolName === "soul.review_memory_proposal" &&
     isHumanReviewerAgentTarget(callContext.agentTarget)
@@ -236,7 +244,10 @@ async function buildCallContext(
   ctx: AlayaCliContext,
   args: ToolsArgs,
   deps: ToolsCommandDependencies
-): Promise<McpMemoryToolCallContext> {
+): Promise<
+  | { readonly ok: true; readonly context: McpMemoryToolCallContext }
+  | { readonly ok: false; readonly message: string }
+> {
   const workspaceContext = resolveCliWorkspaceContext(
     ctx,
     args.contextOverrides.workspaceId,
@@ -244,16 +255,41 @@ async function buildCallContext(
   );
   await ensureImplicitLocalWorkspace(workspaceContext, deps.ensureLocalWorkspace);
 
-  return {
+  const requestedRun = resolveRequestedRunId(ctx, args, deps);
+  const trustedRunId = await resolveTrustedCliRunId({
+    runId: requestedRun.runId,
     workspaceId: workspaceContext.workspaceId,
-    runId:
-      args.contextOverrides.runId !== undefined
-        ? args.contextOverrides.runId
-        : deps.defaultRunId ?? ctx.env.ALAYA_RUN_ID ?? null,
-    agentTarget:
-      args.contextOverrides.agentTarget ??
-      deps.defaultAgentTarget ??
-      ctx.env.ALAYA_AGENT_TARGET ??
-      "tools-cli"
+    runService: deps.runService,
+    sourceLabel: requestedRun.sourceLabel
+  });
+  if (!trustedRunId.ok) {
+    return trustedRunId;
+  }
+
+  return {
+    ok: true,
+    context: {
+      workspaceId: workspaceContext.workspaceId,
+      runId: trustedRunId.runId,
+      agentTarget:
+        args.contextOverrides.agentTarget ??
+        deps.defaultAgentTarget ??
+        ctx.env.ALAYA_AGENT_TARGET ??
+        "tools-cli"
+    }
   };
+}
+
+function resolveRequestedRunId(
+  ctx: AlayaCliContext,
+  args: ToolsArgs,
+  deps: ToolsCommandDependencies
+): { readonly runId: string | null | undefined; readonly sourceLabel: string } {
+  if (args.contextOverrides.runId !== undefined) {
+    return { runId: args.contextOverrides.runId, sourceLabel: "--run" };
+  }
+  if (deps.defaultRunId !== undefined && deps.defaultRunId !== null) {
+    return { runId: deps.defaultRunId, sourceLabel: "defaultRunId" };
+  }
+  return { runId: ctx.env.ALAYA_RUN_ID, sourceLabel: "ALAYA_RUN_ID" };
 }

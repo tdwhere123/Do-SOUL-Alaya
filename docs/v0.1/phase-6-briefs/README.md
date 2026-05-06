@@ -50,6 +50,10 @@ proposal, review, durable apply, recall, usage, and audit evidence.
 
 ## Gate-6 (v0.1.1 release)
 
+Status: Gate-6 acceptance closed on 2026-05-06 by
+`reports/gate-6-closeout.md`. This is the release-acceptance proof for
+the v0.1.1 scope; it does not claim an npm publish was performed.
+
 - Gate-5 and Gate-5F guarantees remain true.
 - Active docs define Phase 6 as MCP Agent-Use Protocol + Trustworthy
   Memory Loop (not benchmark leaderboard acceptance).

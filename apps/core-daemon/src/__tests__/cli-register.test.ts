@@ -1,10 +1,28 @@
 import { PassThrough } from "node:stream";
-import { describe, expect, it, vi } from "vitest";
+import { CoreError } from "@do-soul/alaya-core";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAlayaCliBridge } from "../cli/bridge.js";
 import { registerAlayaCliCommands } from "../cli/register.js";
 import type { AlayaDaemonRuntime } from "../index.js";
 
+const hoisted = vi.hoisted(() => ({
+  runAlayaMcpStdioServer: vi.fn(),
+  serverClose: vi.fn(async () => {})
+}));
+
+vi.mock("../mcp-server.js", () => ({
+  runAlayaMcpStdioServer: hoisted.runAlayaMcpStdioServer
+}));
+
 describe("cli registration", () => {
+  beforeEach(() => {
+    hoisted.runAlayaMcpStdioServer.mockReset();
+    hoisted.serverClose.mockReset();
+    hoisted.runAlayaMcpStdioServer.mockResolvedValue({
+      close: hoisted.serverClose
+    });
+  });
+
   it("registers Phase 4 operator commands in bridge order", () => {
     const bridge = createAlayaCliBridge(createRuntime(), {
       stdin: new PassThrough(),
@@ -108,8 +126,11 @@ describe("cli registration", () => {
       isTTY: false
     });
     registerAlayaCliCommands(bridge, runtime);
+    hoisted.runAlayaMcpStdioServer.mockImplementationOnce(async () => {
+      setImmediate(() => stdin.destroy());
+      return { close: hoisted.serverClose };
+    });
 
-    stdin.end();
     const result = await bridge.dispatch(["mcp", "stdio"]);
 
     expect(result.exitCode).toBe(0);
@@ -119,6 +140,143 @@ describe("cli registration", () => {
       rootPath: "/tmp/alaya-project"
     });
     expect(startBackgroundServices).toHaveBeenCalledTimes(1);
+    expect(hoisted.runAlayaMcpStdioServer).toHaveBeenCalledTimes(1);
+    const [serverOptions] = hoisted.runAlayaMcpStdioServer.mock.calls[0] ?? [];
+    expect(serverOptions).toMatchObject({
+      memoryToolHandler: runtime.services.mcpMemoryToolHandler,
+      stdin,
+      stdout
+    });
+    expect(serverOptions.contextProvider()).toEqual({
+      workspaceId: expect.stringMatching(/^local_[a-f0-9]{16}$/),
+      runId: null,
+      agentTarget: "mcp"
+    });
+    expect(hoisted.serverClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes a workspace-owned ALAYA_RUN_ID into attached MCP tool context", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const baseRuntime = createRuntime();
+    const runtime = createRuntime({
+      services: {
+        ...baseRuntime.services,
+        runService: {
+          getById: vi.fn(async () => createRun({ run_id: "run-1", workspace_id: "workspace-1" }))
+        }
+      }
+    });
+    const bridge = createAlayaCliBridge(runtime, {
+      env: {
+        ALAYA_WORKSPACE_ID: "workspace-1",
+        ALAYA_RUN_ID: "run-1",
+        ALAYA_AGENT_TARGET: "codex"
+      },
+      stdin,
+      stdout,
+      stderr,
+      isTTY: false
+    });
+    registerAlayaCliCommands(bridge, runtime);
+    hoisted.runAlayaMcpStdioServer.mockImplementationOnce(async () => {
+      setImmediate(() => stdin.destroy());
+      return { close: hoisted.serverClose };
+    });
+
+    const result = await bridge.dispatch(["mcp", "stdio"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(runtime.services.runService.getById).toHaveBeenCalledWith("run-1");
+    const [serverOptions] = hoisted.runAlayaMcpStdioServer.mock.calls[0] ?? [];
+    expect(serverOptions.contextProvider()).toEqual({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      agentTarget: "codex"
+    });
+  });
+
+  it("rejects ALAYA_RUN_ID when it belongs to another workspace", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString("utf8")));
+    const startBackgroundServices = vi.fn();
+    const baseRuntime = createRuntime();
+    const runtime = createRuntime({
+      startBackgroundServices,
+      services: {
+        ...baseRuntime.services,
+        runService: {
+          getById: vi.fn(async () => createRun({ run_id: "run-foreign", workspace_id: "workspace-2" }))
+        }
+      }
+    });
+    const bridge = createAlayaCliBridge(runtime, {
+      env: {
+        ALAYA_WORKSPACE_ID: "workspace-1",
+        ALAYA_RUN_ID: "run-foreign"
+      },
+      stdin,
+      stdout,
+      stderr,
+      isTTY: false
+    });
+    registerAlayaCliCommands(bridge, runtime);
+
+    stdin.end();
+    const result = await bridge.dispatch(["mcp", "stdio"]);
+
+    expect(result.exitCode).toBe(65);
+    expect(stderrChunks.join("")).toContain(
+      "ALAYA_RUN_ID run-foreign belongs to workspace workspace-2, not workspace-1."
+    );
+    expect(startBackgroundServices).not.toHaveBeenCalled();
+    expect(hoisted.runAlayaMcpStdioServer).not.toHaveBeenCalled();
+  });
+
+  it("rejects ALAYA_RUN_ID when the run is not found", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString("utf8")));
+    const startBackgroundServices = vi.fn();
+    const baseRuntime = createRuntime();
+    const runtime = createRuntime({
+      startBackgroundServices,
+      services: {
+        ...baseRuntime.services,
+        runService: {
+          getById: vi.fn(async () => {
+            throw new CoreError("NOT_FOUND", "Run not found");
+          })
+        }
+      }
+    });
+    const bridge = createAlayaCliBridge(runtime, {
+      env: {
+        ALAYA_WORKSPACE_ID: "workspace-1",
+        ALAYA_RUN_ID: "run-missing"
+      },
+      stdin,
+      stdout,
+      stderr,
+      isTTY: false
+    });
+    registerAlayaCliCommands(bridge, runtime);
+
+    stdin.end();
+    const result = await bridge.dispatch(["mcp", "stdio"]);
+
+    expect(result.exitCode).toBe(65);
+    expect(stderrChunks.join("")).toContain(
+      "ALAYA_RUN_ID run-missing was not found for workspace workspace-1."
+    );
+    expect(startBackgroundServices).not.toHaveBeenCalled();
+    expect(hoisted.runAlayaMcpStdioServer).not.toHaveBeenCalled();
   });
 });
 
@@ -176,6 +334,9 @@ function createRuntime(overrides: Partial<AlayaDaemonRuntime> = {}): AlayaDaemon
           output: { object_id: "mem1" }
         })
       },
+      runService: {
+        getById: async (runId: string) => createRun({ run_id: runId, workspace_id: "workspace-1" })
+      },
       trustStateRecorder: {
         summarize: async (agentTarget: string) => ({
           agent_target: agentTarget,
@@ -214,4 +375,23 @@ function createRuntime(overrides: Partial<AlayaDaemonRuntime> = {}): AlayaDaemon
     ...runtime,
     ...overrides
   };
+}
+
+function createRun(overrides: {
+  readonly run_id: string;
+  readonly workspace_id: string;
+}) {
+  return {
+    run_id: overrides.run_id,
+    workspace_id: overrides.workspace_id,
+    title: "Run",
+    goal: null,
+    run_mode: "chat",
+    engine_binding_id: null,
+    engine_class: "conversation_engine",
+    run_state: "idle",
+    current_surface_id: null,
+    created_at: "2026-04-30T00:00:00.000Z",
+    last_active_at: "2026-04-30T00:00:00.000Z"
+  } as const;
 }

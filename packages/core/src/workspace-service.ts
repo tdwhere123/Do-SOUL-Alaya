@@ -113,16 +113,29 @@ export class WorkspaceService {
       return existing;
     }
 
-    return await this.createWithId(
-      {
-        name: input.name,
-        root_path: rootPath,
-        workspace_kind: WorkspaceKind.LOCAL_REPO,
-        repo_path: input.repoPath ?? rootPath,
-        default_engine_binding: null
-      },
-      workspaceId
-    );
+    try {
+      return await this.createWithId(
+        {
+          name: input.name,
+          root_path: rootPath,
+          workspace_kind: WorkspaceKind.LOCAL_REPO,
+          repo_path: input.repoPath ?? rootPath,
+          default_engine_binding: null
+        },
+        workspaceId
+      );
+    } catch (error) {
+      if (!isWorkspaceIdDuplicateCreateError(error)) {
+        throw error;
+      }
+
+      const racedWorkspace = await this.dependencies.workspaceRepo.getById(workspaceId);
+      if (racedWorkspace !== null) {
+        return racedWorkspace;
+      }
+
+      throw error;
+    }
   }
 
   private async createWithId(
@@ -408,4 +421,14 @@ function parseEngineBindingInput(input: unknown): EngineBindingInput {
   } catch (error) {
     throw new CoreError("VALIDATION", "Invalid request body", { cause: error });
   }
+}
+
+function isWorkspaceIdDuplicateCreateError(error: unknown): boolean {
+  const directMessage = (error as { readonly message?: unknown })?.message;
+  const causeMessage = (error as { readonly cause?: { readonly message?: unknown } })?.cause?.message;
+  return [directMessage, causeMessage].some(
+    (message) =>
+      typeof message === "string" &&
+      message.includes("UNIQUE constraint failed: workspaces.workspace_id")
+  );
 }

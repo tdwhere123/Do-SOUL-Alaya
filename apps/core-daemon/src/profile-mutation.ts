@@ -102,6 +102,13 @@ export const ALAYA_MCP_ARGS = Object.freeze(["mcp", "stdio"] as const);
 export const ALAYA_SLASH_ARGS = Object.freeze(["inspect", "--open"] as const);
 export const ALAYA_SLASH_COMMAND = resolveAlayaSlashCommand();
 
+type AlayaLauncherRootInput =
+  | string
+  | {
+      readonly importMetaDirname?: string;
+      readonly packageRoot?: string;
+    };
+
 /**
  * Resolve the launcher pair (command, args) that attach writes into user
  * Codex / Claude profiles for spawning Alaya as an MCP stdio server.
@@ -117,7 +124,7 @@ export const ALAYA_SLASH_COMMAND = resolveAlayaSlashCommand();
  */
 export function resolveAlayaMcpLauncher(
   env: NodeJS.ProcessEnv = process.env,
-  repoRoot: string = path.resolve(import.meta.dirname, "..", "..", "..")
+  rootInput?: AlayaLauncherRootInput
 ): { readonly command: string; readonly args: readonly string[] } {
   const override = env.ALAYA_MCP_LAUNCHER?.trim();
   if (override !== undefined && override.length > 0) {
@@ -126,20 +133,20 @@ export function resolveAlayaMcpLauncher(
     const extraArgs = tokens.slice(1);
     return { command: cmd, args: [...extraArgs, ...ALAYA_MCP_ARGS] };
   }
-  const binPath = path.resolve(repoRoot, "bin", "alaya.mjs");
+  const binPath = resolveAlayaBinPath(rootInput);
   return { command: "node", args: [binPath, ...ALAYA_MCP_ARGS] };
 }
 
 export function resolveAlayaSlashCommand(
   env: NodeJS.ProcessEnv = process.env,
-  repoRoot: string = path.resolve(import.meta.dirname, "..", "..", "..")
+  rootInput?: AlayaLauncherRootInput
 ): string {
   const override = env.ALAYA_SLASH_LAUNCHER?.trim();
   if (override !== undefined && override.length > 0) {
     return [override, ...ALAYA_SLASH_ARGS].join(" ");
   }
 
-  const binPath = path.resolve(repoRoot, "bin", "alaya.mjs");
+  const binPath = resolveAlayaBinPath(rootInput);
   return ["node", shellQuote(binPath), ...ALAYA_SLASH_ARGS].join(" ");
 }
 export const PROFILE_MUTATION_CONFIRM_PROMPT = "Apply profile mutation changes? [y/N] ";
@@ -755,6 +762,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
+}
+
+function resolveAlayaBinPath(rootInput: AlayaLauncherRootInput | undefined): string {
+  return path.resolve(resolveAlayaPackageRoot(rootInput), "bin", "alaya.mjs");
+}
+
+function resolveAlayaPackageRoot(rootInput: AlayaLauncherRootInput | undefined): string {
+  if (typeof rootInput === "string") {
+    return path.resolve(rootInput);
+  }
+
+  if (rootInput?.packageRoot !== undefined) {
+    return path.resolve(rootInput.packageRoot);
+  }
+
+  const moduleDir = path.resolve(rootInput?.importMetaDirname ?? import.meta.dirname);
+  const moduleParent = dirname(moduleDir);
+  const moduleGrandparent = dirname(moduleParent);
+  const isRepoCoreDaemonModule =
+    (path.basename(moduleDir) === "src" || path.basename(moduleDir) === "dist") &&
+    path.basename(moduleParent) === "core-daemon" &&
+    path.basename(moduleGrandparent) === "apps";
+
+  if (isRepoCoreDaemonModule) {
+    return path.resolve(moduleDir, "..", "..", "..");
+  }
+
+  if (path.basename(moduleDir) === "dist") {
+    return moduleParent;
+  }
+
+  return path.resolve(moduleDir, "..", "..", "..");
 }
 
 function shellQuote(value: string): string {
