@@ -191,6 +191,24 @@ export function createGardenRuntime(input: {
   const janitorSchedulerPort: JanitorSchedulerPort = {
     reportCompletion: (result) => gardenScheduler.reportCompletion(result)
   };
+  // gate-6-delta I4: hot-index demotion now emits SOUL_MEMORY_TIER_CHANGED
+  // audit rows alongside the storage_tier UPDATE, so wire the same
+  // EventPublisher-backed port that the Auditor uses.
+  const janitorEventLogPort: AuditorEventLogPort = {
+    append: async (entry) =>
+      (await input.eventPublisher.publish({
+        ...entry,
+        event_type: entry.event_type as EventType
+      })) as EventLogEntry,
+    appendManyWithMutation: async (entries, mutate) =>
+      await input.eventPublisher.appendManyWithMutation(
+        entries.map((entry) => ({
+          ...entry,
+          event_type: entry.event_type as EventType
+        })),
+        mutate
+      )
+  };
   const janitor = new Janitor({
     cleanupPort,
     tieringPort: input.gardenDataPorts.tieringPort,
@@ -198,7 +216,8 @@ export function createGardenRuntime(input: {
     strongRefProtectionPort: {
       isProtected: async (workspaceId: string, targetEntityType: string, targetEntityId: string) =>
         await input.strongRefService.isProtected(workspaceId, targetEntityType, targetEntityId)
-    }
+    },
+    eventLogRepo: janitorEventLogPort
   });
 
   const orphanRadarRepo = input.orphanRadarRepo;

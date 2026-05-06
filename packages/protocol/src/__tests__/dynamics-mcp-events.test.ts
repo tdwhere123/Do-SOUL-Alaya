@@ -406,6 +406,7 @@ describe("EventType and TransitionRecord", () => {
       "soul.memory.state_changed",
       "soul.memory.retention_updated",
       "soul.memory.manifestation_changed",
+      "soul.memory.tier_changed",
       "soul.synthesis.created",
       "soul.synthesis.status_changed",
       "soul.synthesis.promoted",

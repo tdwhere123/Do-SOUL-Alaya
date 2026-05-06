@@ -57,7 +57,10 @@ export interface GardenJanitorMemoryTieringPort {
     workspaceId: string,
     criteria: GardenJanitorHotDemotionCriteria
   ): Promise<readonly GardenHotDemotionCandidate[]>;
-  demoteToWarm(workspaceId: string, memoryEntryIds: readonly string[]): Promise<void>;
+  // gate-6-delta I4: sync so the Janitor wraps it in
+  // EventPublisher.appendManyWithMutation alongside the
+  // SOUL_MEMORY_TIER_CHANGED event row.
+  demoteToWarm(workspaceId: string, memoryEntryIds: readonly string[]): void;
 }
 
 export interface GardenMergeCandidate {
@@ -137,9 +140,12 @@ export interface GardenAuditorPointerHealthPort {
 
 export interface GardenAuditorGreenMaintenancePort {
   findExpiringGreenStatuses(workspaceId: string, lookaheadMs: number): Promise<readonly ExpiringGreenStatus[]>;
-  renewGreenPassiveStable(greenStatusId: string, taskId: string): Promise<void>;
-  requestActiveVerification(greenStatusId: string, taskId: string): Promise<void>;
-  revokeGreen(memoryEntryId: string, reason: "verification_fail", taskId: string): Promise<void>;
+  // gate-6-delta I4: sync to allow Auditor to wrap each call inside
+  // an EventPublisher.appendManyWithMutation transaction along with
+  // the corresponding SOUL_GREEN_* EventLog row.
+  renewGreenPassiveStable(greenStatusId: string, taskId: string): void;
+  requestActiveVerification(greenStatusId: string, taskId: string): void;
+  revokeGreen(memoryEntryId: string, reason: "verification_fail", taskId: string): void;
 }
 
 export interface GardenAuditorBootstrappingPort {
@@ -220,7 +226,10 @@ function createTieringPort(context: BaseFactoryContext): GardenJanitorMemoryTier
       ) as readonly GardenHotDemotionCandidate[];
       return rows;
     },
-    demoteToWarm: async (workspaceId, memoryEntryIds) => {
+    // gate-6-delta I4: sync so the Janitor can call this inside
+     // EventPublisher.appendManyWithMutation alongside the
+     // SOUL_MEMORY_TIER_CHANGED event rows.
+    demoteToWarm: (workspaceId, memoryEntryIds) => {
       const uniqueIds = Array.from(new Set(memoryEntryIds.filter((entryId) => entryId.length > 0)));
       if (uniqueIds.length === 0) {
         return;
@@ -461,16 +470,16 @@ function createGreenMaintenancePort(context: BaseFactoryContext): GardenAuditorG
       const cutoffIso = addMilliseconds(context.now(), Math.max(0, lookaheadMs));
       return expiringStatusesStatement.all(workspaceId, cutoffIso) as readonly ExpiringGreenStatus[];
     },
-    renewGreenPassiveStable: async (greenStatusId) => {
+    renewGreenPassiveStable: (greenStatusId) => {
       const nowIso = context.now();
       renewPassiveStableStatement.run(nowIso, nowIso, nowIso, greenStatusId);
     },
-    requestActiveVerification: async (greenStatusId) => {
+    requestActiveVerification: (greenStatusId) => {
       const nowIso = context.now();
       const graceUntil = addMilliseconds(nowIso, ACTIVE_VERIFICATION_GRACE_MS);
       requestActiveVerificationStatement.run(nowIso, nowIso, graceUntil, nowIso, nowIso, greenStatusId);
     },
-    revokeGreen: async (memoryEntryId, reason) => {
+    revokeGreen: (memoryEntryId, reason) => {
       const nowIso = context.now();
       revokeStatement.run(reason, nowIso, nowIso, memoryEntryId);
     }

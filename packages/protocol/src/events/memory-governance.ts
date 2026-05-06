@@ -10,6 +10,10 @@ const memoryGovernanceEventTypeValues = [
   "soul.memory.state_changed",
   "soul.memory.retention_updated",
   "soul.memory.manifestation_changed",
+  // gate-6-delta I4: storage_tier transitions used to be a direct
+  // UPDATE in Janitor.executeHotIndexDemotion with no audit row.
+  // SOUL_MEMORY_TIER_CHANGED closes the §8 gap.
+  "soul.memory.tier_changed",
   "soul.synthesis.created",
   "soul.synthesis.status_changed",
   "soul.synthesis.promoted",
@@ -37,6 +41,7 @@ export const MemoryGovernanceEventType = {
   SOUL_MEMORY_STATE_CHANGED: "soul.memory.state_changed",
   SOUL_MEMORY_RETENTION_UPDATED: "soul.memory.retention_updated",
   SOUL_MEMORY_MANIFESTATION_CHANGED: "soul.memory.manifestation_changed",
+  SOUL_MEMORY_TIER_CHANGED: "soul.memory.tier_changed",
   SOUL_SYNTHESIS_CREATED: "soul.synthesis.created",
   SOUL_SYNTHESIS_STATUS_CHANGED: "soul.synthesis.status_changed",
   SOUL_SYNTHESIS_PROMOTED: "soul.synthesis.promoted",
@@ -97,6 +102,16 @@ export const SoulMemoryRetentionUpdatedPayloadSchema = TransitionEventPayloadObj
 }).readonly();
 export const SoulMemoryManifestationChangedPayloadSchema = TransitionEventPayloadObjectSchema.readonly();
 
+// gate-6-delta I4: storage_tier transition emitted by the Janitor
+// alongside the UPDATE memory_entries.storage_tier write.
+export const SoulMemoryTierChangedPayloadSchema = MemoryGovernanceObjectPayloadObjectSchema.extend({
+  from_tier: NonEmptyStringSchema,
+  to_tier: NonEmptyStringSchema,
+  reason: NonEmptyStringSchema,
+  task_id: NonEmptyStringSchema,
+  occurred_at: IsoDatetimeStringSchema
+}).readonly();
+
 export const SoulSynthesisCreatedPayloadSchema = MemoryGovernanceObjectPayloadObjectSchema.readonly();
 export const SoulSynthesisStatusChangedPayloadSchema = TransitionEventPayloadObjectSchema.readonly();
 export const SoulSynthesisPromotedPayloadSchema = TransitionEventPayloadObjectSchema.readonly();
@@ -125,6 +140,7 @@ const memoryGovernancePayloadSchemas = {
   [MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED]: SoulMemoryStateChangedPayloadSchema,
   [MemoryGovernanceEventType.SOUL_MEMORY_RETENTION_UPDATED]: SoulMemoryRetentionUpdatedPayloadSchema,
   [MemoryGovernanceEventType.SOUL_MEMORY_MANIFESTATION_CHANGED]: SoulMemoryManifestationChangedPayloadSchema,
+  [MemoryGovernanceEventType.SOUL_MEMORY_TIER_CHANGED]: SoulMemoryTierChangedPayloadSchema,
   [MemoryGovernanceEventType.SOUL_SYNTHESIS_CREATED]: SoulSynthesisCreatedPayloadSchema,
   [MemoryGovernanceEventType.SOUL_SYNTHESIS_STATUS_CHANGED]: SoulSynthesisStatusChangedPayloadSchema,
   [MemoryGovernanceEventType.SOUL_SYNTHESIS_PROMOTED]: SoulSynthesisPromotedPayloadSchema,
@@ -194,6 +210,10 @@ const SoulMemoryManifestationChangedEventObjectSchema = createMemoryGovernanceEv
   MemoryGovernanceEventType.SOUL_MEMORY_MANIFESTATION_CHANGED,
   SoulMemoryManifestationChangedPayloadSchema
 );
+const SoulMemoryTierChangedEventObjectSchema = createMemoryGovernanceEventObjectSchema(
+  MemoryGovernanceEventType.SOUL_MEMORY_TIER_CHANGED,
+  SoulMemoryTierChangedPayloadSchema
+);
 const SoulSynthesisCreatedEventObjectSchema = createMemoryGovernanceEventObjectSchema(
   MemoryGovernanceEventType.SOUL_SYNTHESIS_CREATED,
   SoulSynthesisCreatedPayloadSchema
@@ -251,6 +271,7 @@ export const SoulMemoryArchivedEventSchema = SoulMemoryArchivedEventObjectSchema
 export const SoulMemoryStateChangedEventSchema = SoulMemoryStateChangedEventObjectSchema.readonly();
 export const SoulMemoryRetentionUpdatedEventSchema = SoulMemoryRetentionUpdatedEventObjectSchema.readonly();
 export const SoulMemoryManifestationChangedEventSchema = SoulMemoryManifestationChangedEventObjectSchema.readonly();
+export const SoulMemoryTierChangedEventSchema = SoulMemoryTierChangedEventObjectSchema.readonly();
 export const SoulSynthesisCreatedEventSchema = SoulSynthesisCreatedEventObjectSchema.readonly();
 export const SoulSynthesisStatusChangedEventSchema = SoulSynthesisStatusChangedEventObjectSchema.readonly();
 export const SoulSynthesisPromotedEventSchema = SoulSynthesisPromotedEventObjectSchema.readonly();
@@ -273,6 +294,7 @@ const MemoryGovernanceEventUnionSchema = z.discriminatedUnion("event_type", [
   SoulMemoryStateChangedEventObjectSchema,
   SoulMemoryRetentionUpdatedEventObjectSchema,
   SoulMemoryManifestationChangedEventObjectSchema,
+  SoulMemoryTierChangedEventObjectSchema,
   SoulSynthesisCreatedEventObjectSchema,
   SoulSynthesisStatusChangedEventObjectSchema,
   SoulSynthesisPromotedEventObjectSchema,

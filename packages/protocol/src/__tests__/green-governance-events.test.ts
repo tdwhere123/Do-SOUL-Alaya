@@ -17,6 +17,11 @@ describe("Phase 3B event schemas", () => {
       "soul.green.granted",
       "soul.green.pierced",
       "soul.green.grace_entered",
+      // gate-6-delta I4: Auditor-driven Green transitions now emit
+      // dedicated audit events alongside their SQL UPDATEs.
+      "soul.green.revoked",
+      "soul.green.renewed",
+      "soul.green.grace_requested",
       "soul.verification.completed",
       "soul.governance_lease.acquired",
       "soul.governance_lease.released",

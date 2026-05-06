@@ -140,9 +140,15 @@ export interface AuditorOrphanDetectionPort {
 
 export interface AuditorGreenMaintenancePort {
   findExpiringGreenStatuses(workspaceId: string, lookaheadMs: number): Promise<readonly ExpiringGreenStatus[]>;
-  renewGreenPassiveStable(greenStatusId: string, taskId: string): Promise<void>;
-  requestActiveVerification(greenStatusId: string, taskId: string): Promise<void>;
-  revokeGreen(memoryEntryId: string, reason: "verification_fail", taskId: string): Promise<void>;
+  // gate-6-delta I4: Green-state mutations are now invoked from inside
+  // EventPublisher.appendManyWithMutation's sync mutate callback so the
+  // SQL write and the SOUL_GREEN_REVOKED / SOUL_GREEN_RENEWED /
+  // SOUL_GREEN_GRACE_REQUESTED EventLog row commit in the same SQLite
+  // transaction. The underlying better-sqlite3 ops are sync, so the
+  // port surface is sync too.
+  renewGreenPassiveStable(greenStatusId: string, taskId: string): void;
+  requestActiveVerification(greenStatusId: string, taskId: string): void;
+  revokeGreen(memoryEntryId: string, reason: "verification_fail", taskId: string): void;
 }
 
 export interface AuditorBootstrappingPort {
