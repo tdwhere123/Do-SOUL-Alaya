@@ -4,14 +4,14 @@ import { soulToolDefs } from "../provider/soul-tool-specs.js";
 import * as mcpBridgeModule from "../mcp-bridge.js";
 import { McpBridge } from "../mcp-bridge.js";
 
+// gate-6-delta I5: workspace_id / run_id / surface_id are bound
+// server-side from the trusted MCP context; they are not in the
+// public soul.emit_candidate_signal request schema.
 const toolUse: ToolUseBlock = {
   type: "tool_use",
   id: "toolu_1",
   name: "soul.emit_candidate_signal",
   input: {
-    workspace_id: "workspace-1",
-    run_id: "run-1",
-    surface_id: null,
     signal_kind: "potential_claim",
     object_kind: "constraint",
     scope_hint: null,

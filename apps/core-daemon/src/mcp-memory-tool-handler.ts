@@ -300,10 +300,13 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     request: SoulEmitCandidateSignalRequest,
     context: McpMemoryToolCallContext
   ) {
-    // SECURITY (p5-system-review-r1 MR-B03 / invariants §29 Default Scope):
-    // Trusted MCP call context overrides any payload-supplied scope. The
-    // attached agent (LLM) cannot redirect signals to a foreign workspace
-    // by spoofing workspace_id / run_id / surface_id in the request body.
+    // SECURITY (gate-6-delta I5; MR-B03 / invariants §29 Default Scope):
+    // workspace_id / run_id / surface_id are NOT in the public MCP
+    // request schema (see SoulEmitCandidateSignalRequestSchema /
+    // McpEmitCandidateSignalRequestSchema). The daemon binds them from
+    // the trusted MCP call context. The attached agent cannot redirect
+    // signals to a foreign workspace because the schema rejects the
+    // fields outright before this function runs.
     if (context.runId === null) {
       throw new ToolValidationError(
         "soul.emit_candidate_signal requires a runId in the MCP call context."

@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { EmitCandidateSignalRequestSchema, EmitCandidateSignalResponseSchema } from "../candidate-memory-signal.js";
+import {
+  EmitCandidateSignalResponseSchema,
+  McpEmitCandidateSignalRequestSchema
+} from "../candidate-memory-signal.js";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
   BOUNDED_EVIDENCE_ARRAY_MAX,
@@ -201,7 +204,13 @@ export const SoulListPendingProposalsResponseSchema = z
   .strict()
   .readonly();
 
-export const SoulEmitCandidateSignalRequestSchema = EmitCandidateSignalRequestSchema;
+// gate-6-delta I5: agent-facing schema strips workspace_id / run_id /
+// surface_id; the daemon binds those from the trusted MCP call context
+// per invariants §29 Default Scope. See
+// McpEmitCandidateSignalRequestSchema in
+// ../candidate-memory-signal.ts for the rationale and the parity with
+// SoulExploreGraphRequestSchema and SoulListPendingProposalsRequestSchema.
+export const SoulEmitCandidateSignalRequestSchema = McpEmitCandidateSignalRequestSchema;
 export const SoulEmitCandidateSignalResponseSchema = EmitCandidateSignalResponseSchema;
 
 export const SoulApplyOverrideRequestSchema = z

@@ -97,10 +97,9 @@ describe("MCP tool request/response schemas", () => {
     const requestCases = [
       {
         schema: SoulEmitCandidateSignalRequestSchema,
+        // gate-6-delta I5: workspace_id / run_id / surface_id are bound
+        // from trusted MCP context; the public schema rejects them.
         value: {
-          workspace_id: "workspace-1",
-          run_id: "run-1",
-          surface_id: null,
           signal_kind: "potential_claim",
           object_kind: "claim_form",
           scope_hint: null,
@@ -304,6 +303,38 @@ describe("MCP tool request/response schemas", () => {
       })
     ).toThrow();
   });
+
+  // gate-6-delta I5: SoulEmitCandidateSignalRequestSchema must reject
+  // payload-supplied scope fields. The MCP daemon binds workspace_id /
+  // run_id / surface_id from the trusted call context per §29 Default
+  // Scope; allowing them in the public schema would teach attached
+  // LLMs to learn and replay their own scope, reopening the
+  // prompt-inject vector.
+  it.each([
+    { extraField: "workspace_id", extraValue: "workspace-other" },
+    { extraField: "run_id", extraValue: "run-other" },
+    { extraField: "surface_id", extraValue: "surface-other" }
+  ])(
+    "rejects soul.emit_candidate_signal payloads that supply $extraField",
+    ({ extraField, extraValue }) => {
+      const baseValue = {
+        signal_kind: "potential_claim",
+        object_kind: "claim_form",
+        scope_hint: null,
+        domain_tags: ["repo"] as readonly string[],
+        confidence: 0.7,
+        evidence_refs: ["message-1"] as readonly string[],
+        raw_payload: { summary: "candidate signal" }
+      };
+
+      expect(() =>
+        SoulEmitCandidateSignalRequestSchema.parse({
+          ...baseValue,
+          [extraField]: extraValue
+        })
+      ).toThrow();
+    }
+  );
 });
 
 describe("EventType and TransitionRecord", () => {

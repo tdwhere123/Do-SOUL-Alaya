@@ -88,19 +88,42 @@ export const CandidateMemorySignalSchema = z.object({
   created_at: IsoDatetimeStringSchema
 }).readonly();
 
-export const CandidateMemorySignalInputSchema = z
-  .object({
+// Content-only fields that the agent supplies. workspace_id / run_id /
+// surface_id are bound from trusted MCP context per invariants §29
+// Default Scope; see McpEmitCandidateSignalRequestSchema below.
+const CandidateMemorySignalContentFieldsSchema = z.object({
+  signal_kind: SignalKindSchema,
+  object_kind: NonEmptyStringSchema,
+  scope_hint: NonEmptyStringSchema.nullable(),
+  domain_tags: DomainTagsSchema,
+  confidence: ConfidenceSchema,
+  evidence_refs: EvidenceRefsSchema,
+  raw_payload: RawPayloadSchema
+});
+
+// Internal input shape used by signal-service callers that already
+// know workspace/run/surface (Garden compile, user seed, import paths).
+// Public MCP-facing callers should use McpEmitCandidateSignalRequestSchema
+// instead so they never see the scope fields.
+export const CandidateMemorySignalInputSchema = CandidateMemorySignalContentFieldsSchema
+  .extend({
     workspace_id: NonEmptyStringSchema,
     run_id: NonEmptyStringSchema,
-    surface_id: NonEmptyStringSchema.nullable(),
-    signal_kind: SignalKindSchema,
-    object_kind: NonEmptyStringSchema,
-    scope_hint: NonEmptyStringSchema.nullable(),
-    domain_tags: DomainTagsSchema,
-    confidence: ConfidenceSchema,
-    evidence_refs: EvidenceRefsSchema,
-    raw_payload: RawPayloadSchema
+    surface_id: NonEmptyStringSchema.nullable()
   })
+  .strict()
+  .readonly();
+
+// gate-6-delta I5: agent-facing emit request for soul.emit_candidate_signal.
+// Strips workspace_id / run_id / surface_id — the MCP daemon binds those
+// from the trusted call context. This mirrors the §29 hardening already
+// applied to SoulExploreGraphRequestSchema and
+// SoulListPendingProposalsRequestSchema. Keeping the scope fields on the
+// public schema would teach every attached LLM to learn its workspace
+// and pass it back, reopening the prompt-inject vector ("now pass
+// workspace_id=foreign") even though the runtime guard catches the
+// spoof.
+export const McpEmitCandidateSignalRequestSchema = CandidateMemorySignalContentFieldsSchema
   .strict()
   .readonly();
 
@@ -119,4 +142,5 @@ export type SignalState = z.infer<typeof SignalStateSchema>;
 export type CandidateMemorySignal = z.infer<typeof CandidateMemorySignalSchema>;
 export type CandidateMemorySignalInput = z.infer<typeof CandidateMemorySignalInputSchema>;
 export type EmitCandidateSignalRequest = z.infer<typeof EmitCandidateSignalRequestSchema>;
+export type McpEmitCandidateSignalRequest = z.infer<typeof McpEmitCandidateSignalRequestSchema>;
 export type EmitCandidateSignalResponse = z.infer<typeof EmitCandidateSignalResponseSchema>;
