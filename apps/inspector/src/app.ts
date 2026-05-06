@@ -17,6 +17,7 @@ export const INSPECTOR_ROUTE_SURFACE = Object.freeze([
   "PATCH /api/config/:workspaceId/environment",
   "GET /api/config/:workspaceId/embedding-supplement",
   "PATCH /api/config/runtime/embedding-supplement",
+  "GET /api/embedding-status/:workspaceId",
   "GET /api/graph/:workspaceId",
   "GET /api/status",
   // A1 (HITL daemon backbone) — Inspector loopback for the new

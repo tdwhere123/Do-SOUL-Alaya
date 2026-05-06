@@ -156,6 +156,8 @@ describe("EmbeddingSupplementForm", () => {
           embedding_enabled: false
         })
       )
+      // U2: form fetches /embedding-status after config load completes.
+      .mockResolvedValueOnce(jsonResponse(degradedNullEmbeddingStatus()))
       .mockReturnValueOnce(pendingPatch);
 
     const { onRestart } = renderForm();
@@ -211,6 +213,8 @@ describe("EmbeddingSupplementForm", () => {
           embedding_enabled: false
         })
       )
+      // U2: form fetches /embedding-status after config load completes.
+      .mockResolvedValueOnce(jsonResponse(degradedNullEmbeddingStatus()))
       .mockResolvedValueOnce(
         jsonResponse({
           success: true,
@@ -222,7 +226,9 @@ describe("EmbeddingSupplementForm", () => {
             embedding_enabled: true
           }
         })
-      );
+      )
+      // U2: post-save status refresh.
+      .mockResolvedValueOnce(jsonResponse(degradedNullEmbeddingStatus()));
 
     const { onRestart } = renderForm();
     await waitFor(() => screen.getByRole("button", { name: "paste:" }));
@@ -237,14 +243,53 @@ describe("EmbeddingSupplementForm", () => {
     });
 
     await waitFor(() => expect(onRestart).toHaveBeenCalledOnce());
-    const [, init] = fetchMock.mock.calls[1];
-    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+    // U2: form fetches /embedding-status on mount and after save, so the
+    // PATCH is no longer the second fetch by index. Match by method.
+    const patchCall = fetchMock.mock.calls.find(
+      ([, init]) => (init as RequestInit | undefined)?.method === "PATCH"
+    );
+    expect(patchCall).toBeTruthy();
+    const init = patchCall![1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toMatchObject({
       secret_ref_mode: "paste",
       secret_value: plaintext
     });
-    expect(JSON.parse(String((init as RequestInit).body)).secret_ref).toBeUndefined();
+    expect(JSON.parse(String(init.body)).secret_ref).toBeUndefined();
     await waitFor(() => expect(screen.queryByDisplayValue(plaintext)).toBeNull());
     expect(screen.getByDisplayValue("…/openai")).toBeTruthy();
+  });
+  it("surfaces a degraded embedding banner with humanised hint (U2)", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          provider_url: "https://api.example.test/v1",
+          model_id: "text-embedding-3-small",
+          secret_ref: "env:OPENAI_API_KEY",
+          embedding_enabled: true
+        })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          success: true,
+          data: {
+            workspace_id: "ws-1",
+            embedding_enabled: true,
+            provider_configured: true,
+            model_id: "text-embedding-3-small",
+            storage_available: true,
+            effective_mode: "degraded",
+            degraded_reason: "provider_unavailable",
+            checked_at: "2026-05-07T00:00:00.000Z"
+          }
+        })
+      );
+
+    renderForm();
+    await waitFor(() => screen.getByText(/Embedding Degraded/i));
+    expect(
+      screen.getByText(/Provider rejected our request/i)
+    ).toBeTruthy();
+    expect(screen.getByText(/checked 2026-05-07T00:00:00\.000Z/i)).toBeTruthy();
   });
 });
 
@@ -253,4 +298,23 @@ function jsonResponse(body: unknown, status = 200) {
     status,
     headers: { "content-type": "application/json" }
   });
+}
+
+// Default healthy embedding-status payload used to keep the U2 status
+// poll from interfering with tests focused on PATCH behavior. The
+// "Degraded" state has its own dedicated test below.
+function degradedNullEmbeddingStatus() {
+  return {
+    success: true,
+    data: {
+      workspace_id: "ws-1",
+      embedding_enabled: false,
+      provider_configured: false,
+      model_id: "text-embedding-3-small",
+      storage_available: true,
+      effective_mode: "keyword_only",
+      degraded_reason: null,
+      checked_at: "2026-05-07T00:00:00.000Z"
+    }
+  };
 }
