@@ -1,6 +1,5 @@
 import { z } from "zod";
 import {
-  CandidateMemorySignalSchema,
   EmitCandidateSignalResponseSchema,
   McpEmitCandidateSignalRequestSchema
 } from "../candidate-memory-signal.js";
@@ -262,9 +261,20 @@ export const GardenClaimTaskResponseSchema = z
   .strict()
   .readonly();
 
+// v0.1.1 wave-end M1: candidate_signals in the result envelope use the
+// CONTENT-ONLY shape (the same one soul.emit_candidate_signal uses since
+// I5 commit e6378dd). The daemon binds workspace_id / run_id / surface_id
+// / source from trusted MCP context + the claimed task row, never from
+// host payload. Allowing a host to self-supply scope re-opens the §29
+// prompt-inject vector ("now pass workspace_id=foreign / source=user_seed")
+// even though the runtime workspace check would catch the cross-workspace
+// case — `source` and `run_id` could still be forged within a workspace.
 export const GardenTaskResultEnvelopeSchema = z
   .object({
-    candidate_signals: z.array(CandidateMemorySignalSchema).readonly().optional(),
+    candidate_signals: z
+      .array(McpEmitCandidateSignalRequestSchema)
+      .readonly()
+      .optional(),
     extracted_proposals: z.array(z.record(z.unknown()).readonly()).readonly().optional(),
     notes: z.string().optional()
   })

@@ -9,10 +9,8 @@ import {
   GardenTier,
   RunMode,
   RunState,
-  SignalSource,
   WorkspaceKind,
   WorkspaceState,
-  type CandidateMemorySignal,
   type GardenRoleValue,
   type GardenTaskDescriptor,
   type GardenTaskKindValue,
@@ -176,18 +174,27 @@ describe("Garden MCP tools", () => {
       "garden.claim_task",
       { task_id: "task-complete-signals" }
     );
-    const signal = createCandidateSignal({
-      signal_id: "signal-garden-complete",
-      raw_payload: { observation: "Host worker extracted a reusable preference." }
-    });
-
+    // Wave-end M1: result_envelope candidate_signals is content-only.
+    // The daemon binds workspace_id / run_id / surface_id / source from
+    // the trusted MCP context + the claimed task row, never from host
+    // payload. We verify the binding by reading the resulting signal row.
     const response = await harness.callTool<GardenCompleteTaskResponse>(
       "garden.complete_task",
       {
         task_id: "task-complete-signals",
         status: "completed",
         result_envelope: {
-          candidate_signals: [signal],
+          candidate_signals: [
+            {
+              signal_kind: "potential_preference",
+              object_kind: "memory_entry",
+              scope_hint: "project",
+              domain_tags: ["garden"],
+              confidence: 0.9,
+              evidence_refs: ["memory-1"],
+              raw_payload: { observation: "Host worker extracted a reusable preference." }
+            }
+          ],
           notes: "Host worker completed extraction."
         }
       }
@@ -207,9 +214,18 @@ describe("Garden MCP tools", () => {
       success: true,
       candidate_signals_count: 1
     });
-    await expect(harness.signalRepo.getById("signal-garden-complete")).resolves.toMatchObject({
-      signal_id: "signal-garden-complete",
-      workspace_id: "workspace-a"
+    // The daemon-bound workspace must match the trusted MCP context
+    // even though the host did not provide it (M1 §29 guarantee).
+    const emittedIds = (
+      completedEvents[0]?.payload_json as { objects_affected?: readonly string[] }
+    )?.objects_affected;
+    expect(emittedIds).toBeDefined();
+    expect(emittedIds).toHaveLength(1);
+    const emittedId = emittedIds![0]!;
+    await expect(harness.signalRepo.getById(emittedId)).resolves.toMatchObject({
+      signal_id: emittedId,
+      workspace_id: "workspace-a",
+      source: "garden_compile"
     });
   });
 
@@ -480,26 +496,6 @@ function createTaskDescriptor(overrides: Partial<GardenTaskDescriptor> = {}): Ga
     run_id: "run-a",
     target_object_refs: ["memory-1"],
     priority: 10,
-    created_at: "2026-05-07T00:00:00.000Z",
-    ...overrides
-  };
-}
-
-function createCandidateSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
-  return {
-    signal_id: "signal-garden-1",
-    workspace_id: "workspace-a",
-    run_id: "run-a",
-    surface_id: "garden-mcp-tools-test",
-    source: SignalSource.GARDEN_COMPILE,
-    signal_kind: "potential_preference",
-    signal_state: "emitted",
-    object_kind: "memory_entry",
-    scope_hint: "project",
-    domain_tags: ["garden"],
-    confidence: 0.9,
-    evidence_refs: ["memory-1"],
-    raw_payload: { observation: "host worker signal" },
     created_at: "2026-05-07T00:00:00.000Z",
     ...overrides
   };

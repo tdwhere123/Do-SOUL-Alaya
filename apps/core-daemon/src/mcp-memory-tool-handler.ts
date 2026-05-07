@@ -510,13 +510,35 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       throw new ToolNotFoundError(`Garden task not found: ${request.task_id}`);
     }
 
-    const candidateSignals = request.result_envelope?.candidate_signals ?? [];
-    for (const signal of candidateSignals) {
-      if (signal.workspace_id !== context.workspaceId) {
-        throw new ToolValidationError(
-          "garden.complete_task candidate_signals must belong to the MCP call workspace."
-        );
-      }
+    // Wave-end M1 (§29): host-supplied candidate_signals carry only
+    // content fields (McpEmitCandidateSignalRequestSchema). The daemon
+    // binds workspace_id / run_id / surface_id / source from the trusted
+    // task row + MCP context — never from host payload — so a host
+    // cannot self-report `source: "user_seed"` or a foreign run_id and
+    // sneak past the §29 default-scope guard.
+    const contentOnlySignals = request.result_envelope?.candidate_signals ?? [];
+
+    // Wave-end M2 (§10): emit candidate signals BEFORE writing
+    // SOUL_GARDEN_TASK_COMPLETED. The prior order committed the
+    // task-completed event up front (claiming N signals were emitted)
+    // and then looped receiveSignal — if the loop threw mid-batch, the
+    // audit row had already lied. Emitting first means a partial failure
+    // leaves the task in `claimed` (recovery via gcAbandonedClaims or
+    // host retry) without ever publishing a task-completed event whose
+    // objects_affected list does not match reality.
+    const emittedSignalIds: string[] = [];
+    for (const signalContent of contentOnlySignals) {
+      const internalSignal = CandidateMemorySignalSchema.parse({
+        signal_id: `signal_${generateId()}`,
+        ...signalContent,
+        workspace_id: context.workspaceId,
+        run_id: context.runId ?? row.id,
+        surface_id: null,
+        source: SignalSource.GARDEN_COMPILE,
+        created_at: now()
+      });
+      const received = await deps.signalService.receiveSignal(internalSignal);
+      emittedSignalIds.push(received.signal.signal_id);
     }
 
     const completedAt = now();
@@ -533,8 +555,8 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
         role: row.role,
         tier: GARDEN_ROLE_TIER_MAP[row.role],
         success: request.status === "completed",
-        objects_affected: candidateSignals.map((signal) => signal.signal_id),
-        candidate_signals_count: candidateSignals.length,
+        objects_affected: emittedSignalIds,
+        candidate_signals_count: emittedSignalIds.length,
         workspace_id: context.workspaceId,
         occurred_at: completedAt
       })
@@ -549,10 +571,6 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       },
       [event]
     );
-
-    for (const signal of candidateSignals) {
-      await deps.signalService.receiveSignal(CandidateMemorySignalSchema.parse(signal));
-    }
 
     return GardenCompleteTaskResponseSchema.parse({
       task_id: row.id,
