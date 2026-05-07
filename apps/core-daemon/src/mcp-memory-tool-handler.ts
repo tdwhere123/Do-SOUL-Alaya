@@ -43,6 +43,7 @@ import {
   type SoulMemorySearchRequest,
   type SoulOpenPointerRequest,
   type SoulProposeMemoryUpdateRequest,
+  type SoulMemorySearchDegradationReason,
   type SoulRecallStrategyMix,
   type SoulReportContextUsageRequest,
   type SoulReviewMemoryProposalRequest,
@@ -71,6 +72,7 @@ export interface McpMemoryToolHandlerDependencies {
       readonly total_scanned: number;
       readonly coarse_filter_count: number;
       readonly fine_assessment_count: number;
+      readonly degradation_reason?: SoulMemorySearchDegradationReason | null;
     }>>;
   };
   readonly memoryService: {
@@ -256,12 +258,15 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       delivered_at: now()
     });
 
+    const degradationReason =
+      recallResult.degradation_reason ?? (explainabilityPartial ? "recall_explainability_partial" : null);
+
     return SoulMemorySearchResponseSchema.parse({
       delivery_id: deliveryId,
       results,
       total_count: recallResult.fine_assessment_count,
       strategy_mix: buildRecallStrategyMix(policyOverride, results),
-      degradation_reason: explainabilityPartial ? "recall_explainability_partial" : null
+      degradation_reason: degradationReason
     });
   }
 

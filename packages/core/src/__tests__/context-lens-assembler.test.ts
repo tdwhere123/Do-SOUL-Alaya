@@ -1075,6 +1075,7 @@ function createRecallResult(candidates: readonly Readonly<RecallCandidate>[]) {
     total_scanned: candidates.length,
     coarse_filter_count: candidates.length,
     fine_assessment_count: candidates.length,
+    degradation_reason: null,
     working_projection: null
   });
 }

@@ -54,7 +54,49 @@ describe("mcp memory tool handler", () => {
     );
     expect(result.ok && result.output).toMatchObject({
       delivery_id: "delivery_00000000-0000-4000-8000-000000000003",
-      total_count: 1
+      total_count: 1,
+      degradation_reason: "recall_explainability_partial"
+    });
+  });
+
+  it("prefers cascade degradation over explainability partial degradation", async () => {
+    const deps = createDeps();
+    deps.recallService.recall = vi.fn(async () => ({
+      candidates: [
+        {
+          object_id: "mem1",
+          object_kind: "memory_entry",
+          activation_score: 0.9,
+          relevance_score: 0.8,
+          content_preview: "deployment rules",
+          token_estimate: 12,
+          manifestation: "excerpt",
+          dimension: MemoryDimension.PROCEDURE,
+          scope_class: ScopeClass.PROJECT,
+          origin_plane: "workspace_local"
+        }
+      ],
+      total_scanned: 1,
+      coarse_filter_count: 1,
+      fine_assessment_count: 1,
+      degradation_reason: "cold_cascade_engaged"
+    }));
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const result = await handler.call({
+      toolName: "soul.recall",
+      arguments: {
+        query: "deployment rules",
+        scope_class: null,
+        dimension: null,
+        domain_tags: null,
+        max_results: 3
+      },
+      context
+    });
+
+    expect(result.ok && result.output).toMatchObject({
+      degradation_reason: "cold_cascade_engaged"
     });
   });
 

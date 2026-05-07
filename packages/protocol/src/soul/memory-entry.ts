@@ -33,7 +33,7 @@ const manifestationStateValues = ["hidden", "hint", "excerpt", "full_eligible"] 
 
 const retentionStateValues = ["working", "consolidated", "canon", "archived", "tombstoned"] as const;
 
-const storageTierValues = ["hot", "cold"] as const;
+const storageTierValues = ["hot", "warm", "cold"] as const;
 
 export const MemoryDimension = {
   PREFERENCE: "preference",
@@ -87,6 +87,7 @@ export const RetentionState = {
 
 export const StorageTier = {
   HOT: "hot",
+  WARM: "warm",
   COLD: "cold"
 } as const;
 

@@ -38,6 +38,12 @@ export const SoulRecallStrategyMixSchema = z
   .strict()
   .readonly();
 
+export const SoulMemorySearchDegradationReasonSchema = z.enum([
+  "recall_explainability_partial",
+  "warm_cascade_engaged",
+  "cold_cascade_engaged"
+]);
+
 export const MemorySearchResultSchema = z
   .object({
     object_id: NonEmptyStringSchema,
@@ -68,7 +74,7 @@ export const SoulMemorySearchResponseSchema = z
     results: z.array(MemorySearchResultSchema).readonly(),
     total_count: NonNegativeIntSchema,
     strategy_mix: SoulRecallStrategyMixSchema,
-    degradation_reason: BoundedReasonSchema.nullable().optional()
+    degradation_reason: SoulMemorySearchDegradationReasonSchema.nullable().optional()
   })
   .readonly();
 
@@ -259,6 +265,7 @@ export const SoulReportContextUsageResponseSchema = z
 
 export type MemorySearchResult = z.infer<typeof MemorySearchResultSchema>;
 export type SoulRecallStrategyMix = z.infer<typeof SoulRecallStrategyMixSchema>;
+export type SoulMemorySearchDegradationReason = z.infer<typeof SoulMemorySearchDegradationReasonSchema>;
 export type SoulMemorySearchRequest = z.infer<typeof SoulMemorySearchRequestSchema>;
 export type SoulMemorySearchResponse = z.infer<typeof SoulMemorySearchResponseSchema>;
 export type SoulOpenPointerRequest = z.infer<typeof SoulOpenPointerRequestSchema>;

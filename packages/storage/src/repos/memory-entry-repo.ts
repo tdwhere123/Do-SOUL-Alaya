@@ -162,7 +162,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     this.findByWorkspaceTierStatement = db.connection.prepare(`
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
       FROM memory_entries
-      WHERE workspace_id = ? AND storage_tier = ?
+      WHERE workspace_id = ? AND storage_tier = ? AND COALESCE(retention_state, '') != 'tombstoned'
       ORDER BY created_at ASC, object_id ASC
     `);
     this.findByRunIdStatement = db.connection.prepare(`

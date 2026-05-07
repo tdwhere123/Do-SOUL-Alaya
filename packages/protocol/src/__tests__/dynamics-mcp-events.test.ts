@@ -287,6 +287,56 @@ describe("MCP tool request/response schemas", () => {
     }
   });
 
+  it("accepts recall cascade degradation_reason values", () => {
+    const baseResponse = {
+      delivery_id: "delivery-1",
+      results: [],
+      total_count: 0,
+      strategy_mix: {
+        deterministic_match: true,
+        precomputed_rank: true,
+        semantic_supplement: false,
+        graph_support: false,
+        path_plasticity: false,
+        global_recall: false
+      }
+    };
+
+    expect(SoulMemorySearchResponseSchema.parse({
+      ...baseResponse,
+      degradation_reason: "recall_explainability_partial"
+    }).degradation_reason).toBe("recall_explainability_partial");
+    expect(SoulMemorySearchResponseSchema.parse({
+      ...baseResponse,
+      degradation_reason: "warm_cascade_engaged"
+    }).degradation_reason).toBe("warm_cascade_engaged");
+    expect(SoulMemorySearchResponseSchema.parse({
+      ...baseResponse,
+      degradation_reason: "cold_cascade_engaged"
+    }).degradation_reason).toBe("cold_cascade_engaged");
+  });
+
+  it("rejects unknown recall degradation_reason values", () => {
+    const baseResponse = {
+      delivery_id: "delivery-1",
+      results: [],
+      total_count: 0,
+      strategy_mix: {
+        deterministic_match: true,
+        precomputed_rank: true,
+        semantic_supplement: false,
+        graph_support: false,
+        path_plasticity: false,
+        global_recall: false
+      }
+    };
+
+    expect(SoulMemorySearchResponseSchema.safeParse({
+      ...baseResponse,
+      degradation_reason: "frozen_cascade_engaged"
+    }).success).toBe(false);
+  });
+
   it("rejects the legacy generic graph explore contract", () => {
     expect(() =>
       SoulExploreGraphRequestSchema.parse({

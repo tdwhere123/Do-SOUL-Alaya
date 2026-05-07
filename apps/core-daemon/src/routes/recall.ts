@@ -48,8 +48,10 @@ export function registerRecallRoutes(app: Hono, services: RecallRouteServices): 
       runId: run.run_id,
       strategy
     });
+    const debugResult: Record<string, unknown> = { ...result };
+    Reflect.deleteProperty(debugResult, "degradation_reason");
 
-    return context.json({ success: true, data: result }, 200);
+    return context.json({ success: true, data: debugResult }, 200);
   });
 }
 

@@ -10,6 +10,7 @@ import {
   type FineAssessmentConfig,
   type MemoryDimension as MemoryDimensionType,
   type MemoryEntry,
+  type ProjectMappingAnchor,
   type RecallCandidate,
   type RecallScoreFactors,
   type RecallPolicy,
@@ -20,7 +21,10 @@ import { loadGlobalRecallCandidates } from "./global-memory-recall-service.js";
 import { STRATEGY_RECALL_DEFAULTS, type NodeStrategy } from "./task-surface-builder.js";
 import {
   EMBEDDING_SIMILARITY_WEIGHT,
+  COLD_CASCADE_DECAY,
+  MIN_RECALL_RESULTS,
   PATH_PLASTICITY_WEIGHT,
+  WARM_CASCADE_DECAY,
   applySimilarityBoost,
   assertActivationWeightsSumToOne,
   assignManifestation,
@@ -93,7 +97,7 @@ export class RecallService {
   }): Promise<RecallResult> {
     const policy = this.resolvePolicy(params.strategy, params.taskSurface.runtime_id, params.policyOverride);
     const queryText = normalizeQueryText(params.taskSurface.display_name);
-    const coarseFilter = await this.coarseFilter(params.workspaceId, policy.coarse_filter, queryText);
+    const hotCoarseFilter = await this.coarseFilter(params.workspaceId, policy.coarse_filter, queryText);
     const globalCoarseFilter = await loadGlobalRecallCandidates({
       workspaceId: params.workspaceId,
       queryText,
@@ -123,10 +127,6 @@ export class RecallService {
             : ("excluded" as const)
       })
     );
-    const combinedCoarseCandidates = Object.freeze([
-      ...coarseFilter.candidates,
-      ...filteredGlobalCandidates
-    ]) as readonly Readonly<CoarseRecallCandidate>[];
     const slots = await this.dependencies.slotRepo.findByWorkspace(params.workspaceId);
     const winnerClaimIds = new Set(slots.flatMap((slot) => (slot.winner_claim_id === null ? [] : [slot.winner_claim_id])));
     // Resolve claim IDs to their backing memory entry IDs.
@@ -144,30 +144,56 @@ export class RecallService {
       );
     }
 
-    const supplementaryData = await this.collectSupplementaryData({
-      candidates: combinedCoarseCandidates.map((candidate) => candidate.entry),
+    const hotAssessment = await this.assessCoarseFilter({
+      coarseFilter: hotCoarseFilter,
       workspaceId: params.workspaceId,
       runId: params.runId ?? null,
       queryText,
-      coarseFtsRanks: coarseFilter.ftsRanks
+      fineAssessmentConfig: policy.fine_assessment,
+      winnerMemoryIds
     });
-    const lexicalCandidates = this.fineAssess(
-      combinedCoarseCandidates,
-      policy.fine_assessment,
-      winnerMemoryIds,
-      supplementaryData
-    );
+    const coarseFilter = await this.expandTierCascade({
+      workspaceId: params.workspaceId,
+      runId: params.runId ?? null,
+      config: policy.coarse_filter,
+      fineAssessmentConfig: policy.fine_assessment,
+      queryText,
+      hotCoarseFilter,
+      hotFineAssessmentCount: hotAssessment.candidates.length,
+      winnerMemoryIds
+    });
+    const combinedCoarseCandidates = Object.freeze([
+      ...coarseFilter.candidates,
+      ...filteredGlobalCandidates
+    ]) as readonly Readonly<CoarseRecallCandidate>[];
+
+    const assessment =
+      coarseFilter === hotCoarseFilter && filteredGlobalCandidates.length === 0
+        ? hotAssessment
+        : await this.assessCoarseFilter({
+            coarseFilter: Object.freeze({
+              ...coarseFilter,
+              candidates: combinedCoarseCandidates
+            }),
+            workspaceId: params.workspaceId,
+            runId: params.runId ?? null,
+            queryText,
+            fineAssessmentConfig: policy.fine_assessment,
+            winnerMemoryIds
+          });
+    const supplementaryData = assessment.supplementaryData;
+    const lexicalCandidates = assessment.candidates;
     const preparedEmbeddingQuery = await this.prepareEmbeddingSupplementQuery({
       config: policy,
       workspaceId: params.workspaceId,
       runId: params.runId ?? null,
       queryText,
-      localEligibleCandidates: coarseFilter.candidates,
+      localEligibleCandidates: hotCoarseFilter.candidates,
       lexicalFallbackCount: lexicalCandidates.length
     });
     const mergedCandidates = await this.mergeEmbeddingSupplementCandidates({
       baseCandidates: lexicalCandidates,
-      localEligibleCandidates: coarseFilter.candidates,
+      localEligibleCandidates: hotCoarseFilter.candidates,
       config: policy,
       workspaceId: params.workspaceId,
       runId: params.runId ?? null,
@@ -206,6 +232,7 @@ export class RecallService {
       total_scanned: coarseFilter.total_scanned + globalCoarseFilter.total_scanned,
       coarse_filter_count: combinedCoarseCandidates.length,
       fine_assessment_count: candidates.length,
+      degradation_reason: coarseFilter.degradation_reason,
       working_projection: null
     });
   }
@@ -266,19 +293,27 @@ export class RecallService {
   private async coarseFilter(
     workspaceId: string,
     config: Readonly<RecallPolicy>["coarse_filter"],
-    queryText: string | null
+    queryText: string | null,
+    options: Readonly<{
+      readonly tier?: StorageTier;
+      readonly projectMappings?: readonly Readonly<ProjectMappingAnchor>[];
+      readonly sourceChannel?: string;
+      readonly scoreMultiplier?: number;
+    }> = {}
   ): Promise<{
     readonly total_scanned: number;
     readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
     readonly ftsRanks: Readonly<Record<string, number>>;
+    readonly degradation_reason: RecallResult["degradation_reason"];
   }> {
-    const [hotMemories, projectMappings] = await Promise.all([
-      this.dependencies.memoryRepo.findByWorkspaceId(workspaceId, StorageTier.HOT),
-      this.dependencies.projectMappingPort?.findByWorkspace(workspaceId) ?? Promise.resolve([])
+    const tier = options.tier ?? StorageTier.HOT;
+    const [tierMemories, projectMappings] = await Promise.all([
+      this.dependencies.memoryRepo.findByWorkspaceId(workspaceId, tier),
+      options.projectMappings ?? this.dependencies.projectMappingPort?.findByWorkspace(workspaceId) ?? Promise.resolve([])
     ]);
-    const protectedCandidates = hotMemories.filter((entry) => isProtectedDimension(entry.dimension));
+    const protectedCandidates = tierMemories.filter((entry) => isProtectedDimension(entry.dimension));
     const protectedIds = new Set(protectedCandidates.map((entry) => entry.object_id));
-    const deterministicMatches = hotMemories.filter(
+    const deterministicMatches = tierMemories.filter(
       (entry) => !protectedIds.has(entry.object_id) && matchesDeterministicFilter(entry, config)
     );
 
@@ -299,7 +334,7 @@ export class RecallService {
       (this.dependencies.memoryRepo.searchByKeywordWithinObjectIds !== undefined ||
         this.dependencies.memoryRepo.searchByKeyword !== undefined)
     ) {
-      const byId = new Map(hotMemories.map((memory) => [memory.object_id, memory]));
+      const byId = new Map(tierMemories.map((memory) => [memory.object_id, memory]));
       const supplement =
         this.dependencies.memoryRepo.searchByKeywordWithinObjectIds !== undefined
           ? await this.dependencies.memoryRepo.searchByKeywordWithinObjectIds(
@@ -350,17 +385,134 @@ export class RecallService {
         return [
           Object.freeze({
             entry,
-            isAdvisory: classification.isAdvisory
+            isAdvisory: classification.isAdvisory,
+            ...(options.sourceChannel === undefined ? {} : { sourceChannel: options.sourceChannel }),
+            ...(options.scoreMultiplier === undefined ? {} : { scoreMultiplier: options.scoreMultiplier })
           })
         ];
       })
     ) as readonly Readonly<CoarseRecallCandidate>[];
 
     return Object.freeze({
-      total_scanned: hotMemories.length,
+      total_scanned: tierMemories.length,
       candidates: supplementedCandidates,
-      ftsRanks: Object.freeze(Object.fromEntries(ftsRanks.entries()))
+      ftsRanks: Object.freeze(Object.fromEntries(ftsRanks.entries())),
+      degradation_reason: null
     });
+  }
+
+  private async expandTierCascade(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly config: Readonly<RecallPolicy>["coarse_filter"];
+    readonly fineAssessmentConfig: Readonly<FineAssessmentConfig>;
+    readonly queryText: string | null;
+    readonly hotCoarseFilter: Awaited<ReturnType<RecallService["coarseFilter"]>>;
+    readonly hotFineAssessmentCount: number;
+    readonly winnerMemoryIds: ReadonlySet<string>;
+  }): Promise<Awaited<ReturnType<RecallService["coarseFilter"]>>> {
+    const targetCount = Math.min(MIN_RECALL_RESULTS, params.fineAssessmentConfig.budgets.max_entries);
+    if (targetCount === 0) {
+      return params.hotCoarseFilter;
+    }
+
+    if (params.hotFineAssessmentCount >= targetCount) {
+      return params.hotCoarseFilter;
+    }
+
+    const projectMappings =
+      this.dependencies.projectMappingPort?.findByWorkspace === undefined
+        ? []
+        : await this.dependencies.projectMappingPort.findByWorkspace(params.workspaceId);
+    const warmFilter = await this.coarseFilter(params.workspaceId, params.config, params.queryText, {
+      tier: StorageTier.WARM,
+      projectMappings,
+      sourceChannel: "warm_cascade",
+      scoreMultiplier: WARM_CASCADE_DECAY
+    });
+    const warmMerged = this.mergeCoarseFilters(params.hotCoarseFilter, warmFilter, "warm_cascade_engaged");
+    const warmCount = await this.fineAssessmentCountForCascade(warmMerged, params);
+    if (warmCount >= targetCount) {
+      return warmMerged;
+    }
+
+    const coldFilter = await this.coarseFilter(params.workspaceId, params.config, params.queryText, {
+      tier: StorageTier.COLD,
+      projectMappings,
+      sourceChannel: "cold_cascade",
+      scoreMultiplier: COLD_CASCADE_DECAY
+    });
+    return this.mergeCoarseFilters(warmMerged, coldFilter, "cold_cascade_engaged");
+  }
+
+  private async assessCoarseFilter(params: {
+    readonly coarseFilter: Awaited<ReturnType<RecallService["coarseFilter"]>>;
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly queryText: string | null;
+    readonly fineAssessmentConfig: Readonly<FineAssessmentConfig>;
+    readonly winnerMemoryIds: ReadonlySet<string>;
+  }): Promise<Readonly<{
+    readonly supplementaryData: RecallSupplementaryData;
+    readonly candidates: readonly Readonly<RecallCandidate>[];
+  }>> {
+    const supplementaryData = await this.collectSupplementaryData({
+      candidates: params.coarseFilter.candidates.map((candidate) => candidate.entry),
+      workspaceId: params.workspaceId,
+      runId: params.runId,
+      queryText: params.queryText,
+      coarseFtsRanks: params.coarseFilter.ftsRanks
+    });
+    const candidates = this.fineAssess(
+      params.coarseFilter.candidates,
+      params.fineAssessmentConfig,
+      params.winnerMemoryIds,
+      supplementaryData
+    );
+
+    return Object.freeze({
+      supplementaryData,
+      candidates
+    });
+  }
+
+  private mergeCoarseFilters(
+    current: Awaited<ReturnType<RecallService["coarseFilter"]>>,
+    next: Awaited<ReturnType<RecallService["coarseFilter"]>>,
+    degradationReason: NonNullable<RecallResult["degradation_reason"]>
+  ): Awaited<ReturnType<RecallService["coarseFilter"]>> {
+    const seen = new Set(current.candidates.map((candidate) => buildRecallCandidateDedupeKey(candidate)));
+    const nextCandidates = next.candidates.filter((candidate) => {
+      const key = buildRecallCandidateDedupeKey(candidate);
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+
+    return Object.freeze({
+      total_scanned: current.total_scanned + next.total_scanned,
+      candidates: Object.freeze([...current.candidates, ...nextCandidates]),
+      ftsRanks: Object.freeze({
+        ...current.ftsRanks,
+        ...next.ftsRanks
+      }),
+      degradation_reason: degradationReason
+    });
+  }
+
+  private async fineAssessmentCountForCascade(
+    coarseFilter: Awaited<ReturnType<RecallService["coarseFilter"]>>,
+    params: {
+      readonly workspaceId: string;
+      readonly runId: string | null;
+      readonly queryText: string | null;
+      readonly fineAssessmentConfig: Readonly<FineAssessmentConfig>;
+      readonly winnerMemoryIds: ReadonlySet<string>;
+    }
+  ): Promise<number> {
+    return (await this.assessCoarseFilter({ coarseFilter, ...params })).candidates.length;
   }
 
   private async collectSupplementaryData(params: {
@@ -650,7 +802,8 @@ export class RecallService {
           config,
           winnerMemoryIds,
           supplementaryData,
-          candidate.isAdvisory ?? false
+          candidate.isAdvisory ?? false,
+          candidate.scoreMultiplier ?? 1
         )
       }))
       .sort((left, right) => compareEffectiveScores(right, left));
@@ -704,7 +857,8 @@ export class RecallService {
         config,
         winnerMemoryIds,
         supplementaryData,
-        candidate.isAdvisory ?? false
+        candidate.isAdvisory ?? false,
+        candidate.scoreMultiplier ?? 1
       );
       const relevanceScore = scored.score;
       const nextCandidate = RecallCandidateSchema.parse({
@@ -759,14 +913,16 @@ export class RecallService {
     config: Readonly<FineAssessmentConfig>,
     winnerMemoryIds: ReadonlySet<string>,
     supplementaryData: RecallSupplementaryData,
-    isAdvisory: boolean
+    isAdvisory: boolean,
+    scoreMultiplier = 1
   ): number {
     return this.computeEffectiveScoreDetails(
       entry,
       config,
       winnerMemoryIds,
       supplementaryData,
-      isAdvisory
+      isAdvisory,
+      scoreMultiplier
     ).score;
   }
 
@@ -775,7 +931,8 @@ export class RecallService {
     config: Readonly<FineAssessmentConfig>,
     winnerMemoryIds: ReadonlySet<string>,
     supplementaryData: RecallSupplementaryData,
-    isAdvisory: boolean
+    isAdvisory: boolean,
+    scoreMultiplier = 1
   ): Readonly<{ readonly score: number; readonly factors: RecallScoreFactors }> {
     const weights = DYNAMICS_CONSTANTS.activation_weights_phase4b;
     const activationScore = normalizeActivationScore(entry.activation_score);
@@ -799,7 +956,7 @@ export class RecallService {
       weights.retention +
       weights.freshness;
 
-    const score = clamp01(
+    const rawScore = clamp01(
       activationScore * baseWeight +
         relevanceFactor * weights.relevance +
         graphSupportFactor * weights.graph_support +
@@ -807,6 +964,7 @@ export class RecallService {
         budgetPenalty * weights.budget_penalty -
         conflictPenalty * weights.conflict_penalty
     );
+    const score = clamp01(rawScore * scoreMultiplier);
 
     return Object.freeze({
       score,
@@ -835,7 +993,8 @@ export class RecallService {
       config,
       winnerMemoryIds,
       supplementaryData,
-      candidate.isAdvisory ?? false
+      candidate.isAdvisory ?? false,
+      candidate.scoreMultiplier ?? 1
     );
     const normalizedEmbeddingSimilarity = clamp01(normalizedSimilarity);
     const relevanceScore = clamp01(
@@ -913,6 +1072,9 @@ function buildSourceChannels(
   }
   if ((factors.embedding_similarity ?? 0) > 0 || extraChannel !== undefined) {
     channels.add(extraChannel ?? "semantic_supplement");
+  }
+  if (candidate.sourceChannel !== undefined) {
+    channels.add(candidate.sourceChannel);
   }
   if (candidate.isAdvisory === true) {
     channels.add("advisory");
