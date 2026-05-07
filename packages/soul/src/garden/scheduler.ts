@@ -88,6 +88,19 @@ export interface GardenTaskRepoPort {
     limit?: number
   ): readonly GardenTaskRow[];
   claimAtomic(taskId: string, claimedBy: string, claimedAt: string): GardenTaskClaimResult;
+  /**
+   * Wave-end M6: claim a task and append the dispatched audit event(s)
+   * in one storage transaction. Eliminates the prior partial-state
+   * window between claimAtomic and a separate eventLog.append where a
+   * daemon crash would leave a `claimed` row without a matching
+   * SOUL_GARDEN_TASK_DISPATCHED event row.
+   */
+  claimAtomicWithEvents(
+    taskId: string,
+    claimedBy: string,
+    claimedAt: string,
+    dispatchedEvents: readonly GardenTaskEventInput[]
+  ): Promise<GardenTaskClaimResult>;
   completeWithEvents(
     taskId: string,
     result: {
@@ -233,35 +246,37 @@ export class GardenScheduler {
         continue;
       }
 
-      const claimResult = this.taskRepo.claimAtomic(
+      // Wave-end M6: claim AND append the dispatched event in the
+      // same SQLite transaction. Pre-fix, claimAtomic committed first
+      // and the event append happened in a separate tx — a daemon
+      // crash between the two left a `claimed` row with no audit
+      // trail (recovery only via gcAbandonedClaims). Now both
+      // commit-or-roll together.
+      const dispatchedEvent: GardenTaskEventInput = {
+        event_type: GardenEventType.SOUL_GARDEN_TASK_DISPATCHED,
+        entity_type: "garden_task",
+        entity_id: task.task_id,
+        workspace_id: task.workspace_id,
+        run_id: task.run_id,
+        caused_by: IN_PROCESS_GARDEN_CLAIMANT,
+        payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_DISPATCHED, {
+          task_id: task.task_id,
+          task_kind: task.task_kind,
+          role,
+          tier: roleTier,
+          workspace_id: task.workspace_id,
+          run_id: task.run_id,
+          occurred_at: nowIso
+        })
+      };
+      const claimResult = await this.taskRepo.claimAtomicWithEvents(
         task.task_id,
         IN_PROCESS_GARDEN_CLAIMANT,
-        nowIso
+        nowIso,
+        [dispatchedEvent]
       );
       if (claimResult !== "claimed") {
         continue;
-      }
-
-      try {
-        await this.eventLog.append({
-          event_type: GardenEventType.SOUL_GARDEN_TASK_DISPATCHED,
-          entity_type: "garden_task",
-          entity_id: task.task_id,
-          workspace_id: task.workspace_id,
-          run_id: task.run_id,
-          payload: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_DISPATCHED, {
-            task_id: task.task_id,
-            task_kind: task.task_kind,
-            role,
-            tier: roleTier,
-            workspace_id: task.workspace_id,
-            run_id: task.run_id,
-            occurred_at: nowIso
-          })
-        });
-      } catch (error) {
-        this.taskRepo.releaseClaim(task.task_id, IN_PROCESS_GARDEN_CLAIMANT);
-        throw error;
       }
 
       this.updateBacklogTelemetry(nowIso);
@@ -571,6 +586,41 @@ class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
       claimed_at: claimedAt,
       attempt_count: row.attempt_count + 1
     });
+    return "claimed";
+  }
+
+  // Wave-end M6: in-memory impl matches the SQLite-backed contract —
+  // claim and append commit-or-roll together. The in-memory event log
+  // doesn't have transactional semantics, so we apply the rollback by
+  // hand: snapshot the row before claiming, attempt every event append,
+  // and on any throw restore the snapshot via releaseClaim. The
+  // SqliteGardenTaskRepo's appendManyWithMutation already handles
+  // rollback at the SQLite layer.
+  public async claimAtomicWithEvents(
+    taskId: string,
+    claimedBy: string,
+    claimedAt: string,
+    dispatchedEvents: readonly GardenTaskEventInput[]
+  ): Promise<GardenTaskClaimResult> {
+    const result = this.claimAtomic(taskId, claimedBy, claimedAt);
+    if (result !== "claimed") {
+      return result;
+    }
+    try {
+      for (const event of dispatchedEvents) {
+        await this.eventLog.append({
+          event_type: event.event_type,
+          entity_type: event.entity_type,
+          entity_id: event.entity_id,
+          workspace_id: event.workspace_id,
+          run_id: event.run_id,
+          payload: event.payload_json
+        });
+      }
+    } catch (error) {
+      this.releaseClaim(taskId, claimedBy);
+      throw error;
+    }
     return "claimed";
   }
 

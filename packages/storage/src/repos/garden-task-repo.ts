@@ -38,6 +38,18 @@ function isUniqueConstraintError(error: unknown, qualifiedColumn: string): boole
 }
 
 export type GardenTaskStatus = "pending" | "claimed" | "completed" | "failed";
+
+/**
+ * Sentinel thrown inside the appendManyWithMutation callback when the
+ * claim CAS predicate loses. It rolls back the audit append along
+ * with the (no-op) UPDATE so partial state cannot escape.
+ */
+class GardenTaskClaimCasMiss extends Error {
+  constructor() {
+    super("Garden task already claimed by another worker.");
+    this.name = "GardenTaskClaimCasMiss";
+  }
+}
 export type GardenTaskClaimResult = "claimed" | "already-claimed";
 export type GardenTaskEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
@@ -99,6 +111,24 @@ export interface GardenTaskRepoPort {
     claimedAt: string,
     workspace_id?: string
   ): GardenTaskClaimResult;
+  /**
+   * Wave-end M6: claim a pending task AND append the dispatched event(s)
+   * inside the same SQLite transaction. Either the row's status flips
+   * to "claimed" with a corresponding SOUL_GARDEN_TASK_DISPATCHED row
+   * in event_log, or neither — eliminating the partial-state window
+   * where a daemon crash between separate claim + append calls would
+   * leave a `claimed` row with no audit trail (recovery only via
+   * gcAbandonedClaims). When the CAS predicate loses (already claimed
+   * by another worker), no events are appended and the result is
+   * "already-claimed".
+   */
+  claimAtomicWithEvents(
+    taskId: string,
+    claimedBy: string,
+    claimedAt: string,
+    dispatchedEvents: readonly GardenTaskEventInput[],
+    workspace_id?: string
+  ): Promise<GardenTaskClaimResult>;
   releaseClaim(taskId: string, claimedBy: string): boolean;
   completeWithEvents(
     taskId: string,
@@ -365,6 +395,58 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       return result.changes === 1 ? "claimed" : "already-claimed";
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to claim Garden task ${parsedTaskId}.`, error);
+    }
+  }
+
+  public async claimAtomicWithEvents(
+    taskId: string,
+    claimedBy: string,
+    claimedAt: string,
+    dispatchedEvents: readonly GardenTaskEventInput[],
+    workspace_id?: string
+  ): Promise<GardenTaskClaimResult> {
+    const parsedTaskId = parseNonEmptyString(taskId, "garden_task.id");
+    const parsedClaimedBy = parseNonEmptyString(claimedBy, "garden_task.claimed_by");
+    const parsedClaimedAt = parseTimestamp(claimedAt);
+    const parsedWorkspaceId =
+      workspace_id === undefined
+        ? null
+        : parseNonEmptyString(workspace_id, "garden_task.workspace_id");
+
+    if (dispatchedEvents.length === 0) {
+      return this.claimAtomic(parsedTaskId, parsedClaimedBy, parsedClaimedAt, workspace_id);
+    }
+
+    let claimResult: GardenTaskClaimResult = "already-claimed";
+    try {
+      await this.eventPublisher.appendManyWithMutation(dispatchedEvents, () => {
+        const result = this.claimStatement.run(
+          parsedClaimedBy,
+          parsedClaimedAt,
+          parsedTaskId,
+          parsedWorkspaceId,
+          parsedWorkspaceId
+        );
+        claimResult = result.changes === 1 ? "claimed" : "already-claimed";
+        if (claimResult !== "claimed") {
+          // CAS lost. Roll the audit append back with the same throw-to-rollback
+          // contract completeWithEvents already uses for tier-promotion CAS misses.
+          throw new GardenTaskClaimCasMiss();
+        }
+      });
+      return claimResult;
+    } catch (error) {
+      if (error instanceof GardenTaskClaimCasMiss) {
+        return "already-claimed";
+      }
+      if (error instanceof StorageError) {
+        throw error;
+      }
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to atomically claim Garden task ${parsedTaskId}.`,
+        error
+      );
     }
   }
 
