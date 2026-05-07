@@ -65,6 +65,44 @@ export const RuntimeEmbeddingConfigPatchSchema = RuntimeEmbeddingConfigSchema.un
   .strict()
   .readonly();
 
+const RuntimeSecretRefSchema = z
+  .string()
+  .superRefine((value, context) => {
+    if (value.startsWith("env:")) {
+      const envName = value.slice("env:".length);
+      if (/^[A-Za-z_][A-Za-z0-9_]*$/u.test(envName)) {
+        return;
+      }
+    }
+
+    if (value.startsWith("file:")) {
+      const filePath = value.slice("file:".length);
+      if (filePath.startsWith("/") && filePath.length > 1) {
+        return;
+      }
+    }
+
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'secret_ref must use "env:NAME" or "file:/path".'
+    });
+  });
+
+export const RuntimeGardenComputeConfigSchema = z
+  .object({
+    provider_kind: z.enum(["official_api", "local_heuristics", "host_worker"]),
+    model_id: NonEmptyStringSchema.nullable(),
+    provider_url: NonEmptyStringSchema.nullable(),
+    secret_ref: RuntimeSecretRefSchema.nullable(),
+    enabled: z.boolean()
+  })
+  .readonly();
+
+export const RuntimeGardenComputeConfigPatchSchema = RuntimeGardenComputeConfigSchema.unwrap()
+  .partial()
+  .strict()
+  .readonly();
+
 export const AlayaStatusSchema = z
   .object({
     checked_at: NonEmptyStringSchema,
@@ -91,6 +129,8 @@ export type EnvironmentConfig = z.infer<typeof EnvironmentConfigSchema>;
 export type ToolchainStatus = z.infer<typeof ToolchainStatusSchema>;
 export type RuntimeEmbeddingConfig = z.infer<typeof RuntimeEmbeddingConfigSchema>;
 export type RuntimeEmbeddingConfigPatch = z.infer<typeof RuntimeEmbeddingConfigPatchSchema>;
+export type RuntimeGardenComputeConfig = z.infer<typeof RuntimeGardenComputeConfigSchema>;
+export type RuntimeGardenComputeConfigPatch = z.infer<typeof RuntimeGardenComputeConfigPatchSchema>;
 export type AlayaStatus = z.infer<typeof AlayaStatusSchema>;
 
 export const DEFAULT_SOUL_CONFIG: SoulConfig = {

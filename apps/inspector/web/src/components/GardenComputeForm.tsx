@@ -1,13 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Eye, EyeOff, Save } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Eye, EyeOff, Save } from "lucide-react";
 import { clsx } from "clsx";
 import { apiFetch, getWorkspaceId, type ApiError } from "../api";
 import { useToasts } from "./Toast";
-import {
-  EmbeddingStatusSchema,
-  type EmbeddingStatus,
-  type RuntimeEmbeddingConfig
-} from "@do-soul/alaya-protocol";
+import type { RuntimeGardenComputeConfig } from "@do-soul/alaya-protocol";
 
 interface PatchResult {
   readonly success?: boolean;
@@ -16,15 +12,16 @@ interface PatchResult {
 }
 
 type SecretRefMode = "env" | "file" | "paste";
+type ProviderKind = RuntimeGardenComputeConfig["provider_kind"];
 
 interface ParsedSecretRef {
   readonly mode: SecretRefMode;
   readonly value: string;
 }
 
-interface RuntimeEmbeddingConfigEnvelope {
+interface RuntimeGardenComputeConfigEnvelope {
   readonly success?: boolean;
-  readonly data?: RuntimeEmbeddingConfig;
+  readonly data?: RuntimeGardenComputeConfig;
 }
 
 const ENV_NAME_RE = /^[A-Z_][A-Z0-9_]*$/;
@@ -46,91 +43,68 @@ interface Props {
   readonly onRequiresRestart: () => void;
 }
 
-export default function EmbeddingSupplementForm({ onRequiresRestart }: Props) {
+export default function GardenComputeForm({ onRequiresRestart }: Props) {
   const workspaceId = getWorkspaceId() ?? "default";
   const { showToast } = useToasts();
 
+  const [providerKind, setProviderKind] = useState<ProviderKind>("local_heuristics");
   const [providerUrl, setProviderUrl] = useState<string>("");
   const [modelId, setModelId] = useState<string>("");
-  const [embeddingEnabled, setEmbeddingEnabled] = useState<boolean>(false);
+  const [enabled, setEnabled] = useState<boolean>(false);
   const [secretMode, setSecretMode] = useState<SecretRefMode>("env");
   const [secretValue, setSecretValue] = useState<string>("");
 
   const [revealFile, setRevealFile] = useState<boolean>(false);
-  const [initial, setInitial] = useState<RuntimeEmbeddingConfig | null>(null);
+  const [initial, setInitial] = useState<RuntimeGardenComputeConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
-  const [embeddingStatus, setEmbeddingStatus] = useState<EmbeddingStatus | null>(null);
-
-  // Fetch the workspace embedding-status so the form can surface init/runtime
-  // failures (bad URL, unreachable endpoint, model unknown) inline rather
-  // than letting them sit silently in daemon logs. The daemon already records
-  // degraded_reason via the health-journal degradation path the moment recall
-  // attempts to use the provider; we just expose what's already there.
-  const refreshEmbeddingStatus = useCallback(async () => {
-    try {
-      const envelope = await apiFetch<{ data?: unknown }>(
-        `/embedding-status/${workspaceId}`
-      );
-      const parsed = EmbeddingStatusSchema.safeParse(envelope.data);
-      if (parsed.success) {
-        setEmbeddingStatus(parsed.data);
-      }
-    } catch {
-      // Non-fatal: leave previous status visible. The standalone /status page
-      // owns the global "daemon unreachable" surfacing.
-    }
-  }, [workspaceId]);
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
-        const envelope = await apiFetch<RuntimeEmbeddingConfig | RuntimeEmbeddingConfigEnvelope>(
-          `/config/${workspaceId}/embedding-supplement`
+        const envelope = await apiFetch<RuntimeGardenComputeConfig | RuntimeGardenComputeConfigEnvelope>(
+          `/config/${workspaceId}/garden-compute`
         );
-        const data = unwrapRuntimeEmbeddingConfig(envelope);
+        const data = unwrapRuntimeGardenComputeConfig(envelope);
         if (cancelled) return;
         setInitial(data);
+        setProviderKind(data.provider_kind);
         setProviderUrl(data.provider_url ?? "");
         setModelId(data.model_id ?? "");
-        setEmbeddingEnabled(data.embedding_enabled);
+        setEnabled(data.enabled);
         const parsed = parseSecretRef(data.secret_ref);
         setSecretMode(parsed.mode);
         setSecretValue(parsed.value);
       } catch (err) {
         if ((err as ApiError).status === 401) return;
         showToast({
-          message: `Failed to load embedding config: ${(err as Error).message}`,
+          message: `Failed to load garden compute config: ${(err as Error).message}`,
           type: "error"
         });
         return;
       } finally {
         if (!cancelled) setLoading(false);
       }
-      // Fetch status AFTER config load completes — keeps the request order
-      // deterministic for tests and avoids racing the config GET on mount.
-      if (!cancelled) {
-        await refreshEmbeddingStatus();
-      }
     };
     void load();
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, showToast, refreshEmbeddingStatus]);
+  }, [workspaceId, showToast]);
 
   const dirty = useMemo(() => {
     if (!initial) return false;
     const builtRef = secretMode === "paste" ? initial.secret_ref : buildSecretRef(secretMode, secretValue);
     return (
+      initial.provider_kind !== providerKind ||
       (initial.provider_url ?? "") !== providerUrl ||
       (initial.model_id ?? "") !== modelId ||
-      initial.embedding_enabled !== embeddingEnabled ||
+      initial.enabled !== enabled ||
       (secretMode === "paste" ? secretValue !== "" : (initial.secret_ref ?? null) !== builtRef)
     );
-  }, [initial, providerUrl, modelId, embeddingEnabled, secretMode, secretValue]);
+  }, [initial, providerKind, providerUrl, modelId, enabled, secretMode, secretValue]);
 
   const handleSave = async () => {
     if (secretValue !== "") {
@@ -145,41 +119,39 @@ export default function EmbeddingSupplementForm({ onRequiresRestart }: Props) {
     setSaving(true);
     try {
       const secretPatch = buildSecretPatch(secretMode, secretValue);
-      const result = await apiFetch<PatchResult>("/config/runtime/embedding-supplement", {
+      const result = await apiFetch<PatchResult>("/config/runtime/garden-compute", {
         method: "PATCH",
         body: {
+          provider_kind: providerKind,
           provider_url: providerUrl === "" ? null : providerUrl,
           model_id: modelId === "" ? null : modelId,
-          embedding_enabled: embeddingEnabled,
+          enabled,
           ...secretPatch
         }
       });
-      const sanitized = unwrapRuntimeEmbeddingConfig(result.data);
+      const sanitized = unwrapRuntimeGardenComputeConfig(result.data);
       showToast({
-        message: "Embedding supplement patched · daemon restart pending",
+        message: "Garden compute patched · daemon restart pending",
         type: "success"
       });
       if (result.requires_daemon_restart) {
         onRequiresRestart();
       }
       setInitial({
+        provider_kind: sanitized?.provider_kind ?? providerKind,
         provider_url: sanitized?.provider_url ?? (providerUrl === "" ? null : providerUrl),
         model_id: sanitized?.model_id ?? (modelId === "" ? null : modelId),
-        embedding_enabled: sanitized?.embedding_enabled ?? embeddingEnabled,
+        enabled: sanitized?.enabled ?? enabled,
         secret_ref: sanitized?.secret_ref ?? secretPatch.secret_ref ?? null
       });
       const returnedRef = sanitized?.secret_ref ?? secretPatch.secret_ref ?? null;
       const parsed = parseSecretRef(returnedRef);
       setSecretMode(parsed.mode);
       setSecretValue(parsed.value);
-      // Note: we don't re-fetch /embedding-status here. The daemon must be
-      // restarted to apply config changes anyway, so the pre-restart status
-      // snapshot is meaningless. The next mount (after the user restarts the
-      // daemon and reloads the Inspector) will pick up the fresh status.
     } catch (err) {
       if ((err as ApiError).status === 401) return;
       showToast({
-        message: `Failed to patch embedding: ${(err as Error).message}`,
+        message: `Failed to patch garden compute: ${(err as Error).message}`,
         type: "error"
       });
     } finally {
@@ -190,32 +162,26 @@ export default function EmbeddingSupplementForm({ onRequiresRestart }: Props) {
   if (loading) {
     return (
       <div className="py-4 text-xs text-ink-700/40 uppercase tracking-widest animate-pulse">
-        Loading Embedding Supplement...
+        Loading Garden Compute...
       </div>
     );
   }
 
   return (
     <div className="space-y-5">
-      {embeddingStatus !== null && embeddingStatus.effective_mode === "degraded" ? (
-        <div
-          role="alert"
-          className="flex items-start gap-3 px-4 py-3 bg-[#C9ADA7]/15 border border-[#C9ADA7] rounded text-xs text-ink-700"
+      <FieldRow label="provider kind">
+        <select
+          value={providerKind}
+          onChange={(e) => setProviderKind(e.target.value as ProviderKind)}
+          className="bg-transparent border-b border-beige-300 focus:border-ink-600 outline-none text-sm text-ink-700 font-mono text-right py-1 min-w-[260px]"
+          aria-label="Garden compute provider kind"
         >
-          <AlertTriangle className="w-4 h-4 mt-0.5 text-[#C9ADA7] shrink-0" />
-          <div className="flex-1 space-y-1 min-w-0">
-            <p className="font-bold uppercase tracking-widest">
-              Embedding Degraded
-            </p>
-            <p className="text-ink-700/80 break-words">
-              {humanizeDegradedReason(embeddingStatus.degraded_reason)}
-            </p>
-            <p className="text-[10px] text-ink-700/50 font-mono">
-              checked {embeddingStatus.checked_at}
-            </p>
-          </div>
-        </div>
-      ) : null}
+          <option value="local_heuristics">local_heuristics (no external calls)</option>
+          <option value="official_api">official_api (OpenAI-compatible)</option>
+          <option value="host_worker">host_worker (deferred to v0.1.2)</option>
+        </select>
+      </FieldRow>
+
       <FieldRow label="provider url">
         <input
           type="text"
@@ -231,26 +197,26 @@ export default function EmbeddingSupplementForm({ onRequiresRestart }: Props) {
           type="text"
           value={modelId}
           onChange={(e) => setModelId(e.target.value)}
-          placeholder="text-embedding-3-small"
+          placeholder="gpt-4.1-mini"
           className="bg-transparent border-b border-beige-300 focus:border-ink-600 outline-none text-sm text-ink-700 font-mono text-right py-1 min-w-[260px]"
         />
       </FieldRow>
 
-      <FieldRow label="embedding enabled">
+      <FieldRow label="garden compute enabled">
         <button
           type="button"
-          onClick={() => setEmbeddingEnabled((v) => !v)}
+          onClick={() => setEnabled((v) => !v)}
           className={clsx(
             "w-10 h-5 rounded-full relative transition-colors duration-300",
-            embeddingEnabled ? "bg-morandi-green" : "bg-beige-300"
+            enabled ? "bg-morandi-green" : "bg-beige-300"
           )}
-          aria-pressed={embeddingEnabled}
-          aria-label="Toggle embedding"
+          aria-pressed={enabled}
+          aria-label="Toggle garden compute"
         >
           <div
             className={clsx(
               "absolute top-1 w-3 h-3 rounded-full bg-beige-50 transition-transform duration-300",
-              embeddingEnabled ? "left-6" : "left-1"
+              enabled ? "left-6" : "left-1"
             )}
           />
         </button>
@@ -338,7 +304,7 @@ export default function EmbeddingSupplementForm({ onRequiresRestart }: Props) {
           {saving ? "Saving..." : (
             <>
               <Save className="w-4 h-4" />
-              Commit Embedding
+              Commit Garden Compute
             </>
           )}
         </button>
@@ -362,29 +328,6 @@ function FieldRow({
       <div>{children}</div>
     </div>
   );
-}
-
-// Map daemon-side degraded_reason codes to operator-readable hints.
-// Unknown codes fall through to a neutral message so the form never shows
-// raw enum text.
-function humanizeDegradedReason(reason: string | null): string {
-  if (reason === null || reason === "") {
-    return "Embedding marked degraded but no reason was reported. Check daemon logs.";
-  }
-  switch (reason) {
-    case "provider_unconfigured":
-      return "Provider is not configured. Set the secret_ref and re-save, then restart the daemon.";
-    case "storage_unavailable":
-      return "Embedding storage table is missing. Run `alaya doctor` to verify schema migration.";
-    case "provider_unavailable":
-      return "Provider rejected our request (auth or network). Verify the secret_ref points to a valid key and the provider URL is reachable.";
-    case "query_embedding_failed":
-      return "Provider returned an error when embedding a query. Verify the model id is supported by your endpoint.";
-    case "local_vector_lookup_failed":
-      return "Local embedding vector lookup failed. Restart the daemon; if it persists, run `alaya doctor`.";
-    default:
-      return `Provider reports: ${reason}. See daemon logs for the full error.`;
-  }
 }
 
 function buildSecretRef(mode: Exclude<SecretRefMode, "paste">, value: string): string | null {
@@ -430,14 +373,14 @@ function validateSecretValue(mode: SecretRefMode, value: string): string | null 
   return null;
 }
 
-function unwrapRuntimeEmbeddingConfig(value: unknown): RuntimeEmbeddingConfig {
+function unwrapRuntimeGardenComputeConfig(value: unknown): RuntimeGardenComputeConfig {
   if (
     typeof value === "object" &&
     value !== null &&
     "data" in value &&
-    typeof (value as RuntimeEmbeddingConfigEnvelope).data === "object"
+    typeof (value as RuntimeGardenComputeConfigEnvelope).data === "object"
   ) {
-    return (value as RuntimeEmbeddingConfigEnvelope).data as RuntimeEmbeddingConfig;
+    return (value as RuntimeGardenComputeConfigEnvelope).data as RuntimeGardenComputeConfig;
   }
-  return value as RuntimeEmbeddingConfig;
+  return value as RuntimeGardenComputeConfig;
 }

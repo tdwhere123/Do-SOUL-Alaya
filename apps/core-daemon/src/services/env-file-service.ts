@@ -5,8 +5,11 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { CoreError } from "@do-soul/alaya-core";
 import {
   RuntimeEmbeddingConfigPatchSchema,
+  RuntimeGardenComputeConfigPatchSchema,
   type RuntimeEmbeddingConfig,
-  type RuntimeEmbeddingConfigPatch
+  type RuntimeEmbeddingConfigPatch,
+  type RuntimeGardenComputeConfig,
+  type RuntimeGardenComputeConfigPatch
 } from "@do-soul/alaya-protocol";
 import type { AlayaConfigPaths } from "../cli/config-files.js";
 import {
@@ -17,6 +20,9 @@ import {
 } from "./private-file-service.js";
 
 export const ALAYA_OPENAI_SECRET_REF_ENV = "ALAYA_OPENAI_SECRET_REF";
+export const ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV = "ALAYA_OFFICIAL_GARDEN_SECRET_REF";
+export const OFFICIAL_API_GARDEN_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";
+export const OFFICIAL_API_GARDEN_PROVIDER_URL_ENV = "OFFICIAL_API_GARDEN_PROVIDER_URL";
 
 const ENV_SECRET_REF_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -32,8 +38,22 @@ type MutableRuntimeEmbeddingConfigPatch = {
   -readonly [K in keyof RuntimeEmbeddingConfig]?: RuntimeEmbeddingConfig[K];
 };
 
+type RawRuntimeGardenComputeConfigPatch = RuntimeGardenComputeConfigPatch & {
+  readonly secret_ref_mode?: SecretRefMode;
+  readonly secret_value?: string | null;
+};
+
+type MutableRuntimeGardenComputeConfigPatch = {
+  -readonly [K in keyof RuntimeGardenComputeConfig]?: RuntimeGardenComputeConfig[K];
+};
+
 export type NormalizedRuntimeEmbeddingConfigPatch = Readonly<{
   readonly patch: Partial<RuntimeEmbeddingConfig>;
+  readonly pastedSecret: Readonly<{ readonly path: string; readonly value: string }> | null;
+}>;
+
+export type NormalizedRuntimeGardenComputeConfigPatch = Readonly<{
+  readonly patch: Partial<RuntimeGardenComputeConfig>;
   readonly pastedSecret: Readonly<{ readonly path: string; readonly value: string }> | null;
 }>;
 
@@ -103,6 +123,73 @@ export function normalizeRuntimeEmbeddingConfigPatch(
   };
 }
 
+export function normalizeRuntimeGardenComputeConfigPatch(
+  patch: unknown,
+  paths: AlayaConfigPaths,
+  platform: NodeJS.Platform
+): NormalizedRuntimeGardenComputeConfigPatch {
+  const parsedPatch = parseRuntimeGardenComputeConfigPatchWithSecretControls(patch);
+  const normalized: MutableRuntimeGardenComputeConfigPatch = {};
+
+  if (parsedPatch.provider_kind !== undefined) normalized.provider_kind = parsedPatch.provider_kind;
+  if (parsedPatch.provider_url !== undefined) normalized.provider_url = parsedPatch.provider_url;
+  if (parsedPatch.model_id !== undefined) normalized.model_id = parsedPatch.model_id;
+  if (parsedPatch.enabled !== undefined) normalized.enabled = parsedPatch.enabled;
+
+  if (parsedPatch.secret_ref_mode === undefined) {
+    if (parsedPatch.secret_value !== undefined) {
+      throw invalidRuntimeGardenComputePatch();
+    }
+    if (parsedPatch.secret_ref !== undefined) {
+      normalized.secret_ref =
+        parsedPatch.secret_ref === null ? null : normalizeSecretRef(parsedPatch.secret_ref);
+    }
+    return { patch: normalized, pastedSecret: null };
+  }
+
+  if (parsedPatch.secret_ref === null) {
+    normalized.secret_ref = null;
+    return { patch: normalized, pastedSecret: null };
+  }
+
+  const secretValue = parsedPatch.secret_value;
+  if (typeof secretValue !== "string" || secretValue.trim().length === 0) {
+    throw invalidRuntimeGardenComputePatch();
+  }
+
+  if (parsedPatch.secret_ref_mode === "env") {
+    const envName = secretValue.trim();
+    if (!ENV_SECRET_REF_PATTERN.test(envName)) {
+      throw invalidRuntimeGardenComputePatch();
+    }
+    normalized.secret_ref = `env:${envName}`;
+    return { patch: normalized, pastedSecret: null };
+  }
+
+  if (parsedPatch.secret_ref_mode === "file") {
+    const filePath = secretValue.trim();
+    if (!path.isAbsolute(filePath)) {
+      throw invalidRuntimeGardenComputePatch();
+    }
+    normalized.secret_ref = `file:${filePath}`;
+    return { patch: normalized, pastedSecret: null };
+  }
+
+  if (platform === "win32") {
+    throw new CoreError("VALIDATION", "paste mode is not supported on win32");
+  }
+
+  const secretPath = path.join(paths.secretsDir, "official-garden");
+  normalized.secret_ref = `file:${secretPath}`;
+  return {
+    patch: normalized,
+    pastedSecret: {
+      path: secretPath,
+      value: secretValue
+    }
+  };
+}
+
 export async function applyRuntimeEmbeddingConfigFiles<T>(input: {
   readonly paths: AlayaConfigPaths;
   readonly normalized: NormalizedRuntimeEmbeddingConfigPatch;
@@ -119,6 +206,26 @@ export async function applyRuntimeEmbeddingConfigFiles<T>(input: {
         retryMs: input.lockRetryMs
       },
       async () => await applyRuntimeEmbeddingConfigFilesLocked(input)
+    )
+  );
+}
+
+export async function applyRuntimeGardenComputeConfigFiles<T>(input: {
+  readonly paths: AlayaConfigPaths;
+  readonly normalized: NormalizedRuntimeGardenComputeConfigPatch;
+  readonly generateTempId: () => string;
+  readonly persist: () => Promise<T>;
+  readonly lockTimeoutMs?: number;
+  readonly lockRetryMs?: number;
+}): Promise<T> {
+  return await withRuntimeEmbeddingConfigLock(input.paths.envPath, async () =>
+    await withRuntimeEmbeddingFileLock(
+      input.paths.envPath,
+      {
+        timeoutMs: input.lockTimeoutMs,
+        retryMs: input.lockRetryMs
+      },
+      async () => await applyRuntimeGardenComputeConfigFilesLocked(input)
     )
   );
 }
@@ -148,6 +255,44 @@ async function applyRuntimeEmbeddingConfigFilesLocked<T>(input: {
     }
 
     await patchRuntimeEmbeddingEnvFile(input.paths, input.normalized.patch, input.generateTempId);
+    return await input.persist();
+  } catch (error) {
+    await restoreRuntimeEmbeddingFiles(
+      input.paths,
+      previousEnv,
+      input.normalized.pastedSecret,
+      previousSecret,
+      input.generateTempId
+    );
+    throw error;
+  }
+}
+
+async function applyRuntimeGardenComputeConfigFilesLocked<T>(input: {
+  readonly paths: AlayaConfigPaths;
+  readonly normalized: NormalizedRuntimeGardenComputeConfigPatch;
+  readonly generateTempId: () => string;
+  readonly persist: () => Promise<T>;
+}): Promise<T> {
+  const previousEnv = await readOptional(input.paths.envPath);
+  const previousSecret =
+    input.normalized.pastedSecret === null ? null : await readOptional(input.normalized.pastedSecret.path);
+
+  if (input.normalized.pastedSecret !== null) {
+    await ensurePrivateDirectory(input.paths.secretsDir);
+  }
+
+  try {
+    if (input.normalized.pastedSecret !== null) {
+      await writeTextAtomicLocked(
+        input.normalized.pastedSecret.path,
+        `${trimTrailingLineBreaks(input.normalized.pastedSecret.value)}\n`,
+        0o600,
+        input.generateTempId
+      );
+    }
+
+    await patchRuntimeGardenComputeEnvFile(input.paths, input.normalized.patch, input.generateTempId);
     return await input.persist();
   } catch (error) {
     await restoreRuntimeEmbeddingFiles(
@@ -499,4 +644,82 @@ function trimTrailingLineBreaks(value: string): string {
 
 function invalidRuntimeEmbeddingPatch(): CoreError {
   return new CoreError("VALIDATION", "Invalid runtime embedding config patch");
+}
+
+function invalidRuntimeGardenComputePatch(): CoreError {
+  return new CoreError("VALIDATION", "Invalid runtime garden compute config patch");
+}
+
+function parseRuntimeGardenComputeConfigPatchWithSecretControls(
+  patch: unknown
+): RawRuntimeGardenComputeConfigPatch {
+  if (typeof patch !== "object" || patch === null || Array.isArray(patch)) {
+    throw invalidRuntimeGardenComputePatch();
+  }
+
+  const record = patch as Record<string, unknown>;
+  const protocolPatch: Record<string, unknown> = {};
+  const allowedKeys = new Set([
+    "provider_kind",
+    "provider_url",
+    "secret_ref",
+    "model_id",
+    "enabled",
+    "secret_ref_mode",
+    "secret_value"
+  ]);
+
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new CoreError("VALIDATION", `Unknown runtime garden compute config field: ${key}`);
+    }
+    if (key !== "secret_ref_mode" && key !== "secret_value") {
+      protocolPatch[key] = record[key];
+    }
+  }
+
+  const parsedProtocolPatch = RuntimeGardenComputeConfigPatchSchema.safeParse(protocolPatch);
+  if (!parsedProtocolPatch.success) {
+    throw new CoreError("VALIDATION", "Invalid runtime garden compute config patch", {
+      cause: parsedProtocolPatch.error
+    });
+  }
+
+  return {
+    ...parsedProtocolPatch.data,
+    ...("secret_ref_mode" in record
+      ? { secret_ref_mode: parseSecretRefMode(record.secret_ref_mode) }
+      : {}),
+    ...("secret_value" in record
+      ? { secret_value: parseNullableRawString(record.secret_value, "secret_value") }
+      : {})
+  };
+}
+
+async function patchRuntimeGardenComputeEnvFile(
+  paths: AlayaConfigPaths,
+  patch: Partial<RuntimeGardenComputeConfig>,
+  generateTempId: () => string
+): Promise<void> {
+  const existing = parseEnv(await readOptional(paths.envPath));
+  const next = new Map(existing);
+
+  if (patch.enabled !== undefined) {
+    next.set("ALAYA_ENABLE_GARDEN_OFFICIAL", patch.enabled ? "true" : "false");
+  }
+  if (patch.secret_ref !== undefined) {
+    if (patch.secret_ref === null) {
+      next.delete(ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV);
+    } else {
+      next.set(ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV, patch.secret_ref);
+    }
+  }
+  if (patch.model_id !== undefined) {
+    setOrDelete(next, OFFICIAL_API_GARDEN_MODEL_ENV, patch.model_id);
+  }
+  if (patch.provider_url !== undefined) {
+    setOrDelete(next, OFFICIAL_API_GARDEN_PROVIDER_URL_ENV, patch.provider_url);
+  }
+
+  await writeTextAtomicLocked(paths.envPath, renderEnv(next), 0o600, generateTempId);
 }

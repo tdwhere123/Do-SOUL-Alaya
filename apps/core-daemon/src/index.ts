@@ -127,6 +127,9 @@ import {
   listServerHardConstraints,
   loadConfigEnv,
   patchArbitrationClaimService,
+  readOfficialGardenModelId,
+  readOfficialGardenProviderUrl,
+  readOfficialGardenSecretRef,
   recordStartupStep,
   resolveDatabasePath
 } from "./daemon-runtime-support.js";
@@ -168,6 +171,9 @@ export type { AlayaDaemonListenOptions, AlayaDaemonRuntime, AlayaDaemonRuntimeSe
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..", "..");
 const DEFAULT_GARDEN_STATUS_WORKSPACE_ID = "default";
+const EMBEDDING_SECRET_GARDEN_FALLBACK_WARNING =
+  "[ALAYA] DEPRECATED: ALAYA_OPENAI_SECRET_REF used as Garden compute key. Set ALAYA_OFFICIAL_GARDEN_SECRET_REF for v0.2 compatibility.";
+let embeddingSecretGardenFallbackWarningEmitted = false;
 
 export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const startupSteps: DaemonStartupStepRecord[] = [];
@@ -545,13 +551,18 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   });
   const stancePolicyProvider = createStancePolicyProvider(configRepo);
   const localHeuristicsProvider = new LocalHeuristics();
-  const officialGardenApiKey = embeddingApiKey;
+  const officialGardenSecret = readOfficialGardenSecretRef(configEnv);
+  const officialGardenApiKey =
+    officialGardenSecret ?? maybeUseDeprecatedEmbeddingSecretForGarden(embeddingApiKey);
+  const officialGardenModelId = readOfficialGardenModelId(configEnv) ?? OFFICIAL_API_GARDEN_MODEL;
+  const officialGardenProviderUrl = readOfficialGardenProviderUrl(configEnv);
   const officialGardenProvider =
     officialGardenApiKey === null
       ? null
       : new OfficialApiGardenProvider({
           apiKey: officialGardenApiKey,
-          model: OFFICIAL_API_GARDEN_MODEL
+          model: officialGardenModelId,
+          endpoint: officialGardenProviderUrl ?? undefined
         });
   const computeRoutingService = new ComputeRoutingService({
     providers: [
@@ -561,7 +572,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
             {
               kind: ComputeProviderPriority.OFFICIAL_API,
               provider: officialGardenProvider,
-              model_id: OFFICIAL_API_GARDEN_MODEL,
+              model_id: officialGardenModelId,
               adapter: "garden.official_api"
             } as const
           ]),
@@ -856,6 +867,19 @@ async function resolvePersistedGardenLastPassAt(input: {
     });
     return null;
   }
+}
+
+function maybeUseDeprecatedEmbeddingSecretForGarden(embeddingApiKey: string | null): string | null {
+  if (embeddingApiKey === null) {
+    return null;
+  }
+
+  if (!embeddingSecretGardenFallbackWarningEmitted) {
+    process.stderr.write(`${EMBEDDING_SECRET_GARDEN_FALLBACK_WARNING}\n`);
+    embeddingSecretGardenFallbackWarningEmitted = true;
+  }
+
+  return embeddingApiKey;
 }
 
 export async function startDaemon(options: AlayaDaemonListenOptions = {}): Promise<AlayaDaemonServer> {

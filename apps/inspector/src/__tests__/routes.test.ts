@@ -16,6 +16,8 @@ describe("inspector routes", () => {
       "PATCH /api/config/:workspaceId/environment",
       "GET /api/config/:workspaceId/embedding-supplement",
       "PATCH /api/config/runtime/embedding-supplement",
+      "GET /api/config/:workspaceId/garden-compute",
+      "PATCH /api/config/runtime/garden-compute",
       "GET /api/embedding-status/:workspaceId",
       "GET /api/graph/:workspaceId",
       "GET /api/status",
@@ -52,6 +54,16 @@ describe("inspector routes", () => {
       }),
       headers: { "content-type": "application/json" }
     });
+    await app.request("/api/config/ws1/garden-compute?token=token");
+    await app.request("/api/config/runtime/garden-compute?token=token", {
+      method: "PATCH",
+      body: JSON.stringify({
+        provider_kind: "official_api",
+        secret_ref_mode: "env",
+        secret_value: "ALAYA_OFFICIAL_GARDEN_API_KEY"
+      }),
+      headers: { "content-type": "application/json" }
+    });
     await app.request("/api/config/ws1/strategy?token=token", {
       method: "PATCH",
       body: JSON.stringify({ auto_approve_readonly: true }),
@@ -67,6 +79,12 @@ describe("inspector routes", () => {
         url: "http://daemon.local/config/runtime/embedding-supplement",
         method: "PATCH",
         body: "{\"secret_ref_mode\":\"paste\",\"secret_value\":\"sk-test-plaintext-secret\"}"
+      },
+      { url: "http://daemon.local/config/runtime/garden-compute", method: "GET", body: null },
+      {
+        url: "http://daemon.local/config/runtime/garden-compute",
+        method: "PATCH",
+        body: "{\"provider_kind\":\"official_api\",\"secret_ref_mode\":\"env\",\"secret_value\":\"ALAYA_OFFICIAL_GARDEN_API_KEY\"}"
       },
       {
         url: "http://daemon.local/workspaces/ws1/config/strategy",

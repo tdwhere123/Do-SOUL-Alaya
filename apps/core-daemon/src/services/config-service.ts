@@ -7,21 +7,36 @@ import {
   EnvironmentConfigSchema,
   HealthEventKind,
   GardenEventType,
+  RuntimeGardenComputeConfigSchema,
   RuntimeEmbeddingConfigSchema,
   SoulConfigSchema,
   SoulHealthJournalRecordedPayloadSchema,
   StrategyConfigSchema,
   type EnvironmentConfig,
   type EventLogEntry,
+  type RuntimeGardenComputeConfig,
   type RuntimeEmbeddingConfig,
   type SoulConfig,
   type StrategyConfig
 } from "@do-soul/alaya-protocol";
+import { OFFICIAL_API_GARDEN_MODEL } from "@do-soul/alaya-soul";
 import type { ConfigRepo } from "@do-soul/alaya-storage";
 import type { AlayaConfigPaths } from "../cli/config-files.js";
 import {
+  loadConfigEnv,
+  readConfigEnvValue,
+  readNonEmptyEnv
+} from "../daemon-runtime-support.js";
+import {
+  ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV,
+  ALAYA_OPENAI_SECRET_REF_ENV,
+  applyRuntimeGardenComputeConfigFiles,
   applyRuntimeEmbeddingConfigFiles,
   normalizeRuntimeEmbeddingConfigPatch,
+  normalizeRuntimeGardenComputeConfigPatch,
+  OFFICIAL_API_GARDEN_MODEL_ENV,
+  OFFICIAL_API_GARDEN_PROVIDER_URL_ENV,
+  type NormalizedRuntimeGardenComputeConfigPatch,
   type NormalizedRuntimeEmbeddingConfigPatch
 } from "./env-file-service.js";
 
@@ -34,6 +49,8 @@ export interface AppConfigService {
   patchEnvironmentConfig(workspaceId: string, patch: unknown): Promise<EnvironmentConfig>;
   getRuntimeEmbeddingConfig(): Promise<RuntimeEmbeddingConfig>;
   patchRuntimeEmbeddingConfig(patch: unknown): Promise<RuntimeEmbeddingConfig>;
+  getRuntimeGardenComputeConfig(): Promise<RuntimeGardenComputeConfig>;
+  patchRuntimeGardenComputeConfig(patch: unknown): Promise<RuntimeGardenComputeConfig>;
 }
 
 interface ConfigEventPublisher {
@@ -48,14 +65,23 @@ const StrategyConfigPatchSchema = StrategyConfigSchema.unwrap().partial();
 const EnvironmentConfigPatchSchema = EnvironmentConfigSchema.unwrap().partial();
 
 const RUNTIME_EMBEDDING_CONFIG_KEY = "runtime:embedding-supplement";
+const RUNTIME_GARDEN_COMPUTE_CONFIG_KEY = "runtime:garden-compute";
 const RUNTIME_EMBEDDING_ENTITY_TYPE = "runtime_config";
 const RUNTIME_EMBEDDING_ENTITY_ID = "runtime:embedding-supplement";
+const RUNTIME_GARDEN_COMPUTE_ENTITY_ID = "runtime:garden-compute";
 const RUNTIME_CONFIG_WORKSPACE_ID = "runtime";
 const RUNTIME_EMBEDDING_CONFIG_FIELDS = [
   "provider_url",
   "secret_ref",
   "model_id",
   "embedding_enabled"
+] as const;
+const RUNTIME_GARDEN_COMPUTE_CONFIG_FIELDS = [
+  "provider_kind",
+  "provider_url",
+  "secret_ref",
+  "model_id",
+  "enabled"
 ] as const;
 
 const DEFAULT_RUNTIME_EMBEDDING_CONFIG: RuntimeEmbeddingConfig = {
@@ -126,10 +152,22 @@ export function createConfigService(dependencies: {
         patch,
         "Invalid environment config patch"
       ),
-    getRuntimeEmbeddingConfig: async () =>
-      await getRuntimeEmbeddingConfig(configRepo),
+    getRuntimeEmbeddingConfig: async () => await getRuntimeEmbeddingConfig(configRepo),
     patchRuntimeEmbeddingConfig: async (patch) =>
       await patchRuntimeEmbeddingConfig({
+        repo: configRepo,
+        eventPublisher,
+        paths: configPathsProvider(),
+        patch,
+        clock,
+        platform,
+        generateTempId,
+        generateAuditId
+      }),
+    getRuntimeGardenComputeConfig: async () =>
+      await getRuntimeGardenComputeConfig(configRepo, configPathsProvider()),
+    patchRuntimeGardenComputeConfig: async (patch) =>
+      await patchRuntimeGardenComputeConfig({
         repo: configRepo,
         eventPublisher,
         paths: configPathsProvider(),
@@ -179,6 +217,16 @@ async function getRuntimeEmbeddingConfig(repo: ConfigRepo): Promise<RuntimeEmbed
   return RuntimeEmbeddingConfigSchema.parse(
     (await repo.get<RuntimeEmbeddingConfig>(RUNTIME_EMBEDDING_CONFIG_KEY)) ??
       DEFAULT_RUNTIME_EMBEDDING_CONFIG
+  );
+}
+
+async function getRuntimeGardenComputeConfig(
+  repo: ConfigRepo,
+  paths: AlayaConfigPaths
+): Promise<RuntimeGardenComputeConfig> {
+  return RuntimeGardenComputeConfigSchema.parse(
+    (await repo.get<RuntimeGardenComputeConfig>(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY)) ??
+      (await defaultRuntimeGardenComputeConfig(paths))
   );
 }
 
@@ -258,6 +306,87 @@ function buildRuntimeEmbeddingChangeSummary(normalized: NormalizedRuntimeEmbeddi
   };
 }
 
+async function patchRuntimeGardenComputeConfig(input: {
+  readonly repo: ConfigRepo;
+  readonly eventPublisher: ConfigEventPublisher;
+  readonly paths: AlayaConfigPaths;
+  readonly patch: unknown;
+  readonly clock: () => string;
+  readonly platform: NodeJS.Platform;
+  readonly generateTempId: () => string;
+  readonly generateAuditId: () => string;
+}): Promise<RuntimeGardenComputeConfig> {
+  const normalized = normalizeRuntimeGardenComputeConfigPatch(input.patch, input.paths, input.platform);
+  const occurredAt = parseIsoTimestamp(input.clock(), "Invalid runtime garden compute config patch");
+  const auditEntryId = input.generateAuditId();
+  const defaults = await defaultRuntimeGardenComputeConfig(input.paths);
+
+  return await applyRuntimeGardenComputeConfigFiles({
+    paths: input.paths,
+    normalized,
+    generateTempId: input.generateTempId,
+    persist: async () =>
+      await input.eventPublisher.appendManyWithMutation(
+        [
+          {
+            event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
+            entity_type: RUNTIME_EMBEDDING_ENTITY_TYPE,
+            entity_id: RUNTIME_GARDEN_COMPUTE_ENTITY_ID,
+            workspace_id: RUNTIME_CONFIG_WORKSPACE_ID,
+            run_id: null,
+            caused_by: "inspector",
+            payload_json: SoulHealthJournalRecordedPayloadSchema.parse({
+              entry_id: auditEntryId,
+              event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
+              workspace_id: RUNTIME_CONFIG_WORKSPACE_ID,
+              occurred_at: occurredAt,
+              change_summary: buildRuntimeGardenComputeChangeSummary(normalized)
+            })
+          }
+        ],
+        () => {
+          const next = input.repo.patch(
+            RUNTIME_GARDEN_COMPUTE_CONFIG_KEY,
+            normalized.patch,
+            defaults
+          );
+          return RuntimeGardenComputeConfigSchema.parse(next);
+        }
+      )
+  });
+}
+
+function buildRuntimeGardenComputeChangeSummary(normalized: NormalizedRuntimeGardenComputeConfigPatch): {
+  readonly fields_changed: readonly string[];
+  readonly secret_ref_kind?: "env" | "file" | null;
+} {
+  const fieldsChanged = RUNTIME_GARDEN_COMPUTE_CONFIG_FIELDS.filter((field) => normalized.patch[field] !== undefined);
+  return {
+    fields_changed: fieldsChanged,
+    ...(normalized.patch.secret_ref !== undefined ? { secret_ref_kind: secretRefKind(normalized.patch.secret_ref) } : {})
+  };
+}
+
+async function defaultRuntimeGardenComputeConfig(paths: AlayaConfigPaths): Promise<RuntimeGardenComputeConfig> {
+  const configEnv = await loadConfigEnv(paths.envPath);
+  const gardenSecretRef = readRawSecretRef(configEnv, ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV);
+  const embeddingFallbackSecretRef = readRawSecretRef(configEnv, ALAYA_OPENAI_SECRET_REF_ENV);
+  const secretRef = gardenSecretRef ?? embeddingFallbackSecretRef;
+  const modelId = readNonEmptyEnv(readConfigEnvValue(configEnv, OFFICIAL_API_GARDEN_MODEL_ENV)) ?? OFFICIAL_API_GARDEN_MODEL;
+
+  return RuntimeGardenComputeConfigSchema.parse({
+    provider_kind: secretRef === null ? "local_heuristics" : "official_api",
+    model_id: modelId,
+    provider_url: readNonEmptyEnv(readConfigEnvValue(configEnv, OFFICIAL_API_GARDEN_PROVIDER_URL_ENV)),
+    secret_ref: secretRef,
+    enabled: secretRef !== null
+  });
+}
+
+function readRawSecretRef(configEnv: ReadonlyMap<string, string>, key: string): string | null {
+  return readNonEmptyEnv(readConfigEnvValue(configEnv, key));
+}
+
 function secretRefKind(secretRef: string | null): "env" | "file" | null {
   if (secretRef === null) {
     return null;
@@ -265,9 +394,9 @@ function secretRefKind(secretRef: string | null): "env" | "file" | null {
   return secretRef.startsWith("env:") ? "env" : "file";
 }
 
-function parseIsoTimestamp(value: string): string {
+function parseIsoTimestamp(value: string, validationMessage = "Invalid runtime embedding config patch"): string {
   if (Number.isNaN(Date.parse(value))) {
-    throw new CoreError("VALIDATION", "Invalid runtime embedding config patch");
+    throw new CoreError("VALIDATION", validationMessage);
   }
   return value;
 }

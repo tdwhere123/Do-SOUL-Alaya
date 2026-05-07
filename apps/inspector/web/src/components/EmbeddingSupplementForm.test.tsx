@@ -147,18 +147,20 @@ describe("EmbeddingSupplementForm", () => {
     const pendingPatch = new Promise<Response>((resolve) => {
       resolvePatch = resolve;
     });
-    fetchMock
-      .mockResolvedValueOnce(
-        jsonResponse({
-          provider_url: null,
-          model_id: null,
-          secret_ref: null,
-          embedding_enabled: false
-        })
-      )
-      // U2: form fetches /embedding-status after config load completes.
-      .mockResolvedValueOnce(jsonResponse(degradedNullEmbeddingStatus()))
-      .mockReturnValueOnce(pendingPatch);
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (init?.method === "PATCH") return pendingPatch;
+      if (u.includes("/embedding-status/")) {
+        return jsonResponse(degradedNullEmbeddingStatus());
+      }
+      // GET config
+      return jsonResponse({
+        provider_url: null,
+        model_id: null,
+        secret_ref: null,
+        embedding_enabled: false
+      });
+    });
 
     const { onRestart } = renderForm();
     await waitFor(() => screen.getByPlaceholderText("OPENAI_API_KEY"));
@@ -204,19 +206,10 @@ describe("EmbeddingSupplementForm", () => {
 
   it("submits paste mode and switches to returned file ref without displaying plaintext", async () => {
     const plaintext = "sk-test-plaintext-secret";
-    fetchMock
-      .mockResolvedValueOnce(
-        jsonResponse({
-          provider_url: null,
-          model_id: null,
-          secret_ref: null,
-          embedding_enabled: false
-        })
-      )
-      // U2: form fetches /embedding-status after config load completes.
-      .mockResolvedValueOnce(jsonResponse(degradedNullEmbeddingStatus()))
-      .mockResolvedValueOnce(
-        jsonResponse({
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (init?.method === "PATCH") {
+        return jsonResponse({
           success: true,
           requires_daemon_restart: true,
           data: {
@@ -225,10 +218,19 @@ describe("EmbeddingSupplementForm", () => {
             secret_ref: "file:/tmp/alaya/secrets/openai",
             embedding_enabled: true
           }
-        })
-      )
-      // U2: post-save status refresh.
-      .mockResolvedValueOnce(jsonResponse(degradedNullEmbeddingStatus()));
+        });
+      }
+      if (u.includes("/embedding-status/")) {
+        return jsonResponse(degradedNullEmbeddingStatus());
+      }
+      // GET config
+      return jsonResponse({
+        provider_url: null,
+        model_id: null,
+        secret_ref: null,
+        embedding_enabled: false
+      });
+    });
 
     const { onRestart } = renderForm();
     await waitFor(() => screen.getByRole("button", { name: "paste:" }));
