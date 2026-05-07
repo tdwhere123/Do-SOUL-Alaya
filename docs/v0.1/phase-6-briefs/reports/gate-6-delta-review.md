@@ -450,3 +450,33 @@ to v0.2 backlog.
   from distinct lenses (I2: codex+reviewer; I3: codex+reviewer; I5:
   red-team+spec+codex with severity disagreement) merged into single
   numbered entries with all source lenses cited.
+
+## Follow-up wave (v0.1.1)
+
+This delta review surfaced 4 structural concerns in
+`.do-it/product-logic/agent-use-garden-config-diagnostic.md` (B-PL1,
+B-PL2, I-PL1, I-PL2) that exceeded the spot-fix scope. Combined with
+direct user UX feedback (Inspector graph centring, embedding error
+visibility, recall returning empty results in cold-start), the
+follow-up was scoped as the v0.1.1 *Memory Plane Coherence Wave* —
+11 atomic slices across UX, Garden compute config split, recall
+improvements, host-as-Garden-compute via SQLite-backed task queue, and
+readiness-label honesty. See plan at
+`/home/tdwhere/.claude/plans/phase-6-review-fluffy-sparrow.md` and
+commit range `f4a522e..1f6fe35` plus the L1 docs commit.
+
+Key v0.1.1 outputs that shift this report's claims:
+
+- `mcp-consumable` is now the deprecated alias of `mcp-callable`. The
+  Phase 6 readiness rows in `runtime-status.md` now read `mcp-callable`,
+  with `agent-used` deferred to v0.2 under backlog
+  `#BL-host-driven-autonomy-proof` (closes B-PL2 by relabeling, not by
+  proving — the proof itself is deferred to v0.2).
+- Garden compute is now `host-worker-ready` via H1+H2+H3 (SQLite queue,
+  3 `garden.*` MCP tools, POST_TURN_EXTRACT routing). This closes B-PL1
+  plus the structural truth-A gap (MCP-attached mode now has a
+  daemon-side extraction path).
+- doctor / status / Inspector now expose Garden compute provider truth
+  (closes I-PL1 via slice C2).
+- doctor surfaces attached profile instructions drift (closes I-PL2
+  via slice C3).

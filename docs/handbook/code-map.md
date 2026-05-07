@@ -48,7 +48,7 @@ ContextLensAssembler, and the core barrel are ported and unit-tested as
 `implementation-ready`. Phase 4 daemon, routes, CLI, MCP, secrets,
 operations, trust-state, Inspector server, Inspector frontend, and the
 attached-agent proof have landed. The MCP memory surface is
-`mcp-consumable` through the single-daemon proof harness, including
+`mcp-callable` through the single-daemon SDK-driven proof harness, including
 Garden EventLog and health-journal evidence. The Inspector config-write
 path and trust delivery/usage durability review fixes are verified, so
 Gate-4 passed on 2026-05-01. Gate-5 / v0.1.0 passed on 2026-05-02, and

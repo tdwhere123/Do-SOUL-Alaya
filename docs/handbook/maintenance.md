@@ -32,8 +32,10 @@ When dependencies or readiness gates change:
   cards.
 - Update `docs/v0.1/INDEX.md` status table.
 - Use one of: `not-started`, `schema-ready`, `implementation-ready`,
-  `live-event-ready`, `mcp-consumable`, `cli-consumable`. Definitions
-  in `runtime-status.md`.
+  `live-event-ready`, `mcp-callable`, `agent-used`, `host-worker-ready`,
+  `cli-consumable`. Definitions in `runtime-status.md`. The legacy
+  label `mcp-consumable` is a deprecated alias for `mcp-callable` and
+  must not be used in new claims (retained one release for compat).
 
 When contracts change:
 
@@ -55,7 +57,7 @@ After doc edits, run targeted sweeps for changed symbols, events,
 dependencies, and readiness labels. Useful commands:
 
 ```bash
-rtk rg -n "schema-ready|implementation-ready|live-event-ready|mcp-consumable|cli-consumable|ready|unblocked" docs AGENTS.md CLAUDE.md README.md
+rtk rg -n "schema-ready|implementation-ready|live-event-ready|mcp-callable|mcp-consumable|agent-used|host-worker-ready|cli-consumable|ready|unblocked" docs AGENTS.md CLAUDE.md README.md
 rtk rg -n "@do-soul/alaya-(protocol|core|soul|engine-gateway|storage)" docs AGENTS.md CLAUDE.md README.md
 rtk rg -n "docs/[A-Za-z0-9._-]+\\.md" docs AGENTS.md CLAUDE.md README.md
 rtk find docs -type f -name '*.md' -size +30k -print

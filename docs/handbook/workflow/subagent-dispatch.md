@@ -110,8 +110,9 @@ recurring failure pattern appears across two or more cards.
 4. **Bundled fix commit.** Review fix landed inside the feature
    commit or the wave-closing commit (violates R1).
 5. **Live-ready over-claim.** Card claimed `live-event-ready` /
-   `mcp-consumable` / `cli-consumable` without integration evidence
-   (violates R5).
+   `mcp-callable` / `host-worker-ready` / `cli-consumable` without
+   integration evidence (violates R5). Especially watch for
+   `agent-used` claims without a real host-driven proof.
 6. **Barrel collision.** Two cards in the same wave both wrote to a
    barrel file; merge produced silent conflicts.
 7. **Idempotent overwrite under deletion.** A repo's "upsert" path
