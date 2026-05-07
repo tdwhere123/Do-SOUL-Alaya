@@ -2,6 +2,7 @@ import { access, constants as fsConstants } from "node:fs/promises";
 import type { EmbeddingStatus, ToolchainStatus } from "@do-soul/alaya-protocol";
 import type { DaemonStartupStepRecord } from "../index.js";
 import type { PathPlasticityLookupTelemetrySnapshot } from "../path-plasticity-runtime.js";
+import type { GardenCredentialProvenance } from "../services/config-service.js";
 import { ALAYA_SYSEXITS, type AlayaCliArgsSchema, type AlayaCliContext, type AlayaSubcommandSpec } from "./bridge.js";
 import { resolveCliWorkspaceContext } from "./workspace-context.js";
 
@@ -10,6 +11,7 @@ export interface DoctorCommandDependencies {
   readonly getEmbeddingStatus?: (workspaceId: string) => Promise<EmbeddingStatus>;
   readonly getMcpHealth?: () => Promise<Readonly<{ transport: "ready" | "not_ready"; enrolled_tools: number }>>;
   readonly getGardenHealth?: () => Promise<Readonly<{ status: "healthy" | "degraded"; last_pass_at: string | null }>>;
+  readonly getGardenCredentialProvenance?: () => Promise<GardenCredentialProvenance>;
   readonly getPathPlasticityLookupTelemetry?: () =>
     | Readonly<PathPlasticityLookupTelemetrySnapshot>
     | Promise<Readonly<PathPlasticityLookupTelemetrySnapshot>>;
@@ -63,6 +65,7 @@ interface DoctorReport {
   readonly garden: Readonly<{
     status: "healthy" | "degraded";
     last_pass_at: string | null;
+    credential_provenance: GardenCredentialProvenance;
   }>;
   readonly recall: Readonly<{
     readonly path_plasticity_lookup: Readonly<PathPlasticityLookupTelemetrySnapshot>;
@@ -118,6 +121,9 @@ export function createDoctorCommand(
             status: daemonReady ? "healthy" : "degraded",
             last_pass_at: null
           } as const);
+      const gardenCredentialProvenance = deps.getGardenCredentialProvenance
+        ? await deps.getGardenCredentialProvenance()
+        : ({ kind: "none" } as const);
       const pathPlasticityLookupTelemetry =
         (await deps.getPathPlasticityLookupTelemetry?.()) ??
         ({
@@ -155,7 +161,10 @@ export function createDoctorCommand(
           configured: embeddingStatus?.provider_configured ?? true
         },
         mcp,
-        garden,
+        garden: {
+          ...garden,
+          credential_provenance: gardenCredentialProvenance
+        },
         recall: {
           path_plasticity_lookup: pathPlasticityLookupTelemetry
         },
@@ -297,6 +306,7 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport):
   }
   stream.write(`mcp transport: ${report.mcp.transport}\n`);
   stream.write(`garden status: ${report.garden.status}\n`);
+  stream.write(`garden credential provenance: ${formatGardenCredentialProvenance(report.garden.credential_provenance)}\n`);
   stream.write(
     `recall path plasticity lookup: count=${report.recall.path_plasticity_lookup.lookup_count}` +
       ` p99_ms=${report.recall.path_plasticity_lookup.duration_p99_ms ?? "n/a"}` +
@@ -308,4 +318,10 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport):
       `embedding mode: ${report.provider.embedding.effective_mode} (provider_configured=${report.provider.embedding.provider_configured ? "yes" : "no"})\n`
     );
   }
+}
+
+function formatGardenCredentialProvenance(provenance: GardenCredentialProvenance): string {
+  return provenance.kind === "embedding-fallback"
+    ? "deprecated embedding-fallback"
+    : provenance.kind;
 }

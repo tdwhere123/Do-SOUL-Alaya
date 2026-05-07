@@ -73,7 +73,8 @@ describe("createApp", () => {
             getEnvironmentConfig: vi.fn(),
             patchEnvironmentConfig: vi.fn(),
             getRuntimeEmbeddingConfig: vi.fn(),
-            patchRuntimeEmbeddingConfig
+            patchRuntimeEmbeddingConfig,
+            getGardenCredentialProvenance: vi.fn(async () => ({ kind: "none" }))
           }
         }
       }

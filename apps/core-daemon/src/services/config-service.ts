@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { CoreError } from "@do-soul/alaya-core";
 import {
   DEFAULT_ENVIRONMENT_CONFIG,
@@ -18,10 +19,16 @@ import {
   type StrategyConfig
 } from "@do-soul/alaya-protocol";
 import type { ConfigRepo } from "@do-soul/alaya-storage";
+import {
+  selectGardenCredentialProvenance,
+  type GardenCredentialProvenance
+} from "../garden-credential.js";
+export type { GardenCredentialProvenance } from "../garden-credential.js";
 import type { AlayaConfigPaths } from "../cli/config-files.js";
 import {
   applyRuntimeEmbeddingConfigFiles,
   normalizeRuntimeEmbeddingConfigPatch,
+  parseEnv,
   type NormalizedRuntimeEmbeddingConfigPatch
 } from "./env-file-service.js";
 
@@ -34,6 +41,7 @@ export interface AppConfigService {
   patchEnvironmentConfig(workspaceId: string, patch: unknown): Promise<EnvironmentConfig>;
   getRuntimeEmbeddingConfig(): Promise<RuntimeEmbeddingConfig>;
   patchRuntimeEmbeddingConfig(patch: unknown): Promise<RuntimeEmbeddingConfig>;
+  getGardenCredentialProvenance(): Promise<GardenCredentialProvenance>;
 }
 
 interface ConfigEventPublisher {
@@ -73,6 +81,7 @@ export function createConfigService(dependencies: {
   readonly platform?: NodeJS.Platform;
   readonly generateTempId?: () => string;
   readonly generateAuditId?: () => string;
+  readonly envProvider?: () => NodeJS.ProcessEnv;
 }): AppConfigService {
   const {
     configRepo,
@@ -81,7 +90,8 @@ export function createConfigService(dependencies: {
     clock = () => new Date().toISOString(),
     platform = process.platform,
     generateTempId = () => randomUUID(),
-    generateAuditId = () => randomUUID()
+    generateAuditId = () => randomUUID(),
+    envProvider = () => process.env
   } = dependencies;
 
   return {
@@ -138,6 +148,11 @@ export function createConfigService(dependencies: {
         platform,
         generateTempId,
         generateAuditId
+      }),
+    getGardenCredentialProvenance: async () =>
+      await getGardenCredentialProvenance({
+        paths: configPathsProvider(),
+        env: envProvider()
       })
   };
 }
@@ -265,9 +280,35 @@ function secretRefKind(secretRef: string | null): "env" | "file" | null {
   return secretRef.startsWith("env:") ? "env" : "file";
 }
 
+async function getGardenCredentialProvenance(input: {
+  readonly paths: AlayaConfigPaths;
+  readonly env: NodeJS.ProcessEnv;
+}): Promise<GardenCredentialProvenance> {
+  const configEnv = await loadRuntimeConfigEnv(input.paths.envPath);
+  return selectGardenCredentialProvenance({
+    env: input.env,
+    configEnv
+  });
+}
+
+async function loadRuntimeConfigEnv(envPath: string): Promise<ReadonlyMap<string, string>> {
+  try {
+    return parseEnv(await readFile(envPath, "utf8"));
+  } catch (error) {
+    if (isNodeErrorWithCode(error, "ENOENT")) {
+      return new Map();
+    }
+    throw error;
+  }
+}
+
 function parseIsoTimestamp(value: string): string {
   if (Number.isNaN(Date.parse(value))) {
     throw new CoreError("VALIDATION", "Invalid runtime embedding config patch");
   }
   return value;
+}
+
+function isNodeErrorWithCode(error: unknown, code: string): error is NodeJS.ErrnoException & { readonly code: string } {
+  return error instanceof Error && "code" in error && error.code === code;
 }

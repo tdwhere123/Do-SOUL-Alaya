@@ -33,7 +33,10 @@ import {
 } from "./memory-entry-row-mapper.js";
 import { parseNonEmptyString } from "./shared/validators.js";
 
-export type MemoryEntryRepoUpdateFields = ProtocolMemoryEntryRepoUpdateFields;
+export type MemoryEntryRepoUpdateFields = ProtocolMemoryEntryRepoUpdateFields & {
+  readonly last_used_at?: string;
+  readonly last_hit_at?: string;
+};
 export interface MemoryEntryRepoDynamicsUpdateFields {
   readonly activation_score: number;
   readonly retention_score: number;
@@ -82,6 +85,7 @@ export interface MemoryEntryRepo {
   findLowActivityActiveMemories(workspaceId: string): Promise<readonly Readonly<MemoryEntry>[]>;
   findTombstonedMemories(workspaceId: string): Promise<readonly Readonly<MemoryEntry>[]>;
   update(objectId: string, fields: MemoryEntryRepoUpdateFields): Promise<Readonly<MemoryEntry>>;
+  updateScoped(objectId: string, workspaceId: string, fields: MemoryEntryRepoUpdateFields): Promise<Readonly<MemoryEntry>>;
   updateDynamics(
     objectId: string,
     fields: MemoryEntryRepoDynamicsUpdateFields,
@@ -105,6 +109,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
   private readonly findByDimensionHotStatement;
   private readonly findByScopeClassHotStatement;
   private readonly updateStatement;
+  private readonly updateScopedStatement;
   // updateDynamics uses a dynamic SQL builder to support nullable field clearing.
   private readonly searchByKeywordStatement;
   private readonly findLowActivityActiveMemoriesStatement;
@@ -190,8 +195,22 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         domain_tags = COALESCE(?, domain_tags),
         evidence_refs = COALESCE(?, evidence_refs),
         storage_tier = COALESCE(?, storage_tier),
+        last_used_at = COALESCE(?, last_used_at),
+        last_hit_at = COALESCE(?, last_hit_at),
         updated_at = ?
       WHERE object_id = ?
+    `);
+    this.updateScopedStatement = db.connection.prepare(`
+      UPDATE memory_entries
+      SET
+        content = COALESCE(?, content),
+        domain_tags = COALESCE(?, domain_tags),
+        evidence_refs = COALESCE(?, evidence_refs),
+        storage_tier = COALESCE(?, storage_tier),
+        last_used_at = COALESCE(?, last_used_at),
+        last_hit_at = COALESCE(?, last_hit_at),
+        updated_at = ?
+      WHERE object_id = ? AND workspace_id = ?
     `);
     this.searchByKeywordStatement = db.connection.prepare(`
       SELECT
@@ -536,6 +555,8 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         parsedFields.domain_tags === undefined ? null : JSON.stringify(parsedFields.domain_tags),
         parsedFields.evidence_refs === undefined ? null : JSON.stringify(parsedFields.evidence_refs),
         parsedFields.storage_tier ?? null,
+        parsedFields.last_used_at ?? null,
+        parsedFields.last_hit_at ?? null,
         parsedFields.updated_at,
         objectId
       );
@@ -547,6 +568,47 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
       const updated = await this.findById(objectId);
 
       if (updated === null) {
+        throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found after update.`);
+      }
+
+      return updated;
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError("QUERY_FAILED", `Failed to update memory entry ${objectId}.`, error);
+    }
+  }
+
+  public async updateScoped(
+    objectId: string,
+    workspaceId: string,
+    fields: MemoryEntryRepoUpdateFields
+  ): Promise<Readonly<MemoryEntry>> {
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace_id");
+    const parsedFields = parseUpdateFields(fields);
+
+    try {
+      const result = this.updateScopedStatement.run(
+        parsedFields.content ?? null,
+        parsedFields.domain_tags === undefined ? null : JSON.stringify(parsedFields.domain_tags),
+        parsedFields.evidence_refs === undefined ? null : JSON.stringify(parsedFields.evidence_refs),
+        parsedFields.storage_tier ?? null,
+        parsedFields.last_used_at ?? null,
+        parsedFields.last_hit_at ?? null,
+        parsedFields.updated_at,
+        objectId,
+        parsedWorkspaceId
+      );
+
+      if (result.changes === 0) {
+        throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found.`);
+      }
+
+      const updated = await this.findById(objectId);
+
+      if (updated === null || updated.workspace_id !== parsedWorkspaceId) {
         throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found after update.`);
       }
 

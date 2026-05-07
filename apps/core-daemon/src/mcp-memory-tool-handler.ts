@@ -25,6 +25,7 @@ import {
   SoulReportContextUsageResponseSchema,
   SoulReviewMemoryProposalRequestSchema,
   SoulReviewMemoryProposalResponseSchema,
+  StorageTier,
   TaskObjectSurfaceSchema,
   type CandidateMemorySignal,
   type ContextDeliveryRecord,
@@ -50,6 +51,11 @@ import {
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
 import { hasAlayaMemoryToolName, type AlayaMemoryToolName } from "./mcp-memory-tool-catalog.js";
+
+type MemoryUsageRefreshFields = MemoryEntryMutableFields & {
+  readonly last_used_at?: string;
+  readonly last_hit_at?: string;
+};
 
 export interface McpMemoryToolCallContext {
   readonly workspaceId: string;
@@ -81,7 +87,13 @@ export interface McpMemoryToolHandlerDependencies {
     ): Promise<Readonly<MemoryEntry> | null>;
     update(
       objectId: string,
-      fields: MemoryEntryMutableFields,
+      fields: MemoryUsageRefreshFields,
+      reason: string
+    ): Promise<Readonly<MemoryEntry>>;
+    updateScoped(
+      objectId: string,
+      workspaceId: string,
+      fields: MemoryUsageRefreshFields,
       reason: string
     ): Promise<Readonly<MemoryEntry>>;
     validateUpdate?(
@@ -420,6 +432,8 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     request: SoulReportContextUsageRequest,
     context: McpMemoryToolCallContext
   ) {
+    const reportedAt = now();
+    await validateReportedRecallHits(request, context.workspaceId);
     await deps.trustStateRecorder.recordUsage(
       {
         delivery_id: request.delivery_id,
@@ -429,14 +443,60 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
           ? {}
           : { per_anchor_usage: request.per_anchor_usage }),
         reason: request.reason ?? null,
-        reported_at: now()
+        reported_at: reportedAt
       },
       { expectedWorkspaceId: context.workspaceId }
     );
+    await refreshReportedRecallHits(request, context.workspaceId, reportedAt);
     return SoulReportContextUsageResponseSchema.parse({
       delivery_id: request.delivery_id,
       status: "recorded"
     });
+  }
+
+  async function validateReportedRecallHits(
+    request: SoulReportContextUsageRequest,
+    workspaceId: string
+  ): Promise<void> {
+    if (request.usage_state !== "used") {
+      return;
+    }
+
+    const usedObjectIds = Array.from(new Set(request.used_object_ids ?? []));
+    await Promise.all(
+      usedObjectIds.map(async (objectId) => {
+        const memory = await deps.memoryService.findByIdScoped(objectId, workspaceId);
+        if (memory === null) {
+          throw new ToolNotFoundError(`Memory entry ${objectId} was not found.`);
+        }
+      })
+    );
+  }
+
+  async function refreshReportedRecallHits(
+    request: SoulReportContextUsageRequest,
+    workspaceId: string,
+    reportedAt: string
+  ): Promise<void> {
+    if (request.usage_state !== "used") {
+      return;
+    }
+
+    const usedObjectIds = Array.from(new Set(request.used_object_ids ?? []));
+    await Promise.all(
+      usedObjectIds.map(async (objectId) => {
+        await deps.memoryService.updateScoped(
+          objectId,
+          workspaceId,
+          {
+            storage_tier: StorageTier.HOT,
+            last_used_at: reportedAt,
+            last_hit_at: reportedAt
+          },
+          "recall_usage_reported"
+        );
+      })
+    );
   }
 }
 

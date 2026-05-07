@@ -133,6 +133,7 @@ import {
 import { resolveAlayaConfigDir, resolveAlayaConfigPaths, type AlayaConfigPaths } from "./cli/config-files.js";
 import { resolveCoreDaemonFilesDirectory } from "./files-data-dir.js";
 import { createGardenRuntime } from "./garden-runtime.js";
+import { resolveGardenOpenAiCredential } from "./garden-credential.js";
 import {
   createPathPlasticityService,
   createRecallPathPlasticityPort
@@ -450,7 +451,6 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const globalMemoryRecallInvalidationSubscription: GlobalMemoryRecallSubscription | null =
     globalMemoryRecallService?.subscribeToInvalidations(runtimeNotifier) ?? null;
   const {
-    embeddingApiKey,
     embeddingStatusService,
     embeddingRecallService,
     embeddingBackfillHandler
@@ -545,7 +545,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   });
   const stancePolicyProvider = createStancePolicyProvider(configRepo);
   const localHeuristicsProvider = new LocalHeuristics();
-  const officialGardenApiKey = embeddingApiKey;
+  const officialGardenApiKey = resolveGardenOpenAiCredential({ configEnv }).apiKey;
   const officialGardenProvider =
     officialGardenApiKey === null
       ? null
@@ -804,6 +804,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       daemonMcpCatalog: mcpTooling.daemonMcpCatalog,
       environmentStatusService,
       embeddingStatusService,
+      configService,
       mcpMemoryToolHandler,
       runService,
       trustStateRecorder,

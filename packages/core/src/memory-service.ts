@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   FactualPolicyConditionSchema,
+  IsoDatetimeStringSchema,
   MemoryDimension,
   MemoryEntrySchema,
   ObjectLifecycleStateSchema,
@@ -22,7 +23,7 @@ import {
   type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
-import { parseObjectId } from "./shared/validators.js";
+import { parseNonEmptyString, parseObjectId } from "./shared/validators.js";
 
 export type MemoryEntryInput = Omit<
   MemoryEntry,
@@ -48,8 +49,14 @@ export type MemoryEntryInput = Omit<
   readonly storage_tier?: MemoryEntry["storage_tier"];
 };
 
-export type MemoryEntryUpdateFields = MemoryEntryMutableFields;
-export type MemoryEntryRepoUpdateFields = ProtocolMemoryEntryRepoUpdateFields;
+export type MemoryEntryUpdateFields = MemoryEntryMutableFields & {
+  readonly last_used_at?: string;
+  readonly last_hit_at?: string;
+};
+export type MemoryEntryRepoUpdateFields = ProtocolMemoryEntryRepoUpdateFields & {
+  readonly last_used_at?: string;
+  readonly last_hit_at?: string;
+};
 
 export interface MemoryServiceEventLogRepoPort {
   append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
@@ -73,6 +80,11 @@ export interface MemoryServiceMemoryEntryRepoPort {
     scopeClass: ScopeClass
   ): Promise<readonly Readonly<MemoryEntry>[]>;
   update(objectId: string, fields: MemoryEntryRepoUpdateFields): Promise<Readonly<MemoryEntry>>;
+  updateScoped?(
+    objectId: string,
+    workspaceId: string,
+    fields: MemoryEntryRepoUpdateFields
+  ): Promise<Readonly<MemoryEntry>>;
   transitionLifecycle?(
     objectId: string,
     lifecycleState: MemoryEntry["lifecycle_state"],
@@ -212,49 +224,16 @@ export class MemoryService {
     fields: MemoryEntryUpdateFields,
     reason: string
   ): Promise<Readonly<MemoryEntry>> {
-    const parsedObjectId = parseObjectId(objectId);
-    const parsedReason = parseReason(reason);
-    const parsedFields = parseUpdateFields(fields);
+    return await this.updateInternal({ objectId, fields, reason });
+  }
 
-    if (parsedFields.evidence_refs !== undefined) {
-      await this.validateEvidenceRefs(parsedFields.evidence_refs);
-    }
-
-    const existing = await this.dependencies.memoryEntryRepo.findById(parsedObjectId);
-
-    if (existing === null) {
-      throw new CoreError("NOT_FOUND", "Memory entry not found");
-    }
-
-    if (existing.lifecycle_state === "archived") {
-      throw new CoreError("VALIDATION", "Memory entry is archived and cannot be updated");
-    }
-
-    const updatedFields = toUpdatedFieldNames(parsedFields);
-    const occurredAt = this.now();
-    const event = await this.dependencies.eventLogRepo.append({
-      event_type: MemoryGovernanceEventType.SOUL_MEMORY_UPDATED,
-      entity_type: "memory_entry",
-      entity_id: existing.object_id,
-      workspace_id: existing.workspace_id,
-      run_id: existing.run_id,
-      caused_by: parsedReason,
-      payload_json: SoulMemoryUpdatedPayloadSchema.parse({
-        object_id: existing.object_id,
-        object_kind: existing.object_kind,
-        workspace_id: existing.workspace_id,
-        run_id: existing.run_id,
-        updated_fields: updatedFields
-      })
-    });
-
-    const updated = await this.dependencies.memoryEntryRepo.update(parsedObjectId, {
-      ...parsedFields,
-      updated_at: occurredAt
-    });
-
-    await this.dependencies.runtimeNotifier.notifyEntry(event);
-    return updated;
+  public async updateScoped(
+    objectId: string,
+    workspaceId: string,
+    fields: MemoryEntryUpdateFields,
+    reason: string
+  ): Promise<Readonly<MemoryEntry>> {
+    return await this.updateInternal({ objectId, workspaceId, fields, reason });
   }
 
   public async validateUpdate(
@@ -501,6 +480,75 @@ export class MemoryService {
     );
   }
 
+  private async updateInternal(input: {
+    readonly objectId: string;
+    readonly workspaceId?: string;
+    readonly fields: MemoryEntryUpdateFields;
+    readonly reason: string;
+  }): Promise<Readonly<MemoryEntry>> {
+    const parsedObjectId = parseObjectId(input.objectId);
+    const parsedWorkspaceId =
+      input.workspaceId === undefined ? undefined : parseNonEmptyString(input.workspaceId, "workspaceId");
+    const parsedReason = parseReason(input.reason);
+    const parsedFields = parseUpdateFields(input.fields);
+
+    if (parsedFields.evidence_refs !== undefined) {
+      await this.validateEvidenceRefs(parsedFields.evidence_refs);
+    }
+
+    const existing = await this.dependencies.memoryEntryRepo.findById(parsedObjectId);
+
+    if (existing === null || (parsedWorkspaceId !== undefined && existing.workspace_id !== parsedWorkspaceId)) {
+      throw new CoreError("NOT_FOUND", "Memory entry not found");
+    }
+
+    if (existing.lifecycle_state === "archived") {
+      throw new CoreError("VALIDATION", "Memory entry is archived and cannot be updated");
+    }
+
+    const updatedFields = toUpdatedFieldNames(parsedFields);
+    const occurredAt = this.now();
+    const event = await this.dependencies.eventLogRepo.append({
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_UPDATED,
+      entity_type: "memory_entry",
+      entity_id: existing.object_id,
+      workspace_id: existing.workspace_id,
+      run_id: existing.run_id,
+      caused_by: parsedReason,
+      payload_json: SoulMemoryUpdatedPayloadSchema.parse({
+        object_id: existing.object_id,
+        object_kind: existing.object_kind,
+        workspace_id: existing.workspace_id,
+        run_id: existing.run_id,
+        updated_fields: updatedFields
+      })
+    });
+
+    const repoFields = {
+      ...parsedFields,
+      updated_at: occurredAt
+    };
+    const updated =
+      parsedWorkspaceId === undefined
+        ? await this.dependencies.memoryEntryRepo.update(parsedObjectId, repoFields)
+        : await this.updateRepoScoped(parsedObjectId, parsedWorkspaceId, repoFields);
+
+    await this.dependencies.runtimeNotifier.notifyEntry(event);
+    return updated;
+  }
+
+  private async updateRepoScoped(
+    objectId: string,
+    workspaceId: string,
+    fields: MemoryEntryRepoUpdateFields
+  ): Promise<Readonly<MemoryEntry>> {
+    if (this.dependencies.memoryEntryRepo.updateScoped === undefined) {
+      throw new CoreError("VALIDATION", "Scoped memory update is not available");
+    }
+
+    return await this.dependencies.memoryEntryRepo.updateScoped(objectId, workspaceId, fields);
+  }
+
   private async validateEvidenceRefs(evidenceRefs: readonly string[]): Promise<void> {
     const results = await Promise.all(
       evidenceRefs.map(async (evidenceRef) => ({
@@ -570,14 +618,18 @@ function parseUpdateFields(fields: MemoryEntryUpdateFields): MemoryEntryUpdateFi
     content: fields.content,
     domain_tags: fields.domain_tags,
     evidence_refs: fields.evidence_refs,
-    storage_tier: fields.storage_tier
+    storage_tier: fields.storage_tier,
+    last_used_at: fields.last_used_at,
+    last_hit_at: fields.last_hit_at
   };
 
   if (
     parsed.content === undefined &&
     parsed.domain_tags === undefined &&
     parsed.evidence_refs === undefined &&
-    parsed.storage_tier === undefined
+    parsed.storage_tier === undefined &&
+    parsed.last_used_at === undefined &&
+    parsed.last_hit_at === undefined
   ) {
     throw new CoreError("VALIDATION", "At least one field is required for update");
   }
@@ -596,11 +648,25 @@ function parseUpdateFields(fields: MemoryEntryUpdateFields): MemoryEntryUpdateFi
 
   const parsedStorageTier =
     parsed.storage_tier === undefined ? undefined : parseStorageTier(parsed.storage_tier);
+  const parsedLastUsedAt =
+    parsed.last_used_at === undefined ? undefined : parseIsoDatetime(parsed.last_used_at);
+  const parsedLastHitAt =
+    parsed.last_hit_at === undefined ? undefined : parseIsoDatetime(parsed.last_hit_at);
 
   return {
     ...parsed,
-    storage_tier: parsedStorageTier
+    storage_tier: parsedStorageTier,
+    last_used_at: parsedLastUsedAt,
+    last_hit_at: parsedLastHitAt
   };
+}
+
+function parseIsoDatetime(value: string): string {
+  try {
+    return IsoDatetimeStringSchema.parse(value);
+  } catch (error) {
+    throw new CoreError("VALIDATION", "Invalid timestamp", { cause: error });
+  }
 }
 
 function assertStringArray(value: readonly string[], field: "domain_tags" | "evidence_refs"): void {
@@ -625,6 +691,12 @@ function toUpdatedFieldNames(fields: MemoryEntryUpdateFields): string[] {
   }
   if (fields.storage_tier !== undefined) {
     updatedFields.push("storage_tier");
+  }
+  if (fields.last_used_at !== undefined) {
+    updatedFields.push("last_used_at");
+  }
+  if (fields.last_hit_at !== undefined) {
+    updatedFields.push("last_hit_at");
   }
 
   return updatedFields;

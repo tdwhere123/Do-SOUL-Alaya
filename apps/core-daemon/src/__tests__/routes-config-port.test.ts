@@ -30,7 +30,8 @@ describe("routes-config port batch", () => {
       getEnvironmentConfig: vi.fn(),
       patchEnvironmentConfig: vi.fn(),
       getRuntimeEmbeddingConfig: vi.fn(),
-      patchRuntimeEmbeddingConfig: vi.fn(async (patch: unknown) => patch)
+      patchRuntimeEmbeddingConfig: vi.fn(async (patch: unknown) => patch),
+      getGardenCredentialProvenance: vi.fn(async () => ({ kind: "none" }))
     };
     const app = new Hono();
     registerConfigRoutes(app, {
@@ -186,6 +187,33 @@ describe("routes-config port batch", () => {
     } finally {
       database.close();
     }
+  });
+
+  it("reports dedicated Garden credential provenance from the config env before embedding fallback", async () => {
+    const harness = await createServiceHarness({
+      env: {
+        ALAYA_OPENAI_SECRET_REF: "env:ALAYA_TEST_OPENAI_KEY"
+      } as NodeJS.ProcessEnv
+    });
+    await writeFile(
+      harness.paths.envPath,
+      "ALAYA_GARDEN_OPENAI_SECRET_REF=env:ALAYA_GARDEN_TEST_OPENAI_KEY\n",
+      "utf8"
+    );
+
+    await expect(harness.service.getGardenCredentialProvenance()).resolves.toEqual({ kind: "env" });
+  });
+
+  it("reports deprecated embedding fallback provenance when no dedicated Garden ref exists", async () => {
+    const harness = await createServiceHarness({
+      env: {
+        ALAYA_OPENAI_SECRET_REF: "file:/tmp/alaya-openai-secret"
+      } as NodeJS.ProcessEnv
+    });
+
+    await expect(harness.service.getGardenCredentialProvenance()).resolves.toEqual({
+      kind: "embedding-fallback"
+    });
   });
 
   it("rejects paste mode on win32 before EventLog mutation", async () => {
@@ -544,6 +572,7 @@ async function createServiceHarness(options: {
   readonly platform?: NodeJS.Platform;
   readonly tempIds?: readonly string[];
   readonly repo?: ConfigRepo;
+  readonly env?: NodeJS.ProcessEnv;
 } = {}): Promise<{
   readonly service: ReturnType<typeof createConfigService>;
   readonly paths: AlayaConfigPaths;
@@ -590,7 +619,8 @@ async function createServiceHarness(options: {
       clock: () => "2026-05-01T00:00:00.000Z",
       platform: options.platform,
       generateAuditId: () => `audit-${publishedEvents.length + 1}`,
-      generateTempId: () => options.tempIds?.[tempIndex++] ?? `tmp-${tempIndex++}`
+      generateTempId: () => options.tempIds?.[tempIndex++] ?? `tmp-${tempIndex++}`,
+      envProvider: () => options.env ?? process.env
     }),
     paths,
     publishedEvents,

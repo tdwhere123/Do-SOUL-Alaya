@@ -404,6 +404,20 @@ describe("daemon tool runtime bootstrap", () => {
     });
   });
 
+  it("prefers the dedicated Garden secret-ref over the deprecated embedding fallback", async () => {
+    process.env.ALAYA_GARDEN_OPENAI_SECRET_REF = "env:ALAYA_GARDEN_TEST_OPENAI_KEY";
+    process.env.ALAYA_GARDEN_TEST_OPENAI_KEY = "sk-dedicated-garden";
+    process.env.ALAYA_OPENAI_SECRET_REF = "env:ALAYA_TEST_OPENAI_KEY";
+    process.env.ALAYA_TEST_OPENAI_KEY = "sk-embedding-fallback";
+
+    await bootDaemonRuntime();
+
+    expect(hoisted.officialGardenProviderCtor).toHaveBeenCalledWith({
+      apiKey: "sk-dedicated-garden",
+      model: "gpt-4.1-mini"
+    });
+  });
+
   it("loads embedding secret-ref config from the Alaya config-dir .env during daemon bootstrap", async () => {
     const configDir = await mkdtemp(path.join(tmpdir(), "alaya-daemon-config-env-"));
     await writeFile(

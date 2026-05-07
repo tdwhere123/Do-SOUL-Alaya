@@ -274,6 +274,63 @@ describe("SqliteMemoryEntryRepo", () => {
     expect(updated.updated_at).toBe("2026-03-21T03:00:00.000Z");
   });
 
+  it("updates tier and access timestamps in the same mutable update", async () => {
+    const { repo } = await createRepo();
+    const entry = createMemoryEntry({
+      storage_tier: StorageTier.COLD,
+      last_used_at: "2026-03-01T00:00:00.000Z",
+      last_hit_at: "2026-03-01T00:00:00.000Z"
+    });
+    await repo.create(entry);
+
+    const updated = await repo.update(entry.object_id, {
+      storage_tier: StorageTier.HOT,
+      last_used_at: "2026-03-21T03:30:00.000Z",
+      last_hit_at: "2026-03-21T03:30:00.000Z",
+      updated_at: "2026-03-21T03:30:00.000Z"
+    });
+
+    expect(updated.storage_tier).toBe(StorageTier.HOT);
+    expect(updated.last_used_at).toBe("2026-03-21T03:30:00.000Z");
+    expect(updated.last_hit_at).toBe("2026-03-21T03:30:00.000Z");
+    expect(updated.updated_at).toBe("2026-03-21T03:30:00.000Z");
+  });
+
+  it("updates tier and access timestamps only in the requested workspace", async () => {
+    const { repo } = await createRepo();
+    const entry = createMemoryEntry({
+      storage_tier: StorageTier.COLD,
+      last_used_at: "2026-03-01T00:00:00.000Z",
+      last_hit_at: "2026-03-01T00:00:00.000Z"
+    });
+    await repo.create(entry);
+
+    await expect(
+      repo.updateScoped(entry.object_id, "workspace-2", {
+        storage_tier: StorageTier.HOT,
+        last_used_at: "2026-03-21T03:30:00.000Z",
+        last_hit_at: "2026-03-21T03:30:00.000Z",
+        updated_at: "2026-03-21T03:30:00.000Z"
+      })
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(repo.findById(entry.object_id)).resolves.toMatchObject({
+      storage_tier: StorageTier.COLD,
+      last_used_at: "2026-03-01T00:00:00.000Z",
+      last_hit_at: "2026-03-01T00:00:00.000Z"
+    });
+
+    const updated = await repo.updateScoped(entry.object_id, "workspace-1", {
+      storage_tier: StorageTier.HOT,
+      last_used_at: "2026-03-21T03:30:00.000Z",
+      last_hit_at: "2026-03-21T03:30:00.000Z",
+      updated_at: "2026-03-21T03:30:00.000Z"
+    });
+
+    expect(updated.storage_tier).toBe(StorageTier.HOT);
+    expect(updated.last_used_at).toBe("2026-03-21T03:30:00.000Z");
+    expect(updated.last_hit_at).toBe("2026-03-21T03:30:00.000Z");
+  });
+
   it("updates dynamics fields", async () => {
     const { repo } = await createRepo();
     const entry = createMemoryEntry();

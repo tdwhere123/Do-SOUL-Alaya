@@ -100,6 +100,7 @@ function createDependencies(overrides: Partial<MemoryServiceDependencies> = {}):
   readonly evidenceFindByIdSpy: TestMock;
   readonly notifySpy: TestMock;
   readonly repoUpdateSpy: TestMock;
+  readonly repoUpdateScopedSpy: TestMock;
   readonly repoArchiveSpy: TestMock;
   readonly repoFindByScopeClassSpy: TestMock;
 } {
@@ -119,7 +120,23 @@ function createDependencies(overrides: Partial<MemoryServiceDependencies> = {}):
         content: fields.content ?? "Use pnpm for all workspace commands.",
         domain_tags: fields.domain_tags ?? ["tooling", "workflow"],
         evidence_refs: fields.evidence_refs ?? ["evidence-1", "evidence-2"],
-        storage_tier: fields.storage_tier ?? StorageTier.HOT
+        storage_tier: fields.storage_tier ?? StorageTier.HOT,
+        last_used_at: fields.last_used_at ?? null,
+        last_hit_at: fields.last_hit_at ?? null
+      })
+    )
+  );
+  const repoUpdateScopedSpy = vi.fn(async (_objectId: string, workspaceId: string, fields: MemoryEntryRepoUpdateFields) =>
+    Object.freeze(
+      createMemoryEntry({
+        workspace_id: workspaceId,
+        updated_at: fields.updated_at,
+        content: fields.content ?? "Use pnpm for all workspace commands.",
+        domain_tags: fields.domain_tags ?? ["tooling", "workflow"],
+        evidence_refs: fields.evidence_refs ?? ["evidence-1", "evidence-2"],
+        storage_tier: fields.storage_tier ?? StorageTier.HOT,
+        last_used_at: fields.last_used_at ?? null,
+        last_hit_at: fields.last_hit_at ?? null
       })
     )
   );
@@ -146,6 +163,7 @@ function createDependencies(overrides: Partial<MemoryServiceDependencies> = {}):
       findByDimension: vi.fn(async () => []),
       findByScopeClass: repoFindByScopeClassSpy,
       update: repoUpdateSpy,
+      updateScoped: repoUpdateScopedSpy,
       archive: repoArchiveSpy
     },
     runtimeNotifier: {
@@ -161,6 +179,7 @@ function createDependencies(overrides: Partial<MemoryServiceDependencies> = {}):
     evidenceFindByIdSpy,
     notifySpy,
     repoUpdateSpy,
+    repoUpdateScopedSpy,
     repoArchiveSpy,
     repoFindByScopeClassSpy
   };
@@ -365,6 +384,72 @@ describe("MemoryService", () => {
     const emitted = updateAppendSpy.mock.calls[0][0];
     expect(emitted).not.toHaveProperty("revision");
     expect(emitted.event_type).toBe("soul.memory.updated");
+  });
+
+  it("updates memory through the workspace-scoped repo path", async () => {
+    const { dependencies, repoUpdateSpy, repoUpdateScopedSpy } = createDependencies();
+    const service = new MemoryService(dependencies);
+
+    const updated = await service.updateScoped(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      "workspace-1",
+      {
+        storage_tier: StorageTier.HOT,
+        last_used_at: "2026-03-21T03:30:00.000Z",
+        last_hit_at: "2026-03-21T03:30:00.000Z"
+      },
+      "recall_usage_reported"
+    );
+
+    expect(repoUpdateSpy).not.toHaveBeenCalled();
+    expect(repoUpdateScopedSpy).toHaveBeenCalledWith(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      "workspace-1",
+      expect.objectContaining({
+        storage_tier: StorageTier.HOT,
+        last_used_at: "2026-03-21T03:30:00.000Z",
+        last_hit_at: "2026-03-21T03:30:00.000Z",
+        updated_at: "2026-03-21T01:00:00.000Z"
+      })
+    );
+    expect(updated.last_hit_at).toBe("2026-03-21T03:30:00.000Z");
+  });
+
+  it("rejects scoped update for a foreign workspace before EventLog append", async () => {
+    const updateScopedSpy = vi.fn(async () => createMemoryEntry());
+    const { dependencies, appendSpy } = createDependencies({
+      memoryEntryRepo: {
+        create: vi.fn(async (entry) => entry),
+        findById: vi.fn(async () => createMemoryEntry({ workspace_id: "workspace-2" })),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        updateScoped: updateScopedSpy,
+        archive: vi.fn(async () => {
+          throw new Error("not used");
+        })
+      }
+    });
+    const service = new MemoryService(dependencies);
+
+    await expect(
+      service.updateScoped(
+        "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+        "workspace-1",
+        { last_hit_at: "2026-03-21T03:30:00.000Z" },
+        "recall_usage_reported"
+      )
+    ).rejects.toMatchObject({
+      name: "CoreError",
+      code: "NOT_FOUND",
+      message: "Memory entry not found"
+    });
+    expect(appendSpy).not.toHaveBeenCalled();
+    expect(updateScopedSpy).not.toHaveBeenCalled();
   });
 
   it("validates evidence_refs on update", async () => {

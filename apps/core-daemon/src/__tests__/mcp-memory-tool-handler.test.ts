@@ -127,6 +127,56 @@ describe("mcp memory tool handler", () => {
     );
   });
 
+  it("recall-hit-tier-promotion refreshes used memory access while promoting to hot", async () => {
+    const deps = createDeps();
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const result = await handler.call({
+      toolName: "soul.report_context_usage",
+      arguments: {
+        delivery_id: "delivery_1",
+        usage_state: "used",
+        used_object_ids: ["mem1", "mem1"],
+        per_anchor_usage: [{ object_id: "mem1", anchor_role: "target" }],
+        reason: "cited"
+      },
+      context
+    });
+
+    expect(result.ok).toBe(true);
+    expect(deps.memoryService.findByIdScoped).toHaveBeenCalledWith("mem1", "ws1");
+    expect(deps.memoryService.updateScoped).toHaveBeenCalledTimes(1);
+    expect(deps.memoryService.updateScoped).toHaveBeenCalledWith(
+      "mem1",
+      "ws1",
+      {
+        storage_tier: "hot",
+        last_used_at: "2026-04-30T00:00:00.000Z",
+        last_hit_at: "2026-04-30T00:00:00.000Z"
+      },
+      "recall_usage_reported"
+    );
+  });
+
+  it("does not refresh recall access for skipped reports", async () => {
+    const deps = createDeps();
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const result = await handler.call({
+      toolName: "soul.report_context_usage",
+      arguments: {
+        delivery_id: "delivery_1",
+        usage_state: "skipped",
+        used_object_ids: [],
+        reason: "not relevant"
+      },
+      context
+    });
+
+    expect(result.ok).toBe(true);
+    expect(deps.memoryService.updateScoped).not.toHaveBeenCalled();
+  });
+
   it("maps trust-state usage validation failures to MCP validation errors", async () => {
     const deps = createDeps();
     deps.trustStateRecorder.recordUsage = vi.fn(async () => {
@@ -227,7 +277,8 @@ function createDeps(): McpMemoryToolHandlerDependencies {
         const entry = createMemory();
         return entry.workspace_id === workspaceId ? entry : null;
       }),
-      update: vi.fn(async (_objectId, fields) => createMemory(fields))
+      update: vi.fn(async (_objectId, fields) => createMemory(fields)),
+      updateScoped: vi.fn(async (_objectId, _workspaceId, fields) => createMemory(fields))
     },
     signalService: {
       receiveSignal: vi.fn(async (signal: CandidateMemorySignal) => ({ signal }))

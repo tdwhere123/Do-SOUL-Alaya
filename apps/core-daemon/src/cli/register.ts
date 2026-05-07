@@ -55,6 +55,8 @@ export function registerAlayaCliCommands(
         last_pass_at: gardenStatus.last_pass_at
       };
     },
+    getGardenCredentialProvenance: async () =>
+      await runtime.services.configService.getGardenCredentialProvenance(),
     getPathPlasticityLookupTelemetry: () =>
       defaultRecallPathPlasticityLookupTelemetry.snapshot(),
     // p5-system-review-r3 MR-I11: schema_ok needs the live db. initDatabase

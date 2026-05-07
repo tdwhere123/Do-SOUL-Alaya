@@ -166,11 +166,17 @@ export function parseUpdateFields(fields: MemoryEntryRepoUpdateFields): MemoryEn
 
   const parsedStorageTier =
     fields.storage_tier === undefined ? undefined : parseStorageTier(fields.storage_tier);
+  const parsedLastUsedAt =
+    fields.last_used_at === undefined ? undefined : parseTimestamp(fields.last_used_at);
+  const parsedLastHitAt =
+    fields.last_hit_at === undefined ? undefined : parseTimestamp(fields.last_hit_at);
 
   return {
     ...fields,
     updated_at: updatedAt,
-    storage_tier: parsedStorageTier
+    storage_tier: parsedStorageTier,
+    last_used_at: parsedLastUsedAt,
+    last_hit_at: parsedLastHitAt
   };
 }
 
