@@ -589,19 +589,35 @@ class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
     return "claimed";
   }
 
-  // Wave-end M6: in-memory impl matches the SQLite-backed contract —
-  // claim and append commit-or-roll together. The in-memory event log
-  // doesn't have transactional semantics, so we apply the rollback by
-  // hand: snapshot the row before claiming, attempt every event append,
-  // and on any throw restore the snapshot via releaseClaim. The
-  // SqliteGardenTaskRepo's appendManyWithMutation already handles
-  // rollback at the SQLite layer.
+  // Wave-end M6 + Codex re-review I3: in-memory impl matches the
+  // SQLite-backed contract — claim and append commit-or-roll together.
+  // SQLite handles this via appendManyWithMutation's tx; the in-memory
+  // event log has no transaction, so we apply the rollback by hand:
+  //
+  // 1. Snapshot the full row state BEFORE claim (including attempt_count).
+  // 2. claimAtomic. If CAS loses, return early without appending.
+  // 3. Try event appends one by one.
+  // 4. On any throw, restore the row from the snapshot — this reverts
+  //    status, claimed_by, claimed_at AND attempt_count, which the prior
+  //    naive releaseClaim left bumped (Codex re-review I3).
+  //
+  // We cannot undo events that already appended successfully before the
+  // throw (the port has no truncate). The scheduler today only appends
+  // one event per claim (SOUL_GARDEN_TASK_DISPATCHED), so the multi-event
+  // partial-append window does not exist in production. If a future
+  // caller passes multiple events we keep the row consistent and rely on
+  // the SQLite repo for true atomicity.
   public async claimAtomicWithEvents(
     taskId: string,
     claimedBy: string,
     claimedAt: string,
     dispatchedEvents: readonly GardenTaskEventInput[]
   ): Promise<GardenTaskClaimResult> {
+    const snapshot = this.rows.find((candidate) => candidate.id === taskId);
+    if (snapshot === undefined) {
+      return "already-claimed";
+    }
+    const preClaimState = { ...snapshot };
     const result = this.claimAtomic(taskId, claimedBy, claimedAt);
     if (result !== "claimed") {
       return result;
@@ -618,7 +634,13 @@ class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
         });
       }
     } catch (error) {
-      this.releaseClaim(taskId, claimedBy);
+      const current = this.rows.find((candidate) => candidate.id === taskId);
+      if (current !== undefined) {
+        replaceRow(this.rows, current, preClaimState);
+        this.rows.sort((left, right) =>
+          compareTasks(parseTaskDescriptorFromRow(left), parseTaskDescriptorFromRow(right))
+        );
+      }
       throw error;
     }
     return "claimed";

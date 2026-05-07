@@ -132,10 +132,18 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
     );
     expect(completionEvents).toHaveLength(100);
 
-    // M7: SQL-level invariant proof — for every task id, the row count
-    // grouped by id is exactly 1 (no duplicate claims could have been
-    // committed). This is what the CAS contract actually guarantees,
-    // regardless of how many threads or claimers race against it.
+    // M7 (with Codex re-review N1 calibration): the load-bearing
+    // invariant for "no double-claim" is the count of distinct
+    // entity_ids across SOUL_GARDEN_TASK_COMPLETED events — if two
+    // claimers had both succeeded for the same task, we would have
+    // appended two completion events with the same entity_id and
+    // either the count of distinct entity_ids would be < 100 OR the
+    // total completionEvents count would be > 100. We assert both.
+    expect(new Set(completionEvents.map((event) => event.entity_id)).size).toBe(100);
+    expect(completionEvents.length).toBe(100);
+    // The garden_tasks row count grouped by id is a weaker smoke check
+    // (it primarily proves the PK constraint held, which SQLite would
+    // do regardless of the CAS contract). Kept as a defensive scan.
     const idCountRows = (
       database.connection
         .prepare(
@@ -147,10 +155,6 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
     for (const row of idCountRows) {
       expect(row.row_count).toBe(1);
     }
-    // And the total of completion events equals the unique task count
-    // — second proof that no task got two SOUL_GARDEN_TASK_COMPLETED
-    // rows even under the racey interleaving.
-    expect(new Set(completionEvents.map((event) => event.entity_id)).size).toBe(100);
   });
 
   it("reclaims stale claimed tasks through gcAbandonedClaims", () => {

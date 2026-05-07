@@ -144,14 +144,14 @@ export class RecallService {
       );
     }
 
-    const hotAssessment = await this.assessCoarseFilter({
-      coarseFilter: hotCoarseFilter,
-      workspaceId: params.workspaceId,
-      runId: params.runId ?? null,
-      queryText,
-      fineAssessmentConfig: policy.fine_assessment,
-      winnerMemoryIds
-    });
+    // Codex re-review I2: prior implementation called assessCoarseFilter
+    // on the HOT-only filter (1× collectSupplementaryData) just to feed
+    // hotFineAssessmentCount into expandTierCascade, then ran it again
+    // on the merged filter (2nd call). M5 already simplified the
+    // cascade gate to use coarseFilter.candidates.length; this commit
+    // applies the same simplification at the recall() call site so
+    // collectSupplementaryData runs exactly once per recall — on the
+    // final merged filter — even when cascade fires.
     const coarseFilter = await this.expandTierCascade({
       workspaceId: params.workspaceId,
       runId: params.runId ?? null,
@@ -159,7 +159,7 @@ export class RecallService {
       fineAssessmentConfig: policy.fine_assessment,
       queryText,
       hotCoarseFilter,
-      hotFineAssessmentCount: hotAssessment.candidates.length,
+      hotFineAssessmentCount: hotCoarseFilter.candidates.length,
       winnerMemoryIds
     });
     const combinedCoarseCandidates = Object.freeze([
@@ -167,20 +167,17 @@ export class RecallService {
       ...filteredGlobalCandidates
     ]) as readonly Readonly<CoarseRecallCandidate>[];
 
-    const assessment =
-      coarseFilter === hotCoarseFilter && filteredGlobalCandidates.length === 0
-        ? hotAssessment
-        : await this.assessCoarseFilter({
-            coarseFilter: Object.freeze({
-              ...coarseFilter,
-              candidates: combinedCoarseCandidates
-            }),
-            workspaceId: params.workspaceId,
-            runId: params.runId ?? null,
-            queryText,
-            fineAssessmentConfig: policy.fine_assessment,
-            winnerMemoryIds
-          });
+    const assessment = await this.assessCoarseFilter({
+      coarseFilter: Object.freeze({
+        ...coarseFilter,
+        candidates: combinedCoarseCandidates
+      }),
+      workspaceId: params.workspaceId,
+      runId: params.runId ?? null,
+      queryText,
+      fineAssessmentConfig: policy.fine_assessment,
+      winnerMemoryIds
+    });
     const supplementaryData = assessment.supplementaryData;
     const lexicalCandidates = assessment.candidates;
     const preparedEmbeddingQuery = await this.prepareEmbeddingSupplementQuery({

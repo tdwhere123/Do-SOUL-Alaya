@@ -555,6 +555,17 @@ describe("GardenScheduler", () => {
       warning_active: true
     });
     expect(scheduler.peekBacklogWarningTransition()).toBeNull();
+
+    // Codex re-review I3: a successful retry after the dispatch-append
+    // failure must succeed cleanly — attempt_count should NOT be
+    // pre-bumped from the failed attempt. Pre-fix, claim+1 ran but
+    // releaseClaim only reverted status, so attempt_count silently
+    // accumulated across rollback paths. Now the snapshot-based
+    // rollback fully restores the row including attempt_count.
+    eventLog.append.mockResolvedValue(undefined);
+    const dispatchedAfterRetry = await scheduler.dispatchNext(GardenRole.LIBRARIAN);
+    expect(dispatchedAfterRetry).not.toBeNull();
+    expect(scheduler.queueDepth).toBe(1);
   });
 
   it("does not remove a tier-violation task when the reject append fails", async () => {
