@@ -29,11 +29,23 @@ interface SoulGraphEnvelope {
   readonly data: SoulGraph;
 }
 
+interface GraphData {
+  readonly nodes: GraphNode[];
+  readonly links: GraphLink[];
+  readonly meta: {
+    readonly truncated: boolean;
+    readonly nodeTotal: number;
+    readonly edgeTotal: number;
+  };
+}
+
+const LARGE_GRAPH_LABEL_THRESHOLD = 80;
+const TOP_DEGREE_LABEL_LIMIT = 24;
+
 export default function GraphPage() {
   const svgRef = useRef<SVGSVGElement>(null);
-  const [data, setData] = useState<{ nodes: GraphNode[]; links: GraphLink[] } | null>(
-    null
-  );
+  const userInteractedRef = useRef(false);
+  const [data, setData] = useState<GraphData | null>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -67,7 +79,15 @@ export default function GraphPage() {
             (l) => extractId(l.source) === n.id || extractId(l.target) === n.id
           ).length;
         });
-        setData({ nodes, links });
+        setData({
+          nodes,
+          links,
+          meta: {
+            truncated: graph.truncated,
+            nodeTotal: graph.node_total,
+            edgeTotal: graph.edge_total
+          }
+        });
       } catch (err) {
         if ((err as ApiError).status === 401) return;
         setError((err as Error).message);
@@ -117,6 +137,7 @@ export default function GraphPage() {
   // Render D3 graph: rebuild on data change OR container resize, then fit-to-bounds.
   useEffect(() => {
     if (!data || !svgRef.current) return;
+    userInteractedRef.current = false;
     const svgElement = svgRef.current;
     const svg = select(svgElement);
 
@@ -134,7 +155,11 @@ export default function GraphPage() {
       // viewBox visually with letterbox bands when aspect ratios disagree.
       svg
         .attr("viewBox", `0 0 ${width} ${height}`)
-        .attr("preserveAspectRatio", "xMidYMid meet");
+        .attr("preserveAspectRatio", "xMidYMid meet")
+        .attr(
+          "data-large-graph",
+          data.nodes.length > LARGE_GRAPH_LABEL_THRESHOLD ? "true" : "false"
+        );
 
       // Softened ink-bleed: keeps the paper aesthetic but stops drowning edges.
       const defs = svg.append("defs");
@@ -175,6 +200,16 @@ export default function GraphPage() {
           forceCollide<GraphNode>().radius((d) => nodeRadius(d) + 18)
         )
         .velocityDecay(0.7);
+      simulation.stop();
+      for (let i = 0; i < preTickCount(data.nodes.length, data.links.length); i += 1) {
+        simulation.tick();
+      }
+
+      const isLargeGraph = data.nodes.length > LARGE_GRAPH_LABEL_THRESHOLD;
+      const defaultLabelIds = selectDefaultLabelNodeIds(
+        data.nodes,
+        isLargeGraph ? TOP_DEGREE_LABEL_LIMIT : data.nodes.length
+      );
 
       const link = g
         .append("g")
@@ -193,17 +228,21 @@ export default function GraphPage() {
         .join("g")
         .attr("class", "cursor-pointer")
         .attr("data-node-id", (d) => d.id)
+        .attr("data-hovered", "false")
+        .attr("data-label-visible", (d) => (defaultLabelIds.has(d.id) ? "true" : "false"))
         .on("click", (event, d) => {
           setSelectedNode(d);
           event.stopPropagation();
         })
         .on("mouseenter", function () {
+          select(this).attr("data-hovered", "true");
           select(this)
             .select<SVGCircleElement>("circle.node-body")
             .attr("stroke", "#586E75")
             .attr("stroke-width", 1.5);
         })
         .on("mouseleave", function () {
+          select(this).attr("data-hovered", "false");
           select(this)
             .select<SVGCircleElement>("circle.node-body")
             .attr("stroke", "rgba(88,110,117,0.35)")
@@ -212,6 +251,7 @@ export default function GraphPage() {
         .call(
           drag<SVGGElement, GraphNode>()
             .on("start", (event: D3DragEvent<SVGGElement, GraphNode, GraphNode>) => {
+              userInteractedRef.current = true;
               if (!event.active) simulation.alphaTarget(0.3).restart();
               event.subject.fx = event.subject.x;
               event.subject.fy = event.subject.y;
@@ -261,26 +301,31 @@ export default function GraphPage() {
         .style("stroke-linejoin", "round")
         .text((d) => d.label);
 
-      simulation.on("tick", () => {
+      const updatePositions = () => {
         link
           .attr("x1", (d) => (d.source as GraphNode).x ?? 0)
           .attr("y1", (d) => (d.source as GraphNode).y ?? 0)
           .attr("x2", (d) => (d.target as GraphNode).x ?? 0)
           .attr("y2", (d) => (d.target as GraphNode).y ?? 0);
         nodeSel.attr("transform", (d) => `translate(${d.x ?? 0},${d.y ?? 0})`);
-      });
+      };
 
       const zoomBehavior = zoom<SVGSVGElement, unknown>()
+        .extent([
+          [0, 0],
+          [width, height]
+        ])
         .scaleExtent([0.05, 4])
         .on("zoom", (event) => {
+          if (event.sourceEvent != null) {
+            userInteractedRef.current = true;
+          }
           g.attr("transform", event.transform);
         });
       svg.call(zoomBehavior);
 
-      let didFit = false;
       const fitToBounds = () => {
-        if (didFit || data.nodes.length === 0) return;
-        didFit = true;
+        if (userInteractedRef.current || data.nodes.length === 0) return;
         let minX = Infinity;
         let maxX = -Infinity;
         let minY = Infinity;
@@ -297,8 +342,8 @@ export default function GraphPage() {
         const bboxW = Math.max(maxX - minX, 1);
         const bboxH = Math.max(maxY - minY, 1);
         const rawScale = Math.min(
-          (width - padding * 2) / bboxW,
-          (height - padding * 2) / bboxH
+          Math.max(width - padding * 2, 1) / bboxW,
+          Math.max(height - padding * 2, 1) / bboxH
         );
         const scale = Math.max(0.2, Math.min(rawScale, 1.2));
         const cx = (minX + maxX) / 2;
@@ -308,13 +353,11 @@ export default function GraphPage() {
         svg.call(zoomBehavior.transform, zoomIdentity.translate(tx, ty).scale(scale));
       };
 
-      simulation.on("end", fitToBounds);
-      // Fallback: if simulation never settles in 1.5s (cold rebuilds, large graphs),
-      // fit anyway so the user is not stuck staring at an off-center cluster.
-      const fitTimer = window.setTimeout(fitToBounds, 1500);
+      updatePositions();
+      fitToBounds();
+      simulation.on("tick", updatePositions);
 
       return () => {
-        window.clearTimeout(fitTimer);
         simulation.stop();
       };
     };
@@ -489,6 +532,25 @@ export default function GraphPage() {
         </div>
       ) : null}
 
+      {data ? (
+        <div className="absolute bottom-4 left-4 z-20 flex items-center gap-2 rounded-md border border-beige-200 bg-beige-50/95 px-3 py-2 text-[10px] font-mono uppercase text-ink-700/55 shadow-sm">
+          <span>
+            {data.nodes.length}/{data.meta.nodeTotal} nodes
+          </span>
+          <span>·</span>
+          <span>
+            {data.links.length}/{data.meta.edgeTotal} edges
+          </span>
+          <span className="rounded-sm bg-[#586E75]/10 px-1.5 py-0.5 text-ink-700/65">
+            {data.meta.truncated ||
+            data.nodes.length < data.meta.nodeTotal ||
+            data.links.length < data.meta.edgeTotal
+              ? "sampled"
+              : "complete"}
+          </span>
+        </div>
+      ) : null}
+
       <svg
         ref={svgRef}
         className="flex-1 w-full h-full"
@@ -505,6 +567,30 @@ export default function GraphPage() {
         onCopyCli={copyToClipboard}
       />
     </div>
+  );
+}
+
+function preTickCount(nodeCount: number, edgeCount: number): number {
+  const graphSize = nodeCount + edgeCount;
+  if (graphSize > 1500) return 240;
+  if (graphSize > 500) return 180;
+  if (graphSize > 150) return 120;
+  return 80;
+}
+
+function selectDefaultLabelNodeIds(nodes: readonly GraphNode[], limit: number): Set<string> {
+  if (limit >= nodes.length) {
+    return new Set(nodes.map((node) => node.id));
+  }
+  return new Set(
+    [...nodes]
+      .sort((a, b) => {
+        const degreeDelta = (b.degree ?? 0) - (a.degree ?? 0);
+        if (degreeDelta !== 0) return degreeDelta;
+        return a.label.localeCompare(b.label);
+      })
+      .slice(0, limit)
+      .map((node) => node.id)
   );
 }
 

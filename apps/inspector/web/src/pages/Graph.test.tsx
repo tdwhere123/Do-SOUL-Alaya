@@ -21,6 +21,32 @@ const SAMPLE_GRAPH = {
   edge_total: 2
 };
 
+function createLargeGraph() {
+  const nodes = [
+    { id: "hub", kind: "memory", label: "hub-memory", summary: "high-degree" },
+    ...Array.from({ length: 100 }, (_, index) => ({
+      id: `leaf-${index}`,
+      kind: "memory",
+      label: `leaf-${index}`,
+      summary: "low-degree"
+    }))
+  ];
+  const edges = Array.from({ length: 100 }, (_, index) => ({
+    id: `edge-${index}`,
+    kind: "references",
+    source_id: "hub",
+    target_id: `leaf-${index}`
+  }));
+  return {
+    workspace_id: "ws-1",
+    nodes,
+    edges,
+    truncated: true,
+    node_total: 742,
+    edge_total: 1998
+  };
+}
+
 function renderGraph() {
   return render(
     <ToastProvider>
@@ -70,6 +96,9 @@ describe("GraphPage", () => {
       expect(container.querySelector("g[data-node-id='n1']")).toBeTruthy();
     });
     expect(screen.queryByText("Graph Error")).toBeNull();
+    expect(screen.getByText("3/3 nodes")).toBeTruthy();
+    expect(screen.getByText("2/2 edges")).toBeTruthy();
+    expect(screen.getByText("complete")).toBeTruthy();
   });
 
   it("applies match/adjacent/background spotlight states based on search term", async () => {
@@ -157,5 +186,32 @@ describe("GraphPage", () => {
     expect(viewBox).toBeTruthy();
     expect(viewBox).toMatch(/^0 0 \d+(\.\d+)? \d+(\.\d+)?$/);
     expect(svg!.getAttribute("preserveAspectRatio")).toBe("xMidYMid meet");
+  });
+
+  it("samples large-graph labels and surfaces returned-vs-total counts", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true, data: createLargeGraph() }), {
+        status: 200
+      })
+    );
+
+    const { container } = renderGraph();
+
+    await waitFor(() => {
+      expect(container.querySelector("g[data-node-id='hub']")).toBeTruthy();
+    });
+    const svg = container.querySelector(
+      "svg[data-spotlight-active]"
+    ) as SVGSVGElement | null;
+    expect(svg?.getAttribute("data-large-graph")).toBe("true");
+    expect(
+      container.querySelector("g[data-node-id='hub']")?.getAttribute("data-label-visible")
+    ).toBe("true");
+    expect(
+      container.querySelector("g[data-node-id='leaf-99']")?.getAttribute("data-label-visible")
+    ).toBe("false");
+    expect(screen.getByText("101/742 nodes")).toBeTruthy();
+    expect(screen.getByText("100/1998 edges")).toBeTruthy();
+    expect(screen.getByText("sampled")).toBeTruthy();
   });
 });

@@ -15,7 +15,7 @@ export interface InspectCommandDependencies {
   readonly generateToken?: () => string;
   readonly spawnInspector?: (input: SpawnInspectorInput) => InspectorChildProcess;
   readonly startDaemonServer?: (options: InspectDaemonListenOptions) => Promise<InspectDaemonServer>;
-  readonly probeDaemon?: (url: string) => Promise<boolean>;
+  readonly probeDaemon?: (url: string) => Promise<InspectDaemonProbeResult>;
   readonly checkPortAvailable?: (port: number) => Promise<boolean>;
   readonly openUrl?: (url: string) => Promise<void>;
   readonly inspectorEntryPath?: string;
@@ -31,6 +31,11 @@ export interface InspectDaemonServer {
   readonly port: number;
   close(): Promise<void>;
 }
+
+export type InspectDaemonProbeResult =
+  | { readonly status: "compatible" }
+  | { readonly status: "unavailable"; readonly detail?: string }
+  | { readonly status: "missing_capability"; readonly detail?: string };
 
 export interface SpawnInspectorInput {
   readonly port: number;
@@ -151,10 +156,15 @@ async function ensureDaemonForInspector(
   }
 
   if (!(await checkPortAvailable(DEFAULT_DAEMON_PORT))) {
-    const daemonAvailable = await (deps.probeDaemon ?? defaultProbeDaemon)(fallbackUrl);
-    if (!daemonAvailable) {
+    const probe = await (deps.probeDaemon ?? defaultProbeDaemon)(fallbackUrl);
+    if (probe.status === "unavailable") {
       throw new Error(
         `daemon port ${DEFAULT_DAEMON_PORT} is in use but does not answer as Alaya; stop that process or set ALAYA_DAEMON_URL explicitly.`
+      );
+    }
+    if (probe.status === "missing_capability") {
+      throw new Error(
+        `stale/incompatible daemon on ${DEFAULT_DAEMON_HOST}:${DEFAULT_DAEMON_PORT}: missing required /config/runtime/garden-compute capability${formatProbeDetail(probe.detail)}. Stop that daemon and rerun alaya inspect.`
       );
     }
     ctx.stderr.write(`daemon port ${DEFAULT_DAEMON_PORT} is in use; using existing daemon at ${fallbackUrl}\n`);
@@ -323,15 +333,34 @@ async function defaultCheckPortAvailable(port: number): Promise<boolean> {
   });
 }
 
-async function defaultProbeDaemon(url: string): Promise<boolean> {
+async function defaultProbeDaemon(url: string): Promise<InspectDaemonProbeResult> {
+  const baseUrl = normalizeBaseUrl(url);
   try {
-    const response = await fetch(new URL("/status", normalizeBaseUrl(url)), {
+    const response = await fetch(new URL("/status", baseUrl), {
       method: "GET"
     });
-    return response.ok;
-  } catch {
-    return false;
+    if (!response.ok) {
+      return { status: "unavailable", detail: `status HTTP ${response.status}` };
+    }
+  } catch (error) {
+    return { status: "unavailable", detail: describeError(error) };
   }
+
+  try {
+    const capability = await fetch(new URL("/config/runtime/garden-compute", baseUrl), {
+      method: "GET"
+    });
+    if (capability.ok) {
+      return { status: "compatible" };
+    }
+    return { status: "missing_capability", detail: `HTTP ${capability.status}` };
+  } catch (error) {
+    return { status: "missing_capability", detail: describeError(error) };
+  }
+}
+
+function formatProbeDetail(detail: string | undefined): string {
+  return detail === undefined || detail.trim().length === 0 ? "" : ` (${detail.trim()})`;
 }
 
 function normalizeBaseUrl(value: string): string {

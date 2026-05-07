@@ -82,3 +82,16 @@ g[data-node-id] circle.node-ring {
 g[data-node-id][data-selected="true"] circle.node-ring {
   opacity: 1;
 }
+
+g[data-node-id] text.node-label {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+svg[data-large-graph="false"] g[data-node-id] text.node-label,
+g[data-node-id][data-label-visible="true"] text.node-label,
+g[data-node-id][data-hovered="true"] text.node-label,
+g[data-node-id][data-selected="true"] text.node-label,
+svg[data-spotlight-active="true"] g[data-node-id][data-state="match"] text.node-label {
+  opacity: 1;
+}

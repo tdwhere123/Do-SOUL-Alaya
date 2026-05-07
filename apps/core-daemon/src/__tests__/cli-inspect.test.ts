@@ -162,7 +162,7 @@ describe("cli inspect", () => {
     expect(stderrChunks.join("")).toContain("requires a managed daemon");
   });
 
-  it("binds to an existing daemon only after the daemon status probe passes", async () => {
+  it("binds to an existing daemon only after the required capability probe passes", async () => {
     const child = new FakeInspectorChild();
     const stderr = new PassThrough();
     const stderrChunks: string[] = [];
@@ -172,7 +172,7 @@ describe("cli inspect", () => {
     const command = createInspectCommand({
       checkPortAvailable: async (port) => port !== 5173,
       generateToken: () => "1".repeat(64),
-      probeDaemon: async () => true,
+      probeDaemon: async () => ({ status: "compatible" }),
       startDaemonServer,
       spawnInspector: (input) => {
         spawned.push(input);
@@ -201,6 +201,31 @@ describe("cli inspect", () => {
     expect(stderrChunks.join("")).toContain("using existing daemon");
   });
 
+  it("refuses to bind Inspector to a stale Alaya daemon without garden-compute config", async () => {
+    const stderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
+    const spawnInspector = vi.fn(() => new FakeInspectorChild());
+    const command = createInspectCommand({
+      checkPortAvailable: async (port) => port !== 5173,
+      generateToken: () => "3".repeat(64),
+      probeDaemon: async () => ({ status: "missing_capability", detail: "HTTP 404" }),
+      startDaemonServer: async () => fakeDaemonServer(),
+      spawnInspector
+    });
+
+    const result = await command.handler(createContext({ stderr }), {
+      open: false,
+      port: 5174,
+      token: null
+    });
+
+    expect(result.exitCode).toBe(70);
+    expect(spawnInspector).not.toHaveBeenCalled();
+    expect(stderrChunks.join("")).toContain("stale/incompatible daemon on 127.0.0.1:5173");
+    expect(stderrChunks.join("")).toContain("/config/runtime/garden-compute");
+  });
+
   it("refuses to bind Inspector to an occupied non-Alaya daemon port", async () => {
     const stderr = new PassThrough();
     const stderrChunks: string[] = [];
@@ -209,7 +234,7 @@ describe("cli inspect", () => {
     const command = createInspectCommand({
       checkPortAvailable: async (port) => port !== 5173,
       generateToken: () => "2".repeat(64),
-      probeDaemon: async () => false,
+      probeDaemon: async () => ({ status: "unavailable" }),
       startDaemonServer: async () => fakeDaemonServer(),
       spawnInspector
     });
