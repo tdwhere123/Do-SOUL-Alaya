@@ -256,6 +256,82 @@ describe("Garden MCP tools", () => {
       last_error_text: "host extraction timed out"
     });
   });
+
+  // Codex re-review B1: complete_task must reject when the row is not
+  // claimed (or claimed by another agent target) BEFORE persisting any
+  // candidate signal. Pre-fix, signals were emitted, then completeWith
+  // Events would CAS-fail and the host saw an error — but the
+  // soul.signal.emitted rows were already on disk, orphaned without
+  // any task_completed parent.
+  it("rejects complete_task on a pending (un-claimed) task without persisting any signal (B1)", async () => {
+    const harness = await createGardenMcpHarness();
+    harness.enqueueTask("task-not-claimed");
+    // Intentionally do NOT call garden.claim_task first.
+    let captured: unknown;
+    try {
+      await harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", {
+        task_id: "task-not-claimed",
+        status: "completed",
+        result_envelope: {
+          candidate_signals: [
+            {
+              signal_kind: "potential_preference",
+              object_kind: "memory_entry",
+              scope_hint: "project",
+              domain_tags: ["garden"],
+              confidence: 0.9,
+              evidence_refs: ["memory-1"],
+              raw_payload: { observation: "host worker would have extracted a preference" }
+            }
+          ]
+        }
+      });
+    } catch (error) {
+      captured = error;
+    }
+    expect(captured).toBeDefined();
+    // No signal-emitted events appended (the orphan-signal scenario the
+    // pre-fix code allowed). Counting via EventLog is enough: the
+    // pre-fix path would have appended one soul.signal.emitted row.
+    // Counting signal rows in the SqliteSignalRepo's underlying table
+    // is the strongest assertion of "no orphan signal" — pre-fix, the
+    // failing path would have created exactly one row before the CAS
+    // rejection.
+    const signalRows = (
+      harness.database.connection
+        .prepare("SELECT COUNT(*) AS n FROM signals")
+        .get() as { readonly n: number }
+    ).n;
+    expect(signalRows).toBe(0);
+    // Row stays pending — no completion side-effect.
+    expect(harness.getGardenTask("task-not-claimed")).toMatchObject({ status: "pending" });
+  });
+
+  // Codex re-review B1 / wave-end Spec F4 (N2): only the agent target
+  // that claimed the task may complete it. Two attached host agents
+  // (e.g., codex + claude-code) on the same workspace can race, but
+  // the second one cannot silently absorb the first's claim.
+  it("rejects complete_task from an agent target other than the claimant", async () => {
+    const harness = await createGardenMcpHarness();
+    harness.enqueueTask("task-cross-claim");
+    await harness.callTool<GardenClaimTaskResponse>(
+      "garden.claim_task",
+      { task_id: "task-cross-claim" }
+    );
+    // Switch to a different agent target before calling complete.
+    harness.setContext({ agentTarget: "claude-code" });
+    let captured: unknown;
+    try {
+      await harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", {
+        task_id: "task-cross-claim",
+        status: "completed"
+      });
+    } catch (error) {
+      captured = error;
+    }
+    expect(captured).toBeDefined();
+    expect(harness.getGardenTask("task-cross-claim")).toMatchObject({ status: "claimed" });
+  });
 });
 
 interface GardenListPendingTasksResponse {

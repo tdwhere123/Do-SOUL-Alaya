@@ -510,6 +510,40 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       throw new ToolNotFoundError(`Garden task not found: ${request.task_id}`);
     }
 
+    // Codex re-review B1: verify the row is still owned by this caller
+    // BEFORE emitting any signal. Pre-fix, signals were persisted then
+    // completeWithEvents would CAS-fail (status != claimed) and the
+    // host got an error — but the soul.signal.emitted rows were already
+    // on disk, orphaned without a parent task_completed event. The
+    // pre-emit check rejects the request before any side effect runs
+    // when the row is no longer claimed by us. This also closes wave-
+    // end Spec F4 (N2) — only the agent target that claimed the task
+    // can complete it; a sibling host on the same workspace cannot
+    // silently steal another agent's task by completing it.
+    if (row.status !== "claimed") {
+      throw new ToolValidationError(
+        `Garden task ${row.id} is not in claimed state (current: ${row.status}); claim it via garden.claim_task before completing.`
+      );
+    }
+    if (row.claimed_by !== context.agentTarget) {
+      throw new ToolValidationError(
+        `Garden task ${row.id} is claimed by a different agent target; only the claimant may complete it.`
+      );
+    }
+
+    // Codex re-review I1: prefer the run_id stored in the task payload
+    // (POST_TURN_EXTRACT carries the original conversation's run_id);
+    // fall back to the trusted MCP context's runId; never fall back to
+    // task.id, which is a Garden-task identifier, not a conversation
+    // run id. If neither source resolves, refuse to emit — the signal
+    // schema requires a valid run_id and a fabricated task-id-as-run-id
+    // would corrupt any downstream recall scoped by run_id.
+    const taskPayloadRunId =
+      isUnknownRecord(row.payload) && typeof row.payload.run_id === "string" && row.payload.run_id.length > 0
+        ? row.payload.run_id
+        : null;
+    const resolvedRunId = taskPayloadRunId ?? context.runId;
+
     // Wave-end M1 (§29): host-supplied candidate_signals carry only
     // content fields (McpEmitCandidateSignalRequestSchema). The daemon
     // binds workspace_id / run_id / surface_id / source from the trusted
@@ -518,21 +552,27 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     // sneak past the §29 default-scope guard.
     const contentOnlySignals = request.result_envelope?.candidate_signals ?? [];
 
-    // Wave-end M2 (§10): emit candidate signals BEFORE writing
-    // SOUL_GARDEN_TASK_COMPLETED. The prior order committed the
-    // task-completed event up front (claiming N signals were emitted)
-    // and then looped receiveSignal — if the loop threw mid-batch, the
-    // audit row had already lied. Emitting first means a partial failure
-    // leaves the task in `claimed` (recovery via gcAbandonedClaims or
-    // host retry) without ever publishing a task-completed event whose
-    // objects_affected list does not match reality.
+    if (contentOnlySignals.length > 0 && resolvedRunId === null) {
+      throw new ToolValidationError(
+        "garden.complete_task cannot emit candidate_signals without a run_id in the task payload or MCP call context."
+      );
+    }
+
+    // Wave-end M2 (§10) + Codex re-review B1: emit candidate signals
+    // BEFORE writing SOUL_GARDEN_TASK_COMPLETED but AFTER the
+    // claim-ownership guard above. The combination prevents both the
+    // original audit-lies-about-emitted-N partial-failure window AND
+    // the orphan-signals-when-CAS-rejects window. A signal-emission
+    // throw still leaves the task in `claimed` (recoverable via
+    // gcAbandonedClaims or host retry); a CAS-rejected complete now
+    // never reaches signal emission at all.
     const emittedSignalIds: string[] = [];
     for (const signalContent of contentOnlySignals) {
       const internalSignal = CandidateMemorySignalSchema.parse({
         signal_id: `signal_${generateId()}`,
         ...signalContent,
         workspace_id: context.workspaceId,
-        run_id: context.runId ?? row.id,
+        run_id: resolvedRunId,
         surface_id: null,
         source: SignalSource.GARDEN_COMPILE,
         created_at: now()
