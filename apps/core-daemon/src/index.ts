@@ -56,6 +56,7 @@ import {
   SqliteExtensionDescriptorRepo,
   SqliteFileRepo,
   SqliteGreenStatusRepo,
+  SqliteGardenTaskRepo,
   SqliteHealthJournalRepo,
   SqliteHandoffGapRepo,
   SqliteKarmaEventRepo,
@@ -689,6 +690,10 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     strongRefService,
     workspaceRepo
   });
+  const gardenTaskRepo =
+    typeof (database.connection as { readonly prepare?: unknown }).prepare === "function"
+      ? new SqliteGardenTaskRepo(database.connection, eventPublisher)
+      : undefined;
   const gardenBacklogTelemetryService = new GardenBacklogTelemetryService({
     scheduler: gardenRuntime.backlogTelemetrySource,
     eventLogRepo,
@@ -730,6 +735,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     sessionOverrideService,
     trustStateRecorder,
     eventPublisher,
+    ...(gardenTaskRepo === undefined ? {} : { gardenTaskRepo }),
     eventLogRepo,
     proposalRepo,
     runtimeNotifier

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  CandidateMemorySignalSchema,
   EmitCandidateSignalResponseSchema,
   McpEmitCandidateSignalRequestSchema
 } from "../candidate-memory-signal.js";
@@ -210,6 +211,85 @@ export const SoulListPendingProposalsResponseSchema = z
   .strict()
   .readonly();
 
+export const GardenMcpWorkerRoleSchema = z.enum([
+  "janitor",
+  "auditor",
+  "librarian",
+  "host_worker"
+]);
+
+export const GardenListPendingTasksRequestSchema = z
+  .object({
+    role: GardenMcpWorkerRoleSchema.optional(),
+    limit: z.number().int().min(1).max(50).default(10)
+  })
+  .strict()
+  .readonly();
+
+export const GardenPendingTaskSnapshotSchema = z
+  .object({
+    task_id: z.string(),
+    role: z.string(),
+    kind: z.string(),
+    created_at: z.string(),
+    payload: z.unknown()
+  })
+  .strict()
+  .readonly();
+
+export const GardenListPendingTasksResponseSchema = z
+  .object({
+    tasks: z.array(GardenPendingTaskSnapshotSchema).readonly()
+  })
+  .strict()
+  .readonly();
+
+export const GardenClaimTaskRequestSchema = z
+  .object({
+    task_id: z.string()
+  })
+  .strict()
+  .readonly();
+
+export const GardenClaimTaskResponseSchema = z
+  .object({
+    status: z.enum(["claimed", "already_claimed"]),
+    task_id: z.string(),
+    role: z.string(),
+    kind: z.string(),
+    payload: z.unknown()
+  })
+  .strict()
+  .readonly();
+
+export const GardenTaskResultEnvelopeSchema = z
+  .object({
+    candidate_signals: z.array(CandidateMemorySignalSchema).readonly().optional(),
+    extracted_proposals: z.array(z.record(z.unknown()).readonly()).readonly().optional(),
+    notes: z.string().optional()
+  })
+  .strict()
+  .readonly();
+
+export const GardenCompleteTaskRequestSchema = z
+  .object({
+    task_id: z.string(),
+    status: z.enum(["completed", "failed"]),
+    result_envelope: GardenTaskResultEnvelopeSchema.optional(),
+    last_error_text: z.string().optional()
+  })
+  .strict()
+  .readonly();
+
+export const GardenCompleteTaskResponseSchema = z
+  .object({
+    task_id: z.string(),
+    status: z.enum(["completed", "failed"]),
+    events_appended: NonNegativeIntSchema
+  })
+  .strict()
+  .readonly();
+
 // gate-6-delta I5: agent-facing schema strips workspace_id / run_id /
 // surface_id; the daemon binds those from the trusted MCP call context
 // per invariants §29 Default Scope. See
@@ -279,6 +359,15 @@ export type SoulReviewMemoryProposalResponse = z.infer<typeof SoulReviewMemoryPr
 export type SoulPendingProposalSummary = z.infer<typeof SoulPendingProposalSummarySchema>;
 export type SoulListPendingProposalsRequest = z.infer<typeof SoulListPendingProposalsRequestSchema>;
 export type SoulListPendingProposalsResponse = z.infer<typeof SoulListPendingProposalsResponseSchema>;
+export type GardenMcpWorkerRole = z.infer<typeof GardenMcpWorkerRoleSchema>;
+export type GardenListPendingTasksRequest = z.infer<typeof GardenListPendingTasksRequestSchema>;
+export type GardenPendingTaskSnapshot = z.infer<typeof GardenPendingTaskSnapshotSchema>;
+export type GardenListPendingTasksResponse = z.infer<typeof GardenListPendingTasksResponseSchema>;
+export type GardenClaimTaskRequest = z.infer<typeof GardenClaimTaskRequestSchema>;
+export type GardenClaimTaskResponse = z.infer<typeof GardenClaimTaskResponseSchema>;
+export type GardenTaskResultEnvelope = z.infer<typeof GardenTaskResultEnvelopeSchema>;
+export type GardenCompleteTaskRequest = z.infer<typeof GardenCompleteTaskRequestSchema>;
+export type GardenCompleteTaskResponse = z.infer<typeof GardenCompleteTaskResponseSchema>;
 export type SoulEmitCandidateSignalRequest = z.infer<typeof SoulEmitCandidateSignalRequestSchema>;
 export type SoulEmitCandidateSignalResponse = z.infer<typeof SoulEmitCandidateSignalResponseSchema>;
 export type SoulApplyOverrideRequest = z.infer<typeof SoulApplyOverrideRequestSchema>;
@@ -313,7 +402,10 @@ type SoulToolName =
   | "soul.list_pending_proposals"
   | "soul.apply_override"
   | "soul.explore_graph"
-  | "soul.report_context_usage";
+  | "soul.report_context_usage"
+  | "garden.list_pending_tasks"
+  | "garden.claim_task"
+  | "garden.complete_task";
 
 const soulToolRequestSchemas: Record<SoulToolName, z.ZodTypeAny> = {
   "soul.recall": SoulMemorySearchRequestSchema,
@@ -324,7 +416,10 @@ const soulToolRequestSchemas: Record<SoulToolName, z.ZodTypeAny> = {
   "soul.list_pending_proposals": SoulListPendingProposalsRequestSchema,
   "soul.apply_override": SoulApplyOverrideRequestSchema,
   "soul.explore_graph": SoulExploreGraphRequestSchema,
-  "soul.report_context_usage": SoulReportContextUsageRequestSchema
+  "soul.report_context_usage": SoulReportContextUsageRequestSchema,
+  "garden.list_pending_tasks": GardenListPendingTasksRequestSchema,
+  "garden.claim_task": GardenClaimTaskRequestSchema,
+  "garden.complete_task": GardenCompleteTaskRequestSchema
 };
 
 function deriveJsonSchema(schema: z.ZodTypeAny): Record<string, unknown> {

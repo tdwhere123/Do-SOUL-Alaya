@@ -22,7 +22,10 @@ const expectedMemoryTools = [
   "soul.list_pending_proposals",
   "soul.apply_override",
   "soul.explore_graph",
-  "soul.report_context_usage"
+  "soul.report_context_usage",
+  "garden.list_pending_tasks",
+  "garden.claim_task",
+  "garden.complete_task"
 ] as const;
 
 describe("P5 final-review status", () => {
@@ -56,7 +59,7 @@ describe("P5 final-review status", () => {
     // pre-A1 set, so the existing evidence stays a stable lock.
     // The catalog-equality test above already pins the full A1 set.
     const preA1MemoryTools = expectedMemoryTools.filter(
-      (toolName) => toolName !== "soul.list_pending_proposals"
+      (toolName) => toolName !== "soul.list_pending_proposals" && !toolName.startsWith("garden.")
     );
     for (const toolName of preA1MemoryTools) {
       expect(finalReview).toContain(`\`${toolName}\``);
@@ -91,13 +94,13 @@ describe("P5 final-review status", () => {
   });
 
   // p5-system-review-r3 MR-I16: behavior assertion (not docs↔docs).
-  // The MCP catalog must publish exactly the eight tool names the rest
+  // The MCP catalog must publish exactly the tool names the rest
   // of the report claims, with input schemas derived from zod (so an
   // attacker-controlled payload longer than the documented bound is
   // rejected at parse time). If `soulToolJsonSchemas` ever drifts from
   // ALAYA_MEMORY_TOOL_NAMES this test fails the same Round 1 way the
   // hand-written catalog used to drift silently.
-  it("publishes the eight named tools through the zod-derived catalog", () => {
+  it("publishes the named tools through the zod-derived catalog", () => {
     const definitions = listAlayaMemoryTools();
     expect(definitions.map((definition) => definition.name)).toEqual([...expectedMemoryTools]);
     for (const definition of definitions) {

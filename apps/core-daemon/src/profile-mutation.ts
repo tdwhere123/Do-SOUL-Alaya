@@ -158,6 +158,7 @@ export const ALAYA_OPERATOR_INSTRUCTIONS = [
   "Agent loop: soul.recall -> soul.open_pointer -> respond -> soul.report_context_usage.",
   "When you detect possible durable memory, call soul.emit_candidate_signal first; signal emission is candidate-only and not durable by itself.",
   "For durable edits, call soul.propose_memory_update, then soul.list_pending_proposals and soul.review_memory_proposal with explicit reviewer approval.",
+  "When you have spare capacity, optionally call garden.list_pending_tasks to pick up background organize work; claim with garden.claim_task and report results via garden.complete_task. Skipping is fine — the daemon will handle them eventually.",
   "Accepted proposals trigger durable-memory apply; rejected proposals keep durable memory unchanged."
 ].join(" ");
 

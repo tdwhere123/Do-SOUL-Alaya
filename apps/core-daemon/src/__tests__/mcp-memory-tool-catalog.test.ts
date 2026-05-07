@@ -21,6 +21,9 @@ describe("mcp memory tool catalog", () => {
     expect(byName.get("soul.recall")?.annotations.readOnlyHint).toBe(true);
     expect(byName.get("soul.open_pointer")?.annotations.readOnlyHint).toBe(true);
     expect(byName.get("soul.explore_graph")?.annotations.readOnlyHint).toBe(true);
+    expect(byName.get("garden.list_pending_tasks")?.annotations.readOnlyHint).toBe(true);
+    expect(byName.get("garden.claim_task")?.annotations.readOnlyHint).toBe(false);
+    expect(byName.get("garden.complete_task")?.annotations.idempotentHint).toBe(false);
     expect(byName.get("soul.report_context_usage")?.annotations.readOnlyHint).toBe(false);
   });
 
@@ -37,7 +40,10 @@ describe("mcp memory tool catalog", () => {
     for (const tool of daemonCatalog) {
       const providerDescription = soulToolDefs.find((spec) => spec.name === tool.name)?.description;
       expect(providerDescription).toBeDefined();
-      expect(tool.description.startsWith(`${providerDescription} `)).toBe(true);
+      expect(
+        tool.description === providerDescription ||
+          tool.description.startsWith(`${providerDescription} `)
+      ).toBe(true);
     }
     expect(daemonCatalog.find((tool) => tool.name === "soul.propose_memory_update")?.description).toContain(
       "pending proposal"
@@ -47,6 +53,9 @@ describe("mcp memory tool catalog", () => {
     );
     expect(daemonCatalog.find((tool) => tool.name === "soul.list_pending_proposals")?.description).toContain(
       "not durable memory writes"
+    );
+    expect(daemonCatalog.find((tool) => tool.name === "garden.claim_task")?.description).toContain(
+      "already_claimed"
     );
   });
 });

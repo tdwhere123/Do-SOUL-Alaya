@@ -9,7 +9,10 @@ export const ALAYA_MEMORY_TOOL_NAMES = Object.freeze([
   "soul.list_pending_proposals",
   "soul.apply_override",
   "soul.explore_graph",
-  "soul.report_context_usage"
+  "soul.report_context_usage",
+  "garden.list_pending_tasks",
+  "garden.claim_task",
+  "garden.complete_task"
 ] as const);
 
 export type AlayaMemoryToolName = (typeof ALAYA_MEMORY_TOOL_NAMES)[number];
@@ -51,7 +54,13 @@ const providerBaseDescriptionByName: Readonly<Record<AlayaMemoryToolName, string
   "soul.explore_graph":
     "Inspect one-hop memory graph neighbors for an existing memory entry. Read-only; does not create or mutate edges.",
   "soul.report_context_usage":
-    "Report whether recalled context for a delivery was used, skipped, or not applicable. Supports delivered-vs-used trust state."
+    "Report whether recalled context for a delivery was used, skipped, or not applicable. Supports delivered-vs-used trust state.",
+  "garden.list_pending_tasks":
+    "List Garden background tasks pending in this workspace. Read-only. Use before garden.claim_task to scope what work the host can pick up.",
+  "garden.claim_task":
+    "Atomically claim a Garden task by id so the host (Codex / Claude Code) can run its own sub-agent extraction and post the result back. Returns already_claimed when another worker already grabbed it.",
+  "garden.complete_task":
+    "Submit the host's task result. Candidate signals in the result envelope flow into the same review queue host agents use via soul.emit_candidate_signal."
 });
 
 const loopSuffixByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.freeze({
@@ -72,7 +81,10 @@ const loopSuffixByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.f
   "soul.explore_graph":
     "Inspection aid for related memories; keep write actions on proposal/candidate tools.",
   "soul.report_context_usage":
-    "Close the delivery loop by marking used/skipped/not_applicable so trust state stays explicit."
+    "Close the delivery loop by marking used/skipped/not_applicable so trust state stays explicit.",
+  "garden.list_pending_tasks": "",
+  "garden.claim_task": "",
+  "garden.complete_task": ""
 });
 
 const descriptionByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.freeze({
@@ -84,7 +96,10 @@ const descriptionByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.
   "soul.list_pending_proposals": `${providerBaseDescriptionByName["soul.list_pending_proposals"]} ${loopSuffixByName["soul.list_pending_proposals"]}`,
   "soul.apply_override": `${providerBaseDescriptionByName["soul.apply_override"]} ${loopSuffixByName["soul.apply_override"]}`,
   "soul.explore_graph": `${providerBaseDescriptionByName["soul.explore_graph"]} ${loopSuffixByName["soul.explore_graph"]}`,
-  "soul.report_context_usage": `${providerBaseDescriptionByName["soul.report_context_usage"]} ${loopSuffixByName["soul.report_context_usage"]}`
+  "soul.report_context_usage": `${providerBaseDescriptionByName["soul.report_context_usage"]} ${loopSuffixByName["soul.report_context_usage"]}`,
+  "garden.list_pending_tasks": providerBaseDescriptionByName["garden.list_pending_tasks"],
+  "garden.claim_task": providerBaseDescriptionByName["garden.claim_task"],
+  "garden.complete_task": providerBaseDescriptionByName["garden.complete_task"]
 });
 
 const readOnlyAnnotation = Object.freeze({
@@ -111,7 +126,10 @@ const annotationByToolName: Record<AlayaMemoryToolName, AlayaMemoryToolDefinitio
     "soul.list_pending_proposals": readOnlyAnnotation,
     "soul.apply_override": writeAnnotation,
     "soul.explore_graph": readOnlyAnnotation,
-    "soul.report_context_usage": writeAnnotation
+    "soul.report_context_usage": writeAnnotation,
+    "garden.list_pending_tasks": readOnlyAnnotation,
+    "garden.claim_task": writeAnnotation,
+    "garden.complete_task": writeAnnotation
   });
 
 export function listAlayaMemoryTools(): readonly AlayaMemoryToolDefinition[] {

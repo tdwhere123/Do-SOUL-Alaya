@@ -61,12 +61,18 @@ export interface GardenTaskCompletionResult {
 
 export interface GardenTaskRepoPort {
   enqueue(input: GardenTaskEnqueueInput): { readonly task_id: string };
+  findById(taskId: string): GardenTaskRow | null;
   peekPending(
     role: GardenRoleValue,
     workspace_id?: string,
     limit?: number
   ): readonly GardenTaskRow[];
-  claimAtomic(taskId: string, claimedBy: string, claimedAt: string): GardenTaskClaimResult;
+  claimAtomic(
+    taskId: string,
+    claimedBy: string,
+    claimedAt: string,
+    workspace_id?: string
+  ): GardenTaskClaimResult;
   releaseClaim(taskId: string, claimedBy: string): boolean;
   completeWithEvents(
     taskId: string,
@@ -100,6 +106,7 @@ interface GardenTaskBacklogCountDbRow {
 
 export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
   private readonly enqueueStatement;
+  private readonly findByIdStatement;
   private readonly peekPendingStatement;
   private readonly peekPendingByWorkspaceStatement;
   private readonly claimStatement;
@@ -127,6 +134,24 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
         attempt_count,
         last_error_text
       ) VALUES (?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, NULL, 0, NULL)
+    `);
+    this.findByIdStatement = connection.prepare(`
+      SELECT
+        id,
+        workspace_id,
+        role,
+        kind,
+        payload_json,
+        status,
+        claimed_by,
+        claimed_at,
+        created_at,
+        completed_at,
+        attempt_count,
+        last_error_text
+      FROM garden_tasks
+      WHERE id = ?
+      LIMIT 1
     `);
     this.peekPendingStatement = connection.prepare(`
       SELECT
@@ -191,7 +216,7 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
           claimed_by = ?,
           claimed_at = ?,
           attempt_count = attempt_count + 1
-      WHERE id = ? AND status = 'pending'
+      WHERE id = ? AND status = 'pending' AND (? IS NULL OR workspace_id = ?)
     `);
     this.releaseClaimStatement = connection.prepare(`
       UPDATE garden_tasks
@@ -234,6 +259,21 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     }
   }
 
+  public findById(taskId: string): GardenTaskRow | null {
+    const parsedTaskId = parseNonEmptyString(taskId, "garden_task.id");
+
+    try {
+      const row = this.findByIdStatement.get(parsedTaskId) as GardenTaskDbRow | undefined;
+      return row === undefined ? null : parseGardenTaskRow(row);
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError("QUERY_FAILED", `Failed to load Garden task ${parsedTaskId}.`, error);
+    }
+  }
+
   public peekPending(
     role: GardenRoleValue,
     workspace_id?: string,
@@ -264,14 +304,25 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
   public claimAtomic(
     taskId: string,
     claimedBy: string,
-    claimedAt: string
+    claimedAt: string,
+    workspace_id?: string
   ): GardenTaskClaimResult {
     const parsedTaskId = parseNonEmptyString(taskId, "garden_task.id");
     const parsedClaimedBy = parseNonEmptyString(claimedBy, "garden_task.claimed_by");
     const parsedClaimedAt = parseTimestamp(claimedAt);
+    const parsedWorkspaceId =
+      workspace_id === undefined
+        ? null
+        : parseNonEmptyString(workspace_id, "garden_task.workspace_id");
 
     try {
-      const result = this.claimStatement.run(parsedClaimedBy, parsedClaimedAt, parsedTaskId);
+      const result = this.claimStatement.run(
+        parsedClaimedBy,
+        parsedClaimedAt,
+        parsedTaskId,
+        parsedWorkspaceId,
+        parsedWorkspaceId
+      );
       return result.changes === 1 ? "claimed" : "already-claimed";
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to claim Garden task ${parsedTaskId}.`, error);

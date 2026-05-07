@@ -19,6 +19,7 @@ export function createDaemonMcpMemoryToolHandler(input: {
   readonly sessionOverrideService: McpMemoryToolHandlerDependencies["sessionOverrideService"];
   readonly trustStateRecorder: McpMemoryToolHandlerDependencies["trustStateRecorder"];
   readonly eventPublisher: NonNullable<McpMemoryToolHandlerDependencies["eventPublisher"]>;
+  readonly gardenTaskRepo?: McpMemoryToolHandlerDependencies["gardenTaskRepo"];
   readonly eventLogRepo: McpMemoryProposalWorkflowEventLogRepo;
   readonly proposalRepo: McpMemoryProposalWorkflowProposalRepo;
   readonly runtimeNotifier: McpMemoryProposalWorkflowRuntimeNotifier;
@@ -33,6 +34,7 @@ export function createDaemonMcpMemoryToolHandler(input: {
     sessionOverrideService: input.sessionOverrideService,
     trustStateRecorder: input.trustStateRecorder,
     eventPublisher: input.eventPublisher,
+    ...(input.gardenTaskRepo === undefined ? {} : { gardenTaskRepo: input.gardenTaskRepo }),
     proposalWorkflow: createMcpMemoryProposalWorkflow({
       eventLogRepo: input.eventLogRepo,
       proposalRepo: input.proposalRepo,

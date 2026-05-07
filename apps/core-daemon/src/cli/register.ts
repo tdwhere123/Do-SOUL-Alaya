@@ -287,17 +287,9 @@ function createMcpCommand(runtime: AlayaDaemonRuntime): AlayaSubcommandSpec<read
       // (cli/review.ts:378-408 pins "cli", cli/tools.ts:82-90 rejects
       // human-reviewer targets), so per invariants §30 we fix at
       // source by sanitising the env here.
-      const requestedAgentTarget = ctx.env.ALAYA_AGENT_TARGET;
-      const isHumanReviewerSpoof =
-        requestedAgentTarget === "cli" || requestedAgentTarget === "inspector";
-      if (isHumanReviewerSpoof) {
-        ctx.stderr.write(
-          `Ignoring ALAYA_AGENT_TARGET=${requestedAgentTarget}: MCP stdio cannot impersonate human-reviewer surfaces.\n`
-        );
-      }
-      const resolvedAgentTarget = isHumanReviewerSpoof
-        ? "mcp"
-        : (requestedAgentTarget ?? "mcp");
+      const resolvedAgentTarget = resolveMcpAgentTarget(ctx.env.ALAYA_AGENT_TARGET, (message) => {
+        ctx.stderr.write(`${message}\n`);
+      });
 
       const server = await runAlayaMcpStdioServer({
         memoryToolHandler: runtime.services.mcpMemoryToolHandler,
@@ -319,6 +311,32 @@ function createMcpCommand(runtime: AlayaDaemonRuntime): AlayaSubcommandSpec<read
       return { exitCode: ALAYA_SYSEXITS.OK };
     }
   };
+}
+
+function resolveMcpAgentTarget(
+  requestedAgentTarget: string | undefined,
+  warn: (message: string) => void
+): string {
+  if (requestedAgentTarget === undefined || requestedAgentTarget.trim().length === 0) {
+    return "mcp";
+  }
+
+  if (requestedAgentTarget === "cli" || requestedAgentTarget === "inspector") {
+    warn(`Ignoring ALAYA_AGENT_TARGET=${requestedAgentTarget}: MCP stdio cannot impersonate human-reviewer surfaces.`);
+    return "mcp";
+  }
+
+  if (
+    requestedAgentTarget === "codex" ||
+    requestedAgentTarget === "claude-code" ||
+    requestedAgentTarget === "garden-worker" ||
+    requestedAgentTarget === "mcp"
+  ) {
+    return requestedAgentTarget;
+  }
+
+  warn(`Ignoring unsupported ALAYA_AGENT_TARGET=${requestedAgentTarget}: MCP stdio supports codex, claude-code, garden-worker, or mcp.`);
+  return "mcp";
 }
 
 function stringListArgsSchema(): AlayaCliArgsSchema<readonly string[]> {

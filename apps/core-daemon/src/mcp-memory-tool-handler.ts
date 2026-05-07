@@ -2,8 +2,18 @@ import { randomUUID } from "node:crypto";
 import {
   CandidateMemorySignalSchema,
   ControlPlaneObjectKind,
+  GARDEN_ROLE_TIER_MAP,
+  GardenClaimTaskRequestSchema,
+  GardenClaimTaskResponseSchema,
+  GardenCompleteTaskRequestSchema,
+  GardenCompleteTaskResponseSchema,
+  GardenEventType,
+  GardenListPendingTasksRequestSchema,
+  GardenListPendingTasksResponseSchema,
+  GardenRole,
   MemoryGovernanceEventType,
   MemoryDimensionSchema,
+  parseGardenEventPayload,
   ProposalResolutionState,
   RetentionPolicy,
   ScopeClassSchema,
@@ -32,6 +42,11 @@ import {
   type CandidateMemorySignal,
   type ContextDeliveryRecord,
   type EventLogEntry,
+  type GardenClaimTaskRequest,
+  type GardenCompleteTaskRequest,
+  type GardenListPendingTasksRequest,
+  type GardenMcpWorkerRole,
+  type GardenRoleValue,
   type MemoryEntry,
   type MemorySearchResult,
   type Proposal,
@@ -54,6 +69,11 @@ import {
   type MemoryEntryMutableFields,
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
+import type {
+  GardenTaskCompletionResult,
+  GardenTaskEventInput,
+  GardenTaskRow
+} from "@do-soul/alaya-storage";
 import { hasAlayaMemoryToolName, type AlayaMemoryToolName } from "./mcp-memory-tool-catalog.js";
 
 const RECALL_HIT_ACTIVATION_BUMP = 0.05;
@@ -167,6 +187,25 @@ export interface McpMemoryToolHandlerDependencies {
       readonly total_count: number;
     }>>;
   };
+  readonly gardenTaskRepo?: {
+    findById(taskId: string): GardenTaskRow | null;
+    peekPending(
+      role: GardenRoleValue,
+      workspace_id?: string,
+      limit?: number
+    ): readonly GardenTaskRow[];
+    claimAtomic(
+      taskId: string,
+      claimedBy: string,
+      claimedAt: string,
+      workspace_id?: string
+    ): "claimed" | "already-claimed";
+    completeWithEvents(
+      taskId: string,
+      result: GardenTaskCompletionResult,
+      events: readonly GardenTaskEventInput[]
+    ): Promise<void>;
+  };
   readonly now?: () => string;
   readonly generateId?: () => string;
 }
@@ -226,6 +265,12 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
             return ok(toolName, await exploreGraph(SoulExploreGraphRequestSchema.parse(rawArguments), context));
           case "soul.report_context_usage":
             return ok(toolName, await reportContextUsage(SoulReportContextUsageRequestSchema.parse(rawArguments), context));
+          case "garden.list_pending_tasks":
+            return ok(toolName, await listPendingGardenTasks(GardenListPendingTasksRequestSchema.parse(rawArguments), context));
+          case "garden.claim_task":
+            return ok(toolName, await claimGardenTask(GardenClaimTaskRequestSchema.parse(rawArguments), context));
+          case "garden.complete_task":
+            return ok(toolName, await completeGardenTask(GardenCompleteTaskRequestSchema.parse(rawArguments), context));
         }
       } catch (error) {
         return fail(toolName, classifyError(error), sanitizeError(error));
@@ -404,6 +449,113 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     });
   }
 
+  async function listPendingGardenTasks(
+    request: GardenListPendingTasksRequest,
+    context: McpMemoryToolCallContext
+  ) {
+    if (deps.gardenTaskRepo === undefined) {
+      throw new ToolUnavailableError("Garden task queue is not available.");
+    }
+    const rows = deps.gardenTaskRepo.peekPending(
+      mapGardenMcpWorkerRole(request.role),
+      context.workspaceId,
+      request.limit
+    );
+    return GardenListPendingTasksResponseSchema.parse({
+      tasks: rows.map(toGardenTaskSnapshot)
+    });
+  }
+
+  async function claimGardenTask(
+    request: GardenClaimTaskRequest,
+    context: McpMemoryToolCallContext
+  ) {
+    if (deps.gardenTaskRepo === undefined) {
+      throw new ToolUnavailableError("Garden task queue is not available.");
+    }
+
+    const claimedAt = now();
+    const claimResult = deps.gardenTaskRepo.claimAtomic(
+      request.task_id,
+      context.agentTarget,
+      claimedAt,
+      context.workspaceId
+    );
+    const row = deps.gardenTaskRepo.findById(request.task_id);
+    if (row === null || row.workspace_id !== context.workspaceId) {
+      return GardenClaimTaskResponseSchema.parse(toSilentAlreadyClaimed(request.task_id));
+    }
+
+    return GardenClaimTaskResponseSchema.parse({
+      status: claimResult === "claimed" ? "claimed" : "already_claimed",
+      ...toGardenClaimTaskPayload(row)
+    });
+  }
+
+  async function completeGardenTask(
+    request: GardenCompleteTaskRequest,
+    context: McpMemoryToolCallContext
+  ) {
+    if (deps.gardenTaskRepo === undefined) {
+      throw new ToolUnavailableError("Garden task queue is not available.");
+    }
+
+    const row = deps.gardenTaskRepo.findById(request.task_id);
+    if (row === null || row.workspace_id !== context.workspaceId) {
+      throw new ToolNotFoundError(`Garden task not found: ${request.task_id}`);
+    }
+
+    const candidateSignals = request.result_envelope?.candidate_signals ?? [];
+    for (const signal of candidateSignals) {
+      if (signal.workspace_id !== context.workspaceId) {
+        throw new ToolValidationError(
+          "garden.complete_task candidate_signals must belong to the MCP call workspace."
+        );
+      }
+    }
+
+    const completedAt = now();
+    const event: GardenTaskEventInput = {
+      event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
+      entity_type: "garden_task",
+      entity_id: row.id,
+      workspace_id: context.workspaceId,
+      run_id: context.runId,
+      caused_by: context.agentTarget,
+      payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
+        task_id: row.id,
+        task_kind: row.kind,
+        role: row.role,
+        tier: GARDEN_ROLE_TIER_MAP[row.role],
+        success: request.status === "completed",
+        objects_affected: candidateSignals.map((signal) => signal.signal_id),
+        candidate_signals_count: candidateSignals.length,
+        workspace_id: context.workspaceId,
+        occurred_at: completedAt
+      })
+    };
+
+    await deps.gardenTaskRepo.completeWithEvents(
+      row.id,
+      {
+        status: request.status,
+        completed_at: completedAt,
+        ...(request.last_error_text === undefined ? {} : { last_error_text: request.last_error_text })
+      },
+      [event]
+    );
+
+    for (const signal of candidateSignals) {
+      await deps.signalService.receiveSignal(CandidateMemorySignalSchema.parse(signal));
+    }
+
+    return GardenCompleteTaskResponseSchema.parse({
+      task_id: row.id,
+      status: request.status,
+      events_appended: 1
+    });
+  }
+
   async function applyOverride(
     request: SoulApplyOverrideRequest,
     context: McpMemoryToolCallContext
@@ -573,6 +725,48 @@ function buildRecallPolicy(
       },
       conflict_awareness: true
     }
+  };
+}
+
+function mapGardenMcpWorkerRole(role: GardenMcpWorkerRole | undefined): GardenRoleValue {
+  switch (role) {
+    case "janitor":
+      return GardenRole.JANITOR;
+    case "auditor":
+      return GardenRole.AUDITOR;
+    case "librarian":
+    case "host_worker":
+    case undefined:
+      return GardenRole.LIBRARIAN;
+  }
+}
+
+function toGardenTaskSnapshot(row: GardenTaskRow) {
+  return {
+    task_id: row.id,
+    role: row.role,
+    kind: row.kind,
+    created_at: row.created_at,
+    payload: row.payload
+  };
+}
+
+function toGardenClaimTaskPayload(row: GardenTaskRow) {
+  return {
+    task_id: row.id,
+    role: row.role,
+    kind: row.kind,
+    payload: row.payload
+  };
+}
+
+function toSilentAlreadyClaimed(taskId: string) {
+  return {
+    status: "already_claimed",
+    task_id: taskId,
+    role: "unknown",
+    kind: "unknown",
+    payload: null
   };
 }
 
