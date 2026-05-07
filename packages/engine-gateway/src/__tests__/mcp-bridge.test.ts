@@ -313,7 +313,11 @@ describe("McpBridge", () => {
       "soul.list_pending_proposals",
       "soul.apply_override",
       "soul.explore_graph",
-      "soul.report_context_usage"
+      "soul.report_context_usage",
+      // v0.1.1 H2: host-as-Garden-compute MCP tools.
+      "garden.list_pending_tasks",
+      "garden.claim_task",
+      "garden.complete_task"
     ]);
   });
 
