@@ -87,6 +87,14 @@ export interface GardenTaskRepoPort {
     workspace_id?: string,
     limit?: number
   ): readonly GardenTaskRow[];
+  /**
+   * Reviewer-final F1: read-only single-row lookup. Used by tests that
+   * need to verify post-rollback state (e.g., that attempt_count was
+   * restored to its pre-claim value, distinguishing the I3 fix from
+   * the pre-fix releaseClaim-only path which left attempt_count
+   * silently bumped).
+   */
+  findById(taskId: string): GardenTaskRow | null;
   claimAtomic(taskId: string, claimedBy: string, claimedAt: string): GardenTaskClaimResult;
   /**
    * Wave-end M6: claim a task and append the dispatched audit event(s)
@@ -524,7 +532,15 @@ function countByStatus(
     .reduce((total, count) => total + count.count, 0);
 }
 
-class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
+/**
+ * Default in-process queue used when callers don't provide their own
+ * GardenTaskRepoPort. Exported to enable tests that need to inspect
+ * rollback state via findById (Reviewer-final F1: distinguishing
+ * I3-fix from pre-fix requires reading attempt_count after a failed
+ * dispatch, which the production GardenScheduler API correctly does
+ * not expose).
+ */
+export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
   private readonly rows: GardenTaskRow[] = [];
 
   public constructor(private readonly eventLog: GardenSchedulerEventLogPort) {}
@@ -568,6 +584,11 @@ class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
       .filter((row) => row.status === "pending")
       .filter((row) => workspace_id === undefined || row.workspace_id === workspace_id)
       .slice(0, limit);
+  }
+
+  public findById(taskId: string): GardenTaskRow | null {
+    const row = this.rows.find((candidate) => candidate.id === taskId);
+    return row === undefined ? null : { ...row };
   }
 
   public claimAtomic(

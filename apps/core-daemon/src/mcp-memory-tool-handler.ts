@@ -587,7 +587,12 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       entity_type: "garden_task",
       entity_id: row.id,
       workspace_id: context.workspaceId,
-      run_id: context.runId,
+      // Reviewer-final N1: prefer the run_id resolved from the task
+      // payload (POST_TURN_EXTRACT carries the original conversation's
+      // run_id) so the audit row's run_id matches the run_id stamped
+      // on each emitted candidate signal. Falls back to MCP context's
+      // runId when the task payload doesn't carry one.
+      run_id: resolvedRunId,
       caused_by: context.agentTarget,
       payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
         task_id: row.id,

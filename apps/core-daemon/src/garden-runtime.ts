@@ -158,7 +158,9 @@ export function createGardenRuntime(input: {
   readonly officialApiGardenProvider?: GardenComputeProvider | null;
   readonly localHeuristicsProvider?: GardenComputeProvider;
   readonly signalReceiver?: {
-    receiveSignal(signal: CandidateMemorySignal): Promise<unknown>;
+    receiveSignal(
+      signal: CandidateMemorySignal
+    ): Promise<Readonly<{ readonly signal: Readonly<{ readonly signal_id: string }> }>>;
   };
   readonly strongRefService: StrongRefService;
   readonly workspaceRepo: SqliteWorkspaceRepo;
@@ -677,8 +679,25 @@ export function createGardenRuntime(input: {
       dispatched = true;
 
       const candidateSignals = await compilePostTurnExtractTask(provider, payload);
-      const completedAt = new Date().toISOString();
 
+      // Spec-lens F-fin-1 (§10): emit candidate signals BEFORE writing
+      // SOUL_GARDEN_TASK_COMPLETED. The MCP-side garden.complete_task
+      // handler was hardened by M2/B1+I1 to honour audit-precedes-
+      // broadcast, but this symmetric in-process path used the original
+      // "commit task-completed first, then loop receiveSignal" order.
+      // If receiveSignal threw mid-loop the task_completed event would
+      // already claim N signals were emitted while only K < N actually
+      // were. Now signals are received first; a mid-loop throw flows
+      // into the failure branch which writes a `success: false` task
+      // event — the audit row never claims emitted-N when reality is
+      // emitted-K.
+      const emittedSignalIds: string[] = [];
+      for (const signal of candidateSignals) {
+        const received = await input.signalReceiver.receiveSignal(signal);
+        emittedSignalIds.push(received.signal.signal_id);
+      }
+
+      const completedAt = new Date().toISOString();
       await gardenTaskRepo.completeWithEvents(
         row.id,
         {
@@ -699,18 +718,14 @@ export function createGardenRuntime(input: {
               role: GardenRole.LIBRARIAN,
               tier: GardenTier.TIER_2,
               success: true,
-              objects_affected: candidateSignals.map((signal) => signal.signal_id),
-              candidate_signals_count: candidateSignals.length,
+              objects_affected: emittedSignalIds,
+              candidate_signals_count: emittedSignalIds.length,
               workspace_id: row.workspace_id,
               occurred_at: completedAt
             })
           }
         ]
       );
-
-      for (const signal of candidateSignals) {
-        await input.signalReceiver.receiveSignal(signal);
-      }
     } catch (error) {
       if (!dispatched) {
         gardenTaskRepo.releaseClaim(row.id, IN_PROCESS_POST_TURN_CLAIMANT);
