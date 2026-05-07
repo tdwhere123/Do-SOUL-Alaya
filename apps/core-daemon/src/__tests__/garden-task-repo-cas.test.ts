@@ -267,6 +267,41 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
     });
     expect(events[0]?.payload_json).toMatchObject({ success: false });
   });
+
+  // Wave-end M3: enqueue surfaces a structured StorageError with
+  // code === "DUPLICATE_KEY" on PK collision. Callers (H3 dedupe) walk
+  // the cause chain on the structured code instead of scanning
+  // better-sqlite3's error message text. Mirrors workspace-repo's
+  // I3 contract from commit aacb4f2.
+  it("surfaces DUPLICATE_KEY when an explicit task_id is reused", () => {
+    const { repo } = createHarness();
+    const baseInput = {
+      id: "task-duplicate",
+      workspace_id: "workspace-a",
+      role: GardenRole.JANITOR,
+      kind: GardenTaskKind.TTL_CLEANUP,
+      payload: {
+        task_id: "task-duplicate",
+        task_kind: GardenTaskKind.TTL_CLEANUP,
+        required_tier: GardenTier.TIER_0,
+        workspace_id: "workspace-a",
+        run_id: "run-a",
+        target_object_refs: ["memory-1"],
+        priority: 10,
+        created_at: "2026-05-07T00:00:00.000Z"
+      } as GardenTaskDescriptor
+    };
+    repo.enqueue(baseInput);
+
+    let captured: unknown;
+    try {
+      repo.enqueue(baseInput);
+    } catch (error) {
+      captured = error;
+    }
+    expect(captured).toBeDefined();
+    expect((captured as { readonly code?: unknown }).code).toBe("DUPLICATE_KEY");
+  });
 });
 
 function createHarness(): Readonly<{

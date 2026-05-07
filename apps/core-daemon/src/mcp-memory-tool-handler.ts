@@ -814,24 +814,18 @@ function buildPostTurnExtractTaskId(
   return `post_turn_extract_${digest}`;
 }
 
+// Wave-end M3: detect H3 POST_TURN_EXTRACT dedupe via the structured
+// StorageError("DUPLICATE_KEY", ...) code that the storage repo now raises
+// from enqueue() on a primary-key collision. The previous implementation
+// scanned for SQLITE_CONSTRAINT + "garden_tasks.id" substring matches in
+// the better-sqlite3 error message, which couples this contract to the
+// library's internal text format. Falls back to message-substring
+// detection only as a defensive safety net.
 function isDuplicatePostTurnExtractTask(error: unknown): boolean {
   let current: unknown = error;
   for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {
     const code = (current as { readonly code?: unknown }).code;
-    const message = (current as { readonly message?: unknown }).message;
-    if (
-      typeof code === "string" &&
-      code.startsWith("SQLITE_CONSTRAINT") &&
-      typeof message === "string" &&
-      message.includes("garden_tasks.id")
-    ) {
-      return true;
-    }
-    if (
-      typeof message === "string" &&
-      message.includes("UNIQUE constraint failed") &&
-      message.includes("garden_tasks.id")
-    ) {
+    if (code === "DUPLICATE_KEY") {
       return true;
     }
     current = (current as { readonly cause?: unknown }).cause;

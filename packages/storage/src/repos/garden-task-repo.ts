@@ -11,6 +11,32 @@ import { StorageError } from "../errors.js";
 import { deepFreeze } from "./shared/deep-freeze.js";
 import { parseNonEmptyString, parseNullableString, parseTimestamp } from "./shared/validators.js";
 
+// Walk up to 5 levels of the cause chain looking for a SQLite UNIQUE
+// constraint violation on the named qualified column. Mirrors the helper
+// in workspace-repo.ts; better-sqlite3's error format is library-version
+// coupled, so the cause walk handles eventual error-wrapping by upstream
+// layers. Used by enqueue() to surface PK collisions as the structured
+// DUPLICATE_KEY StorageError code that v0.1.0 commit aacb4f2 standardised.
+function isUniqueConstraintError(error: unknown, qualifiedColumn: string): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {
+    const codeValue = (current as { readonly code?: unknown }).code;
+    const messageValue = (current as { readonly message?: unknown }).message;
+    const isUniqueCode =
+      typeof codeValue === "string" && codeValue.startsWith("SQLITE_CONSTRAINT");
+    const matchesColumn =
+      typeof messageValue === "string" && messageValue.includes(qualifiedColumn);
+    if (isUniqueCode && matchesColumn) {
+      return true;
+    }
+    if (matchesColumn && typeof messageValue === "string" && messageValue.includes("UNIQUE")) {
+      return true;
+    }
+    current = (current as { readonly cause?: unknown }).cause;
+  }
+  return false;
+}
+
 export type GardenTaskStatus = "pending" | "claimed" | "completed" | "failed";
 export type GardenTaskClaimResult = "claimed" | "already-claimed";
 export type GardenTaskEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
@@ -255,6 +281,19 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       this.enqueueStatement.run(id, workspaceId, role, kind, payloadJson, createdAt);
       return { task_id: id };
     } catch (error) {
+      // Wave-end M3: surface PK collisions as the structured DUPLICATE_KEY
+      // error code that v0.1.0 commit aacb4f2 already standardised for
+      // the workspace repo. Callers (notably H3's POST_TURN_EXTRACT
+      // dedupe path) use `error.code === "DUPLICATE_KEY"` instead of
+      // walking the SQLite error message string, which couples the dedupe
+      // contract to better-sqlite3's internal text format.
+      if (isUniqueConstraintError(error, "garden_tasks.id")) {
+        throw new StorageError(
+          "DUPLICATE_KEY",
+          `Garden task ${id} already exists.`,
+          error
+        );
+      }
       throw new StorageError("QUERY_FAILED", `Failed to enqueue Garden task ${id}.`, error);
     }
   }
