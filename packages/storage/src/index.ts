@@ -25,6 +25,7 @@ export {
   SqliteMemoryEntryRepo,
   type MemoryEntryRepo,
   type MemoryEntryRepoDynamicsUpdateFields,
+  type MemoryEntryRepoTierUpdateInput,
   type MemoryEntryRepoUpdateFields
 } from "./repos/memory-entry-repo.js";
 export {

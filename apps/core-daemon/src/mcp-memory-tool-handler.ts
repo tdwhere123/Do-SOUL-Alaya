@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   CandidateMemorySignalSchema,
   ControlPlaneObjectKind,
+  MemoryGovernanceEventType,
   MemoryDimensionSchema,
   ProposalResolutionState,
   RetentionPolicy,
@@ -19,15 +20,18 @@ import {
   SoulMemorySearchResponseSchema,
   SoulOpenPointerRequestSchema,
   SoulOpenPointerResponseSchema,
+  SoulMemoryTierPromotedPayloadSchema,
   SoulProposeMemoryUpdateRequestSchema,
   SoulProposeMemoryUpdateResponseSchema,
   SoulReportContextUsageRequestSchema,
   SoulReportContextUsageResponseSchema,
   SoulReviewMemoryProposalRequestSchema,
   SoulReviewMemoryProposalResponseSchema,
+  StorageTier,
   TaskObjectSurfaceSchema,
   type CandidateMemorySignal,
   type ContextDeliveryRecord,
+  type EventLogEntry,
   type MemoryEntry,
   type MemorySearchResult,
   type Proposal,
@@ -51,6 +55,8 @@ import {
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
 import { hasAlayaMemoryToolName, type AlayaMemoryToolName } from "./mcp-memory-tool-catalog.js";
+
+const RECALL_HIT_ACTIVATION_BUMP = 0.05;
 
 export interface McpMemoryToolCallContext {
   readonly workspaceId: string;
@@ -122,6 +128,23 @@ export interface McpMemoryToolHandlerDependencies {
       input: Omit<UsageProofRecord, "audit_event_id">,
       options?: { readonly expectedWorkspaceId?: string }
     ): Promise<UsageProofRecord>;
+  };
+  readonly eventPublisher?: {
+    appendManyWithMutation<T>(
+      inputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+      mutate: (entries: readonly EventLogEntry[]) => T
+    ): Promise<T>;
+  };
+  readonly memoryEntryRepo?: {
+    updateTier(input: {
+      readonly objectId: string;
+      readonly workspaceId: string;
+      readonly fromTier: StorageTier;
+      readonly toTier: StorageTier;
+      readonly updatedAt: string;
+      readonly expectedUpdatedAt: string;
+      readonly activationBump?: number;
+    }): Readonly<MemoryEntry> | null;
   };
   readonly proposalWorkflow?: {
     proposeMemoryUpdate(
@@ -441,10 +464,76 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       },
       { expectedWorkspaceId: context.workspaceId }
     );
+    await promoteRecallHitMemories(request, context);
     return SoulReportContextUsageResponseSchema.parse({
       delivery_id: request.delivery_id,
       status: "recorded"
     });
+  }
+
+  async function promoteRecallHitMemories(
+    request: SoulReportContextUsageRequest,
+    context: McpMemoryToolCallContext
+  ): Promise<void> {
+    if (
+      request.usage_state !== "used" ||
+      deps.eventPublisher === undefined ||
+      deps.memoryEntryRepo === undefined
+    ) {
+      return;
+    }
+
+    const usedObjectIds = Array.from(new Set(request.used_object_ids ?? []));
+    for (const objectId of usedObjectIds) {
+      const current = await deps.memoryService.findByIdScoped(objectId, context.workspaceId);
+      if (current === null || current.storage_tier === StorageTier.HOT) {
+        continue;
+      }
+
+      const occurredAt = now();
+      const event = {
+        event_type: MemoryGovernanceEventType.SOUL_MEMORY_TIER_PROMOTED,
+        entity_type: "memory_entry",
+        entity_id: current.object_id,
+        workspace_id: context.workspaceId,
+        run_id: context.runId,
+        caused_by: context.agentTarget,
+        payload_json: SoulMemoryTierPromotedPayloadSchema.parse({
+          object_id: current.object_id,
+          object_kind: current.object_kind,
+          workspace_id: context.workspaceId,
+          run_id: context.runId,
+          from_tier: current.storage_tier,
+          to_tier: StorageTier.HOT,
+          reason: "recall_hit",
+          occurred_at: occurredAt
+        })
+      } as const;
+
+      try {
+        await deps.eventPublisher.appendManyWithMutation([event], () => {
+          const updated = deps.memoryEntryRepo?.updateTier({
+            objectId: current.object_id,
+            workspaceId: context.workspaceId,
+            fromTier: current.storage_tier,
+            toTier: StorageTier.HOT,
+            updatedAt: occurredAt,
+            expectedUpdatedAt: current.updated_at,
+            activationBump: RECALL_HIT_ACTIVATION_BUMP
+          });
+          if (updated === null || updated === undefined) {
+            // Roll back the already-appended audit row when the CAS predicate loses.
+            throw new RecallHitTierPromotionCasMiss();
+          }
+          return updated;
+        });
+      } catch (error) {
+        if (error instanceof RecallHitTierPromotionCasMiss) {
+          continue;
+        }
+        throw error;
+      }
+    }
   }
 }
 
@@ -602,6 +691,13 @@ class ToolUnavailableError extends Error {
 
 class ToolNotFoundError extends Error {
   public readonly code = "NOT_FOUND";
+}
+
+class RecallHitTierPromotionCasMiss extends Error {
+  public constructor() {
+    super("Recall-hit tier promotion CAS predicate did not match.");
+    this.name = "RecallHitTierPromotionCasMiss";
+  }
 }
 
 function classifyError(error: unknown): "VALIDATION" | "UNAVAILABLE" | "NOT_FOUND" | "NEEDS_CONTEXT" | "INTERNAL" {

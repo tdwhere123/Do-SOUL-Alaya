@@ -46,6 +46,16 @@ export interface MemoryEntryRepoDynamicsUpdateFields {
   readonly superseded_by?: string;
 }
 
+export interface MemoryEntryRepoTierUpdateInput {
+  readonly objectId: string;
+  readonly workspaceId: string;
+  readonly fromTier: StorageTier;
+  readonly toTier: StorageTier;
+  readonly updatedAt: string;
+  readonly expectedUpdatedAt: string;
+  readonly activationBump?: number;
+}
+
 export interface MemoryEntryKeywordSearchResult {
   readonly object_id: string;
   readonly normalized_rank: number;
@@ -82,6 +92,7 @@ export interface MemoryEntryRepo {
   findLowActivityActiveMemories(workspaceId: string): Promise<readonly Readonly<MemoryEntry>[]>;
   findTombstonedMemories(workspaceId: string): Promise<readonly Readonly<MemoryEntry>[]>;
   update(objectId: string, fields: MemoryEntryRepoUpdateFields): Promise<Readonly<MemoryEntry>>;
+  updateTier(input: MemoryEntryRepoTierUpdateInput): Readonly<MemoryEntry> | null;
   updateDynamics(
     objectId: string,
     fields: MemoryEntryRepoDynamicsUpdateFields,
@@ -557,6 +568,50 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
       }
 
       throw new StorageError("QUERY_FAILED", `Failed to update memory entry ${objectId}.`, error);
+    }
+  }
+
+  public updateTier(input: MemoryEntryRepoTierUpdateInput): Readonly<MemoryEntry> | null {
+    const objectId = parseNonEmptyString(input.objectId, "object_id");
+    const workspaceId = parseNonEmptyString(input.workspaceId, "workspace_id");
+    const fromTier = parseStorageTier(input.fromTier);
+    const toTier = parseStorageTier(input.toTier);
+    const updatedAt = parseUpdatedAt(input.updatedAt);
+    const expectedUpdatedAt = parseUpdatedAt(input.expectedUpdatedAt);
+    const activationBump = input.activationBump ?? 0;
+    if (!Number.isFinite(activationBump) || activationBump < 0 || activationBump > 1) {
+      throw new StorageError("VALIDATION_FAILED", "Failed to validate activation tier bump.");
+    }
+
+    try {
+      const result = this.db.connection
+        .prepare(
+          `UPDATE memory_entries
+           SET storage_tier = ?,
+               activation_score = min(1.0, COALESCE(activation_score, 0.0) + ?),
+               updated_at = ?
+           WHERE object_id = ?
+             AND workspace_id = ?
+             AND storage_tier = ?
+             AND updated_at = ?`
+        )
+        .run(toTier, activationBump, updatedAt, objectId, workspaceId, fromTier, expectedUpdatedAt);
+
+      if (result.changes === 0) {
+        return null;
+      }
+
+      const row = this.findByIdStatement.get(objectId) as MemoryEntryRow | undefined;
+      if (row === undefined) {
+        throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found after tier update.`);
+      }
+      return parseMemoryEntryRow(row);
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError("QUERY_FAILED", `Failed to update memory entry tier for ${objectId}.`, error);
     }
   }
 

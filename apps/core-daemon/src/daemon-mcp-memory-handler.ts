@@ -13,10 +13,12 @@ import {
 export function createDaemonMcpMemoryToolHandler(input: {
   readonly recallService: McpMemoryToolHandlerDependencies["recallService"];
   readonly memoryService: McpMemoryToolHandlerDependencies["memoryService"];
+  readonly memoryEntryRepo: NonNullable<McpMemoryToolHandlerDependencies["memoryEntryRepo"]>;
   readonly signalService: McpMemoryToolHandlerDependencies["signalService"];
   readonly graphExploreService: McpMemoryToolHandlerDependencies["graphExploreService"];
   readonly sessionOverrideService: McpMemoryToolHandlerDependencies["sessionOverrideService"];
   readonly trustStateRecorder: McpMemoryToolHandlerDependencies["trustStateRecorder"];
+  readonly eventPublisher: NonNullable<McpMemoryToolHandlerDependencies["eventPublisher"]>;
   readonly eventLogRepo: McpMemoryProposalWorkflowEventLogRepo;
   readonly proposalRepo: McpMemoryProposalWorkflowProposalRepo;
   readonly runtimeNotifier: McpMemoryProposalWorkflowRuntimeNotifier;
@@ -25,10 +27,12 @@ export function createDaemonMcpMemoryToolHandler(input: {
   return createMcpMemoryToolHandler({
     recallService: input.recallService,
     memoryService: input.memoryService,
+    memoryEntryRepo: input.memoryEntryRepo,
     signalService: input.signalService,
     graphExploreService: input.graphExploreService,
     sessionOverrideService: input.sessionOverrideService,
     trustStateRecorder: input.trustStateRecorder,
+    eventPublisher: input.eventPublisher,
     proposalWorkflow: createMcpMemoryProposalWorkflow({
       eventLogRepo: input.eventLogRepo,
       proposalRepo: input.proposalRepo,

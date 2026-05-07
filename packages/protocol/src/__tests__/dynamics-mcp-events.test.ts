@@ -22,6 +22,7 @@ import {
   SoulReportContextUsageResponseSchema,
   SoulReviewMemoryProposalRequestSchema,
   SoulReviewMemoryProposalResponseSchema,
+  StorageTier,
   TransitionCausedBy,
   TransitionCausedBySchema,
   TransitionRecordSchema,
@@ -440,6 +441,33 @@ describe("EventType and TransitionRecord", () => {
     }
   });
 
+  it("parses recall-hit tier promotion payloads", () => {
+    const payload = {
+      object_id: "memory-1",
+      object_kind: "memory_entry",
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      from_tier: StorageTier.WARM,
+      to_tier: StorageTier.HOT,
+      reason: "recall_hit",
+      occurred_at: validTimestamp
+    } as const;
+
+    expect(
+      parseMemoryGovernanceEventPayload(
+        MemoryGovernanceEventType.SOUL_MEMORY_TIER_PROMOTED,
+        payload
+      )
+    ).toEqual(payload);
+
+    expect(() =>
+      parseMemoryGovernanceEventPayload(
+        MemoryGovernanceEventType.SOUL_MEMORY_TIER_PROMOTED,
+        { ...payload, reason: "not-a-promotion-reason" }
+      )
+    ).toThrow();
+  });
+
   it("keeps caused_by enum complete and closed", () => {
     const expectedValues = ["user", "system", "review", "deterministic_rule", "auditor", "bootstrap"];
     expect(Object.values(TransitionCausedBy)).toEqual(expectedValues);
@@ -457,6 +485,7 @@ describe("EventType and TransitionRecord", () => {
       "soul.memory.retention_updated",
       "soul.memory.manifestation_changed",
       "soul.memory.tier_changed",
+      "soul.memory.tier_promoted",
       "soul.synthesis.created",
       "soul.synthesis.status_changed",
       "soul.synthesis.promoted",

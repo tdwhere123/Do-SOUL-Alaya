@@ -724,10 +724,12 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const mcpMemoryToolHandler = createDaemonMcpMemoryToolHandler({
     recallService,
     memoryService,
+    memoryEntryRepo,
     signalService,
     graphExploreService,
     sessionOverrideService,
     trustStateRecorder,
+    eventPublisher,
     eventLogRepo,
     proposalRepo,
     runtimeNotifier
