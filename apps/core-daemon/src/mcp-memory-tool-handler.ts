@@ -655,7 +655,11 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       deps.gardenTaskRepo === undefined ||
       context.runId === null ||
       request.turn_index === undefined ||
-      !hasUsedDeliveredObject(request)
+      // Wave-end M4: share the canonical used-id resolver with R2 so a
+      // single request produces consistent side-effects across the two
+      // paths (no ghost extract task without a matching tier promote
+      // and vice versa).
+      resolveUsedObjectIds(request).length === 0
     ) {
       return;
     }
@@ -704,15 +708,18 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     request: SoulReportContextUsageRequest,
     context: McpMemoryToolCallContext
   ): Promise<void> {
-    if (
-      request.usage_state !== "used" ||
-      deps.eventPublisher === undefined ||
-      deps.memoryEntryRepo === undefined
-    ) {
+    if (deps.eventPublisher === undefined || deps.memoryEntryRepo === undefined) {
       return;
     }
 
-    const usedObjectIds = Array.from(new Set(request.used_object_ids ?? []));
+    // Wave-end M4: the canonical used-id list now drives R2 the same
+    // way it drives H3. Pre-fix, R2 only saw `usage_state === "used"`
+    // + `used_object_ids` and missed requests that exercised the
+    // modern `delivered_objects[].usage_status === "used"` shape, so a
+    // host using the new shape would queue a POST_TURN_EXTRACT task
+    // (H3) but never trigger a tier promotion (R2). Same predicate
+    // now.
+    const usedObjectIds = resolveUsedObjectIds(request);
     for (const objectId of usedObjectIds) {
       const current = await deps.memoryService.findByIdScoped(objectId, context.workspaceId);
       if (current === null || current.storage_tier === StorageTier.HOT) {
@@ -766,14 +773,33 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
   }
 }
 
-function hasUsedDeliveredObject(request: SoulReportContextUsageRequest): boolean {
-  if (request.delivered_objects !== undefined) {
-    return request.delivered_objects.some((object) => object.usage_status === "used");
+// Wave-end M4: one canonical "used object id list" for the entire
+// report_context_usage handler. Both R2 (recall hit → tier promotion)
+// and H3 (POST_TURN_EXTRACT enqueue) used to compute "is this used"
+// from different shapes of the same untrusted request — R2 looked at
+// `usage_state`+`used_object_ids` and H3 looked at `delivered_objects`.
+// A request that filled only one shape produced one side effect but
+// not the other. Now both consume the same canonical list.
+//
+// Modern shape (preferred): `delivered_objects[]` with per-object
+// `usage_status`. Take only those whose status is "used".
+// Legacy shape: top-level `usage_state === "used"` + `used_object_ids`.
+function resolveUsedObjectIds(request: SoulReportContextUsageRequest): readonly string[] {
+  if (request.delivered_objects !== undefined && request.delivered_objects.length > 0) {
+    const usedIds = request.delivered_objects
+      .filter((object) => object.usage_status === "used")
+      .map((object) => object.object_id);
+    return Object.freeze(Array.from(new Set(usedIds)));
   }
-
-  return request.usage_state === "used" && (request.used_object_ids?.length ?? 0) > 0;
+  if (request.usage_state === "used") {
+    return Object.freeze(Array.from(new Set(request.used_object_ids ?? [])));
+  }
+  return Object.freeze([]);
 }
 
+// All delivered object ids regardless of usage_status — used for the
+// H3 turn_digest manifest so the extract task sees what was delivered,
+// not just what was used.
 function resolveDeliveredObjectIds(request: SoulReportContextUsageRequest): readonly string[] {
   const ids =
     request.delivered_objects === undefined
