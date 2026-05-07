@@ -431,8 +431,15 @@ export class RecallService {
       scoreMultiplier: WARM_CASCADE_DECAY
     });
     const warmMerged = this.mergeCoarseFilters(params.hotCoarseFilter, warmFilter, "warm_cascade_engaged");
-    const warmCount = await this.fineAssessmentCountForCascade(warmMerged, params);
-    if (warmCount >= targetCount) {
+    // Wave-end M5 (Reviewer I4): the cascade gate previously called
+    // assessCoarseFilter (which runs collectSupplementaryData) just to
+    // count candidates — meaning HOT-empty cold-start paths fanned the
+    // N+1 graph/plasticity/embedding lookups twice (warm gate + final
+    // assess) and three times when COLD also fired. Use the much
+    // cheaper coarse-filter candidate count for the cascade trigger;
+    // collectSupplementaryData now runs exactly once, on the final
+    // merged filter, in assessCoarseFilter at the recall() call site.
+    if (warmMerged.candidates.length >= targetCount) {
       return warmMerged;
     }
 
@@ -500,19 +507,6 @@ export class RecallService {
       }),
       degradation_reason: degradationReason
     });
-  }
-
-  private async fineAssessmentCountForCascade(
-    coarseFilter: Awaited<ReturnType<RecallService["coarseFilter"]>>,
-    params: {
-      readonly workspaceId: string;
-      readonly runId: string | null;
-      readonly queryText: string | null;
-      readonly fineAssessmentConfig: Readonly<FineAssessmentConfig>;
-      readonly winnerMemoryIds: ReadonlySet<string>;
-    }
-  ): Promise<number> {
-    return (await this.assessCoarseFilter({ coarseFilter, ...params })).candidates.length;
   }
 
   private async collectSupplementaryData(params: {
