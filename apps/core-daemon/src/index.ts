@@ -56,6 +56,7 @@ import {
   SqliteExtensionDescriptorRepo,
   SqliteFileRepo,
   SqliteGreenStatusRepo,
+  SqliteGardenTaskRepo,
   SqliteHealthJournalRepo,
   SqliteHandoffGapRepo,
   SqliteKarmaEventRepo,
@@ -124,12 +125,14 @@ import {
   createRequestProtection,
   createSoulGraphService,
   createUnavailableRuntimeAdapter,
-  listServerHardConstraints,
-  loadConfigEnv,
-  patchArbitrationClaimService,
-  recordStartupStep,
-  resolveDatabasePath
-} from "./daemon-runtime-support.js";
+    listServerHardConstraints,
+    loadConfigEnv,
+    patchArbitrationClaimService,
+    readOfficialGardenModelId,
+    readOfficialGardenProviderUrl,
+    recordStartupStep,
+    resolveDatabasePath
+  } from "./daemon-runtime-support.js";
 import { resolveAlayaConfigDir, resolveAlayaConfigPaths, type AlayaConfigPaths } from "./cli/config-files.js";
 import { resolveCoreDaemonFilesDirectory } from "./files-data-dir.js";
 import { createGardenRuntime } from "./garden-runtime.js";
@@ -169,6 +172,9 @@ export type { AlayaDaemonListenOptions, AlayaDaemonRuntime, AlayaDaemonRuntimeSe
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..", "..");
 const DEFAULT_GARDEN_STATUS_WORKSPACE_ID = "default";
+const EMBEDDING_SECRET_GARDEN_FALLBACK_WARNING =
+  "[ALAYA] DEPRECATED: ALAYA_OPENAI_SECRET_REF used as Garden compute key. Set ALAYA_OFFICIAL_GARDEN_SECRET_REF for v0.2 compatibility.";
+let embeddingSecretGardenFallbackWarningEmitted = false;
 
 export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const startupSteps: DaemonStartupStepRecord[] = [];
@@ -545,13 +551,20 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   });
   const stancePolicyProvider = createStancePolicyProvider(configRepo);
   const localHeuristicsProvider = new LocalHeuristics();
-  const officialGardenApiKey = resolveGardenOpenAiCredential({ configEnv }).apiKey;
+  const gardenCredential = resolveGardenOpenAiCredential({ configEnv });
+  const officialGardenApiKey =
+    gardenCredential.provenance.kind === "embedding-fallback"
+      ? maybeUseDeprecatedEmbeddingSecretForGarden(gardenCredential.apiKey)
+      : gardenCredential.apiKey;
+  const officialGardenModelId = readOfficialGardenModelId(configEnv) ?? OFFICIAL_API_GARDEN_MODEL;
+  const officialGardenProviderUrl = readOfficialGardenProviderUrl(configEnv);
   const officialGardenProvider =
     officialGardenApiKey === null
       ? null
       : new OfficialApiGardenProvider({
           apiKey: officialGardenApiKey,
-          model: OFFICIAL_API_GARDEN_MODEL
+          model: officialGardenModelId,
+          endpoint: officialGardenProviderUrl ?? undefined
         });
   const computeRoutingService = new ComputeRoutingService({
     providers: [
@@ -561,7 +574,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
             {
               kind: ComputeProviderPriority.OFFICIAL_API,
               provider: officialGardenProvider,
-              model_id: OFFICIAL_API_GARDEN_MODEL,
+              model_id: officialGardenModelId,
               adapter: "garden.official_api"
             } as const
           ]),
@@ -675,9 +688,17 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     pathPlasticityWatermarkRepo,
     pathPlasticityService,
     embeddingBackfillHandler,
+    configService,
+    officialApiGardenProvider: officialGardenProvider,
+    localHeuristicsProvider,
+    signalReceiver: signalService,
     strongRefService,
     workspaceRepo
   });
+  const gardenTaskRepo =
+    typeof (database.connection as { readonly prepare?: unknown }).prepare === "function"
+      ? new SqliteGardenTaskRepo(database.connection, eventPublisher)
+      : undefined;
   const gardenBacklogTelemetryService = new GardenBacklogTelemetryService({
     scheduler: gardenRuntime.backlogTelemetrySource,
     eventLogRepo,
@@ -713,10 +734,13 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const mcpMemoryToolHandler = createDaemonMcpMemoryToolHandler({
     recallService,
     memoryService,
+    memoryEntryRepo,
     signalService,
     graphExploreService,
     sessionOverrideService,
     trustStateRecorder,
+    eventPublisher,
+    ...(gardenTaskRepo === undefined ? {} : { gardenTaskRepo }),
     eventLogRepo,
     proposalRepo,
     runtimeNotifier
@@ -857,6 +881,19 @@ async function resolvePersistedGardenLastPassAt(input: {
     });
     return null;
   }
+}
+
+function maybeUseDeprecatedEmbeddingSecretForGarden(embeddingApiKey: string | null): string | null {
+  if (embeddingApiKey === null) {
+    return null;
+  }
+
+  if (!embeddingSecretGardenFallbackWarningEmitted) {
+    process.stderr.write(`${EMBEDDING_SECRET_GARDEN_FALLBACK_WARNING}\n`);
+    embeddingSecretGardenFallbackWarningEmitted = true;
+  }
+
+  return embeddingApiKey;
 }
 
 export async function startDaemon(options: AlayaDaemonListenOptions = {}): Promise<AlayaDaemonServer> {

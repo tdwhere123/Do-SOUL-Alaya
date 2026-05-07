@@ -129,6 +129,63 @@ describe("Janitor", () => {
     );
   });
 
+  // gate-6-delta I4: hot-index demotion now commits one
+  // SOUL_MEMORY_TIER_CHANGED audit row per demoted entry inside the
+  // same SQLite transaction as the storage_tier UPDATE.
+  it("emits SOUL_MEMORY_TIER_CHANGED for each demoted entry alongside the demote", async () => {
+    const appendManyWithMutation = vi.fn(async (entries: readonly unknown[], mutate: (rows: readonly unknown[]) => unknown) => {
+      const persisted = entries.map((entry, idx) => ({
+        ...(entry as object),
+        event_id: `evt-${idx}`,
+        created_at: "2026-03-27T00:00:00.000Z",
+        revision: idx
+      }));
+      mutate(persisted);
+      return undefined;
+    });
+    const eventLogRepo = {
+      append: vi.fn(),
+      appendManyWithMutation
+    };
+    const tieringPort = {
+      findHotDemotionCandidates: vi.fn(async () => [
+        { memory_entry_id: "memory-1", last_access_at: null, activation_score: 0.1 },
+        { memory_entry_id: "memory-2", last_access_at: null, activation_score: 0.2 }
+      ]),
+      demoteToWarm: vi.fn(() => undefined)
+    };
+    const cleanupPort = {
+      findExpiredObjects: vi.fn(async () => []),
+      removeExpiredObjects: vi.fn(async () => undefined)
+    };
+    const scheduler = { reportCompletion: vi.fn(async () => undefined) };
+    const janitor = new Janitor({
+      cleanupPort,
+      tieringPort,
+      scheduler,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      eventLogRepo: eventLogRepo as any,
+      now: () => "2026-03-27T00:00:00.000Z"
+    });
+
+    await janitor.run(createTask({ task_kind: GardenTaskKind.HOT_INDEX_DEMOTION }));
+
+    expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
+    const firstCall = appendManyWithMutation.mock.calls[0] ?? [[], () => undefined];
+    const emittedEntries = firstCall[0] as readonly unknown[];
+    expect(emittedEntries).toHaveLength(2);
+    const eventTypes = (emittedEntries as readonly { readonly event_type: string }[]).map((entry) => entry.event_type);
+    expect(eventTypes).toEqual(["soul.memory.tier_changed", "soul.memory.tier_changed"]);
+    const payloads = (emittedEntries as readonly { readonly payload_json: { readonly object_id: string; readonly from_tier: string; readonly to_tier: string; readonly reason: string } }[]).map((entry) => entry.payload_json);
+    expect(payloads.map((payload) => payload.object_id)).toEqual(["memory-1", "memory-2"]);
+    for (const payload of payloads) {
+      expect(payload.from_tier).toBe("hot");
+      expect(payload.to_tier).toBe("cold");
+      expect(payload.reason).toBe("hot_index_demotion");
+    }
+    expect(tieringPort.demoteToWarm).toHaveBeenCalledWith("workspace-1", ["memory-1", "memory-2"]);
+  });
+
   it("does not demote anything when hot index demotion finds no candidates", async () => {
     const { tieringPort, scheduler, janitor } = createJanitor();
 

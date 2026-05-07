@@ -23,7 +23,8 @@ const gardenTaskKindValues = [
   "template_candidate",
   "synthesis_review",
   "embedding_backfill",
-  "path_plasticity_update"
+  "path_plasticity_update",
+  "post_turn_extract"
 ] as const;
 
 export const GardenRole = {
@@ -58,7 +59,8 @@ export const GardenTaskKind = {
   TEMPLATE_CANDIDATE: "template_candidate",
   SYNTHESIS_REVIEW: "synthesis_review",
   EMBEDDING_BACKFILL: "embedding_backfill",
-  PATH_PLASTICITY_UPDATE: "path_plasticity_update"
+  PATH_PLASTICITY_UPDATE: "path_plasticity_update",
+  POST_TURN_EXTRACT: "post_turn_extract"
 } as const;
 
 export const GardenRoleSchema = z.enum(gardenRoleValues);
@@ -142,7 +144,9 @@ export const GardenTaskDescriptorSchema = z
     run_id: NonEmptyStringSchema.nullable(),
     target_object_refs: z.array(NonEmptyStringSchema).readonly(),
     priority: NonNegativeIntSchema.max(100),
-    created_at: IsoDatetimeStringSchema
+    created_at: IsoDatetimeStringSchema,
+    turn_index: NonNegativeIntSchema.optional(),
+    turn_digest: z.unknown().optional()
   })
   .strict()
   .readonly();

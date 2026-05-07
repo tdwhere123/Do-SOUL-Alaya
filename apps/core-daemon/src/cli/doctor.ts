@@ -3,8 +3,34 @@ import type { EmbeddingStatus, ToolchainStatus } from "@do-soul/alaya-protocol";
 import type { DaemonStartupStepRecord } from "../index.js";
 import type { PathPlasticityLookupTelemetrySnapshot } from "../path-plasticity-runtime.js";
 import type { GardenCredentialProvenance } from "../services/config-service.js";
+import {
+  detectAttachedProfileInstructionsDrift,
+  type ProfileInstructionsDriftReport,
+  type ProfileTarget
+} from "../profile-mutation.js";
 import { ALAYA_SYSEXITS, type AlayaCliArgsSchema, type AlayaCliContext, type AlayaSubcommandSpec } from "./bridge.js";
 import { resolveCliWorkspaceContext } from "./workspace-context.js";
+
+/**
+ * C2: shape returned by the optional getGardenCompute doctor dep so an
+ * operator can see what Garden compute the daemon actually wired up,
+ * independent of embedding. credential_source distinguishes
+ * - env:NAME ⇒ Garden has its own ALAYA_OFFICIAL_GARDEN_SECRET_REF
+ * - file:/.../mask ⇒ Garden has its own file-based secret
+ * - embedding-fallback ⇒ Garden borrowed embedding's key (deprecated)
+ * - none ⇒ no key, Garden routes to local_heuristics
+ */
+export interface GardenComputeStatus {
+  readonly provider_kind: "official_api" | "local_heuristics" | "host_worker";
+  readonly model_id: string | null;
+  readonly provider_url: string | null;
+  readonly credential_source:
+    | { readonly kind: "env"; readonly name: string }
+    | { readonly kind: "file"; readonly masked_path: string }
+    | { readonly kind: "embedding-fallback" }
+    | { readonly kind: "none" };
+  readonly routing_decision: "official_api" | "local_heuristics" | "host_worker";
+}
 
 export interface DoctorCommandDependencies {
   readonly getToolchainStatus: () => Promise<ToolchainStatus>;
@@ -12,6 +38,13 @@ export interface DoctorCommandDependencies {
   readonly getMcpHealth?: () => Promise<Readonly<{ transport: "ready" | "not_ready"; enrolled_tools: number }>>;
   readonly getGardenHealth?: () => Promise<Readonly<{ status: "healthy" | "degraded"; last_pass_at: string | null }>>;
   readonly getGardenCredentialProvenance?: () => Promise<GardenCredentialProvenance>;
+  /**
+   * C2: surface Garden compute provider truth (kind / model / credential /
+   * routing) so operators can tell official_api from local_heuristics from
+   * the deprecated embedding-fallback. When omitted, doctor reports a
+   * conservative "local_heuristics + none" snapshot.
+   */
+  readonly getGardenCompute?: () => Promise<GardenComputeStatus> | GardenComputeStatus;
   readonly getPathPlasticityLookupTelemetry?: () =>
     | Readonly<PathPlasticityLookupTelemetrySnapshot>
     | Promise<Readonly<PathPlasticityLookupTelemetrySnapshot>>;
@@ -67,11 +100,15 @@ interface DoctorReport {
     last_pass_at: string | null;
     credential_provenance: GardenCredentialProvenance;
   }>;
+  readonly garden_compute: GardenComputeStatus;
   readonly recall: Readonly<{
     readonly path_plasticity_lookup: Readonly<PathPlasticityLookupTelemetrySnapshot>;
   }>;
+  readonly attached_profiles: ReadonlyArray<ProfileInstructionsDriftReport>;
   readonly checks: Readonly<Record<"runtime" | "storage" | "provider" | "mcp" | "garden", DoctorCheckStatus>>;
 }
+
+const PROFILE_TARGETS: readonly ProfileTarget[] = ["codex", "claude-code"];
 
 const STARTUP_STEPS = [
   "database",
@@ -124,6 +161,15 @@ export function createDoctorCommand(
       const gardenCredentialProvenance = deps.getGardenCredentialProvenance
         ? await deps.getGardenCredentialProvenance()
         : ({ kind: "none" } as const);
+      const gardenCompute: GardenComputeStatus = deps.getGardenCompute
+        ? await deps.getGardenCompute()
+        : {
+            provider_kind: "local_heuristics",
+            model_id: null,
+            provider_url: null,
+            credential_source: { kind: "none" },
+            routing_decision: "local_heuristics"
+          };
       const pathPlasticityLookupTelemetry =
         (await deps.getPathPlasticityLookupTelemetry?.()) ??
         ({
@@ -132,6 +178,27 @@ export function createDoctorCommand(
           duration_p99_ms: null,
           window_size: 128
         } satisfies PathPlasticityLookupTelemetrySnapshot);
+
+      // C3: detect drift between source ALAYA_OPERATOR_INSTRUCTIONS and the
+      // value Alaya wrote into host MCP profiles on a prior `alaya attach`.
+      // Operators don't always re-attach after `alaya update`, so we surface
+      // the divergence here with a concrete refresh hint.
+      const attachedProfiles = await Promise.all(
+        PROFILE_TARGETS.map(async (target) => {
+          try {
+            return await detectAttachedProfileInstructionsDrift(target);
+          } catch {
+            // HOME unset / unreadable profile path — treat as "absent" rather
+            // than failing doctor. Resolve a placeholder report.
+            return {
+              target,
+              profile_path: "",
+              status: "absent",
+              attached_preview: null
+            } as const satisfies ProfileInstructionsDriftReport;
+          }
+        })
+      );
 
       const checks = {
         runtime: daemonReady ? "pass" : "fail",
@@ -165,9 +232,11 @@ export function createDoctorCommand(
           ...garden,
           credential_provenance: gardenCredentialProvenance
         },
+        garden_compute: gardenCompute,
         recall: {
           path_plasticity_lookup: pathPlasticityLookupTelemetry
         },
+        attached_profiles: attachedProfiles,
         checks
       };
 
@@ -307,6 +376,15 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport):
   stream.write(`mcp transport: ${report.mcp.transport}\n`);
   stream.write(`garden status: ${report.garden.status}\n`);
   stream.write(`garden credential provenance: ${formatGardenCredentialProvenance(report.garden.credential_provenance)}\n`);
+  // C2: surface Garden compute truth so operators can tell whether Garden
+  // is calling out (official_api), running locally (local_heuristics), or
+  // borrowing the embedding key (deprecated embedding-fallback).
+  stream.write(
+    `garden compute: kind=${report.garden_compute.provider_kind}` +
+      ` routing=${report.garden_compute.routing_decision}` +
+      ` model=${report.garden_compute.model_id ?? "default"}` +
+      ` cred=${formatCredentialSource(report.garden_compute.credential_source)}\n`
+  );
   stream.write(
     `recall path plasticity lookup: count=${report.recall.path_plasticity_lookup.lookup_count}` +
       ` p99_ms=${report.recall.path_plasticity_lookup.duration_p99_ms ?? "n/a"}` +
@@ -317,6 +395,33 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport):
     stream.write(
       `embedding mode: ${report.provider.embedding.effective_mode} (provider_configured=${report.provider.embedding.provider_configured ? "yes" : "no"})\n`
     );
+  }
+  for (const profile of report.attached_profiles) {
+    if (profile.status === "drifted") {
+      stream.write(
+        `attached profile (${profile.target}): instructions DRIFTED — ` +
+          `host file is older than current source. ` +
+          `Run \`alaya attach ${profile.target}\` to refresh ` +
+          `(${profile.profile_path}).\n`
+      );
+    } else if (profile.status === "in_sync") {
+      stream.write(`attached profile (${profile.target}): in sync\n`);
+    }
+    // status === "absent" is silent — the user may have intentionally not
+    // attached this target.
+  }
+}
+
+function formatCredentialSource(source: GardenComputeStatus["credential_source"]): string {
+  switch (source.kind) {
+    case "env":
+      return `env:${source.name}`;
+    case "file":
+      return `file:${source.masked_path}`;
+    case "embedding-fallback":
+      return "embedding-fallback (deprecated)";
+    case "none":
+      return "none";
   }
 }
 

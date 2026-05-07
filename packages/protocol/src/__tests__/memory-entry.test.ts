@@ -243,7 +243,7 @@ describe("MemoryEntry enums", () => {
   });
 
   it("exports the full StorageTier set", () => {
-    expect(Object.values(StorageTier)).toEqual(["hot", "cold"]);
+    expect(Object.values(StorageTier)).toEqual(["hot", "warm", "cold"]);
   });
 });
 

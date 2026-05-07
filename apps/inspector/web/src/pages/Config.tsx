@@ -4,6 +4,7 @@ import { clsx } from "clsx";
 import { apiFetch, getWorkspaceId, type ApiError } from "../api";
 import { useToasts } from "../components/Toast";
 import EmbeddingSupplementForm from "../components/EmbeddingSupplementForm";
+import GardenComputeForm from "../components/GardenComputeForm";
 
 interface PatchResult {
   readonly success?: boolean;
@@ -128,6 +129,18 @@ export default function ConfigPage() {
           </h2>
         </div>
         <EmbeddingSupplementForm onRequiresRestart={handleRestartRequired} />
+      </div>
+
+      <div className="mb-12 border-b border-beige-200 pb-8">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="text-ink-600">
+            <KeyRound className="w-6 h-6" />
+          </div>
+          <h2 className="text-xl font-bold text-ink-600 uppercase tracking-wider">
+            Garden Compute
+          </h2>
+        </div>
+        <GardenComputeForm onRequiresRestart={handleRestartRequired} />
       </div>
 
       <div className="mt-12 p-6 bg-beige-200/30 rounded-lg border border-beige-200">

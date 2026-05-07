@@ -49,6 +49,18 @@ export interface MemoryEntryRepoDynamicsUpdateFields {
   readonly superseded_by?: string;
 }
 
+export interface MemoryEntryRepoTierUpdateInput {
+  readonly objectId: string;
+  readonly workspaceId: string;
+  readonly fromTier: StorageTier;
+  readonly toTier: StorageTier;
+  readonly updatedAt: string;
+  readonly expectedUpdatedAt: string;
+  readonly activationBump?: number;
+  readonly lastUsedAt?: string;
+  readonly lastHitAt?: string;
+}
+
 export interface MemoryEntryKeywordSearchResult {
   readonly object_id: string;
   readonly normalized_rank: number;
@@ -86,6 +98,7 @@ export interface MemoryEntryRepo {
   findTombstonedMemories(workspaceId: string): Promise<readonly Readonly<MemoryEntry>[]>;
   update(objectId: string, fields: MemoryEntryRepoUpdateFields): Promise<Readonly<MemoryEntry>>;
   updateScoped(objectId: string, workspaceId: string, fields: MemoryEntryRepoUpdateFields): Promise<Readonly<MemoryEntry>>;
+  updateTier(input: MemoryEntryRepoTierUpdateInput): Readonly<MemoryEntry> | null;
   updateDynamics(
     objectId: string,
     fields: MemoryEntryRepoDynamicsUpdateFields,
@@ -167,7 +180,7 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     this.findByWorkspaceTierStatement = db.connection.prepare(`
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
       FROM memory_entries
-      WHERE workspace_id = ? AND storage_tier = ?
+      WHERE workspace_id = ? AND storage_tier = ? AND COALESCE(retention_state, '') != 'tombstoned'
       ORDER BY created_at ASC, object_id ASC
     `);
     this.findByRunIdStatement = db.connection.prepare(`
@@ -619,6 +632,64 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
       }
 
       throw new StorageError("QUERY_FAILED", `Failed to update memory entry ${objectId}.`, error);
+    }
+  }
+
+  public updateTier(input: MemoryEntryRepoTierUpdateInput): Readonly<MemoryEntry> | null {
+    const objectId = parseNonEmptyString(input.objectId, "object_id");
+    const workspaceId = parseNonEmptyString(input.workspaceId, "workspace_id");
+    const fromTier = parseStorageTier(input.fromTier);
+    const toTier = parseStorageTier(input.toTier);
+    const updatedAt = parseUpdatedAt(input.updatedAt);
+    const expectedUpdatedAt = parseUpdatedAt(input.expectedUpdatedAt);
+    const lastUsedAt = input.lastUsedAt === undefined ? undefined : parseUpdatedAt(input.lastUsedAt);
+    const lastHitAt = input.lastHitAt === undefined ? undefined : parseUpdatedAt(input.lastHitAt);
+    const activationBump = input.activationBump ?? 0;
+    if (!Number.isFinite(activationBump) || activationBump < 0 || activationBump > 1) {
+      throw new StorageError("VALIDATION_FAILED", "Failed to validate activation tier bump.");
+    }
+
+    try {
+      const result = this.db.connection
+        .prepare(
+          `UPDATE memory_entries
+           SET storage_tier = ?,
+               activation_score = min(1.0, COALESCE(activation_score, 0.0) + ?),
+               last_used_at = COALESCE(?, last_used_at),
+               last_hit_at = COALESCE(?, last_hit_at),
+               updated_at = ?
+           WHERE object_id = ?
+             AND workspace_id = ?
+             AND storage_tier = ?
+             AND updated_at = ?`
+        )
+        .run(
+          toTier,
+          activationBump,
+          lastUsedAt ?? null,
+          lastHitAt ?? null,
+          updatedAt,
+          objectId,
+          workspaceId,
+          fromTier,
+          expectedUpdatedAt
+        );
+
+      if (result.changes === 0) {
+        return null;
+      }
+
+      const row = this.findByIdStatement.get(objectId) as MemoryEntryRow | undefined;
+      if (row === undefined) {
+        throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found after tier update.`);
+      }
+      return parseMemoryEntryRow(row);
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError("QUERY_FAILED", `Failed to update memory entry tier for ${objectId}.`, error);
     }
   }
 

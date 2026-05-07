@@ -2,6 +2,10 @@ import {
   GardenRole,
   GardenTaskKind,
   GardenTier,
+  MemoryGovernanceEventType,
+  SoulMemoryTierChangedPayloadSchema,
+  type AuditorEventLogPort,
+  type EventLogEntry,
   type GardenRoleValue,
   type GardenTaskDescriptor,
   type GardenTaskResult,
@@ -41,7 +45,10 @@ export interface JanitorMemoryTieringPort {
     workspaceId: string,
     criteria: JanitorHotDemotionCriteria
   ): Promise<readonly HotDemotionCandidate[]>;
-  demoteToWarm(workspaceId: string, memoryEntryIds: readonly string[]): Promise<void>;
+  // gate-6-delta I4: sync so the Janitor can wrap each demote in
+  // EventPublisher.appendManyWithMutation atomically with the
+  // SOUL_MEMORY_TIER_CHANGED event log row.
+  demoteToWarm(workspaceId: string, memoryEntryIds: readonly string[]): void;
 }
 
 export interface LowActivityMemoryRecord {
@@ -77,6 +84,11 @@ export interface JanitorDependencies {
   readonly dormantDemotionPort?: JanitorDormantDemotionPort;
   readonly tombstoneGcPort?: JanitorTombstoneGcPort;
   readonly strongRefProtectionPort?: JanitorStrongRefProtectionPort;
+  // gate-6-delta I4: optional EventLog writer used to commit
+  // SOUL_MEMORY_TIER_CHANGED rows in the same SQLite transaction as
+  // the storage_tier UPDATE. When undefined the Janitor falls back to
+  // the bare UPDATE (legacy / test paths).
+  readonly eventLogRepo?: AuditorEventLogPort;
   readonly now?: () => string;
 }
 
@@ -90,6 +102,7 @@ export class Janitor {
   private readonly dormantDemotionPort?: JanitorDormantDemotionPort;
   private readonly tombstoneGcPort?: JanitorTombstoneGcPort;
   private readonly strongRefProtectionPort?: JanitorStrongRefProtectionPort;
+  private readonly eventLogRepo?: AuditorEventLogPort;
   private readonly now: () => string;
 
   public constructor(deps: JanitorDependencies) {
@@ -99,6 +112,7 @@ export class Janitor {
     this.dormantDemotionPort = deps.dormantDemotionPort;
     this.tombstoneGcPort = deps.tombstoneGcPort;
     this.strongRefProtectionPort = deps.strongRefProtectionPort;
+    this.eventLogRepo = deps.eventLogRepo;
     this.now = deps.now ?? (() => new Date().toISOString());
   }
 
@@ -151,7 +165,35 @@ export class Janitor {
     const objectIds = candidates.slice(0, JANITOR_CONSTANTS.BATCH_SIZE).map((entry) => entry.memory_entry_id);
 
     if (objectIds.length > 0) {
-      await this.tieringPort.demoteToWarm(task.workspace_id, objectIds);
+      // gate-6-delta I4: emit one SOUL_MEMORY_TIER_CHANGED row per
+      // demoted entry, atomically with the storage_tier UPDATE. The
+      // batch demote runs once inside the mutate callback (cheap)
+      // and the per-entry events land in EventLog for audit replay.
+      // Storage impl writes "cold" tier (BOUNDARY_COLD_TIER) — keep
+      // the audit row consistent.
+      const occurredAt = this.now();
+      const events = objectIds.map((memoryId) => ({
+        event_type: MemoryGovernanceEventType.SOUL_MEMORY_TIER_CHANGED,
+        entity_type: "memory_entry",
+        entity_id: memoryId,
+        workspace_id: task.workspace_id,
+        run_id: task.run_id,
+        caused_by: this.role,
+        payload_json: SoulMemoryTierChangedPayloadSchema.parse({
+          object_id: memoryId,
+          object_kind: "memory_entry",
+          workspace_id: task.workspace_id,
+          run_id: task.run_id,
+          from_tier: "hot",
+          to_tier: "cold",
+          reason: "hot_index_demotion",
+          task_id: task.task_id,
+          occurred_at: occurredAt
+        })
+      }));
+      await this.publishEventLogsMutation(events, () => {
+        this.tieringPort.demoteToWarm(task.workspace_id, objectIds);
+      });
     }
 
     const result = this.createSuccessResult(task, completedAt, objectIds, [
@@ -159,6 +201,23 @@ export class Janitor {
     ]);
     await this.scheduler.reportCompletion(result);
     return result;
+  }
+
+  // gate-6-delta I4: mirror the Auditor.publishEventLogMutation
+  // pattern but accept multiple events so a batch UPDATE (e.g. demote
+  // N entries in one statement) commits atomically with N audit rows.
+  private async publishEventLogsMutation(
+    events: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>,
+    mutate: () => void
+  ): Promise<void> {
+    if (this.eventLogRepo === undefined) {
+      mutate();
+      return;
+    }
+    await this.eventLogRepo.appendManyWithMutation(events, () => {
+      mutate();
+      return undefined as never;
+    });
   }
 
   private async executeDormantDemotion(

@@ -197,6 +197,102 @@ describe("cli registration", () => {
     });
   });
 
+  it("permits garden-worker as an attached MCP agent target", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const baseRuntime = createRuntime();
+    const runtime = createRuntime({
+      services: {
+        ...baseRuntime.services,
+        runService: {
+          getById: vi.fn(async () => createRun({ run_id: "run-1", workspace_id: "workspace-1" }))
+        }
+      }
+    });
+    const bridge = createAlayaCliBridge(runtime, {
+      env: {
+        ALAYA_WORKSPACE_ID: "workspace-1",
+        ALAYA_RUN_ID: "run-1",
+        ALAYA_AGENT_TARGET: "garden-worker"
+      },
+      stdin,
+      stdout,
+      stderr,
+      isTTY: false
+    });
+    registerAlayaCliCommands(bridge, runtime);
+    hoisted.runAlayaMcpStdioServer.mockImplementationOnce(async () => {
+      setImmediate(() => stdin.destroy());
+      return { close: hoisted.serverClose };
+    });
+
+    const result = await bridge.dispatch(["mcp", "stdio"]);
+
+    expect(result.exitCode).toBe(0);
+    const [serverOptions] = hoisted.runAlayaMcpStdioServer.mock.calls[0] ?? [];
+    expect(serverOptions.contextProvider()).toEqual({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      agentTarget: "garden-worker"
+    });
+  });
+
+  // gate-6-delta B1: cover the env-spoof guard on the MCP stdio path.
+  // ALAYA_AGENT_TARGET=cli/inspector must NOT promote the attached LLM
+  // to a human-reviewer surface; the env is sanitised at the boundary.
+  it.each([
+    { spoof: "cli" as const },
+    { spoof: "inspector" as const }
+  ])(
+    "ignores ALAYA_AGENT_TARGET=$spoof and pins agentTarget to \"mcp\" with a stderr warning",
+    async ({ spoof }) => {
+      const stdin = new PassThrough();
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      const stderrChunks: string[] = [];
+      stderr.on("data", (chunk) => stderrChunks.push(chunk.toString("utf8")));
+      const baseRuntime = createRuntime();
+      const runtime = createRuntime({
+        services: {
+          ...baseRuntime.services,
+          runService: {
+            getById: vi.fn(async () => createRun({ run_id: "run-1", workspace_id: "workspace-1" }))
+          }
+        }
+      });
+      const bridge = createAlayaCliBridge(runtime, {
+        env: {
+          ALAYA_WORKSPACE_ID: "workspace-1",
+          ALAYA_RUN_ID: "run-1",
+          ALAYA_AGENT_TARGET: spoof
+        },
+        stdin,
+        stdout,
+        stderr,
+        isTTY: false
+      });
+      registerAlayaCliCommands(bridge, runtime);
+      hoisted.runAlayaMcpStdioServer.mockImplementationOnce(async () => {
+        setImmediate(() => stdin.destroy());
+        return { close: hoisted.serverClose };
+      });
+
+      const result = await bridge.dispatch(["mcp", "stdio"]);
+
+      expect(result.exitCode).toBe(0);
+      const [serverOptions] = hoisted.runAlayaMcpStdioServer.mock.calls[0] ?? [];
+      expect(serverOptions.contextProvider()).toEqual({
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        agentTarget: "mcp"
+      });
+      expect(stderrChunks.join("")).toContain(
+        `Ignoring ALAYA_AGENT_TARGET=${spoof}: MCP stdio cannot impersonate human-reviewer surfaces.`
+      );
+    }
+  );
+
   it("rejects ALAYA_RUN_ID when it belongs to another workspace", async () => {
     const stdin = new PassThrough();
     const stdout = new PassThrough();

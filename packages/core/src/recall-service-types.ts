@@ -6,6 +6,7 @@ import type {
   ProjectMappingAnchor,
   RecallCandidate,
   RecallOriginPlane,
+  SoulMemorySearchDegradationReason,
   Slot,
   StorageTier as StorageTierType
 } from "@do-soul/alaya-protocol";
@@ -144,6 +145,7 @@ export interface RecallResult {
   readonly total_scanned: number;
   readonly coarse_filter_count: number;
   readonly fine_assessment_count: number;
+  readonly degradation_reason: SoulMemorySearchDegradationReason | null;
   readonly working_projection: null;
 }
 
@@ -158,6 +160,8 @@ export interface CoarseRecallCandidate {
   readonly entry: Readonly<MemoryEntry>;
   readonly isAdvisory?: boolean;
   readonly originPlane?: RecallOriginPlane;
+  readonly sourceChannel?: string;
+  readonly scoreMultiplier?: number;
 }
 
 export interface RecallServiceWarnPort {

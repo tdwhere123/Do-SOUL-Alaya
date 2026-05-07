@@ -28,8 +28,8 @@ type GardenProviderErrorKind = "auth" | "network" | "provider_failure" | "invali
 
 interface OfficialApiGardenProviderDependencies {
   readonly apiKey?: string | null;
-  readonly model?: string;
-  readonly endpoint?: string;
+  readonly model?: string | null;
+  readonly endpoint?: string | null;
   readonly fetchImpl?: typeof fetch;
   readonly requestTimeoutMs?: number;
   readonly createAbortController?: () => AbortController;

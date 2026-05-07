@@ -105,6 +105,12 @@ export interface McpMemoryProposalWorkflowProposalRepo {
       readonly proposed_changes: MemoryEntryMutableFields;
       readonly updated_at: string;
       readonly caused_by: string;
+      // gate-6-delta I1: optional baseline snapshot of memory_entry.updated_at
+      // captured by prepareAcceptedProposalApply outside the storage
+      // transaction. The storage layer asserts the live row is still
+      // at this baseline before applying; mismatch = stale-snapshot
+      // CONFLICT.
+      readonly expected_baseline_updated_at?: string | null;
     },
     options?: { readonly reviewerIdentity?: string }
   ): Promise<Readonly<{
@@ -140,7 +146,16 @@ export interface McpMemoryProposalWorkflowDependencies {
     findByIdScoped(
       objectId: string,
       workspaceId: string
-    ): Promise<Readonly<{ readonly object_id: string }> | null>;
+    ): Promise<
+      | Readonly<{
+          readonly object_id: string;
+          // gate-6-delta I1: optional baseline timestamp captured outside
+          // the storage transaction so the accept-and-apply path can
+          // reject stale-snapshot proposals via a CAS predicate.
+          readonly updated_at?: string;
+        }>
+      | null
+    >;
     update(
       objectId: string,
       fields: MemoryEntryMutableFields,
@@ -405,6 +420,7 @@ export function createMcpMemoryProposalWorkflow(
     readonly workspace_id: string;
     readonly proposed_changes: MemoryEntryMutableFields;
     readonly caused_by: string;
+    readonly expected_baseline_updated_at: string | null;
   }>> {
     const memoryService = deps.memoryService;
     if (memoryService === undefined) {
@@ -436,7 +452,11 @@ export function createMcpMemoryProposalWorkflow(
       target_object_id: targetObjectId,
       workspace_id: context.workspaceId,
       proposed_changes: proposedChanges,
-      caused_by: `proposal_accept:${proposalId}`
+      caused_by: `proposal_accept:${proposalId}`,
+      // gate-6-delta I1: capture the memory's updated_at outside the
+      // storage transaction so the accept-and-apply CAS predicate can
+      // reject stale-snapshot proposals (cross-proposal lost-update).
+      expected_baseline_updated_at: scopedTarget.updated_at ?? null
     };
   }
 
@@ -449,6 +469,7 @@ export function createMcpMemoryProposalWorkflow(
       readonly workspace_id: string;
       readonly proposed_changes: MemoryEntryMutableFields;
       readonly caused_by: string;
+      readonly expected_baseline_updated_at: string | null;
     }>,
     reviewerIdentity: string
   ): Promise<Readonly<{

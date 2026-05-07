@@ -140,6 +140,30 @@ describe("SqliteMemoryEntryRepo", () => {
     expect(rows.map((row) => row.object_id)).toEqual(["6406be93-cfed-43d3-90ac-e287facc9ed4"]);
   });
 
+  it("returns explicit warm-tier records when tier is provided", async () => {
+    const { repo } = await createRepo();
+
+    await repo.create(
+      createMemoryEntry({
+        object_id: "2501b5fa-3bc0-4759-a0da-219f805ef03f",
+        storage_tier: StorageTier.HOT,
+        workspace_id: "workspace-1",
+        run_id: "run-1"
+      })
+    );
+    await repo.create(
+      createMemoryEntry({
+        object_id: "4a2f07c4-371f-41eb-a9cb-6e842e2c2ca9",
+        storage_tier: StorageTier.WARM,
+        workspace_id: "workspace-1",
+        run_id: "run-2"
+      })
+    );
+
+    const rows = await repo.findByWorkspaceId("workspace-1", StorageTier.WARM);
+    expect(rows.map((row) => row.object_id)).toEqual(["4a2f07c4-371f-41eb-a9cb-6e842e2c2ca9"]);
+  });
+
   it("excludes tombstoned rows when explicit HOT tier is requested", async () => {
     const { repo } = await createRepo();
 
@@ -164,6 +188,34 @@ describe("SqliteMemoryEntryRepo", () => {
 
     const rows = await repo.findByWorkspaceId("workspace-1", StorageTier.HOT);
     expect(rows.map((row) => row.object_id)).toEqual(["7ab81ca8-9425-4e18-ad4a-81ab6406db55"]);
+  });
+
+  it("excludes tombstoned rows when non-hot tiers are requested", async () => {
+    const { repo } = await createRepo();
+
+    await repo.create(
+      createMemoryEntry({
+        object_id: "4a2f07c4-371f-41eb-a9cb-6e842e2c2ca9",
+        storage_tier: StorageTier.WARM,
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        retention_state: null
+      })
+    );
+    await repo.create(
+      createMemoryEntry({
+        object_id: "ca648194-c03c-4932-b103-3ec4d318732a",
+        storage_tier: StorageTier.COLD,
+        workspace_id: "workspace-1",
+        run_id: "run-2",
+        retention_state: "tombstoned"
+      })
+    );
+
+    const warmRows = await repo.findByWorkspaceId("workspace-1", StorageTier.WARM);
+    const coldRows = await repo.findByWorkspaceId("workspace-1", StorageTier.COLD);
+    expect(warmRows.map((row) => row.object_id)).toEqual(["4a2f07c4-371f-41eb-a9cb-6e842e2c2ca9"]);
+    expect(coldRows).toEqual([]);
   });
 
   it("lists entries by run id across both tiers", async () => {

@@ -1,8 +1,21 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   CandidateMemorySignalSchema,
   ControlPlaneObjectKind,
+  GARDEN_ROLE_TIER_MAP,
+  GardenClaimTaskRequestSchema,
+  GardenClaimTaskResponseSchema,
+  GardenCompleteTaskRequestSchema,
+  GardenCompleteTaskResponseSchema,
+  GardenEventType,
+  GardenListPendingTasksRequestSchema,
+  GardenListPendingTasksResponseSchema,
+  GardenRole,
+  GardenTaskKind,
+  GardenTier,
+  MemoryGovernanceEventType,
   MemoryDimensionSchema,
+  parseGardenEventPayload,
   ProposalResolutionState,
   RetentionPolicy,
   ScopeClassSchema,
@@ -19,6 +32,7 @@ import {
   SoulMemorySearchResponseSchema,
   SoulOpenPointerRequestSchema,
   SoulOpenPointerResponseSchema,
+  SoulMemoryTierPromotedPayloadSchema,
   SoulProposeMemoryUpdateRequestSchema,
   SoulProposeMemoryUpdateResponseSchema,
   SoulReportContextUsageRequestSchema,
@@ -29,6 +43,12 @@ import {
   TaskObjectSurfaceSchema,
   type CandidateMemorySignal,
   type ContextDeliveryRecord,
+  type EventLogEntry,
+  type GardenClaimTaskRequest,
+  type GardenCompleteTaskRequest,
+  type GardenListPendingTasksRequest,
+  type GardenMcpWorkerRole,
+  type GardenRoleValue,
   type MemoryEntry,
   type MemorySearchResult,
   type Proposal,
@@ -44,18 +64,28 @@ import {
   type SoulMemorySearchRequest,
   type SoulOpenPointerRequest,
   type SoulProposeMemoryUpdateRequest,
+  type SoulMemorySearchDegradationReason,
   type SoulRecallStrategyMix,
   type SoulReportContextUsageRequest,
   type SoulReviewMemoryProposalRequest,
   type MemoryEntryMutableFields,
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
+import type {
+  GardenTaskCompletionResult,
+  GardenTaskEnqueueInput,
+  GardenTaskEventInput,
+  GardenTaskRow
+} from "@do-soul/alaya-storage";
 import { hasAlayaMemoryToolName, type AlayaMemoryToolName } from "./mcp-memory-tool-catalog.js";
 
 type MemoryUsageRefreshFields = MemoryEntryMutableFields & {
   readonly last_used_at?: string;
   readonly last_hit_at?: string;
 };
+
+const RECALL_HIT_ACTIVATION_BUMP = 0.05;
+const POST_TURN_EXTRACT_EXCERPT_MAX_CHARS = 800;
 
 export interface McpMemoryToolCallContext {
   readonly workspaceId: string;
@@ -77,6 +107,7 @@ export interface McpMemoryToolHandlerDependencies {
       readonly total_scanned: number;
       readonly coarse_filter_count: number;
       readonly fine_assessment_count: number;
+      readonly degradation_reason?: SoulMemorySearchDegradationReason | null;
     }>>;
   };
   readonly memoryService: {
@@ -90,7 +121,7 @@ export interface McpMemoryToolHandlerDependencies {
       fields: MemoryUsageRefreshFields,
       reason: string
     ): Promise<Readonly<MemoryEntry>>;
-    updateScoped(
+    updateScoped?(
       objectId: string,
       workspaceId: string,
       fields: MemoryUsageRefreshFields,
@@ -133,6 +164,25 @@ export interface McpMemoryToolHandlerDependencies {
       options?: { readonly expectedWorkspaceId?: string }
     ): Promise<UsageProofRecord>;
   };
+  readonly eventPublisher?: {
+    appendManyWithMutation<T>(
+      inputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+      mutate: (entries: readonly EventLogEntry[]) => T
+    ): Promise<T>;
+  };
+  readonly memoryEntryRepo?: {
+    updateTier(input: {
+      readonly objectId: string;
+      readonly workspaceId: string;
+      readonly fromTier: StorageTier;
+      readonly toTier: StorageTier;
+      readonly updatedAt: string;
+      readonly expectedUpdatedAt: string;
+      readonly activationBump?: number;
+      readonly lastUsedAt?: string;
+      readonly lastHitAt?: string;
+    }): Readonly<MemoryEntry> | null;
+  };
   readonly proposalWorkflow?: {
     proposeMemoryUpdate(
       input: SoulProposeMemoryUpdateRequest,
@@ -153,6 +203,26 @@ export interface McpMemoryToolHandlerDependencies {
       readonly proposals: readonly Readonly<SoulPendingProposalSummary>[];
       readonly total_count: number;
     }>>;
+  };
+  readonly gardenTaskRepo?: {
+    enqueue(input: GardenTaskEnqueueInput): { readonly task_id: string };
+    findById(taskId: string): GardenTaskRow | null;
+    peekPending(
+      role: GardenRoleValue,
+      workspace_id?: string,
+      limit?: number
+    ): readonly GardenTaskRow[];
+    claimAtomic(
+      taskId: string,
+      claimedBy: string,
+      claimedAt: string,
+      workspace_id?: string
+    ): "claimed" | "already-claimed";
+    completeWithEvents(
+      taskId: string,
+      result: GardenTaskCompletionResult,
+      events: readonly GardenTaskEventInput[]
+    ): Promise<void>;
   };
   readonly now?: () => string;
   readonly generateId?: () => string;
@@ -213,6 +283,12 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
             return ok(toolName, await exploreGraph(SoulExploreGraphRequestSchema.parse(rawArguments), context));
           case "soul.report_context_usage":
             return ok(toolName, await reportContextUsage(SoulReportContextUsageRequestSchema.parse(rawArguments), context));
+          case "garden.list_pending_tasks":
+            return ok(toolName, await listPendingGardenTasks(GardenListPendingTasksRequestSchema.parse(rawArguments), context));
+          case "garden.claim_task":
+            return ok(toolName, await claimGardenTask(GardenClaimTaskRequestSchema.parse(rawArguments), context));
+          case "garden.complete_task":
+            return ok(toolName, await completeGardenTask(GardenCompleteTaskRequestSchema.parse(rawArguments), context));
         }
       } catch (error) {
         return fail(toolName, classifyError(error), sanitizeError(error));
@@ -268,12 +344,15 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       delivered_at: now()
     });
 
+    const degradationReason =
+      recallResult.degradation_reason ?? (explainabilityPartial ? "recall_explainability_partial" : null);
+
     return SoulMemorySearchResponseSchema.parse({
       delivery_id: deliveryId,
       results,
       total_count: recallResult.fine_assessment_count,
       strategy_mix: buildRecallStrategyMix(policyOverride, results),
-      degradation_reason: explainabilityPartial ? "recall_explainability_partial" : null
+      degradation_reason: degradationReason
     });
   }
 
@@ -312,10 +391,13 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     request: SoulEmitCandidateSignalRequest,
     context: McpMemoryToolCallContext
   ) {
-    // SECURITY (p5-system-review-r1 MR-B03 / invariants §29 Default Scope):
-    // Trusted MCP call context overrides any payload-supplied scope. The
-    // attached agent (LLM) cannot redirect signals to a foreign workspace
-    // by spoofing workspace_id / run_id / surface_id in the request body.
+    // SECURITY (gate-6-delta I5; MR-B03 / invariants §29 Default Scope):
+    // workspace_id / run_id / surface_id are NOT in the public MCP
+    // request schema (see SoulEmitCandidateSignalRequestSchema /
+    // McpEmitCandidateSignalRequestSchema). The daemon binds them from
+    // the trusted MCP call context. The attached agent cannot redirect
+    // signals to a foreign workspace because the schema rejects the
+    // fields outright before this function runs.
     if (context.runId === null) {
       throw new ToolValidationError(
         "soul.emit_candidate_signal requires a runId in the MCP call context."
@@ -385,6 +467,176 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     });
   }
 
+  async function listPendingGardenTasks(
+    request: GardenListPendingTasksRequest,
+    context: McpMemoryToolCallContext
+  ) {
+    if (deps.gardenTaskRepo === undefined) {
+      throw new ToolUnavailableError("Garden task queue is not available.");
+    }
+    const rows = deps.gardenTaskRepo.peekPending(
+      mapGardenMcpWorkerRole(request.role),
+      context.workspaceId,
+      request.limit
+    );
+    return GardenListPendingTasksResponseSchema.parse({
+      tasks: rows.map(toGardenTaskSnapshot)
+    });
+  }
+
+  async function claimGardenTask(
+    request: GardenClaimTaskRequest,
+    context: McpMemoryToolCallContext
+  ) {
+    if (deps.gardenTaskRepo === undefined) {
+      throw new ToolUnavailableError("Garden task queue is not available.");
+    }
+
+    const claimedAt = now();
+    const claimResult = deps.gardenTaskRepo.claimAtomic(
+      request.task_id,
+      context.agentTarget,
+      claimedAt,
+      context.workspaceId
+    );
+    const row = deps.gardenTaskRepo.findById(request.task_id);
+    if (row === null || row.workspace_id !== context.workspaceId) {
+      return GardenClaimTaskResponseSchema.parse(toSilentAlreadyClaimed(request.task_id));
+    }
+
+    return GardenClaimTaskResponseSchema.parse({
+      status: claimResult === "claimed" ? "claimed" : "already_claimed",
+      ...toGardenClaimTaskPayload(row)
+    });
+  }
+
+  async function completeGardenTask(
+    request: GardenCompleteTaskRequest,
+    context: McpMemoryToolCallContext
+  ) {
+    if (deps.gardenTaskRepo === undefined) {
+      throw new ToolUnavailableError("Garden task queue is not available.");
+    }
+
+    const row = deps.gardenTaskRepo.findById(request.task_id);
+    if (row === null || row.workspace_id !== context.workspaceId) {
+      throw new ToolNotFoundError(`Garden task not found: ${request.task_id}`);
+    }
+
+    // Codex re-review B1: verify the row is still owned by this caller
+    // BEFORE emitting any signal. Pre-fix, signals were persisted then
+    // completeWithEvents would CAS-fail (status != claimed) and the
+    // host got an error — but the soul.signal.emitted rows were already
+    // on disk, orphaned without a parent task_completed event. The
+    // pre-emit check rejects the request before any side effect runs
+    // when the row is no longer claimed by us. This also closes wave-
+    // end Spec F4 (N2) — only the agent target that claimed the task
+    // can complete it; a sibling host on the same workspace cannot
+    // silently steal another agent's task by completing it.
+    if (row.status !== "claimed") {
+      throw new ToolValidationError(
+        `Garden task ${row.id} is not in claimed state (current: ${row.status}); claim it via garden.claim_task before completing.`
+      );
+    }
+    if (row.claimed_by !== context.agentTarget) {
+      throw new ToolValidationError(
+        `Garden task ${row.id} is claimed by a different agent target; only the claimant may complete it.`
+      );
+    }
+
+    // Codex re-review I1: prefer the run_id stored in the task payload
+    // (POST_TURN_EXTRACT carries the original conversation's run_id);
+    // fall back to the trusted MCP context's runId; never fall back to
+    // task.id, which is a Garden-task identifier, not a conversation
+    // run id. If neither source resolves, refuse to emit — the signal
+    // schema requires a valid run_id and a fabricated task-id-as-run-id
+    // would corrupt any downstream recall scoped by run_id.
+    const taskPayloadRunId =
+      isUnknownRecord(row.payload) && typeof row.payload.run_id === "string" && row.payload.run_id.length > 0
+        ? row.payload.run_id
+        : null;
+    const resolvedRunId = taskPayloadRunId ?? context.runId;
+
+    // Wave-end M1 (§29): host-supplied candidate_signals carry only
+    // content fields (McpEmitCandidateSignalRequestSchema). The daemon
+    // binds workspace_id / run_id / surface_id / source from the trusted
+    // task row + MCP context — never from host payload — so a host
+    // cannot self-report `source: "user_seed"` or a foreign run_id and
+    // sneak past the §29 default-scope guard.
+    const contentOnlySignals = request.result_envelope?.candidate_signals ?? [];
+
+    if (contentOnlySignals.length > 0 && resolvedRunId === null) {
+      throw new ToolValidationError(
+        "garden.complete_task cannot emit candidate_signals without a run_id in the task payload or MCP call context."
+      );
+    }
+
+    // Wave-end M2 (§10) + Codex re-review B1: emit candidate signals
+    // BEFORE writing SOUL_GARDEN_TASK_COMPLETED but AFTER the
+    // claim-ownership guard above. The combination prevents both the
+    // original audit-lies-about-emitted-N partial-failure window AND
+    // the orphan-signals-when-CAS-rejects window. A signal-emission
+    // throw still leaves the task in `claimed` (recoverable via
+    // gcAbandonedClaims or host retry); a CAS-rejected complete now
+    // never reaches signal emission at all.
+    const emittedSignalIds: string[] = [];
+    for (const signalContent of contentOnlySignals) {
+      const internalSignal = CandidateMemorySignalSchema.parse({
+        signal_id: `signal_${generateId()}`,
+        ...signalContent,
+        workspace_id: context.workspaceId,
+        run_id: resolvedRunId,
+        surface_id: null,
+        source: SignalSource.GARDEN_COMPILE,
+        created_at: now()
+      });
+      const received = await deps.signalService.receiveSignal(internalSignal);
+      emittedSignalIds.push(received.signal.signal_id);
+    }
+
+    const completedAt = now();
+    const event: GardenTaskEventInput = {
+      event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
+      entity_type: "garden_task",
+      entity_id: row.id,
+      workspace_id: context.workspaceId,
+      // Reviewer-final N1: prefer the run_id resolved from the task
+      // payload (POST_TURN_EXTRACT carries the original conversation's
+      // run_id) so the audit row's run_id matches the run_id stamped
+      // on each emitted candidate signal. Falls back to MCP context's
+      // runId when the task payload doesn't carry one.
+      run_id: resolvedRunId,
+      caused_by: context.agentTarget,
+      payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
+        task_id: row.id,
+        task_kind: row.kind,
+        role: row.role,
+        tier: GARDEN_ROLE_TIER_MAP[row.role],
+        success: request.status === "completed",
+        objects_affected: emittedSignalIds,
+        candidate_signals_count: emittedSignalIds.length,
+        workspace_id: context.workspaceId,
+        occurred_at: completedAt
+      })
+    };
+
+    await deps.gardenTaskRepo.completeWithEvents(
+      row.id,
+      {
+        status: request.status,
+        completed_at: completedAt,
+        ...(request.last_error_text === undefined ? {} : { last_error_text: request.last_error_text })
+      },
+      [event]
+    );
+
+    return GardenCompleteTaskResponseSchema.parse({
+      task_id: row.id,
+      status: request.status,
+      events_appended: 1
+    });
+  }
+
   async function applyOverride(
     request: SoulApplyOverrideRequest,
     context: McpMemoryToolCallContext
@@ -447,7 +699,8 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       },
       { expectedWorkspaceId: context.workspaceId }
     );
-    await refreshReportedRecallHits(request, context.workspaceId, reportedAt);
+    await promoteRecallHitMemories(request, context, reportedAt);
+    enqueuePostTurnExtractTask(request, context);
     return SoulReportContextUsageResponseSchema.parse({
       delivery_id: request.delivery_id,
       status: "recorded"
@@ -458,11 +711,17 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     request: SoulReportContextUsageRequest,
     workspaceId: string
   ): Promise<void> {
+    if (request.delivered_objects !== undefined && request.delivered_objects.length > 0) {
+      return;
+    }
     if (request.usage_state !== "used") {
       return;
     }
-
     const usedObjectIds = Array.from(new Set(request.used_object_ids ?? []));
+    if (usedObjectIds.length === 0) {
+      return;
+    }
+
     await Promise.all(
       usedObjectIds.map(async (objectId) => {
         const memory = await deps.memoryService.findByIdScoped(objectId, workspaceId);
@@ -478,26 +737,268 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     workspaceId: string,
     reportedAt: string
   ): Promise<void> {
-    if (request.usage_state !== "used") {
+    const usedObjectIds = resolveUsedObjectIds(request);
+    if (usedObjectIds.length === 0) {
       return;
     }
 
-    const usedObjectIds = Array.from(new Set(request.used_object_ids ?? []));
     await Promise.all(
       usedObjectIds.map(async (objectId) => {
-        await deps.memoryService.updateScoped(
+        await refreshScopedRecallUsage(
           objectId,
           workspaceId,
-          {
-            storage_tier: StorageTier.HOT,
-            last_used_at: reportedAt,
-            last_hit_at: reportedAt
-          },
-          "recall_usage_reported"
+          reportedAt
         );
       })
     );
   }
+
+  async function refreshScopedRecallUsage(
+    objectId: string,
+    workspaceId: string,
+    reportedAt: string
+  ): Promise<void> {
+    if (deps.memoryService.updateScoped === undefined) {
+      return;
+    }
+    await deps.memoryService.updateScoped(
+      objectId,
+      workspaceId,
+      {
+        storage_tier: StorageTier.HOT,
+        last_used_at: reportedAt,
+        last_hit_at: reportedAt
+      },
+      "recall_usage_reported"
+    );
+  }
+
+  function enqueuePostTurnExtractTask(
+    request: SoulReportContextUsageRequest,
+    context: McpMemoryToolCallContext
+  ): void {
+    if (
+      deps.gardenTaskRepo === undefined ||
+      context.runId === null ||
+      request.turn_index === undefined ||
+      // Wave-end M4: share the canonical used-id resolver with R2 so a
+      // single request produces consistent side-effects across the two
+      // paths (no ghost extract task without a matching tier promote
+      // and vice versa).
+      resolveUsedObjectIds(request).length === 0
+    ) {
+      return;
+    }
+
+    const workspaceId = context.workspaceId;
+    const runId = context.runId;
+    const turnIndex = request.turn_index;
+    const deliveredObjectIds = resolveDeliveredObjectIds(request);
+    const taskId = buildPostTurnExtractTaskId(workspaceId, runId, turnIndex);
+    const createdAt = now();
+
+    try {
+      deps.gardenTaskRepo.enqueue({
+        id: taskId,
+        workspace_id: workspaceId,
+        role: GardenRole.LIBRARIAN,
+        kind: GardenTaskKind.POST_TURN_EXTRACT,
+        payload: {
+          task_id: taskId,
+          task_kind: GardenTaskKind.POST_TURN_EXTRACT,
+          required_tier: GardenTier.TIER_2,
+          run_id: runId,
+          target_object_refs: deliveredObjectIds,
+          priority: 20,
+          created_at: createdAt,
+          turn_index: turnIndex,
+          workspace_id: workspaceId,
+          turn_digest: {
+            last_messages: normalizeTurnDigestMessages(request.turn_digest?.last_messages ?? []),
+            context_manifest: {
+              delivered_object_ids: deliveredObjectIds
+            }
+          }
+        },
+        created_at: createdAt
+      });
+    } catch (error) {
+      if (isDuplicatePostTurnExtractTask(error)) {
+        return;
+      }
+      throw error;
+    }
+  }
+
+  async function promoteRecallHitMemories(
+    request: SoulReportContextUsageRequest,
+    context: McpMemoryToolCallContext,
+    reportedAt: string
+  ): Promise<void> {
+    if (deps.eventPublisher === undefined || deps.memoryEntryRepo === undefined) {
+      await refreshReportedRecallHits(request, context.workspaceId, reportedAt);
+      return;
+    }
+
+    // Wave-end M4: the canonical used-id list now drives R2 the same
+    // way it drives H3. Pre-fix, R2 only saw `usage_state === "used"`
+    // + `used_object_ids` and missed requests that exercised the
+    // modern `delivered_objects[].usage_status === "used"` shape, so a
+    // host using the new shape would queue a POST_TURN_EXTRACT task
+    // (H3) but never trigger a tier promotion (R2). Same predicate
+    // now.
+    const usedObjectIds = resolveUsedObjectIds(request);
+    for (const objectId of usedObjectIds) {
+      const current = await deps.memoryService.findByIdScoped(objectId, context.workspaceId);
+      if (current === null) {
+        continue;
+      }
+      if (current.storage_tier === StorageTier.HOT) {
+        await refreshScopedRecallUsage(
+          objectId,
+          context.workspaceId,
+          reportedAt
+        );
+        continue;
+      }
+
+      const occurredAt = reportedAt;
+      const event = {
+        event_type: MemoryGovernanceEventType.SOUL_MEMORY_TIER_PROMOTED,
+        entity_type: "memory_entry",
+        entity_id: current.object_id,
+        workspace_id: context.workspaceId,
+        run_id: context.runId,
+        caused_by: context.agentTarget,
+        payload_json: SoulMemoryTierPromotedPayloadSchema.parse({
+          object_id: current.object_id,
+          object_kind: current.object_kind,
+          workspace_id: context.workspaceId,
+          run_id: context.runId,
+          from_tier: current.storage_tier,
+          to_tier: StorageTier.HOT,
+          reason: "recall_hit",
+          occurred_at: occurredAt
+        })
+      } as const;
+
+      try {
+        await deps.eventPublisher.appendManyWithMutation([event], () => {
+          const updated = deps.memoryEntryRepo?.updateTier({
+            objectId: current.object_id,
+            workspaceId: context.workspaceId,
+            fromTier: current.storage_tier,
+            toTier: StorageTier.HOT,
+            updatedAt: occurredAt,
+            expectedUpdatedAt: current.updated_at,
+            activationBump: RECALL_HIT_ACTIVATION_BUMP,
+            lastUsedAt: occurredAt,
+            lastHitAt: occurredAt
+          });
+          if (updated === null || updated === undefined) {
+            // Roll back the already-appended audit row when the CAS predicate loses.
+            throw new RecallHitTierPromotionCasMiss();
+          }
+          return updated;
+        });
+      } catch (error) {
+        if (error instanceof RecallHitTierPromotionCasMiss) {
+          continue;
+        }
+        throw error;
+      }
+    }
+  }
+}
+
+// Wave-end M4: one canonical "used object id list" for the entire
+// report_context_usage handler. Both R2 (recall hit → tier promotion)
+// and H3 (POST_TURN_EXTRACT enqueue) used to compute "is this used"
+// from different shapes of the same untrusted request — R2 looked at
+// `usage_state`+`used_object_ids` and H3 looked at `delivered_objects`.
+// A request that filled only one shape produced one side effect but
+// not the other. Now both consume the same canonical list.
+//
+// Modern shape (preferred): `delivered_objects[]` with per-object
+// `usage_status`. Take only those whose status is "used".
+// Legacy shape: top-level `usage_state === "used"` + `used_object_ids`.
+function resolveUsedObjectIds(request: SoulReportContextUsageRequest): readonly string[] {
+  if (request.delivered_objects !== undefined && request.delivered_objects.length > 0) {
+    const usedIds = request.delivered_objects
+      .filter((object) => object.usage_status === "used")
+      .map((object) => object.object_id);
+    return Object.freeze(Array.from(new Set(usedIds)));
+  }
+  if (request.usage_state === "used") {
+    return Object.freeze(Array.from(new Set(request.used_object_ids ?? [])));
+  }
+  return Object.freeze([]);
+}
+
+// All delivered object ids regardless of usage_status — used for the
+// H3 turn_digest manifest so the extract task sees what was delivered,
+// not just what was used.
+function resolveDeliveredObjectIds(request: SoulReportContextUsageRequest): readonly string[] {
+  const ids =
+    request.delivered_objects === undefined
+      ? request.used_object_ids ?? []
+      : request.delivered_objects.map((object) => object.object_id);
+  return Object.freeze([...new Set(ids)]);
+}
+
+function normalizeTurnDigestMessages(
+  messages: NonNullable<SoulReportContextUsageRequest["turn_digest"]>["last_messages"]
+): readonly { readonly role: string; readonly content_excerpt: string }[] {
+  return Object.freeze(
+    messages.map((message) =>
+      Object.freeze({
+        role: message.role,
+        content_excerpt: message.content_excerpt.slice(0, POST_TURN_EXTRACT_EXCERPT_MAX_CHARS)
+      })
+    )
+  );
+}
+
+function buildPostTurnExtractTaskId(
+  workspaceId: string,
+  runId: string,
+  turnIndex: number
+): string {
+  const digest = createHash("sha256")
+    .update(workspaceId)
+    .update("\0")
+    .update(runId)
+    .update("\0")
+    .update(String(turnIndex))
+    .digest("hex")
+    .slice(0, 32);
+  // Dedup key is (workspace_id, run_id, turn_index). H3 keeps the H1 repo
+  // unchanged, so the deterministic task id lets SQLite's existing
+  // garden_tasks primary-key constraint act as the duplicate guard.
+  return `post_turn_extract_${digest}`;
+}
+
+// Wave-end M3: detect H3 POST_TURN_EXTRACT dedupe via the structured
+// StorageError("DUPLICATE_KEY", ...) code that the storage repo now raises
+// from enqueue() on a primary-key collision. The previous implementation
+// scanned for SQLITE_CONSTRAINT + "garden_tasks.id" substring matches in
+// the better-sqlite3 error message, which couples this contract to the
+// library's internal text format. Falls back to message-substring
+// detection only as a defensive safety net.
+function isDuplicatePostTurnExtractTask(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {
+    const code = (current as { readonly code?: unknown }).code;
+    if (code === "DUPLICATE_KEY") {
+      return true;
+    }
+    current = (current as { readonly cause?: unknown }).cause;
+  }
+  return false;
+}
+
+function isUnknownRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function buildRecallPolicy(
@@ -536,6 +1037,65 @@ function buildRecallPolicy(
       },
       conflict_awareness: true
     }
+  };
+}
+
+function mapGardenMcpWorkerRole(role: GardenMcpWorkerRole | undefined): GardenRoleValue {
+  switch (role) {
+    case "janitor":
+      return GardenRole.JANITOR;
+    case "auditor":
+      return GardenRole.AUDITOR;
+    case "librarian":
+    case "host_worker":
+    case undefined:
+      return GardenRole.LIBRARIAN;
+  }
+}
+
+function toGardenTaskSnapshot(row: GardenTaskRow) {
+  return {
+    task_id: row.id,
+    role: gardenWorkerRoleForRow(row),
+    kind: row.kind,
+    created_at: row.created_at,
+    payload: publicGardenTaskPayload(row)
+  };
+}
+
+function toGardenClaimTaskPayload(row: GardenTaskRow) {
+  return {
+    task_id: row.id,
+    role: gardenWorkerRoleForRow(row),
+    kind: row.kind,
+    payload: publicGardenTaskPayload(row)
+  };
+}
+
+function gardenWorkerRoleForRow(row: GardenTaskRow): string {
+  return row.kind === GardenTaskKind.POST_TURN_EXTRACT ? "host_worker" : row.role;
+}
+
+function publicGardenTaskPayload(row: GardenTaskRow): unknown {
+  if (row.kind !== GardenTaskKind.POST_TURN_EXTRACT || !isUnknownRecord(row.payload)) {
+    return row.payload;
+  }
+
+  return {
+    run_id: row.payload.run_id,
+    turn_index: row.payload.turn_index,
+    workspace_id: row.payload.workspace_id,
+    turn_digest: row.payload.turn_digest
+  };
+}
+
+function toSilentAlreadyClaimed(taskId: string) {
+  return {
+    status: "already_claimed",
+    task_id: taskId,
+    role: "unknown",
+    kind: "unknown",
+    payload: null
   };
 }
 
@@ -654,6 +1214,13 @@ class ToolUnavailableError extends Error {
 
 class ToolNotFoundError extends Error {
   public readonly code = "NOT_FOUND";
+}
+
+class RecallHitTierPromotionCasMiss extends Error {
+  public constructor() {
+    super("Recall-hit tier promotion CAS predicate did not match.");
+    this.name = "RecallHitTierPromotionCasMiss";
+  }
 }
 
 function classifyError(error: unknown): "VALIDATION" | "UNAVAILABLE" | "NOT_FOUND" | "NEEDS_CONTEXT" | "INTERNAL" {

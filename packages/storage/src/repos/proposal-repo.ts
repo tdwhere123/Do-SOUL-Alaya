@@ -110,6 +110,14 @@ export interface AcceptedMemoryUpdateInput {
   readonly proposed_changes: MemoryEntryMutableFields;
   readonly updated_at: string;
   readonly caused_by: string;
+  // gate-6-delta I1: optional baseline snapshot of memory_entry.updated_at
+  // captured by the workflow's pre-tx read. When provided, the
+  // accept-and-apply transaction asserts the live memory is still at
+  // this baseline before mutating; on mismatch it throws a CONFLICT
+  // that the workflow normalises to VALIDATION ("stale snapshot,
+  // re-review required"). Closes the cross-proposal lost-update window
+  // when two distinct proposals target the same memory entry.
+  readonly expected_baseline_updated_at?: string | null;
 }
 
 export interface CreateProposalWithEventsOptions {
@@ -906,6 +914,24 @@ export class SqliteProposalRepo implements ProposalRepo {
           );
         }
 
+        // gate-6-delta I1: cross-proposal lost-update guard. The
+        // workflow captured the memory's updated_at outside this
+        // transaction (in prepareAcceptedProposalApply); if the live
+        // row has moved on (because a sibling proposal accept already
+        // committed against the same memory_entry), abort with
+        // CONFLICT so the reviewer can re-review against the new
+        // baseline. normalizeResolutionError in the workflow maps
+        // CONFLICT to a VALIDATION envelope.
+        if (
+          parsedMemoryUpdate.expected_baseline_updated_at !== null &&
+          existingMemory.updated_at !== parsedMemoryUpdate.expected_baseline_updated_at
+        ) {
+          throw new StorageError(
+            "CONFLICT",
+            `Memory entry ${parsedMemoryUpdate.target_object_id}: proposal was made against a stale snapshot; re-review required.`
+          );
+        }
+
         const storedReviewEvents = events.map((event) => insertEventLogEntry(this.eventLogWriter, event));
         const acceptedState = "accepted" satisfies ProposalResolutionState;
         const result =
@@ -1098,17 +1124,25 @@ function parseAcceptedMemoryUpdateInput(
   readonly workspace_id: string;
   readonly proposed_changes: MemoryEntryMutableFields & { readonly updated_at: string };
   readonly caused_by: string;
+  readonly expected_baseline_updated_at: string | null;
 }> {
   const parsedChanges = parseUpdateFields({
     ...PublicMemoryEntryMutableFieldsSchema.parse(input.proposed_changes),
     updated_at: parseUpdatedAt(input.updated_at)
   });
 
+  const expectedBaselineUpdatedAt =
+    input.expected_baseline_updated_at === null ||
+    input.expected_baseline_updated_at === undefined
+      ? null
+      : parseUpdatedAt(input.expected_baseline_updated_at);
+
   return deepFreeze({
     target_object_id: parseNonEmptyString(input.target_object_id, "target_object_id"),
     workspace_id: parseWorkspaceId(input.workspace_id),
     proposed_changes: parsedChanges,
-    caused_by: parseNonEmptyString(input.caused_by, "caused_by")
+    caused_by: parseNonEmptyString(input.caused_by, "caused_by"),
+    expected_baseline_updated_at: expectedBaselineUpdatedAt
   });
 }
 

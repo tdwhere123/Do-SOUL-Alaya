@@ -1,5 +1,8 @@
 import {
   SignalKind,
+  GardenClaimTaskRequestSchema,
+  GardenCompleteTaskRequestSchema,
+  GardenListPendingTasksRequestSchema,
   SoulApplyOverrideRequestSchema,
   SoulEmitCandidateSignalRequestSchema,
   SoulExploreGraphRequestSchema,
@@ -77,6 +80,24 @@ export const soulToolDefs: readonly SoulToolSpec[] = [
     description:
       "Report whether recalled context for a delivery was used, skipped, or not applicable. Supports delivered-vs-used trust state.",
     parametersSchema: SoulReportContextUsageRequestSchema
+  },
+  {
+    name: "garden.list_pending_tasks",
+    description:
+      "List Garden background tasks pending in this workspace. Read-only. Use before garden.claim_task to scope what work the host can pick up.",
+    parametersSchema: GardenListPendingTasksRequestSchema
+  },
+  {
+    name: "garden.claim_task",
+    description:
+      "Atomically claim a Garden task by id so the host (Codex / Claude Code) can run its own sub-agent extraction and post the result back. Returns already_claimed when another worker already grabbed it.",
+    parametersSchema: GardenClaimTaskRequestSchema
+  },
+  {
+    name: "garden.complete_task",
+    description:
+      "Submit the host's task result. Candidate signals in the result envelope flow into the same review queue host agents use via soul.emit_candidate_signal.",
+    parametersSchema: GardenCompleteTaskRequestSchema
   }
 ];
 

@@ -67,6 +67,82 @@ describe("Auditor", () => {
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
+  // gate-6-delta I4: revoke + renew + grace_request now commit a
+  // green-governance EventLog row in the same SQLite transaction as
+  // the underlying SQL UPDATE. The mock eventLogRepo captures the
+  // (events, mutate) pair so we can assert (a) the canonical event
+  // type lands and (b) the storage mutation runs inside the
+  // transaction body, not before/after.
+  it("emits SOUL_GREEN_REVOKED alongside revoke during evidence staleness check", async () => {
+    const appendManyWithMutation = vi.fn(async (entries: readonly unknown[], mutate: (rows: readonly unknown[]) => unknown) => {
+      const persisted = entries.map((entry, idx) => ({ ...(entry as object), event_id: `evt-${idx}`, created_at: "2026-03-27T00:00:00.000Z", revision: idx }));
+      mutate(persisted);
+      return undefined;
+    });
+    const eventLogRepo = {
+      append: vi.fn(),
+      appendManyWithMutation
+    } as unknown as { readonly appendManyWithMutation: ReturnType<typeof vi.fn> };
+    const { auditor, greenMaintenancePort } = createAuditor({
+      staleEntries: [{ memory_entry_id: "memory-1", stale_evidence_refs: ["evidence-1"] }],
+      eventLogRepo
+    });
+
+    await auditor.run(createTask({ task_kind: GardenTaskKind.EVIDENCE_STALENESS_CHECK }));
+
+    expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
+    const firstCall = appendManyWithMutation.mock.calls[0] ?? [[], () => undefined];
+    const emittedEntries = firstCall[0];
+    expect(emittedEntries).toEqual([
+      expect.objectContaining({
+        event_type: "soul.green.revoked",
+        entity_type: "memory_entry",
+        entity_id: "memory-1",
+        workspace_id: "workspace-1",
+        caused_by: "auditor",
+        payload_json: expect.objectContaining({
+          target_object_id: "memory-1",
+          revoke_reason: "verification_fail",
+          task_id: "task-1"
+        })
+      })
+    ]);
+    // The storage mutation still ran (inside the mutate callback).
+    expect(greenMaintenancePort.revokeGreen).toHaveBeenCalledWith(
+      "memory-1",
+      "verification_fail",
+      "task-1"
+    );
+  });
+
+  it("emits SOUL_GREEN_RENEWED for passive-stable expiring statuses and SOUL_GREEN_GRACE_REQUESTED for verification-required ones", async () => {
+    const appendManyWithMutation = vi.fn(async (entries: readonly unknown[], mutate: (rows: readonly unknown[]) => unknown) => {
+      const persisted = entries.map((entry, idx) => ({ ...(entry as object), event_id: `evt-${idx}`, created_at: "2026-03-27T00:00:00.000Z", revision: idx }));
+      mutate(persisted);
+      return undefined;
+    });
+    const eventLogRepo = {
+      append: vi.fn(),
+      appendManyWithMutation
+    } as unknown as { readonly appendManyWithMutation: ReturnType<typeof vi.fn> };
+    const { auditor, greenMaintenancePort } = createAuditor({
+      expiringStatuses: [
+        createExpiringGreenStatus("g1", MemoryDimension.PREFERENCE),
+        createExpiringGreenStatus("g2", MemoryDimension.FACT)
+      ],
+      eventLogRepo
+    });
+
+    await auditor.run(createTask({ task_kind: GardenTaskKind.GREEN_MAINTENANCE }));
+
+    const allEntries = appendManyWithMutation.mock.calls.flatMap((call) => call[0] ?? []);
+    const eventTypes = allEntries.map((entry) => (entry as { readonly event_type: string }).event_type);
+    expect(eventTypes).toContain("soul.green.renewed");
+    expect(eventTypes).toContain("soul.green.grace_requested");
+    expect(greenMaintenancePort.renewGreenPassiveStable).toHaveBeenCalledWith("g1", "task-1");
+    expect(greenMaintenancePort.requestActiveVerification).toHaveBeenCalledWith("g2", "task-1");
+  });
+
   it("does not revoke Green or record health diagnostics when evidence staleness finds nothing", async () => {
     const { auditor, greenMaintenancePort, healthJournal, scheduler } = createAuditor();
 
@@ -436,6 +512,7 @@ function createAuditor(options: {
   readonly patterns?: readonly HighFrequencyPattern[];
   readonly pendingPatternKeys?: readonly string[];
   readonly findBrokenPointers?: (workspaceId: string) => Promise<readonly BrokenPointerRecord[]>;
+  readonly eventLogRepo?: { readonly appendManyWithMutation: ReturnType<typeof vi.fn> };
 } = {}) {
   const evidenceCheckPort = {
     findMemoriesWithStaleEvidence: vi.fn(async () => options.staleEntries ?? [])
@@ -485,6 +562,7 @@ function createAuditor(options: {
       bootstrappingPort,
       scheduler,
       healthJournal,
+      eventLogRepo: options.eventLogRepo,
       now: () => "2026-03-27T00:00:00.000Z"
     }),
     evidenceCheckPort,

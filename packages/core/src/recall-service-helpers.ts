@@ -23,6 +23,12 @@ const CLAIM_LIKE_DIMENSIONS = new Set<MemoryDimensionType>([
   MemoryDimension.PREFERENCE,
   MemoryDimension.PROCEDURE
 ]);
+// Minimum local recall payload before lower tiers are worth scanning.
+export const MIN_RECALL_RESULTS = 5;
+// WARM memories are still useful but should rank below equally relevant HOT entries.
+export const WARM_CASCADE_DECAY = 0.7;
+// COLD memories are cold-start fallback only and receive a stronger freshness penalty.
+export const COLD_CASCADE_DECAY = 0.45;
 export const EMBEDDING_SIMILARITY_WEIGHT = 0.8;
 /**
  * Additive weight applied to PathPlasticityState.strength inside the

@@ -34,7 +34,12 @@ export function registerInspectorProposalRoutes(app: Hono, options: InspectorPro
     return await proxyDaemonJson(context, options, {
       method: "POST",
       path: `/workspaces/${encodeURIComponent(workspaceId)}/proposals/${encodeURIComponent(proposalId)}/review`,
-      body: bindReviewerIdentity(body, options)
+      body: bindReviewerIdentity(body, options),
+      // gate-6-delta I2: review is routed through the soul.* memory
+      // tool handler, which returns a closed {success: false, error:
+      // {code, message}} envelope. Forward it verbatim so MCP /
+      // Inspector / CLI report identical error.code + error.message.
+      forwardStructuredError: true
     });
   });
 }

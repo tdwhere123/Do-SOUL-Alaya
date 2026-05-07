@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../schema-primitives.js";
+import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../schema-primitives.js";
 import { GardenRoleSchema, GardenTaskKindSchema, GardenTierSchema } from "../soul/garden-tier.js";
 import { HealthEventKindSchema } from "../soul/health-journal.js";
 
@@ -39,6 +39,7 @@ export const SoulGardenTaskCompletedPayloadSchema = z
     tier: GardenTierSchema,
     success: z.boolean(),
     objects_affected: z.array(NonEmptyStringSchema).readonly(),
+    candidate_signals_count: NonNegativeIntSchema.optional(),
     workspace_id: NonEmptyStringSchema,
     occurred_at: IsoDatetimeStringSchema
   })

@@ -4,14 +4,18 @@ export type GardenCredentialProvenance = Readonly<{
   readonly kind: "env" | "file" | "embedding-fallback" | "none";
 }>;
 
-export const ALAYA_GARDEN_OPENAI_SECRET_REF_ENV = "ALAYA_GARDEN_OPENAI_SECRET_REF";
+export const ALAYA_GARDEN_OPENAI_SECRET_REF_ENV = "ALAYA_OFFICIAL_GARDEN_SECRET_REF";
+export const ALAYA_LEGACY_GARDEN_OPENAI_SECRET_REF_ENV = "ALAYA_GARDEN_OPENAI_SECRET_REF";
 export const ALAYA_EMBEDDING_OPENAI_SECRET_REF_ENV = "ALAYA_OPENAI_SECRET_REF";
 
 export function selectGardenCredentialProvenance(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly configEnv: ReadonlyMap<string, string>;
 }): GardenCredentialProvenance {
-  const dedicatedRef = readConfigValue(input.env, input.configEnv, ALAYA_GARDEN_OPENAI_SECRET_REF_ENV);
+  const dedicatedRef = readFirstConfigValue(input.env, input.configEnv, [
+    ALAYA_GARDEN_OPENAI_SECRET_REF_ENV,
+    ALAYA_LEGACY_GARDEN_OPENAI_SECRET_REF_ENV
+  ]);
 
   if (dedicatedRef !== null) {
     return { kind: secretRefKind(dedicatedRef) ?? "file" };
@@ -31,7 +35,10 @@ export function resolveGardenOpenAiCredential(input: {
   readonly provenance: GardenCredentialProvenance;
 }> {
   const env = input.env ?? process.env;
-  const dedicatedRef = readConfigValue(env, input.configEnv, ALAYA_GARDEN_OPENAI_SECRET_REF_ENV);
+  const dedicatedRef = readFirstConfigValue(env, input.configEnv, [
+    ALAYA_GARDEN_OPENAI_SECRET_REF_ENV,
+    ALAYA_LEGACY_GARDEN_OPENAI_SECRET_REF_ENV
+  ]);
 
   if (dedicatedRef !== null) {
     const resolved = resolveSecretRefOrThrow(dedicatedRef, ALAYA_GARDEN_OPENAI_SECRET_REF_ENV);
@@ -54,6 +61,20 @@ export function resolveGardenOpenAiCredential(input: {
     apiKey: resolved.value,
     provenance: { kind: "embedding-fallback" }
   };
+}
+
+function readFirstConfigValue(
+  env: NodeJS.ProcessEnv,
+  configEnv: ReadonlyMap<string, string>,
+  keys: readonly string[]
+): string | null {
+  for (const key of keys) {
+    const value = readConfigValue(env, configEnv, key);
+    if (value !== null) {
+      return value;
+    }
+  }
+  return null;
 }
 
 function readConfigValue(

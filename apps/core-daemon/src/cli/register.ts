@@ -22,7 +22,7 @@ import {
   resolveAlayaConfigPaths
 } from "./config-files.js";
 import { createDetachCommandSpec } from "./detach.js";
-import { createDoctorCommand } from "./doctor.js";
+import { createDoctorCommand, type GardenComputeStatus } from "./doctor.js";
 import { createInstallCommand } from "./install.js";
 import { createInspectCommand } from "./inspect.js";
 import { createUpdateCommand } from "./update.js";
@@ -57,6 +57,12 @@ export function registerAlayaCliCommands(
     },
     getGardenCredentialProvenance: async () =>
       await runtime.services.configService.getGardenCredentialProvenance(),
+    // C2: derive Garden compute provider truth from the same env the daemon
+    // bootstrap reads. credential_source distinguishes the dedicated Garden
+    // secret_ref from the deprecated embedding-fallback path so operators
+    // can see which configuration is actually live.
+    getGardenCompute: async () =>
+      await resolveGardenComputeStatus(runtime),
     getPathPlasticityLookupTelemetry: () =>
       defaultRecallPathPlasticityLookupTelemetry.snapshot(),
     // p5-system-review-r3 MR-I11: schema_ok needs the live db. initDatabase
@@ -102,6 +108,62 @@ export function registerAlayaCliCommands(
   for (const command of createOperationCommandSpecs()) {
     bridge.registerSubcommand(command);
   }
+}
+
+/**
+ * C2: derive the Garden compute snapshot the doctor command reports.
+ *
+ * Reading the saved RuntimeGardenComputeConfig (via configService) gives us
+ * provider_kind / model_id / provider_url. The credential_source needs raw
+ * env so we can distinguish the dedicated Garden key from the embedding
+ * fallback (deprecated for v0.1.1, removed in v0.2). routing_decision
+ * mirrors provider_kind for now — once the host_worker provider lands in
+ * H2/H3, this can flip when official_api is configured but unhealthy.
+ */
+async function resolveGardenComputeStatus(
+  runtime: AlayaDaemonRuntime
+): Promise<GardenComputeStatus> {
+  const config = await runtime.services.configService.getRuntimeGardenComputeConfig();
+  const provenance = await runtime.services.configService.getGardenCredentialProvenance();
+  const credential =
+    provenance.kind === "embedding-fallback"
+      ? ({ kind: "embedding-fallback" } as const)
+      : resolveGardenCredentialSource(config.secret_ref);
+  return {
+    provider_kind: config.provider_kind,
+    model_id: config.model_id,
+    provider_url: config.provider_url,
+    credential_source: credential,
+    routing_decision: config.provider_kind
+  };
+}
+
+function resolveGardenCredentialSource(
+  secretRef: string | null
+): GardenComputeStatus["credential_source"] {
+  if (secretRef === null || secretRef === "") {
+    // No dedicated Garden secret_ref. Embedding fallback only kicks in when
+    // the deprecated path was the active source — getRuntimeGardenComputeConfig
+    // surfaces that as a non-null secret_ref starting with "env:" or "file:",
+    // so a null here means Garden has no key at all.
+    return { kind: "none" };
+  }
+  if (secretRef.startsWith("env:")) {
+    return { kind: "env", name: secretRef.slice("env:".length) };
+  }
+  if (secretRef.startsWith("file:")) {
+    const path = secretRef.slice("file:".length);
+    return { kind: "file", masked_path: maskPath(path) };
+  }
+  return { kind: "none" };
+}
+
+function maskPath(path: string): string {
+  const segments = path.split("/").filter(Boolean);
+  if (segments.length <= 2) {
+    return path;
+  }
+  return `…/${segments[segments.length - 1]}`;
 }
 
 interface AttachArgs {
@@ -220,12 +282,27 @@ function createMcpCommand(runtime: AlayaDaemonRuntime): AlayaSubcommandSpec<read
       }
       runtime.startBackgroundServices();
 
+      // gate-6-delta B1: the MCP stdio surface is an attached-agent
+      // boundary; it must never advertise itself as a human-reviewer
+      // surface ("inspector" / "cli"). An attacker controlling launch
+      // env who set ALAYA_AGENT_TARGET=cli would otherwise get
+      // assertProposalContext's runId-null loosening at
+      // mcp-memory-proposal-workflow.ts:568-571 and could accept any
+      // pending proposal in the workspace. The other agent-attached
+      // surfaces apply equivalent guards at their boundaries
+      // (cli/review.ts:378-408 pins "cli", cli/tools.ts:82-90 rejects
+      // human-reviewer targets), so per invariants §30 we fix at
+      // source by sanitising the env here.
+      const resolvedAgentTarget = resolveMcpAgentTarget(ctx.env.ALAYA_AGENT_TARGET, (message) => {
+        ctx.stderr.write(`${message}\n`);
+      });
+
       const server = await runAlayaMcpStdioServer({
         memoryToolHandler: runtime.services.mcpMemoryToolHandler,
         contextProvider: () => ({
           workspaceId: workspaceContext.workspaceId,
           runId: trustedRunId.runId,
-          agentTarget: ctx.env.ALAYA_AGENT_TARGET ?? "mcp"
+          agentTarget: resolvedAgentTarget
         }),
         stdin: ctx.stdin as unknown as Readable,
         stdout: ctx.stdout as unknown as Writable
@@ -240,6 +317,32 @@ function createMcpCommand(runtime: AlayaDaemonRuntime): AlayaSubcommandSpec<read
       return { exitCode: ALAYA_SYSEXITS.OK };
     }
   };
+}
+
+function resolveMcpAgentTarget(
+  requestedAgentTarget: string | undefined,
+  warn: (message: string) => void
+): string {
+  if (requestedAgentTarget === undefined || requestedAgentTarget.trim().length === 0) {
+    return "mcp";
+  }
+
+  if (requestedAgentTarget === "cli" || requestedAgentTarget === "inspector") {
+    warn(`Ignoring ALAYA_AGENT_TARGET=${requestedAgentTarget}: MCP stdio cannot impersonate human-reviewer surfaces.`);
+    return "mcp";
+  }
+
+  if (
+    requestedAgentTarget === "codex" ||
+    requestedAgentTarget === "claude-code" ||
+    requestedAgentTarget === "garden-worker" ||
+    requestedAgentTarget === "mcp"
+  ) {
+    return requestedAgentTarget;
+  }
+
+  warn(`Ignoring unsupported ALAYA_AGENT_TARGET=${requestedAgentTarget}: MCP stdio supports codex, claude-code, garden-worker, or mcp.`);
+  return "mcp";
 }
 
 function stringListArgsSchema(): AlayaCliArgsSchema<readonly string[]> {

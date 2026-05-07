@@ -169,10 +169,10 @@ describe("Phase-6 MCP agent-use protocol proof", () => {
       transcript.push({ step: "soul.report_context_usage", evidence: usage });
       expect(usage).toEqual({ delivery_id: recall.delivery_id, status: "recorded" });
 
+      // gate-6-delta I5: workspace_id / run_id / surface_id are stripped
+      // from the public MCP schema. The daemon binds them from the
+      // trusted MCP call context via mcpMemoryToolHandler.
       const signal = await callTool<SoulEmitCandidateSignalResponse>(client, "soul.emit_candidate_signal", {
-        workspace_id: "workspace-1",
-        run_id: "run-1",
-        surface_id: "phase6-agent-use-proof",
         signal_kind: "potential_preference",
         object_kind: "memory_entry",
         scope_hint: ScopeClass.PROJECT,

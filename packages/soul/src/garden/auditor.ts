@@ -8,8 +8,12 @@ import {
   type OrphanRadar,
   type OrphanRadarSuggestedActionValue,
   GraphAuditorEventType,
+  GreenGovernanceEventType,
   SoulGardenEventLogOrphanDetectedEventType,
   SoulGardenEventLogOrphanDetectedPayloadSchema,
+  SoulGreenGraceRequestedPayloadSchema,
+  SoulGreenRenewedPayloadSchema,
+  SoulGreenRevokedPayloadSchema,
   type AuditorBootstrappingPort,
   type AuditorEventLogPort,
   type AuditorEvidenceCheckPort,
@@ -43,8 +47,16 @@ export const AUDITOR_CONSTANTS = {
   EXPIRY_LOOKAHEAD_MS: 7 * 86_400_000,
   ORPHAN_RADAR_TTL_MS: 48 * 3_600_000,
   RECOVERY_WINDOW_MS: 3_600_000,
-  BATCH_SIZE: 20
+  BATCH_SIZE: 20,
+  // gate-6-delta I4: must mirror the storage-side
+  // ACTIVE_VERIFICATION_GRACE_MS so the SOUL_GREEN_GRACE_REQUESTED
+  // audit row records the same valid_until that the SQL UPDATE sets.
+  ACTIVE_VERIFICATION_GRACE_MS: 7 * 86_400_000
 } as const;
+
+function addMillisecondsIso(isoTimestamp: string, deltaMs: number): string {
+  return new Date(new Date(isoTimestamp).getTime() + deltaMs).toISOString();
+}
 
 export interface AuditorDependencies {
   readonly evidenceCheckPort: AuditorEvidenceCheckPort;
@@ -107,10 +119,34 @@ export class Auditor {
     const batch = staleEntries.slice(0, AUDITOR_CONSTANTS.BATCH_SIZE);
 
     for (const entry of batch) {
-      await this.dependencies.greenMaintenancePort.revokeGreen(
-        entry.memory_entry_id,
-        "verification_fail",
-        task.task_id
+      // gate-6-delta I4: revokeGreen used to write green_statuses
+      // directly with no audit row. Now it commits inside a single
+      // SQLite tx with the SOUL_GREEN_REVOKED event log row.
+      const revokedAt = this.now();
+      const payload = SoulGreenRevokedPayloadSchema.parse({
+        target_object_id: entry.memory_entry_id,
+        workspace_id: task.workspace_id,
+        revoke_reason: "verification_fail",
+        task_id: task.task_id,
+        occurred_at: revokedAt
+      });
+      await this.publishEventLogMutation(
+        {
+          event_type: GreenGovernanceEventType.SOUL_GREEN_REVOKED,
+          entity_type: "memory_entry",
+          entity_id: entry.memory_entry_id,
+          workspace_id: task.workspace_id,
+          run_id: task.run_id,
+          caused_by: this.role,
+          payload_json: payload
+        },
+        () => {
+          this.dependencies.greenMaintenancePort.revokeGreen(
+            entry.memory_entry_id,
+            "verification_fail",
+            task.task_id
+          );
+        }
       );
     }
 
@@ -401,9 +437,33 @@ export class Auditor {
 
     for (const status of batch) {
       if (isPassiveStableDimension(status.dimension)) {
-        await this.dependencies.greenMaintenancePort.renewGreenPassiveStable(
-          status.green_status_id,
-          task.task_id
+        // gate-6-delta I4: SOUL_GREEN_RENEWED audit row is committed
+        // alongside the renew SQL in one SQLite transaction.
+        const renewedAt = this.now();
+        const renewedPayload = SoulGreenRenewedPayloadSchema.parse({
+          object_id: status.green_status_id,
+          target_object_id: status.memory_entry_id,
+          workspace_id: task.workspace_id,
+          verification_basis: "passive_stable",
+          task_id: task.task_id,
+          occurred_at: renewedAt
+        });
+        await this.publishEventLogMutation(
+          {
+            event_type: GreenGovernanceEventType.SOUL_GREEN_RENEWED,
+            entity_type: "green_status",
+            entity_id: status.green_status_id,
+            workspace_id: task.workspace_id,
+            run_id: task.run_id,
+            caused_by: this.role,
+            payload_json: renewedPayload
+          },
+          () => {
+            this.dependencies.greenMaintenancePort.renewGreenPassiveStable(
+              status.green_status_id,
+              task.task_id
+            );
+          }
         );
         affected = [...affected, status.green_status_id];
         continue;
@@ -415,9 +475,34 @@ export class Auditor {
       }
 
       if (requiresActiveVerification(status.dimension)) {
-        await this.dependencies.greenMaintenancePort.requestActiveVerification(
-          status.green_status_id,
-          task.task_id
+        // gate-6-delta I4: SOUL_GREEN_GRACE_REQUESTED audit row is
+        // committed alongside the active-verification grace request.
+        const requestedAt = this.now();
+        const graceUntil = addMillisecondsIso(requestedAt, AUDITOR_CONSTANTS.ACTIVE_VERIFICATION_GRACE_MS);
+        const requestedPayload = SoulGreenGraceRequestedPayloadSchema.parse({
+          object_id: status.green_status_id,
+          target_object_id: status.memory_entry_id,
+          workspace_id: task.workspace_id,
+          valid_until: graceUntil,
+          task_id: task.task_id,
+          occurred_at: requestedAt
+        });
+        await this.publishEventLogMutation(
+          {
+            event_type: GreenGovernanceEventType.SOUL_GREEN_GRACE_REQUESTED,
+            entity_type: "green_status",
+            entity_id: status.green_status_id,
+            workspace_id: task.workspace_id,
+            run_id: task.run_id,
+            caused_by: this.role,
+            payload_json: requestedPayload
+          },
+          () => {
+            this.dependencies.greenMaintenancePort.requestActiveVerification(
+              status.green_status_id,
+              task.task_id
+            );
+          }
         );
         affected = [...affected, status.green_status_id];
       }

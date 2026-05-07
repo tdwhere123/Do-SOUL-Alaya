@@ -22,6 +22,7 @@ import {
   SoulReportContextUsageResponseSchema,
   SoulReviewMemoryProposalRequestSchema,
   SoulReviewMemoryProposalResponseSchema,
+  StorageTier,
   TransitionCausedBy,
   TransitionCausedBySchema,
   TransitionRecordSchema,
@@ -97,10 +98,9 @@ describe("MCP tool request/response schemas", () => {
     const requestCases = [
       {
         schema: SoulEmitCandidateSignalRequestSchema,
+        // gate-6-delta I5: workspace_id / run_id / surface_id are bound
+        // from trusted MCP context; the public schema rejects them.
         value: {
-          workspace_id: "workspace-1",
-          run_id: "run-1",
-          surface_id: null,
           signal_kind: "potential_claim",
           object_kind: "claim_form",
           scope_hint: null,
@@ -288,6 +288,56 @@ describe("MCP tool request/response schemas", () => {
     }
   });
 
+  it("accepts recall cascade degradation_reason values", () => {
+    const baseResponse = {
+      delivery_id: "delivery-1",
+      results: [],
+      total_count: 0,
+      strategy_mix: {
+        deterministic_match: true,
+        precomputed_rank: true,
+        semantic_supplement: false,
+        graph_support: false,
+        path_plasticity: false,
+        global_recall: false
+      }
+    };
+
+    expect(SoulMemorySearchResponseSchema.parse({
+      ...baseResponse,
+      degradation_reason: "recall_explainability_partial"
+    }).degradation_reason).toBe("recall_explainability_partial");
+    expect(SoulMemorySearchResponseSchema.parse({
+      ...baseResponse,
+      degradation_reason: "warm_cascade_engaged"
+    }).degradation_reason).toBe("warm_cascade_engaged");
+    expect(SoulMemorySearchResponseSchema.parse({
+      ...baseResponse,
+      degradation_reason: "cold_cascade_engaged"
+    }).degradation_reason).toBe("cold_cascade_engaged");
+  });
+
+  it("rejects unknown recall degradation_reason values", () => {
+    const baseResponse = {
+      delivery_id: "delivery-1",
+      results: [],
+      total_count: 0,
+      strategy_mix: {
+        deterministic_match: true,
+        precomputed_rank: true,
+        semantic_supplement: false,
+        graph_support: false,
+        path_plasticity: false,
+        global_recall: false
+      }
+    };
+
+    expect(SoulMemorySearchResponseSchema.safeParse({
+      ...baseResponse,
+      degradation_reason: "frozen_cascade_engaged"
+    }).success).toBe(false);
+  });
+
   it("rejects the legacy generic graph explore contract", () => {
     expect(() =>
       SoulExploreGraphRequestSchema.parse({
@@ -304,6 +354,38 @@ describe("MCP tool request/response schemas", () => {
       })
     ).toThrow();
   });
+
+  // gate-6-delta I5: SoulEmitCandidateSignalRequestSchema must reject
+  // payload-supplied scope fields. The MCP daemon binds workspace_id /
+  // run_id / surface_id from the trusted call context per §29 Default
+  // Scope; allowing them in the public schema would teach attached
+  // LLMs to learn and replay their own scope, reopening the
+  // prompt-inject vector.
+  it.each([
+    { extraField: "workspace_id", extraValue: "workspace-other" },
+    { extraField: "run_id", extraValue: "run-other" },
+    { extraField: "surface_id", extraValue: "surface-other" }
+  ])(
+    "rejects soul.emit_candidate_signal payloads that supply $extraField",
+    ({ extraField, extraValue }) => {
+      const baseValue = {
+        signal_kind: "potential_claim",
+        object_kind: "claim_form",
+        scope_hint: null,
+        domain_tags: ["repo"] as readonly string[],
+        confidence: 0.7,
+        evidence_refs: ["message-1"] as readonly string[],
+        raw_payload: { summary: "candidate signal" }
+      };
+
+      expect(() =>
+        SoulEmitCandidateSignalRequestSchema.parse({
+          ...baseValue,
+          [extraField]: extraValue
+        })
+      ).toThrow();
+    }
+  );
 });
 
 describe("EventType and TransitionRecord", () => {
@@ -359,6 +441,33 @@ describe("EventType and TransitionRecord", () => {
     }
   });
 
+  it("parses recall-hit tier promotion payloads", () => {
+    const payload = {
+      object_id: "memory-1",
+      object_kind: "memory_entry",
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      from_tier: StorageTier.WARM,
+      to_tier: StorageTier.HOT,
+      reason: "recall_hit",
+      occurred_at: validTimestamp
+    } as const;
+
+    expect(
+      parseMemoryGovernanceEventPayload(
+        MemoryGovernanceEventType.SOUL_MEMORY_TIER_PROMOTED,
+        payload
+      )
+    ).toEqual(payload);
+
+    expect(() =>
+      parseMemoryGovernanceEventPayload(
+        MemoryGovernanceEventType.SOUL_MEMORY_TIER_PROMOTED,
+        { ...payload, reason: "not-a-promotion-reason" }
+      )
+    ).toThrow();
+  });
+
   it("keeps caused_by enum complete and closed", () => {
     const expectedValues = ["user", "system", "review", "deterministic_rule", "auditor", "bootstrap"];
     expect(Object.values(TransitionCausedBy)).toEqual(expectedValues);
@@ -375,6 +484,8 @@ describe("EventType and TransitionRecord", () => {
       "soul.memory.state_changed",
       "soul.memory.retention_updated",
       "soul.memory.manifestation_changed",
+      "soul.memory.tier_changed",
+      "soul.memory.tier_promoted",
       "soul.synthesis.created",
       "soul.synthesis.status_changed",
       "soul.synthesis.promoted",

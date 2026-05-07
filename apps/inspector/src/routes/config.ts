@@ -28,6 +28,31 @@ export function registerInspectorConfigRoutes(
       body: await context.req.json()
     });
   });
+
+  app.get("/api/config/:workspaceId/garden-compute", async (context) => {
+    return await proxyDaemonJson(context, options, {
+      method: "GET",
+      path: "/config/runtime/garden-compute"
+    });
+  });
+
+  app.patch("/api/config/runtime/garden-compute", async (context) => {
+    return await proxyDaemonJson(context, options, {
+      method: "PATCH",
+      path: "/config/runtime/garden-compute",
+      body: await context.req.json()
+    });
+  });
+
+  // U2: surface embedding init/runtime failures inline in the Inspector
+  // config form. The daemon already records degraded_reason via the health
+  // journal; this proxy gives the form a clean read path.
+  app.get("/api/embedding-status/:workspaceId", async (context) => {
+    return await proxyDaemonJson(context, options, {
+      method: "GET",
+      path: `/workspaces/${encodeURIComponent(context.req.param("workspaceId"))}/embedding-status`
+    });
+  });
 }
 
 function registerConfigSection(

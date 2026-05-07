@@ -6,12 +6,13 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-038` (`#BL-022` was opened by
+sequence. **Next available number**: `#BL-039` (`#BL-022` was opened by
 p5-system-review-r3 as an EventPublisher v0.2 deferral and closed in
 v0.1-closeout-a2; `#BL-023`/`#BL-024` were resolved in r1 / r2;
 `#BL-025` through `#BL-036` were opened by the v0.1-closeout A2 and
 D2 fix-loops, then resolved by Gate-5F under
-`docs/v0.1/phase-5-followup-briefs/` before Phase 6).
+`docs/v0.1/phase-5-followup-briefs/` before Phase 6; `#BL-037` and
+`#BL-038` remain open).
 
 ## Open Issues
 
@@ -35,6 +36,52 @@ Close condition:
 - If unsupported, remove the `cli-consumable` expectation for Codex
   host slash recognition and keep `alaya inspect --open` plus MCP/CLI
   fallback as the supported path.
+
+### #BL-038 - Host autonomous use of `soul.*` tools
+
+Opened by v0.1.1 Slice L1 (Codex diagnostic finding B-PL2 in
+`.do-it/product-logic/agent-use-garden-config-diagnostic.md`).
+
+**Why:** Today `mcp-callable` is proven only by an SDK-driven
+deterministic harness (`apps/core-daemon/src/__tests__/phase6-agent-use-protocol.test.ts`).
+That proves the daemon can serve calls when something invokes them.
+It does NOT prove a real Codex or Claude Code session, with the
+attach-written `operator_instructions`, autonomously selects
+`soul.recall` / `soul.open_pointer` / `soul.report_context_usage`
+during a normal user conversation.
+
+**Acceptance (when this gets a v0.2 task card):**
+
+1. Fresh install → fresh attach in an isolated config dir.
+2. Start a real MCP stdio session against Codex CLI (or Claude Code) —
+   no test harness driving tool calls.
+3. Run a memory-sensitive prompt that the host model has plausibly
+   trained on as a recall-worthy scenario (e.g. "what was the user's
+   stated naming preference for retry helpers?").
+4. Capture EventLog rows for `soul.recall` invoked by the host within
+   N turns, with non-empty delivery.
+5. Post `soul.report_context_usage` with `usage_status="used"` for at
+   least one delivered_object.
+6. EventLog evidence is preserved as a fixture under
+   `docs/v0.X/...` and tied to a regression check that re-runs against
+   the recorded transcript (offline replay) so the proof remains
+   stable across host model upgrades.
+
+**Out of scope here:** Provider-backed Garden compute proof
+(separate; gated by network/key availability, not model autonomy).
+
+**Why not in v0.1.1:** Requires either a real Codex/Claude run with
+controlled prompting, or an offline transcript replay harness — neither
+is in the v0.1.1 wave scope. v0.1.1 ships the surface and the
+`agent-used` label so that when a real proof lands, it has a place to
+go without renaming the vocabulary again.
+
+## Resolved Recently
+
+There are no other cross-phase unresolved issues after the Gate-5F
+implementation closeout. Gate-5F's aggregate final review and full
+verification gates passed before Phase 6 started; Phase 6 closed via
+Gate-6 + delta补审 (`docs/v0.1/phase-6-briefs/reports/gate-6-delta-review.md`).
 
 ## Resolved by Gate-5F (2026-05-05)
 

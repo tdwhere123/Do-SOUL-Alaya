@@ -68,6 +68,18 @@ export function registerConfigRoutes(app: Hono, services: ConfigRouteServices): 
       );
       return context.json({ success: true, data: config, requires_daemon_restart: true }, 200);
     });
+
+    app.get("/config/runtime/garden-compute", async (context) => {
+      const config = await services.configService!.getRuntimeGardenComputeConfig();
+      return context.json({ success: true, data: config }, 200);
+    });
+
+    app.patch("/config/runtime/garden-compute", async (context) => {
+      const config = await services.configService!.patchRuntimeGardenComputeConfig(
+        await parseJsonBody(context.req.json.bind(context.req))
+      );
+      return context.json({ success: true, data: config, requires_daemon_restart: true }, 200);
+    });
   }
 
   if (services.environmentStatusService !== undefined) {

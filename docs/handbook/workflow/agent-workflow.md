@@ -154,10 +154,12 @@ a separate commit prefixed `docs(<card-id>):` that touches the card
 and the report in the same commit. Silent amendments are forbidden.
 
 **R5. Live-ready claims need integration evidence.** Claiming
-`live-event-ready`, `mcp-consumable`, or `cli-consumable` requires
-citing one integration or E2E test that exercises the producer →
-surface path end-to-end. Unit-only evidence does not earn a live-ready
-label.
+`live-event-ready`, `mcp-callable`, `host-worker-ready`, or
+`cli-consumable` requires citing one integration or E2E test that
+exercises the producer → surface path end-to-end. Unit-only evidence
+does not earn a live-ready label. The stronger `agent-used` label
+requires a real host-driven proof and is currently deferred (see
+backlog `#BL-host-driven-autonomy-proof`).
 
 ## Discipline Rules
 

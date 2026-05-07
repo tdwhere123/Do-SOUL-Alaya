@@ -127,6 +127,15 @@ export default function GraphPage() {
     const renderForBox = (width: number, height: number): (() => void) => {
       svg.selectAll("*").remove();
 
+      // viewBox normalises the SVG user-coordinate system to the simulation's
+      // width×height. Without it, user coords equal CSS pixels — so a sim
+      // centred at (width/2,height/2) ends up in the upper-left quadrant of a
+      // larger rendered SVG. preserveAspectRatio="xMidYMid meet" centres the
+      // viewBox visually with letterbox bands when aspect ratios disagree.
+      svg
+        .attr("viewBox", `0 0 ${width} ${height}`)
+        .attr("preserveAspectRatio", "xMidYMid meet");
+
       // Softened ink-bleed: keeps the paper aesthetic but stops drowning edges.
       const defs = svg.append("defs");
       const filter = defs

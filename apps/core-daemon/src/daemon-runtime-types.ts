@@ -1,9 +1,9 @@
 import type { RequestProtectionConfig } from "./app.js";
 import type { createCoreDaemonApp } from "./daemon-app-composition.js";
 import type { AlayaRuntimeNotifier } from "./runtime-notifier.js";
+import type { AppConfigService } from "./services/config-service.js";
 import type { EmbeddingStatusService } from "./services/embedding-status-service.js";
 import type { EnvironmentStatusService } from "./services/environment-status-service.js";
-import type { AppConfigService } from "./services/config-service.js";
 import type { McpMemoryToolHandler } from "./mcp-memory-tool-handler.js";
 import type { TrustStateRecorder } from "./trust-state.js";
 import type { RunService, WorkspaceService } from "@do-soul/alaya-core";
@@ -45,7 +45,7 @@ export interface AlayaDaemonRuntimeServices {
   }>;
   readonly environmentStatusService: EnvironmentStatusService;
   readonly embeddingStatusService: EmbeddingStatusService;
-  readonly configService: Pick<AppConfigService, "getGardenCredentialProvenance">;
+  readonly configService: Pick<AppConfigService, "getGardenCredentialProvenance" | "getRuntimeGardenComputeConfig">;
   readonly mcpMemoryToolHandler: McpMemoryToolHandler;
   readonly runService: Pick<RunService, "getById">;
   readonly trustStateRecorder: TrustStateRecorder;

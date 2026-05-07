@@ -7,7 +7,7 @@ import {
   type GardenTaskDescriptor,
   type GardenTaskResult
 } from "@do-soul/alaya-protocol";
-import { GardenScheduler } from "../garden/scheduler.js";
+import { GardenScheduler, InMemoryGardenTaskRepo } from "../garden/scheduler.js";
 
 describe("GardenScheduler", () => {
   it("dispatches a tier-0 task for janitor and emits a dispatch event", async () => {
@@ -555,6 +555,49 @@ describe("GardenScheduler", () => {
       warning_active: true
     });
     expect(scheduler.peekBacklogWarningTransition()).toBeNull();
+  });
+
+  // Reviewer-final F1 (refines Codex re-review I3): the snapshot-based
+  // rollback in InMemoryGardenTaskRepo.claimAtomicWithEvents must
+  // restore attempt_count to its pre-claim value, not just status. The
+  // earlier I3 regression test only checked that a retry succeeded —
+  // pre-fix releaseClaim path also let retries succeed (it only failed
+  // to revert attempt_count, not status). This test exposes the
+  // pre-fix bug by reading attempt_count via the new findById port and
+  // asserting it never drifts above 1 across multiple failed dispatches.
+  it("restores attempt_count on dispatch-append rollback (I3 + F1)", async () => {
+    const eventLog = {
+      append: vi
+        .fn(async () => undefined)
+        .mockRejectedValueOnce(new Error("first append failed"))
+        .mockRejectedValueOnce(new Error("second append failed"))
+    };
+    const repo = new InMemoryGardenTaskRepo(eventLog);
+    const scheduler = new GardenScheduler(
+      eventLog,
+      { now: () => "2026-04-23T08:00:00.000Z" },
+      null,
+      repo
+    );
+
+    scheduler.enqueue(
+      createTask({ task_id: "task-i3", required_tier: GardenTier.TIER_0 })
+    );
+
+    await expect(scheduler.dispatchNext(GardenRole.LIBRARIAN)).rejects.toThrow(
+      "first append failed"
+    );
+    expect(repo.findById("task-i3")?.attempt_count).toBe(0);
+
+    await expect(scheduler.dispatchNext(GardenRole.LIBRARIAN)).rejects.toThrow(
+      "second append failed"
+    );
+    expect(repo.findById("task-i3")?.attempt_count).toBe(0);
+
+    // Successful retry: attempt_count bumps to exactly 1, not 3.
+    const dispatched = await scheduler.dispatchNext(GardenRole.LIBRARIAN);
+    expect(dispatched).not.toBeNull();
+    expect(repo.findById("task-i3")?.attempt_count).toBe(1);
   });
 
   it("does not remove a tier-violation task when the reject append fails", async () => {

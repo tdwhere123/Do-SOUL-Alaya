@@ -1,9 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
-import { Eye, EyeOff, Save } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Eye, EyeOff, Save } from "lucide-react";
 import { clsx } from "clsx";
 import { apiFetch, getWorkspaceId, type ApiError } from "../api";
 import { useToasts } from "./Toast";
-import type { RuntimeEmbeddingConfig } from "@do-soul/alaya-protocol";
+import {
+  EmbeddingStatusSchema,
+  type EmbeddingStatus,
+  type RuntimeEmbeddingConfig
+} from "@do-soul/alaya-protocol";
 
 interface PatchResult {
   readonly success?: boolean;
@@ -57,6 +61,27 @@ export default function EmbeddingSupplementForm({ onRequiresRestart }: Props) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [embeddingStatus, setEmbeddingStatus] = useState<EmbeddingStatus | null>(null);
+
+  // Fetch the workspace embedding-status so the form can surface init/runtime
+  // failures (bad URL, unreachable endpoint, model unknown) inline rather
+  // than letting them sit silently in daemon logs. The daemon already records
+  // degraded_reason via the health-journal degradation path the moment recall
+  // attempts to use the provider; we just expose what's already there.
+  const refreshEmbeddingStatus = useCallback(async () => {
+    try {
+      const envelope = await apiFetch<{ data?: unknown }>(
+        `/embedding-status/${workspaceId}`
+      );
+      const parsed = EmbeddingStatusSchema.safeParse(envelope.data);
+      if (parsed.success) {
+        setEmbeddingStatus(parsed.data);
+      }
+    } catch {
+      // Non-fatal: leave previous status visible. The standalone /status page
+      // owns the global "daemon unreachable" surfacing.
+    }
+  }, [workspaceId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,15 +105,21 @@ export default function EmbeddingSupplementForm({ onRequiresRestart }: Props) {
           message: `Failed to load embedding config: ${(err as Error).message}`,
           type: "error"
         });
+        return;
       } finally {
         if (!cancelled) setLoading(false);
+      }
+      // Fetch status AFTER config load completes — keeps the request order
+      // deterministic for tests and avoids racing the config GET on mount.
+      if (!cancelled) {
+        await refreshEmbeddingStatus();
       }
     };
     void load();
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, showToast]);
+  }, [workspaceId, showToast, refreshEmbeddingStatus]);
 
   const dirty = useMemo(() => {
     if (!initial) return false;
@@ -141,6 +172,10 @@ export default function EmbeddingSupplementForm({ onRequiresRestart }: Props) {
       const parsed = parseSecretRef(returnedRef);
       setSecretMode(parsed.mode);
       setSecretValue(parsed.value);
+      // Note: we don't re-fetch /embedding-status here. The daemon must be
+      // restarted to apply config changes anyway, so the pre-restart status
+      // snapshot is meaningless. The next mount (after the user restarts the
+      // daemon and reloads the Inspector) will pick up the fresh status.
     } catch (err) {
       if ((err as ApiError).status === 401) return;
       showToast({
@@ -162,6 +197,25 @@ export default function EmbeddingSupplementForm({ onRequiresRestart }: Props) {
 
   return (
     <div className="space-y-5">
+      {embeddingStatus !== null && embeddingStatus.effective_mode === "degraded" ? (
+        <div
+          role="alert"
+          className="flex items-start gap-3 px-4 py-3 bg-[#C9ADA7]/15 border border-[#C9ADA7] rounded text-xs text-ink-700"
+        >
+          <AlertTriangle className="w-4 h-4 mt-0.5 text-[#C9ADA7] shrink-0" />
+          <div className="flex-1 space-y-1 min-w-0">
+            <p className="font-bold uppercase tracking-widest">
+              Embedding Degraded
+            </p>
+            <p className="text-ink-700/80 break-words">
+              {humanizeDegradedReason(embeddingStatus.degraded_reason)}
+            </p>
+            <p className="text-[10px] text-ink-700/50 font-mono">
+              checked {embeddingStatus.checked_at}
+            </p>
+          </div>
+        </div>
+      ) : null}
       <FieldRow label="provider url">
         <input
           type="text"
@@ -308,6 +362,29 @@ function FieldRow({
       <div>{children}</div>
     </div>
   );
+}
+
+// Map daemon-side degraded_reason codes to operator-readable hints.
+// Unknown codes fall through to a neutral message so the form never shows
+// raw enum text.
+function humanizeDegradedReason(reason: string | null): string {
+  if (reason === null || reason === "") {
+    return "Embedding marked degraded but no reason was reported. Check daemon logs.";
+  }
+  switch (reason) {
+    case "provider_unconfigured":
+      return "Provider is not configured. Set the secret_ref and re-save, then restart the daemon.";
+    case "storage_unavailable":
+      return "Embedding storage table is missing. Run `alaya doctor` to verify schema migration.";
+    case "provider_unavailable":
+      return "Provider rejected our request (auth or network). Verify the secret_ref points to a valid key and the provider URL is reachable.";
+    case "query_embedding_failed":
+      return "Provider returned an error when embedding a query. Verify the model id is supported by your endpoint.";
+    case "local_vector_lookup_failed":
+      return "Local embedding vector lookup failed. Restart the daemon; if it persists, run `alaya doctor`.";
+    default:
+      return `Provider reports: ${reason}. See daemon logs for the full error.`;
+  }
 }
 
 function buildSecretRef(mode: Exclude<SecretRefMode, "paste">, value: string): string | null {

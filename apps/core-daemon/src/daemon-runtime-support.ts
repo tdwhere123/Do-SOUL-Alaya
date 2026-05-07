@@ -50,6 +50,9 @@ import { resolveSecretRef, type ResolveSecretError } from "./secrets.js";
 import type { AlayaRuntimeNotifier } from "./runtime-notifier.js";
 
 export const DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small";
+export const ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV = "ALAYA_OFFICIAL_GARDEN_SECRET_REF";
+export const OFFICIAL_API_GARDEN_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";
+export const OFFICIAL_API_GARDEN_PROVIDER_URL_ENV = "OFFICIAL_API_GARDEN_PROVIDER_URL";
 const GARDEN_BACKLOG_REARM_RATIO = 0.7;
 const GARDEN_BACKLOG_SNAPSHOT_INTERVAL_MS = 60_000;
 
@@ -139,6 +142,21 @@ export function readOptionalSecretRef(value: string | undefined, label: string):
   }
 
   return resolved.value;
+}
+
+export function readOfficialGardenSecretRef(configEnv: ReadonlyMap<string, string>): string | null {
+  return readOptionalSecretRef(
+    readConfigEnvValue(configEnv, ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV),
+    ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV
+  );
+}
+
+export function readOfficialGardenModelId(configEnv: ReadonlyMap<string, string>): string | null {
+  return readNonEmptyEnv(readConfigEnvValue(configEnv, OFFICIAL_API_GARDEN_MODEL_ENV));
+}
+
+export function readOfficialGardenProviderUrl(configEnv: ReadonlyMap<string, string>): string | null {
+  return readNonEmptyEnv(readConfigEnvValue(configEnv, OFFICIAL_API_GARDEN_PROVIDER_URL_ENV));
 }
 
 export function createOptionalMemoryEmbeddingRepo(database: StorageDatabase): MemoryEmbeddingRepo | null {
