@@ -189,10 +189,21 @@ export {
   SqliteTrustStateRepo,
   type TrustStateRepo
 } from "./repos/trust-state-repo.js";
-
 export { SqliteHandoffGapRepo } from "./repos/handoff-gap-repo.js";
 export {
   createGardenBackgroundDataPorts,
   type GardenBackgroundDataPorts,
   type GardenDataPortFactoryOptions
 } from "./repos/garden-data-ports.js";
+export {
+  SqliteGardenTaskRepo,
+  type GardenTaskBacklogCount,
+  type GardenTaskClaimResult,
+  type GardenTaskCompletionResult,
+  type GardenTaskEnqueueInput,
+  type GardenTaskEventInput,
+  type GardenTaskEventPublisherPort,
+  type GardenTaskRepoPort,
+  type GardenTaskRow,
+  type GardenTaskStatus
+} from "./repos/garden-task-repo.js";

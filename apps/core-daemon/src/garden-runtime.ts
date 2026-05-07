@@ -28,6 +28,7 @@ import {
   createGardenBackgroundDataPorts,
   type PathPlasticityWatermarkRepo,
   type SqliteEventLogRepo,
+  SqliteGardenTaskRepo,
   type SqliteHandoffGapRepo,
   type SqliteHealthJournalRepo,
   type SqliteOrphanRadarRepo,
@@ -161,6 +162,10 @@ export function createGardenRuntime(input: {
       void (await input.healthJournalRepo.append(entry));
     }
   };
+  const gardenTaskRepo =
+    typeof (input.databaseConnection as { readonly prepare?: unknown }).prepare === "function"
+      ? new SqliteGardenTaskRepo(input.databaseConnection, input.eventPublisher)
+      : undefined;
   const gardenScheduler = new GardenScheduler(
     schedulerEventLogPort,
     {
@@ -169,7 +174,8 @@ export function createGardenRuntime(input: {
         warning_rearm_depth: input.backlogThresholds.warning_rearm_depth
       }
     },
-    healthJournalPort
+    healthJournalPort,
+    gardenTaskRepo
   );
   const runtimeGardenScheduler = gardenScheduler as RuntimeGardenScheduler;
   let backlogTelemetryObserver: GardenBacklogTelemetryObserver | null = null;
