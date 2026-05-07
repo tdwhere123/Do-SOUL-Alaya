@@ -10,11 +10,39 @@ import {
 import { ALAYA_SYSEXITS, type AlayaCliArgsSchema, type AlayaCliContext, type AlayaSubcommandSpec } from "./bridge.js";
 import { resolveCliWorkspaceContext } from "./workspace-context.js";
 
+/**
+ * C2: shape returned by the optional getGardenCompute doctor dep so an
+ * operator can see what Garden compute the daemon actually wired up,
+ * independent of embedding. credential_source distinguishes
+ * - env:NAME ⇒ Garden has its own ALAYA_OFFICIAL_GARDEN_SECRET_REF
+ * - file:/.../mask ⇒ Garden has its own file-based secret
+ * - embedding-fallback ⇒ Garden borrowed embedding's key (deprecated)
+ * - none ⇒ no key, Garden routes to local_heuristics
+ */
+export interface GardenComputeStatus {
+  readonly provider_kind: "official_api" | "local_heuristics" | "host_worker";
+  readonly model_id: string | null;
+  readonly provider_url: string | null;
+  readonly credential_source:
+    | { readonly kind: "env"; readonly name: string }
+    | { readonly kind: "file"; readonly masked_path: string }
+    | { readonly kind: "embedding-fallback" }
+    | { readonly kind: "none" };
+  readonly routing_decision: "official_api" | "local_heuristics" | "host_worker";
+}
+
 export interface DoctorCommandDependencies {
   readonly getToolchainStatus: () => Promise<ToolchainStatus>;
   readonly getEmbeddingStatus?: (workspaceId: string) => Promise<EmbeddingStatus>;
   readonly getMcpHealth?: () => Promise<Readonly<{ transport: "ready" | "not_ready"; enrolled_tools: number }>>;
   readonly getGardenHealth?: () => Promise<Readonly<{ status: "healthy" | "degraded"; last_pass_at: string | null }>>;
+  /**
+   * C2: surface Garden compute provider truth (kind / model / credential /
+   * routing) so operators can tell official_api from local_heuristics from
+   * the deprecated embedding-fallback. When omitted, doctor reports a
+   * conservative "local_heuristics + none" snapshot.
+   */
+  readonly getGardenCompute?: () => Promise<GardenComputeStatus> | GardenComputeStatus;
   readonly getPathPlasticityLookupTelemetry?: () =>
     | Readonly<PathPlasticityLookupTelemetrySnapshot>
     | Promise<Readonly<PathPlasticityLookupTelemetrySnapshot>>;
@@ -69,6 +97,7 @@ interface DoctorReport {
     status: "healthy" | "degraded";
     last_pass_at: string | null;
   }>;
+  readonly garden_compute: GardenComputeStatus;
   readonly recall: Readonly<{
     readonly path_plasticity_lookup: Readonly<PathPlasticityLookupTelemetrySnapshot>;
   }>;
@@ -126,6 +155,15 @@ export function createDoctorCommand(
             status: daemonReady ? "healthy" : "degraded",
             last_pass_at: null
           } as const);
+      const gardenCompute: GardenComputeStatus = deps.getGardenCompute
+        ? await deps.getGardenCompute()
+        : {
+            provider_kind: "local_heuristics",
+            model_id: null,
+            provider_url: null,
+            credential_source: { kind: "none" },
+            routing_decision: "local_heuristics"
+          };
       const pathPlasticityLookupTelemetry =
         (await deps.getPathPlasticityLookupTelemetry?.()) ??
         ({
@@ -185,6 +223,7 @@ export function createDoctorCommand(
         },
         mcp,
         garden,
+        garden_compute: gardenCompute,
         recall: {
           path_plasticity_lookup: pathPlasticityLookupTelemetry
         },
@@ -327,6 +366,15 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport):
   }
   stream.write(`mcp transport: ${report.mcp.transport}\n`);
   stream.write(`garden status: ${report.garden.status}\n`);
+  // C2: surface Garden compute truth so operators can tell whether Garden
+  // is calling out (official_api), running locally (local_heuristics), or
+  // borrowing the embedding key (deprecated embedding-fallback).
+  stream.write(
+    `garden compute: kind=${report.garden_compute.provider_kind}` +
+      ` routing=${report.garden_compute.routing_decision}` +
+      ` model=${report.garden_compute.model_id ?? "default"}` +
+      ` cred=${formatCredentialSource(report.garden_compute.credential_source)}\n`
+  );
   stream.write(
     `recall path plasticity lookup: count=${report.recall.path_plasticity_lookup.lookup_count}` +
       ` p99_ms=${report.recall.path_plasticity_lookup.duration_p99_ms ?? "n/a"}` +
@@ -351,5 +399,18 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport):
     }
     // status === "absent" is silent — the user may have intentionally not
     // attached this target.
+  }
+}
+
+function formatCredentialSource(source: GardenComputeStatus["credential_source"]): string {
+  switch (source.kind) {
+    case "env":
+      return `env:${source.name}`;
+    case "file":
+      return `file:${source.masked_path}`;
+    case "embedding-fallback":
+      return "embedding-fallback (deprecated)";
+    case "none":
+      return "none";
   }
 }

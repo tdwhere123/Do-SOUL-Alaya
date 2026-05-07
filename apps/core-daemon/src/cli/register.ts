@@ -22,7 +22,7 @@ import {
   resolveAlayaConfigPaths
 } from "./config-files.js";
 import { createDetachCommandSpec } from "./detach.js";
-import { createDoctorCommand } from "./doctor.js";
+import { createDoctorCommand, type GardenComputeStatus } from "./doctor.js";
 import { createInstallCommand } from "./install.js";
 import { createInspectCommand } from "./inspect.js";
 import { createUpdateCommand } from "./update.js";
@@ -55,6 +55,12 @@ export function registerAlayaCliCommands(
         last_pass_at: gardenStatus.last_pass_at
       };
     },
+    // C2: derive Garden compute provider truth from the same env the daemon
+    // bootstrap reads. credential_source distinguishes the dedicated Garden
+    // secret_ref from the deprecated embedding-fallback path so operators
+    // can see which configuration is actually live.
+    getGardenCompute: async () =>
+      await resolveGardenComputeStatus(runtime),
     getPathPlasticityLookupTelemetry: () =>
       defaultRecallPathPlasticityLookupTelemetry.snapshot(),
     // p5-system-review-r3 MR-I11: schema_ok needs the live db. initDatabase
@@ -100,6 +106,58 @@ export function registerAlayaCliCommands(
   for (const command of createOperationCommandSpecs()) {
     bridge.registerSubcommand(command);
   }
+}
+
+/**
+ * C2: derive the Garden compute snapshot the doctor command reports.
+ *
+ * Reading the saved RuntimeGardenComputeConfig (via configService) gives us
+ * provider_kind / model_id / provider_url. The credential_source needs raw
+ * env so we can distinguish the dedicated Garden key from the embedding
+ * fallback (deprecated for v0.1.1, removed in v0.2). routing_decision
+ * mirrors provider_kind for now — once the host_worker provider lands in
+ * H2/H3, this can flip when official_api is configured but unhealthy.
+ */
+async function resolveGardenComputeStatus(
+  runtime: AlayaDaemonRuntime
+): Promise<GardenComputeStatus> {
+  const config = await runtime.services.configService.getRuntimeGardenComputeConfig();
+  const credential = resolveGardenCredentialSource(config.secret_ref);
+  return {
+    provider_kind: config.provider_kind,
+    model_id: config.model_id,
+    provider_url: config.provider_url,
+    credential_source: credential,
+    routing_decision: config.provider_kind
+  };
+}
+
+function resolveGardenCredentialSource(
+  secretRef: string | null
+): GardenComputeStatus["credential_source"] {
+  if (secretRef === null || secretRef === "") {
+    // No dedicated Garden secret_ref. Embedding fallback only kicks in when
+    // the deprecated path was the active source — getRuntimeGardenComputeConfig
+    // surfaces that as a non-null secret_ref starting with "env:" or "file:",
+    // so a null here means Garden has no key at all.
+    return { kind: "none" };
+  }
+  if (secretRef.startsWith("env:")) {
+    return { kind: "env", name: secretRef.slice("env:".length) };
+  }
+  if (secretRef.startsWith("file:")) {
+    const path = secretRef.slice("file:".length);
+    return { kind: "file", masked_path: maskPath(path) };
+  }
+  return { kind: "none" };
+}
+
+function maskPath(path: string): string {
+  const segments = path.split("/").filter(Boolean);
+  if (segments.length <= 2) {
+    return path;
+  }
+  return `…/${segments[segments.length - 1]}`;
 }
 
 interface AttachArgs {
