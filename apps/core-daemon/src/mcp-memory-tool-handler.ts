@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   CandidateMemorySignalSchema,
   ControlPlaneObjectKind,
@@ -11,6 +11,8 @@ import {
   GardenListPendingTasksRequestSchema,
   GardenListPendingTasksResponseSchema,
   GardenRole,
+  GardenTaskKind,
+  GardenTier,
   MemoryGovernanceEventType,
   MemoryDimensionSchema,
   parseGardenEventPayload,
@@ -71,12 +73,14 @@ import {
 } from "@do-soul/alaya-protocol";
 import type {
   GardenTaskCompletionResult,
+  GardenTaskEnqueueInput,
   GardenTaskEventInput,
   GardenTaskRow
 } from "@do-soul/alaya-storage";
 import { hasAlayaMemoryToolName, type AlayaMemoryToolName } from "./mcp-memory-tool-catalog.js";
 
 const RECALL_HIT_ACTIVATION_BUMP = 0.05;
+const POST_TURN_EXTRACT_EXCERPT_MAX_CHARS = 800;
 
 export interface McpMemoryToolCallContext {
   readonly workspaceId: string;
@@ -188,6 +192,7 @@ export interface McpMemoryToolHandlerDependencies {
     }>>;
   };
   readonly gardenTaskRepo?: {
+    enqueue(input: GardenTaskEnqueueInput): { readonly task_id: string };
     findById(taskId: string): GardenTaskRow | null;
     peekPending(
       role: GardenRoleValue,
@@ -617,10 +622,64 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       { expectedWorkspaceId: context.workspaceId }
     );
     await promoteRecallHitMemories(request, context);
+    enqueuePostTurnExtractTask(request, context);
     return SoulReportContextUsageResponseSchema.parse({
       delivery_id: request.delivery_id,
       status: "recorded"
     });
+  }
+
+  function enqueuePostTurnExtractTask(
+    request: SoulReportContextUsageRequest,
+    context: McpMemoryToolCallContext
+  ): void {
+    if (
+      deps.gardenTaskRepo === undefined ||
+      context.runId === null ||
+      request.turn_index === undefined ||
+      !hasUsedDeliveredObject(request)
+    ) {
+      return;
+    }
+
+    const workspaceId = context.workspaceId;
+    const runId = context.runId;
+    const turnIndex = request.turn_index;
+    const deliveredObjectIds = resolveDeliveredObjectIds(request);
+    const taskId = buildPostTurnExtractTaskId(workspaceId, runId, turnIndex);
+    const createdAt = now();
+
+    try {
+      deps.gardenTaskRepo.enqueue({
+        id: taskId,
+        workspace_id: workspaceId,
+        role: GardenRole.LIBRARIAN,
+        kind: GardenTaskKind.POST_TURN_EXTRACT,
+        payload: {
+          task_id: taskId,
+          task_kind: GardenTaskKind.POST_TURN_EXTRACT,
+          required_tier: GardenTier.TIER_2,
+          run_id: runId,
+          target_object_refs: deliveredObjectIds,
+          priority: 20,
+          created_at: createdAt,
+          turn_index: turnIndex,
+          workspace_id: workspaceId,
+          turn_digest: {
+            last_messages: normalizeTurnDigestMessages(request.turn_digest?.last_messages ?? []),
+            context_manifest: {
+              delivered_object_ids: deliveredObjectIds
+            }
+          }
+        },
+        created_at: createdAt
+      });
+    } catch (error) {
+      if (isDuplicatePostTurnExtractTask(error)) {
+        return;
+      }
+      throw error;
+    }
   }
 
   async function promoteRecallHitMemories(
@@ -689,6 +748,83 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
   }
 }
 
+function hasUsedDeliveredObject(request: SoulReportContextUsageRequest): boolean {
+  if (request.delivered_objects !== undefined) {
+    return request.delivered_objects.some((object) => object.usage_status === "used");
+  }
+
+  return request.usage_state === "used" && (request.used_object_ids?.length ?? 0) > 0;
+}
+
+function resolveDeliveredObjectIds(request: SoulReportContextUsageRequest): readonly string[] {
+  const ids =
+    request.delivered_objects === undefined
+      ? request.used_object_ids ?? []
+      : request.delivered_objects.map((object) => object.object_id);
+  return Object.freeze([...new Set(ids)]);
+}
+
+function normalizeTurnDigestMessages(
+  messages: NonNullable<SoulReportContextUsageRequest["turn_digest"]>["last_messages"]
+): readonly { readonly role: string; readonly content_excerpt: string }[] {
+  return Object.freeze(
+    messages.map((message) =>
+      Object.freeze({
+        role: message.role,
+        content_excerpt: message.content_excerpt.slice(0, POST_TURN_EXTRACT_EXCERPT_MAX_CHARS)
+      })
+    )
+  );
+}
+
+function buildPostTurnExtractTaskId(
+  workspaceId: string,
+  runId: string,
+  turnIndex: number
+): string {
+  const digest = createHash("sha256")
+    .update(workspaceId)
+    .update("\0")
+    .update(runId)
+    .update("\0")
+    .update(String(turnIndex))
+    .digest("hex")
+    .slice(0, 32);
+  // Dedup key is (workspace_id, run_id, turn_index). H3 keeps the H1 repo
+  // unchanged, so the deterministic task id lets SQLite's existing
+  // garden_tasks primary-key constraint act as the duplicate guard.
+  return `post_turn_extract_${digest}`;
+}
+
+function isDuplicatePostTurnExtractTask(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {
+    const code = (current as { readonly code?: unknown }).code;
+    const message = (current as { readonly message?: unknown }).message;
+    if (
+      typeof code === "string" &&
+      code.startsWith("SQLITE_CONSTRAINT") &&
+      typeof message === "string" &&
+      message.includes("garden_tasks.id")
+    ) {
+      return true;
+    }
+    if (
+      typeof message === "string" &&
+      message.includes("UNIQUE constraint failed") &&
+      message.includes("garden_tasks.id")
+    ) {
+      return true;
+    }
+    current = (current as { readonly cause?: unknown }).cause;
+  }
+  return false;
+}
+
+function isUnknownRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function buildRecallPolicy(
   request: SoulMemorySearchRequest,
   taskSurfaceId: string,
@@ -744,19 +880,36 @@ function mapGardenMcpWorkerRole(role: GardenMcpWorkerRole | undefined): GardenRo
 function toGardenTaskSnapshot(row: GardenTaskRow) {
   return {
     task_id: row.id,
-    role: row.role,
+    role: gardenWorkerRoleForRow(row),
     kind: row.kind,
     created_at: row.created_at,
-    payload: row.payload
+    payload: publicGardenTaskPayload(row)
   };
 }
 
 function toGardenClaimTaskPayload(row: GardenTaskRow) {
   return {
     task_id: row.id,
-    role: row.role,
+    role: gardenWorkerRoleForRow(row),
     kind: row.kind,
-    payload: row.payload
+    payload: publicGardenTaskPayload(row)
+  };
+}
+
+function gardenWorkerRoleForRow(row: GardenTaskRow): string {
+  return row.kind === GardenTaskKind.POST_TURN_EXTRACT ? "host_worker" : row.role;
+}
+
+function publicGardenTaskPayload(row: GardenTaskRow): unknown {
+  if (row.kind !== GardenTaskKind.POST_TURN_EXTRACT || !isUnknownRecord(row.payload)) {
+    return row.payload;
+  }
+
+  return {
+    run_id: row.payload.run_id,
+    turn_index: row.payload.turn_index,
+    workspace_id: row.payload.workspace_id,
+    turn_digest: row.payload.turn_digest
   };
 }
 

@@ -1,11 +1,14 @@
 import { randomUUID } from "node:crypto";
 import {
+  CandidateMemorySignalSchema,
+  GardenEventType,
   GardenRole,
   type GardenBacklogThresholds,
   GardenTaskKind,
   GardenTier,
   HealthEventKind,
   RuntimeGovernanceEventType,
+  parseGardenEventPayload,
   parseRuntimeGovernanceEventPayload,
   type AuditorEventLogPort,
   type AuditorOrphanDetectionPort,
@@ -16,7 +19,10 @@ import {
   type GardenTierValue,
   type HealthJournalRecordPort,
   type OrphanRadar,
-  type PathGraphSnapshot
+  type PathGraphSnapshot,
+  type RuntimeGardenComputeConfig,
+  type CandidateMemorySignal,
+  type ConversationMessage
 } from "@do-soul/alaya-protocol";
 import type {
   EmbeddingBackfillHandler,
@@ -44,6 +50,8 @@ import {
   Librarian,
   PathGraphSnapshotter,
   reviewPathGraphSnapshotHistory,
+  type GardenCompileContext,
+  type GardenComputeProvider,
   type GardenSchedulerEventLogPort,
   type JanitorControlPlaneCleanupPort,
   type JanitorSchedulerPort,
@@ -68,6 +76,8 @@ const PATH_GRAPH_SNAPSHOT_INTERVAL_MS = 900_000;
 const PATH_GRAPH_HISTORY_REVIEW_LIMIT = 2;
 const PATH_GRAPH_SNAPSHOT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const DEFAULT_GARDEN_STATUS_WORKSPACE_ID = "default";
+const IN_PROCESS_POST_TURN_CLAIMANT = "in-process";
+const POST_TURN_EXTRACT_EXCERPT_MAX_CHARS = 800;
 const JANITOR_RUNTIME_TASK_KINDS = [
   GardenTaskKind.TTL_CLEANUP,
   GardenTaskKind.HOT_INDEX_DEMOTION,
@@ -112,6 +122,21 @@ export interface GardenRuntimeStatus {
   readonly last_pass_at: string | null;
 }
 
+interface PostTurnExtractTaskPayload {
+  readonly run_id: string;
+  readonly turn_index: number;
+  readonly workspace_id: string;
+  readonly turn_digest: {
+    readonly last_messages: readonly {
+      readonly role: string;
+      readonly content_excerpt: string;
+    }[];
+    readonly context_manifest: {
+      readonly delivered_object_ids: readonly string[];
+    };
+  };
+}
+
 export function createGardenRuntime(input: {
   readonly databaseConnection: StorageDatabase["connection"];
   readonly backlogThresholds: GardenBacklogThresholds;
@@ -127,6 +152,14 @@ export function createGardenRuntime(input: {
   readonly pathPlasticityWatermarkRepo?: PathPlasticityWatermarkRepo;
   readonly pathPlasticityService?: Pick<PathPlasticityService, "computeAndApplyPlasticity">;
   readonly embeddingBackfillHandler?: Pick<EmbeddingBackfillHandler, "handle">;
+  readonly configService?: {
+    getRuntimeGardenComputeConfig(): Promise<RuntimeGardenComputeConfig>;
+  };
+  readonly officialApiGardenProvider?: GardenComputeProvider | null;
+  readonly localHeuristicsProvider?: GardenComputeProvider;
+  readonly signalReceiver?: {
+    receiveSignal(signal: CandidateMemorySignal): Promise<unknown>;
+  };
   readonly strongRefService: StrongRefService;
   readonly workspaceRepo: SqliteWorkspaceRepo;
 }): Readonly<{
@@ -587,6 +620,175 @@ export function createGardenRuntime(input: {
     }
   };
 
+  const processPostTurnExtractTask = async (): Promise<void> => {
+    if (
+      gardenTaskRepo === undefined ||
+      input.configService === undefined ||
+      input.signalReceiver === undefined
+    ) {
+      return;
+    }
+
+    const row = gardenTaskRepo
+      .peekPending(GardenRole.LIBRARIAN, undefined, 50)
+      .find((candidate) => candidate.kind === GardenTaskKind.POST_TURN_EXTRACT);
+    if (row === undefined) {
+      return;
+    }
+
+    const config = await input.configService.getRuntimeGardenComputeConfig();
+    const provider = selectPostTurnExtractProvider(config);
+    if (provider === null) {
+      return;
+    }
+
+    const claimedAt = new Date().toISOString();
+    const claimResult = gardenTaskRepo.claimAtomic(
+      row.id,
+      IN_PROCESS_POST_TURN_CLAIMANT,
+      claimedAt,
+      row.workspace_id
+    );
+    if (claimResult !== "claimed") {
+      return;
+    }
+
+    let dispatched = false;
+    let payload: PostTurnExtractTaskPayload | null = null;
+    try {
+      payload = parsePostTurnExtractTaskPayload(row.payload);
+      await input.eventPublisher.publish({
+        event_type: GardenEventType.SOUL_GARDEN_TASK_DISPATCHED,
+        entity_type: "garden_task",
+        entity_id: row.id,
+        workspace_id: row.workspace_id,
+        run_id: payload.run_id,
+        caused_by: "garden-runtime",
+        payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_DISPATCHED, {
+          task_id: row.id,
+          task_kind: GardenTaskKind.POST_TURN_EXTRACT,
+          role: GardenRole.LIBRARIAN,
+          tier: GardenTier.TIER_2,
+          workspace_id: row.workspace_id,
+          run_id: payload.run_id,
+          occurred_at: claimedAt
+        })
+      });
+      dispatched = true;
+
+      const candidateSignals = await compilePostTurnExtractTask(provider, payload);
+      const completedAt = new Date().toISOString();
+
+      await gardenTaskRepo.completeWithEvents(
+        row.id,
+        {
+          status: "completed",
+          completed_at: completedAt
+        },
+        [
+          {
+            event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
+            entity_type: "garden_task",
+            entity_id: row.id,
+            workspace_id: row.workspace_id,
+            run_id: payload.run_id,
+            caused_by: "garden-runtime",
+            payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
+              task_id: row.id,
+              task_kind: GardenTaskKind.POST_TURN_EXTRACT,
+              role: GardenRole.LIBRARIAN,
+              tier: GardenTier.TIER_2,
+              success: true,
+              objects_affected: candidateSignals.map((signal) => signal.signal_id),
+              candidate_signals_count: candidateSignals.length,
+              workspace_id: row.workspace_id,
+              occurred_at: completedAt
+            })
+          }
+        ]
+      );
+
+      for (const signal of candidateSignals) {
+        await input.signalReceiver.receiveSignal(signal);
+      }
+    } catch (error) {
+      if (!dispatched) {
+        gardenTaskRepo.releaseClaim(row.id, IN_PROCESS_POST_TURN_CLAIMANT);
+        throw error;
+      }
+
+      const completedAt = new Date().toISOString();
+      await gardenTaskRepo.completeWithEvents(
+        row.id,
+        {
+          status: "failed",
+          completed_at: completedAt,
+          last_error_text: error instanceof Error ? error.message : String(error)
+        },
+        [
+          {
+            event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
+            entity_type: "garden_task",
+            entity_id: row.id,
+            workspace_id: row.workspace_id,
+            run_id: payload?.run_id ?? null,
+            caused_by: "garden-runtime",
+            payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
+              task_id: row.id,
+              task_kind: GardenTaskKind.POST_TURN_EXTRACT,
+              role: GardenRole.LIBRARIAN,
+              tier: GardenTier.TIER_2,
+              success: false,
+              objects_affected: [],
+              candidate_signals_count: 0,
+              workspace_id: row.workspace_id,
+              occurred_at: completedAt
+            })
+          }
+        ]
+      );
+      throw error;
+    }
+  };
+
+  const selectPostTurnExtractProvider = (
+    config: RuntimeGardenComputeConfig
+  ): GardenComputeProvider | null => {
+    if (config.provider_kind === "host_worker") {
+      return null;
+    }
+
+    if (config.provider_kind === "official_api") {
+      return config.enabled && input.officialApiGardenProvider !== undefined
+        ? input.officialApiGardenProvider
+        : null;
+    }
+
+    return input.localHeuristicsProvider ?? null;
+  };
+
+  const compilePostTurnExtractTask = async (
+    provider: GardenComputeProvider,
+    payload: PostTurnExtractTaskPayload
+  ): Promise<readonly CandidateMemorySignal[]> => {
+    const context: GardenCompileContext = {
+      workspace_id: payload.workspace_id,
+      run_id: payload.run_id,
+      surface_id: null,
+      turn_messages: buildPostTurnConversationMessages(payload)
+    };
+    const signals = await provider.compile(buildPostTurnContent(payload), context);
+    return Object.freeze(
+      signals.map((signal) => {
+        const parsed = CandidateMemorySignalSchema.parse(signal);
+        if (parsed.workspace_id !== payload.workspace_id || parsed.run_id !== payload.run_id) {
+          throw new Error("Post-turn extract candidate signal escaped the task workspace or run.");
+        }
+        return parsed;
+      })
+    );
+  };
+
   let lastBackgroundPassAt: string | null = null;
   const markBackgroundPassCompleted = (): void => {
     lastBackgroundPassAt = new Date().toISOString();
@@ -634,6 +836,7 @@ export function createGardenRuntime(input: {
       name: "GardenScheduler",
       intervalMs: 60_000,
       task: async () => {
+        await processPostTurnExtractTask();
         for (const [role, handler, runtimeTaskKinds] of [
           [GardenRole.JANITOR, janitor, JANITOR_RUNTIME_TASK_KINDS],
           [GardenRole.AUDITOR, auditor, AUDITOR_RUNTIME_TASK_KINDS],
@@ -719,6 +922,96 @@ export function createGardenRuntime(input: {
       backlogTelemetryObserver = observer;
     }
   });
+}
+
+function parsePostTurnExtractTaskPayload(payload: unknown): PostTurnExtractTaskPayload {
+  if (!isRecord(payload)) {
+    throw new Error("Invalid post-turn extract task payload.");
+  }
+
+  const runId = parseStringField(payload, "run_id");
+  const workspaceId = parseStringField(payload, "workspace_id");
+  const turnIndex = payload.turn_index;
+  const turnDigest = payload.turn_digest;
+  if (
+    typeof turnIndex !== "number" ||
+    !Number.isInteger(turnIndex) ||
+    turnIndex < 0 ||
+    !isRecord(turnDigest)
+  ) {
+    throw new Error("Invalid post-turn extract task payload.");
+  }
+  const parsedTurnIndex = turnIndex as number;
+
+  const contextManifest = turnDigest.context_manifest;
+  const lastMessages = Array.isArray(turnDigest.last_messages)
+    ? turnDigest.last_messages.map(parsePostTurnDigestMessage)
+    : [];
+  const deliveredObjectIds =
+    isRecord(contextManifest) && Array.isArray(contextManifest.delivered_object_ids)
+      ? contextManifest.delivered_object_ids.filter((id): id is string => typeof id === "string")
+      : [];
+
+  return {
+    run_id: runId,
+    turn_index: parsedTurnIndex,
+    workspace_id: workspaceId,
+    turn_digest: {
+      last_messages: Object.freeze(lastMessages),
+      context_manifest: {
+        delivered_object_ids: Object.freeze([...new Set(deliveredObjectIds)])
+      }
+    }
+  };
+}
+
+function parsePostTurnDigestMessage(value: unknown): {
+  readonly role: string;
+  readonly content_excerpt: string;
+} {
+  if (!isRecord(value)) {
+    return { role: "user", content_excerpt: "" };
+  }
+
+  const role = typeof value.role === "string" && value.role.trim().length > 0 ? value.role : "user";
+  const contentExcerpt =
+    typeof value.content_excerpt === "string"
+      ? value.content_excerpt.slice(0, POST_TURN_EXTRACT_EXCERPT_MAX_CHARS)
+      : "";
+  return { role, content_excerpt: contentExcerpt };
+}
+
+function buildPostTurnContent(payload: PostTurnExtractTaskPayload): string {
+  return payload.turn_digest.last_messages
+    .map((message) => `${message.role}: ${message.content_excerpt.slice(0, POST_TURN_EXTRACT_EXCERPT_MAX_CHARS)}`)
+    .join("\n\n");
+}
+
+function buildPostTurnConversationMessages(
+  payload: PostTurnExtractTaskPayload
+): readonly ConversationMessage[] {
+  return Object.freeze(
+    payload.turn_digest.last_messages.map((message, index) => {
+      const role: ConversationMessage["role"] = message.role === "assistant" ? "assistant" : "user";
+      return {
+        message_id: `post-turn-${payload.run_id}-${payload.turn_index}-${index}`,
+        role,
+        content: message.content_excerpt.slice(0, POST_TURN_EXTRACT_EXCERPT_MAX_CHARS)
+      };
+    })
+  );
+}
+
+function parseStringField(record: Readonly<Record<string, unknown>>, field: string): string {
+  const value = record[field];
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error("Invalid post-turn extract task payload.");
+  }
+  return value;
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isPathGraphSnapshotDue(

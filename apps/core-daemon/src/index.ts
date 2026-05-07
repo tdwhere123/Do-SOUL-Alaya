@@ -687,6 +687,10 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     pathPlasticityWatermarkRepo,
     pathPlasticityService,
     embeddingBackfillHandler,
+    configService,
+    officialApiGardenProvider: officialGardenProvider,
+    localHeuristicsProvider,
+    signalReceiver: signalService,
     strongRefService,
     workspaceRepo
   });

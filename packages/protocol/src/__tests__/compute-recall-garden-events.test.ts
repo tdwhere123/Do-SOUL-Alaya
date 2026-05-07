@@ -37,7 +37,8 @@ describe("Phase C extension protocol schemas", () => {
       "template_candidate",
       "synthesis_review",
       "embedding_backfill",
-      "path_plasticity_update"
+      "path_plasticity_update",
+      "post_turn_extract"
     ]);
     expect(GardenTaskKindSchema.parse("embedding_backfill")).toBe("embedding_backfill");
     expect(GardenTaskKind.EMBEDDING_BACKFILL).toBe("embedding_backfill");
@@ -64,6 +65,18 @@ describe("Phase C extension protocol schemas", () => {
     expect(
       GARDEN_ROLE_PERMISSIONS[GardenRole.JANITOR].allowed_task_kinds
     ).not.toContain(GardenTaskKind.PATH_PLASTICITY_UPDATE);
+
+    expect(GardenTaskKindSchema.parse("post_turn_extract")).toBe("post_turn_extract");
+    expect(GardenTaskKind.POST_TURN_EXTRACT).toBe("post_turn_extract");
+    expect(
+      GARDEN_ROLE_PERMISSIONS[GardenRole.AUDITOR].allowed_task_kinds
+    ).not.toContain(GardenTaskKind.POST_TURN_EXTRACT);
+    expect(
+      GARDEN_ROLE_PERMISSIONS[GardenRole.LIBRARIAN].allowed_task_kinds
+    ).not.toContain(GardenTaskKind.POST_TURN_EXTRACT);
+    expect(
+      GARDEN_ROLE_PERMISSIONS[GardenRole.JANITOR].allowed_task_kinds
+    ).not.toContain(GardenTaskKind.POST_TURN_EXTRACT);
 
     expect(Object.values(HealthEventKind)).toEqual([
       "bankruptcy",

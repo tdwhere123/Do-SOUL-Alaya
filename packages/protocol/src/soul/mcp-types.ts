@@ -326,11 +326,41 @@ export const SoulContextPerAnchorUsageSchema = z
   .strict()
   .readonly();
 
+export const SoulContextDeliveredObjectUsageSchema = z
+  .object({
+    object_id: BoundedIdSchema,
+    usage_status: SoulContextUsageStateSchema
+  })
+  .strict()
+  .readonly();
+
+export const SoulContextUsageTurnMessageSchema = z
+  .object({
+    role: BoundedLabelSchema,
+    content_excerpt: BoundedReasonSchema
+  })
+  .strict()
+  .readonly();
+
+export const SoulContextUsageTurnDigestSchema = z
+  .object({
+    last_messages: z.array(SoulContextUsageTurnMessageSchema).max(50).readonly().default([])
+  })
+  .strict()
+  .readonly();
+
 export const SoulReportContextUsageRequestSchema = z
   .object({
     delivery_id: BoundedIdSchema,
     usage_state: SoulContextUsageStateSchema,
     used_object_ids: z.array(BoundedIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+    delivered_objects: z
+      .array(SoulContextDeliveredObjectUsageSchema)
+      .max(BOUNDED_DEFAULT_ARRAY_MAX)
+      .readonly()
+      .optional(),
+    turn_index: NonNegativeIntSchema.optional(),
+    turn_digest: SoulContextUsageTurnDigestSchema.optional(),
     per_anchor_usage: z.array(SoulContextPerAnchorUsageSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
     reason: BoundedReasonSchema.nullable().optional()
   })
