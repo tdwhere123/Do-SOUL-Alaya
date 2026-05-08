@@ -55,6 +55,20 @@ function renderGraph() {
   );
 }
 
+function domRect(width: number, height: number): DOMRect {
+  return {
+    x: 0,
+    y: 0,
+    width,
+    height,
+    top: 0,
+    left: 0,
+    right: width,
+    bottom: height,
+    toJSON: () => ({})
+  } as DOMRect;
+}
+
 describe("GraphPage", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -80,6 +94,7 @@ describe("GraphPage", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -186,6 +201,33 @@ describe("GraphPage", () => {
     expect(viewBox).toBeTruthy();
     expect(viewBox).toMatch(/^0 0 \d+(\.\d+)? \d+(\.\d+)?$/);
     expect(svg!.getAttribute("preserveAspectRatio")).toBe("xMidYMid meet");
+  });
+
+  it("sizes the viewBox from the graph viewport, not the SVG intrinsic fallback", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if ((this as Element).getAttribute("data-graph-viewport") === "true") {
+        return domRect(1200, 900);
+      }
+      return domRect(0, 0);
+    });
+    vi.spyOn(SVGElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: SVGElement
+    ) {
+      if ((this as Element).matches("svg[data-spotlight-active]")) {
+        return domRect(1200, 150);
+      }
+      return domRect(0, 0);
+    });
+
+    const { container } = renderGraph();
+
+    await waitFor(() => container.querySelector("g[data-node-id='n1']"));
+    const svg = container.querySelector(
+      "svg[data-spotlight-active]"
+    ) as SVGSVGElement | null;
+    expect(svg?.getAttribute("viewBox")).toBe("0 0 1200 900");
   });
 
   it("samples large-graph labels and surfaces returned-vs-total counts", async () => {

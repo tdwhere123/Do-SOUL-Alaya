@@ -9,6 +9,12 @@
   --accent-ink: #93A1A1;
 }
 
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   background-color: var(--bg-beige);
   /* Subtle paper texture effect using a data URI SVG */

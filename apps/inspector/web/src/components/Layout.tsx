@@ -17,7 +17,7 @@ const NAV_ITEMS = [
 
 export default function Layout() {
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="h-screen min-h-screen flex flex-col">
       <header className="sticky top-0 z-50 bg-beige-100/80 backdrop-blur-sm border-b border-beige-200">
         <nav className="max-w-7xl mx-auto px-4 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2 shrink-0">
@@ -54,7 +54,7 @@ export default function Layout() {
         </nav>
       </header>
 
-      <main className="flex-1 flex flex-col relative overflow-hidden">
+      <main className="flex-1 min-h-0 flex flex-col relative overflow-hidden">
         <Outlet />
       </main>
     </div>

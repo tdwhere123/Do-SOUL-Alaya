@@ -43,6 +43,7 @@ const LARGE_GRAPH_LABEL_THRESHOLD = 80;
 const TOP_DEGREE_LABEL_LIMIT = 24;
 
 export default function GraphPage() {
+  const viewportRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const userInteractedRef = useRef(false);
   const [data, setData] = useState<GraphData | null>(null);
@@ -136,8 +137,9 @@ export default function GraphPage() {
 
   // Render D3 graph: rebuild on data change OR container resize, then fit-to-bounds.
   useEffect(() => {
-    if (!data || !svgRef.current) return;
+    if (!data || !viewportRef.current || !svgRef.current) return;
     userInteractedRef.current = false;
+    const viewportElement = viewportRef.current;
     const svgElement = svgRef.current;
     const svg = select(svgElement);
 
@@ -155,6 +157,8 @@ export default function GraphPage() {
       // viewBox visually with letterbox bands when aspect ratios disagree.
       svg
         .attr("viewBox", `0 0 ${width} ${height}`)
+        .attr("width", width)
+        .attr("height", height)
         .attr("preserveAspectRatio", "xMidYMid meet")
         .attr(
           "data-large-graph",
@@ -383,9 +387,9 @@ export default function GraphPage() {
       if (!rect) return;
       ensureRender(rect.width, rect.height);
     });
-    observer.observe(svgElement);
+    observer.observe(viewportElement);
 
-    const initialRect = svgElement.getBoundingClientRect();
+    const initialRect = viewportElement.getBoundingClientRect();
     ensureRender(initialRect.width, initialRect.height);
 
     return () => {
@@ -483,7 +487,11 @@ export default function GraphPage() {
   );
 
   return (
-    <div className="flex-1 relative flex overflow-hidden bg-[#FDF6E3]">
+    <div
+      ref={viewportRef}
+      data-graph-viewport="true"
+      className="flex-1 min-h-0 relative overflow-hidden bg-[#FDF6E3]"
+    >
       {/* Search overlay */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 bg-beige-50/95 backdrop-blur-sm border border-beige-200 rounded-full px-4 py-2 shadow-sm">
         <Search className="w-3 h-3 text-ink-700/40" />
@@ -553,7 +561,7 @@ export default function GraphPage() {
 
       <svg
         ref={svgRef}
-        className="flex-1 w-full h-full"
+        className="absolute inset-0 block h-full w-full"
         data-spotlight-active={spotlightActive ? "true" : "false"}
         data-focused-match={focusedMatchId ?? ""}
         onClick={() => setSelectedNode(null)}
