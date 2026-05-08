@@ -1239,7 +1239,10 @@ describe("tool-runtime relative path handling", () => {
     const service = {
       findById: vi.fn(async (toolId: string) => {
         if (toolId === "tools.write_file") {
-          return specs[0];
+          return {
+            ...specs[0],
+            description: "Existing stale write_file spec"
+          };
         }
 
         throw new CoreError("NOT_FOUND", "Tool spec not found");

@@ -13,6 +13,7 @@ import {
   getToolRuntimeWiringFixture,
   resetToolRuntimeWiringState
 } from "./tool-runtime-wiring-fixture.js";
+import { getBuiltinConversationToolSpecs } from "../builtin-conversation-tool-specs.js";
 
 const hoisted = getToolRuntimeWiringFixture();
 const activeRuntimes: Array<{ shutdown(): Promise<void> }> = [];
@@ -466,6 +467,90 @@ describe("daemon tool runtime bootstrap", () => {
     });
   });
 
+  it("falls back to local heuristics when the embedding fallback secret-ref is unresolvable", async () => {
+    const configDir = await mkdtemp(path.join(tmpdir(), "alaya-daemon-missing-provider-"));
+    isolatedConfigDirs.push(configDir);
+    await writeFile(
+      path.join(configDir, ".env"),
+      [
+        "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT=true",
+        "ALAYA_OPENAI_SECRET_REF=env:ALAYA_MISSING_OPENAI_KEY",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    process.env.ALAYA_CONFIG_DIR = configDir;
+    delete process.env.ALAYA_MISSING_OPENAI_KEY;
+    delete process.env.ALAYA_OPENAI_SECRET_REF;
+
+    await bootDaemonRuntime();
+
+    expect(hoisted.officialGardenProviderCtor).not.toHaveBeenCalled();
+    expect(hoisted.computeRoutingServiceDeps).toMatchObject({
+      providers: [
+        expect.objectContaining({
+          kind: "stub",
+          adapter: "garden.local_heuristics"
+        })
+      ]
+    });
+  });
+
+  it("reports degraded embedding status when supplement is enabled but the secret env is missing", async () => {
+    const configDir = await mkdtemp(path.join(tmpdir(), "alaya-daemon-missing-embedding-status-"));
+    isolatedConfigDirs.push(configDir);
+    await writeFile(
+      path.join(configDir, ".env"),
+      [
+        "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT=true",
+        "ALAYA_OPENAI_SECRET_REF=env:ALAYA_MISSING_OPENAI_KEY",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    process.env.ALAYA_CONFIG_DIR = configDir;
+    delete process.env.ALAYA_MISSING_OPENAI_KEY;
+    delete process.env.ALAYA_OPENAI_SECRET_REF;
+
+    const runtime = await bootDaemonRuntime() as Awaited<ReturnType<typeof bootDaemonRuntime>> & {
+      readonly services: {
+        readonly embeddingStatusService: {
+          getStatus(workspaceId: string): Promise<{
+            readonly embedding_enabled: boolean;
+            readonly provider_configured: boolean;
+            readonly effective_mode: string;
+            readonly degraded_reason: string | null;
+          }>;
+        };
+      };
+    };
+
+    await expect(runtime.services.embeddingStatusService.getStatus("workspace-1")).resolves.toMatchObject({
+      embedding_enabled: true,
+      provider_configured: false,
+      effective_mode: "degraded",
+      degraded_reason: "provider_unconfigured"
+    });
+  });
+
+  it("rejects malformed embedding secret refs during daemon bootstrap", async () => {
+    const configDir = await mkdtemp(path.join(tmpdir(), "alaya-daemon-malformed-embedding-"));
+    isolatedConfigDirs.push(configDir);
+    await writeFile(
+      path.join(configDir, ".env"),
+      [
+        "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT=true",
+        "ALAYA_OPENAI_SECRET_REF=this-has-no-prefix",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    process.env.ALAYA_CONFIG_DIR = configDir;
+    delete process.env.ALAYA_OPENAI_SECRET_REF;
+
+    await expect(bootDaemonRuntime()).rejects.toThrow("ALAYA_OPENAI_SECRET_REF");
+  });
+
   it("ignores a raw OPENAI_API_KEY when the Alaya secret-ref env is absent", async () => {
     delete process.env.ALAYA_OPENAI_SECRET_REF;
     process.env.OPENAI_API_KEY = "sk-legacy-global";
@@ -681,6 +766,22 @@ describe("daemon tool runtime bootstrap", () => {
     expect(hoisted.toolSpecService.update).toHaveBeenCalledWith(
       expect.objectContaining({ tool_id: "tools.read_file" })
     );
+    expect(hoisted.toolSpecService.register).not.toHaveBeenCalled();
+  });
+
+  it("skips writing unchanged conversation tool specs during daemon bootstrap", async () => {
+    const builtinSpecs = getBuiltinConversationToolSpecs();
+    hoisted.toolSpecService.findById.mockImplementation(async (toolId: string) => {
+      const spec = builtinSpecs.find((candidate) => candidate.tool_id === toolId);
+      if (spec === undefined) {
+        throw new Error(`missing builtin fixture ${toolId}`);
+      }
+      return spec;
+    });
+
+    await bootDaemonRuntime();
+
+    expect(hoisted.toolSpecService.update).not.toHaveBeenCalled();
     expect(hoisted.toolSpecService.register).not.toHaveBeenCalled();
   });
 

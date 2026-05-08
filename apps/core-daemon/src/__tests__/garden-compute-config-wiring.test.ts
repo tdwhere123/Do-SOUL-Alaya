@@ -7,6 +7,7 @@ import {
   readOfficialGardenProviderUrl,
   readOfficialGardenSecretRef
 } from "../daemon-runtime-support.js";
+import { resolveGardenOpenAiCredential } from "../garden-credential.js";
 
 /**
  * C1 wiring tests — verify the env readers honour the new
@@ -58,6 +59,51 @@ describe("Garden compute env readers (C1)", () => {
       [ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV, "this-has-no-prefix"]
     ]);
     expect(() => readOfficialGardenSecretRef(env)).toThrow();
+  });
+
+  it("degrades Garden official API to unavailable when a dedicated env secret is missing", () => {
+    const env = new Map([
+      [ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV, "env:ALAYA_MISSING_GARDEN_KEY"]
+    ]);
+
+    expect(resolveGardenOpenAiCredential({ env: {}, configEnv: env })).toEqual({
+      apiKey: null,
+      provenance: { kind: "none" }
+    });
+  });
+
+  it("degrades deprecated embedding fallback when its env secret is missing", () => {
+    const env = new Map([
+      ["ALAYA_OPENAI_SECRET_REF", "env:ALAYA_MISSING_OPENAI_KEY"]
+    ]);
+
+    expect(resolveGardenOpenAiCredential({ env: {}, configEnv: env })).toEqual({
+      apiKey: null,
+      provenance: { kind: "embedding-fallback" }
+    });
+  });
+
+  it("rejects malformed Garden secret refs on the live credential resolver", () => {
+    const env = new Map([
+      [ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV, "this-has-no-prefix"]
+    ]);
+
+    expect(() => resolveGardenOpenAiCredential({ env: {}, configEnv: env })).toThrow(
+      "ALAYA_OFFICIAL_GARDEN_SECRET_REF"
+    );
+  });
+
+  it("rejects empty Garden secret values on the live credential resolver", () => {
+    const env = new Map([
+      [ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV, "env:ALAYA_EMPTY_GARDEN_KEY"]
+    ]);
+
+    expect(() =>
+      resolveGardenOpenAiCredential({
+        env: { ALAYA_EMPTY_GARDEN_KEY: "   " },
+        configEnv: env
+      })
+    ).toThrow("secret is empty");
   });
 
   it("reads OFFICIAL_API_GARDEN_MODEL when the operator overrides the default model", () => {

@@ -166,6 +166,56 @@ describe("doctor CLI", () => {
       "garden compute: kind=local_heuristics routing=local_heuristics model=default cred=none"
     );
   });
+
+  it("does not fail the provider check when embedding is disabled and keyword-only", async () => {
+    const harness = createDoctorHarness({
+      getEmbeddingStatus: async (workspaceId) => ({
+        workspace_id: workspaceId,
+        embedding_enabled: false,
+        provider_configured: false,
+        model_id: null,
+        storage_available: true,
+        effective_mode: "keyword_only",
+        degraded_reason: null,
+        checked_at: "2026-05-05T00:00:00.000Z"
+      })
+    });
+
+    const jsonResult = await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1", "--json"]);
+
+    expect(jsonResult.json).toMatchObject({
+      checks: {
+        provider: "pass"
+      },
+      provider: {
+        configured: false
+      }
+    });
+  });
+
+  it("fails the provider check when embedding status is degraded", async () => {
+    const harness = createDoctorHarness({
+      getEmbeddingStatus: async (workspaceId) => ({
+        workspace_id: workspaceId,
+        embedding_enabled: true,
+        provider_configured: false,
+        model_id: "text-embedding-3-small",
+        storage_available: true,
+        effective_mode: "degraded",
+        degraded_reason: "provider_unconfigured",
+        checked_at: "2026-05-05T00:00:00.000Z"
+      })
+    });
+
+    const jsonResult = await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1", "--json"]);
+
+    expect(jsonResult.json).toMatchObject({
+      overall: "degraded",
+      checks: {
+        provider: "fail"
+      }
+    });
+  });
 });
 
 function createDoctorHarness(overrides: Partial<Parameters<typeof createDoctorCommand>[0]> = {}) {

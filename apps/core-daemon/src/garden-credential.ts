@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { resolveSecretRef, type ResolveSecretError, type ResolvedSecret } from "./secrets.js";
 
 export type GardenCredentialProvenance = Readonly<{
@@ -41,7 +42,13 @@ export function resolveGardenOpenAiCredential(input: {
   ]);
 
   if (dedicatedRef !== null) {
-    const resolved = resolveSecretRefOrThrow(dedicatedRef, ALAYA_GARDEN_OPENAI_SECRET_REF_ENV);
+    const resolved = resolveSecretRefOrNull(dedicatedRef, ALAYA_GARDEN_OPENAI_SECRET_REF_ENV, env);
+    if (resolved === null) {
+      return {
+        apiKey: null,
+        provenance: { kind: "none" }
+      };
+    }
     return {
       apiKey: resolved.value,
       provenance: { kind: resolved.origin }
@@ -56,7 +63,13 @@ export function resolveGardenOpenAiCredential(input: {
     };
   }
 
-  const resolved = resolveSecretRefOrThrow(embeddingFallbackRef, ALAYA_EMBEDDING_OPENAI_SECRET_REF_ENV);
+  const resolved = resolveSecretRefOrNull(embeddingFallbackRef, ALAYA_EMBEDDING_OPENAI_SECRET_REF_ENV, env);
+  if (resolved === null) {
+    return {
+      apiKey: null,
+      provenance: { kind: "embedding-fallback" }
+    };
+  }
   return {
     apiKey: resolved.value,
     provenance: { kind: "embedding-fallback" }
@@ -103,10 +116,21 @@ function secretRefKind(secretRef: string): "env" | "file" | null {
   return null;
 }
 
-function resolveSecretRefOrThrow(secretRef: string, label: string): ResolvedSecret {
-  const resolved = resolveSecretRef(secretRef);
+function resolveSecretRefOrNull(
+  secretRef: string,
+  label: string,
+  env: NodeJS.ProcessEnv
+): ResolvedSecret | null {
+  const resolved = resolveSecretRef(secretRef, {
+    readEnv: (name) => env[name],
+    readFile: (filePath) => readFileSync(filePath, "utf8")
+  });
   if ("kind" in resolved) {
-    throw new Error(formatSecretResolutionError(label, resolved));
+    if (resolved.kind === "malformed" || resolved.kind === "empty") {
+      throw new Error(formatSecretResolutionError(label, resolved));
+    }
+
+    return null;
   }
 
   return resolved;
@@ -116,13 +140,11 @@ function formatSecretResolutionError(label: string, error: ResolveSecretError): 
   switch (error.kind) {
     case "malformed":
       return `${label}: ${error.ref} -> ${error.reason}`;
-    case "env_missing":
-      return `${label}: ${error.ref} -> environment variable ${error.var_name} is not set`;
-    case "file_missing":
-      return `${label}: ${error.ref} -> file not found at ${error.path}`;
-    case "file_unreadable":
-      return `${label}: ${error.ref} -> file unreadable at ${error.path} (${error.cause})`;
     case "empty":
       return `${label}: ${error.ref} -> ${error.origin} secret is empty`;
+    case "env_missing":
+    case "file_missing":
+    case "file_unreadable":
+      return `${label}: ${error.ref} -> secret is unavailable`;
   }
 }

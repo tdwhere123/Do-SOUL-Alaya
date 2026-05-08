@@ -204,7 +204,7 @@ export function createDoctorCommand(
         runtime: daemonReady ? "pass" : "fail",
         storage:
           storage.exists && storage.writable && storage.schema_ok !== false ? "pass" : "fail",
-        provider: embeddingStatus === null || embeddingStatus.provider_configured ? "pass" : "fail",
+        provider: embeddingStatus === null || embeddingStatus.effective_mode !== "degraded" ? "pass" : "fail",
         mcp: mcp.transport === "ready" ? "pass" : "fail",
         garden: garden.status === "healthy" ? "pass" : "fail"
       } satisfies Record<"runtime" | "storage" | "provider" | "mcp" | "garden", DoctorCheckStatus>;

@@ -36,6 +36,7 @@ import {
   resolveTrustedCliRunId,
   resolveCliWorkspaceContext
 } from "./workspace-context.js";
+import { resolveSecretRef } from "../secrets.js";
 
 export function registerAlayaCliCommands(
   bridge: AlayaCliBridge,
@@ -134,8 +135,23 @@ async function resolveGardenComputeStatus(
     model_id: config.model_id,
     provider_url: config.provider_url,
     credential_source: credential,
-    routing_decision: config.provider_kind
+    routing_decision: resolveGardenRoutingDecision(config)
   };
+}
+
+function resolveGardenRoutingDecision(
+  config: Awaited<ReturnType<AlayaDaemonRuntime["services"]["configService"]["getRuntimeGardenComputeConfig"]>>
+): GardenComputeStatus["routing_decision"] {
+  if (config.provider_kind !== "official_api") {
+    return config.provider_kind;
+  }
+
+  if (config.secret_ref === null) {
+    return "local_heuristics";
+  }
+
+  const resolved = resolveSecretRef(config.secret_ref);
+  return "kind" in resolved ? "local_heuristics" : "official_api";
 }
 
 function resolveGardenCredentialSource(
