@@ -1,7 +1,7 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ComputeRecallGardenEventType,
   type EventLogEntry,
@@ -16,14 +16,24 @@ import {
 
 const hoisted = getToolRuntimeWiringFixture();
 const activeRuntimes: Array<{ shutdown(): Promise<void> }> = [];
+const isolatedConfigDirs: string[] = [];
 
 describe("daemon tool runtime bootstrap", () => {
+  beforeEach(async () => {
+    const configDir = await mkdtemp(path.join(tmpdir(), "alaya-daemon-config-isolated-"));
+    isolatedConfigDirs.push(configDir);
+    process.env.ALAYA_CONFIG_DIR = configDir;
+  });
+
   afterEach(async () => {
     for (const runtime of activeRuntimes.splice(0)) {
       await runtime.shutdown().catch(() => undefined);
     }
     vi.useRealTimers();
     resetToolRuntimeWiringState();
+    for (const configDir of isolatedConfigDirs.splice(0)) {
+      await rm(configDir, { force: true, recursive: true }).catch(() => undefined);
+    }
   });
 
   it(
@@ -420,6 +430,7 @@ describe("daemon tool runtime bootstrap", () => {
 
   it("loads embedding secret-ref config from the Alaya config-dir .env during daemon bootstrap", async () => {
     const configDir = await mkdtemp(path.join(tmpdir(), "alaya-daemon-config-env-"));
+    isolatedConfigDirs.push(configDir);
     await writeFile(
       path.join(configDir, ".env"),
       [

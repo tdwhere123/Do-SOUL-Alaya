@@ -302,8 +302,17 @@ export class SqliteEventLogRepo implements EventLogRepo {
   public append(event: EventLogAppendInput): EventLogEntry {
     // Always auto-compute revision so the unique index on (entity_type, entity_id, revision) is
     // never violated by callers that hardcode revision: 0 or supply stale MAX+1 values.
-    // When invoked inside `transactional(...)` the SELECT MAX + INSERT pair is atomic, closing
-    // the read-modify-write race window noted by #BL-022.
+    // The SELECT MAX + INSERT pair must be one write transaction even when callers append
+    // directly, because multiple CLI/daemon processes can bootstrap against the same DB.
+    if (this.db.connection.inTransaction) {
+      return this.appendInCurrentTransaction(event);
+    }
+
+    const txn = this.db.connection.transaction(() => this.appendInCurrentTransaction(event));
+    return txn.immediate();
+  }
+
+  private appendInCurrentTransaction(event: EventLogAppendInput): EventLogEntry {
     const revision = this.computeNextRevision(event.entity_type, event.entity_id);
 
     const entry = parseEventLogEntry({
@@ -346,7 +355,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
     // BEGIN/COMMIT pair completes before the awaited work, which is incorrect.
     // Callers that need async work must do it outside the transaction.
     const txn = this.db.connection.transaction(fn);
-    return txn();
+    return txn.immediate();
   }
 
   public async queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]> {

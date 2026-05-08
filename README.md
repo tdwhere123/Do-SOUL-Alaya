@@ -10,9 +10,9 @@
 
 ### *A local-first memory plane for CLI coding agents.*
 
-[![status](https://img.shields.io/badge/status-v0.1.0-success?style=flat-square)](#where-this-is-going)
+[![status](https://img.shields.io/badge/status-v0.1.1-success?style=flat-square)](#where-this-is-going)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-1994%20passing-success?style=flat-square)](#where-this-is-going)
+[![tests](https://img.shields.io/badge/tests-2190%20passing-success?style=flat-square)](#where-this-is-going)
 [![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#quickstart)
 [![pnpm](https://img.shields.io/badge/pnpm-%E2%89%A59-F69220?style=flat-square&logo=pnpm&logoColor=white)](#quickstart)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](#architecture-at-a-glance)
@@ -564,7 +564,7 @@ Do-SOUL Alaya/
 
 ## Where this is going
 
-> **Status note (2026-05-05).** v0.1.0 released. v0.1 was originally
+> **Status note (2026-05-08).** v0.1.1 release prep is in progress. v0.1 was originally
 > framed as released on 2026-05-03, then reopened to absorb three
 > structural gaps the first release pass had deferred (HITL daemon
 > backbone A1, EventPublisher atomic transaction A2, path-axis

@@ -85,7 +85,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
   public constructor(deps: OfficialApiGardenProviderDependencies = {}) {
     this.apiKey = normalizeOptionalString(deps.apiKey ?? null);
     this.model = normalizeOptionalString(deps.model) ?? OFFICIAL_API_GARDEN_MODEL;
-    this.endpoint = normalizeOptionalString(deps.endpoint) ?? OFFICIAL_API_ENDPOINT;
+    this.endpoint = normalizeOfficialApiEndpoint(deps.endpoint);
     this.fetchImpl = deps.fetchImpl ?? fetch;
     this.requestTimeoutMs = normalizePositiveTimeoutMs(deps.requestTimeoutMs) ?? DEFAULT_OFFICIAL_API_REQUEST_TIMEOUT_MS;
     this.createAbortController = deps.createAbortController ?? (() => new AbortController());
@@ -303,6 +303,18 @@ function normalizeOptionalString(value: unknown): string | null {
 
   const trimmed = value.trim();
   return trimmed.length === 0 ? null : trimmed;
+}
+
+function normalizeOfficialApiEndpoint(value: unknown): string {
+  const normalized = normalizeOptionalString(value);
+  if (normalized === null) {
+    return OFFICIAL_API_ENDPOINT;
+  }
+
+  const withoutTrailingSlash = normalized.replace(/\/+$/u, "");
+  return withoutTrailingSlash.endsWith("/chat/completions")
+    ? withoutTrailingSlash
+    : `${withoutTrailingSlash}/chat/completions`;
 }
 
 function normalizePositiveTimeoutMs(value: unknown): number | null {

@@ -57,6 +57,40 @@ describe("OfficialApiGardenProvider", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("accepts OpenAI-compatible base URLs and posts to chat completions", async () => {
+    const seenUrls: string[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      seenUrls.push(String(input));
+      return createJsonResponse({ choices: [{ message: { content: JSON.stringify({ signals: [] }) } }] });
+    });
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      endpoint: "https://garden.example.test/v1/",
+      fetchImpl
+    });
+
+    await expect(provider.compile("No durable memory here.", createContext())).resolves.toEqual([]);
+
+    expect(seenUrls).toEqual(["https://garden.example.test/v1/chat/completions"]);
+  });
+
+  it("keeps full chat completions endpoints unchanged", async () => {
+    const seenUrls: string[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      seenUrls.push(String(input));
+      return createJsonResponse({ choices: [{ message: { content: JSON.stringify({ signals: [] }) } }] });
+    });
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      endpoint: "https://garden.example.test/v1/chat/completions",
+      fetchImpl
+    });
+
+    await expect(provider.compile("No durable memory here.", createContext())).resolves.toEqual([]);
+
+    expect(seenUrls).toEqual(["https://garden.example.test/v1/chat/completions"]);
+  });
+
   it("fails closed when official provider credentials are missing", async () => {
     const fetchImpl = vi.fn();
     const provider = new OfficialApiGardenProvider({
