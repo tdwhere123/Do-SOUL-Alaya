@@ -102,6 +102,11 @@ export interface McpMemoryToolHandlerDependencies {
       readonly strategy: "chat" | "analyze" | "build" | "govern";
       readonly runId?: string | null;
       readonly policyOverride?: Readonly<RecallPolicy>;
+      readonly timeFilter?: Readonly<{
+        readonly since?: string | null;
+        readonly until?: string | null;
+        readonly field?: "created_at" | "last_used_at";
+      }>;
     }): Promise<Readonly<{
       readonly candidates: readonly Readonly<RecallCandidate>[];
       readonly total_scanned: number;
@@ -312,12 +317,21 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       context_refs: []
     });
     const policyOverride = buildRecallPolicy(request, taskSurface.runtime_id, generateId());
+    const timeFilter =
+      request.since !== undefined || request.until !== undefined || request.time_field !== undefined
+        ? {
+            since: request.since ?? null,
+            until: request.until ?? null,
+            field: request.time_field ?? "created_at"
+          }
+        : undefined;
     const recallResult = await deps.recallService.recall({
       taskSurface,
       workspaceId: context.workspaceId,
       strategy: "chat",
       runId: context.runId,
-      policyOverride
+      policyOverride,
+      timeFilter
     });
     let usedTokens = 0;
     let explainabilityPartial = false;

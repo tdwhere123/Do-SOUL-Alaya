@@ -38,29 +38,29 @@ export interface AlayaMemoryToolDefinition {
 
 const providerBaseDescriptionByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.freeze({
   "soul.recall":
-    "Recall relevant durable memory for the current task. Returns ranked candidates, evidence pointers, and a delivery id for later usage proof.",
+    "WHEN: at the start of any turn that may benefit from prior memory (user preferences, past decisions, project context, or any \"do you remember / last time / we agreed\" reference). Recall relevant durable memory for the current task. Returns ranked candidates, evidence pointers, and a delivery id for later usage proof. Optional time filter via `since` / `until` (ISO datetime) — useful for queries like \"what did I say on May 20\".",
   "soul.open_pointer":
-    "Open a recalled memory object or evidence pointer by id. Read-only; use before citing recalled context in model output.",
+    "WHEN: a recall result preview is insufficient and you need the full content before citing it. Open a recalled memory object or evidence pointer by id. Read-only.",
   "soul.emit_candidate_signal":
-    "Emit a candidate memory signal when you detect a durable preference, decision, constraint, handoff, conflict, synthesis, or evidence anchor worth tracking. (This tool is language-agnostic. For Chinese inputs: 当你检测到需要记忆的偏好、决定、约束、冲突或证据时，请触发此工具)",
+    "WHEN: you observe a new durable signal worth memorizing — a preference, decision, constraint, handoff, conflict, synthesis, or evidence anchor. Emit a candidate memory signal so the governance loop can promote it to a durable proposal. (Language-agnostic. 当你检测到需要记忆的偏好、决定、约束、冲突或证据时，请触发此工具)",
   "soul.propose_memory_update":
-    "Submit a proposed durable memory update for governance review. This does not directly write durable memory.",
+    "WHEN: a candidate signal has matured into a concrete memory write you want governance to review. Submit a proposed durable memory update; this does not directly write durable memory.",
   "soul.review_memory_proposal":
-    "Accept or reject a pending memory proposal while preserving an explicit governance trace. Requires reviewer_identity so the review record names who approved or rejected the change.",
+    "WHEN: a human reviewer has explicitly approved or rejected a pending proposal and you need to record their decision. Accept or reject a pending memory proposal while preserving an explicit governance trace. Requires reviewer_identity so the review record names who approved or rejected the change.",
   "soul.list_pending_proposals":
-    "List proposals in the pending state for a workspace. Read-only; use before soul.review_memory_proposal so the agent can present a current queue to the human reviewer.",
+    "WHEN: you need to present the pending governance queue to the reviewer (read-only) before calling soul.review_memory_proposal. List proposals in the pending state for a workspace.",
   "soul.apply_override":
-    "Apply an immediate session-only correction when the user explicitly says the current assumption/tool/behavior is wrong and should be replaced for this run.",
+    "WHEN: the user explicitly says the current assumption, tool, or behavior is wrong and must be replaced for this run. Apply an immediate session-only correction.",
   "soul.explore_graph":
-    "Inspect one-hop memory graph neighbors for an existing memory entry. Read-only; does not create or mutate edges.",
+    "WHEN: you need 1-hop graph neighbors of an existing memory entry to ground related context. Inspect memory graph neighbors. Read-only; does not create or mutate edges.",
   "soul.report_context_usage":
-    "Report whether recalled context for a delivery was used, skipped, or not applicable. Supports delivered-vs-used trust state.",
+    "WHEN: you used recalled memory in your answer and need to close the delivery loop. Report whether recalled context for a delivery was used, skipped, or not applicable. Supports delivered-vs-used trust state.",
   "garden.list_pending_tasks":
-    "List Garden background tasks pending in this workspace. Read-only. Use before garden.claim_task to scope what work the host can pick up.",
+    "WHEN: you have spare capacity and want to pick up background organize work. List Garden background tasks pending in this workspace. Read-only. Use before garden.claim_task to scope what work the host can pick up.",
   "garden.claim_task":
-    "Atomically claim a Garden task by id so the host (Codex / Claude Code) can run its own sub-agent extraction and post the result back. Returns already_claimed when another worker already grabbed it.",
+    "WHEN: a pending Garden task should be picked up by this host (atomic claim). Returns already_claimed when another worker already grabbed it. The host (Codex / Claude Code) can then run its own sub-agent extraction and post the result back.",
   "garden.complete_task":
-    "Submit the host's task result. Candidate signals in the result envelope flow into the same review queue host agents use via soul.emit_candidate_signal."
+    "WHEN: the host finished its task work and is reporting the result back. Candidate signals in the result envelope flow into the same review queue host agents use via soul.emit_candidate_signal."
 });
 
 const loopSuffixByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.freeze({

@@ -359,3 +359,53 @@ export function assertActivationWeightsSumToOne(
 export function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+/**
+ * Optional time-window pre-filter applied during recall coarse-filter, before
+ * ranking. Lets agents answer queries like "what did I say on May 20" without
+ * touching the score function. Both bounds are ISO datetime strings; either
+ * may be null/undefined for an open-ended bound. `field` selects whether the
+ * window applies to entry creation time or last-used time (defaults to
+ * created_at when omitted).
+ */
+export type RecallTimeFilter = Readonly<{
+  readonly since?: string | null;
+  readonly until?: string | null;
+  readonly field?: "created_at" | "last_used_at";
+}>;
+
+export function filterMemoriesByTimeWindow(
+  entries: readonly Readonly<MemoryEntry>[],
+  filter: RecallTimeFilter | undefined
+): readonly Readonly<MemoryEntry>[] {
+  if (filter === undefined) {
+    return entries;
+  }
+
+  const since = filter.since ?? null;
+  const until = filter.until ?? null;
+
+  if (since === null && until === null) {
+    return entries;
+  }
+
+  const field = filter.field ?? "created_at";
+
+  return entries.filter((entry) => {
+    const stamp = field === "last_used_at" ? entry.last_used_at : entry.created_at;
+
+    if (stamp === null || stamp === undefined) {
+      return false;
+    }
+
+    if (since !== null && stamp < since) {
+      return false;
+    }
+
+    if (until !== null && stamp > until) {
+      return false;
+    }
+
+    return true;
+  });
+}

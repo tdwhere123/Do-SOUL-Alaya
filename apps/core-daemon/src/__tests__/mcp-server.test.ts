@@ -82,8 +82,9 @@ describe("mcp server", () => {
 
     expect(ALAYA_MCP_SERVER_INSTRUCTIONS).toContain("tools only");
     expect(ALAYA_MCP_SERVER_INSTRUCTIONS).toContain("no prompts, no resources");
-    expect(ALAYA_MCP_SERVER_INSTRUCTIONS).toContain("recall -> open pointer");
-    expect(ALAYA_MCP_SERVER_INSTRUCTIONS).toContain("candidate signals");
+    expect(ALAYA_MCP_SERVER_INSTRUCTIONS).toContain("START every memory-sensitive turn");
+    expect(ALAYA_MCP_SERVER_INSTRUCTIONS).toContain("soul.recall -> soul.open_pointer");
+    expect(ALAYA_MCP_SERVER_INSTRUCTIONS).toContain("soul.emit_candidate_signal");
     expect(ALAYA_MCP_SERVER_INSTRUCTIONS).toContain("accepted proposal apply");
   });
 });

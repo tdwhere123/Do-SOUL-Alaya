@@ -27,8 +27,10 @@ export interface AlayaMcpStdioServer {
 
 export const ALAYA_MCP_SERVER_INSTRUCTIONS = [
   "This MCP server exposes tools only (no prompts, no resources).",
-  "Use the soul.* memory tools as a governed loop: recall -> open pointer -> respond -> report usage.",
-  "When new durable memory may be needed, emit candidate signals first, then propose updates for review.",
+  "START every memory-sensitive turn by calling soul.recall BEFORE answering.",
+  "You SHOULD call soul.recall when the user message touches: personal preferences, working style, or past corrections; prior decisions, architecture choices, or project context; or any \"do you remember / last time / we agreed\" reference.",
+  "Workflow: soul.recall -> soul.open_pointer (only if the preview is insufficient) -> answer -> soul.report_context_usage.",
+  "When you find new durable memory candidates: soul.emit_candidate_signal first, then soul.propose_memory_update.",
   "Durable memory mutates only through accepted proposal apply; rejected proposals do not mutate durable memory."
 ].join(" ");
 
