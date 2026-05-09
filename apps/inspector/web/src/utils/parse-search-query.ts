@@ -1,4 +1,14 @@
-import * as chrono from "chrono-node";
+// Lazy module-level cache so chrono-node ships in its own Vite chunk and
+// only downloads on the first English time expression. zh-CN single-day +
+// multi-day branches resolve from local regex without touching this cache.
+type ChronoModule = typeof import("chrono-node");
+let chronoPromise: Promise<ChronoModule> | null = null;
+function ensureChrono(): Promise<ChronoModule> {
+  if (chronoPromise === null) {
+    chronoPromise = import("chrono-node");
+  }
+  return chronoPromise;
+}
 
 export interface ParsedSearchQuery {
   /** Free-text remainder after time expressions are stripped. */
@@ -109,7 +119,10 @@ const ZH_RELATIVE_RANGES: ReadonlyArray<{
  * when no time expression is recognised so the caller can run pure keyword
  * search without re-parsing.
  */
-export function parseSearchQuery(input: string, now: Date = new Date()): ParsedSearchQuery {
+export async function parseSearchQuery(
+  input: string,
+  now: Date = new Date()
+): Promise<ParsedSearchQuery> {
   const trimmed = input.trim();
   if (trimmed.length === 0) {
     return { text: "", since: null, until: null, windowLabel: null };
@@ -145,8 +158,11 @@ export function parseSearchQuery(input: string, now: Date = new Date()): ParsedS
     };
   }
 
-  // Fall through to chrono-node for English expressions.
+  // Fall through to chrono-node for English expressions. chrono-node is
+  // lazy-loaded so 2D-only / zh-CN-only operators do not pay its bundle
+  // cost on first paint.
   try {
+    const chrono = await ensureChrono();
     const results = chrono.parse(trimmed, now, { forwardDate: false });
     if (results.length > 0) {
       const first = results[0]!;

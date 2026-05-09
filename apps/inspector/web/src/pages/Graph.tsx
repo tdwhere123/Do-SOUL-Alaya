@@ -392,15 +392,16 @@ export default function GraphPage() {
       setSearchKeywordFallback("");
       return;
     }
-    const parsed = parseSearchQuery(trimmed);
-    setSearchKeywordFallback(parsed.text);
-    if (parsed.since === null && parsed.until === null) {
-      setSearchTimeHits(null);
-      setSearchError(null);
-      return;
-    }
     let cancelled = false;
     void (async () => {
+      const parsed = await parseSearchQuery(trimmed);
+      if (cancelled) return;
+      setSearchKeywordFallback(parsed.text);
+      if (parsed.since === null && parsed.until === null) {
+        setSearchTimeHits(null);
+        setSearchError(null);
+        return;
+      }
       try {
         const envelope = await apiFetch<{
           success: boolean;
