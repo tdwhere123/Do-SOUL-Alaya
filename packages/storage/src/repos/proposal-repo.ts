@@ -46,6 +46,7 @@ export interface ProposalCreateInput {
   readonly proposed_change_summary?: string;
   readonly proposed_changes?: MemoryEntryMutableFields | null;
   readonly created_at?: string;
+  readonly target_baseline_updated_at?: string | null;
 }
 
 export interface ScopedProposal {
@@ -60,6 +61,7 @@ export interface ScopedProposal {
   // workflow only; intentionally not exposed through the public Proposal
   // domain projection returned by findById/findPending.
   readonly proposed_changes: Readonly<MemoryEntryMutableFields> | null;
+  readonly target_baseline_updated_at: string | null;
 }
 
 export interface PendingProposalSummary {
@@ -99,6 +101,8 @@ export interface FindPendingSummariesOptions {
 
 export type ProposalResolutionEventInput = EventLogDraftInput;
 export type ProposalCreationEventInput = EventLogDraftInput;
+
+const SQLITE_VARIABLE_CHUNK_SIZE = 900;
 
 export interface UpdatePendingResolutionOptions {
   readonly reviewerIdentity?: string;
@@ -144,6 +148,10 @@ export interface ProposalRepo {
   // chip in the inspector would lie when more than `limit` pending
   // proposals exist).
   countPending(workspaceId: string): Promise<number>;
+  countPendingMemoryTargetEdges(
+    workspaceId: string,
+    targetObjectIds: readonly string[]
+  ): Promise<number>;
   findPendingSummaries(
     workspaceId: string,
     options?: FindPendingSummariesOptions
@@ -210,7 +218,8 @@ const PROPOSAL_SELECT_COLUMNS = `
         target_object_kind,
         proposed_change_summary,
         proposed_changes,
-        created_at
+        created_at,
+        target_baseline_updated_at
 `;
 
 interface ProposalRow {
@@ -235,6 +244,7 @@ interface ProposalRow {
   readonly proposed_change_summary: string;
   readonly proposed_changes: string | null;
   readonly created_at: string | null;
+  readonly target_baseline_updated_at: string | null;
 }
 
 interface ProposalReviewerAssignmentRow {
@@ -293,8 +303,9 @@ export class SqliteProposalRepo implements ProposalRepo {
         target_object_kind,
         proposed_change_summary,
         proposed_changes,
-        created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        created_at,
+        target_baseline_updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     this.findByIdStatement = db.connection.prepare(`
@@ -416,6 +427,7 @@ export class SqliteProposalRepo implements ProposalRepo {
     const proposedChangeSummary = input.proposed_change_summary ?? "";
     const proposedChanges = serializeProposedChanges(input.proposed_changes ?? null);
     const createdAt = input.created_at ?? parsedProposal.last_updated_at;
+    const targetBaselineUpdatedAt = parseNullableTimestamp(input.target_baseline_updated_at ?? null);
 
     try {
       this.createStatement.run(
@@ -436,7 +448,8 @@ export class SqliteProposalRepo implements ProposalRepo {
         targetObjectKind,
         proposedChangeSummary,
         proposedChanges,
-        createdAt
+        createdAt,
+        targetBaselineUpdatedAt
       );
     } catch (error) {
       throw new StorageError(
@@ -464,6 +477,7 @@ export class SqliteProposalRepo implements ProposalRepo {
     const proposedChangeSummary = input.proposed_change_summary ?? "";
     const proposedChanges = serializeProposedChanges(input.proposed_changes ?? null);
     const createdAt = input.created_at ?? parsedProposal.last_updated_at;
+    const targetBaselineUpdatedAt = parseNullableTimestamp(input.target_baseline_updated_at ?? null);
     const reviewerAssignment =
       options.reviewerAssignment === undefined
         ? undefined
@@ -490,7 +504,8 @@ export class SqliteProposalRepo implements ProposalRepo {
           targetObjectKind,
           proposedChangeSummary,
           proposedChanges,
-          createdAt
+          createdAt,
+          targetBaselineUpdatedAt
         );
         if (reviewerAssignment !== undefined) {
           this.insertReviewerAssignment(reviewerAssignment);
@@ -538,7 +553,8 @@ export class SqliteProposalRepo implements ProposalRepo {
             run_id: row.run_id,
             reviewer_identity: row.reviewer_identity,
             reviewer_assignment: assignment,
-            proposed_changes: parseProposedChanges(row.proposed_changes)
+            proposed_changes: parseProposedChanges(row.proposed_changes),
+            target_baseline_updated_at: row.target_baseline_updated_at
           });
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to load proposal ${proposalId}.`, error);
@@ -587,6 +603,45 @@ export class SqliteProposalRepo implements ProposalRepo {
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to count pending proposals for workspace ${parsedWorkspaceId}.`,
+        error
+      );
+    }
+  }
+
+  public async countPendingMemoryTargetEdges(
+    workspaceId: string,
+    targetObjectIds: readonly string[]
+  ): Promise<number> {
+    const parsedWorkspaceId = parseWorkspaceId(workspaceId);
+    const uniqueTargetObjectIds = [...new Set(targetObjectIds.map((id) =>
+      parseNonEmptyString(id, "target_object_id")
+    ))];
+    if (uniqueTargetObjectIds.length === 0) {
+      return 0;
+    }
+
+    try {
+      let total = 0;
+      for (let index = 0; index < uniqueTargetObjectIds.length; index += SQLITE_VARIABLE_CHUNK_SIZE) {
+        const chunk = uniqueTargetObjectIds.slice(index, index + SQLITE_VARIABLE_CHUNK_SIZE);
+        const placeholders = chunk.map(() => "?").join(", ");
+        const row = this.db.connection
+          .prepare(`
+            SELECT COUNT(*) AS total
+            FROM proposals
+            WHERE workspace_id = ?
+              AND resolution_state = 'pending'
+              AND target_object_kind = 'memory_entry'
+              AND derived_from IN (${placeholders})
+          `)
+          .get(parsedWorkspaceId, ...chunk) as { readonly total: number } | undefined;
+        total += row === undefined ? 0 : Number(row.total);
+      }
+      return total;
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to count pending proposal memory target edges for workspace ${parsedWorkspaceId}.`,
         error
       );
     }
@@ -1187,7 +1242,8 @@ function assertAcceptedMemoryUpdateMatchesProposal(
   if (
     row.workspace_id !== update.workspace_id ||
     row.target_object_kind !== "memory_entry" ||
-    row.derived_from !== update.target_object_id
+    row.derived_from !== update.target_object_id ||
+    row.target_baseline_updated_at !== update.expected_baseline_updated_at
   ) {
     throw createAcceptedMemoryUpdateMismatch(row.proposal_id);
   }

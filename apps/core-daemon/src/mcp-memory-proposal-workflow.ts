@@ -43,6 +43,7 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     readonly proposed_changes?: MemoryEntryMutableFields | null;
     readonly proposed_change_summary?: string;
     readonly created_at?: string;
+    readonly target_baseline_updated_at?: string | null;
   }): Promise<Readonly<Proposal>>;
   createProposalWithEvents(
     input: {
@@ -53,6 +54,7 @@ export interface McpMemoryProposalWorkflowProposalRepo {
       readonly proposed_changes?: MemoryEntryMutableFields | null;
       readonly proposed_change_summary?: string;
       readonly created_at?: string;
+      readonly target_baseline_updated_at?: string | null;
     },
     events: readonly ProposalCreationEventInput[],
     options?: {
@@ -83,6 +85,7 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     // path returns NEEDS_CONTEXT when unavailable.
     readonly target_object_id?: string | null;
     readonly proposed_changes?: Readonly<MemoryEntryMutableFields> | null;
+    readonly target_baseline_updated_at?: string | null;
   }> | null>;
   // A1 (HITL daemon backbone) — pending-queue projection. The repo
   // already enforces workspace scoping; the workflow simply forwards
@@ -189,6 +192,10 @@ export function createMcpMemoryProposalWorkflow(
   ): Promise<Readonly<{ proposal_id: string; status: "created" }>> {
     const timestamp = now();
     const proposalId = generateObjectId();
+    const targetBaselineUpdatedAt = await readProposalTargetBaseline(
+      input.target_object_id,
+      context.workspaceId
+    );
     const proposal = ProposalSchema.parse({
       runtime_id: proposalId,
       object_kind: ControlPlaneObjectKind.PROPOSAL,
@@ -253,7 +260,8 @@ export function createMcpMemoryProposalWorkflow(
         target_object_kind: "memory_entry",
         proposed_changes: input.proposed_changes,
         proposed_change_summary: input.reason,
-        created_at: timestamp
+        created_at: timestamp,
+        target_baseline_updated_at: targetBaselineUpdatedAt
       },
       creationEvents,
       reviewerAssignment === undefined ? undefined : { reviewerAssignment }
@@ -413,6 +421,7 @@ export function createMcpMemoryProposalWorkflow(
       readonly workspace_id: string;
       readonly target_object_id?: string | null;
       readonly proposed_changes?: Readonly<MemoryEntryMutableFields> | null;
+      readonly target_baseline_updated_at?: string | null;
     }>,
     context: McpMemoryToolCallContext
   ): Promise<Readonly<{
@@ -453,10 +462,7 @@ export function createMcpMemoryProposalWorkflow(
       workspace_id: context.workspaceId,
       proposed_changes: proposedChanges,
       caused_by: `proposal_accept:${proposalId}`,
-      // gate-6-delta I1: capture the memory's updated_at outside the
-      // storage transaction so the accept-and-apply CAS predicate can
-      // reject stale-snapshot proposals (cross-proposal lost-update).
-      expected_baseline_updated_at: scopedTarget.updated_at ?? null
+      expected_baseline_updated_at: scopedProposal.target_baseline_updated_at ?? null
     };
   }
 
@@ -493,6 +499,24 @@ export function createMcpMemoryProposalWorkflow(
       },
       { reviewerIdentity }
     );
+  }
+
+  async function readProposalTargetBaseline(
+    targetObjectId: string,
+    workspaceId: string
+  ): Promise<string | null> {
+    const memoryService = deps.memoryService;
+    if (memoryService === undefined) {
+      return null;
+    }
+    const scopedTarget = await memoryService.findByIdScoped(targetObjectId, workspaceId);
+    if (scopedTarget === null) {
+      throw createWorkflowError(
+        "NOT_FOUND",
+        `Target memory object not found in workspace: ${targetObjectId}`
+      );
+    }
+    return scopedTarget.updated_at ?? null;
   }
 }
 

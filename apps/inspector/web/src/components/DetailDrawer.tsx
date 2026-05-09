@@ -59,7 +59,7 @@ export function DetailDrawer({
   return (
     <div
       className={clsx(
-        "absolute right-0 top-0 h-full w-96 bg-beige-50 border-l border-beige-200 shadow-2xl transition-transform duration-300 transform",
+        "absolute right-0 top-0 h-full w-full max-w-[24rem] bg-beige-50 border-l border-beige-200 shadow-2xl transition-transform duration-300 transform sm:w-96",
         node ? "translate-x-0" : "translate-x-full"
       )}
       role="complementary"

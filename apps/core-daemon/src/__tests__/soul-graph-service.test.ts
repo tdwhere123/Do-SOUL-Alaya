@@ -11,6 +11,11 @@ import type {
   PathRelationRepo
 } from "@do-soul/alaya-storage";
 
+type SoulGraphProposalRepo = Pick<
+  ProposalRepo,
+  "findPendingSummaries" | "countPending" | "countPendingMemoryTargetEdges"
+>;
+
 describe("createSoulGraphService", () => {
   it("projects shared domain tags as read-only scope nodes and belongs_to edges", async () => {
     const service = createSoulGraphService({
@@ -36,8 +41,9 @@ describe("createSoulGraphService", () => {
       } as unknown as Pick<PathRelationRepo, "findActive">,
       proposalRepo: {
         findPendingSummaries: async () => [],
-        countPending: async () => 0
-      } as unknown as Pick<ProposalRepo, "findPendingSummaries" | "countPending">,
+        countPending: async () => 0,
+        countPendingMemoryTargetEdges: async () => 0
+      } as unknown as SoulGraphProposalRepo,
       eventLogRepo: emptyEventLogRepo()
     });
 
@@ -113,8 +119,9 @@ describe("createSoulGraphService", () => {
       } as unknown as Pick<PathRelationRepo, "findActive">,
       proposalRepo: {
         findPendingSummaries: async () => [],
-        countPending: async () => 0
-      } as unknown as Pick<ProposalRepo, "findPendingSummaries" | "countPending">,
+        countPending: async () => 0,
+        countPendingMemoryTargetEdges: async () => 0
+      } as unknown as SoulGraphProposalRepo,
       eventLogRepo: emptyEventLogRepo()
     });
 
@@ -158,8 +165,9 @@ describe("createSoulGraphService", () => {
       } as unknown as Pick<PathRelationRepo, "findActive">,
       proposalRepo: {
         findPendingSummaries: async () => [],
-        countPending: async () => 0
-      } as unknown as Pick<ProposalRepo, "findPendingSummaries" | "countPending">,
+        countPending: async () => 0,
+        countPendingMemoryTargetEdges: async () => 0
+      } as unknown as SoulGraphProposalRepo,
       eventLogRepo: emptyEventLogRepo()
     });
 
@@ -200,8 +208,9 @@ describe("createSoulGraphService", () => {
       } as unknown as Pick<PathRelationRepo, "findActive">,
       proposalRepo: {
         findPendingSummaries: async () => [],
-        countPending: async () => 0
-      } as unknown as Pick<ProposalRepo, "findPendingSummaries" | "countPending">,
+        countPending: async () => 0,
+        countPendingMemoryTargetEdges: async () => 0
+      } as unknown as SoulGraphProposalRepo,
       eventLogRepo: emptyEventLogRepo()
     });
 
@@ -256,7 +265,7 @@ describe("createSoulGraphService", () => {
             path_id: "path-a-b",
             source_object_id: "memory-a",
             target_object_id: "memory-b",
-            strength: 0.65,
+            strength: 1.5,
             support_events_count: 3,
             stability_class: "stable",
             last_reinforced_at: "2026-05-05T03:00:00.000Z"
@@ -278,8 +287,9 @@ describe("createSoulGraphService", () => {
             is_overdue: false
           }
         ],
-        countPending: async () => 1
-      } as unknown as Pick<ProposalRepo, "findPendingSummaries" | "countPending">,
+        countPending: async () => 1,
+        countPendingMemoryTargetEdges: async () => 1
+      } as unknown as SoulGraphProposalRepo,
       eventLogRepo: {
         queryByWorkspaceAndType: async () => [createMemoryUpdatedEvent("memory-c")]
       }
@@ -325,8 +335,8 @@ describe("createSoulGraphService", () => {
           id: "path-a-b",
           source_id: "memory-a",
           target_id: "memory-b",
-          weight: 0.65,
-          strength_normalized: 0.65,
+          weight: 1,
+          strength_normalized: 1,
           stability_class: "stable",
           last_reinforced_at: "2026-05-05T03:00:00.000Z"
         }),
@@ -453,8 +463,9 @@ describe("createSoulGraphService", () => {
       } as unknown as Pick<PathRelationRepo, "findActive">,
       proposalRepo: {
         findPendingSummaries: async () => [],
-        countPending: async () => 0
-      } as unknown as Pick<ProposalRepo, "findPendingSummaries" | "countPending">,
+        countPending: async () => 0,
+        countPendingMemoryTargetEdges: async () => 0
+      } as unknown as SoulGraphProposalRepo,
       eventLogRepo: emptyEventLogRepo()
     });
 
@@ -497,8 +508,9 @@ describe("createSoulGraphService", () => {
             is_overdue: false
           }
         ],
-        countPending: async () => 1
-      } as unknown as Pick<ProposalRepo, "findPendingSummaries" | "countPending">,
+        countPending: async () => 1,
+        countPendingMemoryTargetEdges: async () => 1
+      } as unknown as SoulGraphProposalRepo,
       eventLogRepo: emptyEventLogRepo()
     });
 
@@ -545,8 +557,9 @@ describe("createSoulGraphService", () => {
             deadline_at: null,
             is_overdue: false
           })),
-        countPending: async () => 25
-      } as unknown as Pick<ProposalRepo, "findPendingSummaries" | "countPending">,
+        countPending: async () => 25,
+        countPendingMemoryTargetEdges: async () => 25
+      } as unknown as SoulGraphProposalRepo,
       eventLogRepo: emptyEventLogRepo()
     });
 
@@ -554,6 +567,7 @@ describe("createSoulGraphService", () => {
 
     // 1 memory + 25 (raw) pending proposals + 0 unique tags = 26.
     expect(graph.node_total).toBe(26);
+    expect(graph.edge_total).toBe(25);
     expect(graph.truncated).toBe(true);
   });
 });

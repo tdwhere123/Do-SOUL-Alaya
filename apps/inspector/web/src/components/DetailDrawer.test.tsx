@@ -38,6 +38,24 @@ describe("DetailDrawer", () => {
     expect(screen.getByText("14 paths reinforced")).toBeTruthy();
   });
 
+  it("hides optional sections when graph fields are absent", () => {
+    renderDrawer({
+      node: {
+        id: "projection-1",
+        kind: "projection",
+        label: "Pending proposal",
+        degree: 0
+      }
+    });
+
+    expect(screen.queryByText("What's remembered")).toBeNull();
+    expect(screen.queryByText("Evidence")).toBeNull();
+    expect(screen.queryByText("Trust")).toBeNull();
+    expect(screen.queryByText("Usage")).toBeNull();
+    expect(screen.queryByText("Actions")).toBeNull();
+    expect(screen.getByText("Metadata")).toBeTruthy();
+  });
+
   it("creates a rewrite proposal through the parent callback", async () => {
     const onCreateProposal = vi.fn(async () => undefined);
     renderDrawer({ onCreateProposal });

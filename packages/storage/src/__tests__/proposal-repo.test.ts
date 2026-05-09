@@ -108,7 +108,8 @@ describe("SqliteProposalRepo", () => {
       run_id: "run-1",
       reviewer_identity: null,
       reviewer_assignment: null,
-      proposed_changes: null
+      proposed_changes: null,
+      target_baseline_updated_at: null
     });
   });
 
@@ -190,6 +191,59 @@ describe("SqliteProposalRepo", () => {
       secondPending.proposal_id,
       firstPending.proposal_id
     ]);
+  });
+
+  it("counts pending memory-target proposal edges independently of pending summary limits", async () => {
+    const { repo } = createRepo();
+    const firstTarget = "11111111-1111-4111-8111-111111111111";
+    const secondTarget = "22222222-2222-4222-8222-222222222222";
+
+    await repo.create({
+      proposal: createProposal({
+        runtime_id: "33333333-3333-4333-8333-333333333333",
+        proposal_id: "33333333-3333-4333-8333-333333333333",
+        derived_from: firstTarget
+      }),
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_kind: "memory_entry"
+    });
+    await repo.create({
+      proposal: createProposal({
+        runtime_id: "44444444-4444-4444-8444-444444444444",
+        proposal_id: "44444444-4444-4444-8444-444444444444",
+        derived_from: secondTarget
+      }),
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_kind: "memory_entry"
+    });
+    await repo.create({
+      proposal: createProposal({
+        runtime_id: "55555555-5555-4555-8555-555555555555",
+        proposal_id: "55555555-5555-4555-8555-555555555555",
+        derived_from: firstTarget,
+        resolution_state: "accepted"
+      }),
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_kind: "memory_entry"
+    });
+    await repo.create({
+      proposal: createProposal({
+        runtime_id: "66666666-6666-4666-8666-666666666666",
+        proposal_id: "66666666-6666-4666-8666-666666666666",
+        derived_from: firstTarget
+      }),
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_kind: "synthesis_capsule"
+    });
+
+    await expect(
+      repo.countPendingMemoryTargetEdges("workspace-1", [firstTarget, secondTarget])
+    ).resolves.toBe(2);
+    await expect(repo.countPendingMemoryTargetEdges("workspace-1", [firstTarget])).resolves.toBe(1);
   });
 
   it("finds only pending bankruptcy proposals for a run", async () => {

@@ -248,7 +248,10 @@ export function createSoulGraphService(input: {
   readonly memoryEntryRepo: SqliteMemoryEntryRepo;
   readonly memoryGraphEdgeRepo: SqliteMemoryGraphEdgeRepo;
   readonly pathRelationRepo: Pick<PathRelationRepo, "findActive">;
-  readonly proposalRepo: Pick<ProposalRepo, "findPendingSummaries" | "countPending">;
+  readonly proposalRepo: Pick<
+    ProposalRepo,
+    "findPendingSummaries" | "countPending" | "countPendingMemoryTargetEdges"
+  >;
   readonly eventLogRepo: Pick<SqliteEventLogRepo, "queryByWorkspaceAndType">;
   readonly now?: () => string;
 }) {
@@ -282,6 +285,10 @@ export function createSoulGraphService(input: {
           MemoryGovernanceEventType.SOUL_MEMORY_UPDATED
         )
       ]);
+      const allMemoryIds = memories.map((memory) => memory.object_id);
+      const allMemoryIdSet = new Set(allMemoryIds);
+      const pendingProposalEdgesTotal =
+        await input.proposalRepo.countPendingMemoryTargetEdges(workspaceId, allMemoryIds);
       const limitedMemories = memories.slice(0, limit);
       const memoryIds = new Set(limitedMemories.map((memory: MemoryEntryRecord) => memory.object_id));
       // Edge limit precedence under pressure: PathRelation edges (the new
@@ -358,8 +365,8 @@ export function createSoulGraphService(input: {
         node_total: memories.length + pendingProposalsTotal + countUniqueDomainTags(memories),
         edge_total:
           edges.length +
-          countPathRelationEdges(pathRelations, new Set(memories.map((memory) => memory.object_id))) +
-          countPendingProposalEdges(pendingProposals, new Set(memories.map((memory) => memory.object_id))) +
+          countPathRelationEdges(pathRelations, allMemoryIdSet) +
+          pendingProposalEdgesTotal +
           countDomainTagEdges(memories)
       };
     }
@@ -441,7 +448,7 @@ function buildPathRelationEdges(
     ) {
       return [];
     }
-    const strength = relation.plasticity_state.strength;
+    const strength = normalizePathStrength(relation.plasticity_state.strength);
     return [
       {
         id: relation.path_id,
@@ -449,7 +456,7 @@ function buildPathRelationEdges(
         source_id: sourceId,
         target_id: targetId,
         weight: strength,
-        strength_normalized: normalizePathStrength(strength),
+        strength_normalized: strength,
         stability_class: relation.plasticity_state.stability_class,
         last_reinforced_at: relation.plasticity_state.last_reinforced_at,
         created_at: relation.created_at
@@ -543,16 +550,6 @@ function countPathRelationEdges(
       ? count + 1
       : count;
   }, 0);
-}
-
-function countPendingProposalEdges(
-  proposals: Awaited<ReturnType<ProposalRepo["findPendingSummaries"]>>,
-  memoryIds: ReadonlySet<string>
-): number {
-  return proposals.reduce(
-    (count, proposal) => count + (memoryIds.has(proposal.target_object_id) ? 1 : 0),
-    0
-  );
 }
 
 function normalizePathStrength(value: number): number {

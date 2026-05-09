@@ -34,7 +34,7 @@ interface ProposalCreateEnvelope {
   readonly success: boolean;
   readonly data: {
     readonly proposal_id: string;
-    readonly status: "created" | "rejected";
+    readonly status: "created" | "already_pending";
   };
 }
 
@@ -519,9 +519,12 @@ export default function GraphPage() {
           }
         );
         const proposalId = envelope.data.proposal_id;
+        const alreadyPending = envelope.data.status === "already_pending";
         showToast({
           type: "success",
-          message: "Proposal created. Review at Pending Proposals.",
+          message: alreadyPending
+            ? "Proposal already pending. Review at Pending Proposals."
+            : "Proposal created. Review at Pending Proposals.",
           action: {
             label: "Review",
             onClick: () => navigate(`/proposals?highlight=${encodeURIComponent(proposalId)}`)
@@ -548,7 +551,7 @@ export default function GraphPage() {
       className="flex-1 min-h-0 relative overflow-hidden bg-[#FDF6E3]"
     >
       {/* Search overlay */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 bg-beige-50/95 backdrop-blur-sm border border-beige-200 rounded-full px-4 py-2 shadow-sm">
+      <div className="absolute left-4 right-4 top-4 z-20 flex items-center gap-3 rounded-full border border-beige-200 bg-beige-50/95 px-4 py-2 shadow-sm backdrop-blur-sm sm:left-1/2 sm:right-auto sm:w-auto sm:-translate-x-1/2">
         <Search className="w-3 h-3 text-ink-700/40" />
         <input
           ref={searchInputRef}
@@ -556,7 +559,7 @@ export default function GraphPage() {
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           placeholder="probe label / id / summary  (press /)"
-          className="bg-transparent outline-none text-xs font-mono text-ink-700 placeholder:text-ink-700/30 w-[280px]"
+          className="min-w-0 flex-1 bg-transparent font-mono text-xs text-ink-700 outline-none placeholder:text-ink-700/30 sm:w-[280px] sm:flex-none"
           aria-label="Search graph nodes"
         />
         {spotlightActive ? (

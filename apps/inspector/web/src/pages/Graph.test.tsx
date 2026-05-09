@@ -259,4 +259,37 @@ describe("GraphPage", () => {
     expect(screen.getByText("100/1998 edges")).toBeTruthy();
     expect(screen.getByText("sampled")).toBeTruthy();
   });
+
+  it("posts memory actions and distinguishes already-pending proposals", async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(SAMPLE_GRAPH), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: { proposal_id: "proposal-existing", status: "already_pending" }
+          }),
+          { status: 200 }
+        )
+      );
+
+    const { container } = renderGraph();
+
+    await waitFor(() => container.querySelector("g[data-node-id='n1']"));
+    const node = container.querySelector("g[data-node-id='n1']") as Element;
+    await act(async () => {
+      fireEvent.click(node);
+    });
+    await userEvent.click(await screen.findByRole("button", { name: /keep/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/proposals/ws-1/memory/n1/keep",
+        expect.objectContaining({ method: "POST" })
+      );
+    });
+    expect(
+      await screen.findByText("Proposal already pending. Review at Pending Proposals.")
+    ).toBeTruthy();
+  });
 });
