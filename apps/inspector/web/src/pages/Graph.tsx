@@ -19,6 +19,7 @@ import { apiFetch, getWorkspaceId, type ApiError } from "../api";
 import { useToasts } from "../components/Toast";
 import { DetailDrawer } from "../components/DetailDrawer";
 import type { GraphNode, GraphLink, SpotlightState } from "../types/graph";
+import { parseSearchQuery } from "../utils/parse-search-query";
 import {
   EDGE_TYPE_BASE_COLOR,
   ORIGIN_KIND_COLOR,
@@ -90,6 +91,17 @@ export default function GraphPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
+  // When the debounced search term parses to a time window, the spotlight
+  // hits come from the daemon /soul/search endpoint instead of the in-memory
+  // substring scan. Null = use substring fallback. The chip below the search
+  // bar shows the parsed window label so operators see why the result set
+  // changed.
+  const [searchTimeHits, setSearchTimeHits] = useState<{
+    readonly ids: ReadonlySet<string>;
+    readonly windowLabel: string;
+    readonly total: number;
+  } | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [matchCursor, setMatchCursor] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode>("2d");
   const [webglSupported] = useState<boolean>(() => probeWebgl());
@@ -215,7 +227,9 @@ export default function GraphPage() {
   );
 
   // Spotlight: compute match + adjacent sets from the *debounced* search term
-  // so 5k+ node workspaces don't re-scan on every keystroke.
+  // so 5k+ node workspaces don't re-scan on every keystroke. Two paths feed
+  // matchIds: time-window queries fetch from the daemon (searchTimeHits),
+  // pure-keyword queries fall through to in-memory substring matching.
   const { matchIds, adjacentIds, matchOrder } = useMemo(() => {
     if (!data || debouncedSearchTerm.trim() === "") {
       return {
@@ -224,12 +238,22 @@ export default function GraphPage() {
         matchOrder: [] as string[]
       };
     }
-    const needle = debouncedSearchTerm.trim().toLowerCase();
-    const matches = data.nodes.filter((n) => {
-      const haystack = `${n.id} ${n.label} ${n.summary ?? ""}`.toLowerCase();
-      return haystack.includes(needle);
-    });
-    const matchSet = new Set(matches.map((n) => n.id));
+    let matchSet: Set<string>;
+    let order: string[];
+    if (searchTimeHits) {
+      matchSet = new Set(searchTimeHits.ids);
+      order = data.nodes
+        .filter((n) => matchSet.has(n.id))
+        .map((n) => n.id);
+    } else {
+      const needle = debouncedSearchTerm.trim().toLowerCase();
+      const matches = data.nodes.filter((n) => {
+        const haystack = `${n.id} ${n.label} ${n.summary ?? ""}`.toLowerCase();
+        return haystack.includes(needle);
+      });
+      matchSet = new Set(matches.map((n) => n.id));
+      order = matches.map((n) => n.id);
+    }
     const adjacent = new Set<string>();
     data.links.forEach((l) => {
       const a = extractId(l.source);
@@ -241,9 +265,9 @@ export default function GraphPage() {
     return {
       matchIds: matchSet,
       adjacentIds: adjacent,
-      matchOrder: matches.map((n) => n.id)
+      matchOrder: order
     };
-  }, [data, debouncedSearchTerm]);
+  }, [data, debouncedSearchTerm, searchTimeHits]);
 
   // The chip + clear-button still react to the live `searchTerm` so the user
   // sees their input immediately; only the heavy spotlight scan is debounced.
@@ -340,6 +364,61 @@ export default function GraphPage() {
     const id = window.setTimeout(() => setDebouncedSearchTerm(searchTerm), 120);
     return () => window.clearTimeout(id);
   }, [searchTerm, debouncedSearchTerm]);
+
+  // Parse the debounced query. When a time window is detected, fetch
+  // ranked hits from /api/soul/search/:workspaceId; otherwise fall through
+  // to the legacy in-memory substring spotlight.
+  useEffect(() => {
+    if (workspaceId === null) return;
+    const trimmed = debouncedSearchTerm.trim();
+    if (trimmed.length === 0) {
+      setSearchTimeHits(null);
+      setSearchError(null);
+      return;
+    }
+    const parsed = parseSearchQuery(trimmed);
+    if (parsed.since === null && parsed.until === null) {
+      setSearchTimeHits(null);
+      setSearchError(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const envelope = await apiFetch<{
+          success: boolean;
+          data: {
+            results: ReadonlyArray<{ object_id: string }>;
+            total_count?: number;
+          };
+        }>(`/soul/search/${workspaceId}`, {
+          method: "POST",
+          body: {
+            text: parsed.text.length > 0 ? parsed.text : (parsed.windowLabel ?? trimmed),
+            since: parsed.since,
+            until: parsed.until,
+            max_results: 50
+          }
+        });
+        if (cancelled) return;
+        const ids = new Set(envelope.data.results.map((r) => r.object_id));
+        setSearchTimeHits({
+          ids,
+          windowLabel: parsed.windowLabel ?? trimmed,
+          total: envelope.data.total_count ?? ids.size
+        });
+        setSearchError(null);
+      } catch (err) {
+        if (cancelled) return;
+        if ((err as ApiError).status === 401) return;
+        setSearchTimeHits(null);
+        setSearchError(err instanceof Error ? err.message : "search failed");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedSearchTerm, workspaceId]);
 
   useEffect(() => {
     return () => {
@@ -606,6 +685,24 @@ export default function GraphPage() {
       {data && !webglSupported ? (
         <div className="absolute left-4 top-16 z-20 max-w-md rounded-md border border-[#D4AF37]/35 bg-beige-50/95 px-3 py-2 font-mono text-[10px] uppercase tracking-wide text-ink-700/65 shadow-sm">
           3D not available in this environment. Graph is locked to 2D.
+        </div>
+      ) : null}
+
+      {searchTimeHits ? (
+        <div
+          className="absolute left-1/2 top-16 z-20 -translate-x-1/2 rounded-full border border-[#4A90A4]/35 bg-beige-50/95 px-3 py-1 font-mono text-[10px] uppercase tracking-wide text-ink-700/70 shadow-sm"
+          data-testid="search-time-window-chip"
+        >
+          showing {searchTimeHits.windowLabel} · {searchTimeHits.total} hits
+        </div>
+      ) : null}
+
+      {searchError ? (
+        <div
+          className="absolute left-1/2 top-16 z-20 -translate-x-1/2 rounded-md border border-[#C9ADA7] bg-beige-50/95 px-3 py-1 font-mono text-[10px] uppercase tracking-wide text-[#8B4536] shadow-sm"
+          data-testid="search-error-chip"
+        >
+          search failed · {searchError} · falling back to keyword
         </div>
       ) : null}
 

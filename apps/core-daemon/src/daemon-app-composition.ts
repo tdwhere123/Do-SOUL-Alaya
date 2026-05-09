@@ -186,6 +186,10 @@ export function createCoreDaemonApp(input: CreateCoreDaemonAppInput): ReturnType
         workspaceService: input.workspaceService,
         soulGraphService: input.soulGraphService
       },
+      soulSearch: {
+        workspaceService: input.workspaceService,
+        mcpMemoryToolHandler: input.mcpMemoryToolHandler
+      },
       status: {
         startupStepsProvider: () => input.startupSteps.map((step) => step.step),
         principalCodingEngineAvailableProvider: () => input.principalCodingEngineAvailable,

@@ -5,6 +5,7 @@ import { createInspectorAuthMiddleware } from "./auth.js";
 import { registerInspectorConfigRoutes } from "./routes/config.js";
 import { registerInspectorGraphRoutes } from "./routes/graph.js";
 import { registerInspectorProposalRoutes } from "./routes/proposals.js";
+import { registerInspectorSoulSearchRoutes } from "./routes/soul-search.js";
 import { registerInspectorStatusRoutes } from "./routes/status.js";
 import { registerInspectorStaticRoutes } from "./static.js";
 
@@ -29,7 +30,8 @@ export const INSPECTOR_ROUTE_SURFACE = Object.freeze([
   "POST /api/proposals/:workspaceId/memory/:memoryId/keep",
   "POST /api/proposals/:workspaceId/memory/:memoryId/rewrite",
   "POST /api/proposals/:workspaceId/memory/:memoryId/downgrade",
-  "POST /api/proposals/:workspaceId/memory/:memoryId/retire"
+  "POST /api/proposals/:workspaceId/memory/:memoryId/retire",
+  "POST /api/soul/search/:workspaceId"
 ] as const);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -65,6 +67,7 @@ export function createInspectorApp(options: InspectorAppOptions): Hono {
   registerInspectorGraphRoutes(app, proxyOptions);
   registerInspectorStatusRoutes(app, proxyOptions);
   registerInspectorProposalRoutes(app, proxyOptions);
+  registerInspectorSoulSearchRoutes(app, proxyOptions);
   registerInspectorStaticRoutes(app, {
     staticRoot: options.staticRoot ?? defaultStaticRoot
   });

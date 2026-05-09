@@ -28,7 +28,8 @@ describe("inspector routes", () => {
       "POST /api/proposals/:workspaceId/memory/:memoryId/keep",
       "POST /api/proposals/:workspaceId/memory/:memoryId/rewrite",
       "POST /api/proposals/:workspaceId/memory/:memoryId/downgrade",
-      "POST /api/proposals/:workspaceId/memory/:memoryId/retire"
+      "POST /api/proposals/:workspaceId/memory/:memoryId/retire",
+      "POST /api/soul/search/:workspaceId"
     ]);
   });
 
