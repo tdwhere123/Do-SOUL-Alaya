@@ -397,6 +397,46 @@ describe("createSoulGraphService", () => {
     ).toBe("user_memory");
   });
 
+  // invariant: bulk codex-memory-import rows persist source_kind="compiler"
+  // and formation_kind="extracted" (not "import" / "imported"), and their
+  // evidence_refs hold internal UUIDs rather than file paths. The classifier
+  // must still reach engineering_chunk through domain_tags / run_id /
+  // content cues so the production graph view does not silently mislabel
+  // 226 codex chunks as `system`.
+  it("classifies codex-memory-import bulk rows as engineering_chunk via domain_tags / run_id / content", () => {
+    const baseShape = {
+      object_id: "codex-bulk-1",
+      domain_tags: ["codex-memory-import", "smoke"] as readonly string[],
+      source_kind: "compiler" as const,
+      formation_kind: "extracted" as const,
+      created_by: "model_tool",
+      evidence_refs: ["75b87846-1351-4c03-9f05-969bbd075032"]
+    };
+    expect(classifySoulGraphOriginKind(createMemory(baseShape))).toBe("engineering_chunk");
+
+    expect(
+      classifySoulGraphOriginKind(
+        createMemory({
+          ...baseShape,
+          object_id: "codex-bulk-2",
+          domain_tags: [],
+          run_id: "codex-memory-import-smoke-20260505"
+        })
+      )
+    ).toBe("engineering_chunk");
+
+    expect(
+      classifySoulGraphOriginKind(
+        createMemory({
+          ...baseShape,
+          object_id: "codex-bulk-3",
+          domain_tags: [],
+          content: "Codex memory file import (2026-05-05)\nSource: ~/.codex/memories/MEMORY.md\nChunk: 1/11\n..."
+        })
+      )
+    ).toBe("engineering_chunk");
+  });
+
   it("returns reviewed_engineering_chunk for an engineering-origin memory after proposal accept", () => {
     expect(
       classifySoulGraphOriginKind(
@@ -620,6 +660,7 @@ function createMemory(overrides: {
   readonly confidence?: number | null;
   readonly last_used_at?: string | null;
   readonly last_hit_at?: string | null;
+  readonly run_id?: string;
 }) {
   return {
     object_id: overrides.object_id,
@@ -634,7 +675,8 @@ function createMemory(overrides: {
     evidence_refs: overrides.evidence_refs ?? [],
     confidence: overrides.confidence ?? null,
     last_used_at: overrides.last_used_at ?? null,
-    last_hit_at: overrides.last_hit_at ?? null
+    last_hit_at: overrides.last_hit_at ?? null,
+    run_id: overrides.run_id ?? "test-run-id"
   };
 }
 

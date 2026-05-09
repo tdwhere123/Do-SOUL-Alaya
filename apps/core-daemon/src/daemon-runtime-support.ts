@@ -374,16 +374,39 @@ export function createSoulGraphService(input: {
 }
 
 export function classifySoulGraphOriginKind(
-  memory: Pick<MemoryEntryRecord, "source_kind" | "formation_kind" | "created_by" | "evidence_refs">,
+  memory: Pick<
+    MemoryEntryRecord,
+    | "source_kind"
+    | "formation_kind"
+    | "created_by"
+    | "evidence_refs"
+    | "content"
+    | "domain_tags"
+    | "run_id"
+  >,
   hasAcceptedProposalApply = false
 ): SoulGraphOriginKind {
   // invariant: reviewer acceptance adds governance state without overwriting
-  // the entry's true engineering-origin attribution.
+  // the entry's true engineering-origin attribution. Engineering-origin
+  // signals fan out across multiple persisted fields because import paths
+  // historically populate them inconsistently — `evidence_refs` carries
+  // internal UUIDs (not file paths) for the codex-memory-import bulk
+  // pipeline, so classifier must also read `content`, `domain_tags`, and
+  // `run_id` to recover the same attribution.
+  const tagsContainCodex = memory.domain_tags.some((tag) =>
+    tag.toLowerCase().includes("codex-memory-import")
+  );
+  const runIdMarksCodex = memory.run_id.toLowerCase().includes("codex-memory-import");
+  const contentMentionsCodexMemories = memory.content.includes(".codex/memories");
+
   const isEngineeringOrigin =
     memory.source_kind === "import" ||
     memory.formation_kind === "imported" ||
     memory.created_by.toLowerCase().includes("codex") ||
-    memory.evidence_refs.some((ref) => ref.includes(".codex/memories"));
+    memory.evidence_refs.some((ref) => ref.includes(".codex/memories")) ||
+    tagsContainCodex ||
+    runIdMarksCodex ||
+    contentMentionsCodexMemories;
   const isUserOrigin = memory.source_kind === "user" || memory.source_kind === "review";
 
   if (isEngineeringOrigin) {
