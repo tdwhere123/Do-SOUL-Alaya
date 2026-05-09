@@ -27,7 +27,7 @@ describe("RuntimeGardenComputeConfig schema (C1)", () => {
     expect(RuntimeGardenComputeConfigSchema.parse(value)).toEqual(value);
   });
 
-  it("accepts host_worker (deferred to v0.1.2)", () => {
+  it("accepts host_worker for attached-agent Garden compute", () => {
     const value = {
       provider_kind: "host_worker",
       model_id: null,

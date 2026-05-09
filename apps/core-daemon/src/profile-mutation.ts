@@ -164,7 +164,7 @@ export const ALAYA_OPERATOR_INSTRUCTIONS = [
   "Workflow: soul.recall -> soul.open_pointer (only if the preview is insufficient) -> answer -> soul.report_context_usage.",
   "When you detect possible durable memory, call soul.emit_candidate_signal first; signal emission is candidate-only and not durable by itself.",
   "For durable edits, call soul.propose_memory_update, then soul.list_pending_proposals and soul.review_memory_proposal with explicit reviewer approval.",
-  "When you have spare capacity, optionally call garden.list_pending_tasks to pick up background organize work; claim with garden.claim_task and report results via garden.complete_task. Skipping is fine — the daemon will handle them eventually.",
+  "When the operator has set Garden compute provider_kind=host_worker and you have spare capacity, optionally call garden.list_pending_tasks, then garden.claim_task, then garden.complete_task. If provider_kind is not host_worker, do not claim Garden work.",
   "Accepted proposals trigger durable-memory apply; rejected proposals keep durable memory unchanged."
 ].join(" ");
 
