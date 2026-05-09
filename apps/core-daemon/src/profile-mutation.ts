@@ -147,7 +147,11 @@ export function resolveAlayaSlashCommand(
   }
 
   const binPath = resolveAlayaBinPath(rootInput);
-  return ["node", shellQuote(binPath), ...ALAYA_SLASH_ARGS].join(" ");
+  return ["node", alwaysSingleQuote(binPath), ...ALAYA_SLASH_ARGS].join(" ");
+}
+
+function alwaysSingleQuote(value: string): string {
+  return `'${value.replace(/'/gu, "'\\''")}'`;
 }
 export const PROFILE_MUTATION_CONFIRM_PROMPT = "Apply profile mutation changes? [y/N] ";
 export const PUBLIC_SOUL_TOOL_NAMES = Object.freeze(soulToolDefs.map((toolDef) => toolDef.name));
@@ -899,12 +903,4 @@ function resolveAlayaPackageRoot(rootInput: AlayaLauncherRootInput | undefined):
   }
 
   return path.resolve(moduleDir, "..", "..", "..");
-}
-
-function shellQuote(value: string): string {
-  if (/^[A-Za-z0-9_/:=+.,@%-]+$/u.test(value)) {
-    return value;
-  }
-
-  return `'${value.replace(/'/gu, "'\\''")}'`;
 }
