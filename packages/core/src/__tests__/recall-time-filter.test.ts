@@ -84,4 +84,22 @@ describe("filterMemoriesByTimeWindow", () => {
     });
     expect(result).toEqual([]);
   });
+
+  it("does NOT exempt protected dimensions (hazard/constraint) from the window — pinned per UX", () => {
+    const hazardOutOfWindow = entry({
+      object_id: "hazard-old",
+      dimension: "hazard",
+      created_at: "2026-04-01T12:00:00.000Z"
+    });
+    const constraintOutOfWindow = entry({
+      object_id: "constraint-old",
+      dimension: "constraint",
+      created_at: "2026-04-01T12:00:00.000Z"
+    });
+    const result = filterMemoriesByTimeWindow([hazardOutOfWindow, constraintOutOfWindow, may20], {
+      since: "2026-05-20T00:00:00.000Z",
+      until: "2026-05-20T23:59:59.000Z"
+    });
+    expect(result.map((entry) => entry.object_id)).toEqual(["may-20"]);
+  });
 });

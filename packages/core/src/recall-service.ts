@@ -36,6 +36,7 @@ import {
   compareMemoryEntries,
   compareRecallCandidates,
   createContentPreview,
+  entryMatchesTimeFilter,
   estimateTokens,
   filterMemoriesByTimeWindow,
   getGlobalRecallLimit,
@@ -110,7 +111,9 @@ export class RecallService {
       createdBy: "system",
       globalRecallPort: this.dependencies.globalRecallPort,
       projectMappingPort: this.dependencies.projectMappingPort,
-      classifyGlobalCandidate
+      classifyGlobalCandidate,
+      timeFilter: params.timeFilter,
+      entryMatchesTimeFilter
     });
     const filteredGlobalCandidates = globalCoarseFilter.records.flatMap((record) => {
       if (record.candidate === null) {

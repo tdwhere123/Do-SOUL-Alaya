@@ -374,6 +374,50 @@ export type RecallTimeFilter = Readonly<{
   readonly field?: "created_at" | "last_used_at";
 }>;
 
+/**
+ * Single-entry predicate matching {@link filterMemoriesByTimeWindow}. Exposed
+ * separately so the global recall path can apply the same window check before
+ * adopting cross-workspace candidates without rebuilding an array just to
+ * filter it. When `filter` is undefined or has no bounds, every entry passes.
+ *
+ * Note: lexicographic string comparison is sound only because
+ * IsoDatetimeStringSchema uses Zod's default `{ offset: false }` mode (UTC `Z`
+ * suffix only). If that schema is ever relaxed, this comparator must move to
+ * a parsed comparison.
+ */
+export function entryMatchesTimeFilter(
+  entry: Readonly<MemoryEntry>,
+  filter: RecallTimeFilter | undefined
+): boolean {
+  if (filter === undefined) {
+    return true;
+  }
+
+  const since = filter.since ?? null;
+  const until = filter.until ?? null;
+
+  if (since === null && until === null) {
+    return true;
+  }
+
+  const field = filter.field ?? "created_at";
+  const stamp = field === "last_used_at" ? entry.last_used_at : entry.created_at;
+
+  if (stamp === null || stamp === undefined) {
+    return false;
+  }
+
+  if (since !== null && stamp < since) {
+    return false;
+  }
+
+  if (until !== null && stamp > until) {
+    return false;
+  }
+
+  return true;
+}
+
 export function filterMemoriesByTimeWindow(
   entries: readonly Readonly<MemoryEntry>[],
   filter: RecallTimeFilter | undefined
@@ -389,23 +433,5 @@ export function filterMemoriesByTimeWindow(
     return entries;
   }
 
-  const field = filter.field ?? "created_at";
-
-  return entries.filter((entry) => {
-    const stamp = field === "last_used_at" ? entry.last_used_at : entry.created_at;
-
-    if (stamp === null || stamp === undefined) {
-      return false;
-    }
-
-    if (since !== null && stamp < since) {
-      return false;
-    }
-
-    if (until !== null && stamp > until) {
-      return false;
-    }
-
-    return true;
-  });
+  return entries.filter((entry) => entryMatchesTimeFilter(entry, filter));
 }

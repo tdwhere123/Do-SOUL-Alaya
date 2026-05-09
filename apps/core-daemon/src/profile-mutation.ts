@@ -159,7 +159,9 @@ export const PUBLIC_SOUL_TOOL_NAMES = Object.freeze(soulToolDefs.map((toolDef) =
 export const ALAYA_OPERATOR_INSTRUCTIONS = [
   "This server is tools-only for soul.* memory operations; do not expect MCP prompts/resources.",
   `Use only these public SOUL memory tools: ${PUBLIC_SOUL_TOOL_NAMES.join(", ")}.`,
-  "Agent loop: soul.recall -> soul.open_pointer -> respond -> soul.report_context_usage.",
+  "START every memory-sensitive turn by calling soul.recall BEFORE answering.",
+  "You SHOULD call soul.recall when the user message touches: personal preferences, working style, or past corrections; prior decisions, architecture choices, or project context; or any \"do you remember / last time / we agreed\" reference.",
+  "Workflow: soul.recall -> soul.open_pointer (only if the preview is insufficient) -> answer -> soul.report_context_usage.",
   "When you detect possible durable memory, call soul.emit_candidate_signal first; signal emission is candidate-only and not durable by itself.",
   "For durable edits, call soul.propose_memory_update, then soul.list_pending_proposals and soul.review_memory_proposal with explicit reviewer approval.",
   "When you have spare capacity, optionally call garden.list_pending_tasks to pick up background organize work; claim with garden.claim_task and report results via garden.complete_task. Skipping is fine — the daemon will handle them eventually.",
