@@ -437,6 +437,44 @@ describe("createSoulGraphService", () => {
     ).toBe("engineering_chunk");
   });
 
+  // invariant: source_kind="user"/"review" beats every soft engineering
+  // substring signal. A user note that mentions .codex/memories or carries
+  // a "codex-memory-import" tag stays user_memory.
+  it("keeps source_kind=user as user_memory even when content / tags / run_id mention codex", () => {
+    expect(
+      classifySoulGraphOriginKind(
+        createMemory({
+          object_id: "user-mentions-codex-path",
+          source_kind: "user",
+          formation_kind: "explicit",
+          domain_tags: [],
+          content: "I disagree with how we treat ~/.codex/memories — let's revisit."
+        })
+      )
+    ).toBe("user_memory");
+    expect(
+      classifySoulGraphOriginKind(
+        createMemory({
+          object_id: "user-with-codex-tag",
+          source_kind: "user",
+          formation_kind: "explicit",
+          domain_tags: ["codex-memory-import-feedback"]
+        })
+      )
+    ).toBe("user_memory");
+    expect(
+      classifySoulGraphOriginKind(
+        createMemory({
+          object_id: "review-with-codex-run-id",
+          source_kind: "review",
+          formation_kind: "explicit",
+          domain_tags: [],
+          run_id: "codex-memory-import-bug-investigation"
+        })
+      )
+    ).toBe("user_memory");
+  });
+
   it("returns reviewed_engineering_chunk for an engineering-origin memory after proposal accept", () => {
     expect(
       classifySoulGraphOriginKind(

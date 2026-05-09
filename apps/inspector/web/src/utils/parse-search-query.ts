@@ -115,7 +115,21 @@ export function parseSearchQuery(input: string, now: Date = new Date()): ParsedS
     return { text: "", since: null, until: null, windowLabel: null };
   }
 
-  // Try zh-CN day matchers first (single-day windows).
+  // Multi-day relative ranges win over single-day patterns when both match.
+  // Otherwise "5月20号 上周" silently collapses to a single-day window and
+  // the operator's "上周" intent disappears.
+  for (const range of ZH_RELATIVE_RANGES) {
+    const match = range.regex.exec(trimmed);
+    if (!match) continue;
+    const resolved = range.resolve(now);
+    return {
+      text: stripMatch(trimmed, match),
+      since: resolved.since.toISOString(),
+      until: resolved.until.toISOString(),
+      windowLabel: resolved.label
+    };
+  }
+
   for (const matcher of ZH_DAY_PATTERNS) {
     const match = matcher.regex.exec(trimmed);
     if (!match) continue;
@@ -127,19 +141,6 @@ export function parseSearchQuery(input: string, now: Date = new Date()): ParsedS
       text: stripMatch(trimmed, match),
       since: since.toISOString(),
       until: until.toISOString(),
-      windowLabel: resolved.label
-    };
-  }
-
-  // Try zh-CN relative ranges (multi-day windows).
-  for (const range of ZH_RELATIVE_RANGES) {
-    const match = range.regex.exec(trimmed);
-    if (!match) continue;
-    const resolved = range.resolve(now);
-    return {
-      text: stripMatch(trimmed, match),
-      since: resolved.since.toISOString(),
-      until: resolved.until.toISOString(),
       windowLabel: resolved.label
     };
   }

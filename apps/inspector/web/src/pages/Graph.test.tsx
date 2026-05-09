@@ -558,6 +558,44 @@ describe("GraphPage (react-force-graph driven)", () => {
     expect(n1Color).not.toMatch(/0\.12/);
   });
 
+  // invariant: when the search bar parses a time expression, the daemon
+  // /soul/search endpoint is called and its returned object_ids drive the
+  // spotlight; a chip below the search bar shows the parsed window label
+  // and the actual hit count (not the daemon's unsliced total_count).
+  it("calls /api/soul/search and highlights returned ids when a time expression parses", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(SAMPLE_GRAPH), { status: 200 })
+    );
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            delivery_id: "delivery-1",
+            results: [{ object_id: "n1", relevance_score: 0.9 }],
+            total_count: 1
+          }
+        }),
+        { status: 200 }
+      )
+    );
+    renderGraphWithEnv();
+    await screen.findByTestId("force-graph-2d");
+    await user.type(screen.getByPlaceholderText(/probe label/i), "yesterday auth");
+    await waitFor(() => {
+      const chip = screen.getByTestId("search-time-window-chip");
+      expect(chip.textContent).toMatch(/showing/i);
+      expect(chip.textContent).toMatch(/1 hits/);
+    });
+    await waitFor(() => {
+      const searchCall = fetchMock.mock.calls.find(([url]) =>
+        typeof url === "string" && url.includes("/soul/search/ws-1")
+      );
+      expect(searchCall).toBeDefined();
+    });
+  });
+
   // invariant G8: Inspector is read-only — right-click on the graph viewport
   // never mounts a destructive context menu. See docs/handbook/invariants.md.
   it("does not surface a destructive context menu on right-click (G8)", async () => {

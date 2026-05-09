@@ -99,9 +99,14 @@ export default function GraphPage() {
   const [searchTimeHits, setSearchTimeHits] = useState<{
     readonly ids: ReadonlySet<string>;
     readonly windowLabel: string;
-    readonly total: number;
   } | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
+  // Keyword remainder after the parser strips a recognised time expression.
+  // When the daemon errors out and we fall back to substring matching, we
+  // search this rather than the full `debouncedSearchTerm` so the matcher
+  // is not fed "5月20号 inspector" — which would match almost nothing —
+  // and instead sees just "inspector".
+  const [searchKeywordFallback, setSearchKeywordFallback] = useState<string>("");
   const [matchCursor, setMatchCursor] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode>("2d");
   const [webglSupported] = useState<boolean>(() => probeWebgl());
@@ -246,11 +251,21 @@ export default function GraphPage() {
         .filter((n) => matchSet.has(n.id))
         .map((n) => n.id);
     } else {
-      const needle = debouncedSearchTerm.trim().toLowerCase();
-      const matches = data.nodes.filter((n) => {
-        const haystack = `${n.id} ${n.label} ${n.summary ?? ""}`.toLowerCase();
-        return haystack.includes(needle);
-      });
+      // When a time expression was parsed but the daemon errored (or no
+      // time expression was found at all), fall back to substring matching
+      // on the parsed keyword remainder. searchKeywordFallback equals
+      // debouncedSearchTerm when the parser found no time window, so the
+      // legacy behaviour is preserved.
+      const fallbackText =
+        searchKeywordFallback.length > 0 ? searchKeywordFallback : debouncedSearchTerm.trim();
+      const needle = fallbackText.toLowerCase();
+      const matches =
+        needle.length === 0
+          ? []
+          : data.nodes.filter((n) => {
+              const haystack = `${n.id} ${n.label} ${n.summary ?? ""}`.toLowerCase();
+              return haystack.includes(needle);
+            });
       matchSet = new Set(matches.map((n) => n.id));
       order = matches.map((n) => n.id);
     }
@@ -267,7 +282,7 @@ export default function GraphPage() {
       adjacentIds: adjacent,
       matchOrder: order
     };
-  }, [data, debouncedSearchTerm, searchTimeHits]);
+  }, [data, debouncedSearchTerm, searchTimeHits, searchKeywordFallback]);
 
   // The chip + clear-button still react to the live `searchTerm` so the user
   // sees their input immediately; only the heavy spotlight scan is debounced.
@@ -374,9 +389,11 @@ export default function GraphPage() {
     if (trimmed.length === 0) {
       setSearchTimeHits(null);
       setSearchError(null);
+      setSearchKeywordFallback("");
       return;
     }
     const parsed = parseSearchQuery(trimmed);
+    setSearchKeywordFallback(parsed.text);
     if (parsed.since === null && parsed.until === null) {
       setSearchTimeHits(null);
       setSearchError(null);
@@ -404,8 +421,7 @@ export default function GraphPage() {
         const ids = new Set(envelope.data.results.map((r) => r.object_id));
         setSearchTimeHits({
           ids,
-          windowLabel: parsed.windowLabel ?? trimmed,
-          total: envelope.data.total_count ?? ids.size
+          windowLabel: parsed.windowLabel ?? trimmed
         });
         setSearchError(null);
       } catch (err) {
@@ -693,7 +709,7 @@ export default function GraphPage() {
           className="absolute left-1/2 top-16 z-20 -translate-x-1/2 rounded-full border border-[#4A90A4]/35 bg-beige-50/95 px-3 py-1 font-mono text-[10px] uppercase tracking-wide text-ink-700/70 shadow-sm"
           data-testid="search-time-window-chip"
         >
-          showing {searchTimeHits.windowLabel} · {searchTimeHits.total} hits
+          showing {searchTimeHits.windowLabel} · {searchTimeHits.ids.size} hits
         </div>
       ) : null}
 

@@ -39,12 +39,33 @@ export function registerSoulSearchRoutes(app: Hono, services: SoulSearchRouteSer
       );
     }
     const maxResults = clampMaxResults(body.max_results);
-    const since = optionalIsoDatetime(body.since);
-    const until = optionalIsoDatetime(body.until);
-    const timeField =
-      body.time_field === "last_used_at" || body.time_field === "created_at"
-        ? body.time_field
-        : undefined;
+    // invariant: malformed `since` / `until` / `time_field` reach the route
+    // boundary as a 400 instead of being silently coerced to undefined and
+    // bypassing the recall schema. The MCP tool already validates good
+    // values; the route is responsible for distinguishing "absent" from
+    // "wrong type".
+    let since: string | null | undefined;
+    let until: string | null | undefined;
+    try {
+      since = parseOptionalIsoDatetime(body.since, "since");
+      until = parseOptionalIsoDatetime(body.until, "until");
+    } catch (err) {
+      return context.json(
+        { success: false, error: err instanceof Error ? err.message : "invalid datetime" },
+        400
+      );
+    }
+    let timeField: "created_at" | "last_used_at" | undefined;
+    if (body.time_field === undefined) {
+      timeField = undefined;
+    } else if (body.time_field === "last_used_at" || body.time_field === "created_at") {
+      timeField = body.time_field;
+    } else {
+      return context.json(
+        { success: false, error: "time_field must be 'created_at' or 'last_used_at'" },
+        400
+      );
+    }
 
     const args: Record<string, unknown> = {
       query: text,
@@ -88,14 +109,19 @@ function clampMaxResults(raw: unknown): number {
   return Math.max(1, Math.min(HARD_MAX_RESULTS, Math.floor(raw)));
 }
 
-function optionalIsoDatetime(raw: unknown): string | null | undefined {
+function parseOptionalIsoDatetime(raw: unknown, fieldName: string): string | null | undefined {
   if (raw === null) return null;
   if (raw === undefined) return undefined;
-  if (typeof raw !== "string") return undefined;
-  // Pass through; recall-service / SoulMemorySearchRequestSchema rejects
-  // bad ISO strings with VALIDATION. Pre-trimming defends against accidental
-  // whitespace from the search-bar parser.
-  return raw.trim();
+  if (typeof raw !== "string") {
+    throw new Error(`${fieldName} must be a string ISO datetime, got ${typeof raw}`);
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  // SoulMemorySearchRequestSchema enforces UTC `Z` suffix and rejects bad
+  // patterns; this route-side parse just shapes the type and surfaces a
+  // 400 for non-string inputs that the schema would otherwise see as
+  // "absent".
+  return trimmed;
 }
 
 async function readJsonObject(context: Context): Promise<Record<string, unknown> | null> {

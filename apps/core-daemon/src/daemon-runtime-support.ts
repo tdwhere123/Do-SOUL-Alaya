@@ -393,6 +393,17 @@ export function classifySoulGraphOriginKind(
   // internal UUIDs (not file paths) for the codex-memory-import bulk
   // pipeline, so classifier must also read `content`, `domain_tags`, and
   // `run_id` to recover the same attribution.
+  // invariant: source_kind="user"/"review" beats every soft engineering
+  // signal. The substring fallbacks below recover engineering attribution
+  // for bulk codex imports whose source_kind is "compiler" — they must NOT
+  // override an explicit user-curated source. Otherwise a user note that
+  // mentions .codex/memories or carries a tag with "codex-memory-import"
+  // would be silently relabeled as engineering.
+  const isUserOrigin = memory.source_kind === "user" || memory.source_kind === "review";
+  if (isUserOrigin) {
+    return "user_memory";
+  }
+
   const tagsContainCodex = memory.domain_tags.some((tag) =>
     tag.toLowerCase().includes("codex-memory-import")
   );
@@ -407,12 +418,11 @@ export function classifySoulGraphOriginKind(
     tagsContainCodex ||
     runIdMarksCodex ||
     contentMentionsCodexMemories;
-  const isUserOrigin = memory.source_kind === "user" || memory.source_kind === "review";
 
   if (isEngineeringOrigin) {
     return hasAcceptedProposalApply ? "reviewed_engineering_chunk" : "engineering_chunk";
   }
-  if (isUserOrigin || hasAcceptedProposalApply) {
+  if (hasAcceptedProposalApply) {
     return "user_memory";
   }
   return "system";
