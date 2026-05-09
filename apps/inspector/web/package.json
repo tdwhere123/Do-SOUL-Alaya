@@ -15,6 +15,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "chrono-node": "^2.7.7",
     "clsx": "^2.1.1",
     "d3-drag": "^3.0.0",
     "d3-force": "^3.0.0",
@@ -23,8 +24,11 @@
     "lucide-react": "^0.378.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-force-graph-2d": "^1.25.4",
+    "react-force-graph-3d": "^1.24.3",
     "react-router-dom": "^6.23.1",
-    "tailwind-merge": "^2.3.0"
+    "tailwind-merge": "^2.3.0",
+    "three": "^0.169.0"
   },
   "devDependencies": {
     "@do-soul/alaya-protocol": "workspace:*",
@@ -36,6 +40,7 @@
     "@types/d3-zoom": "^3.0.8",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
+    "@types/three": "^0.169.0",
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.19",
     "jsdom": "^24.1.0",
