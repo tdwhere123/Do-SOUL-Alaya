@@ -1,34 +1,90 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { forwardRef, type ReactElement } from "react";
+import { forwardRef, useEffect, useImperativeHandle, type ReactElement } from "react";
 import { ToastProvider } from "../components/Toast";
 import { setInspectorToken, setWorkspaceId } from "../api";
+import {
+  STABILITY_DASH,
+  linkDistance,
+  linkStrength,
+  linkWidth,
+  nodeInfluenceSize
+} from "../utils/graph";
 import GraphPage from "./Graph";
 
+const forceGraphMockState = vi.hoisted(() => ({
+  distanceCalls: [] as number[][],
+  strengthCalls: [] as number[][],
+  reheatCount: 0,
+  reset() {
+    this.distanceCalls = [];
+    this.strengthCalls = [];
+    this.reheatCount = 0;
+  }
+}));
+
+interface ForceGraphStubNode {
+  id: string;
+  label?: string;
+  kind?: string;
+  influence_count?: number;
+  last_used_at?: string;
+}
+
+interface ForceGraphStubLink {
+  id: string;
+  strength_normalized?: number;
+  weight?: number;
+  last_reinforced_at?: string;
+}
+
 interface ForceGraphStubProps {
-  graphData?: { nodes?: unknown[]; links?: unknown[] };
-  nodeColor?: (node: { id: string }) => string;
-  nodeLabel?: (node: { id: string; label?: string }) => string;
-  linkColor?: (link: { id: string }) => string;
-  onNodeClick?: (node: { id: string; label?: string; kind?: string }) => void;
+  graphData?: { nodes?: ForceGraphStubNode[]; links?: ForceGraphStubLink[] };
+  nodeColor?: (node: ForceGraphStubNode) => string;
+  nodeLabel?: (node: ForceGraphStubNode) => string;
+  nodeVal?: (node: ForceGraphStubNode) => number;
+  linkColor?: (link: ForceGraphStubLink) => string;
+  linkWidth?: (link: ForceGraphStubLink) => number;
+  linkDirectionalParticles?: (link: ForceGraphStubLink) => number;
+  linkDirectionalParticleSpeed?: (link: ForceGraphStubLink) => number;
+  onEngineTick?: () => void;
+  onEngineStop?: () => void;
+  cooldownTicks?: number;
+  onNodeClick?: (node: ForceGraphStubNode, event?: MouseEvent) => void;
   onBackgroundClick?: () => void;
   width?: number;
   height?: number;
 }
 
-// vi.mock is hoisted to the top of the file, so the lazy import inside the
-// stub can safely reference React without a circular dep.
+function createForceGraphHandle(links: readonly ForceGraphStubLink[]) {
+  return {
+    d3Force: (name: string) =>
+      name === "link"
+        ? {
+            distance: (fn: (link: ForceGraphStubLink) => number) => {
+              forceGraphMockState.distanceCalls.push(links.map((link) => fn(link)));
+            },
+            strength: (fn: (link: ForceGraphStubLink) => number) => {
+              forceGraphMockState.strengthCalls.push(links.map((link) => fn(link)));
+            }
+          }
+        : undefined,
+    d3ReheatSimulation: () => {
+      forceGraphMockState.reheatCount += 1;
+    }
+  };
+}
 
-// Mocks for the WebGL/Canvas-heavy force-graph components: jsdom can't run
-// the real `force-graph` simulation (it pokes a real CanvasRenderingContext),
-// and we don't need to test that library — only that we're feeding it the
-// right data and wiring up the click/colour callbacks correctly.
 vi.mock("react-force-graph-2d", () => {
-  const Stub = forwardRef<unknown, ForceGraphStubProps>((props, _ref) => {
+  const Stub = forwardRef<unknown, ForceGraphStubProps>((props, ref) => {
     const nodes = props.graphData?.nodes ?? [];
     const links = props.graphData?.links ?? [];
+    useImperativeHandle(ref, () => createForceGraphHandle(links), [links]);
+    useEffect(() => {
+      props.onEngineTick?.();
+    }, [props]);
     return (
       <div
         data-testid="force-graph-2d"
@@ -45,12 +101,23 @@ vi.mock("react-force-graph-2d", () => {
               data-testid={`fg-node-${node.id}`}
               data-color={props.nodeColor?.(node) ?? ""}
               data-label-text={props.nodeLabel?.(node) ?? ""}
-              onClick={() => props.onNodeClick?.(node)}
+              data-node-val={props.nodeVal?.(node) ?? ""}
+              onClick={(event) => props.onNodeClick?.(node, event.nativeEvent)}
             >
               {node.label ?? node.id}
             </button>
           );
         })}
+        {links.map((link) => (
+          <div
+            key={link.id}
+            data-testid={`fg-link-${link.id}`}
+            data-color={props.linkColor?.(link) ?? ""}
+            data-width={props.linkWidth?.(link) ?? ""}
+            data-particles={props.linkDirectionalParticles?.(link) ?? ""}
+            data-particle-speed={props.linkDirectionalParticleSpeed?.(link) ?? ""}
+          />
+        ))}
         <button
           data-testid="fg-background"
           onClick={() => props.onBackgroundClick?.()}
@@ -65,19 +132,35 @@ vi.mock("react-force-graph-2d", () => {
 });
 
 vi.mock("react-force-graph-3d", () => {
-  const Stub = forwardRef<unknown, ForceGraphStubProps>((props, _ref) => (
-    <div
-      data-testid="force-graph-3d"
-      data-node-count={(props.graphData?.nodes ?? []).length}
-      data-link-count={(props.graphData?.links ?? []).length}
-    />
-  )) as unknown as (props: ForceGraphStubProps) => ReactElement;
+  const Stub = forwardRef<unknown, ForceGraphStubProps>((props, ref) => {
+    const links = props.graphData?.links ?? [];
+    useImperativeHandle(ref, () => createForceGraphHandle(links), [links]);
+    useEffect(() => {
+      props.onEngineTick?.();
+      props.onEngineStop?.();
+    }, [props]);
+    return (
+      <div
+        data-testid="force-graph-3d"
+        data-node-count={(props.graphData?.nodes ?? []).length}
+        data-link-count={links.length}
+        data-cooldown-ticks={props.cooldownTicks}
+      >
+        {links.map((link) => (
+          <div
+            key={link.id}
+            data-testid={`fg-3d-link-${link.id}`}
+            data-width={props.linkWidth?.(link) ?? ""}
+            data-particles={props.linkDirectionalParticles?.(link) ?? ""}
+            data-particle-speed={props.linkDirectionalParticleSpeed?.(link) ?? ""}
+          />
+        ))}
+      </div>
+    );
+  }) as unknown as (props: ForceGraphStubProps) => ReactElement;
   return { default: Stub };
 });
 
-// WebGL: default to "supported" so the 2D/3D toggle is actionable in tests.
-// The probe in Graph.tsx now does a real clear + readPixels round-trip
-// (Phase 3 review M-3); the stub has to play back the matching colour bytes.
 function stubWebgl(supported: boolean): void {
   const realGetContext = HTMLCanvasElement.prototype.getContext;
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (
@@ -186,10 +269,39 @@ function renderGraphWithEnv() {
   );
 }
 
+function createAnimationFrameDriver() {
+  const callbacks = new Map<number, FrameRequestCallback>();
+  let nextId = 1;
+  vi.stubGlobal(
+    "requestAnimationFrame",
+    vi.fn((callback: FrameRequestCallback) => {
+      const id = nextId++;
+      callbacks.set(id, callback);
+      return id;
+    })
+  );
+  vi.stubGlobal(
+    "cancelAnimationFrame",
+    vi.fn((id: number) => {
+      callbacks.delete(id);
+    })
+  );
+  return {
+    async step(timestamp: number) {
+      const queued = [...callbacks.values()];
+      callbacks.clear();
+      await act(async () => {
+        for (const callback of queued) callback(timestamp);
+      });
+    }
+  };
+}
+
 describe("GraphPage (react-force-graph driven)", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    forceGraphMockState.reset();
     setInspectorToken("test-token");
     setWorkspaceId("ws-1");
     stubWebgl(true);
@@ -265,21 +377,157 @@ describe("GraphPage (react-force-graph driven)", () => {
     const user = userEvent.setup();
     renderGraphWithEnv();
     await screen.findByTestId("force-graph-2d");
+    const callsBeforeToggle = forceGraphMockState.distanceCalls.length;
     const toggle3d = screen.getByRole("button", { name: /3D/i });
     await user.click(toggle3d);
     await waitFor(() => {
       expect(screen.getByTestId("force-graph-3d")).toBeTruthy();
       expect(screen.queryByTestId("force-graph-2d")).not.toBeTruthy();
     });
+    await waitFor(() => {
+      expect(forceGraphMockState.distanceCalls.length).toBeGreaterThan(callsBeforeToggle);
+    });
+    expect(forceGraphMockState.distanceCalls.at(-1)).toEqual([
+      linkDistance(0.85),
+      linkDistance(0.2)
+    ]);
+    expect(forceGraphMockState.strengthCalls.at(-1)).toEqual([
+      0.1 + 0.9 * linkStrength(0.85),
+      0.1 + 0.9 * linkStrength(0.2)
+    ]);
   });
 
   it("locks 2D mode and disables the 3D toggle when WebGL is unavailable", async () => {
-    vi.restoreAllMocks();
     stubWebgl(false);
     renderGraphWithEnv();
     await screen.findByTestId("force-graph-2d");
     const toggle3d = screen.getByRole("button", { name: /3D/i }) as HTMLButtonElement;
     expect(toggle3d.disabled).toBe(true);
+    expect(screen.getByText(/3D not available in this environment/i)).toBeTruthy();
+  });
+
+  it("pins node and edge visual encodings required by the graph plan", async () => {
+    renderGraphWithEnv();
+    await screen.findByTestId("force-graph-2d");
+
+    expect(screen.getByTestId("fg-node-n1").getAttribute("data-node-val")).toBe(
+      String(nodeInfluenceSize({ id: "n1", kind: "memory", influence_count: 3 }) ** 2)
+    );
+    expect(screen.getByTestId("fg-link-e1").getAttribute("data-width")).toBe(
+      String(linkWidth(0.85))
+    );
+    expect(linkDistance(0.9)).toBeCloseTo(80);
+    expect(linkDistance(0.1)).toBeCloseTo(240);
+    expect(linkWidth(undefined, 0.9)).toBeGreaterThan(linkWidth(undefined, 0.1));
+    expect(STABILITY_DASH.volatile).toEqual([4, 3]);
+  });
+
+  it("uses legacy weight as the fallback for edge strength encoding", () => {
+    expect(linkStrength(undefined, 0.9)).toBe(0.9);
+    expect(linkDistance(undefined, 0.9)).toBeLessThan(linkDistance(undefined, 0.1));
+    expect(linkWidth(undefined, 0.9)).toBeGreaterThan(linkWidth(undefined, 0.1));
+    expect(linkStrength(undefined, undefined)).toBe(0.3);
+  });
+
+  it("includes influence and last-used metadata in node hover labels", async () => {
+    renderGraphWithEnv();
+    await screen.findByTestId("force-graph-2d");
+    const label = screen.getByTestId("fg-node-n1").getAttribute("data-label-text") ?? "";
+    expect(label).toContain("mem-alpha");
+    expect(label).toContain("influence: 3");
+    expect(label).toContain("last used:");
+  });
+
+  it("focuses the one-hop subgraph shortcut on double click", async () => {
+    renderGraphWithEnv();
+    await screen.findByTestId("force-graph-2d");
+    fireEvent.click(screen.getByTestId("fg-node-n1"), { detail: 1 });
+    fireEvent.click(screen.getByTestId("fg-node-n1"), { detail: 2 });
+    expect((screen.getByPlaceholderText(/probe label/i) as HTMLInputElement).value).toBe("n1");
+  });
+
+  it("uses the large-graph 3D performance gate", async () => {
+    const nodes = Array.from({ length: 501 }, (_, index) => ({
+      id: `n${index}`,
+      kind: "memory",
+      label: `node-${index}`,
+      origin_kind: "system"
+    }));
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ...SAMPLE_GRAPH,
+          nodes,
+          edges: [
+            {
+              id: "large-link",
+              kind: "references",
+              source_id: "n0",
+              target_id: "n1",
+              strength_normalized: 0.9,
+              last_reinforced_at: new Date().toISOString()
+            }
+          ],
+          node_total: nodes.length,
+          edge_total: 1
+        }),
+        { status: 200 }
+      )
+    );
+    const user = userEvent.setup();
+    renderGraphWithEnv();
+    await screen.findByTestId("force-graph-2d");
+    await user.click(screen.getByRole("button", { name: /3D/i }));
+    await screen.findByTestId("force-graph-3d");
+
+    expect(screen.getByText(/large graph mode/i)).toBeTruthy();
+    expect(screen.getByTestId("force-graph-3d").getAttribute("data-cooldown-ticks")).toBe("60");
+    expect(screen.getByTestId("fg-3d-link-large-link").getAttribute("data-particles")).toBe("0");
+  });
+
+  it("clears the low-FPS warning after sustained recovered frame cadence", async () => {
+    const raf = createAnimationFrameDriver();
+    const nodes = Array.from({ length: 501 }, (_, index) => ({
+      id: `n${index}`,
+      kind: "memory",
+      label: `node-${index}`,
+      origin_kind: "system"
+    }));
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ...SAMPLE_GRAPH,
+          nodes,
+          edges: [
+            {
+              id: "large-link",
+              kind: "references",
+              source_id: "n0",
+              target_id: "n1",
+              strength_normalized: 0.9,
+              last_reinforced_at: new Date().toISOString()
+            }
+          ],
+          node_total: nodes.length,
+          edge_total: 1
+        }),
+        { status: 200 }
+      )
+    );
+    const user = userEvent.setup();
+    renderGraphWithEnv();
+    await screen.findByTestId("force-graph-2d");
+    await user.click(screen.getByRole("button", { name: /3D/i }));
+    await screen.findByTestId("force-graph-3d");
+
+    await raf.step(0);
+    for (let i = 1; i <= 16; i += 1) await raf.step(i * 100);
+    expect(screen.getByText(/low fps detected/i)).toBeTruthy();
+
+    for (let i = 1; i <= 15; i += 1) await raf.step(1600 + i * 16);
+    await waitFor(() => {
+      expect(screen.queryByText(/low fps detected/i)).toBeNull();
+    });
   });
 
   // Note: the full retire→already-pending toast flow is pinned daemon-side at

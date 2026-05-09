@@ -1,9 +1,10 @@
 # v0.1.2 Inspector & MCP UX Uplift — Phase 3 Review
 
 **Diff range**: `997047f..HEAD` (Phase 3 inspector visual rebuild on `react-force-graph` + visual feedback fixes + this fix-loop)
-**Lenses**: Claude `reviewer` agent + Codex `codex:codex-rescue` second opinion. Live manual e2e verified by the human operator (2D/3D toggle, origin palette, dedupe summary, OrbitControls pan).
+**Lenses**: Claude `reviewer` agent + Codex `codex:codex-rescue` second opinion. Re-opened on 2026-05-09 by Codex `reviewer`, `react-specialist`, and `spec-compliance-reviewer` agents.
 **Verdict before fix-loop**: 0 BLOCKING + 7 IMPORTANT (Claude found 6, Codex confirmed 3 + escalated 1 + added 1)
-**Verdict after fix-loop**: 0 BLOCKING + 0 IMPORTANT (all 7 closed in this loop) + 3 NICE-TO-HAVE folded in (O-1, O-2, O-7) + 4 deferred opportunities (O-3, O-5, O-6, NTH-1-touch-hint)
+**Verdict after fix-loop**: superseded by the 2026-05-09 re-open; the original 7 IMPORTANT findings were closed, and final closure status is tracked below.
+**Verdict after 2026-05-09 re-open**: final closure re-review reports zero Blocking / Important / Opportunity findings. Browser-only 500+ node FPS proof is **NOT_VERIFIED** in this Codex turn because no local browser binary is available.
 
 ---
 
@@ -71,14 +72,30 @@
 
 - **O-1**: dead `d3-drag` / `d3-force` / `d3-selection` / `d3-zoom` runtime deps and their `@types/*` siblings ✅ removed from `apps/inspector/web/package.json`. Vite manualChunks `d3` chunk also removed (it pointed at the deleted modules). Bundle composition unchanged because `react-force-graph` keeps its own d3 internals.
 - **O-2**: duplicate `extractId` definition ✅ removed from `Graph.tsx`; the page now imports the single source-of-truth from `utils/graph.ts`.
+- **O-3**: closure churn on every keystroke ✅ mitigated for the heavy spotlight scan with a 120 ms `debouncedSearchTerm`; the chip and clear button still react to live input.
 - **O-5**: `STABILITY_DASH` over-broad `Record<string, …>` ✅ tightened to `Record<"stable" | "normal" | "pinned" | "volatile", …>` so a future schema addition (`consolidating`, etc.) surfaces in the compiler instead of silently falling through to "solid".
+- **O-6**: 2D ↔ 3D position retention ✅ fixed by caching simulation-mutated node positions and rehydrating the next mounted ForceGraph instance.
 - **O-7**: WebGL `webglSupported = true` flicker ✅ fixed by lazy-init useState — probe runs synchronously before the first paint.
 - **NTH-1**: 3D hint extended to cover touch — "(touch: 1-finger rotate · 2-finger pan / pinch zoom)" appended.
 
-Two opportunities remain open and need a user decision before action — neither blocks merge:
+No review-open Opportunity remains in this document. Real-browser profiling for 500+ node 3D graphs remains manual evidence, tracked below as `NOT_VERIFIED`, not as a code-review finding.
 
-- **O-3** (closure churn on every keystroke): for 200-node graphs the re-render cost on search is invisible; for 5k+ node workspaces it can stutter. Mitigation is a 120 ms `searchTerm` debounce. Open question: do any current workspaces approach the 5k node mark? If not, this is real-but-not-yet-felt.
-- **O-6** (2D ↔ 3D toggle does not preserve node positions): both ForceGraph instances run their own simulation from random initial positions on mount. Toggling forgets layout. Mitigation is a position cache (read x/y/z from the unmounting instance, pass as initial positions on remount). Mid-effort UX polish.
+## 2026-05-09 Re-open Fix Loop
+
+The re-opened review found one Blocking docs-truth issue and six Important implementation / coverage issues. The repair patch addressed them as follows:
+
+- **B1 / large-graph performance gate**: `Graph.tsx` now enables large-graph 3D mode above 500 nodes, pauses 3D link particles, shortens cooldown, watches frame cadence, and displays a 2D fallback suggestion. `Graph.test.tsx` now covers the 501-node gate.
+- **I1 / lazy 3D force retune**: force-link distance and strength retune runs from the ForceGraph ref and is retriggered on the first 3D engine tick / stop, so the lazy-loaded 3D instance cannot miss the strength-driven layout setup.
+- **I2 / weight fallback + formula drift**: `linkStrength` now resolves `strength_normalized ?? weight ?? 0.3`; `linkDistance` matches `60 + 200 * (1 - strength)`.
+- **I3 / tooltip contract**: 2D and 3D `nodeLabel` now includes label, summary, `influence_count`, and `last_used_at` as a relative time.
+- **I4 / double-click focus shortcut**: node double-click now routes through the same one-hop focus path as the drawer focus action.
+- **Coverage**: `Graph.test.tsx` now covers node size, edge width / distance / dash encoding, weight fallback, lazy 3D force retune, WebGL degraded notice, tooltip metadata, double-click focus, and large-graph 3D performance mode.
+- **Comment discipline**: source comments that referenced review IDs or fix history were removed or rewritten as present-tense invariants.
+
+Manual evidence status:
+
+- **NOT_VERIFIED in this Codex turn**: real-browser 500+ node 3D FPS. The local environment has no `chromium`, `chromium-browser`, `google-chrome`, `firefox`, or `playwright` executable available.
+- **Previously human-verified**: 2D ↔ 3D toggle, paper background in both modes, origin palette, dedupe summary, and OrbitControls pan.
 
 ### OK and pinned (verified by both lenses)
 
@@ -91,13 +108,15 @@ Two opportunities remain open and need a user decision before action — neither
 
 ## Status
 
-- BLOCKING: 0 open / 0 closed
-- IMPORTANT: 0 open / 7 closed (M-1, M-2, M-3, M-4, M-5, M-6, M-7)
-- NICE-TO-HAVE: 3 folded in (O-1, O-2, O-7) / 4 deferred (O-3, O-5, O-6, NTH-1-touch-hint)
+- BLOCKING: 0 open / 1 closed in the 2026-05-09 re-open (B1)
+- IMPORTANT: 0 open / all confirmed re-open Important findings repaired
+- NICE-TO-HAVE: 6 folded in (O-1, O-2, O-3, O-5, O-6, O-7) / 0 open / NTH-1 folded into the 3D hint
 
 Verification (fresh):
-- `rtk pnpm build` — pass
-- `rtk pnpm test` — **2253 / 2253 pass** (280 / 280 test files), including 2 new Graph.test.tsx pin tests (spotlight + G8) and 4 new soul-graph-service.test.ts cases for `deriveDomainTagSummary`.
-- Manual e2e (live operator verification): 2D ↔ 3D toggle, paper background in both modes, 5-colour origin palette with letter glyphs, summary dedupe (`#codex-memory-recall-shard` collapses to `all: Codex memory recall shard`), OrbitControls pan via right-drag.
+- `rtk pnpm --dir apps/inspector/web exec vitest run src/pages/Graph.test.tsx` — **14 / 14 pass**.
+- `rtk pnpm --dir apps/inspector/web build` — pass.
+- `rtk pnpm build` — pass.
+- `rtk pnpm test` — **2259 / 2259 pass** (280 / 280 test files).
+- Manual e2e (live operator verification from the earlier pass): 2D ↔ 3D toggle, paper background in both modes, 5-colour origin palette with letter glyphs, summary dedupe (`#codex-memory-recall-shard` collapses to `all: Codex memory recall shard`), OrbitControls pan via right-drag.
 
-Next: Phase 3 closed (all 7 IMPORTANT findings resolved in this loop, no deferral to v0.1.3). Phase 4 (NL + time search) and Phase 5 (closeout, npm publish) remain.
+Final closure re-review over the 2026-05-09 repair patch found zero Blocking / Important / Opportunity issues. The follow-up cleanup normalized this review doc bookkeeping, aligned the `.do-it` plan with current large-graph behavior, made the low-FPS warning recover after sustained healthy frame cadence, and made the double-click shortcut test exercise the click-event `detail` path. Phase 5 release closeout must still collect the real-browser 500+ node FPS proof before claiming full operator-ready manual evidence.

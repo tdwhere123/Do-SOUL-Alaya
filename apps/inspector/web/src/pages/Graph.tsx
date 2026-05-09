@@ -11,18 +11,9 @@ import { useNavigate } from "react-router-dom";
 import { Search, X, Box, Square } from "lucide-react";
 import ForceGraph2D from "react-force-graph-2d";
 import type { ForceGraphMethods as ForceGraphMethods2D } from "react-force-graph-2d";
-// Type-only import keeps the static typing of `ForceGraph3D` (component shape
-// + strong GraphNode / GraphLink callback signatures) without pulling
-// three.js into the main entry chunk — `import type` evaporates at runtime.
 import type ForceGraph3DType from "react-force-graph-3d";
 import type { ForceGraphMethods as ForceGraphMethods3D } from "react-force-graph-3d";
 
-// Lazy-load the 3D component so 2D-only / WebGL-locked users do NOT pay the
-// ~1.4 MB three.js cost on initial bundle. The chunk is fetched the first
-// time the user clicks the 3D toggle. The cast keeps our strongly-typed
-// callbacks compatible with the original component signature (Phase 3
-// review M-2). See also: utils/graph.ts:ORIGIN_KIND_COLOR for the visual
-// encoding the lazy chunk consumes.
 const ForceGraph3D = lazy(() => import("react-force-graph-3d")) as unknown as typeof ForceGraph3DType;
 import { apiFetch, getWorkspaceId, type ApiError } from "../api";
 import { useToasts } from "../components/Toast";
@@ -33,9 +24,11 @@ import {
   ORIGIN_KIND_COLOR,
   STABILITY_DASH,
   extractId,
+  formatRelativeTime,
   isRecentlyReinforced,
   linkAlpha,
   linkDistance,
+  linkStrength,
   linkWidth,
   nodeInfluenceSize,
   recencyAlpha,
@@ -67,39 +60,40 @@ interface GraphData {
 }
 
 type ViewMode = "2d" | "3d";
+type ForceGraphWithForces = {
+  d3Force?: (name: string) => unknown;
+  d3ReheatSimulation?: () => unknown;
+};
+type TunedForceKey = "twoD" | "threeD";
 
 const DEFAULT_NODE_FALLBACK_COLOR = "#586E75";
 const SPOTLIGHT_BG_ALPHA = 0.12;
 const SPOTLIGHT_ADJ_ALPHA = 0.55;
 const REINFORCED_GLOW_ALPHA = 0.95;
+const LARGE_GRAPH_NODE_THRESHOLD = 500;
+const LOW_FPS_THRESHOLD = 30;
+const LOW_FPS_FRAME_COUNT = 15;
+const RECOVERED_FPS_FRAME_COUNT = 15;
 
 export default function GraphPage() {
   const viewportRef = useRef<HTMLDivElement>(null);
   const fg2dRef = useRef<ForceGraphMethods2D<GraphNode, GraphLink> | undefined>(undefined);
   const fg3dRef = useRef<ForceGraphMethods3D<GraphNode, GraphLink> | undefined>(undefined);
-  // Cache of simulation-mutated node positions so 2D↔3D toggle preserves
-  // layout. Both ForceGraph variants mutate node.x/y(/z) in place during the
-  // simulation; we snapshot on unmount and re-hydrate on mount so the
-  // operator does not lose the spatial mental model on every mode switch.
   const nodePositionsRef = useRef<Map<string, { x?: number; y?: number; z?: number }>>(new Map());
+  const tunedForceRefs = useRef<Record<TunedForceKey, ForceGraphWithForces | null>>({
+    twoD: null,
+    threeD: null
+  });
   const [data, setData] = useState<GraphData | null>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
-  // Spotlight uses the debounced value so 5k+ node workspaces don't recompute
-  // matchIds on every keystroke. 120 ms is below the perception threshold for
-  // typing feel and well above one frame on slow hardware. The input itself
-  // stays bound to `searchTerm` so users see their keystrokes instantly.
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [matchCursor, setMatchCursor] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode>("2d");
-  // Lazy-init the WebGL probe so the first render already reflects reality —
-  // avoids the "3D button enabled for one frame then disables" flicker on
-  // WebGL-broken environments (Phase 3 review O-7). The probe now does a real
-  // clear + readPixels round-trip (Phase 3 review M-3) so software fallbacks
-  // that return a context but cannot draw are correctly rejected.
   const [webglSupported] = useState<boolean>(() => probeWebgl());
+  const [lowFpsDetected, setLowFpsDetected] = useState(false);
   const [viewport, setViewport] = useState<{ width: number; height: number }>(() => ({
     width: 800,
     height: 600
@@ -109,18 +103,12 @@ export default function GraphPage() {
   const navigate = useNavigate();
 
   const workspaceId = getWorkspaceId();
-  // `now` ticks on a 60s interval rather than freezing on data fetch, so
-  // recencyAlpha and the 24h reinforcement glow keep decaying while the tab
-  // is open instead of lying after one daylight (Phase 3 review I-1).
   const [now, setNow] = useState<number>(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(id);
   }, []);
 
-  // (WebGL probe runs synchronously via the lazy useState initialiser above.)
-
-  // Track viewport dimensions; ForceGraph requires explicit width/height props.
   useEffect(() => {
     if (!viewportRef.current) return;
     const element = viewportRef.current;
@@ -192,26 +180,39 @@ export default function GraphPage() {
     };
   }, [workspaceId]);
 
-  // Tune the d3 force-link distance / strength based on edge.strength_normalized.
-  // ForceGraph exposes the underlying d3 simulation via ref.d3Force(...). We
-  // re-apply on every data change so a refetch picks up new edge weights.
+  const tuneGraphForces = useCallback((instance: ForceGraphWithForces | undefined, reheat = false) => {
+    if (!instance?.d3Force) return;
+    const linkForce = instance.d3Force("link") as
+      | {
+          distance: (fn: (l: GraphLink) => number) => unknown;
+          strength: (fn: (l: GraphLink) => number) => unknown;
+        }
+      | undefined;
+    if (!linkForce) return;
+    linkForce.distance((l: GraphLink) => linkDistance(l.strength_normalized, l.weight));
+    linkForce.strength(
+      (l: GraphLink) => 0.1 + 0.9 * linkStrength(l.strength_normalized, l.weight)
+    );
+    if (reheat) instance.d3ReheatSimulation?.();
+  }, []);
+
   useEffect(() => {
     if (!data) return;
-    const apply = (instance: { d3Force?: (name: string) => unknown } | undefined) => {
-      if (!instance?.d3Force) return;
-      const linkForce = instance.d3Force("link") as
-        | {
-            distance: (fn: (l: GraphLink) => number) => unknown;
-            strength: (fn: (l: GraphLink) => number) => unknown;
-          }
-        | undefined;
-      if (!linkForce) return;
-      linkForce.distance((l: GraphLink) => linkDistance(l.strength_normalized));
-      linkForce.strength((l: GraphLink) => 0.1 + 0.9 * (l.strength_normalized ?? 0.4));
-    };
-    apply(fg2dRef.current);
-    apply(fg3dRef.current);
-  }, [data, viewMode]);
+    tunedForceRefs.current = { twoD: null, threeD: null };
+    tuneGraphForces(fg2dRef.current, true);
+    tuneGraphForces(fg3dRef.current, true);
+  }, [data, viewMode, tuneGraphForces]);
+
+  const handleGraphEngineTick = useCallback(
+    (mode: ViewMode) => {
+      const key: TunedForceKey = mode === "2d" ? "twoD" : "threeD";
+      const instance = mode === "2d" ? fg2dRef.current : fg3dRef.current;
+      if (!instance || tunedForceRefs.current[key] === instance) return;
+      tuneGraphForces(instance, true);
+      tunedForceRefs.current[key] = instance;
+    },
+    [tuneGraphForces]
+  );
 
   // Spotlight: compute match + adjacent sets from the *debounced* search term
   // so 5k+ node workspaces don't re-scan on every keystroke.
@@ -259,8 +260,45 @@ export default function GraphPage() {
     [matchIds, adjacentIds, spotlightActive]
   );
 
-  // Lock to 2D when WebGL is unavailable so we never mount the 3D component.
   const effectiveMode: ViewMode = webglSupported ? viewMode : "2d";
+  const largeGraphMode =
+    effectiveMode === "3d" && (data?.nodes.length ?? 0) > LARGE_GRAPH_NODE_THRESHOLD;
+
+  useEffect(() => {
+    if (!largeGraphMode || typeof window.requestAnimationFrame !== "function") {
+      setLowFpsDetected(false);
+      return;
+    }
+    let frameId = 0;
+    let last = 0;
+    let lowFrames = 0;
+    let recoveredFrames = 0;
+    let warningVisible = false;
+    const updateLowFpsDetected = (next: boolean) => {
+      if (warningVisible === next) return;
+      warningVisible = next;
+      setLowFpsDetected(next);
+    };
+    const sampleFrame = (timestamp: number) => {
+      if (last > 0) {
+        const delta = timestamp - last;
+        const fps = delta > 0 ? 1000 / delta : LOW_FPS_THRESHOLD;
+        if (fps < LOW_FPS_THRESHOLD) {
+          lowFrames += 1;
+          recoveredFrames = 0;
+          if (lowFrames >= LOW_FPS_FRAME_COUNT) updateLowFpsDetected(true);
+        } else {
+          lowFrames = 0;
+          recoveredFrames += 1;
+          if (recoveredFrames >= RECOVERED_FPS_FRAME_COUNT) updateLowFpsDetected(false);
+        }
+      }
+      last = timestamp;
+      frameId = window.requestAnimationFrame(sampleFrame);
+    };
+    frameId = window.requestAnimationFrame(sampleFrame);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [largeGraphMode]);
 
   // Keyboard shortcuts: '/', Cmd/Ctrl+K → focus search; Esc → clear/close drawer
   useEffect(() => {
@@ -303,9 +341,6 @@ export default function GraphPage() {
     return () => window.clearTimeout(id);
   }, [searchTerm, debouncedSearchTerm]);
 
-  // Snapshot node positions just before the active ForceGraph unmounts on
-  // viewMode change. The effect's cleanup fires when `viewMode` flips, which
-  // is exactly the unmount boundary of the outgoing instance.
   useEffect(() => {
     return () => {
       if (!data) return;
@@ -318,10 +353,6 @@ export default function GraphPage() {
     };
   }, [viewMode, data]);
 
-  // Re-hydrate cached positions onto the next data shape so the freshly-
-  // mounted ForceGraph instance starts with the previous layout instead of
-  // a random scatter. Mutation in place is safe because react-force-graph
-  // already treats node objects as live simulation state.
   useEffect(() => {
     if (!data) return;
     const cache = nodePositionsRef.current;
@@ -337,7 +368,6 @@ export default function GraphPage() {
 
   const focusedMatchId = matchOrder[matchCursor];
 
-  // Recenter view on the focused search match.
   useEffect(() => {
     if (!focusedMatchId || !data) return;
     const node = data.nodes.find((n) => n.id === focusedMatchId);
@@ -412,9 +442,6 @@ export default function GraphPage() {
     [navigate, showToast, workspaceId]
   );
 
-  // Node color is the central visual encoding: origin_kind hue, recency alpha,
-  // and spotlight dim/highlight all collapse here so ForceGraph repaint stays
-  // a per-frame function call rather than a re-render.
   const computeNodeColor = useCallback(
     (node: GraphNode): string => {
       const baseHex =
@@ -432,13 +459,10 @@ export default function GraphPage() {
     [now, nodeSpotlightState]
   );
 
-  // Link color = type base RGB + strength_normalized alpha + stability dimming.
-  // A reinforced-in-24h glow rides on top via linkColor returning a brighter
-  // alpha so eyes are drawn to "what just changed."
   const computeLinkColor = useCallback(
     (link: GraphLink): string => {
       const rgb = EDGE_TYPE_BASE_COLOR[link.kind] ?? [147, 161, 161];
-      const baseAlpha = linkAlpha(link.strength_normalized);
+      const baseAlpha = linkAlpha(link.strength_normalized, link.weight);
       const reinforced = isRecentlyReinforced(link.last_reinforced_at, now);
       const aSrc = extractId(link.source);
       const aTgt = extractId(link.target);
@@ -455,17 +479,17 @@ export default function GraphPage() {
     [now, matchIds, spotlightActive]
   );
 
-  const handleNodeClick = useCallback((node: GraphNode) => {
+  const handleNodeClick = useCallback((node: GraphNode, event?: MouseEvent) => {
     setSelectedNode(node);
+    if ((event?.detail ?? 1) >= 2) {
+      setSearchTerm(node.id);
+    }
   }, []);
 
   const handleBackgroundClick = useCallback(() => {
     setSelectedNode(null);
   }, []);
 
-  // 2D nodeCanvasObject draws kind-as-shape (memory=circle, scope=square,
-  // signal=triangle, projection=diamond) plus an optional ring for selection
-  // and the recency/origin-tinted fill the rest of the encoding builds on.
   const nodeCanvasObject = useCallback(
     (node: GraphNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
       const x = node.x ?? 0;
@@ -481,9 +505,6 @@ export default function GraphPage() {
         ctx.arc(x, y, radius + 3, 0, 2 * Math.PI);
         ctx.stroke();
       }
-      // Show labels when zoomed in OR for high-degree hubs OR when this node
-      // is in the search match set. Background spotlight nodes never show
-      // labels regardless of zoom.
       const state = nodeSpotlightState(node.id);
       const showLabel =
         state !== "background" &&
@@ -504,15 +525,11 @@ export default function GraphPage() {
     [computeNodeColor, selectedNode, matchIds, nodeSpotlightState]
   );
 
-  // Link line dash for 2D — encodes stability_class as solid/dashed.
   const linkLineDashFor = (link: GraphLink): number[] | null => {
     const dash = STABILITY_DASH[link.stability_class ?? "stable"];
     return dash === undefined ? null : (dash as unknown as number[] | null);
   };
 
-  // 2D-mode link override so we can paint the reinforced-glow underlay before
-  // the actual stroke — react-force-graph's default linkCanvasObject would skip
-  // the glow band entirely otherwise.
   const linkCanvasObject = useCallback(
     (link: GraphLink, ctx: CanvasRenderingContext2D) => {
       const sourceNode = link.source as GraphNode;
@@ -522,11 +539,10 @@ export default function GraphPage() {
       const x2 = targetNode.x ?? 0;
       const y2 = targetNode.y ?? 0;
       const baseColor = computeLinkColor(link);
-      const width = linkWidth(link.strength_normalized);
+      const width = linkWidth(link.strength_normalized, link.weight);
       const dash = linkLineDashFor(link);
       ctx.save();
       if (isRecentlyReinforced(link.last_reinforced_at, now)) {
-        // Subtle outer glow for paths reinforced in the last 24h.
         const rgb = EDGE_TYPE_BASE_COLOR[link.kind] ?? [147, 161, 161];
         ctx.strokeStyle = rgba(rgb, 0.35);
         ctx.lineWidth = width + 4;
@@ -553,7 +569,6 @@ export default function GraphPage() {
       data-graph-viewport="true"
       className="flex-1 min-h-0 relative overflow-hidden bg-[#FDF6E3]"
     >
-      {/* Top overlay row: search + 2D/3D toggle */}
       <div className="absolute left-4 right-4 top-4 z-20 flex items-center justify-between gap-3 sm:flex-row">
         <div className="flex flex-1 items-center gap-3 rounded-full border border-beige-200 bg-beige-50/95 px-4 py-2 shadow-sm backdrop-blur-sm sm:max-w-md">
           <Search className="w-3 h-3 text-ink-700/40" />
@@ -587,6 +602,19 @@ export default function GraphPage() {
           onChange={setViewMode}
         />
       </div>
+
+      {data && !webglSupported ? (
+        <div className="absolute left-4 top-16 z-20 max-w-md rounded-md border border-[#D4AF37]/35 bg-beige-50/95 px-3 py-2 font-mono text-[10px] uppercase tracking-wide text-ink-700/65 shadow-sm">
+          3D not available in this environment. Graph is locked to 2D.
+        </div>
+      ) : null}
+
+      {data && largeGraphMode ? (
+        <div className="absolute left-4 top-16 z-20 max-w-md rounded-md border border-beige-200 bg-beige-50/95 px-3 py-2 font-mono text-[10px] uppercase tracking-wide text-ink-700/65 shadow-sm">
+          large graph mode: link particles are paused and frame rate is watched.
+          {lowFpsDetected ? " Low FPS detected; switch to 2D for inspection." : ""}
+        </div>
+      ) : null}
 
       {loading ? (
         <div className="absolute inset-0 flex items-center justify-center bg-beige-100/50 z-10">
@@ -627,21 +655,14 @@ export default function GraphPage() {
         </div>
       ) : null}
 
-      {/* Origin-kind legend pinned bottom-right so the new colour vocabulary
-          (5 origin kinds incl. reviewed_engineering_chunk) is always findable. */}
       {data ? <OriginLegend /> : null}
 
-      {/* 3D-mode hint: OrbitControls semantics aren't obvious to trackpad
-          users, especially the pan-via-right-click. Surface the cheat sheet
-          near the toggle so pan is discoverable. */}
       {data && effectiveMode === "3d" ? (
         <div className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-md border border-beige-200 bg-beige-50/95 px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-ink-700/55 shadow-sm">
           drag = rotate · right-drag = pan · scroll = zoom · (touch: 1-finger rotate · 2-finger pan / pinch zoom)
         </div>
       ) : null}
 
-      {/* The graph itself. We mount one or the other component (not both) so
-          react-force-graph's two simulations never compete for the same data. */}
       <div className="absolute inset-0" data-spotlight-active={spotlightActive ? "true" : "false"}>
         {data && effectiveMode === "2d" ? (
           <ForceGraph2D
@@ -654,17 +675,18 @@ export default function GraphPage() {
             nodeRelSize={1}
             nodeVal={(n) => nodeInfluenceSize(n) * nodeInfluenceSize(n)}
             nodeColor={computeNodeColor}
-            nodeLabel={(n) => `${n.label}${n.summary ? `\n${n.summary}` : ""}`}
+            nodeLabel={formatGraphNodeTooltip}
             nodeCanvasObject={nodeCanvasObject}
             nodeCanvasObjectMode={() => "replace"}
             linkSource="source"
             linkTarget="target"
             linkColor={computeLinkColor}
-            linkWidth={(l) => linkWidth(l.strength_normalized)}
+            linkWidth={(l) => linkWidth(l.strength_normalized, l.weight)}
             linkCanvasObjectMode={() => "replace"}
             linkCanvasObject={linkCanvasObject}
             cooldownTicks={120}
             d3VelocityDecay={0.4}
+            onEngineTick={() => handleGraphEngineTick("2d")}
             onNodeClick={handleNodeClick}
             onBackgroundClick={handleBackgroundClick}
           />
@@ -681,36 +703,33 @@ export default function GraphPage() {
           >
             <ForceGraph3D
               ref={fg3dRef}
-            graphData={data}
-            width={viewport.width}
-            height={viewport.height}
-            // Match the 2D paper background so the eye does not have to
-            // re-adapt brightness when toggling modes. The scene's directional
-            // light still gives nodes enough volume on a near-white field.
-            backgroundColor="#FDF6E3"
-            // OrbitControls expose right-click pan (trackball, the default,
-            // does not). Add an on-screen hint below so trackpad users know
-            // pan is reachable.
-            controlType="orbit"
-            nodeId="id"
-            nodeRelSize={4}
-            nodeVal={(n) => nodeInfluenceSize(n)}
-            nodeColor={computeNodeColor}
-            nodeLabel={(n) => `${n.label}${n.summary ? `\n${n.summary}` : ""}`}
-            nodeOpacity={0.92}
-            linkSource="source"
-            linkTarget="target"
-            linkColor={computeLinkColor}
-            linkWidth={(l) => linkWidth(l.strength_normalized)}
-            linkOpacity={0.85}
-            linkDirectionalParticles={(l) =>
-              isRecentlyReinforced(l.last_reinforced_at, now) ? 2 : 0
-            }
-            linkDirectionalParticleSpeed={(l) =>
-              0.005 + 0.012 * (l.strength_normalized ?? 0.4)
-            }
-            linkDirectionalParticleWidth={2}
-              cooldownTicks={120}
+              graphData={data}
+              width={viewport.width}
+              height={viewport.height}
+              backgroundColor="#FDF6E3"
+              controlType="orbit"
+              nodeId="id"
+              nodeRelSize={4}
+              nodeVal={(n) => nodeInfluenceSize(n)}
+              nodeColor={computeNodeColor}
+              nodeLabel={formatGraphNodeTooltip}
+              nodeOpacity={0.92}
+              linkSource="source"
+              linkTarget="target"
+              linkColor={computeLinkColor}
+              linkWidth={(l) => linkWidth(l.strength_normalized, l.weight)}
+              linkOpacity={0.85}
+              linkDirectionalParticles={(l) =>
+                largeGraphMode ? 0 : isRecentlyReinforced(l.last_reinforced_at, now) ? 2 : 0
+              }
+              linkDirectionalParticleSpeed={(l) =>
+                0.005 + 0.012 * linkStrength(l.strength_normalized, l.weight)
+              }
+              linkDirectionalParticleWidth={2}
+              cooldownTicks={largeGraphMode ? 60 : 120}
+              d3VelocityDecay={largeGraphMode ? 0.55 : 0.4}
+              onEngineTick={() => handleGraphEngineTick("3d")}
+              onEngineStop={() => handleGraphEngineTick("3d")}
               onNodeClick={handleNodeClick}
               onBackgroundClick={handleBackgroundClick}
             />
@@ -769,10 +788,6 @@ function ViewModeToggle({ mode, webglSupported, onChange }: ViewModeToggleProps)
 }
 
 function OriginLegend() {
-  // Each item carries a single-letter glyph drawn on top of the colour swatch
-  // so deuteranopia / tritanopia operators can still tell origin classes apart
-  // when colour-only contrast collapses (Phase 3 review M-7). The glyph is
-  // also drawn inside the canvas node itself in `nodeCanvasObject`.
   const items: ReadonlyArray<{ kind: string; label: string; glyph: string; title: string }> = [
     { kind: "user_memory", label: "user memory", glyph: "U", title: "User-curated memory entries" },
     { kind: "engineering_chunk", label: "engineering chunk", glyph: "E", title: "Auto-imported from .codex / engineering source" },
@@ -798,6 +813,14 @@ function OriginLegend() {
   );
 }
 
+function formatGraphNodeTooltip(node: GraphNode): string {
+  const lines = [node.label];
+  if (node.summary) lines.push(node.summary);
+  if (typeof node.influence_count === "number") lines.push(`influence: ${node.influence_count}`);
+  if (node.last_used_at) lines.push(`last used: ${formatRelativeTime(node.last_used_at)}`);
+  return lines.join("\n");
+}
+
 function drawNodeShape(
   ctx: CanvasRenderingContext2D,
   kind: string,
@@ -810,18 +833,15 @@ function drawNodeShape(
   ctx.beginPath();
   switch (kind) {
     case "scope":
-      // Square: stable, structural scope nodes.
       ctx.rect(x - r, y - r, r * 2, r * 2);
       break;
     case "signal":
-      // Triangle: ephemeral candidate signals not yet promoted.
       ctx.moveTo(x, y - r);
       ctx.lineTo(x + r, y + r);
       ctx.lineTo(x - r, y + r);
       ctx.closePath();
       break;
     case "projection":
-      // Diamond: derived/projected nodes (proposal projections, etc.).
       ctx.moveTo(x, y - r);
       ctx.lineTo(x + r, y);
       ctx.lineTo(x, y + r);
@@ -830,7 +850,6 @@ function drawNodeShape(
       break;
     case "memory":
     default:
-      // Circle: durable memory entries.
       ctx.arc(x, y, r, 0, 2 * Math.PI);
       break;
   }
@@ -845,11 +864,6 @@ function hexToRgb(hex: string): [number, number, number] {
   return [(num >> 16) & 0xff, (num >> 8) & 0xff, num & 0xff];
 }
 
-// Strong WebGL probe — context + program + a real draw + readPixels round-trip.
-// The previous "createProgram + deleteProgram" check accepted contexts that
-// returned non-null but rendered black (WSL2 WARP / Mesa llvmpipe), letting
-// the user click 3D and watch nothing paint. We now write a known colour into
-// the framebuffer and confirm we read it back. Phase 3 review M-3.
 function probeWebgl(): boolean {
   if (typeof window === "undefined" || typeof document === "undefined") {
     return false;
@@ -865,12 +879,10 @@ function probeWebgl(): boolean {
     const program = gl.createProgram();
     if (!program) return false;
     gl.deleteProgram(program);
-    // Real draw round-trip: the buffer must come back with the colour we set.
     gl.clearColor(0.4, 0.6, 0.8, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     const pixel = new Uint8Array(4);
     gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
-    // Allow a small drift for sRGB conversion / driver rounding.
     const matchesClear =
       Math.abs(pixel[0]! - 102) < 16 &&
       Math.abs(pixel[1]! - 153) < 16 &&

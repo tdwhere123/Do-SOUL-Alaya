@@ -377,13 +377,8 @@ export function classifySoulGraphOriginKind(
   memory: Pick<MemoryEntryRecord, "source_kind" | "formation_kind" | "created_by" | "evidence_refs">,
   hasAcceptedProposalApply = false
 ): SoulGraphOriginKind {
-  // Origin classification preserves the entry's *true source* even after a
-  // reviewer accepts a downstream proposal. The previous "governance history
-  // wins" rule (accepted apply → user_memory regardless of source) silently
-  // relabeled engineering imports as user memories, corrupting attribution.
-  // Per Phase 2 review-loop M-6 decision, an engineering-origin entry that
-  // has been reviewer-accepted is its own dedicated kind:
-  // `reviewed_engineering_chunk`, not `user_memory`.
+  // invariant: reviewer acceptance adds governance state without overwriting
+  // the entry's true engineering-origin attribution.
   const isEngineeringOrigin =
     memory.source_kind === "import" ||
     memory.formation_kind === "imported" ||

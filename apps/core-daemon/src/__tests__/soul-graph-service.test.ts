@@ -397,11 +397,6 @@ describe("createSoulGraphService", () => {
     ).toBe("user_memory");
   });
 
-  // M-6 (Phase 2 review-loop): a Codex-origin entry that has been
-  // reviewer-accepted is its own classification — neither plain
-  // "engineering_chunk" (loses governance signal) nor "user_memory" (loses
-  // attribution). The classifier must resolve to "reviewed_engineering_chunk"
-  // so the graph view tells the operator both facts.
   it("returns reviewed_engineering_chunk for an engineering-origin memory after proposal accept", () => {
     expect(
       classifySoulGraphOriginKind(
@@ -415,7 +410,6 @@ describe("createSoulGraphService", () => {
         true
       )
     ).toBe("reviewed_engineering_chunk");
-    // Without the reviewer accept the same entry stays "engineering_chunk".
     expect(
       classifySoulGraphOriginKind(
         createMemory({
@@ -429,10 +423,6 @@ describe("createSoulGraphService", () => {
     ).toBe("engineering_chunk");
   });
 
-  // M-2 (Phase 2 review-loop): under graph limit pressure, PathRelation
-  // edges (richer dynamics metadata: strength, stability, last_reinforced_at)
-  // claim slots first; legacy memoryGraphEdge rows fill the remainder. This
-  // pin test surfaces any future re-order in a single test diff.
   it("prefers PathRelation edges over legacy edges under limit pressure", async () => {
     const service = createSoulGraphService({
       memoryEntryRepo: {
@@ -473,7 +463,6 @@ describe("createSoulGraphService", () => {
 
     const graph = await service.buildSoulGraph({ workspaceId: "default", depth: 2, limit: 4 });
 
-    // 4 PathRelation edges fit within the limit; legacy edge is starved out.
     const pathEdges = graph.edges.filter((edge) => edge.id.startsWith("path-"));
     const legacyEdges = graph.edges.filter((edge) => edge.id === "legacy-edge-1");
     expect(pathEdges).toHaveLength(4);
@@ -481,10 +470,6 @@ describe("createSoulGraphService", () => {
     expect(graph.truncated).toBe(true);
   });
 
-  // M-3 (Phase 2 review-loop): pending-proposal projection nodes and domain-tag
-  // projection scope nodes share kind="projection". Their ids must stay in
-  // disjoint namespaces ("proposal:" vs "scope:domain_tag:") so the inspector
-  // can never collide a proposal node with a tag-named-"proposal:foo".
   it("keeps proposal projection ids in a different namespace from domain-tag scope ids", async () => {
     const service = createSoulGraphService({
       memoryEntryRepo: {
@@ -520,8 +505,6 @@ describe("createSoulGraphService", () => {
     const proposalNodes = graph.nodes.filter((node) => node.kind === "projection");
     const scopeNodes = graph.nodes.filter((node) => node.kind === "scope");
     expect(proposalNodes.map((node) => node.id)).toEqual(["proposal:proposal-1"]);
-    // Every proposal projection id starts with "proposal:" and every shared
-    // tag scope node id starts with "scope:domain_tag:" — disjoint namespaces.
     for (const node of proposalNodes) {
       expect(node.id.startsWith("proposal:")).toBe(true);
       expect(node.id.startsWith("scope:domain_tag:")).toBe(false);
@@ -533,10 +516,6 @@ describe("createSoulGraphService", () => {
     expect(scopeNodes.length).toBeGreaterThan(0);
   });
 
-  // M-4 (Phase 2 review-loop): node_total / edge_total must reflect TRUE
-  // counts even when findPendingSummaries SQL-LIMITs. Pin behavior: even
-  // with limit=10 and 25 pending proposals in storage, node_total includes
-  // all 25 (via cheap COUNT(*) via countPending), and truncated=true.
   it("reports raw pending proposal count in node_total even when LIMIT clips the summary list", async () => {
     const service = createSoulGraphService({
       memoryEntryRepo: {
