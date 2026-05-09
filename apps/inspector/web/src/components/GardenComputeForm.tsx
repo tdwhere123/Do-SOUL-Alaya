@@ -178,7 +178,7 @@ export default function GardenComputeForm({ onRequiresRestart }: Props) {
         >
           <option value="local_heuristics">local_heuristics (no external calls)</option>
           <option value="official_api">official_api (OpenAI-compatible)</option>
-          <option value="host_worker">host_worker (deferred to v0.1.2)</option>
+          <option value="host_worker">host_worker (attached CLI agent claims via MCP)</option>
         </select>
       </FieldRow>
 

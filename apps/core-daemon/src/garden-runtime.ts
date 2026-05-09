@@ -77,6 +77,14 @@ const PATH_GRAPH_HISTORY_REVIEW_LIMIT = 2;
 const PATH_GRAPH_SNAPSHOT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const DEFAULT_GARDEN_STATUS_WORKSPACE_ID = "default";
 const IN_PROCESS_POST_TURN_CLAIMANT = "in-process";
+// host_worker mode: an attached CLI agent (Codex / Claude Code) claims via
+// MCP and runs sub-agent extraction. If the agent crashes or detaches
+// before garden.complete_task, the row stays in `claimed` forever. This
+// TTL is the upper bound on how long we wait before reclaiming the row
+// back to `pending` so another agent can take it. 10 min balances "long
+// enough for a real LLM round-trip" against "short enough that operator
+// reconnect doesn't have to wait an hour".
+const GARDEN_CLAIM_STALE_AFTER_MS = 10 * 60 * 1000;
 const POST_TURN_EXTRACT_EXCERPT_MAX_CHARS = 800;
 const JANITOR_RUNTIME_TASK_KINDS = [
   GardenTaskKind.TTL_CLEANUP,
@@ -851,6 +859,9 @@ export function createGardenRuntime(input: {
       name: "GardenScheduler",
       intervalMs: 60_000,
       task: async () => {
+        if (gardenTaskRepo !== undefined) {
+          gardenTaskRepo.gcAbandonedClaims(new Date().toISOString(), GARDEN_CLAIM_STALE_AFTER_MS);
+        }
         await processPostTurnExtractTask();
         for (const [role, handler, runtimeTaskKinds] of [
           [GardenRole.JANITOR, janitor, JANITOR_RUNTIME_TASK_KINDS],

@@ -56,11 +56,11 @@ const providerBaseDescriptionByName: Readonly<Record<AlayaMemoryToolName, string
   "soul.report_context_usage":
     "WHEN: you used recalled memory in your answer and need to close the delivery loop. Report whether recalled context for a delivery was used, skipped, or not applicable. Supports delivered-vs-used trust state.",
   "garden.list_pending_tasks":
-    "WHEN: you have spare capacity and want to pick up background organize work. List Garden background tasks pending in this workspace. Read-only. Use before garden.claim_task to scope what work the host can pick up.",
+    "WHEN: you have spare capacity (idle between user turns, or operator asks to flush the garden queue) and the operator has set garden compute provider_kind=host_worker so the host CLI agent is the worker. List Garden background tasks pending for this workspace. Read-only. Use before garden.claim_task to scope what work the host can pick up. (当 garden compute 模式为 host_worker 时，CLI agent 在空闲间隙先 list 再 claim 抢任务)",
   "garden.claim_task":
-    "WHEN: a pending Garden task should be picked up by this host (atomic claim). Returns already_claimed when another worker already grabbed it. The host (Codex / Claude Code) can then run its own sub-agent extraction and post the result back.",
+    "WHEN: a pending Garden task should be picked up by this host (atomic claim). Returns already_claimed when another worker already grabbed it. The host (Codex / Claude Code / similar attached CLI agent) then runs its own sub-agent extraction on the task payload and posts the result back via garden.complete_task. Abandoned claims are reclaimed automatically after a stale timeout, so don't claim more than you'll actually run.",
   "garden.complete_task":
-    "WHEN: the host finished its task work and is reporting the result back. Candidate signals in the result envelope flow into the same review queue host agents use via soul.emit_candidate_signal."
+    "WHEN: the host finished its task work and is reporting the result back. Only the agent target that claimed the task can complete it. Candidate signals in the result_envelope flow into the same governance review queue host agents use via soul.emit_candidate_signal — they are NOT durable memory writes."
 });
 
 const loopSuffixByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.freeze({
