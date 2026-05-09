@@ -138,7 +138,7 @@ export default function ProposalsPage() {
   );
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="h-full w-full overflow-y-auto"><div className="p-6 max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold text-[#586E75] mb-4 font-mono uppercase tracking-widest">
         {t("proposals:title")}
       </h1>
@@ -252,6 +252,7 @@ export default function ProposalsPage() {
           );
         })}
       </ul>
+    </div>
     </div>
   );
 }

@@ -66,7 +66,7 @@ export default function ConfigPage() {
   }, [dirtySections]);
 
   return (
-    <div className="max-w-4xl mx-auto w-full p-8 font-mono">
+    <div className="h-full w-full overflow-y-auto"><div className="max-w-4xl mx-auto w-full p-8 font-mono">
       {restartPending ? (
         <div
           role="alert"
@@ -154,6 +154,7 @@ export default function ConfigPage() {
           <p>DIRTY_SECTIONS: {dirtySections.size}</p>
         </div>
       </div>
+    </div>
     </div>
   );
 }
