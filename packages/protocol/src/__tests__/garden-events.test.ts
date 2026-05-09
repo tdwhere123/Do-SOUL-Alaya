@@ -131,6 +131,22 @@ describe("Phase 4A protocol schemas", () => {
       completedPayload
     );
 
+    const reclaimedPayload = {
+      task_id: "task-claim-stale",
+      task_kind: GardenTaskKind.PATH_GRAPH_SNAPSHOT,
+      role: GardenRole.LIBRARIAN,
+      tier: GardenTier.TIER_2,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      previous_claimed_by: "abandoned-agent",
+      claimed_at: validTimestamp,
+      stale_after_ms: 600_000,
+      occurred_at: "2026-03-27T00:10:00.000Z"
+    } as const;
+    expect(
+      parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED, reclaimedPayload)
+    ).toEqual(reclaimedPayload);
+
     const rejectedPayload = {
       task_id: "task-3",
       task_kind: GardenTaskKind.MERGE_PROPOSAL,
@@ -177,6 +193,7 @@ describe("Phase 4A protocol schemas", () => {
     expect(GardenEventTypeSchema.options).toEqual([
       GardenEventType.SOUL_GARDEN_TASK_DISPATCHED,
       GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
+      GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED,
       GardenEventType.SOUL_GARDEN_TIER_VIOLATION_REJECTED,
       GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED
     ]);
@@ -221,6 +238,9 @@ describe("Phase 4A protocol schemas", () => {
   it("accepts garden event types in the global EventType union", () => {
     expect(EventTypeSchema.parse(GardenEventType.SOUL_GARDEN_TASK_DISPATCHED)).toBe(
       GardenEventType.SOUL_GARDEN_TASK_DISPATCHED
+    );
+    expect(EventTypeSchema.parse(GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED)).toBe(
+      GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED
     );
     expect(EventTypeSchema.parse(GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED)).toBe(
       GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED

@@ -10,7 +10,7 @@
 
 ### *A local-first memory plane for CLI coding agents.*
 
-[![status](https://img.shields.io/badge/status-v0.1.1-success?style=flat-square)](#where-this-is-going)
+[![status](https://img.shields.io/badge/status-v0.1.2-success?style=flat-square)](#where-this-is-going)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![tests](https://img.shields.io/badge/tests-2190%20passing-success?style=flat-square)](#where-this-is-going)
 [![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#quickstart)
@@ -334,7 +334,7 @@ graph TD
     end
 
     subgraph Daemon["apps/core-daemon — wiring + dispatch"]
-        TH["MCP tool handler<br/>(9 soul.* tools)"]
+        TH["MCP tool handler<br/>(12 tools: 9 soul.* + 3 garden.*)"]
         BG["BackgroundServiceManager<br/>(Garden runtime · fire-and-forget)"]
         NOTI["InProcessRuntimeNotifier"]
     end
@@ -404,7 +404,7 @@ Two surfaces over one runtime. The agent attaches via MCP; humans
 script via CLI. Both go through the same daemon and the same truth
 boundary.
 
-### MCP tools (9 `soul.*`)
+### MCP tools (9 `soul.*` + 3 `garden.*`)
 
 All schema-bounded; `maxLength`, `maxItems`, `additionalProperties:
 false` are derived from the zod request schemas and enforced both
@@ -453,15 +453,20 @@ Every mutating verb supports preview before write. `attach` and
 
 ## Quickstart
 
-### Option A — install from npm (recommended)
+### Option A — install from GitHub Releases (recommended)
 
-> **Status:** the npm package `@do-soul/alaya` is published from the
-> first `v0.1.x` tagged release onward. If `npm view @do-soul/alaya
-> version` returns 404, the project has not yet been published — fall
-> back to Option B.
+> **Status:** Do-SOUL Alaya is **not published to npm**. v0.1.2 onward
+> ships as a checksum-verified source tarball attached to each GitHub
+> Release. The installer below downloads the tarball + `SHA256SUMS`,
+> verifies the SHA256, then runs `pnpm install --frozen-lockfile && pnpm
+> build` inside `~/.local/share/do-soul-alaya`. (No GPG / sigstore
+> signing yet — tag protection on `v*` is the trust anchor.)
 
 ```bash
-npm install -g @do-soul/alaya
+# Install latest release (downloads tarball, checksum-verifies, builds locally).
+curl -fsSL https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/main/scripts/install.sh | bash
+
+# Verify and attach.
 alaya doctor
 
 # Pass an absolute db_path — your shell expands ~ before alaya runs.
@@ -469,7 +474,29 @@ alaya install --non-interactive "$(printf '{"db_path":"%s/.config/alaya/alaya.db
 alaya attach claude-code
 ```
 
-Subsequent updates: `alaya update` (or `npm install -g @do-soul/alaya@latest`).
+Pin a specific version (env vars must follow the pipe so `bash` sees
+them, not `curl`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/main/scripts/install.sh \
+  | ALAYA_VERSION=v0.1.2 bash
+```
+
+Override install location:
+
+```bash
+curl -fsSL ... | ALAYA_HOME=/opt/alaya ALAYA_BIN_DIR=/usr/local/bin bash
+```
+
+Subsequent upgrades: rerun the `install.sh` one-liner with a newer
+`ALAYA_VERSION`. The installer extracts and builds into a staging dir
+first; only on success does it atomically swap into `$ALAYA_HOME`,
+moving the previous install aside as `${ALAYA_HOME}.bak`. (`alaya
+update` is npm-only and is unused on this distribution path.)
+
+Uninstall: `bash ~/.local/share/do-soul-alaya/scripts/uninstall.sh`
+(add `--purge` to also remove `~/.config/alaya/`, which holds your
+durable memory database and audit log).
 
 ### Option B — build from source
 
@@ -511,7 +538,7 @@ pnpm alaya attach claude-code      # preview, confirm, then apply
 
 # 8) First tool call — verify the MCP surface end-to-end
 pnpm alaya tools list --json | jq '.tools | length'
-#   Expect: 9
+#   Expect: 12  (9 soul.* + 3 garden.* tools)
 
 pnpm alaya tools call soul.recall \
   '{"query":"hello","scope_class":null,"dimension":null,"domain_tags":null,"max_results":5}' \
@@ -522,8 +549,8 @@ pnpm alaya tools call soul.recall \
 ```
 
 After step 7 your agent sees Alaya as an MCP server on its next
-start, and the 9 `soul.*` tools become callable from inside the
-agent.
+start, and the 12 tools (9 `soul.*` + 3 `garden.*`) become callable
+from inside the agent.
 
 **If a step fails:**
 
@@ -564,7 +591,10 @@ Do-SOUL Alaya/
 
 ## Where this is going
 
-> **Status note (2026-05-08).** v0.1.1 release prep is in progress. v0.1 was originally
+> **Status note (2026-05-09).** v0.1.2 ships via GitHub Releases
+> (tarball + SHA256SUMS, checksum-verified by the installer; no npm
+> publish — see Quickstart). v0.1.1 was the npm-publish attempt that
+> motivated the move. v0.1 was originally
 > framed as released on 2026-05-03, then reopened to absorb three
 > structural gaps the first release pass had deferred (HITL daemon
 > backbone A1, EventPublisher atomic transaction A2, path-axis

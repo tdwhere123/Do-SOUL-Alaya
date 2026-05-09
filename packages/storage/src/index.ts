@@ -203,6 +203,7 @@ export {
   type GardenTaskEnqueueInput,
   type GardenTaskEventInput,
   type GardenTaskEventPublisherPort,
+  type GardenTaskReclaimInput,
   type GardenTaskRepoPort,
   type GardenTaskRow,
   type GardenTaskStatus

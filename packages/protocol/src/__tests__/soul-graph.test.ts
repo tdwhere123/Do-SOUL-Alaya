@@ -29,13 +29,24 @@ describe("Soul graph protocol schemas", () => {
       scope_id: "scope:project",
       workspace_id: "workspace-1",
       created_at: "2026-04-23T12:00:00.000Z",
-      origin_plane: "project"
+      origin_plane: "project",
+      origin_kind: "user_memory",
+      evidence_refs: ["evidence:1"],
+      rationale: "User explicitly confirmed this preference.",
+      confidence: 0.72,
+      last_used_at: "2026-04-24T12:00:00.000Z",
+      last_hit_at: "2026-04-25T12:00:00.000Z",
+      influence_count: 14
     });
     const edge = SoulGraphEdgeSchema.parse({
       id: "edge:memory-1:scope-project",
       kind: "belongs_to",
       source_id: "memory:memory-1",
       target_id: "scope:project",
+      weight: 0.6,
+      strength_normalized: 0.6,
+      stability_class: "stable",
+      last_reinforced_at: "2026-04-24T12:00:00.000Z",
       created_at: "2026-04-23T12:00:00.000Z"
     });
 
@@ -71,6 +82,59 @@ describe("Soul graph protocol schemas", () => {
       node_total: 2,
       edge_total: 1
     });
+  });
+
+  it("keeps graph metadata additive and strict", () => {
+    expect(
+      SoulGraphNodeSchema.parse({
+        id: "memory:legacy",
+        kind: "memory",
+        label: "Legacy client-visible node"
+      })
+    ).toEqual({
+      id: "memory:legacy",
+      kind: "memory",
+      label: "Legacy client-visible node"
+    });
+    expect(
+      SoulGraphEdgeSchema.parse({
+        id: "edge:legacy",
+        kind: "references",
+        source_id: "memory:1",
+        target_id: "memory:2"
+      })
+    ).toEqual({
+      id: "edge:legacy",
+      kind: "references",
+      source_id: "memory:1",
+      target_id: "memory:2"
+    });
+
+    expect(() =>
+      SoulGraphNodeSchema.parse({
+        id: "memory:bad",
+        kind: "memory",
+        label: "bad",
+        origin_kind: "manual"
+      })
+    ).toThrow();
+    expect(() =>
+      SoulGraphEdgeSchema.parse({
+        id: "edge:bad",
+        kind: "references",
+        source_id: "memory:1",
+        target_id: "memory:2",
+        strength_normalized: 1.2
+      })
+    ).toThrow();
+    expect(() =>
+      SoulGraphNodeSchema.parse({
+        id: "memory:bad",
+        kind: "memory",
+        label: "bad",
+        unexpected: true
+      })
+    ).toThrow();
   });
 
   it("rejects invalid kinds and origin planes", () => {

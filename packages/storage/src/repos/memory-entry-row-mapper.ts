@@ -166,6 +166,15 @@ export function parseUpdateFields(fields: MemoryEntryRepoUpdateFields): MemoryEn
 
   const parsedStorageTier =
     fields.storage_tier === undefined ? undefined : parseStorageTier(fields.storage_tier);
+  if (
+    fields.confidence !== undefined &&
+    (!Number.isFinite(fields.confidence) || fields.confidence < 0 || fields.confidence > 1)
+  ) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate confidence.");
+  }
+  if (fields.retention_state !== undefined && fields.retention_state !== null) {
+    parseRetentionState(fields.retention_state);
+  }
   const parsedLastUsedAt =
     fields.last_used_at === undefined ? undefined : parseTimestamp(fields.last_used_at);
   const parsedLastHitAt =

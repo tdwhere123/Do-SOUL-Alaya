@@ -10,6 +10,7 @@ import StatusPage from "./pages/Status";
 import Layout from "./components/Layout";
 import SessionExpired from "./components/SessionExpired";
 import { ToastProvider } from "./components/Toast";
+import { LocaleProvider } from "./i18n/Locale";
 
 export function AppContent() {
   const [searchParams] = useSearchParams();
@@ -90,9 +91,11 @@ export function AppContent() {
 function App() {
   return (
     <BrowserRouter>
-      <ToastProvider>
-        <AppContent />
-      </ToastProvider>
+      <LocaleProvider>
+        <ToastProvider>
+          <AppContent />
+        </ToastProvider>
+      </LocaleProvider>
     </BrowserRouter>
   );
 }

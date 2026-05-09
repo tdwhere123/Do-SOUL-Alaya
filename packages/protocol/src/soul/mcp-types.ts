@@ -10,6 +10,7 @@ import {
   BoundedLabelSchema,
   BoundedQuerySchema,
   BoundedReasonSchema,
+  IsoDatetimeStringSchema,
   NonEmptyStringSchema,
   NonNegativeIntSchema
 } from "../schema-primitives.js";
@@ -58,13 +59,21 @@ export const MemorySearchResultSchema = z
   })
   .readonly();
 
+export const RecallTimeFieldSchema = z.enum(["created_at", "last_used_at"]);
+
 export const SoulMemorySearchRequestSchema = z
   .object({
     query: BoundedQuerySchema,
     scope_class: ScopeClassSchema.nullable(),
     dimension: MemoryDimensionSchema.nullable(),
     domain_tags: z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().nullable(),
-    max_results: NonNegativeIntSchema.max(1000)
+    max_results: NonNegativeIntSchema.max(1000),
+    // Optional time-window filter applied during coarse filter, before ranking.
+    // Lets agents answer queries like "what did I say on May 20" without breaking
+    // the score function. `time_field` selects which timestamp the bounds apply to.
+    since: IsoDatetimeStringSchema.nullable().optional(),
+    until: IsoDatetimeStringSchema.nullable().optional(),
+    time_field: RecallTimeFieldSchema.optional()
   })
   .readonly();
 

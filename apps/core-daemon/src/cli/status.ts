@@ -154,4 +154,5 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: StatusReport):
     "trust counters above track delivery/usage evidence and are distinct from pending proposal queue state.\n"
   );
   stream.write(`garden last pass: ${report.garden.last_pass_at ?? "n/a"}\n`);
+  stream.write("memory inspector: run `alaya inspect --open` to launch the loopback UI (http://127.0.0.1:5174).\n");
 }

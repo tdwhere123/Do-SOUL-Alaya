@@ -82,6 +82,87 @@ async function seedMemoryEntry(
 }
 
 describe("proposal accept-and-apply — cross-proposal CAS predicate (gate-6-delta I1)", () => {
+  it("pins CAS to the proposal creation baseline, not the review-time read", async () => {
+    const database = createDb();
+    const proposalRepo = new SqliteProposalRepo(database);
+    const eventLogRepo = new SqliteEventLogRepo(database);
+    const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
+    const proposalIds = [
+      "aaaaaaaa-bbbb-4bbb-8bbb-cccccccccccc",
+      "dddddddd-eeee-4eee-8eee-ffffffffffff"
+    ];
+
+    const memory = await seedMemoryEntry(memoryEntryRepo, {
+      workspace_id: "ws-cas-create"
+    });
+    const memoryService = {
+      findByIdScoped: async (objectId: string, workspaceId: string) => {
+        const live = await memoryEntryRepo.findById(objectId);
+        return live?.workspace_id === workspaceId ? live : null;
+      },
+      validateUpdate: async () => {},
+      update: async (objectId: string) => ({ object_id: objectId })
+    };
+    const workflow = createMcpMemoryProposalWorkflow({
+      now: () => "2026-05-06T00:00:00.000Z",
+      generateObjectId: () => proposalIds.shift() ?? "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      eventLogRepo,
+      proposalRepo,
+      runtimeNotifier: { notifyEntry: async () => {} },
+      memoryService
+    });
+
+    const first = await workflow.proposeMemoryUpdate(
+      {
+        target_object_id: memory.object_id,
+        proposed_changes: { content: "V1" },
+        reason: "first proposal"
+      },
+      { workspaceId: "ws-cas-create", runId: null, agentTarget: "codex" }
+    );
+    const second = await workflow.proposeMemoryUpdate(
+      {
+        target_object_id: memory.object_id,
+        proposed_changes: { content: "V2 stale" },
+        reason: "second proposal against V0"
+      },
+      { workspaceId: "ws-cas-create", runId: null, agentTarget: "codex" }
+    );
+
+    await expect(
+      workflow.reviewMemoryProposal(
+        {
+          proposal_id: first.proposal_id,
+          verdict: "accept",
+          reason: "accept first",
+          reviewer_identity: "user:reviewer"
+        },
+        { workspaceId: "ws-cas-create", runId: null, agentTarget: "inspector" }
+      )
+    ).resolves.toMatchObject({ resolution_state: ProposalResolutionState.ACCEPTED });
+
+    await expect(
+      workflow.reviewMemoryProposal(
+        {
+          proposal_id: second.proposal_id,
+          verdict: "accept",
+          reason: "accept second after target changed",
+          reviewer_identity: "user:reviewer"
+        },
+        { workspaceId: "ws-cas-create", runId: null, agentTarget: "inspector" }
+      )
+    ).rejects.toMatchObject({
+      code: "VALIDATION",
+      message: expect.stringContaining("stale snapshot")
+    });
+
+    const live = await memoryEntryRepo.findById(memory.object_id);
+    expect(live?.content).toBe("V1");
+    expect((await proposalRepo.findScopedById(second.proposal_id))?.proposal.resolution_state).toBe(
+      ProposalResolutionState.PENDING
+    );
+  });
+
   it("refuses to apply when the memory's live updated_at moved past the captured baseline", async () => {
     const database = createDb();
     const proposalRepo = new SqliteProposalRepo(database);

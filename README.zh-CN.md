@@ -10,7 +10,7 @@
 
 ### *给 CLI 编码 agent 的本地优先记忆平面。*
 
-[![status](https://img.shields.io/badge/status-v0.1.1-success?style=flat-square)](#接下来的方向)
+[![status](https://img.shields.io/badge/status-v0.1.2-success?style=flat-square)](#接下来的方向)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![tests](https://img.shields.io/badge/tests-2190%20passing-success?style=flat-square)](#接下来的方向)
 [![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#快速开始)
@@ -309,7 +309,7 @@ graph TD
     end
 
     subgraph Daemon["apps/core-daemon —— 接线 + 派发"]
-        TH["MCP tool handler<br/>(9 个 soul.* 工具)"]
+        TH["MCP tool handler<br/>(12 个工具：9 soul.* + 3 garden.*)"]
         BG["BackgroundServiceManager<br/>(Garden runtime · 即发即忘)"]
         NOTI["InProcessRuntimeNotifier"]
     end
@@ -377,7 +377,7 @@ CI 测试强制的规则：
 两个对外面，一套 runtime。Agent 走 MCP attach；人走 CLI 脚本。
 两个面都通过同一个 daemon、同一个真相边界。
 
-### MCP 工具（9 个 `soul.*`）
+### MCP 工具（9 个 `soul.*` + 3 个 `garden.*`）
 
 全部 schema-bounded；`maxLength`、`maxItems`、
 `additionalProperties: false` 都是从 zod 请求 schema 派生的，在
@@ -424,14 +424,20 @@ CI 测试强制的规则：
 
 ## 快速开始
 
-### 方式 A —— 从 npm 安装（推荐）
+### 方式 A —— 从 GitHub Release 安装（推荐）
 
-> **状态**：npm 包 `@do-soul/alaya` 从首个 `v0.1.x` tag release 起开始发布。
-> 如果 `npm view @do-soul/alaya version` 返回 404，说明还没发布过，
-> 请改用方式 B。
+> **状态**：Do-SOUL Alaya **不发布到 npm**。从 v0.1.2 起，每个 GitHub
+> Release 附带一份带 SHA256 校验的源码 tarball；下面的 installer 会拉取
+> tarball 和 `SHA256SUMS`、本地校验 SHA256 通过后，再在
+> `~/.local/share/do-soul-alaya` 里跑 `pnpm install --frozen-lockfile &&
+> pnpm build`。（暂未做 GPG / sigstore 签名 —— `v*` tag protection
+> 是当前的信任锚。）
 
 ```bash
-npm install -g @do-soul/alaya
+# 装最新 release（下载 tarball、校验 sha256、本地 build）。
+curl -fsSL https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/main/scripts/install.sh | bash
+
+# 验证 + attach。
 alaya doctor
 
 # 传绝对路径——shell 在 alaya 启动前展开 ~。
@@ -439,7 +445,28 @@ alaya install --non-interactive "$(printf '{"db_path":"%s/.config/alaya/alaya.db
 alaya attach claude-code
 ```
 
-后续升级：`alaya update`（或 `npm install -g @do-soul/alaya@latest`）。
+锁版本（环境变量必须放在管道**之后**——前面是给 `curl` 用，后面才是
+给 `bash` 用）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/main/scripts/install.sh \
+  | ALAYA_VERSION=v0.1.2 bash
+```
+
+改装路径：
+
+```bash
+curl -fsSL ... | ALAYA_HOME=/opt/alaya ALAYA_BIN_DIR=/usr/local/bin bash
+```
+
+后续升级：用更新的 `ALAYA_VERSION` 重跑一次 install.sh。Installer 先在
+staging 目录解压并 build，build 成功后再原子地交换进 `$ALAYA_HOME`；
+旧 install 目录会被移到 `${ALAYA_HOME}.bak`。（`alaya update` 是 npm
+路径下的命令，本分发路径下不使用。）
+
+卸载：`bash ~/.local/share/do-soul-alaya/scripts/uninstall.sh`
+（加 `--purge` 同时删 `~/.config/alaya/`，里面是 durable memory
+数据库和 audit log）。
 
 ### 方式 B —— 从源码构建
 
@@ -481,7 +508,7 @@ pnpm alaya attach claude-code      # preview，确认，再 apply
 
 # 8) 第一次 tool call —— 端到端验证 MCP 接口
 pnpm alaya tools list --json | jq '.tools | length'
-#   期望：9
+#   期望：12（9 个 soul.* + 3 个 garden.*）
 
 pnpm alaya tools call soul.recall \
   '{"query":"hello","scope_class":null,"dimension":null,"domain_tags":null,"max_results":5}' \
@@ -491,8 +518,8 @@ pnpm alaya tools call soul.recall \
 #   response 带 strategy_mix 和可选 degradation_reason。
 ```
 
-走完第 7 步，agent 下次启动就会把 Alaya 当 MCP server 看，9 个
-`soul.*` 工具在 agent 内部就可以调了。
+走完第 7 步，agent 下次启动就会把 Alaya 当 MCP server 看，12 个
+工具（9 个 `soul.*` + 3 个 `garden.*`）在 agent 内部就可以调了。
 
 **某一步失败时：**
 
@@ -532,7 +559,9 @@ Do-SOUL Alaya/
 
 ## 接下来的方向
 
-> **状态说明（2026-05-08）。** v0.1.1 发布准备进行中。v0.1 一开始（2026-05-03）
+> **状态说明（2026-05-09）。** v0.1.2 走 GitHub Release 分发（tarball +
+> SHA256SUMS，不上 npm —— 见快速开始）。v0.1.1 是 npm 发布尝试，正是
+> 它把分发路径推到了 GitHub-only。v0.1 一开始（2026-05-03）
 > 被过早写成了"已发布"，后来我把它重开，把第一轮 release 里被 deferred
 > 的三处结构性差距 —— HITL daemon 骨架 (A1)、EventPublisher 原子事务
 > (A2)、Path 轴可塑性反馈环 (A3) —— 加上 C1 hygiene wave 一起纳进收尾

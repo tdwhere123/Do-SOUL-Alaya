@@ -164,6 +164,7 @@ export function createCoreDaemonApp(input: CreateCoreDaemonAppInput): ReturnType
       },
       proposals: {
         workspaceService: input.workspaceService,
+        memoryService: input.memoryService,
         proposalService: input.proposalService,
         mcpMemoryToolHandler: input.mcpMemoryToolHandler
       },
@@ -184,6 +185,10 @@ export function createCoreDaemonApp(input: CreateCoreDaemonAppInput): ReturnType
       soulGraph: {
         workspaceService: input.workspaceService,
         soulGraphService: input.soulGraphService
+      },
+      soulSearch: {
+        workspaceService: input.workspaceService,
+        mcpMemoryToolHandler: input.mcpMemoryToolHandler
       },
       status: {
         startupStepsProvider: () => input.startupSteps.map((step) => step.step),

@@ -213,6 +213,109 @@ describe("post-turn extract Garden task", () => {
     });
   });
 
+  it("host_worker end-to-end: enqueue then MCP claim/complete delivers candidate signals", async () => {
+    const harness = await createRoutingHarness({ provider_kind: "host_worker" });
+    harness.enqueuePostTurnTask();
+    await harness.runScheduler();
+    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
+      status: "pending",
+      claimed_by: null
+    });
+
+    const handler = createMcpMemoryToolHandler(createMcpDeps(harness));
+    const claimResult = unwrapOk<{
+      readonly status: string;
+      readonly task_id: string;
+    }>(
+      await handler.call({
+        toolName: "garden.claim_task",
+        arguments: { task_id: "post-turn-task-1" },
+        context: defaultContext()
+      })
+    );
+    expect(claimResult.status).toBe("claimed");
+    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
+      status: "claimed",
+      claimed_by: defaultContext().agentTarget
+    });
+
+    const completeResult = unwrapOk<{
+      readonly status: string;
+      readonly events_appended: number;
+    }>(
+      await handler.call({
+        toolName: "garden.complete_task",
+        arguments: {
+          task_id: "post-turn-task-1",
+          status: "completed",
+          result_envelope: {
+            candidate_signals: [
+              {
+                signal_kind: "potential_preference",
+                object_kind: "memory_entry",
+                scope_hint: "project",
+                domain_tags: ["preference"],
+                confidence: 0.78,
+                evidence_refs: ["evidence-1"],
+                raw_payload: { observation: "user prefers vitest watch mode" }
+              }
+            ]
+          }
+        },
+        context: defaultContext()
+      })
+    );
+    expect(completeResult.status).toBe("completed");
+    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
+      status: "completed"
+    });
+    const signals = await harness.signalService.listByRun("run-1");
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toMatchObject({
+      source: SignalSource.GARDEN_COMPILE,
+      signal_state: "triaged"
+    });
+  });
+
+  it("scheduler reclaims abandoned claims (status=claimed older than stale TTL) back to pending", async () => {
+    const harness = await createRoutingHarness({ provider_kind: "host_worker" });
+    harness.enqueuePostTurnTask();
+    // Simulate an attached agent that claimed but never completed — row sits
+    // in claimed state with a claimed_at timestamp older than the runtime's
+    // GARDEN_CLAIM_STALE_AFTER_MS (10 min) ceiling. The scheduler tick must
+    // reclaim it back to pending so another agent (or the same agent after
+    // reconnect) can pick it up.
+    const staleClaimedAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    harness.gardenTaskRepo.claimAtomic(
+      "post-turn-task-1",
+      "abandoned-agent",
+      staleClaimedAt,
+      "workspace-1"
+    );
+    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
+      status: "claimed",
+      claimed_by: "abandoned-agent"
+    });
+
+    await harness.runScheduler();
+
+    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
+      status: "pending",
+      claimed_by: null
+    });
+    await expect(
+      harness.eventLogRepo.queryByType(GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED)
+    ).resolves.toEqual([
+      expect.objectContaining({
+        entity_id: "post-turn-task-1",
+        payload_json: expect.objectContaining({
+          previous_claimed_by: "abandoned-agent",
+          stale_after_ms: 10 * 60 * 1000
+        })
+      })
+    ]);
+  });
+
   it("records compiled candidate signals in the signal review queue", async () => {
     const harness = await createRoutingHarness({
       provider_kind: "official_api",
@@ -248,9 +351,11 @@ interface HandlerHarness extends ClosableHarness {
 interface RoutingHarness extends ClosableHarness {
   readonly database: StorageDatabase;
   readonly eventLogRepo: SqliteEventLogRepo;
+  readonly eventPublisher: EventPublisher;
   readonly gardenTaskRepo: SqliteGardenTaskRepo;
   readonly signalRepo: SqliteSignalRepo;
   readonly signalService: SignalService;
+  readonly runtimeNotifier: { notifyEntry(entry: unknown): void };
   enqueuePostTurnTask(): void;
   runScheduler(): Promise<void>;
 }

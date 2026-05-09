@@ -36,7 +36,9 @@ import {
   compareMemoryEntries,
   compareRecallCandidates,
   createContentPreview,
+  entryMatchesTimeFilter,
   estimateTokens,
+  filterMemoriesByTimeWindow,
   getGlobalRecallLimit,
   isClaimLikeDimension,
   isProtectedDimension,
@@ -48,7 +50,8 @@ import {
   normalizeGraphSupport,
   normalizeQueryText,
   parseEmbeddingPrecheckReason,
-  toErrorMessage
+  toErrorMessage,
+  type RecallTimeFilter
 } from "./recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
@@ -94,10 +97,13 @@ export class RecallService {
     readonly strategy: NodeStrategy;
     readonly runId?: string | null;
     readonly policyOverride?: Readonly<RecallPolicy>;
+    readonly timeFilter?: RecallTimeFilter;
   }): Promise<RecallResult> {
     const policy = this.resolvePolicy(params.strategy, params.taskSurface.runtime_id, params.policyOverride);
     const queryText = normalizeQueryText(params.taskSurface.display_name);
-    const hotCoarseFilter = await this.coarseFilter(params.workspaceId, policy.coarse_filter, queryText);
+    const hotCoarseFilter = await this.coarseFilter(params.workspaceId, policy.coarse_filter, queryText, {
+      timeFilter: params.timeFilter
+    });
     const globalCoarseFilter = await loadGlobalRecallCandidates({
       workspaceId: params.workspaceId,
       queryText,
@@ -105,7 +111,9 @@ export class RecallService {
       createdBy: "system",
       globalRecallPort: this.dependencies.globalRecallPort,
       projectMappingPort: this.dependencies.projectMappingPort,
-      classifyGlobalCandidate
+      classifyGlobalCandidate,
+      timeFilter: params.timeFilter,
+      entryMatchesTimeFilter
     });
     const filteredGlobalCandidates = globalCoarseFilter.records.flatMap((record) => {
       if (record.candidate === null) {
@@ -160,7 +168,8 @@ export class RecallService {
       queryText,
       hotCoarseFilter,
       hotFineAssessmentCount: hotCoarseFilter.candidates.length,
-      winnerMemoryIds
+      winnerMemoryIds,
+      timeFilter: params.timeFilter
     });
     const combinedCoarseCandidates = Object.freeze([
       ...coarseFilter.candidates,
@@ -296,6 +305,7 @@ export class RecallService {
       readonly projectMappings?: readonly Readonly<ProjectMappingAnchor>[];
       readonly sourceChannel?: string;
       readonly scoreMultiplier?: number;
+      readonly timeFilter?: RecallTimeFilter;
     }> = {}
   ): Promise<{
     readonly total_scanned: number;
@@ -304,10 +314,13 @@ export class RecallService {
     readonly degradation_reason: RecallResult["degradation_reason"];
   }> {
     const tier = options.tier ?? StorageTier.HOT;
-    const [tierMemories, projectMappings] = await Promise.all([
+    const [rawTierMemories, projectMappings] = await Promise.all([
       this.dependencies.memoryRepo.findByWorkspaceId(workspaceId, tier),
       options.projectMappings ?? this.dependencies.projectMappingPort?.findByWorkspace(workspaceId) ?? Promise.resolve([])
     ]);
+    // Apply optional time-window filter as a pre-filter so the score function
+    // is unaffected. Empty/absent bounds keep behavior backward-compatible.
+    const tierMemories = filterMemoriesByTimeWindow(rawTierMemories, options.timeFilter);
     const protectedCandidates = tierMemories.filter((entry) => isProtectedDimension(entry.dimension));
     const protectedIds = new Set(protectedCandidates.map((entry) => entry.object_id));
     const deterministicMatches = tierMemories.filter(
@@ -407,6 +420,7 @@ export class RecallService {
     readonly hotCoarseFilter: Awaited<ReturnType<RecallService["coarseFilter"]>>;
     readonly hotFineAssessmentCount: number;
     readonly winnerMemoryIds: ReadonlySet<string>;
+    readonly timeFilter?: RecallTimeFilter;
   }): Promise<Awaited<ReturnType<RecallService["coarseFilter"]>>> {
     const targetCount = Math.min(MIN_RECALL_RESULTS, params.fineAssessmentConfig.budgets.max_entries);
     if (targetCount === 0) {
@@ -425,7 +439,8 @@ export class RecallService {
       tier: StorageTier.WARM,
       projectMappings,
       sourceChannel: "warm_cascade",
-      scoreMultiplier: WARM_CASCADE_DECAY
+      scoreMultiplier: WARM_CASCADE_DECAY,
+      timeFilter: params.timeFilter
     });
     const warmMerged = this.mergeCoarseFilters(params.hotCoarseFilter, warmFilter, "warm_cascade_engaged");
     // Wave-end M5 (Reviewer I4): the cascade gate previously called
@@ -444,7 +459,8 @@ export class RecallService {
       tier: StorageTier.COLD,
       projectMappings,
       sourceChannel: "cold_cascade",
-      scoreMultiplier: COLD_CASCADE_DECAY
+      scoreMultiplier: COLD_CASCADE_DECAY,
+      timeFilter: params.timeFilter
     });
     return this.mergeCoarseFilters(warmMerged, coldFilter, "cold_cascade_engaged");
   }

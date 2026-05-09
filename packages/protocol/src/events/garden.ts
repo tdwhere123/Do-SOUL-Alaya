@@ -6,6 +6,7 @@ import { HealthEventKindSchema } from "../soul/health-journal.js";
 const gardenEventTypeValues = [
   "soul.garden.task_dispatched",
   "soul.garden.task_completed",
+  "soul.garden.task_claim_reclaimed",
   "soul.garden.tier_violation_rejected",
   "soul.health_journal.recorded"
 ] as const;
@@ -13,6 +14,7 @@ const gardenEventTypeValues = [
 export const GardenEventType = {
   SOUL_GARDEN_TASK_DISPATCHED: "soul.garden.task_dispatched",
   SOUL_GARDEN_TASK_COMPLETED: "soul.garden.task_completed",
+  SOUL_GARDEN_TASK_CLAIM_RECLAIMED: "soul.garden.task_claim_reclaimed",
   SOUL_GARDEN_TIER_VIOLATION_REJECTED: "soul.garden.tier_violation_rejected",
   SOUL_HEALTH_JOURNAL_RECORDED: "soul.health_journal.recorded"
 } as const;
@@ -41,6 +43,21 @@ export const SoulGardenTaskCompletedPayloadSchema = z
     objects_affected: z.array(NonEmptyStringSchema).readonly(),
     candidate_signals_count: NonNegativeIntSchema.optional(),
     workspace_id: NonEmptyStringSchema,
+    occurred_at: IsoDatetimeStringSchema
+  })
+  .readonly();
+
+export const SoulGardenTaskClaimReclaimedPayloadSchema = z
+  .object({
+    task_id: NonEmptyStringSchema,
+    task_kind: GardenTaskKindSchema,
+    role: GardenRoleSchema,
+    tier: GardenTierSchema,
+    workspace_id: NonEmptyStringSchema,
+    run_id: NonEmptyStringSchema.nullable(),
+    previous_claimed_by: NonEmptyStringSchema,
+    claimed_at: IsoDatetimeStringSchema,
+    stale_after_ms: NonNegativeIntSchema,
     occurred_at: IsoDatetimeStringSchema
   })
   .readonly();
@@ -75,6 +92,7 @@ export const SoulHealthJournalRecordedPayloadSchema = z
 const gardenPayloadSchemas = {
   [GardenEventType.SOUL_GARDEN_TASK_DISPATCHED]: SoulGardenTaskDispatchedPayloadSchema,
   [GardenEventType.SOUL_GARDEN_TASK_COMPLETED]: SoulGardenTaskCompletedPayloadSchema,
+  [GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED]: SoulGardenTaskClaimReclaimedPayloadSchema,
   [GardenEventType.SOUL_GARDEN_TIER_VIOLATION_REJECTED]: SoulGardenTierViolationRejectedPayloadSchema,
   [GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED]: SoulHealthJournalRecordedPayloadSchema
 } as const;
@@ -94,6 +112,10 @@ const SoulGardenTaskCompletedEventObjectSchema = createGardenEventObjectSchema(
   GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
   SoulGardenTaskCompletedPayloadSchema
 );
+const SoulGardenTaskClaimReclaimedEventObjectSchema = createGardenEventObjectSchema(
+  GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED,
+  SoulGardenTaskClaimReclaimedPayloadSchema
+);
 const SoulGardenTierViolationRejectedEventObjectSchema = createGardenEventObjectSchema(
   GardenEventType.SOUL_GARDEN_TIER_VIOLATION_REJECTED,
   SoulGardenTierViolationRejectedPayloadSchema
@@ -105,6 +127,7 @@ const SoulHealthJournalRecordedEventObjectSchema = createGardenEventObjectSchema
 
 export const SoulGardenTaskDispatchedEventSchema = SoulGardenTaskDispatchedEventObjectSchema.readonly();
 export const SoulGardenTaskCompletedEventSchema = SoulGardenTaskCompletedEventObjectSchema.readonly();
+export const SoulGardenTaskClaimReclaimedEventSchema = SoulGardenTaskClaimReclaimedEventObjectSchema.readonly();
 export const SoulGardenTierViolationRejectedEventSchema = SoulGardenTierViolationRejectedEventObjectSchema.readonly();
 export const SoulHealthJournalRecordedEventSchema = SoulHealthJournalRecordedEventObjectSchema.readonly();
 
@@ -112,6 +135,7 @@ export const GardenEventUnionSchema = z
   .discriminatedUnion("type", [
     SoulGardenTaskDispatchedEventObjectSchema,
     SoulGardenTaskCompletedEventObjectSchema,
+    SoulGardenTaskClaimReclaimedEventObjectSchema,
     SoulGardenTierViolationRejectedEventObjectSchema,
     SoulHealthJournalRecordedEventObjectSchema
   ])

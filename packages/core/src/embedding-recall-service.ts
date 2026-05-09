@@ -66,6 +66,14 @@ export interface EmbeddingRecallServiceDependencies {
   readonly generateQueryId?: () => string;
   readonly now?: () => string;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
+  /**
+   * Per-query embedding provider timeout for the recall prefetch / supplement
+   * paths. Defaults to {@link DEFAULT_QUERY_TIMEOUT_MS}. The default of 250 ms
+   * was empirically too tight (long-run test 2026-05-08 observed 100% of
+   * queries finishing as `query_embedding_pending`); 1500 ms gives OpenAI /
+   * local providers room to land within the recall window while still bounded.
+   */
+  readonly queryTimeoutMs?: number;
 }
 
 export type PreparedEmbeddingQuerySnapshot =
@@ -90,7 +98,16 @@ interface EmbeddingRecallPrecheckError extends Error {
   readonly reason: "local_vector_lookup_failed";
 }
 
-const QUERY_TIMEOUT_MS = 250;
+export const DEFAULT_QUERY_TIMEOUT_MS = 1500;
+export const MAX_QUERY_TIMEOUT_MS = 5000;
+export const MIN_QUERY_TIMEOUT_MS = 50;
+
+function clampQueryTimeout(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    return DEFAULT_QUERY_TIMEOUT_MS;
+  }
+  return Math.min(MAX_QUERY_TIMEOUT_MS, Math.max(MIN_QUERY_TIMEOUT_MS, value));
+}
 
 const EMPTY_SUPPLEMENT_RESULT: EmbeddingRecallSupplementResult = Object.freeze({
   supplementaryEntries: Object.freeze([]),
@@ -101,11 +118,13 @@ export class EmbeddingRecallService {
   private readonly generateQueryId: () => string;
   private readonly now: () => string;
   private readonly warn: (message: string, meta: Record<string, unknown>) => void;
+  private readonly queryTimeoutMs: number;
 
   public constructor(private readonly dependencies: EmbeddingRecallServiceDependencies) {
     this.generateQueryId = dependencies.generateQueryId ?? (() => `recall-embedding-${randomUUID()}`);
     this.now = dependencies.now ?? (() => new Date().toISOString());
     this.warn = dependencies.warn ?? (() => undefined);
+    this.queryTimeoutMs = clampQueryTimeout(dependencies.queryTimeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS);
   }
 
   public prepareQueryEmbedding(params: {
@@ -131,7 +150,7 @@ export class EmbeddingRecallService {
 
     void this.dependencies.provider
       .embedTexts([params.queryText], {
-        timeoutMs: QUERY_TIMEOUT_MS
+        timeoutMs: this.queryTimeoutMs
       })
       .then((embeddings) => {
         if (embeddings.length !== 1) {
@@ -359,7 +378,7 @@ export class EmbeddingRecallService {
   }): Promise<Float32Array | null> {
     try {
       const embeddings = await this.dependencies.provider.embedTexts([params.queryText], {
-        timeoutMs: QUERY_TIMEOUT_MS
+        timeoutMs: this.queryTimeoutMs
       });
       if (embeddings.length !== 1) {
         throw new Error(`Expected exactly one query embedding, received ${embeddings.length}.`);

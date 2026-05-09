@@ -27,9 +27,14 @@ export interface AlayaMcpStdioServer {
 
 export const ALAYA_MCP_SERVER_INSTRUCTIONS = [
   "This MCP server exposes tools only (no prompts, no resources).",
-  "Use the soul.* memory tools as a governed loop: recall -> open pointer -> respond -> report usage.",
-  "When new durable memory may be needed, emit candidate signals first, then propose updates for review.",
-  "Durable memory mutates only through accepted proposal apply; rejected proposals do not mutate durable memory."
+  "START every memory-sensitive turn by calling soul.recall BEFORE answering.",
+  "You SHOULD call soul.recall when the user message touches: personal preferences, working style, or past corrections; prior decisions, architecture choices, or project context; or any \"do you remember / last time / we agreed\" reference.",
+  "Workflow: soul.recall -> soul.open_pointer (only if the preview is insufficient) -> answer -> soul.report_context_usage.",
+  "When you find new durable memory candidates: soul.emit_candidate_signal first, then soul.propose_memory_update.",
+  "Durable memory mutates only through accepted proposal apply; rejected proposals do not mutate durable memory.",
+  "GARDEN HOST-WORKER LOOP: when the operator has set garden compute provider_kind=host_worker, Alaya queues POST_TURN_EXTRACT background tasks for an attached CLI agent (Codex / Claude Code / similar) to run as host worker.",
+  "When you have spare capacity between user turns (or are explicitly asked to flush the garden queue), you MAY: garden.list_pending_tasks -> garden.claim_task -> run your own sub-agent extraction on the task payload -> garden.complete_task with candidate_signals.",
+  "Only the agent target that claimed a task can complete it; another attached host completing it is rejected. Task payload carries the original conversation's run_id; never substitute a different run id."
 ].join(" ");
 
 export function createAlayaMcpServer(options: AlayaMcpServerOptions): Server {

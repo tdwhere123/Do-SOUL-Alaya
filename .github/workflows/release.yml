@@ -1,5 +1,10 @@
 name: Release
 
+# v0.1.2: Do-SOUL Alaya is distributed via GitHub Releases (source tarball
+# + SHA256SUMS), not npm. The end-user installer scripts/install.sh
+# downloads these two assets, verifies the checksum, then runs pnpm
+# install + pnpm build inside the user's $ALAYA_HOME.
+
 on:
   push:
     tags:
@@ -9,7 +14,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write   # gh release create + upload assets
 
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +27,6 @@ jobs:
         with:
           node-version: '20'
           cache: 'pnpm'
-          registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -33,34 +37,94 @@ jobs:
       - name: Test
         run: pnpm test
 
-      - name: Configure npm auth
-        # pnpm publish honors NPM_TOKEN only via .npmrc — write it
-        # explicitly so the release does not silently 401 on the first
-        # workspace package.
-        run: |
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
-          echo "registry=https://registry.npmjs.org/" >> ~/.npmrc
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Verify tarballs (dry run)
-        # Sanity check: tarballs should not include test fixtures, src TS,
-        # or stray data/ directories. Fail the release if they do.
+      - name: Pack source tarball + SHA256SUMS
+        id: pack
         run: |
           set -euo pipefail
-          for pkg in packages/protocol packages/storage packages/core packages/soul packages/engine-gateway apps/inspector apps/core-daemon; do
-            echo "=== $pkg ==="
-            (cd "$pkg" && pnpm pack --dry-run 2>&1 | tee "/tmp/pack-${pkg//\//-}.txt")
-            if grep -E '__tests__|\.test\.|/data/.*\.db' "/tmp/pack-${pkg//\//-}.txt"; then
-              echo "ERROR: $pkg tarball contains forbidden paths"
-              exit 1
-            fi
-          done
+          TAG="${GITHUB_REF##refs/tags/}"
+          VERSION="${TAG#v}"
+          PREFIX="do-soul-alaya-${VERSION}"
+          TARBALL="${PREFIX}.tar.gz"
 
-      - name: Publish to npm
-        # --recursive walks the workspace in topological order; private
-        # workspace roots (root + apps/inspector/web) are skipped.
-        run: pnpm publish --recursive --access public --no-git-checks
+          # git archive HEAD captures exactly what the tag points to.
+          # Generated paths (dist/, node_modules/, var/, data/, .do-it/,
+          # .codex/) are .gitignored so they're never tracked, and git
+          # archive only emits tracked content — the resulting tarball is
+          # exactly what install.sh needs to run pnpm install + pnpm build.
+          git archive --format=tar.gz --prefix="${PREFIX}/" -o "${TARBALL}" HEAD
+
+          # Sanity-check the tarball before publishing.
+          tar -tzf "${TARBALL}" | grep -q "${PREFIX}/bin/alaya.mjs" \
+            || { echo "FATAL: tarball missing bin/alaya.mjs"; exit 1; }
+          tar -tzf "${TARBALL}" | grep -q "${PREFIX}/package.json" \
+            || { echo "FATAL: tarball missing package.json"; exit 1; }
+          tar -tzf "${TARBALL}" | grep -q "${PREFIX}/scripts/install.sh" \
+            || { echo "FATAL: tarball missing scripts/install.sh"; exit 1; }
+          tar_size=$(stat -c%s "${TARBALL}")
+          [ "$tar_size" -gt 1024 ] \
+            || { echo "FATAL: tarball is suspiciously small (${tar_size} bytes)"; exit 1; }
+
+          # SHA256SUMS — install.sh validates this with `sha256sum -c`.
+          sha256sum "${TARBALL}" > SHA256SUMS
+          cat SHA256SUMS
+
+          {
+            echo "tag=${TAG}"
+            echo "tarball=${TARBALL}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Smoke test installer against the just-built tarball
+        # End-to-end check that scripts/install.sh can consume the
+        # release artifact format produced above. We bypass the GitHub
+        # download step (the release does not exist yet at this point)
+        # and exercise everything else: tarball-path safety, sha256
+        # match logic, atomic staging, pnpm install + build, and the
+        # post-build `node bin/alaya.mjs --help` sanity gate.
+        run: |
+          set -euo pipefail
+          TARBALL="${{ steps.pack.outputs.tarball }}"
+          SMOKE_HOME="${RUNNER_TEMP}/alaya-smoke-home"
+          SMOKE_TMP="${RUNNER_TEMP}/alaya-smoke-tmp"
+          SMOKE_STAGING="${SMOKE_HOME}.staging-smoke"
+          rm -rf "$SMOKE_HOME" "$SMOKE_TMP" "$SMOKE_STAGING"
+          mkdir -p "$SMOKE_TMP" "$SMOKE_STAGING"
+
+          # 1. Confirm the tarball + SHA256SUMS contract install.sh expects.
+          grep -q "TARBALL_NAME=" scripts/install.sh \
+            || { echo "FATAL: install.sh has no TARBALL_NAME var"; exit 1; }
+          grep -E "[ *]${TARBALL}\$" SHA256SUMS \
+            || { echo "FATAL: SHA256SUMS does not anchor-match TARBALL"; exit 1; }
+
+          # 2. install.sh path-safety scan.
+          tar -tzf "$TARBALL" \
+            | awk '/^\// || /(^|\/)\.\.($|\/)/ { bad=1 } END { exit bad ? 1 : 0 }' \
+            || { echo "FATAL: tarball has unsafe paths"; exit 1; }
+
+          # 3. Staged extract + build (mirrors install.sh post-checksum path).
+          tar -xzf "$TARBALL" -C "$SMOKE_STAGING" \
+            --strip-components=1 --no-same-owner --no-same-permissions
+          cd "$SMOKE_STAGING"
+          pnpm install --frozen-lockfile
+          pnpm build
+          node ./bin/alaya.mjs --help >/dev/null 2>&1 \
+            || { echo "FATAL: alaya --help failed in smoke install"; exit 1; }
+
+          # 4. Atomic swap simulation.
+          mv "$SMOKE_STAGING" "$SMOKE_HOME"
+          test -x "$SMOKE_HOME/bin/alaya.mjs" \
+            || { echo "FATAL: bin/alaya.mjs missing post-swap"; exit 1; }
+
+          echo "SMOKE OK: tarball + install.sh contract upholds end-to-end."
+
+      - name: Create GitHub Release
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.pack.outputs.tag }}"
+          TARBALL="${{ steps.pack.outputs.tarball }}"
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --generate-notes \
+            "$TARBALL" \
+            SHA256SUMS

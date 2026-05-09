@@ -14,6 +14,7 @@ import type {
   GlobalMemoryRecallEntry,
   GlobalMemoryRecallPort
 } from "./global-memory-recall-port.js";
+import type { RecallTimeFilter } from "./recall-service-helpers.js";
 
 export interface GlobalMemoryRecallProjectMappingPort {
   findByWorkspace(workspaceId: string): Promise<readonly Readonly<ProjectMappingAnchor>[]>;
@@ -72,6 +73,11 @@ export async function loadGlobalRecallCandidates(params: {
     entry: { readonly global_object_id: string },
     anchorMap: ReadonlyMap<string, Readonly<ProjectMappingAnchor>>
   ) => GlobalCandidateClassification;
+  readonly timeFilter?: RecallTimeFilter;
+  readonly entryMatchesTimeFilter?: (
+    entry: Readonly<MemoryEntry>,
+    filter: RecallTimeFilter | undefined
+  ) => boolean;
 }): Promise<{
   readonly total_scanned: number;
   readonly candidates: readonly Readonly<GlobalMemoryRecallCandidate>[];
@@ -106,18 +112,25 @@ export async function loadGlobalRecallCandidates(params: {
     createdBy: params.createdBy ?? "system",
     projectMappingPort: params.projectMappingPort
   });
+  const matchesTimeFilter = params.entryMatchesTimeFilter;
   const candidates: GlobalMemoryRecallCandidate[] = [];
   const records = surfacedEntries.map((entry) => {
     const classification = params.classifyGlobalCandidate(entry, anchorMap);
     let candidate: Readonly<GlobalMemoryRecallCandidate> | null = null;
 
     if (classification.include) {
-      candidate = Object.freeze({
-        entry: createPseudoMemoryEntry(entry, params.workspaceId),
-        originPlane: "global" as const,
-        isAdvisory: false
-      });
-      candidates.push(candidate);
+      const pseudoEntry = createPseudoMemoryEntry(entry, params.workspaceId);
+      const passesTimeWindow =
+        matchesTimeFilter === undefined ? true : matchesTimeFilter(pseudoEntry, params.timeFilter);
+
+      if (passesTimeWindow) {
+        candidate = Object.freeze({
+          entry: pseudoEntry,
+          originPlane: "global" as const,
+          isAdvisory: false
+        });
+        candidates.push(candidate);
+      }
     }
 
     return Object.freeze({

@@ -102,6 +102,11 @@ export interface McpMemoryToolHandlerDependencies {
       readonly strategy: "chat" | "analyze" | "build" | "govern";
       readonly runId?: string | null;
       readonly policyOverride?: Readonly<RecallPolicy>;
+      readonly timeFilter?: Readonly<{
+        readonly since?: string | null;
+        readonly until?: string | null;
+        readonly field?: "created_at" | "last_used_at";
+      }>;
     }): Promise<Readonly<{
       readonly candidates: readonly Readonly<RecallCandidate>[];
       readonly total_scanned: number;
@@ -221,8 +226,16 @@ export interface McpMemoryToolHandlerDependencies {
     completeWithEvents(
       taskId: string,
       result: GardenTaskCompletionResult,
-      events: readonly GardenTaskEventInput[]
+      events: readonly GardenTaskEventInput[],
+      claimedBy: string
     ): Promise<void>;
+    beginCompletionAttempt(
+      taskId: string,
+      claimedBy: string,
+      completionClaimedBy: string,
+      claimedAt: string
+    ): boolean;
+    refreshClaim(taskId: string, claimedBy: string, claimedAt: string): boolean;
   };
   readonly now?: () => string;
   readonly generateId?: () => string;
@@ -312,12 +325,21 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       context_refs: []
     });
     const policyOverride = buildRecallPolicy(request, taskSurface.runtime_id, generateId());
+    const timeFilter =
+      request.since !== undefined || request.until !== undefined || request.time_field !== undefined
+        ? {
+            since: request.since ?? null,
+            until: request.until ?? null,
+            field: request.time_field ?? "created_at"
+          }
+        : undefined;
     const recallResult = await deps.recallService.recall({
       taskSurface,
       workspaceId: context.workspaceId,
       strategy: "chat",
       runId: context.runId,
-      policyOverride
+      policyOverride,
+      timeFilter
     });
     let usedTokens = 0;
     let explainabilityPartial = false;
@@ -523,16 +545,6 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       throw new ToolNotFoundError(`Garden task not found: ${request.task_id}`);
     }
 
-    // Codex re-review B1: verify the row is still owned by this caller
-    // BEFORE emitting any signal. Pre-fix, signals were persisted then
-    // completeWithEvents would CAS-fail (status != claimed) and the
-    // host got an error — but the soul.signal.emitted rows were already
-    // on disk, orphaned without a parent task_completed event. The
-    // pre-emit check rejects the request before any side effect runs
-    // when the row is no longer claimed by us. This also closes wave-
-    // end Spec F4 (N2) — only the agent target that claimed the task
-    // can complete it; a sibling host on the same workspace cannot
-    // silently steal another agent's task by completing it.
     if (row.status !== "claimed") {
       throw new ToolValidationError(
         `Garden task ${row.id} is not in claimed state (current: ${row.status}); claim it via garden.claim_task before completing.`
@@ -544,25 +556,12 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       );
     }
 
-    // Codex re-review I1: prefer the run_id stored in the task payload
-    // (POST_TURN_EXTRACT carries the original conversation's run_id);
-    // fall back to the trusted MCP context's runId; never fall back to
-    // task.id, which is a Garden-task identifier, not a conversation
-    // run id. If neither source resolves, refuse to emit — the signal
-    // schema requires a valid run_id and a fabricated task-id-as-run-id
-    // would corrupt any downstream recall scoped by run_id.
     const taskPayloadRunId =
       isUnknownRecord(row.payload) && typeof row.payload.run_id === "string" && row.payload.run_id.length > 0
         ? row.payload.run_id
         : null;
     const resolvedRunId = taskPayloadRunId ?? context.runId;
 
-    // Wave-end M1 (§29): host-supplied candidate_signals carry only
-    // content fields (McpEmitCandidateSignalRequestSchema). The daemon
-    // binds workspace_id / run_id / surface_id / source from the trusted
-    // task row + MCP context — never from host payload — so a host
-    // cannot self-report `source: "user_seed"` or a foreign run_id and
-    // sneak past the §29 default-scope guard.
     const contentOnlySignals = request.result_envelope?.candidate_signals ?? [];
 
     if (contentOnlySignals.length > 0 && resolvedRunId === null) {
@@ -571,14 +570,24 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       );
     }
 
-    // Wave-end M2 (§10) + Codex re-review B1: emit candidate signals
-    // BEFORE writing SOUL_GARDEN_TASK_COMPLETED but AFTER the
-    // claim-ownership guard above. The combination prevents both the
-    // original audit-lies-about-emitted-N partial-failure window AND
-    // the orphan-signals-when-CAS-rejects window. A signal-emission
-    // throw still leaves the task in `claimed` (recoverable via
-    // gcAbandonedClaims or host retry); a CAS-rejected complete now
-    // never reaches signal emission at all.
+    const completionClaimedBy =
+      contentOnlySignals.length === 0
+        ? context.agentTarget
+        : `${context.agentTarget}:complete:${generateId()}`;
+    if (contentOnlySignals.length > 0) {
+      const completionClaimStarted = deps.gardenTaskRepo.beginCompletionAttempt(
+        row.id,
+        context.agentTarget,
+        completionClaimedBy,
+        now()
+      );
+      if (!completionClaimStarted) {
+        throw new ToolValidationError(
+          `Garden task ${row.id} claim changed before candidate signal emission; retry after claiming the task again.`
+        );
+      }
+    }
+
     const emittedSignalIds: string[] = [];
     for (const signalContent of contentOnlySignals) {
       const internalSignal = CandidateMemorySignalSchema.parse({
@@ -600,11 +609,6 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       entity_type: "garden_task",
       entity_id: row.id,
       workspace_id: context.workspaceId,
-      // Reviewer-final N1: prefer the run_id resolved from the task
-      // payload (POST_TURN_EXTRACT carries the original conversation's
-      // run_id) so the audit row's run_id matches the run_id stamped
-      // on each emitted candidate signal. Falls back to MCP context's
-      // runId when the task payload doesn't carry one.
       run_id: resolvedRunId,
       caused_by: context.agentTarget,
       payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
@@ -627,7 +631,8 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
         completed_at: completedAt,
         ...(request.last_error_text === undefined ? {} : { last_error_text: request.last_error_text })
       },
-      [event]
+      [event],
+      completionClaimedBy
     );
 
     return GardenCompleteTaskResponseSchema.parse({

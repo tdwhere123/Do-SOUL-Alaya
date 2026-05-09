@@ -118,7 +118,7 @@ export default function StatusPage() {
   const indicator = pickIndicator(ready, degraded !== null);
 
   return (
-    <div className="max-w-4xl mx-auto w-full p-8 font-mono">
+    <div className="h-full w-full overflow-y-auto"><div className="max-w-4xl mx-auto w-full p-8 font-mono">
       {degraded ? (
         <div
           role="alert"
@@ -233,6 +233,7 @@ export default function StatusPage() {
           </div>
         </>
       ) : null}
+    </div>
     </div>
   );
 }

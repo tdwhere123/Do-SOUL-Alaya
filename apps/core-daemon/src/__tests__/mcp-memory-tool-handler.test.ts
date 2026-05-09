@@ -59,6 +59,84 @@ describe("mcp memory tool handler", () => {
     });
   });
 
+  it("omits timeFilter when the request has no time bounds", async () => {
+    const deps = createDeps();
+    const handler = createMcpMemoryToolHandler(deps);
+
+    await handler.call({
+      toolName: "soul.recall",
+      arguments: {
+        query: "deployment rules",
+        scope_class: null,
+        dimension: null,
+        domain_tags: null,
+        max_results: 3
+      },
+      context
+    });
+
+    const callArg = (deps.recallService.recall as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+    expect(callArg).toBeDefined();
+    expect(callArg!.timeFilter).toBeUndefined();
+  });
+
+  it("threads since/until/time_field from request into recallService.recall as timeFilter", async () => {
+    const deps = createDeps();
+    const handler = createMcpMemoryToolHandler(deps);
+
+    await handler.call({
+      toolName: "soul.recall",
+      arguments: {
+        query: "what did I say on May 20",
+        scope_class: null,
+        dimension: null,
+        domain_tags: null,
+        max_results: 3,
+        since: "2026-05-20T00:00:00.000Z",
+        until: "2026-05-20T23:59:59.000Z",
+        time_field: "created_at"
+      },
+      context
+    });
+
+    expect(deps.recallService.recall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        timeFilter: {
+          since: "2026-05-20T00:00:00.000Z",
+          until: "2026-05-20T23:59:59.000Z",
+          field: "created_at"
+        }
+      })
+    );
+  });
+
+  it("defaults time_field to created_at when only since is provided", async () => {
+    const deps = createDeps();
+    const handler = createMcpMemoryToolHandler(deps);
+
+    await handler.call({
+      toolName: "soul.recall",
+      arguments: {
+        query: "recent context",
+        scope_class: null,
+        dimension: null,
+        domain_tags: null,
+        max_results: 3,
+        since: "2026-05-01T00:00:00.000Z"
+      },
+      context
+    });
+
+    expect(deps.recallService.recall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        timeFilter: expect.objectContaining({
+          since: "2026-05-01T00:00:00.000Z",
+          field: "created_at"
+        })
+      })
+    );
+  });
+
   it("prefers cascade degradation over explainability partial degradation", async () => {
     const deps = createDeps();
     deps.recallService.recall = vi.fn(async () => ({

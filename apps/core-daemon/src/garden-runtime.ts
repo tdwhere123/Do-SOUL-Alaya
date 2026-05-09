@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   CandidateMemorySignalSchema,
+  GARDEN_ROLE_TIER_MAP,
   GardenEventType,
   GardenRole,
   type GardenBacklogThresholds,
@@ -32,6 +33,7 @@ import type {
 } from "@do-soul/alaya-core";
 import {
   createGardenBackgroundDataPorts,
+  type GardenTaskReclaimInput,
   type PathPlasticityWatermarkRepo,
   type SqliteEventLogRepo,
   SqliteGardenTaskRepo,
@@ -77,6 +79,14 @@ const PATH_GRAPH_HISTORY_REVIEW_LIMIT = 2;
 const PATH_GRAPH_SNAPSHOT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const DEFAULT_GARDEN_STATUS_WORKSPACE_ID = "default";
 const IN_PROCESS_POST_TURN_CLAIMANT = "in-process";
+// host_worker mode: an attached CLI agent (Codex / Claude Code) claims via
+// MCP and runs sub-agent extraction. If the agent crashes or detaches
+// before garden.complete_task, the row stays in `claimed` forever. This
+// TTL is the upper bound on how long we wait before reclaiming the row
+// back to `pending` so another agent can take it. 10 min balances "long
+// enough for a real LLM round-trip" against "short enough that operator
+// reconnect doesn't have to wait an hour".
+const GARDEN_CLAIM_STALE_AFTER_MS = 10 * 60 * 1000;
 const POST_TURN_EXTRACT_EXCERPT_MAX_CHARS = 800;
 const JANITOR_RUNTIME_TASK_KINDS = [
   GardenTaskKind.TTL_CLEANUP,
@@ -680,19 +690,17 @@ export function createGardenRuntime(input: {
 
       const candidateSignals = await compilePostTurnExtractTask(provider, payload);
 
-      // Spec-lens F-fin-1 (§10): emit candidate signals BEFORE writing
-      // SOUL_GARDEN_TASK_COMPLETED. The MCP-side garden.complete_task
-      // handler was hardened by M2/B1+I1 to honour audit-precedes-
-      // broadcast, but this symmetric in-process path used the original
-      // "commit task-completed first, then loop receiveSignal" order.
-      // If receiveSignal threw mid-loop the task_completed event would
-      // already claim N signals were emitted while only K < N actually
-      // were. Now signals are received first; a mid-loop throw flows
-      // into the failure branch which writes a `success: false` task
-      // event — the audit row never claims emitted-N when reality is
-      // emitted-K.
       const emittedSignalIds: string[] = [];
       for (const signal of candidateSignals) {
+        if (
+          !gardenTaskRepo.refreshClaim(
+            row.id,
+            IN_PROCESS_POST_TURN_CLAIMANT,
+            new Date().toISOString()
+          )
+        ) {
+          throw new Error(`Garden task ${row.id} claim changed before candidate signal emission.`);
+        }
         const received = await input.signalReceiver.receiveSignal(signal);
         emittedSignalIds.push(received.signal.signal_id);
       }
@@ -724,7 +732,8 @@ export function createGardenRuntime(input: {
               occurred_at: completedAt
             })
           }
-        ]
+        ],
+        IN_PROCESS_POST_TURN_CLAIMANT
       );
     } catch (error) {
       if (!dispatched) {
@@ -760,7 +769,8 @@ export function createGardenRuntime(input: {
               occurred_at: completedAt
             })
           }
-        ]
+        ],
+        IN_PROCESS_POST_TURN_CLAIMANT
       );
       throw error;
     }
@@ -809,6 +819,47 @@ export function createGardenRuntime(input: {
     lastBackgroundPassAt = new Date().toISOString();
   };
 
+  const reclaimAbandonedGardenClaims = async (repo: SqliteGardenTaskRepo): Promise<void> => {
+    const occurredAt = new Date().toISOString();
+    const abandonedClaims = repo.peekAbandonedClaims(
+      occurredAt,
+      GARDEN_CLAIM_STALE_AFTER_MS
+    );
+    const reclaims: GardenTaskReclaimInput[] = [];
+    for (const row of abandonedClaims) {
+      if (row.claimed_by === null || row.claimed_at === null) {
+        continue;
+      }
+      const runId = extractGardenTaskRunId(row.payload);
+      reclaims.push({
+        task_id: row.id,
+        claimed_by: row.claimed_by,
+        claimed_at: row.claimed_at,
+        event: {
+          event_type: GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED,
+          entity_type: "garden_task",
+          entity_id: row.id,
+          workspace_id: row.workspace_id,
+          run_id: runId,
+          caused_by: "garden-runtime",
+          payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED, {
+            task_id: row.id,
+            task_kind: row.kind,
+            role: row.role,
+            tier: GARDEN_ROLE_TIER_MAP[row.role],
+            workspace_id: row.workspace_id,
+            run_id: runId,
+            previous_claimed_by: row.claimed_by,
+            claimed_at: row.claimed_at,
+            stale_after_ms: GARDEN_CLAIM_STALE_AFTER_MS,
+            occurred_at: occurredAt
+          })
+        }
+      });
+    }
+    await repo.gcAbandonedClaims(reclaims);
+  };
+
   const backgroundServices = [
     {
       name: "Janitor",
@@ -851,6 +902,9 @@ export function createGardenRuntime(input: {
       name: "GardenScheduler",
       intervalMs: 60_000,
       task: async () => {
+        if (gardenTaskRepo !== undefined) {
+          await reclaimAbandonedGardenClaims(gardenTaskRepo);
+        }
         await processPostTurnExtractTask();
         for (const [role, handler, runtimeTaskKinds] of [
           [GardenRole.JANITOR, janitor, JANITOR_RUNTIME_TASK_KINDS],
@@ -1023,6 +1077,13 @@ function parseStringField(record: Readonly<Record<string, unknown>>, field: stri
     throw new Error("Invalid post-turn extract task payload.");
   }
   return value;
+}
+
+function extractGardenTaskRunId(payload: unknown): string | null {
+  if (!isRecord(payload) || typeof payload.run_id !== "string" || payload.run_id.trim().length === 0) {
+    return null;
+  }
+  return payload.run_id;
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {

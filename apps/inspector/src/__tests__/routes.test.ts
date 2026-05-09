@@ -24,7 +24,12 @@ describe("inspector routes", () => {
       // A1 (HITL daemon backbone) — Inspector loopback for the new
       // pending-proposals listing tool plus accept/reject.
       "GET /api/proposals/:workspaceId/pending",
-      "POST /api/proposals/:workspaceId/:proposalId/review"
+      "POST /api/proposals/:workspaceId/:proposalId/review",
+      "POST /api/proposals/:workspaceId/memory/:memoryId/keep",
+      "POST /api/proposals/:workspaceId/memory/:memoryId/rewrite",
+      "POST /api/proposals/:workspaceId/memory/:memoryId/downgrade",
+      "POST /api/proposals/:workspaceId/memory/:memoryId/retire",
+      "POST /api/soul/search/:workspaceId"
     ]);
   });
 
@@ -288,6 +293,14 @@ describe("inspector routes", () => {
       }),
       headers: { "content-type": "application/json" }
     });
+    await app.request("/api/proposals/ws1/memory/mem-1/rewrite?token=token", {
+      method: "POST",
+      body: JSON.stringify({ new_content: "rewritten memory" }),
+      headers: { "content-type": "application/json" }
+    });
+    await app.request("/api/proposals/ws1/memory/mem-1/retire?token=token", {
+      method: "POST"
+    });
 
     expect(calls).toEqual([
       {
@@ -301,6 +314,20 @@ describe("inspector routes", () => {
         url: "http://daemon.local/workspaces/ws1/proposals/prop-1/review",
         method: "POST",
         body: "{\"verdict\":\"accept\",\"reason\":\"looks right\",\"reviewer_identity\":\"user:local-reviewer\",\"reviewer_token\":\"review-token\"}",
+        requestToken: "daemon-request-token",
+        desktop: "1"
+      },
+      {
+        url: "http://daemon.local/workspaces/ws1/soul/memory/mem-1/proposals/rewrite",
+        method: "POST",
+        body: "{\"new_content\":\"rewritten memory\"}",
+        requestToken: "daemon-request-token",
+        desktop: "1"
+      },
+      {
+        url: "http://daemon.local/workspaces/ws1/soul/memory/mem-1/proposals/retire",
+        method: "POST",
+        body: null,
         requestToken: "daemon-request-token",
         desktop: "1"
       }
