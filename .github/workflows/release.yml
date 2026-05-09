@@ -53,12 +53,18 @@ jobs:
           # exactly what install.sh needs to run pnpm install + pnpm build.
           git archive --format=tar.gz --prefix="${PREFIX}/" -o "${TARBALL}" HEAD
 
-          # Sanity-check the tarball before publishing.
-          tar -tzf "${TARBALL}" | grep -q "${PREFIX}/bin/alaya.mjs" \
+          # Sanity-check the tarball before publishing. We cache the
+          # tar listing to a file because `tar -tzf | grep -q ...`
+          # combined with `set -o pipefail` reports the pipeline as
+          # failed: grep -q exits early on first match, tar gets
+          # SIGPIPE, pipefail surfaces tar's 141 exit and the `||`
+          # block fires even when the file IS present in the tarball.
+          tar -tzf "${TARBALL}" > tarball-listing.txt
+          grep -qF "${PREFIX}/bin/alaya.mjs" tarball-listing.txt \
             || { echo "FATAL: tarball missing bin/alaya.mjs"; exit 1; }
-          tar -tzf "${TARBALL}" | grep -q "${PREFIX}/package.json" \
+          grep -qF "${PREFIX}/package.json" tarball-listing.txt \
             || { echo "FATAL: tarball missing package.json"; exit 1; }
-          tar -tzf "${TARBALL}" | grep -q "${PREFIX}/scripts/install.sh" \
+          grep -qF "${PREFIX}/scripts/install.sh" tarball-listing.txt \
             || { echo "FATAL: tarball missing scripts/install.sh"; exit 1; }
           tar_size=$(stat -c%s "${TARBALL}")
           [ "$tar_size" -gt 1024 ] \
