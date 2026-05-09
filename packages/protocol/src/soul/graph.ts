@@ -17,6 +17,12 @@ import {
 const soulGraphNodeKindValues = ["signal", "memory", "scope", "projection"] as const;
 const soulGraphEdgeKindValues = ["references", "belongs_to", "derived_from"] as const;
 const soulGraphOriginPlaneValues = ["project", "global"] as const;
+const soulGraphOriginKindValues = [
+  "user_memory",
+  "engineering_chunk",
+  "proposal_pending",
+  "system"
+] as const;
 
 export const MIN_SOUL_GRAPH_DEPTH = 1;
 export const DEFAULT_SOUL_GRAPH_DEPTH = 2;
@@ -27,6 +33,7 @@ export const MAX_SOUL_GRAPH_LIMIT = 2000;
 export const SoulGraphNodeKindSchema = z.enum(soulGraphNodeKindValues);
 export const SoulGraphEdgeKindSchema = z.enum(soulGraphEdgeKindValues);
 export const SoulGraphOriginPlaneSchema = z.enum(soulGraphOriginPlaneValues);
+export const SoulGraphOriginKindSchema = z.enum(soulGraphOriginKindValues);
 
 export const SoulGraphNodeSchema = z
   .object({
@@ -37,7 +44,14 @@ export const SoulGraphNodeSchema = z
     scope_id: NonEmptyStringSchema.optional(),
     workspace_id: NonEmptyStringSchema.optional(),
     created_at: IsoDatetimeStringSchema.optional(),
-    origin_plane: SoulGraphOriginPlaneSchema.optional()
+    origin_plane: SoulGraphOriginPlaneSchema.optional(),
+    origin_kind: SoulGraphOriginKindSchema.optional(),
+    evidence_refs: z.array(NonEmptyStringSchema).optional(),
+    rationale: NonEmptyStringSchema.optional(),
+    confidence: z.number().min(0).max(1).optional(),
+    last_used_at: IsoDatetimeStringSchema.optional(),
+    last_hit_at: IsoDatetimeStringSchema.optional(),
+    influence_count: NonNegativeIntSchema.optional()
   })
   .strict()
   .readonly();
@@ -49,6 +63,9 @@ export const SoulGraphEdgeSchema = z
     source_id: NonEmptyStringSchema,
     target_id: NonEmptyStringSchema,
     weight: z.number().finite().nonnegative().optional(),
+    strength_normalized: z.number().min(0).max(1).optional(),
+    stability_class: StabilityClassSchema.optional(),
+    last_reinforced_at: IsoDatetimeStringSchema.optional(),
     created_at: IsoDatetimeStringSchema.optional()
   })
   .strict()
@@ -194,6 +211,7 @@ function parseSoulGraphBoundedInt(
 export type SoulGraphNodeKind = z.infer<typeof SoulGraphNodeKindSchema>;
 export type SoulGraphEdgeKind = z.infer<typeof SoulGraphEdgeKindSchema>;
 export type SoulGraphOriginPlane = z.infer<typeof SoulGraphOriginPlaneSchema>;
+export type SoulGraphOriginKind = z.infer<typeof SoulGraphOriginKindSchema>;
 export type SoulGraphNode = z.infer<typeof SoulGraphNodeSchema>;
 export type SoulGraphEdge = z.infer<typeof SoulGraphEdgeSchema>;
 export type SoulGraph = z.infer<typeof SoulGraphSchema>;

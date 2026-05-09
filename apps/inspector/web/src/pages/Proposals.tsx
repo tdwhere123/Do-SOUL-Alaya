@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { apiFetch, getWorkspaceId, type ApiError } from "../api";
 import { useToasts } from "../components/Toast";
 
@@ -39,7 +40,9 @@ export default function ProposalsPage() {
   const [reviewer, setReviewer] = useState<string>("");
   const [reasonByProposal, setReasonByProposal] = useState<Record<string, string>>({});
   const [busyProposalId, setBusyProposalId] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
   const { showToast } = useToasts();
+  const highlightedProposalId = searchParams.get("highlight");
 
   const refresh = useCallback(async () => {
     const workspaceId = getWorkspaceId();
@@ -141,7 +144,11 @@ export default function ProposalsPage() {
         {proposals.map((proposal) => (
           <li
             key={proposal.proposal_id}
-            className="border border-[#D4CDB8] rounded p-4 bg-[#FDF6E3]"
+            className={
+              proposal.proposal_id === highlightedProposalId
+                ? "border-2 border-[#B58900] rounded p-4 bg-[#FDF6E3]"
+                : "border border-[#D4CDB8] rounded p-4 bg-[#FDF6E3]"
+            }
           >
             <div className="font-mono text-xs text-[#93A1A1] mb-2">
               {proposal.proposal_id}

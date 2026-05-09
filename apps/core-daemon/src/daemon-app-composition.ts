@@ -164,6 +164,7 @@ export function createCoreDaemonApp(input: CreateCoreDaemonAppInput): ReturnType
       },
       proposals: {
         workspaceService: input.workspaceService,
+        memoryService: input.memoryService,
         proposalService: input.proposalService,
         mcpMemoryToolHandler: input.mcpMemoryToolHandler
       },

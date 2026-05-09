@@ -1,4 +1,4 @@
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { proxyDaemonJson, type InspectorProxyOptions } from "./shared.js";
 
 // A1 (HITL daemon backbone) — Inspector tooling-loopback for the new
@@ -41,6 +41,45 @@ export function registerInspectorProposalRoutes(app: Hono, options: InspectorPro
       // Inspector / CLI report identical error.code + error.message.
       forwardStructuredError: true
     });
+  });
+
+  app.post("/api/proposals/:workspaceId/memory/:memoryId/keep", async (context) =>
+    await proxyMemoryAction(context, options, "keep")
+  );
+  app.post("/api/proposals/:workspaceId/memory/:memoryId/rewrite", async (context) =>
+    await proxyMemoryAction(context, options, "rewrite")
+  );
+  app.post("/api/proposals/:workspaceId/memory/:memoryId/downgrade", async (context) =>
+    await proxyMemoryAction(context, options, "downgrade")
+  );
+  app.post("/api/proposals/:workspaceId/memory/:memoryId/retire", async (context) =>
+    await proxyMemoryAction(context, options, "retire")
+  );
+}
+
+async function proxyMemoryAction(
+  context: Context,
+  options: InspectorProxyOptions,
+  action: "keep" | "rewrite" | "downgrade" | "retire"
+): Promise<Response> {
+  const workspaceId = context.req.param("workspaceId");
+  const memoryId = context.req.param("memoryId");
+  if (workspaceId === undefined || memoryId === undefined) {
+    return context.json({ error: "invalid_request" }, 400);
+  }
+  let body: unknown = undefined;
+  if (action === "rewrite") {
+    try {
+      body = await context.req.json();
+    } catch {
+      return context.json({ error: "invalid_request" }, 400);
+    }
+  }
+  return await proxyDaemonJson(context, options, {
+    method: "POST",
+    path: `/workspaces/${encodeURIComponent(workspaceId)}/soul/memory/${encodeURIComponent(memoryId)}/proposals/${action}`,
+    body,
+    forwardStructuredError: true
   });
 }
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import GraphPage from "./Graph";
 import { ToastProvider } from "../components/Toast";
 import { setInspectorToken, setWorkspaceId } from "../api";
@@ -49,9 +50,11 @@ function createLargeGraph() {
 
 function renderGraph() {
   return render(
-    <ToastProvider>
-      <GraphPage />
-    </ToastProvider>
+    <MemoryRouter>
+      <ToastProvider>
+        <GraphPage />
+      </ToastProvider>
+    </MemoryRouter>
   );
 }
 

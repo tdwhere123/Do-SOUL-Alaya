@@ -5,6 +5,7 @@ import {
   useRef,
   useState
 } from "react";
+import { useNavigate } from "react-router-dom";
 import { Search, X } from "lucide-react";
 import { drag, type D3DragEvent } from "d3-drag";
 import {
@@ -27,6 +28,14 @@ import type { SoulGraph } from "@do-soul/alaya-protocol";
 interface SoulGraphEnvelope {
   readonly success: boolean;
   readonly data: SoulGraph;
+}
+
+interface ProposalCreateEnvelope {
+  readonly success: boolean;
+  readonly data: {
+    readonly proposal_id: string;
+    readonly status: "created" | "rejected";
+  };
 }
 
 interface GraphData {
@@ -54,6 +63,7 @@ export default function GraphPage() {
   const [matchCursor, setMatchCursor] = useState(0);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const { showToast } = useToasts();
+  const navigate = useNavigate();
 
   const workspaceId = getWorkspaceId();
 
@@ -73,7 +83,11 @@ export default function GraphPage() {
           id: e.id,
           kind: e.kind,
           source: e.source_id,
-          target: e.target_id
+          target: e.target_id,
+          weight: e.weight,
+          strength_normalized: e.strength_normalized,
+          stability_class: e.stability_class,
+          last_reinforced_at: e.last_reinforced_at
         }));
         nodes.forEach((n) => {
           n.degree = links.filter(
@@ -486,6 +500,47 @@ export default function GraphPage() {
     [showToast]
   );
 
+  const createMemoryProposal = useCallback(
+    async (
+      action: "keep" | "rewrite" | "downgrade" | "retire",
+      nodeId: string,
+      newContent?: string
+    ) => {
+      if (workspaceId === null) {
+        showToast({ type: "error", message: "No workspace selected." });
+        return;
+      }
+      try {
+        const envelope = await apiFetch<ProposalCreateEnvelope>(
+          `/proposals/${workspaceId}/memory/${nodeId}/${action}`,
+          {
+            method: "POST",
+            body: action === "rewrite" ? { new_content: newContent ?? "" } : undefined
+          }
+        );
+        const proposalId = envelope.data.proposal_id;
+        showToast({
+          type: "success",
+          message: "Proposal created. Review at Pending Proposals.",
+          action: {
+            label: "Review",
+            onClick: () => navigate(`/proposals?highlight=${encodeURIComponent(proposalId)}`)
+          }
+        });
+        navigate(`/proposals?highlight=${encodeURIComponent(proposalId)}`);
+      } catch (err) {
+        if ((err as ApiError).status === 401) {
+          return;
+        }
+        showToast({
+          type: "error",
+          message: err instanceof Error ? err.message : "proposal creation failed"
+        });
+      }
+    },
+    [navigate, showToast, workspaceId]
+  );
+
   return (
     <div
       ref={viewportRef}
@@ -573,6 +628,7 @@ export default function GraphPage() {
         onClose={() => setSelectedNode(null)}
         onFocusSubgraph={(id) => setSearchTerm(id)}
         onCopyCli={copyToClipboard}
+        onCreateProposal={createMemoryProposal}
       />
     </div>
   );

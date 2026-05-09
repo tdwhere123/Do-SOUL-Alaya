@@ -386,6 +386,8 @@ export class SqliteProposalRepo implements ProposalRepo {
         domain_tags = COALESCE(?, domain_tags),
         evidence_refs = COALESCE(?, evidence_refs),
         storage_tier = COALESCE(?, storage_tier),
+        confidence = COALESCE(?, confidence),
+        retention_state = COALESCE(?, retention_state),
         updated_at = ?
       WHERE object_id = ?
     `);
@@ -973,6 +975,8 @@ export class SqliteProposalRepo implements ProposalRepo {
           parsedFields.domain_tags === undefined ? null : JSON.stringify(parsedFields.domain_tags),
           parsedFields.evidence_refs === undefined ? null : JSON.stringify(parsedFields.evidence_refs),
           parsedFields.storage_tier ?? null,
+          parsedFields.confidence ?? null,
+          parsedFields.retention_state ?? null,
           parsedFields.updated_at,
           parsedMemoryUpdate.target_object_id
         );
@@ -1182,7 +1186,9 @@ function proposedChangesMatch(
     stored.content === supplied.content &&
     stringArraysMatch(stored.domain_tags, supplied.domain_tags) &&
     stringArraysMatch(stored.evidence_refs, supplied.evidence_refs) &&
-    stored.storage_tier === supplied.storage_tier
+    stored.storage_tier === supplied.storage_tier &&
+    stored.confidence === supplied.confidence &&
+    stored.retention_state === supplied.retention_state
   );
 }
 
@@ -1211,6 +1217,12 @@ function toUpdatedFieldNames(fields: MemoryEntryMutableFields): string[] {
   }
   if (fields.storage_tier !== undefined) {
     updatedFields.push("storage_tier");
+  }
+  if (fields.confidence !== undefined) {
+    updatedFields.push("confidence");
+  }
+  if (fields.retention_state !== undefined) {
+    updatedFields.push("retention_state");
   }
 
   return updatedFields;

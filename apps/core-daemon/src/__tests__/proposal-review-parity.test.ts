@@ -55,6 +55,7 @@ describe("proposal review inspector cli parity", () => {
       routes: {
         proposals: {
           workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws1" })) } as any,
+          memoryService: { findByIdScoped: vi.fn(async () => null) } as any,
           proposalService: {
             findByWorkspaceId: vi.fn(async () => []),
             findPending: vi.fn(async () => [])
@@ -178,6 +179,7 @@ async function runReviewParityScenario(
     routes: {
       proposals: {
         workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws1" })) } as any,
+        memoryService: { findByIdScoped: vi.fn(async () => null) } as any,
         proposalService: {
           findByWorkspaceId: vi.fn(async () => []),
           findPending: vi.fn(async () => [])

@@ -114,7 +114,9 @@ const MemoryEntryMutableFieldsBaseSchema = z.object({
     .max(BOUNDED_EVIDENCE_ARRAY_MAX)
     .readonly()
     .optional(),
-  storage_tier: StorageTierSchema.optional()
+  storage_tier: StorageTierSchema.optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  retention_state: RetentionStateSchema.optional()
 });
 
 export const MemoryEntryMutableFieldsSchema = MemoryEntryMutableFieldsBaseSchema.readonly();

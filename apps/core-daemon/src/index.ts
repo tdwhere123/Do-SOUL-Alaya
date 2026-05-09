@@ -353,7 +353,10 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   });
   const soulGraphService = createSoulGraphService({
     memoryEntryRepo,
-    memoryGraphEdgeRepo
+    memoryGraphEdgeRepo,
+    pathRelationRepo,
+    proposalRepo,
+    eventLogRepo
   });
   const synthesisService = new SynthesisService({
     synthesisCapsuleRepo,

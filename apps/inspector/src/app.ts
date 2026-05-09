@@ -25,7 +25,11 @@ export const INSPECTOR_ROUTE_SURFACE = Object.freeze([
   // A1 (HITL daemon backbone) — Inspector loopback for the new
   // pending-proposals listing tool plus accept/reject.
   "GET /api/proposals/:workspaceId/pending",
-  "POST /api/proposals/:workspaceId/:proposalId/review"
+  "POST /api/proposals/:workspaceId/:proposalId/review",
+  "POST /api/proposals/:workspaceId/memory/:memoryId/keep",
+  "POST /api/proposals/:workspaceId/memory/:memoryId/rewrite",
+  "POST /api/proposals/:workspaceId/memory/:memoryId/downgrade",
+  "POST /api/proposals/:workspaceId/memory/:memoryId/retire"
 ] as const);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

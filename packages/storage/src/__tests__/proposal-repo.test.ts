@@ -404,6 +404,63 @@ describe("SqliteProposalRepo", () => {
     });
   });
 
+  it("accepts Inspector trust and retire proposals only through audited apply", async () => {
+    const { repo, database } = createRepo();
+    const memoryRepo = new SqliteMemoryEntryRepo(database);
+    const proposal = createProposal({
+      proposal_id: "44444444-4444-4444-8444-444444444444",
+      runtime_id: "44444444-4444-4444-8444-444444444444"
+    });
+    await memoryRepo.create(createMemoryEntry());
+    await repo.create({
+      proposal,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_kind: "memory_entry",
+      proposed_change_summary: "Retire stale memory",
+      proposed_changes: {
+        confidence: 0.4,
+        retention_state: "tombstoned",
+        storage_tier: "cold"
+      }
+    });
+
+    await expect(memoryRepo.findById(proposal.derived_from ?? "")).resolves.toMatchObject({
+      confidence: 1,
+      retention_state: "working",
+      storage_tier: "hot"
+    });
+
+    const result = await repo.acceptPendingMemoryUpdateWithEvents(
+      proposal.proposal_id,
+      "2026-03-21T03:00:00.000Z",
+      createReviewEvents(proposal),
+      {
+        target_object_id: proposal.derived_from ?? "",
+        workspace_id: "workspace-1",
+        proposed_changes: {
+          confidence: 0.4,
+          retention_state: "tombstoned",
+          storage_tier: "cold"
+        },
+        updated_at: "2026-03-21T03:00:00.000Z",
+        caused_by: `proposal_accept:${proposal.proposal_id}`
+      },
+      { reviewerIdentity: "user:alice" }
+    );
+
+    expect(result.memory).toMatchObject({
+      confidence: 0.4,
+      retention_state: "tombstoned",
+      storage_tier: "cold"
+    });
+    expect(result.events.at(-1)?.event_type).toBe(MemoryGovernanceEventType.SOUL_MEMORY_UPDATED);
+    expect(result.events.at(-1)?.payload_json).toMatchObject({
+      updated_fields: ["storage_tier", "confidence", "retention_state"]
+    });
+    expect(countMemoryUpdatedEvents(database, proposal.derived_from ?? "")).toBe(1);
+  });
+
   it("rejects accepting one proposal while applying a different memory target", async () => {
     const { repo, database } = createRepo();
     const memoryRepo = new SqliteMemoryEntryRepo(database);

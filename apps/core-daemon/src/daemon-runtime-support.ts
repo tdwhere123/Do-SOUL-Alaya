@@ -3,14 +3,19 @@ import { readFile } from "node:fs/promises";
 import {
   AcceptedBy,
   DEFAULT_SOUL_CONFIG,
+  DYNAMICS_CONSTANTS,
+  MemoryGovernanceEventType,
   ProjectMappingState,
+  type PathAnchorRef,
+  type PathRelation,
   type AgentRuntimePort,
   type EngineBinding,
   type EngineBindingSummary,
   type EventLogEntry,
   type GlobalMemoryEntry,
   type GardenBacklogThresholds,
-  type SoulGraph
+  type SoulGraph,
+  type SoulGraphOriginKind
 } from "@do-soul/alaya-protocol";
 import {
   ArbitrationService,
@@ -33,10 +38,12 @@ import {
   SqliteKarmaEventRepo,
   SqliteMemoryEntryRepo,
   SqliteMemoryGraphEdgeRepo,
+  type ProposalRepo,
   SqliteToolExecutionRecordRepo,
   type GlobalMemoryRecallCacheRepo,
   type GlobalMemoryRepo,
   type MemoryEmbeddingRepo,
+  type PathRelationRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { createWarnLogger } from "./daemon-runtime-helpers.js";
@@ -240,6 +247,10 @@ export function createGlobalMemoryRecallCachePort(params: {
 export function createSoulGraphService(input: {
   readonly memoryEntryRepo: SqliteMemoryEntryRepo;
   readonly memoryGraphEdgeRepo: SqliteMemoryGraphEdgeRepo;
+  readonly pathRelationRepo: Pick<PathRelationRepo, "findActive">;
+  readonly proposalRepo: Pick<ProposalRepo, "findPendingSummaries">;
+  readonly eventLogRepo: Pick<SqliteEventLogRepo, "queryByWorkspaceAndType">;
+  readonly now?: () => string;
 }) {
   return {
     buildSoulGraph: async ({
@@ -250,14 +261,29 @@ export function createSoulGraphService(input: {
       readonly depth: number;
       readonly limit: number;
     }): Promise<SoulGraph> => {
-      const memories = await input.memoryEntryRepo.findByWorkspaceId(workspaceId);
-      const edges = await input.memoryGraphEdgeRepo.findByWorkspace(workspaceId);
+      const [memories, edges, pathRelations, pendingProposals, memoryUpdateEvents] = await Promise.all([
+        input.memoryEntryRepo.findByWorkspaceId(workspaceId),
+        input.memoryGraphEdgeRepo.findByWorkspace(workspaceId),
+        input.pathRelationRepo.findActive(workspaceId),
+        input.proposalRepo.findPendingSummaries(workspaceId, {
+          limit,
+          now: input.now?.()
+        }),
+        input.eventLogRepo.queryByWorkspaceAndType(
+          workspaceId,
+          MemoryGovernanceEventType.SOUL_MEMORY_UPDATED
+        )
+      ]);
       const limitedMemories = memories.slice(0, limit);
       const memoryIds = new Set(limitedMemories.map((memory: MemoryEntryRecord) => memory.object_id));
+      const pathRelationEdges = buildPathRelationEdges(pathRelations, memoryIds).slice(0, limit);
       const limitedEdges = edges
         .filter((edge) => memoryIds.has(edge.source_memory_id) && memoryIds.has(edge.target_memory_id))
-        .slice(0, limit);
+        .slice(0, Math.max(0, limit - pathRelationEdges.length));
       const tagProjection = buildDomainTagProjection(limitedMemories);
+      const influenceCounts = buildInfluenceCounts(pathRelations);
+      const proposalProjection = buildPendingProposalProjection(pendingProposals, memoryIds);
+      const userReviewedMemoryIds = buildUserReviewedMemoryIds(memoryUpdateEvents);
 
       return {
         workspace_id: workspaceId,
@@ -265,6 +291,7 @@ export function createSoulGraphService(input: {
           ...limitedMemories.map((memory: MemoryEntryRecord) => {
             const label = deriveMemoryNodeLabel(memory.content);
             const summary = deriveMemoryNodeSummary(memory.content, label);
+            const hasAcceptedProposalApply = userReviewedMemoryIds.has(memory.object_id);
             const node: SoulGraph["nodes"][number] = {
               id: memory.object_id,
               kind: "memory",
@@ -272,13 +299,25 @@ export function createSoulGraphService(input: {
               workspace_id: memory.workspace_id,
               created_at: memory.created_at,
               scope_id: memory.scope_class,
-              origin_plane: memory.scope_class === "project" ? "project" : "global"
+              origin_plane: memory.scope_class === "project" ? "project" : "global",
+              origin_kind: classifySoulGraphOriginKind(
+                memory,
+                hasAcceptedProposalApply
+              ),
+              evidence_refs: memory.evidence_refs.length === 0 ? undefined : [...memory.evidence_refs],
+              rationale: deriveMemoryRationale(memory, hasAcceptedProposalApply),
+              confidence: memory.confidence ?? undefined,
+              last_used_at: memory.last_used_at ?? undefined,
+              last_hit_at: memory.last_hit_at ?? undefined,
+              influence_count: influenceCounts.get(memory.object_id) ?? 0
             };
             return summary === undefined ? node : { ...node, summary };
           }),
+          ...proposalProjection.nodes,
           ...tagProjection.nodes
         ],
         edges: [
+          ...pathRelationEdges,
           ...limitedEdges.map((edge) => ({
             id: edge.edge_id,
             kind: "references" as const,
@@ -286,14 +325,220 @@ export function createSoulGraphService(input: {
             target_id: edge.target_memory_id,
             created_at: edge.created_at
           })),
+          ...proposalProjection.edges,
           ...tagProjection.edges
         ],
-        truncated: memories.length > limitedMemories.length || edges.length > limitedEdges.length,
-        node_total: memories.length + countUniqueDomainTags(memories),
-        edge_total: edges.length + countDomainTagEdges(memories)
+        truncated:
+          memories.length > limitedMemories.length ||
+          edges.length > limitedEdges.length ||
+          pathRelations.length > pathRelationEdges.length,
+        node_total: memories.length + pendingProposals.length + countUniqueDomainTags(memories),
+        edge_total:
+          edges.length +
+          countPathRelationEdges(pathRelations, new Set(memories.map((memory) => memory.object_id))) +
+          countPendingProposalEdges(pendingProposals, new Set(memories.map((memory) => memory.object_id))) +
+          countDomainTagEdges(memories)
       };
     }
   };
+}
+
+export function classifySoulGraphOriginKind(
+  memory: Pick<MemoryEntryRecord, "source_kind" | "formation_kind" | "created_by" | "evidence_refs">,
+  hasAcceptedProposalApply = false
+): SoulGraphOriginKind {
+  if (hasAcceptedProposalApply) {
+    return "user_memory";
+  }
+  if (memory.source_kind === "user" || memory.source_kind === "review") {
+    return "user_memory";
+  }
+  if (
+    memory.source_kind === "import" ||
+    memory.formation_kind === "imported" ||
+    memory.created_by.toLowerCase().includes("codex") ||
+    memory.evidence_refs.some((ref) => ref.includes(".codex/memories"))
+  ) {
+    return "engineering_chunk";
+  }
+  return "system";
+}
+
+function buildUserReviewedMemoryIds(events: readonly EventLogEntry[]): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const event of events) {
+    if (
+      event.entity_type === "memory_entry" &&
+      event.caused_by?.startsWith("proposal_accept:") === true
+    ) {
+      ids.add(event.entity_id);
+    }
+  }
+  return ids;
+}
+
+function deriveMemoryRationale(
+  memory: Pick<MemoryEntryRecord, "source_kind" | "formation_kind">,
+  hasAcceptedProposalApply: boolean
+): string {
+  if (hasAcceptedProposalApply) {
+    return "Human-reviewed proposal applied to this memory.";
+  }
+  if (memory.source_kind === "user" || memory.source_kind === "review") {
+    return "Explicit user or reviewer-governed memory.";
+  }
+  if (memory.source_kind === "import" || memory.formation_kind === "imported") {
+    return "Imported engineering context.";
+  }
+  if (memory.source_kind === "seed") {
+    return "System bootstrap seed.";
+  }
+  return "Compiled from governed runtime signals.";
+}
+
+function buildPathRelationEdges(
+  relations: readonly Readonly<PathRelation>[],
+  memoryIds: ReadonlySet<string>
+): readonly SoulGraph["edges"][number][] {
+  return relations.flatMap((relation) => {
+    const sourceId = anchorMemoryId(relation.anchors.source_anchor);
+    const targetId = anchorMemoryId(relation.anchors.target_anchor);
+    if (
+      sourceId === undefined ||
+      targetId === undefined ||
+      !memoryIds.has(sourceId) ||
+      !memoryIds.has(targetId) ||
+      sourceId === targetId
+    ) {
+      return [];
+    }
+    const strength = relation.plasticity_state.strength;
+    return [
+      {
+        id: relation.path_id,
+        kind: "references" as const,
+        source_id: sourceId,
+        target_id: targetId,
+        weight: strength,
+        strength_normalized: normalizePathStrength(strength),
+        stability_class: relation.plasticity_state.stability_class,
+        last_reinforced_at: relation.plasticity_state.last_reinforced_at,
+        created_at: relation.created_at
+      }
+    ];
+  });
+}
+
+function buildInfluenceCounts(
+  relations: readonly Readonly<PathRelation>[]
+): ReadonlyMap<string, number> {
+  const influence = new Map<string, number>();
+  for (const relation of relations) {
+    const anchors = new Set(
+      [relation.anchors.source_anchor, relation.anchors.target_anchor]
+        .map(anchorMemoryId)
+        .filter((id): id is string => id !== undefined)
+    );
+    const increment = 1 + relation.plasticity_state.support_events_count;
+    for (const memoryId of anchors) {
+      influence.set(memoryId, (influence.get(memoryId) ?? 0) + increment);
+    }
+  }
+  return influence;
+}
+
+function buildPendingProposalProjection(
+  proposals: Awaited<ReturnType<ProposalRepo["findPendingSummaries"]>>,
+  memoryIds: ReadonlySet<string>
+): {
+  readonly nodes: readonly SoulGraph["nodes"][number][];
+  readonly edges: readonly SoulGraph["edges"][number][];
+  readonly total_edges: number;
+} {
+  const nodes: SoulGraph["nodes"][number][] = [];
+  const edges: SoulGraph["edges"][number][] = [];
+
+  for (const proposal of proposals) {
+    const proposalNodeId = `proposal:${proposal.proposal_id}`;
+    nodes.push({
+      id: proposalNodeId,
+      kind: "projection",
+      label: `Proposal ${proposal.proposal_id}`,
+      ...(proposal.proposed_change_summary.length === 0
+        ? {}
+        : { summary: proposal.proposed_change_summary }),
+      created_at: proposal.created_at,
+      scope_id: proposal.target_object_id,
+      origin_kind: "proposal_pending"
+    });
+    if (memoryIds.has(proposal.target_object_id)) {
+      edges.push({
+        id: `proposal:${proposal.proposal_id}:target`,
+        kind: "derived_from",
+        source_id: proposalNodeId,
+        target_id: proposal.target_object_id,
+        created_at: proposal.created_at
+      });
+    }
+  }
+
+  return { nodes, edges, total_edges: edges.length };
+}
+
+function anchorMemoryId(anchor: PathAnchorRef): string | undefined {
+  switch (anchor.kind) {
+    case "object":
+    case "object_facet":
+      return anchor.object_id;
+    case "obligation":
+    case "risk_concern":
+    case "time_concern":
+      return anchor.source_object_id;
+    default:
+      return undefined;
+  }
+}
+
+function countPathRelationEdges(
+  relations: readonly Readonly<PathRelation>[],
+  memoryIds: ReadonlySet<string>
+): number {
+  return relations.reduce((count, relation) => {
+    const sourceId = anchorMemoryId(relation.anchors.source_anchor);
+    const targetId = anchorMemoryId(relation.anchors.target_anchor);
+    return sourceId !== undefined &&
+      targetId !== undefined &&
+      sourceId !== targetId &&
+      memoryIds.has(sourceId) &&
+      memoryIds.has(targetId)
+      ? count + 1
+      : count;
+  }, 0);
+}
+
+function countPendingProposalEdges(
+  proposals: Awaited<ReturnType<ProposalRepo["findPendingSummaries"]>>,
+  memoryIds: ReadonlySet<string>
+): number {
+  return proposals.reduce(
+    (count, proposal) => count + (memoryIds.has(proposal.target_object_id) ? 1 : 0),
+    0
+  );
+}
+
+function normalizePathStrength(value: number): number {
+  const floor = DYNAMICS_CONSTANTS.path_plasticity.strength_floor;
+  const ceiling = DYNAMICS_CONSTANTS.path_plasticity.strength_ceiling;
+  if (ceiling <= floor) {
+    return clamp01(value);
+  }
+  return clamp01((value - floor) / (ceiling - floor));
+}
+
+function clamp01(value: number): number {
+  if (value <= 0) return 0;
+  if (value >= 1) return 1;
+  return value;
 }
 
 function buildDomainTagProjection(memories: readonly MemoryEntryRecord[]): {
