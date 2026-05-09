@@ -77,11 +77,21 @@ export default function GraphPage() {
   const viewportRef = useRef<HTMLDivElement>(null);
   const fg2dRef = useRef<ForceGraphMethods2D<GraphNode, GraphLink> | undefined>(undefined);
   const fg3dRef = useRef<ForceGraphMethods3D<GraphNode, GraphLink> | undefined>(undefined);
+  // Cache of simulation-mutated node positions so 2D↔3D toggle preserves
+  // layout. Both ForceGraph variants mutate node.x/y(/z) in place during the
+  // simulation; we snapshot on unmount and re-hydrate on mount so the
+  // operator does not lose the spatial mental model on every mode switch.
+  const nodePositionsRef = useRef<Map<string, { x?: number; y?: number; z?: number }>>(new Map());
   const [data, setData] = useState<GraphData | null>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  // Spotlight uses the debounced value so 5k+ node workspaces don't recompute
+  // matchIds on every keystroke. 120 ms is below the perception threshold for
+  // typing feel and well above one frame on slow hardware. The input itself
+  // stays bound to `searchTerm` so users see their keystrokes instantly.
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [matchCursor, setMatchCursor] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode>("2d");
   // Lazy-init the WebGL probe so the first render already reflects reality —
@@ -203,16 +213,17 @@ export default function GraphPage() {
     apply(fg3dRef.current);
   }, [data, viewMode]);
 
-  // Spotlight: compute match + adjacent sets from search term
+  // Spotlight: compute match + adjacent sets from the *debounced* search term
+  // so 5k+ node workspaces don't re-scan on every keystroke.
   const { matchIds, adjacentIds, matchOrder } = useMemo(() => {
-    if (!data || searchTerm.trim() === "") {
+    if (!data || debouncedSearchTerm.trim() === "") {
       return {
         matchIds: new Set<string>(),
         adjacentIds: new Set<string>(),
         matchOrder: [] as string[]
       };
     }
-    const needle = searchTerm.trim().toLowerCase();
+    const needle = debouncedSearchTerm.trim().toLowerCase();
     const matches = data.nodes.filter((n) => {
       const haystack = `${n.id} ${n.label} ${n.summary ?? ""}`.toLowerCase();
       return haystack.includes(needle);
@@ -231,9 +242,11 @@ export default function GraphPage() {
       adjacentIds: adjacent,
       matchOrder: matches.map((n) => n.id)
     };
-  }, [data, searchTerm]);
+  }, [data, debouncedSearchTerm]);
 
-  const spotlightActive = searchTerm.trim() !== "";
+  // The chip + clear-button still react to the live `searchTerm` so the user
+  // sees their input immediately; only the heavy spotlight scan is debounced.
+  const spotlightActive = searchTerm.trim() !== "" && debouncedSearchTerm.trim() !== "";
   const matchCount = matchOrder.length;
 
   const nodeSpotlightState = useCallback(
@@ -283,6 +296,44 @@ export default function GraphPage() {
   useEffect(() => {
     setMatchCursor(0);
   }, [searchTerm]);
+
+  useEffect(() => {
+    if (searchTerm === debouncedSearchTerm) return;
+    const id = window.setTimeout(() => setDebouncedSearchTerm(searchTerm), 120);
+    return () => window.clearTimeout(id);
+  }, [searchTerm, debouncedSearchTerm]);
+
+  // Snapshot node positions just before the active ForceGraph unmounts on
+  // viewMode change. The effect's cleanup fires when `viewMode` flips, which
+  // is exactly the unmount boundary of the outgoing instance.
+  useEffect(() => {
+    return () => {
+      if (!data) return;
+      for (const n of data.nodes) {
+        const z = (n as { z?: number }).z;
+        if (n.x !== undefined || n.y !== undefined || z !== undefined) {
+          nodePositionsRef.current.set(n.id, { x: n.x, y: n.y, z });
+        }
+      }
+    };
+  }, [viewMode, data]);
+
+  // Re-hydrate cached positions onto the next data shape so the freshly-
+  // mounted ForceGraph instance starts with the previous layout instead of
+  // a random scatter. Mutation in place is safe because react-force-graph
+  // already treats node objects as live simulation state.
+  useEffect(() => {
+    if (!data) return;
+    const cache = nodePositionsRef.current;
+    if (cache.size === 0) return;
+    for (const n of data.nodes) {
+      const cached = cache.get(n.id);
+      if (!cached) continue;
+      if (cached.x !== undefined) n.x = cached.x;
+      if (cached.y !== undefined) n.y = cached.y;
+      if (cached.z !== undefined) (n as { z?: number }).z = cached.z;
+    }
+  }, [data, viewMode]);
 
   const focusedMatchId = matchOrder[matchCursor];
 
