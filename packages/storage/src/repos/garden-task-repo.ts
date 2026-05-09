@@ -97,6 +97,13 @@ export interface GardenTaskCompletionResult {
   readonly last_error_text?: string;
 }
 
+export interface GardenTaskReclaimInput {
+  readonly task_id: string;
+  readonly claimed_by: string;
+  readonly claimed_at: string;
+  readonly event: GardenTaskEventInput;
+}
+
 export interface GardenTaskRepoPort {
   enqueue(input: GardenTaskEnqueueInput): { readonly task_id: string };
   findById(taskId: string): GardenTaskRow | null;
@@ -129,13 +136,22 @@ export interface GardenTaskRepoPort {
     dispatchedEvents: readonly GardenTaskEventInput[],
     workspace_id?: string
   ): Promise<GardenTaskClaimResult>;
+  beginCompletionAttempt(
+    taskId: string,
+    claimedBy: string,
+    completionClaimedBy: string,
+    claimedAt: string
+  ): boolean;
+  refreshClaim(taskId: string, claimedBy: string, claimedAt: string): boolean;
   releaseClaim(taskId: string, claimedBy: string): boolean;
   completeWithEvents(
     taskId: string,
     result: GardenTaskCompletionResult,
-    events: readonly GardenTaskEventInput[]
+    events: readonly GardenTaskEventInput[],
+    claimedBy: string
   ): Promise<void>;
-  gcAbandonedClaims(now: string, staleAfterMs: number): number;
+  peekAbandonedClaims(now: string, staleAfterMs: number): readonly GardenTaskRow[];
+  gcAbandonedClaims(reclaims: readonly GardenTaskReclaimInput[]): Promise<number>;
   countBacklog(workspace_id?: string): readonly GardenTaskBacklogCount[];
 }
 
@@ -166,9 +182,12 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
   private readonly peekPendingStatement;
   private readonly peekPendingByWorkspaceStatement;
   private readonly claimStatement;
+  private readonly beginCompletionAttemptStatement;
+  private readonly refreshClaimStatement;
   private readonly releaseClaimStatement;
   private readonly completeStatement;
-  private readonly gcAbandonedClaimsStatement;
+  private readonly peekAbandonedClaimsStatement;
+  private readonly gcAbandonedClaimStatement;
   private readonly countByRoleStatusStatement;
 
   public constructor(
@@ -279,15 +298,43 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       SET status = 'pending', claimed_by = NULL, claimed_at = NULL
       WHERE id = ? AND status = 'claimed' AND claimed_by = ?
     `);
+    this.beginCompletionAttemptStatement = connection.prepare(`
+      UPDATE garden_tasks
+      SET claimed_by = ?, claimed_at = ?
+      WHERE id = ? AND status = 'claimed' AND claimed_by = ?
+    `);
+    this.refreshClaimStatement = connection.prepare(`
+      UPDATE garden_tasks
+      SET claimed_at = ?
+      WHERE id = ? AND status = 'claimed' AND claimed_by = ?
+    `);
     this.completeStatement = connection.prepare(`
       UPDATE garden_tasks
       SET status = ?, completed_at = ?, last_error_text = ?
-      WHERE id = ? AND status = 'claimed'
+      WHERE id = ? AND status = 'claimed' AND claimed_by = ?
     `);
-    this.gcAbandonedClaimsStatement = connection.prepare(`
+    this.peekAbandonedClaimsStatement = connection.prepare(`
+      SELECT
+        id,
+        workspace_id,
+        role,
+        kind,
+        payload_json,
+        status,
+        claimed_by,
+        claimed_at,
+        created_at,
+        completed_at,
+        attempt_count,
+        last_error_text
+      FROM garden_tasks
+      WHERE status = 'claimed' AND claimed_at IS NOT NULL AND claimed_at < ?
+      ORDER BY claimed_at ASC, id ASC
+    `);
+    this.gcAbandonedClaimStatement = connection.prepare(`
       UPDATE garden_tasks
       SET status = 'pending', claimed_by = NULL, claimed_at = NULL
-      WHERE status = 'claimed' AND claimed_at < ?
+      WHERE id = ? AND status = 'claimed' AND claimed_by = ? AND claimed_at = ?
     `);
     this.countByRoleStatusStatement = connection.prepare(`
       SELECT role, status, COUNT(*) AS count
@@ -466,14 +513,64 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     }
   }
 
+  public refreshClaim(taskId: string, claimedBy: string, claimedAt: string): boolean {
+    const parsedTaskId = parseNonEmptyString(taskId, "garden_task.id");
+    const parsedClaimedBy = parseNonEmptyString(claimedBy, "garden_task.claimed_by");
+    const parsedClaimedAt = parseTimestamp(claimedAt);
+
+    try {
+      const result = this.refreshClaimStatement.run(parsedClaimedAt, parsedTaskId, parsedClaimedBy);
+      return result.changes === 1;
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to refresh Garden task claim ${parsedTaskId}.`,
+        error
+      );
+    }
+  }
+
+  public beginCompletionAttempt(
+    taskId: string,
+    claimedBy: string,
+    completionClaimedBy: string,
+    claimedAt: string
+  ): boolean {
+    const parsedTaskId = parseNonEmptyString(taskId, "garden_task.id");
+    const parsedClaimedBy = parseNonEmptyString(claimedBy, "garden_task.claimed_by");
+    const parsedCompletionClaimedBy = parseNonEmptyString(
+      completionClaimedBy,
+      "garden_task.completion_claimed_by"
+    );
+    const parsedClaimedAt = parseTimestamp(claimedAt);
+
+    try {
+      const result = this.beginCompletionAttemptStatement.run(
+        parsedCompletionClaimedBy,
+        parsedClaimedAt,
+        parsedTaskId,
+        parsedClaimedBy
+      );
+      return result.changes === 1;
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to begin Garden task completion attempt ${parsedTaskId}.`,
+        error
+      );
+    }
+  }
+
   public async completeWithEvents(
     taskId: string,
     result: GardenTaskCompletionResult,
-    events: readonly GardenTaskEventInput[]
+    events: readonly GardenTaskEventInput[],
+    claimedBy: string
   ): Promise<void> {
     const parsedTaskId = parseNonEmptyString(taskId, "garden_task.id");
     const status = parseCompletedStatus(result.status);
     const completedAt = parseTimestamp(result.completed_at);
+    const parsedClaimedBy = parseNonEmptyString(claimedBy, "garden_task.claimed_by");
     const lastErrorText =
       result.last_error_text === undefined
         ? null
@@ -482,13 +579,13 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     try {
       if (events.length === 0) {
         this.connection.transaction(() => {
-          this.completeClaimedTask(parsedTaskId, status, completedAt, lastErrorText);
+          this.completeClaimedTask(parsedTaskId, status, completedAt, lastErrorText, parsedClaimedBy);
         })();
         return;
       }
 
       await this.eventPublisher.appendManyWithMutation(events, () => {
-        this.completeClaimedTask(parsedTaskId, status, completedAt, lastErrorText);
+        this.completeClaimedTask(parsedTaskId, status, completedAt, lastErrorText, parsedClaimedBy);
       });
     } catch (error) {
       if (error instanceof StorageError) {
@@ -503,20 +600,55 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     }
   }
 
-  public gcAbandonedClaims(now: string, staleAfterMs: number): number {
-    const nowMs = new Date(parseTimestamp(now)).getTime();
-    if (!Number.isFinite(nowMs)) {
-      throw new StorageError("VALIDATION_FAILED", "Failed to validate garden_task.gc.now.");
-    }
-    if (!Number.isFinite(staleAfterMs) || staleAfterMs < 0) {
-      throw new StorageError("VALIDATION_FAILED", "Failed to validate garden_task.gc.stale_after_ms.");
-    }
-    const cutoff = new Date(nowMs - staleAfterMs).toISOString();
+  public peekAbandonedClaims(now: string, staleAfterMs: number): readonly GardenTaskRow[] {
+    const cutoff = computeStaleClaimCutoff(now, staleAfterMs);
 
     try {
-      const result = this.gcAbandonedClaimsStatement.run(cutoff);
-      return result.changes;
+      const rows = this.peekAbandonedClaimsStatement.all(cutoff) as GardenTaskDbRow[];
+      return rows.map((row) => parseGardenTaskRow(row));
     } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to read abandoned Garden task claims.", error);
+    }
+  }
+
+  public async gcAbandonedClaims(reclaims: readonly GardenTaskReclaimInput[]): Promise<number> {
+    if (reclaims.length === 0) {
+      return 0;
+    }
+
+    const parsedReclaims = reclaims.map((reclaim) => ({
+      task_id: parseNonEmptyString(reclaim.task_id, "garden_task.id"),
+      claimed_by: parseNonEmptyString(reclaim.claimed_by, "garden_task.claimed_by"),
+      claimed_at: parseTimestamp(reclaim.claimed_at),
+      event: reclaim.event
+    }));
+
+    try {
+      return await this.eventPublisher.appendManyWithMutation(
+        parsedReclaims.map((reclaim) => reclaim.event),
+        () => {
+          let reclaimed = 0;
+          for (const reclaim of parsedReclaims) {
+            const result = this.gcAbandonedClaimStatement.run(
+              reclaim.task_id,
+              reclaim.claimed_by,
+              reclaim.claimed_at
+            );
+            if (result.changes !== 1) {
+              throw new StorageError(
+                "CONFLICT",
+                `Garden task ${reclaim.task_id} claim changed and cannot be reclaimed.`
+              );
+            }
+            reclaimed += 1;
+          }
+          return reclaimed;
+        }
+      );
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
       throw new StorageError("QUERY_FAILED", "Failed to reclaim abandoned Garden tasks.", error);
     }
   }
@@ -541,16 +673,28 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     taskId: string,
     status: "completed" | "failed",
     completedAt: string,
-    lastErrorText: string | null
+    lastErrorText: string | null,
+    claimedBy: string
   ): void {
-    const update = this.completeStatement.run(status, completedAt, lastErrorText, taskId);
+    const update = this.completeStatement.run(status, completedAt, lastErrorText, taskId, claimedBy);
     if (update.changes !== 1) {
       throw new StorageError(
         "CONFLICT",
-        `Garden task ${taskId} is not currently claimed and cannot be completed.`
+        `Garden task ${taskId} is not claimed by the expected worker and cannot be completed.`
       );
     }
   }
+}
+
+function computeStaleClaimCutoff(now: string, staleAfterMs: number): string {
+  const nowMs = new Date(parseTimestamp(now)).getTime();
+  if (!Number.isFinite(nowMs)) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate garden_task.gc.now.");
+  }
+  if (!Number.isFinite(staleAfterMs) || staleAfterMs < 0) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate garden_task.gc.stale_after_ms.");
+  }
+  return new Date(nowMs - staleAfterMs).toISOString();
 }
 
 function parseGardenTaskRow(row: GardenTaskDbRow): GardenTaskRow {

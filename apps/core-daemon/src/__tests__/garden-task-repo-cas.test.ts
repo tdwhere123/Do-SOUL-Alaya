@@ -115,7 +115,8 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
                   success: true,
                   occurredAt: "2026-05-07T00:01:00.000Z"
                 })
-              ]
+              ],
+              `agent-target-${claimerIndex + 1}`
             );
           }
         })
@@ -157,8 +158,8 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
     }
   });
 
-  it("reclaims stale claimed tasks through gcAbandonedClaims", () => {
-    const { database, repo } = createHarness();
+  it("reclaims stale claimed tasks with an audit event", async () => {
+    const { database, eventLogRepo, repo } = createHarness();
     repo.enqueue({
       id: "task-stale-claim",
       workspace_id: "workspace-gc",
@@ -174,13 +175,101 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
       repo.claimAtomic("task-stale-claim", "agent-target-a", "2026-05-07T00:00:00.000Z")
     ).toBe("claimed");
 
-    const reclaimed = repo.gcAbandonedClaims("2026-05-07T00:10:00.000Z", 5 * 60 * 1000);
+    const abandoned = repo.peekAbandonedClaims("2026-05-07T00:10:00.000Z", 5 * 60 * 1000);
+    const reclaimed = await repo.gcAbandonedClaims(
+      abandoned.map((row) => ({
+        task_id: row.id,
+        claimed_by: row.claimed_by!,
+        claimed_at: row.claimed_at!,
+        event: createTaskReclaimedEvent({
+          taskId: row.id,
+          workspaceId: row.workspace_id,
+          taskKind: row.kind,
+          role: row.role,
+          previousClaimedBy: row.claimed_by!,
+          claimedAt: row.claimed_at!,
+          occurredAt: "2026-05-07T00:10:00.000Z",
+          staleAfterMs: 5 * 60 * 1000
+        })
+      }))
+    );
 
     expect(reclaimed).toBe(1);
     const row = getGardenTask(database, "task-stale-claim");
     expect(row.status).toBe("pending");
     expect(row.claimed_by).toBeNull();
     expect(row.claimed_at).toBeNull();
+    await expect(eventLogRepo.queryByType(GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED)).resolves.toEqual([
+      expect.objectContaining({
+        entity_id: "task-stale-claim",
+        caused_by: "garden-task-repo-test",
+        payload_json: expect.objectContaining({
+          previous_claimed_by: "agent-target-a",
+          stale_after_ms: 5 * 60 * 1000
+        })
+      })
+    ]);
+  });
+
+  it("does not complete a task after another claimant reclaims the same id", async () => {
+    const { database, repo } = createHarness();
+    repo.enqueue({
+      id: "task-claimant-cas",
+      workspace_id: "workspace-cas",
+      role: GardenRole.JANITOR,
+      kind: GardenTaskKind.TTL_CLEANUP,
+      payload: createTask({
+        task_id: "task-claimant-cas",
+        workspace_id: "workspace-cas"
+      }),
+      created_at: "2026-05-07T00:00:00.000Z"
+    });
+    expect(
+      repo.claimAtomic("task-claimant-cas", "agent-target-a", "2026-05-07T00:00:00.000Z")
+    ).toBe("claimed");
+    const abandoned = repo.peekAbandonedClaims("2026-05-07T00:10:00.000Z", 5 * 60 * 1000);
+    await repo.gcAbandonedClaims(
+      abandoned.map((row) => ({
+        task_id: row.id,
+        claimed_by: row.claimed_by!,
+        claimed_at: row.claimed_at!,
+        event: createTaskReclaimedEvent({
+          taskId: row.id,
+          workspaceId: row.workspace_id,
+          taskKind: row.kind,
+          role: row.role,
+          previousClaimedBy: row.claimed_by!,
+          claimedAt: row.claimed_at!,
+          occurredAt: "2026-05-07T00:10:00.000Z",
+          staleAfterMs: 5 * 60 * 1000
+        })
+      }))
+    );
+    expect(
+      repo.claimAtomic("task-claimant-cas", "agent-target-b", "2026-05-07T00:11:00.000Z")
+    ).toBe("claimed");
+
+    await expect(
+      repo.completeWithEvents(
+        "task-claimant-cas",
+        { status: "completed", completed_at: "2026-05-07T00:12:00.000Z" },
+        [
+          createTaskCompletedEvent({
+            taskId: "task-claimant-cas",
+            workspaceId: "workspace-cas",
+            taskKind: GardenTaskKind.TTL_CLEANUP,
+            role: GardenRole.JANITOR,
+            success: true,
+            occurredAt: "2026-05-07T00:12:00.000Z"
+          })
+        ],
+        "agent-target-a"
+      )
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(getGardenTask(database, "task-claimant-cas")).toMatchObject({
+      status: "claimed",
+      claimed_by: "agent-target-b"
+    });
   });
 
   it("keeps the in-process scheduler on the SQLite CAS path", async () => {
@@ -287,7 +376,8 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
           success: false,
           occurredAt: "2026-05-07T00:00:02.000Z"
         })
-      ]
+      ],
+      "agent-target-failed"
     );
 
     const row = getGardenTask(database, "task-failed");
@@ -420,6 +510,44 @@ function createTaskCompletedEvent(input: {
       success: input.success,
       objects_affected: [],
       workspace_id: input.workspaceId,
+      occurred_at: input.occurredAt
+    })
+  };
+}
+
+function createTaskReclaimedEvent(input: {
+  readonly taskId: string;
+  readonly workspaceId: string;
+  readonly taskKind: GardenTaskKindValue;
+  readonly role: GardenRoleValue;
+  readonly previousClaimedBy: string;
+  readonly claimedAt: string;
+  readonly occurredAt: string;
+  readonly staleAfterMs: number;
+}): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
+  const tier =
+    input.role === GardenRole.JANITOR
+      ? GardenTier.TIER_0
+      : input.role === GardenRole.AUDITOR
+        ? GardenTier.TIER_1
+        : GardenTier.TIER_2;
+  return {
+    event_type: GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED,
+    entity_type: "garden_task",
+    entity_id: input.taskId,
+    workspace_id: input.workspaceId,
+    run_id: null,
+    caused_by: "garden-task-repo-test",
+    payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED, {
+      task_id: input.taskId,
+      task_kind: input.taskKind,
+      role: input.role,
+      tier,
+      workspace_id: input.workspaceId,
+      run_id: null,
+      previous_claimed_by: input.previousClaimedBy,
+      claimed_at: input.claimedAt,
+      stale_after_ms: input.staleAfterMs,
       occurred_at: input.occurredAt
     })
   };

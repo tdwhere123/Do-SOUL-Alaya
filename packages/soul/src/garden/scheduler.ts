@@ -116,9 +116,18 @@ export interface GardenTaskRepoPort {
       readonly completed_at: string;
       readonly last_error_text?: string;
     },
-    events: readonly GardenTaskEventInput[]
+    events: readonly GardenTaskEventInput[],
+    claimedBy: string
   ): Promise<void>;
-  gcAbandonedClaims(now: string, staleAfterMs: number): number;
+  peekAbandonedClaims(now: string, staleAfterMs: number): readonly GardenTaskRow[];
+  gcAbandonedClaims(
+    reclaims: readonly {
+      readonly task_id: string;
+      readonly claimed_by: string;
+      readonly claimed_at: string;
+      readonly event: GardenTaskEventInput;
+    }[]
+  ): Promise<number>;
   countBacklog(workspace_id?: string): readonly GardenTaskBacklogCount[];
   releaseClaim(taskId: string, claimedBy: string): boolean;
 }
@@ -242,7 +251,8 @@ export class GardenScheduler {
             completed_at: nowIso,
             last_error_text: `Tier violation: ${role} cannot dispatch ${task.required_tier}`
           },
-          []
+          [],
+          IN_PROCESS_GARDEN_CLAIMANT
         );
         this.updateBacklogTelemetry(nowIso);
         await this.recordTierViolationHealthJournal(task, roleTier);
@@ -323,7 +333,8 @@ export class GardenScheduler {
             occurred_at: nowIso
           })
         }
-      ]
+      ],
+      IN_PROCESS_GARDEN_CLAIMANT
     );
 
     if (result.success && result.tier === GardenTier.TIER_1) {
@@ -674,7 +685,8 @@ export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
       readonly completed_at: string;
       readonly last_error_text?: string;
     },
-    events: readonly GardenTaskEventInput[]
+    events: readonly GardenTaskEventInput[],
+    claimedBy: string
   ): Promise<void> {
     for (const event of events) {
       await this.eventLog.append({
@@ -694,6 +706,9 @@ export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
     if (row.status !== "pending" && row.status !== "claimed") {
       return;
     }
+    if (row.claimed_by !== claimedBy) {
+      throw new Error(`Garden task ${taskId} is not claimed by the expected worker.`);
+    }
     replaceRow(this.rows, row, {
       ...row,
       status: result.status,
@@ -702,16 +717,47 @@ export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
     });
   }
 
-  public gcAbandonedClaims(now: string, staleAfterMs: number): number {
+  public peekAbandonedClaims(now: string, staleAfterMs: number): readonly GardenTaskRow[] {
     const threshold = Date.parse(now) - staleAfterMs;
+    return this.rows
+      .filter((row) => row.status === "claimed" && row.claimed_at !== null)
+      .filter((row) => Date.parse(row.claimed_at!) < threshold)
+      .map((row) => ({ ...row }));
+  }
+
+  public async gcAbandonedClaims(
+    reclaims: readonly {
+      readonly task_id: string;
+      readonly claimed_by: string;
+      readonly claimed_at: string;
+      readonly event: GardenTaskEventInput;
+    }[]
+  ): Promise<number> {
+    const rowsToReclaim: GardenTaskRow[] = [];
+    for (const reclaim of reclaims) {
+      const row = this.rows.find((candidate) => candidate.id === reclaim.task_id);
+      if (
+        row === undefined ||
+        row.status !== "claimed" ||
+        row.claimed_by !== reclaim.claimed_by ||
+        row.claimed_at !== reclaim.claimed_at
+      ) {
+        throw new Error(`Garden task ${reclaim.task_id} claim changed and cannot be reclaimed.`);
+      }
+      rowsToReclaim.push(row);
+    }
+
     let reclaimed = 0;
-    for (const row of [...this.rows]) {
-      if (row.status !== "claimed" || row.claimed_at === null) {
-        continue;
-      }
-      if (Date.parse(row.claimed_at) >= threshold) {
-        continue;
-      }
+    for (const [index, reclaim] of reclaims.entries()) {
+      await this.eventLog.append({
+        event_type: reclaim.event.event_type,
+        entity_type: reclaim.event.entity_type,
+        entity_id: reclaim.event.entity_id,
+        workspace_id: reclaim.event.workspace_id,
+        run_id: reclaim.event.run_id,
+        payload: reclaim.event.payload_json
+      });
+      const row = rowsToReclaim[index]!;
       replaceRow(this.rows, row, {
         ...row,
         status: "pending",

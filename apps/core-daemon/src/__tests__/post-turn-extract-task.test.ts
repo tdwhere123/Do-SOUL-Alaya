@@ -303,6 +303,17 @@ describe("post-turn extract Garden task", () => {
       status: "pending",
       claimed_by: null
     });
+    await expect(
+      harness.eventLogRepo.queryByType(GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED)
+    ).resolves.toEqual([
+      expect.objectContaining({
+        entity_id: "post-turn-task-1",
+        payload_json: expect.objectContaining({
+          previous_claimed_by: "abandoned-agent",
+          stale_after_ms: 10 * 60 * 1000
+        })
+      })
+    ]);
   });
 
   it("records compiled candidate signals in the signal review queue", async () => {

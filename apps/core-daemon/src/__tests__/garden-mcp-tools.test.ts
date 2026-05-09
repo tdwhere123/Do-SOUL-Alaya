@@ -11,9 +11,11 @@ import {
   RunState,
   WorkspaceKind,
   WorkspaceState,
+  parseGardenEventPayload,
   type GardenRoleValue,
   type GardenTaskDescriptor,
   type GardenTaskKindValue,
+  type CandidateMemorySignal,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import { EventPublisher, SignalService } from "@do-soul/alaya-core";
@@ -53,7 +55,8 @@ describe("Garden MCP tools", () => {
     await harness.gardenTaskRepo.completeWithEvents(
       "task-completed",
       { status: "completed", completed_at: "2026-05-07T00:00:03.000Z" },
-      []
+      [],
+      "worker-a"
     );
 
     const response = await harness.callTool<GardenListPendingTasksResponse>(
@@ -174,10 +177,6 @@ describe("Garden MCP tools", () => {
       "garden.claim_task",
       { task_id: "task-complete-signals" }
     );
-    // Wave-end M1: result_envelope candidate_signals is content-only.
-    // The daemon binds workspace_id / run_id / surface_id / source from
-    // the trusted MCP context + the claimed task row, never from host
-    // payload. We verify the binding by reading the resulting signal row.
     const response = await harness.callTool<GardenCompleteTaskResponse>(
       "garden.complete_task",
       {
@@ -214,8 +213,6 @@ describe("Garden MCP tools", () => {
       success: true,
       candidate_signals_count: 1
     });
-    // The daemon-bound workspace must match the trusted MCP context
-    // even though the host did not provide it (M1 §29 guarantee).
     const emittedIds = (
       completedEvents[0]?.payload_json as { objects_affected?: readonly string[] }
     )?.objects_affected;
@@ -257,16 +254,9 @@ describe("Garden MCP tools", () => {
     });
   });
 
-  // Codex re-review B1: complete_task must reject when the row is not
-  // claimed (or claimed by another agent target) BEFORE persisting any
-  // candidate signal. Pre-fix, signals were emitted, then completeWith
-  // Events would CAS-fail and the host saw an error — but the
-  // soul.signal.emitted rows were already on disk, orphaned without
-  // any task_completed parent.
-  it("rejects complete_task on a pending (un-claimed) task without persisting any signal (B1)", async () => {
+  it("rejects complete_task on a pending task without persisting any signal", async () => {
     const harness = await createGardenMcpHarness();
     harness.enqueueTask("task-not-claimed");
-    // Intentionally do NOT call garden.claim_task first.
     let captured: unknown;
     try {
       await harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", {
@@ -290,27 +280,15 @@ describe("Garden MCP tools", () => {
       captured = error;
     }
     expect(captured).toBeDefined();
-    // No signal-emitted events appended (the orphan-signal scenario the
-    // pre-fix code allowed). Counting via EventLog is enough: the
-    // pre-fix path would have appended one soul.signal.emitted row.
-    // Counting signal rows in the SqliteSignalRepo's underlying table
-    // is the strongest assertion of "no orphan signal" — pre-fix, the
-    // failing path would have created exactly one row before the CAS
-    // rejection.
     const signalRows = (
       harness.database.connection
         .prepare("SELECT COUNT(*) AS n FROM signals")
         .get() as { readonly n: number }
     ).n;
     expect(signalRows).toBe(0);
-    // Row stays pending — no completion side-effect.
     expect(harness.getGardenTask("task-not-claimed")).toMatchObject({ status: "pending" });
   });
 
-  // Codex re-review B1 / wave-end Spec F4 (N2): only the agent target
-  // that claimed the task may complete it. Two attached host agents
-  // (e.g., codex + claude-code) on the same workspace can race, but
-  // the second one cannot silently absorb the first's claim.
   it("rejects complete_task from an agent target other than the claimant", async () => {
     const harness = await createGardenMcpHarness();
     harness.enqueueTask("task-cross-claim");
@@ -318,7 +296,6 @@ describe("Garden MCP tools", () => {
       "garden.claim_task",
       { task_id: "task-cross-claim" }
     );
-    // Switch to a different agent target before calling complete.
     harness.setContext({ agentTarget: "claude-code" });
     let captured: unknown;
     try {
@@ -331,6 +308,227 @@ describe("Garden MCP tools", () => {
     }
     expect(captured).toBeDefined();
     expect(harness.getGardenTask("task-cross-claim")).toMatchObject({ status: "claimed" });
+  });
+
+  it("rejects complete_task from a stale claimant after GC reclaim and new claim", async () => {
+    const harness = await createGardenMcpHarness();
+    harness.enqueueTask("task-reclaimed");
+    expect(
+      harness.gardenTaskRepo.claimAtomic("task-reclaimed", "garden-worker", "2026-05-07T00:00:00.000Z")
+    ).toBe("claimed");
+    const abandoned = harness.gardenTaskRepo.peekAbandonedClaims(
+      "2026-05-07T00:20:00.000Z",
+      5 * 60 * 1000
+    );
+    await harness.gardenTaskRepo.gcAbandonedClaims(
+      abandoned.map((row) => ({
+        task_id: row.id,
+        claimed_by: row.claimed_by!,
+        claimed_at: row.claimed_at!,
+        event: {
+          event_type: GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED,
+          entity_type: "garden_task",
+          entity_id: row.id,
+          workspace_id: row.workspace_id,
+          run_id: null,
+          caused_by: "garden-mcp-tools-test",
+          payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED, {
+            task_id: row.id,
+            task_kind: row.kind,
+            role: row.role,
+            tier: GardenTier.TIER_0,
+            workspace_id: row.workspace_id,
+            run_id: null,
+            previous_claimed_by: row.claimed_by!,
+            claimed_at: row.claimed_at!,
+            stale_after_ms: 5 * 60 * 1000,
+            occurred_at: "2026-05-07T00:20:00.000Z"
+          })
+        }
+      }))
+    );
+    harness.setContext({ agentTarget: "claude-code" });
+    await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", { task_id: "task-reclaimed" });
+    harness.setContext({ agentTarget: "garden-worker" });
+
+    let captured: unknown;
+    try {
+      await harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", {
+        task_id: "task-reclaimed",
+        status: "completed",
+        result_envelope: {
+          candidate_signals: [
+            {
+              signal_kind: "potential_preference",
+              object_kind: "memory_entry",
+              scope_hint: "project",
+              domain_tags: ["garden"],
+              confidence: 0.9,
+              evidence_refs: ["memory-1"],
+              raw_payload: { observation: "stale worker result must not persist" }
+            }
+          ]
+        }
+      });
+    } catch (error) {
+      captured = error;
+    }
+
+    expect(captured).toBeDefined();
+    expect(harness.getGardenTask("task-reclaimed")).toMatchObject({
+      status: "claimed",
+      claimed_by: "claude-code"
+    });
+    const signalRows = (
+      harness.database.connection
+        .prepare("SELECT COUNT(*) AS n FROM signals")
+        .get() as { readonly n: number }
+    ).n;
+    expect(signalRows).toBe(0);
+  });
+
+  it("renews the claim lease before candidate signal emission", async () => {
+    let gcAttempted = false;
+    const harness = await createGardenMcpHarness({
+      receiveSignal: async (signal, context) => {
+        gcAttempted = true;
+        const abandoned = context.gardenTaskRepo.peekAbandonedClaims(
+          "2026-05-07T00:20:00.000Z",
+          10 * 60 * 1000
+        );
+        expect(abandoned).toEqual([]);
+        expect(
+          context.gardenTaskRepo.claimAtomic(
+            "task-lease-race",
+            "claude-code",
+            "2026-05-07T00:20:01.000Z"
+          )
+        ).toBe("already-claimed");
+        return await context.signalService.receiveSignal(signal);
+      }
+    });
+    harness.enqueueTask("task-lease-race");
+    expect(
+      harness.gardenTaskRepo.claimAtomic("task-lease-race", "garden-worker", "2026-05-07T00:00:00.000Z")
+    ).toBe("claimed");
+
+    await expect(
+      harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", {
+        task_id: "task-lease-race",
+        status: "completed",
+        result_envelope: {
+          candidate_signals: [
+            {
+              signal_kind: "potential_preference",
+              object_kind: "memory_entry",
+              scope_hint: "project",
+              domain_tags: ["garden"],
+              confidence: 0.9,
+              evidence_refs: ["memory-1"],
+              raw_payload: { observation: "host worker extracted a preference" }
+            }
+          ]
+        }
+      })
+    ).resolves.toMatchObject({ task_id: "task-lease-race", status: "completed" });
+
+    expect(gcAttempted).toBe(true);
+    expect(harness.getGardenTask("task-lease-race")).toMatchObject({ status: "completed" });
+    const signalRows = (
+      harness.database.connection
+        .prepare("SELECT COUNT(*) AS n FROM signals")
+        .get() as { readonly n: number }
+    ).n;
+    expect(signalRows).toBe(1);
+  });
+
+  it("rejects duplicate same-claimant complete_task before a second signal can persist", async () => {
+    let resolveFirstSignalStarted!: () => void;
+    const firstSignalStarted = new Promise<void>((resolve) => {
+      resolveFirstSignalStarted = resolve;
+    });
+    let unblockFirstSignal!: () => void;
+    const firstSignalGate = new Promise<void>((resolve) => {
+      unblockFirstSignal = resolve;
+    });
+    let receiveCount = 0;
+    const harness = await createGardenMcpHarness({
+      receiveSignal: async (signal, context) => {
+        receiveCount += 1;
+        if (receiveCount === 1) {
+          resolveFirstSignalStarted();
+          await firstSignalGate;
+        }
+        return await context.signalService.receiveSignal(signal);
+      }
+    });
+    harness.enqueueTask("task-same-claimant-race");
+    await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
+      task_id: "task-same-claimant-race"
+    });
+
+    const firstCompletion = harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", {
+      task_id: "task-same-claimant-race",
+      status: "completed",
+      result_envelope: {
+        candidate_signals: [
+          {
+            signal_kind: "potential_preference",
+            object_kind: "memory_entry",
+            scope_hint: "project",
+            domain_tags: ["garden"],
+            confidence: 0.9,
+            evidence_refs: ["memory-1"],
+            raw_payload: { observation: "first completion result" }
+          }
+        ]
+      }
+    });
+    await firstSignalStarted;
+
+    let duplicate: unknown;
+    try {
+      await harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", {
+        task_id: "task-same-claimant-race",
+        status: "completed",
+        result_envelope: {
+          candidate_signals: [
+            {
+              signal_kind: "potential_preference",
+              object_kind: "memory_entry",
+              scope_hint: "project",
+              domain_tags: ["garden"],
+              confidence: 0.9,
+              evidence_refs: ["memory-1"],
+              raw_payload: { observation: "duplicate completion result" }
+            }
+          ]
+        }
+      });
+    } catch (error) {
+      duplicate = error;
+    }
+
+    expect(duplicate).toBeDefined();
+    let signalRows = (
+      harness.database.connection
+        .prepare("SELECT COUNT(*) AS n FROM signals")
+        .get() as { readonly n: number }
+    ).n;
+    expect(signalRows).toBe(0);
+
+    unblockFirstSignal();
+    await expect(firstCompletion).resolves.toMatchObject({
+      task_id: "task-same-claimant-race",
+      status: "completed"
+    });
+    expect(receiveCount).toBe(1);
+    signalRows = (
+      harness.database.connection
+        .prepare("SELECT COUNT(*) AS n FROM signals")
+        .get() as { readonly n: number }
+    ).n;
+    expect(signalRows).toBe(1);
   });
 });
 
@@ -368,6 +566,19 @@ interface GardenTaskDbRow {
   readonly last_error_text: string | null;
 }
 
+interface GardenMcpReceiveSignalContext {
+  readonly gardenTaskRepo: SqliteGardenTaskRepo;
+  readonly signalService: SignalService;
+}
+
+interface GardenMcpHarnessOptions {
+  readonly now?: () => string;
+  readonly receiveSignal?: (
+    signal: CandidateMemorySignal,
+    context: GardenMcpReceiveSignalContext
+  ) => Promise<Readonly<{ readonly signal: Readonly<CandidateMemorySignal> }>>;
+}
+
 interface GardenMcpHarness {
   readonly database: StorageDatabase;
   readonly eventLogRepo: SqliteEventLogRepo;
@@ -389,7 +600,7 @@ interface GardenMcpHarness {
   setContext(overrides: Partial<McpMemoryToolCallContext>): void;
 }
 
-async function createGardenMcpHarness(): Promise<GardenMcpHarness> {
+async function createGardenMcpHarness(options: GardenMcpHarnessOptions = {}): Promise<GardenMcpHarness> {
   const database = initDatabase({ filename: ":memory:" });
   const eventLogRepo = new SqliteEventLogRepo(database);
   const workspaceRepo = new SqliteWorkspaceRepo(database);
@@ -410,6 +621,8 @@ async function createGardenMcpHarness(): Promise<GardenMcpHarness> {
     signalRepo,
     runtimeNotifier
   });
+  const receiveSignal: NonNullable<GardenMcpHarnessOptions["receiveSignal"]> =
+    options.receiveSignal ?? (async (signal) => await signalService.receiveSignal(signal));
   const context: McpMemoryToolCallContext = {
     workspaceId: "workspace-a",
     runId: "run-a",
@@ -422,7 +635,7 @@ async function createGardenMcpHarness(): Promise<GardenMcpHarness> {
   let server: Server | null = null;
 
   const deps: McpMemoryToolHandlerDependencies & { readonly gardenTaskRepo: SqliteGardenTaskRepo } = {
-    now: () => "2026-05-07T00:10:00.000Z",
+    now: options.now ?? (() => "2026-05-07T00:10:00.000Z"),
     generateId: () => "00000000-0000-4000-8000-000000000001",
     recallService: {
       recall: async () => ({
@@ -438,7 +651,11 @@ async function createGardenMcpHarness(): Promise<GardenMcpHarness> {
       update: async () => createMemoryEntry()
     },
     signalService: {
-      receiveSignal: async (signal) => await signalService.receiveSignal(signal)
+      receiveSignal: async (signal) =>
+        await receiveSignal(signal, {
+          gardenTaskRepo,
+          signalService
+        })
     },
     graphExploreService: {
       exploreOneHop: async () => []
