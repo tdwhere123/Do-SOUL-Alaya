@@ -25,15 +25,15 @@ export default function Layout() {
   return (
     <div className="h-screen min-h-screen flex flex-col">
       <header className="sticky top-0 z-50 bg-beige-100/80 backdrop-blur-sm border-b border-beige-200">
-        <nav className="max-w-7xl mx-auto px-4 sm:px-6 h-14 sm:h-16 grid grid-cols-[auto_1fr_auto] items-center gap-4">
-          <div className="flex items-center gap-2 shrink-0">
+        <nav className="w-full px-4 sm:px-6 h-14 sm:h-16 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4">
+          <div className="flex items-center gap-2 shrink-0 justify-self-start">
             <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-morandi-sage animate-pulse" />
             <span className="font-bold tracking-tight text-ink-600 text-sm sm:text-base">
               {t("nav:appName")}
             </span>
           </div>
 
-          <div className="flex justify-center gap-3 sm:gap-8 overflow-x-auto">
+          <div className="flex min-w-0 max-w-full justify-center gap-3 overflow-x-auto justify-self-center sm:gap-8">
             {NAV_ITEMS.map((item) => (
               <NavLink
                 key={item.to}
