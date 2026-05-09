@@ -633,7 +633,7 @@ function deriveMemoryNodeSummary(content: string, label: string): string | undef
   return truncateWithEllipsis(trimmed, MEMORY_NODE_SUMMARY_MAX);
 }
 
-function deriveDomainTagSummary(members: readonly MemoryEntryRecord[]): string {
+export function deriveDomainTagSummary(members: readonly MemoryEntryRecord[]): string {
   const count = members.length;
   // Dedupe sample labels: a tag like #codex-memory-recall-shard with 226
   // members all sharing the same truncated firstLine ("Codex memory recall

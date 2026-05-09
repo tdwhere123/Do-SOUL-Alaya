@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { forwardRef, type ReactElement } from "react";
@@ -76,6 +76,8 @@ vi.mock("react-force-graph-3d", () => {
 });
 
 // WebGL: default to "supported" so the 2D/3D toggle is actionable in tests.
+// The probe in Graph.tsx now does a real clear + readPixels round-trip
+// (Phase 3 review M-3); the stub has to play back the matching colour bytes.
 function stubWebgl(supported: boolean): void {
   const realGetContext = HTMLCanvasElement.prototype.getContext;
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (
@@ -85,10 +87,37 @@ function stubWebgl(supported: boolean): void {
   ) {
     if (contextId === "webgl" || contextId === "webgl2") {
       if (!supported) return null;
-      // Minimal shape used by Graph.tsx WebGL probe.
+      let pendingClear: [number, number, number, number] = [0, 0, 0, 0];
       return {
         createProgram: () => ({}),
-        deleteProgram: () => undefined
+        deleteProgram: () => undefined,
+        // The probe sets clearColor(0.4, 0.6, 0.8, 1.0) → 102/153/204/255.
+        clearColor: (r: number, g: number, b: number, a: number) => {
+          pendingClear = [
+            Math.round(r * 255),
+            Math.round(g * 255),
+            Math.round(b * 255),
+            Math.round(a * 255)
+          ];
+        },
+        clear: () => undefined,
+        readPixels: (
+          _x: number,
+          _y: number,
+          _w: number,
+          _h: number,
+          _format: number,
+          _type: number,
+          buffer: Uint8Array
+        ) => {
+          buffer[0] = pendingClear[0];
+          buffer[1] = pendingClear[1];
+          buffer[2] = pendingClear[2];
+          buffer[3] = pendingClear[3];
+        },
+        COLOR_BUFFER_BIT: 0x4000,
+        RGBA: 0x1908,
+        UNSIGNED_BYTE: 0x1401
       } as unknown as WebGLRenderingContext;
     }
     return realGetContext.call(this, contextId as "2d", options as never);
@@ -259,4 +288,36 @@ describe("GraphPage (react-force-graph driven)", () => {
   // round-trips real fetch + real proposal repo. Re-pinning the same flow
   // through DetailDrawer in jsdom adds brittle DOM coupling without new
   // coverage.
+
+  // invariant: search filter dims non-matching, non-adjacent nodes purely
+  // through the colour closure — no DOM mutation, no class toggling. The
+  // canvas itself is opaque, so we sample the stub's data-color attribute
+  // (which echoes nodeColor()) and check the alpha collapsed to 0.12.
+  it("dims non-matching nodes via colour closure when a search filter is set", async () => {
+    const user = userEvent.setup();
+    renderGraphWithEnv();
+    await screen.findByTestId("force-graph-2d");
+    await user.type(screen.getByPlaceholderText(/probe label/i), "alpha");
+    await waitFor(() => {
+      // n3 is two hops from the alpha match (n1) — neither match nor
+      // adjacent → background state. Background alpha is the
+      // SPOTLIGHT_BG_ALPHA constant (0.12).
+      const n3Color = screen.getByTestId("fg-node-n3").getAttribute("data-color") ?? "";
+      expect(n3Color).toMatch(/0\.12/);
+    });
+    // n1 (the match) stays at full recency alpha and never dims to background.
+    const n1Color = screen.getByTestId("fg-node-n1").getAttribute("data-color") ?? "";
+    expect(n1Color).not.toMatch(/0\.12/);
+  });
+
+  // invariant G8: Inspector is read-only — right-click on the graph viewport
+  // never mounts a destructive context menu. See docs/handbook/invariants.md.
+  it("does not surface a destructive context menu on right-click (G8)", async () => {
+    renderGraphWithEnv();
+    const viewport = await screen.findByTestId("force-graph-2d");
+    fireEvent.contextMenu(viewport);
+    expect(document.querySelector("menu[role='menu']")).toBeNull();
+    // The graph viewport itself stays mounted (right-click did not unmount it).
+    expect(screen.getByTestId("force-graph-2d")).toBeTruthy();
+  });
 });

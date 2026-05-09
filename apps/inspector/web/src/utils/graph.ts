@@ -32,10 +32,15 @@ export const EDGE_TYPE_BASE_COLOR: Record<string, [number, number, number]> = {
   derived_from: [192, 128, 64] // soft orange
 };
 
-// stability_class drives the dash pattern. Stable paths are solid; provisional
-// fade in and out as evidence accrues; retiring is the visible "this path is
-// about to be reaped" signal.
-export const STABILITY_DASH: Record<string, [number, number] | null> = {
+// stability_class drives the dash pattern. Stable / normal / pinned paths are
+// solid; volatile paths get a dashed underlay so the operator sees "this edge
+// is fragile, evidence is still consolidating". Tightened from
+// Record<string, …> to keep schema additions visible to the compiler. See
+// also: packages/protocol/src/soul/path-relation.ts:StabilityClassSchema.
+export const STABILITY_DASH: Record<
+  "stable" | "normal" | "pinned" | "volatile",
+  [number, number] | null
+> = {
   stable: null,
   pinned: null,
   normal: null,
@@ -48,12 +53,14 @@ export function nodeRadius(d: GraphNodeShape): number {
 }
 
 // Influence-driven size for ForceGraph nodeVal. Hubs that have been used many
-// times get visually larger; minimum is the kind-default radius so unused
-// nodes are still readable.
+// times get visually larger; the +2 offset keeps influence_count = 0 nodes at
+// a readable minimum of 4 (log2(2) * 4 = 4) while letting a 100-influence hub
+// reach ~27. Aligned with Phase 3 plan spec "size = log2(influence_count+2)*4"
+// (Phase 3 review I-4); the previous 4 + log2(x+1)*2.2 compressed the
+// high-influence end by ~30% which weakened the hub-vs-leaf reading.
 export function nodeInfluenceSize(d: GraphNodeShape): number {
-  const influence = d.influence_count ?? 0;
-  if (influence <= 0) return 4;
-  return 4 + Math.log2(influence + 1) * 2.2;
+  const influence = Math.max(0, d.influence_count ?? 0);
+  return Math.log2(influence + 2) * 4;
 }
 
 // Recency alpha for nodes — entries used recently are crisp, stale entries

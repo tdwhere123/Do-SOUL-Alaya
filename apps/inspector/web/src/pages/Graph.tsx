@@ -1,4 +1,6 @@
 import {
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useMemo,
@@ -8,9 +10,20 @@ import {
 import { useNavigate } from "react-router-dom";
 import { Search, X, Box, Square } from "lucide-react";
 import ForceGraph2D from "react-force-graph-2d";
-import ForceGraph3D from "react-force-graph-3d";
 import type { ForceGraphMethods as ForceGraphMethods2D } from "react-force-graph-2d";
+// Type-only import keeps the static typing of `ForceGraph3D` (component shape
+// + strong GraphNode / GraphLink callback signatures) without pulling
+// three.js into the main entry chunk — `import type` evaporates at runtime.
+import type ForceGraph3DType from "react-force-graph-3d";
 import type { ForceGraphMethods as ForceGraphMethods3D } from "react-force-graph-3d";
+
+// Lazy-load the 3D component so 2D-only / WebGL-locked users do NOT pay the
+// ~1.4 MB three.js cost on initial bundle. The chunk is fetched the first
+// time the user clicks the 3D toggle. The cast keeps our strongly-typed
+// callbacks compatible with the original component signature (Phase 3
+// review M-2). See also: utils/graph.ts:ORIGIN_KIND_COLOR for the visual
+// encoding the lazy chunk consumes.
+const ForceGraph3D = lazy(() => import("react-force-graph-3d")) as unknown as typeof ForceGraph3DType;
 import { apiFetch, getWorkspaceId, type ApiError } from "../api";
 import { useToasts } from "../components/Toast";
 import { DetailDrawer } from "../components/DetailDrawer";
@@ -19,6 +32,7 @@ import {
   EDGE_TYPE_BASE_COLOR,
   ORIGIN_KIND_COLOR,
   STABILITY_DASH,
+  extractId,
   isRecentlyReinforced,
   linkAlpha,
   linkDistance,
@@ -70,7 +84,12 @@ export default function GraphPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [matchCursor, setMatchCursor] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode>("2d");
-  const [webglSupported, setWebglSupported] = useState<boolean>(true);
+  // Lazy-init the WebGL probe so the first render already reflects reality —
+  // avoids the "3D button enabled for one frame then disables" flicker on
+  // WebGL-broken environments (Phase 3 review O-7). The probe now does a real
+  // clear + readPixels round-trip (Phase 3 review M-3) so software fallbacks
+  // that return a context but cannot draw are correctly rejected.
+  const [webglSupported] = useState<boolean>(() => probeWebgl());
   const [viewport, setViewport] = useState<{ width: number; height: number }>(() => ({
     width: 800,
     height: 600
@@ -80,32 +99,16 @@ export default function GraphPage() {
   const navigate = useNavigate();
 
   const workspaceId = getWorkspaceId();
-  const now = useMemo(() => Date.now(), [data]);
-
-  // WebGL availability probe — ForceGraph3D needs a working WebGL context.
-  // WSL2/headless environments often expose WebGL but throw on draw, so we
-  // also test a minimal createProgram round-trip.
+  // `now` ticks on a 60s interval rather than freezing on data fetch, so
+  // recencyAlpha and the 24h reinforcement glow keep decaying while the tab
+  // is open instead of lying after one daylight (Phase 3 review I-1).
+  const [now, setNow] = useState<number>(() => Date.now());
   useEffect(() => {
-    try {
-      const canvas = document.createElement("canvas");
-      const gl =
-        (canvas.getContext("webgl2") as WebGL2RenderingContext | null) ??
-        (canvas.getContext("webgl") as WebGLRenderingContext | null);
-      if (!gl) {
-        setWebglSupported(false);
-        return;
-      }
-      const program = gl.createProgram();
-      if (!program) {
-        setWebglSupported(false);
-        return;
-      }
-      gl.deleteProgram(program);
-      setWebglSupported(true);
-    } catch {
-      setWebglSupported(false);
-    }
+    const id = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(id);
   }, []);
+
+  // (WebGL probe runs synchronously via the lazy useState initialiser above.)
 
   // Track viewport dimensions; ForceGraph requires explicit width/height props.
   useEffect(() => {
@@ -582,7 +585,7 @@ export default function GraphPage() {
           near the toggle so pan is discoverable. */}
       {data && effectiveMode === "3d" ? (
         <div className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-md border border-beige-200 bg-beige-50/95 px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-ink-700/55 shadow-sm">
-          drag = rotate · right-drag = pan · scroll = zoom
+          drag = rotate · right-drag = pan · scroll = zoom · (touch: 1-finger rotate · 2-finger pan / pinch zoom)
         </div>
       ) : null}
 
@@ -616,8 +619,17 @@ export default function GraphPage() {
           />
         ) : null}
         {data && effectiveMode === "3d" ? (
-          <ForceGraph3D
-            ref={fg3dRef}
+          <Suspense
+            fallback={
+              <div className="absolute inset-0 flex items-center justify-center">
+                <p className="font-mono text-xs uppercase tracking-wider text-ink-700/40">
+                  loading 3D engine…
+                </p>
+              </div>
+            }
+          >
+            <ForceGraph3D
+              ref={fg3dRef}
             graphData={data}
             width={viewport.width}
             height={viewport.height}
@@ -647,10 +659,11 @@ export default function GraphPage() {
               0.005 + 0.012 * (l.strength_normalized ?? 0.4)
             }
             linkDirectionalParticleWidth={2}
-            cooldownTicks={120}
-            onNodeClick={handleNodeClick}
-            onBackgroundClick={handleBackgroundClick}
-          />
+              cooldownTicks={120}
+              onNodeClick={handleNodeClick}
+              onBackgroundClick={handleBackgroundClick}
+            />
+          </Suspense>
         ) : null}
       </div>
 
@@ -705,22 +718,28 @@ function ViewModeToggle({ mode, webglSupported, onChange }: ViewModeToggleProps)
 }
 
 function OriginLegend() {
-  const items: ReadonlyArray<{ kind: string; label: string }> = [
-    { kind: "user_memory", label: "user memory" },
-    { kind: "engineering_chunk", label: "engineering chunk" },
-    { kind: "reviewed_engineering_chunk", label: "reviewed engineering" },
-    { kind: "proposal_pending", label: "proposal pending" },
-    { kind: "system", label: "system" }
+  // Each item carries a single-letter glyph drawn on top of the colour swatch
+  // so deuteranopia / tritanopia operators can still tell origin classes apart
+  // when colour-only contrast collapses (Phase 3 review M-7). The glyph is
+  // also drawn inside the canvas node itself in `nodeCanvasObject`.
+  const items: ReadonlyArray<{ kind: string; label: string; glyph: string; title: string }> = [
+    { kind: "user_memory", label: "user memory", glyph: "U", title: "User-curated memory entries" },
+    { kind: "engineering_chunk", label: "engineering chunk", glyph: "E", title: "Auto-imported from .codex / engineering source" },
+    { kind: "reviewed_engineering_chunk", label: "reviewed engineering", glyph: "R", title: "Engineering origin, reviewer-accepted" },
+    { kind: "proposal_pending", label: "proposal pending", glyph: "P", title: "Awaiting governance review" },
+    { kind: "system", label: "system", glyph: "S", title: "Bootstrap / install / runtime-derived" }
   ];
   return (
     <div className="absolute bottom-4 right-4 z-20 flex flex-col gap-1 rounded-md border border-beige-200 bg-beige-50/95 px-3 py-2 text-[10px] font-mono uppercase text-ink-700/65 shadow-sm">
       {items.map((item) => (
-        <div key={item.kind} className="flex items-center gap-2">
+        <div key={item.kind} className="flex items-center gap-2" title={item.title}>
           <span
-            aria-hidden="true"
-            className="inline-block h-2.5 w-2.5 rounded-full"
+            className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[8px] font-bold text-beige-50"
             style={{ backgroundColor: ORIGIN_KIND_COLOR[item.kind] }}
-          />
+            aria-label={`${item.label} (${item.glyph})`}
+          >
+            {item.glyph}
+          </span>
           <span>{item.label}</span>
         </div>
       ))}
@@ -775,10 +794,40 @@ function hexToRgb(hex: string): [number, number, number] {
   return [(num >> 16) & 0xff, (num >> 8) & 0xff, num & 0xff];
 }
 
-function extractId(endpoint: string | number | { id: string }): string {
-  if (typeof endpoint === "string") return endpoint;
-  if (typeof endpoint === "number") return String(endpoint);
-  return endpoint.id;
+// Strong WebGL probe — context + program + a real draw + readPixels round-trip.
+// The previous "createProgram + deleteProgram" check accepted contexts that
+// returned non-null but rendered black (WSL2 WARP / Mesa llvmpipe), letting
+// the user click 3D and watch nothing paint. We now write a known colour into
+// the framebuffer and confirm we read it back. Phase 3 review M-3.
+function probeWebgl(): boolean {
+  if (typeof window === "undefined" || typeof document === "undefined") {
+    return false;
+  }
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = 2;
+    canvas.height = 2;
+    const gl =
+      (canvas.getContext("webgl2") as WebGL2RenderingContext | null) ??
+      (canvas.getContext("webgl") as WebGLRenderingContext | null);
+    if (!gl) return false;
+    const program = gl.createProgram();
+    if (!program) return false;
+    gl.deleteProgram(program);
+    // Real draw round-trip: the buffer must come back with the colour we set.
+    gl.clearColor(0.4, 0.6, 0.8, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    const pixel = new Uint8Array(4);
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+    // Allow a small drift for sRGB conversion / driver rounding.
+    const matchesClear =
+      Math.abs(pixel[0]! - 102) < 16 &&
+      Math.abs(pixel[1]! - 153) < 16 &&
+      Math.abs(pixel[2]! - 204) < 16;
+    return matchesClear;
+  } catch {
+    return false;
+  }
 }
 
 function unwrapSoulGraph(value: SoulGraph | SoulGraphEnvelope): SoulGraph {

@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   classifySoulGraphOriginKind,
-  createSoulGraphService
+  createSoulGraphService,
+  deriveDomainTagSummary
 } from "../daemon-runtime-support.js";
 import { MemoryGovernanceEventType, type EventLogEntry, type PathRelation } from "@do-soul/alaya-protocol";
 import type {
   SqliteMemoryEntryRepo,
   SqliteMemoryGraphEdgeRepo,
   ProposalRepo,
-  PathRelationRepo
+  PathRelationRepo,
+  MemoryEntryRecord
 } from "@do-soul/alaya-storage";
 
 type SoulGraphProposalRepo = Pick<
@@ -569,6 +571,55 @@ describe("createSoulGraphService", () => {
     expect(graph.node_total).toBe(26);
     expect(graph.edge_total).toBe(25);
     expect(graph.truncated).toBe(true);
+  });
+});
+
+describe("deriveDomainTagSummary", () => {
+  it("returns just the count when members is empty", () => {
+    expect(deriveDomainTagSummary([])).toBe("0 memories");
+  });
+
+  it("collapses a uniform bucket to 'all: <label>' so the same string is not repeated", () => {
+    const sameContent = "Codex memory recall shard (2026-04-12)";
+    const members = Array.from({ length: 226 }, (_, i) =>
+      createMemory({ object_id: `chunk-${i}`, content: sameContent, domain_tags: [] })
+    );
+    const summary = deriveDomainTagSummary(members as unknown as readonly MemoryEntryRecord[]);
+    expect(summary).toMatch(/^226 memories · all: Codex memory recall shard/);
+    // Two raw "Codex memory recall shard" occurrences in a row would be the
+    // pre-dedupe regression (one from "all:" prefix, one from a duplicated
+    // sample slot). Assert the phrase appears exactly once.
+    const occurrences = (summary.match(/Codex memory recall shard/g) ?? []).length;
+    expect(occurrences).toBe(1);
+  });
+
+  it("lists distinct labels and surfaces a +N more variants tail when heterogeneous", () => {
+    const members = [
+      createMemory({ object_id: "a", content: "Alpha topic line", domain_tags: [] }),
+      createMemory({ object_id: "b", content: "Bravo topic line", domain_tags: [] }),
+      createMemory({ object_id: "c", content: "Charlie topic line", domain_tags: [] }),
+      createMemory({ object_id: "d", content: "Delta topic line", domain_tags: [] }),
+      createMemory({ object_id: "e", content: "Echo topic line", domain_tags: [] })
+    ];
+    const summary = deriveDomainTagSummary(members as unknown as readonly MemoryEntryRecord[]);
+    expect(summary).toMatch(/^5 memories · /);
+    expect(summary).toContain("Alpha topic line");
+    expect(summary).toContain("Bravo topic line");
+    expect(summary).toContain("Charlie topic line");
+    expect(summary).toMatch(/\+2 more variants$/);
+    expect(summary).not.toContain("Delta topic line");
+    expect(summary).not.toContain("Echo topic line");
+  });
+
+  it("uses singular 'variant' when exactly one is hidden", () => {
+    const members = [
+      createMemory({ object_id: "a", content: "Alpha topic line", domain_tags: [] }),
+      createMemory({ object_id: "b", content: "Bravo topic line", domain_tags: [] }),
+      createMemory({ object_id: "c", content: "Charlie topic line", domain_tags: [] }),
+      createMemory({ object_id: "d", content: "Delta topic line", domain_tags: [] })
+    ];
+    const summary = deriveDomainTagSummary(members as unknown as readonly MemoryEntryRecord[]);
+    expect(summary).toMatch(/\+1 more variant$/);
   });
 });
 
