@@ -2,20 +2,26 @@ import { NavLink, Outlet } from "react-router-dom";
 import { Activity, CheckSquare, Cpu, Network } from "lucide-react";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { useI18n } from "../i18n/Locale";
+import type { DictKey } from "../i18n/dict";
 
 function cn(...inputs: unknown[]): string {
   return twMerge(clsx(inputs));
 }
 
-const NAV_ITEMS = [
-  { to: "/config", label: "Configuration", icon: <Cpu className="w-4 h-4" /> },
-  { to: "/graph", label: "Memory Graph", icon: <Network className="w-4 h-4" /> },
-  // A1 (HITL daemon backbone) — Pending Proposals tooling-loopback view.
-  { to: "/proposals", label: "Pending Proposals", icon: <CheckSquare className="w-4 h-4" /> },
-  { to: "/status", label: "System Status", icon: <Activity className="w-4 h-4" /> }
+const NAV_ITEMS: ReadonlyArray<{
+  readonly to: string;
+  readonly labelKey: DictKey;
+  readonly icon: JSX.Element;
+}> = [
+  { to: "/config", labelKey: "nav:configuration", icon: <Cpu className="w-4 h-4" /> },
+  { to: "/graph", labelKey: "nav:memoryGraph", icon: <Network className="w-4 h-4" /> },
+  { to: "/proposals", labelKey: "nav:pendingProposals", icon: <CheckSquare className="w-4 h-4" /> },
+  { to: "/status", labelKey: "nav:systemStatus", icon: <Activity className="w-4 h-4" /> }
 ];
 
 export default function Layout() {
+  const { t, locale, setLocale } = useI18n();
   return (
     <div className="h-screen min-h-screen flex flex-col">
       <header className="sticky top-0 z-50 bg-beige-100/80 backdrop-blur-sm border-b border-beige-200">
@@ -23,7 +29,7 @@ export default function Layout() {
           <div className="flex items-center gap-2 shrink-0">
             <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-morandi-sage animate-pulse" />
             <span className="font-bold tracking-tight text-ink-600 text-sm sm:text-base">
-              ALAYA INSPECTOR
+              {t("nav:appName")}
             </span>
           </div>
 
@@ -42,14 +48,43 @@ export default function Layout() {
                 }
               >
                 <span className="sm:hidden">{item.icon}</span>
-                <span className="hidden sm:inline">{item.label}</span>
-                <span className="sm:hidden">{item.label}</span>
+                <span className="hidden sm:inline">{t(item.labelKey)}</span>
+                <span className="sm:hidden">{t(item.labelKey)}</span>
               </NavLink>
             ))}
           </div>
 
-          <div className="text-[10px] text-ink-700/40 uppercase tracking-widest shrink-0">
-            v0.1.0-alpha
+          <div
+            className="flex items-center gap-1 rounded-full border border-beige-200 bg-beige-50 p-0.5 shadow-sm shrink-0"
+            role="group"
+            aria-label="Language"
+          >
+            <button
+              type="button"
+              onClick={() => setLocale("zh")}
+              aria-pressed={locale === "zh"}
+              className={cn(
+                "px-2 py-0.5 rounded-full text-[10px] font-mono uppercase transition-colors",
+                locale === "zh"
+                  ? "bg-[#586E75] text-beige-50"
+                  : "text-ink-700/60 hover:text-ink-700"
+              )}
+            >
+              {t("nav:locale.zh")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setLocale("en")}
+              aria-pressed={locale === "en"}
+              className={cn(
+                "px-2 py-0.5 rounded-full text-[10px] font-mono uppercase transition-colors",
+                locale === "en"
+                  ? "bg-[#586E75] text-beige-50"
+                  : "text-ink-700/60 hover:text-ink-700"
+              )}
+            >
+              {t("nav:locale.en")}
+            </button>
           </div>
         </nav>
       </header>

@@ -3,6 +3,18 @@ import { Check, Copy, Edit3, Terminal, Trash2, TrendingDown, X } from "lucide-re
 import { clsx } from "clsx";
 import type { GraphNode } from "../types/graph";
 import { formatRelativeTime, NODE_COLOR } from "../utils/graph";
+import { useI18n } from "../i18n/Locale";
+import type { DictKey } from "../i18n/dict";
+
+// Translate origin_kind values into the legend's localized labels so the
+// drawer header badge stays in sync with the in-graph legend.
+const ORIGIN_KIND_LABEL_KEYS: Readonly<Record<string, DictKey>> = {
+  user_memory: "graph:legend.user_memory",
+  engineering_chunk: "graph:legend.engineering_chunk",
+  reviewed_engineering_chunk: "graph:legend.reviewed_engineering_chunk",
+  proposal_pending: "graph:legend.proposal_pending",
+  system: "graph:legend.system"
+};
 
 export interface DetailDrawerProps {
   readonly node: GraphNode | null;
@@ -23,6 +35,7 @@ export function DetailDrawer({
   onCopyCli,
   onCreateProposal
 }: DetailDrawerProps) {
+  const { t } = useI18n();
   const [rewriteContent, setRewriteContent] = useState("");
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const cliCommand = node
@@ -63,7 +76,7 @@ export function DetailDrawer({
         node ? "translate-x-0" : "translate-x-full"
       )}
       role="complementary"
-      aria-label="Node details"
+      aria-label={t("drawer:nodeAriaLabel")}
     >
       {node ? (
         <div className="relative h-full flex flex-col p-6 pl-7 font-mono overflow-y-auto">
@@ -77,7 +90,9 @@ export function DetailDrawer({
             <div className="flex items-center gap-2 flex-wrap">
               {node.origin_kind ? (
                 <span className="px-2 py-0.5 text-[10px] uppercase tracking-widest rounded bg-[#586E75]/10 text-ink-700">
-                  {formatOriginKind(node.origin_kind)}
+                  {ORIGIN_KIND_LABEL_KEYS[node.origin_kind]
+                    ? t(ORIGIN_KIND_LABEL_KEYS[node.origin_kind]!)
+                    : node.origin_kind.replace(/_/g, " ")}
                 </span>
               ) : null}
               <span
@@ -88,14 +103,14 @@ export function DetailDrawer({
               </span>
               {node.origin_plane === "global" ? (
                 <span className="px-2 py-0.5 text-[10px] uppercase tracking-widest rounded bg-[#D4AF37]/20 text-[#7A5A0F]">
-                  global
+                  {t("drawer:globalBadge")}
                 </span>
               ) : null}
             </div>
             <button
               onClick={onClose}
               className="p-1 hover:bg-beige-200 rounded transition-colors -mr-1"
-              aria-label="Close detail drawer"
+              aria-label={t("drawer:close")}
             >
               <X className="w-5 h-5 text-ink-700/40" />
             </button>
@@ -108,7 +123,7 @@ export function DetailDrawer({
           {hasRemembered ? (
             <section className="mb-6">
               <h4 className="text-[10px] uppercase text-ink-700/40 mb-2 tracking-widest">
-                What's remembered
+                {t("drawer:section.whatRemembered")}
               </h4>
               {node.summary ? (
                 <p className="text-sm text-ink-700 leading-relaxed whitespace-pre-wrap max-h-[28vh] overflow-y-auto pr-1">
@@ -117,7 +132,8 @@ export function DetailDrawer({
               ) : null}
               {node.rationale ? (
                 <p className="mt-3 text-xs text-ink-700/70 leading-relaxed">
-                  <span className="font-bold text-ink-700">Why:</span> {node.rationale}
+                  <span className="font-bold text-ink-700">{t("drawer:rationale.label")}</span>{" "}
+                  {node.rationale}
                 </p>
               ) : null}
             </section>
@@ -126,7 +142,7 @@ export function DetailDrawer({
           {hasEvidence ? (
             <section className="mb-6">
               <h4 className="text-[10px] uppercase text-ink-700/40 mb-2 tracking-widest">
-                Evidence
+                {t("drawer:section.evidence")}
               </h4>
               <ul className="space-y-2">
                 {node.evidence_refs?.map((ref) => (
@@ -138,7 +154,7 @@ export function DetailDrawer({
                     <button
                       onClick={() => onCopyCli(ref)}
                       className="text-ink-700/40 hover:text-ink-700"
-                      aria-label={`Copy evidence ${ref}`}
+                      aria-label={t("drawer:copyEvidence", { ref })}
                     >
                       <Copy className="w-3 h-3" />
                     </button>
@@ -151,7 +167,7 @@ export function DetailDrawer({
           {hasTrust ? (
             <section className="mb-6">
               <h4 className="text-[10px] uppercase text-ink-700/40 mb-2 tracking-widest">
-                Trust
+                {t("drawer:section.trust")}
               </h4>
               <div className="flex items-center gap-3 text-xs text-ink-700">
                 <div className="h-2 flex-1 rounded bg-beige-200 overflow-hidden">
@@ -168,12 +184,12 @@ export function DetailDrawer({
           {hasUsage ? (
             <section className="mb-6">
               <h4 className="text-[10px] uppercase text-ink-700/40 mb-2 tracking-widest">
-                Usage
+                {t("drawer:section.usage")}
               </h4>
               <dl className="grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-2 text-xs">
                 {node.last_used_at ? (
                   <>
-                    <dt className="text-ink-700/60">Last used</dt>
+                    <dt className="text-ink-700/60">{t("drawer:lastUsed.label")}</dt>
                     <dd className="text-ink-700" title={node.last_used_at}>
                       {formatRelativeTime(node.last_used_at)}
                     </dd>
@@ -181,7 +197,7 @@ export function DetailDrawer({
                 ) : null}
                 {node.last_hit_at ? (
                   <>
-                    <dt className="text-ink-700/60">Last hit</dt>
+                    <dt className="text-ink-700/60">{t("drawer:lastHit.label")}</dt>
                     <dd className="text-ink-700" title={node.last_hit_at}>
                       {formatRelativeTime(node.last_hit_at)}
                     </dd>
@@ -189,9 +205,12 @@ export function DetailDrawer({
                 ) : null}
                 {node.influence_count !== undefined ? (
                   <>
-                    <dt className="text-ink-700/60">Influence</dt>
+                    <dt className="text-ink-700/60">{t("drawer:influence.label")}</dt>
                     <dd className="text-ink-700">
-                      {node.influence_count} path{node.influence_count === 1 ? "" : "s"} reinforced
+                      {t("drawer:usage.influence", {
+                        count: node.influence_count,
+                        plural: node.influence_count === 1 ? "" : "s"
+                      })}
                     </dd>
                   </>
                 ) : null}
@@ -202,7 +221,7 @@ export function DetailDrawer({
           {canAct ? (
             <section className="mb-6">
               <h4 className="text-[10px] uppercase text-ink-700/40 mb-2 tracking-widest">
-                Actions
+                {t("drawer:section.actions")}
               </h4>
               <div className="grid grid-cols-2 gap-2">
                 <button
@@ -211,7 +230,7 @@ export function DetailDrawer({
                   className="flex items-center justify-center gap-2 rounded bg-[#859900] px-3 py-2 text-xs font-bold uppercase tracking-widest text-beige-50 disabled:opacity-50"
                 >
                   <Check className="w-3 h-3" />
-                  Keep
+                  {t("drawer:action.keep")}
                 </button>
                 <button
                   onClick={() => void runAction("downgrade")}
@@ -219,7 +238,7 @@ export function DetailDrawer({
                   className="flex items-center justify-center gap-2 rounded bg-[#B58900] px-3 py-2 text-xs font-bold uppercase tracking-widest text-beige-50 disabled:opacity-50"
                 >
                   <TrendingDown className="w-3 h-3" />
-                  Downgrade
+                  {t("drawer:action.downgrade")}
                 </button>
                 <button
                   onClick={() => void runAction("retire")}
@@ -227,7 +246,7 @@ export function DetailDrawer({
                   className="flex items-center justify-center gap-2 rounded bg-[#DC322F] px-3 py-2 text-xs font-bold uppercase tracking-widest text-beige-50 disabled:opacity-50"
                 >
                   <Trash2 className="w-3 h-3" />
-                  Delete
+                  {t("drawer:action.retire")}
                 </button>
               </div>
               <div className="mt-3 space-y-2">
@@ -235,7 +254,7 @@ export function DetailDrawer({
                   value={rewriteContent}
                   onChange={(event) => setRewriteContent(event.target.value)}
                   className="min-h-24 w-full resize-y rounded border border-beige-200 bg-white p-2 text-xs text-ink-700 outline-none focus:border-ink-600"
-                  aria-label="Rewrite content"
+                  aria-label={t("drawer:rewriteAria")}
                 />
                 <button
                   onClick={() => void runAction("rewrite", rewriteContent)}
@@ -243,7 +262,7 @@ export function DetailDrawer({
                   className="flex w-full items-center justify-center gap-2 rounded bg-ink-600 px-3 py-2 text-xs font-bold uppercase tracking-widest text-beige-50 disabled:opacity-50"
                 >
                   <Edit3 className="w-3 h-3" />
-                  Rewrite
+                  {t("drawer:action.rewrite")}
                 </button>
               </div>
             </section>
@@ -251,59 +270,59 @@ export function DetailDrawer({
 
           <section className="mb-6">
             <h4 className="text-[10px] uppercase text-ink-700/40 mb-2 tracking-widest">
-              Spotlight
+              {t("drawer:section.spotlight")}
             </h4>
             <button
               onClick={() => onFocusSubgraph(node.id)}
               className="text-xs font-mono text-ink-600 underline hover:text-ink-700"
             >
-              Focus 1-hop subgraph around this node →
+              {t("drawer:focusOneHop")}
             </button>
           </section>
 
           <details className="mb-6">
             <summary className="cursor-pointer text-[10px] uppercase text-ink-700/40 mb-2 tracking-widest">
-              Metadata
+              {t("drawer:section.metadata")}
             </summary>
             <dl className="bg-beige-100 p-3 rounded text-xs grid grid-cols-[5rem_1fr_auto] gap-x-3 gap-y-2 items-baseline">
-              <dt className="text-ink-700/60">id</dt>
+              <dt className="text-ink-700/60">{t("drawer:meta.id")}</dt>
               <dd className="text-ink-700 break-all select-all">{node.id}</dd>
               <button
                 onClick={() => onCopyCli(node.id)}
                 className="text-ink-700/40 hover:text-ink-700"
-                aria-label="Copy node id"
+                aria-label={t("drawer:copyNodeId")}
               >
                 <Copy className="w-3 h-3" />
               </button>
 
               {node.scope_id ? (
                 <>
-                  <dt className="text-ink-700/60">scope</dt>
+                  <dt className="text-ink-700/60">{t("drawer:meta.scope")}</dt>
                   <dd className="text-ink-700 break-all col-span-2">{node.scope_id}</dd>
                 </>
               ) : null}
 
               {node.workspace_id ? (
                 <>
-                  <dt className="text-ink-700/60">workspace</dt>
+                  <dt className="text-ink-700/60">{t("drawer:meta.workspace")}</dt>
                   <dd className="text-ink-700 break-all col-span-2">{node.workspace_id}</dd>
                 </>
               ) : null}
 
               {node.created_at ? (
                 <>
-                  <dt className="text-ink-700/60">created</dt>
+                  <dt className="text-ink-700/60">{t("drawer:meta.created")}</dt>
                   <dd className="text-ink-700 col-span-2" title={node.created_at}>
                     {formatRelativeTime(node.created_at)}
                   </dd>
                 </>
               ) : null}
 
-              <dt className="text-ink-700/60">degree</dt>
+              <dt className="text-ink-700/60">{t("drawer:meta.degree")}</dt>
               <dd className="text-ink-700 col-span-2">
                 {node.degree ?? 0}{" "}
                 <span className="text-ink-700/40">
-                  connection{node.degree === 1 ? "" : "s"}
+                  {t("drawer:meta.connections", { plural: node.degree === 1 ? "" : "s" })}
                 </span>
               </dd>
             </dl>
@@ -315,7 +334,7 @@ export function DetailDrawer({
               className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-ink-600 text-beige-50 rounded hover:bg-ink-700 transition-colors text-xs font-bold uppercase tracking-widest"
             >
               <Terminal className="w-4 h-4" />
-              Open in CLI
+              {t("drawer:openInCli")}
               <Copy className="w-3 h-3 ml-auto opacity-60" />
             </button>
           </div>
@@ -323,8 +342,4 @@ export function DetailDrawer({
       ) : null}
     </div>
   );
-}
-
-function formatOriginKind(value: NonNullable<GraphNode["origin_kind"]>): string {
-  return value.replace(/_/g, " ");
 }

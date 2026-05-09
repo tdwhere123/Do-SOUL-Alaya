@@ -1,0 +1,287 @@
+// Inspector i18n dictionary. The Memory Inspector is a memory-tooling
+// loopback (not an agent surface, per invariants §21a) and ships with two
+// operator-facing locales: zh (default for the primary operator audience)
+// and en. Keys are flat strings with a colon-namespaced prefix so `t()`
+// callers grep cleanly.
+//
+// Adding a key: append it to BOTH dictionaries; missing-key audit test in
+// Locale.test.tsx will fail on drift.
+
+export type Locale = "zh" | "en";
+
+export type DictKey = keyof typeof zh;
+
+export const zh = {
+  // ── nav ─────────────────────────────────────────────────────────────
+  "nav:configuration": "配置",
+  "nav:memoryGraph": "记忆图谱",
+  "nav:pendingProposals": "待审记忆",
+  "nav:systemStatus": "系统状态",
+  "nav:appName": "ALAYA 后台",
+  "nav:locale.zh": "中",
+  "nav:locale.en": "EN",
+
+  // ── common ──────────────────────────────────────────────────────────
+  "common:loading": "加载中…",
+  "common:error": "错误",
+  "common:retry": "重试",
+  "common:close": "关闭",
+  "common:cancel": "取消",
+  "common:copy": "复制",
+  "common:copied": "已复制到剪贴板",
+  "common:none": "无",
+  "common:noWorkspace": "URL 缺少 workspaceId。请用 alaya inspect --workspace 重新启动。",
+
+  // ── graph ───────────────────────────────────────────────────────────
+  "graph:search.placeholder": "搜索 标签 / id / 摘要 / 时间（按 / 聚焦）",
+  "graph:search.noMatch": "无匹配节点",
+  "graph:search.clear": "清除搜索",
+  "graph:search.matchCounter": "{current}/{total}",
+  "graph:search.windowChip": "显示 {window} · 共 {hits} 条",
+  "graph:search.errorChip": "搜索失败 · {message} · 已回退到关键字",
+  "graph:scanning": "正在扫描记忆面…",
+  "graph:loadError": "图谱加载错误",
+  "graph:meta.nodes": "{shown}/{total} 节点",
+  "graph:meta.edges": "{shown}/{total} 边",
+  "graph:meta.sampled": "已采样",
+  "graph:meta.complete": "完整",
+  "graph:viewMode.2d": "2D",
+  "graph:viewMode.3d": "3D",
+  "graph:viewMode.label": "图谱视图模式",
+  "graph:viewMode.unavailable": "当前环境不支持 3D（缺 WebGL）",
+  "graph:webgl.locked": "当前环境不支持 3D，已锁定 2D。",
+  "graph:hint3d": "拖拽 = 旋转 · 右键拖拽 = 平移 · 滚轮 = 缩放 ·（触屏：单指旋转 · 双指平移 / 缩放）",
+  "graph:largeGraphMode": "大图模式：边粒子已暂停，正在监视帧率。",
+  "graph:largeGraphMode.lowFps": "检测到帧率偏低，建议切回 2D。",
+  "graph:legend.user_memory": "用户记忆",
+  "graph:legend.engineering_chunk": "工程片段",
+  "graph:legend.reviewed_engineering_chunk": "已审工程片段",
+  "graph:legend.proposal_pending": "待审提议",
+  "graph:legend.system": "系统",
+  "graph:legend.user_memory.tip": "用户提炼或主动确认的记忆",
+  "graph:legend.engineering_chunk.tip": "从 .codex 等工程源自动导入",
+  "graph:legend.reviewed_engineering_chunk.tip": "工程来源 + 已被人审通过",
+  "graph:legend.proposal_pending.tip": "等待 governance 审核中",
+  "graph:legend.system.tip": "Bootstrap / 安装 / 运行时派生",
+
+  // ── detail drawer ───────────────────────────────────────────────────
+  "drawer:section.whatRemembered": "记住了什么",
+  "drawer:section.evidence": "证据",
+  "drawer:section.trust": "可信度",
+  "drawer:section.usage": "使用情况",
+  "drawer:section.actions": "操作",
+  "drawer:section.spotlight": "聚焦",
+  "drawer:section.metadata": "元数据",
+  "drawer:rationale.label": "为什么记：",
+  "drawer:rationale.empty": "未提供原因",
+  "drawer:globalBadge": "全局",
+  "drawer:nodeAriaLabel": "节点详情",
+  "drawer:close": "关闭详情面板",
+  "drawer:copyEvidence": "复制证据 {ref}",
+  "drawer:copyNodeId": "复制节点 id",
+  "drawer:rewriteAria": "改写后的内容",
+  "drawer:focusOneHop": "聚焦此节点的 1 跳邻接 →",
+  "drawer:meta.id": "id",
+  "drawer:meta.scope": "scope",
+  "drawer:meta.workspace": "workspace",
+  "drawer:meta.created": "创建于",
+  "drawer:meta.degree": "度数",
+  "drawer:meta.connections": "条连接",
+  "drawer:usage.influence": "{count} 条路径已被强化",
+  "drawer:confidence.label": "可信度",
+  "drawer:stability.label": "稳定性",
+  "drawer:lastUsed.label": "最近用过",
+  "drawer:lastHit.label": "最近命中",
+  "drawer:influence.label": "已强化路径数",
+  "drawer:lastUsed.never": "从未",
+  "drawer:focusSubgraph": "聚焦 1 跳子图",
+  "drawer:openInCli": "在 CLI 中打开",
+  "drawer:action.keep": "保留",
+  "drawer:action.rewrite": "改写",
+  "drawer:action.downgrade": "降权",
+  "drawer:action.retire": "删除",
+  "drawer:action.rewritePrompt": "请输入新内容（提交后将进入审核）",
+  "drawer:action.proposalCreated": "提议已创建，请到「待审记忆」复核。",
+  "drawer:action.proposalAlreadyPending": "已有相同的待审提议。请到「待审记忆」复核。",
+  "drawer:action.proposalReviewLink": "去复核",
+  "drawer:action.proposalFailed": "提议创建失败",
+  "drawer:action.noWorkspace": "未选中 workspace",
+
+  // ── proposals page ──────────────────────────────────────────────────
+  "proposals:title": "待审记忆",
+  "proposals:reviewer.label": "审核人身份（接受/拒绝必填）",
+  "proposals:reviewer.placeholder": "user:你的名字",
+  "proposals:reviewer.required": "必须先填审核人身份才能接受/拒绝。",
+  "proposals:loading": "加载提议中…",
+  "proposals:empty": "暂无待审提议。",
+  "proposals:errorPrefix": "错误：{message}",
+  "proposals:loadFailedNoWorkspace": "URL 缺少 workspaceId。请用 alaya inspect --workspace 重新启动。",
+  "proposals:row.proposedChanges": "提议改动",
+  "proposals:row.proposedChangesUnavailable": "提议数据缺失，无法接受。",
+  "proposals:row.createdAt": "创建于：{ts}",
+  "proposals:row.reasonPlaceholder": "可选：填一段审核理由",
+  "proposals:row.reasonAria": "提议 {id} 的审核理由",
+  "proposals:row.accept": "接受",
+  "proposals:row.reject": "拒绝",
+  "proposals:row.targetSeparator": "→",
+  "proposals:toast.reviewed": "提议 {id} 已 {state}。",
+  "proposals:toast.reviewFailed": "审核失败",
+  "proposals:status.accepted": "接受",
+  "proposals:status.rejected": "拒绝",
+  "proposals:status.pending": "待审",
+
+  // ── config page (light coverage; full audit deferred) ──────────────
+  "config:title": "配置",
+  "config:loading": "加载配置中…",
+
+  // ── status page ────────────────────────────────────────────────────
+  "status:title": "系统状态",
+  "status:loading": "加载状态中…",
+
+  // ── session ────────────────────────────────────────────────────────
+  "session:expired.title": "会话已过期",
+  "session:expired.body": "Inspector 安全 token 已失效。请关闭标签页并重新运行 alaya inspect。",
+
+  // ── toast (default texts) ──────────────────────────────────────────
+  "toast.dismiss": "关闭"
+} as const;
+
+export const en: Record<DictKey, string> = {
+  // nav
+  "nav:configuration": "Configuration",
+  "nav:memoryGraph": "Memory Graph",
+  "nav:pendingProposals": "Pending Proposals",
+  "nav:systemStatus": "System Status",
+  "nav:appName": "ALAYA INSPECTOR",
+  "nav:locale.zh": "中",
+  "nav:locale.en": "EN",
+
+  // common
+  "common:loading": "Loading…",
+  "common:error": "Error",
+  "common:retry": "Retry",
+  "common:close": "Close",
+  "common:cancel": "Cancel",
+  "common:copy": "Copy",
+  "common:copied": "copied to clipboard",
+  "common:none": "None",
+  "common:noWorkspace": "No workspaceId in URL. Re-run `alaya inspect` with --workspace.",
+
+  // graph
+  "graph:search.placeholder": "probe label / id / summary / time (press /)",
+  "graph:search.noMatch": "no nodes match",
+  "graph:search.clear": "Clear search",
+  "graph:search.matchCounter": "{current}/{total}",
+  "graph:search.windowChip": "showing {window} · {hits} hits",
+  "graph:search.errorChip": "search failed · {message} · falling back to keyword",
+  "graph:scanning": "Scanning Memory Fabric...",
+  "graph:loadError": "Graph Error",
+  "graph:meta.nodes": "{shown}/{total} nodes",
+  "graph:meta.edges": "{shown}/{total} edges",
+  "graph:meta.sampled": "sampled",
+  "graph:meta.complete": "complete",
+  "graph:viewMode.2d": "2D",
+  "graph:viewMode.3d": "3D",
+  "graph:viewMode.label": "Graph view mode",
+  "graph:viewMode.unavailable": "3D unavailable: WebGL not supported in this environment",
+  "graph:webgl.locked": "3D not available in this environment. Graph is locked to 2D.",
+  "graph:hint3d": "drag = rotate · right-drag = pan · scroll = zoom · (touch: 1-finger rotate · 2-finger pan / pinch zoom)",
+  "graph:largeGraphMode": "Large graph mode: link particles paused, frame rate watched.",
+  "graph:largeGraphMode.lowFps": "Low FPS detected; switch to 2D for inspection.",
+  "graph:legend.user_memory": "user memory",
+  "graph:legend.engineering_chunk": "engineering chunk",
+  "graph:legend.reviewed_engineering_chunk": "reviewed engineering",
+  "graph:legend.proposal_pending": "proposal pending",
+  "graph:legend.system": "system",
+  "graph:legend.user_memory.tip": "User-curated memory entries",
+  "graph:legend.engineering_chunk.tip": "Auto-imported from .codex / engineering source",
+  "graph:legend.reviewed_engineering_chunk.tip": "Engineering origin, reviewer-accepted",
+  "graph:legend.proposal_pending.tip": "Awaiting governance review",
+  "graph:legend.system.tip": "Bootstrap / install / runtime-derived",
+
+  // detail drawer
+  "drawer:section.whatRemembered": "What's remembered",
+  "drawer:section.evidence": "Evidence",
+  "drawer:section.trust": "Trust",
+  "drawer:section.usage": "Usage",
+  "drawer:section.actions": "Actions",
+  "drawer:section.spotlight": "Spotlight",
+  "drawer:section.metadata": "Metadata",
+  "drawer:rationale.label": "Why:",
+  "drawer:rationale.empty": "No rationale recorded",
+  "drawer:globalBadge": "global",
+  "drawer:nodeAriaLabel": "Node details",
+  "drawer:close": "Close detail drawer",
+  "drawer:copyEvidence": "Copy evidence {ref}",
+  "drawer:copyNodeId": "Copy node id",
+  "drawer:rewriteAria": "Rewrite content",
+  "drawer:focusOneHop": "Focus 1-hop subgraph around this node →",
+  "drawer:meta.id": "id",
+  "drawer:meta.scope": "scope",
+  "drawer:meta.workspace": "workspace",
+  "drawer:meta.created": "created",
+  "drawer:meta.degree": "degree",
+  "drawer:meta.connections": "connection{plural}",
+  "drawer:usage.influence": "{count} path{plural} reinforced",
+  "drawer:confidence.label": "Confidence",
+  "drawer:stability.label": "Stability",
+  "drawer:lastUsed.label": "Last used",
+  "drawer:lastHit.label": "Last hit",
+  "drawer:influence.label": "Paths reinforced",
+  "drawer:lastUsed.never": "never",
+  "drawer:focusSubgraph": "Focus 1-hop subgraph",
+  "drawer:openInCli": "Open in CLI",
+  "drawer:action.keep": "Keep",
+  "drawer:action.rewrite": "Rewrite",
+  "drawer:action.downgrade": "Downgrade",
+  "drawer:action.retire": "Delete",
+  "drawer:action.rewritePrompt": "Enter the new content (will go to review queue)",
+  "drawer:action.proposalCreated": "Proposal created. Review at Pending Proposals.",
+  "drawer:action.proposalAlreadyPending": "Proposal already pending. Review at Pending Proposals.",
+  "drawer:action.proposalReviewLink": "Review",
+  "drawer:action.proposalFailed": "proposal creation failed",
+  "drawer:action.noWorkspace": "No workspace selected.",
+
+  // proposals page
+  "proposals:title": "Pending Proposals",
+  "proposals:reviewer.label": "Reviewer identity (required for accept/reject)",
+  "proposals:reviewer.placeholder": "user:alice",
+  "proposals:reviewer.required": "Reviewer identity is required.",
+  "proposals:loading": "Loading proposals...",
+  "proposals:empty": "No pending proposals.",
+  "proposals:errorPrefix": "Error: {message}",
+  "proposals:loadFailedNoWorkspace": "No workspaceId in URL. Re-run `alaya inspect` with --workspace.",
+  "proposals:row.proposedChanges": "Proposed changes",
+  "proposals:row.proposedChangesUnavailable": "Proposed changes payload unavailable. Accept is disabled.",
+  "proposals:row.createdAt": "created_at: {ts}",
+  "proposals:row.reasonPlaceholder": "optional review reason",
+  "proposals:row.reasonAria": "Review reason for proposal {id}",
+  "proposals:row.accept": "Accept",
+  "proposals:row.reject": "Reject",
+  "proposals:row.targetSeparator": "→",
+  "proposals:toast.reviewed": "Proposal {id} {state}.",
+  "proposals:toast.reviewFailed": "review failed",
+  "proposals:status.accepted": "accepted",
+  "proposals:status.rejected": "rejected",
+  "proposals:status.pending": "pending",
+
+  // config
+  "config:title": "Configuration",
+  "config:loading": "Loading configuration…",
+
+  // status
+  "status:title": "System Status",
+  "status:loading": "Loading status…",
+
+  // session
+  "session:expired.title": "Session expired",
+  "session:expired.body": "The Inspector security token is no longer valid. Close this tab and re-run alaya inspect.",
+
+  // toast
+  "toast.dismiss": "Dismiss"
+};
+
+export const dictionaries: Record<Locale, Record<DictKey, string>> = {
+  zh,
+  en
+};

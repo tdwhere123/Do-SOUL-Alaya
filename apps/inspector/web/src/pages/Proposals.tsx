@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { apiFetch, getWorkspaceId, type ApiError } from "../api";
 import { useToasts } from "../components/Toast";
+import { useI18n } from "../i18n/Locale";
+import type { DictKey } from "../i18n/dict";
 
 // A1 (HITL daemon backbone) — minimal Pending Proposals view. The
 // Inspector is a memory-tooling loopback, not an agent surface, so the
@@ -34,7 +36,14 @@ interface ReviewEnvelope {
   };
 }
 
+const RESOLUTION_STATE_KEYS: Readonly<Record<string, DictKey>> = {
+  accepted: "proposals:status.accepted",
+  rejected: "proposals:status.rejected",
+  pending: "proposals:status.pending"
+};
+
 export default function ProposalsPage() {
+  const { t } = useI18n();
   const [proposals, setProposals] = useState<readonly PendingSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +58,7 @@ export default function ProposalsPage() {
   const refresh = useCallback(async () => {
     const workspaceId = getWorkspaceId();
     if (workspaceId === null) {
-      setError("No workspaceId in URL. Re-run `alaya inspect` with --workspace.");
+      setError(t("proposals:loadFailedNoWorkspace"));
       setLoading(false);
       return;
     }
@@ -68,7 +77,7 @@ export default function ProposalsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void refresh();
@@ -86,7 +95,7 @@ export default function ProposalsPage() {
     async (proposalId: string, verdict: "accept" | "reject") => {
       const trimmedReviewer = reviewer.trim();
       if (trimmedReviewer.length === 0) {
-        showToast({ type: "error", message: "Reviewer identity is required." });
+        showToast({ type: "error", message: t("proposals:reviewer.required") });
         return;
       }
       const workspaceId = getWorkspaceId();
@@ -104,9 +113,13 @@ export default function ProposalsPage() {
             }
           }
         );
+        const stateKey = envelope.data?.resolution_state ?? verdict;
+        const stateLabel = RESOLUTION_STATE_KEYS[stateKey]
+          ? t(RESOLUTION_STATE_KEYS[stateKey]!)
+          : stateKey;
         showToast({
           type: "success",
-          message: `Proposal ${proposalId} ${envelope.data?.resolution_state ?? verdict}.`
+          message: t("proposals:toast.reviewed", { id: proposalId, state: stateLabel })
         });
         await refresh();
       } catch (err) {
@@ -115,44 +128,46 @@ export default function ProposalsPage() {
         }
         showToast({
           type: "error",
-          message: err instanceof Error ? err.message : "review failed"
+          message: err instanceof Error ? err.message : t("proposals:toast.reviewFailed")
         });
       } finally {
         setBusyProposalId(null);
       }
     },
-    [reasonByProposal, refresh, reviewer, showToast]
+    [reasonByProposal, refresh, reviewer, showToast, t]
   );
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold text-[#586E75] mb-4 font-mono uppercase tracking-widest">
-        Pending Proposals
+        {t("proposals:title")}
       </h1>
       <div className="mb-6">
         <label
           htmlFor="proposal-reviewer-identity"
           className="block text-sm font-mono text-[#657B83] mb-1"
         >
-          Reviewer identity (required for accept/reject)
+          {t("proposals:reviewer.label")}
         </label>
         <input
           id="proposal-reviewer-identity"
           type="text"
           value={reviewer}
           onChange={(event) => setReviewer(event.target.value)}
-          placeholder="user:alice"
+          placeholder={t("proposals:reviewer.placeholder")}
           className="w-full px-3 py-2 border border-[#D4CDB8] rounded font-mono text-sm bg-[#FDF6E3]"
         />
       </div>
       {loading && (
-        <p className="text-[#586E75] font-mono text-sm">Loading proposals...</p>
+        <p className="text-[#586E75] font-mono text-sm">{t("proposals:loading")}</p>
       )}
       {error !== null && (
-        <p className="text-red-700 font-mono text-sm">Error: {error}</p>
+        <p className="text-red-700 font-mono text-sm">
+          {t("proposals:errorPrefix", { message: error })}
+        </p>
       )}
       {!loading && proposals.length === 0 && (
-        <p className="text-[#657B83] font-mono text-sm">No pending proposals.</p>
+        <p className="text-[#657B83] font-mono text-sm">{t("proposals:empty")}</p>
       )}
       <ul className="space-y-4">
         {proposals.map((proposal) => {
@@ -176,18 +191,18 @@ export default function ProposalsPage() {
               {proposal.proposal_id}
             </div>
             <div className="font-mono text-sm text-[#586E75] mb-2">
-              {proposal.target_object_kind} → {proposal.target_object_id}
+              {proposal.target_object_kind} {t("proposals:row.targetSeparator")} {proposal.target_object_id}
             </div>
             <div className="text-sm text-[#657B83] mb-3">
               {proposal.proposed_change_summary}
             </div>
             <div className="mb-3 rounded border border-[#D4CDB8] bg-white p-3">
               <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-[#93A1A1]">
-                Proposed changes
+                {t("proposals:row.proposedChanges")}
               </div>
               {proposedChangesDisplay === null ? (
                 <p className="font-mono text-xs text-red-700">
-                  Proposed changes payload unavailable. Accept is disabled.
+                  {t("proposals:row.proposedChangesUnavailable")}
                 </p>
               ) : (
                 <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-[#586E75]">
@@ -196,16 +211,16 @@ export default function ProposalsPage() {
               )}
             </div>
             <div className="text-xs text-[#93A1A1] mb-3 font-mono">
-              created_at: {proposal.created_at}
+              {t("proposals:row.createdAt", { ts: proposal.created_at })}
             </div>
             <label htmlFor={reasonInputId} className="sr-only">
-              Review reason for proposal {proposal.proposal_id}
+              {t("proposals:row.reasonAria", { id: proposal.proposal_id })}
             </label>
             <input
               id={reasonInputId}
               type="text"
-              placeholder="optional review reason"
-              aria-label={`Review reason for proposal ${proposal.proposal_id}`}
+              placeholder={t("proposals:row.reasonPlaceholder")}
+              aria-label={t("proposals:row.reasonAria", { id: proposal.proposal_id })}
               value={reasonByProposal[proposal.proposal_id] ?? ""}
               onChange={(event) =>
                 setReasonByProposal((prev) => ({
@@ -222,7 +237,7 @@ export default function ProposalsPage() {
                 onClick={() => void submitReview(proposal.proposal_id, "accept")}
                 className="px-4 py-2 bg-[#859900] text-white font-mono text-sm rounded disabled:opacity-50"
               >
-                Accept
+                {t("proposals:row.accept")}
               </button>
               <button
                 type="button"
@@ -230,7 +245,7 @@ export default function ProposalsPage() {
                 onClick={() => void submitReview(proposal.proposal_id, "reject")}
                 className="px-4 py-2 bg-[#DC322F] text-white font-mono text-sm rounded disabled:opacity-50"
               >
-                Reject
+                {t("proposals:row.reject")}
               </button>
             </div>
           </li>

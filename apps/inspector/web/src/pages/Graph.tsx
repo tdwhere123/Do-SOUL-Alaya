@@ -20,6 +20,8 @@ import { useToasts } from "../components/Toast";
 import { DetailDrawer } from "../components/DetailDrawer";
 import type { GraphNode, GraphLink, SpotlightState } from "../types/graph";
 import { parseSearchQuery } from "../utils/parse-search-query";
+import { useI18n } from "../i18n/Locale";
+import type { DictKey } from "../i18n/dict";
 import {
   EDGE_TYPE_BASE_COLOR,
   ORIGIN_KIND_COLOR,
@@ -77,6 +79,7 @@ const LOW_FPS_FRAME_COUNT = 15;
 const RECOVERED_FPS_FRAME_COUNT = 15;
 
 export default function GraphPage() {
+  const { t } = useI18n();
   const viewportRef = useRef<HTMLDivElement>(null);
   const fg2dRef = useRef<ForceGraphMethods2D<GraphNode, GraphLink> | undefined>(undefined);
   const fg3dRef = useRef<ForceGraphMethods3D<GraphNode, GraphLink> | undefined>(undefined);
@@ -489,9 +492,9 @@ export default function GraphPage() {
   const copyToClipboard = useCallback(
     (text: string) => {
       void navigator.clipboard.writeText(text);
-      showToast({ message: "copied to clipboard", type: "success", duration: 2500 });
+      showToast({ message: t("common:copied"), type: "success", duration: 2500 });
     },
-    [showToast]
+    [showToast, t]
   );
 
   const createMemoryProposal = useCallback(
@@ -501,7 +504,7 @@ export default function GraphPage() {
       newContent?: string
     ) => {
       if (workspaceId === null) {
-        showToast({ type: "error", message: "No workspace selected." });
+        showToast({ type: "error", message: t("drawer:action.noWorkspace") });
         return;
       }
       try {
@@ -517,10 +520,10 @@ export default function GraphPage() {
         showToast({
           type: "success",
           message: alreadyPending
-            ? "Proposal already pending. Review at Pending Proposals."
-            : "Proposal created. Review at Pending Proposals.",
+            ? t("drawer:action.proposalAlreadyPending")
+            : t("drawer:action.proposalCreated"),
           action: {
-            label: "Review",
+            label: t("drawer:action.proposalReviewLink"),
             onClick: () => navigate(`/proposals?highlight=${encodeURIComponent(proposalId)}`)
           }
         });
@@ -531,11 +534,11 @@ export default function GraphPage() {
         }
         showToast({
           type: "error",
-          message: err instanceof Error ? err.message : "proposal creation failed"
+          message: err instanceof Error ? err.message : t("drawer:action.proposalFailed")
         });
       }
     },
-    [navigate, showToast, workspaceId]
+    [navigate, showToast, workspaceId, t]
   );
 
   const computeNodeColor = useCallback(
@@ -673,20 +676,25 @@ export default function GraphPage() {
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="probe label / id / summary  (press /)"
+            placeholder={t("graph:search.placeholder")}
             className="min-w-0 flex-1 bg-transparent font-mono text-xs text-ink-700 outline-none placeholder:text-ink-700/30"
-            aria-label="Search graph nodes"
+            aria-label={t("graph:search.placeholder")}
           />
           {spotlightActive ? (
             <span className="text-[10px] text-ink-700/40 font-mono whitespace-nowrap">
-              {matchCount === 0 ? "no nodes match" : `${matchCursor + 1}/${matchCount}`}
+              {matchCount === 0
+                ? t("graph:search.noMatch")
+                : t("graph:search.matchCounter", {
+                    current: matchCursor + 1,
+                    total: matchCount
+                  })}
             </span>
           ) : null}
           {searchTerm ? (
             <button
               onClick={() => setSearchTerm("")}
               className="text-ink-700/40 hover:text-ink-700"
-              aria-label="Clear search"
+              aria-label={t("graph:search.clear")}
             >
               <X className="w-3 h-3" />
             </button>
@@ -701,7 +709,7 @@ export default function GraphPage() {
 
       {data && !webglSupported ? (
         <div className="absolute left-4 top-16 z-20 max-w-md rounded-md border border-[#D4AF37]/35 bg-beige-50/95 px-3 py-2 font-mono text-[10px] uppercase tracking-wide text-ink-700/65 shadow-sm">
-          3D not available in this environment. Graph is locked to 2D.
+          {t("graph:webgl.locked")}
         </div>
       ) : null}
 
@@ -710,7 +718,10 @@ export default function GraphPage() {
           className="absolute left-1/2 top-16 z-20 -translate-x-1/2 rounded-full border border-[#4A90A4]/35 bg-beige-50/95 px-3 py-1 font-mono text-[10px] uppercase tracking-wide text-ink-700/70 shadow-sm"
           data-testid="search-time-window-chip"
         >
-          showing {searchTimeHits.windowLabel} · {searchTimeHits.ids.size} hits
+          {t("graph:search.windowChip", {
+            window: searchTimeHits.windowLabel,
+            hits: searchTimeHits.ids.size
+          })}
         </div>
       ) : null}
 
@@ -719,14 +730,14 @@ export default function GraphPage() {
           className="absolute left-1/2 top-16 z-20 -translate-x-1/2 rounded-md border border-[#C9ADA7] bg-beige-50/95 px-3 py-1 font-mono text-[10px] uppercase tracking-wide text-[#8B4536] shadow-sm"
           data-testid="search-error-chip"
         >
-          search failed · {searchError} · falling back to keyword
+          {t("graph:search.errorChip", { message: searchError })}
         </div>
       ) : null}
 
       {data && largeGraphMode ? (
         <div className="absolute left-4 top-16 z-20 max-w-md rounded-md border border-beige-200 bg-beige-50/95 px-3 py-2 font-mono text-[10px] uppercase tracking-wide text-ink-700/65 shadow-sm">
-          large graph mode: link particles are paused and frame rate is watched.
-          {lowFpsDetected ? " Low FPS detected; switch to 2D for inspection." : ""}
+          {t("graph:largeGraphMode")}
+          {lowFpsDetected ? ` ${t("graph:largeGraphMode.lowFps")}` : ""}
         </div>
       ) : null}
 
@@ -735,7 +746,7 @@ export default function GraphPage() {
           <div className="flex flex-col items-center gap-3">
             <div className="w-10 h-10 border-2 border-[#586E75]/20 border-t-[#586E75] rounded-full animate-spin" />
             <p className="font-mono text-xs uppercase text-ink-600 tracking-widest">
-              Scanning Memory Fabric...
+              {t("graph:scanning")}
             </p>
           </div>
         </div>
@@ -744,7 +755,7 @@ export default function GraphPage() {
       {error ? (
         <div className="absolute inset-0 flex items-center justify-center z-10 p-8">
           <div className="bg-beige-50 border border-[#C9ADA7] p-4 rounded-md max-w-md">
-            <h3 className="text-ink-600 font-bold mb-2 font-mono">Graph Error</h3>
+            <h3 className="text-ink-600 font-bold mb-2 font-mono">{t("graph:loadError")}</h3>
             <p className="text-ink-700 text-sm font-mono">{error}</p>
           </div>
         </div>
@@ -753,18 +764,18 @@ export default function GraphPage() {
       {data ? (
         <div className="absolute bottom-4 left-4 z-20 flex items-center gap-2 rounded-md border border-beige-200 bg-beige-50/95 px-3 py-2 text-[10px] font-mono uppercase text-ink-700/55 shadow-sm">
           <span>
-            {data.nodes.length}/{data.meta.nodeTotal} nodes
+            {t("graph:meta.nodes", { shown: data.nodes.length, total: data.meta.nodeTotal })}
           </span>
           <span>·</span>
           <span>
-            {data.links.length}/{data.meta.edgeTotal} edges
+            {t("graph:meta.edges", { shown: data.links.length, total: data.meta.edgeTotal })}
           </span>
           <span className="rounded-sm bg-[#586E75]/10 px-1.5 py-0.5 text-ink-700/65">
             {data.meta.truncated ||
             data.nodes.length < data.meta.nodeTotal ||
             data.links.length < data.meta.edgeTotal
-              ? "sampled"
-              : "complete"}
+              ? t("graph:meta.sampled")
+              : t("graph:meta.complete")}
           </span>
         </div>
       ) : null}
@@ -773,7 +784,7 @@ export default function GraphPage() {
 
       {data && effectiveMode === "3d" ? (
         <div className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-md border border-beige-200 bg-beige-50/95 px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-ink-700/55 shadow-sm">
-          drag = rotate · right-drag = pan · scroll = zoom · (touch: 1-finger rotate · 2-finger pan / pinch zoom)
+          {t("graph:hint3d")}
         </div>
       ) : null}
 
@@ -869,11 +880,12 @@ interface ViewModeToggleProps {
 }
 
 function ViewModeToggle({ mode, webglSupported, onChange }: ViewModeToggleProps) {
+  const { t } = useI18n();
   return (
     <div
       className="flex items-center gap-1 rounded-full border border-beige-200 bg-beige-50/95 p-1 shadow-sm"
       role="group"
-      aria-label="Graph view mode"
+      aria-label={t("graph:viewMode.label")}
     >
       <button
         type="button"
@@ -883,7 +895,7 @@ function ViewModeToggle({ mode, webglSupported, onChange }: ViewModeToggleProps)
         }`}
         aria-pressed={mode === "2d"}
       >
-        <Square className="w-3 h-3" /> 2D
+        <Square className="w-3 h-3" /> {t("graph:viewMode.2d")}
       </button>
       <button
         type="button"
@@ -893,36 +905,45 @@ function ViewModeToggle({ mode, webglSupported, onChange }: ViewModeToggleProps)
           mode === "3d" ? "bg-[#586E75] text-beige-50" : "text-ink-700/60 hover:text-ink-700"
         } ${webglSupported ? "" : "cursor-not-allowed opacity-40"}`}
         aria-pressed={mode === "3d"}
-        title={webglSupported ? undefined : "3D unavailable: WebGL not supported in this environment"}
+        title={webglSupported ? undefined : t("graph:viewMode.unavailable")}
       >
-        <Box className="w-3 h-3" /> 3D
+        <Box className="w-3 h-3" /> {t("graph:viewMode.3d")}
       </button>
     </div>
   );
 }
 
 function OriginLegend() {
-  const items: ReadonlyArray<{ kind: string; label: string; glyph: string; title: string }> = [
-    { kind: "user_memory", label: "user memory", glyph: "U", title: "User-curated memory entries" },
-    { kind: "engineering_chunk", label: "engineering chunk", glyph: "E", title: "Auto-imported from .codex / engineering source" },
-    { kind: "reviewed_engineering_chunk", label: "reviewed engineering", glyph: "R", title: "Engineering origin, reviewer-accepted" },
-    { kind: "proposal_pending", label: "proposal pending", glyph: "P", title: "Awaiting governance review" },
-    { kind: "system", label: "system", glyph: "S", title: "Bootstrap / install / runtime-derived" }
+  const { t } = useI18n();
+  const items: ReadonlyArray<{
+    readonly kind: string;
+    readonly labelKey: DictKey;
+    readonly tipKey: DictKey;
+    readonly glyph: string;
+  }> = [
+    { kind: "user_memory", labelKey: "graph:legend.user_memory", tipKey: "graph:legend.user_memory.tip", glyph: "U" },
+    { kind: "engineering_chunk", labelKey: "graph:legend.engineering_chunk", tipKey: "graph:legend.engineering_chunk.tip", glyph: "E" },
+    { kind: "reviewed_engineering_chunk", labelKey: "graph:legend.reviewed_engineering_chunk", tipKey: "graph:legend.reviewed_engineering_chunk.tip", glyph: "R" },
+    { kind: "proposal_pending", labelKey: "graph:legend.proposal_pending", tipKey: "graph:legend.proposal_pending.tip", glyph: "P" },
+    { kind: "system", labelKey: "graph:legend.system", tipKey: "graph:legend.system.tip", glyph: "S" }
   ];
   return (
     <div className="absolute bottom-4 right-4 z-20 flex flex-col gap-1 rounded-md border border-beige-200 bg-beige-50/95 px-3 py-2 text-[10px] font-mono uppercase text-ink-700/65 shadow-sm">
-      {items.map((item) => (
-        <div key={item.kind} className="flex items-center gap-2" title={item.title}>
-          <span
-            className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[8px] font-bold text-beige-50"
-            style={{ backgroundColor: ORIGIN_KIND_COLOR[item.kind] }}
-            aria-label={`${item.label} (${item.glyph})`}
-          >
-            {item.glyph}
-          </span>
-          <span>{item.label}</span>
-        </div>
-      ))}
+      {items.map((item) => {
+        const label = t(item.labelKey);
+        return (
+          <div key={item.kind} className="flex items-center gap-2" title={t(item.tipKey)}>
+            <span
+              className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[8px] font-bold text-beige-50"
+              style={{ backgroundColor: ORIGIN_KIND_COLOR[item.kind] }}
+              aria-label={`${label} (${item.glyph})`}
+            >
+              {item.glyph}
+            </span>
+            <span>{label}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
