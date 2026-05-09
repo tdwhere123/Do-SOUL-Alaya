@@ -9,7 +9,12 @@ export interface GraphNode extends SimulationNodeDatum {
   workspace_id?: string;
   created_at?: string;
   origin_plane?: "project" | "global";
-  origin_kind?: "user_memory" | "engineering_chunk" | "proposal_pending" | "system";
+  origin_kind?:
+    | "user_memory"
+    | "engineering_chunk"
+    | "reviewed_engineering_chunk"
+    | "proposal_pending"
+    | "system";
   evidence_refs?: readonly string[];
   rationale?: string;
   confidence?: number;

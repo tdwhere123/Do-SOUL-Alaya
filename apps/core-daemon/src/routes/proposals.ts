@@ -227,6 +227,29 @@ async function createMemoryActionProposal(
     readonly reason: string;
   }
 ): Promise<Response> {
+  // M-1 dedupe — second click of the same Inspector action button on the
+  // same memory should NOT spam-create duplicate pending proposals. We
+  // best-effort scan up to 100 pending proposals (the soul.list_pending_proposals
+  // tool's max limit) and reuse an existing proposal whose target + proposed_changes
+  // canonically match. Workspaces with >100 pending proposals may miss tail matches;
+  // Inspector clicks are not a high-frequency path so this is acceptable. If the
+  // miss rate becomes a problem, lift this lookup off the MCP tool and onto a
+  // direct proposalRepo.findPendingSummaries call without the 100-row cap.
+  const existing = await findExistingPendingMatch(services, {
+    workspaceId: input.workspaceId,
+    memoryId: input.memoryId,
+    proposed_changes: input.proposed_changes
+  });
+  if (existing !== null) {
+    return context.json(
+      {
+        success: true,
+        data: { proposal_id: existing, status: "already_pending" }
+      },
+      200
+    );
+  }
+
   const result = await services.mcpMemoryToolHandler.call({
     toolName: "soul.propose_memory_update",
     arguments: {
@@ -270,4 +293,50 @@ function clamp01(value: number): number {
   if (value <= 0) return 0;
   if (value >= 1) return 1;
   return Number(value.toFixed(6));
+}
+
+async function findExistingPendingMatch(
+  services: ProposalRouteServices,
+  input: {
+    readonly workspaceId: string;
+    readonly memoryId: string;
+    readonly proposed_changes: Record<string, unknown>;
+  }
+): Promise<string | null> {
+  const result = await services.mcpMemoryToolHandler.call({
+    toolName: "soul.list_pending_proposals",
+    arguments: { limit: 100 },
+    context: {
+      workspaceId: input.workspaceId,
+      runId: null,
+      agentTarget: "inspector"
+    }
+  });
+  if (!result.ok) return null;
+  const output = result.output as
+    | {
+        readonly proposals?: ReadonlyArray<{
+          readonly proposal_id: string;
+          readonly target_object_id: string;
+          readonly proposed_changes: Record<string, unknown> | null;
+        }>;
+      }
+    | null
+    | undefined;
+  const proposals = output?.proposals ?? [];
+  if (proposals.length === 0) return null;
+  const targetKey = canonicalizeChanges(input.proposed_changes);
+  for (const proposal of proposals) {
+    if (proposal.target_object_id !== input.memoryId) continue;
+    if (proposal.proposed_changes === null) continue;
+    if (canonicalizeChanges(proposal.proposed_changes) === targetKey) {
+      return proposal.proposal_id;
+    }
+  }
+  return null;
+}
+
+function canonicalizeChanges(value: Record<string, unknown>): string {
+  const sortedKeys = Object.keys(value).sort();
+  return JSON.stringify(sortedKeys.map((key) => [key, value[key]]));
 }

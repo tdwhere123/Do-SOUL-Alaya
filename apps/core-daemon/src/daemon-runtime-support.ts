@@ -248,7 +248,7 @@ export function createSoulGraphService(input: {
   readonly memoryEntryRepo: SqliteMemoryEntryRepo;
   readonly memoryGraphEdgeRepo: SqliteMemoryGraphEdgeRepo;
   readonly pathRelationRepo: Pick<PathRelationRepo, "findActive">;
-  readonly proposalRepo: Pick<ProposalRepo, "findPendingSummaries">;
+  readonly proposalRepo: Pick<ProposalRepo, "findPendingSummaries" | "countPending">;
   readonly eventLogRepo: Pick<SqliteEventLogRepo, "queryByWorkspaceAndType">;
   readonly now?: () => string;
 }) {
@@ -261,7 +261,14 @@ export function createSoulGraphService(input: {
       readonly depth: number;
       readonly limit: number;
     }): Promise<SoulGraph> => {
-      const [memories, edges, pathRelations, pendingProposals, memoryUpdateEvents] = await Promise.all([
+      const [
+        memories,
+        edges,
+        pathRelations,
+        pendingProposals,
+        pendingProposalsTotal,
+        memoryUpdateEvents
+      ] = await Promise.all([
         input.memoryEntryRepo.findByWorkspaceId(workspaceId),
         input.memoryGraphEdgeRepo.findByWorkspace(workspaceId),
         input.pathRelationRepo.findActive(workspaceId),
@@ -269,6 +276,7 @@ export function createSoulGraphService(input: {
           limit,
           now: input.now?.()
         }),
+        input.proposalRepo.countPending(workspaceId),
         input.eventLogRepo.queryByWorkspaceAndType(
           workspaceId,
           MemoryGovernanceEventType.SOUL_MEMORY_UPDATED
@@ -276,6 +284,16 @@ export function createSoulGraphService(input: {
       ]);
       const limitedMemories = memories.slice(0, limit);
       const memoryIds = new Set(limitedMemories.map((memory: MemoryEntryRecord) => memory.object_id));
+      // Edge limit precedence under pressure: PathRelation edges (the new
+      // dynamics-driven view, with strength + stability + last_reinforced_at
+      // metadata that Phase 3 visual encoding depends on) claim limit slots
+      // first; legacy memoryGraphEdge rows fill the remainder. This means a
+      // workspace with >limit PathRelation edges will visually drop the
+      // legacy edges entirely until the limit is raised. The precedence is
+      // intentional — path-plasticity edges carry richer semantics — but it
+      // is pinned by `prefers PathRelation edges over legacy edges under
+      // limit pressure` in soul-graph-service.test.ts so any future re-order
+      // surfaces in the test diff.
       const pathRelationEdges = buildPathRelationEdges(pathRelations, memoryIds).slice(0, limit);
       const limitedEdges = edges
         .filter((edge) => memoryIds.has(edge.source_memory_id) && memoryIds.has(edge.target_memory_id))
@@ -331,8 +349,13 @@ export function createSoulGraphService(input: {
         truncated:
           memories.length > limitedMemories.length ||
           edges.length > limitedEdges.length ||
-          pathRelations.length > pathRelationEdges.length,
-        node_total: memories.length + pendingProposals.length + countUniqueDomainTags(memories),
+          pathRelations.length > pathRelationEdges.length ||
+          pendingProposalsTotal > pendingProposals.length,
+        // Use the cheap COUNT(*) over pending proposals, NOT pendingProposals.length:
+        // findPendingSummaries SQL-LIMITs to `limit`, so pendingProposals.length is
+        // capped and would understate node_total when more than `limit` proposals are
+        // pending — the inspector "sampled vs complete" chip would silently lie.
+        node_total: memories.length + pendingProposalsTotal + countUniqueDomainTags(memories),
         edge_total:
           edges.length +
           countPathRelationEdges(pathRelations, new Set(memories.map((memory) => memory.object_id))) +
@@ -347,19 +370,25 @@ export function classifySoulGraphOriginKind(
   memory: Pick<MemoryEntryRecord, "source_kind" | "formation_kind" | "created_by" | "evidence_refs">,
   hasAcceptedProposalApply = false
 ): SoulGraphOriginKind {
-  if (hasAcceptedProposalApply) {
-    return "user_memory";
-  }
-  if (memory.source_kind === "user" || memory.source_kind === "review") {
-    return "user_memory";
-  }
-  if (
+  // Origin classification preserves the entry's *true source* even after a
+  // reviewer accepts a downstream proposal. The previous "governance history
+  // wins" rule (accepted apply → user_memory regardless of source) silently
+  // relabeled engineering imports as user memories, corrupting attribution.
+  // Per Phase 2 review-loop M-6 decision, an engineering-origin entry that
+  // has been reviewer-accepted is its own dedicated kind:
+  // `reviewed_engineering_chunk`, not `user_memory`.
+  const isEngineeringOrigin =
     memory.source_kind === "import" ||
     memory.formation_kind === "imported" ||
     memory.created_by.toLowerCase().includes("codex") ||
-    memory.evidence_refs.some((ref) => ref.includes(".codex/memories"))
-  ) {
-    return "engineering_chunk";
+    memory.evidence_refs.some((ref) => ref.includes(".codex/memories"));
+  const isUserOrigin = memory.source_kind === "user" || memory.source_kind === "review";
+
+  if (isEngineeringOrigin) {
+    return hasAcceptedProposalApply ? "reviewed_engineering_chunk" : "engineering_chunk";
+  }
+  if (isUserOrigin || hasAcceptedProposalApply) {
+    return "user_memory";
   }
   return "system";
 }

@@ -20,6 +20,7 @@ const soulGraphOriginPlaneValues = ["project", "global"] as const;
 const soulGraphOriginKindValues = [
   "user_memory",
   "engineering_chunk",
+  "reviewed_engineering_chunk",
   "proposal_pending",
   "system"
 ] as const;

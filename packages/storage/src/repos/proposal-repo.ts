@@ -138,6 +138,12 @@ export interface ProposalRepo {
   findScopedById(proposalId: string): Promise<Readonly<ScopedProposal> | null>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<Proposal>[]>;
   findPending(workspaceId: string): Promise<readonly Readonly<Proposal>[]>;
+  // Cheap COUNT(*) for pending proposals in a workspace. Used by the soul
+  // graph endpoint to report a true `node_total` independent of the
+  // findPendingSummaries SQL `LIMIT` (otherwise the sampled-vs-complete
+  // chip in the inspector would lie when more than `limit` pending
+  // proposals exist).
+  countPending(workspaceId: string): Promise<number>;
   findPendingSummaries(
     workspaceId: string,
     options?: FindPendingSummariesOptions
@@ -251,6 +257,7 @@ export class SqliteProposalRepo implements ProposalRepo {
   private readonly findByIdStatement;
   private readonly findByWorkspaceIdStatement;
   private readonly findPendingStatement;
+  private readonly countPendingStatement;
   private readonly findPendingByRunIdStatement;
   private readonly assignReviewerStatement;
   private readonly findReviewerAssignmentStatement;
@@ -309,6 +316,12 @@ export class SqliteProposalRepo implements ProposalRepo {
       FROM proposals
       WHERE workspace_id = ? AND resolution_state = 'pending'
       ORDER BY last_updated_at DESC, proposal_id DESC
+    `);
+
+    this.countPendingStatement = db.connection.prepare(`
+      SELECT COUNT(*) AS total
+      FROM proposals
+      WHERE workspace_id = ? AND resolution_state = 'pending'
     `);
 
     this.findPendingByRunIdStatement = db.connection.prepare(`
@@ -557,6 +570,23 @@ export class SqliteProposalRepo implements ProposalRepo {
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list pending proposals for workspace ${parsedWorkspaceId}.`,
+        error
+      );
+    }
+  }
+
+  public async countPending(workspaceId: string): Promise<number> {
+    const parsedWorkspaceId = parseWorkspaceId(workspaceId);
+
+    try {
+      const row = this.countPendingStatement.get(parsedWorkspaceId) as
+        | { readonly total: number }
+        | undefined;
+      return row === undefined ? 0 : Number(row.total);
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to count pending proposals for workspace ${parsedWorkspaceId}.`,
         error
       );
     }

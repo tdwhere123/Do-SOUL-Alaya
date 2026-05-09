@@ -35,8 +35,9 @@ describe("createSoulGraphService", () => {
         findActive: async () => []
       } as unknown as Pick<PathRelationRepo, "findActive">,
       proposalRepo: {
-        findPendingSummaries: async () => []
-      } as unknown as Pick<ProposalRepo, "findPendingSummaries">,
+        findPendingSummaries: async () => [],
+        countPending: async () => 0
+      } as unknown as Pick<ProposalRepo, "findPendingSummaries" | "countPending">,
       eventLogRepo: emptyEventLogRepo()
     });
 
@@ -111,8 +112,9 @@ describe("createSoulGraphService", () => {
         findActive: async () => []
       } as unknown as Pick<PathRelationRepo, "findActive">,
       proposalRepo: {
-        findPendingSummaries: async () => []
-      } as unknown as Pick<ProposalRepo, "findPendingSummaries">,
+        findPendingSummaries: async () => [],
+        countPending: async () => 0
+      } as unknown as Pick<ProposalRepo, "findPendingSummaries" | "countPending">,
       eventLogRepo: emptyEventLogRepo()
     });
 
@@ -155,8 +157,9 @@ describe("createSoulGraphService", () => {
         findActive: async () => []
       } as unknown as Pick<PathRelationRepo, "findActive">,
       proposalRepo: {
-        findPendingSummaries: async () => []
-      } as unknown as Pick<ProposalRepo, "findPendingSummaries">,
+        findPendingSummaries: async () => [],
+        countPending: async () => 0
+      } as unknown as Pick<ProposalRepo, "findPendingSummaries" | "countPending">,
       eventLogRepo: emptyEventLogRepo()
     });
 
@@ -196,8 +199,9 @@ describe("createSoulGraphService", () => {
         findActive: async () => []
       } as unknown as Pick<PathRelationRepo, "findActive">,
       proposalRepo: {
-        findPendingSummaries: async () => []
-      } as unknown as Pick<ProposalRepo, "findPendingSummaries">,
+        findPendingSummaries: async () => [],
+        countPending: async () => 0
+      } as unknown as Pick<ProposalRepo, "findPendingSummaries" | "countPending">,
       eventLogRepo: emptyEventLogRepo()
     });
 
@@ -273,8 +277,9 @@ describe("createSoulGraphService", () => {
             deadline_at: null,
             is_overdue: false
           }
-        ]
-      } as unknown as Pick<ProposalRepo, "findPendingSummaries">,
+        ],
+        countPending: async () => 1
+      } as unknown as Pick<ProposalRepo, "findPendingSummaries" | "countPending">,
       eventLogRepo: {
         queryByWorkspaceAndType: async () => [createMemoryUpdatedEvent("memory-c")]
       }
@@ -378,6 +383,178 @@ describe("createSoulGraphService", () => {
         true
       )
     ).toBe("user_memory");
+  });
+
+  // M-6 (Phase 2 review-loop): a Codex-origin entry that has been
+  // reviewer-accepted is its own classification — neither plain
+  // "engineering_chunk" (loses governance signal) nor "user_memory" (loses
+  // attribution). The classifier must resolve to "reviewed_engineering_chunk"
+  // so the graph view tells the operator both facts.
+  it("returns reviewed_engineering_chunk for an engineering-origin memory after proposal accept", () => {
+    expect(
+      classifySoulGraphOriginKind(
+        createMemory({
+          object_id: "codex-then-accepted",
+          domain_tags: [],
+          source_kind: "import",
+          formation_kind: "imported",
+          evidence_refs: ["/home/tdwhere/.codex/memories/MEMORY.md:42"]
+        }),
+        true
+      )
+    ).toBe("reviewed_engineering_chunk");
+    // Without the reviewer accept the same entry stays "engineering_chunk".
+    expect(
+      classifySoulGraphOriginKind(
+        createMemory({
+          object_id: "codex-pending",
+          domain_tags: [],
+          source_kind: "import",
+          formation_kind: "imported",
+          evidence_refs: ["/home/tdwhere/.codex/memories/MEMORY.md:42"]
+        })
+      )
+    ).toBe("engineering_chunk");
+  });
+
+  // M-2 (Phase 2 review-loop): under graph limit pressure, PathRelation
+  // edges (richer dynamics metadata: strength, stability, last_reinforced_at)
+  // claim slots first; legacy memoryGraphEdge rows fill the remainder. This
+  // pin test surfaces any future re-order in a single test diff.
+  it("prefers PathRelation edges over legacy edges under limit pressure", async () => {
+    const service = createSoulGraphService({
+      memoryEntryRepo: {
+        findByWorkspaceId: async () => [
+          createMemory({ object_id: "memory-a", domain_tags: [] }),
+          createMemory({ object_id: "memory-b", domain_tags: [] })
+        ]
+      } as unknown as SqliteMemoryEntryRepo,
+      memoryGraphEdgeRepo: {
+        findByWorkspace: async () => [
+          {
+            edge_id: "legacy-edge-1",
+            source_memory_id: "memory-a",
+            target_memory_id: "memory-b",
+            edge_type: "explicit",
+            workspace_id: "default",
+            created_at: "2026-05-05T00:00:00.000Z"
+          }
+        ]
+      } as unknown as SqliteMemoryGraphEdgeRepo,
+      pathRelationRepo: {
+        findActive: async () =>
+          Array.from({ length: 5 }, (_, index) => createPathRelation({
+            path_id: `path-${index + 1}`,
+            source_object_id: "memory-a",
+            target_object_id: "memory-b",
+            strength: 0.5,
+            support_events_count: 1
+          }))
+      } as unknown as Pick<PathRelationRepo, "findActive">,
+      proposalRepo: {
+        findPendingSummaries: async () => [],
+        countPending: async () => 0
+      } as unknown as Pick<ProposalRepo, "findPendingSummaries" | "countPending">,
+      eventLogRepo: emptyEventLogRepo()
+    });
+
+    const graph = await service.buildSoulGraph({ workspaceId: "default", depth: 2, limit: 4 });
+
+    // 4 PathRelation edges fit within the limit; legacy edge is starved out.
+    const pathEdges = graph.edges.filter((edge) => edge.id.startsWith("path-"));
+    const legacyEdges = graph.edges.filter((edge) => edge.id === "legacy-edge-1");
+    expect(pathEdges).toHaveLength(4);
+    expect(legacyEdges).toHaveLength(0);
+    expect(graph.truncated).toBe(true);
+  });
+
+  // M-3 (Phase 2 review-loop): pending-proposal projection nodes and domain-tag
+  // projection scope nodes share kind="projection". Their ids must stay in
+  // disjoint namespaces ("proposal:" vs "scope:domain_tag:") so the inspector
+  // can never collide a proposal node with a tag-named-"proposal:foo".
+  it("keeps proposal projection ids in a different namespace from domain-tag scope ids", async () => {
+    const service = createSoulGraphService({
+      memoryEntryRepo: {
+        findByWorkspaceId: async () => [
+          createMemory({ object_id: "memory-a", domain_tags: ["tooling", "workflow"] }),
+          createMemory({ object_id: "memory-b", domain_tags: ["tooling"] })
+        ]
+      } as unknown as SqliteMemoryEntryRepo,
+      memoryGraphEdgeRepo: { findByWorkspace: async () => [] } as unknown as SqliteMemoryGraphEdgeRepo,
+      pathRelationRepo: { findActive: async () => [] } as unknown as Pick<PathRelationRepo, "findActive">,
+      proposalRepo: {
+        findPendingSummaries: async () => [
+          {
+            proposal_id: "proposal-1",
+            target_object_id: "memory-a",
+            target_object_kind: "memory_entry",
+            created_at: "2026-05-05T04:00:00.000Z",
+            proposed_change_summary: "Rewrite memory-a",
+            proposed_changes: { content: "rewritten" },
+            assigned_reviewer_identity: null,
+            assigned_at: null,
+            deadline_at: null,
+            is_overdue: false
+          }
+        ],
+        countPending: async () => 1
+      } as unknown as Pick<ProposalRepo, "findPendingSummaries" | "countPending">,
+      eventLogRepo: emptyEventLogRepo()
+    });
+
+    const graph = await service.buildSoulGraph({ workspaceId: "default", depth: 2, limit: 50 });
+    const proposalNodes = graph.nodes.filter((node) => node.kind === "projection");
+    const scopeNodes = graph.nodes.filter((node) => node.kind === "scope");
+    expect(proposalNodes.map((node) => node.id)).toEqual(["proposal:proposal-1"]);
+    // Every proposal projection id starts with "proposal:" and every shared
+    // tag scope node id starts with "scope:domain_tag:" — disjoint namespaces.
+    for (const node of proposalNodes) {
+      expect(node.id.startsWith("proposal:")).toBe(true);
+      expect(node.id.startsWith("scope:domain_tag:")).toBe(false);
+    }
+    for (const node of scopeNodes) {
+      expect(node.id.startsWith("scope:domain_tag:")).toBe(true);
+      expect(node.id.startsWith("proposal:")).toBe(false);
+    }
+    expect(scopeNodes.length).toBeGreaterThan(0);
+  });
+
+  // M-4 (Phase 2 review-loop): node_total / edge_total must reflect TRUE
+  // counts even when findPendingSummaries SQL-LIMITs. Pin behavior: even
+  // with limit=10 and 25 pending proposals in storage, node_total includes
+  // all 25 (via cheap COUNT(*) via countPending), and truncated=true.
+  it("reports raw pending proposal count in node_total even when LIMIT clips the summary list", async () => {
+    const service = createSoulGraphService({
+      memoryEntryRepo: {
+        findByWorkspaceId: async () => [createMemory({ object_id: "memory-a", domain_tags: [] })]
+      } as unknown as SqliteMemoryEntryRepo,
+      memoryGraphEdgeRepo: { findByWorkspace: async () => [] } as unknown as SqliteMemoryGraphEdgeRepo,
+      pathRelationRepo: { findActive: async () => [] } as unknown as Pick<PathRelationRepo, "findActive">,
+      proposalRepo: {
+        // Simulating the SQL LIMIT: only 10 of the 25 pending rows surface.
+        findPendingSummaries: async () =>
+          Array.from({ length: 10 }, (_, index) => ({
+            proposal_id: `proposal-${index + 1}`,
+            target_object_id: "memory-a",
+            target_object_kind: "memory_entry",
+            created_at: "2026-05-05T04:00:00.000Z",
+            proposed_change_summary: `change ${index + 1}`,
+            proposed_changes: { content: `c${index + 1}` },
+            assigned_reviewer_identity: null,
+            assigned_at: null,
+            deadline_at: null,
+            is_overdue: false
+          })),
+        countPending: async () => 25
+      } as unknown as Pick<ProposalRepo, "findPendingSummaries" | "countPending">,
+      eventLogRepo: emptyEventLogRepo()
+    });
+
+    const graph = await service.buildSoulGraph({ workspaceId: "default", depth: 2, limit: 10 });
+
+    // 1 memory + 25 (raw) pending proposals + 0 unique tags = 26.
+    expect(graph.node_total).toBe(26);
+    expect(graph.truncated).toBe(true);
   });
 });
 
