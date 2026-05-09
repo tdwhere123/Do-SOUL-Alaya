@@ -635,12 +635,38 @@ function deriveMemoryNodeSummary(content: string, label: string): string | undef
 
 function deriveDomainTagSummary(members: readonly MemoryEntryRecord[]): string {
   const count = members.length;
-  const sample = members
-    .slice(0, DOMAIN_TAG_SAMPLE_LIMIT)
-    .map((m) => truncateWithEllipsis(deriveMemoryNodeLabel(m.content), DOMAIN_TAG_SAMPLE_LABEL_MAX))
-    .join(" · ");
+  // Dedupe sample labels: a tag like #codex-memory-recall-shard with 226
+  // members all sharing the same truncated firstLine ("Codex memory recall
+  // shard (2026-…)") would otherwise render as the same string repeated
+  // three times. Walk every member, collect distinct truncated labels, and
+  // surface a count of remaining variants so the operator can tell whether
+  // the bucket is uniform or heterogeneous.
+  const distinctLabels: string[] = [];
+  const seenLabels = new Set<string>();
+  for (const member of members) {
+    const sample = truncateWithEllipsis(
+      deriveMemoryNodeLabel(member.content),
+      DOMAIN_TAG_SAMPLE_LABEL_MAX
+    );
+    if (!seenLabels.has(sample)) {
+      seenLabels.add(sample);
+      distinctLabels.push(sample);
+    }
+  }
   const noun = count === 1 ? "memory" : "memories";
-  return sample.length > 0 ? `${count} ${noun} · ${sample}` : `${count} ${noun}`;
+  if (distinctLabels.length === 0) {
+    return `${count} ${noun}`;
+  }
+  if (distinctLabels.length === 1 && count > 1) {
+    return `${count} ${noun} · all: ${distinctLabels[0]}`;
+  }
+  const visible = distinctLabels.slice(0, DOMAIN_TAG_SAMPLE_LIMIT);
+  const remainingVariants = distinctLabels.length - visible.length;
+  const tail =
+    remainingVariants > 0
+      ? ` · +${remainingVariants} more variant${remainingVariants === 1 ? "" : "s"}`
+      : "";
+  return `${count} ${noun} · ${visible.join(" · ")}${tail}`;
 }
 
 function truncateWithEllipsis(value: string, max: number): string {

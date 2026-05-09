@@ -577,6 +577,15 @@ export default function GraphPage() {
           (5 origin kinds incl. reviewed_engineering_chunk) is always findable. */}
       {data ? <OriginLegend /> : null}
 
+      {/* 3D-mode hint: OrbitControls semantics aren't obvious to trackpad
+          users, especially the pan-via-right-click. Surface the cheat sheet
+          near the toggle so pan is discoverable. */}
+      {data && effectiveMode === "3d" ? (
+        <div className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-md border border-beige-200 bg-beige-50/95 px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-ink-700/55 shadow-sm">
+          drag = rotate · right-drag = pan · scroll = zoom
+        </div>
+      ) : null}
+
       {/* The graph itself. We mount one or the other component (not both) so
           react-force-graph's two simulations never compete for the same data. */}
       <div className="absolute inset-0" data-spotlight-active={spotlightActive ? "true" : "false"}>
@@ -612,7 +621,14 @@ export default function GraphPage() {
             graphData={data}
             width={viewport.width}
             height={viewport.height}
-            backgroundColor="#1B1F23"
+            // Match the 2D paper background so the eye does not have to
+            // re-adapt brightness when toggling modes. The scene's directional
+            // light still gives nodes enough volume on a near-white field.
+            backgroundColor="#FDF6E3"
+            // OrbitControls expose right-click pan (trackball, the default,
+            // does not). Add an on-screen hint below so trackpad users know
+            // pan is reachable.
+            controlType="orbit"
             nodeId="id"
             nodeRelSize={4}
             nodeVal={(n) => nodeInfluenceSize(n)}
