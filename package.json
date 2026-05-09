@@ -13,7 +13,8 @@
     "test": "vitest run --config vitest.config.mjs",
     "hygiene:unused": "knip --config knip.json --no-progress --no-config-hints",
     "alaya": "node ./bin/alaya.mjs",
-    "doctor": "node ./bin/alaya.mjs doctor"
+    "doctor": "node ./bin/alaya.mjs doctor",
+    "inspector": "node ./bin/alaya.mjs inspect --open"
   },
   "devDependencies": {
     "@do-soul/alaya": "workspace:*",

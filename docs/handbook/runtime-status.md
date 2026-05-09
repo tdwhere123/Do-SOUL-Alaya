@@ -290,6 +290,22 @@ DRY MCP catalog from zod, `SoulOpenPointerResponse` projection,
 shutdown drain, doctor `schema_ok`, EventPublisher port extension) are
 non-blocking and tracked for a follow-up wave.
 
+## v0.1.2 Distribution (2026-05-09)
+
+Distribution path moved off npm: v0.1.2 ships exclusively as a
+checksum-verified source tarball attached to each GitHub Release. The end-user installer
+(`scripts/install.sh`) downloads `do-soul-alaya-${VERSION}.tar.gz` +
+`SHA256SUMS`, verifies the checksum locally, then runs `pnpm install
+--frozen-lockfile && pnpm build` inside `~/.local/share/do-soul-alaya`
+(or `$ALAYA_HOME`) and symlinks `bin/alaya.mjs` into `~/.local/bin`.
+Rationale: v0.1.1 publish was blocked by npm auth and the monorepo
++ pnpm workspace shape does not graft cleanly under `npm install -g`.
+GitHub-only distribution removes the secret-management surface and
+keeps the install path readable end-to-end (clone → checksum → build).
+Release workflow lives at `.github/workflows/release.yml`; on `git
+push tag v*` it runs CI, generates the tarball + `SHA256SUMS` via
+`git archive HEAD`, and uploads both to the GitHub Release.
+
 ## Gate Definitions
 
 - **Gate-0**: Handbook complete, INDEX complete, task cards written for
