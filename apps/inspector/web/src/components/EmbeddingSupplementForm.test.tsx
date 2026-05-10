@@ -9,7 +9,7 @@ function renderForm() {
   const onRestart = vi.fn();
   const utils = render(
     <ToastProvider>
-      <EmbeddingSupplementForm onRequiresRestart={onRestart} />
+      <EmbeddingSupplementForm onRequiresRestart={onRestart} workspaceId="ws-1" />
     </ToastProvider>
   );
   return { ...utils, onRestart };

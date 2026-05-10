@@ -4,14 +4,17 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import ConfigPage from "./Config";
 import { ToastProvider } from "../components/Toast";
+import { LocaleProvider } from "../i18n/Locale";
 import { setInspectorToken, setWorkspaceId } from "../api";
 
 function renderConfig() {
   return render(
     <MemoryRouter initialEntries={["/config"]}>
-      <ToastProvider>
-        <ConfigPage />
-      </ToastProvider>
+      <LocaleProvider>
+        <ToastProvider>
+          <ConfigPage />
+        </ToastProvider>
+      </LocaleProvider>
     </MemoryRouter>
   );
 }
@@ -69,6 +72,25 @@ describe("ConfigPage", () => {
       await userEvent.click(toggles[0]);
     });
     await waitFor(() => expect(dot.className).toContain("#C9A36F"));
+  });
+
+  it("renders the noWorkspace banner and never fetches when workspaceId is null", async () => {
+    setWorkspaceId(null);
+    renderConfig();
+    expect(await screen.findByTestId("config-no-workspace")).toBeTruthy();
+    expect(screen.queryByText(/Soul Runtime/i)).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("loads strategy config from /config/:workspaceId/strategy when workspaceId is set", async () => {
+    renderConfig();
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url]) => typeof url === "string" && url.endsWith("/api/config/ws-1/strategy")
+        )
+      ).toBe(true);
+    });
   });
 
   it("shows restart banner after PATCH that returns requires_daemon_restart", async () => {

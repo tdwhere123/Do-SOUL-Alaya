@@ -290,6 +290,33 @@ DRY MCP catalog from zod, `SoulOpenPointerResponse` projection,
 shutdown drain, doctor `schema_ok`, EventPublisher port extension) are
 non-blocking and tracked for a follow-up wave.
 
+## v0.1.3 Inspector Workspace Bootstrap (2026-05-10)
+
+Patch release. Three fixes wired together so `alaya inspect --open`
+shows live data on a fresh install instead of 404-ing the Strategy /
+Soul / Environment config sections:
+
+- `alaya inspect` now lists `/workspaces` from the daemon at start. If
+  exactly one active workspace exists it is auto-selected; zero exits
+  with `'alaya install' inside your project root first`; multiple
+  prints the candidate ids and requires `--workspace <id>`.
+  `--workspace` is implemented as a CLI flag and the chosen
+  `workspaceId` is encoded into the loopback URL as `&workspaceId=...`
+  alongside the existing `?token=...`.
+- `apps/inspector/web/src/pages/Config.tsx` and `Graph.tsx` removed
+  the silent `?? "default"` fallback that produced the 404 path. They
+  now mirror `Proposals.tsx` and render the `common:noWorkspace`
+  banner when `getWorkspaceId()` returns null.
+- `setWorkspaceId` widened to `string | null` so test surfaces and
+  any future "detach from workspace" flow can clear it cleanly.
+
+The plan / verification evidence is `do-it-review-loop`-cleared with
+`install-release-reviewer` + `codex:codex-rescue` independent passes.
+End-to-end check: clean `~/.config/alaya/`, run `alaya install` in a
+repo, then `alaya inspect --open` — printed URL contains
+`&workspaceId=local_…`, browser shows Config / Graph / Proposals
+loaded, no console 404s.
+
 ## v0.1.2 Distribution (2026-05-09)
 
 Distribution path moved off npm: v0.1.2 ships exclusively as a

@@ -19,7 +19,24 @@ export interface InspectCommandDependencies {
   readonly checkPortAvailable?: (port: number) => Promise<boolean>;
   readonly openUrl?: (url: string) => Promise<void>;
   readonly inspectorEntryPath?: string;
+  readonly listWorkspaces?: (daemonUrl: string) => Promise<readonly WorkspaceSummary[]>;
+  readonly getWorkspaceById?: (
+    daemonUrl: string,
+    workspaceId: string
+  ) => Promise<WorkspaceLookupResult>;
 }
+
+export interface WorkspaceSummary {
+  readonly workspace_id: string;
+  readonly name: string | null;
+  readonly repo_path: string | null;
+  readonly workspace_state: string;
+}
+
+export type WorkspaceLookupResult =
+  | { readonly status: "ok"; readonly workspace: WorkspaceSummary }
+  | { readonly status: "not_found" }
+  | { readonly status: "error"; readonly detail?: string };
 
 export interface InspectDaemonListenOptions {
   readonly hostname?: string;
@@ -68,6 +85,7 @@ interface InspectArgs {
   readonly open: boolean;
   readonly port: number;
   readonly token: string | null;
+  readonly workspace: string | null;
 }
 
 const DEFAULT_INSPECTOR_PORT = 5174;
@@ -105,13 +123,17 @@ async function executeInspect(
   }
 
   const token = args.token ?? (deps.generateToken ?? defaultGenerateToken)();
-  const url = `http://127.0.0.1:${args.port}/?token=${token}`;
   let child: InspectorChildProcess | null = null;
   let startedDaemon: InspectDaemonServer | null = null;
 
   try {
     const daemon = await ensureDaemonForInspector(ctx, deps, checkPortAvailable);
     startedDaemon = daemon.startedDaemon;
+    const workspaceResolution = await resolveWorkspaceForInspector(ctx, deps, daemon.url, args.workspace);
+    if (workspaceResolution.status !== "ok") {
+      return { exitCode: workspaceResolution.exitCode };
+    }
+    const url = `http://127.0.0.1:${args.port}/?token=${token}&workspaceId=${encodeURIComponent(workspaceResolution.workspaceId)}`;
     child = (deps.spawnInspector ?? defaultSpawnInspector)({
       port: args.port,
       token,
@@ -138,6 +160,115 @@ async function executeInspect(
       });
     }
   }
+}
+
+type WorkspaceResolution =
+  | { readonly status: "ok"; readonly workspaceId: string }
+  | { readonly status: "fail"; readonly exitCode: number };
+
+async function resolveWorkspaceForInspector(
+  ctx: AlayaCliContext,
+  deps: InspectCommandDependencies,
+  daemonUrl: string,
+  explicitId: string | null
+): Promise<WorkspaceResolution> {
+  if (explicitId !== null) {
+    const trimmed = explicitId.trim();
+    const lookup = await (deps.getWorkspaceById ?? defaultGetWorkspaceById)(daemonUrl, trimmed);
+    if (lookup.status === "ok") {
+      return { status: "ok", workspaceId: lookup.workspace.workspace_id };
+    }
+    if (lookup.status === "not_found") {
+      ctx.stderr.write(
+        `workspace "${trimmed}" not found in daemon; run 'alaya install' inside the project root, or rerun without --workspace to auto-select / list candidates.\n`
+      );
+      return { status: "fail", exitCode: ALAYA_SYSEXITS.USAGE };
+    }
+    ctx.stderr.write(
+      `failed to verify workspace "${trimmed}" against daemon${formatProbeDetail(lookup.detail)}.\n`
+    );
+    return { status: "fail", exitCode: ALAYA_SYSEXITS.SOFTWARE };
+  }
+
+  let workspaces: readonly WorkspaceSummary[];
+  try {
+    workspaces = await (deps.listWorkspaces ?? defaultListWorkspaces)(daemonUrl);
+  } catch (error) {
+    ctx.stderr.write(`failed to list workspaces from daemon: ${describeError(error)}\n`);
+    return { status: "fail", exitCode: ALAYA_SYSEXITS.SOFTWARE };
+  }
+
+  const active = workspaces.filter((ws) => ws.workspace_state === "active");
+  if (active.length === 0) {
+    ctx.stderr.write(
+      "no active workspace registered; run 'alaya install' inside your project root first.\n"
+    );
+    return { status: "fail", exitCode: ALAYA_SYSEXITS.SOFTWARE };
+  }
+  if (active.length === 1) {
+    return { status: "ok", workspaceId: active[0]!.workspace_id };
+  }
+
+  ctx.stderr.write(
+    "multiple workspaces registered; choose one with --workspace <id>:\n"
+  );
+  for (const ws of active) {
+    const label = ws.name?.trim().length ? ws.name : "(no name)";
+    const path = ws.repo_path?.trim().length ? ws.repo_path : "(no repo path)";
+    ctx.stderr.write(`  ${ws.workspace_id}  ${label}  ${path}\n`);
+  }
+  return { status: "fail", exitCode: ALAYA_SYSEXITS.USAGE };
+}
+
+async function defaultListWorkspaces(daemonUrl: string): Promise<readonly WorkspaceSummary[]> {
+  const baseUrl = normalizeBaseUrl(daemonUrl);
+  const response = await fetch(new URL("workspaces", baseUrl), { method: "GET" });
+  if (!response.ok) {
+    throw new Error(`daemon /workspaces returned HTTP ${response.status}`);
+  }
+  const payload = (await response.json()) as { readonly data?: unknown };
+  const data = payload?.data;
+  if (!Array.isArray(data)) {
+    throw new Error("daemon /workspaces response did not include a data array");
+  }
+  return data.map((entry: unknown) => coerceWorkspaceSummary(entry));
+}
+
+async function defaultGetWorkspaceById(
+  daemonUrl: string,
+  workspaceId: string
+): Promise<WorkspaceLookupResult> {
+  const baseUrl = normalizeBaseUrl(daemonUrl);
+  let response: Response;
+  try {
+    response = await fetch(new URL(`workspaces/${encodeURIComponent(workspaceId)}`, baseUrl), {
+      method: "GET"
+    });
+  } catch (error) {
+    return { status: "error", detail: describeError(error) };
+  }
+  if (response.status === 404) {
+    return { status: "not_found" };
+  }
+  if (!response.ok) {
+    return { status: "error", detail: `HTTP ${response.status}` };
+  }
+  const payload = (await response.json().catch(() => ({}))) as { readonly data?: unknown };
+  return { status: "ok", workspace: coerceWorkspaceSummary(payload?.data) };
+}
+
+function coerceWorkspaceSummary(value: unknown): WorkspaceSummary {
+  const record = (value ?? {}) as Record<string, unknown>;
+  const workspaceId = typeof record.workspace_id === "string" ? record.workspace_id : "";
+  const name = typeof record.name === "string" ? record.name : null;
+  const repoPath = typeof record.repo_path === "string" ? record.repo_path : null;
+  const state = typeof record.workspace_state === "string" ? record.workspace_state : "unknown";
+  return {
+    workspace_id: workspaceId,
+    name,
+    repo_path: repoPath,
+    workspace_state: state
+  };
 }
 
 async function ensureDaemonForInspector(
@@ -191,6 +322,7 @@ function inspectArgsSchema(): AlayaCliArgsSchema<InspectArgs> {
       let open = false;
       let port = DEFAULT_INSPECTOR_PORT;
       let token: string | null = null;
+      let workspace: string | null = null;
       for (let index = 0; index < input.length; index += 1) {
         const current = input[index]!;
         if (current === "--open") {
@@ -219,10 +351,19 @@ function inspectArgsSchema(): AlayaCliArgsSchema<InspectArgs> {
           index += 1;
           continue;
         }
+        if (current === "--workspace") {
+          const value = input[index + 1];
+          if (value === undefined || value.trim().length === 0) {
+            return { success: false, error: { issues: [{ path: [index + 1], message: "--workspace requires a non-empty workspace_id." }] } };
+          }
+          workspace = value;
+          index += 1;
+          continue;
+        }
         return { success: false, error: { issues: [{ path: [index], message: `Unknown inspect option: ${current}` }] } };
       }
 
-      return { success: true, data: { open, port, token } };
+      return { success: true, data: { open, port, token, workspace } };
     }
   };
 }

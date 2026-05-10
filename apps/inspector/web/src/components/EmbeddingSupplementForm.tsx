@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Eye, EyeOff, Save } from "lucide-react";
 import { clsx } from "clsx";
-import { apiFetch, getWorkspaceId, type ApiError } from "../api";
+import { apiFetch, type ApiError } from "../api";
 import { useToasts } from "./Toast";
 import {
   EmbeddingStatusSchema,
@@ -44,10 +44,10 @@ function maskFilePath(path: string): string {
 
 interface Props {
   readonly onRequiresRestart: () => void;
+  readonly workspaceId: string;
 }
 
-export default function EmbeddingSupplementForm({ onRequiresRestart }: Props) {
-  const workspaceId = getWorkspaceId() ?? "default";
+export default function EmbeddingSupplementForm({ onRequiresRestart, workspaceId }: Props) {
   const { showToast } = useToasts();
 
   const [providerUrl, setProviderUrl] = useState<string>("");

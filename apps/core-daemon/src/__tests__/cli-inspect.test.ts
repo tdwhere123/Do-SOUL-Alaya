@@ -21,20 +21,24 @@ describe("cli inspect", () => {
       checkPortAvailable: async () => true,
       generateToken: () => "a".repeat(64),
       startDaemonServer: async () => fakeDaemonServer(),
-      spawnInspector: () => child
+      spawnInspector: () => child,
+      listWorkspaces: oneWorkspaceList()
     });
 
     const promise = command.handler(createContext({ stdout }), {
       open: false,
       port: 5174,
-      token: null
+      token: null,
+      workspace: null
     });
     setTimeout(() => child.stdout.write("inspector_ready\n"), 0);
     setTimeout(() => child.emitExit(0, null), 10);
     const result = await promise;
 
     expect(result.exitCode).toBe(0);
-    expect(stdoutChunks.join("")).toBe("http://127.0.0.1:5174/?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n");
+    expect(stdoutChunks.join("")).toBe(
+      "http://127.0.0.1:5174/?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&workspaceId=ws-1\n"
+    );
   });
 
   it("returns a remediation when the port is busy", async () => {
@@ -48,7 +52,8 @@ describe("cli inspect", () => {
     const result = await command.handler(createContext({ stderr }), {
       open: false,
       port: 5174,
-      token: null
+      token: null,
+      workspace: null
     });
 
     expect(result.exitCode).toBe(75);
@@ -72,13 +77,15 @@ describe("cli inspect", () => {
       openUrl: async (url) => {
         opened.push(url);
         throw new Error("missing helper");
-      }
+      },
+      listWorkspaces: oneWorkspaceList()
     });
 
     const promise = command.handler(createContext({ env: { ALAYA_INSPECTOR_ALLOW_FIXED_TOKEN: "1" }, stderr }), {
       open: true,
       port: 5175,
-      token: "b".repeat(64)
+      token: "b".repeat(64),
+      workspace: null
     });
     setTimeout(() => child.stdout.write("inspector_ready\n"), 0);
     setTimeout(() => child.emitExit(0, null), 10);
@@ -92,7 +99,9 @@ describe("cli inspect", () => {
         token: "b".repeat(64)
       }
     ]);
-    expect(opened).toEqual(["http://127.0.0.1:5175/?token=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]);
+    expect(opened).toEqual([
+      "http://127.0.0.1:5175/?token=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb&workspaceId=ws-1"
+    ]);
   });
 
   it("starts a loopback daemon and passes its URL to the inspector child", async () => {
@@ -116,13 +125,15 @@ describe("cli inspect", () => {
       spawnInspector: (input) => {
         spawned.push(input);
         return child;
-      }
+      },
+      listWorkspaces: oneWorkspaceList()
     });
 
     const promise = command.handler(createContext(), {
       open: false,
       port: 5174,
-      token: null
+      token: null,
+      workspace: null
     });
     setTimeout(() => child.stdout.write("inspector_ready\n"), 0);
     setTimeout(() => child.emitExit(0, null), 10);
@@ -154,7 +165,8 @@ describe("cli inspect", () => {
     const result = await command.handler(createContext({ stderr }), {
       open: false,
       port: 5174,
-      token: null
+      token: null,
+      workspace: null
     });
 
     expect(result.exitCode).toBe(70);
@@ -177,13 +189,15 @@ describe("cli inspect", () => {
       spawnInspector: (input) => {
         spawned.push(input);
         return child;
-      }
+      },
+      listWorkspaces: oneWorkspaceList()
     });
 
     const promise = command.handler(createContext({ stderr }), {
       open: false,
       port: 5174,
-      token: null
+      token: null,
+      workspace: null
     });
     setTimeout(() => child.stdout.write("inspector_ready\n"), 0);
     setTimeout(() => child.emitExit(0, null), 10);
@@ -217,7 +231,8 @@ describe("cli inspect", () => {
     const result = await command.handler(createContext({ stderr }), {
       open: false,
       port: 5174,
-      token: null
+      token: null,
+      workspace: null
     });
 
     expect(result.exitCode).toBe(70);
@@ -242,7 +257,8 @@ describe("cli inspect", () => {
     const result = await command.handler(createContext({ stderr }), {
       open: false,
       port: 5174,
-      token: null
+      token: null,
+      workspace: null
     });
 
     expect(result.exitCode).toBe(70);
@@ -317,11 +333,231 @@ describe("cli inspect", () => {
     const result = await command.handler(createContext({ stderr }), {
       open: false,
       port: 5174,
-      token: "c".repeat(64)
+      token: "c".repeat(64),
+      workspace: null
     });
 
     expect(result.exitCode).toBe(64);
     expect(stderrChunks.join("")).toContain("ALAYA_INSPECTOR_ALLOW_FIXED_TOKEN=1");
+  });
+
+  it("injects workspaceId into the printed token URL when exactly one workspace is registered", async () => {
+    const child = new FakeInspectorChild();
+    const stdout = new PassThrough();
+    const stdoutChunks: string[] = [];
+    stdout.on("data", (chunk) => stdoutChunks.push(chunk.toString()));
+    const command = createInspectCommand({
+      checkPortAvailable: async () => true,
+      generateToken: () => "a".repeat(64),
+      startDaemonServer: async () => fakeDaemonServer(),
+      spawnInspector: () => child,
+      listWorkspaces: async () => [
+        {
+          workspace_id: "local_efcd2c3483725c97",
+          name: "Sample",
+          repo_path: "/tmp/sample",
+          workspace_state: "active"
+        }
+      ]
+    });
+
+    const promise = command.handler(createContext({ stdout }), {
+      open: false,
+      port: 5174,
+      token: null,
+      workspace: null
+    });
+    setTimeout(() => child.stdout.write("inspector_ready\n"), 0);
+    setTimeout(() => child.emitExit(0, null), 10);
+    const result = await promise;
+
+    expect(result.exitCode).toBe(0);
+    expect(stdoutChunks.join("")).toContain("&workspaceId=local_efcd2c3483725c97");
+  });
+
+  it("errors with remediation when no active workspace is registered", async () => {
+    const stderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
+    const spawnInspector = vi.fn(() => new FakeInspectorChild());
+    const command = createInspectCommand({
+      checkPortAvailable: async () => true,
+      generateToken: () => "a".repeat(64),
+      startDaemonServer: async () => fakeDaemonServer(),
+      spawnInspector,
+      listWorkspaces: async () => []
+    });
+
+    const result = await command.handler(createContext({ stderr }), {
+      open: false,
+      port: 5174,
+      token: null,
+      workspace: null
+    });
+
+    expect(result.exitCode).toBe(70);
+    expect(spawnInspector).not.toHaveBeenCalled();
+    expect(stderrChunks.join("")).toContain("no active workspace registered");
+    expect(stderrChunks.join("")).toContain("alaya install");
+  });
+
+  it("errors and lists candidates when multiple workspaces and no --workspace flag", async () => {
+    const stderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
+    const spawnInspector = vi.fn(() => new FakeInspectorChild());
+    const command = createInspectCommand({
+      checkPortAvailable: async () => true,
+      generateToken: () => "a".repeat(64),
+      startDaemonServer: async () => fakeDaemonServer(),
+      spawnInspector,
+      listWorkspaces: async () => [
+        {
+          workspace_id: "ws-alpha",
+          name: "Alpha",
+          repo_path: "/tmp/alpha",
+          workspace_state: "active"
+        },
+        {
+          workspace_id: "ws-beta",
+          name: "Beta",
+          repo_path: "/tmp/beta",
+          workspace_state: "active"
+        }
+      ]
+    });
+
+    const result = await command.handler(createContext({ stderr }), {
+      open: false,
+      port: 5174,
+      token: null,
+      workspace: null
+    });
+
+    expect(result.exitCode).toBe(64);
+    expect(spawnInspector).not.toHaveBeenCalled();
+    const out = stderrChunks.join("");
+    expect(out).toContain("multiple workspaces registered");
+    expect(out).toContain("ws-alpha");
+    expect(out).toContain("ws-beta");
+    expect(out).toContain("--workspace");
+  });
+
+  it("surfaces listWorkspaces failures as SOFTWARE exit with the daemon error", async () => {
+    const stderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
+    const spawnInspector = vi.fn(() => new FakeInspectorChild());
+    const command = createInspectCommand({
+      checkPortAvailable: async () => true,
+      generateToken: () => "a".repeat(64),
+      startDaemonServer: async () => fakeDaemonServer(),
+      spawnInspector,
+      listWorkspaces: async () => {
+        throw new Error("daemon /workspaces returned HTTP 503");
+      }
+    });
+
+    const result = await command.handler(createContext({ stderr }), {
+      open: false,
+      port: 5174,
+      token: null,
+      workspace: null
+    });
+
+    expect(result.exitCode).toBe(70);
+    expect(spawnInspector).not.toHaveBeenCalled();
+    expect(stderrChunks.join("")).toContain("failed to list workspaces from daemon");
+    expect(stderrChunks.join("")).toContain("HTTP 503");
+  });
+
+  it("filters non-active workspaces during auto-resolution", async () => {
+    const stderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
+    const spawnInspector = vi.fn(() => new FakeInspectorChild());
+    const command = createInspectCommand({
+      checkPortAvailable: async () => true,
+      generateToken: () => "a".repeat(64),
+      startDaemonServer: async () => fakeDaemonServer(),
+      spawnInspector,
+      listWorkspaces: async () => [
+        {
+          workspace_id: "ws-archived",
+          name: "Archived",
+          repo_path: "/tmp/archived",
+          workspace_state: "archived"
+        }
+      ]
+    });
+
+    const result = await command.handler(createContext({ stderr }), {
+      open: false,
+      port: 5174,
+      token: null,
+      workspace: null
+    });
+
+    expect(result.exitCode).toBe(70);
+    expect(spawnInspector).not.toHaveBeenCalled();
+    expect(stderrChunks.join("")).toContain("no active workspace registered");
+  });
+
+  it("accepts --workspace <id> and verifies it exists, rejecting unknown ids", async () => {
+    const childOk = new FakeInspectorChild();
+    const stdoutOk = new PassThrough();
+    const stdoutOkChunks: string[] = [];
+    stdoutOk.on("data", (chunk) => stdoutOkChunks.push(chunk.toString()));
+    const okCommand = createInspectCommand({
+      checkPortAvailable: async () => true,
+      generateToken: () => "a".repeat(64),
+      startDaemonServer: async () => fakeDaemonServer(),
+      spawnInspector: () => childOk,
+      getWorkspaceById: async (_url, id) => ({
+        status: "ok",
+        workspace: {
+          workspace_id: id,
+          name: "Explicit",
+          repo_path: "/tmp/explicit",
+          workspace_state: "active"
+        }
+      })
+    });
+
+    const okPromise = okCommand.handler(createContext({ stdout: stdoutOk }), {
+      open: false,
+      port: 5174,
+      token: null,
+      workspace: "explicit-ws"
+    });
+    setTimeout(() => childOk.stdout.write("inspector_ready\n"), 0);
+    setTimeout(() => childOk.emitExit(0, null), 10);
+    const okResult = await okPromise;
+    expect(okResult.exitCode).toBe(0);
+    expect(stdoutOkChunks.join("")).toContain("&workspaceId=explicit-ws");
+
+    const stderrMissing = new PassThrough();
+    const stderrMissingChunks: string[] = [];
+    stderrMissing.on("data", (chunk) => stderrMissingChunks.push(chunk.toString()));
+    const spawnInspector = vi.fn(() => new FakeInspectorChild());
+    const missingCommand = createInspectCommand({
+      checkPortAvailable: async () => true,
+      generateToken: () => "a".repeat(64),
+      startDaemonServer: async () => fakeDaemonServer(),
+      spawnInspector,
+      getWorkspaceById: async () => ({ status: "not_found" })
+    });
+
+    const missingResult = await missingCommand.handler(createContext({ stderr: stderrMissing }), {
+      open: false,
+      port: 5174,
+      token: null,
+      workspace: "nope"
+    });
+
+    expect(missingResult.exitCode).toBe(64);
+    expect(spawnInspector).not.toHaveBeenCalled();
+    expect(stderrMissingChunks.join("")).toContain('workspace "nope" not found');
   });
 
   it("terminates the inspector child when the CLI receives SIGINT", async () => {
@@ -330,13 +566,15 @@ describe("cli inspect", () => {
       checkPortAvailable: async () => true,
       generateToken: () => "d".repeat(64),
       startDaemonServer: async () => fakeDaemonServer(),
-      spawnInspector: () => child
+      spawnInspector: () => child,
+      listWorkspaces: oneWorkspaceList()
     });
 
     const promise = command.handler(createContext(), {
       open: false,
       port: 5174,
-      token: null
+      token: null,
+      workspace: null
     });
     setTimeout(() => child.stdout.write("inspector_ready\n"), 0);
     setTimeout(() => process.emit("SIGINT", "SIGINT"), 10);
@@ -392,4 +630,15 @@ function fakeDaemonServer() {
     port: 5173,
     close: async () => {}
   };
+}
+
+function oneWorkspaceList() {
+  return async () => [
+    {
+      workspace_id: "ws-1",
+      name: "Sample",
+      repo_path: "/tmp/sample",
+      workspace_state: "active"
+    }
+  ];
 }

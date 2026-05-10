@@ -150,12 +150,16 @@ export default function GraphPage() {
 
   // Fetch graph payload
   useEffect(() => {
+    if (workspaceId === null) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     const fetchData = async () => {
       try {
         setLoading(true);
         const result = await apiFetch<SoulGraph | SoulGraphEnvelope>(
-          `/graph/${workspaceId ?? "default"}`
+          `/graph/${workspaceId}`
         );
         if (cancelled) return;
         const graph = unwrapSoulGraph(result);
@@ -661,6 +665,20 @@ export default function GraphPage() {
     },
     [computeLinkColor, now]
   );
+
+  if (workspaceId === null) {
+    return (
+      <div
+        role="alert"
+        data-testid="graph-no-workspace"
+        className="flex-1 min-h-0 flex items-center justify-center bg-[#FDF6E3] p-8"
+      >
+        <p className="font-mono text-sm text-ink-700">
+          {t("common:noWorkspace")}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div

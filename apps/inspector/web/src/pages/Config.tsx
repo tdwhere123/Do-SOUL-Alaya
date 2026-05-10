@@ -5,6 +5,7 @@ import { apiFetch, getWorkspaceId, type ApiError } from "../api";
 import { useToasts } from "../components/Toast";
 import EmbeddingSupplementForm from "../components/EmbeddingSupplementForm";
 import GardenComputeForm from "../components/GardenComputeForm";
+import { useI18n } from "../i18n/Locale";
 
 interface PatchResult {
   readonly success?: boolean;
@@ -31,7 +32,8 @@ const SECTIONS: ReadonlyArray<SectionMeta> = [
 ];
 
 export default function ConfigPage() {
-  const workspaceId = getWorkspaceId() ?? "default";
+  const workspaceId = getWorkspaceId();
+  const { t } = useI18n();
   const [dirtySections, setDirtySections] = useState<Set<SectionKey>>(new Set());
   const [restartPending, setRestartPending] = useState(false);
 
@@ -64,6 +66,22 @@ export default function ConfigPage() {
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirtySections]);
+
+  if (workspaceId === null) {
+    return (
+      <div className="h-full w-full overflow-y-auto">
+        <div
+          role="alert"
+          data-testid="config-no-workspace"
+          className="max-w-4xl mx-auto w-full p-8 font-mono text-sm text-ink-700"
+        >
+          <h1 className="text-2xl font-bold text-ink-600 mb-3 uppercase tracking-widest">
+            {t("common:noWorkspace")}
+          </h1>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full w-full overflow-y-auto"><div className="max-w-4xl mx-auto w-full p-8 font-mono">
@@ -128,7 +146,10 @@ export default function ConfigPage() {
             Embedding Supplement
           </h2>
         </div>
-        <EmbeddingSupplementForm onRequiresRestart={handleRestartRequired} />
+        <EmbeddingSupplementForm
+          onRequiresRestart={handleRestartRequired}
+          workspaceId={workspaceId}
+        />
       </div>
 
       <div className="mb-12 border-b border-beige-200 pb-8">
@@ -140,7 +161,10 @@ export default function ConfigPage() {
             Garden Compute
           </h2>
         </div>
-        <GardenComputeForm onRequiresRestart={handleRestartRequired} />
+        <GardenComputeForm
+          onRequiresRestart={handleRestartRequired}
+          workspaceId={workspaceId}
+        />
       </div>
 
       <div className="mt-12 p-6 bg-beige-200/30 rounded-lg border border-beige-200">

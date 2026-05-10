@@ -17,7 +17,7 @@ export const setInspectorToken = (token: string) => {
 
 export const getInspectorToken = () => inspectorToken;
 
-export const setWorkspaceId = (id: string) => {
+export const setWorkspaceId = (id: string | null) => {
   currentWorkspaceId = id;
 };
 
