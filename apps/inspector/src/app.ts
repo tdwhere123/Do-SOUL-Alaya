@@ -39,6 +39,7 @@ const defaultStaticRoot = resolve(__dirname, "..", "web", "dist");
 
 export interface InspectorAppOptions {
   readonly token: string;
+  readonly workspaceId?: string;
   readonly daemonUrl?: string;
   readonly staticRoot?: string;
   readonly fetchImpl?: typeof fetch;
@@ -58,6 +59,7 @@ export function createInspectorApp(options: InspectorAppOptions): Hono {
 
   const proxyOptions = {
     daemonUrl: options.daemonUrl ?? "http://127.0.0.1:5173",
+    workspaceId: normalizeOptionalSecret(options.workspaceId),
     fetchImpl: options.fetchImpl,
     daemonRequestToken: normalizeOptionalSecret(env.ALAYA_REQUEST_TOKEN),
     reviewerToken: normalizeOptionalSecret(env.ALAYA_REVIEWER_TOKEN),

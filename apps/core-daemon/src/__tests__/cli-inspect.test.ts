@@ -306,6 +306,7 @@ describe("cli inspect", () => {
     const env = buildInspectorChildEnv({
       port: 5175,
       token: "b".repeat(64),
+      workspaceId: "ws-1",
       inspectorEntryPath: "/tmp/inspector.js",
       env: {
         ALAYA_DAEMON_URL: "http://127.0.0.1:3000",
@@ -318,7 +319,8 @@ describe("cli inspect", () => {
     expect(env).toEqual({
       ALAYA_DAEMON_URL: "http://127.0.0.1:3000",
       ALAYA_INSPECTOR_TOKEN: "b".repeat(64),
-      ALAYA_INSPECTOR_PORT: "5175"
+      ALAYA_INSPECTOR_PORT: "5175",
+      ALAYA_INSPECTOR_WORKSPACE_ID: "ws-1"
     });
   });
 
@@ -373,6 +375,56 @@ describe("cli inspect", () => {
 
     expect(result.exitCode).toBe(0);
     expect(stdoutChunks.join("")).toContain("&workspaceId=local_efcd2c3483725c97");
+  });
+
+  it("resolves the auto-selected workspace through the daemon /workspaces HTTP contract", async () => {
+    const child = new FakeInspectorChild();
+    const stdout = new PassThrough();
+    const stdoutChunks: string[] = [];
+    stdout.on("data", (chunk) => stdoutChunks.push(chunk.toString()));
+    const daemon = stubWorkspaceDaemonFetch((url) => {
+      if (url.pathname === "/workspaces") {
+        return {
+          body: {
+            success: true,
+            data: [
+              {
+                workspace_id: "ws-http",
+                name: "HTTP",
+                repo_path: "/tmp/http",
+                workspace_state: "active"
+              }
+            ]
+          }
+        };
+      }
+      return { status: 404, body: { success: false } };
+    });
+    const command = createInspectCommand({
+      checkPortAvailable: async () => true,
+      generateToken: () => "a".repeat(64),
+      spawnInspector: () => {
+        setTimeout(() => child.stdout.write("inspector_ready\n"), 0);
+        setTimeout(() => child.emitExit(0, null), 10);
+        return child;
+      }
+    });
+
+    try {
+      const promise = command.handler(createContext({ env: { ALAYA_DAEMON_URL: daemon.url }, stdout }), {
+        open: false,
+        port: 5174,
+        token: null,
+        workspace: null
+      });
+      const result = await promise;
+
+      expect(result.exitCode).toBe(0);
+      expect(daemon.requests).toEqual(["/workspaces"]);
+      expect(stdoutChunks.join("")).toContain("&workspaceId=ws-http");
+    } finally {
+      daemon.restore();
+    }
   });
 
   it("errors with remediation when no active workspace is registered", async () => {
@@ -560,6 +612,54 @@ describe("cli inspect", () => {
     expect(stderrMissingChunks.join("")).toContain('workspace "nope" not found');
   });
 
+  it("verifies explicit --workspace through the daemon /workspaces/:id HTTP contract", async () => {
+    const child = new FakeInspectorChild();
+    const stdout = new PassThrough();
+    const stdoutChunks: string[] = [];
+    stdout.on("data", (chunk) => stdoutChunks.push(chunk.toString()));
+    const daemon = stubWorkspaceDaemonFetch((url) => {
+      if (url.pathname === "/workspaces/explicit-ws") {
+        return {
+          body: {
+            success: true,
+            data: {
+              workspace_id: "explicit-ws",
+              name: "Explicit",
+              repo_path: "/tmp/explicit",
+              workspace_state: "active"
+            }
+          }
+        };
+      }
+      return { status: 404, body: { success: false } };
+    });
+    const command = createInspectCommand({
+      checkPortAvailable: async () => true,
+      generateToken: () => "a".repeat(64),
+      spawnInspector: () => {
+        setTimeout(() => child.stdout.write("inspector_ready\n"), 0);
+        setTimeout(() => child.emitExit(0, null), 10);
+        return child;
+      }
+    });
+
+    try {
+      const promise = command.handler(createContext({ env: { ALAYA_DAEMON_URL: daemon.url }, stdout }), {
+        open: false,
+        port: 5174,
+        token: null,
+        workspace: "explicit-ws"
+      });
+      const result = await promise;
+
+      expect(result.exitCode).toBe(0);
+      expect(daemon.requests).toEqual(["/workspaces/explicit-ws"]);
+      expect(stdoutChunks.join("")).toContain("&workspaceId=explicit-ws");
+    } finally {
+      daemon.restore();
+    }
+  });
+
   it("terminates the inspector child when the CLI receives SIGINT", async () => {
     const child = new FakeInspectorChild();
     const command = createInspectCommand({
@@ -641,4 +741,33 @@ function oneWorkspaceList() {
       workspace_state: "active"
     }
   ];
+}
+
+interface TestDaemonResponse {
+  readonly status?: number;
+  readonly body: unknown;
+}
+
+function stubWorkspaceDaemonFetch(
+  handler: (url: URL) => TestDaemonResponse
+): {
+  readonly url: string;
+  readonly requests: string[];
+  restore(): void;
+} {
+  const requests: string[] = [];
+  const originalFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+    const requestUrl = input instanceof Request ? new URL(input.url) : new URL(String(input));
+    requests.push(requestUrl.pathname);
+    const response = handler(requestUrl);
+    return Response.json(response.body, { status: response.status ?? 200 });
+  });
+  return {
+    url: "http://daemon.local",
+    requests,
+    restore: () => {
+      vi.stubGlobal("fetch", originalFetch);
+    }
+  };
 }

@@ -73,6 +73,7 @@ describe("proposal review inspector cli parity", () => {
     }> = [];
     const inspectorApp = createInspectorApp({
       token: "inspector-token",
+      workspaceId: "ws1",
       daemonUrl: "http://daemon.local",
       env: {
         ALAYA_REQUEST_TOKEN: "daemon-request-token",
@@ -190,6 +191,7 @@ async function runReviewParityScenario(
   });
   const inspectorApp = createInspectorApp({
     token: "inspector-token",
+    workspaceId: "ws1",
     daemonUrl: "http://daemon.local",
     env: {
       ALAYA_REQUEST_TOKEN: "daemon-request-token",

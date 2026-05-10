@@ -329,8 +329,25 @@ describe("GraphPage (react-force-graph driven)", () => {
     );
     renderGraphWithEnv();
     const stub = await screen.findByTestId("force-graph-2d");
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/graph/ws-1",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({ "X-Alaya-Inspector-Token": "test-token" })
+      })
+    );
     expect(stub.getAttribute("data-node-count")).toBe("3");
     expect(stub.getAttribute("data-link-count")).toBe("2");
+  });
+
+  it("renders no-workspace alert and never fetches when workspaceId is null", async () => {
+    setWorkspaceId(null);
+
+    renderGraphWithEnv();
+
+    expect(await screen.findByTestId("graph-no-workspace")).toBeTruthy();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("surfaces returned-vs-total counts and the sampled badge", async () => {

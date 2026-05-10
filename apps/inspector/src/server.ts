@@ -34,9 +34,16 @@ export async function startInspectorServer(options: InspectorServerOptions = {})
     process.exitCode = 2;
     throw new Error("inspector_daemon_url_missing");
   }
+  const workspaceId = env.ALAYA_INSPECTOR_WORKSPACE_ID?.trim();
+  if (!workspaceId) {
+    stderr.write("inspector_workspace_id_missing\n");
+    process.exitCode = 2;
+    throw new Error("inspector_workspace_id_missing");
+  }
 
   const app = createInspectorApp({
     token,
+    workspaceId,
     daemonUrl,
     env
   });
@@ -54,7 +61,8 @@ if (process.argv[1] !== undefined && process.argv[1].endsWith("/server.js")) {
     const isStartupConfigError =
       error instanceof Error &&
       (error.message === "inspector_token_missing" ||
-        error.message === "inspector_daemon_url_missing");
+        error.message === "inspector_daemon_url_missing" ||
+        error.message === "inspector_workspace_id_missing");
     if (!isStartupConfigError) {
       process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
       process.exitCode = 1;

@@ -57,6 +57,7 @@ export type InspectDaemonProbeResult =
 export interface SpawnInspectorInput {
   readonly port: number;
   readonly token: string;
+  readonly workspaceId: string;
   readonly inspectorEntryPath: string;
   readonly env: NodeJS.ProcessEnv;
 }
@@ -137,6 +138,7 @@ async function executeInspect(
     child = (deps.spawnInspector ?? defaultSpawnInspector)({
       port: args.port,
       token,
+      workspaceId: workspaceResolution.workspaceId,
       inspectorEntryPath: deps.inspectorEntryPath ?? defaultInspectorEntryPath(),
       env: { ...ctx.env, ALAYA_DAEMON_URL: daemon.url }
     });
@@ -398,6 +400,7 @@ export function buildInspectorChildEnv(input: SpawnInspectorInput): NodeJS.Proce
   }
   env.ALAYA_INSPECTOR_TOKEN = input.token;
   env.ALAYA_INSPECTOR_PORT = String(input.port);
+  env.ALAYA_INSPECTOR_WORKSPACE_ID = input.workspaceId;
   return env;
 }
 

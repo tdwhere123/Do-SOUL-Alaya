@@ -37,6 +37,7 @@ describe("inspector routes", () => {
     const calls: { url: string; method: string; body: string | null }[] = [];
     const app = createInspectorApp({
       token: "token",
+      workspaceId: "ws1",
       daemonUrl: "http://daemon.local",
       staticRoot: await mkdtemp(path.join(tmpdir(), "inspector-static-")),
       fetchImpl: async (input, init) => {
@@ -104,6 +105,7 @@ describe("inspector routes", () => {
   it("loads embedding-supplement config from the daemon runtime config endpoint", async () => {
     const app = createInspectorApp({
       token: "token",
+      workspaceId: "ws1",
       daemonUrl: "http://daemon.local",
       staticRoot: await mkdtemp(path.join(tmpdir(), "inspector-static-")),
       fetchImpl: async (input) => {
@@ -151,6 +153,7 @@ describe("inspector routes", () => {
   it("sanitizes daemon upstream errors", async () => {
     const app = createInspectorApp({
       token: "token",
+      workspaceId: "ws1",
       daemonUrl: "http://daemon.local",
       fetchImpl: async () => Response.json({ error: "/secret/path" }, { status: 503 })
     });
@@ -164,6 +167,7 @@ describe("inspector routes", () => {
   it("returns daemon unavailable when the daemon fetch fails", async () => {
     const app = createInspectorApp({
       token: "token",
+      workspaceId: "ws1",
       daemonUrl: "http://daemon.local",
       fetchImpl: async () => {
         throw Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:5173"), {
@@ -182,6 +186,7 @@ describe("inspector routes", () => {
     const plaintext = "sk-test-leaked-secret";
     const app = createInspectorApp({
       token: "token",
+      workspaceId: "ws1",
       daemonUrl: "http://daemon.local",
       fetchImpl: async () => Response.json({ error: `validation failed: ${plaintext}` }, { status: 400 })
     });
@@ -206,6 +211,7 @@ describe("inspector routes", () => {
     const plaintext = "sk-test-plaintext-secret";
     const app = createInspectorApp({
       token: "token",
+      workspaceId: "ws1",
       daemonUrl: "http://daemon.local",
       fetchImpl: async () => {
         throw new Error(`boom ${plaintext}`);
@@ -263,6 +269,7 @@ describe("inspector routes", () => {
     }[] = [];
     const app = createInspectorApp({
       token: "token",
+      workspaceId: "ws1",
       daemonUrl: "http://daemon.local",
       staticRoot: await mkdtemp(path.join(tmpdir(), "inspector-static-")),
       env: {
@@ -332,5 +339,55 @@ describe("inspector routes", () => {
         desktop: "1"
       }
     ]);
+  });
+
+  it("rejects workspace-scoped API paths that do not match the launch workspace", async () => {
+    const calls: string[] = [];
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      fetchImpl: async (input) => {
+        calls.push(String(input));
+        return Response.json({ success: true, data: { ok: true } });
+      }
+    });
+
+    const graph = await app.request("/api/graph/ws2?token=token");
+    const graphWhitespace = await app.request("/api/graph/ws1%20?token=token");
+    const config = await app.request("/api/config/ws2/strategy?token=token");
+    const proposals = await app.request("/api/proposals/ws2/pending?token=token");
+    const search = await app.request("/api/soul/search/ws2?token=token", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "memory" })
+    });
+
+    expect(graph.status).toBe(403);
+    expect(graphWhitespace.status).toBe(403);
+    expect(config.status).toBe(403);
+    expect(proposals.status).toBe(403);
+    expect(search.status).toBe(403);
+    await expect(graph.json()).resolves.toEqual({ error: "workspace_forbidden" });
+    await expect(graphWhitespace.json()).resolves.toEqual({ error: "workspace_forbidden" });
+    expect(calls).toEqual([]);
+  });
+
+  it("rejects workspace-scoped API paths when the Inspector app is missing its launch workspace", async () => {
+    const calls: string[] = [];
+    const app = createInspectorApp({
+      token: "token",
+      daemonUrl: "http://daemon.local",
+      fetchImpl: async (input) => {
+        calls.push(String(input));
+        return Response.json({ success: true, data: { ok: true } });
+      }
+    });
+
+    const response = await app.request("/api/graph/ws1?token=token");
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ error: "workspace_binding_missing" });
+    expect(calls).toEqual([]);
   });
 });

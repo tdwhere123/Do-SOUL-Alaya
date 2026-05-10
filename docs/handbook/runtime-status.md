@@ -310,12 +310,15 @@ Soul / Environment config sections:
 - `setWorkspaceId` widened to `string | null` so test surfaces and
   any future "detach from workspace" flow can clear it cleanly.
 
-The plan / verification evidence is `do-it-review-loop`-cleared with
-`install-release-reviewer` + `codex:codex-rescue` independent passes.
-End-to-end check: clean `~/.config/alaya/`, run `alaya install` in a
-repo, then `alaya inspect --open` — printed URL contains
-`&workspaceId=local_…`, browser shows Config / Graph / Proposals
-loaded, no console 404s.
+Follow-up review tightened the trust boundary: the CLI-selected
+workspace is now passed to the Inspector child as
+`ALAYA_INSPECTOR_WORKSPACE_ID`, and the Inspector backend rejects
+workspace-scoped API paths whose path workspace does not match that
+launch context. Automated evidence covers the route-backed CLI
+`/workspaces` contract, Inspector proxy mismatch rejection, stale
+frontend workspace clearing, and Graph no-workspace rendering. Manual
+browser smoke remains useful, but it is not the source of authority for
+the token-bound workspace rule.
 
 ## v0.1.2 Distribution (2026-05-09)
 

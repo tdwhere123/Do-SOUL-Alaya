@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { proxyDaemonJson, type InspectorProxyOptions } from "./shared.js";
+import { assertInspectorWorkspace, proxyDaemonJson, type InspectorProxyOptions } from "./shared.js";
 
 // Inspector loopback for the NL+time-aware search bar. Forwards body verbatim
 // to the daemon's POST /workspaces/:wsId/soul/search, which routes through
@@ -13,6 +13,8 @@ export function registerInspectorSoulSearchRoutes(
     if (workspaceId === undefined) {
       return context.json({ error: "invalid_request" }, 400);
     }
+    const forbidden = assertInspectorWorkspace(context, options, workspaceId);
+    if (forbidden !== null) return forbidden;
     let body: unknown;
     try {
       body = await context.req.json();

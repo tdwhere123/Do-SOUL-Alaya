@@ -24,9 +24,7 @@ export function AppContent() {
 
     if (token) {
       setInspectorToken(token);
-      if (workspaceId) {
-        setWorkspaceId(workspaceId);
-      }
+      setWorkspaceId(workspaceId?.trim().length ? workspaceId : null);
       setAuthError(null);
       setReady(true);
     } else if (getInspectorToken()) {

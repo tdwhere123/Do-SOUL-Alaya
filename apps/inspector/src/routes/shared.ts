@@ -2,10 +2,30 @@ import type { Context } from "hono";
 
 export interface InspectorProxyOptions {
   readonly daemonUrl: string;
+  readonly workspaceId?: string;
   readonly fetchImpl?: typeof fetch;
   readonly daemonRequestToken?: string;
   readonly reviewerToken?: string;
   readonly reviewerIdentity?: string;
+}
+
+export function assertInspectorWorkspace(
+  context: Context,
+  options: InspectorProxyOptions,
+  workspaceId: string | undefined
+): Response | null {
+  const expected = options.workspaceId?.trim();
+  const provided = workspaceId;
+  if (expected === undefined || expected.length === 0) {
+    return context.json({ error: "workspace_binding_missing" }, 500);
+  }
+  if (provided === undefined || provided.length === 0) {
+    return context.json({ error: "workspace_required" }, 400);
+  }
+  if (provided !== expected) {
+    return context.json({ error: "workspace_forbidden" }, 403);
+  }
+  return null;
 }
 
 export async function proxyDaemonJson(

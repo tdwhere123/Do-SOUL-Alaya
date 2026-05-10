@@ -1,5 +1,5 @@
 import type { Context, Hono } from "hono";
-import { proxyDaemonJson, type InspectorProxyOptions } from "./shared.js";
+import { assertInspectorWorkspace, proxyDaemonJson, type InspectorProxyOptions } from "./shared.js";
 
 // A1 (HITL daemon backbone) — Inspector tooling-loopback for the new
 // pending-proposals listing tool plus accept/reject. The Inspector is
@@ -10,6 +10,8 @@ import { proxyDaemonJson, type InspectorProxyOptions } from "./shared.js";
 export function registerInspectorProposalRoutes(app: Hono, options: InspectorProxyOptions): void {
   app.get("/api/proposals/:workspaceId/pending", async (context) => {
     const workspaceId = context.req.param("workspaceId");
+    const forbidden = assertInspectorWorkspace(context, options, workspaceId);
+    if (forbidden !== null) return forbidden;
     const since = context.req.query("since");
     const limit = context.req.query("limit");
     const search = new URLSearchParams();
@@ -24,6 +26,8 @@ export function registerInspectorProposalRoutes(app: Hono, options: InspectorPro
 
   app.post("/api/proposals/:workspaceId/:proposalId/review", async (context) => {
     const workspaceId = context.req.param("workspaceId");
+    const forbidden = assertInspectorWorkspace(context, options, workspaceId);
+    if (forbidden !== null) return forbidden;
     const proposalId = context.req.param("proposalId");
     let body: unknown;
     try {
@@ -67,6 +71,8 @@ async function proxyMemoryAction(
   if (workspaceId === undefined || memoryId === undefined) {
     return context.json({ error: "invalid_request" }, 400);
   }
+  const forbidden = assertInspectorWorkspace(context, options, workspaceId);
+  if (forbidden !== null) return forbidden;
   let body: unknown = undefined;
   if (action === "rewrite") {
     try {
