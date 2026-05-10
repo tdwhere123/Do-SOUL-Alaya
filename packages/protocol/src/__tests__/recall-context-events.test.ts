@@ -13,7 +13,9 @@ describe("Phase 3A event schemas", () => {
     const expected = [
       "soul.task_surface.created",
       "soul.recall.completed",
-      "soul.context_lens.assembled"
+      "soul.context_lens.assembled",
+      "soul.recall.delivered",
+      "soul.context_usage.reported"
     ];
 
     expect(Object.values(RecallContextEventType)).toEqual(expected);
@@ -64,6 +66,71 @@ describe("Phase 3A event schemas", () => {
     expect(parseRecallContextEventPayload(RecallContextEventType.SOUL_CONTEXT_LENS_ASSEMBLED, payload)).toEqual(payload);
   });
 
+  it("parses soul.recall.delivered payload", () => {
+    const payload = {
+      delivery_id: "delivery_70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      session_id: "session_70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      run_id: "run-1",
+      agent_target: "claude-code",
+      query_hash: "abc123def456",
+      pointer_count: 5,
+      latency_ms: 142,
+      workspace_id: "workspace-1",
+      occurred_at: validTimestamp
+    } as const;
+
+    expect(parseRecallContextEventPayload(RecallContextEventType.SOUL_RECALL_DELIVERED, payload)).toEqual(payload);
+  });
+
+  it("parses soul.recall.delivered payload with null run_id", () => {
+    const payload = {
+      delivery_id: "delivery_no-run",
+      session_id: "mcp-session-no-run",
+      run_id: null,
+      agent_target: "claude-code",
+      query_hash: "abc123def456",
+      pointer_count: 0,
+      latency_ms: 8,
+      workspace_id: "workspace-1",
+      occurred_at: validTimestamp
+    } as const;
+
+    expect(parseRecallContextEventPayload(RecallContextEventType.SOUL_RECALL_DELIVERED, payload)).toEqual(payload);
+  });
+
+  it("parses soul.context_usage.reported payload for each usage_state", () => {
+    const states = ["used", "skipped", "not_applicable"] as const;
+    for (const usageState of states) {
+      const payload = {
+        delivery_id: "delivery_70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+        session_id: "session_70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+        run_id: "run-1",
+        agent_target: "claude-code",
+        usage_state: usageState,
+        workspace_id: "workspace-1",
+        occurred_at: validTimestamp
+      } as const;
+
+      expect(parseRecallContextEventPayload(RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED, payload)).toEqual(
+        payload
+      );
+    }
+  });
+
+  it("rejects soul.context_usage.reported with unknown usage_state", () => {
+    expect(() =>
+      parseRecallContextEventPayload(RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED, {
+        delivery_id: "delivery_x",
+        session_id: "session_x",
+        run_id: "run-1",
+        agent_target: "claude-code",
+        usage_state: "rejected",
+        workspace_id: "workspace-1",
+        occurred_at: validTimestamp
+      })
+    ).toThrow();
+  });
+
   it("throws for unknown recall-context event types", () => {
     expect(() =>
       parseRecallContextEventPayload("soul.unknown.event" as never, {
@@ -78,6 +145,12 @@ describe("Phase 3A event schemas", () => {
     );
     expect(EventTypeSchema.parse(RecallContextEventType.SOUL_RECALL_COMPLETED)).toBe(
       RecallContextEventType.SOUL_RECALL_COMPLETED
+    );
+    expect(EventTypeSchema.parse(RecallContextEventType.SOUL_RECALL_DELIVERED)).toBe(
+      RecallContextEventType.SOUL_RECALL_DELIVERED
+    );
+    expect(EventTypeSchema.parse(RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED)).toBe(
+      RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED
     );
   });
 });

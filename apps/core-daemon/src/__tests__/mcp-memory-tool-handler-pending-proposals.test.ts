@@ -18,7 +18,8 @@ import {
 const context = {
   workspaceId: "ws1",
   runId: "run1",
-  agentTarget: "codex"
+  agentTarget: "codex",
+      sessionId: "mcp-memory-tool-handler-pending-proposals-session",
 };
 
 describe("mcp memory tool handler — soul.list_pending_proposals (A1)", () => {

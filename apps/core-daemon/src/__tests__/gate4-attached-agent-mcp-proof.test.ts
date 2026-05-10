@@ -82,6 +82,7 @@ describe("Gate-4 attached-agent MCP proof", () => {
         workspaceId: "workspace-1",
         runId: "run-1",
         agentTarget: "codex",
+      sessionId: "gate4-attached-agent-mcp-proof-session",
         surfaceId: "gate4-attached-agent-proof"
       })
     });

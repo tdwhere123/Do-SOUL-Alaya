@@ -5,6 +5,7 @@ import type { AppConfigService } from "./services/config-service.js";
 import type { EmbeddingStatusService } from "./services/embedding-status-service.js";
 import type { EnvironmentStatusService } from "./services/environment-status-service.js";
 import type { McpMemoryToolHandler } from "./mcp-memory-tool-handler.js";
+import type { RecallUtilizationService } from "./services/recall-utilization-service.js";
 import type { TrustStateRecorder } from "./trust-state.js";
 import type { RunService, WorkspaceService } from "@do-soul/alaya-core";
 
@@ -47,6 +48,7 @@ export interface AlayaDaemonRuntimeServices {
   readonly embeddingStatusService: EmbeddingStatusService;
   readonly configService: Pick<AppConfigService, "getGardenCredentialProvenance" | "getRuntimeGardenComputeConfig">;
   readonly mcpMemoryToolHandler: McpMemoryToolHandler;
+  readonly recallUtilizationService: RecallUtilizationService;
   readonly runService: Pick<RunService, "getById">;
   readonly trustStateRecorder: TrustStateRecorder;
   readonly workspaceService: Pick<WorkspaceService, "ensureLocalWorkspace">;

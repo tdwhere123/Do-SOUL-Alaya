@@ -168,6 +168,10 @@ export class TrustStateRecorder {
     );
   }
 
+  public async findDeliveryById(deliveryId: string): Promise<Readonly<ContextDeliveryRecord> | null> {
+    return await this.repo.findDeliveryById(deliveryId);
+  }
+
   public async recordUsage(
     input: Omit<UsageProofRecord, "audit_event_id">,
     options?: { readonly expectedWorkspaceId?: string }

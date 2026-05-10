@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -81,7 +82,8 @@ export function registerAlayaCliCommands(
   }));
   bridge.registerSubcommand(createStatusCommand({
     trustStateSummaryProvider: async (agentTarget) => await runtime.services.trustStateRecorder.summarize(agentTarget),
-    getGardenStatus: async () => runtime.services.gardenStatus.getStatus()
+    getGardenStatus: async () => runtime.services.gardenStatus.getStatus(),
+    recallUtilizationService: runtime.services.recallUtilizationService
   }));
   bridge.registerSubcommand(createInstallCommand());
   bridge.registerSubcommand(createInspectCommand({
@@ -313,12 +315,17 @@ function createMcpCommand(runtime: AlayaDaemonRuntime): AlayaSubcommandSpec<read
         ctx.stderr.write(`${message}\n`);
       });
 
+      // sessionId is process-stable for an attached MCP stdio session:
+      // each attach launches a fresh `alaya mcp stdio` child, so one
+      // uuid per process maps 1:1 to one MCP attach session.
+      const mcpSessionId = `mcp-session-${randomUUID()}`;
       const server = await runAlayaMcpStdioServer({
         memoryToolHandler: runtime.services.mcpMemoryToolHandler,
         contextProvider: () => ({
           workspaceId: workspaceContext.workspaceId,
           runId: trustedRunId.runId,
-          agentTarget: resolvedAgentTarget
+          agentTarget: resolvedAgentTarget,
+          sessionId: mcpSessionId
         }),
         stdin: ctx.stdin as unknown as Readable,
         stdout: ctx.stdout as unknown as Writable

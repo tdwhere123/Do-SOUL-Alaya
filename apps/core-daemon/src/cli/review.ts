@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   McpMemoryToolCallContext,
   McpMemoryToolHandler
@@ -405,7 +406,8 @@ async function buildCallContext(
       agentTarget:
         args.contextOverrides.agentTarget ??
         deps.defaultAgentTarget ??
-        "cli"
+        "cli",
+      sessionId: `review-cli-${randomUUID()}`
     }
   };
 }

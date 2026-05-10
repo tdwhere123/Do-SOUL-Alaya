@@ -92,7 +92,8 @@ describe("proposal routes (HTTP surface narrowed in p5-system-review-r1)", () =>
       context: {
         workspaceId: "ws-1",
         runId: null,
-        agentTarget: "inspector"
+        agentTarget: "inspector",
+        sessionId: expect.stringMatching(/^inspector-/)
       }
     });
   });

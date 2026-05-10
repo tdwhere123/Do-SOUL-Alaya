@@ -16,7 +16,8 @@ import {
 const context = {
   workspaceId: "ws1",
   runId: "run1",
-  agentTarget: "codex"
+  agentTarget: "codex",
+      sessionId: "mcp-memory-tool-handler-session",
 };
 
 describe("mcp memory tool handler", () => {
@@ -417,7 +418,8 @@ function createDeps(): McpMemoryToolHandlerDependencies {
       recordUsage: vi.fn(async (input: Omit<UsageProofRecord, "audit_event_id">) => ({
         ...input,
         audit_event_id: "event2"
-      }))
+      })),
+      findDeliveryById: vi.fn(async () => null)
     }
   };
 }

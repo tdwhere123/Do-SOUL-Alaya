@@ -206,7 +206,8 @@ describe("trust state SQL persistence", () => {
         context: {
           workspaceId: "workspace-1",
           runId: "run-1",
-          agentTarget: "codex"
+          agentTarget: "codex",
+          sessionId: "trust-state-cross-workspace-test"
         }
       });
 
@@ -361,6 +362,7 @@ async function callRuntimeMemoryTool<TOutput = unknown>(
       workspaceId: "workspace-1",
       runId: "run-1",
       agentTarget: "codex",
+      sessionId: "trust-state-persistence-test-session",
       surfaceId: "gate4-proof"
     }
   });

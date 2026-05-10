@@ -259,7 +259,8 @@ async function reportUsageWithDelivery(
     context: {
       workspaceId: "workspace-1",
       runId: "run-1",
-      agentTarget: "codex"
+      agentTarget: "codex",
+      sessionId: "recall-hit-tier-promotion-session",
     }
   });
 }

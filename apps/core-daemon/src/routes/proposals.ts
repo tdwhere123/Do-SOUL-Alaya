@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Context, Hono } from "hono";
 import type { MemoryService, ProposalService, WorkspaceService } from "@do-soul/alaya-core";
 import type { McpMemoryToolHandler } from "../mcp-memory-tool-handler.js";
@@ -66,7 +67,8 @@ export function registerProposalRoutes(app: Hono, services: ProposalRouteService
       context: {
         workspaceId,
         runId: null,
-        agentTarget: "inspector"
+        agentTarget: "inspector",
+        sessionId: `inspector-${randomUUID()}`
       }
     });
     if (!result.ok) {
@@ -111,7 +113,8 @@ export function registerProposalRoutes(app: Hono, services: ProposalRouteService
       context: {
         workspaceId,
         runId: null,
-        agentTarget: "inspector"
+        agentTarget: "inspector",
+        sessionId: `inspector-${randomUUID()}`
       }
     });
     if (!result.ok) {
@@ -260,7 +263,8 @@ async function createMemoryActionProposal(
     context: {
       workspaceId: input.workspaceId,
       runId: null,
-      agentTarget: "inspector"
+      agentTarget: "inspector",
+      sessionId: `inspector-${randomUUID()}`
     }
   });
   if (!result.ok) {
@@ -309,7 +313,8 @@ async function findExistingPendingMatch(
     context: {
       workspaceId: input.workspaceId,
       runId: null,
-      agentTarget: "inspector"
+      agentTarget: "inspector",
+      sessionId: `inspector-${randomUUID()}`
     }
   });
   if (!result.ok) return null;

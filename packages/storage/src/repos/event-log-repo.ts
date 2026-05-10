@@ -185,6 +185,10 @@ export class SqliteEventLogRepo implements EventLogRepo {
       WHERE workspace_id = ?
       ORDER BY created_at ASC, rowid ASC
     `);
+    // INVARIANT: window filter falls back to created_at when payload has
+    // no reported_at field. soul.recall.delivered / soul.context_usage.reported
+    // carry occurred_at, not reported_at, so they intentionally hit the
+    // fallback branch — do not tighten this to require reported_at IS NOT NULL.
     this.queryByWorkspaceAndTypeStatement = db.connection.prepare(`
       SELECT
         event_id,

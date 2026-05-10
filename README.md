@@ -408,7 +408,7 @@ outside the agent runtime.
 | `alaya attach codex` | Add `mcpServers.alaya` to `~/.codex/config.toml` | yes | yes |
 | `alaya attach claude-code` | Add `mcpServers.alaya` to `~/.claude.json` | yes | yes |
 | `alaya detach codex` / `detach claude-code` | Reverse the corresponding attach atomically | yes | yes |
-| `alaya status` | Daemon health + trust-state summary | no | no |
+| `alaya status` | Daemon health + trust-state summary. `--recall-stats --workspace <id> [--since <iso>] [--until <iso>]` adds a recall utilization section (recall throughput, miss ratio, used vs skipped) for attached agent traffic; `inspector` and `cli` agent_targets are excluded by default. | no | no |
 | `alaya inspect` | Open the Memory Inspector SPA on loopback (memory-tooling, *not* an agent surface) | no | no |
 | `alaya update [--check] [--yes]` | Check for and install the latest npm release of `@do-soul/alaya` | yes (npm global) | no |
 | `alaya tools list` | List the MCP tool catalog | no | no |

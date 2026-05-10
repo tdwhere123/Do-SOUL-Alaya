@@ -627,6 +627,7 @@ async function createGardenMcpHarness(options: GardenMcpHarnessOptions = {}): Pr
     workspaceId: "workspace-a",
     runId: "run-a",
     agentTarget: "garden-worker",
+    sessionId: "garden-mcp-tools-test-session",
     surfaceId: "garden-mcp-tools-test"
   };
   await seedWorkspaceRun(workspaceRepo, runRepo, "workspace-a", "run-a");
@@ -665,7 +666,8 @@ async function createGardenMcpHarness(options: GardenMcpHarnessOptions = {}): Pr
     },
     trustStateRecorder: {
       recordDelivery: async (input) => ({ ...input, audit_event_id: "event-delivery" }),
-      recordUsage: async (input) => ({ ...input, audit_event_id: "event-usage" })
+      recordUsage: async (input) => ({ ...input, audit_event_id: "event-usage" }),
+      findDeliveryById: async () => null
     },
     eventPublisher,
     gardenTaskRepo

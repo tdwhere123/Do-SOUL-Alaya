@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Context, Hono } from "hono";
 import type { WorkspaceService } from "@do-soul/alaya-core";
 import type { McpMemoryToolHandler } from "../mcp-memory-tool-handler.js";
@@ -84,7 +85,8 @@ export function registerSoulSearchRoutes(app: Hono, services: SoulSearchRouteSer
       context: {
         workspaceId,
         runId: null,
-        agentTarget: "inspector"
+        agentTarget: "inspector",
+        sessionId: `inspector-${randomUUID()}`
       }
     });
 

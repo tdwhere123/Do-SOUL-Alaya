@@ -17,11 +17,13 @@ import {
   MemoryDimensionSchema,
   parseGardenEventPayload,
   ProposalResolutionState,
+  RecallContextEventType,
   RetentionPolicy,
   ScopeClassSchema,
   SignalSource,
   SoulApplyOverrideRequestSchema,
   SoulApplyOverrideResponseSchema,
+  SoulContextUsageReportedPayloadSchema,
   SoulEmitCandidateSignalRequestSchema,
   SoulEmitCandidateSignalResponseSchema,
   SoulExploreGraphRequestSchema,
@@ -35,6 +37,7 @@ import {
   SoulMemoryTierPromotedPayloadSchema,
   SoulProposeMemoryUpdateRequestSchema,
   SoulProposeMemoryUpdateResponseSchema,
+  SoulRecallDeliveredPayloadSchema,
   SoulReportContextUsageRequestSchema,
   SoulReportContextUsageResponseSchema,
   SoulReviewMemoryProposalRequestSchema,
@@ -91,6 +94,12 @@ export interface McpMemoryToolCallContext {
   readonly workspaceId: string;
   readonly runId: string | null;
   readonly agentTarget: string;
+  // Session id is the trusted unique counter for "an MCP attach session"
+  // — required so the metering service can compute attached-agent
+  // session distributions even when ALAYA_RUN_ID is not set. Generated
+  // once per attach for stdio (process-stable) and per call for HTTP /
+  // CLI surfaces.
+  readonly sessionId: string;
   readonly surfaceId?: string | null;
 }
 
@@ -168,6 +177,7 @@ export interface McpMemoryToolHandlerDependencies {
       input: Omit<UsageProofRecord, "audit_event_id">,
       options?: { readonly expectedWorkspaceId?: string }
     ): Promise<UsageProofRecord>;
+    findDeliveryById(deliveryId: string): Promise<Readonly<ContextDeliveryRecord> | null>;
   };
   readonly eventPublisher?: {
     appendManyWithMutation<T>(
@@ -313,6 +323,7 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     request: SoulMemorySearchRequest,
     context: McpMemoryToolCallContext
   ) {
+    const recallStartedAt = Date.now();
     const taskSurface = TaskObjectSurfaceSchema.parse({
       runtime_id: generateId(),
       object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
@@ -366,6 +377,14 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       delivered_at: now()
     });
 
+    await emitRecallDeliveredTelemetry({
+      deliveryId,
+      query: request.query,
+      pointerCount: results.length,
+      latencyMs: Date.now() - recallStartedAt,
+      context
+    });
+
     const degradationReason =
       recallResult.degradation_reason ?? (explainabilityPartial ? "recall_explainability_partial" : null);
 
@@ -376,6 +395,44 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       strategy_mix: buildRecallStrategyMix(policyOverride, results),
       degradation_reason: degradationReason
     });
+  }
+
+  async function emitRecallDeliveredTelemetry(input: {
+    readonly deliveryId: string;
+    readonly query: string;
+    readonly pointerCount: number;
+    readonly latencyMs: number;
+    readonly context: McpMemoryToolCallContext;
+  }): Promise<void> {
+    if (deps.eventPublisher === undefined) {
+      return;
+    }
+    const occurredAt = now();
+    const queryHash = createHash("sha256").update(input.query).digest("hex").slice(0, 16);
+    const event = {
+      event_type: RecallContextEventType.SOUL_RECALL_DELIVERED,
+      entity_type: "context_delivery",
+      entity_id: input.deliveryId,
+      workspace_id: input.context.workspaceId,
+      run_id: input.context.runId,
+      caused_by: input.context.agentTarget,
+      payload_json: SoulRecallDeliveredPayloadSchema.parse({
+        delivery_id: input.deliveryId,
+        session_id: input.context.sessionId,
+        run_id: input.context.runId,
+        agent_target: input.context.agentTarget,
+        query_hash: queryHash,
+        pointer_count: input.pointerCount,
+        latency_ms: Math.max(0, Math.trunc(input.latencyMs)),
+        workspace_id: input.context.workspaceId,
+        occurred_at: occurredAt
+      })
+    } as const;
+    try {
+      await deps.eventPublisher.appendManyWithMutation([event], () => undefined);
+    } catch {
+      // INVARIANT: telemetry append never throws to the MCP caller.
+    }
   }
 
   async function openPointer(request: SoulOpenPointerRequest, context: McpMemoryToolCallContext) {
@@ -706,10 +763,59 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     );
     await promoteRecallHitMemories(request, context, reportedAt);
     enqueuePostTurnExtractTask(request, context);
+    // INVARIANT: stats attribution follows the linked delivery, not the
+    // reporter's MCP context — a delayed retry / CLI fallback report
+    // would otherwise count usage under the wrong run/agent and skew
+    // used_ratio vs the trust-state proof.
+    const linkedDelivery = await deps.trustStateRecorder.findDeliveryById(request.delivery_id);
+    await emitContextUsageReportedTelemetry({
+      deliveryId: request.delivery_id,
+      usageState: request.usage_state,
+      occurredAt: reportedAt,
+      context,
+      linkedDelivery
+    });
     return SoulReportContextUsageResponseSchema.parse({
       delivery_id: request.delivery_id,
       status: "recorded"
     });
+  }
+
+  async function emitContextUsageReportedTelemetry(input: {
+    readonly deliveryId: string;
+    readonly usageState: SoulReportContextUsageRequest["usage_state"];
+    readonly occurredAt: string;
+    readonly context: McpMemoryToolCallContext;
+    readonly linkedDelivery: Readonly<ContextDeliveryRecord> | null;
+  }): Promise<void> {
+    if (deps.eventPublisher === undefined) {
+      return;
+    }
+    const attributedRunId = input.linkedDelivery?.run_id ?? input.context.runId;
+    const attributedAgentTarget = input.linkedDelivery?.agent_target ?? input.context.agentTarget;
+    const attributedWorkspaceId = input.linkedDelivery?.workspace_id ?? input.context.workspaceId;
+    const event = {
+      event_type: RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
+      entity_type: "context_delivery",
+      entity_id: input.deliveryId,
+      workspace_id: attributedWorkspaceId,
+      run_id: attributedRunId,
+      caused_by: attributedAgentTarget,
+      payload_json: SoulContextUsageReportedPayloadSchema.parse({
+        delivery_id: input.deliveryId,
+        session_id: input.context.sessionId,
+        run_id: attributedRunId,
+        agent_target: attributedAgentTarget,
+        usage_state: input.usageState,
+        workspace_id: attributedWorkspaceId,
+        occurred_at: input.occurredAt
+      })
+    } as const;
+    try {
+      await deps.eventPublisher.appendManyWithMutation([event], () => undefined);
+    } catch {
+      // INVARIANT: telemetry append never throws to the MCP caller.
+    }
   }
 
   async function validateReportedRecallHits(

@@ -9,7 +9,9 @@ import {
   FormationKind,
   MemoryDimension,
   MemoryGovernanceEventType,
+  parseRecallContextEventPayload,
   ProposalResolutionState,
+  RecallContextEventType,
   RunMode,
   RunState,
   ScopeClass,
@@ -87,6 +89,7 @@ describe("Phase-6 MCP agent-use protocol proof", () => {
         workspaceId: "workspace-1",
         runId: "run-1",
         agentTarget: "codex",
+        sessionId: "phase6-session-1",
         surfaceId: "phase6-agent-use-proof"
       })
     });
@@ -286,6 +289,41 @@ describe("Phase-6 MCP agent-use protocol proof", () => {
       expect(durable.eventsByType[MemoryGovernanceEventType.SOUL_REVIEW_CREATED]).toBeGreaterThan(0);
       expect(durable.eventsByType[MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED]).toBeGreaterThan(0);
       expect(durable.eventsByType[MemoryGovernanceEventType.SOUL_MEMORY_UPDATED]).toBeGreaterThan(0);
+      expect(durable.eventsByType[RecallContextEventType.SOUL_RECALL_DELIVERED]).toBeGreaterThan(0);
+      expect(durable.eventsByType[RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED]).toBeGreaterThan(0);
+
+      const deliveredRow = durable.recallDelivered.find((row) => {
+        const parsed = parseRecallContextEventPayload(
+          RecallContextEventType.SOUL_RECALL_DELIVERED,
+          row.payload_json as Record<string, unknown>
+        );
+        return parsed.delivery_id === recall.delivery_id;
+      });
+      expect(deliveredRow).toBeDefined();
+      const deliveredPayload = parseRecallContextEventPayload(
+        RecallContextEventType.SOUL_RECALL_DELIVERED,
+        deliveredRow!.payload_json as Record<string, unknown>
+      );
+      expect(deliveredPayload.pointer_count).toBe(recall.results.length);
+      expect(deliveredPayload.query_hash).toMatch(/^[a-f0-9]{16}$/);
+      expect(deliveredPayload.latency_ms).toBeGreaterThanOrEqual(0);
+      expect(deliveredPayload.agent_target.length).toBeGreaterThan(0);
+      expect(deliveredPayload.workspace_id).toBe("workspace-1");
+
+      const usageRow = durable.contextUsageReported.find((row) => {
+        const parsed = parseRecallContextEventPayload(
+          RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
+          row.payload_json as Record<string, unknown>
+        );
+        return parsed.delivery_id === recall.delivery_id;
+      });
+      expect(usageRow).toBeDefined();
+      const usagePayload = parseRecallContextEventPayload(
+        RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
+        usageRow!.payload_json as Record<string, unknown>
+      );
+      expect(usagePayload.usage_state).toBe("used");
+      expect(usagePayload.workspace_id).toBe("workspace-1");
 
       const secondRecall = await callTool<SoulMemorySearchResponse>(client, "soul.recall", {
         query: "pnpm workspace commands",
@@ -353,6 +391,7 @@ describe("Phase-6 MCP agent-use protocol proof", () => {
         workspaceId: "workspace-1",
         runId: "run-1",
         agentTarget: "codex",
+        sessionId: "phase6-session-2",
         surfaceId: "phase6-agent-use-proof-accept"
       })
     });
@@ -548,6 +587,8 @@ async function readPhase6Evidence(
     signal: unknown;
     usages: readonly unknown[];
     eventsByType: Readonly<Record<string, number>>;
+    recallDelivered: readonly Readonly<{ payload_json: unknown }>[];
+    contextUsageReported: readonly Readonly<{ payload_json: unknown }>[];
     summary: Readonly<Record<string, unknown>>;
   }>
 > {
@@ -557,21 +598,34 @@ async function readPhase6Evidence(
   const signalRepo = new SqliteSignalRepo(database);
   const trustStateRepo = new SqliteTrustStateRepo(database);
   const eventLogRepo = new SqliteEventLogRepo(database);
-  const [memory, proposal, signal, usages, reviewCreated, proposalResolved, memoryUpdated] =
-    await Promise.all([
-      memoryRepo.findById(ids.memoryId),
-      proposalRepo.findById(ids.proposalId),
-      signalRepo.getById(ids.signalId),
-      trustStateRepo.listUsageByDeliveryIds([ids.deliveryId]),
-      eventLogRepo.queryByType(MemoryGovernanceEventType.SOUL_REVIEW_CREATED),
-      eventLogRepo.queryByType(MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED),
-      eventLogRepo.queryByType(MemoryGovernanceEventType.SOUL_MEMORY_UPDATED)
-    ]);
+  const [
+    memory,
+    proposal,
+    signal,
+    usages,
+    reviewCreated,
+    proposalResolved,
+    memoryUpdated,
+    recallDelivered,
+    contextUsageReported
+  ] = await Promise.all([
+    memoryRepo.findById(ids.memoryId),
+    proposalRepo.findById(ids.proposalId),
+    signalRepo.getById(ids.signalId),
+    trustStateRepo.listUsageByDeliveryIds([ids.deliveryId]),
+    eventLogRepo.queryByType(MemoryGovernanceEventType.SOUL_REVIEW_CREATED),
+    eventLogRepo.queryByType(MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED),
+    eventLogRepo.queryByType(MemoryGovernanceEventType.SOUL_MEMORY_UPDATED),
+    eventLogRepo.queryByType(RecallContextEventType.SOUL_RECALL_DELIVERED),
+    eventLogRepo.queryByType(RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED)
+  ]);
 
   const eventsByType = {
     [MemoryGovernanceEventType.SOUL_REVIEW_CREATED]: reviewCreated.length,
     [MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED]: proposalResolved.length,
-    [MemoryGovernanceEventType.SOUL_MEMORY_UPDATED]: memoryUpdated.length
+    [MemoryGovernanceEventType.SOUL_MEMORY_UPDATED]: memoryUpdated.length,
+    [RecallContextEventType.SOUL_RECALL_DELIVERED]: recallDelivered.length,
+    [RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED]: contextUsageReported.length
   };
 
   return {
@@ -580,6 +634,8 @@ async function readPhase6Evidence(
     signal,
     usages,
     eventsByType,
+    recallDelivered,
+    contextUsageReported,
     summary: {
       proposal_state: proposal?.resolution_state ?? null,
       memory_content: memory?.content ?? null,

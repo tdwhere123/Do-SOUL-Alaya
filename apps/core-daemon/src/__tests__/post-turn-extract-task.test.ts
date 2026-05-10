@@ -569,7 +569,8 @@ function createMcpDeps(base: {
     },
     trustStateRecorder: {
       recordDelivery: async (input) => ({ ...input, audit_event_id: "event-delivery" }),
-      recordUsage: async (input) => ({ ...input, audit_event_id: "event-usage" })
+      recordUsage: async (input) => ({ ...input, audit_event_id: "event-usage" }),
+      findDeliveryById: async () => null
     },
     eventPublisher: base.eventPublisher,
     gardenTaskRepo: base.gardenTaskRepo
@@ -709,6 +710,7 @@ function defaultContext(): McpMemoryToolCallContext {
     workspaceId: "workspace-1",
     runId: "run-1",
     agentTarget: "codex",
+    sessionId: "post-turn-extract-test-session",
     surfaceId: "post-turn-extract-test"
   };
 }

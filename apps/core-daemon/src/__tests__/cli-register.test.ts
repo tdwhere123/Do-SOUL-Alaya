@@ -150,7 +150,8 @@ describe("cli registration", () => {
     expect(serverOptions.contextProvider()).toEqual({
       workspaceId: expect.stringMatching(/^local_[a-f0-9]{16}$/),
       runId: null,
-      agentTarget: "mcp"
+      agentTarget: "mcp",
+      sessionId: expect.stringMatching(/^mcp-session-[0-9a-f-]+$/)
     });
     expect(hoisted.serverClose).toHaveBeenCalledTimes(1);
   });
@@ -193,7 +194,8 @@ describe("cli registration", () => {
     expect(serverOptions.contextProvider()).toEqual({
       workspaceId: "workspace-1",
       runId: "run-1",
-      agentTarget: "codex"
+      agentTarget: "codex",
+      sessionId: expect.stringMatching(/^mcp-session-[0-9a-f-]+$/)
     });
   });
 
@@ -234,7 +236,8 @@ describe("cli registration", () => {
     expect(serverOptions.contextProvider()).toEqual({
       workspaceId: "workspace-1",
       runId: "run-1",
-      agentTarget: "garden-worker"
+      agentTarget: "garden-worker",
+      sessionId: expect.stringMatching(/^mcp-session-[0-9a-f-]+$/)
     });
   });
 
@@ -285,7 +288,8 @@ describe("cli registration", () => {
       expect(serverOptions.contextProvider()).toEqual({
         workspaceId: "workspace-1",
         runId: "run-1",
-        agentTarget: "mcp"
+        agentTarget: "mcp",
+        sessionId: expect.stringMatching(/^mcp-session-[0-9a-f-]+$/)
       });
       expect(stderrChunks.join("")).toContain(
         `Ignoring ALAYA_AGENT_TARGET=${spoof}: MCP stdio cannot impersonate human-reviewer surfaces.`
@@ -450,7 +454,8 @@ function createRuntime(overrides: Partial<AlayaDaemonRuntime> = {}): AlayaDaemon
         recordInstalled: async () => {},
         recordConfigured: async () => {},
         recordDelivery: async (input) => ({ ...input, audit_event_id: "event1" }),
-        recordUsage: async (input) => ({ ...input, audit_event_id: "event2" })
+        recordUsage: async (input) => ({ ...input, audit_event_id: "event2" }),
+        findDeliveryById: async () => null
       },
       workspaceService: {
         ensureLocalWorkspace: async () => undefined

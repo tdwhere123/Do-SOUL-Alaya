@@ -367,6 +367,7 @@ async function callRuntimeMemoryTool<TOutput = unknown>(
       workspaceId: "workspace-1",
       runId: "run-1",
       agentTarget: "codex",
+      sessionId: "path-plasticity-integration-session",
       surfaceId: "gate-5f-e-redirection-proof"
     }
   });

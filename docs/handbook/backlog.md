@@ -59,13 +59,24 @@ during a normal user conversation.
    trained on as a recall-worthy scenario (e.g. "what was the user's
    stated naming preference for retry helpers?").
 4. Capture EventLog rows for `soul.recall` invoked by the host within
-   N turns, with non-empty delivery.
+   N turns, with non-empty delivery. (Telemetry shape shipped:
+   `soul.recall.delivered` carries `delivery_id`, `query_hash`,
+   `pointer_count`, `latency_ms`, `agent_target`; aggregation through
+   `alaya status --recall-stats`.)
 5. Post `soul.report_context_usage` with `usage_status="used"` for at
-   least one delivered_object.
+   least one delivered_object. (Telemetry shape shipped:
+   `soul.context_usage.reported` keyed by `delivery_id` carries
+   `usage_state`.)
 6. EventLog evidence is preserved as a fixture under
    `docs/v0.X/...` and tied to a regression check that re-runs against
    the recorded transcript (offline replay) so the proof remains
    stable across host model upgrades.
+
+Open work for v0.2 task card: items 1-3 (real Codex/Claude session
+capture) and item 6 (offline replay fixture). Items 4-5 are now
+testable via `phase6-agent-use-protocol.test.ts` + the new metering
+service, but the live-host autonomous selection proof still requires
+a recorded transcript.
 
 **Out of scope here:** Provider-backed Garden compute proof
 (separate; gated by network/key availability, not model autonomy).

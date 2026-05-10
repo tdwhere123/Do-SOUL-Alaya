@@ -91,6 +91,7 @@ describe("P5 v0.1 release loop E2E", () => {
         workspaceId: "workspace-1",
         runId: "run-1",
         agentTarget: "codex",
+        sessionId: "p5-release-loop-session",
         surfaceId: "p5-release-loop"
       })
     });
@@ -458,6 +459,7 @@ describe("P5 v0.1 release loop E2E", () => {
         workspaceId: "workspace-1",
         runId: "run-1",
         agentTarget: "codex",
+        sessionId: "p5-config-storage-session",
         surfaceId: "p5-config-storage"
       })
     });

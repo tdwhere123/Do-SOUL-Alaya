@@ -40,7 +40,7 @@ describe("proposal review inspector cli parity", () => {
     const mcpResult = await callAlayaMcpMemoryTool(
       {
         memoryToolHandler: createReviewHandler(),
-        contextProvider: () => ({ workspaceId: "ws1", runId: null, agentTarget: "codex" })
+        contextProvider: () => ({ workspaceId: "ws1", runId: null, agentTarget: "codex", sessionId: "review-parity-mcp-session" })
       },
       "soul.review_memory_proposal",
       reviewerArgs
@@ -165,7 +165,7 @@ async function runReviewParityScenario(
   const mcpResult = await callAlayaMcpMemoryTool(
     {
       memoryToolHandler: buildHandler(),
-      contextProvider: () => ({ workspaceId: "ws1", runId: null, agentTarget: "codex" })
+      contextProvider: () => ({ workspaceId: "ws1", runId: null, agentTarget: "codex", sessionId: "review-parity-buildhandler-session" })
     },
     "soul.review_memory_proposal",
     reviewerArgs
@@ -511,7 +511,8 @@ function createBaseDeps(): Omit<McpMemoryToolHandlerDependencies, "proposalWorkf
       recordUsage: async (input: Omit<UsageProofRecord, "audit_event_id">) => ({
         ...input,
         audit_event_id: "event-usage"
-      })
+      }),
+      findDeliveryById: async () => null
     }
   };
 }

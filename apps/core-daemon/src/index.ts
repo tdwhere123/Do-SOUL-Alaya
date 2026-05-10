@@ -154,6 +154,7 @@ import {
   CORE_DAEMON_ENVIRONMENT_TOOLS,
   derivePrincipalCodingAvailability
 } from "./services/principal-coding-availability.js";
+import { createRecallUtilizationService } from "./services/recall-utilization-service.js";
 import { createSoulApprovalService } from "./services/soul-approval-service.js";
 import { SoulTopologyAuditService } from "./services/soul-topology-audit-service.js";
 import { SqliteWorkspaceEngineConfigRepo } from "./services/workspace-engine-config-repo.js";
@@ -474,6 +475,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const recallPathPlasticityPort = createRecallPathPlasticityPort({
     pathRelationRepo
   });
+  const recallUtilizationService = createRecallUtilizationService({ eventLogRepo });
   const recallService = new RecallService({
     memoryRepo: memoryEntryRepo,
     slotRepo,
@@ -833,6 +835,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       embeddingStatusService,
       configService,
       mcpMemoryToolHandler,
+      recallUtilizationService,
       runService,
       trustStateRecorder,
       workspaceService: securedWorkspaceService,

@@ -332,7 +332,8 @@ describe("alaya review (A1)", () => {
         context: expect.objectContaining({
           workspaceId: "ws1",
           runId: null,
-          agentTarget: "cli"
+          agentTarget: "cli",
+          sessionId: expect.stringMatching(/^review-cli-/)
         })
       })
     );

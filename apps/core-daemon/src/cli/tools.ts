@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   listAlayaMemoryTools
 } from "../mcp-memory-tool-catalog.js";
@@ -275,7 +276,8 @@ async function buildCallContext(
         args.contextOverrides.agentTarget ??
         deps.defaultAgentTarget ??
         ctx.env.ALAYA_AGENT_TARGET ??
-        "tools-cli"
+        "tools-cli",
+      sessionId: `tools-cli-${randomUUID()}`
     }
   };
 }
