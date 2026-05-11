@@ -1,0 +1,1 @@
+Use GardenComputeProviderResolver as the daemon service name.

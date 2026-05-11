@@ -1,0 +1,1 @@
+Maybe Redis could be useful someday if local SQLite is not enough.

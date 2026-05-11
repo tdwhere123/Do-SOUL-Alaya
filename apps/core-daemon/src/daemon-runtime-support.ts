@@ -790,20 +790,6 @@ export function createConversationToolExecutor(input: {
   };
 }
 
-export function createAlayaConversationEngine() {
-  return {
-    sendMessage: async () => ({
-      message: {
-        role: "assistant" as const,
-        content: "Alaya does not execute chat turns; use MCP memory tools.",
-        message_id: randomUUID()
-      },
-      finish_reason: "stop" as const
-    }),
-    streamMessage: async function* () {}
-  };
-}
-
 export function createEngineBindingTester() {
   return {
     testBinding: async (binding: EngineBinding): Promise<EngineBindingSummary & { readonly available_models: readonly string[] }> => ({

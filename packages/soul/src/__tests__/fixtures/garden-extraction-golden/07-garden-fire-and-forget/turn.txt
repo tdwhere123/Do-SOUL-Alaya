@@ -1,0 +1,1 @@
+In Alaya, Garden jobs are fire-and-forget relative to the consumer-agent path.

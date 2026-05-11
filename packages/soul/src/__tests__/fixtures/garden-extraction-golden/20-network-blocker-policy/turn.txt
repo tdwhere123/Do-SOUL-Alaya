@@ -1,0 +1,1 @@
+If tests fail because network access is blocked, return BLOCKED instead of faking lockfile proof.

@@ -6,33 +6,24 @@ import {
   LocalModelGardenProvider,
   OfficialApiGardenProvider
 } from "../garden/compute-provider.js";
+import { SignalExtractorError, type SignalExtractor } from "../garden/pi-mono-extractor.js";
 
 describe("OfficialApiGardenProvider", () => {
   it("materializes candidate signals from a successful official API response", async () => {
-    const fetchImpl = vi.fn(async () =>
-      createJsonResponse({
-        choices: [
-          {
-            message: {
-              content: JSON.stringify({
-                signals: [
-                  {
-                    signal_kind: "potential_preference",
-                    object_kind: "user_preference",
-                    confidence: 0.92,
-                    matched_text: "Call me Ash",
-                    reason: "naming_preference"
-                  }
-                ]
-              })
-            }
-          }
-        ]
-      })
-    );
+    const extractor = createExtractor(JSON.stringify({
+      signals: [
+        {
+          signal_kind: "potential_preference",
+          object_kind: "user_preference",
+          confidence: 0.92,
+          matched_text: "Call me Ash",
+          reason: "naming_preference"
+        }
+      ]
+    }));
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      fetchImpl,
+      extractor,
       now: () => "2026-04-23T09:00:00.000Z",
       generateSignalId: () => "signal-1"
     });
@@ -54,47 +45,30 @@ describe("OfficialApiGardenProvider", () => {
         created_at: "2026-04-23T09:00:00.000Z"
       })
     ]);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(extractor.extract).toHaveBeenCalledTimes(1);
   });
 
-  it("accepts OpenAI-compatible base URLs and posts to chat completions", async () => {
-    const seenUrls: string[] = [];
-    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
-      seenUrls.push(String(input));
-      return createJsonResponse({ choices: [{ message: { content: JSON.stringify({ signals: [] }) } }] });
-    });
+  it("passes structured turn content to the signal extractor", async () => {
+    const extractor = createExtractor(JSON.stringify({ signals: [] }));
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      endpoint: "https://garden.example.test/v1/",
-      fetchImpl
+      extractor
     });
 
     await expect(provider.compile("No durable memory here.", createContext())).resolves.toEqual([]);
 
-    expect(seenUrls).toEqual(["https://garden.example.test/v1/chat/completions"]);
-  });
-
-  it("keeps full chat completions endpoints unchanged", async () => {
-    const seenUrls: string[] = [];
-    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
-      seenUrls.push(String(input));
-      return createJsonResponse({ choices: [{ message: { content: JSON.stringify({ signals: [] }) } }] });
+    expect(JSON.parse(vi.mocked(extractor.extract).mock.calls[0]![0].userPrompt)).toMatchObject({
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      surface_id: "surface-1",
+      turn_content: "No durable memory here."
     });
-    const provider = new OfficialApiGardenProvider({
-      apiKey: "sk-test",
-      endpoint: "https://garden.example.test/v1/chat/completions",
-      fetchImpl
-    });
-
-    await expect(provider.compile("No durable memory here.", createContext())).resolves.toEqual([]);
-
-    expect(seenUrls).toEqual(["https://garden.example.test/v1/chat/completions"]);
   });
 
   it("fails closed when official provider credentials are missing", async () => {
-    const fetchImpl = vi.fn();
+    const extractor = createExtractor(JSON.stringify({ signals: [] }));
     const provider = new OfficialApiGardenProvider({
-      fetchImpl
+      extractor
     });
 
     await expect(provider.compile("Call me Ash.", createContext())).rejects.toMatchObject({
@@ -102,68 +76,50 @@ describe("OfficialApiGardenProvider", () => {
       kind: "auth",
       message: "Official garden provider credentials are missing."
     });
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(extractor.extract).not.toHaveBeenCalled();
   });
 
-  it("surfaces upstream provider failures with their typed error kind", async () => {
+  it("surfaces extractor transport failures as network errors", async () => {
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      fetchImpl: vi.fn(async () => new Response("upstream failure", { status: 503 }))
-    });
-
-    await expect(provider.compile("Call me Ash.", createContext())).rejects.toMatchObject({
-      name: "GardenProviderError",
-      kind: "provider_failure",
-      message: "Official garden provider request failed with status 503."
-    } satisfies Partial<GardenProviderError>);
-  });
-
-  it("surfaces timed out official API requests as network errors with the timeout message", async () => {
-    const clearTimeoutImpl = vi.fn();
-    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      expect(init?.signal).toBeInstanceOf(AbortSignal);
-      expect(init?.signal?.aborted).toBe(true);
-      throw new Error("request aborted");
-    });
-    const provider = new OfficialApiGardenProvider({
-      apiKey: "sk-test",
-      requestTimeoutMs: 321,
-      fetchImpl,
-      createAbortController: () => new AbortController(),
-      setTimeoutImpl: ((callback: Parameters<typeof setTimeout>[0]) => {
-        if (typeof callback === "function") {
-          callback();
-        }
-        return 1 as ReturnType<typeof setTimeout>;
-      }) as typeof setTimeout,
-      clearTimeoutImpl: clearTimeoutImpl as typeof clearTimeout
+      extractor: {
+        extract: vi.fn(async () => {
+          throw new SignalExtractorError("transport_failure", "Signal extractor request failed.");
+        })
+      }
     });
 
     await expect(provider.compile("Call me Ash.", createContext())).rejects.toMatchObject({
       name: "GardenProviderError",
       kind: "network",
-      message: "Official garden provider request timed out after 321ms."
+      message: "Signal extractor request failed."
     } satisfies Partial<GardenProviderError>);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(clearTimeoutImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces timed out extractor requests as network errors with the timeout message", async () => {
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      requestTimeoutMs: 321,
+      extractor: {
+        extract: vi.fn(async () => {
+          throw new SignalExtractorError("timeout", "Signal extractor request timed out after 321ms.");
+        })
+      }
+    });
+
+    await expect(provider.compile("Call me Ash.", createContext())).rejects.toMatchObject({
+      name: "GardenProviderError",
+      kind: "network",
+      message: "Signal extractor request timed out after 321ms."
+    } satisfies Partial<GardenProviderError>);
   });
 
   it("rejects invalid official API payloads", async () => {
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      fetchImpl: vi.fn(async () =>
-        createJsonResponse({
-          choices: [
-            {
-              message: {
-                content: JSON.stringify({
-                  signals: "not-an-array"
-                })
-              }
-            }
-          ]
-        })
-      )
+      extractor: createExtractor(JSON.stringify({
+        signals: "not-an-array"
+      }))
     });
 
     await expect(provider.compile("Call me Ash.", createContext())).rejects.toMatchObject({
@@ -210,11 +166,8 @@ function createContext() {
   };
 }
 
-function createJsonResponse(payload: unknown): Response {
-  return new Response(JSON.stringify(payload), {
-    status: 200,
-    headers: {
-      "content-type": "application/json"
-    }
-  });
+function createExtractor(rawJson: string): SignalExtractor {
+  return {
+    extract: vi.fn(async () => ({ rawJson }))
+  };
 }

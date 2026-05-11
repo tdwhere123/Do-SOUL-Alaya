@@ -1,0 +1,1 @@
+Earlier I said long reports were fine, but now keep lane reports under 1500 tokens.

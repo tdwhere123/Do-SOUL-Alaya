@@ -6,10 +6,8 @@ import {
   type EngineBinding
 } from "@do-soul/alaya-protocol";
 import {
-  providerAdaptersDeferredMessage,
   readApiKey,
-  resolveApiKey,
-  resolveLanguageModel
+  resolveApiKey
 } from "../provider/provider-registry.js";
 
 function createBinding(overrides: Partial<EngineBinding> = {}): EngineBinding {
@@ -25,25 +23,6 @@ function createBinding(overrides: Partial<EngineBinding> = {}): EngineBinding {
 }
 
 describe("provider registry skeleton", () => {
-  it("fails closed instead of constructing deferred provider adapters", () => {
-    expect(() =>
-      resolveLanguageModel(createBinding(), (key) =>
-        key === "OPENAI_API_KEY" ? "sk-openai" : undefined
-      )
-    ).toThrowError(
-      new EngineError(providerAdaptersDeferredMessage, EngineErrorKind.MODEL_ERROR)
-    );
-  });
-
-  it("does not read environment credentials while failing closed", () => {
-    const getEnv = vi.fn().mockReturnValue("sk-openai");
-
-    expect(() => resolveLanguageModel(createBinding(), getEnv)).toThrowError(
-      providerAdaptersDeferredMessage
-    );
-    expect(getEnv).not.toHaveBeenCalled();
-  });
-
   it("prefers inline api_key over getEnv", () => {
     const getEnv = vi.fn();
 
