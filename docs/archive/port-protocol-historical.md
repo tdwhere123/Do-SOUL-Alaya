@@ -5,7 +5,7 @@
 > vendor cleanup. The rules below were the v0.1 port-time discipline;
 > they no longer govern any active work. They are preserved for
 > archaeology when reading port-era task cards under
-> `docs/v0.1/phase-*-briefs/` and the v0.1.0 git history. The upstream
+> `docs/archive/v0.1-port-record/phase-*-briefs/` and the v0.1.0 git history. The upstream
 > commit the snapshot was frozen at:
 > `6ed846341f66ff98bfcddbb940db74cfc10133ca` (snapshotted 2026-04-28).
 

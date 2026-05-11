@@ -217,5 +217,5 @@ can prove.
 - Current invariants: `docs/handbook/invariants.md`
 - Current code map: `docs/handbook/code-map.md`
 - Current runtime status: `docs/handbook/runtime-status.md`
-- Historical port-era task cards: `docs/v0.1/INDEX.md`
+- Historical port-era task cards: `docs/archive/v0.1-port-record/INDEX.md`
 - Retired port discipline: `docs/archive/port-protocol-historical.md`

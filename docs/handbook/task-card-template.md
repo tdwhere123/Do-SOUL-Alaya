@@ -97,7 +97,7 @@ build → test → lint → integration.
 ## §6 Shared File Hazards & Dependencies
 
 A short list of shared files this card writes that may collide with
-other cards in the same wave (consult `docs/v0.1/INDEX.md §Shared
+other cards in the same wave (consult `docs/archive/v0.1-port-record/INDEX.md §Shared
 File Conflict Table` for the historical list of high-risk files; new
 shared files should be added there as they are discovered). If none,
 write `No shared-file hazards.` exactly.
@@ -138,4 +138,4 @@ The original v0.1 port-era template (with `trivial-copy` /
 `adapt-and-port` / `requires-redesign` framing and vendor source
 paths) is preserved at
 `docs/archive/task-card-template-historical.md`. Reference it only
-when reading port-era cards under `docs/v0.1/phase-*-briefs/`.
+when reading port-era cards under `docs/archive/v0.1-port-record/phase-*-briefs/`.

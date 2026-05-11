@@ -3,7 +3,7 @@
 This handbook is the current, low-token navigation hub for Alaya
 implementation and review work. It points to the maintained rules,
 code maps, and workflow documents. Historical v0.1 port-era task
-cards live under `docs/v0.1/` (preserved as record); forward work
+cards live under `docs/archive/v0.1-port-record/` (preserved as record); forward work
 runs through `docs/handbook/backlog.md` and normal PR/issue flow.
 
 For required read order and task-type-specific minimum reads, use
@@ -19,7 +19,7 @@ Reading Matrix`. Do not treat this page as a second workflow table.
   evidence expectations.
 - `docs/handbook/backlog.md` for tracked issues and the close
   conditions on each.
-- `docs/v0.1/INDEX.md` for the historical v0.1 port-era task-card
+- `docs/archive/v0.1-port-record/INDEX.md` for the historical v0.1 port-era task-card
   index (the vendor paths inside those cards point to a directory
   that has been removed by Phase E vendor cleanup; use `git log`
   against the v0.1.0 tag for source verification).

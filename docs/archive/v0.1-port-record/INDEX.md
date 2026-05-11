@@ -1,5 +1,12 @@
 # Do-SOUL Alaya v0.1 — Task Card Index (Historical)
 
+> **ARCHIVED.** This directory (`docs/archive/v0.1-port-record/`) is a
+> read-only snapshot of the v0.1 port era. Forward development on
+> `main` does not reference these task cards or phase reports. Pointers
+> in `CLAUDE.md`, `docs/handbook/README.md`, and historical archive
+> files have been updated to this new path. Do not add new content
+> here; new work cards live under normal handbook/backlog flow.
+>
 > **Status: historical port record.** v0.1.0 shipped on 2026-05-05.
 > The phase-{0..5} task cards under `phase-*-briefs/` are preserved
 > as a record of how the memory subsystem was ported from

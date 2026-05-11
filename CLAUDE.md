@@ -48,7 +48,7 @@ project `do-what-new`, frozen at upstream commit
 The port wave closed with v0.1.0 and the working snapshot directory
 has been removed. For port-time archaeology see
 `docs/archive/port-protocol-historical.md` and the historical task
-cards under `docs/v0.1/phase-*-briefs/` (their `vendor/...` paths
+cards under `docs/archive/v0.1-port-record/phase-*-briefs/` (their `vendor/...` paths
 point to the removed snapshot — use `git log` against the v0.1.0 tag
 for source verification when needed).
 
@@ -144,7 +144,7 @@ pnpm does not auto-expose private root bins to `node_modules/.bin/`, so
 - `docs/handbook/workflow/subagent-dispatch.md` — dispatch policy,
   failure modes
 - `docs/handbook/backlog.md` — unresolved issues
-- `docs/v0.1/INDEX.md` — historical v0.1 task-card index (port era)
+- `docs/archive/v0.1-port-record/INDEX.md` — historical v0.1 task-card index (port era)
 - `docs/archive/port-protocol-historical.md` — retired Port-First
   discipline (kept for archaeology)
 

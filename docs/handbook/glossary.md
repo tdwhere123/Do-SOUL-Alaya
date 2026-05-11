@@ -49,7 +49,7 @@ Recall + Evidence + Green + Governance + OutputShaping). Alaya
 retains only the candidate→recall→govern→durable memory orchestration;
 chat-specific orchestration (worker-dispatch / runtime-adapter /
 tool-substrate) was dropped during the v0.1 port. See historical
-card `docs/v0.1/phase-3-briefs/README.md` row P3-conversation.
+card `docs/archive/v0.1-port-record/phase-3-briefs/README.md` row P3-conversation.
 
 **RecallQuery** — Per-turn request to RecallService describing what
 the consuming agent needs (subject, scope, dimensions, budgets,
@@ -229,7 +229,7 @@ The `Port` / `trivial-copy` / `adapt-and-port` / `requires-redesign`
 / `Vendor Snapshot` terminology was load-bearing only during the v0.1
 port wave. Definitions are preserved at
 `docs/archive/port-protocol-historical.md` for reading port-era task
-cards under `docs/v0.1/phase-*-briefs/`. Forward (post-v0.1.0) work
+cards under `docs/archive/v0.1-port-record/phase-*-briefs/`. Forward (post-v0.1.0) work
 does not use these terms.
 
 ## Workflow

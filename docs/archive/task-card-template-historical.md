@@ -2,7 +2,7 @@
 
 > **Status: archived after v0.1.0.** This template was the
 > authoritative spec for the v0.1 port-era task cards under
-> `docs/v0.1/phase-{1..5}-briefs/`. It is preserved for archaeology
+> `docs/archive/v0.1-port-record/phase-{1..5}-briefs/`. It is preserved for archaeology
 > and is no longer load-bearing — port-mode framing
 > (`trivial-copy` / `adapt-and-port` / `requires-redesign`) and
 > vendor-snapshot source paths only made sense while the port was in
@@ -13,12 +13,12 @@
 ---
 
 This file was the authoritative spec for Alaya v0.1 task cards. Every
-card under `docs/v0.1/phase-{1..5}-briefs/` followed this layout
+card under `docs/archive/v0.1-port-record/phase-{1..5}-briefs/` followed this layout
 exactly. Section order, field names, and capitalization were fixed.
 
 ## File Layout
 
-- File path: `docs/v0.1/phase-N-briefs/task-pN-<short-id>.md`
+- File path: `docs/archive/v0.1-port-record/phase-N-briefs/task-pN-<short-id>.md`
   - `N` is the phase number (1, 2, 3, 4, 5).
   - `<short-id>` is a kebab-case short name (`protocol`,
     `repos-batch-1`, `svc-memory`, `garden-batch-1`,
@@ -74,7 +74,7 @@ The "why this card is allowed to exist" cite. Per port mode:
 
 - **trivial-copy**: cite the phase README row that allocates this work
   AND `docs/handbook/port-protocol.md §1`. Example:
-  > `docs/v0.1/phase-1-briefs/README.md` row "P1-protocol";
+  > `docs/archive/v0.1-port-record/phase-1-briefs/README.md` row "P1-protocol";
   > `docs/handbook/port-protocol.md §1 trivial-copy`.
 
 - **adapt-and-port**: cite the phase README row AND
@@ -85,7 +85,7 @@ The "why this card is allowed to exist" cite. Per port mode:
 - **requires-redesign**: cite the phase README row AND
   `docs/handbook/port-protocol.md §3` AND the specific Alaya invariant
   or architecture section that drives the divergence. Example:
-  > `docs/v0.1/phase-4-briefs/README.md` row "P4-attach-codex";
+  > `docs/archive/v0.1-port-record/phase-4-briefs/README.md` row "P4-attach-codex";
   > `docs/handbook/port-protocol.md §3 requires-redesign`;
   > `docs/handbook/invariants.md §22 attach changes write only after
   > preview + explicit confirm`.
@@ -258,7 +258,7 @@ Plus a short dependency restatement (mirrors frontmatter):
 
 ## 0. Charter Authority
 
-`docs/v0.1/phase-1-briefs/README.md` row "P1-protocol";
+`docs/archive/v0.1-port-record/phase-1-briefs/README.md` row "P1-protocol";
 `docs/handbook/port-protocol.md §1 trivial-copy`.
 
 ## 1. Background & Goal
@@ -321,7 +321,7 @@ Nothing deferred.
 | AC2 | Ported `__tests__/` pass | `rtk pnpm exec vitest run --project @do-soul/alaya-protocol` green |
 | AC3 | TypeScript compiles | `rtk pnpm exec tsc --noEmit -p packages/protocol` clean |
 | AC4 | Public exports match source | `rtk node -e "console.log(Object.keys(require('@do-soul/alaya-protocol')).sort())"` matches source's exported names |
-| AC5 | Closing readiness label is `schema-ready` | `docs/handbook/runtime-status.md` updated; `docs/v0.1/INDEX.md` updated |
+| AC5 | Closing readiness label is `schema-ready` | `docs/handbook/runtime-status.md` updated; `docs/archive/v0.1-port-record/INDEX.md` updated |
 
 ## 5. Verification
 
@@ -359,7 +359,7 @@ Nothing deferred.
 
 ## 0. Charter Authority
 
-`docs/v0.1/phase-3-briefs/README.md` row "P3-conversation";
+`docs/archive/v0.1-port-record/phase-3-briefs/README.md` row "P3-conversation";
 `docs/handbook/port-protocol.md §2 adapt-and-port`;
 `docs/handbook/invariants.md §20` (no chat surface);
 user decision 2026-04-28: "ConversationService = adapt-and-port, retain memory-orchestration only".
@@ -453,7 +453,7 @@ removed, keeping only the candidate→recall→govern→durable memory path.
 
 ## 0. Charter Authority
 
-`docs/v0.1/phase-4-briefs/README.md` row "P4-attach-codex";
+`docs/archive/v0.1-port-record/phase-4-briefs/README.md` row "P4-attach-codex";
 `docs/handbook/port-protocol.md §3 requires-redesign`;
 `docs/handbook/invariants.md §22` ("Attach / Profile changes write only after preview + explicit confirm");
 `docs/handbook/architecture.md §Surface Shape` (CLI commands `alaya install / attach / status / doctor`);
@@ -541,7 +541,7 @@ and on confirm writes config file").
 ## Completion Report Template
 
 When a card requires a completion report, write it to
-`docs/v0.1/phase-N-briefs/reports/task-pN-<short-id>.md`. Use this
+`docs/archive/v0.1-port-record/phase-N-briefs/reports/task-pN-<short-id>.md`. Use this
 exact layout:
 
 ```markdown
@@ -594,8 +594,8 @@ commit. If none planned, write `No post-landing edits planned.`.)
 
 ## File Naming Conventions
 
-- Task card file: `docs/v0.1/phase-N-briefs/task-pN-<short-id>.md`
-- Completion report file: `docs/v0.1/phase-N-briefs/reports/task-pN-<short-id>.md`
+- Task card file: `docs/archive/v0.1-port-record/phase-N-briefs/task-pN-<short-id>.md`
+- Completion report file: `docs/archive/v0.1-port-record/phase-N-briefs/reports/task-pN-<short-id>.md`
 - Card ID in commits: feature commits use `feat(pN-short-id): ...`;
   fix commits use `fix(pN-short-id): <finding> [review <severity>]`;
   doc-amendment commits use `docs(pN-short-id): ...`.

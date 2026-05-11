@@ -163,7 +163,7 @@ required防复发 step per `docs/handbook/workflow/review-protocol.md`
 
 ## Docs
 
-32. `docs/v0.1/` is the historical v0.1 port-era task-card record
+32. `docs/archive/v0.1-port-record/` is the historical v0.1 port-era task-card record
     (v0.1.0 shipped 2026-05-05). New work tracking lives in
     `docs/handbook/backlog.md` and PR descriptions.
 33. `docs/handbook/` is the maintained implementation handbook.

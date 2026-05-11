@@ -146,7 +146,7 @@ sql-pro, install-release, pr-review, test-automator, plan-challenger,
 documentation-engineer, typescript-pro, codex external) ran in parallel
 and surfaced 11 Blocking / 21 Important / 11 Nice-to-have findings after
 deduplication. The merged report is at
-`docs/v0.1/phase-5-briefs/reports/p5-system-review-round-1.md`. Twenty-two
+`docs/archive/v0.1-port-record/phase-5-briefs/reports/p5-system-review-round-1.md`. Twenty-two
 atomic commits closed the Round 1 Blocking set (HTTP proposal review +
 memory read endpoints removed; `soul.emit_candidate_signal` scope bound to
 MCP context; ProposalService/ClaimService `deferredNotificationEvents`
@@ -158,7 +158,7 @@ Aggregation + invariants §21a / §29-31 added; `#BL-024`, `#BL-023`,
 `#BL-017` close paths declared in `docs/handbook/backlog.md`).
 
 **Round 2 (`p5-system-review-r2`).** A Codex external sanity check
-(`docs/v0.1/phase-5-briefs/reports/p5-system-review-round-2.md`) confirmed
+(`docs/archive/v0.1-port-record/phase-5-briefs/reports/p5-system-review-round-2.md`) confirmed
 Round 1 closures and surfaced 4 residual Blocking findings: F-r2-001
 (`soul.explore_graph` payload-spoofable workspace), F-r2-002 (`open_pointer`
 fixed at handler boundary, not at `MemoryService` source), F-r2-003 (install
@@ -368,7 +368,7 @@ push tag v*` it runs CI, generates the tarball + `SHA256SUMS` via
   are archived Phase 6 artifacts and not active Gate-6 acceptance.
 - **Gate-6 (v0.1.1 MCP agent-use proof)**: passed 2026-05-06 for release
   acceptance, with evidence in
-  `docs/v0.1/phase-6-briefs/reports/gate-6-closeout.md`. Gate-5F plus
+  `docs/archive/v0.1-port-record/phase-6-briefs/reports/gate-6-closeout.md`. Gate-5F plus
   tools-only MCP instructions, strengthened attach/install profile text,
   accept-as-apply proposal governance, recall explainability fields,
   operator-state CLI language, cwd-derived workspace startup,

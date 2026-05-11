@@ -17,31 +17,31 @@ const allowedBl014References = [
     line: "### #BL-014 — Resolved (atomic fix-commit hygiene proven by p5-system-review-r1+r2)"
   },
   {
-    file: "docs/v0.1/phase-4-briefs/README.md",
+    file: "docs/archive/v0.1-port-record/phase-4-briefs/README.md",
     line: "`#BL-014` through p5-system-review atomic fix-commit evidence,"
   },
   {
-    file: "docs/v0.1/phase-4-briefs/reports/gate-4-closeout.md",
+    file: "docs/archive/v0.1-port-record/phase-4-briefs/reports/gate-4-closeout.md",
     line: "- `#BL-014` remains open: this batch corrected a docs reference, but"
   },
   {
-    file: "docs/v0.1/phase-2-briefs/reports/post-gate-2-review.md",
+    file: "docs/archive/v0.1-port-record/phase-2-briefs/reports/post-gate-2-review.md",
     line: "records prevention without history rewrite or R1 exemption. `#BL-014`"
   },
   {
-    file: "docs/v0.1/phase-2-briefs/reports/post-gate-2-review.md",
+    file: "docs/archive/v0.1-port-record/phase-2-briefs/reports/post-gate-2-review.md",
     line: "- **Fix-Loop Disposition**: Same as I1; commit `2dde29d` and `#BL-014`"
   },
   {
-    file: "docs/v0.1/phase-2-briefs/reports/post-gate-2-review.md",
+    file: "docs/archive/v0.1-port-record/phase-2-briefs/reports/post-gate-2-review.md",
     line: "rewrite. Added backlog issue `#BL-014` and tightened"
   },
   {
-    file: "docs/v0.1/phase-4-briefs/reports/round-3-review.md",
+    file: "docs/archive/v0.1-port-record/phase-4-briefs/reports/round-3-review.md",
     line: "| `#BL-014` / `#BL-015` / `#BL-021` wording inconsistencies | `#BL-014` keeps Open status with an explicit note that this round touched documentation references but did not close the issue. `#BL-015` title narrowed to delivery/usage records. `#BL-021` moved under a new \"Accepted divergences (registered, not closed)\" subsection in `backlog.md`, semantically aligned with `port-protocol.md:104`'s Registered Divergences section. |"
   },
   {
-    file: "docs/v0.1/phase-5-briefs/reports/p5-system-review-round-3.md",
+    file: "docs/archive/v0.1-port-record/phase-5-briefs/reports/p5-system-review-round-3.md",
     line: "#BL-014 (atomic commit hygiene; proven by this very wave)"
   }
 ];

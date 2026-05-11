@@ -123,6 +123,6 @@ rtk pnpm exec alaya tools call --json # CLI fallback: call a memory tool
 - `docs/handbook/workflow/subagent-dispatch.md` — dispatch policy
 - `docs/handbook/backlog.md` — tracked issues
 - `docs/handbook/maintenance.md` — doc-edit protocol
-- `docs/v0.1/INDEX.md` — historical port record (Phase E banner)
+- `docs/archive/v0.1-port-record/INDEX.md` — historical port record (Phase E banner)
 - `CLAUDE.md §Project Genealogy` — upstream commit reference and port
   lineage

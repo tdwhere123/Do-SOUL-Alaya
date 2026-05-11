@@ -36,7 +36,7 @@ describe("P5 final-review status", () => {
 
   it("records four clear final-review perspectives", () => {
     for (const suffix of ["a", "b", "c", "d"]) {
-      const reportPath = `docs/v0.1/phase-5-briefs/reports/p5-final-review-perspective-${suffix}.md`;
+      const reportPath = `docs/archive/v0.1-port-record/phase-5-briefs/reports/p5-final-review-perspective-${suffix}.md`;
       expect(existsSync(resolveRepoPath(reportPath))).toBe(true);
       const report = readRepoFile(reportPath);
       expect(report).toContain("Status: CLEAR");
@@ -46,8 +46,8 @@ describe("P5 final-review status", () => {
   });
 
   it("keeps final-review and Gate-5 closeout claims aligned", () => {
-    const finalReview = readRepoFile("docs/v0.1/phase-5-briefs/reports/task-p5-final-review.md");
-    const gate5 = readRepoFile("docs/v0.1/phase-5-briefs/reports/gate-5-closeout.md");
+    const finalReview = readRepoFile("docs/archive/v0.1-port-record/phase-5-briefs/reports/task-p5-final-review.md");
+    const gate5 = readRepoFile("docs/archive/v0.1-port-record/phase-5-briefs/reports/gate-5-closeout.md");
 
     expect(finalReview).toContain("Blocking: 0");
     expect(finalReview).toContain("Important: 0");
@@ -72,7 +72,7 @@ describe("P5 final-review status", () => {
   });
 
   it("marks Phase 5 closed without pulling benchmark work into Gate-5", () => {
-    const index = readRepoFile("docs/v0.1/INDEX.md");
+    const index = readRepoFile("docs/archive/v0.1-port-record/INDEX.md");
     const runtimeStatus = readRepoFile("docs/handbook/runtime-status.md");
     const backlog = readRepoFile("docs/handbook/backlog.md");
 

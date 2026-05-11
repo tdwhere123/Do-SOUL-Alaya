@@ -58,7 +58,7 @@ from `agent-workflow.md` plus:
 ## Parallel Wave Execution
 
 Within a Wave, only cards with **disjoint write sets** may run in
-parallel. The Wave plan in `docs/v0.1/INDEX.md` enumerates the
+parallel. The Wave plan in `docs/archive/v0.1-port-record/INDEX.md` enumerates the
 exclusion table:
 
 - Storage shared utils (`packages/storage/src/repos/shared/*.ts`)

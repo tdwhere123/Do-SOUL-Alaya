@@ -61,7 +61,7 @@ and root unused-code checking is reproducible through `knip`.
 | Workspace shell | `package.json`, `pnpm-workspace.yaml`, `tsconfig.base.json`, `vitest.config.mjs`, `vitest.workspace.mjs`, `knip.json` | present; `rtk pnpm run hygiene:unused` is the reproducible unused-code gate |
 | Project instructions | `CLAUDE.md`, `AGENTS.md`, `README.md`, `RTK.md` | present |
 | Handbook | `docs/handbook/*` | present (P0-3) |
-| v0.1 task cards | `docs/v0.1/INDEX.md`, `docs/v0.1/phase-{0..5}-briefs/` | populated by P0-3e + P0-4 |
+| v0.1 task cards | `docs/archive/v0.1-port-record/INDEX.md`, `docs/archive/v0.1-port-record/phase-{0..5}-briefs/` | populated by P0-3e + P0-4 |
 | Project genealogy | `CLAUDE.md` §Project Genealogy + `docs/archive/port-protocol-historical.md` | port closed at upstream commit `6ed8463`; snapshot directory removed by Phase E vendor cleanup |
 | Protocol types | `packages/protocol/src/` | ported; `schema-ready` (P1-protocol). Post-port hygiene renamed former `events/phase-*` modules and `Phase*` event symbols to domain names such as `workspace-run`, `memory-governance`, `runtime-governance`, and `compute-recall-garden`, preserving event string values. `packages/protocol/src/soul/mcp-types.ts` also carries the P4-mcp-memory-tools public `soul.*` memory tool contract seed, including recall delivery metadata and usage-proof schemas. |
 | Storage skeleton + DB helpers | `packages/storage/{package.json,tsconfig.json,src/db.ts,src/errors.ts,src/index.ts}` | ported; `schema-ready` (P1-storage-skeleton) |
@@ -82,7 +82,7 @@ and root unused-code checking is reproducible through `knip`.
 
 The v0.1 port mapping (which Alaya files came from which upstream
 `vendor/do-what-new-snapshot/` paths) is preserved in the historical
-task cards under `docs/v0.1/phase-*-briefs/`. The vendor snapshot
+task cards under `docs/archive/v0.1-port-record/phase-*-briefs/`. The vendor snapshot
 itself has been removed by Phase E vendor cleanup; for any specific
 file's port lineage, run `git log --follow <path>` against the
 v0.1.0 tag.

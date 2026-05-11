@@ -4,7 +4,7 @@
 
 - `docs/handbook/`: maintained implementation handbook (Alaya's own
   rules and maps).
-- `docs/v0.1/`: historical v0.1 port-era task cards, phase READMEs,
+- `docs/archive/v0.1-port-record/`: historical v0.1 port-era task cards, phase READMEs,
   completion reports (preserved as record after v0.1.0).
 - `docs/archive/`: retired-but-preserved discipline documents
   (port-protocol, port-era task-card template).
@@ -23,14 +23,14 @@ When implementation changes:
   as a short cross-phase issue index with owner docs and close
   conditions; task-level acceptance detail belongs in the owning phase
   README or task card.
-- Update the relevant `docs/v0.1/` task card or report if the change
+- Update the relevant `docs/archive/v0.1-port-record/` task card or report if the change
   belongs to a v0.1 delivery card.
 
 When dependencies or readiness gates change:
 
 - Update `Prerequisite`, `Blocks`, `Depends` in the affected task
   cards.
-- Update `docs/v0.1/INDEX.md` status table.
+- Update `docs/archive/v0.1-port-record/INDEX.md` status table.
 - Use one of: `not-started`, `schema-ready`, `implementation-ready`,
   `live-event-ready`, `mcp-callable`, `agent-used`, `host-worker-ready`,
   `cli-consumable`. Definitions in `runtime-status.md`. The legacy

@@ -11,7 +11,7 @@ p5-system-review-r3 as an EventPublisher v0.2 deferral and closed in
 v0.1-closeout-a2; `#BL-023`/`#BL-024` were resolved in r1 / r2;
 `#BL-025` through `#BL-036` were opened by the v0.1-closeout A2 and
 D2 fix-loops, then resolved by Gate-5F under
-`docs/v0.1/phase-5-followup-briefs/` before Phase 6; `#BL-037` and
+`docs/archive/v0.1-port-record/phase-5-followup-briefs/` before Phase 6; `#BL-037` and
 `#BL-038` remain open).
 
 ## Open Issues
@@ -92,7 +92,7 @@ go without renaming the vocabulary again.
 There are no other cross-phase unresolved issues after the Gate-5F
 implementation closeout. Gate-5F's aggregate final review and full
 verification gates passed before Phase 6 started; Phase 6 closed via
-Gate-6 + delta补审 (`docs/v0.1/phase-6-briefs/reports/gate-6-delta-review.md`).
+Gate-6 + delta补审 (`docs/archive/v0.1-port-record/phase-6-briefs/reports/gate-6-delta-review.md`).
 
 ## Resolved by Gate-5F (2026-05-05)
 
@@ -269,7 +269,7 @@ dedicated post-port hygiene wave executed the full close path:
   hygiene closeout report now record the executed layout.
 
 Closeout evidence lives at
-`docs/v0.1/post-port-hygiene-briefs/reports/post-port-hygiene-closeout.md`.
+`docs/archive/v0.1-port-record/post-port-hygiene-briefs/reports/post-port-hygiene-closeout.md`.
 If new oversized files or unused-code residue appear after this wave,
 open a new issue rather than re-opening #BL-017.
 
