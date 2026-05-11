@@ -122,11 +122,10 @@ export async function runAlayaMcpStdioServer(
 }
 
 function toMcpTool(tool: AlayaMemoryToolDefinition): Tool {
-  // p5-system-review-r3 MR-I04: inputSchema is now derived from zod via
-  // zod-to-json-schema (Record<string, unknown>). The MCP SDK's Tool
-  // shape requires the canonical { type: "object", properties, required,
-  // additionalProperties } subset, so we shallow-spread the derived JSON
-  // Schema rather than re-typing each field.
+  // inputSchema is a zod-to-json-schema-derived Record<string, unknown>; the
+  // MCP SDK's Tool shape requires the canonical { type: "object", properties,
+  // required, additionalProperties } subset, so we shallow-spread the derived
+  // JSON Schema rather than re-typing each field.
   const derived = tool.inputSchema as {
     properties?: Record<string, object>;
     required?: readonly string[];

@@ -242,9 +242,9 @@ export function createGardenRuntime(input: {
   const janitorSchedulerPort: JanitorSchedulerPort = {
     reportCompletion: (result) => gardenScheduler.reportCompletion(result)
   };
-  // gate-6-delta I4: hot-index demotion now emits SOUL_MEMORY_TIER_CHANGED
-  // audit rows alongside the storage_tier UPDATE, so wire the same
-  // EventPublisher-backed port that the Auditor uses.
+  // Hot-index demotion emits SOUL_MEMORY_TIER_CHANGED audit rows alongside the
+  // storage_tier UPDATE, so wire the same EventPublisher-backed port the
+  // Auditor uses.
   const janitorEventLogPort: AuditorEventLogPort = {
     append: async (entry) =>
       (await input.eventPublisher.publish({

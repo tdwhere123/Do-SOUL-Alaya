@@ -220,10 +220,10 @@ export interface McpMemoryToolHandlerDependencies {
       input: SoulReviewMemoryProposalRequest,
       context: McpMemoryToolCallContext
     ): Promise<Readonly<{ readonly proposal_id: string; readonly resolution_state: Proposal["resolution_state"] }>>;
-    // A1 (HITL daemon backbone) — projects the workspace-scoped pending
-    // queue. The handler enforces workspace via the trusted MCP call
-    // context; the request payload's workspace_id is rejected if it
-    // does not match (SECURITY: invariants §29 Default Scope).
+    // Projects the workspace-scoped pending queue. The handler enforces
+    // workspace via the trusted MCP call context; the request payload's
+    // workspace_id is rejected if it does not match (SECURITY: invariants
+    // §29 Default Scope).
     listPendingProposals(
       input: SoulListPendingProposalsRequest,
       context: McpMemoryToolCallContext
@@ -455,11 +455,10 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
   }
 
   async function openPointer(request: SoulOpenPointerRequest, context: McpMemoryToolCallContext) {
-    // SECURITY (p5-system-review-r2 F-r2-002 / invariants §30 Fix at Source):
-    // Use the scoped service method so cross-workspace lookup is blocked at
-    // the service layer, not just at this handler. Any future caller of
-    // memoryService.findById must take the same precaution; new MCP/CLI
-    // surfaces should call findByIdScoped.
+    // SECURITY (invariants §30 Fix at Source): use the scoped service method
+    // so cross-workspace lookup is blocked at the service layer, not just at
+    // this handler. Any future caller of memoryService.findById must take the
+    // same precaution; new MCP/CLI surfaces should call findByIdScoped.
     const memory = await deps.memoryService.findByIdScoped(
       request.object_id,
       context.workspaceId
@@ -470,7 +469,7 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
 
     // Explicit projection: do not spread MemoryEntry. Internal fields
     // (lifecycle_state, created_by, storage_tier, workspace_id, ...) must
-    // not leak to the attached agent (p5-system-review-r3 MR-I05).
+    // not leak to the attached agent.
     return SoulOpenPointerResponseSchema.parse({
       object_id: memory.object_id,
       object_kind: memory.object_kind,
@@ -489,13 +488,12 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     request: SoulEmitCandidateSignalRequest,
     context: McpMemoryToolCallContext
   ) {
-    // SECURITY (gate-6-delta I5; MR-B03 / invariants §29 Default Scope):
-    // workspace_id / run_id / surface_id are NOT in the public MCP
-    // request schema (see SoulEmitCandidateSignalRequestSchema /
-    // McpEmitCandidateSignalRequestSchema). The daemon binds them from
-    // the trusted MCP call context. The attached agent cannot redirect
-    // signals to a foreign workspace because the schema rejects the
-    // fields outright before this function runs.
+    // SECURITY (invariants §29 Default Scope): workspace_id / run_id /
+    // surface_id are NOT in the public MCP request schema (see
+    // SoulEmitCandidateSignalRequestSchema / McpEmitCandidateSignalRequestSchema).
+    // The daemon binds them from the trusted MCP call context. The attached
+    // agent cannot redirect signals to a foreign workspace because the schema
+    // rejects the fields outright before this function runs.
     if (context.runId === null) {
       throw new ToolValidationError(
         "soul.emit_candidate_signal requires a runId in the MCP call context."
@@ -788,9 +786,9 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     request: SoulExploreGraphRequest,
     context: McpMemoryToolCallContext
   ) {
-    // SECURITY (p5-system-review-r2 F-r2-001 / invariants §29 Default Scope):
-    // workspace is server-bound from the trusted MCP call context; payload
-    // cannot redirect graph exploration to a foreign workspace.
+    // SECURITY (invariants §29 Default Scope): workspace is server-bound from
+    // the trusted MCP call context; payload cannot redirect graph exploration
+    // to a foreign workspace.
     const neighbors = await deps.graphExploreService.exploreOneHop(
       request.memory_id,
       context.workspaceId,
@@ -1094,13 +1092,11 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       return;
     }
 
-    // Wave-end M4: the canonical used-id list now drives R2 the same
-    // way it drives H3. Pre-fix, R2 only saw `usage_state === "used"`
-    // + `used_object_ids` and missed requests that exercised the
-    // modern `delivered_objects[].usage_status === "used"` shape, so a
-    // host using the new shape would queue a POST_TURN_EXTRACT task
-    // (H3) but never trigger a tier promotion (R2). Same predicate
-    // now.
+    // resolveUsedObjectIds is the single canonical "used object id" list, so
+    // the recall-hit → tier promotion path here and the POST_TURN_EXTRACT
+    // enqueue path see the same set regardless of which request shape the host
+    // filled in (`delivered_objects[].usage_status` vs top-level
+    // `usage_state`+`used_object_ids`).
     const usedObjectIds = resolveUsedObjectIds(request);
     for (const objectId of usedObjectIds) {
       const current = await deps.memoryService.findByIdScoped(objectId, context.workspaceId);
@@ -1165,17 +1161,12 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
   }
 }
 
-// Wave-end M4: one canonical "used object id list" for the entire
-// report_context_usage handler. Both R2 (recall hit → tier promotion)
-// and H3 (POST_TURN_EXTRACT enqueue) used to compute "is this used"
-// from different shapes of the same untrusted request — R2 looked at
-// `usage_state`+`used_object_ids` and H3 looked at `delivered_objects`.
-// A request that filled only one shape produced one side effect but
-// not the other. Now both consume the same canonical list.
-//
-// Modern shape (preferred): `delivered_objects[]` with per-object
-// `usage_status`. Take only those whose status is "used".
-// Legacy shape: top-level `usage_state === "used"` + `used_object_ids`.
+// One canonical "used object id" list for the report_context_usage handler:
+// the recall-hit → tier promotion path and the POST_TURN_EXTRACT enqueue path
+// both consume this, so a request that fills only one shape never produces a
+// half side-effect. Modern shape (preferred): `delivered_objects[]` with
+// per-object `usage_status` — take only those whose status is "used". Legacy
+// shape: top-level `usage_state === "used"` + `used_object_ids`.
 function resolveUsedObjectIds(request: SoulReportContextUsageRequest): readonly string[] {
   if (request.delivered_objects !== undefined && request.delivered_objects.length > 0) {
     const usedIds = request.delivered_objects
@@ -1190,8 +1181,8 @@ function resolveUsedObjectIds(request: SoulReportContextUsageRequest): readonly 
 }
 
 // All delivered object ids regardless of usage_status — used for the
-// H3 turn_digest manifest so the extract task sees what was delivered,
-// not just what was used.
+// turn_digest manifest so the extract task sees what was delivered, not just
+// what was used.
 function resolveDeliveredObjectIds(request: SoulReportContextUsageRequest): readonly string[] {
   const ids =
     request.delivered_objects === undefined
@@ -1226,9 +1217,9 @@ function buildPostTurnExtractTaskId(
     .update(String(turnIndex))
     .digest("hex")
     .slice(0, 32);
-  // Dedup key is (workspace_id, run_id, turn_index). H3 keeps the H1 repo
-  // unchanged, so the deterministic task id lets SQLite's existing
-  // garden_tasks primary-key constraint act as the duplicate guard.
+  // Dedup key is (workspace_id, run_id, turn_index): the deterministic task
+  // id lets SQLite's existing garden_tasks primary-key constraint act as the
+  // duplicate guard.
   return `post_turn_extract_${digest}`;
 }
 
@@ -1249,13 +1240,11 @@ function buildRecallExtractTaskId(workspaceId: string, runId: string, turnText: 
   return `recall_extract_${digest}`;
 }
 
-// Wave-end M3: detect H3 POST_TURN_EXTRACT dedupe via the structured
-// StorageError("DUPLICATE_KEY", ...) code that the storage repo now raises
-// from enqueue() on a primary-key collision. The previous implementation
-// scanned for SQLITE_CONSTRAINT + "garden_tasks.id" substring matches in
-// the better-sqlite3 error message, which couples this contract to the
-// library's internal text format. Falls back to message-substring
-// detection only as a defensive safety net.
+// Detect a POST_TURN_EXTRACT enqueue dedupe via the structured
+// StorageError("DUPLICATE_KEY", ...) code the storage repo raises from
+// enqueue() on a primary-key collision — not by scanning better-sqlite3's
+// error text, which would couple this to the library's message format. Falls
+// back to message-substring detection only as a defensive safety net.
 function isDuplicatePostTurnExtractTask(error: unknown): boolean {
   let current: unknown = error;
   for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {

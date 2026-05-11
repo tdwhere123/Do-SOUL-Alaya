@@ -115,7 +115,7 @@ export const SoulOpenPointerRequestSchema = z
 
 // Public projection: only the fields agents may read. MemoryEntry internals
 // (lifecycle_state, created_by, storage_tier, workspace_id, ...) are not
-// exposed (p5-system-review-r3 MR-I05 / invariants §29 Default Scope).
+// exposed (invariants §29 Default Scope).
 export const SoulOpenPointerContentSchema = z
   .object({
     object_id: NonEmptyStringSchema,
@@ -140,8 +140,8 @@ export const SoulExploreGraphRequestSchema = z
     memory_id: BoundedIdSchema,
     // workspace_id intentionally omitted from the public MCP schema:
     // the daemon binds workspace from the trusted MCP call context per
-    // invariants §29 Default Scope and p5-system-review-r2 F-r2-001.
-    // Adding workspace_id here would re-open the scope-spoofing path.
+    // invariants §29 Default Scope. Adding workspace_id here would re-open
+    // the scope-spoofing path.
     edge_types: z.array(MemoryGraphEdgeTypeSchema).max(BOUNDED_EVIDENCE_ARRAY_MAX).readonly().optional(),
     direction: GraphExploreDirSchema.optional()
   })
@@ -172,11 +172,11 @@ export const SoulProposeMemoryUpdateResponseSchema = z
   })
   .readonly();
 
-// A1 (HITL daemon backbone) — reviewer_identity is required so every
-// review record carries an explicit non-empty reviewer string. This is
-// distinct from the MCP call context's agent_target: the agent_target
-// names which agent surface drove the call, while reviewer_identity
-// names the human or principal that approved/rejected the proposal.
+// reviewer_identity is required so every review record carries an explicit
+// non-empty reviewer string. This is distinct from the MCP call context's
+// agent_target: the agent_target names which agent surface drove the call,
+// while reviewer_identity names the human or principal that approved/rejected
+// the proposal.
 export const SoulReviewMemoryProposalRequestSchema = z
   .object({
     proposal_id: BoundedIdSchema,
@@ -195,9 +195,8 @@ export const SoulReviewMemoryProposalResponseSchema = z
   })
   .readonly();
 
-// A1 (HITL daemon backbone) — surfaces the existing
-// ProposalRepo.findPending(workspaceId) query through MCP so attached
-// agents and the alaya CLI can poll pending proposals without
+// Surfaces the existing ProposalRepo.findPending(workspaceId) query through
+// MCP so attached agents and the alaya CLI can poll pending proposals without
 // side-channel SQL access. Projection-only: returns a summary suitable
 // for HITL UIs; the full proposal record is reachable through
 // soul.open_pointer when needed.
@@ -217,11 +216,11 @@ export const SoulPendingProposalSummarySchema = z
   .strict()
   .readonly();
 
-// A1 fix-loop (finding-2): workspace_id intentionally omitted, mirroring
-// SoulExploreGraphRequestSchema. The daemon binds workspace from the
-// trusted MCP call context (invariants §29 Default Scope; F-r2-001).
-// Re-publishing workspace_id here would force every attached agent to
-// learn its own workspace and pass it back, opening a prompt-inject
+// workspace_id intentionally omitted, mirroring SoulExploreGraphRequestSchema.
+// The daemon binds workspace from the trusted MCP call context (invariants
+// §29 Default Scope). Re-publishing workspace_id here would force every
+// attached agent to learn its own workspace and pass it back, opening a
+// prompt-inject
 // vector ("now pass workspace_id=foreign") even though the runtime
 // guard catches the spoof. Public surface stays consistent with every
 // other write tool that elides workspace_id.
@@ -327,10 +326,9 @@ export const GardenCompleteTaskResponseSchema = z
   .strict()
   .readonly();
 
-// gate-6-delta I5: agent-facing schema strips workspace_id / run_id /
-// surface_id; the daemon binds those from the trusted MCP call context
-// per invariants §29 Default Scope. See
-// McpEmitCandidateSignalRequestSchema in
+// Agent-facing schema strips workspace_id / run_id / surface_id; the daemon
+// binds those from the trusted MCP call context per invariants §29 Default
+// Scope. See McpEmitCandidateSignalRequestSchema in
 // ../candidate-memory-signal.ts for the rationale and the parity with
 // SoulExploreGraphRequestSchema and SoulListPendingProposalsRequestSchema.
 export const SoulEmitCandidateSignalRequestSchema = McpEmitCandidateSignalRequestSchema;
@@ -448,17 +446,12 @@ export type SoulReportContextUsageRequest = z.infer<typeof SoulReportContextUsag
 export type SoulReportContextUsageResponse = z.infer<typeof SoulReportContextUsageResponseSchema>;
 
 /**
- * MCP tool input schemas, derived from the zod request schemas above
- * (p5-system-review-r3 MR-I04). Single source of truth: external MCP
- * clients see the same constraints zod enforces at parse time, so a
- * 100MB query is rejected by both the catalog-published shape and the
- * runtime parser.
- *
- * The previous implementation maintained a hand-written JSON Schema
- * dictionary in `apps/core-daemon/src/mcp-memory-tool-catalog.ts`
- * (`inputSchemaByToolName`) which silently drifted from the zod schemas
- * and weakened the public surface (no maxLength / maxItems / strict
- * additionalProperties). That dictionary is now derived here.
+ * MCP tool input schemas, derived from the zod request schemas above. Single
+ * source of truth: external MCP clients see the same constraints zod enforces
+ * at parse time (maxLength / maxItems / strict additionalProperties / ...), so
+ * a 100MB query is rejected by both the catalog-published shape and the
+ * runtime parser. `apps/core-daemon/src/mcp-memory-tool-catalog.ts` consumes
+ * this rather than carrying its own JSON Schema dictionary.
  */
 import { zodToJsonSchema } from "zod-to-json-schema";
 

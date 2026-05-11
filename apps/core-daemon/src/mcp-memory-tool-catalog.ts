@@ -19,8 +19,8 @@ export type AlayaMemoryToolName = (typeof ALAYA_MEMORY_TOOL_NAMES)[number];
 
 /**
  * MCP tool input schema. Derived from `@do-soul/alaya-protocol`
- * `soulToolJsonSchemas` (zod → JSON Schema, p5-system-review-r3 MR-I04)
- * so external clients see the exact same bounds the runtime enforces.
+ * `soulToolJsonSchemas` (zod → JSON Schema) so external clients see the
+ * exact same bounds the runtime enforces.
  */
 export type JsonObjectSchema = Readonly<Record<string, unknown>>;
 

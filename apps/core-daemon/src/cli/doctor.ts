@@ -12,7 +12,7 @@ import { ALAYA_SYSEXITS, type AlayaCliArgsSchema, type AlayaCliContext, type Ala
 import { resolveCliWorkspaceContext } from "./workspace-context.js";
 
 /**
- * C2: shape returned by the optional getGardenCompute doctor dep so an
+ * Shape returned by the optional getGardenCompute doctor dep so an
  * operator can see what Garden compute the daemon actually wired up,
  * independent of embedding. credential_source distinguishes
  * - env:NAME ⇒ Garden has its own ALAYA_OFFICIAL_GARDEN_SECRET_REF
@@ -39,7 +39,7 @@ export interface DoctorCommandDependencies {
   readonly getGardenHealth?: () => Promise<Readonly<{ status: "healthy" | "degraded"; last_pass_at: string | null }>>;
   readonly getGardenCredentialProvenance?: () => Promise<GardenCredentialProvenance>;
   /**
-   * C2: surface Garden compute provider truth (kind / model / credential /
+   * Surface Garden compute provider truth (kind / model / credential /
    * routing) so operators can tell official_api from local_heuristics from
    * the deprecated embedding-fallback. When omitted, doctor reports a
    * conservative "local_heuristics + none" snapshot.
@@ -49,10 +49,9 @@ export interface DoctorCommandDependencies {
     | Readonly<PathPlasticityLookupTelemetrySnapshot>
     | Promise<Readonly<PathPlasticityLookupTelemetrySnapshot>>;
   /**
-   * Optional schema readiness probe (p5-system-review-r3 MR-I11). When
-   * provided, doctor reports `storage.schema_ok` so an operator can
-   * tell apart "db file exists and is writable" from "db is fully
-   * migrated for this binary".
+   * Optional schema readiness probe. When provided, doctor reports
+   * `storage.schema_ok` so an operator can tell apart "db file exists and is
+   * writable" from "db is fully migrated for this binary".
    */
   readonly getSchemaSummary?: (
     dbPath: string
@@ -179,10 +178,10 @@ export function createDoctorCommand(
           window_size: 128
         } satisfies PathPlasticityLookupTelemetrySnapshot);
 
-      // C3: detect drift between source ALAYA_OPERATOR_INSTRUCTIONS and the
-      // value Alaya wrote into host MCP profiles on a prior `alaya attach`.
-      // Operators don't always re-attach after `alaya update`, so we surface
-      // the divergence here with a concrete refresh hint.
+      // Detect drift between source ALAYA_OPERATOR_INSTRUCTIONS and the value
+      // Alaya wrote into host MCP profiles on a prior `alaya attach`. Operators
+      // don't always re-attach after `alaya update`, so we surface the
+      // divergence here with a concrete refresh hint.
       const attachedProfiles = await Promise.all(
         PROFILE_TARGETS.map(async (target) => {
           try {
@@ -376,8 +375,8 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport):
   stream.write(`mcp transport: ${report.mcp.transport}\n`);
   stream.write(`garden status: ${report.garden.status}\n`);
   stream.write(`garden credential provenance: ${formatGardenCredentialProvenance(report.garden.credential_provenance)}\n`);
-  // C2: surface Garden compute truth so operators can tell whether Garden
-  // is calling out (official_api), running locally (local_heuristics), or
+  // Surface Garden compute truth so operators can tell whether Garden is
+  // calling out (official_api), running locally (local_heuristics), or
   // borrowing the embedding key (deprecated embedding-fallback).
   stream.write(
     `garden compute: kind=${report.garden_compute.provider_kind}` +
