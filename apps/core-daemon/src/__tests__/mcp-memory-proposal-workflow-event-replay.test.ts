@@ -95,6 +95,57 @@ describe("mcp memory proposal workflow — event_log audit replay (A1 finding-6)
     expect(createdEvent?.caused_by).toBe("codex");
   });
 
+  it("persists source_delivery_ids on the proposal row and echoes them through created and resolved events", async () => {
+    const database = createDb();
+    const proposalRepo = new SqliteProposalRepo(database);
+    const eventLogRepo = new SqliteEventLogRepo(database);
+
+    const workflow = createMcpMemoryProposalWorkflow({
+      now: () => "2026-04-30T00:00:00.000Z",
+      generateObjectId: () => "77777777-8888-4888-8888-999999999999",
+      eventLogRepo,
+      proposalRepo,
+      runtimeNotifier: { notifyEntry: async () => {} },
+      memoryService: createMemoryApplyPort()
+    });
+
+    const sourceDeliveryIds = ["delivery-1", "delivery-2"] as const;
+    const created = await workflow.proposeMemoryUpdate(
+      {
+        target_object_id: "mem-anchored",
+        proposed_changes: { content: "anchored correction" },
+        reason: "delivery-anchored proposal",
+        source_delivery_ids: sourceDeliveryIds
+      },
+      { workspaceId: "ws-anchored", runId: "run-anchored", agentTarget: "codex" }
+    );
+
+    await expect(proposalRepo.findScopedById(created.proposal_id)).resolves.toMatchObject({
+      source_delivery_ids: sourceDeliveryIds
+    });
+    const createdRows = await eventLogRepo.queryByEntity("proposal", created.proposal_id);
+    expect(
+      createdRows.find((entry) => entry.event_type === MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED)
+        ?.payload_json
+    ).toMatchObject({ source_delivery_ids: sourceDeliveryIds });
+
+    await workflow.reviewMemoryProposal(
+      {
+        proposal_id: created.proposal_id,
+        verdict: "reject",
+        reason: "trace proof only",
+        reviewer_identity: "user:trace-reviewer"
+      },
+      { workspaceId: "ws-anchored", runId: "run-anchored", agentTarget: "cli" }
+    );
+
+    const replayed = await eventLogRepo.queryByEntity("proposal", created.proposal_id);
+    expect(
+      replayed.find((entry) => entry.event_type === MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED)
+        ?.payload_json
+    ).toMatchObject({ source_delivery_ids: sourceDeliveryIds });
+  });
+
   it("round-trips a non-ASCII reviewer identity with embedded quotes through event_log (UTF-8 lock)", async () => {
     const database = createDb();
     const proposalRepo = new SqliteProposalRepo(database);

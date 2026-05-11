@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  CandidateMemorySignalContentSchema,
   EmitCandidateSignalResponseSchema,
   McpEmitCandidateSignalRequestSchema
 } from "../candidate-memory-signal.js";
@@ -139,8 +140,10 @@ export const SoulProposeMemoryUpdateRequestSchema = z
   .object({
     target_object_id: BoundedIdSchema,
     proposed_changes: PublicMemoryEntryMutableFieldsSchema,
-    reason: BoundedReasonSchema
+    reason: BoundedReasonSchema,
+    source_delivery_ids: z.array(NonEmptyStringSchema).min(1).readonly().optional()
   })
+  .strict()
   .readonly();
 
 export const SoulProposeMemoryUpdateResponseSchema = z
@@ -270,18 +273,14 @@ export const GardenClaimTaskResponseSchema = z
   .strict()
   .readonly();
 
-// v0.1.1 wave-end M1: candidate_signals in the result envelope use the
-// CONTENT-ONLY shape (the same one soul.emit_candidate_signal uses since
-// I5 commit e6378dd). The daemon binds workspace_id / run_id / surface_id
-// / source from trusted MCP context + the claimed task row, never from
-// host payload. Allowing a host to self-supply scope re-opens the §29
-// prompt-inject vector ("now pass workspace_id=foreign / source=user_seed")
-// even though the runtime workspace check would catch the cross-workspace
-// case — `source` and `run_id` could still be forged within a workspace.
+// Garden candidate_signals use the anchor-free CONTENT-ONLY shape. The
+// daemon binds workspace_id / run_id / surface_id / source from trusted MCP
+// context + the claimed task row, and Garden-originated extraction has no
+// prior recall delivery to attribute.
 export const GardenTaskResultEnvelopeSchema = z
   .object({
     candidate_signals: z
-      .array(McpEmitCandidateSignalRequestSchema)
+      .array(CandidateMemorySignalContentSchema)
       .readonly()
       .optional(),
     extracted_proposals: z.array(z.record(z.unknown()).readonly()).readonly().optional(),

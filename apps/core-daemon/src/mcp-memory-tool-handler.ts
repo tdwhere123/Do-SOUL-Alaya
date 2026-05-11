@@ -249,6 +249,7 @@ export interface McpMemoryToolHandlerDependencies {
   };
   readonly now?: () => string;
   readonly generateId?: () => string;
+  readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }
 
 export type McpMemoryToolCallResult =
@@ -279,6 +280,7 @@ export interface McpMemoryToolHandler {
 export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencies): McpMemoryToolHandler {
   const now = deps.now ?? (() => new Date().toISOString());
   const generateId = deps.generateId ?? randomUUID;
+  const warn = deps.warn ?? ((message: string, meta: Record<string, unknown>) => console.warn(message, meta));
 
   return {
     async call({ toolName, arguments: rawArguments, context }) {
@@ -491,6 +493,7 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       source: SignalSource.MODEL_TOOL,
       created_at: now()
     });
+    warnIfModelToolSignalMissingDeliveryAnchor(signal);
     const received = await deps.signalService.receiveSignal(signal);
     return SoulEmitCandidateSignalResponseSchema.parse({
       signal_id: received.signal.signal_id,
@@ -697,6 +700,18 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       status: request.status,
       events_appended: 1
     });
+  }
+
+  function warnIfModelToolSignalMissingDeliveryAnchor(signal: CandidateMemorySignal): void {
+    if (
+      signal.source === SignalSource.MODEL_TOOL &&
+      (signal.source_delivery_ids === undefined || signal.source_delivery_ids.length === 0)
+    ) {
+      warn("MODEL_TOOL candidate signal emitted without source_delivery_ids.", {
+        signal_id: signal.signal_id,
+        source: signal.source
+      });
+    }
   }
 
   async function applyOverride(

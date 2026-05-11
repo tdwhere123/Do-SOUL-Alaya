@@ -91,6 +91,7 @@ const MemoryGovernanceObjectPayloadObjectSchema = z.object({
 });
 
 const TransitionEventPayloadObjectSchema = MemoryGovernanceObjectPayloadObjectSchema.merge(TransitionRecordObjectSchema);
+const SourceDeliveryIdsSchema = z.array(NonEmptyStringSchema).min(1).readonly();
 
 export const SoulEvidenceCreatedPayloadSchema = MemoryGovernanceObjectPayloadObjectSchema.readonly();
 export const SoulEvidenceHealthChangedPayloadSchema = TransitionEventPayloadObjectSchema.readonly();
@@ -137,8 +138,12 @@ export const SoulClaimContestedPayloadSchema = MemoryGovernanceObjectPayloadObje
 export const SoulClaimWonPayloadSchema = TransitionEventPayloadObjectSchema.readonly();
 export const SoulClaimSupersededPayloadSchema = TransitionEventPayloadObjectSchema.readonly();
 
-export const SoulProposalCreatedPayloadSchema = MemoryGovernanceObjectPayloadObjectSchema.readonly();
-export const SoulProposalResolvedPayloadSchema = TransitionEventPayloadObjectSchema.readonly();
+export const SoulProposalCreatedPayloadSchema = MemoryGovernanceObjectPayloadObjectSchema.extend({
+  source_delivery_ids: SourceDeliveryIdsSchema.optional()
+}).readonly();
+export const SoulProposalResolvedPayloadSchema = TransitionEventPayloadObjectSchema.extend({
+  source_delivery_ids: SourceDeliveryIdsSchema.optional()
+}).readonly();
 
 export const SoulReviewCreatedPayloadSchema = MemoryGovernanceObjectPayloadObjectSchema.readonly();
 export const SoulReviewCompletedPayloadSchema = TransitionEventPayloadObjectSchema.readonly();

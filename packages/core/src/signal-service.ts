@@ -92,6 +92,9 @@ export class SignalService {
         run_id: parsedSignal.run_id,
         source: parsedSignal.source,
         signal_kind: parsedSignal.signal_kind,
+        ...(parsedSignal.source_delivery_ids === undefined
+          ? {}
+          : { source_delivery_ids: parsedSignal.source_delivery_ids }),
         raw_payload: parsedSignal.raw_payload
       })
     });

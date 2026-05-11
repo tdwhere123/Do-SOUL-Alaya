@@ -364,6 +364,60 @@ describe("mcp memory tool handler", () => {
       error: { code: "UNAVAILABLE" }
     });
   });
+
+  it("threads source delivery anchors through emit_candidate_signal and warns when MODEL_TOOL omits them", async () => {
+    const warn = vi.fn();
+    const deps = { ...createDeps(), warn };
+    const handler = createMcpMemoryToolHandler(deps);
+
+    await expect(
+      handler.call({
+        toolName: "soul.emit_candidate_signal",
+        arguments: {
+          signal_kind: "potential_preference",
+          object_kind: "memory_entry",
+          scope_hint: "project",
+          domain_tags: ["tooling"],
+          confidence: 0.9,
+          evidence_refs: ["memory-1"],
+          raw_payload: { observation: "Use pnpm." },
+          source_delivery_ids: ["delivery-1", "delivery-2"]
+        },
+        context
+      })
+    ).resolves.toMatchObject({ ok: true });
+
+    expect(deps.signalService.receiveSignal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "model_tool",
+        source_delivery_ids: ["delivery-1", "delivery-2"]
+      })
+    );
+    expect(warn).not.toHaveBeenCalled();
+
+    await expect(
+      handler.call({
+        toolName: "soul.emit_candidate_signal",
+        arguments: {
+          signal_kind: "potential_preference",
+          object_kind: "memory_entry",
+          scope_hint: "project",
+          domain_tags: ["tooling"],
+          confidence: 0.9,
+          evidence_refs: ["memory-1"],
+          raw_payload: { observation: "Missing anchor." }
+        },
+        context
+      })
+    ).resolves.toMatchObject({ ok: true });
+
+    expect(warn).toHaveBeenCalledWith(
+      "MODEL_TOOL candidate signal emitted without source_delivery_ids.",
+      expect.objectContaining({
+        source: "model_tool"
+      })
+    );
+  });
 });
 
 function createDeps(): McpMemoryToolHandlerDependencies {

@@ -44,6 +44,7 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     readonly proposed_change_summary?: string;
     readonly created_at?: string;
     readonly target_baseline_updated_at?: string | null;
+    readonly source_delivery_ids?: readonly string[] | null;
   }): Promise<Readonly<Proposal>>;
   createProposalWithEvents(
     input: {
@@ -55,6 +56,7 @@ export interface McpMemoryProposalWorkflowProposalRepo {
       readonly proposed_change_summary?: string;
       readonly created_at?: string;
       readonly target_baseline_updated_at?: string | null;
+      readonly source_delivery_ids?: readonly string[] | null;
     },
     events: readonly ProposalCreationEventInput[],
     options?: {
@@ -86,6 +88,7 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     readonly target_object_id?: string | null;
     readonly proposed_changes?: Readonly<MemoryEntryMutableFields> | null;
     readonly target_baseline_updated_at?: string | null;
+    readonly source_delivery_ids?: readonly string[] | null;
   }> | null>;
   // A1 (HITL daemon backbone) — pending-queue projection. The repo
   // already enforces workspace scoping; the workflow simply forwards
@@ -192,6 +195,7 @@ export function createMcpMemoryProposalWorkflow(
   ): Promise<Readonly<{ proposal_id: string; status: "created" }>> {
     const timestamp = now();
     const proposalId = generateObjectId();
+    const sourceDeliveryIds = input.source_delivery_ids ?? null;
     const targetBaselineUpdatedAt = await readProposalTargetBaseline(
       input.target_object_id,
       context.workspaceId
@@ -232,7 +236,8 @@ export function createMcpMemoryProposalWorkflow(
           object_id: proposal.runtime_id,
           object_kind: proposal.object_kind,
           workspace_id: context.workspaceId,
-          run_id: context.runId
+          run_id: context.runId,
+          ...(sourceDeliveryIds === null ? {} : { source_delivery_ids: sourceDeliveryIds })
         })
       }
     ];
@@ -261,7 +266,8 @@ export function createMcpMemoryProposalWorkflow(
         proposed_changes: input.proposed_changes,
         proposed_change_summary: input.reason,
         created_at: timestamp,
-        target_baseline_updated_at: targetBaselineUpdatedAt
+        target_baseline_updated_at: targetBaselineUpdatedAt,
+        source_delivery_ids: sourceDeliveryIds
       },
       creationEvents,
       reviewerAssignment === undefined ? undefined : { reviewerAssignment }
@@ -355,7 +361,11 @@ export function createMcpMemoryProposalWorkflow(
           reason_code: input.reason ?? input.verdict,
           caused_by: TransitionCausedBy.REVIEW,
           evidence_refs: null,
-          occurred_at: reviewedAt
+          occurred_at: reviewedAt,
+          ...(scopedProposal.source_delivery_ids === null ||
+          scopedProposal.source_delivery_ids === undefined
+            ? {}
+            : { source_delivery_ids: scopedProposal.source_delivery_ids })
         })
       }
     ];
