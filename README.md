@@ -122,11 +122,23 @@ governance to write durable.
 
 ### 1. Perception (感知)
 
-**What happens.** The agent emits a *candidate signal* — *"I think
-this matters"* — via `soul.emit_candidate_signal`. The signal is
-persisted (so it survives the turn) but does **not** mutate ontology
-truth. A triage step decides: low confidence + no evidence →
-deferred; otherwise → may flow into the proposal pipeline.
+**What happens.** A *candidate signal* — *"I think this matters"* —
+enters one of two ways. The agent can emit one explicitly via
+`soul.emit_candidate_signal`. But it doesn't have to: the daemon also
+extracts signals server-side from the turn text the agent already
+forwards on `soul.recall` (`recent_turn`) and
+`soul.report_context_usage` (`turn_digest`), so a fresh install starts
+learning from the first conversation without the agent filing anything.
+Either way the signal is persisted (so it survives the turn) but does
+**not** mutate ontology truth. A triage step decides: low confidence +
+no evidence → deferred; otherwise → may flow into the proposal pipeline.
+
+The built-in extractor (`LocalHeuristics`) is deliberately conservative
+— pattern matching for *"I always use X"*, *"we decided …"*, *"call me
+…"*, EN and ZH — so it catches the obvious durable facts and misses
+nuanced ones; pointing Garden compute at an `official_api` model widens
+that. The explicit `soul.emit_candidate_signal` channel stays available
+for facts the agent judges worth recording that the heuristics won't see.
 
 **Failure mode this prevents.** If the agent could write durable
 truth at perception, every fluent-but-wrong assertion would become
@@ -584,7 +596,12 @@ Threads I'll pull next:
   explicit: recall delivery → usage receipt → candidate signal →
   proposal → accepted proposal → durable application → post-apply
   recall / usage proof. Make every link auditable from the daemon
-  alone, no external tracing required.
+  alone, no external tracing required. v0.2.x closed the cold-start
+  gap — `soul.recall` now feeds server-side extraction so an empty
+  store learns from the first conversation; what's left is richer
+  extraction beyond `LocalHeuristics` and a real-host proof that
+  agents drive the *explicit* `emit`/`propose` channel autonomously
+  (deferred, `#BL-038`).
 - **Embedding strategy refinement** — keep "supplement, never
   oracle"; experiment with boost weight, supplement cap, per-domain
   calibration.

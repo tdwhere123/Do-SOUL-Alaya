@@ -57,6 +57,35 @@ smoke is recorded in `task-cards/reports/v0.2.0-slice-3.md`.
   weights by deterministic domain-tag match; recall results expose
   `RecallScoreFactors.resolved_activation_weights` for auditability.
 
+## Self-Bootstrapping Capture
+
+- Durable capture no longer depends on the host filing
+  `soul.emit_candidate_signal` / `soul.propose_memory_update` or on it
+  echoing a `turn_digest` on `soul.report_context_usage`. `soul.recall`
+  gains an optional `recent_turn` (the verbatim latest user message;
+  falls back to `query`) and, after recording the delivery, enqueues a
+  `POST_TURN_EXTRACT` Garden task from that text — deduped by
+  `(workspace_id, run_id, turn-text hash)`, skipped below a 24-char floor
+  or when the librarian queue is already 128 deep. Garden's existing
+  pipeline (`LocalHeuristics` → deterministic triage → materialization)
+  turns those signals into durable memory.
+- `report_context_usage` no longer gates its `POST_TURN_EXTRACT` enqueue
+  on a used object — a cold-store turn carrying a `turn_digest` is still
+  worth extracting. Tier-promote stays separate (nothing to promote when
+  no recalled object was used).
+- A `POST_TURN_EXTRACT` task that fails during extraction (provider
+  error, bad response) is recorded as failed and no longer rethrows: the
+  task now runs on every recall, so a flaky compute provider must not
+  abort the rest of the Garden background pass.
+- The `soul.recall` / `soul.report_context_usage` tool descriptions and
+  the MCP server instructions tell the host to forward turn text so the
+  plane learns passively, and reframe emit/propose as the optional
+  explicit channel for facts the host judges clearly worth recording.
+- `alaya doctor` reports where recall-driven extract tasks run
+  (`recall-driven extraction: in-process via <provider>` or
+  `queued for an attached host worker`), so "memory is not being
+  captured" is diagnosable from doctor alone.
+
 ## Trustworthy Loop Trace
 
 - Agent-originated signal and proposal paths carry optional
@@ -91,6 +120,10 @@ smoke is recorded in `task-cards/reports/v0.2.0-slice-3.md`.
   the current public surface, including schema signature hashes for
   optionality, nullability, enum/literal values, defaults, and basic
   checks, so additions and removals are explicit.
+- The new `soul.recall` `recent_turn` field is additive and optional
+  (§25 minor); the `soul.recall` and `soul.report_context_usage` tool
+  descriptions gained a passive-extraction clause. Both surface changes
+  are in the regenerated snapshot.
 
 ## Follow-Ups
 

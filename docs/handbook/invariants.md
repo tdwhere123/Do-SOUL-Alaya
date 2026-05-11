@@ -70,6 +70,12 @@ These rules always win over lower-level docs and task-card convenience.
 19. **LLMs and connected agents propose, Alaya decides.** Any agent
     output enters the system through the proposal route; durable
     promotion requires explicit evidence, governance, and audit.
+    Turn text an agent forwards for passive extraction (`recent_turn`
+    on `soul.recall`, `turn_digest` on `soul.report_context_usage`) is
+    *input*, not an agent claim of truth: it feeds Garden's extractor,
+    whose candidates still pass the same deterministic triage, evidence
+    synthesis, and EventLog audit before any durable write — that
+    triage step is the "Alaya decides".
 20. **Delivered ≠ used.** Context delivery to a consumer agent is not
     proof of usage. Trust state distinguishes installed / configured /
     delivered / used / skipped / unverifiable / mixed.

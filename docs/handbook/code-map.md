@@ -58,7 +58,14 @@ and root unused-code checking is reproducible through `knip`. v0.2.0
 candidate work adds the pi-mono Garden provider path, recall scoring
 refinements, Trustworthy Loop trace anchors, and the invariant §25
 SemVer snapshot; credentialed live pi-mono smoke remains the release
-acceptance blocker.
+acceptance blocker. v0.2.x makes durable capture self-bootstrapping:
+`soul.recall` (in `apps/core-daemon/src/mcp-memory-tool-handler.ts`)
+enqueues a `POST_TURN_EXTRACT` Garden task from the host's `recent_turn`
+(or `query`), `report_context_usage` no longer gates that enqueue on a
+used object, and `garden-runtime.ts` no longer aborts the background
+pass when one extract task fails — so the existing
+LocalHeuristics → triage → materialization pipeline fills memory
+without the host filing proposals.
 
 | Concern | Primary files | State |
 |---|---|---|

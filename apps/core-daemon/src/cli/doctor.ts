@@ -385,6 +385,16 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport):
       ` model=${report.garden_compute.model_id ?? "default"}` +
       ` cred=${formatCredentialSource(report.garden_compute.credential_source)}\n`
   );
+  // Auto-extract path: every recall (with turn text) enqueues a turn-text
+  // extract task; tell the operator where those tasks get run so "memory is
+  // not being captured" is diagnosable from doctor alone.
+  stream.write(
+    `recall-driven extraction: ${
+      report.garden_compute.routing_decision === "host_worker"
+        ? "queued for an attached host worker (provider_kind=host_worker)"
+        : `in-process via ${report.garden_compute.routing_decision}`
+    }\n`
+  );
   stream.write(
     `recall path plasticity lookup: count=${report.recall.path_plasticity_lookup.lookup_count}` +
       ` p99_ms=${report.recall.path_plasticity_lookup.duration_p99_ms ?? "n/a"}` +
