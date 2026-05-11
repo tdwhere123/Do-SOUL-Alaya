@@ -181,7 +181,7 @@ describe("ComputeRoutingService", () => {
         adapter: "garden.official_api"
       })
     ).toBe(officialProvider);
-    expect(service.resolveProvider(null)).toBeNull();
+    expect(service.resolveProvider(null)).toBe(officialProvider);
   });
 
   it("refreshes routing candidates when runtime provider config changes", async () => {
@@ -204,6 +204,7 @@ describe("ComputeRoutingService", () => {
       selected_provider: ComputeProviderPriority.STUB,
       model_id: "local-heuristics"
     });
+    expect(service.resolveProvider(null)).toBe(localProvider);
 
     service.setProviders([
       {
@@ -224,6 +225,7 @@ describe("ComputeRoutingService", () => {
       selected_provider: ComputeProviderPriority.OFFICIAL_API,
       model_id: "gpt-4.1-mini"
     });
+    expect(service.resolveProvider(null)).toBe(officialProvider);
     expect(
       service.resolveProvider({
         provider: ComputeProviderPriority.OFFICIAL_API,

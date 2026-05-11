@@ -45,7 +45,10 @@ import {
   createMcpMemoryToolHandler,
   type McpMemoryToolCallContext
 } from "../mcp-memory-tool-handler.js";
-import { createMcpMemoryProposalWorkflow } from "../mcp-memory-proposal-workflow.js";
+import {
+  SourceDeliveryAnchorValidationError,
+  createMcpMemoryProposalWorkflow
+} from "../mcp-memory-proposal-workflow.js";
 import { createTrustStateRecorder } from "../trust-state.js";
 
 const TRACE_SQL = `
@@ -322,6 +325,23 @@ async function createTrustworthyLoopHarness(
     proposalRepo,
     runtimeNotifier,
     memoryService,
+    sourceDeliveryAnchorValidator: {
+      validate: async (sourceDeliveryIds, validationContext) => {
+        for (const deliveryId of sourceDeliveryIds) {
+          const delivery = await trustStateRecorder.findDeliveryById(deliveryId);
+          if (
+            delivery === null ||
+            delivery.agent_target !== validationContext.agentTarget ||
+            delivery.workspace_id !== validationContext.workspaceId ||
+            delivery.run_id !== validationContext.runId
+          ) {
+            throw new SourceDeliveryAnchorValidationError(
+              `source_delivery_ids entry '${deliveryId}' is not a valid recalled delivery for this context.`
+            );
+          }
+        }
+      }
+    },
     reviewerIdentityBinding: {
       identity: TRACE_REVIEWER_IDENTITY,
       token: TRACE_REVIEWER_TOKEN

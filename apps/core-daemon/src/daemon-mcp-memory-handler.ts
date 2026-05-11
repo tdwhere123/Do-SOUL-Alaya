@@ -1,5 +1,6 @@
 import {
   createMcpMemoryProposalWorkflow,
+  SourceDeliveryAnchorValidationError,
   type McpMemoryProposalWorkflowEventLogRepo,
   type McpMemoryProposalWorkflowProposalRepo,
   type McpMemoryProposalWorkflowRuntimeNotifier,
@@ -40,6 +41,23 @@ export function createDaemonMcpMemoryToolHandler(input: {
       proposalRepo: input.proposalRepo,
       runtimeNotifier: input.runtimeNotifier,
       memoryService: input.memoryService,
+      sourceDeliveryAnchorValidator: {
+        validate: async (sourceDeliveryIds, context) => {
+          for (const deliveryId of sourceDeliveryIds) {
+            const delivery = await input.trustStateRecorder.findDeliveryById(deliveryId);
+            if (
+              delivery === null ||
+              delivery.agent_target !== context.agentTarget ||
+              delivery.workspace_id !== context.workspaceId ||
+              delivery.run_id !== context.runId
+            ) {
+              throw new SourceDeliveryAnchorValidationError(
+                `source_delivery_ids contains an unknown or out-of-scope delivery_id: ${deliveryId}`
+              );
+            }
+          }
+        }
+      },
       reviewerIdentityBinding:
         input.reviewerIdentityBinding ?? createReviewerIdentityBindingFromEnv(process.env)
     })

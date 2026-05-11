@@ -31,6 +31,10 @@ export interface McpMemoryProposalWorkflowEventLogRepo {
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
 }
 
+export class SourceDeliveryAnchorValidationError extends Error {
+  public readonly code = "VALIDATION";
+}
+
 type ProposalResolutionEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 type ProposalCreationEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
@@ -173,6 +177,12 @@ export interface McpMemoryProposalWorkflowDependencies {
     ): Promise<void>;
   }>;
   readonly reviewerIdentityBinding?: ReviewerIdentityBinding;
+  readonly sourceDeliveryAnchorValidator?: {
+    validate(
+      sourceDeliveryIds: readonly string[],
+      context: McpMemoryToolCallContext
+    ): Promise<void> | void;
+  };
   readonly now?: () => string;
   readonly generateObjectId?: () => string;
 }
@@ -196,6 +206,7 @@ export function createMcpMemoryProposalWorkflow(
     const timestamp = now();
     const proposalId = generateObjectId();
     const sourceDeliveryIds = input.source_delivery_ids ?? null;
+    await validateSourceDeliveryIds(sourceDeliveryIds, context);
     const targetBaselineUpdatedAt = await readProposalTargetBaseline(
       input.target_object_id,
       context.workspaceId
@@ -527,6 +538,21 @@ export function createMcpMemoryProposalWorkflow(
       );
     }
     return scopedTarget.updated_at ?? null;
+  }
+
+  async function validateSourceDeliveryIds(
+    sourceDeliveryIds: readonly string[] | null,
+    context: McpMemoryToolCallContext
+  ): Promise<void> {
+    if (sourceDeliveryIds === null) {
+      return;
+    }
+    if (deps.sourceDeliveryAnchorValidator === undefined) {
+      throw new SourceDeliveryAnchorValidationError(
+        "source_delivery_ids require a source delivery anchor validator."
+      );
+    }
+    await deps.sourceDeliveryAnchorValidator.validate(sourceDeliveryIds, context);
   }
 }
 

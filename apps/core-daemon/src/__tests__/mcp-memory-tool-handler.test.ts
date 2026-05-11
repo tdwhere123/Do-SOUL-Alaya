@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   MemoryDimension,
+  ProposalResolutionState,
   RetentionPolicy,
   ScopeClass,
   type CandidateMemorySignal,
@@ -393,6 +394,43 @@ describe("mcp memory tool handler", () => {
       ok: false,
       error: { code: "UNAVAILABLE" }
     });
+  });
+
+  it("rejects forged source delivery anchors before proposal workflow receives proposals", async () => {
+    const deps = createDeps();
+    deps.trustStateRecorder.findDeliveryById = vi.fn(async () => null);
+    const proposalWorkflow: NonNullable<McpMemoryToolHandlerDependencies["proposalWorkflow"]> = {
+      proposeMemoryUpdate: vi.fn(async () => ({
+        proposal_id: "proposal-1",
+        status: "created"
+      })),
+      reviewMemoryProposal: vi.fn(async () => ({
+        proposal_id: "proposal-1",
+        resolution_state: ProposalResolutionState.ACCEPTED
+      })),
+      listPendingProposals: vi.fn(async () => ({
+        proposals: [],
+        total_count: 0
+      }))
+    };
+    const handler = createMcpMemoryToolHandler({ ...deps, proposalWorkflow });
+
+    const result = await handler.call({
+      toolName: "soul.propose_memory_update",
+      arguments: {
+        target_object_id: "mem1",
+        proposed_changes: { content: "forged" },
+        reason: "spoofed anchor",
+        source_delivery_ids: ["delivery-forged"]
+      },
+      context
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "VALIDATION" }
+    });
+    expect(proposalWorkflow.proposeMemoryUpdate).not.toHaveBeenCalled();
   });
 
   it("threads source delivery anchors through emit_candidate_signal and warns when MODEL_TOOL omits them", async () => {

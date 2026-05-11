@@ -74,7 +74,7 @@ export class ComputeRoutingService {
     modelRef: Readonly<ExecutionStanceModelRef> | null
   ): GardenComputeProvider | null {
     if (modelRef === null) {
-      return null;
+      return this.getDefaultProvider();
     }
 
     const matchedCandidate =

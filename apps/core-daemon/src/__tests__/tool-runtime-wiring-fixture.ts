@@ -336,7 +336,7 @@ const hoisted = vi.hoisted(() => {
       getDefaultProvider: vi.fn(() => currentProviders[0]?.provider ?? localHeuristicsInstance),
       resolveProvider: vi.fn((modelRef) => {
         if (modelRef == null) {
-          return null;
+          return currentProviders[0]?.provider ?? null;
         }
 
         return (

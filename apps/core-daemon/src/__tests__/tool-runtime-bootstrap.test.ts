@@ -504,6 +504,11 @@ describe("daemon tool runtime bootstrap", () => {
         adapter: "garden.local_heuristics"
       })
     ]);
+    expect(
+      hoisted.conversationServiceDeps?.resolveGardenComputeProvider?.resolve(null)
+    ).toMatchObject({
+      provider_kind: "official_api"
+    });
   });
 
   it("reports degraded embedding status when supplement is enabled but the secret env is missing", async () => {

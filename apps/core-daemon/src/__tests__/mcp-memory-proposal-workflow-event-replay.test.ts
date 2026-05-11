@@ -11,7 +11,10 @@ import {
   SqliteProposalRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import { createMcpMemoryProposalWorkflow } from "../mcp-memory-proposal-workflow.js";
+import {
+  createMcpMemoryProposalWorkflow,
+  SourceDeliveryAnchorValidationError
+} from "../mcp-memory-proposal-workflow.js";
 
 // A1 fix-loop (finding-6): the original A1 work tested that the
 // workflow *passes* reviewer_identity into the resolution events
@@ -106,7 +109,10 @@ describe("mcp memory proposal workflow — event_log audit replay (A1 finding-6)
       eventLogRepo,
       proposalRepo,
       runtimeNotifier: { notifyEntry: async () => {} },
-      memoryService: createMemoryApplyPort()
+      memoryService: createMemoryApplyPort(),
+      sourceDeliveryAnchorValidator: {
+        validate: () => undefined
+      }
     });
 
     const sourceDeliveryIds = ["delivery-1", "delivery-2"] as const;
@@ -144,6 +150,34 @@ describe("mcp memory proposal workflow — event_log audit replay (A1 finding-6)
       replayed.find((entry) => entry.event_type === MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED)
         ?.payload_json
     ).toMatchObject({ source_delivery_ids: sourceDeliveryIds });
+  });
+
+  it("rejects direct workflow proposal anchors when no validator is wired", async () => {
+    const database = createDb();
+    const proposalRepo = new SqliteProposalRepo(database);
+    const eventLogRepo = new SqliteEventLogRepo(database);
+
+    const workflow = createMcpMemoryProposalWorkflow({
+      now: () => "2026-04-30T00:00:00.000Z",
+      generateObjectId: () => "77777777-8888-4888-8888-999999999999",
+      eventLogRepo,
+      proposalRepo,
+      runtimeNotifier: { notifyEntry: async () => {} },
+      memoryService: createMemoryApplyPort()
+    });
+
+    await expect(
+      workflow.proposeMemoryUpdate(
+        {
+          target_object_id: "mem-forged",
+          proposed_changes: { content: "forged correction" },
+          reason: "direct workflow forged anchor",
+          source_delivery_ids: ["delivery-forged"]
+        },
+        { workspaceId: "ws-anchored", runId: "run-anchored", agentTarget: "codex" }
+      )
+    ).rejects.toBeInstanceOf(SourceDeliveryAnchorValidationError);
+    await expect(eventLogRepo.queryByEntity("proposal", "77777777-8888-4888-8888-999999999999")).resolves.toEqual([]);
   });
 
   it("round-trips a non-ASCII reviewer identity with embedded quotes through event_log (UTF-8 lock)", async () => {
