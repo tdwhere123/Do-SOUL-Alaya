@@ -47,6 +47,7 @@ export interface ProposalCreateInput {
   readonly proposed_changes?: MemoryEntryMutableFields | null;
   readonly created_at?: string;
   readonly target_baseline_updated_at?: string | null;
+  readonly source_delivery_ids?: readonly string[] | null;
 }
 
 export interface ScopedProposal {
@@ -62,6 +63,7 @@ export interface ScopedProposal {
   // domain projection returned by findById/findPending.
   readonly proposed_changes: Readonly<MemoryEntryMutableFields> | null;
   readonly target_baseline_updated_at: string | null;
+  readonly source_delivery_ids: readonly string[] | null;
 }
 
 export interface PendingProposalSummary {
@@ -219,7 +221,8 @@ const PROPOSAL_SELECT_COLUMNS = `
         proposed_change_summary,
         proposed_changes,
         created_at,
-        target_baseline_updated_at
+        target_baseline_updated_at,
+        source_delivery_ids
 `;
 
 interface ProposalRow {
@@ -245,6 +248,7 @@ interface ProposalRow {
   readonly proposed_changes: string | null;
   readonly created_at: string | null;
   readonly target_baseline_updated_at: string | null;
+  readonly source_delivery_ids: string | null;
 }
 
 interface ProposalReviewerAssignmentRow {
@@ -304,8 +308,9 @@ export class SqliteProposalRepo implements ProposalRepo {
         proposed_change_summary,
         proposed_changes,
         created_at,
-        target_baseline_updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        target_baseline_updated_at,
+        source_delivery_ids
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     this.findByIdStatement = db.connection.prepare(`
@@ -428,6 +433,7 @@ export class SqliteProposalRepo implements ProposalRepo {
     const proposedChanges = serializeProposedChanges(input.proposed_changes ?? null);
     const createdAt = input.created_at ?? parsedProposal.last_updated_at;
     const targetBaselineUpdatedAt = parseNullableTimestamp(input.target_baseline_updated_at ?? null);
+    const sourceDeliveryIds = serializeSourceDeliveryIds(input.source_delivery_ids ?? null);
 
     try {
       this.createStatement.run(
@@ -449,7 +455,8 @@ export class SqliteProposalRepo implements ProposalRepo {
         proposedChangeSummary,
         proposedChanges,
         createdAt,
-        targetBaselineUpdatedAt
+        targetBaselineUpdatedAt,
+        sourceDeliveryIds
       );
     } catch (error) {
       throw new StorageError(
@@ -478,6 +485,7 @@ export class SqliteProposalRepo implements ProposalRepo {
     const proposedChanges = serializeProposedChanges(input.proposed_changes ?? null);
     const createdAt = input.created_at ?? parsedProposal.last_updated_at;
     const targetBaselineUpdatedAt = parseNullableTimestamp(input.target_baseline_updated_at ?? null);
+    const sourceDeliveryIds = serializeSourceDeliveryIds(input.source_delivery_ids ?? null);
     const reviewerAssignment =
       options.reviewerAssignment === undefined
         ? undefined
@@ -505,7 +513,8 @@ export class SqliteProposalRepo implements ProposalRepo {
           proposedChangeSummary,
           proposedChanges,
           createdAt,
-          targetBaselineUpdatedAt
+          targetBaselineUpdatedAt,
+          sourceDeliveryIds
         );
         if (reviewerAssignment !== undefined) {
           this.insertReviewerAssignment(reviewerAssignment);
@@ -554,7 +563,8 @@ export class SqliteProposalRepo implements ProposalRepo {
             reviewer_identity: row.reviewer_identity,
             reviewer_assignment: assignment,
             proposed_changes: parseProposedChanges(row.proposed_changes),
-            target_baseline_updated_at: row.target_baseline_updated_at
+            target_baseline_updated_at: row.target_baseline_updated_at,
+            source_delivery_ids: parseSourceDeliveryIds(row.source_delivery_ids)
           });
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to load proposal ${proposalId}.`, error);
@@ -1204,6 +1214,39 @@ function parseProposedChanges(value: string | null): Readonly<MemoryEntryMutable
   } catch (error) {
     throw new StorageError("VALIDATION_FAILED", "Failed to validate proposal proposed_changes row.", error);
   }
+}
+
+function serializeSourceDeliveryIds(value: readonly string[] | null): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  const parsed = parseSourceDeliveryIdsArray(value);
+  return JSON.stringify(parsed);
+}
+
+function parseSourceDeliveryIds(value: string | null): readonly string[] | null {
+  if (value === null) {
+    return null;
+  }
+
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(value);
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to parse proposal source_delivery_ids JSON.", error);
+  }
+
+  return parseSourceDeliveryIdsArray(parsedJson);
+}
+
+function parseSourceDeliveryIdsArray(value: unknown): readonly string[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new StorageError("VALIDATION_FAILED", "Proposal source_delivery_ids must be a non-empty array.");
+  }
+  return deepFreeze(
+    value.map((item, index) => parseNonEmptyString(item, `source_delivery_ids[${index}]`))
+  );
 }
 
 function parseAcceptedMemoryUpdateInput(

@@ -109,7 +109,55 @@ describe("SqliteProposalRepo", () => {
       reviewer_identity: null,
       reviewer_assignment: null,
       proposed_changes: null,
-      target_baseline_updated_at: null
+      target_baseline_updated_at: null,
+      source_delivery_ids: null
+    });
+  });
+
+  it("round-trips optional source delivery anchors on scoped proposals", async () => {
+    const { repo } = createRepo();
+    const singleAnchorProposal = createProposal({
+      runtime_id: "a1111111-1111-4111-8111-111111111111",
+      proposal_id: "a1111111-1111-4111-8111-111111111111"
+    });
+    const multiAnchorProposal = createProposal({
+      runtime_id: "b2222222-2222-4222-8222-222222222222",
+      proposal_id: "b2222222-2222-4222-8222-222222222222"
+    });
+    const omittedAnchorProposal = createProposal({
+      runtime_id: "c3333333-3333-4333-8333-333333333333",
+      proposal_id: "c3333333-3333-4333-8333-333333333333"
+    });
+
+    await repo.create({
+      proposal: singleAnchorProposal,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_kind: "memory_entry",
+      source_delivery_ids: ["delivery-1"]
+    });
+    await repo.create({
+      proposal: multiAnchorProposal,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_kind: "memory_entry",
+      source_delivery_ids: ["delivery-1", "delivery-2"]
+    });
+    await repo.create({
+      proposal: omittedAnchorProposal,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_kind: "memory_entry"
+    });
+
+    await expect(repo.findScopedById(singleAnchorProposal.proposal_id)).resolves.toMatchObject({
+      source_delivery_ids: ["delivery-1"]
+    });
+    await expect(repo.findScopedById(multiAnchorProposal.proposal_id)).resolves.toMatchObject({
+      source_delivery_ids: ["delivery-1", "delivery-2"]
+    });
+    await expect(repo.findScopedById(omittedAnchorProposal.proposal_id)).resolves.toMatchObject({
+      source_delivery_ids: null
     });
   });
 

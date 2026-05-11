@@ -93,6 +93,44 @@ describe("SignalService", () => {
     });
   });
 
+  it("threads source delivery anchors into the emitted EventLog payload", async () => {
+    const storedEvents: EventLogEntry[] = [];
+    const service = new SignalService({
+      eventLogRepo: {
+        append: vi.fn(async (event) => {
+          const stored: EventLogEntry = {
+            event_id: `evt_${storedEvents.length + 1}`,
+            created_at: `2026-03-18T00:00:0${storedEvents.length + 1}.000Z`,
+            revision: storedEvents.length,
+            ...event
+          };
+          storedEvents.push(stored);
+          return stored;
+        }),
+        queryByEntity: vi.fn(async () => [])
+      },
+      signalRepo: {
+        create: vi.fn(async (signal) => ({ ...signal, signal_state: "emitted" })),
+        getById: vi.fn(async () => null),
+        listByRun: vi.fn(async () => []),
+        updateState: vi.fn(async (signalId, state) => createSignal({ signal_id: signalId, signal_state: state }))
+      },
+      runtimeNotifier: {
+        notifyEntry: vi.fn(async () => {})
+      }
+    });
+
+    await service.receiveSignal(createSignal({ source_delivery_ids: ["delivery-1", "delivery-2"] }));
+
+    expect(storedEvents[0]).toMatchObject({
+      event_type: "soul.signal.emitted",
+      payload_json: {
+        signal_id: "signal-1",
+        source_delivery_ids: ["delivery-1", "delivery-2"]
+      }
+    });
+  });
+
   it("defers low-confidence potential_conflict signals", async () => {
     const service = new SignalService({
       eventLogRepo: {

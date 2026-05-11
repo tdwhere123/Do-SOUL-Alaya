@@ -70,6 +70,7 @@ const ConfidenceSchema = z.number().min(0).max(1);
 const DomainTagsSchema = z.array(NonEmptyStringSchema).readonly();
 const EvidenceRefsSchema = z.array(NonEmptyStringSchema).readonly();
 const RawPayloadSchema = z.record(z.unknown()).readonly();
+const SourceDeliveryIdsSchema = z.array(NonEmptyStringSchema).min(1).readonly();
 
 export const CandidateMemorySignalSchema = z.object({
   signal_id: NonEmptyStringSchema,
@@ -85,6 +86,7 @@ export const CandidateMemorySignalSchema = z.object({
   confidence: ConfidenceSchema,
   evidence_refs: EvidenceRefsSchema,
   raw_payload: RawPayloadSchema,
+  source_delivery_ids: SourceDeliveryIdsSchema.optional(),
   created_at: IsoDatetimeStringSchema
 }).readonly();
 
@@ -100,6 +102,10 @@ const CandidateMemorySignalContentFieldsSchema = z.object({
   evidence_refs: EvidenceRefsSchema,
   raw_payload: RawPayloadSchema
 });
+
+export const CandidateMemorySignalContentSchema = CandidateMemorySignalContentFieldsSchema
+  .strict()
+  .readonly();
 
 // Internal input shape used by signal-service callers that already
 // know workspace/run/surface (Garden compile, user seed, import paths).
@@ -124,6 +130,9 @@ export const CandidateMemorySignalInputSchema = CandidateMemorySignalContentFiel
 // workspace_id=foreign") even though the runtime guard catches the
 // spoof.
 export const McpEmitCandidateSignalRequestSchema = CandidateMemorySignalContentFieldsSchema
+  .extend({
+    source_delivery_ids: SourceDeliveryIdsSchema.optional()
+  })
   .strict()
   .readonly();
 

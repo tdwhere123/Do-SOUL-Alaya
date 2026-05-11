@@ -11,6 +11,7 @@ const signalEventTypeValues = [
 ] as const;
 
 const triageResultValues = ["accepted", "dropped", "deferred"] as const;
+const SourceDeliveryIdsSchema = z.array(NonEmptyStringSchema).min(1).readonly();
 
 export const SignalEventType = {
   SOUL_SIGNAL_EMITTED: "soul.signal.emitted",
@@ -28,6 +29,7 @@ export const SoulSignalEmittedPayloadSchema = z.object({
   run_id: NonEmptyStringSchema,
   source: SignalSourceSchema,
   signal_kind: SignalKindSchema,
+  source_delivery_ids: SourceDeliveryIdsSchema.optional(),
   raw_payload: z.record(z.unknown()).readonly()
 }).readonly();
 
