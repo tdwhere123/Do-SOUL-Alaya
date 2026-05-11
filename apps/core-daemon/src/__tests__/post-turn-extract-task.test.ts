@@ -197,6 +197,41 @@ describe("post-turn extract Garden task", () => {
     expect(postTurnRows(harness.gardenTaskRepo)).toHaveLength(1);
   });
 
+  it("a recall and a report for the same turn enqueue two extract tasks (disjoint keyspaces)", async () => {
+    const harness = await createHandlerHarness();
+
+    await recall(harness.handler, { query: "remember that I always use pnpm for this project" });
+    await reportUsage(harness.handler, { turn_index: 3 });
+
+    const rows = postTurnRows(harness.gardenTaskRepo);
+    expect(rows).toHaveLength(2);
+    expect(rows.some((row) => row.id.startsWith("recall_extract_"))).toBe(true);
+    expect(rows.some((row) => row.id.startsWith("post_turn_extract_"))).toBe(true);
+  });
+
+  it("skips the recall-driven extract task when the librarian queue is already saturated", async () => {
+    const harness = await createHandlerHarness();
+    for (let i = 0; i < 128; i += 1) {
+      harness.gardenTaskRepo.enqueue({
+        id: `seed-extract-${i}`,
+        workspace_id: "workspace-1",
+        role: GardenRole.LIBRARIAN,
+        kind: GardenTaskKind.POST_TURN_EXTRACT,
+        payload: createPostTurnPayload(),
+        created_at: "2026-05-07T00:00:00.000Z"
+      });
+    }
+
+    await recall(harness.handler, { query: "remember that I always use pnpm for this project" });
+
+    expect(harness.gardenTaskRepo.findById("seed-extract-0")).not.toBeNull();
+    expect(
+      harness.gardenTaskRepo
+        .peekPending(GardenRole.LIBRARIAN, "workspace-1", 256)
+        .filter((row) => row.kind === GardenTaskKind.POST_TURN_EXTRACT && row.id.startsWith("recall_extract_"))
+    ).toEqual([]);
+  });
+
   it("official_api healthy routing claims, compiles, completes, and records two signals", async () => {
     const signalA = createSignal({ signal_id: "signal-official-a" });
     const signalB = createSignal({ signal_id: "signal-official-b" });
@@ -281,6 +316,33 @@ describe("post-turn extract Garden task", () => {
     });
     await expect(harness.signalRepo.getById("signal-local")).resolves.toMatchObject({
       signal_id: "signal-local"
+    });
+  });
+
+  it("a failing extract provider marks the task failed without aborting the background pass", async () => {
+    const compile = vi.fn(async () => {
+      throw new Error("provider blew up");
+    });
+    const harness = await createRoutingHarness({
+      provider_kind: "local_heuristics",
+      localCompile: compile
+    });
+    harness.enqueuePostTurnTask();
+
+    await expect(harness.runScheduler()).resolves.toBeUndefined();
+
+    expect(compile).toHaveBeenCalledTimes(1);
+    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
+      status: "failed",
+      last_error_text: expect.stringContaining("provider blew up")
+    });
+    const completedEvents = await harness.eventLogRepo.queryByType(
+      GardenEventType.SOUL_GARDEN_TASK_COMPLETED
+    );
+    expect(completedEvents.at(-1)?.payload_json).toMatchObject({
+      task_kind: GardenTaskKind.POST_TURN_EXTRACT,
+      success: false,
+      candidate_signals_count: 0
     });
   });
 

@@ -134,11 +134,12 @@ Either way the signal is persisted (so it survives the turn) but does
 no evidence → deferred; otherwise → may flow into the proposal pipeline.
 
 The built-in extractor (`LocalHeuristics`) is deliberately conservative
-— pattern matching for *"I always use X"*, *"we decided …"*, *"call me
-…"*, EN and ZH — so it catches the obvious durable facts and misses
-nuanced ones; pointing Garden compute at an `official_api` model widens
-that. The explicit `soul.emit_candidate_signal` channel stays available
-for facts the agent judges worth recording that the heuristics won't see.
+— pattern matching for forms like *"I always use X"* / *"we decided …"*
+in English and Chinese, plus Chinese self-introduction (*"请叫我 …"*) —
+so it catches the obvious durable facts and misses nuanced ones;
+pointing Garden compute at an `official_api` model widens that. The
+explicit `soul.emit_candidate_signal` channel stays available for facts
+the agent judges worth recording that the heuristics won't see.
 
 **Failure mode this prevents.** If the agent could write durable
 truth at perception, every fluent-but-wrong assertion would become

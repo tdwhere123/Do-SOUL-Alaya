@@ -94,9 +94,12 @@ const POST_TURN_EXTRACT_EXCERPT_MAX_CHARS = 800;
 // Garden compute provider to find a durable signal in; a bare keyword query
 // is below this floor and not worth a Garden task.
 const MIN_AUTO_EXTRACT_TURN_CHARS = 24;
-// Stop enqueuing recall-driven extract tasks once the librarian queue for a
-// workspace is this deep: Garden is not draining (e.g. host_worker mode with
-// no worker, or a stalled background pass) and piling on cannot help.
+// Stop enqueuing recall-driven extract tasks once the pending Garden queue
+// visible to peekPending(LIBRARIAN, ...) — librarian rows plus the
+// higher-priority janitor/auditor rows — for a workspace is this deep: Garden
+// is not draining (e.g. host_worker mode with no worker, or a stalled
+// background pass) and piling on cannot help. Coarse backpressure —
+// over-counting only makes Alaya more conservative.
 const RECALL_EXTRACT_BACKLOG_SKIP_THRESHOLD = 128;
 
 export interface McpMemoryToolCallContext {
@@ -957,20 +960,12 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     context: McpMemoryToolCallContext,
     deliveredObjectIds: readonly string[]
   ): void {
-    if (deps.gardenTaskRepo === undefined || context.runId === null) {
+    const gardenTaskRepo = deps.gardenTaskRepo;
+    if (gardenTaskRepo === undefined || context.runId === null) {
       return;
     }
     const turnText = (request.recent_turn ?? request.query).trim();
     if (turnText.length < MIN_AUTO_EXTRACT_TURN_CHARS) {
-      return;
-    }
-    if (
-      deps.gardenTaskRepo.peekPending(
-        GardenRole.LIBRARIAN,
-        context.workspaceId,
-        RECALL_EXTRACT_BACKLOG_SKIP_THRESHOLD
-      ).length >= RECALL_EXTRACT_BACKLOG_SKIP_THRESHOLD
-    ) {
       return;
     }
     const workspaceId = context.workspaceId;
@@ -978,8 +973,20 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     const dedupedDeliveredIds = Object.freeze([...new Set(deliveredObjectIds)]);
     const taskId = buildRecallExtractTaskId(workspaceId, runId, turnText);
     const createdAt = now();
+    // Best-effort capture: a dropped extract task is acceptable; a storage
+    // hiccup must not break recall. Swallow everything but a duplicate (already
+    // queued for this turn) and log.
     try {
-      deps.gardenTaskRepo.enqueue({
+      if (
+        gardenTaskRepo.peekPending(
+          GardenRole.LIBRARIAN,
+          workspaceId,
+          RECALL_EXTRACT_BACKLOG_SKIP_THRESHOLD
+        ).length >= RECALL_EXTRACT_BACKLOG_SKIP_THRESHOLD
+      ) {
+        return;
+      }
+      gardenTaskRepo.enqueue({
         id: taskId,
         workspace_id: workspaceId,
         role: GardenRole.LIBRARIAN,
@@ -1012,7 +1019,11 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       if (isDuplicatePostTurnExtractTask(error)) {
         return;
       }
-      throw error;
+      warn("recall-driven extract task enqueue failed; skipping.", {
+        workspace_id: workspaceId,
+        run_id: runId,
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
   }
 

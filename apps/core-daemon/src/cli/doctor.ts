@@ -391,7 +391,7 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport):
   stream.write(
     `recall-driven extraction: ${
       report.garden_compute.routing_decision === "host_worker"
-        ? "queued for an attached host worker (provider_kind=host_worker)"
+        ? "queued for a host worker (provider_kind=host_worker)"
         : `in-process via ${report.garden_compute.routing_decision}`
     }\n`
   );

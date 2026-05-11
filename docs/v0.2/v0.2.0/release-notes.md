@@ -73,6 +73,10 @@ smoke is recorded in `task-cards/reports/v0.2.0-slice-3.md`.
   on a used object — a cold-store turn carrying a `turn_digest` is still
   worth extracting. Tier-promote stays separate (nothing to promote when
   no recalled object was used).
+- A recall-origin task (keyed on the turn-text hash) and a report-origin
+  task (keyed on `turn_index`) can both fire for the same turn; this is
+  expected — the heuristics dedup signals within a task and Garden's
+  `MERGE_PROPOSAL` consolidation absorbs cross-task duplicates.
 - A `POST_TURN_EXTRACT` task that fails during extraction (provider
   error, bad response) is recorded as failed and no longer rethrows: the
   task now runs on every recall, so a flaky compute provider must not
