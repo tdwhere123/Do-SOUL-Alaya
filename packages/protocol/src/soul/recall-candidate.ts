@@ -8,6 +8,7 @@ import {
 } from "../schema-primitives.js";
 import { ManifestationStateSchema, MemoryDimensionSchema } from "./memory-entry.js";
 import { ScopeClassSchema } from "./object-kind.js";
+import { ActivationWeightsSchema } from "./recall-policy.js";
 
 const recallOriginPlaneValues = ["workspace_local", "global"] as const;
 
@@ -21,7 +22,8 @@ export const RecallScoreFactorsSchema = z
     path_plasticity: z.number().min(0).max(1).optional(),
     budget_penalty: z.number().min(0).max(1).optional(),
     embedding_similarity: z.number().min(0).max(1).optional(),
-    conflict_penalty: z.number().min(0).max(1).optional()
+    conflict_penalty: z.number().min(0).max(1).optional(),
+    resolved_activation_weights: ActivationWeightsSchema.optional()
   })
   .strict()
   .readonly();

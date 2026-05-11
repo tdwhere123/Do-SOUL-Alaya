@@ -67,6 +67,7 @@ import {
   type SoulMemorySearchRequest,
   type SoulOpenPointerRequest,
   type SoulProposeMemoryUpdateRequest,
+  type SoulRecallHostContext,
   type SoulMemorySearchDegradationReason,
   type SoulRecallStrategyMix,
   type SoulReportContextUsageRequest,
@@ -116,6 +117,7 @@ export interface McpMemoryToolHandlerDependencies {
         readonly until?: string | null;
         readonly field?: "created_at" | "last_used_at";
       }>;
+      readonly hostContext?: Readonly<SoulRecallHostContext>;
     }): Promise<Readonly<{
       readonly candidates: readonly Readonly<RecallCandidate>[];
       readonly total_scanned: number;
@@ -350,7 +352,8 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       strategy: "chat",
       runId: context.runId,
       policyOverride,
-      timeFilter
+      timeFilter,
+      hostContext: request.host_context
     });
     let usedTokens = 0;
     let explainabilityPartial = false;

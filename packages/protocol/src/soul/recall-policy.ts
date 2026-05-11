@@ -50,11 +50,27 @@ export const FineAssessmentConfigSchema = z
   })
   .readonly();
 
+const ActivationWeightsShape = {
+  scope_match: z.number().min(0).max(1),
+  domain_match: z.number().min(0).max(1),
+  retention: z.number().min(0).max(1),
+  freshness: z.number().min(0).max(1),
+  relevance: z.number().min(0).max(1),
+  graph_support: z.number().min(0).max(1),
+  budget_penalty: z.number().min(0).max(1),
+  conflict_penalty: z.number().min(0).max(1)
+} as const;
+
+export const ActivationWeightsSchema = z.object(ActivationWeightsShape).strict().readonly();
+
+export const ActivationWeightsPatchSchema = z.object(ActivationWeightsShape).partial().strict().readonly();
+
 export const RecallPolicySchema = ControlPlaneEnvelopeSchema.unwrap()
   .extend({
     object_kind: z.literal(ControlPlaneObjectKind.RECALL_POLICY),
     coarse_filter: CoarseFilterConfigSchema,
-    fine_assessment: FineAssessmentConfigSchema
+    fine_assessment: FineAssessmentConfigSchema,
+    domain_weight_overrides: z.record(NonEmptyStringSchema, ActivationWeightsPatchSchema).optional()
   })
   .readonly();
 
@@ -64,4 +80,6 @@ export type SemanticSupplementConfig = z.infer<typeof SemanticSupplementConfigSc
 export type CoarseFilterConfig = z.infer<typeof CoarseFilterConfigSchema>;
 export type RecallBudgets = z.infer<typeof RecallBudgetsSchema>;
 export type FineAssessmentConfig = z.infer<typeof FineAssessmentConfigSchema>;
+export type ActivationWeights = z.infer<typeof ActivationWeightsSchema>;
+export type ActivationWeightsPatch = z.infer<typeof ActivationWeightsPatchSchema>;
 export type RecallPolicy = z.infer<typeof RecallPolicySchema>;

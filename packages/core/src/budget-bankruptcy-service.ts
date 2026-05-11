@@ -35,6 +35,7 @@ interface BankruptcyStoreEntry {
   readonly state: Readonly<BudgetBankruptcyState>;
   readonly dossier: Readonly<BankruptcyDossier>;
   readonly proposalId: string;
+  readonly pressureRatio: number;
 }
 
 export interface BudgetBankruptcyServiceEventLogPort {
@@ -78,6 +79,8 @@ export interface BudgetBankruptcyDeclareParams {
   readonly droppedCandidates: readonly string[];
   readonly unresolvedConflicts: readonly string[];
   readonly requiredActions: readonly BankruptcyActionValue[];
+  readonly tokensUsed?: number;
+  readonly maxTotalTokens?: number;
 }
 
 export interface BudgetBankruptcyDeclareResult {
@@ -149,6 +152,7 @@ export class BudgetBankruptcyService {
     const bankruptcyId = this.generateRuntimeId();
     const dossierId = this.generateRuntimeId();
     const kind = determineBankruptcyKind(params);
+    const pressureRatio = computePressureRatio(params, kind);
     const taskSurfaceRef = normalizeOptionalString(params.taskSurfaceRef);
     const expiresAt = normalizeOptionalTimestamp(params.taskSurfaceExpiresAt, "taskSurfaceExpiresAt");
     // Mirror the originating task surface so restart recovery can trace both control-plane objects to the same source.
@@ -259,7 +263,8 @@ export class BudgetBankruptcyService {
       this.stateStore.set(runId, {
         state,
         dossier,
-        proposalId: proposal.proposal_id
+        proposalId: proposal.proposal_id,
+        pressureRatio
       });
       await this.dependencies.runtimeNotifier.notifyEntry(declaredEvent);
       await this.dependencies.runtimeNotifier.notifyEntry(resolvedEvent);
@@ -270,7 +275,8 @@ export class BudgetBankruptcyService {
     this.stateStore.set(runId, {
       state,
       dossier,
-      proposalId: proposal.proposal_id
+      proposalId: proposal.proposal_id,
+      pressureRatio
     });
     await this.dependencies.runtimeNotifier.notifyEntry(declaredEvent);
     return { state, dossier, proposal };
@@ -339,7 +345,8 @@ export class BudgetBankruptcyService {
     this.stateStore.set(runId, {
       state: updatedState,
       dossier: entry.dossier,
-      proposalId: updatedProposal.proposal_id
+      proposalId: updatedProposal.proposal_id,
+      pressureRatio: entry.pressureRatio
     });
     await this.dependencies.runtimeNotifier.notifyEntry(resolvedEvent);
 
@@ -361,6 +368,7 @@ export class BudgetBankruptcyService {
             run_id: parsedRunId,
             current_mode: RuntimeMode.FULL,
             bankruptcy_kind: BankruptcyKind.NONE,
+            pressure_ratio: 0,
             trigger_summary: null,
             active_dossier: null,
             pending_proposal: null
@@ -378,6 +386,7 @@ export class BudgetBankruptcyService {
       run_id: parsedRunId,
       current_mode: entry.state.current_mode,
       bankruptcy_kind: entry.state.bankruptcy_kind,
+      pressure_ratio: entry.pressureRatio,
       trigger_summary: entry.state.trigger_summary,
       active_dossier: {
         bankruptcy_id: entry.dossier.bankruptcy_id,
@@ -493,7 +502,8 @@ export class BudgetBankruptcyService {
         required_actions: payload.required_actions,
         created_at: payload.occurred_at
       }),
-      proposalId: pendingProposal.proposal_id
+      proposalId: pendingProposal.proposal_id,
+      pressureRatio: pressureRatioForKind(payload.bankruptcy_kind)
     } satisfies BankruptcyStoreEntry;
 
     this.stateStore.set(runId, recovered);
@@ -557,6 +567,40 @@ function determineBankruptcyKind(params: BudgetBankruptcyDeclareParams): ActiveB
     params.triggerKind === BankruptcyTriggerKind.MISSING_VERIFICATION;
 
   return hasAutoPath ? BankruptcyKind.SOFT : BankruptcyKind.HARD;
+}
+
+function computePressureRatio(
+  params: BudgetBankruptcyDeclareParams,
+  kind: ActiveBankruptcyKind
+): number {
+  if (kind === BankruptcyKind.HARD) {
+    return 1;
+  }
+
+  if (
+    typeof params.tokensUsed === "number" &&
+    typeof params.maxTotalTokens === "number" &&
+    params.maxTotalTokens > 0
+  ) {
+    return clamp01(params.tokensUsed / params.maxTotalTokens);
+  }
+
+  return pressureRatioForKind(kind);
+}
+
+function pressureRatioForKind(kind: BankruptcyKindValue): number {
+  switch (kind) {
+    case BankruptcyKind.NONE:
+      return 0;
+    case BankruptcyKind.SOFT:
+      return 0.5;
+    case BankruptcyKind.HARD:
+      return 1;
+  }
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
 }
 
 function buildProposalOptions(

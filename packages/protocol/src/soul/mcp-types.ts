@@ -61,6 +61,20 @@ export const MemorySearchResultSchema = z
 
 export const RecallTimeFieldSchema = z.enum(["created_at", "last_used_at"]);
 
+export const SoulRecallTokenizerHintSchema = z.enum([
+  "cl100k",
+  "o200k",
+  "approx_chars_per_token"
+]);
+
+export const SoulRecallHostContextSchema = z
+  .object({
+    tokenizer_hint: SoulRecallTokenizerHintSchema.optional(),
+    host_context_window: z.number().int().positive().optional()
+  })
+  .strict()
+  .readonly();
+
 export const SoulMemorySearchRequestSchema = z
   .object({
     query: BoundedQuerySchema,
@@ -73,7 +87,8 @@ export const SoulMemorySearchRequestSchema = z
     // the score function. `time_field` selects which timestamp the bounds apply to.
     since: IsoDatetimeStringSchema.nullable().optional(),
     until: IsoDatetimeStringSchema.nullable().optional(),
-    time_field: RecallTimeFieldSchema.optional()
+    time_field: RecallTimeFieldSchema.optional(),
+    host_context: SoulRecallHostContextSchema.optional()
   })
   .readonly();
 
@@ -395,6 +410,8 @@ export const SoulReportContextUsageResponseSchema = z
 export type MemorySearchResult = z.infer<typeof MemorySearchResultSchema>;
 export type SoulRecallStrategyMix = z.infer<typeof SoulRecallStrategyMixSchema>;
 export type SoulMemorySearchDegradationReason = z.infer<typeof SoulMemorySearchDegradationReasonSchema>;
+export type SoulRecallTokenizerHint = z.infer<typeof SoulRecallTokenizerHintSchema>;
+export type SoulRecallHostContext = z.infer<typeof SoulRecallHostContextSchema>;
 export type SoulMemorySearchRequest = z.infer<typeof SoulMemorySearchRequestSchema>;
 export type SoulMemorySearchResponse = z.infer<typeof SoulMemorySearchResponseSchema>;
 export type SoulOpenPointerRequest = z.infer<typeof SoulOpenPointerRequestSchema>;
