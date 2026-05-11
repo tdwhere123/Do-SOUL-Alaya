@@ -1,0 +1,1 @@
+Alaya has no conversation TUI; it exposes MCP and CLI memory surfaces only.

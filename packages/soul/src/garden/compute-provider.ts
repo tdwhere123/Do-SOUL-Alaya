@@ -8,6 +8,11 @@ import {
   type ConversationMessage
 } from "@do-soul/alaya-protocol";
 import { randomUUID } from "node:crypto";
+import {
+  SignalExtractorError,
+  createPiMonoExtractor,
+  type SignalExtractor
+} from "./pi-mono-extractor.js";
 
 export const GardenProviderKind = GardenProviderKinds;
 export type GardenProviderKind = GardenProviderKindValue;
@@ -30,11 +35,8 @@ interface OfficialApiGardenProviderDependencies {
   readonly apiKey?: string | null;
   readonly model?: string | null;
   readonly endpoint?: string | null;
-  readonly fetchImpl?: typeof fetch;
   readonly requestTimeoutMs?: number;
-  readonly createAbortController?: () => AbortController;
-  readonly setTimeoutImpl?: typeof setTimeout;
-  readonly clearTimeoutImpl?: typeof clearTimeout;
+  readonly extractor?: SignalExtractor;
   readonly now?: () => string;
   readonly generateSignalId?: () => string;
 }
@@ -58,10 +60,9 @@ export class GardenProviderError extends Error {
   }
 }
 
-const OFFICIAL_API_ENDPOINT = "https://api.openai.com/v1/chat/completions";
 const DEFAULT_OFFICIAL_API_REQUEST_TIMEOUT_MS = 10_000;
 export const OFFICIAL_API_GARDEN_MODEL = "gpt-4.1-mini";
-const OFFICIAL_API_SYSTEM_PROMPT = [
+export const OFFICIAL_API_SYSTEM_PROMPT = [
   "You extract candidate durable memory signals from a single operator turn.",
   'Return strict JSON only with shape {"signals":[...]} and no markdown.',
   'Each signal must include "signal_kind", "object_kind", "confidence", and "matched_text".',
@@ -73,24 +74,24 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
   public readonly provider_kind = GardenProviderKind.OFFICIAL_API;
   private readonly apiKey: string | null;
   private readonly model: string;
-  private readonly endpoint: string;
-  private readonly fetchImpl: typeof fetch;
+  private readonly endpoint: string | null;
   private readonly requestTimeoutMs: number;
-  private readonly createAbortController: () => AbortController;
-  private readonly setTimeoutImpl: typeof setTimeout;
-  private readonly clearTimeoutImpl: typeof clearTimeout;
+  private readonly extractor: SignalExtractor | null;
   private readonly now: () => string;
   private readonly generateSignalId: () => string;
 
   public constructor(deps: OfficialApiGardenProviderDependencies = {}) {
     this.apiKey = normalizeOptionalString(deps.apiKey ?? null);
     this.model = normalizeOptionalString(deps.model) ?? OFFICIAL_API_GARDEN_MODEL;
-    this.endpoint = normalizeOfficialApiEndpoint(deps.endpoint);
-    this.fetchImpl = deps.fetchImpl ?? fetch;
+    this.endpoint = normalizeOptionalString(deps.endpoint);
     this.requestTimeoutMs = normalizePositiveTimeoutMs(deps.requestTimeoutMs) ?? DEFAULT_OFFICIAL_API_REQUEST_TIMEOUT_MS;
-    this.createAbortController = deps.createAbortController ?? (() => new AbortController());
-    this.setTimeoutImpl = deps.setTimeoutImpl ?? setTimeout;
-    this.clearTimeoutImpl = deps.clearTimeoutImpl ?? clearTimeout;
+    this.extractor = deps.extractor ?? (this.apiKey === null
+      ? null
+      : createPiMonoExtractor({
+          apiKey: this.apiKey,
+          model: this.model,
+          ...(this.endpoint === null ? {} : { endpoint: this.endpoint })
+        }));
     this.now = deps.now ?? (() => new Date().toISOString());
     this.generateSignalId = deps.generateSignalId ?? (() => randomUUID());
   }
@@ -141,63 +142,33 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
     turnContent: string,
     context: GardenCompileContext
   ): Promise<readonly OfficialApiSignalDraft[]> {
-    let response: Response;
-    const abortController = this.createAbortController();
-    const timeoutHandle = this.setTimeoutImpl(() => {
-      abortController.abort();
-    }, this.requestTimeoutMs);
-
-    try {
-      response = await this.fetchImpl(this.endpoint, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${this.apiKey}`,
-          "content-type": "application/json"
-        },
-        signal: abortController.signal,
-        body: JSON.stringify({
-          model: this.model,
-          temperature: 0,
-          response_format: { type: "json_object" },
-          messages: [
-            {
-              role: "system",
-              content: OFFICIAL_API_SYSTEM_PROMPT
-            },
-            {
-              role: "user",
-              content: JSON.stringify({
-                workspace_id: context.workspace_id,
-                run_id: context.run_id,
-                surface_id: context.surface_id,
-                turn_content: turnContent,
-                turn_messages: context.turn_messages
-              })
-            }
-          ]
-        })
-      });
-    } catch (error) {
-      const message = abortController.signal.aborted
-        ? `Official garden provider request timed out after ${this.requestTimeoutMs}ms.`
-        : "Official garden provider request failed.";
-      throw new GardenProviderError(message, "network", {
-        cause: error
-      });
-    } finally {
-      this.clearTimeoutImpl(timeoutHandle);
-    }
-
-    if (!response.ok) {
-      throw new GardenProviderError(
-        `Official garden provider request failed with status ${response.status}.`,
-        response.status === 401 || response.status === 403 ? "auth" : "provider_failure"
-      );
+    if (this.extractor === null) {
+      throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
     }
 
     try {
-      return parseOfficialApiSignals(await readAssistantContent(response));
+      const response = await this.extractor.extract({
+        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+        userPrompt: JSON.stringify({
+          workspace_id: context.workspace_id,
+          run_id: context.run_id,
+          surface_id: context.surface_id,
+          turn_content: turnContent,
+          turn_messages: context.turn_messages
+        }),
+        timeoutMs: this.requestTimeoutMs
+      });
+      return parseOfficialApiSignals(response.rawJson);
     } catch (error) {
+      if (error instanceof SignalExtractorError) {
+        throw new GardenProviderError(
+          error.kind === "invalid_json"
+            ? "Official garden provider returned an invalid response."
+            : error.message,
+          error.kind === "invalid_json" ? "invalid_response" : "network",
+          { cause: error }
+        );
+      }
       throw new GardenProviderError("Official garden provider returned an invalid response.", "invalid_response", {
         cause: error
       });
@@ -225,33 +196,6 @@ export class LocalModelGardenProvider implements GardenComputeProvider {
       "provider_failure"
     );
   }
-}
-
-async function readAssistantContent(response: Response): Promise<string> {
-  const body = await response.json() as {
-    readonly choices?: ReadonlyArray<{
-      readonly message?: {
-        readonly content?: string | ReadonlyArray<{ readonly type?: string; readonly text?: string }>;
-      };
-    }>;
-  };
-  const content = body.choices?.[0]?.message?.content;
-
-  if (typeof content === "string") {
-    return content;
-  }
-
-  if (Array.isArray(content)) {
-    const text = content
-      .filter((part) => part.type === "text" && typeof part.text === "string")
-      .map((part) => part.text)
-      .join("");
-    if (text.length > 0) {
-      return text;
-    }
-  }
-
-  throw new Error("assistant content missing");
 }
 
 function parseOfficialApiSignals(content: string): readonly OfficialApiSignalDraft[] {
@@ -303,18 +247,6 @@ function normalizeOptionalString(value: unknown): string | null {
 
   const trimmed = value.trim();
   return trimmed.length === 0 ? null : trimmed;
-}
-
-function normalizeOfficialApiEndpoint(value: unknown): string {
-  const normalized = normalizeOptionalString(value);
-  if (normalized === null) {
-    return OFFICIAL_API_ENDPOINT;
-  }
-
-  const withoutTrailingSlash = normalized.replace(/\/+$/u, "");
-  return withoutTrailingSlash.endsWith("/chat/completions")
-    ? withoutTrailingSlash
-    : `${withoutTrailingSlash}/chat/completions`;
 }
 
 function normalizePositiveTimeoutMs(value: unknown): number | null {

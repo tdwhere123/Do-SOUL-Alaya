@@ -1,0 +1,1 @@
+Never store raw API keys in reports; use secret refs or describe the blocker.

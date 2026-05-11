@@ -329,64 +329,19 @@ describe("daemon tool runtime bootstrap", () => {
     );
   });
 
-  it("boots ConversationService with the compute-routing resolver and appends routing after stance resolution", async () => {
+  it("boots ConversationService with the compute-routing resolver and no legacy stance resolver", async () => {
     await bootDaemonRuntime();
 
-    const resolveExecutionStance = hoisted.conversationServiceDeps?.resolveExecutionStance as
-      | {
-          resolve(params: {
-            readonly workspaceId: string;
-            readonly runId: string;
-            readonly candidates: readonly [];
-            readonly modelRef: null;
-          }): Promise< unknown>;
-        }
-      | undefined;
-
-    expect(typeof resolveExecutionStance?.resolve).toBe("function");
-
-    hoisted.eventLogRepo.append.mockClear();
-    hoisted.computeRoutingRoute.mockClear();
-    hoisted.computeRoutingToModelRef.mockClear();
-    hoisted.stanceResolutionResolve.mockClear();
-
-    await resolveExecutionStance?.resolve({
-      workspaceId: "workspace-1",
-      runId: "run-1",
-      candidates: [],
-      modelRef: null
-    });
-
-    expect(hoisted.computeRoutingRoute).toHaveBeenCalledWith("workspace-1");
-    expect(hoisted.eventLogRepo.append).toHaveBeenCalledWith({
-      event_type: "compute.provider_routed",
-      entity_type: "compute_provider_route",
-      entity_id: "decision-1",
-      workspace_id: "workspace-1",
-      run_id: "run-1",
-      caused_by: "deterministic_rule",
-      payload_json: {
-        decision_id: "decision-1",
-        workspace_id: "workspace-1",
-        selected_provider: "stub",
-        model_id: "local-heuristics",
-        selection_reason: "stub selected as configured fallback compute provider",
-        decided_at: "2026-04-12T10:00:00.000Z"
+    expect(hoisted.conversationServiceDeps).toMatchObject({
+      gardenComputeProvider: expect.objectContaining({
+        provider_kind: "local_heuristics"
+      }),
+      resolveGardenComputeProvider: {
+        resolve: expect.any(Function)
       }
     });
-    expect(hoisted.stanceResolutionResolve).toHaveBeenCalledWith({
-      workspaceId: "workspace-1",
-      runId: "run-1",
-      candidates: [],
-      modelRef: {
-        provider: "stub",
-        model_id: "local-heuristics",
-        adapter: "garden.local_heuristics"
-      }
-    });
-    expect(hoisted.stanceResolutionResolve.mock.invocationCallOrder[0]).toBeLessThan(
-      hoisted.eventLogRepo.append.mock.invocationCallOrder[0]
-    );
+    expect(hoisted.conversationServiceDeps).not.toHaveProperty("engine");
+    expect(hoisted.conversationServiceDeps).not.toHaveProperty("resolveExecutionStance");
   });
 
   it("wires the official_api garden provider through bootstrap and routing without an ad-hoc model env surface", async () => {
@@ -397,17 +352,21 @@ describe("daemon tool runtime bootstrap", () => {
 
     await bootDaemonRuntime();
 
+    expect(hoisted.officialGardenProviderCtor).not.toHaveBeenCalled();
+    await expect(resolveBootGardenProvider()).resolves.toBe(hoisted.officialGardenProviderInstance);
     expect(hoisted.officialGardenProviderCtor).toHaveBeenCalledWith({
       apiKey: "sk-official",
       model: "gpt-4.1-mini"
     });
     expect(process.env.OPENAI_API_KEY).toBeUndefined();
-    expect(hoisted.conversationServiceDeps?.gardenComputeProvider).toBe(hoisted.officialGardenProviderInstance);
     expect(hoisted.computeRoutingServiceDeps).toMatchObject({
       providers: expect.arrayContaining([
         expect.objectContaining({
           kind: "official_api",
-          provider: hoisted.officialGardenProviderInstance,
+          provider: expect.objectContaining({
+            provider_kind: "official_api",
+            getProvider: expect.any(Function)
+          }),
           model_id: "gpt-4.1-mini",
           adapter: "garden.official_api"
         })
@@ -423,6 +382,8 @@ describe("daemon tool runtime bootstrap", () => {
 
     await bootDaemonRuntime();
 
+    expect(hoisted.officialGardenProviderCtor).not.toHaveBeenCalled();
+    await expect(resolveBootGardenProvider()).resolves.toBe(hoisted.officialGardenProviderInstance);
     expect(hoisted.officialGardenProviderCtor).toHaveBeenCalledWith({
       apiKey: "sk-dedicated-garden",
       model: "gpt-4.1-mini"
@@ -453,6 +414,8 @@ describe("daemon tool runtime bootstrap", () => {
 
     await bootDaemonRuntime();
 
+    expect(hoisted.officialGardenProviderCtor).not.toHaveBeenCalled();
+    await expect(resolveBootGardenProvider()).resolves.toBe(hoisted.officialGardenProviderInstance);
     expect(hoisted.officialGardenProviderCtor).toHaveBeenCalledWith({
       apiKey: "sk-config-file",
       model: "gpt-4.1-mini"
@@ -873,6 +836,19 @@ function createSnapshot(
     warning_active: false,
     ...overrides
   };
+}
+
+async function resolveBootGardenProvider(): Promise<unknown> {
+  const provider = hoisted.conversationServiceDeps?.gardenComputeProvider as
+    | { getProvider?: () => Promise<unknown> }
+    | undefined;
+  if (provider === undefined) {
+    throw new Error("ConversationService gardenComputeProvider was not wired.");
+  }
+  if (typeof provider.getProvider === "function") {
+    return await provider.getProvider();
+  }
+  return provider;
 }
 
 async function bootDaemonRuntime(): Promise<{ shutdown(): Promise<void>; startHttpServer(): Promise< unknown> }> {

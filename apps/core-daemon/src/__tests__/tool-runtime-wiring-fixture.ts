@@ -27,7 +27,7 @@ type MockMcpBridgeDeps = Readonly<{
 
 type MockConversationServiceDeps = Pick<
   ConversationServiceDependencies,
-  "contextLensAssembler" | "engine" | "gardenComputeProvider" | "resolveExecutionStance"
+  "contextLensAssembler" | "gardenComputeProvider" | "resolveGardenComputeProvider"
 >;
 
 const hoisted = vi.hoisted(() => {
@@ -543,6 +543,37 @@ const ORIGINAL_OPENAI_EMBEDDING_PROVIDER_URL = process.env.OPENAI_EMBEDDING_PROV
 const ORIGINAL_OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const ORIGINAL_OFFICIAL_GARDEN_MODEL = process.env.OFFICIAL_GARDEN_MODEL;
 
+async function readMockConfigEnv(): Promise<ReadonlyMap<string, string>> {
+  const configDir = process.env.ALAYA_CONFIG_DIR;
+  if (configDir === undefined || configDir.trim().length === 0) {
+    return new Map();
+  }
+  const { readFile } = await import("node:fs/promises");
+  const path = await import("node:path");
+  try {
+    const raw = await readFile(path.join(configDir, ".env"), "utf8");
+    return parseMockEnv(raw);
+  } catch {
+    return new Map();
+  }
+}
+
+function parseMockEnv(raw: string): ReadonlyMap<string, string> {
+  const values = new Map<string, string>();
+  for (const line of raw.split(/\r?\n/u)) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0 || trimmed.startsWith("#")) {
+      continue;
+    }
+    const equalsIndex = trimmed.indexOf("=");
+    if (equalsIndex < 1) {
+      continue;
+    }
+    values.set(trimmed.slice(0, equalsIndex), trimmed.slice(equalsIndex + 1).trim());
+  }
+  return values;
+}
+
 vi.mock("@do-soul/alaya-protocol", async () => {
   const actual = await vi.importActual<Record<string, unknown>>("@do-soul/alaya-protocol");
 
@@ -588,7 +619,46 @@ vi.mock("../orphan-query.js", () => ({
 }));
 
 vi.mock("../services/config-service.js", () => ({
-  createConfigService: vi.fn(() => ({}))
+  createConfigService: vi.fn(() => {
+    const getRuntimeGardenComputeConfig = vi.fn(async () => {
+      const envValues = await readMockConfigEnv();
+      const readValue = (key: string): string | null => {
+        const processValue = process.env[key]?.trim();
+        if (processValue !== undefined && processValue.length > 0) {
+          return processValue;
+        }
+        return envValues.get(key) ?? null;
+      };
+      const secretRefCandidates = [
+        ["ALAYA_OFFICIAL_GARDEN_SECRET_REF", readValue("ALAYA_OFFICIAL_GARDEN_SECRET_REF")],
+        ["ALAYA_GARDEN_OPENAI_SECRET_REF", readValue("ALAYA_GARDEN_OPENAI_SECRET_REF")],
+        ["ALAYA_OPENAI_SECRET_REF", readValue("ALAYA_OPENAI_SECRET_REF")]
+      ] as const;
+      const secretRefCandidate = secretRefCandidates.find(([, value]) => value !== null);
+      const secretRef = secretRefCandidate?.[1] ?? null;
+      if (
+        secretRefCandidate !== undefined &&
+        !/^env:[A-Za-z_][A-Za-z0-9_]*$/u.test(secretRef) &&
+        !/^file:\/.+/u.test(secretRef)
+      ) {
+        throw new Error(`${secretRefCandidate[0]} secret_ref must use "env:NAME" or "file:/path".`);
+      }
+      return {
+        provider_kind: secretRef === null ? "local_heuristics" : "official_api",
+        provider_url: readValue("OFFICIAL_API_GARDEN_PROVIDER_URL"),
+        secret_ref: secretRef,
+        model_id: readValue("OFFICIAL_API_GARDEN_MODEL") ?? "gpt-4.1-mini",
+        enabled: secretRef !== null
+      };
+    });
+    return {
+      getRuntimeGardenComputeConfig,
+      patchRuntimeGardenComputeConfig: vi.fn(async (patch: Record<string, unknown>) => ({
+        ...(await getRuntimeGardenComputeConfig()),
+        ...patch
+      }))
+    };
+  })
 }));
 
 vi.mock("../services/environment-status-service.js", () => ({

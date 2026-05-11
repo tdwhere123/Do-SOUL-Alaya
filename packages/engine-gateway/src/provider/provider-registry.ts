@@ -4,17 +4,6 @@ import {
   type EngineBinding
 } from "@do-soul/alaya-protocol";
 
-export const providerAdaptersDeferredMessage =
-  "Engine provider adapters are deferred to #BL-008.";
-
-export function resolveLanguageModel(
-  _binding: EngineBinding,
-  _getEnv: (key: string) => string | undefined = (key) => process.env[key],
-  _apiKeyOverride?: string
-): never {
-  throw new EngineError(providerAdaptersDeferredMessage, EngineErrorKind.MODEL_ERROR);
-}
-
 export function readApiKey(
   binding: EngineBinding,
   getEnv: (key: string) => string | undefined = (key) => process.env[key]

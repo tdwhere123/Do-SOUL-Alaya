@@ -42,6 +42,13 @@ export {
   type GardenComputeProvider
 } from "./compute-provider.js";
 export {
+  SignalExtractorError,
+  createPiMonoExtractor,
+  type PiMonoExtractorDependencies,
+  type SignalExtractor,
+  type SignalExtractorErrorKind
+} from "./pi-mono-extractor.js";
+export {
   DEGRADATION_CONSTANTS,
   DegradationPipeline,
   type DegradationAssessParams,

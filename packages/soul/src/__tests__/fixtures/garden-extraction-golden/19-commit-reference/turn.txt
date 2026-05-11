@@ -1,0 +1,1 @@
+See commit abc123 for the migration that proves the queue CAS behavior.

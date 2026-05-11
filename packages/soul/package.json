@@ -22,6 +22,7 @@
     "test": "pnpm exec vitest run --project @do-soul/alaya-soul"
   },
   "dependencies": {
-    "@do-soul/alaya-protocol": "workspace:*"
+    "@do-soul/alaya-protocol": "workspace:*",
+    "@earendil-works/pi-ai": "0.74.0"
   }
 }

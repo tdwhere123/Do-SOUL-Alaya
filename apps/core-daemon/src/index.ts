@@ -1,6 +1,10 @@
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ComputeProviderPriority, HealthEventKind } from "@do-soul/alaya-protocol";
+import {
+  ComputeProviderPriority,
+  HealthEventKind,
+  type RuntimeGardenComputeConfig
+} from "@do-soul/alaya-protocol";
 import {
   ArbitrationService,
   BudgetBankruptcyService,
@@ -26,7 +30,6 @@ import {
   SessionOverrideService,
   SignalService,
   SlotService,
-  StanceResolutionService,
   StrongRefService,
   SurfaceBindingService,
   SurfaceDriftService,
@@ -102,17 +105,14 @@ import { createCoreDaemonApp } from "./daemon-app-composition.js";
 import { createDaemonEmbeddingRuntime } from "./daemon-embedding-runtime.js";
 import { createDaemonMcpMemoryToolHandler } from "./daemon-mcp-memory-handler.js";
 import { createBudgetProposalPort } from "./budget-wiring.js";
-import { createComputeRoutingExecutionStanceResolver } from "./compute-routing-resolver.js";
 import { defaultBootstrappingTemplates, defaultCanonicalAliasMap } from "./daemon-defaults.js";
 import { bootstrapDaemonMcpTooling } from "./daemon-mcp-tooling.js";
 import {
-  createStancePolicyProvider,
   createTargetCurrencyCheckPort,
   createWarnLogger
 } from "./daemon-runtime-helpers.js";
 import { createCoreDaemonLifecycleState, createDaemonLifecycleControls } from "./daemon-runtime-lifecycle.js";
 import {
-  createAlayaConversationEngine,
   createConversationToolExecutor,
   createEngineBindingTester,
   createGardenBacklogThresholds,
@@ -125,18 +125,16 @@ import {
   createRequestProtection,
   createSoulGraphService,
   createUnavailableRuntimeAdapter,
-    listServerHardConstraints,
-    loadConfigEnv,
-    patchArbitrationClaimService,
-    readOfficialGardenModelId,
-    readOfficialGardenProviderUrl,
-    recordStartupStep,
-    resolveDatabasePath
-  } from "./daemon-runtime-support.js";
+  listServerHardConstraints,
+  loadConfigEnv,
+  patchArbitrationClaimService,
+  recordStartupStep,
+  resolveDatabasePath
+} from "./daemon-runtime-support.js";
 import { resolveAlayaConfigDir, resolveAlayaConfigPaths, type AlayaConfigPaths } from "./cli/config-files.js";
 import { resolveCoreDaemonFilesDirectory } from "./files-data-dir.js";
 import { createGardenRuntime } from "./garden-runtime.js";
-import { resolveGardenOpenAiCredential } from "./garden-credential.js";
+import { resolveSecretRef, type ResolveSecretError } from "./secrets.js";
 import {
   createPathPlasticityService,
   createRecallPathPlasticityPort
@@ -150,6 +148,7 @@ import { createSecurityStatusBootstrapServices } from "./security-status-bootstr
 import { isRemoteDaemonOptInEnabled } from "./server-options.js";
 import { createConfigService } from "./services/config-service.js";
 import { createEnvironmentStatusService } from "./services/environment-status-service.js";
+import { GardenComputeProviderResolver } from "./services/garden-compute-provider-resolver.js";
 import {
   CORE_DAEMON_ENVIRONMENT_TOOLS,
   derivePrincipalCodingAvailability
@@ -173,9 +172,6 @@ export type { AlayaDaemonListenOptions, AlayaDaemonRuntime, AlayaDaemonRuntimeSe
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..", "..");
 const DEFAULT_GARDEN_STATUS_WORKSPACE_ID = "default";
-const EMBEDDING_SECRET_GARDEN_FALLBACK_WARNING =
-  "[ALAYA] DEPRECATED: ALAYA_OPENAI_SECRET_REF used as Garden compute key. Set ALAYA_OFFICIAL_GARDEN_SECRET_REF for v0.2 compatibility.";
-let embeddingSecretGardenFallbackWarningEmitted = false;
 
 export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const startupSteps: DaemonStartupStepRecord[] = [];
@@ -269,7 +265,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     pathRelationRepo,
     bootstrappingRecordRepo
   });
-  const configService = createConfigService({
+  const rawConfigService = createConfigService({
     configRepo,
     eventPublisher,
     configPathsProvider: () => configPaths
@@ -554,35 +550,41 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
         derivedFrom: params.derivedFrom
       })
   });
-  const stancePolicyProvider = createStancePolicyProvider(configRepo);
   const localHeuristicsProvider = new LocalHeuristics();
-  const gardenCredential = resolveGardenOpenAiCredential({ configEnv });
-  const officialGardenApiKey =
-    gardenCredential.provenance.kind === "embedding-fallback"
-      ? maybeUseDeprecatedEmbeddingSecretForGarden(gardenCredential.apiKey)
-      : gardenCredential.apiKey;
-  const officialGardenModelId = readOfficialGardenModelId(configEnv) ?? OFFICIAL_API_GARDEN_MODEL;
-  const officialGardenProviderUrl = readOfficialGardenProviderUrl(configEnv);
-  const officialGardenProvider =
-    officialGardenApiKey === null
-      ? null
-      : new OfficialApiGardenProvider({
-          apiKey: officialGardenApiKey,
-          model: officialGardenModelId,
-          endpoint: officialGardenProviderUrl ?? undefined
-        });
+  const gardenComputeProviderResolver = new GardenComputeProviderResolver({
+    configReader: rawConfigService,
+    fallbackProvider: localHeuristicsProvider,
+    secretReader: resolveGardenSecretRefValue,
+    makeProvider: ({ apiKey, model, endpoint }) =>
+      new OfficialApiGardenProvider({
+        apiKey,
+        model,
+        ...(endpoint === null ? {} : { endpoint })
+      })
+  });
+  const configService = {
+    ...rawConfigService,
+    patchRuntimeGardenComputeConfig: async (patch: unknown) => {
+      const config = await rawConfigService.patchRuntimeGardenComputeConfig(patch);
+      gardenComputeProviderResolver.invalidate();
+      return config;
+    }
+  } satisfies typeof rawConfigService;
+  const officialGardenProvider = gardenComputeProviderResolver;
+  const initialGardenComputeConfig = await rawConfigService.getRuntimeGardenComputeConfig();
+  const initialOfficialGardenProviderAvailable = canResolveInitialOfficialGardenProvider(initialGardenComputeConfig);
   const computeRoutingService = new ComputeRoutingService({
     providers: [
-      ...(officialGardenProvider === null
-        ? []
-        : [
+      ...(initialOfficialGardenProviderAvailable
+        ? [
             {
               kind: ComputeProviderPriority.OFFICIAL_API,
               provider: officialGardenProvider,
-              model_id: officialGardenModelId,
+              model_id: initialGardenComputeConfig.model_id ?? OFFICIAL_API_GARDEN_MODEL,
               adapter: "garden.official_api"
-            } as const
-          ]),
+            }
+          ]
+        : []),
       {
         kind: ComputeProviderPriority.STUB,
         provider: localHeuristicsProvider,
@@ -592,20 +594,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     ]
   });
   const gardenComputeProvider = computeRoutingService.getDefaultProvider();
-  const stanceResolutionService = new StanceResolutionService({
-    stancePolicyProvider,
-    eventLogWriter: eventLogRepo
-  });
-  const resolveExecutionStance = createComputeRoutingExecutionStanceResolver({
-    computeRoutingService,
-    eventLogWriter: eventLogRepo,
-    stanceResolutionService
-  });
-  const conversationEngine = createAlayaConversationEngine();
   const conversationServiceDependencies = {
-    engine: conversationEngine,
-    eventPublisher,
-    runHotStateService,
     runRepo,
     workspaceRepo,
     eventLogRepo,
@@ -616,14 +605,11 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     signalReceiver: signalService,
     contextLensAssembler: conversationContextLensAssembler,
     governanceLeaseService,
-    resolveExecutionStance,
     budgetBankruptcyService,
     healthJournalRecorder: healthJournalService,
     warn: warnLogger.warn
-  } satisfies ConversationServiceDependencies & Record<string, unknown>;
-  const conversationService = new ConversationService(
-    conversationServiceDependencies as ConversationServiceDependencies
-  );
+  } satisfies ConversationServiceDependencies;
+  const conversationService = new ConversationService(conversationServiceDependencies);
   const runService = new RunService({
     workspaceRepo,
     runRepo,
@@ -889,17 +875,45 @@ async function resolvePersistedGardenLastPassAt(input: {
   }
 }
 
-function maybeUseDeprecatedEmbeddingSecretForGarden(embeddingApiKey: string | null): string | null {
-  if (embeddingApiKey === null) {
-    return null;
+function resolveGardenSecretRefValue(secretRef: string): string {
+  const resolved = resolveSecretRef(secretRef);
+  if (!("kind" in resolved)) {
+    return resolved.value;
   }
 
-  if (!embeddingSecretGardenFallbackWarningEmitted) {
-    process.stderr.write(`${EMBEDDING_SECRET_GARDEN_FALLBACK_WARNING}\n`);
-    embeddingSecretGardenFallbackWarningEmitted = true;
+  throw new Error(formatGardenSecretRefError(resolved));
+}
+
+function canResolveInitialOfficialGardenProvider(config: RuntimeGardenComputeConfig): boolean {
+  if (
+    config.provider_kind !== "official_api" ||
+    !config.enabled ||
+    config.secret_ref === null
+  ) {
+    return false;
   }
 
-  return embeddingApiKey;
+  try {
+    resolveGardenSecretRefValue(config.secret_ref);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function formatGardenSecretRefError(error: ResolveSecretError): string {
+  switch (error.kind) {
+    case "malformed":
+      return `Garden compute secret_ref ${error.ref} is malformed: ${error.reason}`;
+    case "empty":
+      return `Garden compute secret_ref ${error.ref} resolved to an empty ${error.origin} secret.`;
+    case "env_missing":
+      return `Garden compute secret_ref ${error.ref} is missing environment variable ${error.var_name}.`;
+    case "file_missing":
+      return `Garden compute secret_ref ${error.ref} is missing file ${error.path}.`;
+    case "file_unreadable":
+      return `Garden compute secret_ref ${error.ref} file ${error.path} is unreadable.`;
+  }
 }
 
 export async function startDaemon(options: AlayaDaemonListenOptions = {}): Promise<AlayaDaemonServer> {
