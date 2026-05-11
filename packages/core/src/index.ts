@@ -65,7 +65,6 @@ export * from "./shared/validated-activation-candidates.js";
 export * from "./shared/validators.js";
 export * from "./signal-service.js";
 export * from "./slot-service.js";
-export * from "./stance-resolution-service.js";
 export * from "./strong-ref-service.js";
 export * from "./surface-binding-service.js";
 export * from "./surface-drift-service.js";

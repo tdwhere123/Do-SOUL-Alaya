@@ -125,8 +125,7 @@ describe("mcp memory tool handler", () => {
         domain_tags: null,
         max_results: 3,
         host_context: {
-          tokenizer_hint: "cl100k",
-          host_context_window: 128000
+          tokenizer_hint: "cl100k"
         }
       },
       context
@@ -135,8 +134,7 @@ describe("mcp memory tool handler", () => {
     expect(deps.recallService.recall).toHaveBeenCalledWith(
       expect.objectContaining({
         hostContext: {
-          tokenizer_hint: "cl100k",
-          host_context_window: 128000
+          tokenizer_hint: "cl100k"
         }
       })
     );

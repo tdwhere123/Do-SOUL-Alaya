@@ -495,6 +495,52 @@ describe("cli inspect", () => {
     expect(out).toContain("--workspace");
   });
 
+  it("auto-selects the workspace whose repo path matches the current directory", async () => {
+    const child = new FakeInspectorChild();
+    const stdout = new PassThrough();
+    const stdoutChunks: string[] = [];
+    stdout.on("data", (chunk) => stdoutChunks.push(chunk.toString()));
+    const stderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
+    const spawnInspector = vi.fn(() => child);
+    const command = createInspectCommand({
+      checkPortAvailable: async () => true,
+      generateToken: () => "a".repeat(64),
+      startDaemonServer: async () => fakeDaemonServer(),
+      spawnInspector,
+      listWorkspaces: async () => [
+        {
+          workspace_id: "ws-alpha",
+          name: "Alpha",
+          repo_path: "/tmp/alpha",
+          workspace_state: "active"
+        },
+        {
+          workspace_id: "ws-beta",
+          name: "Beta",
+          repo_path: "/tmp/beta",
+          workspace_state: "active"
+        }
+      ]
+    });
+
+    const promise = command.handler(createContext({ cwd: "/tmp/beta", stdout, stderr }), {
+      open: false,
+      port: 5174,
+      token: null,
+      workspace: null
+    });
+    setTimeout(() => child.stdout.write("inspector_ready\n"), 0);
+    setTimeout(() => child.emitExit(0, null), 10);
+    const result = await promise;
+
+    expect(result.exitCode).toBe(0);
+    expect(spawnInspector).toHaveBeenCalledTimes(1);
+    expect(stdoutChunks.join("")).toContain("workspaceId=ws-beta");
+    expect(stderrChunks.join("")).toContain("using workspace ws-beta");
+  });
+
   it("surfaces listWorkspaces failures as SOFTWARE exit with the daemon error", async () => {
     const stderr = new PassThrough();
     const stderrChunks: string[] = [];

@@ -63,7 +63,7 @@ soul:mcp-types.ts#SoulExploreGraphResponseSchema(count,neighbors,source_memory_i
 soul:mcp-types.ts#SoulListPendingProposalsRequestSchema(limit,since)#f6ed9a7
 soul:mcp-types.ts#SoulListPendingProposalsResponseSchema(proposals,total_count)#887900d
 soul:mcp-types.ts#SoulMemorySearchDegradationReasonSchema()#a8fdf75|enum=cold_cascade_engaged|recall_explainability_partial|warm_cascade_engaged
-soul:mcp-types.ts#SoulMemorySearchRequestSchema(dimension,domain_tags,host_context,max_results,query,scope_class,since,time_field,until)#f6d775c
+soul:mcp-types.ts#SoulMemorySearchRequestSchema(dimension,domain_tags,host_context,max_results,query,scope_class,since,time_field,until)#dd46e10
 soul:mcp-types.ts#SoulMemorySearchResponseSchema(degradation_reason,delivery_id,results,strategy_mix,total_count)#cdfd7c9
 soul:mcp-types.ts#SoulOpenPointerContentSchema(content,domain_tags,evidence_refs,object_id,object_kind,schema_version)#1babe96
 soul:mcp-types.ts#SoulOpenPointerRequestSchema(object_id)#a961e8f
@@ -71,7 +71,7 @@ soul:mcp-types.ts#SoulOpenPointerResponseSchema(content,object_id,object_kind)#7
 soul:mcp-types.ts#SoulPendingProposalSummarySchema(assigned_at,assigned_reviewer_identity,created_at,deadline_at,is_overdue,proposal_id,proposed_change_summary,proposed_changes,target_object_id,target_object_kind)#c39d462
 soul:mcp-types.ts#SoulProposeMemoryUpdateRequestSchema(proposed_changes,reason,source_delivery_ids,target_object_id)#08a46eb
 soul:mcp-types.ts#SoulProposeMemoryUpdateResponseSchema(proposal_id,status)#cde6898
-soul:mcp-types.ts#SoulRecallHostContextSchema(host_context_window,tokenizer_hint)#a6262fe
+soul:mcp-types.ts#SoulRecallHostContextSchema(tokenizer_hint)#ef47782
 soul:mcp-types.ts#SoulRecallStrategyMixSchema(deterministic_match,global_recall,graph_support,path_plasticity,precomputed_rank,semantic_supplement)#7106699
 soul:mcp-types.ts#SoulRecallTokenizerHintSchema()#fc878ed|enum=approx_chars_per_token|cl100k|o200k
 soul:mcp-types.ts#SoulReportContextUsageRequestSchema(delivered_objects,delivery_id,per_anchor_usage,reason,turn_digest,turn_index,usage_state,used_object_ids)#dfccee7

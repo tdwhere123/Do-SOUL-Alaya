@@ -250,6 +250,33 @@ describe("ConversationService", () => {
     );
   });
 
+  it("re-resolves the current default Garden provider when the requested model ref does not match", async () => {
+    const currentDefaultProvider = {
+      provider_kind: "official_api" as const,
+      compile: vi.fn(async () => [])
+    };
+    const resolve = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(currentDefaultProvider);
+    const { service, dependencies } = createService({
+      resolveGardenComputeProvider: { resolve }
+    });
+
+    await service.orchestrateMemoryTurn({
+      runId: "run-1",
+      userMessage: createMessage("msg-user", "user", "remember this"),
+      assistantMessage: createMessage("msg-assistant", "assistant", "noted"),
+      modelRef: { provider: "openai", model_id: "stale-model" }
+    });
+    await flushBackgroundTasks();
+
+    expect(resolve).toHaveBeenNthCalledWith(1, { provider: "openai", model_id: "stale-model" });
+    expect(resolve).toHaveBeenNthCalledWith(2, null);
+    expect(currentDefaultProvider.compile).toHaveBeenCalledTimes(1);
+    expect(dependencies.gardenComputeProvider.compile).not.toHaveBeenCalled();
+  });
+
   it("conversation lists stored messages without executing a chat turn", async () => {
     const eventLogRepo = {
       queryByRun: vi.fn(async () => [

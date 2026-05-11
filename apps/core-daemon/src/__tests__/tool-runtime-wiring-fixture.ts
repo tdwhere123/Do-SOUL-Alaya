@@ -356,20 +356,6 @@ const hoisted = vi.hoisted(() => {
       setProviders
     };
   });
-  const stanceResolutionResolve = vi.fn(async () => ({
-    resolution_id: "resolution-1",
-    workspace_id: "workspace-1",
-    run_id: "run-1",
-    verification_attention: "standard",
-    conservatism: "balanced",
-    contributing_candidate_ids: [],
-    model_ref: {
-      provider: "stub",
-      model_id: "local-heuristics",
-      adapter: "garden.local_heuristics"
-    },
-    resolved_at: "2026-04-12T10:00:00.000Z"
-  }));
   const extensionProviders: Readonly<ToolProvider>[] = [];
   const runtimeConversationToolSpecs = [...conversationToolSpecs];
   const resetRuntimeConversationToolSpecs = () => {
@@ -473,7 +459,6 @@ const hoisted = vi.hoisted(() => {
     computeRoutingServiceCtor,
     computeRoutingServiceDeps: null as null | Record<string, unknown>,
     computeRoutingServiceSetProviders: null as null | ReturnType<typeof vi.fn>,
-    stanceResolutionResolve,
     createApp: vi.fn(() => ({ fetch: vi.fn() })),
     createEnvironmentStatusService: vi.fn(() => ({
       getStatus: vi.fn(async () => ({
@@ -1020,9 +1005,6 @@ vi.mock("@do-soul/alaya-core", () => {
     SlashCommandService: makeClass(),
     SlotService: makeClass(),
     SqliteKarmaEventStore: makeClass(),
-    StanceResolutionService: makeClass({
-      resolve: hoisted.stanceResolutionResolve
-    }),
     SurfaceBindingService: makeClass(),
     SurfaceService: makeClass(),
     SynthesisService: makeClass(),

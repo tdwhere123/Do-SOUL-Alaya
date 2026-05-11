@@ -590,8 +590,13 @@ export class ConversationService {
     modelRef: Readonly<ExecutionStanceModelRef> | null
   ): Promise<ConversationGardenComputeProviderPort> {
     const resolvedProvider = (await this.dependencies.resolveGardenComputeProvider?.resolve(modelRef)) ?? null;
+    if (resolvedProvider !== null) {
+      return resolvedProvider;
+    }
 
-    return resolvedProvider ?? this.dependencies.gardenComputeProvider;
+    const currentDefaultProvider =
+      (await this.dependencies.resolveGardenComputeProvider?.resolve(null)) ?? null;
+    return currentDefaultProvider ?? this.dependencies.gardenComputeProvider;
   }
 
   private async releaseGovernanceLeaseSafely(runId: string, workspaceId: string, phase: string): Promise<void> {

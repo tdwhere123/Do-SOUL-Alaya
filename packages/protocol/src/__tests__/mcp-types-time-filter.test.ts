@@ -59,15 +59,20 @@ describe("SoulMemorySearchRequestSchema time-filter fields", () => {
     const parsed = SoulMemorySearchRequestSchema.parse({
       ...baseRequest,
       host_context: {
-        tokenizer_hint: "cl100k",
-        host_context_window: 200000
+        tokenizer_hint: "cl100k"
       }
     });
 
     expect(parsed.host_context).toEqual({
-      tokenizer_hint: "cl100k",
-      host_context_window: 200000
+      tokenizer_hint: "cl100k"
     });
+
+    expect(
+      SoulMemorySearchRequestSchema.safeParse({
+        ...baseRequest,
+        host_context: { tokenizer_hint: "cl100k", host_context_window: 200000 }
+      }).success
+    ).toBe(false);
   });
 
   it("rejects unknown tokenizer hints and publishes host_context in the MCP catalog schema", () => {

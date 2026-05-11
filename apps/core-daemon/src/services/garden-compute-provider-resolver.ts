@@ -24,11 +24,18 @@ export interface GardenComputeProviderResolverDependencies {
 }
 
 export class GardenComputeProviderResolver implements GardenComputeProvider {
-  public readonly provider_kind = GardenProviderKind.OFFICIAL_API;
   private cachedKey: string | null = null;
   private cachedProvider: GardenComputeProvider | null = null;
+  // Starts at the resolver's nominal kind; getProvider() corrects it to the kind it
+  // actually resolved, so a compute-routing tie-breaker on provider.provider_kind does
+  // not see OFFICIAL_API while the resolver is serving the local-heuristics fallback.
+  private lastResolvedKind: GardenProviderKind = GardenProviderKind.OFFICIAL_API;
 
   public constructor(private readonly deps: GardenComputeProviderResolverDependencies) {}
+
+  public get provider_kind(): GardenProviderKind {
+    return this.lastResolvedKind;
+  }
 
   public async getProvider(): Promise<GardenComputeProvider> {
     const config = await this.deps.configReader.getRuntimeGardenComputeConfig();
@@ -38,6 +45,7 @@ export class GardenComputeProviderResolver implements GardenComputeProvider {
       config.secret_ref === null
     ) {
       if (this.deps.fallbackProvider !== undefined) {
+        this.lastResolvedKind = this.deps.fallbackProvider.provider_kind;
         return this.deps.fallbackProvider;
       }
       throw new GardenProviderError("Official garden provider is not enabled.", "auth");
@@ -52,6 +60,7 @@ export class GardenComputeProviderResolver implements GardenComputeProvider {
     });
 
     if (this.cachedKey === cacheKey && this.cachedProvider !== null) {
+      this.lastResolvedKind = this.cachedProvider.provider_kind;
       return this.cachedProvider;
     }
 
@@ -59,6 +68,7 @@ export class GardenComputeProviderResolver implements GardenComputeProvider {
     const provider = this.deps.makeProvider({ apiKey, model, endpoint });
     this.cachedKey = cacheKey;
     this.cachedProvider = provider;
+    this.lastResolvedKind = provider.provider_kind;
     return provider;
   }
 

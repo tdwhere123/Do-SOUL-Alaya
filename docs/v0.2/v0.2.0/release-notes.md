@@ -18,6 +18,15 @@ smoke is recorded in `task-cards/reports/v0.2.0-slice-3.md`.
   lazily resolves the current `RuntimeGardenComputeConfig.secret_ref`,
   rebuilds official providers after config or secret changes, and is
   reinserted into compute routing after runtime Garden compute PATCH.
+  Its `provider_kind` mirrors the provider it actually resolved (so it
+  does not advertise `OFFICIAL_API` while serving the local-heuristics
+  fallback), and `ConversationService` re-resolves the current default
+  routing candidate when a stale model ref does not match — both follow
+  a hot config PATCH without a daemon restart.
+- The unused post-`ConversationProvider`-retirement stance/routing code
+  (`compute-routing-resolver.ts`, `stance-resolution-service.ts`,
+  `createStancePolicyProvider`) was removed; none had a production
+  caller.
 - `parseOfficialApiSignals` and the pi-mono extractor bound the
   official-provider response: at most 64 signals, length-clamped
   `object_kind` / `matched_text` / `reason`, and a response body over
@@ -40,8 +49,10 @@ smoke is recorded in `task-cards/reports/v0.2.0-slice-3.md`.
 - `BudgetSnapshot.pressure_ratio` is additive and defaulted for old
   payloads; SOFT budget penalty now follows a graduated pressure curve
   instead of a fixed constant.
-- `soul.recall` accepts optional `host_context.tokenizer_hint`, and
-  recall/context-lens token estimation uses a per-call estimator.
+- `soul.recall` accepts an optional `host_context.tokenizer_hint`, and
+  recall/context-lens token estimation uses a per-call estimator. (The
+  schema carries `tokenizer_hint` only — an unused `host_context_window`
+  field that briefly existed pre-release was dropped.)
 - `RecallPolicy.domain_weight_overrides` can override activation
   weights by deterministic domain-tag match; recall results expose
   `RecallScoreFactors.resolved_activation_weights` for auditability.
@@ -57,6 +68,16 @@ smoke is recorded in `task-cards/reports/v0.2.0-slice-3.md`.
   workers cannot smuggle recall anchors.
 - The daemon integration proof for the loop uses EventLog payload data
   and SQLite JSON membership over `source_delivery_ids`.
+- `source_delivery_ids` arrays are bounded to at most 32 anchors so a
+  single MCP call cannot fan out into an unbounded delivery-lookup
+  sequence.
+
+## CLI
+
+- `alaya inspect` auto-selects the workspace whose registered
+  `repo_path` resolves to the current directory when several workspaces
+  are active; it still lists candidates and asks for `--workspace <id>`
+  when zero or more than one match.
 
 ## SemVer Contract
 

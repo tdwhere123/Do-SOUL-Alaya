@@ -91,7 +91,7 @@ const MemoryGovernanceObjectPayloadObjectSchema = z.object({
 });
 
 const TransitionEventPayloadObjectSchema = MemoryGovernanceObjectPayloadObjectSchema.merge(TransitionRecordObjectSchema);
-const SourceDeliveryIdsSchema = z.array(NonEmptyStringSchema).min(1).readonly();
+const SourceDeliveryIdsSchema = z.array(NonEmptyStringSchema).min(1).max(32).readonly();
 
 export const SoulEvidenceCreatedPayloadSchema = MemoryGovernanceObjectPayloadObjectSchema.readonly();
 export const SoulEvidenceHealthChangedPayloadSchema = TransitionEventPayloadObjectSchema.readonly();

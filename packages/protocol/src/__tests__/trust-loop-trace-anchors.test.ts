@@ -175,4 +175,36 @@ describe("Trustworthy Loop source_delivery_ids protocol contracts", () => {
       }).success
     ).toBe(false);
   });
+
+  it("bounds source_delivery_ids arrays to at most 32 anchors", () => {
+    const within = Array.from({ length: 32 }, (_, index) => `delivery-${index + 1}`);
+    const tooMany = Array.from({ length: 33 }, (_, index) => `delivery-${index + 1}`);
+
+    expect(
+      SoulSignalEmittedPayloadSchema.safeParse({ ...signalPayloadBase, source_delivery_ids: within }).success
+    ).toBe(true);
+    expect(
+      SoulSignalEmittedPayloadSchema.safeParse({ ...signalPayloadBase, source_delivery_ids: tooMany }).success
+    ).toBe(false);
+    expect(
+      SoulProposalCreatedPayloadSchema.safeParse({
+        ...proposalCreatedPayloadBase,
+        source_delivery_ids: tooMany
+      }).success
+    ).toBe(false);
+    expect(
+      SoulEmitCandidateSignalRequestSchema.safeParse({
+        ...candidateContentBase,
+        source_delivery_ids: tooMany
+      }).success
+    ).toBe(false);
+    expect(
+      SoulProposeMemoryUpdateRequestSchema.safeParse({
+        target_object_id: "memory-1",
+        proposed_changes: { content: "Use pnpm." },
+        reason: "Observed in current run.",
+        source_delivery_ids: tooMany
+      }).success
+    ).toBe(false);
+  });
 });

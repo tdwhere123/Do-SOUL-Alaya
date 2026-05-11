@@ -70,7 +70,7 @@ const ConfidenceSchema = z.number().min(0).max(1);
 const DomainTagsSchema = z.array(NonEmptyStringSchema).readonly();
 const EvidenceRefsSchema = z.array(NonEmptyStringSchema).readonly();
 const RawPayloadSchema = z.record(z.unknown()).readonly();
-const SourceDeliveryIdsSchema = z.array(NonEmptyStringSchema).min(1).readonly();
+const SourceDeliveryIdsSchema = z.array(NonEmptyStringSchema).min(1).max(32).readonly();
 
 export const CandidateMemorySignalSchema = z.object({
   signal_id: NonEmptyStringSchema,

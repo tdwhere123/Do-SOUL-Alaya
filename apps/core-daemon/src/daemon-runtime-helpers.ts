@@ -1,7 +1,5 @@
 import {
-  ExecutionStancePolicySchema,
   ManifestationBudgetConfigSchema,
-  type ExecutionStancePolicy,
   type ManifestationBudgetConfig
 } from "@do-soul/alaya-protocol";
 
@@ -25,18 +23,6 @@ export function createWarnLogger(): WarnLogger {
   return Object.freeze({
     warn: (message: string, meta: Record<string, unknown>) => {
       console.warn(message, meta);
-    }
-  });
-}
-
-export function createStancePolicyProvider(configRepo: ConfigRepoPort): Readonly<{
-  getPolicy(workspaceId: string): Promise<Readonly<ExecutionStancePolicy> | null>;
-}> {
-  return Object.freeze({
-    getPolicy: async (workspaceId: string): Promise<Readonly<ExecutionStancePolicy> | null> => {
-      const configKey = `workspace:${workspaceId}:stance_policy`;
-      const rawPolicy = await configRepo.get<ExecutionStancePolicy>(configKey);
-      return rawPolicy === null ? null : ExecutionStancePolicySchema.parse(rawPolicy);
     }
   });
 }

@@ -91,6 +91,37 @@ describe("GardenComputeProviderResolver", () => {
     });
     expect(makeProvider).toHaveBeenCalledTimes(1);
   });
+
+  it("reports provider_kind of the provider it currently serves", async () => {
+    const fallbackProvider: GardenComputeProvider = {
+      provider_kind: GardenProviderKind.LOCAL_HEURISTICS,
+      compile: vi.fn(async () => [])
+    };
+    let config: RuntimeGardenComputeConfig = {
+      provider_kind: "local_heuristics",
+      provider_url: null,
+      secret_ref: null,
+      model_id: null,
+      enabled: false
+    };
+    const resolver = new GardenComputeProviderResolver({
+      configReader: { getRuntimeGardenComputeConfig: async () => config },
+      fallbackProvider,
+      secretReader: vi.fn(() => "sk-one"),
+      makeProvider: vi.fn(() => createProvider("official"))
+    });
+
+    expect(resolver.provider_kind).toBe(GardenProviderKind.OFFICIAL_API);
+    await expect(resolver.getProvider()).resolves.toBe(fallbackProvider);
+    expect(resolver.provider_kind).toBe(GardenProviderKind.LOCAL_HEURISTICS);
+
+    config = createOfficialConfig({ secret_ref: "env:GARDEN_KEY" });
+    resolver.invalidate();
+    await expect(resolver.getProvider()).resolves.toMatchObject({
+      provider_kind: GardenProviderKind.OFFICIAL_API
+    });
+    expect(resolver.provider_kind).toBe(GardenProviderKind.OFFICIAL_API);
+  });
 });
 
 function createConfigReader(config: RuntimeGardenComputeConfig): {

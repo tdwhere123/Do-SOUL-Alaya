@@ -70,8 +70,7 @@ export const SoulRecallTokenizerHintSchema = z.enum([
 
 export const SoulRecallHostContextSchema = z
   .object({
-    tokenizer_hint: SoulRecallTokenizerHintSchema.optional(),
-    host_context_window: z.number().int().positive().optional()
+    tokenizer_hint: SoulRecallTokenizerHintSchema.optional()
   })
   .strict()
   .readonly();
@@ -156,7 +155,7 @@ export const SoulProposeMemoryUpdateRequestSchema = z
     target_object_id: BoundedIdSchema,
     proposed_changes: PublicMemoryEntryMutableFieldsSchema,
     reason: BoundedReasonSchema,
-    source_delivery_ids: z.array(NonEmptyStringSchema).min(1).readonly().optional()
+    source_delivery_ids: z.array(NonEmptyStringSchema).min(1).max(32).readonly().optional()
   })
   .strict()
   .readonly();

@@ -2,6 +2,7 @@ import { spawn as spawnChildProcess, type ChildProcess } from "node:child_proces
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { platform, release } from "node:os";
+import nodePath from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ALAYA_SYSEXITS,
@@ -211,13 +212,29 @@ async function resolveWorkspaceForInspector(
     return { status: "ok", workspaceId: active[0]!.workspace_id };
   }
 
+  const normalizedCwd = nodePath.resolve(ctx.cwd);
+  const cwdMatches = active.filter(
+    (ws) =>
+      typeof ws.repo_path === "string" &&
+      ws.repo_path.trim().length > 0 &&
+      nodePath.resolve(ws.repo_path) === normalizedCwd
+  );
+  if (cwdMatches.length === 1) {
+    const match = cwdMatches[0]!;
+    const label = match.name?.trim().length ? match.name : match.workspace_id;
+    ctx.stderr.write(
+      `using workspace ${match.workspace_id} (${label}) for the current directory; pass --workspace <id> to override.\n`
+    );
+    return { status: "ok", workspaceId: match.workspace_id };
+  }
+
   ctx.stderr.write(
     "multiple workspaces registered; choose one with --workspace <id>:\n"
   );
   for (const ws of active) {
     const label = ws.name?.trim().length ? ws.name : "(no name)";
-    const path = ws.repo_path?.trim().length ? ws.repo_path : "(no repo path)";
-    ctx.stderr.write(`  ${ws.workspace_id}  ${label}  ${path}\n`);
+    const repoPath = ws.repo_path?.trim().length ? ws.repo_path : "(no repo path)";
+    ctx.stderr.write(`  ${ws.workspace_id}  ${label}  ${repoPath}\n`);
   }
   return { status: "fail", exitCode: ALAYA_SYSEXITS.USAGE };
 }

@@ -85,18 +85,22 @@ describe("v0.2 recall protocol contract", () => {
       SoulMemorySearchRequestSchema.parse({
         ...baseRequest,
         host_context: {
-          tokenizer_hint: "cl100k",
-          host_context_window: 128000
+          tokenizer_hint: "cl100k"
         }
       }).host_context
     ).toEqual({
-      tokenizer_hint: "cl100k",
-      host_context_window: 128000
+      tokenizer_hint: "cl100k"
     });
     expect(
       SoulMemorySearchRequestSchema.safeParse({
         ...baseRequest,
         host_context: { tokenizer_hint: "unknown" }
+      }).success
+    ).toBe(false);
+    expect(
+      SoulMemorySearchRequestSchema.safeParse({
+        ...baseRequest,
+        host_context: { tokenizer_hint: "cl100k", host_context_window: 128000 }
       }).success
     ).toBe(false);
   });

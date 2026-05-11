@@ -11,7 +11,7 @@ const signalEventTypeValues = [
 ] as const;
 
 const triageResultValues = ["accepted", "dropped", "deferred"] as const;
-const SourceDeliveryIdsSchema = z.array(NonEmptyStringSchema).min(1).readonly();
+const SourceDeliveryIdsSchema = z.array(NonEmptyStringSchema).min(1).max(32).readonly();
 
 export const SignalEventType = {
   SOUL_SIGNAL_EMITTED: "soul.signal.emitted",
