@@ -88,7 +88,12 @@ export const SoulMemorySearchRequestSchema = z
     since: IsoDatetimeStringSchema.nullable().optional(),
     until: IsoDatetimeStringSchema.nullable().optional(),
     time_field: RecallTimeFieldSchema.optional(),
-    host_context: SoulRecallHostContextSchema.optional()
+    host_context: SoulRecallHostContextSchema.optional(),
+    // The host's latest verbatim user message. Carried so the memory plane
+    // can passively extract durable candidates from the turn the host is
+    // already recalling for, without depending on the host echoing a
+    // turn_digest on report_context_usage. Falls back to `query` when absent.
+    recent_turn: BoundedQuerySchema.optional()
   })
   .readonly();
 

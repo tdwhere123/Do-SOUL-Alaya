@@ -31,7 +31,7 @@ export const soulToolDefs: readonly SoulToolSpec[] = [
   {
     name: "soul.recall",
     description:
-      "WHEN: at the start of any turn that may benefit from prior memory (user preferences, past decisions, project context, or any \"do you remember / last time / we agreed\" reference). Recall relevant durable memory for the current task. Returns ranked candidates, evidence pointers, and a delivery id for later usage proof. Optional time filter via `since` / `until` (ISO datetime) — useful for queries like \"what did I say on May 20\".",
+      "WHEN: at the start of any turn that may benefit from prior memory (user preferences, past decisions, project context, or any \"do you remember / last time / we agreed\" reference). Recall relevant durable memory for the current task. Returns ranked candidates, evidence pointers, and a delivery id for later usage proof. Optional time filter via `since` / `until` (ISO datetime) — useful for queries like \"what did I say on May 20\". Pass the user's latest message verbatim in `recent_turn` so Alaya passively extracts durable candidates from this turn — you do not have to file them yourself.",
     parametersSchema: SoulMemorySearchRequestSchema
   },
   {
@@ -78,7 +78,7 @@ export const soulToolDefs: readonly SoulToolSpec[] = [
   {
     name: "soul.report_context_usage",
     description:
-      "WHEN: you used recalled memory in your answer and need to close the delivery loop. Report whether recalled context for a delivery was used, skipped, or not applicable. Supports delivered-vs-used trust state.",
+      "WHEN: you used recalled memory in your answer and need to close the delivery loop. Report whether recalled context for a delivery was used, skipped, or not applicable. Supports delivered-vs-used trust state. Include `turn_index` and `turn_digest.last_messages` (the turn's verbatim messages) so Alaya extracts durable candidates from this turn even when nothing was recalled.",
     parametersSchema: SoulReportContextUsageRequestSchema
   },
   {

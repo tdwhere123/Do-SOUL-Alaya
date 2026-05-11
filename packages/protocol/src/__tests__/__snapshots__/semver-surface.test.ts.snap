@@ -11,8 +11,8 @@ soul.explore_graph|desc16=a201e0e810d3af2b
 soul.list_pending_proposals|desc16=925e6974b20e161a
 soul.open_pointer|desc16=0997adbea3835160
 soul.propose_memory_update|desc16=f07db7ac6cd1ef5f
-soul.recall|desc16=959f51270c1d4484
-soul.report_context_usage|desc16=29603cabde531821
+soul.recall|desc16=d07ab8a86dc64a59
+soul.report_context_usage|desc16=8dbdd7f81a645327
 soul.review_memory_proposal|desc16=5dd212b22f7ecbd4
 [mcp.reachableModules]
 protocol:candidate-memory-signal.ts
@@ -63,7 +63,7 @@ soul:mcp-types.ts#SoulExploreGraphResponseSchema(count,neighbors,source_memory_i
 soul:mcp-types.ts#SoulListPendingProposalsRequestSchema(limit,since)#f6ed9a7
 soul:mcp-types.ts#SoulListPendingProposalsResponseSchema(proposals,total_count)#887900d
 soul:mcp-types.ts#SoulMemorySearchDegradationReasonSchema()#a8fdf75|enum=cold_cascade_engaged|recall_explainability_partial|warm_cascade_engaged
-soul:mcp-types.ts#SoulMemorySearchRequestSchema(dimension,domain_tags,host_context,max_results,query,scope_class,since,time_field,until)#dd46e10
+soul:mcp-types.ts#SoulMemorySearchRequestSchema(dimension,domain_tags,host_context,max_results,query,recent_turn,scope_class,since,time_field,until)#1dd1f43
 soul:mcp-types.ts#SoulMemorySearchResponseSchema(degradation_reason,delivery_id,results,strategy_mix,total_count)#cdfd7c9
 soul:mcp-types.ts#SoulOpenPointerContentSchema(content,domain_tags,evidence_refs,object_id,object_kind,schema_version)#1babe96
 soul:mcp-types.ts#SoulOpenPointerRequestSchema(object_id)#a961e8f

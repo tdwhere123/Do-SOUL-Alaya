@@ -38,7 +38,7 @@ export interface AlayaMemoryToolDefinition {
 
 const providerBaseDescriptionByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.freeze({
   "soul.recall":
-    "WHEN: at the start of any turn that may benefit from prior memory (user preferences, past decisions, project context, or any \"do you remember / last time / we agreed\" reference). Recall relevant durable memory for the current task. Returns ranked candidates, evidence pointers, and a delivery id for later usage proof. Optional time filter via `since` / `until` (ISO datetime) — useful for queries like \"what did I say on May 20\".",
+    "WHEN: at the start of any turn that may benefit from prior memory (user preferences, past decisions, project context, or any \"do you remember / last time / we agreed\" reference). Recall relevant durable memory for the current task. Returns ranked candidates, evidence pointers, and a delivery id for later usage proof. Optional time filter via `since` / `until` (ISO datetime) — useful for queries like \"what did I say on May 20\". Pass the user's latest message verbatim in `recent_turn` so Alaya passively extracts durable candidates from this turn — you do not have to file them yourself.",
   "soul.open_pointer":
     "WHEN: a recall result preview is insufficient and you need the full content before citing it. Open a recalled memory object or evidence pointer by id. Read-only.",
   "soul.emit_candidate_signal":
@@ -54,7 +54,7 @@ const providerBaseDescriptionByName: Readonly<Record<AlayaMemoryToolName, string
   "soul.explore_graph":
     "WHEN: you need 1-hop graph neighbors of an existing memory entry to ground related context. Inspect memory graph neighbors. Read-only; does not create or mutate edges.",
   "soul.report_context_usage":
-    "WHEN: you used recalled memory in your answer and need to close the delivery loop. Report whether recalled context for a delivery was used, skipped, or not applicable. Supports delivered-vs-used trust state.",
+    "WHEN: you used recalled memory in your answer and need to close the delivery loop. Report whether recalled context for a delivery was used, skipped, or not applicable. Supports delivered-vs-used trust state. Include `turn_index` and `turn_digest.last_messages` (the turn's verbatim messages) so Alaya extracts durable candidates from this turn even when nothing was recalled.",
   "garden.list_pending_tasks":
     "WHEN: you have spare capacity (idle between user turns, or operator asks to flush the garden queue) and the operator has set garden compute provider_kind=host_worker so the host CLI agent is the worker. List Garden background tasks pending for this workspace. Read-only. Use before garden.claim_task to scope what work the host can pick up. (当 garden compute 模式为 host_worker 时，CLI agent 在空闲间隙先 list 再 claim 抢任务)",
   "garden.claim_task":

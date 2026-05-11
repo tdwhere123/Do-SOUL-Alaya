@@ -95,7 +95,7 @@ describe("post-turn extract Garden task", () => {
     });
   });
 
-  it("skipped and not_applicable usage do not enqueue post-turn work", async () => {
+  it("skipped and not_applicable usage still enqueue extract work when a turn_digest is present", async () => {
     const harness = await createHandlerHarness();
 
     await reportUsage(harness.handler, {
@@ -111,6 +111,26 @@ describe("post-turn extract Garden task", () => {
       delivered_objects: [{ object_id: "memory-b", usage_status: "not_applicable" }]
     });
 
+    const rows = postTurnRows(harness.gardenTaskRepo);
+    expect(rows).toHaveLength(2);
+    expect(
+      rows.every(
+        (row) => row.kind === GardenTaskKind.POST_TURN_EXTRACT && row.status === "pending"
+      )
+    ).toBe(true);
+  });
+
+  it("a report with an empty turn_digest enqueues no extract work", async () => {
+    const harness = await createHandlerHarness();
+
+    await reportUsage(harness.handler, {
+      turn_index: 1,
+      usage_state: "skipped",
+      used_object_ids: [],
+      delivered_objects: [{ object_id: "memory-a", usage_status: "skipped" }],
+      last_messages: []
+    });
+
     expect(postTurnRows(harness.gardenTaskRepo)).toEqual([]);
   });
 
@@ -123,6 +143,57 @@ describe("post-turn extract Garden task", () => {
     ]);
 
     expect(calls.every((result) => result.ok)).toBe(true);
+    expect(postTurnRows(harness.gardenTaskRepo)).toHaveLength(1);
+  });
+
+  it("a recall with a long query enqueues a recall-driven extract task from the turn text", async () => {
+    const harness = await createHandlerHarness();
+
+    const result = await recall(harness.handler, {
+      query: "remember that I always use pnpm for this project"
+    });
+
+    expect(result.ok).toBe(true);
+    const rows = postTurnRows(harness.gardenTaskRepo);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.id.startsWith("recall_extract_")).toBe(true);
+    const payload = rows[0]!.payload as PostTurnPayload;
+    expect(payload.run_id).toBe("run-1");
+    expect(payload.workspace_id).toBe("workspace-1");
+    expect(payload.turn_digest.last_messages).toEqual([
+      { role: "user", content_excerpt: "remember that I always use pnpm for this project" }
+    ]);
+  });
+
+  it("prefers recent_turn over query for the recall-driven extract task", async () => {
+    const harness = await createHandlerHarness();
+
+    await recall(harness.handler, {
+      query: "pnpm",
+      recent_turn: "From now on always reply to me in Chinese for this project."
+    });
+
+    const rows = postTurnRows(harness.gardenTaskRepo);
+    expect(rows).toHaveLength(1);
+    expect((rows[0]!.payload as PostTurnPayload).turn_digest.last_messages[0]!.content_excerpt).toBe(
+      "From now on always reply to me in Chinese for this project."
+    );
+  });
+
+  it("does not enqueue a recall-driven extract task for a short query and no recent_turn", async () => {
+    const harness = await createHandlerHarness();
+
+    await recall(harness.handler, { query: "pnpm" });
+
+    expect(postTurnRows(harness.gardenTaskRepo)).toEqual([]);
+  });
+
+  it("dedupes repeated recalls for the same turn text within a run", async () => {
+    const harness = await createHandlerHarness();
+
+    await recall(harness.handler, { query: "remember that I always use pnpm for this project" });
+    await recall(harness.handler, { query: "remember that I always use pnpm for this project" });
+
     expect(postTurnRows(harness.gardenTaskRepo)).toHaveLength(1);
   });
 
@@ -575,6 +646,27 @@ function createMcpDeps(base: {
     eventPublisher: base.eventPublisher,
     gardenTaskRepo: base.gardenTaskRepo
   };
+}
+
+async function recall(
+  handler: McpMemoryToolHandler,
+  overrides: Partial<{
+    readonly query: string;
+    readonly recent_turn: string;
+  }> = {}
+): Promise<McpMemoryToolCallResult> {
+  return await handler.call({
+    toolName: "soul.recall",
+    arguments: {
+      query: overrides.query ?? "recall test query",
+      scope_class: null,
+      dimension: null,
+      domain_tags: null,
+      max_results: 5,
+      ...(overrides.recent_turn === undefined ? {} : { recent_turn: overrides.recent_turn })
+    },
+    context: defaultContext()
+  });
 }
 
 async function reportUsage(

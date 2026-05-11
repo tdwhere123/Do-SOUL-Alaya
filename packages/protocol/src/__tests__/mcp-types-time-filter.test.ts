@@ -131,4 +131,24 @@ describe("SoulMemorySearchRequestSchema time-filter fields", () => {
     expect(RecallTimeFieldSchema.parse("last_used_at")).toBe("last_used_at");
     expect(() => RecallTimeFieldSchema.parse("anything_else")).toThrow();
   });
+
+  it("accepts an optional recent_turn without requiring old callers to send it", () => {
+    expect(SoulMemorySearchRequestSchema.parse({ ...baseRequest }).recent_turn).toBeUndefined();
+
+    const parsed = SoulMemorySearchRequestSchema.parse({
+      ...baseRequest,
+      recent_turn: "From now on always call me by my handle, not my full name."
+    });
+    expect(parsed.recent_turn).toBe("From now on always call me by my handle, not my full name.");
+
+    expect(
+      SoulMemorySearchRequestSchema.safeParse({ ...baseRequest, recent_turn: "x".repeat(4097) })
+        .success
+    ).toBe(false);
+
+    const recallSchema = soulToolJsonSchemas["soul.recall"] as {
+      readonly properties?: Record<string, unknown>;
+    };
+    expect(recallSchema.properties?.["recent_turn"]).toBeDefined();
+  });
 });

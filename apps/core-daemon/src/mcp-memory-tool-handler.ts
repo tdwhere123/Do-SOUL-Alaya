@@ -90,6 +90,14 @@ type MemoryUsageRefreshFields = MemoryEntryMutableFields & {
 
 const RECALL_HIT_ACTIVATION_BUMP = 0.05;
 const POST_TURN_EXTRACT_EXCERPT_MAX_CHARS = 800;
+// Auto-extract from a recall turn only when there is enough text for the
+// Garden compute provider to find a durable signal in; a bare keyword query
+// is below this floor and not worth a Garden task.
+const MIN_AUTO_EXTRACT_TURN_CHARS = 24;
+// Stop enqueuing recall-driven extract tasks once the librarian queue for a
+// workspace is this deep: Garden is not draining (e.g. host_worker mode with
+// no worker, or a stalled background pass) and piling on cannot help.
+const RECALL_EXTRACT_BACKLOG_SKIP_THRESHOLD = 128;
 
 export interface McpMemoryToolCallContext {
   readonly workspaceId: string;
@@ -373,14 +381,17 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       return result;
     });
     const deliveryId = `delivery_${generateId()}`;
+    const deliveredObjectIds = results.map((result) => result.object_id);
     await deps.trustStateRecorder.recordDelivery({
       delivery_id: deliveryId,
       agent_target: context.agentTarget,
       workspace_id: context.workspaceId,
       run_id: context.runId,
-      delivered_object_ids: results.map((result) => result.object_id),
+      delivered_object_ids: deliveredObjectIds,
       delivered_at: now()
     });
+
+    enqueueRecallExtractTask(request, context, deliveredObjectIds);
 
     await emitRecallDeliveredTelemetry({
       deliveryId,
@@ -935,6 +946,76 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     );
   }
 
+  // Auto-extract path: enqueue a POST_TURN_EXTRACT task from the turn text the
+  // host already sends on soul.recall, so durable capture does not depend on
+  // the host echoing a turn_digest on report_context_usage or filing an
+  // explicit proposal. Deduped by (workspace, run, turn-text hash) so repeated
+  // recalls for the same turn collapse to one task.
+  // see also: garden-runtime.ts processPostTurnExtractTask (consumes the task).
+  function enqueueRecallExtractTask(
+    request: SoulMemorySearchRequest,
+    context: McpMemoryToolCallContext,
+    deliveredObjectIds: readonly string[]
+  ): void {
+    if (deps.gardenTaskRepo === undefined || context.runId === null) {
+      return;
+    }
+    const turnText = (request.recent_turn ?? request.query).trim();
+    if (turnText.length < MIN_AUTO_EXTRACT_TURN_CHARS) {
+      return;
+    }
+    if (
+      deps.gardenTaskRepo.peekPending(
+        GardenRole.LIBRARIAN,
+        context.workspaceId,
+        RECALL_EXTRACT_BACKLOG_SKIP_THRESHOLD
+      ).length >= RECALL_EXTRACT_BACKLOG_SKIP_THRESHOLD
+    ) {
+      return;
+    }
+    const workspaceId = context.workspaceId;
+    const runId = context.runId;
+    const dedupedDeliveredIds = Object.freeze([...new Set(deliveredObjectIds)]);
+    const taskId = buildRecallExtractTaskId(workspaceId, runId, turnText);
+    const createdAt = now();
+    try {
+      deps.gardenTaskRepo.enqueue({
+        id: taskId,
+        workspace_id: workspaceId,
+        role: GardenRole.LIBRARIAN,
+        kind: GardenTaskKind.POST_TURN_EXTRACT,
+        payload: {
+          task_id: taskId,
+          task_kind: GardenTaskKind.POST_TURN_EXTRACT,
+          required_tier: GardenTier.TIER_2,
+          run_id: runId,
+          target_object_refs: dedupedDeliveredIds,
+          priority: 20,
+          created_at: createdAt,
+          turn_index: 0,
+          workspace_id: workspaceId,
+          turn_digest: {
+            last_messages: [
+              {
+                role: "user",
+                content_excerpt: turnText.slice(0, POST_TURN_EXTRACT_EXCERPT_MAX_CHARS)
+              }
+            ],
+            context_manifest: {
+              delivered_object_ids: dedupedDeliveredIds
+            }
+          }
+        },
+        created_at: createdAt
+      });
+    } catch (error) {
+      if (isDuplicatePostTurnExtractTask(error)) {
+        return;
+      }
+      throw error;
+    }
+  }
+
   function enqueuePostTurnExtractTask(
     request: SoulReportContextUsageRequest,
     context: McpMemoryToolCallContext
@@ -943,11 +1024,11 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       deps.gardenTaskRepo === undefined ||
       context.runId === null ||
       request.turn_index === undefined ||
-      // Wave-end M4: share the canonical used-id resolver with R2 so a
-      // single request produces consistent side-effects across the two
-      // paths (no ghost extract task without a matching tier promote
-      // and vice versa).
-      resolveUsedObjectIds(request).length === 0
+      // Extract needs turn text; without a turn_digest the recall-driven
+      // enqueueRecallExtractTask already covered this turn. Tier-promote
+      // (resolveUsedObjectIds) stays separate — there is nothing to promote
+      // when no object was used, but a cold-store turn is still worth extracting.
+      (request.turn_digest?.last_messages?.length ?? 0) === 0
     ) {
       return;
     }
@@ -1138,6 +1219,23 @@ function buildPostTurnExtractTaskId(
   // unchanged, so the deterministic task id lets SQLite's existing
   // garden_tasks primary-key constraint act as the duplicate guard.
   return `post_turn_extract_${digest}`;
+}
+
+function buildRecallExtractTaskId(workspaceId: string, runId: string, turnText: string): string {
+  const digest = createHash("sha256")
+    .update(workspaceId)
+    .update("\0")
+    .update(runId)
+    .update("\0")
+    .update(turnText)
+    .digest("hex")
+    .slice(0, 32);
+  // Dedup key is (workspace_id, run_id, turn-text hash): repeated recalls for
+  // the same conversation turn collapse to one extract task via the
+  // garden_tasks primary key. Distinct from buildPostTurnExtractTaskId (which
+  // keys on turn_index) so a recall-driven and a report-driven task for the
+  // same turn do not collide.
+  return `recall_extract_${digest}`;
 }
 
 // Wave-end M3: detect H3 POST_TURN_EXTRACT dedupe via the structured

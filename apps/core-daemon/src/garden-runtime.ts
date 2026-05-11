@@ -741,6 +741,12 @@ export function createGardenRuntime(input: {
         throw error;
       }
 
+      // A dispatched task that fails during extraction (provider error, bad
+      // response, ...) is recorded as failed with the error captured in
+      // last_error_text and a SOUL_GARDEN_TASK_COMPLETED(success: false)
+      // event. We do NOT rethrow: post-turn extract is fire-and-forget and
+      // runs on every recall, so a flaky compute provider must not abort the
+      // rest of the Garden background pass.
       const completedAt = new Date().toISOString();
       await gardenTaskRepo.completeWithEvents(
         row.id,
@@ -772,7 +778,6 @@ export function createGardenRuntime(input: {
         ],
         IN_PROCESS_POST_TURN_CLAIMANT
       );
-      throw error;
     }
   };
 
