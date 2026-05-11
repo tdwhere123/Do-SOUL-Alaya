@@ -40,6 +40,7 @@ export const BudgetSnapshotSchema = z
     run_id: NonEmptyStringSchema,
     current_mode: RuntimeModeSchema,
     bankruptcy_kind: BankruptcyKindSchema,
+    pressure_ratio: z.number().min(0).max(1).default(0).readonly(),
     trigger_summary: NonEmptyStringSchema.nullable(),
     active_dossier: BudgetDossierSummarySchema.nullable(),
     pending_proposal: BudgetProposalSummarySchema.nullable()

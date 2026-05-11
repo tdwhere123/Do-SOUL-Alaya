@@ -6,6 +6,8 @@ import type {
   ProjectMappingAnchor,
   RecallCandidate,
   RecallOriginPlane,
+  SoulRecallHostContext,
+  SoulRecallTokenizerHint,
   SoulMemorySearchDegradationReason,
   Slot,
   StorageTier as StorageTierType
@@ -88,6 +90,36 @@ export interface RecallServicePathPlasticityPort {
   ): Promise<ReadonlyMap<string, number>>;
 }
 
+export interface TokenEstimator {
+  estimate(text: string): number;
+}
+
+export function makeTokenEstimator(opts: {
+  readonly hint?: SoulRecallTokenizerHint | null;
+} = {}): TokenEstimator {
+  const charsPerToken = resolveCharsPerToken(opts.hint ?? null);
+
+  return Object.freeze({
+    estimate(text: string): number {
+      return Math.ceil(text.length / charsPerToken);
+    }
+  });
+}
+
+function resolveCharsPerToken(hint: SoulRecallTokenizerHint | null): number {
+  switch (hint) {
+    case "cl100k":
+      // OpenAI tokenizer docs cite ~4 chars/token for common English text;
+      // this v0.2.0 hint is a conservative heuristic, not a native tokenizer.
+      return 3.6;
+    case "o200k":
+      return 3.2;
+    case "approx_chars_per_token":
+    case null:
+      return 4;
+  }
+}
+
 export interface RecallServiceEmbeddingRecallPort {
   hasStoredVectors?(params: {
     readonly workspaceId: string;
@@ -168,4 +200,5 @@ export interface RecallServiceWarnPort {
   (message: string, meta: Record<string, unknown>): void;
 }
 
+export type { SoulRecallHostContext };
 export type { RecallCandidate } from "@do-soul/alaya-protocol";

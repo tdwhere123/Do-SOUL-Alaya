@@ -8,12 +8,14 @@ import {
   SoulRecallCompletedPayloadSchema,
   StorageTier,
   type FineAssessmentConfig,
+  type ActivationWeights,
   type MemoryDimension as MemoryDimensionType,
   type MemoryEntry,
   type ProjectMappingAnchor,
   type RecallCandidate,
   type RecallScoreFactors,
   type RecallPolicy,
+  type SoulRecallHostContext,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import type { PreparedEmbeddingQueryHandle } from "./embedding-recall-service.js";
@@ -50,6 +52,7 @@ import {
   normalizeGraphSupport,
   normalizeQueryText,
   parseEmbeddingPrecheckReason,
+  resolveActivationWeights,
   toErrorMessage,
   type RecallTimeFilter
 } from "./recall-service-helpers.js";
@@ -58,8 +61,10 @@ import type {
   RecallResult,
   RecallServiceDependencies,
   RecallServiceWarnPort,
-  RecallSupplementaryData
+  RecallSupplementaryData,
+  TokenEstimator
 } from "./recall-service-types.js";
+import { makeTokenEstimator } from "./recall-service-types.js";
 import { parseRecallPolicy } from "./shared/recall-policy.js";
 
 export { classifyGlobalCandidate } from "./recall-service-helpers.js";
@@ -76,8 +81,10 @@ export type {
   RecallServiceMemoryRepoPort,
   RecallServiceProjectMappingPort,
   RecallServiceSlotRepoPort,
-  RecallServiceWarnPort
+  RecallServiceWarnPort,
+  TokenEstimator
 } from "./recall-service-types.js";
+export { makeTokenEstimator } from "./recall-service-types.js";
 
 export class RecallService {
   private readonly generateRuntimeId: () => string;
@@ -98,8 +105,10 @@ export class RecallService {
     readonly runId?: string | null;
     readonly policyOverride?: Readonly<RecallPolicy>;
     readonly timeFilter?: RecallTimeFilter;
+    readonly hostContext?: Readonly<SoulRecallHostContext>;
   }): Promise<RecallResult> {
     const policy = this.resolvePolicy(params.strategy, params.taskSurface.runtime_id, params.policyOverride);
+    const tokenEstimator = makeTokenEstimator({ hint: params.hostContext?.tokenizer_hint });
     const queryText = normalizeQueryText(params.taskSurface.display_name);
     const hotCoarseFilter = await this.coarseFilter(params.workspaceId, policy.coarse_filter, queryText, {
       timeFilter: params.timeFilter
@@ -184,8 +193,9 @@ export class RecallService {
       workspaceId: params.workspaceId,
       runId: params.runId ?? null,
       queryText,
-      fineAssessmentConfig: policy.fine_assessment,
-      winnerMemoryIds
+      policy,
+      winnerMemoryIds,
+      tokenEstimator
     });
     const supplementaryData = assessment.supplementaryData;
     const lexicalCandidates = assessment.candidates;
@@ -206,7 +216,8 @@ export class RecallService {
       queryText,
       winnerMemoryIds,
       supplementaryData,
-      preparedEmbeddingQuery
+      preparedEmbeddingQuery,
+      tokenEstimator
     });
     const candidates = this.rebuildBudgetStateForDelivery(
       mergedCandidates,
@@ -470,8 +481,9 @@ export class RecallService {
     readonly workspaceId: string;
     readonly runId: string | null;
     readonly queryText: string | null;
-    readonly fineAssessmentConfig: Readonly<FineAssessmentConfig>;
+    readonly policy: Readonly<RecallPolicy>;
     readonly winnerMemoryIds: ReadonlySet<string>;
+    readonly tokenEstimator: TokenEstimator;
   }): Promise<Readonly<{
     readonly supplementaryData: RecallSupplementaryData;
     readonly candidates: readonly Readonly<RecallCandidate>[];
@@ -485,9 +497,10 @@ export class RecallService {
     });
     const candidates = this.fineAssess(
       params.coarseFilter.candidates,
-      params.fineAssessmentConfig,
+      params.policy,
       params.winnerMemoryIds,
-      supplementaryData
+      supplementaryData,
+      params.tokenEstimator
     );
 
     return Object.freeze({
@@ -587,6 +600,7 @@ export class RecallService {
     readonly winnerMemoryIds: ReadonlySet<string>;
     readonly supplementaryData: RecallSupplementaryData;
     readonly preparedEmbeddingQuery: PreparedEmbeddingQueryHandle | null;
+    readonly tokenEstimator: TokenEstimator;
   }): Promise<readonly Readonly<RecallCandidate>[]> {
     const embeddingRecallService = this.dependencies.embeddingRecallService;
     if (
@@ -644,10 +658,11 @@ export class RecallService {
       return [
         this.buildSupplementaryRecallCandidate(
           coarseCandidate,
-          params.config.fine_assessment,
+          params.config,
           params.winnerMemoryIds,
           params.supplementaryData,
-          similarityHint.normalized_similarity
+          similarityHint.normalized_similarity,
+          params.tokenEstimator
         )
       ];
     });
@@ -787,13 +802,15 @@ export class RecallService {
 
   private fineAssess(
     candidates: readonly Readonly<CoarseRecallCandidate>[],
-    config: Readonly<FineAssessmentConfig>,
+    policy: Readonly<RecallPolicy>,
     winnerMemoryIds: ReadonlySet<string>,
-    supplementaryData: RecallSupplementaryData
+    supplementaryData: RecallSupplementaryData,
+    tokenEstimator: TokenEstimator
   ): readonly Readonly<RecallCandidate>[] {
     if (candidates.length === 0) {
       return Object.freeze([]);
     }
+    const config = policy.fine_assessment;
 
     const mandatory = candidates.filter(
       ({ entry }) => isProtectedDimension(entry.dimension) || winnerMemoryIds.has(entry.object_id)
@@ -806,7 +823,7 @@ export class RecallService {
         ...candidate,
         effectiveScore: this.computeEffectiveScore(
           candidate.entry,
-          config,
+          policy,
           winnerMemoryIds,
           supplementaryData,
           candidate.isAdvisory ?? false,
@@ -841,7 +858,7 @@ export class RecallService {
         return accumulator;
       }
 
-      const tokenEstimate = estimateTokens(entry.content);
+      const tokenEstimate = estimateTokens(entry.content, tokenEstimator);
       const dimensionCount = accumulator.perDimensionCounts.get(entry.dimension) ?? 0;
       const dimensionLimit = config.budgets.per_dimension_limits?.[entry.dimension] ?? null;
       const nextEntryCount = accumulator.selected.length + 1;
@@ -861,7 +878,7 @@ export class RecallService {
       const manifestation = assignManifestation(activationScore);
       const scored = this.computeEffectiveScoreDetails(
         entry,
-        config,
+        policy,
         winnerMemoryIds,
         supplementaryData,
         candidate.isAdvisory ?? false,
@@ -917,7 +934,7 @@ export class RecallService {
 
   private computeEffectiveScore(
     entry: Readonly<MemoryEntry>,
-    config: Readonly<FineAssessmentConfig>,
+    policy: Readonly<RecallPolicy>,
     winnerMemoryIds: ReadonlySet<string>,
     supplementaryData: RecallSupplementaryData,
     isAdvisory: boolean,
@@ -925,7 +942,7 @@ export class RecallService {
   ): number {
     return this.computeEffectiveScoreDetails(
       entry,
-      config,
+      policy,
       winnerMemoryIds,
       supplementaryData,
       isAdvisory,
@@ -935,13 +952,14 @@ export class RecallService {
 
   private computeEffectiveScoreDetails(
     entry: Readonly<MemoryEntry>,
-    config: Readonly<FineAssessmentConfig>,
+    policy: Readonly<RecallPolicy>,
     winnerMemoryIds: ReadonlySet<string>,
     supplementaryData: RecallSupplementaryData,
     isAdvisory: boolean,
     scoreMultiplier = 1
   ): Readonly<{ readonly score: number; readonly factors: RecallScoreFactors }> {
-    const weights = DYNAMICS_CONSTANTS.activation_weights_phase4b;
+    const config = policy.fine_assessment;
+    const weights = this.resolveEffectiveActivationWeights(entry, policy);
     const activationScore = normalizeActivationScore(entry.activation_score);
     const relevanceFactor = supplementaryData.ftsRanks[entry.object_id] ?? 0;
     const graphSupportFactor = normalizeGraphSupport(supplementaryData.graphSupportCounts[entry.object_id] ?? 0);
@@ -981,23 +999,56 @@ export class RecallService {
         graph_support: graphSupportFactor,
         path_plasticity: plasticityFactor,
         budget_penalty: budgetPenalty,
-        conflict_penalty: conflictPenalty
+        conflict_penalty: conflictPenalty,
+        resolved_activation_weights: weights
       })
     });
   }
 
+  private resolveEffectiveActivationWeights(
+    entry: Readonly<MemoryEntry>,
+    policy: Readonly<RecallPolicy>
+  ): ActivationWeights {
+    const overrides = policy.domain_weight_overrides;
+    if (overrides === undefined) {
+      return resolveActivationWeights();
+    }
+
+    const matchedDomainTag = entry.domain_tags
+      .filter((tag) => overrides[tag] !== undefined)
+      .sort((left, right) => left.localeCompare(right))[0];
+
+    if (matchedDomainTag === undefined) {
+      return resolveActivationWeights();
+    }
+
+    const resolved = resolveActivationWeights(overrides[matchedDomainTag]);
+    try {
+      assertActivationWeightsSumToOne(resolved);
+      return resolved;
+    } catch (error) {
+      this.warn("ERROR: recall domain weight override invalid; falling back to base activation weights", {
+        policy_id: policy.runtime_id,
+        domain_tag: matchedDomainTag,
+        error: toErrorMessage(error)
+      });
+      return resolveActivationWeights();
+    }
+  }
+
   private buildSupplementaryRecallCandidate(
     candidate: Readonly<CoarseRecallCandidate>,
-    config: Readonly<FineAssessmentConfig>,
+    policy: Readonly<RecallPolicy>,
     winnerMemoryIds: ReadonlySet<string>,
     supplementaryData: RecallSupplementaryData,
-    normalizedSimilarity: number
+    normalizedSimilarity: number,
+    tokenEstimator: TokenEstimator
   ): Readonly<RecallCandidate> {
     const activationScore = normalizeActivationScore(candidate.entry.activation_score);
     const manifestation = assignManifestation(activationScore);
     const scored = this.computeEffectiveScoreDetails(
       candidate.entry,
-      config,
+      policy,
       winnerMemoryIds,
       supplementaryData,
       candidate.isAdvisory ?? false,
@@ -1012,6 +1063,7 @@ export class RecallService {
       relevance: relevanceScore,
       embedding_similarity: normalizedEmbeddingSimilarity
     });
+    const tokenEstimate = estimateTokens(candidate.entry.content, tokenEstimator);
 
     return RecallCandidateSchema.parse({
       object_id: candidate.entry.object_id,
@@ -1023,7 +1075,7 @@ export class RecallService {
         manifestation,
         candidate.originPlane
       ),
-      token_estimate: estimateTokens(candidate.entry.content),
+      token_estimate: tokenEstimate,
       manifestation,
       dimension: candidate.entry.dimension,
       scope_class: candidate.entry.scope_class,
@@ -1031,9 +1083,9 @@ export class RecallService {
       source_channels: buildSourceChannels(candidate, scoreFactors, "semantic_supplement"),
       score_factors: scoreFactors,
       budget_state: buildBudgetState({
-        tokenEstimate: estimateTokens(candidate.entry.content),
-        maxEntries: config.budgets.max_entries,
-        maxTotalTokens: config.budgets.max_total_tokens,
+        tokenEstimate,
+        maxEntries: policy.fine_assessment.budgets.max_entries,
+        maxTotalTokens: policy.fine_assessment.budgets.max_total_tokens,
         index: 0,
         usedTokensBeforeCandidate: 0
       }),

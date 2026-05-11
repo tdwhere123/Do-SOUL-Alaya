@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   BankruptcyKind,
   ControlPlaneObjectKind,
+  DYNAMICS_CONSTANTS,
   MemoryDimension,
   RetentionPolicy,
   ScopeClass,
@@ -12,6 +13,7 @@ import {
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import { RecallService, type RecallServiceDependencies } from "../recall-service.js";
+import { mapBudgetPenalty } from "../recall-service-helpers.js";
 
 function createTaskSurface(displayName = "Implement recall"): TaskObjectSurface {
   return {
@@ -164,6 +166,38 @@ function overridePolicy(base: Readonly<RecallPolicy>, patch: Partial<RecallPolic
 }
 
 describe("RecallService 8-factor scoring", () => {
+  it("maps budget pressure to a graduated monotonic penalty", () => {
+    const baseSnapshot = {
+      snapshot_at: "2026-05-11T00:00:00.000Z",
+      run_id: "run-1",
+      current_mode: "lean",
+      trigger_summary: null,
+      active_dossier: null,
+      pending_proposal: null
+    } as const;
+    const ratios = [0, 0.5, 0.75, 0.99] as const;
+    const penalties = ratios.map((pressure_ratio) =>
+      mapBudgetPenalty({
+        ...baseSnapshot,
+        bankruptcy_kind: BankruptcyKind.SOFT,
+        pressure_ratio
+      })
+    );
+
+    expect(mapBudgetPenalty({ ...baseSnapshot, bankruptcy_kind: BankruptcyKind.NONE, pressure_ratio: 0 })).toBe(0);
+    expect(mapBudgetPenalty({ ...baseSnapshot, bankruptcy_kind: BankruptcyKind.HARD, pressure_ratio: 1 })).toBe(1);
+    expect(
+      mapBudgetPenalty({
+        ...baseSnapshot,
+        bankruptcy_kind: BankruptcyKind.SOFT
+      } as never)
+    ).toBe(0);
+    expect(penalties[0]).toBe(0);
+    expect(penalties[1]).toBeCloseTo(0.1);
+    expect(penalties[2]).toBeCloseTo(0.4);
+    expect(penalties[3]).toBeGreaterThan(penalties[2]);
+  });
+
   it("keeps the default keyword supplement enabled in default policy", () => {
     const { dependencies } = createDependencies([]);
     const service = new RecallService(dependencies);
@@ -211,6 +245,65 @@ describe("RecallService 8-factor scoring", () => {
     expect(getSnapshot).toHaveBeenCalledWith("run-1");
     expect(result.candidates[0]?.object_id).toBe("memory-2");
     expect(result.candidates[0]?.relevance_score).toBeGreaterThan(result.candidates[1]?.relevance_score ?? 0);
+  });
+
+  it("uses token-estimator hints per recall call without leaking global state", async () => {
+    const content = "x".repeat(36);
+    const { dependencies } = createDependencies([
+      createMemoryEntry({ object_id: "memory-1", content, activation_score: 0.7 })
+    ]);
+    const service = new RecallService(dependencies);
+    const baseParams = {
+      taskSurface: createTaskSurface("token estimate"),
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      strategy: "build" as const
+    };
+
+    const noHint = await service.recall(baseParams);
+    const cl100k = await service.recall({
+      ...baseParams,
+      hostContext: { tokenizer_hint: "cl100k" }
+    });
+    const noHintAgain = await service.recall(baseParams);
+
+    expect(noHint.candidates[0]?.token_estimate).toBe(9);
+    expect(cl100k.candidates[0]?.token_estimate).toBe(10);
+    expect(noHintAgain.candidates[0]?.token_estimate).toBe(9);
+  });
+
+  it("records valid per-domain activation weight overrides in score factors", async () => {
+    const { dependencies } = createDependencies([
+      createMemoryEntry({
+        object_id: "memory-1",
+        content: "Domain-specific recall weighting",
+        domain_tags: ["repo", "docs"]
+      })
+    ]);
+    const service = new RecallService(dependencies);
+    const basePolicy = service.buildDefaultPolicy("build", createTaskSurface().runtime_id);
+    const policy = overridePolicy(basePolicy, {
+      domain_weight_overrides: {
+        docs: {
+          scope_match: 0.08,
+          relevance: 0.2
+        }
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface("Domain-specific recall weighting"),
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      strategy: "build",
+      policyOverride: policy
+    });
+
+    expect(result.candidates[0]?.score_factors?.resolved_activation_weights).toMatchObject({
+      ...DYNAMICS_CONSTANTS.activation_weights_phase4b,
+      scope_match: 0.08,
+      relevance: 0.2
+    });
   });
 
   it("applies conflict penalty to non-winner claim-like entries", async () => {

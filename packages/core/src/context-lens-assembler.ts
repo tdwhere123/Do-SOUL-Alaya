@@ -32,6 +32,7 @@ import {
   type WorkingProjection
 } from "@do-soul/alaya-protocol";
 import type { RecallCandidate, RecallResult } from "./recall-service.js";
+import { makeTokenEstimator, type TokenEstimator } from "./recall-service-types.js";
 import type { NodeStrategy } from "./task-surface-builder.js";
 
 const MAX_LENS_STORE_SIZE = 200;
@@ -99,6 +100,8 @@ export interface LensAssemblerBankruptcyPort {
     readonly droppedCandidates: readonly string[];
     readonly unresolvedConflicts: readonly string[];
     readonly requiredActions: readonly BankruptcyActionValue[];
+    readonly tokensUsed?: number;
+    readonly maxTotalTokens?: number;
   }): Promise<unknown>;
 }
 
@@ -382,7 +385,9 @@ export class ContextLensAssembler {
           protectedConstraints: degradationResult.protectedObjectIds,
           droppedCandidates: degradationResult.droppedObjectIds,
           unresolvedConflicts: [],
-          requiredActions: [BankruptcyAction.COMPRESS, BankruptcyAction.DEFER]
+          requiredActions: [BankruptcyAction.COMPRESS, BankruptcyAction.DEFER],
+          tokensUsed: tokensAfterDegradation,
+          maxTotalTokens: params.policyBudget
         });
       }
     }
@@ -502,7 +507,8 @@ export class ContextLensAssembler {
     strictWinners: readonly Readonly<ClaimForm>[],
     recalledMemories: ReadonlyMap<string, Readonly<MemoryEntry>>,
     recallPolicyRef: string | null,
-    activeOverrides: readonly Readonly<SessionOverride>[]
+    activeOverrides: readonly Readonly<SessionOverride>[],
+    tokenEstimator: TokenEstimator = makeTokenEstimator()
   ): Readonly<WorkingProjection> {
     let taskSurfaceEntryIndex = 0;
     const strictWinnerMap = new Map(strictWinners.map((claim) => [claim.object_id, claim] as const));
@@ -528,7 +534,7 @@ export class ContextLensAssembler {
         object_id: entry.object_id,
         object_kind: entry.object_kind,
         content_snapshot: contentSnapshot,
-        token_estimate: estimateTokens(contentSnapshot)
+        token_estimate: tokenEstimator.estimate(contentSnapshot)
       };
     });
     const totalTokenEstimate = entries.reduce((sum, entry) => sum + entry.token_estimate, 0);
@@ -683,10 +689,6 @@ function compareRecallCandidates(left: Readonly<RecallCandidate>, right: Readonl
   }
 
   return left.object_id.localeCompare(right.object_id);
-}
-
-function estimateTokens(value: string): number {
-  return Math.ceil(value.length / 4);
 }
 
 const EXCERPT_CONTENT_RATIO = 0.35;

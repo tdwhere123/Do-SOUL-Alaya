@@ -12,11 +12,12 @@ import {
   type MemoryEntry,
   type ProjectMappingAnchor,
   type RecallCandidate,
+  type ActivationWeights,
   type RecallOriginPlane,
   type RecallPolicy
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
-import type { CoarseRecallCandidate, RecallServiceProjectMappingPort } from "./recall-service-types.js";
+import { makeTokenEstimator, type CoarseRecallCandidate, type RecallServiceProjectMappingPort, type TokenEstimator } from "./recall-service-types.js";
 
 const CLAIM_LIKE_DIMENSIONS = new Set<MemoryDimensionType>([
   MemoryDimension.CONSTRAINT,
@@ -30,6 +31,8 @@ export const WARM_CASCADE_DECAY = 0.7;
 // COLD memories are cold-start fallback only and receive a stronger freshness penalty.
 export const COLD_CASCADE_DECAY = 0.45;
 export const EMBEDDING_SIMILARITY_WEIGHT = 0.8;
+export const BUDGET_PRESSURE_SOFT_THRESHOLD = 0.5;
+export const BUDGET_PRESSURE_HARD_THRESHOLD = 1;
 /**
  * Additive weight applied to PathPlasticityState.strength inside the
  * fine-assessment score. Plasticity is a recall *supplement*: it can boost a
@@ -166,12 +169,30 @@ export function mapBudgetPenalty(snapshot: Readonly<BudgetSnapshot>): number {
     case BankruptcyKind.NONE:
       return 0;
     case BankruptcyKind.SOFT:
-      return 0.3;
+      return mapSoftBudgetPenalty(readBudgetPressureRatio(snapshot));
     case BankruptcyKind.HARD:
       return 1;
     default:
       return 0;
   }
+}
+
+function readBudgetPressureRatio(snapshot: Readonly<BudgetSnapshot>): number {
+  return typeof snapshot.pressure_ratio === "number" && Number.isFinite(snapshot.pressure_ratio)
+    ? snapshot.pressure_ratio
+    : 0;
+}
+
+function mapSoftBudgetPenalty(pressureRatio: number): number {
+  if (pressureRatio < BUDGET_PRESSURE_SOFT_THRESHOLD) {
+    return 0;
+  }
+
+  const softRange = BUDGET_PRESSURE_HARD_THRESHOLD - BUDGET_PRESSURE_SOFT_THRESHOLD;
+  const normalized = softRange <= 0
+    ? 1
+    : (clamp01(pressureRatio) - BUDGET_PRESSURE_SOFT_THRESHOLD) / softRange;
+  return clamp01(0.1 + 0.6 * normalized);
 }
 
 export function getGlobalRecallLimit(policy: Readonly<RecallPolicy>): number {
@@ -310,8 +331,8 @@ export function matchesPrecomputedRankFilter(
   );
 }
 
-export function estimateTokens(content: string): number {
-  return Math.ceil(content.length / 4);
+export function estimateTokens(content: string, tokenEstimator: TokenEstimator = makeTokenEstimator()): number {
+  return tokenEstimator.estimate(content);
 }
 
 export function createContentPreview(
@@ -347,13 +368,25 @@ export function assignManifestation(activationScore: number): ManifestationState
 }
 
 export function assertActivationWeightsSumToOne(
-  weights: Readonly<Record<keyof typeof DYNAMICS_CONSTANTS.activation_weights_phase4b, number>>
+  weights: Readonly<Partial<Record<keyof typeof DYNAMICS_CONSTANTS.activation_weights_phase4b, number>>>
 ): void {
-  const sum = Object.values(weights).reduce((total, weight) => total + weight, 0);
+  const resolved = resolveActivationWeights(weights);
+  const sum = Object.values(resolved).reduce((total, weight) => total + weight, 0);
 
-  if (Math.abs(sum - 1) > Number.EPSILON) {
+  // Tolerance avoids rejecting valid decimal compositions due to floating
+  // point representation while still catching real weight drift.
+  if (Math.abs(sum - 1) >= 1e-6) {
     throw new CoreError("VALIDATION", `activation_weights_phase4b must sum to 1.0, got ${sum}`);
   }
+}
+
+export function resolveActivationWeights(
+  weights: Readonly<Partial<Record<keyof typeof DYNAMICS_CONSTANTS.activation_weights_phase4b, number>>> = {}
+): ActivationWeights {
+  return Object.freeze({
+    ...DYNAMICS_CONSTANTS.activation_weights_phase4b,
+    ...weights
+  }) as ActivationWeights;
 }
 
 export function toErrorMessage(error: unknown): string {

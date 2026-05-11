@@ -111,6 +111,36 @@ describe("mcp memory tool handler", () => {
     );
   });
 
+  it("threads host_context from recall requests into RecallService", async () => {
+    const deps = createDeps();
+    const handler = createMcpMemoryToolHandler(deps);
+
+    await handler.call({
+      toolName: "soul.recall",
+      arguments: {
+        query: "deployment rules",
+        scope_class: null,
+        dimension: null,
+        domain_tags: null,
+        max_results: 3,
+        host_context: {
+          tokenizer_hint: "cl100k",
+          host_context_window: 128000
+        }
+      },
+      context
+    });
+
+    expect(deps.recallService.recall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hostContext: {
+          tokenizer_hint: "cl100k",
+          host_context_window: 128000
+        }
+      })
+    );
+  });
+
   it("defaults time_field to created_at when only since is provided", async () => {
     const deps = createDeps();
     const handler = createMcpMemoryToolHandler(deps);
