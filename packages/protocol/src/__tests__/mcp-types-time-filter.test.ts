@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   RecallTimeFieldSchema,
-  SoulMemorySearchRequestSchema
+  SoulMemorySearchRequestSchema,
+  soulToolJsonSchemas
 } from "../soul/mcp-types.js";
 
 const baseRequest = {
@@ -50,6 +51,47 @@ describe("SoulMemorySearchRequestSchema time-filter fields", () => {
       time_field: "last_used_at"
     });
     expect(parsed.time_field).toBe("last_used_at");
+  });
+
+  it("accepts optional host_context tokenizer hints without requiring old callers to send it", () => {
+    expect(SoulMemorySearchRequestSchema.parse({ ...baseRequest }).host_context).toBeUndefined();
+
+    const parsed = SoulMemorySearchRequestSchema.parse({
+      ...baseRequest,
+      host_context: {
+        tokenizer_hint: "cl100k",
+        host_context_window: 200000
+      }
+    });
+
+    expect(parsed.host_context).toEqual({
+      tokenizer_hint: "cl100k",
+      host_context_window: 200000
+    });
+  });
+
+  it("rejects unknown tokenizer hints and publishes host_context in the MCP catalog schema", () => {
+    expect(() =>
+      SoulMemorySearchRequestSchema.parse({
+        ...baseRequest,
+        host_context: {
+          tokenizer_hint: "unknown-tokenizer"
+        }
+      })
+    ).toThrow();
+
+    const recallSchema = soulToolJsonSchemas["soul.recall"] as {
+      readonly properties?: Record<string, unknown>;
+    };
+    const hostContextSchema = recallSchema.properties?.["host_context"] as {
+      readonly properties?: Record<string, unknown>;
+    } | undefined;
+    const tokenizerHintSchema = hostContextSchema?.properties?.["tokenizer_hint"] as {
+      readonly enum?: readonly string[];
+    } | undefined;
+
+    expect(hostContextSchema).toBeDefined();
+    expect(tokenizerHintSchema?.enum).toEqual(["cl100k", "o200k", "approx_chars_per_token"]);
   });
 
   it("rejects a non-ISO datetime in since", () => {

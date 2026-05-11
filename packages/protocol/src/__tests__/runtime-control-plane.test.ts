@@ -6,6 +6,7 @@ import {
   BudgetBankruptcyStateSchema,
   ContextLensSchema,
   ControlPlaneObjectKind,
+  DYNAMICS_CONSTANTS,
   GapRecordSchema,
   GovernanceLeaseSchema,
   HandoffRecordSchema,
@@ -242,6 +243,38 @@ const gapRecordBase = {
 describe("Runtime Control Plane Schemas", () => {
   it("parses RecallPolicy two-stage config round-trip", () => {
     expect(RecallPolicySchema.parse(recallPolicyBase)).toEqual(recallPolicyBase);
+  });
+
+  it("parses optional per-domain recall weight overrides as additive policy data", () => {
+    const parsed = RecallPolicySchema.parse({
+      ...recallPolicyBase,
+      domain_weight_overrides: {
+        research: {
+          scope_match: 0.08,
+          relevance: 0.2
+        }
+      }
+    });
+
+    expect(parsed.domain_weight_overrides?.research).toEqual({
+      scope_match: 0.08,
+      relevance: 0.2
+    });
+    expect(RecallPolicySchema.parse(recallPolicyBase).domain_weight_overrides).toBeUndefined();
+    expect(
+      RecallPolicySchema.safeParse({
+        ...recallPolicyBase,
+        domain_weight_overrides: {
+          research: {
+            relevance: 1.2
+          }
+        }
+      }).success
+    ).toBe(false);
+    expect(Object.values(DYNAMICS_CONSTANTS.activation_weights_phase4b).reduce((sum, value) => sum + value, 0)).toBeCloseTo(
+      1,
+      10
+    );
   });
 
   it("enforces [0,1] relevance_score in ContextLensEntry", () => {

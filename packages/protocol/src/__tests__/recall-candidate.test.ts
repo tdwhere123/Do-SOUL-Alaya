@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MemoryDimension, ScopeClass } from "../index.js";
+import { DYNAMICS_CONSTANTS, MemoryDimension, ScopeClass } from "../index.js";
 import {
   RecallCandidateSchema,
   RecallOriginPlaneSchema
@@ -98,5 +98,45 @@ describe("Recall candidate protocol schema", () => {
         within_budget: true
       }
     });
+  });
+
+  it("accepts resolved activation weights in score factors and remains backward-compatible without them", () => {
+    const withResolvedWeights = RecallCandidateSchema.parse({
+      object_id: "memory-4",
+      object_kind: "memory_entry",
+      activation_score: 0.7,
+      relevance_score: 0.64,
+      content_preview: "Prefer deterministic tests.",
+      token_estimate: 7,
+      manifestation: "excerpt",
+      dimension: MemoryDimension.PROCEDURE,
+      scope_class: ScopeClass.PROJECT,
+      score_factors: {
+        activation: 0.7,
+        relevance: 0.64,
+        resolved_activation_weights: DYNAMICS_CONSTANTS.activation_weights_phase4b
+      }
+    });
+
+    const withoutResolvedWeights = RecallCandidateSchema.parse({
+      object_id: "memory-5",
+      object_kind: "memory_entry",
+      activation_score: 0.7,
+      relevance_score: 0.64,
+      content_preview: "Old score factor payloads still parse.",
+      token_estimate: 7,
+      manifestation: "excerpt",
+      dimension: MemoryDimension.PROCEDURE,
+      scope_class: ScopeClass.PROJECT,
+      score_factors: {
+        activation: 0.7,
+        relevance: 0.64
+      }
+    });
+
+    expect(withResolvedWeights.score_factors?.resolved_activation_weights).toEqual(
+      DYNAMICS_CONSTANTS.activation_weights_phase4b
+    );
+    expect(withoutResolvedWeights.score_factors?.resolved_activation_weights).toBeUndefined();
   });
 });
