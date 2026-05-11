@@ -121,6 +121,56 @@ These rules always win over lower-level docs and task-card convenience.
     `docs/handbook/architecture.md §Surface Shape` for design
     authority.
 
+25. **MCP and Protocol SemVer Contract.** Alaya publishes three
+    concentric public contracts that downstream consumers (sibling
+    agents, MCP clients, SDK pinning) may rely on:
+
+    - **MCP tool surface:** tool names and descriptions in
+      `packages/engine-gateway/src/provider/soul-tool-specs.ts`, and
+      every Zod schema transitively reachable from an MCP request or
+      response type in `packages/protocol/src/soul/mcp-types.ts`.
+      The authoritative definition is transitive reachability, not a
+      hand-maintained file list. The `semver-surface.test.ts`
+      snapshot computes and pins the reachable set.
+    - **EventLog payload surface:** payload schemas under
+      `packages/protocol/src/events/*`.
+    - **Runtime control-plane config surface:** config schemas under
+      `packages/protocol/src/app-config.ts`.
+
+    Workspace-internal TypeScript interfaces with no MCP, EventLog,
+    config, or production-consumer surface are out of SemVer scope
+    until they gain a real consumer.
+
+    SemVer step meanings:
+
+    - Patch (`x.y.Z`): bug fixes, performance work, or internal
+      refactors with no public schema change.
+    - Minor (`x.Y.z`): additive only, including new optional
+      payload/result fields, new event types, new tool names, and new
+      enum values that are not discriminator keys.
+    - Major (`X.y.z`): any removal, rename, narrowed nullable,
+      newly-required field, removed enum value, renamed tool, or
+      semantic redefinition on any covered layer.
+
+    Removing a public symbol requires `@deprecated` JSDoc on the
+    schema at least one minor release before removal, a
+    `docs/handbook/maintenance.md` entry naming the symbol and target
+    removal version, and a sibling-compat smoke test asserting the old
+    shape still parses. Earliest removal is the next minor after the
+    deprecation minor.
+
+    Sibling consumers pin `@do-soul/alaya-protocol` to the minor, for
+    example `^0.2.0`. Cross-major upgrades require reading the
+    relevant maintenance migration entry.
+
+    PRs touching `packages/protocol/src/events/`,
+    `packages/protocol/src/app-config.ts`,
+    `packages/engine-gateway/src/provider/soul-tool-specs.ts`, or any
+    Zod schema transitively reachable from MCP request/response types
+    in `mcp-types.ts` must cite §25 and declare the SemVer step. If
+    the `semver-surface.test.ts` snapshot moves, the PR is touching
+    the MCP contract.
+
 ## Port (Historical, retired after v0.1.0)
 
 The v0.1-specific port invariants (vendor snapshot as source of

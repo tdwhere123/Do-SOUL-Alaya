@@ -42,9 +42,9 @@ const providerBaseDescriptionByName: Readonly<Record<AlayaMemoryToolName, string
   "soul.open_pointer":
     "WHEN: a recall result preview is insufficient and you need the full content before citing it. Open a recalled memory object or evidence pointer by id. Read-only.",
   "soul.emit_candidate_signal":
-    "WHEN: you observe a new durable signal worth memorizing — a preference, decision, constraint, handoff, conflict, synthesis, or evidence anchor. Emit a candidate memory signal so the governance loop can promote it to a durable proposal. (Language-agnostic. 当你检测到需要记忆的偏好、决定、约束、冲突或证据时，请触发此工具)",
+    "WHEN: you observe a new durable signal worth memorizing — a preference, decision, constraint, handoff, conflict, synthesis, or evidence anchor. Emit a candidate memory signal so the governance loop can promote it to a durable proposal. Optional source_delivery_ids must reference recorded recall deliveries in the current trusted context. (Language-agnostic. 当你检测到需要记忆的偏好、决定、约束、冲突或证据时，请触发此工具)",
   "soul.propose_memory_update":
-    "WHEN: a candidate signal has matured into a concrete memory write you want governance to review. Submit a proposed durable memory update; this does not directly write durable memory.",
+    "WHEN: a candidate signal has matured into a concrete memory write you want governance to review. Submit a proposed durable memory update; this does not directly write durable memory. Optional source_delivery_ids must reference recorded recall deliveries in the current trusted context.",
   "soul.review_memory_proposal":
     "WHEN: a human reviewer has explicitly approved or rejected a pending proposal and you need to record their decision. Accept or reject a pending memory proposal while preserving an explicit governance trace. Requires reviewer_identity so the review record names who approved or rejected the change.",
   "soul.list_pending_proposals":

@@ -31,6 +31,7 @@ each Phase Gate.
 | Gate-5F | Post-Gate-5 backlog closeout | **done**: `#BL-025`..`#BL-036` resolved; aggregate final review clean; full verification passed | Gate-5F passed |
 | Phase 6 | Wave 6: MCP agent-use protocol (9 `soul.*` tools), Garden auto-start on attach, cwd workspace, proposal accept→apply persistence | **done**: 9 MCP tools `mcp-callable`; Trustworthy Memory Loop `live-event-ready` | Gate-6 passed 2026-05-02; delta补审 closed at commit `abd464d` |
 | Phase 6.1 (v0.1.1) | Memory plane coherence wave: Inspector graph centring, Garden compute config split, recall tier widening, recall hit promotion, host-as-Garden-compute via SQLite-backed task queue + 3 `garden.*` MCP tools, profile drift detection, embedding error surfacing | **done**: Garden compute `host-worker-ready` via H1+H2+H3; recall cascade `live-event-ready`; 11 atomic slices, see commits `f4a522e..1f6fe35` | wave-end review pending |
+| v0.2.0 | pi-mono Garden provider path, recall scoring refinements, Trustworthy Loop trace anchoring, and invariant §25 SemVer contract | **candidate**: deterministic pi-mono resolver/extractor tests pass, recall refinements `live-event-ready`, Trustworthy Loop trace `live-event-ready`, SemVer snapshot `docs-truth-ready`; credentialed live pi-mono smoke is not proven in this environment | `docs/v0.2/v0.2.0/`; release acceptance pending live provider smoke |
 
 ## Subsystem Readiness (target = v0.1 release)
 
@@ -48,7 +49,7 @@ each Phase Gate.
 | SignalService | `implementation-ready` | `live-event-ready` | P2-svc-signal |
 | GlobalMemoryRecallService | `implementation-ready` | `live-event-ready` | P2-svc-global-recall |
 | TaskSurfaceBuilder | `implementation-ready` | `implementation-ready` | P2-svc-task-surface-builder-prelude |
-| RecallService | `implementation-ready` | `live-event-ready` | P2-svc-recall |
+| RecallService | `live-event-ready`; v0.2.0 adds budget `pressure_ratio` scoring, per-call `host_context.tokenizer_hint` estimation, and deterministic `domain_weight_overrides` audit factors | `live-event-ready` | P2-svc-recall + v0.2.0-slice-5..7 |
 | EmbeddingRecallService | `implementation-ready` | `live-event-ready` | P2-svc-embedding-recall |
 | EmbeddingBackfillHandler | `implementation-ready` | `live-event-ready` | P2-svc-embedding-pipeline |
 | ManifestationResolver | `implementation-ready` | `live-event-ready` | P2-svc-manifestation |
@@ -61,7 +62,7 @@ each Phase Gate.
 | Garden Janitor | `implementation-ready` | `live-event-ready` | P2-garden-batch-2 |
 | Garden Librarian | `implementation-ready` | `live-event-ready` | P2-garden-batch-2 |
 | GardenScheduler | `implementation-ready` | `live-event-ready` | P2-garden-batch-1 |
-| Garden compute providers / local heuristics | `implementation-ready` | `live-event-ready` | P2-garden-batch-1 |
+| Garden compute providers / pi-mono + local heuristics | `implementation-ready`; `OfficialApiGardenProvider` routes extraction through `packages/soul/src/garden/pi-mono-extractor.ts`, with lazy daemon credential/config resolution through `GardenComputeProviderResolver`; deterministic daemon/config tests pass, but credentialed live pi-mono smoke is pending | `live-event-ready` | P2-garden-batch-1 + v0.2.0-slice-2..4 |
 | Garden materialization / degradation / handoff gap | `implementation-ready` | `live-event-ready` | P2-garden-batch-3 |
 | Garden bootstrapping / remediation / backlog telemetry | `implementation-ready` | `live-event-ready` | P2-garden-batch-4 |
 | Soul package skeleton + governance leaves | `schema-ready` | `schema-ready` | P1-soul-skeleton |
@@ -69,10 +70,10 @@ each Phase Gate.
 | Permission policy stack | `implementation-ready` | `implementation-ready` | P2-security-1 |
 | Worker safety / trust | `implementation-ready` | `implementation-ready` | P2-security-2 |
 | ConversationService | `implementation-ready` | `implementation-ready` in P3; `live-event-ready` after Phase 4 daemon/MCP proof | P3-conversation + P4-mcp-memory-tools |
-| Engine gateway MCP/provider skeleton | `implementation-ready` | `implementation-ready` | P1-engine-gateway-mcp |
+| Engine gateway MCP tool specs + binding helpers | `implementation-ready`; dead provider-placeholder types were deleted in v0.2.0, while `provider/soul-tool-specs.ts` remains the stable MCP tool-name/description seed under invariant §25 | `implementation-ready` | P1-engine-gateway-mcp + v0.2.0-slice-1 |
 | First-party MCP memory tool contract | `implementation-ready` | `implementation-ready` | P4-mcp-memory-tools |
 | MCP discovery services | `implementation-ready` | `implementation-ready` | P3-mcp-discovery |
-| MCP tool surface | `mcp-callable` via single-daemon attached-agent MCP harness | `mcp-callable`; `agent-used` deferred to v0.2 (real Codex/Claude conversation autonomy proof) | P3-mcp-discovery + P4-mcp-tooling + P4-mcp-memory-tools + P4-mcp-server + Gate-4 proof harness |
+| MCP tool surface | `mcp-callable` via single-daemon attached-agent MCP harness | `mcp-callable`; `agent-used` deferred to v0.2.2 / #BL-038 (real Codex/Claude conversation autonomy proof) | P3-mcp-discovery + P4-mcp-tooling + P4-mcp-memory-tools + P4-mcp-server + Gate-4 proof harness |
 | Core daemon | `implementation-ready` | `live-event-ready` | P4-daemon-skeleton + P4-daemon-startup-ordering + P4-sse-strip |
 | Profile mutation (Codex/Claude attach) | MCP profile entries are `cli-consumable`; Alaya-managed slash profile entries are written but host recognition is tracked separately | `cli-consumable` for MCP attach | P4-profile-mutation |
 | Slash boot trigger (`/alaya-inspect`) | `implementation-ready`; attach writes the managed trigger, but Codex host recognition for custom slash commands is not proven | host-proven `cli-consumable` | P4-profile-mutation + #BL-037 |
@@ -85,13 +86,13 @@ each Phase Gate.
 | Memory Inspector | `live-event-ready`; server/frontend exist, token-gated routes pass, and Provider/Config writes proxy daemon runtime config | `live-event-ready` for the inspector surface | P4-inspector-server + P4-cli-inspect + P4-inspector-frontend + #BL-019 repair |
 | Current-directory workspace startup | `cli-consumable`; absent `--workspace` or `ALAYA_WORKSPACE_ID`, attached MCP stdio and CLI fallback calls derive and register a stable local workspace from process cwd before invoking memory tools or Garden startup | `cli-consumable` | P6-cwd-workspace-startup |
 | Garden startup / cleanup loop | `live-event-ready`; HTTP daemon and attached MCP stdio start Garden services, trigger one startup background pass, then leave Janitor/Auditor/Librarian/Scheduler on intervals until shutdown drains them | `live-event-ready` | P2-garden-batch-* + P4-mcp-server + P6-garden-startup-cleanup-loop |
-| MCP Agent-Use Protocol | `mcp-callable`; SDK-driven proof covers tool discovery, ordered MCP calls, CLI fallback, pointer open, usage receipt, proposal review, durable update, and post-apply recall. Does NOT yet prove a real host autonomously selects these tools during a live Codex/Claude conversation. | `mcp-callable`; `agent-used` deferred to v0.2 (see backlog `#BL-host-driven-autonomy-proof`) | P6-agent-use-protocol + P6-live-agent-proof |
-| Garden compute provider config | `live-event-ready`; provider_kind / model_id / provider_url / secret_ref split from embedding config; doctor surfaces credential_source (env / file / embedding-fallback / none) and routing_decision; deprecation warning fires once when ALAYA_OPENAI_SECRET_REF is reused as Garden key | `live-event-ready` | P6.1-C1 + P6.1-C2 |
+| MCP Agent-Use Protocol | `mcp-callable`; SDK-driven proof covers tool discovery, ordered MCP calls, CLI fallback, pointer open, usage receipt, proposal review, durable update, and post-apply recall. Does NOT yet prove a real host autonomously selects these tools during a live Codex/Claude conversation. | `mcp-callable`; `agent-used` deferred to v0.2.2 / #BL-038 | P6-agent-use-protocol + P6-live-agent-proof |
+| Garden compute provider config | `live-event-ready` for deterministic config routing; provider_kind / model_id / provider_url / secret_ref split from embedding config; doctor surfaces credential_source (env / file / embedding-fallback / none) and routing_decision; v0.2.0 hot-applies runtime config patches by refreshing compute routing candidates and lazily rebuilding pi-mono-backed official providers after config/secret changes | `live-event-ready` | P6.1-C1 + P6.1-C2 + v0.2.0-slice-4 |
 | Garden host-worker surface | `host-worker-ready`; SQLite-backed task queue with atomic claimAtomic CAS (`packages/storage/src/repos/garden-task-repo.ts`); three MCP tools (`garden.list_pending_tasks`, `garden.claim_task`, `garden.complete_task`) let host CLI agents claim and complete Garden tasks; result candidate_signals flow into the same review queue as `soul.emit_candidate_signal` | `host-worker-ready` | P6.1-H1 + P6.1-H2 + P6.1-H3 |
 | POST_TURN_EXTRACT routing | `live-event-ready`; `report_context_usage` with `usage_status="used"` enqueues a `POST_TURN_EXTRACT` Garden task deduped on `(workspace_id, run_id, turn_index)`; routes to OfficialApiGardenProvider, host_worker (pending for MCP claim), or LocalHeuristics based on the live Garden compute config | `live-event-ready` | P6.1-H3 |
 | Recall tier widening | `live-event-ready`; coarse filter cascades HOT → WARM → COLD when fine-assessment results stay below `MIN_RECALL_RESULTS`; freshness decay 0.7 / 0.45; `degradation_reason` surfaces `warm_cascade_engaged` / `cold_cascade_engaged`; HOT-only fast path is byte-identical at the response boundary | `live-event-ready` | P6.1-R1 |
 | Recall hit → tier promotion | `live-event-ready`; `report_context_usage` with `usage_status="used"` on a non-HOT memory atomically promotes it to HOT and emits `SOUL_MEMORY_TIER_PROMOTED` with `reason="recall_hit"` via `EventPublisher.appendManyWithMutation`; concurrent USED reports collapse to one promotion via storage CAS | `live-event-ready` | P6.1-R2 |
-| Trustworthy Memory Loop | `live-event-ready`; accepted memory proposals validate through `MemoryService.validateUpdate`, apply inside an atomic proposal/storage transaction, reject leaves durable memory unchanged, and audit evidence remains in EventLog / repo projections | `live-event-ready` | P6-governance-accept-apply |
+| Trustworthy Memory Loop | `live-event-ready`; accepted memory proposals validate through `MemoryService.validateUpdate`, apply inside an atomic proposal/storage transaction, reject leaves durable memory unchanged, and v0.2.0 carries optional `source_delivery_ids` through agent-originated candidate signals, proposal rows, proposal events, and daemon audit proof after validating anchors against recorded deliveries in the current trusted context | `live-event-ready` | P6-governance-accept-apply + v0.2.0-slice-8..9 |
 | Recall explainability + operator control | `schema-ready`; recall results expose selection reason, source channels, score factors, budget state, response strategy mix, and degradation reason; CLI/status names control-plane states distinctly | `schema-ready` | P6-recall-explainability + P6-operator-control |
 | Recall utilization telemetry | `live-event-ready`; daemon emits `soul.recall.delivered` (delivery_id / session_id / run_id / agent_target / query_hash / pointer_count / latency_ms) per `soul.recall` MCP call and `soul.context_usage.reported` per `soul.report_context_usage`. session_id is process-stable for `mcp stdio` and per-call for HTTP / CLI surfaces. usage events attribute run_id / agent_target / workspace_id from the linked delivery (not the reporter context) so retries land in the right session. `alaya status --recall-stats --workspace <id> [--since/--until]` aggregates total / unique_sessions / unique_runs / miss_ratio / used_ratio / follow_through_ratio over the EventLog window; aggregation excludes `inspector` / `cli` / `tools-cli` agent_targets by default (configurable via `excludeAgentTargets`); failures of the telemetry append never surface to the MCP caller. | `live-event-ready` | apps/core-daemon/src/services/recall-utilization-service.ts |
 | Cross-surface Phase 6 contract parity docs | `docs-truth-ready` | `docs-truth-ready` | P6-contract-parity-reset |
@@ -359,8 +360,7 @@ push tag v*` it runs CI, generates the tarball + `SHA256SUMS` via
   against a real daemon and asserts Garden EventLog + health-journal
   evidence. `mcp-callable` requires this SDK-driven attached-agent
   proof, not P4-mcp-tooling alone; `agent-used` requires real host
-  autonomy and is deferred to v0.2 (see backlog
-  `#BL-host-driven-autonomy-proof`). Current proof:
+  autonomy and is deferred to v0.2.2 / #BL-038. Current proof:
   `rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon gate4-attached-agent-mcp-proof`.
 - **Gate-5 (v0.1.0 release)**: Gate-4 plus graph contract derived
   from real PathRelation data, full E2E proof, and final multi-lens

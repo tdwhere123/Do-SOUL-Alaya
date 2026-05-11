@@ -323,18 +323,24 @@ const hoisted = vi.hoisted(() => {
     return officialGardenProviderInstance;
   });
   const computeRoutingServiceCtor = vi.fn().mockImplementation(function ComputeRoutingService(deps) {
-    hoisted.computeRoutingServiceDeps = deps;
+    let currentProviders = deps.providers;
+    const setProviders = vi.fn((providers) => {
+      currentProviders = providers;
+      hoisted.computeRoutingServiceDeps = { ...deps, providers: currentProviders };
+    });
+    hoisted.computeRoutingServiceDeps = { ...deps, providers: currentProviders };
+    hoisted.computeRoutingServiceSetProviders = setProviders;
     return {
       route: hoisted.computeRoutingRoute,
       toModelRef: hoisted.computeRoutingToModelRef,
-      getDefaultProvider: vi.fn(() => deps.providers[0]?.provider ?? localHeuristicsInstance),
+      getDefaultProvider: vi.fn(() => currentProviders[0]?.provider ?? localHeuristicsInstance),
       resolveProvider: vi.fn((modelRef) => {
         if (modelRef == null) {
           return null;
         }
 
         return (
-          deps.providers.find(
+          currentProviders.find(
             (candidate: {
               readonly kind: string;
               readonly model_id: string;
@@ -346,7 +352,8 @@ const hoisted = vi.hoisted(() => {
               (candidate.adapter ?? null) === (modelRef.adapter ?? null)
           )?.provider ?? null
         );
-      })
+      }),
+      setProviders
     };
   });
   const stanceResolutionResolve = vi.fn(async () => ({
@@ -465,6 +472,7 @@ const hoisted = vi.hoisted(() => {
     computeRoutingToModelRef,
     computeRoutingServiceCtor,
     computeRoutingServiceDeps: null as null | Record<string, unknown>,
+    computeRoutingServiceSetProviders: null as null | ReturnType<typeof vi.fn>,
     stanceResolutionResolve,
     createApp: vi.fn(() => ({ fetch: vi.fn() })),
     createEnvironmentStatusService: vi.fn(() => ({
@@ -1215,6 +1223,7 @@ export function resetToolRuntimeWiringState(): void {
   hoisted.canonicalAliasServiceDeps = null;
   hoisted.claimServiceDeps = null;
   hoisted.computeRoutingServiceDeps = null;
+  hoisted.computeRoutingServiceSetProviders = null;
   hoisted.conversationToolExecutorDeps = null;
   hoisted.conversationServiceDeps = null;
   hoisted.officialGardenProviderDeps = null;

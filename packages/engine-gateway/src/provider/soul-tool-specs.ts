@@ -25,7 +25,7 @@ export interface SoulToolSpec {
 }
 
 const emitCandidateSignalDescription =
-  "WHEN: you observe a new durable signal worth memorizing — a preference, decision, constraint, handoff, conflict, synthesis, or evidence anchor. Emit a candidate memory signal so the governance loop can promote it to a durable proposal. (Language-agnostic. 当你检测到需要记忆的偏好、决定、约束、冲突或证据时，请触发此工具)";
+  "WHEN: you observe a new durable signal worth memorizing — a preference, decision, constraint, handoff, conflict, synthesis, or evidence anchor. Emit a candidate memory signal so the governance loop can promote it to a durable proposal. Optional source_delivery_ids must reference recorded recall deliveries in the current trusted context. (Language-agnostic. 当你检测到需要记忆的偏好、决定、约束、冲突或证据时，请触发此工具)";
 
 export const soulToolDefs: readonly SoulToolSpec[] = [
   {
@@ -48,7 +48,7 @@ export const soulToolDefs: readonly SoulToolSpec[] = [
   {
     name: "soul.propose_memory_update",
     description:
-      "WHEN: a candidate signal has matured into a concrete memory write you want governance to review. Submit a proposed durable memory update; this does not directly write durable memory.",
+      "WHEN: a candidate signal has matured into a concrete memory write you want governance to review. Submit a proposed durable memory update; this does not directly write durable memory. Optional source_delivery_ids must reference recorded recall deliveries in the current trusted context.",
     parametersSchema: SoulProposeMemoryUpdateRequestSchema
   },
   {

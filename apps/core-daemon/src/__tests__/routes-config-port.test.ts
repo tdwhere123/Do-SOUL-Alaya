@@ -60,6 +60,48 @@ describe("routes-config port batch", () => {
     expect(configService.patchRuntimeEmbeddingConfig).toHaveBeenCalledWith(body);
   });
 
+  it("reports runtime Garden compute patches as hot-applied without daemon restart", async () => {
+    const configService = {
+      getSoulConfig: vi.fn(),
+      patchSoulConfig: vi.fn(),
+      getStrategyConfig: vi.fn(),
+      patchStrategyConfig: vi.fn(),
+      getEnvironmentConfig: vi.fn(),
+      patchEnvironmentConfig: vi.fn(),
+      getRuntimeEmbeddingConfig: vi.fn(),
+      patchRuntimeEmbeddingConfig: vi.fn(),
+      getRuntimeGardenComputeConfig: vi.fn(),
+      patchRuntimeGardenComputeConfig: vi.fn(async (patch: unknown) => patch),
+      getGardenCredentialProvenance: vi.fn(async () => ({ kind: "none" }))
+    };
+    const app = new Hono();
+    registerConfigRoutes(app, {
+      workspaceService: { getById: vi.fn() },
+      configService
+    } as any);
+
+    const body = {
+      provider_kind: "official_api",
+      provider_url: null,
+      secret_ref: "env:ALAYA_TEST_OPENAI_KEY",
+      model_id: "gpt-4.1-mini",
+      enabled: true
+    };
+    const response = await app.request("/config/runtime/garden-compute", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      success: true,
+      data: body,
+      requires_daemon_restart: false
+    });
+    expect(configService.patchRuntimeGardenComputeConfig).toHaveBeenCalledWith(body);
+  });
+
   it("persists runtime embedding config through the config service envelope and EventLog audit", async () => {
     const harness = await createServiceHarness();
 

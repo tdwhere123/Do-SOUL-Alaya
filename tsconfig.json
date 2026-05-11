@@ -1,0 +1,12 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/protocol" },
+    { "path": "./packages/storage" },
+    { "path": "./packages/core" },
+    { "path": "./packages/soul" },
+    { "path": "./packages/engine-gateway" },
+    { "path": "./apps/inspector" },
+    { "path": "./apps/core-daemon" }
+  ]
+}

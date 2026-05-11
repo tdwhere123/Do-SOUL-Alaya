@@ -31,13 +31,15 @@ const SYSTEM_NOW = () => new Date().toISOString();
 
 export class ComputeRoutingService {
   private readonly now: () => string;
+  private providers: readonly ComputeRoutingCandidate[];
 
   public constructor(private readonly deps: ComputeRoutingDependencies) {
     this.now = deps.now ?? SYSTEM_NOW;
+    this.providers = deps.providers;
   }
 
   public async route(workspaceId: string): Promise<Readonly<ComputeRoutingDecision>> {
-    const selectedCandidate = selectHighestPriorityCandidate(this.deps.providers);
+    const selectedCandidate = selectHighestPriorityCandidate(this.providers);
 
     if (selectedCandidate == null) {
       throw new Error("Compute routing failed closed: no configured compute providers.");
@@ -55,7 +57,7 @@ export class ComputeRoutingService {
   }
 
   public getDefaultProvider(): GardenComputeProvider {
-    const selectedCandidate = selectHighestPriorityCandidate(this.deps.providers);
+    const selectedCandidate = selectHighestPriorityCandidate(this.providers);
 
     if (selectedCandidate == null) {
       throw new Error("Compute routing failed closed: no configured compute providers.");
@@ -76,7 +78,7 @@ export class ComputeRoutingService {
     }
 
     const matchedCandidate =
-      this.deps.providers.find(
+      this.providers.find(
         (candidate) =>
           candidate.kind === modelRef.provider &&
           candidate.model_id === modelRef.model_id &&
@@ -84,6 +86,10 @@ export class ComputeRoutingService {
       ) ?? null;
 
     return matchedCandidate?.provider ?? null;
+  }
+
+  public setProviders(providers: readonly ComputeRoutingCandidate[]): void {
+    this.providers = providers;
   }
 
   private generateDecisionId(): string {

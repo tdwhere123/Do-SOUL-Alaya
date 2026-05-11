@@ -78,7 +78,7 @@ export function registerConfigRoutes(app: Hono, services: ConfigRouteServices): 
       const config = await services.configService!.patchRuntimeGardenComputeConfig(
         await parseJsonBody(context.req.json.bind(context.req))
       );
-      return context.json({ success: true, data: config, requires_daemon_restart: true }, 200);
+      return context.json({ success: true, data: config, requires_daemon_restart: false }, 200);
     });
   }
 

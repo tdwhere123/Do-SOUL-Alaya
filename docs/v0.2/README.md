@@ -92,6 +92,9 @@ docs/v0.2/
 ├── README.md              ← this file (entry point)
 ├── v0.2.0/
 │   ├── plan.md            ← v0.2.0 decisions + slice plan + risks
+│   ├── release-notes.md   ← v0.2.0 shipped surface + follow-ups
+│   ├── reports/
+│   │   └── v0.2.0-closeout.md
 │   └── task-cards/
 │       ├── v0.2.0-slice-1-retire-conversation-provider.md
 │       ├── v0.2.0-slice-2-pi-mono-extractor.md

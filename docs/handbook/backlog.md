@@ -18,6 +18,8 @@ D2 fix-loops, then resolved by Gate-5F under
 
 ### #BL-037 - Codex `/alaya-inspect` host recognition proof
 
+**Status**: Deferred to v0.2.2.
+
 `alaya attach codex` writes an Alaya-managed
 `[slash_commands.alaya-inspect]` profile entry that launches
 `node <repo>/bin/alaya.mjs inspect --open`. Current project truth proves
@@ -38,6 +40,8 @@ Close condition:
   fallback as the supported path.
 
 ### #BL-038 - Host autonomous use of `soul.*` tools
+
+**Status**: Deferred to v0.2.2.
 
 Opened by v0.1.1 Slice L1 (Codex diagnostic finding B-PL2 in
 `.do-it/product-logic/agent-use-garden-config-diagnostic.md`).
@@ -72,7 +76,7 @@ during a normal user conversation.
    the recorded transcript (offline replay) so the proof remains
    stable across host model upgrades.
 
-Open work for v0.2 task card: items 1-3 (real Codex/Claude session
+Open work for v0.2.2 task card: items 1-3 (real Codex/Claude session
 capture) and item 6 (offline replay fixture). Items 4-5 are now
 testable via `phase6-agent-use-protocol.test.ts` + the new metering
 service, but the live-host autonomous selection proof still requires
@@ -89,10 +93,30 @@ go without renaming the vocabulary again.
 
 ## Resolved Recently
 
-There are no other cross-phase unresolved issues after the Gate-5F
-implementation closeout. Gate-5F's aggregate final review and full
-verification gates passed before Phase 6 started; Phase 6 closed via
-Gate-6 + delta补审 (`docs/archive/v0.1-port-record/phase-6-briefs/reports/gate-6-delta-review.md`).
+Gate-5F's aggregate final review and full verification gates passed
+before Phase 6 started; Phase 6 closed via Gate-6 + delta补审
+(`docs/archive/v0.1-port-record/phase-6-briefs/reports/gate-6-delta-review.md`).
+
+### #BL-008 — engine-gateway provider integration via pi-mono
+
+**Status**: Resolved in v0.2.0.
+
+`OfficialApiGardenProvider` now calls pi-mono
+(`@earendil-works/pi-ai`) through
+`packages/soul/src/garden/pi-mono-extractor.ts`; daemon runtime config
+uses `GardenComputeProviderResolver` so provider credentials are
+resolved lazily from the current `RuntimeGardenComputeConfig`.
+
+The former engine-gateway `ConversationProvider` placeholder column
+was deleted rather than deprecated because invariant §21 retired the
+chat-turn surface that motivated it, and invariant §25 does not cover
+workspace-internal TypeScript interfaces with no MCP, EventLog,
+runtime-config, or production-consumer surface. Sibling-agent LLM
+abstraction remains intentionally undesigned until a real consumer
+surfaces a concrete contract.
+
+Close evidence: `v0.2.0-slice-1` through `v0.2.0-slice-4`; provider
+lane commit `fe89e28`.
 
 ## Resolved by Gate-5F (2026-05-05)
 
@@ -304,33 +328,16 @@ future contributor can re-litigate with full context.
 - **#BL-007 — Daemon SSE pipeline**: stripped by P4-sse-strip per
   invariant §11. Inspector consumes HTTP via polling, not SSE.
 
-## Deferred to v0.2
+## Deferred to v0.2.1
 
 These are real deferrals: the work is appropriate for Alaya but
 explicitly out of scope for v0.1. Each card that defers scope to one
 of these issues MUST cite the issue number in its §3 Deferred per
 Anti-Tail R2.
 
-### #BL-008 — engine-gateway provider integration via pi-mono
-
-**Status**: Deferred to v0.2
-**Close condition**: v0.2 integrates pi-mono
-(https://github.com/badlogic/pi-mono) as the LLM provider abstraction;
-`packages/engine-gateway` becomes a pi-mono client; synthesis,
-agent-side proposal scoring, and reflection paths route through
-pi-mono instead of upstream `provider/ai-sdk-*.ts`.
-
-Original entry "Defer LLM provider integration to v0.2" updated on
-2026-04-29 with route change: Alaya v0.2 does **not** port upstream
-`provider/ai-sdk-openai.ts`, `provider/ai-sdk-anthropic.ts`, or
-`api-conversation-engine.ts`. Those paths are replaced by a pi-mono
-integration. v0.1 still ships only the MCP bridge + provider registry
-skeleton (P1-engine-gateway-mcp); LLM-driven synthesis remains
-post-v0.1.
-
 ### #BL-009 — OS keychain for secrets
 
-**Status**: Deferred to v0.2
+**Status**: Deferred to v0.2.1.
 **Close condition**: P4-secrets gains a keychain adapter (macOS
 Keychain / Linux libsecret / Windows Credential Manager); secret-ref
 syntax extends to `keychain:<service>:<account>` and resolves through

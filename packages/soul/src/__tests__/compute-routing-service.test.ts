@@ -183,6 +183,55 @@ describe("ComputeRoutingService", () => {
     ).toBe(officialProvider);
     expect(service.resolveProvider(null)).toBeNull();
   });
+
+  it("refreshes routing candidates when runtime provider config changes", async () => {
+    const officialProvider = createProvider(GardenProviderKind.OFFICIAL_API);
+    const localProvider = createProvider(GardenProviderKind.LOCAL_HEURISTICS);
+    const service = new ComputeRoutingService({
+      providers: [
+        {
+          kind: ComputeProviderPriority.STUB,
+          provider: localProvider,
+          model_id: "local-heuristics",
+          adapter: "garden.local_heuristics"
+        }
+      ],
+      now: () => NOW,
+      generateDecisionId: () => "decision-001"
+    });
+
+    await expect(service.route("workspace-1")).resolves.toMatchObject({
+      selected_provider: ComputeProviderPriority.STUB,
+      model_id: "local-heuristics"
+    });
+
+    service.setProviders([
+      {
+        kind: ComputeProviderPriority.OFFICIAL_API,
+        provider: officialProvider,
+        model_id: "gpt-4.1-mini",
+        adapter: "garden.official_api"
+      },
+      {
+        kind: ComputeProviderPriority.STUB,
+        provider: localProvider,
+        model_id: "local-heuristics",
+        adapter: "garden.local_heuristics"
+      }
+    ]);
+
+    await expect(service.route("workspace-1")).resolves.toMatchObject({
+      selected_provider: ComputeProviderPriority.OFFICIAL_API,
+      model_id: "gpt-4.1-mini"
+    });
+    expect(
+      service.resolveProvider({
+        provider: ComputeProviderPriority.OFFICIAL_API,
+        model_id: "gpt-4.1-mini",
+        adapter: "garden.official_api"
+      })
+    ).toBe(officialProvider);
+  });
 });
 
 function createCandidate(input: {

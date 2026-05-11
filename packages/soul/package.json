@@ -1,6 +1,6 @@
 {
   "name": "@do-soul/alaya-soul",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "soul.* MCP tool surface for Do-SOUL Alaya (recall, propose, review, signals).",
   "license": "MIT",
   "homepage": "https://github.com/tdwhere123/Do-SOUL-Alaya",

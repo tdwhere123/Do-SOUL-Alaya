@@ -99,7 +99,8 @@ import {
   SoulToolGovernanceAdapter,
   SoulWorkerSafetyAdapter,
   SoulWorkerSafetyReader,
-  TopologyService
+  TopologyService,
+  type ComputeRoutingCandidate
 } from "@do-soul/alaya-soul";
 import { createCoreDaemonApp } from "./daemon-app-composition.js";
 import { createDaemonEmbeddingRuntime } from "./daemon-embedding-runtime.js";
@@ -567,31 +568,24 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     patchRuntimeGardenComputeConfig: async (patch: unknown) => {
       const config = await rawConfigService.patchRuntimeGardenComputeConfig(patch);
       gardenComputeProviderResolver.invalidate();
+      computeRoutingService.setProviders(
+        buildGardenComputeRoutingProviders({
+          config,
+          officialGardenProvider,
+          localHeuristicsProvider
+        })
+      );
       return config;
     }
   } satisfies typeof rawConfigService;
   const officialGardenProvider = gardenComputeProviderResolver;
   const initialGardenComputeConfig = await rawConfigService.getRuntimeGardenComputeConfig();
-  const initialOfficialGardenProviderAvailable = canResolveInitialOfficialGardenProvider(initialGardenComputeConfig);
   const computeRoutingService = new ComputeRoutingService({
-    providers: [
-      ...(initialOfficialGardenProviderAvailable
-        ? [
-            {
-              kind: ComputeProviderPriority.OFFICIAL_API,
-              provider: officialGardenProvider,
-              model_id: initialGardenComputeConfig.model_id ?? OFFICIAL_API_GARDEN_MODEL,
-              adapter: "garden.official_api"
-            }
-          ]
-        : []),
-      {
-        kind: ComputeProviderPriority.STUB,
-        provider: localHeuristicsProvider,
-        model_id: "local-heuristics",
-        adapter: "garden.local_heuristics"
-      }
-    ]
+    providers: buildGardenComputeRoutingProviders({
+      config: initialGardenComputeConfig,
+      officialGardenProvider,
+      localHeuristicsProvider
+    })
   });
   const gardenComputeProvider = computeRoutingService.getDefaultProvider();
   const conversationServiceDependencies = {
@@ -884,7 +878,32 @@ function resolveGardenSecretRefValue(secretRef: string): string {
   throw new Error(formatGardenSecretRefError(resolved));
 }
 
-function canResolveInitialOfficialGardenProvider(config: RuntimeGardenComputeConfig): boolean {
+function buildGardenComputeRoutingProviders(input: {
+  readonly config: RuntimeGardenComputeConfig;
+  readonly officialGardenProvider: GardenComputeProviderResolver;
+  readonly localHeuristicsProvider: LocalHeuristics;
+}): readonly ComputeRoutingCandidate[] {
+  return [
+    ...(canResolveOfficialGardenProvider(input.config)
+      ? [
+          {
+            kind: ComputeProviderPriority.OFFICIAL_API,
+            provider: input.officialGardenProvider,
+            model_id: input.config.model_id ?? OFFICIAL_API_GARDEN_MODEL,
+            adapter: "garden.official_api"
+          } satisfies ComputeRoutingCandidate
+        ]
+      : []),
+    {
+      kind: ComputeProviderPriority.STUB,
+      provider: input.localHeuristicsProvider,
+      model_id: "local-heuristics",
+      adapter: "garden.local_heuristics"
+    }
+  ];
+}
+
+function canResolveOfficialGardenProvider(config: RuntimeGardenComputeConfig): boolean {
   if (
     config.provider_kind !== "official_api" ||
     !config.enabled ||

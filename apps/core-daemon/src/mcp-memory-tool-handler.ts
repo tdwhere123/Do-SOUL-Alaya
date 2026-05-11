@@ -487,6 +487,7 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
         "soul.emit_candidate_signal requires a runId in the MCP call context."
       );
     }
+    await validateSourceDeliveryAnchors(request.source_delivery_ids, context);
     const signal = CandidateMemorySignalSchema.parse({
       signal_id: `signal_${generateId()}`,
       ...request,
@@ -511,6 +512,7 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     if (deps.proposalWorkflow === undefined) {
       throw new ToolUnavailableError("Memory proposal workflow is not available.");
     }
+    await validateSourceDeliveryAnchors(request.source_delivery_ids, context);
     return SoulProposeMemoryUpdateResponseSchema.parse(
       await deps.proposalWorkflow.proposeMemoryUpdate(request, context)
     );
@@ -715,6 +717,37 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
         source: signal.source
       });
     }
+  }
+
+  async function validateSourceDeliveryAnchors(
+    sourceDeliveryIds: readonly string[] | undefined,
+    context: McpMemoryToolCallContext
+  ): Promise<void> {
+    if (sourceDeliveryIds === undefined) {
+      return;
+    }
+
+    for (const deliveryId of sourceDeliveryIds) {
+      const delivery = await deps.trustStateRecorder.findDeliveryById(deliveryId);
+      if (!isSourceDeliveryInScope(delivery, context)) {
+        throw new ToolValidationError(
+          `source_delivery_ids contains an unknown or out-of-scope delivery_id: ${deliveryId}`
+        );
+      }
+    }
+  }
+
+  function isSourceDeliveryInScope(
+    delivery: Readonly<ContextDeliveryRecord> | null,
+    context: McpMemoryToolCallContext
+  ): delivery is Readonly<ContextDeliveryRecord> {
+    if (delivery === null) {
+      return false;
+    }
+
+    return delivery.agent_target === context.agentTarget &&
+      delivery.workspace_id === context.workspaceId &&
+      delivery.run_id === context.runId;
   }
 
   async function applyOverride(

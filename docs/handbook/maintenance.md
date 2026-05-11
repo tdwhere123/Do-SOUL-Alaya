@@ -45,6 +45,23 @@ When contracts change:
 - Update acceptance criteria and test expectations.
 - Update downstream consumer assumptions.
 
+## Deprecated public symbols
+
+No public MCP, EventLog, or runtime-control-plane symbols are
+deprecated as of v0.2.0. `ConversationProvider` was deleted rather
+than deprecated because it was a workspace-internal placeholder with
+no production consumer and is outside invariant §25's public surface.
+
+Future deprecation entries use this shape:
+
+```text
+<symbol> — deprecated in vX.Y, removal in vX.(Y+1) — see <migration link>
+```
+
+Each entry must name the covered surface, the replacement, the
+earliest removal version, and the sibling-compat smoke test that
+keeps the old shape parsing during the deprecation minor.
+
 ## Large File Rule
 
 Do not create new handbook files that require full reads over 30 KB

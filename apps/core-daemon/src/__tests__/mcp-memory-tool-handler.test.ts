@@ -398,6 +398,9 @@ describe("mcp memory tool handler", () => {
   it("threads source delivery anchors through emit_candidate_signal and warns when MODEL_TOOL omits them", async () => {
     const warn = vi.fn();
     const deps = { ...createDeps(), warn };
+    deps.trustStateRecorder.findDeliveryById = vi.fn(async (deliveryId: string) =>
+      createDeliveryRecord(deliveryId)
+    );
     const handler = createMcpMemoryToolHandler(deps);
 
     await expect(
@@ -447,6 +450,33 @@ describe("mcp memory tool handler", () => {
         source: "model_tool"
       })
     );
+  });
+
+  it("rejects source delivery anchors that are not recorded in the trusted context table", async () => {
+    const deps = createDeps();
+    deps.trustStateRecorder.findDeliveryById = vi.fn(async () => null);
+    const handler = createMcpMemoryToolHandler(deps);
+
+    await expect(
+      handler.call({
+        toolName: "soul.emit_candidate_signal",
+        arguments: {
+          signal_kind: "potential_preference",
+          object_kind: "memory_entry",
+          scope_hint: "project",
+          domain_tags: ["tooling"],
+          confidence: 0.9,
+          evidence_refs: ["memory-1"],
+          raw_payload: { observation: "Forged anchor." },
+          source_delivery_ids: ["delivery-forged"]
+        },
+        context
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "VALIDATION" }
+    });
+    expect(deps.signalService.receiveSignal).not.toHaveBeenCalled();
   });
 });
 
@@ -540,5 +570,17 @@ function createMemory(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
     contradiction_count: 0,
     superseded_by: null,
     ...overrides
+  };
+}
+
+function createDeliveryRecord(deliveryId: string): ContextDeliveryRecord {
+  return {
+    delivery_id: deliveryId,
+    agent_target: context.agentTarget,
+    workspace_id: context.workspaceId,
+    run_id: context.runId,
+    delivered_object_ids: ["mem1"],
+    delivered_at: "2026-04-30T00:00:00.000Z",
+    audit_event_id: `event-${deliveryId}`
   };
 }

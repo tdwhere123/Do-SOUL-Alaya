@@ -459,6 +459,53 @@ describe("daemon tool runtime bootstrap", () => {
     });
   });
 
+  it("hot-applies Garden compute PATCH by refreshing routing candidates without restart", async () => {
+    delete process.env.ALAYA_OPENAI_SECRET_REF;
+    delete process.env.OPENAI_API_KEY;
+
+    const runtime = await bootDaemonRuntime();
+
+    expect(hoisted.computeRoutingServiceDeps).toMatchObject({
+      providers: [
+        expect.objectContaining({
+          kind: "stub",
+          adapter: "garden.local_heuristics"
+        })
+      ]
+    });
+
+    process.env.ALAYA_TEST_OPENAI_KEY = "sk-patched-garden";
+    const configService = (runtime as Awaited<ReturnType<typeof bootDaemonRuntime>> & {
+      readonly services: {
+        readonly configService: {
+          patchRuntimeGardenComputeConfig(patch: unknown): Promise<unknown>;
+        };
+      };
+    }).services.configService;
+    await expect(configService.patchRuntimeGardenComputeConfig({
+      provider_kind: "official_api",
+      provider_url: null,
+      secret_ref: "env:ALAYA_TEST_OPENAI_KEY",
+      model_id: "gpt-4.1-mini",
+      enabled: true
+    })).resolves.toMatchObject({
+      provider_kind: "official_api",
+      secret_ref: "env:ALAYA_TEST_OPENAI_KEY",
+      enabled: true
+    });
+    expect(hoisted.computeRoutingServiceSetProviders).toHaveBeenCalledWith([
+      expect.objectContaining({
+        kind: "official_api",
+        model_id: "gpt-4.1-mini",
+        adapter: "garden.official_api"
+      }),
+      expect.objectContaining({
+        kind: "stub",
+        adapter: "garden.local_heuristics"
+      })
+    ]);
+  });
+
   it("reports degraded embedding status when supplement is enabled but the secret env is missing", async () => {
     const configDir = await mkdtemp(path.join(tmpdir(), "alaya-daemon-missing-embedding-status-"));
     isolatedConfigDirs.push(configDir);
