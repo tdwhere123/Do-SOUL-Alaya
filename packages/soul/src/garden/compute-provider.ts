@@ -198,6 +198,11 @@ export class LocalModelGardenProvider implements GardenComputeProvider {
   }
 }
 
+const MAX_OFFICIAL_API_SIGNALS = 64;
+const MAX_OFFICIAL_API_OBJECT_KIND_CHARS = 200;
+const MAX_OFFICIAL_API_MATCHED_TEXT_CHARS = 4_000;
+const MAX_OFFICIAL_API_REASON_CHARS = 400;
+
 function parseOfficialApiSignals(content: string): readonly OfficialApiSignalDraft[] {
   const parsed = JSON.parse(content) as unknown;
   if (
@@ -210,33 +215,36 @@ function parseOfficialApiSignals(content: string): readonly OfficialApiSignalDra
   }
 
   return Object.freeze(
-    (parsed as { readonly signals: readonly unknown[] }).signals.map((candidate) => {
-      if (typeof candidate !== "object" || candidate === null) {
-        throw new Error("signal entry must be an object");
-      }
+    (parsed as { readonly signals: readonly unknown[] }).signals
+      .slice(0, MAX_OFFICIAL_API_SIGNALS)
+      .map((candidate) => {
+        if (typeof candidate !== "object" || candidate === null) {
+          throw new Error("signal entry must be an object");
+        }
 
-      const signalKind = normalizeOptionalString((candidate as { readonly signal_kind?: unknown }).signal_kind);
-      const objectKind = normalizeOptionalString((candidate as { readonly object_kind?: unknown }).object_kind);
-      const matchedText = normalizeOptionalString((candidate as { readonly matched_text?: unknown }).matched_text);
-      const confidence = (candidate as { readonly confidence?: unknown }).confidence;
-      const reason = normalizeOptionalString((candidate as { readonly reason?: unknown }).reason);
+        const signalKind = normalizeOptionalString((candidate as { readonly signal_kind?: unknown }).signal_kind);
+        const objectKind = normalizeOptionalString((candidate as { readonly object_kind?: unknown }).object_kind);
+        const matchedText = normalizeOptionalString((candidate as { readonly matched_text?: unknown }).matched_text);
+        const confidence = (candidate as { readonly confidence?: unknown }).confidence;
+        const reason = normalizeOptionalString((candidate as { readonly reason?: unknown }).reason);
 
-      if (signalKind === null || !isSignalKind(signalKind)) {
-        throw new Error("signal_kind must be a supported protocol value");
-      }
+        if (signalKind === null || !isSignalKind(signalKind)) {
+          throw new Error("signal_kind must be a supported protocol value");
+        }
 
-      if (objectKind === null || matchedText === null || typeof confidence !== "number") {
-        throw new Error("signal entry missing required fields");
-      }
+        if (objectKind === null || matchedText === null || typeof confidence !== "number") {
+          throw new Error("signal entry missing required fields");
+        }
 
-      return Object.freeze({
-        signal_kind: signalKind,
-        object_kind: objectKind,
-        confidence,
-        matched_text: matchedText,
-        ...(reason === null ? {} : { reason })
-      });
-    })
+        const clampedReason = reason === null ? null : reason.slice(0, MAX_OFFICIAL_API_REASON_CHARS);
+        return Object.freeze({
+          signal_kind: signalKind,
+          object_kind: objectKind.slice(0, MAX_OFFICIAL_API_OBJECT_KIND_CHARS),
+          confidence,
+          matched_text: matchedText.slice(0, MAX_OFFICIAL_API_MATCHED_TEXT_CHARS),
+          ...(clampedReason === null ? {} : { reason: clampedReason })
+        });
+      })
   );
 }
 

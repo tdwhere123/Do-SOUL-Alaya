@@ -1,3 +1,7 @@
+// Proves the pi-mono extractor's transport shape (prompts, JSON-mode, options)
+// against the curated fixture turns; it does NOT prove extraction quality —
+// real-provider extraction is gated by the live smoke recorded in
+// docs/v0.2/v0.2.0/task-cards/reports/v0.2.0-slice-3.md.
 import { readdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";

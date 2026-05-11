@@ -172,6 +172,36 @@ describe("Phase 4A protocol schemas", () => {
     expect(parseGardenEventPayload(GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED, recordedPayload)).toEqual(
       recordedPayload
     );
+
+    const gardenComputeRecordedPayload = {
+      entry_id: "entry-2",
+      event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
+      workspace_id: "workspace-1",
+      occurred_at: validTimestamp,
+      change_summary: {
+        fields_changed: ["provider_url", "model_id", "secret_ref"],
+        secret_ref_kind: "env",
+        provider_url: "https://garden.example.test/v1",
+        model_id: "gpt-4.1-mini"
+      }
+    } as const;
+    expect(
+      parseGardenEventPayload(GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED, gardenComputeRecordedPayload)
+    ).toEqual(gardenComputeRecordedPayload);
+
+    const clearedProviderUrlPayload = {
+      entry_id: "entry-3",
+      event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
+      workspace_id: "workspace-1",
+      occurred_at: validTimestamp,
+      change_summary: {
+        fields_changed: ["provider_url"],
+        provider_url: null
+      }
+    } as const;
+    expect(
+      parseGardenEventPayload(GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED, clearedProviderUrlPayload)
+    ).toEqual(clearedProviderUrlPayload);
   });
 
   it("rejects health journal change summaries that expose secret values", () => {

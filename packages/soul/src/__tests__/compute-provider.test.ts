@@ -129,6 +129,33 @@ describe("OfficialApiGardenProvider", () => {
     } satisfies Partial<GardenProviderError>);
   });
 
+  it("caps the signal count and clamps oversized fields from an official API response", async () => {
+    const oversizedMatchedText = "x".repeat(10_000);
+    const oversizedObjectKind = "k".repeat(1_000);
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      now: () => "2026-04-23T09:00:00.000Z",
+      generateSignalId: () => "signal-capped",
+      extractor: createExtractor(
+        JSON.stringify({
+          signals: Array.from({ length: 200 }, () => ({
+            signal_kind: "potential_preference",
+            object_kind: oversizedObjectKind,
+            confidence: 0.5,
+            matched_text: oversizedMatchedText,
+            reason: "r".repeat(1_000)
+          }))
+        })
+      )
+    });
+
+    const signals = await provider.compile("Call me Ash.", createContext());
+    expect(signals).toHaveLength(64);
+    expect(signals[0]!.object_kind.length).toBe(200);
+    expect((signals[0]!.raw_payload as { matched_text: string }).matched_text.length).toBe(4_000);
+    expect((signals[0]!.raw_payload as { extraction_reason: string }).extraction_reason.length).toBe(400);
+  });
+
   it("surfaces the custom API stub as a typed provider failure", async () => {
     const provider = new CustomApiGardenProvider();
 

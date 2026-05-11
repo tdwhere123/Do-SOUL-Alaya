@@ -134,6 +134,35 @@ describe("routes-config port batch", () => {
     });
   });
 
+  it("records the non-secret provider_url and model_id in the runtime Garden compute config audit", async () => {
+    const harness = await createServiceHarness();
+
+    await harness.service.patchRuntimeGardenComputeConfig({
+      provider_kind: "official_api",
+      provider_url: "https://garden.example.test/v1",
+      secret_ref: "env:ALAYA_TEST_GARDEN_KEY",
+      model_id: "gpt-4.1-mini",
+      enabled: true
+    });
+
+    expect(harness.publishedEvents).toHaveLength(1);
+    expect(harness.publishedEvents[0]).toMatchObject({
+      event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
+      entity_type: "runtime_config",
+      entity_id: "runtime:garden-compute",
+      caused_by: "inspector",
+      payload_json: {
+        event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
+        change_summary: {
+          fields_changed: ["provider_kind", "provider_url", "secret_ref", "model_id", "enabled"],
+          secret_ref_kind: "env",
+          provider_url: "https://garden.example.test/v1",
+          model_id: "gpt-4.1-mini"
+        }
+      }
+    });
+  });
+
   it("normalizes paste mode in daemon service, writes only file refs publicly, and keeps plaintext out of audit/env", async () => {
     const harness = await createServiceHarness();
     const plaintext = "sk-test-plaintext-secret";

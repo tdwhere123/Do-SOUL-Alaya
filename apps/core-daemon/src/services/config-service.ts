@@ -373,11 +373,15 @@ async function patchRuntimeGardenComputeConfig(input: {
 function buildRuntimeGardenComputeChangeSummary(normalized: NormalizedRuntimeGardenComputeConfigPatch): {
   readonly fields_changed: readonly string[];
   readonly secret_ref_kind?: "env" | "file" | null;
+  readonly provider_url?: string | null;
+  readonly model_id?: string | null;
 } {
   const fieldsChanged = RUNTIME_GARDEN_COMPUTE_CONFIG_FIELDS.filter((field) => normalized.patch[field] !== undefined);
   return {
     fields_changed: fieldsChanged,
-    ...(normalized.patch.secret_ref !== undefined ? { secret_ref_kind: secretRefKind(normalized.patch.secret_ref) } : {})
+    ...(normalized.patch.secret_ref !== undefined ? { secret_ref_kind: secretRefKind(normalized.patch.secret_ref) } : {}),
+    ...(normalized.patch.provider_url !== undefined ? { provider_url: normalized.patch.provider_url } : {}),
+    ...(normalized.patch.model_id !== undefined ? { model_id: normalized.patch.model_id } : {})
   };
 }
 

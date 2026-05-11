@@ -1,10 +1,10 @@
-# Alaya v0.2.0 Release Candidate Notes
+# Alaya v0.2.0 Release Notes
 
-v0.2.0 is the first forward-development candidate after the v0.1 port:
+v0.2.0 is the first forward-development release after the v0.1 port:
 pi-mono provider wiring, recall scoring refinements, Trustworthy Loop
 trace anchoring, and invariant §25 for public protocol SemVer. Local
-deterministic build/test gates pass; credentialed live pi-mono smoke is
-the remaining release-acceptance proof.
+deterministic build/test gates pass and the credentialed live pi-mono
+smoke is recorded in `task-cards/reports/v0.2.0-slice-3.md`.
 
 ## Provider Path
 
@@ -18,6 +18,17 @@ the remaining release-acceptance proof.
   lazily resolves the current `RuntimeGardenComputeConfig.secret_ref`,
   rebuilds official providers after config or secret changes, and is
   reinserted into compute routing after runtime Garden compute PATCH.
+- `parseOfficialApiSignals` and the pi-mono extractor bound the
+  official-provider response: at most 64 signals, length-clamped
+  `object_kind` / `matched_text` / `reason`, and a response body over
+  256 000 chars is rejected as invalid JSON — Garden's fire-and-forget
+  per-turn call cannot amplify a hostile/misconfigured endpoint into
+  unbounded EventLog writes.
+- The runtime Garden-compute config-change audit
+  (`SOUL_HEALTH_JOURNAL_RECORDED` → `change_summary`) records the new
+  non-secret `provider_url` and `model_id` values (additive optional
+  fields), not just the changed field names; `secret_ref` stays reduced
+  to `secret_ref_kind`.
 - The old engine-gateway `ConversationProvider` placeholder and
   `resolveLanguageModel` throw path were deleted. This removal is
   outside the invariant §25 public surface: it was a workspace-internal

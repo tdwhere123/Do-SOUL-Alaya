@@ -50,6 +50,7 @@ const DEFAULT_MAX_RETRIES = 0;
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 const DEFAULT_MAX_TOKENS = 8_192;
 const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1";
+const MAX_RESPONSE_TEXT_CHARS = 256_000;
 
 export function createPiMonoExtractor(deps: PiMonoExtractorDependencies): SignalExtractor {
   const completeImpl = deps.complete ?? complete;
@@ -164,6 +165,10 @@ function readTextContent(message: AssistantMessage): string {
 
   if (text.trim().length === 0) {
     throw new SignalExtractorError("invalid_json", "Signal extractor returned no text content.");
+  }
+
+  if (text.length > MAX_RESPONSE_TEXT_CHARS) {
+    throw new SignalExtractorError("invalid_json", "Signal extractor response exceeded the size limit.");
   }
 
   return text;

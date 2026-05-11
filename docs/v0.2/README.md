@@ -57,9 +57,9 @@ the minor and follow without reading code.
 | **v0.2.1** | OS keychain adapter (#BL-009) | Three platform integrations |
 | **v0.2.2** | Real host autonomy recording + offline replay (#BL-038); Codex `/alaya-inspect` host recognition (#BL-037) | External: needs real Codex/Claude run + Codex version handshake |
 
-Splitting along cadence boundaries means v0.2.0 can reach release
-candidate on local code merit, but PASS requires the recorded
-credentialed pi-mono smoke named by Slice 3. v0.2.1 and v0.2.2 are
+Splitting along cadence boundaries means v0.2.0 reached release on local
+code merit plus the recorded credentialed pi-mono smoke named by Slice 3
+(`v0.2.0/task-cards/reports/v0.2.0-slice-3.md`). v0.2.1 and v0.2.2 are
 dispatched independently when their external dependencies allow.
 
 ## Forward compatibility commitment
@@ -93,10 +93,12 @@ docs/v0.2/
 ├── README.md              ← this file (entry point)
 ├── v0.2.0/
 │   ├── plan.md            ← v0.2.0 decisions + slice plan + risks
-│   ├── release-notes.md   ← v0.2.0 candidate surface + follow-ups
+│   ├── release-notes.md   ← v0.2.0 shipped surface + follow-ups
 │   ├── reports/
 │   │   └── v0.2.0-closeout.md
 │   └── task-cards/
+│       ├── reports/
+│       │   └── v0.2.0-slice-3.md   ← live pi-mono smoke transcript
 │       ├── v0.2.0-slice-1-retire-conversation-provider.md
 │       ├── v0.2.0-slice-2-pi-mono-extractor.md
 │       ├── v0.2.0-slice-3-garden-provider-swap.md
