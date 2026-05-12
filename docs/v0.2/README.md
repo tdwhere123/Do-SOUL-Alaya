@@ -54,8 +54,16 @@ the minor and follow without reading code.
 | Release | Scope | Cadence driver |
 |---|---|---|
 | **v0.2.0** | pi-mono enabler, recall refinement, Trustworthy Loop trace, §25 SemVer | Local deterministic gates + provider-transport smoke; full daemon AC7 still required for release acceptance |
-| **v0.2.1** | OS keychain adapter (#BL-009) | Three platform integrations |
-| **v0.2.2** | Real host autonomy recording + offline replay (#BL-038); Codex `/alaya-inspect` host recognition (#BL-037) | External: needs real Codex/Claude run + Codex version handshake |
+
+The originally-planned `v0.2.1` (OS keychain adapter, `#BL-009`) and
+`v0.2.2` (host autonomy recording + Codex `/alaya-inspect`
+recognition, `#BL-038` / `#BL-037`) buckets were folded into
+**v0.3.0** — see `docs/v0.3/`. The renumber to a minor is because
+adding `keychain:` to the `secret_ref` accepted shapes
+(`packages/protocol/src/app-config.ts`) and `keychain` to the
+`secret_ref_kind` EventLog enum (`packages/protocol/src/events/garden.ts`)
+is an additive change on two §25-covered surfaces, which §25 defines
+as a minor bump.
 
 Splitting along cadence boundaries means v0.2.0 reached candidate status
 on local code merit plus the recorded provider-transport smoke named by
@@ -63,8 +71,7 @@ Slice 3 (`v0.2.0/task-cards/reports/v0.2.0-slice-3.md`). Full release
 acceptance still requires the Slice 3 AC7 live daemon smoke: fresh
 install, `soul.recall`, `soul.report_context_usage`, completed
 `POST_TURN_EXTRACT`, EventLog payload, and CandidateMemorySignal
-evidence in one run. v0.2.1 and v0.2.2 are dispatched independently
-when their external dependencies allow.
+evidence in one run.
 
 v0.2.0's release channel remains the GitHub source tarball / local build
 path used after v0.1.2. The workspace package metadata is for local
@@ -101,40 +108,37 @@ engine-gateway provider abstractions before any consumer exists) are
 ```
 docs/v0.2/
 ├── README.md              ← this file (entry point)
-├── v0.2.0/
-│   ├── plan.md            ← v0.2.0 decisions + slice plan + risks
-│   ├── release-notes.md   ← v0.2.0 candidate surface + follow-ups
-│   ├── reports/
-│   │   └── v0.2.0-closeout.md
-│   └── task-cards/
-│       ├── reports/
-│       │   └── v0.2.0-slice-3.md   ← provider-transport smoke transcript (AC7 partial)
-│       ├── v0.2.0-slice-1-retire-conversation-provider.md
-│       ├── v0.2.0-slice-2-pi-mono-extractor.md
-│       ├── v0.2.0-slice-3-garden-provider-swap.md
-│       ├── v0.2.0-slice-4-compute-provider-resolver.md
-│       ├── v0.2.0-slice-5-budget-penalty-graduated.md
-│       ├── v0.2.0-slice-6-token-estimator-hint.md
-│       ├── v0.2.0-slice-7-per-domain-weights.md
-│       ├── v0.2.0-slice-8-trust-loop-trace-anchors.md
-│       ├── v0.2.0-slice-9-trust-loop-e2e-test.md
-│       └── v0.2.0-slice-10-mcp-semver-25.md
-├── v0.2.1/
-│   └── plan.md            ← v0.2.1 keychain (#BL-009)
-└── v0.2.2/
-    └── plan.md            ← v0.2.2 host autonomy (#BL-037, #BL-038)
+└── v0.2.0/
+    ├── plan.md            ← v0.2.0 decisions + slice plan + risks
+    ├── release-notes.md   ← v0.2.0 candidate surface + follow-ups
+    ├── reports/
+    │   └── v0.2.0-closeout.md
+    └── task-cards/
+        ├── reports/
+        │   └── v0.2.0-slice-3.md   ← provider-transport smoke transcript (AC7 partial)
+        ├── v0.2.0-slice-1-retire-conversation-provider.md
+        ├── v0.2.0-slice-2-pi-mono-extractor.md
+        ├── v0.2.0-slice-3-garden-provider-swap.md
+        ├── v0.2.0-slice-4-compute-provider-resolver.md
+        ├── v0.2.0-slice-5-budget-penalty-graduated.md
+        ├── v0.2.0-slice-6-token-estimator-hint.md
+        ├── v0.2.0-slice-7-per-domain-weights.md
+        ├── v0.2.0-slice-8-trust-loop-trace-anchors.md
+        ├── v0.2.0-slice-9-trust-loop-e2e-test.md
+        └── v0.2.0-slice-10-mcp-semver-25.md
 ```
 
+(The former `v0.2.1/` and `v0.2.2/` plan folders were removed when
+that work was folded into `docs/v0.3/v0.3.0/`.)
+
 `v0.2.0/plan.md` is the operational plan; the ten task cards under
-`v0.2.0/task-cards/` are the work units. v0.2.1 and v0.2.2 carry only
-plan summaries; their task cards are written when each release becomes
-the active wave.
+`v0.2.0/task-cards/` are the work units.
 
 ## Cross-references
 
 - `docs/handbook/invariants.md` — §21 (no agent UI), §25 (SemVer, new)
-- `docs/handbook/backlog.md` — #BL-008 (closes in v0.2.0), #BL-009
-  (v0.2.1), #BL-037 / #BL-038 (v0.2.2)
+- `docs/handbook/backlog.md` — #BL-008 (closes in v0.2.0); #BL-009 /
+  #BL-037 / #BL-038 moved to v0.3.0 (see `docs/v0.3/`)
 - `docs/handbook/runtime-status.md` — Subsystem readiness; updated as
   each slice lands
 - `docs/handbook/workflow/agent-workflow.md` — per-card pipeline
