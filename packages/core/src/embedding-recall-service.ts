@@ -70,8 +70,8 @@ export interface EmbeddingRecallServiceDependencies {
    * Per-query embedding provider timeout for the recall prefetch / supplement
    * paths. Defaults to {@link DEFAULT_QUERY_TIMEOUT_MS}. The default of 250 ms
    * was empirically too tight (long-run test 2026-05-08 observed 100% of
-   * queries finishing as `query_embedding_pending`); 1500 ms gives OpenAI /
-   * local providers room to land within the recall window while still bounded.
+   * queries finishing as `query_embedding_pending`); 2500 ms gives OpenAI /
+   * compatible providers room to land within the recall window while still bounded.
    */
   readonly queryTimeoutMs?: number;
 }
@@ -92,13 +92,14 @@ export type PreparedEmbeddingQuerySnapshot =
 export interface PreparedEmbeddingQueryHandle {
   readonly queryId: string;
   getSnapshot(): PreparedEmbeddingQuerySnapshot;
+  waitForSnapshot?(timeoutMs: number): Promise<PreparedEmbeddingQuerySnapshot>;
 }
 
 interface EmbeddingRecallPrecheckError extends Error {
   readonly reason: "local_vector_lookup_failed";
 }
 
-export const DEFAULT_QUERY_TIMEOUT_MS = 1500;
+export const DEFAULT_QUERY_TIMEOUT_MS = 2500;
 export const MAX_QUERY_TIMEOUT_MS = 5000;
 export const MIN_QUERY_TIMEOUT_MS = 50;
 
@@ -148,7 +149,7 @@ export class EmbeddingRecallService {
       status: "pending"
     });
 
-    void this.dependencies.provider
+    const settled = this.dependencies.provider
       .embedTexts([params.queryText], {
         timeoutMs: this.queryTimeoutMs
       })
@@ -169,7 +170,14 @@ export class EmbeddingRecallService {
         });
       });
 
-    return createPreparedEmbeddingQueryHandle(queryId, () => snapshot);
+    return createPreparedEmbeddingQueryHandle(queryId, () => snapshot, async (timeoutMs) => {
+      if (snapshot.status !== "pending") {
+        return snapshot;
+      }
+
+      await waitForPreparedQuery(settled, timeoutMs);
+      return snapshot;
+    });
   }
 
   public async hasStoredVectors(params: {
@@ -300,7 +308,10 @@ export class EmbeddingRecallService {
       return EMPTY_SUPPLEMENT_RESULT;
     }
 
-    const snapshot = params.preparedQuery.getSnapshot();
+    const initialSnapshot = params.preparedQuery.getSnapshot();
+    const snapshot = initialSnapshot.status === "pending" && typeof params.preparedQuery.waitForSnapshot === "function"
+      ? await params.preparedQuery.waitForSnapshot(this.queryTimeoutMs)
+      : initialSnapshot;
     if (snapshot.status === "pending") {
       await this.recordDegraded({
         workspaceId: params.workspaceId,
@@ -704,15 +715,34 @@ function createPreparedEmbeddingQueryHandle(
   queryId: string,
   snapshotOrGetter:
     | PreparedEmbeddingQuerySnapshot
-    | (() => PreparedEmbeddingQuerySnapshot)
+    | (() => PreparedEmbeddingQuerySnapshot),
+  waitForSnapshot?: (timeoutMs: number) => Promise<PreparedEmbeddingQuerySnapshot>
 ): PreparedEmbeddingQueryHandle {
   return {
     queryId,
     getSnapshot:
       typeof snapshotOrGetter === "function"
         ? snapshotOrGetter
-        : () => snapshotOrGetter
+        : () => snapshotOrGetter,
+    ...(waitForSnapshot === undefined ? {} : { waitForSnapshot })
   };
+}
+
+async function waitForPreparedQuery(settled: Promise<unknown>, timeoutMs: number): Promise<void> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  try {
+    await Promise.race([
+      settled,
+      new Promise<void>((resolve) => {
+        timeoutHandle = setTimeout(resolve, timeoutMs);
+        timeoutHandle.unref?.();
+      })
+    ]);
+  } finally {
+    if (timeoutHandle !== null) {
+      clearTimeout(timeoutHandle);
+    }
+  }
 }
 
 function normalizeBaseUrl(value: string): string {

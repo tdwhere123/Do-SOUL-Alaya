@@ -30,7 +30,10 @@ export const MIN_RECALL_RESULTS = 5;
 export const WARM_CASCADE_DECAY = 0.7;
 // COLD memories are cold-start fallback only and receive a stronger freshness penalty.
 export const COLD_CASCADE_DECAY = 0.45;
-export const EMBEDDING_SIMILARITY_WEIGHT = 0.8;
+// Embedding is a supplement, not an oracle. Keep the boost small enough that
+// strong lexical / activation evidence remains stable while semantic hints can
+// still break close ties and add otherwise-missed candidates.
+export const EMBEDDING_SIMILARITY_WEIGHT = 0.15;
 export const BUDGET_PRESSURE_SOFT_THRESHOLD = 0.5;
 export const BUDGET_PRESSURE_HARD_THRESHOLD = 1;
 /**

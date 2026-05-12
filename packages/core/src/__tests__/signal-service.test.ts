@@ -131,6 +131,126 @@ describe("SignalService", () => {
     });
   });
 
+  it("resumes an existing emitted signal through triage and materialization", async () => {
+    const appendedEvents: string[] = [];
+    const stateUpdates: string[] = [];
+    const signalRepo = {
+      create: vi.fn(async (signal: CandidateMemorySignal) => ({ ...signal, signal_state: "emitted" as const })),
+      getById: vi.fn(async () => createSignal({ signal_state: "emitted" })),
+      listByRun: vi.fn(async () => []),
+      updateState: vi.fn(async (signalId: string, state: CandidateMemorySignal["signal_state"]) => {
+        stateUpdates.push(state);
+        return createSignal({ signal_id: signalId, signal_state: state });
+      })
+    };
+    const materialize = vi.fn(async (signal: CandidateMemorySignal) => ({
+      signal_id: signal.signal_id,
+      target_kind: "memory_and_claim" as const,
+      routing_reason: "retry resumed after signal row creation",
+      created_objects: [{ object_kind: "memory_entry", object_id: "memory-1" }],
+      success: true
+    }));
+    const service = new SignalService({
+      eventLogRepo: {
+        append: vi.fn(async (event) => {
+          appendedEvents.push(event.event_type);
+          return {
+            event_id: `evt_${appendedEvents.length}`,
+            created_at: "2026-03-18T00:00:01.000Z",
+            revision: appendedEvents.length - 1,
+            ...event
+          };
+        }),
+        queryByEntity: vi.fn(async () => [])
+      },
+      signalRepo,
+      runtimeNotifier: {
+        notifyEntry: vi.fn(async () => {})
+      },
+      postTriageMaterializer: {
+        materialize
+      }
+    });
+
+    const result = await service.receiveSignal(createSignal());
+
+    expect(signalRepo.create).not.toHaveBeenCalled();
+    expect(result.signal.signal_state).toBe("materialized");
+    expect(appendedEvents).toEqual([
+      "soul.signal.triaged",
+      "soul.signal.materialized"
+    ]);
+    expect(stateUpdates).toEqual(["triaged", "compiled", "materialized"]);
+    expect(materialize).toHaveBeenCalledWith(expect.objectContaining({ signal_state: "compiled" }));
+  });
+
+  it("does not replay materialization side effects for post-triage signal states", async () => {
+    for (const state of ["triaged", "compiled"] as const) {
+      const materialize = vi.fn(async () => {
+        throw new Error("should not rerun materialization");
+      });
+      const warn = vi.fn();
+      const service = new SignalService({
+        eventLogRepo: {
+          append: vi.fn(),
+          queryByEntity: vi.fn(async () => [])
+        } as any,
+        signalRepo: {
+          create: vi.fn(),
+          getById: vi.fn(async () => createSignal({ signal_state: state })),
+          listByRun: vi.fn(async () => []),
+          updateState: vi.fn()
+        } as any,
+        runtimeNotifier: {
+          notifyEntry: vi.fn()
+        } as any,
+        postTriageMaterializer: {
+          materialize
+        },
+        warn
+      });
+
+      const result = await service.receiveSignal(createSignal());
+
+      expect(result.signal.signal_state).toBe(state);
+      expect(result.materialization).toBeNull();
+      expect(materialize).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        "Signal replay found a post-triage signal; not replaying materialization side effects.",
+        expect.objectContaining({
+          signal_id: "signal-1",
+          signal_state: state
+        })
+      );
+    }
+  });
+
+  it("rejects an idempotent replay whose candidate content changed", async () => {
+    const service = new SignalService({
+      eventLogRepo: {
+        append: vi.fn(),
+        queryByEntity: vi.fn(async () => [])
+      } as any,
+      signalRepo: {
+        create: vi.fn(),
+        getById: vi.fn(async () => createSignal({
+          raw_payload: { excerpt: "original signal" }
+        })),
+        listByRun: vi.fn(async () => []),
+        updateState: vi.fn()
+      } as any,
+      runtimeNotifier: {
+        notifyEntry: vi.fn()
+      } as any
+    });
+
+    await expect(
+      service.receiveSignal(createSignal({
+        raw_payload: { excerpt: "changed signal" }
+      }))
+    ).rejects.toThrow("Candidate signal replay does not match existing signal content");
+  });
+
   it("defers low-confidence potential_conflict signals", async () => {
     const service = new SignalService({
       eventLogRepo: {
@@ -217,7 +337,7 @@ describe("SignalService", () => {
     });
   });
 
-  it("keeps triaged state when post-triage materializer throws", async () => {
+  it("marks the signal failed when post-triage materializer throws", async () => {
     const warn = vi.fn();
     const service = new SignalService({
       eventLogRepo: {
@@ -248,7 +368,7 @@ describe("SignalService", () => {
 
     const result = await service.receiveSignal(createSignal());
 
-    expect(result.signal.signal_state).toBe("triaged");
+    expect(result.signal.signal_state).toBe("failed");
     expect(result.materialization).toMatchObject({
       success: false,
       routing_reason: "materialization_exception"

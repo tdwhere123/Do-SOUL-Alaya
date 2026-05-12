@@ -1,10 +1,19 @@
 # Alaya v0.2.0 Release Notes
 
-v0.2.0 is the first forward-development release after the v0.1 port:
+v0.2.0 is the first forward-development candidate after the v0.1 port:
 pi-mono provider wiring, recall scoring refinements, Trustworthy Loop
 trace anchoring, and invariant §25 for public protocol SemVer. Local
-deterministic build/test gates pass and the credentialed live pi-mono
-smoke is recorded in `task-cards/reports/v0.2.0-slice-3.md`.
+deterministic build/test gates pass and the credentialed
+provider-transport smoke is recorded in
+`task-cards/reports/v0.2.0-slice-3.md`; full release acceptance still
+requires the Slice 3 AC7 daemon/EventLog live smoke.
+
+## Release Channel
+
+v0.2.0 follows the GitHub source tarball / local build distribution
+path. Workspace package versions support local source consumers and
+SemVer pinning; npm registry publication and global `npm install` are
+not claimed release channels for v0.2.0.
 
 ## Provider Path
 
@@ -57,7 +66,11 @@ smoke is recorded in `task-cards/reports/v0.2.0-slice-3.md`.
   weights by deterministic domain-tag match; recall results expose
   `RecallScoreFactors.resolved_activation_weights` for auditability.
 
-## Self-Bootstrapping Capture
+## Post-v0.2.0 Addendum: Self-Bootstrapping Capture
+
+This section documents v0.2.x self-bootstrapping capture work that
+landed after the v0.2.0 review baseline. It is not part of the v0.2.0
+candidate surface or its release-acceptance evidence.
 
 - Durable capture no longer depends on the host filing
   `soul.emit_candidate_signal` / `soul.propose_memory_update` or on it
@@ -65,26 +78,49 @@ smoke is recorded in `task-cards/reports/v0.2.0-slice-3.md`.
   gains an optional `recent_turn` (the verbatim latest user message;
   falls back to `query`) and, after recording the delivery, enqueues a
   `POST_TURN_EXTRACT` Garden task from that text — deduped by
-  `(workspace_id, run_id, turn-text hash)`, skipped below a 24-char floor
-  or when the librarian queue is already 128 deep. Garden's existing
-  pipeline (`LocalHeuristics` → deterministic triage → materialization)
-  turns those signals into durable memory.
+  `(workspace_id, run_id, turn-text hash)`, skipped below a 24-char
+  floor or when the librarian queue is already 128 deep. Attached MCP
+  stdio sessions without `ALAYA_RUN_ID` are first canonicalized as
+  session runs, so passive extraction still satisfies the durable
+  `run_id` contract. Garden's existing pipeline (`LocalHeuristics` →
+  deterministic triage → materialization) turns those signals into
+  durable memory.
 - `report_context_usage` no longer gates its `POST_TURN_EXTRACT` enqueue
   on a used object — a cold-store turn carrying a `turn_digest` is still
-  worth extracting. Tier-promote stays separate (nothing to promote when
-  no recalled object was used).
-- A recall-origin task (keyed on the turn-text hash) and a report-origin
-  task (keyed on `turn_index`) can both fire for the same turn; this is
-  expected — the heuristics dedup signals within a task and Garden's
-  `MERGE_PROPOSAL` consolidation absorbs cross-task duplicates.
+  worth extracting. Report-side extraction and recall-hit promotion now
+  attribute side effects to the linked delivery's workspace / run / agent,
+  so delayed retries or CLI fallback reports do not persist under the
+  reporter's later session. Tier-promote stays separate (nothing to
+  promote when no recalled object was used).
+- Recall-origin tasks are keyed on the turn-text hash and report-origin
+  tasks are keyed on `turn_index`, but the report path suppresses enqueue
+  when the same normalized user turn already has a recall-origin extract
+  task. Garden's `MERGE_PROPOSAL` consolidation remains the downstream
+  duplicate guard for distinct turns or genuinely different task inputs.
 - A `POST_TURN_EXTRACT` task that fails during extraction (provider
   error, bad response) is recorded as failed and no longer rethrows: the
   task now runs on every recall, so a flaky compute provider must not
   abort the rest of the Garden background pass.
+- Host-worker `garden.complete_task` now records an immutable completion
+  envelope before candidate-signal persistence. If a partial completion
+  fails after signals were persisted, retries must submit the same
+  `candidate_signals` envelope; shortened, extended, or changed retries
+  are rejected so the completion audit cannot under-report durable
+  signal side effects.
+- Accepted signals enter the persisted `compiled` state before
+  materialization side effects run. Replaying a `triaged` / `compiled`
+  signal no longer reruns materialization, which prevents duplicate
+  evidence / memory / claim objects after a crash or retry in the narrow
+  window between side effects and final state update.
 - The `soul.recall` / `soul.report_context_usage` tool descriptions and
   the MCP server instructions tell the host to forward turn text so the
   plane learns passively, and reframe emit/propose as the optional
   explicit channel for facts the host judges clearly worth recording.
+- In the current worktree this post-baseline addition also moves the
+  SemVer snapshots: `soul.recall.recent_turn` is an additive optional
+  MCP field, and the tool-description hashes move for `soul.recall` and
+  `soul.report_context_usage`. Treat those changes as v0.2.x
+  self-bootstrapping evidence, not v0.2.0 candidate evidence.
 - `alaya doctor` reports where recall-driven extract tasks run
   (`recall-driven extraction: in-process via <provider>` or
   `queued for an attached host worker`), so "memory is not being
@@ -121,16 +157,19 @@ smoke is recorded in `task-cards/reports/v0.2.0-slice-3.md`.
 - `docs/handbook/maintenance.md` now owns future public-symbol
   deprecation entries. No public symbols are deprecated as of v0.2.0.
 - `packages/protocol/src/__tests__/semver-surface.test.ts` snapshots
-  the current public surface, including schema signature hashes for
-  optionality, nullability, enum/literal values, defaults, and basic
-  checks, so additions and removals are explicit.
-- The new `soul.recall` `recent_turn` field is additive and optional
-  (§25 minor); the `soul.recall` and `soul.report_context_usage` tool
-  descriptions gained a passive-extraction clause. Both surface changes
-  are in the regenerated snapshot.
+  the schema / EventLog / runtime-config surface, including schema
+  signature hashes for optionality, nullability, enum/literal values,
+  defaults, and basic checks, so additions and removals are explicit.
+- `packages/engine-gateway/src/__tests__/semver-tool-surface.test.ts`
+  snapshots MCP tool names and description hashes from the actual
+  exported `soulToolDefs`, keeping provider-facing tool text pinned
+  without making `packages/protocol` parse or import a sibling package.
 
 ## Follow-Ups
 
 - `#BL-009` remains deferred to v0.2.1 for OS keychain secret refs.
 - `#BL-037` and `#BL-038` remain deferred to v0.2.2 for host slash
   recognition and real-host autonomous use proof.
+- No additional v0.2.0 review-fix backlog was opened; task-card tail
+  items are either current non-goals or conditional future work that
+  requires explicit scheduling.

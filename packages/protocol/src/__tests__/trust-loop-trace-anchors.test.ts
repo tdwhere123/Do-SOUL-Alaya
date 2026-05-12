@@ -207,4 +207,56 @@ describe("Trustworthy Loop source_delivery_ids protocol contracts", () => {
       }).success
     ).toBe(false);
   });
+
+  it("bounds Garden complete_task result envelopes from host workers", () => {
+    const withinSignals = Array.from({ length: 64 }, (_, index) => ({
+      ...candidateContentBase,
+      raw_payload: { observation: `Host worker observation ${index + 1}` }
+    }));
+    const tooManySignals = Array.from({ length: 65 }, (_, index) => ({
+      ...candidateContentBase,
+      raw_payload: { observation: `Host worker observation ${index + 1}` }
+    }));
+
+    expect(
+      GardenTaskResultEnvelopeSchema.safeParse({ candidate_signals: withinSignals }).success
+    ).toBe(true);
+    expect(
+      GardenTaskResultEnvelopeSchema.safeParse({ candidate_signals: tooManySignals }).success
+    ).toBe(false);
+    expect(
+      GardenTaskResultEnvelopeSchema.safeParse({
+        candidate_signals: [
+          {
+            ...candidateContentBase,
+            domain_tags: Array.from({ length: 1001 }, (_, index) => `tag-${index + 1}`)
+          }
+        ]
+      }).success
+    ).toBe(false);
+    expect(
+      GardenTaskResultEnvelopeSchema.safeParse({
+        candidate_signals: [
+          {
+            ...candidateContentBase,
+            raw_payload: { observation: "x".repeat(20_000) }
+          }
+        ]
+      }).success
+    ).toBe(false);
+    expect(
+      GardenTaskResultEnvelopeSchema.safeParse({
+        extracted_proposals: Array.from({ length: 33 }, (_, index) => ({
+          proposal: `candidate-${index + 1}`
+        }))
+      }).success
+    ).toBe(false);
+    expect(
+      GardenCompleteTaskRequestSchema.safeParse({
+        task_id: "garden-task-1",
+        status: "failed",
+        last_error_text: "x".repeat(17_000)
+      }).success
+    ).toBe(false);
+  });
 });

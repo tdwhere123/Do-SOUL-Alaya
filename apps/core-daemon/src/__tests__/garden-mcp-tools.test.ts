@@ -114,7 +114,7 @@ describe("Garden MCP tools", () => {
     });
   });
 
-  it("claim already-claimed returns the current task snapshot", async () => {
+  it("claim already-claimed returns the current task snapshot to the same claimant", async () => {
     const harness = await createGardenMcpHarness();
     harness.enqueueTask("task-already-claimed");
 
@@ -132,6 +132,39 @@ describe("Garden MCP tools", () => {
       task_id: "task-already-claimed",
       role: GardenRole.JANITOR,
       kind: GardenTaskKind.TTL_CLEANUP
+    });
+  });
+
+  it("claim already-claimed hides the payload from a different same-workspace claimant", async () => {
+    const harness = await createGardenMcpHarness();
+    harness.enqueueTask("task-same-workspace-other-claimant", {
+      payload: createTaskDescriptor({
+        task_id: "task-same-workspace-other-claimant",
+        target_object_refs: ["private-memory-ref"]
+      })
+    });
+
+    await harness.callTool<GardenClaimTaskResponse>(
+      "garden.claim_task",
+      { task_id: "task-same-workspace-other-claimant" }
+    );
+    harness.setContext({ agentTarget: "claude-code" });
+
+    const response = await harness.callTool<GardenClaimTaskResponse>(
+      "garden.claim_task",
+      { task_id: "task-same-workspace-other-claimant" }
+    );
+
+    expect(response).toEqual({
+      status: "already_claimed",
+      task_id: "task-same-workspace-other-claimant",
+      role: "unknown",
+      kind: "unknown",
+      payload: null
+    });
+    expect(harness.getGardenTask("task-same-workspace-other-claimant")).toMatchObject({
+      status: "claimed",
+      claimed_by: "garden-worker"
     });
   });
 
@@ -442,6 +475,501 @@ describe("Garden MCP tools", () => {
     expect(signalRows).toBe(1);
   });
 
+  it("retries a partial complete_task after signal persistence without duplicating the signal", async () => {
+    let failOnce = true;
+    const harness = await createGardenMcpHarness({
+      receiveSignal: async (signal, context) => {
+        const received = await context.signalService.receiveSignal(signal);
+        if (failOnce) {
+          failOnce = false;
+          throw new Error("simulated failure after signal persistence");
+        }
+        return received;
+      }
+    });
+    harness.enqueueTask("task-partial-retry");
+    await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
+      task_id: "task-partial-retry"
+    });
+
+    let firstFailure: unknown;
+    try {
+      await harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", {
+        task_id: "task-partial-retry",
+        status: "completed",
+        result_envelope: {
+          candidate_signals: [
+            {
+              signal_kind: "potential_preference",
+              object_kind: "memory_entry",
+              scope_hint: "project",
+              domain_tags: ["garden"],
+              confidence: 0.9,
+              evidence_refs: ["memory-1"],
+              raw_payload: { observation: "retry should reuse the deterministic Garden signal id" }
+            }
+          ]
+        }
+      });
+    } catch (error) {
+      firstFailure = error;
+    }
+
+    expect(firstFailure).toBeDefined();
+    expect(harness.getGardenTask("task-partial-retry")).toMatchObject({
+      status: "pending",
+      claimed_by: null
+    });
+    let signalRows = (
+      harness.database.connection
+        .prepare("SELECT COUNT(*) AS n FROM signals")
+        .get() as { readonly n: number }
+    ).n;
+    expect(signalRows).toBe(1);
+
+    await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
+      task_id: "task-partial-retry"
+    });
+    await expect(
+      harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", {
+        task_id: "task-partial-retry",
+        status: "completed",
+        result_envelope: {
+          candidate_signals: [
+            {
+              signal_kind: "potential_preference",
+              object_kind: "memory_entry",
+              scope_hint: "project",
+              domain_tags: ["garden"],
+              confidence: 0.9,
+              evidence_refs: ["memory-1"],
+              raw_payload: { observation: "retry should reuse the deterministic Garden signal id" }
+            }
+          ]
+        }
+      })
+    ).resolves.toMatchObject({
+      task_id: "task-partial-retry",
+      status: "completed",
+      events_appended: 1
+    });
+
+    signalRows = (
+      harness.database.connection
+        .prepare("SELECT COUNT(*) AS n FROM signals")
+        .get() as { readonly n: number }
+    ).n;
+    expect(signalRows).toBe(1);
+    const completedEvents = await harness.eventLogRepo.queryByType(
+      GardenEventType.SOUL_GARDEN_TASK_COMPLETED
+    );
+    expect(completedEvents).toHaveLength(1);
+    expect(completedEvents[0]?.payload_json).toMatchObject({
+      task_id: "task-partial-retry",
+      candidate_signals_count: 1
+    });
+  });
+
+  it("releases completion claim after completeWithEvents fails so the same signal can retry", async () => {
+    let failCompleteOnce = true;
+    const harness = await createGardenMcpHarness({
+      completeWithEvents: async (taskId, result, events, claimedBy, original) => {
+        if (failCompleteOnce) {
+          failCompleteOnce = false;
+          throw new Error("simulated completion persistence failure");
+        }
+        await original(taskId, result, events, claimedBy);
+      }
+    });
+    harness.enqueueTask("task-complete-failure-retry");
+    await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
+      task_id: "task-complete-failure-retry"
+    });
+
+    const completeArgs = {
+      task_id: "task-complete-failure-retry",
+      status: "completed",
+      result_envelope: {
+        candidate_signals: [
+          {
+            signal_kind: "potential_preference",
+            object_kind: "memory_entry",
+            scope_hint: "project",
+            domain_tags: ["garden"],
+            confidence: 0.9,
+            evidence_refs: ["memory-1"],
+            raw_payload: { observation: "retry after completeWithEvents failure" }
+          }
+        ]
+      }
+    } as const;
+
+    await expect(
+      harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", completeArgs)
+    ).rejects.toThrow("Tool call failed for garden.complete_task");
+    expect(harness.getGardenTask("task-complete-failure-retry")).toMatchObject({
+      status: "pending",
+      claimed_by: null
+    });
+
+    await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
+      task_id: "task-complete-failure-retry"
+    });
+    await expect(
+      harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", completeArgs)
+    ).resolves.toMatchObject({
+      task_id: "task-complete-failure-retry",
+      status: "completed"
+    });
+    const signalRows = (
+      harness.database.connection
+        .prepare("SELECT COUNT(*) AS n FROM signals")
+        .get() as { readonly n: number }
+    ).n;
+    expect(signalRows).toBe(1);
+  });
+
+  it("rejects a shortened completion retry after a partial completion failure", async () => {
+    let failCompleteOnce = true;
+    const harness = await createGardenMcpHarness({
+      completeWithEvents: async (taskId, result, events, claimedBy, original) => {
+        if (failCompleteOnce) {
+          failCompleteOnce = false;
+          throw new Error("simulated completion persistence failure");
+        }
+        await original(taskId, result, events, claimedBy);
+      }
+    });
+    harness.enqueueTask("task-shortened-envelope-retry");
+    await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
+      task_id: "task-shortened-envelope-retry"
+    });
+
+    const twoSignalCompletion = {
+      task_id: "task-shortened-envelope-retry",
+      status: "completed",
+      result_envelope: {
+        candidate_signals: [
+          {
+            signal_kind: "potential_preference",
+            object_kind: "memory_entry",
+            scope_hint: "project",
+            domain_tags: ["garden"],
+            confidence: 0.9,
+            evidence_refs: ["memory-1"],
+            raw_payload: { observation: "first signal from original envelope" }
+          },
+          {
+            signal_kind: "potential_claim",
+            object_kind: "memory_entry",
+            scope_hint: "project",
+            domain_tags: ["garden"],
+            confidence: 0.8,
+            evidence_refs: ["memory-2"],
+            raw_payload: { observation: "second signal from original envelope" }
+          }
+        ]
+      }
+    } as const;
+
+    await expect(
+      harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", twoSignalCompletion)
+    ).rejects.toThrow("Tool call failed for garden.complete_task");
+    expect(harness.getGardenTask("task-shortened-envelope-retry")).toMatchObject({
+      status: "pending",
+      claimed_by: null
+    });
+    expect(harness.gardenTaskRepo.findById("task-shortened-envelope-retry")?.completion_envelope_json)
+      .toEqual(expect.stringContaining("\"candidate_signal_count\":2"));
+
+    await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
+      task_id: "task-shortened-envelope-retry"
+    });
+    await expect(
+      harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", {
+        task_id: "task-shortened-envelope-retry",
+        status: "completed",
+        result_envelope: {
+          candidate_signals: [twoSignalCompletion.result_envelope.candidate_signals[0]]
+        }
+      })
+    ).rejects.toThrow("candidate_signals changed after a previous partial completion attempt");
+    expect(harness.getGardenTask("task-shortened-envelope-retry")).toMatchObject({
+      status: "claimed",
+      claimed_by: "garden-worker"
+    });
+
+    await expect(
+      harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", twoSignalCompletion)
+    ).resolves.toMatchObject({
+      task_id: "task-shortened-envelope-retry",
+      status: "completed"
+    });
+    const completedEvents = await harness.eventLogRepo.queryByType(
+      GardenEventType.SOUL_GARDEN_TASK_COMPLETED
+    );
+    expect(completedEvents[0]?.payload_json).toMatchObject({
+      task_id: "task-shortened-envelope-retry",
+      candidate_signals_count: 2
+    });
+  });
+
+  it("rejects an omitted completion envelope retry after a partial completion failure", async () => {
+    let failCompleteOnce = true;
+    const harness = await createGardenMcpHarness({
+      completeWithEvents: async (taskId, result, events, claimedBy, original) => {
+        if (failCompleteOnce) {
+          failCompleteOnce = false;
+          throw new Error("simulated completion persistence failure");
+        }
+        await original(taskId, result, events, claimedBy);
+      }
+    });
+    harness.enqueueTask("task-omitted-envelope-retry");
+    await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
+      task_id: "task-omitted-envelope-retry"
+    });
+
+    const oneSignalCompletion = {
+      task_id: "task-omitted-envelope-retry",
+      status: "completed",
+      result_envelope: {
+        candidate_signals: [
+          {
+            signal_kind: "potential_preference",
+            object_kind: "memory_entry",
+            scope_hint: "project",
+            domain_tags: ["garden"],
+            confidence: 0.9,
+            evidence_refs: ["memory-1"],
+            raw_payload: { observation: "original envelope signal" }
+          }
+        ]
+      }
+    } as const;
+
+    await expect(
+      harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", oneSignalCompletion)
+    ).rejects.toThrow("Tool call failed for garden.complete_task");
+
+    await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
+      task_id: "task-omitted-envelope-retry"
+    });
+    await expect(
+      harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", {
+        task_id: "task-omitted-envelope-retry",
+        status: "completed"
+      })
+    ).rejects.toThrow("candidate_signals changed after a previous partial completion attempt");
+
+    await expect(
+      harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", oneSignalCompletion)
+    ).resolves.toMatchObject({
+      task_id: "task-omitted-envelope-retry",
+      status: "completed"
+    });
+  });
+
+  it("rejects an empty completion envelope retry after a partial completion failure", async () => {
+    let failCompleteOnce = true;
+    const harness = await createGardenMcpHarness({
+      completeWithEvents: async (taskId, result, events, claimedBy, original) => {
+        if (failCompleteOnce) {
+          failCompleteOnce = false;
+          throw new Error("simulated completion persistence failure");
+        }
+        await original(taskId, result, events, claimedBy);
+      }
+    });
+    harness.enqueueTask("task-empty-envelope-retry");
+    await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
+      task_id: "task-empty-envelope-retry"
+    });
+
+    const oneSignalCompletion = {
+      task_id: "task-empty-envelope-retry",
+      status: "completed",
+      result_envelope: {
+        candidate_signals: [
+          {
+            signal_kind: "potential_preference",
+            object_kind: "memory_entry",
+            scope_hint: "project",
+            domain_tags: ["garden"],
+            confidence: 0.9,
+            evidence_refs: ["memory-1"],
+            raw_payload: { observation: "original envelope signal" }
+          }
+        ]
+      }
+    } as const;
+
+    await expect(
+      harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", oneSignalCompletion)
+    ).rejects.toThrow("Tool call failed for garden.complete_task");
+
+    await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
+      task_id: "task-empty-envelope-retry"
+    });
+    await expect(
+      harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", {
+        task_id: "task-empty-envelope-retry",
+        status: "completed",
+        result_envelope: {
+          candidate_signals: []
+        }
+      })
+    ).rejects.toThrow("candidate_signals changed after a previous partial completion attempt");
+
+    await expect(
+      harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", oneSignalCompletion)
+    ).resolves.toMatchObject({
+      task_id: "task-empty-envelope-retry",
+      status: "completed"
+    });
+  });
+
+  it("rejects an extended completion retry after a partial completion failure", async () => {
+    let failCompleteOnce = true;
+    const harness = await createGardenMcpHarness({
+      completeWithEvents: async (taskId, result, events, claimedBy, original) => {
+        if (failCompleteOnce) {
+          failCompleteOnce = false;
+          throw new Error("simulated completion persistence failure");
+        }
+        await original(taskId, result, events, claimedBy);
+      }
+    });
+    harness.enqueueTask("task-extended-envelope-retry");
+    await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
+      task_id: "task-extended-envelope-retry"
+    });
+
+    const firstSignal = {
+      signal_kind: "potential_preference",
+      object_kind: "memory_entry",
+      scope_hint: "project",
+      domain_tags: ["garden"],
+      confidence: 0.9,
+      evidence_refs: ["memory-1"],
+      raw_payload: { observation: "only original signal" }
+    } as const;
+    const oneSignalCompletion = {
+      task_id: "task-extended-envelope-retry",
+      status: "completed",
+      result_envelope: {
+        candidate_signals: [firstSignal]
+      }
+    } as const;
+
+    await expect(
+      harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", oneSignalCompletion)
+    ).rejects.toThrow("Tool call failed for garden.complete_task");
+
+    await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
+      task_id: "task-extended-envelope-retry"
+    });
+    await expect(
+      harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", {
+        task_id: "task-extended-envelope-retry",
+        status: "completed",
+        result_envelope: {
+          candidate_signals: [
+            firstSignal,
+            {
+              signal_kind: "potential_claim",
+              object_kind: "memory_entry",
+              scope_hint: "project",
+              domain_tags: ["garden"],
+              confidence: 0.8,
+              evidence_refs: ["memory-2"],
+              raw_payload: { observation: "extra retry signal" }
+            }
+          ]
+        }
+      })
+    ).rejects.toThrow("candidate_signals changed after a previous partial completion attempt");
+
+    await expect(
+      harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", oneSignalCompletion)
+    ).resolves.toMatchObject({
+      task_id: "task-extended-envelope-retry",
+      status: "completed"
+    });
+  });
+
+  it("rejects a Garden completion retry with changed candidate content for the same signal id", async () => {
+    let failOnce = true;
+    const harness = await createGardenMcpHarness({
+      receiveSignal: async (signal, context) => {
+        const received = await context.signalService.receiveSignal(signal);
+        if (failOnce) {
+          failOnce = false;
+          throw new Error("simulated failure after first signal");
+        }
+        return received;
+      }
+    });
+    harness.enqueueTask("task-mismatched-retry");
+    await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
+      task_id: "task-mismatched-retry"
+    });
+
+    await expect(
+      harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", {
+        task_id: "task-mismatched-retry",
+        status: "completed",
+        result_envelope: {
+          candidate_signals: [
+            {
+              signal_kind: "potential_preference",
+              object_kind: "memory_entry",
+              scope_hint: "project",
+              domain_tags: ["garden"],
+              confidence: 0.9,
+              evidence_refs: ["memory-1"],
+              raw_payload: { observation: "first durable signal" }
+            }
+          ]
+        }
+      })
+    ).rejects.toThrow("Tool call failed for garden.complete_task");
+
+    await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
+      task_id: "task-mismatched-retry"
+    });
+    await expect(
+      harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", {
+        task_id: "task-mismatched-retry",
+        status: "completed",
+        result_envelope: {
+          candidate_signals: [
+            {
+              signal_kind: "potential_claim",
+              object_kind: "memory_entry",
+              scope_hint: "project",
+              domain_tags: ["garden", "changed"],
+              confidence: 0.9,
+              evidence_refs: ["memory-1"],
+              raw_payload: { observation: "changed durable signal" }
+            }
+          ]
+        }
+      })
+    ).rejects.toThrow("Tool call failed for garden.complete_task");
+
+    expect(harness.getGardenTask("task-mismatched-retry")).toMatchObject({
+      status: "claimed",
+      claimed_by: "garden-worker"
+    });
+    const signalRows = (
+      harness.database.connection
+        .prepare("SELECT COUNT(*) AS n FROM signals")
+        .get() as { readonly n: number }
+    ).n;
+    expect(signalRows).toBe(1);
+  });
+
   it("rejects duplicate same-claimant complete_task before a second signal can persist", async () => {
     let resolveFirstSignalStarted!: () => void;
     const firstSignalStarted = new Promise<void>((resolve) => {
@@ -577,6 +1105,13 @@ interface GardenMcpHarnessOptions {
     signal: CandidateMemorySignal,
     context: GardenMcpReceiveSignalContext
   ) => Promise<Readonly<{ readonly signal: Readonly<CandidateMemorySignal> }>>;
+  readonly completeWithEvents?: (
+    taskId: string,
+    result: Parameters<SqliteGardenTaskRepo["completeWithEvents"]>[1],
+    events: Parameters<SqliteGardenTaskRepo["completeWithEvents"]>[2],
+    claimedBy: string,
+    original: SqliteGardenTaskRepo["completeWithEvents"]
+  ) => Promise<void>;
 }
 
 interface GardenMcpHarness {
@@ -621,6 +1156,29 @@ async function createGardenMcpHarness(options: GardenMcpHarnessOptions = {}): Pr
     signalRepo,
     runtimeNotifier
   });
+  const originalCompleteWithEvents = gardenTaskRepo.completeWithEvents.bind(gardenTaskRepo);
+  const handlerGardenTaskRepo: NonNullable<McpMemoryToolHandlerDependencies["gardenTaskRepo"]> = {
+    enqueue: gardenTaskRepo.enqueue.bind(gardenTaskRepo),
+    findById: gardenTaskRepo.findById.bind(gardenTaskRepo),
+    peekPending: gardenTaskRepo.peekPending.bind(gardenTaskRepo),
+    claimAtomic: gardenTaskRepo.claimAtomic.bind(gardenTaskRepo),
+    completeWithEvents: async (taskId, result, events, claimedBy) => {
+      if (options.completeWithEvents !== undefined) {
+        await options.completeWithEvents(
+          taskId,
+          result,
+          events,
+          claimedBy,
+          originalCompleteWithEvents
+        );
+        return;
+      }
+      await originalCompleteWithEvents(taskId, result, events, claimedBy);
+    },
+    beginCompletionAttempt: gardenTaskRepo.beginCompletionAttempt.bind(gardenTaskRepo),
+    refreshClaim: gardenTaskRepo.refreshClaim.bind(gardenTaskRepo),
+    releaseClaim: gardenTaskRepo.releaseClaim.bind(gardenTaskRepo)
+  };
   const receiveSignal: NonNullable<GardenMcpHarnessOptions["receiveSignal"]> =
     options.receiveSignal ?? (async (signal) => await signalService.receiveSignal(signal));
   const context: McpMemoryToolCallContext = {
@@ -635,7 +1193,7 @@ async function createGardenMcpHarness(options: GardenMcpHarnessOptions = {}): Pr
   let client: Client | null = null;
   let server: Server | null = null;
 
-  const deps: McpMemoryToolHandlerDependencies & { readonly gardenTaskRepo: SqliteGardenTaskRepo } = {
+  const deps: McpMemoryToolHandlerDependencies = {
     now: options.now ?? (() => "2026-05-07T00:10:00.000Z"),
     generateId: () => "00000000-0000-4000-8000-000000000001",
     recallService: {
@@ -670,7 +1228,7 @@ async function createGardenMcpHarness(options: GardenMcpHarnessOptions = {}): Pr
       findDeliveryById: async () => null
     },
     eventPublisher,
-    gardenTaskRepo
+    gardenTaskRepo: handlerGardenTaskRepo
   };
   const handler = createMcpMemoryToolHandler(deps);
   server = createAlayaMcpServer({

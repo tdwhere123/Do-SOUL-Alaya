@@ -8,6 +8,7 @@ import {
   BOUNDED_DEFAULT_ARRAY_MAX,
   BOUNDED_EVIDENCE_ARRAY_MAX,
   BoundedIdSchema,
+  BoundedJsonObjectSchema,
   BoundedLabelSchema,
   BoundedQuerySchema,
   BoundedReasonSchema,
@@ -27,6 +28,9 @@ import {
   RecallBudgetStateSchema,
   RecallScoreFactorsSchema
 } from "./recall-candidate.js";
+
+const GARDEN_COMPLETE_CANDIDATE_SIGNAL_MAX = 64;
+const GARDEN_COMPLETE_EXTRACTED_PROPOSAL_MAX = 32;
 
 export const SoulRecallStrategyMixSchema = z
   .object({
@@ -257,9 +261,9 @@ export const GardenListPendingTasksRequestSchema = z
 
 export const GardenPendingTaskSnapshotSchema = z
   .object({
-    task_id: z.string(),
-    role: z.string(),
-    kind: z.string(),
+    task_id: BoundedIdSchema,
+    role: BoundedLabelSchema,
+    kind: BoundedLabelSchema,
     created_at: z.string(),
     payload: z.unknown()
   })
@@ -275,7 +279,7 @@ export const GardenListPendingTasksResponseSchema = z
 
 export const GardenClaimTaskRequestSchema = z
   .object({
-    task_id: z.string()
+    task_id: BoundedIdSchema
   })
   .strict()
   .readonly();
@@ -283,9 +287,9 @@ export const GardenClaimTaskRequestSchema = z
 export const GardenClaimTaskResponseSchema = z
   .object({
     status: z.enum(["claimed", "already_claimed"]),
-    task_id: z.string(),
-    role: z.string(),
-    kind: z.string(),
+    task_id: BoundedIdSchema,
+    role: BoundedLabelSchema,
+    kind: BoundedLabelSchema,
     payload: z.unknown()
   })
   .strict()
@@ -299,27 +303,32 @@ export const GardenTaskResultEnvelopeSchema = z
   .object({
     candidate_signals: z
       .array(CandidateMemorySignalContentSchema)
+      .max(GARDEN_COMPLETE_CANDIDATE_SIGNAL_MAX)
       .readonly()
       .optional(),
-    extracted_proposals: z.array(z.record(z.unknown()).readonly()).readonly().optional(),
-    notes: z.string().optional()
+    extracted_proposals: z
+      .array(BoundedJsonObjectSchema)
+      .max(GARDEN_COMPLETE_EXTRACTED_PROPOSAL_MAX)
+      .readonly()
+      .optional(),
+    notes: BoundedReasonSchema.optional()
   })
   .strict()
   .readonly();
 
 export const GardenCompleteTaskRequestSchema = z
   .object({
-    task_id: z.string(),
+    task_id: BoundedIdSchema,
     status: z.enum(["completed", "failed"]),
     result_envelope: GardenTaskResultEnvelopeSchema.optional(),
-    last_error_text: z.string().optional()
+    last_error_text: BoundedReasonSchema.optional()
   })
   .strict()
   .readonly();
 
 export const GardenCompleteTaskResponseSchema = z
   .object({
-    task_id: z.string(),
+    task_id: BoundedIdSchema,
     status: z.enum(["completed", "failed"]),
     events_appended: NonNegativeIntSchema
   })

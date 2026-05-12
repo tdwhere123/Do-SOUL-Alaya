@@ -75,7 +75,10 @@ These rules always win over lower-level docs and task-card convenience.
     *input*, not an agent claim of truth: it feeds Garden's extractor,
     whose candidates still pass the same deterministic triage, evidence
     synthesis, and EventLog audit before any durable write — that
-    triage step is the "Alaya decides".
+    triage step is the "Alaya decides". When an attached MCP session has
+    no `ALAYA_RUN_ID`, the attach boundary first creates a canonical
+    session run whose `run_id` equals the process-stable MCP `session_id`,
+    so the non-null signal and memory-entry run contract still holds.
 20. **Delivered ≠ used.** Context delivery to a consumer agent is not
     proof of usage. Trust state distinguishes installed / configured /
     delivered / used / skipped / unverifiable / mixed.
@@ -136,8 +139,9 @@ These rules always win over lower-level docs and task-card convenience.
       every Zod schema transitively reachable from an MCP request or
       response type in `packages/protocol/src/soul/mcp-types.ts`.
       The authoritative definition is transitive reachability, not a
-      hand-maintained file list. The `semver-surface.test.ts`
-      snapshot computes and pins the reachable set.
+      hand-maintained file list. `semver-tool-surface.test.ts` pins
+      the tool names/descriptions; `semver-surface.test.ts` computes
+      and pins the reachable schema set.
     - **EventLog payload surface:** payload schemas under
       `packages/protocol/src/events/*`.
     - **Runtime control-plane config surface:** config schemas under
@@ -174,8 +178,7 @@ These rules always win over lower-level docs and task-card convenience.
     `packages/engine-gateway/src/provider/soul-tool-specs.ts`, or any
     Zod schema transitively reachable from MCP request/response types
     in `mcp-types.ts` must cite §25 and declare the SemVer step. If
-    the `semver-surface.test.ts` snapshot moves, the PR is touching
-    the MCP contract.
+    either SemVer snapshot moves, the PR is touching the MCP contract.
 
 ## Port (Historical, retired after v0.1.0)
 

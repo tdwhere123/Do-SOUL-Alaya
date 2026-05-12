@@ -1,6 +1,7 @@
 {
   "name": "@do-soul/alaya-core",
   "version": "0.2.0",
+  "private": true,
   "description": "Truth boundary services for Do-SOUL Alaya — EventPublisher, MemoryService, GardenRuntime.",
   "license": "MIT",
   "homepage": "https://github.com/tdwhere123/Do-SOUL-Alaya",
@@ -9,7 +10,6 @@
     "url": "git+https://github.com/tdwhere123/Do-SOUL-Alaya.git",
     "directory": "packages/core"
   },
-  "publishConfig": { "access": "public" },
   "files": ["dist/"],
   "type": "module",
   "main": "dist/index.js",

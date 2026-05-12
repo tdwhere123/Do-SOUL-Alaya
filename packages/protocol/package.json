@@ -1,6 +1,7 @@
 {
   "name": "@do-soul/alaya-protocol",
   "version": "0.2.0",
+  "private": true,
   "description": "Zod schemas + JSON-schema export for the Do-SOUL Alaya MCP catalog (leaf — no internal deps).",
   "license": "MIT",
   "homepage": "https://github.com/tdwhere123/Do-SOUL-Alaya",
@@ -9,7 +10,6 @@
     "url": "git+https://github.com/tdwhere123/Do-SOUL-Alaya.git",
     "directory": "packages/protocol"
   },
-  "publishConfig": { "access": "public" },
   "files": ["dist/"],
   "type": "module",
   "main": "dist/index.js",

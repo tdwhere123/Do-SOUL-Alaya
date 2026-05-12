@@ -668,7 +668,7 @@ export class RecallService {
     });
 
     return this.appendAdditiveCandidatesWithinRemainingBudgets(
-      [...boostedBaseCandidates].sort(compareRecallCandidates),
+      boostedBaseCandidates,
       additiveCandidates.sort(compareRecallCandidates),
       params.config.fine_assessment
     );
@@ -771,7 +771,7 @@ export class RecallService {
       totalTokens = nextTokenCount;
     }
 
-    return Object.freeze([...selected].sort(compareRecallCandidates));
+    return Object.freeze(selected);
   }
 
   private rebuildBudgetStateForDelivery(

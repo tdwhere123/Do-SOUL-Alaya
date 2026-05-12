@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { soulToolDefs } from "@do-soul/alaya-engine-gateway";
 import * as AppConfig from "../app-config.js";
 import * as CandidateMemorySignal from "../candidate-memory-signal.js";
 import * as SchemaPrimitives from "../schema-primitives.js";
@@ -132,7 +131,6 @@ describe("semver-surface", () => {
 function collectMcpSurface(
   schemaRegistry: ReadonlyMap<z.ZodTypeAny, readonly NamedSchema[]>
 ): Readonly<{
-  readonly tools: readonly Readonly<{ readonly name: string; readonly description: string }>[];
   readonly reachableModules: readonly string[];
   readonly reachableSchemas: readonly Readonly<{
     readonly module: string;
@@ -150,11 +148,6 @@ function collectMcpSurface(
   const reachableSchemas = [...reachable.values()].sort(compareByModuleThenSchema);
 
   return Object.freeze({
-    tools: Object.freeze(
-      soulToolDefs
-        .map(({ name, description }) => Object.freeze({ name, description }))
-        .sort((left, right) => left.name.localeCompare(right.name))
-    ),
     reachableModules: Object.freeze([...new Set(reachableSchemas.map(({ module }) => module))].sort()),
     reachableSchemas: Object.freeze(reachableSchemas.map((entry) => Object.freeze(entry)))
   });
@@ -506,10 +499,6 @@ function formatSnapshotLines(surface: Readonly<{
   readonly runtimeConfigKeys: ReturnType<typeof collectRuntimeConfigKeys>;
 }>): readonly string[] {
   return Object.freeze([
-    "[mcp.tools]",
-    ...surface.mcp.tools.map(({ name, description }) =>
-      `${name}|desc16=${sha256(description).slice(0, 16)}`
-    ),
     "[mcp.reachableModules]",
     ...surface.mcp.reachableModules.map(shortModule),
     "[mcp.reachableSchemas]",

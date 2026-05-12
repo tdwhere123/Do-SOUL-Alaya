@@ -383,7 +383,7 @@ CI 测试强制的规则：
 | `alaya detach codex` / `detach claude-code` | 原子地反向解除对应的 attach | 是 | 是 |
 | `alaya status` | Daemon 健康 + trust-state 摘要 | 否 | 否 |
 | `alaya inspect` | 在 loopback 上打开 Memory Inspector SPA（memory-tooling，*不是* agent surface） | 否 | 否 |
-| `alaya update [--check] [--yes]` | 检查并安装 npm 上 `@do-soul/alaya` 的最新版 | 是（npm 全局） | 否 |
+| `alaya update` | 显示 GitHub Release / 源码构建升级指引 | 否 | 否 |
 | `alaya tools list` | 列 MCP 工具目录 | 否 | 否 |
 | `alaya tools call <tool> '<json>'` | 从 CLI 调一个工具 | 视情况 | 视情况 |
 | `alaya review pending\|accept\|reject` | 查看并裁决 HITL proposal 队列（Memory Inspector 的 CLI 兜底） | accept / reject：是 | 是 |
@@ -435,8 +435,9 @@ curl -fsSL ... | ALAYA_HOME=/opt/alaya ALAYA_BIN_DIR=/usr/local/bin bash
 
 后续升级：用更新的 `ALAYA_VERSION` 重跑一次 install.sh。Installer 先在
 staging 目录解压并 build，build 成功后再原子地交换进 `$ALAYA_HOME`；
-旧 install 目录会被移到 `${ALAYA_HOME}.bak`。（`alaya update` 是 npm
-路径下的命令，本分发路径下不使用。）
+旧 install 目录会被移到 `${ALAYA_HOME}.bak`。`alaya update` 在当前
+GitHub Release / 源码构建分发路径下只显示升级指引；它不会调用 npm，
+也不会修改安装目录。
 
 卸载：`bash ~/.local/share/do-soul-alaya/scripts/uninstall.sh`
 （加 `--purge` 同时删 `~/.config/alaya/`，里面是 durable memory

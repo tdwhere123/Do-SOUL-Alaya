@@ -160,6 +160,69 @@ describe("EmbeddingRecallService", () => {
     ]);
   });
 
+  it("waits briefly for a prepared query embedding before degrading", async () => {
+    const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+      event_id: `event-${entry.event_type}`,
+      created_at: "2026-04-23T00:00:00.000Z",
+      revision: 0,
+      ...entry
+    }));
+    const service = new EmbeddingRecallService({
+      embeddingRepo: {
+        listByObjectIds: vi.fn(async () => [
+          createEmbeddingRecord({
+            object_id: "memory-1",
+            content_hash: hashMemoryContent("Lexical baseline."),
+            embedding: new Float32Array([0.8, 0.2])
+          }),
+          createEmbeddingRecord({
+            object_id: "memory-2",
+            content_hash: hashMemoryContent("Semantic supplement."),
+            embedding: new Float32Array([0.1, 0.99])
+          })
+        ])
+      },
+      provider: createProvider({
+        embedTexts: vi.fn(async () =>
+          await new Promise<readonly Float32Array[]>((resolve) => {
+            setTimeout(() => resolve([new Float32Array([0, 1])]), 10);
+          })
+        )
+      }),
+      eventLogRepo: {
+        append: appendSpy,
+        queryByEntity: vi.fn(async () => [])
+      },
+      generateQueryId: () => "prepared-query-wait",
+      now: () => "2026-04-23T00:00:00.000Z",
+      queryTimeoutMs: 100
+    });
+
+    const preparedQuery = service.prepareQueryEmbedding({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "Semantic recall ranking"
+    });
+
+    const result = await service.querySupplementIfReady({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      eligibleMemories: [
+        createMemoryEntry({ object_id: "memory-1", content: "Lexical baseline." }),
+        createMemoryEntry({ object_id: "memory-2", content: "Semantic supplement." })
+      ],
+      baseCandidateIds: ["memory-1"],
+      maxSupplement: 1,
+      preparedQuery
+    });
+
+    expect(result.supplementaryEntries.map((entry) => entry.object_id)).toEqual(["memory-2"]);
+    expect(appendSpy.mock.calls.map(([entry]) => entry.event_type)).toEqual([
+      ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_QUERIED,
+      ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_MERGED
+    ]);
+  });
+
   it("records degraded fallback when the prepared query embedding is not ready by merge time", async () => {
     const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       event_id: `event-${entry.event_type}`,
@@ -189,7 +252,8 @@ describe("EmbeddingRecallService", () => {
       },
       healthJournalRecorder: healthJournal,
       generateQueryId: () => "prepared-query-pending",
-      now: () => "2026-04-23T00:00:00.000Z"
+      now: () => "2026-04-23T00:00:00.000Z",
+      queryTimeoutMs: 50
     });
 
     const preparedQuery = service.prepareQueryEmbedding({
@@ -510,13 +574,13 @@ describe("EmbeddingRecallService queryTimeoutMs configuration", () => {
     });
   }
 
-  it("uses the 1500ms default when queryTimeoutMs is not configured", () => {
+  it("uses the 2500ms default when queryTimeoutMs is not configured", () => {
     const embedTexts = vi.fn(async () => [new Float32Array([0, 1])]);
     const service = buildServiceWithTimeout({ embedTexts });
     service.prepareQueryEmbedding({ workspaceId: "ws-1", runId: null, queryText: "hello" });
     expect(embedTexts).toHaveBeenCalledWith(
       ["hello"],
-      expect.objectContaining({ timeoutMs: 1500 })
+      expect.objectContaining({ timeoutMs: 2500 })
     );
   });
 
@@ -556,7 +620,7 @@ describe("EmbeddingRecallService queryTimeoutMs configuration", () => {
     service.prepareQueryEmbedding({ workspaceId: "ws-1", runId: null, queryText: "hello" });
     expect(embedTexts).toHaveBeenCalledWith(
       ["hello"],
-      expect.objectContaining({ timeoutMs: 1500 })
+      expect.objectContaining({ timeoutMs: 2500 })
     );
   });
 });

@@ -53,25 +53,35 @@ the minor and follow without reading code.
 
 | Release | Scope | Cadence driver |
 |---|---|---|
-| **v0.2.0** | pi-mono enabler, recall refinement, Trustworthy Loop trace, §25 SemVer | Local code + credentialed live provider smoke |
+| **v0.2.0** | pi-mono enabler, recall refinement, Trustworthy Loop trace, §25 SemVer | Local deterministic gates + provider-transport smoke; full daemon AC7 still required for release acceptance |
 | **v0.2.1** | OS keychain adapter (#BL-009) | Three platform integrations |
 | **v0.2.2** | Real host autonomy recording + offline replay (#BL-038); Codex `/alaya-inspect` host recognition (#BL-037) | External: needs real Codex/Claude run + Codex version handshake |
 
-Splitting along cadence boundaries means v0.2.0 reached release on local
-code merit plus the recorded credentialed pi-mono smoke named by Slice 3
-(`v0.2.0/task-cards/reports/v0.2.0-slice-3.md`). v0.2.1 and v0.2.2 are
-dispatched independently when their external dependencies allow.
+Splitting along cadence boundaries means v0.2.0 reached candidate status
+on local code merit plus the recorded provider-transport smoke named by
+Slice 3 (`v0.2.0/task-cards/reports/v0.2.0-slice-3.md`). Full release
+acceptance still requires the Slice 3 AC7 live daemon smoke: fresh
+install, `soul.recall`, `soul.report_context_usage`, completed
+`POST_TURN_EXTRACT`, EventLog payload, and CandidateMemorySignal
+evidence in one run. v0.2.1 and v0.2.2 are dispatched independently
+when their external dependencies allow.
+
+v0.2.0's release channel remains the GitHub source tarball / local build
+path used after v0.1.2. The workspace package metadata is for local
+source consumers and SemVer pinning; npm registry publication is not a
+claimed v0.2.0 distribution path.
 
 ## Forward compatibility commitment
 
 v0.2.0 introduces invariant §25 (MCP and Protocol SemVer Contract).
 Three concentric public contracts are covered:
 
-- (a) MCP tool surface — tool names/descriptions plus every Zod
-  schema *transitively reachable* from an MCP request/response type
-  in `packages/protocol/src/soul/mcp-types.ts`, wherever those
-  schemas live (the `semver-surface.test.ts` reachability snapshot is
-  the authoritative inventory — no hand-maintained file list)
+- (a) MCP tool surface — tool names/descriptions are pinned by
+  `packages/engine-gateway/src/__tests__/semver-tool-surface.test.ts`;
+  every Zod schema *transitively reachable* from an MCP
+  request/response type in `packages/protocol/src/soul/mcp-types.ts`
+  is pinned by the `semver-surface.test.ts` reachability snapshot
+  (no hand-maintained file list)
 - (b) EventLog payload schemas (`packages/protocol/src/events/*`)
 - (c) Runtime control-plane config schemas (`packages/protocol/src/app-config.ts`)
 
@@ -93,12 +103,12 @@ docs/v0.2/
 ├── README.md              ← this file (entry point)
 ├── v0.2.0/
 │   ├── plan.md            ← v0.2.0 decisions + slice plan + risks
-│   ├── release-notes.md   ← v0.2.0 shipped surface + follow-ups
+│   ├── release-notes.md   ← v0.2.0 candidate surface + follow-ups
 │   ├── reports/
 │   │   └── v0.2.0-closeout.md
 │   └── task-cards/
 │       ├── reports/
-│       │   └── v0.2.0-slice-3.md   ← live pi-mono smoke transcript
+│       │   └── v0.2.0-slice-3.md   ← provider-transport smoke transcript (AC7 partial)
 │       ├── v0.2.0-slice-1-retire-conversation-provider.md
 │       ├── v0.2.0-slice-2-pi-mono-extractor.md
 │       ├── v0.2.0-slice-3-garden-provider-swap.md

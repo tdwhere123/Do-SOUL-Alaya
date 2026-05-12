@@ -57,13 +57,15 @@ now use domain names, the listed oversized production files were split,
 and root unused-code checking is reproducible through `knip`. v0.2.0
 candidate work adds the pi-mono Garden provider path, recall scoring
 refinements, Trustworthy Loop trace anchors, and the invariant §25
-SemVer snapshot; credentialed live pi-mono smoke remains the release
-acceptance blocker. v0.2.x makes durable capture self-bootstrapping:
+SemVer snapshot; the remaining release acceptance blocker is the full
+Slice 3 AC7 daemon `POST_TURN_EXTRACT` + EventLog live smoke. v0.2.x
+makes durable capture self-bootstrapping:
 `soul.recall` (in `apps/core-daemon/src/mcp-memory-tool-handler.ts`)
 enqueues a `POST_TURN_EXTRACT` Garden task from the host's `recent_turn`
 (or `query`), `report_context_usage` no longer gates that enqueue on a
-used object, and `garden-runtime.ts` no longer aborts the background
-pass when one extract task fails — so the existing
+used object, and no-run MCP attach sessions are canonicalized as real
+session runs before the MCP context reaches the handler. `garden-runtime.ts`
+no longer aborts the background pass when one extract task fails — so the existing
 LocalHeuristics → triage → materialization pipeline fills memory
 without the host filing proposals.
 
@@ -77,8 +79,8 @@ without the host filing proposals.
 | Protocol types | `packages/protocol/src/` | ported; `schema-ready` (P1-protocol). Post-port hygiene renamed former `events/phase-*` modules and `Phase*` event symbols to domain names such as `workspace-run`, `memory-governance`, `runtime-governance`, and `compute-recall-garden`, preserving event string values. `packages/protocol/src/soul/mcp-types.ts` also carries the P4-mcp-memory-tools public `soul.*` memory tool contract seed, including recall delivery metadata and usage-proof schemas. |
 | Storage skeleton + DB helpers | `packages/storage/{package.json,tsconfig.json,src/db.ts,src/errors.ts,src/index.ts}` | ported; `schema-ready` (P1-storage-skeleton) |
 | Storage shared utilities | `packages/storage/src/repos/shared/`, `packages/storage/src/__tests__/deep-freeze.test.ts` | ported; `implementation-ready` (P1-storage-shared) |
-| Storage migrations | `packages/storage/src/migrations/` | ported; `implementation-ready` (P1-migrations) plus Alaya follow-up `056-trust-state-persistence.sql` |
-| Storage repos | `packages/storage/src/repos/`, `packages/storage/src/index.ts`, `packages/storage/src/__tests__/*-repo.test.ts` | ported; `implementation-ready` (P2-repos-batch-* + P2-barrel-storage) plus Alaya-original `trust-state-repo.ts`. Post-port hygiene split `memory-entry-repo.ts` into keyword-search and row-mapper helpers, and split `garden-data-ports.ts` into shared and librarian data-port helpers. |
+| Storage migrations | `packages/storage/src/migrations/` | ported; `implementation-ready` (P1-migrations) plus Alaya follow-ups including `056-trust-state-persistence.sql` and `067-garden-completion-envelope.sql` |
+| Storage repos | `packages/storage/src/repos/`, `packages/storage/src/index.ts`, `packages/storage/src/__tests__/*-repo.test.ts` | ported; `implementation-ready` (P2-repos-batch-* + P2-barrel-storage) plus Alaya-original `trust-state-repo.ts`. Post-port hygiene split `memory-entry-repo.ts` into keyword-search and row-mapper helpers, and split `garden-data-ports.ts` into shared and librarian data-port helpers. `garden-task-repo.ts` owns the Garden completion-envelope CAS used by host-worker retries. |
 | Core skeleton + config leaves | `packages/core/src/{errors.ts,index.ts,shared/,dynamics-constants-runtime.ts}` | ported; `schema-ready` (P1-core-skeleton + P1-config) |
 | Core services | `packages/core/src/` service files | Phase 2 services are ported: `memory-service.ts`, `evidence-service.ts`, `signal-service.ts`, `global-memory-recall-{port,service}.ts`, `task-surface-builder.ts`, `recall-service.ts`, `manifestation-resolver.ts`, `synthesis-service.ts`, `proposal-service.ts`, `green-service.ts`, `governance-lease-service.ts`, `session-override-service.ts`, `embedding-recall-service.ts`, `embedding-backfill-handler.ts`, `event-publisher.ts`, `runtime-event-normalizer.ts`, `output-shaping-service.ts`, `narrative-budget-service.ts`, `health-journal-service.ts`, and `karma-event-store.ts`; Phase 3 services are ported: `tool-spec-service.ts`, `strong-ref-service.ts`, `dirty-state-panic-service.ts`, `file-path.ts`, `message-history.ts`, `mcp-tool-discovery-service.ts`, `extension-registry-service.ts`, `worker-run-lifecycle-service.ts`, `worker-run-state-machine.ts`, `run-service.ts`, `run-hot-state-service.ts`, `serial-delegation-{service,event-intake,recovery}.ts`, `canonical-alias-service.ts`, `project-mapping-service.ts`, `engine-binding-service.ts`, `workspace-service.ts`, `slot-service.ts`, `surface-service.ts`, `surface-binding-service.ts`, `surface-drift-service.ts`, `target-revalidate-service.ts`, `graph-explore-service.ts`, `constitutional-fragment-service.ts`, `deferred-obligation-service.ts`, `budget-bankruptcy-service.ts`, `arbitration-service.ts`, `claim-service.ts`, `dynamics-service.ts`, `prompt-asset-registry.ts`, `node-template-resolver.ts`, `security-status-service.ts`, `conversation-service.ts`, and `context-lens-assembler.ts`. Post-port hygiene split `recall-service.ts` into helper/type modules and split serial-delegation recovery errors into `serial-delegation-recovery-errors.ts`. v0.2.0 threads per-call recall token estimation, budget pressure ratios, and domain weight overrides through `recall-service.ts`, `recall-service-helpers.ts`, `recall-service-types.ts`, and `context-lens-assembler.ts`. |
 | Core security stack | `packages/core/src/{permission-policy/,ports/,zero-day-security-layer.ts,constraint-proxy.ts,integration-gate.ts,worker-safety-gate.ts,worker-trust-assessor.ts,cross-cutting-permission-service.ts}` | ported; `implementation-ready` (P2-security-1 + P2-security-2). v0.2.x removed the unused `stance-resolution-service.ts` / `compute-routing-resolver.ts` / `createStancePolicyProvider` after the slice-1 ConversationProvider retirement left them caller-less. |

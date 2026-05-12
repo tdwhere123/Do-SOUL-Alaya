@@ -1088,7 +1088,7 @@ describe("RecallService", () => {
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["memory-lexical"]);
   });
 
-  it("rebuilds budget state after embedding boost reorders delivered candidates", async () => {
+  it("rebuilds budget state after embedding boost without overriding a strong lexical rank", async () => {
     const memories = [
       createMemoryEntry({
         object_id: "memory-first-lexical",
@@ -1157,8 +1157,8 @@ describe("RecallService", () => {
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
-      "memory-second-semantic",
-      "memory-first-lexical"
+      "memory-first-lexical",
+      "memory-second-semantic"
     ]);
     expect(result.candidates[0]?.budget_state).toMatchObject({
       token_estimate: result.candidates[0]?.token_estimate,

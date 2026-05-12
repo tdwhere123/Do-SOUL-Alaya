@@ -11,8 +11,8 @@ p5-system-review-r3 as an EventPublisher v0.2 deferral and closed in
 v0.1-closeout-a2; `#BL-023`/`#BL-024` were resolved in r1 / r2;
 `#BL-025` through `#BL-036` were opened by the v0.1-closeout A2 and
 D2 fix-loops, then resolved by Gate-5F under
-`docs/archive/v0.1-port-record/phase-5-followup-briefs/` before Phase 6; `#BL-037` and
-`#BL-038` remain open).
+`docs/archive/v0.1-port-record/phase-5-followup-briefs/` before Phase 6;
+`#BL-037` and `#BL-038` remain open).
 
 ## Open Issues
 

@@ -184,8 +184,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const configEnv = await loadConfigEnv(configPaths.envPath);
   // Fallback DB path is the user's config dir, NOT a path inside the
   // package install directory. Writing to package internals corrupts
-  // future upgrades and would let an npm-installed daemon mutate state
-  // inside node_modules/@do-soul/alaya/.
+  // future upgrades and would let a release/source-built daemon mutate
+  // state inside its own package files.
   const dbPath = await resolveDatabasePath(configPaths, join(configPaths.configDir, "alaya.db"));
   const filesDirectory = resolveCoreDaemonFilesDirectory();
   const database = initDatabase({ filename: dbPath });

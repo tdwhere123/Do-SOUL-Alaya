@@ -35,7 +35,7 @@ export const ALAYA_MCP_SERVER_INSTRUCTIONS = [
   "Durable memory mutates only through accepted proposal apply; rejected proposals do not mutate durable memory.",
   "GARDEN HOST-WORKER LOOP: when the operator has set garden compute provider_kind=host_worker, Alaya queues POST_TURN_EXTRACT background tasks for an attached CLI agent (Codex / Claude Code / similar) to run as host worker.",
   "When you have spare capacity between user turns (or are explicitly asked to flush the garden queue), you MAY: garden.list_pending_tasks -> garden.claim_task -> run your own sub-agent extraction on the task payload -> garden.complete_task with candidate_signals.",
-  "Only the agent target that claimed a task can complete it; another attached host completing it is rejected. Task payload carries the original conversation's run_id; never substitute a different run id."
+  "Only the agent target that claimed a task can complete it; another attached host completing it is rejected. Task payload carries the run_id bound by the MCP context; attached MCP sessions without ALAYA_RUN_ID are first canonicalized as session runs. Never substitute a different run id."
 ].join(" ");
 
 export function createAlayaMcpServer(options: AlayaMcpServerOptions): Server {

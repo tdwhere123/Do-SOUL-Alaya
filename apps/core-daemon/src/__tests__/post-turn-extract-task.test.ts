@@ -9,6 +9,7 @@ import {
   WorkspaceKind,
   WorkspaceState,
   type CandidateMemorySignal,
+  type ContextDeliveryRecord,
   type RuntimeGardenComputeConfig
 } from "@do-soul/alaya-protocol";
 import { EventPublisher, SignalService } from "@do-soul/alaya-core";
@@ -29,6 +30,7 @@ import {
 } from "@do-soul/alaya-storage";
 import type { BackgroundServiceConfig } from "../background/bootstrap.js";
 import { createGardenRuntime } from "../garden-runtime.js";
+import { buildGardenTaskSignalId } from "../garden-task-signal-id.js";
 import {
   createMcpMemoryToolHandler,
   type McpMemoryToolCallContext,
@@ -93,6 +95,55 @@ describe("post-turn extract Garden task", () => {
       role: "host_worker",
       kind: GardenTaskKind.POST_TURN_EXTRACT
     });
+  });
+
+  it("usage report with no run id and no linked delivery enqueues no extract work", async () => {
+    const harness = await createHandlerHarness({ delivery: null });
+
+    const result = await reportUsage(harness.handler, {
+      turn_index: 8,
+      context: noRunContext()
+    });
+
+    expect(result.ok).toBe(true);
+    expect(postTurnRows(harness.gardenTaskRepo)).toEqual([]);
+  });
+
+  it("usage report with an attached session run enqueues extract work scoped to the linked delivery run", async () => {
+    const harness = await createHandlerHarness({
+      delivery: createDeliveryRecord({ run_id: "mcp-session-run-1" })
+    });
+
+    const result = await reportUsage(harness.handler, {
+      turn_index: 8,
+      context: sessionRunContext()
+    });
+
+    expect(result.ok).toBe(true);
+    const rows = postTurnRows(harness.gardenTaskRepo);
+    expect(rows).toHaveLength(1);
+    expect((rows[0]!.payload as PostTurnPayload).run_id).toBe("mcp-session-run-1");
+  });
+
+  it("delayed usage reports enqueue extract work under the linked delivery run", async () => {
+    const harness = await createHandlerHarness({
+      delivery: createDeliveryRecord({ run_id: "run-original" })
+    });
+
+    const result = await reportUsage(harness.handler, {
+      turn_index: 9,
+      context: {
+        ...defaultContext(),
+        runId: "run-reporter",
+        sessionId: "later-session"
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    const rows = postTurnRows(harness.gardenTaskRepo);
+    expect(rows).toHaveLength(1);
+    const payload = rows[0]!.payload as PostTurnPayload;
+    expect(payload.run_id).toBe("run-original");
   });
 
   it("skipped and not_applicable usage still enqueue extract work when a turn_digest is present", async () => {
@@ -180,6 +231,39 @@ describe("post-turn extract Garden task", () => {
     );
   });
 
+  it("recall with no run id enqueues no extract work", async () => {
+    const harness = await createHandlerHarness();
+
+    const result = await recall(harness.handler, {
+      query: "pnpm",
+      recent_turn: "Please remember that I do not want fixable issues parked in backlog.",
+      context: noRunContext()
+    });
+
+    expect(result.ok).toBe(true);
+    expect(postTurnRows(harness.gardenTaskRepo)).toEqual([]);
+  });
+
+  it("recall with an attached session run enqueues recall-driven extract work", async () => {
+    const harness = await createHandlerHarness();
+
+    const result = await recall(harness.handler, {
+      query: "pnpm",
+      recent_turn: "Please remember that I do not want fixable issues parked in backlog.",
+      context: sessionRunContext()
+    });
+
+    expect(result.ok).toBe(true);
+    const rows = postTurnRows(harness.gardenTaskRepo);
+    expect(rows).toHaveLength(1);
+    const payload = rows[0]!.payload as PostTurnPayload;
+    expect(rows[0]!.id.startsWith("recall_extract_")).toBe(true);
+    expect(payload.run_id).toBe("mcp-session-run-1");
+    expect(payload.turn_digest.last_messages[0]!.content_excerpt).toBe(
+      "Please remember that I do not want fixable issues parked in backlog."
+    );
+  });
+
   it("does not enqueue a recall-driven extract task for a short query and no recent_turn", async () => {
     const harness = await createHandlerHarness();
 
@@ -197,16 +281,21 @@ describe("post-turn extract Garden task", () => {
     expect(postTurnRows(harness.gardenTaskRepo)).toHaveLength(1);
   });
 
-  it("a recall and a report for the same turn enqueue two extract tasks (disjoint keyspaces)", async () => {
+  it("a report for the same recalled user message does not enqueue duplicate extract work", async () => {
     const harness = await createHandlerHarness();
 
     await recall(harness.handler, { query: "remember that I always use pnpm for this project" });
-    await reportUsage(harness.handler, { turn_index: 3 });
+    await reportUsage(harness.handler, {
+      turn_index: 3,
+      last_messages: [
+        { role: "user", content_excerpt: "remember that I always use pnpm for this project" },
+        { role: "assistant", content_excerpt: "I used the project preference." }
+      ]
+    });
 
     const rows = postTurnRows(harness.gardenTaskRepo);
-    expect(rows).toHaveLength(2);
-    expect(rows.some((row) => row.id.startsWith("recall_extract_"))).toBe(true);
-    expect(rows.some((row) => row.id.startsWith("post_turn_extract_"))).toBe(true);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.id.startsWith("recall_extract_")).toBe(true);
   });
 
   it("skips the recall-driven extract task when the librarian queue is already saturated", async () => {
@@ -257,12 +346,12 @@ describe("post-turn extract Garden task", () => {
       success: true,
       candidate_signals_count: 2
     });
-    await expect(harness.signalRepo.getById("signal-official-a")).resolves.toMatchObject({
-      signal_id: "signal-official-a",
+    await expect(harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 0))).resolves.toMatchObject({
+      signal_id: gardenTaskSignalId("post-turn-task-1", 0),
       workspace_id: "workspace-1"
     });
-    await expect(harness.signalRepo.getById("signal-official-b")).resolves.toMatchObject({
-      signal_id: "signal-official-b",
+    await expect(harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 1))).resolves.toMatchObject({
+      signal_id: gardenTaskSignalId("post-turn-task-1", 1),
       workspace_id: "workspace-1"
     });
   });
@@ -314,8 +403,36 @@ describe("post-turn extract Garden task", () => {
       status: "completed",
       claimed_by: "in-process"
     });
-    await expect(harness.signalRepo.getById("signal-local")).resolves.toMatchObject({
-      signal_id: "signal-local"
+    await expect(harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 0))).resolves.toMatchObject({
+      signal_id: gardenTaskSignalId("post-turn-task-1", 0)
+    });
+  });
+
+  it("local_heuristics routing persists signals for canonical attached session runs", async () => {
+    const localCompile = vi.fn(async (_content, context) => [
+      createSignal({ signal_id: "signal-session-run", run_id: context.run_id })
+    ]);
+    const harness = await createRoutingHarness({
+      provider_kind: "local_heuristics",
+      localCompile
+    });
+    await seedRun(harness.runRepo, "mcp-session-run-1");
+    harness.enqueuePostTurnTask({
+      id: "post-turn-session-task",
+      payload: createPostTurnPayload({
+        task_id: "post-turn-session-task",
+        run_id: "mcp-session-run-1"
+      })
+    });
+
+    await harness.runScheduler();
+
+    expect(harness.gardenTaskRepo.findById("post-turn-session-task")).toMatchObject({
+      status: "completed"
+    });
+    await expect(harness.signalRepo.getById(gardenTaskSignalId("post-turn-session-task", 0))).resolves.toMatchObject({
+      run_id: "mcp-session-run-1",
+      signal_id: gardenTaskSignalId("post-turn-session-task", 0)
     });
   });
 
@@ -463,7 +580,7 @@ describe("post-turn extract Garden task", () => {
     const signals = await harness.signalService.listByRun("run-1");
     expect(signals).toEqual([
       expect.objectContaining({
-        signal_id: "signal-review-queue",
+        signal_id: gardenTaskSignalId("post-turn-task-1", 0),
         source: SignalSource.GARDEN_COMPILE,
         signal_state: "triaged"
       })
@@ -486,10 +603,14 @@ interface RoutingHarness extends ClosableHarness {
   readonly eventLogRepo: SqliteEventLogRepo;
   readonly eventPublisher: EventPublisher;
   readonly gardenTaskRepo: SqliteGardenTaskRepo;
+  readonly runRepo: SqliteRunRepo;
   readonly signalRepo: SqliteSignalRepo;
   readonly signalService: SignalService;
   readonly runtimeNotifier: { notifyEntry(entry: unknown): void };
-  enqueuePostTurnTask(): void;
+  enqueuePostTurnTask(overrides?: {
+    readonly id?: string;
+    readonly payload?: PostTurnPayload;
+  }): void;
   runScheduler(): Promise<void>;
 }
 
@@ -523,9 +644,11 @@ interface PostTurnPayload {
   };
 }
 
-async function createHandlerHarness(): Promise<HandlerHarness> {
+async function createHandlerHarness(options: {
+  readonly delivery?: ContextDeliveryRecord | null;
+} = {}): Promise<HandlerHarness> {
   const base = await createSqliteHarnessBase();
-  const handler = createMcpMemoryToolHandler(createMcpDeps(base));
+  const handler = createMcpMemoryToolHandler(createMcpDeps(base, options));
   const harness = {
     ...base,
     handler
@@ -589,13 +712,13 @@ async function createRoutingHarness(options: {
   const harness: RoutingHarness = {
     ...base,
     signalService,
-    enqueuePostTurnTask() {
+    enqueuePostTurnTask(overrides = {}) {
       base.gardenTaskRepo.enqueue({
-        id: "post-turn-task-1",
+        id: overrides.id ?? "post-turn-task-1",
         workspace_id: "workspace-1",
         role: GardenRole.LIBRARIAN,
         kind: GardenTaskKind.POST_TURN_EXTRACT,
-        payload: createPostTurnPayload(),
+        payload: overrides.payload ?? createPostTurnPayload(),
         created_at: "2026-05-07T00:00:00.000Z"
       });
     },
@@ -629,6 +752,7 @@ async function createSqliteHarnessBase() {
     eventLogRepo,
     eventPublisher,
     gardenTaskRepo,
+    runRepo,
     runtimeNotifier,
     signalRepo,
     workspaceRepo,
@@ -650,10 +774,14 @@ async function seedWorkspaceRun(
     default_engine_binding: null,
     workspace_state: WorkspaceState.ACTIVE
   });
+  await seedRun(runRepo, "run-1");
+}
+
+async function seedRun(runRepo: SqliteRunRepo, runId: string): Promise<void> {
   await runRepo.create({
-    run_id: "run-1",
+    run_id: runId,
     workspace_id: "workspace-1",
-    title: "run-1",
+    title: runId,
     goal: null,
     run_mode: RunMode.CHAT,
     engine_binding_id: null,
@@ -669,7 +797,9 @@ function createMcpDeps(base: {
   readonly signalRepo: SqliteSignalRepo;
   readonly eventLogRepo: SqliteEventLogRepo;
   readonly runtimeNotifier: { notifyEntry(entry: unknown): void };
-}): McpMemoryToolHandlerDependencies {
+}, options: {
+  readonly delivery?: ContextDeliveryRecord | null;
+} = {}): McpMemoryToolHandlerDependencies {
   const signalService = new SignalService({
     eventLogRepo: base.eventLogRepo,
     signalRepo: base.signalRepo,
@@ -688,7 +818,8 @@ function createMcpDeps(base: {
     },
     memoryService: {
       findById: async () => null,
-      findByIdScoped: async () => null,
+      findByIdScoped: async (objectId, workspaceId) =>
+        workspaceId === "workspace-1" ? createMemoryEntry({ object_id: objectId }) : null,
       update: async () => createMemoryEntry()
     },
     signalService: {
@@ -703,7 +834,7 @@ function createMcpDeps(base: {
     trustStateRecorder: {
       recordDelivery: async (input) => ({ ...input, audit_event_id: "event-delivery" }),
       recordUsage: async (input) => ({ ...input, audit_event_id: "event-usage" }),
-      findDeliveryById: async () => null
+      findDeliveryById: async () => options.delivery === undefined ? createDeliveryRecord() : options.delivery
     },
     eventPublisher: base.eventPublisher,
     gardenTaskRepo: base.gardenTaskRepo
@@ -715,6 +846,7 @@ async function recall(
   overrides: Partial<{
     readonly query: string;
     readonly recent_turn: string;
+    readonly context: McpMemoryToolCallContext;
   }> = {}
 ): Promise<McpMemoryToolCallResult> {
   return await handler.call({
@@ -727,7 +859,7 @@ async function recall(
       max_results: 5,
       ...(overrides.recent_turn === undefined ? {} : { recent_turn: overrides.recent_turn })
     },
-    context: defaultContext()
+    context: overrides.context ?? defaultContext()
   });
 }
 
@@ -745,16 +877,22 @@ async function reportUsage(
       readonly role: string;
       readonly content_excerpt: string;
     }[];
+    readonly context: McpMemoryToolCallContext;
   }> = {}
 ): Promise<McpMemoryToolCallResult> {
+  const deliveredObjects =
+    overrides.delivered_objects ?? [{ object_id: "memory-a", usage_status: "used" }] as const;
+  const usedObjectIds = overrides.used_object_ids ??
+    deliveredObjects
+      .filter((object) => object.usage_status === "used")
+      .map((object) => object.object_id);
   return await handler.call({
     toolName: "soul.report_context_usage",
     arguments: {
       delivery_id: "delivery-1",
       usage_state: overrides.usage_state ?? "used",
-      used_object_ids: overrides.used_object_ids ?? ["memory-a"],
-      delivered_objects:
-        overrides.delivered_objects ?? [{ object_id: "memory-a", usage_status: "used" }],
+      used_object_ids: usedObjectIds,
+      delivered_objects: deliveredObjects,
       turn_index: overrides.turn_index ?? 1,
       turn_digest: {
         last_messages:
@@ -765,7 +903,7 @@ async function reportUsage(
       },
       reason: "post-turn extract test"
     },
-    context: defaultContext()
+    context: overrides.context ?? defaultContext()
   });
 }
 
@@ -782,8 +920,8 @@ function createProvider(
   return { provider_kind, compile };
 }
 
-function createPostTurnPayload(): PostTurnPayload {
-  return {
+function createPostTurnPayload(overrides: Partial<PostTurnPayload> = {}): PostTurnPayload {
+  const payload: PostTurnPayload = {
     task_id: "post-turn-task-1",
     task_kind: GardenTaskKind.POST_TURN_EXTRACT,
     required_tier: "tier_2",
@@ -803,6 +941,7 @@ function createPostTurnPayload(): PostTurnPayload {
       }
     }
   };
+  return { ...payload, ...overrides };
 }
 
 function createSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
@@ -825,7 +964,14 @@ function createSignal(overrides: Partial<CandidateMemorySignal> = {}): Candidate
   };
 }
 
-function createMemoryEntry() {
+function createMemoryEntry(overrides: Partial<ReturnType<typeof createMemoryEntryBase>> = {}) {
+  return {
+    ...createMemoryEntryBase(),
+    ...overrides
+  } as const;
+}
+
+function createMemoryEntryBase() {
   return {
     object_id: "memory-a",
     object_kind: "memory_entry",
@@ -859,6 +1005,19 @@ function createMemoryEntry() {
   } as const;
 }
 
+function createDeliveryRecord(overrides: Partial<ContextDeliveryRecord> = {}): ContextDeliveryRecord {
+  return {
+    delivery_id: "delivery-1",
+    agent_target: "codex",
+    workspace_id: "workspace-1",
+    run_id: "run-1",
+    delivered_object_ids: ["memory-a"],
+    delivered_at: "2026-05-07T00:00:00.000Z",
+    audit_event_id: "event-delivery",
+    ...overrides
+  };
+}
+
 function defaultContext(): McpMemoryToolCallContext {
   return {
     workspaceId: "workspace-1",
@@ -866,6 +1025,22 @@ function defaultContext(): McpMemoryToolCallContext {
     agentTarget: "codex",
     sessionId: "post-turn-extract-test-session",
     surfaceId: "post-turn-extract-test"
+  };
+}
+
+function noRunContext(): McpMemoryToolCallContext {
+  return {
+    ...defaultContext(),
+    runId: null,
+    sessionId: "mcp-session-without-run"
+  };
+}
+
+function sessionRunContext(): McpMemoryToolCallContext {
+  return {
+    ...defaultContext(),
+    runId: "mcp-session-run-1",
+    sessionId: "mcp-session-run-1"
   };
 }
 
@@ -884,3 +1059,5 @@ function unwrapOk<T>(result: McpMemoryToolCallResult): T {
   expect(result).toMatchObject({ ok: true });
   return (result as Extract<McpMemoryToolCallResult, { ok: true }>).output as T;
 }
+
+const gardenTaskSignalId = buildGardenTaskSignalId;

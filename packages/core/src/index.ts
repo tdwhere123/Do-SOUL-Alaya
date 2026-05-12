@@ -59,6 +59,7 @@ export * from "./shared/extension-descriptor-parsers.js";
 export * from "./shared/load-or-default-with-workspace-guard.js";
 export * from "./shared/normalize-unit.js";
 export * from "./shared/recall-policy.js";
+export * from "./shared/stable-stringify.js";
 export * from "./shared/surface-uri.js";
 export * from "./shared/time.js";
 export * from "./shared/validated-activation-candidates.js";

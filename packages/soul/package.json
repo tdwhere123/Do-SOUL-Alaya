@@ -1,6 +1,7 @@
 {
   "name": "@do-soul/alaya-soul",
   "version": "0.2.0",
+  "private": true,
   "description": "soul.* MCP tool surface for Do-SOUL Alaya (recall, propose, review, signals).",
   "license": "MIT",
   "homepage": "https://github.com/tdwhere123/Do-SOUL-Alaya",
@@ -9,7 +10,6 @@
     "url": "git+https://github.com/tdwhere123/Do-SOUL-Alaya.git",
     "directory": "packages/soul"
   },
-  "publishConfig": { "access": "public" },
   "files": ["dist/"],
   "type": "module",
   "main": "dist/index.js",

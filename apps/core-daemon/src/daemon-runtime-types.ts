@@ -49,7 +49,7 @@ export interface AlayaDaemonRuntimeServices {
   readonly configService: Pick<AppConfigService, "getGardenCredentialProvenance" | "getRuntimeGardenComputeConfig">;
   readonly mcpMemoryToolHandler: McpMemoryToolHandler;
   readonly recallUtilizationService: RecallUtilizationService;
-  readonly runService: Pick<RunService, "getById">;
+  readonly runService: Pick<RunService, "getById" | "ensureAttachedMcpSessionRun">;
   readonly trustStateRecorder: TrustStateRecorder;
   readonly workspaceService: Pick<WorkspaceService, "ensureLocalWorkspace">;
   readonly gardenStatus: Readonly<{

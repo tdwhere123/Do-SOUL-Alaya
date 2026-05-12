@@ -277,17 +277,17 @@ wherever those schemas live (today that closure includes
 `packages/protocol/src/soul/memory-graph.ts`,
 `packages/protocol/src/soul/object-kind.ts`,
 `packages/protocol/src/soul/proposal.ts`, … — but the authoritative
-inventory is the `semver-surface.test.ts` reachability snapshot, not
-this list); (b) the EventLog payload schemas under
+schema inventory is the `semver-surface.test.ts` reachability
+snapshot, while tool names/descriptions are pinned by
+`semver-tool-surface.test.ts`, not this list); (b) the EventLog
+payload schemas under
 `packages/protocol/src/events/*`; (c) the runtime control-plane
 config schemas under `packages/protocol/src/app-config.ts`.
 Workspace-internal TypeScript interfaces without a consumer are out
 of scope. PRs touching any of those paths — or any change that makes
-the `semver-surface.test.ts` snapshot move — MUST cite §25 and
-declare the SemVer step. The `semver-surface.test.ts` snapshot
-(Slice 10, in-scope not optional) computes the reachability closure
-and pins it, so "removal is major" and "the contract surface grew"
-both become tripwires.
+either SemVer snapshot move — MUST cite §25 and declare the SemVer
+step. The Slice 10 snapshots are in-scope, not optional, so "removal
+is major" and "the contract surface grew" both become tripwires.
 
 ## 3. Critical files
 

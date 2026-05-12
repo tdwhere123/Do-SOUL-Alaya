@@ -9,6 +9,7 @@ import {
   type EventLogEntry,
   type SignalState as SignalStateValue
 } from "@do-soul/alaya-protocol";
+import { stableStringify } from "./shared/stable-stringify.js";
 
 export interface SignalServiceEventLogRepoPort {
   append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
@@ -79,6 +80,11 @@ export class SignalService {
 
   public async receiveSignal(signal: CandidateMemorySignal): Promise<SignalServiceReceiveResult> {
     const parsedSignal = CandidateMemorySignalSchema.parse(signal);
+    const existingSignal = await this.dependencies.signalRepo.getById(parsedSignal.signal_id);
+    if (existingSignal !== null) {
+      assertReplayMatchesExistingSignal(existingSignal, parsedSignal);
+      return await this.resumeExistingSignal(existingSignal);
+    }
     const emittedEvent = await this.dependencies.eventLogRepo.append({
       event_type: "soul.signal.emitted",
       entity_type: "candidate_memory_signal",
@@ -105,6 +111,44 @@ export class SignalService {
       await this.dependencies.runtimeNotifier.notifyEntry(emittedEvent);
     }
 
+    return await this.triageAndMaybeMaterialize(storedSignal);
+  }
+
+  public async listByRun(runId: string): Promise<readonly CandidateMemorySignal[]> {
+    return await this.dependencies.signalRepo.listByRun(runId);
+  }
+
+  private async resumeExistingSignal(existingSignal: CandidateMemorySignal): Promise<SignalServiceReceiveResult> {
+    if (
+      existingSignal.signal_state === SignalState.EMITTED ||
+      existingSignal.signal_state === SignalState.NORMALIZED
+    ) {
+      return await this.triageAndMaybeMaterialize(existingSignal);
+    }
+
+    if (
+      (existingSignal.signal_state === SignalState.TRIAGED ||
+        existingSignal.signal_state === SignalState.COMPILED) &&
+      this.dependencies.postTriageMaterializer !== undefined
+    ) {
+      this.warn("Signal replay found a post-triage signal; not replaying materialization side effects.", {
+        signal_id: existingSignal.signal_id,
+        workspace_id: existingSignal.workspace_id,
+        run_id: existingSignal.run_id,
+        signal_state: existingSignal.signal_state
+      });
+    }
+
+    return {
+      signal: existingSignal,
+      triage_result: mapExistingSignalStateToTriage(existingSignal.signal_state),
+      materialization: null
+    };
+  }
+
+  private async triageAndMaybeMaterialize(
+    storedSignal: CandidateMemorySignal
+  ): Promise<SignalServiceReceiveResult> {
     const triageResult = this.evaluateTriage(storedSignal);
     const triagedState = mapTriageResultToSignalState(triageResult);
     const triagedEvent = await this.dependencies.eventLogRepo.append({
@@ -136,10 +180,31 @@ export class SignalService {
       };
     }
 
+    return await this.materializeAcceptedSignal(triagedSignal, triageResult);
+  }
+
+  private async materializeAcceptedSignal(
+    triagedSignal: CandidateMemorySignal,
+    triageResult: SignalTriageResult
+  ): Promise<SignalServiceReceiveResult> {
+    const materializer = this.dependencies.postTriageMaterializer;
+    if (materializer === undefined) {
+      return {
+        signal: triagedSignal,
+        triage_result: triageResult,
+        materialization: null
+      };
+    }
+
     let materialization: SignalMaterializationResult;
     let caughtMaterializationError = false;
+    const materializingSignal = await this.dependencies.signalRepo.updateState(
+      triagedSignal.signal_id,
+      SignalState.COMPILED
+    );
+
     try {
-      materialization = await this.dependencies.postTriageMaterializer.materialize(triagedSignal);
+      materialization = await materializer.materialize(materializingSignal);
     } catch (error) {
       caughtMaterializationError = true;
       materialization = {
@@ -178,7 +243,14 @@ export class SignalService {
     });
 
     if (materialization.success !== true) {
-      // No DB update in the failure path — runtime notification follows EventLog directly.
+      const failedSignal = await this.dependencies.signalRepo.updateState(
+        materializingSignal.signal_id,
+        SignalState.FAILED
+      );
+      // Failure is terminal for automatic replay: materializers can create
+      // durable side effects before returning/throwing, so a later retry must
+      // not run the same materializer again unless a separate repair path
+      // explicitly resets the signal.
       if (matEvent.run_id !== null) {
         await this.dependencies.runtimeNotifier.notifyEntry(matEvent);
       }
@@ -193,7 +265,7 @@ export class SignalService {
       }
 
       return {
-        signal: triagedSignal,
+        signal: failedSignal,
         triage_result: triageResult,
         materialization
       };
@@ -242,7 +314,7 @@ export class SignalService {
 
     // EventLog-first: DB update then runtime notification (invariant #7).
     const materializedSignal = await this.dependencies.signalRepo.updateState(
-      triagedSignal.signal_id,
+      materializingSignal.signal_id,
       SignalState.MATERIALIZED
     );
 
@@ -255,10 +327,6 @@ export class SignalService {
       triage_result: triageResult,
       materialization
     };
-  }
-
-  public async listByRun(runId: string): Promise<readonly CandidateMemorySignal[]> {
-    return await this.dependencies.signalRepo.listByRun(runId);
   }
 
   private evaluateTriage(signal: CandidateMemorySignal): SignalTriageResult {
@@ -299,4 +367,53 @@ function readErrorMessage(error: unknown): string {
   }
 
   return "Unknown materialization error";
+}
+
+function mapExistingSignalStateToTriage(state: SignalStateValue): SignalTriageResult {
+  switch (state) {
+    case SignalState.DROPPED:
+      return "dropped";
+    case SignalState.DEFERRED:
+      return "deferred";
+    default:
+      return "accepted";
+  }
+}
+
+function assertReplayMatchesExistingSignal(
+  existingSignal: CandidateMemorySignal,
+  incomingSignal: CandidateMemorySignal
+): void {
+  if (buildSignalReplayFingerprint(existingSignal) !== buildSignalReplayFingerprint(incomingSignal)) {
+    throw new SignalReplayMismatchError(
+      `Candidate signal replay does not match existing signal content: ${incomingSignal.signal_id}`
+    );
+  }
+}
+
+function buildSignalReplayFingerprint(signal: CandidateMemorySignal): string {
+  return stableStringify({
+    signal_id: signal.signal_id,
+    workspace_id: signal.workspace_id,
+    run_id: signal.run_id,
+    surface_id: signal.surface_id,
+    source: signal.source,
+    signal_kind: signal.signal_kind,
+    object_kind: signal.object_kind,
+    scope_hint: signal.scope_hint,
+    domain_tags: signal.domain_tags,
+    confidence: signal.confidence,
+    evidence_refs: signal.evidence_refs,
+    raw_payload: signal.raw_payload,
+    source_delivery_ids: signal.source_delivery_ids
+  });
+}
+
+class SignalReplayMismatchError extends Error {
+  public readonly code = "VALIDATION";
+
+  public constructor(message: string) {
+    super(message);
+    this.name = "SignalReplayMismatchError";
+  }
 }

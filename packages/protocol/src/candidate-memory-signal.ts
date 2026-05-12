@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "./schema-primitives.js";
+import {
+  BOUNDED_DEFAULT_ARRAY_MAX,
+  BOUNDED_EVIDENCE_ARRAY_MAX,
+  BoundedIdSchema,
+  BoundedJsonObjectSchema,
+  BoundedLabelSchema,
+  IsoDatetimeStringSchema
+} from "./schema-primitives.js";
 
 const signalKindValues = [
   "potential_claim",
@@ -67,21 +74,21 @@ export const SignalSourceSchema = z.enum(signalSourceValues);
 export const SignalStateSchema = z.enum(signalStateValues);
 
 const ConfidenceSchema = z.number().min(0).max(1);
-const DomainTagsSchema = z.array(NonEmptyStringSchema).readonly();
-const EvidenceRefsSchema = z.array(NonEmptyStringSchema).readonly();
-const RawPayloadSchema = z.record(z.unknown()).readonly();
-const SourceDeliveryIdsSchema = z.array(NonEmptyStringSchema).min(1).max(32).readonly();
+const DomainTagsSchema = z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly();
+const EvidenceRefsSchema = z.array(BoundedLabelSchema).max(BOUNDED_EVIDENCE_ARRAY_MAX).readonly();
+const RawPayloadSchema = BoundedJsonObjectSchema;
+const SourceDeliveryIdsSchema = z.array(BoundedIdSchema).min(1).max(32).readonly();
 
 export const CandidateMemorySignalSchema = z.object({
-  signal_id: NonEmptyStringSchema,
-  workspace_id: NonEmptyStringSchema,
-  run_id: NonEmptyStringSchema,
-  surface_id: NonEmptyStringSchema.nullable(),
+  signal_id: BoundedIdSchema,
+  workspace_id: BoundedIdSchema,
+  run_id: BoundedIdSchema,
+  surface_id: BoundedIdSchema.nullable(),
   source: SignalSourceSchema,
   signal_kind: SignalKindSchema,
   signal_state: SignalStateSchema.default(SignalState.EMITTED),
-  object_kind: NonEmptyStringSchema,
-  scope_hint: NonEmptyStringSchema.nullable(),
+  object_kind: BoundedLabelSchema,
+  scope_hint: BoundedLabelSchema.nullable(),
   domain_tags: DomainTagsSchema,
   confidence: ConfidenceSchema,
   evidence_refs: EvidenceRefsSchema,
@@ -95,8 +102,8 @@ export const CandidateMemorySignalSchema = z.object({
 // Default Scope; see McpEmitCandidateSignalRequestSchema below.
 const CandidateMemorySignalContentFieldsSchema = z.object({
   signal_kind: SignalKindSchema,
-  object_kind: NonEmptyStringSchema,
-  scope_hint: NonEmptyStringSchema.nullable(),
+  object_kind: BoundedLabelSchema,
+  scope_hint: BoundedLabelSchema.nullable(),
   domain_tags: DomainTagsSchema,
   confidence: ConfidenceSchema,
   evidence_refs: EvidenceRefsSchema,
@@ -113,9 +120,9 @@ export const CandidateMemorySignalContentSchema = CandidateMemorySignalContentFi
 // instead so they never see the scope fields.
 export const CandidateMemorySignalInputSchema = CandidateMemorySignalContentFieldsSchema
   .extend({
-    workspace_id: NonEmptyStringSchema,
-    run_id: NonEmptyStringSchema,
-    surface_id: NonEmptyStringSchema.nullable()
+    workspace_id: BoundedIdSchema,
+    run_id: BoundedIdSchema,
+    surface_id: BoundedIdSchema.nullable()
   })
   .strict()
   .readonly();
@@ -140,7 +147,7 @@ export const EmitCandidateSignalRequestSchema = CandidateMemorySignalInputSchema
 
 export const EmitCandidateSignalResponseSchema = z
   .object({
-    signal_id: NonEmptyStringSchema,
+    signal_id: BoundedIdSchema,
     status: z.enum(["emitted", "normalized"])
   })
   .readonly();

@@ -298,7 +298,6 @@ function createMcpCommand(runtime: AlayaDaemonRuntime): AlayaSubcommandSpec<read
         ctx.stderr.write(`${trustedRunId.message}\n`);
         return { exitCode: ALAYA_SYSEXITS.DATAERR };
       }
-      runtime.startBackgroundServices();
 
       // gate-6-delta B1: the MCP stdio surface is an attached-agent
       // boundary; it must never advertise itself as a human-reviewer
@@ -319,11 +318,17 @@ function createMcpCommand(runtime: AlayaDaemonRuntime): AlayaSubcommandSpec<read
       // each attach launches a fresh `alaya mcp stdio` child, so one
       // uuid per process maps 1:1 to one MCP attach session.
       const mcpSessionId = `mcp-session-${randomUUID()}`;
+      const mcpRunId = trustedRunId.runId ?? (await runtime.services.runService.ensureAttachedMcpSessionRun({
+        workspaceId: workspaceContext.workspaceId,
+        sessionId: mcpSessionId,
+        agentTarget: resolvedAgentTarget
+      })).run_id;
+      runtime.startBackgroundServices();
       const server = await runAlayaMcpStdioServer({
         memoryToolHandler: runtime.services.mcpMemoryToolHandler,
         contextProvider: () => ({
           workspaceId: workspaceContext.workspaceId,
-          runId: trustedRunId.runId,
+          runId: mcpRunId,
           agentTarget: resolvedAgentTarget,
           sessionId: mcpSessionId
         }),

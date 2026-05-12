@@ -180,7 +180,7 @@ export function createDoctorCommand(
 
       // Detect drift between source ALAYA_OPERATOR_INSTRUCTIONS and the value
       // Alaya wrote into host MCP profiles on a prior `alaya attach`. Operators
-      // don't always re-attach after `alaya update`, so we surface the
+      // don't always re-attach after upgrading Alaya, so we surface the
       // divergence here with a concrete refresh hint.
       const attachedProfiles = await Promise.all(
         PROFILE_TARGETS.map(async (target) => {

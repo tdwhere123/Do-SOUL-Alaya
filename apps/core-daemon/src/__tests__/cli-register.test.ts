@@ -147,11 +147,18 @@ describe("cli registration", () => {
       stdin,
       stdout
     });
-    expect(serverOptions.contextProvider()).toEqual({
+    const context = serverOptions.contextProvider();
+    expect(context).toEqual({
       workspaceId: expect.stringMatching(/^local_[a-f0-9]{16}$/),
-      runId: null,
+      runId: expect.stringMatching(/^mcp-session-[0-9a-f-]+$/),
       agentTarget: "mcp",
       sessionId: expect.stringMatching(/^mcp-session-[0-9a-f-]+$/)
+    });
+    expect(context.runId).toBe(context.sessionId);
+    expect(runtime.services.runService.ensureAttachedMcpSessionRun).toHaveBeenCalledWith({
+      workspaceId: context.workspaceId,
+      sessionId: context.sessionId,
+      agentTarget: "mcp"
     });
     expect(hoisted.serverClose).toHaveBeenCalledTimes(1);
   });
@@ -165,6 +172,7 @@ describe("cli registration", () => {
       services: {
         ...baseRuntime.services,
         runService: {
+          ...baseRuntime.services.runService,
           getById: vi.fn(async () => createRun({ run_id: "run-1", workspace_id: "workspace-1" }))
         }
       }
@@ -190,6 +198,7 @@ describe("cli registration", () => {
 
     expect(result.exitCode).toBe(0);
     expect(runtime.services.runService.getById).toHaveBeenCalledWith("run-1");
+    expect(runtime.services.runService.ensureAttachedMcpSessionRun).not.toHaveBeenCalled();
     const [serverOptions] = hoisted.runAlayaMcpStdioServer.mock.calls[0] ?? [];
     expect(serverOptions.contextProvider()).toEqual({
       workspaceId: "workspace-1",
@@ -208,6 +217,7 @@ describe("cli registration", () => {
       services: {
         ...baseRuntime.services,
         runService: {
+          ...baseRuntime.services.runService,
           getById: vi.fn(async () => createRun({ run_id: "run-1", workspace_id: "workspace-1" }))
         }
       }
@@ -260,6 +270,7 @@ describe("cli registration", () => {
         services: {
           ...baseRuntime.services,
           runService: {
+            ...baseRuntime.services.runService,
             getById: vi.fn(async () => createRun({ run_id: "run-1", workspace_id: "workspace-1" }))
           }
         }
@@ -310,6 +321,7 @@ describe("cli registration", () => {
       services: {
         ...baseRuntime.services,
         runService: {
+          ...baseRuntime.services.runService,
           getById: vi.fn(async () => createRun({ run_id: "run-foreign", workspace_id: "workspace-2" }))
         }
       }
@@ -350,6 +362,7 @@ describe("cli registration", () => {
       services: {
         ...baseRuntime.services,
         runService: {
+          ...baseRuntime.services.runService,
           getById: vi.fn(async () => {
             throw new CoreError("NOT_FOUND", "Run not found");
           })
@@ -435,7 +448,10 @@ function createRuntime(overrides: Partial<AlayaDaemonRuntime> = {}): AlayaDaemon
         })
       },
       runService: {
-        getById: async (runId: string) => createRun({ run_id: runId, workspace_id: "workspace-1" })
+        getById: vi.fn(async (runId: string) => createRun({ run_id: runId, workspace_id: "workspace-1" })),
+        ensureAttachedMcpSessionRun: vi.fn(async (input) =>
+          createRun({ run_id: input.sessionId, workspace_id: input.workspaceId })
+        )
       },
       trustStateRecorder: {
         summarize: async (agentTarget: string) => ({

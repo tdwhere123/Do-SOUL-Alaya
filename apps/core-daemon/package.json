@@ -1,6 +1,7 @@
 {
   "name": "@do-soul/alaya",
   "version": "0.2.0",
+  "private": true,
   "description": "Local-first memory plane for CLI agents (Codex, Claude Code, similar). Provides MCP attach surface and the alaya CLI (13 verbs).",
   "license": "MIT",
   "homepage": "https://github.com/tdwhere123/Do-SOUL-Alaya",
@@ -10,7 +11,6 @@
     "directory": "apps/core-daemon"
   },
   "keywords": ["mcp", "memory", "agent", "claude-code", "codex", "alaya", "local-first"],
-  "publishConfig": { "access": "public" },
   "files": [
     "dist/**/*.js",
     "dist/**/*.d.ts",

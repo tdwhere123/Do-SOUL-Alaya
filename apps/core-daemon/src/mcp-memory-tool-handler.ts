@@ -81,12 +81,17 @@ import type {
   GardenTaskEventInput,
   GardenTaskRow
 } from "@do-soul/alaya-storage";
+import { stableStringify } from "@do-soul/alaya-core";
+import { buildGardenTaskSignalId } from "./garden-task-signal-id.js";
 import { hasAlayaMemoryToolName, type AlayaMemoryToolName } from "./mcp-memory-tool-catalog.js";
 
 type MemoryUsageRefreshFields = MemoryEntryMutableFields & {
   readonly last_used_at?: string;
   readonly last_hit_at?: string;
 };
+type GardenCompletionCandidateSignal = NonNullable<
+  NonNullable<GardenCompleteTaskRequest["result_envelope"]>["candidate_signals"]
+>[number];
 
 const RECALL_HIT_ACTIVATION_BUMP = 0.05;
 const POST_TURN_EXTRACT_EXCERPT_MAX_CHARS = 800;
@@ -256,9 +261,11 @@ export interface McpMemoryToolHandlerDependencies {
       taskId: string,
       claimedBy: string,
       completionClaimedBy: string,
-      claimedAt: string
+      claimedAt: string,
+      completionEnvelopeJson?: string | null
     ): boolean;
     refreshClaim(taskId: string, claimedBy: string, claimedAt: string): boolean;
+    releaseClaim(taskId: string, claimedBy: string): boolean;
   };
   readonly now?: () => string;
   readonly generateId?: () => string;
@@ -602,6 +609,9 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     if (row === null || row.workspace_id !== context.workspaceId) {
       return GardenClaimTaskResponseSchema.parse(toSilentAlreadyClaimed(request.task_id));
     }
+    if (claimResult !== "claimed" && row.claimed_by !== context.agentTarget) {
+      return GardenClaimTaskResponseSchema.parse(toSilentAlreadyClaimed(request.task_id));
+    }
 
     return GardenClaimTaskResponseSchema.parse({
       status: claimResult === "claimed" ? "claimed" : "already_claimed",
@@ -640,10 +650,19 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     const resolvedRunId = taskPayloadRunId ?? context.runId;
 
     const contentOnlySignals = request.result_envelope?.candidate_signals ?? [];
+    const completionEnvelopeJson =
+      contentOnlySignals.length === 0
+        ? null
+        : buildGardenCompletionEnvelopeJson(row.id, contentOnlySignals);
 
     if (contentOnlySignals.length > 0 && resolvedRunId === null) {
       throw new ToolValidationError(
         "garden.complete_task cannot emit candidate_signals without a run_id in the task payload or MCP call context."
+      );
+    }
+    if (row.completion_envelope_json !== null && row.completion_envelope_json !== completionEnvelopeJson) {
+      throw new ToolValidationError(
+        `Garden task ${row.id} candidate_signals changed after a previous partial completion attempt; retry with the original candidate signal envelope.`
       );
     }
 
@@ -656,7 +675,8 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
         row.id,
         context.agentTarget,
         completionClaimedBy,
-        now()
+        now(),
+        completionEnvelopeJson
       );
       if (!completionClaimStarted) {
         throw new ToolValidationError(
@@ -666,51 +686,65 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     }
 
     const emittedSignalIds: string[] = [];
-    for (const signalContent of contentOnlySignals) {
-      const internalSignal = CandidateMemorySignalSchema.parse({
-        signal_id: `signal_${generateId()}`,
-        ...signalContent,
+    try {
+      for (const [index, signalContent] of contentOnlySignals.entries()) {
+        const internalSignal = CandidateMemorySignalSchema.parse({
+          signal_id: buildGardenTaskSignalId(row.id, index),
+          ...signalContent,
+          workspace_id: context.workspaceId,
+          run_id: resolvedRunId,
+          surface_id: null,
+          source: SignalSource.GARDEN_COMPILE,
+          created_at: now()
+        });
+        const received = await deps.signalService.receiveSignal(internalSignal);
+        emittedSignalIds.push(received.signal.signal_id);
+      }
+
+      const completedAt = now();
+      const event: GardenTaskEventInput = {
+        event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
+        entity_type: "garden_task",
+        entity_id: row.id,
         workspace_id: context.workspaceId,
         run_id: resolvedRunId,
-        surface_id: null,
-        source: SignalSource.GARDEN_COMPILE,
-        created_at: now()
-      });
-      const received = await deps.signalService.receiveSignal(internalSignal);
-      emittedSignalIds.push(received.signal.signal_id);
+        caused_by: context.agentTarget,
+        payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
+          task_id: row.id,
+          task_kind: row.kind,
+          role: row.role,
+          tier: GARDEN_ROLE_TIER_MAP[row.role],
+          success: request.status === "completed",
+          objects_affected: emittedSignalIds,
+          candidate_signals_count: emittedSignalIds.length,
+          workspace_id: context.workspaceId,
+          occurred_at: completedAt
+        })
+      };
+
+      await deps.gardenTaskRepo.completeWithEvents(
+        row.id,
+        {
+          status: request.status,
+          completed_at: completedAt,
+          ...(request.last_error_text === undefined ? {} : { last_error_text: request.last_error_text })
+        },
+        [event],
+        completionClaimedBy
+      );
+    } catch (error) {
+      if (contentOnlySignals.length > 0) {
+        const released = deps.gardenTaskRepo.releaseClaim(row.id, completionClaimedBy);
+        if (!released) {
+          warn("Garden task completion claim could not be released after partial failure.", {
+            task_id: row.id,
+            claimed_by: completionClaimedBy,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      }
+      throw error;
     }
-
-    const completedAt = now();
-    const event: GardenTaskEventInput = {
-      event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
-      entity_type: "garden_task",
-      entity_id: row.id,
-      workspace_id: context.workspaceId,
-      run_id: resolvedRunId,
-      caused_by: context.agentTarget,
-      payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
-        task_id: row.id,
-        task_kind: row.kind,
-        role: row.role,
-        tier: GARDEN_ROLE_TIER_MAP[row.role],
-        success: request.status === "completed",
-        objects_affected: emittedSignalIds,
-        candidate_signals_count: emittedSignalIds.length,
-        workspace_id: context.workspaceId,
-        occurred_at: completedAt
-      })
-    };
-
-    await deps.gardenTaskRepo.completeWithEvents(
-      row.id,
-      {
-        status: request.status,
-        completed_at: completedAt,
-        ...(request.last_error_text === undefined ? {} : { last_error_text: request.last_error_text })
-      },
-      [event],
-      completionClaimedBy
-    );
 
     return GardenCompleteTaskResponseSchema.parse({
       task_id: row.id,
@@ -810,12 +844,15 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     context: McpMemoryToolCallContext
   ) {
     const reportedAt = now();
+    validateUsageStateConsistency(request);
     await validateReportedRecallHits(request, context.workspaceId);
+    const usageState = resolveUsageState(request);
+    const usedObjectIds = resolveUsedObjectIds(request);
     await deps.trustStateRecorder.recordUsage(
       {
         delivery_id: request.delivery_id,
-        usage_state: request.usage_state,
-        used_object_ids: request.used_object_ids ?? [],
+        usage_state: usageState,
+        used_object_ids: usedObjectIds,
         ...(request.per_anchor_usage === undefined
           ? {}
           : { per_anchor_usage: request.per_anchor_usage }),
@@ -824,16 +861,16 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       },
       { expectedWorkspaceId: context.workspaceId }
     );
-    await promoteRecallHitMemories(request, context, reportedAt);
-    enqueuePostTurnExtractTask(request, context);
     // INVARIANT: stats attribution follows the linked delivery, not the
     // reporter's MCP context — a delayed retry / CLI fallback report
     // would otherwise count usage under the wrong run/agent and skew
     // used_ratio vs the trust-state proof.
     const linkedDelivery = await deps.trustStateRecorder.findDeliveryById(request.delivery_id);
+    await promoteRecallHitMemories(request, context, linkedDelivery, reportedAt);
+    enqueuePostTurnExtractTask(request, context, linkedDelivery);
     await emitContextUsageReportedTelemetry({
       deliveryId: request.delivery_id,
-      usageState: request.usage_state,
+      usageState,
       occurredAt: reportedAt,
       context,
       linkedDelivery
@@ -881,17 +918,30 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     }
   }
 
+  function resolveReportSideEffectAttribution(
+    linkedDelivery: Readonly<ContextDeliveryRecord> | null,
+    context: McpMemoryToolCallContext
+  ): {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly agentTarget: string;
+  } | null {
+    if (linkedDelivery === null) {
+      return null;
+    }
+
+    return {
+      workspaceId: linkedDelivery.workspace_id ?? context.workspaceId,
+      runId: linkedDelivery.run_id,
+      agentTarget: linkedDelivery.agent_target
+    };
+  }
+
   async function validateReportedRecallHits(
     request: SoulReportContextUsageRequest,
     workspaceId: string
   ): Promise<void> {
-    if (request.delivered_objects !== undefined && request.delivered_objects.length > 0) {
-      return;
-    }
-    if (request.usage_state !== "used") {
-      return;
-    }
-    const usedObjectIds = Array.from(new Set(request.used_object_ids ?? []));
+    const usedObjectIds = resolveUsedObjectIds(request);
     if (usedObjectIds.length === 0) {
       return;
     }
@@ -989,28 +1039,20 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
         workspace_id: workspaceId,
         role: GardenRole.LIBRARIAN,
         kind: GardenTaskKind.POST_TURN_EXTRACT,
-        payload: {
-          task_id: taskId,
-          task_kind: GardenTaskKind.POST_TURN_EXTRACT,
-          required_tier: GardenTier.TIER_2,
-          run_id: runId,
-          target_object_refs: dedupedDeliveredIds,
-          priority: 20,
-          created_at: createdAt,
-          turn_index: 0,
-          workspace_id: workspaceId,
-          turn_digest: {
-            last_messages: [
-              {
-                role: "user",
-                content_excerpt: turnText.slice(0, POST_TURN_EXTRACT_EXCERPT_MAX_CHARS)
-              }
-            ],
-            context_manifest: {
-              delivered_object_ids: dedupedDeliveredIds
+        payload: buildPostTurnExtractPayload({
+          taskId,
+          workspaceId,
+          runId,
+          deliveredObjectIds: dedupedDeliveredIds,
+          createdAt,
+          turnIndex: 0,
+          lastMessages: [
+            {
+              role: "user",
+              content_excerpt: turnText.slice(0, POST_TURN_EXTRACT_EXCERPT_MAX_CHARS)
             }
-          }
-        },
+          ]
+        }),
         created_at: createdAt
       });
     } catch (error) {
@@ -1027,11 +1069,14 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
 
   function enqueuePostTurnExtractTask(
     request: SoulReportContextUsageRequest,
-    context: McpMemoryToolCallContext
+    context: McpMemoryToolCallContext,
+    linkedDelivery: Readonly<ContextDeliveryRecord> | null
   ): void {
+    const attribution = resolveReportSideEffectAttribution(linkedDelivery, context);
     if (
       deps.gardenTaskRepo === undefined ||
-      context.runId === null ||
+      attribution === null ||
+      attribution.runId === null ||
       request.turn_index === undefined ||
       // Extract needs turn text; without a turn_digest the recall-driven
       // enqueueRecallExtractTask already covered this turn. Tier-promote
@@ -1042,10 +1087,14 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       return;
     }
 
-    const workspaceId = context.workspaceId;
-    const runId = context.runId;
+    const workspaceId = attribution.workspaceId;
+    const runId = attribution.runId;
     const turnIndex = request.turn_index;
     const deliveredObjectIds = resolveDeliveredObjectIds(request);
+    const lastMessages = normalizeTurnDigestMessages(request.turn_digest?.last_messages ?? []);
+    if (hasRecallExtractTaskForTurnDigest(deps.gardenTaskRepo, workspaceId, runId, lastMessages)) {
+      return;
+    }
     const taskId = buildPostTurnExtractTaskId(workspaceId, runId, turnIndex);
     const createdAt = now();
 
@@ -1055,23 +1104,15 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
         workspace_id: workspaceId,
         role: GardenRole.LIBRARIAN,
         kind: GardenTaskKind.POST_TURN_EXTRACT,
-        payload: {
-          task_id: taskId,
-          task_kind: GardenTaskKind.POST_TURN_EXTRACT,
-          required_tier: GardenTier.TIER_2,
-          run_id: runId,
-          target_object_refs: deliveredObjectIds,
-          priority: 20,
-          created_at: createdAt,
-          turn_index: turnIndex,
-          workspace_id: workspaceId,
-          turn_digest: {
-            last_messages: normalizeTurnDigestMessages(request.turn_digest?.last_messages ?? []),
-            context_manifest: {
-              delivered_object_ids: deliveredObjectIds
-            }
-          }
-        },
+        payload: buildPostTurnExtractPayload({
+          taskId,
+          workspaceId,
+          runId,
+          deliveredObjectIds,
+          createdAt,
+          turnIndex,
+          lastMessages
+        }),
         created_at: createdAt
       });
     } catch (error) {
@@ -1085,10 +1126,16 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
   async function promoteRecallHitMemories(
     request: SoulReportContextUsageRequest,
     context: McpMemoryToolCallContext,
+    linkedDelivery: Readonly<ContextDeliveryRecord> | null,
     reportedAt: string
   ): Promise<void> {
+    const attribution = resolveReportSideEffectAttribution(linkedDelivery, context);
+    if (attribution === null) {
+      return;
+    }
+
     if (deps.eventPublisher === undefined || deps.memoryEntryRepo === undefined) {
-      await refreshReportedRecallHits(request, context.workspaceId, reportedAt);
+      await refreshReportedRecallHits(request, attribution.workspaceId, reportedAt);
       return;
     }
 
@@ -1099,14 +1146,14 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     // `usage_state`+`used_object_ids`).
     const usedObjectIds = resolveUsedObjectIds(request);
     for (const objectId of usedObjectIds) {
-      const current = await deps.memoryService.findByIdScoped(objectId, context.workspaceId);
+      const current = await deps.memoryService.findByIdScoped(objectId, attribution.workspaceId);
       if (current === null) {
         continue;
       }
       if (current.storage_tier === StorageTier.HOT) {
         await refreshScopedRecallUsage(
           objectId,
-          context.workspaceId,
+          attribution.workspaceId,
           reportedAt
         );
         continue;
@@ -1117,14 +1164,14 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
         event_type: MemoryGovernanceEventType.SOUL_MEMORY_TIER_PROMOTED,
         entity_type: "memory_entry",
         entity_id: current.object_id,
-        workspace_id: context.workspaceId,
-        run_id: context.runId,
-        caused_by: context.agentTarget,
+        workspace_id: attribution.workspaceId,
+        run_id: attribution.runId,
+        caused_by: attribution.agentTarget,
         payload_json: SoulMemoryTierPromotedPayloadSchema.parse({
           object_id: current.object_id,
           object_kind: current.object_kind,
-          workspace_id: context.workspaceId,
-          run_id: context.runId,
+          workspace_id: attribution.workspaceId,
+          run_id: attribution.runId,
           from_tier: current.storage_tier,
           to_tier: StorageTier.HOT,
           reason: "recall_hit",
@@ -1136,7 +1183,7 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
         await deps.eventPublisher.appendManyWithMutation([event], () => {
           const updated = deps.memoryEntryRepo?.updateTier({
             objectId: current.object_id,
-            workspaceId: context.workspaceId,
+            workspaceId: attribution.workspaceId,
             fromTier: current.storage_tier,
             toTier: StorageTier.HOT,
             updatedAt: occurredAt,
@@ -1180,6 +1227,53 @@ function resolveUsedObjectIds(request: SoulReportContextUsageRequest): readonly 
   return Object.freeze([]);
 }
 
+function resolveUsageState(request: SoulReportContextUsageRequest): SoulReportContextUsageRequest["usage_state"] {
+  if (request.delivered_objects !== undefined && request.delivered_objects.length > 0) {
+    return deriveDeliveredObjectsUsageState(request.delivered_objects);
+  }
+  return request.usage_state;
+}
+
+function validateUsageStateConsistency(request: SoulReportContextUsageRequest): void {
+  const deliveredObjects = request.delivered_objects;
+  if (deliveredObjects !== undefined && deliveredObjects.length > 0) {
+    const derivedUsageState = deriveDeliveredObjectsUsageState(deliveredObjects);
+    if (request.usage_state !== derivedUsageState) {
+      throw new ToolValidationError(
+        `usage_state ${request.usage_state} contradicts delivered_objects aggregate usage_state ${derivedUsageState}.`
+      );
+    }
+    if (request.used_object_ids !== undefined) {
+      const reportedIds = [...new Set(request.used_object_ids)].sort();
+      const deliveredUsedIds = [...new Set(
+        deliveredObjects
+          .filter((object) => object.usage_status === "used")
+          .map((object) => object.object_id)
+      )].sort();
+      if (reportedIds.join("\0") !== deliveredUsedIds.join("\0")) {
+        throw new ToolValidationError("used_object_ids contradict delivered_objects usage_status values.");
+      }
+    }
+    return;
+  }
+
+  if (request.usage_state !== "used" && (request.used_object_ids?.length ?? 0) > 0) {
+    throw new ToolValidationError("used_object_ids can only be supplied when usage_state is used.");
+  }
+}
+
+function deriveDeliveredObjectsUsageState(
+  deliveredObjects: NonNullable<SoulReportContextUsageRequest["delivered_objects"]>
+): SoulReportContextUsageRequest["usage_state"] {
+  if (deliveredObjects.some((object) => object.usage_status === "used")) {
+    return "used";
+  }
+  if (deliveredObjects.some((object) => object.usage_status === "skipped")) {
+    return "skipped";
+  }
+  return "not_applicable";
+}
+
 // All delivered object ids regardless of usage_status — used for the
 // turn_digest manifest so the extract task sees what was delivered, not just
 // what was used.
@@ -1189,6 +1283,28 @@ function resolveDeliveredObjectIds(request: SoulReportContextUsageRequest): read
       ? request.used_object_ids ?? []
       : request.delivered_objects.map((object) => object.object_id);
   return Object.freeze([...new Set(ids)]);
+}
+
+function buildGardenCompletionEnvelopeJson(
+  taskId: string,
+  signals: readonly GardenCompletionCandidateSignal[]
+): string {
+  const signalIds = signals.map((_, index) => buildGardenTaskSignalId(taskId, index));
+  const fingerprint = createHash("sha256")
+    .update(stableStringify({
+      task_id: taskId,
+      candidate_signal_ids: signalIds,
+      candidate_signals: signals
+    }))
+    .digest("hex");
+
+  return JSON.stringify({
+    version: 1,
+    task_id: taskId,
+    candidate_signal_count: signals.length,
+    candidate_signal_ids: signalIds,
+    fingerprint
+  });
 }
 
 function normalizeTurnDigestMessages(
@@ -1202,6 +1318,69 @@ function normalizeTurnDigestMessages(
       })
     )
   );
+}
+
+function hasRecallExtractTaskForTurnDigest(
+  gardenTaskRepo: NonNullable<McpMemoryToolHandlerDependencies["gardenTaskRepo"]>,
+  workspaceId: string,
+  runId: string,
+  messages: readonly { readonly role: string; readonly content_excerpt: string }[]
+): boolean {
+  for (const message of messages) {
+    if (message.role !== "user") {
+      continue;
+    }
+    const turnText = message.content_excerpt.trim();
+    if (turnText.length < MIN_AUTO_EXTRACT_TURN_CHARS) {
+      continue;
+    }
+    if (gardenTaskRepo.findById(buildRecallExtractTaskId(workspaceId, runId, turnText)) !== null) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function buildPostTurnExtractPayload(input: {
+  readonly taskId: string;
+  readonly workspaceId: string;
+  readonly runId: string;
+  readonly deliveredObjectIds: readonly string[];
+  readonly createdAt: string;
+  readonly turnIndex: number;
+  readonly lastMessages: readonly { readonly role: string; readonly content_excerpt: string }[];
+}): Readonly<{
+  readonly task_id: string;
+  readonly task_kind: typeof GardenTaskKind.POST_TURN_EXTRACT;
+  readonly required_tier: typeof GardenTier.TIER_2;
+  readonly run_id: string;
+  readonly target_object_refs: readonly string[];
+  readonly priority: 20;
+  readonly created_at: string;
+  readonly turn_index: number;
+  readonly workspace_id: string;
+  readonly turn_digest: {
+    readonly last_messages: readonly { readonly role: string; readonly content_excerpt: string }[];
+    readonly context_manifest: { readonly delivered_object_ids: readonly string[] };
+  };
+}> {
+  return Object.freeze({
+    task_id: input.taskId,
+    task_kind: GardenTaskKind.POST_TURN_EXTRACT,
+    required_tier: GardenTier.TIER_2,
+    run_id: input.runId,
+    target_object_refs: input.deliveredObjectIds,
+    priority: 20,
+    created_at: input.createdAt,
+    turn_index: input.turnIndex,
+    workspace_id: input.workspaceId,
+    turn_digest: Object.freeze({
+      last_messages: input.lastMessages,
+      context_manifest: Object.freeze({
+        delivered_object_ids: input.deliveredObjectIds
+      })
+    })
+  });
 }
 
 function buildPostTurnExtractTaskId(

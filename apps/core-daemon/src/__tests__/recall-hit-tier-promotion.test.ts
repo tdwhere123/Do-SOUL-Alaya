@@ -124,8 +124,8 @@ describe("recall-hit tier promotion", () => {
       deliveryId: "delivery-not-applicable"
     });
 
-    expect(await reportUsage(skipped, "skipped", [MEMORY_ID])).toMatchObject({ ok: true });
-    expect(await reportUsage(notApplicable, "not_applicable", [MEMORY_ID])).toMatchObject({ ok: true });
+    expect(await reportUsage(skipped, "skipped", [])).toMatchObject({ ok: true });
+    expect(await reportUsage(notApplicable, "not_applicable", [])).toMatchObject({ ok: true });
 
     await expectNoPromotion(skipped, {
       expectedTier: StorageTier.WARM,

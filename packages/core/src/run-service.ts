@@ -65,6 +65,12 @@ export type CreateRunInput = {
   readonly engine_class?: Run["engine_class"];
 };
 
+export interface EnsureAttachedMcpSessionRunInput {
+  readonly workspaceId: string;
+  readonly sessionId: string;
+  readonly agentTarget: string;
+}
+
 export interface RunServiceDependencies {
   readonly workspaceRepo: RunWorkspaceRepoPort;
   readonly runRepo: RunRepoPort;
@@ -132,6 +138,49 @@ export class RunService {
           engine_binding_id: persistedBindingId,
           engine_class: engineClass,
           run_state: RunState.IDLE,
+          current_surface_id: null
+        })
+    );
+  }
+
+  public async ensureAttachedMcpSessionRun(input: EnsureAttachedMcpSessionRunInput): Promise<Run> {
+    const workspace = await this.requireWorkspace(input.workspaceId);
+    const existing = await this.dependencies.runRepo.getById(input.sessionId);
+    if (existing !== null) {
+      if (existing.workspace_id !== workspace.workspace_id) {
+        throw new CoreError("CONFLICT", "MCP session run belongs to a different workspace");
+      }
+      return existing;
+    }
+
+    const title = `MCP session ${input.agentTarget}`;
+    return this.dependencies.eventPublisher.appendManyWithMutation(
+      [
+        {
+          event_type: WorkspaceRunEventType.RUN_CREATED,
+          entity_type: "run",
+          entity_id: input.sessionId,
+          workspace_id: workspace.workspace_id,
+          run_id: input.sessionId,
+          caused_by: input.agentTarget,
+          payload_json: RunCreatedPayloadSchema.parse({
+            run_id: input.sessionId,
+            workspace_id: workspace.workspace_id,
+            run_mode: RunMode.CHAT,
+            title
+          })
+        }
+      ],
+      () =>
+        this.dependencies.runRepo.create({
+          run_id: input.sessionId,
+          workspace_id: workspace.workspace_id,
+          title,
+          goal: "Attached MCP session",
+          run_mode: RunMode.CHAT,
+          engine_binding_id: null,
+          engine_class: null,
+          run_state: RunState.ACTIVE,
           current_surface_id: null
         })
     );

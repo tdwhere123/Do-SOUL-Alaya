@@ -19,13 +19,13 @@ export async function loadAlayaCliModules(importModule = defaultImportModule) {
   ]);
 
   if (typeof bridgeModule.createAlayaCliBridge !== "function") {
-    throw new Error(`Cannot find module "${bridgeDistPath}". Run \`npm install -g @do-soul/alaya\` to reinstall.`);
+    throw new Error(`Cannot find module "${bridgeDistPath}". Re-run the GitHub Release installer or rebuild the source checkout.`);
   }
   if (typeof daemonModule.createAlayaDaemonRuntime !== "function") {
-    throw new Error(`Cannot find module "${daemonDistPath}". Run \`npm install -g @do-soul/alaya\` to reinstall.`);
+    throw new Error(`Cannot find module "${daemonDistPath}". Re-run the GitHub Release installer or rebuild the source checkout.`);
   }
   if (typeof registerModule.registerAlayaCliCommands !== "function") {
-    throw new Error(`Cannot find module "${registerDistPath}". Run \`npm install -g @do-soul/alaya\` to reinstall.`);
+    throw new Error(`Cannot find module "${registerDistPath}". Re-run the GitHub Release installer or rebuild the source checkout.`);
   }
 
   const softwareExit = toExitCode(bridgeModule.ALAYA_SYSEXITS?.SOFTWARE, SOFTWARE_EXIT_FALLBACK);

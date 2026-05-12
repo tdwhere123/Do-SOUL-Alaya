@@ -57,9 +57,9 @@ Use these boundaries before opening new planning threads:
   Inspector, not an MCP tool, MCP prompt, or Codex skill. Host
   recognition is tracked separately from Alaya writing a profile entry.
 - Install mode matters: a source checkout uses the absolute
-  `node <repo>/bin/alaya.mjs ...` launcher written by attach, while a
-  global npm install depends on the package existing on npm and being
-  on PATH.
+  `node <repo>/bin/alaya.mjs ...` launcher written by attach. The
+  supported release channel is GitHub Release source tarball / local
+  build; npm/global install is not an active distribution path.
 
 ## Project Genealogy (Historical)
 

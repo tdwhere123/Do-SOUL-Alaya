@@ -277,6 +277,100 @@ describe("mcp memory tool handler", () => {
     );
   });
 
+  it("uses delivered_objects as the canonical used object list", async () => {
+    const deps = createDeps();
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const result = await handler.call({
+      toolName: "soul.report_context_usage",
+      arguments: {
+        delivery_id: "delivery_1",
+        usage_state: "used",
+        delivered_objects: [
+          { object_id: "mem1", usage_status: "used" },
+          { object_id: "mem2", usage_status: "skipped" }
+        ],
+        reason: "cited from delivered object status"
+      },
+      context
+    });
+
+    expect(result.ok).toBe(true);
+    expect(deps.trustStateRecorder.recordUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        delivery_id: "delivery_1",
+        usage_state: "used",
+        used_object_ids: ["mem1"],
+        reason: "cited from delivered object status"
+      }),
+      { expectedWorkspaceId: context.workspaceId }
+    );
+    expect(deps.memoryService.findByIdScoped).toHaveBeenCalledWith("mem1", "ws1");
+    expect(deps.memoryService.findByIdScoped).not.toHaveBeenCalledWith("mem2", "ws1");
+    expect(deps.memoryService.updateScoped).toHaveBeenCalledTimes(1);
+    expect(deps.memoryService.updateScoped).toHaveBeenCalledWith(
+      "mem1",
+      "ws1",
+      expect.objectContaining({
+        storage_tier: "hot",
+        last_used_at: "2026-04-30T00:00:00.000Z",
+        last_hit_at: "2026-04-30T00:00:00.000Z"
+      }),
+      "recall_usage_reported"
+    );
+  });
+
+  it("rejects report_context_usage when aggregate usage_state contradicts delivered_objects", async () => {
+    const deps = createDeps();
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const result = await handler.call({
+      toolName: "soul.report_context_usage",
+      arguments: {
+        delivery_id: "delivery_1",
+        usage_state: "used",
+        delivered_objects: [
+          { object_id: "mem1", usage_status: "skipped" }
+        ],
+        reason: "contradictory proof"
+      },
+      context
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "VALIDATION" }
+    });
+    expect(deps.trustStateRecorder.recordUsage).not.toHaveBeenCalled();
+    expect(deps.memoryService.updateScoped).not.toHaveBeenCalled();
+  });
+
+  it("rejects report_context_usage when used_object_ids contradict delivered_objects", async () => {
+    const deps = createDeps();
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const result = await handler.call({
+      toolName: "soul.report_context_usage",
+      arguments: {
+        delivery_id: "delivery_1",
+        usage_state: "used",
+        used_object_ids: ["mem2"],
+        delivered_objects: [
+          { object_id: "mem1", usage_status: "used" }
+        ],
+        reason: "contradictory ids"
+      },
+      context
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "VALIDATION" }
+    });
+    expect(deps.trustStateRecorder.recordUsage).not.toHaveBeenCalled();
+    expect(deps.memoryService.updateScoped).not.toHaveBeenCalled();
+  });
+
   it("recall-hit-tier-promotion refreshes used memory access while promoting to hot", async () => {
     const deps = createDeps();
     const handler = createMcpMemoryToolHandler(deps);
@@ -569,7 +663,7 @@ function createDeps(): McpMemoryToolHandlerDependencies {
         ...input,
         audit_event_id: "event2"
       })),
-      findDeliveryById: vi.fn(async () => null)
+      findDeliveryById: vi.fn(async (deliveryId: string) => createDeliveryRecord(deliveryId))
     }
   };
 }

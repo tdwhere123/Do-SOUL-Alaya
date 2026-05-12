@@ -31,3 +31,29 @@ export const BoundedContentSchema = BoundedString(65536);
 
 export const BOUNDED_DEFAULT_ARRAY_MAX = 1000;
 export const BOUNDED_EVIDENCE_ARRAY_MAX = 100;
+export const BOUNDED_JSON_OBJECT_MAX_CHARS = 16384;
+
+export const BoundedJsonObjectSchema = z
+  .record(z.unknown())
+  .superRefine((value, ctx) => {
+    let serialized: string;
+    try {
+      serialized = JSON.stringify(value);
+    } catch {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "JSON object must be serializable."
+      });
+      return;
+    }
+    if (serialized.length > BOUNDED_JSON_OBJECT_MAX_CHARS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.too_big,
+        maximum: BOUNDED_JSON_OBJECT_MAX_CHARS,
+        type: "string",
+        inclusive: true,
+        message: `JSON object must serialize to at most ${BOUNDED_JSON_OBJECT_MAX_CHARS} characters.`
+      });
+    }
+  })
+  .readonly();

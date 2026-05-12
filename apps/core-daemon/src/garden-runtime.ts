@@ -61,6 +61,7 @@ import {
 } from "@do-soul/alaya-soul";
 import { findEventLogOrphansForWorkspace, findOrphanedMemoriesForWorkspace } from "./orphan-query.js";
 import { BackgroundServiceManager } from "./background/bootstrap.js";
+import { buildGardenTaskSignalId } from "./garden-task-signal-id.js";
 import {
   createPathPlasticityWatermarkRegistry,
   type PathPlasticityWatermarkRegistry
@@ -691,7 +692,7 @@ export function createGardenRuntime(input: {
       const candidateSignals = await compilePostTurnExtractTask(provider, payload);
 
       const emittedSignalIds: string[] = [];
-      for (const signal of candidateSignals) {
+      for (const [index, signal] of candidateSignals.entries()) {
         if (
           !gardenTaskRepo.refreshClaim(
             row.id,
@@ -701,7 +702,12 @@ export function createGardenRuntime(input: {
         ) {
           throw new Error(`Garden task ${row.id} claim changed before candidate signal emission.`);
         }
-        const received = await input.signalReceiver.receiveSignal(signal);
+        const received = await input.signalReceiver.receiveSignal(
+          CandidateMemorySignalSchema.parse({
+            ...signal,
+            signal_id: buildGardenTaskSignalId(row.id, index)
+          })
+        );
         emittedSignalIds.push(received.signal.signal_id);
       }
 

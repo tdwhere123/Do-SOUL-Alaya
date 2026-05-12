@@ -148,6 +148,30 @@ describe("RunService", () => {
       engine_binding_id: ownedBinding.binding_id
     });
   });
+
+  it("creates attached MCP session runs without requiring a principal engine", async () => {
+    const service = createService({
+      workspace: createWorkspace({
+        default_engine_class: null
+      })
+    });
+
+    const created = await service.ensureAttachedMcpSessionRun({
+      workspaceId: "ws_1",
+      sessionId: "mcp-session-1",
+      agentTarget: "codex"
+    });
+
+    expect(created).toMatchObject({
+      run_id: "mcp-session-1",
+      workspace_id: "ws_1",
+      title: "MCP session codex",
+      goal: "Attached MCP session",
+      run_mode: RunMode.CHAT,
+      engine_class: null,
+      run_state: RunState.ACTIVE
+    });
+  });
 });
 
 interface CreateServiceOptions {

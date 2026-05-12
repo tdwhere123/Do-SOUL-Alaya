@@ -83,6 +83,7 @@ export interface GardenTaskRow {
   readonly completed_at: string | null;
   readonly attempt_count: number;
   readonly last_error_text: string | null;
+  readonly completion_envelope_json: string | null;
 }
 
 export interface GardenTaskBacklogCount {
@@ -140,7 +141,8 @@ export interface GardenTaskRepoPort {
     taskId: string,
     claimedBy: string,
     completionClaimedBy: string,
-    claimedAt: string
+    claimedAt: string,
+    completionEnvelopeJson?: string | null
   ): boolean;
   refreshClaim(taskId: string, claimedBy: string, claimedAt: string): boolean;
   releaseClaim(taskId: string, claimedBy: string): boolean;
@@ -168,6 +170,7 @@ interface GardenTaskDbRow {
   readonly completed_at: string | null;
   readonly attempt_count: number;
   readonly last_error_text: string | null;
+  readonly completion_envelope_json: string | null;
 }
 
 interface GardenTaskBacklogCountDbRow {
@@ -207,8 +210,9 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
         created_at,
         completed_at,
         attempt_count,
-        last_error_text
-      ) VALUES (?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, NULL, 0, NULL)
+        last_error_text,
+        completion_envelope_json
+      ) VALUES (?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, NULL, 0, NULL, NULL)
     `);
     this.findByIdStatement = connection.prepare(`
       SELECT
@@ -223,7 +227,8 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
         created_at,
         completed_at,
         attempt_count,
-        last_error_text
+        last_error_text,
+        completion_envelope_json
       FROM garden_tasks
       WHERE id = ?
       LIMIT 1
@@ -241,7 +246,8 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
         created_at,
         completed_at,
         attempt_count,
-        last_error_text
+        last_error_text,
+        completion_envelope_json
       FROM garden_tasks
       WHERE status = 'pending'
         AND CASE role
@@ -269,7 +275,8 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
         created_at,
         completed_at,
         attempt_count,
-        last_error_text
+        last_error_text,
+        completion_envelope_json
       FROM garden_tasks
       WHERE status = 'pending'
         AND CASE role
@@ -300,8 +307,13 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     `);
     this.beginCompletionAttemptStatement = connection.prepare(`
       UPDATE garden_tasks
-      SET claimed_by = ?, claimed_at = ?
-      WHERE id = ? AND status = 'claimed' AND claimed_by = ?
+      SET claimed_by = ?,
+          claimed_at = ?,
+          completion_envelope_json = COALESCE(completion_envelope_json, ?)
+      WHERE id = ?
+        AND status = 'claimed'
+        AND claimed_by = ?
+        AND (completion_envelope_json IS NULL OR completion_envelope_json = ?)
     `);
     this.refreshClaimStatement = connection.prepare(`
       UPDATE garden_tasks
@@ -326,7 +338,8 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
         created_at,
         completed_at,
         attempt_count,
-        last_error_text
+        last_error_text,
+        completion_envelope_json
       FROM garden_tasks
       WHERE status = 'claimed' AND claimed_at IS NOT NULL AND claimed_at < ?
       ORDER BY claimed_at ASC, id ASC
@@ -534,7 +547,8 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     taskId: string,
     claimedBy: string,
     completionClaimedBy: string,
-    claimedAt: string
+    claimedAt: string,
+    completionEnvelopeJson?: string | null
   ): boolean {
     const parsedTaskId = parseNonEmptyString(taskId, "garden_task.id");
     const parsedClaimedBy = parseNonEmptyString(claimedBy, "garden_task.claimed_by");
@@ -543,13 +557,19 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       "garden_task.completion_claimed_by"
     );
     const parsedClaimedAt = parseTimestamp(claimedAt);
+    const parsedCompletionEnvelopeJson =
+      completionEnvelopeJson === undefined
+        ? null
+        : parseNullableString(completionEnvelopeJson, "garden_task.completion_envelope_json");
 
     try {
       const result = this.beginCompletionAttemptStatement.run(
         parsedCompletionClaimedBy,
         parsedClaimedAt,
+        parsedCompletionEnvelopeJson,
         parsedTaskId,
-        parsedClaimedBy
+        parsedClaimedBy,
+        parsedCompletionEnvelopeJson
       );
       return result.changes === 1;
     } catch (error) {
@@ -719,7 +739,11 @@ function parseGardenTaskRow(row: GardenTaskDbRow): GardenTaskRow {
     created_at: parseTimestamp(row.created_at),
     completed_at: parseNullableString(row.completed_at, "garden_task.completed_at"),
     attempt_count: row.attempt_count,
-    last_error_text: parseNullableString(row.last_error_text, "garden_task.last_error_text")
+    last_error_text: parseNullableString(row.last_error_text, "garden_task.last_error_text"),
+    completion_envelope_json: parseNullableString(
+      row.completion_envelope_json,
+      "garden_task.completion_envelope_json"
+    )
   });
 }
 

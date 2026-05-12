@@ -1,5 +1,6 @@
 import type { ToolGovernanceDecision, ToolGovernancePort, ToolGovernanceQuery } from "@do-soul/alaya-protocol";
 import { deepFreeze } from "../shared/deep-freeze.js";
+import { stableStringify } from "../shared/stable-stringify.js";
 
 export interface ToolGovernanceClientDependencies {
   readonly port: ToolGovernancePort;
@@ -79,23 +80,3 @@ interface GovernanceCacheEntry {
 }
 
 const DEFAULT_GOVERNANCE_CACHE_TTL_MS = 60_000;
-
-function stableStringify(value: ToolGovernanceQuery): string {
-  return JSON.stringify(stableNormalize(value));
-}
-
-function stableNormalize(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((entry) => stableNormalize(entry));
-  }
-
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, entry]) => [key, stableNormalize(entry)])
-    );
-  }
-
-  return value;
-}

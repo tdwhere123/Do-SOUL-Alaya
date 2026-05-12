@@ -423,7 +423,7 @@ outside the agent runtime.
 | `alaya detach codex` / `detach claude-code` | Reverse the corresponding attach atomically | yes | yes |
 | `alaya status` | Daemon health + trust-state summary. `--recall-stats --workspace <id> [--since <iso>] [--until <iso>]` adds a recall utilization section (recall throughput, miss ratio, used vs skipped) for attached agent traffic; `inspector` and `cli` agent_targets are excluded by default. | no | no |
 | `alaya inspect` | Open the Memory Inspector SPA on loopback (memory-tooling, *not* an agent surface). With several workspaces registered it auto-selects the one whose repo path matches the current directory; otherwise it lists candidates and you pass `--workspace <id>`. | no | no |
-| `alaya update [--check] [--yes]` | Check for and install the latest npm release of `@do-soul/alaya` | yes (npm global) | no |
+| `alaya update` | Show GitHub Release / source-build upgrade instructions | no | no |
 | `alaya tools list` | List the MCP tool catalog | no | no |
 | `alaya tools call <tool> '<json>'` | Invoke a tool from CLI | varies | varies |
 | `alaya review pending\|accept\|reject` | Inspect and resolve the HITL proposal queue (CLI fallback for the Memory Inspector) | accept / reject: yes | yes |
@@ -477,8 +477,9 @@ curl -fsSL ... | ALAYA_HOME=/opt/alaya ALAYA_BIN_DIR=/usr/local/bin bash
 Subsequent upgrades: rerun the `install.sh` one-liner with a newer
 `ALAYA_VERSION`. The installer extracts and builds into a staging dir
 first; only on success does it atomically swap into `$ALAYA_HOME`,
-moving the previous install aside as `${ALAYA_HOME}.bak`. (`alaya
-update` is npm-only and is unused on this distribution path.)
+moving the previous install aside as `${ALAYA_HOME}.bak`. `alaya
+update` is a read-only reminder for this GitHub Release / source-build
+distribution path; it does not call npm or mutate the install.
 
 Uninstall: `bash ~/.local/share/do-soul-alaya/scripts/uninstall.sh`
 (add `--purge` to also remove `~/.config/alaya/`, which holds your
