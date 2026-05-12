@@ -423,6 +423,12 @@ function normalizeSecretRef(value: string): string {
       return trimmed;
     }
   }
+  if (trimmed.startsWith("keychain:")) {
+    const segments = trimmed.slice("keychain:".length).split(":");
+    if (segments.length === 2 && segments[0] !== "" && segments[1] !== "") {
+      return trimmed;
+    }
+  }
   throw invalidRuntimeEmbeddingPatch();
 }
 

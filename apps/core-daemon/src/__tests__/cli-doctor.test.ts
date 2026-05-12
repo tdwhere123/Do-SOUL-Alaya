@@ -167,6 +167,132 @@ describe("doctor CLI", () => {
     );
   });
 
+  it("reports a successful Garden keychain check only when a keychain ref is configured", async () => {
+    const harness = createDoctorHarness({
+      getGardenCompute: async () => ({
+        provider_kind: "official_api",
+        model_id: "gpt-4.1-mini",
+        provider_url: null,
+        credential_source: { kind: "keychain", service: "alaya-garden", account: "openai" },
+        routing_decision: "official_api",
+        keychain_check: {
+          ok: true,
+          service: "alaya-garden",
+          account: "openai"
+        }
+      })
+    });
+
+    const jsonResult = await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1", "--json"]);
+    const humanResult = await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1"]);
+
+    expect(jsonResult.exitCode).toBe(75);
+    expect(jsonResult.json).toMatchObject({
+      checks: { garden: "pass" },
+      garden_compute: {
+        credential_source: { kind: "keychain", service: "alaya-garden", account: "openai" },
+        keychain_check: { ok: true, service: "alaya-garden", account: "openai" }
+      }
+    });
+    expect(humanResult.exitCode).toBe(75);
+    expect(harness.stdoutText()).toContain("garden keychain: ok (keychain:alaya-garden:openai)");
+  });
+
+  it("degrades Garden when the configured keychain entry is missing without leaking a secret", async () => {
+    const harness = createDoctorHarness({
+      getGardenCompute: async () => ({
+        provider_kind: "official_api",
+        model_id: "gpt-4.1-mini",
+        provider_url: null,
+        credential_source: { kind: "keychain", service: "alaya-garden", account: "openai" },
+        routing_decision: "local_heuristics",
+        keychain_check: {
+          ok: false,
+          service: "alaya-garden",
+          account: "openai",
+          error_kind: "keychain_entry_not_found",
+          remediation: "Populate keychain service alaya-garden account openai."
+        }
+      })
+    });
+
+    const jsonResult = await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1", "--json"]);
+    const humanResult = await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1"]);
+    const serialized = JSON.stringify(jsonResult.json);
+
+    expect(jsonResult.exitCode).toBe(75);
+    expect(jsonResult.json).toMatchObject({
+      overall: "degraded",
+      checks: { garden: "fail" },
+      garden_compute: {
+        keychain_check: {
+          ok: false,
+          service: "alaya-garden",
+          account: "openai",
+          error_kind: "keychain_entry_not_found"
+        }
+      }
+    });
+    expect(serialized).toContain("alaya-garden");
+    expect(serialized).toContain("openai");
+    expect(serialized).not.toContain("sk-test-secret");
+    expect(humanResult.exitCode).toBe(75);
+    expect(harness.stdoutText()).toContain(
+      "garden keychain: unavailable (keychain:alaya-garden:openai) — Populate keychain service alaya-garden account openai."
+    );
+  });
+
+  it("degrades Garden when keychain tooling is unavailable and names the prerequisite", async () => {
+    const harness = createDoctorHarness({
+      getGardenCompute: async () => ({
+        provider_kind: "official_api",
+        model_id: "gpt-4.1-mini",
+        provider_url: null,
+        credential_source: { kind: "keychain", service: "alaya-garden", account: "openai" },
+        routing_decision: "local_heuristics",
+        keychain_check: {
+          ok: false,
+          service: "alaya-garden",
+          account: "openai",
+          error_kind: "keychain_tooling_unavailable",
+          remediation: "secret-tool was not found on PATH; install the libsecret-tools package."
+        }
+      })
+    });
+
+    const jsonResult = await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1", "--json"]);
+
+    expect(jsonResult.exitCode).toBe(75);
+    expect(jsonResult.json).toMatchObject({
+      checks: { garden: "fail" },
+      garden_compute: {
+        keychain_check: {
+          ok: false,
+          error_kind: "keychain_tooling_unavailable",
+          remediation: "secret-tool was not found on PATH; install the libsecret-tools package."
+        }
+      }
+    });
+  });
+
+  it("keeps non-keychain Garden compute reports free of keychain_check", async () => {
+    const harness = createDoctorHarness({
+      getGardenCompute: async () => ({
+        provider_kind: "official_api",
+        model_id: "gpt-4.1-mini",
+        provider_url: null,
+        credential_source: { kind: "env", name: "ALAYA_OFFICIAL_GARDEN_API_KEY" },
+        routing_decision: "official_api"
+      })
+    });
+
+    const jsonResult = await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1", "--json"]);
+    expect(jsonResult.exitCode).toBe(75);
+    expect((jsonResult.json as { garden_compute: Record<string, unknown> }).garden_compute).not.toHaveProperty(
+      "keychain_check"
+    );
+  });
+
   it("does not fail the provider check when embedding is disabled and keyword-only", async () => {
     const harness = createDoctorHarness({
       getEmbeddingStatus: async (workspaceId) => ({

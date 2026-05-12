@@ -189,6 +189,20 @@ describe("Phase 4A protocol schemas", () => {
       parseGardenEventPayload(GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED, gardenComputeRecordedPayload)
     ).toEqual(gardenComputeRecordedPayload);
 
+    const keychainRecordedPayload = {
+      entry_id: "entry-keychain",
+      event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
+      workspace_id: "workspace-1",
+      occurred_at: validTimestamp,
+      change_summary: {
+        fields_changed: ["secret_ref"],
+        secret_ref_kind: "keychain"
+      }
+    } as const;
+    expect(parseGardenEventPayload(GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED, keychainRecordedPayload)).toEqual(
+      keychainRecordedPayload
+    );
+
     const clearedProviderUrlPayload = {
       entry_id: "entry-3",
       event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,

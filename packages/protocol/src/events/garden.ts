@@ -82,7 +82,7 @@ export const SoulHealthJournalRecordedPayloadSchema = z
     change_summary: z
       .object({
         fields_changed: z.array(NonEmptyStringSchema).readonly(),
-        secret_ref_kind: z.enum(["env", "file"]).nullable().optional(),
+        secret_ref_kind: z.enum(["env", "file", "keychain"]).nullable().optional(),
         provider_url: z.string().nullable().optional(),
         model_id: z.string().nullable().optional()
       })

@@ -311,7 +311,7 @@ async function patchRuntimeEmbeddingConfig(input: {
 
 function buildRuntimeEmbeddingChangeSummary(normalized: NormalizedRuntimeEmbeddingConfigPatch): {
   readonly fields_changed: readonly string[];
-  readonly secret_ref_kind?: "env" | "file" | null;
+  readonly secret_ref_kind?: "env" | "file" | "keychain" | null;
 } {
   const fieldsChanged = RUNTIME_EMBEDDING_CONFIG_FIELDS.filter((field) => normalized.patch[field] !== undefined);
   return {
@@ -372,7 +372,7 @@ async function patchRuntimeGardenComputeConfig(input: {
 
 function buildRuntimeGardenComputeChangeSummary(normalized: NormalizedRuntimeGardenComputeConfigPatch): {
   readonly fields_changed: readonly string[];
-  readonly secret_ref_kind?: "env" | "file" | null;
+  readonly secret_ref_kind?: "env" | "file" | "keychain" | null;
   readonly provider_url?: string | null;
   readonly model_id?: string | null;
 } {
@@ -407,11 +407,20 @@ function readRawSecretRef(configEnv: ReadonlyMap<string, string>, key: string): 
   return readNonEmptyEnv(readConfigEnvValue(configEnv, key));
 }
 
-function secretRefKind(secretRef: string | null): "env" | "file" | null {
+function secretRefKind(secretRef: string | null): "env" | "file" | "keychain" | null {
   if (secretRef === null) {
     return null;
   }
-  return secretRef.startsWith("env:") ? "env" : "file";
+  if (secretRef.startsWith("env:")) {
+    return "env";
+  }
+  if (secretRef.startsWith("file:")) {
+    return "file";
+  }
+  if (secretRef.startsWith("keychain:")) {
+    return "keychain";
+  }
+  return null;
 }
 
 async function getGardenCredentialProvenance(input: {

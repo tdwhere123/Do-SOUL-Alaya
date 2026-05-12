@@ -1,6 +1,8 @@
-import { mkdir, readFile, readdir, unlink } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, unlink } from "node:fs/promises";
 import path from "node:path";
-import { initDatabase } from "@do-soul/alaya-storage";
+import { createInterface } from "node:readline/promises";
+import { RuntimeGardenComputeConfigSchema, type RuntimeGardenComputeConfig } from "@do-soul/alaya-protocol";
+import { initDatabase, SqliteConfigRepo } from "@do-soul/alaya-storage";
 import {
   buildInstallAuditPath,
   resolveAlayaConfigDir,
@@ -18,6 +20,15 @@ import {
   ensurePrivateDirectory,
   writePrivateTextAtomic
 } from "../services/private-file-service.js";
+import { resolveSecretRef as resolveRuntimeSecretRef, type ResolveSecretError } from "../secrets.js";
+import {
+  checkPlatformKeychainAvailable,
+  readPlatformKeychainSecret,
+  writePlatformKeychainSecret,
+  type KeychainAvailabilityResult,
+  type KeychainReadResult,
+  type KeychainWriteResult
+} from "../secrets/keychain/index.js";
 
 export interface InstallAnswers {
   readonly db_path?: string;
@@ -35,12 +46,18 @@ export interface InstallAnswers {
 export interface InstallCommandDependencies {
   readonly clock?: () => string;
   readonly configDirResolver?: (ctx: AlayaCliContext) => string;
+  readonly keychain?: {
+    readonly checkAvailable?: (service: string, account: string) => KeychainAvailabilityResult;
+    readonly writeKeychain?: (service: string, account: string, value: string) => KeychainWriteResult;
+    readonly readKeychain?: (service: string, account: string) => KeychainReadResult;
+  };
 }
 
 interface InstallArgs {
   readonly nonInteractive: boolean;
   readonly answers: InstallAnswers | null;
   readonly force: boolean;
+  readonly keychain: boolean;
 }
 
 interface PartialStateEntry {
@@ -48,6 +65,13 @@ interface PartialStateEntry {
   // beforeContent === undefined means the file did not exist before; rollback unlinks.
   readonly beforeContent: string | undefined;
 }
+
+// invariant: install --keychain writes the dedicated Garden credential ref and
+// leaves the legacy embedding ALAYA_OPENAI_SECRET_REF line untouched.
+const KEYCHAIN_INSTALL_SERVICE = "alaya";
+const KEYCHAIN_INSTALL_ACCOUNT = "openai";
+const GARDEN_KEYCHAIN_SECRET_REF_ENV = "ALAYA_OFFICIAL_GARDEN_SECRET_REF";
+const RUNTIME_GARDEN_COMPUTE_CONFIG_KEY = "runtime:garden-compute";
 
 export function createInstallCommand(deps: InstallCommandDependencies = {}): AlayaSubcommandSpec<InstallArgs> {
   return {
@@ -64,6 +88,10 @@ async function executeInstall(
   args: InstallArgs,
   deps: InstallCommandDependencies
 ): Promise<AlayaCliResult> {
+  if (args.keychain) {
+    return await executeKeychainInstall(ctx, args, deps);
+  }
+
   if (!args.nonInteractive || args.answers === null) {
     ctx.stderr.write("interactive install is not implemented in this build; use --non-interactive <json>\n");
     return { exitCode: ALAYA_SYSEXITS.USAGE };
@@ -169,6 +197,141 @@ async function executeInstall(
   }
 }
 
+async function executeKeychainInstall(
+  ctx: AlayaCliContext,
+  args: InstallArgs,
+  deps: InstallCommandDependencies
+): Promise<AlayaCliResult> {
+  if (args.nonInteractive) {
+    ctx.stderr.write("install --keychain requires interactive input; --non-interactive is not supported for keychain secrets.\n");
+    return { exitCode: ALAYA_SYSEXITS.USAGE };
+  }
+
+  const service = KEYCHAIN_INSTALL_SERVICE;
+  const account = KEYCHAIN_INSTALL_ACCOUNT;
+  const keychainRef = `keychain:${service}:${account}`;
+  const clock = deps.clock ?? (() => new Date().toISOString());
+  const configDir = deps.configDirResolver?.(ctx) ?? resolveAlayaConfigDir({ env: ctx.env });
+  const paths = resolveAlayaConfigPaths(configDir);
+  const startedAt = clock();
+  const auditPath = buildInstallAuditPath(paths, startedAt);
+  const partialState: PartialStateEntry[] = [];
+  let auditInitialized = false;
+  let persistedGardenConfigBefore: RuntimeGardenComputeConfig | null | undefined;
+
+  await ensurePrivateDirectory(paths.configDir);
+  await ensurePrivateDirectory(paths.auditDir);
+
+  if (!args.force) {
+    const blocking = await detectBlockingPriorAudit(paths);
+    if (blocking !== null) {
+      ctx.stderr.write(
+        `previous install audit ${blocking.fileName} reports status="${blocking.status}"; ` +
+          `partial_state may be unrecovered. Re-run with --force to override.\n`
+      );
+      return { exitCode: ALAYA_SYSEXITS.TEMPFAIL };
+    }
+  }
+
+  const checkAvailable = deps.keychain?.checkAvailable ?? ((svc, acct) => checkPlatformKeychainAvailable(svc, acct));
+  const writeKeychain = deps.keychain?.writeKeychain ?? ((svc, acct, value) => writePlatformKeychainSecret(svc, acct, value));
+  const readKeychain = deps.keychain?.readKeychain ?? ((svc, acct) => readPlatformKeychainSecret(svc, acct));
+
+  const availability = checkAvailable(service, account);
+  if (!("ok" in availability)) {
+    ctx.stderr.write(`${formatKeychainInstallError(availability)}\n`);
+    return { exitCode: ALAYA_SYSEXITS.TEMPFAIL };
+  }
+
+  ctx.stderr.write(`Enter secret for ${keychainRef}: `);
+  const secret = await readSecretLine(ctx.stdin, ctx.stderr, ctx.isTTY);
+  if (secret.trim().length === 0) {
+    ctx.stderr.write("install --keychain requires a non-empty secret value.\n");
+    return { exitCode: ALAYA_SYSEXITS.USAGE };
+  }
+
+  try {
+    await writeInstallAudit(auditPath, {
+      status: "started",
+      started_at: startedAt,
+      finished_at: null,
+      config_dir: paths.configDir,
+      partial_state: [],
+      error: null
+    });
+    auditInitialized = true;
+
+    const writeResult = writeKeychain(service, account, secret);
+    if (!("ok" in writeResult)) {
+      throw new Error(formatKeychainInstallError(writeResult));
+    }
+
+    const verified = resolveRuntimeSecretRef(keychainRef, {
+      readEnv: (name) => ctx.env[name],
+      readFile: () => {
+        throw new Error("unexpected file secret read during keychain verification");
+      },
+      readKeychain
+    });
+    if ("kind" in verified) {
+      throw new Error(`keychain write verification failed: ${formatSecretRefVerificationError(verified)}`);
+    }
+
+    const envBefore = await readOptional(paths.envPath);
+    const nextEnv = patchEnvWithGardenKeychainRef(envBefore, keychainRef);
+    if (normalizeFile(envBefore) !== normalizeFile(nextEnv)) {
+      await writePrivateTextAtomic(paths.envPath, nextEnv, 0o600);
+      partialState.push({ path: paths.envPath, beforeContent: envBefore ?? undefined });
+    }
+
+    const existing = await readExistingInstallConfig(paths);
+    const dbPath = path.resolve(existing.db_path ?? path.join(paths.configDir, "alaya.db"));
+    const persistedPatch = await patchPersistedGardenSecretRefIfPresent(dbPath, keychainRef);
+    persistedGardenConfigBefore = persistedPatch?.before;
+
+    await writeInstallAudit(auditPath, {
+      status: "succeeded",
+      started_at: startedAt,
+      finished_at: clock(),
+      config_dir: paths.configDir,
+      partial_state: partialState.map((entry) => entry.path),
+      error: null
+    });
+
+    if (ctx.jsonRequested !== true) {
+      ctx.stdout.write(`installed Alaya keychain ref ${keychainRef} at ${paths.envPath}\n`);
+    }
+    return {
+      exitCode: ALAYA_SYSEXITS.OK,
+      json: {
+        ok: true,
+        config_dir: paths.configDir,
+        env_path: paths.envPath,
+        audit_path: auditPath,
+        secret_ref: keychainRef
+      }
+    };
+  } catch (error) {
+    const rollbackErrors = await rollbackPartialState(partialState);
+    if (auditInitialized) {
+      await writeInstallAudit(auditPath, {
+        status: "failed",
+        started_at: startedAt,
+        finished_at: clock(),
+        config_dir: paths.configDir,
+        partial_state: partialState.map((entry) => entry.path),
+        error: sanitizeInstallError(error),
+        rollback_errors: rollbackErrors.length > 0 ? rollbackErrors : undefined
+      }).catch(() => undefined);
+    }
+    if (persistedGardenConfigBefore !== undefined) {
+      await restorePersistedGardenConfig(paths, persistedGardenConfigBefore).catch(() => undefined);
+    }
+    ctx.stderr.write(`${sanitizeInstallError(error)}\n`);
+    return { exitCode: ALAYA_SYSEXITS.CANTCREAT };
+  }
+}
+
 /**
  * Open the configured SQLite database and apply schema migrations.
  * Wrapper exists so install can report a real "schema ready" outcome
@@ -256,15 +419,28 @@ function installArgsSchema(): AlayaCliArgsSchema<InstallArgs> {
       }
 
       if (input.length === 0) {
-        return { success: true, data: { nonInteractive: false, answers: null, force: false } };
+        return { success: true, data: { nonInteractive: false, answers: null, force: false, keychain: false } };
       }
 
       const tokens = [...input];
+      const keychainIndex = tokens.indexOf("--keychain");
+      const keychain = keychainIndex >= 0;
+      if (keychain) {
+        tokens.splice(keychainIndex, 1);
+      }
+      const forceIndex = tokens.indexOf("--force");
+      const force = forceIndex >= 0;
+      if (force) {
+        tokens.splice(forceIndex, 1);
+      }
       const nonInteractiveIndex = tokens.indexOf("--non-interactive");
       if (nonInteractiveIndex < 0) {
+        if (keychain && tokens.length === 0) {
+          return { success: true, data: { nonInteractive: false, answers: null, force, keychain: true } };
+        }
         return {
           success: false,
-          error: { issues: [{ path: [], message: "Usage: install --non-interactive [--json] [--force] <answers-json>" }] }
+          error: { issues: [{ path: [], message: "Usage: install [--keychain] | install --non-interactive [--json] [--force] <answers-json>" }] }
         };
       }
       tokens.splice(nonInteractiveIndex, 1);
@@ -272,10 +448,8 @@ function installArgsSchema(): AlayaCliArgsSchema<InstallArgs> {
       if (jsonIndex >= 0) {
         tokens.splice(jsonIndex, 1);
       }
-      const forceIndex = tokens.indexOf("--force");
-      const force = forceIndex >= 0;
-      if (force) {
-        tokens.splice(forceIndex, 1);
+      if (keychain && tokens.length <= 1) {
+        return { success: true, data: { nonInteractive: true, answers: null, force, keychain: true } };
       }
       if (tokens.length !== 1) {
         return {
@@ -289,7 +463,7 @@ function installArgsSchema(): AlayaCliArgsSchema<InstallArgs> {
         if (!isRecord(parsed)) {
           throw new Error("answers must be an object");
         }
-        return { success: true, data: { nonInteractive: true, answers: parsed as InstallAnswers, force } };
+        return { success: true, data: { nonInteractive: true, answers: parsed as InstallAnswers, force, keychain } };
       } catch (error) {
         return {
           success: false,
@@ -350,7 +524,7 @@ function resolveInstallAnswers(
         }
       : null;
   const secretRef = embeddingEnabled
-    ? resolveSecretRef(answers, existing, pastedSecret)
+    ? resolveInstallSecretRef(answers, existing, pastedSecret)
     : existing.secret_ref;
 
   return {
@@ -368,7 +542,7 @@ function resolveInstallAnswers(
   };
 }
 
-function resolveSecretRef(
+function resolveInstallSecretRef(
   answers: InstallAnswers,
   existing: ExistingInstallConfig,
   pastedSecret: ResolvedInstallConfig["pasted_secret"]
@@ -484,6 +658,199 @@ function readEnvValue(content: string, key: string): string | null {
     }
   }
   return null;
+}
+
+async function readSecretLine(
+  stdin: NodeJS.ReadableStream,
+  stderr: NodeJS.WritableStream,
+  isTTY: boolean
+): Promise<string> {
+  if (isTTY) {
+    return await readMaskedTtySecretLine(stdin, stderr);
+  }
+  const readline = createInterface({ input: stdin, terminal: false });
+  try {
+    return await readline.question("");
+  } finally {
+    readline.close();
+  }
+}
+
+async function readMaskedTtySecretLine(
+  stdin: NodeJS.ReadableStream,
+  stderr: NodeJS.WritableStream
+): Promise<string> {
+  type RawModeReadable = NodeJS.ReadableStream & {
+    readonly isRaw?: boolean;
+    setRawMode?: (mode: boolean) => RawModeReadable;
+    setEncoding?: (encoding: BufferEncoding) => RawModeReadable;
+    resume?: () => RawModeReadable;
+    pause?: () => RawModeReadable;
+  };
+  const input = stdin as RawModeReadable;
+  const hadRawMode = Boolean(input.isRaw);
+  const canSetRawMode = typeof input.setRawMode === "function";
+  if (canSetRawMode && !hadRawMode) {
+    input.setRawMode?.(true);
+  }
+  input.setEncoding?.("utf8");
+  input.resume?.();
+
+  return await new Promise((resolve, reject) => {
+    let secret = "";
+    let settled = false;
+
+    const cleanup = (): void => {
+      input.off("data", onData);
+      input.off("error", onError);
+      if (canSetRawMode && !hadRawMode) {
+        input.setRawMode?.(false);
+      }
+      input.pause?.();
+      stderr.write("\n");
+    };
+
+    const finish = (value: string): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    };
+
+    const fail = (error: Error): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+
+    const onError = (error: Error): void => fail(error);
+    const onData = (chunk: Buffer | string): void => {
+      const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      for (const char of text) {
+        if (char === "\r" || char === "\n") {
+          finish(secret);
+          return;
+        }
+        if (char === "\u0003") {
+          fail(new Error("install --keychain canceled"));
+          return;
+        }
+        if (char === "\u007f" || char === "\b") {
+          secret = secret.slice(0, -1);
+          continue;
+        }
+        secret += char;
+      }
+    };
+
+    input.on("data", onData);
+    input.on("error", onError);
+  });
+}
+
+async function patchPersistedGardenSecretRefIfPresent(
+  dbPath: string,
+  secretRef: string
+): Promise<{ readonly before: RuntimeGardenComputeConfig | null; readonly after: RuntimeGardenComputeConfig } | null> {
+  if (!(await fileExists(dbPath))) {
+    return null;
+  }
+  const configRepo = new SqliteConfigRepo(initDatabase({ filename: dbPath }));
+  const before = configRepo.get<RuntimeGardenComputeConfig>(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY);
+  if (before === null) {
+    return null;
+  }
+  const parsedBefore = RuntimeGardenComputeConfigSchema.parse(before);
+  const after = RuntimeGardenComputeConfigSchema.parse({
+    ...parsedBefore,
+    provider_kind: "official_api",
+    enabled: true,
+    secret_ref: secretRef
+  });
+  configRepo.set(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY, after);
+  return { before: parsedBefore, after };
+}
+
+async function restorePersistedGardenConfig(
+  paths: AlayaConfigPaths,
+  config: RuntimeGardenComputeConfig | null
+): Promise<void> {
+  const existing = await readExistingInstallConfig(paths);
+  const dbPath = path.resolve(existing.db_path ?? path.join(paths.configDir, "alaya.db"));
+  if (!(await fileExists(dbPath)) || config === null) {
+    return;
+  }
+  new SqliteConfigRepo(initDatabase({ filename: dbPath })).set(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY, config);
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function patchEnvWithGardenKeychainRef(envBefore: string | null, keychainRef: string): string {
+  const assignment = `${GARDEN_KEYCHAIN_SECRET_REF_ENV}=${keychainRef}`;
+  if (normalizeFile(envBefore).length === 0) {
+    return `${assignment}\n`;
+  }
+
+  const normalized = (envBefore ?? "").replace(/\r\n/gu, "\n");
+  const lines = normalized.endsWith("\n") ? normalized.slice(0, -1).split("\n") : normalized.split("\n");
+  let replaced = false;
+  const nextLines = lines.map((line) => {
+    const separatorIndex = line.indexOf("=");
+    const key = separatorIndex >= 0 ? line.slice(0, separatorIndex) : line;
+    if (key === GARDEN_KEYCHAIN_SECRET_REF_ENV) {
+      replaced = true;
+      return assignment;
+    }
+    return line;
+  });
+
+  if (!replaced) {
+    nextLines.push(assignment);
+  }
+  return `${nextLines.join("\n")}\n`;
+}
+
+type KeychainInstallFailure =
+  | Exclude<KeychainAvailabilityResult, { readonly ok: true }>
+  | Exclude<KeychainWriteResult, { readonly ok: true }>;
+
+function formatKeychainInstallError(error: KeychainInstallFailure): string {
+  switch (error.kind) {
+    case "keychain_tooling_unavailable":
+      return `keychain tooling unavailable for keychain:${error.service}:${error.account}: ${error.reason}`;
+    case "keychain_write_failed":
+      return `keychain write failed for keychain:${error.service}:${error.account}: ${error.reason}`;
+  }
+}
+
+function formatSecretRefVerificationError(error: ResolveSecretError): string {
+  switch (error.kind) {
+    case "malformed":
+      return error.reason;
+    case "env_missing":
+      return `environment variable ${error.var_name} is missing`;
+    case "file_missing":
+      return `secret file is missing: ${error.path}`;
+    case "file_unreadable":
+      return `secret file is unreadable: ${error.cause}`;
+    case "keychain_tooling_unavailable":
+      return `keychain tooling unavailable for keychain:${error.service}:${error.account}: ${error.reason}`;
+    case "keychain_entry_not_found":
+      return `keychain entry not found for keychain:${error.service}:${error.account}: ${error.reason}`;
+    case "empty":
+      return `${error.origin} secret is empty`;
+  }
 }
 
 function quoteTomlString(value: string): string {

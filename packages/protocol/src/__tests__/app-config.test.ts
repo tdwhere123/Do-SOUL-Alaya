@@ -7,6 +7,7 @@ import {
   EnvironmentConfigSchema,
   RuntimeEmbeddingConfigPatchSchema,
   RuntimeEmbeddingConfigSchema,
+  RuntimeGardenComputeConfigSchema,
   SoulConfigSchema,
   StrategyConfigSchema,
   ToolchainStatusSchema
@@ -105,6 +106,30 @@ describe("app config schemas", () => {
 
     expect(RuntimeEmbeddingConfigPatchSchema.safeParse({ embedding_enabled: false }).success).toBe(true);
     expect(RuntimeEmbeddingConfigPatchSchema.safeParse({ unknown: true }).success).toBe(false);
+
+    expect(
+      RuntimeGardenComputeConfigSchema.parse({
+        provider_kind: "official_api",
+        provider_url: null,
+        secret_ref: "keychain:alaya-garden:openai",
+        model_id: "gpt-4.1-mini",
+        enabled: true
+      })
+    ).toMatchObject({
+      secret_ref: "keychain:alaya-garden:openai"
+    });
+
+    for (const secretRef of ["keychain:", "keychain:onlyservice", "keychain:a:b:c", "keychain::acct"]) {
+      expect(
+        RuntimeGardenComputeConfigSchema.safeParse({
+          provider_kind: "official_api",
+          provider_url: null,
+          secret_ref: secretRef,
+          model_id: "gpt-4.1-mini",
+          enabled: true
+        }).success
+      ).toBe(false);
+    }
 
     expect(
       AlayaStatusSchema.parse({

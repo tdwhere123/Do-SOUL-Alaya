@@ -852,6 +852,9 @@ function formatSecretResolutionError(label: string, error: ResolveSecretError): 
       return `${label}: ${error.ref} -> file not found at ${error.path}`;
     case "file_unreadable":
       return `${label}: ${error.ref} -> file unreadable at ${error.path} (${error.cause})`;
+    case "keychain_tooling_unavailable":
+    case "keychain_entry_not_found":
+      return `${label}: ${error.ref} -> ${error.reason}`;
     case "empty":
       return `${label}: ${error.ref} -> ${error.origin} secret is empty`;
   }

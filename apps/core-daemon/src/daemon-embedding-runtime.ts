@@ -113,6 +113,9 @@ function describeSecretRefSource(error: ResolveSecretError): string {
     case "file_missing":
     case "file_unreadable":
       return "file";
+    case "keychain_tooling_unavailable":
+    case "keychain_entry_not_found":
+      return `keychain:${error.service}:${error.account}`;
     case "malformed":
     case "empty":
       return "invalid";
@@ -128,6 +131,8 @@ function formatEmbeddingSecretResolutionError(error: ResolveSecretError): string
     case "env_missing":
     case "file_missing":
     case "file_unreadable":
+    case "keychain_tooling_unavailable":
+    case "keychain_entry_not_found":
       return "ALAYA_OPENAI_SECRET_REF is unavailable";
   }
 }

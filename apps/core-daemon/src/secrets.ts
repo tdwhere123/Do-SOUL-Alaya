@@ -1,17 +1,19 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { readPlatformKeychainSecret, type KeychainReadError } from "./secrets/keychain/index.js";
 
 export type SecretRef = string;
 
 export interface SecretRefReader {
   readonly readEnv: (name: string) => string | undefined;
   readonly readFile: (filePath: string) => string;
+  readonly readKeychain: (service: string, account: string) => string | KeychainReadError;
 }
 
 export interface ResolvedSecret {
   readonly ref: SecretRef;
   readonly value: string;
-  readonly origin: "env" | "file";
+  readonly origin: "env" | "file" | "keychain";
 }
 
 export type ResolveSecretError =
@@ -19,15 +21,19 @@ export type ResolveSecretError =
   | { kind: "env_missing"; ref: SecretRef; var_name: string }
   | { kind: "file_missing"; ref: SecretRef; path: string }
   | { kind: "file_unreadable"; ref: SecretRef; path: string; cause: string }
-  | { kind: "empty"; ref: SecretRef; origin: "env" | "file" };
+  | { kind: "keychain_tooling_unavailable"; ref: SecretRef; service: string; account: string; reason: string }
+  | { kind: "keychain_entry_not_found"; ref: SecretRef; service: string; account: string; reason: string }
+  | { kind: "empty"; ref: SecretRef; origin: "env" | "file" | "keychain" };
 
 const ENV_REF_PREFIX = "env:";
 const FILE_REF_PREFIX = "file:";
+const KEYCHAIN_REF_PREFIX = "keychain:";
 const ENV_IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 const defaultSecretRefReader: SecretRefReader = {
   readEnv: (name) => process.env[name],
-  readFile: (filePath) => readFileSync(filePath, "utf8")
+  readFile: (filePath) => readFileSync(filePath, "utf8"),
+  readKeychain: (service, account) => readPlatformKeychainSecret(service, account)
 };
 
 export function resolveSecretRef(
@@ -42,10 +48,14 @@ export function resolveSecretRef(
     return resolveFileRef(ref, reader);
   }
 
+  if (ref.startsWith(KEYCHAIN_REF_PREFIX)) {
+    return resolveKeychainRef(ref, reader);
+  }
+
   return {
     kind: "malformed",
     ref,
-    reason: 'Unsupported secret-ref scheme. Use "env:NAME" or "file:/abs/path".'
+    reason: 'Unsupported secret-ref scheme. Use "env:NAME", "file:/abs/path", or "keychain:service:account".'
   };
 }
 
@@ -126,6 +136,56 @@ function resolveFileRef(ref: SecretRef, reader: SecretRefReader): ResolvedSecret
     ref,
     value,
     origin: "file"
+  };
+}
+
+function resolveKeychainRef(ref: SecretRef, reader: SecretRefReader): ResolvedSecret | ResolveSecretError {
+  const parsed = parseKeychainRef(ref);
+  if ("kind" in parsed) {
+    return parsed;
+  }
+
+  const readResult = reader.readKeychain(parsed.service, parsed.account);
+  if (typeof readResult !== "string") {
+    return {
+      ...readResult,
+      ref
+    };
+  }
+
+  const value = readResult.trimEnd();
+  if (value.trim().length === 0) {
+    return {
+      kind: "empty",
+      ref,
+      origin: "keychain"
+    };
+  }
+
+  return {
+    ref,
+    value,
+    origin: "keychain"
+  };
+}
+
+function parseKeychainRef(
+  ref: SecretRef
+): { readonly service: string; readonly account: string } | Extract<ResolveSecretError, { kind: "malformed" }> {
+  const body = ref.slice(KEYCHAIN_REF_PREFIX.length);
+  const segments = body.split(":");
+  // Invariant: keychain refs are exactly two colon-free segments so service/account parsing is deterministic.
+  if (segments.length !== 2 || segments[0] === "" || segments[1] === "") {
+    return {
+      kind: "malformed",
+      ref,
+      reason: "Keychain secret ref must match keychain:<service>:<account> with two non-empty colon-free segments."
+    };
+  }
+
+  return {
+    service: segments[0],
+    account: segments[1]
   };
 }
 

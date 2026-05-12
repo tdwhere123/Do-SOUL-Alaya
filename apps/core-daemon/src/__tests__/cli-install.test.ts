@@ -16,6 +16,8 @@ describe("cli install", () => {
 
     const result = await command.handler(createContext(), {
       nonInteractive: true,
+      force: false,
+      keychain: false,
       answers: {
         embedding_enabled: true,
         api_key_source: "paste",
@@ -71,11 +73,16 @@ describe("cli install", () => {
       default_workspace: "default"
     };
 
-    await command.handler(createContext(), { nonInteractive: true, answers });
+    await command.handler(createContext(), { nonInteractive: true, answers, force: false, keychain: false });
     const tomlBefore = await readFile(path.join(configDir, "alaya.toml"), "utf8");
     const envBefore = await readFile(path.join(configDir, ".env"), "utf8");
 
-    const result = await command.handler(createContext(), { nonInteractive: true, answers: {} });
+    const result = await command.handler(createContext(), {
+      nonInteractive: true,
+      answers: {},
+      force: false,
+      keychain: false
+    });
 
     expect(result.exitCode).toBe(0);
     expect(await readFile(path.join(configDir, "alaya.toml"), "utf8")).toBe(tomlBefore);
@@ -95,6 +102,8 @@ describe("cli install", () => {
 
     const result = await command.handler(createContext(), {
       nonInteractive: true,
+      force: false,
+      keychain: false,
       answers: {
         embedding_enabled: true,
         api_key_source: "paste",
@@ -119,6 +128,8 @@ describe("cli install", () => {
 
     const result = await command.handler(createContext(), {
       nonInteractive: true,
+      force: false,
+      keychain: false,
       answers: {
         embedding_enabled: true,
         api_key_source: "paste",

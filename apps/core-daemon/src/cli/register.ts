@@ -23,7 +23,7 @@ import {
   resolveAlayaConfigPaths
 } from "./config-files.js";
 import { createDetachCommandSpec } from "./detach.js";
-import { createDoctorCommand, type GardenComputeStatus } from "./doctor.js";
+import { createDoctorCommand, type GardenComputeStatus, type GardenKeychainCheck } from "./doctor.js";
 import { createInstallCommand } from "./install.js";
 import { createInspectCommand } from "./inspect.js";
 import { createUpdateCommand } from "./update.js";
@@ -37,7 +37,7 @@ import {
   resolveTrustedCliRunId,
   resolveCliWorkspaceContext
 } from "./workspace-context.js";
-import { resolveSecretRef } from "../secrets.js";
+import { resolveSecretRef, type ResolveSecretError } from "../secrets.js";
 
 export function registerAlayaCliCommands(
   bridge: AlayaCliBridge,
@@ -137,7 +137,8 @@ async function resolveGardenComputeStatus(
     model_id: config.model_id,
     provider_url: config.provider_url,
     credential_source: credential,
-    routing_decision: resolveGardenRoutingDecision(config)
+    routing_decision: resolveGardenRoutingDecision(config),
+    ...keychainCheckField(config.secret_ref)
   };
 }
 
@@ -156,13 +157,95 @@ function resolveGardenRoutingDecision(
   return "kind" in resolved ? "local_heuristics" : "official_api";
 }
 
+function keychainCheckField(
+  secretRef: string | null
+): Pick<GardenComputeStatus, "keychain_check"> {
+  if (secretRef === null || !secretRef.startsWith("keychain:")) {
+    return {};
+  }
+  const parsed = parseKeychainRef(secretRef);
+  if (parsed === null) {
+    return {
+      keychain_check: {
+        ok: false,
+        service: "",
+        account: "",
+        error_kind: "malformed",
+        remediation: "Keychain secret_ref must match keychain:<service>:<account>."
+      }
+    };
+  }
+
+  const resolved = resolveSecretRef(secretRef);
+  if (!("kind" in resolved)) {
+    return {
+      keychain_check: {
+        ok: true,
+        service: parsed.service,
+        account: parsed.account
+      }
+    };
+  }
+
+  return {
+    keychain_check: {
+      ok: false,
+      service: parsed.service,
+      account: parsed.account,
+      error_kind: keychainErrorKind(resolved),
+      remediation: keychainRemediation(resolved)
+    }
+  };
+}
+
+function parseKeychainRef(secretRef: string): { readonly service: string; readonly account: string } | null {
+  const [service, account, extra] = secretRef.slice("keychain:".length).split(":");
+  if (service === undefined || account === undefined || extra !== undefined || service === "" || account === "") {
+    return null;
+  }
+  return { service, account };
+}
+
+function keychainErrorKind(
+  error: ResolveSecretError
+): Extract<GardenKeychainCheck, { readonly ok: false }>["error_kind"] {
+  switch (error.kind) {
+    case "keychain_tooling_unavailable":
+    case "keychain_entry_not_found":
+    case "empty":
+    case "malformed":
+      return error.kind;
+    case "env_missing":
+    case "file_missing":
+    case "file_unreadable":
+      return "malformed";
+  }
+}
+
+function keychainRemediation(error: ResolveSecretError): string {
+  switch (error.kind) {
+    case "keychain_tooling_unavailable":
+    case "keychain_entry_not_found":
+      return error.reason;
+    case "empty":
+      return "The keychain entry exists but its stored secret is empty.";
+    case "malformed":
+      return error.reason;
+    case "env_missing":
+    case "file_missing":
+    case "file_unreadable":
+      return "Configured Garden secret_ref is not a keychain reference.";
+  }
+}
+
 function resolveGardenCredentialSource(
   secretRef: string | null
 ): GardenComputeStatus["credential_source"] {
   if (secretRef === null || secretRef === "") {
     // No dedicated Garden secret_ref. Embedding fallback only kicks in when
     // the deprecated path was the active source — getRuntimeGardenComputeConfig
-    // surfaces that as a non-null secret_ref starting with "env:" or "file:",
+    // surfaces that as a non-null secret_ref starting with "env:", "file:",
+    // or "keychain:",
     // so a null here means Garden has no key at all.
     return { kind: "none" };
   }
@@ -172,6 +255,12 @@ function resolveGardenCredentialSource(
   if (secretRef.startsWith("file:")) {
     const path = secretRef.slice("file:".length);
     return { kind: "file", masked_path: maskPath(path) };
+  }
+  if (secretRef.startsWith("keychain:")) {
+    const parsed = parseKeychainRef(secretRef);
+    if (parsed !== null) {
+      return { kind: "keychain", service: parsed.service, account: parsed.account };
+    }
   }
   return { kind: "none" };
 }

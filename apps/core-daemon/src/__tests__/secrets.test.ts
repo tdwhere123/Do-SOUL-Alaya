@@ -167,12 +167,105 @@ describe("secrets resolver", () => {
     });
   });
 
+  it("resolves keychain references via injected reader", () => {
+    const result = resolveSecretRef(
+      "keychain:prod:openai",
+      createReader({
+        readKeychain: (service, account) =>
+          service === "prod" && account === "openai" ? "resolved-keychain-value\n" : {
+            kind: "keychain_entry_not_found",
+            service,
+            account,
+            reason: "missing"
+          }
+      })
+    );
+
+    expect(result).toEqual({
+      ref: "keychain:prod:openai",
+      value: "resolved-keychain-value",
+      origin: "keychain"
+    });
+  });
+
+  it.each(["keychain:", "keychain:onlyservice", "keychain:a:b:c", "keychain::acct", "keychain:svc:"])(
+    "returns malformed for invalid keychain ref %s",
+    (ref) => {
+      const result = resolveSecretRef(ref, createReader());
+
+      expect(result).toMatchObject({
+        kind: "malformed",
+        ref
+      });
+    }
+  );
+
+  it("returns keychain_tooling_unavailable with remediation details", () => {
+    const result = resolveSecretRef(
+      "keychain:prod:openai",
+      createReader({
+        readKeychain: (service, account) => ({
+          kind: "keychain_tooling_unavailable",
+          service,
+          account,
+          reason: "install platform keychain tooling"
+        })
+      })
+    );
+
+    expect(result).toEqual({
+      kind: "keychain_tooling_unavailable",
+      ref: "keychain:prod:openai",
+      service: "prod",
+      account: "openai",
+      reason: "install platform keychain tooling"
+    });
+    expect(JSON.stringify(result)).not.toContain("resolved-keychain-value");
+  });
+
+  it("returns keychain_entry_not_found when the platform adapter misses", () => {
+    const result = resolveSecretRef(
+      "keychain:prod:openai",
+      createReader({
+        readKeychain: (service, account) => ({
+          kind: "keychain_entry_not_found",
+          service,
+          account,
+          reason: "not found"
+        })
+      })
+    );
+
+    expect(result).toEqual({
+      kind: "keychain_entry_not_found",
+      ref: "keychain:prod:openai",
+      service: "prod",
+      account: "openai",
+      reason: "not found"
+    });
+  });
+
+  it("returns empty for keychain values that become empty after trimEnd", () => {
+    const result = resolveSecretRef(
+      "keychain:prod:openai",
+      createReader({
+        readKeychain: () => " \n\t "
+      })
+    );
+
+    expect(result).toEqual({
+      kind: "empty",
+      ref: "keychain:prod:openai",
+      origin: "keychain"
+    });
+  });
+
   it("returns malformed for unsupported secret-ref schemes", () => {
-    const result = resolveSecretRef("keychain:prod:openai", createReader());
+    const result = resolveSecretRef("vault:prod:openai", createReader());
 
     expect(result).toMatchObject({
       kind: "malformed",
-      ref: "keychain:prod:openai"
+      ref: "vault:prod:openai"
     });
   });
 });
@@ -182,6 +275,9 @@ function createReader(overrides: Partial<SecretRefReader> = {}): SecretRefReader
     readEnv: () => undefined,
     readFile: () => {
       throw new Error("unexpected readFile call");
+    },
+    readKeychain: () => {
+      throw new Error("unexpected readKeychain call");
     },
     ...overrides
   };

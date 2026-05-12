@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 import { resolveSecretRef, type ResolveSecretError, type ResolvedSecret } from "./secrets.js";
+import { readPlatformKeychainSecret } from "./secrets/keychain/index.js";
 
 export type GardenCredentialProvenance = Readonly<{
-  readonly kind: "env" | "file" | "embedding-fallback" | "none";
+  readonly kind: "env" | "file" | "keychain" | "embedding-fallback" | "none";
 }>;
 
 export const ALAYA_GARDEN_OPENAI_SECRET_REF_ENV = "ALAYA_OFFICIAL_GARDEN_SECRET_REF";
@@ -104,13 +105,17 @@ function readConfigValue(
   return trimmed.length === 0 ? null : trimmed;
 }
 
-function secretRefKind(secretRef: string): "env" | "file" | null {
+function secretRefKind(secretRef: string): "env" | "file" | "keychain" | null {
   if (secretRef.startsWith("env:")) {
     return "env";
   }
 
   if (secretRef.startsWith("file:")) {
     return "file";
+  }
+
+  if (secretRef.startsWith("keychain:")) {
+    return "keychain";
   }
 
   return null;
@@ -123,7 +128,8 @@ function resolveSecretRefOrNull(
 ): ResolvedSecret | null {
   const resolved = resolveSecretRef(secretRef, {
     readEnv: (name) => env[name],
-    readFile: (filePath) => readFileSync(filePath, "utf8")
+    readFile: (filePath) => readFileSync(filePath, "utf8"),
+    readKeychain: (service, account) => readPlatformKeychainSecret(service, account)
   });
   if ("kind" in resolved) {
     if (resolved.kind === "malformed" || resolved.kind === "empty") {
@@ -142,6 +148,9 @@ function formatSecretResolutionError(label: string, error: ResolveSecretError): 
       return `${label}: ${error.ref} -> ${error.reason}`;
     case "empty":
       return `${label}: ${error.ref} -> ${error.origin} secret is empty`;
+    case "keychain_tooling_unavailable":
+    case "keychain_entry_not_found":
+      return `${label}: ${error.ref} -> ${error.reason}`;
     case "env_missing":
     case "file_missing":
     case "file_unreadable":

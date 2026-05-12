@@ -163,6 +163,34 @@ describe("routes-config port batch", () => {
     });
   });
 
+  it("normalizes keychain refs through env-file and audit provenance surfaces", async () => {
+    const harness = await createServiceHarness();
+
+    await harness.service.patchRuntimeGardenComputeConfig({
+      provider_kind: "official_api",
+      provider_url: null,
+      secret_ref: "keychain:alaya-garden:openai",
+      model_id: "gpt-4.1-mini",
+      enabled: true
+    });
+
+    await expect(harness.service.getRuntimeGardenComputeConfig()).resolves.toMatchObject({
+      secret_ref: "keychain:alaya-garden:openai"
+    });
+    await expect(readFile(harness.paths.envPath, "utf8")).resolves.toContain(
+      "ALAYA_OFFICIAL_GARDEN_SECRET_REF=keychain:alaya-garden:openai"
+    );
+    expect(harness.publishedEvents[0]).toMatchObject({
+      payload_json: {
+        change_summary: {
+          fields_changed: ["provider_kind", "provider_url", "secret_ref", "model_id", "enabled"],
+          secret_ref_kind: "keychain"
+        }
+      }
+    });
+    await expect(harness.service.getGardenCredentialProvenance()).resolves.toEqual({ kind: "keychain" });
+  });
+
   it("normalizes paste mode in daemon service, writes only file refs publicly, and keeps plaintext out of audit/env", async () => {
     const harness = await createServiceHarness();
     const plaintext = "sk-test-plaintext-secret";

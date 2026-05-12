@@ -82,9 +82,16 @@ const RuntimeSecretRefSchema = z
       }
     }
 
+    if (value.startsWith("keychain:")) {
+      const segments = value.slice("keychain:".length).split(":");
+      if (segments.length === 2 && segments[0] !== "" && segments[1] !== "") {
+        return;
+      }
+    }
+
     context.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'secret_ref must use "env:NAME" or "file:/path".'
+      message: 'secret_ref must use "env:NAME", "file:/path", or "keychain:service:account".'
     });
   });
 

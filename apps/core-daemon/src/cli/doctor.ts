@@ -3,6 +3,7 @@ import type { EmbeddingStatus, ToolchainStatus } from "@do-soul/alaya-protocol";
 import type { DaemonStartupStepRecord } from "../index.js";
 import type { PathPlasticityLookupTelemetrySnapshot } from "../path-plasticity-runtime.js";
 import type { GardenCredentialProvenance } from "../services/config-service.js";
+import type { ResolveSecretError } from "../secrets.js";
 import {
   detectAttachedProfileInstructionsDrift,
   type ProfileInstructionsDriftReport,
@@ -27,10 +28,23 @@ export interface GardenComputeStatus {
   readonly credential_source:
     | { readonly kind: "env"; readonly name: string }
     | { readonly kind: "file"; readonly masked_path: string }
+    | { readonly kind: "keychain"; readonly service: string; readonly account: string }
     | { readonly kind: "embedding-fallback" }
     | { readonly kind: "none" };
   readonly routing_decision: "official_api" | "local_heuristics" | "host_worker";
+  // Present only when the active Garden secret_ref is keychain:<service>:<account>.
+  readonly keychain_check?: GardenKeychainCheck;
 }
+
+export type GardenKeychainCheck =
+  | Readonly<{ readonly ok: true; readonly service: string; readonly account: string }>
+  | Readonly<{
+      readonly ok: false;
+      readonly service: string;
+      readonly account: string;
+      readonly error_kind: Extract<ResolveSecretError["kind"], "keychain_tooling_unavailable" | "keychain_entry_not_found" | "empty" | "malformed">;
+      readonly remediation: string;
+    }>;
 
 export interface DoctorCommandDependencies {
   readonly getToolchainStatus: () => Promise<ToolchainStatus>;
@@ -205,7 +219,7 @@ export function createDoctorCommand(
           storage.exists && storage.writable && storage.schema_ok !== false ? "pass" : "fail",
         provider: embeddingStatus === null || embeddingStatus.effective_mode !== "degraded" ? "pass" : "fail",
         mcp: mcp.transport === "ready" ? "pass" : "fail",
-        garden: garden.status === "healthy" ? "pass" : "fail"
+        garden: garden.status === "healthy" && gardenCompute.keychain_check?.ok !== false ? "pass" : "fail"
       } satisfies Record<"runtime" | "storage" | "provider" | "mcp" | "garden", DoctorCheckStatus>;
 
       const overall = Object.values(checks).every((status) => status === "pass")
@@ -384,6 +398,9 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport):
       ` model=${report.garden_compute.model_id ?? "default"}` +
       ` cred=${formatCredentialSource(report.garden_compute.credential_source)}\n`
   );
+  if (report.garden_compute.keychain_check !== undefined) {
+    stream.write(`${formatGardenKeychainCheck(report.garden_compute.keychain_check)}\n`);
+  }
   // Auto-extract path: every recall (with turn text) enqueues a turn-text
   // extract task; tell the operator where those tasks get run so "memory is
   // not being captured" is diagnosable from doctor alone.
@@ -427,6 +444,8 @@ function formatCredentialSource(source: GardenComputeStatus["credential_source"]
       return `env:${source.name}`;
     case "file":
       return `file:${source.masked_path}`;
+    case "keychain":
+      return `keychain:${source.service}:${source.account}`;
     case "embedding-fallback":
       return "embedding-fallback (deprecated)";
     case "none":
@@ -438,4 +457,11 @@ function formatGardenCredentialProvenance(provenance: GardenCredentialProvenance
   return provenance.kind === "embedding-fallback"
     ? "deprecated embedding-fallback"
     : provenance.kind;
+}
+
+function formatGardenKeychainCheck(check: GardenKeychainCheck): string {
+  const ref = `keychain:${check.service}:${check.account}`;
+  return check.ok
+    ? `garden keychain: ok (${ref})`
+    : `garden keychain: unavailable (${ref}) — ${check.remediation}`;
 }

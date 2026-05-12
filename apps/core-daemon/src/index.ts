@@ -932,6 +932,9 @@ function formatGardenSecretRefError(error: ResolveSecretError): string {
       return `Garden compute secret_ref ${error.ref} is missing file ${error.path}.`;
     case "file_unreadable":
       return `Garden compute secret_ref ${error.ref} file ${error.path} is unreadable.`;
+    case "keychain_tooling_unavailable":
+    case "keychain_entry_not_found":
+      return `Garden compute secret_ref ${error.ref} keychain lookup failed: ${error.reason}`;
   }
 }
 

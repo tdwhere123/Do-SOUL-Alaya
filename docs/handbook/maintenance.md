@@ -45,6 +45,23 @@ When contracts change:
 - Update acceptance criteria and test expectations.
 - Update downstream consumer assumptions.
 
+## Host Version Notes
+
+### #BL-037 — Codex `/alaya-inspect` Slash Recognition
+
+Tested Codex CLI version: `codex-cli 0.130.0`.
+
+Outcome: negative proof. The Alaya-managed Codex profile writer can
+write `[slash_commands.alaya-inspect]` with
+`node <repo>/bin/alaya.mjs inspect --open`, and the local Codex profile
+file contains that entry, but the tested Codex CLI help, feature list,
+installed package files, and local config docs do not expose or document
+a third-party fixed slash-command registry. Do not claim
+`/alaya-inspect` as Codex `cli-consumable` on this version.
+
+Supported fallback: run `alaya inspect --open` directly, or use the
+MCP / CLI fallback paths documented in `runtime-status.md`.
+
 ## Deprecated public symbols
 
 No public MCP, EventLog, or runtime-control-plane symbols are
