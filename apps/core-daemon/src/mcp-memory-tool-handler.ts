@@ -54,7 +54,6 @@ import {
   type GardenMcpWorkerRole,
   type GardenRoleValue,
   type MemoryEntry,
-  type MemoryGraphEdgeTypeValue,
   type Proposal,
   type RecallCandidate,
   type RecallPolicy,
@@ -80,7 +79,7 @@ import type {
   GardenTaskRow
 } from "@do-soul/alaya-storage";
 import { stableStringify } from "@do-soul/alaya-core";
-import { normalizeSchemaGroundedSignal } from "@do-soul/alaya-soul";
+import { normalizeSchemaGroundedSignal, type GraphEdgeCreationPort } from "@do-soul/alaya-soul";
 import { buildGardenTaskSignalId } from "./garden-task-signal-id.js";
 import { hasAlayaMemoryToolName, type AlayaMemoryToolName } from "./mcp-memory-tool-catalog.js";
 import { buildMemorySearchResult, buildRecallStrategyMix } from "./mcp-memory-recall-result.js";
@@ -186,16 +185,9 @@ export interface McpMemoryToolHandlerDependencies {
     ): Promise<readonly Readonly<{ readonly memory_id: string; readonly edge_type: string; readonly direction: string; readonly edge_id: string }>[]>;
   };
   // Optional write port for RECALLS-edge cross-linking on used reports.
-  // Same shape as MaterializationRouter's GraphEdgeCreationPort.
-  readonly graphEdgePort?: {
-    createEdge(params: {
-      readonly sourceMemoryId: string;
-      readonly targetMemoryId: string;
-      readonly edgeType: MemoryGraphEdgeTypeValue;
-      readonly workspaceId: string;
-      readonly runId?: string | null;
-    }): Promise<void>;
-  };
+  // Single canonical declaration lives next to MaterializationRouter — re-using
+  // the same port keeps the daemon-side wiring and the materializer in lockstep.
+  readonly graphEdgePort?: GraphEdgeCreationPort;
   readonly sessionOverrideService: {
     apply(params: {
       readonly runId: string;
@@ -1153,6 +1145,16 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       return;
     }
 
+    if (usedObjectIds.length > MAX_CROSS_LINK_FANOUT) {
+      // invariants §13: plasticity / cross-link changes must be auditable.
+      // The hard cap exists to bound write amplification (~N² edges per call);
+      // emit a warn so the truncation is observable from logs, not silent.
+      warn("mcp-memory-tool-handler: cross-link truncated to fanout cap", {
+        usedObjectCount: usedObjectIds.length,
+        truncatedTo: MAX_CROSS_LINK_FANOUT,
+        droppedCount: usedObjectIds.length - MAX_CROSS_LINK_FANOUT
+      });
+    }
     const targets = usedObjectIds.slice(0, MAX_CROSS_LINK_FANOUT);
 
     for (const source of targets) {
