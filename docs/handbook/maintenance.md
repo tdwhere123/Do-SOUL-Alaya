@@ -62,6 +62,26 @@ a third-party fixed slash-command registry. Do not claim
 Supported fallback: run `alaya inspect --open` directly, or use the
 MCP / CLI fallback paths documented in `runtime-status.md`.
 
+### #BL-009 — OS keychain platform coverage
+
+Runtime-verified: Linux (incl. WSL2) via `secret-tool` —
+`alaya install --keychain` migration + `alaya doctor` keychain readiness;
+transcript under `docs/v0.3/v0.3.0/keychain-transcripts/`.
+
+macOS (`security -i` stdin write / `find-generic-password -w` read) and
+Windows (PowerShell `PasswordVault` read+write over stdin) adapters are
+**code-reviewed, runtime verification deferred** — no maintainer has a
+macOS or Windows host to capture a real write/read transcript. Code-review
+state as of v0.3.0: secrets are passed via stdin (not argv) on every write
+path; all keychain subprocess calls are bounded by
+`KEYCHAIN_SUBPROCESS_TIMEOUT_MS` (10s) and map ENOENT / timeout to
+`keychain_tooling_unavailable`. Known untested edge: macOS
+`find-generic-password` returns non-zero for a *locked* keychain, which the
+adapter currently reports as `keychain_entry_not_found` rather than a
+distinct "locked" state — a real macOS transcript should confirm or refine
+this. When a macOS / Windows host becomes available, capture the transcript
+and update this note + `runtime-status.md`.
+
 ## Deprecated public symbols
 
 No public MCP, EventLog, or runtime-control-plane symbols are
