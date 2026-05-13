@@ -51,6 +51,11 @@ export interface RecallServiceEventLogRepoPort {
 
 export interface RecallServiceGraphSupportPort {
   countInboundSupports(memoryId: string, workspaceId: string): Promise<number>;
+  // Aggregates inbound graph edges by edge_type weight into one signed
+  // support score. The recall service consumes this instead of plain
+  // supports count so that derives_from / recalls signals also lift
+  // graph_support and supersedes pulls it down.
+  countInboundEdgesWeighted(memoryId: string, workspaceId: string): Promise<number>;
 }
 
 export interface RecallServiceBudgetPenaltyPort {

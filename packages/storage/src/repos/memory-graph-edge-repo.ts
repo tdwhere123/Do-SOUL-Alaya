@@ -27,6 +27,12 @@ export interface MemoryGraphEdgeRepo {
     workspaceId: string
   ): Promise<Readonly<MemoryGraphEdge> | null>;
   countInboundSupports(memoryId: string, workspaceId: string): Promise<number>;
+  // Aggregates inbound edges into a single signed graph-support score
+  // weighted by edge_type:
+  //   supports=+1.0, derives_from=+0.5, recalls=+0.3, supersedes=-0.5
+  // Other edge types contribute 0. The caller normalizes the returned
+  // weight into the recall scoring space.
+  countInboundEdgesWeighted(memoryId: string, workspaceId: string): Promise<number>;
   delete(edgeId: string): Promise<void>;
 }
 
@@ -208,6 +214,40 @@ export class SqliteMemoryGraphEdgeRepo implements MemoryGraphEdgeRepo {
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to count inbound supports for memory ${parsedMemoryId}.`,
+        error
+      );
+    }
+  }
+
+  public async countInboundEdgesWeighted(memoryId: string, workspaceId: string): Promise<number> {
+    const parsedMemoryId = parseNonEmptyString(memoryId, "memory id");
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
+
+    try {
+      // Weight map aligned with MemoryGraphEdgeType in
+      // packages/protocol/src/soul/memory-graph.ts. Edge types not listed
+      // contribute 0 to the weighted total.
+      const row = this.db.connection
+        .prepare(
+          `SELECT COALESCE(SUM(
+             CASE edge_type
+               WHEN 'supports'     THEN  1.0
+               WHEN 'derives_from' THEN  0.5
+               WHEN 'recalls'      THEN  0.3
+               WHEN 'supersedes'   THEN -0.5
+               ELSE 0
+             END
+           ), 0) AS weight
+           FROM memory_graph_edges
+           WHERE target_memory_id = ? AND workspace_id = ?`
+        )
+        .get(parsedMemoryId, parsedWorkspaceId) as { readonly weight: number } | undefined;
+
+      return row?.weight ?? 0;
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to compute weighted inbound edges for memory ${parsedMemoryId}.`,
         error
       );
     }

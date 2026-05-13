@@ -39,6 +39,8 @@ describe("GraphExploreService", () => {
       findByMemoryId: vi.fn(async () => []),
       findBySourceAndTarget: vi.fn(async () => null),
       countInboundSupports: vi.fn(async () => 0),
+
+      countInboundEdgesWeighted: vi.fn(async () => 0),
       delete: vi.fn(async () => undefined)
     };
     const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
@@ -100,6 +102,8 @@ describe("GraphExploreService", () => {
         findByMemoryId: vi.fn(async () => []),
         findBySourceAndTarget: vi.fn(async () => existing),
         countInboundSupports: vi.fn(async () => 0),
+
+        countInboundEdgesWeighted: vi.fn(async () => 0),
         delete: vi.fn(async () => undefined)
       },
       eventLogRepo: { append: vi.fn(async (event) => createEventLogEntry(event)) },
@@ -132,6 +136,8 @@ describe("GraphExploreService", () => {
         ]),
         findBySourceAndTarget: vi.fn(async () => null),
         countInboundSupports: vi.fn(async () => 1),
+
+        countInboundEdgesWeighted: vi.fn(async () => 1),
         delete: vi.fn(async () => undefined)
       },
       eventLogRepo: { append },
@@ -184,6 +190,8 @@ describe("GraphExploreService", () => {
         findByMemoryId: vi.fn(async () => []),
         findBySourceAndTarget: vi.fn(async () => null),
         countInboundSupports: vi.fn(async () => 0),
+
+        countInboundEdgesWeighted: vi.fn(async () => 0),
         delete: vi.fn(async () => undefined)
       },
       eventLogRepo: { append },
@@ -200,6 +208,8 @@ describe("GraphExploreService", () => {
       findByMemoryId: vi.fn(async () => []),
       findBySourceAndTarget: vi.fn(async () => null),
       countInboundSupports: vi.fn(async () => 0),
+
+      countInboundEdgesWeighted: vi.fn(async () => 0),
       delete: vi.fn(async () => undefined)
     };
     const service = new GraphExploreService({

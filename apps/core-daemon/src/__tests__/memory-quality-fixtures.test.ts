@@ -254,6 +254,9 @@ function createRecallDependencies(memories: readonly MemoryEntry[]): RecallServi
     graphSupportPort: {
       countInboundSupports: vi.fn(async (memoryId) =>
         memoryId.includes("relation") ? 3 : 0
+      ),
+      countInboundEdgesWeighted: vi.fn(async (memoryId) =>
+        memoryId.includes("relation") ? 3 : 0
       )
     }
   };

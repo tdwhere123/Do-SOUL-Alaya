@@ -179,6 +179,96 @@ describe("SqliteMemoryGraphEdgeRepo", () => {
     await expect(repo.countInboundSupports(sourceMemoryId, "workspace-1")).resolves.toBe(0);
   });
 
+  it("countInboundEdgesWeighted sums by edge_type weight (supports=1, derives_from=0.5, recalls=0.3, supersedes=-0.5)", async () => {
+    const { database, memoryRepo } = await createRepo();
+    const repo = new SqliteMemoryGraphEdgeRepo(database);
+    const targetId = createMemoryId(20);
+    const srcA = createMemoryId(21);
+    const srcB = createMemoryId(22);
+    const srcC = createMemoryId(23);
+    const srcD = createMemoryId(24);
+    const srcE = createMemoryId(25);
+    const outsideTargetId = createMemoryId(26);
+
+    await createMemory(memoryRepo, targetId);
+    await createMemory(memoryRepo, srcA);
+    await createMemory(memoryRepo, srcB);
+    await createMemory(memoryRepo, srcC);
+    await createMemory(memoryRepo, srcD);
+    await createMemory(memoryRepo, srcE);
+    await createMemory(memoryRepo, outsideTargetId);
+
+    // 2 × supports → +2.0
+    await repo.create(createGraphEdge({
+      edge_id: "wedge-sup-1",
+      source_memory_id: srcA,
+      target_memory_id: targetId,
+      edge_type: "supports",
+      created_at: "2026-04-01T00:00:00.000Z"
+    }));
+    await repo.create(createGraphEdge({
+      edge_id: "wedge-sup-2",
+      source_memory_id: srcB,
+      target_memory_id: targetId,
+      edge_type: "supports",
+      created_at: "2026-04-01T00:00:01.000Z"
+    }));
+    // 1 × derives_from → +0.5
+    await repo.create(createGraphEdge({
+      edge_id: "wedge-derives-1",
+      source_memory_id: srcC,
+      target_memory_id: targetId,
+      edge_type: "derives_from",
+      created_at: "2026-04-01T00:00:02.000Z"
+    }));
+    // 2 × recalls → +0.6
+    await repo.create(createGraphEdge({
+      edge_id: "wedge-rec-1",
+      source_memory_id: srcD,
+      target_memory_id: targetId,
+      edge_type: "recalls",
+      created_at: "2026-04-01T00:00:03.000Z"
+    }));
+    await repo.create(createGraphEdge({
+      edge_id: "wedge-rec-2",
+      source_memory_id: srcE,
+      target_memory_id: targetId,
+      edge_type: "recalls",
+      created_at: "2026-04-01T00:00:04.000Z"
+    }));
+    // 1 × supersedes → -0.5
+    await repo.create(createGraphEdge({
+      edge_id: "wedge-sup-by-1",
+      source_memory_id: srcA,
+      target_memory_id: targetId,
+      edge_type: "supersedes",
+      created_at: "2026-04-01T00:00:05.000Z"
+    }));
+    // ignored: contradicts, exception_to, incompatible_with → 0 each
+    await repo.create(createGraphEdge({
+      edge_id: "wedge-contra-1",
+      source_memory_id: srcA,
+      target_memory_id: targetId,
+      edge_type: "contradicts",
+      created_at: "2026-04-01T00:00:06.000Z"
+    }));
+    // outbound edge → not counted as inbound
+    await repo.create(createGraphEdge({
+      edge_id: "wedge-out-1",
+      source_memory_id: targetId,
+      target_memory_id: outsideTargetId,
+      edge_type: "supports",
+      created_at: "2026-04-01T00:00:07.000Z"
+    }));
+
+    // 2.0 + 0.5 + 0.6 - 0.5 + 0 (contradicts) = 2.6
+    await expect(repo.countInboundEdgesWeighted(targetId, "workspace-1")).resolves.toBeCloseTo(2.6, 10);
+    // outsideTargetId has one inbound supports edge (wedge-out-1) → 1.0
+    await expect(repo.countInboundEdgesWeighted(outsideTargetId, "workspace-1")).resolves.toBeCloseTo(1.0, 10);
+    // wrong workspace → 0
+    await expect(repo.countInboundEdgesWeighted(targetId, "workspace-other")).resolves.toBe(0);
+  });
+
   it("limits neighbor lists to 200 edges with deterministic ordering", async () => {
     const { database, memoryRepo } = await createRepo();
     const repo = new SqliteMemoryGraphEdgeRepo(database);

@@ -33,6 +33,7 @@ export interface GraphExploreServiceEdgeRepoPort {
     workspaceId: string
   ): Promise<Readonly<MemoryGraphEdge> | null>;
   countInboundSupports(memoryId: string, workspaceId: string): Promise<number>;
+  countInboundEdgesWeighted(memoryId: string, workspaceId: string): Promise<number>;
   delete(edgeId: string): Promise<void>;
 }
 
@@ -200,6 +201,13 @@ export class GraphExploreService {
 
   public async countInboundSupports(memoryId: string, workspaceId: string): Promise<number> {
     return await this.dependencies.edgeRepo.countInboundSupports(parseObjectId(memoryId), parseObjectId(workspaceId));
+  }
+
+  public async countInboundEdgesWeighted(memoryId: string, workspaceId: string): Promise<number> {
+    return await this.dependencies.edgeRepo.countInboundEdgesWeighted(
+      parseObjectId(memoryId),
+      parseObjectId(workspaceId)
+    );
   }
 
   public async deleteEdge(edgeId: string): Promise<void> {

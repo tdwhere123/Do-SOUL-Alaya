@@ -543,13 +543,20 @@ export class RecallService {
     readonly queryText: string | null;
     readonly coarseFtsRanks: Readonly<Record<string, number>>;
   }): Promise<RecallSupplementaryData> {
+    // graph_support is now a weighted aggregate across edge_types — see
+    // SqliteMemoryGraphEdgeRepo.countInboundEdgesWeighted for the weight
+    // map. The legacy supports-only count would pin graph_support to 0
+    // whenever materialization hadn't yet attached a SUPPORTS edge.
     const graphSupportCounts = Object.fromEntries(
       await Promise.all(
         params.candidates.map(async (candidate) => [
           candidate.object_id,
           this.dependencies.graphSupportPort === undefined
             ? 0
-            : await this.dependencies.graphSupportPort.countInboundSupports(candidate.object_id, params.workspaceId)
+            : await this.dependencies.graphSupportPort.countInboundEdgesWeighted(
+                candidate.object_id,
+                params.workspaceId
+              )
         ])
       )
     );

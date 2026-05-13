@@ -199,7 +199,8 @@ describe("RecallService tier cascade", () => {
       warm: [createMemoryEntry({ object_id: "warm-unused", storage_tier: StorageTier.WARM })],
       cold: [createMemoryEntry({ object_id: "cold-unused", storage_tier: StorageTier.COLD })],
       graphSupportPort: {
-        countInboundSupports: graphSupportSpy
+        countInboundSupports: graphSupportSpy,
+        countInboundEdgesWeighted: graphSupportSpy
       }
     });
 
@@ -233,7 +234,8 @@ describe("RecallService tier cascade", () => {
         })
       ),
       graphSupportPort: {
-        countInboundSupports: cascadeGraphSpy
+        countInboundSupports: cascadeGraphSpy,
+        countInboundEdgesWeighted: cascadeGraphSpy
       }
     }, 3);
 

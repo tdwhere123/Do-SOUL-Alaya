@@ -127,6 +127,9 @@ function createDependencies(memories: readonly MemoryEntry[]): RecallServiceDepe
     graphSupportPort: {
       countInboundSupports: vi.fn(async (memoryId) =>
         memoryId === "relation-router-storage" ? 3 : 0
+      ),
+      countInboundEdgesWeighted: vi.fn(async (memoryId) =>
+        memoryId === "relation-router-storage" ? 3 : 0
       )
     }
   };

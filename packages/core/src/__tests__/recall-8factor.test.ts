@@ -97,6 +97,7 @@ function createDependencies(
   readonly dependencies: RecallServiceDependencies;
   readonly searchByKeyword: ReturnType<typeof vi.fn>;
   readonly countInboundSupports: ReturnType<typeof vi.fn>;
+  readonly countInboundEdgesWeighted: ReturnType<typeof vi.fn>;
   readonly getSnapshot: ReturnType<typeof vi.fn>;
 } {
   const searchByKeyword = vi.fn(async () => [{ object_id: memories[1]?.object_id ?? "memory-2", normalized_rank: 1 }]);
@@ -137,7 +138,8 @@ function createDependencies(
         queryByEntity: vi.fn(async () => [])
       },
       graphSupportPort: {
-        countInboundSupports
+        countInboundSupports,
+        countInboundEdgesWeighted: countInboundSupports
       },
       budgetPenaltyPort: {
         getSnapshot
@@ -152,6 +154,7 @@ function createDependencies(
     } as RecallServiceDependencies,
     searchByKeyword,
     countInboundSupports,
+    countInboundEdgesWeighted: countInboundSupports,
     getSnapshot
   };
 }
