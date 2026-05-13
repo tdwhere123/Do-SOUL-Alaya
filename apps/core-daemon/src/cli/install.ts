@@ -63,6 +63,10 @@ export interface InstallCommandDependencies {
     readonly writeKeychain?: (service: string, account: string, value: string) => KeychainWriteResult;
     readonly readKeychain?: (service: string, account: string) => KeychainReadResult;
   };
+  // Injectable so tests can pin the per-platform orphan remediation cmd
+  // independent of the host that runs the test. Production paths default
+  // to process.platform.
+  readonly platform?: NodeJS.Platform;
 }
 
 interface InstallArgs {
@@ -295,7 +299,7 @@ async function executeKeychainInstall(
     if (!("ok" in writeResult)) {
       throw new Error(formatKeychainInstallError(writeResult));
     }
-    keychainOrphan = buildKeychainOrphanAudit(keychainRef, service, account);
+    keychainOrphan = buildKeychainOrphanAudit(keychainRef, service, account, deps.platform ?? process.platform);
 
     const verified = resolveRuntimeSecretRef(keychainRef, {
       readEnv: (name) => ctx.env[name],
@@ -677,16 +681,36 @@ function summarizeGardenConfigForInstallAudit(config: RuntimeGardenComputeConfig
 function buildKeychainOrphanAudit(
   secretRef: string,
   service: string,
-  account: string
+  account: string,
+  platform: NodeJS.Platform
 ): InstallAuditKeychainOrphan {
   return {
     secret_ref: secretRef,
     service,
     account,
-    remediation:
-      `Remove the stale keychain entry for service ${service} account ${account} ` +
-      "with the platform keychain tool before retrying if desired."
+    remediation: buildKeychainOrphanRemediation(platform, service, account)
   };
+}
+
+// Per-platform delete commands. Segments are restricted to
+// /^[A-Za-z0-9_.][A-Za-z0-9._-]*$/ at the protocol layer (see
+// parseSecretRefKeychainTarget), so they cannot smuggle shell
+// metacharacters or leading dashes into the recommended command line.
+function buildKeychainOrphanRemediation(
+  platform: NodeJS.Platform,
+  service: string,
+  account: string
+): string {
+  switch (platform) {
+    case "darwin":
+      return `Remove the orphaned macOS Keychain item with: security delete-generic-password -s ${service} -a ${account}.`;
+    case "linux":
+      return `Remove the orphaned libsecret item with: secret-tool clear service ${service} account ${account}.`;
+    case "win32":
+      return `Remove the orphaned Windows Credential Manager item via the Credential Manager UI or by removing the Windows.Security.Credentials.PasswordCredential for service ${service} account ${account}.`;
+    default:
+      return `Remove the stale keychain entry for service ${service} account ${account} with the platform keychain tool before retrying if desired.`;
+  }
 }
 
 async function writeInstallAudit(

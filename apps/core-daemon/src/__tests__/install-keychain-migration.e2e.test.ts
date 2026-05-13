@@ -355,50 +355,69 @@ describe("install keychain migration", () => {
     expect(ctx.stderr.text()).not.toContain("sk-keychain-secret");
   });
 
-  it("does not patch config when post-write keychain verification fails", async () => {
-    const configDir = await mkdtemp(path.join(tmpdir(), "alaya-install-keychain-verify-"));
-    const envBefore = "ALAYA_OPENAI_SECRET_REF=env:OPENAI_API_KEY\n";
-    await writeFile(path.join(configDir, ".env"), envBefore, "utf8");
-    const command = createInstallCommand({
-      configDirResolver: () => configDir,
-      keychain: {
-        checkAvailable: () => ({ ok: true as const }),
-        writeKeychain: () => ({ ok: true as const }),
-        readKeychain: () => ({
-          kind: "keychain_entry_not_found" as const,
-          service: "alaya",
-          account: "openai",
-          reason: "entry not found"
-        })
-      }
-    });
-    const ctx = createContext("sk-keychain-secret\n");
-
-    const result = await command.handler(ctx, {
-      nonInteractive: false,
-      answers: null,
-      force: false,
-      keychain: true
-    });
-
-    expect(result.exitCode).toBe(ALAYA_SYSEXITS.CANTCREAT);
-    expect(await readFile(path.join(configDir, ".env"), "utf8")).toBe(envBefore);
-    expect(ctx.stderr.text()).toContain("keychain write verification failed");
-    expect(ctx.stderr.text()).not.toContain("sk-keychain-secret");
-
-    const auditFiles = await readdir(path.join(configDir, "audit"));
-    const audit = JSON.parse(await readFile(path.join(configDir, "audit", auditFiles[0]!), "utf8")) as {
-      readonly keychain_orphan?: unknown;
-    };
-    expect(audit.keychain_orphan).toEqual({
-      secret_ref: "keychain:alaya:openai",
-      service: "alaya",
-      account: "openai",
+  it.each([
+    {
+      platform: "darwin" as const,
       remediation:
-        "Remove the stale keychain entry for service alaya account openai with the platform keychain tool before retrying if desired."
-    });
-    expect(JSON.stringify(audit)).not.toContain("sk-keychain-secret");
-  });
+        "Remove the orphaned macOS Keychain item with: security delete-generic-password -s alaya -a openai."
+    },
+    {
+      platform: "linux" as const,
+      remediation:
+        "Remove the orphaned libsecret item with: secret-tool clear service alaya account openai."
+    },
+    {
+      platform: "win32" as const,
+      remediation:
+        "Remove the orphaned Windows Credential Manager item via the Credential Manager UI or by removing the Windows.Security.Credentials.PasswordCredential for service alaya account openai."
+    }
+  ])(
+    "audits a $platform keychain orphan with a per-platform delete cmd when verification fails",
+    async ({ platform, remediation }) => {
+      const configDir = await mkdtemp(path.join(tmpdir(), `alaya-install-keychain-verify-${platform}-`));
+      const envBefore = "ALAYA_OPENAI_SECRET_REF=env:OPENAI_API_KEY\n";
+      await writeFile(path.join(configDir, ".env"), envBefore, "utf8");
+      const command = createInstallCommand({
+        configDirResolver: () => configDir,
+        platform,
+        keychain: {
+          checkAvailable: () => ({ ok: true as const }),
+          writeKeychain: () => ({ ok: true as const }),
+          readKeychain: () => ({
+            kind: "keychain_entry_not_found" as const,
+            service: "alaya",
+            account: "openai",
+            reason: "entry not found"
+          })
+        }
+      });
+      const ctx = createContext("sk-keychain-secret\n");
+
+      const result = await command.handler(ctx, {
+        nonInteractive: false,
+        answers: null,
+        force: false,
+        keychain: true
+      });
+
+      expect(result.exitCode).toBe(ALAYA_SYSEXITS.CANTCREAT);
+      expect(await readFile(path.join(configDir, ".env"), "utf8")).toBe(envBefore);
+      expect(ctx.stderr.text()).toContain("keychain write verification failed");
+      expect(ctx.stderr.text()).not.toContain("sk-keychain-secret");
+
+      const auditFiles = await readdir(path.join(configDir, "audit"));
+      const audit = JSON.parse(await readFile(path.join(configDir, "audit", auditFiles[0]!), "utf8")) as {
+        readonly keychain_orphan?: unknown;
+      };
+      expect(audit.keychain_orphan).toEqual({
+        secret_ref: "keychain:alaya:openai",
+        service: "alaya",
+        account: "openai",
+        remediation
+      });
+      expect(JSON.stringify(audit)).not.toContain("sk-keychain-secret");
+    }
+  );
 });
 
 function createClock(): () => string {
