@@ -7,6 +7,28 @@ import { createInstallCommand } from "../cli/install.js";
 import type { AlayaCliContext } from "../cli/bridge.js";
 
 describe("cli install", () => {
+  it("parses keychain install flags without accepting secret material in argv", () => {
+    const command = createInstallCommand();
+
+    expect(command.argsSchema.safeParse(["--keychain"])).toMatchObject({
+      success: true,
+      data: { nonInteractive: false, answers: null, force: false, keychain: true }
+    });
+    expect(command.argsSchema.safeParse(["--keychain", "--force"])).toMatchObject({
+      success: true,
+      data: { nonInteractive: false, answers: null, force: true, keychain: true }
+    });
+    expect(command.argsSchema.safeParse(["--keychain", "--non-interactive"])).toMatchObject({
+      success: true,
+      data: { nonInteractive: true, answers: null, force: false, keychain: true }
+    });
+
+    expect(command.argsSchema.safeParse(["--keychain", "extra"])).toMatchObject({ success: false });
+    expect(command.argsSchema.safeParse(["--keychain", "--non-interactive", "extra"])).toMatchObject({
+      success: false
+    });
+  });
+
   it("writes config, secret refs, pasted secrets, and audit rows without plaintext .env keys", async () => {
     const configDir = await mkdtemp(path.join(tmpdir(), "alaya-install-"));
     const command = createInstallCommand({

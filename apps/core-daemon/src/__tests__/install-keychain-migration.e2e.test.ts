@@ -225,6 +225,102 @@ describe("install keychain migration", () => {
     expect(report.garden_compute.keychain_check).toEqual({ ok: true, service: "alaya", account: "openai" });
   });
 
+  it("patches only the persisted Garden secret_ref and audits the DB-row change", async () => {
+    const configDir = await mkdtemp(path.join(tmpdir(), "alaya-install-keychain-preserve-garden-"));
+    const oldSecretPath = path.join(configDir, "secrets", "garden-openai");
+    const dbPath = path.join(configDir, "alaya.db");
+    await mkdir(path.dirname(oldSecretPath), { recursive: true });
+    await writeFile(oldSecretPath, "old-secret\n", "utf8");
+    await writeFile(
+      path.join(configDir, "alaya.toml"),
+      `[storage]\ndb_path = ${JSON.stringify(dbPath)}\n`,
+      "utf8"
+    );
+    const database = initDatabase({ filename: dbPath });
+    const configRepo = new SqliteConfigRepo(database);
+    configRepo.set<RuntimeGardenComputeConfig>("runtime:garden-compute", {
+      provider_kind: "host_worker",
+      model_id: "gpt-4.1-mini",
+      provider_url: "https://api.openai.test/v1",
+      secret_ref: `file:${oldSecretPath}`,
+      enabled: false
+    });
+    const command = createInstallCommand({
+      configDirResolver: () => configDir,
+      clock: createClock(),
+      keychain: {
+        checkAvailable: () => ({ ok: true as const }),
+        writeKeychain: () => ({ ok: true as const }),
+        readKeychain: () => "sk-keychain-secret"
+      }
+    });
+
+    const result = await command.handler(createContext("sk-keychain-secret\n"), {
+      nonInteractive: false,
+      answers: null,
+      force: false,
+      keychain: true
+    });
+
+    expect(result.exitCode).toBe(ALAYA_SYSEXITS.OK);
+    const persisted = RuntimeGardenComputeConfigSchema.parse(
+      configRepo.get<RuntimeGardenComputeConfig>("runtime:garden-compute")
+    );
+    expect(persisted).toMatchObject({
+      provider_kind: "host_worker",
+      enabled: false,
+      secret_ref: "keychain:alaya:openai"
+    });
+
+    const auditFiles = await readdir(path.join(configDir, "audit"));
+    const audit = JSON.parse(await readFile(path.join(configDir, "audit", auditFiles[0]!), "utf8")) as {
+      readonly config_changes?: readonly unknown[];
+    };
+    expect(audit.config_changes).toEqual([
+      {
+        key: "runtime:garden-compute",
+        before: {
+          provider_kind: "host_worker",
+          enabled: false,
+          secret_ref: `file:${oldSecretPath}`
+        },
+        after: {
+          provider_kind: "host_worker",
+          enabled: false,
+          secret_ref: "keychain:alaya:openai"
+        }
+      }
+    ]);
+    expect(JSON.stringify(audit)).not.toContain("sk-keychain-secret");
+
+    const eventRows = database.connection
+      .prepare(
+        `SELECT event_type, entity_type, entity_id, caused_by, payload_json
+         FROM event_log
+         WHERE entity_type = 'runtime_config' AND entity_id = 'runtime:garden-compute'`
+      )
+      .all() as readonly {
+      readonly event_type: string;
+      readonly entity_type: string;
+      readonly entity_id: string;
+      readonly caused_by: string | null;
+      readonly payload_json: string;
+    }[];
+    expect(eventRows).toHaveLength(1);
+    expect(eventRows[0]).toMatchObject({
+      event_type: "soul.health_journal.recorded",
+      entity_type: "runtime_config",
+      entity_id: "runtime:garden-compute",
+      caused_by: "install"
+    });
+    expect(JSON.parse(eventRows[0]!.payload_json)).toMatchObject({
+      change_summary: {
+        fields_changed: ["secret_ref"],
+        secret_ref_kind: "keychain"
+      }
+    });
+  });
+
   it("fails keychain install before config mutation when platform tooling is unavailable", async () => {
     const configDir = await mkdtemp(path.join(tmpdir(), "alaya-install-keychain-tooling-"));
     const envBefore = "ALAYA_OPENAI_SECRET_REF=env:OPENAI_API_KEY\n";
@@ -289,6 +385,19 @@ describe("install keychain migration", () => {
     expect(await readFile(path.join(configDir, ".env"), "utf8")).toBe(envBefore);
     expect(ctx.stderr.text()).toContain("keychain write verification failed");
     expect(ctx.stderr.text()).not.toContain("sk-keychain-secret");
+
+    const auditFiles = await readdir(path.join(configDir, "audit"));
+    const audit = JSON.parse(await readFile(path.join(configDir, "audit", auditFiles[0]!), "utf8")) as {
+      readonly keychain_orphan?: unknown;
+    };
+    expect(audit.keychain_orphan).toEqual({
+      secret_ref: "keychain:alaya:openai",
+      service: "alaya",
+      account: "openai",
+      remediation:
+        "Remove the stale keychain entry for service alaya account openai with the platform keychain tool before retrying if desired."
+    });
+    expect(JSON.stringify(audit)).not.toContain("sk-keychain-secret");
   });
 });
 

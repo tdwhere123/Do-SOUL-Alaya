@@ -1,8 +1,15 @@
 import { access, mkdir, readFile, readdir, unlink } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
-import { RuntimeGardenComputeConfigSchema, type RuntimeGardenComputeConfig } from "@do-soul/alaya-protocol";
-import { initDatabase, SqliteConfigRepo } from "@do-soul/alaya-storage";
+import { EventPublisher } from "@do-soul/alaya-core";
+import {
+  GardenEventType,
+  HealthEventKind,
+  RuntimeGardenComputeConfigSchema,
+  SoulHealthJournalRecordedPayloadSchema,
+  type RuntimeGardenComputeConfig
+} from "@do-soul/alaya-protocol";
+import { initDatabase, SqliteConfigRepo, SqliteEventLogRepo } from "@do-soul/alaya-storage";
 import {
   buildInstallAuditPath,
   resolveAlayaConfigDir,
@@ -64,6 +71,21 @@ interface PartialStateEntry {
   readonly path: string;
   // beforeContent === undefined means the file did not exist before; rollback unlinks.
   readonly beforeContent: string | undefined;
+}
+
+type GardenConfigAuditSnapshot = Pick<RuntimeGardenComputeConfig, "provider_kind" | "enabled" | "secret_ref">;
+
+interface InstallAuditConfigChange {
+  readonly key: string;
+  readonly before: GardenConfigAuditSnapshot;
+  readonly after: GardenConfigAuditSnapshot;
+}
+
+interface InstallAuditKeychainOrphan {
+  readonly secret_ref: string;
+  readonly service: string;
+  readonly account: string;
+  readonly remediation: string;
 }
 
 // invariant: install --keychain writes the dedicated Garden credential ref and
@@ -218,6 +240,8 @@ async function executeKeychainInstall(
   const partialState: PartialStateEntry[] = [];
   let auditInitialized = false;
   let persistedGardenConfigBefore: RuntimeGardenComputeConfig | null | undefined;
+  let persistedGardenConfigChange: InstallAuditConfigChange | undefined;
+  let keychainOrphan: InstallAuditKeychainOrphan | undefined;
 
   await ensurePrivateDirectory(paths.configDir);
   await ensurePrivateDirectory(paths.auditDir);
@@ -265,6 +289,7 @@ async function executeKeychainInstall(
     if (!("ok" in writeResult)) {
       throw new Error(formatKeychainInstallError(writeResult));
     }
+    keychainOrphan = buildKeychainOrphanAudit(keychainRef, service, account);
 
     const verified = resolveRuntimeSecretRef(keychainRef, {
       readEnv: (name) => ctx.env[name],
@@ -286,8 +311,16 @@ async function executeKeychainInstall(
 
     const existing = await readExistingInstallConfig(paths);
     const dbPath = path.resolve(existing.db_path ?? path.join(paths.configDir, "alaya.db"));
-    const persistedPatch = await patchPersistedGardenSecretRefIfPresent(dbPath, keychainRef);
+    const persistedPatch = await patchPersistedGardenSecretRefIfPresent(dbPath, keychainRef, startedAt);
     persistedGardenConfigBefore = persistedPatch?.before;
+    persistedGardenConfigChange =
+      persistedPatch === null
+        ? undefined
+        : {
+            key: RUNTIME_GARDEN_COMPUTE_CONFIG_KEY,
+            before: summarizeGardenConfigForInstallAudit(persistedPatch.before),
+            after: summarizeGardenConfigForInstallAudit(persistedPatch.after)
+          };
 
     await writeInstallAudit(auditPath, {
       status: "succeeded",
@@ -295,7 +328,8 @@ async function executeKeychainInstall(
       finished_at: clock(),
       config_dir: paths.configDir,
       partial_state: partialState.map((entry) => entry.path),
-      error: null
+      error: null,
+      config_changes: persistedGardenConfigChange === undefined ? undefined : [persistedGardenConfigChange]
     });
 
     if (ctx.jsonRequested !== true) {
@@ -321,7 +355,8 @@ async function executeKeychainInstall(
         config_dir: paths.configDir,
         partial_state: partialState.map((entry) => entry.path),
         error: sanitizeInstallError(error),
-        rollback_errors: rollbackErrors.length > 0 ? rollbackErrors : undefined
+        rollback_errors: rollbackErrors.length > 0 ? rollbackErrors : undefined,
+        keychain_orphan: keychainOrphan
       }).catch(() => undefined);
     }
     if (persistedGardenConfigBefore !== undefined) {
@@ -448,8 +483,21 @@ function installArgsSchema(): AlayaCliArgsSchema<InstallArgs> {
       if (jsonIndex >= 0) {
         tokens.splice(jsonIndex, 1);
       }
-      if (keychain && tokens.length <= 1) {
-        return { success: true, data: { nonInteractive: true, answers: null, force, keychain: true } };
+      if (keychain) {
+        if (tokens.length === 0) {
+          return { success: true, data: { nonInteractive: true, answers: null, force, keychain: true } };
+        }
+        return {
+          success: false,
+          error: {
+            issues: [
+              {
+                path: [],
+                message: "install --keychain --non-interactive does not accept an answer JSON or secret argument."
+              }
+            ]
+          }
+        };
       }
       if (tokens.length !== 1) {
         return {
@@ -590,6 +638,29 @@ function renderEnvFile(config: ResolvedInstallConfig): string {
   return `${lines.join("\n")}\n`;
 }
 
+function summarizeGardenConfigForInstallAudit(config: RuntimeGardenComputeConfig): GardenConfigAuditSnapshot {
+  return {
+    provider_kind: config.provider_kind,
+    enabled: config.enabled,
+    secret_ref: config.secret_ref
+  };
+}
+
+function buildKeychainOrphanAudit(
+  secretRef: string,
+  service: string,
+  account: string
+): InstallAuditKeychainOrphan {
+  return {
+    secret_ref: secretRef,
+    service,
+    account,
+    remediation:
+      `Remove the stale keychain entry for service ${service} account ${account} ` +
+      "with the platform keychain tool before retrying if desired."
+  };
+}
+
 async function writeInstallAudit(
   auditPath: string,
   input: Readonly<{
@@ -600,6 +671,8 @@ async function writeInstallAudit(
     readonly partial_state: readonly string[];
     readonly error: string | null;
     readonly rollback_errors?: readonly string[];
+    readonly config_changes?: readonly InstallAuditConfigChange[];
+    readonly keychain_orphan?: InstallAuditKeychainOrphan;
   }>
 ): Promise<void> {
   await writePrivateTextAtomic(auditPath, `${JSON.stringify({ audit_version: 1, ...input })}\n`, 0o600);
@@ -751,12 +824,14 @@ async function readMaskedTtySecretLine(
 
 async function patchPersistedGardenSecretRefIfPresent(
   dbPath: string,
-  secretRef: string
-): Promise<{ readonly before: RuntimeGardenComputeConfig | null; readonly after: RuntimeGardenComputeConfig } | null> {
+  secretRef: string,
+  occurredAt: string
+): Promise<{ readonly before: RuntimeGardenComputeConfig; readonly after: RuntimeGardenComputeConfig } | null> {
   if (!(await fileExists(dbPath))) {
     return null;
   }
-  const configRepo = new SqliteConfigRepo(initDatabase({ filename: dbPath }));
+  const database = initDatabase({ filename: dbPath });
+  const configRepo = new SqliteConfigRepo(database);
   const before = configRepo.get<RuntimeGardenComputeConfig>(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY);
   if (before === null) {
     return null;
@@ -764,11 +839,42 @@ async function patchPersistedGardenSecretRefIfPresent(
   const parsedBefore = RuntimeGardenComputeConfigSchema.parse(before);
   const after = RuntimeGardenComputeConfigSchema.parse({
     ...parsedBefore,
-    provider_kind: "official_api",
-    enabled: true,
     secret_ref: secretRef
   });
-  configRepo.set(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY, after);
+  const eventPublisher = new EventPublisher({
+    eventLogRepo: new SqliteEventLogRepo(database),
+    runHotStateService: { apply: () => undefined },
+    runtimeNotifier: {
+      notify: () => undefined,
+      notifyEntry: () => undefined
+    }
+  });
+  await eventPublisher.appendManyWithMutation(
+    [
+      {
+        event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
+        entity_type: "runtime_config",
+        entity_id: RUNTIME_GARDEN_COMPUTE_CONFIG_KEY,
+        workspace_id: "runtime",
+        run_id: null,
+        caused_by: "install",
+        payload_json: SoulHealthJournalRecordedPayloadSchema.parse({
+          entry_id: `install-keychain:${occurredAt}`,
+          event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
+          workspace_id: "runtime",
+          occurred_at: occurredAt,
+          change_summary: {
+            fields_changed: ["secret_ref"],
+            secret_ref_kind: "keychain"
+          }
+        })
+      }
+    ],
+    () => {
+      configRepo.set(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY, after);
+      return after;
+    }
+  );
   return { before: parsedBefore, after };
 }
 
