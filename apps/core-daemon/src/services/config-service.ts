@@ -34,6 +34,7 @@ import {
   readNonEmptyEnv
 } from "../daemon-runtime-support.js";
 import {
+  ALAYA_GARDEN_PROVIDER_KIND_ENV,
   ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV,
   ALAYA_OPENAI_SECRET_REF_ENV,
   applyRuntimeGardenComputeConfigFiles,
@@ -45,6 +46,8 @@ import {
   type NormalizedRuntimeGardenComputeConfigPatch,
   type NormalizedRuntimeEmbeddingConfigPatch
 } from "./env-file-service.js";
+
+const GardenProviderKindSchema = RuntimeGardenComputeConfigSchema.unwrap().shape.provider_kind;
 
 export interface AppConfigService {
   getSoulConfig(workspaceId: string): Promise<SoulConfig>;
@@ -393,13 +396,24 @@ async function defaultRuntimeGardenComputeConfig(paths: AlayaConfigPaths): Promi
   const embeddingFallbackSecretRef = readRawSecretRef(configEnv, ALAYA_OPENAI_SECRET_REF_ENV);
   const secretRef = gardenSecretRef ?? embeddingFallbackSecretRef;
   const modelId = readNonEmptyEnv(readConfigEnvValue(configEnv, OFFICIAL_API_GARDEN_MODEL_ENV)) ?? OFFICIAL_API_GARDEN_MODEL;
+  // An explicit ALAYA_GARDEN_PROVIDER_KIND wins over secret-presence inference;
+  // it is the only way a non-Inspector setup can request host_worker. An
+  // unrecognized value falls back to inference rather than crashing boot.
+  const declaredProviderKind = GardenProviderKindSchema.safeParse(
+    readNonEmptyEnv(readConfigEnvValue(configEnv, ALAYA_GARDEN_PROVIDER_KIND_ENV))
+  );
+  const providerKind = declaredProviderKind.success
+    ? declaredProviderKind.data
+    : secretRef === null
+      ? "local_heuristics"
+      : "official_api";
 
   return RuntimeGardenComputeConfigSchema.parse({
-    provider_kind: secretRef === null ? "local_heuristics" : "official_api",
+    provider_kind: providerKind,
     model_id: modelId,
     provider_url: readNonEmptyEnv(readConfigEnvValue(configEnv, OFFICIAL_API_GARDEN_PROVIDER_URL_ENV)),
     secret_ref: secretRef,
-    enabled: secretRef !== null
+    enabled: providerKind === "official_api" && secretRef !== null
   });
 }
 

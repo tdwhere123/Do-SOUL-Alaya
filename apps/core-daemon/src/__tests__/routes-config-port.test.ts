@@ -191,6 +191,52 @@ describe("routes-config port batch", () => {
     await expect(harness.service.getGardenCredentialProvenance()).resolves.toEqual({ kind: "keychain" });
   });
 
+  it("persists provider_kind=host_worker and mirrors it into ALAYA_GARDEN_PROVIDER_KIND", async () => {
+    const harness = await createServiceHarness();
+
+    await harness.service.patchRuntimeGardenComputeConfig({
+      provider_kind: "host_worker",
+      provider_url: null,
+      secret_ref: null,
+      model_id: null,
+      enabled: false
+    });
+
+    await expect(harness.service.getRuntimeGardenComputeConfig()).resolves.toMatchObject({
+      provider_kind: "host_worker",
+      secret_ref: null
+    });
+    await expect(readFile(harness.paths.envPath, "utf8")).resolves.toContain(
+      "ALAYA_GARDEN_PROVIDER_KIND=host_worker"
+    );
+    expect(harness.publishedEvents[0]).toMatchObject({
+      payload_json: {
+        change_summary: {
+          fields_changed: ["provider_kind", "provider_url", "secret_ref", "model_id", "enabled"]
+        }
+      }
+    });
+  });
+
+  it("derives provider_kind from ALAYA_GARDEN_PROVIDER_KIND when no persisted Garden config row exists", async () => {
+    const harness = await createServiceHarness();
+    await writeFile(harness.paths.envPath, "ALAYA_GARDEN_PROVIDER_KIND=host_worker\n", "utf8");
+
+    await expect(harness.service.getRuntimeGardenComputeConfig()).resolves.toMatchObject({
+      provider_kind: "host_worker",
+      enabled: false
+    });
+  });
+
+  it("ignores an unrecognized ALAYA_GARDEN_PROVIDER_KIND and falls back to secret-presence inference", async () => {
+    const harness = await createServiceHarness();
+    await writeFile(harness.paths.envPath, "ALAYA_GARDEN_PROVIDER_KIND=not-a-real-kind\n", "utf8");
+
+    await expect(harness.service.getRuntimeGardenComputeConfig()).resolves.toMatchObject({
+      provider_kind: "local_heuristics"
+    });
+  });
+
   it("normalizes paste mode in daemon service, writes only file refs publicly, and keeps plaintext out of audit/env", async () => {
     const harness = await createServiceHarness();
     const plaintext = "sk-test-plaintext-secret";

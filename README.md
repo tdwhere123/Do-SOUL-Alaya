@@ -141,6 +141,18 @@ pointing Garden compute at an `official_api` model widens that. The
 explicit `soul.emit_candidate_signal` channel stays available for facts
 the agent judges worth recording that the heuristics won't see.
 
+**Garden compute mode** is one of three: `local_heuristics` (the
+default — no external calls), `official_api` (an OpenAI-compatible
+model), or `host_worker` (the attached CLI agent itself drains the
+extract queue via `garden.list_pending_tasks` / `garden.claim_task` /
+`garden.complete_task`). The default is inferred from whether a Garden
+credential is configured; to pick it explicitly — `host_worker` in
+particular can't be inferred — set `ALAYA_GARDEN_PROVIDER_KIND` in
+`~/.config/alaya/.env`, pass `garden_provider_kind` to `alaya install
+--non-interactive`, or use the Garden Compute form in `alaya inspect
+--open`. `alaya doctor` prints the live mode on its `garden compute:`
+line.
+
 **Failure mode this prevents.** If the agent could write durable
 truth at perception, every fluent-but-wrong assertion would become
 fact. The model's confidence would become the truth model.
