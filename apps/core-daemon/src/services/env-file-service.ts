@@ -23,6 +23,10 @@ export const ALAYA_OPENAI_SECRET_REF_ENV = "ALAYA_OPENAI_SECRET_REF";
 export const ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV = "ALAYA_OFFICIAL_GARDEN_SECRET_REF";
 export const OFFICIAL_API_GARDEN_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";
 export const OFFICIAL_API_GARDEN_PROVIDER_URL_ENV = "OFFICIAL_API_GARDEN_PROVIDER_URL";
+// Garden compute mode is otherwise inferred from secret presence; this env key
+// lets an operator (or a fresh install) declare it explicitly, including the
+// host_worker mode that the inference path can never produce.
+export const ALAYA_GARDEN_PROVIDER_KIND_ENV = "ALAYA_GARDEN_PROVIDER_KIND";
 
 const ENV_SECRET_REF_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -710,6 +714,9 @@ async function patchRuntimeGardenComputeEnvFile(
   const existing = parseEnv(await readOptional(paths.envPath));
   const next = new Map(existing);
 
+  if (patch.provider_kind !== undefined) {
+    next.set(ALAYA_GARDEN_PROVIDER_KIND_ENV, patch.provider_kind);
+  }
   if (patch.enabled !== undefined) {
     next.set("ALAYA_ENABLE_GARDEN_OFFICIAL", patch.enabled ? "true" : "false");
   }

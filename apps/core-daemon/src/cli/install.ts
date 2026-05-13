@@ -6,6 +6,7 @@ import {
   GardenEventType,
   HealthEventKind,
   RuntimeGardenComputeConfigSchema,
+  RuntimeGardenProviderKindSchema,
   SoulHealthJournalRecordedPayloadSchema,
   type RuntimeGardenComputeConfig
 } from "@do-soul/alaya-protocol";
@@ -48,6 +49,10 @@ export interface InstallAnswers {
   readonly pasted_key?: string;
   readonly default_workspace?: string;
   readonly worktree_enabled?: boolean;
+  // Declares the Garden compute mode in the env file; host_worker cannot be
+  // reached through secret-presence inference, so it has to be set explicitly
+  // here (or via the Inspector / ALAYA_GARDEN_PROVIDER_KIND).
+  readonly garden_provider_kind?: RuntimeGardenComputeConfig["provider_kind"];
 }
 
 export interface InstallCommandDependencies {
@@ -93,6 +98,7 @@ interface InstallAuditKeychainOrphan {
 const KEYCHAIN_INSTALL_SERVICE = "alaya";
 const KEYCHAIN_INSTALL_ACCOUNT = "openai";
 const GARDEN_KEYCHAIN_SECRET_REF_ENV = "ALAYA_OFFICIAL_GARDEN_SECRET_REF";
+const GARDEN_PROVIDER_KIND_ENV = "ALAYA_GARDEN_PROVIDER_KIND";
 const RUNTIME_GARDEN_COMPUTE_CONFIG_KEY = "runtime:garden-compute";
 
 export function createInstallCommand(deps: InstallCommandDependencies = {}): AlayaSubcommandSpec<InstallArgs> {
@@ -530,6 +536,7 @@ interface ExistingInstallConfig {
   readonly default_workspace: string | null;
   readonly worktree_enabled: boolean | null;
   readonly secret_ref: string | null;
+  readonly garden_provider_kind: string | null;
 }
 
 interface ResolvedInstallConfig {
@@ -540,6 +547,7 @@ interface ResolvedInstallConfig {
   readonly default_workspace: string;
   readonly worktree_enabled: boolean;
   readonly secret_ref: string | null;
+  readonly garden_provider_kind: RuntimeGardenComputeConfig["provider_kind"] | null;
   readonly pasted_secret: Readonly<{ readonly path: string; readonly value: string }> | null;
 }
 
@@ -553,7 +561,8 @@ async function readExistingInstallConfig(paths: AlayaConfigPaths): Promise<Exist
     model_id: toml === null ? null : readTomlString(toml, "embedding", "model_id"),
     default_workspace: toml === null ? null : readTomlString(toml, "runtime", "default_workspace"),
     worktree_enabled: toml === null ? null : readTomlBoolean(toml, "runtime", "worktree_enabled"),
-    secret_ref: env === null ? null : readEnvValue(env, "ALAYA_OPENAI_SECRET_REF")
+    secret_ref: env === null ? null : readEnvValue(env, "ALAYA_OPENAI_SECRET_REF"),
+    garden_provider_kind: env === null ? null : readEnvValue(env, GARDEN_PROVIDER_KIND_ENV)
   };
 }
 
@@ -586,8 +595,24 @@ function resolveInstallAnswers(
     ),
     worktree_enabled: answers.worktree_enabled ?? existing.worktree_enabled ?? false,
     secret_ref: secretRef,
+    garden_provider_kind: resolveGardenProviderKind(answers.garden_provider_kind, existing.garden_provider_kind),
     pasted_secret: pastedSecret
   };
+}
+
+function resolveGardenProviderKind(
+  answer: unknown,
+  existing: string | null
+): RuntimeGardenComputeConfig["provider_kind"] | null {
+  if (answer !== undefined) {
+    const parsed = RuntimeGardenProviderKindSchema.safeParse(answer);
+    if (!parsed.success) {
+      throw new Error('garden_provider_kind must be one of "official_api", "local_heuristics", or "host_worker"');
+    }
+    return parsed.data;
+  }
+  const carried = RuntimeGardenProviderKindSchema.safeParse(existing);
+  return carried.success ? carried.data : null;
 }
 
 function resolveInstallSecretRef(
@@ -634,6 +659,9 @@ function renderEnvFile(config: ResolvedInstallConfig): string {
   lines.push(`OPENAI_EMBEDDING_MODEL=${config.model_id}`);
   if (config.provider_base_url !== null) {
     lines.push(`OPENAI_EMBEDDING_PROVIDER_URL=${config.provider_base_url}`);
+  }
+  if (config.garden_provider_kind !== null) {
+    lines.push(`${GARDEN_PROVIDER_KIND_ENV}=${config.garden_provider_kind}`);
   }
   return `${lines.join("\n")}\n`;
 }

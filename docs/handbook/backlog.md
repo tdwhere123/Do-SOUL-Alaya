@@ -12,13 +12,26 @@ v0.1-closeout-a2; `#BL-023`/`#BL-024` were resolved in r1 / r2;
 `#BL-025` through `#BL-036` were opened by the v0.1-closeout A2 and
 D2 fix-loops, then resolved by Gate-5F under
 `docs/archive/v0.1-port-record/phase-5-followup-briefs/` before Phase 6;
-`#BL-037` and `#BL-038` remain open).
+`#BL-009`, `#BL-037`, and `#BL-038` were resolved in v0.3.0).
 
 ## Open Issues
 
+(None currently open. `#BL-009`, `#BL-037`, and `#BL-038` were resolved
+in v0.3.0 — see below.)
+
+## Resolved in v0.3.0 (2026-05-13)
+
 ### #BL-037 - Codex `/alaya-inspect` host recognition proof
 
-**Status**: Deferred to v0.2.2.
+**Status**: Resolved in v0.3.0 (negative proof).
+
+**Resolution (v0.3.0):** Tested Codex CLI `0.130.0` — its help, feature
+list, installed package files, and config docs do not expose a
+third-party fixed slash-command registry, so `/alaya-inspect` cannot be
+claimed `cli-consumable` for Codex on this version. The Alaya-managed
+`[slash_commands.alaya-inspect]` profile entry stays written; the
+supported path is `alaya inspect --open` directly or the MCP/CLI
+fallback. Version-limitation note in `docs/handbook/maintenance.md`.
 
 `alaya attach codex` writes an Alaya-managed
 `[slash_commands.alaya-inspect]` profile entry that launches
@@ -41,7 +54,25 @@ Close condition:
 
 ### #BL-038 - Host autonomous use of `soul.*` tools
 
-**Status**: Deferred to v0.2.2.
+**Status**: Resolved in v0.3.0 (live-usage witness; strict stdio-replay
+variant dropped).
+
+**Resolution (v0.3.0):** The acceptance below assumed a fresh-install
+capture + recorded raw MCP stdio transcript + offline replay. That was
+dropped as over-engineering — the daemon does not record raw stdio
+frames, and a hand-built transcript is exactly the fabricated proof this
+issue rejects. Instead the witness is a snapshot of *real* attached-host
+usage: `scripts/export-host-autonomy-witness.mjs` exports the linked
+`soul.recall.delivered` (`pointer_count >= 1`) →
+`soul.context_usage.reported` (`usage_state == "used"`) chains from the
+operator's live EventLog into
+`docs/v0.3/v0.3.0/host-autonomy-fixtures/<host>-live/`, and
+`apps/core-daemon/src/__tests__/host-autonomy-witness.test.ts` pins that
+chain offline. Six such chains from real Claude Code MCP sessions are
+committed (`agent_target=mcp`; the `claude-code`/`codex` label arrives
+once an operator re-attaches on a v0.3.0 daemon — the attach now stamps
+`ALAYA_AGENT_TARGET`). Narrower / still unobserved: autonomous use of
+`soul.emit_candidate_signal` / `soul.propose_memory_update`.
 
 Opened by v0.1.1 Slice L1 (Codex diagnostic finding B-PL2 in
 `.do-it/product-logic/agent-use-garden-config-diagnostic.md`).
@@ -337,16 +368,38 @@ Anti-Tail R2.
 
 ### #BL-009 — OS keychain for secrets
 
-**Status**: Deferred to v0.2.1.
-**Close condition**: P4-secrets gains a keychain adapter (macOS
-Keychain / Linux libsecret / Windows Credential Manager); secret-ref
-syntax extends to `keychain:<service>:<account>` and resolves through
-the platform-native API.
+**Status**: Resolved in v0.3.0 (keychain adapter implemented + code-reviewed
+on macOS / Linux / Windows; runtime keychain write/read verification
+deferred — no maintainer host has a working secret service; `env:` / `file:`
+secret refs runtime-verified).
 
-P4-secrets v0.1 supports env + local-file adapters only. Keychain is
-production-grade key management; v0.1 is a single-user local-first
-build where env variables and `~/.config/alaya/.env` with strict file
-permissions are sufficient.
+**Resolution (v0.3.0):** `keychain:<service>:<account>` secret refs
+resolve through the platform-native API; `alaya install --keychain`
+performs the interactive migration (writes the keychain entry, verifies
+it reads back, writes `ALAYA_OFFICIAL_GARDEN_SECRET_REF`); `alaya doctor`
+reports keychain readiness. The Linux libsecret (`secret-tool`), macOS
+(`security -i` stdin write / `find-generic-password -w` read), and Windows
+(PowerShell `PasswordVault` stdin read+write) adapters are code-reviewed
+(secrets via stdin not argv on every write path; subprocess calls bounded
+at 10s; ENOENT/timeout → `keychain_tooling_unavailable`) and the libsecret
+adapter is observed to degrade correctly when no secret service is running.
+What is **not** yet runtime-exercised is an actual keychain write→read on a
+real OS keychain: the dev box runs under WSL2, which has no running secret
+service (`secret-tool store` / `alaya install --keychain` fail with "no
+secret service" — by design the adapter reports `keychain_tooling_unavailable`),
+and no maintainer has a macOS / Windows host. The runtime-verified secret
+path on the dev box is `env:` / `file:` refs (`alaya doctor` shows
+`cred=file`, `garden status: healthy`). Known untested edge: macOS
+`find-generic-password` returns non-zero for a *locked* keychain, which the
+adapter reports as `keychain_entry_not_found` rather than a distinct
+"locked" state. See `docs/handbook/maintenance.md` § "#BL-009 — OS keychain
+platform coverage" and `docs/v0.3/v0.3.0/keychain-transcripts/README.md`.
+
+**Original close condition** (kept for context): P4-secrets gains a
+keychain adapter (macOS Keychain / Linux libsecret / Windows Credential
+Manager); secret-ref syntax extends to `keychain:<service>:<account>`
+and resolves through the platform-native API. P4-secrets v0.1 supported
+env + local-file adapters only.
 
 ## Resolved (short closure summaries)
 

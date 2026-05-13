@@ -231,13 +231,47 @@ export function extractAttachedOperatorInstructions(
 }
 
 /**
+ * Extract the ALAYA_AGENT_TARGET env stamp from a host profile's MCP entry, if
+ * present. Returns undefined when the entry is absent or carries no stamp so the
+ * caller can flag it as drifted — without the stamp, recall/usage telemetry
+ * attributes to the generic `mcp` bucket instead of this host's trust surface.
+ */
+export function extractAttachedAgentTarget(
+  target: ProfileTarget,
+  content: string | undefined
+): string | undefined {
+  if (content === undefined || content.trim().length === 0) {
+    return undefined;
+  }
+  if (target === "codex") {
+    const block = extractTomlBlock(content, "[mcp_servers.alaya]");
+    if (block === undefined) {
+      return undefined;
+    }
+    const match = /\bALAYA_AGENT_TARGET\s*=\s*"([^"]*)"/u.exec(block);
+    return match === null ? undefined : match[1];
+  }
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = parseJsonObject(content, ".claude.json");
+  } catch {
+    return undefined;
+  }
+  const alayaEntry = isRecord(parsed.mcpServers) ? parsed.mcpServers.alaya : undefined;
+  const entryEnv = isRecord(alayaEntry) ? alayaEntry.env : undefined;
+  const value = isRecord(entryEnv) ? entryEnv.ALAYA_AGENT_TARGET : undefined;
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
  * Read the active host profile and report whether the attached
  * operator_instructions are in sync with the current source value.
  *
- * Why this exists: source-side `ALAYA_OPERATOR_INSTRUCTIONS` evolves between
- * releases. `alaya attach` already overwrites the entry on re-run, but
- * operators don't always know to re-attach after `alaya update`. doctor
- * surfaces drift so the operator sees a clear hint to refresh.
+ * The attached entry is in sync only when both the operator_instructions value
+ * and the ALAYA_AGENT_TARGET stamp match current source. `alaya attach`
+ * overwrites the entry on re-run, but operators don't always re-attach after
+ * `alaya update`; doctor surfaces drift — stale instructions or a missing/wrong
+ * stamp — so the operator sees a clear hint to refresh.
  */
 export async function detectAttachedProfileInstructionsDrift(
   target: ProfileTarget,
@@ -256,19 +290,30 @@ export async function detectAttachedProfileInstructionsDrift(
       attached_preview: null
     };
   }
-  if (attached === ALAYA_OPERATOR_INSTRUCTIONS) {
+  if (attached !== ALAYA_OPERATOR_INSTRUCTIONS) {
     return {
       target,
       profile_path: paths.mcpConfigPath,
-      status: "in_sync",
-      attached_preview: null
+      status: "drifted",
+      attached_preview: attached.length > 120 ? `${attached.slice(0, 119)}…` : attached
+    };
+  }
+  // ProfileTarget values ("codex" / "claude-code") are exactly the expected
+  // ALAYA_AGENT_TARGET stamp; an entry without the stamp counts as drifted.
+  const attachedAgentTarget = extractAttachedAgentTarget(target, content);
+  if (attachedAgentTarget !== target) {
+    return {
+      target,
+      profile_path: paths.mcpConfigPath,
+      status: "drifted",
+      attached_preview: `ALAYA_AGENT_TARGET=${attachedAgentTarget ?? "(missing)"}`
     };
   }
   return {
     target,
     profile_path: paths.mcpConfigPath,
-    status: "drifted",
-    attached_preview: attached.length > 120 ? `${attached.slice(0, 119)}…` : attached
+    status: "in_sync",
+    attached_preview: null
   };
 }
 
@@ -551,6 +596,10 @@ function upsertMcpEntry(target: ProfileTarget, before: string | undefined, env: 
     alaya: {
       command: launcher.command,
       args: [...launcher.args],
+      // Stamps the launched `alaya mcp stdio` child with its host identity so
+      // recall / usage telemetry attributes to the claude-code trust surface
+      // instead of the generic `mcp` session bucket (see resolveMcpAgentTarget).
+      env: { ALAYA_AGENT_TARGET: "claude-code" },
       operatorInstructions: ALAYA_OPERATOR_INSTRUCTIONS
     }
   };
@@ -697,6 +746,10 @@ function renderCodexMcpBlock(env: NodeJS.ProcessEnv): string {
     "[mcp_servers.alaya]",
     `command = ${JSON.stringify(launcher.command)}`,
     `args = ${JSON.stringify([...launcher.args])}`,
+    // Stamps the launched `alaya mcp stdio` child with its host identity so
+    // recall / usage telemetry attributes to the codex trust surface instead
+    // of the generic `mcp` session bucket (see resolveMcpAgentTarget).
+    `env = { ALAYA_AGENT_TARGET = "codex" }`,
     `operator_instructions = ${JSON.stringify(ALAYA_OPERATOR_INSTRUCTIONS)}`
   ].join("\n");
 }

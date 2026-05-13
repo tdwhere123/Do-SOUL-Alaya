@@ -1,6 +1,6 @@
 {
   "name": "@do-soul/alaya-engine-gateway",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Compute engine gateway for Do-SOUL Alaya — provider abstraction and routing stance.",
   "license": "MIT",
