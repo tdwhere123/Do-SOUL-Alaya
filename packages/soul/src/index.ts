@@ -109,6 +109,7 @@ export {
   type MaterializationResult,
   type MaterializationRouterDeps,
   type MaterializationTarget,
+  type GraphEdgeCreationPort,
   type SchemaGroundedRawPayloadInput,
   type SchemaGroundingValidationResult,
   type SchemaGroundingValidationStatus,

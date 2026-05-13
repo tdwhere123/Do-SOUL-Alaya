@@ -100,7 +100,8 @@ export {
   MaterializationRouter,
   type MaterializationResult,
   type MaterializationRouterDeps,
-  type MaterializationTarget
+  type MaterializationTarget,
+  type GraphEdgeCreationPort
 } from "./materialization-router.js";
 export {
   buildSchemaGroundedRawPayload,

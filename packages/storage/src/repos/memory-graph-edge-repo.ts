@@ -1,4 +1,5 @@
 import {
+  MEMORY_GRAPH_EDGE_RECALL_WEIGHTS,
   MemoryGraphEdgeSchema,
   MemoryGraphEdgeTypeSchema,
   type MemoryGraphEdge,
@@ -10,6 +11,17 @@ import { deepFreeze } from "./shared/deep-freeze.js";
 import { parseNonEmptyString, parseTimestamp } from "./shared/validators.js";
 
 const MEMORY_GRAPH_EDGE_LIST_LIMIT = 200;
+
+// SQL `CASE edge_type WHEN ... THEN ...` derived from
+// MEMORY_GRAPH_EDGE_RECALL_WEIGHTS. Adding a new MemoryGraphEdgeType value
+// without a weight entry compiles cleanly but contributes 0 here, matching
+// the documented behavior of the weight map.
+const WEIGHTED_INBOUND_CASE_SQL = (() => {
+  const arms = Object.entries(MEMORY_GRAPH_EDGE_RECALL_WEIGHTS)
+    .filter(([, weight]) => weight !== 0)
+    .map(([edgeType, weight]) => `WHEN '${edgeType}' THEN ${weight}`);
+  return `CASE edge_type ${arms.join(" ")} ELSE 0 END`;
+})();
 
 export interface MemoryGraphEdgeRepo {
   create(edge: Readonly<MemoryGraphEdge>): Promise<Readonly<MemoryGraphEdge>>;
@@ -26,12 +38,12 @@ export interface MemoryGraphEdgeRepo {
     edgeType: MemoryGraphEdgeTypeValue,
     workspaceId: string
   ): Promise<Readonly<MemoryGraphEdge> | null>;
+  /** @deprecated since v0.3.3 — use `countInboundEdgesWeighted`. Retained
+   * for one release for diagnostic surfaces (e.g. inspector tooling) that
+   * still need a raw supports-only count; remove in v0.4.0. */
   countInboundSupports(memoryId: string, workspaceId: string): Promise<number>;
-  // Aggregates inbound edges into a single signed graph-support score
-  // weighted by edge_type:
-  //   supports=+1.0, derives_from=+0.5, recalls=+0.3, supersedes=-0.5
-  // Other edge types contribute 0. The caller normalizes the returned
-  // weight into the recall scoring space.
+  // Aggregates inbound edges into a single signed graph-support score using
+  // MEMORY_GRAPH_EDGE_RECALL_WEIGHTS. The caller normalizes the result.
   countInboundEdgesWeighted(memoryId: string, workspaceId: string): Promise<number>;
   delete(edgeId: string): Promise<void>;
 }
@@ -224,20 +236,10 @@ export class SqliteMemoryGraphEdgeRepo implements MemoryGraphEdgeRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      // Weight map aligned with MemoryGraphEdgeType in
-      // packages/protocol/src/soul/memory-graph.ts. Edge types not listed
-      // contribute 0 to the weighted total.
+      // SQL derived from MEMORY_GRAPH_EDGE_RECALL_WEIGHTS; see WEIGHTED_INBOUND_CASE_SQL.
       const row = this.db.connection
         .prepare(
-          `SELECT COALESCE(SUM(
-             CASE edge_type
-               WHEN 'supports'     THEN  1.0
-               WHEN 'derives_from' THEN  0.5
-               WHEN 'recalls'      THEN  0.3
-               WHEN 'supersedes'   THEN -0.5
-               ELSE 0
-             END
-           ), 0) AS weight
+          `SELECT COALESCE(SUM(${WEIGHTED_INBOUND_CASE_SQL}), 0) AS weight
            FROM memory_graph_edges
            WHERE target_memory_id = ? AND workspace_id = ?`
         )
