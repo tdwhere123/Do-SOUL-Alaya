@@ -1,0 +1,20 @@
+{
+  "host": "claude-code",
+  "capture_kind": "live-usage-witness",
+  "note": "Snapshot of real attached-host soul.recall -> soul.report_context_usage chains from a normal conversation; not a synthetic capture. agent_target=mcp rows pre-date the v0.3.0 attach env stamp; re-attach + refresh to get host-labelled rows.",
+  "daemon_version": "0.2.0",
+  "source_db": "/home/tdwhere/.config/alaya/alaya.db",
+  "captured_at": "2026-05-13T03:12:55.142Z",
+  "chain_count": 6,
+  "agent_targets": [
+    "mcp"
+  ],
+  "delivery_ids": [
+    "delivery_327b5c4c-0e0a-4dc6-8a84-6de941d20375",
+    "delivery_9f470a6d-2c1e-4fe5-b15a-67d3542b7057",
+    "delivery_de8ba777-ee99-4e36-a168-bbadf7f26f6b",
+    "delivery_0035be08-ee24-47cc-8da5-dc1979a87218",
+    "delivery_e14c239a-2295-4039-8dfe-8ad582d5ef2c",
+    "delivery_d78793d5-1cce-479b-a499-2eedaf18967b"
+  ]
+}

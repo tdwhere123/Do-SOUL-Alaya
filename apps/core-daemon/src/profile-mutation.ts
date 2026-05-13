@@ -551,6 +551,10 @@ function upsertMcpEntry(target: ProfileTarget, before: string | undefined, env: 
     alaya: {
       command: launcher.command,
       args: [...launcher.args],
+      // Stamps the launched `alaya mcp stdio` child with its host identity so
+      // recall / usage telemetry attributes to the claude-code trust surface
+      // instead of the generic `mcp` session bucket (see resolveMcpAgentTarget).
+      env: { ALAYA_AGENT_TARGET: "claude-code" },
       operatorInstructions: ALAYA_OPERATOR_INSTRUCTIONS
     }
   };
@@ -697,6 +701,10 @@ function renderCodexMcpBlock(env: NodeJS.ProcessEnv): string {
     "[mcp_servers.alaya]",
     `command = ${JSON.stringify(launcher.command)}`,
     `args = ${JSON.stringify([...launcher.args])}`,
+    // Stamps the launched `alaya mcp stdio` child with its host identity so
+    // recall / usage telemetry attributes to the codex trust surface instead
+    // of the generic `mcp` session bucket (see resolveMcpAgentTarget).
+    `env = { ALAYA_AGENT_TARGET = "codex" }`,
     `operator_instructions = ${JSON.stringify(ALAYA_OPERATOR_INSTRUCTIONS)}`
   ].join("\n");
 }
