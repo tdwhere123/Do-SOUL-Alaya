@@ -134,11 +134,15 @@ Object · Evidence 轴）在后续阶段同意之前完全不动。
 `official_api`（OpenAI 兼容模型）、`host_worker`（附着的 CLI agent
 自己通过 `garden.list_pending_tasks` / `garden.claim_task` /
 `garden.complete_task` 抢 extract 队列）。默认值由"是否配了 Garden
-凭据"推断；要显式指定——`host_worker` 尤其推断不出来——可以在
-`~/.config/alaya/.env` 里设 `ALAYA_GARDEN_PROVIDER_KIND`、给 `alaya
-install --non-interactive` 传 `garden_provider_kind`、或在 `alaya
-inspect --open` 的 Garden Compute 表单里改。`alaya doctor` 的
-`garden compute:` 行会打印当前生效的模式。
+凭据"推断；要显式指定——`host_worker` 尤其推断不出来——首次配置时
+在 `~/.config/alaya/.env` 里设 `ALAYA_GARDEN_PROVIDER_KIND` 或给
+`alaya install --non-interactive` 传 `garden_provider_kind`，或在
+`alaya inspect --open` 的 Garden Compute 表单里改（表单写的是持久
+runtime 配置，一旦保存就覆盖 env 默认值）。`alaya doctor` 的
+`garden compute:` 行会打印当前生效的模式。`official_api` 的端点和模型
+是非密钥配置 `OFFICIAL_API_GARDEN_PROVIDER_URL` /
+`OFFICIAL_API_GARDEN_MODEL`（明文 `.env` 或同一个表单）；只有 API key
+是密钥——用 `alaya install --keychain`（或 `env:` / `file:` 引用）存。
 
 *代码锚点：* `packages/core/src/signal-service.ts:80-130`、
 `packages/core/src/signal-service.ts:270-283`（分诊门）。

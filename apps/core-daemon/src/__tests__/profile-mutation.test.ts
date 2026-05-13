@@ -416,6 +416,36 @@ operator_instructions = ${JSON.stringify(stale)}
     expect(report.profile_path).toBe(stalePath);
   });
 
+  it("reports drifted when instructions match but the ALAYA_AGENT_TARGET stamp is missing", async () => {
+    const fs = new MemoryProfileFs();
+    fs.files.set(
+      "/tmp/home/.codex/config.toml",
+      `[mcp_servers.alaya]\ncommand = "node"\nargs = ["x"]\noperator_instructions = ${JSON.stringify(ALAYA_OPERATOR_INSTRUCTIONS)}\n`
+    );
+    const codexReport = await detectAttachedProfileInstructionsDrift("codex", { env: { HOME: "/tmp/home" }, fs });
+    expect(codexReport.status).toBe("drifted");
+    expect(codexReport.attached_preview).toBe("ALAYA_AGENT_TARGET=(missing)");
+
+    fs.files.set(
+      "/tmp/home/.claude.json",
+      JSON.stringify({ mcpServers: { alaya: { command: "node", args: ["x"], operatorInstructions: ALAYA_OPERATOR_INSTRUCTIONS } } }, null, 2)
+    );
+    const claudeReport = await detectAttachedProfileInstructionsDrift("claude-code", { env: { HOME: "/tmp/home" }, fs });
+    expect(claudeReport.status).toBe("drifted");
+    expect(claudeReport.attached_preview).toBe("ALAYA_AGENT_TARGET=(missing)");
+  });
+
+  it("reports in_sync after a fresh attach (instructions + ALAYA_AGENT_TARGET stamp)", async () => {
+    const fs = new MemoryProfileFs();
+    for (const target of ["codex", "claude-code"] as const) {
+      const plan = await buildAttachProfileMutationPlan(target, { env: { HOME: "/tmp/home" }, fs });
+      await applyProfileMutationPlan(plan, { fs });
+      const report = await detectAttachedProfileInstructionsDrift(target, { env: { HOME: "/tmp/home" }, fs });
+      expect(report.status).toBe("in_sync");
+      expect(report.attached_preview).toBeNull();
+    }
+  });
+
   it("truncates long attached_preview to 120 chars in drift reports", async () => {
     const fs = new MemoryProfileFs();
     const long = "x".repeat(500);

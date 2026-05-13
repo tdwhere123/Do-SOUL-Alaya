@@ -8,6 +8,7 @@ import {
   HealthEventKind,
   GardenEventType,
   RuntimeGardenComputeConfigSchema,
+  RuntimeGardenProviderKindSchema,
   RuntimeEmbeddingConfigSchema,
   SoulConfigSchema,
   SoulHealthJournalRecordedPayloadSchema,
@@ -46,8 +47,6 @@ import {
   type NormalizedRuntimeGardenComputeConfigPatch,
   type NormalizedRuntimeEmbeddingConfigPatch
 } from "./env-file-service.js";
-
-const GardenProviderKindSchema = RuntimeGardenComputeConfigSchema.unwrap().shape.provider_kind;
 
 export interface AppConfigService {
   getSoulConfig(workspaceId: string): Promise<SoulConfig>;
@@ -399,7 +398,7 @@ async function defaultRuntimeGardenComputeConfig(paths: AlayaConfigPaths): Promi
   // An explicit ALAYA_GARDEN_PROVIDER_KIND wins over secret-presence inference;
   // it is the only way a non-Inspector setup can request host_worker. An
   // unrecognized value falls back to inference rather than crashing boot.
-  const declaredProviderKind = GardenProviderKindSchema.safeParse(
+  const declaredProviderKind = RuntimeGardenProviderKindSchema.safeParse(
     readNonEmptyEnv(readConfigEnvValue(configEnv, ALAYA_GARDEN_PROVIDER_KIND_ENV))
   );
   const providerKind = declaredProviderKind.success

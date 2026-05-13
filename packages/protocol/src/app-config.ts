@@ -95,9 +95,11 @@ const RuntimeSecretRefSchema = z
     });
   });
 
+export const RuntimeGardenProviderKindSchema = z.enum(["official_api", "local_heuristics", "host_worker"]);
+
 export const RuntimeGardenComputeConfigSchema = z
   .object({
-    provider_kind: z.enum(["official_api", "local_heuristics", "host_worker"]),
+    provider_kind: RuntimeGardenProviderKindSchema,
     model_id: NonEmptyStringSchema.nullable(),
     provider_url: NonEmptyStringSchema.nullable(),
     secret_ref: RuntimeSecretRefSchema.nullable(),
@@ -136,6 +138,7 @@ export type EnvironmentConfig = z.infer<typeof EnvironmentConfigSchema>;
 export type ToolchainStatus = z.infer<typeof ToolchainStatusSchema>;
 export type RuntimeEmbeddingConfig = z.infer<typeof RuntimeEmbeddingConfigSchema>;
 export type RuntimeEmbeddingConfigPatch = z.infer<typeof RuntimeEmbeddingConfigPatchSchema>;
+export type RuntimeGardenProviderKind = z.infer<typeof RuntimeGardenProviderKindSchema>;
 export type RuntimeGardenComputeConfig = z.infer<typeof RuntimeGardenComputeConfigSchema>;
 export type RuntimeGardenComputeConfigPatch = z.infer<typeof RuntimeGardenComputeConfigPatchSchema>;
 export type AlayaStatus = z.infer<typeof AlayaStatusSchema>;

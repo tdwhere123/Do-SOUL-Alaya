@@ -148,10 +148,15 @@ extract queue via `garden.list_pending_tasks` / `garden.claim_task` /
 `garden.complete_task`). The default is inferred from whether a Garden
 credential is configured; to pick it explicitly — `host_worker` in
 particular can't be inferred — set `ALAYA_GARDEN_PROVIDER_KIND` in
-`~/.config/alaya/.env`, pass `garden_provider_kind` to `alaya install
---non-interactive`, or use the Garden Compute form in `alaya inspect
---open`. `alaya doctor` prints the live mode on its `garden compute:`
-line.
+`~/.config/alaya/.env` or pass `garden_provider_kind` to `alaya install
+--non-interactive` for a fresh setup, or use the Garden Compute form in
+`alaya inspect --open` (which writes the persisted runtime config and,
+once saved, takes precedence over the env default). `alaya doctor` prints
+the live mode on its `garden compute:` line. The official-API endpoint
+and model are the non-secret `OFFICIAL_API_GARDEN_PROVIDER_URL` /
+`OFFICIAL_API_GARDEN_MODEL` (plain `.env` or the same Inspector form);
+only the API key is a secret — store it with `alaya install --keychain`
+(or `env:` / `file:` refs).
 
 **Failure mode this prevents.** If the agent could write durable
 truth at perception, every fluent-but-wrong assertion would become

@@ -18,29 +18,37 @@
 // counts, usage_state) — no recalled content and no free-text fields.
 
 import { createRequire } from "node:module";
-import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const fixturesRoot = path.join(repoRoot, "docs/v0.3/v0.3.0/host-autonomy-fixtures");
+
+function fail(message) {
+  console.error(message);
+  process.exit(1);
+}
 
 function resolveBetterSqlite3() {
-  // The driver is a workspace dependency of @do-soul/alaya-storage; resolve it
-  // from there so this script works without its own package manifest.
-  const candidates = [
-    "better-sqlite3",
-    path.join(repoRoot, "node_modules/.pnpm/better-sqlite3@12.9.0/node_modules/better-sqlite3")
-  ];
-  for (const id of candidates) {
-    try {
-      return require(id);
-    } catch {
-      /* try next */
-    }
+  // better-sqlite3 is a workspace dependency of @do-soul/alaya-storage; it is
+  // not hoisted to the root node_modules, so resolve it version-agnostically
+  // from the pnpm store rather than pinning a version path.
+  try {
+    return require("better-sqlite3");
+  } catch {
+    /* not hoisted — look in the pnpm store */
   }
-  throw new Error("Cannot resolve better-sqlite3. Run `rtk pnpm install` first.");
+  try {
+    const pnpmDir = path.join(repoRoot, "node_modules/.pnpm");
+    const entry = readdirSync(pnpmDir).find((name) => name.startsWith("better-sqlite3@"));
+    if (entry !== undefined) return require(path.join(pnpmDir, entry, "node_modules/better-sqlite3"));
+  } catch {
+    /* fall through to the error below */
+  }
+  fail("Cannot resolve better-sqlite3. Run `rtk pnpm install` from the repo root first.");
 }
 
 function resolveDbPath(arg) {
@@ -48,6 +56,17 @@ function resolveDbPath(arg) {
   const fromEnv = process.env.ALAYA_CONFIG_DIR?.trim();
   if (fromEnv) return path.join(path.resolve(fromEnv), "alaya.db");
   return path.join(homedir(), ".config", "alaya", "alaya.db");
+}
+
+// The db path is recorded in metadata for provenance, but the repo fixture must
+// not carry the operator's absolute home path (and hence username). Collapse a
+// home-relative path to ~/..., and drop the directory for anything else.
+function redactDbPath(dbPath) {
+  const home = homedir();
+  if (dbPath === home || dbPath.startsWith(home + path.sep)) {
+    return path.posix.join("~", path.relative(home, dbPath).split(path.sep).join("/"));
+  }
+  return path.basename(dbPath);
 }
 
 function daemonVersion() {
@@ -60,17 +79,32 @@ function daemonVersion() {
 
 const dbPath = resolveDbPath(process.argv[2]);
 const hostLabel = (process.argv[3] ?? "claude-code").trim();
-const Database = resolveBetterSqlite3();
-const db = new Database(dbPath, { readonly: true });
+if (!/^[a-z0-9][a-z0-9-]*$/.test(hostLabel)) {
+  fail(`Invalid host label ${JSON.stringify(hostLabel)}: use lower-case letters, digits, and dashes only.`);
+}
+const fixtureDir = path.resolve(fixturesRoot, `${hostLabel}-live`);
+if (fixtureDir !== path.join(fixturesRoot, `${hostLabel}-live`) || !fixtureDir.startsWith(fixturesRoot + path.sep)) {
+  fail(`Refusing to write outside ${path.relative(repoRoot, fixturesRoot)}.`);
+}
 
-const rows = db
-  .prepare(
-    `SELECT event_id, event_type, entity_type, entity_id, workspace_id, run_id, caused_by, payload_json, created_at
-       FROM event_log
-      WHERE event_type IN ('soul.recall.delivered', 'soul.context_usage.reported')
-      ORDER BY created_at`
-  )
-  .all();
+const Database = resolveBetterSqlite3();
+let rows;
+try {
+  const db = new Database(dbPath, { readonly: true });
+  rows = db
+    .prepare(
+      `SELECT event_id, event_type, entity_type, entity_id, workspace_id, run_id, caused_by, payload_json, created_at
+         FROM event_log
+        WHERE event_type IN ('soul.recall.delivered', 'soul.context_usage.reported')
+        ORDER BY created_at`
+    )
+    .all();
+} catch (error) {
+  fail(
+    `Cannot read the Alaya EventLog at ${dbPath}: ${error instanceof Error ? error.message : String(error)}.\n` +
+      "Pass an explicit db path, set ALAYA_CONFIG_DIR, or run `alaya install` first."
+  );
+}
 
 const byDelivery = new Map();
 for (const row of rows) {
@@ -93,13 +127,12 @@ for (const row of rows) {
 
 const chains = [...byDelivery.entries()].filter(([, slot]) => slot.delivered !== null && slot.used !== null);
 if (chains.length === 0) {
-  console.error(
+  fail(
     `No complete host-autonomy chain found in ${dbPath}.\n` +
       "Need at least one soul.recall.delivered (pointer_count >= 1) followed by a\n" +
-      "matching soul.context_usage.reported with usage_state == \"used\". Attach a host\n" +
+      'matching soul.context_usage.reported with usage_state == "used". Attach a host\n' +
       "(alaya attach claude / codex), have a recall-worthy conversation, then re-run."
   );
-  process.exit(1);
 }
 
 const eventRows = [];
@@ -121,7 +154,6 @@ for (const [, slot] of chains) {
 eventRows.sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0));
 
 const agentTargets = [...new Set(eventRows.map((e) => e.payload_json.agent_target).filter(Boolean))];
-const fixtureDir = path.join(repoRoot, "docs/v0.3/v0.3.0/host-autonomy-fixtures", `${hostLabel}-live`);
 mkdirSync(fixtureDir, { recursive: true });
 
 const eventLogPath = path.join(fixtureDir, "event-log.jsonl");
@@ -133,7 +165,7 @@ const metadata = {
   note:
     "Snapshot of real attached-host soul.recall -> soul.report_context_usage chains from a normal conversation; not a synthetic capture. agent_target=mcp rows pre-date the v0.3.0 attach env stamp; re-attach + refresh to get host-labelled rows.",
   daemon_version: daemonVersion(),
-  source_db: dbPath,
+  source_db: redactDbPath(dbPath),
   captured_at: new Date().toISOString(),
   chain_count: chains.length,
   agent_targets: agentTargets,

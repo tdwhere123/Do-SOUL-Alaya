@@ -6,6 +6,7 @@ import {
   GardenEventType,
   HealthEventKind,
   RuntimeGardenComputeConfigSchema,
+  RuntimeGardenProviderKindSchema,
   SoulHealthJournalRecordedPayloadSchema,
   type RuntimeGardenComputeConfig
 } from "@do-soul/alaya-protocol";
@@ -99,7 +100,6 @@ const KEYCHAIN_INSTALL_ACCOUNT = "openai";
 const GARDEN_KEYCHAIN_SECRET_REF_ENV = "ALAYA_OFFICIAL_GARDEN_SECRET_REF";
 const GARDEN_PROVIDER_KIND_ENV = "ALAYA_GARDEN_PROVIDER_KIND";
 const RUNTIME_GARDEN_COMPUTE_CONFIG_KEY = "runtime:garden-compute";
-const GardenProviderKindSchema = RuntimeGardenComputeConfigSchema.unwrap().shape.provider_kind;
 
 export function createInstallCommand(deps: InstallCommandDependencies = {}): AlayaSubcommandSpec<InstallArgs> {
   return {
@@ -605,13 +605,13 @@ function resolveGardenProviderKind(
   existing: string | null
 ): RuntimeGardenComputeConfig["provider_kind"] | null {
   if (answer !== undefined) {
-    const parsed = GardenProviderKindSchema.safeParse(answer);
+    const parsed = RuntimeGardenProviderKindSchema.safeParse(answer);
     if (!parsed.success) {
       throw new Error('garden_provider_kind must be one of "official_api", "local_heuristics", or "host_worker"');
     }
     return parsed.data;
   }
-  const carried = GardenProviderKindSchema.safeParse(existing);
+  const carried = RuntimeGardenProviderKindSchema.safeParse(existing);
   return carried.success ? carried.data : null;
 }
 

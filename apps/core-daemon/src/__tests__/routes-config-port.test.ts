@@ -237,6 +237,23 @@ describe("routes-config port batch", () => {
     });
   });
 
+  it("the persisted runtime row wins over a disagreeing ALAYA_GARDEN_PROVIDER_KIND env default", async () => {
+    const harness = await createServiceHarness();
+    await harness.service.patchRuntimeGardenComputeConfig({
+      provider_kind: "host_worker",
+      provider_url: null,
+      secret_ref: null,
+      model_id: null,
+      enabled: false
+    });
+    // Make the env disagree with the persisted row.
+    await writeFile(harness.paths.envPath, "ALAYA_GARDEN_PROVIDER_KIND=local_heuristics\n", "utf8");
+
+    await expect(harness.service.getRuntimeGardenComputeConfig()).resolves.toMatchObject({
+      provider_kind: "host_worker"
+    });
+  });
+
   it("normalizes paste mode in daemon service, writes only file refs publicly, and keeps plaintext out of audit/env", async () => {
     const harness = await createServiceHarness();
     const plaintext = "sk-test-plaintext-secret";
