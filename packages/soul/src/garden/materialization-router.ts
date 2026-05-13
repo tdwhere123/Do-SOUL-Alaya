@@ -259,6 +259,15 @@ export class MaterializationRouter {
       );
       createdObjects.push({ object_kind: claim.object_kind, object_id: claim.object_id });
 
+      // invariants §8: durable memories require evidence. Materialization always
+      // wires the new memory to the evidence it stands on as a SUPPORTS edge.
+      await this.createEvidenceSupportEdges(
+        memory.object_id,
+        [evidence.object_id],
+        signal.workspace_id,
+        signal.run_id
+      );
+
       // Create derives_from edges to any memory IDs the model tagged in raw_payload.source_memory_refs.
       await this.createSourceMemoryEdges(
         memory.object_id,
@@ -310,6 +319,15 @@ export class MaterializationRouter {
         buildSynthesisInput(signal, evidenceIds)
       );
       createdObjects.push({ object_kind: synthesis.object_kind, object_id: synthesis.object_id });
+
+      // invariants §8: durable memories require evidence. Synthesis stands on
+      // every evidence it organizes — one SUPPORTS edge per evidence id.
+      await this.createEvidenceSupportEdges(
+        synthesis.object_id,
+        evidenceIds,
+        signal.workspace_id,
+        signal.run_id
+      );
 
       // Create derives_from edges to any memory IDs the model tagged in raw_payload.source_memory_refs.
       await this.createSourceMemoryEdges(
@@ -375,6 +393,45 @@ export class MaterializationRouter {
       created_objects: [],
       success: true
     };
+  }
+
+  /**
+   * Creates `SUPPORTS` edges from a newly materialized memory/synthesis to
+   * each evidence id it stands on. Edge writes are fire-and-forget — they
+   * must never block or fail a materialization (invariants §8 + §17).
+   */
+  private async createEvidenceSupportEdges(
+    sourceObjectId: string,
+    evidenceObjectIds: readonly string[],
+    workspaceId: string,
+    runId: string | null
+  ): Promise<void> {
+    if (this.dependencies.graphEdgePort === undefined || evidenceObjectIds.length === 0) {
+      return;
+    }
+
+    for (const evidenceId of evidenceObjectIds) {
+      if (typeof evidenceId !== "string" || evidenceId.trim().length === 0 || evidenceId === sourceObjectId) {
+        continue;
+      }
+
+      try {
+        await this.dependencies.graphEdgePort.createEdge({
+          sourceMemoryId: sourceObjectId,
+          targetMemoryId: evidenceId,
+          edgeType: MemoryGraphEdgeType.SUPPORTS,
+          workspaceId,
+          runId
+        });
+      } catch (err) {
+        // Fire-and-forget: graph edges are supplementary, not critical.
+        console.warn("materialization-router: supports edge creation failed", {
+          sourceMemoryId: sourceObjectId,
+          targetMemoryId: evidenceId,
+          error: err instanceof Error ? err.message : String(err)
+        });
+      }
+    }
   }
 
   /**

@@ -306,6 +306,54 @@ describe("MaterializationRouter", () => {
     expect(memoryInput.content).toBe("Always use rtk for repo commands.");
   });
 
+  it("creates a SUPPORTS edge from the new memory to its evidence during materializeMemoryAndClaim", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    await router.materializeSignal(createSignal());
+
+    const supportsCalls = deps.graphEdgePort.createEdge.mock.calls
+      .map((call) => call[0])
+      .filter((args) => args.edgeType === "supports");
+
+    expect(supportsCalls).toHaveLength(1);
+    expect(supportsCalls[0]).toEqual({
+      sourceMemoryId: "memory-1",
+      targetMemoryId: "evidence-1",
+      edgeType: "supports",
+      workspaceId: "workspace-1",
+      runId: "run-1"
+    });
+  });
+
+  it("creates one SUPPORTS edge per evidence during materializeSynthesis", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    await router.materializeSignal(
+      createSignal({
+        signal_kind: "potential_synthesis",
+        evidence_refs: ["msg-1", "msg-2", "msg-3"]
+      })
+    );
+
+    const supportsCalls = deps.graphEdgePort.createEdge.mock.calls
+      .map((call) => call[0])
+      .filter((args) => args.edgeType === "supports");
+
+    expect(supportsCalls).toHaveLength(3);
+    expect(supportsCalls.map((args) => args.targetMemoryId)).toEqual([
+      "evidence-1",
+      "evidence-2",
+      "evidence-3"
+    ]);
+    for (const args of supportsCalls) {
+      expect(args.sourceMemoryId).toBe("synthesis-1");
+      expect(args.workspaceId).toBe("workspace-1");
+      expect(args.runId).toBe("run-1");
+    }
+  });
+
   it("materializes synthesis by creating evidence objects and one synthesis capsule", async () => {
     const deps = createDeps();
     const router = new MaterializationRouter(deps);
@@ -528,6 +576,9 @@ function createDeps() {
           object_id: "claim-1"
         }) as any
       )
+    },
+    graphEdgePort: {
+      createEdge: vi.fn(async () => undefined)
     },
     handoffGapHandler: new InMemoryHandoffGapHandler()
   };
