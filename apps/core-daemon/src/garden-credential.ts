@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { secretRefScheme } from "@do-soul/alaya-protocol";
 import { resolveSecretRef, type ResolveSecretError, type ResolvedSecret } from "./secrets.js";
 import { readPlatformKeychainSecret } from "./secrets/keychain/index.js";
 
@@ -20,7 +21,7 @@ export function selectGardenCredentialProvenance(input: {
   ]);
 
   if (dedicatedRef !== null) {
-    return { kind: secretRefKind(dedicatedRef) ?? "file" };
+    return { kind: secretRefScheme(dedicatedRef) ?? "file" };
   }
 
   const embeddingFallbackRef = readConfigValue(input.env, input.configEnv, ALAYA_EMBEDDING_OPENAI_SECRET_REF_ENV);
@@ -103,22 +104,6 @@ function readConfigValue(
 
   const trimmed = value.trim();
   return trimmed.length === 0 ? null : trimmed;
-}
-
-function secretRefKind(secretRef: string): "env" | "file" | "keychain" | null {
-  if (secretRef.startsWith("env:")) {
-    return "env";
-  }
-
-  if (secretRef.startsWith("file:")) {
-    return "file";
-  }
-
-  if (secretRef.startsWith("keychain:")) {
-    return "keychain";
-  }
-
-  return null;
 }
 
 function resolveSecretRefOrNull(

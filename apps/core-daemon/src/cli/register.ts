@@ -13,8 +13,6 @@ import {
   ALAYA_SYSEXITS,
   type AlayaCliArgsSchema,
   type AlayaCliBridge,
-  type AlayaCliContext,
-  type AlayaCliResult,
   type AlayaSubcommandSpec
 } from "./bridge.js";
 import {
@@ -38,7 +36,12 @@ import {
   resolveCliWorkspaceContext
 } from "./workspace-context.js";
 import { resolveSecretRef, type ResolvedSecret, type ResolveSecretError } from "../secrets.js";
-import { parseSecretRefKeychainTarget } from "@do-soul/alaya-protocol";
+import {
+  parseSecretRefKeychainTarget,
+  SECRET_REF_ENV_PREFIX,
+  SECRET_REF_FILE_PREFIX,
+  secretRefScheme
+} from "@do-soul/alaya-protocol";
 
 type GardenSecretRefResolution = ResolvedSecret | ResolveSecretError;
 
@@ -262,20 +265,21 @@ function resolveGardenCredentialSource(
     // so a null here means Garden has no key at all.
     return { kind: "none" };
   }
-  if (secretRef.startsWith("env:")) {
-    return { kind: "env", name: secretRef.slice("env:".length) };
-  }
-  if (secretRef.startsWith("file:")) {
-    const path = secretRef.slice("file:".length);
-    return { kind: "file", masked_path: maskPath(path) };
-  }
-  if (secretRef.startsWith("keychain:")) {
-    const parsed = parseSecretRefKeychainTarget(secretRef);
-    if (parsed !== null) {
-      return { kind: "keychain", service: parsed.service, account: parsed.account };
+  switch (secretRefScheme(secretRef)) {
+    case "env":
+      return { kind: "env", name: secretRef.slice(SECRET_REF_ENV_PREFIX.length) };
+    case "file":
+      return { kind: "file", masked_path: maskPath(secretRef.slice(SECRET_REF_FILE_PREFIX.length)) };
+    case "keychain": {
+      const parsed = parseSecretRefKeychainTarget(secretRef);
+      if (parsed !== null) {
+        return { kind: "keychain", service: parsed.service, account: parsed.account };
+      }
+      return { kind: "none" };
     }
+    case null:
+      return { kind: "none" };
   }
-  return { kind: "none" };
 }
 
 function maskPath(path: string): string {

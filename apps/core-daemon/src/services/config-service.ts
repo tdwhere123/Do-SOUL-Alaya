@@ -10,6 +10,7 @@ import {
   RuntimeGardenComputeConfigSchema,
   RuntimeGardenProviderKindSchema,
   RuntimeEmbeddingConfigSchema,
+  secretRefScheme,
   SoulConfigSchema,
   SoulHealthJournalRecordedPayloadSchema,
   StrategyConfigSchema,
@@ -109,6 +110,7 @@ export function createConfigService(dependencies: {
   readonly generateTempId?: () => string;
   readonly generateAuditId?: () => string;
   readonly envProvider?: () => NodeJS.ProcessEnv;
+  readonly warn?: (message: string) => void;
 }): AppConfigService {
   const {
     configRepo,
@@ -118,7 +120,10 @@ export function createConfigService(dependencies: {
     platform = process.platform,
     generateTempId = () => randomUUID(),
     generateAuditId = () => randomUUID(),
-    envProvider = () => process.env
+    envProvider = () => process.env,
+    warn = (message) => {
+      process.stderr.write(`${message}\n`);
+    }
   } = dependencies;
 
   return {
@@ -181,7 +186,7 @@ export function createConfigService(dependencies: {
         env: envProvider()
       }),
     getRuntimeGardenComputeConfig: async () =>
-      await getRuntimeGardenComputeConfig(configRepo, configPathsProvider()),
+      await getRuntimeGardenComputeConfig(configRepo, configPathsProvider(), warn),
     patchRuntimeGardenComputeConfig: async (patch) =>
       await patchRuntimeGardenComputeConfig({
         repo: configRepo,
@@ -191,7 +196,8 @@ export function createConfigService(dependencies: {
         clock,
         platform,
         generateTempId,
-        generateAuditId
+        generateAuditId,
+        warn
       })
   };
 }
@@ -238,12 +244,46 @@ async function getRuntimeEmbeddingConfig(repo: ConfigRepo): Promise<RuntimeEmbed
 
 async function getRuntimeGardenComputeConfig(
   repo: ConfigRepo,
-  paths: AlayaConfigPaths
+  paths: AlayaConfigPaths,
+  warn: (message: string) => void
 ): Promise<RuntimeGardenComputeConfig> {
-  return RuntimeGardenComputeConfigSchema.parse(
-    (await repo.get<RuntimeGardenComputeConfig>(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY)) ??
-      (await defaultRuntimeGardenComputeConfig(paths))
+  const persisted = await repo.get<RuntimeGardenComputeConfig>(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY);
+  const raw = persisted ?? (await defaultRuntimeGardenComputeConfig(paths, warn));
+  return parseGardenComputeConfigWithLegacyFallback(raw, "garden-compute config", warn);
+}
+
+// v0.3.3 tightened RuntimeSecretRefSchema (keychain segment charset and
+// whitespace rejection). A v0.3.2 daemon that persisted, or an env var that
+// still carries, a whitespace/leading-dash ref must not crash the doctor
+// pass on upgrade — we drop the offending ref to null with a warn so the
+// operator can re-run `alaya install --keychain` while the rest of the
+// runtime stays observable.
+function parseGardenComputeConfigWithLegacyFallback(
+  input: unknown,
+  source: string,
+  warn: (message: string) => void
+): RuntimeGardenComputeConfig {
+  const direct = RuntimeGardenComputeConfigSchema.safeParse(input);
+  if (direct.success) {
+    return direct.data;
+  }
+  const issues = direct.error.issues.map((issue) => `${issue.path.join(".") || "<root>"}: ${issue.message}`).join("; ");
+  warn(
+    `${source}: rejected by schema (${issues}); dropping secret_ref and falling back to local_heuristics. ` +
+      "Re-run `alaya install --keychain` (or fix the offending env/SQL value) to restore Garden compute."
   );
+  const fallbackBase = isRecord(input) ? input : {};
+  const fallback = {
+    ...fallbackBase,
+    secret_ref: null,
+    enabled: false,
+    provider_kind: "local_heuristics"
+  };
+  return RuntimeGardenComputeConfigSchema.parse(fallback);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function patchRuntimeEmbeddingConfig(input: {
@@ -318,7 +358,7 @@ function buildRuntimeEmbeddingChangeSummary(normalized: NormalizedRuntimeEmbeddi
   const fieldsChanged = RUNTIME_EMBEDDING_CONFIG_FIELDS.filter((field) => normalized.patch[field] !== undefined);
   return {
     fields_changed: fieldsChanged,
-    ...(normalized.patch.secret_ref !== undefined ? { secret_ref_kind: secretRefKind(normalized.patch.secret_ref) } : {})
+    ...(normalized.patch.secret_ref !== undefined ? { secret_ref_kind: (normalized.patch.secret_ref === null ? null : secretRefScheme(normalized.patch.secret_ref)) } : {})
   };
 }
 
@@ -331,11 +371,12 @@ async function patchRuntimeGardenComputeConfig(input: {
   readonly platform: NodeJS.Platform;
   readonly generateTempId: () => string;
   readonly generateAuditId: () => string;
+  readonly warn: (message: string) => void;
 }): Promise<RuntimeGardenComputeConfig> {
   const normalized = normalizeRuntimeGardenComputeConfigPatch(input.patch, input.paths, input.platform);
   const occurredAt = parseIsoTimestamp(input.clock(), "Invalid runtime garden compute config patch");
   const auditEntryId = input.generateAuditId();
-  const defaults = await defaultRuntimeGardenComputeConfig(input.paths);
+  const defaults = await defaultRuntimeGardenComputeConfig(input.paths, input.warn);
 
   return await applyRuntimeGardenComputeConfigFiles({
     paths: input.paths,
@@ -366,7 +407,11 @@ async function patchRuntimeGardenComputeConfig(input: {
             normalized.patch,
             defaults
           );
-          return RuntimeGardenComputeConfigSchema.parse(next);
+          // Route through the same legacy-fallback wrapper the read path uses
+          // so an Inspector patch that merges onto a v0.3.2 row carrying a
+          // whitespace/leading-dash secret_ref degrades to local_heuristics
+          // with a warn instead of throwing inside the EventLog mutation.
+          return parseGardenComputeConfigWithLegacyFallback(next, "garden-compute config patch", input.warn);
         }
       )
   });
@@ -381,13 +426,16 @@ function buildRuntimeGardenComputeChangeSummary(normalized: NormalizedRuntimeGar
   const fieldsChanged = RUNTIME_GARDEN_COMPUTE_CONFIG_FIELDS.filter((field) => normalized.patch[field] !== undefined);
   return {
     fields_changed: fieldsChanged,
-    ...(normalized.patch.secret_ref !== undefined ? { secret_ref_kind: secretRefKind(normalized.patch.secret_ref) } : {}),
+    ...(normalized.patch.secret_ref !== undefined ? { secret_ref_kind: (normalized.patch.secret_ref === null ? null : secretRefScheme(normalized.patch.secret_ref)) } : {}),
     ...(normalized.patch.provider_url !== undefined ? { provider_url: normalized.patch.provider_url } : {}),
     ...(normalized.patch.model_id !== undefined ? { model_id: normalized.patch.model_id } : {})
   };
 }
 
-async function defaultRuntimeGardenComputeConfig(paths: AlayaConfigPaths): Promise<RuntimeGardenComputeConfig> {
+async function defaultRuntimeGardenComputeConfig(
+  paths: AlayaConfigPaths,
+  warn: (message: string) => void
+): Promise<RuntimeGardenComputeConfig> {
   const configEnv = await loadConfigEnv(paths.envPath);
   const gardenSecretRef =
     readRawSecretRef(configEnv, ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV) ??
@@ -407,34 +455,23 @@ async function defaultRuntimeGardenComputeConfig(paths: AlayaConfigPaths): Promi
       ? "local_heuristics"
       : "official_api";
 
-  return RuntimeGardenComputeConfigSchema.parse({
-    provider_kind: providerKind,
-    model_id: modelId,
-    provider_url: readNonEmptyEnv(readConfigEnvValue(configEnv, OFFICIAL_API_GARDEN_PROVIDER_URL_ENV)),
-    secret_ref: secretRef,
-    enabled: providerKind === "official_api" && secretRef !== null
-  });
+  return parseGardenComputeConfigWithLegacyFallback(
+    {
+      provider_kind: providerKind,
+      model_id: modelId,
+      provider_url: readNonEmptyEnv(readConfigEnvValue(configEnv, OFFICIAL_API_GARDEN_PROVIDER_URL_ENV)),
+      secret_ref: secretRef,
+      enabled: providerKind === "official_api" && secretRef !== null
+    },
+    "garden-compute env defaults",
+    warn
+  );
 }
 
 function readRawSecretRef(configEnv: ReadonlyMap<string, string>, key: string): string | null {
   return readNonEmptyEnv(readConfigEnvValue(configEnv, key));
 }
 
-function secretRefKind(secretRef: string | null): "env" | "file" | "keychain" | null {
-  if (secretRef === null) {
-    return null;
-  }
-  if (secretRef.startsWith("env:")) {
-    return "env";
-  }
-  if (secretRef.startsWith("file:")) {
-    return "file";
-  }
-  if (secretRef.startsWith("keychain:")) {
-    return "keychain";
-  }
-  return null;
-}
 
 async function getGardenCredentialProvenance(input: {
   readonly paths: AlayaConfigPaths;

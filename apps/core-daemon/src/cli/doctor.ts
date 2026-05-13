@@ -460,7 +460,15 @@ function formatGardenCredentialProvenance(provenance: GardenCredentialProvenance
 }
 
 function formatGardenKeychainCheck(check: GardenKeychainCheck): string {
-  const ref = `keychain:${check.service}:${check.account}`;
+  // Defensive: a malformed ref can reach this branch with empty
+  // service/account when keychainCheckField is invoked directly with
+  // an invalid ref string (post-schema-fallback this is unreachable
+  // via the normal doctor pipeline, but the renderer still needs to
+  // render something operator-actionable instead of "keychain::").
+  const ref =
+    check.service === "" || check.account === ""
+      ? "keychain:<malformed>"
+      : `keychain:${check.service}:${check.account}`;
   return check.ok
     ? `garden keychain: ok (${ref})`
     : `garden keychain: unavailable (${ref}) — ${check.remediation}`;

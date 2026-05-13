@@ -275,6 +275,32 @@ describe("doctor CLI", () => {
     });
   });
 
+  it("renders the malformed keychain branch as keychain:<malformed> instead of an empty pair", async () => {
+    const harness = createDoctorHarness({
+      getGardenCompute: async () => ({
+        provider_kind: "official_api",
+        model_id: "gpt-4.1-mini",
+        provider_url: null,
+        credential_source: { kind: "none" },
+        routing_decision: "local_heuristics",
+        keychain_check: {
+          ok: false,
+          service: "",
+          account: "",
+          error_kind: "malformed",
+          remediation:
+            "Keychain secret_ref must match keychain:<service>:<account> with each segment limited to [A-Za-z0-9._-]+."
+        }
+      })
+    });
+
+    const humanResult = await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1"]);
+
+    expect(humanResult.exitCode).toBe(75);
+    expect(harness.stdoutText()).toContain("garden keychain: unavailable (keychain:<malformed>) —");
+    expect(harness.stdoutText()).not.toContain("keychain::");
+  });
+
   it("keeps non-keychain Garden compute reports free of keychain_check", async () => {
     const harness = createDoctorHarness({
       getGardenCompute: async () => ({
