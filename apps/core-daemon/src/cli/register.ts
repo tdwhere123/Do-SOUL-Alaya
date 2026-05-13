@@ -37,8 +37,10 @@ import {
   resolveTrustedCliRunId,
   resolveCliWorkspaceContext
 } from "./workspace-context.js";
-import { resolveSecretRef, type ResolveSecretError } from "../secrets.js";
+import { resolveSecretRef, type ResolvedSecret, type ResolveSecretError } from "../secrets.js";
 import { parseSecretRefKeychainTarget } from "@do-soul/alaya-protocol";
+
+type GardenSecretRefResolution = ResolvedSecret | ResolveSecretError;
 
 export function registerAlayaCliCommands(
   bridge: AlayaCliBridge,
@@ -124,11 +126,18 @@ export function registerAlayaCliCommands(
    * stays separate from provider_kind so official_api can degrade to
    * local_heuristics when credentials are missing.
  */
-async function resolveGardenComputeStatus(
+export async function resolveGardenComputeStatus(
   runtime: AlayaDaemonRuntime
 ): Promise<GardenComputeStatus> {
   const config = await runtime.services.configService.getRuntimeGardenComputeConfig();
   const provenance = await runtime.services.configService.getGardenCredentialProvenance();
+  // For keychain refs `resolveSecretRef` triggers a platform subprocess
+  // (`security` / `secret-tool` / PowerShell). The doctor pass needs the
+  // result for both `routing_decision` and `keychain_check`, so resolve
+  // at most once per pass and thread it to both consumers — a locked or
+  // missing keychain entry must not pay double cost to be reported.
+  const resolved: GardenSecretRefResolution | null =
+    config.secret_ref === null ? null : resolveSecretRef(config.secret_ref);
   const credential =
     provenance.kind === "embedding-fallback"
       ? ({ kind: "embedding-fallback" } as const)
@@ -138,28 +147,29 @@ async function resolveGardenComputeStatus(
     model_id: config.model_id,
     provider_url: config.provider_url,
     credential_source: credential,
-    routing_decision: resolveGardenRoutingDecision(config),
-    ...keychainCheckField(config.secret_ref)
+    routing_decision: deriveGardenRoutingDecision(config, resolved),
+    ...keychainCheckField(config.secret_ref, resolved)
   };
 }
 
-function resolveGardenRoutingDecision(
-  config: Awaited<ReturnType<AlayaDaemonRuntime["services"]["configService"]["getRuntimeGardenComputeConfig"]>>
+function deriveGardenRoutingDecision(
+  config: Awaited<ReturnType<AlayaDaemonRuntime["services"]["configService"]["getRuntimeGardenComputeConfig"]>>,
+  resolved: GardenSecretRefResolution | null
 ): GardenComputeStatus["routing_decision"] {
   if (config.provider_kind !== "official_api") {
     return config.provider_kind;
   }
 
-  if (config.secret_ref === null) {
+  if (resolved === null) {
     return "local_heuristics";
   }
 
-  const resolved = resolveSecretRef(config.secret_ref);
   return "kind" in resolved ? "local_heuristics" : "official_api";
 }
 
 function keychainCheckField(
-  secretRef: string | null
+  secretRef: string | null,
+  resolved: GardenSecretRefResolution | null
 ): Pick<GardenComputeStatus, "keychain_check"> {
   if (secretRef === null || !secretRef.startsWith("keychain:")) {
     return {};
@@ -178,8 +188,12 @@ function keychainCheckField(
     };
   }
 
-  const resolved = resolveSecretRef(secretRef);
-  if (!("kind" in resolved)) {
+  // `resolved` is non-null whenever `secretRef` is non-null because they
+  // are derived from the same `config.secret_ref` in the parent pass.
+  // The null-fallback below preserves safety if the contract is ever
+  // broken (e.g. a future caller forgets to thread the resolution
+  // through) without re-spawning the keychain subprocess.
+  if (resolved !== null && !("kind" in resolved)) {
     return {
       keychain_check: {
         ok: true,
@@ -189,13 +203,18 @@ function keychainCheckField(
     };
   }
 
+  const error: ResolveSecretError =
+    resolved === null
+      ? { kind: "malformed", ref: secretRef, reason: "keychain secret_ref was not resolved during this doctor pass." }
+      : (resolved as ResolveSecretError);
+
   return {
     keychain_check: {
       ok: false,
       service: parsed.service,
       account: parsed.account,
-      error_kind: keychainErrorKind(resolved),
-      remediation: keychainRemediation(resolved)
+      error_kind: keychainErrorKind(error),
+      remediation: keychainRemediation(error)
     }
   };
 }
