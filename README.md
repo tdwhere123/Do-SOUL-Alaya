@@ -18,6 +18,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](#architecture-at-a-glance)
 [![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57?style=flat-square&logo=sqlite&logoColor=white)](#architecture-at-a-glance)
 [![MCP](https://img.shields.io/badge/MCP-stdio-7B61FF?style=flat-square)](#surfaces-mcp--cli)
+[![SafeSkill 84/100](https://img.shields.io/badge/SafeSkill-84%2F100_Passes%20with%20Notes-yellow)](https://safeskill.dev/scan/tdwhere123-do-soul-alaya)
 
 [**The problem**](#the-problem) ·
 [**Design grammar**](#how-i-think-about-memory) ·
