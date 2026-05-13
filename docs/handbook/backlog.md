@@ -368,24 +368,32 @@ Anti-Tail R2.
 
 ### #BL-009 — OS keychain for secrets
 
-**Status**: Resolved in v0.3.0 (Linux/WSL2 runtime-verified; macOS/Windows
-code-reviewed, runtime verification deferred).
+**Status**: Resolved in v0.3.0 (keychain adapter implemented + code-reviewed
+on macOS / Linux / Windows; runtime keychain write/read verification
+deferred — no maintainer host has a working secret service; `env:` / `file:`
+secret refs runtime-verified).
 
 **Resolution (v0.3.0):** `keychain:<service>:<account>` secret refs
 resolve through the platform-native API; `alaya install --keychain`
 performs the interactive migration (writes the keychain entry, verifies
 it reads back, writes `ALAYA_OFFICIAL_GARDEN_SECRET_REF`); `alaya doctor`
-reports keychain readiness. Linux (incl. WSL2, `secret-tool`) is
-runtime-verified — transcript under `docs/v0.3/v0.3.0/keychain-transcripts/`.
-The macOS (`security -i` stdin write / `find-generic-password -w` read)
-and Windows (PowerShell `PasswordVault` stdin read+write) adapters are
-code-reviewed (secrets via stdin not argv; subprocess calls bounded at
-10s; ENOENT/timeout → `keychain_tooling_unavailable`) but their runtime
-verification is deferred — no maintainer has a macOS/Windows host. Known
-untested edge: macOS `find-generic-password` returns non-zero for a
-*locked* keychain, which the adapter reports as `keychain_entry_not_found`
-rather than a distinct "locked" state. See `docs/handbook/maintenance.md`
-§ "#BL-009 — OS keychain platform coverage".
+reports keychain readiness. The Linux libsecret (`secret-tool`), macOS
+(`security -i` stdin write / `find-generic-password -w` read), and Windows
+(PowerShell `PasswordVault` stdin read+write) adapters are code-reviewed
+(secrets via stdin not argv on every write path; subprocess calls bounded
+at 10s; ENOENT/timeout → `keychain_tooling_unavailable`) and the libsecret
+adapter is observed to degrade correctly when no secret service is running.
+What is **not** yet runtime-exercised is an actual keychain write→read on a
+real OS keychain: the dev box runs under WSL2, which has no running secret
+service (`secret-tool store` / `alaya install --keychain` fail with "no
+secret service" — by design the adapter reports `keychain_tooling_unavailable`),
+and no maintainer has a macOS / Windows host. The runtime-verified secret
+path on the dev box is `env:` / `file:` refs (`alaya doctor` shows
+`cred=file`, `garden status: healthy`). Known untested edge: macOS
+`find-generic-password` returns non-zero for a *locked* keychain, which the
+adapter reports as `keychain_entry_not_found` rather than a distinct
+"locked" state. See `docs/handbook/maintenance.md` § "#BL-009 — OS keychain
+platform coverage" and `docs/v0.3/v0.3.0/keychain-transcripts/README.md`.
 
 **Original close condition** (kept for context): P4-secrets gains a
 keychain adapter (macOS Keychain / Linux libsecret / Windows Credential

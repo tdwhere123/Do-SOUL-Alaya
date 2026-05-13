@@ -244,9 +244,13 @@ re-discovering them from `.do-it/findings/{a1,a2,a3}.md`.
 ## v0.3.0 Release (2026-05-13)
 
 Closes `#BL-009` (OS keychain for secrets — `keychain:<service>:<account>`
-refs, `alaya install --keychain` migration, doctor readiness; Linux/WSL2
-runtime-verified, macOS/Windows code-reviewed with runtime verification
-deferred — see `docs/handbook/maintenance.md`), `#BL-038` (host autonomy —
+refs, `alaya install --keychain` migration, doctor readiness; the libsecret
+/ macOS `security` / Windows `PasswordVault` adapters are code-reviewed and
+the libsecret one degrades correctly without a secret service, but an actual
+keychain write→read is not runtime-exercised anywhere yet — the dev box is
+WSL2 with no secret service, no maintainer has a macOS/Windows host;
+`env:` / `file:` secret refs are the runtime-verified path — see
+`docs/handbook/maintenance.md`), `#BL-038` (host autonomy —
 `agent-used` for `soul.recall` + `soul.report_context_usage` via a
 live-usage EventLog witness + offline regression), and confirms `#BL-037`
 closed as negative proof (Codex 0.130.0 has no third-party fixed slash

@@ -64,23 +64,32 @@ MCP / CLI fallback paths documented in `runtime-status.md`.
 
 ### #BL-009 — OS keychain platform coverage
 
-Runtime-verified: Linux (incl. WSL2) via `secret-tool` —
-`alaya install --keychain` migration + `alaya doctor` keychain readiness;
-transcript under `docs/v0.3/v0.3.0/keychain-transcripts/`.
+Code-reviewed on all three platforms; runtime keychain write/read **not**
+exercised on any of them yet — runtime verification is deferred.
 
-macOS (`security -i` stdin write / `find-generic-password -w` read) and
-Windows (PowerShell `PasswordVault` read+write over stdin) adapters are
-**code-reviewed, runtime verification deferred** — no maintainer has a
-macOS or Windows host to capture a real write/read transcript. Code-review
-state as of v0.3.0: secrets are passed via stdin (not argv) on every write
-path; all keychain subprocess calls are bounded by
+- **Linux libsecret (`secret-tool`)**: adapter reviewed; observed to degrade
+  correctly (`keychain_tooling_unavailable` / `keychain_write_failed`) when
+  no secret service is running. The dev box runs under WSL2, which by
+  default has no running gnome-keyring / DBus secret service — `secret-tool
+  store` and `alaya install --keychain` fail there with "no secret service".
+  A real Linux keychain transcript needs a host with a running secret
+  service (or WSL2 set up with `gnome-keyring` + `dbus-launch` +
+  `gnome-keyring-daemon --unlock`).
+- **macOS** (`security -i` stdin write / `find-generic-password -w` read)
+  and **Windows** (PowerShell `PasswordVault` read+write over stdin):
+  reviewed; no maintainer has a host. Known untested edge: macOS
+  `find-generic-password` returns non-zero for a *locked* keychain, which
+  the adapter reports as `keychain_entry_not_found` rather than a distinct
+  "locked" state.
+
+Code-review state as of v0.3.0: secrets are passed via stdin (not argv) on
+every write path; all keychain subprocess calls are bounded by
 `KEYCHAIN_SUBPROCESS_TIMEOUT_MS` (10s) and map ENOENT / timeout to
-`keychain_tooling_unavailable`. Known untested edge: macOS
-`find-generic-password` returns non-zero for a *locked* keychain, which the
-adapter currently reports as `keychain_entry_not_found` rather than a
-distinct "locked" state — a real macOS transcript should confirm or refine
-this. When a macOS / Windows host becomes available, capture the transcript
-and update this note + `runtime-status.md`.
+`keychain_tooling_unavailable`. The runtime-verified secret path on the dev
+box is `env:` / `file:` refs. When a host with a working keychain service is
+available, capture `<platform>/transcript.txt` under
+`docs/v0.3/v0.3.0/keychain-transcripts/` and update this note +
+`runtime-status.md`.
 
 ## Deprecated public symbols
 

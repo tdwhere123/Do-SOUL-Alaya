@@ -20,9 +20,14 @@ v0.3.0 closes the three long-open backlog items `#BL-009`, `#BL-037`, and
   plus a per-entry keychain check.
 - Adds the `secret_ref_kind: "keychain"` value to config-change EventLog
   audits — a public-surface change, hence the SemVer minor bump.
-- **Coverage**: Linux (incl. WSL2, `secret-tool`) is runtime-verified.
-  macOS and Windows adapters are code-reviewed but runtime verification
-  is deferred (no maintainer host) — see `docs/handbook/maintenance.md`.
+- **Coverage**: the Linux libsecret / macOS `security` / Windows
+  `PasswordVault` adapters are code-reviewed (secrets via stdin not argv;
+  subprocess calls bounded; degrades correctly when no secret service is
+  running). An actual keychain write→read is **not** runtime-exercised yet —
+  the dev box is WSL2 with no running secret service (`secret-tool` /
+  `install --keychain` fail there with "no secret service"), and no
+  maintainer has a macOS/Windows host. Use `env:` / `file:` secret refs
+  there; that path is runtime-verified. See `docs/handbook/maintenance.md`.
 
 ### Host-worker Garden compute is now reachable from the CLI
 
