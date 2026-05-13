@@ -73,6 +73,96 @@ describe("doctor CLI", () => {
     );
   });
 
+  it("reports degraded graph health when graph and path evidence are sparse", async () => {
+    const harness = createDoctorHarness({
+      getGraphHealth: async (workspaceId) => ({
+        workspace_id: workspaceId,
+        status: "degraded",
+        memory_graph_edges_total: 0,
+        memory_graph_edges_by_type: {
+          supports: 0,
+          derives_from: 0,
+          contradicts: 0,
+          supersedes: 0,
+          recalls: 0,
+          exception_to: 0,
+          incompatible_with: 0
+        },
+        path_relations_total: 0,
+        latest_path_event_at: null,
+        warnings: ["memory_graph_edges_empty", "path_relations_empty"],
+        hint: "Graph/path evidence is sparse; this is expected for a new install or workspace before recall/report and Garden path activity."
+      })
+    });
+
+    const jsonResult = await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1", "--json"]);
+    const humanResult = await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1"]);
+
+    expect(jsonResult.json).toMatchObject({
+      graph_health: {
+        workspace_id: "workspace-1",
+        status: "degraded",
+        memory_graph_edges_total: 0,
+        path_relations_total: 0,
+        latest_path_event_at: null,
+        warnings: ["memory_graph_edges_empty", "path_relations_empty"]
+      }
+    });
+    expect(humanResult.exitCode).toBe(75);
+    expect(harness.stdoutText()).toContain(
+      "graph health: degraded memory_edges=0 path_relations=0 latest_path_event=none"
+    );
+    expect(harness.stdoutText()).toContain(
+      "graph health warnings: memory_graph_edges_empty,path_relations_empty"
+    );
+  });
+
+  it("reports healthy graph health counts and recent path event", async () => {
+    const harness = createDoctorHarness({
+      getGraphHealth: async (workspaceId) => ({
+        workspace_id: workspaceId,
+        status: "healthy",
+        memory_graph_edges_total: 3,
+        memory_graph_edges_by_type: {
+          supports: 1,
+          derives_from: 0,
+          contradicts: 0,
+          supersedes: 0,
+          recalls: 2,
+          exception_to: 0,
+          incompatible_with: 0
+        },
+        path_relations_total: 4,
+        latest_path_event_at: "2026-05-12T00:00:00.000Z",
+        warnings: [],
+        hint: null
+      })
+    });
+
+    const jsonResult = await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1", "--json"]);
+    const humanResult = await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1"]);
+
+    expect(jsonResult.json).toMatchObject({
+      graph_health: {
+        workspace_id: "workspace-1",
+        status: "healthy",
+        memory_graph_edges_total: 3,
+        memory_graph_edges_by_type: {
+          supports: 1,
+          recalls: 2
+        },
+        path_relations_total: 4,
+        latest_path_event_at: "2026-05-12T00:00:00.000Z",
+        warnings: []
+      }
+    });
+    expect(humanResult.exitCode).toBe(75);
+    expect(harness.stdoutText()).toContain(
+      "graph health: healthy memory_edges=3 path_relations=4 latest_path_event=2026-05-12T00:00:00.000Z"
+    );
+    expect(harness.stdoutText()).not.toContain("graph health warnings:");
+  });
+
   it("reports Garden compute provider truth (C2) — kind / routing / model / cred", async () => {
     const daemon = {
       startupSteps: STARTUP_STEPS.map((step) => ({
@@ -351,7 +441,7 @@ describe("doctor CLI", () => {
       workspace_id: workspaceId,
       paths_planted: 1,
       record_id: "bootstrap-record-1",
-      template_ids: ["workspace.bootstrap.conservative-start"] as const
+      template_ids: ["workspace.bootstrap.explicit-test"] as const
     }));
     const harness = createDoctorHarness({
       reconcileBootstrapPaths: reconcile
@@ -455,6 +545,42 @@ describe("doctor CLI", () => {
     });
   });
 
+  it("reports skipped_no_templates without degrading bootstrap reconcile", async () => {
+    const harness = createDoctorHarness({
+      reconcileBootstrapPaths: async () => ({
+        status: "skipped_no_templates" as const,
+        workspace_id: "workspace-1",
+        template_ids: []
+      })
+    });
+
+    const jsonResult = await harness.bridge.dispatch([
+      "doctor",
+      "--workspace",
+      "workspace-1",
+      "--reconcile-bootstrap",
+      "--json"
+    ]);
+    const humanResult = await harness.bridge.dispatch([
+      "doctor",
+      "--workspace",
+      "workspace-1",
+      "--reconcile-bootstrap"
+    ]);
+
+    expect(jsonResult.json).toMatchObject({
+      bootstrap_reconcile: {
+        status: "skipped_no_templates",
+        template_ids: []
+      },
+      checks: { bootstrap_reconcile: "pass" }
+    });
+    expect(humanResult.exitCode).toBe(75);
+    expect(harness.stdoutText()).toContain(
+      "bootstrap reconcile: skipped - no configured bootstrap templates"
+    );
+  });
+
   it("surfaces handler errors as a failed reconcile summary instead of throwing", async () => {
     const harness = createDoctorHarness({
       reconcileBootstrapPaths: async () => {
@@ -470,8 +596,42 @@ describe("doctor CLI", () => {
       "--json"
     ]);
 
+    expect(jsonResult.exitCode).toBe(75);
     expect(jsonResult.json).toMatchObject({
-      bootstrap_reconcile: { status: "failed", reason: "planner_unavailable" }
+      overall: "degraded",
+      bootstrap_reconcile: { status: "failed", reason: "planner_unavailable" },
+      checks: { bootstrap_reconcile: "fail" }
+    });
+  });
+
+  it("marks doctor degraded when explicit bootstrap reconcile finds corrupt partial state", async () => {
+    const harness = createDoctorHarness({
+      reconcileBootstrapPaths: async () => ({
+        status: "corrupt_partial" as const,
+        workspace_id: "workspace-1",
+        record_id: "bootstrap-record-1",
+        relation_count: 0,
+        reason: "bootstrapping_record_without_relations" as const
+      })
+    });
+
+    const jsonResult = await harness.bridge.dispatch([
+      "doctor",
+      "--workspace",
+      "workspace-1",
+      "--reconcile-bootstrap",
+      "--json"
+    ]);
+
+    expect(jsonResult.exitCode).toBe(75);
+    expect(jsonResult.json).toMatchObject({
+      overall: "degraded",
+      bootstrap_reconcile: {
+        status: "corrupt_partial",
+        record_id: "bootstrap-record-1",
+        relation_count: 0
+      },
+      checks: { bootstrap_reconcile: "fail" }
     });
   });
 

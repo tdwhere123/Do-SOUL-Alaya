@@ -82,8 +82,15 @@ exercised on any of them yet — runtime verification is deferred.
   the adapter reports as `keychain_entry_not_found` rather than a distinct
   "locked" state.
 
-Code-review state as of v0.3.0: secrets are passed via stdin (not argv) on
-every write path; all keychain subprocess calls are bounded by
+Code-review state as of v0.3.3: secrets are passed via stdin (not argv) on
+every write path; macOS `security -i` quoting has adversarial argv/stdin
+coverage for embedded quotes, backslashes, leading dashes, and shell-looking
+text; Windows PasswordVault load failures map to
+`keychain_tooling_unavailable`. PowerShell `-NoProfile` /
+`-NonInteractive` does not disable policy-driven `Start-Transcript`; if an
+operator enables transcription at the host policy layer, stdout secrets can
+still be captured outside Alaya's control. All keychain subprocess calls are
+bounded by
 `KEYCHAIN_SUBPROCESS_TIMEOUT_MS` (10s) and map ENOENT / timeout to
 `keychain_tooling_unavailable`. The runtime-verified secret path on the dev
 box is `env:` / `file:` refs. When a host with a working keychain service is

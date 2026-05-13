@@ -45,8 +45,7 @@ export function readPlatformKeychainSecret(
     readonly runner?: KeychainSubprocessRunner;
   } = {}
 ): KeychainReadResult {
-  const platform = input.platform ?? process.platform;
-  const runner = input.runner ?? defaultKeychainSubprocessRunner;
+  const { platform, runner } = resolveKeychainDispatchInput(input);
 
   switch (platform) {
     case "darwin":
@@ -74,8 +73,7 @@ export function writePlatformKeychainSecret(
     readonly runner?: KeychainSubprocessRunner;
   } = {}
 ): KeychainWriteResult {
-  const platform = input.platform ?? process.platform;
-  const runner = input.runner ?? defaultKeychainSubprocessRunner;
+  const { platform, runner } = resolveKeychainDispatchInput(input);
 
   switch (platform) {
     case "darwin":
@@ -102,8 +100,7 @@ export function checkPlatformKeychainAvailable(
     readonly runner?: KeychainSubprocessRunner;
   } = {}
 ): KeychainAvailabilityResult {
-  const platform = input.platform ?? process.platform;
-  const runner = input.runner ?? defaultKeychainSubprocessRunner;
+  const { platform, runner } = resolveKeychainDispatchInput(input);
 
   switch (platform) {
     case "darwin":
@@ -120,6 +117,19 @@ export function checkPlatformKeychainAvailable(
         reason: `No keychain adapter is available for platform ${platform}.`
       };
   }
+}
+
+function resolveKeychainDispatchInput(input: {
+  readonly platform?: NodeJS.Platform;
+  readonly runner?: KeychainSubprocessRunner;
+}): { readonly platform: NodeJS.Platform; readonly runner: KeychainSubprocessRunner } {
+  if (input.platform !== undefined && input.runner === undefined) {
+    throw new Error("keychain platform override is test-only and requires an explicit subprocess runner.");
+  }
+  return {
+    platform: input.platform ?? process.platform,
+    runner: input.runner ?? defaultKeychainSubprocessRunner
+  };
 }
 
 export function defaultKeychainSubprocessRunner(

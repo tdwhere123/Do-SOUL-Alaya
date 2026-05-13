@@ -7,10 +7,9 @@ import { initDatabase, SqliteConfigRepo, SqliteEventLogRepo } from "@do-soul/ala
 import { createConfigService } from "../services/config-service.js";
 import { resolveAlayaConfigPaths } from "../cli/config-files.js";
 
-describe("config-service legacy secret_ref fallback", () => {
-  it("degrades a persisted whitespace-tainted keychain ref to local_heuristics with a warn", async () => {
+describe("config-service legacy secret_ref compatibility", () => {
+  it("keeps a persisted legacy keychain ref schema-compatible for the resolver boundary", async () => {
     const harness = await createHarness();
-    // Simulate a v0.3.2 persisted row that carried a now-invalid ref.
     harness.configRepo.set("runtime:garden-compute", {
       provider_kind: "official_api",
       provider_url: null,
@@ -21,19 +20,9 @@ describe("config-service legacy secret_ref fallback", () => {
 
     const config = await harness.configService.getRuntimeGardenComputeConfig();
 
-    expect(config).toEqual({
-      provider_kind: "local_heuristics",
-      provider_url: null,
-      secret_ref: null,
-      model_id: "gpt-4.1-mini",
-      enabled: false
-    });
-    expect(harness.warn).toHaveBeenCalledWith(
-      expect.stringContaining("garden-compute config: rejected by schema")
-    );
-    expect(harness.warn).toHaveBeenCalledWith(
-      expect.stringContaining("Re-run `alaya install --keychain`")
-    );
+    expect(config.secret_ref).toBe("keychain:alaya: openai");
+    expect(config.provider_kind).toBe("official_api");
+    expect(harness.warn).not.toHaveBeenCalled();
   });
 
   it("does not warn when the persisted ref is valid", async () => {
@@ -53,19 +42,16 @@ describe("config-service legacy secret_ref fallback", () => {
     expect(harness.warn).not.toHaveBeenCalled();
   });
 
-  it("degrades an .env-derived legacy ref too, so a freshly-installed daemon also survives the upgrade", async () => {
+  it("keeps an .env-derived legacy keychain ref visible for doctor/runtime diagnostics", async () => {
     const harness = await createHarness({
       dotenv: "ALAYA_OFFICIAL_GARDEN_SECRET_REF=keychain:alaya:--openai\n"
     });
-    // No persisted row — the env-default path runs through the same fallback.
 
     const config = await harness.configService.getRuntimeGardenComputeConfig();
 
-    expect(config.secret_ref).toBe(null);
-    expect(config.provider_kind).toBe("local_heuristics");
-    expect(harness.warn).toHaveBeenCalledWith(
-      expect.stringContaining("garden-compute env defaults: rejected by schema")
-    );
+    expect(config.secret_ref).toBe("keychain:alaya:--openai");
+    expect(config.provider_kind).toBe("official_api");
+    expect(harness.warn).not.toHaveBeenCalled();
   });
 });
 

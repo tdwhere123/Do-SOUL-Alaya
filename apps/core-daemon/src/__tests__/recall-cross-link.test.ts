@@ -1,22 +1,35 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   EventPublisher,
+  GraphExploreService,
   MemoryService,
+  RecallService,
+  type RecallServiceDependencies,
   type RuntimeNotifier
 } from "@do-soul/alaya-core";
 import {
+  ControlPlaneObjectKind,
   FormationKind,
   MemoryDimension,
+  RetentionPolicy,
+  RunMode,
+  RunState,
   ScopeClass,
   SourceKind,
   StorageTier,
-  type MemoryEntry
+  WorkspaceKind,
+  WorkspaceState,
+  type MemoryEntry,
+  type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import {
   initDatabase,
   SqliteEventLogRepo,
   SqliteMemoryEntryRepo,
+  SqliteMemoryGraphEdgeRepo,
+  SqliteRunRepo,
   SqliteTrustStateRepo,
+  SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { createMcpMemoryToolHandler } from "../mcp-memory-tool-handler.js";
@@ -107,6 +120,44 @@ describe("recall cross-link: report_context_usage(used) writes RECALLS edges", (
     );
   });
 
+  it("persists RECALLS edges that a later recall reads as graph_support", async () => {
+    const harness = await createHarness([MEM_A, MEM_B, MEM_C], { realGraphEdges: true });
+
+    await reportUsed(harness, [MEM_A, MEM_B]);
+
+    const persistedEdges = await harness.graphEdgeRepo.findByWorkspace("workspace-1");
+    expect(persistedEdges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source_memory_id: MEM_A,
+          target_memory_id: MEM_B,
+          edge_type: "recalls"
+        }),
+        expect.objectContaining({
+          source_memory_id: MEM_B,
+          target_memory_id: MEM_A,
+          edge_type: "recalls"
+        })
+      ])
+    );
+
+    const recallService = createRecallServiceWithPersistedGraph(harness);
+    const result = await recallService.recall({
+      taskSurface: createTaskSurface("seed memory"),
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      strategy: "build"
+    });
+
+    const candidateA = result.candidates.find((candidate) => candidate.object_id === MEM_A);
+    const candidateB = result.candidates.find((candidate) => candidate.object_id === MEM_B);
+    const candidateC = result.candidates.find((candidate) => candidate.object_id === MEM_C);
+
+    expect(candidateA?.score_factors?.graph_support).toBeGreaterThan(0);
+    expect(candidateB?.score_factors?.graph_support).toBeGreaterThan(0);
+    expect(candidateC?.score_factors?.graph_support ?? 0).toBe(0);
+  });
+
   it("never fails the report when the graph edge port throws", async () => {
     const harness = await createHarness([MEM_A, MEM_B]);
     harness.graphEdgePort.createEdge.mockRejectedValueOnce(new Error("edge db down"));
@@ -120,13 +171,19 @@ describe("recall cross-link: report_context_usage(used) writes RECALLS edges", (
 
 async function createHarness(
   memoryIds: readonly string[],
-  options: { readonly warn?: (message: string, meta: Record<string, unknown>) => void } = {}
+  options: {
+    readonly realGraphEdges?: boolean;
+    readonly warn?: (message: string, meta: Record<string, unknown>) => void;
+  } = {}
 ) {
   const database = initDatabase({ filename: ":memory:" });
   databases.add(database);
   const eventLogRepo = new SqliteEventLogRepo(database);
   const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
+  const graphEdgeRepo = new SqliteMemoryGraphEdgeRepo(database);
+  const runRepo = new SqliteRunRepo(database);
   const trustStateRepo = new SqliteTrustStateRepo(database);
+  const workspaceRepo = new SqliteWorkspaceRepo(database);
   const runtimeNotifier: RuntimeNotifier = {
     notify: () => {},
     notifyEntry: () => {}
@@ -150,6 +207,26 @@ async function createHarness(
     now: () => "2026-05-07T00:00:00.000Z"
   });
 
+  await workspaceRepo.create({
+    workspace_id: "workspace-1",
+    name: "workspace one",
+    root_path: "/tmp/workspace-1",
+    workspace_kind: WorkspaceKind.LOCAL_REPO,
+    default_engine_binding: null,
+    workspace_state: WorkspaceState.ACTIVE
+  });
+  await runRepo.create({
+    run_id: "run-1",
+    workspace_id: "workspace-1",
+    title: "run one",
+    goal: null,
+    run_mode: RunMode.CHAT,
+    engine_binding_id: null,
+    engine_class: null,
+    run_state: RunState.IDLE,
+    current_surface_id: null
+  });
+
   for (const id of memoryIds) {
     await memoryEntryRepo.create(createMemoryEntry(id));
   }
@@ -162,8 +239,22 @@ async function createHarness(
     delivered_at: "2026-05-07T00:00:00.000Z"
   });
 
+  let edgeCounter = 0;
+  const graphExploreService = new GraphExploreService({
+    memoryRepo: memoryEntryRepo,
+    edgeRepo: graphEdgeRepo,
+    eventLogRepo,
+    runtimeNotifier,
+    now: () => "2026-05-07T00:00:01.000Z",
+    generateId: () => `00000000-0000-4000-8000-${(++edgeCounter).toString().padStart(12, "0")}`
+  });
+
   const graphEdgePort = {
-    createEdge: vi.fn(async () => undefined)
+    createEdge: vi.fn(async (params: Parameters<GraphExploreService["addEdge"]>[0]) => {
+      if (options.realGraphEdges === true) {
+        await graphExploreService.addEdge(params);
+      }
+    })
   };
 
   const handler = createMcpMemoryToolHandler({
@@ -199,18 +290,20 @@ async function createHarness(
     ...(options.warn === undefined ? {} : { warn: options.warn })
   });
 
-  return { handler, graphEdgePort };
+  return { eventLogRepo, graphEdgePort, graphEdgeRepo, handler, memoryEntryRepo };
 }
 
+type ReportHarness = Pick<Awaited<ReturnType<typeof createHarness>>, "handler">;
+
 async function reportUsed(
-  harness: Awaited<ReturnType<typeof createHarness>>,
+  harness: ReportHarness,
   usedObjectIds: readonly string[]
 ) {
   return await reportUsage(harness, "used", usedObjectIds);
 }
 
 async function reportUsage(
-  harness: Awaited<ReturnType<typeof createHarness>>,
+  harness: ReportHarness,
   usageState: "used" | "skipped" | "not_applicable",
   usedObjectIds: readonly string[]
 ) {
@@ -229,6 +322,43 @@ async function reportUsage(
       sessionId: "recall-cross-link-session"
     }
   });
+}
+
+function createRecallServiceWithPersistedGraph(
+  harness: Pick<Awaited<ReturnType<typeof createHarness>>, "eventLogRepo" | "graphEdgeRepo" | "memoryEntryRepo">
+): RecallService {
+  const deps: RecallServiceDependencies = {
+    now: () => "2026-05-07T00:00:02.000Z",
+    generateRuntimeId: () => "00000000-0000-4000-8000-000000000099",
+    memoryRepo: harness.memoryEntryRepo,
+    slotRepo: {
+      findByWorkspace: vi.fn(async () => [])
+    },
+    eventLogRepo: {
+      append: harness.eventLogRepo.append.bind(harness.eventLogRepo),
+      queryByEntity: vi.fn(async () => [])
+    },
+    graphSupportPort: {
+      countInboundSupports: harness.graphEdgeRepo.countInboundSupports.bind(harness.graphEdgeRepo),
+      countInboundEdgesWeighted: harness.graphEdgeRepo.countInboundEdgesWeighted.bind(harness.graphEdgeRepo)
+    }
+  };
+
+  return new RecallService(deps);
+}
+
+function createTaskSurface(displayName: string): TaskObjectSurface {
+  return {
+    runtime_id: "00000000-0000-4000-8000-000000000098",
+    object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
+    task_surface_ref: null,
+    expires_at: "2026-05-07T00:30:00.000Z",
+    derived_from: null,
+    retention_policy: RetentionPolicy.SESSION_ONLY,
+    surface_kind: "build",
+    display_name: displayName,
+    context_refs: []
+  };
 }
 
 function createMemoryEntry(objectId: string): MemoryEntry {

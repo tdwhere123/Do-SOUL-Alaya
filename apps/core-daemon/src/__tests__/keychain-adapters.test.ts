@@ -8,7 +8,11 @@ import {
 } from "../secrets/keychain/index.js";
 import { checkLinuxKeychainAvailable, readLinuxKeychainSecret, writeLinuxKeychainSecret } from "../secrets/keychain/linux.js";
 import { readMacosKeychainSecret, writeMacosKeychainSecret } from "../secrets/keychain/macos.js";
-import { readWindowsKeychainSecret, writeWindowsKeychainSecret } from "../secrets/keychain/windows.js";
+import {
+  checkWindowsKeychainAvailable,
+  readWindowsKeychainSecret,
+  writeWindowsKeychainSecret
+} from "../secrets/keychain/windows.js";
 
 describe("keychain adapters", () => {
   it("builds the macOS security argv and maps success", () => {
@@ -76,6 +80,46 @@ describe("keychain adapters", () => {
     expect(options).toEqual({ input: "secret", timeoutMs: 10_000 });
   });
 
+  it.each([
+    {
+      label: "single quote",
+      service: "svc'quote",
+      account: "acct",
+      secret: "sk'quote",
+      expectedInput: "add-generic-password -s 'svc'\\''quote' -a 'acct' -w 'sk'\\''quote' -U\n"
+    },
+    {
+      label: "backslash",
+      service: "svc\\path",
+      account: "acct\\path",
+      secret: "sk\\secret",
+      expectedInput: "add-generic-password -s 'svc\\path' -a 'acct\\path' -w 'sk\\secret' -U\n"
+    },
+    {
+      label: "leading dash",
+      service: "-svc",
+      account: "-acct",
+      secret: "-secret",
+      expectedInput: "add-generic-password -s '-svc' -a '-acct' -w '-secret' -U\n"
+    },
+    {
+      label: "substitution text",
+      service: "$(svc)",
+      account: "$(acct)",
+      secret: "$(secret)",
+      expectedInput: "add-generic-password -s '$(svc)' -a '$(acct)' -w '$(secret)' -U\n"
+    }
+  ])("quotes macOS security -i values for $label without argv secret exposure", ({ service, account, secret, expectedInput }) => {
+    const runner = stubRunner({ code: 0, stdout: "", stderr: "" });
+
+    expect(writeMacosKeychainSecret(service, account, secret, runner)).toEqual({ ok: true });
+    expect(runner).toHaveBeenCalledWith("security", ["-i"], {
+      input: expectedInput,
+      timeoutMs: 10_000
+    });
+    expect(runner.mock.calls[0]![1].join(" ")).not.toContain(secret);
+  });
+
   it("maps write tooling and command failures", () => {
     expect(writeLinuxKeychainSecret("svc", "acct", "secret", stubRunner({ code: null, stdout: "", stderr: "", error: enoent() }))).toMatchObject({
       kind: "keychain_tooling_unavailable"
@@ -106,6 +150,23 @@ describe("keychain adapters", () => {
     });
   });
 
+  it("maps Windows PasswordVault load failures to tooling unavailable", () => {
+    const stderr = "Unable to find type [Windows.Security.Credentials.PasswordVault].";
+
+    expect(readWindowsKeychainSecret("svc", "acct", stubRunner({ code: 1, stdout: "", stderr }))).toMatchObject({
+      kind: "keychain_tooling_unavailable",
+      reason: expect.stringContaining("PasswordVault WinRT type is unavailable")
+    });
+    expect(writeWindowsKeychainSecret("svc", "acct", "secret", stubRunner({ code: 1, stdout: "", stderr }))).toMatchObject({
+      kind: "keychain_tooling_unavailable",
+      reason: expect.stringContaining("PasswordVault WinRT type is unavailable")
+    });
+    expect(checkWindowsKeychainAvailable("svc", "acct", stubRunner({ code: 1, stdout: "", stderr }))).toMatchObject({
+      kind: "keychain_tooling_unavailable",
+      reason: expect.stringContaining("PasswordVault WinRT type is unavailable")
+    });
+  });
+
   it("dispatches through the host-platform adapter table", () => {
     const runner = stubRunner({ code: 0, stdout: "linux-secret\n", stderr: "" });
 
@@ -118,6 +179,9 @@ describe("keychain adapters", () => {
       service: "svc",
       account: "acct"
     });
+    expect(() => readPlatformKeychainSecret("svc", "acct", { platform: "linux" })).toThrow(
+      "keychain platform override is test-only"
+    );
   });
 
   it("maps timed-out keychain subprocesses to tooling-unavailable diagnostics", () => {

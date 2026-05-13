@@ -296,7 +296,7 @@ describe("Phase C event registry", () => {
       record_id: "bootstrap-record-1",
       workspace_id: "workspace-1",
       paths_planted: 1,
-      template_ids: ["workspace.bootstrap.conservative-start"],
+      template_ids: ["workspace.bootstrap.explicit-test"],
       planted_at: validTimestamp
     } as const;
 

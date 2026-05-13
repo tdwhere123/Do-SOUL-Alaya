@@ -65,13 +65,9 @@ export const RuntimeEmbeddingConfigPatchSchema = RuntimeEmbeddingConfigSchema.un
   .strict()
   .readonly();
 
-// Canonical secret-ref grammar. Anyone touching a `secret_ref` string —
-// schema validation, daemon resolver, doctor renderer, env-file normalizer —
-// reads keychain refs through `parseSecretRefKeychainTarget` so the same
-// charset and segment rules apply at write-time and at every read-time
-// call site. The charset blocks whitespace, quoting, and leading-dash
-// segments that would otherwise reach `security -a` / `secret-tool account`
-// as command-line arguments.
+// Runtime config keeps the patch-compatible keychain:service:account shape.
+// Operational keychain reads/writes use parseSecretRefKeychainTarget below so
+// platform argv never receives whitespace, quoting, or leading-dash segments.
 export const SECRET_REF_ENV_PREFIX = "env:";
 export const SECRET_REF_FILE_PREFIX = "file:";
 export const SECRET_REF_KEYCHAIN_PREFIX = "keychain:";
@@ -138,14 +134,16 @@ const RuntimeSecretRefSchema = z
       }
     }
 
-    if (value.startsWith(SECRET_REF_KEYCHAIN_PREFIX) && parseSecretRefKeychainTarget(value) !== null) {
-      return;
+    if (value.startsWith(SECRET_REF_KEYCHAIN_PREFIX)) {
+      const segments = value.slice(SECRET_REF_KEYCHAIN_PREFIX.length).split(":");
+      if (segments.length === 2 && segments[0] !== "" && segments[1] !== "") {
+        return;
+      }
     }
 
     context.addIssue({
       code: z.ZodIssueCode.custom,
-      message:
-        'secret_ref must use "env:NAME", "file:/path", or "keychain:service:account" with each keychain segment limited to [A-Za-z0-9._-]+.'
+      message: 'secret_ref must use "env:NAME", "file:/path", or "keychain:service:account".'
     });
   });
 

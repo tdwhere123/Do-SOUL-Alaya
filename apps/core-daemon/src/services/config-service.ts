@@ -252,12 +252,9 @@ async function getRuntimeGardenComputeConfig(
   return parseGardenComputeConfigWithLegacyFallback(raw, "garden-compute config", warn);
 }
 
-// v0.3.3 tightened RuntimeSecretRefSchema (keychain segment charset and
-// whitespace rejection). A v0.3.2 daemon that persisted, or an env var that
-// still carries, a whitespace/leading-dash ref must not crash the doctor
-// pass on upgrade — we drop the offending ref to null with a warn so the
-// operator can re-run `alaya install --keychain` while the rest of the
-// runtime stays observable.
+// Keep malformed rows from making runtime config unreadable. Keychain refs
+// that are schema-compatible but operationally invalid are handled later by
+// resolveSecretRef/doctor so v0.3.3 does not narrow the runtime config schema.
 function parseGardenComputeConfigWithLegacyFallback(
   input: unknown,
   source: string,
@@ -407,10 +404,9 @@ async function patchRuntimeGardenComputeConfig(input: {
             normalized.patch,
             defaults
           );
-          // Route through the same legacy-fallback wrapper the read path uses
-          // so an Inspector patch that merges onto a v0.3.2 row carrying a
-          // whitespace/leading-dash secret_ref degrades to local_heuristics
-          // with a warn instead of throwing inside the EventLog mutation.
+          // Route through the same malformed-row fallback the read path uses
+          // so an Inspector patch never throws inside the EventLog mutation
+          // because of an unreadable runtime config row.
           return parseGardenComputeConfigWithLegacyFallback(next, "garden-compute config patch", input.warn);
         }
       )

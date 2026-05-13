@@ -151,6 +151,7 @@ import { isRemoteDaemonOptInEnabled } from "./server-options.js";
 import { createConfigService } from "./services/config-service.js";
 import { createEnvironmentStatusService } from "./services/environment-status-service.js";
 import { GardenComputeProviderResolver } from "./services/garden-compute-provider-resolver.js";
+import { createGraphHealthService } from "./services/graph-health-service.js";
 import {
   CORE_DAEMON_ENVIRONMENT_TOOLS,
   derivePrincipalCodingAvailability
@@ -357,6 +358,11 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     proposalRepo,
     eventLogRepo
   });
+  const graphHealthService = createGraphHealthService({
+    memoryGraphEdgeRepo,
+    pathRelationRepo,
+    eventLogRepo
+  });
   const synthesisService = new SynthesisService({
     synthesisCapsuleRepo,
     evidenceService,
@@ -517,9 +523,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     delegate: contextLensAssembler
   });
   const sqliteHandoffGapAdapter = new SqliteHandoffGapAdapter(sqliteHandoffGapRepo);
-  // Shared write port for memory-graph edges. Used by materialization
-  // (memory→evidence SUPPORTS, memory→memory DERIVES_FROM) and by the
-  // MCP report_context_usage handler (memory↔memory RECALLS cross-link).
+  // Shared write port for memory-graph edges. Materialization and
+  // report_context_usage use it to keep graph writes behind core validation.
   const graphEdgePort = {
     createEdge: async (params: Parameters<typeof graphExploreService.addEdge>[0]) => {
       await graphExploreService.addEdge(params);
@@ -828,6 +833,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       daemonMcpCatalog: mcpTooling.daemonMcpCatalog,
       environmentStatusService,
       embeddingStatusService,
+      graphHealthService,
       configService,
       mcpMemoryToolHandler,
       recallUtilizationService,

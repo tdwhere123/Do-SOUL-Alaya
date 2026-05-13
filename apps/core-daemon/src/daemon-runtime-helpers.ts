@@ -30,7 +30,12 @@ export function createWarnLogger(): WarnLogger {
 
 export type ReconcileBootstrapPathsForAllWorkspacesDeps = Readonly<{
   readonly workspaceRepo: Readonly<{
-    list(): Promise<readonly Readonly<{ readonly workspace_id: string }>[]>;
+    list(): Promise<
+      readonly Readonly<{
+        readonly workspace_id: string;
+        readonly workspace_state?: string;
+      }>[]
+    >;
   }>;
   readonly workspaceService: Pick<WorkspaceService, "reconcileBootstrapPaths">;
   readonly warn: WarnLogger["warn"];
@@ -39,7 +44,10 @@ export type ReconcileBootstrapPathsForAllWorkspacesDeps = Readonly<{
 export async function reconcileBootstrapPathsForAllWorkspaces(
   deps: ReconcileBootstrapPathsForAllWorkspacesDeps
 ): Promise<void> {
-  let workspaces: readonly Readonly<{ readonly workspace_id: string }>[];
+  let workspaces: readonly Readonly<{
+    readonly workspace_id: string;
+    readonly workspace_state?: string;
+  }>[];
   try {
     workspaces = await deps.workspaceRepo.list();
   } catch (error) {
@@ -50,6 +58,10 @@ export async function reconcileBootstrapPathsForAllWorkspaces(
   }
 
   for (const workspace of workspaces) {
+    if (workspace.workspace_state !== undefined && workspace.workspace_state !== "active") {
+      continue;
+    }
+
     try {
       await deps.workspaceService.reconcileBootstrapPaths(workspace.workspace_id);
     } catch (error) {

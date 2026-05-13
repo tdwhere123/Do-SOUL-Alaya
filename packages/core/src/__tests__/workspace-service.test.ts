@@ -104,6 +104,62 @@ describe("WorkspaceService", () => {
     expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
   });
 
+  it("does not create bootstrap records when the planner has no templates", async () => {
+    const appendManyWithMutation = fakeAppendManyWithMutation();
+    const pathRelationRepo = {
+      create: vi.fn((relation: PathRelation) => relation),
+      findByWorkspace: vi.fn(async () => [])
+    };
+    const bootstrappingRecordRepo = {
+      findByWorkspace: vi.fn(() => null),
+      create: vi.fn((record: BootstrappingRecord) => record)
+    };
+    const bootstrappingPlanner = {
+      planBootstrap: vi.fn(async (workspaceId: string) => ({
+        relations: [],
+        record: createBootstrappingRecord({
+          workspace_id: workspaceId,
+          paths_planted: 0,
+          template_ids_used: []
+        })
+      }))
+    };
+    const service = new WorkspaceService({
+      workspaceRepo: {
+        create: vi.fn((input) => createWorkspace(input)),
+        getById: vi.fn(async () => null),
+        list: vi.fn(async () => []),
+        delete: vi.fn(() => undefined),
+        updateDefaultEngineClass: vi.fn(() => {
+          throw new Error("not used");
+        })
+      },
+      runRepo: {
+        listByWorkspace: vi.fn(async () => [])
+      },
+      eventPublisher: {
+        appendManyWithMutation
+      } as any,
+      bootstrappingPlanner,
+      pathRelationRepo,
+      bootstrappingRecordRepo
+    });
+
+    const created = await service.create({
+      name: "alpha",
+      root_path: "/tmp/alpha",
+      workspace_kind: WorkspaceKind.LOCAL_REPO
+    });
+
+    expect(created.name).toBe("alpha");
+    expect(bootstrappingPlanner.planBootstrap).toHaveBeenCalledWith(created.workspace_id);
+    expect(pathRelationRepo.create).not.toHaveBeenCalled();
+    expect(bootstrappingRecordRepo.create).not.toHaveBeenCalled();
+    expect(appendManyWithMutation).toHaveBeenCalledWith([expect.objectContaining({
+      event_type: "workspace.created"
+    })], expect.any(Function));
+  });
+
   it("ensures a deterministic local workspace id without creating duplicates", async () => {
     const appendManyWithMutation = fakeAppendManyWithMutation();
     const persistedWorkspace = createWorkspace({
@@ -466,7 +522,32 @@ describe("WorkspaceService.reconcileBootstrapPaths", () => {
     expect(harness.appendManyWithMutation).toHaveBeenCalledTimes(1);
   });
 
-  it("returns already_planted without invoking the planner when a record exists", async () => {
+  it("skips reconcile when the bootstrapping planner has no templates", async () => {
+    const harness = makeReconcileService({
+      planBootstrap: async () => ({
+        relations: [],
+        record: createBootstrappingRecord({
+          workspace_id: "ws_alpha",
+          paths_planted: 0,
+          template_ids_used: []
+        })
+      })
+    });
+
+    const result = await harness.service.reconcileBootstrapPaths("ws_alpha");
+
+    expect(result).toEqual({
+      status: "skipped_no_templates",
+      workspace_id: "ws_alpha",
+      template_ids: []
+    });
+    expect(harness.planner.planBootstrap).toHaveBeenCalledWith("ws_alpha");
+    expect(harness.recordRepo.create).not.toHaveBeenCalled();
+    expect(harness.pathRepo.create).not.toHaveBeenCalled();
+    expect(harness.appendManyWithMutation).not.toHaveBeenCalled();
+  });
+
+  it("reports corrupt_partial when a record exists without seed relations", async () => {
     const existingRecord = createBootstrappingRecord({ workspace_id: "ws_alpha" });
     const harness = makeReconcileService({
       recordFindByWorkspace: () => existingRecord
@@ -475,10 +556,11 @@ describe("WorkspaceService.reconcileBootstrapPaths", () => {
     const result = await harness.service.reconcileBootstrapPaths("ws_alpha");
 
     expect(result).toEqual({
-      status: "already_planted",
+      status: "corrupt_partial",
       workspace_id: "ws_alpha",
       record_id: existingRecord.record_id,
-      relation_count: 0
+      relation_count: 0,
+      reason: "bootstrapping_record_without_relations"
     });
     expect(harness.planner.planBootstrap).not.toHaveBeenCalled();
     expect(harness.recordRepo.create).not.toHaveBeenCalled();
@@ -529,10 +611,11 @@ describe("WorkspaceService.reconcileBootstrapPaths", () => {
     const result = await harness.service.reconcileBootstrapPaths("ws_alpha");
 
     expect(result).toEqual({
-      status: "already_planted",
+      status: "corrupt_partial",
       workspace_id: "ws_alpha",
       record_id: racedRecord.record_id,
-      relation_count: 0
+      relation_count: 0,
+      reason: "bootstrapping_record_without_relations"
     });
     expect(harness.pathRepo.create).not.toHaveBeenCalled();
     expect(harness.recordRepo.create).not.toHaveBeenCalled();
@@ -669,12 +752,12 @@ function createPathRelation(overrides: Partial<PathRelation> = {}): PathRelation
       target_anchor: {
         kind: "object_facet",
         object_id: "workspace-1",
-        facet_key: "conservative_start"
+        facet_key: "explicit_test_seed"
       }
     },
     constitution: {
       relation_kind: "supports",
-      why_this_relation_exists: ["new workspace starts with conservative learned-path defaults"]
+      why_this_relation_exists: ["test-configured ontology seed"]
     },
     effect_vector: {
       salience: 0.1,
@@ -694,7 +777,7 @@ function createPathRelation(overrides: Partial<PathRelation> = {}): PathRelation
       retirement_rule: "consolidation_only"
     },
     legitimacy: {
-      evidence_basis: ["bootstrapping:workspace.bootstrap.conservative-start"],
+      evidence_basis: ["bootstrapping:workspace.bootstrap.explicit-test"],
       governance_class: "hint_only"
     },
     created_at: "2026-04-20T00:00:00.000Z",
@@ -710,7 +793,7 @@ function createBootstrappingRecord(
     record_id: "bootstrap-record-1",
     workspace_id: "workspace-1",
     paths_planted: 1,
-    template_ids_used: ["workspace.bootstrap.conservative-start"],
+    template_ids_used: ["workspace.bootstrap.explicit-test"],
     planted_at: "2026-04-20T00:00:00.000Z",
     ...overrides
   };

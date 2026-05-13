@@ -19,22 +19,8 @@ export const defaultCanonicalAliasMap: CanonicalAliasMap = {
   ]
 };
 
-export const defaultBootstrappingTemplates: readonly BootstrappingPathTemplate[] = [
-  {
-    template_id: "workspace.bootstrap.conservative-start",
-    relation_kind: "supports",
-    why_this_relation_exists: ["new workspace starts with conservative learned-path defaults"],
-    source_anchor_template: {
-      kind: "object",
-      description: "workspace"
-    },
-    target_anchor_template: {
-      kind: "object_facet",
-      description: "conservative_start"
-    },
-    default_strength: 0.1,
-    default_stability_class: "volatile",
-    default_governance_class: "hint_only",
-    default_manifestation_preference: "stance_bias"
-  }
-] as const;
+// Alaya ships without built-in PathRelation seeds. PathRelation rows are
+// ontology structure, so daemon defaults must not invent a workspace-level
+// relation merely to make path tables non-empty. Operators or future ontology
+// packages can supply explicit templates through this wiring point.
+export const defaultBootstrappingTemplates: readonly BootstrappingPathTemplate[] = [] as const;

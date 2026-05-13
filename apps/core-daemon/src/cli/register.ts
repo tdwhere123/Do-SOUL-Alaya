@@ -71,6 +71,8 @@ export function registerAlayaCliCommands(
     // can see which configuration is actually live.
     getGardenCompute: async () =>
       await resolveGardenComputeStatus(runtime),
+    getGraphHealth: async (workspaceId) =>
+      await runtime.services.graphHealthService.getStatus(workspaceId),
     reconcileBootstrapPaths: async (workspaceId) =>
       await runtime.services.workspaceService.reconcileBootstrapPaths(workspaceId, {
         causedBy: "user_action"

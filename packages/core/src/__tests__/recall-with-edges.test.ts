@@ -23,13 +23,8 @@ import {
 import { RunMode, RunState, WorkspaceKind, WorkspaceState } from "@do-soul/alaya-protocol";
 import { RecallService, type RecallServiceDependencies } from "../recall-service.js";
 
-// End-to-end-flavored test for v0.3.3 Slice 1 P1.3:
-// drive RecallService.recall() against a real SQLite-backed memory-graph
-// edge repository, lay down RECALLS / DERIVES_FROM edges, and assert that
-// score_factors.graph_support flows through to the candidate. This is the
-// missing acceptance test called out in the slice plan ("recall-with-edges")
-// and ensures graph_support stops being structurally pinned to 0 once
-// production-shaped edges land in `memory_graph_edges`.
+// Recall scoring must read per-memory inbound graph edges from SQLite, not
+// from a constant or process-local cache.
 
 const databases = new Set<StorageDatabase>();
 
@@ -45,7 +40,7 @@ const MEM_SRC_A = "00000000-0000-4000-8000-000000000002";
 const MEM_SRC_B = "00000000-0000-4000-8000-000000000003";
 const MEM_ISOLATED = "00000000-0000-4000-8000-000000000004";
 
-describe("RecallService end-to-end with real memory_graph_edges (P1.3)", () => {
+describe("RecallService end-to-end with real memory_graph_edges", () => {
   it("lifts score_factors.graph_support above 0 when inbound RECALLS edges exist", async () => {
     const { database, memoryEntryRepo, graphEdgeRepo } = await createRealStorage();
 
@@ -149,7 +144,7 @@ describe("RecallService end-to-end with real memory_graph_edges (P1.3)", () => {
     );
 
     // One supersedes edge: weight = -0.5; normalizeGraphSupport clamps to 0
-    // (the documented floor-at-zero limitation for v0.3.3).
+    // (the documented floor-at-zero limitation).
     await graphEdgeRepo.create({
       edge_id: "edge-sup-1",
       source_memory_id: MEM_SRC_A,

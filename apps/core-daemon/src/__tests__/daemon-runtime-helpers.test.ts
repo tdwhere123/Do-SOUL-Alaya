@@ -26,6 +26,31 @@ describe("reconcileBootstrapPathsForAllWorkspaces", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it("reconciles active workspaces only when workspace state is available", async () => {
+    const reconcileBootstrapPaths = vi.fn(async (workspaceId: string) => ({
+      status: "already_planted" as const,
+      workspace_id: workspaceId,
+      record_id: `record-${workspaceId}`,
+      relation_count: 1
+    }));
+    const warn = vi.fn();
+
+    await reconcileBootstrapPathsForAllWorkspaces({
+      workspaceRepo: {
+        list: async () => [
+          { workspace_id: "ws_active", workspace_state: "active" },
+          { workspace_id: "ws_archived", workspace_state: "archived" }
+        ]
+      },
+      workspaceService: { reconcileBootstrapPaths },
+      warn
+    });
+
+    expect(reconcileBootstrapPaths).toHaveBeenCalledTimes(1);
+    expect(reconcileBootstrapPaths).toHaveBeenCalledWith("ws_active");
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it("logs and continues when one workspace's reconcile throws", async () => {
     const reconcileBootstrapPaths = vi.fn(async (workspaceId: string) => {
       if (workspaceId === "ws_beta") {

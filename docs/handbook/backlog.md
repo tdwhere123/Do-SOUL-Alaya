@@ -187,7 +187,13 @@ Close evidence: `5F-B-reviewer-inbox`.
 Librarian / TIER_2 Garden path. Auditor remains focused on audit and
 staleness work.
 
+v0.3.3 keeps this ownership split. Fresh workspaces no longer receive
+daemon-invented bootstrap PathRelations by default; cold graph/path
+recall scoring reallocates that absent signal to relevance until
+explicit PathRelation activity exists.
+
 Close evidence: `5F-D-garden-queue`.
+v0.3.3 follow-up evidence: `docs/v0.3/v0.3.3/reports/v0.3.3-closeout.md`.
 
 ### #BL-029 - Resolved (direction-bias redirection consumer)
 
@@ -197,7 +203,12 @@ new `direction_bias`, and recall respects that direction. The live
 proof covers `soul.recall -> soul.report_context_usage -> Garden pass
 -> PathRelation mutation -> later soul.recall`.
 
+v0.3.3 adds persisted `RECALLS` memory graph cross-links from used
+recall reports. This is separate from direction-bias redirection and
+does not change the close evidence for `#BL-029`.
+
 Close evidence: `5F-E-redirection`.
+v0.3.3 follow-up evidence: `docs/v0.3/v0.3.3/reports/v0.3.3-closeout.md`.
 
 ### #BL-030 - Resolved (explicit PathLifecycle status)
 
@@ -206,6 +217,7 @@ state the writer produces, removing the old strength-based retirement
 inference.
 
 Close evidence: `5F-C-path-foundation`.
+v0.3.3 follow-up evidence: `docs/v0.3/v0.3.3/reports/v0.3.3-closeout.md`.
 
 ### #BL-031 - Resolved (sync-first storage repos)
 
@@ -227,6 +239,10 @@ Close evidence: `5F-C-path-foundation`.
 
 Recall plasticity uses batched anchor lookup for candidate memories and
 exposes telemetry so future evidence harnesses can observe the cost.
+
+v0.3.3 preserves the batched lookup and adds a cold graph/path
+reallocation path so a sparse workspace does not lose all scoring weight
+when both `graph_support` and `path_plasticity` are zero.
 
 Close evidence: `5F-C-path-foundation`.
 
@@ -394,6 +410,12 @@ path on the dev box is `env:` / `file:` refs (`alaya doctor` shows
 adapter reports as `keychain_entry_not_found` rather than a distinct
 "locked" state. See `docs/handbook/maintenance.md` § "#BL-009 — OS keychain
 platform coverage" and `docs/v0.3/v0.3.0/keychain-transcripts/README.md`.
+
+**v0.3.3 hygiene update:** install keychain code is split out of
+`install.ts`; `install --keychain` argv parsing, TTY raw-mode restore,
+macOS `security -i` quoting, Windows PasswordVault load failures, and
+test-only platform overrides now have focused regression coverage. See
+`docs/v0.3/v0.3.3/reports/v0.3.3-closeout.md` for the closeout gate.
 
 **Original close condition** (kept for context): P4-secrets gains a
 keychain adapter (macOS Keychain / Linux libsecret / Windows Credential

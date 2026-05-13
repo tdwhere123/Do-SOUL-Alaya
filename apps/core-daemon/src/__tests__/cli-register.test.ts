@@ -440,6 +440,26 @@ function createRuntime(overrides: Partial<AlayaDaemonRuntime> = {}): AlayaDaemon
           checked_at: "2026-04-30T00:00:00.000Z"
         })
       },
+      graphHealthService: {
+        getStatus: async (workspaceId) => ({
+          workspace_id: workspaceId,
+          status: "healthy",
+          memory_graph_edges_total: 1,
+          memory_graph_edges_by_type: {
+            supports: 1,
+            derives_from: 0,
+            contradicts: 0,
+            supersedes: 0,
+            recalls: 0,
+            exception_to: 0,
+            incompatible_with: 0
+          },
+          path_relations_total: 1,
+          latest_path_event_at: "2026-04-30T00:00:00.000Z",
+          warnings: [],
+          hint: null
+        })
+      },
       mcpMemoryToolHandler: {
         call: async () => ({
           ok: true,
@@ -474,7 +494,13 @@ function createRuntime(overrides: Partial<AlayaDaemonRuntime> = {}): AlayaDaemon
         findDeliveryById: async () => null
       },
       workspaceService: {
-        ensureLocalWorkspace: async () => undefined
+        ensureLocalWorkspace: async () => undefined,
+        reconcileBootstrapPaths: async () => ({
+          status: "already_planted" as const,
+          workspace_id: "workspace-1",
+          record_id: "bootstrap-record-1",
+          relation_count: 1
+        })
       },
       principalCodingEngineAvailable: true
     },

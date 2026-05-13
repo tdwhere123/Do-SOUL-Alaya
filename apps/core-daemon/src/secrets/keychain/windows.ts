@@ -10,9 +10,15 @@ import {
   keychainSubprocessTimeoutReason
 } from "./constants.js";
 
+const PASSWORD_VAULT_LOAD_SCRIPT =
+  "[Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime] | Out-Null";
+const PASSWORD_VAULT_TRANSCRIPT_LIMIT_NOTE =
+  "$script:AlayaKeychainTranscriptLimit = 'LIMIT: policy-driven PowerShell transcription can capture stdout secrets; Alaya never enables transcription'";
+
 const PASSWORD_VAULT_READ_SCRIPT = [
   // PasswordVault can read credentials that were written through the Windows Credential Manager WinRT API.
-  "[Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime] | Out-Null",
+  PASSWORD_VAULT_TRANSCRIPT_LIMIT_NOTE,
+  PASSWORD_VAULT_LOAD_SCRIPT,
   "$service = $args[0]",
   "$account = $args[1]",
   "$vault = [Windows.Security.Credentials.PasswordVault]::new()",
@@ -23,7 +29,8 @@ const PASSWORD_VAULT_READ_SCRIPT = [
 
 const PASSWORD_VAULT_WRITE_SCRIPT = [
   // PasswordVault write mirrors the read path and avoids cmdkey, which cannot read secrets back.
-  "[Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime] | Out-Null",
+  PASSWORD_VAULT_TRANSCRIPT_LIMIT_NOTE,
+  PASSWORD_VAULT_LOAD_SCRIPT,
   "$service = $args[0]",
   "$account = $args[1]",
   "$password = [Console]::In.ReadToEnd()",
@@ -57,6 +64,9 @@ export function readWindowsKeychainSecret(
   }
 
   if (result.code !== 0) {
+    if (isWindowsPasswordVaultUnavailable(result.stderr)) {
+      return windowsToolingUnavailable(service, account, windowsPasswordVaultUnavailableReason(result.stderr));
+    }
     return {
       kind: "keychain_entry_not_found",
       service,
@@ -98,6 +108,9 @@ export function writeWindowsKeychainSecret(
   }
 
   if (result.code !== 0) {
+    if (isWindowsPasswordVaultUnavailable(result.stderr)) {
+      return windowsToolingUnavailable(service, account, windowsPasswordVaultUnavailableReason(result.stderr));
+    }
     return {
       kind: "keychain_write_failed",
       service,
@@ -120,13 +133,22 @@ export function checkWindowsKeychainAvailable(
     "-ExecutionPolicy",
     "Bypass",
     "-Command",
-    "$PSVersionTable.PSVersion.ToString()"
+    [PASSWORD_VAULT_TRANSCRIPT_LIMIT_NOTE, PASSWORD_VAULT_LOAD_SCRIPT].join("; ")
   ], { timeoutMs: KEYCHAIN_SUBPROCESS_TIMEOUT_MS });
-  return result.error?.code === "ENOENT" || isKeychainSubprocessTimeout(result)
+  if (result.error?.code === "ENOENT" || isKeychainSubprocessTimeout(result)) {
+    return windowsToolingUnavailable(
+      service,
+      account,
+      isKeychainSubprocessTimeout(result) ? keychainSubprocessTimeoutReason("PowerShell PasswordVault") : undefined
+    );
+  }
+  return result.code !== 0
     ? windowsToolingUnavailable(
         service,
         account,
-        isKeychainSubprocessTimeout(result) ? keychainSubprocessTimeoutReason("PowerShell PasswordVault") : undefined
+        isWindowsPasswordVaultUnavailable(result.stderr)
+          ? windowsPasswordVaultUnavailableReason(result.stderr)
+          : `PowerShell PasswordVault probe failed: ${result.stderr.trim() || "unknown error"}`
       )
     : { ok: true };
 }
@@ -142,4 +164,16 @@ function windowsToolingUnavailable(
     account,
     reason
   };
+}
+
+function isWindowsPasswordVaultUnavailable(stderr: string): boolean {
+  return /PasswordVault|Windows\.Security\.Credentials|WinRT|WindowsRuntime/iu.test(stderr) &&
+    /unable to find type|cannot find type|type .* not found|load|assembly|namespace/iu.test(stderr);
+}
+
+function windowsPasswordVaultUnavailableReason(stderr: string): string {
+  const detail = stderr.trim();
+  return detail.length === 0
+    ? "PowerShell PasswordVault WinRT type is unavailable."
+    : `PowerShell PasswordVault WinRT type is unavailable: ${detail}`;
 }

@@ -12,6 +12,11 @@ import {
 } from "../profile-mutation.js";
 import { ALAYA_SYSEXITS, type AlayaCliArgsSchema, type AlayaCliContext, type AlayaSubcommandSpec } from "./bridge.js";
 import { resolveCliWorkspaceContext } from "./workspace-context.js";
+import {
+  createEmptyGraphHealthSnapshot,
+  type GraphHealthSnapshot,
+  type GraphHealthWarning
+} from "../services/graph-health-service.js";
 
 /**
  * Shape returned by the optional getGardenCompute doctor dep so an
@@ -68,6 +73,9 @@ export interface DoctorCommandDependencies {
   readonly getPathPlasticityLookupTelemetry?: () =>
     | Readonly<PathPlasticityLookupTelemetrySnapshot>
     | Promise<Readonly<PathPlasticityLookupTelemetrySnapshot>>;
+  readonly getGraphHealth?: (workspaceId: string) =>
+    | Readonly<GraphHealthSnapshot>
+    | Promise<Readonly<GraphHealthSnapshot>>;
   /**
    * Optional schema readiness probe. When provided, doctor reports
    * `storage.schema_ok` so an operator can tell apart "db file exists and is
@@ -100,17 +108,32 @@ export type DoctorBootstrapReconcileSummary = Readonly<
       readonly record_id: string | null;
       readonly relation_count: number;
     }
-  // invariant: skipped_no_planner / skipped_no_handler are defence-in-depth
-  // arms — the wired daemon always provides both the dep and the handler,
-  // so under normal operation only planted / already_planted / failed are
-  // observed. The two skipped arms exist to keep the doctor JSON well-typed
-  // when a partial dep is injected (tests / dev harnesses).
+  | {
+      readonly status: "corrupt_partial";
+      readonly record_id: string;
+      readonly relation_count: 0;
+      readonly reason: "bootstrapping_record_without_relations";
+    }
+  | {
+      readonly status: "skipped_no_templates";
+      readonly template_ids: readonly string[];
+    }
+  // skipped_no_templates is a normal wired-daemon outcome when no
+  // ontology-approved bootstrap seeds are configured. skipped_no_planner /
+  // skipped_no_handler remain defence-in-depth arms for partial harnesses.
   | { readonly status: "skipped_no_planner" }
   | { readonly status: "skipped_no_handler" }
   | { readonly status: "failed"; readonly reason: string }
 >;
 
 type DoctorCheckStatus = "pass" | "fail";
+type DoctorCheckName =
+  | "runtime"
+  | "storage"
+  | "provider"
+  | "mcp"
+  | "garden"
+  | "bootstrap_reconcile";
 
 interface DoctorReport {
   readonly checked_at: string;
@@ -146,10 +169,11 @@ interface DoctorReport {
   readonly recall: Readonly<{
     readonly path_plasticity_lookup: Readonly<PathPlasticityLookupTelemetrySnapshot>;
   }>;
+  readonly graph_health: Readonly<GraphHealthSnapshot>;
   readonly attached_profiles: ReadonlyArray<ProfileInstructionsDriftReport>;
   // Present only when --reconcile-bootstrap is requested.
   readonly bootstrap_reconcile?: DoctorBootstrapReconcileSummary;
-  readonly checks: Readonly<Record<"runtime" | "storage" | "provider" | "mcp" | "garden", DoctorCheckStatus>>;
+  readonly checks: Readonly<Record<DoctorCheckName, DoctorCheckStatus>>;
 }
 
 const PROFILE_TARGETS: readonly ProfileTarget[] = ["codex", "claude-code"];
@@ -222,6 +246,9 @@ export function createDoctorCommand(
           duration_p99_ms: null,
           window_size: 128
         } satisfies PathPlasticityLookupTelemetrySnapshot);
+      const graphHealth =
+        (await deps.getGraphHealth?.(workspaceId)) ??
+        createEmptyGraphHealthSnapshot(workspaceId);
 
       // Detect drift between source ALAYA_OPERATOR_INSTRUCTIONS and the value
       // Alaya wrote into host MCP profiles on a prior `alaya attach`. Operators
@@ -230,6 +257,13 @@ export function createDoctorCommand(
       const bootstrapReconcileSummary = args.reconcileBootstrap
         ? await runBootstrapReconcile(deps.reconcileBootstrapPaths, workspaceId)
         : null;
+      const bootstrapReconcileCheck =
+        bootstrapReconcileSummary === null ||
+        bootstrapReconcileSummary.status === "planted" ||
+        bootstrapReconcileSummary.status === "already_planted" ||
+        bootstrapReconcileSummary.status === "skipped_no_templates"
+          ? "pass"
+          : "fail";
 
       const attachedProfiles = await Promise.all(
         PROFILE_TARGETS.map(async (target) => {
@@ -254,8 +288,9 @@ export function createDoctorCommand(
           storage.exists && storage.writable && storage.schema_ok !== false ? "pass" : "fail",
         provider: embeddingStatus === null || embeddingStatus.effective_mode !== "degraded" ? "pass" : "fail",
         mcp: mcp.transport === "ready" ? "pass" : "fail",
-        garden: garden.status === "healthy" && gardenCompute.keychain_check?.ok !== false ? "pass" : "fail"
-      } satisfies Record<"runtime" | "storage" | "provider" | "mcp" | "garden", DoctorCheckStatus>;
+        garden: garden.status === "healthy" && gardenCompute.keychain_check?.ok !== false ? "pass" : "fail",
+        bootstrap_reconcile: bootstrapReconcileCheck
+      } satisfies Record<DoctorCheckName, DoctorCheckStatus>;
 
       const overall = Object.values(checks).every((status) => status === "pass")
         ? "green"
@@ -284,6 +319,7 @@ export function createDoctorCommand(
         recall: {
           path_plasticity_lookup: pathPlasticityLookupTelemetry
         },
+        graph_health: graphHealth,
         attached_profiles: attachedProfiles,
         ...(bootstrapReconcileSummary === null
           ? {}
@@ -490,6 +526,18 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport):
       ` samples=${report.recall.path_plasticity_lookup.sample_count}` +
       ` window=${report.recall.path_plasticity_lookup.window_size}\n`
   );
+  stream.write(
+    `graph health: ${report.graph_health.status}` +
+      ` memory_edges=${report.graph_health.memory_graph_edges_total}` +
+      ` path_relations=${report.graph_health.path_relations_total}` +
+      ` latest_path_event=${report.graph_health.latest_path_event_at ?? "none"}\n`
+  );
+  if (report.graph_health.warnings.length > 0) {
+    stream.write(
+      `graph health warnings: ${formatGraphHealthWarnings(report.graph_health.warnings)}` +
+        ` - ${report.graph_health.hint ?? "Inspect graph/path producers for this workspace."}\n`
+    );
+  }
   if (report.provider.embedding !== null) {
     stream.write(
       `embedding mode: ${report.provider.embedding.effective_mode} (provider_configured=${report.provider.embedding.provider_configured ? "yes" : "no"})\n`
@@ -512,6 +560,10 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport):
     // status === "absent" is silent — the user may have intentionally not
     // attached this target.
   }
+}
+
+function formatGraphHealthWarnings(warnings: readonly GraphHealthWarning[]): string {
+  return warnings.join(",");
 }
 
 function formatCredentialSource(source: GardenComputeStatus["credential_source"]): string {
@@ -560,6 +612,18 @@ async function runBootstrapReconcile(
           record_id: result.record_id,
           relation_count: result.relation_count
         };
+      case "corrupt_partial":
+        return {
+          status: "corrupt_partial",
+          record_id: result.record_id,
+          relation_count: result.relation_count,
+          reason: result.reason
+        };
+      case "skipped_no_templates":
+        return {
+          status: "skipped_no_templates",
+          template_ids: result.template_ids
+        };
       case "skipped_no_planner":
         return { status: "skipped_no_planner" };
     }
@@ -583,12 +647,19 @@ function formatBootstrapReconcileSummary(summary: DoctorBootstrapReconcileSummar
         `bootstrap reconcile: already planted` +
         ` (record=${summary.record_id ?? "absent"}, relations=${summary.relation_count})`
       );
+    case "corrupt_partial":
+      return (
+        `bootstrap reconcile: corrupt partial state` +
+        ` (record=${summary.record_id}, relations=${summary.relation_count}) - ${summary.reason}`
+      );
+    case "skipped_no_templates":
+      return "bootstrap reconcile: skipped - no configured bootstrap templates";
     case "skipped_no_planner":
-      return "bootstrap reconcile: skipped — planner not wired";
+      return "bootstrap reconcile: skipped - planner not wired";
     case "skipped_no_handler":
-      return "bootstrap reconcile: skipped — no handler available";
+      return "bootstrap reconcile: skipped - no handler available";
     case "failed":
-      return `bootstrap reconcile: failed — ${summary.reason}`;
+      return `bootstrap reconcile: failed - ${summary.reason}`;
   }
 }
 

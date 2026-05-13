@@ -12,6 +12,7 @@
 | [`v0.3.0`](v0.3.0/README.md) | Keychain secret refs, host autonomy evidence, Codex slash recognition proof | done |
 | [`v0.3.1`](v0.3.1/README.md) | Patch-safe recall maintainability and baseline foundation | done |
 | [`v0.3.2`](v0.3.2/README.md) | Patch-internal read/write memory quality | done |
+| [`v0.3.3`](v0.3.3/README.md) | Recall graph quality, bootstrap reconciliation truth, and keychain hygiene | done |
 
 ## What v0.3.0 is
 
@@ -117,6 +118,10 @@ docs/v0.3/
 │   └── reports/
 └── v0.3.2/
     ├── README.md                          ← patch-internal memory quality track
+    ├── release-notes.md
+    └── reports/
+└── v0.3.3/
+    ├── README.md                          ← recall graph + keychain hygiene track
     ├── release-notes.md
     └── reports/
 ```

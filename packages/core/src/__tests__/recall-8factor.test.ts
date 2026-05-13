@@ -6,6 +6,7 @@ import {
   MemoryDimension,
   RetentionPolicy,
   ScopeClass,
+  type ActivationWeights,
   type EventLogEntry,
   type MemoryEntry,
   type RecallPolicy,
@@ -13,7 +14,7 @@ import {
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import { RecallService, type RecallServiceDependencies } from "../recall-service.js";
-import { mapBudgetPenalty } from "../recall-service-helpers.js";
+import { mapBudgetPenalty, PATH_PLASTICITY_WEIGHT } from "../recall-service-helpers.js";
 
 function createTaskSurface(displayName = "Implement recall"): TaskObjectSurface {
   return {
@@ -92,7 +93,11 @@ function createDependencies(
   memories: readonly MemoryEntry[],
   slots: readonly Slot[] = [],
   // Maps claim object_id -> source_object_refs (backing memory IDs).
-  claimSourceRefs: Readonly<Record<string, readonly string[]>> = {}
+  claimSourceRefs: Readonly<Record<string, readonly string[]>> = {},
+  supportOptions: Readonly<{
+    readonly graphSupportByMemoryId?: Readonly<Record<string, number>>;
+    readonly pathPlasticityByMemoryId?: Readonly<Record<string, number>>;
+  }> = {}
 ): {
   readonly dependencies: RecallServiceDependencies;
   readonly searchByKeyword: ReturnType<typeof vi.fn>;
@@ -101,7 +106,20 @@ function createDependencies(
   readonly getSnapshot: ReturnType<typeof vi.fn>;
 } {
   const searchByKeyword = vi.fn(async () => [{ object_id: memories[1]?.object_id ?? "memory-2", normalized_rank: 1 }]);
-  const countInboundSupports = vi.fn(async (memoryId: string) => (memoryId === "memory-2" ? 3 : 0));
+  const countInboundSupports = vi.fn(async (memoryId: string) => {
+    if (supportOptions.graphSupportByMemoryId !== undefined) {
+      return supportOptions.graphSupportByMemoryId[memoryId] ?? 0;
+    }
+    return memoryId === "memory-2" ? 3 : 0;
+  });
+  const getStrengthByMemoryId = vi.fn(async (_workspaceId: string, memoryIds: readonly string[]) =>
+    new Map(
+      memoryIds.flatMap((memoryId) => {
+        const strength = supportOptions.pathPlasticityByMemoryId?.[memoryId];
+        return strength === undefined ? [] : [[memoryId, strength] as const];
+      })
+    )
+  );
   const getSnapshot = vi.fn(async () => ({
     snapshot_at: "2026-03-23T00:00:00.000Z",
     run_id: "run-1",
@@ -144,6 +162,13 @@ function createDependencies(
       budgetPenaltyPort: {
         getSnapshot
       },
+      ...(supportOptions.pathPlasticityByMemoryId === undefined
+        ? {}
+        : {
+            pathPlasticityPort: {
+              getStrengthByMemoryId
+            }
+          }),
       claimResolverPort: {
         findByIds: vi.fn(async (ids: readonly string[]) =>
           ids
@@ -166,6 +191,28 @@ function overridePolicy(base: Readonly<RecallPolicy>, patch: Partial<RecallPolic
     coarse_filter: patch.coarse_filter ?? base.coarse_filter,
     fine_assessment: patch.fine_assessment ?? base.fine_assessment
   };
+}
+
+function sumActivationWeights(weights: Readonly<ActivationWeights>): number {
+  return (
+    weights.scope_match +
+    weights.domain_match +
+    weights.retention +
+    weights.freshness +
+    weights.relevance +
+    weights.graph_support +
+    weights.budget_penalty +
+    weights.conflict_penalty
+  );
+}
+
+function expectScoreWeightTotalConserved(
+  weights: Readonly<ActivationWeights>,
+  effectivePathWeight: number
+): void {
+  expect(sumActivationWeights(weights) + effectivePathWeight).toBeCloseTo(
+    sumActivationWeights(DYNAMICS_CONSTANTS.activation_weights_phase4b) + PATH_PLASTICITY_WEIGHT
+  );
 }
 
 describe("RecallService 8-factor scoring", () => {
@@ -276,13 +323,18 @@ describe("RecallService 8-factor scoring", () => {
   });
 
   it("records valid per-domain activation weight overrides in score factors", async () => {
-    const { dependencies } = createDependencies([
-      createMemoryEntry({
-        object_id: "memory-1",
-        content: "Domain-specific recall weighting",
-        domain_tags: ["repo", "docs"]
-      })
-    ]);
+    const { dependencies } = createDependencies(
+      [
+        createMemoryEntry({
+          object_id: "memory-1",
+          content: "Domain-specific recall weighting",
+          domain_tags: ["repo", "docs"]
+        })
+      ],
+      [],
+      {},
+      { graphSupportByMemoryId: { "memory-1": 1 } }
+    );
     const service = new RecallService(dependencies);
     const basePolicy = service.buildDefaultPolicy("build", createTaskSurface().runtime_id);
     const policy = overridePolicy(basePolicy, {
@@ -308,6 +360,95 @@ describe("RecallService 8-factor scoring", () => {
       relevance: 0.2
     });
   });
+
+  it.each([
+    {
+      caseName: "no graph, no path",
+      graphSupport: 0,
+      pathPlasticity: undefined,
+      expectedRelevanceWeight: 0.3,
+      expectedGraphWeight: 0,
+      expectedGraphFactor: 0,
+      expectedPathFactor: 0,
+      effectivePathWeight: 0
+    },
+    {
+      caseName: "only graph",
+      graphSupport: 3,
+      pathPlasticity: undefined,
+      expectedRelevanceWeight: 0.1,
+      expectedGraphWeight: 0.05,
+      expectedGraphFactor: 1,
+      expectedPathFactor: 0,
+      effectivePathWeight: PATH_PLASTICITY_WEIGHT
+    },
+    {
+      caseName: "only path",
+      graphSupport: 0,
+      pathPlasticity: 0.6,
+      expectedRelevanceWeight: 0.1,
+      expectedGraphWeight: 0.05,
+      expectedGraphFactor: 0,
+      expectedPathFactor: 0.6,
+      effectivePathWeight: PATH_PLASTICITY_WEIGHT
+    },
+    {
+      caseName: "both",
+      graphSupport: 3,
+      pathPlasticity: 0.6,
+      expectedRelevanceWeight: 0.1,
+      expectedGraphWeight: 0.05,
+      expectedGraphFactor: 1,
+      expectedPathFactor: 0.6,
+      effectivePathWeight: PATH_PLASTICITY_WEIGHT
+    }
+  ])(
+    "keeps score weight total stable with dynamic graph/path reallocation when $caseName",
+    async ({
+      graphSupport,
+      pathPlasticity,
+      expectedRelevanceWeight,
+      expectedGraphWeight,
+      expectedGraphFactor,
+      expectedPathFactor,
+      effectivePathWeight
+    }) => {
+      const { dependencies, searchByKeyword } = createDependencies(
+        [
+          createMemoryEntry({
+            object_id: "memory-1",
+            content: "Dynamic scoring evidence"
+          })
+        ],
+        [],
+        {},
+        {
+          graphSupportByMemoryId: { "memory-1": graphSupport },
+          ...(pathPlasticity === undefined
+            ? {}
+            : { pathPlasticityByMemoryId: { "memory-1": pathPlasticity } })
+        }
+      );
+      searchByKeyword.mockResolvedValue([{ object_id: "memory-1", normalized_rank: 1 }]);
+      const service = new RecallService(dependencies);
+
+      const result = await service.recall({
+        taskSurface: createTaskSurface("Dynamic scoring evidence"),
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        strategy: "build"
+      });
+
+      const candidate = result.candidates[0];
+      const weights = candidate?.score_factors?.resolved_activation_weights;
+      expect(weights).toBeDefined();
+      expect(weights?.relevance).toBeCloseTo(expectedRelevanceWeight);
+      expect(weights?.graph_support).toBeCloseTo(expectedGraphWeight);
+      expect(candidate?.score_factors?.graph_support).toBeCloseTo(expectedGraphFactor);
+      expect(candidate?.score_factors?.path_plasticity).toBeCloseTo(expectedPathFactor);
+      expectScoreWeightTotalConserved(weights as ActivationWeights, effectivePathWeight);
+    }
+  );
 
   it("applies conflict penalty to non-winner claim-like entries", async () => {
     const memories = [

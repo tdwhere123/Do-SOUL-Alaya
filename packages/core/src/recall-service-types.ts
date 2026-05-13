@@ -193,6 +193,7 @@ export interface RecallSupplementaryData {
   readonly graphSupportCounts: Readonly<Record<string, number>>;
   readonly budgetPenaltyFactor: number;
   readonly plasticityFactors: Readonly<Record<string, number>>;
+  readonly graphAndPathCold: boolean;
 }
 
 export interface CoarseRecallCandidate {

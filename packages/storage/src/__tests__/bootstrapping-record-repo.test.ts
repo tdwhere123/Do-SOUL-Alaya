@@ -119,7 +119,7 @@ function createBootstrappingRecord(
     record_id: "bootstrap-record-1",
     workspace_id: "workspace-1",
     paths_planted: 1,
-    template_ids_used: ["workspace.bootstrap.conservative-start"],
+    template_ids_used: ["workspace.bootstrap.explicit-test"],
     planted_at: "2026-04-20T00:00:00.000Z",
     ...overrides
   };

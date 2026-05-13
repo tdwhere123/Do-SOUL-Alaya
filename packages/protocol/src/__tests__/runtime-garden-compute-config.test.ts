@@ -85,6 +85,18 @@ describe("RuntimeGardenComputeConfig schema (C1)", () => {
       })
     ).not.toThrow();
   });
+
+  it("keeps legacy keychain segment values schema-compatible for patch releases", () => {
+    expect(() =>
+      RuntimeGardenComputeConfigSchema.parse({
+        provider_kind: "official_api",
+        model_id: null,
+        provider_url: null,
+        secret_ref: "keychain:alaya: openai",
+        enabled: true
+      })
+    ).not.toThrow();
+  });
 });
 
 describe("RuntimeGardenComputeConfigPatch schema (C1)", () => {

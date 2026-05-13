@@ -162,14 +162,9 @@ export class RecallService {
       );
     }
 
-    // Codex re-review I2: prior implementation called assessCoarseFilter
-    // on the HOT-only filter (1× collectSupplementaryData) just to feed
-    // hotFineAssessmentCount into expandTierCascade, then ran it again
-    // on the merged filter (2nd call). M5 already simplified the
-    // cascade gate to use coarseFilter.candidates.length; this commit
-    // applies the same simplification at the recall() call site so
-    // collectSupplementaryData runs exactly once per recall — on the
-    // final merged filter — even when cascade fires.
+    // Keep supplementary scoring data on the final merged candidate set only;
+    // the HOT pass drives tier expansion but must not double-read graph/path
+    // signals when the cascade widens.
     const coarseFilter = await this.expandTierCascade({
       workspaceId: params.workspaceId,
       runId: params.runId ?? null,
@@ -455,14 +450,8 @@ export class RecallService {
       timeFilter: params.timeFilter
     });
     const warmMerged = this.mergeCoarseFilters(params.hotCoarseFilter, warmFilter, "warm_cascade_engaged");
-    // Wave-end M5 (Reviewer I4): the cascade gate previously called
-    // assessCoarseFilter (which runs collectSupplementaryData) just to
-    // count candidates — meaning HOT-empty cold-start paths fanned the
-    // N+1 graph/plasticity/embedding lookups twice (warm gate + final
-    // assess) and three times when COLD also fired. Use the much
-    // cheaper coarse-filter candidate count for the cascade trigger;
-    // collectSupplementaryData now runs exactly once, on the final
-    // merged filter, in assessCoarseFilter at the recall() call site.
+    // Use coarse-filter candidate counts for cascade gates; supplementary
+    // graph/plasticity/embedding lookups run once on the final merged filter.
     if (warmMerged.candidates.length >= targetCount) {
       return warmMerged;
     }
@@ -543,10 +532,8 @@ export class RecallService {
     readonly queryText: string | null;
     readonly coarseFtsRanks: Readonly<Record<string, number>>;
   }): Promise<RecallSupplementaryData> {
-    // graph_support is now a weighted aggregate across edge_types — see
-    // SqliteMemoryGraphEdgeRepo.countInboundEdgesWeighted for the weight
-    // map. The legacy supports-only count would pin graph_support to 0
-    // whenever materialization hadn't yet attached a SUPPORTS edge.
+    // graph_support is a weighted inbound aggregate across edge types; the
+    // storage repo owns the concrete edge_type weight map.
     const graphSupportCounts = Object.fromEntries(
       await Promise.all(
         params.candidates.map(async (candidate) => [
@@ -590,11 +577,20 @@ export class RecallService {
       }
     }
 
+    const graphAndPathCold =
+      params.candidates.length > 0 &&
+      params.candidates.every(
+        (candidate) =>
+          normalizeGraphSupport(graphSupportCounts[candidate.object_id] ?? 0) === 0 &&
+          clamp01(plasticityFactors[candidate.object_id] ?? 0) === 0
+      );
+
     return Object.freeze({
       ftsRanks: params.coarseFtsRanks,
       graphSupportCounts: Object.freeze(graphSupportCounts),
       budgetPenaltyFactor,
-      plasticityFactors
+      plasticityFactors,
+      graphAndPathCold
     });
   }
 
@@ -881,7 +877,10 @@ export class RecallService {
     scoreMultiplier = 1
   ): Readonly<{ readonly score: number; readonly factors: RecallScoreFactors }> {
     const config = policy.fine_assessment;
-    const weights = this.resolveEffectiveActivationWeights(entry, policy);
+    const weights = resolveDynamicActivationWeights(
+      this.resolveEffectiveActivationWeights(entry, policy),
+      supplementaryData.graphAndPathCold
+    );
     const activationScore = normalizeActivationScore(entry.activation_score);
     const relevanceFactor = supplementaryData.ftsRanks[entry.object_id] ?? 0;
     const graphSupportFactor = normalizeGraphSupport(supplementaryData.graphSupportCounts[entry.object_id] ?? 0);
@@ -902,12 +901,13 @@ export class RecallService {
       weights.domain_match +
       weights.retention +
       weights.freshness;
+    const pathPlasticityWeight = supplementaryData.graphAndPathCold ? 0 : PATH_PLASTICITY_WEIGHT;
 
     const rawScore = clamp01(
       activationScore * baseWeight +
         relevanceFactor * weights.relevance +
         graphSupportFactor * weights.graph_support +
-        plasticityFactor * PATH_PLASTICITY_WEIGHT -
+        plasticityFactor * pathPlasticityWeight -
         budgetPenalty * weights.budget_penalty -
         conflictPenalty * weights.conflict_penalty
     );
@@ -995,4 +995,19 @@ export class RecallService {
       extraSourceChannel: "semantic_supplement"
     });
   }
+}
+
+function resolveDynamicActivationWeights(
+  weights: ActivationWeights,
+  graphAndPathCold: boolean
+): ActivationWeights {
+  if (!graphAndPathCold) {
+    return weights;
+  }
+
+  return Object.freeze({
+    ...weights,
+    relevance: weights.relevance + weights.graph_support + PATH_PLASTICITY_WEIGHT,
+    graph_support: 0
+  });
 }

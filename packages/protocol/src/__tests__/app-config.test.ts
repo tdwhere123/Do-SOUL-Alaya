@@ -163,13 +163,20 @@ describe("app config schemas", () => {
       secret_ref: "keychain:alaya-garden:openai"
     });
 
-    for (const secretRef of [
-      "keychain:",
-      "keychain:onlyservice",
-      "keychain:a:b:c",
-      "keychain::acct",
-      // Whitespace and shell-meta characters would otherwise reach
-      // `security -a` / `secret-tool account` as argv values.
+    for (const secretRef of ["keychain:", "keychain:onlyservice", "keychain:a:b:c", "keychain::acct"]) {
+      expect(
+        RuntimeGardenComputeConfigSchema.safeParse({
+          provider_kind: "official_api",
+          provider_url: null,
+          secret_ref: secretRef,
+          model_id: "gpt-4.1-mini",
+          enabled: true
+        }).success,
+        secretRef
+      ).toBe(false);
+    }
+
+    for (const legacySecretRef of [
       "keychain:alaya: openai",
       "keychain:alaya:openai ",
       "keychain: alaya:openai",
@@ -184,12 +191,12 @@ describe("app config schemas", () => {
         RuntimeGardenComputeConfigSchema.safeParse({
           provider_kind: "official_api",
           provider_url: null,
-          secret_ref: secretRef,
+          secret_ref: legacySecretRef,
           model_id: "gpt-4.1-mini",
           enabled: true
         }).success,
-        secretRef
-      ).toBe(false);
+        legacySecretRef
+      ).toBe(true);
     }
 
     expect(

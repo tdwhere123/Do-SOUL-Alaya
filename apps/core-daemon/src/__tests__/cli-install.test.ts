@@ -4,6 +4,7 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { createInstallCommand } from "../cli/install.js";
+import { readSecretLine } from "../cli/install/masked-stdin.js";
 import type { AlayaCliContext } from "../cli/bridge.js";
 
 describe("cli install", () => {
@@ -27,6 +28,91 @@ describe("cli install", () => {
     expect(command.argsSchema.safeParse(["--keychain", "--non-interactive", "extra"])).toMatchObject({
       success: false
     });
+  });
+
+  it("restores TTY raw mode after reading a masked keychain secret", async () => {
+    const stdin = new PassThrough() as PassThrough & {
+      isRaw: boolean;
+      setRawMode: (mode: boolean) => typeof stdin;
+    };
+    const rawModeChanges: boolean[] = [];
+    stdin.isRaw = false;
+    stdin.setRawMode = (mode: boolean) => {
+      rawModeChanges.push(mode);
+      stdin.isRaw = mode;
+      return stdin;
+    };
+    const stderr = new PassThrough();
+
+    const read = readSecretLine(stdin, stderr, true);
+    stdin.write("sk-secrex");
+    stdin.write(Buffer.from([0x7f]));
+    stdin.write("t\n");
+
+    await expect(read).resolves.toBe("sk-secret");
+    expect(rawModeChanges).toEqual([true, false]);
+  });
+
+  it("restores TTY raw mode when setup fails after raw mode is enabled", async () => {
+    const stdin = new PassThrough() as PassThrough & {
+      isRaw: boolean;
+      setRawMode: (mode: boolean) => typeof stdin;
+      setEncoding: () => typeof stdin;
+    };
+    const rawModeChanges: boolean[] = [];
+    stdin.isRaw = false;
+    stdin.setRawMode = (mode: boolean) => {
+      rawModeChanges.push(mode);
+      stdin.isRaw = mode;
+      return stdin;
+    };
+    stdin.setEncoding = () => {
+      throw new Error("encoding failed");
+    };
+
+    await expect(readSecretLine(stdin, new PassThrough(), true)).rejects.toThrow("encoding failed");
+    expect(rawModeChanges).toEqual([true, false]);
+  });
+
+  it("restores TTY raw mode when input ends before newline", async () => {
+    const stdin = new PassThrough() as PassThrough & {
+      isRaw: boolean;
+      setRawMode: (mode: boolean) => typeof stdin;
+    };
+    const rawModeChanges: boolean[] = [];
+    stdin.isRaw = false;
+    stdin.setRawMode = (mode: boolean) => {
+      rawModeChanges.push(mode);
+      stdin.isRaw = mode;
+      return stdin;
+    };
+
+    const read = readSecretLine(stdin, new PassThrough(), true);
+    stdin.end("partial-secret");
+
+    await expect(read).rejects.toThrow("ended before newline");
+    expect(rawModeChanges).toEqual([true, false]);
+  });
+
+  it("restores TTY raw mode when input closes before newline", async () => {
+    const stdin = new PassThrough() as PassThrough & {
+      isRaw: boolean;
+      setRawMode: (mode: boolean) => typeof stdin;
+    };
+    const rawModeChanges: boolean[] = [];
+    stdin.isRaw = false;
+    stdin.setRawMode = (mode: boolean) => {
+      rawModeChanges.push(mode);
+      stdin.isRaw = mode;
+      return stdin;
+    };
+
+    const read = readSecretLine(stdin, new PassThrough(), true);
+    stdin.write("partial-secret");
+    stdin.destroy();
+
+    await expect(read).rejects.toThrow("closed before newline");
+    expect(rawModeChanges).toEqual([true, false]);
   });
 
   it("writes config, secret refs, pasted secrets, and audit rows without plaintext .env keys", async () => {

@@ -4,7 +4,7 @@ import { buildBootstrappingPathId, buildBootstrappingRecordId } from "../shared/
 import { BootstrappingService } from "../garden/bootstrapping-service.js";
 
 describe("BootstrappingService", () => {
-  it("plans conservative learned paths for a new workspace without writes", async () => {
+  it("plans explicitly configured learned paths for a new workspace without writes", async () => {
     const service = new BootstrappingService({
       templates: [createTemplate()],
       now: () => "2026-04-20T00:00:00.000Z"
@@ -15,7 +15,7 @@ describe("BootstrappingService", () => {
         expect.objectContaining({
           path_id: buildBootstrappingPathId(
             "workspace-1",
-            "workspace.bootstrap.conservative-start"
+            "workspace.bootstrap.explicit-test"
           ),
           workspace_id: "workspace-1",
           anchors: {
@@ -26,19 +26,19 @@ describe("BootstrappingService", () => {
             target_anchor: {
               kind: "object_facet",
               object_id: "workspace-1",
-              facet_key: "conservative_start"
+              facet_key: "explicit_test_seed"
             }
           },
           constitution: {
             relation_kind: "supports",
-            why_this_relation_exists: ["new workspace starts with conservative learned-path defaults"]
+            why_this_relation_exists: ["test-configured ontology seed"]
           },
           plasticity_state: expect.objectContaining({
             strength: 0.1,
             stability_class: "volatile"
           }),
           legitimacy: {
-            evidence_basis: ["bootstrapping:workspace.bootstrap.conservative-start"],
+            evidence_basis: ["bootstrapping:workspace.bootstrap.explicit-test"],
             governance_class: "hint_only"
           },
           effect_vector: expect.objectContaining({
@@ -50,7 +50,7 @@ describe("BootstrappingService", () => {
         record_id: buildBootstrappingRecordId("workspace-1"),
         workspace_id: "workspace-1",
         paths_planted: 1,
-        template_ids_used: ["workspace.bootstrap.conservative-start"],
+        template_ids_used: ["workspace.bootstrap.explicit-test"],
         planted_at: "2026-04-20T00:00:00.000Z"
       }
     });
@@ -70,7 +70,7 @@ describe("BootstrappingService", () => {
           expect.objectContaining({
             path_id: buildBootstrappingPathId(
               "workspace-1",
-              "workspace.bootstrap.conservative-start"
+              "workspace.bootstrap.explicit-test"
             ),
             created_at: "2026-04-20T12:34:56.789Z",
             updated_at: "2026-04-20T12:34:56.789Z"
@@ -91,16 +91,16 @@ function createTemplate(
   overrides: Partial<BootstrappingPathTemplate> = {}
 ): BootstrappingPathTemplate {
   return {
-    template_id: "workspace.bootstrap.conservative-start",
+    template_id: "workspace.bootstrap.explicit-test",
     relation_kind: "supports",
-    why_this_relation_exists: ["new workspace starts with conservative learned-path defaults"],
+    why_this_relation_exists: ["test-configured ontology seed"],
     source_anchor_template: {
       kind: "object",
       description: "workspace"
     },
     target_anchor_template: {
       kind: "object_facet",
-      description: "conservative_start"
+      description: "explicit_test_seed"
     },
     default_strength: 0.1,
     default_stability_class: "volatile",

@@ -4,6 +4,7 @@ import type { AlayaRuntimeNotifier } from "./runtime-notifier.js";
 import type { AppConfigService } from "./services/config-service.js";
 import type { EmbeddingStatusService } from "./services/embedding-status-service.js";
 import type { EnvironmentStatusService } from "./services/environment-status-service.js";
+import type { GraphHealthService } from "./services/graph-health-service.js";
 import type { McpMemoryToolHandler } from "./mcp-memory-tool-handler.js";
 import type { RecallUtilizationService } from "./services/recall-utilization-service.js";
 import type { TrustStateRecorder } from "./trust-state.js";
@@ -46,6 +47,7 @@ export interface AlayaDaemonRuntimeServices {
   }>;
   readonly environmentStatusService: EnvironmentStatusService;
   readonly embeddingStatusService: EmbeddingStatusService;
+  readonly graphHealthService: GraphHealthService;
   readonly configService: Pick<AppConfigService, "getGardenCredentialProvenance" | "getRuntimeGardenComputeConfig">;
   readonly mcpMemoryToolHandler: McpMemoryToolHandler;
   readonly recallUtilizationService: RecallUtilizationService;

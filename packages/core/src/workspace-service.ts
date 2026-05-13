@@ -93,6 +93,18 @@ export type WorkspaceBootstrapReconcileResult = Readonly<
       readonly relation_count: number;
     }
   | {
+      readonly status: "corrupt_partial";
+      readonly workspace_id: string;
+      readonly record_id: string;
+      readonly relation_count: 0;
+      readonly reason: "bootstrapping_record_without_relations";
+    }
+  | {
+      readonly status: "skipped_no_templates";
+      readonly workspace_id: string;
+      readonly template_ids: readonly string[];
+    }
+  | {
       readonly status: "skipped_no_planner";
       readonly workspace_id: string;
     }
@@ -203,8 +215,10 @@ export class WorkspaceService {
       existingBootstrappingRecord === null
         ? await bootstrappingDeps.bootstrappingPlanner.planBootstrap(workspaceId)
         : null;
+    const shouldPlantBootstrapPlan =
+      bootstrapPlan !== null && bootstrapPlan.relations.length > 0;
     const events =
-      bootstrapPlan === null
+      !shouldPlantBootstrapPlan
         ? [workspaceCreatedEvent]
         : [workspaceCreatedEvent, this.buildBootstrappingPathsPlantedEvent(bootstrapPlan.record)];
 
@@ -219,7 +233,7 @@ export class WorkspaceService {
       const persistedBootstrappingRecord =
         bootstrappingDeps.bootstrappingRecordRepo.findByWorkspace(createdWorkspace.workspace_id);
 
-      if (persistedBootstrappingRecord !== null || bootstrapPlan === null) {
+      if (persistedBootstrappingRecord !== null || !shouldPlantBootstrapPlan) {
         return createdWorkspace;
       }
 
@@ -250,6 +264,16 @@ export class WorkspaceService {
       bootstrappingDeps.bootstrappingRecordRepo.findByWorkspace(workspaceId);
     const existingRelations =
       await bootstrappingDeps.pathRelationRepo.findByWorkspace(workspaceId);
+    if (existingRecord !== null && existingRelations.length === 0) {
+      return {
+        status: "corrupt_partial",
+        workspace_id: workspaceId,
+        record_id: existingRecord.record_id,
+        relation_count: 0,
+        reason: "bootstrapping_record_without_relations"
+      };
+    }
+
     if (existingRecord !== null || existingRelations.length > 0) {
       return {
         status: "already_planted",
@@ -261,6 +285,14 @@ export class WorkspaceService {
 
     const bootstrapPlan =
       await bootstrappingDeps.bootstrappingPlanner.planBootstrap(workspaceId);
+    if (bootstrapPlan.relations.length === 0) {
+      return {
+        status: "skipped_no_templates",
+        workspace_id: workspaceId,
+        template_ids: bootstrapPlan.record.template_ids_used
+      };
+    }
+
     const plantedEvent = this.buildBootstrappingPathsPlantedEvent(
       bootstrapPlan.record,
       options?.causedBy ?? "system"
@@ -301,11 +333,23 @@ export class WorkspaceService {
     }
 
     if (racedRecordId !== null) {
+      const racedRelations =
+        await bootstrappingDeps.pathRelationRepo.findByWorkspace(workspaceId);
+      if (racedRelations.length === 0) {
+        return {
+          status: "corrupt_partial",
+          workspace_id: workspaceId,
+          record_id: racedRecordId,
+          relation_count: 0,
+          reason: "bootstrapping_record_without_relations"
+        };
+      }
+
       return {
         status: "already_planted",
         workspace_id: workspaceId,
         record_id: racedRecordId,
-        relation_count: 0
+        relation_count: racedRelations.length
       };
     }
 
