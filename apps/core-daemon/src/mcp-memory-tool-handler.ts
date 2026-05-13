@@ -14,6 +14,7 @@ import {
   GardenTaskKind,
   GardenTier,
   MemoryGovernanceEventType,
+  MemoryGraphEdgeType,
   MemoryDimensionSchema,
   parseGardenEventPayload,
   ProposalResolutionState,
@@ -53,6 +54,7 @@ import {
   type GardenMcpWorkerRole,
   type GardenRoleValue,
   type MemoryEntry,
+  type MemoryGraphEdgeTypeValue,
   type Proposal,
   type RecallCandidate,
   type RecallPolicy,
@@ -92,6 +94,11 @@ type GardenCompletionCandidateSignal = NonNullable<
 >[number];
 
 const RECALL_HIT_ACTIVATION_BUMP = 0.05;
+// Bounds the fan-out per `report_context_usage(used)` call. With N=8 the
+// ordered pairs cap at 56 edge writes; UNIQUE(src, tgt, edge_type) on
+// `memory_graph_edges` deduplicates on retries, so repeated reports of the
+// same set are idempotent at storage level.
+const MAX_CROSS_LINK_FANOUT = 8;
 const POST_TURN_EXTRACT_EXCERPT_MAX_CHARS = 800;
 // Auto-extract from a recall turn only when there is enough text for the
 // Garden compute provider to find a durable signal in; a bare keyword query
@@ -177,6 +184,17 @@ export interface McpMemoryToolHandlerDependencies {
         readonly runId?: string | null;
       }>
     ): Promise<readonly Readonly<{ readonly memory_id: string; readonly edge_type: string; readonly direction: string; readonly edge_id: string }>[]>;
+  };
+  // Optional write port for RECALLS-edge cross-linking on used reports.
+  // Same shape as MaterializationRouter's GraphEdgeCreationPort.
+  readonly graphEdgePort?: {
+    createEdge(params: {
+      readonly sourceMemoryId: string;
+      readonly targetMemoryId: string;
+      readonly edgeType: MemoryGraphEdgeTypeValue;
+      readonly workspaceId: string;
+      readonly runId?: string | null;
+    }): Promise<void>;
   };
   readonly sessionOverrideService: {
     apply(params: {
@@ -865,6 +883,11 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     // used_ratio vs the trust-state proof.
     const linkedDelivery = await deps.trustStateRecorder.findDeliveryById(request.delivery_id);
     await promoteRecallHitMemories(request, context, linkedDelivery, reportedAt);
+    await crossLinkRecalledMemories(
+      usedObjectIds,
+      linkedDelivery?.workspace_id ?? context.workspaceId,
+      linkedDelivery?.run_id ?? context.runId ?? null
+    );
     enqueuePostTurnExtractTask(request, context, linkedDelivery);
     await emitContextUsageReportedTelemetry({
       deliveryId: request.delivery_id,
@@ -1118,6 +1141,42 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
         return;
       }
       throw error;
+    }
+  }
+
+  async function crossLinkRecalledMemories(
+    usedObjectIds: readonly string[],
+    workspaceId: string,
+    runId: string | null
+  ): Promise<void> {
+    if (deps.graphEdgePort === undefined || usedObjectIds.length < 2) {
+      return;
+    }
+
+    const targets = usedObjectIds.slice(0, MAX_CROSS_LINK_FANOUT);
+
+    for (const source of targets) {
+      for (const target of targets) {
+        if (source === target) {
+          continue;
+        }
+        try {
+          await deps.graphEdgePort.createEdge({
+            sourceMemoryId: source,
+            targetMemoryId: target,
+            edgeType: MemoryGraphEdgeType.RECALLS,
+            workspaceId,
+            runId
+          });
+        } catch (err) {
+          // Fire-and-forget: supplementary signal, never load-bearing.
+          warn("mcp-memory-tool-handler: recalls edge creation failed", {
+            sourceMemoryId: source,
+            targetMemoryId: target,
+            error: err instanceof Error ? err.message : String(err)
+          });
+        }
+      }
     }
   }
 

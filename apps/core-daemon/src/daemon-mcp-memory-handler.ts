@@ -17,6 +17,7 @@ export function createDaemonMcpMemoryToolHandler(input: {
   readonly memoryEntryRepo: NonNullable<McpMemoryToolHandlerDependencies["memoryEntryRepo"]>;
   readonly signalService: McpMemoryToolHandlerDependencies["signalService"];
   readonly graphExploreService: McpMemoryToolHandlerDependencies["graphExploreService"];
+  readonly graphEdgePort?: McpMemoryToolHandlerDependencies["graphEdgePort"];
   readonly sessionOverrideService: McpMemoryToolHandlerDependencies["sessionOverrideService"];
   readonly trustStateRecorder: McpMemoryToolHandlerDependencies["trustStateRecorder"];
   readonly eventPublisher: NonNullable<McpMemoryToolHandlerDependencies["eventPublisher"]>;
@@ -32,6 +33,7 @@ export function createDaemonMcpMemoryToolHandler(input: {
     memoryEntryRepo: input.memoryEntryRepo,
     signalService: input.signalService,
     graphExploreService: input.graphExploreService,
+    ...(input.graphEdgePort === undefined ? {} : { graphEdgePort: input.graphEdgePort }),
     sessionOverrideService: input.sessionOverrideService,
     trustStateRecorder: input.trustStateRecorder,
     eventPublisher: input.eventPublisher,

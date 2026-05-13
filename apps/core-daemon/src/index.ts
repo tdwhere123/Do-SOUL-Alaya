@@ -516,16 +516,20 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     delegate: contextLensAssembler
   });
   const sqliteHandoffGapAdapter = new SqliteHandoffGapAdapter(sqliteHandoffGapRepo);
+  // Shared write port for memory-graph edges. Used by materialization
+  // (memory→evidence SUPPORTS, memory→memory DERIVES_FROM) and by the
+  // MCP report_context_usage handler (memory↔memory RECALLS cross-link).
+  const graphEdgePort = {
+    createEdge: async (params: Parameters<typeof graphExploreService.addEdge>[0]) => {
+      await graphExploreService.addEdge(params);
+    }
+  };
   const materializationRouter = new MaterializationRouter({
     evidenceService,
     memoryService,
     synthesisService,
     claimService,
-    graphEdgePort: {
-      createEdge: async (params) => {
-        await graphExploreService.addEdge(params);
-      }
-    },
+    graphEdgePort,
     handoffGapHandler: sqliteHandoffGapAdapter
   });
   const signalService = new SignalService({
@@ -722,6 +726,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     memoryEntryRepo,
     signalService,
     graphExploreService,
+    graphEdgePort,
     sessionOverrideService,
     trustStateRecorder,
     eventPublisher,
