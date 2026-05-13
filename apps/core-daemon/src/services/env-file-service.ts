@@ -4,6 +4,7 @@ import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { CoreError } from "@do-soul/alaya-core";
 import {
+  parseSecretRefKeychainTarget,
   RuntimeEmbeddingConfigPatchSchema,
   RuntimeGardenComputeConfigPatchSchema,
   type RuntimeEmbeddingConfig,
@@ -427,11 +428,8 @@ function normalizeSecretRef(value: string): string {
       return trimmed;
     }
   }
-  if (trimmed.startsWith("keychain:")) {
-    const segments = trimmed.slice("keychain:".length).split(":");
-    if (segments.length === 2 && segments[0] !== "" && segments[1] !== "") {
-      return trimmed;
-    }
+  if (trimmed.startsWith("keychain:") && parseSecretRefKeychainTarget(trimmed) !== null) {
+    return trimmed;
   }
   throw invalidRuntimeEmbeddingPatch();
 }

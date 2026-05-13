@@ -65,33 +65,87 @@ export const RuntimeEmbeddingConfigPatchSchema = RuntimeEmbeddingConfigSchema.un
   .strict()
   .readonly();
 
+// Canonical secret-ref grammar. Anyone touching a `secret_ref` string —
+// schema validation, daemon resolver, doctor renderer, env-file normalizer —
+// reads keychain refs through `parseSecretRefKeychainTarget` so the same
+// charset and segment rules apply at write-time and at every read-time
+// call site. The charset blocks whitespace, quoting, and leading-dash
+// segments that would otherwise reach `security -a` / `secret-tool account`
+// as command-line arguments.
+export const SECRET_REF_ENV_PREFIX = "env:";
+export const SECRET_REF_FILE_PREFIX = "file:";
+export const SECRET_REF_KEYCHAIN_PREFIX = "keychain:";
+export const ENV_SECRET_REF_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+// Each segment must start with an alphanumeric or `_`/`.` so platform
+// tooling (`security -a <segment>`, `secret-tool account <segment>`)
+// cannot interpret it as a flag, and the body uses the same charset
+// plus `-` so common service names like `alaya-garden` stay valid.
+export const KEYCHAIN_REF_SEGMENT_PATTERN = /^[A-Za-z0-9_.][A-Za-z0-9._-]*$/u;
+
+export type SecretRefScheme = "env" | "file" | "keychain";
+
+export interface KeychainRefTarget {
+  readonly service: string;
+  readonly account: string;
+}
+
+export function secretRefScheme(ref: string): SecretRefScheme | null {
+  if (ref.startsWith(SECRET_REF_ENV_PREFIX)) {
+    return "env";
+  }
+  if (ref.startsWith(SECRET_REF_FILE_PREFIX)) {
+    return "file";
+  }
+  if (ref.startsWith(SECRET_REF_KEYCHAIN_PREFIX)) {
+    return "keychain";
+  }
+  return null;
+}
+
+export function parseSecretRefKeychainTarget(ref: string): KeychainRefTarget | null {
+  if (!ref.startsWith(SECRET_REF_KEYCHAIN_PREFIX)) {
+    return null;
+  }
+  const body = ref.slice(SECRET_REF_KEYCHAIN_PREFIX.length);
+  const segments = body.split(":");
+  if (segments.length !== 2) {
+    return null;
+  }
+  const [service, account] = segments;
+  if (service === undefined || account === undefined) {
+    return null;
+  }
+  if (!KEYCHAIN_REF_SEGMENT_PATTERN.test(service) || !KEYCHAIN_REF_SEGMENT_PATTERN.test(account)) {
+    return null;
+  }
+  return { service, account };
+}
+
 const RuntimeSecretRefSchema = z
   .string()
   .superRefine((value, context) => {
-    if (value.startsWith("env:")) {
-      const envName = value.slice("env:".length);
-      if (/^[A-Za-z_][A-Za-z0-9_]*$/u.test(envName)) {
+    if (value.startsWith(SECRET_REF_ENV_PREFIX)) {
+      const envName = value.slice(SECRET_REF_ENV_PREFIX.length);
+      if (ENV_SECRET_REF_NAME_PATTERN.test(envName)) {
         return;
       }
     }
 
-    if (value.startsWith("file:")) {
-      const filePath = value.slice("file:".length);
+    if (value.startsWith(SECRET_REF_FILE_PREFIX)) {
+      const filePath = value.slice(SECRET_REF_FILE_PREFIX.length);
       if (filePath.startsWith("/") && filePath.length > 1) {
         return;
       }
     }
 
-    if (value.startsWith("keychain:")) {
-      const segments = value.slice("keychain:".length).split(":");
-      if (segments.length === 2 && segments[0] !== "" && segments[1] !== "") {
-        return;
-      }
+    if (value.startsWith(SECRET_REF_KEYCHAIN_PREFIX) && parseSecretRefKeychainTarget(value) !== null) {
+      return;
     }
 
     context.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'secret_ref must use "env:NAME", "file:/path", or "keychain:service:account".'
+      message:
+        'secret_ref must use "env:NAME", "file:/path", or "keychain:service:account" with each keychain segment limited to [A-Za-z0-9._-]+.'
     });
   });
 

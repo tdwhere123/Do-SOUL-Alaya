@@ -1,5 +1,11 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import {
+  parseSecretRefKeychainTarget,
+  SECRET_REF_ENV_PREFIX,
+  SECRET_REF_FILE_PREFIX,
+  SECRET_REF_KEYCHAIN_PREFIX
+} from "@do-soul/alaya-protocol";
 import { readPlatformKeychainSecret, type KeychainReadError } from "./secrets/keychain/index.js";
 
 export type SecretRef = string;
@@ -25,9 +31,9 @@ export type ResolveSecretError =
   | { kind: "keychain_entry_not_found"; ref: SecretRef; service: string; account: string; reason: string }
   | { kind: "empty"; ref: SecretRef; origin: "env" | "file" | "keychain" };
 
-const ENV_REF_PREFIX = "env:";
-const FILE_REF_PREFIX = "file:";
-const KEYCHAIN_REF_PREFIX = "keychain:";
+const ENV_REF_PREFIX = SECRET_REF_ENV_PREFIX;
+const FILE_REF_PREFIX = SECRET_REF_FILE_PREFIX;
+const KEYCHAIN_REF_PREFIX = SECRET_REF_KEYCHAIN_PREFIX;
 const ENV_IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 const defaultSecretRefReader: SecretRefReader = {
@@ -140,9 +146,14 @@ function resolveFileRef(ref: SecretRef, reader: SecretRefReader): ResolvedSecret
 }
 
 function resolveKeychainRef(ref: SecretRef, reader: SecretRefReader): ResolvedSecret | ResolveSecretError {
-  const parsed = parseKeychainRef(ref);
-  if ("kind" in parsed) {
-    return parsed;
+  const parsed = parseSecretRefKeychainTarget(ref);
+  if (parsed === null) {
+    return {
+      kind: "malformed",
+      ref,
+      reason:
+        "Keychain secret ref must match keychain:<service>:<account> with each segment limited to [A-Za-z0-9._-]+."
+    };
   }
 
   const readResult = reader.readKeychain(parsed.service, parsed.account);
@@ -166,26 +177,6 @@ function resolveKeychainRef(ref: SecretRef, reader: SecretRefReader): ResolvedSe
     ref,
     value,
     origin: "keychain"
-  };
-}
-
-function parseKeychainRef(
-  ref: SecretRef
-): { readonly service: string; readonly account: string } | Extract<ResolveSecretError, { kind: "malformed" }> {
-  const body = ref.slice(KEYCHAIN_REF_PREFIX.length);
-  const segments = body.split(":");
-  // Invariant: keychain refs are exactly two colon-free segments so service/account parsing is deterministic.
-  if (segments.length !== 2 || segments[0] === "" || segments[1] === "") {
-    return {
-      kind: "malformed",
-      ref,
-      reason: "Keychain secret ref must match keychain:<service>:<account> with two non-empty colon-free segments."
-    };
-  }
-
-  return {
-    service: segments[0],
-    account: segments[1]
   };
 }
 

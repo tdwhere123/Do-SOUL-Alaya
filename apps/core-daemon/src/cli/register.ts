@@ -38,6 +38,7 @@ import {
   resolveCliWorkspaceContext
 } from "./workspace-context.js";
 import { resolveSecretRef, type ResolveSecretError } from "../secrets.js";
+import { parseSecretRefKeychainTarget } from "@do-soul/alaya-protocol";
 
 export function registerAlayaCliCommands(
   bridge: AlayaCliBridge,
@@ -163,7 +164,7 @@ function keychainCheckField(
   if (secretRef === null || !secretRef.startsWith("keychain:")) {
     return {};
   }
-  const parsed = parseKeychainRef(secretRef);
+  const parsed = parseSecretRefKeychainTarget(secretRef);
   if (parsed === null) {
     return {
       keychain_check: {
@@ -171,7 +172,8 @@ function keychainCheckField(
         service: "",
         account: "",
         error_kind: "malformed",
-        remediation: "Keychain secret_ref must match keychain:<service>:<account>."
+        remediation:
+          "Keychain secret_ref must match keychain:<service>:<account> with each segment limited to [A-Za-z0-9._-]+."
       }
     };
   }
@@ -196,14 +198,6 @@ function keychainCheckField(
       remediation: keychainRemediation(resolved)
     }
   };
-}
-
-function parseKeychainRef(secretRef: string): { readonly service: string; readonly account: string } | null {
-  const [service, account, extra] = secretRef.slice("keychain:".length).split(":");
-  if (service === undefined || account === undefined || extra !== undefined || service === "" || account === "") {
-    return null;
-  }
-  return { service, account };
 }
 
 function keychainErrorKind(
@@ -257,7 +251,7 @@ function resolveGardenCredentialSource(
     return { kind: "file", masked_path: maskPath(path) };
   }
   if (secretRef.startsWith("keychain:")) {
-    const parsed = parseKeychainRef(secretRef);
+    const parsed = parseSecretRefKeychainTarget(secretRef);
     if (parsed !== null) {
       return { kind: "keychain", service: parsed.service, account: parsed.account };
     }

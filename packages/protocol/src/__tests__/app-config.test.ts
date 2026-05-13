@@ -5,9 +5,11 @@ import {
   DEFAULT_SOUL_CONFIG,
   DEFAULT_STRATEGY_CONFIG,
   EnvironmentConfigSchema,
+  parseSecretRefKeychainTarget,
   RuntimeEmbeddingConfigPatchSchema,
   RuntimeEmbeddingConfigSchema,
   RuntimeGardenComputeConfigSchema,
+  secretRefScheme,
   SoulConfigSchema,
   StrategyConfigSchema,
   ToolchainStatusSchema
@@ -89,6 +91,48 @@ describe("app config schemas", () => {
     });
   });
 
+  it("classifies and parses secret refs through the protocol-level grammar", () => {
+    expect(secretRefScheme("env:OPENAI_API_KEY")).toBe("env");
+    expect(secretRefScheme("file:/etc/alaya/secret")).toBe("file");
+    expect(secretRefScheme("keychain:alaya:openai")).toBe("keychain");
+    expect(secretRefScheme("vault:alaya:openai")).toBe(null);
+    expect(secretRefScheme("OPENAI_API_KEY")).toBe(null);
+
+    expect(parseSecretRefKeychainTarget("keychain:alaya:openai")).toEqual({
+      service: "alaya",
+      account: "openai"
+    });
+    expect(parseSecretRefKeychainTarget("keychain:alaya-garden:openai_4o")).toEqual({
+      service: "alaya-garden",
+      account: "openai_4o"
+    });
+    expect(parseSecretRefKeychainTarget("keychain:alaya.garden:openai.preview")).toEqual({
+      service: "alaya.garden",
+      account: "openai.preview"
+    });
+
+    for (const malformed of [
+      "env:OPENAI_API_KEY",
+      "keychain:",
+      "keychain:alaya",
+      "keychain:alaya:openai:extra",
+      "keychain:: openai",
+      "keychain:alaya: openai",
+      "keychain:alaya:openai ",
+      "keychain: alaya:openai",
+      "keychain:\talaya:openai",
+      "keychain:alaya:open\nai",
+      "keychain:alaya:open\"ai",
+      "keychain:alaya:open'ai",
+      "keychain:alaya:open$ai",
+      "keychain:alaya:open(ai)",
+      "keychain:-alaya:openai",
+      "keychain:alaya:--openai"
+    ]) {
+      expect(parseSecretRefKeychainTarget(malformed), malformed).toBe(null);
+    }
+  });
+
   it("exports runtime embedding and Alaya status schemas for Inspector", () => {
     expect(
       RuntimeEmbeddingConfigSchema.parse({
@@ -119,7 +163,23 @@ describe("app config schemas", () => {
       secret_ref: "keychain:alaya-garden:openai"
     });
 
-    for (const secretRef of ["keychain:", "keychain:onlyservice", "keychain:a:b:c", "keychain::acct"]) {
+    for (const secretRef of [
+      "keychain:",
+      "keychain:onlyservice",
+      "keychain:a:b:c",
+      "keychain::acct",
+      // Whitespace and shell-meta characters would otherwise reach
+      // `security -a` / `secret-tool account` as argv values.
+      "keychain:alaya: openai",
+      "keychain:alaya:openai ",
+      "keychain: alaya:openai",
+      "keychain:alaya:open\tai",
+      "keychain:alaya:openai\n",
+      "keychain:alaya:open\"ai",
+      "keychain:alaya:open$ai",
+      "keychain:-alaya:openai",
+      "keychain:alaya:--openai"
+    ]) {
       expect(
         RuntimeGardenComputeConfigSchema.safeParse({
           provider_kind: "official_api",
@@ -127,7 +187,8 @@ describe("app config schemas", () => {
           secret_ref: secretRef,
           model_id: "gpt-4.1-mini",
           enabled: true
-        }).success
+        }).success,
+        secretRef
       ).toBe(false);
     }
 

@@ -188,8 +188,23 @@ describe("secrets resolver", () => {
     });
   });
 
-  it.each(["keychain:", "keychain:onlyservice", "keychain:a:b:c", "keychain::acct", "keychain:svc:"])(
-    "returns malformed for invalid keychain ref %s",
+  it.each([
+    "keychain:",
+    "keychain:onlyservice",
+    "keychain:a:b:c",
+    "keychain::acct",
+    "keychain:svc:",
+    "keychain:alaya: openai",
+    "keychain:alaya:openai ",
+    "keychain: alaya:openai",
+    "keychain:alaya:open\tai",
+    "keychain:alaya:open\nai",
+    "keychain:alaya:open\"ai",
+    "keychain:alaya:open$ai",
+    "keychain:-alaya:openai",
+    "keychain:alaya:--openai"
+  ])(
+    "returns malformed for invalid keychain ref %j",
     (ref) => {
       const result = resolveSecretRef(ref, createReader());
 
