@@ -10,9 +10,9 @@
 
 ### *A local-first memory plane for CLI coding agents.*
 
-[![status](https://img.shields.io/badge/status-v0.1.3-success?style=flat-square)](#where-this-is-going)
+[![status](https://img.shields.io/badge/status-v0.3.0-success?style=flat-square)](#where-this-is-going)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-2302%20passing-success?style=flat-square)](#where-this-is-going)
+[![tests](https://img.shields.io/badge/tests-2428%20passing-success?style=flat-square)](#where-this-is-going)
 [![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#quickstart)
 [![pnpm](https://img.shields.io/badge/pnpm-%E2%89%A59-F69220?style=flat-square&logo=pnpm&logoColor=white)](#quickstart)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](#architecture-at-a-glance)
@@ -482,7 +482,7 @@ them, not `curl`):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/main/scripts/install.sh \
-  | ALAYA_VERSION=v0.1.3 bash
+  | ALAYA_VERSION=v0.3.0 bash
 ```
 
 Override install location:
@@ -595,15 +595,15 @@ Do-SOUL Alaya/
 
 ## Where this is going
 
-### Current state (2026-05-10)
+### Current state (2026-05-13)
 
-v0.1.3 ships the six-phase memory loop end-to-end on a single SQLite
-file: perception → governance → durability → recall → receipt →
-maintenance. Distribution is GitHub-Release tarball + `SHA256SUMS`,
-verified locally by `scripts/install.sh`; npm publish is intentionally
-out-of-scope. The latest patch (`v0.1.3`) wires `alaya inspect` to
-the active workspace so the Memory Inspector loads on a fresh
-install instead of 404-ing.
+v0.3.0 is the current checkpoint. It keeps the six-phase memory loop
+end-to-end on a single SQLite file, adds `keychain:<service>:<account>`
+secret refs, exposes a CLI/env entry path for host-worker Garden
+compute, and closes the host-autonomy evidence gap for `soul.recall`
+→ `soul.report_context_usage` with a live EventLog witness. Distribution
+is still GitHub-Release tarball + `SHA256SUMS`, verified locally by
+`scripts/install.sh`; npm publish is intentionally out-of-scope.
 
 ### Where it is going
 
@@ -617,10 +617,10 @@ Threads I'll pull next:
   recall / usage proof. Make every link auditable from the daemon
   alone, no external tracing required. v0.2.x closed the cold-start
   gap — `soul.recall` now feeds server-side extraction so an empty
-  store learns from the first conversation; what's left is richer
-  extraction beyond `LocalHeuristics` and a real-host proof that
-  agents drive the *explicit* `emit`/`propose` channel autonomously
-  (deferred, `#BL-038`).
+  store learns from the first conversation. v0.3.0 proves real-host
+  recall/usage follow-through; what's left is richer extraction beyond
+  `LocalHeuristics` and future proof, when available, that agents drive
+  the *explicit* `emit`/`propose` channel autonomously.
 - **Embedding strategy refinement** — keep "supplement, never
   oracle"; experiment with boost weight, supplement cap, per-domain
   calibration.

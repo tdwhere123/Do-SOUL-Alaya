@@ -6,12 +6,12 @@ runs strictly sequential. Group B (host autonomy evidence, `#BL-037`
 
 | Slice | Card | Issue | Size | Prereq | Status |
 |---|---|---|---|---|---|
-| 1 | [`keychain-resolver`](v0.3.0-slice-1-keychain-resolver.md) | `#BL-009` | M | none | not started |
-| 2 | [`keychain-doctor`](v0.3.0-slice-2-keychain-doctor.md) | `#BL-009` | S | slice 1 | not started |
-| 3 | [`keychain-install`](v0.3.0-slice-3-keychain-install.md) | `#BL-009` | M | slices 1, 2 | not started |
-| 4 | [`host-autonomy-replay`](v0.3.0-slice-4-host-autonomy-replay.md) | `#BL-038` | M | none (external dep) | not started |
-| 5 | [`codex-slash-recognition`](v0.3.0-slice-5-codex-slash-recognition.md) | `#BL-037` | S | none (external dep) | not started |
-| 6 | [`closeout`](v0.3.0-slice-6-closeout.md) | `#BL-009` / `#BL-037` / `#BL-038` | S | slices 1–5 | not started |
+| 1 | [`keychain-resolver`](v0.3.0-slice-1-keychain-resolver.md) | `#BL-009` | M | none | done — report: [`v0.3.0-slice-1.md`](reports/v0.3.0-slice-1.md) |
+| 2 | [`keychain-doctor`](v0.3.0-slice-2-keychain-doctor.md) | `#BL-009` | S | slice 1 | done — report: [`v0.3.0-slice-2.md`](reports/v0.3.0-slice-2.md) |
+| 3 | [`keychain-install`](v0.3.0-slice-3-keychain-install.md) | `#BL-009` | M | slices 1, 2 | done — review fixes landed; report: [`v0.3.0-slice-3.md`](reports/v0.3.0-slice-3.md) |
+| 4 | [`host-autonomy-replay`](v0.3.0-slice-4-host-autonomy-replay.md) | `#BL-038` | M | none (external dep) | done — live-usage witness; report: [`v0.3.0-slice-4.md`](reports/v0.3.0-slice-4.md) |
+| 5 | [`codex-slash-recognition`](v0.3.0-slice-5-codex-slash-recognition.md) | `#BL-037` | S | none (external dep) | done — negative proof; report: [`v0.3.0-slice-5.md`](reports/v0.3.0-slice-5.md) |
+| 6 | [`closeout`](v0.3.0-slice-6-closeout.md) | `#BL-009` / `#BL-037` / `#BL-038` | S | slices 1–5 | done — merged to `main`; report: [`v0.3.0-closeout.md`](reports/v0.3.0-closeout.md) |
 
 ## Cross-card constraints
 

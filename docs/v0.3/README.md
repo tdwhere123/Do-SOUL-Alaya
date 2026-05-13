@@ -80,6 +80,13 @@ reasonable window:
   v0.3.0 tag until the recording lands — is recorded but not the
   default.) The decision is taken before the close-out slice.
 
+Closeout result (2026-05-13): slice 4 closed with a live-usage
+EventLog witness rather than a synthetic stdio replay; slice 5 closed
+as negative proof for Codex CLI `0.130.0`; `#BL-009` closed with
+adapters code-reviewed on Linux/macOS/Windows while actual OS keychain
+write→read runtime transcripts remain operator-side follow-up evidence
+under `v0.3.0/keychain-transcripts/`.
+
 ## Layout
 
 ```
