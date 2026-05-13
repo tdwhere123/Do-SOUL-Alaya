@@ -99,5 +99,6 @@ docs/v0.3/
 ```
 
 The former `docs/v0.2/v0.2.1/` and `docs/v0.2/v0.2.2/` plan folders
-have been removed; `docs/v0.2/README.md` records that their work was
-folded into this directory.
+were removed when their work was folded into this directory. The v0.2
+line is archived under `docs/archive/v0.2/`; `docs/archive/v0.2/README.md`
+records the fold-in.
