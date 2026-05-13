@@ -67,6 +67,36 @@ describe("MaterializationRouter", () => {
     expect(target.kind).toBe("memory_and_claim");
   });
 
+  it("defers invalid schema-grounded field candidates before memory_and_claim", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    const signal = createSignal({
+      confidence: 0.9,
+      raw_payload: {
+        schema_grounding: { version: 1 },
+        detected_object: { object_kind: "constraint" },
+        field_candidates: [],
+        validation_result: { status: "deferred", reasons: ["field_candidates missing"] }
+      }
+    });
+
+    expect(router.route(signal)).toMatchObject({
+      kind: "deferred",
+      routing_reason: expect.stringContaining("schema-grounded signal failed validation")
+    });
+
+    const result = await router.materializeSignal(signal);
+
+    expect(result).toMatchObject({
+      target_kind: "deferred",
+      success: true,
+      created_objects: []
+    });
+    expect(deps.memoryService.create).not.toHaveBeenCalled();
+    expect(deps.claimService.create).not.toHaveBeenCalled();
+  });
+
   it("does NOT route potential_claim with confidence 0.49 to memory_and_claim (just below boundary)", () => {
     const router = createRouter();
 
@@ -204,6 +234,35 @@ describe("MaterializationRouter", () => {
     expect(evidenceInput.semantic_anchor.summary).toBe("Never print secrets.");
     expect(memoryInput.content).toBe("Never print secrets.");
     expect(claimInput.proposition_digest).toBe("Never print secrets.");
+  });
+
+  it("uses validated schema-grounded field values as memory content", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    const result = await router.materializeSignal(
+      createSignal({
+        raw_payload: {
+          schema_grounding: { version: 1, status: "valid" },
+          detected_object: { object_kind: "constraint", confidence: 0.8 },
+          field_candidates: [
+            {
+              field_name: "constraint",
+              value: "Always use rtk for repo commands.",
+              evidence: "Always use rtk for repo commands.",
+              confidence: 0.8
+            }
+          ],
+          validation_result: { status: "valid", reasons: [] }
+        }
+      })
+    );
+
+    expect(result.success).toBe(true);
+    const memoryInput = deps.memoryService.create.mock.calls[0][0] as {
+      readonly content: string;
+    };
+    expect(memoryInput.content).toBe("Always use rtk for repo commands.");
   });
 
   it("materializes synthesis by creating evidence objects and one synthesis capsule", async () => {

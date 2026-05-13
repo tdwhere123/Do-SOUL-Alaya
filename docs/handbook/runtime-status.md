@@ -46,7 +46,7 @@ each Phase Gate.
 | Dynamics runtime constants | `schema-ready` | `schema-ready` | P1-config |
 | MemoryService | `implementation-ready` | `live-event-ready` | P2-svc-memory |
 | EvidenceService | `implementation-ready` | `live-event-ready` | P2-svc-evidence |
-| SignalService | `implementation-ready` | `live-event-ready` | P2-svc-signal |
+| SignalService | `implementation-ready`; v0.3.2 defers invalid schema-grounded candidate signals before post-triage materialization can run | `live-event-ready` | P2-svc-signal + v0.3.2 |
 | GlobalMemoryRecallService | `implementation-ready` | `live-event-ready` | P2-svc-global-recall |
 | TaskSurfaceBuilder | `implementation-ready` | `implementation-ready` | P2-svc-task-surface-builder-prelude |
 | RecallService | `live-event-ready`; v0.2.0 adds budget `pressure_ratio` scoring, per-call `host_context.tokenizer_hint` estimation, and deterministic `domain_weight_overrides` audit factors | `live-event-ready` | P2-svc-recall + v0.2.0-slice-5..7 |
@@ -62,8 +62,8 @@ each Phase Gate.
 | Garden Janitor | `implementation-ready` | `live-event-ready` | P2-garden-batch-2 |
 | Garden Librarian | `implementation-ready` | `live-event-ready` | P2-garden-batch-2 |
 | GardenScheduler | `implementation-ready` | `live-event-ready` | P2-garden-batch-1 |
-| Garden compute providers / pi-mono + local heuristics | `implementation-ready`; `OfficialApiGardenProvider` routes extraction through `packages/soul/src/garden/pi-mono-extractor.ts`, with lazy daemon credential/config resolution through `GardenComputeProviderResolver`; deterministic daemon/config tests pass and provider-transport live smoke is recorded, but full daemon `POST_TURN_EXTRACT` + EventLog live AC7 remains pending | `live-event-ready` | P2-garden-batch-1 + v0.2.0-slice-2..4 |
-| Garden materialization / degradation / handoff gap | `implementation-ready`; accepted signals are fenced through persisted `compiled` state before materialization side effects, and replay of `triaged` / `compiled` signals does not rerun materializers, preventing duplicate evidence / memory / claim objects after retry or crash windows | `live-event-ready` | P2-garden-batch-3 |
+| Garden compute providers / pi-mono + local heuristics | `implementation-ready`; `OfficialApiGardenProvider` routes extraction through `packages/soul/src/garden/pi-mono-extractor.ts`, with lazy daemon credential/config resolution through `GardenComputeProviderResolver`; deterministic daemon/config tests pass and provider-transport live smoke is recorded, but full daemon `POST_TURN_EXTRACT` + EventLog live AC7 remains pending. v0.3.2 normalizes provider, local-heuristic, daemon, and host-worker candidate signals with internal schema-grounded raw-payload validation. | `live-event-ready` | P2-garden-batch-1 + v0.2.0-slice-2..4 + v0.3.2 |
+| Garden materialization / degradation / handoff gap | `implementation-ready`; accepted signals are fenced through persisted `compiled` state before materialization side effects, and replay of `triaged` / `compiled` signals does not rerun materializers, preventing duplicate evidence / memory / claim objects after retry or crash windows. v0.3.2 rechecks schema-grounded field/value payloads in `MaterializationRouter` and routes invalid payloads to `deferred`, creating no memory or claim objects. | `live-event-ready` | P2-garden-batch-3 + v0.3.2 |
 | Garden bootstrapping / remediation / backlog telemetry | `implementation-ready` | `live-event-ready` | P2-garden-batch-4 |
 | Soul package skeleton + governance leaves | `schema-ready` | `schema-ready` | P1-soul-skeleton |
 | Soul topology leaves | `implementation-ready` | `implementation-ready` | P1-topology |
@@ -93,7 +93,7 @@ each Phase Gate.
 | Recall tier widening | `live-event-ready`; coarse filter cascades HOT → WARM → COLD when fine-assessment results stay below `MIN_RECALL_RESULTS`; freshness decay 0.7 / 0.45; `degradation_reason` surfaces `warm_cascade_engaged` / `cold_cascade_engaged`; HOT-only fast path is byte-identical at the response boundary | `live-event-ready` | P6.1-R1 |
 | Recall hit → tier promotion | `live-event-ready`; `report_context_usage` with `usage_status="used"` on a non-HOT memory atomically promotes it to HOT and emits `SOUL_MEMORY_TIER_PROMOTED` with `reason="recall_hit"` via `EventPublisher.appendManyWithMutation`; concurrent USED reports collapse to one promotion via storage CAS | `live-event-ready` | P6.1-R2 |
 | Trustworthy Memory Loop | `live-event-ready`; accepted memory proposals validate through `MemoryService.validateUpdate`, apply inside an atomic proposal/storage transaction, reject leaves durable memory unchanged, and v0.2.0 carries optional `source_delivery_ids` through agent-originated candidate signals, proposal rows, proposal events, and daemon audit proof after validating anchors against recorded deliveries in the current trusted context | `live-event-ready` | P6-governance-accept-apply + v0.2.0-slice-8..9 |
-| Recall explainability + operator control | `schema-ready`; recall results expose selection reason, source channels, score factors, budget state, response strategy mix, and degradation reason; CLI/status names control-plane states distinctly | `schema-ready` | P6-recall-explainability + P6-operator-control |
+| Recall explainability + operator control | `schema-ready`; recall results expose selection reason, source channels, score factors, budget state, response strategy mix, and degradation reason; CLI/status names control-plane states distinctly. v0.3.2 adds internal recall evidence packs for fixture-level selected ids, source channels, score factors, budget state, evidence pointers, delivery/usage links, and metrics. | `schema-ready` | P6-recall-explainability + P6-operator-control + v0.3.2 |
 | Recall utilization telemetry | `live-event-ready`; daemon emits `soul.recall.delivered` (delivery_id / session_id / run_id / agent_target / query_hash / pointer_count / latency_ms) per `soul.recall` MCP call and `soul.context_usage.reported` per `soul.report_context_usage`. session_id is process-stable for `mcp stdio` and per-call for HTTP / CLI surfaces. usage events attribute run_id / agent_target / workspace_id from the linked delivery (not the reporter context) so retries land in the right session. `alaya status --recall-stats --workspace <id> [--since/--until]` aggregates total / unique_sessions / unique_runs / miss_ratio / used_ratio / follow_through_ratio over the EventLog window; aggregation excludes `inspector` / `cli` / `tools-cli` agent_targets by default (configurable via `excludeAgentTargets`); failures of the telemetry append never surface to the MCP caller. | `live-event-ready` | apps/core-daemon/src/services/recall-utilization-service.ts |
 | Cross-surface Phase 6 contract parity docs | `docs-truth-ready` | `docs-truth-ready` | P6-contract-parity-reset |
 | Graph inspector data contract | `schema-ready`; read-only contract derives from active PathRelation data, no live route | `schema-ready` | P5-graph-contract |
@@ -240,6 +240,35 @@ Both lessons are process-level — neither requires a code change in
 v0.1-closeout. They are pinned here so the v0.1.x maintenance waves and
 v0.2 planning agents can reference them at the source rather than
 re-discovering them from `.do-it/findings/{a1,a2,a3}.md`.
+
+## v0.3.2 Release (2026-05-13)
+
+Patch-internal memory-quality release. No MCP tool names or descriptions,
+MCP request/response schemas, EventLog payload schemas, runtime config
+schemas, or storage migrations changed. The release adds internal recall
+evidence packs for fixture-level selected ids / source channels / score
+factors / budget state / evidence pointers / delivery usage links,
+normalizes Garden candidate signals with internal schema-grounded
+`raw_payload` metadata, defers invalid schema-grounded signals in
+`SignalService`, blocks invalid field/value payloads in
+`MaterializationRouter` before memory / claim writes, and adds read/write
+integration fixtures for exact fact, current state, negative query,
+relation query, thematic recall, and Chinese preference / constraint
+recall. Workspace packages bumped `0.3.1` -> `0.3.2`. See
+`docs/v0.3/v0.3.2/`.
+
+## v0.3.1 Release (2026-05-13)
+
+Patch-safe recall/code-quality release. No MCP tool names or descriptions,
+MCP request/response schemas, EventLog payload schemas, runtime config
+schemas, or storage migrations changed. The release extracts recall
+candidate construction and delivery-budget rebuilds from `RecallService`,
+unifies storage keyword-search row plumbing, splits daemon recall result
+shaping out of `mcp-memory-tool-handler.ts`, registers the host-autonomy
+witness export script as an explicit hygiene-visible package script, and
+bumps workspace packages `0.3.0` -> `0.3.1`. The later v0.3.2
+read/write integrated memory-quality work is recorded above. See
+`docs/v0.3/v0.3.1/`.
 
 ## v0.3.0 Release (2026-05-13)
 

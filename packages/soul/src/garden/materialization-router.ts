@@ -24,6 +24,10 @@ import {
   type HandoffGapCreatedObject,
   type HandoffGapHandler
 } from "./handoff-gap-handler.js";
+import {
+  readSchemaGroundedContent,
+  validateSchemaGroundingForSignal
+} from "./schema-grounding.js";
 
 export interface MaterializationTarget {
   readonly kind: "memory_and_claim" | "synthesis" | "handoff_gap" | "evidence_only" | "deferred";
@@ -145,6 +149,14 @@ export class MaterializationRouter {
   }
 
   public route(signal: CandidateMemorySignal): MaterializationTarget {
+    const schemaGroundingValidation = validateSchemaGroundingForSignal(signal);
+    if (schemaGroundingValidation.declared && schemaGroundingValidation.status !== "valid") {
+      return {
+        kind: "deferred",
+        routing_reason: `schema-grounded signal failed validation: ${schemaGroundingValidation.reasons.join("; ")}`
+      };
+    }
+
     if (
       (signal.signal_kind === "potential_claim" || signal.signal_kind === "potential_preference") &&
       signal.confidence >= 0.5
@@ -639,6 +651,11 @@ function buildTopicKey(signal: CandidateMemorySignal): string {
 }
 
 function buildSignalSummary(signal: CandidateMemorySignal): string {
+  const schemaGroundedContent = readSchemaGroundedContent(signal);
+  if (schemaGroundedContent !== null) {
+    return schemaGroundedContent;
+  }
+
   const excerpt = signal.raw_payload.excerpt;
   if (typeof excerpt === "string" && excerpt.trim().length > 0) {
     return excerpt.trim();

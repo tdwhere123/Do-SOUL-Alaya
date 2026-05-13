@@ -43,6 +43,7 @@ export * from "./project-mapping-service.js";
 export * from "./prompt-asset-registry.js";
 export * from "./proposal-service.js";
 export * from "./recall-service.js";
+export * from "./recall-evidence-pack.js";
 export * from "./run-hot-state-service.js";
 export * from "./run-service.js";
 export * from "./runtime-event-normalizer-state.js";

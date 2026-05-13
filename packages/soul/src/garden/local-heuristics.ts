@@ -6,6 +6,7 @@ import {
   type SignalKind
 } from "@do-soul/alaya-protocol";
 import { GardenProviderKind, type GardenCompileContext, type GardenComputeProvider } from "./compute-provider.js";
+import { buildSchemaGroundedRawPayload } from "./schema-grounding.js";
 
 interface PatternDefinition {
   readonly pattern: RegExp;
@@ -175,11 +176,16 @@ export class LocalHeuristics implements GardenComputeProvider {
             domain_tags: [],
             confidence: definition.confidence,
             evidence_refs: [],
-            raw_payload: {
-              matched_text: matchedText,
-              pattern_category: definition.pattern_category,
-              turn_content_excerpt: buildTurnExcerpt(normalizedTurnContent, matchedText)
-            },
+            raw_payload: buildSchemaGroundedRawPayload({
+              signalKind: definition.signal_kind,
+              objectKind: definition.object_kind,
+              confidence: definition.confidence,
+              rawPayload: {
+                matched_text: matchedText,
+                pattern_category: definition.pattern_category,
+                turn_content_excerpt: buildTurnExcerpt(normalizedTurnContent, matchedText)
+              }
+            }),
             created_at: createdAt
           })
         );

@@ -41,6 +41,7 @@ describe("garden-extraction-parser-parity", () => {
         expect(signal.signal_kind).toBe(expected.signal_kind);
         expect(signal.object_kind).toBe(expected.object_kind);
         expect(signal.confidence).toBeCloseTo(expected.confidence, 1);
+        expect(signal.raw_payload.validation_result).toMatchObject({ status: "valid" });
       });
     }
   });

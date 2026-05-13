@@ -433,38 +433,8 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     queryText: string,
     limit: number
   ): Promise<readonly MemoryEntryKeywordSearchResult[]> {
-    const tokens = tokenizeFtsQuery(queryText);
-
-    if (tokens.length === 0 || !Number.isInteger(limit) || limit <= 0) {
-      return Object.freeze([]);
-    }
-
-    const shortTokens = tokens.filter((token) => countQueryCodepoints(token) < 3);
-    const trigramTokens = tokens.filter((token) => countQueryCodepoints(token) >= 3);
-
     try {
-      const exactRows = this.searchExactKeywordRows(workspaceId, shortTokens, limit);
-      const trigramRows =
-        trigramTokens.length === 0
-          ? []
-          : (this.searchByKeywordStatement.all(
-              workspaceId,
-              trigramTokens.map((token) => `"${token}"`).join(" OR "),
-              limit
-            ) as Array<{
-              readonly object_id: string;
-              readonly raw_rank: number;
-            }>);
-      const mergedRows = mergeKeywordSearchRows(exactRows, trigramRows, limit);
-
-      return Object.freeze(
-        mergedRows.map((row) =>
-          Object.freeze({
-            object_id: row.object_id,
-            normalized_rank: row.normalized_rank
-          })
-        )
-      );
+      return this.searchKeywordRows({ workspaceId, queryText, limit });
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -480,47 +450,19 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     limit: number,
     objectIds: readonly string[]
   ): Promise<readonly MemoryEntryKeywordSearchResult[]> {
-    const tokens = tokenizeFtsQuery(queryText);
     const candidateObjectIds = normalizeKeywordSearchObjectIds(objectIds);
 
-    if (
-      tokens.length === 0 ||
-      candidateObjectIds.length === 0 ||
-      !Number.isInteger(limit) ||
-      limit <= 0
-    ) {
+    if (candidateObjectIds.length === 0) {
       return Object.freeze([]);
     }
 
-    const shortTokens = tokens.filter((token) => countQueryCodepoints(token) < 3);
-    const trigramTokens = tokens.filter((token) => countQueryCodepoints(token) >= 3);
-
     try {
-      const exactRows = this.searchExactKeywordRows(
+      return this.searchKeywordRows({
         workspaceId,
-        shortTokens,
+        queryText,
         limit,
         candidateObjectIds
-      );
-      const trigramRows =
-        trigramTokens.length === 0
-          ? []
-          : this.searchTrigramKeywordRowsWithinObjectIds(
-              workspaceId,
-              trigramTokens,
-              limit,
-              candidateObjectIds
-            );
-      const mergedRows = mergeKeywordSearchRows(exactRows, trigramRows, limit);
-
-      return Object.freeze(
-        mergedRows.map((row) =>
-          Object.freeze({
-            object_id: row.object_id,
-            normalized_rank: row.normalized_rank
-          })
-        )
-      );
+      });
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -859,6 +801,44 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     }
   }
 
+  private searchKeywordRows(params: Readonly<{
+    readonly workspaceId: string;
+    readonly queryText: string;
+    readonly limit: number;
+    readonly candidateObjectIds?: readonly string[];
+  }>): readonly MemoryEntryKeywordSearchResult[] {
+    const tokens = tokenizeFtsQuery(params.queryText);
+
+    if (tokens.length === 0 || !Number.isInteger(params.limit) || params.limit <= 0) {
+      return Object.freeze([]);
+    }
+
+    const shortTokens = tokens.filter((token) => countQueryCodepoints(token) < 3);
+    const trigramTokens = tokens.filter((token) => countQueryCodepoints(token) >= 3);
+    const exactRows = this.searchExactKeywordRows(
+      params.workspaceId,
+      shortTokens,
+      params.limit,
+      params.candidateObjectIds
+    );
+    const trigramRows = this.searchTrigramKeywordRows(
+      params.workspaceId,
+      trigramTokens,
+      params.limit,
+      params.candidateObjectIds
+    );
+    const mergedRows = mergeKeywordSearchRows(exactRows, trigramRows, params.limit);
+
+    return Object.freeze(
+      mergedRows.map((row) =>
+        Object.freeze({
+          object_id: row.object_id,
+          normalized_rank: row.normalized_rank
+        })
+      )
+    );
+  }
+
   private searchExactKeywordRows(
     workspaceId: string,
     tokens: readonly string[],
@@ -929,6 +909,32 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
       workspaceId,
       tokens.map((token) => `"${token}"`).join(" OR "),
       ...objectIdFilter.params,
+      limit
+    ) as readonly FtsKeywordSearchRow[];
+  }
+
+  private searchTrigramKeywordRows(
+    workspaceId: string,
+    tokens: readonly string[],
+    limit: number,
+    candidateObjectIds?: readonly string[]
+  ): readonly FtsKeywordSearchRow[] {
+    if (tokens.length === 0) {
+      return [];
+    }
+
+    if (candidateObjectIds !== undefined) {
+      return this.searchTrigramKeywordRowsWithinObjectIds(
+        workspaceId,
+        tokens,
+        limit,
+        candidateObjectIds
+      );
+    }
+
+    return this.searchByKeywordStatement.all(
+      workspaceId,
+      tokens.map((token) => `"${token}"`).join(" OR "),
       limit
     ) as readonly FtsKeywordSearchRow[];
   }

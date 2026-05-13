@@ -31,9 +31,20 @@ describe("LocalHeuristics", () => {
       created_at: "2026-03-18T10:20:30.000Z",
       raw_payload: expect.objectContaining({
         pattern_category: "preference",
-        matched_text: "I always use TypeScript strict mode for application code."
+        matched_text: "I always use TypeScript strict mode for application code.",
+        schema_grounding: expect.objectContaining({ status: "valid" }),
+        detected_object: expect.objectContaining({ object_kind: "preference" }),
+        validation_result: expect.objectContaining({ status: "valid" })
       })
     });
+    expect(signals[0].raw_payload.field_candidates).toEqual([
+      {
+        field_name: "preference",
+        value: "I always use TypeScript strict mode for application code.",
+        evidence: "I always use TypeScript strict mode for application code.",
+        confidence: 0.6
+      }
+    ]);
     expect(UUID_PATTERN.test(signals[0].signal_id)).toBe(true);
     expect(CandidateMemorySignalSchema.parse(signals[0])).toEqual(signals[0]);
   });

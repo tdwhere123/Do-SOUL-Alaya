@@ -50,6 +50,7 @@ import {
   GardenScheduler,
   Janitor,
   Librarian,
+  normalizeSchemaGroundedSignal,
   PathGraphSnapshotter,
   reviewPathGraphSnapshotHistory,
   type GardenCompileContext,
@@ -820,7 +821,7 @@ export function createGardenRuntime(input: {
         if (parsed.workspace_id !== payload.workspace_id || parsed.run_id !== payload.run_id) {
           throw new Error("Post-turn extract candidate signal escaped the task workspace or run.");
         }
-        return parsed;
+        return normalizeSchemaGroundedSignal(parsed);
       })
     );
   };

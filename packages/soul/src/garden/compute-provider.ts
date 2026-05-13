@@ -13,6 +13,7 @@ import {
   createPiMonoExtractor,
   type SignalExtractor
 } from "./pi-mono-extractor.js";
+import { buildSchemaGroundedRawPayload } from "./schema-grounding.js";
 
 export const GardenProviderKind = GardenProviderKinds;
 export type GardenProviderKind = GardenProviderKindValue;
@@ -113,8 +114,9 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
     const createdAt = this.now();
 
     return Object.freeze(
-      drafts.map((draft) =>
-        CandidateMemorySignalSchema.parse({
+      drafts.map((draft) => {
+        const confidence = clampConfidence(draft.confidence);
+        return CandidateMemorySignalSchema.parse({
           signal_id: this.generateSignalId(),
           workspace_id: context.workspace_id,
           run_id: context.run_id,
@@ -124,17 +126,22 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
           object_kind: draft.object_kind,
           scope_hint: null,
           domain_tags: [],
-          confidence: clampConfidence(draft.confidence),
+          confidence,
           evidence_refs: [],
-          raw_payload: {
-            matched_text: draft.matched_text,
-            provider_kind: this.provider_kind,
-            extraction_reason: draft.reason ?? "official_api",
-            turn_content_excerpt: buildTurnExcerpt(normalizedTurnContent, draft.matched_text)
-          },
+          raw_payload: buildSchemaGroundedRawPayload({
+            signalKind: draft.signal_kind,
+            objectKind: draft.object_kind,
+            confidence,
+            rawPayload: {
+              matched_text: draft.matched_text,
+              provider_kind: this.provider_kind,
+              extraction_reason: draft.reason ?? "official_api",
+              turn_content_excerpt: buildTurnExcerpt(normalizedTurnContent, draft.matched_text)
+            }
+          }),
           created_at: createdAt
-        })
-      )
+        });
+      })
     );
   }
 

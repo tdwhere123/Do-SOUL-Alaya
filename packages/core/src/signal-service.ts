@@ -330,6 +330,10 @@ export class SignalService {
   }
 
   private evaluateTriage(signal: CandidateMemorySignal): SignalTriageResult {
+    if (hasInvalidSchemaGrounding(signal)) {
+      return "deferred";
+    }
+
     if (signal.confidence < 0.3 && signal.signal_kind === "potential_conflict") {
       return "deferred";
     }
@@ -407,6 +411,62 @@ function buildSignalReplayFingerprint(signal: CandidateMemorySignal): string {
     raw_payload: signal.raw_payload,
     source_delivery_ids: signal.source_delivery_ids
   });
+}
+
+function hasInvalidSchemaGrounding(signal: CandidateMemorySignal): boolean {
+  const rawPayload = signal.raw_payload;
+  if (
+    rawPayload.schema_grounding === undefined &&
+    rawPayload.detected_object === undefined &&
+    rawPayload.field_candidates === undefined &&
+    rawPayload.validation_result === undefined
+  ) {
+    return false;
+  }
+
+  const detectedObject = readRecord(rawPayload.detected_object);
+  const detectedObjectKind = readNonEmptyString(detectedObject?.object_kind);
+  if (detectedObjectKind !== signal.object_kind) {
+    return true;
+  }
+
+  const fields = Array.isArray(rawPayload.field_candidates)
+    ? rawPayload.field_candidates
+    : [];
+  if (fields.length === 0) {
+    return true;
+  }
+
+  for (const field of fields) {
+    const record = readRecord(field);
+    if (
+      record === null ||
+      readNonEmptyString(record.field_name) === null ||
+      readNonEmptyString(record.value) === null ||
+      readNonEmptyString(record.evidence) === null
+    ) {
+      return true;
+    }
+  }
+
+  const validationResult = readRecord(rawPayload.validation_result);
+  const validationStatus = readNonEmptyString(validationResult?.status);
+  return validationStatus !== "valid";
+}
+
+function readRecord(value: unknown): Readonly<Record<string, unknown>> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : null;
+}
+
+function readNonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? null : trimmed;
 }
 
 class SignalReplayMismatchError extends Error {

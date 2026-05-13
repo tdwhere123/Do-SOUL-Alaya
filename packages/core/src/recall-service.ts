@@ -3,7 +3,6 @@ import {
   ControlPlaneObjectKind,
   DYNAMICS_CONSTANTS,
   RecallContextEventType,
-  RecallCandidateSchema,
   RetentionPolicy,
   SoulRecallCompletedPayloadSchema,
   StorageTier,
@@ -20,6 +19,11 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { PreparedEmbeddingQueryHandle } from "./embedding-recall-service.js";
 import { loadGlobalRecallCandidates } from "./global-memory-recall-service.js";
+import {
+  appendAdditiveCandidatesWithinRemainingBudgets,
+  buildRecallCandidate,
+  rebuildRecallBudgetStateForDelivery
+} from "./recall-candidate-builder.js";
 import { STRATEGY_RECALL_DEFAULTS, type NodeStrategy } from "./task-surface-builder.js";
 import {
   EMBEDDING_SIMILARITY_WEIGHT,
@@ -29,7 +33,6 @@ import {
   WARM_CASCADE_DECAY,
   applySimilarityBoost,
   assertActivationWeightsSumToOne,
-  assignManifestation,
   buildRecallCandidateDedupeKey,
   classifyGlobalCandidate,
   classifyProjectMappingCandidate,
@@ -37,9 +40,7 @@ import {
   compareEffectiveScores,
   compareMemoryEntries,
   compareRecallCandidates,
-  createContentPreview,
   entryMatchesTimeFilter,
-  estimateTokens,
   filterMemoriesByTimeWindow,
   getGlobalRecallLimit,
   isClaimLikeDimension,
@@ -219,7 +220,7 @@ export class RecallService {
       preparedEmbeddingQuery,
       tokenEstimator
     });
-    const candidates = this.rebuildBudgetStateForDelivery(
+    const candidates = rebuildRecallBudgetStateForDelivery(
       mergedCandidates,
       policy.fine_assessment
     );
@@ -667,7 +668,7 @@ export class RecallService {
       ];
     });
 
-    return this.appendAdditiveCandidatesWithinRemainingBudgets(
+    return appendAdditiveCandidatesWithinRemainingBudgets(
       boostedBaseCandidates,
       additiveCandidates.sort(compareRecallCandidates),
       params.config.fine_assessment
@@ -730,76 +731,6 @@ export class RecallService {
     });
   }
 
-  private appendAdditiveCandidatesWithinRemainingBudgets(
-    baseCandidates: readonly Readonly<RecallCandidate>[],
-    additiveCandidates: readonly Readonly<RecallCandidate>[],
-    config: Readonly<FineAssessmentConfig>
-  ): readonly Readonly<RecallCandidate>[] {
-    if (additiveCandidates.length === 0) {
-      return baseCandidates;
-    }
-
-    const selected = [...baseCandidates];
-    const perDimensionCounts = new Map<MemoryDimensionType, number>();
-    let totalTokens = 0;
-
-    for (const candidate of baseCandidates) {
-      const dimensionCount = perDimensionCounts.get(candidate.dimension) ?? 0;
-      perDimensionCounts.set(candidate.dimension, dimensionCount + 1);
-      totalTokens += candidate.token_estimate;
-    }
-
-    for (const candidate of additiveCandidates) {
-      const dimensionCount = perDimensionCounts.get(candidate.dimension) ?? 0;
-      const dimensionLimit = config.budgets.per_dimension_limits?.[candidate.dimension] ?? null;
-      const nextEntryCount = selected.length + 1;
-      const nextTokenCount = totalTokens + candidate.token_estimate;
-
-      if (dimensionLimit !== null && dimensionCount >= dimensionLimit) {
-        continue;
-      }
-
-      if (
-        nextEntryCount > config.budgets.max_entries ||
-        nextTokenCount > config.budgets.max_total_tokens
-      ) {
-        continue;
-      }
-
-      selected.push(candidate);
-      perDimensionCounts.set(candidate.dimension, dimensionCount + 1);
-      totalTokens = nextTokenCount;
-    }
-
-    return Object.freeze(selected);
-  }
-
-  private rebuildBudgetStateForDelivery(
-    candidates: readonly Readonly<RecallCandidate>[],
-    config: Readonly<FineAssessmentConfig>
-  ): readonly Readonly<RecallCandidate>[] {
-    let usedTokensBeforeCandidate = 0;
-
-    return Object.freeze(
-      candidates.map((candidate, index) => {
-        const tokenEstimate = candidate.token_estimate;
-        const rebuilt = RecallCandidateSchema.parse({
-          ...candidate,
-          budget_state: buildBudgetState({
-            tokenEstimate,
-            maxEntries: config.budgets.max_entries,
-            maxTotalTokens: config.budgets.max_total_tokens,
-            index,
-            usedTokensBeforeCandidate
-          })
-        });
-
-        usedTokensBeforeCandidate += tokenEstimate;
-        return rebuilt;
-      })
-    );
-  }
-
   private fineAssess(
     candidates: readonly Readonly<CoarseRecallCandidate>[],
     policy: Readonly<RecallPolicy>,
@@ -858,7 +789,7 @@ export class RecallService {
         return accumulator;
       }
 
-      const tokenEstimate = estimateTokens(entry.content, tokenEstimator);
+      const tokenEstimate = tokenEstimator.estimate(entry.content);
       const dimensionCount = accumulator.perDimensionCounts.get(entry.dimension) ?? 0;
       const dimensionLimit = config.budgets.per_dimension_limits?.[entry.dimension] ?? null;
       const nextEntryCount = accumulator.selected.length + 1;
@@ -874,8 +805,6 @@ export class RecallService {
         }
       }
 
-      const activationScore = normalizeActivationScore(entry.activation_score);
-      const manifestation = assignManifestation(activationScore);
       const scored = this.computeEffectiveScoreDetails(
         entry,
         policy,
@@ -884,29 +813,15 @@ export class RecallService {
         candidate.isAdvisory ?? false,
         candidate.scoreMultiplier ?? 1
       );
-      const relevanceScore = scored.score;
-      const nextCandidate = RecallCandidateSchema.parse({
-        object_id: entry.object_id,
-        object_kind: "memory_entry" as const,
-        activation_score: activationScore,
-        relevance_score: relevanceScore,
-        content_preview: createContentPreview(entry.content, manifestation, candidate.originPlane),
-        token_estimate: tokenEstimate,
-        manifestation,
-        dimension: entry.dimension,
-        scope_class: entry.scope_class,
-        selection_reason: buildSelectionReason(scored.factors, candidate.originPlane),
-        source_channels: buildSourceChannels(candidate, scored.factors),
-        score_factors: scored.factors,
-        budget_state: buildBudgetState({
-          tokenEstimate,
-          maxEntries: config.budgets.max_entries,
-          maxTotalTokens: config.budgets.max_total_tokens,
-          index: accumulator.selected.length,
-          usedTokensBeforeCandidate: accumulator.totalTokens
-        }),
-        ...(candidate.originPlane === undefined ? {} : { origin_plane: candidate.originPlane }),
-        ...(candidate.isAdvisory === undefined ? {} : { is_advisory: candidate.isAdvisory })
+      const nextCandidate = buildRecallCandidate({
+        candidate,
+        relevanceScore: scored.score,
+        scoreFactors: scored.factors,
+        tokenEstimator,
+        tokenEstimate,
+        budgets: config.budgets,
+        index: accumulator.selected.length,
+        usedTokensBeforeCandidate: accumulator.totalTokens
       });
 
       return {
@@ -1044,8 +959,6 @@ export class RecallService {
     normalizedSimilarity: number,
     tokenEstimator: TokenEstimator
   ): Readonly<RecallCandidate> {
-    const activationScore = normalizeActivationScore(candidate.entry.activation_score);
-    const manifestation = assignManifestation(activationScore);
     const scored = this.computeEffectiveScoreDetails(
       candidate.entry,
       policy,
@@ -1063,100 +976,16 @@ export class RecallService {
       relevance: relevanceScore,
       embedding_similarity: normalizedEmbeddingSimilarity
     });
-    const tokenEstimate = estimateTokens(candidate.entry.content, tokenEstimator);
 
-    return RecallCandidateSchema.parse({
-      object_id: candidate.entry.object_id,
-      object_kind: "memory_entry",
-      activation_score: activationScore,
-      relevance_score: relevanceScore,
-      content_preview: createContentPreview(
-        candidate.entry.content,
-        manifestation,
-        candidate.originPlane
-      ),
-      token_estimate: tokenEstimate,
-      manifestation,
-      dimension: candidate.entry.dimension,
-      scope_class: candidate.entry.scope_class,
-      selection_reason: buildSelectionReason(scoreFactors, candidate.originPlane),
-      source_channels: buildSourceChannels(candidate, scoreFactors, "semantic_supplement"),
-      score_factors: scoreFactors,
-      budget_state: buildBudgetState({
-        tokenEstimate,
-        maxEntries: policy.fine_assessment.budgets.max_entries,
-        maxTotalTokens: policy.fine_assessment.budgets.max_total_tokens,
-        index: 0,
-        usedTokensBeforeCandidate: 0
-      }),
-      ...(candidate.originPlane === undefined ? {} : { origin_plane: candidate.originPlane }),
-      ...(candidate.isAdvisory === undefined ? {} : { is_advisory: candidate.isAdvisory })
+    return buildRecallCandidate({
+      candidate,
+      relevanceScore,
+      scoreFactors,
+      tokenEstimator,
+      budgets: policy.fine_assessment.budgets,
+      index: 0,
+      usedTokensBeforeCandidate: 0,
+      extraSourceChannel: "semantic_supplement"
     });
   }
-}
-
-function buildSelectionReason(
-  factors: Readonly<RecallScoreFactors>,
-  originPlane: CoarseRecallCandidate["originPlane"]
-): string {
-  const origin = originPlane === "global" ? "global recall" : "workspace recall";
-  const supports: string[] = [`activation ${factors.activation.toFixed(3)}`];
-  if ((factors.graph_support ?? 0) > 0) {
-    supports.push(`graph support ${factors.graph_support?.toFixed(3)}`);
-  }
-  if ((factors.path_plasticity ?? 0) > 0) {
-    supports.push(`path plasticity ${factors.path_plasticity?.toFixed(3)}`);
-  }
-  if ((factors.embedding_similarity ?? 0) > 0) {
-    supports.push(`embedding similarity ${factors.embedding_similarity?.toFixed(3)}`);
-  }
-  if ((factors.budget_penalty ?? 0) > 0) {
-    supports.push(`budget penalty ${factors.budget_penalty?.toFixed(3)}`);
-  }
-
-  return `Selected by ${origin}; score ${factors.relevance.toFixed(3)} from ${supports.join(", ")}.`;
-}
-
-function buildSourceChannels(
-  candidate: Readonly<CoarseRecallCandidate>,
-  factors: Readonly<RecallScoreFactors>,
-  extraChannel?: string
-): readonly string[] {
-  const channels = new Set<string>(["ranked_recall", candidate.originPlane ?? "workspace_local"]);
-  if ((factors.graph_support ?? 0) > 0) {
-    channels.add("graph_support");
-  }
-  if ((factors.path_plasticity ?? 0) > 0) {
-    channels.add("path_plasticity");
-  }
-  if ((factors.embedding_similarity ?? 0) > 0 || extraChannel !== undefined) {
-    channels.add(extraChannel ?? "semantic_supplement");
-  }
-  if (candidate.sourceChannel !== undefined) {
-    channels.add(candidate.sourceChannel);
-  }
-  if (candidate.isAdvisory === true) {
-    channels.add("advisory");
-  }
-
-  return Object.freeze([...channels]);
-}
-
-function buildBudgetState(params: Readonly<{
-  readonly tokenEstimate: number;
-  readonly maxEntries: number;
-  readonly maxTotalTokens: number;
-  readonly index: number;
-  readonly usedTokensBeforeCandidate: number;
-}>) {
-  const usedTokensThroughCandidate = params.usedTokensBeforeCandidate + params.tokenEstimate;
-
-  return Object.freeze({
-    token_estimate: params.tokenEstimate,
-    max_entries: params.maxEntries,
-    max_total_tokens: params.maxTotalTokens,
-    remaining_entries: Math.max(params.maxEntries - params.index - 1, 0),
-    remaining_tokens: Math.max(params.maxTotalTokens - usedTokensThroughCandidate, 0),
-    within_budget: params.index < params.maxEntries && usedTokensThroughCandidate <= params.maxTotalTokens
-  });
 }

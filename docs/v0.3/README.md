@@ -1,9 +1,17 @@
-# Do-SOUL Alaya v0.3 — Keychain + Host Autonomy Evidence
+# Do-SOUL Alaya v0.3 Line
 
 > Codename TBD (v0.2 was "distributed-falcon"; the v0.3 codename is
 > chosen in the v0.3.0 close-out slice or left unset). v0.3 keeps
 > invariant §21 intact (local-first memory plane; no chat UI, no
 > agent UI).
+
+## Version Tracks
+
+| Track | Purpose | Status |
+|---|---|---|
+| [`v0.3.0`](v0.3.0/README.md) | Keychain secret refs, host autonomy evidence, Codex slash recognition proof | done |
+| [`v0.3.1`](v0.3.1/README.md) | Patch-safe recall maintainability and baseline foundation | done |
+| [`v0.3.2`](v0.3.2/README.md) | Patch-internal read/write memory quality | done |
 
 ## What v0.3.0 is
 
@@ -92,17 +100,25 @@ under `v0.3.0/keychain-transcripts/`.
 ```
 docs/v0.3/
 ├── README.md                              ← this file (entry point)
-└── v0.3.0/
-    ├── README.md                          ← v0.3.0 wave index + cross-card constraints
-    ├── v0.3.0-slice-1-keychain-resolver.md
-    ├── v0.3.0-slice-2-keychain-doctor.md
-    ├── v0.3.0-slice-3-keychain-install.md
-    ├── v0.3.0-slice-4-host-autonomy-replay.md
-    ├── v0.3.0-slice-5-codex-slash-recognition.md
-    ├── v0.3.0-slice-6-closeout.md
-    ├── release-notes.md                    ← written by slice 6
-    ├── reports/                            ← per-card completion reports + platform transcripts
-    └── host-autonomy-fixtures/             ← written by slice 4
+├── v0.3.0/
+│   ├── README.md                          ← v0.3.0 wave index + cross-card constraints
+│   ├── v0.3.0-slice-1-keychain-resolver.md
+│   ├── v0.3.0-slice-2-keychain-doctor.md
+│   ├── v0.3.0-slice-3-keychain-install.md
+│   ├── v0.3.0-slice-4-host-autonomy-replay.md
+│   ├── v0.3.0-slice-5-codex-slash-recognition.md
+│   ├── v0.3.0-slice-6-closeout.md
+│   ├── release-notes.md                    ← written by slice 6
+│   ├── reports/                            ← per-card completion reports + platform transcripts
+│   └── host-autonomy-fixtures/             ← written by slice 4
+├── v0.3.1/
+│   ├── README.md                          ← patch-safe recall/code-quality track
+│   ├── release-notes.md
+│   └── reports/
+└── v0.3.2/
+    ├── README.md                          ← patch-internal memory quality track
+    ├── release-notes.md
+    └── reports/
 ```
 
 The former `docs/v0.2/v0.2.1/` and `docs/v0.2/v0.2.2/` plan folders

@@ -102,6 +102,15 @@ export {
   type MaterializationRouterDeps,
   type MaterializationTarget
 } from "./materialization-router.js";
+export {
+  buildSchemaGroundedRawPayload,
+  normalizeSchemaGroundedSignal,
+  readSchemaGroundedContent,
+  validateSchemaGroundingForSignal,
+  type SchemaGroundedRawPayloadInput,
+  type SchemaGroundingValidationResult,
+  type SchemaGroundingValidationStatus
+} from "./schema-grounding.js";
 export { LocalHeuristics } from "./local-heuristics.js";
 export {
   SessionOverrideRemediation,

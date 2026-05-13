@@ -33,9 +33,8 @@ function fail(message) {
 }
 
 function resolveBetterSqlite3() {
-  // better-sqlite3 is a workspace dependency of @do-soul/alaya-storage; it is
-  // not hoisted to the root node_modules, so resolve it version-agnostically
-  // from the pnpm store rather than pinning a version path.
+  // Normal repo installs expose better-sqlite3 to this root script. Keep the
+  // pnpm-store fallback for older workspace-only layouts.
   try {
     return require("better-sqlite3");
   } catch {

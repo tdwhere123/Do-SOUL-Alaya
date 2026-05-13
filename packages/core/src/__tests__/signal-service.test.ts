@@ -290,6 +290,52 @@ describe("SignalService", () => {
     expect(result.materialization).toBeNull();
   });
 
+  it("defers invalid schema-grounded signals before materialization can write memory", async () => {
+    const materialize = vi.fn(async () => {
+      throw new Error("should not run for invalid schema-grounded signals");
+    });
+    const service = new SignalService({
+      eventLogRepo: {
+        append: vi.fn(async (event) => ({
+          event_id: "evt_1",
+          created_at: "2026-03-18T00:00:01.000Z",
+          revision: 0,
+          ...event
+        })),
+        queryByEntity: vi.fn(async () => [])
+      },
+      signalRepo: {
+        create: vi.fn(async (signal) => ({ ...signal, signal_state: "emitted" })),
+        getById: vi.fn(async () => null),
+        listByRun: vi.fn(async () => []),
+        updateState: vi.fn(async (signalId, state) => createSignal({ signal_id: signalId, signal_state: state }))
+      },
+      runtimeNotifier: {
+        notifyEntry: vi.fn(async () => {})
+      },
+      postTriageMaterializer: {
+        materialize
+      }
+    });
+
+    const result = await service.receiveSignal(
+      createSignal({
+        confidence: 0.9,
+        raw_payload: {
+          schema_grounding: { version: 1 },
+          detected_object: { object_kind: "constraint" },
+          field_candidates: [],
+          validation_result: { status: "deferred", reasons: ["field_candidates missing"] }
+        }
+      })
+    );
+
+    expect(result.triage_result).toBe("deferred");
+    expect(result.signal.signal_state).toBe("deferred");
+    expect(result.materialization).toBeNull();
+    expect(materialize).not.toHaveBeenCalled();
+  });
+
   it("materializes accepted signals when post-triage materializer succeeds", async () => {
     const service = new SignalService({
       eventLogRepo: {
