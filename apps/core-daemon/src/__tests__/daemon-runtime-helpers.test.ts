@@ -35,7 +35,7 @@ describe("reconcileBootstrapPathsForAllWorkspaces", () => {
         status: "already_planted" as const,
         workspace_id: workspaceId,
         record_id: `record-${workspaceId}`,
-        active_relation_count: 1
+        relation_count: 1
       };
     });
     const warn = vi.fn();

@@ -87,7 +87,10 @@ export type WorkspaceBootstrapReconcileResult = Readonly<
       readonly status: "already_planted";
       readonly workspace_id: string;
       readonly record_id: string | null;
-      readonly active_relation_count: number;
+      // invariant: relation_count counts ALL relations for the workspace
+      // including retired ones; reconcile uses any-relation-present as a
+      // "do not re-plant" signal regardless of lifecycle status.
+      readonly relation_count: number;
     }
   | {
       readonly status: "skipped_no_planner";
@@ -230,11 +233,17 @@ export class WorkspaceService {
   }
 
   public async reconcileBootstrapPaths(
-    workspaceId: string
+    workspaceId: string,
+    options?: { readonly causedBy?: "system" | "user_action" }
   ): Promise<WorkspaceBootstrapReconcileResult> {
     const bootstrappingDeps = this.resolveBootstrappingDependencies();
     if (bootstrappingDeps === null) {
       return { status: "skipped_no_planner", workspace_id: workspaceId };
+    }
+
+    const workspace = await this.dependencies.workspaceRepo.getById(workspaceId);
+    if (workspace === null) {
+      throw new CoreError("NOT_FOUND", "Workspace not found");
     }
 
     const existingRecord =
@@ -246,45 +255,57 @@ export class WorkspaceService {
         status: "already_planted",
         workspace_id: workspaceId,
         record_id: existingRecord === null ? null : existingRecord.record_id,
-        active_relation_count: existingRelations.length
+        relation_count: existingRelations.length
       };
     }
 
     const bootstrapPlan =
       await bootstrappingDeps.bootstrappingPlanner.planBootstrap(workspaceId);
     const plantedEvent = this.buildBootstrappingPathsPlantedEvent(
-      bootstrapPlan.record
+      bootstrapPlan.record,
+      options?.causedBy ?? "system"
     );
 
     let plantedCount = 0;
     let racedRecordId: string | null = null;
-    await this.dependencies.eventPublisher.appendManyWithMutation(
-      [plantedEvent],
-      () => {
-        // @anchor: race-guard mirrors createWithId:185-206
-        const racedRecord =
-          bootstrappingDeps.bootstrappingRecordRepo.findByWorkspace(
-            workspaceId
-          );
-        if (racedRecord !== null) {
-          racedRecordId = racedRecord.record_id;
-          return;
-        }
+    try {
+      await this.dependencies.eventPublisher.appendManyWithMutation(
+        [plantedEvent],
+        () => {
+          // @anchor: race-guard mirrors createWithId:185-206 but throws so
+          // SQLite rolls back the queued BOOTSTRAPPING_PATHS_PLANTED event
+          // together with any partial inserts. Returning normally would
+          // commit an event with no matching mutation.
+          const racedRecord =
+            bootstrappingDeps.bootstrappingRecordRepo.findByWorkspace(
+              workspaceId
+            );
+          if (racedRecord !== null) {
+            throw new BootstrapReconcileRaceError(racedRecord);
+          }
 
-        for (const relation of bootstrapPlan.relations) {
-          bootstrappingDeps.pathRelationRepo.create(relation);
-          plantedCount += 1;
+          for (const relation of bootstrapPlan.relations) {
+            bootstrappingDeps.pathRelationRepo.create(relation);
+            plantedCount += 1;
+          }
+          bootstrappingDeps.bootstrappingRecordRepo.create(bootstrapPlan.record);
         }
-        bootstrappingDeps.bootstrappingRecordRepo.create(bootstrapPlan.record);
+      );
+    } catch (error) {
+      const raceError = extractBootstrapReconcileRaceError(error);
+      if (raceError !== null) {
+        racedRecordId = raceError.racedRecord.record_id;
+      } else {
+        throw error;
       }
-    );
+    }
 
-    if (plantedCount === 0) {
+    if (racedRecordId !== null) {
       return {
         status: "already_planted",
         workspace_id: workspaceId,
         record_id: racedRecordId,
-        active_relation_count: 0
+        relation_count: 0
       };
     }
 
@@ -472,14 +493,17 @@ export class WorkspaceService {
     } as const;
   }
 
-  private buildBootstrappingPathsPlantedEvent(record: Readonly<BootstrappingRecord>) {
+  private buildBootstrappingPathsPlantedEvent(
+    record: Readonly<BootstrappingRecord>,
+    causedBy: "system" | "user_action" = "system"
+  ) {
     return {
       event_type: RuntimeGovernanceEventType.BOOTSTRAPPING_PATHS_PLANTED,
-      entity_type: "workspace",
+      entity_type: "workspace" as const,
       entity_id: record.workspace_id,
       workspace_id: record.workspace_id,
       run_id: null,
-      caused_by: "system",
+      caused_by: causedBy,
       payload_json: BootstrappingPathsPlantedPayloadSchema.parse({
         record_id: record.record_id,
         workspace_id: record.workspace_id,
@@ -487,7 +511,7 @@ export class WorkspaceService {
         template_ids: record.template_ids_used,
         planted_at: record.planted_at
       })
-    } as const;
+    };
   }
 }
 
@@ -512,6 +536,30 @@ function parseEngineBindingInput(input: unknown): EngineBindingInput {
   } catch (error) {
     throw new CoreError("VALIDATION", "Invalid request body", { cause: error });
   }
+}
+
+class BootstrapReconcileRaceError extends Error {
+  public readonly racedRecord: Readonly<BootstrappingRecord>;
+  public constructor(racedRecord: Readonly<BootstrappingRecord>) {
+    super("bootstrap_reconcile_race");
+    this.racedRecord = racedRecord;
+  }
+}
+
+// EventPublisher may wrap mutate-callback throws (e.g. inside
+// EventPublisherPropagationError); unwrap a bounded cause chain so the
+// race sentinel survives.
+function extractBootstrapReconcileRaceError(
+  error: unknown
+): BootstrapReconcileRaceError | null {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {
+    if (current instanceof BootstrapReconcileRaceError) {
+      return current;
+    }
+    current = (current as { readonly cause?: unknown }).cause;
+  }
+  return null;
 }
 
 // gate-6-delta I3/N3: prefer the structured DUPLICATE_KEY surfaced by

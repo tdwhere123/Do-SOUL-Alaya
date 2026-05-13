@@ -98,8 +98,13 @@ export type DoctorBootstrapReconcileSummary = Readonly<
   | {
       readonly status: "already_planted";
       readonly record_id: string | null;
-      readonly active_relation_count: number;
+      readonly relation_count: number;
     }
+  // invariant: skipped_no_planner / skipped_no_handler are defence-in-depth
+  // arms — the wired daemon always provides both the dep and the handler,
+  // so under normal operation only planted / already_planted / failed are
+  // observed. The two skipped arms exist to keep the doctor JSON well-typed
+  // when a partial dep is injected (tests / dev harnesses).
   | { readonly status: "skipped_no_planner" }
   | { readonly status: "skipped_no_handler" }
   | { readonly status: "failed"; readonly reason: string }
@@ -300,6 +305,11 @@ export function createDoctorCommand(
 
 function doctorArgsSchema(): AlayaCliArgsSchema<DoctorArgs> {
   const usage = "Usage: doctor [--workspace <workspace-id>] [--reconcile-bootstrap]";
+  const duplicateFlag = (name: string, cursor: number) =>
+    ({
+      success: false,
+      error: { issues: [{ path: [cursor], message: `${name} may only be passed once.` }] }
+    }) as const;
   return {
     safeParse(input) {
       if (!Array.isArray(input) || input.some((token) => typeof token !== "string")) {
@@ -316,16 +326,23 @@ function doctorArgsSchema(): AlayaCliArgsSchema<DoctorArgs> {
         const token = input[cursor];
         if (token === "--workspace") {
           if (workspaceId !== null) {
-            return {
-              success: false,
-              error: { issues: [{ path: [cursor], message: "--workspace may only be passed once." }] }
-            } as const;
+            return duplicateFlag("--workspace", cursor);
           }
           const next = input[cursor + 1];
           if (next === undefined) {
             return {
               success: false,
               error: { issues: [{ path: [cursor], message: "--workspace requires a workspace id." }] }
+            } as const;
+          }
+          if (next.startsWith("--")) {
+            return {
+              success: false,
+              error: {
+                issues: [
+                  { path: [cursor + 1], message: "--workspace requires a workspace id, not a flag." }
+                ]
+              }
             } as const;
           }
           const candidate = next.trim();
@@ -341,14 +358,7 @@ function doctorArgsSchema(): AlayaCliArgsSchema<DoctorArgs> {
         }
         if (token === "--reconcile-bootstrap") {
           if (reconcileBootstrap) {
-            return {
-              success: false,
-              error: {
-                issues: [
-                  { path: [cursor], message: "--reconcile-bootstrap may only be passed once." }
-                ]
-              }
-            } as const;
+            return duplicateFlag("--reconcile-bootstrap", cursor);
           }
           reconcileBootstrap = true;
           cursor += 1;
@@ -548,7 +558,7 @@ async function runBootstrapReconcile(
         return {
           status: "already_planted",
           record_id: result.record_id,
-          active_relation_count: result.active_relation_count
+          relation_count: result.relation_count
         };
       case "skipped_no_planner":
         return { status: "skipped_no_planner" };
@@ -571,7 +581,7 @@ function formatBootstrapReconcileSummary(summary: DoctorBootstrapReconcileSummar
     case "already_planted":
       return (
         `bootstrap reconcile: already planted` +
-        ` (record=${summary.record_id ?? "absent"}, relations=${summary.active_relation_count})`
+        ` (record=${summary.record_id ?? "absent"}, relations=${summary.relation_count})`
       );
     case "skipped_no_planner":
       return "bootstrap reconcile: skipped — planner not wired";

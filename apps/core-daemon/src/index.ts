@@ -723,6 +723,10 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     workspaceRepo,
     workspaceService: securedWorkspaceService,
     warn: warnLogger.warn
+  }).catch((error) => {
+    warnLogger.warn("bootstrap reconcile loop crashed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
   });
   await rebuildCountersFromEventLog(eventLogRepo, trustStateRecorder);
   trustStateRecorder.markReady();

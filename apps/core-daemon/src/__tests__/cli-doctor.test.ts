@@ -385,7 +385,7 @@ describe("doctor CLI", () => {
         status: "already_planted" as const,
         workspace_id: "workspace-1",
         record_id: "bootstrap-record-1",
-        active_relation_count: 3
+        relation_count: 3
       })
     });
 
@@ -399,6 +399,44 @@ describe("doctor CLI", () => {
     expect(harness.stdoutText()).toContain(
       "bootstrap reconcile: already planted (record=bootstrap-record-1, relations=3)"
     );
+  });
+
+  it("parses --reconcile-bootstrap before --workspace in any order", async () => {
+    const reconcile = vi.fn(async (workspaceId: string) => ({
+      status: "planted" as const,
+      workspace_id: workspaceId,
+      paths_planted: 1,
+      record_id: "rec-1",
+      template_ids: ["t1"] as const
+    }));
+    const harness = createDoctorHarness({ reconcileBootstrapPaths: reconcile });
+
+    const reversed = await harness.bridge.dispatch([
+      "doctor",
+      "--reconcile-bootstrap",
+      "--workspace",
+      "workspace-1",
+      "--json"
+    ]);
+
+    expect(reconcile).toHaveBeenCalledWith("workspace-1");
+    expect(reversed.json).toMatchObject({
+      bootstrap_reconcile: { status: "planted" }
+    });
+  });
+
+  it("rejects --workspace followed by another flag (instead of swallowing it as id)", async () => {
+    const reconcile = vi.fn();
+    const harness = createDoctorHarness({ reconcileBootstrapPaths: reconcile });
+
+    const result = await harness.bridge.dispatch([
+      "doctor",
+      "--workspace",
+      "--reconcile-bootstrap"
+    ]);
+
+    expect(result.exitCode).toBe(64);
+    expect(reconcile).not.toHaveBeenCalled();
   });
 
   it("reports skipped_no_handler when --reconcile-bootstrap runs without a handler wired", async () => {
@@ -437,7 +475,7 @@ describe("doctor CLI", () => {
     });
   });
 
-  it("rejects --reconcile-bootstrap when passed twice", async () => {
+  it("rejects --reconcile-bootstrap when passed twice with USAGE exit code", async () => {
     const harness = createDoctorHarness({});
 
     const result = await harness.bridge.dispatch([
@@ -446,7 +484,7 @@ describe("doctor CLI", () => {
       "--reconcile-bootstrap"
     ]);
 
-    expect(result.exitCode).not.toBe(0);
+    expect(result.exitCode).toBe(64);
   });
 
   it("fails the provider check when embedding status is degraded", async () => {
