@@ -85,6 +85,28 @@ describe("recall cross-link: report_context_usage(used) writes RECALLS edges", (
     expect(harness.graphEdgePort.createEdge).not.toHaveBeenCalled();
   });
 
+  it("emits an observable warning when used_object_ids exceeds the fan-out cap", async () => {
+    // Create 10 memories so the used report exceeds MAX_CROSS_LINK_FANOUT = 8.
+    const memoryIds = Array.from({ length: 10 }, (_, idx) =>
+      `11111111-aaaa-4aaa-8aaa-0000000000${(idx + 1).toString().padStart(2, "0")}`
+    );
+    const warn = vi.fn();
+    const harness = await createHarness(memoryIds, { warn });
+
+    await reportUsed(harness, memoryIds);
+
+    // 8 ordered × 7 cross targets = 56 edge writes; truncation warned once.
+    expect(harness.graphEdgePort.createEdge).toHaveBeenCalledTimes(56);
+    expect(warn).toHaveBeenCalledWith(
+      "mcp-memory-tool-handler: cross-link truncated to fanout cap",
+      expect.objectContaining({
+        usedObjectCount: 10,
+        truncatedTo: 8,
+        droppedCount: 2
+      })
+    );
+  });
+
   it("never fails the report when the graph edge port throws", async () => {
     const harness = await createHarness([MEM_A, MEM_B]);
     harness.graphEdgePort.createEdge.mockRejectedValueOnce(new Error("edge db down"));
@@ -96,7 +118,10 @@ describe("recall cross-link: report_context_usage(used) writes RECALLS edges", (
   });
 });
 
-async function createHarness(memoryIds: readonly string[]) {
+async function createHarness(
+  memoryIds: readonly string[],
+  options: { readonly warn?: (message: string, meta: Record<string, unknown>) => void } = {}
+) {
   const database = initDatabase({ filename: ":memory:" });
   databases.add(database);
   const eventLogRepo = new SqliteEventLogRepo(database);
@@ -170,7 +195,8 @@ async function createHarness(memoryIds: readonly string[]) {
     eventPublisher,
     memoryEntryRepo,
     now: () => "2026-05-07T00:00:01.000Z",
-    generateId: () => "00000000-0000-4000-8000-000000000001"
+    generateId: () => "00000000-0000-4000-8000-000000000001",
+    ...(options.warn === undefined ? {} : { warn: options.warn })
   });
 
   return { handler, graphEdgePort };

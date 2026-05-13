@@ -159,6 +159,12 @@ export function normalizeActivationScore(value: number | null): number {
 }
 
 export function normalizeGraphSupport(count: number): number {
+  // Clamp [count, 0, 3] / 3. The clamp at 0 is intentional and matches the
+  // floor-at-zero limitation documented on MEMORY_GRAPH_EDGE_RECALL_WEIGHTS:
+  // signed weighted sums (e.g. dominated by SUPERSEDES) collapse to 0
+  // rather than pulling graph_support below baseline. Extending the
+  // scoring range to [-1, 1] is a v0.4 task that requires reviewing the
+  // downstream weight balance.
   return Math.min(Math.max(count, 0), 3) / 3;
 }
 

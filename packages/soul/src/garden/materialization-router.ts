@@ -314,14 +314,12 @@ export class MaterializationRouter {
       );
       createdObjects.push({ object_kind: synthesis.object_kind, object_id: synthesis.object_id });
 
-      // Create derives_from edges to any memory IDs the model tagged in raw_payload.source_memory_refs.
-      // See note in materializeMemoryAndClaim — graph edges are memory↔memory; the synthesis↔evidence
-      // relation is carried by synthesis.evidence_refs, not by a SUPPORTS row.
-      await this.createSourceMemoryEdges(
-        synthesis.object_id,
-        signal,
-        MemoryGraphEdgeType.DERIVES_FROM
-      );
+      // No graph edge here: memory_graph_edges constrains both source and target
+      // to memory_entries(object_id) (migration 025). A synthesis_capsule id
+      // cannot be an edge endpoint. The synthesis↔memory relation is carried by
+      // synthesis.evidence_refs (which point at evidence ids) and by claim
+      // resolution downstream. If a synthesis-to-memory provenance edge is
+      // wanted later, it needs a schema change to widen the FK domain.
 
       return {
         signal_id: signal.signal_id,

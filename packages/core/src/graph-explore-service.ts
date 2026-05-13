@@ -32,6 +32,9 @@ export interface GraphExploreServiceEdgeRepoPort {
     edgeType: MemoryGraphEdgeTypeValue,
     workspaceId: string
   ): Promise<Readonly<MemoryGraphEdge> | null>;
+  /** @deprecated since v0.3.3 — use `countInboundEdgesWeighted`. Retained for
+   * one release for diagnostic surfaces that still need a raw supports-only
+   * count; remove in v0.4.0. */
   countInboundSupports(memoryId: string, workspaceId: string): Promise<number>;
   countInboundEdgesWeighted(memoryId: string, workspaceId: string): Promise<number>;
   delete(edgeId: string): Promise<void>;
@@ -199,6 +202,8 @@ export class GraphExploreService {
     return Object.freeze(neighbors);
   }
 
+  /** @deprecated since v0.3.3 — use `countInboundEdgesWeighted` for recall
+   * scoring; remove in v0.4.0. */
   public async countInboundSupports(memoryId: string, workspaceId: string): Promise<number> {
     return await this.dependencies.edgeRepo.countInboundSupports(parseObjectId(memoryId), parseObjectId(workspaceId));
   }
