@@ -110,7 +110,8 @@ import { defaultBootstrappingTemplates, defaultCanonicalAliasMap } from "./daemo
 import { bootstrapDaemonMcpTooling } from "./daemon-mcp-tooling.js";
 import {
   createTargetCurrencyCheckPort,
-  createWarnLogger
+  createWarnLogger,
+  reconcileBootstrapPathsForAllWorkspaces
 } from "./daemon-runtime-helpers.js";
 import { createCoreDaemonLifecycleState, createDaemonLifecycleControls } from "./daemon-runtime-lifecycle.js";
 import {
@@ -717,6 +718,11 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     warnLogger.warn("event log orphan reconciler failed", {
       error: error instanceof Error ? error.message : String(error)
     });
+  });
+  void reconcileBootstrapPathsForAllWorkspaces({
+    workspaceRepo,
+    workspaceService: securedWorkspaceService,
+    warn: warnLogger.warn
   });
   await rebuildCountersFromEventLog(eventLogRepo, trustStateRecorder);
   trustStateRecorder.markReady();

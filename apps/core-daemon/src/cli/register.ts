@@ -71,6 +71,8 @@ export function registerAlayaCliCommands(
     // can see which configuration is actually live.
     getGardenCompute: async () =>
       await resolveGardenComputeStatus(runtime),
+    reconcileBootstrapPaths: async (workspaceId) =>
+      await runtime.services.workspaceService.reconcileBootstrapPaths(workspaceId),
     getPathPlasticityLookupTelemetry: () =>
       defaultRecallPathPlasticityLookupTelemetry.snapshot(),
     // p5-system-review-r3 MR-I11: schema_ok needs the live db. initDatabase

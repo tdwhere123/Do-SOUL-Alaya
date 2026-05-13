@@ -1,5 +1,5 @@
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createAlayaCliBridge } from "../cli/bridge.js";
 import { createDoctorCommand } from "../cli/doctor.js";
 
@@ -343,6 +343,110 @@ describe("doctor CLI", () => {
         configured: false
       }
     });
+  });
+
+  it("invokes reconcileBootstrapPaths only when --reconcile-bootstrap is passed", async () => {
+    const reconcile = vi.fn(async (workspaceId: string) => ({
+      status: "planted" as const,
+      workspace_id: workspaceId,
+      paths_planted: 1,
+      record_id: "bootstrap-record-1",
+      template_ids: ["workspace.bootstrap.conservative-start"] as const
+    }));
+    const harness = createDoctorHarness({
+      reconcileBootstrapPaths: reconcile
+    });
+
+    await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1"]);
+    expect(reconcile).not.toHaveBeenCalled();
+
+    const jsonResult = await harness.bridge.dispatch([
+      "doctor",
+      "--workspace",
+      "workspace-1",
+      "--reconcile-bootstrap",
+      "--json"
+    ]);
+
+    expect(reconcile).toHaveBeenCalledTimes(1);
+    expect(reconcile).toHaveBeenCalledWith("workspace-1");
+    expect(jsonResult.json).toMatchObject({
+      bootstrap_reconcile: {
+        status: "planted",
+        paths_planted: 1,
+        record_id: "bootstrap-record-1"
+      }
+    });
+  });
+
+  it("renders bootstrap_reconcile in the human summary when --reconcile-bootstrap is passed", async () => {
+    const harness = createDoctorHarness({
+      reconcileBootstrapPaths: async () => ({
+        status: "already_planted" as const,
+        workspace_id: "workspace-1",
+        record_id: "bootstrap-record-1",
+        active_relation_count: 3
+      })
+    });
+
+    await harness.bridge.dispatch([
+      "doctor",
+      "--workspace",
+      "workspace-1",
+      "--reconcile-bootstrap"
+    ]);
+
+    expect(harness.stdoutText()).toContain(
+      "bootstrap reconcile: already planted (record=bootstrap-record-1, relations=3)"
+    );
+  });
+
+  it("reports skipped_no_handler when --reconcile-bootstrap runs without a handler wired", async () => {
+    const harness = createDoctorHarness({});
+
+    const jsonResult = await harness.bridge.dispatch([
+      "doctor",
+      "--workspace",
+      "workspace-1",
+      "--reconcile-bootstrap",
+      "--json"
+    ]);
+
+    expect(jsonResult.json).toMatchObject({
+      bootstrap_reconcile: { status: "skipped_no_handler" }
+    });
+  });
+
+  it("surfaces handler errors as a failed reconcile summary instead of throwing", async () => {
+    const harness = createDoctorHarness({
+      reconcileBootstrapPaths: async () => {
+        throw new Error("planner_unavailable");
+      }
+    });
+
+    const jsonResult = await harness.bridge.dispatch([
+      "doctor",
+      "--workspace",
+      "workspace-1",
+      "--reconcile-bootstrap",
+      "--json"
+    ]);
+
+    expect(jsonResult.json).toMatchObject({
+      bootstrap_reconcile: { status: "failed", reason: "planner_unavailable" }
+    });
+  });
+
+  it("rejects --reconcile-bootstrap when passed twice", async () => {
+    const harness = createDoctorHarness({});
+
+    const result = await harness.bridge.dispatch([
+      "doctor",
+      "--reconcile-bootstrap",
+      "--reconcile-bootstrap"
+    ]);
+
+    expect(result.exitCode).not.toBe(0);
   });
 
   it("fails the provider check when embedding status is degraded", async () => {

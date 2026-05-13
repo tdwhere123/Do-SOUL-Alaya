@@ -50,7 +50,8 @@ describe("WorkspaceService", () => {
   it("bootstraps conservative path relations during workspace creation", async () => {
     const appendManyWithMutation = fakeAppendManyWithMutation();
     const pathRelationRepo = {
-      create: vi.fn((relation: PathRelation) => relation)
+      create: vi.fn((relation: PathRelation) => relation),
+      findByWorkspace: vi.fn(async () => [])
     };
     const bootstrappingRecordRepo = {
       findByWorkspace: vi.fn(() => null),
@@ -292,7 +293,8 @@ describe("WorkspaceService", () => {
     const workspaceCreateSync = vi.fn(() => persistedWorkspace);
     const appendManyWithMutation = fakeAppendManyWithMutation();
     const pathRelationRepo = {
-      create: vi.fn((relation: PathRelation) => relation)
+      create: vi.fn((relation: PathRelation) => relation),
+      findByWorkspace: vi.fn(async () => [])
     };
     const bootstrappingRecordRepo = {
       findByWorkspace: vi.fn(() => null),
@@ -359,7 +361,8 @@ describe("WorkspaceService", () => {
       create: vi.fn((relation: PathRelation) => {
         order.push(`path:${relation.path_id}`);
         return relation;
-      })
+      }),
+      findByWorkspace: vi.fn(async () => [])
     };
     const bootstrappingRecordRepo = {
       findByWorkspace: vi.fn(() => null),
@@ -420,6 +423,230 @@ describe("WorkspaceService", () => {
       `path:${secondRelation.path_id}`,
       "bootstrap_record"
     ]);
+  });
+});
+
+describe("WorkspaceService.reconcileBootstrapPaths", () => {
+  it("returns skipped_no_planner when bootstrapping deps are not wired", async () => {
+    const service = new WorkspaceService({
+      workspaceRepo: {
+        create: vi.fn(),
+        getById: vi.fn(async () => null),
+        list: vi.fn(async () => []),
+        delete: vi.fn(() => undefined),
+        updateDefaultEngineClass: vi.fn(() => {
+          throw new Error("not used");
+        })
+      },
+      runRepo: { listByWorkspace: vi.fn(async () => []) },
+      eventPublisher: { appendManyWithMutation: vi.fn() } as any
+    });
+
+    const result = await service.reconcileBootstrapPaths("ws_alpha");
+    expect(result).toEqual({
+      status: "skipped_no_planner",
+      workspace_id: "ws_alpha"
+    });
+  });
+
+  it("plants seed paths when the workspace has no record and no relations", async () => {
+    const planted: string[] = [];
+    const appendManyWithMutation = fakeAppendManyWithMutation();
+    const seedRecord = createBootstrappingRecord({ workspace_id: "ws_alpha" });
+    const seedRelation = createPathRelation({ workspace_id: "ws_alpha" });
+
+    const pathRelationRepo = {
+      create: vi.fn((relation: PathRelation) => {
+        planted.push(relation.path_id);
+        return relation;
+      }),
+      findByWorkspace: vi.fn(async () => [])
+    };
+    const bootstrappingRecordRepo = {
+      findByWorkspace: vi.fn(() => null),
+      create: vi.fn((record: BootstrappingRecord) => record)
+    };
+    const bootstrappingPlanner = {
+      planBootstrap: vi.fn(async () => ({
+        relations: [seedRelation],
+        record: seedRecord
+      }))
+    };
+
+    const service = new WorkspaceService({
+      workspaceRepo: {
+        create: vi.fn(),
+        getById: vi.fn(async () => null),
+        list: vi.fn(async () => []),
+        delete: vi.fn(() => undefined),
+        updateDefaultEngineClass: vi.fn(() => {
+          throw new Error("not used");
+        })
+      },
+      runRepo: { listByWorkspace: vi.fn(async () => []) },
+      eventPublisher: { appendManyWithMutation } as any,
+      bootstrappingPlanner,
+      pathRelationRepo,
+      bootstrappingRecordRepo
+    });
+
+    const result = await service.reconcileBootstrapPaths("ws_alpha");
+
+    expect(result).toEqual({
+      status: "planted",
+      workspace_id: "ws_alpha",
+      paths_planted: 1,
+      record_id: seedRecord.record_id,
+      template_ids: seedRecord.template_ids_used
+    });
+    expect(bootstrappingPlanner.planBootstrap).toHaveBeenCalledWith("ws_alpha");
+    expect(planted).toEqual([seedRelation.path_id]);
+    expect(bootstrappingRecordRepo.create).toHaveBeenCalledTimes(1);
+    expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns already_planted without invoking the planner when a record exists", async () => {
+    const existingRecord = createBootstrappingRecord({ workspace_id: "ws_alpha" });
+    const pathRelationRepo = {
+      create: vi.fn(),
+      findByWorkspace: vi.fn(async () => [])
+    };
+    const bootstrappingRecordRepo = {
+      findByWorkspace: vi.fn(() => existingRecord),
+      create: vi.fn()
+    };
+    const bootstrappingPlanner = { planBootstrap: vi.fn() };
+
+    const service = new WorkspaceService({
+      workspaceRepo: {
+        create: vi.fn(),
+        getById: vi.fn(async () => null),
+        list: vi.fn(async () => []),
+        delete: vi.fn(() => undefined),
+        updateDefaultEngineClass: vi.fn(() => {
+          throw new Error("not used");
+        })
+      },
+      runRepo: { listByWorkspace: vi.fn(async () => []) },
+      eventPublisher: { appendManyWithMutation: vi.fn() } as any,
+      bootstrappingPlanner,
+      pathRelationRepo,
+      bootstrappingRecordRepo
+    });
+
+    const result = await service.reconcileBootstrapPaths("ws_alpha");
+
+    expect(result).toEqual({
+      status: "already_planted",
+      workspace_id: "ws_alpha",
+      record_id: existingRecord.record_id,
+      active_relation_count: 0
+    });
+    expect(bootstrappingPlanner.planBootstrap).not.toHaveBeenCalled();
+    expect(bootstrappingRecordRepo.create).not.toHaveBeenCalled();
+    expect(pathRelationRepo.create).not.toHaveBeenCalled();
+  });
+
+  it("treats non-empty path_relations as already_planted even when record is null", async () => {
+    // invariant: corrupted state (relations present, record null) must not
+    // trigger a second plant — re-planting would create orphan seeds.
+    const existingRelation = createPathRelation({ workspace_id: "ws_alpha" });
+    const pathRelationRepo = {
+      create: vi.fn(),
+      findByWorkspace: vi.fn(async () => [existingRelation])
+    };
+    const bootstrappingRecordRepo = {
+      findByWorkspace: vi.fn(() => null),
+      create: vi.fn()
+    };
+    const bootstrappingPlanner = { planBootstrap: vi.fn() };
+
+    const service = new WorkspaceService({
+      workspaceRepo: {
+        create: vi.fn(),
+        getById: vi.fn(async () => null),
+        list: vi.fn(async () => []),
+        delete: vi.fn(() => undefined),
+        updateDefaultEngineClass: vi.fn(() => {
+          throw new Error("not used");
+        })
+      },
+      runRepo: { listByWorkspace: vi.fn(async () => []) },
+      eventPublisher: { appendManyWithMutation: vi.fn() } as any,
+      bootstrappingPlanner,
+      pathRelationRepo,
+      bootstrappingRecordRepo
+    });
+
+    const result = await service.reconcileBootstrapPaths("ws_alpha");
+
+    expect(result).toEqual({
+      status: "already_planted",
+      workspace_id: "ws_alpha",
+      record_id: null,
+      active_relation_count: 1
+    });
+    expect(bootstrappingPlanner.planBootstrap).not.toHaveBeenCalled();
+  });
+
+  it("aborts planting when an in-transaction race writes the record first", async () => {
+    // @anchor: race-guard mirrors createWithId in-transaction re-check
+    const racedRecord = createBootstrappingRecord({
+      workspace_id: "ws_alpha",
+      record_id: "bootstrap-record-raced"
+    });
+    let recordPersisted = false;
+    const pathRelationRepo = {
+      create: vi.fn(),
+      findByWorkspace: vi.fn(async () => [])
+    };
+    const bootstrappingRecordRepo = {
+      findByWorkspace: vi.fn((): BootstrappingRecord | null => {
+        if (recordPersisted) return racedRecord;
+        return null;
+      }),
+      create: vi.fn()
+    };
+    const bootstrappingPlanner = {
+      planBootstrap: vi.fn(async () => ({
+        relations: [createPathRelation({ workspace_id: "ws_alpha" })],
+        record: createBootstrappingRecord({ workspace_id: "ws_alpha" })
+      }))
+    };
+
+    const appendManyWithMutation = vi.fn(async (events: unknown[], mutate: () => void) => {
+      void events;
+      recordPersisted = true;
+      mutate();
+    });
+
+    const service = new WorkspaceService({
+      workspaceRepo: {
+        create: vi.fn(),
+        getById: vi.fn(async () => null),
+        list: vi.fn(async () => []),
+        delete: vi.fn(() => undefined),
+        updateDefaultEngineClass: vi.fn(() => {
+          throw new Error("not used");
+        })
+      },
+      runRepo: { listByWorkspace: vi.fn(async () => []) },
+      eventPublisher: { appendManyWithMutation } as any,
+      bootstrappingPlanner,
+      pathRelationRepo,
+      bootstrappingRecordRepo
+    });
+
+    const result = await service.reconcileBootstrapPaths("ws_alpha");
+
+    expect(result).toEqual({
+      status: "already_planted",
+      workspace_id: "ws_alpha",
+      record_id: racedRecord.record_id,
+      active_relation_count: 0
+    });
+    expect(pathRelationRepo.create).not.toHaveBeenCalled();
+    expect(bootstrappingRecordRepo.create).not.toHaveBeenCalled();
   });
 });
 

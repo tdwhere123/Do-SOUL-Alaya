@@ -2,6 +2,7 @@ import {
   ManifestationBudgetConfigSchema,
   type ManifestationBudgetConfig
 } from "@do-soul/alaya-protocol";
+import type { WorkspaceService } from "@do-soul/alaya-core";
 
 type ConfigRepoPort = {
   get<TValue>(key: string): TValue | null | Promise<TValue | null>;
@@ -25,6 +26,39 @@ export function createWarnLogger(): WarnLogger {
       console.warn(message, meta);
     }
   });
+}
+
+export type ReconcileBootstrapPathsForAllWorkspacesDeps = Readonly<{
+  readonly workspaceRepo: Readonly<{
+    list(): Promise<readonly Readonly<{ readonly workspace_id: string }>[]>;
+  }>;
+  readonly workspaceService: Pick<WorkspaceService, "reconcileBootstrapPaths">;
+  readonly warn: WarnLogger["warn"];
+}>;
+
+export async function reconcileBootstrapPathsForAllWorkspaces(
+  deps: ReconcileBootstrapPathsForAllWorkspacesDeps
+): Promise<void> {
+  let workspaces: readonly Readonly<{ readonly workspace_id: string }>[];
+  try {
+    workspaces = await deps.workspaceRepo.list();
+  } catch (error) {
+    deps.warn("bootstrap reconcile enumeration failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return;
+  }
+
+  for (const workspace of workspaces) {
+    try {
+      await deps.workspaceService.reconcileBootstrapPaths(workspace.workspace_id);
+    } catch (error) {
+      deps.warn("bootstrap reconcile failed", {
+        workspace_id: workspace.workspace_id,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
 }
 
 export function createManifestationBudgetConfigProvider(configRepo: ConfigRepoPort): Readonly<{

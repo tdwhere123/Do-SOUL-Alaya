@@ -220,7 +220,10 @@ describe("install keychain migration", () => {
       }),
       clock: createClock()
     });
-    const doctorResult = await doctor.handler(createContext(), { workspaceId: null });
+    const doctorResult = await doctor.handler(createContext(), {
+      workspaceId: null,
+      reconcileBootstrap: false
+    });
     const report = doctorResult.json as { readonly garden_compute: { readonly keychain_check?: { readonly ok: boolean } } };
     expect(report.garden_compute.keychain_check).toEqual({ ok: true, service: "alaya", account: "openai" });
   });

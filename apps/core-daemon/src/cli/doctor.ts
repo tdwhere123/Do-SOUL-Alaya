@@ -1,5 +1,6 @@
 import { access, constants as fsConstants } from "node:fs/promises";
 import type { EmbeddingStatus, ToolchainStatus } from "@do-soul/alaya-protocol";
+import type { WorkspaceBootstrapReconcileResult } from "@do-soul/alaya-core";
 import type { DaemonStartupStepRecord } from "../index.js";
 import type { PathPlasticityLookupTelemetrySnapshot } from "../path-plasticity-runtime.js";
 import type { GardenCredentialProvenance } from "../services/config-service.js";
@@ -52,6 +53,11 @@ export interface DoctorCommandDependencies {
   readonly getMcpHealth?: () => Promise<Readonly<{ transport: "ready" | "not_ready"; enrolled_tools: number }>>;
   readonly getGardenHealth?: () => Promise<Readonly<{ status: "healthy" | "degraded"; last_pass_at: string | null }>>;
   readonly getGardenCredentialProvenance?: () => Promise<GardenCredentialProvenance>;
+  // see also: WorkspaceService.reconcileBootstrapPaths; idempotent re-plant
+  // for workspaces created before migration 042.
+  readonly reconcileBootstrapPaths?: (
+    workspaceId: string
+  ) => Promise<WorkspaceBootstrapReconcileResult>;
   /**
    * Surface Garden compute provider truth (kind / model / credential /
    * routing) so operators can tell official_api from local_heuristics from
@@ -79,7 +85,25 @@ export interface DoctorCommandDependencies {
 
 interface DoctorArgs {
   readonly workspaceId: string | null;
+  readonly reconcileBootstrap: boolean;
 }
+
+export type DoctorBootstrapReconcileSummary = Readonly<
+  | {
+      readonly status: "planted";
+      readonly paths_planted: number;
+      readonly record_id: string;
+      readonly template_ids: readonly string[];
+    }
+  | {
+      readonly status: "already_planted";
+      readonly record_id: string | null;
+      readonly active_relation_count: number;
+    }
+  | { readonly status: "skipped_no_planner" }
+  | { readonly status: "skipped_no_handler" }
+  | { readonly status: "failed"; readonly reason: string }
+>;
 
 type DoctorCheckStatus = "pass" | "fail";
 
@@ -118,6 +142,8 @@ interface DoctorReport {
     readonly path_plasticity_lookup: Readonly<PathPlasticityLookupTelemetrySnapshot>;
   }>;
   readonly attached_profiles: ReadonlyArray<ProfileInstructionsDriftReport>;
+  // Present only when --reconcile-bootstrap is requested.
+  readonly bootstrap_reconcile?: DoctorBootstrapReconcileSummary;
   readonly checks: Readonly<Record<"runtime" | "storage" | "provider" | "mcp" | "garden", DoctorCheckStatus>>;
 }
 
@@ -196,6 +222,10 @@ export function createDoctorCommand(
       // Alaya wrote into host MCP profiles on a prior `alaya attach`. Operators
       // don't always re-attach after upgrading Alaya, so we surface the
       // divergence here with a concrete refresh hint.
+      const bootstrapReconcileSummary = args.reconcileBootstrap
+        ? await runBootstrapReconcile(deps.reconcileBootstrapPaths, workspaceId)
+        : null;
+
       const attachedProfiles = await Promise.all(
         PROFILE_TARGETS.map(async (target) => {
           try {
@@ -250,6 +280,9 @@ export function createDoctorCommand(
           path_plasticity_lookup: pathPlasticityLookupTelemetry
         },
         attached_profiles: attachedProfiles,
+        ...(bootstrapReconcileSummary === null
+          ? {}
+          : { bootstrap_reconcile: bootstrapReconcileSummary }),
         checks
       };
 
@@ -266,6 +299,7 @@ export function createDoctorCommand(
 }
 
 function doctorArgsSchema(): AlayaCliArgsSchema<DoctorArgs> {
+  const usage = "Usage: doctor [--workspace <workspace-id>] [--reconcile-bootstrap]";
   return {
     safeParse(input) {
       if (!Array.isArray(input) || input.some((token) => typeof token !== "string")) {
@@ -275,31 +309,60 @@ function doctorArgsSchema(): AlayaCliArgsSchema<DoctorArgs> {
         } as const;
       }
 
-      if (input.length === 0) {
-        return { success: true, data: { workspaceId: null } } as const;
-      }
-
-      if (input.length === 2 && input[0] === "--workspace") {
-        const workspaceId = input[1].trim();
-        if (workspaceId.length === 0) {
-          return {
-            success: false,
-            error: { issues: [{ path: [1], message: "Workspace id must not be empty." }] }
-          } as const;
+      let workspaceId: string | null = null;
+      let reconcileBootstrap = false;
+      let cursor = 0;
+      while (cursor < input.length) {
+        const token = input[cursor];
+        if (token === "--workspace") {
+          if (workspaceId !== null) {
+            return {
+              success: false,
+              error: { issues: [{ path: [cursor], message: "--workspace may only be passed once." }] }
+            } as const;
+          }
+          const next = input[cursor + 1];
+          if (next === undefined) {
+            return {
+              success: false,
+              error: { issues: [{ path: [cursor], message: "--workspace requires a workspace id." }] }
+            } as const;
+          }
+          const candidate = next.trim();
+          if (candidate.length === 0) {
+            return {
+              success: false,
+              error: { issues: [{ path: [cursor + 1], message: "Workspace id must not be empty." }] }
+            } as const;
+          }
+          workspaceId = candidate;
+          cursor += 2;
+          continue;
         }
-        return { success: true, data: { workspaceId } } as const;
+        if (token === "--reconcile-bootstrap") {
+          if (reconcileBootstrap) {
+            return {
+              success: false,
+              error: {
+                issues: [
+                  { path: [cursor], message: "--reconcile-bootstrap may only be passed once." }
+                ]
+              }
+            } as const;
+          }
+          reconcileBootstrap = true;
+          cursor += 1;
+          continue;
+        }
+        return {
+          success: false,
+          error: { issues: [{ path: [cursor], message: usage }] }
+        } as const;
       }
 
       return {
-        success: false,
-        error: {
-          issues: [
-            {
-              path: [],
-              message: "Usage: doctor [--workspace <workspace-id>]"
-            }
-          ]
-        }
+        success: true,
+        data: { workspaceId, reconcileBootstrap }
       } as const;
     }
   };
@@ -422,6 +485,9 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport):
       `embedding mode: ${report.provider.embedding.effective_mode} (provider_configured=${report.provider.embedding.provider_configured ? "yes" : "no"})\n`
     );
   }
+  if (report.bootstrap_reconcile !== undefined) {
+    stream.write(`${formatBootstrapReconcileSummary(report.bootstrap_reconcile)}\n`);
+  }
   for (const profile of report.attached_profiles) {
     if (profile.status === "drifted") {
       stream.write(
@@ -457,6 +523,63 @@ function formatGardenCredentialProvenance(provenance: GardenCredentialProvenance
   return provenance.kind === "embedding-fallback"
     ? "deprecated embedding-fallback"
     : provenance.kind;
+}
+
+async function runBootstrapReconcile(
+  handler:
+    | ((workspaceId: string) => Promise<WorkspaceBootstrapReconcileResult>)
+    | undefined,
+  workspaceId: string
+): Promise<DoctorBootstrapReconcileSummary> {
+  if (handler === undefined) {
+    return { status: "skipped_no_handler" };
+  }
+  try {
+    const result = await handler(workspaceId);
+    switch (result.status) {
+      case "planted":
+        return {
+          status: "planted",
+          paths_planted: result.paths_planted,
+          record_id: result.record_id,
+          template_ids: result.template_ids
+        };
+      case "already_planted":
+        return {
+          status: "already_planted",
+          record_id: result.record_id,
+          active_relation_count: result.active_relation_count
+        };
+      case "skipped_no_planner":
+        return { status: "skipped_no_planner" };
+    }
+  } catch (error) {
+    return {
+      status: "failed",
+      reason: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+function formatBootstrapReconcileSummary(summary: DoctorBootstrapReconcileSummary): string {
+  switch (summary.status) {
+    case "planted":
+      return (
+        `bootstrap reconcile: planted ${summary.paths_planted} seed path(s)` +
+        ` (record=${summary.record_id})`
+      );
+    case "already_planted":
+      return (
+        `bootstrap reconcile: already planted` +
+        ` (record=${summary.record_id ?? "absent"}, relations=${summary.active_relation_count})`
+      );
+    case "skipped_no_planner":
+      return "bootstrap reconcile: skipped — planner not wired";
+    case "skipped_no_handler":
+      return "bootstrap reconcile: skipped — no handler available";
+    case "failed":
+      return `bootstrap reconcile: failed — ${summary.reason}`;
+  }
 }
 
 function formatGardenKeychainCheck(check: GardenKeychainCheck): string {

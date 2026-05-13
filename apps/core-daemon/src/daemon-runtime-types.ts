@@ -51,7 +51,10 @@ export interface AlayaDaemonRuntimeServices {
   readonly recallUtilizationService: RecallUtilizationService;
   readonly runService: Pick<RunService, "getById" | "ensureAttachedMcpSessionRun">;
   readonly trustStateRecorder: TrustStateRecorder;
-  readonly workspaceService: Pick<WorkspaceService, "ensureLocalWorkspace">;
+  readonly workspaceService: Pick<
+    WorkspaceService,
+    "ensureLocalWorkspace" | "reconcileBootstrapPaths"
+  >;
   readonly gardenStatus: Readonly<{
     getStatus(): Readonly<{ readonly last_pass_at: string | null }>;
   }>;

@@ -65,12 +65,35 @@ export interface WorkspaceBootstrappingPlannerPort {
 
 export interface WorkspacePathRelationRepoPort {
   create(relation: PathRelation): Readonly<PathRelation>;
+  // invariant: includes retired rows; reconcileBootstrapPaths uses this
+  // as the "any relation present" signal.
+  findByWorkspace(workspaceId: string): Promise<readonly Readonly<PathRelation>[]>;
 }
 
 export interface WorkspaceBootstrappingRecordRepoPort {
   create(record: BootstrappingRecord): Readonly<BootstrappingRecord>;
   findByWorkspace(workspaceId: string): Readonly<BootstrappingRecord> | null;
 }
+
+export type WorkspaceBootstrapReconcileResult = Readonly<
+  | {
+      readonly status: "planted";
+      readonly workspace_id: string;
+      readonly paths_planted: number;
+      readonly record_id: string;
+      readonly template_ids: readonly string[];
+    }
+  | {
+      readonly status: "already_planted";
+      readonly workspace_id: string;
+      readonly record_id: string | null;
+      readonly active_relation_count: number;
+    }
+  | {
+      readonly status: "skipped_no_planner";
+      readonly workspace_id: string;
+    }
+>;
 
 export interface WorkspaceServiceDependencies {
   readonly workspaceRepo: WorkspaceRepoPort;
@@ -204,6 +227,74 @@ export class WorkspaceService {
       bootstrappingDeps.bootstrappingRecordRepo.create(bootstrapPlan.record);
       return createdWorkspace;
     });
+  }
+
+  public async reconcileBootstrapPaths(
+    workspaceId: string
+  ): Promise<WorkspaceBootstrapReconcileResult> {
+    const bootstrappingDeps = this.resolveBootstrappingDependencies();
+    if (bootstrappingDeps === null) {
+      return { status: "skipped_no_planner", workspace_id: workspaceId };
+    }
+
+    const existingRecord =
+      bootstrappingDeps.bootstrappingRecordRepo.findByWorkspace(workspaceId);
+    const existingRelations =
+      await bootstrappingDeps.pathRelationRepo.findByWorkspace(workspaceId);
+    if (existingRecord !== null || existingRelations.length > 0) {
+      return {
+        status: "already_planted",
+        workspace_id: workspaceId,
+        record_id: existingRecord === null ? null : existingRecord.record_id,
+        active_relation_count: existingRelations.length
+      };
+    }
+
+    const bootstrapPlan =
+      await bootstrappingDeps.bootstrappingPlanner.planBootstrap(workspaceId);
+    const plantedEvent = this.buildBootstrappingPathsPlantedEvent(
+      bootstrapPlan.record
+    );
+
+    let plantedCount = 0;
+    let racedRecordId: string | null = null;
+    await this.dependencies.eventPublisher.appendManyWithMutation(
+      [plantedEvent],
+      () => {
+        // @anchor: race-guard mirrors createWithId:185-206
+        const racedRecord =
+          bootstrappingDeps.bootstrappingRecordRepo.findByWorkspace(
+            workspaceId
+          );
+        if (racedRecord !== null) {
+          racedRecordId = racedRecord.record_id;
+          return;
+        }
+
+        for (const relation of bootstrapPlan.relations) {
+          bootstrappingDeps.pathRelationRepo.create(relation);
+          plantedCount += 1;
+        }
+        bootstrappingDeps.bootstrappingRecordRepo.create(bootstrapPlan.record);
+      }
+    );
+
+    if (plantedCount === 0) {
+      return {
+        status: "already_planted",
+        workspace_id: workspaceId,
+        record_id: racedRecordId,
+        active_relation_count: 0
+      };
+    }
+
+    return {
+      status: "planted",
+      workspace_id: workspaceId,
+      paths_planted: plantedCount,
+      record_id: bootstrapPlan.record.record_id,
+      template_ids: bootstrapPlan.record.template_ids_used
+    };
   }
 
   public list(): Promise<readonly Workspace[]> {
