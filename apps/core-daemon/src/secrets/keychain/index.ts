@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { checkLinuxKeychainAvailable, readLinuxKeychainSecret, writeLinuxKeychainSecret } from "./linux.js";
 import { checkMacosKeychainAvailable, readMacosKeychainSecret, writeMacosKeychainSecret } from "./macos.js";
 import { checkWindowsKeychainAvailable, readWindowsKeychainSecret, writeWindowsKeychainSecret } from "./windows.js";
+import { KEYCHAIN_SUBPROCESS_TIMEOUT_MS } from "./constants.js";
 
 export interface KeychainSubprocessOptions {
   readonly timeoutMs?: number;
@@ -13,6 +14,7 @@ export interface KeychainSubprocessResult {
   readonly stdout: string;
   readonly stderr: string;
   readonly error?: NodeJS.ErrnoException;
+  readonly signal?: NodeJS.Signals | null;
 }
 
 export type KeychainSubprocessRunner = (
@@ -128,7 +130,7 @@ export function defaultKeychainSubprocessRunner(
   const result = spawnSync(command, [...args], {
     encoding: "utf8",
     input: options.input,
-    timeout: options.timeoutMs,
+    timeout: options.timeoutMs ?? KEYCHAIN_SUBPROCESS_TIMEOUT_MS,
     windowsHide: true
   });
 
@@ -136,6 +138,7 @@ export function defaultKeychainSubprocessRunner(
     code: typeof result.status === "number" ? result.status : null,
     stdout: typeof result.stdout === "string" ? result.stdout : "",
     stderr: typeof result.stderr === "string" ? result.stderr : "",
-    error: result.error as NodeJS.ErrnoException | undefined
+    error: result.error as NodeJS.ErrnoException | undefined,
+    signal: result.signal
   };
 }

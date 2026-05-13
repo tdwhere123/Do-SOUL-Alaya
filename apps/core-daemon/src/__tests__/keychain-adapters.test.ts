@@ -15,7 +15,9 @@ describe("keychain adapters", () => {
     const runner = stubRunner({ code: 0, stdout: "mac-secret\n", stderr: "" });
 
     expect(readMacosKeychainSecret("svc", "acct", runner)).toBe("mac-secret");
-    expect(runner).toHaveBeenCalledWith("security", ["find-generic-password", "-s", "svc", "-a", "acct", "-w"]);
+    expect(runner).toHaveBeenCalledWith("security", ["find-generic-password", "-s", "svc", "-a", "acct", "-w"], {
+      timeoutMs: 10_000
+    });
   });
 
   it("maps macOS tooling and not-found failures", () => {
@@ -35,7 +37,9 @@ describe("keychain adapters", () => {
     const runner = stubRunner({ code: 0, stdout: "linux-secret\n", stderr: "" });
 
     expect(readLinuxKeychainSecret("svc", "acct", runner)).toBe("linux-secret");
-    expect(runner).toHaveBeenCalledWith("secret-tool", ["lookup", "service", "svc", "account", "acct"]);
+    expect(runner).toHaveBeenCalledWith("secret-tool", ["lookup", "service", "svc", "account", "acct"], {
+      timeoutMs: 10_000
+    });
     expect(
       readLinuxKeychainSecret("svc", "acct", stubRunner({ code: null, stdout: "", stderr: "", error: enoent() }))
     ).toMatchObject({ kind: "keychain_tooling_unavailable" });
@@ -51,7 +55,8 @@ describe("keychain adapters", () => {
     const macRunner = stubRunner({ code: 0, stdout: "", stderr: "" });
     expect(writeMacosKeychainSecret("svc", "acct", "secret", macRunner)).toEqual({ ok: true });
     expect(macRunner).toHaveBeenCalledWith("security", ["-i"], {
-      input: "add-generic-password -s 'svc' -a 'acct' -w 'secret' -U\n"
+      input: "add-generic-password -s 'svc' -a 'acct' -w 'secret' -U\n",
+      timeoutMs: 10_000
     });
     expect(macRunner.mock.calls[0]![1].join(" ")).not.toContain("secret");
 
@@ -60,7 +65,7 @@ describe("keychain adapters", () => {
     expect(linuxRunner).toHaveBeenCalledWith(
       "secret-tool",
       ["store", "--label=alaya", "service", "svc", "account", "acct"],
-      { input: "secret" }
+      { input: "secret", timeoutMs: 10_000 }
     );
 
     const windowsRunner = stubRunner({ code: 0, stdout: "", stderr: "" });
@@ -68,7 +73,7 @@ describe("keychain adapters", () => {
     const [command, args, options] = windowsRunner.mock.calls[0]!;
     expect(command).toBe("powershell.exe");
     expect(args.join(" ")).toContain("PasswordVault");
-    expect(options).toEqual({ input: "secret" });
+    expect(options).toEqual({ input: "secret", timeoutMs: 10_000 });
   });
 
   it("maps write tooling and command failures", () => {
@@ -114,6 +119,23 @@ describe("keychain adapters", () => {
       account: "acct"
     });
   });
+
+  it("maps timed-out keychain subprocesses to tooling-unavailable diagnostics", () => {
+    const timedOut = stubRunner({ code: null, stdout: "", stderr: "", error: timeoutError() });
+
+    expect(readLinuxKeychainSecret("svc", "acct", timedOut)).toMatchObject({
+      kind: "keychain_tooling_unavailable",
+      reason: expect.stringContaining("timed out")
+    });
+    expect(writeMacosKeychainSecret("svc", "acct", "secret", timedOut)).toMatchObject({
+      kind: "keychain_tooling_unavailable",
+      reason: expect.stringContaining("timed out")
+    });
+    expect(checkPlatformKeychainAvailable("svc", "acct", { platform: "win32", runner: timedOut })).toMatchObject({
+      kind: "keychain_tooling_unavailable",
+      reason: expect.stringContaining("timed out")
+    });
+  });
 });
 
 function stubRunner(result: KeychainSubprocessResult): KeychainSubprocessRunner & ReturnType<typeof vi.fn> {
@@ -123,5 +145,11 @@ function stubRunner(result: KeychainSubprocessResult): KeychainSubprocessRunner 
 function enoent(): NodeJS.ErrnoException {
   const error = new Error("not found") as NodeJS.ErrnoException;
   error.code = "ENOENT";
+  return error;
+}
+
+function timeoutError(): NodeJS.ErrnoException {
+  const error = new Error("timed out") as NodeJS.ErrnoException;
+  error.code = "ETIMEDOUT";
   return error;
 }

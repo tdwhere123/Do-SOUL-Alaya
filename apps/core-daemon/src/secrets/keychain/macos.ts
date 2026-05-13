@@ -4,20 +4,26 @@ import type {
   KeychainSubprocessRunner,
   KeychainWriteResult
 } from "./index.js";
+import {
+  KEYCHAIN_SUBPROCESS_TIMEOUT_MS,
+  isKeychainSubprocessTimeout,
+  keychainSubprocessTimeoutReason
+} from "./constants.js";
 
 export function readMacosKeychainSecret(
   service: string,
   account: string,
   runner: KeychainSubprocessRunner
 ): KeychainReadResult {
-  const result = runner("security", ["find-generic-password", "-s", service, "-a", account, "-w"]);
+  const result = runner("security", ["find-generic-password", "-s", service, "-a", account, "-w"], {
+    timeoutMs: KEYCHAIN_SUBPROCESS_TIMEOUT_MS
+  });
   if (result.error?.code === "ENOENT") {
-    return {
-      kind: "keychain_tooling_unavailable",
-      service,
-      account,
-      reason: "macOS security command was not found on PATH."
-    };
+    return macosToolingUnavailable(service, account);
+  }
+
+  if (isKeychainSubprocessTimeout(result)) {
+    return macosToolingUnavailable(service, account, keychainSubprocessTimeoutReason("macOS security"));
   }
 
   if (result.code !== 0) {
@@ -39,10 +45,14 @@ export function writeMacosKeychainSecret(
   runner: KeychainSubprocessRunner
 ): KeychainWriteResult {
   const result = runner("security", ["-i"], {
-    input: `add-generic-password -s ${quoteSecurityInteractiveArg(service)} -a ${quoteSecurityInteractiveArg(account)} -w ${quoteSecurityInteractiveArg(value)} -U\n`
+    input: `add-generic-password -s ${quoteSecurityInteractiveArg(service)} -a ${quoteSecurityInteractiveArg(account)} -w ${quoteSecurityInteractiveArg(value)} -U\n`,
+    timeoutMs: KEYCHAIN_SUBPROCESS_TIMEOUT_MS
   });
   if (result.error?.code === "ENOENT") {
     return macosToolingUnavailable(service, account);
+  }
+  if (isKeychainSubprocessTimeout(result)) {
+    return macosToolingUnavailable(service, account, keychainSubprocessTimeoutReason("macOS security"));
   }
   if (result.code !== 0) {
     return {
@@ -60,16 +70,26 @@ export function checkMacosKeychainAvailable(
   account: string,
   runner: KeychainSubprocessRunner
 ): KeychainAvailabilityResult {
-  const result = runner("security", ["-h"]);
-  return result.error?.code === "ENOENT" ? macosToolingUnavailable(service, account) : { ok: true };
+  const result = runner("security", ["-h"], { timeoutMs: KEYCHAIN_SUBPROCESS_TIMEOUT_MS });
+  return result.error?.code === "ENOENT" || isKeychainSubprocessTimeout(result)
+    ? macosToolingUnavailable(
+        service,
+        account,
+        isKeychainSubprocessTimeout(result) ? keychainSubprocessTimeoutReason("macOS security") : undefined
+      )
+    : { ok: true };
 }
 
-function macosToolingUnavailable(service: string, account: string): Extract<KeychainAvailabilityResult, { kind: "keychain_tooling_unavailable" }> {
+function macosToolingUnavailable(
+  service: string,
+  account: string,
+  reason = "macOS security command was not found on PATH."
+): Extract<KeychainAvailabilityResult, { kind: "keychain_tooling_unavailable" }> {
   return {
     kind: "keychain_tooling_unavailable",
     service,
     account,
-    reason: "macOS security command was not found on PATH."
+    reason
   };
 }
 

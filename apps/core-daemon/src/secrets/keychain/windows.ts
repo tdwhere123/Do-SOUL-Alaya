@@ -4,6 +4,11 @@ import type {
   KeychainSubprocessRunner,
   KeychainWriteResult
 } from "./index.js";
+import {
+  KEYCHAIN_SUBPROCESS_TIMEOUT_MS,
+  isKeychainSubprocessTimeout,
+  keychainSubprocessTimeoutReason
+} from "./constants.js";
 
 const PASSWORD_VAULT_READ_SCRIPT = [
   // PasswordVault can read credentials that were written through the Windows Credential Manager WinRT API.
@@ -41,15 +46,14 @@ export function readWindowsKeychainSecret(
     PASSWORD_VAULT_READ_SCRIPT,
     service,
     account
-  ]);
+  ], { timeoutMs: KEYCHAIN_SUBPROCESS_TIMEOUT_MS });
 
   if (result.error?.code === "ENOENT") {
-    return {
-      kind: "keychain_tooling_unavailable",
-      service,
-      account,
-      reason: "PowerShell was not found on PATH; Windows keychain reads require PowerShell PasswordVault access."
-    };
+    return windowsToolingUnavailable(service, account);
+  }
+
+  if (isKeychainSubprocessTimeout(result)) {
+    return windowsToolingUnavailable(service, account, keychainSubprocessTimeoutReason("PowerShell PasswordVault"));
   }
 
   if (result.code !== 0) {
@@ -82,11 +86,15 @@ export function writeWindowsKeychainSecret(
       service,
       account
     ],
-    { input: value }
+    { input: value, timeoutMs: KEYCHAIN_SUBPROCESS_TIMEOUT_MS }
   );
 
   if (result.error?.code === "ENOENT") {
     return windowsToolingUnavailable(service, account);
+  }
+
+  if (isKeychainSubprocessTimeout(result)) {
+    return windowsToolingUnavailable(service, account, keychainSubprocessTimeoutReason("PowerShell PasswordVault"));
   }
 
   if (result.code !== 0) {
@@ -113,15 +121,25 @@ export function checkWindowsKeychainAvailable(
     "Bypass",
     "-Command",
     "$PSVersionTable.PSVersion.ToString()"
-  ]);
-  return result.error?.code === "ENOENT" ? windowsToolingUnavailable(service, account) : { ok: true };
+  ], { timeoutMs: KEYCHAIN_SUBPROCESS_TIMEOUT_MS });
+  return result.error?.code === "ENOENT" || isKeychainSubprocessTimeout(result)
+    ? windowsToolingUnavailable(
+        service,
+        account,
+        isKeychainSubprocessTimeout(result) ? keychainSubprocessTimeoutReason("PowerShell PasswordVault") : undefined
+      )
+    : { ok: true };
 }
 
-function windowsToolingUnavailable(service: string, account: string): Extract<KeychainAvailabilityResult, { kind: "keychain_tooling_unavailable" }> {
+function windowsToolingUnavailable(
+  service: string,
+  account: string,
+  reason = "PowerShell was not found on PATH; Windows keychain access requires PowerShell PasswordVault access."
+): Extract<KeychainAvailabilityResult, { kind: "keychain_tooling_unavailable" }> {
   return {
     kind: "keychain_tooling_unavailable",
     service,
     account,
-    reason: "PowerShell was not found on PATH; Windows keychain access requires PowerShell PasswordVault access."
+    reason
   };
 }

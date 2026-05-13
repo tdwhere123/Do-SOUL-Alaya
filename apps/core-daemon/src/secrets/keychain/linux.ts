@@ -4,20 +4,26 @@ import type {
   KeychainSubprocessRunner,
   KeychainWriteResult
 } from "./index.js";
+import {
+  KEYCHAIN_SUBPROCESS_TIMEOUT_MS,
+  isKeychainSubprocessTimeout,
+  keychainSubprocessTimeoutReason
+} from "./constants.js";
 
 export function readLinuxKeychainSecret(
   service: string,
   account: string,
   runner: KeychainSubprocessRunner
 ): KeychainReadResult {
-  const result = runner("secret-tool", ["lookup", "service", service, "account", account]);
+  const result = runner("secret-tool", ["lookup", "service", service, "account", account], {
+    timeoutMs: KEYCHAIN_SUBPROCESS_TIMEOUT_MS
+  });
   if (result.error?.code === "ENOENT") {
-    return {
-      kind: "keychain_tooling_unavailable",
-      service,
-      account,
-      reason: "secret-tool was not found on PATH; install the libsecret-tools package."
-    };
+    return linuxToolingUnavailable(service, account);
+  }
+
+  if (isKeychainSubprocessTimeout(result)) {
+    return linuxToolingUnavailable(service, account, keychainSubprocessTimeoutReason("secret-tool"));
   }
 
   if (result.code !== 0 || result.stdout.trim().length === 0) {
@@ -41,10 +47,13 @@ export function writeLinuxKeychainSecret(
   const result = runner(
     "secret-tool",
     ["store", "--label=alaya", "service", service, "account", account],
-    { input: value }
+    { input: value, timeoutMs: KEYCHAIN_SUBPROCESS_TIMEOUT_MS }
   );
   if (result.error?.code === "ENOENT") {
     return linuxToolingUnavailable(service, account);
+  }
+  if (isKeychainSubprocessTimeout(result)) {
+    return linuxToolingUnavailable(service, account, keychainSubprocessTimeoutReason("secret-tool"));
   }
   if (result.code !== 0) {
     return {
@@ -62,15 +71,25 @@ export function checkLinuxKeychainAvailable(
   account: string,
   runner: KeychainSubprocessRunner
 ): KeychainAvailabilityResult {
-  const result = runner("secret-tool", ["--help"]);
-  return result.error?.code === "ENOENT" ? linuxToolingUnavailable(service, account) : { ok: true };
+  const result = runner("secret-tool", ["--help"], { timeoutMs: KEYCHAIN_SUBPROCESS_TIMEOUT_MS });
+  return result.error?.code === "ENOENT" || isKeychainSubprocessTimeout(result)
+    ? linuxToolingUnavailable(
+        service,
+        account,
+        isKeychainSubprocessTimeout(result) ? keychainSubprocessTimeoutReason("secret-tool") : undefined
+      )
+    : { ok: true };
 }
 
-function linuxToolingUnavailable(service: string, account: string): Extract<KeychainAvailabilityResult, { kind: "keychain_tooling_unavailable" }> {
+function linuxToolingUnavailable(
+  service: string,
+  account: string,
+  reason = "secret-tool was not found on PATH; install the libsecret-tools package."
+): Extract<KeychainAvailabilityResult, { kind: "keychain_tooling_unavailable" }> {
   return {
     kind: "keychain_tooling_unavailable",
     service,
     account,
-    reason: "secret-tool was not found on PATH; install the libsecret-tools package."
+    reason
   };
 }
