@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { InMemoryHandoffGapHandler, MaterializationRouter } from "@do-soul/alaya-soul";
+import {
+  InMemoryHandoffGapHandler,
+  MaterializationRouter,
+  normalizeSchemaGroundedSignal
+} from "@do-soul/alaya-soul";
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 
 function createSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
@@ -80,6 +84,43 @@ describe("MaterializationRouter", () => {
         validation_result: { status: "deferred", reasons: ["field_candidates missing"] }
       }
     });
+
+    expect(router.route(signal)).toMatchObject({
+      kind: "deferred",
+      routing_reason: expect.stringContaining("schema-grounded signal failed validation")
+    });
+
+    const result = await router.materializeSignal(signal);
+
+    expect(result).toMatchObject({
+      target_kind: "deferred",
+      success: true,
+      created_objects: []
+    });
+    expect(deps.memoryService.create).not.toHaveBeenCalled();
+    expect(deps.claimService.create).not.toHaveBeenCalled();
+  });
+
+  it("does not materialize malformed schema-grounded host input after normalization", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+    const signal = normalizeSchemaGroundedSignal(
+      createSignal({
+        confidence: 0.9,
+        raw_payload: {
+          schema_grounding: { version: 1, status: "valid" },
+          detected_object: { object_kind: "constraint" },
+          field_candidates: [
+            {
+              field_name: "constraint",
+              evidence: "Never print secrets."
+            }
+          ],
+          matched_text: "Never print secrets.",
+          validation_result: { status: "valid", reasons: [] }
+        }
+      })
+    );
 
     expect(router.route(signal)).toMatchObject({
       kind: "deferred",

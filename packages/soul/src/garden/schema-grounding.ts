@@ -34,8 +34,19 @@ const MAX_FIELD_EVIDENCE_CHARS = 4_000;
 export function buildSchemaGroundedRawPayload(
   input: SchemaGroundedRawPayloadInput
 ): Readonly<Record<string, unknown>> {
-  const detectedObject = normalizeDetectedObject(input.rawPayload, input.objectKind, input.confidence);
-  const fieldCandidates = normalizeFieldCandidates(input.rawPayload, input.objectKind, input.confidence);
+  const alreadyDeclared = declaresSchemaGrounding(input.rawPayload);
+  const detectedObject = normalizeDetectedObject(
+    input.rawPayload,
+    input.objectKind,
+    input.confidence,
+    !alreadyDeclared
+  );
+  const fieldCandidates = normalizeFieldCandidates(
+    input.rawPayload,
+    input.objectKind,
+    input.confidence,
+    !alreadyDeclared
+  );
   const validation = validateSchemaGroundingParts({
     signalObjectKind: input.objectKind,
     detectedObject,
@@ -128,10 +139,15 @@ function declaresSchemaGrounding(rawPayload: Readonly<Record<string, unknown>>):
 function normalizeDetectedObject(
   rawPayload: Readonly<Record<string, unknown>>,
   objectKind: string,
-  confidence: number
+  confidence: number,
+  allowFallback: boolean
 ): Readonly<Record<string, unknown>> {
   const supplied = readRecord(rawPayload.detected_object);
   const suppliedObjectKind = readNonEmptyString(supplied?.object_kind);
+
+  if (suppliedObjectKind === null && !allowFallback) {
+    return Object.freeze({});
+  }
 
   return Object.freeze({
     object_kind: suppliedObjectKind ?? objectKind,
@@ -142,11 +158,16 @@ function normalizeDetectedObject(
 function normalizeFieldCandidates(
   rawPayload: Readonly<Record<string, unknown>>,
   objectKind: string,
-  confidence: number
+  confidence: number,
+  allowFallback: boolean
 ): readonly SchemaGroundedFieldCandidate[] {
   const supplied = readFieldCandidates(rawPayload.field_candidates);
   if (supplied.length > 0) {
     return supplied;
+  }
+
+  if (!allowFallback) {
+    return [];
   }
 
   const value = readPrimaryPayloadText(rawPayload);

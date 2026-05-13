@@ -91,4 +91,31 @@ describe("schema-grounding", () => {
       field_count: 0
     });
   });
+
+  it("does not silently repair malformed declared schema-grounded payloads", () => {
+    const normalized = normalizeSchemaGroundedSignal(
+      createSignal({
+        raw_payload: {
+          schema_grounding: { version: 1, status: "valid" },
+          detected_object: { object_kind: "constraint" },
+          field_candidates: [
+            {
+              field_name: "constraint",
+              evidence: "Never print secrets."
+            }
+          ],
+          matched_text: "Never print secrets.",
+          validation_result: { status: "valid", reasons: [] }
+        }
+      })
+    );
+
+    expect(validateSchemaGroundingForSignal(normalized)).toMatchObject({
+      declared: true,
+      status: "deferred",
+      field_count: 0,
+      reasons: expect.arrayContaining(["field_candidates missing"])
+    });
+    expect(readSchemaGroundedContent(normalized)).toBeNull();
+  });
 });
