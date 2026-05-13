@@ -4,7 +4,7 @@
   "note": "Snapshot of real attached-host soul.recall -> soul.report_context_usage chains from a normal conversation; not a synthetic capture. agent_target=mcp rows pre-date the v0.3.0 attach env stamp; re-attach + refresh to get host-labelled rows.",
   "daemon_version": "0.3.0",
   "source_db": "~/.config/alaya/alaya.db",
-  "captured_at": "2026-05-13T03:45:30.507Z",
+  "captured_at": "2026-05-13T04:08:10.155Z",
   "chain_count": 6,
   "agent_targets": [
     "mcp"

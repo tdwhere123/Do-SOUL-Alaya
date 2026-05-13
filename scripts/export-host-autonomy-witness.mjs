@@ -60,13 +60,15 @@ function resolveDbPath(arg) {
 
 // The db path is recorded in metadata for provenance, but the repo fixture must
 // not carry the operator's absolute home path (and hence username). Collapse a
-// home-relative path to ~/..., and drop the directory for anything else.
+// home-relative path to ~/..., and otherwise keep only the file name — split on
+// both separators so a Windows-style path passed on a POSIX host can't leak the
+// directory either.
 function redactDbPath(dbPath) {
   const home = homedir();
   if (dbPath === home || dbPath.startsWith(home + path.sep)) {
     return path.posix.join("~", path.relative(home, dbPath).split(path.sep).join("/"));
   }
-  return path.basename(dbPath);
+  return dbPath.split(/[\\/]/u).filter(Boolean).pop() ?? "alaya.db";
 }
 
 function daemonVersion() {
