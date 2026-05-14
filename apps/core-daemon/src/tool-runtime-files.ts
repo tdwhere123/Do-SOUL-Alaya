@@ -580,6 +580,7 @@ async function execShell(
         cwd,
         timeout: timeoutMs,
         maxBuffer: MAX_EXEC_BUFFER_BYTES,
+        encoding: "utf8",
         env: createExecChildProcessEnv(),
         windowsHide: true
       },

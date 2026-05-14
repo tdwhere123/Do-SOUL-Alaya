@@ -400,55 +400,49 @@ function createMcpCommand(runtime: AlayaDaemonRuntime): AlayaSubcommandSpec<read
         return { exitCode: ALAYA_SYSEXITS.USAGE };
       }
 
-      const workspaceContext = resolveCliWorkspaceContext(ctx);
-      await ensureImplicitLocalWorkspace(workspaceContext, runtime.services.workspaceService);
-      const trustedRunId = await resolveTrustedCliRunId({
-        runId: ctx.env.ALAYA_RUN_ID,
-        workspaceId: workspaceContext.workspaceId,
-        runService: runtime.services.runService,
-        sourceLabel: "ALAYA_RUN_ID"
-      });
-      if (!trustedRunId.ok) {
-        ctx.stderr.write(`${trustedRunId.message}\n`);
-        return { exitCode: ALAYA_SYSEXITS.DATAERR };
-      }
+      let server: Awaited<ReturnType<typeof runAlayaMcpStdioServer>>;
 
-      // gate-6-delta B1: the MCP stdio surface is an attached-agent
-      // boundary; it must never advertise itself as a human-reviewer
-      // surface ("inspector" / "cli"). An attacker controlling launch
-      // env who set ALAYA_AGENT_TARGET=cli would otherwise get
-      // assertProposalContext's runId-null loosening at
-      // mcp-memory-proposal-workflow.ts:568-571 and could accept any
-      // pending proposal in the workspace. The other agent-attached
-      // surfaces apply equivalent guards at their boundaries
-      // (cli/review.ts:378-408 pins "cli", cli/tools.ts:82-90 rejects
-      // human-reviewer targets), so per invariants §30 we fix at
-      // source by sanitising the env here.
-      const resolvedAgentTarget = resolveMcpAgentTarget(ctx.env.ALAYA_AGENT_TARGET, (message) => {
-        ctx.stderr.write(`${message}\n`);
-      });
-
-      // sessionId is process-stable for an attached MCP stdio session:
-      // each attach launches a fresh `alaya mcp stdio` child, so one
-      // uuid per process maps 1:1 to one MCP attach session.
-      const mcpSessionId = `mcp-session-${randomUUID()}`;
-      const mcpRunId = trustedRunId.runId ?? (await runtime.services.runService.ensureAttachedMcpSessionRun({
-        workspaceId: workspaceContext.workspaceId,
-        sessionId: mcpSessionId,
-        agentTarget: resolvedAgentTarget
-      })).run_id;
-      runtime.startBackgroundServices();
-      const server = await runAlayaMcpStdioServer({
-        memoryToolHandler: runtime.services.mcpMemoryToolHandler,
-        contextProvider: () => ({
+      try {
+        const workspaceContext = resolveCliWorkspaceContext(ctx);
+        await ensureImplicitLocalWorkspace(workspaceContext, runtime.services.workspaceService);
+        const trustedRunId = await resolveTrustedCliRunId({
+          runId: ctx.env.ALAYA_RUN_ID,
           workspaceId: workspaceContext.workspaceId,
-          runId: mcpRunId,
-          agentTarget: resolvedAgentTarget,
-          sessionId: mcpSessionId
-        }),
-        stdin: ctx.stdin as unknown as Readable,
-        stdout: ctx.stdout as unknown as Writable
-      });
+          runService: runtime.services.runService,
+          sourceLabel: "ALAYA_RUN_ID"
+        });
+        if (!trustedRunId.ok) {
+          ctx.stderr.write(`${trustedRunId.message}\n`);
+          return { exitCode: ALAYA_SYSEXITS.DATAERR };
+        }
+
+        const resolvedAgentTarget = resolveMcpAgentTarget(ctx.env.ALAYA_AGENT_TARGET, (message) => {
+          ctx.stderr.write(`${message}\n`);
+        });
+
+        // invariant: one MCP stdio child process owns one stable attach session id.
+        const mcpSessionId = `mcp-session-${randomUUID()}`;
+        const mcpRunId = trustedRunId.runId ?? (await runtime.services.runService.ensureAttachedMcpSessionRun({
+          workspaceId: workspaceContext.workspaceId,
+          sessionId: mcpSessionId,
+          agentTarget: resolvedAgentTarget
+        })).run_id;
+        server = await runAlayaMcpStdioServer({
+          memoryToolHandler: runtime.services.mcpMemoryToolHandler,
+          contextProvider: () => ({
+            workspaceId: workspaceContext.workspaceId,
+            runId: mcpRunId,
+            agentTarget: resolvedAgentTarget,
+            sessionId: mcpSessionId
+          }),
+          stdin: ctx.stdin as unknown as Readable,
+          stdout: ctx.stdout as unknown as Writable
+        });
+        runtime.startBackgroundServices();
+      } catch (error) {
+        ctx.stderr.write(`MCP stdio startup failed: ${formatMcpStartupError(error)}\n`);
+        return { exitCode: ALAYA_SYSEXITS.SOFTWARE };
+      }
 
       try {
         await waitForInputClose(ctx.stdin);
@@ -485,6 +479,13 @@ function resolveMcpAgentTarget(
 
   warn(`Ignoring unsupported ALAYA_AGENT_TARGET=${requestedAgentTarget}: MCP stdio supports codex, claude-code, garden-worker, or mcp.`);
   return "mcp";
+}
+
+function formatMcpStartupError(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message.trim();
+  }
+  return "unable to start MCP stdio transport";
 }
 
 function stringListArgsSchema(): AlayaCliArgsSchema<readonly string[]> {

@@ -1,6 +1,6 @@
 {
   "name": "@do-soul/alaya-core",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "private": true,
   "description": "Truth boundary services for Do-SOUL Alaya — EventPublisher, MemoryService, GardenRuntime.",
   "license": "MIT",
@@ -23,5 +23,8 @@
   },
   "dependencies": {
     "@do-soul/alaya-protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@do-soul/alaya-storage": "workspace:*"
   }
 }

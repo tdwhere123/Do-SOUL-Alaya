@@ -176,6 +176,7 @@ export function createGardenRuntime(input: {
   };
   readonly strongRefService: StrongRefService;
   readonly workspaceRepo: SqliteWorkspaceRepo;
+  readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }): Readonly<{
   readonly backgroundManager: BackgroundServiceManager;
   readonly backlogTelemetrySource: GardenBacklogTelemetrySource;
@@ -190,6 +191,7 @@ export function createGardenRuntime(input: {
         ? {}
         : { watermarkRepo: input.pathPlasticityWatermarkRepo })
     });
+  const warn = input.warn ?? defaultGardenRuntimeWarn;
 
   const schedulerEventLogPort: GardenSchedulerEventLogPort = {
     append: async (entry) => {
@@ -374,7 +376,7 @@ export function createGardenRuntime(input: {
     void observer
       .capture()
       .catch((error) => {
-        console.warn("[garden] backlog telemetry observer capture failed", {
+        warn("garden backlog telemetry observer capture failed", {
           reason,
           error: error instanceof Error ? error.message : String(error)
         });
@@ -551,7 +553,7 @@ export function createGardenRuntime(input: {
 
       if (snapshot !== null) {
         await prunePathGraphHistoryForWorkspace(task.workspace_id, snapshot.snapshot_at).catch((error) => {
-          console.warn("[garden] path graph snapshot prune failed after persistence", {
+          warn("garden path graph snapshot prune failed after persistence", {
             workspaceId: task.workspace_id,
             snapshotId: snapshot.snapshot_id,
             error: error instanceof Error ? error.message : String(error)
@@ -948,7 +950,9 @@ export function createGardenRuntime(input: {
       }
     }
   ];
-  const backgroundManager = new BackgroundServiceManager(backgroundServices);
+  const backgroundManager = new BackgroundServiceManager(backgroundServices, {
+    logger: { warn }
+  });
 
   return Object.freeze({
     backgroundManager,
@@ -1003,6 +1007,10 @@ export function createGardenRuntime(input: {
       backlogTelemetryObserver = observer;
     }
   });
+}
+
+function defaultGardenRuntimeWarn(message: string, meta: Record<string, unknown>): void {
+  console.warn(message, meta);
 }
 
 function parsePostTurnExtractTaskPayload(payload: unknown): PostTurnExtractTaskPayload {

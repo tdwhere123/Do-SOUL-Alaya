@@ -141,6 +141,10 @@ importers:
       '@do-soul/alaya-protocol':
         specifier: workspace:*
         version: link:../protocol
+    devDependencies:
+      '@do-soul/alaya-storage':
+        specifier: workspace:*
+        version: link:../storage
 
   packages/engine-gateway:
     dependencies:

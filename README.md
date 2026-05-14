@@ -10,9 +10,9 @@
 
 ### *A local-first memory plane for CLI coding agents.*
 
-[![status](https://img.shields.io/badge/status-v0.3.4-success?style=flat-square)](#where-this-is-going)
+[![status](https://img.shields.io/badge/status-v0.3.5-success?style=flat-square)](#where-this-is-going)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-2517%20passing-success?style=flat-square)](#where-this-is-going)
+[![tests](https://img.shields.io/badge/tests-2525%20passing-success?style=flat-square)](#where-this-is-going)
 [![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#quickstart)
 [![pnpm](https://img.shields.io/badge/pnpm-%E2%89%A59-F69220?style=flat-square&logo=pnpm&logoColor=white)](#quickstart)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](#architecture-at-a-glance)
@@ -446,8 +446,14 @@ stdio); every mutating verb supports preview before write, attach
 > signing yet — tag protection on `v*` is the trust anchor.)
 
 ```bash
-# Install latest release (downloads tarball, checksum-verifies, builds locally).
-curl -fsSL https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/main/scripts/install.sh | bash
+# Install a pinned release. The installer then downloads the matching
+# release tarball, verifies SHA256SUMS, and builds locally.
+ALAYA_VERSION=v0.3.5
+INSTALLER="$(mktemp)"
+trap 'rm -f "$INSTALLER"' EXIT
+curl -fsSL -o "$INSTALLER" \
+  "https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/${ALAYA_VERSION}/scripts/install.sh"
+ALAYA_VERSION="$ALAYA_VERSION" bash "$INSTALLER"
 
 # Verify and attach.
 alaya doctor
@@ -457,12 +463,13 @@ alaya install --non-interactive "$(printf '{"db_path":"%s/.config/alaya/alaya.db
 alaya attach claude-code
 ```
 
-Pin a specific version (env vars must follow the pipe so `bash` sees
-them, not `curl`):
+Pipe-to-bash shortcut (faster, but you execute the downloaded
+installer directly; the release tarball is still checksum-verified by
+the script):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/main/scripts/install.sh \
-  | ALAYA_VERSION=v0.3.0 bash
+  | ALAYA_VERSION=v0.3.5 bash
 ```
 
 Override install location:
@@ -547,7 +554,7 @@ place to look. The full project layout is documented in
 
 ### Current state (2026-05-14)
 
-v0.3.4 is the current checkpoint and the first publicly released
+v0.3.5 is the current checkpoint; v0.3.4 was the first publicly released
 v0.3.x line. Cumulative since v0.3.0: real Codex and Claude Code
 MCP sessions are observed autonomously running `soul.recall` →
 `soul.report_context_usage` during normal conversations, with a
@@ -562,12 +569,13 @@ recall reports and later recall reads them as weighted
 sets); bootstrap is honest about empty templates; `keychain:` secret
 refs are code-reviewed across Linux / macOS / Windows adapters
 (runtime cross-platform write→read still deferred — `env:` / `file:`
-refs are the runtime-verified path on WSL2); and v0.3.4 makes
-`alaya doctor` print the running daemon's `version` / `git_head` /
-`built_at`. Distribution is GitHub-Release source tarball +
-`SHA256SUMS`, verified locally by `scripts/install.sh` — v0.3.4 is
-the first v0.3.x tag and the first triggered `release.yml`
-workflow run. npm publish is intentionally out-of-scope.
+refs are the runtime-verified path on WSL2); v0.3.4 makes `alaya
+doctor` print the running daemon's `version` / `git_head` / `built_at`;
+and v0.3.5 hardens the CLI/MCP startup and local execution support
+code without changing public MCP, protocol, EventLog, runtime config,
+or SQLite surfaces. Distribution is GitHub-Release source tarball +
+`SHA256SUMS`, verified locally by `scripts/install.sh`; npm publish is
+intentionally out-of-scope.
 
 ### Where it is going
 

@@ -13,6 +13,8 @@
 | [`v0.3.1`](v0.3.1/README.md) | Patch-safe recall maintainability and baseline foundation | done |
 | [`v0.3.2`](v0.3.2/README.md) | Patch-internal read/write memory quality | done |
 | [`v0.3.3`](v0.3.3/README.md) | Recall graph quality, bootstrap reconciliation truth, and keychain hygiene | done |
+| [`v0.3.4`](v0.3.4/README.md) | First public v0.3.x release, release workflow, README closeout, and doctor build-info | done |
+| [`v0.3.5`](v0.3.5/README.md) | Patch-internal CLI/MCP startup and local execution hardening | done |
 
 ## What v0.3.0 is
 
@@ -122,6 +124,14 @@ docs/v0.3/
     └── reports/
 └── v0.3.3/
     ├── README.md                          ← recall graph + keychain hygiene track
+    ├── release-notes.md
+    └── reports/
+└── v0.3.4/
+    ├── README.md                          ← first public v0.3.x release closeout
+    ├── release-notes.md
+    └── reports/
+└── v0.3.5/
+    ├── README.md                          ← patch-internal CLI/MCP quality hardening
     ├── release-notes.md
     └── reports/
 ```

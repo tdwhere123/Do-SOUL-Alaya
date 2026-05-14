@@ -11,6 +11,7 @@ import type {
 } from "@do-soul/alaya-protocol";
 import { createExternalConversationToolExecutor } from "../mcp-catalog.js";
 import {
+  executeConversationTool,
   executeConversationToolOrThrow,
   handleConversationToolUse,
   registerConversationToolSpecs
@@ -79,6 +80,70 @@ describe("tool-runtime relative path handling", () => {
         content: "workspace readme",
         bytesRead: 16
       })
+    });
+  });
+
+  it("executes tools.exec_shell through argv without shell expansion and without leaking ambient secrets", async () => {
+    const workspaceDir = await createWorkspace();
+    process.env.ALAYA_EXEC_SHELL_TEST_SECRET = "sk-env-leak";
+    try {
+      const result = await executeConversationTool(
+        "tools.exec_shell",
+        {
+          command: process.execPath,
+          args: [
+            "-e",
+            "require('node:fs').writeFileSync(1, `${process.argv[1]}|${process.env.ALAYA_EXEC_SHELL_TEST_SECRET ?? 'missing'}`)",
+            "$(echo owned)"
+          ]
+        },
+        [workspaceDir]
+      );
+
+      expect(result).toEqual({
+        ok: true,
+        exitCode: 0,
+        stdout: "$(echo owned)|missing",
+        stderr: ""
+      });
+    } finally {
+      delete process.env.ALAYA_EXEC_SHELL_TEST_SECRET;
+    }
+  });
+
+  it("maps tools.exec_shell nonzero exits and timeouts to structured results", async () => {
+    const workspaceDir = await createWorkspace();
+
+    await expect(
+      executeConversationTool(
+        "tools.exec_shell",
+        {
+          command: process.execPath,
+          args: ["-e", "require('node:fs').writeFileSync(2, 'bad'); process.exit(7)"]
+        },
+        [workspaceDir]
+      )
+    ).resolves.toEqual({
+      ok: true,
+      exitCode: 7,
+      stdout: "",
+      stderr: "bad"
+    });
+
+    await expect(
+      executeConversationTool(
+        "tools.exec_shell",
+        {
+          command: process.execPath,
+          args: ["-e", "setTimeout(() => {}, 1000)"],
+          timeoutMs: 1
+        },
+        [workspaceDir]
+      )
+    ).resolves.toEqual({
+      ok: false,
+      code: "TIMEOUT",
+      message: "Command timed out after 1ms."
     });
   });
 

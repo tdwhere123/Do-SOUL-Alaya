@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
 # Do-SOUL Alaya local installer.
 #
-# Usage (env vars MUST come after the pipe so `bash` sees them, not `curl`):
-#   curl -fsSL https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/main/scripts/install.sh | bash
-#   curl -fsSL ... | ALAYA_VERSION=v0.1.2 bash
+# Recommended tag-pinned usage:
+#   ALAYA_VERSION=v0.3.5
+#   INSTALLER="$(mktemp)"
+#   curl -fsSL -o "$INSTALLER" "https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/${ALAYA_VERSION}/scripts/install.sh"
+#   ALAYA_VERSION="$ALAYA_VERSION" bash "$INSTALLER"
+#
+# Pipe shortcut (env vars MUST come after the pipe so `bash` sees them,
+# not `curl`; the downloaded script still verifies the release tarball):
+#   curl -fsSL https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/main/scripts/install.sh | ALAYA_VERSION=v0.3.5 bash
 #   curl -fsSL ... | ALAYA_HOME=/opt/alaya ALAYA_BIN_DIR=/usr/local/bin bash
 #
 # Environment overrides:
-#   ALAYA_VERSION   default: latest GitHub release tag (e.g. v0.1.2)
+#   ALAYA_VERSION   default: latest GitHub release tag (e.g. v0.3.5)
 #   ALAYA_HOME      default: $HOME/.local/share/do-soul-alaya
 #   ALAYA_BIN_DIR   default: $HOME/.local/bin
 #   ALAYA_REPO      default: tdwhere123/Do-SOUL-Alaya

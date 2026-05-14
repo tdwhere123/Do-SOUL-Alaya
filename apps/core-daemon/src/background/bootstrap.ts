@@ -8,34 +8,52 @@ export interface BackgroundServiceStopOptions {
   readonly timeoutMs?: number | null;
 }
 
+export interface BackgroundServiceLogger {
+  warn(message: string, meta: Record<string, unknown>): void;
+}
+
+export interface BackgroundServiceManagerOptions {
+  readonly logger?: BackgroundServiceLogger;
+}
+
 export class BackgroundServiceManager {
   private readonly services: readonly BackgroundServiceConfig[];
+  private readonly logger: BackgroundServiceLogger;
   private timers: ReturnType<typeof setInterval>[] = [];
   private inFlight: Promise<void>[] = [];
   private executionLocks: Map<string, boolean> = new Map();
   private started = false;
 
-  public constructor(services: BackgroundServiceConfig[]) {
+  public constructor(services: BackgroundServiceConfig[], options: BackgroundServiceManagerOptions = {}) {
     this.services = services;
+    this.logger = options.logger ?? defaultBackgroundServiceLogger;
   }
 
   public start(): void {
     if (this.started) return;
     this.started = true;
     for (const svc of this.services) {
-      console.warn(`[daemon] Background service started: ${svc.name} (interval: ${svc.intervalMs}ms)`);
+      this.logger.warn("background service started", {
+        service: svc.name,
+        intervalMs: svc.intervalMs
+      });
       this.executionLocks.set(svc.name, false);
       this.timers.push(
         setInterval(() => {
           if (this.executionLocks.get(svc.name)) {
-            console.warn(`[daemon] Background service "${svc.name}" skipped (previous execution still running)`);
+            this.logger.warn("background service skipped because previous execution is still running", {
+              service: svc.name
+            });
             return;
           }
 
           this.executionLocks.set(svc.name, true);
           const p = svc.task()
             .catch((err) => {
-              console.warn(`[daemon] Background service "${svc.name}" task error:`, err);
+              this.logger.warn("background service task failed", {
+                service: svc.name,
+                error: err instanceof Error ? err.message : String(err)
+              });
             })
             .finally(() => {
               this.executionLocks.set(svc.name, false);
@@ -63,3 +81,9 @@ export class BackgroundServiceManager {
     this.started = false;
   }
 }
+
+const defaultBackgroundServiceLogger: BackgroundServiceLogger = Object.freeze({
+  warn(message: string, meta: Record<string, unknown>) {
+    console.warn(message, meta);
+  }
+});

@@ -391,6 +391,78 @@ describe("cli registration", () => {
     expect(startBackgroundServices).not.toHaveBeenCalled();
     expect(hoisted.runAlayaMcpStdioServer).not.toHaveBeenCalled();
   });
+
+  it("reports MCP stdio startup failures on stderr without writing JSON-RPC stdout", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const stdoutChunks: string[] = [];
+    const stderrChunks: string[] = [];
+    stdout.on("data", (chunk) => stdoutChunks.push(chunk.toString("utf8")));
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString("utf8")));
+    const baseRuntime = createRuntime();
+    const runtime = createRuntime({
+      services: {
+        ...baseRuntime.services,
+        runService: {
+          ...baseRuntime.services.runService,
+          ensureAttachedMcpSessionRun: vi.fn(async () => {
+            throw new Error("SQLITE_READONLY: attempt to write a readonly database");
+          })
+        }
+      }
+    });
+    const bridge = createAlayaCliBridge(runtime, {
+      env: {
+        ALAYA_WORKSPACE_ID: "workspace-1"
+      },
+      stdin,
+      stdout,
+      stderr,
+      isTTY: false
+    });
+    registerAlayaCliCommands(bridge, runtime);
+
+    const result = await bridge.dispatch(["mcp", "stdio"]);
+
+    expect(result.exitCode).toBe(70);
+    expect(stdoutChunks.join("")).toBe("");
+    expect(stderrChunks.join("")).toContain(
+      "MCP stdio startup failed: SQLITE_READONLY: attempt to write a readonly database"
+    );
+    expect(hoisted.runAlayaMcpStdioServer).not.toHaveBeenCalled();
+  });
+
+  it("does not start background services when MCP stdio server startup fails", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const stdoutChunks: string[] = [];
+    const stderrChunks: string[] = [];
+    const startBackgroundServices = vi.fn();
+    stdout.on("data", (chunk) => stdoutChunks.push(chunk.toString("utf8")));
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString("utf8")));
+    hoisted.runAlayaMcpStdioServer.mockRejectedValueOnce(new Error("stdio bind failed"));
+    const runtime = createRuntime({ startBackgroundServices });
+    const bridge = createAlayaCliBridge(runtime, {
+      env: {
+        ALAYA_WORKSPACE_ID: "workspace-1"
+      },
+      stdin,
+      stdout,
+      stderr,
+      isTTY: false
+    });
+    registerAlayaCliCommands(bridge, runtime);
+
+    const result = await bridge.dispatch(["mcp", "stdio"]);
+
+    expect(result.exitCode).toBe(70);
+    expect(stdoutChunks.join("")).toBe("");
+    expect(stderrChunks.join("")).toContain("MCP stdio startup failed: stdio bind failed");
+    expect(startBackgroundServices).not.toHaveBeenCalled();
+    expect(hoisted.serverClose).not.toHaveBeenCalled();
+  });
 });
 
 function createRuntime(overrides: Partial<AlayaDaemonRuntime> = {}): AlayaDaemonRuntime {

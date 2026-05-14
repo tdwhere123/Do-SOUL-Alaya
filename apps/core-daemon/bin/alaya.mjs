@@ -11,11 +11,22 @@ const registerDistPath = resolve(packageRoot, "dist/cli/register.js");
 const daemonDistPath = resolve(packageRoot, "dist/index.js");
 const SOFTWARE_EXIT_FALLBACK = 70;
 
-export async function loadAlayaCliModules(importModule = defaultImportModule) {
+export function createAlayaCliModuleLoaders(importModule = defaultImportModule) {
+  return Object.freeze({
+    bridge: () => importModule(bridgeDistPath),
+    register: () => importModule(registerDistPath),
+    daemon: () => importModule(daemonDistPath)
+  });
+}
+
+export async function loadAlayaCliModules(loaders = createAlayaCliModuleLoaders()) {
+  const moduleLoaders = typeof loaders === "function"
+    ? createAlayaCliModuleLoaders(loaders)
+    : loaders;
   const [bridgeModule, registerModule, daemonModule] = await Promise.all([
-    importModule(bridgeDistPath),
-    importModule(registerDistPath),
-    importModule(daemonDistPath)
+    moduleLoaders.bridge(),
+    moduleLoaders.register(),
+    moduleLoaders.daemon()
   ]);
 
   if (typeof bridgeModule.createAlayaCliBridge !== "function") {

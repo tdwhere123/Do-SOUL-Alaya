@@ -688,7 +688,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     localHeuristicsProvider,
     signalReceiver: signalService,
     strongRefService,
-    workspaceRepo
+    workspaceRepo,
+    warn: warnLogger.warn
   });
   const gardenTaskRepo =
     typeof (database.connection as { readonly prepare?: unknown }).prepare === "function"

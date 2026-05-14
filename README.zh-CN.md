@@ -10,9 +10,9 @@
 
 ### *给 CLI 编码 agent 的本地优先记忆平面。*
 
-[![status](https://img.shields.io/badge/status-v0.3.4-success?style=flat-square)](#接下来的方向)
+[![status](https://img.shields.io/badge/status-v0.3.5-success?style=flat-square)](#接下来的方向)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-2517%20passing-success?style=flat-square)](#接下来的方向)
+[![tests](https://img.shields.io/badge/tests-2525%20passing-success?style=flat-square)](#接下来的方向)
 [![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#快速开始)
 [![pnpm](https://img.shields.io/badge/pnpm-%E2%89%A59-F69220?style=flat-square&logo=pnpm&logoColor=white)](#快速开始)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](#架构总览)
@@ -403,8 +403,14 @@ attach / detach 原子，审计日志在 `~/.config/alaya/audit/`。
 > 是当前的信任锚。）
 
 ```bash
-# 装最新 release（下载 tarball、校验 sha256、本地 build）。
-curl -fsSL https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/main/scripts/install.sh | bash
+# 安装锁定的 release。installer 随后下载同版本 tarball，
+# 校验 SHA256SUMS，再本地 build。
+ALAYA_VERSION=v0.3.5
+INSTALLER="$(mktemp)"
+trap 'rm -f "$INSTALLER"' EXIT
+curl -fsSL -o "$INSTALLER" \
+  "https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/${ALAYA_VERSION}/scripts/install.sh"
+ALAYA_VERSION="$ALAYA_VERSION" bash "$INSTALLER"
 
 # 验证 + attach。
 alaya doctor
@@ -414,12 +420,12 @@ alaya install --non-interactive "$(printf '{"db_path":"%s/.config/alaya/alaya.db
 alaya attach claude-code
 ```
 
-锁版本（环境变量必须放在管道**之后**——前面是给 `curl` 用，后面才是
-给 `bash` 用）：
+pipe-to-bash 快捷方式（更快，但会直接执行下载下来的 installer；
+release tarball 仍会由脚本做 SHA256 校验）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/main/scripts/install.sh \
-  | ALAYA_VERSION=v0.3.0 bash
+  | ALAYA_VERSION=v0.3.5 bash
 ```
 
 改装路径：
@@ -502,7 +508,7 @@ pnpm alaya tools call soul.recall \
 
 ### 当前状态（2026-05-14）
 
-v0.3.4 是当前 checkpoint，也是 v0.3.x 这条线第一次正式对外发布。
+v0.3.5 是当前 checkpoint；v0.3.4 是 v0.3.x 这条线第一次正式对外发布。
 从 v0.3.0 起累积下来：真实的 Codex 和 Claude Code MCP 会话已经
 被观察到在正常对话里自主调 `soul.recall` → `soul.report_context_usage`，
 真实 live-usage EventLog witness 落档在 `docs/v0.3/v0.3.0/`
@@ -516,10 +522,10 @@ v0.3.4 是当前 checkpoint，也是 v0.3.x 这条线第一次正式对外发布
 三平台 adapter 已 code-review（跨平台 runtime 写读仍 defer 待
 真机覆盖 —— WSL2 上 `env:` / `file:` 是 runtime-verified 路径）；
 v0.3.4 让 `alaya doctor` 打印当前 daemon 的 `version` / `git_head`
-/ `built_at`。分发仍然走 GitHub Release source tarball +
-`SHA256SUMS`，由 `scripts/install.sh` 本地校验 —— v0.3.4 是
-v0.3.x 这条线的第一个 git tag、第一个触发 `release.yml` workflow
-的发布。npm 是有意不做的。
+/ `built_at`；v0.3.5 加固 CLI/MCP 启动和本地执行支撑代码，同时不改
+MCP、protocol、EventLog、runtime config 或 SQLite 公共面。分发仍然走
+GitHub Release source tarball + `SHA256SUMS`，由 `scripts/install.sh`
+本地校验；npm 是有意不做的。
 
 ### 下一步要走的方向
 

@@ -4,6 +4,25 @@ import { checkMacosKeychainAvailable, readMacosKeychainSecret, writeMacosKeychai
 import { checkWindowsKeychainAvailable, readWindowsKeychainSecret, writeWindowsKeychainSecret } from "./windows.js";
 import { KEYCHAIN_SUBPROCESS_TIMEOUT_MS } from "./constants.js";
 
+const KEYCHAIN_CHILD_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "USER",
+  "TMP",
+  "TEMP",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "XDG_RUNTIME_DIR",
+  "DBUS_SESSION_BUS_ADDRESS",
+  "SystemRoot",
+  "ComSpec",
+  "PATHEXT",
+  "USERPROFILE",
+  "LOCALAPPDATA",
+  "APPDATA"
+] as const;
+
 export interface KeychainSubprocessOptions {
   readonly timeoutMs?: number;
   readonly input?: string;
@@ -141,6 +160,7 @@ export function defaultKeychainSubprocessRunner(
     encoding: "utf8",
     input: options.input,
     timeout: options.timeoutMs ?? KEYCHAIN_SUBPROCESS_TIMEOUT_MS,
+    env: createKeychainChildProcessEnv(),
     windowsHide: true
   });
 
@@ -151,4 +171,15 @@ export function defaultKeychainSubprocessRunner(
     error: result.error as NodeJS.ErrnoException | undefined,
     signal: result.signal
   };
+}
+
+function createKeychainChildProcessEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const variableName of KEYCHAIN_CHILD_ENV_ALLOWLIST) {
+    const value = source[variableName];
+    if (typeof value === "string" && value.length > 0) {
+      env[variableName] = value;
+    }
+  }
+  return env;
 }

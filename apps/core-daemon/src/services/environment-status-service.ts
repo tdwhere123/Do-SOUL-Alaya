@@ -1,4 +1,7 @@
 import { execFile } from "node:child_process";
+import { constants as fsConstants } from "node:fs";
+import { access } from "node:fs/promises";
+import path from "node:path";
 import { ToolchainStatusSchema, type ToolchainStatus } from "@do-soul/alaya-protocol";
 
 export interface EnvironmentStatusService {
@@ -40,13 +43,23 @@ export function createEnvironmentStatusService(dependencies?: {
   };
 }
 
+const DEFAULT_ENVIRONMENT_PROBE_TIMEOUT_MS = 5_000;
+const ENVIRONMENT_PROBE_CHILD_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "USER",
+  "TMP",
+  "TEMP",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "SystemRoot",
+  "ComSpec",
+  "PATHEXT"
+] as const;
+
 async function defaultProbeTool(toolName: string): Promise<boolean> {
-  try {
-    await runExecFile("bash", ["-lc", "command -v -- \"$1\" >/dev/null 2>&1", "bash", toolName]);
-    return true;
-  } catch {
-    return false;
-  }
+  return await findExecutableOnPath(toolName, process.env);
 }
 
 async function defaultCountActiveWorktrees(): Promise<number> {
@@ -74,7 +87,12 @@ function runExecFile(
   options?: Parameters<typeof execFile>[2]
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile(command, [...args], options, (error, stdout, stderr) => {
+    execFile(command, [...args], {
+      ...options,
+      timeout: DEFAULT_ENVIRONMENT_PROBE_TIMEOUT_MS,
+      windowsHide: true,
+      env: createEnvironmentProbeChildEnv()
+    }, (error, stdout, stderr) => {
       if (error) {
         reject(error);
         return;
@@ -86,6 +104,67 @@ function runExecFile(
       });
     });
   });
+}
+
+async function findExecutableOnPath(toolName: string, env: NodeJS.ProcessEnv): Promise<boolean> {
+  if (toolName.includes("\0") || toolName.trim().length === 0) {
+    return false;
+  }
+
+  if (path.isAbsolute(toolName) || toolName.includes(path.sep) || toolName.includes("/")) {
+    return await isExecutablePath(toolName);
+  }
+
+  const pathValue = env.PATH;
+  if (pathValue === undefined || pathValue.trim().length === 0) {
+    return false;
+  }
+
+  for (const directory of pathValue.split(path.delimiter)) {
+    if (directory.trim().length === 0) {
+      continue;
+    }
+    for (const candidateName of executableCandidateNames(toolName, env)) {
+      if (await isExecutablePath(path.join(directory, candidateName))) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function executableCandidateNames(toolName: string, env: NodeJS.ProcessEnv): readonly string[] {
+  if (process.platform !== "win32" || path.extname(toolName).length > 0) {
+    return [toolName];
+  }
+
+  const extensions = (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .map((extension) => extension.trim())
+    .filter((extension) => extension.length > 0);
+
+  return [toolName, ...extensions.map((extension) => `${toolName}${extension}`)];
+}
+
+async function isExecutablePath(candidatePath: string): Promise<boolean> {
+  try {
+    await access(candidatePath, process.platform === "win32" ? fsConstants.F_OK : fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function createEnvironmentProbeChildEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const variableName of ENVIRONMENT_PROBE_CHILD_ENV_ALLOWLIST) {
+    const value = source[variableName];
+    if (typeof value === "string" && value.length > 0) {
+      env[variableName] = value;
+    }
+  }
+  return env;
 }
 
 function normalizeExecFileOutput(output: string | Buffer | null | undefined): string {

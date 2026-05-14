@@ -1,59 +1,64 @@
+import type { ExecFileException, execFile as nodeExecFile } from "node:child_process";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const execFileMock = vi.hoisted(() => vi.fn());
+type ExecFileCallback = (
+  error: ExecFileException | null,
+  stdout: string | Buffer,
+  stderr: string | Buffer
+) => void;
+type GitWorktreeMockState =
+  | { readonly kind: "success"; readonly stdout: string }
+  | { readonly kind: "failure"; readonly error: Error };
 
-vi.mock("node:child_process", () => ({
-  execFile: execFileMock
+const childProcessMock = vi.hoisted(() => ({
+  execFileMock: vi.fn(),
+  gitWorktreeState: { kind: "success", stdout: "" } as GitWorktreeMockState
 }));
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  childProcessMock.execFileMock.mockImplementation(
+    (
+      command: string,
+      args: readonly string[],
+      options: Parameters<typeof nodeExecFile>[2],
+      callback: ExecFileCallback
+    ) => {
+      if (command === "git" && args[0] === "worktree" && args[1] === "list" && args[2] === "--porcelain") {
+        queueMicrotask(() => {
+          const state = childProcessMock.gitWorktreeState;
+          if (state.kind === "failure") {
+            callback(state.error as ExecFileException, "", "");
+            return;
+          }
+
+          callback(null, state.stdout, "");
+        });
+        return undefined;
+      }
+
+      return actual.execFile(command, [...args], options, callback);
+    }
+  );
+  return {
+    ...actual,
+    execFile: childProcessMock.execFileMock
+  };
+});
 
 import { createEnvironmentStatusService } from "../services/environment-status-service.js";
 
 describe("environment status service", () => {
   beforeEach(() => {
-    execFileMock.mockReset();
+    childProcessMock.execFileMock.mockClear();
+    childProcessMock.gitWorktreeState = { kind: "success", stdout: "" };
   });
 
   it("uses async default probes and worktree counting when commands succeed", async () => {
-    execFileMock.mockImplementation(
-      (
-        command: string,
-        args: readonly string[],
-        options: { readonly encoding?: string; readonly stdio?: string },
-        callback: (error: Error | null, stdout?: string, stderr?: string) => void
-      ) => {
-        queueMicrotask(() => {
-          if (
-            command === "bash"
-            && args[0] === "-lc"
-            && args[1] === "command -v -- \"$1\" >/dev/null 2>&1"
-            && args[2] === "bash"
-            && args[3] === "git"
-          ) {
-            callback(null, "", "");
-            return;
-          }
-
-          if (
-            command === "bash"
-            && args[0] === "-lc"
-            && args[1] === "command -v -- \"$1\" >/dev/null 2>&1"
-            && args[2] === "bash"
-            && args[3] === "node"
-          ) {
-            callback(null, "", "");
-            return;
-          }
-
-          if (command === "git" && args[0] === "worktree" && args[1] === "list" && args[2] === "--porcelain") {
-            expect(options).toEqual({ encoding: "utf8" });
-            callback(null, "worktree /tmp/one\nworktree /tmp/two\n", "");
-            return;
-          }
-
-          callback(new Error(`unexpected command: ${command} ${args.join(" ")}`));
-        });
-      }
-    );
+    childProcessMock.gitWorktreeState = {
+      kind: "success",
+      stdout: "worktree /tmp/one\nworktree /tmp/two\n"
+    };
 
     const service = createEnvironmentStatusService({
       toolNames: ["git", "node"],
@@ -70,24 +75,32 @@ describe("environment status service", () => {
       db_path: "/tmp/alaya.db",
       files_dir: "/tmp/alaya-files"
     });
+
+    const gitWorktreeCall = childProcessMock.execFileMock.mock.calls.find(([command]) => command === "git");
+    expect(gitWorktreeCall?.[2]).toMatchObject({
+      encoding: "utf8",
+      timeout: 5_000,
+      windowsHide: true
+    });
+    expect(gitWorktreeCall?.[2]).toMatchObject({
+      env: expect.not.objectContaining({
+        ALAYA_ENV_STATUS_TEST_SECRET: expect.any(String)
+      })
+    });
+    expect(childProcessMock.execFileMock).not.toHaveBeenCalledWith(
+      "bash",
+      expect.arrayContaining(["-lc"]),
+      expect.anything(),
+      expect.anything()
+    );
   });
 
-  it("falls back to false and zero when probe commands fail", async () => {
-    execFileMock.mockImplementation(
-      (
-        _command: string,
-        _args: readonly string[],
-        _options: { readonly encoding?: string; readonly stdio?: string },
-        callback: (error: Error | null, stdout?: string, stderr?: string) => void
-      ) => {
-        queueMicrotask(() => {
-          callback(new Error("boom"), "", "");
-        });
-      }
-    );
+  it("falls back to false and zero when probes and worktree counting fail", async () => {
+    childProcessMock.gitWorktreeState = { kind: "failure", error: new Error("boom") };
 
     const service = createEnvironmentStatusService({
       toolNames: ["git", "node"],
+      probeTool: async () => false,
       getDatabasePath: () => "/tmp/alaya.db",
       getFilesDirectory: () => "/tmp/alaya-files"
     });
@@ -149,5 +162,31 @@ describe("environment status service", () => {
       db_path: "/tmp/alaya.db",
       files_dir: "/tmp/alaya-files"
     });
+  });
+
+  it("does not use a shell for default tool probes", async () => {
+    process.env.ALAYA_ENV_STATUS_TEST_SECRET = "secret";
+    try {
+      const service = createEnvironmentStatusService({
+        toolNames: ["definitely-not-a-real-alaya-tool;echo-owned"],
+        getDatabasePath: () => "/tmp/alaya.db",
+        getFilesDirectory: () => "/tmp/alaya-files"
+      });
+
+      await expect(service.getStatus()).resolves.toMatchObject({
+        tools: {
+          "definitely-not-a-real-alaya-tool;echo-owned": false
+        }
+      });
+    } finally {
+      delete process.env.ALAYA_ENV_STATUS_TEST_SECRET;
+    }
+
+    expect(childProcessMock.execFileMock).not.toHaveBeenCalledWith(
+      "bash",
+      expect.anything(),
+      expect.anything(),
+      expect.anything()
+    );
   });
 });

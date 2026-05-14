@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   checkPlatformKeychainAvailable,
+  defaultKeychainSubprocessRunner,
   readPlatformKeychainSecret,
   writePlatformKeychainSecret,
   type KeychainSubprocessResult,
@@ -199,6 +200,21 @@ describe("keychain adapters", () => {
       kind: "keychain_tooling_unavailable",
       reason: expect.stringContaining("timed out")
     });
+  });
+
+  it("runs keychain subprocesses with an allowlisted child environment", () => {
+    process.env.ALAYA_KEYCHAIN_TEST_SECRET = "sk-env-leak";
+    try {
+      const result = defaultKeychainSubprocessRunner(process.execPath, [
+        "-e",
+        "require('node:fs').writeFileSync(1, process.env.ALAYA_KEYCHAIN_TEST_SECRET ?? 'missing')"
+      ]);
+
+      expect(result.code).toBe(0);
+      expect(result.stdout).toBe("missing");
+    } finally {
+      delete process.env.ALAYA_KEYCHAIN_TEST_SECRET;
+    }
   });
 });
 
