@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCcw } from "lucide-react";
 import { apiFetch, getWorkspaceId, type ApiError } from "../api";
 import { useToasts } from "../components/Toast";
@@ -70,42 +70,48 @@ export default function RecallPage() {
   const isMountedRef = useRef(true);
   const refreshLockRef = useRef(false);
   const cooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestIdRef = useRef(0);
   const { showToast } = useToasts();
 
-  const since = useMemo(() => {
-    const hours = WINDOW_HOURS[windowChoice];
-    return new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-  }, [windowChoice]);
-
-  const fetchStats = useCallback(async () => {
-    if (workspaceId === null) {
-      setLoading(false);
-      return;
-    }
-    try {
-      const search = new URLSearchParams();
-      search.set("since", since);
-      const envelope = await apiFetch<RecallStatsEnvelope>(
-        `/recall-stats/${workspaceId}?${search.toString()}`
-      );
-      if (!isMountedRef.current) return;
-      setStats(envelope.data);
-      setError(null);
-    } catch (err) {
-      if (!isMountedRef.current) return;
-      if ((err as ApiError).status === 401) return;
-      const message = err instanceof Error ? err.message : "unknown error";
-      setError(message);
-      showToast({ message: `Recall fetch failed: ${message}`, type: "error" });
-    } finally {
-      if (isMountedRef.current) setLoading(false);
-    }
-  }, [since, workspaceId, showToast]);
+  const fetchStats = useCallback(
+    async (choice: WindowChoice) => {
+      if (workspaceId === null) {
+        setLoading(false);
+        return;
+      }
+      const since = new Date(
+        Date.now() - WINDOW_HOURS[choice] * 60 * 60 * 1000
+      ).toISOString();
+      requestIdRef.current += 1;
+      const myRequestId = requestIdRef.current;
+      try {
+        const search = new URLSearchParams();
+        search.set("since", since);
+        const envelope = await apiFetch<RecallStatsEnvelope>(
+          `/recall-stats/${workspaceId}?${search.toString()}`
+        );
+        if (!isMountedRef.current || myRequestId !== requestIdRef.current) return;
+        setStats(envelope.data);
+        setError(null);
+      } catch (err) {
+        if (!isMountedRef.current || myRequestId !== requestIdRef.current) return;
+        if ((err as ApiError).status === 401) return;
+        const message = err instanceof Error ? err.message : "unknown error";
+        setError(message);
+        showToast({ message: `Recall fetch failed: ${message}`, type: "error" });
+      } finally {
+        if (isMountedRef.current && myRequestId === requestIdRef.current) {
+          setLoading(false);
+        }
+      }
+    },
+    [workspaceId, showToast]
+  );
 
   useEffect(() => {
     isMountedRef.current = true;
     setLoading(true);
-    void fetchStats();
+    void fetchStats(windowChoice);
     return () => {
       isMountedRef.current = false;
       if (cooldownTimerRef.current) {
@@ -113,13 +119,13 @@ export default function RecallPage() {
         cooldownTimerRef.current = null;
       }
     };
-  }, [fetchStats]);
+  }, [fetchStats, windowChoice]);
 
   const handleRefresh = useCallback(async () => {
     if (refreshLockRef.current) return;
     refreshLockRef.current = true;
     setRefreshing(true);
-    await fetchStats();
+    await fetchStats(windowChoice);
     if (!isMountedRef.current) {
       refreshLockRef.current = false;
       return;
@@ -129,7 +135,7 @@ export default function RecallPage() {
       refreshLockRef.current = false;
       if (isMountedRef.current) setRefreshing(false);
     }, REFRESH_COOLDOWN_MS);
-  }, [fetchStats]);
+  }, [fetchStats, windowChoice]);
 
   if (workspaceId === null) {
     return (

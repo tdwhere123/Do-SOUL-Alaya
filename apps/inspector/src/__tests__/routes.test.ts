@@ -366,6 +366,7 @@ describe("inspector routes", () => {
     const graphWhitespace = await app.request("/api/graph/ws1%20?token=token");
     const config = await app.request("/api/config/ws2/strategy?token=token");
     const proposals = await app.request("/api/proposals/ws2/pending?token=token");
+    const recallStats = await app.request("/api/recall-stats/ws2?token=token");
     const search = await app.request("/api/soul/search/ws2?token=token", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -376,9 +377,11 @@ describe("inspector routes", () => {
     expect(graphWhitespace.status).toBe(403);
     expect(config.status).toBe(403);
     expect(proposals.status).toBe(403);
+    expect(recallStats.status).toBe(403);
     expect(search.status).toBe(403);
     await expect(graph.json()).resolves.toEqual({ error: "workspace_forbidden" });
     await expect(graphWhitespace.json()).resolves.toEqual({ error: "workspace_forbidden" });
+    await expect(recallStats.json()).resolves.toEqual({ error: "workspace_forbidden" });
     expect(calls).toEqual([]);
   });
 

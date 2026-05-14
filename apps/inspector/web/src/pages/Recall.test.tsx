@@ -114,6 +114,22 @@ describe("RecallPage", () => {
     expect(await screen.findByTestId("recall-no-workspace")).toBeTruthy();
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("surfaces a recall-error block when the daemon returns 500", async () => {
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(async (input: FetchInput) => {
+      const url = urlOf(input);
+      if (url.includes("/recall-stats/ws1")) {
+        return new Response("server boom", { status: 500 });
+      }
+      return jsonResponse({}, 404);
+    });
+    renderRecall();
+    await waitFor(
+      () => expect(screen.getByTestId("recall-error")).toBeTruthy(),
+      { timeout: 5000 }
+    );
+  });
 });
 
 function jsonResponse(body: unknown, status = 200): Response {
