@@ -294,24 +294,31 @@ async function runMergeLongMemEvalCommand(
     }
 
     // @anchor merge-shard-validations — refuse incompatible shards.
-    // Branches: split, sample_size, dataset.{name,size,source},
-    // harness_mode, embedding_provider, chat_provider, bench_name,
-    // alaya_version, alaya_commit, duplicate per_scenario id,
-    // evaluated_total > sample_size. See packages/eval/src/kpi-schema.ts
-    // §harness_mode for the mcp_propose_review vs direct_db_seed
-    // audit-distinguishability contract.
+    // Scalar identity branches expressed as a table; dataset composite
+    // and duplicate-id / over-eval guards remain inline below because
+    // they don't reduce to a single-field equality.
+    // see also: packages/eval/src/kpi-schema.ts §harness_mode for the
+    // mcp_propose_review vs direct_db_seed audit-distinguishability
+    // contract.
+    const SCALAR_IDENTITY_FIELDS: ReadonlyArray<keyof KpiPayload> = [
+      "split",
+      "sample_size",
+      "harness_mode",
+      "embedding_provider",
+      "chat_provider",
+      "bench_name",
+      "alaya_version",
+      "alaya_commit"
+    ];
     for (let i = 1; i < shardPayloads.length; i++) {
       const shard = shardPayloads[i];
       if (shard === undefined) continue;
-      if (shard.split !== first.split) {
-        throw new Error(
-          `merge refused: shard[${i}] split=${shard.split} != shard[0] split=${first.split}`
-        );
-      }
-      if (shard.sample_size !== first.sample_size) {
-        throw new Error(
-          `merge refused: shard[${i}] sample_size=${shard.sample_size} != shard[0] sample_size=${first.sample_size}`
-        );
+      for (const field of SCALAR_IDENTITY_FIELDS) {
+        if (shard[field] !== first[field]) {
+          throw new Error(
+            `merge refused: shard[${i}] ${field}=${String(shard[field])} != shard[0] ${field}=${String(first[field])}`
+          );
+        }
       }
       if (
         shard.dataset.name !== first.dataset.name ||
@@ -320,36 +327,6 @@ async function runMergeLongMemEvalCommand(
       ) {
         throw new Error(
           `merge refused: shard[${i}] dataset identity (${shard.dataset.name}/${shard.dataset.size}/${shard.dataset.source}) != shard[0] (${first.dataset.name}/${first.dataset.size}/${first.dataset.source})`
-        );
-      }
-      if (shard.harness_mode !== first.harness_mode) {
-        throw new Error(
-          `merge refused: shard[${i}] harness_mode=${shard.harness_mode} != shard[0] harness_mode=${first.harness_mode}`
-        );
-      }
-      if (shard.embedding_provider !== first.embedding_provider) {
-        throw new Error(
-          `merge refused: shard[${i}] embedding_provider=${shard.embedding_provider} != shard[0] embedding_provider=${first.embedding_provider}`
-        );
-      }
-      if (shard.chat_provider !== first.chat_provider) {
-        throw new Error(
-          `merge refused: shard[${i}] chat_provider=${shard.chat_provider} != shard[0] chat_provider=${first.chat_provider}`
-        );
-      }
-      if (shard.bench_name !== first.bench_name) {
-        throw new Error(
-          `merge refused: shard[${i}] bench_name=${shard.bench_name} != shard[0] bench_name=${first.bench_name}`
-        );
-      }
-      if (shard.alaya_version !== first.alaya_version) {
-        throw new Error(
-          `merge refused: shard[${i}] alaya_version=${shard.alaya_version} != shard[0] alaya_version=${first.alaya_version}`
-        );
-      }
-      if (shard.alaya_commit !== first.alaya_commit) {
-        throw new Error(
-          `merge refused: shard[${i}] alaya_commit=${shard.alaya_commit} != shard[0] alaya_commit=${first.alaya_commit}`
         );
       }
     }

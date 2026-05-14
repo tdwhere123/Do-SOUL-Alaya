@@ -168,11 +168,13 @@ describe("merge-longmemeval validations", () => {
   it("refuses shards whose dataset identity differs", async () => {
     const shardA = path.join(tmpRoot, "shard-a");
     const shardB = path.join(tmpRoot, "shard-b");
-    await writeShardRoot(shardA, makeShardKpi({ alaya_commit: "0000aaa" }));
+    // Same alaya_commit so scalar-identity loop reaches the dataset
+    // composite check (dataset is not in SCALAR_IDENTITY_FIELDS).
+    await writeShardRoot(shardA, makeShardKpi({ alaya_commit: "abc1234" }));
     await writeShardRoot(
       shardB,
       makeShardKpi({
-        alaya_commit: "0000bbb",
+        alaya_commit: "abc1234",
         dataset: {
           name: "longmemeval_s_tampered",
           size: 500,
