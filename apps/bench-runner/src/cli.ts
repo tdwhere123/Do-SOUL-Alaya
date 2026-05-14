@@ -294,10 +294,15 @@ async function runMergeLongMemEvalCommand(
     }
 
     // @anchor merge-shard-validations — refuse incompatible shards.
-    // Validates split, dataset.{name,size,source}, sample_size,
-    // per-question id uniqueness, and total-vs-sample-size cap. Each
-    // check maps to a concrete operator-misuse path that would
-    // otherwise silently corrupt the bench-history archive.
+    // Each branch maps to an operator-misuse path that would silently
+    // corrupt the bench-history archive (apples-to-oranges merge):
+    //   - split / dataset identity / sample_size: same-evaluation guard
+    //   - harness_mode: kpi-schema §harness_mode forbids citing
+    //     mcp_propose_review numbers mixed with direct_db_seed
+    //   - embedding_provider / chat_provider: recall path identity
+    //   - bench_name / alaya_version: archive provenance identity
+    //   - duplicate per_scenario id: overlapping --offset/--limit
+    //   - evaluated_total > sample_size: shards collectively over-eval
     for (let i = 1; i < shardPayloads.length; i++) {
       const shard = shardPayloads[i];
       if (shard === undefined) continue;
@@ -318,6 +323,31 @@ async function runMergeLongMemEvalCommand(
       ) {
         throw new Error(
           `merge refused: shard[${i}] dataset identity (${shard.dataset.name}/${shard.dataset.size}/${shard.dataset.source}) != shard[0] (${first.dataset.name}/${first.dataset.size}/${first.dataset.source})`
+        );
+      }
+      if (shard.harness_mode !== first.harness_mode) {
+        throw new Error(
+          `merge refused: shard[${i}] harness_mode=${shard.harness_mode} != shard[0] harness_mode=${first.harness_mode} (mixing harness modes corrupts the audit-distinguishability contract in kpi-schema §harness_mode)`
+        );
+      }
+      if (shard.embedding_provider !== first.embedding_provider) {
+        throw new Error(
+          `merge refused: shard[${i}] embedding_provider=${shard.embedding_provider} != shard[0] embedding_provider=${first.embedding_provider}`
+        );
+      }
+      if (shard.chat_provider !== first.chat_provider) {
+        throw new Error(
+          `merge refused: shard[${i}] chat_provider=${shard.chat_provider} != shard[0] chat_provider=${first.chat_provider}`
+        );
+      }
+      if (shard.bench_name !== first.bench_name) {
+        throw new Error(
+          `merge refused: shard[${i}] bench_name=${shard.bench_name} != shard[0] bench_name=${first.bench_name}`
+        );
+      }
+      if (shard.alaya_version !== first.alaya_version) {
+        throw new Error(
+          `merge refused: shard[${i}] alaya_version=${shard.alaya_version} != shard[0] alaya_version=${first.alaya_version}`
         );
       }
     }

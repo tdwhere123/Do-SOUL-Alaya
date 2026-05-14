@@ -910,9 +910,14 @@ async function bootDaemonRuntime(): Promise<{ shutdown(): Promise<void>; startHt
   return runtime;
 }
 
-async function bootStartedDaemonRuntime(): Promise<{ shutdown(): Promise<void>; startHttpServer(): Promise< unknown> }> {
-  const runtime = await bootDaemonRuntime();
-  await runtime.startHttpServer();
+async function bootStartedDaemonRuntime(): Promise<{ shutdown(): Promise<void>; startHttpServer(opts?: { port?: number }): Promise< unknown> }> {
+  const runtime = (await bootDaemonRuntime()) as {
+    shutdown(): Promise<void>;
+    startHttpServer(opts?: { port?: number }): Promise<unknown>;
+  };
+  // @anchor test-port-zero — OS-assigned port avoids parallel bind race.
+  // see also: apps/core-daemon/src/daemon-runtime-lifecycle.ts startHttpServer.
+  await runtime.startHttpServer({ port: 0 });
   return runtime;
 }
 

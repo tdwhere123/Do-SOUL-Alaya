@@ -6,15 +6,15 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-043` (`#BL-022` was opened by
+sequence. **Next available number**: `#BL-044` (`#BL-022` was opened by
 p5-system-review-r3 as an EventPublisher v0.2 deferral and closed in
 v0.1-closeout-a2; `#BL-023`/`#BL-024` were resolved in r1 / r2;
 `#BL-025` through `#BL-036` were opened by the v0.1-closeout A2 and
 D2 fix-loops, then resolved by Gate-5F under
 `docs/archive/v0.1-port-record/phase-5-followup-briefs/` before Phase 6;
 `#BL-009`, `#BL-037`, and `#BL-038` were resolved in v0.3.0;
-`#BL-039` through `#BL-042` were opened by v0.3.6 Phase 5 close-out as
-v0.3.7 candidates — see [Open Issues](#open-issues)).
+`#BL-039` through `#BL-043` were opened by v0.3.6 Phase 5/6 close-out
+as v0.3.7 candidates — see [Open Issues](#open-issues)).
 
 ## Open Issues
 
@@ -79,6 +79,30 @@ driver.
 3. R@K, latency, token-saved KPIs in a fresh
    `docs/v0.3/bench-history/public/<slug>/` entry; report.md cites
    `agentmemory`'s number with link and the dataset-version pin.
+
+### #BL-043 — tool-runtime-bootstrap.test.ts port-3000 parallel flake
+
+**Status**: Open, v0.3.7 candidate.
+
+**Why open**: The full vitest run sometimes fails on the first
+invocation in `apps/core-daemon/src/__tests__/tool-runtime-bootstrap.test.ts`
+with hook timeouts and `vi.waitFor` retries on
+`backlogTelemetryService.stop`. A second back-to-back invocation passes
+cleanly (318/318 / 2588/2588). The file passes 25/25 when run in
+isolation. This is parallel-execution port-3000 contention with other
+core-daemon tests — pre-existing (no edits in the v0.3.6 review loop)
+and surfaced only because the v0.3.6 review-loop ran the full suite
+five times in close succession.
+
+**Close condition**:
+
+1. Either bind the daemon listener to a free port (port `0`) so the
+   tests don't contend on a fixed port, or `vitest.workspace.mjs` is
+   updated to serialize this test file (no parallel workers within the
+   file's project).
+2. Full `rtk pnpm exec vitest run` is reliably green on cold cache.
+3. Backlog entry close-out documents which path was taken (port-0 or
+   serialization).
 
 ### #BL-042 — Inspector Memory Browser + command palette (deferred from v0.3.6)
 

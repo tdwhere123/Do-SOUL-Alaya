@@ -244,6 +244,189 @@ describe("merge-longmemeval validations", () => {
     expect(stderrBuf).toMatch(/duplicate question_id 'q-collide'/);
   });
 
+  it("refuses shards whose harness_mode differs", async () => {
+    const shardA = path.join(tmpRoot, "shard-a");
+    const shardB = path.join(tmpRoot, "shard-b");
+    await writeShardRoot(
+      shardA,
+      makeShardKpi({ alaya_commit: "0000aaa", harness_mode: "mcp_propose_review" })
+    );
+    await writeShardRoot(
+      shardB,
+      makeShardKpi({
+        alaya_commit: "0000bbb",
+        harness_mode: "direct_db_seed",
+        kpi: {
+          ...makeShardKpi().kpi,
+          per_scenario: [
+            { id: "q-shard-b-1", version: 1, hit_at_5: true, tier: "warm" }
+          ]
+        }
+      })
+    );
+    const historyRoot = path.join(tmpRoot, "history");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shardA,
+      shardB
+    ]);
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toMatch(
+      /harness_mode=direct_db_seed != shard\[0\] harness_mode=mcp_propose_review/
+    );
+  });
+
+  it("refuses shards whose embedding_provider differs", async () => {
+    const shardA = path.join(tmpRoot, "shard-a");
+    const shardB = path.join(tmpRoot, "shard-b");
+    await writeShardRoot(
+      shardA,
+      makeShardKpi({ alaya_commit: "0000aaa", embedding_provider: "none" })
+    );
+    await writeShardRoot(
+      shardB,
+      makeShardKpi({
+        alaya_commit: "0000bbb",
+        embedding_provider: "yunwu:text-embedding-3-small",
+        kpi: {
+          ...makeShardKpi().kpi,
+          per_scenario: [
+            { id: "q-shard-b-1", version: 1, hit_at_5: true, tier: "warm" }
+          ]
+        }
+      })
+    );
+    const historyRoot = path.join(tmpRoot, "history");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shardA,
+      shardB
+    ]);
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toMatch(
+      /embedding_provider=yunwu:text-embedding-3-small != shard\[0\] embedding_provider=none/
+    );
+  });
+
+  it("refuses shards whose chat_provider differs", async () => {
+    const shardA = path.join(tmpRoot, "shard-a");
+    const shardB = path.join(tmpRoot, "shard-b");
+    await writeShardRoot(
+      shardA,
+      makeShardKpi({ alaya_commit: "0000aaa", chat_provider: "none" })
+    );
+    await writeShardRoot(
+      shardB,
+      makeShardKpi({
+        alaya_commit: "0000bbb",
+        chat_provider: "yunwu:gpt-5.4-mini",
+        kpi: {
+          ...makeShardKpi().kpi,
+          per_scenario: [
+            { id: "q-shard-b-1", version: 1, hit_at_5: true, tier: "warm" }
+          ]
+        }
+      })
+    );
+    const historyRoot = path.join(tmpRoot, "history");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shardA,
+      shardB
+    ]);
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toMatch(
+      /chat_provider=yunwu:gpt-5.4-mini != shard\[0\] chat_provider=none/
+    );
+  });
+
+  it("refuses shards whose bench_name differs", async () => {
+    const shardA = path.join(tmpRoot, "shard-a");
+    const shardB = path.join(tmpRoot, "shard-b");
+    await writeShardRoot(
+      shardA,
+      makeShardKpi({ alaya_commit: "0000aaa", bench_name: "public" })
+    );
+    await writeShardRoot(
+      shardB,
+      makeShardKpi({
+        alaya_commit: "0000bbb",
+        bench_name: "self",
+        kpi: {
+          ...makeShardKpi().kpi,
+          per_scenario: [
+            { id: "q-shard-b-1", version: 1, hit_at_5: true, tier: "warm" }
+          ]
+        }
+      })
+    );
+    const historyRoot = path.join(tmpRoot, "history");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shardA,
+      shardB
+    ]);
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toMatch(/bench_name=self != shard\[0\] bench_name=public/);
+  });
+
+  it("refuses shards whose alaya_version differs", async () => {
+    const shardA = path.join(tmpRoot, "shard-a");
+    const shardB = path.join(tmpRoot, "shard-b");
+    await writeShardRoot(
+      shardA,
+      makeShardKpi({ alaya_commit: "0000aaa", alaya_version: "0.3.6" })
+    );
+    await writeShardRoot(
+      shardB,
+      makeShardKpi({
+        alaya_commit: "0000bbb",
+        alaya_version: "0.3.7",
+        kpi: {
+          ...makeShardKpi().kpi,
+          per_scenario: [
+            { id: "q-shard-b-1", version: 1, hit_at_5: true, tier: "warm" }
+          ]
+        }
+      })
+    );
+    const historyRoot = path.join(tmpRoot, "history");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shardA,
+      shardB
+    ]);
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toMatch(
+      /alaya_version=0.3.7 != shard\[0\] alaya_version=0.3.6/
+    );
+  });
+
   it("refuses shards whose evaluated_total exceeds dataset sample_size", async () => {
     const shardA = path.join(tmpRoot, "shard-a");
     const shardB = path.join(tmpRoot, "shard-b");
