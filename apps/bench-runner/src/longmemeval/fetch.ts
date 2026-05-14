@@ -53,7 +53,7 @@ export async function fetchLongMemEval(
   // Return cached copy unless force-fetch requested
   if (!options.force) {
     try {
-      const raw = await readFile(localPath, "utf8");
+      await readFile(localPath, "utf8");
       const meta = JSON.parse(await readFile(metaPath, "utf8")) as {
         sha256: string;
         questionCount: number;

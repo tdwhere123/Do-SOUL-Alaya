@@ -388,7 +388,7 @@ async function seedBenchWorkspaceAndRun(
   const db = initDatabase({ filename: join(dataDir, "alaya.db") });
   const workspaceRepo = new SqliteWorkspaceRepo(db);
   const runRepo = new SqliteRunRepo(db);
-  await workspaceRepo.create({
+  workspaceRepo.create({
     workspace_id: workspaceId,
     name: workspaceId,
     root_path: join(dataDir, "bench-workspace-root"),
@@ -396,7 +396,7 @@ async function seedBenchWorkspaceAndRun(
     default_engine_binding: null,
     workspace_state: WorkspaceState.ACTIVE
   });
-  await runRepo.create({
+  runRepo.create({
     run_id: runId,
     workspace_id: workspaceId,
     title: `bench run ${runId}`,

@@ -124,6 +124,25 @@ a drop of exactly 5.0 pp registers as `fail`.
 A `✗` on any of these makes `alaya-bench-runner` exit non-zero. CI hookup is
 optional today; the contract is that the exit code is meaningful.
 
+## Known bench-harness stderr noise
+
+The `alaya-bench-runner self` and `alaya-bench-runner longmemeval` runs
+emit one `MODEL_TOOL candidate signal emitted without source_delivery_ids.`
+warning per seed. This is structural and intentional:
+
+- Bench seeds enter through `soul.emit_candidate_signal` over MCP, so
+  the daemon stamps them with `source = MODEL_TOOL` per invariants §29
+  (the MCP request schema strips the `source` field — MCP callers cannot
+  set it themselves).
+- `MODEL_TOOL` signals are expected to carry `source_delivery_ids`
+  pointing at a prior `soul.recall` delivery. Bench seeds originate
+  from dataset fixtures, not from a recall, so no valid anchor exists.
+- The daemon's `validateSourceDeliveryAnchors` would reject any synthetic
+  id, so threading a fake anchor is not a fix.
+
+The warning is informational; it does not change the propose+review
+audit chain captured under `evidence/audit-trail-witness.json`.
+
 ## Synthetic scenario versioning
 
 Each scenario in `packages/eval/fixtures/synthetic-recall/*.json` carries
