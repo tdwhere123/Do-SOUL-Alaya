@@ -13,6 +13,7 @@ export type DictKey = keyof typeof zh;
 
 export const zh = {
   // ── nav ─────────────────────────────────────────────────────────────
+  "nav:overview": "总览",
   "nav:configuration": "配置",
   "nav:memoryGraph": "记忆图谱",
   "nav:pendingProposals": "待审记忆",
@@ -20,6 +21,30 @@ export const zh = {
   "nav:appName": "ALAYA 后台",
   "nav:locale.zh": "中",
   "nav:locale.en": "EN",
+
+  // ── overview page ───────────────────────────────────────────────────
+  "overview:title": "Memory 总览",
+  "overview:subtitle": "操作员视角：守护进程、待审记忆、召回利用率、层级分布。",
+  "overview:card.daemon.label": "守护进程",
+  "overview:card.daemon.subtitle": "运行状态与启动日志",
+  "overview:card.daemon.value.ready": "正常",
+  "overview:card.daemon.value.initializing": "初始化中",
+  "overview:card.daemon.value.offline": "离线",
+  "overview:card.daemon.value.warming": "退避中",
+  "overview:card.proposals.label": "待审记忆",
+  "overview:card.proposals.subtitle": "等待 HITL 审核的提议数量",
+  "overview:card.proposals.empty": "无待审项",
+  "overview:card.recall.label": "近 7 天召回",
+  "overview:card.recall.subtitle": "调用次数 · 命中率",
+  "overview:card.recall.placeholder": "—",
+  "overview:card.tier.label": "层级分布",
+  "overview:card.tier.subtitle": "Hot · Warm · Cold",
+  "overview:card.tier.placeholder": "—",
+  "overview:linkProposals": "去复核 →",
+  "overview:linkRecall": "查看召回详情 →",
+  "overview:linkStatus": "查看完整状态 →",
+  "overview:loading": "加载总览中…",
+  "overview:degraded": "状态查询退避中，最近一次：{message}",
 
   // ── common ──────────────────────────────────────────────────────────
   "common:loading": "加载中…",
@@ -148,6 +173,7 @@ export const zh = {
 
 export const en: Record<DictKey, string> = {
   // nav
+  "nav:overview": "Overview",
   "nav:configuration": "Configuration",
   "nav:memoryGraph": "Memory Graph",
   "nav:pendingProposals": "Pending Proposals",
@@ -155,6 +181,30 @@ export const en: Record<DictKey, string> = {
   "nav:appName": "ALAYA INSPECTOR",
   "nav:locale.zh": "中",
   "nav:locale.en": "EN",
+
+  // overview page
+  "overview:title": "Memory Overview",
+  "overview:subtitle": "Operator view: daemon, pending memory, recall utilization, tier mix.",
+  "overview:card.daemon.label": "Daemon",
+  "overview:card.daemon.subtitle": "Runtime & startup",
+  "overview:card.daemon.value.ready": "OPERATIONAL",
+  "overview:card.daemon.value.initializing": "INITIALIZING",
+  "overview:card.daemon.value.offline": "OFFLINE",
+  "overview:card.daemon.value.warming": "WARMING",
+  "overview:card.proposals.label": "Pending Memory",
+  "overview:card.proposals.subtitle": "Awaiting HITL review",
+  "overview:card.proposals.empty": "nothing pending",
+  "overview:card.recall.label": "Recall (7d)",
+  "overview:card.recall.subtitle": "calls · hit-rate",
+  "overview:card.recall.placeholder": "—",
+  "overview:card.tier.label": "Tier mix",
+  "overview:card.tier.subtitle": "hot · warm · cold",
+  "overview:card.tier.placeholder": "—",
+  "overview:linkProposals": "Review →",
+  "overview:linkRecall": "Recall stats →",
+  "overview:linkStatus": "Full status →",
+  "overview:loading": "Loading overview…",
+  "overview:degraded": "Status feed degraded, last: {message}",
 
   // common
   "common:loading": "Loading…",

@@ -4,6 +4,7 @@ import { getInspectorToken, setInspectorToken, setUnauthorizedHandler, setWorksp
 
 import ConfigPage from "./pages/Config";
 import GraphPage from "./pages/Graph";
+import OverviewPage from "./pages/Overview";
 import ProposalsPage from "./pages/Proposals";
 import StatusPage from "./pages/Status";
 
@@ -46,15 +47,15 @@ export function AppContent() {
 
   if (authError) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-[#FDF6E3] p-8 text-center">
-        <h1 className="text-2xl font-bold text-[#586E75] mb-4 font-mono uppercase tracking-widest">
+      <div className="flex flex-col items-center justify-center min-h-screen bg-beige-100 p-8 text-center">
+        <h1 className="text-2xl font-bold text-ink-600 mb-4 font-mono uppercase tracking-widest">
           Authentication Required
         </h1>
-        <p className="text-[#657B83] max-w-md font-mono text-sm leading-relaxed">
+        <p className="text-ink-700 max-w-md font-mono text-sm leading-relaxed">
           {authError}
         </p>
-        <div className="mt-8 pt-8 border-t border-[#D4CDB8] w-full max-w-xs">
-          <code className="text-xs text-[#93A1A1]">ERROR_CODE: AUTH_MISSING_TOKEN</code>
+        <div className="mt-8 pt-8 border-t border-beige-300 w-full max-w-xs">
+          <code className="text-xs text-ink-500">ERROR_CODE: AUTH_MISSING_TOKEN</code>
         </div>
       </div>
     );
@@ -62,10 +63,10 @@ export function AppContent() {
 
   if (!ready) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-[#FDF6E3]">
+      <div className="flex items-center justify-center min-h-screen bg-beige-100">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 border-2 border-[#586E75]/20 border-t-[#586E75] rounded-full animate-spin" />
-          <p className="text-[#586E75] font-mono text-xs uppercase tracking-widest">
+          <div className="w-12 h-12 border-2 border-ink-600/20 border-t-ink-600 rounded-full animate-spin" />
+          <p className="text-ink-600 font-mono text-xs uppercase tracking-widest">
             Loading Inspector Surface...
           </p>
         </div>
@@ -76,11 +77,12 @@ export function AppContent() {
   return (
     <Routes>
       <Route element={<Layout />}>
+        <Route path="/overview" element={<OverviewPage />} />
         <Route path="/config" element={<ConfigPage />} />
         <Route path="/graph" element={<GraphPage />} />
         <Route path="/proposals" element={<ProposalsPage />} />
         <Route path="/status" element={<StatusPage />} />
-        <Route path="/" element={<Navigate to="/config" replace />} />
+        <Route path="/" element={<Navigate to="/overview" replace />} />
       </Route>
     </Routes>
   );

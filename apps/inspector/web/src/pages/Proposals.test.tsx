@@ -44,7 +44,7 @@ describe("ProposalsPage", () => {
 
     await waitFor(() => {
       expect(row?.className).toContain("border-2");
-      expect(row?.className).toContain("border-[#B58900]");
+      expect(row?.className).toContain("border-state-emphasis");
       expect(row?.getAttribute("aria-current")).toBe("true");
       expect(scrollIntoViewMock).toHaveBeenCalled();
     });

@@ -298,7 +298,7 @@ function ConfigSection({
           data-testid={`dirty-dot-${meta.key}`}
           className={clsx(
             "w-1.5 h-1.5 rounded-full transition-colors",
-            dirty ? "bg-[#C9A36F]" : "bg-morandi-green"
+            dirty ? "bg-state-warm" : "bg-morandi-green"
           )}
           aria-label={dirty ? "section has unsaved changes" : "section in sync"}
         />

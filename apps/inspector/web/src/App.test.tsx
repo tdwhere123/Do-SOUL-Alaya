@@ -5,6 +5,10 @@ import { AppContent } from "./App";
 import { ToastProvider } from "./components/Toast";
 import { getWorkspaceId, setWorkspaceId } from "./api";
 
+vi.mock("./pages/Overview", () => ({
+  default: () => <div>overview page</div>
+}));
+
 vi.mock("./pages/Config", () => ({
   default: () => <div>config page</div>
 }));
@@ -18,7 +22,7 @@ vi.mock("./pages/Status", () => ({
 }));
 
 describe("AppContent", () => {
-  it("keeps the launch token after redirecting from / to /config", async () => {
+  it("keeps the launch token after redirecting from / to /overview", async () => {
     render(
       <MemoryRouter initialEntries={["/?token=test-token&workspaceId=ws1"]}>
         <ToastProvider>
@@ -27,7 +31,7 @@ describe("AppContent", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByText("config page")).toBeTruthy();
+    expect(await screen.findByText("overview page")).toBeTruthy();
     expect(
       screen.queryByText("No token found in URL. Please run `alaya inspect` to open this tool.")
     ).toBeNull();
@@ -44,7 +48,7 @@ describe("AppContent", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByText("config page")).toBeTruthy();
+    expect(await screen.findByText("overview page")).toBeTruthy();
     expect(getWorkspaceId()).toBeNull();
   });
 });

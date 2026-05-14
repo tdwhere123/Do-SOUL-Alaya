@@ -71,7 +71,7 @@ describe("ConfigPage", () => {
     await act(async () => {
       await userEvent.click(toggles[0]);
     });
-    await waitFor(() => expect(dot.className).toContain("#C9A36F"));
+    await waitFor(() => expect(dot.className).toContain("bg-state-warm"));
   });
 
   it("renders the noWorkspace banner and never fetches when workspaceId is null", async () => {
@@ -103,7 +103,7 @@ describe("ConfigPage", () => {
     await act(async () => {
       await userEvent.click(toggles[0]);
     });
-    await waitFor(() => expect(dot.className).toContain("#C9A36F"));
+    await waitFor(() => expect(dot.className).toContain("bg-state-warm"));
     const commit = within(soulSection).getByRole("button", { name: /commit changes/i });
     await act(async () => {
       await userEvent.click(commit);

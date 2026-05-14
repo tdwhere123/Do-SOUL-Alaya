@@ -671,7 +671,7 @@ export default function GraphPage() {
       <div
         role="alert"
         data-testid="graph-no-workspace"
-        className="flex-1 min-h-0 flex items-center justify-center bg-[#FDF6E3] p-8"
+        className="flex-1 min-h-0 flex items-center justify-center bg-beige-100 p-8"
       >
         <p className="font-mono text-sm text-ink-700">
           {t("common:noWorkspace")}
@@ -684,7 +684,7 @@ export default function GraphPage() {
     <div
       ref={viewportRef}
       data-graph-viewport="true"
-      className="flex-1 min-h-0 relative overflow-hidden bg-[#FDF6E3]"
+      className="flex-1 min-h-0 relative overflow-hidden bg-beige-100"
     >
       <div className="absolute left-4 right-4 top-4 z-20 flex items-center justify-between gap-3 sm:flex-row">
         <div className="flex flex-1 items-center gap-3 rounded-full border border-beige-200 bg-beige-50/95 px-4 py-2 shadow-sm backdrop-blur-sm sm:max-w-md">
@@ -726,14 +726,14 @@ export default function GraphPage() {
       </div>
 
       {data && !webglSupported ? (
-        <div className="absolute left-4 top-16 z-20 max-w-md rounded-md border border-[#D4AF37]/35 bg-beige-50/95 px-3 py-2 font-mono text-[10px] uppercase tracking-wide text-ink-700/65 shadow-sm">
+        <div className="absolute left-4 top-16 z-20 max-w-md rounded-md border border-state-warning/35 bg-beige-50/95 px-3 py-2 font-mono text-[10px] uppercase tracking-wide text-ink-700/65 shadow-sm">
           {t("graph:webgl.locked")}
         </div>
       ) : null}
 
       {searchTimeHits ? (
         <div
-          className="absolute left-1/2 top-16 z-20 -translate-x-1/2 rounded-full border border-[#4A90A4]/35 bg-beige-50/95 px-3 py-1 font-mono text-[10px] uppercase tracking-wide text-ink-700/70 shadow-sm"
+          className="absolute left-1/2 top-16 z-20 -translate-x-1/2 rounded-full border border-state-info/35 bg-beige-50/95 px-3 py-1 font-mono text-[10px] uppercase tracking-wide text-ink-700/70 shadow-sm"
           data-testid="search-time-window-chip"
         >
           {t("graph:search.windowChip", {
@@ -745,7 +745,7 @@ export default function GraphPage() {
 
       {searchError ? (
         <div
-          className="absolute left-1/2 top-16 z-20 -translate-x-1/2 rounded-md border border-[#C9ADA7] bg-beige-50/95 px-3 py-1 font-mono text-[10px] uppercase tracking-wide text-[#8B4536] shadow-sm"
+          className="absolute left-1/2 top-16 z-20 -translate-x-1/2 rounded-md border border-morandi-pink bg-beige-50/95 px-3 py-1 font-mono text-[10px] uppercase tracking-wide text-state-error-text shadow-sm"
           data-testid="search-error-chip"
         >
           {t("graph:search.errorChip", { message: searchError })}
@@ -762,7 +762,7 @@ export default function GraphPage() {
       {loading ? (
         <div className="absolute inset-0 flex items-center justify-center bg-beige-100/50 z-10">
           <div className="flex flex-col items-center gap-3">
-            <div className="w-10 h-10 border-2 border-[#586E75]/20 border-t-[#586E75] rounded-full animate-spin" />
+            <div className="w-10 h-10 border-2 border-ink-600/20 border-t-ink-600 rounded-full animate-spin" />
             <p className="font-mono text-xs uppercase text-ink-600 tracking-widest">
               {t("graph:scanning")}
             </p>
@@ -772,7 +772,7 @@ export default function GraphPage() {
 
       {error ? (
         <div className="absolute inset-0 flex items-center justify-center z-10 p-8">
-          <div className="bg-beige-50 border border-[#C9ADA7] p-4 rounded-md max-w-md">
+          <div className="bg-beige-50 border border-morandi-pink p-4 rounded-md max-w-md">
             <h3 className="text-ink-600 font-bold mb-2 font-mono">{t("graph:loadError")}</h3>
             <p className="text-ink-700 text-sm font-mono">{error}</p>
           </div>
@@ -788,7 +788,7 @@ export default function GraphPage() {
           <span>
             {t("graph:meta.edges", { shown: data.links.length, total: data.meta.edgeTotal })}
           </span>
-          <span className="rounded-sm bg-[#586E75]/10 px-1.5 py-0.5 text-ink-700/65">
+          <span className="rounded-sm bg-ink-600/10 px-1.5 py-0.5 text-ink-700/65">
             {data.meta.truncated ||
             data.nodes.length < data.meta.nodeTotal ||
             data.links.length < data.meta.edgeTotal
@@ -909,7 +909,7 @@ function ViewModeToggle({ mode, webglSupported, onChange }: ViewModeToggleProps)
         type="button"
         onClick={() => onChange("2d")}
         className={`flex items-center gap-1 rounded-full px-2.5 py-1 font-mono text-[10px] uppercase transition-colors ${
-          mode === "2d" ? "bg-[#586E75] text-beige-50" : "text-ink-700/60 hover:text-ink-700"
+          mode === "2d" ? "bg-ink-600 text-beige-50" : "text-ink-700/60 hover:text-ink-700"
         }`}
         aria-pressed={mode === "2d"}
       >
@@ -920,7 +920,7 @@ function ViewModeToggle({ mode, webglSupported, onChange }: ViewModeToggleProps)
         onClick={() => webglSupported && onChange("3d")}
         disabled={!webglSupported}
         className={`flex items-center gap-1 rounded-full px-2.5 py-1 font-mono text-[10px] uppercase transition-colors ${
-          mode === "3d" ? "bg-[#586E75] text-beige-50" : "text-ink-700/60 hover:text-ink-700"
+          mode === "3d" ? "bg-ink-600 text-beige-50" : "text-ink-700/60 hover:text-ink-700"
         } ${webglSupported ? "" : "cursor-not-allowed opacity-40"}`}
         aria-pressed={mode === "3d"}
         title={webglSupported ? undefined : t("graph:viewMode.unavailable")}
