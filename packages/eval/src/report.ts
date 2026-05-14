@@ -135,8 +135,12 @@ export function renderReport(
   lines.push(`- R@1: ${formatRatio(current.kpi.r_at_1)}`);
   lines.push(`- R@5: ${formatRatio(current.kpi.r_at_5)}`);
   lines.push(`- R@10: ${formatRatio(current.kpi.r_at_10)}`);
-  lines.push(`- Latency p50: ${current.kpi.latency_ms_p50} ms`);
-  lines.push(`- Latency p95: ${current.kpi.latency_ms_p95} ms`);
+  const latencyTag =
+    current.kpi.latency_source === "worst_shard_bound"
+      ? " (≤ worst-shard upper bound)"
+      : "";
+  lines.push(`- Latency p50: ${current.kpi.latency_ms_p50} ms${latencyTag}`);
+  lines.push(`- Latency p95: ${current.kpi.latency_ms_p95} ms${latencyTag}`);
   lines.push(
     `- Token saved vs full-prompt baseline: ${formatRatio(current.kpi.token_saved_ratio_vs_full_prompt)}`
   );
@@ -144,8 +148,17 @@ export function renderReport(
     `- Tier distribution: hot=${current.kpi.tier_distribution.hot} warm=${current.kpi.tier_distribution.warm} cold=${current.kpi.tier_distribution.cold}`
   );
   lines.push(
-    `- Degradation reasons: none=${current.kpi.degradation_reasons.none} warm_cascade=${current.kpi.degradation_reasons.warm_cascade_engaged} cold_cascade=${current.kpi.degradation_reasons.cold_cascade_engaged}`
+    `- Degradation reasons: none=${current.kpi.degradation_reasons.none} warm_cascade=${current.kpi.degradation_reasons.warm_cascade_engaged} cold_cascade=${current.kpi.degradation_reasons.cold_cascade_engaged} explainability_partial=${current.kpi.degradation_reasons.recall_explainability_partial}`
   );
+  const trunc = current.kpi.seed_truncation;
+  lines.push(
+    `- Seed truncation: turns=${trunc.seed_turns_truncated} answer_bearing=${trunc.answer_turns_truncated} chars_clipped=${trunc.seed_chars_clipped}`
+  );
+  if (trunc.answer_turns_truncated > 0) {
+    lines.push(
+      `  - ⚠ ${trunc.answer_turns_truncated} answer-bearing turn(s) had their content clipped at the protocol cap; recall cannot retrieve text past the cutoff.`
+    );
+  }
   lines.push("");
 
   if (current.kpi.per_scenario.length > 0) {

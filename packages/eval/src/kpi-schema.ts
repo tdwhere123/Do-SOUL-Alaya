@@ -4,7 +4,8 @@ export const BenchSplit = z.enum([
   "golden",
   "synthetic",
   "longmemeval-s",
-  "longmemeval-oracle"
+  "longmemeval-oracle",
+  "longmemeval-m"
 ]);
 export type BenchSplit = z.infer<typeof BenchSplit>;
 
@@ -21,10 +22,14 @@ const TierDistributionSchema = z.object({
 });
 export type TierDistribution = z.infer<typeof TierDistributionSchema>;
 
+// @anchor degradation-reasons-mirror — kept in 1:1 correspondence with
+// protocol §SoulMemorySearchDegradationReasonSchema. recall_explainability_partial
+// defaults to 0 (optional) so older kpi.json records remain schema-valid.
 const DegradationReasonsSchema = z.object({
   none: z.number().int().nonnegative(),
   warm_cascade_engaged: z.number().int().nonnegative(),
-  cold_cascade_engaged: z.number().int().nonnegative()
+  cold_cascade_engaged: z.number().int().nonnegative(),
+  recall_explainability_partial: z.number().int().nonnegative().default(0)
 });
 export type DegradationReasons = z.infer<typeof DegradationReasonsSchema>;
 
@@ -36,15 +41,43 @@ const PerScenarioRowSchema = z.object({
 });
 export type PerScenarioRow = z.infer<typeof PerScenarioRowSchema>;
 
+// @anchor latency-source — "exact" when latencies are union percentiles
+// of a single run; "worst_shard_bound" when merged from N shards as
+// max(shard_p) (upper-bound only — raw latency arrays are not carried
+// across shards in v0.3.6). see also: apps/bench-runner/src/cli.ts
+// @merge-longmemeval.
+const LatencySourceSchema = z
+  .enum(["exact", "worst_shard_bound"])
+  .default("exact");
+
+// @anchor seed-truncation — count of bench-seeded turns whose content
+// exceeded the protocol raw_payload cap and was clipped before propose.
+// answer_truncated counts only the subset that carried has_answer=true
+// (the worry case for honest retrieval). see also: harness/daemon.ts
+// @bench-seed-content-cap.
+const SeedTruncationSchema = z
+  .object({
+    seed_turns_truncated: z.number().int().nonnegative().default(0),
+    answer_turns_truncated: z.number().int().nonnegative().default(0),
+    seed_chars_clipped: z.number().int().nonnegative().default(0)
+  })
+  .default({
+    seed_turns_truncated: 0,
+    answer_turns_truncated: 0,
+    seed_chars_clipped: 0
+  });
+
 const KpiCoreSchema = z.object({
   r_at_1: z.number().min(0).max(1),
   r_at_5: z.number().min(0).max(1),
   r_at_10: z.number().min(0).max(1),
   latency_ms_p50: z.number().nonnegative(),
   latency_ms_p95: z.number().nonnegative(),
+  latency_source: LatencySourceSchema,
   token_saved_ratio_vs_full_prompt: z.number(),
   tier_distribution: TierDistributionSchema,
   degradation_reasons: DegradationReasonsSchema,
+  seed_truncation: SeedTruncationSchema,
   per_scenario: z.array(PerScenarioRowSchema)
 });
 export type KpiCore = z.infer<typeof KpiCoreSchema>;

@@ -59,7 +59,7 @@ supplement, full MCP `propose+review` chain seeded.
 | Bench | n | R@1 | R@5 | R@10 | p95 latency | Notes |
 |---|---|---|---|---|---|---|
 | self / synthetic | 8 | 100% | 100% | 100% | ~150ms | Tiny workspace tripwire, not a retrieval claim. See report.md Scoring contract. |
-| public / longmemeval-oracle | 500/500 | 45.2% | 79.8% | 89.2% | 15ms | Coarse retrieval — no distractor sessions, session-axis filter degenerates. |
+| public / longmemeval-oracle | 500/500 | 45.2% | 80.0% | 90.4% | 21ms | Coarse retrieval — no distractor sessions, session-axis filter degenerates. |
 | public / longmemeval-s | **500/500** | 45.8% | **60.2%** | 60.6% | 73ms | First honest retrieval baseline. 98% distractor session ratio. Shard split — first 250 human-authored: 52.0%; last 250 GPT-4-augmented: 68.4%. Scale-up + CI tracked as #BL-040. |
 
 External reference (cited as reported, link, not run by us):

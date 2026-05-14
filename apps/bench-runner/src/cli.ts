@@ -79,7 +79,6 @@ interface ParsedFlags {
   readonly offset?: number;
   readonly historyRoot: string;
   readonly dataDir?: string;
-  readonly concurrency?: number;
   readonly shards?: ReadonlyArray<string>;
 }
 
@@ -89,7 +88,6 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   let offset: number | undefined;
   let historyRoot: string = DEFAULT_HISTORY_ROOT;
   let dataDir: string | undefined;
-  let concurrency: number | undefined;
   const shards: string[] = [];
   let collectingShards = false;
 
@@ -112,13 +110,6 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
         if (!Number.isNaN(parsed) && parsed >= 0) offset = parsed;
       }
       collectingShards = false;
-    } else if (token === "--concurrency") {
-      const raw = args[++i];
-      if (raw !== undefined) {
-        const parsed = parseInt(raw, 10);
-        if (!Number.isNaN(parsed) && parsed > 0) concurrency = parsed;
-      }
-      collectingShards = false;
     } else if (token === "--history-root") {
       historyRoot = args[++i] ?? DEFAULT_HISTORY_ROOT;
       collectingShards = false;
@@ -132,7 +123,6 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
     }
   }
 
-  // Map short alias to full variant name
   const variantMap: Record<string, LongMemEvalVariant> = {
     oracle: "longmemeval_oracle",
     s: "longmemeval_s",
@@ -150,7 +140,6 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
     offset,
     historyRoot,
     dataDir,
-    concurrency,
     shards: shards.length > 0 ? shards : undefined
   };
 }
@@ -189,8 +178,7 @@ async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
       limit: opts.limit,
       offset: opts.offset,
       historyRoot: opts.historyRoot,
-      dataDir: opts.dataDir,
-      concurrency: opts.concurrency
+      dataDir: opts.dataDir
     });
     const kpi = result.payload.kpi;
     process.stdout.write(
@@ -305,6 +293,37 @@ async function runMergeLongMemEvalCommand(
       throw new Error("no shards loaded");
     }
 
+    // @anchor merge-shard-validations — refuse to merge incompatible
+    // shards (different split / sample_size, duplicate question ids,
+    // or shards whose evaluated total exceeds the dataset size). Each
+    // validation maps to a real operator-misuse failure mode that would
+    // otherwise corrupt the bench-history archive silently.
+    for (let i = 1; i < shardPayloads.length; i++) {
+      const shard = shardPayloads[i];
+      if (shard === undefined) continue;
+      if (shard.split !== first.split) {
+        throw new Error(
+          `merge refused: shard[${i}] split=${shard.split} != shard[0] split=${first.split}`
+        );
+      }
+      if (shard.sample_size !== first.sample_size) {
+        throw new Error(
+          `merge refused: shard[${i}] sample_size=${shard.sample_size} != shard[0] sample_size=${first.sample_size}`
+        );
+      }
+    }
+    const seenIds = new Set<string>();
+    for (const shard of shardPayloads) {
+      for (const row of shard.kpi.per_scenario) {
+        if (seenIds.has(row.id)) {
+          throw new Error(
+            `merge refused: duplicate question_id '${row.id}' across shards (overlapping --offset/--limit ranges?)`
+          );
+        }
+        seenIds.add(row.id);
+      }
+    }
+
     // Sum counters across shards. R@K is recomputed from concatenated
     // per_scenario rather than weighted-averaged from shard R@K, so the
     // final number is exact even if shards had unequal sizes.
@@ -315,12 +334,14 @@ async function runMergeLongMemEvalCommand(
     let degradeNone = 0;
     let degradeWarm = 0;
     let degradeCold = 0;
+    let degradePartial = 0;
+    let truncSeedTotal = 0;
+    let truncAnswerTotal = 0;
+    let truncCharsTotal = 0;
     let totalHitAt1 = 0;
     let totalHitAt10 = 0;
     let evaluatedTotal = 0;
-    let latencyP50Min = Infinity;
     let latencyP50Max = 0;
-    let latencyP95Min = Infinity;
     let latencyP95Max = 0;
 
     for (const shard of shardPayloads) {
@@ -343,10 +364,12 @@ async function runMergeLongMemEvalCommand(
       degradeNone += shard.kpi.degradation_reasons.none;
       degradeWarm += shard.kpi.degradation_reasons.warm_cascade_engaged;
       degradeCold += shard.kpi.degradation_reasons.cold_cascade_engaged;
+      degradePartial += shard.kpi.degradation_reasons.recall_explainability_partial;
+      truncSeedTotal += shard.kpi.seed_truncation.seed_turns_truncated;
+      truncAnswerTotal += shard.kpi.seed_truncation.answer_turns_truncated;
+      truncCharsTotal += shard.kpi.seed_truncation.seed_chars_clipped;
       evaluatedTotal += shard.evaluated_count;
-      latencyP50Min = Math.min(latencyP50Min, shard.kpi.latency_ms_p50);
       latencyP50Max = Math.max(latencyP50Max, shard.kpi.latency_ms_p50);
-      latencyP95Min = Math.min(latencyP95Min, shard.kpi.latency_ms_p95);
       latencyP95Max = Math.max(latencyP95Max, shard.kpi.latency_ms_p95);
     }
 
@@ -357,10 +380,12 @@ async function runMergeLongMemEvalCommand(
     const rAt10 = n === 0 ? 0 : totalHitAt10 / n;
 
     // Latency percentiles across shards: report the worst (max) shard
-    // p50 / p95 — a conservative upper bound. Exact union-percentile
-    // would require shard kpi.json to carry the raw latency array.
-    const latencyP50 = latencyP50Max === 0 ? 0 : latencyP50Max;
-    const latencyP95 = latencyP95Max === 0 ? 0 : latencyP95Max;
+    // p50 / p95 — a conservative upper bound. kpi.latency_source =
+    // "worst_shard_bound" marks this for downstream readers. Exact
+    // union-percentile would require shard kpi.json to carry the raw
+    // latency array.
+    const latencyP50 = latencyP50Max;
+    const latencyP95 = latencyP95Max;
 
     const runAt = new Date();
     const commitSha7 = (() => {
@@ -389,12 +414,20 @@ async function runMergeLongMemEvalCommand(
         r_at_10: rAt10,
         latency_ms_p50: latencyP50,
         latency_ms_p95: latencyP95,
+        // @anchor merged-latency-source — see kpi-schema @latency-source.
+        latency_source: "worst_shard_bound",
         token_saved_ratio_vs_full_prompt: 0,
         tier_distribution: { hot: tierHot, warm: tierWarm, cold: tierCold },
         degradation_reasons: {
           none: degradeNone,
           warm_cascade_engaged: degradeWarm,
-          cold_cascade_engaged: degradeCold
+          cold_cascade_engaged: degradeCold,
+          recall_explainability_partial: degradePartial
+        },
+        seed_truncation: {
+          seed_turns_truncated: truncSeedTotal,
+          answer_turns_truncated: truncAnswerTotal,
+          seed_chars_clipped: truncCharsTotal
         },
         per_scenario: perScenario
       }

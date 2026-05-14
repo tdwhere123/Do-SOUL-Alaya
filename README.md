@@ -83,7 +83,7 @@ parallel via `apps/bench-runner/scripts/run-full-public-bench.sh`):
 | Axis | Alaya v0.3.6 | Why this is the framing |
 |---|---|---|
 | Retrieval R@5 (LongMemEval-S full set n=500) | **60.2%** | FTS + activation, no embedding. v0.3.7 will wire the real embedding provider; this number is the floor, not the ceiling. (Shard split: 52.0% on the first 250 human-authored questions, 68.4% on the last 250 GPT-4-augmented questions — the asymmetry is dataset, not stack.) |
-| Retrieval R@1 / R@10 / p95 latency | 45.8% / 60.6% / 73ms | Same 500-q run. Latency is in-process daemon, not over a network. R@10 ≈ R@5 means the recall ranking concentrates hits in top-5; rank 6–10 adds almost nothing. |
+| Retrieval R@1 / R@10 / p95 latency | 45.8% / 60.6% / 73ms (≤ upper bound across 2 shards) | Same 500-q run. Latency is in-process daemon, not over a network. R@10 − R@5 = 0.4 pp means rank 6–10 added only **2 hits out of 500** in this run — could be top-5 concentration, could be FTS-without-embedding lacking ranking granularity past top-5. Until per-row `hit_at_10` / `first_hit_rank` is tracked (v0.3.7), do not read this as a ranking-quality claim. |
 | Governance — durable proposals require accepted review | ✅ HITL gate | `soul.propose_memory_update` → `soul.review_memory_proposal` (accept/reject). Rejection does not mutate truth. |
 | Audit completeness — every durable mutation is a SOUL_* event | ✅ 9+ event-types per propose+review chain | EventLog row per signal / proposal / review / resolution / memory update. Recoverable by `apps/bench-runner/scripts/audit-trail-witness.mjs`. |
 | Conflict & tier discipline | ✅ Tier-aware promotion + path plasticity | Recall returns tier-stamped pointers (hot/warm/cold) + degradation reason; see `Recall` Inspector page. |

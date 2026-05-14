@@ -41,6 +41,10 @@ export interface SeededMemoryResult {
   readonly signalId: string;
   /** Proposal id created by soul.propose_memory_update on the new memory. */
   readonly proposalId: string;
+  /** true iff the source content exceeded SEED_CONTENT_MAX and was truncated. */
+  readonly truncated: boolean;
+  /** chars clipped from source content; 0 when not truncated. */
+  readonly charsClipped: number;
 }
 
 export interface BenchDaemonHandle {
@@ -209,11 +213,12 @@ export async function startBenchDaemon(
     // cannot find it — that's a structural cap, documented in the bench
     // report.md Scoring contract.
     const SEED_CONTENT_MAX = 15_000;
-    const safeContent =
-      content.length > SEED_CONTENT_MAX
-        ? content.slice(0, SEED_CONTENT_MAX) +
-          ` [truncated at ${SEED_CONTENT_MAX} chars]`
-        : content;
+    const wasTruncated = content.length > SEED_CONTENT_MAX;
+    const charsClipped = wasTruncated ? content.length - SEED_CONTENT_MAX : 0;
+    const safeContent = wasTruncated
+      ? content.slice(0, SEED_CONTENT_MAX) +
+        ` [truncated at ${SEED_CONTENT_MAX} chars]`
+      : content;
 
     // Step 1 — emit candidate signal. signal_kind=potential_preference at
     // confidence 0.9 with evidence_refs >= 1 routes to "memory_and_claim"
@@ -291,7 +296,9 @@ export async function startBenchDaemon(
     return {
       memoryId,
       signalId: signalResponse.signal_id,
-      proposalId: proposeResponse.proposal_id
+      proposalId: proposeResponse.proposal_id,
+      truncated: wasTruncated,
+      charsClipped
     };
   }
 

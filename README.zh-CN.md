@@ -76,7 +76,7 @@ question**、仅 SQLite FTS + activation、没启用 embedding 补充、每题
 | 维度 | Alaya v0.3.6 | 为什么这样表述 |
 |---|---|---|
 | 检索 R@5（LongMemEval-S 全集 n=500） | **60.2%** | FTS + activation，没开 embedding。v0.3.7 才接真 embedding；这是地板不是天花板。（Shard 拆分：前 250 人工题 52.0%，后 250 GPT-4 增强题 68.4% — 这是数据集差异，不是栈差异。） |
-| R@1 / R@10 / p95 latency | 45.8% / 60.6% / 73ms | 同一份 500-q run。延迟是 in-process daemon，不过网络。R@10 ≈ R@5 说明召回排序把命中都集中在 top-5，rank 6-10 几乎不贡献。 |
+| R@1 / R@10 / p95 latency | 45.8% / 60.6% / 73ms（≤ 2 shard 跨段上界） | 同一份 500-q run。延迟是 in-process daemon，不过网络。R@10 − R@5 = 0.4 pp 意味着 rank 6-10 在这次跑里只追加了 **500 中的 2 个** — 可能是 top-5 已经覆盖，也可能是 FTS-without-embedding 在 top-5 之外的排序粒度不够。在引入 per-row `hit_at_10` / `first_hit_rank` 之前（v0.3.7）不要把这条当排序质量声明。 |
 | 治理 —— durable proposal 必须通过 review 接受 | ✅ HITL 网关 | `soul.propose_memory_update` → `soul.review_memory_proposal`（accept/reject）。reject 不会修改 durable truth。 |
 | 审计完备 —— 每次 durable 变更都是 SOUL_* 事件 | ✅ 每条 propose+review 链 9+ event 类型 | 每个 signal / proposal / review / resolution / memory update 都一行 EventLog。可用 `apps/bench-runner/scripts/audit-trail-witness.mjs` 复现。 |
 | 冲突 & tier 纪律 | ✅ Tier-aware 升降 + path 可塑性 | recall 返回带 tier（hot/warm/cold）的 pointer + degradation reason；见 Inspector 的 Recall 页。 |

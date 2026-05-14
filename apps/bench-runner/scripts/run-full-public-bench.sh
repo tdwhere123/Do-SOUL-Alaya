@@ -12,11 +12,19 @@
 #   apps/bench-runner/scripts/run-full-public-bench.sh \
 #     [--variant s|oracle] [--shards N] [--limit M]
 #
-# Defaults: variant=s, shards=4, no limit (full 500).
+# Defaults: variant=s, shards=2 (memory-guarded; see @anchor sharding-default
+# below), no limit (full 500).
 set -euo pipefail
 
 VARIANT="s"
-SHARDS="4"
+# @anchor sharding-default — empirically 2 is the safe default on a
+# 7.6 GiB WSL2 system. Each in-process bench daemon holds ~1.3 GB RSS
+# (better-sqlite3 + materialization router + dataset in memory), so
+# shards=4 has OOM-killed processes in practice on a system with ~3 GB
+# free. The /proc/meminfo guard below auto-downgrades the requested
+# shard count to whatever the available memory budget supports
+# (~1500 MB reserved per shard).
+SHARDS=""
 LIMIT=""
 LOG_DIR="${BENCH_LOG_DIR:-/tmp/alaya-bench-logs}"
 
@@ -33,6 +41,28 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$REPO_ROOT"
 
 mkdir -p "$LOG_DIR"
+
+# @anchor memory-guard — cap shards by /proc/meminfo so an operator
+# requesting more than memory can support is automatically downgraded
+# rather than OOM-killed mid-run. Each shard reserves ~1500 MB.
+PER_SHARD_MB=1500
+DEFAULT_SHARDS=2
+REQUESTED_SHARDS="${SHARDS:-$DEFAULT_SHARDS}"
+if [[ -r /proc/meminfo ]]; then
+  AVAIL_KB=$(awk '/^MemAvailable:/ { print $2 }' /proc/meminfo)
+  AVAIL_MB=$(( AVAIL_KB / 1024 ))
+  MAX_BY_MEM=$(( AVAIL_MB / PER_SHARD_MB ))
+  if (( MAX_BY_MEM < 1 )); then MAX_BY_MEM=1; fi
+else
+  AVAIL_MB="unknown"
+  MAX_BY_MEM=$REQUESTED_SHARDS
+fi
+if (( REQUESTED_SHARDS > MAX_BY_MEM )); then
+  echo "[$(date -u -Iseconds)] memory guard: requested shards=$REQUESTED_SHARDS but available_mb=$AVAIL_MB only supports $MAX_BY_MEM at ${PER_SHARD_MB}MB/shard; downgrading to $MAX_BY_MEM" >&2
+  SHARDS=$MAX_BY_MEM
+else
+  SHARDS=$REQUESTED_SHARDS
+fi
 TS="$(date -u '+%Y-%m-%dT%H%M%SZ')"
 RUN_TAG="longmemeval_${VARIANT}_s${SHARDS}_${TS}"
 MASTER_LOG="$LOG_DIR/${RUN_TAG}.log"

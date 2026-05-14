@@ -124,6 +124,20 @@ a drop of exactly 5.0 pp registers as `fail`.
 A `✗` on any of these makes `alaya-bench-runner` exit non-zero. CI hookup is
 optional today; the contract is that the exit code is meaningful.
 
+## Entry errata
+
+This archive is append-mostly. Existing entries are immutable for KPI
+fields; only metadata labels (split, dataset.name) may be corrected
+when a Phase-N wiring bug wrote the wrong label at write time. Each
+correction lists the affected slug + the corrected field + the commit
+that did it. **Numbers (R@K, latency, tier_distribution,
+degradation_reasons, per_scenario rows) are never rewritten** — to
+restate a number, write a new entry.
+
+| Slug | Field | Was | Is | Commit | Reason |
+|---|---|---|---|---|---|
+| `public/2026-05-14T095424Z-01385ce/` | `split` | `longmemeval-s` | `longmemeval-oracle` | dda1f9b | Variant was always Oracle; the v0.3.6 Phase 4 runner hard-coded `split: longmemeval-s`. Phase 5 introduced variant→split mapping. |
+
 ## Known bench-harness stderr noise
 
 The `alaya-bench-runner self` and `alaya-bench-runner longmemeval` runs

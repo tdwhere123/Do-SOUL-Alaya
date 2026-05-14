@@ -25,19 +25,18 @@ export function diffKpis(
     };
   }
 
-  // @anchor previous-sample-too-small — see thresholds.min_sample_for_ratio_diff.
-  // When the previous baseline was a tiny smoke (n < min_sample) we cannot
-  // distinguish "regression" from "sample-size variance" or harness-mode
-  // drift (e.g. smoke was 1-shard sequential, full is 2-shard parallel, so
-  // latency grows from disk/CPU contention not from a recall regression).
-  // Downgrade FAIL verdicts to WARN universally (ratio-based + latency +
-  // tier-share) so the alarm is informative without being false-positive.
-  // Fixture flips are still scored as FAIL — those compare individual
-  // pass/fail signals, not aggregates.
-  const previousUndersampled =
-    previous.evaluated_count < thresholds.min_sample_for_ratio_diff;
+  // @anchor sample-too-small — see thresholds.min_sample_for_ratio_diff.
+  // Whenever either side of the diff has evaluated_count below the
+  // guard, ratio-based + latency + tier-share aggregates are variance
+  // noise (e.g. smoke 1-shard vs full 2-shard latency, or current=smoke
+  // vs previous=full giving spurious deltas). Downgrade FAIL to WARN
+  // universally. Fixture flips remain FAIL — pass/fail per row is not
+  // sample-size sensitive.
+  const undersampled =
+    Math.min(previous.evaluated_count, current.evaluated_count) <
+    thresholds.min_sample_for_ratio_diff;
   const downgradeFail = (v: Verdict): Verdict =>
-    previousUndersampled && v === "fail" ? "warn" : v;
+    undersampled && v === "fail" ? "warn" : v;
 
   const deltas: KpiDelta[] = [];
 

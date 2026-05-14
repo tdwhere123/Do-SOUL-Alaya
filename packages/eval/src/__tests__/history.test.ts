@@ -206,6 +206,21 @@ describe("history archive", () => {
     ).rejects.toThrow(/must match/);
   });
 
+  // @anchor write-entry-collision-test — see history.ts @write-entry-atomic
+  it("refuses to overwrite an existing slug rather than clobbering the audit trail", async () => {
+    const slug = "2026-05-14T120000Z-deadbef";
+    await writeEntry(layout, "self", slug, buildPayload("deadbef"), "first report\n", null);
+    await expect(
+      writeEntry(layout, "self", slug, buildPayload("deadbef"), "second report\n", null)
+    ).rejects.toThrow(/refusing to overwrite/);
+    // First write must remain intact (atomicity).
+    const firstReport = await readFile(
+      path.join(root, "self", slug, "report.md"),
+      "utf8"
+    );
+    expect(firstReport).toBe("first report\n");
+  });
+
   // @anchor split-aware-readLatest-test — see history.ts @read-latest-split-aware
   it("readLatest with opts.split filters to entries of the matching split", async () => {
     const oraclePayload: KpiPayload = {

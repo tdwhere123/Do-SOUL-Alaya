@@ -57,8 +57,12 @@ export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBench
   let degradeNone = 0;
   let degradeWarm = 0;
   let degradeCold = 0;
+  let degradePartial = 0;
   let totalHitAt1 = 0;
   let totalHitAt10 = 0;
+  let truncSeedTotal = 0;
+  let truncAnswerTotal = 0;
+  let truncCharsTotal = 0;
 
   for (const scenario of SYNTHETIC_SCENARIOS) {
     const daemon = await startBenchDaemon({
@@ -78,6 +82,11 @@ export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBench
         const expectedId = `${scenario.id}-s${i}`;
         const evidenceRef = `${scenario.id}-setup-${i}`;
         const seed = await daemon.proposeMemory(content, evidenceRef);
+        if (seed.truncated) {
+          truncSeedTotal++;
+          truncAnswerTotal++;
+          truncCharsTotal += seed.charsClipped;
+        }
         sidecar.set(seed.memoryId, expectedId);
       }
 
@@ -89,7 +98,11 @@ export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBench
         const content = scenario.distractors[i];
         if (content === undefined) continue;
         const evidenceRef = `${scenario.id}-distractor-${i}`;
-        await daemon.proposeMemory(content, evidenceRef);
+        const seed = await daemon.proposeMemory(content, evidenceRef);
+        if (seed.truncated) {
+          truncSeedTotal++;
+          truncCharsTotal += seed.charsClipped;
+        }
       }
 
       const recallStart = Date.now();
@@ -140,6 +153,7 @@ export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBench
       const degradationReason = recallResult.degradation_reason ?? null;
       if (degradationReason === "warm_cascade_engaged") degradeWarm++;
       else if (degradationReason === "cold_cascade_engaged") degradeCold++;
+      else if (degradationReason === "recall_explainability_partial") degradePartial++;
       else degradeNone++;
 
       perScenario.push({
@@ -182,12 +196,19 @@ export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBench
       r_at_10: rAt10,
       latency_ms_p50: latencyP50,
       latency_ms_p95: latencyP95,
+      latency_source: "exact",
       token_saved_ratio_vs_full_prompt: 0,
       tier_distribution: { hot: tierHot, warm: tierWarm, cold: tierCold },
       degradation_reasons: {
         none: degradeNone,
         warm_cascade_engaged: degradeWarm,
-        cold_cascade_engaged: degradeCold
+        cold_cascade_engaged: degradeCold,
+        recall_explainability_partial: degradePartial
+      },
+      seed_truncation: {
+        seed_turns_truncated: truncSeedTotal,
+        answer_turns_truncated: truncAnswerTotal,
+        seed_chars_clipped: truncCharsTotal
       },
       per_scenario: perScenario
     }

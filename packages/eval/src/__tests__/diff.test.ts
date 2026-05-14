@@ -122,9 +122,7 @@ describe("diffKpis", () => {
 
   it("downgrades latency FAIL to WARN when previous baseline is undersampled", () => {
     // Latency growth crossing the +50% FAIL band against an undersampled
-    // baseline. The smoke vs full case is structural (concurrency mode
-    // changes across runs at small N), so a hard FAIL would be a false
-    // alarm. The min-sample guard downgrades it to WARN.
+    // baseline. The min-sample guard downgrades it to WARN.
     const previous: KpiPayload = {
       ...buildPayload({ latency_ms_p95: 39 }),
       evaluated_count: 20
@@ -136,12 +134,35 @@ describe("diffKpis", () => {
     expect(result.worst_verdict).not.toBe("fail");
   });
 
+  // @anchor sample-too-small-symmetric — current-undersampled case
+  it("downgrades fail to warn when CURRENT run is below min sample size", () => {
+    // Previous is a healthy 500-q baseline at R@5=80%; current is a
+    // 5-q smoke that happens to land at R@5=0%. The 80pp drop would
+    // cross FAIL — but the smoke is the unstable side, not the
+    // baseline. The guard must downgrade FAIL here too.
+    const previous: KpiPayload = {
+      ...buildPayload({ r_at_5: 0.8 }),
+      evaluated_count: 500
+    };
+    const current: KpiPayload = {
+      ...buildPayload({ r_at_5: 0 }),
+      evaluated_count: 5
+    };
+    const result = diffKpis(current, previous);
+    const r5 = result.deltas.find((d) => d.key === "r_at_5");
+    expect(r5?.verdict).toBe("warn");
+    expect(result.worst_verdict).not.toBe("fail");
+  });
+
   it("still reports fail when both baselines are at or above min sample size", () => {
     const previous: KpiPayload = {
       ...buildPayload({ r_at_5: 0.95 }),
       evaluated_count: 200
     };
-    const current = buildPayload({ r_at_5: 0.7 });
+    const current: KpiPayload = {
+      ...buildPayload({ r_at_5: 0.7 }),
+      evaluated_count: 500
+    };
     const result = diffKpis(current, previous);
     expect(result.worst_verdict).toBe("fail");
   });

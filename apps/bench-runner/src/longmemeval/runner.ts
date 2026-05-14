@@ -9,6 +9,7 @@ import {
   renderFindings,
   renderReport,
   writeEntry,
+  type BenchSplit,
   type HistoryLayout,
   type KpiPayload,
   type PerScenarioRow
@@ -27,21 +28,10 @@ export interface LongMemEvalRunOptions {
   // callers should leave this undefined so the canonical
   // docs/v0.3/bench-history/datasets path is used.
   readonly pinnedMetaRoot?: string;
-  // @anchor longmemeval-offset — skip the first N questions of the
-  // dataset before applying `limit`. Used by the shard-and-merge driver
-  // in apps/bench-runner/scripts/ to fan a single full-set run across
-  // multiple Node processes (in-process daemon mutates process.env, so
-  // intra-process concurrency is unsafe — see daemon.ts MANAGED_ENV_KEYS;
-  // process-level sharding is the safe parallelism).
+  // @anchor longmemeval-offset — skip the first N questions before
+  // `limit`. Pairs with process-level sharding in
+  // apps/bench-runner/scripts/run-full-public-bench.sh.
   readonly offset?: number;
-  // @anchor longmemeval-concurrency — DEPRECATED in v0.3.6 Phase 5:
-  // intra-process concurrency is unsafe with the current in-process daemon
-  // because each daemon mutates process.env DATA_DIR / ALAYA_CONFIG_DIR /
-  // HOME during start-up, so concurrent starts race on those globals.
-  // Use process-level sharding via --offset/--limit + the
-  // run-full-public-bench.sh driver instead. Reserved here for future
-  // wiring once the daemon takes config from an option object.
-  readonly concurrency?: number;
 }
 
 export interface LongMemEvalRunResult {
@@ -96,6 +86,9 @@ export async function runLongMemEval(
     firstTier: "hot" | "warm" | "cold";
     latencyMs: number;
     degradationReason: string | null;
+    seedTurnsTruncated: number;
+    answerTurnsTruncated: number;
+    seedCharsClipped: number;
   };
 
   async function runOneQuestion(
@@ -108,6 +101,9 @@ export async function runLongMemEval(
     try {
       const sidecar = new Map<string, SidecarEntry>();
       const answerSessionSet = new Set(question.answer_session_ids);
+      let seedTurnsTruncated = 0;
+      let answerTurnsTruncated = 0;
+      let seedCharsClipped = 0;
 
       for (let si = 0; si < question.haystack_sessions.length; si++) {
         const session = question.haystack_sessions[si];
@@ -120,6 +116,11 @@ export async function runLongMemEval(
 
           const evidenceRef = `${question.question_id}-s${si}-t${ti}`;
           const seed = await daemon.proposeMemory(turn.content, evidenceRef);
+          if (seed.truncated) {
+            seedTurnsTruncated++;
+            seedCharsClipped += seed.charsClipped;
+            if (turn.has_answer === true) answerTurnsTruncated++;
+          }
           sidecar.set(seed.memoryId, {
             sessionId,
             hasAnswer: turn.has_answer === true
@@ -163,19 +164,21 @@ export async function runLongMemEval(
         hitAt10,
         firstTier,
         latencyMs,
-        degradationReason: recallResult.degradation_reason ?? null
+        degradationReason: recallResult.degradation_reason ?? null,
+        seedTurnsTruncated,
+        answerTurnsTruncated,
+        seedCharsClipped
       };
     } finally {
       await daemon.shutdown();
     }
   }
 
-  // @anchor longmemeval-sequential — sequential iteration over questions.
-  // Intra-process concurrency is unsafe because startBenchDaemon mutates
-  // process.env (DATA_DIR / ALAYA_CONFIG_DIR / HOME / ALAYA_REVIEWER_*),
-  // so concurrent daemon starts race. For full-set throughput use
-  // process-level sharding via --offset/--limit + the shell driver under
-  // apps/bench-runner/scripts/run-full-public-bench.sh.
+  // @anchor longmemeval-sequential — intra-process concurrency races
+  // on the process.env mutated by startBenchDaemon (DATA_DIR /
+  // ALAYA_CONFIG_DIR / HOME / ALAYA_REVIEWER_*).
+  // see also: apps/bench-runner/scripts/run-full-public-bench.sh for
+  // safe process-level sharding.
   const collected: WorkerResult[] = [];
   for (let i = 0; i < window.length; i++) {
     const q = window[i];
@@ -196,8 +199,12 @@ export async function runLongMemEval(
   let degradeNone = 0;
   let degradeWarm = 0;
   let degradeCold = 0;
+  let degradePartial = 0;
   let totalHitAt1 = 0;
   let totalHitAt10 = 0;
+  let truncSeedTotal = 0;
+  let truncAnswerTotal = 0;
+  let truncCharsTotal = 0;
 
   for (let i = 0; i < collected.length; i++) {
     const res = collected[i];
@@ -210,7 +217,11 @@ export async function runLongMemEval(
     else tierCold++;
     if (res.degradationReason === "warm_cascade_engaged") degradeWarm++;
     else if (res.degradationReason === "cold_cascade_engaged") degradeCold++;
+    else if (res.degradationReason === "recall_explainability_partial") degradePartial++;
     else degradeNone++;
+    truncSeedTotal += res.seedTurnsTruncated;
+    truncAnswerTotal += res.answerTurnsTruncated;
+    truncCharsTotal += res.seedCharsClipped;
     perScenario.push({
       id: res.questionId,
       version: 1,
@@ -228,17 +239,15 @@ export async function runLongMemEval(
 
   const datasetSize = opts.fetchResult?.questionCount ?? questions.length;
 
-  // @anchor variant-to-split — split is the audit-facing label used by the
-  // diff engine, report.md scoring contract caveat, and Inspector trend
-  // lines. Oracle and S are functionally different evaluations (Oracle's
-  // session-set filter is a no-op; S's is meaningful), so they MUST be
-  // archived under distinct splits, not pooled.
-  const split =
-    opts.variant === "longmemeval_oracle"
-      ? "longmemeval-oracle"
-      : opts.variant === "longmemeval_s"
-        ? "longmemeval-s"
-        : "longmemeval-s";
+  // @anchor variant-to-split — exhaustive Record so a new
+  // LongMemEvalVariant without a split mapping is a compile error.
+  // see also: packages/eval/src/kpi-schema.ts BenchSplit enum.
+  const VARIANT_TO_SPLIT: Record<typeof opts.variant, BenchSplit> = {
+    longmemeval_oracle: "longmemeval-oracle",
+    longmemeval_s: "longmemeval-s",
+    longmemeval_m: "longmemeval-m"
+  };
+  const split = VARIANT_TO_SPLIT[opts.variant];
 
   const payload: KpiPayload = {
     bench_name: "public",
@@ -262,13 +271,20 @@ export async function runLongMemEval(
       r_at_10: rAt10,
       latency_ms_p50: latencyP50,
       latency_ms_p95: latencyP95,
+      latency_source: "exact",
       // @anchor token_saved_ratio — set to 0 until a token-budget baseline exists
       token_saved_ratio_vs_full_prompt: 0,
       tier_distribution: { hot: tierHot, warm: tierWarm, cold: tierCold },
       degradation_reasons: {
         none: degradeNone,
         warm_cascade_engaged: degradeWarm,
-        cold_cascade_engaged: degradeCold
+        cold_cascade_engaged: degradeCold,
+        recall_explainability_partial: degradePartial
+      },
+      seed_truncation: {
+        seed_turns_truncated: truncSeedTotal,
+        answer_turns_truncated: truncAnswerTotal,
+        seed_chars_clipped: truncCharsTotal
       },
       per_scenario: perScenario
     }

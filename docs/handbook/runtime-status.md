@@ -279,8 +279,11 @@ New runtime-visible surfaces:
   `docs/v0.3/bench-history/datasets/<variant>.meta.json`) through the
   same in-process daemon.
 - Bench history archive (`docs/v0.3/bench-history/{self,public}/`) —
-  split-keyed entries with `kpi.json`, `report.md`, optional
-  `findings.md`, and split-aware `latest-baseline.json`.
+  bench-keyed entries with `kpi.json`, `report.md`, optional
+  `findings.md`. The bench-wide `latest-baseline.json` pointer tracks
+  the newest entry across all splits; split-aware comparison lives in
+  the `readLatest(layout, bench, { split })` API which scans entries
+  and ignores the pointer when a split filter is provided.
 
 Workspace packages bumped `0.3.5` -> `0.3.6`. See `docs/v0.3/v0.3.6/`.
 

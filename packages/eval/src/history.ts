@@ -1,4 +1,13 @@
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  writeFile
+} from "node:fs/promises";
 import path from "node:path";
 import {
   KpiPayloadSchema,
@@ -31,6 +40,17 @@ export function entrySlug(runAt: Date, commitSha7: string): string {
 
 const SLUG_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{6}Z-[0-9a-f]{7,40}$/;
 
+/**
+ * @anchor write-entry-atomic — bench-history write is staged in a
+ * sibling .tmp- directory then rename(2)'d into place. Either the
+ * entry is fully present (kpi.json + report.md + optional findings.md)
+ * or the slug directory does not exist — never half-written.
+ * `latest-baseline.json` is written via a tmp + rename two-step on the
+ * same filesystem. If the target slug already exists, writeEntry throws
+ * rather than overwriting — second precision in entrySlug means same-
+ * second collisions are possible and silently clobbering destroys
+ * audit trail.
+ */
 export async function writeEntry(
   layout: HistoryLayout,
   benchName: BenchName,
@@ -49,20 +69,59 @@ export async function writeEntry(
   }
   const benchRoot = path.join(layout.historyRoot, benchName);
   const entryRoot = path.join(benchRoot, slug);
-  await mkdir(entryRoot, { recursive: true });
+  // Refuse to overwrite an existing slug. Same-second reruns must wait
+  // a second or supply a distinct commit_sha — silent overwrites would
+  // destroy the audit trail.
+  try {
+    await access(entryRoot);
+    throw new Error(
+      `entry slug '${slug}' already exists at ${entryRoot}; refusing to overwrite (audit trail)`
+    );
+  } catch (err) {
+    if (
+      err !== null &&
+      typeof err === "object" &&
+      "code" in err &&
+      (err as { code: string }).code === "ENOENT"
+    ) {
+      // expected — slug is free
+    } else {
+      throw err;
+    }
+  }
+  const stagingRoot = path.join(benchRoot, `.tmp-${slug}-${process.pid}`);
+  await mkdir(stagingRoot, { recursive: true });
+  try {
+    const stagingKpi = path.join(stagingRoot, KPI_FILENAME);
+    const stagingReport = path.join(stagingRoot, REPORT_FILENAME);
+    const stagingFindings = path.join(stagingRoot, FINDINGS_FILENAME);
+    await writeFile(stagingKpi, JSON.stringify(payload, null, 2) + "\n", "utf8");
+    await writeFile(stagingReport, reportMarkdown, "utf8");
+    if (findingsMarkdown !== null) {
+      await writeFile(stagingFindings, findingsMarkdown, "utf8");
+    }
+    await rename(stagingRoot, entryRoot);
+  } catch (err) {
+    await rm(stagingRoot, { recursive: true, force: true });
+    throw err;
+  }
+
   const kpiPath = path.join(entryRoot, KPI_FILENAME);
   const reportPath = path.join(entryRoot, REPORT_FILENAME);
   const findingsPath = path.join(entryRoot, FINDINGS_FILENAME);
-  await writeFile(kpiPath, JSON.stringify(payload, null, 2) + "\n", "utf8");
-  await writeFile(reportPath, reportMarkdown, "utf8");
-  if (findingsMarkdown !== null) {
-    await writeFile(findingsPath, findingsMarkdown, "utf8");
-  }
+
+  // Pointer write — staged in a sibling tmp file then renamed so the
+  // pointer is never half-written / never references a slug that does
+  // not yet exist on disk.
+  const pointerPath = path.join(benchRoot, LATEST_BASELINE_FILENAME);
+  const pointerTmp = `${pointerPath}.${process.pid}.tmp`;
   await writeFile(
-    path.join(benchRoot, LATEST_BASELINE_FILENAME),
+    pointerTmp,
     JSON.stringify({ slug, kpi_path: path.relative(benchRoot, kpiPath) }, null, 2) + "\n",
     "utf8"
   );
+  await rename(pointerTmp, pointerPath);
+
   return { slug, kpiPath, reportPath, findingsPath };
 }
 
