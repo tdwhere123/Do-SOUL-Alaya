@@ -450,6 +450,56 @@ describe("RecallService 8-factor scoring", () => {
     }
   );
 
+  // v0.3.4 — cold reallocation must fire at the candidate-set level, not per
+  // candidate. When even one candidate has non-zero graph_support, the whole
+  // set is not "cold" and reallocation must stay off — otherwise we would
+  // silently inflate relevance weight for the candidates that still have
+  // graph evidence. Production data on a real workspace tends to land in this
+  // mixed state (some recall hits are in the RECALLS edge graph, most are
+  // not), which is exactly the boundary that natural recall traffic did not
+  // exercise during the v0.3.3 dogfood pass.
+  it("keeps baseline weights when only some candidates have graph/path support (mixed)", async () => {
+    const memories = [
+      createMemoryEntry({
+        object_id: "memory-cold",
+        content: "Cold candidate — no graph, no path"
+      }),
+      createMemoryEntry({
+        object_id: "memory-warm",
+        content: "Warm candidate — has graph support"
+      })
+    ];
+    const { dependencies, searchByKeyword } = createDependencies(
+      memories,
+      [],
+      {},
+      {
+        graphSupportByMemoryId: { "memory-cold": 0, "memory-warm": 3 }
+      }
+    );
+    searchByKeyword.mockResolvedValue([
+      { object_id: "memory-cold", normalized_rank: 1 },
+      { object_id: "memory-warm", normalized_rank: 1 }
+    ]);
+    const service = new RecallService(dependencies);
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface("Mixed cold/warm scoring evidence"),
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      strategy: "build"
+    });
+
+    for (const candidate of result.candidates) {
+      const weights = candidate.score_factors?.resolved_activation_weights;
+      expect(weights).toBeDefined();
+      // Baseline relevance + graph_support, NOT the cold-reallocation
+      // relevance: 0.3 / graph_support: 0 shape.
+      expect(weights?.relevance).toBeCloseTo(0.1);
+      expect(weights?.graph_support).toBeCloseTo(0.05);
+    }
+  });
+
   it("applies conflict penalty to non-winner claim-like entries", async () => {
     const memories = [
       createMemoryEntry({
