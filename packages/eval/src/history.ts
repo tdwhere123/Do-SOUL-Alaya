@@ -111,9 +111,10 @@ export async function writeEntry(
   const findingsPath = path.join(entryRoot, FINDINGS_FILENAME);
 
   const pointerPath = path.join(benchRoot, LATEST_BASELINE_FILENAME);
-  // Pointer tmp suffix combines pid + 8-byte random so two same-PID
-  // concurrent writeEntry calls (worker_threads) cannot collide on the
-  // tmp filename even though Node's main thread is single-runtime.
+  // Pointer tmp suffix combines pid + 4-byte random (8 hex chars,
+  // ~4.3e9 namespace) so two same-PID concurrent writeEntry calls
+  // (worker_threads) cannot collide on the tmp filename even though
+  // Node's main thread is single-runtime.
   const pointerTmp = `${pointerPath}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
   await writeFile(
     pointerTmp,

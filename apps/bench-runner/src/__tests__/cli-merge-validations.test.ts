@@ -125,6 +125,46 @@ describe("merge-longmemeval validations", () => {
     expect(stderrBuf).toMatch(/split=longmemeval-oracle.*split=longmemeval-s/);
   });
 
+  it("refuses shards whose sample_size differs", async () => {
+    const shardA = path.join(tmpRoot, "shard-a");
+    const shardB = path.join(tmpRoot, "shard-b");
+    await writeShardRoot(
+      shardA,
+      makeShardKpi({
+        alaya_commit: "0000aaa",
+        sample_size: 500,
+        evaluated_count: 5
+      })
+    );
+    await writeShardRoot(
+      shardB,
+      makeShardKpi({
+        alaya_commit: "0000bbb",
+        sample_size: 250,
+        evaluated_count: 5,
+        kpi: {
+          ...makeShardKpi().kpi,
+          per_scenario: [
+            { id: "q-shard-b-1", version: 1, hit_at_5: true, tier: "warm" }
+          ]
+        }
+      })
+    );
+    const historyRoot = path.join(tmpRoot, "history");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shardA,
+      shardB
+    ]);
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toMatch(/sample_size=250 != shard\[0\] sample_size=500/);
+  });
+
   it("refuses shards whose dataset identity differs", async () => {
     const shardA = path.join(tmpRoot, "shard-a");
     const shardB = path.join(tmpRoot, "shard-b");
