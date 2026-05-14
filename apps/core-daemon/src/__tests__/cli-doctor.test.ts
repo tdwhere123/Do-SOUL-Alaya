@@ -670,6 +670,50 @@ describe("doctor CLI", () => {
       }
     });
   });
+
+  it("reports build_info in JSON and human output when provided", async () => {
+    const harness = createDoctorHarness({
+      getBuildInfo: () => ({
+        version: "0.3.4",
+        git_head: "abcdef1234567890",
+        built_at: "2026-05-14T03:00:00.000Z"
+      })
+    });
+
+    const jsonResult = await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1", "--json"]);
+    const humanResult = await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1"]);
+
+    expect(jsonResult.json).toMatchObject({
+      build_info: {
+        version: "0.3.4",
+        git_head: "abcdef1234567890",
+        built_at: "2026-05-14T03:00:00.000Z"
+      }
+    });
+    expect(humanResult.exitCode).toBe(75);
+    expect(harness.stdoutText()).toContain(
+      "version: 0.3.4 git_head: abcdef1 built_at: 2026-05-14T03:00:00.000Z"
+    );
+  });
+
+  it("falls back to a dev sentinel when getBuildInfo is omitted", async () => {
+    const harness = createDoctorHarness({});
+
+    const jsonResult = await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1", "--json"]);
+    const humanResult = await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1"]);
+
+    expect(jsonResult.json).toMatchObject({
+      build_info: {
+        version: "0.0.0-dev",
+        git_head: "unknown",
+        built_at: "unknown"
+      }
+    });
+    expect(humanResult.exitCode).toBe(75);
+    expect(harness.stdoutText()).toContain(
+      "version: 0.0.0-dev git_head: unknown built_at: unknown"
+    );
+  });
 });
 
 function createDoctorHarness(overrides: Partial<Parameters<typeof createDoctorCommand>[0]> = {}) {

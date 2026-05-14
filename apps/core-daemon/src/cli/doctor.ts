@@ -17,6 +17,13 @@ import {
   type GraphHealthSnapshot,
   type GraphHealthWarning
 } from "../services/graph-health-service.js";
+import type { BuildInfo } from "../build-info.js";
+
+const UNKNOWN_BUILD_INFO: BuildInfo = {
+  version: "0.0.0-dev",
+  git_head: "unknown",
+  built_at: "unknown"
+};
 
 /**
  * Shape returned by the optional getGardenCompute doctor dep so an
@@ -89,6 +96,13 @@ export interface DoctorCommandDependencies {
   ) => readonly DaemonStartupStepRecord[];
   readonly defaultWorkspaceId?: string;
   readonly clock?: () => string;
+  /**
+   * Build-time stamp (version / git_head / built_at) that doctor surfaces
+   * so operators can tell which binary the daemon is running. When omitted,
+   * doctor renders a "0.0.0-dev / unknown / unknown" sentinel — convenient
+   * for unit tests and for source runs without a built dist/build-info.json.
+   */
+  readonly getBuildInfo?: () => BuildInfo;
 }
 
 interface DoctorArgs {
@@ -138,6 +152,7 @@ type DoctorCheckName =
 interface DoctorReport {
   readonly checked_at: string;
   readonly overall: "green" | "degraded";
+  readonly build_info: BuildInfo;
   readonly startup: Readonly<{
     ready: boolean;
     completed_steps: readonly string[];
@@ -204,6 +219,7 @@ export function createDoctorCommand(
       const missingSteps = STARTUP_STEPS.filter((step) => !completedSteps.includes(step));
       const daemonReady = missingSteps.length === 0;
 
+      const buildInfo = deps.getBuildInfo?.() ?? UNKNOWN_BUILD_INFO;
       const toolchainStatus = await deps.getToolchainStatus();
       const storage = await inspectStorage(toolchainStatus.db_path, deps.getSchemaSummary);
       const workspaceId = resolveCliWorkspaceContext(
@@ -299,6 +315,7 @@ export function createDoctorCommand(
       const report: DoctorReport = {
         checked_at: now(),
         overall,
+        build_info: buildInfo,
         startup: {
           ready: daemonReady,
           completed_steps: completedSteps,
@@ -484,6 +501,11 @@ async function inspectStorage(
 
 function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport): void {
   stream.write(`doctor overall: ${report.overall}\n`);
+  stream.write(
+    `version: ${report.build_info.version}` +
+      ` git_head: ${shortenGitHead(report.build_info.git_head)}` +
+      ` built_at: ${report.build_info.built_at}\n`
+  );
   stream.write(`runtime ready: ${report.startup.ready ? "yes" : "no"}\n`);
   stream.write(`storage db path: ${report.storage.db_path}\n`);
   stream.write(`storage writable: ${report.storage.writable ? "yes" : "no"}\n`);
@@ -564,6 +586,13 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport):
 
 function formatGraphHealthWarnings(warnings: readonly GraphHealthWarning[]): string {
   return warnings.join(",");
+}
+
+function shortenGitHead(head: string): string {
+  if (head === "unknown") {
+    return head;
+  }
+  return head.length >= 7 ? head.slice(0, 7) : head;
 }
 
 function formatCredentialSource(source: GardenComputeStatus["credential_source"]): string {

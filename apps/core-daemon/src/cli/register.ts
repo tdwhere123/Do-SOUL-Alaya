@@ -22,6 +22,7 @@ import {
 } from "./config-files.js";
 import { createDetachCommandSpec } from "./detach.js";
 import { createDoctorCommand, type GardenComputeStatus, type GardenKeychainCheck } from "./doctor.js";
+import { readBuildInfo } from "../build-info.js";
 import { createInstallCommand } from "./install.js";
 import { createInspectCommand } from "./inspect.js";
 import { createUpdateCommand } from "./update.js";
@@ -50,6 +51,7 @@ export function registerAlayaCliCommands(
   runtime: AlayaDaemonRuntime
 ): void {
   bridge.registerSubcommand(createDoctorCommand({
+    getBuildInfo: readBuildInfo,
     getToolchainStatus: async () => await runtime.services.environmentStatusService.getStatus(),
     getEmbeddingStatus: async (workspaceId) => await runtime.services.embeddingStatusService.getStatus(workspaceId),
     getMcpHealth: async () => ({

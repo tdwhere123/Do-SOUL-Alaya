@@ -1,4 +1,4 @@
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -44,6 +44,32 @@ const copyMigrations = spawnSync(
 
 if (copyMigrations.status !== 0) {
   process.exit(copyMigrations.status ?? 1);
+}
+
+// Stamp build-info.json next to the built daemon. doctor.ts reads it so
+// operators can tell which binary the running daemon was built from.
+// git_head falls back to "unknown" when no .git is available (e.g. when
+// users install from a release tarball that contains no .git directory).
+const daemonDistDir = "apps/core-daemon/dist";
+if (existsSync(daemonDistDir)) {
+  const daemonPkg = JSON.parse(
+    readFileSync("apps/core-daemon/package.json", "utf8")
+  );
+  const headResult = spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" });
+  const gitHead =
+    headResult.status === 0 && typeof headResult.stdout === "string"
+      ? headResult.stdout.trim()
+      : "unknown";
+  const buildInfo = {
+    version: typeof daemonPkg.version === "string" ? daemonPkg.version : "unknown",
+    git_head: gitHead,
+    built_at: new Date().toISOString()
+  };
+  mkdirSync(daemonDistDir, { recursive: true });
+  writeFileSync(
+    join(daemonDistDir, "build-info.json"),
+    `${JSON.stringify(buildInfo, null, 2)}\n`
+  );
 }
 
 // Inspector SPA frontend lives in apps/inspector/web — separate Vite build.
