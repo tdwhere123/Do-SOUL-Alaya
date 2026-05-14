@@ -17,6 +17,10 @@ vi.mock("./pages/Graph", () => ({
   default: () => <div>graph page</div>
 }));
 
+vi.mock("./pages/Recall", () => ({
+  default: () => <div>recall page</div>
+}));
+
 vi.mock("./pages/Status", () => ({
   default: () => <div>status page</div>
 }));

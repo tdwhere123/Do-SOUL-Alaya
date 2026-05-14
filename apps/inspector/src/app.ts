@@ -5,6 +5,7 @@ import { createInspectorAuthMiddleware } from "./auth.js";
 import { registerInspectorConfigRoutes } from "./routes/config.js";
 import { registerInspectorGraphRoutes } from "./routes/graph.js";
 import { registerInspectorProposalRoutes } from "./routes/proposals.js";
+import { registerInspectorRecallStatsRoutes } from "./routes/recall-stats.js";
 import { registerInspectorSoulSearchRoutes } from "./routes/soul-search.js";
 import { registerInspectorStatusRoutes } from "./routes/status.js";
 import { registerInspectorStaticRoutes } from "./static.js";
@@ -22,6 +23,7 @@ export const INSPECTOR_ROUTE_SURFACE = Object.freeze([
   "PATCH /api/config/runtime/garden-compute",
   "GET /api/embedding-status/:workspaceId",
   "GET /api/graph/:workspaceId",
+  "GET /api/recall-stats/:workspaceId",
   "GET /api/status",
   // A1 (HITL daemon backbone) — Inspector loopback for the new
   // pending-proposals listing tool plus accept/reject.
@@ -69,6 +71,7 @@ export function createInspectorApp(options: InspectorAppOptions): Hono {
   registerInspectorGraphRoutes(app, proxyOptions);
   registerInspectorStatusRoutes(app, proxyOptions);
   registerInspectorProposalRoutes(app, proxyOptions);
+  registerInspectorRecallStatsRoutes(app, proxyOptions);
   registerInspectorSoulSearchRoutes(app, proxyOptions);
   registerInspectorStaticRoutes(app, {
     staticRoot: options.staticRoot ?? defaultStaticRoot

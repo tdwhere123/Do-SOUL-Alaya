@@ -20,6 +20,7 @@ describe("inspector routes", () => {
       "PATCH /api/config/runtime/garden-compute",
       "GET /api/embedding-status/:workspaceId",
       "GET /api/graph/:workspaceId",
+      "GET /api/recall-stats/:workspaceId",
       "GET /api/status",
       // A1 (HITL daemon backbone) — Inspector loopback for the new
       // pending-proposals listing tool plus accept/reject.
@@ -76,6 +77,9 @@ describe("inspector routes", () => {
       headers: { "content-type": "application/json" }
     });
     await app.request("/api/graph/ws1?token=token");
+    await app.request(
+      "/api/recall-stats/ws1?token=token&since=2026-05-01T00:00:00Z&until=2026-05-08T00:00:00Z&excludeAgentTargets=inspector,cli"
+    );
     await app.request("/api/status?token=token");
 
     expect(calls).toEqual([
@@ -98,6 +102,11 @@ describe("inspector routes", () => {
         body: "{\"auto_approve_readonly\":true}"
       },
       { url: "http://daemon.local/workspaces/ws1/soul/graph", method: "GET", body: null },
+      {
+        url: "http://daemon.local/workspaces/ws1/recall-stats?since=2026-05-01T00%3A00%3A00Z&until=2026-05-08T00%3A00%3A00Z&excludeAgentTargets=inspector%2Ccli",
+        method: "GET",
+        body: null
+      },
       { url: "http://daemon.local/status", method: "GET", body: null }
     ]);
   });

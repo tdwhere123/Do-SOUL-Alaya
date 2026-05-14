@@ -112,6 +112,7 @@ export default function OverviewPage() {
             label={t("overview:card.recall.label")}
             value={t("overview:card.recall.placeholder")}
             subtitle={t("overview:card.recall.subtitle")}
+            link={{ to: "/recall", text: t("overview:linkRecall") }}
             testId="overview-card-recall"
           />
           <SummaryCard

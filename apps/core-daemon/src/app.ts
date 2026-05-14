@@ -30,6 +30,10 @@ import {
 } from "./routes/project-mapping.js";
 import { registerProposalRoutes, type ProposalRouteServices } from "./routes/proposals.js";
 import { registerRecallRoutes, type RecallRouteServices } from "./routes/recall.js";
+import {
+  registerRecallStatsRoutes,
+  type RecallStatsRouteServices
+} from "./routes/recall-stats.js";
 import { registerRunRoutes, type RunRouteServices } from "./routes/runs.js";
 import { registerSecurityStatusRoutes, type SecurityStatusRouteServices } from "./routes/security-status.js";
 import { registerSignalRoutes, type SignalRouteServices } from "./routes/signals.js";
@@ -74,6 +78,7 @@ export interface CoreDaemonRouteServices {
   readonly projectMapping?: ProjectMappingRouteServices;
   readonly proposals?: ProposalRouteServices;
   readonly recall?: RecallRouteServices;
+  readonly recallStats?: RecallStatsRouteServices;
   readonly runs?: RunRouteServices;
   readonly securityStatus?: SecurityStatusRouteServices;
   readonly signals?: SignalRouteServices;
@@ -269,6 +274,8 @@ function registerConfiguredRoutes(app: Hono, routes: CoreDaemonRouteServices | u
   if (routes.budget !== undefined) registerBudgetRoutes(app, routes.budget);
   if (routes.slots !== undefined) registerSlotRoutes(app, routes.slots);
   if (routes.recall !== undefined) registerRecallRoutes(app, routes.recall);
+  if (routes.recallStats !== undefined)
+    registerRecallStatsRoutes(app, routes.recallStats);
   if (routes.syntheses !== undefined) registerSynthesisRoutes(app, routes.syntheses);
   if (routes.claims !== undefined) registerClaimRoutes(app, routes.claims);
   if (routes.proposals !== undefined) registerProposalRoutes(app, routes.proposals);

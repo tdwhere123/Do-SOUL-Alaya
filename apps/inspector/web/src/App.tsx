@@ -6,6 +6,7 @@ import ConfigPage from "./pages/Config";
 import GraphPage from "./pages/Graph";
 import OverviewPage from "./pages/Overview";
 import ProposalsPage from "./pages/Proposals";
+import RecallPage from "./pages/Recall";
 import StatusPage from "./pages/Status";
 
 import Layout from "./components/Layout";
@@ -81,6 +82,7 @@ export function AppContent() {
         <Route path="/config" element={<ConfigPage />} />
         <Route path="/graph" element={<GraphPage />} />
         <Route path="/proposals" element={<ProposalsPage />} />
+        <Route path="/recall" element={<RecallPage />} />
         <Route path="/status" element={<StatusPage />} />
         <Route path="/" element={<Navigate to="/overview" replace />} />
       </Route>
