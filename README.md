@@ -407,49 +407,29 @@ Two surfaces over one runtime. The agent attaches via MCP; humans
 script via CLI. Both go through the same daemon and the same truth
 boundary.
 
-### MCP tools (9 `soul.*` + 3 `garden.*`)
+**MCP tools (9 `soul.*` + 3 `garden.*`)** — all schema-bounded
+(`maxLength`, `maxItems`, `additionalProperties: false` derived from
+the zod request schemas):
 
-All schema-bounded; `maxLength`, `maxItems`, `additionalProperties:
-false` are derived from the zod request schemas and enforced both
-at parse time and in the published catalog.
+- **Recall** (read-only): `soul.recall`, `soul.open_pointer`,
+  `soul.explore_graph`
+- **Perception → Governance** (proposal-side writes):
+  `soul.emit_candidate_signal`, `soul.propose_memory_update`,
+  `soul.review_memory_proposal`, `soul.list_pending_proposals`
+- **Runtime control & receipt**: `soul.apply_override` (session-scoped,
+  never durable), `soul.report_context_usage` (audit-only write)
+- **Garden host-worker** (when `provider_kind=host_worker`):
+  `garden.list_pending_tasks`, `garden.claim_task`,
+  `garden.complete_task`
 
-| Tool | Phase | Mutating? |
-|---|---|---|
-| `soul.recall` | Recall | no |
-| `soul.open_pointer` | Recall (read by id) | no |
-| `soul.explore_graph` | Recall (one-hop neighbours) | no |
-| `soul.emit_candidate_signal` | Perception | yes (proposal-side) |
-| `soul.propose_memory_update` | Governance entry | yes (proposal-side) |
-| `soul.review_memory_proposal` | Governance resolution | yes |
-| `soul.list_pending_proposals` | Governance triage (HITL queue) | no |
-| `soul.apply_override` | Runtime Control (session-scoped, never durable) | yes (session-scope) |
-| `soul.report_context_usage` | Receipt | yes (audit) |
-
-`alaya tools list --json` and `alaya tools call <tool> '<json>' --json`
-are the CLI fallback for the same surface — useful for scripting
-outside the agent runtime.
-
-### CLI commands (13 verbs)
-
-| Command | Purpose | Mutating? | Audit log? |
-|---|---|---|---|
-| `alaya doctor` | Diagnose env, storage health, schema version, daemon reachability | no | no |
-| `alaya install` | Plan / apply / rollback an install profile | yes | yes |
-| `alaya attach codex` | Add `mcpServers.alaya` to `~/.codex/config.toml` | yes | yes |
-| `alaya attach claude-code` | Add `mcpServers.alaya` to `~/.claude.json` | yes | yes |
-| `alaya detach codex` / `detach claude-code` | Reverse the corresponding attach atomically | yes | yes |
-| `alaya status` | Daemon health + trust-state summary. `--recall-stats --workspace <id> [--since <iso>] [--until <iso>]` adds a recall utilization section (recall throughput, miss ratio, used vs skipped) for attached agent traffic; `inspector` and `cli` agent_targets are excluded by default. | no | no |
-| `alaya inspect` | Open the Memory Inspector SPA on loopback (memory-tooling, *not* an agent surface). With several workspaces registered it auto-selects the one whose repo path matches the current directory; otherwise it lists candidates and you pass `--workspace <id>`. | no | no |
-| `alaya update` | Show GitHub Release / source-build upgrade instructions | no | no |
-| `alaya tools list` | List the MCP tool catalog | no | no |
-| `alaya tools call <tool> '<json>'` | Invoke a tool from CLI | varies | varies |
-| `alaya review pending\|accept\|reject` | Inspect and resolve the HITL proposal queue (CLI fallback for the Memory Inspector) | accept / reject: yes | yes |
-| `alaya backup --output <path>` | Portable backup bundle (signed) | no | yes |
-| `alaya export --output <path>` / `import --bundle <path>` | Portable export / restore | export: no, import: yes | yes |
-| `alaya mcp stdio` | Run the daemon's MCP stdio server (what `attach` wires up) | no | no |
-
-Every mutating verb supports preview before write. `attach` and
-`detach` are atomic. The audit log lives at
+`alaya tools list --json` prints the live MCP catalog (names +
+descriptions + request schemas) and `alaya tools call <tool>
+'<json>'` invokes any tool from CLI — both are scripting fallbacks
+over the same daemon path. Run `alaya --help` for the full CLI
+catalog of 13 verbs (doctor / install / attach / detach / status /
+inspect / update / tools / review / backup / export / import / mcp
+stdio); every mutating verb supports preview before write, attach
+/ detach are atomic, and the audit log lives at
 `~/.config/alaya/audit/`.
 
 ---
@@ -556,54 +536,38 @@ After step 7 your agent sees Alaya as an MCP server on its next
 start, and the 12 tools (9 `soul.*` + 3 `garden.*`) become callable
 from inside the agent.
 
-**If a step fails:**
-
-- `pnpm alaya doctor` tells you which check failed (env, storage,
-  daemon, MCP transport). It is the first place to look.
-- `pnpm alaya install --plan-only '<json>'` shows the diff before
-  apply.
-- `pnpm alaya detach codex` (or `claude-code`) atomically reverses
-  the attach and writes its own audit entry.
-- Storage problems leave `alaya.db.shm` / `alaya.db.wal` files —
-  that is WAL working state, not corruption. `alaya doctor` warns
-  when the schema version diverges.
-
----
-
-## Project layout
-
-```
-Do-SOUL Alaya/
-├── apps/
-│   ├── core-daemon/             Hono HTTP + MCP stdio + CLI entry
-│   └── inspector/               Memory Inspector SPA (loopback memory-tooling, NOT an agent surface)
-├── packages/
-│   ├── alaya-protocol/          zod schemas (truth boundary leaf)
-│   ├── alaya-storage/           SQLite + ~57 ordered migrations
-│   ├── alaya-core/              services (signal / proposal / claim / evidence / recall / trust / ...)
-│   ├── alaya-soul/              Garden roles (Auditor / Janitor / Librarian / Scheduler)
-│   └── alaya-engine-gateway/    provider routing only (no business logic)
-├── docs/
-│   └── handbook/                invariants, code-map, runtime-status, workflow
-├── bin/alaya.mjs                CLI shim (used by `pnpm alaya …`)
-├── README.md / README.zh-CN.md
-├── CLAUDE.md                    instructions for agent contributors
-└── LICENSE
-```
+If a step fails, `pnpm alaya doctor` tells you which check failed
+(version, env, storage, daemon, MCP transport) — it is the first
+place to look. The full project layout is documented in
+[docs/handbook/code-map.md](docs/handbook/code-map.md).
 
 ---
 
 ## Where this is going
 
-### Current state (2026-05-13)
+### Current state (2026-05-14)
 
-v0.3.0 is the current checkpoint. It keeps the six-phase memory loop
-end-to-end on a single SQLite file, adds `keychain:<service>:<account>`
-secret refs, exposes a CLI/env entry path for host-worker Garden
-compute, and closes the host-autonomy evidence gap for `soul.recall`
-→ `soul.report_context_usage` with a live EventLog witness. Distribution
-is still GitHub-Release tarball + `SHA256SUMS`, verified locally by
-`scripts/install.sh`; npm publish is intentionally out-of-scope.
+v0.3.4 is the current checkpoint and the first publicly released
+v0.3.x line. Cumulative since v0.3.0: real Codex and Claude Code
+MCP sessions are observed autonomously running `soul.recall` →
+`soul.report_context_usage` during normal conversations, with a
+live-usage EventLog witness committed under `docs/v0.3/v0.3.0/`
+(18 chains across both hosts after the v0.3.4 refresh);
+`POST_TURN_EXTRACT` auto-captures from the `recent_turn` text the
+host already forwards, so an empty store learns from the first
+conversation without explicit `soul.emit_candidate_signal` calls;
+v0.3.3 persists bounded `RECALLS` cross-link edges from used
+recall reports and later recall reads them as weighted
+`graph_support` (with cold reallocation for sparse candidate
+sets); bootstrap is honest about empty templates; `keychain:` secret
+refs are code-reviewed across Linux / macOS / Windows adapters
+(runtime cross-platform write→read still deferred — `env:` / `file:`
+refs are the runtime-verified path on WSL2); and v0.3.4 makes
+`alaya doctor` print the running daemon's `version` / `git_head` /
+`built_at`. Distribution is GitHub-Release source tarball +
+`SHA256SUMS`, verified locally by `scripts/install.sh` — v0.3.4 is
+the first v0.3.x tag and the first triggered `release.yml`
+workflow run. npm publish is intentionally out-of-scope.
 
 ### Where it is going
 

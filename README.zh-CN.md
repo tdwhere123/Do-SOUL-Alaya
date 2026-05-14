@@ -365,48 +365,29 @@ CI 测试强制的规则：
 两个对外面，一套 runtime。Agent 走 MCP attach；人走 CLI 脚本。
 两个面都通过同一个 daemon、同一个真相边界。
 
-### MCP 工具（9 个 `soul.*` + 3 个 `garden.*`）
+**MCP 工具（9 个 `soul.*` + 3 个 `garden.*`）** —— 全部
+schema-bounded（`maxLength` / `maxItems` /
+`additionalProperties: false` 从 zod 请求 schema 派生）：
 
-全部 schema-bounded；`maxLength`、`maxItems`、
-`additionalProperties: false` 都是从 zod 请求 schema 派生的，在
-解析时和发布的目录里都强制执行。
+- **召回**（read-only）：`soul.recall`、`soul.open_pointer`、
+  `soul.explore_graph`
+- **感知 → 治理**（proposal-side 写入）：
+  `soul.emit_candidate_signal`、`soul.propose_memory_update`、
+  `soul.review_memory_proposal`、`soul.list_pending_proposals`
+- **Runtime control & 回执**：`soul.apply_override`
+  （session 局部，永远不进 durable）、`soul.report_context_usage`
+  （只写 audit）
+- **Garden host-worker**（当 `provider_kind=host_worker` 时）：
+  `garden.list_pending_tasks`、`garden.claim_task`、
+  `garden.complete_task`
 
-| Tool | 阶段 | 修改 durable？ |
-|---|---|---|
-| `soul.recall` | 召回 | 否 |
-| `soul.open_pointer` | 召回（按 id 读） | 否 |
-| `soul.explore_graph` | 召回（一跳邻居） | 否 |
-| `soul.emit_candidate_signal` | 感知 | 是（proposal-side） |
-| `soul.propose_memory_update` | 治理入口 | 是（proposal-side） |
-| `soul.review_memory_proposal` | 治理裁决 | 是 |
-| `soul.list_pending_proposals` | 治理分诊（HITL 队列） | 否 |
-| `soul.apply_override` | Runtime Control（session 局部，永远不进 durable） | 是（session-scope） |
-| `soul.report_context_usage` | 回执 | 是（audit） |
-
-`alaya tools list --json` 和 `alaya tools call <tool> '<json>' --json`
-是同一套接口的 CLI 兜底——用来在 agent runtime 之外做脚本化。
-
-### CLI 命令（13 个动词）
-
-| 命令 | 用途 | 修改？ | 审计日志？ |
-|---|---|---|---|
-| `alaya doctor` | 诊断环境、storage 健康、schema 版本、daemon 可达性 | 否 | 否 |
-| `alaya install` | 规划 / 应用 / 回滚一份安装 profile | 是 | 是 |
-| `alaya attach codex` | 给 `~/.codex/config.toml` 写 `mcpServers.alaya` | 是 | 是 |
-| `alaya attach claude-code` | 给 `~/.claude.json` 写 `mcpServers.alaya` | 是 | 是 |
-| `alaya detach codex` / `detach claude-code` | 原子地反向解除对应的 attach | 是 | 是 |
-| `alaya status` | Daemon 健康 + trust-state 摘要 | 否 | 否 |
-| `alaya inspect` | 在 loopback 上打开 Memory Inspector SPA（memory-tooling，*不是* agent surface） | 否 | 否 |
-| `alaya update` | 显示 GitHub Release / 源码构建升级指引 | 否 | 否 |
-| `alaya tools list` | 列 MCP 工具目录 | 否 | 否 |
-| `alaya tools call <tool> '<json>'` | 从 CLI 调一个工具 | 视情况 | 视情况 |
-| `alaya review pending\|accept\|reject` | 查看并裁决 HITL proposal 队列（Memory Inspector 的 CLI 兜底） | accept / reject：是 | 是 |
-| `alaya backup --output <path>` | 可携带备份包（已签名） | 否 | 是 |
-| `alaya export --output <path>` / `import --bundle <path>` | 可携带导出 / 导入 | 导出否 / 导入是 | 是 |
-| `alaya mcp stdio` | 跑 daemon 的 MCP stdio 服务（attach 接的就是这个） | 否 | 否 |
-
-每个会修改的动词都支持先 preview 再写。`attach` 和 `detach` 是
-原子的。审计日志在 `~/.config/alaya/audit/`。
+`alaya tools list --json` 打印 live MCP 目录（名字 + 描述 +
+请求 schema），`alaya tools call <tool> '<json>'` 在 CLI 调一个
+工具——两者都是同 daemon 路径上的脚本兜底。跑 `alaya --help`
+看 13 个 CLI 动词的完整目录（doctor / install / attach / detach
+/ status / inspect / update / tools / review / backup / export /
+import / mcp stdio）；每个会修改的动词都支持先 preview 再写，
+attach / detach 原子，审计日志在 `~/.config/alaya/audit/`。
 
 ---
 
@@ -510,53 +491,35 @@ pnpm alaya tools call soul.recall \
 走完第 7 步，agent 下次启动就会把 Alaya 当 MCP server 看，12 个
 工具（9 个 `soul.*` + 3 个 `garden.*`）在 agent 内部就可以调了。
 
-**某一步失败时：**
-
-- `pnpm alaya doctor` 会告诉你具体哪一项检查失败（环境、storage、
-  daemon、MCP 传输）——第一站。
-- `pnpm alaya install --plan-only '<json>'` 在 apply 前看 diff。
-- `pnpm alaya detach codex`（或 `claude-code`）原子撤销 attach，
-  并写自己的审计条目。
-- Storage 看上去出问题时，`alaya.db.shm` / `alaya.db.wal` 是 WAL
-  正在工作，不是损坏。`alaya doctor` 会在 schema 版本对不上时
-  告警。
-
----
-
-## 仓库布局
-
-```
-Do-SOUL Alaya/
-├── apps/
-│   ├── core-daemon/             Hono HTTP + MCP stdio + CLI 入口
-│   └── inspector/               Memory Inspector SPA（loopback memory-tooling，不是 agent surface）
-├── packages/
-│   ├── alaya-protocol/          zod schema（真相边界的叶子）
-│   ├── alaya-storage/           SQLite + ~57 个有序迁移
-│   ├── alaya-core/              services（signal / proposal / claim / evidence / recall / trust / ...）
-│   ├── alaya-soul/              Garden 角色（Auditor / Janitor / Librarian / Scheduler）
-│   └── alaya-engine-gateway/    只做 provider 路由（没有业务逻辑）
-├── docs/
-│   └── handbook/                invariants、code-map、runtime-status、workflow
-├── bin/alaya.mjs                CLI shim（`pnpm alaya …` 用的就是它）
-├── README.md / README.zh-CN.md
-├── CLAUDE.md                    给 agent 贡献者的指引
-└── LICENSE
-```
+某一步失败时，`pnpm alaya doctor` 会告诉你具体哪一项检查失败
+（版本、环境、storage、daemon、MCP 传输）——第一站。完整的仓库
+布局看
+[docs/handbook/code-map.md](docs/handbook/code-map.md)。
 
 ---
 
 ## 接下来的方向
 
-### 当前状态（2026-05-13）
+### 当前状态（2026-05-14）
 
-v0.3.0 是当前 checkpoint。它保留"感知 → 治理 → 沉淀 → 召回 →
-回执 → 维护"这条六阶段记忆环，并继续跑在一个 SQLite 文件上；
-同时新增 `keychain:<service>:<account>` secret ref、给 host-worker
-Garden compute 补上 CLI/env 入口，并用真实 EventLog witness 关闭了
-`soul.recall` → `soul.report_context_usage` 的 host-autonomy 证据缺口。
-分发仍然走 GitHub Release tarball + `SHA256SUMS`，由
-`scripts/install.sh` 本地校验；npm 是有意不做的。
+v0.3.4 是当前 checkpoint，也是 v0.3.x 这条线第一次正式对外发布。
+从 v0.3.0 起累积下来：真实的 Codex 和 Claude Code MCP 会话已经
+被观察到在正常对话里自主调 `soul.recall` → `soul.report_context_usage`，
+真实 live-usage EventLog witness 落档在 `docs/v0.3/v0.3.0/`
+（v0.3.4 wave 把 fixture 刷到 18 条链，含两个 host）；
+`POST_TURN_EXTRACT` 在 host 已经转发的 `recent_turn` 文本上自动
+抓取，空库从第一句对话就开始学，host 不必显式调
+`soul.emit_candidate_signal`；v0.3.3 把 used recall report 持久化
+为带边界的 `RECALLS` 跨链边，后续 recall 把这些边读成加权的
+`graph_support`（候选集合都冷时走 cold reallocation）；bootstrap
+对空模板诚实；`keychain:` secret ref 在 Linux / macOS / Windows
+三平台 adapter 已 code-review（跨平台 runtime 写读仍 defer 待
+真机覆盖 —— WSL2 上 `env:` / `file:` 是 runtime-verified 路径）；
+v0.3.4 让 `alaya doctor` 打印当前 daemon 的 `version` / `git_head`
+/ `built_at`。分发仍然走 GitHub Release source tarball +
+`SHA256SUMS`，由 `scripts/install.sh` 本地校验 —— v0.3.4 是
+v0.3.x 这条线的第一个 git tag、第一个触发 `release.yml` workflow
+的发布。npm 是有意不做的。
 
 ### 下一步要走的方向
 
