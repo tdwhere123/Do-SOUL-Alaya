@@ -1,6 +1,6 @@
 {
   "name": "@do-soul/alaya-eval",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "private": true,
   "description": "Reproducible recall benchmark harness for Do-SOUL Alaya — self + LongMemEval-S splits, history archive, threshold-driven diff engine.",
   "license": "MIT",

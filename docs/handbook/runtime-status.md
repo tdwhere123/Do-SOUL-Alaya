@@ -255,6 +255,35 @@ v0.1-closeout. They are pinned here so the v0.1.x maintenance waves and
 v0.2 planning agents can reference them at the source rather than
 re-discovering them from `.do-it/findings/{a1,a2,a3}.md`.
 
+## v0.3.6 Release (2026-05-14)
+
+Patch-internal UI + bench feedback-loop release. No MCP tool names or
+descriptions, MCP request/response schemas, EventLog payload schemas,
+runtime config schemas, or storage migrations changed.
+
+New runtime-visible surfaces:
+
+- Inspector overview surface (`apps/inspector/web/src/pages/Overview.tsx`)
+  with daemon health pill, pending proposals card, recall stats card,
+  tier distribution, and per-split latest bench cards.
+- Inspector recall utilization UI (`apps/inspector/web/src/pages/Recall.tsx`)
+  consuming `RecallUtilizationService` via the new
+  `GET /workspaces/:workspaceId/recall-stats` daemon route + the
+  `/api/recall-stats/:workspaceId` Inspector proxy.
+- Bench harness (self) — `@do-soul/alaya-bench-runner self` runs the 8
+  inline synthetic scenarios through the real MCP `propose+review`
+  chain in an in-process daemon.
+- Bench harness (public LongMemEval-Oracle + LongMemEval-S) —
+  `@do-soul/alaya-bench-runner longmemeval --variant {oracle|s}` runs
+  the HuggingFace dataset (sha256-pinned under
+  `docs/v0.3/bench-history/datasets/<variant>.meta.json`) through the
+  same in-process daemon.
+- Bench history archive (`docs/v0.3/bench-history/{self,public}/`) —
+  split-keyed entries with `kpi.json`, `report.md`, optional
+  `findings.md`, and split-aware `latest-baseline.json`.
+
+Workspace packages bumped `0.3.5` -> `0.3.6`. See `docs/v0.3/v0.3.6/`.
+
 ## v0.3.2 Release (2026-05-13)
 
 Patch-internal memory-quality release. No MCP tool names or descriptions,

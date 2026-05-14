@@ -10,9 +10,9 @@
 
 ### *A local-first memory plane for CLI coding agents.*
 
-[![status](https://img.shields.io/badge/status-v0.3.5-success?style=flat-square)](#where-this-is-going)
+[![status](https://img.shields.io/badge/status-v0.3.6-success?style=flat-square)](#where-this-is-going)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-2525%20passing-success?style=flat-square)](#where-this-is-going)
+[![tests](https://img.shields.io/badge/tests-2580%20passing-success?style=flat-square)](#where-this-is-going)
 [![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#quickstart)
 [![pnpm](https://img.shields.io/badge/pnpm-%E2%89%A59-F69220?style=flat-square&logo=pnpm&logoColor=white)](#quickstart)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](#architecture-at-a-glance)
@@ -55,6 +55,63 @@ together.**
 It runs next to your agent — over MCP for attach, over a CLI for
 scripting — and stores everything in one SQLite file you own. No
 chat UI. No telemetry. No cloud round-trip on the recall path.
+
+---
+
+## Where Alaya sits
+
+Two questions a CLI-agent memory system has to answer, and they trade
+against each other:
+
+1. **Recall axis** — given a question, can you surface the right turn?
+2. **Governance axis** — when a candidate becomes a durable claim, who
+   approved it, what evidence supports it, who could it conflict with,
+   and is that decision auditable?
+
+Most public memory frameworks (`mem0`, `agentmemory`, `Letta`, …) optimise
+hard on axis 1 and stay light on axis 2. Alaya inverts that emphasis —
+deliberately. The Quickstart and the Architecture sections below are
+governance-first; recall accuracy is something we measure and publish as
+the [bench-history](docs/v0.3/bench-history/) archive, not something we
+brand on.
+
+The first honest LongMemEval-S retrieval baseline (v0.3.6, **full set
+500/500 questions**, SQLite FTS + activation only, no embedding
+supplement, 98% distractor session ratio per question, 2-shard
+parallel via `apps/bench-runner/scripts/run-full-public-bench.sh`):
+
+| Axis | Alaya v0.3.6 | Why this is the framing |
+|---|---|---|
+| Retrieval R@5 (LongMemEval-S full set n=500) | **60.2%** | FTS + activation, no embedding. v0.3.7 will wire the real embedding provider; this number is the floor, not the ceiling. (Shard split: 52.0% on the first 250 human-authored questions, 68.4% on the last 250 GPT-4-augmented questions — the asymmetry is dataset, not stack.) |
+| Retrieval R@1 / R@10 / p95 latency | 45.8% / 60.6% / 73ms | Same 500-q run. Latency is in-process daemon, not over a network. R@10 ≈ R@5 means the recall ranking concentrates hits in top-5; rank 6–10 adds almost nothing. |
+| Governance — durable proposals require accepted review | ✅ HITL gate | `soul.propose_memory_update` → `soul.review_memory_proposal` (accept/reject). Rejection does not mutate truth. |
+| Audit completeness — every durable mutation is a SOUL_* event | ✅ 9+ event-types per propose+review chain | EventLog row per signal / proposal / review / resolution / memory update. Recoverable by `apps/bench-runner/scripts/audit-trail-witness.mjs`. |
+| Conflict & tier discipline | ✅ Tier-aware promotion + path plasticity | Recall returns tier-stamped pointers (hot/warm/cold) + degradation reason; see `Recall` Inspector page. |
+| Local-first storage | ✅ Single SQLite WAL file | No network on recall path. Backup / export / import are 13-verb CLI commands. |
+
+For the contrast: `agentmemory`'s public README cites R@5 = 95.2% on
+LoCoMo, token-saved 92%, annual cost ~$10. Different dataset, different
+stack — quoted "as reported, link" so the reader can verify. We do not
+have a directly comparable number on LoCoMo today; that is a v0.3.7
+follow-up. What we *do* have is the v0.3.6 bench-history archive, every
+KPI reproducible by:
+
+```bash
+# self-bench (8 inline synthetic scenarios, ~10s)
+node apps/bench-runner/bin/alaya-bench-runner.mjs self
+# LongMemEval-S full 500-q set, 2-shard parallel (~85 min on a typical
+# laptop; sequential is ~150 min). Writes a single merged kpi.json +
+# report.md to docs/v0.3/bench-history/public/<slug>/.
+apps/bench-runner/scripts/run-full-public-bench.sh --variant s --shards 2
+```
+
+(see [release-notes](docs/v0.3/v0.3.6/release-notes.md) for the full
+command list and threshold-gated regression contract.)
+
+The shape of the bet: an attached coding agent is fine with R@5 ≈ 60%
+as long as the durable claims it acts on are audited and reversible.
+A naked R@5 = 95% number is worth less than a 60% number whose decisions
+you can trace to the evidence that produced them.
 
 ---
 
@@ -448,7 +505,7 @@ stdio); every mutating verb supports preview before write, attach
 ```bash
 # Install a pinned release. The installer then downloads the matching
 # release tarball, verifies SHA256SUMS, and builds locally.
-ALAYA_VERSION=v0.3.5
+ALAYA_VERSION=v0.3.6
 INSTALLER="$(mktemp)"
 trap 'rm -f "$INSTALLER"' EXIT
 curl -fsSL -o "$INSTALLER" \
@@ -469,7 +526,7 @@ the script):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/main/scripts/install.sh \
-  | ALAYA_VERSION=v0.3.5 bash
+  | ALAYA_VERSION=v0.3.6 bash
 ```
 
 Override install location:
@@ -554,7 +611,7 @@ place to look. The full project layout is documented in
 
 ### Current state (2026-05-14)
 
-v0.3.5 is the current checkpoint; v0.3.4 was the first publicly released
+v0.3.6 is the current checkpoint; v0.3.4 was the first publicly released
 v0.3.x line. Cumulative since v0.3.0: real Codex and Claude Code
 MCP sessions are observed autonomously running `soul.recall` →
 `soul.report_context_usage` during normal conversations, with a
@@ -571,7 +628,7 @@ refs are code-reviewed across Linux / macOS / Windows adapters
 (runtime cross-platform write→read still deferred — `env:` / `file:`
 refs are the runtime-verified path on WSL2); v0.3.4 makes `alaya
 doctor` print the running daemon's `version` / `git_head` / `built_at`;
-and v0.3.5 hardens the CLI/MCP startup and local execution support
+and v0.3.6 hardens the CLI/MCP startup and local execution support
 code without changing public MCP, protocol, EventLog, runtime config,
 or SQLite surfaces. Distribution is GitHub-Release source tarball +
 `SHA256SUMS`, verified locally by `scripts/install.sh`; npm publish is

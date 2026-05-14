@@ -25,7 +25,7 @@ export const zh = {
 
   // ── overview page ───────────────────────────────────────────────────
   "overview:title": "Memory 总览",
-  "overview:subtitle": "操作员视角：守护进程、待审记忆、召回利用率、层级分布。",
+  "overview:subtitle": "操作员视角，双轴呈现：召回精度（bench-history）+ 治理深度（待审记忆、tier、audit）。",
   "overview:card.daemon.label": "守护进程",
   "overview:card.daemon.subtitle": "运行状态与启动日志",
   "overview:card.daemon.value.ready": "正常",
@@ -222,7 +222,7 @@ export const en: Record<DictKey, string> = {
 
   // overview page
   "overview:title": "Memory Overview",
-  "overview:subtitle": "Operator view: daemon, pending memory, recall utilization, tier mix.",
+  "overview:subtitle": "Operator view, dual-axis: recall accuracy (bench-history) + governance depth (pending memory, tier, audit).",
   "overview:card.daemon.label": "Daemon",
   "overview:card.daemon.subtitle": "Runtime & startup",
   "overview:card.daemon.value.ready": "OPERATIONAL",
