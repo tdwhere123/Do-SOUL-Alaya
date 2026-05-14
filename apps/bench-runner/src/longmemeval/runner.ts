@@ -27,6 +27,21 @@ export interface LongMemEvalRunOptions {
   // callers should leave this undefined so the canonical
   // docs/v0.3/bench-history/datasets path is used.
   readonly pinnedMetaRoot?: string;
+  // @anchor longmemeval-offset — skip the first N questions of the
+  // dataset before applying `limit`. Used by the shard-and-merge driver
+  // in apps/bench-runner/scripts/ to fan a single full-set run across
+  // multiple Node processes (in-process daemon mutates process.env, so
+  // intra-process concurrency is unsafe — see daemon.ts MANAGED_ENV_KEYS;
+  // process-level sharding is the safe parallelism).
+  readonly offset?: number;
+  // @anchor longmemeval-concurrency — DEPRECATED in v0.3.6 Phase 5:
+  // intra-process concurrency is unsafe with the current in-process daemon
+  // because each daemon mutates process.env DATA_DIR / ALAYA_CONFIG_DIR /
+  // HOME during start-up, so concurrent starts race on those globals.
+  // Use process-level sharding via --offset/--limit + the
+  // run-full-public-bench.sh driver instead. Reserved here for future
+  // wiring once the daemon takes config from an option object.
+  readonly concurrency?: number;
 }
 
 export interface LongMemEvalRunResult {
@@ -59,7 +74,10 @@ export async function runLongMemEval(
     dataDir: opts.dataDir,
     pinnedMetaRoot: opts.pinnedMetaRoot
   });
-  const window = opts.limit !== undefined ? questions.slice(0, opts.limit) : questions;
+  const offset = Math.max(0, opts.offset ?? 0);
+  const sliceEnd =
+    opts.limit !== undefined ? offset + opts.limit : questions.length;
+  const window = questions.slice(offset, sliceEnd);
 
   const alayaVersion = resolveAlayaVersion();
   const commitSha7 = resolveCommitSha7();
@@ -70,23 +88,23 @@ export async function runLongMemEval(
   // the seed turn was tagged has_answer=true in the dataset.
   type SidecarEntry = { sessionId: string; hasAnswer: boolean };
 
-  const perScenario: PerScenarioRow[] = [];
-  const latencies: number[] = [];
-  let tierHot = 0;
-  let tierWarm = 0;
-  let tierCold = 0;
-  let degradeNone = 0;
-  let degradeWarm = 0;
-  let degradeCold = 0;
-  let totalHitAt1 = 0;
-  let totalHitAt10 = 0;
+  type WorkerResult = {
+    questionId: string;
+    hitAt1: boolean;
+    hitAt5: boolean;
+    hitAt10: boolean;
+    firstTier: "hot" | "warm" | "cold";
+    latencyMs: number;
+    degradationReason: string | null;
+  };
 
-  for (const question of window) {
+  async function runOneQuestion(
+    question: typeof window[number]
+  ): Promise<WorkerResult> {
     const daemon = await startBenchDaemon({
       workspaceId: `lme-${question.question_id.slice(0, 8)}`,
       runId: `run-${question.question_id.slice(0, 8)}`
     });
-
     try {
       const sidecar = new Map<string, SidecarEntry>();
       const answerSessionSet = new Set(question.answer_session_ids);
@@ -112,7 +130,6 @@ export async function runLongMemEval(
       const recallStart = Date.now();
       const recallResult = await daemon.recall(question.question, { maxResults: 10 });
       const latencyMs = Date.now() - recallStart;
-      latencies.push(latencyMs);
 
       const results = recallResult.results;
 
@@ -124,20 +141,14 @@ export async function runLongMemEval(
       for (let rank = 0; rank < results.length && rank < 10; rank++) {
         const pointer = results[rank];
         if (pointer === undefined) continue;
-
         if (rank === 0) {
           firstTier = inferTier(pointer.relevance_score);
         }
-
-        // object_id equality scoring: a hit is a recall pointer whose
-        // object_id maps to a seed flagged has_answer=true on an answer
-        // session. No content-preview overlap. No prefix string match.
         const meta = sidecar.get(pointer.object_id);
         const isHit =
           meta !== undefined &&
           meta.hasAnswer &&
           answerSessionSet.has(meta.sessionId);
-
         if (isHit) {
           if (rank === 0) hitAt1 = true;
           if (rank < 5) hitAt5 = true;
@@ -145,29 +156,67 @@ export async function runLongMemEval(
         }
       }
 
-      if (hitAt1) totalHitAt1++;
-      if (hitAt10) totalHitAt10++;
-
-      if (firstTier === "hot") tierHot++;
-      else if (firstTier === "warm") tierWarm++;
-      else tierCold++;
-
-      // degradation_reason is read directly off the daemon's recall response
-      // — never echoed from seed counts. null = no cascade engaged.
-      const degradationReason = recallResult.degradation_reason ?? null;
-      if (degradationReason === "warm_cascade_engaged") degradeWarm++;
-      else if (degradationReason === "cold_cascade_engaged") degradeCold++;
-      else degradeNone++;
-
-      perScenario.push({
-        id: question.question_id,
-        version: 1,
-        hit_at_5: hitAt5,
-        tier: firstTier
-      });
+      return {
+        questionId: question.question_id,
+        hitAt1,
+        hitAt5,
+        hitAt10,
+        firstTier,
+        latencyMs,
+        degradationReason: recallResult.degradation_reason ?? null
+      };
     } finally {
       await daemon.shutdown();
     }
+  }
+
+  // @anchor longmemeval-sequential — sequential iteration over questions.
+  // Intra-process concurrency is unsafe because startBenchDaemon mutates
+  // process.env (DATA_DIR / ALAYA_CONFIG_DIR / HOME / ALAYA_REVIEWER_*),
+  // so concurrent daemon starts race. For full-set throughput use
+  // process-level sharding via --offset/--limit + the shell driver under
+  // apps/bench-runner/scripts/run-full-public-bench.sh.
+  const collected: WorkerResult[] = [];
+  for (let i = 0; i < window.length; i++) {
+    const q = window[i];
+    if (q === undefined) continue;
+    const res = await runOneQuestion(q);
+    collected.push(res);
+    process.stdout.write(
+      `[${i + 1}/${window.length}] ${q.question_id.slice(0, 8)} ` +
+        `R@5=${res.hitAt5 ? "✓" : "✗"} latency=${res.latencyMs}ms\n`
+    );
+  }
+
+  const perScenario: PerScenarioRow[] = [];
+  const latencies: number[] = [];
+  let tierHot = 0;
+  let tierWarm = 0;
+  let tierCold = 0;
+  let degradeNone = 0;
+  let degradeWarm = 0;
+  let degradeCold = 0;
+  let totalHitAt1 = 0;
+  let totalHitAt10 = 0;
+
+  for (let i = 0; i < collected.length; i++) {
+    const res = collected[i];
+    if (res === null || res === undefined) continue;
+    latencies.push(res.latencyMs);
+    if (res.hitAt1) totalHitAt1++;
+    if (res.hitAt10) totalHitAt10++;
+    if (res.firstTier === "hot") tierHot++;
+    else if (res.firstTier === "warm") tierWarm++;
+    else tierCold++;
+    if (res.degradationReason === "warm_cascade_engaged") degradeWarm++;
+    else if (res.degradationReason === "cold_cascade_engaged") degradeCold++;
+    else degradeNone++;
+    perScenario.push({
+      id: res.questionId,
+      version: 1,
+      hit_at_5: res.hitAt5,
+      tier: res.firstTier
+    });
   }
 
   const n = perScenario.length;
@@ -179,9 +228,21 @@ export async function runLongMemEval(
 
   const datasetSize = opts.fetchResult?.questionCount ?? questions.length;
 
+  // @anchor variant-to-split — split is the audit-facing label used by the
+  // diff engine, report.md scoring contract caveat, and Inspector trend
+  // lines. Oracle and S are functionally different evaluations (Oracle's
+  // session-set filter is a no-op; S's is meaningful), so they MUST be
+  // archived under distinct splits, not pooled.
+  const split =
+    opts.variant === "longmemeval_oracle"
+      ? "longmemeval-oracle"
+      : opts.variant === "longmemeval_s"
+        ? "longmemeval-s"
+        : "longmemeval-s";
+
   const payload: KpiPayload = {
     bench_name: "public",
-    split: "longmemeval-s",
+    split,
     run_at: runAt.toISOString(),
     alaya_commit: commitSha7,
     alaya_version: alayaVersion,
@@ -214,7 +275,11 @@ export async function runLongMemEval(
   };
 
   const layout: HistoryLayout = { historyRoot: opts.historyRoot };
-  const previous = await readLatest(layout, "public");
+  // Diff against the latest entry of the SAME split — Oracle vs S are
+  // not comparable retrieval evaluations (Oracle's session filter is
+  // no-op, S's is meaningful). See packages/eval/src/history.ts
+  // @anchor read-latest-split-aware.
+  const previous = await readLatest(layout, "public", { split: payload.split });
   const diff = diffKpis(payload, previous);
   const slug = entrySlug(runAt, commitSha7);
 

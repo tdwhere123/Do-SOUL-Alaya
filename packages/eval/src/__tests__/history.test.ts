@@ -205,4 +205,51 @@ describe("history archive", () => {
       writeEntry(layout, "self", "2026-05-14T080000Z-zzzzzzz", buildPayload("abc"), "r", null)
     ).rejects.toThrow(/must match/);
   });
+
+  // @anchor split-aware-readLatest-test — see history.ts @read-latest-split-aware
+  it("readLatest with opts.split filters to entries of the matching split", async () => {
+    const oraclePayload: KpiPayload = {
+      ...buildPayload("0aaaaaa"),
+      bench_name: "public",
+      split: "longmemeval-oracle",
+      sample_size: 500,
+      evaluated_count: 500
+    };
+    const sPayload: KpiPayload = {
+      ...buildPayload("0bbbbbb"),
+      bench_name: "public",
+      split: "longmemeval-s",
+      sample_size: 500,
+      evaluated_count: 50
+    };
+    await writeEntry(
+      layout,
+      "public",
+      "2026-05-14T080000Z-0aaaaaa",
+      oraclePayload,
+      "report",
+      null
+    );
+    await writeEntry(
+      layout,
+      "public",
+      "2026-05-14T090000Z-0bbbbbb",
+      sPayload,
+      "report",
+      null
+    );
+    // Without split filter — newest pointer wins
+    const newestAny = await readLatest(layout, "public");
+    expect(newestAny?.alaya_commit).toBe("0bbbbbb");
+    // With split filter — oracle goes back to 0aaaaaa even though 0bbbbbb is newer
+    const newestOracle = await readLatest(layout, "public", {
+      split: "longmemeval-oracle"
+    });
+    expect(newestOracle?.alaya_commit).toBe("0aaaaaa");
+    const newestS = await readLatest(layout, "public", { split: "longmemeval-s" });
+    expect(newestS?.alaya_commit).toBe("0bbbbbb");
+    // Split with no matching entries returns null, not the newest
+    const newestGolden = await readLatest(layout, "public", { split: "golden" });
+    expect(newestGolden).toBeNull();
+  });
 });

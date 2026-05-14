@@ -1,6 +1,6 @@
 {
   "bench_name": "public",
-  "split": "longmemeval-s",
+  "split": "longmemeval-oracle",
   "run_at": "2026-05-14T09:54:24.914Z",
   "alaya_commit": "01385ce",
   "alaya_version": "0.3.6",

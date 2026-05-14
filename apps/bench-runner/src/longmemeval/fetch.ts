@@ -13,6 +13,17 @@ const DATA_DIR_ROOT = path.resolve(__dirname, "../../data/longmemeval");
 const HUGGINGFACE_BASE =
   "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main";
 
+// @anchor upstream-filename-map — variant id is logical (matches our
+// dataset.ts enum); upstream filenames in the HuggingFace repo are
+// inconsistently suffixed. Keep the variant <-> upstream filename
+// translation centralized here so the rest of the code can use clean
+// variant ids and pinned meta filenames (`<variant>.meta.json`).
+const UPSTREAM_FILENAME: Record<LongMemEvalVariant, string> = {
+  longmemeval_oracle: "longmemeval_oracle.json",
+  longmemeval_s: "longmemeval_s_cleaned.json",
+  longmemeval_m: "longmemeval_m_cleaned.json"
+};
+
 // @anchor pinned-meta-root — pinned (committed) dataset checksums live under
 // docs/v0.3/bench-history/datasets/<variant>.meta.json. This is the trusted
 // reference for loadDataset; the gitignored data/longmemeval/<variant>.meta.json
@@ -64,7 +75,8 @@ export async function fetchLongMemEval(
     }
   }
 
-  const url = `${HUGGINGFACE_BASE}/${variant}.json`;
+  const upstreamFile = UPSTREAM_FILENAME[variant];
+  const url = `${HUGGINGFACE_BASE}/${upstreamFile}`;
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(

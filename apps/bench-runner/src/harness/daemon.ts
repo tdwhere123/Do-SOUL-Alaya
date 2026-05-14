@@ -200,6 +200,21 @@ export async function startBenchDaemon(
     content: string,
     evidenceRef: string
   ): Promise<SeededMemoryResult> {
+    // @anchor bench-seed-content-cap — protocol §soul.emit_candidate_signal
+    // caps raw_payload at 16384 characters JSON-serialized. The bench
+    // harness seeds dataset turns; LongMemEval-S has turn contents that
+    // can exceed 16K chars. Truncate to a safe length (leaving room for
+    // the {"excerpt":"..."} JSON wrapper) instead of crashing the run.
+    // Trade-off: if the has_answer fact lives past the cutoff, recall
+    // cannot find it — that's a structural cap, documented in the bench
+    // report.md Scoring contract.
+    const SEED_CONTENT_MAX = 15_000;
+    const safeContent =
+      content.length > SEED_CONTENT_MAX
+        ? content.slice(0, SEED_CONTENT_MAX) +
+          ` [truncated at ${SEED_CONTENT_MAX} chars]`
+        : content;
+
     // Step 1 — emit candidate signal. signal_kind=potential_preference at
     // confidence 0.9 with evidence_refs >= 1 routes to "memory_and_claim"
     // (see materialization-router.ts:160). raw_payload.excerpt becomes
@@ -214,7 +229,7 @@ export async function startBenchDaemon(
         domain_tags: ["bench-seed"],
         confidence: 0.9,
         evidence_refs: [evidenceRef],
-        raw_payload: { excerpt: content }
+        raw_payload: { excerpt: safeContent }
       }
     );
     if (signalResponse.status !== "emitted") {

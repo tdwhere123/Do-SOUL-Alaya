@@ -1,4 +1,4 @@
-# Bench Report — public / longmemeval-s
+# Bench Report — public / longmemeval-oracle
 
 - Run at: 2026-05-14T09:54:24.914Z
 - Sample size: 500 (evaluated 5/500)

@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-export const BenchSplit = z.enum(["golden", "synthetic", "longmemeval-s"]);
+export const BenchSplit = z.enum([
+  "golden",
+  "synthetic",
+  "longmemeval-s",
+  "longmemeval-oracle"
+]);
 export type BenchSplit = z.infer<typeof BenchSplit>;
 
 export const BenchName = z.enum(["self", "public"]);

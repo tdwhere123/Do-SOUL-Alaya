@@ -194,7 +194,10 @@ export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBench
   };
 
   const layout: HistoryLayout = { historyRoot: opts.historyRoot };
-  const previous = await readLatest(layout, "self");
+  // Diff against the latest entry of the SAME split. Self currently only
+  // has the "synthetic" split, but the API is split-aware so adding a
+  // "golden" split later does not silently cross-compare.
+  const previous = await readLatest(layout, "self", { split: payload.split });
   const diff = diffKpis(payload, previous);
   const slug = entrySlug(runAt, commitSha7);
 

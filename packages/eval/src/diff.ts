@@ -25,6 +25,20 @@ export function diffKpis(
     };
   }
 
+  // @anchor previous-sample-too-small — see thresholds.min_sample_for_ratio_diff.
+  // When the previous baseline was a tiny smoke (n < min_sample) we cannot
+  // distinguish "regression" from "sample-size variance" or harness-mode
+  // drift (e.g. smoke was 1-shard sequential, full is 2-shard parallel, so
+  // latency grows from disk/CPU contention not from a recall regression).
+  // Downgrade FAIL verdicts to WARN universally (ratio-based + latency +
+  // tier-share) so the alarm is informative without being false-positive.
+  // Fixture flips are still scored as FAIL — those compare individual
+  // pass/fail signals, not aggregates.
+  const previousUndersampled =
+    previous.evaluated_count < thresholds.min_sample_for_ratio_diff;
+  const downgradeFail = (v: Verdict): Verdict =>
+    previousUndersampled && v === "fail" ? "warn" : v;
+
   const deltas: KpiDelta[] = [];
 
   pushRatioDelta(
@@ -32,21 +46,24 @@ export function diffKpis(
     "r_at_5",
     current.kpi.r_at_5,
     previous.kpi.r_at_5,
-    thresholds.r_at_5_drop_pp
+    thresholds.r_at_5_drop_pp,
+    downgradeFail
   );
   pushRatioDelta(
     deltas,
     "r_at_10",
     current.kpi.r_at_10,
     previous.kpi.r_at_10,
-    thresholds.r_at_10_drop_pp
+    thresholds.r_at_10_drop_pp,
+    downgradeFail
   );
   pushRatioDelta(
     deltas,
     "token_saved_ratio_vs_full_prompt",
     current.kpi.token_saved_ratio_vs_full_prompt,
     previous.kpi.token_saved_ratio_vs_full_prompt,
-    thresholds.token_saved_drop_pp
+    thresholds.token_saved_drop_pp,
+    downgradeFail
   );
 
   const latencyVerdict = classifyLatencyGrowth(
@@ -59,7 +76,7 @@ export function diffKpis(
     current: current.kpi.latency_ms_p95,
     previous: previous.kpi.latency_ms_p95,
     delta: current.kpi.latency_ms_p95 - previous.kpi.latency_ms_p95,
-    verdict: latencyVerdict.verdict,
+    verdict: downgradeFail(latencyVerdict.verdict),
     direction: "growth_bad"
   });
 
@@ -73,7 +90,7 @@ export function diffKpis(
     current: shareOfHot(current.kpi.tier_distribution),
     previous: shareOfHot(previous.kpi.tier_distribution),
     delta: -hotShareVerdict.deltaPp / 100,
-    verdict: hotShareVerdict.verdict,
+    verdict: downgradeFail(hotShareVerdict.verdict),
     direction: "drop_bad"
   });
 
@@ -97,7 +114,8 @@ function pushRatioDelta(
   key: string,
   current: number,
   previous: number,
-  band: { readonly warn: number; readonly fail: number }
+  band: { readonly warn: number; readonly fail: number },
+  postClassify: (v: Verdict) => Verdict = (v) => v
 ): void {
   const classified = classifyRatioDrop(current, previous, band);
   acc.push({
@@ -105,7 +123,7 @@ function pushRatioDelta(
     current,
     previous,
     delta: current - previous,
-    verdict: classified.verdict,
+    verdict: postClassify(classified.verdict),
     direction: "drop_bad"
   });
 }

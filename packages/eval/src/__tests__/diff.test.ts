@@ -103,4 +103,46 @@ describe("diffKpis", () => {
     expect(result.new_scenarios).toEqual(["f3"]);
     expect(result.fixture_regressions).toHaveLength(0);
   });
+
+  // @anchor min-sample-test — see thresholds.min_sample_for_ratio_diff
+  it("downgrades fail to warn when the previous baseline is below min sample size", () => {
+    // Previous baseline was a tiny n=5 smoke that happened to hit 100%.
+    // Without the sample-size guard a 20pp "drop" would flag FAIL even
+    // though variance at n=5 is enormous. With the guard it reports WARN.
+    const previous: KpiPayload = {
+      ...buildPayload({ r_at_5: 1.0, r_at_10: 1.0 }),
+      evaluated_count: 5
+    };
+    const current = buildPayload({ r_at_5: 0.798, r_at_10: 0.892 });
+    const result = diffKpis(current, previous);
+    expect(result.worst_verdict).toBe("warn");
+    const r5 = result.deltas.find((d) => d.key === "r_at_5");
+    expect(r5?.verdict).toBe("warn");
+  });
+
+  it("downgrades latency FAIL to WARN when previous baseline is undersampled", () => {
+    // Latency growth crossing the +50% FAIL band against an undersampled
+    // baseline. The smoke vs full case is structural (concurrency mode
+    // changes across runs at small N), so a hard FAIL would be a false
+    // alarm. The min-sample guard downgrades it to WARN.
+    const previous: KpiPayload = {
+      ...buildPayload({ latency_ms_p95: 39 }),
+      evaluated_count: 20
+    };
+    const current = buildPayload({ latency_ms_p95: 73 });
+    const result = diffKpis(current, previous);
+    const lat = result.deltas.find((d) => d.key === "latency_ms_p95");
+    expect(lat?.verdict).toBe("warn");
+    expect(result.worst_verdict).not.toBe("fail");
+  });
+
+  it("still reports fail when both baselines are at or above min sample size", () => {
+    const previous: KpiPayload = {
+      ...buildPayload({ r_at_5: 0.95 }),
+      evaluated_count: 200
+    };
+    const current = buildPayload({ r_at_5: 0.7 });
+    const result = diffKpis(current, previous);
+    expect(result.worst_verdict).toBe("fail");
+  });
 });

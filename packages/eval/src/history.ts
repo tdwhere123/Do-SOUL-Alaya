@@ -1,6 +1,11 @@
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { KpiPayloadSchema, type BenchName, type KpiPayload } from "./kpi-schema.js";
+import {
+  KpiPayloadSchema,
+  type BenchName,
+  type BenchSplit,
+  type KpiPayload
+} from "./kpi-schema.js";
 
 export interface HistoryLayout {
   readonly historyRoot: string;
@@ -99,10 +104,38 @@ export async function readEntry(
   }
 }
 
+/**
+ * @anchor read-latest-split-aware — diff must be apple-to-apple
+ *
+ * Without the `split` filter, the diff engine would compare Oracle (filter
+ * no-op, ~100% R@K artifact) against LongMemEval-S (real retrieval, lower
+ * R@K), trigger a spurious "5pp drop = ✗ FAIL", and pollute findings.md.
+ * Callers that own a split-specific cadence (Oracle 500 vs S smoke) pass
+ * `opts.split`; callers that just want the newest entry (e.g. Inspector
+ * Overview "latest run" card) leave it undefined.
+ *
+ * When `opts.split` is provided we ignore `latest-baseline.json` (which
+ * tracks only the absolute newest entry, not per-split) and scan via
+ * listEntries → readEntry → filter.
+ */
 export async function readLatest(
   layout: HistoryLayout,
-  benchName: BenchName
+  benchName: BenchName,
+  opts: { split?: BenchSplit } = {}
 ): Promise<KpiPayload | null> {
+  if (opts.split !== undefined) {
+    const slugs = await listEntries(layout, benchName);
+    for (let i = slugs.length - 1; i >= 0; i--) {
+      const slug = slugs[i];
+      if (slug === undefined) continue;
+      const entry = await readEntry(layout, benchName, slug);
+      if (entry !== null && entry.split === opts.split) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
   const pointerSlug = await readLatestPointerSlug(layout, benchName);
   if (pointerSlug !== null) {
     const pointed = await readEntry(layout, benchName, pointerSlug);

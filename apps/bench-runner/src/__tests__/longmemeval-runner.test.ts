@@ -97,7 +97,10 @@ describe("LongMemEval runner", () => {
 
       // Structural assertions
       expect(result.payload.bench_name).toBe("public");
-      expect(result.payload.split).toBe("longmemeval-s");
+      // Variant=longmemeval_oracle → split=longmemeval-oracle (split now
+      // tracks variant; Oracle and S are archived under distinct splits
+      // because their session-set filter semantics differ).
+      expect(result.payload.split).toBe("longmemeval-oracle");
       expect(result.payload.kpi.per_scenario).toHaveLength(2);
       expect(result.payload.kpi.per_scenario[0]?.id).toBe("q001");
       expect(result.payload.kpi.per_scenario[1]?.id).toBe("q002");
