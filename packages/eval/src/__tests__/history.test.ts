@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -206,19 +206,84 @@ describe("history archive", () => {
     ).rejects.toThrow(/must match/);
   });
 
-  // @anchor write-entry-collision-test — see history.ts @write-entry-atomic
+  // @anchor write-entry-collision-test — see history.ts @write-entry-atomic.
+  // Covers kpi.json + report.md + findings.md + pointer all surviving
+  // the refused overwrite intact, not just report.md.
   it("refuses to overwrite an existing slug rather than clobbering the audit trail", async () => {
     const slug = "2026-05-14T120000Z-deadbef";
-    await writeEntry(layout, "self", slug, buildPayload("deadbef"), "first report\n", null);
+    await writeEntry(
+      layout,
+      "self",
+      slug,
+      buildPayload("deadbef"),
+      "first report\n",
+      "first findings\n"
+    );
     await expect(
-      writeEntry(layout, "self", slug, buildPayload("deadbef"), "second report\n", null)
+      writeEntry(
+        layout,
+        "self",
+        slug,
+        { ...buildPayload("deadbef"), alaya_commit: "0bbbbbb" } as KpiPayload,
+        "second report\n",
+        "second findings\n"
+      )
     ).rejects.toThrow(/refusing to overwrite/);
-    // First write must remain intact (atomicity).
+    // Every artifact from the first write must survive.
+    const firstKpi = JSON.parse(
+      await readFile(path.join(root, "self", slug, "kpi.json"), "utf8")
+    ) as { alaya_commit: string };
+    expect(firstKpi.alaya_commit).toBe("deadbef");
     const firstReport = await readFile(
       path.join(root, "self", slug, "report.md"),
       "utf8"
     );
     expect(firstReport).toBe("first report\n");
+    const firstFindings = await readFile(
+      path.join(root, "self", slug, "findings.md"),
+      "utf8"
+    );
+    expect(firstFindings).toBe("first findings\n");
+    // Pointer still references the first slug.
+    const pointer = JSON.parse(
+      await readFile(path.join(root, "self", "latest-baseline.json"), "utf8")
+    ) as { slug: string };
+    expect(pointer.slug).toBe(slug);
+  });
+
+  // @anchor orphan-staging-filter-test — see history.ts @write-entry-tmp-filter.
+  // If a writeEntry is killed (SIGKILL / OOM) between mkdtemp and rename,
+  // the .tmp-<slug>-<rand>/ staging directory is left on disk with a
+  // parseable kpi.json. listEntries / readLatest must NOT return it.
+  it("ignores orphan .tmp- staging directories left by interrupted writes", async () => {
+    // Simulate an orphan staging dir matching the prefix we use.
+    const orphanDir = path.join(
+      root,
+      "self",
+      ".tmp-2026-05-14T999999Z-aaaaaaa-x7r2qp"
+    );
+    await mkdir(orphanDir, { recursive: true });
+    await writeFile(
+      path.join(orphanDir, "kpi.json"),
+      JSON.stringify(buildPayload("aaaaaaa"), null, 2) + "\n",
+      "utf8"
+    );
+    await writeFile(path.join(orphanDir, "report.md"), "orphan\n", "utf8");
+
+    // Plus a real entry alongside.
+    await writeEntry(
+      layout,
+      "self",
+      "2026-05-14T100000Z-bbbbbbb",
+      buildPayload("bbbbbbb"),
+      "real\n",
+      null
+    );
+
+    const slugs = await listEntries(layout, "self");
+    expect(slugs).toEqual(["2026-05-14T100000Z-bbbbbbb"]);
+    const latest = await readLatest(layout, "self");
+    expect(latest?.alaya_commit).toBe("bbbbbbb");
   });
 
   // @anchor split-aware-readLatest-test — see history.ts @read-latest-split-aware

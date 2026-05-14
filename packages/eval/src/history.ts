@@ -1,6 +1,7 @@
 import {
   access,
   mkdir,
+  mkdtemp,
   readFile,
   readdir,
   rename,
@@ -41,15 +42,16 @@ export function entrySlug(runAt: Date, commitSha7: string): string {
 const SLUG_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{6}Z-[0-9a-f]{7,40}$/;
 
 /**
- * @anchor write-entry-atomic — bench-history write is staged in a
- * sibling .tmp- directory then rename(2)'d into place. Either the
- * entry is fully present (kpi.json + report.md + optional findings.md)
- * or the slug directory does not exist — never half-written.
- * `latest-baseline.json` is written via a tmp + rename two-step on the
- * same filesystem. If the target slug already exists, writeEntry throws
- * rather than overwriting — second precision in entrySlug means same-
- * second collisions are possible and silently clobbering destroys
- * audit trail.
+ * @anchor write-entry-atomic — stage in a sibling .tmp- directory
+ * (created via mkdtemp so two concurrent writers on the same slug
+ * cannot collide), then rename(2) into place. Either the entry exists
+ * in full (kpi.json + report.md + optional findings.md) or the slug
+ * directory does not exist — never half-written. The pointer is also
+ * written via tmp + rename. If the target slug already exists,
+ * writeEntry throws rather than overwriting.
+ * see also: @anchor write-entry-tmp-filter in listEntries — orphan
+ * staging directories (process kill between mkdtemp and rename) are
+ * filtered out of the slug listing.
  */
 export async function writeEntry(
   layout: HistoryLayout,
@@ -68,10 +70,8 @@ export async function writeEntry(
     );
   }
   const benchRoot = path.join(layout.historyRoot, benchName);
+  await mkdir(benchRoot, { recursive: true });
   const entryRoot = path.join(benchRoot, slug);
-  // Refuse to overwrite an existing slug. Same-second reruns must wait
-  // a second or supply a distinct commit_sha — silent overwrites would
-  // destroy the audit trail.
   try {
     await access(entryRoot);
     throw new Error(
@@ -84,13 +84,12 @@ export async function writeEntry(
       "code" in err &&
       (err as { code: string }).code === "ENOENT"
     ) {
-      // expected — slug is free
+      // ENOENT means the slug is free; any other error is fatal.
     } else {
       throw err;
     }
   }
-  const stagingRoot = path.join(benchRoot, `.tmp-${slug}-${process.pid}`);
-  await mkdir(stagingRoot, { recursive: true });
+  const stagingRoot = await mkdtemp(path.join(benchRoot, `${STAGING_PREFIX}${slug}-`));
   try {
     const stagingKpi = path.join(stagingRoot, KPI_FILENAME);
     const stagingReport = path.join(stagingRoot, REPORT_FILENAME);
@@ -110,9 +109,6 @@ export async function writeEntry(
   const reportPath = path.join(entryRoot, REPORT_FILENAME);
   const findingsPath = path.join(entryRoot, FINDINGS_FILENAME);
 
-  // Pointer write — staged in a sibling tmp file then renamed so the
-  // pointer is never half-written / never references a slug that does
-  // not yet exist on disk.
   const pointerPath = path.join(benchRoot, LATEST_BASELINE_FILENAME);
   const pointerTmp = `${pointerPath}.${process.pid}.tmp`;
   await writeFile(
@@ -125,6 +121,13 @@ export async function writeEntry(
   return { slug, kpiPath, reportPath, findingsPath };
 }
 
+// @anchor write-entry-tmp-filter — staging directories created by
+// writeEntry must never surface as "slugs" to readers. Pattern matches
+// `.tmp-<slug>-<mkdtemp-suffix>`. Also rejects anything that doesn't
+// match the canonical SLUG_PATTERN so future schemes that leak through
+// fail loud rather than silent.
+const STAGING_PREFIX = ".tmp-";
+
 export async function listEntries(
   layout: HistoryLayout,
   benchName: BenchName
@@ -135,6 +138,8 @@ export async function listEntries(
     const slugs: string[] = [];
     for (const entry of entries) {
       if (entry === LATEST_BASELINE_FILENAME) continue;
+      if (entry.startsWith(STAGING_PREFIX)) continue;
+      if (!SLUG_PATTERN.test(entry)) continue;
       const fullPath = path.join(benchRoot, entry);
       const st = await stat(fullPath).catch(() => null);
       if (st !== null && st.isDirectory()) slugs.push(entry);

@@ -293,11 +293,11 @@ async function runMergeLongMemEvalCommand(
       throw new Error("no shards loaded");
     }
 
-    // @anchor merge-shard-validations — refuse to merge incompatible
-    // shards (different split / sample_size, duplicate question ids,
-    // or shards whose evaluated total exceeds the dataset size). Each
-    // validation maps to a real operator-misuse failure mode that would
-    // otherwise corrupt the bench-history archive silently.
+    // @anchor merge-shard-validations — refuse incompatible shards.
+    // Validates split, dataset.{name,size,source}, sample_size,
+    // per-question id uniqueness, and total-vs-sample-size cap. Each
+    // check maps to a concrete operator-misuse path that would
+    // otherwise silently corrupt the bench-history archive.
     for (let i = 1; i < shardPayloads.length; i++) {
       const shard = shardPayloads[i];
       if (shard === undefined) continue;
@@ -309,6 +309,15 @@ async function runMergeLongMemEvalCommand(
       if (shard.sample_size !== first.sample_size) {
         throw new Error(
           `merge refused: shard[${i}] sample_size=${shard.sample_size} != shard[0] sample_size=${first.sample_size}`
+        );
+      }
+      if (
+        shard.dataset.name !== first.dataset.name ||
+        shard.dataset.size !== first.dataset.size ||
+        shard.dataset.source !== first.dataset.source
+      ) {
+        throw new Error(
+          `merge refused: shard[${i}] dataset identity (${shard.dataset.name}/${shard.dataset.size}/${shard.dataset.source}) != shard[0] (${first.dataset.name}/${first.dataset.size}/${first.dataset.source})`
         );
       }
     }
@@ -371,6 +380,12 @@ async function runMergeLongMemEvalCommand(
       evaluatedTotal += shard.evaluated_count;
       latencyP50Max = Math.max(latencyP50Max, shard.kpi.latency_ms_p50);
       latencyP95Max = Math.max(latencyP95Max, shard.kpi.latency_ms_p95);
+    }
+
+    if (evaluatedTotal > first.sample_size) {
+      throw new Error(
+        `merge refused: evaluated_total=${evaluatedTotal} > sample_size=${first.sample_size} (shards collectively over-evaluated; check --offset/--limit ranges)`
+      );
     }
 
     const n = evaluatedTotal;

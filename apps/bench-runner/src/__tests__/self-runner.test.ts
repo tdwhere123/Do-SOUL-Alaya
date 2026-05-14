@@ -53,7 +53,8 @@ describe("Self bench runner", () => {
       const degradeTotal =
         kpi.degradation_reasons.none +
         kpi.degradation_reasons.warm_cascade_engaged +
-        kpi.degradation_reasons.cold_cascade_engaged;
+        kpi.degradation_reasons.cold_cascade_engaged +
+        kpi.degradation_reasons.recall_explainability_partial;
       expect(degradeTotal).toBe(SYNTHETIC_SCENARIOS.length);
 
       const expectedIds = SYNTHETIC_SCENARIOS.map((s) => s.id);
