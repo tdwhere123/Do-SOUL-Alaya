@@ -1,5 +1,6 @@
 import path from "node:path";
 import process from "node:process";
+import { ZodError } from "zod";
 import { diffKpis } from "./diff.js";
 import { listEntries, readEntry, readPrevious, type HistoryLayout } from "./history.js";
 import { runSelfBench } from "./self/runner.js";
@@ -75,9 +76,6 @@ async function runSelfCommand(
   layout: HistoryLayout,
   opts: ParsedFlags
 ): Promise<number> {
-  process.stdout.write(
-    "alaya-eval self: deferred to Phase 4 of v0.3.6 — runner stub is in place.\n"
-  );
   return await runSelfBench(layout, opts.out);
 }
 
@@ -85,9 +83,6 @@ async function runLongMemEvalCommand(
   layout: HistoryLayout,
   opts: ParsedFlags
 ): Promise<number> {
-  process.stdout.write(
-    "alaya-eval longmemeval: deferred to Phase 5 of v0.3.6 — runner stub is in place.\n"
-  );
   return await runLongMemEval(layout, opts.out);
 }
 
@@ -108,25 +103,29 @@ async function runDiffCommand(
     return 2;
   }
   const benchName = parsed.data;
-  const slugs = await listEntries(layout, benchName);
-  if (slugs.length === 0) {
-    process.stdout.write(
-      `alaya-eval diff: no entries yet under ${path.join(layout.historyRoot, benchName)}\n`
-    );
-    return 0;
+  try {
+    const slugs = await listEntries(layout, benchName);
+    if (slugs.length === 0) {
+      process.stdout.write(
+        `alaya-eval diff: no entries yet under ${path.join(layout.historyRoot, benchName)}\n`
+      );
+      return 0;
+    }
+    const currentSlug = slugs[slugs.length - 1];
+    if (currentSlug === undefined) return 0;
+    const current = await readEntry(layout, benchName, currentSlug);
+    if (current === null) {
+      process.stderr.write(`alaya-eval diff: latest entry '${currentSlug}' unreadable\n`);
+      return 2;
+    }
+    const previous = await readPrevious(layout, benchName, currentSlug);
+    const diffResult = diffKpis(current, previous);
+    process.stdout.write(renderReport(current, previous, diffResult));
+    process.stdout.write("\n");
+    return diffResult.worst_verdict === "fail" ? 1 : 0;
+  } catch (error) {
+    return reportReadError("diff", error);
   }
-  const currentSlug = slugs[slugs.length - 1];
-  if (currentSlug === undefined) return 0;
-  const current = await readEntry(layout, benchName, currentSlug);
-  if (current === null) {
-    process.stderr.write(`alaya-eval diff: latest entry '${currentSlug}' unreadable\n`);
-    return 2;
-  }
-  const previous = await readPrevious(layout, benchName, currentSlug);
-  const diffResult = diffKpis(current, previous);
-  process.stdout.write(renderReport(current, previous, diffResult));
-  process.stdout.write("\n");
-  return diffResult.worst_verdict === "fail" ? 1 : 0;
 }
 
 async function runListCommand(
@@ -145,13 +144,38 @@ async function runListCommand(
     );
     return 2;
   }
-  const slugs = await listEntries(layout, parsed.data);
-  if (slugs.length === 0) {
-    process.stdout.write("(no entries)\n");
+  try {
+    const slugs = await listEntries(layout, parsed.data);
+    if (slugs.length === 0) {
+      process.stdout.write("(no entries)\n");
+      return 0;
+    }
+    for (const slug of slugs) {
+      process.stdout.write(`${slug}\n`);
+    }
     return 0;
+  } catch (error) {
+    return reportReadError("list", error);
   }
-  for (const slug of slugs) {
-    process.stdout.write(`${slug}\n`);
+}
+
+function reportReadError(command: string, error: unknown): number {
+  if (error instanceof ZodError) {
+    process.stderr.write(
+      `alaya-eval ${command}: kpi.json failed schema validation — ${error.issues
+        .map((issue) => `${issue.path.join(".") || "<root>"}: ${issue.message}`)
+        .join("; ")}\n`
+    );
+    return 2;
   }
-  return 0;
+  if (error instanceof SyntaxError) {
+    process.stderr.write(
+      `alaya-eval ${command}: kpi.json is not valid JSON — ${error.message}\n`
+    );
+    return 2;
+  }
+  process.stderr.write(
+    `alaya-eval ${command}: unexpected error — ${error instanceof Error ? error.message : String(error)}\n`
+  );
+  return 2;
 }

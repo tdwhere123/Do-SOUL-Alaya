@@ -50,6 +50,30 @@ export function renderReport(
       }
       lines.push("");
     }
+    if (diff.rebaselined_scenarios.length > 0) {
+      lines.push(
+        `### Rebaselined scenarios (${diff.rebaselined_scenarios.length})`
+      );
+      lines.push("");
+      lines.push(
+        "_Version bumped vs previous run; per-row hit deltas suppressed by design._"
+      );
+      lines.push("");
+      for (const id of diff.rebaselined_scenarios) {
+        lines.push(`- ${id}`);
+      }
+      lines.push("");
+    }
+    if (diff.new_scenarios.length > 0) {
+      lines.push(`### New scenarios (${diff.new_scenarios.length})`);
+      lines.push("");
+      lines.push("_Scenario ids not present in the previous baseline._");
+      lines.push("");
+      for (const id of diff.new_scenarios) {
+        lines.push(`- ${id}`);
+      }
+      lines.push("");
+    }
   }
 
   lines.push("## Absolute KPIs");

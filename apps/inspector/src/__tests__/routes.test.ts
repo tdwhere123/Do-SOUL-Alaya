@@ -408,7 +408,7 @@ describe("inspector routes", () => {
 
   it("summarizes the latest bench-history entry when one is present", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "bench-history-with-entries-"));
-    const selfRoot = path.join(root, "self", "2026-05-14-ec44a05");
+    const selfRoot = path.join(root, "self", "2026-05-14T100000Z-ec44a05");
     await mkdir(selfRoot, { recursive: true });
     const payload = {
       bench_name: "self",
@@ -453,7 +453,65 @@ describe("inspector routes", () => {
       data: { self: { history_count: number; latest_slug: string } | null };
     };
     expect(body.data.self?.history_count).toBe(1);
-    expect(body.data.self?.latest_slug).toBe("2026-05-14-ec44a05");
+    expect(body.data.self?.latest_slug).toBe("2026-05-14T100000Z-ec44a05");
+  });
+
+  it("isolates a malformed kpi.json on one split without wiping the other split", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "bench-history-mixed-"));
+    const badSelf = path.join(root, "self", "2026-05-14T100000Z-deadbee");
+    await mkdir(badSelf, { recursive: true });
+    await writeFile(path.join(badSelf, "kpi.json"), "{not valid json", "utf8");
+
+    const goodPublic = path.join(root, "public", "2026-05-14T100000Z-abcdef0");
+    await mkdir(goodPublic, { recursive: true });
+    const payload = {
+      bench_name: "public",
+      split: "longmemeval-s",
+      run_at: "2026-05-14T10:00:00.000Z",
+      alaya_commit: "abcdef0",
+      alaya_version: "0.3.6",
+      embedding_provider: "yunwu:text-embedding-3-small",
+      chat_provider: "yunwu:gpt-5.4-mini",
+      dataset: { name: "LongMemEval-S", size: 500, source: "github:xiaowu0162/LongMemEval" },
+      kpi: {
+        r_at_1: 0.45,
+        r_at_5: 0.72,
+        r_at_10: 0.81,
+        latency_ms_p50: 90,
+        latency_ms_p95: 140,
+        token_saved_ratio_vs_full_prompt: 0.83,
+        tier_distribution: { hot: 40, warm: 35, cold: 25 },
+        degradation_reasons: {
+          none: 70,
+          warm_cascade_engaged: 18,
+          cold_cascade_engaged: 12
+        },
+        per_scenario: []
+      }
+    };
+    await writeFile(path.join(goodPublic, "kpi.json"), JSON.stringify(payload), "utf8");
+
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      benchHistoryRoot: root,
+      staticRoot: await mkdtemp(path.join(tmpdir(), "inspector-static-")),
+      fetchImpl: async () => Response.json({}, { status: 500 })
+    });
+
+    const response = await app.request("/api/bench-summary?token=token");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      success: boolean;
+      data: {
+        self: unknown;
+        public: { history_count: number; latest_slug: string } | null;
+      };
+    };
+    expect(body.data.self).toBeNull();
+    expect(body.data.public?.history_count).toBe(1);
+    expect(body.data.public?.latest_slug).toBe("2026-05-14T100000Z-abcdef0");
   });
 
   it("rejects workspace-scoped API paths when the Inspector app is missing its launch workspace", async () => {

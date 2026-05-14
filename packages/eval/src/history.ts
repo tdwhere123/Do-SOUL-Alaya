@@ -19,8 +19,9 @@ const FINDINGS_FILENAME = "findings.md";
 const LATEST_BASELINE_FILENAME = "latest-baseline.json";
 
 export function entrySlug(runAt: Date, commitSha7: string): string {
-  const date = runAt.toISOString().slice(0, 10);
-  return `${date}-${commitSha7}`;
+  const iso = runAt.toISOString();
+  const stamp = `${iso.slice(0, 10)}T${iso.slice(11, 13)}${iso.slice(14, 16)}${iso.slice(17, 19)}Z`;
+  return `${stamp}-${commitSha7}`;
 }
 
 export async function writeEntry(
@@ -31,6 +32,9 @@ export async function writeEntry(
   reportMarkdown: string,
   findingsMarkdown: string | null
 ): Promise<HistoryEntry> {
+  if (slug.includes("/") || slug.includes("\\") || slug.includes("..") || slug.length === 0) {
+    throw new Error(`invalid slug: '${slug}' contains a path separator or '..' token`);
+  }
   const benchRoot = path.join(layout.historyRoot, benchName);
   const entryRoot = path.join(benchRoot, slug);
   await mkdir(entryRoot, { recursive: true });
@@ -92,11 +96,34 @@ export async function readLatest(
   layout: HistoryLayout,
   benchName: BenchName
 ): Promise<KpiPayload | null> {
+  const pointerSlug = await readLatestPointerSlug(layout, benchName);
+  if (pointerSlug !== null) {
+    const pointed = await readEntry(layout, benchName, pointerSlug);
+    if (pointed !== null) return pointed;
+  }
   const slugs = await listEntries(layout, benchName);
   if (slugs.length === 0) return null;
   const newest = slugs[slugs.length - 1];
   if (newest === undefined) return null;
   return await readEntry(layout, benchName, newest);
+}
+
+async function readLatestPointerSlug(
+  layout: HistoryLayout,
+  benchName: BenchName
+): Promise<string | null> {
+  const pointerPath = path.join(layout.historyRoot, benchName, LATEST_BASELINE_FILENAME);
+  try {
+    const raw = await readFile(pointerPath, "utf8");
+    const parsed = JSON.parse(raw) as { slug?: unknown };
+    if (typeof parsed.slug === "string" && parsed.slug.length > 0) {
+      return parsed.slug;
+    }
+    return null;
+  } catch (error) {
+    if (isNotFound(error)) return null;
+    return null;
+  }
 }
 
 export async function readPrevious(

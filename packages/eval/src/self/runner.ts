@@ -5,7 +5,7 @@ export async function runSelfBench(
   _outPath: string | undefined
 ): Promise<number> {
   process.stderr.write(
-    "alaya-eval self: stub — Phase 4 of v0.3.6 wires the golden + synthetic runners; nothing written today.\n"
+    "alaya-eval self: runner stub in place; golden + synthetic execution not yet implemented.\n"
   );
   return 0;
 }

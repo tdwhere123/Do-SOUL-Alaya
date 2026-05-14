@@ -19,7 +19,9 @@ export function diffKpis(
     return {
       deltas: [],
       worst_verdict: "ok",
-      fixture_regressions: []
+      fixture_regressions: [],
+      rebaselined_scenarios: [],
+      new_scenarios: []
     };
   }
 
@@ -75,16 +77,18 @@ export function diffKpis(
     direction: "drop_bad"
   });
 
-  const fixtureRegressions = diffFixtures(current, previous);
+  const fixtureDiff = diffFixtures(current, previous);
   const worst = rollupWorstVerdict([
     ...deltas.map((d) => d.verdict),
-    fixtureRegressions.length > 0 ? "fail" : "ok"
+    fixtureDiff.regressions.length > 0 ? "fail" : "ok"
   ]);
 
   return {
     deltas,
     worst_verdict: worst,
-    fixture_regressions: fixtureRegressions
+    fixture_regressions: fixtureDiff.regressions,
+    rebaselined_scenarios: fixtureDiff.rebaselined,
+    new_scenarios: fixtureDiff.new_scenarios
   };
 }
 
@@ -106,22 +110,38 @@ function pushRatioDelta(
   });
 }
 
-function diffFixtures(current: KpiPayload, previous: KpiPayload): string[] {
-  if (current.split !== "golden") return [];
+interface FixtureDiff {
+  readonly regressions: readonly string[];
+  readonly rebaselined: readonly string[];
+  readonly new_scenarios: readonly string[];
+}
+
+function diffFixtures(current: KpiPayload, previous: KpiPayload): FixtureDiff {
+  if (current.split !== "golden") {
+    return { regressions: [], rebaselined: [], new_scenarios: [] };
+  }
   const previousById = new Map<string, PerScenarioRow>();
   for (const row of previous.kpi.per_scenario) {
     previousById.set(row.id, row);
   }
   const regressions: string[] = [];
+  const rebaselined: string[] = [];
+  const newScenarios: string[] = [];
   for (const row of current.kpi.per_scenario) {
     const prev = previousById.get(row.id);
-    if (prev === undefined) continue;
-    if (prev.version !== row.version) continue;
+    if (prev === undefined) {
+      newScenarios.push(row.id);
+      continue;
+    }
+    if (prev.version !== row.version) {
+      rebaselined.push(row.id);
+      continue;
+    }
     if (prev.hit_at_5 && !row.hit_at_5) {
       regressions.push(row.id);
     }
   }
-  return regressions;
+  return { regressions, rebaselined, new_scenarios: newScenarios };
 }
 
 function shareOfHot(d: KpiPayload["kpi"]["tier_distribution"]): number {

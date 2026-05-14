@@ -39,6 +39,8 @@ export interface KpiDiffResult {
   readonly deltas: readonly KpiDelta[];
   readonly worst_verdict: Verdict;
   readonly fixture_regressions: readonly string[];
+  readonly rebaselined_scenarios: readonly string[];
+  readonly new_scenarios: readonly string[];
 }
 
 export function classifyRatioDrop(

@@ -54,14 +54,14 @@ describe("history archive", () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  it("derives a date+sha7 slug for a run", () => {
-    const slug = entrySlug(new Date("2026-05-14T10:00:00.000Z"), "abcdef0");
-    expect(slug).toBe("2026-05-14-abcdef0");
+  it("derives a sortable iso-timestamp slug for a run", () => {
+    const slug = entrySlug(new Date("2026-05-14T10:30:45.000Z"), "abcdef0");
+    expect(slug).toBe("2026-05-14T103045Z-abcdef0");
   });
 
   it("writes kpi.json + report.md and tracks the latest-baseline pointer", async () => {
     const payload = buildPayload("ec44a05");
-    const slug = "2026-05-14-ec44a05";
+    const slug = "2026-05-14T100000Z-ec44a05";
     const entry = await writeEntry(layout, "self", slug, payload, "# report\n", null);
     expect(entry.slug).toBe(slug);
     const writtenKpi = await readFile(entry.kpiPath, "utf8");
@@ -73,11 +73,41 @@ describe("history archive", () => {
     expect(JSON.parse(baseline).slug).toBe(slug);
   });
 
+  it("orders same-day slugs by ISO timestamp, not by sha7", async () => {
+    // Two runs on the same date — the lex order of sha7 ('a...' < 'z...')
+    // would put the morning run last if the date prefix alone drove sorting.
+    await writeEntry(
+      layout,
+      "self",
+      "2026-05-14T080000Z-zzzzzzz",
+      buildPayload("zzzzzzz"),
+      "report",
+      null
+    );
+    await writeEntry(
+      layout,
+      "self",
+      "2026-05-14T180000Z-aaaaaaa",
+      buildPayload("aaaaaaa"),
+      "report",
+      null
+    );
+    const slugs = await listEntries(layout, "self");
+    expect(slugs).toEqual([
+      "2026-05-14T080000Z-zzzzzzz",
+      "2026-05-14T180000Z-aaaaaaa"
+    ]);
+    const latest = await readLatest(layout, "self");
+    expect(latest?.alaya_commit).toBe("aaaaaaa");
+    const previous = await readPrevious(layout, "self", "2026-05-14T180000Z-aaaaaaa");
+    expect(previous?.alaya_commit).toBe("zzzzzzz");
+  });
+
   it("returns the newest slug from listEntries and tracks readLatest / readPrevious", async () => {
     await writeEntry(
       layout,
       "self",
-      "2026-05-10-aaaaaaa",
+      "2026-05-10T100000Z-aaaaaaa",
       buildPayload("aaaaaaa"),
       "report",
       null
@@ -85,7 +115,7 @@ describe("history archive", () => {
     await writeEntry(
       layout,
       "self",
-      "2026-05-11-bbbbbbb",
+      "2026-05-11T100000Z-bbbbbbb",
       buildPayload("bbbbbbb"),
       "report",
       null
@@ -93,20 +123,20 @@ describe("history archive", () => {
     await writeEntry(
       layout,
       "self",
-      "2026-05-12-ccccccc",
+      "2026-05-12T100000Z-ccccccc",
       buildPayload("ccccccc"),
       "report",
       null
     );
     const slugs = await listEntries(layout, "self");
     expect(slugs).toEqual([
-      "2026-05-10-aaaaaaa",
-      "2026-05-11-bbbbbbb",
-      "2026-05-12-ccccccc"
+      "2026-05-10T100000Z-aaaaaaa",
+      "2026-05-11T100000Z-bbbbbbb",
+      "2026-05-12T100000Z-ccccccc"
     ]);
     const latest = await readLatest(layout, "self");
     expect(latest?.alaya_commit).toBe("ccccccc");
-    const previous = await readPrevious(layout, "self", "2026-05-12-ccccccc");
+    const previous = await readPrevious(layout, "self", "2026-05-12T100000Z-ccccccc");
     expect(previous?.alaya_commit).toBe("bbbbbbb");
   });
 
@@ -117,7 +147,7 @@ describe("history archive", () => {
   });
 
   it("writes findings.md only when the caller passes a non-null body", async () => {
-    const slug = "2026-05-15-fafafaf";
+    const slug = "2026-05-15T120000Z-fafafaf";
     const entry = await writeEntry(
       layout,
       "public",
@@ -128,5 +158,37 @@ describe("history archive", () => {
     );
     const findings = await readFile(entry.findingsPath, "utf8");
     expect(findings).toContain("findings");
+  });
+
+  it("rejects slugs that contain path separators or parent-dir tokens", async () => {
+    await expect(
+      writeEntry(layout, "self", "../escape", buildPayload("abc"), "r", null)
+    ).rejects.toThrow(/invalid slug/);
+    await expect(
+      writeEntry(layout, "self", "a/b", buildPayload("abc"), "r", null)
+    ).rejects.toThrow(/invalid slug/);
+  });
+
+  it("prefers latest-baseline.json pointer over directory listing when present", async () => {
+    await writeEntry(
+      layout,
+      "self",
+      "2026-05-14T080000Z-older",
+      buildPayload("older00"),
+      "report",
+      null
+    );
+    await writeEntry(
+      layout,
+      "self",
+      "2026-05-15T080000Z-newer",
+      buildPayload("newer00"),
+      "report",
+      null
+    );
+    // writeEntry repointed the pointer to the latest write; readLatest should
+    // honour the pointer rather than re-scan the directory.
+    const latest = await readLatest(layout, "self");
+    expect(latest?.alaya_commit).toBe("newer00");
   });
 });

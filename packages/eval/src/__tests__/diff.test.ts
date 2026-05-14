@@ -73,7 +73,7 @@ describe("diffKpis", () => {
     expect(result.fixture_regressions).toEqual(["f1"]);
   });
 
-  it("does not count a version bump as a fixture regression", () => {
+  it("does not count a version bump as a fixture regression but reports it as rebaselined", () => {
     const previous = buildPayload({});
     const current = buildPayload({
       per_scenario: [
@@ -82,6 +82,22 @@ describe("diffKpis", () => {
       ]
     });
     const result = diffKpis(current, previous);
+    expect(result.fixture_regressions).toHaveLength(0);
+    expect(result.rebaselined_scenarios).toEqual(["f1"]);
+    expect(result.new_scenarios).toHaveLength(0);
+  });
+
+  it("reports scenario ids missing from the previous baseline under new_scenarios", () => {
+    const previous = buildPayload({});
+    const current = buildPayload({
+      per_scenario: [
+        { id: "f1", version: 1, hit_at_5: true, tier: "hot" },
+        { id: "f2", version: 1, hit_at_5: true, tier: "hot" },
+        { id: "f3", version: 1, hit_at_5: true, tier: "hot" }
+      ]
+    });
+    const result = diffKpis(current, previous);
+    expect(result.new_scenarios).toEqual(["f3"]);
     expect(result.fixture_regressions).toHaveLength(0);
   });
 });

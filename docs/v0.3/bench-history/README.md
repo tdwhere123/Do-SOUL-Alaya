@@ -30,22 +30,26 @@ regression thresholds and an Inspector trend line — is engineering.
 docs/v0.3/bench-history/
 ├── README.md                              # this file
 ├── self/
-│   ├── <YYYY-MM-DD>-<sha7>/
+│   ├── <YYYY-MM-DDTHHMMSSZ>-<sha7>/
 │   │   ├── kpi.json                       # machine-readable KPIs
 │   │   ├── report.md                      # human report + diff vs prev
 │   │   └── findings.md (optional)         # only present when ✗ fired
-│   └── latest-baseline.json               # symlink/copy → newest dir
+│   └── latest-baseline.json               # JSON pointer → newest dir
 └── public/
-    └── <YYYY-MM-DD>-<sha7>/
+    └── <YYYY-MM-DDTHHMMSSZ>-<sha7>/
         ├── kpi.json
         ├── report.md
         └── findings.md (optional)
 ```
 
-- `<YYYY-MM-DD>-<sha7>` is the run date and the **alaya commit sha** the
-  harness was run against. Reproducibility requires both.
-- `latest-baseline.json` points to the most recent run for that split.
-  The diff engine resolves it via `latest-baseline.json → kpi.json`.
+- `<YYYY-MM-DDTHHMMSSZ>-<sha7>` combines the ISO-8601 run timestamp (UTC,
+  colon-stripped so the path is filesystem-safe) and the **alaya commit
+  sha** the harness was run against. Same-day reruns keep their natural
+  chronological order under lex sort.
+- `latest-baseline.json` is a JSON pointer (`{ "slug": ..., "kpi_path": ... }`)
+  rewritten on every successful `writeEntry`. `readLatest` checks this
+  pointer first and only falls back to directory listing when the file is
+  absent or malformed.
 - `findings.md` is emitted by the diff engine when any KPI hits the `✗`
   threshold; it lists the regression, the suspected root cause, and a
   candidate `#BL-XXX` backlog entry. The release relay turn must lift
@@ -64,7 +68,7 @@ docs/v0.3/bench-history/
   "chat_provider": "yunwu:gpt-5.4-mini" | "n/a",
   "dataset": { "name": "LongMemEval-S", "size": 500, "source": "..." },
   "kpi": {
-    "r_at_1": 0.0,
+    "r_at_1": 0.0,                            // archival only; not threshold-gated
     "r_at_5": 0.0,
     "r_at_10": 0.0,
     "latency_ms_p50": 0,
@@ -105,11 +109,14 @@ optional today; the contract is that the exit code is meaningful.
 Each scenario in `packages/eval/fixtures/synthetic-recall/*.json` carries
 `scenario_id` (stable) + `version` (incremented on edit). The diff engine
 matches by `scenario_id`; if a scenario's `version` changes, the diff
-engine reports the scenario as **rebaselined** rather than as a delta —
-so editing one scenario does not silently move the overall R@5 number.
+engine reports the scenario in `rebaselined_scenarios` rather than as a
+hit→miss delta — so editing one scenario does not silently move the
+overall R@5 number.
 
-Adding a brand-new `scenario_id` is reported separately as
-**new-scenario**.
+Adding a brand-new `scenario_id` is reported in `new_scenarios`. Both
+categories appear in the `report.md` markdown section and in
+`KpiDiffResult` returned by the diff engine, but neither contributes to
+the worst verdict (they are advisory, not gating).
 
 ## How to add a new entry (operator handbook)
 
