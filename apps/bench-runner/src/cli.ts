@@ -140,8 +140,7 @@ async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
         `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
         `  KPI: ${result.kpiPath}\n`
     );
-    const verdict = result.payload.diff_vs_previous?.verdict_per_kpi["r_at_5"] ?? "ok";
-    return verdict === "fail" ? 1 : 0;
+    return exitCodeForVerdicts(result.payload.diff_vs_previous?.verdict_per_kpi);
   } catch (err) {
     process.stderr.write(
       `alaya-bench-runner longmemeval: ${err instanceof Error ? err.message : String(err)}\n`
@@ -161,14 +160,31 @@ async function runSelfCommand(opts: ParsedFlags): Promise<number> {
         `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
         `  KPI: ${result.kpiPath}\n`
     );
-    const verdict = result.payload.diff_vs_previous?.verdict_per_kpi["r_at_5"] ?? "ok";
-    return verdict === "fail" ? 1 : 0;
+    return exitCodeForVerdicts(result.payload.diff_vs_previous?.verdict_per_kpi);
   } catch (err) {
     process.stderr.write(
       `alaya-bench-runner self: ${err instanceof Error ? err.message : String(err)}\n`
     );
     return 2;
   }
+}
+
+/**
+ * Pick the worst verdict across all gated KPIs. A previous version of this
+ * mapping only inspected verdict_per_kpi["r_at_5"], which masked latency /
+ * tier / token-budget failures. Worst-across-all keeps the exit-code contract
+ * consistent with the report.md `Worst verdict: …` line and with
+ * diff.worst_verdict in @do-soul/alaya-eval.
+ *
+ * fail → exit 1; warn → exit 0 (advisory); ok / missing → exit 0.
+ */
+function exitCodeForVerdicts(
+  verdictPerKpi: Record<string, string> | undefined
+): number {
+  if (verdictPerKpi === undefined) return 0;
+  const values = Object.values(verdictPerKpi);
+  if (values.includes("fail")) return 1;
+  return 0;
 }
 
 function pct(ratio: number): string {

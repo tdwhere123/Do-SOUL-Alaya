@@ -51,20 +51,54 @@ const DiffVsPreviousSchema = z.object({
 });
 export type DiffVsPrevious = z.infer<typeof DiffVsPreviousSchema>;
 
-export const KpiPayloadSchema = z.object({
-  bench_name: BenchName,
-  split: BenchSplit,
-  run_at: z.string(),
-  alaya_commit: z.string().min(7),
-  alaya_version: z.string().min(1),
-  embedding_provider: z.string(),
-  chat_provider: z.string(),
-  dataset: z.object({
-    name: z.string(),
-    size: z.number().int().nonnegative(),
-    source: z.string()
-  }),
-  kpi: KpiCoreSchema,
-  diff_vs_previous: DiffVsPreviousSchema.nullable().optional()
-});
+/**
+ * @anchor harness_mode — bench data-ingestion path; an audit-distinguishable label.
+ *
+ * - direct_db_seed: harness wrote directly to storage repos / EventLog (no MCP).
+ *   Used only when the harness is a unit-style test that bypasses the propose
+ *   → review → accept governance loop. Numbers from this mode are NOT a claim
+ *   about live agent behavior.
+ * - mcp_propose_review: harness drove the in-process daemon via the real MCP
+ *   tools soul.propose_memory_update + soul.review_memory_proposal. This is
+ *   the production-equivalent ingestion path and the only mode in which KPI
+ *   numbers may be cited as "what an attached agent would observe".
+ * - external_replay: harness replayed a recorded stdio transcript against the
+ *   real daemon. Reserved for cross-version regression replays.
+ */
+export const HarnessMode = z.enum([
+  "direct_db_seed",
+  "mcp_propose_review",
+  "external_replay"
+]);
+export type HarnessMode = z.infer<typeof HarnessMode>;
+
+export const KpiPayloadSchema = z
+  .object({
+    bench_name: BenchName,
+    split: BenchSplit,
+    run_at: z.string(),
+    alaya_commit: z.string().min(7),
+    alaya_version: z.string().min(1),
+    embedding_provider: z.string(),
+    chat_provider: z.string(),
+    dataset: z.object({
+      name: z.string(),
+      size: z.number().int().nonnegative(),
+      source: z.string()
+    }),
+    // sample_size = the total questions / scenarios the dataset offers.
+    //   LongMemEval Oracle full set = 50; self synthetic = 8.
+    // evaluated_count = the number actually executed by this run (smoke run
+    //   may use --limit N; full run must equal sample_size).
+    // refinement: evaluated_count <= sample_size.
+    sample_size: z.number().int().nonnegative(),
+    evaluated_count: z.number().int().nonnegative(),
+    harness_mode: HarnessMode,
+    kpi: KpiCoreSchema,
+    diff_vs_previous: DiffVsPreviousSchema.nullable().optional()
+  })
+  .refine((payload) => payload.evaluated_count <= payload.sample_size, {
+    message: "evaluated_count must be <= sample_size",
+    path: ["evaluated_count"]
+  });
 export type KpiPayload = z.infer<typeof KpiPayloadSchema>;

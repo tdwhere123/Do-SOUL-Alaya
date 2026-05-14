@@ -423,6 +423,9 @@ describe("inspector routes", () => {
       embedding_provider: "local-heuristic",
       chat_provider: "n/a",
       dataset: { name: "synthetic", size: 12, source: "internal" },
+      sample_size: 12,
+      evaluated_count: 12,
+      harness_mode: "mcp_propose_review",
       kpi: {
         r_at_1: 0.7,
         r_at_5: 0.9,
@@ -477,6 +480,9 @@ describe("inspector routes", () => {
       embedding_provider: "yunwu:text-embedding-3-small",
       chat_provider: "yunwu:gpt-5.4-mini",
       dataset: { name: "LongMemEval-S", size: 500, source: "github:xiaowu0162/LongMemEval" },
+      sample_size: 500,
+      evaluated_count: 500,
+      harness_mode: "mcp_propose_review",
       kpi: {
         r_at_1: 0.45,
         r_at_5: 0.72,

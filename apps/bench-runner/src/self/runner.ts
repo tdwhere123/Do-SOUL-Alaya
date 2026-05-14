@@ -14,6 +14,7 @@ import {
   type PerScenarioRow
 } from "@do-soul/alaya-eval";
 import { startBenchDaemon } from "../harness/daemon.js";
+import { previewContainsExpectedPrefix } from "../scoring.js";
 import { SYNTHETIC_SCENARIOS } from "./scenarios.js";
 
 export interface SelfBenchRunOptions {
@@ -92,8 +93,9 @@ export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBench
         }
 
         // A result is a hit when its content_preview matches any expected setup string prefix.
-        const isHit = expectedContents.some((c) =>
-          pointer.content_preview.includes(c.slice(0, 40))
+        const isHit = previewContainsExpectedPrefix(
+          pointer.content_preview,
+          expectedContents
         );
 
         if (isHit) {
@@ -146,6 +148,13 @@ export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBench
       size: SYNTHETIC_SCENARIOS.length,
       source: "inline"
     },
+    sample_size: SYNTHETIC_SCENARIOS.length,
+    evaluated_count: SYNTHETIC_SCENARIOS.length,
+    // see also: apps/bench-runner/src/harness/daemon.ts — proposeMemory writes
+    // directly via SqliteMemoryEntryRepo, so this run skipped the propose/review
+    // governance loop. Flip to mcp_propose_review once the harness drives the
+    // real MCP soul.propose_memory_update + soul.review_memory_proposal tools.
+    harness_mode: "direct_db_seed",
     kpi: {
       r_at_1: rAt1,
       r_at_5: rAt5,
@@ -203,7 +212,7 @@ function resolveAlayaVersion(): string {
     const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
     return pkg.version;
   } catch {
-    return "0.3.5";
+    return "0.3.6";
   }
 }
 

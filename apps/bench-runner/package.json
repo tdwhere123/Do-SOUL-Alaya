@@ -1,6 +1,6 @@
 {
   "name": "@do-soul/alaya-bench-runner",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "private": true,
   "description": "Daemon-attached bench runner that drives self-bench and LongMemEval-S evaluations against an in-process Alaya daemon. Owns the harness; eval package stays a zod-only leaf.",
   "license": "MIT",

@@ -12,6 +12,8 @@ export function renderReport(
   lines.push("");
   lines.push(
     `- Run at: ${current.run_at}`,
+    `- Sample size: ${current.sample_size} (evaluated ${current.evaluated_count}/${current.sample_size})`,
+    `- Harness mode: ${current.harness_mode}`,
     `- Alaya commit: ${current.alaya_commit} (${current.alaya_version})`,
     `- Embedding: ${current.embedding_provider}`,
     `- Chat: ${current.chat_provider}`,

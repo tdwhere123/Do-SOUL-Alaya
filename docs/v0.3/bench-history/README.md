@@ -11,9 +11,9 @@ regression thresholds and an Inspector trend line — is engineering.
 
 ## Why this exists
 
-- An external reader can re-run `rtk pnpm exec alaya-eval self &&
-  rtk pnpm exec alaya-eval longmemeval` and reproduce our published
-  numbers.
+- An external reader can re-run `rtk pnpm exec alaya-bench-runner self &&
+  rtk pnpm exec alaya-bench-runner longmemeval` and reproduce our
+  published numbers.
 - Any PR that changes recall / embedding / tier / proposal behavior
   must attach a fresh entry here and link the diff vs. the previous
   baseline in the PR description.
@@ -67,6 +67,23 @@ docs/v0.3/bench-history/
   "embedding_provider": "yunwu:text-embedding-3-small" | "local-heuristic" | "...",
   "chat_provider": "yunwu:gpt-5.4-mini" | "n/a",
   "dataset": { "name": "LongMemEval-S", "size": 500, "source": "..." },
+  // sample_size = dataset total (LongMemEval Oracle = 50, self synthetic = 8).
+  // evaluated_count = how many of those this run actually scored. For a full
+  // run, evaluated_count === sample_size. For a smoke run, --limit N caps it.
+  // The KPI schema refines evaluated_count <= sample_size.
+  "sample_size": 50,
+  "evaluated_count": 50,
+  // harness_mode names the data-ingestion path so the audit trail is honest:
+  //   direct_db_seed     — bench wrote MemoryEntry rows directly via the
+  //                        storage repo, bypassing the propose → review →
+  //                        accept governance loop. Numbers from this mode
+  //                        are NOT a claim about live agent behavior.
+  //   mcp_propose_review — bench drove the in-process daemon via the real
+  //                        soul.propose_memory_update + soul.review_memory_proposal
+  //                        MCP tools (production-equivalent ingestion).
+  //   external_replay    — bench replayed a recorded stdio transcript
+  //                        against the real daemon (cross-version regression).
+  "harness_mode": "mcp_propose_review",
   "kpi": {
     "r_at_1": 0.0,                            // archival only; not threshold-gated
     "r_at_5": 0.0,
@@ -126,10 +143,17 @@ the worst verdict (they are advisory, not gating).
 ```bash
 # from the alaya repo root (or any worktree on a branch you want to bench)
 rtk pnpm install
-rtk pnpm exec alaya-eval self           # writes self/<date>T<HHMMSS>Z-<sha7>/
-rtk pnpm exec alaya-eval longmemeval    # writes public/<date>T<HHMMSS>Z-<sha7>/
-rtk pnpm exec alaya-eval diff self      # prints diff vs prev
-rtk pnpm exec alaya-eval diff public
+rtk pnpm build
+
+# 1. (LongMemEval only) Fetch the public dataset before the first run.
+#    Verifies sha256 against datasets/<name>.meta.json and caches the JSON
+#    under <data-dir>/longmemeval/.
+rtk pnpm exec alaya-bench-runner fetch-longmemeval --variant oracle
+
+# 2. Run the benches. Each writes <split>/<date>T<HHMMSS>Z-<sha7>/ and
+#    rewrites the corresponding latest-baseline.json pointer.
+rtk pnpm exec alaya-bench-runner self
+rtk pnpm exec alaya-bench-runner longmemeval --variant oracle
 ```
 
 Then commit the new `<date>T<HHMMSS>Z-<sha7>/` directory +

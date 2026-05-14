@@ -1,6 +1,7 @@
 export {
   BenchName,
   BenchSplit,
+  HarnessMode,
   KpiPayloadSchema,
   Verdict,
   type DegradationReasons,

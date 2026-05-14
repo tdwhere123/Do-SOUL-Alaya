@@ -14,6 +14,7 @@ import {
   type PerScenarioRow
 } from "@do-soul/alaya-eval";
 import { startBenchDaemon } from "../harness/daemon.js";
+import { previewContainsExpectedPrefix } from "../scoring.js";
 import { loadDataset, type FetchResult } from "./fetch.js";
 import type { LongMemEvalVariant } from "./dataset.js";
 
@@ -126,10 +127,11 @@ export async function runLongMemEval(
         // Content-preview match against known answer contents (oracle approximation).
         // The object_id in recall results is the durable memory object_id assigned on
         // accept — not the proposal_id. We match by content preview substring.
-        const isHit = answerContents.size > 0 &&
-          [...answerContents].some((c) =>
-            pointer.content_preview.includes(c.slice(0, 40))
-          );
+        const isHit =
+          answerContents.size > 0 &&
+          previewContainsExpectedPrefix(pointer.content_preview, [
+            ...answerContents
+          ]);
 
         if (isHit) {
           if (rank === 0) hitAt1 = true;
@@ -185,13 +187,20 @@ export async function runLongMemEval(
       size: datasetSize,
       source: "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned"
     },
+    sample_size: datasetSize,
+    evaluated_count: window.length,
+    // see also: apps/bench-runner/src/harness/daemon.ts — proposeMemory writes
+    // directly via SqliteMemoryEntryRepo, so this run skipped the propose/review
+    // governance loop. Flip to mcp_propose_review once the harness drives the
+    // real MCP soul.propose_memory_update + soul.review_memory_proposal tools.
+    harness_mode: "direct_db_seed",
     kpi: {
       r_at_1: rAt1,
       r_at_5: rAt5,
       r_at_10: rAt10,
       latency_ms_p50: latencyP50,
       latency_ms_p95: latencyP95,
-      // @anchor: token_saved_ratio — wired in Phase 5 when baseline available
+      // @anchor token_saved_ratio — set to 0 until a token-budget baseline exists
       token_saved_ratio_vs_full_prompt: 0,
       tier_distribution: { hot: tierHot, warm: tierWarm, cold: tierCold },
       degradation_reasons: {
@@ -243,7 +252,7 @@ function resolveAlayaVersion(): string {
     const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
     return pkg.version;
   } catch {
-    return "0.3.5";
+    return "0.3.6";
   }
 }
 

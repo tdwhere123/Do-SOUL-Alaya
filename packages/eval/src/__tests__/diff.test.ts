@@ -12,6 +12,9 @@ function buildPayload(overrides: Partial<KpiPayload["kpi"]>): KpiPayload {
     embedding_provider: "yunwu:text-embedding-3-small",
     chat_provider: "yunwu:gpt-5.4-mini",
     dataset: { name: "host-autonomy-fixtures", size: 6, source: "internal" },
+    sample_size: 10,
+    evaluated_count: 10,
+    harness_mode: "mcp_propose_review",
     kpi: {
       r_at_1: 0.7,
       r_at_5: 0.95,

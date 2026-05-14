@@ -23,6 +23,9 @@ function buildPayload(commit: string): KpiPayload {
     embedding_provider: "local-heuristic",
     chat_provider: "n/a",
     dataset: { name: "synthetic", size: 12, source: "internal" },
+    sample_size: 10,
+    evaluated_count: 10,
+    harness_mode: "mcp_propose_review",
     kpi: {
       r_at_1: 0.6,
       r_at_5: 0.85,
