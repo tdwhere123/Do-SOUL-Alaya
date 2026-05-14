@@ -1,8 +1,10 @@
-// @anchor audit-trail-witness — one-off proof script for Phase 4 closeout.
+#!/usr/bin/env node
+// must run after: rtk pnpm --filter @do-soul/alaya-bench-runner build
+// @anchor audit-trail-witness — one-off audit-trail witness script.
 // Stands up the bench daemon harness, seeds one memory through the real
-// MCP propose+review chain, then dumps the full 8-event audit trail
-// (SOUL_SIGNAL_EMITTED -> SOUL_MEMORY_UPDATED) from event_log so the
-// reviewer can see each event_id is real and not claimed.
+// MCP propose+review chain, then dumps the full event_log audit trail
+// (SOUL_SIGNAL_EMITTED -> SOUL_MEMORY_UPDATED) to stdout so an auditor
+// can see each event_id is real and not claimed.
 
 import { initDatabase, SqliteEventLogRepo } from "@do-soul/alaya-storage";
 import { join } from "node:path";
@@ -16,7 +18,7 @@ const daemon = await startBenchDaemon({
 let seed;
 try {
   seed = await daemon.proposeMemory(
-    "Phase 4 closeout audit witness: this is a real propose+review chain trace.",
+    "bench-runner audit-trail witness seed: this is a real propose+review chain trace.",
     "audit-witness-evidence-1"
   );
 } finally {

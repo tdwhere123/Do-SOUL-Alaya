@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -52,14 +53,27 @@ describe("LongMemEval runner", () => {
       ];
 
       const variant = "longmemeval_oracle";
-      await writeFile(
-        join(dataDir, `${variant}.json`),
-        JSON.stringify(mockQuestions),
-        "utf8"
-      );
+      const datasetRaw = JSON.stringify(mockQuestions);
+      const datasetSha = createHash("sha256").update(datasetRaw, "utf8").digest("hex");
+      await writeFile(join(dataDir, `${variant}.json`), datasetRaw, "utf8");
       await writeFile(
         join(dataDir, `${variant}.meta.json`),
-        JSON.stringify({ variant, sha256: "test-sha256", questionCount: 2 }),
+        JSON.stringify({ variant, sha256: datasetSha, questionCount: 2 }),
+        "utf8"
+      );
+
+      // Pinned meta lookup root for the loadDataset checksum guard.
+      const pinnedMetaRoot = join(tmpDir, "pinned-meta");
+      await mkdir(pinnedMetaRoot, { recursive: true });
+      await writeFile(
+        join(pinnedMetaRoot, `${variant}.meta.json`),
+        JSON.stringify({
+          name: variant,
+          sha256: datasetSha,
+          question_count: 2,
+          first_pinned_at: "2026-05-14T00:00:00Z",
+          pinned_by_commit: "test"
+        }),
         "utf8"
       );
 
@@ -67,7 +81,8 @@ describe("LongMemEval runner", () => {
         variant,
         limit: 2,
         historyRoot,
-        dataDir
+        dataDir,
+        pinnedMetaRoot
       });
 
       // Slug format must match SLUG_PATTERN

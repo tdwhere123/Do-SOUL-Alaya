@@ -23,6 +23,10 @@ export interface LongMemEvalRunOptions {
   readonly historyRoot: string;
   readonly dataDir?: string;
   readonly fetchResult?: FetchResult;
+  // Override the pinned-checksum lookup root (test-only). Production
+  // callers should leave this undefined so the canonical
+  // docs/v0.3/bench-history/datasets path is used.
+  readonly pinnedMetaRoot?: string;
 }
 
 export interface LongMemEvalRunResult {
@@ -51,7 +55,10 @@ export interface LongMemEvalRunResult {
 export async function runLongMemEval(
   opts: LongMemEvalRunOptions
 ): Promise<LongMemEvalRunResult> {
-  const questions = await loadDataset(opts.variant, { dataDir: opts.dataDir });
+  const questions = await loadDataset(opts.variant, {
+    dataDir: opts.dataDir,
+    pinnedMetaRoot: opts.pinnedMetaRoot
+  });
   const window = opts.limit !== undefined ? questions.slice(0, opts.limit) : questions;
 
   const alayaVersion = resolveAlayaVersion();

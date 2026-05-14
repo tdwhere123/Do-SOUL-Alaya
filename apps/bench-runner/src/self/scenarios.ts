@@ -6,10 +6,11 @@ export interface SyntheticScenario {
   readonly setup: ReadonlyArray<string>;
   /**
    * Off-topic memories seeded alongside `setup` to enlarge the recall
-   * search space. Distractors are NOT in the expected-hit set; if a
-   * distractor is recalled it occupies a top-K slot but does not score.
-   * This breaks the workspace-too-small trivial-hit tautology that the
-   * reviewer flagged in Phase 4 round 1.
+   * search space. Distractors are deliberately off-topic so that a hit
+   * signal carries information rather than reducing to "the only seed
+   * in the workspace is the right one". Distractors are NOT in the
+   * expected-hit set; if a distractor is recalled it occupies a top-K
+   * slot but does not score.
    */
   readonly distractors: ReadonlyArray<string>;
   readonly probe: string;

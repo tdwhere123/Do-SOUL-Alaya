@@ -178,8 +178,9 @@ export async function startBenchDaemon(
   // install command writes the daemon config but does not create rows in
   // those tables. Seed the bench workspace + run directly so the MCP
   // call context (which binds these ids from the trusted context provider)
-  // resolves to existing FK rows. Same pattern as phase6-agent-use-protocol
-  // test fixture.
+  // resolves to existing FK rows.
+  // see also: apps/core-daemon/src/__tests__/phase6-agent-use-protocol.test.ts
+  //   — workspace + run seeding fixture using the same repos.
   await seedBenchWorkspaceAndRun(dataDir, workspaceId, runId);
 
   async function recall(

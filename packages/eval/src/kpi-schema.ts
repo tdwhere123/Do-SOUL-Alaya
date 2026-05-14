@@ -87,7 +87,8 @@ export const KpiPayloadSchema = z
       source: z.string()
     }),
     // sample_size = the total questions / scenarios the dataset offers.
-    //   LongMemEval Oracle full set = 50; self synthetic = 8.
+    //   LongMemEval Oracle full set = 500 (HuggingFace
+    //   xiaowu0162/longmemeval-cleaned); self synthetic = 8.
     // evaluated_count = the number actually executed by this run (smoke run
     //   may use --limit N; full run must equal sample_size).
     // refinement: evaluated_count <= sample_size.

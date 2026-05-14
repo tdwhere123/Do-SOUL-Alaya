@@ -67,12 +67,12 @@ docs/v0.3/bench-history/
   "embedding_provider": "yunwu:text-embedding-3-small" | "local-heuristic" | "...",
   "chat_provider": "yunwu:gpt-5.4-mini" | "n/a",
   "dataset": { "name": "LongMemEval-S", "size": 500, "source": "..." },
-  // sample_size = dataset total (LongMemEval Oracle = 50, self synthetic = 8).
+  // sample_size = dataset total (LongMemEval Oracle = 500, self synthetic = 8).
   // evaluated_count = how many of those this run actually scored. For a full
   // run, evaluated_count === sample_size. For a smoke run, --limit N caps it.
   // The KPI schema refines evaluated_count <= sample_size.
-  "sample_size": 50,
-  "evaluated_count": 50,
+  "sample_size": 500,
+  "evaluated_count": 500,
   // harness_mode names the data-ingestion path so the audit trail is honest:
   //   direct_db_seed     — bench wrote MemoryEntry rows directly via the
   //                        storage repo, bypassing the propose → review →
@@ -121,7 +121,7 @@ a drop of exactly 5.0 pp registers as `fail`.
 | golden-set hit | any individual fixture flips hit→miss | ✗ same row |
 | `tier_distribution.hot` share | drop ≥ 5.0 pp | drop ≥ 10.0 pp |
 
-A `✗` on any of these makes `alaya-eval` exit non-zero. CI hookup is
+A `✗` on any of these makes `alaya-bench-runner` exit non-zero. CI hookup is
 optional today; the contract is that the exit code is meaningful.
 
 ## Synthetic scenario versioning

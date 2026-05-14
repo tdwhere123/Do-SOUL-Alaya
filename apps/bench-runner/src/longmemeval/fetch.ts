@@ -13,6 +13,21 @@ const DATA_DIR_ROOT = path.resolve(__dirname, "../../data/longmemeval");
 const HUGGINGFACE_BASE =
   "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main";
 
+// @anchor pinned-meta-root — pinned (committed) dataset checksums live under
+// docs/v0.3/bench-history/datasets/<variant>.meta.json. This is the trusted
+// reference for loadDataset; the gitignored data/longmemeval/<variant>.meta.json
+// is only a fetch-time scratch record and is NOT load-bearing.
+const PINNED_META_ROOT = path.resolve(
+  __dirname,
+  "../../../../docs/v0.3/bench-history/datasets"
+);
+
+// Variant ids ("longmemeval_oracle", "longmemeval_s", ...) match the meta
+// filename stem directly: docs/v0.3/bench-history/datasets/<variant>.meta.json.
+function pinnedMetaPath(variant: LongMemEvalVariant, root?: string): string {
+  return path.join(root ?? PINNED_META_ROOT, `${variant}.meta.json`);
+}
+
 export interface FetchResult {
   readonly variant: LongMemEvalVariant;
   readonly localPath: string;
@@ -76,15 +91,53 @@ export async function fetchLongMemEval(
 
 /**
  * Load a previously fetched LongMemEval variant from the local data dir.
- * Throws if not fetched yet.
+ *
+ * @invariant The local JSON file's sha256 MUST match the pinned checksum
+ *   under docs/v0.3/bench-history/datasets/<variant>.meta.json. A loader
+ *   that skips this check would let a corrupted or upstream-mutated cache
+ *   silently produce different bench numbers across runs and reviewers.
+ *
+ * see also: apps/bench-runner/src/__tests__/dataset-checksum.test.ts
  */
 export async function loadDataset(
   variant: LongMemEvalVariant,
-  options: { dataDir?: string } = {}
+  options: { dataDir?: string; pinnedMetaRoot?: string } = {}
 ): Promise<LongMemEvalQuestion[]> {
   const dataDir = options.dataDir ?? DATA_DIR_ROOT;
   const localPath = path.join(dataDir, `${variant}.json`);
+  const pinnedPath = pinnedMetaPath(variant, options.pinnedMetaRoot);
+
+  let pinnedRaw: string;
+  try {
+    pinnedRaw = await readFile(pinnedPath, "utf8");
+  } catch {
+    throw new Error(
+      `dataset not pinned: ${variant}; commit a checksum to docs/v0.3/bench-history/datasets/${variant}.meta.json first`
+    );
+  }
+
+  let pinnedSha: string;
+  try {
+    const pinned = JSON.parse(pinnedRaw) as { sha256?: unknown };
+    if (typeof pinned.sha256 !== "string" || pinned.sha256.length === 0) {
+      throw new Error("missing sha256");
+    }
+    pinnedSha = pinned.sha256;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `dataset pinned meta unreadable: ${variant}; pinnedPath=${pinnedPath}; detail=${detail}`
+    );
+  }
+
   const raw = await readFile(localPath, "utf8");
+  const actualSha = createHash("sha256").update(raw, "utf8").digest("hex");
+  if (actualSha !== pinnedSha) {
+    throw new Error(
+      `dataset checksum mismatch: ${variant}; pinned=${pinnedSha}; actual=${actualSha}; re-fetch with 'alaya-bench-runner fetch-longmemeval --variant ${variant}'`
+    );
+  }
+
   const parsed = JSON.parse(raw) as unknown;
   return validateDataset(parsed);
 }

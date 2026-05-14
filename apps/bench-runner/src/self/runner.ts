@@ -31,16 +31,15 @@ export interface SelfBenchRunResult {
 /**
  * @anchor self-bench-runner — in-process daemon, 8 synthetic scenarios + distractors
  *
- * Scoring: object_id sidecar. Each setup utterance is seeded through the
- * MCP propose+review chain and recorded in the sidecar against its
- * expected_id (e.g. "syn-001-s0"). Distractors are seeded too — to grow
- * the recall search space and break the workspace-too-small trivial-hit
- * tautology the reviewer flagged in Phase 4 round 1 — but they are NOT
- * recorded in the sidecar, so a distractor recall does not score.
+ * @invariant Hits are scored by object_id set membership against a
+ *   sidecar populated only from setup seeds — never by substring overlap
+ *   on recall preview text. Distractors are seeded so the recall search
+ *   space is not trivially small, but their object_id is intentionally
+ *   not entered in the sidecar, so a distractor recall occupies a top-K
+ *   slot without scoring.
  *
  * Hit rule: a recall pointer is a hit iff its object_id maps in the
- * sidecar to an expected_id from scenario.expected_ids. No content prefix
- * overlap. No setup-line substring match.
+ * sidecar to an expected_id from scenario.expected_ids.
  *
  * see also: apps/bench-runner/src/harness/daemon.ts — proposeMemory chain
  * see also: apps/bench-runner/src/self/scenarios.ts — setup + distractor pairs
