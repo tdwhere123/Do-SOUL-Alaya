@@ -45,6 +45,8 @@ export function useDaemonHealth(): UseDaemonHealthResult {
   const consecutiveFailuresRef = useRef(0);
   const refreshLockRef = useRef(false);
   const lastStatusRef = useRef<AlayaStatus | null>(null);
+  const isMountedRef = useRef(true);
+  const cooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { showToast } = useToasts();
 
   const fetchStatus = useCallback(async (): Promise<FetchOutcome> => {
@@ -68,6 +70,7 @@ export function useDaemonHealth(): UseDaemonHealthResult {
 
   const tick = useCallback(async () => {
     const outcome = await fetchStatus();
+    if (!isMountedRef.current) return;
     if (outcome.kind === "ok") {
       lastStatusRef.current = outcome.status;
       setState({ kind: "ok", status: outcome.status });
@@ -92,6 +95,7 @@ export function useDaemonHealth(): UseDaemonHealthResult {
   }, [fetchStatus, showToast]);
 
   useEffect(() => {
+    isMountedRef.current = true;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -107,7 +111,12 @@ export function useDaemonHealth(): UseDaemonHealthResult {
     void loop();
     return () => {
       cancelled = true;
+      isMountedRef.current = false;
       if (timer) clearTimeout(timer);
+      if (cooldownTimerRef.current) {
+        clearTimeout(cooldownTimerRef.current);
+        cooldownTimerRef.current = null;
+      }
     };
   }, [tick]);
 
@@ -116,9 +125,14 @@ export function useDaemonHealth(): UseDaemonHealthResult {
     refreshLockRef.current = true;
     setRefreshing(true);
     await tick();
-    setTimeout(() => {
+    if (!isMountedRef.current) {
       refreshLockRef.current = false;
-      setRefreshing(false);
+      return;
+    }
+    cooldownTimerRef.current = setTimeout(() => {
+      cooldownTimerRef.current = null;
+      refreshLockRef.current = false;
+      if (isMountedRef.current) setRefreshing(false);
     }, REFRESH_COOLDOWN_MS);
   }, [tick]);
 

@@ -56,6 +56,8 @@ export const zh = {
   "common:copied": "已复制到剪贴板",
   "common:none": "无",
   "common:noWorkspace": "URL 缺少 workspaceId。请用 alaya inspect --workspace 重新启动。",
+  "common:refresh": "刷新",
+  "common:refresh.aria": "立即刷新",
 
   // ── graph ───────────────────────────────────────────────────────────
   "graph:search.placeholder": "搜索 标签 / id / 摘要 / 时间（按 / 聚焦）",
@@ -161,6 +163,7 @@ export const zh = {
 
   // ── status page ────────────────────────────────────────────────────
   "status:title": "系统状态",
+  "status:subtitle": "Alaya 守护进程与核心服务的实时遥测。",
   "status:loading": "加载状态中…",
 
   // ── session ────────────────────────────────────────────────────────
@@ -216,6 +219,8 @@ export const en: Record<DictKey, string> = {
   "common:copied": "copied to clipboard",
   "common:none": "None",
   "common:noWorkspace": "No workspaceId in URL. Re-run `alaya inspect` with --workspace.",
+  "common:refresh": "Refresh",
+  "common:refresh.aria": "Refresh now",
 
   // graph
   "graph:search.placeholder": "probe label / id / summary / time (press /)",
@@ -321,6 +326,7 @@ export const en: Record<DictKey, string> = {
 
   // status
   "status:title": "System Status",
+  "status:subtitle": "Real-time telemetry from the Alaya daemon and core services.",
   "status:loading": "Loading status…",
 
   // session

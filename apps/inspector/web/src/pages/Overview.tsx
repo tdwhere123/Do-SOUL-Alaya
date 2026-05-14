@@ -78,10 +78,10 @@ export default function OverviewPage() {
               onClick={() => void refresh()}
               disabled={refreshing}
               className="flex items-center gap-2 px-3 py-1 text-[10px] uppercase tracking-widest text-ink-700/60 hover:text-ink-700 disabled:opacity-50 transition-colors"
-              aria-label="Refresh overview"
+              aria-label={t("common:refresh.aria")}
             >
               <RefreshCcw className={`w-3 h-3 ${refreshing ? "animate-spin" : ""}`} />
-              Refresh
+              {t("common:refresh")}
             </button>
           </div>
         </header>
@@ -112,7 +112,6 @@ export default function OverviewPage() {
             label={t("overview:card.recall.label")}
             value={t("overview:card.recall.placeholder")}
             subtitle={t("overview:card.recall.subtitle")}
-            link={{ to: "/graph", text: t("overview:linkRecall") }}
             testId="overview-card-recall"
           />
           <SummaryCard
@@ -120,7 +119,6 @@ export default function OverviewPage() {
             label={t("overview:card.tier.label")}
             value={t("overview:card.tier.placeholder")}
             subtitle={t("overview:card.tier.subtitle")}
-            link={{ to: "/graph", text: t("overview:linkRecall") }}
             testId="overview-card-tier"
           />
         </div>

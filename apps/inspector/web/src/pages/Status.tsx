@@ -1,8 +1,10 @@
 import { Activity, RotateCcw, Server, Shield, Zap } from "lucide-react";
 import type { AlayaStatus } from "@do-soul/alaya-protocol";
 import { useDaemonHealth } from "../hooks/useDaemonHealth";
+import { useI18n } from "../i18n/Locale";
 
 export default function StatusPage() {
+  const { t } = useI18n();
   const { state, indicator, refresh, refreshing } = useDaemonHealth();
   const loading = state.kind === "loading";
   const status: AlayaStatus | null =
@@ -41,10 +43,8 @@ export default function StatusPage() {
 
       <header className="mb-12 flex justify-between items-end">
         <div>
-          <h1 className="text-3xl font-bold text-ink-600 mb-2">System Status</h1>
-          <p className="text-ink-700/60 text-sm">
-            Real-time telemetry from the Alaya daemon and core services.
-          </p>
+          <h1 className="text-3xl font-bold text-ink-600 mb-2">{t("status:title")}</h1>
+          <p className="text-ink-700/60 text-sm">{t("status:subtitle")}</p>
         </div>
         <div className="text-right flex flex-col items-end gap-2">
           <div
@@ -60,10 +60,10 @@ export default function StatusPage() {
             onClick={handleManualRefresh}
             disabled={refreshing}
             className="flex items-center gap-2 px-3 py-1 text-[10px] uppercase tracking-widest text-ink-700/60 hover:text-ink-700 disabled:opacity-50 transition-colors"
-            aria-label="Refresh status now"
+            aria-label={t("common:refresh.aria")}
           >
             <RotateCcw className={`w-3 h-3 ${refreshing ? "animate-spin" : ""}`} />
-            Refresh
+            {t("common:refresh")}
           </button>
           <p className="text-[10px] text-ink-700/40">
             LAST_CHECK:{" "}
