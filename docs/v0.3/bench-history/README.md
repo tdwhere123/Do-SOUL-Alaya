@@ -1,0 +1,127 @@
+# Bench History — Cross-version baseline archive
+
+This directory accumulates **reproducible recall benchmark KPIs** across
+every Alaya release that touches recall, embedding, tier, or governance
+behavior. It is the durable contract that v0.3.6 establishes for v0.3.7+
+and beyond.
+
+The premise: a single one-off benchmark number is theatre. A feedback
+loop — same harness, same data, diffed against previous baselines, with
+regression thresholds and an Inspector trend line — is engineering.
+
+## Why this exists
+
+- An external reader can re-run `rtk pnpm exec alaya-eval self &&
+  rtk pnpm exec alaya-eval longmemeval` and reproduce our published
+  numbers.
+- Any PR that changes recall / embedding / tier / proposal behavior
+  must attach a fresh entry here and link the diff vs. the previous
+  baseline in the PR description.
+- Inspector reads the last N entries and renders trend lines on
+  `/overview` and `/recall`.
+- The diff engine encodes regression thresholds in
+  `packages/eval/src/thresholds.ts`. A `✗` finding flips the CLI exit
+  code, so this archive can be wired into CI later without changing
+  contract.
+
+## Layout
+
+```
+docs/v0.3/bench-history/
+├── README.md                              # this file
+├── self/
+│   ├── <YYYY-MM-DD>-<sha7>/
+│   │   ├── kpi.json                       # machine-readable KPIs
+│   │   ├── report.md                      # human report + diff vs prev
+│   │   └── findings.md (optional)         # only present when ✗ fired
+│   └── latest-baseline.json               # symlink/copy → newest dir
+└── public/
+    └── <YYYY-MM-DD>-<sha7>/
+        ├── kpi.json
+        ├── report.md
+        └── findings.md (optional)
+```
+
+- `<YYYY-MM-DD>-<sha7>` is the run date and the **alaya commit sha** the
+  harness was run against. Reproducibility requires both.
+- `latest-baseline.json` points to the most recent run for that split.
+  The diff engine resolves it via `latest-baseline.json → kpi.json`.
+- `findings.md` is emitted by the diff engine when any KPI hits the `✗`
+  threshold; it lists the regression, the suspected root cause, and a
+  candidate `#BL-XXX` backlog entry. The release relay turn must lift
+  these into `docs/handbook/backlog.md`.
+
+## KPI schema (`kpi.json`)
+
+```jsonc
+{
+  "bench_name": "self" | "public",
+  "split": "golden" | "synthetic" | "longmemeval-s",
+  "run_at": "2026-05-14T12:34:56Z",
+  "alaya_commit": "97dbdd9",
+  "alaya_version": "0.3.6",
+  "embedding_provider": "yunwu:text-embedding-3-small" | "local-heuristic" | "...",
+  "chat_provider": "yunwu:gpt-5.4-mini" | "n/a",
+  "dataset": { "name": "LongMemEval-S", "size": 500, "source": "..." },
+  "kpi": {
+    "r_at_1": 0.0,
+    "r_at_5": 0.0,
+    "r_at_10": 0.0,
+    "latency_ms_p50": 0,
+    "latency_ms_p95": 0,
+    "token_saved_ratio_vs_full_prompt": 0.0,
+    "tier_distribution": { "hot": 0, "warm": 0, "cold": 0 },
+    "degradation_reasons": { "none": 0, "warm_cascade_engaged": 0, "cold_cascade_engaged": 0 },
+    "per_scenario": [
+      { "id": "syn-001", "version": 1, "hit_at_5": true, "tier": "hot" }
+    ]
+  },
+  "diff_vs_previous": {
+    "previous_run": "2026-05-13-abcdef0",
+    "r_at_5_delta_pp": 0.0,
+    "verdict_per_kpi": { "r_at_5": "ok" }
+  }
+}
+```
+
+## Thresholds (regression verdicts)
+
+Defined in `packages/eval/src/thresholds.ts`. Reference values:
+
+| KPI | ⚠ (warn) | ✗ (fail, exit 1) |
+|---|---|---|
+| `r_at_5` | drop > 2.0 pp | drop > 5.0 pp |
+| `r_at_10` | drop > 2.0 pp | drop > 5.0 pp |
+| `latency_ms_p95` | +20% | +50% |
+| `token_saved_ratio_vs_full_prompt` | drop > 2.0 pp | drop > 5.0 pp |
+| golden-set hit | any individual fixture flips hit→miss | ✗ same row |
+| `tier_distribution.hot` share | drop > 5.0 pp | drop > 10.0 pp |
+
+A `✗` on any of these makes `alaya-eval` exit non-zero. CI hookup is
+optional today; the contract is that the exit code is meaningful.
+
+## Synthetic scenario versioning
+
+Each scenario in `packages/eval/fixtures/synthetic-recall/*.json` carries
+`scenario_id` (stable) + `version` (incremented on edit). The diff engine
+matches by `scenario_id`; if a scenario's `version` changes, the diff
+engine reports the scenario as **rebaselined** rather than as a delta —
+so editing one scenario does not silently move the overall R@5 number.
+
+Adding a brand-new `scenario_id` is reported separately as
+**new-scenario**.
+
+## How to add a new entry (operator handbook)
+
+```bash
+# from the alaya repo root (or any worktree on a branch you want to bench)
+rtk pnpm install
+rtk pnpm exec alaya-eval self           # writes self/<date>-<sha7>/
+rtk pnpm exec alaya-eval longmemeval    # writes public/<date>-<sha7>/
+rtk pnpm exec alaya-eval diff self      # prints diff vs prev
+rtk pnpm exec alaya-eval diff public
+```
+
+Then commit the new `<date>-<sha7>/` directory + `latest-baseline.json`
+update. If `findings.md` exists, open the corresponding backlog entry in
+the same PR.
