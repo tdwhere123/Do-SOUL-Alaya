@@ -1,0 +1,73 @@
+{
+  "signal_id": "signal_25209e27-c738-495b-a3aa-d76029628ff2",
+  "memory_id": "590ee9d8-baff-4d07-a418-25ad571f70b0",
+  "proposal_id": "8efa207f-84d9-4559-86ee-2182452bbcfb",
+  "captured_at": "2026-05-14T09:58:22Z",
+  "captured_by": "apps/bench-runner/scripts/audit-trail-witness.mjs",
+  "alaya_commit": "01385ce",
+  "events": [
+    {
+      "event_id": "d42137df-4817-4761-8bc5-2d84fedfa3ea",
+      "event_type": "soul.signal.emitted",
+      "entity_type": "candidate_memory_signal",
+      "entity_id": "signal_25209e27-c738-495b-a3aa-d76029628ff2",
+      "created_at": "2026-05-14T09:58:22.823Z"
+    },
+    {
+      "event_id": "7e4699f3-e7c3-4995-a250-51426e2ead7c",
+      "event_type": "soul.signal.triaged",
+      "entity_type": "candidate_memory_signal",
+      "entity_id": "signal_25209e27-c738-495b-a3aa-d76029628ff2",
+      "created_at": "2026-05-14T09:58:22.826Z"
+    },
+    {
+      "event_id": "a1ba6850-b318-4ec4-a7b5-2042b1bcb82f",
+      "event_type": "soul.memory.created",
+      "entity_type": "memory_entry",
+      "entity_id": "590ee9d8-baff-4d07-a418-25ad571f70b0",
+      "created_at": "2026-05-14T09:58:22.837Z"
+    },
+    {
+      "event_id": "54591b47-0c49-4d92-a4b2-1b7c9d1bf1cf",
+      "event_type": "soul.signal.materialized",
+      "entity_type": "candidate_memory_signal",
+      "entity_id": "signal_25209e27-c738-495b-a3aa-d76029628ff2",
+      "created_at": "2026-05-14T09:58:22.846Z"
+    },
+    {
+      "event_id": "7e2cf00a-0af7-44c6-945f-7d79e121c97a",
+      "event_type": "soul.proposal.created",
+      "entity_type": "proposal",
+      "entity_id": "8efa207f-84d9-4559-86ee-2182452bbcfb",
+      "created_at": "2026-05-14T09:58:22.864Z"
+    },
+    {
+      "event_id": "53e270f3-ec46-4c13-b170-c21c92df77d8",
+      "event_type": "soul.memory.updated",
+      "entity_type": "memory_entry",
+      "entity_id": "590ee9d8-baff-4d07-a418-25ad571f70b0",
+      "created_at": "2026-05-14T09:58:22.877Z"
+    },
+    {
+      "event_id": "e651194f-8098-4093-be93-347a959bb8bf",
+      "event_type": "soul.review.created",
+      "entity_type": "proposal",
+      "entity_id": "8efa207f-84d9-4559-86ee-2182452bbcfb",
+      "created_at": "2026-05-14T09:58:22.877Z"
+    },
+    {
+      "event_id": "8b76b3d4-2a84-4a3f-8004-de73d5183131",
+      "event_type": "soul.review.completed",
+      "entity_type": "proposal",
+      "entity_id": "8efa207f-84d9-4559-86ee-2182452bbcfb",
+      "created_at": "2026-05-14T09:58:22.877Z"
+    },
+    {
+      "event_id": "ae826466-392f-4fad-b69a-20e1d83c53bc",
+      "event_type": "soul.proposal.resolved",
+      "entity_type": "proposal",
+      "entity_id": "8efa207f-84d9-4559-86ee-2182452bbcfb",
+      "created_at": "2026-05-14T09:58:22.877Z"
+    }
+  ]
+}
