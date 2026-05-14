@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {
   access,
   mkdir,
@@ -110,7 +111,10 @@ export async function writeEntry(
   const findingsPath = path.join(entryRoot, FINDINGS_FILENAME);
 
   const pointerPath = path.join(benchRoot, LATEST_BASELINE_FILENAME);
-  const pointerTmp = `${pointerPath}.${process.pid}.tmp`;
+  // Pointer tmp suffix combines pid + 8-byte random so two same-PID
+  // concurrent writeEntry calls (worker_threads) cannot collide on the
+  // tmp filename even though Node's main thread is single-runtime.
+  const pointerTmp = `${pointerPath}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
   await writeFile(
     pointerTmp,
     JSON.stringify({ slug, kpi_path: path.relative(benchRoot, kpiPath) }, null, 2) + "\n",
@@ -123,9 +127,10 @@ export async function writeEntry(
 
 // @anchor write-entry-tmp-filter — staging directories created by
 // writeEntry must never surface as "slugs" to readers. Pattern matches
-// `.tmp-<slug>-<mkdtemp-suffix>`. Also rejects anything that doesn't
-// match the canonical SLUG_PATTERN so future schemes that leak through
-// fail loud rather than silent.
+// `.tmp-<slug>-<mkdtemp-suffix>`. listEntries also skips any directory
+// whose name does not match the canonical SLUG_PATTERN — that is a
+// silent skip by design (a future archive may carry sidecar dirs like
+// `evidence/` or `datasets/` at the bench root that are not slugs).
 const STAGING_PREFIX = ".tmp-";
 
 export async function listEntries(
