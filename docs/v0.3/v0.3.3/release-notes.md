@@ -39,11 +39,28 @@ bootstrap reconciliation truth, doctor diagnostics, and keychain hygiene.
 
 ## Compatibility
 
-- No MCP tool surface change.
-- No protocol zod schema change.
-- No EventLog payload schema change.
+- No MCP tool surface change (no new MCP tool names, no removed
+  request/response fields).
+- Protocol zod schemas: additive only. `MemoryGraphEdgeTypeSchema`
+  gains a new enum value `"recalls"`
+  (`packages/protocol/src/soul/memory-graph.ts`), which is the
+  RECALLS-edge marker persisted by used recall reports.
+- EventLog payload schemas: additive only. The same `"recalls"`
+  enum value is now a valid `edge_type` in
+  `SoulGraphEdgeCreatedPayloadSchema`
+  (`packages/protocol/src/events/graph-auditor.ts`); a new
+  `soul.graph.edge_created` row is now emitted on each persisted
+  RECALLS edge. No existing payload field is removed or renamed.
 - No runtime config schema change.
-- No SQLite migration.
+- No SQLite migration (`memory_graph_edges` table already existed
+  before v0.3.3; v0.3.3 only adds a new `edge_type` value).
+- Per invariants §25, additive enum values are additive changes; in
+  a publicly released line they would warrant a minor bump
+  (0.3.x → 0.4.0). v0.3.3 is unreleased and the workspace bumped
+  0.3.2 → 0.3.3 locally for binary-version alignment only — see
+  `chore(v0.3.3): bump workspace packages to 0.3.3` (commit
+  `e77668c`). The next public release should reconsider whether
+  the v0.3.0 → v0.3.3 delta deserves a 0.4.0 stamp.
 - Operators with persisted invalid keychain refs should repair their
   config by re-running `alaya install --keychain` or editing the local
   runtime config before relying on doctor/runtime startup.
