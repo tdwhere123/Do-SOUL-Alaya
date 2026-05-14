@@ -2,12 +2,14 @@
   "host": "claude-code",
   "capture_kind": "live-usage-witness",
   "note": "Snapshot of real attached-host soul.recall -> soul.report_context_usage chains from a normal conversation; not a synthetic capture. agent_target=mcp rows pre-date the v0.3.0 attach env stamp; re-attach + refresh to get host-labelled rows.",
-  "daemon_version": "0.3.0",
+  "daemon_version": "0.3.2",
   "source_db": "~/.config/alaya/alaya.db",
-  "captured_at": "2026-05-13T04:08:10.155Z",
-  "chain_count": 6,
+  "captured_at": "2026-05-14T01:21:29.705Z",
+  "chain_count": 18,
   "agent_targets": [
-    "mcp"
+    "mcp",
+    "codex",
+    "claude-code"
   ],
   "delivery_ids": [
     "delivery_327b5c4c-0e0a-4dc6-8a84-6de941d20375",
@@ -15,6 +17,18 @@
     "delivery_de8ba777-ee99-4e36-a168-bbadf7f26f6b",
     "delivery_0035be08-ee24-47cc-8da5-dc1979a87218",
     "delivery_e14c239a-2295-4039-8dfe-8ad582d5ef2c",
-    "delivery_d78793d5-1cce-479b-a499-2eedaf18967b"
+    "delivery_d78793d5-1cce-479b-a499-2eedaf18967b",
+    "delivery_73fa4981-8d1d-4035-81e6-68ee8356510c",
+    "delivery_6fe5f89b-d824-4059-967a-4b9d8d7d1a9b",
+    "delivery_b767dee3-d572-4d7a-a67d-a3bd7e3f3e6b",
+    "delivery_38a97103-0deb-4ed2-8911-7df7109dfdb7",
+    "delivery_4c555199-b799-4f9d-9bb6-9f1bc4f03d58",
+    "delivery_28f076ab-7c9f-4c2e-bce3-ea9344e095aa",
+    "delivery_8b7781b9-91be-4f2e-b38f-230d5cec35bd",
+    "delivery_776cff10-b845-4944-87c6-805ae19f889c",
+    "delivery_77f30800-503a-4925-a6c6-68fbdaa809af",
+    "delivery_6bb9f405-e4d3-41ec-b1bc-0ebfb4dac9a9",
+    "delivery_d40eecb1-f6be-4fd0-a2bf-3cd4918ef71b",
+    "delivery_50292882-51d8-47d2-8133-9dad3faf99fe"
   ]
 }
