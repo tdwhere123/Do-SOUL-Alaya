@@ -24,6 +24,8 @@ export function entrySlug(runAt: Date, commitSha7: string): string {
   return `${stamp}-${commitSha7}`;
 }
 
+const SLUG_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{6}Z-[0-9a-f]{7,40}$/;
+
 export async function writeEntry(
   layout: HistoryLayout,
   benchName: BenchName,
@@ -34,6 +36,11 @@ export async function writeEntry(
 ): Promise<HistoryEntry> {
   if (slug.includes("/") || slug.includes("\\") || slug.includes("..") || slug.length === 0) {
     throw new Error(`invalid slug: '${slug}' contains a path separator or '..' token`);
+  }
+  if (!SLUG_PATTERN.test(slug)) {
+    throw new Error(
+      `invalid slug: '${slug}' must match <YYYY-MM-DDTHHMMSSZ>-<sha7+> (use entrySlug helper)`
+    );
   }
   const benchRoot = path.join(layout.historyRoot, benchName);
   const entryRoot = path.join(benchRoot, slug);

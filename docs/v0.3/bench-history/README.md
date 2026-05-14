@@ -81,7 +81,7 @@ docs/v0.3/bench-history/
     ]
   },
   "diff_vs_previous": {
-    "previous_run": "2026-05-13-abcdef0",
+    "previous_run": "2026-05-13T120000Z-abcdef0",
     "r_at_5_delta_pp": 0.0,
     "verdict_per_kpi": { "r_at_5": "ok" }
   }
@@ -92,14 +92,17 @@ docs/v0.3/bench-history/
 
 Defined in `packages/eval/src/thresholds.ts`. Reference values:
 
+Bands are inclusive (`≥`): a drop of exactly 2.0 pp registers as `warn`,
+a drop of exactly 5.0 pp registers as `fail`.
+
 | KPI | ⚠ (warn) | ✗ (fail, exit 1) |
 |---|---|---|
-| `r_at_5` | drop > 2.0 pp | drop > 5.0 pp |
-| `r_at_10` | drop > 2.0 pp | drop > 5.0 pp |
-| `latency_ms_p95` | +20% | +50% |
-| `token_saved_ratio_vs_full_prompt` | drop > 2.0 pp | drop > 5.0 pp |
+| `r_at_5` | drop ≥ 2.0 pp | drop ≥ 5.0 pp |
+| `r_at_10` | drop ≥ 2.0 pp | drop ≥ 5.0 pp |
+| `latency_ms_p95` | ≥ +20% | ≥ +50% |
+| `token_saved_ratio_vs_full_prompt` | drop ≥ 2.0 pp | drop ≥ 5.0 pp |
 | golden-set hit | any individual fixture flips hit→miss | ✗ same row |
-| `tier_distribution.hot` share | drop > 5.0 pp | drop > 10.0 pp |
+| `tier_distribution.hot` share | drop ≥ 5.0 pp | drop ≥ 10.0 pp |
 
 A `✗` on any of these makes `alaya-eval` exit non-zero. CI hookup is
 optional today; the contract is that the exit code is meaningful.
@@ -123,12 +126,12 @@ the worst verdict (they are advisory, not gating).
 ```bash
 # from the alaya repo root (or any worktree on a branch you want to bench)
 rtk pnpm install
-rtk pnpm exec alaya-eval self           # writes self/<date>-<sha7>/
-rtk pnpm exec alaya-eval longmemeval    # writes public/<date>-<sha7>/
+rtk pnpm exec alaya-eval self           # writes self/<date>T<HHMMSS>Z-<sha7>/
+rtk pnpm exec alaya-eval longmemeval    # writes public/<date>T<HHMMSS>Z-<sha7>/
 rtk pnpm exec alaya-eval diff self      # prints diff vs prev
 rtk pnpm exec alaya-eval diff public
 ```
 
-Then commit the new `<date>-<sha7>/` directory + `latest-baseline.json`
-update. If `findings.md` exists, open the corresponding backlog entry in
-the same PR.
+Then commit the new `<date>T<HHMMSS>Z-<sha7>/` directory +
+`latest-baseline.json` update. If `findings.md` exists, open the
+corresponding backlog entry in the same PR.

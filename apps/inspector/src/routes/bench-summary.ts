@@ -28,29 +28,54 @@ export function registerInspectorBenchSummaryRoutes(
   options: BenchSummaryOptions
 ): void {
   app.get("/api/bench-summary", async (context) => {
-    const [selfSummary, publicSummary] = await Promise.all([
+    const [selfResult, publicResult] = await Promise.all([
       summarizeSafe(options.historyRoot, "self"),
       summarizeSafe(options.historyRoot, "public")
     ]);
     return context.json(
       {
         success: true,
-        data: { self: selfSummary, public: publicSummary }
+        data: {
+          self: selfResult.value,
+          public: publicResult.value,
+          errors: {
+            self: selfResult.error,
+            public: publicResult.error
+          }
+        }
       },
       200
     );
   });
 }
 
+interface SummarizeOutcome {
+  readonly value: BenchSummary | null;
+  readonly error: string | null;
+}
+
 async function summarizeSafe(
   historyRoot: string,
   benchName: BenchName
-): Promise<BenchSummary | null> {
+): Promise<SummarizeOutcome> {
   try {
-    return await summarize(historyRoot, benchName);
-  } catch {
-    return null;
+    return { value: await summarize(historyRoot, benchName), error: null };
+  } catch (err) {
+    const reason = classifyError(err);
+    console.error(`[bench-summary] ${benchName} summary failed:`, reason, err);
+    return { value: null, error: reason };
   }
+}
+
+function classifyError(err: unknown): string {
+  if (err instanceof SyntaxError) return "kpi_json_invalid";
+  const name = err instanceof Error ? err.name : "";
+  if (name === "ZodError") return "kpi_schema_invalid";
+  if (err !== null && typeof err === "object" && "code" in err) {
+    const code = (err as { code: unknown }).code;
+    if (typeof code === "string") return `io_${code.toLowerCase()}`;
+  }
+  return "summary_failed";
 }
 
 async function summarize(

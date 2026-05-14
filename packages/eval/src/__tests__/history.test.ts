@@ -74,33 +74,35 @@ describe("history archive", () => {
   });
 
   it("orders same-day slugs by ISO timestamp, not by sha7", async () => {
-    // Two runs on the same date — the lex order of sha7 ('a...' < 'z...')
-    // would put the morning run last if the date prefix alone drove sorting.
+    // Two runs on the same date — the sha7 chosen for the later run is
+    // lexicographically smaller, so a date-only slug would have put it
+    // before the morning run. The ISO-T slug should keep them in the
+    // correct chronological order regardless of sha7 ordering.
     await writeEntry(
       layout,
       "self",
-      "2026-05-14T080000Z-zzzzzzz",
-      buildPayload("zzzzzzz"),
+      "2026-05-14T080000Z-ffeeddc",
+      buildPayload("ffeeddc"),
       "report",
       null
     );
     await writeEntry(
       layout,
       "self",
-      "2026-05-14T180000Z-aaaaaaa",
-      buildPayload("aaaaaaa"),
+      "2026-05-14T180000Z-0011223",
+      buildPayload("0011223"),
       "report",
       null
     );
     const slugs = await listEntries(layout, "self");
     expect(slugs).toEqual([
-      "2026-05-14T080000Z-zzzzzzz",
-      "2026-05-14T180000Z-aaaaaaa"
+      "2026-05-14T080000Z-ffeeddc",
+      "2026-05-14T180000Z-0011223"
     ]);
     const latest = await readLatest(layout, "self");
-    expect(latest?.alaya_commit).toBe("aaaaaaa");
-    const previous = await readPrevious(layout, "self", "2026-05-14T180000Z-aaaaaaa");
-    expect(previous?.alaya_commit).toBe("zzzzzzz");
+    expect(latest?.alaya_commit).toBe("0011223");
+    const previous = await readPrevious(layout, "self", "2026-05-14T180000Z-0011223");
+    expect(previous?.alaya_commit).toBe("ffeeddc");
   });
 
   it("returns the newest slug from listEntries and tracks readLatest / readPrevious", async () => {
@@ -173,22 +175,31 @@ describe("history archive", () => {
     await writeEntry(
       layout,
       "self",
-      "2026-05-14T080000Z-older",
-      buildPayload("older00"),
+      "2026-05-14T080000Z-0aaaaaa",
+      buildPayload("0aaaaaa"),
       "report",
       null
     );
     await writeEntry(
       layout,
       "self",
-      "2026-05-15T080000Z-newer",
-      buildPayload("newer00"),
+      "2026-05-15T080000Z-0bbbbbb",
+      buildPayload("0bbbbbb"),
       "report",
       null
     );
     // writeEntry repointed the pointer to the latest write; readLatest should
     // honour the pointer rather than re-scan the directory.
     const latest = await readLatest(layout, "self");
-    expect(latest?.alaya_commit).toBe("newer00");
+    expect(latest?.alaya_commit).toBe("0bbbbbb");
+  });
+
+  it("rejects slugs that violate the canonical ISO-T pattern", async () => {
+    await expect(
+      writeEntry(layout, "self", "2026-05-14-abcdef0", buildPayload("abc"), "r", null)
+    ).rejects.toThrow(/must match/);
+    await expect(
+      writeEntry(layout, "self", "2026-05-14T080000Z-zzzzzzz", buildPayload("abc"), "r", null)
+    ).rejects.toThrow(/must match/);
   });
 });

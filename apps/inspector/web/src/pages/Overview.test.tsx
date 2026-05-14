@@ -54,7 +54,7 @@ describe("OverviewPage", () => {
       if (url.includes("/bench-summary")) {
         return jsonResponse({
           success: true,
-          data: { self: null, public: null }
+          data: { self: null, public: null, errors: { self: null, public: null } }
         });
       }
       return jsonResponse({}, 404);
@@ -104,7 +104,7 @@ describe("OverviewPage", () => {
       if (url.includes("/bench-summary")) {
         return jsonResponse({
           success: true,
-          data: { self: null, public: null }
+          data: { self: null, public: null, errors: { self: null, public: null } }
         });
       }
       return jsonResponse({}, 404);
@@ -143,7 +143,7 @@ describe("OverviewPage", () => {
           success: true,
           data: {
             self: {
-              latest_slug: "2026-05-14-ec44a05",
+              latest_slug: "2026-05-14T100000Z-ec44a05",
               history_count: 3,
               payload: {
                 bench_name: "self",
@@ -152,12 +152,13 @@ describe("OverviewPage", () => {
                 kpi: { r_at_5: 0.912 }
               },
               diff: {
-                previous_slug: "2026-05-12-aaaaaaa",
+                previous_slug: "2026-05-12T100000Z-aaaaaaa",
                 worst_verdict: "warn",
                 r_at_5_delta_pp: -2.1
               }
             },
-            public: null
+            public: null,
+            errors: { self: null, public: null }
           }
         });
       }
