@@ -51,6 +51,12 @@ describe("OverviewPage", () => {
       if (url.includes("/status")) {
         return jsonResponse({ success: true, data: VALID_STATUS });
       }
+      if (url.includes("/bench-summary")) {
+        return jsonResponse({
+          success: true,
+          data: { self: null, public: null }
+        });
+      }
       return jsonResponse({}, 404);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -95,6 +101,12 @@ describe("OverviewPage", () => {
       if (url.includes("/status")) {
         return jsonResponse({ success: true, data: VALID_STATUS });
       }
+      if (url.includes("/bench-summary")) {
+        return jsonResponse({
+          success: true,
+          data: { self: null, public: null }
+        });
+      }
       return jsonResponse({}, 404);
     });
 
@@ -105,6 +117,58 @@ describe("OverviewPage", () => {
       )
     );
     expect(screen.getByTestId("overview-card-proposals").textContent).toContain("—");
+  });
+
+  it("renders both Latest Bench cards with an empty placeholder when no entries exist", async () => {
+    renderOverview();
+    expect(await screen.findByTestId("overview-bench-self-empty")).toBeTruthy();
+    expect(screen.getByTestId("overview-bench-public-empty")).toBeTruthy();
+    expect(screen.getByTestId("overview-bench-self-empty").textContent).toMatch(
+      /no benchmark entries yet/i
+    );
+  });
+
+  it("renders the latest R@5 + delta when a self-bench entry is present", async () => {
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(async (input: FetchInput) => {
+      const url = urlOf(input);
+      if (url.includes("/proposals/ws1/pending")) {
+        return jsonResponse({ success: true, data: { proposals: [], total_count: 0 } });
+      }
+      if (url.includes("/status")) {
+        return jsonResponse({ success: true, data: VALID_STATUS });
+      }
+      if (url.includes("/bench-summary")) {
+        return jsonResponse({
+          success: true,
+          data: {
+            self: {
+              latest_slug: "2026-05-14-ec44a05",
+              history_count: 3,
+              payload: {
+                bench_name: "self",
+                split: "synthetic",
+                run_at: "2026-05-14T10:00:00.000Z",
+                kpi: { r_at_5: 0.912 }
+              },
+              diff: {
+                previous_slug: "2026-05-12-aaaaaaa",
+                worst_verdict: "warn",
+                r_at_5_delta_pp: -2.1
+              }
+            },
+            public: null
+          }
+        });
+      }
+      return jsonResponse({}, 404);
+    });
+
+    renderOverview();
+    const selfCard = await screen.findByTestId("overview-bench-self");
+    expect(selfCard.textContent).toContain("91.2%");
+    expect(selfCard.textContent).toMatch(/-2.1pp/);
+    expect(selfCard.textContent).toContain("3 historical entries");
   });
 });
 

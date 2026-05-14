@@ -1,7 +1,6 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { mkdtemp } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { createInspectorApp, INSPECTOR_ROUTE_SURFACE } from "../app.js";
 
@@ -18,6 +17,7 @@ describe("inspector routes", () => {
       "PATCH /api/config/runtime/embedding-supplement",
       "GET /api/config/:workspaceId/garden-compute",
       "PATCH /api/config/runtime/garden-compute",
+      "GET /api/bench-summary",
       "GET /api/embedding-status/:workspaceId",
       "GET /api/graph/:workspaceId",
       "GET /api/recall-stats/:workspaceId",
@@ -383,6 +383,77 @@ describe("inspector routes", () => {
     await expect(graphWhitespace.json()).resolves.toEqual({ error: "workspace_forbidden" });
     await expect(recallStats.json()).resolves.toEqual({ error: "workspace_forbidden" });
     expect(calls).toEqual([]);
+  });
+
+  it("returns empty bench-summary when the history root does not exist yet", async () => {
+    const missing = await mkdtemp(path.join(tmpdir(), "bench-history-empty-"));
+    await rm(missing, { recursive: true, force: true });
+
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      benchHistoryRoot: missing,
+      staticRoot: await mkdtemp(path.join(tmpdir(), "inspector-static-")),
+      fetchImpl: async () => Response.json({}, { status: 500 })
+    });
+
+    const response = await app.request("/api/bench-summary?token=token");
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      success: true,
+      data: { self: null, public: null }
+    });
+  });
+
+  it("summarizes the latest bench-history entry when one is present", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "bench-history-with-entries-"));
+    const selfRoot = path.join(root, "self", "2026-05-14-ec44a05");
+    await mkdir(selfRoot, { recursive: true });
+    const payload = {
+      bench_name: "self",
+      split: "synthetic",
+      run_at: "2026-05-14T10:00:00.000Z",
+      alaya_commit: "ec44a05",
+      alaya_version: "0.3.6",
+      embedding_provider: "local-heuristic",
+      chat_provider: "n/a",
+      dataset: { name: "synthetic", size: 12, source: "internal" },
+      kpi: {
+        r_at_1: 0.7,
+        r_at_5: 0.9,
+        r_at_10: 0.93,
+        latency_ms_p50: 60,
+        latency_ms_p95: 110,
+        token_saved_ratio_vs_full_prompt: 0.88,
+        tier_distribution: { hot: 50, warm: 30, cold: 20 },
+        degradation_reasons: {
+          none: 80,
+          warm_cascade_engaged: 12,
+          cold_cascade_engaged: 8
+        },
+        per_scenario: []
+      }
+    };
+    await writeFile(path.join(selfRoot, "kpi.json"), JSON.stringify(payload), "utf8");
+
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      benchHistoryRoot: root,
+      staticRoot: await mkdtemp(path.join(tmpdir(), "inspector-static-")),
+      fetchImpl: async () => Response.json({}, { status: 500 })
+    });
+
+    const response = await app.request("/api/bench-summary?token=token");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      success: boolean;
+      data: { self: { history_count: number; latest_slug: string } | null };
+    };
+    expect(body.data.self?.history_count).toBe(1);
+    expect(body.data.self?.latest_slug).toBe("2026-05-14-ec44a05");
   });
 
   it("rejects workspace-scoped API paths when the Inspector app is missing its launch workspace", async () => {

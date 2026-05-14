@@ -56,6 +56,9 @@ importers:
 
   apps/inspector:
     dependencies:
+      '@do-soul/alaya-eval':
+        specifier: workspace:*
+        version: link:../../packages/eval
       '@do-soul/alaya-protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -151,6 +154,12 @@ importers:
       '@do-soul/alaya-protocol':
         specifier: workspace:*
         version: link:../protocol
+
+  packages/eval:
+    dependencies:
+      zod:
+        specifier: ^3.24.2
+        version: 3.25.76
 
   packages/protocol:
     dependencies:

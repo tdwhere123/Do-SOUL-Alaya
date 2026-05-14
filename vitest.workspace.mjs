@@ -59,6 +59,7 @@ export default [
   packageProject("@do-soul/alaya-core", "packages/core"),
   packageProject("@do-soul/alaya-soul", "packages/soul"),
   packageProject("@do-soul/alaya-engine-gateway", "packages/engine-gateway"),
+  packageProject("@do-soul/alaya-eval", "packages/eval"),
   appProject("@do-soul/alaya-core-daemon", "apps/core-daemon"),
   appProject("@do-soul/alaya-inspector", "apps/inspector"),
   // The inspector web frontend has its own vitest config (jsdom env, RTL setup).

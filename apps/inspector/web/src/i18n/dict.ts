@@ -46,6 +46,16 @@ export const zh = {
   "overview:linkStatus": "查看完整状态 →",
   "overview:loading": "加载总览中…",
   "overview:degraded": "状态查询退避中，最近一次：{message}",
+  "overview:bench.section": "最近 Benchmark",
+  "overview:bench.self.label": "Self-bench",
+  "overview:bench.self.hint": "黄金 fixtures + 合成 scenario；运行：rtk pnpm exec alaya-eval self",
+  "overview:bench.public.label": "LongMemEval-S",
+  "overview:bench.public.hint": "公开 benchmark；运行：rtk pnpm exec alaya-eval longmemeval",
+  "overview:bench.empty": "尚无 benchmark 记录。",
+  "overview:bench.loading": "加载 benchmark 摘要中…",
+  "overview:bench.delta": "Δ vs 上一版 {delta}",
+  "overview:bench.firstBaseline": "首份 baseline",
+  "overview:bench.history": "共 {count} 份历史记录",
 
   // ── common ──────────────────────────────────────────────────────────
   "common:loading": "加载中…",
@@ -233,6 +243,16 @@ export const en: Record<DictKey, string> = {
   "overview:linkStatus": "Full status →",
   "overview:loading": "Loading overview…",
   "overview:degraded": "Status feed degraded, last: {message}",
+  "overview:bench.section": "Latest Benchmarks",
+  "overview:bench.self.label": "Self-bench",
+  "overview:bench.self.hint": "Golden fixtures + synthetic scenarios. Run: rtk pnpm exec alaya-eval self",
+  "overview:bench.public.label": "LongMemEval-S",
+  "overview:bench.public.hint": "Public benchmark. Run: rtk pnpm exec alaya-eval longmemeval",
+  "overview:bench.empty": "No benchmark entries yet.",
+  "overview:bench.loading": "Loading bench summary…",
+  "overview:bench.delta": "Δ vs prev {delta}",
+  "overview:bench.firstBaseline": "first baseline",
+  "overview:bench.history": "{count} historical entries",
 
   // common
   "common:loading": "Loading…",

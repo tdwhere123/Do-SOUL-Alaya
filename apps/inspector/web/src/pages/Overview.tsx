@@ -1,6 +1,14 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Activity, CheckSquare, Layers, RefreshCcw, Zap } from "lucide-react";
+import {
+  Activity,
+  CheckSquare,
+  FlaskConical,
+  Globe2,
+  Layers,
+  RefreshCcw,
+  Zap
+} from "lucide-react";
 import { apiFetch, getWorkspaceId, type ApiError } from "../api";
 import { useDaemonHealth } from "../hooks/useDaemonHealth";
 import { useI18n } from "../i18n/Locale";
@@ -11,10 +19,37 @@ interface PendingCountEnvelope {
   readonly data: { readonly total_count: number };
 }
 
+interface BenchSummaryShape {
+  readonly latest_slug: string;
+  readonly history_count: number;
+  readonly payload: {
+    readonly bench_name: "self" | "public";
+    readonly split: string;
+    readonly run_at: string;
+    readonly kpi: { readonly r_at_5: number };
+  };
+  readonly diff: {
+    readonly previous_slug: string | null;
+    readonly worst_verdict: "ok" | "warn" | "fail";
+    readonly r_at_5_delta_pp: number | null;
+  };
+}
+
+interface BenchSummaryEnvelope {
+  readonly success: boolean;
+  readonly data: {
+    readonly self: BenchSummaryShape | null;
+    readonly public: BenchSummaryShape | null;
+  };
+}
+
 export default function OverviewPage() {
   const { t } = useI18n();
   const { state, indicator, refresh, refreshing } = useDaemonHealth();
   const [pendingCount, setPendingCount] = useState<number | null>(null);
+  const [benchSelf, setBenchSelf] = useState<BenchSummaryShape | null>(null);
+  const [benchPublic, setBenchPublic] = useState<BenchSummaryShape | null>(null);
+  const [benchLoaded, setBenchLoaded] = useState(false);
   const workspaceId = getWorkspaceId();
 
   useEffect(() => {
@@ -37,6 +72,28 @@ export default function OverviewPage() {
       cancelled = true;
     };
   }, [workspaceId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const envelope = await apiFetch<BenchSummaryEnvelope>("/bench-summary");
+        if (cancelled) return;
+        setBenchSelf(envelope.data.self);
+        setBenchPublic(envelope.data.public);
+      } catch (err) {
+        if (cancelled) return;
+        if ((err as ApiError).status === 401) return;
+        setBenchSelf(null);
+        setBenchPublic(null);
+      } finally {
+        if (!cancelled) setBenchLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const degradedMessage = state.kind === "degraded" ? state.message : null;
   const daemonValue = resolveDaemonLabelKey(state);
@@ -123,9 +180,114 @@ export default function OverviewPage() {
             testId="overview-card-tier"
           />
         </div>
+
+        <section className="mt-10" aria-labelledby="overview-bench-heading">
+          <h2
+            id="overview-bench-heading"
+            className="text-sm font-bold text-ink-600 uppercase tracking-widest mb-4"
+          >
+            {t("overview:bench.section")}
+          </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <BenchCard
+              icon={<FlaskConical className="w-4 h-4" />}
+              label={t("overview:bench.self.label")}
+              hint={t("overview:bench.self.hint")}
+              empty={t("overview:bench.empty")}
+              summary={benchSelf}
+              loaded={benchLoaded}
+              t={t}
+              testId="overview-bench-self"
+            />
+            <BenchCard
+              icon={<Globe2 className="w-4 h-4" />}
+              label={t("overview:bench.public.label")}
+              hint={t("overview:bench.public.hint")}
+              empty={t("overview:bench.empty")}
+              summary={benchPublic}
+              loaded={benchLoaded}
+              t={t}
+              testId="overview-bench-public"
+            />
+          </div>
+        </section>
       </div>
     </div>
   );
+}
+
+interface BenchCardProps {
+  readonly icon: ReactNode;
+  readonly label: string;
+  readonly hint: string;
+  readonly empty: string;
+  readonly summary: BenchSummaryShape | null;
+  readonly loaded: boolean;
+  readonly t: (key: DictKey, params?: Record<string, string | number>) => string;
+  readonly testId?: string;
+}
+
+function BenchCard({
+  icon,
+  label,
+  hint,
+  empty,
+  summary,
+  loaded,
+  t,
+  testId
+}: BenchCardProps) {
+  return (
+    <div
+      data-testid={testId}
+      className="p-5 bg-beige-50 border border-beige-200 rounded-lg flex flex-col gap-3"
+    >
+      <div className="flex items-center gap-2 text-ink-700/40">
+        {icon}
+        <span className="text-[10px] uppercase tracking-widest font-bold">
+          {label}
+        </span>
+      </div>
+      {summary === null ? (
+        <div className="text-[11px] text-ink-700/55" data-testid={`${testId}-empty`}>
+          {loaded ? empty : t("overview:bench.loading")}
+        </div>
+      ) : (
+        <>
+          <div className="text-3xl font-bold text-ink-600 tabular-nums">
+            {formatRatio(summary.payload.kpi.r_at_5)}
+          </div>
+          <div className="text-[11px] text-ink-700/55">
+            R@5 ·{" "}
+            {summary.diff.r_at_5_delta_pp === null
+              ? t("overview:bench.firstBaseline")
+              : t("overview:bench.delta", {
+                  delta: formatDeltaPp(summary.diff.r_at_5_delta_pp)
+                })}
+          </div>
+          <div className="text-[10px] uppercase tracking-widest text-ink-700/55">
+            {summary.payload.split} · {summary.latest_slug}
+          </div>
+          <div className="text-[10px] text-ink-700/40">
+            {t("overview:bench.history", { count: summary.history_count })}
+          </div>
+        </>
+      )}
+      <div className="text-[10px] text-ink-700/40 mt-auto">{hint}</div>
+    </div>
+  );
+}
+
+function formatRatio(value: number): string {
+  if (!Number.isFinite(value)) return "—";
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatDeltaPp(deltaPp: number): string {
+  if (!Number.isFinite(deltaPp)) return "—";
+  if (deltaPp === 0) return "0pp";
+  const sign = deltaPp > 0 ? "+" : "";
+  return `${sign}${deltaPp.toFixed(1)}pp`;
 }
 
 function resolveDaemonLabelKey(
