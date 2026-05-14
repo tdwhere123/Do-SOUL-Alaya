@@ -300,7 +300,20 @@ async function runMergeLongMemEvalCommand(
     // see also: packages/eval/src/kpi-schema.ts §harness_mode for the
     // mcp_propose_review vs direct_db_seed audit-distinguishability
     // contract.
-    const SCALAR_IDENTITY_FIELDS: ReadonlyArray<keyof KpiPayload> = [
+    // @anchor scalar-identity-field-narrowing — the union literal
+    // shape (vs `keyof KpiPayload`) makes adding a non-scalar key like
+    // `dataset` or `kpi` a compile error rather than a silent
+    // object-reference comparison.
+    type ScalarIdentityField =
+      | "split"
+      | "sample_size"
+      | "harness_mode"
+      | "embedding_provider"
+      | "chat_provider"
+      | "bench_name"
+      | "alaya_version"
+      | "alaya_commit";
+    const SCALAR_IDENTITY_FIELDS: ReadonlyArray<ScalarIdentityField> = [
       "split",
       "sample_size",
       "harness_mode",
