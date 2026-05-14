@@ -14,7 +14,6 @@ import {
   type PerScenarioRow
 } from "@do-soul/alaya-eval";
 import { startBenchDaemon } from "../harness/daemon.js";
-import { previewContainsExpectedPrefix } from "../scoring.js";
 import { loadDataset, type FetchResult } from "./fetch.js";
 import type { LongMemEvalVariant } from "./dataset.js";
 
@@ -37,9 +36,17 @@ export interface LongMemEvalRunResult {
 /**
  * @anchor longmemeval-runner — per-question workspace, seed-then-recall
  *
- * Hit rule: any top-k recall result that maps back to a seeded memory whose
- * sessionId is in answer_session_ids and has_answer === true counts as a hit.
- * see also: harness/daemon.ts — proposeMemory / acceptProposal helpers
+ * Scoring: object_id sidecar. Each seeded turn produces a durable memory
+ * via the MCP propose+review chain (see harness/daemon.ts proposeMemory).
+ * The returned memoryId is the durable object_id that soul.recall returns
+ * in pointer.object_id, so scoring is by id equality — never by string
+ * preview overlap.
+ *
+ * Hit rule: a recall result is a hit iff its object_id maps in the sidecar
+ * to a seed whose hasAnswer === true AND whose sessionId is in
+ * question.answer_session_ids.
+ *
+ * see also: apps/bench-runner/src/harness/daemon.ts — proposeMemory chain
  */
 export async function runLongMemEval(
   opts: LongMemEvalRunOptions
@@ -51,8 +58,10 @@ export async function runLongMemEval(
   const commitSha7 = resolveCommitSha7();
   const runAt = new Date();
 
-  // sidecar: maps proposalId → seed metadata so we can score recall pointers
-  type SidecarEntry = { sessionId: string; hasAnswer: boolean; content: string };
+  // Sidecar maps durable memory object_id -> seed metadata. The harness
+  // owns this map (the daemon doesn't need it). hasAnswer flags whether
+  // the seed turn was tagged has_answer=true in the dataset.
+  type SidecarEntry = { sessionId: string; hasAnswer: boolean };
 
   const perScenario: PerScenarioRow[] = [];
   const latencies: number[] = [];
@@ -72,13 +81,9 @@ export async function runLongMemEval(
     });
 
     try {
-      // proposalId → seed metadata (used for sidecar lookup)
       const sidecar = new Map<string, SidecarEntry>();
-      // Store all seeded contents for fallback content-match scoring
-      const answerContents = new Set<string>();
       const answerSessionSet = new Set(question.answer_session_ids);
 
-      // Seed all haystack sessions
       for (let si = 0; si < question.haystack_sessions.length; si++) {
         const session = question.haystack_sessions[si];
         const sessionId = question.haystack_session_ids[si] ?? `session-${si}`;
@@ -89,21 +94,14 @@ export async function runLongMemEval(
           if (turn === undefined) continue;
 
           const evidenceRef = `${question.question_id}-s${si}-t${ti}`;
-          const proposalId = await daemon.proposeMemory(turn.content, evidenceRef);
-          await daemon.acceptProposal(proposalId);
-          sidecar.set(proposalId, {
+          const seed = await daemon.proposeMemory(turn.content, evidenceRef);
+          sidecar.set(seed.memoryId, {
             sessionId,
-            hasAnswer: turn.has_answer === true,
-            content: turn.content
+            hasAnswer: turn.has_answer === true
           });
-
-          if (turn.has_answer === true && answerSessionSet.has(sessionId)) {
-            answerContents.add(turn.content.trim());
-          }
         }
       }
 
-      // Recall the question
       const recallStart = Date.now();
       const recallResult = await daemon.recall(question.question, { maxResults: 10 });
       const latencyMs = Date.now() - recallStart;
@@ -124,14 +122,14 @@ export async function runLongMemEval(
           firstTier = inferTier(pointer.relevance_score);
         }
 
-        // Content-preview match against known answer contents (oracle approximation).
-        // The object_id in recall results is the durable memory object_id assigned on
-        // accept — not the proposal_id. We match by content preview substring.
+        // object_id equality scoring: a hit is a recall pointer whose
+        // object_id maps to a seed flagged has_answer=true on an answer
+        // session. No content-preview overlap. No prefix string match.
+        const meta = sidecar.get(pointer.object_id);
         const isHit =
-          answerContents.size > 0 &&
-          previewContainsExpectedPrefix(pointer.content_preview, [
-            ...answerContents
-          ]);
+          meta !== undefined &&
+          meta.hasAnswer &&
+          answerSessionSet.has(meta.sessionId);
 
         if (isHit) {
           if (rank === 0) hitAt1 = true;
@@ -143,11 +141,12 @@ export async function runLongMemEval(
       if (hitAt1) totalHitAt1++;
       if (hitAt10) totalHitAt10++;
 
-      // Tier and degradation accounting
       if (firstTier === "hot") tierHot++;
       else if (firstTier === "warm") tierWarm++;
       else tierCold++;
 
+      // degradation_reason is read directly off the daemon's recall response
+      // — never echoed from seed counts. null = no cascade engaged.
       const degradationReason = recallResult.degradation_reason ?? null;
       if (degradationReason === "warm_cascade_engaged") degradeWarm++;
       else if (degradationReason === "cold_cascade_engaged") degradeCold++;
@@ -164,7 +163,6 @@ export async function runLongMemEval(
     }
   }
 
-  // Aggregate KPIs
   const n = perScenario.length;
   const rAt1 = n === 0 ? 0 : totalHitAt1 / n;
   const rAt5 = n === 0 ? 0 : perScenario.filter((r) => r.hit_at_5).length / n;
@@ -189,11 +187,7 @@ export async function runLongMemEval(
     },
     sample_size: datasetSize,
     evaluated_count: window.length,
-    // see also: apps/bench-runner/src/harness/daemon.ts — proposeMemory writes
-    // directly via SqliteMemoryEntryRepo, so this run skipped the propose/review
-    // governance loop. Flip to mcp_propose_review once the harness drives the
-    // real MCP soul.propose_memory_update + soul.review_memory_proposal tools.
-    harness_mode: "direct_db_seed",
+    harness_mode: "mcp_propose_review",
     kpi: {
       r_at_1: rAt1,
       r_at_5: rAt5,

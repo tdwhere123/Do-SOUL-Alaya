@@ -138,6 +138,37 @@ categories appear in the `report.md` markdown section and in
 `KpiDiffResult` returned by the diff engine, but neither contributes to
 the worst verdict (they are advisory, not gating).
 
+## Bench harness — degradation diagnostics
+
+`kpi.degradation_reasons` is read straight off the daemon's recall
+response — it is not echoed from seed counts. Each probe contributes
+exactly one bucket:
+
+- `none` — hot-tier coarse filter returned enough candidates; no cascade.
+- `warm_cascade_engaged` — hot tier was empty / underfilled, warm tier
+  was searched and produced the merged candidate set.
+- `cold_cascade_engaged` — warm tier still underfilled, cold tier was
+  searched too.
+
+Why the split between `self` and `public` looks asymmetric:
+
+- `public` (LongMemEval) seeds dozens of haystack turns per question.
+  The hot tier is dense, FTS matches are plentiful, and most probes
+  return enough hot candidates without ever firing the cascade.
+- `self` seeds only the 1–2 setup utterances plus 3–5 distractors per
+  scenario. The hot tier is sparse relative to the recall budget, so
+  the cascade fires almost every probe and most `self` runs report
+  `cold_cascade_engaged=N`. This is real recall behavior on a small
+  workspace, not a harness bug. Larger workspaces (e.g. real attached
+  agents over a session) will lean back toward `none`.
+
+`harness_mode = "mcp_propose_review"` in `kpi.json` confirms each seed
+went through the full propose+review chain
+(`soul.emit_candidate_signal → soul.propose_memory_update →
+soul.review_memory_proposal accept`). Any KPI carrying
+`harness_mode = "direct_db_seed"` is from a pre-v0.3.6 run that
+bypassed governance and should not be used as a v0.3.6 baseline.
+
 ## How to add a new entry (operator handbook)
 
 ```bash

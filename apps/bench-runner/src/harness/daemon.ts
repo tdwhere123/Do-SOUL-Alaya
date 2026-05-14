@@ -1,35 +1,46 @@
 import { mkdtemp } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
-  FormationKind,
-  MemoryDimension,
+  RunMode,
+  RunState,
   ScopeClass,
-  SourceKind,
-  StorageTier,
-  type MemoryEntry,
+  SignalEventType,
+  SoulSignalMaterializedPayloadSchema,
+  WorkspaceKind,
+  WorkspaceState,
+  type SoulEmitCandidateSignalResponse,
   type SoulMemorySearchResponse,
+  type SoulProposeMemoryUpdateResponse,
   type SoulReviewMemoryProposalResponse
 } from "@do-soul/alaya-protocol";
-import { initDatabase, SqliteMemoryEntryRepo } from "@do-soul/alaya-storage";
-// Cross-package imports: bench-runner depends on core-daemon via @do-soul/alaya.
-// The daemon runtime and MCP server are the integration points only.
+import {
+  initDatabase,
+  SqliteEventLogRepo,
+  SqliteRunRepo,
+  SqliteWorkspaceRepo
+} from "@do-soul/alaya-storage";
 import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "@do-soul/alaya";
 import { createAlayaMcpServer } from "@do-soul/alaya/mcp-server";
 import { createAlayaCliBridge } from "@do-soul/alaya/cli/bridge";
 import { registerAlayaCliCommands } from "@do-soul/alaya/cli/register";
 
 export interface BenchDaemonOptions {
-  /** Root directory for the daemon's data files. A temp dir is created if omitted. */
   readonly dataDirRoot?: string;
-  /** Workspace id used for the bench run (default: "bench-workspace-1"). */
   readonly workspaceId?: string;
-  /** Run id used for the bench run (default: "bench-run-1"). */
   readonly runId?: string;
+}
+
+export interface SeededMemoryResult {
+  /** Durable memory object_id assigned by the signal materializer. */
+  readonly memoryId: string;
+  /** Signal id that produced the memory (audit trail anchor). */
+  readonly signalId: string;
+  /** Proposal id created by soul.propose_memory_update on the new memory. */
+  readonly proposalId: string;
 }
 
 export interface BenchDaemonHandle {
@@ -38,22 +49,36 @@ export interface BenchDaemonHandle {
   readonly workspaceId: string;
   readonly runId: string;
   readonly dataDir: string;
-  /** Low-level MCP tool caller. Prefer recall / proposeMemory / acceptProposal. */
   dispatchCli(argv: readonly string[]): Promise<{ exitCode: number; json?: unknown }>;
-  /** Recall memories matching query. */
   recall(
     query: string,
     opts?: { maxResults?: number }
   ): Promise<SoulMemorySearchResponse>;
-  /** Propose a new memory (content + evidence ref). Returns the proposal id. */
-  proposeMemory(content: string, evidenceRef: string): Promise<string>;
-  /** Accept a pending proposal by id. */
-  acceptProposal(proposalId: string): Promise<SoulReviewMemoryProposalResponse>;
-  /** Shut down daemon and restore process env. */
+  /**
+   * @anchor proposeMemory — full propose+review chain
+   *
+   * Steps (production-correct audit trail, no direct DB write):
+   *   1. soul.emit_candidate_signal — signal_kind=potential_preference,
+   *      confidence=0.9, raw_payload.excerpt=content. The daemon's
+   *      MaterializationRouter synchronously creates evidence + memory_entry
+   *      + claim because signal_kind=potential_preference @ confidence>=0.5
+   *      routes to "memory_and_claim" (see packages/soul/.../materialization-router.ts).
+   *   2. Read SOUL_SIGNAL_MATERIALIZED event from event_log to recover
+   *      the durable memory object_id created by the materializer.
+   *   3. soul.propose_memory_update — propose adding a domain_tag on the
+   *      new memory so the propose+review event chain fires.
+   *   4. soul.review_memory_proposal — verdict=accept, identity+token
+   *      bound to ALAYA_REVIEWER_IDENTITY / ALAYA_REVIEWER_TOKEN.
+   *
+   * Returns { memoryId, signalId, proposalId } so callers can build a
+   * sidecar keyed on the durable memory object_id (recall pointers carry
+   * the same object_id, so scoring is by id equality — never by string
+   * preview overlap).
+   */
+  proposeMemory(content: string, evidenceRef: string): Promise<SeededMemoryResult>;
   shutdown(): Promise<void>;
 }
 
-// Saved env vars restored by shutdown()
 const MANAGED_ENV_KEYS = [
   "DATA_DIR",
   "OPENAI_API_KEY",
@@ -68,11 +93,9 @@ const MANAGED_ENV_KEYS = [
 
 type ManagedEnvKey = (typeof MANAGED_ENV_KEYS)[number];
 
-/**
- * Start an in-process Alaya daemon wired with an InMemoryTransport MCP client.
- * The caller must call handle.shutdown() after the session to restore env and
- * free the database handle.
- */
+const REVIEWER_IDENTITY = "user:bench-runner";
+const REVIEWER_TOKEN = "bench-review-token";
+
 export async function startBenchDaemon(
   opts: BenchDaemonOptions = {}
 ): Promise<BenchDaemonHandle> {
@@ -82,13 +105,11 @@ export async function startBenchDaemon(
   const dataDir =
     opts.dataDirRoot ?? (await mkdtemp(join(tmpdir(), "alaya-bench-")));
 
-  // Save current env for restoration on shutdown.
   const savedEnv: Partial<Record<ManagedEnvKey, string | undefined>> = {};
   for (const key of MANAGED_ENV_KEYS) {
     savedEnv[key] = process.env[key];
   }
 
-  // Set the required env for the in-process daemon.
   process.env.DATA_DIR = dataDir;
   process.env.ALAYA_OPENAI_SECRET_REF = "env:OPENAI_API_KEY";
   process.env.OPENAI_API_KEY = "test-openai-key";
@@ -96,8 +117,8 @@ export async function startBenchDaemon(
   process.env.ALAYA_CONFIG_DIR = join(dataDir, "config");
   process.env.CODEX_HOME = join(dataDir, "codex-home");
   process.env.HOME = join(dataDir, "home");
-  process.env.ALAYA_REVIEWER_IDENTITY = "user:bench-runner";
-  process.env.ALAYA_REVIEWER_TOKEN = "bench-review-token";
+  process.env.ALAYA_REVIEWER_IDENTITY = REVIEWER_IDENTITY;
+  process.env.ALAYA_REVIEWER_TOKEN = REVIEWER_TOKEN;
 
   const runtime = await createAlayaDaemonRuntime();
   runtime.startBackgroundServices();
@@ -114,7 +135,7 @@ export async function startBenchDaemon(
   });
 
   const mcpClient = new Client(
-    { name: "alaya-bench-runner", version: "0.3.5" },
+    { name: "alaya-bench-runner", version: "0.3.6" },
     { capabilities: {} }
   );
 
@@ -122,7 +143,6 @@ export async function startBenchDaemon(
   await server.connect(serverTransport);
   await mcpClient.connect(clientTransport);
 
-  // Install + attach so MCP tools come live.
   const dispatchCliFn = makeDispatchCli(runtime);
 
   const install = await dispatchCliFn([
@@ -153,6 +173,15 @@ export async function startBenchDaemon(
     throw new Error(`alaya attach failed with exitCode=${attach.exitCode}`);
   }
 
+  // @anchor bench-workspace-seed — signals.workspace_id / signals.run_id are
+  // FK-constrained to workspaces / runs (migration 003-signals.sql). The
+  // install command writes the daemon config but does not create rows in
+  // those tables. Seed the bench workspace + run directly so the MCP
+  // call context (which binds these ids from the trusted context provider)
+  // resolves to existing FK rows. Same pattern as phase6-agent-use-protocol
+  // test fixture.
+  await seedBenchWorkspaceAndRun(dataDir, workspaceId, runId);
+
   async function recall(
     query: string,
     recallOpts: { maxResults?: number } = {}
@@ -166,65 +195,88 @@ export async function startBenchDaemon(
     });
   }
 
-  // @anchor bench-seed — direct storage write bypasses propose-review flow.
-  // soul.propose_memory_update requires an existing target_object_id; there is
-  // no MCP "create" verb. We seed bench fixtures directly via SqliteMemoryEntryRepo
-  // and return the new object_id as the "proposal token" that acceptProposal confirms.
   async function proposeMemory(
     content: string,
     evidenceRef: string
-  ): Promise<string> {
-    const objectId = randomUUID();
-    const now = new Date().toISOString();
-    const entry: MemoryEntry = {
-      object_id: objectId,
-      object_kind: "memory_entry",
-      schema_version: 1,
-      lifecycle_state: "active",
-      created_at: now,
-      updated_at: now,
-      created_by: "bench-runner",
-      dimension: MemoryDimension.FACT,
-      source_kind: SourceKind.SEED,
-      formation_kind: FormationKind.EXTRACTED,
-      scope_class: ScopeClass.PROJECT,
-      content,
-      domain_tags: ["bench-seed"],
-      evidence_refs: [evidenceRef],
-      workspace_id: workspaceId,
-      run_id: runId,
-      surface_id: null,
-      storage_tier: StorageTier.HOT,
-      activation_score: 0.9,
-      retention_score: 0.9,
-      manifestation_state: "excerpt",
-      retention_state: "working",
-      decay_profile: "stable",
-      confidence: 1,
-      last_used_at: null,
-      last_hit_at: null,
-      reinforcement_count: 0,
-      contradiction_count: 0,
-      superseded_by: null
-    };
+  ): Promise<SeededMemoryResult> {
+    // Step 1 — emit candidate signal. signal_kind=potential_preference at
+    // confidence 0.9 with evidence_refs >= 1 routes to "memory_and_claim"
+    // (see materialization-router.ts:160). raw_payload.excerpt becomes
+    // the materialized memory_entry.content via buildSignalSummary.
+    const signalResponse = await callMcpTool<SoulEmitCandidateSignalResponse>(
+      mcpClient,
+      "soul.emit_candidate_signal",
+      {
+        signal_kind: "potential_preference",
+        object_kind: "fact",
+        scope_hint: ScopeClass.PROJECT,
+        domain_tags: ["bench-seed"],
+        confidence: 0.9,
+        evidence_refs: [evidenceRef],
+        raw_payload: { excerpt: content }
+      }
+    );
+    if (signalResponse.status !== "emitted") {
+      throw new Error(
+        `soul.emit_candidate_signal returned unexpected status=${signalResponse.status}`
+      );
+    }
 
-    // initDatabase caches connections by path; the daemon holds the same
-    // connection. Do not close() — closing would tear down the daemon's DB.
-    const db = initDatabase({ filename: join(dataDir, "alaya.db") });
-    const repo = new SqliteMemoryEntryRepo(db);
-    await repo.create(entry);
-    return objectId;
-  }
+    // Step 2 — read SOUL_SIGNAL_MATERIALIZED from event_log to find the
+    // memory object_id created synchronously by the materialization router.
+    // The MCP surface returns only signal_id, so the bench harness consults
+    // the daemon's event log directly (read-only). This is an
+    // implementation-of-record lookup, not a bypass of governance.
+    const memoryId = await readMaterializedMemoryId(
+      dataDir,
+      signalResponse.signal_id
+    );
 
-  // acceptProposal is a no-op for bench seeds: the memory was already written
-  // by proposeMemory. We return a synthetic accepted response.
-  async function acceptProposal(
-    proposalId: string
-  ): Promise<SoulReviewMemoryProposalResponse> {
+    // Step 3 — propose update on the materialized memory so the
+    // propose+review event chain (SOUL_PROPOSAL_CREATED, SOUL_REVIEW_*,
+    // SOUL_PROPOSAL_RESOLVED, SOUL_MEMORY_UPDATED) is written to the
+    // audit trail. The change is a no-op-ish domain_tag append; what
+    // matters is that the chain fires for every seed.
+    const proposeResponse = await callMcpTool<SoulProposeMemoryUpdateResponse>(
+      mcpClient,
+      "soul.propose_memory_update",
+      {
+        target_object_id: memoryId,
+        proposed_changes: {
+          domain_tags: ["bench-seed", "bench-reviewed"]
+        },
+        reason: `bench seed accept for evidence ${evidenceRef}`
+      }
+    );
+    if (proposeResponse.status !== "created") {
+      throw new Error(
+        `soul.propose_memory_update returned unexpected status=${proposeResponse.status}`
+      );
+    }
+
+    // Step 4 — accept the proposal under the bench reviewer identity.
+    const reviewResponse = await callMcpTool<SoulReviewMemoryProposalResponse>(
+      mcpClient,
+      "soul.review_memory_proposal",
+      {
+        proposal_id: proposeResponse.proposal_id,
+        verdict: "accept",
+        reason: "bench seed auto-accept",
+        reviewer_identity: REVIEWER_IDENTITY,
+        reviewer_token: REVIEWER_TOKEN
+      }
+    );
+    if (reviewResponse.resolution_state !== "accepted") {
+      throw new Error(
+        `soul.review_memory_proposal returned unexpected state=${reviewResponse.resolution_state}`
+      );
+    }
+
     return {
-      proposal_id: proposalId,
-      resolution_state: "accepted"
-    } as unknown as SoulReviewMemoryProposalResponse;
+      memoryId,
+      signalId: signalResponse.signal_id,
+      proposalId: proposeResponse.proposal_id
+    };
   }
 
   async function shutdown(): Promise<void> {
@@ -251,7 +303,6 @@ export async function startBenchDaemon(
     dispatchCli: dispatchCliFn,
     recall,
     proposeMemory,
-    acceptProposal,
     shutdown
   };
 }
@@ -295,6 +346,66 @@ async function callMcpTool<TOutput>(
     throw new Error(`MCP tool ${name} returned non-ok structured content`);
   }
   return structured.output;
+}
+
+// @anchor readMaterializedMemoryId — bridges signal_id -> durable memory_id
+// The MCP surface intentionally does not expose materialization side-effects
+// (the agent should only know it emitted a signal). The bench harness reads
+// the event_log directly, which is the canonical audit-trail record of the
+// materialization. initDatabase caches connections by path so this opens the
+// same handle the daemon already uses — do not close the connection here or
+// the daemon will lose its DB.
+async function readMaterializedMemoryId(
+  dataDir: string,
+  signalId: string
+): Promise<string> {
+  const db = initDatabase({ filename: join(dataDir, "alaya.db") });
+  const eventLogRepo = new SqliteEventLogRepo(db);
+  const events = await eventLogRepo.queryByEntity("candidate_memory_signal", signalId);
+  for (const event of events) {
+    if (event.event_type !== SignalEventType.SOUL_SIGNAL_MATERIALIZED) {
+      continue;
+    }
+    const payload = SoulSignalMaterializedPayloadSchema.parse(event.payload_json);
+    const memoryObject = payload.created_objects.find(
+      (obj) => obj.object_kind === "memory_entry"
+    );
+    if (memoryObject !== undefined) {
+      return memoryObject.object_id;
+    }
+  }
+  throw new Error(
+    `Signal ${signalId} did not materialize a memory_entry — check signal_kind / confidence / evidence_refs routing.`
+  );
+}
+
+async function seedBenchWorkspaceAndRun(
+  dataDir: string,
+  workspaceId: string,
+  runId: string
+): Promise<void> {
+  const db = initDatabase({ filename: join(dataDir, "alaya.db") });
+  const workspaceRepo = new SqliteWorkspaceRepo(db);
+  const runRepo = new SqliteRunRepo(db);
+  await workspaceRepo.create({
+    workspace_id: workspaceId,
+    name: workspaceId,
+    root_path: join(dataDir, "bench-workspace-root"),
+    workspace_kind: WorkspaceKind.LOCAL_REPO,
+    default_engine_binding: null,
+    workspace_state: WorkspaceState.ACTIVE
+  });
+  await runRepo.create({
+    run_id: runId,
+    workspace_id: workspaceId,
+    title: `bench run ${runId}`,
+    goal: null,
+    run_mode: RunMode.CHAT,
+    engine_binding_id: null,
+    engine_class: null,
+    run_state: RunState.IDLE,
+    current_surface_id: null
+  });
 }
 
 function restoreEnv(saved: Partial<Record<ManagedEnvKey, string | undefined>>): void {

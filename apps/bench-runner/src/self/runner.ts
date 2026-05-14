@@ -14,7 +14,6 @@ import {
   type PerScenarioRow
 } from "@do-soul/alaya-eval";
 import { startBenchDaemon } from "../harness/daemon.js";
-import { previewContainsExpectedPrefix } from "../scoring.js";
 import { SYNTHETIC_SCENARIOS } from "./scenarios.js";
 
 export interface SelfBenchRunOptions {
@@ -30,13 +29,21 @@ export interface SelfBenchRunResult {
 }
 
 /**
- * @anchor self-bench-runner — in-process daemon, 8 synthetic scenarios, split=synthetic
+ * @anchor self-bench-runner — in-process daemon, 8 synthetic scenarios + distractors
  *
- * Hit rule: a recall result is a hit when its content_preview contains a
- * 40-char prefix of one of the seeded setup strings for that scenario.
- * R@1, R@5, R@10 are all computed and written to the KPI entry.
- * see also: harness/daemon.ts — proposeMemory / acceptProposal helpers
- * see also: self/scenarios.ts — 8 synthetic scenario definitions
+ * Scoring: object_id sidecar. Each setup utterance is seeded through the
+ * MCP propose+review chain and recorded in the sidecar against its
+ * expected_id (e.g. "syn-001-s0"). Distractors are seeded too — to grow
+ * the recall search space and break the workspace-too-small trivial-hit
+ * tautology the reviewer flagged in Phase 4 round 1 — but they are NOT
+ * recorded in the sidecar, so a distractor recall does not score.
+ *
+ * Hit rule: a recall pointer is a hit iff its object_id maps in the
+ * sidecar to an expected_id from scenario.expected_ids. No content prefix
+ * overlap. No setup-line substring match.
+ *
+ * see also: apps/bench-runner/src/harness/daemon.ts — proposeMemory chain
+ * see also: apps/bench-runner/src/self/scenarios.ts — setup + distractor pairs
  */
 export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBenchRunResult> {
   const alayaVersion = resolveAlayaVersion();
@@ -61,17 +68,31 @@ export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBench
     });
 
     try {
-      // Build the expected content set for scoring: all setup strings
-      const expectedContents: string[] = scenario.setup.map((s) => s.trim());
+      // Sidecar maps durable memory object_id -> the scenario's expected_id
+      // (e.g. "syn-001-s0"). Only setup seeds populate the sidecar.
+      const sidecar = new Map<string, string>();
+      const expectedIdSet = new Set(scenario.expected_ids);
 
-      // Seed each setup utterance as a proposed+accepted memory
-      for (const content of scenario.setup) {
-        const evidenceRef = `${scenario.id}-setup-${scenario.setup.indexOf(content)}`;
-        const proposalId = await daemon.proposeMemory(content, evidenceRef);
-        await daemon.acceptProposal(proposalId);
+      for (let i = 0; i < scenario.setup.length; i++) {
+        const content = scenario.setup[i];
+        if (content === undefined) continue;
+        const expectedId = `${scenario.id}-s${i}`;
+        const evidenceRef = `${scenario.id}-setup-${i}`;
+        const seed = await daemon.proposeMemory(content, evidenceRef);
+        sidecar.set(seed.memoryId, expectedId);
       }
 
-      // Recall using the probe
+      // Distractors expand the recall search space. Their memoryId is not
+      // recorded — if the recall returns one, it occupies a top-K slot
+      // but the scoring loop sees `sidecar.get` return undefined and
+      // counts no hit.
+      for (let i = 0; i < scenario.distractors.length; i++) {
+        const content = scenario.distractors[i];
+        if (content === undefined) continue;
+        const evidenceRef = `${scenario.id}-distractor-${i}`;
+        await daemon.proposeMemory(content, evidenceRef);
+      }
+
       const recallStart = Date.now();
       const recallResult = await daemon.recall(scenario.probe, { maxResults: 10 });
       const latencyMs = Date.now() - recallStart;
@@ -92,11 +113,10 @@ export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBench
           firstTier = inferTier(pointer.relevance_score);
         }
 
-        // A result is a hit when its content_preview matches any expected setup string prefix.
-        const isHit = previewContainsExpectedPrefix(
-          pointer.content_preview,
-          expectedContents
-        );
+        // object_id equality scoring: a hit is a recall pointer whose
+        // sidecar-mapped expected_id appears in scenario.expected_ids.
+        const expectedId = sidecar.get(pointer.object_id);
+        const isHit = expectedId !== undefined && expectedIdSet.has(expectedId);
 
         if (isHit) {
           if (rank === 0) hitAt1 = true;
@@ -112,6 +132,12 @@ export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBench
       else if (firstTier === "warm") tierWarm++;
       else tierCold++;
 
+      // degradation_reason is read directly off the daemon's recall response.
+      // For self-bench scenarios the workspace is small (2 setups +
+      // 3-5 distractors), so the warm/cold cascade fires for many probes
+      // — that is real recall behavior, not a harness bug. See
+      // README §"Bench harness — degradation diagnostics" for the
+      // operator-facing diagnosis.
       const degradationReason = recallResult.degradation_reason ?? null;
       if (degradationReason === "warm_cascade_engaged") degradeWarm++;
       else if (degradationReason === "cold_cascade_engaged") degradeCold++;
@@ -150,11 +176,7 @@ export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBench
     },
     sample_size: SYNTHETIC_SCENARIOS.length,
     evaluated_count: SYNTHETIC_SCENARIOS.length,
-    // see also: apps/bench-runner/src/harness/daemon.ts — proposeMemory writes
-    // directly via SqliteMemoryEntryRepo, so this run skipped the propose/review
-    // governance loop. Flip to mcp_propose_review once the harness drives the
-    // real MCP soul.propose_memory_update + soul.review_memory_proposal tools.
-    harness_mode: "direct_db_seed",
+    harness_mode: "mcp_propose_review",
     kpi: {
       r_at_1: rAt1,
       r_at_5: rAt5,
