@@ -294,15 +294,12 @@ async function runMergeLongMemEvalCommand(
     }
 
     // @anchor merge-shard-validations — refuse incompatible shards.
-    // Each branch maps to an operator-misuse path that would silently
-    // corrupt the bench-history archive (apples-to-oranges merge):
-    //   - split / dataset identity / sample_size: same-evaluation guard
-    //   - harness_mode: kpi-schema §harness_mode forbids citing
-    //     mcp_propose_review numbers mixed with direct_db_seed
-    //   - embedding_provider / chat_provider: recall path identity
-    //   - bench_name / alaya_version: archive provenance identity
-    //   - duplicate per_scenario id: overlapping --offset/--limit
-    //   - evaluated_total > sample_size: shards collectively over-eval
+    // Branches: split, sample_size, dataset.{name,size,source},
+    // harness_mode, embedding_provider, chat_provider, bench_name,
+    // alaya_version, alaya_commit, duplicate per_scenario id,
+    // evaluated_total > sample_size. See packages/eval/src/kpi-schema.ts
+    // §harness_mode for the mcp_propose_review vs direct_db_seed
+    // audit-distinguishability contract.
     for (let i = 1; i < shardPayloads.length; i++) {
       const shard = shardPayloads[i];
       if (shard === undefined) continue;
@@ -327,7 +324,7 @@ async function runMergeLongMemEvalCommand(
       }
       if (shard.harness_mode !== first.harness_mode) {
         throw new Error(
-          `merge refused: shard[${i}] harness_mode=${shard.harness_mode} != shard[0] harness_mode=${first.harness_mode} (mixing harness modes corrupts the audit-distinguishability contract in kpi-schema §harness_mode)`
+          `merge refused: shard[${i}] harness_mode=${shard.harness_mode} != shard[0] harness_mode=${first.harness_mode}`
         );
       }
       if (shard.embedding_provider !== first.embedding_provider) {
@@ -348,6 +345,11 @@ async function runMergeLongMemEvalCommand(
       if (shard.alaya_version !== first.alaya_version) {
         throw new Error(
           `merge refused: shard[${i}] alaya_version=${shard.alaya_version} != shard[0] alaya_version=${first.alaya_version}`
+        );
+      }
+      if (shard.alaya_commit !== first.alaya_commit) {
+        throw new Error(
+          `merge refused: shard[${i}] alaya_commit=${shard.alaya_commit} != shard[0] alaya_commit=${first.alaya_commit}`
         );
       }
     }

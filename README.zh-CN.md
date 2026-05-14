@@ -12,7 +12,7 @@
 
 [![status](https://img.shields.io/badge/status-v0.3.6-success?style=flat-square)](#接下来的方向)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-2593%20passing-success?style=flat-square)](#接下来的方向)
+[![tests](https://img.shields.io/badge/tests-2594%20passing-success?style=flat-square)](#接下来的方向)
 [![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#快速开始)
 [![pnpm](https://img.shields.io/badge/pnpm-%E2%89%A59-F69220?style=flat-square&logo=pnpm&logoColor=white)](#快速开始)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](#架构总览)

@@ -80,30 +80,6 @@ driver.
    `docs/v0.3/bench-history/public/<slug>/` entry; report.md cites
    `agentmemory`'s number with link and the dataset-version pin.
 
-### #BL-043 — tool-runtime-bootstrap.test.ts port-3000 parallel flake
-
-**Status**: Open, v0.3.7 candidate.
-
-**Why open**: The full vitest run sometimes fails on the first
-invocation in `apps/core-daemon/src/__tests__/tool-runtime-bootstrap.test.ts`
-with hook timeouts and `vi.waitFor` retries on
-`backlogTelemetryService.stop`. A second back-to-back invocation passes
-cleanly (318/318 / 2588/2588). The file passes 25/25 when run in
-isolation. This is parallel-execution port-3000 contention with other
-core-daemon tests — pre-existing (no edits in the v0.3.6 review loop)
-and surfaced only because the v0.3.6 review-loop ran the full suite
-five times in close succession.
-
-**Close condition**:
-
-1. Either bind the daemon listener to a free port (port `0`) so the
-   tests don't contend on a fixed port, or `vitest.workspace.mjs` is
-   updated to serialize this test file (no parallel workers within the
-   file's project).
-2. Full `rtk pnpm exec vitest run` is reliably green on cold cache.
-3. Backlog entry close-out documents which path was taken (port-0 or
-   serialization).
-
 ### #BL-042 — Inspector Memory Browser + command palette (deferred from v0.3.6)
 
 **Status**: Open, v0.3.7 candidate (deferred from v0.3.6 plan §Out).
@@ -123,6 +99,21 @@ trace from a tier-distribution number down to specific entries.
    `soul.open_pointer`).
 3. cmd-K command palette wiring `attach detach status inspect review`
    verbs.
+
+## Resolved in v0.3.6 (2026-05-14)
+
+### #BL-043 — tool-runtime-bootstrap.test.ts port-3000 parallel flake
+
+**Status**: Resolved in v0.3.6 review-loop round 5 (commit `b8fce04`).
+
+**Resolution**: `bootStartedDaemonRuntime` in
+`apps/core-daemon/src/__tests__/tool-runtime-bootstrap.test.ts` now
+passes `{ port: 0 }` to `runtime.startHttpServer`, so the OS assigns a
+free port per test. The previous fixed-3000 default raced with other
+core-daemon test files in parallel runs and produced sporadic hook
+timeouts on `vi.waitFor`. Path taken: port-0 (option 1 of the
+original close condition). Full `rtk pnpm exec vitest run` is green
+on cold cache: 318/318 files / 2593/2593 tests in 30s.
 
 ## Resolved in v0.3.0 (2026-05-13)
 

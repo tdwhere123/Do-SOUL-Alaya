@@ -205,10 +205,12 @@ describe("merge-longmemeval validations", () => {
     const shardA = path.join(tmpRoot, "shard-a");
     const shardB = path.join(tmpRoot, "shard-b");
     const dupId = "q-collide";
+    // Same alaya_commit for both shards so the new alaya_commit check
+    // does not fire first; the test exercises the duplicate-id branch.
     await writeShardRoot(
       shardA,
       makeShardKpi({
-        alaya_commit: "0000aaa",
+        alaya_commit: "abc1234",
         kpi: {
           ...makeShardKpi().kpi,
           per_scenario: [
@@ -220,7 +222,7 @@ describe("merge-longmemeval validations", () => {
     await writeShardRoot(
       shardB,
       makeShardKpi({
-        alaya_commit: "0000bbb",
+        alaya_commit: "abc1234",
         kpi: {
           ...makeShardKpi().kpi,
           per_scenario: [
@@ -390,6 +392,42 @@ describe("merge-longmemeval validations", () => {
     expect(stderrBuf).toMatch(/bench_name=self != shard\[0\] bench_name=public/);
   });
 
+  it("refuses shards whose alaya_commit differs", async () => {
+    const shardA = path.join(tmpRoot, "shard-a");
+    const shardB = path.join(tmpRoot, "shard-b");
+    await writeShardRoot(
+      shardA,
+      makeShardKpi({ alaya_commit: "abc1234" })
+    );
+    await writeShardRoot(
+      shardB,
+      makeShardKpi({
+        alaya_commit: "def5678",
+        kpi: {
+          ...makeShardKpi().kpi,
+          per_scenario: [
+            { id: "q-shard-b-1", version: 1, hit_at_5: true, tier: "warm" }
+          ]
+        }
+      })
+    );
+    const historyRoot = path.join(tmpRoot, "history");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shardA,
+      shardB
+    ]);
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toMatch(
+      /alaya_commit=def5678 != shard\[0\] alaya_commit=abc1234/
+    );
+  });
+
   it("refuses shards whose alaya_version differs", async () => {
     const shardA = path.join(tmpRoot, "shard-a");
     const shardB = path.join(tmpRoot, "shard-b");
@@ -430,10 +468,12 @@ describe("merge-longmemeval validations", () => {
   it("refuses shards whose evaluated_total exceeds dataset sample_size", async () => {
     const shardA = path.join(tmpRoot, "shard-a");
     const shardB = path.join(tmpRoot, "shard-b");
+    // Same alaya_commit so the test exercises the evaluated_total cap,
+    // not the alaya_commit equality check (which runs earlier).
     await writeShardRoot(
       shardA,
       makeShardKpi({
-        alaya_commit: "0000aaa",
+        alaya_commit: "abc1234",
         sample_size: 10,
         evaluated_count: 8,
         kpi: {
@@ -447,7 +487,7 @@ describe("merge-longmemeval validations", () => {
     await writeShardRoot(
       shardB,
       makeShardKpi({
-        alaya_commit: "0000bbb",
+        alaya_commit: "abc1234",
         sample_size: 10,
         evaluated_count: 8,
         kpi: {
