@@ -13,6 +13,18 @@ const sharedAlias = {
   "@do-soul/alaya-engine-gateway": path.resolve(rootDir, "packages/engine-gateway/src/index.ts")
 };
 
+// see also: apps/bench-runner — bench-runner-only aliases; cross-app import boundary
+// Subpath aliases must come before the bare @do-soul/alaya entry so the more
+// specific keys match first (Vite resolves alias entries in array order).
+const benchRunnerAlias = [
+  ...Object.entries(sharedAlias).map(([find, replacement]) => ({ find, replacement })),
+  { find: "@do-soul/alaya/mcp-server", replacement: path.resolve(rootDir, "apps/core-daemon/src/mcp-server.ts") },
+  { find: "@do-soul/alaya/cli/bridge", replacement: path.resolve(rootDir, "apps/core-daemon/src/cli/bridge.ts") },
+  { find: "@do-soul/alaya/cli/register", replacement: path.resolve(rootDir, "apps/core-daemon/src/cli/register.ts") },
+  { find: "@do-soul/alaya", replacement: path.resolve(rootDir, "apps/core-daemon/src/index.ts") },
+  { find: "@do-soul/alaya-eval", replacement: path.resolve(rootDir, "packages/eval/src/index.ts") }
+];
+
 function packageProject(name, packageDir) {
   const packageRoot = path.resolve(rootDir, packageDir);
   const testDir = path.resolve(rootDir, packageDir, "src/__tests__");
@@ -62,7 +74,20 @@ export default [
   packageProject("@do-soul/alaya-eval", "packages/eval"),
   appProject("@do-soul/alaya-core-daemon", "apps/core-daemon"),
   appProject("@do-soul/alaya-inspector", "apps/inspector"),
-  // The inspector web frontend has its own vitest config (jsdom env, RTL setup).
-  // Reference its config file directly so the workspace runner picks it up.
-  path.resolve(rootDir, "apps/inspector/web/vitest.config.ts")
+  // see also: apps/inspector/web/vitest.config.ts — jsdom env + RTL setup
+  path.resolve(rootDir, "apps/inspector/web/vitest.config.ts"),
+  (() => {
+    const appRoot = path.resolve(rootDir, "apps/bench-runner");
+    const testDir = path.resolve(rootDir, "apps/bench-runner/src/__tests__");
+    if (!existsSync(path.resolve(appRoot, "package.json"))) return null;
+    return defineProject({
+      resolve: { alias: benchRunnerAlias },
+      test: {
+        name: "@do-soul/alaya-bench-runner",
+        environment: "node",
+        include: [path.resolve(testDir, "**/*.{test,spec}.ts")],
+        exclude: ["**/dist/**"]
+      }
+    });
+  })()
 ].filter(Boolean);

@@ -1,0 +1,30 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "paths": {
+      "@do-soul/alaya-protocol": ["../../packages/protocol/src/index.ts"],
+      "@do-soul/alaya-core": ["../../packages/core/src/index.ts"],
+      "@do-soul/alaya-soul": ["../../packages/soul/src/index.ts"],
+      "@do-soul/alaya-engine-gateway": ["../../packages/engine-gateway/src/index.ts"],
+      "@do-soul/alaya-storage": ["../../packages/storage/src/index.ts"],
+      "@do-soul/alaya": ["../../apps/core-daemon/src/index.ts"],
+      "@do-soul/alaya/mcp-server": ["../../apps/core-daemon/src/mcp-server.ts"],
+      "@do-soul/alaya/cli/bridge": ["../../apps/core-daemon/src/cli/bridge.ts"],
+      "@do-soul/alaya/cli/register": ["../../apps/core-daemon/src/cli/register.ts"],
+      "@do-soul/alaya-eval": ["../../packages/eval/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/__tests__/**"],
+  "references": [
+    { "path": "../../packages/protocol" },
+    { "path": "../../packages/core" },
+    { "path": "../../packages/soul" },
+    { "path": "../../packages/engine-gateway" },
+    { "path": "../../packages/storage" },
+    { "path": "../../packages/eval" },
+    { "path": "../core-daemon" }
+  ]
+}

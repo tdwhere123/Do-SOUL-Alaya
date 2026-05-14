@@ -12,6 +12,7 @@ coverage/
 # Local runtime data
 var/
 data/
+apps/bench-runner/data/
 *.db
 *.db-journal
 *.db-wal
