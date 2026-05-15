@@ -168,6 +168,21 @@ export interface McpMemoryToolHandlerDependencies {
       fields: MemoryEntryMutableFields
     ): Promise<void>;
   };
+  // Evidence resolver used by soul.open_pointer to dereference
+  // evidence_refs[] from a MemoryEntry back to its raw EvidenceCapsule
+  // (gist / excerpt). Scoped lookup mirrors memoryService.findByIdScoped.
+  readonly evidenceService?: {
+    findByIdScoped?(
+      objectId: string,
+      workspaceId: string
+    ): Promise<Readonly<{
+      readonly object_id: string;
+      readonly object_kind: string;
+      readonly schema_version: number;
+      readonly gist: string | null;
+      readonly excerpt: string | null;
+    }> | null>;
+  };
   readonly signalService: {
     receiveSignal(signal: CandidateMemorySignal): Promise<Readonly<{
       readonly signal: Readonly<CandidateMemorySignal>;
@@ -470,33 +485,54 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
   }
 
   async function openPointer(request: SoulOpenPointerRequest, context: McpMemoryToolCallContext) {
-    // SECURITY (invariants §30 Fix at Source): use the scoped service method
-    // so cross-workspace lookup is blocked at the service layer, not just at
-    // this handler. Any future caller of memoryService.findById must take the
-    // same precaution; new MCP/CLI surfaces should call findByIdScoped.
+    // SECURITY (invariants §30 Fix at Source): scoped lookup blocks
+    // cross-workspace pointer resolution at the service layer. Memory
+    // lookup is the primary path; if it misses, fall through to
+    // EvidenceCapsule lookup so attached agents can resolve evidence_refs
+    // to the raw turn material that backs a distilled MemoryEntry.
     const memory = await deps.memoryService.findByIdScoped(
       request.object_id,
       context.workspaceId
     );
-    if (memory === null) {
-      throw new ToolNotFoundError(`Memory object not found: ${request.object_id}`);
-    }
-
-    // Explicit projection: do not spread MemoryEntry. Internal fields
-    // (lifecycle_state, created_by, storage_tier, workspace_id, ...) must
-    // not leak to the attached agent.
-    return SoulOpenPointerResponseSchema.parse({
-      object_id: memory.object_id,
-      object_kind: memory.object_kind,
-      content: {
+    if (memory !== null) {
+      return SoulOpenPointerResponseSchema.parse({
         object_id: memory.object_id,
         object_kind: memory.object_kind,
-        schema_version: memory.schema_version,
-        content: memory.content ?? null,
-        domain_tags: memory.domain_tags ?? [],
-        evidence_refs: memory.evidence_refs ?? []
+        content: {
+          object_id: memory.object_id,
+          object_kind: memory.object_kind,
+          schema_version: memory.schema_version,
+          content: memory.content ?? null,
+          domain_tags: memory.domain_tags ?? [],
+          evidence_refs: memory.evidence_refs ?? []
+        }
+      });
+    }
+
+    if (deps.evidenceService?.findByIdScoped !== undefined) {
+      const evidence = await deps.evidenceService.findByIdScoped(
+        request.object_id,
+        context.workspaceId
+      );
+      if (evidence !== null) {
+        return SoulOpenPointerResponseSchema.parse({
+          object_id: evidence.object_id,
+          object_kind: evidence.object_kind,
+          content: {
+            object_id: evidence.object_id,
+            object_kind: evidence.object_kind,
+            schema_version: evidence.schema_version,
+            content: evidence.excerpt ?? evidence.gist ?? null,
+            domain_tags: [],
+            evidence_refs: [],
+            gist: evidence.gist,
+            excerpt: evidence.excerpt
+          }
+        });
       }
-    });
+    }
+
+    throw new ToolNotFoundError(`Pointer object not found: ${request.object_id}`);
   }
 
   async function emitCandidateSignal(

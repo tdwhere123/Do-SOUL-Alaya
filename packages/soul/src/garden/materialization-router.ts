@@ -501,7 +501,11 @@ function buildMemoryInput(
     source_kind: toSourceKind(signal.source),
     formation_kind: toFormationKind(signal.source),
     scope_class: toScopeClass(signal.scope_hint),
-    content: buildSignalSummary(signal),
+    // invariant: MemoryEntry.content is the distilled fact, never raw turn.
+    // Raw evidence lives in EvidenceCapsule.gist / .excerpt and is reached
+    // via evidence_refs + soul.open_pointer. see buildDistilledFact for
+    // caller-provided distilled_fact vs rule-based fallback.
+    content: buildDistilledFact(signal),
     domain_tags: signal.domain_tags,
     evidence_refs: evidenceRefs,
     workspace_id: signal.workspace_id,
@@ -530,7 +534,7 @@ function buildClaimInput(
     enforcement_level: claimKind === "constraint" || claimKind === "factual_policy" ? "strict" : "preferred",
     origin_tier: toOriginTier(signal.source),
     precedence_basis: "evidence_strength",
-    proposition_digest: buildSignalSummary(signal),
+    proposition_digest: buildDistilledFact(signal),
     evidence_refs: evidenceRefs,
     source_object_refs: sourceObjectRefs,
     workspace_id: signal.workspace_id
@@ -545,7 +549,7 @@ function buildSynthesisInput(
     created_by: signal.source,
     topic_key: buildTopicKey(signal),
     synthesis_type: toSynthesisType(),
-    summary: buildSignalSummary(signal),
+    summary: buildDistilledFact(signal),
     evidence_refs: evidenceRefs,
     source_memory_refs: [],
     workspace_id: signal.workspace_id,
@@ -670,6 +674,53 @@ function buildSignalSummary(signal: CandidateMemorySignal): string {
   }
 
   return `Signal ${signal.signal_id} (${signal.signal_kind})`;
+}
+
+// invariant: MemoryEntry.content / Claim.proposition_digest /
+// Synthesis.summary store a distilled fact, not raw turn. Raw turn lives
+// in EvidenceCapsule.gist / .excerpt. Caller (LLM / user / bench harness)
+// may supply raw_payload.distilled_fact directly; otherwise a rule-based
+// fallback takes the first two sentences capped at DISTILLED_FACT_MAX_CHARS.
+const DISTILLED_FACT_MAX_CHARS = 280;
+const DISTILLED_FACT_MAX_SENTENCES = 2;
+
+function buildDistilledFact(signal: CandidateMemorySignal): string {
+  const providedDistilled = signal.raw_payload.distilled_fact;
+  if (typeof providedDistilled === "string") {
+    const trimmed = providedDistilled.trim();
+    if (trimmed.length > 0) {
+      return trimmed.length <= DISTILLED_FACT_MAX_CHARS
+        ? trimmed
+        : `${trimmed.slice(0, DISTILLED_FACT_MAX_CHARS - 3)}...`;
+    }
+  }
+  return ruleDistillFromRaw(buildSignalSummary(signal));
+}
+
+// see also: buildDistilledFact — fallback path when caller does not supply
+// raw_payload.distilled_fact. Sentence boundary scan covers Latin (.!?;)
+// and CJK (。！？；) terminators; falls back to char-count slice when no
+// terminator is found in the first 2x window.
+function ruleDistillFromRaw(raw: string): string {
+  const normalized = raw.replace(/\s+/g, " ").trim();
+  if (normalized.length === 0) {
+    return "";
+  }
+  if (normalized.length <= DISTILLED_FACT_MAX_CHARS) {
+    return normalized;
+  }
+  const sentenceRegex = /[^.!?;。！？；]+[.!?;。！？；]+/gu;
+  const sentences = normalized.match(sentenceRegex) ?? [];
+  if (sentences.length > 0) {
+    const head = sentences.slice(0, DISTILLED_FACT_MAX_SENTENCES).join("").trim();
+    if (head.length > 0 && head.length <= DISTILLED_FACT_MAX_CHARS) {
+      return head;
+    }
+    if (head.length > DISTILLED_FACT_MAX_CHARS) {
+      return `${head.slice(0, DISTILLED_FACT_MAX_CHARS - 3)}...`;
+    }
+  }
+  return `${normalized.slice(0, DISTILLED_FACT_MAX_CHARS - 3)}...`;
 }
 
 function appendSummarySuffix(summary: string, suffix?: string): string {

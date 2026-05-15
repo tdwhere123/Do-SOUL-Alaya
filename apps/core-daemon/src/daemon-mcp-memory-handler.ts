@@ -15,6 +15,7 @@ export function createDaemonMcpMemoryToolHandler(input: {
   readonly recallService: McpMemoryToolHandlerDependencies["recallService"];
   readonly memoryService: McpMemoryToolHandlerDependencies["memoryService"];
   readonly memoryEntryRepo: NonNullable<McpMemoryToolHandlerDependencies["memoryEntryRepo"]>;
+  readonly evidenceService?: McpMemoryToolHandlerDependencies["evidenceService"];
   readonly signalService: McpMemoryToolHandlerDependencies["signalService"];
   readonly graphExploreService: McpMemoryToolHandlerDependencies["graphExploreService"];
   readonly graphEdgePort?: McpMemoryToolHandlerDependencies["graphEdgePort"];
@@ -31,6 +32,7 @@ export function createDaemonMcpMemoryToolHandler(input: {
     recallService: input.recallService,
     memoryService: input.memoryService,
     memoryEntryRepo: input.memoryEntryRepo,
+    ...(input.evidenceService === undefined ? {} : { evidenceService: input.evidenceService }),
     signalService: input.signalService,
     graphExploreService: input.graphExploreService,
     ...(input.graphEdgePort === undefined ? {} : { graphEdgePort: input.graphEdgePort }),

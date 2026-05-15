@@ -505,13 +505,15 @@ export class RecallService {
       workspaceId,
       byId,
       drafts,
-      addCandidate
+      addCandidate,
+      winnerMemoryIds
     });
     await this.addPathExpansionCandidates({
       workspaceId,
       byId,
       drafts,
-      addCandidate
+      addCandidate,
+      winnerMemoryIds
     });
 
     const anchorMap = new Map(projectMappings.map((mapping) => [mapping.global_object_id, mapping]));
@@ -671,7 +673,16 @@ export class RecallService {
     for (const entry of exactCohortMatches) {
       params.addCandidate(entry, "session_surface_cohort", 0.8, "session_surface_cohort");
     }
+    // invariant: cohort dominance guard. The seed-cohort branch admits the
+    // ±N neighbors around a structural seed. On a small workspace this
+    // degenerates into "admit every memory in the workspace" because every
+    // memory shares the same run_id / surface_id. We compute the would-be
+    // cohort size (per-seed ±radius unique) before admitting; if it would
+    // cover more than half of tierMemories, the plane is skipped so other
+    // planes (evidence_anchor / domain_tag_cluster / lexical) can compete.
     if (structuralSeeds.length > 0) {
+      const cohortByMemoryId = new Map<string, readonly Readonly<MemoryEntry>[]>();
+      const wouldBeCohort = new Set<string>();
       for (const seed of seeds.slice(0, DYNAMIC_RECALL_SEED_CAP)) {
         const cohort = params.tierMemories
           .filter((entry) =>
@@ -682,6 +693,7 @@ export class RecallService {
             const createdAtComparison = left.created_at.localeCompare(right.created_at);
             return createdAtComparison === 0 ? left.object_id.localeCompare(right.object_id) : createdAtComparison;
           });
+        cohortByMemoryId.set(seed.object_id, cohort);
         const center = cohort.findIndex((entry) => entry.object_id === seed.object_id);
         if (center < 0) {
           continue;
@@ -690,7 +702,27 @@ export class RecallService {
         const end = Math.min(cohort.length, center + DYNAMIC_RECALL_COHORT_RADIUS + 1);
         for (const entry of cohort.slice(start, end)) {
           if (entry.object_id !== seed.object_id) {
-            params.addCandidate(entry, "session_surface_cohort", 0.55, "session_surface_cohort");
+            wouldBeCohort.add(entry.object_id);
+          }
+        }
+      }
+      const seedCohortRatio =
+        params.tierMemories.length === 0
+          ? 0
+          : wouldBeCohort.size / params.tierMemories.length;
+      if (seedCohortRatio <= 0.5) {
+        for (const seed of seeds.slice(0, DYNAMIC_RECALL_SEED_CAP)) {
+          const cohort = cohortByMemoryId.get(seed.object_id) ?? [];
+          const center = cohort.findIndex((entry) => entry.object_id === seed.object_id);
+          if (center < 0) {
+            continue;
+          }
+          const start = Math.max(0, center - DYNAMIC_RECALL_COHORT_RADIUS);
+          const end = Math.min(cohort.length, center + DYNAMIC_RECALL_COHORT_RADIUS + 1);
+          for (const entry of cohort.slice(start, end)) {
+            if (entry.object_id !== seed.object_id) {
+              params.addCandidate(entry, "session_surface_cohort", 0.55, "session_surface_cohort");
+            }
           }
         }
       }
@@ -702,6 +734,7 @@ export class RecallService {
     readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
     readonly drafts: ReadonlyMap<string, CoarseCandidateDraft>;
     readonly addCandidate: CoarseCandidateAdder;
+    readonly winnerMemoryIds: ReadonlySet<string>;
   }>): Promise<void> {
     const graphExpansionPort = this.dependencies.graphExpansionPort;
     if (graphExpansionPort === undefined || params.drafts.size === 0) {
@@ -725,6 +758,21 @@ export class RecallService {
         });
         continue;
       }
+      // usage_proof gate: a seed only qualifies to project its graph
+      // neighbors when there is independent evidence that the seed was
+      // *used* historically — not just lexically matched in this query.
+      // Two sources count as proof:
+      //   1. an inbound RECALLS edge (left behind by a prior
+      //      report_context_usage on this memory), or
+      //   2. governance attestation via winnerMemoryIds (the seed is the
+      //      backing memory of a slot's winner_claim).
+      // Without this gate, graph_expansion degrades into "lexical-match
+      // neighborhood discovery" and pollutes the structural score band.
+      const hasRecallsEdge = edges.some((edge) => edge.edge_type === "recalls");
+      const isWinnerBackedSeed = params.winnerMemoryIds.has(seed.entry.object_id);
+      if (!hasRecallsEdge && !isWinnerBackedSeed) {
+        continue;
+      }
       for (const edge of edges.slice(0, DYNAMIC_RECALL_EDGE_FANOUT)) {
         const neighborId = edge.source_memory_id === seed.entry.object_id
           ? edge.target_memory_id
@@ -742,18 +790,68 @@ export class RecallService {
     }
   }
 
+  // see also: addGraphExpansionCandidates — same gate inlined there
+  private async filterUsageProofSeeds(
+    seeds: readonly Readonly<CoarseCandidateDraft>[],
+    workspaceId: string,
+    winnerMemoryIds: ReadonlySet<string>,
+    graphExpansionPort: typeof this.dependencies.graphExpansionPort
+  ): Promise<readonly Readonly<CoarseCandidateDraft>[]> {
+    if (graphExpansionPort === undefined) {
+      return seeds.filter((seed) => winnerMemoryIds.has(seed.entry.object_id));
+    }
+    const qualified: Readonly<CoarseCandidateDraft>[] = [];
+    for (const seed of seeds) {
+      if (winnerMemoryIds.has(seed.entry.object_id)) {
+        qualified.push(seed);
+        continue;
+      }
+      try {
+        const edges = await graphExpansionPort.findByMemoryId(
+          seed.entry.object_id,
+          workspaceId
+        );
+        if (edges.some((edge) => edge.edge_type === "recalls")) {
+          qualified.push(seed);
+        }
+      } catch (error) {
+        this.warn("usage_proof seed gate lookup failed", {
+          workspace_id: workspaceId,
+          seed_memory_id: seed.entry.object_id,
+          error: toErrorMessage(error)
+        });
+      }
+    }
+    return qualified;
+  }
+
   private async addPathExpansionCandidates(params: Readonly<{
     readonly workspaceId: string;
     readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
     readonly drafts: ReadonlyMap<string, CoarseCandidateDraft>;
     readonly addCandidate: CoarseCandidateAdder;
+    readonly winnerMemoryIds: ReadonlySet<string>;
   }>): Promise<void> {
     const pathExpansionPort = this.dependencies.pathExpansionPort;
     if (pathExpansionPort === undefined || params.drafts.size === 0) {
       return;
     }
 
-    const seeds = selectExpansionSeedDrafts(params.drafts).slice(0, DYNAMIC_RECALL_SEED_CAP);
+    // invariant: usage_proof seed gate (also enforced in
+    // addGraphExpansionCandidates): a PathRelation anchor must be either
+    // governance-attested (winnerMemoryIds) or have at least one inbound
+    // RECALLS edge. Lexical-only seeds do not qualify.
+    const graphExpansionPort = this.dependencies.graphExpansionPort;
+    const allSeeds = selectExpansionSeedDrafts(params.drafts).slice(0, DYNAMIC_RECALL_SEED_CAP);
+    const seeds: readonly Readonly<CoarseCandidateDraft>[] = await this.filterUsageProofSeeds(
+      allSeeds,
+      params.workspaceId,
+      params.winnerMemoryIds,
+      graphExpansionPort
+    );
+    if (seeds.length === 0) {
+      return;
+    }
     const seedIds = new Set(seeds.map((seed) => seed.entry.object_id));
     const anchors: PathAnchorRef[] = seeds.map((seed) => ({
       kind: "object",

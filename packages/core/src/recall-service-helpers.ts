@@ -347,9 +347,14 @@ export function estimateTokens(content: string, tokenEstimator: TokenEstimator =
 export function createContentPreview(
   content: string,
   manifestation?: ManifestationState,
-  originPlane?: RecallOriginPlane
+  _originPlane?: RecallOriginPlane
 ): string {
-  if (originPlane === "global" && manifestation === "full_eligible") {
+  // Manifestation gates whether the agent gets the full body. Both
+  // workspace_local and global candidates use the same gate; the
+  // previous origin_plane discrimination meant workspace_local could
+  // never serve full content even when its activation_score put it in
+  // the full_eligible band — see DynamicsService.assignInitialDynamics.
+  if (manifestation === "full_eligible") {
     return content;
   }
 

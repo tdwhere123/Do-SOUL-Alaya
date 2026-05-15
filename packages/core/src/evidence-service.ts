@@ -151,6 +151,21 @@ export class EvidenceService {
     return this.dependencies.evidenceCapsuleRepo.findById(objectId);
   }
 
+  // SECURITY: scoped lookup blocks cross-workspace pointer resolution at
+  // the service layer (parallel to MemoryService.findByIdScoped). Used by
+  // soul.open_pointer to dereference evidence_refs back to raw turn
+  // material without leaking foreign-workspace evidence.
+  public async findByIdScoped(
+    objectId: string,
+    workspaceId: string
+  ): Promise<Readonly<EvidenceCapsule> | null> {
+    const evidence = await this.dependencies.evidenceCapsuleRepo.findById(objectId);
+    if (evidence === null || evidence.workspace_id !== workspaceId) {
+      return null;
+    }
+    return evidence;
+  }
+
   public findByRunId(runId: string): Promise<readonly Readonly<EvidenceCapsule>[]> {
     return this.dependencies.evidenceCapsuleRepo.findByRunId(runId);
   }

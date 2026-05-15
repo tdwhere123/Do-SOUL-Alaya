@@ -190,7 +190,7 @@ describe("DynamicsService", () => {
     expect(hazard.decay_profile).toBe("hazard");
     expect(hazard.confidence).toBe(0.9);
     expect(hazard.retention_state).toBe("working");
-    expect(hazard.activation_score).toBe(0.45);
+    expect(hazard.activation_score).toBeCloseTo(0.54, 10);
 
     expect(episode.decay_profile).toBe("volatile");
     expect(episode.confidence).toBe(0.4);

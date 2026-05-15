@@ -1108,9 +1108,20 @@ describe("RecallService", () => {
     ];
     const { dependencies } = createDependencies(memories);
     const graphExpansionPort = {
+      // usage_proof gate: seed-memory carries a prior RECALLS edge so the
+      // graph_expansion / path_expansion planes recognize it as historically
+      // used (see filterUsageProofSeeds in recall-service.ts).
       findByMemoryId: vi.fn(async (memoryId: string) =>
         memoryId === "seed-memory"
           ? [
+              {
+                edge_id: "edge-recalls",
+                source_memory_id: "prior-recall",
+                target_memory_id: "seed-memory",
+                edge_type: "recalls" as const,
+                workspace_id: "workspace-1",
+                created_at: "2026-03-19T00:00:00.000Z"
+              },
               {
                 edge_id: "edge-1",
                 source_memory_id: "seed-memory",

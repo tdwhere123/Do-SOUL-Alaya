@@ -119,7 +119,9 @@ export const SoulOpenPointerRequestSchema = z
 
 // Public projection: only the fields agents may read. MemoryEntry internals
 // (lifecycle_state, created_by, storage_tier, workspace_id, ...) are not
-// exposed (invariants §29 Default Scope).
+// exposed (invariants §29 Default Scope). EvidenceCapsule projection adds
+// gist / excerpt so attached agents can resolve evidence_refs back to raw
+// turn material via the same soul.open_pointer entry point.
 export const SoulOpenPointerContentSchema = z
   .object({
     object_id: NonEmptyStringSchema,
@@ -127,7 +129,9 @@ export const SoulOpenPointerContentSchema = z
     schema_version: z.number().int().min(1),
     content: z.string().nullable(),
     domain_tags: z.array(NonEmptyStringSchema).readonly(),
-    evidence_refs: z.array(NonEmptyStringSchema).readonly()
+    evidence_refs: z.array(NonEmptyStringSchema).readonly(),
+    gist: z.string().nullable().optional(),
+    excerpt: z.string().nullable().optional()
   })
   .readonly();
 

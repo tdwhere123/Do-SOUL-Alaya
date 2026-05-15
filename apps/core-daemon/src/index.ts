@@ -744,6 +744,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     recallService,
     memoryService,
     memoryEntryRepo,
+    evidenceService,
     signalService,
     graphExploreService,
     graphEdgePort,

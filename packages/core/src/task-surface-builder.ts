@@ -70,8 +70,8 @@ export const STRATEGY_RECALL_DEFAULTS: Readonly<
     }),
     fine: Object.freeze({
       budgets: Object.freeze({
-        max_total_tokens: 2000,
-        max_entries: 10,
+        max_total_tokens: 3000,
+        max_entries: 15,
         per_dimension_limits: null
       }),
       conflict_awareness: false
@@ -96,8 +96,8 @@ export const STRATEGY_RECALL_DEFAULTS: Readonly<
     }),
     fine: Object.freeze({
       budgets: Object.freeze({
-        max_total_tokens: 4000,
-        max_entries: 25,
+        max_total_tokens: 5000,
+        max_entries: 30,
         per_dimension_limits: null
       }),
       conflict_awareness: true
@@ -126,8 +126,8 @@ export const STRATEGY_RECALL_DEFAULTS: Readonly<
     }),
     fine: Object.freeze({
       budgets: Object.freeze({
-        max_total_tokens: 3000,
-        max_entries: 15,
+        max_total_tokens: 4000,
+        max_entries: 20,
         per_dimension_limits: null
       }),
       conflict_awareness: true
@@ -152,8 +152,8 @@ export const STRATEGY_RECALL_DEFAULTS: Readonly<
     }),
     fine: Object.freeze({
       budgets: Object.freeze({
-        max_total_tokens: 3500,
-        max_entries: 20,
+        max_total_tokens: 4500,
+        max_entries: 25,
         per_dimension_limits: null
       }),
       conflict_awareness: true

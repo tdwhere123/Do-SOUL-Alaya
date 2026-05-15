@@ -53,9 +53,9 @@ soul:mcp-types.ts#SoulListPendingProposalsResponseSchema(proposals,total_count)#
 soul:mcp-types.ts#SoulMemorySearchDegradationReasonSchema()#a8fdf75|enum=cold_cascade_engaged|recall_explainability_partial|warm_cascade_engaged
 soul:mcp-types.ts#SoulMemorySearchRequestSchema(dimension,domain_tags,host_context,max_results,query,recent_turn,scope_class,since,time_field,until)#1dd1f43
 soul:mcp-types.ts#SoulMemorySearchResponseSchema(degradation_reason,delivery_id,results,strategy_mix,total_count)#cdfd7c9
-soul:mcp-types.ts#SoulOpenPointerContentSchema(content,domain_tags,evidence_refs,object_id,object_kind,schema_version)#1babe96
+soul:mcp-types.ts#SoulOpenPointerContentSchema(content,domain_tags,evidence_refs,excerpt,gist,object_id,object_kind,schema_version)#fcdde3f
 soul:mcp-types.ts#SoulOpenPointerRequestSchema(object_id)#a961e8f
-soul:mcp-types.ts#SoulOpenPointerResponseSchema(content,object_id,object_kind)#79c32b9
+soul:mcp-types.ts#SoulOpenPointerResponseSchema(content,object_id,object_kind)#7eb611f
 soul:mcp-types.ts#SoulPendingProposalSummarySchema(assigned_at,assigned_reviewer_identity,created_at,deadline_at,is_overdue,proposal_id,proposed_change_summary,proposed_changes,target_object_id,target_object_kind)#c39d462
 soul:mcp-types.ts#SoulProposeMemoryUpdateRequestSchema(proposed_changes,reason,source_delivery_ids,target_object_id)#08a46eb
 soul:mcp-types.ts#SoulProposeMemoryUpdateResponseSchema(proposal_id,status)#cde6898
