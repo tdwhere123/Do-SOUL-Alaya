@@ -543,19 +543,29 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       await graphExploreService.addEdge(params);
     }
   };
-  const conflictDetectionService = new ConflictDetectionService({
-    memoryRepo: {
-      findByDimension: async (workspaceId, dimension) =>
-        await memoryEntryRepo.findByDimension(workspaceId, dimension),
-      findByWorkspaceId: async (workspaceId) =>
-        await memoryEntryRepo.findByWorkspaceId(workspaceId)
-    },
-    graphEdgePort,
-    ...(createConflictDetectionLlmPort() === null
-      ? {}
-      : { llmPort: createConflictDetectionLlmPort()! }),
-    warn: warnLogger.warn
-  });
+  // invariant: ConflictDetectionService is opt-in. Each materialization
+  // pays O(workspace_size) for findByDimension + findByWorkspaceId;
+  // high-frequency seeding paths (bench harness, bulk import) cannot
+  // afford this. Operators enable conflict edge production through
+  // ALAYA_CONFLICT_DETECTION_ENABLED=1 (off by default).
+  const conflictDetectionEnabled =
+    process.env.ALAYA_CONFLICT_DETECTION_ENABLED === "1" ||
+    process.env.ALAYA_CONFLICT_DETECTION_ENABLED?.toLowerCase() === "true";
+  const conflictDetectionService = conflictDetectionEnabled
+    ? new ConflictDetectionService({
+        memoryRepo: {
+          findByDimension: async (workspaceId, dimension) =>
+            await memoryEntryRepo.findByDimension(workspaceId, dimension),
+          findByWorkspaceId: async (workspaceId) =>
+            await memoryEntryRepo.findByWorkspaceId(workspaceId)
+        },
+        graphEdgePort,
+        ...(createConflictDetectionLlmPort() === null
+          ? {}
+          : { llmPort: createConflictDetectionLlmPort()! }),
+        warn: warnLogger.warn
+      })
+    : null;
   const pathRelationProposalService = new PathRelationProposalService({
     repo: {
       create: async (relation) => pathRelationRepo.create(relation),
@@ -572,7 +582,9 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     synthesisService,
     claimService,
     graphEdgePort,
-    conflictDetectionPort: conflictDetectionService,
+    ...(conflictDetectionService === null
+      ? {}
+      : { conflictDetectionPort: conflictDetectionService }),
     handoffGapHandler: sqliteHandoffGapAdapter
   });
   const signalService = new SignalService({
