@@ -1,7 +1,6 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { mkdtemp } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { createInspectorApp, INSPECTOR_ROUTE_SURFACE } from "../app.js";
 
@@ -18,8 +17,10 @@ describe("inspector routes", () => {
       "PATCH /api/config/runtime/embedding-supplement",
       "GET /api/config/:workspaceId/garden-compute",
       "PATCH /api/config/runtime/garden-compute",
+      "GET /api/bench-summary",
       "GET /api/embedding-status/:workspaceId",
       "GET /api/graph/:workspaceId",
+      "GET /api/recall-stats/:workspaceId",
       "GET /api/status",
       // A1 (HITL daemon backbone) — Inspector loopback for the new
       // pending-proposals listing tool plus accept/reject.
@@ -76,6 +77,9 @@ describe("inspector routes", () => {
       headers: { "content-type": "application/json" }
     });
     await app.request("/api/graph/ws1?token=token");
+    await app.request(
+      "/api/recall-stats/ws1?token=token&since=2026-05-01T00:00:00Z&until=2026-05-08T00:00:00Z&excludeAgentTargets=inspector,cli"
+    );
     await app.request("/api/status?token=token");
 
     expect(calls).toEqual([
@@ -98,6 +102,11 @@ describe("inspector routes", () => {
         body: "{\"auto_approve_readonly\":true}"
       },
       { url: "http://daemon.local/workspaces/ws1/soul/graph", method: "GET", body: null },
+      {
+        url: "http://daemon.local/workspaces/ws1/recall-stats?since=2026-05-01T00%3A00%3A00Z&until=2026-05-08T00%3A00%3A00Z&excludeAgentTargets=inspector%2Ccli",
+        method: "GET",
+        body: null
+      },
       { url: "http://daemon.local/status", method: "GET", body: null }
     ]);
   });
@@ -357,6 +366,7 @@ describe("inspector routes", () => {
     const graphWhitespace = await app.request("/api/graph/ws1%20?token=token");
     const config = await app.request("/api/config/ws2/strategy?token=token");
     const proposals = await app.request("/api/proposals/ws2/pending?token=token");
+    const recallStats = await app.request("/api/recall-stats/ws2?token=token");
     const search = await app.request("/api/soul/search/ws2?token=token", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -367,10 +377,154 @@ describe("inspector routes", () => {
     expect(graphWhitespace.status).toBe(403);
     expect(config.status).toBe(403);
     expect(proposals.status).toBe(403);
+    expect(recallStats.status).toBe(403);
     expect(search.status).toBe(403);
     await expect(graph.json()).resolves.toEqual({ error: "workspace_forbidden" });
     await expect(graphWhitespace.json()).resolves.toEqual({ error: "workspace_forbidden" });
+    await expect(recallStats.json()).resolves.toEqual({ error: "workspace_forbidden" });
     expect(calls).toEqual([]);
+  });
+
+  it("returns empty bench-summary when the history root does not exist yet", async () => {
+    const missing = await mkdtemp(path.join(tmpdir(), "bench-history-empty-"));
+    await rm(missing, { recursive: true, force: true });
+
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      benchHistoryRoot: missing,
+      staticRoot: await mkdtemp(path.join(tmpdir(), "inspector-static-")),
+      fetchImpl: async () => Response.json({}, { status: 500 })
+    });
+
+    const response = await app.request("/api/bench-summary?token=token");
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      success: true,
+      data: {
+        self: null,
+        public: null,
+        errors: { self: null, public: null }
+      }
+    });
+  });
+
+  it("summarizes the latest bench-history entry when one is present", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "bench-history-with-entries-"));
+    const selfRoot = path.join(root, "self", "2026-05-14T100000Z-ec44a05");
+    await mkdir(selfRoot, { recursive: true });
+    const payload = {
+      bench_name: "self",
+      split: "synthetic",
+      run_at: "2026-05-14T10:00:00.000Z",
+      alaya_commit: "ec44a05",
+      alaya_version: "0.3.6",
+      embedding_provider: "local-heuristic",
+      chat_provider: "n/a",
+      dataset: { name: "synthetic", size: 12, source: "internal" },
+      sample_size: 12,
+      evaluated_count: 12,
+      harness_mode: "mcp_propose_review",
+      kpi: {
+        r_at_1: 0.7,
+        r_at_5: 0.9,
+        r_at_10: 0.93,
+        latency_ms_p50: 60,
+        latency_ms_p95: 110,
+        token_saved_ratio_vs_full_prompt: 0.88,
+        tier_distribution: { hot: 50, warm: 30, cold: 20 },
+        degradation_reasons: {
+          none: 80,
+          warm_cascade_engaged: 12,
+          cold_cascade_engaged: 8
+        },
+        per_scenario: []
+      }
+    };
+    await writeFile(path.join(selfRoot, "kpi.json"), JSON.stringify(payload), "utf8");
+
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      benchHistoryRoot: root,
+      staticRoot: await mkdtemp(path.join(tmpdir(), "inspector-static-")),
+      fetchImpl: async () => Response.json({}, { status: 500 })
+    });
+
+    const response = await app.request("/api/bench-summary?token=token");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      success: boolean;
+      data: { self: { history_count: number; latest_slug: string } | null };
+    };
+    expect(body.data.self?.history_count).toBe(1);
+    expect(body.data.self?.latest_slug).toBe("2026-05-14T100000Z-ec44a05");
+  });
+
+  it("isolates a malformed kpi.json on one split without wiping the other split", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "bench-history-mixed-"));
+    const badSelf = path.join(root, "self", "2026-05-14T100000Z-deadbee");
+    await mkdir(badSelf, { recursive: true });
+    await writeFile(path.join(badSelf, "kpi.json"), "{not valid json", "utf8");
+
+    const goodPublic = path.join(root, "public", "2026-05-14T100000Z-abcdef0");
+    await mkdir(goodPublic, { recursive: true });
+    const payload = {
+      bench_name: "public",
+      split: "longmemeval-s",
+      run_at: "2026-05-14T10:00:00.000Z",
+      alaya_commit: "abcdef0",
+      alaya_version: "0.3.6",
+      embedding_provider: "yunwu:text-embedding-3-small",
+      chat_provider: "yunwu:gpt-5.4-mini",
+      dataset: { name: "LongMemEval-S", size: 500, source: "github:xiaowu0162/LongMemEval" },
+      sample_size: 500,
+      evaluated_count: 500,
+      harness_mode: "mcp_propose_review",
+      kpi: {
+        r_at_1: 0.45,
+        r_at_5: 0.72,
+        r_at_10: 0.81,
+        latency_ms_p50: 90,
+        latency_ms_p95: 140,
+        token_saved_ratio_vs_full_prompt: 0.83,
+        tier_distribution: { hot: 40, warm: 35, cold: 25 },
+        degradation_reasons: {
+          none: 70,
+          warm_cascade_engaged: 18,
+          cold_cascade_engaged: 12
+        },
+        per_scenario: []
+      }
+    };
+    await writeFile(path.join(goodPublic, "kpi.json"), JSON.stringify(payload), "utf8");
+
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      benchHistoryRoot: root,
+      staticRoot: await mkdtemp(path.join(tmpdir(), "inspector-static-")),
+      fetchImpl: async () => Response.json({}, { status: 500 })
+    });
+
+    const response = await app.request("/api/bench-summary?token=token");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      success: boolean;
+      data: {
+        self: unknown;
+        public: { history_count: number; latest_slug: string } | null;
+        errors: { self: string | null; public: string | null };
+      };
+    };
+    expect(body.data.self).toBeNull();
+    expect(body.data.errors.self).toMatch(/kpi_json_invalid|kpi_schema_invalid|summary_failed/);
+    expect(body.data.errors.public).toBeNull();
+    expect(body.data.public?.history_count).toBe(1);
+    expect(body.data.public?.latest_slug).toBe("2026-05-14T100000Z-abcdef0");
   });
 
   it("rejects workspace-scoped API paths when the Inspector app is missing its launch workspace", async () => {

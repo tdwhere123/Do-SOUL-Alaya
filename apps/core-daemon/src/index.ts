@@ -791,6 +791,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     slotService,
     arbitrationService,
     recallService,
+    recallUtilizationService,
     taskSurfaceBuilder,
     synthesisService,
     claimService,

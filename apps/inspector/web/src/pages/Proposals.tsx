@@ -139,13 +139,13 @@ export default function ProposalsPage() {
 
   return (
     <div className="h-full w-full overflow-y-auto"><div className="p-6 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold text-[#586E75] mb-4 font-mono uppercase tracking-widest">
+      <h1 className="text-2xl font-bold text-ink-600 mb-4 font-mono uppercase tracking-widest">
         {t("proposals:title")}
       </h1>
       <div className="mb-6">
         <label
           htmlFor="proposal-reviewer-identity"
-          className="block text-sm font-mono text-[#657B83] mb-1"
+          className="block text-sm font-mono text-ink-700 mb-1"
         >
           {t("proposals:reviewer.label")}
         </label>
@@ -155,11 +155,11 @@ export default function ProposalsPage() {
           value={reviewer}
           onChange={(event) => setReviewer(event.target.value)}
           placeholder={t("proposals:reviewer.placeholder")}
-          className="w-full px-3 py-2 border border-[#D4CDB8] rounded font-mono text-sm bg-[#FDF6E3]"
+          className="w-full px-3 py-2 border border-beige-300 rounded font-mono text-sm bg-beige-100"
         />
       </div>
       {loading && (
-        <p className="text-[#586E75] font-mono text-sm">{t("proposals:loading")}</p>
+        <p className="text-ink-600 font-mono text-sm">{t("proposals:loading")}</p>
       )}
       {error !== null && (
         <p className="text-red-700 font-mono text-sm">
@@ -167,7 +167,7 @@ export default function ProposalsPage() {
         </p>
       )}
       {!loading && proposals.length === 0 && (
-        <p className="text-[#657B83] font-mono text-sm">{t("proposals:empty")}</p>
+        <p className="text-ink-700 font-mono text-sm">{t("proposals:empty")}</p>
       )}
       <ul className="space-y-4">
         {proposals.map((proposal) => {
@@ -183,21 +183,21 @@ export default function ProposalsPage() {
             aria-current={isHighlighted ? "true" : undefined}
             className={
               isHighlighted
-                ? "border-2 border-[#B58900] rounded p-4 bg-[#FDF6E3]"
-                : "border border-[#D4CDB8] rounded p-4 bg-[#FDF6E3]"
+                ? "border-2 border-state-emphasis rounded p-4 bg-beige-100"
+                : "border border-beige-300 rounded p-4 bg-beige-100"
             }
           >
-            <div className="font-mono text-xs text-[#93A1A1] mb-2">
+            <div className="font-mono text-xs text-ink-500 mb-2">
               {proposal.proposal_id}
             </div>
-            <div className="font-mono text-sm text-[#586E75] mb-2">
+            <div className="font-mono text-sm text-ink-600 mb-2">
               {proposal.target_object_kind} {t("proposals:row.targetSeparator")} {proposal.target_object_id}
             </div>
-            <div className="text-sm text-[#657B83] mb-3">
+            <div className="text-sm text-ink-700 mb-3">
               {proposal.proposed_change_summary}
             </div>
-            <div className="mb-3 rounded border border-[#D4CDB8] bg-white p-3">
-              <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-[#93A1A1]">
+            <div className="mb-3 rounded border border-beige-300 bg-white p-3">
+              <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-500">
                 {t("proposals:row.proposedChanges")}
               </div>
               {proposedChangesDisplay === null ? (
@@ -205,12 +205,12 @@ export default function ProposalsPage() {
                   {t("proposals:row.proposedChangesUnavailable")}
                 </p>
               ) : (
-                <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-[#586E75]">
+                <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-ink-600">
                   {proposedChangesDisplay}
                 </pre>
               )}
             </div>
-            <div className="text-xs text-[#93A1A1] mb-3 font-mono">
+            <div className="text-xs text-ink-500 mb-3 font-mono">
               {t("proposals:row.createdAt", { ts: proposal.created_at })}
             </div>
             <label htmlFor={reasonInputId} className="sr-only">
@@ -228,14 +228,14 @@ export default function ProposalsPage() {
                   [proposal.proposal_id]: event.target.value
                 }))
               }
-              className="w-full px-3 py-2 border border-[#D4CDB8] rounded font-mono text-sm bg-white mb-3"
+              className="w-full px-3 py-2 border border-beige-300 rounded font-mono text-sm bg-white mb-3"
             />
             <div className="flex gap-2">
               <button
                 type="button"
                 disabled={busyProposalId === proposal.proposal_id || !canAccept}
                 onClick={() => void submitReview(proposal.proposal_id, "accept")}
-                className="px-4 py-2 bg-[#859900] text-white font-mono text-sm rounded disabled:opacity-50"
+                className="px-4 py-2 bg-state-ok text-white font-mono text-sm rounded disabled:opacity-50"
               >
                 {t("proposals:row.accept")}
               </button>
@@ -243,7 +243,7 @@ export default function ProposalsPage() {
                 type="button"
                 disabled={busyProposalId === proposal.proposal_id}
                 onClick={() => void submitReview(proposal.proposal_id, "reject")}
-                className="px-4 py-2 bg-[#DC322F] text-white font-mono text-sm rounded disabled:opacity-50"
+                className="px-4 py-2 bg-state-error text-white font-mono text-sm rounded disabled:opacity-50"
               >
                 {t("proposals:row.reject")}
               </button>

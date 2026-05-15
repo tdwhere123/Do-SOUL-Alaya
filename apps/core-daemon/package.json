@@ -1,6 +1,6 @@
 {
   "name": "@do-soul/alaya",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "private": true,
   "description": "Local-first memory plane for CLI agents (Codex, Claude Code, similar). Provides MCP attach surface and the alaya CLI (13 verbs).",
   "license": "MIT",
@@ -20,6 +20,24 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./mcp-server": {
+      "import": "./dist/mcp-server.js",
+      "types": "./dist/mcp-server.d.ts"
+    },
+    "./cli/bridge": {
+      "import": "./dist/cli/bridge.js",
+      "types": "./dist/cli/bridge.d.ts"
+    },
+    "./cli/register": {
+      "import": "./dist/cli/register.js",
+      "types": "./dist/cli/register.d.ts"
+    }
+  },
   "engines": {
     "node": ">=20.19.0"
   },

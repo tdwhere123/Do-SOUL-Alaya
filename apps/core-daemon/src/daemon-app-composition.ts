@@ -38,6 +38,7 @@ type CreateCoreDaemonAppInput = Readonly<{
   slotService: unknown;
   arbitrationService: unknown;
   recallService: unknown;
+  recallUtilizationService: unknown;
   taskSurfaceBuilder: unknown;
   synthesisService: unknown;
   claimService: unknown;
@@ -153,6 +154,10 @@ export function createCoreDaemonApp(input: CreateCoreDaemonAppInput): ReturnType
         taskSurfaceBuilder: input.taskSurfaceBuilder,
         runService: input.runService,
         workspaceService: input.workspaceService
+      },
+      recallStats: {
+        workspaceService: input.workspaceService,
+        recallUtilizationService: input.recallUtilizationService
       },
       syntheses: {
         workspaceService: input.workspaceService,

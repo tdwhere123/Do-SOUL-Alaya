@@ -1,3 +1,12 @@
+/**
+ * @internal Exposed via `@do-soul/alaya/cli/bridge` for the in-process
+ * bench harness in `@do-soul/alaya-bench-runner`. Not a stability promise:
+ * the export surface, symbol names, and signatures may change without a
+ * deprecation period. If you rename or split this module, also update:
+ *   - apps/core-daemon/package.json `exports."./cli/bridge"`
+ *   - apps/bench-runner/src/harness/daemon.ts (the only known consumer)
+ * @see apps/bench-runner/src/harness/daemon.ts
+ */
 import type { AlayaDaemonRuntime } from "../index.js";
 
 export const ALAYA_SYSEXITS = Object.freeze({

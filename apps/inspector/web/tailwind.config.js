@@ -10,6 +10,7 @@ export default {
         beige: {
           50: '#FDFDF3',
           100: '#FDF6E3',
+          150: '#EEE8D5',
           200: '#E8E2D0',
           300: '#D4CDB8',
         },
@@ -24,6 +25,17 @@ export default {
           blue: '#92A8B3',
           sage: '#B5BD89',
           orange: '#E0C7B0',
+        },
+        state: {
+          ok: '#859900',
+          warm: '#C9A36F',
+          warning: '#D4AF37',
+          emphasis: '#B58900',
+          'emphasis-text': '#7A5A0F',
+          error: '#DC322F',
+          'error-soft': '#C9ADA7',
+          'error-text': '#8B4536',
+          info: '#4A90A4',
         }
       },
     },

@@ -1,6 +1,6 @@
 {
   "name": "@do-soul/alaya-inspector",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "private": true,
   "description": "Memory Inspector loopback server for Do-SOUL Alaya — local-only memory tooling, NOT an agent surface.",
   "license": "MIT",
@@ -22,6 +22,7 @@
     "test": "pnpm exec vitest run --project @do-soul/alaya-inspector"
   },
   "dependencies": {
+    "@do-soul/alaya-eval": "workspace:*",
     "@do-soul/alaya-protocol": "workspace:*",
     "@hono/node-server": "^1.13.8",
     "hono": "^4.6.10"

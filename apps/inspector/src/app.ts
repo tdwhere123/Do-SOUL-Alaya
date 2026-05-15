@@ -2,9 +2,11 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { createInspectorAuthMiddleware } from "./auth.js";
+import { registerInspectorBenchSummaryRoutes } from "./routes/bench-summary.js";
 import { registerInspectorConfigRoutes } from "./routes/config.js";
 import { registerInspectorGraphRoutes } from "./routes/graph.js";
 import { registerInspectorProposalRoutes } from "./routes/proposals.js";
+import { registerInspectorRecallStatsRoutes } from "./routes/recall-stats.js";
 import { registerInspectorSoulSearchRoutes } from "./routes/soul-search.js";
 import { registerInspectorStatusRoutes } from "./routes/status.js";
 import { registerInspectorStaticRoutes } from "./static.js";
@@ -20,8 +22,10 @@ export const INSPECTOR_ROUTE_SURFACE = Object.freeze([
   "PATCH /api/config/runtime/embedding-supplement",
   "GET /api/config/:workspaceId/garden-compute",
   "PATCH /api/config/runtime/garden-compute",
+  "GET /api/bench-summary",
   "GET /api/embedding-status/:workspaceId",
   "GET /api/graph/:workspaceId",
+  "GET /api/recall-stats/:workspaceId",
   "GET /api/status",
   // A1 (HITL daemon backbone) — Inspector loopback for the new
   // pending-proposals listing tool plus accept/reject.
@@ -42,6 +46,7 @@ export interface InspectorAppOptions {
   readonly workspaceId?: string;
   readonly daemonUrl?: string;
   readonly staticRoot?: string;
+  readonly benchHistoryRoot?: string;
   readonly fetchImpl?: typeof fetch;
   readonly env?: NodeJS.ProcessEnv;
   readonly clock?: () => string;
@@ -69,7 +74,13 @@ export function createInspectorApp(options: InspectorAppOptions): Hono {
   registerInspectorGraphRoutes(app, proxyOptions);
   registerInspectorStatusRoutes(app, proxyOptions);
   registerInspectorProposalRoutes(app, proxyOptions);
+  registerInspectorRecallStatsRoutes(app, proxyOptions);
   registerInspectorSoulSearchRoutes(app, proxyOptions);
+  registerInspectorBenchSummaryRoutes(app, {
+    historyRoot:
+      options.benchHistoryRoot ??
+      resolve(process.cwd(), "docs/bench-history")
+  });
   registerInspectorStaticRoutes(app, {
     staticRoot: options.staticRoot ?? defaultStaticRoot
   });

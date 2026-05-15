@@ -1,0 +1,10 @@
+{
+  "name": "longmemeval_oracle",
+  "source_url": "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_oracle.json",
+  "sha256": "821a2034d219ab45846873dd14c14f12cfe7776e73527a483f9dac095d38620c",
+  "fetched_at": "2026-05-14T09:53:50Z",
+  "size_bytes": 15388478,
+  "question_count": 500,
+  "first_pinned_at": "2026-05-14T09:53:50Z",
+  "pinned_by_commit": "a925730"
+}

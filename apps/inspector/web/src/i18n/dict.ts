@@ -13,13 +13,49 @@ export type DictKey = keyof typeof zh;
 
 export const zh = {
   // ── nav ─────────────────────────────────────────────────────────────
+  "nav:overview": "总览",
   "nav:configuration": "配置",
   "nav:memoryGraph": "记忆图谱",
   "nav:pendingProposals": "待审记忆",
+  "nav:recallStats": "召回利用率",
   "nav:systemStatus": "系统状态",
   "nav:appName": "ALAYA 后台",
   "nav:locale.zh": "中",
   "nav:locale.en": "EN",
+
+  // ── overview page ───────────────────────────────────────────────────
+  "overview:title": "Memory 总览",
+  "overview:subtitle": "操作员视角，双轴呈现：召回精度（bench-history）+ 治理深度（待审记忆、tier、audit）。",
+  "overview:card.daemon.label": "守护进程",
+  "overview:card.daemon.subtitle": "运行状态与启动日志",
+  "overview:card.daemon.value.ready": "正常",
+  "overview:card.daemon.value.initializing": "初始化中",
+  "overview:card.daemon.value.offline": "离线",
+  "overview:card.daemon.value.warming": "退避中",
+  "overview:card.proposals.label": "待审记忆",
+  "overview:card.proposals.subtitle": "等待 HITL 审核的提议数量",
+  "overview:card.proposals.empty": "无待审项",
+  "overview:card.recall.label": "近 7 天召回",
+  "overview:card.recall.subtitle": "调用次数 · 命中率",
+  "overview:card.recall.placeholder": "—",
+  "overview:card.tier.label": "层级分布",
+  "overview:card.tier.subtitle": "Hot · Warm · Cold",
+  "overview:card.tier.placeholder": "—",
+  "overview:linkProposals": "去复核 →",
+  "overview:linkRecall": "查看召回详情 →",
+  "overview:linkStatus": "查看完整状态 →",
+  "overview:loading": "加载总览中…",
+  "overview:degraded": "状态查询退避中，最近一次：{message}",
+  "overview:bench.section": "最近 Benchmark",
+  "overview:bench.self.label": "Self-bench",
+  "overview:bench.self.hint": "黄金 fixtures + 合成 scenario；运行：rtk pnpm exec alaya-eval self",
+  "overview:bench.public.label": "LongMemEval-S",
+  "overview:bench.public.hint": "公开 benchmark；运行：rtk pnpm exec alaya-eval longmemeval",
+  "overview:bench.empty": "尚无 benchmark 记录。",
+  "overview:bench.loading": "加载 benchmark 摘要中…",
+  "overview:bench.delta": "Δ vs 上一版 {delta}",
+  "overview:bench.firstBaseline": "首份 baseline",
+  "overview:bench.history": "共 {count} 份历史记录",
 
   // ── common ──────────────────────────────────────────────────────────
   "common:loading": "加载中…",
@@ -31,6 +67,8 @@ export const zh = {
   "common:copied": "已复制到剪贴板",
   "common:none": "无",
   "common:noWorkspace": "URL 缺少 workspaceId。请用 alaya inspect --workspace 重新启动。",
+  "common:refresh": "刷新",
+  "common:refresh.aria": "立即刷新",
 
   // ── graph ───────────────────────────────────────────────────────────
   "graph:search.placeholder": "搜索 标签 / id / 摘要 / 时间（按 / 聚焦）",
@@ -134,8 +172,32 @@ export const zh = {
   "config:title": "配置",
   "config:loading": "加载配置中…",
 
+  // ── recall stats page ──────────────────────────────────────────────
+  "recall:title": "召回利用率",
+  "recall:subtitle": "守护进程的召回与上下文使用遥测。Inspector / CLI / tools-cli 流量已从聚合中排除。",
+  "recall:loading": "加载召回数据中…",
+  "recall:error": "召回数据加载失败：{message}",
+  "recall:window.24h": "24h",
+  "recall:window.7d": "7d",
+  "recall:window.30d": "30d",
+  "recall:kpi.total": "调用总数",
+  "recall:kpi.sessions": "唯一会话",
+  "recall:kpi.runs": "唯一 run",
+  "recall:kpi.miss": "miss 比例",
+  "recall:kpi.used": "used 比例",
+  "recall:kpi.follow": "回填闭环率",
+  "recall:detail.p50Pointer": "p50 命中数量",
+  "recall:detail.p50Latency": "p50 延迟",
+  "recall:detail.nullRun": "空 run_id 次数",
+  "recall:detail.usageTotal": "used / skipped / n.a.",
+  "recall:detail.usageHint": "三种 usage_state 的计数",
+  "recall:meta.window": "窗口 {since} → {until}",
+  "recall:meta.now": "现在",
+  "recall:meta.excludedTargets": "已排除：{targets}",
+
   // ── status page ────────────────────────────────────────────────────
   "status:title": "系统状态",
+  "status:subtitle": "Alaya 守护进程与核心服务的实时遥测。",
   "status:loading": "加载状态中…",
 
   // ── session ────────────────────────────────────────────────────────
@@ -148,13 +210,49 @@ export const zh = {
 
 export const en: Record<DictKey, string> = {
   // nav
+  "nav:overview": "Overview",
   "nav:configuration": "Configuration",
   "nav:memoryGraph": "Memory Graph",
   "nav:pendingProposals": "Pending Proposals",
+  "nav:recallStats": "Recall Stats",
   "nav:systemStatus": "System Status",
   "nav:appName": "ALAYA INSPECTOR",
   "nav:locale.zh": "中",
   "nav:locale.en": "EN",
+
+  // overview page
+  "overview:title": "Memory Overview",
+  "overview:subtitle": "Operator view, dual-axis: recall accuracy (bench-history) + governance depth (pending memory, tier, audit).",
+  "overview:card.daemon.label": "Daemon",
+  "overview:card.daemon.subtitle": "Runtime & startup",
+  "overview:card.daemon.value.ready": "OPERATIONAL",
+  "overview:card.daemon.value.initializing": "INITIALIZING",
+  "overview:card.daemon.value.offline": "OFFLINE",
+  "overview:card.daemon.value.warming": "WARMING",
+  "overview:card.proposals.label": "Pending Memory",
+  "overview:card.proposals.subtitle": "Awaiting HITL review",
+  "overview:card.proposals.empty": "nothing pending",
+  "overview:card.recall.label": "Recall (7d)",
+  "overview:card.recall.subtitle": "calls · hit-rate",
+  "overview:card.recall.placeholder": "—",
+  "overview:card.tier.label": "Tier mix",
+  "overview:card.tier.subtitle": "hot · warm · cold",
+  "overview:card.tier.placeholder": "—",
+  "overview:linkProposals": "Review →",
+  "overview:linkRecall": "Recall stats →",
+  "overview:linkStatus": "Full status →",
+  "overview:loading": "Loading overview…",
+  "overview:degraded": "Status feed degraded, last: {message}",
+  "overview:bench.section": "Latest Benchmarks",
+  "overview:bench.self.label": "Self-bench",
+  "overview:bench.self.hint": "Golden fixtures + synthetic scenarios. Run: rtk pnpm exec alaya-eval self",
+  "overview:bench.public.label": "LongMemEval-S",
+  "overview:bench.public.hint": "Public benchmark. Run: rtk pnpm exec alaya-eval longmemeval",
+  "overview:bench.empty": "No benchmark entries yet.",
+  "overview:bench.loading": "Loading bench summary…",
+  "overview:bench.delta": "Δ vs prev {delta}",
+  "overview:bench.firstBaseline": "first baseline",
+  "overview:bench.history": "{count} historical entries",
 
   // common
   "common:loading": "Loading…",
@@ -166,6 +264,8 @@ export const en: Record<DictKey, string> = {
   "common:copied": "copied to clipboard",
   "common:none": "None",
   "common:noWorkspace": "No workspaceId in URL. Re-run `alaya inspect` with --workspace.",
+  "common:refresh": "Refresh",
+  "common:refresh.aria": "Refresh now",
 
   // graph
   "graph:search.placeholder": "probe label / id / summary / time (press /)",
@@ -269,8 +369,32 @@ export const en: Record<DictKey, string> = {
   "config:title": "Configuration",
   "config:loading": "Loading configuration…",
 
+  // recall stats page
+  "recall:title": "Recall Utilization",
+  "recall:subtitle": "Recall and context-usage telemetry from the daemon. Inspector / CLI / tools-cli traffic is excluded from the aggregate.",
+  "recall:loading": "Loading recall data…",
+  "recall:error": "Recall data failed to load: {message}",
+  "recall:window.24h": "24h",
+  "recall:window.7d": "7d",
+  "recall:window.30d": "30d",
+  "recall:kpi.total": "calls",
+  "recall:kpi.sessions": "unique sessions",
+  "recall:kpi.runs": "unique runs",
+  "recall:kpi.miss": "miss ratio",
+  "recall:kpi.used": "used ratio",
+  "recall:kpi.follow": "follow-through",
+  "recall:detail.p50Pointer": "p50 pointer count",
+  "recall:detail.p50Latency": "p50 latency",
+  "recall:detail.nullRun": "null run_id count",
+  "recall:detail.usageTotal": "used / skipped / n.a.",
+  "recall:detail.usageHint": "Counts of the three usage_state values",
+  "recall:meta.window": "window {since} → {until}",
+  "recall:meta.now": "now",
+  "recall:meta.excludedTargets": "excluded: {targets}",
+
   // status
   "status:title": "System Status",
+  "status:subtitle": "Real-time telemetry from the Alaya daemon and core services.",
   "status:loading": "Loading status…",
 
   // session

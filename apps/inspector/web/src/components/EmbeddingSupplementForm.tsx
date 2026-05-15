@@ -200,9 +200,9 @@ export default function EmbeddingSupplementForm({ onRequiresRestart, workspaceId
       {embeddingStatus !== null && embeddingStatus.effective_mode === "degraded" ? (
         <div
           role="alert"
-          className="flex items-start gap-3 px-4 py-3 bg-[#C9ADA7]/15 border border-[#C9ADA7] rounded text-xs text-ink-700"
+          className="flex items-start gap-3 px-4 py-3 bg-morandi-pink/15 border border-morandi-pink rounded text-xs text-ink-700"
         >
-          <AlertTriangle className="w-4 h-4 mt-0.5 text-[#C9ADA7] shrink-0" />
+          <AlertTriangle className="w-4 h-4 mt-0.5 text-morandi-pink shrink-0" />
           <div className="flex-1 space-y-1 min-w-0">
             <p className="font-bold uppercase tracking-widest">
               Embedding Degraded
@@ -304,7 +304,7 @@ export default function EmbeddingSupplementForm({ onRequiresRestart, workspaceId
               className={clsx(
                 "bg-transparent border-b outline-none text-sm font-mono text-right py-1 min-w-[260px]",
                 validationError
-                  ? "border-[#C9ADA7] text-[#C9ADA7]"
+                  ? "border-morandi-pink text-morandi-pink"
                   : "border-beige-300 focus:border-ink-600 text-ink-700"
               )}
               onFocus={() => secretMode === "file" && setRevealFile(true)}
@@ -316,7 +316,7 @@ export default function EmbeddingSupplementForm({ onRequiresRestart, workspaceId
             />
           </div>
           {validationError ? (
-            <span className="text-[10px] text-[#C9ADA7]">{validationError}</span>
+            <span className="text-[10px] text-morandi-pink">{validationError}</span>
           ) : null}
           {secretMode === "paste" ? (
             <span className="max-w-[260px] text-right text-[10px] text-ink-700/40">

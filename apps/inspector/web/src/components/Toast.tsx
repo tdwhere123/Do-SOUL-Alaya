@@ -36,10 +36,10 @@ const MAX_VISIBLE = 3;
 const DEDUP_WINDOW_MS = 2000;
 
 const icons: Record<ToastType, ReactNode> = {
-  info: <Info className="w-5 h-5 text-[#92A8B3]" />,
-  success: <CheckCircle className="w-5 h-5 text-[#96AD90]" />,
-  warning: <AlertTriangle className="w-5 h-5 text-[#C9A36F]" />,
-  error: <AlertCircle className="w-5 h-5 text-[#C9ADA7]" />
+  info: <Info className="w-5 h-5 text-morandi-blue" />,
+  success: <CheckCircle className="w-5 h-5 text-morandi-green" />,
+  warning: <AlertTriangle className="w-5 h-5 text-state-warm" />,
+  error: <AlertCircle className="w-5 h-5 text-morandi-pink" />
 };
 
 interface ToastContextValue {

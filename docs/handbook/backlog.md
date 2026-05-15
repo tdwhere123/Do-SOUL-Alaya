@@ -6,18 +6,114 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-039` (`#BL-022` was opened by
+sequence. **Next available number**: `#BL-044` (`#BL-022` was opened by
 p5-system-review-r3 as an EventPublisher v0.2 deferral and closed in
 v0.1-closeout-a2; `#BL-023`/`#BL-024` were resolved in r1 / r2;
 `#BL-025` through `#BL-036` were opened by the v0.1-closeout A2 and
 D2 fix-loops, then resolved by Gate-5F under
 `docs/archive/v0.1-port-record/phase-5-followup-briefs/` before Phase 6;
-`#BL-009`, `#BL-037`, and `#BL-038` were resolved in v0.3.0).
+`#BL-009`, `#BL-037`, and `#BL-038` were resolved in v0.3.0;
+`#BL-039` through `#BL-043` were opened by v0.3.6 Phase 5/6 close-out
+as v0.3.7 candidates — see [Open Issues](#open-issues)).
 
 ## Open Issues
 
-(None currently open. `#BL-009`, `#BL-037`, and `#BL-038` were resolved
-in v0.3.0 — see below.)
+### #BL-039 — Wire real embedding provider into recall path
+
+**Status**: Open, v0.3.7 candidate.
+
+**Why open**: v0.3.6 LongMemEval-S smoke (n=20) gives R@5 = 65.0% with
+SQLite FTS + activation only (`ALAYA_ENABLE_EMBEDDING_SUPPLEMENT=false`
+in the bench harness). The recall path already has an embedding
+supplement slot (per invariant: embedding never decides durable truth,
+but may supplement ranking). Wiring the yunwu `text-embedding-3-small`
+provider (or a local-heuristic fallback) and re-running the bench is
+the cleanest single change that should lift R@5 toward 70-80% without
+touching the truth boundary.
+
+**Close condition**:
+
+1. Provider config (file: ref under `~/.config/alaya/secrets/`) wires
+   into `RecallUtilizationService` embedding lookup.
+2. LongMemEval-S `--limit 50` re-run produces a new bench-history entry
+   with the embedding-enabled KPI and a diff vs v0.3.6 floor.
+3. Invariant §"embedding is a recall supplement; it never decides
+   durable truth" remains intact (review-loop must verify).
+4. Bench-history latest-baseline for `public/longmemeval-s` is bumped.
+
+### #BL-040 — Scale LongMemEval-S smoke to confidence-interval sample
+
+**Status**: Open, v0.3.7 candidate.
+
+**Why open**: v0.3.6 ran n=20 of 500 LongMemEval-S questions. Each
+question is a single bernoulli trial, so a 65% R@5 has a 95% CI of
+roughly ±21pp at n=20 — too wide to claim trend in a single PR.
+
+**Close condition**:
+
+1. Re-run LongMemEval-S at `--limit 100` (or full 500 if the
+   harness-mode latency budget allows; current cost is ~6 min per 20
+   questions).
+2. Compute and publish a 95% CI alongside the point estimate in
+   `report.md`.
+3. Threshold engine learns to gate `r_at_5_delta_pp` against `CI/2`
+   instead of raw 2pp / 5pp when `n < 100`.
+
+### #BL-041 — LoCoMo cross-stack comparison
+
+**Status**: Open, v0.3.7 candidate.
+
+**Why open**: v0.3.6 README quotes `agentmemory`'s public R@5 = 95.2%
+on LoCoMo "as reported, link". We do not run LoCoMo today, so the
+comparison is rhetorical, not numerical. The bench-runner abstracts
+dataset variant cleanly enough that adding a LoCoMo driver
+(`apps/bench-runner/src/locomo/`) is a parallel of the LongMemEval
+driver.
+
+**Close condition**:
+
+1. LoCoMo dataset fetcher + sha256-pinned meta committed under
+   `docs/bench-history/datasets/`.
+2. `alaya-bench-runner locomo` subcommand wired to the same in-process
+   daemon harness + propose+review chain.
+3. R@K, latency, token-saved KPIs in a fresh
+   `docs/bench-history/public/<slug>/` entry; report.md cites
+   `agentmemory`'s number with link and the dataset-version pin.
+
+### #BL-042 — Inspector Memory Browser + command palette (deferred from v0.3.6)
+
+**Status**: Open, v0.3.7 candidate (deferred from v0.3.6 plan §Out).
+
+**Why open**: v0.3.6 scope kept the UI uplift to Overview + Recall +
+sidebar; the Memory Browser (durable entry list with evidence drill-in)
+and command palette (cmd-K) were scoped out to keep the release tight.
+With Recall Stats showing first KPIs and the bench archive growing,
+Memory Browser becomes the next operator surface that lets a maintainer
+trace from a tier-distribution number down to specific entries.
+
+**Close condition**:
+
+1. `apps/inspector/web/src/pages/MemoryBrowser.tsx` with filter
+   (workspace, scope_class, dimension, has-conflict).
+2. Per-row evidence drill-in (right-side drawer reading
+   `soul.open_pointer`).
+3. cmd-K command palette wiring `attach detach status inspect review`
+   verbs.
+
+## Resolved in v0.3.6 (2026-05-14)
+
+### #BL-043 — tool-runtime-bootstrap.test.ts port-3000 parallel flake
+
+**Status**: Resolved in v0.3.6 review-loop round 5 (commit `b8fce04`).
+
+**Resolution**: `bootStartedDaemonRuntime` in
+`apps/core-daemon/src/__tests__/tool-runtime-bootstrap.test.ts` now
+passes `{ port: 0 }` to `runtime.startHttpServer`, so the OS assigns a
+free port per test. The previous fixed-3000 default raced with other
+core-daemon test files in parallel runs and produced sporadic hook
+timeouts on `vi.waitFor`. Path taken: port-0 (option 1 of the
+original close condition). Full `rtk pnpm exec vitest run` is green
+on cold cache: 318/318 files / 2593/2593 tests in 30s.
 
 ## Resolved in v0.3.0 (2026-05-13)
 
