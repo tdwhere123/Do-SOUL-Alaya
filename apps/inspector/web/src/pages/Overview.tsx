@@ -6,6 +6,7 @@ import {
   FlaskConical,
   Globe2,
   Layers,
+  Repeat2,
   RefreshCcw,
   ShieldCheck,
   Zap
@@ -24,7 +25,7 @@ interface BenchSummaryShape {
   readonly latest_slug: string;
   readonly history_count: number;
   readonly payload: {
-    readonly bench_name: "self" | "public" | "live";
+    readonly bench_name: "self" | "public" | "public-multiturn" | "live";
     readonly split: string;
     readonly run_at: string;
     readonly kpi: { readonly r_at_5: number };
@@ -41,6 +42,7 @@ interface BenchSummaryEnvelope {
   readonly data: {
     readonly self: BenchSummaryShape | null;
     readonly public: BenchSummaryShape | null;
+    readonly public_multiturn: BenchSummaryShape | null;
     readonly live: BenchSummaryShape | null;
   };
 }
@@ -51,6 +53,8 @@ export default function OverviewPage() {
   const [pendingCount, setPendingCount] = useState<number | null>(null);
   const [benchSelf, setBenchSelf] = useState<BenchSummaryShape | null>(null);
   const [benchPublic, setBenchPublic] = useState<BenchSummaryShape | null>(null);
+  const [benchPublicMultiturn, setBenchPublicMultiturn] =
+    useState<BenchSummaryShape | null>(null);
   const [benchLive, setBenchLive] = useState<BenchSummaryShape | null>(null);
   const [benchLoaded, setBenchLoaded] = useState(false);
   const workspaceId = getWorkspaceId();
@@ -84,12 +88,14 @@ export default function OverviewPage() {
         if (cancelled) return;
         setBenchSelf(envelope.data.self);
         setBenchPublic(envelope.data.public);
+        setBenchPublicMultiturn(envelope.data.public_multiturn);
         setBenchLive(envelope.data.live);
       } catch (err) {
         if (cancelled) return;
         if ((err as ApiError).status === 401) return;
         setBenchSelf(null);
         setBenchPublic(null);
+        setBenchPublicMultiturn(null);
         setBenchLive(null);
       } finally {
         if (!cancelled) setBenchLoaded(true);
@@ -193,7 +199,7 @@ export default function OverviewPage() {
           >
             {t("overview:bench.section")}
           </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <BenchCard
               icon={<FlaskConical className="w-4 h-4" />}
               label={t("overview:bench.self.label")}
@@ -213,6 +219,16 @@ export default function OverviewPage() {
               loaded={benchLoaded}
               t={t}
               testId="overview-bench-public"
+            />
+            <BenchCard
+              icon={<Repeat2 className="w-4 h-4" />}
+              label={t("overview:bench.publicMultiturn.label")}
+              hint={t("overview:bench.publicMultiturn.hint")}
+              empty={t("overview:bench.empty")}
+              summary={benchPublicMultiturn}
+              loaded={benchLoaded}
+              t={t}
+              testId="overview-bench-public-multiturn"
             />
             <BenchCard
               icon={<ShieldCheck className="w-4 h-4" />}

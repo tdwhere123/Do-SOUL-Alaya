@@ -3,6 +3,10 @@ import type {
   EventLogEntry,
   MemoryDimension as MemoryDimensionType,
   MemoryEntry,
+  MemoryGraphEdge,
+  MemoryGraphEdgeTypeValue,
+  PathAnchorRef,
+  PathRelation,
   ProjectMappingAnchor,
   RecallCandidate,
   RecallOriginPlane,
@@ -97,6 +101,21 @@ export interface RecallServicePathPlasticityPort {
   ): Promise<ReadonlyMap<string, number>>;
 }
 
+export interface RecallServiceGraphExpansionPort {
+  findByMemoryId(
+    memoryId: string,
+    workspaceId: string,
+    edgeTypes?: readonly MemoryGraphEdgeTypeValue[]
+  ): Promise<readonly Readonly<MemoryGraphEdge>[]>;
+}
+
+export interface RecallServicePathExpansionPort {
+  findByAnchors(
+    workspaceId: string,
+    anchorRefs: readonly PathAnchorRef[]
+  ): Promise<readonly Readonly<PathRelation>[]>;
+}
+
 export interface TokenEstimator {
   estimate(text: string): number;
 }
@@ -174,9 +193,77 @@ export interface RecallServiceDependencies {
   readonly claimResolverPort?: RecallServiceClaimResolverPort;
   readonly embeddingRecallService?: RecallServiceEmbeddingRecallPort;
   readonly pathPlasticityPort?: RecallServicePathPlasticityPort;
+  readonly graphExpansionPort?: RecallServiceGraphExpansionPort;
+  readonly pathExpansionPort?: RecallServicePathExpansionPort;
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;
   readonly warn?: RecallServiceWarnPort;
+}
+
+export type RecallAdmissionPlane =
+  | "activation"
+  | "protected_winner"
+  | "object_probe"
+  | "evidence_anchor"
+  | "domain_tag_cluster"
+  | "temporal_proximity"
+  | "session_surface_cohort"
+  | "graph_expansion"
+  | "path_expansion"
+  | "lexical";
+
+export type RecallCandidateDropReason =
+  | "duplicate"
+  | "dimension_limit"
+  | "max_entries"
+  | "max_total_tokens";
+
+export type RecallEmbeddingProviderStatus =
+  | "provider_returned"
+  | "provider_pending"
+  | "provider_failed"
+  | "provider_not_requested";
+
+export interface RecallCandidateDiagnostic {
+  readonly object_id: string;
+  readonly admission_planes: readonly RecallAdmissionPlane[];
+  readonly plane_first_admitted: RecallAdmissionPlane;
+  readonly plane_winning_admission: RecallAdmissionPlane;
+  readonly pre_budget_rank: number;
+  readonly final_rank: number | null;
+  readonly dropped_reason: RecallCandidateDropReason | null;
+  readonly within_budget: boolean;
+  readonly relevance_score: number;
+  readonly lexical_rank: number | null;
+  readonly structural_score: number;
+  readonly source_channels: readonly string[];
+}
+
+export interface RecallDiagnostics {
+  readonly query_probes: {
+    readonly object_ids: readonly string[];
+    readonly evidence_refs: readonly string[];
+    readonly run_ids: readonly string[];
+    readonly surface_ids: readonly string[];
+    readonly file_paths: readonly string[];
+    readonly command_names: readonly string[];
+    readonly package_names: readonly string[];
+    readonly task_refs: readonly string[];
+    readonly dimensions: readonly string[];
+    readonly scope_classes: readonly string[];
+    readonly domain_tags: readonly string[];
+    readonly lexical_terms: readonly string[];
+    readonly phrases: readonly string[];
+    readonly char_ngrams: readonly string[];
+    readonly date_terms: readonly string[];
+  };
+  readonly total_scanned: number;
+  readonly candidate_pool_count: number;
+  readonly pre_budget_count: number;
+  readonly delivered_count: number;
+  readonly embedding_provider_status: RecallEmbeddingProviderStatus;
+  readonly provider_degradation_reason: string | null;
+  readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
 }
 
 export interface RecallResult {
@@ -186,10 +273,12 @@ export interface RecallResult {
   readonly fine_assessment_count: number;
   readonly degradation_reason: SoulMemorySearchDegradationReason | null;
   readonly working_projection: null;
+  readonly diagnostics?: Readonly<RecallDiagnostics>;
 }
 
 export interface RecallSupplementaryData {
   readonly ftsRanks: Readonly<Record<string, number>>;
+  readonly structuralScores: Readonly<Record<string, number>>;
   readonly graphSupportCounts: Readonly<Record<string, number>>;
   readonly budgetPenaltyFactor: number;
   readonly plasticityFactors: Readonly<Record<string, number>>;
@@ -201,6 +290,10 @@ export interface CoarseRecallCandidate {
   readonly isAdvisory?: boolean;
   readonly originPlane?: RecallOriginPlane;
   readonly sourceChannel?: string;
+  readonly sourceChannels?: readonly string[];
+  readonly admissionPlanes?: readonly RecallAdmissionPlane[];
+  readonly firstAdmissionPlane?: RecallAdmissionPlane;
+  readonly structuralScore?: number;
   readonly scoreMultiplier?: number;
 }
 

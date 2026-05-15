@@ -4,8 +4,12 @@ This directory accumulates **reproducible recall benchmark KPIs** and
 sanitized live-check snapshots across every Alaya release that touches
 recall, embedding, tier, or governance behavior. It is the durable
 contract that v0.3.6 establishes for v0.3.7+ and beyond.
-v0.3.7 adds `live/strict-real` entries so the older `.do-it` live main
-checks are visible beside reproducible `self` / `public` bench results.
+
+v0.3.7 introduces the `live/strict-real` and `public-multiturn` archive
+**contracts and import commands**. The first archive entries under
+`docs/bench-history/live/` and `docs/bench-history/public-multiturn/`
+are follow-up work; if those directories are empty you are looking at
+a pre-Phase-B v0.3.7 checkout.
 
 The premise: a single one-off benchmark number is theatre. A feedback
 loop — same harness, same data, diffed against previous baselines, with
@@ -17,15 +21,18 @@ regression thresholds and an Inspector trend line — is engineering.
   `rtk node apps/bench-runner/bin/alaya-bench-runner.mjs self`,
   and `rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval`
   to reproduce the tracked archive shape after `rtk pnpm build`.
-  `alaya-bench-runner live` is operator-only re-archive plumbing for a
-  newly generated local live-check summary. The older `.do-it` live
+  `alaya-bench-runner longmemeval-multiturn` repeats LongMemEval recall
+  with `soul.report_context_usage`; `alaya-bench-runner live` is
+  operator-only re-archive plumbing for a newly generated local
+  live-check summary. The older `.do-it` live
   histories have already been imported here and the raw run directories
   are no longer kept in the repo checkout.
 - Any PR that changes recall / embedding / tier / proposal behavior
   must attach a fresh entry here and link the diff vs. the previous
   baseline in the PR description.
 - Inspector reads the last N entries and renders trend lines on
-  `/overview` and `/recall`.
+  `/overview` and `/recall`, including the separate
+  `public-multiturn` archive.
 - The diff engine encodes regression thresholds in
   `packages/eval/src/thresholds.ts`. A `✗` finding flips the CLI exit
   code, so this archive can be wired into CI later without changing
@@ -45,6 +52,14 @@ docs/bench-history/
 ├── public/
 │   ├── <YYYY-MM-DDTHHMMSSZ>-<sha7>/
 │   │   ├── kpi.json
+│   │   ├── longmemeval-diagnostics.json (optional)
+│   │   ├── report.md
+│   │   └── findings.md (optional)
+│   └── latest-baseline.json
+├── public-multiturn/
+│   ├── <YYYY-MM-DDTHHMMSSZ>-<sha7>/
+│   │   ├── kpi.json
+│   │   ├── longmemeval-diagnostics.json
 │   │   ├── report.md
 │   │   └── findings.md (optional)
 │   └── latest-baseline.json
@@ -74,7 +89,7 @@ docs/bench-history/
 
 ```jsonc
 {
-  "bench_name": "self" | "public" | "live",
+  "bench_name": "self" | "public" | "public-multiturn" | "live",
   "split": "golden" | "synthetic" | "longmemeval-s" | "longmemeval-oracle" | "longmemeval-m" | "strict-real",
   "run_at": "2026-05-14T12:34:56Z",
   "alaya_commit": "97dbdd9",
@@ -105,6 +120,15 @@ docs/bench-history/
     "r_at_1": 0.0,                            // archival only; not threshold-gated
     "r_at_5": 0.0,
     "r_at_10": 0.0,
+    "r_at_5_overall": 0.0,                    // env embedding only
+    "r_at_5_with_embedding_returned": 0.0,    // env embedding only
+    "r_at_5_round_1": 0.0,                    // public-multiturn only
+    "r_at_5_round_2": 0.0,                    // public-multiturn only
+    "r_at_5_round_n": 0.0,                    // public-multiturn final round
+    "multiturn_rounds": 3,
+    "provider_returned_rate": 0.0,            // env embedding diagnostics
+    "provider_pending_rate": 0.0,
+    "provider_failed_rate": 0.0,
     "latency_ms_p50": 0,
     "latency_ms_p95": 0,
     "token_saved_ratio_vs_full_prompt": 0.0,
@@ -140,6 +164,12 @@ a drop of exactly 5.0 pp registers as `fail`.
 
 A `✗` on any of these makes `alaya-bench-runner` exit non-zero. CI hookup is
 optional today; the contract is that the exit code is meaningful.
+
+`public-multiturn` uses a separate archive root and separate
+`latest-baseline.json` from single-turn `public`. Its threshold decision
+uses the same drop bands above, but the primary quality field is
+final-round `r_at_5` / `r_at_5_round_n`; round-curve fields are evidence
+for plasticity behavior, not a shared trend line with single-turn runs.
 
 ## Entry errata
 
@@ -240,6 +270,27 @@ soul.review_memory_proposal accept`). Any KPI carrying
 `harness_mode = "direct_db_seed"` is from a pre-v0.3.6 run that
 bypassed governance and should not be used as a v0.3.6 baseline.
 
+LongMemEval entries may include a `longmemeval-diagnostics.json`
+sidecar. This file is additive bench evidence, not an MCP/protocol
+schema. It records sanitized object-id diagnostics: question id, gold
+memory ids, delivered object ids/ranks, miss classification, optional
+normalized `recallResult.diagnostics` fields when the daemon supplies
+them, and embedding provider state counts/rates. It must not include
+raw turn text, raw provider transcripts, API keys, or secret refs.
+
+When the daemon does not yet return `recallResult.diagnostics`, the
+sidecar records `recall_diagnostics_present=false` and falls back to
+final delivered-rank evidence plus `diagnostics_unavailable` for misses.
+Env-embedding provider rates should be read as known returned/pending/
+failed counts only; unknown provider state remains visible in the
+sidecar and must not be quoted as a returned-vector result.
+
+`public-multiturn` is a separate archive root. It reuses LongMemEval
+material but runs repeated `soul.recall` -> `soul.report_context_usage`
+rounds in one workspace per question. Its final-round `r_at_5` feeds
+the overview card, while `r_at_5_round_1`, `r_at_5_round_2`, and
+`r_at_5_round_n` preserve the round curve.
+
 ## How to add a new entry (operator handbook)
 
 ```bash
@@ -257,6 +308,7 @@ rtk node apps/bench-runner/bin/alaya-bench-runner.mjs fetch-longmemeval --varian
 #    rewrites the corresponding latest-baseline.json pointer.
 rtk node apps/bench-runner/bin/alaya-bench-runner.mjs self
 rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval --variant oracle
+rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval-multiturn --variant s --rounds 3 --limit 20
 # Optional: opt into the daemon's real embedding env for a cost-bearing
 # semantic-supplement run. Keep local credentials outside git, for example
 # in `.do-it/bench-env/alaya-api.env`, then source them before the run.

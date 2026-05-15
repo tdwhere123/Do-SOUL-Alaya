@@ -230,6 +230,12 @@ function buildSourceChannels(
   if (candidate.sourceChannel !== undefined) {
     channels.add(candidate.sourceChannel);
   }
+  for (const channel of candidate.sourceChannels ?? []) {
+    channels.add(channel);
+  }
+  for (const plane of candidate.admissionPlanes ?? []) {
+    channels.add(`plane:${plane}`);
+  }
   if (candidate.isAdvisory === true) {
     channels.add("advisory");
   }

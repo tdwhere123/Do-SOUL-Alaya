@@ -8,7 +8,7 @@ import type { GraphHealthService } from "./services/graph-health-service.js";
 import type { McpMemoryToolHandler } from "./mcp-memory-tool-handler.js";
 import type { RecallUtilizationService } from "./services/recall-utilization-service.js";
 import type { TrustStateRecorder } from "./trust-state.js";
-import type { RunService, WorkspaceService } from "@do-soul/alaya-core";
+import type { RecallService, RunService, WorkspaceService } from "@do-soul/alaya-core";
 
 export type StartupStep =
   | "database"
@@ -50,6 +50,7 @@ export interface AlayaDaemonRuntimeServices {
   readonly graphHealthService: GraphHealthService;
   readonly configService: Pick<AppConfigService, "getGardenCredentialProvenance" | "getRuntimeGardenComputeConfig">;
   readonly mcpMemoryToolHandler: McpMemoryToolHandler;
+  readonly recallService: Pick<RecallService, "recall">;
   readonly recallUtilizationService: RecallUtilizationService;
   readonly runService: Pick<RunService, "getById" | "ensureAttachedMcpSessionRun">;
   readonly trustStateRecorder: TrustStateRecorder;

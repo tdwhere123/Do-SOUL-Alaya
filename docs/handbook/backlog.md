@@ -26,14 +26,15 @@ post-v0.3.7 follow-through — see
 **Status**: Open, post-v0.3.7 follow-through.
 
 **Why open**: v0.3.6 LongMemEval-S full run (500/500) gives R@5 =
-60.2% with SQLite FTS + activation only. v0.3.7's archived strict-real
-live check shows the real provider path can reach top5 = 94.6% on its
-internal 500-query live corpus, but that is not the public
-LongMemEval-S claim. The recall path already has an embedding supplement
-slot (per invariant: embedding never decides durable truth, but may
-supplement ranking). The remaining work is to wire provider-backed
-supplement into the public bench path and prove whether it lifts
-LongMemEval-S without crossing the truth boundary.
+60.2% with SQLite FTS + activation only. Pre-v0.3.7 strict-real live
+checks on a v0.3.6 build observed provider top5 around 94% on a
+separate internal corpus, but no v0.3.7-era live archive has been
+produced and that number is not a LongMemEval-S claim. The recall
+path already has an embedding supplement slot (per invariant:
+embedding never decides durable truth, but may supplement ranking).
+The remaining work is to wire provider-backed supplement into the
+public bench path and prove whether it lifts LongMemEval-S without
+crossing the truth boundary.
 
 **Close condition**:
 

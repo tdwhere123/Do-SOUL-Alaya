@@ -1,0 +1,490 @@
+import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  diffKpis,
+  entrySlug,
+  readLatest,
+  renderFindings,
+  renderReport,
+  writeEntry,
+  type BenchSplit,
+  type HistoryLayout,
+  type KpiPayload,
+  type PerScenarioRow
+} from "@do-soul/alaya-eval";
+import { startBenchDaemon, type BenchEmbeddingMode } from "../harness/daemon.js";
+import {
+  buildQuestionDiagnostic,
+  rAt5WithProviderReturned,
+  renderDiagnosticsSidecar,
+  summarizeProviderStates,
+  type LongMemEvalQuestionDiagnostic
+} from "./diagnostics.js";
+import type { LongMemEvalVariant } from "./dataset.js";
+import { loadDataset, type FetchResult } from "./fetch.js";
+import { resolveBenchEmbeddingProviderLabel } from "./runner.js";
+
+const LONGMEMEVAL_DIAGNOSTICS_FILENAME = "longmemeval-diagnostics.json";
+
+export interface LongMemEvalMultiturnRunOptions {
+  readonly variant: LongMemEvalVariant;
+  readonly limit?: number;
+  readonly historyRoot: string;
+  readonly dataDir?: string;
+  readonly fetchResult?: FetchResult;
+  readonly embeddingMode?: BenchEmbeddingMode;
+  readonly pinnedMetaRoot?: string;
+  readonly offset?: number;
+  readonly rounds?: number;
+}
+
+export interface LongMemEvalMultiturnRunResult {
+  readonly slug: string;
+  readonly kpiPath: string;
+  readonly reportPath: string;
+  readonly findingsPath: string;
+  readonly diagnosticsPath: string | null;
+  readonly payload: KpiPayload;
+}
+
+type SidecarEntry = { sessionId: string; hasAnswer: boolean };
+
+interface RoundResult {
+  readonly roundIndex: number;
+  readonly hitAt1: boolean;
+  readonly hitAt5: boolean;
+  readonly hitAt10: boolean;
+  readonly firstTier: "hot" | "warm" | "cold";
+  readonly latencyMs: number;
+  readonly degradationReason: string | null;
+  readonly diagnostics: LongMemEvalQuestionDiagnostic;
+}
+
+interface QuestionResult {
+  readonly questionId: string;
+  readonly rounds: readonly RoundResult[];
+  readonly seedTurnsTruncated: number;
+  readonly answerTurnsTruncated: number;
+  readonly seedCharsClipped: number;
+}
+
+export async function runLongMemEvalMultiturn(
+  opts: LongMemEvalMultiturnRunOptions
+): Promise<LongMemEvalMultiturnRunResult> {
+  const questions = await loadDataset(opts.variant, {
+    dataDir: opts.dataDir,
+    pinnedMetaRoot: opts.pinnedMetaRoot
+  });
+  const offset = Math.max(0, opts.offset ?? 0);
+  const sliceEnd =
+    opts.limit !== undefined ? offset + opts.limit : questions.length;
+  const window = questions.slice(offset, sliceEnd);
+  const rounds = Math.max(1, opts.rounds ?? 3);
+
+  const alayaVersion = resolveAlayaVersion();
+  const commitSha7 = resolveCommitSha7();
+  const runAt = new Date();
+  const embeddingProviderLabel = resolveBenchEmbeddingProviderLabel(
+    opts.embeddingMode ?? "disabled"
+  );
+
+  async function runOneQuestion(
+    question: typeof window[number]
+  ): Promise<QuestionResult> {
+    const daemon = await startBenchDaemon({
+      workspaceId: `lme-mt-${question.question_id.slice(0, 8)}`,
+      runId: `run-mt-${question.question_id.slice(0, 8)}`,
+      embeddingMode: opts.embeddingMode ?? "disabled"
+    });
+    try {
+      const sidecar = new Map<string, SidecarEntry>();
+      const answerSessionSet = new Set(question.answer_session_ids);
+      let seedTurnsTruncated = 0;
+      let answerTurnsTruncated = 0;
+      let seedCharsClipped = 0;
+
+      for (let si = 0; si < question.haystack_sessions.length; si++) {
+        const session = question.haystack_sessions[si];
+        const sessionId = question.haystack_session_ids[si] ?? `session-${si}`;
+        if (session === undefined) continue;
+
+        for (let ti = 0; ti < session.length; ti++) {
+          const turn = session[ti];
+          if (turn === undefined) continue;
+
+          const evidenceRef = `${question.question_id}-mt-s${si}-t${ti}`;
+          const seed = await daemon.proposeMemory(turn.content, evidenceRef);
+          if (seed.truncated) {
+            seedTurnsTruncated++;
+            seedCharsClipped += seed.charsClipped;
+            if (turn.has_answer === true) answerTurnsTruncated++;
+          }
+          sidecar.set(seed.memoryId, {
+            sessionId,
+            hasAnswer: turn.has_answer === true
+          });
+        }
+      }
+
+      if (opts.embeddingMode === "env") {
+        await daemon.runtime.runGardenBackgroundPass();
+      }
+
+      const goldMemoryIds = [...sidecar.entries()]
+        .filter(
+          ([, meta]) =>
+            meta.hasAnswer && answerSessionSet.has(meta.sessionId)
+        )
+        .map(([memoryId]) => memoryId);
+      const roundResults: RoundResult[] = [];
+
+      for (let roundIndex = 1; roundIndex <= rounds; roundIndex++) {
+        const recallStart = Date.now();
+        const recallResult = await daemon.recall(question.question, {
+          maxResults: 10
+        });
+        const latencyMs = Date.now() - recallStart;
+        const results = recallResult.results;
+        const deliveredResults = results.slice(0, 10).map((pointer, index) => ({
+          object_id: pointer.object_id,
+          rank: index + 1,
+          relevance_score: pointer.relevance_score
+        }));
+
+        let hitAt1 = false;
+        let hitAt5 = false;
+        let hitAt10 = false;
+        let firstTier: "hot" | "warm" | "cold" = "cold";
+        const usedGoldObjectIds: string[] = [];
+
+        for (let rank = 0; rank < results.length && rank < 10; rank++) {
+          const pointer = results[rank];
+          if (pointer === undefined) continue;
+          if (rank === 0) {
+            firstTier = inferTier(pointer.relevance_score);
+          }
+          const meta = sidecar.get(pointer.object_id);
+          const isHit =
+            meta !== undefined &&
+            meta.hasAnswer &&
+            answerSessionSet.has(meta.sessionId);
+          if (isHit) {
+            usedGoldObjectIds.push(pointer.object_id);
+            if (rank === 0) hitAt1 = true;
+            if (rank < 5) hitAt5 = true;
+            hitAt10 = true;
+          }
+        }
+
+        const diagnostics = buildQuestionDiagnostic({
+          questionId: question.question_id,
+          roundIndex,
+          goldMemoryIds,
+          answerSessionIds: question.answer_session_ids,
+          deliveredResults,
+          hitAt1,
+          hitAt5,
+          hitAt10,
+          degradationReason: recallResult.degradation_reason ?? null,
+          recallResult,
+          embeddingMode: opts.embeddingMode ?? "disabled"
+        });
+
+        await daemon.reportContextUsage({
+          deliveryId: recallResult.delivery_id,
+          usageState: usedGoldObjectIds.length > 0 ? "used" : "skipped",
+          ...(usedGoldObjectIds.length === 0
+            ? {}
+            : { usedObjectIds: usedGoldObjectIds }),
+          deliveredObjects: results.slice(0, 10).map((pointer) => ({
+            objectId: pointer.object_id,
+            usageStatus: usedGoldObjectIds.includes(pointer.object_id)
+              ? "used"
+              : "skipped"
+          })),
+          turnIndex: roundIndex,
+          turnDigest: {
+            lastMessages: [
+              {
+                role: "user",
+                contentExcerpt: truncateExcerpt(question.question)
+              }
+            ]
+          },
+          reason:
+            usedGoldObjectIds.length > 0
+              ? `LongMemEval multi-turn round ${roundIndex}: gold pointer delivered.`
+              : `LongMemEval multi-turn round ${roundIndex}: gold pointer not delivered.`
+        });
+
+        roundResults.push({
+          roundIndex,
+          hitAt1,
+          hitAt5,
+          hitAt10,
+          firstTier,
+          latencyMs,
+          degradationReason: recallResult.degradation_reason ?? null,
+          diagnostics
+        });
+      }
+
+      return {
+        questionId: question.question_id,
+        rounds: roundResults,
+        seedTurnsTruncated,
+        answerTurnsTruncated,
+        seedCharsClipped
+      };
+    } finally {
+      await daemon.shutdown();
+    }
+  }
+
+  const collected: QuestionResult[] = [];
+  for (let i = 0; i < window.length; i++) {
+    const q = window[i];
+    if (q === undefined) continue;
+    const res = await runOneQuestion(q);
+    collected.push(res);
+    const finalRound = res.rounds[res.rounds.length - 1];
+    process.stdout.write(
+      `[${i + 1}/${window.length}] ${q.question_id.slice(0, 8)} ` +
+        `rounds=${rounds} final_R@5=${finalRound?.hitAt5 ? "✓" : "✗"}\n`
+    );
+  }
+
+  const finalRounds = collected
+    .map((result) => result.rounds[result.rounds.length - 1])
+    .filter((result): result is RoundResult => result !== undefined);
+  const perScenario: PerScenarioRow[] = finalRounds.map((result, index) => ({
+    id: collected[index]?.questionId ?? `question-${index + 1}`,
+    version: 1,
+    hit_at_5: result.hitAt5,
+    tier: result.firstTier
+  }));
+  const allDiagnostics = collected.flatMap((result) =>
+    result.rounds.map((round) => round.diagnostics)
+  );
+  const finalDiagnostics = finalRounds.map((round) => round.diagnostics);
+  const providerSummary = summarizeProviderStates(allDiagnostics);
+  const rAt5EmbeddingReturned = rAt5WithProviderReturned(finalDiagnostics);
+
+  const n = finalRounds.length;
+  const rAt1 = ratio(finalRounds.filter((round) => round.hitAt1).length, n);
+  const rAt5 = ratio(finalRounds.filter((round) => round.hitAt5).length, n);
+  const rAt10 = ratio(finalRounds.filter((round) => round.hitAt10).length, n);
+  const rAt5Round1 = rAt5ForRound(collected, 1);
+  const rAt5Round2 = rounds >= 2 ? rAt5ForRound(collected, 2) : undefined;
+  const latencyP50 = computePercentile(finalRounds.map((round) => round.latencyMs), 50);
+  const latencyP95 = computePercentile(finalRounds.map((round) => round.latencyMs), 95);
+  const tierDistribution = countTiers(finalRounds);
+  const degradationReasons = countDegradationReasons(finalRounds);
+  const truncation = {
+    seed_turns_truncated: collected.reduce(
+      (acc, result) => acc + result.seedTurnsTruncated,
+      0
+    ),
+    answer_turns_truncated: collected.reduce(
+      (acc, result) => acc + result.answerTurnsTruncated,
+      0
+    ),
+    seed_chars_clipped: collected.reduce(
+      (acc, result) => acc + result.seedCharsClipped,
+      0
+    )
+  };
+
+  const datasetSize = opts.fetchResult?.questionCount ?? questions.length;
+  const split = variantToSplit(opts.variant);
+  const payload: KpiPayload = {
+    bench_name: "public-multiturn",
+    split,
+    run_at: runAt.toISOString(),
+    alaya_commit: commitSha7,
+    alaya_version: alayaVersion,
+    embedding_provider: embeddingProviderLabel,
+    chat_provider: "none",
+    dataset: {
+      name: `${opts.variant}:multiturn`,
+      size: datasetSize,
+      source: "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned"
+    },
+    sample_size: datasetSize,
+    evaluated_count: window.length,
+    harness_mode: "mcp_propose_review",
+    kpi: {
+      r_at_1: rAt1,
+      r_at_5: rAt5,
+      r_at_10: rAt10,
+      r_at_5_round_1: rAt5Round1,
+      ...(rAt5Round2 === undefined ? {} : { r_at_5_round_2: rAt5Round2 }),
+      r_at_5_round_n: rAt5,
+      multiturn_rounds: rounds,
+      ...(opts.embeddingMode === "env"
+        ? {
+            r_at_5_overall: rAt5,
+            ...(rAt5EmbeddingReturned === undefined
+              ? {}
+              : { r_at_5_with_embedding_returned: rAt5EmbeddingReturned }),
+            provider_returned_rate: providerSummary.provider_returned_rate,
+            provider_pending_rate: providerSummary.provider_pending_rate,
+            provider_failed_rate: providerSummary.provider_failed_rate
+          }
+        : {}),
+      latency_ms_p50: latencyP50,
+      latency_ms_p95: latencyP95,
+      latency_source: "exact",
+      token_saved_ratio_vs_full_prompt: 0,
+      tier_distribution: tierDistribution,
+      degradation_reasons: degradationReasons,
+      seed_truncation: truncation,
+      per_scenario: perScenario
+    }
+  };
+
+  const layout: HistoryLayout = { historyRoot: opts.historyRoot };
+  const previous = await readLatest(layout, "public-multiturn", {
+    split: payload.split
+  });
+  const diff = diffKpis(payload, previous);
+  const slug = entrySlug(runAt, commitSha7);
+  const report = renderReport(payload, previous, diff);
+  const findings = renderFindings(payload, diff);
+  const diagnosticsSidecar = renderDiagnosticsSidecar({
+    schema_version: 1,
+    bench_name: "public-multiturn",
+    split,
+    run_at: payload.run_at,
+    alaya_commit: payload.alaya_commit,
+    embedding_provider: payload.embedding_provider,
+    embedding_mode: opts.embeddingMode ?? "disabled",
+    provider_state_summary: providerSummary,
+    questions: allDiagnostics.length > 0 ? allDiagnostics : finalDiagnostics
+  });
+
+  const entry = await writeEntry(
+    layout,
+    "public-multiturn",
+    slug,
+    payload,
+    report,
+    findings,
+    {
+      sidecars: [
+        {
+          filename: LONGMEMEVAL_DIAGNOSTICS_FILENAME,
+          contents: diagnosticsSidecar
+        }
+      ]
+    }
+  );
+  return {
+    slug,
+    kpiPath: entry.kpiPath,
+    reportPath: entry.reportPath,
+    findingsPath: entry.findingsPath,
+    diagnosticsPath: entry.sidecarPaths[LONGMEMEVAL_DIAGNOSTICS_FILENAME] ?? null,
+    payload
+  };
+}
+
+function variantToSplit(variant: LongMemEvalVariant): BenchSplit {
+  const map: Record<LongMemEvalVariant, BenchSplit> = {
+    longmemeval_oracle: "longmemeval-oracle",
+    longmemeval_s: "longmemeval-s",
+    longmemeval_m: "longmemeval-m"
+  };
+  return map[variant];
+}
+
+function rAt5ForRound(collected: readonly QuestionResult[], roundIndex: number): number {
+  const rows = collected
+    .map((result) => result.rounds[roundIndex - 1])
+    .filter((round): round is RoundResult => round !== undefined);
+  return ratio(rows.filter((round) => round.hitAt5).length, rows.length);
+}
+
+function countTiers(rounds: readonly RoundResult[]): {
+  readonly hot: number;
+  readonly warm: number;
+  readonly cold: number;
+} {
+  let hot = 0;
+  let warm = 0;
+  let cold = 0;
+  for (const round of rounds) {
+    if (round.firstTier === "hot") hot++;
+    else if (round.firstTier === "warm") warm++;
+    else cold++;
+  }
+  return { hot, warm, cold };
+}
+
+function countDegradationReasons(rounds: readonly RoundResult[]): {
+  readonly none: number;
+  readonly warm_cascade_engaged: number;
+  readonly cold_cascade_engaged: number;
+  readonly recall_explainability_partial: number;
+} {
+  let none = 0;
+  let warm = 0;
+  let cold = 0;
+  let partial = 0;
+  for (const round of rounds) {
+    if (round.degradationReason === "warm_cascade_engaged") warm++;
+    else if (round.degradationReason === "cold_cascade_engaged") cold++;
+    else if (round.degradationReason === "recall_explainability_partial") partial++;
+    else none++;
+  }
+  return {
+    none,
+    warm_cascade_engaged: warm,
+    cold_cascade_engaged: cold,
+    recall_explainability_partial: partial
+  };
+}
+
+function inferTier(relevanceScore: number): "hot" | "warm" | "cold" {
+  if (relevanceScore >= 0.7) return "hot";
+  if (relevanceScore >= 0.4) return "warm";
+  return "cold";
+}
+
+function computePercentile(values: number[], p: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = Math.ceil((p / 100) * sorted.length) - 1;
+  return sorted[Math.max(0, idx)] ?? 0;
+}
+
+function ratio(count: number, total: number): number {
+  return total === 0 ? 0 : count / total;
+}
+
+function truncateExcerpt(value: string): string {
+  return value.length <= 500 ? value : `${value.slice(0, 497)}...`;
+}
+
+function resolveAlayaVersion(): string {
+  try {
+    const pkgPath = resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      "../../../package.json"
+    );
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
+    return pkg.version;
+  } catch {
+    return "0.3.7";
+  }
+}
+
+function resolveCommitSha7(): string {
+  try {
+    return execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
+  } catch {
+    return "0000000";
+  }
+}

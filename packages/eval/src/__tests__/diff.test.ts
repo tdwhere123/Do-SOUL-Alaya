@@ -166,4 +166,31 @@ describe("diffKpis", () => {
     const result = diffKpis(current, previous);
     expect(result.worst_verdict).toBe("fail");
   });
+
+  it("does not fail public LongMemEval diffs on score-derived hot-share movement", () => {
+    const previous: KpiPayload = {
+      ...buildPayload({
+        tier_distribution: { hot: 100, warm: 0, cold: 0 }
+      }),
+      bench_name: "public",
+      split: "longmemeval-s",
+      evaluated_count: 100,
+      sample_size: 500
+    };
+    const current: KpiPayload = {
+      ...buildPayload({
+        r_at_5: 0.97,
+        tier_distribution: { hot: 5, warm: 95, cold: 0 }
+      }),
+      bench_name: "public",
+      split: "longmemeval-s",
+      evaluated_count: 100,
+      sample_size: 500
+    };
+
+    const result = diffKpis(current, previous);
+
+    expect(result.deltas.some((delta) => delta.key === "tier_distribution.hot_share")).toBe(false);
+    expect(result.worst_verdict).toBe("ok");
+  });
 });

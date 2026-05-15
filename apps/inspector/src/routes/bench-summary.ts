@@ -28,21 +28,25 @@ export function registerInspectorBenchSummaryRoutes(
   options: BenchSummaryOptions
 ): void {
   app.get("/api/bench-summary", async (context) => {
-    const [selfResult, publicResult, liveResult] = await Promise.all([
-      summarizeSafe(options.historyRoot, "self"),
-      summarizeSafe(options.historyRoot, "public"),
-      summarizeSafe(options.historyRoot, "live")
-    ]);
+    const [selfResult, publicResult, publicMultiturnResult, liveResult] =
+      await Promise.all([
+        summarizeSafe(options.historyRoot, "self"),
+        summarizeSafe(options.historyRoot, "public"),
+        summarizeSafe(options.historyRoot, "public-multiturn"),
+        summarizeSafe(options.historyRoot, "live")
+      ]);
     return context.json(
       {
         success: true,
         data: {
           self: selfResult.value,
           public: publicResult.value,
+          public_multiturn: publicMultiturnResult.value,
           live: liveResult.value,
           errors: {
             self: selfResult.error,
             public: publicResult.error,
+            public_multiturn: publicMultiturnResult.error,
             live: liveResult.error
           }
         }

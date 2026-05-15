@@ -10,7 +10,13 @@ export const BenchSplit = z.enum([
 ]);
 export type BenchSplit = z.infer<typeof BenchSplit>;
 
-export const BenchName = z.enum(["self", "public", "live"]);
+export const BenchName = z.enum([
+  "self",
+  "public",
+  "public-multiturn",
+  "public-crossquestion",
+  "live"
+]);
 export type BenchName = z.infer<typeof BenchName>;
 
 export const Verdict = z.enum(["ok", "warn", "fail"]);
@@ -68,10 +74,28 @@ const SeedTruncationSchema = z
     seed_chars_clipped: 0
   });
 
+const RatioSchema = z.number().min(0).max(1);
+
 const KpiCoreSchema = z.object({
-  r_at_1: z.number().min(0).max(1),
-  r_at_5: z.number().min(0).max(1),
-  r_at_10: z.number().min(0).max(1),
+  r_at_1: RatioSchema,
+  r_at_5: RatioSchema,
+  r_at_10: RatioSchema,
+  r_at_5_overall: RatioSchema.optional(),
+  r_at_5_with_embedding_returned: RatioSchema.optional(),
+  r_at_5_round_1: RatioSchema.optional(),
+  r_at_5_round_2: RatioSchema.optional(),
+  r_at_5_round_n: RatioSchema.optional(),
+  multiturn_rounds: z.number().int().positive().optional(),
+  // public-crossquestion: split R@5 by position in the question sequence.
+  // first_half = first floor(N/2) questions; last_half = the rest. If
+  // shared-workspace accumulation actually helps, last_half should beat
+  // first_half. Optional so other bench surfaces are unaffected.
+  r_at_5_first_half: RatioSchema.optional(),
+  r_at_5_last_half: RatioSchema.optional(),
+  crossquestion_questions: z.number().int().positive().optional(),
+  provider_returned_rate: RatioSchema.optional(),
+  provider_pending_rate: RatioSchema.optional(),
+  provider_failed_rate: RatioSchema.optional(),
   latency_ms_p50: z.number().nonnegative(),
   latency_ms_p95: z.number().nonnegative(),
   latency_source: LatencySourceSchema,

@@ -487,8 +487,10 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     slotRepo,
     eventLogRepo,
     graphSupportPort: graphExploreService,
+    graphExpansionPort: memoryGraphEdgeRepo,
     projectMappingPort: projectMappingService,
     pathPlasticityPort: recallPathPlasticityPort,
+    pathExpansionPort: pathRelationRepo,
     ...(globalMemoryRepo === null
       ? {}
       : {
@@ -840,6 +842,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       graphHealthService,
       configService,
       mcpMemoryToolHandler,
+      recallService,
       recallUtilizationService,
       runService,
       trustStateRecorder,

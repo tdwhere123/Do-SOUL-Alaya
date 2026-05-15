@@ -888,7 +888,17 @@ describe("RecallService", () => {
       createMemoryEntry({ object_id: "memory-4", dimension: MemoryDimension.HAZARD, scope_class: ScopeClass.GLOBAL_DOMAIN, activation_score: 0.05 })
     ];
     const { dependencies } = createDependencies(memories);
-    const service = new RecallService(dependencies);
+    const searchByKeyword = vi.fn(async () => [
+      { object_id: "memory-template", normalized_rank: 1 },
+      { object_id: "memory-answer", normalized_rank: 1 }
+    ]);
+    const service = new RecallService({
+      ...dependencies,
+      memoryRepo: {
+        ...dependencies.memoryRepo,
+        searchByKeyword
+      }
+    });
 
     const analyze = await service.recall({
       taskSurface: createTaskSurface(),
@@ -1030,6 +1040,177 @@ describe("RecallService", () => {
     });
 
     expect(result.candidates).toHaveLength(2);
+  });
+
+  it("keeps pre-budget diagnostics for candidates dropped by final delivery budget", async () => {
+    const memories = [
+      createMemoryEntry({ object_id: "memory-1", activation_score: 0.9 }),
+      createMemoryEntry({ object_id: "memory-2", activation_score: 0.8 }),
+      createMemoryEntry({ object_id: "memory-3", activation_score: 0.7 })
+    ];
+    const { dependencies } = createDependencies(memories);
+    const service = new RecallService(dependencies);
+    const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+    const policy = overridePolicy(basePolicy, {
+      coarse_filter: {
+        ...basePolicy.coarse_filter,
+        precomputed_rank: {
+          ...basePolicy.coarse_filter.precomputed_rank,
+          max_candidates: 3
+        }
+      },
+      fine_assessment: {
+        ...basePolicy.fine_assessment,
+        budgets: {
+          max_total_tokens: 1000,
+          max_entries: 1,
+          per_dimension_limits: null
+        }
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["memory-1"]);
+    expect(result.diagnostics?.candidate_pool_count).toBe(3);
+    expect(result.diagnostics?.candidates.find((candidate) => candidate.object_id === "memory-2")).toMatchObject({
+      pre_budget_rank: 2,
+      final_rank: null,
+      dropped_reason: "max_entries",
+      within_budget: false
+    });
+  });
+
+  it("uses graph and path expansion as read-side candidate generators before scoring", async () => {
+    const memories = [
+      createMemoryEntry({
+        object_id: "seed-memory",
+        content: "Deployment recall seed.",
+        activation_score: 0.9
+      }),
+      createMemoryEntry({
+        object_id: "graph-target",
+        content: "Graph neighbor has the answer.",
+        activation_score: 0.1,
+        domain_tags: ["graph"]
+      }),
+      createMemoryEntry({
+        object_id: "path-target",
+        content: "Path neighbor has the answer.",
+        activation_score: 0.1,
+        domain_tags: ["path"]
+      })
+    ];
+    const { dependencies } = createDependencies(memories);
+    const graphExpansionPort = {
+      findByMemoryId: vi.fn(async (memoryId: string) =>
+        memoryId === "seed-memory"
+          ? [
+              {
+                edge_id: "edge-1",
+                source_memory_id: "seed-memory",
+                target_memory_id: "graph-target",
+                edge_type: "supports" as const,
+                workspace_id: "workspace-1",
+                created_at: "2026-03-20T00:00:00.000Z"
+              }
+            ]
+          : []
+      )
+    };
+    const pathExpansionPort = {
+      findByAnchors: vi.fn(async () => [
+        {
+          path_id: "path-1",
+          workspace_id: "workspace-1",
+          anchors: {
+            source_anchor: { kind: "object", object_id: "seed-memory" },
+            target_anchor: { kind: "object", object_id: "path-target" }
+          },
+          constitution: {
+            relation_kind: "supports_recall",
+            why_this_relation_exists: ["test relation"]
+          },
+          effect_vector: {
+            salience: 1,
+            recall_bias: 1,
+            verification_bias: 0,
+            unfinishedness_bias: 0,
+            default_manifestation_preference: "lens_entry"
+          },
+          plasticity_state: {
+            strength: 1,
+            direction_bias: "source_to_target",
+            stability_class: "stable",
+            support_events_count: 1,
+            contradiction_events_count: 0
+          },
+          lifecycle: {
+            status: "active",
+            retirement_rule: "manual"
+          },
+          legitimacy: {
+            evidence_basis: ["test"],
+            governance_class: "recall_allowed"
+          },
+          created_at: "2026-03-20T00:00:00.000Z",
+          updated_at: "2026-03-20T00:00:00.000Z"
+        }
+      ])
+    };
+    const service = new RecallService({
+      ...dependencies,
+      graphExpansionPort,
+      pathExpansionPort
+    });
+    const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+    const policy = overridePolicy(basePolicy, {
+      coarse_filter: {
+        ...basePolicy.coarse_filter,
+        precomputed_rank: {
+          ...basePolicy.coarse_filter.precomputed_rank,
+          max_candidates: 1
+        },
+        semantic_supplement: {
+          enabled: false,
+          max_supplement: 0
+        }
+      },
+      fine_assessment: {
+        ...basePolicy.fine_assessment,
+        budgets: {
+          max_total_tokens: 1000,
+          max_entries: 3,
+          per_dimension_limits: null
+        }
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(
+      expect.arrayContaining(["seed-memory", "graph-target", "path-target"])
+    );
+    expect(result.diagnostics?.candidates.find((candidate) => candidate.object_id === "graph-target")).toMatchObject({
+      structural_score: 1
+    });
+    expect(result.diagnostics?.candidates.find((candidate) => candidate.object_id === "graph-target")?.admission_planes)
+      .toContain("graph_expansion");
+    expect(result.diagnostics?.candidates.find((candidate) => candidate.object_id === "path-target")).toMatchObject({
+      object_id: "path-target"
+    });
+    expect(result.diagnostics?.candidates.find((candidate) => candidate.object_id === "path-target")?.admission_planes)
+      .toContain("path_expansion");
   });
 
   it("applies conflict awareness to non-winner claim-like entries", async () => {
@@ -1576,6 +1757,57 @@ describe("RecallService", () => {
       new Set(["memory-1", "memory-2"])
     );
     expect(result.candidates).toHaveLength(2);
+  });
+
+  it("records lexical_rank in diagnostics without conflating it with structural score", async () => {
+    const memories = [
+      createMemoryEntry({
+        object_id: "memory-alpha",
+        activation_score: 0.6,
+        content: "alpha beta gamma delta epsilon zeta eta theta iota kappa."
+      }),
+      createMemoryEntry({
+        object_id: "memory-beta",
+        activation_score: 0.6,
+        content: "alpha beta gamma."
+      })
+    ];
+    const { dependencies } = createDependencies(memories);
+    const searchByKeyword = vi.fn(async () => [
+      { object_id: "memory-alpha", normalized_rank: 1 },
+      { object_id: "memory-beta", normalized_rank: 0.5 }
+    ]);
+    const service = new RecallService({
+      ...dependencies,
+      memoryRepo: {
+        ...dependencies.memoryRepo,
+        searchByKeyword
+      }
+    });
+    const taskSurface = {
+      ...createTaskSurface(),
+      display_name: "alpha beta gamma"
+    };
+
+    const result = await service.recall({
+      taskSurface,
+      workspaceId: "workspace-1",
+      strategy: "chat"
+    });
+
+    const alphaDiagnostic = result.diagnostics?.candidates.find(
+      (candidate) => candidate.object_id === "memory-alpha"
+    );
+    const betaDiagnostic = result.diagnostics?.candidates.find(
+      (candidate) => candidate.object_id === "memory-beta"
+    );
+    expect(alphaDiagnostic?.lexical_rank).toBe(1);
+    expect(betaDiagnostic?.lexical_rank).toBe(0.5);
+    // FTS rank is reported as a separate field; it must not be silently copied
+    // into structural_score. structural_score reflects content/structural
+    // evidence (e.g. query_probe_lexical match, evidence_anchor) and may
+    // legitimately differ from lexical_rank in either direction.
+    expect(alphaDiagnostic?.structural_score).not.toBe(alphaDiagnostic?.lexical_rank);
   });
 
   it("merges semantic supplement candidates without duplicating existing matches", async () => {

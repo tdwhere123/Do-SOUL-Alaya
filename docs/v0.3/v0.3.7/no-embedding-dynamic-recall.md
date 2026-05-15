@@ -2,8 +2,10 @@
 
 ## Status
 
-Draft implementation plan for review. No implementation change is
-claimed by this document.
+Implemented in the v0.3.7 dynamic recall follow-up. This document now
+serves as both the original design rationale and the implementation map.
+No MCP/protocol/EventLog/runtime-config schema or SQLite migration was
+changed.
 
 This note records the v0.3.7 direction after the initial benchmark and
 Inspector repair slice: no-embedding recall is a core capability, not a
@@ -37,18 +39,26 @@ effect vector includes `recall_bias`; its plasticity state includes
 `strength`, `direction_bias`, and `stability_class`
 (`packages/protocol/src/soul/path-relation.ts`).
 
-The current MCP recall policy is still narrow: for `max_results=N`, the
-coarse activation window is `N * 5`, and keyword supplement size is only
-`ceil(N / 2)` (`apps/core-daemon/src/mcp-memory-tool-handler.ts`).
+The original MCP recall policy was narrow: for `max_results=N`, the
+coarse activation window was `N * 5`, and keyword supplement size was
+only `ceil(N / 2)`. v0.3.7 changes that internal policy derivation to a
+wider read-side candidate window (`maxResults * 10`, capped at 1000)
+without exposing a new public policy field
+(`apps/core-daemon/src/mcp-memory-tool-handler.ts`).
 
-The current core recall flow builds candidates from tier memories,
+The original core recall flow built candidates from tier memories,
 deterministic filters, activation rank, and a small keyword supplement.
-Graph support and path plasticity are collected only after candidates
-are already in the coarse set (`packages/core/src/recall-service.ts`).
+v0.3.7 replaces that with an internal union builder: activation,
+protected/winner governance, object probes, evidence anchors, domain tag
+clusters, temporal proximity, session/surface cohorts, memory-graph
+one-hop expansion, PathRelation expansion, and lexical evidence all
+admit candidates before scoring (`packages/core/src/recall-service.ts`).
 
-The current path read side can look up active path relations by anchor
-and can compute strength for already-selected memory ids, but recall does
-not yet use paths to pull additional candidate objects into the pool
+The path read side can look up active path relations by anchor and can
+compute strength for already-selected memory ids. v0.3.7 additionally
+uses existing PathRelation anchor reads to pull direction-eligible
+opposite-side object anchors into the recall pool. It does not create
+paths or durable relations during recall
 (`packages/storage/src/repos/path-relation-repo.ts`,
 `apps/core-daemon/src/path-plasticity-runtime.ts`).
 
@@ -413,6 +423,29 @@ Release floor:
 - If direct benchmark evidence shows a different bottleneck than this
   document predicts, update the plan before implementation continues.
 
+Current v0.3.7 evidence:
+
+- The earlier disabled-100 archive at
+  `docs/bench-history/public/2026-05-15T100511Z-af4a721/` reported
+  R@1 = 49.0%, R@5 = 70.0%, R@10 = 73.0%, p95 = 127ms with sidecar
+  classification 70 `hit_at_5` / 2 `under_ranked` / 22 `budget_dropped`
+  / 6 `candidate_absent`. **That run included
+  LongMemEval-question-shape heuristics in `packages/core` that were
+  later removed**; its R@5 is retracted as a current-code claim and is
+  recorded here only as a historical sidecar reference.
+- Honest-baseline disabled-100 (heuristic-removed build) and the first
+  `public-multiturn` round-curve are produced by Phase A and Phase B
+  of the follow-up plan
+  (`/home/tdwhere/.claude/plans/500-100-500-federated-sundae.md`).
+  Results will be linked from
+  `docs/v0.3/v0.3.7/reports/v0.3.7-closeout.md` once those runs land.
+- Interpretation: v0.3.7's evidence chain (sidecar, miss
+  classification, plane provenance) is in place; the no-embedding
+  ranking work continues on top of an honest baseline rather than a
+  heuristic-inflated one. FTS rank is kept separate from
+  structural/content evidence as a permanent architectural invariant,
+  not a one-off heuristic.
+
 ### Slice G: Embedding-Mode Engineering Stability
 
 Goal: separate "embedding provider failed" from "no-embedding quality
@@ -608,9 +641,9 @@ next plan can name:
   threshold-table decision per Open Design Questions);
 - the code paths that stay untouched to preserve public contracts.
 
-## Approval Checkpoint
+## Approval Checkpoint Outcome
 
-Implementation should not start until this document is reviewed and the
-slice order is accepted. After approval, the first implementation step
-should be Slice A diagnostic sidecar, because it turns the benchmark into
-the decision surface for the later algorithm work.
+The implementation followed the approved order: diagnostic sidecar first,
+then deterministic query probes, candidate union, scoring, daemon wiring,
+and benchmark/Inspector reporting. The tracked implementation summary is
+`reports/v0.3.7-closeout.md`.

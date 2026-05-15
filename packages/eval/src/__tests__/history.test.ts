@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { diffKpis } from "../diff.js";
 import {
   entrySlug,
   listEntries,
@@ -11,7 +12,8 @@ import {
   writeEntry,
   type HistoryLayout
 } from "../history.js";
-import type { KpiPayload } from "../kpi-schema.js";
+import { KpiPayloadSchema, type KpiPayload } from "../kpi-schema.js";
+import { renderFindings, renderReport } from "../report.js";
 
 function buildPayload(commit: string): KpiPayload {
   return {
@@ -358,5 +360,89 @@ describe("history archive", () => {
     // Split with no matching entries returns null, not the newest
     const newestGolden = await readLatest(layout, "public", { split: "golden" });
     expect(newestGolden).toBeNull();
+  });
+
+  it("accepts public-multiturn archives and optional embedding diagnostic KPIs", async () => {
+    const payload: KpiPayload = {
+      ...buildPayload("abc1234"),
+      bench_name: "public-multiturn",
+      split: "longmemeval-s",
+      embedding_provider: "yunwu:text-embedding-3-small",
+      dataset: {
+        name: "longmemeval_s:multiturn",
+        size: 500,
+        source: "github:xiaowu0162/LongMemEval"
+      },
+      sample_size: 500,
+      evaluated_count: 25,
+      kpi: {
+        ...buildPayload("abc1234").kpi,
+        r_at_5: 0.64,
+        r_at_5_overall: 0.64,
+        r_at_5_with_embedding_returned: 0.71,
+        r_at_5_round_1: 0.52,
+        r_at_5_round_2: 0.6,
+        r_at_5_round_n: 0.64,
+        multiturn_rounds: 3,
+        provider_returned_rate: 0.8,
+        provider_pending_rate: 0.12,
+        provider_failed_rate: 0.08
+      }
+    };
+    const parsedPayload = KpiPayloadSchema.parse(payload);
+    expect(parsedPayload.bench_name).toBe("public-multiturn");
+
+    const report = renderReport(parsedPayload, null, diffKpis(parsedPayload, null));
+    expect(report).toContain("Public multi-turn archive");
+    expect(report).toContain("Multi-turn R@5");
+    expect(report).toContain("Embedding provider states");
+
+    await writeEntry(
+      layout,
+      "public-multiturn",
+      "2026-05-15T140000Z-abc1234",
+      parsedPayload,
+      report,
+      null
+    );
+    const latest = await readLatest(layout, "public-multiturn", {
+      split: "longmemeval-s"
+    });
+    expect(latest?.bench_name).toBe("public-multiturn");
+    expect(latest?.kpi.r_at_5_with_embedding_returned).toBe(0.71);
+  });
+
+  it("flags LongMemEval-S disabled-100 reports below the smoke target", () => {
+    const payload: KpiPayload = {
+      ...buildPayload("beef123"),
+      bench_name: "public",
+      split: "longmemeval-s",
+      embedding_provider: "none",
+      sample_size: 500,
+      evaluated_count: 100,
+      dataset: {
+        name: "longmemeval_s",
+        size: 500,
+        source: "fixture"
+      },
+      kpi: {
+        ...buildPayload("beef123").kpi,
+        r_at_5: 0.68
+      }
+    };
+    const parsedPayload = KpiPayloadSchema.parse(payload);
+    const diff = diffKpis(parsedPayload, {
+      ...payload,
+      alaya_commit: "c0ffee0"
+    });
+
+    const report = renderReport(parsedPayload, parsedPayload, diff);
+    expect(report).toContain("Worst verdict: **OK**");
+    expect(report).toContain("LongMemEval-S disabled-100 smoke target");
+    expect(report).toContain("68.00% < target 70.00%");
+
+    const findings = renderFindings(parsedPayload, diff);
+    expect(findings).toContain("Absolute target gaps");
+    expect(findings).toContain("current 68.00% < target 70.00%");
   });
 });

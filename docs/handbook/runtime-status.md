@@ -257,22 +257,49 @@ re-discovering them from `.do-it/findings/{a1,a2,a3}.md`.
 
 ## v0.3.7 Release (2026-05-15)
 
-Patch-internal benchmark archive + Inspector repair slice. No MCP tool
-names or descriptions, MCP request/response schemas, protocol zod
-schemas, EventLog payload schemas, runtime config schemas, or storage
-migrations changed.
+Patch-internal dynamic recall, benchmark archive, and Inspector repair
+slice. No MCP tool names or descriptions, MCP request/response schemas,
+protocol zod schemas, EventLog payload schemas, runtime config schemas,
+or storage migrations changed.
+
+Status: implementation checkpoint in **honest-baseline rewrite** mode.
+The earlier R@5 = 70.0% disabled-100 number came from a build that
+included LongMemEval-question-shape heuristics in `packages/core`;
+those heuristics have been removed and the post-removal disabled-100
+archive is the new honest baseline (see
+`docs/v0.3/v0.3.7/reports/v0.3.7-closeout.md`). Disabled-500,
+env-embedding staged floor evidence, and the first `public-multiturn`
+and `live` archives are explicitly out of scope for this checkpoint
+and are tracked in the follow-up plan.
 
 New / changed runtime-visible surfaces:
 
-- Bench history archive now has `docs/bench-history/live/` alongside
-  `self/` and `public/`. The live entry normalizes the strict-real
-  `.do-it/checks/alaya-live/main-check.json` summary into
-  `kpi.json`, `report.md`, and `live-gates.json` without committing raw
-  provider transcripts, samples, run DBs, or secrets.
+- Core recall now has deterministic query probes, multi-plane
+  no-embedding candidate admission, read-side graph/path expansion, and
+  internal recall diagnostics. These diagnostics remain internal to the
+  core/bench harness and are not added to the MCP response schema.
+- Bench history archive **contract** now defines
+  `docs/bench-history/public-multiturn/` for repeated LongMemEval
+  recall/report-context-usage rounds in one workspace per question
+  (with its own `latest-baseline.json`), and
+  `docs/bench-history/live/` for normalized strict-real entries
+  alongside `self/` and `public/`. No v0.3.7-era entries in those
+  directories yet; first archives are follow-up work.
+- LongMemEval entries may include a secret-free
+  `longmemeval-diagnostics.json` sidecar with candidate admission
+  planes, rank/drop status, miss classification, and closed provider
+  state/rate fields. Env-embedding KPI payloads may include
+  `r_at_5_overall`, `r_at_5_with_embedding_returned`, and provider
+  returned/pending/failed rates.
+- `alaya-bench-runner live` and `alaya-bench-runner
+  longmemeval-multiturn` are wired and unit-tested; first invocations
+  on the current v0.3.7 code are follow-up work.
 - `@do-soul/alaya-eval` accepts `bench_name="live"`,
-  `split="strict-real"`, and `harness_mode="live_strict_real"` for this
-  archive surface.
-- Inspector Overview reads `self`, `public`, and `live` bench summaries.
+  `bench_name="public-multiturn"`, `split="strict-real"` /
+  LongMemEval splits, and `harness_mode="live_strict_real"` for these
+  archive surfaces.
+- Inspector Overview reads `self`, `public`, `public-multiturn`, and
+  `live` bench summaries.
 - `alaya inspect` injects the managed daemon's `ALAYA_REQUEST_TOKEN` into
   the Inspector child process, fixing graph/memory actions that require
   daemon request-token protection. External daemons do not inherit a

@@ -57,8 +57,9 @@ describe("OverviewPage", () => {
           data: {
             self: null,
             public: null,
+            public_multiturn: null,
             live: null,
-            errors: { self: null, public: null, live: null }
+            errors: { self: null, public: null, public_multiturn: null, live: null }
           }
         });
       }
@@ -112,8 +113,9 @@ describe("OverviewPage", () => {
           data: {
             self: null,
             public: null,
+            public_multiturn: null,
             live: null,
-            errors: { self: null, public: null, live: null }
+            errors: { self: null, public: null, public_multiturn: null, live: null }
           }
         });
       }
@@ -133,6 +135,7 @@ describe("OverviewPage", () => {
     renderOverview();
     expect(await screen.findByTestId("overview-bench-self-empty")).toBeTruthy();
     expect(screen.getByTestId("overview-bench-public-empty")).toBeTruthy();
+    expect(screen.getByTestId("overview-bench-public-multiturn-empty")).toBeTruthy();
     expect(screen.getByTestId("overview-bench-live-empty")).toBeTruthy();
     expect(screen.getByTestId("overview-bench-self-empty").textContent).toMatch(
       /no benchmark entries yet/i
@@ -169,6 +172,21 @@ describe("OverviewPage", () => {
               }
             },
             public: null,
+            public_multiturn: {
+              latest_slug: "2026-05-15T100000Z-abcdef0",
+              history_count: 2,
+              payload: {
+                bench_name: "public-multiturn",
+                split: "longmemeval-s",
+                run_at: "2026-05-15T10:00:00.000Z",
+                kpi: { r_at_5: 0.634 }
+              },
+              diff: {
+                previous_slug: "2026-05-14T100000Z-bbbbbbb",
+                worst_verdict: "ok",
+                r_at_5_delta_pp: 3.4
+              }
+            },
             live: {
               latest_slug: "2026-05-12T053953Z-ec44a05",
               history_count: 1,
@@ -184,7 +202,7 @@ describe("OverviewPage", () => {
                 r_at_5_delta_pp: null
               }
             },
-            errors: { self: null, public: null, live: null }
+            errors: { self: null, public: null, public_multiturn: null, live: null }
           }
         });
       }
@@ -196,6 +214,8 @@ describe("OverviewPage", () => {
     expect(selfCard.textContent).toContain("91.2%");
     expect(selfCard.textContent).toMatch(/-2.1pp/);
     expect(selfCard.textContent).toContain("3 historical entries");
+    expect(screen.getByTestId("overview-bench-public-multiturn").textContent).toContain("63.4%");
+    expect(screen.getByTestId("overview-bench-public-multiturn").textContent).toMatch(/\+3.4pp/);
     expect(screen.getByTestId("overview-bench-live").textContent).toContain("94.6%");
   });
 });

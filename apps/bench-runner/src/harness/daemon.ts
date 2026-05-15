@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,16 +6,27 @@ import { PassThrough } from "node:stream";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
+  ControlPlaneObjectKind,
   RunMode,
   RunState,
   ScopeClass,
   SignalEventType,
   SoulSignalMaterializedPayloadSchema,
+  RetentionPolicy,
+  SoulMemorySearchResponseSchema,
+  TaskObjectSurfaceSchema,
   WorkspaceKind,
   WorkspaceState,
+  type MemorySearchResult,
+  type RecallPolicy,
+  type RecallBudgetState,
+  type RecallCandidate,
+  type RecallScoreFactors,
   type SoulEmitCandidateSignalResponse,
   type SoulMemorySearchResponse,
+  type SoulRecallStrategyMix,
   type SoulProposeMemoryUpdateResponse,
+  type SoulReportContextUsageResponse,
   type SoulReviewMemoryProposalResponse
 } from "@do-soul/alaya-protocol";
 import {
@@ -55,6 +67,26 @@ export interface SeededMemoryResult {
   readonly charsClipped: number;
 }
 
+export interface BenchContextUsageObject {
+  readonly objectId: string;
+  readonly usageStatus: "used" | "skipped" | "not_applicable";
+}
+
+export interface BenchReportContextUsageInput {
+  readonly deliveryId: string;
+  readonly usageState: "used" | "skipped" | "not_applicable";
+  readonly usedObjectIds?: readonly string[];
+  readonly deliveredObjects?: readonly BenchContextUsageObject[];
+  readonly turnIndex?: number;
+  readonly turnDigest?: {
+    readonly lastMessages: readonly {
+      readonly role: string;
+      readonly contentExcerpt: string;
+    }[];
+  };
+  readonly reason?: string;
+}
+
 export interface BenchDaemonHandle {
   readonly runtime: AlayaDaemonRuntime;
   readonly mcpClient: Client;
@@ -65,7 +97,8 @@ export interface BenchDaemonHandle {
   recall(
     query: string,
     opts?: { maxResults?: number }
-  ): Promise<SoulMemorySearchResponse>;
+  ): Promise<SoulMemorySearchResponse & { readonly diagnostics?: unknown }>;
+  reportContextUsage(input: BenchReportContextUsageInput): Promise<void>;
   /**
    * @anchor proposeMemory — full propose+review chain
    *
@@ -109,6 +142,7 @@ type ManagedEnvKey = (typeof MANAGED_ENV_KEYS)[number];
 
 const REVIEWER_IDENTITY = "user:bench-runner";
 const REVIEWER_TOKEN = "bench-review-token";
+let activeBenchDaemonCount = 0;
 
 export async function startBenchDaemon(
   opts: BenchDaemonOptions = {}
@@ -130,6 +164,19 @@ export async function startBenchDaemon(
   if (embeddingMode === "env") {
     requireBenchOpenAiSecretRef(effectiveOpenAiSecretRef);
   }
+  if (activeBenchDaemonCount > 0) {
+    throw new Error(
+      "startBenchDaemon supports only one active daemon per process; use process-level shards for LongMemEval parallelism"
+    );
+  }
+  activeBenchDaemonCount++;
+  let activeReleased = false;
+  const releaseActive = () => {
+    if (!activeReleased) {
+      activeReleased = true;
+      activeBenchDaemonCount = Math.max(0, activeBenchDaemonCount - 1);
+    }
+  };
 
   let runtime: AlayaDaemonRuntime | undefined;
   let server: ReturnType<typeof createAlayaMcpServer> | undefined;
@@ -218,6 +265,7 @@ export async function startBenchDaemon(
       await closeBenchDaemonResources({ mcpClient, server, runtime });
     } finally {
       restoreEnv(savedEnv);
+      releaseActive();
     }
     throw err;
   }
@@ -229,6 +277,7 @@ export async function startBenchDaemon(
     dispatchCliFn === undefined
   ) {
     restoreEnv(savedEnv);
+    releaseActive();
     throw new Error("bench daemon startup did not initialize required resources");
   }
 
@@ -240,14 +289,115 @@ export async function startBenchDaemon(
   async function recall(
     query: string,
     recallOpts: { maxResults?: number } = {}
-  ): Promise<SoulMemorySearchResponse> {
-    return callMcpTool<SoulMemorySearchResponse>(activeMcpClient, "soul.recall", {
-      query,
-      scope_class: null,
-      dimension: null,
-      domain_tags: null,
-      max_results: recallOpts.maxResults ?? 10
+  ): Promise<SoulMemorySearchResponse & { readonly diagnostics?: unknown }> {
+    const maxResults = recallOpts.maxResults ?? 10;
+    const taskSurface = TaskObjectSurfaceSchema.parse({
+      runtime_id: randomUUID(),
+      object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
+      task_surface_ref: null,
+      expires_at: null,
+      derived_from: null,
+      retention_policy: RetentionPolicy.SESSION_ONLY,
+      surface_kind: "bench_recall",
+      display_name: query,
+      context_refs: []
     });
+    const policy = buildBenchDiagnosticRecallPolicy(taskSurface.runtime_id, maxResults);
+    const diagnosticRuntime = activeRuntime as unknown as {
+      readonly services: {
+        readonly recallService: {
+          recall(params: {
+            readonly taskSurface: ReturnType<typeof TaskObjectSurfaceSchema.parse>;
+            readonly workspaceId: string;
+            readonly strategy: "chat";
+            readonly runId: string;
+            readonly policyOverride: Readonly<RecallPolicy>;
+          }): Promise<Readonly<{
+            readonly candidates: readonly Readonly<RecallCandidate>[];
+            readonly fine_assessment_count: number;
+            readonly degradation_reason?: SoulMemorySearchResponse["degradation_reason"];
+            readonly diagnostics?: unknown;
+          }>>;
+        };
+        readonly trustStateRecorder: {
+          recordDelivery(input: {
+            readonly delivery_id: string;
+            readonly agent_target: string;
+            readonly workspace_id: string;
+            readonly run_id: string;
+            readonly delivered_object_ids: readonly string[];
+            readonly delivered_at: string;
+          }): Promise<unknown>;
+        };
+      };
+    };
+    const recallResult = await diagnosticRuntime.services.recallService.recall({
+      taskSurface,
+      workspaceId,
+      strategy: "chat",
+      runId,
+      policyOverride: policy
+    });
+    let usedTokens = 0;
+    const results = recallResult.candidates.slice(0, maxResults).map((candidate, index) => {
+      const result = buildBenchMemorySearchResult(candidate, policy, index, usedTokens);
+      usedTokens += candidate.token_estimate;
+      return result;
+    });
+    const deliveryId = `delivery_${randomUUID()}`;
+    await diagnosticRuntime.services.trustStateRecorder.recordDelivery({
+      delivery_id: deliveryId,
+      agent_target: "bench-runner",
+      workspace_id: workspaceId,
+      run_id: runId,
+      delivered_object_ids: results.map((result) => result.object_id),
+      delivered_at: new Date().toISOString()
+    });
+    const response = SoulMemorySearchResponseSchema.parse({
+      delivery_id: deliveryId,
+      results,
+      total_count: recallResult.fine_assessment_count,
+      strategy_mix: buildBenchRecallStrategyMix(policy, results),
+      degradation_reason: recallResult.degradation_reason ?? null
+    });
+    return Object.freeze({
+      ...response,
+      diagnostics: recallResult.diagnostics
+    });
+  }
+
+  async function reportContextUsage(input: BenchReportContextUsageInput): Promise<void> {
+    await callMcpTool<SoulReportContextUsageResponse>(
+      activeMcpClient,
+      "soul.report_context_usage",
+      {
+        delivery_id: input.deliveryId,
+        usage_state: input.usageState,
+        ...(input.usedObjectIds === undefined
+          ? {}
+          : { used_object_ids: input.usedObjectIds }),
+        ...(input.deliveredObjects === undefined
+          ? {}
+          : {
+              delivered_objects: input.deliveredObjects.map((item) => ({
+                object_id: item.objectId,
+                usage_status: item.usageStatus
+              }))
+            }),
+        ...(input.turnIndex === undefined ? {} : { turn_index: input.turnIndex }),
+        ...(input.turnDigest === undefined
+          ? {}
+          : {
+              turn_digest: {
+                last_messages: input.turnDigest.lastMessages.map((message) => ({
+                  role: message.role,
+                  content_excerpt: message.contentExcerpt
+                }))
+              }
+            }),
+        ...(input.reason === undefined ? {} : { reason: input.reason })
+      }
+    );
   }
 
   async function proposeMemory(
@@ -361,6 +511,7 @@ export async function startBenchDaemon(
       });
     } finally {
       restoreEnv(savedEnv);
+      releaseActive();
     }
   }
 
@@ -372,6 +523,7 @@ export async function startBenchDaemon(
     dataDir,
     dispatchCli: activeDispatchCli,
     recall,
+    reportContextUsage,
     proposeMemory,
     shutdown
   };
@@ -482,6 +634,135 @@ async function callMcpTool<TOutput>(
     throw new Error(`MCP tool ${name} returned non-ok structured content`);
   }
   return structured.output;
+}
+
+function buildBenchDiagnosticRecallPolicy(
+  taskSurfaceId: string,
+  maxResultsInput: number
+): RecallPolicy {
+  const maxResults = Math.max(maxResultsInput, 1);
+  const coarseCandidateLimit = Math.min(Math.max(maxResults * 10, maxResults), 1000);
+  const keywordCandidateLimit = Math.min(Math.max(coarseCandidateLimit, maxResults * 10, 1), 1000);
+  return {
+    runtime_id: randomUUID(),
+    object_kind: ControlPlaneObjectKind.RECALL_POLICY,
+    task_surface_ref: taskSurfaceId,
+    expires_at: null,
+    derived_from: null,
+    retention_policy: RetentionPolicy.SESSION_ONLY,
+    coarse_filter: {
+      deterministic_match: {
+        scope_filter: null,
+        dimension_filter: null,
+        domain_tag_filter: null
+      },
+      precomputed_rank: {
+        max_candidates: coarseCandidateLimit,
+        min_activation_score: null
+      },
+      semantic_supplement: {
+        enabled: true,
+        max_supplement: keywordCandidateLimit,
+        embedding_enabled: true
+      }
+    },
+    fine_assessment: {
+      budgets: {
+        max_total_tokens: 2000,
+        max_entries: maxResults,
+        per_dimension_limits: null
+      },
+      conflict_awareness: true
+    }
+  };
+}
+
+function buildBenchMemorySearchResult(
+  candidate: Readonly<RecallCandidate>,
+  policy: Readonly<RecallPolicy>,
+  index: number,
+  usedTokensBeforeCandidate: number
+): MemorySearchResult {
+  return {
+    object_id: candidate.object_id,
+    object_kind: candidate.object_kind,
+    relevance_score: candidate.relevance_score,
+    content_preview: candidate.content_preview,
+    evidence_pointers: [candidate.object_id],
+    selection_reason: candidate.selection_reason ?? buildBenchSelectionReason(candidate),
+    source_channels: candidate.source_channels ?? buildBenchSourceChannels(candidate),
+    score_factors: candidate.score_factors ?? buildBenchScoreFactors(candidate),
+    budget_state: candidate.budget_state ?? buildBenchBudgetState(candidate, policy, index, usedTokensBeforeCandidate)
+  };
+}
+
+function buildBenchRecallStrategyMix(
+  policy: Readonly<RecallPolicy>,
+  results: readonly Readonly<MemorySearchResult>[]
+): SoulRecallStrategyMix {
+  return {
+    deterministic_match: true,
+    precomputed_rank: policy.coarse_filter.precomputed_rank.max_candidates > 0,
+    semantic_supplement: results.some(
+      (result) =>
+        result.source_channels.includes("semantic_supplement") ||
+        result.score_factors.embedding_similarity !== undefined
+    ),
+    graph_support: results.some(
+      (result) =>
+        result.source_channels.includes("graph_support") ||
+        (result.score_factors.graph_support ?? 0) > 0
+    ),
+    path_plasticity: results.some(
+      (result) =>
+        result.source_channels.includes("path_plasticity") ||
+        (result.score_factors.path_plasticity ?? 0) > 0
+    ),
+    global_recall: results.some((result) => result.source_channels.includes("global"))
+  };
+}
+
+function buildBenchSelectionReason(candidate: Readonly<RecallCandidate>): string {
+  const origin = candidate.origin_plane === "global" ? "global recall" : "workspace recall";
+  return `Selected by ${origin} with relevance ${candidate.relevance_score.toFixed(3)} and activation ${candidate.activation_score.toFixed(3)}.`;
+}
+
+function buildBenchSourceChannels(candidate: Readonly<RecallCandidate>): readonly string[] {
+  const channels = ["ranked_recall", candidate.origin_plane] as string[];
+  if (candidate.is_advisory === true) {
+    channels.push("advisory");
+  }
+  return channels;
+}
+
+function buildBenchScoreFactors(candidate: Readonly<RecallCandidate>): RecallScoreFactors {
+  return {
+    activation: clampScore(candidate.activation_score),
+    relevance: clampScore(candidate.relevance_score)
+  };
+}
+
+function buildBenchBudgetState(
+  candidate: Readonly<RecallCandidate>,
+  policy: Readonly<RecallPolicy>,
+  index: number,
+  usedTokensBeforeCandidate: number
+): RecallBudgetState {
+  const maxEntries = policy.fine_assessment.budgets.max_entries;
+  const maxTotalTokens = policy.fine_assessment.budgets.max_total_tokens;
+  const usedTokensThroughCandidate = usedTokensBeforeCandidate + candidate.token_estimate;
+  return {
+    token_estimate: candidate.token_estimate,
+    max_entries: maxEntries,
+    max_total_tokens: maxTotalTokens,
+    remaining_entries: Math.max(maxEntries - index - 1, 0),
+    remaining_tokens: Math.max(maxTotalTokens - usedTokensThroughCandidate, 0),
+    within_budget: index < maxEntries && usedTokensThroughCandidate <= maxTotalTokens
+  };
+}
+
+function clampScore(value: number): number {
+  return Math.min(Math.max(value, 0), 1);
 }
 
 // @anchor readMaterializedMemoryId — bridges signal_id -> durable memory_id

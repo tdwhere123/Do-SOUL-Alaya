@@ -79,19 +79,21 @@ export function diffKpis(
     direction: "growth_bad"
   });
 
-  const hotShareVerdict = classifyHotShareDrop(
-    current.kpi.tier_distribution,
-    previous.kpi.tier_distribution,
-    thresholds.hot_share_drop_pp
-  );
-  deltas.push({
-    key: "tier_distribution.hot_share",
-    current: shareOfHot(current.kpi.tier_distribution),
-    previous: shareOfHot(previous.kpi.tier_distribution),
-    delta: -hotShareVerdict.deltaPp / 100,
-    verdict: downgradeFail(hotShareVerdict.verdict),
-    direction: "drop_bad"
-  });
+  if (shouldDiffHotShare(current)) {
+    const hotShareVerdict = classifyHotShareDrop(
+      current.kpi.tier_distribution,
+      previous.kpi.tier_distribution,
+      thresholds.hot_share_drop_pp
+    );
+    deltas.push({
+      key: "tier_distribution.hot_share",
+      current: shareOfHot(current.kpi.tier_distribution),
+      previous: shareOfHot(previous.kpi.tier_distribution),
+      delta: -hotShareVerdict.deltaPp / 100,
+      verdict: downgradeFail(hotShareVerdict.verdict),
+      direction: "drop_bad"
+    });
+  }
 
   const fixtureDiff = diffFixtures(current, previous);
   const worst = rollupWorstVerdict([
@@ -125,6 +127,10 @@ function pushRatioDelta(
     verdict: postClassify(classified.verdict),
     direction: "drop_bad"
   });
+}
+
+function shouldDiffHotShare(current: KpiPayload): boolean {
+  return !(current.bench_name === "public" && current.split.startsWith("longmemeval-"));
 }
 
 interface FixtureDiff {

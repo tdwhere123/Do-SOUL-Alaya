@@ -165,6 +165,25 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
   });
 
   it(
+    "enforces one active bench daemon per process",
+    async () => {
+      const daemon = await startBenchDaemon({
+        workspaceId: "harness-single-daemon-ws",
+        runId: "harness-single-daemon-run"
+      });
+      handles.push(daemon);
+
+      await expect(
+        startBenchDaemon({
+          workspaceId: "harness-second-daemon-ws",
+          runId: "harness-second-daemon-run"
+        })
+      ).rejects.toThrow(/only one active daemon per process/);
+    },
+    60_000
+  );
+
+  it(
     "emit_candidate_signal -> propose_memory_update -> review_memory_proposal accept produces recallable memory",
     async () => {
       const daemon = await startBenchDaemon({
@@ -206,6 +225,14 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       expect(Array.isArray(recallResult.results)).toBe(true);
       const recalledIds = recallResult.results.map((r) => r.object_id);
       expect(recalledIds).toContain(seed.memoryId);
+      const diagnostics = recallResult.diagnostics as
+        | { readonly delivered_count?: number; readonly candidates?: readonly { readonly object_id: string; readonly final_rank: number | null }[] }
+        | undefined;
+      expect(diagnostics?.delivered_count).toBe(recallResult.results.length);
+      const seededDiagnostic = diagnostics?.candidates?.find(
+        (candidate) => candidate.object_id === seed.memoryId
+      );
+      expect(seededDiagnostic?.final_rank).not.toBeNull();
     },
     60_000
   );

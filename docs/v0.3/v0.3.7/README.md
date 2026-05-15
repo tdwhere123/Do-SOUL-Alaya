@@ -2,7 +2,22 @@
 
 ## Status
 
-Implemented on 2026-05-15.
+Honest-baseline rewrite on 2026-05-15 after a multi-lens review. The
+dynamic recall infrastructure and benchmark-diagnostic surfaces are
+implemented. The earlier R@5 = 70.0% disabled-100 result was produced
+by a build that included LongMemEval-question-shape heuristics inside
+`packages/core`; those heuristics have been removed and the
+post-removal disabled-100 archive is the new honest baseline.
+
+`docs/bench-history/live/` and `docs/bench-history/public-multiturn/`
+are **not yet populated**. The earlier README/closeout language that
+described them as landed has been retracted. The harness code for
+`alaya inspect`, `longmemeval-multiturn`, and `live` import is in
+place; producing the first archives is follow-up work, not v0.3.7
+closeout work.
+
+Disabled-500 and env-embedding floor evidence remain explicitly out
+of scope for this checkpoint.
 
 ## Scope
 
@@ -24,19 +39,24 @@ the v0.3.6 full benchmark run.
 ## Delivered in this slice
 
 - `@do-soul/alaya-eval` schema accepts `bench_name="live"`,
-  `split="strict-real"`, and `harness_mode="live_strict_real"`.
+  `split="strict-real"`, `harness_mode="live_strict_real"`, and the
+  `public-multiturn` bench name.
 - `@do-soul/alaya-bench-runner live` imports
   `.do-it/checks/alaya-live/main-check.json` into
-  `docs/bench-history/live/<slug>/`.
-- `docs/bench-history/live/2026-05-12T053953Z-46531a6/` archives the
-  v0.3.7 strict-real baseline: provider R@1 = 91.4%, R@5 = 94.6%,
-  semantic supplement = 99.8%, p95 = 1504.71ms, and all strict gates
-  pass.
+  `docs/bench-history/live/<slug>/`. **No live archive has been
+  produced yet against the current v0.3.7 code.** The earlier number
+  `provider R@1 = 91.4%, R@5 = 94.6%` came from a v0.3.6-era live
+  check and was retracted because no v0.3.7 live re-run exists on
+  disk.
+- `alaya-bench-runner longmemeval-multiturn` is wired to produce
+  `docs/bench-history/public-multiturn/<slug>/` entries with
+  round-by-round R@5. **No multi-turn archive has been produced
+  yet.**
 - `alaya inspect` now injects the managed daemon's
   `ALAYA_REQUEST_TOKEN` into the Inspector child environment. External
   daemons do not inherit a parent `ALAYA_REQUEST_TOKEN`; use
-  `ALAYA_INSPECTOR_DAEMON_REQUEST_TOKEN` when intentionally pointing the
-  Inspector at a protected external daemon.
+  `ALAYA_INSPECTOR_DAEMON_REQUEST_TOKEN` when intentionally pointing
+  the Inspector at a protected external daemon.
 - Inspector frontend error handling now surfaces backend error strings
   and structured error messages instead of collapsing them to generic
   HTTP status text.
@@ -46,20 +66,37 @@ the v0.3.6 full benchmark run.
 - No MCP tool name, request schema, or response schema changes.
 - No protocol zod schema, EventLog payload schema, runtime config schema,
   or SQLite migration changes.
-- No recall-ranking algorithm change yet. Public LongMemEval-S remains
-  the v0.3.6 500/500 baseline until #BL-039 runs an embedding-enabled
-  public bench.
+- No durable ontology or migration change. Recall expansion is read-side
+  only and uses existing `MemoryEntry`, memory graph, and `PathRelation`
+  structures.
 
-## Active planning note
+## Dynamic recall implementation
 
 - [No-Embedding Dynamic Recall Design Notes](./no-embedding-dynamic-recall.md)
-  records the v0.3.7 plan for deterministic recall without an embedding
-  model. The current revision adds two slices on top of the original
-  diagnose → probe → multi-plane → score-after-expansion → no-embedding-
-  score → bench-iterate spine:
+  records the v0.3.7 plan and implementation notes for deterministic
+  recall without an embedding model. The implemented spine is:
+  diagnose → probe → multi-plane candidate union → score after expansion
+  → final delivery budget → benchmark sidecar.
+  - Core recall now emits internal diagnostics (`query_probes`,
+    candidate admission planes, pre-budget rank, final rank, drop reason,
+    lexical rank, structural score, and provider status) without changing
+    MCP response schemas.
+  - No-embedding recall now admits candidates from activation,
+    protected/winner governance, object probes, evidence anchors, domain
+    tag clusters, temporal/session cohorts, memory graph one-hop
+    expansion, PathRelation expansion, and lexical evidence. Keyword/FTS
+    remains one weak channel rather than the definition of recall quality.
+  - The daemon derives a wider internal candidate window from
+    `max_results` and keeps `max_results` as delivery budget only.
+  - `LongMemEval` archives now include a secret-free
+    `longmemeval-diagnostics.json` sidecar. Env-embedding runs get
+    provider-state rates and dual KPI fields.
   - **Slice C-multi** — multi-turn LongMemEval-S harness variant
-    (single workspace, N=3 rounds with `report_context_usage`) archived
-    under `docs/bench-history/public-multiturn/`. Provides the only
+    (single workspace, N=3 rounds with `report_context_usage`) is
+    **code-ready** in `apps/bench-runner/src/longmemeval/multiturn.ts`
+    and the `alaya-bench-runner longmemeval-multiturn` CLI. The first
+    archive under `docs/bench-history/public-multiturn/` is follow-up
+    work (Phase B of the v0.3.7 follow-up plan). This is the only
     bench-time verification surface for PathRelation / RECALLS-edge /
     plasticity development, since the single-turn per-question
     workspace has zero usage history.
@@ -86,3 +123,6 @@ rtk pnpm exec vitest run --project @do-soul/alaya-inspector-web -- api Overview
 rtk pnpm exec vitest run --project @do-soul/alaya-eval
 rtk node apps/bench-runner/bin/alaya-bench-runner.mjs live --source .do-it/checks/alaya-live/main-check.json --history-root docs/bench-history
 ```
+
+Implementation summary and current command evidence are tracked in
+[`reports/v0.3.7-closeout.md`](reports/v0.3.7-closeout.md).

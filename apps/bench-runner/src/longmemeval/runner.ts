@@ -15,10 +15,18 @@ import {
   type PerScenarioRow
 } from "@do-soul/alaya-eval";
 import { startBenchDaemon, type BenchEmbeddingMode } from "../harness/daemon.js";
+import {
+  buildQuestionDiagnostic,
+  rAt5WithProviderReturned,
+  renderDiagnosticsSidecar,
+  summarizeProviderStates,
+  type LongMemEvalQuestionDiagnostic
+} from "./diagnostics.js";
 import { loadDataset, type FetchResult } from "./fetch.js";
 import type { LongMemEvalVariant } from "./dataset.js";
 
 const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
+const LONGMEMEVAL_DIAGNOSTICS_FILENAME = "longmemeval-diagnostics.json";
 
 export interface LongMemEvalRunOptions {
   readonly variant: LongMemEvalVariant;
@@ -42,6 +50,7 @@ export interface LongMemEvalRunResult {
   readonly kpiPath: string;
   readonly reportPath: string;
   readonly findingsPath: string;
+  readonly diagnosticsPath: string | null;
   readonly payload: KpiPayload;
 }
 
@@ -95,6 +104,7 @@ export async function runLongMemEval(
     seedTurnsTruncated: number;
     answerTurnsTruncated: number;
     seedCharsClipped: number;
+    diagnostics: LongMemEvalQuestionDiagnostic;
   };
 
   async function runOneQuestion(
@@ -144,6 +154,17 @@ export async function runLongMemEval(
       const latencyMs = Date.now() - recallStart;
 
       const results = recallResult.results;
+      const goldMemoryIds = [...sidecar.entries()]
+        .filter(
+          ([, meta]) =>
+            meta.hasAnswer && answerSessionSet.has(meta.sessionId)
+        )
+        .map(([memoryId]) => memoryId);
+      const deliveredResults = results.slice(0, 10).map((pointer, index) => ({
+        object_id: pointer.object_id,
+        rank: index + 1,
+        relevance_score: pointer.relevance_score
+      }));
 
       let hitAt1 = false;
       let hitAt5 = false;
@@ -167,6 +188,18 @@ export async function runLongMemEval(
           hitAt10 = true;
         }
       }
+      const diagnostics = buildQuestionDiagnostic({
+        questionId: question.question_id,
+        goldMemoryIds,
+        answerSessionIds: question.answer_session_ids,
+        deliveredResults,
+        hitAt1,
+        hitAt5,
+        hitAt10,
+        degradationReason: recallResult.degradation_reason ?? null,
+        recallResult,
+        embeddingMode: opts.embeddingMode ?? "disabled"
+      });
 
       return {
         questionId: question.question_id,
@@ -178,7 +211,8 @@ export async function runLongMemEval(
         degradationReason: recallResult.degradation_reason ?? null,
         seedTurnsTruncated,
         answerTurnsTruncated,
-        seedCharsClipped
+        seedCharsClipped,
+        diagnostics
       };
     } finally {
       await daemon.shutdown();
@@ -216,10 +250,12 @@ export async function runLongMemEval(
   let truncSeedTotal = 0;
   let truncAnswerTotal = 0;
   let truncCharsTotal = 0;
+  const questionDiagnostics: LongMemEvalQuestionDiagnostic[] = [];
 
   for (let i = 0; i < collected.length; i++) {
     const res = collected[i];
     if (res === null || res === undefined) continue;
+    questionDiagnostics.push(res.diagnostics);
     latencies.push(res.latencyMs);
     if (res.hitAt1) totalHitAt1++;
     if (res.hitAt10) totalHitAt10++;
@@ -247,6 +283,8 @@ export async function runLongMemEval(
   const rAt10 = n === 0 ? 0 : totalHitAt10 / n;
   const latencyP50 = computePercentile(latencies, 50);
   const latencyP95 = computePercentile(latencies, 95);
+  const providerSummary = summarizeProviderStates(questionDiagnostics);
+  const rAt5EmbeddingReturned = rAt5WithProviderReturned(questionDiagnostics);
 
   const datasetSize = opts.fetchResult?.questionCount ?? questions.length;
 
@@ -280,6 +318,17 @@ export async function runLongMemEval(
       r_at_1: rAt1,
       r_at_5: rAt5,
       r_at_10: rAt10,
+      ...(opts.embeddingMode === "env"
+        ? {
+            r_at_5_overall: rAt5,
+            ...(rAt5EmbeddingReturned === undefined
+              ? {}
+              : { r_at_5_with_embedding_returned: rAt5EmbeddingReturned }),
+            provider_returned_rate: providerSummary.provider_returned_rate,
+            provider_pending_rate: providerSummary.provider_pending_rate,
+            provider_failed_rate: providerSummary.provider_failed_rate
+          }
+        : {}),
       latency_ms_p50: latencyP50,
       latency_ms_p95: latencyP95,
       latency_source: "exact",
@@ -313,12 +362,31 @@ export async function runLongMemEval(
   const report = renderReport(payload, previous, diff);
   const findings = renderFindings(payload, diff);
 
-  const entry = await writeEntry(layout, "public", slug, payload, report, findings);
+  const diagnosticsSidecar = renderDiagnosticsSidecar({
+    schema_version: 1,
+    bench_name: "public",
+    split,
+    run_at: payload.run_at,
+    alaya_commit: payload.alaya_commit,
+    embedding_provider: payload.embedding_provider,
+    embedding_mode: opts.embeddingMode ?? "disabled",
+    provider_state_summary: providerSummary,
+    questions: questionDiagnostics
+  });
+  const entry = await writeEntry(layout, "public", slug, payload, report, findings, {
+    sidecars: [
+      {
+        filename: LONGMEMEVAL_DIAGNOSTICS_FILENAME,
+        contents: diagnosticsSidecar
+      }
+    ]
+  });
   return {
     slug,
     kpiPath: entry.kpiPath,
     reportPath: entry.reportPath,
     findingsPath: entry.findingsPath,
+    diagnosticsPath: entry.sidecarPaths[LONGMEMEVAL_DIAGNOSTICS_FILENAME] ?? null,
     payload
   };
 }

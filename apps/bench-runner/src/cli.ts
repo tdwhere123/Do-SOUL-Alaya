@@ -15,6 +15,8 @@ import {
   type PerScenarioRow
 } from "@do-soul/alaya-eval";
 import { fetchLongMemEval } from "./longmemeval/fetch.js";
+import { runLongMemEvalMultiturn } from "./longmemeval/multiturn.js";
+import { runLongMemEvalCrossQuestion } from "./longmemeval/crossquestion.js";
 import { runLiveBench } from "./live/runner.js";
 import { runLongMemEval } from "./longmemeval/runner.js";
 import { runSelfBench } from "./self/runner.js";
@@ -28,6 +30,8 @@ const HELP_TEXT = `alaya-bench-runner — daemon-attached benchmark harness
 Usage:
   alaya-bench-runner fetch-longmemeval [--variant oracle|s|m]
   alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--history-root <path>]
+  alaya-bench-runner longmemeval-multiturn [--variant oracle|s|m] [--limit N] [--offset N] [--rounds N] [--embedding disabled|env] [--history-root <path>]
+  alaya-bench-runner longmemeval-crossquestion [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--history-root <path>]
   alaya-bench-runner self [--history-root <path>]
   alaya-bench-runner live [--source <main-check.json|main-check-run.json>] [--history-root <path>]
   alaya-bench-runner merge-longmemeval --shards <dir1> <dir2> ... --variant <v> --history-root <path>
@@ -72,6 +76,10 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
       return runFetchLongMemEval(opts);
     case "longmemeval":
       return runLongMemEvalCommand(opts);
+    case "longmemeval-multiturn":
+      return runLongMemEvalMultiturnCommand(opts);
+    case "longmemeval-crossquestion":
+      return runLongMemEvalCrossQuestionCommand(opts);
     case "self":
       return runSelfCommand(opts);
     case "live":
@@ -95,6 +103,7 @@ interface ParsedFlags {
   readonly shards?: ReadonlyArray<string>;
   readonly source?: string;
   readonly embeddingMode: BenchEmbeddingMode;
+  readonly rounds?: number;
 }
 
 function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
@@ -105,6 +114,7 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   let dataDir: string | undefined;
   let source: string | undefined;
   let embeddingMode: BenchEmbeddingMode = "disabled";
+  let rounds: number | undefined;
   const shards: string[] = [];
   let collectingShards = false;
 
@@ -125,6 +135,13 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
       if (raw !== undefined) {
         const parsed = parseInt(raw, 10);
         if (!Number.isNaN(parsed) && parsed >= 0) offset = parsed;
+      }
+      collectingShards = false;
+    } else if (token === "--rounds") {
+      const raw = args[++i];
+      if (raw !== undefined) {
+        const parsed = parseInt(raw, 10);
+        if (!Number.isNaN(parsed) && parsed > 0) rounds = parsed;
       }
       collectingShards = false;
     } else if (token === "--history-root") {
@@ -169,7 +186,8 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
     dataDir,
     shards: shards.length > 0 ? shards : undefined,
     source,
-    embeddingMode
+    embeddingMode,
+    rounds
   };
 }
 
@@ -222,6 +240,76 @@ async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
   } catch (err) {
     process.stderr.write(
       `alaya-bench-runner longmemeval: ${err instanceof Error ? err.message : String(err)}\n`
+    );
+    return 2;
+  }
+}
+
+async function runLongMemEvalMultiturnCommand(opts: ParsedFlags): Promise<number> {
+  try {
+    process.stdout.write(
+      `Running LongMemEval multi-turn ${opts.variant}` +
+        (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
+        (opts.limit !== undefined ? ` limit=${opts.limit}` : "") +
+        ` rounds=${opts.rounds ?? 3}` +
+        (opts.embeddingMode !== "disabled" ? ` embedding=${opts.embeddingMode}` : "") +
+        "...\n"
+    );
+    const result = await runLongMemEvalMultiturn({
+      variant: opts.variant,
+      limit: opts.limit,
+      offset: opts.offset,
+      rounds: opts.rounds,
+      historyRoot: opts.historyRoot,
+      dataDir: opts.dataDir,
+      embeddingMode: opts.embeddingMode
+    });
+    const kpi = result.payload.kpi;
+    process.stdout.write(
+      `Done. Slug: ${result.slug}\n` +
+        `  R@1=${pct(kpi.r_at_1)} R@5=${pct(kpi.r_at_5)} R@10=${pct(kpi.r_at_10)}\n` +
+        `  round1=${pct(kpi.r_at_5_round_1 ?? kpi.r_at_5)} roundN=${pct(kpi.r_at_5_round_n ?? kpi.r_at_5)}\n` +
+        `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
+        `  KPI: ${result.kpiPath}\n`
+    );
+    return exitCodeForVerdicts(result.payload.diff_vs_previous?.verdict_per_kpi);
+  } catch (err) {
+    process.stderr.write(
+      `alaya-bench-runner longmemeval-multiturn: ${err instanceof Error ? err.message : String(err)}\n`
+    );
+    return 2;
+  }
+}
+
+async function runLongMemEvalCrossQuestionCommand(opts: ParsedFlags): Promise<number> {
+  try {
+    process.stdout.write(
+      `Running LongMemEval cross-question ${opts.variant}` +
+        (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
+        (opts.limit !== undefined ? ` limit=${opts.limit}` : "") +
+        (opts.embeddingMode !== "disabled" ? ` embedding=${opts.embeddingMode}` : "") +
+        "...\n"
+    );
+    const result = await runLongMemEvalCrossQuestion({
+      variant: opts.variant,
+      limit: opts.limit,
+      offset: opts.offset,
+      historyRoot: opts.historyRoot,
+      dataDir: opts.dataDir,
+      embeddingMode: opts.embeddingMode
+    });
+    const kpi = result.payload.kpi;
+    process.stdout.write(
+      `Done. Slug: ${result.slug}\n` +
+        `  R@1=${pct(kpi.r_at_1)} R@5=${pct(kpi.r_at_5)} R@10=${pct(kpi.r_at_10)}\n` +
+        `  first_half=${pct(kpi.r_at_5_first_half ?? kpi.r_at_5)} last_half=${pct(kpi.r_at_5_last_half ?? kpi.r_at_5)}\n` +
+        `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
+        `  KPI: ${result.kpiPath}\n`
+    );
+    return exitCodeForVerdicts(result.payload.diff_vs_previous?.verdict_per_kpi);
+  } catch (err) {
+    process.stderr.write(
+      `alaya-bench-runner longmemeval-crossquestion: ${err instanceof Error ? err.message : String(err)}\n`
     );
     return 2;
   }
@@ -292,6 +380,10 @@ function exitCodeForVerdicts(
 
 function pct(ratio: number): string {
   return `${(ratio * 100).toFixed(1)}%`;
+}
+
+function ratio(count: number, total: number): number {
+  return total === 0 ? 0 : count / total;
 }
 
 /**
@@ -427,6 +519,12 @@ async function runMergeLongMemEvalCommand(
     let truncCharsTotal = 0;
     let totalHitAt1 = 0;
     let totalHitAt10 = 0;
+    let providerReturnedTotal = 0;
+    let providerPendingTotal = 0;
+    let providerFailedTotal = 0;
+    let providerReturnedHitAt5 = 0;
+    let hasProviderRates = false;
+    let hasReturnedSubsetRAt5 = false;
     let evaluatedTotal = 0;
     let latencyP50Max = 0;
     let latencyP95Max = 0;
@@ -455,6 +553,29 @@ async function runMergeLongMemEvalCommand(
       truncSeedTotal += shard.kpi.seed_truncation.seed_turns_truncated;
       truncAnswerTotal += shard.kpi.seed_truncation.answer_turns_truncated;
       truncCharsTotal += shard.kpi.seed_truncation.seed_chars_clipped;
+      if (
+        shard.kpi.provider_returned_rate !== undefined ||
+        shard.kpi.provider_pending_rate !== undefined ||
+        shard.kpi.provider_failed_rate !== undefined
+      ) {
+        hasProviderRates = true;
+        const returned = Math.round(
+          (shard.kpi.provider_returned_rate ?? 0) * shard.evaluated_count
+        );
+        providerReturnedTotal += returned;
+        providerPendingTotal += Math.round(
+          (shard.kpi.provider_pending_rate ?? 0) * shard.evaluated_count
+        );
+        providerFailedTotal += Math.round(
+          (shard.kpi.provider_failed_rate ?? 0) * shard.evaluated_count
+        );
+        if (shard.kpi.r_at_5_with_embedding_returned !== undefined) {
+          hasReturnedSubsetRAt5 = true;
+          providerReturnedHitAt5 += Math.round(
+            shard.kpi.r_at_5_with_embedding_returned * returned
+          );
+        }
+      }
       evaluatedTotal += shard.evaluated_count;
       latencyP50Max = Math.max(latencyP50Max, shard.kpi.latency_ms_p50);
       latencyP95Max = Math.max(latencyP95Max, shard.kpi.latency_ms_p95);
@@ -505,6 +626,22 @@ async function runMergeLongMemEvalCommand(
         r_at_1: rAt1,
         r_at_5: rAt5,
         r_at_10: rAt10,
+        ...(first.kpi.r_at_5_overall === undefined
+          ? {}
+          : { r_at_5_overall: rAt5 }),
+        ...(hasReturnedSubsetRAt5 && providerReturnedTotal > 0
+          ? {
+              r_at_5_with_embedding_returned:
+                providerReturnedHitAt5 / providerReturnedTotal
+            }
+          : {}),
+        ...(hasProviderRates
+          ? {
+              provider_returned_rate: ratio(providerReturnedTotal, evaluatedTotal),
+              provider_pending_rate: ratio(providerPendingTotal, evaluatedTotal),
+              provider_failed_rate: ratio(providerFailedTotal, evaluatedTotal)
+            }
+          : {}),
         latency_ms_p50: latencyP50,
         latency_ms_p95: latencyP95,
         // @anchor merged-latency-source — see kpi-schema @latency-source.

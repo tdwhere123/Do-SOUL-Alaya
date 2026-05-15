@@ -99,8 +99,9 @@ describe("mcp memory tool handler", () => {
     });
 
     const callArg = (deps.recallService.recall as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
-    expect(callArg?.policyOverride?.coarse_filter.precomputed_rank.max_candidates).toBe(15);
+    expect(callArg?.policyOverride?.coarse_filter.precomputed_rank.max_candidates).toBe(30);
     expect(callArg?.policyOverride?.fine_assessment.budgets.max_entries).toBe(3);
+    expect(callArg?.policyOverride?.coarse_filter.semantic_supplement.max_supplement).toBe(30);
     expect(callArg?.policyOverride?.coarse_filter.semantic_supplement.embedding_enabled).toBe(true);
   });
 

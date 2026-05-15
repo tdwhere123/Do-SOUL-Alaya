@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -513,5 +513,86 @@ describe("merge-longmemeval validations", () => {
     ]);
     expect(exitCode).toBe(2);
     expect(stderrBuf).toMatch(/evaluated_total=16 > sample_size=10/);
+  });
+
+  it("merges env embedding provider-rate KPIs by evaluated question count", async () => {
+    const shardA = path.join(tmpRoot, "shard-a");
+    const shardB = path.join(tmpRoot, "shard-b");
+    const rowsA = Array.from({ length: 5 }, (_, index) => ({
+      id: `qA-${index + 1}`,
+      version: 1,
+      hit_at_5: index < 4,
+      tier: "warm" as const
+    }));
+    const rowsB = Array.from({ length: 5 }, (_, index) => ({
+      id: `qB-${index + 1}`,
+      version: 1,
+      hit_at_5: index < 3,
+      tier: "warm" as const
+    }));
+    await writeShardRoot(
+      shardA,
+      makeShardKpi({
+        alaya_commit: "abc1234",
+        embedding_provider: "yunwu:text-embedding-3-small",
+        evaluated_count: 5,
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 0.8,
+          r_at_5_overall: 0.8,
+          r_at_5_with_embedding_returned: 2 / 3,
+          provider_returned_rate: 3 / 5,
+          provider_pending_rate: 1 / 5,
+          provider_failed_rate: 1 / 5,
+          per_scenario: rowsA
+        }
+      })
+    );
+    await writeShardRoot(
+      shardB,
+      makeShardKpi({
+        alaya_commit: "abc1234",
+        embedding_provider: "yunwu:text-embedding-3-small",
+        evaluated_count: 5,
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 0.6,
+          r_at_5_overall: 0.6,
+          r_at_5_with_embedding_returned: 1,
+          provider_returned_rate: 2 / 5,
+          provider_pending_rate: 2 / 5,
+          provider_failed_rate: 1 / 5,
+          per_scenario: rowsB
+        }
+      })
+    );
+    const historyRoot = path.join(tmpRoot, "history");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shardA,
+      shardB
+    ]);
+    expect(exitCode).toBe(0);
+
+    const pointer = JSON.parse(
+      await readFile(path.join(historyRoot, "public", "latest-baseline.json"), "utf8")
+    ) as { slug: string };
+    const merged = JSON.parse(
+      await readFile(
+        path.join(historyRoot, "public", pointer.slug, "kpi.json"),
+        "utf8"
+      )
+    ) as KpiPayload;
+    expect(merged.kpi.r_at_5).toBe(0.7);
+    expect(merged.kpi.r_at_5_overall).toBe(0.7);
+    expect(merged.kpi.provider_returned_rate).toBe(0.5);
+    expect(merged.kpi.provider_pending_rate).toBe(0.3);
+    expect(merged.kpi.provider_failed_rate).toBe(0.2);
+    expect(merged.kpi.r_at_5_with_embedding_returned).toBe(0.8);
   });
 });

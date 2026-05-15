@@ -16,7 +16,7 @@
 | [`v0.3.4`](v0.3.4/README.md) | First public v0.3.x release, release workflow, README closeout, and doctor build-info | done |
 | [`v0.3.5`](v0.3.5/README.md) | Patch-internal CLI/MCP startup and local execution hardening | done |
 | [`v0.3.6`](v0.3.6/release-notes.md) | Inspector Overview/Recall UI and reproducible bench-history loop | done |
-| [`v0.3.7`](v0.3.7/README.md) | Live strict-real bench archive + Inspector graph-action 403 repair | done |
+| [`v0.3.7`](v0.3.7/README.md) | Dynamic no-embedding recall + bench diagnostics + Inspector graph-action 403 repair | implementation checkpoint; disabled-100 smoke gate met, disabled-500/env gates open |
 
 ## What v0.3.0 is
 

@@ -259,7 +259,7 @@ describe("RecallService 8-factor scoring", () => {
     });
   });
 
-  it("adds FTS supplement candidates and ranks by effective relevance_score", async () => {
+  it("adds FTS supplement candidates without treating FTS rank as structural evidence", async () => {
     const memories = [
       createMemoryEntry({ object_id: "memory-1", content: "Alpha", activation_score: 0.72 }),
       createMemoryEntry({ object_id: "memory-2", content: "Implement recall", activation_score: 0.55 })
@@ -283,18 +283,25 @@ describe("RecallService 8-factor scoring", () => {
     });
 
     const result = await service.recall({
-      taskSurface: createTaskSurface("Implement recall"),
+      taskSurface: createTaskSurface("zulu omega"),
       workspaceId: "workspace-1",
       runId: "run-1",
       strategy: "build",
       policyOverride: policy
     });
 
-    expect(searchByKeyword).toHaveBeenCalledWith("workspace-1", "Implement recall", 5);
+    expect(searchByKeyword).toHaveBeenCalledWith("workspace-1", "zulu omega", 5);
     expect(countInboundSupports).toHaveBeenCalledWith("memory-2", "workspace-1");
     expect(getSnapshot).toHaveBeenCalledWith("run-1");
-    expect(result.candidates[0]?.object_id).toBe("memory-2");
-    expect(result.candidates[0]?.relevance_score).toBeGreaterThan(result.candidates[1]?.relevance_score ?? 0);
+    const ftsCandidate = result.candidates.find((candidate) => candidate.object_id === "memory-2");
+    const ftsDiagnostic = result.diagnostics?.candidates.find((candidate) => candidate.object_id === "memory-2");
+    expect(ftsCandidate).toBeDefined();
+    expect(ftsDiagnostic).toMatchObject({
+      lexical_rank: 1
+    });
+    expect(ftsDiagnostic?.structural_score).toBeLessThan(1);
+    expect(ftsDiagnostic?.admission_planes).toContain("lexical");
+    expect(ftsDiagnostic?.source_channels).toContain("lexical");
   });
 
   it("uses token-estimator hints per recall call without leaking global state", async () => {

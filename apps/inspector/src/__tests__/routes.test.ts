@@ -405,8 +405,9 @@ describe("inspector routes", () => {
       data: {
         self: null,
         public: null,
+        public_multiturn: null,
         live: null,
-        errors: { self: null, public: null, live: null }
+        errors: { self: null, public: null, public_multiturn: null, live: null }
       }
     });
   });
@@ -464,6 +465,87 @@ describe("inspector routes", () => {
     expect(body.data.self?.latest_slug).toBe("2026-05-14T100000Z-ec44a05");
   });
 
+  it("summarizes public-multiturn bench-history independently", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "bench-history-multiturn-"));
+    const mtRoot = path.join(
+      root,
+      "public-multiturn",
+      "2026-05-15T100000Z-abcdef0"
+    );
+    await mkdir(mtRoot, { recursive: true });
+    await writeFile(
+      path.join(mtRoot, "kpi.json"),
+      JSON.stringify({
+        bench_name: "public-multiturn",
+        split: "longmemeval-s",
+        run_at: "2026-05-15T10:00:00.000Z",
+        alaya_commit: "abcdef0",
+        alaya_version: "0.3.7",
+        embedding_provider: "none",
+        chat_provider: "none",
+        dataset: {
+          name: "longmemeval_s:multiturn",
+          size: 500,
+          source: "github:xiaowu0162/LongMemEval"
+        },
+        sample_size: 500,
+        evaluated_count: 10,
+        harness_mode: "mcp_propose_review",
+        kpi: {
+          r_at_1: 0.2,
+          r_at_5: 0.6,
+          r_at_10: 0.7,
+          r_at_5_round_1: 0.4,
+          r_at_5_round_2: 0.5,
+          r_at_5_round_n: 0.6,
+          multiturn_rounds: 3,
+          latency_ms_p50: 80,
+          latency_ms_p95: 150,
+          token_saved_ratio_vs_full_prompt: 0,
+          tier_distribution: { hot: 3, warm: 5, cold: 2 },
+          degradation_reasons: {
+            none: 8,
+            warm_cascade_engaged: 1,
+            cold_cascade_engaged: 1
+          },
+          per_scenario: []
+        }
+      }),
+      "utf8"
+    );
+
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      benchHistoryRoot: root,
+      staticRoot: await mkdtemp(path.join(tmpdir(), "inspector-static-")),
+      fetchImpl: async () => Response.json({}, { status: 500 })
+    });
+
+    const response = await app.request("/api/bench-summary?token=token");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: {
+        public_multiturn: {
+          history_count: number;
+          latest_slug: string;
+          payload: { bench_name: string; kpi: { r_at_5_round_n?: number } };
+        } | null;
+        errors: { public_multiturn: string | null };
+      };
+    };
+    expect(body.data.errors.public_multiturn).toBeNull();
+    expect(body.data.public_multiturn?.history_count).toBe(1);
+    expect(body.data.public_multiturn?.latest_slug).toBe(
+      "2026-05-15T100000Z-abcdef0"
+    );
+    expect(body.data.public_multiturn?.payload.bench_name).toBe(
+      "public-multiturn"
+    );
+    expect(body.data.public_multiturn?.payload.kpi.r_at_5_round_n).toBe(0.6);
+  });
+
   it("isolates a malformed kpi.json on one split without wiping the other split", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "bench-history-mixed-"));
     const badSelf = path.join(root, "self", "2026-05-14T100000Z-deadbee");
@@ -518,13 +600,21 @@ describe("inspector routes", () => {
       data: {
         self: unknown;
         public: { history_count: number; latest_slug: string } | null;
+        public_multiturn: unknown;
         live: unknown;
-        errors: { self: string | null; public: string | null; live: string | null };
+        errors: {
+          self: string | null;
+          public: string | null;
+          public_multiturn: string | null;
+          live: string | null;
+        };
       };
     };
     expect(body.data.self).toBeNull();
     expect(body.data.errors.self).toMatch(/kpi_json_invalid|kpi_schema_invalid|summary_failed/);
     expect(body.data.errors.public).toBeNull();
+    expect(body.data.public_multiturn).toBeNull();
+    expect(body.data.errors.public_multiturn).toBeNull();
     expect(body.data.live).toBeNull();
     expect(body.data.errors.live).toBeNull();
     expect(body.data.public?.history_count).toBe(1);

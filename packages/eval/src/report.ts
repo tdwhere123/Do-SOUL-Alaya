@@ -81,6 +81,15 @@ export function renderReport(
       "  per-query rows, raw provider transcripts, or live secrets."
     );
   }
+  if (current.bench_name === "public-multiturn") {
+    lines.push(
+      "- **Public multi-turn archive.** This entry runs LongMemEval material",
+      "  through repeated `soul.recall` → `soul.report_context_usage` rounds",
+      "  in one workspace per question. Its trend line is separate from the",
+      "  single-turn `public` archive because usage-derived graph/path signals",
+      "  are part of the measurement."
+    );
+  }
   lines.push("");
 
   lines.push("## Verdict");
@@ -88,6 +97,21 @@ export function renderReport(
   lines.push(
     `Worst verdict: **${diff.worst_verdict.toUpperCase()}** ${verdictBadge(diff.worst_verdict)}`
   );
+  const targetGates = collectAbsoluteTargetGates(current);
+  if (targetGates.length > 0) {
+    lines.push("");
+    lines.push("Absolute target gates:");
+    for (const gate of targetGates) {
+      lines.push(
+        `- ${gate.passed ? "✓" : "⚠"} ${gate.label}: ${formatRatio(gate.current)} ${gate.passed ? ">=" : "<"} target ${formatRatio(gate.target)}`
+      );
+    }
+    if (targetGates.some((gate) => !gate.passed)) {
+      lines.push(
+        "  - The delta verdict above is only a regression check against the previous archive entry; this artifact is below an absolute stage/release target."
+      );
+    }
+  }
   lines.push("");
 
   if (previous === null) {
@@ -145,6 +169,26 @@ export function renderReport(
   lines.push(`- R@1: ${formatRatio(current.kpi.r_at_1)}`);
   lines.push(`- R@5: ${formatRatio(current.kpi.r_at_5)}`);
   lines.push(`- R@10: ${formatRatio(current.kpi.r_at_10)}`);
+  if (
+    current.kpi.r_at_5_overall !== undefined ||
+    current.kpi.r_at_5_with_embedding_returned !== undefined
+  ) {
+    lines.push(
+      `- Env embedding R@5 overall: ${formatMaybeRatio(current.kpi.r_at_5_overall)}`
+    );
+    lines.push(
+      `- Env embedding R@5 when provider returned: ${formatMaybeRatio(current.kpi.r_at_5_with_embedding_returned)}`
+    );
+  }
+  if (
+    current.kpi.r_at_5_round_1 !== undefined ||
+    current.kpi.r_at_5_round_2 !== undefined ||
+    current.kpi.r_at_5_round_n !== undefined
+  ) {
+    lines.push(
+      `- Multi-turn R@5: round1=${formatMaybeRatio(current.kpi.r_at_5_round_1)} round2=${formatMaybeRatio(current.kpi.r_at_5_round_2)} round${current.kpi.multiturn_rounds ?? "N"}=${formatMaybeRatio(current.kpi.r_at_5_round_n)}`
+    );
+  }
   const latencyTag =
     current.kpi.latency_source === "worst_shard_bound"
       ? " (≤ worst-shard upper bound)"
@@ -160,6 +204,15 @@ export function renderReport(
   lines.push(
     `- Degradation reasons: none=${current.kpi.degradation_reasons.none} warm_cascade=${current.kpi.degradation_reasons.warm_cascade_engaged} cold_cascade=${current.kpi.degradation_reasons.cold_cascade_engaged} explainability_partial=${current.kpi.degradation_reasons.recall_explainability_partial}`
   );
+  if (
+    current.kpi.provider_returned_rate !== undefined ||
+    current.kpi.provider_pending_rate !== undefined ||
+    current.kpi.provider_failed_rate !== undefined
+  ) {
+    lines.push(
+      `- Embedding provider states: returned=${formatMaybeRatio(current.kpi.provider_returned_rate)} pending=${formatMaybeRatio(current.kpi.provider_pending_rate)} failed=${formatMaybeRatio(current.kpi.provider_failed_rate)}`
+    );
+  }
   const trunc = current.kpi.seed_truncation;
   lines.push(
     `- Seed truncation: turns=${trunc.seed_turns_truncated} answer_bearing=${trunc.answer_turns_truncated} chars_clipped=${trunc.seed_chars_clipped}`
@@ -192,16 +245,39 @@ export function renderFindings(
   diff: KpiDiffResult
 ): string | null {
   const failures = diff.deltas.filter((d) => d.verdict === "fail");
-  if (failures.length === 0 && diff.fixture_regressions.length === 0) {
+  const targetFailures = collectAbsoluteTargetGates(current).filter(
+    (gate) => !gate.passed
+  );
+  if (
+    failures.length === 0 &&
+    diff.fixture_regressions.length === 0 &&
+    targetFailures.length === 0
+  ) {
     return null;
   }
   const lines: string[] = [];
   lines.push(`# Bench Findings — ${current.bench_name} / ${current.split}`);
   lines.push("");
-  lines.push(
-    `Run ${current.alaya_commit} on ${current.run_at} flipped one or more KPIs into ✗ FAIL.`
-  );
+  if (failures.length > 0 || diff.fixture_regressions.length > 0) {
+    lines.push(
+      `Run ${current.alaya_commit} on ${current.run_at} flipped one or more KPIs into ✗ FAIL.`
+    );
+  } else {
+    lines.push(
+      `Run ${current.alaya_commit} on ${current.run_at} is below one or more absolute benchmark targets.`
+    );
+  }
   lines.push("");
+  if (targetFailures.length > 0) {
+    lines.push("## Absolute target gaps");
+    lines.push("");
+    for (const failure of targetFailures) {
+      lines.push(
+        `- **${failure.label}**: current ${formatRatio(failure.current)} < target ${formatRatio(failure.target)}`
+      );
+    }
+    lines.push("");
+  }
   if (failures.length > 0) {
     lines.push("## KPI regressions");
     lines.push("");
@@ -229,9 +305,63 @@ export function renderFindings(
   return lines.join("\n");
 }
 
+interface AbsoluteTargetGate {
+  readonly label: string;
+  readonly current: number;
+  readonly target: number;
+  readonly passed: boolean;
+}
+
+function collectAbsoluteTargetGates(
+  current: KpiPayload
+): readonly AbsoluteTargetGate[] {
+  if (
+    current.bench_name !== "public" ||
+    current.split !== "longmemeval-s" ||
+    current.embedding_provider !== "none"
+  ) {
+    return [];
+  }
+
+  if (current.evaluated_count === 100) {
+    return [
+      absoluteTargetGate(
+        "LongMemEval-S disabled-100 smoke target",
+        current.kpi.r_at_5,
+        0.7
+      )
+    ];
+  }
+
+  if (current.evaluated_count >= current.sample_size && current.sample_size >= 500) {
+    return [
+      absoluteTargetGate(
+        "LongMemEval-S disabled-500 release floor",
+        current.kpi.r_at_5,
+        0.65
+      )
+    ];
+  }
+
+  return [];
+}
+
+function absoluteTargetGate(
+  label: string,
+  current: number,
+  target: number
+): AbsoluteTargetGate {
+  return { label, current, target, passed: current >= target };
+}
+
 function formatRatio(value: number): string {
   if (!Number.isFinite(value)) return "—";
   return `${(value * 100).toFixed(2)}%`;
+}
+
+function formatMaybeRatio(value: number | undefined): string {
+  if (value === undefined) return "n/a";
+  return formatRatio(value);
 }
 
 function formatNumber(value: number): string {

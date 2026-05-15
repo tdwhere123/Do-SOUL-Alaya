@@ -1506,6 +1506,7 @@ function buildRecallPolicy(
 ): RecallPolicy {
   const maxResults = Math.max(request.max_results, 1);
   const coarseCandidateLimit = resolveRecallCoarseCandidateLimit(maxResults);
+  const keywordCandidateLimit = resolveRecallKeywordCandidateLimit(maxResults, coarseCandidateLimit);
 
   return {
     runtime_id: policyId,
@@ -1526,7 +1527,7 @@ function buildRecallPolicy(
       },
       semantic_supplement: {
         enabled: true,
-        max_supplement: Math.max(Math.ceil(maxResults / 2), 1),
+        max_supplement: keywordCandidateLimit,
         embedding_enabled: true
       }
     },
@@ -1542,7 +1543,11 @@ function buildRecallPolicy(
 }
 
 function resolveRecallCoarseCandidateLimit(maxResults: number): number {
-  return Math.min(Math.max(maxResults * 5, maxResults), 1000);
+  return Math.min(Math.max(maxResults * 10, maxResults), 1000);
+}
+
+function resolveRecallKeywordCandidateLimit(maxResults: number, coarseCandidateLimit: number): number {
+  return Math.min(Math.max(coarseCandidateLimit, maxResults * 10, 1), 1000);
 }
 
 function mapGardenMcpWorkerRole(role: GardenMcpWorkerRole | undefined): GardenRoleValue {
