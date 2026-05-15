@@ -50,6 +50,32 @@ the v0.3.6 full benchmark run.
   the v0.3.6 500/500 baseline until #BL-039 runs an embedding-enabled
   public bench.
 
+## Active planning note
+
+- [No-Embedding Dynamic Recall Design Notes](./no-embedding-dynamic-recall.md)
+  records the v0.3.7 plan for deterministic recall without an embedding
+  model. The current revision adds two slices on top of the original
+  diagnose → probe → multi-plane → score-after-expansion → no-embedding-
+  score → bench-iterate spine:
+  - **Slice C-multi** — multi-turn LongMemEval-S harness variant
+    (single workspace, N=3 rounds with `report_context_usage`) archived
+    under `docs/bench-history/public-multiturn/`. Provides the only
+    bench-time verification surface for PathRelation / RECALLS-edge /
+    plasticity development, since the single-turn per-question
+    workspace has zero usage history.
+  - **Slice G** — env-embedding engineering stability. Adds three
+    provider-state rates to the Slice A sidecar
+    (`provider_returned_rate` / `provider_pending_rate` /
+    `provider_failed_rate`), dual KPI tracks in `kpi.json`
+    (`r_at_5_overall` vs `r_at_5_with_embedding_returned`), a vitest
+    case enforcing the shard-runner single-daemon contract, and Yunwu
+    as the named v0.3.7 ship provider (key file at
+    `~/.config/alaya/secrets/official-garden`).
+  Slice E's verification is split across three tracks: single-turn
+  LongMemEval (no-regression bar; structural value carried by Slice C
+  content-derived planes), multi-turn (round-curve must show
+  improvement), and live/strict-real (advisory Inspector trend only).
+
 ## Verification
 
 ```bash
