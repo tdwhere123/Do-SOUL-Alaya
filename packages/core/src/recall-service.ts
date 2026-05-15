@@ -493,6 +493,58 @@ export class RecallService {
           addCandidate(entry, "lexical", clamp01(match.normalized_rank), "lexical");
         }
       }
+
+      // Evidence FTS: when distillation drops keywords from MemoryEntry.content,
+      // the raw turn still lives in EvidenceCapsule.gist / .excerpt. Searching
+      // there and resolving back via evidence_refs admits memories that would
+      // otherwise miss lexical entirely. see: 068-evidence-capsule-fts.sql.
+      if (
+        this.dependencies.evidenceSearchPort !== undefined &&
+        this.dependencies.memoryRepo.findByEvidenceRefs !== undefined
+      ) {
+        try {
+          const evidenceMatches = await this.dependencies.evidenceSearchPort.searchByKeyword(
+            workspaceId,
+            queryText,
+            config.semantic_supplement.max_supplement
+          );
+          if (evidenceMatches.length > 0) {
+            const evidenceRankById = new Map<string, number>();
+            for (const match of evidenceMatches) {
+              evidenceRankById.set(match.object_id, clamp01(match.normalized_rank));
+            }
+            const memoriesByEvidence = await this.dependencies.memoryRepo.findByEvidenceRefs(
+              workspaceId,
+              [...evidenceRankById.keys()]
+            );
+            for (const memory of memoriesByEvidence) {
+              if (!byId.has(memory.object_id)) {
+                continue;
+              }
+              let bestRank = 0;
+              for (const ref of memory.evidence_refs) {
+                const evidenceRank = evidenceRankById.get(ref);
+                if (evidenceRank !== undefined && evidenceRank > bestRank) {
+                  bestRank = evidenceRank;
+                }
+              }
+              if (bestRank <= 0) {
+                continue;
+              }
+              const existingRank = ftsRanks.get(memory.object_id) ?? 0;
+              if (bestRank > existingRank) {
+                ftsRanks.set(memory.object_id, bestRank);
+              }
+              addCandidate(memory, "lexical", bestRank, "evidence_fts");
+            }
+          }
+        } catch (error) {
+          this.warn("evidence FTS lookup failed", {
+            workspace_id: workspaceId,
+            error: toErrorMessage(error)
+          });
+        }
+      }
     }
 
     this.addContentDerivedExpansionCandidates({

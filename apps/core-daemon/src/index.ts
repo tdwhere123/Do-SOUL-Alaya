@@ -494,6 +494,12 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     projectMappingPort: projectMappingService,
     pathPlasticityPort: recallPathPlasticityPort,
     pathExpansionPort: pathRelationRepo,
+    evidenceSearchPort: {
+      searchByKeyword: async (workspaceId, queryText, limit) =>
+        evidenceCapsuleRepo.searchByKeyword === undefined
+          ? []
+          : await evidenceCapsuleRepo.searchByKeyword(workspaceId, queryText, limit)
+    },
     ...(globalMemoryRepo === null
       ? {}
       : {

@@ -42,6 +42,24 @@ export interface RecallServiceMemoryRepoPort {
     limit: number,
     objectIds: readonly string[]
   ): Promise<readonly KeywordSearchResult[]>;
+  // see also: 068-evidence-capsule-fts.sql — used by lexical plane to admit
+  // memories whose distilled content lost keywords but whose underlying
+  // EvidenceCapsule.gist still matches the query.
+  findByEvidenceRefs?(
+    workspaceId: string,
+    evidenceObjectIds: readonly string[]
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
+}
+
+// Evidence FTS port consumed by the recall service. The implementing repo
+// is SqliteEvidenceCapsuleRepo (migration 068). Recall uses this only to
+// widen lexical candidate generation when distillation drops keywords.
+export interface RecallServiceEvidenceSearchPort {
+  searchByKeyword(
+    workspaceId: string,
+    queryText: string,
+    limit: number
+  ): Promise<readonly KeywordSearchResult[]>;
 }
 
 export interface RecallServiceSlotRepoPort {
@@ -195,6 +213,7 @@ export interface RecallServiceDependencies {
   readonly pathPlasticityPort?: RecallServicePathPlasticityPort;
   readonly graphExpansionPort?: RecallServiceGraphExpansionPort;
   readonly pathExpansionPort?: RecallServicePathExpansionPort;
+  readonly evidenceSearchPort?: RecallServiceEvidenceSearchPort;
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;
   readonly warn?: RecallServiceWarnPort;

@@ -94,6 +94,13 @@ export interface MemoryEntryRepo {
     limit: number,
     objectIds: readonly string[]
   ): Promise<readonly MemoryEntryKeywordSearchResult[]>;
+  // see also: 005-evidence-capsules.sql + 068-evidence-capsule-fts.sql
+  // Returns memory entries whose evidence_refs JSON array references any of
+  // the given evidence_capsule.object_id values, scoped to workspace.
+  findByEvidenceRefs?(
+    workspaceId: string,
+    evidenceObjectIds: readonly string[]
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
   findLowActivityActiveMemories(workspaceId: string): Promise<readonly Readonly<MemoryEntry>[]>;
   findTombstonedMemories(workspaceId: string): Promise<readonly Readonly<MemoryEntry>[]>;
   update(objectId: string, fields: MemoryEntryRepoUpdateFields): Promise<Readonly<MemoryEntry>>;
@@ -423,6 +430,39 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list memory entries for workspace ${workspaceId} and scope class ${parsedScopeClass}.`,
+        error
+      );
+    }
+  }
+
+  public async findByEvidenceRefs(
+    workspaceId: string,
+    evidenceObjectIds: readonly string[]
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    const unique = [...new Set(evidenceObjectIds.filter((id) => typeof id === "string" && id.length > 0))];
+    if (unique.length === 0) {
+      return Object.freeze([]);
+    }
+    const cappedIds = unique.slice(0, 256);
+    const likePatterns = cappedIds.map(() => `evidence_refs LIKE ?`);
+    const likeValues = cappedIds.map((id) => `%${id.replace(/[%_]/g, "")}%`);
+    try {
+      const rows = this.db.connection
+        .prepare(
+          `SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
+           FROM memory_entries
+           WHERE workspace_id = ?
+             AND COALESCE(retention_state, '') != 'tombstoned'
+             AND (${likePatterns.join(" OR ")})
+           ORDER BY object_id ASC
+           LIMIT 512`
+        )
+        .all(workspaceId, ...likeValues) as MemoryEntryRow[];
+      return Object.freeze(rows.map((row) => parseMemoryEntryRow(row)));
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to find memory entries by evidence_refs in workspace ${workspaceId}.`,
         error
       );
     }

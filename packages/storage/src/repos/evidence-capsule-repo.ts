@@ -9,6 +9,11 @@ import { StorageError } from "../errors.js";
 import { deepFreeze } from "./shared/deep-freeze.js";
 import { parseTimestamp } from "./shared/validators.js";
 
+export interface EvidenceCapsuleKeywordHit {
+  readonly object_id: string;
+  readonly normalized_rank: number;
+}
+
 export interface EvidenceCapsuleRepo {
   create(capsule: EvidenceCapsule): Promise<Readonly<EvidenceCapsule>>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;
@@ -20,6 +25,12 @@ export interface EvidenceCapsuleRepo {
     health: EvidenceHealthState,
     updatedAt: string
   ): Promise<Readonly<EvidenceCapsule>>;
+  // see also: memory_content_fts — parallel raw FTS surface
+  searchByKeyword?(
+    workspaceId: string,
+    query: string,
+    limit: number
+  ): Promise<readonly EvidenceCapsuleKeywordHit[]>;
 }
 
 interface EvidenceCapsuleRow {
@@ -50,6 +61,8 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
   private readonly findByWorkspaceIdStatement;
   private readonly findByHealthStatement;
   private readonly updateHealthStatement;
+  // see also: 068-evidence-capsule-fts.sql — virtual FTS5 table.
+  private readonly searchByKeywordStatement;
 
   public constructor(private readonly db: StorageDatabase) {
     this.createStatement = db.connection.prepare(`
@@ -175,6 +188,69 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
       SET evidence_health_state = ?, updated_at = ?
       WHERE object_id = ?
     `);
+    this.searchByKeywordStatement = db.connection.prepare(`
+      SELECT
+        evidence_capsule_fts.object_id,
+        bm25(evidence_capsule_fts) AS raw_rank
+      FROM evidence_capsule_fts
+      JOIN evidence_capsules ON evidence_capsules.object_id = evidence_capsule_fts.object_id
+      WHERE
+        evidence_capsule_fts.workspace_id = ?
+        AND evidence_capsule_fts MATCH ?
+        AND COALESCE(evidence_capsules.lifecycle_state, '') != 'retired'
+      ORDER BY raw_rank ASC, evidence_capsule_fts.object_id ASC
+      LIMIT ?
+    `);
+  }
+
+  public async searchByKeyword(
+    workspaceId: string,
+    queryText: string,
+    limit: number
+  ): Promise<readonly EvidenceCapsuleKeywordHit[]> {
+    const trimmed = queryText.trim();
+    if (trimmed.length === 0 || !Number.isInteger(limit) || limit <= 0) {
+      return Object.freeze([]);
+    }
+    try {
+      const tokens = trimmed
+        .normalize("NFKC")
+        .split(/[^\p{L}\p{N}_]+/u)
+        .filter((token) => token.length >= 2)
+        .slice(0, 16);
+      if (tokens.length === 0) {
+        return Object.freeze([]);
+      }
+      const matchExpression = tokens.map((token) => `"${token.replace(/"/g, '""')}"`).join(" OR ");
+      const rows = this.searchByKeywordStatement.all(
+        workspaceId,
+        matchExpression,
+        limit
+      ) as ReadonlyArray<{ readonly object_id: string; readonly raw_rank: number }>;
+      if (rows.length === 0) {
+        return Object.freeze([]);
+      }
+      // bm25 returns negative scores; normalize so 1.0 = top, 0.0 = bottom.
+      const ranks = rows.map((row) => row.raw_rank);
+      const maxRank = Math.max(...ranks);
+      const minRank = Math.min(...ranks);
+      const span = maxRank - minRank;
+      return Object.freeze(
+        rows.map((row) =>
+          Object.freeze({
+            object_id: row.object_id,
+            normalized_rank:
+              span <= 0 ? 1 : 1 - (row.raw_rank - minRank) / span
+          })
+        )
+      );
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to search evidence capsules for workspace ${workspaceId}.`,
+        error
+      );
+    }
   }
 
   public async create(capsule: EvidenceCapsule): Promise<Readonly<EvidenceCapsule>> {
