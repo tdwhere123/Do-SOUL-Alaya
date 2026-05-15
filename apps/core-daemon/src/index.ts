@@ -551,6 +551,9 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const conflictDetectionEnabled =
     process.env.ALAYA_CONFLICT_DETECTION_ENABLED === "1" ||
     process.env.ALAYA_CONFLICT_DETECTION_ENABLED?.toLowerCase() === "true";
+  const conflictDetectionLlmPort = conflictDetectionEnabled
+    ? createConflictDetectionLlmPort()
+    : null;
   const conflictDetectionService = conflictDetectionEnabled
     ? new ConflictDetectionService({
         memoryRepo: {
@@ -560,9 +563,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
             await memoryEntryRepo.findByWorkspaceId(workspaceId)
         },
         graphEdgePort,
-        ...(createConflictDetectionLlmPort() === null
-          ? {}
-          : { llmPort: createConflictDetectionLlmPort()! }),
+        ...(conflictDetectionLlmPort === null ? {} : { llmPort: conflictDetectionLlmPort }),
         warn: warnLogger.warn
       })
     : null;
@@ -1033,10 +1034,11 @@ function createConflictDetectionLlmPort(): ConflictDetectionLlmPort | null {
     return null;
   }
   const model = process.env.ALAYA_CONFLICT_LLM_MODEL?.trim() ?? "gpt-5.4-mini";
-  const timeoutMs = Number.parseInt(
-    process.env.ALAYA_CONFLICT_LLM_TIMEOUT_MS ?? "8000",
+  const parsedTimeout = Number.parseInt(
+    process.env.ALAYA_CONFLICT_LLM_TIMEOUT_MS ?? "",
     10
   );
+  const timeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 8000;
 
   return {
     classifyPair: async ({ newContent, existingContent, dimension, scopeClass }) => {

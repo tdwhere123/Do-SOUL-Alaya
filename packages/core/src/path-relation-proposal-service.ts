@@ -9,6 +9,12 @@ import {
 // service writes a new PathRelation with default plasticity. The plasticity
 // strength is later evolved by PathPlasticityService. Counter state is
 // in-memory per daemon process (suitable for K small, e.g. 3).
+// invariant: counter Map is unbounded. Long-running daemons should
+// periodically clear stale counters (no current eviction policy).
+// O(pairs_co_used²) memory. Acceptable for v0.3.8 because K=3 means
+// once a pair is promoted, the counter is dropped; the only growth is
+// pairs that co-occurred ≤ 2 times. v0.3.9 should add TTL-based eviction
+// once production traces inform the right bound.
 // see also: crossLinkRecalledMemories — caller hook
 // see also: PathPlasticityService — strength evolution
 // see also: PathRelationRepo — durable write side
@@ -108,12 +114,7 @@ export class PathRelationProposalService {
 
     const occurredAt = this.now();
     const relation: PathRelation = PathRelationSchema.parse({
-      object_id: this.generateId(),
-      object_kind: "path_relation",
-      schema_version: 1,
-      lifecycle_state: "active",
-      created_at: occurredAt,
-      updated_at: occurredAt,
+      path_id: this.generateId(),
       workspace_id: workspaceId,
       anchors: {
         source_anchor: { kind: "object", object_id: sourceMemoryId },
@@ -146,7 +147,9 @@ export class PathRelationProposalService {
       legitimacy: {
         evidence_basis: ["recalls_edge_co_usage"],
         governance_class: "recall_allowed"
-      }
+      },
+      created_at: occurredAt,
+      updated_at: occurredAt
     });
 
     await this.deps.repo.create(relation);

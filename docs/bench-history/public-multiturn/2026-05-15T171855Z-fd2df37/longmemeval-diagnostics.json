@@ -1,0 +1,1745 @@
+{
+  "schema_version": 1,
+  "bench_name": "public-multiturn",
+  "split": "longmemeval-s",
+  "run_at": "2026-05-15T17:18:55.087Z",
+  "alaya_commit": "fd2df37",
+  "embedding_provider": "none",
+  "embedding_mode": "disabled",
+  "provider_state_summary": {
+    "total": 15,
+    "provider_returned": 0,
+    "provider_pending": 0,
+    "provider_failed": 0,
+    "provider_not_requested": 15,
+    "unknown": 0,
+    "provider_returned_rate": 0,
+    "provider_pending_rate": 0,
+    "provider_failed_rate": 0,
+    "unknown_rate": 0
+  },
+  "questions": [
+    {
+      "question_id": "e47becba",
+      "round_index": 1,
+      "gold_memory_ids": [
+        "e731c346-b04a-4bfb-affc-957b72861294",
+        "8879e27b-5832-4126-95c0-6692553ebc73"
+      ],
+      "answer_session_ids": [
+        "answer_280352e9"
+      ],
+      "delivered_results": [
+        {
+          "object_id": "ff1c2330-4fb0-4498-ab81-a3293687b508",
+          "rank": 1,
+          "relevance_score": 0.792
+        },
+        {
+          "object_id": "e731c346-b04a-4bfb-affc-957b72861294",
+          "rank": 2,
+          "relevance_score": 0.6821601264206868
+        },
+        {
+          "object_id": "479fdb15-1990-44d1-819a-1c333e9de2ad",
+          "rank": 3,
+          "relevance_score": 0.6732297905479143
+        },
+        {
+          "object_id": "97405c5b-da7d-4fc7-b01c-00e2824c8418",
+          "rank": 4,
+          "relevance_score": 0.6399078260869566
+        },
+        {
+          "object_id": "8879e27b-5832-4126-95c0-6692553ebc73",
+          "rank": 5,
+          "relevance_score": 0.6370904347826087
+        },
+        {
+          "object_id": "df1bb160-56be-482d-bffc-afd393e6861b",
+          "rank": 6,
+          "relevance_score": 0.6342730434782609
+        },
+        {
+          "object_id": "66114b7d-6d3a-430b-8732-cde539bc55bd",
+          "rank": 7,
+          "relevance_score": 0.6314556521739131
+        },
+        {
+          "object_id": "2b12c463-a1b2-4b3c-9f33-9649f1c25b1e",
+          "rank": 8,
+          "relevance_score": 0.6286382608695653
+        },
+        {
+          "object_id": "d973f418-460f-4831-9945-84f5900523a0",
+          "rank": 9,
+          "relevance_score": 0.6258208695652175
+        },
+        {
+          "object_id": "8cd37ded-aa06-421b-a638-f248846ce00f",
+          "rank": 10,
+          "relevance_score": 0.6230034782608697
+        }
+      ],
+      "hit_at_1": false,
+      "hit_at_5": true,
+      "hit_at_10": true,
+      "miss_classification": "hit_at_5",
+      "degradation_reason": null,
+      "recall_diagnostics_present": true,
+      "recall_diagnostics_keys": [
+        "candidate_pool_count",
+        "candidates",
+        "delivered_count",
+        "embedding_provider_status",
+        "pre_budget_count",
+        "provider_degradation_reason",
+        "query_probes",
+        "total_scanned"
+      ],
+      "provider_state": "provider_not_requested",
+      "provider_degradation_reason": null,
+      "gold": [
+        {
+          "object_id": "e731c346-b04a-4bfb-affc-957b72861294",
+          "candidate_status": "delivered",
+          "final_rank": 2,
+          "pre_budget_rank": 2,
+          "plane_first_admitted": "lexical",
+          "plane_winning_admission": "temporal_proximity",
+          "source_planes": [
+            "lexical",
+            "evidence_anchor",
+            "temporal_proximity"
+          ],
+          "lexical_rank": 1,
+          "structural_score": 0.7323589825065469,
+          "source_channels": [
+            "workspace_local",
+            "lexical",
+            "query_probe_lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "plane:lexical",
+            "plane:evidence_anchor",
+            "plane:temporal_proximity"
+          ],
+          "budget_drop_reason": null
+        },
+        {
+          "object_id": "8879e27b-5832-4126-95c0-6692553ebc73",
+          "candidate_status": "delivered",
+          "final_rank": 5,
+          "pre_budget_rank": 5,
+          "plane_first_admitted": "lexical",
+          "plane_winning_admission": "temporal_proximity",
+          "source_planes": [
+            "lexical",
+            "evidence_anchor",
+            "temporal_proximity"
+          ],
+          "lexical_rank": 0.9130434782608695,
+          "structural_score": 0.65,
+          "source_channels": [
+            "workspace_local",
+            "lexical",
+            "query_probe_lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "plane:lexical",
+            "plane:evidence_anchor",
+            "plane:temporal_proximity"
+          ],
+          "budget_drop_reason": null
+        }
+      ]
+    },
+    {
+      "question_id": "e47becba",
+      "round_index": 2,
+      "gold_memory_ids": [
+        "e731c346-b04a-4bfb-affc-957b72861294",
+        "8879e27b-5832-4126-95c0-6692553ebc73"
+      ],
+      "answer_session_ids": [
+        "answer_280352e9"
+      ],
+      "delivered_results": [
+        {
+          "object_id": "ff1c2330-4fb0-4498-ab81-a3293687b508",
+          "rank": 1,
+          "relevance_score": 0.592
+        },
+        {
+          "object_id": "e731c346-b04a-4bfb-affc-957b72861294",
+          "rank": 2,
+          "relevance_score": 0.5278415610796917
+        },
+        {
+          "object_id": "479fdb15-1990-44d1-819a-1c333e9de2ad",
+          "rank": 3,
+          "relevance_score": 0.5172187570116498
+        },
+        {
+          "object_id": "8879e27b-5832-4126-95c0-6692553ebc73",
+          "rank": 4,
+          "relevance_score": 0.49946434782608695
+        },
+        {
+          "object_id": "97405c5b-da7d-4fc7-b01c-00e2824c8418",
+          "rank": 5,
+          "relevance_score": 0.49623826086956524
+        },
+        {
+          "object_id": "df1bb160-56be-482d-bffc-afd393e6861b",
+          "rank": 6,
+          "relevance_score": 0.4926904347826087
+        },
+        {
+          "object_id": "66114b7d-6d3a-430b-8732-cde539bc55bd",
+          "rank": 7,
+          "relevance_score": 0.4909165217391305
+        },
+        {
+          "object_id": "2b12c463-a1b2-4b3c-9f33-9649f1c25b1e",
+          "rank": 8,
+          "relevance_score": 0.4891426086956522
+        },
+        {
+          "object_id": "d973f418-460f-4831-9945-84f5900523a0",
+          "rank": 9,
+          "relevance_score": 0.487368695652174
+        },
+        {
+          "object_id": "8cd37ded-aa06-421b-a638-f248846ce00f",
+          "rank": 10,
+          "relevance_score": 0.4855947826086957
+        }
+      ],
+      "hit_at_1": false,
+      "hit_at_5": true,
+      "hit_at_10": true,
+      "miss_classification": "hit_at_5",
+      "degradation_reason": null,
+      "recall_diagnostics_present": true,
+      "recall_diagnostics_keys": [
+        "candidate_pool_count",
+        "candidates",
+        "delivered_count",
+        "embedding_provider_status",
+        "pre_budget_count",
+        "provider_degradation_reason",
+        "query_probes",
+        "total_scanned"
+      ],
+      "provider_state": "provider_not_requested",
+      "provider_degradation_reason": null,
+      "gold": [
+        {
+          "object_id": "e731c346-b04a-4bfb-affc-957b72861294",
+          "candidate_status": "delivered",
+          "final_rank": 2,
+          "pre_budget_rank": 2,
+          "plane_first_admitted": "lexical",
+          "plane_winning_admission": "graph_expansion",
+          "source_planes": [
+            "lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "graph_expansion"
+          ],
+          "lexical_rank": 1,
+          "structural_score": 0.7323589825065469,
+          "source_channels": [
+            "workspace_local",
+            "lexical",
+            "query_probe_lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "graph_expansion",
+            "plane:lexical",
+            "plane:evidence_anchor",
+            "plane:temporal_proximity",
+            "plane:graph_expansion"
+          ],
+          "budget_drop_reason": null
+        },
+        {
+          "object_id": "8879e27b-5832-4126-95c0-6692553ebc73",
+          "candidate_status": "delivered",
+          "final_rank": 4,
+          "pre_budget_rank": 4,
+          "plane_first_admitted": "lexical",
+          "plane_winning_admission": "graph_expansion",
+          "source_planes": [
+            "lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "graph_expansion"
+          ],
+          "lexical_rank": 0.9130434782608695,
+          "structural_score": 0.65,
+          "source_channels": [
+            "workspace_local",
+            "lexical",
+            "query_probe_lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "graph_expansion",
+            "plane:lexical",
+            "plane:evidence_anchor",
+            "plane:temporal_proximity",
+            "plane:graph_expansion"
+          ],
+          "budget_drop_reason": null
+        }
+      ]
+    },
+    {
+      "question_id": "e47becba",
+      "round_index": 3,
+      "gold_memory_ids": [
+        "e731c346-b04a-4bfb-affc-957b72861294",
+        "8879e27b-5832-4126-95c0-6692553ebc73"
+      ],
+      "answer_session_ids": [
+        "answer_280352e9"
+      ],
+      "delivered_results": [
+        {
+          "object_id": "ff1c2330-4fb0-4498-ab81-a3293687b508",
+          "rank": 1,
+          "relevance_score": 0.592
+        },
+        {
+          "object_id": "e731c346-b04a-4bfb-affc-957b72861294",
+          "rank": 2,
+          "relevance_score": 0.5278415610796917
+        },
+        {
+          "object_id": "479fdb15-1990-44d1-819a-1c333e9de2ad",
+          "rank": 3,
+          "relevance_score": 0.5172187570116498
+        },
+        {
+          "object_id": "8879e27b-5832-4126-95c0-6692553ebc73",
+          "rank": 4,
+          "relevance_score": 0.49946434782608695
+        },
+        {
+          "object_id": "97405c5b-da7d-4fc7-b01c-00e2824c8418",
+          "rank": 5,
+          "relevance_score": 0.49623826086956524
+        },
+        {
+          "object_id": "df1bb160-56be-482d-bffc-afd393e6861b",
+          "rank": 6,
+          "relevance_score": 0.4926904347826087
+        },
+        {
+          "object_id": "66114b7d-6d3a-430b-8732-cde539bc55bd",
+          "rank": 7,
+          "relevance_score": 0.4909165217391305
+        },
+        {
+          "object_id": "2b12c463-a1b2-4b3c-9f33-9649f1c25b1e",
+          "rank": 8,
+          "relevance_score": 0.4891426086956522
+        },
+        {
+          "object_id": "d973f418-460f-4831-9945-84f5900523a0",
+          "rank": 9,
+          "relevance_score": 0.487368695652174
+        },
+        {
+          "object_id": "8cd37ded-aa06-421b-a638-f248846ce00f",
+          "rank": 10,
+          "relevance_score": 0.4855947826086957
+        }
+      ],
+      "hit_at_1": false,
+      "hit_at_5": true,
+      "hit_at_10": true,
+      "miss_classification": "hit_at_5",
+      "degradation_reason": null,
+      "recall_diagnostics_present": true,
+      "recall_diagnostics_keys": [
+        "candidate_pool_count",
+        "candidates",
+        "delivered_count",
+        "embedding_provider_status",
+        "pre_budget_count",
+        "provider_degradation_reason",
+        "query_probes",
+        "total_scanned"
+      ],
+      "provider_state": "provider_not_requested",
+      "provider_degradation_reason": null,
+      "gold": [
+        {
+          "object_id": "e731c346-b04a-4bfb-affc-957b72861294",
+          "candidate_status": "delivered",
+          "final_rank": 2,
+          "pre_budget_rank": 2,
+          "plane_first_admitted": "lexical",
+          "plane_winning_admission": "graph_expansion",
+          "source_planes": [
+            "lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "graph_expansion"
+          ],
+          "lexical_rank": 1,
+          "structural_score": 0.7323589825065469,
+          "source_channels": [
+            "workspace_local",
+            "lexical",
+            "query_probe_lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "graph_expansion",
+            "plane:lexical",
+            "plane:evidence_anchor",
+            "plane:temporal_proximity",
+            "plane:graph_expansion"
+          ],
+          "budget_drop_reason": null
+        },
+        {
+          "object_id": "8879e27b-5832-4126-95c0-6692553ebc73",
+          "candidate_status": "delivered",
+          "final_rank": 4,
+          "pre_budget_rank": 4,
+          "plane_first_admitted": "lexical",
+          "plane_winning_admission": "graph_expansion",
+          "source_planes": [
+            "lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "graph_expansion"
+          ],
+          "lexical_rank": 0.9130434782608695,
+          "structural_score": 0.65,
+          "source_channels": [
+            "workspace_local",
+            "lexical",
+            "query_probe_lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "graph_expansion",
+            "plane:lexical",
+            "plane:evidence_anchor",
+            "plane:temporal_proximity",
+            "plane:graph_expansion"
+          ],
+          "budget_drop_reason": null
+        }
+      ]
+    },
+    {
+      "question_id": "118b2229",
+      "round_index": 1,
+      "gold_memory_ids": [
+        "a0be7107-8ae6-4304-91ed-1b5b1aa44701"
+      ],
+      "answer_session_ids": [
+        "answer_40a90d51"
+      ],
+      "delivered_results": [
+        {
+          "object_id": "a0be7107-8ae6-4304-91ed-1b5b1aa44701",
+          "rank": 1,
+          "relevance_score": 0.792
+        },
+        {
+          "object_id": "fba85136-c321-41af-b16e-be6ec5ac8c9c",
+          "rank": 2,
+          "relevance_score": 0.7780448493729992
+        },
+        {
+          "object_id": "3a963674-0be9-4651-b36b-83ce6e43455e",
+          "rank": 3,
+          "relevance_score": 0.7299006577273486
+        },
+        {
+          "object_id": "d3c34cec-265f-40de-b102-757a70b2d62d",
+          "rank": 4,
+          "relevance_score": 0.64836
+        },
+        {
+          "object_id": "5eeb1af3-788a-4098-b29d-c240c17f0923",
+          "rank": 5,
+          "relevance_score": 0.6430156701030929
+        },
+        {
+          "object_id": "0efe0de4-4a39-44ad-8b44-0353f94f1448",
+          "rank": 6,
+          "relevance_score": 0.642528
+        },
+        {
+          "object_id": "05d91274-f66c-419f-b8cb-a03e28537fb8",
+          "rank": 7,
+          "relevance_score": 0.642528
+        },
+        {
+          "object_id": "9f2ebd9c-b1df-488a-958d-6236f3b266fa",
+          "rank": 8,
+          "relevance_score": 0.642528
+        },
+        {
+          "object_id": "10a7a50b-bbc0-4234-b704-ffb5752ad56e",
+          "rank": 9,
+          "relevance_score": 0.641679587628866
+        },
+        {
+          "object_id": "f3cacf25-7122-4d8f-8b08-60fb162e9bf8",
+          "rank": 10,
+          "relevance_score": 0.6403435051546392
+        }
+      ],
+      "hit_at_1": true,
+      "hit_at_5": true,
+      "hit_at_10": true,
+      "miss_classification": "hit_at_5",
+      "degradation_reason": null,
+      "recall_diagnostics_present": true,
+      "recall_diagnostics_keys": [
+        "candidate_pool_count",
+        "candidates",
+        "delivered_count",
+        "embedding_provider_status",
+        "pre_budget_count",
+        "provider_degradation_reason",
+        "query_probes",
+        "total_scanned"
+      ],
+      "provider_state": "provider_not_requested",
+      "provider_degradation_reason": null,
+      "gold": [
+        {
+          "object_id": "a0be7107-8ae6-4304-91ed-1b5b1aa44701",
+          "candidate_status": "delivered",
+          "final_rank": 1,
+          "pre_budget_rank": 1,
+          "plane_first_admitted": "activation",
+          "plane_winning_admission": "temporal_proximity",
+          "source_planes": [
+            "activation",
+            "lexical",
+            "evidence_anchor",
+            "temporal_proximity"
+          ],
+          "lexical_rank": 1,
+          "structural_score": 1,
+          "source_channels": [
+            "workspace_local",
+            "activation",
+            "lexical",
+            "query_probe_lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "plane:activation",
+            "plane:lexical",
+            "plane:evidence_anchor",
+            "plane:temporal_proximity"
+          ],
+          "budget_drop_reason": null
+        }
+      ]
+    },
+    {
+      "question_id": "118b2229",
+      "round_index": 2,
+      "gold_memory_ids": [
+        "a0be7107-8ae6-4304-91ed-1b5b1aa44701"
+      ],
+      "answer_session_ids": [
+        "answer_40a90d51"
+      ],
+      "delivered_results": [
+        {
+          "object_id": "a0be7107-8ae6-4304-91ed-1b5b1aa44701",
+          "rank": 1,
+          "relevance_score": 0.792
+        },
+        {
+          "object_id": "fba85136-c321-41af-b16e-be6ec5ac8c9c",
+          "rank": 2,
+          "relevance_score": 0.7780448493729992
+        },
+        {
+          "object_id": "3a963674-0be9-4651-b36b-83ce6e43455e",
+          "rank": 3,
+          "relevance_score": 0.7299006577273486
+        },
+        {
+          "object_id": "d3c34cec-265f-40de-b102-757a70b2d62d",
+          "rank": 4,
+          "relevance_score": 0.64836
+        },
+        {
+          "object_id": "5eeb1af3-788a-4098-b29d-c240c17f0923",
+          "rank": 5,
+          "relevance_score": 0.6430156701030929
+        },
+        {
+          "object_id": "0efe0de4-4a39-44ad-8b44-0353f94f1448",
+          "rank": 6,
+          "relevance_score": 0.642528
+        },
+        {
+          "object_id": "05d91274-f66c-419f-b8cb-a03e28537fb8",
+          "rank": 7,
+          "relevance_score": 0.642528
+        },
+        {
+          "object_id": "9f2ebd9c-b1df-488a-958d-6236f3b266fa",
+          "rank": 8,
+          "relevance_score": 0.642528
+        },
+        {
+          "object_id": "10a7a50b-bbc0-4234-b704-ffb5752ad56e",
+          "rank": 9,
+          "relevance_score": 0.641679587628866
+        },
+        {
+          "object_id": "f3cacf25-7122-4d8f-8b08-60fb162e9bf8",
+          "rank": 10,
+          "relevance_score": 0.6403435051546392
+        }
+      ],
+      "hit_at_1": true,
+      "hit_at_5": true,
+      "hit_at_10": true,
+      "miss_classification": "hit_at_5",
+      "degradation_reason": null,
+      "recall_diagnostics_present": true,
+      "recall_diagnostics_keys": [
+        "candidate_pool_count",
+        "candidates",
+        "delivered_count",
+        "embedding_provider_status",
+        "pre_budget_count",
+        "provider_degradation_reason",
+        "query_probes",
+        "total_scanned"
+      ],
+      "provider_state": "provider_not_requested",
+      "provider_degradation_reason": null,
+      "gold": [
+        {
+          "object_id": "a0be7107-8ae6-4304-91ed-1b5b1aa44701",
+          "candidate_status": "delivered",
+          "final_rank": 1,
+          "pre_budget_rank": 1,
+          "plane_first_admitted": "activation",
+          "plane_winning_admission": "temporal_proximity",
+          "source_planes": [
+            "activation",
+            "lexical",
+            "evidence_anchor",
+            "temporal_proximity"
+          ],
+          "lexical_rank": 1,
+          "structural_score": 1,
+          "source_channels": [
+            "workspace_local",
+            "activation",
+            "lexical",
+            "query_probe_lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "plane:activation",
+            "plane:lexical",
+            "plane:evidence_anchor",
+            "plane:temporal_proximity"
+          ],
+          "budget_drop_reason": null
+        }
+      ]
+    },
+    {
+      "question_id": "118b2229",
+      "round_index": 3,
+      "gold_memory_ids": [
+        "a0be7107-8ae6-4304-91ed-1b5b1aa44701"
+      ],
+      "answer_session_ids": [
+        "answer_40a90d51"
+      ],
+      "delivered_results": [
+        {
+          "object_id": "a0be7107-8ae6-4304-91ed-1b5b1aa44701",
+          "rank": 1,
+          "relevance_score": 0.792
+        },
+        {
+          "object_id": "fba85136-c321-41af-b16e-be6ec5ac8c9c",
+          "rank": 2,
+          "relevance_score": 0.7780448493729992
+        },
+        {
+          "object_id": "3a963674-0be9-4651-b36b-83ce6e43455e",
+          "rank": 3,
+          "relevance_score": 0.7299006577273486
+        },
+        {
+          "object_id": "d3c34cec-265f-40de-b102-757a70b2d62d",
+          "rank": 4,
+          "relevance_score": 0.64836
+        },
+        {
+          "object_id": "5eeb1af3-788a-4098-b29d-c240c17f0923",
+          "rank": 5,
+          "relevance_score": 0.6430156701030929
+        },
+        {
+          "object_id": "0efe0de4-4a39-44ad-8b44-0353f94f1448",
+          "rank": 6,
+          "relevance_score": 0.642528
+        },
+        {
+          "object_id": "05d91274-f66c-419f-b8cb-a03e28537fb8",
+          "rank": 7,
+          "relevance_score": 0.642528
+        },
+        {
+          "object_id": "9f2ebd9c-b1df-488a-958d-6236f3b266fa",
+          "rank": 8,
+          "relevance_score": 0.642528
+        },
+        {
+          "object_id": "10a7a50b-bbc0-4234-b704-ffb5752ad56e",
+          "rank": 9,
+          "relevance_score": 0.641679587628866
+        },
+        {
+          "object_id": "f3cacf25-7122-4d8f-8b08-60fb162e9bf8",
+          "rank": 10,
+          "relevance_score": 0.6403435051546392
+        }
+      ],
+      "hit_at_1": true,
+      "hit_at_5": true,
+      "hit_at_10": true,
+      "miss_classification": "hit_at_5",
+      "degradation_reason": null,
+      "recall_diagnostics_present": true,
+      "recall_diagnostics_keys": [
+        "candidate_pool_count",
+        "candidates",
+        "delivered_count",
+        "embedding_provider_status",
+        "pre_budget_count",
+        "provider_degradation_reason",
+        "query_probes",
+        "total_scanned"
+      ],
+      "provider_state": "provider_not_requested",
+      "provider_degradation_reason": null,
+      "gold": [
+        {
+          "object_id": "a0be7107-8ae6-4304-91ed-1b5b1aa44701",
+          "candidate_status": "delivered",
+          "final_rank": 1,
+          "pre_budget_rank": 1,
+          "plane_first_admitted": "activation",
+          "plane_winning_admission": "temporal_proximity",
+          "source_planes": [
+            "activation",
+            "lexical",
+            "evidence_anchor",
+            "temporal_proximity"
+          ],
+          "lexical_rank": 1,
+          "structural_score": 1,
+          "source_channels": [
+            "workspace_local",
+            "activation",
+            "lexical",
+            "query_probe_lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "plane:activation",
+            "plane:lexical",
+            "plane:evidence_anchor",
+            "plane:temporal_proximity"
+          ],
+          "budget_drop_reason": null
+        }
+      ]
+    },
+    {
+      "question_id": "51a45a95",
+      "round_index": 1,
+      "gold_memory_ids": [
+        "f6e3c89f-181f-454d-b4fb-4a96866b6469"
+      ],
+      "answer_session_ids": [
+        "answer_d61669c7"
+      ],
+      "delivered_results": [
+        {
+          "object_id": "f6e3c89f-181f-454d-b4fb-4a96866b6469",
+          "rank": 1,
+          "relevance_score": 0.792
+        },
+        {
+          "object_id": "bd1184d5-3b13-4017-a74e-2bc9136248c5",
+          "rank": 2,
+          "relevance_score": 0.6424690909090909
+        },
+        {
+          "object_id": "0f92f7a3-a0bc-4543-a445-6bd279ee9af0",
+          "rank": 3,
+          "relevance_score": 0.6365781818181819
+        },
+        {
+          "object_id": "c7c72c43-1481-4921-abad-b2570048f220",
+          "rank": 4,
+          "relevance_score": 0.6306872727272728
+        },
+        {
+          "object_id": "f502df58-12c1-4572-bcc2-5824afca0259",
+          "rank": 5,
+          "relevance_score": 0.6247963636363637
+        },
+        {
+          "object_id": "3e35a70f-557a-4363-8454-1025e5885a44",
+          "rank": 6,
+          "relevance_score": 0.6237360000000001
+        },
+        {
+          "object_id": "9cd46f20-d696-4eb1-a955-790d87331a57",
+          "rank": 7,
+          "relevance_score": 0.6237360000000001
+        },
+        {
+          "object_id": "de9b0f71-8b08-4044-88af-aa736992313c",
+          "rank": 8,
+          "relevance_score": 0.6237360000000001
+        },
+        {
+          "object_id": "454e1995-6235-4dfa-8bf8-e06270dfe9ef",
+          "rank": 9,
+          "relevance_score": 0.6237360000000001
+        },
+        {
+          "object_id": "2feaf802-4aa2-4a6d-8b1d-b889db349019",
+          "rank": 10,
+          "relevance_score": 0.6237360000000001
+        }
+      ],
+      "hit_at_1": true,
+      "hit_at_5": true,
+      "hit_at_10": true,
+      "miss_classification": "hit_at_5",
+      "degradation_reason": null,
+      "recall_diagnostics_present": true,
+      "recall_diagnostics_keys": [
+        "candidate_pool_count",
+        "candidates",
+        "delivered_count",
+        "embedding_provider_status",
+        "pre_budget_count",
+        "provider_degradation_reason",
+        "query_probes",
+        "total_scanned"
+      ],
+      "provider_state": "provider_not_requested",
+      "provider_degradation_reason": null,
+      "gold": [
+        {
+          "object_id": "f6e3c89f-181f-454d-b4fb-4a96866b6469",
+          "candidate_status": "delivered",
+          "final_rank": 1,
+          "pre_budget_rank": 1,
+          "plane_first_admitted": "lexical",
+          "plane_winning_admission": "temporal_proximity",
+          "source_planes": [
+            "lexical",
+            "evidence_anchor",
+            "temporal_proximity"
+          ],
+          "lexical_rank": 1,
+          "structural_score": 1,
+          "source_channels": [
+            "workspace_local",
+            "lexical",
+            "query_probe_lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "plane:lexical",
+            "plane:evidence_anchor",
+            "plane:temporal_proximity"
+          ],
+          "budget_drop_reason": null
+        }
+      ]
+    },
+    {
+      "question_id": "51a45a95",
+      "round_index": 2,
+      "gold_memory_ids": [
+        "f6e3c89f-181f-454d-b4fb-4a96866b6469"
+      ],
+      "answer_session_ids": [
+        "answer_d61669c7"
+      ],
+      "delivered_results": [
+        {
+          "object_id": "f6e3c89f-181f-454d-b4fb-4a96866b6469",
+          "rank": 1,
+          "relevance_score": 0.792
+        },
+        {
+          "object_id": "bd1184d5-3b13-4017-a74e-2bc9136248c5",
+          "rank": 2,
+          "relevance_score": 0.6424690909090909
+        },
+        {
+          "object_id": "0f92f7a3-a0bc-4543-a445-6bd279ee9af0",
+          "rank": 3,
+          "relevance_score": 0.6365781818181819
+        },
+        {
+          "object_id": "c7c72c43-1481-4921-abad-b2570048f220",
+          "rank": 4,
+          "relevance_score": 0.6306872727272728
+        },
+        {
+          "object_id": "f502df58-12c1-4572-bcc2-5824afca0259",
+          "rank": 5,
+          "relevance_score": 0.6247963636363637
+        },
+        {
+          "object_id": "3e35a70f-557a-4363-8454-1025e5885a44",
+          "rank": 6,
+          "relevance_score": 0.6237360000000001
+        },
+        {
+          "object_id": "9cd46f20-d696-4eb1-a955-790d87331a57",
+          "rank": 7,
+          "relevance_score": 0.6237360000000001
+        },
+        {
+          "object_id": "de9b0f71-8b08-4044-88af-aa736992313c",
+          "rank": 8,
+          "relevance_score": 0.6237360000000001
+        },
+        {
+          "object_id": "454e1995-6235-4dfa-8bf8-e06270dfe9ef",
+          "rank": 9,
+          "relevance_score": 0.6237360000000001
+        },
+        {
+          "object_id": "2feaf802-4aa2-4a6d-8b1d-b889db349019",
+          "rank": 10,
+          "relevance_score": 0.6237360000000001
+        }
+      ],
+      "hit_at_1": true,
+      "hit_at_5": true,
+      "hit_at_10": true,
+      "miss_classification": "hit_at_5",
+      "degradation_reason": null,
+      "recall_diagnostics_present": true,
+      "recall_diagnostics_keys": [
+        "candidate_pool_count",
+        "candidates",
+        "delivered_count",
+        "embedding_provider_status",
+        "pre_budget_count",
+        "provider_degradation_reason",
+        "query_probes",
+        "total_scanned"
+      ],
+      "provider_state": "provider_not_requested",
+      "provider_degradation_reason": null,
+      "gold": [
+        {
+          "object_id": "f6e3c89f-181f-454d-b4fb-4a96866b6469",
+          "candidate_status": "delivered",
+          "final_rank": 1,
+          "pre_budget_rank": 1,
+          "plane_first_admitted": "lexical",
+          "plane_winning_admission": "temporal_proximity",
+          "source_planes": [
+            "lexical",
+            "evidence_anchor",
+            "temporal_proximity"
+          ],
+          "lexical_rank": 1,
+          "structural_score": 1,
+          "source_channels": [
+            "workspace_local",
+            "lexical",
+            "query_probe_lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "plane:lexical",
+            "plane:evidence_anchor",
+            "plane:temporal_proximity"
+          ],
+          "budget_drop_reason": null
+        }
+      ]
+    },
+    {
+      "question_id": "51a45a95",
+      "round_index": 3,
+      "gold_memory_ids": [
+        "f6e3c89f-181f-454d-b4fb-4a96866b6469"
+      ],
+      "answer_session_ids": [
+        "answer_d61669c7"
+      ],
+      "delivered_results": [
+        {
+          "object_id": "f6e3c89f-181f-454d-b4fb-4a96866b6469",
+          "rank": 1,
+          "relevance_score": 0.792
+        },
+        {
+          "object_id": "bd1184d5-3b13-4017-a74e-2bc9136248c5",
+          "rank": 2,
+          "relevance_score": 0.6424690909090909
+        },
+        {
+          "object_id": "0f92f7a3-a0bc-4543-a445-6bd279ee9af0",
+          "rank": 3,
+          "relevance_score": 0.6365781818181819
+        },
+        {
+          "object_id": "c7c72c43-1481-4921-abad-b2570048f220",
+          "rank": 4,
+          "relevance_score": 0.6306872727272728
+        },
+        {
+          "object_id": "f502df58-12c1-4572-bcc2-5824afca0259",
+          "rank": 5,
+          "relevance_score": 0.6247963636363637
+        },
+        {
+          "object_id": "3e35a70f-557a-4363-8454-1025e5885a44",
+          "rank": 6,
+          "relevance_score": 0.6237360000000001
+        },
+        {
+          "object_id": "9cd46f20-d696-4eb1-a955-790d87331a57",
+          "rank": 7,
+          "relevance_score": 0.6237360000000001
+        },
+        {
+          "object_id": "de9b0f71-8b08-4044-88af-aa736992313c",
+          "rank": 8,
+          "relevance_score": 0.6237360000000001
+        },
+        {
+          "object_id": "454e1995-6235-4dfa-8bf8-e06270dfe9ef",
+          "rank": 9,
+          "relevance_score": 0.6237360000000001
+        },
+        {
+          "object_id": "2feaf802-4aa2-4a6d-8b1d-b889db349019",
+          "rank": 10,
+          "relevance_score": 0.6237360000000001
+        }
+      ],
+      "hit_at_1": true,
+      "hit_at_5": true,
+      "hit_at_10": true,
+      "miss_classification": "hit_at_5",
+      "degradation_reason": null,
+      "recall_diagnostics_present": true,
+      "recall_diagnostics_keys": [
+        "candidate_pool_count",
+        "candidates",
+        "delivered_count",
+        "embedding_provider_status",
+        "pre_budget_count",
+        "provider_degradation_reason",
+        "query_probes",
+        "total_scanned"
+      ],
+      "provider_state": "provider_not_requested",
+      "provider_degradation_reason": null,
+      "gold": [
+        {
+          "object_id": "f6e3c89f-181f-454d-b4fb-4a96866b6469",
+          "candidate_status": "delivered",
+          "final_rank": 1,
+          "pre_budget_rank": 1,
+          "plane_first_admitted": "lexical",
+          "plane_winning_admission": "temporal_proximity",
+          "source_planes": [
+            "lexical",
+            "evidence_anchor",
+            "temporal_proximity"
+          ],
+          "lexical_rank": 1,
+          "structural_score": 1,
+          "source_channels": [
+            "workspace_local",
+            "lexical",
+            "query_probe_lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "plane:lexical",
+            "plane:evidence_anchor",
+            "plane:temporal_proximity"
+          ],
+          "budget_drop_reason": null
+        }
+      ]
+    },
+    {
+      "question_id": "58bf7951",
+      "round_index": 1,
+      "gold_memory_ids": [
+        "9298ddd6-4c0c-4609-b6a0-9774016e70d3"
+      ],
+      "answer_session_ids": [
+        "answer_355c48bb"
+      ],
+      "delivered_results": [
+        {
+          "object_id": "1c0b07a6-78b1-4495-9690-2cc02244c5c3",
+          "rank": 1,
+          "relevance_score": 0.792
+        },
+        {
+          "object_id": "f8d2bb08-8e89-44d3-8652-23648ba61917",
+          "rank": 2,
+          "relevance_score": 0.7502813781288384
+        },
+        {
+          "object_id": "43f66b77-bcbe-465b-91c8-6799e0bf3bca",
+          "rank": 3,
+          "relevance_score": 0.647064
+        },
+        {
+          "object_id": "7c2b61c2-36db-43e3-b6e1-1886c30e3a11",
+          "rank": 4,
+          "relevance_score": 0.6457680000000001
+        },
+        {
+          "object_id": "9298ddd6-4c0c-4609-b6a0-9774016e70d3",
+          "rank": 5,
+          "relevance_score": 0.644472
+        },
+        {
+          "object_id": "7a76de72-4385-44de-b54c-e5a14a93b521",
+          "rank": 6,
+          "relevance_score": 0.6431760000000001
+        },
+        {
+          "object_id": "7cc5b2e7-bbe7-4ee8-8cb9-ed85a325e8a3",
+          "rank": 7,
+          "relevance_score": 0.64188
+        },
+        {
+          "object_id": "95da0d09-3c12-4520-9a19-f2e1f0c6848d",
+          "rank": 8,
+          "relevance_score": 0.64188
+        },
+        {
+          "object_id": "e130c11d-2aa7-466b-ab5a-cd7f1aeab645",
+          "rank": 9,
+          "relevance_score": 0.640584
+        },
+        {
+          "object_id": "2f3eb255-cb35-4422-adb9-f649d43ee1eb",
+          "rank": 10,
+          "relevance_score": 0.6379920000000001
+        }
+      ],
+      "hit_at_1": false,
+      "hit_at_5": true,
+      "hit_at_10": true,
+      "miss_classification": "hit_at_5",
+      "degradation_reason": null,
+      "recall_diagnostics_present": true,
+      "recall_diagnostics_keys": [
+        "candidate_pool_count",
+        "candidates",
+        "delivered_count",
+        "embedding_provider_status",
+        "pre_budget_count",
+        "provider_degradation_reason",
+        "query_probes",
+        "total_scanned"
+      ],
+      "provider_state": "provider_not_requested",
+      "provider_degradation_reason": null,
+      "gold": [
+        {
+          "object_id": "9298ddd6-4c0c-4609-b6a0-9774016e70d3",
+          "candidate_status": "delivered",
+          "final_rank": 5,
+          "pre_budget_rank": 5,
+          "plane_first_admitted": "lexical",
+          "plane_winning_admission": "temporal_proximity",
+          "source_planes": [
+            "lexical",
+            "evidence_anchor",
+            "temporal_proximity"
+          ],
+          "lexical_rank": 0.97,
+          "structural_score": 0.65,
+          "source_channels": [
+            "workspace_local",
+            "lexical",
+            "query_probe_lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "plane:lexical",
+            "plane:evidence_anchor",
+            "plane:temporal_proximity"
+          ],
+          "budget_drop_reason": null
+        }
+      ]
+    },
+    {
+      "question_id": "58bf7951",
+      "round_index": 2,
+      "gold_memory_ids": [
+        "9298ddd6-4c0c-4609-b6a0-9774016e70d3"
+      ],
+      "answer_session_ids": [
+        "answer_355c48bb"
+      ],
+      "delivered_results": [
+        {
+          "object_id": "1c0b07a6-78b1-4495-9690-2cc02244c5c3",
+          "rank": 1,
+          "relevance_score": 0.792
+        },
+        {
+          "object_id": "f8d2bb08-8e89-44d3-8652-23648ba61917",
+          "rank": 2,
+          "relevance_score": 0.7502813781288384
+        },
+        {
+          "object_id": "43f66b77-bcbe-465b-91c8-6799e0bf3bca",
+          "rank": 3,
+          "relevance_score": 0.647064
+        },
+        {
+          "object_id": "7c2b61c2-36db-43e3-b6e1-1886c30e3a11",
+          "rank": 4,
+          "relevance_score": 0.6457680000000001
+        },
+        {
+          "object_id": "9298ddd6-4c0c-4609-b6a0-9774016e70d3",
+          "rank": 5,
+          "relevance_score": 0.644472
+        },
+        {
+          "object_id": "7a76de72-4385-44de-b54c-e5a14a93b521",
+          "rank": 6,
+          "relevance_score": 0.6431760000000001
+        },
+        {
+          "object_id": "7cc5b2e7-bbe7-4ee8-8cb9-ed85a325e8a3",
+          "rank": 7,
+          "relevance_score": 0.64188
+        },
+        {
+          "object_id": "95da0d09-3c12-4520-9a19-f2e1f0c6848d",
+          "rank": 8,
+          "relevance_score": 0.64188
+        },
+        {
+          "object_id": "e130c11d-2aa7-466b-ab5a-cd7f1aeab645",
+          "rank": 9,
+          "relevance_score": 0.640584
+        },
+        {
+          "object_id": "2f3eb255-cb35-4422-adb9-f649d43ee1eb",
+          "rank": 10,
+          "relevance_score": 0.6379920000000001
+        }
+      ],
+      "hit_at_1": false,
+      "hit_at_5": true,
+      "hit_at_10": true,
+      "miss_classification": "hit_at_5",
+      "degradation_reason": null,
+      "recall_diagnostics_present": true,
+      "recall_diagnostics_keys": [
+        "candidate_pool_count",
+        "candidates",
+        "delivered_count",
+        "embedding_provider_status",
+        "pre_budget_count",
+        "provider_degradation_reason",
+        "query_probes",
+        "total_scanned"
+      ],
+      "provider_state": "provider_not_requested",
+      "provider_degradation_reason": null,
+      "gold": [
+        {
+          "object_id": "9298ddd6-4c0c-4609-b6a0-9774016e70d3",
+          "candidate_status": "delivered",
+          "final_rank": 5,
+          "pre_budget_rank": 5,
+          "plane_first_admitted": "lexical",
+          "plane_winning_admission": "temporal_proximity",
+          "source_planes": [
+            "lexical",
+            "evidence_anchor",
+            "temporal_proximity"
+          ],
+          "lexical_rank": 0.97,
+          "structural_score": 0.65,
+          "source_channels": [
+            "workspace_local",
+            "lexical",
+            "query_probe_lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "plane:lexical",
+            "plane:evidence_anchor",
+            "plane:temporal_proximity"
+          ],
+          "budget_drop_reason": null
+        }
+      ]
+    },
+    {
+      "question_id": "58bf7951",
+      "round_index": 3,
+      "gold_memory_ids": [
+        "9298ddd6-4c0c-4609-b6a0-9774016e70d3"
+      ],
+      "answer_session_ids": [
+        "answer_355c48bb"
+      ],
+      "delivered_results": [
+        {
+          "object_id": "1c0b07a6-78b1-4495-9690-2cc02244c5c3",
+          "rank": 1,
+          "relevance_score": 0.792
+        },
+        {
+          "object_id": "f8d2bb08-8e89-44d3-8652-23648ba61917",
+          "rank": 2,
+          "relevance_score": 0.7502813781288384
+        },
+        {
+          "object_id": "43f66b77-bcbe-465b-91c8-6799e0bf3bca",
+          "rank": 3,
+          "relevance_score": 0.647064
+        },
+        {
+          "object_id": "7c2b61c2-36db-43e3-b6e1-1886c30e3a11",
+          "rank": 4,
+          "relevance_score": 0.6457680000000001
+        },
+        {
+          "object_id": "9298ddd6-4c0c-4609-b6a0-9774016e70d3",
+          "rank": 5,
+          "relevance_score": 0.644472
+        },
+        {
+          "object_id": "7a76de72-4385-44de-b54c-e5a14a93b521",
+          "rank": 6,
+          "relevance_score": 0.6431760000000001
+        },
+        {
+          "object_id": "7cc5b2e7-bbe7-4ee8-8cb9-ed85a325e8a3",
+          "rank": 7,
+          "relevance_score": 0.64188
+        },
+        {
+          "object_id": "95da0d09-3c12-4520-9a19-f2e1f0c6848d",
+          "rank": 8,
+          "relevance_score": 0.64188
+        },
+        {
+          "object_id": "e130c11d-2aa7-466b-ab5a-cd7f1aeab645",
+          "rank": 9,
+          "relevance_score": 0.640584
+        },
+        {
+          "object_id": "2f3eb255-cb35-4422-adb9-f649d43ee1eb",
+          "rank": 10,
+          "relevance_score": 0.6379920000000001
+        }
+      ],
+      "hit_at_1": false,
+      "hit_at_5": true,
+      "hit_at_10": true,
+      "miss_classification": "hit_at_5",
+      "degradation_reason": null,
+      "recall_diagnostics_present": true,
+      "recall_diagnostics_keys": [
+        "candidate_pool_count",
+        "candidates",
+        "delivered_count",
+        "embedding_provider_status",
+        "pre_budget_count",
+        "provider_degradation_reason",
+        "query_probes",
+        "total_scanned"
+      ],
+      "provider_state": "provider_not_requested",
+      "provider_degradation_reason": null,
+      "gold": [
+        {
+          "object_id": "9298ddd6-4c0c-4609-b6a0-9774016e70d3",
+          "candidate_status": "delivered",
+          "final_rank": 5,
+          "pre_budget_rank": 5,
+          "plane_first_admitted": "lexical",
+          "plane_winning_admission": "temporal_proximity",
+          "source_planes": [
+            "lexical",
+            "evidence_anchor",
+            "temporal_proximity"
+          ],
+          "lexical_rank": 0.97,
+          "structural_score": 0.65,
+          "source_channels": [
+            "workspace_local",
+            "lexical",
+            "query_probe_lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "plane:lexical",
+            "plane:evidence_anchor",
+            "plane:temporal_proximity"
+          ],
+          "budget_drop_reason": null
+        }
+      ]
+    },
+    {
+      "question_id": "1e043500",
+      "round_index": 1,
+      "gold_memory_ids": [
+        "7a640e12-eede-407d-8596-9777c9ac3295"
+      ],
+      "answer_session_ids": [
+        "answer_3e012175"
+      ],
+      "delivered_results": [
+        {
+          "object_id": "7a640e12-eede-407d-8596-9777c9ac3295",
+          "rank": 1,
+          "relevance_score": 0.792
+        },
+        {
+          "object_id": "70e4c1ca-5c23-4479-8911-8f7d6325b8bc",
+          "rank": 2,
+          "relevance_score": 0.647064
+        },
+        {
+          "object_id": "df076d31-f1e4-4154-ba5a-be26eda5cc96",
+          "rank": 3,
+          "relevance_score": 0.6457680000000001
+        },
+        {
+          "object_id": "e23ac477-cccf-46ad-b24a-5ae8de3051cf",
+          "rank": 4,
+          "relevance_score": 0.644472
+        },
+        {
+          "object_id": "67a0eb43-1e09-4186-b536-090c65fb2271",
+          "rank": 5,
+          "relevance_score": 0.6431760000000001
+        },
+        {
+          "object_id": "623ac714-6fdf-4e4d-b2fc-e1571ec80cbf",
+          "rank": 6,
+          "relevance_score": 0.64188
+        },
+        {
+          "object_id": "70863e0e-f452-49d7-a967-d435e3d88512",
+          "rank": 7,
+          "relevance_score": 0.640584
+        },
+        {
+          "object_id": "7a91211e-44b2-4ff3-837b-3987eb0c898c",
+          "rank": 8,
+          "relevance_score": 0.6392880000000001
+        },
+        {
+          "object_id": "af7e2217-105e-4d19-b2ff-44f2e6a7cf4f",
+          "rank": 9,
+          "relevance_score": 0.6379920000000001
+        },
+        {
+          "object_id": "28ed6c86-9d01-4ac1-9a80-58d6eaaabd06",
+          "rank": 10,
+          "relevance_score": 0.636696
+        }
+      ],
+      "hit_at_1": true,
+      "hit_at_5": true,
+      "hit_at_10": true,
+      "miss_classification": "hit_at_5",
+      "degradation_reason": null,
+      "recall_diagnostics_present": true,
+      "recall_diagnostics_keys": [
+        "candidate_pool_count",
+        "candidates",
+        "delivered_count",
+        "embedding_provider_status",
+        "pre_budget_count",
+        "provider_degradation_reason",
+        "query_probes",
+        "total_scanned"
+      ],
+      "provider_state": "provider_not_requested",
+      "provider_degradation_reason": null,
+      "gold": [
+        {
+          "object_id": "7a640e12-eede-407d-8596-9777c9ac3295",
+          "candidate_status": "delivered",
+          "final_rank": 1,
+          "pre_budget_rank": 1,
+          "plane_first_admitted": "lexical",
+          "plane_winning_admission": "temporal_proximity",
+          "source_planes": [
+            "lexical",
+            "evidence_anchor",
+            "temporal_proximity"
+          ],
+          "lexical_rank": 1,
+          "structural_score": 1,
+          "source_channels": [
+            "workspace_local",
+            "lexical",
+            "query_probe_lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "plane:lexical",
+            "plane:evidence_anchor",
+            "plane:temporal_proximity"
+          ],
+          "budget_drop_reason": null
+        }
+      ]
+    },
+    {
+      "question_id": "1e043500",
+      "round_index": 2,
+      "gold_memory_ids": [
+        "7a640e12-eede-407d-8596-9777c9ac3295"
+      ],
+      "answer_session_ids": [
+        "answer_3e012175"
+      ],
+      "delivered_results": [
+        {
+          "object_id": "7a640e12-eede-407d-8596-9777c9ac3295",
+          "rank": 1,
+          "relevance_score": 0.792
+        },
+        {
+          "object_id": "70e4c1ca-5c23-4479-8911-8f7d6325b8bc",
+          "rank": 2,
+          "relevance_score": 0.647064
+        },
+        {
+          "object_id": "df076d31-f1e4-4154-ba5a-be26eda5cc96",
+          "rank": 3,
+          "relevance_score": 0.6457680000000001
+        },
+        {
+          "object_id": "e23ac477-cccf-46ad-b24a-5ae8de3051cf",
+          "rank": 4,
+          "relevance_score": 0.644472
+        },
+        {
+          "object_id": "67a0eb43-1e09-4186-b536-090c65fb2271",
+          "rank": 5,
+          "relevance_score": 0.6431760000000001
+        },
+        {
+          "object_id": "623ac714-6fdf-4e4d-b2fc-e1571ec80cbf",
+          "rank": 6,
+          "relevance_score": 0.64188
+        },
+        {
+          "object_id": "70863e0e-f452-49d7-a967-d435e3d88512",
+          "rank": 7,
+          "relevance_score": 0.640584
+        },
+        {
+          "object_id": "7a91211e-44b2-4ff3-837b-3987eb0c898c",
+          "rank": 8,
+          "relevance_score": 0.6392880000000001
+        },
+        {
+          "object_id": "af7e2217-105e-4d19-b2ff-44f2e6a7cf4f",
+          "rank": 9,
+          "relevance_score": 0.6379920000000001
+        },
+        {
+          "object_id": "28ed6c86-9d01-4ac1-9a80-58d6eaaabd06",
+          "rank": 10,
+          "relevance_score": 0.636696
+        }
+      ],
+      "hit_at_1": true,
+      "hit_at_5": true,
+      "hit_at_10": true,
+      "miss_classification": "hit_at_5",
+      "degradation_reason": null,
+      "recall_diagnostics_present": true,
+      "recall_diagnostics_keys": [
+        "candidate_pool_count",
+        "candidates",
+        "delivered_count",
+        "embedding_provider_status",
+        "pre_budget_count",
+        "provider_degradation_reason",
+        "query_probes",
+        "total_scanned"
+      ],
+      "provider_state": "provider_not_requested",
+      "provider_degradation_reason": null,
+      "gold": [
+        {
+          "object_id": "7a640e12-eede-407d-8596-9777c9ac3295",
+          "candidate_status": "delivered",
+          "final_rank": 1,
+          "pre_budget_rank": 1,
+          "plane_first_admitted": "lexical",
+          "plane_winning_admission": "temporal_proximity",
+          "source_planes": [
+            "lexical",
+            "evidence_anchor",
+            "temporal_proximity"
+          ],
+          "lexical_rank": 1,
+          "structural_score": 1,
+          "source_channels": [
+            "workspace_local",
+            "lexical",
+            "query_probe_lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "plane:lexical",
+            "plane:evidence_anchor",
+            "plane:temporal_proximity"
+          ],
+          "budget_drop_reason": null
+        }
+      ]
+    },
+    {
+      "question_id": "1e043500",
+      "round_index": 3,
+      "gold_memory_ids": [
+        "7a640e12-eede-407d-8596-9777c9ac3295"
+      ],
+      "answer_session_ids": [
+        "answer_3e012175"
+      ],
+      "delivered_results": [
+        {
+          "object_id": "7a640e12-eede-407d-8596-9777c9ac3295",
+          "rank": 1,
+          "relevance_score": 0.792
+        },
+        {
+          "object_id": "70e4c1ca-5c23-4479-8911-8f7d6325b8bc",
+          "rank": 2,
+          "relevance_score": 0.647064
+        },
+        {
+          "object_id": "df076d31-f1e4-4154-ba5a-be26eda5cc96",
+          "rank": 3,
+          "relevance_score": 0.6457680000000001
+        },
+        {
+          "object_id": "e23ac477-cccf-46ad-b24a-5ae8de3051cf",
+          "rank": 4,
+          "relevance_score": 0.644472
+        },
+        {
+          "object_id": "67a0eb43-1e09-4186-b536-090c65fb2271",
+          "rank": 5,
+          "relevance_score": 0.6431760000000001
+        },
+        {
+          "object_id": "623ac714-6fdf-4e4d-b2fc-e1571ec80cbf",
+          "rank": 6,
+          "relevance_score": 0.64188
+        },
+        {
+          "object_id": "70863e0e-f452-49d7-a967-d435e3d88512",
+          "rank": 7,
+          "relevance_score": 0.640584
+        },
+        {
+          "object_id": "7a91211e-44b2-4ff3-837b-3987eb0c898c",
+          "rank": 8,
+          "relevance_score": 0.6392880000000001
+        },
+        {
+          "object_id": "af7e2217-105e-4d19-b2ff-44f2e6a7cf4f",
+          "rank": 9,
+          "relevance_score": 0.6379920000000001
+        },
+        {
+          "object_id": "28ed6c86-9d01-4ac1-9a80-58d6eaaabd06",
+          "rank": 10,
+          "relevance_score": 0.636696
+        }
+      ],
+      "hit_at_1": true,
+      "hit_at_5": true,
+      "hit_at_10": true,
+      "miss_classification": "hit_at_5",
+      "degradation_reason": null,
+      "recall_diagnostics_present": true,
+      "recall_diagnostics_keys": [
+        "candidate_pool_count",
+        "candidates",
+        "delivered_count",
+        "embedding_provider_status",
+        "pre_budget_count",
+        "provider_degradation_reason",
+        "query_probes",
+        "total_scanned"
+      ],
+      "provider_state": "provider_not_requested",
+      "provider_degradation_reason": null,
+      "gold": [
+        {
+          "object_id": "7a640e12-eede-407d-8596-9777c9ac3295",
+          "candidate_status": "delivered",
+          "final_rank": 1,
+          "pre_budget_rank": 1,
+          "plane_first_admitted": "lexical",
+          "plane_winning_admission": "temporal_proximity",
+          "source_planes": [
+            "lexical",
+            "evidence_anchor",
+            "temporal_proximity"
+          ],
+          "lexical_rank": 1,
+          "structural_score": 1,
+          "source_channels": [
+            "workspace_local",
+            "lexical",
+            "query_probe_lexical",
+            "evidence_anchor",
+            "temporal_proximity",
+            "plane:lexical",
+            "plane:evidence_anchor",
+            "plane:temporal_proximity"
+          ],
+          "budget_drop_reason": null
+        }
+      ]
+    }
+  ]
+}

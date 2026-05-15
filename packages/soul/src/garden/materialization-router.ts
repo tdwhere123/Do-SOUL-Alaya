@@ -281,13 +281,15 @@ export class MaterializationRouter {
         signal,
         MemoryGraphEdgeType.DERIVES_FROM
       );
-      // invariant: caller-explicit ontology hints fire here. The signal
-      // can carry typed memory-id arrays in raw_payload to anchor an
-      // existing edge type. v0.3.8 wires four: supersedes (new replaces
-      // old), exception_to (new is exception of old), contradicts (new
-      // contradicts old), incompatible_with (new and old are cross-
-      // dimension/scope-incompatible). All four are read by recall's
-      // graph_support scoring and graph_expansion plane.
+      // invariant: caller-explicit ontology hints land here. Each
+      // raw_payload.*_refs key maps 1:1 to a MemoryGraphEdgeType:
+      //   supersedes_refs        → SUPERSEDES (new replaces old)
+      //   exception_to_refs      → EXCEPTION_TO (new is exception of old)
+      //   contradicts_refs       → CONTRADICTS (new contradicts old)
+      //   incompatible_with_refs → INCOMPATIBLE_WITH (cross-dimension)
+      // see also: createEdgesFromRawPayloadRefs
+      // see also: ConflictDetectionService — rule-based + LLM producer
+      //   for contradicts / incompatible_with on top of these hints.
       await this.createEdgesFromRawPayloadRefs(
         memory.object_id,
         signal,
@@ -789,19 +791,20 @@ function ruleDistillFromRaw(raw: string): string {
   if (normalized.length === 0) {
     return "";
   }
-  if (normalized.length <= DISTILLED_FACT_MAX_CHARS) {
-    return normalized;
-  }
   const sentenceRegex = /[^.!?;。！？；]+[.!?;。！？；]+/gu;
   const sentences = normalized.match(sentenceRegex) ?? [];
-  if (sentences.length > 0) {
+  // invariant: always take at most DISTILLED_FACT_MAX_SENTENCES sentences
+  // even when the raw fits inside the char cap. Distilled fact is the
+  // *first claim* of a turn, not the entire turn.
+  if (sentences.length >= DISTILLED_FACT_MAX_SENTENCES) {
     const head = sentences.slice(0, DISTILLED_FACT_MAX_SENTENCES).join("").trim();
     if (head.length > 0 && head.length <= DISTILLED_FACT_MAX_CHARS) {
       return head;
     }
-    if (head.length > DISTILLED_FACT_MAX_CHARS) {
-      return `${head.slice(0, DISTILLED_FACT_MAX_CHARS - 3)}...`;
-    }
+    return `${head.slice(0, DISTILLED_FACT_MAX_CHARS - 3)}...`;
+  }
+  if (normalized.length <= DISTILLED_FACT_MAX_CHARS) {
+    return normalized;
   }
   return `${normalized.slice(0, DISTILLED_FACT_MAX_CHARS - 3)}...`;
 }

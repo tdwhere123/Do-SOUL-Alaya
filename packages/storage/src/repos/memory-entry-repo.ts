@@ -444,8 +444,15 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
       return Object.freeze([]);
     }
     const cappedIds = unique.slice(0, 256);
-    const likePatterns = cappedIds.map(() => `evidence_refs LIKE ?`);
-    const likeValues = cappedIds.map((id) => `%${id.replace(/[%_]/g, "")}%`);
+    // invariant: evidence_refs is stored as a JSON array literal (e.g.
+    // ["uuid-a","uuid-b"]). We match each candidate id as a JSON-quoted
+    // substring so a partial-match on a non-UUID id cannot collide with
+    // an unrelated row. ESCAPE keeps LIKE wildcards (`%` / `_`) literal
+    // when an id happens to contain them.
+    const likePatterns = cappedIds.map(() => `evidence_refs LIKE ? ESCAPE '\\'`);
+    const likeValues = cappedIds.map(
+      (id) => `%"${id.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")}"%`
+    );
     try {
       const rows = this.db.connection
         .prepare(

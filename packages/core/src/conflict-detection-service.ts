@@ -10,6 +10,18 @@ import {
 // raw_payload.*_refs). Runs at memory materialization time. Detection
 // failures must not break a successful memory creation; the caller
 // catches and warns.
+// invariant: scope = HOT tier only. findByDimension on memoryRepo reads
+// the hot tier index; cold/warm-tier memories do not participate in
+// rule-based conflict detection. New memories never raise contradicts
+// against tombstoned/archived peers — design intent because conflict
+// detection costs O(workspace_size) on every materialization and only
+// the live working set is recall-eligible.
+// invariant: LLM fallback is bypassed when rule-based detection already
+// produced at least one contradicts edge. The LLM run targets the
+// ambiguous-neighborhood case where rule thresholds did not trip; it
+// is not an "add a second opinion on top" path. Operators who want
+// LLM-as-primary should disable the rule path (currently not exposed;
+// tracked for v0.3.9 if needed).
 
 export interface ConflictDetectionMemoryRepoPort {
   findByDimension(

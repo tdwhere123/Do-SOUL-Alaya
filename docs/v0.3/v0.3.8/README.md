@@ -55,6 +55,29 @@ Reclaims the ontology mid-layer that was a schema-only contract:
 - Storage migration `068` is the only new SQL; all other ontology
   storage already existed.
 
+## Operator-facing env vars
+
+- `ALAYA_CONFLICT_DETECTION_ENABLED` — `1` / `true` to opt in to the
+  rule-based + (optional) LLM `ConflictDetectionService`. Default: off.
+  Off-state cost is zero (the service is not instantiated); on-state
+  cost is O(workspace_size) per memory materialization.
+- `ALAYA_CONFLICT_LLM_PROVIDER_URL` — openai-compatible base URL.
+  Required to enable LLM pair classifier inside
+  ConflictDetectionService.
+- `ALAYA_CONFLICT_LLM_API_KEY` — bearer token for the LLM provider.
+  Required to enable LLM pair classifier.
+- `ALAYA_CONFLICT_LLM_MODEL` — model id. Default `gpt-5.4-mini`.
+- `ALAYA_CONFLICT_LLM_TIMEOUT_MS` — request timeout. Default `8000`.
+
+When the LLM env vars are not set, conflict detection falls back to
+rule-based only (workspace tag-overlap + token-overlap Jaccard
+thresholds). When `ALAYA_CONFLICT_DETECTION_ENABLED` is off, neither
+the rule path nor the LLM path runs and no contradicts /
+incompatible_with edges are produced by the service. Caller-explicit
+edge hints via `raw_payload.{supersedes,exception_to,contradicts,
+incompatible_with}_refs` are unaffected — they always run in
+materialization-router.
+
 ## Implementation pointers
 
 - Distillation: `packages/soul/src/garden/materialization-router.ts`

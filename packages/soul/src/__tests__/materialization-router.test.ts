@@ -486,6 +486,131 @@ describe("MaterializationRouter", () => {
       error: "memory repo down"
     });
   });
+
+  it("uses caller-supplied distilled_fact verbatim when present", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    await router.materializeSignal(
+      createSignal({
+        raw_payload: {
+          excerpt: "Long raw turn that mentions many things across multiple paragraphs.",
+          distilled_fact: "User prefers concise replies."
+        }
+      })
+    );
+
+    expect(deps.memoryService.create).toHaveBeenCalledTimes(1);
+    const memoryInput = deps.memoryService.create.mock.calls[0][0];
+    expect(memoryInput.content).toBe("User prefers concise replies.");
+  });
+
+  it("falls back to rule-based distillation when distilled_fact missing", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    const longRaw =
+      "First sentence states the fact. Second sentence adds context. Third sentence is decoration that should be dropped from the distilled memory because the rule keeps only the first two sentences.";
+    await router.materializeSignal(
+      createSignal({
+        raw_payload: { excerpt: longRaw }
+      })
+    );
+
+    const memoryInput = deps.memoryService.create.mock.calls[0][0];
+    expect(memoryInput.content).toContain("First sentence states the fact.");
+    expect(memoryInput.content).toContain("Second sentence adds context.");
+    expect(memoryInput.content).not.toContain("Third sentence");
+  });
+
+  it("handles CJK sentence terminators in rule-based distillation", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    const cjkRaw =
+      "用户偏好简洁的回复。同时希望保留中文表达。第三句应当被去掉因为它超出前两句的边界。剩余内容也不应进入。";
+    await router.materializeSignal(
+      createSignal({
+        raw_payload: { excerpt: cjkRaw }
+      })
+    );
+
+    const memoryInput = deps.memoryService.create.mock.calls[0][0];
+    expect(memoryInput.content).toContain("用户偏好简洁的回复");
+    expect(memoryInput.content).toContain("同时希望保留中文表达");
+    expect(memoryInput.content).not.toContain("第三句");
+  });
+
+  it("caps distilled fact at 280 chars even when caller supplies a long string", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    const longDistilled = "a".repeat(500);
+    await router.materializeSignal(
+      createSignal({
+        raw_payload: { excerpt: "raw", distilled_fact: longDistilled }
+      })
+    );
+
+    const memoryInput = deps.memoryService.create.mock.calls[0][0];
+    expect(memoryInput.content.length).toBeLessThanOrEqual(280);
+    expect(memoryInput.content.endsWith("...")).toBe(true);
+  });
+
+  it("creates supersedes / exception_to / contradicts / incompatible_with edges from raw_payload refs", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    await router.materializeSignal(
+      createSignal({
+        raw_payload: {
+          excerpt: "Replaces older preference.",
+          supersedes_refs: ["mem-old-1"],
+          exception_to_refs: ["mem-rule-2"],
+          contradicts_refs: ["mem-conflict-3"],
+          incompatible_with_refs: ["mem-incompat-4"]
+        }
+      })
+    );
+
+    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args: unknown[]) => args[0]);
+    const edgeTypes = calls.map((edge: { edgeType: string }) => edge.edgeType);
+    expect(edgeTypes).toEqual(
+      expect.arrayContaining(["supersedes", "exception_to", "contradicts", "incompatible_with"])
+    );
+    const supersedesEdge = calls.find(
+      (edge: { edgeType: string; targetMemoryId: string }) => edge.edgeType === "supersedes"
+    );
+    expect(supersedesEdge).toMatchObject({
+      sourceMemoryId: "memory-1",
+      targetMemoryId: "mem-old-1"
+    });
+  });
+
+  it("invokes conflictDetectionPort with the new memory facts when wired", async () => {
+    const deps = createDeps();
+    const detectAndLinkConflicts = vi.fn(async () => undefined);
+    const router = new MaterializationRouter({
+      ...deps,
+      conflictDetectionPort: { detectAndLinkConflicts }
+    });
+
+    await router.materializeSignal(createSignal());
+
+    expect(detectAndLinkConflicts).toHaveBeenCalledTimes(1);
+    const call = detectAndLinkConflicts.mock.calls[0][0];
+    expect(call.newMemoryId).toBe("memory-1");
+    expect(call.workspaceId).toBe("workspace-1");
+  });
+
+  it("does not call conflictDetectionPort when port is absent", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    const result = await router.materializeSignal(createSignal());
+
+    expect(result.success).toBe(true);
+  });
 });
 
 function createRouter() {
