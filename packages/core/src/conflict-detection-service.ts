@@ -1,0 +1,258 @@
+import {
+  MemoryGraphEdgeType,
+  type MemoryEntry,
+  type MemoryGraphEdgeTypeValue
+} from "@do-soul/alaya-protocol";
+
+// invariant: ConflictDetectionService is the producer of the staged
+// MemoryGraphEdge types contradicts / incompatible_with (the supersedes
+// and exception_to writers live in materialization-router via
+// raw_payload.*_refs). Runs at memory materialization time. Detection
+// failures must not break a successful memory creation; the caller
+// catches and warns.
+
+export interface ConflictDetectionMemoryRepoPort {
+  findByDimension(
+    workspaceId: string,
+    dimension: MemoryEntry["dimension"]
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
+  findByWorkspaceId(
+    workspaceId: string
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
+}
+
+export interface ConflictDetectionGraphPort {
+  createEdge(params: {
+    readonly sourceMemoryId: string;
+    readonly targetMemoryId: string;
+    readonly edgeType: MemoryGraphEdgeTypeValue;
+    readonly workspaceId: string;
+    readonly runId?: string | null;
+  }): Promise<void>;
+}
+
+export interface ConflictDetectionLlmPort {
+  classifyPair(input: {
+    readonly newContent: string;
+    readonly existingContent: string;
+    readonly dimension: string;
+    readonly scopeClass: string;
+  }): Promise<"contradicts" | "incompatible_with" | "none">;
+}
+
+export interface ConflictDetectionServiceDeps {
+  readonly memoryRepo: ConflictDetectionMemoryRepoPort;
+  readonly graphEdgePort: ConflictDetectionGraphPort;
+  readonly llmPort?: ConflictDetectionLlmPort;
+  readonly warn?: (message: string, meta: Record<string, unknown>) => void;
+  readonly llmMaxPairsPerNewMemory?: number;
+}
+
+// Rule-based comparator constants. Values tuned for short distilled facts
+// (≤ 280 chars per buildDistilledFact). High tag overlap + low content
+// overlap = contradicts. Cross-scope or cross-dimension classification
+// is reported by the caller before invoking; this service refines on
+// content evidence within the same dimension.
+const TAG_OVERLAP_CONTRADICTS_THRESHOLD = 0.5;
+const TOKEN_JACCARD_CONTRADICTS_MAX = 0.35;
+const DEFAULT_LLM_MAX_PAIRS = 4;
+
+export class ConflictDetectionService {
+  public constructor(private readonly deps: ConflictDetectionServiceDeps) {}
+
+  public async detectAndLinkConflicts(params: {
+    readonly newMemoryId: string;
+    readonly newMemoryDimension: string;
+    readonly newMemoryScopeClass: string;
+    readonly newMemoryContent: string;
+    readonly newMemoryDomainTags: readonly string[];
+    readonly workspaceId: string;
+    readonly runId: string;
+  }): Promise<void> {
+    const sameDimension = await this.deps.memoryRepo
+      .findByDimension(params.workspaceId, params.newMemoryDimension as MemoryEntry["dimension"])
+      .catch((err) => {
+        this.warn("memoryRepo.findByDimension failed", {
+          workspace_id: params.workspaceId,
+          error: errorMessage(err)
+        });
+        return [] as readonly Readonly<MemoryEntry>[];
+      });
+    const allWorkspace = await this.deps.memoryRepo
+      .findByWorkspaceId(params.workspaceId)
+      .catch((err) => {
+        this.warn("memoryRepo.findByWorkspaceId failed", {
+          workspace_id: params.workspaceId,
+          error: errorMessage(err)
+        });
+        return [] as readonly Readonly<MemoryEntry>[];
+      });
+
+    const newTokens = tokenize(params.newMemoryContent);
+    const newTagSet = new Set(params.newMemoryDomainTags);
+
+    const contradictsCandidates: Array<Readonly<MemoryEntry>> = [];
+
+    for (const existing of sameDimension) {
+      if (existing.object_id === params.newMemoryId) {
+        continue;
+      }
+      if (existing.scope_class !== params.newMemoryScopeClass) {
+        continue;
+      }
+      const existingTagSet = new Set(existing.domain_tags);
+      const tagOverlap = jaccardIndex(newTagSet, existingTagSet);
+      if (tagOverlap < TAG_OVERLAP_CONTRADICTS_THRESHOLD) {
+        continue;
+      }
+      const existingTokens = tokenize(existing.content);
+      const tokenOverlap = jaccardIndex(newTokens, existingTokens);
+      if (tokenOverlap >= TOKEN_JACCARD_CONTRADICTS_MAX) {
+        continue;
+      }
+      contradictsCandidates.push(existing);
+    }
+
+    for (const existing of contradictsCandidates) {
+      await this.writeEdge(
+        params.newMemoryId,
+        existing.object_id,
+        MemoryGraphEdgeType.CONTRADICTS,
+        params.workspaceId,
+        params.runId
+      );
+    }
+
+    for (const existing of allWorkspace) {
+      if (existing.object_id === params.newMemoryId) {
+        continue;
+      }
+      const dimMismatch = existing.dimension !== params.newMemoryDimension;
+      const scopeMismatch = existing.scope_class !== params.newMemoryScopeClass;
+      if (!dimMismatch && !scopeMismatch) {
+        continue;
+      }
+      const existingTagSet = new Set(existing.domain_tags);
+      const tagOverlap = jaccardIndex(newTagSet, existingTagSet);
+      if (tagOverlap < TAG_OVERLAP_CONTRADICTS_THRESHOLD) {
+        continue;
+      }
+      await this.writeEdge(
+        params.newMemoryId,
+        existing.object_id,
+        MemoryGraphEdgeType.INCOMPATIBLE_WITH,
+        params.workspaceId,
+        params.runId
+      );
+    }
+
+    if (this.deps.llmPort !== undefined && contradictsCandidates.length === 0) {
+      const maxPairs = this.deps.llmMaxPairsPerNewMemory ?? DEFAULT_LLM_MAX_PAIRS;
+      const ambiguousNeighbors = sameDimension
+        .filter((existing) => existing.object_id !== params.newMemoryId)
+        .filter((existing) => existing.scope_class === params.newMemoryScopeClass)
+        .filter((existing) => {
+          const existingTagSet = new Set(existing.domain_tags);
+          const overlap = jaccardIndex(newTagSet, existingTagSet);
+          return overlap >= TAG_OVERLAP_CONTRADICTS_THRESHOLD * 0.5;
+        })
+        .slice(0, maxPairs);
+      for (const candidate of ambiguousNeighbors) {
+        try {
+          const verdict = await this.deps.llmPort.classifyPair({
+            newContent: params.newMemoryContent,
+            existingContent: candidate.content,
+            dimension: params.newMemoryDimension,
+            scopeClass: params.newMemoryScopeClass
+          });
+          if (verdict === "contradicts") {
+            await this.writeEdge(
+              params.newMemoryId,
+              candidate.object_id,
+              MemoryGraphEdgeType.CONTRADICTS,
+              params.workspaceId,
+              params.runId
+            );
+          } else if (verdict === "incompatible_with") {
+            await this.writeEdge(
+              params.newMemoryId,
+              candidate.object_id,
+              MemoryGraphEdgeType.INCOMPATIBLE_WITH,
+              params.workspaceId,
+              params.runId
+            );
+          }
+        } catch (err) {
+          this.warn("conflict detection llm pair classify failed", {
+            new_memory_id: params.newMemoryId,
+            existing_memory_id: candidate.object_id,
+            error: errorMessage(err)
+          });
+        }
+      }
+    }
+  }
+
+  private async writeEdge(
+    sourceMemoryId: string,
+    targetMemoryId: string,
+    edgeType: MemoryGraphEdgeTypeValue,
+    workspaceId: string,
+    runId: string
+  ): Promise<void> {
+    try {
+      await this.deps.graphEdgePort.createEdge({
+        sourceMemoryId,
+        targetMemoryId,
+        edgeType,
+        workspaceId,
+        runId
+      });
+    } catch (err) {
+      this.warn("conflict detection edge create failed", {
+        source_memory_id: sourceMemoryId,
+        target_memory_id: targetMemoryId,
+        edge_type: edgeType,
+        workspace_id: workspaceId,
+        error: errorMessage(err)
+      });
+    }
+  }
+
+  private warn(message: string, meta: Record<string, unknown>): void {
+    if (this.deps.warn !== undefined) {
+      this.deps.warn(message, meta);
+    }
+  }
+}
+
+function tokenize(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .normalize("NFKC")
+      .split(/[^\p{L}\p{N}_]+/u)
+      .filter((token) => token.length >= 2)
+  );
+}
+
+function jaccardIndex(left: ReadonlySet<string>, right: ReadonlySet<string>): number {
+  if (left.size === 0 && right.size === 0) {
+    return 0;
+  }
+  let intersection = 0;
+  for (const value of left) {
+    if (right.has(value)) {
+      intersection += 1;
+    }
+  }
+  const union = left.size + right.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}

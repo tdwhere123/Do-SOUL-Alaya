@@ -835,6 +835,12 @@ vi.mock("@do-soul/alaya-core", () => {
       };
     }),
     ClaimService: hoisted.claimServiceCtor,
+    ConflictDetectionService: makeClass({
+      detectAndLinkConflicts: vi.fn(async () => undefined)
+    }),
+    PathRelationProposalService: makeClass({
+      onCoUsage: vi.fn(async () => undefined)
+    }),
     ConstitutionalFragmentService: makeClass({
       ensureRegistered: vi.fn(async (fragment: unknown) => fragment),
       listForWorkspace: vi.fn(async () => [])

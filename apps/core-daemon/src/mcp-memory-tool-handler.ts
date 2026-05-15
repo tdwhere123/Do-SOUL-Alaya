@@ -183,6 +183,16 @@ export interface McpMemoryToolHandlerDependencies {
       readonly excerpt: string | null;
     }> | null>;
   };
+  // PathRelation propose hook. When report_context_usage produces
+  // RECALLS edges between used memories, the service tracks co-usage
+  // counts; on the Nth co-usage of a pair, it writes a new PathRelation
+  // entry so PathPlasticityService has a relation to evolve.
+  readonly pathRelationProposalService?: {
+    onCoUsage(
+      usedObjectIds: readonly string[],
+      workspaceId: string
+    ): Promise<void>;
+  };
   readonly signalService: {
     receiveSignal(signal: CandidateMemorySignal): Promise<Readonly<{
       readonly signal: Readonly<CandidateMemorySignal>;
@@ -916,6 +926,19 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       linkedDelivery?.workspace_id ?? context.workspaceId,
       linkedDelivery?.run_id ?? context.runId ?? null
     );
+    if (deps.pathRelationProposalService !== undefined && usedObjectIds.length >= 2) {
+      try {
+        await deps.pathRelationProposalService.onCoUsage(
+          usedObjectIds,
+          linkedDelivery?.workspace_id ?? context.workspaceId
+        );
+      } catch (err) {
+        warn("path relation propose failed", {
+          workspace_id: linkedDelivery?.workspace_id ?? context.workspaceId,
+          error: err instanceof Error ? err.message : String(err)
+        });
+      }
+    }
     enqueuePostTurnExtractTask(request, context, linkedDelivery);
     await emitContextUsageReportedTelemetry({
       deliveryId: request.delivery_id,

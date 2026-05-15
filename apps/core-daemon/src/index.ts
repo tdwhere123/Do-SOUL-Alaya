@@ -22,9 +22,12 @@ import {
   GreenService,
   HealthJournalService,
   MemoryService,
+  ConflictDetectionService,
   NarrativeBudgetService,
+  PathRelationProposalService,
   ProjectMappingService,
   ProposalService,
+  type ConflictDetectionLlmPort,
   RecallService,
   RunService,
   SessionOverrideService,
@@ -534,12 +537,36 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       await graphExploreService.addEdge(params);
     }
   };
+  const conflictDetectionService = new ConflictDetectionService({
+    memoryRepo: {
+      findByDimension: async (workspaceId, dimension) =>
+        await memoryEntryRepo.findByDimension(workspaceId, dimension),
+      findByWorkspaceId: async (workspaceId) =>
+        await memoryEntryRepo.findByWorkspaceId(workspaceId)
+    },
+    graphEdgePort,
+    ...(createConflictDetectionLlmPort() === null
+      ? {}
+      : { llmPort: createConflictDetectionLlmPort()! }),
+    warn: warnLogger.warn
+  });
+  const pathRelationProposalService = new PathRelationProposalService({
+    repo: {
+      create: async (relation) => pathRelationRepo.create(relation),
+      findByAnchorMemoryId: async (memoryId, workspaceId) =>
+        await pathRelationRepo.findByAnchors(workspaceId, [
+          { kind: "object", object_id: memoryId }
+        ])
+    },
+    warn: warnLogger.warn
+  });
   const materializationRouter = new MaterializationRouter({
     evidenceService,
     memoryService,
     synthesisService,
     claimService,
     graphEdgePort,
+    conflictDetectionPort: conflictDetectionService,
     handoffGapHandler: sqliteHandoffGapAdapter
   });
   const signalService = new SignalService({
@@ -745,6 +772,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     memoryService,
     memoryEntryRepo,
     evidenceService,
+    pathRelationProposalService,
     signalService,
     graphExploreService,
     graphEdgePort,
@@ -965,6 +993,86 @@ function formatGardenSecretRefError(error: ResolveSecretError): string {
     case "keychain_entry_not_found":
       return `Garden compute secret_ref ${error.ref} keychain lookup failed: ${error.reason}`;
   }
+}
+
+// invariant: optional LLM-backed pair classifier for ConflictDetectionService.
+// Returns null when env is not configured; the service then falls back to
+// rule-based detection only. Env keys mirror the embedding provider style
+// so operators can flip both on/off the same way.
+//   ALAYA_CONFLICT_LLM_PROVIDER_URL  openai-compatible base URL
+//   ALAYA_CONFLICT_LLM_MODEL         model id (default gpt-5.4-mini)
+//   ALAYA_CONFLICT_LLM_API_KEY       bearer token
+//   ALAYA_CONFLICT_LLM_TIMEOUT_MS    request timeout (default 8000)
+function createConflictDetectionLlmPort(): ConflictDetectionLlmPort | null {
+  const baseUrl = process.env.ALAYA_CONFLICT_LLM_PROVIDER_URL?.trim();
+  const apiKey = process.env.ALAYA_CONFLICT_LLM_API_KEY?.trim();
+  if (
+    baseUrl === undefined ||
+    baseUrl.length === 0 ||
+    apiKey === undefined ||
+    apiKey.length === 0
+  ) {
+    return null;
+  }
+  const model = process.env.ALAYA_CONFLICT_LLM_MODEL?.trim() ?? "gpt-5.4-mini";
+  const timeoutMs = Number.parseInt(
+    process.env.ALAYA_CONFLICT_LLM_TIMEOUT_MS ?? "8000",
+    10
+  );
+
+  return {
+    classifyPair: async ({ newContent, existingContent, dimension, scopeClass }) => {
+      const prompt = [
+        `You are a deterministic memory ontology classifier for Alaya.`,
+        `Two memory entries share dimension="${dimension}" and scope="${scopeClass}".`,
+        `Decide their relationship: "contradicts" | "incompatible_with" | "none".`,
+        ``,
+        `MEMORY_A (new):`,
+        newContent,
+        ``,
+        `MEMORY_B (existing):`,
+        existingContent,
+        ``,
+        `Reply with one word only: contradicts, incompatible_with, or none.`
+      ].join("\n");
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              { role: "system", content: "Reply with exactly one word." },
+              { role: "user", content: prompt }
+            ],
+            temperature: 0,
+            max_tokens: 8
+          }),
+          signal: controller.signal
+        });
+        if (!response.ok) {
+          return "none";
+        }
+        const data = (await response.json()) as {
+          readonly choices?: ReadonlyArray<{ readonly message?: { readonly content?: string } }>;
+        };
+        const text = data.choices?.[0]?.message?.content?.trim().toLowerCase() ?? "";
+        if (text.startsWith("contradicts")) return "contradicts";
+        if (text.startsWith("incompatible_with")) return "incompatible_with";
+        return "none";
+      } catch {
+        return "none";
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  };
 }
 
 export async function startDaemon(options: AlayaDaemonListenOptions = {}): Promise<AlayaDaemonServer> {

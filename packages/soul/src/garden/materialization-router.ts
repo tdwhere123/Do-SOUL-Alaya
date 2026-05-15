@@ -132,6 +132,18 @@ export interface GraphEdgeCreationPort {
   }): Promise<void>;
 }
 
+export interface ConflictDetectionPort {
+  detectAndLinkConflicts(params: {
+    readonly newMemoryId: string;
+    readonly newMemoryDimension: string;
+    readonly newMemoryScopeClass: string;
+    readonly newMemoryContent: string;
+    readonly newMemoryDomainTags: readonly string[];
+    readonly workspaceId: string;
+    readonly runId: string;
+  }): Promise<void>;
+}
+
 export interface MaterializationRouterDeps {
   readonly evidenceService: EvidenceMaterializationPort;
   readonly memoryService: MemoryMaterializationPort;
@@ -139,6 +151,7 @@ export interface MaterializationRouterDeps {
   readonly claimService: ClaimMaterializationPort;
   readonly handoffGapHandler: HandoffGapHandler;
   readonly graphEdgePort?: GraphEdgeCreationPort;
+  readonly conflictDetectionPort?: ConflictDetectionPort;
 }
 
 export class MaterializationRouter {
@@ -268,6 +281,60 @@ export class MaterializationRouter {
         signal,
         MemoryGraphEdgeType.DERIVES_FROM
       );
+      // invariant: caller-explicit ontology hints fire here. The signal
+      // can carry typed memory-id arrays in raw_payload to anchor an
+      // existing edge type. v0.3.8 wires four: supersedes (new replaces
+      // old), exception_to (new is exception of old), contradicts (new
+      // contradicts old), incompatible_with (new and old are cross-
+      // dimension/scope-incompatible). All four are read by recall's
+      // graph_support scoring and graph_expansion plane.
+      await this.createEdgesFromRawPayloadRefs(
+        memory.object_id,
+        signal,
+        "supersedes_refs",
+        MemoryGraphEdgeType.SUPERSEDES
+      );
+      await this.createEdgesFromRawPayloadRefs(
+        memory.object_id,
+        signal,
+        "exception_to_refs",
+        MemoryGraphEdgeType.EXCEPTION_TO
+      );
+      await this.createEdgesFromRawPayloadRefs(
+        memory.object_id,
+        signal,
+        "contradicts_refs",
+        MemoryGraphEdgeType.CONTRADICTS
+      );
+      await this.createEdgesFromRawPayloadRefs(
+        memory.object_id,
+        signal,
+        "incompatible_with_refs",
+        MemoryGraphEdgeType.INCOMPATIBLE_WITH
+      );
+      // ConflictDetectionService: rule-based + optional LLM scan for
+      // memories in the same workspace that contradict / are incompatible
+      // with the freshly materialized one. Edges created here complement
+      // the caller-explicit hints above.
+      if (this.dependencies.conflictDetectionPort !== undefined) {
+        try {
+          await this.dependencies.conflictDetectionPort.detectAndLinkConflicts({
+            newMemoryId: memory.object_id,
+            newMemoryDimension: toMemoryDimension(signal.object_kind),
+            newMemoryScopeClass: toScopeClass(signal.scope_hint),
+            newMemoryContent: buildDistilledFact(signal),
+            newMemoryDomainTags: signal.domain_tags,
+            workspaceId: signal.workspace_id,
+            runId: signal.run_id
+          });
+        } catch (err) {
+          console.warn("materialization-router: conflict detection failed", {
+            memoryId: memory.object_id,
+            signalId: signal.signal_id,
+            error: err instanceof Error ? err.message : String(err)
+          });
+        }
+      }
 
       return {
         signal_id: signal.signal_id,
@@ -390,11 +457,28 @@ export class MaterializationRouter {
     signal: CandidateMemorySignal,
     edgeType: MemoryGraphEdgeTypeValue
   ): Promise<void> {
+    await this.createEdgesFromRawPayloadRefs(
+      newObjectId,
+      signal,
+      "source_memory_refs",
+      edgeType
+    );
+  }
+
+  // see also: createSourceMemoryEdges — same shape but variable payload key
+  // and edge type. Used by materializeMemoryAndClaim to honor caller-supplied
+  // supersedes / exception_to / contradicts / incompatible_with hints.
+  private async createEdgesFromRawPayloadRefs(
+    newObjectId: string,
+    signal: CandidateMemorySignal,
+    rawPayloadKey: string,
+    edgeType: MemoryGraphEdgeTypeValue
+  ): Promise<void> {
     if (this.dependencies.graphEdgePort === undefined) {
       return;
     }
 
-    const rawRefs = signal.raw_payload["source_memory_refs"];
+    const rawRefs = signal.raw_payload[rawPayloadKey];
     if (!Array.isArray(rawRefs) || rawRefs.length === 0) {
       return;
     }
@@ -413,11 +497,10 @@ export class MaterializationRouter {
           runId: signal.run_id
         });
       } catch (err) {
-        // Fire-and-forget: graph edges are supplementary, not critical.
-        // Log so synthesis derives_from failures are visible in production.
         console.warn("materialization-router: graph edge creation failed", {
           sourceMemoryId: newObjectId,
           targetMemoryId: ref,
+          edgeType,
           signalId: signal.signal_id,
           error: err instanceof Error ? err.message : String(err)
         });
