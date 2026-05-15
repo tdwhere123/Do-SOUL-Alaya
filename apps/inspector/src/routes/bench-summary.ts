@@ -28,9 +28,10 @@ export function registerInspectorBenchSummaryRoutes(
   options: BenchSummaryOptions
 ): void {
   app.get("/api/bench-summary", async (context) => {
-    const [selfResult, publicResult] = await Promise.all([
+    const [selfResult, publicResult, liveResult] = await Promise.all([
       summarizeSafe(options.historyRoot, "self"),
-      summarizeSafe(options.historyRoot, "public")
+      summarizeSafe(options.historyRoot, "public"),
+      summarizeSafe(options.historyRoot, "live")
     ]);
     return context.json(
       {
@@ -38,9 +39,11 @@ export function registerInspectorBenchSummaryRoutes(
         data: {
           self: selfResult.value,
           public: publicResult.value,
+          live: liveResult.value,
           errors: {
             self: selfResult.error,
-            public: publicResult.error
+            public: publicResult.error,
+            live: liveResult.error
           }
         }
       },

@@ -1,0 +1,193 @@
+{
+  "source_path": ".do-it/checks/alaya-live/main-check.json",
+  "latest_run_id": "2026-05-12T05-27-16-166Z-strict-real",
+  "status": "pass",
+  "generated_at": "2026-05-12T05:39:53.229Z",
+  "run_dir": ".do-it/checks/alaya-live/runs/2026-05-12T05-27-16-166Z-strict-real",
+  "report": ".do-it/checks/alaya-live/runs/2026-05-12T05-27-16-166Z-strict-real/report.md",
+  "summary": ".do-it/checks/alaya-live/runs/2026-05-12T05-27-16-166Z-strict-real/main-check-run.json",
+  "gates": [
+    {
+      "id": "raw_key_scan_zero",
+      "pass": true,
+      "threshold": "0 raw/exact secret hits",
+      "observed": "0 raw, 0 exact",
+      "evidence": "evidence/raw-key-scan.json"
+    },
+    {
+      "id": "no_live_db_write",
+      "pass": true,
+      "threshold": "isolated DB only",
+      "observed": "isolated DB only",
+      "evidence": "main-check-run.json"
+    },
+    {
+      "id": "mcp_initialize_zero_failed",
+      "pass": true,
+      "threshold": "0 failures",
+      "observed": "0 failures",
+      "evidence": "*/result.json"
+    },
+    {
+      "id": "workspace_spoof_zero_success",
+      "pass": true,
+      "threshold": "0 spoof successes",
+      "observed": "0 successes",
+      "evidence": "*/result.json"
+    },
+    {
+      "id": "unreviewed_garden_durable_zero",
+      "pass": true,
+      "threshold": "0 unreviewed durable writes",
+      "observed": 0,
+      "evidence": "garden-audit-loop/summary.json"
+    },
+    {
+      "id": "embedding_health_http_200",
+      "pass": true,
+      "threshold": "HTTP 200",
+      "observed": 200,
+      "evidence": "evidence/provider-health.json"
+    },
+    {
+      "id": "garden_health_http_200",
+      "pass": true,
+      "threshold": "HTTP 200",
+      "observed": 200,
+      "evidence": "evidence/provider-health.json"
+    },
+    {
+      "id": "provider_query_error_rate",
+      "pass": true,
+      "threshold": "<= 3%",
+      "observed": 0,
+      "evidence": "embedding-real-provider/recall-results.jsonl"
+    },
+    {
+      "id": "semantic_supplement_rate",
+      "pass": true,
+      "threshold": ">= 80%",
+      "observed": 0.998,
+      "evidence": "embedding-real-provider/result.json"
+    },
+    {
+      "id": "provider_top1",
+      "pass": true,
+      "threshold": ">= 65%",
+      "observed": 0.914,
+      "evidence": "embedding-real-provider/result.json"
+    },
+    {
+      "id": "provider_top5",
+      "pass": true,
+      "threshold": ">= 88%",
+      "observed": 0.946,
+      "evidence": "embedding-real-provider/result.json"
+    },
+    {
+      "id": "provider_top5_delta_vs_keyword",
+      "pass": true,
+      "threshold": "baseline >= 95%; delta not applicable; provider top5 and semantic gates must pass",
+      "observed": "provider=0.946, keyword=0.996, delta=-0.050000000000000044",
+      "evidence": "keyword-local/result.json + embedding-real-provider/result.json"
+    },
+    {
+      "id": "provider_p95_latency",
+      "pass": true,
+      "threshold": "<= 3000 ms",
+      "observed": 1504.71,
+      "evidence": "embedding-real-provider/result.json"
+    },
+    {
+      "id": "garden_schema_valid_rate",
+      "pass": true,
+      "threshold": ">= 90%",
+      "observed": 0.9917,
+      "evidence": "garden-audit-loop/summary.json"
+    },
+    {
+      "id": "garden_reviewer_accept_rate",
+      "pass": true,
+      "threshold": ">= 70%",
+      "observed": 0.9917,
+      "evidence": "garden-audit-loop/summary.json"
+    },
+    {
+      "id": "garden_durable_write_success_rate",
+      "pass": true,
+      "threshold": ">= 95%",
+      "observed": 1,
+      "evidence": "garden-audit-loop/summary.json"
+    },
+    {
+      "id": "garden_followup_success_rate",
+      "pass": true,
+      "threshold": ">= 95%",
+      "observed": 1,
+      "evidence": "garden-audit-loop/summary.json"
+    }
+  ],
+  "modes": [
+    {
+      "mode": "keyword-local",
+      "recall_metrics": {
+        "total_queries": 500,
+        "top1_hits": 480,
+        "top5_hits": 498,
+        "top1_rate": 0.96,
+        "top5_rate": 0.996,
+        "query_error_count": 0,
+        "query_error_rate": 0,
+        "semantic_supplement_count": 0,
+        "semantic_supplement_rate": 0,
+        "degraded_count": 500,
+        "p50_ms": 22.38,
+        "p95_ms": 35.22,
+        "max_ms": 72.1
+      },
+      "mcp_initialize_failed": 0
+    },
+    {
+      "mode": "embedding-real-provider",
+      "recall_metrics": {
+        "total_queries": 500,
+        "top1_hits": 457,
+        "top5_hits": 473,
+        "top1_rate": 0.914,
+        "top5_rate": 0.946,
+        "query_error_count": 0,
+        "query_error_rate": 0,
+        "semantic_supplement_count": 499,
+        "semantic_supplement_rate": 0.998,
+        "degraded_count": 500,
+        "p50_ms": 832.6,
+        "p95_ms": 1504.71,
+        "max_ms": 2563.92
+      },
+      "mcp_initialize_failed": 0
+    }
+  ],
+  "garden": {
+    "task_count": 120,
+    "schema_valid_rate": 0.9917,
+    "accepted_rate": 0.9917,
+    "durable_write_success_rate": 1,
+    "accepted_followup_success_rate": 1,
+    "unreviewed_durable_write_count": 0
+  },
+  "provider_health": {
+    "embedding": {
+      "ok": true,
+      "status": 200,
+      "vector_dimensions": 1536
+    },
+    "garden": {
+      "ok": true,
+      "status": 200
+    }
+  },
+  "security": {
+    "raw_key_hits": 0,
+    "exact_secret_hits": 0
+  }
+}

@@ -6,62 +6,70 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-044` (`#BL-022` was opened by
+sequence. **Next available number**: `#BL-045` (`#BL-022` was opened by
 p5-system-review-r3 as an EventPublisher v0.2 deferral and closed in
 v0.1-closeout-a2; `#BL-023`/`#BL-024` were resolved in r1 / r2;
 `#BL-025` through `#BL-036` were opened by the v0.1-closeout A2 and
 D2 fix-loops, then resolved by Gate-5F under
 `docs/archive/v0.1-port-record/phase-5-followup-briefs/` before Phase 6;
 `#BL-009`, `#BL-037`, and `#BL-038` were resolved in v0.3.0;
-`#BL-039` through `#BL-043` were opened by v0.3.6 Phase 5/6 close-out
-as v0.3.7 candidates — see [Open Issues](#open-issues)).
+`#BL-039` through `#BL-043` were opened by v0.3.6 Phase 5/6 close-out,
+and `#BL-044` was opened by the v0.3.7 benchmark intake. v0.3.7 shipped
+the archive/Inspector repair only; the remaining items below are
+post-v0.3.7 follow-through — see
+[Open Issues](#open-issues)).
 
 ## Open Issues
 
 ### #BL-039 — Wire real embedding provider into recall path
 
-**Status**: Open, v0.3.7 candidate.
+**Status**: Open, post-v0.3.7 follow-through.
 
-**Why open**: v0.3.6 LongMemEval-S smoke (n=20) gives R@5 = 65.0% with
-SQLite FTS + activation only (`ALAYA_ENABLE_EMBEDDING_SUPPLEMENT=false`
-in the bench harness). The recall path already has an embedding
-supplement slot (per invariant: embedding never decides durable truth,
-but may supplement ranking). Wiring the yunwu `text-embedding-3-small`
-provider (or a local-heuristic fallback) and re-running the bench is
-the cleanest single change that should lift R@5 toward 70-80% without
-touching the truth boundary.
+**Why open**: v0.3.6 LongMemEval-S full run (500/500) gives R@5 =
+60.2% with SQLite FTS + activation only. v0.3.7's archived strict-real
+live check shows the real provider path can reach top5 = 94.6% on its
+internal 500-query live corpus, but that is not the public
+LongMemEval-S claim. The recall path already has an embedding supplement
+slot (per invariant: embedding never decides durable truth, but may
+supplement ranking). The remaining work is to wire provider-backed
+supplement into the public bench path and prove whether it lifts
+LongMemEval-S without crossing the truth boundary.
 
 **Close condition**:
 
 1. Provider config (file: ref under `~/.config/alaya/secrets/`) wires
-   into `RecallUtilizationService` embedding lookup.
-2. LongMemEval-S `--limit 50` re-run produces a new bench-history entry
-   with the embedding-enabled KPI and a diff vs v0.3.6 floor.
+   into recall-time embedding lookup without changing durable-memory
+   governance semantics.
+2. LongMemEval-S full run, or a written cost-bound staged run plus CI
+   label, produces a new `docs/bench-history/public/<slug>/` entry
+   with embedding-enabled KPI and a diff vs the v0.3.6 500/500 floor.
 3. Invariant §"embedding is a recall supplement; it never decides
    durable truth" remains intact (review-loop must verify).
 4. Bench-history latest-baseline for `public/longmemeval-s` is bumped.
 
 ### #BL-040 — Scale LongMemEval-S smoke to confidence-interval sample
 
-**Status**: Open, v0.3.7 candidate.
+**Status**: Open, post-v0.3.7 follow-through.
 
-**Why open**: v0.3.6 ran n=20 of 500 LongMemEval-S questions. Each
-question is a single bernoulli trial, so a 65% R@5 has a 95% CI of
-roughly ±21pp at n=20 — too wide to claim trend in a single PR.
+**Why open**: v0.3.6 now has a 500/500 LongMemEval-S baseline (R@5 =
+60.2%), so the original "n=20 only" gap is gone for the release
+baseline. The remaining gap is that future smoke / shard / staged
+runs still need explicit confidence labels so a small-N number cannot
+be mistaken for a release-quality trend.
 
 **Close condition**:
 
-1. Re-run LongMemEval-S at `--limit 100` (or full 500 if the
-   harness-mode latency budget allows; current cost is ~6 min per 20
-   questions).
-2. Compute and publish a 95% CI alongside the point estimate in
-   `report.md`.
-3. Threshold engine learns to gate `r_at_5_delta_pp` against `CI/2`
-   instead of raw 2pp / 5pp when `n < 100`.
+1. `report.md` computes and publishes a 95% CI when
+   `evaluated_count < sample_size` or when the run is produced from
+   shards / staged windows.
+2. Threshold engine gates `r_at_5_delta_pp` against `CI/2` instead of
+   raw 2pp / 5pp when `n < 100`.
+3. README / release notes distinguish smoke, staged, shard-merged, and
+   full-set numbers with concrete n values.
 
 ### #BL-041 — LoCoMo cross-stack comparison
 
-**Status**: Open, v0.3.7 candidate.
+**Status**: Open, post-v0.3.7 follow-through.
 
 **Why open**: v0.3.6 README quotes `agentmemory`'s public R@5 = 95.2%
 on LoCoMo "as reported, link". We do not run LoCoMo today, so the
@@ -82,7 +90,7 @@ driver.
 
 ### #BL-042 — Inspector Memory Browser + command palette (deferred from v0.3.6)
 
-**Status**: Open, v0.3.7 candidate (deferred from v0.3.6 plan §Out).
+**Status**: Open, post-v0.3.7 follow-through (deferred from v0.3.6 plan §Out).
 
 **Why open**: v0.3.6 scope kept the UI uplift to Overview + Recall +
 sidebar; the Memory Browser (durable entry list with evidence drill-in)
@@ -99,6 +107,29 @@ trace from a tier-distribution number down to specific entries.
    `soul.open_pointer`).
 3. cmd-K command palette wiring `attach detach status inspect review`
    verbs.
+
+### #BL-044 — Recall utilization follow-through remains under-explained
+
+**Status**: Open, post-v0.3.7 follow-through.
+
+**Why open**: v0.3.6 added recall utilization telemetry and Inspector
+cards, but operator use still shows low follow-through from delivered
+recall pointers to `soul.report_context_usage(used)`. That number is
+not self-explanatory: it can mean the host did not call recall, recall
+returned weak/noisy candidates, the host used context without reporting
+usage, or the UI/CLI surfaced the metric too coarsely.
+
+**Close condition**:
+
+1. Add a report or Inspector drill-down that separates `no recall`,
+   `empty recall`, `delivered but not reported`, and `reported used`
+   by agent target / run.
+2. Link at least one live strict-real or host-autonomy run to the
+   utilization counters so delivered→used math is audit-traceable by
+   `delivery_id`.
+3. Open a concrete follow-up fix for whichever root cause dominates:
+   ranking quality, host instructions, usage-report ergonomics, or
+   telemetry classification.
 
 ## Resolved in v0.3.6 (2026-05-14)
 

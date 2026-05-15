@@ -54,7 +54,12 @@ describe("OverviewPage", () => {
       if (url.includes("/bench-summary")) {
         return jsonResponse({
           success: true,
-          data: { self: null, public: null, errors: { self: null, public: null } }
+          data: {
+            self: null,
+            public: null,
+            live: null,
+            errors: { self: null, public: null, live: null }
+          }
         });
       }
       return jsonResponse({}, 404);
@@ -104,7 +109,12 @@ describe("OverviewPage", () => {
       if (url.includes("/bench-summary")) {
         return jsonResponse({
           success: true,
-          data: { self: null, public: null, errors: { self: null, public: null } }
+          data: {
+            self: null,
+            public: null,
+            live: null,
+            errors: { self: null, public: null, live: null }
+          }
         });
       }
       return jsonResponse({}, 404);
@@ -119,10 +129,11 @@ describe("OverviewPage", () => {
     expect(screen.getByTestId("overview-card-proposals").textContent).toContain("—");
   });
 
-  it("renders both Latest Bench cards with an empty placeholder when no entries exist", async () => {
+  it("renders all Latest Bench cards with an empty placeholder when no entries exist", async () => {
     renderOverview();
     expect(await screen.findByTestId("overview-bench-self-empty")).toBeTruthy();
     expect(screen.getByTestId("overview-bench-public-empty")).toBeTruthy();
+    expect(screen.getByTestId("overview-bench-live-empty")).toBeTruthy();
     expect(screen.getByTestId("overview-bench-self-empty").textContent).toMatch(
       /no benchmark entries yet/i
     );
@@ -158,7 +169,22 @@ describe("OverviewPage", () => {
               }
             },
             public: null,
-            errors: { self: null, public: null }
+            live: {
+              latest_slug: "2026-05-12T053953Z-ec44a05",
+              history_count: 1,
+              payload: {
+                bench_name: "live",
+                split: "strict-real",
+                run_at: "2026-05-12T05:39:53.229Z",
+                kpi: { r_at_5: 0.946 }
+              },
+              diff: {
+                previous_slug: null,
+                worst_verdict: "ok",
+                r_at_5_delta_pp: null
+              }
+            },
+            errors: { self: null, public: null, live: null }
           }
         });
       }
@@ -170,6 +196,7 @@ describe("OverviewPage", () => {
     expect(selfCard.textContent).toContain("91.2%");
     expect(selfCard.textContent).toMatch(/-2.1pp/);
     expect(selfCard.textContent).toContain("3 historical entries");
+    expect(screen.getByTestId("overview-bench-live").textContent).toContain("94.6%");
   });
 });
 

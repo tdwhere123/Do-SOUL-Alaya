@@ -7,6 +7,7 @@ import {
   Globe2,
   Layers,
   RefreshCcw,
+  ShieldCheck,
   Zap
 } from "lucide-react";
 import { apiFetch, getWorkspaceId, type ApiError } from "../api";
@@ -23,7 +24,7 @@ interface BenchSummaryShape {
   readonly latest_slug: string;
   readonly history_count: number;
   readonly payload: {
-    readonly bench_name: "self" | "public";
+    readonly bench_name: "self" | "public" | "live";
     readonly split: string;
     readonly run_at: string;
     readonly kpi: { readonly r_at_5: number };
@@ -40,6 +41,7 @@ interface BenchSummaryEnvelope {
   readonly data: {
     readonly self: BenchSummaryShape | null;
     readonly public: BenchSummaryShape | null;
+    readonly live: BenchSummaryShape | null;
   };
 }
 
@@ -49,6 +51,7 @@ export default function OverviewPage() {
   const [pendingCount, setPendingCount] = useState<number | null>(null);
   const [benchSelf, setBenchSelf] = useState<BenchSummaryShape | null>(null);
   const [benchPublic, setBenchPublic] = useState<BenchSummaryShape | null>(null);
+  const [benchLive, setBenchLive] = useState<BenchSummaryShape | null>(null);
   const [benchLoaded, setBenchLoaded] = useState(false);
   const workspaceId = getWorkspaceId();
 
@@ -81,11 +84,13 @@ export default function OverviewPage() {
         if (cancelled) return;
         setBenchSelf(envelope.data.self);
         setBenchPublic(envelope.data.public);
+        setBenchLive(envelope.data.live);
       } catch (err) {
         if (cancelled) return;
         if ((err as ApiError).status === 401) return;
         setBenchSelf(null);
         setBenchPublic(null);
+        setBenchLive(null);
       } finally {
         if (!cancelled) setBenchLoaded(true);
       }
@@ -188,7 +193,7 @@ export default function OverviewPage() {
           >
             {t("overview:bench.section")}
           </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <BenchCard
               icon={<FlaskConical className="w-4 h-4" />}
               label={t("overview:bench.self.label")}
@@ -208,6 +213,16 @@ export default function OverviewPage() {
               loaded={benchLoaded}
               t={t}
               testId="overview-bench-public"
+            />
+            <BenchCard
+              icon={<ShieldCheck className="w-4 h-4" />}
+              label={t("overview:bench.live.label")}
+              hint={t("overview:bench.live.hint")}
+              empty={t("overview:bench.empty")}
+              summary={benchLive}
+              loaded={benchLoaded}
+              t={t}
+              testId="overview-bench-live"
             />
           </div>
         </section>

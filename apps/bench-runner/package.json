@@ -1,8 +1,8 @@
 {
   "name": "@do-soul/alaya-bench-runner",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "private": true,
-  "description": "Daemon-attached bench runner that drives self-bench and LongMemEval-S evaluations against an in-process Alaya daemon. Owns the harness; eval package stays a zod-only leaf.",
+  "description": "Daemon-attached bench runner for self-bench, LongMemEval-S, and live strict-real benchmark archives. Owns the harness; eval package stays a zod-only leaf.",
   "license": "MIT",
   "type": "module",
   "main": "dist/index.js",

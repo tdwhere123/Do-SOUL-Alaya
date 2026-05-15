@@ -62,13 +62,17 @@ describe("history archive", () => {
     expect(slug).toBe("2026-05-14T103045Z-abcdef0");
   });
 
-  it("writes kpi.json + report.md and tracks the latest-baseline pointer", async () => {
+  it("writes kpi.json + report.md + sidecars and tracks the latest-baseline pointer", async () => {
     const payload = buildPayload("ec44a05");
     const slug = "2026-05-14T100000Z-ec44a05";
-    const entry = await writeEntry(layout, "self", slug, payload, "# report\n", null);
+    const entry = await writeEntry(layout, "self", slug, payload, "# report\n", null, {
+      sidecars: [{ filename: "live-gates.json", contents: "{\"status\":\"pass\"}\n" }]
+    });
     expect(entry.slug).toBe(slug);
     const writtenKpi = await readFile(entry.kpiPath, "utf8");
     expect(JSON.parse(writtenKpi).alaya_commit).toBe("ec44a05");
+    expect(await readFile(entry.sidecarPaths["live-gates.json"]!, "utf8"))
+      .toBe("{\"status\":\"pass\"}\n");
     const baseline = await readFile(
       path.join(root, "self", "latest-baseline.json"),
       "utf8"
@@ -249,6 +253,29 @@ describe("history archive", () => {
       await readFile(path.join(root, "self", "latest-baseline.json"), "utf8")
     ) as { slug: string };
     expect(pointer.slug).toBe(slug);
+  });
+
+  it("does not publish the slug or latest pointer when a required sidecar write fails", async () => {
+    const slug = "2026-05-15T130000Z-c0ffee0";
+
+    await expect(
+      writeEntry(layout, "live", slug, buildPayload("c0ffee0"), "report\n", null, {
+        sidecars: [
+          {
+            filename: "live-gates.json",
+            contents: undefined as unknown as string
+          }
+        ]
+      })
+    ).rejects.toThrow();
+
+    expect(await listEntries(layout, "live")).toEqual([]);
+    await expect(
+      readFile(path.join(root, "live", "latest-baseline.json"), "utf8")
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(
+      readFile(path.join(root, "live", slug, "kpi.json"), "utf8")
+    ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   // @anchor orphan-staging-filter-test — see history.ts @write-entry-tmp-filter.

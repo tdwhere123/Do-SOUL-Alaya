@@ -4,12 +4,14 @@ import { spawnSync } from "node:child_process";
 
 const projectDirs = [
   "packages/protocol",
+  "packages/eval",
   "packages/core",
   "packages/soul",
   "packages/engine-gateway",
   "packages/storage",
   "apps/core-daemon",
   "apps/inspector",
+  "apps/bench-runner",
 ];
 
 const projects = projectDirs.filter((dir) => existsSync(join(dir, "tsconfig.json")));

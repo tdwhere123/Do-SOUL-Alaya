@@ -14,6 +14,7 @@ import {
 
 export interface InspectCommandDependencies {
   readonly generateToken?: () => string;
+  readonly getRequestToken?: () => string | undefined;
   readonly spawnInspector?: (input: SpawnInspectorInput) => InspectorChildProcess;
   readonly startDaemonServer?: (options: InspectDaemonListenOptions) => Promise<InspectDaemonServer>;
   readonly probeDaemon?: (url: string) => Promise<InspectDaemonProbeResult>;
@@ -96,7 +97,8 @@ const DEFAULT_DAEMON_PORT = 5173;
 const READY_LINE = "inspector_ready";
 const SHUTDOWN_TIMEOUT_MS = 2000;
 const ALLOW_FIXED_TOKEN_ENV = "ALAYA_INSPECTOR_ALLOW_FIXED_TOKEN";
-const INSPECTOR_CHILD_ENV_KEYS = ["ALAYA_DAEMON_URL"] as const;
+const EXTERNAL_DAEMON_REQUEST_TOKEN_ENV = "ALAYA_INSPECTOR_DAEMON_REQUEST_TOKEN";
+const INSPECTOR_CHILD_ENV_KEYS = ["ALAYA_DAEMON_URL", "ALAYA_REQUEST_TOKEN"] as const;
 
 export function createInspectCommand(deps: InspectCommandDependencies = {}): AlayaSubcommandSpec<InspectArgs> {
   return {
@@ -136,12 +138,25 @@ async function executeInspect(
       return { exitCode: workspaceResolution.exitCode };
     }
     const url = `http://127.0.0.1:${args.port}/?token=${token}&workspaceId=${encodeURIComponent(workspaceResolution.workspaceId)}`;
+    const inspectorEnv: NodeJS.ProcessEnv = { ALAYA_DAEMON_URL: daemon.url };
+    if (daemon.startedDaemon !== null) {
+      const requestToken = deps.getRequestToken?.();
+      const trimmedRequestToken = requestToken?.trim();
+      if (trimmedRequestToken !== undefined && trimmedRequestToken.length > 0) {
+        inspectorEnv.ALAYA_REQUEST_TOKEN = trimmedRequestToken;
+      }
+    } else {
+      const externalRequestToken = ctx.env[EXTERNAL_DAEMON_REQUEST_TOKEN_ENV]?.trim();
+      if (externalRequestToken !== undefined && externalRequestToken.length > 0) {
+        inspectorEnv.ALAYA_REQUEST_TOKEN = externalRequestToken;
+      }
+    }
     child = (deps.spawnInspector ?? defaultSpawnInspector)({
       port: args.port,
       token,
       workspaceId: workspaceResolution.workspaceId,
       inspectorEntryPath: deps.inspectorEntryPath ?? defaultInspectorEntryPath(),
-      env: { ...ctx.env, ALAYA_DAEMON_URL: daemon.url }
+      env: inspectorEnv
     });
     await waitForInspectorReady(child, ctx);
     ctx.stdout.write(`${url}\n`);

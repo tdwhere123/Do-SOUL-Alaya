@@ -1,0 +1,43 @@
+{
+  "bench_name": "live",
+  "split": "strict-real",
+  "run_at": "2026-05-12T05:39:53.229Z",
+  "alaya_commit": "46531a6",
+  "alaya_version": "0.3.7",
+  "embedding_provider": "embedding-real-provider",
+  "chat_provider": "garden-real-provider",
+  "dataset": {
+    "name": "alaya-live-strict-real",
+    "size": 500,
+    "source": ".do-it/checks/alaya-live/main-check.json#2026-05-12T05-27-16-166Z-strict-real"
+  },
+  "sample_size": 500,
+  "evaluated_count": 500,
+  "harness_mode": "live_strict_real",
+  "kpi": {
+    "r_at_1": 0.914,
+    "r_at_5": 0.946,
+    "r_at_10": 0.946,
+    "latency_ms_p50": 832.6,
+    "latency_ms_p95": 1504.71,
+    "latency_source": "exact",
+    "token_saved_ratio_vs_full_prompt": 0,
+    "tier_distribution": {
+      "hot": 0,
+      "warm": 500,
+      "cold": 0
+    },
+    "degradation_reasons": {
+      "none": 0,
+      "warm_cascade_engaged": 0,
+      "cold_cascade_engaged": 0,
+      "recall_explainability_partial": 500
+    },
+    "seed_truncation": {
+      "seed_turns_truncated": 0,
+      "answer_turns_truncated": 0,
+      "seed_chars_clipped": 0
+    },
+    "per_scenario": []
+  }
+}

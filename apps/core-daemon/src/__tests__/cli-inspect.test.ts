@@ -151,6 +151,130 @@ describe("cli inspect", () => {
     expect(daemonCloses).toEqual(["closed"]);
   });
 
+  it("passes the managed daemon request token to the inspector child", async () => {
+    const child = new FakeInspectorChild();
+    const spawned: unknown[] = [];
+    const command = createInspectCommand({
+      checkPortAvailable: async () => true,
+      generateToken: () => "e".repeat(64),
+      getRequestToken: () => " managed-daemon-request-token ",
+      startDaemonServer: async () => fakeDaemonServer(),
+      spawnInspector: (input) => {
+        spawned.push(input);
+        return child;
+      },
+      listWorkspaces: oneWorkspaceList()
+    });
+
+    const promise = command.handler(createContext(), {
+      open: false,
+      port: 5174,
+      token: null,
+      workspace: null
+    });
+    setTimeout(() => child.stdout.write("inspector_ready\n"), 0);
+    setTimeout(() => child.emitExit(0, null), 10);
+    const result = await promise;
+
+    expect(result.exitCode).toBe(0);
+    expect(spawned).toMatchObject([
+      {
+        env: {
+          ALAYA_DAEMON_URL: "http://127.0.0.1:5173",
+          ALAYA_REQUEST_TOKEN: "managed-daemon-request-token"
+        }
+      }
+    ]);
+  });
+
+  it("does not forward an inherited request token for an externally configured daemon", async () => {
+    const child = new FakeInspectorChild();
+    const spawned: unknown[] = [];
+    const command = createInspectCommand({
+      checkPortAvailable: async () => true,
+      generateToken: () => "e".repeat(64),
+      getRequestToken: () => "wrong-daemon-token",
+      spawnInspector: (input) => {
+        spawned.push(input);
+        return child;
+      },
+      listWorkspaces: oneWorkspaceList()
+    });
+
+    const promise = command.handler(
+      createContext({
+        env: {
+          ALAYA_DAEMON_URL: "http://external-daemon.local",
+          ALAYA_REQUEST_TOKEN: "stale-parent-token"
+        }
+      }),
+      {
+        open: false,
+        port: 5174,
+        token: null,
+        workspace: null
+      }
+    );
+    setTimeout(() => child.stdout.write("inspector_ready\n"), 0);
+    setTimeout(() => child.emitExit(0, null), 10);
+    const result = await promise;
+
+    expect(result.exitCode).toBe(0);
+    expect(spawned).toMatchObject([
+      {
+        env: {
+          ALAYA_DAEMON_URL: "http://external-daemon.local"
+        }
+      }
+    ]);
+    expect((spawned[0] as { env?: Record<string, unknown> }).env?.ALAYA_REQUEST_TOKEN)
+      .toBeUndefined();
+  });
+
+  it("passes the explicit external daemon request token to the inspector child", async () => {
+    const child = new FakeInspectorChild();
+    const spawned: unknown[] = [];
+    const command = createInspectCommand({
+      checkPortAvailable: async () => true,
+      generateToken: () => "e".repeat(64),
+      getRequestToken: () => "wrong-managed-daemon-token",
+      spawnInspector: (input) => {
+        spawned.push(input);
+        return child;
+      },
+      listWorkspaces: oneWorkspaceList()
+    });
+
+    const promise = command.handler(
+      createContext({
+        env: {
+          ALAYA_DAEMON_URL: "http://external-daemon.local",
+          ALAYA_REQUEST_TOKEN: "stale-parent-token",
+          ALAYA_INSPECTOR_DAEMON_REQUEST_TOKEN: " explicit-external-token "
+        }
+      }),
+      {
+        open: false,
+        port: 5174,
+        token: null,
+        workspace: null
+      }
+    );
+    setTimeout(() => child.stdout.write("inspector_ready\n"), 0);
+    setTimeout(() => child.emitExit(0, null), 10);
+    const result = await promise;
+
+    expect(result.exitCode).toBe(0);
+    expect(spawned).toMatchObject([
+      {
+        env: {
+          ALAYA_DAEMON_URL: "http://external-daemon.local",
+          ALAYA_REQUEST_TOKEN: "explicit-external-token"
+        }
+      }
+    ]);
+  });
+
   it("fails instead of starting a standalone inspector when no daemon is managed", async () => {
     const stderr = new PassThrough();
     const stderrChunks: string[] = [];
@@ -310,6 +434,7 @@ describe("cli inspect", () => {
       inspectorEntryPath: "/tmp/inspector.js",
       env: {
         ALAYA_DAEMON_URL: "http://127.0.0.1:3000",
+        ALAYA_REQUEST_TOKEN: "daemon-request-token",
         ALAYA_OPENAI_SECRET_REF: "file:/tmp/secret",
         OPENAI_API_KEY: "sk-secret",
         PATH: "/usr/bin"
@@ -318,6 +443,7 @@ describe("cli inspect", () => {
 
     expect(env).toEqual({
       ALAYA_DAEMON_URL: "http://127.0.0.1:3000",
+      ALAYA_REQUEST_TOKEN: "daemon-request-token",
       ALAYA_INSPECTOR_TOKEN: "b".repeat(64),
       ALAYA_INSPECTOR_PORT: "5175",
       ALAYA_INSPECTOR_WORKSPACE_ID: "ws-1"

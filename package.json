@@ -1,6 +1,6 @@
 {
   "name": "do-soul-alaya",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "private": true,
   "description": "Do-SOUL Alaya — local-first memory core for CLI agents, ported from do-what-new",
   "engines": {

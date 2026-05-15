@@ -255,6 +255,37 @@ v0.1-closeout. They are pinned here so the v0.1.x maintenance waves and
 v0.2 planning agents can reference them at the source rather than
 re-discovering them from `.do-it/findings/{a1,a2,a3}.md`.
 
+## v0.3.7 Release (2026-05-15)
+
+Patch-internal benchmark archive + Inspector repair slice. No MCP tool
+names or descriptions, MCP request/response schemas, protocol zod
+schemas, EventLog payload schemas, runtime config schemas, or storage
+migrations changed.
+
+New / changed runtime-visible surfaces:
+
+- Bench history archive now has `docs/bench-history/live/` alongside
+  `self/` and `public/`. The live entry normalizes the strict-real
+  `.do-it/checks/alaya-live/main-check.json` summary into
+  `kpi.json`, `report.md`, and `live-gates.json` without committing raw
+  provider transcripts, samples, run DBs, or secrets.
+- `@do-soul/alaya-eval` accepts `bench_name="live"`,
+  `split="strict-real"`, and `harness_mode="live_strict_real"` for this
+  archive surface.
+- Inspector Overview reads `self`, `public`, and `live` bench summaries.
+- `alaya inspect` injects the managed daemon's `ALAYA_REQUEST_TOKEN` into
+  the Inspector child process, fixing graph/memory actions that require
+  daemon request-token protection. External daemons do not inherit a
+  parent `ALAYA_REQUEST_TOKEN`; the explicit external bridge is
+  `ALAYA_INSPECTOR_DAEMON_REQUEST_TOKEN`.
+- Inspector frontend error handling now surfaces backend string or
+  structured error messages instead of generic HTTP status text.
+- `scripts/build-existing.mjs` now builds `packages/eval` and
+  `apps/bench-runner`, preventing stale eval/bench declarations during
+  `rtk pnpm build`.
+
+Workspace packages bumped `0.3.6` -> `0.3.7`. See `docs/v0.3/v0.3.7/`.
+
 ## v0.3.6 Release (2026-05-14)
 
 Patch-internal UI + bench feedback-loop release. No MCP tool names or

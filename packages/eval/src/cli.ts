@@ -18,7 +18,7 @@ Usage:
   alaya-eval diff <bench-name> [--history-root <path>]
   alaya-eval list <bench-name> [--history-root <path>]
 
-bench-name = self | public
+bench-name = self | public | live
 
 Exit code 1 if a regression hits the ✗ threshold; 0 otherwise.
 `;
@@ -98,7 +98,7 @@ async function runDiffCommand(
   const parsed = BenchName.safeParse(benchNameRaw);
   if (!parsed.success) {
     process.stderr.write(
-      `alaya-eval diff: invalid bench-name '${benchNameRaw}' (expected self|public)\n`
+      `alaya-eval diff: invalid bench-name '${benchNameRaw}' (expected self|public|live)\n`
     );
     return 2;
   }
@@ -140,7 +140,7 @@ async function runListCommand(
   const parsed = BenchName.safeParse(benchNameRaw);
   if (!parsed.success) {
     process.stderr.write(
-      `alaya-eval list: invalid bench-name '${benchNameRaw}' (expected self|public)\n`
+      `alaya-eval list: invalid bench-name '${benchNameRaw}' (expected self|public|live)\n`
     );
     return 2;
   }

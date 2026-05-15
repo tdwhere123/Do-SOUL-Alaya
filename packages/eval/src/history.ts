@@ -27,6 +27,16 @@ export interface HistoryEntry {
   readonly kpiPath: string;
   readonly reportPath: string;
   readonly findingsPath: string;
+  readonly sidecarPaths: Readonly<Record<string, string>>;
+}
+
+export interface HistorySidecar {
+  readonly filename: string;
+  readonly contents: string;
+}
+
+export interface WriteEntryOptions {
+  readonly sidecars?: readonly HistorySidecar[];
 }
 
 const KPI_FILENAME = "kpi.json";
@@ -46,9 +56,9 @@ const SLUG_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{6}Z-[0-9a-f]{7,40}$/;
  * @anchor write-entry-atomic — stage in a sibling .tmp- directory
  * (created via mkdtemp so two concurrent writers on the same slug
  * cannot collide), then rename(2) into place. Either the entry exists
- * in full (kpi.json + report.md + optional findings.md) or the slug
- * directory does not exist — never half-written. The pointer is also
- * written via tmp + rename. If the target slug already exists,
+ * in full (kpi.json + report.md + optional findings.md + required
+ * sidecars) or the slug directory does not exist — never half-written.
+ * The pointer is also written via tmp + rename. If the target slug already exists,
  * writeEntry throws rather than overwriting.
  * see also: @anchor write-entry-tmp-filter in listEntries — orphan
  * staging directories (process kill between mkdtemp and rename) are
@@ -60,7 +70,8 @@ export async function writeEntry(
   slug: string,
   payload: KpiPayload,
   reportMarkdown: string,
-  findingsMarkdown: string | null
+  findingsMarkdown: string | null,
+  options: WriteEntryOptions = {}
 ): Promise<HistoryEntry> {
   if (slug.includes("/") || slug.includes("\\") || slug.includes("..") || slug.length === 0) {
     throw new Error(`invalid slug: '${slug}' contains a path separator or '..' token`);
@@ -71,6 +82,10 @@ export async function writeEntry(
     );
   }
   const benchRoot = path.join(layout.historyRoot, benchName);
+  const sidecars = options.sidecars ?? [];
+  for (const sidecar of sidecars) {
+    validateSidecarFilename(sidecar.filename);
+  }
   await mkdir(benchRoot, { recursive: true });
   const entryRoot = path.join(benchRoot, slug);
   try {
@@ -100,6 +115,9 @@ export async function writeEntry(
     if (findingsMarkdown !== null) {
       await writeFile(stagingFindings, findingsMarkdown, "utf8");
     }
+    for (const sidecar of sidecars) {
+      await writeFile(path.join(stagingRoot, sidecar.filename), sidecar.contents, "utf8");
+    }
     await rename(stagingRoot, entryRoot);
   } catch (err) {
     await rm(stagingRoot, { recursive: true, force: true });
@@ -109,6 +127,9 @@ export async function writeEntry(
   const kpiPath = path.join(entryRoot, KPI_FILENAME);
   const reportPath = path.join(entryRoot, REPORT_FILENAME);
   const findingsPath = path.join(entryRoot, FINDINGS_FILENAME);
+  const sidecarPaths = Object.fromEntries(
+    sidecars.map((sidecar) => [sidecar.filename, path.join(entryRoot, sidecar.filename)])
+  );
 
   const pointerPath = path.join(benchRoot, LATEST_BASELINE_FILENAME);
   // Pointer tmp suffix combines pid + 4-byte random (8 hex chars,
@@ -123,7 +144,7 @@ export async function writeEntry(
   );
   await rename(pointerTmp, pointerPath);
 
-  return { slug, kpiPath, reportPath, findingsPath };
+  return { slug, kpiPath, reportPath, findingsPath, sidecarPaths };
 }
 
 // @anchor write-entry-tmp-filter — staging directories created by
@@ -256,4 +277,23 @@ function isNotFound(error: unknown): boolean {
     "code" in error &&
     (error as { code: string }).code === "ENOENT"
   );
+}
+
+function validateSidecarFilename(filename: string): void {
+  const reserved = new Set([
+    KPI_FILENAME,
+    REPORT_FILENAME,
+    FINDINGS_FILENAME,
+    LATEST_BASELINE_FILENAME
+  ]);
+  if (
+    filename.length === 0 ||
+    filename.includes("/") ||
+    filename.includes("\\") ||
+    filename.includes("..") ||
+    filename !== path.basename(filename) ||
+    reserved.has(filename)
+  ) {
+    throw new Error(`invalid sidecar filename: '${filename}'`);
+  }
 }

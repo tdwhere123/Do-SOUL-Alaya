@@ -5,11 +5,12 @@ export const BenchSplit = z.enum([
   "synthetic",
   "longmemeval-s",
   "longmemeval-oracle",
-  "longmemeval-m"
+  "longmemeval-m",
+  "strict-real"
 ]);
 export type BenchSplit = z.infer<typeof BenchSplit>;
 
-export const BenchName = z.enum(["self", "public"]);
+export const BenchName = z.enum(["self", "public", "live"]);
 export type BenchName = z.infer<typeof BenchName>;
 
 export const Verdict = z.enum(["ok", "warn", "fail"]);
@@ -102,11 +103,16 @@ export type DiffVsPrevious = z.infer<typeof DiffVsPreviousSchema>;
  *   numbers may be cited as "what an attached agent would observe".
  * - external_replay: harness replayed a recorded stdio transcript against the
  *   real daemon. Reserved for cross-version regression replays.
+ * - live_strict_real: archive of a strict-real live check generated from an
+ *   isolated run DB with real provider health, MCP security gates, semantic
+ *   supplement metrics, and Garden review-loop audit. It imports existing
+ *   live evidence into bench-history; it does not rescore per-question rows.
  */
 export const HarnessMode = z.enum([
   "direct_db_seed",
   "mcp_propose_review",
-  "external_replay"
+  "external_replay",
+  "live_strict_real"
 ]);
 export type HarnessMode = z.infer<typeof HarnessMode>;
 

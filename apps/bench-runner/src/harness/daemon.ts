@@ -139,7 +139,7 @@ export async function startBenchDaemon(
   });
 
   const mcpClient = new Client(
-    { name: "alaya-bench-runner", version: "0.3.6" },
+    { name: "alaya-bench-runner", version: "0.3.7" },
     { capabilities: {} }
   );
 

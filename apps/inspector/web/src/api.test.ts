@@ -68,4 +68,29 @@ describe("apiFetch", () => {
     ).rejects.toMatchObject({ status: 503 } satisfies Partial<ApiError>);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("surfaces backend error strings instead of a generic HTTP label", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "workspace_forbidden" }), { status: 403 })
+    );
+
+    await expect(apiFetch("/graph/ws-other")).rejects.toMatchObject({
+      message: "workspace_forbidden",
+      status: 403
+    });
+  });
+
+  it("surfaces structured backend error messages", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ success: false, error: { code: "FORBIDDEN", message: "request token missing" } }),
+        { status: 403 }
+      )
+    );
+
+    await expect(apiFetch("/graph/ws1")).rejects.toMatchObject({
+      message: "request token missing",
+      status: 403
+    });
+  });
 });

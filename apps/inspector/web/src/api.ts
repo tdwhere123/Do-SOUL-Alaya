@@ -100,9 +100,13 @@ export async function apiFetch<T>(path: string, options: ApiRequestOptions = {})
     }
 
     if (!response.ok) {
-      const errorData = (await response.json().catch(() => ({}))) as { message?: string };
+      const errorData = (await response.json().catch(() => ({}))) as {
+        readonly message?: unknown;
+        readonly error?: unknown;
+      };
       const error = new Error(
-        errorData.message ?? `API Error: ${response.status} ${response.statusText}`
+        extractApiErrorMessage(errorData) ??
+          `API Error: ${response.status} ${response.statusText}`
       ) as ApiError;
       error.status = response.status;
       throw error;
@@ -112,4 +116,27 @@ export async function apiFetch<T>(path: string, options: ApiRequestOptions = {})
   }
 
   throw lastError instanceof Error ? lastError : new Error("apiFetch exhausted retries");
+}
+
+function extractApiErrorMessage(errorData: {
+  readonly message?: unknown;
+  readonly error?: unknown;
+}): string | null {
+  if (typeof errorData.message === "string" && errorData.message.trim().length > 0) {
+    return errorData.message;
+  }
+  if (typeof errorData.error === "string" && errorData.error.trim().length > 0) {
+    return errorData.error;
+  }
+  if (
+    errorData.error !== null &&
+    typeof errorData.error === "object" &&
+    "message" in errorData.error
+  ) {
+    const message = (errorData.error as { readonly message?: unknown }).message;
+    if (typeof message === "string" && message.trim().length > 0) {
+      return message;
+    }
+  }
+  return null;
 }

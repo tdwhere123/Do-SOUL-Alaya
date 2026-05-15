@@ -15,6 +15,8 @@
 | [`v0.3.3`](v0.3.3/README.md) | Recall graph quality, bootstrap reconciliation truth, and keychain hygiene | done |
 | [`v0.3.4`](v0.3.4/README.md) | First public v0.3.x release, release workflow, README closeout, and doctor build-info | done |
 | [`v0.3.5`](v0.3.5/README.md) | Patch-internal CLI/MCP startup and local execution hardening | done |
+| [`v0.3.6`](v0.3.6/release-notes.md) | Inspector Overview/Recall UI and reproducible bench-history loop | done |
+| [`v0.3.7`](v0.3.7/README.md) | Live strict-real bench archive + Inspector graph-action 403 repair | done |
 
 ## What v0.3.0 is
 
@@ -134,6 +136,12 @@ docs/v0.3/
     ├── README.md                          ← patch-internal CLI/MCP quality hardening
     ├── release-notes.md
     └── reports/
+└── v0.3.6/
+    ├── release-notes.md                    ← Inspector + bench feedback loop release notes
+    └── reports/
+└── v0.3.7/
+    ├── README.md                          ← live bench archive + Inspector 403 repair slice
+    └── release-notes.md
 ```
 
 The former `docs/v0.2/v0.2.1/` and `docs/v0.2/v0.2.2/` plan folders

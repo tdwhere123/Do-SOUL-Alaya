@@ -110,6 +110,7 @@ export function registerAlayaCliCommands(
   }));
   bridge.registerSubcommand(createInstallCommand());
   bridge.registerSubcommand(createInspectCommand({
+    getRequestToken: () => runtime.requestProtection.requestToken,
     startDaemonServer: async (options) => await runtime.startHttpServer(options)
   }));
   bridge.registerSubcommand(createUpdateCommand());

@@ -1,9 +1,11 @@
 # Bench History — Cross-version baseline archive
 
-This directory accumulates **reproducible recall benchmark KPIs** across
-every Alaya release that touches recall, embedding, tier, or governance
-behavior. It is the durable contract that v0.3.6 establishes for v0.3.7+
-and beyond.
+This directory accumulates **reproducible recall benchmark KPIs** and
+sanitized live-check snapshots across every Alaya release that touches
+recall, embedding, tier, or governance behavior. It is the durable
+contract that v0.3.6 establishes for v0.3.7+ and beyond.
+v0.3.7 adds `live/strict-real` entries so the older `.do-it` live main
+checks are visible beside reproducible `self` / `public` bench results.
 
 The premise: a single one-off benchmark number is theatre. A feedback
 loop — same harness, same data, diffed against previous baselines, with
@@ -11,9 +13,13 @@ regression thresholds and an Inspector trend line — is engineering.
 
 ## Why this exists
 
-- An external reader can re-run `rtk pnpm exec alaya-bench-runner self &&
-  rtk pnpm exec alaya-bench-runner longmemeval` and reproduce our
-  published numbers.
+- An external reader can re-run
+  `rtk node apps/bench-runner/bin/alaya-bench-runner.mjs self`,
+  and `rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval`
+  to reproduce the tracked archive shape after `rtk pnpm build`.
+  `alaya-bench-runner live` is operator-only re-archive plumbing: it
+  requires the local `.do-it/checks/alaya-live/main-check.json` source
+  that is intentionally not committed.
 - Any PR that changes recall / embedding / tier / proposal behavior
   must attach a fresh entry here and link the diff vs. the previous
   baseline in the PR description.
@@ -35,11 +41,19 @@ docs/bench-history/
 │   │   ├── report.md                      # human report + diff vs prev
 │   │   └── findings.md (optional)         # only present when ✗ fired
 │   └── latest-baseline.json               # JSON pointer → newest dir
-└── public/
-    └── <YYYY-MM-DDTHHMMSSZ>-<sha7>/
-        ├── kpi.json
-        ├── report.md
-        └── findings.md (optional)
+├── public/
+│   ├── <YYYY-MM-DDTHHMMSSZ>-<sha7>/
+│   │   ├── kpi.json
+│   │   ├── report.md
+│   │   └── findings.md (optional)
+│   └── latest-baseline.json
+└── live/
+    ├── <YYYY-MM-DDTHHMMSSZ>-<sha7>/
+    │   ├── kpi.json                       # normalized strict-real KPIs
+    │   ├── report.md                      # gate table + live mode comparison
+    │   ├── live-gates.json                # sanitized source gate summary
+    │   └── findings.md (optional)
+    └── latest-baseline.json
 ```
 
 - `<YYYY-MM-DDTHHMMSSZ>-<sha7>` combines the ISO-8601 run timestamp (UTC,
@@ -59,11 +73,11 @@ docs/bench-history/
 
 ```jsonc
 {
-  "bench_name": "self" | "public",
-  "split": "golden" | "synthetic" | "longmemeval-s",
+  "bench_name": "self" | "public" | "live",
+  "split": "golden" | "synthetic" | "longmemeval-s" | "longmemeval-oracle" | "longmemeval-m" | "strict-real",
   "run_at": "2026-05-14T12:34:56Z",
   "alaya_commit": "97dbdd9",
-  "alaya_version": "0.3.6",
+  "alaya_version": "0.3.7",
   "embedding_provider": "yunwu:text-embedding-3-small" | "local-heuristic" | "...",
   "chat_provider": "yunwu:gpt-5.4-mini" | "n/a",
   "dataset": { "name": "LongMemEval-S", "size": 500, "source": "..." },
@@ -83,6 +97,8 @@ docs/bench-history/
   //                        MCP tools (production-equivalent ingestion).
   //   external_replay    — bench replayed a recorded stdio transcript
   //                        against the real daemon (cross-version regression).
+  //   live_strict_real   — bench imported a strict-real live check summary
+  //                        generated from an isolated live-check DB.
   "harness_mode": "mcp_propose_review",
   "kpi": {
     "r_at_1": 0.0,                            // archival only; not threshold-gated
@@ -157,6 +173,25 @@ warning per seed. This is structural and intentional:
 The warning is informational; it does not change the propose+review
 audit chain captured under `evidence/audit-trail-witness.json`.
 
+## Live strict-real archive
+
+`live/` is a bridge from the older `.do-it/checks/alaya-live/` main
+check surface into this tracked bench-history archive.
+
+- Source input: `.do-it/checks/alaya-live/main-check.json`.
+- Writer: `rtk node apps/bench-runner/bin/alaya-bench-runner.mjs live`
+  (requires the local `.do-it` source summary).
+- Output: `docs/bench-history/live/<slug>/{kpi.json,report.md,live-gates.json}`.
+- Raw `.do-it` run directories, provider transcripts, sample JSONL, and
+  secrets remain outside git; `live-gates.json` carries only the
+  sanitized gate summary and aggregate metrics.
+- `R@1` / `R@5` come from the `embedding-real-provider` mode. The live
+  check records top1/top5 only, so the archive mirrors top5 into `R@10`
+  and states that caveat in `report.md`.
+- `tier_distribution` and `degradation_reasons` are aggregate placeholders
+  for the shared KPI schema. Read the `Live mode comparison`, `Garden
+  audit`, and gate table before using this entry for direction setting.
+
 ## Synthetic scenario versioning
 
 Each scenario in `packages/eval/fixtures/synthetic-recall/*.json` carries
@@ -212,12 +247,18 @@ rtk pnpm build
 # 1. (LongMemEval only) Fetch the public dataset before the first run.
 #    Verifies sha256 against datasets/<name>.meta.json and caches the JSON
 #    under <data-dir>/longmemeval/.
-rtk pnpm exec alaya-bench-runner fetch-longmemeval --variant oracle
+rtk node apps/bench-runner/bin/alaya-bench-runner.mjs fetch-longmemeval --variant oracle
 
 # 2. Run the benches. Each writes <split>/<date>T<HHMMSS>Z-<sha7>/ and
 #    rewrites the corresponding latest-baseline.json pointer.
-rtk pnpm exec alaya-bench-runner self
-rtk pnpm exec alaya-bench-runner longmemeval --variant oracle
+rtk node apps/bench-runner/bin/alaya-bench-runner.mjs self
+rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval --variant oracle
+
+# 3. (Live only, operator with local .do-it source) Archive the latest
+#    strict-real `.do-it` main check into the tracked bench-history/live/
+#    tree. This imports only sanitized aggregate output; it does not
+#    commit raw run artifacts.
+rtk node apps/bench-runner/bin/alaya-bench-runner.mjs live
 ```
 
 Then commit the new `<date>T<HHMMSS>Z-<sha7>/` directory +

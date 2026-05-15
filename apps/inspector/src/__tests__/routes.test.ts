@@ -405,7 +405,8 @@ describe("inspector routes", () => {
       data: {
         self: null,
         public: null,
-        errors: { self: null, public: null }
+        live: null,
+        errors: { self: null, public: null, live: null }
       }
     });
   });
@@ -517,12 +518,15 @@ describe("inspector routes", () => {
       data: {
         self: unknown;
         public: { history_count: number; latest_slug: string } | null;
-        errors: { self: string | null; public: string | null };
+        live: unknown;
+        errors: { self: string | null; public: string | null; live: string | null };
       };
     };
     expect(body.data.self).toBeNull();
     expect(body.data.errors.self).toMatch(/kpi_json_invalid|kpi_schema_invalid|summary_failed/);
     expect(body.data.errors.public).toBeNull();
+    expect(body.data.live).toBeNull();
+    expect(body.data.errors.live).toBeNull();
     expect(body.data.public?.history_count).toBe(1);
     expect(body.data.public?.latest_slug).toBe("2026-05-14T100000Z-abcdef0");
   });

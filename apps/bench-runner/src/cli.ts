@@ -15,6 +15,7 @@ import {
   type PerScenarioRow
 } from "@do-soul/alaya-eval";
 import { fetchLongMemEval } from "./longmemeval/fetch.js";
+import { runLiveBench } from "./live/runner.js";
 import { runLongMemEval } from "./longmemeval/runner.js";
 import { runSelfBench } from "./self/runner.js";
 import type { LongMemEvalVariant } from "./longmemeval/dataset.js";
@@ -27,6 +28,7 @@ Usage:
   alaya-bench-runner fetch-longmemeval [--variant oracle|s|m]
   alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--history-root <path>]
   alaya-bench-runner self [--history-root <path>]
+  alaya-bench-runner live [--source .do-it/checks/alaya-live/main-check.json] [--history-root <path>]
   alaya-bench-runner merge-longmemeval --shards <dir1> <dir2> ... --variant <v> --history-root <path>
   alaya-bench-runner --help
 
@@ -37,7 +39,7 @@ Variants:
 
 Exit codes:
   0  success (verdict ok or warn)
-  1  verdict = fail (regression)
+  1  verdict = fail (regression) or live strict-real status = fail
   2  argument / IO error
 `;
 
@@ -63,6 +65,8 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
       return runLongMemEvalCommand(opts);
     case "self":
       return runSelfCommand(opts);
+    case "live":
+      return runLiveCommand(opts);
     case "merge-longmemeval":
       return runMergeLongMemEvalCommand(opts);
     default:
@@ -80,6 +84,7 @@ interface ParsedFlags {
   readonly historyRoot: string;
   readonly dataDir?: string;
   readonly shards?: ReadonlyArray<string>;
+  readonly source?: string;
 }
 
 function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
@@ -88,6 +93,7 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   let offset: number | undefined;
   let historyRoot: string = DEFAULT_HISTORY_ROOT;
   let dataDir: string | undefined;
+  let source: string | undefined;
   const shards: string[] = [];
   let collectingShards = false;
 
@@ -116,6 +122,9 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
     } else if (token === "--data-dir") {
       dataDir = args[++i];
       collectingShards = false;
+    } else if (token === "--source") {
+      source = args[++i];
+      collectingShards = false;
     } else if (token === "--shards") {
       collectingShards = true;
     } else if (collectingShards) {
@@ -140,7 +149,8 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
     offset,
     historyRoot,
     dataDir,
-    shards: shards.length > 0 ? shards : undefined
+    shards: shards.length > 0 ? shards : undefined,
+    source
   };
 }
 
@@ -211,6 +221,31 @@ async function runSelfCommand(opts: ParsedFlags): Promise<number> {
   } catch (err) {
     process.stderr.write(
       `alaya-bench-runner self: ${err instanceof Error ? err.message : String(err)}\n`
+    );
+    return 2;
+  }
+}
+
+async function runLiveCommand(opts: ParsedFlags): Promise<number> {
+  try {
+    process.stdout.write("Archiving live strict-real check into bench-history...\n");
+    const result = await runLiveBench({
+      historyRoot: opts.historyRoot,
+      sourcePath: opts.source
+    });
+    const kpi = result.payload.kpi;
+    process.stdout.write(
+      `Done. Slug: ${result.slug}\n` +
+        `  R@1=${pct(kpi.r_at_1)} R@5=${pct(kpi.r_at_5)} R@10=${pct(kpi.r_at_10)}\n` +
+        `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
+        `  KPI: ${result.kpiPath}\n` +
+        `  Live gates: ${result.liveGatesPath}\n`
+    );
+    if (result.status === "fail") return 1;
+    return exitCodeForVerdicts(result.payload.diff_vs_previous?.verdict_per_kpi);
+  } catch (err) {
+    process.stderr.write(
+      `alaya-bench-runner live: ${err instanceof Error ? err.message : String(err)}\n`
     );
     return 2;
   }

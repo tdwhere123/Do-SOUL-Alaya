@@ -1,0 +1,392 @@
+import { execSync } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import process from "node:process";
+import { z } from "zod";
+import {
+  diffKpis,
+  entrySlug,
+  readLatest,
+  renderFindings,
+  renderReport,
+  writeEntry,
+  type HistoryLayout,
+  type KpiPayload
+} from "@do-soul/alaya-eval";
+
+export interface LiveBenchOptions {
+  readonly historyRoot: string;
+  readonly sourcePath?: string;
+}
+
+export interface LiveBenchResult {
+  readonly slug: string;
+  readonly status: "pass" | "fail";
+  readonly kpiPath: string;
+  readonly reportPath: string;
+  readonly findingsPath: string;
+  readonly liveGatesPath: string;
+  readonly payload: KpiPayload;
+}
+
+const DEFAULT_SOURCE_PATH = ".do-it/checks/alaya-live/main-check.json";
+const LIVE_GATES_FILENAME = "live-gates.json";
+const GATE_VALUE_MAX_LENGTH = 200;
+
+const GateSchema = z.object({
+  id: z.string().min(1),
+  pass: z.boolean(),
+  threshold: z.unknown(),
+  observed: z.unknown(),
+  evidence: z.string().min(1)
+});
+
+const RecallMetricsSchema = z
+  .object({
+    total_queries: z.number().int().nonnegative(),
+    top1_hits: z.number().int().nonnegative(),
+    top5_hits: z.number().int().nonnegative(),
+    top1_rate: z.number().min(0).max(1),
+    top5_rate: z.number().min(0).max(1),
+    query_error_count: z.number().int().nonnegative(),
+    query_error_rate: z.number().min(0).max(1),
+    semantic_supplement_count: z.number().int().nonnegative(),
+    semantic_supplement_rate: z.number().min(0).max(1),
+    degraded_count: z.number().int().nonnegative(),
+    p50_ms: z.number().nonnegative(),
+    p95_ms: z.number().nonnegative(),
+    max_ms: z.number().nonnegative()
+  });
+
+const ModeSchema = z
+  .object({
+    mode: z.string().min(1),
+    recall_metrics: RecallMetricsSchema,
+    mcp_initialize_failed: z.number().int().nonnegative().default(0)
+  });
+
+const LiveMainCheckSchema = z
+  .object({
+    latest_run_id: z.string().min(1),
+    status: z.enum(["pass", "fail"]),
+    generated_at: z.string().min(1),
+    run_dir: z.string().min(1),
+    report: z.string().min(1),
+    summary: z.string().min(1),
+    gates: z.array(GateSchema),
+    metrics: z
+      .object({
+        samples: z
+          .object({
+            requested: z.number().int().nonnegative(),
+            actual: z.number().int().nonnegative(),
+            query_count: z.number().int().nonnegative()
+          }),
+        provider_health: z
+          .object({
+            embedding: z
+              .object({
+                ok: z.boolean(),
+                status: z.number().int().nonnegative().nullable().optional(),
+                vector_dimensions: z.number().int().positive().nullable().optional()
+              }),
+            garden: z
+              .object({
+                ok: z.boolean(),
+                status: z.number().int().nonnegative().nullable().optional()
+          })
+	          }),
+        modes: z.array(ModeSchema).min(1),
+        garden: z
+          .object({
+            task_count: z.number().int().nonnegative(),
+            schema_valid_rate: z.number().min(0).max(1),
+            accepted_rate: z.number().min(0).max(1),
+            durable_write_success_rate: z.number().min(0).max(1),
+            accepted_followup_success_rate: z.number().min(0).max(1),
+            unreviewed_durable_write_count: z.number().int().nonnegative()
+          }),
+        security: z
+          .object({
+            raw_key_hits: z.number().int().nonnegative(),
+            exact_secret_hits: z.number().int().nonnegative()
+          })
+      })
+  });
+
+type LiveMainCheck = z.infer<typeof LiveMainCheckSchema>;
+type LiveMode = z.infer<typeof ModeSchema>;
+
+export async function runLiveBench(
+  opts: LiveBenchOptions
+): Promise<LiveBenchResult> {
+  const sourcePath = opts.sourcePath ?? DEFAULT_SOURCE_PATH;
+  const sourceRaw = await readFile(sourcePath, "utf8");
+  const source = LiveMainCheckSchema.parse(JSON.parse(sourceRaw));
+  const providerMode = resolveProviderMode(source.metrics.modes);
+  const keywordMode = source.metrics.modes.find((mode) => mode.mode === "keyword-local") ?? null;
+  const providerMetrics = providerMode.recall_metrics;
+  const runAt = parseRunDate(source.generated_at);
+  const commitSha7 = resolveCommitSha7();
+  const payload: KpiPayload = {
+    bench_name: "live",
+    split: "strict-real",
+    run_at: runAt.toISOString(),
+    alaya_commit: commitSha7,
+    alaya_version: await resolveAlayaVersion(),
+    embedding_provider: source.metrics.provider_health.embedding.ok
+      ? providerMode.mode
+      : "unavailable",
+    chat_provider: source.metrics.provider_health.garden.ok
+      ? "garden-real-provider"
+      : "unavailable",
+    dataset: {
+      name: "alaya-live-strict-real",
+      size: source.metrics.samples.requested,
+      source: `${relativeToCwd(sourcePath)}#${source.latest_run_id}`
+    },
+    sample_size: source.metrics.samples.requested,
+    evaluated_count: providerMetrics.total_queries,
+    harness_mode: "live_strict_real",
+    kpi: {
+      r_at_1: providerMetrics.top1_rate,
+      r_at_5: providerMetrics.top5_rate,
+      r_at_10: providerMetrics.top5_rate,
+      latency_ms_p50: providerMetrics.p50_ms,
+      latency_ms_p95: providerMetrics.p95_ms,
+      latency_source: "exact",
+      token_saved_ratio_vs_full_prompt: 0,
+      tier_distribution: {
+        hot: 0,
+        warm: providerMetrics.total_queries,
+        cold: 0
+      },
+      degradation_reasons: {
+        none: Math.max(0, providerMetrics.total_queries - providerMetrics.degraded_count),
+        warm_cascade_engaged: 0,
+        cold_cascade_engaged: 0,
+        recall_explainability_partial: providerMetrics.degraded_count
+      },
+      seed_truncation: {
+        seed_turns_truncated: 0,
+        answer_turns_truncated: 0,
+        seed_chars_clipped: 0
+      },
+      per_scenario: []
+    }
+  };
+
+  const layout: HistoryLayout = { historyRoot: opts.historyRoot };
+  const previous = await readLatest(layout, "live", { split: "strict-real" });
+  const diff = diffKpis(payload, previous);
+  const slug = entrySlug(runAt, commitSha7);
+  const report = renderLiveReport(payload, previous, diff, source, providerMode, keywordMode);
+  const findings = renderFindings(payload, diff);
+  const entry = await writeEntry(layout, "live", slug, payload, report, findings, {
+    sidecars: [
+      {
+        filename: LIVE_GATES_FILENAME,
+        contents:
+          JSON.stringify(buildLiveGatesSidecar(source, providerMode, keywordMode, sourcePath), null, 2) + "\n"
+      }
+    ]
+  });
+  const liveGatesPath =
+    entry.sidecarPaths[LIVE_GATES_FILENAME] ?? path.join(path.dirname(entry.kpiPath), LIVE_GATES_FILENAME);
+  return {
+    slug,
+    status: source.status,
+    kpiPath: entry.kpiPath,
+    reportPath: entry.reportPath,
+    findingsPath: entry.findingsPath,
+    liveGatesPath,
+    payload
+  };
+}
+
+function resolveProviderMode(modes: readonly LiveMode[]): LiveMode {
+  const provider = modes.find((mode) => mode.mode === "embedding-real-provider");
+  if (provider !== undefined) return provider;
+  throw new Error("live check did not include embedding-real-provider mode");
+}
+
+function renderLiveReport(
+  payload: KpiPayload,
+  previous: KpiPayload | null,
+  diff: Parameters<typeof renderReport>[2],
+  source: LiveMainCheck,
+  providerMode: LiveMode,
+  keywordMode: LiveMode | null
+): string {
+  const lines = [renderReport(payload, previous, diff), ""];
+  lines.push("## Live strict-real gates", "");
+  lines.push(
+    `- Source run: ${source.latest_run_id}`,
+    `- Source status: ${source.status}`,
+    `- Source directory: ${source.run_dir}`,
+    `- Security scan: raw=${source.metrics.security.raw_key_hits} exact=${source.metrics.security.exact_secret_hits}`,
+    `- R@10 note: the live check records top1/top5 only; this archive mirrors top5 into R@10 so diff tooling can read one KPI shape.`
+  );
+  lines.push("");
+  lines.push("| gate | result | observed | threshold | evidence |");
+  lines.push("|---|---|---:|---|---|");
+  for (const gate of source.gates) {
+    lines.push(
+      `| ${gate.id} | ${gate.pass ? "PASS" : "FAIL"} | ${formatUnknown(gate.observed)} | ${formatUnknown(gate.threshold)} | \`${gate.evidence}\` |`
+    );
+  }
+  lines.push("");
+  lines.push("## Live mode comparison", "");
+  lines.push("| mode | top1 | top5 | semantic supplement | p95 ms | query errors |");
+  lines.push("|---|---:|---:|---:|---:|---:|");
+  for (const mode of keywordMode === null ? [providerMode] : [keywordMode, providerMode]) {
+    const metrics = mode.recall_metrics;
+    lines.push(
+      `| ${mode.mode} | ${formatRatio(metrics.top1_rate)} | ${formatRatio(metrics.top5_rate)} | ${formatRatio(metrics.semantic_supplement_rate)} | ${metrics.p95_ms} | ${metrics.query_error_count} |`
+    );
+  }
+  lines.push("");
+  lines.push("## Garden audit", "");
+  lines.push(
+    `- Tasks: ${source.metrics.garden.task_count}`,
+    `- Schema-valid: ${formatRatio(source.metrics.garden.schema_valid_rate)}`,
+    `- Reviewer accepted: ${formatRatio(source.metrics.garden.accepted_rate)}`,
+    `- Durable write success: ${formatRatio(source.metrics.garden.durable_write_success_rate)}`,
+    `- Follow-up success: ${formatRatio(source.metrics.garden.accepted_followup_success_rate)}`,
+    `- Unreviewed durable writes: ${source.metrics.garden.unreviewed_durable_write_count}`
+  );
+  lines.push("");
+  return lines.join("\n");
+}
+
+function buildLiveGatesSidecar(
+  source: LiveMainCheck,
+  providerMode: LiveMode,
+  keywordMode: LiveMode | null,
+  sourcePath: string
+): unknown {
+  return {
+    source_path: relativeToCwd(sourcePath),
+    latest_run_id: source.latest_run_id,
+    status: source.status,
+    generated_at: source.generated_at,
+    run_dir: source.run_dir,
+    report: source.report,
+    summary: source.summary,
+    gates: source.gates.map(sanitizeGate),
+    modes: (keywordMode === null ? [providerMode] : [keywordMode, providerMode]).map(summarizeMode),
+    garden: {
+      task_count: source.metrics.garden.task_count,
+      schema_valid_rate: source.metrics.garden.schema_valid_rate,
+      accepted_rate: source.metrics.garden.accepted_rate,
+      durable_write_success_rate: source.metrics.garden.durable_write_success_rate,
+      accepted_followup_success_rate: source.metrics.garden.accepted_followup_success_rate,
+      unreviewed_durable_write_count: source.metrics.garden.unreviewed_durable_write_count
+    },
+    provider_health: {
+      embedding: {
+        ok: source.metrics.provider_health.embedding.ok,
+        status: source.metrics.provider_health.embedding.status ?? null,
+        vector_dimensions: source.metrics.provider_health.embedding.vector_dimensions ?? null
+      },
+      garden: {
+        ok: source.metrics.provider_health.garden.ok,
+        status: source.metrics.provider_health.garden.status ?? null
+      }
+    },
+    security: {
+      raw_key_hits: source.metrics.security.raw_key_hits,
+      exact_secret_hits: source.metrics.security.exact_secret_hits
+    }
+  };
+}
+
+function summarizeMode(mode: LiveMode): unknown {
+  const metrics = mode.recall_metrics;
+  return {
+    mode: mode.mode,
+    recall_metrics: {
+      total_queries: metrics.total_queries,
+      top1_hits: metrics.top1_hits,
+      top5_hits: metrics.top5_hits,
+      top1_rate: metrics.top1_rate,
+      top5_rate: metrics.top5_rate,
+      query_error_count: metrics.query_error_count,
+      query_error_rate: metrics.query_error_rate,
+      semantic_supplement_count: metrics.semantic_supplement_count,
+      semantic_supplement_rate: metrics.semantic_supplement_rate,
+      degraded_count: metrics.degraded_count,
+      p50_ms: metrics.p50_ms,
+      p95_ms: metrics.p95_ms,
+      max_ms: metrics.max_ms
+    },
+    mcp_initialize_failed: mode.mcp_initialize_failed
+  };
+}
+
+function sanitizeGate(gate: z.infer<typeof GateSchema>): unknown {
+  return {
+    id: gate.id,
+    pass: gate.pass,
+    threshold: sanitizeGateValue(gate.threshold),
+    observed: sanitizeGateValue(gate.observed),
+    evidence: gate.evidence
+  };
+}
+
+function sanitizeGateValue(value: unknown): string | number | boolean | null {
+  if (value === null || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "string") return truncateGateValue(value);
+  return "[redacted_non_scalar]";
+}
+
+function truncateGateValue(value: string): string {
+  if (value.length <= GATE_VALUE_MAX_LENGTH) return value;
+  return `${value.slice(0, GATE_VALUE_MAX_LENGTH)}...`;
+}
+
+function parseRunDate(value: string): Date {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) {
+    throw new Error(`live check generated_at is not a valid ISO date: ${value}`);
+  }
+  return date;
+}
+
+function resolveCommitSha7(): string {
+  try {
+    return execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
+  } catch {
+    return "0000000";
+  }
+}
+
+async function resolveAlayaVersion(): Promise<string> {
+  try {
+    const raw = await readFile(path.resolve(process.cwd(), "package.json"), "utf8");
+    const parsed = JSON.parse(raw) as { version?: unknown };
+    return typeof parsed.version === "string" && parsed.version.length > 0
+      ? parsed.version
+      : "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
+
+function relativeToCwd(value: string): string {
+  const absolute = path.resolve(value);
+  const relative = path.relative(process.cwd(), absolute);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) return value;
+  return relative.length === 0 ? "." : relative;
+}
+
+function formatRatio(value: number): string {
+  if (!Number.isFinite(value)) return "-";
+  return `${(value * 100).toFixed(2)}%`;
+}
+
+function formatUnknown(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value) ?? "";
+}
