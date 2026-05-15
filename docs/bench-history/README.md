@@ -27,7 +27,7 @@ regression thresholds and an Inspector trend line — is engineering.
 ## Layout
 
 ```
-docs/v0.3/bench-history/
+docs/bench-history/
 ├── README.md                              # this file
 ├── self/
 │   ├── <YYYY-MM-DDTHHMMSSZ>-<sha7>/

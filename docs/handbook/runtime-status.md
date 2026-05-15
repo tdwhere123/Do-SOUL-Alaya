@@ -276,9 +276,9 @@ New runtime-visible surfaces:
 - Bench harness (public LongMemEval-Oracle + LongMemEval-S) —
   `@do-soul/alaya-bench-runner longmemeval --variant {oracle|s}` runs
   the HuggingFace dataset (sha256-pinned under
-  `docs/v0.3/bench-history/datasets/<variant>.meta.json`) through the
+  `docs/bench-history/datasets/<variant>.meta.json`) through the
   same in-process daemon.
-- Bench history archive (`docs/v0.3/bench-history/{self,public}/`) —
+- Bench history archive (`docs/bench-history/{self,public}/`) —
   bench-keyed entries with `kpi.json`, `report.md`, optional
   `findings.md`. The bench-wide `latest-baseline.json` pointer tracks
   the newest entry across all splits; split-aware comparison lives in

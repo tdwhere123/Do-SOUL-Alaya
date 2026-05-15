@@ -66,7 +66,7 @@ agent 就能凭幻觉造真相；召回阶段如果让 embedding 压过证据，
 公开的 memory 框架（`mem0` / `agentmemory` / `Letta` / …）几乎都把
 精力全压在轴 1 上，轴 2 留得很薄。Alaya 故意倒过来。下面的 Quickstart
 和 Architecture 章节都是 governance-first；recall 精度我们当 KPI 测、
-进 [bench-history](docs/v0.3/bench-history/) 归档，不当作品牌口号。
+进 [bench-history](docs/bench-history/) 归档，不当作品牌口号。
 
 v0.3.6 跑出来的第一份诚实 LongMemEval-S retrieval 基线（**全集 500/500
 question**、仅 SQLite FTS + activation、没启用 embedding 补充、每题
@@ -93,7 +93,7 @@ question**、仅 SQLite FTS + activation、没启用 embedding 补充、每题
 node apps/bench-runner/bin/alaya-bench-runner.mjs self
 # LongMemEval-S 全集 500q，2-shard 并行（普通笔记本约 85 min；纯
 # sequential 约 150 min）。最终写一份合并 kpi.json + report.md 到
-# docs/v0.3/bench-history/public/<slug>/。
+# docs/bench-history/public/<slug>/。
 apps/bench-runner/scripts/run-full-public-bench.sh --variant s --shards 2
 ```
 

@@ -72,7 +72,7 @@ Most public memory frameworks (`mem0`, `agentmemory`, `Letta`, …) optimise
 hard on axis 1 and stay light on axis 2. Alaya inverts that emphasis —
 deliberately. The Quickstart and the Architecture sections below are
 governance-first; recall accuracy is something we measure and publish as
-the [bench-history](docs/v0.3/bench-history/) archive, not something we
+the [bench-history](docs/bench-history/) archive, not something we
 brand on.
 
 The first honest LongMemEval-S retrieval baseline (v0.3.6, **full set
@@ -101,7 +101,7 @@ KPI reproducible by:
 node apps/bench-runner/bin/alaya-bench-runner.mjs self
 # LongMemEval-S full 500-q set, 2-shard parallel (~85 min on a typical
 # laptop; sequential is ~150 min). Writes a single merged kpi.json +
-# report.md to docs/v0.3/bench-history/public/<slug>/.
+# report.md to docs/bench-history/public/<slug>/.
 apps/bench-runner/scripts/run-full-public-bench.sh --variant s --shards 2
 ```
 

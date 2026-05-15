@@ -25,16 +25,19 @@ const UPSTREAM_FILENAME: Record<LongMemEvalVariant, string> = {
 };
 
 // @anchor pinned-meta-root — pinned (committed) dataset checksums live under
-// docs/v0.3/bench-history/datasets/<variant>.meta.json. This is the trusted
+// docs/bench-history/datasets/<variant>.meta.json. This is the trusted
 // reference for loadDataset; the gitignored data/longmemeval/<variant>.meta.json
 // is only a fetch-time scratch record and is NOT load-bearing.
 const PINNED_META_ROOT = path.resolve(
   __dirname,
-  "../../../../docs/v0.3/bench-history/datasets"
+  "../../../../docs/bench-history/datasets"
 );
+// @anchor pinned-meta-root-path — 4 segments up from
+// apps/bench-runner/dist/longmemeval/ -> apps/bench-runner/dist/ ->
+// apps/bench-runner/ -> apps/ -> repo-root, then docs/bench-history/datasets.
 
 // Variant ids ("longmemeval_oracle", "longmemeval_s", ...) match the meta
-// filename stem directly: docs/v0.3/bench-history/datasets/<variant>.meta.json.
+// filename stem directly: docs/bench-history/datasets/<variant>.meta.json.
 function pinnedMetaPath(variant: LongMemEvalVariant, root?: string): string {
   return path.join(root ?? PINNED_META_ROOT, `${variant}.meta.json`);
 }
@@ -105,7 +108,7 @@ export async function fetchLongMemEval(
  * Load a previously fetched LongMemEval variant from the local data dir.
  *
  * @invariant The local JSON file's sha256 MUST match the pinned checksum
- *   under docs/v0.3/bench-history/datasets/<variant>.meta.json. A loader
+ *   under docs/bench-history/datasets/<variant>.meta.json. A loader
  *   that skips this check would let a corrupted or upstream-mutated cache
  *   silently produce different bench numbers across runs and reviewers.
  *
@@ -124,7 +127,7 @@ export async function loadDataset(
     pinnedRaw = await readFile(pinnedPath, "utf8");
   } catch {
     throw new Error(
-      `dataset not pinned: ${variant}; commit a checksum to docs/v0.3/bench-history/datasets/${variant}.meta.json first`
+      `dataset not pinned: ${variant}; commit a checksum to docs/bench-history/datasets/${variant}.meta.json first`
     );
   }
 

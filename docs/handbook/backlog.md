@@ -73,11 +73,11 @@ driver.
 **Close condition**:
 
 1. LoCoMo dataset fetcher + sha256-pinned meta committed under
-   `docs/v0.3/bench-history/datasets/`.
+   `docs/bench-history/datasets/`.
 2. `alaya-bench-runner locomo` subcommand wired to the same in-process
    daemon harness + propose+review chain.
 3. R@K, latency, token-saved KPIs in a fresh
-   `docs/v0.3/bench-history/public/<slug>/` entry; report.md cites
+   `docs/bench-history/public/<slug>/` entry; report.md cites
    `agentmemory`'s number with link and the dataset-version pin.
 
 ### #BL-042 — Inspector Memory Browser + command palette (deferred from v0.3.6)

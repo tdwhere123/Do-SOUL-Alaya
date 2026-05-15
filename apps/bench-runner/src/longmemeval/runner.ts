@@ -26,7 +26,7 @@ export interface LongMemEvalRunOptions {
   readonly fetchResult?: FetchResult;
   // Override the pinned-checksum lookup root (test-only). Production
   // callers should leave this undefined so the canonical
-  // docs/v0.3/bench-history/datasets path is used.
+  // docs/bench-history/datasets path is used.
   readonly pinnedMetaRoot?: string;
   // @anchor longmemeval-offset — skip the first N questions before
   // `limit`. Pairs with process-level sharding in

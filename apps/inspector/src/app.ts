@@ -79,7 +79,7 @@ export function createInspectorApp(options: InspectorAppOptions): Hono {
   registerInspectorBenchSummaryRoutes(app, {
     historyRoot:
       options.benchHistoryRoot ??
-      resolve(process.cwd(), "docs/v0.3/bench-history")
+      resolve(process.cwd(), "docs/bench-history")
   });
   registerInspectorStaticRoutes(app, {
     staticRoot: options.staticRoot ?? defaultStaticRoot

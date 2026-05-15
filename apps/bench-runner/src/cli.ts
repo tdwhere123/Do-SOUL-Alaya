@@ -19,7 +19,7 @@ import { runLongMemEval } from "./longmemeval/runner.js";
 import { runSelfBench } from "./self/runner.js";
 import type { LongMemEvalVariant } from "./longmemeval/dataset.js";
 
-const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/v0.3/bench-history");
+const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
 
 const HELP_TEXT = `alaya-bench-runner — daemon-attached benchmark harness
 

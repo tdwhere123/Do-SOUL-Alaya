@@ -27,8 +27,8 @@ hidden, neither overclaimed.
   harness that drives self-bench and LongMemEval through the real
   in-process daemon + MCP `propose+review` chain.
 - LongMemEval-Oracle and LongMemEval-S drivers (sha256-pinned via
-  `docs/v0.3/bench-history/datasets/`).
-- Cross-version benchmark archive under `docs/v0.3/bench-history/` with
+  `docs/bench-history/datasets/`).
+- Cross-version benchmark archive under `docs/bench-history/` with
   split-aware `readLatest` so Oracle and S do not cross-compare.
 - Evidence artefact: 9-row EventLog audit-trail-witness for one bench
   seed, proving the harness exercises the production governance path.
@@ -83,7 +83,7 @@ node apps/bench-runner/bin/alaya-bench-runner.mjs fetch-longmemeval --variant s
 node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval --variant s --limit 20
 ```
 
-History archive: `docs/v0.3/bench-history/`. Each run writes
+History archive: `docs/bench-history/`. Each run writes
 `{kpi.json, report.md}` and rewrites `latest-baseline.json`; runs across
 splits (synthetic / longmemeval-oracle / longmemeval-s) are diffed
 apples-to-apples via the split-aware `readLatest`.

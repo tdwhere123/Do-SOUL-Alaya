@@ -69,11 +69,11 @@ MASTER_LOG="$LOG_DIR/${RUN_TAG}.log"
 
 # Resolve total sample size by reading the pinned meta (avoid loading the
 # full dataset JSON in the driver). Dataset variants are pinned under
-# docs/v0.3/bench-history/datasets/<variant>.meta.json.
+# docs/bench-history/datasets/<variant>.meta.json.
 case "$VARIANT" in
-  oracle) META="docs/v0.3/bench-history/datasets/longmemeval_oracle.meta.json";;
-  s) META="docs/v0.3/bench-history/datasets/longmemeval_s.meta.json";;
-  m) META="docs/v0.3/bench-history/datasets/longmemeval_m.meta.json";;
+  oracle) META="docs/bench-history/datasets/longmemeval_oracle.meta.json";;
+  s) META="docs/bench-history/datasets/longmemeval_s.meta.json";;
+  m) META="docs/bench-history/datasets/longmemeval_m.meta.json";;
   *) echo "unknown variant: $VARIANT" >&2; exit 2;;
 esac
 TOTAL=$(node -e "const d=JSON.parse(require('fs').readFileSync('$META','utf8'));console.log(d.question_count);")
@@ -131,7 +131,7 @@ echo "[$(date -u -Iseconds)] merging shards..." | tee -a "$MASTER_LOG"
 node apps/bench-runner/bin/alaya-bench-runner.mjs merge-longmemeval \
   --variant "$VARIANT" \
   --shards "${SHARD_ROOTS[@]}" \
-  --history-root "docs/v0.3/bench-history" \
+  --history-root "docs/bench-history" \
   2>&1 | tee -a "$MASTER_LOG"
 
 echo "[$(date -u -Iseconds)] driver done. master log=$MASTER_LOG" | tee -a "$MASTER_LOG"

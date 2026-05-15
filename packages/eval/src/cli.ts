@@ -8,7 +8,7 @@ import { runLongMemEval } from "./longmemeval/runner.js";
 import { renderReport } from "./report.js";
 import { BenchName } from "./kpi-schema.js";
 
-const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/v0.3/bench-history");
+const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
 
 const HELP_TEXT = `alaya-eval — reproducible recall benchmark harness
 
