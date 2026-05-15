@@ -472,7 +472,7 @@ function resolveAlayaVersion(): string {
     const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
     return pkg.version;
   } catch {
-    return "0.3.7";
+    return "0.3.8";
   }
 }
 

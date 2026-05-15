@@ -480,7 +480,7 @@ describe("inspector routes", () => {
         split: "longmemeval-s",
         run_at: "2026-05-15T10:00:00.000Z",
         alaya_commit: "abcdef0",
-        alaya_version: "0.3.7",
+        alaya_version: "0.3.8",
         embedding_provider: "none",
         chat_provider: "none",
         dataset: {

@@ -441,7 +441,7 @@ describe("merge-longmemeval validations", () => {
       shardB,
       makeShardKpi({
         alaya_commit: "0000bbb",
-        alaya_version: "0.3.7",
+        alaya_version: "0.3.8",
         kpi: {
           ...makeShardKpi().kpi,
           per_scenario: [
@@ -463,7 +463,7 @@ describe("merge-longmemeval validations", () => {
     ]);
     expect(exitCode).toBe(2);
     expect(stderrBuf).toMatch(
-      /alaya_version=0.3.7 != shard\[0\] alaya_version=0.3.6/
+      /alaya_version=0.3.8 != shard\[0\] alaya_version=0.3.6/
     );
   });
 
