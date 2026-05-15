@@ -422,6 +422,16 @@ describe("RecallService", () => {
       }
     ]);
     const { dependencies } = createDependencies(memories);
+    const preparedQuery = createPreparedQueryHandle("prepared-query-origin-collision");
+    const querySupplementIfReady = vi.fn(async () => ({
+      supplementaryEntries: Object.freeze([]),
+      similarityHintsByObjectId: Object.freeze({
+        [sharedObjectId]: Object.freeze({
+          object_id: sharedObjectId,
+          normalized_similarity: 0.25
+        })
+      })
+    }));
     const service = new RecallService({
       ...dependencies,
       projectMappingPort: {
@@ -436,6 +446,15 @@ describe("RecallService", () => {
       },
       globalRecallPort: {
         recall: globalRecall
+      },
+      embeddingRecallService: {
+        hasStoredVectors: vi.fn(async () => true),
+        prepareQueryEmbedding: vi.fn(() => preparedQuery),
+        querySupplementIfReady,
+        querySupplement: vi.fn(async () => ({
+          supplementaryEntries: Object.freeze([]),
+          similarityHintsByObjectId: Object.freeze({})
+        }))
       }
     });
     const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
@@ -452,6 +471,11 @@ describe("RecallService", () => {
           ...basePolicy.coarse_filter.precomputed_rank,
           max_candidates: 10,
           min_activation_score: null
+        },
+        semantic_supplement: {
+          enabled: true,
+          max_supplement: 5,
+          embedding_enabled: true
         }
       },
       fine_assessment: {
@@ -474,11 +498,119 @@ describe("RecallService", () => {
     const collidingCandidates = result.candidates.filter(
       (candidate) => candidate.object_id === sharedObjectId
     );
+    expect(querySupplementIfReady).toHaveBeenCalled();
     expect(collidingCandidates).toHaveLength(2);
     expect(collidingCandidates.map((candidate) => candidate.origin_plane).sort()).toEqual([
       "global",
       "workspace_local"
     ]);
+  });
+
+  it("applies embedding hits to the local candidate when a global candidate shares its object id", async () => {
+    const sharedObjectId = "shared-object-id-embedding";
+    const memories = [
+      createMemoryEntry({
+        object_id: sharedObjectId,
+        scope_class: ScopeClass.PROJECT,
+        content: "Local workspace procedure with the semantic answer.",
+        activation_score: 0.19
+      })
+    ];
+    const globalRecall = vi.fn(async () => [
+      {
+        global_object_id: sharedObjectId,
+        dimension: MemoryDimension.PROCEDURE,
+        scope_class: ScopeClass.GLOBAL_DOMAIN,
+        content: "Global source-plane procedure.",
+        domain_tags: ["repo"],
+        evidence_refs: ["evidence-shared"],
+        activation_score: 0.2,
+        created_at: "2026-03-23T00:00:00.000Z",
+        updated_at: "2026-03-23T00:00:00.000Z"
+      }
+    ]);
+    const { dependencies } = createDependencies(memories);
+    const preparedQuery = createPreparedQueryHandle("prepared-query-origin-local");
+    const querySupplementIfReady = vi.fn(async () => ({
+      supplementaryEntries: Object.freeze([memories[0]!]),
+      similarityHintsByObjectId: Object.freeze({
+        [sharedObjectId]: Object.freeze({
+          object_id: sharedObjectId,
+          normalized_similarity: 1
+        })
+      })
+    }));
+    const service = new RecallService({
+      ...dependencies,
+      projectMappingPort: {
+        findByWorkspace: vi.fn(async () => []),
+        ensureSuggestedAnchors: vi.fn(async () => [
+          createAnchor({
+            object_id: "mapping-shared-embedding",
+            global_object_id: sharedObjectId,
+            mapping_state: ProjectMappingState.ACCEPTED
+          })
+        ])
+      },
+      globalRecallPort: {
+        recall: globalRecall
+      },
+      embeddingRecallService: {
+        hasStoredVectors: vi.fn(async () => true),
+        prepareQueryEmbedding: vi.fn(() => preparedQuery),
+        querySupplementIfReady,
+        querySupplement: vi.fn(async () => ({
+          supplementaryEntries: Object.freeze([]),
+          similarityHintsByObjectId: Object.freeze({})
+        }))
+      }
+    });
+    const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+    const policy = overridePolicy(basePolicy, {
+      coarse_filter: {
+        ...basePolicy.coarse_filter,
+        deterministic_match: {
+          ...basePolicy.coarse_filter.deterministic_match,
+          scope_filter: null,
+          dimension_filter: null,
+          domain_tag_filter: null
+        },
+        precomputed_rank: {
+          ...basePolicy.coarse_filter.precomputed_rank,
+          max_candidates: 10,
+          min_activation_score: null
+        },
+        semantic_supplement: {
+          enabled: true,
+          max_supplement: 5,
+          embedding_enabled: true
+        }
+      },
+      fine_assessment: {
+        ...basePolicy.fine_assessment,
+        budgets: {
+          max_entries: 1,
+          max_total_tokens: 1000,
+          per_dimension_limits: null
+        }
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    expect(querySupplementIfReady).toHaveBeenCalled();
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]).toMatchObject({
+      object_id: sharedObjectId,
+      origin_plane: "workspace_local"
+    });
+    expect(result.candidates[0]?.score_factors?.embedding_similarity).toBe(1);
+    expect(result.candidates[0]?.source_channels).toContain("semantic_supplement");
   });
 
   it("does not record global recall classifications when recall completion fails", async () => {
@@ -1170,6 +1302,93 @@ describe("RecallService", () => {
       remaining_entries: 0,
       within_budget: true
     });
+  });
+
+  it("allows an embedding-boosted supplement to replace a weaker lexical candidate within the delivery budget", async () => {
+    const memories = [
+      createMemoryEntry({
+        object_id: "memory-lexical",
+        dimension: MemoryDimension.PROCEDURE,
+        activation_score: 0.2,
+        content: "Lexical baseline procedure."
+      }),
+      createMemoryEntry({
+        object_id: "memory-semantic",
+        dimension: MemoryDimension.PROCEDURE,
+        activation_score: 0.19,
+        content: "Semantically relevant procedure."
+      })
+    ];
+    const { dependencies } = createDependencies(memories);
+    const preparedQuery = createPreparedQueryHandle("prepared-query-replace");
+    const querySupplementIfReady = vi.fn(async () => ({
+      supplementaryEntries: Object.freeze([memories[1]!]),
+      similarityHintsByObjectId: Object.freeze({
+        "memory-lexical": Object.freeze({
+          object_id: "memory-lexical",
+          normalized_similarity: 0
+        }),
+        "memory-semantic": Object.freeze({
+          object_id: "memory-semantic",
+          normalized_similarity: 1
+        })
+      })
+    }));
+    const service = new RecallService({
+      ...dependencies,
+      embeddingRecallService: {
+        hasStoredVectors: vi.fn(async () => true),
+        prepareQueryEmbedding: vi.fn(() => preparedQuery),
+        querySupplementIfReady,
+        querySupplement: vi.fn(async () => ({
+          supplementaryEntries: Object.freeze([]),
+          similarityHintsByObjectId: Object.freeze({})
+        }))
+      }
+    });
+    const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+    const policy = overridePolicy(basePolicy, {
+      coarse_filter: {
+        ...basePolicy.coarse_filter,
+        precomputed_rank: {
+          max_candidates: 2,
+          min_activation_score: null
+        },
+        semantic_supplement: {
+          enabled: true,
+          max_supplement: 1,
+          embedding_enabled: true
+        }
+      },
+      fine_assessment: {
+        ...basePolicy.fine_assessment,
+        budgets: {
+          max_entries: 1,
+          max_total_tokens: 1000,
+          per_dimension_limits: null
+        }
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    expect(querySupplementIfReady).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eligibleMemories: expect.arrayContaining([
+          expect.objectContaining({ object_id: "memory-lexical" }),
+          expect.objectContaining({ object_id: "memory-semantic" })
+        ])
+      })
+    );
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
+      "memory-semantic"
+    ]);
+    expect(result.candidates[0]?.score_factors?.embedding_similarity).toBe(1);
   });
 
   it("skips prepared embedding work when no stored vectors exist for eligible memories", async () => {

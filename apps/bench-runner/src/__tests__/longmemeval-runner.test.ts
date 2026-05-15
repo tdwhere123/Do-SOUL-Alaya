@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { KpiPayloadSchema } from "@do-soul/alaya-eval";
-import { runLongMemEval } from "../longmemeval/runner.js";
+import {
+  resolveBenchEmbeddingProviderLabel,
+  runLongMemEval
+} from "../longmemeval/runner.js";
 import type { LongMemEvalQuestion } from "../longmemeval/dataset.js";
 
 let tmpDir: string;
@@ -40,6 +43,25 @@ function buildMockQuestion(id: string, answerSessionId: string): LongMemEvalQues
 }
 
 describe("LongMemEval runner", () => {
+  it("labels env embedding benchmarks with provider and model metadata", () => {
+    expect(
+      resolveBenchEmbeddingProviderLabel("env", {
+        OPENAI_EMBEDDING_PROVIDER_URL: "https://api.yunwu.example/v1",
+        OPENAI_EMBEDDING_MODEL: "text-embedding-3-large"
+      })
+    ).toBe("yunwu:text-embedding-3-large");
+    expect(
+      resolveBenchEmbeddingProviderLabel("env", {
+        OPENAI_EMBEDDING_PROVIDER_URL: "https://embedding-proxy.example/v1",
+        OPENAI_EMBEDDING_MODEL: "custom-embed"
+      })
+    ).toBe("openai-compatible:custom-embed");
+    expect(resolveBenchEmbeddingProviderLabel("env", {})).toBe(
+      "openai:text-embedding-3-small"
+    );
+    expect(resolveBenchEmbeddingProviderLabel("disabled", {})).toBe("none");
+  });
+
   it(
     "runs 2-question mock dataset through the real MCP propose+review chain and produces a valid kpi.json with mcp_propose_review harness_mode",
     async () => {
@@ -90,6 +112,7 @@ describe("LongMemEval runner", () => {
 
       // harness_mode must reflect the real MCP chain — never direct_db_seed.
       expect(result.payload.harness_mode).toBe("mcp_propose_review");
+      expect(result.payload.embedding_provider).toBe("none");
 
       // KPI payload must pass schema validation
       const parseResult = KpiPayloadSchema.safeParse(result.payload);

@@ -171,6 +171,8 @@ import type {
 } from "./daemon-runtime-types.js";
 
 export type { AlayaDaemonListenOptions, AlayaDaemonRuntime, AlayaDaemonRuntimeServices, AlayaDaemonServer, DaemonStartupStepRecord } from "./daemon-runtime-types.js";
+export { resolveSecretRef } from "./secrets.js";
+export type { ResolveSecretError, ResolvedSecret, SecretRefReader } from "./secrets.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..", "..");

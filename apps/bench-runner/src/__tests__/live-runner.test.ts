@@ -39,6 +39,14 @@ describe("live strict-real bench archive", () => {
     expect(report).toContain("Live strict-real gates");
     expect(report).toContain("provider_top5");
     expect(report).toContain("R@10 note");
+    expect(report).not.toContain("raw_transcript");
+    expect(report).not.toContain("foreign_object_id");
+    expect(report).not.toContain("text_excerpt");
+    expect(report).not.toContain("db_metrics");
+    expect(report).not.toContain("verbose provider error");
+    expect(report).not.toContain("sk-redacted-test");
+    expect(report).not.toContain("OPENAI_API_KEY");
+    expect(report).toContain("[redacted_sensitive_scalar]");
 
     const sidecarRaw = await readFile(result.liveGatesPath, "utf8");
     expect(sidecarRaw).not.toContain("raw_transcript");
@@ -46,6 +54,8 @@ describe("live strict-real bench archive", () => {
     expect(sidecarRaw).not.toContain("text_excerpt");
     expect(sidecarRaw).not.toContain("db_metrics");
     expect(sidecarRaw).not.toContain("verbose provider error");
+    expect(sidecarRaw).not.toContain("sk-redacted-test");
+    expect(sidecarRaw).not.toContain("OPENAI_API_KEY");
     const sidecar = JSON.parse(sidecarRaw) as {
       latest_run_id: string;
       gates: readonly { id: string; pass: boolean; observed: unknown }[];
@@ -96,6 +106,42 @@ describe("live strict-real bench archive", () => {
     }
   });
 
+  it("archives per-run main-check-run summaries from historical .do-it runs", async () => {
+    const historyRoot = path.join(tmpRoot, "run-summary-history");
+    const wrapper = buildSource() as LiveWrapperSource;
+    const directSummary = {
+      run_id: wrapper.latest_run_id,
+      status: wrapper.status,
+      finished_at: wrapper.generated_at,
+      artifacts: {
+        run_dir: wrapper.run_dir
+      },
+      samples: wrapper.metrics.samples,
+      provider_health: wrapper.metrics.provider_health,
+      modes: wrapper.metrics.modes,
+      garden: wrapper.metrics.garden,
+      security: wrapper.metrics.security,
+      gates: wrapper.gates
+    };
+    await writeFile(sourcePath, JSON.stringify(directSummary, null, 2) + "\n", "utf8");
+
+    const result = await runLiveBench({ historyRoot, sourcePath });
+
+    expect(result.status).toBe("pass");
+    expect(result.payload.dataset.source).toBe(`${sourcePath}#${wrapper.latest_run_id}`);
+    const sidecarRaw = await readFile(result.liveGatesPath, "utf8");
+    const sidecar = JSON.parse(sidecarRaw) as {
+      summary: string;
+      source_path: string;
+      latest_run_id: string;
+    };
+    expect(sidecar.latest_run_id).toBe(wrapper.latest_run_id);
+    expect(sidecar.summary).toBe(sourcePath);
+    expect(sidecar.source_path).toBe(sourcePath);
+    expect(sidecarRaw).not.toContain("raw transcript should not be archived");
+    expect(sidecarRaw).not.toContain("provider-object-should-not-be-archived");
+  });
+
   it("refuses to archive strict-real metrics without embedding-real-provider evidence", async () => {
     const source = buildSource() as {
       metrics: { modes: Array<{ mode: string }> };
@@ -111,6 +157,21 @@ describe("live strict-real bench archive", () => {
     ).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
+
+type LiveWrapperSource = {
+  latest_run_id: string;
+  status: "pass" | "fail";
+  generated_at: string;
+  run_dir: string;
+  gates: unknown[];
+  metrics: {
+    samples: unknown;
+    provider_health: unknown;
+    modes: unknown[];
+    garden: unknown;
+    security: unknown;
+  };
+};
 
 function buildSource(): unknown {
   return {
@@ -147,6 +208,13 @@ function buildSource(): unknown {
           cross_workspace: { foreign_object_id: "gate-observed-object-id" }
         },
         evidence: "structured-error/result.json"
+      },
+      {
+        id: "scalar_secret_redaction",
+        pass: true,
+        threshold: "sk-redacted-test should not be archived",
+        observed: "OPENAI_API_KEY and raw_transcript should not be archived",
+        evidence: "provider error foreign_object_id text_excerpt db_metrics"
       }
     ],
     metrics: {

@@ -1,15 +1,169 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startBenchDaemon, type BenchDaemonHandle } from "../harness/daemon.js";
 
 const handles: BenchDaemonHandle[] = [];
+const tmpRoots: string[] = [];
+
+const MANAGED_ENV_KEYS = [
+  "DATA_DIR",
+  "OPENAI_API_KEY",
+  "OPENAI_EMBEDDING_MODEL",
+  "OPENAI_EMBEDDING_PROVIDER_URL",
+  "ALAYA_OPENAI_SECRET_REF",
+  "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT",
+  "ALAYA_CONFIG_DIR",
+  "CODEX_HOME",
+  "HOME",
+  "ALAYA_REVIEWER_IDENTITY",
+  "ALAYA_REVIEWER_TOKEN"
+] as const;
 
 afterEach(async () => {
   for (const h of handles.splice(0)) {
     await h.shutdown().catch(() => undefined);
   }
+  for (const root of tmpRoots.splice(0)) {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 describe("BenchDaemon harness — real MCP propose+review chain", () => {
+  it("requires an operator embedding secret when env embedding mode is requested", async () => {
+    const savedOpenAiKey = process.env.OPENAI_API_KEY;
+    const savedSecretRef = process.env.ALAYA_OPENAI_SECRET_REF;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.ALAYA_OPENAI_SECRET_REF;
+
+    try {
+      await expect(
+        startBenchDaemon({
+          workspaceId: "harness-embedding-missing-ws",
+          runId: "harness-embedding-missing-run",
+          embeddingMode: "env"
+        })
+      ).rejects.toThrow(/--embedding env requires a resolvable ALAYA_OPENAI_SECRET_REF/);
+    } finally {
+      if (savedOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = savedOpenAiKey;
+      if (savedSecretRef === undefined) delete process.env.ALAYA_OPENAI_SECRET_REF;
+      else process.env.ALAYA_OPENAI_SECRET_REF = savedSecretRef;
+    }
+  });
+
+  it("rejects blank env embedding secret refs before reporting env-configured", async () => {
+    const savedOpenAiKey = process.env.OPENAI_API_KEY;
+    const savedSecretRef = process.env.ALAYA_OPENAI_SECRET_REF;
+    delete process.env.OPENAI_API_KEY;
+    process.env.ALAYA_OPENAI_SECRET_REF = "   ";
+
+    try {
+      await expect(
+        startBenchDaemon({
+          workspaceId: "harness-embedding-blank-ws",
+          runId: "harness-embedding-blank-run",
+          embeddingMode: "env"
+        })
+      ).rejects.toThrow(/--embedding env requires a resolvable ALAYA_OPENAI_SECRET_REF/);
+    } finally {
+      if (savedOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = savedOpenAiKey;
+      if (savedSecretRef === undefined) delete process.env.ALAYA_OPENAI_SECRET_REF;
+      else process.env.ALAYA_OPENAI_SECRET_REF = savedSecretRef;
+    }
+  });
+
+  it("rejects env:OPENAI_API_KEY secret refs when OPENAI_API_KEY is missing", async () => {
+    const savedOpenAiKey = process.env.OPENAI_API_KEY;
+    const savedSecretRef = process.env.ALAYA_OPENAI_SECRET_REF;
+    delete process.env.OPENAI_API_KEY;
+    process.env.ALAYA_OPENAI_SECRET_REF = "env:OPENAI_API_KEY";
+
+    try {
+      await expect(
+        startBenchDaemon({
+          workspaceId: "harness-embedding-ref-missing-key-ws",
+          runId: "harness-embedding-ref-missing-key-run",
+          embeddingMode: "env"
+        })
+      ).rejects.toThrow(/--embedding env requires a resolvable ALAYA_OPENAI_SECRET_REF/);
+    } finally {
+      if (savedOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = savedOpenAiKey;
+      if (savedSecretRef === undefined) delete process.env.ALAYA_OPENAI_SECRET_REF;
+      else process.env.ALAYA_OPENAI_SECRET_REF = savedSecretRef;
+    }
+  });
+
+  it("rejects non-default env secret refs when the referenced variable is missing or blank", async () => {
+    const savedSecretRef = process.env.ALAYA_OPENAI_SECRET_REF;
+    const savedCustomKey = process.env.ALAYA_MISSING_OPENAI_KEY;
+    process.env.ALAYA_OPENAI_SECRET_REF = "env:ALAYA_MISSING_OPENAI_KEY";
+    delete process.env.ALAYA_MISSING_OPENAI_KEY;
+
+    try {
+      await expect(
+        startBenchDaemon({
+          workspaceId: "harness-embedding-custom-missing-ws",
+          runId: "harness-embedding-custom-missing-run",
+          embeddingMode: "env"
+        })
+      ).rejects.toThrow(/missing environment variable ALAYA_MISSING_OPENAI_KEY/);
+
+      process.env.ALAYA_MISSING_OPENAI_KEY = "   ";
+      await expect(
+        startBenchDaemon({
+          workspaceId: "harness-embedding-custom-blank-ws",
+          runId: "harness-embedding-custom-blank-run",
+          embeddingMode: "env"
+        })
+      ).rejects.toThrow(/secret is empty/);
+    } finally {
+      if (savedSecretRef === undefined) delete process.env.ALAYA_OPENAI_SECRET_REF;
+      else process.env.ALAYA_OPENAI_SECRET_REF = savedSecretRef;
+      if (savedCustomKey === undefined) delete process.env.ALAYA_MISSING_OPENAI_KEY;
+      else process.env.ALAYA_MISSING_OPENAI_KEY = savedCustomKey;
+    }
+  });
+
+  it("rejects file secret refs when the referenced file is missing", async () => {
+    const savedSecretRef = process.env.ALAYA_OPENAI_SECRET_REF;
+    process.env.ALAYA_OPENAI_SECRET_REF = "file:/tmp/alaya-bench-missing-openai-secret";
+
+    try {
+      await expect(
+        startBenchDaemon({
+          workspaceId: "harness-embedding-file-missing-ws",
+          runId: "harness-embedding-file-missing-run",
+          embeddingMode: "env"
+        })
+      ).rejects.toThrow(/referenced file is missing/);
+    } finally {
+      if (savedSecretRef === undefined) delete process.env.ALAYA_OPENAI_SECRET_REF;
+      else process.env.ALAYA_OPENAI_SECRET_REF = savedSecretRef;
+    }
+  });
+
+  it("restores managed environment when startup fails after env mutation", async () => {
+    const savedEnv = snapshotManagedEnv();
+    const tmpRoot = await mkdtemp(join(tmpdir(), "bench-daemon-env-restore-"));
+    tmpRoots.push(tmpRoot);
+    const notDirectory = join(tmpRoot, "not-a-dir");
+    await writeFile(notDirectory, "file blocks nested DATA_DIR paths", "utf8");
+
+    await expect(
+      startBenchDaemon({
+        dataDirRoot: notDirectory,
+        workspaceId: "harness-env-restore-ws",
+        runId: "harness-env-restore-run"
+      })
+    ).rejects.toThrow();
+
+    expect(snapshotManagedEnv()).toEqual(savedEnv);
+  });
+
   it(
     "emit_candidate_signal -> propose_memory_update -> review_memory_proposal accept produces recallable memory",
     async () => {
@@ -69,3 +223,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
     }
   );
 });
+
+function snapshotManagedEnv(): Record<string, string | undefined> {
+  return Object.fromEntries(MANAGED_ENV_KEYS.map((key) => [key, process.env[key]]));
+}

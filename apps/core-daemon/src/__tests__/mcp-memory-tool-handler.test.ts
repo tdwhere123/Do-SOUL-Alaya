@@ -82,6 +82,28 @@ describe("mcp memory tool handler", () => {
     expect(callArg!.timeFilter).toBeUndefined();
   });
 
+  it("widens the coarse candidate pool without widening the delivered result count", async () => {
+    const deps = createDeps();
+    const handler = createMcpMemoryToolHandler(deps);
+
+    await handler.call({
+      toolName: "soul.recall",
+      arguments: {
+        query: "deployment rules",
+        scope_class: null,
+        dimension: null,
+        domain_tags: null,
+        max_results: 3
+      },
+      context
+    });
+
+    const callArg = (deps.recallService.recall as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+    expect(callArg?.policyOverride?.coarse_filter.precomputed_rank.max_candidates).toBe(15);
+    expect(callArg?.policyOverride?.fine_assessment.budgets.max_entries).toBe(3);
+    expect(callArg?.policyOverride?.coarse_filter.semantic_supplement.embedding_enabled).toBe(true);
+  });
+
   it("threads since/until/time_field from request into recallService.recall as timeFilter", async () => {
     const deps = createDeps();
     const handler = createMcpMemoryToolHandler(deps);

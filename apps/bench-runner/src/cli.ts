@@ -18,6 +18,7 @@ import { fetchLongMemEval } from "./longmemeval/fetch.js";
 import { runLiveBench } from "./live/runner.js";
 import { runLongMemEval } from "./longmemeval/runner.js";
 import { runSelfBench } from "./self/runner.js";
+import type { BenchEmbeddingMode } from "./harness/daemon.js";
 import type { LongMemEvalVariant } from "./longmemeval/dataset.js";
 
 const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
@@ -26,9 +27,9 @@ const HELP_TEXT = `alaya-bench-runner — daemon-attached benchmark harness
 
 Usage:
   alaya-bench-runner fetch-longmemeval [--variant oracle|s|m]
-  alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--history-root <path>]
+  alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--history-root <path>]
   alaya-bench-runner self [--history-root <path>]
-  alaya-bench-runner live [--source .do-it/checks/alaya-live/main-check.json] [--history-root <path>]
+  alaya-bench-runner live [--source <main-check.json|main-check-run.json>] [--history-root <path>]
   alaya-bench-runner merge-longmemeval --shards <dir1> <dir2> ... --variant <v> --history-root <path>
   alaya-bench-runner --help
 
@@ -56,7 +57,15 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
   }
 
   const [command, ...rest] = argv;
-  const opts = parseFlags(rest);
+  let opts: ParsedFlags;
+  try {
+    opts = parseFlags(rest);
+  } catch (err) {
+    process.stderr.write(
+      `alaya-bench-runner: ${err instanceof Error ? err.message : String(err)}\n`
+    );
+    return 2;
+  }
 
   switch (command) {
     case "fetch-longmemeval":
@@ -85,6 +94,7 @@ interface ParsedFlags {
   readonly dataDir?: string;
   readonly shards?: ReadonlyArray<string>;
   readonly source?: string;
+  readonly embeddingMode: BenchEmbeddingMode;
 }
 
 function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
@@ -94,6 +104,7 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   let historyRoot: string = DEFAULT_HISTORY_ROOT;
   let dataDir: string | undefined;
   let source: string | undefined;
+  let embeddingMode: BenchEmbeddingMode = "disabled";
   const shards: string[] = [];
   let collectingShards = false;
 
@@ -118,6 +129,13 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
       collectingShards = false;
     } else if (token === "--history-root") {
       historyRoot = args[++i] ?? DEFAULT_HISTORY_ROOT;
+      collectingShards = false;
+    } else if (token === "--embedding") {
+      const raw = args[++i] ?? "disabled";
+      if (raw !== "disabled" && raw !== "env") {
+        throw new Error("--embedding must be one of: disabled, env");
+      }
+      embeddingMode = raw;
       collectingShards = false;
     } else if (token === "--data-dir") {
       dataDir = args[++i];
@@ -150,7 +168,8 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
     historyRoot,
     dataDir,
     shards: shards.length > 0 ? shards : undefined,
-    source
+    source,
+    embeddingMode
   };
 }
 
@@ -181,6 +200,7 @@ async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
       `Running LongMemEval ${opts.variant}` +
         (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
         (opts.limit !== undefined ? ` limit=${opts.limit}` : "") +
+        (opts.embeddingMode !== "disabled" ? ` embedding=${opts.embeddingMode}` : "") +
         "...\n"
     );
     const result = await runLongMemEval({
@@ -188,7 +208,8 @@ async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
       limit: opts.limit,
       offset: opts.offset,
       historyRoot: opts.historyRoot,
-      dataDir: opts.dataDir
+      dataDir: opts.dataDir,
+      embeddingMode: opts.embeddingMode
     });
     const kpi = result.payload.kpi;
     process.stdout.write(

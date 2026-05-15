@@ -1504,6 +1504,9 @@ function buildRecallPolicy(
   taskSurfaceId: string,
   policyId: string
 ): RecallPolicy {
+  const maxResults = Math.max(request.max_results, 1);
+  const coarseCandidateLimit = resolveRecallCoarseCandidateLimit(maxResults);
+
   return {
     runtime_id: policyId,
     object_kind: ControlPlaneObjectKind.RECALL_POLICY,
@@ -1518,24 +1521,28 @@ function buildRecallPolicy(
         domain_tag_filter: request.domain_tags
       },
       precomputed_rank: {
-        max_candidates: Math.max(request.max_results, 1),
+        max_candidates: coarseCandidateLimit,
         min_activation_score: null
       },
       semantic_supplement: {
         enabled: true,
-        max_supplement: Math.max(Math.ceil(request.max_results / 2), 1),
+        max_supplement: Math.max(Math.ceil(maxResults / 2), 1),
         embedding_enabled: true
       }
     },
     fine_assessment: {
       budgets: {
         max_total_tokens: 2000,
-        max_entries: Math.max(request.max_results, 1),
+        max_entries: maxResults,
         per_dimension_limits: null
       },
       conflict_awareness: true
     }
   };
+}
+
+function resolveRecallCoarseCandidateLimit(maxResults: number): number {
+  return Math.min(Math.max(maxResults * 5, maxResults), 1000);
 }
 
 function mapGardenMcpWorkerRole(role: GardenMcpWorkerRole | undefined): GardenRoleValue {

@@ -14,9 +14,11 @@ import {
   type KpiPayload,
   type PerScenarioRow
 } from "@do-soul/alaya-eval";
-import { startBenchDaemon } from "../harness/daemon.js";
+import { startBenchDaemon, type BenchEmbeddingMode } from "../harness/daemon.js";
 import { loadDataset, type FetchResult } from "./fetch.js";
 import type { LongMemEvalVariant } from "./dataset.js";
+
+const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
 
 export interface LongMemEvalRunOptions {
   readonly variant: LongMemEvalVariant;
@@ -24,6 +26,7 @@ export interface LongMemEvalRunOptions {
   readonly historyRoot: string;
   readonly dataDir?: string;
   readonly fetchResult?: FetchResult;
+  readonly embeddingMode?: BenchEmbeddingMode;
   // Override the pinned-checksum lookup root (test-only). Production
   // callers should leave this undefined so the canonical
   // docs/bench-history/datasets path is used.
@@ -72,6 +75,9 @@ export async function runLongMemEval(
   const alayaVersion = resolveAlayaVersion();
   const commitSha7 = resolveCommitSha7();
   const runAt = new Date();
+  const embeddingProviderLabel = resolveBenchEmbeddingProviderLabel(
+    opts.embeddingMode ?? "disabled"
+  );
 
   // Sidecar maps durable memory object_id -> seed metadata. The harness
   // owns this map (the daemon doesn't need it). hasAnswer flags whether
@@ -96,7 +102,8 @@ export async function runLongMemEval(
   ): Promise<WorkerResult> {
     const daemon = await startBenchDaemon({
       workspaceId: `lme-${question.question_id.slice(0, 8)}`,
-      runId: `run-${question.question_id.slice(0, 8)}`
+      runId: `run-${question.question_id.slice(0, 8)}`,
+      embeddingMode: opts.embeddingMode ?? "disabled"
     });
     try {
       const sidecar = new Map<string, SidecarEntry>();
@@ -126,6 +133,10 @@ export async function runLongMemEval(
             hasAnswer: turn.has_answer === true
           });
         }
+      }
+
+      if (opts.embeddingMode === "env") {
+        await daemon.runtime.runGardenBackgroundPass();
       }
 
       const recallStart = Date.now();
@@ -255,7 +266,7 @@ export async function runLongMemEval(
     run_at: runAt.toISOString(),
     alaya_commit: commitSha7,
     alaya_version: alayaVersion,
-    embedding_provider: "none",
+    embedding_provider: embeddingProviderLabel,
     chat_provider: "none",
     dataset: {
       name: opts.variant,
@@ -310,6 +321,36 @@ export async function runLongMemEval(
     findingsPath: entry.findingsPath,
     payload
   };
+}
+
+export function resolveBenchEmbeddingProviderLabel(
+  embeddingMode: BenchEmbeddingMode,
+  env: Readonly<Record<string, string | undefined>> = process.env
+): string {
+  if (embeddingMode === "disabled") {
+    return "none";
+  }
+
+  const model = env.OPENAI_EMBEDDING_MODEL?.trim() || DEFAULT_BENCH_EMBEDDING_MODEL;
+  const providerUrl = env.OPENAI_EMBEDDING_PROVIDER_URL?.trim();
+  if (providerUrl === undefined || providerUrl.length === 0) {
+    return `openai:${model}`;
+  }
+
+  return `${labelEmbeddingProviderUrl(providerUrl)}:${model}`;
+}
+
+function labelEmbeddingProviderUrl(providerUrl: string): string {
+  try {
+    const hostname = new URL(providerUrl).hostname.toLowerCase();
+    if (hostname.includes("yunwu")) {
+      return "yunwu";
+    }
+  } catch {
+    return "openai-compatible";
+  }
+
+  return "openai-compatible";
 }
 
 function inferTier(relevanceScore: number): "hot" | "warm" | "cold" {

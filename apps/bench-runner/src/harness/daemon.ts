@@ -23,7 +23,12 @@ import {
   SqliteRunRepo,
   SqliteWorkspaceRepo
 } from "@do-soul/alaya-storage";
-import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "@do-soul/alaya";
+import {
+  createAlayaDaemonRuntime,
+  resolveSecretRef,
+  type AlayaDaemonRuntime,
+  type ResolveSecretError
+} from "@do-soul/alaya";
 import { createAlayaMcpServer } from "@do-soul/alaya/mcp-server";
 import { createAlayaCliBridge } from "@do-soul/alaya/cli/bridge";
 import { registerAlayaCliCommands } from "@do-soul/alaya/cli/register";
@@ -32,7 +37,10 @@ export interface BenchDaemonOptions {
   readonly dataDirRoot?: string;
   readonly workspaceId?: string;
   readonly runId?: string;
+  readonly embeddingMode?: BenchEmbeddingMode;
 }
+
+export type BenchEmbeddingMode = "disabled" | "env";
 
 export interface SeededMemoryResult {
   /** Durable memory object_id assigned by the signal materializer. */
@@ -86,6 +94,8 @@ export interface BenchDaemonHandle {
 const MANAGED_ENV_KEYS = [
   "DATA_DIR",
   "OPENAI_API_KEY",
+  "OPENAI_EMBEDDING_MODEL",
+  "OPENAI_EMBEDDING_PROVIDER_URL",
   "ALAYA_OPENAI_SECRET_REF",
   "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT",
   "ALAYA_CONFIG_DIR",
@@ -105,6 +115,7 @@ export async function startBenchDaemon(
 ): Promise<BenchDaemonHandle> {
   const workspaceId = opts.workspaceId ?? "bench-workspace-1";
   const runId = opts.runId ?? "bench-run-1";
+  const embeddingMode = opts.embeddingMode ?? "disabled";
 
   const dataDir =
     opts.dataDirRoot ?? (await mkdtemp(join(tmpdir(), "alaya-bench-")));
@@ -114,84 +125,123 @@ export async function startBenchDaemon(
     savedEnv[key] = process.env[key];
   }
 
-  process.env.DATA_DIR = dataDir;
-  process.env.ALAYA_OPENAI_SECRET_REF = "env:OPENAI_API_KEY";
-  process.env.OPENAI_API_KEY = "test-openai-key";
-  process.env.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT = "false";
-  process.env.ALAYA_CONFIG_DIR = join(dataDir, "config");
-  process.env.CODEX_HOME = join(dataDir, "codex-home");
-  process.env.HOME = join(dataDir, "home");
-  process.env.ALAYA_REVIEWER_IDENTITY = REVIEWER_IDENTITY;
-  process.env.ALAYA_REVIEWER_TOKEN = REVIEWER_TOKEN;
-
-  const runtime = await createAlayaDaemonRuntime();
-  runtime.startBackgroundServices();
-
-  const server = createAlayaMcpServer({
-    memoryToolHandler: runtime.services.mcpMemoryToolHandler,
-    contextProvider: () => ({
-      workspaceId,
-      runId,
-      agentTarget: "bench-runner",
-      sessionId: `bench-session-${Date.now()}`,
-      surfaceId: "bench"
-    })
-  });
-
-  const mcpClient = new Client(
-    { name: "alaya-bench-runner", version: "0.3.7" },
-    { capabilities: {} }
-  );
-
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  await server.connect(serverTransport);
-  await mcpClient.connect(clientTransport);
-
-  const dispatchCliFn = makeDispatchCli(runtime);
-
-  const install = await dispatchCliFn([
-    "install",
-    "--non-interactive",
-    JSON.stringify({
-      db_path: join(dataDir, "alaya.db"),
-      embedding_enabled: false,
-      default_workspace: workspaceId,
-      worktree_enabled: false
-    }),
-    "--json"
-  ]);
-  if (install.exitCode !== 0) {
-    await mcpClient.close();
-    await server.close();
-    await runtime.shutdown();
-    restoreEnv(savedEnv);
-    throw new Error(`alaya install failed with exitCode=${install.exitCode}`);
+  const effectiveOpenAiSecretRef =
+    embeddingMode === "env" ? resolveBenchOpenAiSecretRef(savedEnv) : "env:OPENAI_API_KEY";
+  if (embeddingMode === "env") {
+    requireBenchOpenAiSecretRef(effectiveOpenAiSecretRef);
   }
 
-  const attach = await dispatchCliFn(["attach", "codex", "--yes", "--json"]);
-  if (attach.exitCode !== 0) {
-    await mcpClient.close();
-    await server.close();
-    await runtime.shutdown();
-    restoreEnv(savedEnv);
-    throw new Error(`alaya attach failed with exitCode=${attach.exitCode}`);
+  let runtime: AlayaDaemonRuntime | undefined;
+  let server: ReturnType<typeof createAlayaMcpServer> | undefined;
+  let mcpClient: Client | undefined;
+  let dispatchCliFn:
+    | ((argv: readonly string[]) => Promise<{ exitCode: number; json?: unknown }>)
+    | undefined;
+
+  try {
+    process.env.DATA_DIR = dataDir;
+    if (embeddingMode === "env") {
+      process.env.ALAYA_OPENAI_SECRET_REF = effectiveOpenAiSecretRef;
+      if (savedEnv.OPENAI_API_KEY === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = savedEnv.OPENAI_API_KEY;
+      }
+      process.env.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT = "true";
+    } else {
+      process.env.ALAYA_OPENAI_SECRET_REF = "env:OPENAI_API_KEY";
+      process.env.OPENAI_API_KEY = "test-openai-key";
+      process.env.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT = "false";
+    }
+    process.env.ALAYA_CONFIG_DIR = join(dataDir, "config");
+    process.env.CODEX_HOME = join(dataDir, "codex-home");
+    process.env.HOME = join(dataDir, "home");
+    process.env.ALAYA_REVIEWER_IDENTITY = REVIEWER_IDENTITY;
+    process.env.ALAYA_REVIEWER_TOKEN = REVIEWER_TOKEN;
+
+    runtime = await createAlayaDaemonRuntime();
+    runtime.startBackgroundServices();
+
+    server = createAlayaMcpServer({
+      memoryToolHandler: runtime.services.mcpMemoryToolHandler,
+      contextProvider: () => ({
+        workspaceId,
+        runId,
+        agentTarget: "bench-runner",
+        sessionId: `bench-session-${Date.now()}`,
+        surfaceId: "bench"
+      })
+    });
+
+    mcpClient = new Client(
+      { name: "alaya-bench-runner", version: "0.3.7" },
+      { capabilities: {} }
+    );
+
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await mcpClient.connect(clientTransport);
+
+    dispatchCliFn = makeDispatchCli(runtime);
+
+    const install = await dispatchCliFn([
+      "install",
+      "--non-interactive",
+      JSON.stringify({
+        db_path: join(dataDir, "alaya.db"),
+        embedding_enabled: embeddingMode === "env",
+        default_workspace: workspaceId,
+        worktree_enabled: false
+      }),
+      "--json"
+    ]);
+    if (install.exitCode !== 0) {
+      throw new Error(`alaya install failed with exitCode=${install.exitCode}`);
+    }
+
+    const attach = await dispatchCliFn(["attach", "codex", "--yes", "--json"]);
+    if (attach.exitCode !== 0) {
+      throw new Error(`alaya attach failed with exitCode=${attach.exitCode}`);
+    }
+
+    // @anchor bench-workspace-seed — signals.workspace_id / signals.run_id are
+    // FK-constrained to workspaces / runs (migration 003-signals.sql). The
+    // install command writes the daemon config but does not create rows in
+    // those tables. Seed the bench workspace + run directly so the MCP
+    // call context (which binds these ids from the trusted context provider)
+    // resolves to existing FK rows.
+    // see also: apps/core-daemon/src/__tests__/phase6-agent-use-protocol.test.ts
+    //   — workspace + run seeding fixture using the same repos.
+    await seedBenchWorkspaceAndRun(dataDir, workspaceId, runId);
+  } catch (err) {
+    try {
+      await closeBenchDaemonResources({ mcpClient, server, runtime });
+    } finally {
+      restoreEnv(savedEnv);
+    }
+    throw err;
   }
 
-  // @anchor bench-workspace-seed — signals.workspace_id / signals.run_id are
-  // FK-constrained to workspaces / runs (migration 003-signals.sql). The
-  // install command writes the daemon config but does not create rows in
-  // those tables. Seed the bench workspace + run directly so the MCP
-  // call context (which binds these ids from the trusted context provider)
-  // resolves to existing FK rows.
-  // see also: apps/core-daemon/src/__tests__/phase6-agent-use-protocol.test.ts
-  //   — workspace + run seeding fixture using the same repos.
-  await seedBenchWorkspaceAndRun(dataDir, workspaceId, runId);
+  if (
+    runtime === undefined ||
+    server === undefined ||
+    mcpClient === undefined ||
+    dispatchCliFn === undefined
+  ) {
+    restoreEnv(savedEnv);
+    throw new Error("bench daemon startup did not initialize required resources");
+  }
+
+  const activeRuntime = runtime;
+  const activeServer = server;
+  const activeMcpClient = mcpClient;
+  const activeDispatchCli = dispatchCliFn;
 
   async function recall(
     query: string,
     recallOpts: { maxResults?: number } = {}
   ): Promise<SoulMemorySearchResponse> {
-    return callMcpTool<SoulMemorySearchResponse>(mcpClient, "soul.recall", {
+    return callMcpTool<SoulMemorySearchResponse>(activeMcpClient, "soul.recall", {
       query,
       scope_class: null,
       dimension: null,
@@ -225,7 +275,7 @@ export async function startBenchDaemon(
     // (see materialization-router.ts:160). raw_payload.excerpt becomes
     // the materialized memory_entry.content via buildSignalSummary.
     const signalResponse = await callMcpTool<SoulEmitCandidateSignalResponse>(
-      mcpClient,
+      activeMcpClient,
       "soul.emit_candidate_signal",
       {
         signal_kind: "potential_preference",
@@ -259,7 +309,7 @@ export async function startBenchDaemon(
     // audit trail. The change is a no-op-ish domain_tag append; what
     // matters is that the chain fires for every seed.
     const proposeResponse = await callMcpTool<SoulProposeMemoryUpdateResponse>(
-      mcpClient,
+      activeMcpClient,
       "soul.propose_memory_update",
       {
         target_object_id: memoryId,
@@ -277,7 +327,7 @@ export async function startBenchDaemon(
 
     // Step 4 — accept the proposal under the bench reviewer identity.
     const reviewResponse = await callMcpTool<SoulReviewMemoryProposalResponse>(
-      mcpClient,
+      activeMcpClient,
       "soul.review_memory_proposal",
       {
         proposal_id: proposeResponse.proposal_id,
@@ -304,30 +354,93 @@ export async function startBenchDaemon(
 
   async function shutdown(): Promise<void> {
     try {
-      await mcpClient.close();
-    } catch {
-      // Ignore close errors
+      await closeBenchDaemonResources({
+        mcpClient: activeMcpClient,
+        server: activeServer,
+        runtime: activeRuntime
+      });
+    } finally {
+      restoreEnv(savedEnv);
     }
-    try {
-      await server.close();
-    } catch {
-      // Ignore close errors
-    }
-    await runtime.shutdown();
-    restoreEnv(savedEnv);
   }
 
   return {
-    runtime,
-    mcpClient,
+    runtime: activeRuntime,
+    mcpClient: activeMcpClient,
     workspaceId,
     runId,
     dataDir,
-    dispatchCli: dispatchCliFn,
+    dispatchCli: activeDispatchCli,
     recall,
     proposeMemory,
     shutdown
   };
+}
+
+function hasUsableEnvValue(value: string | undefined): boolean {
+  return value !== undefined && value.trim().length > 0;
+}
+
+function resolveBenchOpenAiSecretRef(
+  savedEnv: Partial<Record<ManagedEnvKey, string | undefined>>
+): string {
+  return savedEnv.ALAYA_OPENAI_SECRET_REF?.trim() || "env:OPENAI_API_KEY";
+}
+
+function requireBenchOpenAiSecretRef(secretRef: string): void {
+  const resolved = resolveSecretRef(secretRef);
+  if (!("kind" in resolved)) {
+    return;
+  }
+
+  throw new Error(formatBenchEmbeddingSecretError(resolved));
+}
+
+function formatBenchEmbeddingSecretError(error: ResolveSecretError): string {
+  const prefix = "--embedding env requires a resolvable ALAYA_OPENAI_SECRET_REF";
+  switch (error.kind) {
+    case "env_missing":
+      return `${prefix}; missing environment variable ${error.var_name}`;
+    case "empty":
+      return `${prefix}; ${error.origin} secret is empty`;
+    case "file_missing":
+      return `${prefix}; referenced file is missing`;
+    case "file_unreadable":
+      return `${prefix}; referenced file is unreadable`;
+    case "keychain_tooling_unavailable":
+    case "keychain_entry_not_found":
+      return `${prefix}; keychain secret lookup failed`;
+    case "malformed":
+      return `${prefix}; secret ref is malformed`;
+  }
+}
+
+async function closeBenchDaemonResources(resources: {
+  readonly mcpClient?: Client;
+  readonly server?: ReturnType<typeof createAlayaMcpServer>;
+  readonly runtime?: AlayaDaemonRuntime;
+}): Promise<void> {
+  if (resources.mcpClient !== undefined) {
+    try {
+      await resources.mcpClient.close();
+    } catch {
+      // Ignore close errors
+    }
+  }
+  if (resources.server !== undefined) {
+    try {
+      await resources.server.close();
+    } catch {
+      // Ignore close errors
+    }
+  }
+  if (resources.runtime !== undefined) {
+    try {
+      await resources.runtime.shutdown();
+    } catch {
+      // Ignore close errors
+    }
+  }
 }
 
 function makeDispatchCli(

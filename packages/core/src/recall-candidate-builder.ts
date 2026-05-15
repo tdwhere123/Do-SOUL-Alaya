@@ -101,6 +101,50 @@ export function appendAdditiveCandidatesWithinRemainingBudgets(
   return Object.freeze(selected);
 }
 
+export function selectCandidatesWithinBudgets(
+  candidates: readonly Readonly<RecallCandidate>[],
+  config: Readonly<FineAssessmentConfig>
+): readonly Readonly<RecallCandidate>[] {
+  const selected: Readonly<RecallCandidate>[] = [];
+  const seen = new Set<string>();
+  const perDimensionCounts = new Map<MemoryDimensionType, number>();
+  let totalTokens = 0;
+
+  for (const candidate of candidates) {
+    const candidateKey = buildRecallCandidateSelectionKey(candidate);
+    if (seen.has(candidateKey)) {
+      continue;
+    }
+
+    const dimensionCount = perDimensionCounts.get(candidate.dimension) ?? 0;
+    const dimensionLimit = config.budgets.per_dimension_limits?.[candidate.dimension] ?? null;
+    const nextEntryCount = selected.length + 1;
+    const nextTokenCount = totalTokens + candidate.token_estimate;
+
+    if (dimensionLimit !== null && dimensionCount >= dimensionLimit) {
+      continue;
+    }
+
+    if (
+      nextEntryCount > config.budgets.max_entries ||
+      nextTokenCount > config.budgets.max_total_tokens
+    ) {
+      continue;
+    }
+
+    selected.push(candidate);
+    seen.add(candidateKey);
+    perDimensionCounts.set(candidate.dimension, dimensionCount + 1);
+    totalTokens = nextTokenCount;
+  }
+
+  return Object.freeze(selected);
+}
+
+function buildRecallCandidateSelectionKey(candidate: Readonly<RecallCandidate>): string {
+  return `${candidate.origin_plane ?? "workspace_local"}:${candidate.object_id}`;
+}
+
 export function rebuildRecallBudgetStateForDelivery(
   candidates: readonly Readonly<RecallCandidate>[],
   config: Readonly<FineAssessmentConfig>

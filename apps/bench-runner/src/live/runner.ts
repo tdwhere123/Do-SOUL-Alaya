@@ -32,6 +32,8 @@ export interface LiveBenchResult {
 const DEFAULT_SOURCE_PATH = ".do-it/checks/alaya-live/main-check.json";
 const LIVE_GATES_FILENAME = "live-gates.json";
 const GATE_VALUE_MAX_LENGTH = 200;
+const SENSITIVE_GATE_PATTERN =
+  /(sk-[A-Za-z0-9_-]+|OPENAI_API_KEY|ALAYA_OPENAI_API_KEY|raw_transcript|foreign_object_id|text_excerpt|db_metrics|provider error)/iu;
 
 const GateSchema = z.object({
   id: z.string().min(1),
@@ -58,11 +60,49 @@ const RecallMetricsSchema = z
     max_ms: z.number().nonnegative()
   });
 
+const SampleMetricsSchema = z
+  .object({
+    requested: z.number().int().nonnegative(),
+    actual: z.number().int().nonnegative(),
+    query_count: z.number().int().nonnegative()
+  });
+
+const ProviderHealthSchema = z
+  .object({
+    embedding: z
+      .object({
+        ok: z.boolean(),
+        status: z.number().int().nonnegative().nullable().optional(),
+        vector_dimensions: z.number().int().positive().nullable().optional()
+      }),
+    garden: z
+      .object({
+        ok: z.boolean(),
+        status: z.number().int().nonnegative().nullable().optional()
+      })
+  });
+
 const ModeSchema = z
   .object({
     mode: z.string().min(1),
     recall_metrics: RecallMetricsSchema,
     mcp_initialize_failed: z.number().int().nonnegative().default(0)
+  });
+
+const GardenMetricsSchema = z
+  .object({
+    task_count: z.number().int().nonnegative(),
+    schema_valid_rate: z.number().min(0).max(1),
+    accepted_rate: z.number().min(0).max(1),
+    durable_write_success_rate: z.number().min(0).max(1),
+    accepted_followup_success_rate: z.number().min(0).max(1),
+    unreviewed_durable_write_count: z.number().int().nonnegative()
+  });
+
+const SecurityMetricsSchema = z
+  .object({
+    raw_key_hits: z.number().int().nonnegative(),
+    exact_secret_hits: z.number().int().nonnegative()
   });
 
 const LiveMainCheckSchema = z
@@ -76,42 +116,29 @@ const LiveMainCheckSchema = z
     gates: z.array(GateSchema),
     metrics: z
       .object({
-        samples: z
-          .object({
-            requested: z.number().int().nonnegative(),
-            actual: z.number().int().nonnegative(),
-            query_count: z.number().int().nonnegative()
-          }),
-        provider_health: z
-          .object({
-            embedding: z
-              .object({
-                ok: z.boolean(),
-                status: z.number().int().nonnegative().nullable().optional(),
-                vector_dimensions: z.number().int().positive().nullable().optional()
-              }),
-            garden: z
-              .object({
-                ok: z.boolean(),
-                status: z.number().int().nonnegative().nullable().optional()
-          })
-	          }),
+        samples: SampleMetricsSchema,
+        provider_health: ProviderHealthSchema,
         modes: z.array(ModeSchema).min(1),
-        garden: z
-          .object({
-            task_count: z.number().int().nonnegative(),
-            schema_valid_rate: z.number().min(0).max(1),
-            accepted_rate: z.number().min(0).max(1),
-            durable_write_success_rate: z.number().min(0).max(1),
-            accepted_followup_success_rate: z.number().min(0).max(1),
-            unreviewed_durable_write_count: z.number().int().nonnegative()
-          }),
-        security: z
-          .object({
-            raw_key_hits: z.number().int().nonnegative(),
-            exact_secret_hits: z.number().int().nonnegative()
-          })
+        garden: GardenMetricsSchema,
+        security: SecurityMetricsSchema
       })
+  });
+
+const LiveRunSummarySchema = z
+  .object({
+    run_id: z.string().min(1),
+    status: z.enum(["pass", "fail"]),
+    finished_at: z.string().min(1),
+    artifacts: z
+      .object({
+        run_dir: z.string().min(1)
+      }),
+    samples: SampleMetricsSchema,
+    provider_health: ProviderHealthSchema,
+    modes: z.array(ModeSchema).min(1),
+    garden: GardenMetricsSchema,
+    security: SecurityMetricsSchema,
+    gates: z.array(GateSchema)
   });
 
 type LiveMainCheck = z.infer<typeof LiveMainCheckSchema>;
@@ -122,7 +149,7 @@ export async function runLiveBench(
 ): Promise<LiveBenchResult> {
   const sourcePath = opts.sourcePath ?? DEFAULT_SOURCE_PATH;
   const sourceRaw = await readFile(sourcePath, "utf8");
-  const source = LiveMainCheckSchema.parse(JSON.parse(sourceRaw));
+  const source = parseLiveCheckSource(sourceRaw, sourcePath);
   const providerMode = resolveProviderMode(source.metrics.modes);
   const keywordMode = source.metrics.modes.find((mode) => mode.mode === "keyword-local") ?? null;
   const providerMetrics = providerMode.recall_metrics;
@@ -204,6 +231,35 @@ export async function runLiveBench(
   };
 }
 
+function parseLiveCheckSource(raw: string, sourcePath: string): LiveMainCheck {
+  const parsed = JSON.parse(raw) as unknown;
+  const mainCheck = LiveMainCheckSchema.safeParse(parsed);
+  if (mainCheck.success) return mainCheck.data;
+
+  const runSummary = LiveRunSummarySchema.safeParse(parsed);
+  if (!runSummary.success) {
+    throw mainCheck.error;
+  }
+
+  const summary = runSummary.data;
+  return {
+    latest_run_id: summary.run_id,
+    status: summary.status,
+    generated_at: summary.finished_at,
+    run_dir: summary.artifacts.run_dir,
+    report: path.join(summary.artifacts.run_dir, "report.md"),
+    summary: relativeToCwd(sourcePath),
+    gates: summary.gates,
+    metrics: {
+      samples: summary.samples,
+      provider_health: summary.provider_health,
+      modes: summary.modes,
+      garden: summary.garden,
+      security: summary.security
+    }
+  };
+}
+
 function resolveProviderMode(modes: readonly LiveMode[]): LiveMode {
   const provider = modes.find((mode) => mode.mode === "embedding-real-provider");
   if (provider !== undefined) return provider;
@@ -231,8 +287,9 @@ function renderLiveReport(
   lines.push("| gate | result | observed | threshold | evidence |");
   lines.push("|---|---|---:|---|---|");
   for (const gate of source.gates) {
+    const sanitizedGate = sanitizeGate(gate);
     lines.push(
-      `| ${gate.id} | ${gate.pass ? "PASS" : "FAIL"} | ${formatUnknown(gate.observed)} | ${formatUnknown(gate.threshold)} | \`${gate.evidence}\` |`
+      `| ${sanitizedGate.id} | ${sanitizedGate.pass ? "PASS" : "FAIL"} | ${formatUnknown(sanitizedGate.observed)} | ${formatUnknown(sanitizedGate.threshold)} | \`${sanitizedGate.evidence}\` |`
     );
   }
   lines.push("");
@@ -324,23 +381,36 @@ function summarizeMode(mode: LiveMode): unknown {
   };
 }
 
-function sanitizeGate(gate: z.infer<typeof GateSchema>): unknown {
+interface SanitizedGate {
+  readonly id: string;
+  readonly pass: boolean;
+  readonly threshold: string | number | boolean | null;
+  readonly observed: string | number | boolean | null;
+  readonly evidence: string;
+}
+
+function sanitizeGate(gate: z.infer<typeof GateSchema>): SanitizedGate {
   return {
     id: gate.id,
     pass: gate.pass,
     threshold: sanitizeGateValue(gate.threshold),
     observed: sanitizeGateValue(gate.observed),
-    evidence: gate.evidence
+    evidence: sanitizeGateEvidence(gate.evidence)
   };
 }
 
 function sanitizeGateValue(value: unknown): string | number | boolean | null {
   if (value === null || typeof value === "number" || typeof value === "boolean") return value;
-  if (typeof value === "string") return truncateGateValue(value);
+  if (typeof value === "string") return sanitizeGateString(value);
   return "[redacted_non_scalar]";
 }
 
-function truncateGateValue(value: string): string {
+function sanitizeGateEvidence(value: string): string {
+  return sanitizeGateString(value);
+}
+
+function sanitizeGateString(value: string): string {
+  if (SENSITIVE_GATE_PATTERN.test(value)) return "[redacted_sensitive_scalar]";
   if (value.length <= GATE_VALUE_MAX_LENGTH) return value;
   return `${value.slice(0, GATE_VALUE_MAX_LENGTH)}...`;
 }

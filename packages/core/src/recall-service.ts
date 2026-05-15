@@ -20,9 +20,9 @@ import {
 import type { PreparedEmbeddingQueryHandle } from "./embedding-recall-service.js";
 import { loadGlobalRecallCandidates } from "./global-memory-recall-service.js";
 import {
-  appendAdditiveCandidatesWithinRemainingBudgets,
   buildRecallCandidate,
-  rebuildRecallBudgetStateForDelivery
+  rebuildRecallBudgetStateForDelivery,
+  selectCandidatesWithinBudgets
 } from "./recall-candidate-builder.js";
 import { STRATEGY_RECALL_DEFAULTS, type NodeStrategy } from "./task-surface-builder.js";
 import {
@@ -644,11 +644,20 @@ export class RecallService {
       params.localEligibleCandidates.map((candidate) => [candidate.entry.object_id, candidate] as const)
     );
     const boostedBaseCandidates = params.baseCandidates.map((candidate) =>
-      applySimilarityBoost(candidate, supplement.similarityHintsByObjectId[candidate.object_id])
+      applySimilarityBoost(
+        candidate,
+        isWorkspaceLocalRecallCandidate(candidate)
+          ? supplement.similarityHintsByObjectId[candidate.object_id]
+          : undefined
+      )
     );
-    const seenIds = new Set(boostedBaseCandidates.map((candidate) => candidate.object_id));
+    const seenLocalIds = new Set(
+      boostedBaseCandidates
+        .filter(isWorkspaceLocalRecallCandidate)
+        .map((candidate) => candidate.object_id)
+    );
     const additiveCandidates = supplement.supplementaryEntries.flatMap((entry) => {
-      if (seenIds.has(entry.object_id)) {
+      if (seenLocalIds.has(entry.object_id)) {
         return [];
       }
 
@@ -658,7 +667,7 @@ export class RecallService {
         return [];
       }
 
-      seenIds.add(entry.object_id);
+      seenLocalIds.add(entry.object_id);
       return [
         this.buildSupplementaryRecallCandidate(
           coarseCandidate,
@@ -671,9 +680,8 @@ export class RecallService {
       ];
     });
 
-    return appendAdditiveCandidatesWithinRemainingBudgets(
-      boostedBaseCandidates,
-      additiveCandidates.sort(compareRecallCandidates),
+    return selectCandidatesWithinBudgets(
+      [...boostedBaseCandidates, ...additiveCandidates].sort(compareRecallCandidates),
       params.config.fine_assessment
     );
   }
@@ -995,6 +1003,10 @@ export class RecallService {
       extraSourceChannel: "semantic_supplement"
     });
   }
+}
+
+function isWorkspaceLocalRecallCandidate(candidate: Readonly<RecallCandidate>): boolean {
+  return (candidate.origin_plane ?? "workspace_local") === "workspace_local";
 }
 
 function resolveDynamicActivationWeights(
