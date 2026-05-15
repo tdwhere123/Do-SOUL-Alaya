@@ -132,6 +132,45 @@ usage, or the UI/CLI surfaced the metric too coarsely.
    ranking quality, host instructions, usage-report ergonomics, or
    telemetry classification.
 
+### #BL-045 — PathRelationProposalService counter eviction port
+
+**Status**: Open, post-v0.3.8 follow-up.
+
+**Why open**: The in-process pair-counter Map in
+`packages/core/src/path-relation-proposal-service.ts` is unbounded.
+Pairs that reach the propose threshold are dropped from the map, so
+steady-state memory holds only sub-threshold pairs; for daemons that
+accumulate long no-promote tails (low co-usage diversity over weeks)
+the map can still grow without bound. No eviction port is exposed yet.
+
+**Close condition**:
+
+1. The service exposes an eviction port (TTL or LRU) and the daemon
+   wires it via an env-tunable interval.
+2. A unit test demonstrates the counter shrinks under eviction.
+3. The invariant comment in `path-relation-proposal-service.ts`
+   updates to point at the eviction mechanism instead of "no current
+   eviction policy".
+
+### #BL-046 — ConflictDetectionService rule-path disable toggle
+
+**Status**: Open, post-v0.3.8 follow-up.
+
+**Why open**: `ConflictDetectionService` runs the rule path
+unconditionally and only falls back to the LLM port when the rule
+path produced zero contradicts. Operators with a strong LLM provider
+might prefer LLM-as-primary on the same dataset, but the service
+does not expose a way to skip the rule path.
+
+**Close condition**:
+
+1. An option (constructor argument or env flag) disables the rule
+   path so LLM becomes the sole contradicts/incompatible_with
+   producer.
+2. The invariant comment in `conflict-detection-service.ts` reflects
+   the new toggle and removes the "must fork the service"
+   workaround note.
+
 ## Resolved in v0.3.6 (2026-05-14)
 
 ### #BL-043 — tool-runtime-bootstrap.test.ts port-3000 parallel flake

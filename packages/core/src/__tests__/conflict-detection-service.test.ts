@@ -170,6 +170,45 @@ describe("ConflictDetectionService", () => {
     expect(llmPort.classifyPair).toHaveBeenCalled();
   });
 
+  it("skips LLM when rule path already produced a contradicts edge", async () => {
+    // tag overlap = 1.0 + token overlap << 0.35 → rule fires contradicts;
+    // LLM must not run because LLM-only-on-no-rule is the documented
+    // invariant.
+    const ruleHit = createMemoryEntry({
+      object_id: "mem-A",
+      content: "I prefer dark roast coffee."
+    });
+    const memoryRepo = {
+      findByDimension: vi.fn(async () => [ruleHit]),
+      findByWorkspaceId: vi.fn(async () => [])
+    };
+    const graphEdgePort = { createEdge: vi.fn(async () => undefined) };
+    const llmPort = {
+      classifyPair: vi.fn(async () => "contradicts" as const)
+    };
+    const service = new ConflictDetectionService({
+      memoryRepo,
+      graphEdgePort,
+      llmPort
+    });
+
+    await service.detectAndLinkConflicts({
+      newMemoryId: "mem-B",
+      newMemoryDimension: MemoryDimension.PREFERENCE,
+      newMemoryScopeClass: ScopeClass.PROJECT,
+      newMemoryContent: "I prefer light roast tea instead.",
+      newMemoryDomainTags: ["coffee", "preference"],
+      workspaceId: "workspace-1",
+      runId: "run-1"
+    });
+
+    expect(llmPort.classifyPair).not.toHaveBeenCalled();
+    const contradictsCalls = graphEdgePort.createEdge.mock.calls.filter(
+      (call: any[]) => call[0].edgeType === "contradicts"
+    );
+    expect(contradictsCalls).toHaveLength(1);
+  });
+
   it("does not throw when memoryRepo fails to read same-dimension peers", async () => {
     const memoryRepo = {
       findByDimension: vi.fn(async () => {

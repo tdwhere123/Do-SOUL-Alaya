@@ -449,6 +449,11 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     // substring so a partial-match on a non-UUID id cannot collide with
     // an unrelated row. ESCAPE keeps LIKE wildcards (`%` / `_`) literal
     // when an id happens to contain them.
+    // invariant: callers produce ids in the [A-Za-z0-9_-] alphabet
+    // (UUID / generateObjectId surface). The pattern does not escape
+    // `"` or `\\`; if a future generator surfaces those, this match
+    // is no longer safe — see evidence-capsule-repo and memory-entry
+    // generator paths before widening the id alphabet.
     const likePatterns = cappedIds.map(() => `evidence_refs LIKE ? ESCAPE '\\'`);
     const likeValues = cappedIds.map(
       (id) => `%"${id.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")}"%`

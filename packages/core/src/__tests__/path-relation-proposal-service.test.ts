@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { PathRelationSchema } from "@do-soul/alaya-protocol";
 import {
   PathRelationProposalService,
   PATH_RELATION_PROPOSE_THRESHOLD
@@ -38,6 +39,11 @@ describe("PathRelationProposalService", () => {
       written.anchors.target_anchor.object_id
     ].sort();
     expect(anchorIds).toEqual(["mem-A", "mem-B"]);
+    // invariant: written object must round-trip through the strict schema.
+    // The earlier version of this service mis-built fields (object_id /
+    // object_kind / schema_version / lifecycle_state) that strict-mode
+    // PathRelationSchema rejected, so the propose path silently warned.
+    expect(() => PathRelationSchema.parse(written)).not.toThrow();
   });
 
   it("does not double-propose the same pair", async () => {

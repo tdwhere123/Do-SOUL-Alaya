@@ -19,9 +19,10 @@ import {
 // invariant: LLM fallback is bypassed when rule-based detection already
 // produced at least one contradicts edge. The LLM run targets the
 // ambiguous-neighborhood case where rule thresholds did not trip; it
-// is not an "add a second opinion on top" path. Operators who want
-// LLM-as-primary should disable the rule path (currently not exposed;
-// tracked for v0.3.9 if needed).
+// is not an "add a second opinion on top" path. The rule path is not
+// disable-able from the service surface; operators wanting
+// LLM-as-primary must run a forked service. see also:
+// docs/handbook/backlog.md for follow-up gates.
 
 export interface ConflictDetectionMemoryRepoPort {
   findByDimension(

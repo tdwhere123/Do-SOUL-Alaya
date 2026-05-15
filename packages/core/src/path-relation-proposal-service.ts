@@ -9,12 +9,13 @@ import {
 // service writes a new PathRelation with default plasticity. The plasticity
 // strength is later evolved by PathPlasticityService. Counter state is
 // in-memory per daemon process (suitable for K small, e.g. 3).
-// invariant: counter Map is unbounded. Long-running daemons should
-// periodically clear stale counters (no current eviction policy).
-// O(pairs_co_used²) memory. Acceptable for v0.3.8 because K=3 means
-// once a pair is promoted, the counter is dropped; the only growth is
-// pairs that co-occurred ≤ 2 times. v0.3.9 should add TTL-based eviction
-// once production traces inform the right bound.
+// invariant: counter Map is unbounded by design within this version's
+// scope. Pairs that reach the threshold are dropped (proposed and
+// recorded), so steady-state memory holds only pairs that co-occurred
+// fewer than `threshold` times. Daemons accumulating very long
+// no-promote tails should periodically clear stale counters; the
+// service exposes no eviction port yet — see backlog for the eviction
+// gate item.
 // see also: crossLinkRecalledMemories — caller hook
 // see also: PathPlasticityService — strength evolution
 // see also: PathRelationRepo — durable write side
