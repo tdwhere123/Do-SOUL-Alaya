@@ -267,6 +267,42 @@ describe("mcp memory tool handler", () => {
     });
   });
 
+  it("falls through to evidence capsule when memory lookup misses, returning gist and excerpt", async () => {
+    const deps = createDeps();
+    deps.memoryService.findByIdScoped = vi.fn(async () => null);
+    const findEvidence = vi.fn(async (objectId: string, _workspaceId: string) => ({
+      object_id: objectId,
+      object_kind: "evidence_capsule",
+      schema_version: 1,
+      gist: "distilled fact gist",
+      excerpt: "raw turn excerpt material the agent should see when opening a pointer"
+    }));
+    const depsWithEvidence = {
+      ...deps,
+      evidenceService: { findByIdScoped: findEvidence }
+    };
+    const handler = createMcpMemoryToolHandler(depsWithEvidence);
+
+    const result = await handler.call({
+      toolName: "soul.open_pointer",
+      arguments: { object_id: "evidence-1" },
+      context
+    });
+
+    expect(result.ok).toBe(true);
+    expect(findEvidence).toHaveBeenCalledWith("evidence-1", context.workspaceId);
+    expect(result.ok && result.output).toMatchObject({
+      object_id: "evidence-1",
+      object_kind: "evidence_capsule",
+      content: {
+        object_id: "evidence-1",
+        object_kind: "evidence_capsule",
+        gist: "distilled fact gist",
+        excerpt: "raw turn excerpt material the agent should see when opening a pointer"
+      }
+    });
+  });
+
   it("records usage proof against an existing delivery", async () => {
     const deps = createDeps();
     const handler = createMcpMemoryToolHandler(deps);
