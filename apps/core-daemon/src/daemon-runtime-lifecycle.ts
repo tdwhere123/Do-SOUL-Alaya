@@ -33,6 +33,7 @@ type CreateDaemonLifecycleControlsInput = Readonly<{
   daemonMcpRuntimeRegistry: Readonly<{ close(): Promise<void> }>;
   globalMemoryRecallInvalidationSubscription: Readonly<{ dispose(): void }> | null;
   database: Readonly<{ close(): void }>;
+  intervalsToClear?: ReadonlyArray<NodeJS.Timeout>;
 }>;
 
 export function createDaemonLifecycleControls(input: CreateDaemonLifecycleControlsInput): Readonly<{
@@ -108,6 +109,9 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
       input.securityStatusService.close();
       await input.daemonMcpRuntimeRegistry.close();
       input.globalMemoryRecallInvalidationSubscription?.dispose();
+      for (const timer of input.intervalsToClear ?? []) {
+        clearInterval(timer);
+      }
 
       if (server !== null) {
         await closeServer(server);

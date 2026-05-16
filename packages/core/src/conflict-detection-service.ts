@@ -87,6 +87,12 @@ export class ConflictDetectionService {
     readonly workspaceId: string;
     readonly runId: string;
   }): Promise<void> {
+    // invariant: short-circuit when neither writer can fire. With
+    // ruleEnabled=false and no LLM port, both the O(workspace_size)
+    // findByDimension + findByWorkspaceId fetches would be pure waste.
+    if (!this.ruleEnabled && this.deps.llmPort === undefined) {
+      return;
+    }
     const sameDimension = await this.deps.memoryRepo
       .findByDimension(params.workspaceId, params.newMemoryDimension as MemoryEntry["dimension"])
       .catch((err) => {

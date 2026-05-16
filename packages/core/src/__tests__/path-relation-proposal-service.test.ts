@@ -135,6 +135,32 @@ describe("PathRelationProposalService", () => {
     expect(service.counterSize()).toBe(0);
   });
 
+  it("evictExpired uses firstSeenAtMs (does not reset on each onCoUsage re-increment)", async () => {
+    const repo = {
+      create: vi.fn(async (relation: any) => relation),
+      findByAnchorMemoryId: vi.fn(async () => [])
+    };
+    let nowMs = 1_000_000;
+    const service = new PathRelationProposalService({
+      repo,
+      threshold: 10,
+      nowMs: () => nowMs,
+      counterTtlMs: 5_000
+    });
+
+    await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
+    expect(service.counterSize()).toBe(1);
+
+    nowMs = 1_004_000;
+    await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
+    expect(service.counterSize()).toBe(1);
+
+    nowMs = 1_005_500;
+    const removed = service.evictExpired();
+    expect(removed).toBe(1);
+    expect(service.counterSize()).toBe(0);
+  });
+
   it("evictExpired keeps fresh sub-threshold pairs when ttl has not elapsed", async () => {
     const repo = {
       create: vi.fn(async (relation: any) => relation),

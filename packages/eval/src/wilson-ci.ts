@@ -45,6 +45,16 @@ export function wilsonHalfWidthPp(
 // evaluated_count >= 100 the raw bands (e.g. 2pp warn / 5pp fail) are
 // returned. For small samples the band widens to max(raw, ci_half_width)
 // so a noise-level delta does not trip a regression alarm.
+//
+// Asymmetry note: the caller (packages/eval/src/diff.ts) drives the
+// band from the *current* run's evaluated_count and observed
+// proportion only. When the previous baseline is also undersampled,
+// the previous run's wider CI is not blended into the current band —
+// the regression verdict reflects today's confidence in today's
+// number, not a joint confidence with stale baseline noise. This is
+// intentional and matches the report.md narrative ("the current run
+// at sample size N delivers proportion p; verdict against the
+// previous archive holds within ±CI/2").
 export function ciAwareBand(
   rawBand: { readonly warn: number; readonly fail: number },
   successes: number,

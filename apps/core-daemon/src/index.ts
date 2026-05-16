@@ -900,7 +900,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     securityStatusService,
     daemonMcpRuntimeRegistry: mcpTooling.daemonMcpRuntimeRegistry,
     globalMemoryRecallInvalidationSubscription,
-    database
+    database,
+    intervalsToClear: [pathRelationEvictionTimer]
   });
 
   return Object.freeze({

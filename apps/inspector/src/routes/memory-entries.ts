@@ -1,10 +1,12 @@
 import type { Hono } from "hono";
 import { assertInspectorWorkspace, proxyDaemonJson, type InspectorProxyOptions } from "./shared.js";
 
-// invariant: Inspector is a tooling loopback, not an agent surface; it
-// proxies the durable list-memories read to the daemon's workspace-scoped
-// GET /workspaces/{ws}/memories with the same workspace assertion as the
-// other inspector routes. The daemon route already enforces scope.
+// invariant: Inspector is a tooling loopback, not an agent surface.
+// Both the memory list and the pointer fetch are proxied through
+// workspace-scoped daemon routes: GET /workspaces/{ws}/memories and
+// GET /workspaces/{ws}/evidence/{id}. The latter uses
+// `EvidenceService.findByIdScoped` so a caller cannot read another
+// workspace's evidence by object_id alone.
 // see also: apps/core-daemon/src/routes/memories.ts
 //          apps/core-daemon/src/routes/evidence.ts
 export function registerInspectorMemoryEntryRoutes(
@@ -34,7 +36,7 @@ export function registerInspectorMemoryEntryRoutes(
     const objectId = context.req.param("objectId");
     return await proxyDaemonJson(context, options, {
       method: "GET",
-      path: `/evidence/${encodeURIComponent(objectId)}`
+      path: `/workspaces/${encodeURIComponent(workspaceId)}/evidence/${encodeURIComponent(objectId)}`
     });
   });
 }

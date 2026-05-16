@@ -374,6 +374,8 @@ describe("inspector routes", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ text: "memory" })
     });
+    const memoryList = await app.request("/api/memory-entries/ws2?token=token");
+    const pointer = await app.request("/api/pointers/ws2/evidence-1?token=token");
 
     expect(graph.status).toBe(403);
     expect(graphWhitespace.status).toBe(403);
@@ -381,10 +383,30 @@ describe("inspector routes", () => {
     expect(proposals.status).toBe(403);
     expect(recallStats.status).toBe(403);
     expect(search.status).toBe(403);
+    expect(memoryList.status).toBe(403);
+    expect(pointer.status).toBe(403);
     await expect(graph.json()).resolves.toEqual({ error: "workspace_forbidden" });
     await expect(graphWhitespace.json()).resolves.toEqual({ error: "workspace_forbidden" });
     await expect(recallStats.json()).resolves.toEqual({ error: "workspace_forbidden" });
+    await expect(memoryList.json()).resolves.toEqual({ error: "workspace_forbidden" });
+    await expect(pointer.json()).resolves.toEqual({ error: "workspace_forbidden" });
     expect(calls).toEqual([]);
+  });
+
+  it("proxies pointer fetch through the workspace-scoped daemon evidence path with URL-encoded object id", async () => {
+    const calls: string[] = [];
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      fetchImpl: async (input) => {
+        calls.push(String(input));
+        return Response.json({ success: true, data: { object_id: "obj/1", gist: "g", excerpt: "e" } });
+      }
+    });
+    const response = await app.request("/api/pointers/ws1/obj%2F1?token=token");
+    expect(response.status).toBe(200);
+    expect(calls).toEqual(["http://daemon.local/workspaces/ws1/evidence/obj%2F1"]);
   });
 
   it("returns empty bench-summary when the history root does not exist yet", async () => {

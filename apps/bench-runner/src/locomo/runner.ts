@@ -195,13 +195,20 @@ async function runOneConversation(
     let tierHot = 0;
     let tierWarm = 0;
     let tierCold = 0;
+    let scoredCount = 0;
     const latencies: number[] = [];
 
+    // invariant: R@K denominator counts only QAs with non-empty evidence.
+    // LoCoMo category-5 (adversarial) and some other rows carry no
+    // evidence; including them in the denominator would deflate
+    // published R@K against external baselines that score the same
+    // way.
     for (const qa of conversation.qa) {
       const evidenceSet = new Set(qa.evidence);
       if (evidenceSet.size === 0) {
         continue;
       }
+      scoredCount += 1;
       const result = await runQuestion(daemon, qa);
       latencies.push(result.latencyMs);
       const ranked = result.pointers
@@ -217,7 +224,7 @@ async function runOneConversation(
     }
 
     return {
-      qaCount: conversation.qa.length,
+      qaCount: scoredCount,
       hitAt1,
       hitAt5,
       hitAt10,

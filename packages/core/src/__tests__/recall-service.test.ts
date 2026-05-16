@@ -1042,6 +1042,73 @@ describe("RecallService", () => {
     expect(result.candidates).toHaveLength(2);
   });
 
+  it("cohort dominance guard skips the plane when union ratio exceeds 50% on a single-session workspace", async () => {
+    const memories = Array.from({ length: 12 }, (_, i) =>
+      createMemoryEntry({
+        object_id: `cohort-${i}-${"0".repeat(7)}-4111-8111-111111111111`.slice(0, 36),
+        scope_class: ScopeClass.PROJECT,
+        dimension: MemoryDimension.PROCEDURE,
+        surface_id: "shared-surface",
+        run_id: "shared-run",
+        content: `unrelated topic ${i}`,
+        activation_score: 0.6
+      })
+    );
+    const { dependencies } = createDependencies(memories);
+    const service = new RecallService(dependencies);
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      runId: "shared-run",
+      strategy: "analyze"
+    });
+    const cohortWins = result.candidates.filter(
+      (c) => c.source_channels?.some((channel) => channel.includes("session_surface_cohort"))
+    ).length;
+    expect(cohortWins).toBe(0);
+  });
+
+  it("cohort dominance guard admits both branches when union stays under 50%", async () => {
+    const memories = [
+      createMemoryEntry({
+        object_id: "0aaaaaaa-0000-4000-8000-000000000001",
+        surface_id: "matching",
+        run_id: "matching",
+        activation_score: 0.6
+      }),
+      createMemoryEntry({
+        object_id: "0aaaaaaa-0000-4000-8000-000000000002",
+        surface_id: "other",
+        run_id: "other",
+        activation_score: 0.6
+      }),
+      createMemoryEntry({
+        object_id: "0aaaaaaa-0000-4000-8000-000000000003",
+        surface_id: "other",
+        run_id: "other",
+        activation_score: 0.6
+      }),
+      createMemoryEntry({
+        object_id: "0aaaaaaa-0000-4000-8000-000000000004",
+        surface_id: "other",
+        run_id: "other",
+        activation_score: 0.6
+      })
+    ];
+    const { dependencies } = createDependencies(memories);
+    const service = new RecallService(dependencies);
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      runId: "matching",
+      strategy: "analyze"
+    });
+    const matchingCandidate = result.candidates.find(
+      (c) => c.object_id === "0aaaaaaa-0000-4000-8000-000000000001"
+    );
+    expect(matchingCandidate).toBeDefined();
+  });
+
   it("mandatory share guard caps mandatory dimensions at 2/3 of max_entries so ranked optionals keep capacity", async () => {
     const constraintMemories = [
       createMemoryEntry({ object_id: "c-1", dimension: MemoryDimension.CONSTRAINT, activation_score: 0.50 }),

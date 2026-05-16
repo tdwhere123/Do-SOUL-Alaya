@@ -31,4 +31,21 @@ export function registerEvidenceRoutes(app: Hono, services: EvidenceRouteService
 
     return context.json({ success: true, data: evidence }, 200);
   });
+
+  // invariant: workspace-scoped pointer resolution. Mirrors the MCP
+  // soul.open_pointer fallthrough — memory first, then evidence — but
+  // limited to the requested workspace so the inspector loopback cannot
+  // surface foreign-workspace EvidenceCapsule rows by id alone.
+  app.get("/workspaces/:wsId/evidence/:id", async (context) => {
+    const workspaceId = context.req.param("wsId");
+    await services.workspaceService.getById(workspaceId);
+    const evidence = await services.evidenceService.findByIdScoped(
+      context.req.param("id"),
+      workspaceId
+    );
+    if (evidence === null) {
+      throw new CoreError("NOT_FOUND", "Evidence not found in workspace");
+    }
+    return context.json({ success: true, data: evidence }, 200);
+  });
 }
