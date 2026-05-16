@@ -6,7 +6,7 @@ acceptance criteria in the owning phase README or task card.
 ## Issue Numbering
 
 Issues are numbered `#BL-001`, `#BL-002`, ... in plain decimal
-sequence. **Next available number**: `#BL-045` (`#BL-022` was opened by
+sequence. **Next available number**: `#BL-047` (`#BL-022` was opened by
 p5-system-review-r3 as an EventPublisher v0.2 deferral and closed in
 v0.1-closeout-a2; `#BL-023`/`#BL-024` were resolved in r1 / r2;
 `#BL-025` through `#BL-036` were opened by the v0.1-closeout A2 and
@@ -14,104 +14,18 @@ D2 fix-loops, then resolved by Gate-5F under
 `docs/archive/v0.1-port-record/phase-5-followup-briefs/` before Phase 6;
 `#BL-009`, `#BL-037`, and `#BL-038` were resolved in v0.3.0;
 `#BL-039` through `#BL-043` were opened by v0.3.6 Phase 5/6 close-out,
-and `#BL-044` was opened by the v0.3.7 benchmark intake. v0.3.7 shipped
-the archive/Inspector repair only; the remaining items below are
-post-v0.3.7 follow-through — see
-[Open Issues](#open-issues)).
+`#BL-044` was opened by the v0.3.7 benchmark intake, and
+`#BL-045` / `#BL-046` were opened by the v0.3.8 round-1 review-loop.
+v0.3.8 closes `#BL-039` / `#BL-040` / `#BL-041` / `#BL-042` /
+`#BL-045` / `#BL-046`; `#BL-044` remains open and is the sole
+deferred item targeted at v0.3.9 by user directive
+(2026-05-16) — see [Open Issues](#open-issues).
 
 ## Open Issues
 
-### #BL-039 — Wire real embedding provider into recall path
-
-**Status**: Open, post-v0.3.7 follow-through.
-
-**Why open**: v0.3.6 LongMemEval-S full run (500/500) gives R@5 =
-60.2% with SQLite FTS + activation only. Pre-v0.3.7 strict-real live
-checks on a v0.3.6 build observed provider top5 around 94% on a
-separate internal corpus, but no v0.3.7-era live archive has been
-produced and that number is not a LongMemEval-S claim. The recall
-path already has an embedding supplement slot (per invariant:
-embedding never decides durable truth, but may supplement ranking).
-The remaining work is to wire provider-backed supplement into the
-public bench path and prove whether it lifts LongMemEval-S without
-crossing the truth boundary.
-
-**Close condition**:
-
-1. Provider config (file: ref under `~/.config/alaya/secrets/`) wires
-   into recall-time embedding lookup without changing durable-memory
-   governance semantics.
-2. LongMemEval-S full run, or a written cost-bound staged run plus CI
-   label, produces a new `docs/bench-history/public/<slug>/` entry
-   with embedding-enabled KPI and a diff vs the v0.3.6 500/500 floor.
-3. Invariant §"embedding is a recall supplement; it never decides
-   durable truth" remains intact (review-loop must verify).
-4. Bench-history latest-baseline for `public/longmemeval-s` is bumped.
-
-### #BL-040 — Scale LongMemEval-S smoke to confidence-interval sample
-
-**Status**: Open, post-v0.3.7 follow-through.
-
-**Why open**: v0.3.6 now has a 500/500 LongMemEval-S baseline (R@5 =
-60.2%), so the original "n=20 only" gap is gone for the release
-baseline. The remaining gap is that future smoke / shard / staged
-runs still need explicit confidence labels so a small-N number cannot
-be mistaken for a release-quality trend.
-
-**Close condition**:
-
-1. `report.md` computes and publishes a 95% CI when
-   `evaluated_count < sample_size` or when the run is produced from
-   shards / staged windows.
-2. Threshold engine gates `r_at_5_delta_pp` against `CI/2` instead of
-   raw 2pp / 5pp when `n < 100`.
-3. README / release notes distinguish smoke, staged, shard-merged, and
-   full-set numbers with concrete n values.
-
-### #BL-041 — LoCoMo cross-stack comparison
-
-**Status**: Open, post-v0.3.7 follow-through.
-
-**Why open**: v0.3.6 README quotes `agentmemory`'s public R@5 = 95.2%
-on LoCoMo "as reported, link". We do not run LoCoMo today, so the
-comparison is rhetorical, not numerical. The bench-runner abstracts
-dataset variant cleanly enough that adding a LoCoMo driver
-(`apps/bench-runner/src/locomo/`) is a parallel of the LongMemEval
-driver.
-
-**Close condition**:
-
-1. LoCoMo dataset fetcher + sha256-pinned meta committed under
-   `docs/bench-history/datasets/`.
-2. `alaya-bench-runner locomo` subcommand wired to the same in-process
-   daemon harness + propose+review chain.
-3. R@K, latency, token-saved KPIs in a fresh
-   `docs/bench-history/public/<slug>/` entry; report.md cites
-   `agentmemory`'s number with link and the dataset-version pin.
-
-### #BL-042 — Inspector Memory Browser + command palette (deferred from v0.3.6)
-
-**Status**: Open, post-v0.3.7 follow-through (deferred from v0.3.6 plan §Out).
-
-**Why open**: v0.3.6 scope kept the UI uplift to Overview + Recall +
-sidebar; the Memory Browser (durable entry list with evidence drill-in)
-and command palette (cmd-K) were scoped out to keep the release tight.
-With Recall Stats showing first KPIs and the bench archive growing,
-Memory Browser becomes the next operator surface that lets a maintainer
-trace from a tier-distribution number down to specific entries.
-
-**Close condition**:
-
-1. `apps/inspector/web/src/pages/MemoryBrowser.tsx` with filter
-   (workspace, scope_class, dimension, has-conflict).
-2. Per-row evidence drill-in (right-side drawer reading
-   `soul.open_pointer`).
-3. cmd-K command palette wiring `attach detach status inspect review`
-   verbs.
-
 ### #BL-044 — Recall utilization follow-through remains under-explained
 
-**Status**: Open, post-v0.3.7 follow-through.
+**Status**: Open, deferred to v0.3.9 by user directive (2026-05-16).
 
 **Why open**: v0.3.6 added recall utilization telemetry and Inspector
 cards, but operator use still shows low follow-through from delivered
@@ -132,44 +46,89 @@ usage, or the UI/CLI surfaced the metric too coarsely.
    ranking quality, host instructions, usage-report ergonomics, or
    telemetry classification.
 
+## Resolved in v0.3.8 (2026-05-16)
+
+### #BL-039 — Wire real embedding provider into recall path
+
+**Status**: Resolved in v0.3.8.
+
+**Resolution**: `OpenAIEmbeddingClient` already accepted a baseUrl
+override (`packages/core/src/embedding-recall-service.ts`) and the
+bench-runner harness already exposed `--embedding env`
+(`apps/bench-runner/src/harness/daemon.ts:152-200` + MANAGED_ENV_KEYS
+listing `OPENAI_EMBEDDING_PROVIDER_URL` / `OPENAI_EMBEDDING_MODEL`).
+v0.3.8 confirmed the wiring against yunwu.ai `/v1/embeddings`
+(`text-embedding-3-small`, 1536-d), bumped the operator-facing env
+docs in `docs/v0.3/v0.3.8/README.md`, and ran disabled-500 vs
+embedding-on-500 archive pairs under
+`docs/bench-history/public/`. Embedding remains a recall supplement
+(invariant intact).
+
+### #BL-040 — Scale LongMemEval-S smoke to confidence-interval sample
+
+**Status**: Resolved in v0.3.8.
+
+**Resolution**: `packages/eval/src/wilson-ci.ts` (new) computes the
+95% Wilson interval. `packages/eval/src/report.ts` annotates R@K
+with the half-width and explicit lo/hi bounds; the header line
+emits a sample-size label (smoke / shard_merged / full).
+`packages/eval/src/diff.ts` widens the ratio-KPI band to
+`max(raw_band, ci_half_width)` when `evaluated_count < 100`, so
+small-N runs cannot trip the fail/warn alarm on noise. Eight new
+`wilson-ci.test.ts` cases + two reframed `diff.test.ts` cases pin
+the contract.
+
+### #BL-041 — LoCoMo cross-stack comparison
+
+**Status**: Resolved in v0.3.8.
+
+**Resolution**: `apps/bench-runner/src/locomo/` ships dataset
+schema, sha256-pinned fetcher mirroring longmemeval, and a runner
+that proposes every session turn into a per-conversation workspace,
+then drives `soul.recall` per QA. Hit scoring is by dia_id ↔
+memory.object_id sidecar against `qa.evidence`. Pinned checksum
+committed at `docs/bench-history/datasets/locomo10.meta.json` (sha
+79fa87e9…ea698ff4, 10 conversations, 1986 QA, 5882 turns); first
+archive lands under `docs/bench-history/public-locomo/`.
+
+### #BL-042 — Inspector Memory Browser + command palette
+
+**Status**: Resolved in v0.3.8.
+
+**Resolution**: `apps/inspector/web/src/pages/MemoryBrowser.tsx`
+renders the workspace's durable memories with filter chips
+(dimension / scope / has-conflict), and a right-side drawer that
+calls the inspector proxy `/api/pointers/:workspaceId/:objectId`
+to resolve evidence refs through the daemon's
+`GET /evidence/:id` endpoint, returning gist + excerpt for the
+drawer to render. `apps/inspector/web/src/components/CommandPalette.tsx`
+provides a cmd-K palette spanning page jumps plus the five
+`attach / detach / status / inspect / review` CLI verbs;
+inspector remains a tooling loopback (invariants §21a), so the
+palette copies the CLI command to clipboard rather than invoking
+it.
+
 ### #BL-045 — PathRelationProposalService counter eviction port
 
-**Status**: Open, post-v0.3.8 follow-up.
+**Status**: Resolved in v0.3.8.
 
-**Why open**: The in-process pair-counter Map in
-`packages/core/src/path-relation-proposal-service.ts` is unbounded.
-Pairs that reach the propose threshold are dropped from the map, so
-steady-state memory holds only sub-threshold pairs; for daemons that
-accumulate long no-promote tails (low co-usage diversity over weeks)
-the map can still grow without bound. No eviction port is exposed yet.
-
-**Close condition**:
-
-1. The service exposes an eviction port (TTL or LRU) and the daemon
-   wires it via an env-tunable interval.
-2. A unit test demonstrates the counter shrinks under eviction.
-3. The invariant comment in `path-relation-proposal-service.ts`
-   updates to point at the eviction mechanism instead of "no current
-   eviction policy".
+**Resolution**: `PathRelationProposalService` now stamps
+`firstSeenAtMs` per counter entry and exposes
+`evictExpired(nowMs?, ttlMs?)`. The daemon wires an unref'd
+setInterval using `ALAYA_PATHREL_COUNTER_TTL_MS` (default 24h) so
+sub-threshold pairs older than the TTL are discarded. Two new unit
+tests cover the shrinks-when-expired and keeps-when-fresh paths.
 
 ### #BL-046 — ConflictDetectionService rule-path disable toggle
 
-**Status**: Open, post-v0.3.8 follow-up.
+**Status**: Resolved in v0.3.8.
 
-**Why open**: `ConflictDetectionService` runs the rule path
-unconditionally and only falls back to the LLM port when the rule
-path produced zero contradicts. Operators with a strong LLM provider
-might prefer LLM-as-primary on the same dataset, but the service
-does not expose a way to skip the rule path.
-
-**Close condition**:
-
-1. An option (constructor argument or env flag) disables the rule
-   path so LLM becomes the sole contradicts/incompatible_with
-   producer.
-2. The invariant comment in `conflict-detection-service.ts` reflects
-   the new toggle and removes the "must fork the service"
-   workaround note.
+**Resolution**: `ConflictDetectionService` accepts a `ruleEnabled`
+constructor option (default true) and the daemon reads
+`ALAYA_CONFLICT_RULE_ENABLED`. When the rule path is disabled the
+LLM port becomes the sole producer of contradicts /
+incompatible_with edges. Two new unit tests verify the
+LLM-as-sole-producer and no-port-no-edges scenarios.
 
 ## Resolved in v0.3.6 (2026-05-14)
 
