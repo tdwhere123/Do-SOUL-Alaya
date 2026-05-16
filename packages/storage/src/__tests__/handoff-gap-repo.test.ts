@@ -63,11 +63,6 @@ function makeHandoffRecord(overrides: Partial<HandoffRecord> = {}): HandoffRecor
     target_run_id: null,
     surface_id: null,
     ttl_ms: null,
-    recurrence_runs: null,
-    recurrence_surfaces: null,
-    governance_impact: null,
-    unresolved_age_ms: null,
-    upgrade_candidate: null,
     ...overrides
   };
 }
@@ -85,11 +80,6 @@ function makeGapRecord(overrides: Partial<GapRecord> = {}): GapRecord {
     surface_id: null,
     description: "Context was lost between sessions.",
     ttl_ms: null,
-    recurrence_runs: null,
-    recurrence_surfaces: null,
-    governance_impact: null,
-    unresolved_age_ms: null,
-    upgrade_candidate: null,
     ...overrides
   };
 }

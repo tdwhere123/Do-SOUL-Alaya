@@ -124,11 +124,6 @@ export {
   type DirtyStateDossierRepo
 } from "./repos/dirty-state-dossier-repo.js";
 export {
-  SqliteNodeInstanceRepo,
-  type NodeInstanceRepo
-} from "./repos/node-instance-repo.js";
-
-export {
   SqliteConflictMatrixRepo,
   type ConflictMatrixRepo
 } from "./repos/conflict-matrix-repo.js";
@@ -137,6 +132,11 @@ export {
   SqliteSurfaceIdentityRepo,
   type SurfaceIdentityRepo
 } from "./repos/surface-identity-repo.js";
+
+export {
+  SqliteHealthIssueGroupRepo,
+  type HealthIssueGroupRepo
+} from "./repos/health-issue-group-repo.js";
 
 export {
   SqliteSurfaceAnchorRepo,

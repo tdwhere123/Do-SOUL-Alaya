@@ -3,16 +3,6 @@ import { NonEmptyStringSchema, NonNegativeIntSchema } from "../schema-primitives
 import { ControlPlaneEnvelopeSchema } from "./envelope.js";
 import { ControlPlaneObjectKind } from "./object-kind.js";
 
-const upgradeAssessmentAxisFields = {
-  recurrence_runs: NonNegativeIntSchema.nullable(),
-  recurrence_surfaces: NonNegativeIntSchema.nullable(),
-  governance_impact: z.number().nullable(),
-  unresolved_age_ms: NonNegativeIntSchema.nullable(),
-  upgrade_candidate: z.boolean().nullable()
-} as const;
-
-export const UpgradeAssessmentAxisSchema = z.object(upgradeAssessmentAxisFields).readonly();
-
 export const HandoffRecordSchema = ControlPlaneEnvelopeSchema.unwrap()
   .extend({
     object_kind: z.literal(ControlPlaneObjectKind.HANDOFF_RECORD),
@@ -20,8 +10,7 @@ export const HandoffRecordSchema = ControlPlaneEnvelopeSchema.unwrap()
     source_run_id: NonEmptyStringSchema,
     target_run_id: NonEmptyStringSchema.nullable(),
     surface_id: NonEmptyStringSchema.nullable(),
-    ttl_ms: NonNegativeIntSchema.nullable(),
-    ...upgradeAssessmentAxisFields
+    ttl_ms: NonNegativeIntSchema.nullable()
   })
   .readonly();
 
@@ -32,11 +21,9 @@ export const GapRecordSchema = ControlPlaneEnvelopeSchema.unwrap()
     detected_in_run_id: NonEmptyStringSchema,
     surface_id: NonEmptyStringSchema.nullable(),
     description: NonEmptyStringSchema,
-    ttl_ms: NonNegativeIntSchema.nullable(),
-    ...upgradeAssessmentAxisFields
+    ttl_ms: NonNegativeIntSchema.nullable()
   })
   .readonly();
 
-export type UpgradeAssessmentAxis = z.infer<typeof UpgradeAssessmentAxisSchema>;
 export type HandoffRecord = z.infer<typeof HandoffRecordSchema>;
 export type GapRecord = z.infer<typeof GapRecordSchema>;

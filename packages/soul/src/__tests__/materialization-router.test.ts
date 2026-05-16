@@ -403,12 +403,7 @@ describe("MaterializationRouter", () => {
       object_kind: "handoff_record",
       handoff_kind: "run_handoff",
       source_run_id: "run-1",
-      ttl_ms: 60_000,
-      recurrence_runs: null,
-      recurrence_surfaces: null,
-      governance_impact: null,
-      unresolved_age_ms: null,
-      upgrade_candidate: null
+      ttl_ms: 60_000
     });
   });
 

@@ -64,6 +64,7 @@ export * from "./soul/cross-cutting.js";
 export * from "./soul/project-mapping.js";
 export * from "./soul/garden-tier.js";
 export * from "./soul/health-journal.js";
+export * from "./soul/health-issue-group.js";
 export * from "./soul/constitutional-fragment.js";
 export * from "./files.js";
 export * from "./file-tools.js";
@@ -111,7 +112,6 @@ export * from "./worker-safety-port.js";
 export * from "./zero-day-security.js";
 export type { ToolGovernancePort } from "./tool-governance-port.js";
 export * from "./node-template.js";
-export * from "./node-instance.js";
 export * from "./auditor-ports.js";
 export {
   IsoDatetimeStringSchema,

@@ -217,12 +217,7 @@ const handoffRecordBase = {
   source_run_id: "run-1",
   target_run_id: null,
   surface_id: "surface://task/main",
-  ttl_ms: null,
-  recurrence_runs: null,
-  recurrence_surfaces: null,
-  governance_impact: null,
-  unresolved_age_ms: null,
-  upgrade_candidate: null
+  ttl_ms: null
 } as const;
 
 const gapRecordBase = {
@@ -232,12 +227,7 @@ const gapRecordBase = {
   detected_in_run_id: "run-1",
   surface_id: null,
   description: "No verification result for strict change.",
-  ttl_ms: 300000,
-  recurrence_runs: null,
-  recurrence_surfaces: null,
-  governance_impact: null,
-  unresolved_age_ms: null,
-  upgrade_candidate: null
+  ttl_ms: 300000
 } as const;
 
 describe("Runtime Control Plane Schemas", () => {
@@ -420,22 +410,22 @@ describe("Runtime Control Plane Schemas", () => {
     ]);
   });
 
-  it("accepts nullable upgrade-axis fields for HandoffRecord", () => {
-    const parsed = HandoffRecordSchema.parse(handoffRecordBase);
-    expect(parsed.recurrence_runs).toBeNull();
-    expect(parsed.recurrence_surfaces).toBeNull();
-    expect(parsed.governance_impact).toBeNull();
-    expect(parsed.unresolved_age_ms).toBeNull();
-    expect(parsed.upgrade_candidate).toBeNull();
+  it("HandoffRecord schema no longer carries the retired upgrade-axis fields", () => {
+    const parsed = HandoffRecordSchema.parse(handoffRecordBase) as Record<string, unknown>;
+    expect(parsed.recurrence_runs).toBeUndefined();
+    expect(parsed.recurrence_surfaces).toBeUndefined();
+    expect(parsed.governance_impact).toBeUndefined();
+    expect(parsed.unresolved_age_ms).toBeUndefined();
+    expect(parsed.upgrade_candidate).toBeUndefined();
   });
 
-  it("accepts nullable upgrade-axis fields for GapRecord", () => {
-    const parsed = GapRecordSchema.parse(gapRecordBase);
-    expect(parsed.recurrence_runs).toBeNull();
-    expect(parsed.recurrence_surfaces).toBeNull();
-    expect(parsed.governance_impact).toBeNull();
-    expect(parsed.unresolved_age_ms).toBeNull();
-    expect(parsed.upgrade_candidate).toBeNull();
+  it("GapRecord schema no longer carries the retired upgrade-axis fields", () => {
+    const parsed = GapRecordSchema.parse(gapRecordBase) as Record<string, unknown>;
+    expect(parsed.recurrence_runs).toBeUndefined();
+    expect(parsed.recurrence_surfaces).toBeUndefined();
+    expect(parsed.governance_impact).toBeUndefined();
+    expect(parsed.unresolved_age_ms).toBeUndefined();
+    expect(parsed.upgrade_candidate).toBeUndefined();
   });
 
   it("enforces VerificationResult verdict enum", () => {
