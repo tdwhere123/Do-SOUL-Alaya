@@ -713,10 +713,12 @@ export class RecallService {
       }
     }
 
-    // invariant: cohort dominance guard. Exact and seed cohort branches
-    // are admitted together or skipped together; union > 50% of tierMemories
-    // skips the whole plane so evidence_anchor / domain_tag_cluster /
-    // lexical can compete on single-session workspaces.
+    // invariant: cohort dominance guard runs per-branch. Each branch's
+    // would-be admissions are compared against tier pool size; a branch
+    // is skipped when its own coverage exceeds 50% of tierMemories. The
+    // exact branch (query-attested surface_id/run_id) is admitted even
+    // on saturated workspaces unless its own match-set alone exceeds
+    // 50% — query attestation is stronger evidence than seed proximity.
     const querySurfaceIds = new Set(params.queryProbes.surface_ids);
     const queryRunIds = new Set(params.queryProbes.run_ids);
     const exactCohortMatches = params.tierMemories
@@ -726,10 +728,19 @@ export class RecallService {
       )
       .sort(compareMemoryEntries)
       .slice(0, DYNAMIC_RECALL_PLANE_CAP);
+    const exactCohortRatio =
+      params.tierMemories.length === 0
+        ? 0
+        : exactCohortMatches.length / params.tierMemories.length;
+    if (exactCohortRatio <= 0.5) {
+      for (const entry of exactCohortMatches) {
+        params.addCandidate(entry, "session_surface_cohort", 0.8, "session_surface_cohort");
+      }
+    }
 
-    const seedCohortByMemoryId = new Map<string, readonly Readonly<MemoryEntry>[]>();
-    const seedCohortIds = new Set<string>();
     if (structuralSeeds.length > 0) {
+      const seedCohortByMemoryId = new Map<string, readonly Readonly<MemoryEntry>[]>();
+      const seedCohortIds = new Set<string>();
       for (const seed of seeds.slice(0, DYNAMIC_RECALL_SEED_CAP)) {
         const cohort = params.tierMemories
           .filter((entry) =>
@@ -753,20 +764,11 @@ export class RecallService {
           }
         }
       }
-    }
-    const combinedCohortIds = new Set<string>([
-      ...exactCohortMatches.map((entry) => entry.object_id),
-      ...seedCohortIds
-    ]);
-    const combinedCohortRatio =
-      params.tierMemories.length === 0
-        ? 0
-        : combinedCohortIds.size / params.tierMemories.length;
-    if (combinedCohortRatio <= 0.5) {
-      for (const entry of exactCohortMatches) {
-        params.addCandidate(entry, "session_surface_cohort", 0.8, "session_surface_cohort");
-      }
-      if (structuralSeeds.length > 0) {
+      const seedCohortRatio =
+        params.tierMemories.length === 0
+          ? 0
+          : seedCohortIds.size / params.tierMemories.length;
+      if (seedCohortRatio <= 0.5) {
         for (const seed of seeds.slice(0, DYNAMIC_RECALL_SEED_CAP)) {
           const cohort = seedCohortByMemoryId.get(seed.object_id) ?? [];
           const center = cohort.findIndex((entry) => entry.object_id === seed.object_id);

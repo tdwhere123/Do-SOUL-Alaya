@@ -179,7 +179,7 @@ describe("SqliteMemoryGraphEdgeRepo", () => {
     await expect(repo.countInboundSupports(sourceMemoryId, "workspace-1")).resolves.toBe(0);
   });
 
-  it("countInboundEdgesWeighted sums by edge_type weight (supports=1, derives_from=0.5, recalls=0.3, supersedes=-0.5)", async () => {
+  it("countInboundEdgesWeighted sums by edge_type weight (supports=1, derives_from=0.5, recalls=0.3, supersedes=-0.5, contradicts=-0.4, incompatible_with=-0.3, exception_to=0)", async () => {
     const { database, memoryRepo } = await createRepo();
     const repo = new SqliteMemoryGraphEdgeRepo(database);
     const targetId = createMemoryId(20);
@@ -244,7 +244,7 @@ describe("SqliteMemoryGraphEdgeRepo", () => {
       edge_type: "supersedes",
       created_at: "2026-04-01T00:00:05.000Z"
     }));
-    // ignored: contradicts, exception_to, incompatible_with → 0 each
+    // 1 × contradicts → -0.4
     await repo.create(createGraphEdge({
       edge_id: "wedge-contra-1",
       source_memory_id: srcA,
@@ -261,8 +261,8 @@ describe("SqliteMemoryGraphEdgeRepo", () => {
       created_at: "2026-04-01T00:00:07.000Z"
     }));
 
-    // 2.0 + 0.5 + 0.6 - 0.5 + 0 (contradicts) = 2.6
-    await expect(repo.countInboundEdgesWeighted(targetId, "workspace-1")).resolves.toBeCloseTo(2.6, 10);
+    // 2.0 + 0.5 + 0.6 - 0.5 - 0.4 = 2.2
+    await expect(repo.countInboundEdgesWeighted(targetId, "workspace-1")).resolves.toBeCloseTo(2.2, 10);
     // outsideTargetId has one inbound supports edge (wedge-out-1) → 1.0
     await expect(repo.countInboundEdgesWeighted(outsideTargetId, "workspace-1")).resolves.toBeCloseTo(1.0, 10);
     // wrong workspace → 0

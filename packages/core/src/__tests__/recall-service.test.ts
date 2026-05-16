@@ -1045,21 +1045,26 @@ describe("RecallService", () => {
   it("cohort dominance guard skips the plane when union ratio exceeds 50% on a single-session workspace", async () => {
     const memories = Array.from({ length: 12 }, (_, i) =>
       createMemoryEntry({
-        object_id: `cohort-${i}-${"0".repeat(7)}-4111-8111-111111111111`.slice(0, 36),
+        object_id: `0aaa${i.toString().padStart(2, "0")}aa-0000-4000-8000-000000000abc`,
         scope_class: ScopeClass.PROJECT,
         dimension: MemoryDimension.PROCEDURE,
-        surface_id: "shared-surface",
-        run_id: "shared-run",
+        surface_id: "surface-shared",
+        run_id: "run-shared",
         content: `unrelated topic ${i}`,
         activation_score: 0.6
       })
     );
     const { dependencies } = createDependencies(memories);
     const service = new RecallService(dependencies);
+    // invariant: query text mentions both surface-shared and run-shared
+    // so recall-query-probes populates surface_ids / run_ids; without
+    // this the cohort exact branch finds no matches and the test would
+    // pass vacuously for the wrong reason.
+    const taskSurface = createTaskSurface();
     const result = await service.recall({
-      taskSurface: createTaskSurface(),
+      taskSurface: { ...taskSurface, display_name: "request inside surface-shared during run-shared" },
       workspaceId: "workspace-1",
-      runId: "shared-run",
+      runId: "run-shared",
       strategy: "analyze"
     });
     const cohortWins = result.candidates.filter(
@@ -1068,45 +1073,55 @@ describe("RecallService", () => {
     expect(cohortWins).toBe(0);
   });
 
-  it("cohort dominance guard admits both branches when union stays under 50%", async () => {
+  it("cohort dominance guard admits the cohort plane when matching cohort stays under 50%", async () => {
     const memories = [
       createMemoryEntry({
-        object_id: "0aaaaaaa-0000-4000-8000-000000000001",
-        surface_id: "matching",
-        run_id: "matching",
+        object_id: "0aaa0001-0000-4000-8000-000000000abc",
+        surface_id: "surface-target",
+        run_id: "run-target",
+        content: "match by exact cohort",
         activation_score: 0.6
       }),
       createMemoryEntry({
-        object_id: "0aaaaaaa-0000-4000-8000-000000000002",
-        surface_id: "other",
-        run_id: "other",
+        object_id: "0aaa0002-0000-4000-8000-000000000abc",
+        surface_id: "surface-other",
+        run_id: "run-other",
+        content: "unrelated topic alpha",
         activation_score: 0.6
       }),
       createMemoryEntry({
-        object_id: "0aaaaaaa-0000-4000-8000-000000000003",
-        surface_id: "other",
-        run_id: "other",
+        object_id: "0aaa0003-0000-4000-8000-000000000abc",
+        surface_id: "surface-other",
+        run_id: "run-other",
+        content: "unrelated topic beta",
         activation_score: 0.6
       }),
       createMemoryEntry({
-        object_id: "0aaaaaaa-0000-4000-8000-000000000004",
-        surface_id: "other",
-        run_id: "other",
+        object_id: "0aaa0004-0000-4000-8000-000000000abc",
+        surface_id: "surface-other",
+        run_id: "run-other",
+        content: "unrelated topic gamma",
         activation_score: 0.6
       })
     ];
     const { dependencies } = createDependencies(memories);
     const service = new RecallService(dependencies);
+    const taskSurface = createTaskSurface();
     const result = await service.recall({
-      taskSurface: createTaskSurface(),
+      taskSurface: { ...taskSurface, display_name: "request inside surface-target during run-target" },
       workspaceId: "workspace-1",
-      runId: "matching",
+      runId: "run-target",
       strategy: "analyze"
     });
-    const matchingCandidate = result.candidates.find(
-      (c) => c.object_id === "0aaaaaaa-0000-4000-8000-000000000001"
+    // invariant: when the would-be cohort union stays under 50% of the
+    // tier pool (here 1/4 = 25%), the cohort plane admits the matching
+    // memory and the diagnostic surface records the cohort attribution.
+    const cohortDiagnostic = result.diagnostics?.candidates.find(
+      (d) =>
+        d.object_id === "0aaa0001-0000-4000-8000-000000000abc" &&
+        d.admission_planes.includes("session_surface_cohort")
     );
-    expect(matchingCandidate).toBeDefined();
+    expect(cohortDiagnostic, "matching memory should be admitted via the cohort plane").toBeDefined();
   });
 
   it("mandatory share guard caps mandatory dimensions at 2/3 of max_entries so ranked optionals keep capacity", async () => {
