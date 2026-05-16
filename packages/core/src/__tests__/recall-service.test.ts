@@ -1042,6 +1042,88 @@ describe("RecallService", () => {
     expect(result.candidates).toHaveLength(2);
   });
 
+  it("mandatory share guard caps mandatory dimensions at 2/3 of max_entries so ranked optionals keep capacity", async () => {
+    const constraintMemories = [
+      createMemoryEntry({ object_id: "c-1", dimension: MemoryDimension.CONSTRAINT, activation_score: 0.50 }),
+      createMemoryEntry({ object_id: "c-2", dimension: MemoryDimension.CONSTRAINT, activation_score: 0.55 }),
+      createMemoryEntry({ object_id: "c-3", dimension: MemoryDimension.CONSTRAINT, activation_score: 0.60 }),
+      createMemoryEntry({ object_id: "c-4", dimension: MemoryDimension.CONSTRAINT, activation_score: 0.65 }),
+      createMemoryEntry({ object_id: "c-5", dimension: MemoryDimension.CONSTRAINT, activation_score: 0.70 }),
+      createMemoryEntry({ object_id: "c-6", dimension: MemoryDimension.CONSTRAINT, activation_score: 0.75 })
+    ];
+    const procedureMemories = [
+      createMemoryEntry({ object_id: "p-1", dimension: MemoryDimension.PROCEDURE, activation_score: 0.80 }),
+      createMemoryEntry({ object_id: "p-2", dimension: MemoryDimension.PROCEDURE, activation_score: 0.85 }),
+      createMemoryEntry({ object_id: "p-3", dimension: MemoryDimension.PROCEDURE, activation_score: 0.90 })
+    ];
+    const { dependencies } = createDependencies([...constraintMemories, ...procedureMemories]);
+    const service = new RecallService(dependencies);
+    const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+    const policy = overridePolicy(basePolicy, {
+      fine_assessment: {
+        ...basePolicy.fine_assessment,
+        budgets: {
+          max_total_tokens: 10_000,
+          max_entries: 6,
+          per_dimension_limits: null
+        }
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    expect(result.candidates.length).toBeLessThanOrEqual(6);
+    const constraintCount = result.candidates.filter(
+      (candidate) => candidate.dimension === MemoryDimension.CONSTRAINT
+    ).length;
+    expect(constraintCount).toBeLessThanOrEqual(4);
+    const procedureCount = result.candidates.filter(
+      (candidate) => candidate.dimension === MemoryDimension.PROCEDURE
+    ).length;
+    expect(procedureCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it("mandatory share guard preserves all mandatories when they fit under the cap", async () => {
+    const memories = [
+      createMemoryEntry({ object_id: "c-1", dimension: MemoryDimension.CONSTRAINT, activation_score: 0.7 }),
+      createMemoryEntry({ object_id: "c-2", dimension: MemoryDimension.CONSTRAINT, activation_score: 0.6 }),
+      createMemoryEntry({ object_id: "p-1", dimension: MemoryDimension.PROCEDURE, activation_score: 0.9 }),
+      createMemoryEntry({ object_id: "p-2", dimension: MemoryDimension.PROCEDURE, activation_score: 0.8 })
+    ];
+    const { dependencies } = createDependencies(memories);
+    const service = new RecallService(dependencies);
+    const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+    const policy = overridePolicy(basePolicy, {
+      fine_assessment: {
+        ...basePolicy.fine_assessment,
+        budgets: {
+          max_total_tokens: 10_000,
+          max_entries: 6,
+          per_dimension_limits: null
+        }
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id).sort()).toEqual([
+      "c-1",
+      "c-2",
+      "p-1",
+      "p-2"
+    ]);
+  });
+
   it("keeps pre-budget diagnostics for candidates dropped by final delivery budget", async () => {
     const memories = [
       createMemoryEntry({ object_id: "memory-1", activation_score: 0.9 }),

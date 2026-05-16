@@ -1312,24 +1312,38 @@ export class RecallService {
     }
     const config = policy.fine_assessment;
 
-    const mandatory = candidates.filter(
-      ({ entry }) => isProtectedDimension(entry.dimension) || winnerMemoryIds.has(entry.object_id)
+    // invariant: mandatory share cap. winner-attested candidates always
+    // bypass budget; protected-dimension non-winners are capped at
+    // floor(max_entries * 2/3) so the remaining slots are reserved for
+    // ranked non-mandatory candidates. Excess protected-dimension entries
+    // are not re-admitted via the optional pool (they would otherwise
+    // out-rank precise non-mandatory candidates and defeat the cap).
+    const mandatoryShareDenominator = 3;
+    const mandatoryShareNumerator = 2;
+    const mandatoryCap = Math.max(
+      1,
+      Math.floor(config.budgets.max_entries * mandatoryShareNumerator / mandatoryShareDenominator)
     );
-    const optional = candidates
-      .filter(
-        ({ entry }) => !isProtectedDimension(entry.dimension) && !winnerMemoryIds.has(entry.object_id)
+    const scoredCandidates = candidates.map((candidate) => Object.freeze({
+      ...candidate,
+      effectiveScore: this.computeEffectiveScore(
+        candidate.entry,
+        policy,
+        winnerMemoryIds,
+        supplementaryData,
+        candidate.isAdvisory ?? false,
+        candidate.scoreMultiplier ?? 1
       )
-      .map((candidate) => Object.freeze({
-        ...candidate,
-        effectiveScore: this.computeEffectiveScore(
-          candidate.entry,
-          policy,
-          winnerMemoryIds,
-          supplementaryData,
-          candidate.isAdvisory ?? false,
-          candidate.scoreMultiplier ?? 1
-        )
-      }))
+    }));
+    const winnerMandatory = scoredCandidates.filter(({ entry }) => winnerMemoryIds.has(entry.object_id));
+    const protectedMandatoryAll = scoredCandidates
+      .filter(({ entry }) => isProtectedDimension(entry.dimension) && !winnerMemoryIds.has(entry.object_id))
+      .sort((left, right) => compareEffectiveScores(right, left));
+    const protectedSlots = Math.max(0, mandatoryCap - winnerMandatory.length);
+    const protectedMandatory = protectedMandatoryAll.slice(0, protectedSlots);
+    const mandatory = [...winnerMandatory, ...protectedMandatory];
+    const optional = scoredCandidates
+      .filter(({ entry }) => !isProtectedDimension(entry.dimension) && !winnerMemoryIds.has(entry.object_id))
       .sort((left, right) => compareEffectiveScores(right, left));
 
     type FineAssessmentAccumulator = {
