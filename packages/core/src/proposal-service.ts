@@ -3,7 +3,6 @@ import {
   ClaimLifecycleState,
   DYNAMICS_CONSTANTS,
   MemoryGovernanceEventType,
-  PromotionState,
   ProposalOptionKind,
   ProposalResolutionState,
   ProposalSchema,
@@ -81,18 +80,6 @@ export interface ProposalServiceClaimServicePort {
 
 export interface ProposalServiceSynthesisServicePort {
   findById(objectId: string): Promise<Readonly<SynthesisCapsule> | null>;
-  resolvePromotionDecision(
-    objectId: string,
-    nextState: Extract<SynthesisCapsule["promotion_state"], "promoted" | "rejected">,
-    reason: string,
-    causedBy: TransitionCausedBy,
-    options?: {
-      readonly cooldownUntil?: string | null;
-      // When provided, runtime notification is deferred: the event is pushed here
-      // instead of being notified immediately. Callers must preserve order.
-      readonly deferredNotificationEvents?: EventLogEntry[];
-    }
-  ): Promise<Readonly<SynthesisCapsule>>;
 }
 
 export interface ProposalRuntimeNotifier {
@@ -143,6 +130,10 @@ export class ProposalService {
       });
   }
 
+  // invariant: createFromSynthesisPromotion no longer gates on the retired
+  // SynthesisCapsule promotion lifecycle (authority_round_count /
+  // cooldown_until / promotion_state). Active promotion now travels the
+  // soul.resolve typed-resolution path or the Proposal/HITL review path.
   public async createFromSynthesisPromotion(
     synthesisId: string,
     claimDraftId: string
@@ -154,13 +145,6 @@ export class ProposalService {
 
     if (synthesis === null) {
       throw new CoreError("NOT_FOUND", "Synthesis capsule not found");
-    }
-
-    if (synthesis.promotion_state !== PromotionState.CANDIDATE) {
-      throw new CoreError(
-        "VALIDATION",
-        `Synthesis capsule must be in candidate state, got ${synthesis.promotion_state}`
-      );
     }
 
     const claim = await this.dependencies.claimService.findById(parsedClaimDraftId);
@@ -364,13 +348,6 @@ export class ProposalService {
       throw new CoreError("NOT_FOUND", "Synthesis capsule not found");
     }
 
-    if (synthesis.promotion_state !== PromotionState.CANDIDATE) {
-      throw new CoreError(
-        "VALIDATION",
-        `Synthesis capsule must be in candidate state, got ${synthesis.promotion_state}`
-      );
-    }
-
     const claim = await this.dependencies.claimService.findById(claimDraftId);
 
     if (claim === null) {
@@ -400,14 +377,6 @@ export class ProposalService {
       { deferredNotificationEvents }
     );
 
-    await this.dependencies.synthesisService.resolvePromotionDecision(
-      context.synthesis.object_id,
-      PromotionState.PROMOTED,
-      "proposal_accepted",
-      TransitionCausedBy.REVIEW,
-      { deferredNotificationEvents }
-    );
-
     await this.recordKarmaAndProcess(
       context,
       reviewedAt,
@@ -421,13 +390,11 @@ export class ProposalService {
     reviewedAt: string,
     deferredNotificationEvents: EventLogEntry[]
   ): Promise<void> {
-    await this.dependencies.synthesisService.resolvePromotionDecision(
-      context.synthesis.object_id,
-      PromotionState.REJECTED,
-      "proposal_rejected",
-      TransitionCausedBy.REVIEW,
-      { cooldownUntil: addHours(reviewedAt, 24), deferredNotificationEvents }
-    );
+    // SynthesisCapsule no longer carries promotion_state, so rejection is
+    // recorded solely on the proposal + claim path. The deferred-event
+    // collector is still threaded through future expansion (proposal /
+    // claim notifications).
+    void deferredNotificationEvents;
 
     await this.recordKarmaAndProcess(
       context,
@@ -571,12 +538,3 @@ function resolvePrimaryMemoryObjectId(
   return null;
 }
 
-function addHours(iso: string, hours: number): string {
-  const base = Date.parse(iso);
-
-  if (!Number.isFinite(base)) {
-    throw new CoreError("VALIDATION", "reviewed_at must be a valid ISO timestamp");
-  }
-
-  return new Date(base + hours * 60 * 60 * 1000).toISOString();
-}

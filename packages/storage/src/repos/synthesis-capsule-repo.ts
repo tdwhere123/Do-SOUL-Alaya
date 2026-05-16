@@ -1,8 +1,6 @@
-﻿import {
-  PromotionStateSchema,
+import {
   SynthesisCapsuleSchema,
   SynthesisStatusSchema,
-  type PromotionState,
   type SynthesisCapsule,
   type SynthesisStatus
 } from "@do-soul/alaya-protocol";
@@ -27,17 +25,6 @@ export interface SynthesisCapsuleRepo {
     status: SynthesisStatus,
     updatedAt: string
   ): Promise<Readonly<SynthesisCapsule>>;
-  updatePromotionState(
-    objectId: string,
-    state: PromotionState,
-    updatedAt: string
-  ): Promise<Readonly<SynthesisCapsule>>;
-  incrementAuthorityRound(objectId: string, updatedAt: string): Promise<Readonly<SynthesisCapsule>>;
-  setCooldownUntil(
-    objectId: string,
-    cooldownUntil: string | null,
-    updatedAt: string
-  ): Promise<Readonly<SynthesisCapsule>>;
 }
 
 const SYNTHESIS_SELECT_COLUMNS = `
@@ -50,9 +37,6 @@ const SYNTHESIS_SELECT_COLUMNS = `
         created_by,
         topic_key,
         synthesis_type,
-        authority_round_count,
-        cooldown_until,
-        promotion_state,
         summary,
         evidence_refs,
         source_memory_refs,
@@ -71,9 +55,6 @@ interface SynthesisCapsuleRow {
   readonly created_by: string;
   readonly topic_key: string;
   readonly synthesis_type: string;
-  readonly authority_round_count: number;
-  readonly cooldown_until: string | null;
-  readonly promotion_state: string;
   readonly summary: string;
   readonly evidence_refs: string;
   readonly source_memory_refs: string;
@@ -90,9 +71,6 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
   private readonly updateEvidenceRefsStatement;
   private readonly updateSourceMemoryRefsStatement;
   private readonly updateStatusStatement;
-  private readonly updatePromotionStateStatement;
-  private readonly incrementAuthorityRoundStatement;
-  private readonly setCooldownUntilStatement;
 
   public constructor(private readonly db: StorageDatabase) {
     this.createStatement = db.connection.prepare(`
@@ -106,16 +84,13 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
         created_by,
         topic_key,
         synthesis_type,
-        authority_round_count,
-        cooldown_until,
-        promotion_state,
         summary,
         evidence_refs,
         source_memory_refs,
         workspace_id,
         run_id,
         synthesis_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     this.findByIdStatement = db.connection.prepare(`
@@ -157,24 +132,6 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
       SET synthesis_status = ?, updated_at = ?
       WHERE object_id = ?
     `);
-
-    this.updatePromotionStateStatement = db.connection.prepare(`
-      UPDATE synthesis_capsules
-      SET promotion_state = ?, updated_at = ?
-      WHERE object_id = ?
-    `);
-
-    this.incrementAuthorityRoundStatement = db.connection.prepare(`
-      UPDATE synthesis_capsules
-      SET authority_round_count = authority_round_count + 1, updated_at = ?
-      WHERE object_id = ?
-    `);
-
-    this.setCooldownUntilStatement = db.connection.prepare(`
-      UPDATE synthesis_capsules
-      SET cooldown_until = ?, updated_at = ?
-      WHERE object_id = ?
-    `);
   }
 
   public async create(capsule: SynthesisCapsule): Promise<Readonly<SynthesisCapsule>> {
@@ -191,9 +148,6 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
         parsedCapsule.created_by,
         parsedCapsule.topic_key,
         parsedCapsule.synthesis_type,
-        parsedCapsule.authority_round_count,
-        parsedCapsule.cooldown_until,
-        parsedCapsule.promotion_state,
         parsedCapsule.summary,
         JSON.stringify(parsedCapsule.evidence_refs),
         JSON.stringify(parsedCapsule.source_memory_refs),
@@ -275,105 +229,6 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
       }
 
       throw new StorageError("QUERY_FAILED", `Failed to update status for synthesis ${objectId}.`, error);
-    }
-  }
-
-  public async updatePromotionState(
-    objectId: string,
-    state: PromotionState,
-    updatedAt: string
-  ): Promise<Readonly<SynthesisCapsule>> {
-    const parsedState = parsePromotionState(state);
-    const parsedUpdatedAt = parseUpdatedAt(updatedAt);
-
-    try {
-      const result = this.updatePromotionStateStatement.run(parsedState, parsedUpdatedAt, objectId);
-
-      if (result.changes === 0) {
-        throw new StorageError("NOT_FOUND", `Synthesis capsule ${objectId} was not found.`);
-      }
-
-      const updated = await this.findById(objectId);
-
-      if (updated === null) {
-        throw new StorageError("NOT_FOUND", `Synthesis capsule ${objectId} was not found after update.`);
-      }
-
-      return updated;
-    } catch (error) {
-      if (error instanceof StorageError) {
-        throw error;
-      }
-
-      throw new StorageError(
-        "QUERY_FAILED",
-        `Failed to update promotion state for synthesis ${objectId}.`,
-        error
-      );
-    }
-  }
-
-  public async incrementAuthorityRound(
-    objectId: string,
-    updatedAt: string
-  ): Promise<Readonly<SynthesisCapsule>> {
-    const parsedUpdatedAt = parseUpdatedAt(updatedAt);
-
-    try {
-      const result = this.incrementAuthorityRoundStatement.run(parsedUpdatedAt, objectId);
-
-      if (result.changes === 0) {
-        throw new StorageError("NOT_FOUND", `Synthesis capsule ${objectId} was not found.`);
-      }
-
-      const updated = await this.findById(objectId);
-
-      if (updated === null) {
-        throw new StorageError("NOT_FOUND", `Synthesis capsule ${objectId} was not found after update.`);
-      }
-
-      return updated;
-    } catch (error) {
-      if (error instanceof StorageError) {
-        throw error;
-      }
-
-      throw new StorageError(
-        "QUERY_FAILED",
-        `Failed to increment authority rounds for synthesis ${objectId}.`,
-        error
-      );
-    }
-  }
-
-  public async setCooldownUntil(
-    objectId: string,
-    cooldownUntil: string | null,
-    updatedAt: string
-  ): Promise<Readonly<SynthesisCapsule>> {
-    const parsedCooldownUntil = parseCooldownUntil(cooldownUntil);
-    const parsedUpdatedAt = parseUpdatedAt(updatedAt);
-
-    try {
-      const result = this.setCooldownUntilStatement.run(parsedCooldownUntil, parsedUpdatedAt, objectId);
-
-      if (result.changes === 0) {
-        throw new StorageError("NOT_FOUND", `Synthesis capsule ${objectId} was not found.`);
-      }
-
-      const updated = await this.findById(objectId);
-
-      if (updated === null) {
-        throw new StorageError("NOT_FOUND", `Synthesis capsule ${objectId} was not found after update.`);
-      }
-
-      return updated;
-    } catch (error) {
-      if (error instanceof StorageError) {
-        throw error;
-      }
-
-      throw new StorageError("QUERY_FAILED", `Failed to set cooldown for synthesis ${objectId}.`, error);
     }
   }
 
@@ -477,9 +332,6 @@ function parseSynthesisCapsuleRow(row: SynthesisCapsuleRow): Readonly<SynthesisC
         created_by: row.created_by,
         topic_key: row.topic_key,
         synthesis_type: row.synthesis_type,
-        authority_round_count: row.authority_round_count,
-        cooldown_until: row.cooldown_until,
-        promotion_state: row.promotion_state,
         summary: row.summary,
         evidence_refs: JSON.parse(row.evidence_refs),
         source_memory_refs: JSON.parse(row.source_memory_refs),
@@ -499,26 +351,6 @@ function parseSynthesisStatus(value: SynthesisStatus): SynthesisStatus {
   } catch (error) {
     throw new StorageError("VALIDATION_FAILED", "Failed to validate synthesis status.", error);
   }
-}
-
-function parsePromotionState(value: PromotionState): PromotionState {
-  try {
-    return PromotionStateSchema.parse(value);
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to validate promotion state.", error);
-  }
-}
-
-function parseCooldownUntil(value: string | null): string | null {
-  if (value === null) {
-    return null;
-  }
-
-  if (value.trim().length === 0) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to validate cooldown_until.");
-  }
-
-  return value;
 }
 
 const parseUpdatedAt = parseTimestamp;

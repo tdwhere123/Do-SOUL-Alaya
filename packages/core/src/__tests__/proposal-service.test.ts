@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ClaimLifecycleState,
   DYNAMICS_CONSTANTS,
-  PromotionState,
   ProposalResolutionState,
   RetentionPolicy,
   type ClaimForm,
@@ -24,9 +23,6 @@ function createSynthesis(overrides: Partial<SynthesisCapsule> = {}): SynthesisCa
     created_by: "user_action",
     topic_key: "tooling/pnpm",
     synthesis_type: "phase_synthesis",
-    authority_round_count: 1,
-    cooldown_until: null,
-    promotion_state: PromotionState.CANDIDATE,
     summary: "Candidate summary",
     evidence_refs: ["evidence-1"],
     source_memory_refs: ["memory-1"],
@@ -99,7 +95,6 @@ function createDependencies(overrides: Partial<ProposalServiceDependencies> = {}
   readonly proposalCreateSpy: ReturnType<typeof vi.fn>;
   readonly proposalUpdateSpy: ReturnType<typeof vi.fn>;
   readonly claimTransitionSpy: ReturnType<typeof vi.fn>;
-  readonly synthesisResolveSpy: ReturnType<typeof vi.fn>;
   readonly karmaStore: InMemoryKarmaEventStore;
   readonly dynamicsProcessSpy: ReturnType<typeof vi.fn>;
   readonly warnSpy: ReturnType<typeof vi.fn>;
@@ -117,9 +112,6 @@ function createDependencies(overrides: Partial<ProposalServiceDependencies> = {}
     Object.freeze(createProposal({ resolution_state: state, last_updated_at: updatedAt }))
   );
   const claimTransitionSpy = vi.fn(async (_id, status) => Object.freeze(createClaim({ claim_status: status })));
-  const synthesisResolveSpy = vi.fn(async (_id, nextState) =>
-    Object.freeze(createSynthesis({ promotion_state: nextState }))
-  );
   const karmaStore = new InMemoryKarmaEventStore();
   const dynamicsProcessSpy = vi.fn(async () => {});
   const warnSpy = vi.fn();
@@ -140,8 +132,7 @@ function createDependencies(overrides: Partial<ProposalServiceDependencies> = {}
       transitionLifecycle: claimTransitionSpy
     },
     synthesisService: {
-      findById: vi.fn(async () => createSynthesis()),
-      resolvePromotionDecision: synthesisResolveSpy
+      findById: vi.fn(async () => createSynthesis())
     },
     eventLogRepo: {
       append: appendSpy,
@@ -167,7 +158,6 @@ function createDependencies(overrides: Partial<ProposalServiceDependencies> = {}
     proposalCreateSpy,
     proposalUpdateSpy,
     claimTransitionSpy,
-    synthesisResolveSpy,
     karmaStore,
     dynamicsProcessSpy,
     warnSpy,
@@ -176,7 +166,7 @@ function createDependencies(overrides: Partial<ProposalServiceDependencies> = {}
 }
 
 describe("ProposalService", () => {
-  it("creates proposal from synthesis promotion candidate", async () => {
+  it("creates proposal from synthesis capsule + draft claim", async () => {
     const order: string[] = [];
     const { dependencies } = createDependencies({
       eventLogRepo: {
@@ -226,29 +216,6 @@ describe("ProposalService", () => {
     });
   });
 
-  it("rejects create when synthesis is not candidate", async () => {
-    const { dependencies, appendSpy } = createDependencies({
-      synthesisService: {
-        findById: vi.fn(async () => createSynthesis({ promotion_state: PromotionState.NONE })),
-        resolvePromotionDecision: vi.fn(async () => createSynthesis())
-      }
-    });
-
-    const service = new ProposalService(dependencies);
-
-    await expect(
-      service.createFromSynthesisPromotion(
-        "f8b2124d-4954-4ea0-a77e-ad4b137ed8ee",
-        "590b6f34-7ea5-4f9b-ae74-fe8d4f5af96a"
-      )
-    ).rejects.toMatchObject({
-      name: "CoreError",
-      code: "VALIDATION"
-    });
-
-    expect(appendSpy).not.toHaveBeenCalled();
-  });
-
   it("rejects create when claim is not draft", async () => {
     const { dependencies, appendSpy } = createDependencies({
       claimService: {
@@ -272,7 +239,7 @@ describe("ProposalService", () => {
     expect(appendSpy).not.toHaveBeenCalled();
   });
 
-  it("accept review transitions claim+synthesis and records karma gain", async () => {
+  it("accept review transitions claim and records karma gain", async () => {
     const reviewAppendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       event_id: `event-${event.event_type}`,
       created_at: "2026-03-21T00:00:00.000Z",
@@ -280,7 +247,7 @@ describe("ProposalService", () => {
       ...event
     }));
 
-    const { dependencies, claimTransitionSpy, synthesisResolveSpy, karmaStore, dynamicsProcessSpy, proposalUpdateSpy } =
+    const { dependencies, claimTransitionSpy, karmaStore, dynamicsProcessSpy, proposalUpdateSpy } =
       createDependencies({
         eventLogRepo: {
           queryByEntity: vi.fn(async () =>
@@ -325,16 +292,6 @@ describe("ProposalService", () => {
       "review",
       expect.objectContaining({ deferredNotificationEvents: expect.any(Array) })
     );
-    expect(synthesisResolveSpy).toHaveBeenCalledWith(
-      "f8b2124d-4954-4ea0-a77e-ad4b137ed8ee",
-      "promoted",
-      "proposal_accepted",
-      "review",
-      expect.objectContaining({ deferredNotificationEvents: expect.any(Array) })
-    );
-    // A1 fix-loop (finding-5): legacy review path now persists
-    // reviewer_identity through updateResolution's optional 4th arg so
-    // every accepted/rejected row names the reviewer in audit replay.
     expect(proposalUpdateSpy).toHaveBeenCalledWith(
       "24c607da-7544-47a7-a28e-d649071f77f5",
       "accepted",
@@ -369,8 +326,8 @@ describe("ProposalService", () => {
     );
   });
 
-  it("reject review transitions synthesis to rejected with cooldown and records penalty", async () => {
-    const { dependencies, claimTransitionSpy, synthesisResolveSpy, karmaStore, dynamicsProcessSpy, proposalUpdateSpy } =
+  it("reject review skips claim activation and records penalty", async () => {
+    const { dependencies, claimTransitionSpy, karmaStore, dynamicsProcessSpy, proposalUpdateSpy } =
       createDependencies();
 
     const service = new ProposalService(dependencies);
@@ -384,18 +341,6 @@ describe("ProposalService", () => {
 
     expect(updated.resolution_state).toBe("rejected");
     expect(claimTransitionSpy).not.toHaveBeenCalled();
-    expect(synthesisResolveSpy).toHaveBeenCalledWith(
-      "f8b2124d-4954-4ea0-a77e-ad4b137ed8ee",
-      "rejected",
-      "proposal_rejected",
-      "review",
-      expect.objectContaining({
-        cooldownUntil: "2026-03-22T03:00:00.000Z",
-        deferredNotificationEvents: expect.any(Array)
-      })
-    );
-    // A1 fix-loop (finding-5): reviewer_identity threaded into the
-    // legacy update path; reviewed_by ("user") becomes the 4th arg.
     expect(proposalUpdateSpy).toHaveBeenCalledWith(
       "24c607da-7544-47a7-a28e-d649071f77f5",
       "rejected",
@@ -418,8 +363,7 @@ describe("ProposalService", () => {
         transitionLifecycle: vi.fn(async () => createClaim())
       },
       synthesisService: {
-        findById: vi.fn(async () => createSynthesis({ source_memory_refs: [] })),
-        resolvePromotionDecision: vi.fn(async () => createSynthesis())
+        findById: vi.fn(async () => createSynthesis({ source_memory_refs: [] }))
       }
     });
 
@@ -526,11 +470,7 @@ describe("ProposalService", () => {
   });
 
   it("passes deferredNotificationEvents to claimService so claim transition does not notify before reviewCreated", async () => {
-    // Regression for P2-a: ClaimService.transitionLifecycle() must receive the
-    // deferredNotificationEvents array so it defers notification rather than
-    // firing before reviewCreated is notified. Verify the option is threaded through.
     const notificationOrder: string[] = [];
-    // Claim lifecycle events are workspace-scoped and carry run_id: null in production.
     const deferredEventFromClaim: EventLogEntry = {
       event_id: "event-claim-transition",
       event_type: "soul.claim.lifecycle_changed",
@@ -548,7 +488,6 @@ describe("ProposalService", () => {
       claimService: {
         findById: vi.fn(async () => createClaim()),
         transitionLifecycle: vi.fn(async (_id, _state, _reason, _causedBy, options) => {
-          // Simulate real ClaimService: push event to deferred array if provided.
           if (options?.deferredNotificationEvents) {
             options.deferredNotificationEvents.push(deferredEventFromClaim);
           }
@@ -570,10 +509,8 @@ describe("ProposalService", () => {
       reviewed_at: "2026-03-21T02:00:00.000Z"
     });
 
-    // Full notification order on accept path must be:
+    // Notification order on accept path:
     //   soul.review.created → soul.claim.lifecycle_changed → soul.review.completed → soul.proposal.resolved
-    // (P5-system-review-r1 MR-B04: ProposalService/ClaimService property name drift caused
-    // claim.lifecycle_changed to fire before review.created at runtime; covered here.)
     expect(notificationOrder).toEqual([
       "soul.review.created",
       "soul.claim.lifecycle_changed",

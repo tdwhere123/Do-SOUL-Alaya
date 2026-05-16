@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  PromotionState,
   RunMode,
   RunState,
   SynthesisStatus,
@@ -34,9 +33,6 @@ function createSynthesisCapsule(overrides: Partial<SynthesisCapsule> = {}): Synt
     created_by: "user",
     topic_key: "tooling/pnpm",
     synthesis_type: "phase_synthesis",
-    authority_round_count: 0,
-    cooldown_until: null,
-    promotion_state: PromotionState.NONE,
     summary: "Use pnpm for workspace commands.",
     evidence_refs: ["evidence-1"],
     source_memory_refs: ["memory-1"],
@@ -89,48 +85,6 @@ describe("SqliteSynthesisCapsuleRepo", () => {
     ).rejects.toMatchObject({
       code: "NOT_FOUND"
     });
-  });
-
-  it("updates promotion state", async () => {
-    const { repo } = await createRepo();
-    const capsule = createSynthesisCapsule();
-    await repo.create(capsule);
-
-    const updated = await repo.updatePromotionState(
-      capsule.object_id,
-      PromotionState.CANDIDATE,
-      "2026-03-21T02:00:00.000Z"
-    );
-
-    expect(updated.promotion_state).toBe(PromotionState.CANDIDATE);
-    expect(updated.updated_at).toBe("2026-03-21T02:00:00.000Z");
-  });
-
-  it("increments authority round count", async () => {
-    const { repo } = await createRepo();
-    const capsule = createSynthesisCapsule({ authority_round_count: 1 });
-    await repo.create(capsule);
-
-    const updated = await repo.incrementAuthorityRound(capsule.object_id, "2026-03-21T03:00:00.000Z");
-
-    expect(updated.authority_round_count).toBe(2);
-    expect(updated.updated_at).toBe("2026-03-21T03:00:00.000Z");
-  });
-
-  it("sets and clears cooldown_until", async () => {
-    const { repo } = await createRepo();
-    const capsule = createSynthesisCapsule();
-    await repo.create(capsule);
-
-    const withCooldown = await repo.setCooldownUntil(
-      capsule.object_id,
-      "2026-03-22T00:00:00.000Z",
-      "2026-03-21T04:00:00.000Z"
-    );
-    expect(withCooldown.cooldown_until).toBe("2026-03-22T00:00:00.000Z");
-
-    const cleared = await repo.setCooldownUntil(capsule.object_id, null, "2026-03-21T05:00:00.000Z");
-    expect(cleared.cooldown_until).toBeNull();
   });
 
   it("returns immutable synthesis capsules", async () => {

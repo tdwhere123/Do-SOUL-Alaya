@@ -10,6 +10,7 @@ import {
   type ClaimKind,
   type EvidenceCapsule,
   type EvidenceHealthState as EvidenceHealthStateValue,
+  type EvidenceKind as EvidenceKindValue,
   type FormationKind,
   type MemoryDimension as MemoryDimensionValue,
   type MemoryEntry,
@@ -85,9 +86,6 @@ type SynthesisMaterializationInput = Omit<
   | "lifecycle_state"
   | "created_at"
   | "updated_at"
-  | "authority_round_count"
-  | "cooldown_until"
-  | "promotion_state"
   | "synthesis_status"
 >;
 
@@ -546,6 +544,21 @@ function computeEvidenceHealthState(signal: CandidateMemorySignal): EvidenceHeal
   return EvidenceHealthState.VERIFIED;
 }
 
+// invariant: evidence_kind diversifies producer-side so the live ontology
+// no longer collapses to 100% `inferred`. Mapping rules:
+//   - user_seed / import sources → user_statement (operator-attested origin)
+//   - signals carrying evidence_refs → external_reference (linked anchor)
+//   - everything else (LLM / Garden compile) → inferred (default)
+function pickEvidenceKind(signal: CandidateMemorySignal): EvidenceKindValue {
+  if (signal.source === "user_seed" || signal.source === "import") {
+    return "user_statement";
+  }
+  if (signal.evidence_refs.length > 0) {
+    return "external_reference";
+  }
+  return "inferred";
+}
+
 function buildEvidenceInput(
   signal: CandidateMemorySignal,
   summarySuffix?: string
@@ -554,7 +567,7 @@ function buildEvidenceInput(
 
   return {
     created_by: signal.source,
-    evidence_kind: "inferred",
+    evidence_kind: pickEvidenceKind(signal),
     semantic_anchor: {
       topic: buildTopicKey(signal),
       keywords: [...signal.domain_tags],

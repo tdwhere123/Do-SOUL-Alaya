@@ -23,6 +23,7 @@ import {
   HealthJournalService,
   MemoryService,
   ConflictDetectionService,
+  DeferredObligationService,
   NarrativeBudgetService,
   PathRelationProposalService,
   PATH_RELATION_COUNTER_DEFAULT_TTL_MS,
@@ -421,7 +422,12 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   });
   const surfaceDriftService = new SurfaceDriftService({
     leaseRepo: new SqliteDriftLeaseRepo(database),
-    eventPublisher
+    eventPublisher,
+    healthJournal: {
+      record: async (entry) => {
+        await healthJournalService.record(entry);
+      }
+    }
   });
   const surfaceBindingService = new SurfaceBindingService({
     surfaceBindingRepo,
@@ -600,6 +606,15 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // invariant: counter Map is bounded by periodic eviction. The daemon
   // sweeps once per TTL interval; sub-threshold pairs older than the TTL
   // are discarded so long no-promote tails do not grow without bound.
+  // invariant: DeferredObligationService is the producer for path-anchor
+  // `obligation` refs and the destination of soul.resolve `defer`
+  // resolutions. Wired into the daemon so its create/fulfill/expire ports
+  // are callable from the materialization router and the resolve handler.
+  const deferredObligationService = new DeferredObligationService({
+    repo: deferredObligationRepo,
+    eventPublisher
+  });
+  void deferredObligationService;
   const pathRelationEvictionIntervalMs = pathRelationCounterTtlMs ?? PATH_RELATION_COUNTER_DEFAULT_TTL_MS;
   const pathRelationEvictionTimer = setInterval(() => {
     pathRelationProposalService.evictExpired();

@@ -25,7 +25,10 @@ const memoryDimensionValues = [
 
 const sourceKindValues = ["compiler", "user", "seed", "import", "review"] as const;
 
-const formationKindValues = ["extracted", "explicit", "inferred", "derived", "imported"] as const;
+// invariant: live producers must pick one of extracted / explicit /
+// imported. Other values have no producer path and are rejected at the
+// schema layer so stale callers fail fast.
+const formationKindValues = ["extracted", "explicit", "imported"] as const;
 
 const decayProfileValues = ["pinned", "stable", "normal", "volatile", "hazard"] as const;
 
@@ -57,8 +60,6 @@ export const SourceKind = {
 export const FormationKind = {
   EXTRACTED: "extracted",
   EXPLICIT: "explicit",
-  INFERRED: "inferred",
-  DERIVED: "derived",
   IMPORTED: "imported"
 } as const;
 

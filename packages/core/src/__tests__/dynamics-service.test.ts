@@ -178,7 +178,7 @@ describe("DynamicsService", () => {
     });
     const episode = service.assignInitialDynamics({
       dimension: MemoryDimension.EPISODE,
-      formation_kind: FormationKind.INFERRED,
+      formation_kind: FormationKind.EXTRACTED,
       created_at: "2026-03-23T00:00:00.000Z"
     });
     const glossary = service.assignInitialDynamics({
@@ -193,7 +193,7 @@ describe("DynamicsService", () => {
     expect(hazard.activation_score).toBeCloseTo(0.54, 10);
 
     expect(episode.decay_profile).toBe("volatile");
-    expect(episode.confidence).toBe(0.4);
+    expect(episode.confidence).toBe(0.6);
 
     expect(glossary.decay_profile).toBe("pinned");
     expect(glossary.confidence).toBe(0.7);
