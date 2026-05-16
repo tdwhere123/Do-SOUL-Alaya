@@ -20,6 +20,8 @@ import { runLongMemEvalCrossQuestion } from "./longmemeval/crossquestion.js";
 import { runLiveBench } from "./live/runner.js";
 import { runLongMemEval } from "./longmemeval/runner.js";
 import { runSelfBench } from "./self/runner.js";
+import { fetchLocomo } from "./locomo/fetch.js";
+import { runLocomo } from "./locomo/runner.js";
 import type { BenchEmbeddingMode } from "./harness/daemon.js";
 import type { LongMemEvalVariant } from "./longmemeval/dataset.js";
 
@@ -32,6 +34,8 @@ Usage:
   alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--history-root <path>]
   alaya-bench-runner longmemeval-multiturn [--variant oracle|s|m] [--limit N] [--offset N] [--rounds N] [--embedding disabled|env] [--history-root <path>]
   alaya-bench-runner longmemeval-crossquestion [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--history-root <path>]
+  alaya-bench-runner fetch-locomo
+  alaya-bench-runner locomo [--limit N] [--offset N] [--embedding disabled|env] [--history-root <path>]
   alaya-bench-runner self [--history-root <path>]
   alaya-bench-runner live [--source <main-check.json|main-check-run.json>] [--history-root <path>]
   alaya-bench-runner merge-longmemeval --shards <dir1> <dir2> ... --variant <v> --history-root <path>
@@ -80,6 +84,10 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
       return runLongMemEvalMultiturnCommand(opts);
     case "longmemeval-crossquestion":
       return runLongMemEvalCrossQuestionCommand(opts);
+    case "fetch-locomo":
+      return runFetchLocomoCommand(opts);
+    case "locomo":
+      return runLocomoCommand(opts);
     case "self":
       return runSelfCommand(opts);
     case "live":
@@ -310,6 +318,60 @@ async function runLongMemEvalCrossQuestionCommand(opts: ParsedFlags): Promise<nu
   } catch (err) {
     process.stderr.write(
       `alaya-bench-runner longmemeval-crossquestion: ${err instanceof Error ? err.message : String(err)}\n`
+    );
+    return 2;
+  }
+}
+
+async function runFetchLocomoCommand(opts: ParsedFlags): Promise<number> {
+  try {
+    process.stdout.write("Fetching locomo10 from snap-research/locomo...\n");
+    const result = await fetchLocomo("locomo10", {
+      dataDir: opts.dataDir,
+      force: false
+    });
+    process.stdout.write(
+      `Cached: ${result.localPath}\n` +
+        `  sha256: ${result.sha256}\n` +
+        `  conversations: ${result.conversationCount}\n`
+    );
+    return 0;
+  } catch (err) {
+    process.stderr.write(
+      `alaya-bench-runner fetch-locomo: ${err instanceof Error ? err.message : String(err)}\n`
+    );
+    return 2;
+  }
+}
+
+async function runLocomoCommand(opts: ParsedFlags): Promise<number> {
+  try {
+    process.stdout.write(
+      `Running LoCoMo10` +
+        (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
+        (opts.limit !== undefined ? ` limit=${opts.limit}` : "") +
+        (opts.embeddingMode !== "disabled" ? ` embedding=${opts.embeddingMode}` : "") +
+        "...\n"
+    );
+    const result = await runLocomo({
+      variant: "locomo10",
+      limit: opts.limit,
+      offset: opts.offset,
+      historyRoot: opts.historyRoot,
+      dataDir: opts.dataDir,
+      embeddingMode: opts.embeddingMode
+    });
+    const kpi = result.payload.kpi;
+    process.stdout.write(
+      `Done. Slug: ${result.slug}\n` +
+        `  R@1=${pct(kpi.r_at_1)} R@5=${pct(kpi.r_at_5)} R@10=${pct(kpi.r_at_10)}\n` +
+        `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
+        `  KPI: ${result.kpiPath}\n`
+    );
+    return exitCodeForVerdicts(result.payload.diff_vs_previous?.verdict_per_kpi);
+  } catch (err) {
+    process.stderr.write(
+      `alaya-bench-runner locomo: ${err instanceof Error ? err.message : String(err)}\n`
     );
     return 2;
   }

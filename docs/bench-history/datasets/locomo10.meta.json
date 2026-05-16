@@ -1,0 +1,8 @@
+{
+  "variant": "locomo10",
+  "source": "https://github.com/snap-research/locomo/blob/main/data/locomo10.json",
+  "sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
+  "conversation_count": 10,
+  "qa_total": 1986,
+  "dialogue_total": 5882
+}

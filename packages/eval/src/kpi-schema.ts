@@ -6,6 +6,7 @@ export const BenchSplit = z.enum([
   "longmemeval-s",
   "longmemeval-oracle",
   "longmemeval-m",
+  "locomo10",
   "strict-real"
 ]);
 export type BenchSplit = z.infer<typeof BenchSplit>;
@@ -15,6 +16,7 @@ export const BenchName = z.enum([
   "public",
   "public-multiturn",
   "public-crossquestion",
+  "public-locomo",
   "live"
 ]);
 export type BenchName = z.infer<typeof BenchName>;
