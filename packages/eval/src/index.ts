@@ -40,4 +40,13 @@ export {
 
 export { renderFindings, renderReport } from "./report.js";
 
+export {
+  WILSON_Z_95,
+  ciAwareBand,
+  deriveSampleSizeLabel,
+  wilsonHalfWidthPp,
+  wilsonInterval,
+  type SampleSizeLabel
+} from "./wilson-ci.js";
+
 export { runCli } from "./cli.js";

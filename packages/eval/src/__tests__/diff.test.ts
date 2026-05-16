@@ -54,9 +54,17 @@ describe("diffKpis", () => {
     expect(result.deltas.length).toBeGreaterThan(0);
   });
 
-  it("emits warn when R@5 drops just past the warn threshold", () => {
-    const previous = buildPayload({});
-    const current = buildPayload({ r_at_5: 0.92 });
+  it("emits warn when R@5 drops just past the warn threshold on a large-N run", () => {
+    const previous: KpiPayload = {
+      ...buildPayload({}),
+      sample_size: 500,
+      evaluated_count: 500
+    };
+    const current: KpiPayload = {
+      ...buildPayload({ r_at_5: 0.92 }),
+      sample_size: 500,
+      evaluated_count: 500
+    };
     const result = diffKpis(current, previous);
     const rAt5 = result.deltas.find((d) => d.key === "r_at_5");
     expect(rAt5?.verdict).toBe("warn");
@@ -105,19 +113,18 @@ describe("diffKpis", () => {
   });
 
   // @anchor min-sample-test — see thresholds.min_sample_for_ratio_diff
-  it("downgrades fail to warn when the previous baseline is below min sample size", () => {
-    // Previous baseline was a tiny n=5 smoke that happened to hit 100%.
-    // Without the sample-size guard a 20pp "drop" would flag FAIL even
-    // though variance at n=5 is enormous. With the guard it reports WARN.
+  // ci-aware band widening absorbs small-N noise on ratio KPIs, so the
+  // verdict comes out ok directly; the sample-size downgrade still
+  // matters for non-ratio KPIs (latency, hot share) — see the next test.
+  it("ci-aware band absorbs ratio-KPI noise when current evaluated_count is small", () => {
     const previous: KpiPayload = {
       ...buildPayload({ r_at_5: 1.0, r_at_10: 1.0 }),
       evaluated_count: 5
     };
     const current = buildPayload({ r_at_5: 0.798, r_at_10: 0.892 });
     const result = diffKpis(current, previous);
-    expect(result.worst_verdict).toBe("warn");
     const r5 = result.deltas.find((d) => d.key === "r_at_5");
-    expect(r5?.verdict).toBe("warn");
+    expect(r5?.verdict).toBe("ok");
   });
 
   it("downgrades latency FAIL to WARN when previous baseline is undersampled", () => {

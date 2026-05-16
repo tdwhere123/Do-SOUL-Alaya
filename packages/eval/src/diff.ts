@@ -7,8 +7,10 @@ import {
   rollupWorstVerdict,
   type KpiDelta,
   type KpiDiffResult,
+  type RatioBand,
   type ThresholdConfig
 } from "./thresholds.js";
+import { ciAwareBand } from "./wilson-ci.js";
 
 export function diffKpis(
   current: KpiPayload,
@@ -40,12 +42,20 @@ export function diffKpis(
 
   const deltas: KpiDelta[] = [];
 
+  // invariant: ratio-KPI regression thresholds widen to the 95% Wilson CI
+  // half-width when evaluated_count < 100. A noise-level delta no longer
+  // trips a fail/warn alarm on small-N runs, while N >= 100 keeps the raw
+  // 2pp warn / 5pp fail floor.
   pushRatioDelta(
     deltas,
     "r_at_5",
     current.kpi.r_at_5,
     previous.kpi.r_at_5,
-    thresholds.r_at_5_drop_pp,
+    ciAwareBand(
+      thresholds.r_at_5_drop_pp,
+      Math.round(current.kpi.r_at_5 * current.evaluated_count),
+      current.evaluated_count
+    ),
     downgradeFail
   );
   pushRatioDelta(
@@ -53,7 +63,11 @@ export function diffKpis(
     "r_at_10",
     current.kpi.r_at_10,
     previous.kpi.r_at_10,
-    thresholds.r_at_10_drop_pp,
+    ciAwareBand(
+      thresholds.r_at_10_drop_pp,
+      Math.round(current.kpi.r_at_10 * current.evaluated_count),
+      current.evaluated_count
+    ),
     downgradeFail
   );
   pushRatioDelta(
@@ -115,7 +129,7 @@ function pushRatioDelta(
   key: string,
   current: number,
   previous: number,
-  band: { readonly warn: number; readonly fail: number },
+  band: RatioBand,
   postClassify: (v: Verdict) => Verdict = (v) => v
 ): void {
   const classified = classifyRatioDrop(current, previous, band);

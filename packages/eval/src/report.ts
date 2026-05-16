@@ -1,6 +1,7 @@
 import type { KpiPayload } from "./kpi-schema.js";
 import { verdictBadge } from "./diff.js";
 import type { KpiDiffResult } from "./thresholds.js";
+import { deriveSampleSizeLabel, wilsonInterval } from "./wilson-ci.js";
 
 export function renderReport(
   current: KpiPayload,
@@ -8,11 +9,15 @@ export function renderReport(
   diff: KpiDiffResult
 ): string {
   const lines: string[] = [];
+  const sampleLabel = deriveSampleSizeLabel(
+    current.evaluated_count,
+    current.kpi.latency_source
+  );
   lines.push(`# Bench Report — ${current.bench_name} / ${current.split}`);
   lines.push("");
   lines.push(
     `- Run at: ${current.run_at}`,
-    `- Sample size: ${current.sample_size} (evaluated ${current.evaluated_count}/${current.sample_size})`,
+    `- Sample size: ${current.sample_size} (evaluated ${current.evaluated_count}/${current.sample_size}, label=${sampleLabel})`,
     `- Harness mode: ${current.harness_mode}`,
     `- Alaya commit: ${current.alaya_commit} (${current.alaya_version})`,
     `- Embedding: ${current.embedding_provider}`,
@@ -166,9 +171,9 @@ export function renderReport(
 
   lines.push("## Absolute KPIs");
   lines.push("");
-  lines.push(`- R@1: ${formatRatio(current.kpi.r_at_1)}`);
-  lines.push(`- R@5: ${formatRatio(current.kpi.r_at_5)}`);
-  lines.push(`- R@10: ${formatRatio(current.kpi.r_at_10)}`);
+  lines.push(`- R@1: ${formatRatio(current.kpi.r_at_1)}${ciAnnotation(current.kpi.r_at_1, current.evaluated_count)}`);
+  lines.push(`- R@5: ${formatRatio(current.kpi.r_at_5)}${ciAnnotation(current.kpi.r_at_5, current.evaluated_count)}`);
+  lines.push(`- R@10: ${formatRatio(current.kpi.r_at_10)}${ciAnnotation(current.kpi.r_at_10, current.evaluated_count)}`);
   if (
     current.kpi.r_at_5_overall !== undefined ||
     current.kpi.r_at_5_with_embedding_returned !== undefined
@@ -374,4 +379,14 @@ function formatDelta(value: number): string {
   if (value === 0) return "0";
   const sign = value > 0 ? "+" : "";
   return `${sign}${value.toFixed(4)}`;
+}
+
+function ciAnnotation(ratio: number, evaluatedCount: number): string {
+  if (!Number.isFinite(ratio) || evaluatedCount <= 0) {
+    return "";
+  }
+  const successes = Math.round(ratio * evaluatedCount);
+  const interval = wilsonInterval(successes, evaluatedCount);
+  const halfWidthPp = ((interval.hi - interval.lo) / 2) * 100;
+  return ` (95% CI ±${halfWidthPp.toFixed(2)}pp, [${(interval.lo * 100).toFixed(2)}%, ${(interval.hi * 100).toFixed(2)}%])`;
 }
