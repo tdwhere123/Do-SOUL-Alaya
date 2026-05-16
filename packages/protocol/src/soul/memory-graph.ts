@@ -27,33 +27,39 @@ export const MemoryGraphEdgeType = {
 export const MemoryGraphEdgeTypeSchema = z.enum(memoryGraphEdgeTypeValues);
 
 // Per-edge_type contribution to `RecallServiceGraphSupportPort.countInboundEdgesWeighted`
-// (consumed by recall scoring as `graphSupportFactor`). Adding a new edge_type
-// requires either listing it here or accepting that it contributes 0.
+// (consumed by recall scoring as `graphSupportFactor`). Adding a new
+// edge_type requires either listing it here or accepting that it
+// contributes 0.
 //
-// Known limitations (documented for v0.3.3; tracked for v0.4):
-//   * Floor-at-zero: the weighted SUM is clamped to [0, 3] by
-//     `normalizeGraphSupport`, so a single SUPERSEDES (-0.5) reads as
-//     "no edges" not "below baseline". The SUPERSEDES weight is staged
-//     here so the wiring is ready when normalization changes.
-//   * RECALLS saturation: with weight +0.3 and the clamp at 3, ~10
-//     inbound RECALLS edges saturate `graphSupportFactor` to 1.0. A
-//     high-traffic agent that reports the same memory used repeatedly
-//     can pin its preferred memories to max graph_support. The hard
-//     fix (per-run / per-window decay) is a recall-scoring redesign.
-//   * Audit-drift: `GraphExploreService.addEdge` appends
-//     `SOUL_GRAPH_EDGE_CREATED` before the row insert and outside any
-//     transaction. Concurrent fan-out from `report_context_usage` can
-//     leave audit rows for edges the SQL constraint then rejects. The
-//     structural fix (append+insert in one transaction via
-//     `appendManyWithMutation`) is pre-existing scope.
+// invariant: the weighted sum is floor-clamped to [0, 3] by
+// `normalizeGraphSupport`. Inbound negative-signal edges (supersedes /
+// contradicts / incompatible_with) therefore *suppress* graph_support
+// they otherwise would have accumulated from positive edges on the
+// same memory, but cannot drop graph_support below the zero baseline.
+// Lifting the floor to allow negative-only memories to read below
+// baseline is a recall-weight rebalance that needs a co-evaluated
+// bench sweep; the current clamp matches the rest of the score range.
+//
+// invariant: RECALLS edge accumulation can saturate graph_support
+// once inbound RECALLS count × weight crosses the upper clamp. A
+// high-traffic agent that repeatedly reports the same memory used
+// will pin its preferred memories to max graph_support; per-run /
+// per-window decay would be the principled fix.
+//
+// invariant: `GraphExploreService.addEdge` appends
+// `SOUL_GRAPH_EDGE_CREATED` outside the SQL transaction, so a
+// concurrent fan-out can leave an audit row whose row insert later
+// fails. The append+insert single-transaction fix is gated on the
+// `appendManyWithMutation` migration that crosses the materializer
+// boundary.
 export const MEMORY_GRAPH_EDGE_RECALL_WEIGHTS: Readonly<Record<typeof memoryGraphEdgeTypeValues[number], number>> = Object.freeze({
   supports: 1.0,
   derives_from: 0.5,
   recalls: 0.3,
   supersedes: -0.5,
-  contradicts: 0,
-  exception_to: 0,
-  incompatible_with: 0
+  contradicts: -0.4,
+  incompatible_with: -0.3,
+  exception_to: 0
 });
 export const GraphExploreDirSchema = z.enum(graphExploreDirValues);
 export const GraphNeighborDirSchema = z.enum(graphNeighborDirValues);

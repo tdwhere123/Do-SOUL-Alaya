@@ -159,12 +159,15 @@ export function normalizeActivationScore(value: number | null): number {
 }
 
 export function normalizeGraphSupport(count: number): number {
-  // Clamp [count, 0, 3] / 3. The clamp at 0 is intentional and matches the
-  // floor-at-zero limitation documented on MEMORY_GRAPH_EDGE_RECALL_WEIGHTS:
-  // signed weighted sums (e.g. dominated by SUPERSEDES) collapse to 0
-  // rather than pulling graph_support below baseline. Extending the
-  // scoring range to [-1, 1] is a v0.4 task that requires reviewing the
-  // downstream weight balance.
+  // invariant: Clamp [count, 0, 3] / 3. The clamp at 0 matches the
+  // weighted-sum floor documented on MEMORY_GRAPH_EDGE_RECALL_WEIGHTS:
+  // signed weighted sums (e.g. dominated by SUPERSEDES / CONTRADICTS)
+  // collapse to 0 rather than pulling graph_support below baseline.
+  // Negative inbound edges therefore *suppress* graph_support that
+  // positive edges would have otherwise accumulated for the same memory,
+  // but cannot drag graph_support below zero. Lifting the floor needs
+  // a co-evaluated bench sweep — see the same invariant on the weights
+  // table.
   return Math.min(Math.max(count, 0), 3) / 3;
 }
 

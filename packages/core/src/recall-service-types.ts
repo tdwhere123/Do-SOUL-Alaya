@@ -72,13 +72,13 @@ export interface RecallServiceEventLogRepoPort {
 }
 
 export interface RecallServiceGraphSupportPort {
-  /** @deprecated since v0.3.3 — recall reads `countInboundEdgesWeighted` instead.
-   * Kept on the port for one release for non-recall callers. */
+  /** @deprecated recall reads `countInboundEdgesWeighted` instead.
+   * Kept on the port for non-recall callers (raw supports-only count). */
   countInboundSupports(memoryId: string, workspaceId: string): Promise<number>;
   // Aggregates inbound graph edges by edge_type weight into one signed
   // support score. The recall service consumes this so that derives_from /
   // recalls signals also lift graph_support, and supersedes pulls it down
-  // (currently floor-at-zero — see MEMORY_GRAPH_EDGE_RECALL_WEIGHTS comment).
+  // (floor-clamped to zero baseline — see MEMORY_GRAPH_EDGE_RECALL_WEIGHTS invariant).
   countInboundEdgesWeighted(memoryId: string, workspaceId: string): Promise<number>;
 }
 
