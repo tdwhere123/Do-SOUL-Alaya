@@ -228,6 +228,30 @@ describe("Soul graph protocol schemas", () => {
         baseline_snapshot_at: "2026-05-02T00:00:00.000Z",
         edge_count_trend: "stable",
         avg_strength_trend: "stable",
+        latest_stability_distribution: {
+          volatile: 0,
+          normal: 1,
+          stable: 0,
+          pinned: 0
+        },
+        latest_governance_distribution: {
+          hint_only: 0,
+          attention_only: 0,
+          recall_allowed: 1,
+          strictly_governed: 0
+        },
+        latest_connectivity: {
+          unique_source_anchors: 1,
+          unique_target_anchors: 1,
+          max_out_degree: 1,
+          max_in_degree: 1,
+          isolated_anchors: 0
+        },
+        activity_velocity: {
+          paths_reinforced_since_last: 0,
+          paths_weakened_since_last: 0,
+          paths_created_since_last: 1
+        },
         latest_snapshot: createSnapshot()
       }
     });
@@ -301,7 +325,6 @@ function createSnapshot() {
     snapshot_id: "snapshot-1",
     workspace_id: "workspace-1",
     total_active_paths: 1,
-    total_retired_paths: 0,
     strength_distribution: {
       very_weak: 0,
       weak: 0,
@@ -330,7 +353,6 @@ function createSnapshot() {
     },
     paths_reinforced_since_last: 0,
     paths_weakened_since_last: 0,
-    paths_retired_since_last: 0,
     paths_created_since_last: 1,
     snapshot_at: "2026-05-02T00:00:00.000Z"
   } as const;

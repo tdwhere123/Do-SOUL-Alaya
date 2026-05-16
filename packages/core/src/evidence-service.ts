@@ -47,10 +47,32 @@ export interface EvidenceRuntimeNotifier {
   notifyEntry(entry: EventLogEntry): void | Promise<void>;
 }
 
+// invariant: see also: DynamicsService.emitKarmaEvent — the
+// evidence_gain karma kind fires from transitionHealth on the
+// questionable -> verified edge so the memory bound to the evidence
+// gets a retention bump when the source becomes trustworthy again.
+export interface EvidenceServiceKarmaEmitterPort {
+  emitKarmaEvent(input: {
+    readonly kind: "evidence_gain";
+    readonly objectId: string;
+    readonly workspaceId: string;
+  }): Promise<void>;
+}
+
+export interface EvidenceServiceMemoryRefLookupPort {
+  findMemoriesByEvidenceRef(
+    evidenceObjectId: string,
+    workspaceId: string
+  ): Promise<readonly { readonly object_id: string }[]>;
+}
+
 export interface EvidenceServiceDependencies {
   readonly evidenceCapsuleRepo: EvidenceServiceEvidenceCapsuleRepoPort;
   readonly eventLogRepo: EvidenceServiceEventLogRepoPort;
   readonly runtimeNotifier: EvidenceRuntimeNotifier;
+  readonly karmaEmitter?: EvidenceServiceKarmaEmitterPort;
+  readonly memoryRefLookup?: EvidenceServiceMemoryRefLookupPort;
+  readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   readonly generateObjectId?: () => string;
   readonly now?: () => string;
 }
@@ -144,7 +166,58 @@ export class EvidenceService {
     );
 
     await this.dependencies.runtimeNotifier.notifyEntry(event);
+    await this.emitEvidenceGainIfPromoted({
+      fromHealth: existing.evidence_health_state,
+      toHealth: parsedHealth,
+      evidenceObjectId: updated.object_id,
+      workspaceId: updated.workspace_id
+    });
     return updated;
+  }
+
+  private async emitEvidenceGainIfPromoted(input: {
+    readonly fromHealth: EvidenceHealthState;
+    readonly toHealth: EvidenceHealthState;
+    readonly evidenceObjectId: string;
+    readonly workspaceId: string;
+  }): Promise<void> {
+    if (input.fromHealth !== "questionable" || input.toHealth !== "verified") {
+      return;
+    }
+    const karmaEmitter = this.dependencies.karmaEmitter;
+    const memoryRefLookup = this.dependencies.memoryRefLookup;
+    if (karmaEmitter === undefined || memoryRefLookup === undefined) {
+      return;
+    }
+    let memories: readonly { readonly object_id: string }[] = [];
+    try {
+      memories = await memoryRefLookup.findMemoriesByEvidenceRef(
+        input.evidenceObjectId,
+        input.workspaceId
+      );
+    } catch (error) {
+      this.dependencies.warn?.("evidence_gain memory lookup failed", {
+        evidence_object_id: input.evidenceObjectId,
+        workspace_id: input.workspaceId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return;
+    }
+    for (const memory of memories) {
+      try {
+        await karmaEmitter.emitKarmaEvent({
+          kind: "evidence_gain",
+          objectId: memory.object_id,
+          workspaceId: input.workspaceId
+        });
+      } catch (error) {
+        this.dependencies.warn?.("evidence_gain karma emit failed", {
+          memory_object_id: memory.object_id,
+          workspace_id: input.workspaceId,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
   }
 
   public findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null> {

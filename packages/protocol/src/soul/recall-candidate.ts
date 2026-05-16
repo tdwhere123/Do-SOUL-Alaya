@@ -37,6 +37,13 @@ export const RecallScoreFactorsSchema = z
   .strict()
   .readonly();
 
+// invariant: pending_incomplete and unfinishedness_bias are advisory
+// annotations forwarded from PathRelation.effect_vector through the
+// ManifestationResolver sidecar. They do not enter activation_weights.
+// see also: path-activation-candidate-producer.ts (producer),
+// manifestation-resolver.ts (forwarder).
+const UnfinishednessBiasSchema = z.number().min(0).max(1);
+
 export const RecallBudgetStateSchema = z
   .object({
     token_estimate: NonNegativeIntSchema,
@@ -65,7 +72,9 @@ export const RecallCandidateSchema = z
     selection_reason: BoundedReasonSchema.optional(),
     source_channels: z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
     score_factors: RecallScoreFactorsSchema.optional(),
-    budget_state: RecallBudgetStateSchema.optional()
+    budget_state: RecallBudgetStateSchema.optional(),
+    pending_incomplete: z.boolean().optional(),
+    unfinishedness_bias: UnfinishednessBiasSchema.optional()
   })
   .strict()
   .readonly();

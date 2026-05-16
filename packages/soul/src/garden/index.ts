@@ -2,6 +2,7 @@ export {
   AUDITOR_CONSTANTS,
   Auditor,
   type AuditorDependencies,
+  type AuditorHealthIssueGroupPort
 } from "./auditor.js";
 export type {
   AuditorBootstrappingPort,

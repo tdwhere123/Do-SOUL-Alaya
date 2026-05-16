@@ -156,6 +156,14 @@ export interface GardenAuditorGreenMaintenancePort {
     taskId: string,
     workspaceId: string
   ): { readonly affected: number };
+  // invariant: writes revoke_reason='mapping_revoked' when the supplied
+  // newEvidenceRefs share zero overlap with the memory row's stored
+  // evidence_refs. see also: green-status.ts RevokeReason.MAPPING_REVOKED.
+  revokeGreenOnEvidenceRewrite(input: {
+    readonly memoryEntryId: string;
+    readonly workspaceId: string;
+    readonly newEvidenceRefs: readonly string[];
+  }): { readonly affected: number };
 }
 
 export interface GardenAuditorBootstrappingPort {
@@ -477,6 +485,13 @@ function createGreenMaintenancePort(context: BaseFactoryContext): GardenAuditorG
       AND green_state IN ('eligible', 'grace')
   `);
 
+  const readMemoryEvidenceRefsStatement = context.database.connection.prepare(`
+    SELECT evidence_refs
+    FROM memory_entries
+    WHERE object_id = ? AND workspace_id = ?
+    LIMIT 1
+  `);
+
   return {
     findExpiringGreenStatuses: async (workspaceId, lookaheadMs) => {
       const cutoffIso = addMilliseconds(context.now(), Math.max(0, lookaheadMs));
@@ -494,6 +509,38 @@ function createGreenMaintenancePort(context: BaseFactoryContext): GardenAuditorG
     revokeGreen: (memoryEntryId, reason, _taskId, workspaceId) => {
       const nowIso = context.now();
       const result = revokeStatement.run(reason, nowIso, nowIso, memoryEntryId, workspaceId);
+      return { affected: result.changes };
+    },
+    revokeGreenOnEvidenceRewrite: ({ memoryEntryId, workspaceId, newEvidenceRefs }) => {
+      const row = readMemoryEvidenceRefsStatement.get(memoryEntryId, workspaceId) as
+        | { readonly evidence_refs: string }
+        | undefined;
+      if (row === undefined) {
+        return { affected: 0 };
+      }
+      let previousRefs: readonly string[];
+      try {
+        const parsed = JSON.parse(row.evidence_refs);
+        previousRefs = Array.isArray(parsed) ? (parsed as readonly string[]) : [];
+      } catch {
+        previousRefs = [];
+      }
+      if (previousRefs.length === 0) {
+        return { affected: 0 };
+      }
+      const nextSet = new Set(newEvidenceRefs);
+      const stillOverlaps = previousRefs.some((ref) => nextSet.has(ref));
+      if (stillOverlaps) {
+        return { affected: 0 };
+      }
+      const nowIso = context.now();
+      const result = revokeStatement.run(
+        "mapping_revoked",
+        nowIso,
+        nowIso,
+        memoryEntryId,
+        workspaceId
+      );
       return { affected: result.changes };
     }
   };

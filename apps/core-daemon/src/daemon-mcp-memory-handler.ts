@@ -14,6 +14,7 @@ import {
 export function createDaemonMcpMemoryToolHandler(input: {
   readonly recallService: McpMemoryToolHandlerDependencies["recallService"];
   readonly memoryService: McpMemoryToolHandlerDependencies["memoryService"];
+  readonly dynamicsService?: McpMemoryToolHandlerDependencies["dynamicsService"];
   readonly memoryEntryRepo: NonNullable<McpMemoryToolHandlerDependencies["memoryEntryRepo"]>;
   readonly evidenceService?: McpMemoryToolHandlerDependencies["evidenceService"];
   readonly pathRelationProposalService?: McpMemoryToolHandlerDependencies["pathRelationProposalService"];
@@ -32,6 +33,7 @@ export function createDaemonMcpMemoryToolHandler(input: {
   return createMcpMemoryToolHandler({
     recallService: input.recallService,
     memoryService: input.memoryService,
+    ...(input.dynamicsService === undefined ? {} : { dynamicsService: input.dynamicsService }),
     memoryEntryRepo: input.memoryEntryRepo,
     ...(input.evidenceService === undefined ? {} : { evidenceService: input.evidenceService }),
     ...(input.pathRelationProposalService === undefined

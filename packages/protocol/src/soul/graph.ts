@@ -4,7 +4,12 @@ import {
   NonEmptyStringSchema,
   NonNegativeIntSchema
 } from "../schema-primitives.js";
-import { PathGraphSnapshotSchema } from "./path-graph-snapshot.js";
+import {
+  PathConnectivityMetricsSchema,
+  PathGovernanceDistributionSchema,
+  PathGraphSnapshotSchema,
+  PathStabilityDistributionSchema
+} from "./path-graph-snapshot.js";
 import {
   DirectionBiasSchema,
   PathAnchorRefSchema,
@@ -135,6 +140,21 @@ export const SoulPathGraphTopologySchema = z
   .strict()
   .readonly();
 
+// invariant: every PathGraphSnapshot metric must have a named consumer
+// on this trend object so the Inspector trend payload contracts the
+// reader to the producer. activity_velocity / latest_stability /
+// latest_governance / latest_connectivity are the explicit consumers
+// that bind the snapshot's distribution + since-last counters to the
+// SoulPathGraphContract surface. See graph-contract-service.
+const SoulPathGraphActivityVelocitySchema = z
+  .object({
+    paths_reinforced_since_last: NonNegativeIntSchema,
+    paths_weakened_since_last: NonNegativeIntSchema,
+    paths_created_since_last: NonNegativeIntSchema
+  })
+  .strict()
+  .readonly();
+
 export const SoulPathGraphSnapshotTrendSchema = z
   .object({
     snapshot_count: NonNegativeIntSchema,
@@ -144,6 +164,10 @@ export const SoulPathGraphSnapshotTrendSchema = z
     baseline_snapshot_at: IsoDatetimeStringSchema,
     edge_count_trend: SoulPathGraphTrendDirectionSchema,
     avg_strength_trend: SoulPathGraphStrengthTrendDirectionSchema,
+    latest_stability_distribution: PathStabilityDistributionSchema,
+    latest_governance_distribution: PathGovernanceDistributionSchema,
+    latest_connectivity: PathConnectivityMetricsSchema,
+    activity_velocity: SoulPathGraphActivityVelocitySchema,
     latest_snapshot: PathGraphSnapshotSchema
   })
   .strict()

@@ -22,6 +22,9 @@ import type {
   PreparedEmbeddingQueryHandle
 } from "./embedding-recall-service.js";
 import type {
+  ManifestationBiasSidecarEntry
+} from "./manifestation-resolver.js";
+import type {
   GlobalMemoryRecallCachePort,
   GlobalMemoryRecallPort
 } from "./global-memory-recall-port.js";
@@ -134,6 +137,21 @@ export interface RecallServicePathExpansionPort {
   ): Promise<readonly Readonly<PathRelation>[]>;
 }
 
+// invariant: ManifestationSidecarApplierPort produces the bias sidecar
+// the recall service forwards into RecallCandidate.pending_incomplete
+// and RecallCandidate.unfinishedness_bias. Implementations are expected
+// to call PathActivationCandidateProducer and ManifestationResolver in
+// sequence. The port is optional — when absent the recall service skips
+// the sidecar step and emits candidates unchanged.
+export interface RecallServiceManifestationSidecarPort {
+  buildBiasSidecar(params: Readonly<{
+    readonly workspaceId: string;
+    readonly runId: string;
+    readonly anchorMemoryObjectIds: readonly string[];
+    readonly taskSurfaceRef: Readonly<import("@do-soul/alaya-protocol").TaskObjectSurface> | null;
+  }>): Promise<readonly Readonly<ManifestationBiasSidecarEntry>[]>;
+}
+
 export interface TokenEstimator {
   estimate(text: string): number;
 }
@@ -214,6 +232,7 @@ export interface RecallServiceDependencies {
   readonly graphExpansionPort?: RecallServiceGraphExpansionPort;
   readonly pathExpansionPort?: RecallServicePathExpansionPort;
   readonly evidenceSearchPort?: RecallServiceEvidenceSearchPort;
+  readonly manifestationSidecarPort?: RecallServiceManifestationSidecarPort;
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;
   readonly warn?: RecallServiceWarnPort;

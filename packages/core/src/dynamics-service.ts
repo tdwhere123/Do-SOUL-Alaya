@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   DYNAMICS_CONSTANTS,
   FORMATION_CONFIDENCE_MAP,
@@ -10,6 +11,7 @@ import {
   parseKarmaEvent as parseProtocolKarmaEvent,
   type EventLogEntry,
   type KarmaEvent,
+  type KarmaEventKind,
   type ManifestationState,
   type MemoryDimension,
   type MemoryEntry,
@@ -80,15 +82,40 @@ export interface DynamicsServiceDependencies {
     notifyEntry(entry: EventLogEntry): void | Promise<void>;
   };
   readonly greenService?: DynamicsServiceGreenPort;
+  readonly generateEventId?: () => string;
   readonly now?: () => string;
 }
 
 export class DynamicsService {
   private readonly now: () => string;
+  private readonly generateEventId: () => string;
 
   public constructor(private readonly dependencies: DynamicsServiceDependencies) {
     this.now = dependencies.now ?? (() => new Date().toISOString());
+    this.generateEventId = dependencies.generateEventId ?? (() => randomUUID());
     assertActivationWeightsSumToOne(DYNAMICS_CONSTANTS.activation_weights_phase1b);
+  }
+
+  // invariant: the only entry point for protocol-defined karma kinds.
+  // Callers pass kind + object_id; amount defaults to the constant from
+  // DYNAMICS_CONSTANTS.karma so producers cannot silently disagree on
+  // magnitude. processKarmaEvent applies the event to memory state and
+  // appends the audit row.
+  public async emitKarmaEvent(input: {
+    readonly kind: KarmaEventKind;
+    readonly objectId: string;
+    readonly workspaceId: string;
+    readonly amount?: number;
+  }): Promise<void> {
+    const amount = input.amount ?? DYNAMICS_CONSTANTS.karma[input.kind];
+    await this.processKarmaEvent({
+      event_id: this.generateEventId(),
+      kind: input.kind,
+      object_id: input.objectId,
+      amount,
+      created_at: this.now(),
+      workspace_id: input.workspaceId
+    });
   }
 
   public assignInitialDynamics(params: {

@@ -16,6 +16,9 @@ import {
   DynamicsService,
   EngineBindingService,
   EvidenceService,
+  ManifestationResolver,
+  PathActivationCandidateProducer,
+  type PathActivationCandidateProducerPathReaderPort,
   GardenBacklogTelemetryService,
   GovernanceLeaseService,
   GraphExploreService,
@@ -65,6 +68,7 @@ import {
   SqliteFileRepo,
   SqliteGreenStatusRepo,
   SqliteGardenTaskRepo,
+  SqliteHealthIssueGroupRepo,
   SqliteHealthJournalRepo,
   SqliteHandoffGapRepo,
   SqliteKarmaEventRepo,
@@ -312,10 +316,32 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     strongRefService,
     canonicalAliasService
   });
+  // invariant: dynamicsService is constructed below; EvidenceService
+  // calls into it via this ref so the evidence_gain karma emit on
+  // questionable -> verified does not require reordering. see also:
+  // EvidenceService.emitEvidenceGainIfPromoted.
+  const dynamicsServiceRef: {
+    current: { emitKarmaEvent(input: { kind: "evidence_gain"; objectId: string; workspaceId: string }): Promise<void> } | null;
+  } = { current: null };
   const evidenceService = new EvidenceService({
     evidenceCapsuleRepo,
     eventLogRepo,
-    runtimeNotifier
+    runtimeNotifier,
+    karmaEmitter: {
+      emitKarmaEvent: async (input) => {
+        if (dynamicsServiceRef.current === null) {
+          return;
+        }
+        await dynamicsServiceRef.current.emitKarmaEvent(input);
+      }
+    },
+    memoryRefLookup: {
+      findMemoriesByEvidenceRef: async (evidenceObjectId, workspaceId) => {
+        const memories = await memoryEntryRepo.findByEvidenceRefs(workspaceId, [evidenceObjectId]);
+        return memories.map((entry) => ({ object_id: entry.object_id }));
+      }
+    },
+    warn: warnLogger.warn
   });
   const governanceLeaseService = new GovernanceLeaseService({ eventLogRepo });
   const healthJournalService = new HealthJournalService({
@@ -338,6 +364,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     runtimeNotifier,
     greenService
   });
+  dynamicsServiceRef.current = dynamicsService;
   const memoryService = new MemoryService({
     memoryEntryRepo,
     evidenceService,
@@ -492,6 +519,68 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const recallPathPlasticityPort = createRecallPathPlasticityPort({
     pathRelationRepo
   });
+  // invariant: PathActivationCandidateProducer reads PathRelation rows
+  // anchored on the recall candidate memory ids. The reader port adapter
+  // expands each memory id to an `object` PathAnchorRef, queries
+  // pathRelationRepo.findByAnchors, and filters retired rows.
+  const pathActivationReaderPort: PathActivationCandidateProducerPathReaderPort = {
+    async findActiveByAnchorObjectIds(workspaceId, memoryObjectIds) {
+      if (memoryObjectIds.length === 0) {
+        return [];
+      }
+      const anchors = memoryObjectIds.map((objectId) => ({
+        kind: "object" as const,
+        object_id: objectId
+      }));
+      const paths = await pathRelationRepo.findByAnchors(workspaceId, anchors);
+      return paths.filter((path) => path.lifecycle.status !== "retired");
+    }
+  };
+  const pathActivationCandidateProducer = new PathActivationCandidateProducer({
+    pathReader: pathActivationReaderPort
+  });
+  // invariant: ManifestationResolver is instantiated lazily, only when a
+  // recall actually yields activation candidates. The daemon avoids
+  // constructing it at boot so the live ContextLens seam remains
+  // pass-through until paths produce candidates.
+  let manifestationResolverInstance: ManifestationResolver | null = null;
+  const getManifestationResolver = (): ManifestationResolver => {
+    if (manifestationResolverInstance === null) {
+      manifestationResolverInstance = new ManifestationResolver({
+        budgetConfigProvider: {
+          getConfig: async () => null
+        },
+        eventLogWriter: {
+          append: async (entry) => eventLogRepo.append(entry)
+        }
+      });
+    }
+    return manifestationResolverInstance;
+  };
+  const manifestationSidecarPort = {
+    buildBiasSidecar: async (params: Readonly<{
+      readonly workspaceId: string;
+      readonly runId: string;
+      readonly anchorMemoryObjectIds: readonly string[];
+      readonly taskSurfaceRef: Parameters<ManifestationResolver["resolveWithBias"]>[0]["taskSurfaceRef"];
+    }>) => {
+      const candidates = await pathActivationCandidateProducer.produce({
+        workspaceId: params.workspaceId,
+        runId: params.runId,
+        anchorMemoryObjectIds: params.anchorMemoryObjectIds
+      });
+      if (candidates.length === 0) {
+        return [];
+      }
+      const result = await getManifestationResolver().resolveWithBias({
+        workspaceId: params.workspaceId,
+        runId: params.runId,
+        candidates,
+        taskSurfaceRef: params.taskSurfaceRef
+      });
+      return result.biasSidecar;
+    }
+  };
   const recallUtilizationService = createRecallUtilizationService({ eventLogRepo });
   const recallService = new RecallService({
     memoryRepo: memoryEntryRepo,
@@ -526,6 +615,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     },
     claimResolverPort: claimFormRepo,
     embeddingRecallService,
+    manifestationSidecarPort,
     warn: warnLogger.warn
   });
   const contextLensAssembler = new ContextLensAssembler({
@@ -579,6 +669,9 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
         },
         graphEdgePort,
         ...(conflictDetectionLlmPort === null ? {} : { llmPort: conflictDetectionLlmPort }),
+        karmaEmitter: {
+          emitKarmaEvent: (input) => dynamicsService.emitKarmaEvent(input)
+        },
         ruleEnabled: conflictDetectionRuleEnabled,
         warn: warnLogger.warn
       })
@@ -761,6 +854,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     pathRelationRepo,
     eventPublisher
   });
+  const healthIssueGroupRepo = new SqliteHealthIssueGroupRepo(database);
   const gardenRuntime = createGardenRuntime({
     databaseConnection: database.connection,
     backlogThresholds: gardenBacklogThresholds,
@@ -771,6 +865,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     handoffGapRepo: sqliteHandoffGapRepo,
     orphanDetectionEnabled,
     orphanRadarRepo,
+    healthIssueGroupRepo,
     pathGraphSnapshotRepo,
     pathRelationRepo,
     pathPlasticityWatermarkRepo,
@@ -832,6 +927,9 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const mcpMemoryToolHandler = createDaemonMcpMemoryToolHandler({
     recallService,
     memoryService,
+    dynamicsService: {
+      emitKarmaEvent: (input) => dynamicsService.emitKarmaEvent(input)
+    },
     memoryEntryRepo,
     evidenceService,
     pathRelationProposalService,

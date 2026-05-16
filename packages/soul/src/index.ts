@@ -60,6 +60,7 @@ export {
   type AuditorEvidenceCheckPort,
   type AuditorEventLogPort,
   type AuditorGreenMaintenancePort,
+  type AuditorHealthIssueGroupPort,
   type AuditorOrphanDetectionPort,
   type AuditorPointerHealPort,
   type AuditorPointerHealthPort,

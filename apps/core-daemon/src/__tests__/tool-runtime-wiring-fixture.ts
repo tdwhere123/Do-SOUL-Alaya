@@ -202,7 +202,6 @@ const hoisted = vi.hoisted(() => {
     snapshot_id: "snapshot-1",
     workspace_id: "workspace-1",
     total_active_paths: 0,
-    total_retired_paths: 0,
     strength_distribution: {
       very_weak: 0,
       weak: 0,
@@ -231,7 +230,6 @@ const hoisted = vi.hoisted(() => {
     },
     paths_reinforced_since_last: 0,
     paths_weakened_since_last: 0,
-    paths_retired_since_last: 0,
     paths_created_since_last: 0,
     snapshot_at: "2026-04-12T10:00:00.000Z"
   };
@@ -842,6 +840,11 @@ vi.mock("@do-soul/alaya-core", () => {
       onCoUsage: vi.fn(async () => undefined),
       evictExpired: vi.fn(() => 0),
       counterSize: vi.fn(() => 0)
+    }),
+    PathActivationCandidateProducer: vi.fn().mockImplementation(function PathActivationCandidateProducer() {
+      return {
+        produce: vi.fn(async () => [])
+      };
     }),
     PATH_RELATION_PROPOSE_THRESHOLD: 3,
     PATH_RELATION_COUNTER_DEFAULT_TTL_MS: 24 * 60 * 60 * 1000,

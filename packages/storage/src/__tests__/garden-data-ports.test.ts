@@ -241,6 +241,58 @@ describe("garden background data ports", () => {
     });
   });
 
+  it("revokeGreenOnEvidenceRewrite sets revoke_reason='mapping_revoked' when new evidence_refs share zero overlap", async () => {
+    const { database, ports } = await createFixture();
+    seedMemoryEntry(database, {
+      objectId: "memory-reanchored",
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      evidenceRefs: ["evidence-original-a", "evidence-original-b"]
+    });
+    seedGreenStatus(database, {
+      objectId: "green-reanchored",
+      workspaceId: "workspace-1",
+      targetObjectId: "memory-reanchored",
+      verificationBasis: "active_verification",
+      greenState: "eligible",
+      validUntil: "2026-05-15T00:00:00.000Z"
+    });
+
+    const overlapResult = ports.greenMaintenancePort.revokeGreenOnEvidenceRewrite({
+      memoryEntryId: "memory-reanchored",
+      workspaceId: "workspace-1",
+      newEvidenceRefs: ["evidence-original-a", "evidence-new"]
+    });
+    expect(overlapResult).toEqual({ affected: 0 });
+
+    const overlapRow = database.connection
+      .prepare("SELECT green_state, revoke_reason FROM green_statuses WHERE object_id = ? LIMIT 1")
+      .get("green-reanchored") as { readonly green_state: string; readonly revoke_reason: string } | undefined;
+    expect(overlapRow).toEqual({ green_state: "eligible", revoke_reason: "none" });
+
+    const rewriteResult = ports.greenMaintenancePort.revokeGreenOnEvidenceRewrite({
+      memoryEntryId: "memory-reanchored",
+      workspaceId: "workspace-1",
+      newEvidenceRefs: ["evidence-new-1", "evidence-new-2"]
+    });
+    expect(rewriteResult).toEqual({ affected: 1 });
+
+    const revokedRow = database.connection
+      .prepare("SELECT green_state, revoke_reason FROM green_statuses WHERE object_id = ? LIMIT 1")
+      .get("green-reanchored") as { readonly green_state: string; readonly revoke_reason: string } | undefined;
+    expect(revokedRow).toEqual({ green_state: "revoked", revoke_reason: "mapping_revoked" });
+  });
+
+  it("revokeGreenOnEvidenceRewrite is a no-op when the memory entry does not exist", async () => {
+    const { ports } = await createFixture();
+    const result = ports.greenMaintenancePort.revokeGreenOnEvidenceRewrite({
+      memoryEntryId: "memory-missing",
+      workspaceId: "workspace-1",
+      newEvidenceRefs: ["evidence-new"]
+    });
+    expect(result).toEqual({ affected: 0 });
+  });
+
   it("assesses bootstrapping cold-start state and pattern candidate lifecycle", async () => {
     const { database, ports } = await createFixture();
     const coldStart = await ports.bootstrappingPort.assessColdStart("workspace-1");

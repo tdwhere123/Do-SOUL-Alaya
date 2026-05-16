@@ -1,4 +1,5 @@
 export * from "./arbitration-service.js";
+export * from "./auditor-scheduling-advisor.js";
 export * from "./budget-bankruptcy-service.js";
 export * from "./canonical-alias-service.js";
 export * from "./claim-service.js";
@@ -32,6 +33,8 @@ export * from "./health-journal-service.js";
 export * from "./integration-gate.js";
 export * from "./karma-event-store.js";
 export * from "./manifestation-resolver.js";
+export * from "./path-activation-candidate-producer.js";
+export * from "./path-manifestation-policy.js";
 export * from "./mcp-tool-discovery-service.js";
 export * from "./memory-service.js";
 export * from "./message-history.js";

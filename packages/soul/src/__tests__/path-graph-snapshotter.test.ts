@@ -22,7 +22,6 @@ describe("PathGraphSnapshotter", () => {
       snapshot_id: "path-graph-snapshot:workspace-1:2026-04-17T01:00:00.000Z",
       workspace_id: "workspace-1",
       total_active_paths: 0,
-      total_retired_paths: 0,
       strength_distribution: {
         very_weak: 0,
         weak: 0,
@@ -51,7 +50,6 @@ describe("PathGraphSnapshotter", () => {
       },
       paths_reinforced_since_last: 0,
       paths_weakened_since_last: 0,
-      paths_retired_since_last: 0,
       paths_created_since_last: 0,
       snapshot_at: "2026-04-17T01:00:00.000Z"
     });
@@ -130,7 +128,6 @@ describe("PathGraphSnapshotter", () => {
       snapshot_id: "path-graph-snapshot:workspace-1:2026-04-17T01:00:00.000Z",
       workspace_id: "workspace-1",
       total_active_paths: 3,
-      total_retired_paths: 0,
       strength_distribution: {
         very_weak: 1,
         weak: 0,
@@ -159,7 +156,6 @@ describe("PathGraphSnapshotter", () => {
       },
       paths_reinforced_since_last: 3,
       paths_weakened_since_last: 3,
-      paths_retired_since_last: 0,
       paths_created_since_last: 3,
       snapshot_at: "2026-04-17T01:00:00.000Z"
     });
@@ -169,8 +165,6 @@ describe("PathGraphSnapshotter", () => {
     const previousSnapshot = createSnapshotFixture({
       snapshot_id: "snapshot-previous",
       total_active_paths: 3,
-      total_retired_paths: 5,
-      paths_retired_since_last: 2,
       snapshot_at: "2026-04-17T00:30:00.000Z"
     });
     const relations = [
@@ -239,9 +233,7 @@ describe("PathGraphSnapshotter", () => {
     expect(snapshot.paths_created_since_last).toBe(1);
     expect(snapshot.paths_reinforced_since_last).toBe(2);
     expect(snapshot.paths_weakened_since_last).toBe(1);
-    expect(snapshot.paths_retired_since_last).toBe(0);
     expect(snapshot.total_active_paths).toBe(3);
-    expect(snapshot.total_retired_paths).toBe(0);
   });
 });
 
@@ -250,7 +242,6 @@ describe("reviewPathGraphSnapshotHistory", () => {
     const review = reviewPathGraphSnapshotHistory("workspace-1", [
       createSnapshotFixture({
         snapshot_id: "snapshot-latest",
-        total_retired_paths: 9,
         connectivity: {
           unique_source_anchors: 3,
           unique_target_anchors: 3,
@@ -262,7 +253,6 @@ describe("reviewPathGraphSnapshotHistory", () => {
       }),
       createSnapshotFixture({
         snapshot_id: "snapshot-previous",
-        total_retired_paths: 1,
         connectivity: {
           unique_source_anchors: 3,
           unique_target_anchors: 3,
@@ -292,7 +282,6 @@ describe("reviewPathGraphSnapshotHistory", () => {
     const review = reviewPathGraphSnapshotHistory("workspace-1", [
       createSnapshotFixture({
         snapshot_id: "snapshot-latest",
-        total_retired_paths: 9,
         connectivity: {
           unique_source_anchors: 2,
           unique_target_anchors: 3,
@@ -304,7 +293,6 @@ describe("reviewPathGraphSnapshotHistory", () => {
       }),
       createSnapshotFixture({
         snapshot_id: "snapshot-previous",
-        total_retired_paths: 1,
         connectivity: {
           unique_source_anchors: 2,
           unique_target_anchors: 3,
@@ -325,7 +313,6 @@ function createSnapshotFixture(overrides: Partial<PathGraphSnapshot> = {}): Path
     snapshot_id: "snapshot-1",
     workspace_id: "workspace-1",
     total_active_paths: 3,
-    total_retired_paths: 0,
     strength_distribution: {
       very_weak: 0,
       weak: 1,
@@ -354,7 +341,6 @@ function createSnapshotFixture(overrides: Partial<PathGraphSnapshot> = {}): Path
     },
     paths_reinforced_since_last: 2,
     paths_weakened_since_last: 1,
-    paths_retired_since_last: 0,
     paths_created_since_last: 3,
     snapshot_at: "2026-04-17T00:05:00.000Z",
     ...overrides

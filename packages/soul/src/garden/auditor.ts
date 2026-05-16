@@ -4,7 +4,14 @@ import {
   GardenTaskKind,
   GardenTier,
   HealthEventKind,
+  HealthIssueCauseKind,
+  HealthIssueResolutionState,
+  HealthIssueSeverity,
+  HealthIssueSuggestedAction,
   MemoryDimension,
+  type HealthIssueCauseKindValue,
+  type HealthIssueGroup,
+  type HealthIssueSuggestedActionValue,
   type OrphanRadar,
   type OrphanRadarSuggestedActionValue,
   GraphAuditorEventType,
@@ -74,6 +81,22 @@ export class GreenRevokeNoopError extends Error {
   }
 }
 
+// invariant: groups rows by (workspace_id, target_object_id,
+// cause_kind). Used by executeOrphanDetection (cause_kind =
+// orphan_radar) and executeEvidenceCheck (cause_kind =
+// evidence_failure). The implementor reads the existing row when
+// present and increments count + last_seen_at; otherwise it inserts a
+// new pending row. see also: HealthIssueGroupRepo.upsert.
+export interface AuditorHealthIssueGroupPort {
+  findExistingGroup(input: {
+    readonly workspaceId: string;
+    readonly targetObjectId: string;
+    readonly causeKind: HealthIssueCauseKindValue;
+  }): Promise<Readonly<HealthIssueGroup> | null> | Readonly<HealthIssueGroup> | null;
+  upsertHealthIssueGroup(group: HealthIssueGroup): Promise<void> | void;
+  generateGroupId?: () => string;
+}
+
 export interface AuditorDependencies {
   readonly evidenceCheckPort: AuditorEvidenceCheckPort;
   readonly pointerHealthPort: AuditorPointerHealthPort;
@@ -84,6 +107,7 @@ export interface AuditorDependencies {
   readonly scheduler: AuditorSchedulerPort;
   readonly eventLogRepo?: AuditorEventLogPort;
   readonly healthJournal?: HealthJournalRecordPort;
+  readonly healthIssueGroupPort?: AuditorHealthIssueGroupPort;
   readonly now?: () => string;
 }
 
@@ -195,6 +219,23 @@ export class Auditor {
           total_stale_refs: batch.reduce((sum, entry) => sum + entry.stale_evidence_refs.length, 0)
         }
       });
+      for (const memoryId of revokedMemoryIds) {
+        const staleRefs =
+          batch.find((entry) => entry.memory_entry_id === memoryId)?.stale_evidence_refs ?? [];
+        await this.upsertHealthIssueGroup({
+          workspaceId: task.workspace_id,
+          targetObjectId: memoryId,
+          causeKind: HealthIssueCauseKind.EVIDENCE_FAILURE,
+          severity: HealthIssueSeverity.WARN,
+          confidence: 1,
+          observedAt: completedAt,
+          suggestedActions: [
+            HealthIssueSuggestedAction.REQUEST_EVIDENCE,
+            HealthIssueSuggestedAction.MARK_QUESTIONABLE_OK
+          ],
+          incrementCount: Math.max(1, staleRefs.length)
+        });
+      }
     }
 
     if (noopMemoryIds.length > 0) {
@@ -383,6 +424,16 @@ export class Auditor {
           orphanDetectionPort.createOrphanRadarRecord(radarRecord);
         }
       );
+      await this.upsertHealthIssueGroup({
+        workspaceId: orphan.workspace_id,
+        targetObjectId: orphan.memory_id,
+        causeKind: HealthIssueCauseKind.ORPHAN_RADAR,
+        severity: orphan.orphan_confidence >= 0.75 ? HealthIssueSeverity.WARN : HealthIssueSeverity.INFO,
+        confidence: orphan.orphan_confidence,
+        observedAt: completedAt,
+        suggestedActions: orphanSuggestedActionToHealthAction(suggestedAction),
+        incrementCount: 1
+      });
       createdRadarIds.push(radarId);
     }
 
@@ -460,6 +511,59 @@ export class Auditor {
     ]);
     await this.dependencies.scheduler.reportCompletion(result);
     return result;
+  }
+
+  private async upsertHealthIssueGroup(input: {
+    readonly workspaceId: string;
+    readonly targetObjectId: string;
+    readonly causeKind: HealthIssueCauseKindValue;
+    readonly severity: "info" | "warn" | "blocking";
+    readonly confidence: number;
+    readonly observedAt: string;
+    readonly suggestedActions: readonly HealthIssueSuggestedActionValue[];
+    readonly incrementCount: number;
+  }): Promise<void> {
+    const port = this.dependencies.healthIssueGroupPort;
+    if (port === undefined) {
+      return;
+    }
+    let existing: Readonly<HealthIssueGroup> | null;
+    try {
+      const lookup = port.findExistingGroup({
+        workspaceId: input.workspaceId,
+        targetObjectId: input.targetObjectId,
+        causeKind: input.causeKind
+      });
+      existing = lookup instanceof Promise ? await lookup : lookup;
+    } catch {
+      existing = null;
+    }
+    const groupId = existing?.group_id ?? (port.generateGroupId?.() ?? randomUUID());
+    const firstSeenAt = existing?.first_seen_at ?? input.observedAt;
+    const previousCount = existing?.count ?? 0;
+    const nextCount = previousCount + Math.max(1, input.incrementCount);
+    const next: HealthIssueGroup = {
+      group_id: groupId,
+      workspace_id: input.workspaceId,
+      target_object_id: input.targetObjectId,
+      target_object_kind: "memory_entry",
+      cause_kind: input.causeKind,
+      severity: input.severity,
+      confidence: input.confidence,
+      first_seen_at: firstSeenAt,
+      last_seen_at: input.observedAt,
+      count: nextCount,
+      suggested_actions: input.suggestedActions,
+      resolution_state: HealthIssueResolutionState.PENDING,
+      resolved_at: null,
+      resolved_by: null
+    };
+    try {
+      await port.upsertHealthIssueGroup(next);
+    } catch {
+      // invariant: HealthIssueGroup upsert is best-effort projection;
+      // a failure must never break the underlying Auditor task.
+    }
   }
 
   private async publishEventLogMutation<T>(
@@ -662,6 +766,19 @@ function requiresActiveVerification(dimension: MemoryDimension): boolean {
     dimension === MemoryDimension.CONSTRAINT ||
     dimension === MemoryDimension.PROCEDURE
   );
+}
+
+function orphanSuggestedActionToHealthAction(
+  action: OrphanRadarSuggestedActionValue
+): readonly HealthIssueSuggestedActionValue[] {
+  switch (action) {
+    case "re_anchor_candidate":
+      return Object.freeze([HealthIssueSuggestedAction.RELINK]);
+    case "archive_candidate":
+      return Object.freeze([HealthIssueSuggestedAction.RETIRE_MEMORY]);
+    case "no_action":
+      return Object.freeze([HealthIssueSuggestedAction.DEFER]);
+  }
 }
 
 function determineOrphanSuggestedAction(confidence: number): OrphanRadarSuggestedActionValue {

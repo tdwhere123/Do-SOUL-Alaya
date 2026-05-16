@@ -17,6 +17,11 @@ import { deepFreeze } from "./shared/deep-freeze.js";
 export interface HealthIssueGroupRepo {
   upsert(group: HealthIssueGroup): Readonly<HealthIssueGroup>;
   findById(groupId: string): Readonly<HealthIssueGroup> | null;
+  findByCompositeKey(
+    workspaceId: string,
+    targetObjectId: string,
+    causeKind: HealthIssueCauseKindValue
+  ): Readonly<HealthIssueGroup> | null;
   findByWorkspace(
     workspaceId: string,
     options?: {
@@ -172,6 +177,14 @@ export class SqliteHealthIssueGroupRepo implements HealthIssueGroupRepo {
         error
       );
     }
+  }
+
+  public findByCompositeKey(
+    workspaceId: string,
+    targetObjectId: string,
+    causeKind: HealthIssueCauseKindValue
+  ): Readonly<HealthIssueGroup> | null {
+    return this.fetchByCompositeKey(workspaceId, targetObjectId, causeKind);
   }
 
   public markResolved(groupId: string, resolvedBy: string, resolvedAt: string): void {

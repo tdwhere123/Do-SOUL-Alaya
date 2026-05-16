@@ -255,7 +255,13 @@ describe("PathPlasticityService", () => {
       sinceIso: "2026-05-03T00:00:00.000Z"
     });
 
-    expect(result).toEqual({ reinforced: 0, weakened: 0, retired: 0, affectedPathIds: [] });
+    expect(result).toEqual({
+      reinforced: 0,
+      weakened: 0,
+      retired: 0,
+      affectedPathIds: [],
+      promotions: []
+    });
     expect(harness.publishedEvents).toHaveLength(0);
     expect(harness.repoUpdates).toHaveLength(0);
   });

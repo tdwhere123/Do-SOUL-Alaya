@@ -168,6 +168,15 @@ export interface McpMemoryToolHandlerDependencies {
       fields: MemoryEntryMutableFields
     ): Promise<void>;
   };
+  // invariant: reuse_gain producer call site. see also:
+  // DynamicsService.emitKarmaEvent.
+  readonly dynamicsService?: {
+    emitKarmaEvent(input: {
+      readonly kind: "reuse_gain";
+      readonly objectId: string;
+      readonly workspaceId: string;
+    }): Promise<void>;
+  };
   // Evidence resolver used by soul.open_pointer to dereference
   // evidence_refs[] from a MemoryEntry back to its raw EvidenceCapsule
   // (gist / excerpt). Scoped lookup mirrors memoryService.findByIdScoped.
@@ -1268,12 +1277,16 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       if (current === null) {
         continue;
       }
+      // invariant: reuse_gain fires only on the 2nd-or-later recall hit
+      // (last_hit_at non-null). see also: DynamicsService.emitKarmaEvent.
+      const isReuseHit = current.last_hit_at !== null && current.last_hit_at !== undefined;
       if (current.storage_tier === StorageTier.HOT) {
         await refreshScopedRecallUsage(
           objectId,
           attribution.workspaceId,
           reportedAt
         );
+        await maybeEmitReuseGainKarma(isReuseHit, objectId, attribution.workspaceId);
         continue;
       }
 
@@ -1322,6 +1335,30 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
         }
         throw error;
       }
+      await maybeEmitReuseGainKarma(isReuseHit, objectId, attribution.workspaceId);
+    }
+  }
+
+  async function maybeEmitReuseGainKarma(
+    isReuseHit: boolean,
+    objectId: string,
+    workspaceId: string
+  ): Promise<void> {
+    if (!isReuseHit || deps.dynamicsService === undefined) {
+      return;
+    }
+    try {
+      await deps.dynamicsService.emitKarmaEvent({
+        kind: "reuse_gain",
+        objectId,
+        workspaceId
+      });
+    } catch (error) {
+      warn("reuse_gain karma emit failed", {
+        memory_object_id: objectId,
+        workspace_id: workspaceId,
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
   }
 }
