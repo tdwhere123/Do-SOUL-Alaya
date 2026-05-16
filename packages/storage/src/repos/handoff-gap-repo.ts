@@ -3,6 +3,10 @@ import type { StorageDatabase } from "../db.js";
 import { StorageError } from "../errors.js";
 import { deepFreeze } from "./shared/deep-freeze.js";
 
+// ---------------------------------------------------------------------------
+// Row interfaces for SQLite raw rows
+// ---------------------------------------------------------------------------
+
 interface HandoffRecordRow {
   readonly runtime_id: string;
   readonly object_kind: string;
@@ -15,6 +19,11 @@ interface HandoffRecordRow {
   readonly target_run_id: string | null;
   readonly surface_id: string | null;
   readonly ttl_ms: number | null;
+  readonly recurrence_runs: number | null;
+  readonly recurrence_surfaces: number | null;
+  readonly governance_impact: number | null;
+  readonly unresolved_age_ms: number | null;
+  readonly upgrade_candidate: number | null;
 }
 
 interface GapRecordRow {
@@ -29,6 +38,11 @@ interface GapRecordRow {
   readonly surface_id: string | null;
   readonly description: string;
   readonly ttl_ms: number | null;
+  readonly recurrence_runs: number | null;
+  readonly recurrence_surfaces: number | null;
+  readonly governance_impact: number | null;
+  readonly unresolved_age_ms: number | null;
+  readonly upgrade_candidate: number | null;
 }
 
 interface ExpiredObjectRow {
@@ -36,6 +50,10 @@ interface ExpiredObjectRow {
   readonly object_id: string;
   readonly expires_at: string;
 }
+
+// ---------------------------------------------------------------------------
+// Row parsers
+// ---------------------------------------------------------------------------
 
 function parseHandoffRow(row: HandoffRecordRow): Readonly<HandoffRecord> {
   try {
@@ -51,7 +69,13 @@ function parseHandoffRow(row: HandoffRecordRow): Readonly<HandoffRecord> {
         source_run_id: row.source_run_id,
         target_run_id: row.target_run_id,
         surface_id: row.surface_id,
-        ttl_ms: row.ttl_ms
+        ttl_ms: row.ttl_ms,
+        recurrence_runs: row.recurrence_runs,
+        recurrence_surfaces: row.recurrence_surfaces,
+        governance_impact: row.governance_impact,
+        unresolved_age_ms: row.unresolved_age_ms,
+        upgrade_candidate:
+          row.upgrade_candidate === null ? null : row.upgrade_candidate === 1
       })
     );
   } catch (error) {
@@ -73,7 +97,13 @@ function parseGapRow(row: GapRecordRow): Readonly<GapRecord> {
         detected_in_run_id: row.detected_in_run_id,
         surface_id: row.surface_id,
         description: row.description,
-        ttl_ms: row.ttl_ms
+        ttl_ms: row.ttl_ms,
+        recurrence_runs: row.recurrence_runs,
+        recurrence_surfaces: row.recurrence_surfaces,
+        governance_impact: row.governance_impact,
+        unresolved_age_ms: row.unresolved_age_ms,
+        upgrade_candidate:
+          row.upgrade_candidate === null ? null : row.upgrade_candidate === 1
       })
     );
   } catch (error) {
@@ -81,17 +111,9 @@ function parseGapRow(row: GapRecordRow): Readonly<GapRecord> {
   }
 }
 
-const HANDOFF_COLUMNS = `
-  runtime_id, object_kind, task_surface_ref, expires_at, derived_from,
-  retention_policy, handoff_kind, source_run_id, target_run_id, surface_id,
-  ttl_ms
-`;
-
-const GAP_COLUMNS = `
-  runtime_id, object_kind, task_surface_ref, expires_at, derived_from,
-  retention_policy, gap_kind, detected_in_run_id, surface_id, description,
-  ttl_ms
-`;
+// ---------------------------------------------------------------------------
+// SqliteHandoffGapRepo
+// ---------------------------------------------------------------------------
 
 export class SqliteHandoffGapRepo {
   private readonly database: StorageDatabase;
@@ -100,19 +122,44 @@ export class SqliteHandoffGapRepo {
     this.database = database;
   }
 
+  // -------------------------------------------------------------------------
+  // Create
+  // -------------------------------------------------------------------------
+
   public createHandoff(record: HandoffRecord): Readonly<HandoffRecord> {
     let parsed: Readonly<HandoffRecord>;
 
     try {
       parsed = deepFreeze(HandoffRecordSchema.parse(record));
     } catch (error) {
-      throw new StorageError("VALIDATION_FAILED", "Failed to validate handoff record.", error);
+      throw new StorageError(
+        "VALIDATION_FAILED",
+        "Failed to validate handoff record.",
+        error
+      );
     }
 
     try {
       this.database.connection
         .prepare(
-          `INSERT INTO handoff_records (${HANDOFF_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO handoff_records (
+            runtime_id,
+            object_kind,
+            task_surface_ref,
+            expires_at,
+            derived_from,
+            retention_policy,
+            handoff_kind,
+            source_run_id,
+            target_run_id,
+            surface_id,
+            ttl_ms,
+            recurrence_runs,
+            recurrence_surfaces,
+            governance_impact,
+            unresolved_age_ms,
+            upgrade_candidate
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           parsed.runtime_id,
@@ -125,7 +172,12 @@ export class SqliteHandoffGapRepo {
           parsed.source_run_id,
           parsed.target_run_id,
           parsed.surface_id,
-          parsed.ttl_ms
+          parsed.ttl_ms,
+          parsed.recurrence_runs,
+          parsed.recurrence_surfaces,
+          parsed.governance_impact,
+          parsed.unresolved_age_ms,
+          parsed.upgrade_candidate === null ? null : parsed.upgrade_candidate ? 1 : 0
         );
     } catch (error) {
       throw new StorageError(
@@ -144,13 +196,34 @@ export class SqliteHandoffGapRepo {
     try {
       parsed = deepFreeze(GapRecordSchema.parse(record));
     } catch (error) {
-      throw new StorageError("VALIDATION_FAILED", "Failed to validate gap record.", error);
+      throw new StorageError(
+        "VALIDATION_FAILED",
+        "Failed to validate gap record.",
+        error
+      );
     }
 
     try {
       this.database.connection
         .prepare(
-          `INSERT INTO gap_records (${GAP_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO gap_records (
+            runtime_id,
+            object_kind,
+            task_surface_ref,
+            expires_at,
+            derived_from,
+            retention_policy,
+            gap_kind,
+            detected_in_run_id,
+            surface_id,
+            description,
+            ttl_ms,
+            recurrence_runs,
+            recurrence_surfaces,
+            governance_impact,
+            unresolved_age_ms,
+            upgrade_candidate
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           parsed.runtime_id,
@@ -163,7 +236,12 @@ export class SqliteHandoffGapRepo {
           parsed.detected_in_run_id,
           parsed.surface_id,
           parsed.description,
-          parsed.ttl_ms
+          parsed.ttl_ms,
+          parsed.recurrence_runs,
+          parsed.recurrence_surfaces,
+          parsed.governance_impact,
+          parsed.unresolved_age_ms,
+          parsed.upgrade_candidate === null ? null : parsed.upgrade_candidate ? 1 : 0
         );
     } catch (error) {
       throw new StorageError(
@@ -176,38 +254,88 @@ export class SqliteHandoffGapRepo {
     return parsed;
   }
 
+  // -------------------------------------------------------------------------
+  // Find by id
+  // -------------------------------------------------------------------------
+
   public findHandoffById(id: string): Readonly<HandoffRecord> | null {
     try {
       const row = this.database.connection
-        .prepare(`SELECT ${HANDOFF_COLUMNS} FROM handoff_records WHERE runtime_id = ? LIMIT 1`)
+        .prepare(
+          `SELECT
+            runtime_id, object_kind, task_surface_ref, expires_at, derived_from,
+            retention_policy, handoff_kind, source_run_id, target_run_id, surface_id,
+            ttl_ms, recurrence_runs, recurrence_surfaces, governance_impact,
+            unresolved_age_ms, upgrade_candidate
+          FROM handoff_records
+          WHERE runtime_id = ?
+          LIMIT 1`
+        )
         .get(id) as HandoffRecordRow | undefined;
 
       return row === undefined ? null : parseHandoffRow(row);
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", `Failed to load handoff record ${id}.`, error);
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to load handoff record ${id}.`,
+        error
+      );
     }
   }
 
   public findGapById(id: string): Readonly<GapRecord> | null {
     try {
       const row = this.database.connection
-        .prepare(`SELECT ${GAP_COLUMNS} FROM gap_records WHERE runtime_id = ? LIMIT 1`)
+        .prepare(
+          `SELECT
+            runtime_id, object_kind, task_surface_ref, expires_at, derived_from,
+            retention_policy, gap_kind, detected_in_run_id, surface_id, description,
+            ttl_ms, recurrence_runs, recurrence_surfaces, governance_impact,
+            unresolved_age_ms, upgrade_candidate
+          FROM gap_records
+          WHERE runtime_id = ?
+          LIMIT 1`
+        )
         .get(id) as GapRecordRow | undefined;
 
       return row === undefined ? null : parseGapRow(row);
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", `Failed to load gap record ${id}.`, error);
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to load gap record ${id}.`,
+        error
+      );
     }
   }
+
+  // -------------------------------------------------------------------------
+  // List
+  // -------------------------------------------------------------------------
 
   public listAll(): ReadonlyArray<Readonly<HandoffRecord | GapRecord>> {
     try {
       const handoffRows = this.database.connection
-        .prepare(`SELECT ${HANDOFF_COLUMNS} FROM handoff_records ORDER BY runtime_id ASC`)
+        .prepare(
+          `SELECT
+            runtime_id, object_kind, task_surface_ref, expires_at, derived_from,
+            retention_policy, handoff_kind, source_run_id, target_run_id, surface_id,
+            ttl_ms, recurrence_runs, recurrence_surfaces, governance_impact,
+            unresolved_age_ms, upgrade_candidate
+          FROM handoff_records
+          ORDER BY runtime_id ASC`
+        )
         .all() as HandoffRecordRow[];
 
       const gapRows = this.database.connection
-        .prepare(`SELECT ${GAP_COLUMNS} FROM gap_records ORDER BY runtime_id ASC`)
+        .prepare(
+          `SELECT
+            runtime_id, object_kind, task_surface_ref, expires_at, derived_from,
+            retention_policy, gap_kind, detected_in_run_id, surface_id, description,
+            ttl_ms, recurrence_runs, recurrence_surfaces, governance_impact,
+            unresolved_age_ms, upgrade_candidate
+          FROM gap_records
+          ORDER BY runtime_id ASC`
+        )
         .all() as GapRecordRow[];
 
       const results: Array<Readonly<HandoffRecord | GapRecord>> = [
@@ -225,13 +353,27 @@ export class SqliteHandoffGapRepo {
     try {
       const handoffRows = this.database.connection
         .prepare(
-          `SELECT ${HANDOFF_COLUMNS} FROM handoff_records WHERE source_run_id = ? ORDER BY runtime_id ASC`
+          `SELECT
+            runtime_id, object_kind, task_surface_ref, expires_at, derived_from,
+            retention_policy, handoff_kind, source_run_id, target_run_id, surface_id,
+            ttl_ms, recurrence_runs, recurrence_surfaces, governance_impact,
+            unresolved_age_ms, upgrade_candidate
+          FROM handoff_records
+          WHERE source_run_id = ?
+          ORDER BY runtime_id ASC`
         )
         .all(runId) as HandoffRecordRow[];
 
       const gapRows = this.database.connection
         .prepare(
-          `SELECT ${GAP_COLUMNS} FROM gap_records WHERE detected_in_run_id = ? ORDER BY runtime_id ASC`
+          `SELECT
+            runtime_id, object_kind, task_surface_ref, expires_at, derived_from,
+            retention_policy, gap_kind, detected_in_run_id, surface_id, description,
+            ttl_ms, recurrence_runs, recurrence_surfaces, governance_impact,
+            unresolved_age_ms, upgrade_candidate
+          FROM gap_records
+          WHERE detected_in_run_id = ?
+          ORDER BY runtime_id ASC`
         )
         .all(runId) as GapRecordRow[];
 
@@ -242,9 +384,17 @@ export class SqliteHandoffGapRepo {
 
       return Object.freeze(results);
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", `Failed to find records for run ${runId}.`, error);
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to find records for run ${runId}.`,
+        error
+      );
     }
   }
+
+  // -------------------------------------------------------------------------
+  // Delete
+  // -------------------------------------------------------------------------
 
   public deleteById(id: string): void {
     try {
@@ -256,7 +406,11 @@ export class SqliteHandoffGapRepo {
         .prepare("DELETE FROM gap_records WHERE runtime_id = ?")
         .run(id);
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", `Failed to delete record ${id}.`, error);
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to delete record ${id}.`,
+        error
+      );
     }
   }
 
@@ -279,6 +433,10 @@ export class SqliteHandoffGapRepo {
       throw new StorageError("QUERY_FAILED", "Failed to delete expired records.", error);
     }
   }
+
+  // -------------------------------------------------------------------------
+  // Find expired
+  // -------------------------------------------------------------------------
 
   public findExpiredObjects(
     nowIso: string
@@ -304,7 +462,7 @@ export class SqliteHandoffGapRepo {
   }
 
   /**
-   * Workspace-scoped variant: returns expired objects whose associated run
+   * Workspace-scoped variant: only returns expired objects whose associated run
    * belongs to the given workspace (joins against runs table).
    */
   public findExpiredObjectsByWorkspace(

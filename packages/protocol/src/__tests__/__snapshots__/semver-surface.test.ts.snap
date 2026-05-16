@@ -34,7 +34,7 @@ soul:mcp-types.ts#GardenListPendingTasksResponseSchema(tasks)#5bc7339
 soul:mcp-types.ts#GardenMcpWorkerRoleSchema()#db60c46|enum=auditor|host_worker|janitor|librarian
 soul:mcp-types.ts#GardenPendingTaskSnapshotSchema(created_at,kind,payload,role,task_id)#f545860
 soul:mcp-types.ts#GardenTaskResultEnvelopeSchema(candidate_signals,extracted_proposals,notes)#ae1b9c4
-soul:mcp-types.ts#MemorySearchResultSchema(budget_state,content_preview,evidence_pointers,object_id,object_kind,relevance_score,score_factors,selection_reason,source_channels)#c14e337
+soul:mcp-types.ts#MemorySearchResultSchema(budget_state,content_preview,evidence_pointers,object_id,object_kind,relevance_score,score_factors,selection_reason,source_channels)#189b53c
 soul:mcp-types.ts#RecallTimeFieldSchema()#8864eb5|enum=created_at|last_used_at
 soul:mcp-types.ts#SoulApplyOverrideRequestSchema(correction,priority,target_object)#7bb9146
 soul:mcp-types.ts#SoulApplyOverrideResponseSchema(override_id,status)#2f0822a
@@ -52,7 +52,7 @@ soul:mcp-types.ts#SoulListPendingProposalsRequestSchema(limit,since)#f6ed9a7
 soul:mcp-types.ts#SoulListPendingProposalsResponseSchema(proposals,total_count)#887900d
 soul:mcp-types.ts#SoulMemorySearchDegradationReasonSchema()#a8fdf75|enum=cold_cascade_engaged|recall_explainability_partial|warm_cascade_engaged
 soul:mcp-types.ts#SoulMemorySearchRequestSchema(dimension,domain_tags,host_context,max_results,query,recent_turn,scope_class,since,time_field,until)#1dd1f43
-soul:mcp-types.ts#SoulMemorySearchResponseSchema(degradation_reason,delivery_id,results,strategy_mix,total_count)#cdfd7c9
+soul:mcp-types.ts#SoulMemorySearchResponseSchema(degradation_reason,delivery_id,results,strategy_mix,total_count)#0f37988
 soul:mcp-types.ts#SoulOpenPointerContentSchema(content,domain_tags,evidence_refs,excerpt,gist,object_id,object_kind,schema_version)#fcdde3f
 soul:mcp-types.ts#SoulOpenPointerRequestSchema(object_id)#a961e8f
 soul:mcp-types.ts#SoulOpenPointerResponseSchema(content,object_id,object_kind)#7eb611f
@@ -77,7 +77,7 @@ soul:memory-graph.ts#MemoryGraphEdgeTypeSchema()#a55fa99|enum=contradicts|derive
 soul:object-kind.ts#ScopeClassSchema()#bd8ee63|enum=global_core|global_domain|project
 soul:proposal.ts#ProposalResolutionStateSchema()#c128377|enum=accepted|auto_applied|expired|pending|rejected|superseded
 soul:recall-candidate.ts#RecallBudgetStateSchema(max_entries,max_total_tokens,remaining_entries,remaining_tokens,token_estimate,within_budget)#c332813
-soul:recall-candidate.ts#RecallScoreFactorsSchema(activation,budget_penalty,conflict_penalty,embedding_similarity,graph_support,path_plasticity,relevance,resolved_activation_weights)#67807f5
+soul:recall-candidate.ts#RecallScoreFactorsSchema(activation,budget_penalty,conflict_penalty,contradiction_penalty,embedding_similarity,graph_support,path_plasticity,relevance,resolved_activation_weights)#e24e20a
 soul:recall-policy.ts#ActivationWeightsSchema(budget_penalty,conflict_penalty,domain_match,freshness,graph_support,relevance,retention,scope_match)#2e4fc05
 [eventPayloadKeys]
 evt:budget.ts#SoulBudgetBankruptcyDeclaredPayloadSchema(bankruptcy_id,bankruptcy_kind,current_mode,dropped_candidates,expires_at,mode_at_trigger,occurred_at,protected_constraints_preserved,required_actions,run_id,task_surface_ref,trigger_kind,trigger_summary,unresolved_conflicts,workspace_id)#181f231

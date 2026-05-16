@@ -86,6 +86,9 @@ type SynthesisMaterializationInput = Omit<
   | "lifecycle_state"
   | "created_at"
   | "updated_at"
+  | "authority_round_count"
+  | "cooldown_until"
+  | "promotion_state"
   | "synthesis_status"
 >;
 
@@ -597,7 +600,7 @@ function buildMemoryInput(
     created_by: signal.source,
     dimension: toMemoryDimension(signal.object_kind),
     source_kind: toSourceKind(signal.source),
-    formation_kind: toFormationKind(signal.source),
+    formation_kind: toFormationKind(signal),
     scope_class: toScopeClass(signal.scope_hint),
     // invariant: MemoryEntry.content is the distilled fact, never raw turn.
     // Raw evidence lives in EvidenceCapsule.gist / .excerpt and is reached
@@ -701,13 +704,20 @@ function toSourceKind(source: CandidateMemorySignal["source"]): SourceKindValue 
   }
 }
 
-function toFormationKind(source: CandidateMemorySignal["source"]): FormationKind {
-  switch (source) {
+function toFormationKind(signal: CandidateMemorySignal): FormationKind {
+  switch (signal.source) {
     case "user_seed":
       return "explicit";
     case "import":
       return "imported";
     case "model_tool":
+      // model_tool signals carrying source_memory_refs build on top of
+      // existing memories (a derivation); plain LLM emissions without
+      // such refs are inferences.
+      return Array.isArray(signal.raw_payload?.source_memory_refs) &&
+        (signal.raw_payload.source_memory_refs as unknown[]).length > 0
+        ? "derived"
+        : "inferred";
     case "garden_compile":
     default:
       return "extracted";

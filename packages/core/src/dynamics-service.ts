@@ -607,6 +607,8 @@ function parseFormationKind(value: MemoryEntry["formation_kind"]): MemoryEntry["
   if (
     value === "extracted" ||
     value === "explicit" ||
+    value === "inferred" ||
+    value === "derived" ||
     value === "imported"
   ) {
     return value;

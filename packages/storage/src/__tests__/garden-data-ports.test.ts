@@ -739,13 +739,16 @@ function seedSynthesisCapsule(
         created_by,
         topic_key,
         synthesis_type,
+        authority_round_count,
+        cooldown_until,
+        promotion_state,
         summary,
         evidence_refs,
         source_memory_refs,
         workspace_id,
         run_id,
         synthesis_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       params.objectId,
@@ -757,6 +760,9 @@ function seedSynthesisCapsule(
       "user",
       params.topicKey ?? `${params.objectId}.topic`,
       "phase_synthesis",
+      0,
+      null,
+      "none",
       params.objectId,
       JSON.stringify(params.evidenceRefs ?? []),
       JSON.stringify(params.sourceMemoryRefs ?? []),

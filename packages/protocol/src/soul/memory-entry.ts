@@ -25,10 +25,14 @@ const memoryDimensionValues = [
 
 const sourceKindValues = ["compiler", "user", "seed", "import", "review"] as const;
 
-// invariant: live producers must pick one of extracted / explicit /
-// imported. Other values have no producer path and are rejected at the
-// schema layer so stale callers fail fast.
-const formationKindValues = ["extracted", "explicit", "imported"] as const;
+// invariant: each value names a distinct provenance shape that downstream
+// recall/scoring branches on:
+//   extracted — Garden compile pulled the fact out of an evidence excerpt
+//   explicit  — operator stated it directly (user_seed / soul.resolve confirm)
+//   inferred  — LLM produced the fact without a direct user statement
+//   derived   — fact is built from other memories via source_memory_refs
+//   imported  — bulk import / migration carried the row in
+const formationKindValues = ["extracted", "explicit", "inferred", "derived", "imported"] as const;
 
 const decayProfileValues = ["pinned", "stable", "normal", "volatile", "hazard"] as const;
 
@@ -60,6 +64,8 @@ export const SourceKind = {
 export const FormationKind = {
   EXTRACTED: "extracted",
   EXPLICIT: "explicit",
+  INFERRED: "inferred",
+  DERIVED: "derived",
   IMPORTED: "imported"
 } as const;
 

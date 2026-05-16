@@ -227,7 +227,7 @@ describe("MemoryEntry enums", () => {
   });
 
   it("exports the full FormationKind set", () => {
-    expect(Object.values(FormationKind)).toEqual(["extracted", "explicit", "imported"]);
+    expect(Object.values(FormationKind)).toEqual(["extracted", "explicit", "inferred", "derived", "imported"]);
   });
 
   it("exports the full DecayProfile set", () => {
@@ -252,6 +252,8 @@ describe("FORMATION_CONFIDENCE_MAP", () => {
     expect(FORMATION_CONFIDENCE_MAP).toEqual({
       extracted: 0.6,
       explicit: 0.9,
+      inferred: 0.4,
+      derived: 0.5,
       imported: 0.7
     });
   });

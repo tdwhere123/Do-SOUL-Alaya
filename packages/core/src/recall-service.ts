@@ -1545,6 +1545,13 @@ export class RecallService {
       !winnerMemoryIds.has(entry.object_id)
         ? 1
         : 0;
+    // invariant: contradiction-history degradation. ConflictDetectionService
+    // increments MemoryEntry.contradiction_count each time a new memory
+    // supersedes or contradicts this one. Recall scoring subtracts a small
+    // bounded factor so memories that keep losing arbitration drift down
+    // without being tombstoned. Cap at 5 to keep the penalty bounded.
+    const contradictionCount = entry.contradiction_count ?? 0;
+    const contradictionPenalty = clamp01(0.05 * Math.min(contradictionCount, 5));
 
     const baseWeight =
       (isAdvisory ? 0 : weights.scope_match) +
@@ -1560,7 +1567,8 @@ export class RecallService {
         graphSupportFactor * weights.graph_support +
         plasticityFactor * pathPlasticityWeight -
         budgetPenalty * weights.budget_penalty -
-        conflictPenalty * weights.conflict_penalty
+        conflictPenalty * weights.conflict_penalty -
+        contradictionPenalty
     );
     const score = clamp01(rawScore * scoreMultiplier);
 
@@ -1573,6 +1581,7 @@ export class RecallService {
         path_plasticity: plasticityFactor,
         budget_penalty: budgetPenalty,
         conflict_penalty: conflictPenalty,
+        contradiction_penalty: contradictionPenalty,
         resolved_activation_weights: weights
       })
     });
