@@ -23,10 +23,15 @@ export const RecallScoreFactorsSchema = z
     budget_penalty: z.number().min(0).max(1).optional(),
     embedding_similarity: z.number().min(0).max(1).optional(),
     conflict_penalty: z.number().min(0).max(1).optional(),
-    // invariant: degradation factor in [0, CONTRADICTION_PENALTY_MAX]
-    // applied by recall scoring when MemoryEntry.contradiction_count > 0;
-    // upstream producer is ConflictDetectionService.
+    // invariant: degradation factor in [0, 0.25] applied by recall scoring
+    // when MemoryEntry.contradiction_count > 0 (0.05 per contradiction,
+    // capped at 5 contradictions). Producer: ConflictDetectionService.
     contradiction_penalty: z.number().min(0).max(1).optional(),
+    // invariant: producer-side epistemic certainty in [0, 1] copied from
+    // MemoryEntry.confidence and applied additively (outside the
+    // sum-to-1 activation_weights) so propose/accept updates reach
+    // recall ordering without going through retention/activation decay.
+    confidence: z.number().min(0).max(1).optional(),
     resolved_activation_weights: ActivationWeightsSchema.optional()
   })
   .strict()

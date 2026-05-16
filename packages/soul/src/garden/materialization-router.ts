@@ -8,6 +8,7 @@ import {
   type CandidateMemorySignal,
   type ClaimForm,
   type ClaimKind,
+  type EnforcementLevel as EnforcementLevelValue,
   type EvidenceCapsule,
   type EvidenceHealthState as EvidenceHealthStateValue,
   type EvidenceKind as EvidenceKindValue,
@@ -16,6 +17,7 @@ import {
   type MemoryEntry,
   type MemoryGraphEdgeTypeValue,
   type OriginTier,
+  type PrecedenceBasis as PrecedenceBasisValue,
   type ScopeClass as ScopeClassValue,
   type SourceKind as SourceKindValue,
   type SynthesisCapsule,
@@ -30,14 +32,36 @@ import {
   validateSchemaGroundingForSignal
 } from "./schema-grounding.js";
 
+// invariant: RouteTarget is the routing-decision label produced by
+// route(). It diversifies producer-side semantics so the live ontology
+// no longer collapses every signal into the memory_and_claim 1:1:1 trio.
+// MaterializationTarget.kind (the wire-level target_kind consumed by
+// SignalMaterializationResult in @do-soul/alaya-core) stays inside the
+// existing 5-value union for cross-package back-compat; the richer
+// RouteTarget is informational and surfaces through
+// MaterializationTarget.route_target.
+// see also: packages/core/src/signal-service.ts SignalMaterializationTargetKind
+export type RouteTarget =
+  | "signal_only"
+  | "evidence_only"
+  | "evidence_short_ttl"
+  | "memory_entry_only"
+  | "memory_and_claim_draft"
+  | "conflict_evaluation"
+  | "synthesis"
+  | "handoff_gap"
+  | "deferred";
+
 export interface MaterializationTarget {
   readonly kind: "memory_and_claim" | "synthesis" | "handoff_gap" | "evidence_only" | "deferred";
+  readonly route_target: RouteTarget;
   readonly routing_reason: string;
 }
 
 export interface MaterializationResult {
   readonly signal_id: string;
   readonly target_kind: MaterializationTarget["kind"];
+  readonly route_target: RouteTarget;
   readonly routing_reason: string;
   readonly created_objects: readonly { object_kind: string; object_id: string }[];
   readonly success: boolean;
@@ -133,6 +157,12 @@ export interface GraphEdgeCreationPort {
   }): Promise<void>;
 }
 
+// invariant: detectAndLinkConflicts runs at memory materialization time
+// against the new memory's id; evaluate runs against a raw
+// potential_conflict signal that has no memory yet. The router routes
+// the potential_conflict signal_kind to evaluate; the established
+// memory_and_claim_draft path keeps using detectAndLinkConflicts as a
+// post-create scan.
 export interface ConflictDetectionPort {
   detectAndLinkConflicts(params: {
     readonly newMemoryId: string;
@@ -142,6 +172,15 @@ export interface ConflictDetectionPort {
     readonly newMemoryDomainTags: readonly string[];
     readonly workspaceId: string;
     readonly runId: string;
+  }): Promise<void>;
+  evaluate?(params: {
+    readonly signalId: string;
+    readonly workspaceId: string;
+    readonly runId: string;
+    readonly objectKind: string;
+    readonly scopeHint: string | null;
+    readonly content: string;
+    readonly domainTags: readonly string[];
   }): Promise<void>;
 }
 
@@ -167,26 +206,15 @@ export class MaterializationRouter {
     if (schemaGroundingValidation.declared && schemaGroundingValidation.status !== "valid") {
       return {
         kind: "deferred",
+        route_target: "deferred",
         routing_reason: `schema-grounded signal failed validation: ${schemaGroundingValidation.reasons.join("; ")}`
-      };
-    }
-
-    if (
-      (signal.signal_kind === "potential_claim" || signal.signal_kind === "potential_preference") &&
-      signal.confidence >= 0.5
-    ) {
-      return {
-        kind: "memory_and_claim",
-        routing_reason:
-          signal.evidence_refs.length >= 1
-            ? "reusable signal with evidence support"
-            : "high-confidence preference/claim — evidence created during materialization"
       };
     }
 
     if (signal.signal_kind === "potential_synthesis" && signal.evidence_refs.length >= 2) {
       return {
         kind: "synthesis",
+        route_target: "synthesis",
         routing_reason: "multi-evidence synthesis candidate"
       };
     }
@@ -194,6 +222,7 @@ export class MaterializationRouter {
     if (signal.signal_kind === "potential_handoff") {
       return {
         kind: "handoff_gap",
+        route_target: "handoff_gap",
         routing_reason: "run-bound handoff/gap detection"
       };
     }
@@ -201,23 +230,60 @@ export class MaterializationRouter {
     if (signal.signal_kind === "potential_evidence_anchor") {
       return {
         kind: "evidence_only",
+        route_target: "evidence_only",
         routing_reason: "evidence archival"
       };
     }
 
+    // invariant: potential_conflict routes to ConflictDetectionPort.evaluate
+    // instead of the questionable-evidence fallback. Conflict signals
+    // describe an alleged disagreement between memories — evaluate is
+    // the producer of the contradicts / incompatible_with edges and is
+    // the only sink that turns the signal into governance-actionable
+    // structure. When the port is absent the signal is deferred (rather
+    // than archived as questionable evidence), so the conflict surface
+    // never silently degrades into noise.
+    if (signal.signal_kind === "potential_conflict") {
+      return {
+        kind: "deferred",
+        route_target: "conflict_evaluation",
+        routing_reason: "potential_conflict -> ConflictDetectionPort.evaluate"
+      };
+    }
+
+    if (
+      (signal.signal_kind === "potential_claim" || signal.signal_kind === "potential_preference") &&
+      signal.confidence >= 0.5
+    ) {
+      const objectKindRoute = routeByObjectKind(signal.object_kind);
+      if (objectKindRoute !== null) {
+        return objectKindRoute;
+      }
+      return {
+        kind: "memory_and_claim",
+        route_target: "memory_and_claim_draft",
+        routing_reason:
+          signal.evidence_refs.length >= 1
+            ? "reusable signal with evidence support"
+            : "high-confidence preference/claim — evidence created during materialization"
+      };
+    }
+
     // Low-confidence unroutable signals are deferred rather than persisted as
-    // questionable evidence — avoids accumulating low-confidence noise (F9 / doc §77).
+    // questionable evidence — avoids accumulating low-confidence noise.
     if (signal.confidence < 0.3) {
       return {
         kind: "deferred",
+        route_target: "deferred",
         routing_reason: "uncertain signal — deferred pending higher-confidence reconfirmation"
       };
     }
 
     return {
       kind: "evidence_only",
-      // Unroutable signals are archived as questionable evidence only; they do not
-      // produce verified long-term objects (invariant #16).
+      route_target: "evidence_only",
+      // invariant: unroutable signals are archived as questionable evidence only;
+      // they do not produce verified long-term objects (invariant #16).
       routing_reason: "unroutable signal -> evidence archive (questionable evidence only)"
     };
   }
@@ -230,6 +296,16 @@ export class MaterializationRouter {
     signal: CandidateMemorySignal,
     target: MaterializationTarget
   ): Promise<MaterializationResult> {
+    if (target.route_target === "memory_entry_only") {
+      return await this.materializeMemoryEntryOnly(signal, target);
+    }
+    if (target.route_target === "conflict_evaluation") {
+      return await this.materializeConflictEvaluation(signal, target);
+    }
+    if (target.route_target === "signal_only") {
+      return this.materializeDeferred(signal, target);
+    }
+
     switch (target.kind) {
       case "memory_and_claim":
         return await this.materializeMemoryAndClaim(signal, target);
@@ -246,6 +322,7 @@ export class MaterializationRouter {
         return {
           signal_id: signal.signal_id,
           target_kind: exhaustiveCheck,
+          route_target: target.route_target,
           routing_reason: target.routing_reason,
           created_objects: [],
           success: false,
@@ -342,6 +419,7 @@ export class MaterializationRouter {
       return {
         signal_id: signal.signal_id,
         target_kind: target.kind,
+        route_target: target.route_target,
         routing_reason: target.routing_reason,
         created_objects: createdObjects,
         success: true
@@ -350,6 +428,7 @@ export class MaterializationRouter {
       return {
         signal_id: signal.signal_id,
         target_kind: target.kind,
+        route_target: target.route_target,
         routing_reason: target.routing_reason,
         created_objects: createdObjects,
         success: false,
@@ -394,6 +473,7 @@ export class MaterializationRouter {
       return {
         signal_id: signal.signal_id,
         target_kind: target.kind,
+        route_target: target.route_target,
         routing_reason: target.routing_reason,
         created_objects: createdObjects,
         success: true
@@ -402,6 +482,7 @@ export class MaterializationRouter {
       return {
         signal_id: signal.signal_id,
         target_kind: target.kind,
+        route_target: target.route_target,
         routing_reason: target.routing_reason,
         created_objects: createdObjects,
         success: false,
@@ -420,6 +501,7 @@ export class MaterializationRouter {
       return {
         signal_id: signal.signal_id,
         target_kind: target.kind,
+        route_target: target.route_target,
         routing_reason: target.routing_reason,
         created_objects: [createdObject],
         success: true
@@ -428,6 +510,7 @@ export class MaterializationRouter {
       return {
         signal_id: signal.signal_id,
         target_kind: target.kind,
+        route_target: target.route_target,
         routing_reason: target.routing_reason,
         created_objects: [],
         success: false,
@@ -443,11 +526,109 @@ export class MaterializationRouter {
   ): MaterializationResult {
     return {
       signal_id: signal.signal_id,
-      target_kind: target.kind,
+      target_kind: "deferred",
+      route_target: target.route_target,
       routing_reason: target.routing_reason,
       created_objects: [],
       success: true
     };
+  }
+
+  // invariant: produces evidence + memory but no claim. Used when the
+  // signal records an outcome / reference / task_state — facts worth
+  // remembering but not governance-mutating (a claim would over-promote
+  // the signal into a draft awaiting review).
+  // see also: materializeMemoryAndClaim — adds the claim_form layer.
+  private async materializeMemoryEntryOnly(
+    signal: CandidateMemorySignal,
+    target: MaterializationTarget
+  ): Promise<MaterializationResult> {
+    const createdObjects: Array<{ object_kind: string; object_id: string }> = [];
+
+    try {
+      const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal));
+      createdObjects.push({ object_kind: evidence.object_kind, object_id: evidence.object_id });
+
+      const memory = await this.dependencies.memoryService.create(buildMemoryInput(signal, [evidence.object_id]));
+      createdObjects.push({ object_kind: memory.object_kind, object_id: memory.object_id });
+
+      return {
+        signal_id: signal.signal_id,
+        // wire-level kind stays evidence_only so the cross-package
+        // SignalMaterializationTargetKind union does not need to widen;
+        // memory_entry_only is surfaced through route_target.
+        // see also: packages/core/src/signal-service.ts SignalMaterializationTargetKind
+        target_kind: "evidence_only",
+        route_target: target.route_target,
+        routing_reason: target.routing_reason,
+        created_objects: createdObjects,
+        success: true
+      };
+    } catch (error) {
+      return {
+        signal_id: signal.signal_id,
+        target_kind: "evidence_only",
+        route_target: target.route_target,
+        routing_reason: target.routing_reason,
+        created_objects: createdObjects,
+        success: false,
+        error: readErrorMessage(error)
+      };
+    }
+  }
+
+  // invariant: potential_conflict route sink. evaluate is the only
+  // producer for contradicts / incompatible_with edges that originates
+  // from a raw signal (memory-time detection runs through
+  // detectAndLinkConflicts after the new memory is created). When the
+  // port is absent or lacks evaluate, the signal is deferred so the
+  // conflict surface is not silently lost as questionable evidence.
+  private async materializeConflictEvaluation(
+    signal: CandidateMemorySignal,
+    target: MaterializationTarget
+  ): Promise<MaterializationResult> {
+    const port = this.dependencies.conflictDetectionPort;
+    if (port === undefined || port.evaluate === undefined) {
+      return {
+        signal_id: signal.signal_id,
+        target_kind: "deferred",
+        route_target: target.route_target,
+        routing_reason: `${target.routing_reason} — deferred: evaluate unavailable`,
+        created_objects: [],
+        success: true
+      };
+    }
+
+    try {
+      await port.evaluate({
+        signalId: signal.signal_id,
+        workspaceId: signal.workspace_id,
+        runId: signal.run_id,
+        objectKind: signal.object_kind,
+        scopeHint: signal.scope_hint,
+        content: buildDistilledFact(signal),
+        domainTags: signal.domain_tags
+      });
+
+      return {
+        signal_id: signal.signal_id,
+        target_kind: "deferred",
+        route_target: target.route_target,
+        routing_reason: target.routing_reason,
+        created_objects: [],
+        success: true
+      };
+    } catch (error) {
+      return {
+        signal_id: signal.signal_id,
+        target_kind: "deferred",
+        route_target: target.route_target,
+        routing_reason: target.routing_reason,
+        created_objects: [],
+        success: false,
+        error: readErrorMessage(error)
+      };
+    }
   }
 
   /**
@@ -521,6 +702,7 @@ export class MaterializationRouter {
       return {
         signal_id: signal.signal_id,
         target_kind: target.kind,
+        route_target: target.route_target,
         routing_reason: target.routing_reason,
         created_objects: [{ object_kind: evidence.object_kind, object_id: evidence.object_id }],
         success: true
@@ -529,12 +711,63 @@ export class MaterializationRouter {
       return {
         signal_id: signal.signal_id,
         target_kind: target.kind,
+        route_target: target.route_target,
         routing_reason: target.routing_reason,
         created_objects: [],
         success: false,
         error: readErrorMessage(error)
       };
     }
+  }
+}
+
+// invariant: routes a high-confidence potential_claim / potential_preference
+// signal by its `object_kind` so the live ontology no longer collapses
+// every signal into the memory_and_claim 1:1:1 trio. Returns null when
+// the object_kind is not in the diversification table — the caller then
+// falls back to memory_and_claim_draft so dimensions like constraint /
+// procedure / hazard / glossary / episode keep producing claims.
+function routeByObjectKind(objectKind: string): MaterializationTarget | null {
+  switch (objectKind) {
+    case "scope":
+    case "task_scope":
+    case "workflow_preference":
+      return {
+        kind: "deferred",
+        route_target: "signal_only",
+        routing_reason: `object_kind=${objectKind} -> signal_only (no projection beyond signal row)`
+      };
+    case "activity":
+    case "review_scope":
+      return {
+        kind: "evidence_only",
+        route_target: "evidence_only",
+        routing_reason: `object_kind=${objectKind} -> evidence_only`
+      };
+    case "workspace_status":
+    case "project_state":
+      return {
+        kind: "evidence_only",
+        route_target: "evidence_short_ttl",
+        routing_reason: `object_kind=${objectKind} -> evidence_short_ttl`
+      };
+    case "preference":
+    case "decision":
+      return {
+        kind: "memory_and_claim",
+        route_target: "memory_and_claim_draft",
+        routing_reason: `object_kind=${objectKind} -> memory_and_claim_draft (claim_status defaulted to draft by ClaimService)`
+      };
+    case "outcome":
+    case "reference":
+    case "task_state":
+      return {
+        kind: "evidence_only",
+        route_target: "memory_entry_only",
+        routing_reason: `object_kind=${objectKind} -> memory_entry_only (evidence + memory, no claim)`
+      };
+    default:
+      return null;
   }
 }
 
@@ -622,6 +855,8 @@ function buildClaimInput(
   sourceObjectRefs: readonly string[]
 ): ClaimMaterializationInput {
   const claimKind = toClaimKind(signal.object_kind);
+  const enforcementLevel: EnforcementLevelValue =
+    claimKind === "constraint" || claimKind === "factual_policy" ? "strict" : "preferred";
 
   return {
     created_by: signal.source,
@@ -632,14 +867,46 @@ function buildClaimInput(
     },
     claim_kind: claimKind,
     scope_class: toScopeClass(signal.scope_hint),
-    enforcement_level: claimKind === "constraint" || claimKind === "factual_policy" ? "strict" : "preferred",
+    enforcement_level: enforcementLevel,
     origin_tier: toOriginTier(signal.source),
-    precedence_basis: "evidence_strength",
+    precedence_basis: pickPrecedenceBasis(signal, enforcementLevel),
     proposition_digest: buildDistilledFact(signal),
     evidence_refs: evidenceRefs,
     source_object_refs: sourceObjectRefs,
     workspace_id: signal.workspace_id
   };
+}
+
+// invariant: producer-side rule mirrors the canonical helper
+// `derivePrecedenceBasis` in packages/core/src/claim-service.ts. Priority
+// (highest wins): user_override > authority > recency > evidence_strength.
+// Garden cannot import from packages/core (invariant §6), so the rule is
+// duplicated here with the cross-file anchor below; both producers stay
+// in lockstep through identical truth-table tests.
+// see also: packages/core/src/claim-service.ts derivePrecedenceBasis
+function pickPrecedenceBasis(
+  signal: CandidateMemorySignal,
+  enforcementLevel: EnforcementLevelValue
+): PrecedenceBasisValue {
+  if (signal.source === "user_seed" || hasUserOverrideMarker(signal)) {
+    return "user_override";
+  }
+  if (enforcementLevel === "strict") {
+    return "authority";
+  }
+  if (hasSupersedeIntent(signal)) {
+    return "recency";
+  }
+  return "evidence_strength";
+}
+
+function hasUserOverrideMarker(signal: CandidateMemorySignal): boolean {
+  return signal.raw_payload.user_override === true;
+}
+
+function hasSupersedeIntent(signal: CandidateMemorySignal): boolean {
+  const refs = signal.raw_payload.supersedes_refs;
+  return Array.isArray(refs) && refs.some((ref) => typeof ref === "string" && ref.trim().length > 0);
 }
 
 function buildSynthesisInput(

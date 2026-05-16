@@ -101,6 +101,7 @@ export {
   type MaterializationResult,
   type MaterializationRouterDeps,
   type MaterializationTarget,
+  type RouteTarget,
   type GraphEdgeCreationPort
 } from "./materialization-router.js";
 export {

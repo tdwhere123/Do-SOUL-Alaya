@@ -4,6 +4,7 @@ import {
   ClaimLifecycleState,
   ClaimLifecycleStateSchema,
   MemoryGovernanceEventType,
+  PrecedenceBasis,
   SoulClaimContestedPayloadSchema,
   SoulClaimCreatedPayloadSchema,
   SoulClaimLifecycleChangedPayloadSchema,
@@ -13,7 +14,9 @@ import {
   isValidClaimTransition,
   type ClaimForm,
   type ClaimLifecycleState as ClaimLifecycleStateType,
+  type EnforcementLevel as EnforcementLevelType,
   type EventLogEntry,
+  type PrecedenceBasis as PrecedenceBasisType,
   type TransitionCausedBy as TransitionCausedByType
 } from "@do-soul/alaya-protocol";
 import type { CanonicalAliasService } from "./canonical-alias-service.js";
@@ -36,6 +39,37 @@ export type ClaimFormInput = Omit<
   readonly governance_subject_domain: string;
   readonly governance_subject_qualifiers?: Record<string, string>;
 };
+
+// invariant: shared producer-side rule for picking precedence_basis on a
+// newly minted claim. Priority order (highest wins):
+//   user_override  > authority > recency > evidence_strength
+// Consumers: arbitration-service.scoreClaim treats user_override as a
+// score boost; slot-service.evaluateSameScopeElection short-circuits to
+// auto-win when the challenger carries user_override; the other three
+// values are governance metadata for downstream review/audit.
+// see also: packages/soul/src/garden/materialization-router.ts buildClaimInput
+// see also: packages/soul/src/garden/session-override-remediation.ts (USER_OVERRIDE)
+export interface PrecedenceBasisDecisionInput {
+  readonly source: string;
+  readonly enforcement_level: EnforcementLevelType;
+  readonly is_supersede?: boolean;
+  readonly user_override?: boolean;
+}
+
+export function derivePrecedenceBasis(
+  input: PrecedenceBasisDecisionInput
+): PrecedenceBasisType {
+  if (input.user_override === true || input.source === "user_seed") {
+    return PrecedenceBasis.USER_OVERRIDE;
+  }
+  if (input.enforcement_level === "strict") {
+    return PrecedenceBasis.AUTHORITY;
+  }
+  if (input.is_supersede === true) {
+    return PrecedenceBasis.RECENCY;
+  }
+  return PrecedenceBasis.EVIDENCE_STRENGTH;
+}
 
 export interface ClaimServiceEventLogRepoPort {
   append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;

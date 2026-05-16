@@ -106,6 +106,12 @@ const DYNAMIC_RECALL_TEMPORAL_RADIUS = 3;
 const DYNAMIC_RECALL_COHORT_RADIUS = 8;
 const DYNAMIC_RECALL_EDGE_FANOUT = 12;
 const NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT = 0.24;
+// invariant: confidence sub-weight is additive (outside sum-to-1
+// activation_weights). MemoryEntry.confidence is propose/accept-updated
+// epistemic certainty; reading it directly here keeps later confidence
+// edits visible to recall ordering without waiting for retention decay
+// or activation rescore. Final score stays clamp01.
+const CONFIDENCE_DIRECT_WEIGHT = 0.08;
 
 interface CoarseCandidateDraft {
   readonly entry: Readonly<MemoryEntry>;
@@ -1552,6 +1558,7 @@ export class RecallService {
     // without being tombstoned. Cap at 5 to keep the penalty bounded.
     const contradictionCount = entry.contradiction_count ?? 0;
     const contradictionPenalty = clamp01(0.05 * Math.min(contradictionCount, 5));
+    const confidenceFactor = clamp01(entry.confidence ?? 0);
 
     const baseWeight =
       (isAdvisory ? 0 : weights.scope_match) +
@@ -1565,7 +1572,8 @@ export class RecallService {
         relevanceFactor * weights.relevance +
         relevanceFactor * NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT +
         graphSupportFactor * weights.graph_support +
-        plasticityFactor * pathPlasticityWeight -
+        plasticityFactor * pathPlasticityWeight +
+        confidenceFactor * CONFIDENCE_DIRECT_WEIGHT -
         budgetPenalty * weights.budget_penalty -
         conflictPenalty * weights.conflict_penalty -
         contradictionPenalty
@@ -1582,6 +1590,7 @@ export class RecallService {
         budget_penalty: budgetPenalty,
         conflict_penalty: conflictPenalty,
         contradiction_penalty: contradictionPenalty,
+        confidence: confidenceFactor,
         resolved_activation_weights: weights
       })
     });
