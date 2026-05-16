@@ -1,0 +1,104 @@
+{
+  "bench_name": "public-locomo",
+  "split": "locomo10",
+  "run_at": "2026-05-16T02:57:31.078Z",
+  "alaya_commit": "c1d625c",
+  "alaya_version": "0.3.8",
+  "embedding_provider": "none",
+  "chat_provider": "none",
+  "dataset": {
+    "name": "locomo10",
+    "size": 10,
+    "source": "https://github.com/snap-research/locomo/blob/main/data/locomo10.json"
+  },
+  "sample_size": 10,
+  "evaluated_count": 10,
+  "harness_mode": "mcp_propose_review",
+  "kpi": {
+    "r_at_1": 0.2694248234106963,
+    "r_at_5": 0.47527749747729564,
+    "r_at_10": 0.5332996972754793,
+    "latency_ms_p50": 71,
+    "latency_ms_p95": 91,
+    "latency_source": "exact",
+    "token_saved_ratio_vs_full_prompt": 0,
+    "tier_distribution": {
+      "hot": 1982,
+      "warm": 0,
+      "cold": 0
+    },
+    "degradation_reasons": {
+      "none": 1982,
+      "warm_cascade_engaged": 0,
+      "cold_cascade_engaged": 0,
+      "recall_explainability_partial": 0
+    },
+    "seed_truncation": {
+      "seed_turns_truncated": 0,
+      "answer_turns_truncated": 0,
+      "seed_chars_clipped": 0
+    },
+    "per_scenario": [
+      {
+        "id": "conv-26",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot"
+      },
+      {
+        "id": "conv-30",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot"
+      },
+      {
+        "id": "conv-41",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot"
+      },
+      {
+        "id": "conv-42",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot"
+      },
+      {
+        "id": "conv-43",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot"
+      },
+      {
+        "id": "conv-44",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot"
+      },
+      {
+        "id": "conv-47",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot"
+      },
+      {
+        "id": "conv-48",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot"
+      },
+      {
+        "id": "conv-49",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot"
+      },
+      {
+        "id": "conv-50",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot"
+      }
+    ]
+  }
+}
