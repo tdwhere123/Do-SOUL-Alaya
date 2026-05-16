@@ -20,7 +20,15 @@ export type LocomoTurn = z.infer<typeof LocomoTurnSchema>;
 
 export const LocomoQaSchema = z.object({
   question: z.string(),
-  answer: z.union([z.string(), z.number()]).transform((v) => String(v)),
+  // invariant: LoCoMo category-5 adversarial entries either carry
+  // `answer: null` or omit the field entirely (the question is
+  // unanswerable by design). Treat both as the empty string at the
+  // schema boundary; the runner skips empty-evidence QAs from the
+  // scoring denominator.
+  answer: z
+    .union([z.string(), z.number(), z.null()])
+    .optional()
+    .transform((v) => (v === null || v === undefined ? "" : String(v))),
   evidence: z.array(z.string()).default([]),
   category: z.number().int(),
   adversarial_answer: z.string().optional()
