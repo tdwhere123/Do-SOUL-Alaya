@@ -37,7 +37,8 @@ describe("MaterializationRouter", () => {
     expect(target).toEqual({
       kind: "memory_and_claim",
       route_target: "memory_and_claim_draft",
-      routing_reason: "reusable signal with evidence support"
+      routing_reason:
+        "object_kind=constraint -> memory_and_claim_draft (claim_status defaulted to draft by ClaimService)"
     });
   });
 
@@ -55,7 +56,8 @@ describe("MaterializationRouter", () => {
     expect(target).toEqual({
       kind: "memory_and_claim",
       route_target: "memory_and_claim_draft",
-      routing_reason: "high-confidence preference/claim — evidence created during materialization"
+      routing_reason:
+        "object_kind=constraint -> memory_and_claim_draft (claim_status defaulted to draft by ClaimService)"
     });
   });
 
@@ -360,7 +362,9 @@ describe("MaterializationRouter", () => {
 
     const result = await router.materializeSignal(createSignal());
 
-    expect(result.routing_reason).toBe("reusable signal with evidence support");
+    expect(result.routing_reason).toBe(
+      "object_kind=constraint -> memory_and_claim_draft (claim_status defaulted to draft by ClaimService)"
+    );
 
     const evidenceInput = deps.evidenceService.create.mock.calls[0][0] as {
       readonly gist: string;

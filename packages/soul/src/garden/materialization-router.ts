@@ -259,13 +259,15 @@ export class MaterializationRouter {
       if (objectKindRoute !== null) {
         return objectKindRoute;
       }
+      // invariant: unknown object_kind never enters governance review as
+      // a draft claim — that would re-introduce the producer-side claim
+      // collapse the routing table was meant to break. Known claim-
+      // capable dimensions are enumerated in routeByObjectKind; anything
+      // outside the table is archived as questionable evidence only.
       return {
-        kind: "memory_and_claim",
-        route_target: "memory_and_claim_draft",
-        routing_reason:
-          signal.evidence_refs.length >= 1
-            ? "reusable signal with evidence support"
-            : "high-confidence preference/claim — evidence created during materialization"
+        kind: "evidence_only",
+        route_target: "evidence_only",
+        routing_reason: `high-confidence ${signal.signal_kind} with unrouted object_kind=${signal.object_kind} -> evidence_only`
       };
     }
 
@@ -722,11 +724,12 @@ export class MaterializationRouter {
 }
 
 // invariant: routes a high-confidence potential_claim / potential_preference
-// signal by its `object_kind` so the live ontology no longer collapses
-// every signal into the memory_and_claim 1:1:1 trio. Returns null when
-// the object_kind is not in the diversification table — the caller then
-// falls back to memory_and_claim_draft so dimensions like constraint /
-// procedure / hazard / glossary / episode keep producing claims.
+// signal by its `object_kind`. Claim-capable dimensions are enumerated
+// explicitly so truly unknown kinds fall through to null and the
+// caller archives them as evidence_only — keeping the producer side
+// from collapsing unrecognized labels into governance-actionable
+// claims. Returns null only when the object_kind is outside every
+// enumerated branch.
 function routeByObjectKind(objectKind: string): MaterializationTarget | null {
   switch (objectKind) {
     case "scope":
@@ -753,6 +756,13 @@ function routeByObjectKind(objectKind: string): MaterializationTarget | null {
       };
     case "preference":
     case "decision":
+    case "constraint":
+    case "procedure":
+    case "hazard":
+    case "factual_policy":
+    case "exception":
+    case "glossary":
+    case "episode":
       return {
         kind: "memory_and_claim",
         route_target: "memory_and_claim_draft",
@@ -761,6 +771,7 @@ function routeByObjectKind(objectKind: string): MaterializationTarget | null {
     case "outcome":
     case "reference":
     case "task_state":
+    case "fact":
       return {
         kind: "evidence_only",
         route_target: "memory_entry_only",

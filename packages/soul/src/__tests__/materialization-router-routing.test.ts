@@ -88,7 +88,42 @@ describe("MaterializationRouter routing-by-object_kind", () => {
     expect(target.route_target).toBe("evidence_only");
   });
 
-  it("falls back to memory_and_claim_draft for legacy object_kind=constraint (back-compat)", () => {
+  // invariant: high-confidence unknown object_kind must NOT escalate
+  // into a draft claim — that would re-introduce the producer-side
+  // claim collapse the routing table was meant to break. Truly
+  // unknown labels route to evidence_only regardless of confidence.
+  it("routes unknown object_kind under potential_claim to evidence_only even at high confidence", () => {
+    const router = new MaterializationRouter(createDeps());
+
+    const target = router.route(
+      createSignal({
+        object_kind: "totally_unknown_kind",
+        signal_kind: "potential_claim",
+        confidence: 0.95,
+        evidence_refs: ["msg-1", "msg-2"]
+      })
+    );
+
+    expect(target.kind).toBe("evidence_only");
+    expect(target.route_target).toBe("evidence_only");
+  });
+
+  it("routes unknown object_kind under potential_preference to evidence_only at high confidence", () => {
+    const router = new MaterializationRouter(createDeps());
+
+    const target = router.route(
+      createSignal({
+        object_kind: "newly_minted_label",
+        signal_kind: "potential_preference",
+        confidence: 0.9,
+        evidence_refs: ["msg-1"]
+      })
+    );
+
+    expect(target.route_target).toBe("evidence_only");
+  });
+
+  it("legacy object_kind=constraint is now enumerated as memory_and_claim_draft (was fallback)", () => {
     const router = new MaterializationRouter(createDeps());
 
     const target = router.route(
@@ -102,6 +137,45 @@ describe("MaterializationRouter routing-by-object_kind", () => {
 
     expect(target.kind).toBe("memory_and_claim");
     expect(target.route_target).toBe("memory_and_claim_draft");
+  });
+
+  for (const claimCapableKind of [
+    "procedure",
+    "hazard",
+    "factual_policy",
+    "exception",
+    "glossary",
+    "episode"
+  ]) {
+    it(`enumerates claim-capable object_kind=${claimCapableKind} as memory_and_claim_draft`, () => {
+      const router = new MaterializationRouter(createDeps());
+
+      const target = router.route(
+        createSignal({
+          object_kind: claimCapableKind,
+          signal_kind: "potential_claim",
+          confidence: 0.8,
+          evidence_refs: ["msg-1"]
+        })
+      );
+
+      expect(target.route_target).toBe("memory_and_claim_draft");
+    });
+  }
+
+  it("enumerates object_kind=fact as memory_entry_only (no claim)", () => {
+    const router = new MaterializationRouter(createDeps());
+
+    const target = router.route(
+      createSignal({
+        object_kind: "fact",
+        signal_kind: "potential_claim",
+        confidence: 0.8,
+        evidence_refs: ["msg-1"]
+      })
+    );
+
+    expect(target.route_target).toBe("memory_entry_only");
   });
 
   it("routes potential_preference by object_kind too (decision -> memory_and_claim_draft)", () => {
