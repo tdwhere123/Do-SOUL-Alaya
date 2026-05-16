@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 import {
   Activity,
+  BookOpen,
   CheckSquare,
   Cpu,
   Gauge,
@@ -26,6 +27,7 @@ interface NavItem {
 const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { to: "/overview", labelKey: "nav:overview", Icon: LayoutDashboard },
   { to: "/graph", labelKey: "nav:memoryGraph", Icon: Network },
+  { to: "/memory-browser", labelKey: "nav:memoryBrowser", Icon: BookOpen },
   { to: "/proposals", labelKey: "nav:pendingProposals", Icon: CheckSquare },
   { to: "/recall", labelKey: "nav:recallStats", Icon: Gauge },
   { to: "/status", labelKey: "nav:systemStatus", Icon: Activity },

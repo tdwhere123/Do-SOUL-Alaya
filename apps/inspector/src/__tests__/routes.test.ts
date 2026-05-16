@@ -20,6 +20,8 @@ describe("inspector routes", () => {
       "GET /api/bench-summary",
       "GET /api/embedding-status/:workspaceId",
       "GET /api/graph/:workspaceId",
+      "GET /api/memory-entries/:workspaceId",
+      "GET /api/pointers/:workspaceId/:objectId",
       "GET /api/recall-stats/:workspaceId",
       "GET /api/status",
       // A1 (HITL daemon backbone) — Inspector loopback for the new

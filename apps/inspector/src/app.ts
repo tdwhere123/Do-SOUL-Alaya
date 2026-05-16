@@ -5,6 +5,7 @@ import { createInspectorAuthMiddleware } from "./auth.js";
 import { registerInspectorBenchSummaryRoutes } from "./routes/bench-summary.js";
 import { registerInspectorConfigRoutes } from "./routes/config.js";
 import { registerInspectorGraphRoutes } from "./routes/graph.js";
+import { registerInspectorMemoryEntryRoutes } from "./routes/memory-entries.js";
 import { registerInspectorProposalRoutes } from "./routes/proposals.js";
 import { registerInspectorRecallStatsRoutes } from "./routes/recall-stats.js";
 import { registerInspectorSoulSearchRoutes } from "./routes/soul-search.js";
@@ -25,6 +26,8 @@ export const INSPECTOR_ROUTE_SURFACE = Object.freeze([
   "GET /api/bench-summary",
   "GET /api/embedding-status/:workspaceId",
   "GET /api/graph/:workspaceId",
+  "GET /api/memory-entries/:workspaceId",
+  "GET /api/pointers/:workspaceId/:objectId",
   "GET /api/recall-stats/:workspaceId",
   "GET /api/status",
   // A1 (HITL daemon backbone) — Inspector loopback for the new
@@ -72,6 +75,7 @@ export function createInspectorApp(options: InspectorAppOptions): Hono {
   };
   registerInspectorConfigRoutes(app, proxyOptions);
   registerInspectorGraphRoutes(app, proxyOptions);
+  registerInspectorMemoryEntryRoutes(app, proxyOptions);
   registerInspectorStatusRoutes(app, proxyOptions);
   registerInspectorProposalRoutes(app, proxyOptions);
   registerInspectorRecallStatsRoutes(app, proxyOptions);

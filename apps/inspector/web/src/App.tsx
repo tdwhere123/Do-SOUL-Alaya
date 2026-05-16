@@ -4,11 +4,13 @@ import { getInspectorToken, setInspectorToken, setUnauthorizedHandler, setWorksp
 
 import ConfigPage from "./pages/Config";
 import GraphPage from "./pages/Graph";
+import MemoryBrowserPage from "./pages/MemoryBrowser";
 import OverviewPage from "./pages/Overview";
 import ProposalsPage from "./pages/Proposals";
 import RecallPage from "./pages/Recall";
 import StatusPage from "./pages/Status";
 
+import CommandPalette, { useCommandPaletteHotkey } from "./components/CommandPalette";
 import Layout from "./components/Layout";
 import SessionExpired from "./components/SessionExpired";
 import { ToastProvider } from "./components/Toast";
@@ -19,6 +21,8 @@ export function AppContent() {
   const [ready, setReady] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  useCommandPaletteHotkey(paletteOpen, () => setPaletteOpen((prev) => !prev));
 
   useEffect(() => {
     const token = searchParams.get("token");
@@ -76,17 +80,21 @@ export function AppContent() {
   }
 
   return (
-    <Routes>
-      <Route element={<Layout />}>
-        <Route path="/overview" element={<OverviewPage />} />
-        <Route path="/config" element={<ConfigPage />} />
-        <Route path="/graph" element={<GraphPage />} />
-        <Route path="/proposals" element={<ProposalsPage />} />
-        <Route path="/recall" element={<RecallPage />} />
-        <Route path="/status" element={<StatusPage />} />
-        <Route path="/" element={<Navigate to="/overview" replace />} />
-      </Route>
-    </Routes>
+    <>
+      <Routes>
+        <Route element={<Layout />}>
+          <Route path="/overview" element={<OverviewPage />} />
+          <Route path="/config" element={<ConfigPage />} />
+          <Route path="/graph" element={<GraphPage />} />
+          <Route path="/proposals" element={<ProposalsPage />} />
+          <Route path="/recall" element={<RecallPage />} />
+          <Route path="/memory-browser" element={<MemoryBrowserPage />} />
+          <Route path="/status" element={<StatusPage />} />
+          <Route path="/" element={<Navigate to="/overview" replace />} />
+        </Route>
+      </Routes>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+    </>
   );
 }
 
