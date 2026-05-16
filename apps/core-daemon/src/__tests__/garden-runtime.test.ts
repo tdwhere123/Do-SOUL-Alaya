@@ -384,7 +384,7 @@ function createGardenDataPorts(): GardenRuntimeInput["gardenDataPorts"] {
       findExpiringGreenStatuses: vi.fn(async () => []),
       renewGreenPassiveStable: vi.fn(async () => undefined),
       requestActiveVerification: vi.fn(async () => undefined),
-      revokeGreen: vi.fn(async () => undefined)
+      revokeGreen: vi.fn(() => ({ affected: 0 }))
     },
     bootstrappingPort: {
       assessColdStart: vi.fn(async () => ({

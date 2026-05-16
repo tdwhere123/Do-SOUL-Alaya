@@ -195,7 +195,29 @@ describe("garden background data ports", () => {
 
     await ports.greenMaintenancePort.renewGreenPassiveStable("green-expiring", "task-1");
     await ports.greenMaintenancePort.requestActiveVerification("green-expiring", "task-2");
-    await ports.greenMaintenancePort.revokeGreen("memory-revoke", "verification_fail", "task-3");
+    const revokeResult = ports.greenMaintenancePort.revokeGreen(
+      "memory-revoke",
+      "verification_fail",
+      "task-3",
+      "workspace-1"
+    );
+    expect(revokeResult).toEqual({ affected: 1 });
+
+    const noopResult = ports.greenMaintenancePort.revokeGreen(
+      "memory-revoke",
+      "verification_fail",
+      "task-3",
+      "workspace-1"
+    );
+    expect(noopResult).toEqual({ affected: 0 });
+
+    const crossWorkspaceNoop = ports.greenMaintenancePort.revokeGreen(
+      "memory-revoke",
+      "verification_fail",
+      "task-3",
+      "workspace-other"
+    );
+    expect(crossWorkspaceNoop).toEqual({ affected: 0 });
 
     const greenRow = database.connection
       .prepare(

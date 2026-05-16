@@ -24,7 +24,10 @@ const WEIGHTED_INBOUND_CASE_SQL = (() => {
 })();
 
 export interface MemoryGraphEdgeRepo {
-  create(edge: Readonly<MemoryGraphEdge>): Promise<Readonly<MemoryGraphEdge>>;
+  // invariant: synchronous so the row insert can be wrapped together with
+  // its `soul.graph.edge_created` audit event inside one SQLite transaction
+  // via EventPublisher.appendManyWithMutation.
+  create(edge: Readonly<MemoryGraphEdge>): Readonly<MemoryGraphEdge>;
   findById(edgeId: string): Promise<Readonly<MemoryGraphEdge> | null>;
   findByWorkspace(workspaceId: string): Promise<readonly Readonly<MemoryGraphEdge>[]>;
   findByMemoryId(
@@ -60,7 +63,7 @@ interface MemoryGraphEdgeRow {
 export class SqliteMemoryGraphEdgeRepo implements MemoryGraphEdgeRepo {
   public constructor(private readonly db: StorageDatabase) {}
 
-  public async create(edge: Readonly<MemoryGraphEdge>): Promise<Readonly<MemoryGraphEdge>> {
+  public create(edge: Readonly<MemoryGraphEdge>): Readonly<MemoryGraphEdge> {
     const parsed = parseEdge(edge);
 
     try {

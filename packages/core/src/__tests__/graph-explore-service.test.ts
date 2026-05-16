@@ -5,7 +5,10 @@ import {
   type MemoryGraphEdge,
   type MemoryGraphEdgeTypeValue
 } from "@do-soul/alaya-protocol";
-import { GraphExploreService } from "../graph-explore-service.js";
+import {
+  GraphExploreService,
+  type GraphExploreEventPublisherPort
+} from "../graph-explore-service.js";
 
 function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry {
   return {
@@ -28,24 +31,52 @@ function createEdge(overrides: Partial<MemoryGraphEdge> = {}): MemoryGraphEdge {
   };
 }
 
+interface PublisherHarness {
+  publisher: GraphExploreEventPublisherPort;
+  appendManyWithMutation: ReturnType<typeof vi.fn>;
+}
+
+function createPublisher(events: EventLogEntry[] = [], onAppend?: (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => void): PublisherHarness {
+  const appendManyWithMutation = vi.fn(
+    async <T,>(
+      eventInputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+      mutate: (entries: readonly EventLogEntry[]) => T
+    ): Promise<T> => {
+      const persisted: EventLogEntry[] = eventInputs.map((entry) => {
+        if (onAppend !== undefined) {
+          onAppend(entry);
+        }
+        const built = createEventLogEntry(entry);
+        events.push(built);
+        return built;
+      });
+      return mutate(persisted);
+    }
+  );
+  return {
+    publisher: { appendManyWithMutation } as unknown as GraphExploreEventPublisherPort,
+    appendManyWithMutation
+  };
+}
+
 describe("GraphExploreService", () => {
-  it("adds an edge, appends the audit event before persistence, and notifies runtime listeners", async () => {
+  it("adds an edge via atomic append+insert (audit row precedes row insert in the transactional callback)", async () => {
     let persisted = false;
     const edgeRepo = {
-      create: vi.fn(async (edge: Readonly<MemoryGraphEdge>) => {
+      create: vi.fn((edge: Readonly<MemoryGraphEdge>) => {
         persisted = true;
         return edge;
       }),
       findByMemoryId: vi.fn(async () => []),
       findBySourceAndTarget: vi.fn(async () => null),
       countInboundSupports: vi.fn(async () => 0),
-
       countInboundEdgesWeighted: vi.fn(async () => 0),
       delete: vi.fn(async () => undefined)
     };
-    const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
+    const events: EventLogEntry[] = [];
+    const { publisher, appendManyWithMutation } = createPublisher(events, () => {
+      // EventLog input is materialised before mutate fires the row insert.
       expect(persisted).toBe(false);
-      return createEventLogEntry(event);
     });
     const service = new GraphExploreService({
       memoryRepo: {
@@ -54,8 +85,9 @@ describe("GraphExploreService", () => {
         )
       },
       edgeRepo,
-      eventLogRepo: { append },
+      eventLogRepo: { append: vi.fn(async (event) => createEventLogEntry(event)) },
       runtimeNotifier: { notifyEntry: vi.fn(async () => undefined) },
+      eventPublisher: publisher,
       generateId: () => "generated",
       now: () => "2026-03-28T10:00:00.000Z"
     });
@@ -75,15 +107,15 @@ describe("GraphExploreService", () => {
       edge_type: "supports",
       workspace_id: "workspace-1"
     });
-    expect(append).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event_type: GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED,
-        entity_type: "memory_graph_edge",
-        entity_id: "edge_generated",
-        workspace_id: "workspace-1",
-        run_id: "run-1"
-      })
-    );
+    expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      event_type: GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED,
+      entity_type: "memory_graph_edge",
+      entity_id: "edge_generated",
+      workspace_id: "workspace-1",
+      run_id: "run-1"
+    });
     expect(edgeRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({
         edge_id: "edge_generated"
@@ -91,23 +123,24 @@ describe("GraphExploreService", () => {
     );
   });
 
-  it("returns existing edge when addEdge is called idempotently", async () => {
+  it("returns existing edge when addEdge is called idempotently (no event published)", async () => {
     const existing = createEdge();
+    const { publisher, appendManyWithMutation } = createPublisher();
     const service = new GraphExploreService({
       memoryRepo: {
         findById: vi.fn(async () => ({ object_id: "memory-a" }))
       },
       edgeRepo: {
-        create: vi.fn(async (edge: Readonly<MemoryGraphEdge>) => edge),
+        create: vi.fn((edge: Readonly<MemoryGraphEdge>) => edge),
         findByMemoryId: vi.fn(async () => []),
         findBySourceAndTarget: vi.fn(async () => existing),
         countInboundSupports: vi.fn(async () => 0),
-
         countInboundEdgesWeighted: vi.fn(async () => 0),
         delete: vi.fn(async () => undefined)
       },
       eventLogRepo: { append: vi.fn(async (event) => createEventLogEntry(event)) },
-      runtimeNotifier: { notifyEntry: vi.fn(async () => undefined) }
+      runtimeNotifier: { notifyEntry: vi.fn(async () => undefined) },
+      eventPublisher: publisher
     });
 
     await expect(
@@ -118,30 +151,32 @@ describe("GraphExploreService", () => {
         workspaceId: "workspace-1"
       })
     ).resolves.toEqual(existing);
+    expect(appendManyWithMutation).not.toHaveBeenCalled();
   });
 
   it("explores one-hop neighbors in both directions by default and emits an explore event", async () => {
     const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) =>
       createEventLogEntry(event)
     );
+    const { publisher } = createPublisher();
     const service = new GraphExploreService({
       memoryRepo: {
         findById: vi.fn(async () => ({ object_id: "memory-a" }))
       },
       edgeRepo: {
-        create: vi.fn(async (edge: Readonly<MemoryGraphEdge>) => edge),
+        create: vi.fn((edge: Readonly<MemoryGraphEdge>) => edge),
         findByMemoryId: vi.fn(async () => [
           createEdge({ edge_id: "edge-out", source_memory_id: "memory-a", target_memory_id: "memory-b" }),
           createEdge({ edge_id: "edge-in", source_memory_id: "memory-c", target_memory_id: "memory-a" })
         ]),
         findBySourceAndTarget: vi.fn(async () => null),
         countInboundSupports: vi.fn(async () => 1),
-
         countInboundEdgesWeighted: vi.fn(async () => 1),
         delete: vi.fn(async () => undefined)
       },
       eventLogRepo: { append },
       runtimeNotifier: { notifyEntry: vi.fn(async () => undefined) },
+      eventPublisher: publisher,
       now: () => "2026-03-28T10:00:00.000Z"
     });
 
@@ -181,21 +216,22 @@ describe("GraphExploreService", () => {
     const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) =>
       createEventLogEntry(event)
     );
+    const { publisher } = createPublisher();
     const service = new GraphExploreService({
       memoryRepo: {
         findById: vi.fn(async () => ({ object_id: "memory-a" }))
       },
       edgeRepo: {
-        create: vi.fn(async (edge: Readonly<MemoryGraphEdge>) => edge),
+        create: vi.fn((edge: Readonly<MemoryGraphEdge>) => edge),
         findByMemoryId: vi.fn(async () => []),
         findBySourceAndTarget: vi.fn(async () => null),
         countInboundSupports: vi.fn(async () => 0),
-
         countInboundEdgesWeighted: vi.fn(async () => 0),
         delete: vi.fn(async () => undefined)
       },
       eventLogRepo: { append },
-      runtimeNotifier: { notifyEntry: vi.fn(async () => undefined) }
+      runtimeNotifier: { notifyEntry: vi.fn(async () => undefined) },
+      eventPublisher: publisher
     });
 
     await expect(service.exploreOneHop("memory-a", "workspace-1")).resolves.toEqual([]);
@@ -204,21 +240,22 @@ describe("GraphExploreService", () => {
 
   it("translates invalid edge_types into a validation error", async () => {
     const edgeRepo = {
-      create: vi.fn(async (edge: Readonly<MemoryGraphEdge>) => edge),
+      create: vi.fn((edge: Readonly<MemoryGraphEdge>) => edge),
       findByMemoryId: vi.fn(async () => []),
       findBySourceAndTarget: vi.fn(async () => null),
       countInboundSupports: vi.fn(async () => 0),
-
       countInboundEdgesWeighted: vi.fn(async () => 0),
       delete: vi.fn(async () => undefined)
     };
+    const { publisher } = createPublisher();
     const service = new GraphExploreService({
       memoryRepo: {
         findById: vi.fn(async () => ({ object_id: "memory-a" }))
       },
       edgeRepo,
       eventLogRepo: { append: vi.fn(async (event) => createEventLogEntry(event)) },
-      runtimeNotifier: { notifyEntry: vi.fn(async () => undefined) }
+      runtimeNotifier: { notifyEntry: vi.fn(async () => undefined) },
+      eventPublisher: publisher
     });
 
     await expect(

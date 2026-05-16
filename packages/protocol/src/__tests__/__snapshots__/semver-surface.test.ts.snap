@@ -102,7 +102,7 @@ evt:garden.ts#SoulGardenTaskClaimReclaimedPayloadSchema(claimed_at,occurred_at,p
 evt:garden.ts#SoulGardenTaskCompletedPayloadSchema(candidate_signals_count,objects_affected,occurred_at,role,success,task_id,task_kind,tier,workspace_id)#b491dda
 evt:garden.ts#SoulGardenTaskDispatchedPayloadSchema(occurred_at,role,run_id,task_id,task_kind,tier,workspace_id)#b01d01a
 evt:garden.ts#SoulGardenTierViolationRejectedPayloadSchema(occurred_at,required_tier,role_tier,task_id,task_kind,workspace_id)#740c3f1
-evt:garden.ts#SoulHealthJournalRecordedPayloadSchema(change_summary,entry_id,event_kind,occurred_at,workspace_id)#1a2c63a
+evt:garden.ts#SoulHealthJournalRecordedPayloadSchema(change_summary,entry_id,event_kind,occurred_at,workspace_id)#8a72d54
 evt:graph-auditor.ts#SoulAuditorPointerHealedPayloadSchema(cleared_ref,occurred_at,ref_kind,source_object_id,source_object_kind,task_id,workspace_id)#6f971b5
 evt:graph-auditor.ts#SoulGraphEdgeCreatedPayloadSchema(edge_id,edge_type,occurred_at,source_memory_id,target_memory_id,workspace_id)#fcd8411
 evt:graph-auditor.ts#SoulGraphExploreCompletedPayloadSchema()#5a6fcd8

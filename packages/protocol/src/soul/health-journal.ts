@@ -12,7 +12,8 @@ const healthEventKindValues = [
   "green_piercing_distribution",
   "provider_call",
   "embedding_supplement",
-  "recall_tuning"
+  "recall_tuning",
+  "green_revoke_noop"
 ] as const;
 
 export const HealthEventKind = {
@@ -26,7 +27,12 @@ export const HealthEventKind = {
   GREEN_PIERCING_DISTRIBUTION: "green_piercing_distribution",
   PROVIDER_CALL: "provider_call",
   EMBEDDING_SUPPLEMENT: "embedding_supplement",
-  RECALL_TUNING: "recall_tuning"
+  RECALL_TUNING: "recall_tuning",
+  // invariant: emitted when GreenService.revokeStatement matches zero rows
+  // under the workspace+state predicate. The associated SOUL_GREEN_REVOKED
+  // EventLog row is rolled back inside the same SQLite transaction so audit
+  // count tracks real revokes only.
+  GREEN_REVOKE_NOOP: "green_revoke_noop"
 } as const;
 
 export const HealthEventKindSchema = z.enum(healthEventKindValues);

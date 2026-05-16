@@ -13,6 +13,7 @@ import {
   type MemoryGraphEdgeTypeValue
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
+import type { EventPublisher, EventPublisherInput } from "./event-publisher.js";
 import { parseObjectId } from "./shared/validators.js";
 
 export interface GraphExploreServiceMemoryRepoPort {
@@ -20,7 +21,10 @@ export interface GraphExploreServiceMemoryRepoPort {
 }
 
 export interface GraphExploreServiceEdgeRepoPort {
-  create(edge: Readonly<MemoryGraphEdge>): Promise<Readonly<MemoryGraphEdge>>;
+  // invariant: synchronous so addEdge can wrap row insert + audit event in
+  // one SQLite transaction (`packages/protocol/src/soul/memory-graph.ts`
+  // §43-54 atomicity gap closure).
+  create(edge: Readonly<MemoryGraphEdge>): Readonly<MemoryGraphEdge>;
   findByMemoryId(
     memoryId: string,
     workspaceId: string,
@@ -47,11 +51,20 @@ export interface GraphExploreServiceRuntimeNotifierPort {
   notifyEntry(entry: EventLogEntry): void | Promise<void>;
 }
 
+export type GraphExploreEventPublisherPort = Pick<
+  EventPublisher,
+  "appendManyWithMutation"
+>;
+
 export interface GraphExploreServiceDependencies {
   readonly memoryRepo: GraphExploreServiceMemoryRepoPort;
   readonly edgeRepo: GraphExploreServiceEdgeRepoPort;
   readonly eventLogRepo: GraphExploreServiceEventLogRepoPort;
   readonly runtimeNotifier: GraphExploreServiceRuntimeNotifierPort;
+  // invariant: addEdge wraps row insert + audit event in one SQLite
+  // transaction via this port. Without it, a crash between EventLog append
+  // and edge row insert leaves an orphan audit row or a silent edge.
+  readonly eventPublisher: GraphExploreEventPublisherPort;
   readonly generateId?: () => string;
   readonly now?: () => string;
 }
@@ -113,7 +126,7 @@ export class GraphExploreService {
       created_at: createdAt
     });
 
-    const event = await this.dependencies.eventLogRepo.append({
+    const eventInput: EventPublisherInput = {
       event_type: GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED,
       entity_type: "memory_graph_edge",
       entity_id: edge.edge_id,
@@ -128,11 +141,12 @@ export class GraphExploreService {
         workspace_id: workspaceId,
         occurred_at: createdAt
       })
-    });
+    };
 
-    const created = await this.dependencies.edgeRepo.create(edge);
-    await this.dependencies.runtimeNotifier.notifyEntry(event);
-    return created;
+    return await this.dependencies.eventPublisher.appendManyWithMutation(
+      [eventInput],
+      (_entries: readonly EventLogEntry[]) => this.dependencies.edgeRepo.create(edge)
+    );
   }
 
   public async exploreOneHop(

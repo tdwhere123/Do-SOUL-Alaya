@@ -71,10 +71,27 @@ describe("PathRelation end-to-end (propose K=3 -> recall path_expansion)", () =>
       created_at: "2026-05-13T00:00:00.000Z"
     });
 
+    const eventPublisher = {
+      appendManyWithMutation: vi.fn(
+        async <T,>(
+          eventInputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+          mutate: (entries: readonly EventLogEntry[]) => T
+        ): Promise<T> => {
+          const persisted: EventLogEntry[] = eventInputs.map((entry, idx) => ({
+            event_id: `evt_path_relation_${idx}`,
+            created_at: "2026-05-16T00:00:00.000Z",
+            revision: 0,
+            ...entry
+          })) as EventLogEntry[];
+          return mutate(persisted);
+        }
+      )
+    };
     const proposalService = new PathRelationProposalService({
       repo: {
         create: (relation) => pathRelationRepo.create(relation)
       },
+      eventPublisher: eventPublisher as never,
       threshold: 3,
       generateId: () => "11111111-1111-4111-8111-aaaaaaaaaaaa",
       now: () => "2026-05-16T00:00:00.000Z"

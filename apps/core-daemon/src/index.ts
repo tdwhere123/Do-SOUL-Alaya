@@ -349,7 +349,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     memoryRepo: memoryEntryRepo,
     edgeRepo: memoryGraphEdgeRepo,
     eventLogRepo,
-    runtimeNotifier
+    runtimeNotifier,
+    eventPublisher
   });
   const topologyService = new TopologyService({
     pathRelationRepo,
@@ -586,12 +587,13 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   })();
   const pathRelationProposalService = new PathRelationProposalService({
     repo: {
-      create: async (relation) => pathRelationRepo.create(relation),
+      create: (relation) => pathRelationRepo.create(relation),
       findByAnchorMemoryId: async (memoryId, workspaceId) =>
         await pathRelationRepo.findByAnchors(workspaceId, [
           { kind: "object", object_id: memoryId }
         ])
     },
+    eventPublisher,
     ...(pathRelationCounterTtlMs === undefined ? {} : { counterTtlMs: pathRelationCounterTtlMs }),
     warn: warnLogger.warn
   });

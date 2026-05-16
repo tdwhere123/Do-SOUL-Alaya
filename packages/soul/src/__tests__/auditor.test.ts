@@ -41,13 +41,15 @@ describe("Auditor", () => {
       1,
       "memory-1",
       "verification_fail",
-      "task-1"
+      "task-1",
+      "workspace-1"
     );
     expect(greenMaintenancePort.revokeGreen).toHaveBeenNthCalledWith(
       2,
       "memory-2",
       "verification_fail",
-      "task-1"
+      "task-1",
+      "workspace-1"
     );
     expect(healthJournal.record).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -62,7 +64,7 @@ describe("Auditor", () => {
     expect(result).toMatchObject({
       success: true,
       objects_affected: ["memory-1", "memory-2"],
-      audit_entries: ["evidence_staleness_check: revoked green for 2 entries"]
+      audit_entries: ["evidence_staleness_check: revoked green for 2 entries (noop: 0)"]
     });
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
@@ -111,7 +113,8 @@ describe("Auditor", () => {
     expect(greenMaintenancePort.revokeGreen).toHaveBeenCalledWith(
       "memory-1",
       "verification_fail",
-      "task-1"
+      "task-1",
+      "workspace-1"
     );
   });
 
@@ -151,7 +154,9 @@ describe("Auditor", () => {
     expect(greenMaintenancePort.revokeGreen).not.toHaveBeenCalled();
     expect(healthJournal.record).not.toHaveBeenCalled();
     expect(result.objects_affected).toEqual([]);
-    expect(result.audit_entries).toEqual(["evidence_staleness_check: revoked green for 0 entries"]);
+    expect(result.audit_entries).toEqual([
+      "evidence_staleness_check: revoked green for 0 entries (noop: 0)"
+    ]);
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
@@ -513,6 +518,7 @@ function createAuditor(options: {
   readonly pendingPatternKeys?: readonly string[];
   readonly findBrokenPointers?: (workspaceId: string) => Promise<readonly BrokenPointerRecord[]>;
   readonly eventLogRepo?: { readonly appendManyWithMutation: ReturnType<typeof vi.fn> };
+  readonly revokeAffected?: number;
 } = {}) {
   const evidenceCheckPort = {
     findMemoriesWithStaleEvidence: vi.fn(async () => options.staleEntries ?? [])
@@ -527,7 +533,7 @@ function createAuditor(options: {
     findExpiringGreenStatuses: vi.fn(async () => options.expiringStatuses ?? []),
     renewGreenPassiveStable: vi.fn(async () => undefined),
     requestActiveVerification: vi.fn(async () => undefined),
-    revokeGreen: vi.fn(async () => undefined)
+    revokeGreen: vi.fn(() => ({ affected: options.revokeAffected ?? 1 }))
   };
   const bootstrappingPort = {
     assessColdStart: vi.fn(

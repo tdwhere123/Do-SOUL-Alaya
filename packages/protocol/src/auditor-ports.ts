@@ -140,7 +140,7 @@ export interface AuditorOrphanDetectionPort {
 
 export interface AuditorGreenMaintenancePort {
   findExpiringGreenStatuses(workspaceId: string, lookaheadMs: number): Promise<readonly ExpiringGreenStatus[]>;
-  // gate-6-delta I4: Green-state mutations are now invoked from inside
+  // invariant: Green-state mutations are invoked from inside
   // EventPublisher.appendManyWithMutation's sync mutate callback so the
   // SQL write and the SOUL_GREEN_REVOKED / SOUL_GREEN_RENEWED /
   // SOUL_GREEN_GRACE_REQUESTED EventLog row commit in the same SQLite
@@ -148,7 +148,16 @@ export interface AuditorGreenMaintenancePort {
   // port surface is sync too.
   renewGreenPassiveStable(greenStatusId: string, taskId: string): void;
   requestActiveVerification(greenStatusId: string, taskId: string): void;
-  revokeGreen(memoryEntryId: string, reason: "verification_fail", taskId: string): void;
+  // invariant: workspaceId is required so the UPDATE cannot match rows in
+  // a foreign workspace. Returns affected-row count; callers MUST roll back
+  // the corresponding SOUL_GREEN_REVOKED EventLog row when affected === 0
+  // (record a green_revoke_noop health-journal entry instead).
+  revokeGreen(
+    memoryEntryId: string,
+    reason: "verification_fail",
+    taskId: string,
+    workspaceId: string
+  ): { readonly affected: number };
 }
 
 export interface AuditorBootstrappingPort {

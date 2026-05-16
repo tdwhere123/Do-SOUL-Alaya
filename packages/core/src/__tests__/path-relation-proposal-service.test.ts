@@ -1,17 +1,43 @@
 import { describe, expect, it, vi } from "vitest";
-import { PathRelationSchema } from "@do-soul/alaya-protocol";
+import { PathRelationSchema, type EventLogEntry } from "@do-soul/alaya-protocol";
 import {
   PathRelationProposalService,
-  PATH_RELATION_PROPOSE_THRESHOLD
+  PATH_RELATION_PROPOSE_THRESHOLD,
+  type PathRelationProposalEventPublisherPort
 } from "../path-relation-proposal-service.js";
+
+function createEventPublisher(): {
+  publisher: PathRelationProposalEventPublisherPort;
+  appendManyWithMutation: ReturnType<typeof vi.fn>;
+} {
+  const appendManyWithMutation = vi.fn(
+    async <T,>(
+      eventInputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+      mutate: (entries: readonly EventLogEntry[]) => T
+    ): Promise<T> => {
+      const persisted: EventLogEntry[] = eventInputs.map((entry, idx) => ({
+        event_id: `evt_${idx}`,
+        created_at: "2026-05-16T00:00:00.000Z",
+        revision: 0,
+        ...entry
+      })) as EventLogEntry[];
+      return mutate(persisted);
+    }
+  );
+  return {
+    publisher: { appendManyWithMutation } as unknown as PathRelationProposalEventPublisherPort,
+    appendManyWithMutation
+  };
+}
 
 describe("PathRelationProposalService", () => {
   it("does not propose before the threshold is reached", async () => {
     const repo = {
-      create: vi.fn(async (relation: any) => relation),
+      create: vi.fn((relation: any) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
-    const service = new PathRelationProposalService({ repo });
+    const { publisher } = createEventPublisher();
+    const service = new PathRelationProposalService({ repo, eventPublisher: publisher });
 
     for (let i = 1; i < PATH_RELATION_PROPOSE_THRESHOLD; i += 1) {
       await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
@@ -22,16 +48,18 @@ describe("PathRelationProposalService", () => {
 
   it("proposes a PathRelation when the same pair co-occurs K times", async () => {
     const repo = {
-      create: vi.fn(async (relation: any) => relation),
+      create: vi.fn((relation: any) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
-    const service = new PathRelationProposalService({ repo });
+    const { publisher, appendManyWithMutation } = createEventPublisher();
+    const service = new PathRelationProposalService({ repo, eventPublisher: publisher });
 
     for (let i = 0; i < PATH_RELATION_PROPOSE_THRESHOLD; i += 1) {
       await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
     }
 
     expect(repo.create).toHaveBeenCalledTimes(1);
+    expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
     const written = repo.create.mock.calls[0][0];
     expect(written.workspace_id).toBe("workspace-1");
     const anchorIds = [
@@ -39,19 +67,23 @@ describe("PathRelationProposalService", () => {
       written.anchors.target_anchor.object_id
     ].sort();
     expect(anchorIds).toEqual(["mem-A", "mem-B"]);
-    // invariant: written object must round-trip through the strict schema.
-    // The earlier version of this service mis-built fields (object_id /
-    // object_kind / schema_version / lifecycle_state) that strict-mode
-    // PathRelationSchema rejected, so the propose path silently warned.
     expect(() => PathRelationSchema.parse(written)).not.toThrow();
+
+    const [eventInputs] = appendManyWithMutation.mock.calls[0]!;
+    expect(eventInputs).toHaveLength(1);
+    expect(eventInputs[0].event_type).toBe("path.relation_created");
+    expect(eventInputs[0].entity_type).toBe("path_relation");
+    expect(eventInputs[0].entity_id).toBe(written.path_id);
+    expect(eventInputs[0].workspace_id).toBe("workspace-1");
   });
 
   it("does not double-propose the same pair", async () => {
     const repo = {
-      create: vi.fn(async (relation: any) => relation),
+      create: vi.fn((relation: any) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
-    const service = new PathRelationProposalService({ repo });
+    const { publisher } = createEventPublisher();
+    const service = new PathRelationProposalService({ repo, eventPublisher: publisher });
 
     for (let i = 0; i < PATH_RELATION_PROPOSE_THRESHOLD + 5; i += 1) {
       await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
@@ -62,10 +94,11 @@ describe("PathRelationProposalService", () => {
 
   it("counts pairs symmetrically (mem-A,mem-B == mem-B,mem-A)", async () => {
     const repo = {
-      create: vi.fn(async (relation: any) => relation),
+      create: vi.fn((relation: any) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
-    const service = new PathRelationProposalService({ repo });
+    const { publisher } = createEventPublisher();
+    const service = new PathRelationProposalService({ repo, eventPublisher: publisher });
 
     await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
     await service.onCoUsage(["mem-B", "mem-A"], "workspace-1");
@@ -76,10 +109,11 @@ describe("PathRelationProposalService", () => {
 
   it("ignores single-used pairs (no propose when len < 2)", async () => {
     const repo = {
-      create: vi.fn(async (relation: any) => relation),
+      create: vi.fn((relation: any) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
-    const service = new PathRelationProposalService({ repo });
+    const { publisher } = createEventPublisher();
+    const service = new PathRelationProposalService({ repo, eventPublisher: publisher });
 
     for (let i = 0; i < PATH_RELATION_PROPOSE_THRESHOLD; i += 1) {
       await service.onCoUsage(["mem-A"], "workspace-1");
@@ -96,10 +130,15 @@ describe("PathRelationProposalService", () => {
       }
     };
     const repo = {
-      create: vi.fn(async (relation: any) => relation),
+      create: vi.fn((relation: any) => relation),
       findByAnchorMemoryId: vi.fn(async () => [existing])
     };
-    const service = new PathRelationProposalService({ repo, threshold: 1 });
+    const { publisher } = createEventPublisher();
+    const service = new PathRelationProposalService({
+      repo,
+      eventPublisher: publisher,
+      threshold: 1
+    });
 
     await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
 
@@ -108,12 +147,14 @@ describe("PathRelationProposalService", () => {
 
   it("evictExpired shrinks the in-process counter for stale sub-threshold pairs", async () => {
     const repo = {
-      create: vi.fn(async (relation: any) => relation),
+      create: vi.fn((relation: any) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
+    const { publisher } = createEventPublisher();
     let nowMs = 1_000_000;
     const service = new PathRelationProposalService({
       repo,
+      eventPublisher: publisher,
       threshold: 5,
       nowMs: () => nowMs,
       counterTtlMs: 1_000
@@ -137,12 +178,14 @@ describe("PathRelationProposalService", () => {
 
   it("evictExpired uses firstSeenAtMs (does not reset on each onCoUsage re-increment)", async () => {
     const repo = {
-      create: vi.fn(async (relation: any) => relation),
+      create: vi.fn((relation: any) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
+    const { publisher } = createEventPublisher();
     let nowMs = 1_000_000;
     const service = new PathRelationProposalService({
       repo,
+      eventPublisher: publisher,
       threshold: 10,
       nowMs: () => nowMs,
       counterTtlMs: 5_000
@@ -163,12 +206,14 @@ describe("PathRelationProposalService", () => {
 
   it("evictExpired keeps fresh sub-threshold pairs when ttl has not elapsed", async () => {
     const repo = {
-      create: vi.fn(async (relation: any) => relation),
+      create: vi.fn((relation: any) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
+    const { publisher } = createEventPublisher();
     let nowMs = 2_000_000;
     const service = new PathRelationProposalService({
       repo,
+      eventPublisher: publisher,
       threshold: 5,
       nowMs: () => nowMs,
       counterTtlMs: 10_000

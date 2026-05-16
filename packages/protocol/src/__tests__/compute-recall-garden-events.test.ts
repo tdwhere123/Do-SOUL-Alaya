@@ -89,8 +89,11 @@ describe("Phase C extension protocol schemas", () => {
       "green_piercing_distribution",
       "provider_call",
       "embedding_supplement",
-      "recall_tuning"
+      "recall_tuning",
+      "green_revoke_noop"
     ]);
+    expect(HealthEventKindSchema.parse("green_revoke_noop")).toBe("green_revoke_noop");
+    expect(HealthEventKind.GREEN_REVOKE_NOOP).toBe("green_revoke_noop");
     expect(HealthEventKindSchema.parse("provider_call")).toBe("provider_call");
     expect(HealthEventKind.PROVIDER_CALL).toBe("provider_call");
     expect(HealthEventKindSchema.parse("embedding_supplement")).toBe("embedding_supplement");

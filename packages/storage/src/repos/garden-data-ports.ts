@@ -140,12 +140,22 @@ export interface GardenAuditorPointerHealthPort {
 
 export interface GardenAuditorGreenMaintenancePort {
   findExpiringGreenStatuses(workspaceId: string, lookaheadMs: number): Promise<readonly ExpiringGreenStatus[]>;
-  // gate-6-delta I4: sync to allow Auditor to wrap each call inside
-  // an EventPublisher.appendManyWithMutation transaction along with
-  // the corresponding SOUL_GREEN_* EventLog row.
+  // invariant: sync to allow Auditor to wrap each call inside an
+  // EventPublisher.appendManyWithMutation transaction along with the
+  // corresponding SOUL_GREEN_* EventLog row.
   renewGreenPassiveStable(greenStatusId: string, taskId: string): void;
   requestActiveVerification(greenStatusId: string, taskId: string): void;
-  revokeGreen(memoryEntryId: string, reason: "verification_fail", taskId: string): void;
+  // invariant: workspaceId is required and the UPDATE filters revokable
+  // states only, so revokes against missing or already-revoked rows return
+  // affected = 0. The Auditor MUST treat affected = 0 as a no-op (no
+  // SOUL_GREEN_REVOKED EventLog row, log a green_revoke_noop health entry
+  // instead).
+  revokeGreen(
+    memoryEntryId: string,
+    reason: "verification_fail",
+    taskId: string,
+    workspaceId: string
+  ): { readonly affected: number };
 }
 
 export interface GardenAuditorBootstrappingPort {
@@ -463,6 +473,8 @@ function createGreenMaintenancePort(context: BaseFactoryContext): GardenAuditorG
         updated_at = ?,
         last_transition_at = ?
     WHERE target_object_id = ?
+      AND workspace_id = ?
+      AND green_state IN ('eligible', 'grace')
   `);
 
   return {
@@ -479,9 +491,10 @@ function createGreenMaintenancePort(context: BaseFactoryContext): GardenAuditorG
       const graceUntil = addMilliseconds(nowIso, ACTIVE_VERIFICATION_GRACE_MS);
       requestActiveVerificationStatement.run(nowIso, nowIso, graceUntil, nowIso, nowIso, greenStatusId);
     },
-    revokeGreen: (memoryEntryId, reason) => {
+    revokeGreen: (memoryEntryId, reason, _taskId, workspaceId) => {
       const nowIso = context.now();
-      revokeStatement.run(reason, nowIso, nowIso, memoryEntryId);
+      const result = revokeStatement.run(reason, nowIso, nowIso, memoryEntryId, workspaceId);
+      return { affected: result.changes };
     }
   };
 }

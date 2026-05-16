@@ -48,14 +48,30 @@ export const AUDITOR_CONSTANTS = {
   ORPHAN_RADAR_TTL_MS: 48 * 3_600_000,
   RECOVERY_WINDOW_MS: 3_600_000,
   BATCH_SIZE: 20,
-  // gate-6-delta I4: must mirror the storage-side
-  // ACTIVE_VERIFICATION_GRACE_MS so the SOUL_GREEN_GRACE_REQUESTED
-  // audit row records the same valid_until that the SQL UPDATE sets.
+  // invariant: must mirror the storage-side ACTIVE_VERIFICATION_GRACE_MS so
+  // the SOUL_GREEN_GRACE_REQUESTED audit row records the same valid_until
+  // that the SQL UPDATE sets.
   ACTIVE_VERIFICATION_GRACE_MS: 7 * 86_400_000
 } as const;
 
 function addMillisecondsIso(isoTimestamp: string, deltaMs: number): string {
   return new Date(new Date(isoTimestamp).getTime() + deltaMs).toISOString();
+}
+
+// Thrown from inside an appendManyWithMutation mutate callback when
+// revokeGreen affected zero rows. The throw rolls back the SOUL_GREEN_REVOKED
+// EventLog row (so the audit count tracks real revokes), and the catching
+// caller records a green_revoke_noop health-journal entry instead.
+export class GreenRevokeNoopError extends Error {
+  public readonly memoryEntryId: string;
+  public readonly workspaceId: string;
+
+  public constructor(memoryEntryId: string, workspaceId: string) {
+    super(`revokeGreen affected zero rows for memory ${memoryEntryId} in workspace ${workspaceId}`);
+    this.name = "GreenRevokeNoopError";
+    this.memoryEntryId = memoryEntryId;
+    this.workspaceId = workspaceId;
+  }
 }
 
 export interface AuditorDependencies {
@@ -117,11 +133,16 @@ export class Auditor {
   private async executeEvidenceCheck(task: GardenTaskDescriptor, completedAt: string): Promise<GardenTaskResult> {
     const staleEntries = await this.dependencies.evidenceCheckPort.findMemoriesWithStaleEvidence(task.workspace_id);
     const batch = staleEntries.slice(0, AUDITOR_CONSTANTS.BATCH_SIZE);
+    const revokedMemoryIds: string[] = [];
+    const noopMemoryIds: string[] = [];
 
     for (const entry of batch) {
-      // gate-6-delta I4: revokeGreen used to write green_statuses
-      // directly with no audit row. Now it commits inside a single
-      // SQLite tx with the SOUL_GREEN_REVOKED event log row.
+      // invariant: revokeGreen is invoked from inside the
+      // appendManyWithMutation tx so the SQL write and the
+      // SOUL_GREEN_REVOKED EventLog row commit atomically. When the
+      // workspace+revokable-state predicate matches zero rows we throw
+      // GreenRevokeNoopError to roll back the EventLog row with the tx;
+      // the catch records a green_revoke_noop health entry instead.
       const revokedAt = this.now();
       const payload = SoulGreenRevokedPayloadSchema.parse({
         target_object_id: entry.memory_entry_id,
@@ -130,41 +151,67 @@ export class Auditor {
         task_id: task.task_id,
         occurred_at: revokedAt
       });
-      await this.publishEventLogMutation(
-        {
-          event_type: GreenGovernanceEventType.SOUL_GREEN_REVOKED,
-          entity_type: "memory_entry",
-          entity_id: entry.memory_entry_id,
-          workspace_id: task.workspace_id,
-          run_id: task.run_id,
-          caused_by: this.role,
-          payload_json: payload
-        },
-        () => {
-          this.dependencies.greenMaintenancePort.revokeGreen(
-            entry.memory_entry_id,
-            "verification_fail",
-            task.task_id
-          );
+      try {
+        await this.publishEventLogMutation(
+          {
+            event_type: GreenGovernanceEventType.SOUL_GREEN_REVOKED,
+            entity_type: "memory_entry",
+            entity_id: entry.memory_entry_id,
+            workspace_id: task.workspace_id,
+            run_id: task.run_id,
+            caused_by: this.role,
+            payload_json: payload
+          },
+          () => {
+            const result = this.dependencies.greenMaintenancePort.revokeGreen(
+              entry.memory_entry_id,
+              "verification_fail",
+              task.task_id,
+              task.workspace_id
+            );
+            if (result.affected === 0) {
+              throw new GreenRevokeNoopError(entry.memory_entry_id, task.workspace_id);
+            }
+          }
+        );
+        revokedMemoryIds.push(entry.memory_entry_id);
+      } catch (err) {
+        if (err instanceof GreenRevokeNoopError) {
+          noopMemoryIds.push(entry.memory_entry_id);
+          continue;
         }
-      );
+        throw err;
+      }
     }
 
-    if (batch.length > 0) {
+    if (revokedMemoryIds.length > 0) {
       await this.healthJournal?.record({
         event_kind: HealthEventKind.EVIDENCE_FAILURE,
         workspace_id: task.workspace_id,
         run_id: task.run_id,
-        summary: `Evidence staleness check: ${batch.length} memories with stale refs had Green revoked`,
+        summary: `Evidence staleness check: ${revokedMemoryIds.length} memories with stale refs had Green revoked`,
         detail_json: {
-          affected_memory_ids: batch.map((entry) => entry.memory_entry_id),
+          affected_memory_ids: revokedMemoryIds,
           total_stale_refs: batch.reduce((sum, entry) => sum + entry.stale_evidence_refs.length, 0)
         }
       });
     }
 
-    const result = this.createSuccessResult(task, completedAt, batch.map((entry) => entry.memory_entry_id), [
-      `evidence_staleness_check: revoked green for ${batch.length} entries`
+    if (noopMemoryIds.length > 0) {
+      await this.healthJournal?.record({
+        event_kind: HealthEventKind.GREEN_REVOKE_NOOP,
+        workspace_id: task.workspace_id,
+        run_id: task.run_id,
+        summary: `Evidence staleness check: ${noopMemoryIds.length} revoke calls hit zero rows (already revoked / cross-workspace target)`,
+        detail_json: {
+          affected_memory_ids: noopMemoryIds,
+          task_id: task.task_id
+        }
+      });
+    }
+
+    const result = this.createSuccessResult(task, completedAt, revokedMemoryIds, [
+      `evidence_staleness_check: revoked green for ${revokedMemoryIds.length} entries (noop: ${noopMemoryIds.length})`
     ]);
     await this.dependencies.scheduler.reportCompletion(result);
     return result;
@@ -437,8 +484,8 @@ export class Auditor {
 
     for (const status of batch) {
       if (isPassiveStableDimension(status.dimension)) {
-        // gate-6-delta I4: SOUL_GREEN_RENEWED audit row is committed
-        // alongside the renew SQL in one SQLite transaction.
+        // invariant: SOUL_GREEN_RENEWED audit row is committed alongside
+        // the renew SQL in one SQLite transaction.
         const renewedAt = this.now();
         const renewedPayload = SoulGreenRenewedPayloadSchema.parse({
           object_id: status.green_status_id,
@@ -475,8 +522,8 @@ export class Auditor {
       }
 
       if (requiresActiveVerification(status.dimension)) {
-        // gate-6-delta I4: SOUL_GREEN_GRACE_REQUESTED audit row is
-        // committed alongside the active-verification grace request.
+        // invariant: SOUL_GREEN_GRACE_REQUESTED audit row is committed
+        // alongside the active-verification grace request.
         const requestedAt = this.now();
         const graceUntil = addMillisecondsIso(requestedAt, AUDITOR_CONSTANTS.ACTIVE_VERIFICATION_GRACE_MS);
         const requestedPayload = SoulGreenGraceRequestedPayloadSchema.parse({
