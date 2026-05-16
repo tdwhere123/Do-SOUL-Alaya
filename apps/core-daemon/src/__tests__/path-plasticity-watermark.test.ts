@@ -25,10 +25,9 @@ import {
 } from "../path-plasticity-runtime.js";
 
 /**
- * Pins D2 MERGED-B2 (codex-B2) closure: per-workspace high-water mark
- * for the path-plasticity Librarian task resolves before enqueue and advances
- * only after successful processing. The storage-backed tests below pin the
- * Gate-5F durable restart behavior.
+ * Per-workspace high-water mark for the path-plasticity Librarian task
+ * resolves before enqueue and advances only after successful processing.
+ * The storage-backed tests below pin the durable restart behavior.
  */
 describe("path-plasticity watermark registry", () => {
   it("first enqueue on a workspace returns nowIso - 24h without advancing", () => {

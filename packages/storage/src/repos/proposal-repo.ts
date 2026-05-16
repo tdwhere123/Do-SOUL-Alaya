@@ -30,7 +30,7 @@ export interface ProposalCreateInput {
   readonly proposal: Proposal;
   readonly workspace_id: string;
   readonly run_id: string | null;
-  // D2 MERGED-I19 (architect-I2): `target_object_kind` is now REQUIRED.
+  // `target_object_kind` is required at the repository boundary.
   // Migration `058-reviewer-identity.sql` left
   // `target_object_kind TEXT NOT NULL DEFAULT 'memory_entry'` as a
   // one-time backfill for pre-A1 rows; the default would silently
@@ -116,13 +116,11 @@ export interface AcceptedMemoryUpdateInput {
   readonly proposed_changes: MemoryEntryMutableFields;
   readonly updated_at: string;
   readonly caused_by: string;
-  // gate-6-delta I1: optional baseline snapshot of memory_entry.updated_at
-  // captured by the workflow's pre-tx read. When provided, the
-  // accept-and-apply transaction asserts the live memory is still at
-  // this baseline before mutating; on mismatch it throws a CONFLICT
-  // that the workflow normalises to VALIDATION ("stale snapshot,
-  // re-review required"). Closes the cross-proposal lost-update window
-  // when two distinct proposals target the same memory entry.
+  // Optional baseline snapshot of memory_entry.updated_at captured by
+  // the workflow's pre-transaction read. When provided, the
+  // accept-and-apply transaction asserts that the live memory is still
+  // at this baseline before mutating; on mismatch it throws CONFLICT so
+  // the workflow can surface "stale snapshot, re-review required".
   readonly expected_baseline_updated_at?: string | null;
 }
 
@@ -705,11 +703,10 @@ export class SqliteProposalRepo implements ProposalRepo {
     `;
     const params: (string | number)[] = [referenceTime, parsedWorkspaceId];
     if (since !== null) {
-      // D2 MERGED-I2 (reviewer-I3): exclusive `>` cursor semantics.
-      // HITL pollers pass the timestamp of their most-recent record as
+      // Polling uses exclusive `>` cursor semantics. HITL pollers pass
+      // the timestamp of their most-recent record as
       // `since`; an inclusive `>=` returns the boundary record on every
-      // subsequent poll. Mirrors A3's deliberate exclusive `>` choice
-      // for usage records (see path-plasticity-runtime.ts docstring).
+      // subsequent poll.
       sql += " AND p.created_at > ?";
       params.push(since);
     }
@@ -1011,14 +1008,11 @@ export class SqliteProposalRepo implements ProposalRepo {
           );
         }
 
-        // gate-6-delta I1: cross-proposal lost-update guard. The
-        // workflow captured the memory's updated_at outside this
-        // transaction (in prepareAcceptedProposalApply); if the live
-        // row has moved on (because a sibling proposal accept already
-        // committed against the same memory_entry), abort with
-        // CONFLICT so the reviewer can re-review against the new
-        // baseline. normalizeResolutionError in the workflow maps
-        // CONFLICT to a VALIDATION envelope.
+        // Cross-proposal lost-update guard. The workflow captured the
+        // memory's updated_at outside this transaction; if the live row
+        // has moved on because a sibling proposal already committed
+        // against the same memory entry, abort with CONFLICT so the
+        // reviewer can re-review against the new baseline.
         if (
           parsedMemoryUpdate.expected_baseline_updated_at !== null &&
           existingMemory.updated_at !== parsedMemoryUpdate.expected_baseline_updated_at

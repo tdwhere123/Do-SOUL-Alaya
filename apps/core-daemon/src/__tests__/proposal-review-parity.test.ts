@@ -145,13 +145,12 @@ describe("proposal review inspector cli parity", () => {
   });
 });
 
-// gate-6-delta I2: the original parity test only proves the success
-// path. Error-shape parity across MCP / Inspector HTTP / CLI was
-// claimed but not verified. These cases drive each surface through
-// the same workflow with an injected failure and assert error.code +
-// error.message identity. Per-surface transport severity (HTTP
-// status, CLI exit code) intentionally differs by design and is
-// asserted as deterministic-per-surface, not equal across surfaces.
+// Error-shape parity across MCP / Inspector HTTP / CLI must cover the
+// failure path, not just successful review. These cases drive each
+// surface through the same workflow with an injected failure and assert
+// error.code + error.message identity. Per-surface transport severity
+// intentionally differs by design and is asserted as deterministic per
+// surface, not equal across surfaces.
 
 interface ReviewParitySurfaces {
   readonly mcp: { readonly ok: false; readonly error: { readonly code: string; readonly message: string } };
@@ -324,7 +323,7 @@ function createErrorReviewHandler(
   });
 }
 
-describe("proposal review error parity (gate-6-delta I2)", () => {
+describe("proposal review error parity", () => {
   it("returns identical NOT_FOUND envelope across MCP, Inspector HTTP, and CLI when proposal_id is unknown", async () => {
     const { mcp, inspector, cli } = await runReviewParityScenario(() =>
       createErrorReviewHandler({ kind: "proposal_not_found" })

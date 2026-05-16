@@ -115,11 +115,10 @@ export interface McpMemoryProposalWorkflowProposalRepo {
       readonly proposed_changes: MemoryEntryMutableFields;
       readonly updated_at: string;
       readonly caused_by: string;
-      // gate-6-delta I1: optional baseline snapshot of memory_entry.updated_at
-      // captured by prepareAcceptedProposalApply outside the storage
-      // transaction. The storage layer asserts the live row is still
-      // at this baseline before applying; mismatch = stale-snapshot
-      // CONFLICT.
+      // Optional baseline snapshot of memory_entry.updated_at captured by
+      // prepareAcceptedProposalApply outside the storage transaction. The
+      // storage layer asserts the live row is still at this baseline before
+      // applying; mismatch becomes a stale-snapshot CONFLICT.
       readonly expected_baseline_updated_at?: string | null;
     },
     options?: { readonly reviewerIdentity?: string }
@@ -159,9 +158,9 @@ export interface McpMemoryProposalWorkflowDependencies {
     ): Promise<
       | Readonly<{
           readonly object_id: string;
-          // gate-6-delta I1: optional baseline timestamp captured outside
-          // the storage transaction so the accept-and-apply path can
-          // reject stale-snapshot proposals via a CAS predicate.
+          // Optional baseline timestamp captured outside the storage
+          // transaction so the accept-and-apply path can reject
+          // stale-snapshot proposals via a CAS predicate.
           readonly updated_at?: string;
         }>
       | null
@@ -635,13 +634,10 @@ function assertProposalContext(
   // soul.propose_memory_update — i.e. every proposal carrying the
   // attached agent's run_id — unreviewable through Inspector or CLI.
   //
-  // D2 MERGED-I5 (red-team-I3): the original loosening was too broad.
-  // Any MCP caller whose context resolves to runId=null (e.g. an
-  // attached agent calling `soul.review_memory_proposal` without a
-  // run binding) could review any pending proposal in its workspace,
-  // not just human reviewers. Re-tighten by gating the loosening on
+  // The human-reviewer loosening is gated on
   // `agentTarget ∈ HUMAN_REVIEWER_AGENT_TARGETS` (Inspector + CLI).
-  // Other surfaces still need strict workspace+run match.
+  // Other surfaces still need strict workspace+run match, including MCP
+  // callers whose context resolves to runId=null.
   const workspaceId = NonEmptyStringSchema.parse(context.workspaceId);
   if (scopedProposal.workspace_id !== workspaceId) {
     throw createWorkflowError("NOT_FOUND", "Proposal not found in current workspace/run context.");

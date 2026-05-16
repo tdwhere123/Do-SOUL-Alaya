@@ -31,11 +31,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Validate release versions
+        run: pnpm run release:check-version -- "${GITHUB_REF_NAME}"
+
       - name: Build
         run: pnpm build
 
       - name: Test
         run: pnpm test
+
+      - name: Hygiene
+        run: pnpm run hygiene:unused
 
       - name: Pack source tarball + SHA256SUMS
         id: pack
@@ -80,45 +86,28 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Smoke test installer against the just-built tarball
-        # End-to-end check that scripts/install.sh can consume the
-        # release artifact format produced above. We bypass the GitHub
-        # download step (the release does not exist yet at this point)
-        # and exercise everything else: tarball-path safety, sha256
-        # match logic, atomic staging, pnpm install + build, and the
-        # post-build `node bin/alaya.mjs --help` sanity gate.
+        # End-to-end check that the real installer can consume the
+        # release artifact format produced above. The local-asset
+        # override bypasses only the GitHub download step because the
+        # release does not exist yet.
         run: |
           set -euo pipefail
-          TARBALL="${{ steps.pack.outputs.tarball }}"
+          TARBALL="${GITHUB_WORKSPACE}/${{ steps.pack.outputs.tarball }}"
+          SUMS="${GITHUB_WORKSPACE}/SHA256SUMS"
           SMOKE_HOME="${RUNNER_TEMP}/alaya-smoke-home"
-          SMOKE_TMP="${RUNNER_TEMP}/alaya-smoke-tmp"
-          SMOKE_STAGING="${SMOKE_HOME}.staging-smoke"
-          rm -rf "$SMOKE_HOME" "$SMOKE_TMP" "$SMOKE_STAGING"
-          mkdir -p "$SMOKE_TMP" "$SMOKE_STAGING"
+          SMOKE_BIN="${RUNNER_TEMP}/alaya-smoke-bin"
+          rm -rf "$SMOKE_HOME" "$SMOKE_BIN" "${SMOKE_HOME}.bak" "${SMOKE_HOME}".staging-*
+          mkdir -p "$SMOKE_BIN"
 
-          # 1. Confirm the tarball + SHA256SUMS contract install.sh expects.
-          grep -q "TARBALL_NAME=" scripts/install.sh \
-            || { echo "FATAL: install.sh has no TARBALL_NAME var"; exit 1; }
-          grep -E "[ *]${TARBALL}\$" SHA256SUMS \
-            || { echo "FATAL: SHA256SUMS does not anchor-match TARBALL"; exit 1; }
+          ALAYA_VERSION="${{ steps.pack.outputs.tag }}" \
+          ALAYA_LOCAL_TARBALL="$TARBALL" \
+          ALAYA_LOCAL_SHA256SUMS="$SUMS" \
+          ALAYA_HOME="$SMOKE_HOME" \
+          ALAYA_BIN_DIR="$SMOKE_BIN" \
+            bash scripts/install.sh
 
-          # 2. install.sh path-safety scan.
-          tar -tzf "$TARBALL" \
-            | awk '/^\// || /(^|\/)\.\.($|\/)/ { bad=1 } END { exit bad ? 1 : 0 }' \
-            || { echo "FATAL: tarball has unsafe paths"; exit 1; }
-
-          # 3. Staged extract + build (mirrors install.sh post-checksum path).
-          tar -xzf "$TARBALL" -C "$SMOKE_STAGING" \
-            --strip-components=1 --no-same-owner --no-same-permissions
-          cd "$SMOKE_STAGING"
-          pnpm install --frozen-lockfile
-          pnpm build
-          node ./bin/alaya.mjs --help >/dev/null 2>&1 \
-            || { echo "FATAL: alaya --help failed in smoke install"; exit 1; }
-
-          # 4. Atomic swap simulation.
-          mv "$SMOKE_STAGING" "$SMOKE_HOME"
-          test -x "$SMOKE_HOME/bin/alaya.mjs" \
-            || { echo "FATAL: bin/alaya.mjs missing post-swap"; exit 1; }
+          "$SMOKE_BIN/alaya" --help >/dev/null 2>&1 \
+            || { echo "FATAL: installed alaya --help failed"; exit 1; }
 
           echo "SMOKE OK: tarball + install.sh contract upholds end-to-end."
 

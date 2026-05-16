@@ -45,9 +45,9 @@ export interface JanitorMemoryTieringPort {
     workspaceId: string,
     criteria: JanitorHotDemotionCriteria
   ): Promise<readonly HotDemotionCandidate[]>;
-  // gate-6-delta I4: sync so the Janitor can wrap each demote in
+  // Sync so the Janitor can wrap each demote in
   // EventPublisher.appendManyWithMutation atomically with the
-  // SOUL_MEMORY_TIER_CHANGED event log row.
+  // SOUL_MEMORY_TIER_CHANGED EventLog row.
   demoteToWarm(workspaceId: string, memoryEntryIds: readonly string[]): void;
 }
 
@@ -84,10 +84,10 @@ export interface JanitorDependencies {
   readonly dormantDemotionPort?: JanitorDormantDemotionPort;
   readonly tombstoneGcPort?: JanitorTombstoneGcPort;
   readonly strongRefProtectionPort?: JanitorStrongRefProtectionPort;
-  // gate-6-delta I4: optional EventLog writer used to commit
-  // SOUL_MEMORY_TIER_CHANGED rows in the same SQLite transaction as
-  // the storage_tier UPDATE. When undefined the Janitor falls back to
-  // the bare UPDATE (legacy / test paths).
+  // Optional EventLog writer used to commit SOUL_MEMORY_TIER_CHANGED
+  // rows in the same SQLite transaction as the storage_tier UPDATE.
+  // When undefined the Janitor falls back to the bare UPDATE in legacy
+  // or narrow test paths.
   readonly eventLogRepo?: AuditorEventLogPort;
   readonly now?: () => string;
 }
@@ -165,12 +165,11 @@ export class Janitor {
     const objectIds = candidates.slice(0, JANITOR_CONSTANTS.BATCH_SIZE).map((entry) => entry.memory_entry_id);
 
     if (objectIds.length > 0) {
-      // gate-6-delta I4: emit one SOUL_MEMORY_TIER_CHANGED row per
-      // demoted entry, atomically with the storage_tier UPDATE. The
-      // batch demote runs once inside the mutate callback (cheap)
-      // and the per-entry events land in EventLog for audit replay.
-      // Storage impl writes "cold" tier (BOUNDARY_COLD_TIER) — keep
-      // the audit row consistent.
+      // Emit one SOUL_MEMORY_TIER_CHANGED row per demoted entry,
+      // atomically with the storage_tier UPDATE. The batch demote runs
+      // once inside the mutate callback and the per-entry events land
+      // in EventLog for audit replay. Storage writes the "cold" tier
+      // (BOUNDARY_COLD_TIER), so keep the audit row consistent.
       const occurredAt = this.now();
       const events = objectIds.map((memoryId) => ({
         event_type: MemoryGovernanceEventType.SOUL_MEMORY_TIER_CHANGED,
@@ -203,9 +202,9 @@ export class Janitor {
     return result;
   }
 
-  // gate-6-delta I4: mirror the Auditor.publishEventLogMutation
-  // pattern but accept multiple events so a batch UPDATE (e.g. demote
-  // N entries in one statement) commits atomically with N audit rows.
+  // Mirrors the Auditor.publishEventLogMutation pattern but accepts
+  // multiple events so a batch UPDATE can commit atomically with N audit
+  // rows.
   private async publishEventLogsMutation(
     events: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>,
     mutate: () => void

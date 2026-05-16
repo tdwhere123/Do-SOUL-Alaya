@@ -59,7 +59,7 @@ describe("trust state recorder", () => {
     expect(appendManyWithMutation).not.toHaveBeenCalled();
   });
 
-  it("D2 MERGED-B3 recordUsage rejects cross-workspace delivery when expectedWorkspaceId mismatches", async () => {
+  it("recordUsage rejects cross-workspace delivery when expectedWorkspaceId mismatches", async () => {
     // The delivery belongs to workspace-1; an attacker calling
     // soul.report_context_usage from workspace-attacker passes
     // expectedWorkspaceId='workspace-attacker'. The recorder must refuse
@@ -85,7 +85,7 @@ describe("trust state recorder", () => {
     expect(appendManyWithMutation).not.toHaveBeenCalled();
   });
 
-  it("D2 MERGED-B3 recordUsage proceeds when expectedWorkspaceId matches the linked delivery", async () => {
+  it("recordUsage proceeds when expectedWorkspaceId matches the linked delivery", async () => {
     const { recorder } = createRecorder({ ready: true });
     await recorder.recordDelivery(buildDeliveryInput("delivery-aligned"));
 

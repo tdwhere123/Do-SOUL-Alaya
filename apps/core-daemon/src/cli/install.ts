@@ -122,9 +122,9 @@ async function executeInstall(
       partialState.push({ path: paths.envPath, beforeContent: envBefore ?? undefined });
     }
 
-    // p5-system-review-r2 F-r2-003: open the configured SQLite DB and run
-    // migrations now, so install reports readiness honestly. If migration
-    // fails the catch branch unwinds the toml/env writes.
+    // Open the configured SQLite DB and run migrations now, so install
+    // reports readiness honestly. If migration fails the catch branch
+    // unwinds the toml/env writes.
     await ensureSchemaReady(resolved.db_path);
 
     await writeInstallAudit(auditPath, {
@@ -169,8 +169,7 @@ async function executeInstall(
 /**
  * Open the configured SQLite database and apply schema migrations.
  * Wrapper exists so install can report a real "schema ready" outcome
- * (p5-system-review-r2 F-r2-003) without leaking better-sqlite3 details
- * to install.ts.
+ * without leaking better-sqlite3 details to install.ts.
  *
  * Importantly we do NOT close the database here: `initDatabase` is
  * cached per filename, and a long-running daemon process may already

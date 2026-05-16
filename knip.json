@@ -40,6 +40,16 @@
       "entry": ["src/index.ts", "src/__tests__/**/*.test.ts"],
       "project": ["src/**/*.ts", "tsconfig.json"]
     },
+    "apps/bench-runner": {
+      "entry": [
+        "src/cli.ts",
+        "src/__tests__/**/*.test.ts",
+        "bin/*.mjs",
+        "scripts/*.mjs",
+        "scripts/*.sh"
+      ],
+      "project": ["src/**/*.ts", "bin/**/*.mjs", "scripts/**/*.{mjs,sh}", "tsconfig.json"]
+    },
     "apps/inspector": {
       "entry": ["src/app.ts", "src/server.ts", "src/__tests__/**/*.test.ts"],
       "project": ["src/**/*.ts", "tsconfig.json"]

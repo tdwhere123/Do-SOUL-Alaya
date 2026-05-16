@@ -67,12 +67,11 @@ describe("Auditor", () => {
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
-  // gate-6-delta I4: revoke + renew + grace_request now commit a
-  // green-governance EventLog row in the same SQLite transaction as
-  // the underlying SQL UPDATE. The mock eventLogRepo captures the
-  // (events, mutate) pair so we can assert (a) the canonical event
-  // type lands and (b) the storage mutation runs inside the
-  // transaction body, not before/after.
+  // revoke + renew + grace_request commit a green-governance EventLog
+  // row in the same SQLite transaction as the underlying SQL UPDATE.
+  // The mock eventLogRepo captures the (events, mutate) pair so we can
+  // assert the canonical event type lands and the storage mutation runs
+  // inside the transaction body.
   it("emits SOUL_GREEN_REVOKED alongside revoke during evidence staleness check", async () => {
     const appendManyWithMutation = vi.fn(async (entries: readonly unknown[], mutate: (rows: readonly unknown[]) => unknown) => {
       const persisted = entries.map((entry, idx) => ({ ...(entry as object), event_id: `evt-${idx}`, created_at: "2026-03-27T00:00:00.000Z", revision: idx }));

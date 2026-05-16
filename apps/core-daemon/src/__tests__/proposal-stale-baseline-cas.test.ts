@@ -18,14 +18,13 @@ import {
 } from "@do-soul/alaya-storage";
 import { createMcpMemoryProposalWorkflow } from "../mcp-memory-proposal-workflow.js";
 
-// gate-6-delta I1: cross-proposal lost-update guard. The accept-and-
-// apply transaction now CAS-checks the memory entry's updated_at
-// against a baseline captured by prepareAcceptedProposalApply. When
-// two proposals target the same memory entry, the second accept must
-// either re-capture the baseline (post-commit) or refuse to apply
-// against a stale snapshot. This test exercises the refuse path
-// directly by feeding the workflow a memoryService stub that returns
-// a baseline updated_at that does NOT match the live row.
+// Cross-proposal lost-update guard. The accept-and-apply transaction
+// CAS-checks the memory entry's updated_at against a baseline captured
+// by prepareAcceptedProposalApply. When two proposals target the same
+// memory entry, the second accept must either re-capture the baseline
+// or refuse to apply against a stale snapshot. This test exercises the
+// refuse path directly by feeding the workflow a memoryService stub
+// that returns a baseline updated_at that does NOT match the live row.
 
 const databases = new Set<StorageDatabase>();
 
@@ -81,7 +80,7 @@ async function seedMemoryEntry(
   return await memoryEntryRepo.create(base as MemoryEntry);
 }
 
-describe("proposal accept-and-apply — cross-proposal CAS predicate (gate-6-delta I1)", () => {
+describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
   it("pins CAS to the proposal creation baseline, not the review-time read", async () => {
     const database = createDb();
     const proposalRepo = new SqliteProposalRepo(database);

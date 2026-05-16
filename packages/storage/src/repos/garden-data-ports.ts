@@ -57,9 +57,9 @@ export interface GardenJanitorMemoryTieringPort {
     workspaceId: string,
     criteria: GardenJanitorHotDemotionCriteria
   ): Promise<readonly GardenHotDemotionCandidate[]>;
-  // gate-6-delta I4: sync so the Janitor wraps it in
-  // EventPublisher.appendManyWithMutation alongside the
-  // SOUL_MEMORY_TIER_CHANGED event row.
+  // Synchronous so the Janitor can wrap the SQL update and its
+  // SOUL_MEMORY_TIER_CHANGED EventLog rows in one appendManyWithMutation
+  // transaction.
   demoteToWarm(workspaceId: string, memoryEntryIds: readonly string[]): void;
 }
 
@@ -140,9 +140,9 @@ export interface GardenAuditorPointerHealthPort {
 
 export interface GardenAuditorGreenMaintenancePort {
   findExpiringGreenStatuses(workspaceId: string, lookaheadMs: number): Promise<readonly ExpiringGreenStatus[]>;
-  // gate-6-delta I4: sync to allow Auditor to wrap each call inside
-  // an EventPublisher.appendManyWithMutation transaction along with
-  // the corresponding SOUL_GREEN_* EventLog row.
+  // Synchronous so the Auditor can wrap each SQL update and its
+  // corresponding SOUL_GREEN_* EventLog row in one appendManyWithMutation
+  // transaction.
   renewGreenPassiveStable(greenStatusId: string, taskId: string): void;
   requestActiveVerification(greenStatusId: string, taskId: string): void;
   revokeGreen(memoryEntryId: string, reason: "verification_fail", taskId: string): void;
@@ -226,9 +226,9 @@ function createTieringPort(context: BaseFactoryContext): GardenJanitorMemoryTier
       ) as readonly GardenHotDemotionCandidate[];
       return rows;
     },
-    // gate-6-delta I4: sync so the Janitor can call this inside
-     // EventPublisher.appendManyWithMutation alongside the
-     // SOUL_MEMORY_TIER_CHANGED event rows.
+    // Synchronous so the Janitor can call this inside
+    // EventPublisher.appendManyWithMutation alongside the
+    // SOUL_MEMORY_TIER_CHANGED event rows.
     demoteToWarm: (workspaceId, memoryEntryIds) => {
       const uniqueIds = Array.from(new Set(memoryEntryIds.filter((entryId) => entryId.length > 0)));
       if (uniqueIds.length === 0) {

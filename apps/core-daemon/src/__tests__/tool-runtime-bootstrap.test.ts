@@ -853,8 +853,8 @@ describe("daemon tool runtime bootstrap", () => {
       expect.objectContaining({
         principalCodingEngineAvailable: false
       }),
-      // p5-system-review-r3 MR-I06: createApp now also receives a lifecycle
-      // state object so shutdown can drain in-flight requests before closing.
+      // createApp receives lifecycle state so shutdown can drain in-flight
+      // requests before closing.
       expect.objectContaining({
         drainState: expect.objectContaining({ isDraining: false }),
         inFlight: expect.objectContaining({ count: 0 })

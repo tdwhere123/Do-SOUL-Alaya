@@ -95,7 +95,7 @@ export interface CoreDaemonRouteServices {
 /**
  * Shared mutable lifecycle state injected by index.ts so that shutdown
  * can stop accepting new requests while waiting for in-flight handlers
- * to finish (p5-system-review-r3 MR-I06).
+ * to finish.
  *
  * `isDraining` flips to true when SIGTERM/SIGINT arrives; the drain
  * middleware returns 503 for any new request so a process-orchestrator

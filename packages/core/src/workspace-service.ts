@@ -606,10 +606,9 @@ function extractBootstrapReconcileRaceError(
   return null;
 }
 
-// gate-6-delta I3/N3: prefer the structured DUPLICATE_KEY surfaced by
-// SqliteWorkspaceRepo.create. Walk a few cause levels so future
-// intermediary wrappers (transactional repos, EventPublisher) cannot
-// silently bury the code by re-wrapping the StorageError.
+// Prefer the structured DUPLICATE_KEY surfaced by SqliteWorkspaceRepo.create.
+// Walk a few cause levels so future intermediary wrappers cannot silently
+// bury the code by re-wrapping the StorageError.
 function isWorkspaceIdDuplicateCreateError(error: unknown): boolean {
   let current: unknown = error;
   for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {

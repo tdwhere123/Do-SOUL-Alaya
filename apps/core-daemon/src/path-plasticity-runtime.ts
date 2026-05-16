@@ -51,8 +51,8 @@ interface WorkspaceTypeEventLogReader {
  *      request path (the read is cached at fine-assessment time and the
  *      write runs in Garden).
  *
- *   4. `createPathPlasticityWatermarkRegistry` — closes D2 MERGED-B2
- *      (codex-B2). The Garden Librarian was enqueueing PATH_PLASTICITY_UPDATE
+ *   4. `createPathPlasticityWatermarkRegistry` — prevents the Garden
+ *      Librarian from enqueueing PATH_PLASTICITY_UPDATE
  *      with empty `target_object_refs`, so every tick fell back to
  *      `now - 24h`. Per-call audit_event_id dedup did NOT survive across
  *      ticks, so a single MEMORY_USAGE_REPORTED receipt inside the rolling
@@ -221,9 +221,8 @@ export function createPathPlasticityService(deps: {
 
 /**
  * In-process per-workspace high-water mark for the path-plasticity
- * Librarian task. Closes D2 MERGED-B2: the prior daemon enqueued
- * PATH_PLASTICITY_UPDATE without a watermark, so every Librarian tick
- * processed the rolling 24h window and reapplied each receipt 48 times.
+ * Librarian task. Without a watermark, every Librarian tick would process
+ * the rolling 24h window and reapply each receipt repeatedly.
  *
  * Contract:
  *   - First tick on a workspace resolves `nowIso - initialLookbackMs`

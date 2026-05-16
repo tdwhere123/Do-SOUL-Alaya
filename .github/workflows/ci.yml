@@ -29,3 +29,6 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Hygiene
+        run: pnpm run hygiene:unused

@@ -235,7 +235,7 @@ describe("Phase C shared-contract foundation", () => {
       retirement_cooldown_ms: 7 * 24 * 3600 * 1000,
       consolidation_fuse_max_retries: 3,
       consolidation_fuse_cooldown_ms: 60_000,
-      // A3: feedback-loop-specific tuning (see DYNAMICS_CONSTANTS comment).
+      // Feedback-loop-specific tuning (see DYNAMICS_CONSTANTS comment).
       strength_floor: 0,
       strength_ceiling: 1,
       retirement_strength_threshold: 0.05,

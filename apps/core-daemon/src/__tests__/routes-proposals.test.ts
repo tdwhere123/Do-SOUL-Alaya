@@ -2,10 +2,10 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { registerProposalRoutes } from "../routes/proposals.js";
 
-// p5-system-review-r1: HTTP review/read-by-id routes were removed; v0.1.0 release
-// surface is MCP + CLI only. These tests pin the removal so a future re-introduction
-// must explicitly update the assertions.
-describe("proposal routes (HTTP surface narrowed in p5-system-review-r1)", () => {
+// HTTP review/read-by-id routes are intentionally absent from the active
+// surface. These tests pin the removal so a future re-introduction must
+// explicitly update the assertions.
+describe("proposal routes (HTTP surface narrowed)", () => {
   function buildApp() {
     const app = new Hono();
     const workspaceService = {

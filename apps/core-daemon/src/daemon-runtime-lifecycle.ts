@@ -74,11 +74,10 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
     }
 
     shuttingDown = (async () => {
-      // p5-system-review-r3 MR-I06: stop accepting new requests immediately
-      // (subsequent requests get 503 from the lifecycle middleware in app.ts)
-      // and wait for in-flight handlers to drain before closing the database
-      // and tearing down the server. Without this, server.close() only waits
-      // for socket idle, leaving handler async chains writing to a closed db.
+      // Stop accepting new requests immediately and wait for in-flight
+      // handlers to drain before closing the database and tearing down the
+      // server. Without this, server.close() only waits for socket idle,
+      // leaving handler async chains writing to a closed db.
       input.lifecycleState.drainState.isDraining = true;
 
       const drainDeadline = Date.now() + 30_000;

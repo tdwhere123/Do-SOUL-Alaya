@@ -11,9 +11,9 @@ const memoryGovernanceEventTypeValues = [
   "soul.memory.state_changed",
   "soul.memory.retention_updated",
   "soul.memory.manifestation_changed",
-  // gate-6-delta I4: storage_tier transitions used to be a direct
-  // UPDATE in Janitor.executeHotIndexDemotion with no audit row.
-  // SOUL_MEMORY_TIER_CHANGED closes the §8 gap.
+  // storage_tier transitions must go through EventLog before the
+  // memory_entries.storage_tier update so tier changes satisfy
+  // the §8 audit discipline.
   "soul.memory.tier_changed",
   "soul.memory.tier_promoted",
   "soul.synthesis.created",
@@ -107,8 +107,8 @@ export const SoulMemoryRetentionUpdatedPayloadSchema = TransitionEventPayloadObj
 }).readonly();
 export const SoulMemoryManifestationChangedPayloadSchema = TransitionEventPayloadObjectSchema.readonly();
 
-// gate-6-delta I4: storage_tier transition emitted by the Janitor
-// alongside the UPDATE memory_entries.storage_tier write.
+// storage_tier transition emitted by the Janitor alongside the
+// UPDATE memory_entries.storage_tier write.
 export const SoulMemoryTierChangedPayloadSchema = MemoryGovernanceObjectPayloadObjectSchema.extend({
   from_tier: NonEmptyStringSchema,
   to_tier: NonEmptyStringSchema,

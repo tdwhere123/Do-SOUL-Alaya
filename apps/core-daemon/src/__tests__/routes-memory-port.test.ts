@@ -75,22 +75,45 @@ describe("routes-memory port batch", () => {
     });
   });
 
-  it("registerEvidenceRoutes resolves evidence by id", async () => {
+  it("registerEvidenceRoutes resolves evidence through the workspace-scoped pointer path", async () => {
     const app = new Hono();
     const services = {
       workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },
       runService: { getById: vi.fn(async () => ({ run_id: "run-1" })) },
-      evidenceService: { findByWorkspaceId: vi.fn(), findByRunId: vi.fn(), findById: vi.fn(async () => ({ object_id: "e1" })) }
+      evidenceService: {
+        findByWorkspaceId: vi.fn(),
+        findByRunId: vi.fn(),
+        findByIdScoped: vi.fn(async () => ({ object_id: "e1", workspace_id: "ws-1" }))
+      }
+    };
+    registerEvidenceRoutes(app, services as any);
+
+    const response = await app.request("/workspaces/ws-1/evidence/e1");
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      success: true,
+      data: { object_id: "e1", workspace_id: "ws-1" }
+    });
+    expect(services.workspaceService.getById).toHaveBeenCalledWith("ws-1");
+    expect(services.evidenceService.findByIdScoped).toHaveBeenCalledWith("e1", "ws-1");
+  });
+
+  it("registerEvidenceRoutes does not expose unscoped evidence by id", async () => {
+    const app = new Hono();
+    const services = {
+      workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },
+      runService: { getById: vi.fn(async () => ({ run_id: "run-1" })) },
+      evidenceService: {
+        findByWorkspaceId: vi.fn(),
+        findByRunId: vi.fn(),
+        findById: vi.fn()
+      }
     };
     registerEvidenceRoutes(app, services as any);
 
     const response = await app.request("/evidence/e1");
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      success: true,
-      data: { object_id: "e1" }
-    });
-    expect(services.evidenceService.findById).toHaveBeenCalledWith("e1");
+    expect(response.status).toBe(404);
+    expect(services.evidenceService.findById).not.toHaveBeenCalled();
   });
 
   it("registerClaimRoutes resolves claims by id", async () => {
@@ -127,7 +150,7 @@ describe("routes-memory port batch", () => {
     expect(services.synthesisService.findById).toHaveBeenCalledWith("s1");
   });
 
-  it("registerProposalRoutes no longer exposes POST /proposals/:id/review (p5-system-review-r1 MR-B01)", async () => {
+  it("registerProposalRoutes does not expose POST /proposals/:id/review", async () => {
     const app = new Hono();
     const services = {
       workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },

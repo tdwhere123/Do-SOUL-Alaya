@@ -222,11 +222,11 @@ describe("WorkspaceService", () => {
       default_engine_class: null,
       workspace_state: WorkspaceState.ACTIVE
     });
-    // gate-6-delta I3/N3: SqliteWorkspaceRepo.create now surfaces a
-    // structured DUPLICATE_KEY StorageError on UNIQUE collisions so
-    // the service branches on error.code, not on the underlying
-    // sqlite driver message string. Use a duck-typed error here to
-    // keep core test-isolation from the storage package.
+    // SqliteWorkspaceRepo.create surfaces a structured DUPLICATE_KEY
+    // StorageError on UNIQUE collisions so the service branches on
+    // error.code, not on the underlying sqlite driver message string.
+    // Use a duck-typed error here to keep core test-isolation from the
+    // storage package.
     const duplicateWorkspaceError = createDuplicateKeyError(
       "local_abcd",
       new Error("UNIQUE constraint failed: workspaces.workspace_id")
@@ -266,10 +266,9 @@ describe("WorkspaceService", () => {
     expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
   });
 
-  // gate-6-delta I3/N3: prove the duplicate-walk also catches a
-  // wrapped DUPLICATE_KEY (e.g. surfaced by an EventPublisher that
-  // re-wraps the cause). String-matching the sqlite UNIQUE message
-  // would silently fail here.
+  // Prove the duplicate-walk also catches a wrapped DUPLICATE_KEY, such
+  // as one surfaced by an EventPublisher that re-wraps the cause.
+  // String-matching the sqlite UNIQUE message would silently fail here.
   it("re-reads local workspace when DUPLICATE_KEY arrives via a wrapped cause", async () => {
     const appendManyWithMutation = fakeAppendManyWithMutation();
     const persistedWorkspace = createWorkspace({

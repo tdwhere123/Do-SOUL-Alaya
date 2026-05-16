@@ -6,10 +6,8 @@ export type StorageErrorCode =
   | "VALIDATION_FAILED"
   | "CONFLICT"
   | "NOT_FOUND"
-  // gate-6-delta I3/N3: surfaces a UNIQUE-constraint collision so
-  // callers (e.g. WorkspaceService.ensureLocalWorkspace) can branch on
-  // a structured code rather than string-matching the underlying
-  // sqlite driver message.
+  // Surfaces a UNIQUE-constraint collision so callers can branch on a
+  // structured code rather than string-matching sqlite driver messages.
   | "DUPLICATE_KEY";
 
 export class StorageError extends Error {

@@ -131,8 +131,8 @@ export class SoulSignalHandler {
             return createErrorToolResult(toolUse.id, "Graph explore not available");
           }
 
-          // SECURITY (p5-system-review-r2 F-r2-001 / invariants §29):
-          // workspace bound from trusted runtime context, never from tool payload.
+          // SECURITY: workspace is bound from trusted runtime context per
+          // invariant §29, never from tool payload.
           const context = requireRuntimeContext(runtimeContext);
           const input = SoulExploreGraphRequestSchema.parse(toolUse.input);
           const direction = input.direction ?? "both";

@@ -2,10 +2,10 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { registerMemoryRoutes } from "../routes/memories.js";
 
-// p5-system-review-r1: HTTP GET /memories/:id was removed (MR-B02: route-layer
-// cross-workspace leak); v0.1.0 release surface is MCP + CLI only. This test pins
-// the removal so a future re-introduction must explicitly update the assertion.
-describe("memory routes (HTTP surface narrowed in p5-system-review-r1)", () => {
+// HTTP GET /memories/:id is intentionally absent because it previously
+// bypassed workspace scoping. This test pins the removal so a future
+// re-introduction must explicitly update the assertion.
+describe("memory routes (HTTP surface narrowed)", () => {
   function buildApp() {
     const app = new Hono();
     const workspaceService = {

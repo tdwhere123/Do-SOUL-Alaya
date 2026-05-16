@@ -129,9 +129,9 @@ describe("Janitor", () => {
     );
   });
 
-  // gate-6-delta I4: hot-index demotion now commits one
-  // SOUL_MEMORY_TIER_CHANGED audit row per demoted entry inside the
-  // same SQLite transaction as the storage_tier UPDATE.
+  // Hot-index demotion commits one SOUL_MEMORY_TIER_CHANGED audit row
+  // per demoted entry inside the same SQLite transaction as the
+  // storage_tier UPDATE.
   it("emits SOUL_MEMORY_TIER_CHANGED for each demoted entry alongside the demote", async () => {
     const appendManyWithMutation = vi.fn(async (entries: readonly unknown[], mutate: (rows: readonly unknown[]) => unknown) => {
       const persisted = entries.map((entry, idx) => ({

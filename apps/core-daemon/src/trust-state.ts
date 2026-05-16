@@ -183,8 +183,8 @@ export class TrustStateRecorder {
       throw new TrustStateUnknownDeliveryError(input.delivery_id);
     }
 
-    // Cross-workspace guard (D2 MERGED-B3): when the caller supplies a
-    // workspace context, refuse to record usage against a delivery from a
+    // Cross-workspace guard: when the caller supplies a workspace
+    // context, refuse to record usage against a delivery from a
     // different workspace. Without this guard, an attached agent in
     // `attacker_ws` could call `soul.report_context_usage` with any
     // `delivery_id` it observed (e.g. via SSE) and write a

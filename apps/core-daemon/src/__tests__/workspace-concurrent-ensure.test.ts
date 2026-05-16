@@ -12,14 +12,11 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 
-// gate-6-delta I3/N3: a real-storage proof for the cwd workspace
-// concurrent-first-registration race. The prior idempotence test in
-// `packages/core/src/__tests__/workspace-service.test.ts` injects a
-// hand-built "duplicate" error and runs two `ensureLocalWorkspace`
-// calls sequentially; that locks the symptom, not the actual race.
-// Gate-6 closeout claimed MF-B5 closed this race; this integration
-// test exercises it end-to-end against `SqliteWorkspaceRepo` and a
-// real `EventPublisher` with `Promise.all` of two simultaneous calls.
+// Real-storage proof for the cwd workspace concurrent-first-registration
+// race. The core unit test injects a hand-built duplicate error and runs
+// two `ensureLocalWorkspace` calls sequentially; this integration test
+// exercises the live storage path with `Promise.all` of simultaneous
+// calls.
 
 const databases = new Set<StorageDatabase>();
 

@@ -425,8 +425,8 @@ export class MemoryService {
   /**
    * Workspace-scoped lookup. Per invariants §29 (Default Scope) + §30
    * (Fix at Source), MCP/CLI surfaces MUST use this method instead of
-   * `findById` so cross-workspace leak (p5-system-review-r1 MR-B02 /
-   * Round 2 F-r2-002) cannot recur at any handler boundary.
+   * `findById` so cross-workspace leaks cannot recur at any handler
+   * boundary.
    * Returns null when the object exists in a different workspace —
    * indistinguishable from "not found", which is the intended privacy
    * surface.

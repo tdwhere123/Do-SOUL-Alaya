@@ -173,8 +173,8 @@ describe("Gate-4 attached-agent MCP proof", () => {
         status: "recorded"
       });
 
-      // gate-6-delta I5: workspace_id / run_id / surface_id are bound
-      // server-side from the trusted MCP context.
+      // workspace_id / run_id / surface_id are bound server-side from
+      // the trusted MCP context.
       const signal = await callTool<SoulEmitCandidateSignalResponse>(client, "soul.emit_candidate_signal", {
         signal_kind: "potential_preference",
         object_kind: "memory_entry",

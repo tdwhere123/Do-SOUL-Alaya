@@ -60,10 +60,9 @@ export const PhysicalAnchorSchema = z
   })
   .readonly();
 
-// v0.1 -> final mapping notes:
-// - anchor_schema: used to route v0.1 payloads into semantic_anchor/event_anchor/physical_anchor.
-// - anchor_payload: fields are split into the corresponding final anchor object.
-// This file intentionally documents mapping only; migration execution belongs to Phase 1B.
+// invariant: evidence anchors are split by meaning. Semantic anchors carry
+// the claim/topic shape, event anchors carry EventLog coordinates, and
+// physical anchors carry file/symbol/artifact coordinates.
 export const EvidenceCapsuleSchema = PersistentObjectEnvelopeSchema.unwrap().extend({
   object_kind: z.literal("evidence_capsule"),
   evidence_kind: EvidenceKindSchema,

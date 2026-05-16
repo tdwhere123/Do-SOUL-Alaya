@@ -99,10 +99,10 @@ export const ManifestationStateSchema = z.enum(manifestationStateValues);
 export const RetentionStateSchema = z.enum(retentionStateValues);
 export const StorageTierSchema = z.enum(storageTierValues);
 const MemoryEntryMutableFieldsBaseSchema = z.object({
-  // D2 MERGED-I6 (red-team-I4): bound `content` + element bounds on
-  // `domain_tags` / `evidence_refs` so a single MCP call cannot pin the
-  // daemon with a 100MB string field. The default-array max keeps the
-  // tag list from itself becoming an unbounded amplifier.
+  // Bound `content` plus each `domain_tags` / `evidence_refs` element so
+  // a single MCP call cannot pin the daemon with a 100MB string field.
+  // The default-array max keeps the tag list from itself becoming an
+  // unbounded amplifier.
   content: BoundedContentSchema.optional(),
   domain_tags: z
     .array(BoundedLabelSchema)
@@ -124,8 +124,7 @@ export const MemoryEntryMutableFieldsSchema = MemoryEntryMutableFieldsBaseSchema
 /**
  * Strict variant for the public MCP `soul.propose_memory_update`
  * surface: rejects unknown keys at parse time so attached agents
- * cannot smuggle silent fields into proposals
- * (p5-system-review-r3 MR-I03).
+ * cannot smuggle silent fields into proposals.
  */
 export const PublicMemoryEntryMutableFieldsSchema =
   MemoryEntryMutableFieldsBaseSchema.strict().readonly();

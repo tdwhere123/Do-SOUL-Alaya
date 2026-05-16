@@ -118,9 +118,8 @@ type AlayaLauncherRootInput =
  * by exporting ALAYA_MCP_LAUNCHER=<command-or-path> before running
  * `alaya attach <target>` — useful after `pnpm link --global`.
  *
- * p5-system-review-r2 F-r2-004: previously attach wrote bare
- * command="alaya" which is not on PATH (pnpm does not auto-expose
- * private root bins), so spawning the MCP server always failed.
+ * Attach writes a node launcher instead of bare `alaya` because pnpm does
+ * not auto-expose private root bins on PATH.
  */
 export function resolveAlayaMcpLauncher(
   env: NodeJS.ProcessEnv = process.env,

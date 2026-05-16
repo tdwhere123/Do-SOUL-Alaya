@@ -328,10 +328,10 @@ describe("mcp memory tool handler", () => {
         per_anchor_usage: [{ object_id: "mem1", anchor_role: "target" }],
         reason: "cited"
       }),
-      // D2 MERGED-B3: handler now passes the call-context workspace as
-      // an expected-workspace guard so cross-workspace report_context_usage
-      // is rejected at the trust-state layer before any MEMORY_USAGE_REPORTED
-      // row is appended.
+      // The handler passes the call-context workspace as an
+      // expected-workspace guard so cross-workspace report_context_usage
+      // is rejected at the trust-state layer before any
+      // MEMORY_USAGE_REPORTED row is appended.
       { expectedWorkspaceId: context.workspaceId }
     );
   });

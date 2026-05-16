@@ -98,8 +98,8 @@ describe("MCP tool request/response schemas", () => {
     const requestCases = [
       {
         schema: SoulEmitCandidateSignalRequestSchema,
-        // gate-6-delta I5: workspace_id / run_id / surface_id are bound
-        // from trusted MCP context; the public schema rejects them.
+        // workspace_id / run_id / surface_id are bound from trusted MCP
+        // context; the public schema rejects them.
         value: {
           signal_kind: "potential_claim",
           object_kind: "claim_form",
@@ -129,8 +129,8 @@ describe("MCP tool request/response schemas", () => {
       {
         schema: SoulExploreGraphRequestSchema,
         value: {
-          // p5-system-review-r2 F-r2-001: workspace_id removed from public schema;
-          // bound from MCP call context server-side per invariants §29.
+          // workspace_id is bound from MCP call context server-side per
+          // invariants §29, not accepted from public tool input.
           memory_id: "memory-1",
           edge_types: ["supports", "incompatible_with"],
           direction: "both"
@@ -139,10 +139,9 @@ describe("MCP tool request/response schemas", () => {
       {
         schema: SoulProposeMemoryUpdateRequestSchema,
         value: {
-          // p5-system-review-r3 MR-I03: proposed_changes is now
-          // PublicMemoryEntryMutableFieldsSchema (strict). Allowed
-          // keys include content, domain_tags, evidence_refs, storage_tier,
-          // confidence, and retention_state.
+          // proposed_changes is strict PublicMemoryEntryMutableFieldsSchema.
+          // Allowed keys include content, domain_tags, evidence_refs,
+          // storage_tier, confidence, and retention_state.
           target_object_id: "memory-1",
           proposed_changes: { content: "Use pnpm for scripts." },
           reason: "Align build docs with workspace tooling."
@@ -230,10 +229,10 @@ describe("MCP tool request/response schemas", () => {
       {
         schema: SoulOpenPointerResponseSchema,
         value: {
-          // p5-system-review-r3 MR-I05: content is now an explicit
-          // projection (object_id / object_kind / schema_version /
-          // content / domain_tags / evidence_refs); MemoryEntry
-          // internals (lifecycle_state, created_by, ...) no longer leak.
+          // content is an explicit projection (object_id / object_kind /
+          // schema_version / content / domain_tags / evidence_refs);
+          // MemoryEntry internals such as lifecycle_state and created_by
+          // do not leak.
           object_id: "memory-1",
           object_kind: "memory_entry",
           content: {
@@ -356,12 +355,11 @@ describe("MCP tool request/response schemas", () => {
     ).toThrow();
   });
 
-  // gate-6-delta I5: SoulEmitCandidateSignalRequestSchema must reject
-  // payload-supplied scope fields. The MCP daemon binds workspace_id /
-  // run_id / surface_id from the trusted call context per §29 Default
-  // Scope; allowing them in the public schema would teach attached
-  // LLMs to learn and replay their own scope, reopening the
-  // prompt-inject vector.
+  // SoulEmitCandidateSignalRequestSchema must reject payload-supplied
+  // scope fields. The MCP daemon binds workspace_id / run_id / surface_id
+  // from the trusted call context per §29 Default Scope; allowing them in
+  // the public schema would teach attached LLMs to learn and replay their
+  // own scope, reopening the prompt-inject vector.
   it.each([
     { extraField: "workspace_id", extraValue: "workspace-other" },
     { extraField: "run_id", extraValue: "run-other" },

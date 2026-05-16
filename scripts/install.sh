@@ -18,6 +18,8 @@
 #   ALAYA_BIN_DIR   default: $HOME/.local/bin
 #   ALAYA_REPO      default: tdwhere123/Do-SOUL-Alaya
 #   ALAYA_TARBALL   override the asset name (advanced; rarely needed)
+#   ALAYA_LOCAL_TARBALL / ALAYA_LOCAL_SHA256SUMS
+#                   test-only: use local release assets instead of download
 #
 # What it does:
 #   1. checks node >= 20.19, ensures pnpm 9 (corepack); rejects pnpm major != 9
@@ -147,16 +149,31 @@ ok "version: ${VERSION_TAG}"
 # --- download + verify ----------------------------------------------------
 ASSET_BASE="https://github.com/${REPO}/releases/download/${VERSION_TAG}"
 TARBALL_NAME="${ALAYA_TARBALL:-do-soul-alaya-${VERSION}.tar.gz}"
+LOCAL_TARBALL="${ALAYA_LOCAL_TARBALL:-}"
+LOCAL_SHA256SUMS="${ALAYA_LOCAL_SHA256SUMS:-}"
 
 CURL_OPTS=(-fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3)
 
-info "downloading ${TARBALL_NAME}..."
-curl "${CURL_OPTS[@]}" -o "${TMP_DIR}/${TARBALL_NAME}" "${ASSET_BASE}/${TARBALL_NAME}" \
-  || err "tarball download failed: ${ASSET_BASE}/${TARBALL_NAME}"
+if { [ -n "$LOCAL_TARBALL" ] && [ -z "$LOCAL_SHA256SUMS" ]; } || \
+   { [ -z "$LOCAL_TARBALL" ] && [ -n "$LOCAL_SHA256SUMS" ]; }; then
+  err "ALAYA_LOCAL_TARBALL and ALAYA_LOCAL_SHA256SUMS must be set together"
+fi
 
-info "downloading SHA256SUMS..."
-curl "${CURL_OPTS[@]}" -o "${TMP_DIR}/SHA256SUMS" "${ASSET_BASE}/SHA256SUMS" \
-  || err "SHA256SUMS download failed: ${ASSET_BASE}/SHA256SUMS"
+if [ -n "$LOCAL_TARBALL" ]; then
+  [ -f "$LOCAL_TARBALL" ] || err "ALAYA_LOCAL_TARBALL not found: ${LOCAL_TARBALL}"
+  [ -f "$LOCAL_SHA256SUMS" ] || err "ALAYA_LOCAL_SHA256SUMS not found: ${LOCAL_SHA256SUMS}"
+  info "using local ${TARBALL_NAME}..."
+  cp "$LOCAL_TARBALL" "${TMP_DIR}/${TARBALL_NAME}"
+  cp "$LOCAL_SHA256SUMS" "${TMP_DIR}/SHA256SUMS"
+else
+  info "downloading ${TARBALL_NAME}..."
+  curl "${CURL_OPTS[@]}" -o "${TMP_DIR}/${TARBALL_NAME}" "${ASSET_BASE}/${TARBALL_NAME}" \
+    || err "tarball download failed: ${ASSET_BASE}/${TARBALL_NAME}"
+
+  info "downloading SHA256SUMS..."
+  curl "${CURL_OPTS[@]}" -o "${TMP_DIR}/SHA256SUMS" "${ASSET_BASE}/SHA256SUMS" \
+    || err "SHA256SUMS download failed: ${ASSET_BASE}/SHA256SUMS"
+fi
 
 info "verifying checksum..."
 # Anchored match: line must end with the exact tarball name.

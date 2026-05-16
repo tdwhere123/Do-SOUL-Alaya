@@ -146,9 +146,9 @@ describe("soul.review_memory_proposal reviewer_identity contract", () => {
 
 describe("soulToolJsonSchemas registration", () => {
   it("registers soul.list_pending_proposals in the public catalog", () => {
-    // p5-system-review-r3 MR-I04: external MCP clients see the same bounds
-    // the runtime enforces; A1 closes the missing pending-proposals query
-    // surface that previously required side-channel inspection.
+    // External MCP clients see the same bounds the runtime enforces; the
+    // public tool catalog exposes pending-proposal lookup without
+    // side-channel inspection.
     expect(soulToolJsonSchemas["soul.list_pending_proposals"]).toBeDefined();
   });
 });

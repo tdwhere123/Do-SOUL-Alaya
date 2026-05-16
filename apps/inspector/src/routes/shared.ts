@@ -38,11 +38,10 @@ export async function proxyDaemonJson(
     readonly method: "GET" | "PATCH" | "POST";
     readonly path: string;
     readonly body?: unknown;
-    // gate-6-delta I2: opt in to forwarding the daemon's
-    // {success: false, error: {code, message}} envelope verbatim on
-    // 4xx/5xx so cross-surface parity holds for soul.* tools whose
-    // error messages are closed-set workflow strings (no user-input
-    // echo). Default is sanitise.
+    // Opt in to forwarding the daemon's {success: false, error:
+    // {code, message}} envelope verbatim on 4xx/5xx so cross-surface
+    // parity holds for soul.* tools whose error messages are closed-set
+    // workflow strings. Default is sanitise.
     readonly forwardStructuredError?: boolean;
   }
 ): Promise<Response> {
@@ -70,15 +69,13 @@ export async function proxyDaemonJson(
   }
 
   if (!response.ok) {
-    // gate-6-delta I2: by default we sanitise daemon error bodies so
-    // free-text daemon validation messages cannot leak user-supplied
-    // secrets through the inspector (see the embedding paste case in
-    // routes.test.ts:157-179). Routes that route through the MCP
-    // memory-tool handler — where the workflow returns a closed
-    // {success: false, error: {code, message}} envelope — opt in to
-    // verbatim forwarding so cross-surface parity with MCP/CLI holds
-    // on the error path. The forwarder still narrows to the canonical
-    // envelope shape; anything else falls back to the sanitised body.
+    // By default we sanitise daemon error bodies so free-text daemon
+    // validation messages cannot leak user-supplied secrets through the
+    // inspector. Routes that route through the MCP memory-tool handler
+    // can opt in to verbatim forwarding because that workflow returns a
+    // closed {success: false, error: {code, message}} envelope. The
+    // forwarder still narrows to the canonical envelope shape; anything
+    // else falls back to the sanitised body.
     if (request.forwardStructuredError === true) {
       const safe = await tryReadStructuredErrorEnvelope(response);
       if (safe !== null) {

@@ -161,7 +161,7 @@ function runMigrations(database: SqliteConnection): void {
  * Returns the persisted max migration version vs the binary's known max,
  * so doctor can report `schema_ok: true` only when the running binary's
  * migration set fully matches the database. Does not run migrations or
- * mutate state. p5-system-review-r3 MR-I11.
+ * mutate state.
  */
 export function getCurrentSchemaSummary(
   database: StorageDatabase

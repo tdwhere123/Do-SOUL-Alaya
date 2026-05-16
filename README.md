@@ -142,9 +142,8 @@ grammar — every section below refers back to them.
 
 This is the rule that lets recall (Path axis) reach into evidence
 (Evidence axis) and ontology (Object axis) without quietly mutating
-either. Every phase below honours it explicitly — and the places
-where v0.1 doesn't yet honour it as cleanly as it could are called
-out in the [Roadmap](#where-this-is-going).
+either. Every phase below honours it explicitly; remaining runtime gaps
+are tracked in the [Roadmap](#where-this-is-going).
 
 ---
 

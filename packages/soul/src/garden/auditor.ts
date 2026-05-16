@@ -48,9 +48,9 @@ export const AUDITOR_CONSTANTS = {
   ORPHAN_RADAR_TTL_MS: 48 * 3_600_000,
   RECOVERY_WINDOW_MS: 3_600_000,
   BATCH_SIZE: 20,
-  // gate-6-delta I4: must mirror the storage-side
-  // ACTIVE_VERIFICATION_GRACE_MS so the SOUL_GREEN_GRACE_REQUESTED
-  // audit row records the same valid_until that the SQL UPDATE sets.
+  // Must mirror the storage-side ACTIVE_VERIFICATION_GRACE_MS so the
+  // SOUL_GREEN_GRACE_REQUESTED audit row records the same valid_until
+  // that the SQL UPDATE sets.
   ACTIVE_VERIFICATION_GRACE_MS: 7 * 86_400_000
 } as const;
 
@@ -119,9 +119,8 @@ export class Auditor {
     const batch = staleEntries.slice(0, AUDITOR_CONSTANTS.BATCH_SIZE);
 
     for (const entry of batch) {
-      // gate-6-delta I4: revokeGreen used to write green_statuses
-      // directly with no audit row. Now it commits inside a single
-      // SQLite tx with the SOUL_GREEN_REVOKED event log row.
+      // Revoke commits inside a single SQLite tx with the
+      // SOUL_GREEN_REVOKED EventLog row.
       const revokedAt = this.now();
       const payload = SoulGreenRevokedPayloadSchema.parse({
         target_object_id: entry.memory_entry_id,
@@ -437,8 +436,8 @@ export class Auditor {
 
     for (const status of batch) {
       if (isPassiveStableDimension(status.dimension)) {
-        // gate-6-delta I4: SOUL_GREEN_RENEWED audit row is committed
-        // alongside the renew SQL in one SQLite transaction.
+        // The SOUL_GREEN_RENEWED audit row is committed alongside the
+        // renew SQL in one SQLite transaction.
         const renewedAt = this.now();
         const renewedPayload = SoulGreenRenewedPayloadSchema.parse({
           object_id: status.green_status_id,
@@ -475,8 +474,8 @@ export class Auditor {
       }
 
       if (requiresActiveVerification(status.dimension)) {
-        // gate-6-delta I4: SOUL_GREEN_GRACE_REQUESTED audit row is
-        // committed alongside the active-verification grace request.
+        // The SOUL_GREEN_GRACE_REQUESTED audit row is committed alongside
+        // the active-verification grace request.
         const requestedAt = this.now();
         const graceUntil = addMillisecondsIso(requestedAt, AUDITOR_CONSTANTS.ACTIVE_VERIFICATION_GRACE_MS);
         const requestedPayload = SoulGreenGraceRequestedPayloadSchema.parse({

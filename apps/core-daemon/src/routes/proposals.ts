@@ -18,11 +18,9 @@ export interface ProposalRouteServices {
   // via the same MCP handler attached agents use; this HTTP wrapper does
   // not own the storage-atomic path.
   //
-  // D2 MERGED-I7: required (not optional) — production wiring always
-  // constructs the handler in `apps/core-daemon/src/index.ts`, so the
-  // 503 fallback was dead code that masked any future wiring drop. If
-  // a refactor accidentally drops the wiring, the type system now
-  // catches it instead of letting the route 503 silently.
+  // Production wiring always constructs the handler in
+  // `apps/core-daemon/src/index.ts`; keep this required so a future wiring
+  // drop fails at compile time instead of turning into a silent route 503.
   readonly mcpMemoryToolHandler: McpMemoryToolHandler;
 }
 
@@ -85,11 +83,9 @@ export function registerProposalRoutes(app: Hono, services: ProposalRouteService
     let body: Record<string, unknown>;
     try {
       const parsed: unknown = await context.req.json();
-      // D2 MERGED-I4: JSON `null` / arrays / scalars all parse cleanly but
-      // would throw a TypeError on property access (`body.verdict`)
-      // before the existing `result.error.code === "VALIDATION"` mapping
-      // can return a 400. Reject the boundary case explicitly so the
-      // HTTP trust boundary returns 400 instead of leaking a 500.
+      // JSON `null` / arrays / scalars all parse cleanly but would throw
+      // on property access before the MCP handler can map validation to a
+      // 400. Reject the boundary case explicitly at the HTTP boundary.
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
         return context.json(
           { success: false, error: "invalid JSON body" },

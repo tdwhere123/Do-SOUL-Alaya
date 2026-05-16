@@ -251,9 +251,9 @@ describe("cli registration", () => {
     });
   });
 
-  // gate-6-delta B1: cover the env-spoof guard on the MCP stdio path.
-  // ALAYA_AGENT_TARGET=cli/inspector must NOT promote the attached LLM
-  // to a human-reviewer surface; the env is sanitised at the boundary.
+  // Cover the env-spoof guard on the MCP stdio path. ALAYA_AGENT_TARGET
+  // values such as cli/inspector must not promote the attached LLM to a
+  // human-reviewer surface; the env is sanitised at the boundary.
   it.each([
     { spoof: "cli" as const },
     { spoof: "inspector" as const }

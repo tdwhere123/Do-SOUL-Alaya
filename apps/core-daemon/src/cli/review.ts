@@ -376,11 +376,10 @@ async function buildCallContext(
   | { readonly ok: true; readonly context: McpMemoryToolCallContext }
   | { readonly ok: false; readonly message: string }
 > {
-  // D2 MERGED-I3 / Gate-5F: the `alaya review` verbs ARE the
-  // human-reviewer surface. They MUST default to `runId: null` and
-  // `agentTarget: "cli"` regardless of attach-session env such as
-  // ALAYA_RUN_ID / ALAYA_AGENT_TARGET. Only explicit CLI/dependency
-  // overrides change the review context.
+  // The `alaya review` verbs are the human-reviewer surface. They must
+  // default to `runId: null` and `agentTarget: "cli"` regardless of
+  // attach-session env such as ALAYA_RUN_ID / ALAYA_AGENT_TARGET. Only
+  // explicit CLI/dependency overrides change the review context.
   const workspaceContext = resolveCliWorkspaceContext(
     ctx,
     args.contextOverrides.workspaceId,

@@ -6,10 +6,10 @@ export const NonNegativeIntSchema = z.number().int().nonnegative();
 export const PositiveIntSchema = z.number().int().positive();
 
 /**
- * Bounded string primitives. p5-system-review-r3 MR-I03: attached
- * agents are an external boundary (anything reachable through MCP
- * stdio); zod must reject oversized payloads at parse time so the
- * daemon does not OOM on a 100 MB query or a 1 GB nested record.
+ * Bounded string primitives for attached-agent input. Anything reachable
+ * through MCP stdio is an external boundary; zod must reject oversized
+ * payloads at parse time so the daemon does not OOM on a 100 MB query
+ * or a 1 GB nested record.
  *
  * The numbers below are deliberately pragmatic, not minimal:
  *   - id-shaped fields (object_id, proposal_id, delivery_id, run_id):
@@ -25,8 +25,7 @@ export const BoundedReasonSchema = BoundedString(16384);
 export const BoundedLabelSchema = BoundedString(1024);
 /** Memory entry content body. 65536 chars covers long-form notes
  * (a few research paper sections) without giving any single MCP call
- * the ability to pin daemon memory with arbitrarily large strings.
- * Added per D2 MERGED-I6 (red-team-I4). */
+ * the ability to pin daemon memory with arbitrarily large strings. */
 export const BoundedContentSchema = BoundedString(65536);
 
 export const BOUNDED_DEFAULT_ARRAY_MAX = 1000;

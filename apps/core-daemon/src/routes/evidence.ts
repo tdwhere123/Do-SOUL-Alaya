@@ -22,16 +22,6 @@ export function registerEvidenceRoutes(app: Hono, services: EvidenceRouteService
     return context.json({ success: true, data: evidence }, 200);
   });
 
-  app.get("/evidence/:id", async (context) => {
-    const evidence = await services.evidenceService.findById(context.req.param("id"));
-
-    if (evidence === null) {
-      throw new CoreError("NOT_FOUND", "Evidence not found");
-    }
-
-    return context.json({ success: true, data: evidence }, 200);
-  });
-
   // invariant: workspace-scoped pointer resolution. Mirrors the MCP
   // soul.open_pointer fallthrough — memory first, then evidence — but
   // limited to the requested workspace so the inspector loopback cannot

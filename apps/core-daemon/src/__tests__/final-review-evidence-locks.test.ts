@@ -5,10 +5,9 @@ import { describe, expect, it } from "vitest";
 import { soulToolJsonSchemas } from "@do-soul/alaya-protocol";
 import { ALAYA_MEMORY_TOOL_NAMES, listAlayaMemoryTools } from "../mcp-memory-tool-catalog.js";
 
-// p5-system-review-r3 MR-I16: this file was renamed from
-// final-review-status.test.ts to make its purpose explicit. Most cases
-// lock evidence (docs ↔ docs); the last case is a behavior assertion
-// that exercises real code paths so the file is not pure docs prose.
+// Most cases lock historical closeout evidence across docs; the last
+// case is a behavior assertion that exercises real code paths so the
+// file is not pure docs prose.
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(currentDirectory, "../../../..");
@@ -86,20 +85,16 @@ describe("P5 final-review status", () => {
     expect(runtimeStatus).toContain("#BL-024");
     expect(runtimeStatus).not.toContain("Remaining v0.1.0 release work is Phase 5");
 
-    // #BL-024 / #BL-017 were Resolved in p5-system-review-r1+r2 (commits
-    // 0fa309b removes the HTTP route; 964e12a closes the backlog entries
-    // and lands the phase-to-domain stop-gap mapping).
+    // #BL-024 / #BL-017 stay resolved in the handbook backlog; the
+    // archive records the exact historical review rounds and commits.
     expect(backlog).toContain("### #BL-024 — Resolved");
     expect(backlog).toContain("### #BL-017 — Resolved");
   });
 
-  // p5-system-review-r3 MR-I16: behavior assertion (not docs↔docs).
-  // The MCP catalog must publish exactly the tool names the rest
-  // of the report claims, with input schemas derived from zod (so an
-  // attacker-controlled payload longer than the documented bound is
-  // rejected at parse time). If `soulToolJsonSchemas` ever drifts from
-  // ALAYA_MEMORY_TOOL_NAMES this test fails the same Round 1 way the
-  // hand-written catalog used to drift silently.
+  // Behavior assertion, not docs-to-docs evidence. The MCP catalog must
+  // publish exactly the tool names the rest of the report claims, with
+  // input schemas derived from zod so oversized attacker-controlled
+  // payloads are rejected at parse time.
   it("publishes the named tools through the zod-derived catalog", () => {
     const definitions = listAlayaMemoryTools();
     expect(definitions.map((definition) => definition.name)).toEqual([...expectedMemoryTools]);

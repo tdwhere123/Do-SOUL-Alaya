@@ -13,6 +13,7 @@
     "build": "node ./scripts/build-existing.mjs",
     "test": "vitest run --config vitest.config.mjs",
     "hygiene:unused": "knip --config knip.json --no-progress --no-config-hints",
+    "release:check-version": "node ./scripts/check-release-version.mjs",
     "fixtures:host-autonomy-witness": "node ./scripts/export-host-autonomy-witness.mjs",
     "alaya": "node ./bin/alaya.mjs",
     "doctor": "node ./bin/alaya.mjs doctor",

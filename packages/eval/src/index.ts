@@ -50,3 +50,9 @@ export {
 } from "./wilson-ci.js";
 
 export { runCli } from "./cli.js";
+
+export { LONGMEMEVAL_S_META, type DatasetMeta } from "./longmemeval/dataset.js";
+export {
+  SYNTHETIC_SCENARIOS,
+  type SyntheticScenario
+} from "./self/scenarios.js";

@@ -9,11 +9,10 @@ const greenGovernanceEventTypeValues = [
   "soul.green.granted",
   "soul.green.pierced",
   "soul.green.grace_entered",
-  // gate-6-delta I4: Green-status writes by the Auditor (revoke,
-  // passive-stable renewal, active-verification grace request) used to
-  // bypass EventLog. These three event types close the §8/§10 audit
-  // gap so subscribers see Green state changes in the canonical
-  // append-only log.
+  // Green-status writes by the Auditor (revoke, passive-stable renewal,
+  // active-verification grace request) must be represented in EventLog
+  // so subscribers see Green state changes in the canonical append-only
+  // log per §8/§10.
   "soul.green.revoked",
   "soul.green.renewed",
   "soul.green.grace_requested",
@@ -100,9 +99,9 @@ export const SoulGreenGraceEnteredPayloadSchema = z
   })
   .readonly();
 
-// gate-6-delta I4: Green-state mutation events emitted by the Auditor
-// alongside the SQL UPDATE so the audit log records every Green
-// transition, not just granted/pierced/grace_entered.
+// Green-state mutation events emitted by the Auditor alongside the SQL
+// UPDATE so the audit log records every Green transition, not just
+// granted/pierced/grace_entered.
 export const SoulGreenRevokedPayloadSchema = z
   .object({
     target_object_id: NonEmptyStringSchema,

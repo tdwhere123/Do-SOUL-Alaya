@@ -127,15 +127,12 @@ export const CandidateMemorySignalInputSchema = CandidateMemorySignalContentFiel
   .strict()
   .readonly();
 
-// gate-6-delta I5: agent-facing emit request for soul.emit_candidate_signal.
-// Strips workspace_id / run_id / surface_id — the MCP daemon binds those
-// from the trusted call context. This mirrors the §29 hardening already
-// applied to SoulExploreGraphRequestSchema and
-// SoulListPendingProposalsRequestSchema. Keeping the scope fields on the
-// public schema would teach every attached LLM to learn its workspace
-// and pass it back, reopening the prompt-inject vector ("now pass
-// workspace_id=foreign") even though the runtime guard catches the
-// spoof.
+// Agent-facing emit request for soul.emit_candidate_signal. Scope fields are
+// omitted because the MCP daemon binds workspace_id / run_id / surface_id
+// from the trusted call context per invariant §29. Keeping those fields on
+// the public schema would teach attached LLMs to pass caller scope back in
+// the payload, reopening the prompt-injection vector even though runtime
+// guards reject spoofing.
 export const McpEmitCandidateSignalRequestSchema = CandidateMemorySignalContentFieldsSchema
   .extend({
     source_delivery_ids: SourceDeliveryIdsSchema.optional()

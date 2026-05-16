@@ -219,8 +219,8 @@ describe("P5 v0.1 release loop E2E", () => {
       const beforeProposal = await readMemoryEntry(dataDir, objectId);
       expect(beforeProposal?.content).toBe("Use pnpm for all workspace commands.");
 
-      // gate-6-delta I5: workspace_id / run_id / surface_id are bound
-      // server-side from the trusted MCP context.
+      // workspace_id / run_id / surface_id are bound server-side from
+      // the trusted MCP context.
       const signal = await callTool<SoulEmitCandidateSignalResponse>(client, "soul.emit_candidate_signal", {
         signal_kind: "potential_preference",
         object_kind: "memory_entry",
