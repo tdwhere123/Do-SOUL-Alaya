@@ -255,6 +255,67 @@ v0.1-closeout. They are pinned here so the v0.1.x maintenance waves and
 v0.2 planning agents can reference them at the source rather than
 re-discovering them from `.do-it/findings/{a1,a2,a3}.md`.
 
+## v0.3.8 Release (2026-05-16)
+
+Ontology mid-layer recapture + codex-review wiring repair. One new
+storage migration (`068-evidence-capsule-fts.sql` — FTS5 only, no
+ontology table change). No MCP tool name / request / response schema
+changes; one additive schema change (`SoulOpenPointerContentSchema`
+gains optional `gist` / `excerpt` for EvidenceCapsule pointers).
+
+New / changed runtime-visible surfaces:
+
+- **EvidenceCapsule production** is `live-event-ready`: `materialization-
+  router.buildDistilledFact` writes a distilled `MemoryEntry.content`
+  (caller-supplied `distilled_fact` or rule-based 2-sentence fallback
+  capped at 280 chars across Latin + CJK terminators); the raw turn
+  lives in `EvidenceCapsule.gist / .excerpt`; `soul.open_pointer`
+  falls through to `EvidenceService.findByIdScoped` when the memory
+  lookup misses so attached agents can dereference `evidence_refs[i]`.
+- **Four staged MemoryGraphEdge producers** (`supersedes`,
+  `contradicts`, `exception_to`, `incompatible_with`) are
+  `live-event-ready` via caller-explicit `raw_payload.*_refs` hints
+  plus a rule-based `ConflictDetectionService` (env-gated;
+  `ALAYA_CONFLICT_DETECTION_ENABLED` and `ALAYA_CONFLICT_RULE_ENABLED`).
+  Proposal accept does not write edges (in-place update, no
+  new/old memory pair forms).
+- **PathRelation propose** is `live-event-ready` via
+  `PathRelationProposalService`: 3 co-usage events on the same memory
+  pair write a PathRelation; TTL eviction (`ALAYA_PATHREL_COUNTER_TTL_MS`,
+  default 24h) bounds the in-process pair counter.
+- **Cohort dominance guard covers exact branch** — exact + seed
+  cohort branches share a union ratio check and are admitted or
+  skipped together when the union exceeds 50% of the tier pool.
+- **Mandatory share cap** — protected-dimension non-winners are
+  capped at floor(max_entries * 2/3) so 1/3 of the budget stays
+  available for ranked candidates; winnerMemoryIds still bypass
+  budget unconditionally.
+- **Wilson 95% CI in bench report**: `packages/eval/src/wilson-ci.ts`
+  computes the interval; `report.md` annotates R@K with half-width +
+  lo/hi bounds + sample-size label; `diff.ts` widens regression
+  bands to `max(raw, ci_half_width)` for `evaluated_count < 100`.
+- **LoCoMo bench driver**: `apps/bench-runner/src/locomo/` with
+  sha256-pinned dataset (`docs/bench-history/datasets/locomo10.meta.json`)
+  and `alaya-bench-runner locomo` subcommand. Archives land under
+  `docs/bench-history/public-locomo/`.
+- **Inspector Memory Browser + cmd-K palette**:
+  `apps/inspector/web/src/pages/MemoryBrowser.tsx` with filter chips
+  and an evidence drawer reading
+  `/api/pointers/:workspaceId/:objectId`;
+  `apps/inspector/web/src/components/CommandPalette.tsx` provides
+  cmd-K page jumps + clipboard-only CLI verb reminders.
+- **Embedding provider env wiring**: `OPENAI_EMBEDDING_PROVIDER_URL`
+  + `OPENAI_EMBEDDING_MODEL` + `ALAYA_OPENAI_SECRET_REF` continue to
+  drive `OpenAIEmbeddingClient`; documented recipe for yunwu.ai
+  `/v1/embeddings` (`text-embedding-3-small`, 1536-d) lives in
+  `docs/v0.3/v0.3.8/README.md`.
+
+Closed backlog: #BL-039 / #BL-040 / #BL-041 / #BL-042 / #BL-045 /
+#BL-046 (see `docs/handbook/backlog.md`). #BL-044 deferred to v0.3.9
+by user directive.
+
+Workspace packages bumped `0.3.7` -> `0.3.8`. See `docs/v0.3/v0.3.8/`.
+
 ## v0.3.7 Release (2026-05-15)
 
 Patch-internal dynamic recall, benchmark archive, and Inspector repair
