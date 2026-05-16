@@ -73,22 +73,30 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
     });
   });
 
-  it("rolls back row insert if the transactional mutate path throws", async () => {
+  it("rolls back the staged path.relation_created event when repo.create throws inside the tx callback", async () => {
     const repoCreate = vi.fn(() => {
       throw new Error("simulated row-insert failure");
     });
+    const persistedEvents: EventLogEntry[] = [];
+    // Mirrors better-sqlite3 BEGIN IMMEDIATE / COMMIT: staged event rows
+    // become visible only after the synchronous mutate callback returns
+    // without throwing. A thrown error discards the staged events.
     const appendManyWithMutation = vi.fn(
       async <T,>(
         eventInputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
         mutate: (entries: readonly EventLogEntry[]) => T
       ): Promise<T> => {
-        const persisted = eventInputs.map((entry, idx) => ({
+        const staged = eventInputs.map((entry, idx) => ({
           event_id: `evt_${idx}`,
           created_at: "2026-05-16T00:00:00.000Z",
           revision: 0,
           ...entry
         })) as EventLogEntry[];
-        return mutate(persisted);
+        const result = mutate(staged);
+        for (const event of staged) {
+          persistedEvents.push(event);
+        }
+        return result;
       }
     );
 
@@ -109,6 +117,7 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
     }
 
     expect(repoCreate).toHaveBeenCalledTimes(1);
+    expect(persistedEvents).toHaveLength(0);
     expect(warn).toHaveBeenCalledWith(
       "PathRelation propose failed",
       expect.objectContaining({

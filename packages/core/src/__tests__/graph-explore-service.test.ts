@@ -36,21 +36,27 @@ interface PublisherHarness {
   appendManyWithMutation: ReturnType<typeof vi.fn>;
 }
 
+// Mirrors `better-sqlite3` BEGIN IMMEDIATE / COMMIT semantics: staged
+// event rows are NOT visible until the synchronous `mutate` returns
+// without throwing. If mutate throws the staged events are discarded so
+// the test surface matches the production rollback path.
 function createPublisher(events: EventLogEntry[] = [], onAppend?: (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => void): PublisherHarness {
   const appendManyWithMutation = vi.fn(
     async <T,>(
       eventInputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
       mutate: (entries: readonly EventLogEntry[]) => T
     ): Promise<T> => {
-      const persisted: EventLogEntry[] = eventInputs.map((entry) => {
+      const staged: EventLogEntry[] = eventInputs.map((entry) => {
         if (onAppend !== undefined) {
           onAppend(entry);
         }
-        const built = createEventLogEntry(entry);
-        events.push(built);
-        return built;
+        return createEventLogEntry(entry);
       });
-      return mutate(persisted);
+      const result = mutate(staged);
+      for (const event of staged) {
+        events.push(event);
+      }
+      return result;
     }
   );
   return {
@@ -121,6 +127,43 @@ describe("GraphExploreService", () => {
         edge_id: "edge_generated"
       })
     );
+  });
+
+  it("rolls back the staged SOUL_GRAPH_EDGE_CREATED row when the edge insert throws", async () => {
+    const events: EventLogEntry[] = [];
+    const { publisher, appendManyWithMutation } = createPublisher(events);
+    const edgeRepo = {
+      create: vi.fn(() => {
+        throw new Error("simulated edge insert failure");
+      }),
+      findByMemoryId: vi.fn(async () => []),
+      findBySourceAndTarget: vi.fn(async () => null),
+      countInboundSupports: vi.fn(async () => 0),
+      countInboundEdgesWeighted: vi.fn(async () => 0),
+      delete: vi.fn(async () => undefined)
+    };
+    const service = new GraphExploreService({
+      memoryRepo: {
+        findById: vi.fn(async (objectId: string) => ({ object_id: objectId }))
+      },
+      edgeRepo,
+      eventLogRepo: { append: vi.fn(async (event) => createEventLogEntry(event)) },
+      runtimeNotifier: { notifyEntry: vi.fn(async () => undefined) },
+      eventPublisher: publisher,
+      generateId: () => "rollback"
+    });
+
+    await expect(
+      service.addEdge({
+        sourceMemoryId: "memory-a",
+        targetMemoryId: "memory-b",
+        edgeType: "supports",
+        workspaceId: "workspace-1"
+      })
+    ).rejects.toThrow("simulated edge insert failure");
+
+    expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
+    expect(events).toHaveLength(0);
   });
 
   it("returns existing edge when addEdge is called idempotently (no event published)", async () => {
