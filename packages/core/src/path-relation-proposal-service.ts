@@ -9,18 +9,16 @@ import {
 // service writes a new PathRelation with default plasticity. The plasticity
 // strength is later evolved by PathPlasticityService. Counter state is
 // in-memory per daemon process (suitable for K small, e.g. 3).
-// invariant: counter Map is unbounded by design within this version's
-// scope. Pairs that reach the threshold are dropped (proposed and
-// recorded), so steady-state memory holds only pairs that co-occurred
-// fewer than `threshold` times. Daemons accumulating very long
-// no-promote tails should periodically clear stale counters; the
-// service exposes no eviction port yet — see backlog for the eviction
-// gate item.
+// invariant: counter entries carry firstSeenAt timestamps so the daemon
+// can periodically call evictExpired(now, ttlMs) to discard stale pairs
+// that never reached the threshold. Pairs that reach the threshold are
+// already dropped when their PathRelation is written.
 // see also: crossLinkRecalledMemories — caller hook
 // see also: PathPlasticityService — strength evolution
 // see also: PathRelationRepo — durable write side
 
 export const PATH_RELATION_PROPOSE_THRESHOLD = 3;
+export const PATH_RELATION_COUNTER_DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface PathRelationProposalRepoPort {
   create(relation: PathRelation): Promise<Readonly<PathRelation>> | Readonly<PathRelation>;
@@ -34,6 +32,8 @@ export interface PathRelationProposalServiceDeps {
   readonly repo: PathRelationProposalRepoPort;
   readonly threshold?: number;
   readonly now?: () => string;
+  readonly nowMs?: () => number;
+  readonly counterTtlMs?: number;
   readonly generateId?: () => string;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }
@@ -44,16 +44,25 @@ interface PairCounterKey {
   readonly high: string;
 }
 
+interface CounterEntry {
+  readonly count: number;
+  readonly firstSeenAtMs: number;
+}
+
 export class PathRelationProposalService {
-  private readonly counters = new Map<string, number>();
+  private readonly counters = new Map<string, CounterEntry>();
   private readonly proposed = new Set<string>();
   private readonly threshold: number;
   private readonly now: () => string;
+  private readonly nowMs: () => number;
+  private readonly counterTtlMs: number;
   private readonly generateId: () => string;
 
   public constructor(private readonly deps: PathRelationProposalServiceDeps) {
     this.threshold = deps.threshold ?? PATH_RELATION_PROPOSE_THRESHOLD;
     this.now = deps.now ?? (() => new Date().toISOString());
+    this.nowMs = deps.nowMs ?? (() => Date.now());
+    this.counterTtlMs = deps.counterTtlMs ?? PATH_RELATION_COUNTER_DEFAULT_TTL_MS;
     this.generateId = deps.generateId ?? (() => randomUUID());
   }
 
@@ -65,6 +74,7 @@ export class PathRelationProposalService {
       return;
     }
     const unique = [...new Set(usedObjectIds)].sort();
+    const seenAtMs = this.nowMs();
     for (let i = 0; i < unique.length; i += 1) {
       for (let j = i + 1; j < unique.length; j += 1) {
         const left = unique[i]!;
@@ -73,9 +83,12 @@ export class PathRelationProposalService {
         if (this.proposed.has(key)) {
           continue;
         }
-        const next = (this.counters.get(key) ?? 0) + 1;
+        const previous = this.counters.get(key);
+        const next: CounterEntry = previous === undefined
+          ? { count: 1, firstSeenAtMs: seenAtMs }
+          : { count: previous.count + 1, firstSeenAtMs: previous.firstSeenAtMs };
         this.counters.set(key, next);
-        if (next < this.threshold) {
+        if (next.count < this.threshold) {
           continue;
         }
         try {
@@ -92,6 +105,23 @@ export class PathRelationProposalService {
         }
       }
     }
+  }
+
+  public evictExpired(nowMs?: number, ttlMs?: number): number {
+    const cutoffMs = nowMs ?? this.nowMs();
+    const ttl = ttlMs ?? this.counterTtlMs;
+    let removed = 0;
+    for (const [key, entry] of this.counters) {
+      if (cutoffMs - entry.firstSeenAtMs > ttl) {
+        this.counters.delete(key);
+        removed += 1;
+      }
+    }
+    return removed;
+  }
+
+  public counterSize(): number {
+    return this.counters.size;
   }
 
   private keyFor(key: PairCounterKey): string {

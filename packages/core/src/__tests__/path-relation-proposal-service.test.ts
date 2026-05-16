@@ -105,4 +105,55 @@ describe("PathRelationProposalService", () => {
 
     expect(repo.create).not.toHaveBeenCalled();
   });
+
+  it("evictExpired shrinks the in-process counter for stale sub-threshold pairs", async () => {
+    const repo = {
+      create: vi.fn(async (relation: any) => relation),
+      findByAnchorMemoryId: vi.fn(async () => [])
+    };
+    let nowMs = 1_000_000;
+    const service = new PathRelationProposalService({
+      repo,
+      threshold: 5,
+      nowMs: () => nowMs,
+      counterTtlMs: 1_000
+    });
+
+    await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
+    nowMs = 1_001_500;
+    await service.onCoUsage(["mem-C", "mem-D"], "workspace-1");
+    expect(service.counterSize()).toBe(2);
+
+    nowMs = 1_002_000;
+    const removed = service.evictExpired();
+    expect(removed).toBe(1);
+    expect(service.counterSize()).toBe(1);
+
+    nowMs = 1_003_000;
+    const removedAgain = service.evictExpired();
+    expect(removedAgain).toBe(1);
+    expect(service.counterSize()).toBe(0);
+  });
+
+  it("evictExpired keeps fresh sub-threshold pairs when ttl has not elapsed", async () => {
+    const repo = {
+      create: vi.fn(async (relation: any) => relation),
+      findByAnchorMemoryId: vi.fn(async () => [])
+    };
+    let nowMs = 2_000_000;
+    const service = new PathRelationProposalService({
+      repo,
+      threshold: 5,
+      nowMs: () => nowMs,
+      counterTtlMs: 10_000
+    });
+
+    await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
+    await service.onCoUsage(["mem-C", "mem-D"], "workspace-1");
+    expect(service.counterSize()).toBe(2);
+
+    nowMs = 2_005_000;
+    expect(service.evictExpired()).toBe(0);
+    expect(service.counterSize()).toBe(2);
+  });
 });

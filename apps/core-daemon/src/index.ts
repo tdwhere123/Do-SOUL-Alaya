@@ -25,6 +25,7 @@ import {
   ConflictDetectionService,
   NarrativeBudgetService,
   PathRelationProposalService,
+  PATH_RELATION_COUNTER_DEFAULT_TTL_MS,
   ProjectMappingService,
   ProposalService,
   type ConflictDetectionLlmPort,
@@ -567,6 +568,14 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
         warn: warnLogger.warn
       })
     : null;
+  const pathRelationCounterTtlMs = (() => {
+    const raw = process.env.ALAYA_PATHREL_COUNTER_TTL_MS;
+    if (raw === undefined || raw === "") {
+      return undefined;
+    }
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  })();
   const pathRelationProposalService = new PathRelationProposalService({
     repo: {
       create: async (relation) => pathRelationRepo.create(relation),
@@ -575,8 +584,17 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
           { kind: "object", object_id: memoryId }
         ])
     },
+    ...(pathRelationCounterTtlMs === undefined ? {} : { counterTtlMs: pathRelationCounterTtlMs }),
     warn: warnLogger.warn
   });
+  // invariant: counter Map is bounded by periodic eviction. The daemon
+  // sweeps once per TTL interval; sub-threshold pairs older than the TTL
+  // are discarded so long no-promote tails do not grow without bound.
+  const pathRelationEvictionIntervalMs = pathRelationCounterTtlMs ?? PATH_RELATION_COUNTER_DEFAULT_TTL_MS;
+  const pathRelationEvictionTimer = setInterval(() => {
+    pathRelationProposalService.evictExpired();
+  }, pathRelationEvictionIntervalMs);
+  pathRelationEvictionTimer.unref?.();
   const materializationRouter = new MaterializationRouter({
     evidenceService,
     memoryService,
