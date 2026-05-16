@@ -713,6 +713,10 @@ export class RecallService {
       }
     }
 
+    // invariant: cohort dominance guard. Exact and seed cohort branches
+    // are admitted together or skipped together; union > 50% of tierMemories
+    // skips the whole plane so evidence_anchor / domain_tag_cluster /
+    // lexical can compete on single-session workspaces.
     const querySurfaceIds = new Set(params.queryProbes.surface_ids);
     const queryRunIds = new Set(params.queryProbes.run_ids);
     const exactCohortMatches = params.tierMemories
@@ -722,19 +726,10 @@ export class RecallService {
       )
       .sort(compareMemoryEntries)
       .slice(0, DYNAMIC_RECALL_PLANE_CAP);
-    for (const entry of exactCohortMatches) {
-      params.addCandidate(entry, "session_surface_cohort", 0.8, "session_surface_cohort");
-    }
-    // invariant: cohort dominance guard. The seed-cohort branch admits the
-    // ±N neighbors around a structural seed. On a small workspace this
-    // degenerates into "admit every memory in the workspace" because every
-    // memory shares the same run_id / surface_id. We compute the would-be
-    // cohort size (per-seed ±radius unique) before admitting; if it would
-    // cover more than half of tierMemories, the plane is skipped so other
-    // planes (evidence_anchor / domain_tag_cluster / lexical) can compete.
+
+    const seedCohortByMemoryId = new Map<string, readonly Readonly<MemoryEntry>[]>();
+    const seedCohortIds = new Set<string>();
     if (structuralSeeds.length > 0) {
-      const cohortByMemoryId = new Map<string, readonly Readonly<MemoryEntry>[]>();
-      const wouldBeCohort = new Set<string>();
       for (const seed of seeds.slice(0, DYNAMIC_RECALL_SEED_CAP)) {
         const cohort = params.tierMemories
           .filter((entry) =>
@@ -745,7 +740,7 @@ export class RecallService {
             const createdAtComparison = left.created_at.localeCompare(right.created_at);
             return createdAtComparison === 0 ? left.object_id.localeCompare(right.object_id) : createdAtComparison;
           });
-        cohortByMemoryId.set(seed.object_id, cohort);
+        seedCohortByMemoryId.set(seed.object_id, cohort);
         const center = cohort.findIndex((entry) => entry.object_id === seed.object_id);
         if (center < 0) {
           continue;
@@ -754,17 +749,26 @@ export class RecallService {
         const end = Math.min(cohort.length, center + DYNAMIC_RECALL_COHORT_RADIUS + 1);
         for (const entry of cohort.slice(start, end)) {
           if (entry.object_id !== seed.object_id) {
-            wouldBeCohort.add(entry.object_id);
+            seedCohortIds.add(entry.object_id);
           }
         }
       }
-      const seedCohortRatio =
-        params.tierMemories.length === 0
-          ? 0
-          : wouldBeCohort.size / params.tierMemories.length;
-      if (seedCohortRatio <= 0.5) {
+    }
+    const combinedCohortIds = new Set<string>([
+      ...exactCohortMatches.map((entry) => entry.object_id),
+      ...seedCohortIds
+    ]);
+    const combinedCohortRatio =
+      params.tierMemories.length === 0
+        ? 0
+        : combinedCohortIds.size / params.tierMemories.length;
+    if (combinedCohortRatio <= 0.5) {
+      for (const entry of exactCohortMatches) {
+        params.addCandidate(entry, "session_surface_cohort", 0.8, "session_surface_cohort");
+      }
+      if (structuralSeeds.length > 0) {
         for (const seed of seeds.slice(0, DYNAMIC_RECALL_SEED_CAP)) {
-          const cohort = cohortByMemoryId.get(seed.object_id) ?? [];
+          const cohort = seedCohortByMemoryId.get(seed.object_id) ?? [];
           const center = cohort.findIndex((entry) => entry.object_id === seed.object_id);
           if (center < 0) {
             continue;
