@@ -19,10 +19,10 @@ import {
 // invariant: LLM fallback is bypassed when rule-based detection already
 // produced at least one contradicts edge. The LLM run targets the
 // ambiguous-neighborhood case where rule thresholds did not trip; it
-// is not an "add a second opinion on top" path. The rule path is not
-// disable-able from the service surface; operators wanting
-// LLM-as-primary must run a forked service. see also:
-// docs/handbook/backlog.md for follow-up gates.
+// is not an "add a second opinion on top" path. The rule path is
+// disable-able via ruleEnabled=false (constructor) or
+// ALAYA_CONFLICT_RULE_ENABLED=false (env); when disabled the LLM port
+// becomes the sole producer of contradicts / incompatible_with edges.
 
 export interface ConflictDetectionMemoryRepoPort {
   findByDimension(
@@ -59,6 +59,7 @@ export interface ConflictDetectionServiceDeps {
   readonly llmPort?: ConflictDetectionLlmPort;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   readonly llmMaxPairsPerNewMemory?: number;
+  readonly ruleEnabled?: boolean;
 }
 
 // Rule-based comparator constants. Values tuned for short distilled facts
@@ -71,7 +72,11 @@ const TOKEN_JACCARD_CONTRADICTS_MAX = 0.35;
 const DEFAULT_LLM_MAX_PAIRS = 4;
 
 export class ConflictDetectionService {
-  public constructor(private readonly deps: ConflictDetectionServiceDeps) {}
+  private readonly ruleEnabled: boolean;
+
+  public constructor(private readonly deps: ConflictDetectionServiceDeps) {
+    this.ruleEnabled = deps.ruleEnabled ?? true;
+  }
 
   public async detectAndLinkConflicts(params: {
     readonly newMemoryId: string;
@@ -106,57 +111,59 @@ export class ConflictDetectionService {
 
     const contradictsCandidates: Array<Readonly<MemoryEntry>> = [];
 
-    for (const existing of sameDimension) {
-      if (existing.object_id === params.newMemoryId) {
-        continue;
+    if (this.ruleEnabled) {
+      for (const existing of sameDimension) {
+        if (existing.object_id === params.newMemoryId) {
+          continue;
+        }
+        if (existing.scope_class !== params.newMemoryScopeClass) {
+          continue;
+        }
+        const existingTagSet = new Set(existing.domain_tags);
+        const tagOverlap = jaccardIndex(newTagSet, existingTagSet);
+        if (tagOverlap < TAG_OVERLAP_CONTRADICTS_THRESHOLD) {
+          continue;
+        }
+        const existingTokens = tokenize(existing.content);
+        const tokenOverlap = jaccardIndex(newTokens, existingTokens);
+        if (tokenOverlap >= TOKEN_JACCARD_CONTRADICTS_MAX) {
+          continue;
+        }
+        contradictsCandidates.push(existing);
       }
-      if (existing.scope_class !== params.newMemoryScopeClass) {
-        continue;
-      }
-      const existingTagSet = new Set(existing.domain_tags);
-      const tagOverlap = jaccardIndex(newTagSet, existingTagSet);
-      if (tagOverlap < TAG_OVERLAP_CONTRADICTS_THRESHOLD) {
-        continue;
-      }
-      const existingTokens = tokenize(existing.content);
-      const tokenOverlap = jaccardIndex(newTokens, existingTokens);
-      if (tokenOverlap >= TOKEN_JACCARD_CONTRADICTS_MAX) {
-        continue;
-      }
-      contradictsCandidates.push(existing);
-    }
 
-    for (const existing of contradictsCandidates) {
-      await this.writeEdge(
-        params.newMemoryId,
-        existing.object_id,
-        MemoryGraphEdgeType.CONTRADICTS,
-        params.workspaceId,
-        params.runId
-      );
-    }
+      for (const existing of contradictsCandidates) {
+        await this.writeEdge(
+          params.newMemoryId,
+          existing.object_id,
+          MemoryGraphEdgeType.CONTRADICTS,
+          params.workspaceId,
+          params.runId
+        );
+      }
 
-    for (const existing of allWorkspace) {
-      if (existing.object_id === params.newMemoryId) {
-        continue;
+      for (const existing of allWorkspace) {
+        if (existing.object_id === params.newMemoryId) {
+          continue;
+        }
+        const dimMismatch = existing.dimension !== params.newMemoryDimension;
+        const scopeMismatch = existing.scope_class !== params.newMemoryScopeClass;
+        if (!dimMismatch && !scopeMismatch) {
+          continue;
+        }
+        const existingTagSet = new Set(existing.domain_tags);
+        const tagOverlap = jaccardIndex(newTagSet, existingTagSet);
+        if (tagOverlap < TAG_OVERLAP_CONTRADICTS_THRESHOLD) {
+          continue;
+        }
+        await this.writeEdge(
+          params.newMemoryId,
+          existing.object_id,
+          MemoryGraphEdgeType.INCOMPATIBLE_WITH,
+          params.workspaceId,
+          params.runId
+        );
       }
-      const dimMismatch = existing.dimension !== params.newMemoryDimension;
-      const scopeMismatch = existing.scope_class !== params.newMemoryScopeClass;
-      if (!dimMismatch && !scopeMismatch) {
-        continue;
-      }
-      const existingTagSet = new Set(existing.domain_tags);
-      const tagOverlap = jaccardIndex(newTagSet, existingTagSet);
-      if (tagOverlap < TAG_OVERLAP_CONTRADICTS_THRESHOLD) {
-        continue;
-      }
-      await this.writeEdge(
-        params.newMemoryId,
-        existing.object_id,
-        MemoryGraphEdgeType.INCOMPATIBLE_WITH,
-        params.workspaceId,
-        params.runId
-      );
     }
 
     if (this.deps.llmPort !== undefined && contradictsCandidates.length === 0) {

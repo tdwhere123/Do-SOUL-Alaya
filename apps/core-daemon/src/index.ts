@@ -555,6 +555,13 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const conflictDetectionLlmPort = conflictDetectionEnabled
     ? createConflictDetectionLlmPort()
     : null;
+  const conflictDetectionRuleEnabled = (() => {
+    const raw = process.env.ALAYA_CONFLICT_RULE_ENABLED?.toLowerCase();
+    if (raw === undefined || raw === "") {
+      return true;
+    }
+    return raw !== "0" && raw !== "false";
+  })();
   const conflictDetectionService = conflictDetectionEnabled
     ? new ConflictDetectionService({
         memoryRepo: {
@@ -565,6 +572,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
         },
         graphEdgePort,
         ...(conflictDetectionLlmPort === null ? {} : { llmPort: conflictDetectionLlmPort }),
+        ruleEnabled: conflictDetectionRuleEnabled,
         warn: warnLogger.warn
       })
     : null;

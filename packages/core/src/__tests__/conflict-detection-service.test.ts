@@ -231,4 +231,74 @@ describe("ConflictDetectionService", () => {
       })
     ).resolves.toBeUndefined();
   });
+
+  it("ruleEnabled=false skips rule-path edges so only the LLM port produces contradicts", async () => {
+    const existing = createMemoryEntry({
+      object_id: "mem-A",
+      content: "I prefer dark roast coffee."
+    });
+    const memoryRepo = {
+      findByDimension: vi.fn(async () => [existing]),
+      findByWorkspaceId: vi.fn(async () => [existing])
+    };
+    const graphEdgePort = { createEdge: vi.fn(async () => undefined) };
+    const llmPort = {
+      classifyPair: vi.fn(async () => "contradicts" as const)
+    };
+    const service = new ConflictDetectionService({
+      memoryRepo,
+      graphEdgePort,
+      llmPort,
+      ruleEnabled: false
+    });
+
+    await service.detectAndLinkConflicts({
+      newMemoryId: "mem-B",
+      newMemoryDimension: MemoryDimension.PREFERENCE,
+      newMemoryScopeClass: ScopeClass.PROJECT,
+      newMemoryContent: "I prefer light roast tea instead.",
+      newMemoryDomainTags: ["coffee", "preference"],
+      workspaceId: "workspace-1",
+      runId: "run-1"
+    });
+
+    expect(llmPort.classifyPair).toHaveBeenCalled();
+    expect(graphEdgePort.createEdge).toHaveBeenCalledTimes(1);
+    expect(graphEdgePort.createEdge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceMemoryId: "mem-B",
+        targetMemoryId: "mem-A",
+        edgeType: "contradicts"
+      })
+    );
+  });
+
+  it("ruleEnabled=false with no llmPort produces no edges", async () => {
+    const existing = createMemoryEntry({
+      object_id: "mem-A",
+      content: "I prefer dark roast coffee."
+    });
+    const memoryRepo = {
+      findByDimension: vi.fn(async () => [existing]),
+      findByWorkspaceId: vi.fn(async () => [existing])
+    };
+    const graphEdgePort = { createEdge: vi.fn(async () => undefined) };
+    const service = new ConflictDetectionService({
+      memoryRepo,
+      graphEdgePort,
+      ruleEnabled: false
+    });
+
+    await service.detectAndLinkConflicts({
+      newMemoryId: "mem-B",
+      newMemoryDimension: MemoryDimension.PREFERENCE,
+      newMemoryScopeClass: ScopeClass.PROJECT,
+      newMemoryContent: "I prefer light roast tea instead.",
+      newMemoryDomainTags: ["coffee", "preference"],
+      workspaceId: "workspace-1",
+      runId: "run-1"
+    });
+
+    expect(graphEdgePort.createEdge).not.toHaveBeenCalled();
+  });
 });
