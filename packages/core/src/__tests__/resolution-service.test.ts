@@ -236,6 +236,32 @@ describe("ResolutionService dispatch", () => {
     );
   });
 
+  // invariant: agents resolving a staged warning's reject_pending
+  // option (which mapResolutionOptionToKind sends as SoulResolutionKind.REJECT)
+  // must be able to archive a DRAFT claim directly. Without the
+  // draft -> archived transition, the advertised resolution would
+  // throw CONFLICT and the agent has no way to decline a pending claim.
+  it("reject archives a DRAFT claim directly", async () => {
+    const harness = createHarness();
+    harness.claimRepo.findById.mockResolvedValueOnce(
+      buildClaim({ claim_status: ClaimLifecycleState.DRAFT })
+    );
+    const outcome = await harness.service.resolve({
+      ...baseInput,
+      resolution: SoulResolutionKind.REJECT
+    });
+    expect(outcome.status).toBe("applied");
+    expect(outcome.auditEventType).toBe(
+      GovernanceResolutionEventType.SOUL_RESOLUTION_REJECT_APPLIED
+    );
+    expect(harness.claimService.transitionLifecycle).toHaveBeenCalledWith(
+      "claim-1",
+      ClaimLifecycleState.ARCHIVED,
+      expect.any(String),
+      "user"
+    );
+  });
+
   it("correct requires a non-empty correction prose and emits the correct event", async () => {
     const harness = createHarness();
     harness.claimRepo.findById.mockResolvedValue(

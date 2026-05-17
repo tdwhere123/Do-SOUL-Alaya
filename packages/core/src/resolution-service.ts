@@ -150,9 +150,13 @@ export class ResolutionService {
     };
   }
 
-  // invariant: reject archives a draft claim_form when the target is a
-  // claim. For memory_entry targets the resolution emits the audit
-  // event only — durable memory is not mutated by the reject path.
+  // invariant: reject archives the claim_form regardless of starting
+  // state. Draft claims archive directly via the claim_form
+  // transition matrix (draft -> archived); active / contested /
+  // winner / superseded archive through the standard path. For
+  // memory_entry targets the resolution emits the audit event only —
+  // durable memory is not mutated by the reject path.
+  // see also: packages/protocol/src/soul/claim-form.ts claimTransitions
   private async applyReject(input: ResolveInput): Promise<ResolveOutcome> {
     const claim = await this.deps.claimRepo.findById(input.targetObjectId);
     if (claim !== null) {
@@ -160,12 +164,6 @@ export class ResolutionService {
         throw new CoreError(
           "VALIDATION",
           `Claim form ${input.targetObjectId} is not in workspace ${input.workspaceId}`
-        );
-      }
-      if (claim.claim_status === ClaimLifecycleState.DRAFT) {
-        throw new CoreError(
-          "CONFLICT",
-          "reject path does not support DRAFT claims; transition to ACTIVE first or call confirm"
         );
       }
       if (claim.claim_status !== ClaimLifecycleState.ARCHIVED) {

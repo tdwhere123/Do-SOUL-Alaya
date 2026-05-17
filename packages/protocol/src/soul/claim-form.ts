@@ -67,7 +67,10 @@ export const CLAIM_KIND_PRIORITY: Readonly<Record<ClaimKind, number>> = Object.f
 });
 
 const claimTransitions: Readonly<Record<ClaimLifecycleState, readonly ClaimLifecycleState[]>> = {
-  draft: ["active"],
+  // invariant: draft -> archived directly so soul.resolve.reject on a
+  // draft claim has a terminal sink. The intermediate "rejected"
+  // state is reserved for contested-then-rejected arbitration.
+  draft: ["active", "archived"],
   active: ["contested", "superseded", "archived"],
   contested: ["winner", "rejected", "archived"],
   winner: ["superseded", "archived"],
