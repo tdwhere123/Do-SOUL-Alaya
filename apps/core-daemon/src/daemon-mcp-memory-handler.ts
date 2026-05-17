@@ -43,7 +43,19 @@ export function createDaemonMcpMemoryToolHandler(input: {
   const soulResolveHandler = createSoulResolveHandler({
     resolutionService: input.resolutionService,
     trustStateRecorder: {
-      findDeliveryById: (deliveryId) => input.trustStateRecorder.findDeliveryById(deliveryId)
+      findDeliveryById: async (deliveryId) => {
+        const delivery = await input.trustStateRecorder.findDeliveryById(deliveryId);
+        if (delivery === null) {
+          return null;
+        }
+        return {
+          delivery_id: delivery.delivery_id,
+          agent_target: delivery.agent_target,
+          workspace_id: delivery.workspace_id,
+          run_id: delivery.run_id,
+          delivered_object_ids: delivery.delivered_object_ids
+        };
+      }
     }
   });
   return createMcpMemoryToolHandler({

@@ -29,7 +29,6 @@ export interface HealthInboxRouteServices {
   };
 }
 
-const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 500;
 
 export function registerHealthInboxRoutes(
@@ -80,5 +79,5 @@ function parseLimitQuery(value: string | undefined): number | null {
   if (value === undefined || value.trim().length === 0) return null;
   const parsed = Number.parseInt(value.trim(), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return null;
-  return Math.min(parsed, MAX_LIMIT) || DEFAULT_LIMIT;
+  return Math.min(parsed, MAX_LIMIT);
 }

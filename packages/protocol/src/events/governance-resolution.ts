@@ -5,7 +5,11 @@ import {
   IsoDatetimeStringSchema,
   NonEmptyStringSchema
 } from "../schema-primitives.js";
+import { GovernanceResolutionPolicyClassificationSchema } from "../soul/governance-policy-classification.js";
 import { SoulResolutionKindSchema } from "../soul/resolution.js";
+
+// see also: packages/protocol/src/soul/governance-policy-classification.ts
+export { GovernanceResolutionPolicyClassificationSchema };
 
 // invariant: one event type per resolution kind so EventLog consumers
 // can index by event_type without re-parsing the payload. The kind is
@@ -52,12 +56,6 @@ export const RESOLUTION_KIND_TO_EVENT_TYPE: Readonly<
 // the warning to the agent (ask_now / apply_silently / track_only /
 // inspect_later); the resolve handler echoes it so EventLog readers
 // can correlate the resolution with the policy decision.
-export const GovernanceResolutionPolicyClassificationSchema = z.enum([
-  "ask_now",
-  "apply_silently",
-  "track_only",
-  "inspect_later"
-]);
 
 const GovernanceResolutionPayloadObjectSchema = z.object({
   target_object_id: NonEmptyStringSchema,

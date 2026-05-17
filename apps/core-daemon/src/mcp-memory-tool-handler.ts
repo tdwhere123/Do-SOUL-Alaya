@@ -371,7 +371,7 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     const workspaceId = context.workspaceId;
     const agentTarget = context.agentTarget;
     if (workspaceId.length === 0 || agentTarget.length === 0) return;
-    const key = `${workspaceId} ${agentTarget}`;
+    const key = JSON.stringify([workspaceId, agentTarget]);
     if (registeredSurfaces.has(key)) return;
     registeredSurfaces.add(key);
     try {

@@ -1,8 +1,6 @@
 import {
   SoulResolveRequestSchema,
   SoulResolveResponseSchema,
-  type GovernanceResolutionPolicyClassification,
-  type SoulResolveRequest,
   type SoulResolveResponse
 } from "@do-soul/alaya-protocol";
 import type { ResolutionService } from "@do-soul/alaya-core";
@@ -21,6 +19,11 @@ export interface SoulResolveCallContext {
 
 export interface SoulResolveHandlerDependencies {
   readonly resolutionService: ResolutionService;
+  // invariant: delivered_object_ids gates which object_ids the agent
+  // may resolve against this delivery. Without it, an in-scope
+  // delivery_id would authorise mutation of arbitrary workspace
+  // objects (CVE-style scope-confusion). The recorder strips other
+  // ContextDeliveryRecord fields the handler does not need.
   readonly trustStateRecorder: {
     findDeliveryById(
       deliveryId: string
@@ -29,17 +32,9 @@ export interface SoulResolveHandlerDependencies {
       readonly agent_target: string;
       readonly workspace_id: string | null;
       readonly run_id: string | null;
+      readonly delivered_object_ids: readonly string[];
     }> | null>;
   };
-  // invariant: optional classification echo. The MCP layer does not
-  // own GovernancePolicy state (that is per-turn agent-side or per
-  // recall on the daemon-side); the resolve handler is given an
-  // already-classified outcome by the caller when one exists so the
-  // audit event can be correlated with the policy decision.
-  readonly classifyResolution?: (
-    request: SoulResolveRequest,
-    context: SoulResolveCallContext
-  ) => GovernanceResolutionPolicyClassification | undefined;
 }
 
 export class SoulResolveScopeError extends Error {
@@ -58,7 +53,12 @@ export function createSoulResolveHandler(deps: SoulResolveHandlerDependencies) {
       context: SoulResolveCallContext
     ): Promise<SoulResolveResponse> {
       const request = SoulResolveRequestSchema.parse(rawArguments);
-      await assertDeliveryInScope(deps.trustStateRecorder, request.delivery_id, context);
+      await assertDeliveryInScope(
+        deps.trustStateRecorder,
+        request.delivery_id,
+        request.target_object_id,
+        context
+      );
       const outcome = await deps.resolutionService.resolve({
         targetObjectId: request.target_object_id,
         resolution: request.resolution,
@@ -70,7 +70,9 @@ export function createSoulResolveHandler(deps: SoulResolveHandlerDependencies) {
         ...(request.correction === undefined ? {} : { correction: request.correction }),
         ...(request.reason === undefined ? {} : { reason: request.reason }),
         ...(request.defer_until === undefined ? {} : { deferUntil: request.defer_until }),
-        ...buildClassification(deps, request, context)
+        ...(request.policy_classification === undefined
+          ? {}
+          : { policyClassification: request.policy_classification })
       });
       return SoulResolveResponseSchema.parse({
         target_object_id: request.target_object_id,
@@ -87,21 +89,10 @@ export function createSoulResolveHandler(deps: SoulResolveHandlerDependencies) {
   };
 }
 
-function buildClassification(
-  deps: SoulResolveHandlerDependencies,
-  request: SoulResolveRequest,
-  context: SoulResolveCallContext
-): { readonly policyClassification?: GovernanceResolutionPolicyClassification } {
-  if (deps.classifyResolution === undefined) {
-    return {};
-  }
-  const classification = deps.classifyResolution(request, context);
-  return classification === undefined ? {} : { policyClassification: classification };
-}
-
 async function assertDeliveryInScope(
   trustStateRecorder: SoulResolveHandlerDependencies["trustStateRecorder"],
   deliveryId: string,
+  targetObjectId: string,
   context: SoulResolveCallContext
 ): Promise<void> {
   const delivery = await trustStateRecorder.findDeliveryById(deliveryId);
@@ -119,6 +110,16 @@ async function assertDeliveryInScope(
     throw new SoulResolveScopeError(
       "NEEDS_CONTEXT",
       `delivery_id ${deliveryId} is not in the calling agent's recall scope`
+    );
+  }
+  // invariant: agent may only resolve objects the cited delivery
+  // actually delivered. Anything else is scope-confusion: a valid
+  // delivery_id paired with an arbitrary target_object_id would let
+  // the agent mutate workspace objects it never saw via recall.
+  if (!delivery.delivered_object_ids.includes(targetObjectId)) {
+    throw new SoulResolveScopeError(
+      "VALIDATION",
+      `target_object_id ${targetObjectId} was not in delivery ${deliveryId}`
     );
   }
 }

@@ -20,6 +20,15 @@ export interface RecallUtilizationRouteServices {
   // telemetry rows per 1-used delivery match. When absent, the route
   // still computes buckets — telemetry is best-effort, never load-bearing.
   readonly singleUsedAnchorEmitter?: SingleUsedAnchorTelemetryEmitter;
+  // invariant: when present, the route resolves the single
+  // delivered_object_id for 1-pointer deliveries and forwards it on
+  // the telemetry payload so downstream reuse_gain attribution has a
+  // concrete anchor. Absent reader degrades gracefully to null.
+  readonly deliveryAnchorReader?: SingleUsedAnchorDeliveryReader;
+}
+
+export interface SingleUsedAnchorDeliveryReader {
+  findDeliveredObjectIds(deliveryId: string): Promise<readonly string[] | null>;
 }
 
 export interface SingleUsedAnchorTelemetryEmitter {
@@ -30,6 +39,10 @@ export interface SingleUsedAnchorTelemetryEmitter {
     readonly sessionId: string;
     readonly deliveryId: string;
     readonly occurredAt: string;
+    // invariant: the one delivered_object_id of the cited delivery
+    // when pointer_count === 1; downstream reuse_gain attribution
+    // depends on this being populated rather than null.
+    readonly usedAnchorObjectId: string | null;
   }): Promise<void>;
 }
 
@@ -86,7 +99,8 @@ export function registerRecallUtilizationRoutes(
         deliveries,
         reports,
         workspaceId,
-        emitter: services.singleUsedAnchorEmitter
+        emitter: services.singleUsedAnchorEmitter,
+        anchorReader: services.deliveryAnchorReader
       });
     }
 
@@ -314,6 +328,7 @@ async function emitSingleUsedAnchorTelemetry(input: {
   readonly reports: readonly NormalizedReport[];
   readonly workspaceId: string;
   readonly emitter: SingleUsedAnchorTelemetryEmitter;
+  readonly anchorReader?: SingleUsedAnchorDeliveryReader;
 }): Promise<void> {
   const usedReports = new Map<string, NormalizedReport>();
   for (const report of input.reports) {
@@ -335,6 +350,17 @@ async function emitSingleUsedAnchorTelemetry(input: {
     );
 
   for (const { delivery, report } of matches) {
+    let usedAnchorObjectId: string | null = null;
+    if (input.anchorReader !== undefined) {
+      try {
+        const ids = await input.anchorReader.findDeliveredObjectIds(delivery.delivery_id);
+        if (ids !== null && ids.length === 1) {
+          usedAnchorObjectId = ids[0] ?? null;
+        }
+      } catch {
+        // anchor lookup is best-effort; null on any failure
+      }
+    }
     try {
       await input.emitter.emit({
         workspaceId: input.workspaceId,
@@ -342,7 +368,8 @@ async function emitSingleUsedAnchorTelemetry(input: {
         agentTarget: report.agent_target,
         sessionId: report.session_id,
         deliveryId: delivery.delivery_id,
-        occurredAt: report.occurred_at
+        occurredAt: report.occurred_at,
+        usedAnchorObjectId
       });
     } catch {
       // invariant: telemetry emission never breaks the route response.

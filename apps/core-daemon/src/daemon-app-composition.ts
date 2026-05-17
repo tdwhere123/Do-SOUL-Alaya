@@ -40,6 +40,7 @@ type CreateCoreDaemonAppInput = Readonly<{
   recallService: unknown;
   recallUtilizationService: unknown;
   singleUsedAnchorEmitter?: unknown;
+  deliveryAnchorReader?: unknown;
   taskSurfaceBuilder: unknown;
   synthesisService: unknown;
   claimService: unknown;
@@ -167,7 +168,10 @@ export function createCoreDaemonApp(input: CreateCoreDaemonAppInput): ReturnType
         eventLogRepo: input.eventLogRepo,
         ...(input.singleUsedAnchorEmitter === undefined
           ? {}
-          : { singleUsedAnchorEmitter: input.singleUsedAnchorEmitter })
+          : { singleUsedAnchorEmitter: input.singleUsedAnchorEmitter }),
+        ...(input.deliveryAnchorReader === undefined
+          ? {}
+          : { deliveryAnchorReader: input.deliveryAnchorReader })
       },
       syntheses: {
         workspaceService: input.workspaceService,

@@ -123,9 +123,9 @@ describe("computeUtilizationBuckets", () => {
     expect(buckets.no_recall).toBe(2);
   });
 
-  it("ignores orphan reports without turn_index for no_recall", () => {
+  it("counts orphan reports by session even when turn_index is absent", () => {
     const reports = [report({ delivery_id: "orphan_no_turn", usage_state: "not_applicable" })];
-    expect(computeUtilizationBuckets({ deliveries: [], reports }).no_recall).toBe(0);
+    expect(computeUtilizationBuckets({ deliveries: [], reports }).no_recall).toBe(1);
   });
 });
 

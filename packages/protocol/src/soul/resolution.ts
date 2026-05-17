@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { GovernanceResolutionPolicyClassificationSchema } from "./governance-policy-classification.js";
 import {
   BoundedIdSchema,
   BoundedLabelSchema,
@@ -6,6 +7,7 @@ import {
   IsoDatetimeStringSchema,
   NonEmptyStringSchema
 } from "../schema-primitives.js";
+import { type StagedWarningResolutionOption } from "./staged-warning.js";
 
 // invariant: closed set of resolution kinds soul.resolve accepts.
 // see also: packages/core/src/resolution-service.ts (dispatcher)
@@ -40,18 +42,45 @@ export type SoulResolutionKind = z.infer<typeof SoulResolutionKindSchema>;
 // schema.
 // invariant: resolution === "correct" requires `correction`.
 // invariant: resolution === "defer" requires `defer_until`.
+// invariant: policy_classification is agent-supplied. GovernancePolicy
+// is an agent-side helper (per-turn ask_now budget); the daemon
+// echoes the classification onto the resolution audit event without
+// re-classifying.
+// see also: packages/core/src/governance-policy.ts
 export const SoulResolveRequestSchema = z
   .object({
     target_object_id: BoundedIdSchema,
     resolution: SoulResolutionKindSchema,
     delivery_id: BoundedIdSchema,
     policy: BoundedLabelSchema.optional(),
+    policy_classification: GovernanceResolutionPolicyClassificationSchema.optional(),
     correction: BoundedReasonSchema.optional(),
     reason: BoundedReasonSchema.optional(),
     defer_until: IsoDatetimeStringSchema.optional()
   })
   .strict()
   .readonly();
+
+// invariant: maps the agent-facing StagedWarningResolutionOption
+// (recall sidecar surface) to the soul.resolve verb's SoulResolutionKind.
+// Returns null for options that have no direct resolve correspondent;
+// agents fall back to their own resolution choice in that case.
+// see also: packages/protocol/src/soul/staged-warning.ts
+export function mapResolutionOptionToKind(
+  option: StagedWarningResolutionOption
+): SoulResolutionKind | null {
+  switch (option) {
+    case "accept_pending":
+      return SoulResolutionKind.CONFIRM;
+    case "reject_pending":
+      return SoulResolutionKind.REJECT;
+    case "defer":
+      return SoulResolutionKind.DEFER;
+    case "request_evidence":
+    case "escalate_human":
+      return null;
+  }
+}
 
 export const SoulResolveResponseSchema = z
   .object({

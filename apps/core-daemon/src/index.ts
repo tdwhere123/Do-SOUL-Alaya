@@ -600,7 +600,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
           agentTarget: input.agentTarget,
           workspaceId: input.workspaceId,
           occurredAt: input.occurredAt,
-          usedAnchorObjectId: null
+          usedAnchorObjectId: input.usedAnchorObjectId
         })
       } as const;
       try {
@@ -608,6 +608,15 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       } catch {
         // invariant: telemetry emission never propagates failure to the route.
       }
+    }
+  };
+  // invariant: looks up the delivered_object_ids for a delivery so the
+  // SOUL_SINGLE_USED_ANCHOR payload can attribute the reuse to a
+  // concrete anchor when pointer_count === 1.
+  const deliveryAnchorReader = {
+    async findDeliveredObjectIds(deliveryId: string): Promise<readonly string[] | null> {
+      const delivery = await trustStateRecorder.findDeliveryById(deliveryId);
+      return delivery === null ? null : delivery.delivered_object_ids;
     }
   };
   const recallService = new RecallService({
@@ -1033,6 +1042,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     recallService,
     recallUtilizationService,
     singleUsedAnchorEmitter,
+    deliveryAnchorReader,
     taskSurfaceBuilder,
     synthesisService,
     claimService,
