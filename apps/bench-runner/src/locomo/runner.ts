@@ -271,13 +271,14 @@ function computePercentile(values: readonly number[], p: number): number {
 }
 
 function resolveAlayaVersion(): string {
-  try {
-    const pkgPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../../package.json");
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
-    return pkg.version;
-  } catch {
-    return "0.3.8";
-  }
+  // invariant: read the bench-runner package version, not the
+  // grandparent path (which resolves to apps/package.json and does
+  // not exist). On read failure the function throws — there is no
+  // useful "default" version to fall back to because a stale literal
+  // would mis-attribute every bench archive after a release bump.
+  const pkgPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../package.json");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
+  return pkg.version;
 }
 
 function resolveCommitSha7(): string {

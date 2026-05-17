@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
+import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
@@ -221,7 +223,7 @@ export async function startBenchDaemon(
     });
 
     mcpClient = new Client(
-      { name: "alaya-bench-runner", version: "0.3.8" },
+      { name: "alaya-bench-runner", version: resolveBenchRunnerVersion() },
       { capabilities: {} }
     );
 
@@ -834,4 +836,13 @@ function restoreEnv(saved: Partial<Record<ManagedEnvKey, string | undefined>>): 
       process.env[key] = prev;
     }
   }
+}
+
+// invariant: read the bench-runner package version for MCP client
+// identification so archives produced post-release reflect the actual
+// bumped version, not a stale literal.
+function resolveBenchRunnerVersion(): string {
+  const pkgPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../package.json");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
+  return pkg.version;
 }

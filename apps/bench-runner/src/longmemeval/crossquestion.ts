@@ -464,16 +464,15 @@ function truncateExcerpt(value: string): string {
 }
 
 function resolveAlayaVersion(): string {
-  try {
-    const pkgPath = resolve(
-      dirname(fileURLToPath(import.meta.url)),
-      "../../../package.json"
-    );
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
-    return pkg.version;
-  } catch {
-    return "0.3.8";
-  }
+  // invariant: read the bench-runner package version; the prior
+  // `../../../package.json` resolved to nonexistent apps/package.json
+  // and fell back to a stale literal that misattributed archives.
+  const pkgPath = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    "../../package.json"
+  );
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
+  return pkg.version;
 }
 
 function resolveCommitSha7(): string {

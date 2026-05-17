@@ -249,16 +249,15 @@ function computePercentile(values: number[], p: number): number {
 }
 
 function resolveAlayaVersion(): string {
-  try {
-    const pkgPath = resolve(
-      dirname(fileURLToPath(import.meta.url)),
-      "../../../package.json"
-    );
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
-    return pkg.version;
-  } catch {
-    return "0.3.8";
-  }
+  // invariant: read the bench-runner package version, not the
+  // grandparent path (which resolves to apps/package.json and does
+  // not exist). Stale literal fallbacks mis-attribute archives.
+  const pkgPath = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    "../../package.json"
+  );
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
+  return pkg.version;
 }
 
 function resolveCommitSha7(): string {

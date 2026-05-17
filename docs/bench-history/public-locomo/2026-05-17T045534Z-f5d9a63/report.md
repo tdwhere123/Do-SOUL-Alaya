@@ -3,7 +3,7 @@
 - Run at: 2026-05-17T04:55:34.693Z
 - Sample size: 1982 (evaluated 302/1982, label=shard_merged)
 - Harness mode: mcp_propose_review
-- Alaya commit: f5d9a63 (0.3.8)
+- Alaya commit: f5d9a63 (0.3.9)
 - Embedding: none
 - Chat: none
 - Dataset: locomo10 (size=10)
