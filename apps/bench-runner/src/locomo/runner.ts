@@ -109,8 +109,14 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
       size: opts.fetchResult?.conversationCount ?? conversations.length,
       source: LOCOMO_SOURCE_URL
     },
-    sample_size: opts.fetchResult?.conversationCount ?? conversations.length,
-    evaluated_count: window.length,
+    // invariant: sample_size + evaluated_count count QAs, not
+    // conversations. The R@K denominator is `totalQa` (questions
+    // actually scored across all conversations in the window); the
+    // dataset-wide upper bound is the QA total of the full LoCoMo set.
+    // see also: packages/eval/src/wilson-ci.ts (label cascade reads
+    // evaluatedCount in question units).
+    sample_size: resolveLocomoSampleSize(conversations),
+    evaluated_count: totalQa,
     harness_mode: "mcp_propose_review",
     kpi: {
       r_at_1: rAt1,
@@ -280,4 +286,26 @@ function resolveCommitSha7(): string {
   } catch {
     return "0000000";
   }
+}
+
+// invariant: sample_size counts the scoreable-QA upper bound across
+// the full dataset (every QA carrying non-empty evidence), not the
+// number of conversations. evaluated_count is the subset this run
+// actually scored, so evaluated_count <= sample_size holds even when
+// --limit slices the conversation window.
+// see also: apps/bench-runner/src/locomo/dataset.ts — LoCoMo
+// category-5 adversarial entries omit evidence by design and are
+// excluded from the denominator.
+export function resolveLocomoSampleSize(
+  conversations: readonly LocomoSample[]
+): number {
+  let total = 0;
+  for (const conv of conversations) {
+    for (const qa of conv.qa) {
+      if (qa.evidence.length > 0) {
+        total += 1;
+      }
+    }
+  }
+  return total;
 }

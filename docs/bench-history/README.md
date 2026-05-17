@@ -55,7 +55,10 @@ docs/bench-history/
 │   │   ├── longmemeval-diagnostics.json (optional)
 │   │   ├── report.md
 │   │   └── findings.md (optional)
-│   └── latest-baseline.json
+│   ├── latest-baseline.json               # embedding=none canonical pointer
+│   └── latest-baseline-embedding-on.json  # embedding-on sibling pointer
+├── public-pre-v0.3.9/                     # frozen pre-v0.3.9 Pass A archives
+│   └── <YYYY-MM-DDTHHMMSSZ>-<sha7>/       # historical record, not diffed
 ├── public-multiturn/
 │   ├── <YYYY-MM-DDTHHMMSSZ>-<sha7>/
 │   │   ├── kpi.json
@@ -71,6 +74,45 @@ docs/bench-history/
     │   └── findings.md (optional)
     └── latest-baseline.json
 ```
+
+### Two parallel pointers under `public/`
+
+- `latest-baseline.json` — embedding=none canonical pointer. Read by
+  `readLatest` for the disabled-embedding regression chain (the audit
+  surface for "what does Alaya recall by lexical / structural planes
+  alone").
+- `latest-baseline-embedding-on.json` — embedding-on sibling pointer
+  (placeholder). Reserved for callers that opt into the cost-bearing
+  semantic supplement chain so an embedding-on FAIL does not pollute
+  the embedding-off baseline. No consumer reads this file today; it
+  ships with `slug: null` and a note. When the first non-FAIL
+  embedding-on rerun lands, this pointer activates and any reader
+  that explicitly opens it (`readFileSync` of this exact path) will
+  see a populated slug. Until that rerun, treat this pointer as
+  reserved-for-future-use.
+
+### Pre-v0.3.9 frozen archives
+
+`public-pre-v0.3.9/` holds the bench archives written before the
+v0.3.9 denominator + label-cascade fix. They are kept for historical
+reference and are not diffed by the runner. The most recent non-FAIL
+disabled-embedding archive was promoted back into `public/` as the
+anchor so the v0.3.9 reruns have a valid previous-baseline to diff
+against; everything else (including the latency-FAIL archives and the
+single mixed embedding-on FAIL archive) lives under
+`public-pre-v0.3.9/`.
+
+### Sample-size label cascade
+
+`packages/eval/src/wilson-ci.ts` derives the sample-size label from
+`evaluated_count` and `latency_source` via four tiers:
+
+| Label          | Bucket                                          | What the bench claim is good for |
+|---             |---                                              |--- |
+| `smoke`        | `evaluated_count ≤ 50`                          | Tripwire only — verifies the code path runs; not a quality claim. |
+| `staged`       | `51 ≤ evaluated_count ≤ 200`                    | Staged-release confidence — interim sanity check; widening CI bands. |
+| `shard_merged` | `201 ≤ evaluated_count ≤ 499` OR `latency_source = worst_shard_bound` | Cross-shard merged dataset; latency reads as upper bound, not exact percentile. |
+| `full`         | `evaluated_count ≥ 500`                         | Full dataset, exact percentiles, release-grade evidence. |
 
 - `<YYYY-MM-DDTHHMMSSZ>-<sha7>` combines the ISO-8601 run timestamp (UTC,
   colon-stripped so the path is filesystem-safe) and the **alaya commit

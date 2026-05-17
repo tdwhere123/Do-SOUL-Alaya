@@ -1,0 +1,5 @@
+{
+  "slug": null,
+  "kpi_path": null,
+  "note": "No clean embedding-on baseline in public/. The single prior embedding-on archive carried a latency FAIL and was moved to public-pre-v0.3.9/. The first non-FAIL embedding-on rerun lands here and rewrites this pointer."
+}

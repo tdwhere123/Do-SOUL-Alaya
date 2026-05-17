@@ -73,7 +73,26 @@ export function ciAwareBand(
 
 // Sample-size label used in report.md and release notes to communicate
 // statistical confidence at a glance.
-export type SampleSizeLabel = "smoke" | "shard_merged" | "full";
+//
+// invariant: the cascade is size-driven; `worst_shard_bound` latency
+// always pins the label to `shard_merged` regardless of evaluatedCount
+// because the latency channel is the upper-bound of N shards, not the
+// real run-wide percentile.
+//
+// Thresholds:
+//   smoke         — evaluatedCount <= 50           (tripwire; not a quality claim)
+//   staged        — 51 <= evaluatedCount <= 200    (staged confidence; mid-run sanity)
+//   shard_merged  — 201 <= evaluatedCount <= 499   OR latency_source = worst_shard_bound
+//                  (cross-shard merge; latency is upper bound)
+//   full          — evaluatedCount >= 500          (full dataset; release-grade)
+export type SampleSizeLabel = "smoke" | "staged" | "shard_merged" | "full";
+
+export const SAMPLE_SIZE_LABEL_THRESHOLDS = Object.freeze({
+  smoke_max: 50,
+  staged_max: 200,
+  shard_merged_max: 499,
+  full_min: 500
+});
 
 export function deriveSampleSizeLabel(
   evaluatedCount: number,
@@ -82,8 +101,14 @@ export function deriveSampleSizeLabel(
   if (latencySource === "worst_shard_bound") {
     return "shard_merged";
   }
-  if (evaluatedCount < 100) {
+  if (evaluatedCount <= SAMPLE_SIZE_LABEL_THRESHOLDS.smoke_max) {
     return "smoke";
+  }
+  if (evaluatedCount <= SAMPLE_SIZE_LABEL_THRESHOLDS.staged_max) {
+    return "staged";
+  }
+  if (evaluatedCount <= SAMPLE_SIZE_LABEL_THRESHOLDS.shard_merged_max) {
+    return "shard_merged";
   }
   return "full";
 }

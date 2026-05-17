@@ -56,14 +56,31 @@ describe("ciAwareBand", () => {
 });
 
 describe("deriveSampleSizeLabel", () => {
-  it("labels shard-merged runs regardless of evaluated count", () => {
+  it("labels worst_shard_bound latency as shard_merged regardless of evaluated count", () => {
     expect(deriveSampleSizeLabel(500, "worst_shard_bound")).toBe("shard_merged");
     expect(deriveSampleSizeLabel(50, "worst_shard_bound")).toBe("shard_merged");
+    expect(deriveSampleSizeLabel(5, "worst_shard_bound")).toBe("shard_merged");
   });
 
-  it("labels exact runs by evaluated count threshold", () => {
-    expect(deriveSampleSizeLabel(99, "exact")).toBe("smoke");
-    expect(deriveSampleSizeLabel(100, "exact")).toBe("full");
+  it("returns smoke when evaluated_count is at or below 50", () => {
+    expect(deriveSampleSizeLabel(1, "exact")).toBe("smoke");
+    expect(deriveSampleSizeLabel(50, "exact")).toBe("smoke");
+  });
+
+  it("returns staged when evaluated_count is in 51-200", () => {
+    expect(deriveSampleSizeLabel(51, "exact")).toBe("staged");
+    expect(deriveSampleSizeLabel(100, "exact")).toBe("staged");
+    expect(deriveSampleSizeLabel(200, "exact")).toBe("staged");
+  });
+
+  it("returns shard_merged when evaluated_count is in 201-499", () => {
+    expect(deriveSampleSizeLabel(201, "exact")).toBe("shard_merged");
+    expect(deriveSampleSizeLabel(300, "exact")).toBe("shard_merged");
+    expect(deriveSampleSizeLabel(499, "exact")).toBe("shard_merged");
+  });
+
+  it("returns full when evaluated_count is at or above 500", () => {
     expect(deriveSampleSizeLabel(500, "exact")).toBe("full");
+    expect(deriveSampleSizeLabel(1986, "exact")).toBe("full");
   });
 });

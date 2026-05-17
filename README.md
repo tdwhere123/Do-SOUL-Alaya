@@ -10,9 +10,9 @@
 
 ### *A local-first memory plane for CLI coding agents.*
 
-[![status](https://img.shields.io/badge/status-v0.3.6-success?style=flat-square)](#where-this-is-going)
+[![status](https://img.shields.io/badge/status-v0.3.9-success?style=flat-square)](#where-this-is-going)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-2594%20passing-success?style=flat-square)](#where-this-is-going)
+[![tests](https://img.shields.io/badge/tests-2839%20passing-success?style=flat-square)](#where-this-is-going)
 [![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#quickstart)
 [![pnpm](https://img.shields.io/badge/pnpm-%E2%89%A59-F69220?style=flat-square&logo=pnpm&logoColor=white)](#quickstart)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](#architecture-at-a-glance)
@@ -229,26 +229,47 @@ Object / Evidence axes) is untouched until later phases say so.
 
 ### 2. Governance (治理)
 
-**What happens.** Triaged signals can become `Proposal`s with
-`resolution_state: PENDING`. A reviewer (an agent that a human has
-instructed to review, or a scripted role) calls
-`soul.review_memory_proposal` with `accept` or `reject`. Acceptance
-applies the accepted `proposed_changes` through the controlled durable
-memory service and leaves an EventLog / proposal audit trail. Reject
-records the decision but leaves durable memory untouched.
+**What happens.** Governance has two reviewer-bound routes; both end
+in the same EventLog audit shape, and Garden's only legal `ClaimForm`
+output is `claim_status = draft` either way.
+
+- **Inline typed resolution** via `soul.resolve`. Recall results
+  carry an optional `staged_warnings[]` for draft claims that need
+  attention; the agent picks one of six resolutions (`confirm` /
+  `reject` / `correct` / `stale` / `defer` / `not_relevant`) and the
+  daemon atomically transitions `draft → active` (or terminates the
+  draft, or writes a `DeferredObligation`, etc.) with a typed
+  `soul.resolution.*_applied` audit row.
+- **Out-of-band Proposal** via `soul.propose_memory_update` plus
+  `soul.review_memory_proposal`. Triaged signals become `Proposal`s
+  with `resolution_state: PENDING`; a reviewer accepts or rejects
+  with explicit `reviewer_identity`. Acceptance applies the accepted
+  `proposed_changes` through the controlled durable memory service
+  and leaves a proposal audit trail. Reject leaves durable memory
+  untouched.
+
+The Memory Inspector is the **origination surface** for human
+review actions, never a persistence surface — the "Promote to
+strictly_governed" button posts a typed `path_relation` Proposal that
+re-enters the governance gate; it never writes durable directly.
 
 **Failure mode this prevents.** *"The agent said so"* is not a
-governance argument. Without an explicit accept step, every patch
-becomes a silent merge.
+governance argument. Without an explicit reviewer-bound resolution,
+every patch becomes a silent merge. Pushing all promotion through
+typed resolutions also closes the "producer-side high-confidence
+auto-active" loophole that turns syntactic evidence-ref presence
+into pretend verification.
 
-**Design choice.** Propose / review is a separate pair of MCP tools
-on the **Governance axis**. Promotion bookkeeping (Synthesis state,
-Claim lifecycle, karma) lives on the **Memory Ontology** layer and
-**Object** axis but only changes through the proposal-resolution
-path.
+**Design choice.** Propose / review and `soul.resolve` are separate
+verbs on the **Governance axis**. Promotion bookkeeping (Claim
+lifecycle, karma) lives on the **Memory Ontology** layer and
+**Object** axis but only changes through one of the two routes
+above.
 
 *Code anchors:*
 `apps/core-daemon/src/mcp-memory-proposal-workflow.ts`,
+`apps/core-daemon/src/mcp-memory-resolve-handler.ts`,
+`packages/core/src/resolution-service.ts`,
 `packages/core/src/memory-service.ts`,
 `packages/storage/src/migrations/063-proposal-memory-update-patch.sql`.
 
@@ -394,7 +415,7 @@ graph TD
     end
 
     subgraph Daemon["apps/core-daemon — wiring + dispatch"]
-        TH["MCP tool handler<br/>(12 tools: 9 soul.* + 3 garden.*)"]
+        TH["MCP tool handler<br/>(13 tools: 10 soul.* + 3 garden.*)"]
         BG["BackgroundServiceManager<br/>(Garden runtime · fire-and-forget)"]
         NOTI["InProcessRuntimeNotifier"]
     end
@@ -464,7 +485,7 @@ Two surfaces over one runtime. The agent attaches via MCP; humans
 script via CLI. Both go through the same daemon and the same truth
 boundary.
 
-**MCP tools (9 `soul.*` + 3 `garden.*`)** — all schema-bounded
+**MCP tools (10 `soul.*` + 3 `garden.*`)** — all schema-bounded
 (`maxLength`, `maxItems`, `additionalProperties: false` derived from
 the zod request schemas):
 
@@ -473,6 +494,9 @@ the zod request schemas):
 - **Perception → Governance** (proposal-side writes):
   `soul.emit_candidate_signal`, `soul.propose_memory_update`,
   `soul.review_memory_proposal`, `soul.list_pending_proposals`
+- **Inline typed resolution**: `soul.resolve` (six resolutions —
+  `confirm` / `reject` / `correct` / `stale` / `defer` /
+  `not_relevant` — for draft claims and staged warnings)
 - **Runtime control & receipt**: `soul.apply_override` (session-scoped,
   never durable), `soul.report_context_usage` (audit-only write)
 - **Garden host-worker** (when `provider_kind=host_worker`):
@@ -505,7 +529,7 @@ stdio); every mutating verb supports preview before write, attach
 ```bash
 # Install a pinned release. The installer then downloads the matching
 # release tarball, verifies SHA256SUMS, and builds locally.
-ALAYA_VERSION=v0.3.6
+ALAYA_VERSION=v0.3.9
 INSTALLER="$(mktemp)"
 trap 'rm -f "$INSTALLER"' EXIT
 curl -fsSL -o "$INSTALLER" \
@@ -526,7 +550,7 @@ the script):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/main/scripts/install.sh \
-  | ALAYA_VERSION=v0.3.6 bash
+  | ALAYA_VERSION=v0.3.9 bash
 ```
 
 Override install location:
@@ -586,7 +610,7 @@ pnpm alaya attach claude-code      # preview, confirm, then apply
 
 # 8) First tool call — verify the MCP surface end-to-end
 pnpm alaya tools list --json | jq '.tools | length'
-#   Expect: 12  (9 soul.* + 3 garden.* tools)
+#   Expect: 13  (10 soul.* + 3 garden.* tools)
 
 pnpm alaya tools call soul.recall \
   '{"query":"hello","scope_class":null,"dimension":null,"domain_tags":null,"max_results":5}' \
@@ -594,10 +618,12 @@ pnpm alaya tools call soul.recall \
 #   Expect: { "delivery_id": "...", "results": [...], "total_count": <int> }
 #   Each result includes selection_reason/source_channels/score_factors/budget_state;
 #   the response includes strategy_mix and optional degradation_reason.
+#   v0.3.9 also adds an optional staged_warnings[] on each result that
+#   the agent can resolve with soul.resolve.
 ```
 
 After step 7 your agent sees Alaya as an MCP server on its next
-start, and the 12 tools (9 `soul.*` + 3 `garden.*`) become callable
+start, and the 13 tools (10 `soul.*` + 3 `garden.*`) become callable
 from inside the agent.
 
 If a step fails, `pnpm alaya doctor` tells you which check failed
@@ -609,30 +635,42 @@ place to look. The full project layout is documented in
 
 ## Where this is going
 
-### Current state (2026-05-14)
+### Current state (2026-05-17)
 
-v0.3.6 is the current checkpoint; v0.3.4 was the first publicly released
-v0.3.x line. Cumulative since v0.3.0: real Codex and Claude Code
-MCP sessions are observed autonomously running `soul.recall` →
+v0.3.9 is the current checkpoint; v0.3.4 was the first publicly
+released v0.3.x line. Cumulative since v0.3.0: real Codex and Claude
+Code MCP sessions autonomously run `soul.recall` →
 `soul.report_context_usage` during normal conversations, with a
 live-usage EventLog witness committed under `docs/v0.3/v0.3.0/`
-(18 chains across both hosts after the v0.3.4 refresh);
+(18 chains across both hosts after the v0.3.4 refresh).
 `POST_TURN_EXTRACT` auto-captures from the `recent_turn` text the
 host already forwards, so an empty store learns from the first
-conversation without explicit `soul.emit_candidate_signal` calls;
-v0.3.3 persists bounded `RECALLS` cross-link edges from used
-recall reports and later recall reads them as weighted
-`graph_support` (with cold reallocation for sparse candidate
-sets); bootstrap is honest about empty templates; `keychain:` secret
-refs are code-reviewed across Linux / macOS / Windows adapters
-(runtime cross-platform write→read still deferred — `env:` / `file:`
-refs are the runtime-verified path on WSL2); v0.3.4 makes `alaya
-doctor` print the running daemon's `version` / `git_head` / `built_at`;
-and v0.3.6 hardens the CLI/MCP startup and local execution support
-code without changing public MCP, protocol, EventLog, runtime config,
-or SQLite surfaces. Distribution is GitHub-Release source tarball +
-`SHA256SUMS`, verified locally by `scripts/install.sh`; npm publish is
-intentionally out-of-scope.
+conversation without explicit `soul.emit_candidate_signal` calls.
+v0.3.3 persists bounded `RECALLS` cross-link edges and later recall
+reads them as weighted `graph_support`. v0.3.6 ships the bench
+feedback loop and the Memory Inspector overview + recall pages.
+v0.3.7 rebuilds the LongMemEval baselines after removing
+question-shape heuristics. v0.3.8 reclaims the ontology mid-layer
+(distilled `MemoryEntry.content`, `EvidenceCapsule` first-class with
+its own FTS, four staged `MemoryGraphEdgeType` writers,
+`PathRelationProposalService` on K=3 co-usage). **v0.3.9 closes the
+three-layer trust loop**: Garden's only legal claim output is now
+`claim_status = draft`; the new `soul.resolve` MCP verb owns the
+typed promotion path; recall payloads carry an additive
+`staged_warnings[]`; `PathRelation` evolves through stability /
+governance classes and feeds `ManifestationResolver`; the Inspector
+Health Inbox aggregates Auditor / OrphanRadar / Green into typed
+operator actions; and `SynthesisCapsule.promotion` is retired now
+that a replacement exists. The live MCP catalog is **13 tools** (10
+`soul.*` + 3 `garden.*`).
+
+`keychain:` secret refs are code-reviewed across Linux / macOS /
+Windows adapters (runtime cross-platform write→read still deferred —
+`env:` / `file:` refs are the runtime-verified path on WSL2); `alaya
+doctor` prints the running daemon's `version` / `git_head` /
+`built_at`. Distribution is GitHub-Release source tarball +
+`SHA256SUMS`, verified locally by `scripts/install.sh`; npm publish
+is intentionally out-of-scope.
 
 ### Where it is going
 
