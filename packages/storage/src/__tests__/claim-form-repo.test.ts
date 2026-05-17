@@ -128,7 +128,12 @@ describe("SqliteClaimFormRepo", () => {
     const claim = createClaimForm();
     await repo.create(claim);
 
-    const updated = await repo.updateStatus(claim.object_id, ClaimLifecycleState.ACTIVE, "2026-03-21T01:00:00.000Z");
+    const updated = await repo.updateStatus(
+      claim.object_id,
+      ClaimLifecycleState.ACTIVE,
+      "2026-03-21T01:00:00.000Z",
+      claim.claim_status
+    );
 
     expect(updated.claim_status).toBe(ClaimLifecycleState.ACTIVE);
     expect(updated.updated_at).toBe("2026-03-21T01:00:00.000Z");
@@ -138,9 +143,42 @@ describe("SqliteClaimFormRepo", () => {
     const { repo } = await createRepo();
 
     await expect(
-      repo.updateStatus("missing-claim", ClaimLifecycleState.ACTIVE, "2026-03-21T01:00:00.000Z")
+      repo.updateStatus(
+        "missing-claim",
+        ClaimLifecycleState.ACTIVE,
+        "2026-03-21T01:00:00.000Z",
+        ClaimLifecycleState.DRAFT
+      )
     ).rejects.toMatchObject({
       code: "NOT_FOUND"
+    });
+  });
+
+  // invariant: optimistic-concurrency guard. Two concurrent transitions
+  // racing from the same starting state cannot both win. The first
+  // writer flips the status, the second writer's UPDATE finds zero
+  // matching rows and the storage layer raises QUERY_FAILED rather
+  // than silently overwriting.
+  it("raises conflict when expectedFromStatus does not match the current claim_status", async () => {
+    const { repo } = await createRepo();
+    const claim = createClaimForm();
+    await repo.create(claim);
+    await repo.updateStatus(
+      claim.object_id,
+      ClaimLifecycleState.ACTIVE,
+      "2026-03-21T01:00:00.000Z",
+      claim.claim_status
+    );
+
+    await expect(
+      repo.updateStatus(
+        claim.object_id,
+        ClaimLifecycleState.ARCHIVED,
+        "2026-03-21T02:00:00.000Z",
+        ClaimLifecycleState.DRAFT
+      )
+    ).rejects.toMatchObject({
+      code: "QUERY_FAILED"
     });
   });
 

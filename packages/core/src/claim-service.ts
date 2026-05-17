@@ -82,10 +82,16 @@ export interface ClaimServiceClaimFormRepoPort {
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<ClaimForm>[]>;
   findByStatus(workspaceId: string, status: ClaimLifecycleStateType): Promise<readonly Readonly<ClaimForm>[]>;
   findByCanonicalKey(workspaceId: string, canonicalKey: string): Promise<readonly Readonly<ClaimForm>[]>;
+  // invariant: expectedFromStatus is the optimistic-concurrency guard.
+  // Storage writes WHERE object_id = ? AND claim_status = ?; a zero-
+  // row result means another transition raced ahead and the caller
+  // must retry or surface CONFLICT.
+  // see also: packages/storage/src/repos/claim-form-repo.ts
   updateStatus(
     objectId: string,
     status: ClaimLifecycleStateType,
-    updatedAt: string
+    updatedAt: string,
+    expectedFromStatus: ClaimLifecycleStateType
   ): Promise<Readonly<ClaimForm>>;
 }
 
@@ -289,7 +295,8 @@ export class ClaimService {
     const updated = await this.dependencies.claimFormRepo.updateStatus(
       existing.object_id,
       newState,
-      occurredAt
+      occurredAt,
+      existing.claim_status
     );
 
     if (deferredNotificationEvents !== undefined) {
