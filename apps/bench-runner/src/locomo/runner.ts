@@ -13,6 +13,8 @@ import {
   type KpiPayload,
   type PerScenarioRow
 } from "@do-soul/alaya-eval";
+import { resolveBenchRunnerVersion } from "../version.js";
+import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import { startBenchDaemon, type BenchEmbeddingMode } from "../harness/daemon.js";
 import { extractSessions, type LocomoQa, type LocomoSample, type LocomoVariant } from "./dataset.js";
 import { loadLocomo, type LocomoFetchResult } from "./fetch.js";
@@ -47,7 +49,7 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   const sliceEnd = opts.limit !== undefined ? offset + opts.limit : conversations.length;
   const window = conversations.slice(offset, sliceEnd);
 
-  const alayaVersion = resolveAlayaVersion();
+  const alayaVersion = resolveBenchRunnerVersion();
   const commitSha7 = resolveCommitSha7();
   const runAt = new Date();
   const embeddingProvider = opts.embeddingMode === "env" ? "yunwu:text-embedding-3-small" : "none";
@@ -182,12 +184,21 @@ async function runOneConversation(
   try {
     const diaIdByMemoryId = new Map<string, string>();
     const sessions = extractSessions(conversation.conversation);
+    // invariant: rotate the seeded object_kind across each turn so the
+    // archive witnesses both MaterializationRouter branches (memory-
+    // only + memory-and-claim-draft). Recall surface is unchanged
+    // (memory_entry is persisted in both branches).
+    // see also: apps/bench-runner/src/harness/seed-rotation.ts
+    let seedIndex = 0;
     for (const session of sessions) {
       for (const turn of session.turns) {
         const seedContent = `${turn.speaker}: ${turn.text}`;
         const evidenceRef = `${conversation.sample_id}-${turn.dia_id}`;
-        const seed = await daemon.proposeMemory(seedContent, evidenceRef);
+        const seed = await daemon.proposeMemory(seedContent, evidenceRef, {
+          objectKind: rotatingSeedObjectKind(seedIndex)
+        });
         diaIdByMemoryId.set(seed.memoryId, turn.dia_id);
+        seedIndex += 1;
       }
     }
 
@@ -270,16 +281,7 @@ function computePercentile(values: readonly number[], p: number): number {
   return sorted[Math.max(0, idx)] ?? 0;
 }
 
-function resolveAlayaVersion(): string {
-  // invariant: read the bench-runner package version, not the
-  // grandparent path (which resolves to apps/package.json and does
-  // not exist). On read failure the function throws — there is no
-  // useful "default" version to fall back to because a stale literal
-  // would mis-attribute every bench archive after a release bump.
-  const pkgPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../package.json");
-  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
-  return pkg.version;
-}
+// see also: apps/bench-runner/src/version.ts resolveBenchRunnerVersion
 
 function resolveCommitSha7(): string {
   try {

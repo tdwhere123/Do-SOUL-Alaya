@@ -2,6 +2,8 @@ import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveBenchRunnerVersion } from "../version.js";
+import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import {
   diffKpis,
   entrySlug,
@@ -85,7 +87,7 @@ export async function runLongMemEvalCrossQuestion(
     opts.limit !== undefined ? offset + opts.limit : questions.length;
   const window = questions.slice(offset, sliceEnd);
 
-  const alayaVersion = resolveAlayaVersion();
+  const alayaVersion = resolveBenchRunnerVersion();
   const commitSha7 = resolveCommitSha7();
   const runAt = new Date();
   const embeddingProviderLabel = resolveBenchEmbeddingProviderLabel(
@@ -113,6 +115,8 @@ export async function runLongMemEvalCrossQuestion(
       let seedTurnsTruncated = 0;
       let answerTurnsTruncated = 0;
       let seedCharsClipped = 0;
+      // see also: apps/bench-runner/src/harness/seed-rotation.ts
+      let seedIndex = 0;
       for (let si = 0; si < question.haystack_sessions.length; si++) {
         const session = question.haystack_sessions[si];
         const sessionId = question.haystack_session_ids[si] ?? `${question.question_id}-session-${si}`;
@@ -121,7 +125,10 @@ export async function runLongMemEvalCrossQuestion(
           const turn = session[ti];
           if (turn === undefined) continue;
           const evidenceRef = `${question.question_id}-cq-s${si}-t${ti}`;
-          const seed = await daemon.proposeMemory(turn.content, evidenceRef);
+          const seed = await daemon.proposeMemory(turn.content, evidenceRef, {
+            objectKind: rotatingSeedObjectKind(seedIndex)
+          });
+          seedIndex += 1;
           if (seed.truncated) {
             seedTurnsTruncated++;
             seedCharsClipped += seed.charsClipped;
@@ -463,17 +470,7 @@ function truncateExcerpt(value: string): string {
   return value.length <= 500 ? value : `${value.slice(0, 497)}...`;
 }
 
-function resolveAlayaVersion(): string {
-  // invariant: read the bench-runner package version; the prior
-  // `../../../package.json` resolved to nonexistent apps/package.json
-  // and fell back to a stale literal that misattributed archives.
-  const pkgPath = resolve(
-    dirname(fileURLToPath(import.meta.url)),
-    "../../package.json"
-  );
-  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
-  return pkg.version;
-}
+// see also: apps/bench-runner/src/version.ts
 
 function resolveCommitSha7(): string {
   try {

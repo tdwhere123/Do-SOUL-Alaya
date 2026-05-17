@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { fileURLToPath } from "node:url";
+import { resolveBenchRunnerVersion } from "../version.js";
+import { type SeedObjectKind } from "./seed-rotation.js";
+export { rotatingSeedObjectKind, type SeedObjectKind, BENCH_SEED_ROTATION } from "./seed-rotation.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
@@ -107,9 +108,13 @@ export interface BenchDaemonHandle {
    * Steps (production-correct audit trail, no direct DB write):
    *   1. soul.emit_candidate_signal — signal_kind=potential_preference,
    *      confidence=0.9, raw_payload.excerpt=content. The daemon's
-   *      MaterializationRouter synchronously creates evidence + memory_entry
-   *      + claim because signal_kind=potential_preference @ confidence>=0.5
-   *      routes to "memory_and_claim" (see packages/soul/.../materialization-router.ts).
+   *      MaterializationRouter synchronously routes by object_kind
+   *      (see packages/soul/src/garden/materialization-router.ts
+   *      routeByObjectKind): claim-capable kinds (preference / decision /
+   *      constraint / etc.) land in memory_and_claim_draft and persist
+   *      both a memory_entry AND a draft claim_form; non-claim kinds
+   *      (fact / outcome / reference / task_state) land in
+   *      memory_entry_only and persist only the memory_entry.
    *   2. Read SOUL_SIGNAL_MATERIALIZED event from event_log to recover
    *      the durable memory object_id created by the materializer.
    *   3. soul.propose_memory_update — propose adding a domain_tag on the
@@ -121,8 +126,20 @@ export interface BenchDaemonHandle {
    * sidecar keyed on the durable memory object_id (recall pointers carry
    * the same object_id, so scoring is by id equality — never by string
    * preview overlap).
+   *
+   * The optional objectKind param diversifies the producer chain so
+   * bench archives witness BOTH router branches (memory_entry_only +
+   * memory_and_claim_draft). Callers rotate the kind across the seed
+   * stream so the archive proves derivePrecedenceBasis / claim_status=draft
+   * lock / claim_form persistence end-to-end. Default "fact" preserves
+   * legacy memory_entry_only behavior for tests that pin the shape.
+   * see also: apps/bench-runner/src/harness/seed-rotation.ts
    */
-  proposeMemory(content: string, evidenceRef: string): Promise<SeededMemoryResult>;
+  proposeMemory(
+    content: string,
+    evidenceRef: string,
+    options?: { readonly objectKind?: SeedObjectKind }
+  ): Promise<SeededMemoryResult>;
   shutdown(): Promise<void>;
 }
 
@@ -404,8 +421,10 @@ export async function startBenchDaemon(
 
   async function proposeMemory(
     content: string,
-    evidenceRef: string
+    evidenceRef: string,
+    options: { readonly objectKind?: SeedObjectKind } = {}
   ): Promise<SeededMemoryResult> {
+    const objectKind: SeedObjectKind = options.objectKind ?? "fact";
     // @anchor bench-seed-content-cap — protocol §soul.emit_candidate_signal
     // caps raw_payload at 16384 characters JSON-serialized. The bench
     // harness seeds dataset turns; LongMemEval-S has turn contents that
@@ -423,15 +442,17 @@ export async function startBenchDaemon(
       : content;
 
     // Step 1 — emit candidate signal. signal_kind=potential_preference at
-    // confidence 0.9 with evidence_refs >= 1 routes to "memory_and_claim"
-    // (see materialization-router.ts:160). raw_payload.excerpt becomes
-    // the materialized memory_entry.content via buildSignalSummary.
+    // confidence 0.9 with evidence_refs >= 1 routes per object_kind
+    // (see materialization-router.ts routeByObjectKind): claim-capable
+    // kinds land in memory_and_claim_draft; fact / outcome land in
+    // memory_entry_only. raw_payload.excerpt becomes the materialized
+    // memory_entry.content via buildSignalSummary.
     const signalResponse = await callMcpTool<SoulEmitCandidateSignalResponse>(
       activeMcpClient,
       "soul.emit_candidate_signal",
       {
         signal_kind: "potential_preference",
-        object_kind: "fact",
+        object_kind: objectKind,
         scope_hint: ScopeClass.PROJECT,
         domain_tags: ["bench-seed"],
         confidence: 0.9,
@@ -838,11 +859,4 @@ function restoreEnv(saved: Partial<Record<ManagedEnvKey, string | undefined>>): 
   }
 }
 
-// invariant: read the bench-runner package version for MCP client
-// identification so archives produced post-release reflect the actual
-// bumped version, not a stale literal.
-function resolveBenchRunnerVersion(): string {
-  const pkgPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../package.json");
-  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
-  return pkg.version;
-}
+// see also: apps/bench-runner/src/version.ts

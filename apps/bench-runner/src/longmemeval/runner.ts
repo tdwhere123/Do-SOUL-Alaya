@@ -2,6 +2,8 @@ import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveBenchRunnerVersion } from "../version.js";
+import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import {
   diffKpis,
   entrySlug,
@@ -81,7 +83,7 @@ export async function runLongMemEval(
     opts.limit !== undefined ? offset + opts.limit : questions.length;
   const window = questions.slice(offset, sliceEnd);
 
-  const alayaVersion = resolveAlayaVersion();
+  const alayaVersion = resolveBenchRunnerVersion();
   const commitSha7 = resolveCommitSha7();
   const runAt = new Date();
   const embeddingProviderLabel = resolveBenchEmbeddingProviderLabel(
@@ -122,6 +124,10 @@ export async function runLongMemEval(
       let answerTurnsTruncated = 0;
       let seedCharsClipped = 0;
 
+      // invariant: rotate seeded object_kind across turns so the
+      // archive witnesses both MaterializationRouter branches.
+      // see also: apps/bench-runner/src/harness/seed-rotation.ts
+      let seedIndex = 0;
       for (let si = 0; si < question.haystack_sessions.length; si++) {
         const session = question.haystack_sessions[si];
         const sessionId = question.haystack_session_ids[si] ?? `session-${si}`;
@@ -132,7 +138,10 @@ export async function runLongMemEval(
           if (turn === undefined) continue;
 
           const evidenceRef = `${question.question_id}-s${si}-t${ti}`;
-          const seed = await daemon.proposeMemory(turn.content, evidenceRef);
+          const seed = await daemon.proposeMemory(turn.content, evidenceRef, {
+            objectKind: rotatingSeedObjectKind(seedIndex)
+          });
+          seedIndex += 1;
           if (seed.truncated) {
             seedTurnsTruncated++;
             seedCharsClipped += seed.charsClipped;
@@ -434,18 +443,7 @@ function computePercentile(values: number[], p: number): number {
   return sorted[Math.max(0, idx)] ?? 0;
 }
 
-function resolveAlayaVersion(): string {
-  try {
-    const pkgPath = resolve(
-      dirname(fileURLToPath(import.meta.url)),
-      "../../../package.json"
-    );
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
-    return pkg.version;
-  } catch {
-    return "0.3.8";
-  }
-}
+// see also: apps/bench-runner/src/version.ts
 
 function resolveCommitSha7(): string {
   try {
