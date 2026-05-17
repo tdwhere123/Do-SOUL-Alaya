@@ -110,9 +110,6 @@ type SynthesisMaterializationInput = Omit<
   | "lifecycle_state"
   | "created_at"
   | "updated_at"
-  | "authority_round_count"
-  | "cooldown_until"
-  | "promotion_state"
   | "synthesis_status"
 >;
 

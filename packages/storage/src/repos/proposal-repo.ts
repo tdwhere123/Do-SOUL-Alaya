@@ -36,12 +36,12 @@ export interface ProposalCreateInput {
   // one-time backfill for pre-A1 rows; the default would silently
   // mislabel future inserts that omit the column. Type-system
   // enforcement is cheaper than dropping the SQL default (SQLite has
-  // no `ALTER COLUMN ... DROP DEFAULT`). All three current production
-  // callers pass it explicitly: `'memory_entry'` for
-  // `soul.propose_memory_update` (mcp-memory-proposal-workflow.ts),
-  // `'synthesis_capsule'` for `ProposalService.createFromSynthesisPromotion`
-  // (proposal-service.ts), and `'bankruptcy_dossier'` for the budget
-  // bankruptcy path (budget-wiring.ts).
+  // no `ALTER COLUMN ... DROP DEFAULT`). Production callers pass it
+  // explicitly: `'memory_entry'` for `soul.propose_memory_update`
+  // (mcp-memory-proposal-workflow.ts), `'path_relation'` for the
+  // strictly_governed promote endpoint
+  // (apps/core-daemon/src/routes/proposals.ts), and `'bankruptcy_dossier'`
+  // for the budget bankruptcy path (budget-wiring.ts).
   readonly target_object_kind: string;
   readonly proposed_change_summary?: string;
   readonly proposed_changes?: MemoryEntryMutableFields | null;

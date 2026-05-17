@@ -442,12 +442,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const sessionOverrideService = new SessionOverrideService({ eventLogRepo });
   const proposalService = new ProposalService({
     proposalRepo,
-    claimService,
-    synthesisService,
     eventLogRepo,
-    karmaEventStore: createKarmaEventStore(karmaEventRepo, warnLogger),
-    dynamicsService,
-    warn: warnLogger,
     runtimeNotifier
   });
   const crossCuttingPermissionService = new CrossCuttingPermissionService({

@@ -52,9 +52,6 @@ const synthesisBase = {
   lifecycle_state: "active",
   topic_key: "tooling/package-manager",
   synthesis_type: "phase_synthesis",
-  authority_round_count: 1,
-  cooldown_until: null,
-  promotion_state: "none",
   summary: "Use pnpm for this repository.",
   evidence_refs: ["evidence-1", "evidence-2"],
   source_memory_refs: ["memory-1"],
@@ -92,33 +89,6 @@ describe("SynthesisCapsuleSchema", () => {
   it("keeps synthesis status enum complete and closed", () => {
     expect(SynthesisStatusSchema.options).toEqual(["working", "stable", "superseded", "archived"]);
     expect(Object.values(SynthesisStatus)).toEqual(["working", "stable", "superseded", "archived"]);
-  });
-
-  it("accepts nullable cooldown_until and valid timestamp values", () => {
-    expect(SynthesisCapsuleSchema.parse(synthesisBase).cooldown_until).toBeNull();
-
-    const value = {
-      ...synthesisBase,
-      cooldown_until: validTimestamp
-    } as const;
-
-    expect(SynthesisCapsuleSchema.parse(value).cooldown_until).toBe(validTimestamp);
-  });
-
-  it("requires authority_round_count to be a non-negative integer", () => {
-    expect(
-      SynthesisCapsuleSchema.safeParse({
-        ...synthesisBase,
-        authority_round_count: -1
-      }).success
-    ).toBe(false);
-
-    expect(
-      SynthesisCapsuleSchema.safeParse({
-        ...synthesisBase,
-        authority_round_count: 1.5
-      }).success
-    ).toBe(false);
   });
 
   it("accepts all legal synthesis status transitions", () => {

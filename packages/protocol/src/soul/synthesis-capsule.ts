@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../schema-primitives.js";
+import { NonEmptyStringSchema, NonNegativeIntSchema } from "../schema-primitives.js";
 import { PersistentObjectEnvelopeSchema } from "./envelope.js";
 import { ObjectKind } from "./object-kind.js";
 
@@ -7,7 +7,6 @@ const synthesisTypeValues = ["phase_synthesis", "cross_evidence", "pattern_detec
 
 const synthesisStatusValues = ["working", "stable", "superseded", "archived"] as const;
 
-const promotionStateValues = ["none", "candidate", "proposed", "promoted", "rejected"] as const;
 type SynthesisStatusValue = (typeof synthesisStatusValues)[number];
 
 export const SynthesisType = {
@@ -23,17 +22,8 @@ export const SynthesisStatus = {
   ARCHIVED: "archived"
 } as const;
 
-export const PromotionState = {
-  NONE: "none",
-  CANDIDATE: "candidate",
-  PROPOSED: "proposed",
-  PROMOTED: "promoted",
-  REJECTED: "rejected"
-} as const;
-
 export const SynthesisTypeSchema = z.enum(synthesisTypeValues);
 export const SynthesisStatusSchema = z.enum(synthesisStatusValues);
-export const PromotionStateSchema = z.enum(promotionStateValues);
 
 const synthesisTransitions: Readonly<Record<SynthesisStatusValue, readonly SynthesisStatusValue[]>> = {
   working: ["stable"],
@@ -60,14 +50,14 @@ export const ClaimCandidateConditionsSchema = z
   })
   .readonly();
 
+// invariant: synthesis capsules describe synthesis-tier observations;
+// draft -> active claim transitions are owned by ResolutionService.
+// see also: packages/core/src/resolution-service.ts
 export const SynthesisCapsuleSchema = PersistentObjectEnvelopeSchema.unwrap()
   .extend({
     object_kind: z.literal(ObjectKind.SYNTHESIS_CAPSULE),
     topic_key: NonEmptyStringSchema,
     synthesis_type: SynthesisTypeSchema,
-    authority_round_count: NonNegativeIntSchema,
-    cooldown_until: IsoDatetimeStringSchema.nullable(),
-    promotion_state: PromotionStateSchema,
     summary: NonEmptyStringSchema,
     evidence_refs: z.array(NonEmptyStringSchema).readonly(),
     source_memory_refs: z.array(NonEmptyStringSchema).readonly(),
@@ -79,6 +69,5 @@ export const SynthesisCapsuleSchema = PersistentObjectEnvelopeSchema.unwrap()
 
 export type SynthesisType = z.infer<typeof SynthesisTypeSchema>;
 export type SynthesisStatus = z.infer<typeof SynthesisStatusSchema>;
-export type PromotionState = z.infer<typeof PromotionStateSchema>;
 export type ClaimCandidateConditions = z.infer<typeof ClaimCandidateConditionsSchema>;
 export type SynthesisCapsule = z.infer<typeof SynthesisCapsuleSchema>;
