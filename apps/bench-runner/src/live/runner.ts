@@ -424,15 +424,14 @@ function parseRunDate(value: string): Date {
   return date;
 }
 
-function resolveCommitSha7(): string {
-  try {
-    return execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
-  } catch {
-    return "0000000";
-  }
-}
-
 // see also: apps/bench-runner/src/version.ts resolveBenchRunnerVersion
+function resolveCommitSha7(): string {
+  const sha = execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
+  if (sha.length === 0) {
+    throw new Error("git rev-parse --short HEAD returned an empty value");
+  }
+  return sha;
+}
 
 function relativeToCwd(value: string): string {
   const absolute = path.resolve(value);
