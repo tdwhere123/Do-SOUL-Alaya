@@ -195,7 +195,29 @@ describe("garden background data ports", () => {
 
     await ports.greenMaintenancePort.renewGreenPassiveStable("green-expiring", "task-1");
     await ports.greenMaintenancePort.requestActiveVerification("green-expiring", "task-2");
-    await ports.greenMaintenancePort.revokeGreen("memory-revoke", "verification_fail", "task-3");
+    const revokeResult = ports.greenMaintenancePort.revokeGreen(
+      "memory-revoke",
+      "verification_fail",
+      "task-3",
+      "workspace-1"
+    );
+    expect(revokeResult).toEqual({ affected: 1 });
+
+    const noopResult = ports.greenMaintenancePort.revokeGreen(
+      "memory-revoke",
+      "verification_fail",
+      "task-3",
+      "workspace-1"
+    );
+    expect(noopResult).toEqual({ affected: 0 });
+
+    const crossWorkspaceNoop = ports.greenMaintenancePort.revokeGreen(
+      "memory-revoke",
+      "verification_fail",
+      "task-3",
+      "workspace-other"
+    );
+    expect(crossWorkspaceNoop).toEqual({ affected: 0 });
 
     const greenRow = database.connection
       .prepare(
@@ -217,6 +239,58 @@ describe("garden background data ports", () => {
       green_state: "revoked",
       revoke_reason: "verification_fail"
     });
+  });
+
+  it("revokeGreenOnEvidenceRewrite sets revoke_reason='mapping_revoked' when new evidence_refs share zero overlap", async () => {
+    const { database, ports } = await createFixture();
+    seedMemoryEntry(database, {
+      objectId: "memory-reanchored",
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      evidenceRefs: ["evidence-original-a", "evidence-original-b"]
+    });
+    seedGreenStatus(database, {
+      objectId: "green-reanchored",
+      workspaceId: "workspace-1",
+      targetObjectId: "memory-reanchored",
+      verificationBasis: "active_verification",
+      greenState: "eligible",
+      validUntil: "2026-05-15T00:00:00.000Z"
+    });
+
+    const overlapResult = ports.greenMaintenancePort.revokeGreenOnEvidenceRewrite({
+      memoryEntryId: "memory-reanchored",
+      workspaceId: "workspace-1",
+      newEvidenceRefs: ["evidence-original-a", "evidence-new"]
+    });
+    expect(overlapResult).toEqual({ affected: 0 });
+
+    const overlapRow = database.connection
+      .prepare("SELECT green_state, revoke_reason FROM green_statuses WHERE object_id = ? LIMIT 1")
+      .get("green-reanchored") as { readonly green_state: string; readonly revoke_reason: string } | undefined;
+    expect(overlapRow).toEqual({ green_state: "eligible", revoke_reason: "none" });
+
+    const rewriteResult = ports.greenMaintenancePort.revokeGreenOnEvidenceRewrite({
+      memoryEntryId: "memory-reanchored",
+      workspaceId: "workspace-1",
+      newEvidenceRefs: ["evidence-new-1", "evidence-new-2"]
+    });
+    expect(rewriteResult).toEqual({ affected: 1 });
+
+    const revokedRow = database.connection
+      .prepare("SELECT green_state, revoke_reason FROM green_statuses WHERE object_id = ? LIMIT 1")
+      .get("green-reanchored") as { readonly green_state: string; readonly revoke_reason: string } | undefined;
+    expect(revokedRow).toEqual({ green_state: "revoked", revoke_reason: "mapping_revoked" });
+  });
+
+  it("revokeGreenOnEvidenceRewrite is a no-op when the memory entry does not exist", async () => {
+    const { ports } = await createFixture();
+    const result = ports.greenMaintenancePort.revokeGreenOnEvidenceRewrite({
+      memoryEntryId: "memory-missing",
+      workspaceId: "workspace-1",
+      newEvidenceRefs: ["evidence-new"]
+    });
+    expect(result).toEqual({ affected: 0 });
   });
 
   it("assesses bootstrapping cold-start state and pattern candidate lifecycle", async () => {
@@ -717,16 +791,13 @@ function seedSynthesisCapsule(
         created_by,
         topic_key,
         synthesis_type,
-        authority_round_count,
-        cooldown_until,
-        promotion_state,
         summary,
         evidence_refs,
         source_memory_refs,
         workspace_id,
         run_id,
         synthesis_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       params.objectId,
@@ -738,9 +809,6 @@ function seedSynthesisCapsule(
       "user",
       params.topicKey ?? `${params.objectId}.topic`,
       "phase_synthesis",
-      0,
-      null,
-      "none",
       params.objectId,
       JSON.stringify(params.evidenceRefs ?? []),
       JSON.stringify(params.sourceMemoryRefs ?? []),

@@ -46,12 +46,12 @@ export const MemoryGraphEdgeTypeSchema = z.enum(memoryGraphEdgeTypeValues);
 // will pin its preferred memories to max graph_support; per-run /
 // per-window decay would be the principled fix.
 //
-// invariant: `GraphExploreService.addEdge` appends
-// `SOUL_GRAPH_EDGE_CREATED` outside the SQL transaction, so a
-// concurrent fan-out can leave an audit row whose row insert later
-// fails. The append+insert single-transaction fix is gated on the
-// `appendManyWithMutation` migration that crosses the materializer
-// boundary.
+// invariant: `GraphExploreService.addEdge` wraps the
+// `SOUL_GRAPH_EDGE_CREATED` audit row and the `memory_graph_edges`
+// row insert in a single SQLite transaction via
+// `EventPublisher.appendManyWithMutation`. A row insert failure rolls
+// back the audit row in the same tx; concurrent writers serialize on
+// the SQLite write lock so no orphan audit can leak.
 export const MEMORY_GRAPH_EDGE_RECALL_WEIGHTS: Readonly<Record<typeof memoryGraphEdgeTypeValues[number], number>> = Object.freeze({
   supports: 1.0,
   derives_from: 0.5,

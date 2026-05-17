@@ -15,7 +15,8 @@ describe("Phase 3A event schemas", () => {
       "soul.recall.completed",
       "soul.context_lens.assembled",
       "soul.recall.delivered",
-      "soul.context_usage.reported"
+      "soul.context_usage.reported",
+      "soul.single_used_anchor"
     ];
 
     expect(Object.values(RecallContextEventType)).toEqual(expected);
@@ -152,5 +153,28 @@ describe("Phase 3A event schemas", () => {
     expect(EventTypeSchema.parse(RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED)).toBe(
       RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED
     );
+    expect(EventTypeSchema.parse(RecallContextEventType.SOUL_SINGLE_USED_ANCHOR)).toBe(
+      RecallContextEventType.SOUL_SINGLE_USED_ANCHOR
+    );
+  });
+
+  it("parses soul.single_used_anchor payload with and without anchor object id", () => {
+    const withAnchor = {
+      delivery_id: "delivery_single",
+      session_id: "session_single",
+      run_id: "run-1",
+      agent_target: "claude-code",
+      used_anchor_object_id: "obj-anchor-1",
+      workspace_id: "workspace-1",
+      occurred_at: validTimestamp
+    } as const;
+    expect(
+      parseRecallContextEventPayload(RecallContextEventType.SOUL_SINGLE_USED_ANCHOR, withAnchor)
+    ).toEqual(withAnchor);
+
+    const withoutAnchor = { ...withAnchor, used_anchor_object_id: null };
+    expect(
+      parseRecallContextEventPayload(RecallContextEventType.SOUL_SINGLE_USED_ANCHOR, withoutAnchor)
+    ).toEqual(withoutAnchor);
   });
 });

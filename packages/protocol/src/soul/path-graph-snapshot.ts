@@ -5,7 +5,7 @@ import {
   NonNegativeIntSchema
 } from "../schema-primitives.js";
 
-const PathStrengthDistributionSchema = z
+export const PathStrengthDistributionSchema = z
   .object({
     very_weak: NonNegativeIntSchema,
     weak: NonNegativeIntSchema,
@@ -16,7 +16,7 @@ const PathStrengthDistributionSchema = z
   .strict()
   .readonly();
 
-const PathStabilityDistributionSchema = z
+export const PathStabilityDistributionSchema = z
   .object({
     volatile: NonNegativeIntSchema,
     normal: NonNegativeIntSchema,
@@ -26,7 +26,7 @@ const PathStabilityDistributionSchema = z
   .strict()
   .readonly();
 
-const PathGovernanceDistributionSchema = z
+export const PathGovernanceDistributionSchema = z
   .object({
     hint_only: NonNegativeIntSchema,
     attention_only: NonNegativeIntSchema,
@@ -36,7 +36,7 @@ const PathGovernanceDistributionSchema = z
   .strict()
   .readonly();
 
-const PathConnectivityMetricsSchema = z
+export const PathConnectivityMetricsSchema = z
   .object({
     unique_source_anchors: NonNegativeIntSchema,
     unique_target_anchors: NonNegativeIntSchema,
@@ -47,19 +47,24 @@ const PathConnectivityMetricsSchema = z
   .strict()
   .readonly();
 
+// invariant: every metric field on PathGraphSnapshot must have a named
+// downstream consumer. Inspector trend rendering reads strength /
+// stability / governance distributions plus the connectivity + activity
+// counters through SoulPathGraphSnapshotTrend.latest_snapshot.
+// total_retired_paths and paths_retired_since_last were reserved
+// placeholders without a producer or a reader; they were dropped to
+// keep the schema honest. See also: graph-contract-service trend logic.
 export const PathGraphSnapshotSchema = z
   .object({
     snapshot_id: NonEmptyStringSchema,
     workspace_id: NonEmptyStringSchema,
     total_active_paths: NonNegativeIntSchema,
-    total_retired_paths: NonNegativeIntSchema,
     strength_distribution: PathStrengthDistributionSchema,
     stability_distribution: PathStabilityDistributionSchema,
     governance_distribution: PathGovernanceDistributionSchema,
     connectivity: PathConnectivityMetricsSchema,
     paths_reinforced_since_last: NonNegativeIntSchema,
     paths_weakened_since_last: NonNegativeIntSchema,
-    paths_retired_since_last: NonNegativeIntSchema,
     paths_created_since_last: NonNegativeIntSchema,
     snapshot_at: IsoDatetimeStringSchema
   })

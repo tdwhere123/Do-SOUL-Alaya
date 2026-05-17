@@ -4,6 +4,7 @@ import {
   ClaimLifecycleState,
   ClaimLifecycleStateSchema,
   MemoryGovernanceEventType,
+  PrecedenceBasis,
   SoulClaimContestedPayloadSchema,
   SoulClaimCreatedPayloadSchema,
   SoulClaimLifecycleChangedPayloadSchema,
@@ -13,7 +14,9 @@ import {
   isValidClaimTransition,
   type ClaimForm,
   type ClaimLifecycleState as ClaimLifecycleStateType,
+  type EnforcementLevel as EnforcementLevelType,
   type EventLogEntry,
+  type PrecedenceBasis as PrecedenceBasisType,
   type TransitionCausedBy as TransitionCausedByType
 } from "@do-soul/alaya-protocol";
 import type { CanonicalAliasService } from "./canonical-alias-service.js";
@@ -37,6 +40,37 @@ export type ClaimFormInput = Omit<
   readonly governance_subject_qualifiers?: Record<string, string>;
 };
 
+// invariant: shared producer-side rule for picking precedence_basis on a
+// newly minted claim. Priority order (highest wins):
+//   user_override  > authority > recency > evidence_strength
+// Consumers: arbitration-service.scoreClaim treats user_override as a
+// score boost; slot-service.evaluateSameScopeElection short-circuits to
+// auto-win when the challenger carries user_override; the other three
+// values are governance metadata for downstream review/audit.
+// see also: packages/soul/src/garden/materialization-router.ts buildClaimInput
+// see also: packages/soul/src/garden/session-override-remediation.ts (USER_OVERRIDE)
+export interface PrecedenceBasisDecisionInput {
+  readonly source: string;
+  readonly enforcement_level: EnforcementLevelType;
+  readonly is_supersede?: boolean;
+  readonly user_override?: boolean;
+}
+
+export function derivePrecedenceBasis(
+  input: PrecedenceBasisDecisionInput
+): PrecedenceBasisType {
+  if (input.user_override === true || input.source === "user_seed") {
+    return PrecedenceBasis.USER_OVERRIDE;
+  }
+  if (input.enforcement_level === "strict") {
+    return PrecedenceBasis.AUTHORITY;
+  }
+  if (input.is_supersede === true) {
+    return PrecedenceBasis.RECENCY;
+  }
+  return PrecedenceBasis.EVIDENCE_STRENGTH;
+}
+
 export interface ClaimServiceEventLogRepoPort {
   append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
@@ -48,10 +82,16 @@ export interface ClaimServiceClaimFormRepoPort {
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<ClaimForm>[]>;
   findByStatus(workspaceId: string, status: ClaimLifecycleStateType): Promise<readonly Readonly<ClaimForm>[]>;
   findByCanonicalKey(workspaceId: string, canonicalKey: string): Promise<readonly Readonly<ClaimForm>[]>;
+  // invariant: expectedFromStatus is the optimistic-concurrency guard.
+  // Storage writes WHERE object_id = ? AND claim_status = ?; a zero-
+  // row result means another transition raced ahead and the caller
+  // must retry or surface CONFLICT.
+  // see also: packages/storage/src/repos/claim-form-repo.ts
   updateStatus(
     objectId: string,
     status: ClaimLifecycleStateType,
-    updatedAt: string
+    updatedAt: string,
+    expectedFromStatus: ClaimLifecycleStateType
   ): Promise<Readonly<ClaimForm>>;
 }
 
@@ -231,6 +271,21 @@ export class ClaimService {
     deferredNotificationEvents?: EventLogEntry[]
   ): Promise<Readonly<ClaimForm>> {
     const occurredAt = this.now();
+    // invariant: CAS-guarded state mutation runs BEFORE the lifecycle
+    // audit append. Concurrent confirm/reject races against the same
+    // starting state: the loser fails the CAS check and exits before
+    // emitting an audit row that does not match a real state change.
+    // The winner's audit row reflects a transition that actually
+    // happened durably.
+    // see also: packages/storage/src/repos/claim-form-repo.ts
+    //   updateStatusStatement (WHERE claim_status = ?)
+    const updated = await this.dependencies.claimFormRepo.updateStatus(
+      existing.object_id,
+      newState,
+      occurredAt,
+      existing.claim_status
+    );
+
     const event = await this.dependencies.eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_CLAIM_LIFECYCLE_CHANGED,
       entity_type: "claim_form",
@@ -251,12 +306,6 @@ export class ClaimService {
         occurred_at: occurredAt
       })
     });
-
-    const updated = await this.dependencies.claimFormRepo.updateStatus(
-      existing.object_id,
-      newState,
-      occurredAt
-    );
 
     if (deferredNotificationEvents !== undefined) {
       deferredNotificationEvents.push(event);

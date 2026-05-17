@@ -98,7 +98,7 @@ describe("trust state SQL persistence", () => {
 
     expect(existsSync(databasePath)).toBe(true);
     expect(process.env.DATA_DIR).toBe(dataDir);
-    expect(readMaxSchemaVersion(dataDir)).toBe(68);
+    expect(readMaxSchemaVersion(dataDir)).toBe(72);
     expect(firstStatus).not.toBeNull();
     if (firstStatus === null) {
       throw new Error("first daemon lifetime did not produce a trust status");

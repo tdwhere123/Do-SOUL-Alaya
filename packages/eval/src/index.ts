@@ -41,6 +41,7 @@ export {
 export { renderFindings, renderReport } from "./report.js";
 
 export {
+  SAMPLE_SIZE_LABEL_THRESHOLDS,
   WILSON_Z_95,
   ciAwareBand,
   deriveSampleSizeLabel,
@@ -56,3 +57,25 @@ export {
   SYNTHETIC_SCENARIOS,
   type SyntheticScenario
 } from "./self/scenarios.js";
+
+export {
+  UtilizationBucketDeliverySchema,
+  UtilizationBucketReportSchema,
+  computeUtilizationBuckets,
+  rollUpUtilizationBucketsByCohort,
+  listSingleUsedAnchorDeliveries,
+  type UtilizationBucketDelivery,
+  type UtilizationBucketReport,
+  type UtilizationBucketCounts,
+  type UtilizationBucketCohortRow
+} from "./utilization-buckets.js";
+
+export {
+  PlaneAttributionRowSchema,
+  computePlaneAttribution,
+  extractPlaneAttributionRows,
+  shareOfPlane,
+  type PlaneAttributionRow,
+  type PlaneAttributionShare,
+  type PlaneAttributionResult
+} from "./cohort-attribution.js";

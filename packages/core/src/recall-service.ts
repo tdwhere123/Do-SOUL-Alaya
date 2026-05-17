@@ -106,6 +106,12 @@ const DYNAMIC_RECALL_TEMPORAL_RADIUS = 3;
 const DYNAMIC_RECALL_COHORT_RADIUS = 8;
 const DYNAMIC_RECALL_EDGE_FANOUT = 12;
 const NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT = 0.24;
+// invariant: confidence sub-weight is additive (outside sum-to-1
+// activation_weights). MemoryEntry.confidence is propose/accept-updated
+// epistemic certainty; reading it directly here keeps later confidence
+// edits visible to recall ordering without waiting for retention decay
+// or activation rescore. Final score stays clamp01.
+const CONFIDENCE_DIRECT_WEIGHT = 0.08;
 
 interface CoarseCandidateDraft {
   readonly entry: Readonly<MemoryEntry>;
@@ -259,10 +265,16 @@ export class RecallService {
       preparedEmbeddingQuery.handle,
       preparedEmbeddingQuery.degradedReason
     );
-    const candidates = rebuildRecallBudgetStateForDelivery(
+    const rebuiltCandidates = rebuildRecallBudgetStateForDelivery(
       mergedCandidates,
       policy.fine_assessment
     );
+    const candidates = await this.applyManifestationBiasSidecar({
+      workspaceId: params.workspaceId,
+      runId: params.runId ?? null,
+      taskSurfaceRef: params.taskSurface,
+      candidates: rebuiltCandidates
+    });
     const candidateDiagnostics = finalizeRecallCandidateDiagnostics(
       assessment.diagnostics,
       candidates
@@ -306,6 +318,79 @@ export class RecallService {
         candidates: candidateDiagnostics
       })
     });
+  }
+
+  private async applyManifestationBiasSidecar(params: Readonly<{
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly taskSurfaceRef: Readonly<TaskObjectSurface>;
+    readonly candidates: readonly Readonly<RecallCandidate>[];
+  }>): Promise<readonly Readonly<RecallCandidate>[]> {
+    const sidecarPort = this.dependencies.manifestationSidecarPort;
+    if (sidecarPort === undefined || params.candidates.length === 0 || params.runId === null) {
+      return params.candidates;
+    }
+
+    const anchorMemoryObjectIds = Object.freeze(
+      [...new Set(params.candidates.map((candidate) => candidate.object_id))]
+    );
+
+    let sidecarEntries: readonly Readonly<import("./manifestation-resolver.js").ManifestationBiasSidecarEntry>[];
+    try {
+      sidecarEntries = await sidecarPort.buildBiasSidecar({
+        workspaceId: params.workspaceId,
+        runId: params.runId,
+        anchorMemoryObjectIds,
+        taskSurfaceRef: params.taskSurfaceRef
+      });
+    } catch (error) {
+      this.warn("manifestation bias sidecar build failed", {
+        workspace_id: params.workspaceId,
+        run_id: params.runId,
+        error: toErrorMessage(error)
+      });
+      return params.candidates;
+    }
+
+    if (sidecarEntries.length === 0) {
+      return params.candidates;
+    }
+
+    // Highest unfinishedness_bias wins per target memory; ties resolve
+    // deterministically by candidate_id so repeated runs are stable.
+    const byMemoryId = new Map<string, Readonly<import("./manifestation-resolver.js").ManifestationBiasSidecarEntry>>();
+    const sortedEntries = [...sidecarEntries].sort((left, right) => {
+      if (right.unfinishedness_bias !== left.unfinishedness_bias) {
+        return right.unfinishedness_bias - left.unfinishedness_bias;
+      }
+      return left.candidate_id.localeCompare(right.candidate_id);
+    });
+    for (const entry of sortedEntries) {
+      if (entry.target_memory_object_id === null) {
+        continue;
+      }
+      if (!byMemoryId.has(entry.target_memory_object_id)) {
+        byMemoryId.set(entry.target_memory_object_id, entry);
+      }
+    }
+
+    if (byMemoryId.size === 0) {
+      return params.candidates;
+    }
+
+    return Object.freeze(
+      params.candidates.map((candidate) => {
+        const sidecar = byMemoryId.get(candidate.object_id);
+        if (sidecar === undefined) {
+          return candidate;
+        }
+        return Object.freeze({
+          ...candidate,
+          pending_incomplete: sidecar.pending_incomplete,
+          unfinishedness_bias: sidecar.unfinishedness_bias
+        });
+      })
+    );
   }
 
   private async recordGlobalRecallClassificationsSafely(
@@ -1545,6 +1630,14 @@ export class RecallService {
       !winnerMemoryIds.has(entry.object_id)
         ? 1
         : 0;
+    // invariant: contradiction-history degradation. ConflictDetectionService
+    // increments MemoryEntry.contradiction_count each time a new memory
+    // supersedes or contradicts this one. Recall scoring subtracts a small
+    // bounded factor so memories that keep losing arbitration drift down
+    // without being tombstoned. Cap at 5 to keep the penalty bounded.
+    const contradictionCount = entry.contradiction_count ?? 0;
+    const contradictionPenalty = clamp01(0.05 * Math.min(contradictionCount, 5));
+    const confidenceFactor = clamp01(entry.confidence ?? 0);
 
     const baseWeight =
       (isAdvisory ? 0 : weights.scope_match) +
@@ -1558,9 +1651,11 @@ export class RecallService {
         relevanceFactor * weights.relevance +
         relevanceFactor * NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT +
         graphSupportFactor * weights.graph_support +
-        plasticityFactor * pathPlasticityWeight -
+        plasticityFactor * pathPlasticityWeight +
+        confidenceFactor * CONFIDENCE_DIRECT_WEIGHT -
         budgetPenalty * weights.budget_penalty -
-        conflictPenalty * weights.conflict_penalty
+        conflictPenalty * weights.conflict_penalty -
+        contradictionPenalty
     );
     const score = clamp01(rawScore * scoreMultiplier);
 
@@ -1573,6 +1668,8 @@ export class RecallService {
         path_plasticity: plasticityFactor,
         budget_penalty: budgetPenalty,
         conflict_penalty: conflictPenalty,
+        contradiction_penalty: contradictionPenalty,
+        confidence: confidenceFactor,
         resolved_activation_weights: weights
       })
     });

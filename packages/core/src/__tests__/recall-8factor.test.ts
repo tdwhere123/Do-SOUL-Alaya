@@ -507,6 +507,42 @@ describe("RecallService 8-factor scoring", () => {
     }
   });
 
+  it("orders identical memories by confidence sub-weight", async () => {
+    const memories = [
+      createMemoryEntry({
+        object_id: "memory-low-confidence",
+        content: "shared identical content body",
+        confidence: 0.2
+      }),
+      createMemoryEntry({
+        object_id: "memory-high-confidence",
+        content: "shared identical content body",
+        confidence: 0.95
+      })
+    ];
+    const { dependencies, searchByKeyword } = createDependencies(memories);
+    searchByKeyword.mockResolvedValue([]);
+    const service = new RecallService(dependencies);
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface("shared identical content body"),
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      strategy: "build"
+    });
+
+    const high = result.candidates.find((candidate) => candidate.object_id === "memory-high-confidence");
+    const low = result.candidates.find((candidate) => candidate.object_id === "memory-low-confidence");
+
+    expect(high).toBeDefined();
+    expect(low).toBeDefined();
+    expect(high?.score_factors?.confidence).toBeCloseTo(0.95);
+    expect(low?.score_factors?.confidence).toBeCloseTo(0.2);
+    expect(high?.relevance_score ?? 0).toBeGreaterThan(low?.relevance_score ?? 0);
+    expect(high?.relevance_score ?? -1).toBeLessThanOrEqual(1);
+    expect(low?.relevance_score ?? 2).toBeGreaterThanOrEqual(0);
+  });
+
   it("applies conflict penalty to non-winner claim-like entries", async () => {
     const memories = [
       createMemoryEntry({

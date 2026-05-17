@@ -40,21 +40,18 @@ export class PathGraphSnapshotter {
     const relations = await this.deps.pathRelationRepo.findActive(workspaceId);
     const snapshotAt = this.now().toISOString();
     const metrics = summarizePathRelations(relations, previousSnapshot);
-    const retiredMetrics = buildReservedRetiredMetrics();
 
     return freezeSnapshot(
       PathGraphSnapshotSchema.parse({
         snapshot_id: `path-graph-snapshot:${workspaceId}:${snapshotAt}`,
         workspace_id: workspaceId,
         total_active_paths: metrics.total_active_paths,
-        total_retired_paths: retiredMetrics.total_retired_paths,
         strength_distribution: metrics.strength_distribution,
         stability_distribution: metrics.stability_distribution,
         governance_distribution: metrics.governance_distribution,
         connectivity: metrics.connectivity,
         paths_reinforced_since_last: metrics.paths_reinforced_since_last,
         paths_weakened_since_last: metrics.paths_weakened_since_last,
-        paths_retired_since_last: retiredMetrics.paths_retired_since_last,
         paths_created_since_last: metrics.paths_created_since_last,
         snapshot_at: snapshotAt
       })
@@ -197,17 +194,6 @@ function summarizePathRelations(
 
 function timestampIsAfter(timestamp: string | undefined, previousSnapshotAt: string): boolean {
   return timestamp !== undefined && timestamp > previousSnapshotAt;
-}
-
-function buildReservedRetiredMetrics(): Pick<
-  PathGraphSnapshot,
-  "total_retired_paths" | "paths_retired_since_last"
-> {
-  // Retired counters stay zero until a live retirement producer reaches this path.
-  return {
-    total_retired_paths: 0,
-    paths_retired_since_last: 0
-  };
 }
 
 function addAnchorPath(anchorPathSets: Map<string, Set<string>>, anchorKey: string, pathId: string): void {

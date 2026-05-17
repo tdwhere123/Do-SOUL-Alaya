@@ -13,6 +13,8 @@ import {
   type KpiPayload,
   type PerScenarioRow
 } from "@do-soul/alaya-eval";
+import { resolveBenchRunnerVersion } from "../version.js";
+import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import { startBenchDaemon, type BenchEmbeddingMode } from "../harness/daemon.js";
 import { extractSessions, type LocomoQa, type LocomoSample, type LocomoVariant } from "./dataset.js";
 import { loadLocomo, type LocomoFetchResult } from "./fetch.js";
@@ -47,7 +49,7 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   const sliceEnd = opts.limit !== undefined ? offset + opts.limit : conversations.length;
   const window = conversations.slice(offset, sliceEnd);
 
-  const alayaVersion = resolveAlayaVersion();
+  const alayaVersion = resolveBenchRunnerVersion();
   const commitSha7 = resolveCommitSha7();
   const runAt = new Date();
   const embeddingProvider = opts.embeddingMode === "env" ? "yunwu:text-embedding-3-small" : "none";
@@ -109,8 +111,14 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
       size: opts.fetchResult?.conversationCount ?? conversations.length,
       source: LOCOMO_SOURCE_URL
     },
-    sample_size: opts.fetchResult?.conversationCount ?? conversations.length,
-    evaluated_count: window.length,
+    // invariant: sample_size + evaluated_count count QAs, not
+    // conversations. The R@K denominator is `totalQa` (questions
+    // actually scored across all conversations in the window); the
+    // dataset-wide upper bound is the QA total of the full LoCoMo set.
+    // see also: packages/eval/src/wilson-ci.ts (label cascade reads
+    // evaluatedCount in question units).
+    sample_size: resolveLocomoSampleSize(conversations),
+    evaluated_count: totalQa,
     harness_mode: "mcp_propose_review",
     kpi: {
       r_at_1: rAt1,
@@ -176,12 +184,21 @@ async function runOneConversation(
   try {
     const diaIdByMemoryId = new Map<string, string>();
     const sessions = extractSessions(conversation.conversation);
+    // invariant: rotate the seeded object_kind across each turn so the
+    // archive witnesses both MaterializationRouter branches (memory-
+    // only + memory-and-claim-draft). Recall surface is unchanged
+    // (memory_entry is persisted in both branches).
+    // see also: apps/bench-runner/src/harness/seed-rotation.ts
+    let seedIndex = 0;
     for (const session of sessions) {
       for (const turn of session.turns) {
         const seedContent = `${turn.speaker}: ${turn.text}`;
         const evidenceRef = `${conversation.sample_id}-${turn.dia_id}`;
-        const seed = await daemon.proposeMemory(seedContent, evidenceRef);
+        const seed = await daemon.proposeMemory(seedContent, evidenceRef, {
+          objectKind: rotatingSeedObjectKind(seedIndex)
+        });
         diaIdByMemoryId.set(seed.memoryId, turn.dia_id);
+        seedIndex += 1;
       }
     }
 
@@ -264,15 +281,7 @@ function computePercentile(values: readonly number[], p: number): number {
   return sorted[Math.max(0, idx)] ?? 0;
 }
 
-function resolveAlayaVersion(): string {
-  try {
-    const pkgPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../../package.json");
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
-    return pkg.version;
-  } catch {
-    return "0.3.8";
-  }
-}
+// see also: apps/bench-runner/src/version.ts resolveBenchRunnerVersion
 
 function resolveCommitSha7(): string {
   try {
@@ -280,4 +289,26 @@ function resolveCommitSha7(): string {
   } catch {
     return "0000000";
   }
+}
+
+// invariant: sample_size counts the scoreable-QA upper bound across
+// the full dataset (every QA carrying non-empty evidence), not the
+// number of conversations. evaluated_count is the subset this run
+// actually scored, so evaluated_count <= sample_size holds even when
+// --limit slices the conversation window.
+// see also: apps/bench-runner/src/locomo/dataset.ts — LoCoMo
+// category-5 adversarial entries omit evidence by design and are
+// excluded from the denominator.
+export function resolveLocomoSampleSize(
+  conversations: readonly LocomoSample[]
+): number {
+  let total = 0;
+  for (const conv of conversations) {
+    for (const qa of conv.qa) {
+      if (qa.evidence.length > 0) {
+        total += 1;
+      }
+    }
+  }
+  return total;
 }

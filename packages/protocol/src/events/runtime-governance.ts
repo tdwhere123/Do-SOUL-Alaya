@@ -305,8 +305,11 @@ export const PathGraphSnapshotCreatedPayloadSchema = z
     snapshot_id: NonEmptyStringSchema,
     workspace_id: NonEmptyStringSchema,
     total_active_paths: NonNegativeIntSchema,
-    total_retired_paths: NonNegativeIntSchema,
-    snapshot_at: IsoDatetimeStringSchema
+    snapshot_at: IsoDatetimeStringSchema,
+    // invariant: deprecated and no longer emitted; retained as optional
+    // so EventLog replay tolerates rows persisted before the field was
+    // retired. Producers MUST omit it; consumers MUST ignore it.
+    total_retired_paths: NonNegativeIntSchema.optional()
   })
   .strict()
   .readonly();

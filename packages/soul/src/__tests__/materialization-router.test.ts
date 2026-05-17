@@ -36,7 +36,9 @@ describe("MaterializationRouter", () => {
 
     expect(target).toEqual({
       kind: "memory_and_claim",
-      routing_reason: "reusable signal with evidence support"
+      route_target: "memory_and_claim_draft",
+      routing_reason:
+        "object_kind=constraint -> memory_and_claim_draft (claim_status defaulted to draft by ClaimService)"
     });
   });
 
@@ -53,7 +55,9 @@ describe("MaterializationRouter", () => {
 
     expect(target).toEqual({
       kind: "memory_and_claim",
-      routing_reason: "high-confidence preference/claim — evidence created during materialization"
+      route_target: "memory_and_claim_draft",
+      routing_reason:
+        "object_kind=constraint -> memory_and_claim_draft (claim_status defaulted to draft by ClaimService)"
     });
   });
 
@@ -180,6 +184,7 @@ describe("MaterializationRouter", () => {
 
     expect(target).toEqual({
       kind: "synthesis",
+      route_target: "synthesis",
       routing_reason: "multi-evidence synthesis candidate"
     });
   });
@@ -196,6 +201,7 @@ describe("MaterializationRouter", () => {
 
     expect(target).toEqual({
       kind: "handoff_gap",
+      route_target: "handoff_gap",
       routing_reason: "run-bound handoff/gap detection"
     });
   });
@@ -209,7 +215,7 @@ describe("MaterializationRouter", () => {
         evidence_refs: []
       })
     );
-    // confidence < 0.3 → deferred (F9: uncertain signal must not persist as evidence noise)
+    // confidence < 0.3 → deferred: uncertain signal must not persist as evidence noise
     const deferred = router.route(
       createSignal({
         signal_kind: "potential_preference",
@@ -228,14 +234,17 @@ describe("MaterializationRouter", () => {
 
     expect(explicit).toEqual({
       kind: "evidence_only",
+      route_target: "evidence_only",
       routing_reason: "evidence archival"
     });
     expect(deferred).toEqual({
       kind: "deferred",
+      route_target: "deferred",
       routing_reason: "uncertain signal — deferred pending higher-confidence reconfirmation"
     });
     expect(evidenceOnly).toEqual({
       kind: "evidence_only",
+      route_target: "evidence_only",
       routing_reason: "unroutable signal -> evidence archive (questionable evidence only)"
     });
   });
@@ -353,7 +362,9 @@ describe("MaterializationRouter", () => {
 
     const result = await router.materializeSignal(createSignal());
 
-    expect(result.routing_reason).toBe("reusable signal with evidence support");
+    expect(result.routing_reason).toBe(
+      "object_kind=constraint -> memory_and_claim_draft (claim_status defaulted to draft by ClaimService)"
+    );
 
     const evidenceInput = deps.evidenceService.create.mock.calls[0][0] as {
       readonly gist: string;

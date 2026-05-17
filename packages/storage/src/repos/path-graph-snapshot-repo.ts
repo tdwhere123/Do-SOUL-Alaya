@@ -198,14 +198,12 @@ export class SqlitePathGraphSnapshotRepo implements PathGraphSnapshotRepo {
 function extractMetrics(snapshot: PathGraphSnapshot): PathGraphSnapshotMetrics {
   return {
     total_active_paths: snapshot.total_active_paths,
-    total_retired_paths: snapshot.total_retired_paths,
     strength_distribution: snapshot.strength_distribution,
     stability_distribution: snapshot.stability_distribution,
     governance_distribution: snapshot.governance_distribution,
     connectivity: snapshot.connectivity,
     paths_reinforced_since_last: snapshot.paths_reinforced_since_last,
     paths_weakened_since_last: snapshot.paths_weakened_since_last,
-    paths_retired_since_last: snapshot.paths_retired_since_last,
     paths_created_since_last: snapshot.paths_created_since_last
   };
 }
@@ -218,11 +216,26 @@ function parsePathGraphSnapshot(value: PathGraphSnapshot): Readonly<PathGraphSna
   }
 }
 
+// invariant: metrics_json may carry legacy keys (total_retired_paths,
+// paths_retired_since_last) written before those reserved placeholders
+// were dropped. Strip unknown keys before validation so historic rows
+// load through the current strict schema.
+const PATH_GRAPH_SNAPSHOT_METRIC_KEYS = [
+  "total_active_paths",
+  "strength_distribution",
+  "stability_distribution",
+  "governance_distribution",
+  "connectivity",
+  "paths_reinforced_since_last",
+  "paths_weakened_since_last",
+  "paths_created_since_last"
+] as const satisfies readonly (keyof PathGraphSnapshotMetrics)[];
+
 function parsePathGraphSnapshotRow(row: PathGraphSnapshotRow): Readonly<PathGraphSnapshot> {
-  let metrics: unknown;
+  let metricsRaw: unknown;
 
   try {
-    metrics = JSON.parse(row.metrics_json);
+    metricsRaw = JSON.parse(row.metrics_json);
   } catch (error) {
     throw new StorageError(
       "VALIDATION_FAILED",
@@ -231,12 +244,31 @@ function parsePathGraphSnapshotRow(row: PathGraphSnapshotRow): Readonly<PathGrap
     );
   }
 
+  const metrics = projectKnownMetrics(metricsRaw);
+
   return parsePathGraphSnapshot({
     snapshot_id: parseNonEmptyString(row.snapshot_id, "snapshot id"),
     workspace_id: parseNonEmptyString(row.workspace_id, "workspace id"),
     snapshot_at: parseTimestamp(row.snapshot_at),
-    ...(metrics as PathGraphSnapshotMetrics)
+    ...metrics
   });
+}
+
+function projectKnownMetrics(value: unknown): PathGraphSnapshotMetrics {
+  if (typeof value !== "object" || value === null) {
+    throw new StorageError(
+      "VALIDATION_FAILED",
+      "Failed to project path graph snapshot metrics: payload is not an object."
+    );
+  }
+  const source = value as Record<string, unknown>;
+  const projected: Record<string, unknown> = {};
+  for (const key of PATH_GRAPH_SNAPSHOT_METRIC_KEYS) {
+    if (key in source) {
+      projected[key] = source[key];
+    }
+  }
+  return projected as PathGraphSnapshotMetrics;
 }
 
 function parseLimit(limit: number): number {

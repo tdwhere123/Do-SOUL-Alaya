@@ -10,6 +10,7 @@ export const ALAYA_MEMORY_TOOL_NAMES = Object.freeze([
   "soul.apply_override",
   "soul.explore_graph",
   "soul.report_context_usage",
+  "soul.resolve",
   "garden.list_pending_tasks",
   "garden.claim_task",
   "garden.complete_task"
@@ -38,7 +39,7 @@ export interface AlayaMemoryToolDefinition {
 
 const providerBaseDescriptionByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.freeze({
   "soul.recall":
-    "WHEN: at the start of any turn that may benefit from prior memory (user preferences, past decisions, project context, or any \"do you remember / last time / we agreed\" reference). Recall relevant durable memory for the current task. Returns ranked candidates, evidence pointers, and a delivery id for later usage proof. Optional time filter via `since` / `until` (ISO datetime) — useful for queries like \"what did I say on May 20\". Pass the user's latest message verbatim in `recent_turn` so Alaya passively extracts durable candidates from this turn — you do not have to file them yourself.",
+    "WHEN: at the start of any turn that may benefit from prior memory (user preferences, past decisions, project context, or any \"do you remember / last time / we agreed\" reference). Recall relevant durable memory for the current task. Returns ranked candidates, evidence pointers, and a delivery id for later usage proof. Optional time filter via `since` / `until` (ISO datetime) — useful for queries like \"what did I say on May 20\". Pass the user's latest message verbatim in `recent_turn` so Alaya passively extracts durable candidates from this turn — you do not have to file them yourself. Each result may carry an optional `staged_warnings` array — every warning names `kind` (low_confidence / contradiction_pending / supersede_candidate / evidence_missing / policy_violation), `severity` (info / warning / blocking), the producing `policy`, a one-line `summary`, and `resolution_options` an agent may pick from. Older agents that do not understand the field can ignore it.",
   "soul.open_pointer":
     "WHEN: a recall result preview is insufficient and you need the full content before citing it. Open a recalled memory object or evidence pointer by id. Read-only.",
   "soul.emit_candidate_signal":
@@ -55,6 +56,8 @@ const providerBaseDescriptionByName: Readonly<Record<AlayaMemoryToolName, string
     "WHEN: you need 1-hop graph neighbors of an existing memory entry to ground related context. Inspect memory graph neighbors. Read-only; does not create or mutate edges.",
   "soul.report_context_usage":
     "WHEN: you used recalled memory in your answer and need to close the delivery loop. Report whether recalled context for a delivery was used, skipped, or not applicable. Supports delivered-vs-used trust state. Include `turn_index` and `turn_digest.last_messages` (the turn's verbatim messages) so Alaya extracts durable candidates from this turn even when nothing was recalled.",
+  "soul.resolve":
+    "WHEN: a recalled pointer carries a `staged_warnings` entry and you have decided how to handle it (confirm / reject / correct / stale / defer / not_relevant). Resolve a staged warning attached to a recall result. `confirm` activates a draft claim_form (draft -> active); `reject` archives a non-draft claim_form or records the dismissal for a memory_entry; `correct` records the corrected proposition (downstream consumers pick it up from the audit row); `stale` transitions an active memory_entry to dormant; `defer` creates a deferred obligation that expires at `defer_until`; `not_relevant` records the dismissal without mutating the target. delivery_id MUST be the same delivery_id soul.recall returned for the pointer being resolved.",
   "garden.list_pending_tasks":
     "WHEN: you have spare capacity (idle between user turns, or operator asks to flush the garden queue) and the operator has set garden compute provider_kind=host_worker so the host CLI agent is the worker. List Garden background tasks pending for this workspace. Read-only. Use before garden.claim_task to scope what work the host can pick up. (当 garden compute 模式为 host_worker 时，CLI agent 在空闲间隙先 list 再 claim 抢任务)",
   "garden.claim_task":
@@ -82,6 +85,8 @@ const loopSuffixByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.f
     "Inspection aid for related memories; keep write actions on proposal/candidate tools.",
   "soul.report_context_usage":
     "Close the delivery loop by marking used/skipped/not_applicable so trust state stays explicit.",
+  "soul.resolve":
+    "Apply a resolution against a staged warning surfaced by soul.recall; the audit event is the durable record of the decision.",
   "garden.list_pending_tasks": "",
   "garden.claim_task": "",
   "garden.complete_task": ""
@@ -97,6 +102,7 @@ const descriptionByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.
   "soul.apply_override": `${providerBaseDescriptionByName["soul.apply_override"]} ${loopSuffixByName["soul.apply_override"]}`,
   "soul.explore_graph": `${providerBaseDescriptionByName["soul.explore_graph"]} ${loopSuffixByName["soul.explore_graph"]}`,
   "soul.report_context_usage": `${providerBaseDescriptionByName["soul.report_context_usage"]} ${loopSuffixByName["soul.report_context_usage"]}`,
+  "soul.resolve": `${providerBaseDescriptionByName["soul.resolve"]} ${loopSuffixByName["soul.resolve"]}`,
   "garden.list_pending_tasks": providerBaseDescriptionByName["garden.list_pending_tasks"],
   "garden.claim_task": providerBaseDescriptionByName["garden.claim_task"],
   "garden.complete_task": providerBaseDescriptionByName["garden.complete_task"]
@@ -127,6 +133,7 @@ const annotationByToolName: Record<AlayaMemoryToolName, AlayaMemoryToolDefinitio
     "soul.apply_override": writeAnnotation,
     "soul.explore_graph": readOnlyAnnotation,
     "soul.report_context_usage": writeAnnotation,
+    "soul.resolve": writeAnnotation,
     "garden.list_pending_tasks": readOnlyAnnotation,
     "garden.claim_task": writeAnnotation,
     "garden.complete_task": writeAnnotation

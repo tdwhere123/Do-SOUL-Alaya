@@ -10,10 +10,15 @@ import {
   createMcpMemoryToolHandler,
   type McpMemoryToolHandlerDependencies
 } from "./mcp-memory-tool-handler.js";
+import {
+  createSoulResolveHandler,
+  type SoulResolveHandlerDependencies
+} from "./mcp-memory-resolve-handler.js";
 
 export function createDaemonMcpMemoryToolHandler(input: {
   readonly recallService: McpMemoryToolHandlerDependencies["recallService"];
   readonly memoryService: McpMemoryToolHandlerDependencies["memoryService"];
+  readonly dynamicsService?: McpMemoryToolHandlerDependencies["dynamicsService"];
   readonly memoryEntryRepo: NonNullable<McpMemoryToolHandlerDependencies["memoryEntryRepo"]>;
   readonly evidenceService?: McpMemoryToolHandlerDependencies["evidenceService"];
   readonly pathRelationProposalService?: McpMemoryToolHandlerDependencies["pathRelationProposalService"];
@@ -28,10 +33,45 @@ export function createDaemonMcpMemoryToolHandler(input: {
   readonly proposalRepo: McpMemoryProposalWorkflowProposalRepo;
   readonly runtimeNotifier: McpMemoryProposalWorkflowRuntimeNotifier;
   readonly reviewerIdentityBinding?: ReviewerIdentityBinding;
+  readonly attachSurfaceRegistrar?: McpMemoryToolHandlerDependencies["attachSurfaceRegistrar"];
+  // invariant: ResolutionService is required so soul.resolve is
+  // routable from every attached agent. The handler binds workspace
+  // and delivery scope from the trusted MCP call context before
+  // dispatching to the service.
+  readonly resolutionService: SoulResolveHandlerDependencies["resolutionService"];
+  // invariant: indirect scope check resolver. Reads a claim's
+  // source_object_refs so the resolve handler can authorise
+  // claim_form resolutions through the memory_entry rows that recall
+  // actually delivered.
+  // see also: apps/core-daemon/src/mcp-memory-resolve-handler.ts
+  //   assertDeliveryInScope
+  readonly claimSourceReader?: SoulResolveHandlerDependencies["claimSourceReader"];
 }) {
+  const soulResolveHandler = createSoulResolveHandler({
+    resolutionService: input.resolutionService,
+    trustStateRecorder: {
+      findDeliveryById: async (deliveryId) => {
+        const delivery = await input.trustStateRecorder.findDeliveryById(deliveryId);
+        if (delivery === null) {
+          return null;
+        }
+        return {
+          delivery_id: delivery.delivery_id,
+          agent_target: delivery.agent_target,
+          workspace_id: delivery.workspace_id,
+          run_id: delivery.run_id,
+          delivered_object_ids: delivery.delivered_object_ids
+        };
+      }
+    },
+    ...(input.claimSourceReader === undefined
+      ? {}
+      : { claimSourceReader: input.claimSourceReader })
+  });
   return createMcpMemoryToolHandler({
     recallService: input.recallService,
     memoryService: input.memoryService,
+    ...(input.dynamicsService === undefined ? {} : { dynamicsService: input.dynamicsService }),
     memoryEntryRepo: input.memoryEntryRepo,
     ...(input.evidenceService === undefined ? {} : { evidenceService: input.evidenceService }),
     ...(input.pathRelationProposalService === undefined
@@ -44,6 +84,10 @@ export function createDaemonMcpMemoryToolHandler(input: {
     trustStateRecorder: input.trustStateRecorder,
     eventPublisher: input.eventPublisher,
     ...(input.gardenTaskRepo === undefined ? {} : { gardenTaskRepo: input.gardenTaskRepo }),
+    ...(input.attachSurfaceRegistrar === undefined
+      ? {}
+      : { attachSurfaceRegistrar: input.attachSurfaceRegistrar }),
+    soulResolveHandler,
     proposalWorkflow: createMcpMemoryProposalWorkflow({
       eventLogRepo: input.eventLogRepo,
       proposalRepo: input.proposalRepo,

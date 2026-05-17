@@ -13,6 +13,7 @@ import {
   type HistoryLayout,
   type KpiPayload
 } from "@do-soul/alaya-eval";
+import { resolveBenchRunnerVersion } from "../version.js";
 
 export interface LiveBenchOptions {
   readonly historyRoot: string;
@@ -160,7 +161,7 @@ export async function runLiveBench(
     split: "strict-real",
     run_at: runAt.toISOString(),
     alaya_commit: commitSha7,
-    alaya_version: await resolveAlayaVersion(),
+    alaya_version: resolveBenchRunnerVersion(),
     embedding_provider: source.metrics.provider_health.embedding.ok
       ? providerMode.mode
       : "unavailable",
@@ -423,24 +424,13 @@ function parseRunDate(value: string): Date {
   return date;
 }
 
+// see also: apps/bench-runner/src/version.ts resolveBenchRunnerVersion
 function resolveCommitSha7(): string {
-  try {
-    return execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
-  } catch {
-    return "0000000";
+  const sha = execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
+  if (sha.length === 0) {
+    throw new Error("git rev-parse --short HEAD returned an empty value");
   }
-}
-
-async function resolveAlayaVersion(): Promise<string> {
-  try {
-    const raw = await readFile(path.resolve(process.cwd(), "package.json"), "utf8");
-    const parsed = JSON.parse(raw) as { version?: unknown };
-    return typeof parsed.version === "string" && parsed.version.length > 0
-      ? parsed.version
-      : "0.0.0";
-  } catch {
-    return "0.0.0";
-  }
+  return sha;
 }
 
 function relativeToCwd(value: string): string {

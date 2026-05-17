@@ -182,6 +182,89 @@ describe("proposal routes (HTTP surface narrowed)", () => {
     expect(propose).not.toHaveBeenCalled();
   });
 
+  // invariant: governance promotion to strictly_governed is auditable and
+  // must travel through the Proposal lifecycle, not a direct mutation.
+  it("creates a typed path_relation Proposal when promote-strictly-governed is invoked", async () => {
+    const app = new Hono();
+    const workspaceService = { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) };
+    const memoryService = {
+      findByIdScoped: vi.fn(async () => ({ object_id: "mem-1" }))
+    };
+    const proposalService = {
+      findByWorkspaceId: vi.fn(async () => []),
+      findPending: vi.fn(async () => [])
+    };
+    const mcpMemoryToolHandler = { call: vi.fn() };
+    const createProposalWithEvents = vi.fn(async (input: { proposal: { proposal_id: string } }) => ({
+      proposal: input.proposal,
+      events: [{ event_id: "evt-1" }]
+    }));
+    const notifyEntry = vi.fn();
+    registerProposalRoutes(app, {
+      workspaceService,
+      memoryService,
+      proposalService,
+      proposalRepo: { createProposalWithEvents },
+      runtimeNotifier: { notifyEntry },
+      mcpMemoryToolHandler
+    } as any);
+
+    const response = await app.request(
+      "/workspaces/ws-1/soul/memory/mem-1/proposals/promote-strictly-governed",
+      { method: "POST" }
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.success).toBe(true);
+    expect(body.data.status).toBe("created");
+    expect(body.data.target_object_kind).toBe("path_relation");
+    expect(body.data.requested_governance_class).toBe("strictly_governed");
+    expect(body.data.target_object_id).toBe("mem-1");
+
+    expect(createProposalWithEvents).toHaveBeenCalledTimes(1);
+    const callInput = createProposalWithEvents.mock.calls[0][0] as {
+      target_object_kind: string;
+      proposed_change_summary: string;
+      proposal: { derived_from: string; resolution_state: string };
+    };
+    expect(callInput.target_object_kind).toBe("path_relation");
+    expect(callInput.proposal.derived_from).toBe("mem-1");
+    expect(callInput.proposal.resolution_state).toBe("pending");
+    expect(callInput.proposed_change_summary).toContain("strictly_governed");
+    // The MCP propose path must NOT be used; the path_relation Proposal
+    // does not match SoulProposeMemoryUpdateRequestSchema's
+    // PublicMemoryEntryMutableFields constraint.
+    expect(mcpMemoryToolHandler.call).not.toHaveBeenCalled();
+    expect(notifyEntry).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 404 when the target memory does not exist", async () => {
+    const app = new Hono();
+    const workspaceService = { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) };
+    const memoryService = { findByIdScoped: vi.fn(async () => null) };
+    const proposalService = {
+      findByWorkspaceId: vi.fn(async () => []),
+      findPending: vi.fn(async () => [])
+    };
+    const createProposalWithEvents = vi.fn();
+    registerProposalRoutes(app, {
+      workspaceService,
+      memoryService,
+      proposalService,
+      proposalRepo: { createProposalWithEvents },
+      runtimeNotifier: { notifyEntry: vi.fn() },
+      mcpMemoryToolHandler: { call: vi.fn() }
+    } as any);
+
+    const response = await app.request(
+      "/workspaces/ws-1/soul/memory/missing/proposals/promote-strictly-governed",
+      { method: "POST" }
+    );
+    expect(response.status).toBe(404);
+    expect(createProposalWithEvents).not.toHaveBeenCalled();
+  });
+
   it("still creates a new proposal when the existing pending proposal has different proposed_changes", async () => {
     const app = new Hono();
     const workspaceService = { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) };

@@ -245,6 +245,7 @@ async function createHarness(
     edgeRepo: graphEdgeRepo,
     eventLogRepo,
     runtimeNotifier,
+    eventPublisher,
     now: () => "2026-05-07T00:00:01.000Z",
     generateId: () => `00000000-0000-4000-8000-${(++edgeCounter).toString().padStart(12, "0")}`
   });

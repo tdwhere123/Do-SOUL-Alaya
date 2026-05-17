@@ -2,6 +2,8 @@ import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveBenchRunnerVersion } from "../version.js";
+import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import {
   diffKpis,
   entrySlug,
@@ -45,7 +47,7 @@ export interface SelfBenchRunResult {
  * see also: apps/bench-runner/src/self/scenarios.ts — setup + distractor pairs
  */
 export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBenchRunResult> {
-  const alayaVersion = resolveAlayaVersion();
+  const alayaVersion = resolveBenchRunnerVersion();
   const commitSha7 = resolveCommitSha7();
   const runAt = new Date();
 
@@ -75,13 +77,18 @@ export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBench
       // (e.g. "syn-001-s0"). Only setup seeds populate the sidecar.
       const sidecar = new Map<string, string>();
       const expectedIdSet = new Set(scenario.expected_ids);
+      // see also: apps/bench-runner/src/harness/seed-rotation.ts
+      let seedIndex = 0;
 
       for (let i = 0; i < scenario.setup.length; i++) {
         const content = scenario.setup[i];
         if (content === undefined) continue;
         const expectedId = `${scenario.id}-s${i}`;
         const evidenceRef = `${scenario.id}-setup-${i}`;
-        const seed = await daemon.proposeMemory(content, evidenceRef);
+        const seed = await daemon.proposeMemory(content, evidenceRef, {
+          objectKind: rotatingSeedObjectKind(seedIndex)
+        });
+        seedIndex += 1;
         if (seed.truncated) {
           truncSeedTotal++;
           truncAnswerTotal++;
@@ -98,7 +105,10 @@ export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBench
         const content = scenario.distractors[i];
         if (content === undefined) continue;
         const evidenceRef = `${scenario.id}-distractor-${i}`;
-        const seed = await daemon.proposeMemory(content, evidenceRef);
+        const seed = await daemon.proposeMemory(content, evidenceRef, {
+          objectKind: rotatingSeedObjectKind(seedIndex)
+        });
+        seedIndex += 1;
         if (seed.truncated) {
           truncSeedTotal++;
           truncCharsTotal += seed.charsClipped;
@@ -248,18 +258,7 @@ function computePercentile(values: number[], p: number): number {
   return sorted[Math.max(0, idx)] ?? 0;
 }
 
-function resolveAlayaVersion(): string {
-  try {
-    const pkgPath = resolve(
-      dirname(fileURLToPath(import.meta.url)),
-      "../../../package.json"
-    );
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
-    return pkg.version;
-  } catch {
-    return "0.3.8";
-  }
-}
+// see also: apps/bench-runner/src/version.ts
 
 function resolveCommitSha7(): string {
   try {

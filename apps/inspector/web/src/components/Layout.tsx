@@ -5,6 +5,7 @@ import {
   CheckSquare,
   Cpu,
   Gauge,
+  HeartPulse,
   LayoutDashboard,
   Network,
   type LucideIcon
@@ -29,6 +30,7 @@ const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { to: "/graph", labelKey: "nav:memoryGraph", Icon: Network },
   { to: "/memory-browser", labelKey: "nav:memoryBrowser", Icon: BookOpen },
   { to: "/proposals", labelKey: "nav:pendingProposals", Icon: CheckSquare },
+  { to: "/health-inbox", labelKey: "nav:healthInbox", Icon: HeartPulse },
   { to: "/recall", labelKey: "nav:recallStats", Icon: Gauge },
   { to: "/status", labelKey: "nav:systemStatus", Icon: Activity },
   { to: "/config", labelKey: "nav:configuration", Icon: Cpu }
@@ -89,7 +91,7 @@ export default function Layout() {
 
       <nav
         data-testid="inspector-mobile-tabs"
-        className="sm:hidden fixed bottom-0 inset-x-0 z-40 h-14 grid grid-cols-6 border-t border-beige-200 bg-beige-100/95 backdrop-blur-sm"
+        className="sm:hidden fixed bottom-0 inset-x-0 z-40 h-14 grid grid-cols-8 border-t border-beige-200 bg-beige-100/95 backdrop-blur-sm"
       >
         {NAV_ITEMS.map(({ to, labelKey, Icon }) => (
           <NavLink

@@ -36,6 +36,17 @@ interface EvidenceEnvelope {
   readonly data: EvidenceCapsuleShape;
 }
 
+interface PromoteEnvelope {
+  readonly success: boolean;
+  readonly data: {
+    readonly proposal_id: string;
+    readonly status: "created";
+    readonly target_object_id: string;
+    readonly target_object_kind: "path_relation";
+    readonly requested_governance_class: "strictly_governed";
+  };
+}
+
 type DimensionFilter = "all" | string;
 type ScopeFilter = "all" | string;
 type ConflictFilter = "any" | "has_conflict";
@@ -130,6 +141,36 @@ export default function MemoryBrowserPage() {
     setSelectedRow(row);
     setPointer(null);
   }, []);
+
+  const [promoteBusyId, setPromoteBusyId] = useState<string | null>(null);
+  const promoteToStrictlyGoverned = useCallback(
+    async (memoryId: string) => {
+      if (workspaceId === null) return;
+      setPromoteBusyId(memoryId);
+      try {
+        const envelope = await apiFetch<PromoteEnvelope>(
+          `/workspaces/${workspaceId}/soul/memory/${encodeURIComponent(memoryId)}/proposals/promote-strictly-governed`,
+          {
+            method: "POST",
+            body: {}
+          }
+        );
+        showToast({
+          type: "success",
+          message: `Proposal created: ${envelope.data.proposal_id} (path_relation → strictly_governed)`
+        });
+      } catch (err) {
+        if ((err as ApiError).status === 401) return;
+        const message = err instanceof Error ? err.message : "unknown error";
+        showToast({ message: `Promote failed: ${message}`, type: "error" });
+      } finally {
+        if (isMountedRef.current) {
+          setPromoteBusyId(null);
+        }
+      }
+    },
+    [workspaceId, showToast]
+  );
 
   const openEvidence = useCallback(
     async (evidenceId: string) => {
@@ -268,6 +309,22 @@ export default function MemoryBrowserPage() {
               <div>
                 <div className="text-ink-500 uppercase tracking-widest text-[10px]">memory id</div>
                 <div className="break-all">{selectedRow.object_id}</div>
+              </div>
+              <div>
+                <button
+                  type="button"
+                  data-testid="promote-strictly-governed"
+                  aria-label={t("healthInbox:row.promoteStrictlyGovernedAria", {
+                    id: selectedRow.object_id
+                  })}
+                  disabled={promoteBusyId === selectedRow.object_id}
+                  onClick={() => {
+                    void promoteToStrictlyGoverned(selectedRow.object_id);
+                  }}
+                  className="w-full px-3 py-1.5 text-xs font-mono uppercase border border-ink-600 text-ink-600 hover:bg-ink-600 hover:text-beige-50 disabled:opacity-50"
+                >
+                  {t("healthInbox:row.promoteStrictlyGoverned")}
+                </button>
               </div>
               <div>
                 <div className="text-ink-500 uppercase tracking-widest text-[10px]">distilled content</div>

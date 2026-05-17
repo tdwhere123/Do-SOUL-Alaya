@@ -190,11 +190,79 @@ Signal ingestion is dual-track:
 Both produce candidates that flow through the Promotion Gate before
 becoming durable.
 
+## Low-Trust Draft and Typed-Resolution Chain
+
+Garden's deterministic `SignalService.evaluateTriage` +
+`MaterializationRouter` is the **low-trust durable producer**. It may
+write `MemoryEntry` rows for any signal whose triage outcome admits
+durable storage, but the only legal `ClaimForm` it may emit carries
+`claim_status = draft`. Syntactic presence of `evidence_refs` is not a
+verification fact about the referenced capsule; producer-side
+"high-confidence + evidence_refs auto-active" is not a legal shape.
+
+A draft claim does not enter runtime governance.
+`SoulToolGovernanceAdapter` gates active runtime governance on
+`claim_status ∈ {active, contested, winner}`, so draft claims sit in
+the durable store as candidate truth until a typed resolution
+promotes them. Two reviewer-bound routes can perform the promotion;
+both share the same audit shape and reviewer-identity binding.
+
+### Route 1 — Inline typed resolution (`soul.resolve`)
+
+An attached agent receives a `staged_warning` on a recall result.
+The agent invokes `soul.resolve` with one of six resolutions and a
+typed payload:
+
+| Resolution | Outcome |
+|---|---|
+| `confirm` | Atomic CAS transition `draft → active` on the target claim via `ClaimService.transitionLifecycle`, then the typed `soul.resolution.confirm_applied` audit row is appended. CAS first, audit second: the race loser observes a zero-row update and returns `QUERY_FAILED` before any audit append. |
+| `reject` | Terminates the claim. `applyReject` covers all six starting states including `DRAFT`. |
+| `correct` | Records a corrected payload and emits the typed audit. |
+| `stale` | Marks the claim subject as no longer current. |
+| `defer` | Writes a `DeferredObligation` carrying the re-entry timestamp; replaces the retired `cooldown_until` field on `SynthesisCapsule`. |
+| `not_relevant` | Records that the warning was inspected but did not apply to the current task. |
+
+The handler is at `apps/core-daemon/src/mcp-memory-resolve-handler.ts`;
+the typed dispatcher is `packages/core/src/resolution-service.ts`.
+The `assertDeliveryInScope` check requires the `target_object_id` to
+be a direct member of the agent's delivered_object_ids or to be
+reachable indirectly through the `claimSourceReader` port (so a
+delivered memory's draft claim form is in-scope without delivering
+the claim form itself). Active claims promoted through this route are
+bound to the agent's MCP session identity for downstream attribution.
+
+### Route 2 — Out-of-band Proposal
+
+The explicit host-assertion path is unchanged from v0.3.8:
+`soul.propose_memory_update` enters a pending Proposal;
+`soul.review_memory_proposal` (or the Inspector "Promote to
+strictly_governed" button, which posts a typed `path_relation`
+Proposal) accepts or rejects. Accepted proposals apply through
+`MemoryService.validateUpdate` inside an atomic proposal / storage
+transaction. Rejected proposals leave durable memory untouched.
+
+### Agent-side classification — `GovernancePolicy`
+
+A staged warning may carry an optional `policy_classification`
+(`ask_now` / `apply_silently` / `track_only` / `inspect_later`). The
+agent supplies the classification; the daemon echoes it on the
+resolution audit. A per-turn `ask_now` budget keeps the agent's
+context intact; warnings that exceed the budget downgrade to
+`inspect_later` so the Inspector still surfaces them.
+
+### Inspector is the origination surface
+
+Inspector cannot directly mutate durable state. Any action that
+appears to promote, retire, or relink routes through one of the two
+typed-resolution paths above. Invariants §21 / §21b are unchanged;
+invariants §35 / §36 codify the two-route shape.
+
 ## Control Plane Discipline
 
 Runtime control objects can guide execution, request review, and shape
 projection, but they must not silently become durable memory.
-Promotion to durable memory requires explicit evidence and governance.
+Promotion to durable memory requires explicit evidence and governance
+through the two routes named above.
 
 ## Trust Model
 

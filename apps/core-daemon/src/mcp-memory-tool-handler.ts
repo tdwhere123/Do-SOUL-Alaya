@@ -83,6 +83,10 @@ import { normalizeSchemaGroundedSignal, type GraphEdgeCreationPort } from "@do-s
 import { buildGardenTaskSignalId } from "./garden-task-signal-id.js";
 import { hasAlayaMemoryToolName, type AlayaMemoryToolName } from "./mcp-memory-tool-catalog.js";
 import { buildMemorySearchResult, buildRecallStrategyMix } from "./mcp-memory-recall-result.js";
+import type { createSoulResolveHandler } from "./mcp-memory-resolve-handler.js";
+
+// see also: apps/core-daemon/src/mcp-memory-resolve-handler.ts
+type SoulResolveHandler = ReturnType<typeof createSoulResolveHandler>;
 
 type MemoryUsageRefreshFields = MemoryEntryMutableFields & {
   readonly last_used_at?: string;
@@ -167,6 +171,15 @@ export interface McpMemoryToolHandlerDependencies {
       objectId: string,
       fields: MemoryEntryMutableFields
     ): Promise<void>;
+  };
+  // invariant: reuse_gain producer call site. see also:
+  // DynamicsService.emitKarmaEvent.
+  readonly dynamicsService?: {
+    emitKarmaEvent(input: {
+      readonly kind: "reuse_gain";
+      readonly objectId: string;
+      readonly workspaceId: string;
+    }): Promise<void>;
   };
   // Evidence resolver used by soul.open_pointer to dereference
   // evidence_refs[] from a MemoryEntry back to its raw EvidenceCapsule
@@ -300,6 +313,22 @@ export interface McpMemoryToolHandlerDependencies {
     refreshClaim(taskId: string, claimedBy: string, claimedAt: string): boolean;
     releaseClaim(taskId: string, claimedBy: string): boolean;
   };
+  // invariant: surface_identities row is the canonical record that a
+  // given agent_target has ever attached to this workspace. The handler
+  // calls ensureAgentSurface once per (workspace_id, agent_target) per
+  // process so the first MCP tool call from each attached agent
+  // (codex / claude-code / mcp) lands one durable surface_identity row;
+  // subsequent calls become idempotent in-memory hits.
+  // see also: packages/core/src/surface-service.ts SurfaceService.createSurface
+  readonly attachSurfaceRegistrar?: {
+    ensureAgentSurface(input: {
+      readonly workspaceId: string;
+      readonly agentTarget: string;
+    }): Promise<void>;
+  };
+  // see also: apps/core-daemon/src/mcp-memory-resolve-handler.ts
+  //   createSoulResolveHandler
+  readonly soulResolveHandler?: SoulResolveHandler;
   readonly now?: () => string;
   readonly generateId?: () => string;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
@@ -334,12 +363,35 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
   const now = deps.now ?? (() => new Date().toISOString());
   const generateId = deps.generateId ?? randomUUID;
   const warn = deps.warn ?? ((message: string, meta: Record<string, unknown>) => console.warn(message, meta));
+  const registeredSurfaces = new Set<string>();
+
+  async function ensureAgentSurfaceForCall(context: McpMemoryToolCallContext): Promise<void> {
+    const registrar = deps.attachSurfaceRegistrar;
+    if (registrar === undefined) return;
+    const workspaceId = context.workspaceId;
+    const agentTarget = context.agentTarget;
+    if (workspaceId.length === 0 || agentTarget.length === 0) return;
+    const key = JSON.stringify([workspaceId, agentTarget]);
+    if (registeredSurfaces.has(key)) return;
+    registeredSurfaces.add(key);
+    try {
+      await registrar.ensureAgentSurface({ workspaceId, agentTarget });
+    } catch (error) {
+      registeredSurfaces.delete(key);
+      warn("agent surface registration failed", {
+        workspace_id: workspaceId,
+        agent_target: agentTarget,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
 
   return {
     async call({ toolName, arguments: rawArguments, context }) {
       if (!hasAlayaMemoryToolName(toolName)) {
         return fail(toolName, "UNKNOWN_TOOL", `Unsupported Alaya memory tool: ${toolName}`);
       }
+      await ensureAgentSurfaceForCall(context);
 
       try {
         switch (toolName) {
@@ -361,6 +413,8 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
             return ok(toolName, await exploreGraph(SoulExploreGraphRequestSchema.parse(rawArguments), context));
           case "soul.report_context_usage":
             return ok(toolName, await reportContextUsage(SoulReportContextUsageRequestSchema.parse(rawArguments), context));
+          case "soul.resolve":
+            return ok(toolName, await resolveStagedWarning(rawArguments, context));
           case "garden.list_pending_tasks":
             return ok(toolName, await listPendingGardenTasks(GardenListPendingTasksRequestSchema.parse(rawArguments), context));
           case "garden.claim_task":
@@ -870,6 +924,28 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     });
   }
 
+  async function resolveStagedWarning(
+    rawArguments: unknown,
+    context: McpMemoryToolCallContext
+  ) {
+    const handler = deps.soulResolveHandler;
+    if (handler === undefined) {
+      // invariant: surface UNAVAILABLE distinctly so MCP clients
+      // can detect mis-wired daemons.
+      throw new ToolUnavailableError(
+        "soul.resolve is not wired into this daemon"
+      );
+    }
+    // SECURITY (invariants §29 Default Scope): the resolve handler
+    // re-binds workspace_id / run_id / agent_target from the trusted
+    // MCP call context and re-verifies the delivery scope.
+    return await handler.resolve(rawArguments, {
+      workspaceId: context.workspaceId,
+      runId: context.runId,
+      agentTarget: context.agentTarget
+    });
+  }
+
   async function exploreGraph(
     request: SoulExploreGraphRequest,
     context: McpMemoryToolCallContext
@@ -1268,12 +1344,16 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       if (current === null) {
         continue;
       }
+      // invariant: reuse_gain fires only on the 2nd-or-later recall hit
+      // (last_hit_at non-null). see also: DynamicsService.emitKarmaEvent.
+      const isReuseHit = current.last_hit_at !== null && current.last_hit_at !== undefined;
       if (current.storage_tier === StorageTier.HOT) {
         await refreshScopedRecallUsage(
           objectId,
           attribution.workspaceId,
           reportedAt
         );
+        await maybeEmitReuseGainKarma(isReuseHit, objectId, attribution.workspaceId);
         continue;
       }
 
@@ -1322,6 +1402,30 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
         }
         throw error;
       }
+      await maybeEmitReuseGainKarma(isReuseHit, objectId, attribution.workspaceId);
+    }
+  }
+
+  async function maybeEmitReuseGainKarma(
+    isReuseHit: boolean,
+    objectId: string,
+    workspaceId: string
+  ): Promise<void> {
+    if (!isReuseHit || deps.dynamicsService === undefined) {
+      return;
+    }
+    try {
+      await deps.dynamicsService.emitKarmaEvent({
+        kind: "reuse_gain",
+        objectId,
+        workspaceId
+      });
+    } catch (error) {
+      warn("reuse_gain karma emit failed", {
+        memory_object_id: objectId,
+        workspace_id: workspaceId,
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
   }
 }

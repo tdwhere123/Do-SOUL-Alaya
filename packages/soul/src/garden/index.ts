@@ -2,6 +2,7 @@ export {
   AUDITOR_CONSTANTS,
   Auditor,
   type AuditorDependencies,
+  type AuditorHealthIssueGroupPort
 } from "./auditor.js";
 export type {
   AuditorBootstrappingPort,
@@ -101,6 +102,7 @@ export {
   type MaterializationResult,
   type MaterializationRouterDeps,
   type MaterializationTarget,
+  type RouteTarget,
   type GraphEdgeCreationPort
 } from "./materialization-router.js";
 export {

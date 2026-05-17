@@ -1,6 +1,6 @@
 {
   "name": "@do-soul/alaya-storage",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "private": true,
   "description": "SQLite storage layer for Do-SOUL Alaya — repos, migrations, EventLog.",
   "license": "MIT",

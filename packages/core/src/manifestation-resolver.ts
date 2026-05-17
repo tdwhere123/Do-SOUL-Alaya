@@ -5,7 +5,6 @@ import {
   ManifestationDecisionSchema,
   ManifestationEscalationDecidedPayloadSchema,
   ManifestationLevel,
-  PathGovernanceClass,
   RuntimeGovernanceEventType,
   listPathAnchorRefContextRefs,
   type ActivationCandidate,
@@ -15,6 +14,7 @@ import {
   type ManifestationLevel as ManifestationLevelValue,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
+import { governanceAuthorisesLevel } from "./path-manifestation-policy.js";
 import { loadOrDefaultWithWorkspaceGuard } from "./shared/load-or-default-with-workspace-guard.js";
 import { normalizeUnit } from "./shared/normalize-unit.js";
 import { validateActivationCandidates } from "./shared/validated-activation-candidates.js";
@@ -40,6 +40,23 @@ export interface ResolveManifestationParams {
   readonly taskSurfaceRef: Readonly<TaskObjectSurface> | null;
 }
 
+// invariant: ManifestationBiasSidecar carries advisory annotations
+// derived from ActivationCandidate.effect_vector_snapshot. The sidecar
+// is keyed by candidate_id so callers can correlate decisions with the
+// originating candidate without re-reading PathRelation rows.
+export interface ManifestationBiasSidecarEntry {
+  readonly candidate_id: string;
+  readonly target_memory_object_id: string | null;
+  readonly unfinishedness_bias: number;
+  readonly pending_incomplete: boolean;
+  readonly verification_bias: number;
+}
+
+export interface ResolveManifestationWithBiasResult {
+  readonly decisions: readonly Readonly<ManifestationDecision>[];
+  readonly biasSidecar: readonly Readonly<ManifestationBiasSidecarEntry>[];
+}
+
 type BudgetState = Readonly<{
   stance_bias: number;
   dialogue_nudge: number;
@@ -50,6 +67,7 @@ type BudgetAllocationResult = Readonly<{
   assignedLevel: ManifestationLevelValue | null;
   exhaustedLevels: readonly ManifestationLevelValue[];
   remainingBudget: BudgetState;
+  governanceBlocked: boolean;
 }>;
 
 type LensEligibility = {
@@ -57,12 +75,6 @@ type LensEligibility = {
   blockedReason: "task_surface_ref_missing" | "task_coupling" | "governance_ceiling" | null;
 };
 
-const governanceOrder = {
-  [PathGovernanceClass.HINT_ONLY]: 0,
-  [PathGovernanceClass.ATTENTION_ONLY]: 1,
-  [PathGovernanceClass.RECALL_ALLOWED]: 2,
-  [PathGovernanceClass.STRICTLY_GOVERNED]: 3
-} as const;
 const SYSTEM_NOW = () => new Date().toISOString();
 
 export class ManifestationResolver {
@@ -70,6 +82,51 @@ export class ManifestationResolver {
 
   public constructor(private readonly deps: ManifestationResolverDependencies) {
     this.now = deps.now ?? SYSTEM_NOW;
+  }
+
+  // Extension surface: returns the same decisions as resolve() plus an
+  // additive bias sidecar that downstream callers (recall sidecar
+  // assembly, Auditor scheduling) consume without reaching back into
+  // PathRelation rows. Keeping resolve() shape unchanged preserves the
+  // existing consumer contract.
+  public async resolveWithBias(
+    params: ResolveManifestationParams
+  ): Promise<Readonly<ResolveManifestationWithBiasResult>> {
+    const decisions = await this.resolve(params);
+    const decisionIndex = new Map<string, Readonly<ManifestationDecision>>();
+    for (const decision of decisions) {
+      decisionIndex.set(decision.candidate_id, decision);
+    }
+
+    const biasSidecar: Readonly<ManifestationBiasSidecarEntry>[] = [];
+    for (const candidate of params.candidates) {
+      if (
+        candidate.workspace_id !== params.workspaceId ||
+        candidate.run_id !== params.runId
+      ) {
+        continue;
+      }
+      if (!decisionIndex.has(candidate.candidate_id)) {
+        continue;
+      }
+      const targetMemoryId = anchorMemoryObjectId(candidate.target_anchor);
+      const unfinishednessBias = candidate.effect_vector_snapshot.unfinishedness_bias;
+      const verificationBias = candidate.effect_vector_snapshot.verification_bias;
+      biasSidecar.push(
+        Object.freeze({
+          candidate_id: candidate.candidate_id,
+          target_memory_object_id: targetMemoryId,
+          unfinishedness_bias: unfinishednessBias,
+          pending_incomplete: unfinishednessBias > 0,
+          verification_bias: verificationBias
+        })
+      );
+    }
+
+    return Object.freeze({
+      decisions,
+      biasSidecar: Object.freeze(biasSidecar)
+    });
   }
 
   public async resolve(
@@ -163,11 +220,12 @@ export class ManifestationResolver {
     readonly nextBudget: BudgetState;
   }> {
     const desiredLevel = determineDesiredLevel(candidate, config, taskSurfaceRef);
-    const allocation = allocateBudget(desiredLevel.level, budgets);
+    const allocation = allocateBudget(desiredLevel.level, budgets, candidate.governance_ceiling);
     const reason = buildDecisionReason({
       assignedLevel: allocation.assignedLevel,
       exhaustedLevels: allocation.exhaustedLevels,
-      blockedReason: desiredLevel.lens.blockedReason
+      blockedReason: desiredLevel.lens.blockedReason,
+      governanceBlocked: allocation.governanceBlocked
     });
 
     return Object.freeze({
@@ -267,7 +325,7 @@ function evaluateLensEligibility(
 
   if (
     config.escalation_policy.lens_requires_governance_ceiling &&
-    !governanceAllowsLens(candidate.governance_ceiling)
+    !governanceAuthorisesLevel(candidate.governance_ceiling, ManifestationLevel.LENS_ENTRY)
   ) {
     return {
       eligible: false,
@@ -279,10 +337,6 @@ function evaluateLensEligibility(
     eligible: true,
     blockedReason: null
   };
-}
-
-function governanceAllowsLens(governanceCeiling: ActivationCandidate["governance_ceiling"]): boolean {
-  return governanceOrder[governanceCeiling] >= governanceOrder[PathGovernanceClass.RECALL_ALLOWED];
 }
 
 function hasTaskCoupling(
@@ -305,13 +359,19 @@ function hasTaskCoupling(
 
 function allocateBudget(
   desiredLevel: ManifestationLevelValue,
-  budgets: BudgetState
+  budgets: BudgetState,
+  governanceCeiling: ActivationCandidate["governance_ceiling"]
 ): BudgetAllocationResult {
   const fallbackOrder = getAllocationOrder(desiredLevel);
   const exhaustedLevels: ManifestationLevelValue[] = [];
   let nextBudget = budgets;
+  let governanceBlocked = false;
 
   for (const level of fallbackOrder) {
+    if (!governanceAuthorisesLevel(governanceCeiling, level)) {
+      governanceBlocked = true;
+      continue;
+    }
     if (nextBudget[level] > 0) {
       nextBudget = Object.freeze({
         ...nextBudget,
@@ -320,7 +380,8 @@ function allocateBudget(
       return Object.freeze({
         assignedLevel: level,
         exhaustedLevels: Object.freeze([...exhaustedLevels]),
-        remainingBudget: nextBudget
+        remainingBudget: nextBudget,
+        governanceBlocked
       });
     }
 
@@ -330,7 +391,8 @@ function allocateBudget(
   return Object.freeze({
     assignedLevel: null,
     exhaustedLevels: Object.freeze([...exhaustedLevels]),
-    remainingBudget: nextBudget
+    remainingBudget: nextBudget,
+    governanceBlocked
   });
 }
 
@@ -357,12 +419,23 @@ function buildDecisionReason(input: {
   assignedLevel: ManifestationLevelValue | null;
   exhaustedLevels: readonly ManifestationLevelValue[];
   blockedReason: LensEligibility["blockedReason"];
+  governanceBlocked: boolean;
 }): string {
   const details: string[] = [];
 
   if (input.assignedLevel === null) {
-    const lastExhausted = input.exhaustedLevels[input.exhaustedLevels.length - 1] ?? ManifestationLevel.STANCE_BIAS;
-    return `discarded:${lastExhausted}_budget_exhausted`;
+    const parts: string[] = [];
+    if (input.exhaustedLevels.length > 0) {
+      const lastExhausted = input.exhaustedLevels[input.exhaustedLevels.length - 1] ?? ManifestationLevel.STANCE_BIAS;
+      parts.push(`discarded:${lastExhausted}_budget_exhausted`);
+    }
+    if (input.governanceBlocked) {
+      parts.push("discarded:governance_ceiling_blocked");
+    }
+    if (parts.length === 0) {
+      parts.push(`discarded:${ManifestationLevel.STANCE_BIAS}_budget_exhausted`);
+    }
+    return parts.join("; ");
   }
 
   details.push(`assigned:${input.assignedLevel}`);
@@ -373,6 +446,10 @@ function buildDecisionReason(input: {
 
   if (input.blockedReason !== null) {
     details.push(`blocked:${input.blockedReason}`);
+  }
+
+  if (input.governanceBlocked) {
+    details.push("blocked:governance_ceiling");
   }
 
   return details.join("; ");
@@ -434,4 +511,16 @@ function createDefaultManifestationBudgetConfig(
 
 function unreachableManifestationLevel(value: never): never {
   throw new Error(`Unhandled manifestation level: ${String(value)}`);
+}
+
+function anchorMemoryObjectId(anchor: ActivationCandidate["target_anchor"]): string | null {
+  switch (anchor.kind) {
+    case "object":
+    case "object_facet":
+      return anchor.object_id;
+    case "obligation":
+    case "risk_concern":
+    case "time_concern":
+      return anchor.source_object_id;
+  }
 }

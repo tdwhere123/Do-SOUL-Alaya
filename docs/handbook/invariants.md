@@ -229,3 +229,41 @@ required防复发 step per `docs/handbook/workflow/review-protocol.md`
 34. `docs/archive/` holds retired-but-preserved discipline documents
     (port-protocol, port-era task-card template). They are
     archaeology, not active rules.
+
+## Governance (two-route promotion)
+
+35. **Garden's only legal claim output is `draft`.** The deterministic
+    `SignalService.evaluateTriage` + `MaterializationRouter` chain is
+    the **low-trust durable producer**. It may write `MemoryEntry`
+    rows whose triage outcome admits durable storage, but the only
+    legal `ClaimForm` it may emit carries `claim_status = draft`.
+    Producer-side "high-confidence + evidence_refs auto-active" is
+    not a legal shape; syntactic presence of `evidence_refs` is not a
+    verification fact about the referenced capsule.
+    `SoulToolGovernanceAdapter` continues to gate active runtime
+    governance on `claim_status ∈ {active, contested, winner}`, so a
+    draft claim does not enter runtime governance until a typed
+    resolution promotes it.
+
+36. **Active promotion requires a typed resolution recorded in
+    EventLog through one of two reviewer-bound routes.** Both routes
+    share the same audit shape and reviewer-identity binding:
+
+    - **Inline typed resolution** via the `soul.resolve` MCP verb.
+      Six resolutions (`confirm` / `reject` / `correct` / `stale` /
+      `defer` / `not_relevant`). The handler atomically performs the
+      CAS state mutation (`ClaimService.transitionLifecycle(draft →
+      active)`) before appending the typed
+      `soul.resolution.*_applied` audit row; optimistic concurrency
+      at the SQL boundary (`AND claim_status = ?`) ensures a
+      concurrent confirm / reject race resolves to a single winner.
+    - **Out-of-band Proposal** via `soul.propose_memory_update` plus
+      `soul.review_memory_proposal`. Unchanged from v0.3.8; this is
+      the explicit host-assertion or operator-review path. Inspector
+      writes that appear to "promote" or "retire" route through this
+      path by posting a typed Proposal.
+
+    Inspector is the **origination surface**, never the persistence
+    surface — it cannot directly mutate durable state (consistent
+    with §21 and §21b). The two-route language replaces any prior
+    "single proposal route" wording in lower-level docs.

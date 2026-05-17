@@ -25,7 +25,8 @@ export interface ClaimFormRepo {
   updateStatus(
     objectId: string,
     status: ClaimLifecycleState,
-    updatedAt: string
+    updatedAt: string,
+    expectedFromStatus: ClaimLifecycleState
   ): Promise<Readonly<ClaimForm>>;
 }
 
@@ -147,10 +148,15 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
       WHERE object_id = ?
     `);
 
+    // invariant: WHERE clause includes the expected current claim_status
+    // so two concurrent transitions racing from the same starting
+    // state cannot both win. The first writer flips the status, the
+    // second writer's UPDATE finds zero matching rows and the service
+    // layer raises CONFLICT.
     this.updateStatusStatement = db.connection.prepare(`
       UPDATE claim_forms
       SET claim_status = ?, updated_at = ?
-      WHERE object_id = ?
+      WHERE object_id = ? AND claim_status = ?
     `);
   }
 
@@ -259,16 +265,34 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
   public async updateStatus(
     objectId: string,
     status: ClaimLifecycleState,
-    updatedAt: string
+    updatedAt: string,
+    expectedFromStatus: ClaimLifecycleState
   ): Promise<Readonly<ClaimForm>> {
     const parsedStatus = parseClaimLifecycleState(status);
+    const parsedFrom = parseClaimLifecycleState(expectedFromStatus);
     const parsedUpdatedAt = parseUpdatedAt(updatedAt);
 
     try {
-      const result = this.updateStatusStatement.run(parsedStatus, parsedUpdatedAt, objectId);
+      const result = this.updateStatusStatement.run(
+        parsedStatus,
+        parsedUpdatedAt,
+        objectId,
+        parsedFrom
+      );
 
       if (result.changes === 0) {
-        throw new StorageError("NOT_FOUND", `Claim form ${objectId} was not found.`);
+        // invariant: zero rows changed either because the claim does
+        // not exist OR another transition raced ahead and the row no
+        // longer matches expectedFromStatus. The race case is
+        // semantically a conflict, not a not-found.
+        const current = await this.findById(objectId);
+        if (current === null) {
+          throw new StorageError("NOT_FOUND", `Claim form ${objectId} was not found.`);
+        }
+        throw new StorageError(
+          "QUERY_FAILED",
+          `Claim form ${objectId} transition expected from ${parsedFrom} but found ${current.claim_status}.`
+        );
       }
 
       const updated = await this.findById(objectId);

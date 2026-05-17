@@ -53,10 +53,24 @@ export interface ConflictDetectionLlmPort {
   }): Promise<"contradicts" | "incompatible_with" | "none">;
 }
 
+// invariant: see also: DynamicsService.emitKarmaEvent — the
+// supersede_penalty karma kind fires from this service whenever a new
+// memory is linked to an existing peer via the CONTRADICTS edge. The
+// target_memory_id (the older peer) takes the penalty because the new
+// memory is the supersede candidate.
+export interface ConflictDetectionKarmaEmitterPort {
+  emitKarmaEvent(input: {
+    readonly kind: "supersede_penalty";
+    readonly objectId: string;
+    readonly workspaceId: string;
+  }): Promise<void>;
+}
+
 export interface ConflictDetectionServiceDeps {
   readonly memoryRepo: ConflictDetectionMemoryRepoPort;
   readonly graphEdgePort: ConflictDetectionGraphPort;
   readonly llmPort?: ConflictDetectionLlmPort;
+  readonly karmaEmitter?: ConflictDetectionKarmaEmitterPort;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   readonly llmMaxPairsPerNewMemory?: number;
   readonly ruleEnabled?: boolean;
@@ -242,6 +256,23 @@ export class ConflictDetectionService {
         workspace_id: workspaceId,
         error: errorMessage(err)
       });
+      return;
+    }
+
+    if (edgeType === MemoryGraphEdgeType.CONTRADICTS && this.deps.karmaEmitter !== undefined) {
+      try {
+        await this.deps.karmaEmitter.emitKarmaEvent({
+          kind: "supersede_penalty",
+          objectId: targetMemoryId,
+          workspaceId
+        });
+      } catch (err) {
+        this.warn("supersede_penalty karma emit failed", {
+          target_memory_id: targetMemoryId,
+          workspace_id: workspaceId,
+          error: errorMessage(err)
+        });
+      }
     }
   }
 

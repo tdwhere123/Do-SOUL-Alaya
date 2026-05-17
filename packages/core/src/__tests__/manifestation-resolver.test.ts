@@ -30,7 +30,8 @@ describe("ManifestationResolver", () => {
           source_anchor: { kind: "object" as const, object_id: "object-stance" },
           target_anchor: { kind: "object" as const, object_id: "object-target-stance" },
           pressure: 0.2,
-          confidence: 0.9
+          confidence: 0.9,
+          governance_ceiling: PathGovernanceClass.STRICTLY_GOVERNED
         }),
         createCandidate({
           candidate_id: "candidate-lens",
@@ -157,25 +158,29 @@ describe("ManifestationResolver", () => {
           candidate_id: "candidate-1",
           source_anchor: { kind: "object" as const, object_id: "task-object-1" },
           pressure: 0.95,
-          confidence: 0.95
+          confidence: 0.95,
+          governance_ceiling: PathGovernanceClass.STRICTLY_GOVERNED
         }),
         createCandidate({
           candidate_id: "candidate-2",
           source_anchor: { kind: "object" as const, object_id: "task-object-1" },
           pressure: 0.9,
-          confidence: 0.9
+          confidence: 0.9,
+          governance_ceiling: PathGovernanceClass.STRICTLY_GOVERNED
         }),
         createCandidate({
           candidate_id: "candidate-3",
           source_anchor: { kind: "object" as const, object_id: "task-object-1" },
           pressure: 0.85,
-          confidence: 0.85
+          confidence: 0.85,
+          governance_ceiling: PathGovernanceClass.STRICTLY_GOVERNED
         }),
         createCandidate({
           candidate_id: "candidate-4",
           source_anchor: { kind: "object" as const, object_id: "task-object-1" },
           pressure: 0.8,
-          confidence: 0.8
+          confidence: 0.8,
+          governance_ceiling: PathGovernanceClass.STRICTLY_GOVERNED
         })
       ],
       taskSurfaceRef: createTaskSurface(["task-object-1"])
@@ -192,7 +197,7 @@ describe("ManifestationResolver", () => {
     expect(decisions[3]?.reason).toContain("stance_bias_budget_exhausted");
   });
 
-  it("blocks lens_entry when governance ceiling is below recall_allowed", async () => {
+  it("clamps to lens_entry when governance ceiling is attention_only", async () => {
     const service = await createService(
       createDependencies({
         config: null
@@ -215,8 +220,7 @@ describe("ManifestationResolver", () => {
     });
 
     expect(decisions).toHaveLength(1);
-    expect(decisions[0]?.assigned_level).toBe(ManifestationLevel.DIALOGUE_NUDGE);
-    expect(decisions[0]?.reason).toContain("governance_ceiling");
+    expect(decisions[0]?.assigned_level).toBe(ManifestationLevel.LENS_ENTRY);
   });
 
   it("blocks lens_entry when taskSurfaceRef is null but still allows dialogue_nudge", async () => {
@@ -273,6 +277,92 @@ describe("ManifestationResolver", () => {
 
     expect(decisions).toHaveLength(1);
     expect(decisions[0]?.assigned_level).toBe(ManifestationLevel.LENS_ENTRY);
+  });
+
+  it("discards candidates whose governance_ceiling is hint_only across every level", async () => {
+    const service = await createService(
+      createDependencies({
+        config: null
+      })
+    );
+
+    const decisions = await service.resolve({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      candidates: [
+        createCandidate({
+          candidate_id: "candidate-hint-only",
+          source_anchor: { kind: "object" as const, object_id: "task-object-1" },
+          pressure: 0.95,
+          confidence: 0.95,
+          governance_ceiling: PathGovernanceClass.HINT_ONLY
+        })
+      ],
+      taskSurfaceRef: createTaskSurface(["task-object-1"])
+    });
+
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]?.assigned_level).toBeNull();
+    expect(decisions[0]?.reason).toContain("governance_ceiling");
+  });
+
+  it("strictly_governed authorises stance_bias fallback when higher levels are exhausted", async () => {
+    const deps = createDependencies({
+      config: createBudgetConfig({
+        stance_bias_cap: 1,
+        dialogue_nudge_cap: 0,
+        lens_entry_cap: 0
+      })
+    });
+    const service = await createService(deps);
+
+    const decisions = await service.resolve({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      candidates: [
+        createCandidate({
+          candidate_id: "candidate-strict",
+          source_anchor: { kind: "object" as const, object_id: "task-object-1" },
+          pressure: 0.95,
+          confidence: 0.95,
+          governance_ceiling: PathGovernanceClass.STRICTLY_GOVERNED
+        })
+      ],
+      taskSurfaceRef: createTaskSurface(["task-object-1"])
+    });
+
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]?.assigned_level).toBe(ManifestationLevel.STANCE_BIAS);
+  });
+
+  it("recall_allowed permits dialogue_nudge but refuses stance_bias fallback", async () => {
+    const deps = createDependencies({
+      config: createBudgetConfig({
+        stance_bias_cap: 5,
+        dialogue_nudge_cap: 0,
+        lens_entry_cap: 0
+      })
+    });
+    const service = await createService(deps);
+
+    const decisions = await service.resolve({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      candidates: [
+        createCandidate({
+          candidate_id: "candidate-recall-allowed",
+          source_anchor: { kind: "object" as const, object_id: "task-object-1" },
+          pressure: 0.95,
+          confidence: 0.95,
+          governance_ceiling: PathGovernanceClass.RECALL_ALLOWED
+        })
+      ],
+      taskSurfaceRef: createTaskSurface(["task-object-1"])
+    });
+
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]?.assigned_level).toBeNull();
+    expect(decisions[0]?.reason).toContain("governance_ceiling");
   });
 
   it("rejects malformed candidates before evaluation", async () => {

@@ -57,9 +57,9 @@ export interface GardenJanitorMemoryTieringPort {
     workspaceId: string,
     criteria: GardenJanitorHotDemotionCriteria
   ): Promise<readonly GardenHotDemotionCandidate[]>;
-  // Synchronous so the Janitor can wrap the SQL update and its
-  // SOUL_MEMORY_TIER_CHANGED EventLog rows in one appendManyWithMutation
-  // transaction.
+  // gate-6-delta I4: sync so the Janitor wraps it in
+  // EventPublisher.appendManyWithMutation alongside the
+  // SOUL_MEMORY_TIER_CHANGED event row.
   demoteToWarm(workspaceId: string, memoryEntryIds: readonly string[]): void;
 }
 
@@ -140,12 +140,30 @@ export interface GardenAuditorPointerHealthPort {
 
 export interface GardenAuditorGreenMaintenancePort {
   findExpiringGreenStatuses(workspaceId: string, lookaheadMs: number): Promise<readonly ExpiringGreenStatus[]>;
-  // Synchronous so the Auditor can wrap each SQL update and its
-  // corresponding SOUL_GREEN_* EventLog row in one appendManyWithMutation
-  // transaction.
+  // invariant: sync to allow Auditor to wrap each call inside an
+  // EventPublisher.appendManyWithMutation transaction along with the
+  // corresponding SOUL_GREEN_* EventLog row.
   renewGreenPassiveStable(greenStatusId: string, taskId: string): void;
   requestActiveVerification(greenStatusId: string, taskId: string): void;
-  revokeGreen(memoryEntryId: string, reason: "verification_fail", taskId: string): void;
+  // invariant: workspaceId is required and the UPDATE filters revokable
+  // states only, so revokes against missing or already-revoked rows return
+  // affected = 0. The Auditor MUST treat affected = 0 as a no-op (no
+  // SOUL_GREEN_REVOKED EventLog row, log a green_revoke_noop health entry
+  // instead).
+  revokeGreen(
+    memoryEntryId: string,
+    reason: "verification_fail",
+    taskId: string,
+    workspaceId: string
+  ): { readonly affected: number };
+  // invariant: writes revoke_reason='mapping_revoked' when the supplied
+  // newEvidenceRefs share zero overlap with the memory row's stored
+  // evidence_refs. see also: green-status.ts RevokeReason.MAPPING_REVOKED.
+  revokeGreenOnEvidenceRewrite(input: {
+    readonly memoryEntryId: string;
+    readonly workspaceId: string;
+    readonly newEvidenceRefs: readonly string[];
+  }): { readonly affected: number };
 }
 
 export interface GardenAuditorBootstrappingPort {
@@ -226,9 +244,9 @@ function createTieringPort(context: BaseFactoryContext): GardenJanitorMemoryTier
       ) as readonly GardenHotDemotionCandidate[];
       return rows;
     },
-    // Synchronous so the Janitor can call this inside
-    // EventPublisher.appendManyWithMutation alongside the
-    // SOUL_MEMORY_TIER_CHANGED event rows.
+    // gate-6-delta I4: sync so the Janitor can call this inside
+     // EventPublisher.appendManyWithMutation alongside the
+     // SOUL_MEMORY_TIER_CHANGED event rows.
     demoteToWarm: (workspaceId, memoryEntryIds) => {
       const uniqueIds = Array.from(new Set(memoryEntryIds.filter((entryId) => entryId.length > 0)));
       if (uniqueIds.length === 0) {
@@ -463,6 +481,15 @@ function createGreenMaintenancePort(context: BaseFactoryContext): GardenAuditorG
         updated_at = ?,
         last_transition_at = ?
     WHERE target_object_id = ?
+      AND workspace_id = ?
+      AND green_state IN ('eligible', 'grace')
+  `);
+
+  const readMemoryEvidenceRefsStatement = context.database.connection.prepare(`
+    SELECT evidence_refs
+    FROM memory_entries
+    WHERE object_id = ? AND workspace_id = ?
+    LIMIT 1
   `);
 
   return {
@@ -479,9 +506,42 @@ function createGreenMaintenancePort(context: BaseFactoryContext): GardenAuditorG
       const graceUntil = addMilliseconds(nowIso, ACTIVE_VERIFICATION_GRACE_MS);
       requestActiveVerificationStatement.run(nowIso, nowIso, graceUntil, nowIso, nowIso, greenStatusId);
     },
-    revokeGreen: (memoryEntryId, reason) => {
+    revokeGreen: (memoryEntryId, reason, _taskId, workspaceId) => {
       const nowIso = context.now();
-      revokeStatement.run(reason, nowIso, nowIso, memoryEntryId);
+      const result = revokeStatement.run(reason, nowIso, nowIso, memoryEntryId, workspaceId);
+      return { affected: result.changes };
+    },
+    revokeGreenOnEvidenceRewrite: ({ memoryEntryId, workspaceId, newEvidenceRefs }) => {
+      const row = readMemoryEvidenceRefsStatement.get(memoryEntryId, workspaceId) as
+        | { readonly evidence_refs: string }
+        | undefined;
+      if (row === undefined) {
+        return { affected: 0 };
+      }
+      let previousRefs: readonly string[];
+      try {
+        const parsed = JSON.parse(row.evidence_refs);
+        previousRefs = Array.isArray(parsed) ? (parsed as readonly string[]) : [];
+      } catch {
+        previousRefs = [];
+      }
+      if (previousRefs.length === 0) {
+        return { affected: 0 };
+      }
+      const nextSet = new Set(newEvidenceRefs);
+      const stillOverlaps = previousRefs.some((ref) => nextSet.has(ref));
+      if (stillOverlaps) {
+        return { affected: 0 };
+      }
+      const nowIso = context.now();
+      const result = revokeStatement.run(
+        "mapping_revoked",
+        nowIso,
+        nowIso,
+        memoryEntryId,
+        workspaceId
+      );
+      return { affected: result.changes };
     }
   };
 }

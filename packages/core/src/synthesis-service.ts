@@ -1,19 +1,14 @@
 import { randomUUID } from "node:crypto";
 import {
   MemoryGovernanceEventType,
-  PromotionState,
-  PromotionStateSchema,
   SoulSynthesisCreatedPayloadSchema,
-  SoulSynthesisPromotedPayloadSchema,
   SoulSynthesisStatusChangedPayloadSchema,
   SynthesisCapsuleSchema,
   SynthesisStatus,
   SynthesisStatusSchema,
   isValidSynthesisTransition,
-  TransitionCausedBy,
   TransitionCausedBySchema,
   type EventLogEntry,
-  type PromotionState as PromotionStateType,
   type SynthesisCapsule,
   type SynthesisStatus as SynthesisStatusType,
   type TransitionCausedBy as TransitionCausedByType
@@ -29,9 +24,6 @@ export type SynthesisCapsuleInput = Omit<
   | "lifecycle_state"
   | "created_at"
   | "updated_at"
-  | "authority_round_count"
-  | "cooldown_until"
-  | "promotion_state"
   | "synthesis_status"
 >;
 
@@ -48,17 +40,6 @@ export interface SynthesisServiceSynthesisCapsuleRepoPort {
   updateStatus(
     objectId: string,
     status: SynthesisStatusType,
-    updatedAt: string
-  ): Promise<Readonly<SynthesisCapsule>>;
-  updatePromotionState(
-    objectId: string,
-    state: SynthesisCapsule["promotion_state"],
-    updatedAt: string
-  ): Promise<Readonly<SynthesisCapsule>>;
-  incrementAuthorityRound(objectId: string, updatedAt: string): Promise<Readonly<SynthesisCapsule>>;
-  setCooldownUntil(
-    objectId: string,
-    cooldownUntil: string | null,
     updatedAt: string
   ): Promise<Readonly<SynthesisCapsule>>;
 }
@@ -104,13 +85,10 @@ export class SynthesisService {
       lifecycle_state: "active",
       created_at: timestamp,
       updated_at: timestamp,
-      authority_round_count: 0,
-      cooldown_until: null,
-      promotion_state: PromotionState.NONE,
       synthesis_status: SynthesisStatus.WORKING
     });
 
-    // Validate references before any EventLog write to keep EventLog-first semantics intact.
+    // EventLog-first: reference validation runs before any EventLog write.
     await Promise.all([
       this.validateEvidenceRefs(synthesis.evidence_refs),
       this.validateSourceMemoryRefs(synthesis.source_memory_refs)
@@ -185,147 +163,6 @@ export class SynthesisService {
     return updated;
   }
 
-  public async incrementAuthority(objectId: string): Promise<Readonly<SynthesisCapsule>> {
-    const parsedObjectId = parseObjectId(objectId);
-    const existing = await this.dependencies.synthesisCapsuleRepo.findById(parsedObjectId);
-
-    if (existing === null) {
-      throw new CoreError("NOT_FOUND", "Synthesis capsule not found");
-    }
-
-    return await this.dependencies.synthesisCapsuleRepo.incrementAuthorityRound(
-      parsedObjectId,
-      this.now()
-    );
-  }
-
-  public async requestPromotion(objectId: string): Promise<Readonly<SynthesisCapsule>> {
-    const parsedObjectId = parseObjectId(objectId);
-    const existing = await this.dependencies.synthesisCapsuleRepo.findById(parsedObjectId);
-
-    if (existing === null) {
-      throw new CoreError("NOT_FOUND", "Synthesis capsule not found");
-    }
-
-    const occurredAt = this.now();
-    ensurePromotionRequestAllowed(existing, occurredAt);
-    const event = await this.dependencies.eventLogRepo.append({
-      event_type: MemoryGovernanceEventType.SOUL_SYNTHESIS_PROMOTED,
-      entity_type: "synthesis_capsule",
-      entity_id: existing.object_id,
-      workspace_id: existing.workspace_id,
-      run_id: existing.run_id,
-      caused_by: TransitionCausedBy.SYSTEM,
-      payload_json: SoulSynthesisPromotedPayloadSchema.parse({
-        object_id: existing.object_id,
-        object_kind: existing.object_kind,
-        workspace_id: existing.workspace_id,
-        run_id: existing.run_id,
-        from_state: existing.promotion_state,
-        to_state: PromotionState.CANDIDATE,
-        reason_code: "promotion_requested",
-        caused_by: TransitionCausedBy.SYSTEM,
-        evidence_refs: null,
-        occurred_at: occurredAt
-      })
-    });
-
-    const updated = await this.dependencies.synthesisCapsuleRepo.updatePromotionState(
-      existing.object_id,
-      PromotionState.CANDIDATE,
-      occurredAt
-    );
-    await this.dependencies.runtimeNotifier.notifyEntry(event);
-    return updated;
-  }
-
-  public async resolvePromotionDecision(
-    objectId: string,
-    nextState: Extract<PromotionStateType, "promoted" | "rejected">,
-    reason: string,
-    causedBy: TransitionCausedByType,
-    options: {
-      readonly cooldownUntil?: string | null;
-      // When provided, runtime notification is deferred: the event is pushed here
-      // instead of being notified immediately, allowing the caller to preserve order.
-      readonly deferredNotificationEvents?: EventLogEntry[];
-    } = {}
-  ): Promise<Readonly<SynthesisCapsule>> {
-    const parsedObjectId = parseObjectId(objectId);
-    const parsedNextState = parsePromotionDecision(nextState);
-    const parsedReason = parseReason(reason);
-    const parsedCausedBy = parseTransitionCausedBy(causedBy);
-    const existing = await this.dependencies.synthesisCapsuleRepo.findById(parsedObjectId);
-
-    if (existing === null) {
-      throw new CoreError("NOT_FOUND", "Synthesis capsule not found");
-    }
-
-    if (existing.promotion_state !== PromotionState.CANDIDATE) {
-      throw new CoreError(
-        "VALIDATION",
-        `Synthesis promotion decision requires candidate state, got ${existing.promotion_state}`
-      );
-    }
-
-    const occurredAt = this.now();
-    const event = await this.dependencies.eventLogRepo.append({
-      event_type: MemoryGovernanceEventType.SOUL_SYNTHESIS_PROMOTED,
-      entity_type: "synthesis_capsule",
-      entity_id: existing.object_id,
-      workspace_id: existing.workspace_id,
-      run_id: existing.run_id,
-      caused_by: parsedCausedBy,
-      payload_json: SoulSynthesisPromotedPayloadSchema.parse({
-        object_id: existing.object_id,
-        object_kind: existing.object_kind,
-        workspace_id: existing.workspace_id,
-        run_id: existing.run_id,
-        from_state: existing.promotion_state,
-        to_state: parsedNextState,
-        reason_code: parsedReason,
-        caused_by: parsedCausedBy,
-        evidence_refs: null,
-        occurred_at: occurredAt
-      })
-    });
-
-    let updated = await this.dependencies.synthesisCapsuleRepo.updatePromotionState(
-      existing.object_id,
-      parsedNextState,
-      occurredAt
-    );
-
-    if (parsedNextState === PromotionState.REJECTED) {
-      const cooldownUntil =
-        options.cooldownUntil === undefined
-          ? updated.cooldown_until
-          : parseCooldownUntil(options.cooldownUntil);
-      updated = await this.dependencies.synthesisCapsuleRepo.setCooldownUntil(
-        existing.object_id,
-        cooldownUntil,
-        occurredAt
-      );
-    }
-
-    if (parsedNextState === PromotionState.PROMOTED && updated.cooldown_until !== null) {
-      updated = await this.dependencies.synthesisCapsuleRepo.setCooldownUntil(
-        existing.object_id,
-        null,
-        occurredAt
-      );
-    }
-
-    if (options.deferredNotificationEvents !== undefined) {
-      // Caller requested deferred notification: push event to the collector so it
-      // can be notified in EventLog order alongside sibling events.
-      options.deferredNotificationEvents.push(event);
-    } else {
-      await this.dependencies.runtimeNotifier.notifyEntry(event);
-    }
-
-    return updated;
-  }
   public findById(objectId: string): Promise<Readonly<SynthesisCapsule> | null> {
     return this.dependencies.synthesisCapsuleRepo.findById(objectId);
   }
@@ -401,38 +238,6 @@ function parseTransitionCausedBy(value: TransitionCausedByType): TransitionCause
   }
 }
 
-function parsePromotionDecision(
-  value: PromotionStateType
-): Extract<PromotionStateType, "promoted" | "rejected"> {
-  let parsedState: PromotionStateType;
-
-  try {
-    parsedState = PromotionStateSchema.parse(value);
-  } catch (error) {
-    throw new CoreError("VALIDATION", "Invalid promotion state", { cause: error });
-  }
-
-  if (parsedState !== PromotionState.PROMOTED && parsedState !== PromotionState.REJECTED) {
-    throw new CoreError(
-      "VALIDATION",
-      `Promotion decision must be promoted or rejected, received ${parsedState}`
-    );
-  }
-
-  return parsedState;
-}
-
-function parseCooldownUntil(value: string | null): string | null {
-  if (value === null) {
-    return null;
-  }
-
-  if (value.trim().length === 0) {
-    throw new CoreError("VALIDATION", "Cooldown timestamp must not be empty");
-  }
-
-  return value;
-}
 function ensureValidStatusTransition(from: SynthesisStatusType, to: SynthesisStatusType): void {
   if (from === to) {
     throw new CoreError("VALIDATION", "Synthesis status transition must change state");
@@ -440,23 +245,5 @@ function ensureValidStatusTransition(from: SynthesisStatusType, to: SynthesisSta
 
   if (!isValidSynthesisTransition(from, to)) {
     throw new CoreError("VALIDATION", `Invalid synthesis status transition: ${from} -> ${to}`);
-  }
-}
-
-function ensurePromotionRequestAllowed(existing: SynthesisCapsule, nowIso: string): void {
-  if (existing.cooldown_until !== null) {
-    const now = Date.parse(nowIso);
-    const cooldownUntil = Date.parse(existing.cooldown_until);
-
-    if (Number.isFinite(now) && Number.isFinite(cooldownUntil) && now < cooldownUntil) {
-      throw new CoreError(
-        "VALIDATION",
-        `Synthesis capsule is in cooldown until ${existing.cooldown_until}`
-      );
-    }
-  }
-
-  if (existing.promotion_state !== PromotionState.NONE && existing.promotion_state !== PromotionState.REJECTED) {
-    throw new CoreError("VALIDATION", "Synthesis capsule already has an active promotion state");
   }
 }

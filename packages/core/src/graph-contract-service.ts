@@ -91,6 +91,14 @@ export class GraphContractService {
         estimateAverageStrength(latest),
         estimateAverageStrength(baseline)
       ),
+      latest_stability_distribution: latest.stability_distribution,
+      latest_governance_distribution: latest.governance_distribution,
+      latest_connectivity: latest.connectivity,
+      activity_velocity: {
+        paths_reinforced_since_last: latest.paths_reinforced_since_last,
+        paths_weakened_since_last: latest.paths_weakened_since_last,
+        paths_created_since_last: latest.paths_created_since_last
+      },
       latest_snapshot: latest
     };
   }

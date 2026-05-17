@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  PromotionState,
   SynthesisStatus,
   TransitionCausedBy,
   type EventLogEntry,
@@ -37,9 +36,6 @@ function createSynthesisCapsule(overrides: Partial<SynthesisCapsule> = {}): Synt
     created_by: "user_action",
     topic_key: "tooling/pnpm",
     synthesis_type: "phase_synthesis",
-    authority_round_count: 0,
-    cooldown_until: null,
-    promotion_state: PromotionState.NONE,
     summary: "Use pnpm for workspace commands.",
     evidence_refs: ["evidence-1"],
     source_memory_refs: ["memory-1"],
@@ -101,15 +97,6 @@ function createDependencies(overrides: Partial<SynthesisServiceDependencies> = {
       findByTopicKey: vi.fn(async () => []),
       updateStatus: vi.fn(async (_objectId, status, updatedAt) =>
         Object.freeze(createSynthesisCapsule({ synthesis_status: status, updated_at: updatedAt }))
-      ),
-      updatePromotionState: vi.fn(async (_objectId, state, updatedAt) =>
-        Object.freeze(createSynthesisCapsule({ promotion_state: state, updated_at: updatedAt }))
-      ),
-      incrementAuthorityRound: vi.fn(async (_objectId, updatedAt) =>
-        Object.freeze(createSynthesisCapsule({ authority_round_count: 1, updated_at: updatedAt }))
-      ),
-      setCooldownUntil: vi.fn(async (_objectId, cooldownUntil, updatedAt) =>
-        Object.freeze(createSynthesisCapsule({ cooldown_until: cooldownUntil, updated_at: updatedAt }))
       )
     },
     evidenceService: {
@@ -167,15 +154,6 @@ describe("SynthesisService", () => {
         findByWorkspaceId: vi.fn(async () => []),
         findByTopicKey: vi.fn(async () => []),
         updateStatus: vi.fn(async () => {
-          throw new Error("not used");
-        }),
-        updatePromotionState: vi.fn(async () => {
-          throw new Error("not used");
-        }),
-        incrementAuthorityRound: vi.fn(async () => {
-          throw new Error("not used");
-        }),
-        setCooldownUntil: vi.fn(async () => {
           throw new Error("not used");
         })
       },
@@ -259,15 +237,6 @@ describe("SynthesisService", () => {
         updateStatus: vi.fn(async (_objectId, status, updatedAt) => {
           order.push("repo_update");
           return Object.freeze({ ...existing, synthesis_status: status, updated_at: updatedAt });
-        }),
-        updatePromotionState: vi.fn(async () => {
-          throw new Error("not used");
-        }),
-        incrementAuthorityRound: vi.fn(async () => {
-          throw new Error("not used");
-        }),
-        setCooldownUntil: vi.fn(async () => {
-          throw new Error("not used");
         })
       },
       runtimeNotifier: {
@@ -298,10 +267,7 @@ describe("SynthesisService", () => {
         findById: vi.fn(async () => existing),
         findByWorkspaceId: vi.fn(async () => []),
         findByTopicKey: vi.fn(async () => []),
-        updateStatus: vi.fn(async () => existing),
-        updatePromotionState: vi.fn(async () => existing),
-        incrementAuthorityRound: vi.fn(async () => existing),
-        setCooldownUntil: vi.fn(async () => existing)
+        updateStatus: vi.fn(async () => existing)
       }
     });
 
@@ -313,241 +279,5 @@ describe("SynthesisService", () => {
       name: "CoreError",
       code: "VALIDATION"
     });
-  });
-
-  it("requests promotion to candidate", async () => {
-    const existing = createSynthesisCapsule({ promotion_state: PromotionState.NONE, cooldown_until: null });
-
-    const { dependencies } = createDependencies({
-      eventLogRepo: {
-        queryByEntity: vi.fn(async () => createEventLogHistory(1)),
-        append: vi.fn(async (event) => ({
-          event_id: "event-promoted",
-          created_at: "2026-03-21T03:00:00.000Z",
-          revision: 0,
-          ...event
-        }))
-      },
-      synthesisCapsuleRepo: {
-        create: vi.fn(async (capsule) => capsule),
-        findById: vi.fn(async () => existing),
-        findByWorkspaceId: vi.fn(async () => []),
-        findByTopicKey: vi.fn(async () => []),
-        updateStatus: vi.fn(async () => {
-          throw new Error("not used");
-        }),
-        updatePromotionState: vi.fn(async (_objectId, state, updatedAt) =>
-          Object.freeze({ ...existing, promotion_state: state, updated_at: updatedAt })
-        ),
-        incrementAuthorityRound: vi.fn(async () => {
-          throw new Error("not used");
-        }),
-        setCooldownUntil: vi.fn(async () => {
-          throw new Error("not used");
-        })
-      }
-    });
-
-    const service = new SynthesisService(dependencies);
-    const updated = await service.requestPromotion(existing.object_id);
-
-    expect(updated.promotion_state).toBe(PromotionState.CANDIDATE);
-  });
-
-  it("rejects promotion while in cooldown", async () => {
-    const existing = createSynthesisCapsule({ cooldown_until: "2026-03-22T00:00:00.000Z" });
-
-    const { dependencies } = createDependencies({
-      now: () => "2026-03-21T01:00:00.000Z",
-      synthesisCapsuleRepo: {
-        create: vi.fn(async (capsule) => capsule),
-        findById: vi.fn(async () => existing),
-        findByWorkspaceId: vi.fn(async () => []),
-        findByTopicKey: vi.fn(async () => []),
-        updateStatus: vi.fn(async () => existing),
-        updatePromotionState: vi.fn(async () => existing),
-        incrementAuthorityRound: vi.fn(async () => existing),
-        setCooldownUntil: vi.fn(async () => existing)
-      }
-    });
-
-    const service = new SynthesisService(dependencies);
-
-    await expect(service.requestPromotion(existing.object_id)).rejects.toMatchObject({
-      name: "CoreError",
-      code: "VALIDATION"
-    });
-  });
-
-  it("rejects promotion when state is already active", async () => {
-    const existing = createSynthesisCapsule({ promotion_state: PromotionState.PROPOSED, cooldown_until: null });
-
-    const { dependencies } = createDependencies({
-      synthesisCapsuleRepo: {
-        create: vi.fn(async (capsule) => capsule),
-        findById: vi.fn(async () => existing),
-        findByWorkspaceId: vi.fn(async () => []),
-        findByTopicKey: vi.fn(async () => []),
-        updateStatus: vi.fn(async () => existing),
-        updatePromotionState: vi.fn(async () => existing),
-        incrementAuthorityRound: vi.fn(async () => existing),
-        setCooldownUntil: vi.fn(async () => existing)
-      }
-    });
-
-    const service = new SynthesisService(dependencies);
-
-    await expect(service.requestPromotion(existing.object_id)).rejects.toMatchObject({
-      name: "CoreError",
-      code: "VALIDATION"
-    });
-  });
-
-
-  it("resolves candidate promotion to promoted", async () => {
-    const existing = createSynthesisCapsule({
-      promotion_state: PromotionState.CANDIDATE,
-      cooldown_until: "2026-03-22T00:00:00.000Z"
-    });
-
-    const { dependencies } = createDependencies({
-      eventLogRepo: {
-        queryByEntity: vi.fn(async () => createEventLogHistory(2)),
-        append: vi.fn(async (event) => ({
-          event_id: "event-promoted",
-          created_at: "2026-03-21T03:00:00.000Z",
-          revision: 0,
-          ...event
-        }))
-      },
-      synthesisCapsuleRepo: {
-        create: vi.fn(async (capsule) => capsule),
-        findById: vi.fn(async () => existing),
-        findByWorkspaceId: vi.fn(async () => []),
-        findByTopicKey: vi.fn(async () => []),
-        updateStatus: vi.fn(async () => existing),
-        updatePromotionState: vi.fn(async (_objectId, state, updatedAt) =>
-          Object.freeze({ ...existing, promotion_state: state, updated_at: updatedAt })
-        ),
-        incrementAuthorityRound: vi.fn(async () => existing),
-        setCooldownUntil: vi.fn(async (_objectId, cooldownUntil, updatedAt) =>
-          Object.freeze({
-            ...existing,
-            promotion_state: PromotionState.PROMOTED,
-            cooldown_until: cooldownUntil,
-            updated_at: updatedAt
-          })
-        )
-      }
-    });
-
-    const service = new SynthesisService(dependencies);
-    const updated = await service.resolvePromotionDecision(
-      existing.object_id,
-      PromotionState.PROMOTED,
-      "proposal_accepted",
-      TransitionCausedBy.REVIEW
-    );
-
-    expect(updated.promotion_state).toBe(PromotionState.PROMOTED);
-    expect(updated.cooldown_until).toBeNull();
-  });
-
-  it("resolves candidate promotion to rejected with cooldown", async () => {
-    const existing = createSynthesisCapsule({
-      promotion_state: PromotionState.CANDIDATE,
-      cooldown_until: null
-    });
-
-    const { dependencies } = createDependencies({
-      synthesisCapsuleRepo: {
-        create: vi.fn(async (capsule) => capsule),
-        findById: vi.fn(async () => existing),
-        findByWorkspaceId: vi.fn(async () => []),
-        findByTopicKey: vi.fn(async () => []),
-        updateStatus: vi.fn(async () => existing),
-        updatePromotionState: vi.fn(async (_objectId, state, updatedAt) =>
-          Object.freeze({ ...existing, promotion_state: state, updated_at: updatedAt })
-        ),
-        incrementAuthorityRound: vi.fn(async () => existing),
-        setCooldownUntil: vi.fn(async (_objectId, cooldownUntil, updatedAt) =>
-          Object.freeze({
-            ...existing,
-            promotion_state: PromotionState.REJECTED,
-            cooldown_until: cooldownUntil,
-            updated_at: updatedAt
-          })
-        )
-      }
-    });
-
-    const service = new SynthesisService(dependencies);
-    const updated = await service.resolvePromotionDecision(
-      existing.object_id,
-      PromotionState.REJECTED,
-      "proposal_rejected",
-      TransitionCausedBy.REVIEW,
-      { cooldownUntil: "2026-03-22T04:00:00.000Z" }
-    );
-
-    expect(updated.promotion_state).toBe(PromotionState.REJECTED);
-    expect(updated.cooldown_until).toBe("2026-03-22T04:00:00.000Z");
-  });
-
-  it("rejects promotion resolution when synthesis is not candidate", async () => {
-    const existing = createSynthesisCapsule({
-      promotion_state: PromotionState.NONE,
-      cooldown_until: null
-    });
-
-    const { dependencies } = createDependencies({
-      synthesisCapsuleRepo: {
-        create: vi.fn(async (capsule) => capsule),
-        findById: vi.fn(async () => existing),
-        findByWorkspaceId: vi.fn(async () => []),
-        findByTopicKey: vi.fn(async () => []),
-        updateStatus: vi.fn(async () => existing),
-        updatePromotionState: vi.fn(async () => existing),
-        incrementAuthorityRound: vi.fn(async () => existing),
-        setCooldownUntil: vi.fn(async () => existing)
-      }
-    });
-
-    const service = new SynthesisService(dependencies);
-
-    await expect(
-      service.resolvePromotionDecision(
-        existing.object_id,
-        PromotionState.PROMOTED,
-        "proposal_accepted",
-        TransitionCausedBy.REVIEW
-      )
-    ).rejects.toMatchObject({
-      name: "CoreError",
-      code: "VALIDATION"
-    });
-  });
-  it("increments authority rounds", async () => {
-    const existing = createSynthesisCapsule({ authority_round_count: 3 });
-
-    const { dependencies } = createDependencies({
-      synthesisCapsuleRepo: {
-        create: vi.fn(async (capsule) => capsule),
-        findById: vi.fn(async () => existing),
-        findByWorkspaceId: vi.fn(async () => []),
-        findByTopicKey: vi.fn(async () => []),
-        updateStatus: vi.fn(async () => existing),
-        updatePromotionState: vi.fn(async () => existing),
-        incrementAuthorityRound: vi.fn(async (_objectId, updatedAt) =>
-          Object.freeze({ ...existing, authority_round_count: 4, updated_at: updatedAt })
-        ),
-        setCooldownUntil: vi.fn(async () => existing)
-      }
-    });
-
-    const service = new SynthesisService(dependencies);
-    const updated = await service.incrementAuthority(existing.object_id);
-
-    expect(updated.authority_round_count).toBe(4);
   });
 });

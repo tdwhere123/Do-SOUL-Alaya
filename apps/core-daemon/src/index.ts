@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import {
   ComputeProviderPriority,
   HealthEventKind,
+  RecallContextEventType,
   type RuntimeGardenComputeConfig
 } from "@do-soul/alaya-protocol";
 import {
@@ -16,6 +17,9 @@ import {
   DynamicsService,
   EngineBindingService,
   EvidenceService,
+  ManifestationResolver,
+  PathActivationCandidateProducer,
+  type PathActivationCandidateProducerPathReaderPort,
   GardenBacklogTelemetryService,
   GovernanceLeaseService,
   GraphExploreService,
@@ -23,11 +27,13 @@ import {
   HealthJournalService,
   MemoryService,
   ConflictDetectionService,
+  DeferredObligationService,
   NarrativeBudgetService,
   PathRelationProposalService,
   PATH_RELATION_COUNTER_DEFAULT_TTL_MS,
   ProjectMappingService,
   ProposalService,
+  ResolutionService,
   type ConflictDetectionLlmPort,
   RecallService,
   RunService,
@@ -64,6 +70,7 @@ import {
   SqliteFileRepo,
   SqliteGreenStatusRepo,
   SqliteGardenTaskRepo,
+  SqliteHealthIssueGroupRepo,
   SqliteHealthJournalRepo,
   SqliteHandoffGapRepo,
   SqliteKarmaEventRepo,
@@ -109,6 +116,7 @@ import {
 import { createCoreDaemonApp } from "./daemon-app-composition.js";
 import { createDaemonEmbeddingRuntime } from "./daemon-embedding-runtime.js";
 import { createDaemonMcpMemoryToolHandler } from "./daemon-mcp-memory-handler.js";
+import { createAttachSurfaceRegistrar } from "./attach-surface-registrar.js";
 import { createBudgetProposalPort } from "./budget-wiring.js";
 import { defaultBootstrappingTemplates, defaultCanonicalAliasMap } from "./daemon-defaults.js";
 import { bootstrapDaemonMcpTooling } from "./daemon-mcp-tooling.js";
@@ -161,6 +169,10 @@ import {
   derivePrincipalCodingAvailability
 } from "./services/principal-coding-availability.js";
 import { createRecallUtilizationService } from "./services/recall-utilization-service.js";
+import {
+  buildSingleUsedAnchorPayload,
+  type SingleUsedAnchorTelemetryEmitter
+} from "./routes/recall-utilization.js";
 import { createSoulApprovalService } from "./services/soul-approval-service.js";
 import { SoulTopologyAuditService } from "./services/soul-topology-audit-service.js";
 import { SqliteWorkspaceEngineConfigRepo } from "./services/workspace-engine-config-repo.js";
@@ -311,10 +323,32 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     strongRefService,
     canonicalAliasService
   });
+  // invariant: dynamicsService is constructed below; EvidenceService
+  // calls into it via this ref so the evidence_gain karma emit on
+  // questionable -> verified does not require reordering. see also:
+  // EvidenceService.emitEvidenceGainIfPromoted.
+  const dynamicsServiceRef: {
+    current: { emitKarmaEvent(input: { kind: "evidence_gain"; objectId: string; workspaceId: string }): Promise<void> } | null;
+  } = { current: null };
   const evidenceService = new EvidenceService({
     evidenceCapsuleRepo,
     eventLogRepo,
-    runtimeNotifier
+    runtimeNotifier,
+    karmaEmitter: {
+      emitKarmaEvent: async (input) => {
+        if (dynamicsServiceRef.current === null) {
+          return;
+        }
+        await dynamicsServiceRef.current.emitKarmaEvent(input);
+      }
+    },
+    memoryRefLookup: {
+      findMemoriesByEvidenceRef: async (evidenceObjectId, workspaceId) => {
+        const memories = await memoryEntryRepo.findByEvidenceRefs(workspaceId, [evidenceObjectId]);
+        return memories.map((entry) => ({ object_id: entry.object_id }));
+      }
+    },
+    warn: warnLogger.warn
   });
   const governanceLeaseService = new GovernanceLeaseService({ eventLogRepo });
   const healthJournalService = new HealthJournalService({
@@ -337,6 +371,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     runtimeNotifier,
     greenService
   });
+  dynamicsServiceRef.current = dynamicsService;
   const memoryService = new MemoryService({
     memoryEntryRepo,
     evidenceService,
@@ -349,7 +384,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     memoryRepo: memoryEntryRepo,
     edgeRepo: memoryGraphEdgeRepo,
     eventLogRepo,
-    runtimeNotifier
+    runtimeNotifier,
+    eventPublisher
   });
   const topologyService = new TopologyService({
     pathRelationRepo,
@@ -406,12 +442,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const sessionOverrideService = new SessionOverrideService({ eventLogRepo });
   const proposalService = new ProposalService({
     proposalRepo,
-    claimService,
-    synthesisService,
     eventLogRepo,
-    karmaEventStore: createKarmaEventStore(karmaEventRepo, warnLogger),
-    dynamicsService,
-    warn: warnLogger,
     runtimeNotifier
   });
   const crossCuttingPermissionService = new CrossCuttingPermissionService({
@@ -420,7 +451,12 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   });
   const surfaceDriftService = new SurfaceDriftService({
     leaseRepo: new SqliteDriftLeaseRepo(database),
-    eventPublisher
+    eventPublisher,
+    healthJournal: {
+      record: async (entry) => {
+        await healthJournalService.record(entry);
+      }
+    }
   });
   const surfaceBindingService = new SurfaceBindingService({
     surfaceBindingRepo,
@@ -485,7 +521,104 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const recallPathPlasticityPort = createRecallPathPlasticityPort({
     pathRelationRepo
   });
+  // invariant: PathActivationCandidateProducer reads PathRelation rows
+  // anchored on the recall candidate memory ids. The reader port adapter
+  // expands each memory id to an `object` PathAnchorRef, queries
+  // pathRelationRepo.findByAnchors, and filters retired rows.
+  const pathActivationReaderPort: PathActivationCandidateProducerPathReaderPort = {
+    async findActiveByAnchorObjectIds(workspaceId, memoryObjectIds) {
+      if (memoryObjectIds.length === 0) {
+        return [];
+      }
+      const anchors = memoryObjectIds.map((objectId) => ({
+        kind: "object" as const,
+        object_id: objectId
+      }));
+      const paths = await pathRelationRepo.findByAnchors(workspaceId, anchors);
+      return paths.filter((path) => path.lifecycle.status !== "retired");
+    }
+  };
+  const pathActivationCandidateProducer = new PathActivationCandidateProducer({
+    pathReader: pathActivationReaderPort
+  });
+  // invariant: ManifestationResolver is instantiated lazily, only when a
+  // recall actually yields activation candidates. The daemon avoids
+  // constructing it at boot so the live ContextLens seam remains
+  // pass-through until paths produce candidates.
+  let manifestationResolverInstance: ManifestationResolver | null = null;
+  const getManifestationResolver = (): ManifestationResolver => {
+    if (manifestationResolverInstance === null) {
+      manifestationResolverInstance = new ManifestationResolver({
+        budgetConfigProvider: {
+          getConfig: async () => null
+        },
+        eventLogWriter: {
+          append: async (entry) => eventLogRepo.append(entry)
+        }
+      });
+    }
+    return manifestationResolverInstance;
+  };
+  const manifestationSidecarPort = {
+    buildBiasSidecar: async (params: Readonly<{
+      readonly workspaceId: string;
+      readonly runId: string;
+      readonly anchorMemoryObjectIds: readonly string[];
+      readonly taskSurfaceRef: Parameters<ManifestationResolver["resolveWithBias"]>[0]["taskSurfaceRef"];
+    }>) => {
+      const candidates = await pathActivationCandidateProducer.produce({
+        workspaceId: params.workspaceId,
+        runId: params.runId,
+        anchorMemoryObjectIds: params.anchorMemoryObjectIds
+      });
+      if (candidates.length === 0) {
+        return [];
+      }
+      const result = await getManifestationResolver().resolveWithBias({
+        workspaceId: params.workspaceId,
+        runId: params.runId,
+        candidates,
+        taskSurfaceRef: params.taskSurfaceRef
+      });
+      return result.biasSidecar;
+    }
+  };
   const recallUtilizationService = createRecallUtilizationService({ eventLogRepo });
+  const singleUsedAnchorEmitter: SingleUsedAnchorTelemetryEmitter = {
+    async emit(input) {
+      const event = {
+        event_type: RecallContextEventType.SOUL_SINGLE_USED_ANCHOR,
+        entity_type: "context_delivery",
+        entity_id: input.deliveryId,
+        workspace_id: input.workspaceId,
+        run_id: input.runId,
+        caused_by: input.agentTarget,
+        payload_json: buildSingleUsedAnchorPayload({
+          deliveryId: input.deliveryId,
+          sessionId: input.sessionId,
+          runId: input.runId,
+          agentTarget: input.agentTarget,
+          workspaceId: input.workspaceId,
+          occurredAt: input.occurredAt,
+          usedAnchorObjectId: input.usedAnchorObjectId
+        })
+      } as const;
+      try {
+        await eventPublisher.appendManyWithMutation([event], () => undefined);
+      } catch {
+        // invariant: telemetry emission never propagates failure to the route.
+      }
+    }
+  };
+  // invariant: looks up the delivered_object_ids for a delivery so the
+  // SOUL_SINGLE_USED_ANCHOR payload can attribute the reuse to a
+  // concrete anchor when pointer_count === 1.
+  const deliveryAnchorReader = {
+    async findDeliveredObjectIds(deliveryId: string): Promise<readonly string[] | null> {
+      const delivery = await trustStateRecorder.findDeliveryById(deliveryId);
+      return delivery === null ? null : delivery.delivered_object_ids;
+    }
+  };
   const recallService = new RecallService({
     memoryRepo: memoryEntryRepo,
     slotRepo,
@@ -519,6 +652,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     },
     claimResolverPort: claimFormRepo,
     embeddingRecallService,
+    manifestationSidecarPort,
     warn: warnLogger.warn
   });
   const contextLensAssembler = new ContextLensAssembler({
@@ -572,6 +706,9 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
         },
         graphEdgePort,
         ...(conflictDetectionLlmPort === null ? {} : { llmPort: conflictDetectionLlmPort }),
+        karmaEmitter: {
+          emitKarmaEvent: (input) => dynamicsService.emitKarmaEvent(input)
+        },
         ruleEnabled: conflictDetectionRuleEnabled,
         warn: warnLogger.warn
       })
@@ -586,18 +723,41 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   })();
   const pathRelationProposalService = new PathRelationProposalService({
     repo: {
-      create: async (relation) => pathRelationRepo.create(relation),
+      create: (relation) => pathRelationRepo.create(relation),
       findByAnchorMemoryId: async (memoryId, workspaceId) =>
         await pathRelationRepo.findByAnchors(workspaceId, [
           { kind: "object", object_id: memoryId }
         ])
     },
+    eventPublisher,
     ...(pathRelationCounterTtlMs === undefined ? {} : { counterTtlMs: pathRelationCounterTtlMs }),
     warn: warnLogger.warn
   });
   // invariant: counter Map is bounded by periodic eviction. The daemon
   // sweeps once per TTL interval; sub-threshold pairs older than the TTL
   // are discarded so long no-promote tails do not grow without bound.
+  // invariant: DeferredObligationService is the producer for path-anchor
+  // `obligation` refs and the destination of soul.resolve `defer`
+  // resolutions. Wired into the daemon so its create/fulfill/expire ports
+  // are callable from the materialization router and the resolve handler.
+  const deferredObligationService = new DeferredObligationService({
+    repo: deferredObligationRepo,
+    eventPublisher
+  });
+  // invariant: ResolutionService is the typed dispatcher behind
+  // soul.resolve. confirm activates draft claims; defer creates
+  // obligations through DeferredObligationService; stale flips
+  // memory_entry active -> dormant.
+  // see also: packages/core/src/resolution-service.ts
+  // see also: apps/core-daemon/src/mcp-memory-resolve-handler.ts
+  const resolutionService = new ResolutionService({
+    eventPublisher,
+    claimRepo: claimFormRepo,
+    memoryRepo: memoryEntryRepo,
+    claimService,
+    memoryService,
+    deferredObligationService
+  });
   const pathRelationEvictionIntervalMs = pathRelationCounterTtlMs ?? PATH_RELATION_COUNTER_DEFAULT_TTL_MS;
   const pathRelationEvictionTimer = setInterval(() => {
     pathRelationProposalService.evictExpired();
@@ -744,6 +904,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     pathRelationRepo,
     eventPublisher
   });
+  const healthIssueGroupRepo = new SqliteHealthIssueGroupRepo(database);
   const gardenRuntime = createGardenRuntime({
     databaseConnection: database.connection,
     backlogThresholds: gardenBacklogThresholds,
@@ -754,6 +915,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     handoffGapRepo: sqliteHandoffGapRepo,
     orphanDetectionEnabled,
     orphanRadarRepo,
+    healthIssueGroupRepo,
     pathGraphSnapshotRepo,
     pathRelationRepo,
     pathPlasticityWatermarkRepo,
@@ -812,9 +974,16 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   });
   await rebuildCountersFromEventLog(eventLogRepo, trustStateRecorder);
   trustStateRecorder.markReady();
+  const attachSurfaceRegistrar = createAttachSurfaceRegistrar({
+    surfaceService,
+    warn: warnLogger.warn
+  });
   const mcpMemoryToolHandler = createDaemonMcpMemoryToolHandler({
     recallService,
     memoryService,
+    dynamicsService: {
+      emitKarmaEvent: (input) => dynamicsService.emitKarmaEvent(input)
+    },
     memoryEntryRepo,
     evidenceService,
     pathRelationProposalService,
@@ -827,7 +996,15 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     ...(gardenTaskRepo === undefined ? {} : { gardenTaskRepo }),
     eventLogRepo,
     proposalRepo,
-    runtimeNotifier
+    runtimeNotifier,
+    attachSurfaceRegistrar,
+    resolutionService,
+    claimSourceReader: {
+      findSourceObjectRefs: async (targetObjectId: string) => {
+        const claim = await claimFormRepo.findById(targetObjectId);
+        return claim === null ? null : claim.source_object_refs;
+      }
+    }
   });
   recordStartupStep(startupSteps, "mcp-tooling");
 
@@ -870,10 +1047,14 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     arbitrationService,
     recallService,
     recallUtilizationService,
+    singleUsedAnchorEmitter,
+    deliveryAnchorReader,
     taskSurfaceBuilder,
     synthesisService,
     claimService,
     proposalService,
+    proposalRepo,
+    healthIssueGroupRepo,
     // A1 (HITL daemon backbone) — Inspector loopback HTTP routes need
     // the same MCP handler that attached agents call.
     mcpMemoryToolHandler,

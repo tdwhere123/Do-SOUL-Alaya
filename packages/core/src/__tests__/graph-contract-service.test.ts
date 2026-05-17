@@ -198,7 +198,6 @@ function createSnapshot(snapshotId: string, activePaths: number): PathGraphSnaps
     snapshot_id: snapshotId,
     workspace_id: "workspace-1",
     total_active_paths: activePaths,
-    total_retired_paths: 0,
     strength_distribution: {
       very_weak: 0,
       weak: 0,
@@ -227,7 +226,6 @@ function createSnapshot(snapshotId: string, activePaths: number): PathGraphSnaps
     },
     paths_reinforced_since_last: 0,
     paths_weakened_since_last: 0,
-    paths_retired_since_last: 0,
     paths_created_since_last: activePaths,
     snapshot_at: "2026-05-02T00:00:00.000Z"
   };

@@ -7,7 +7,12 @@ import {
   type EventLogEntry,
   type Slot
 } from "@do-soul/alaya-protocol";
-import { ClaimService, type ClaimFormInput, type ClaimServiceDependencies } from "../claim-service.js";
+import {
+  ClaimService,
+  derivePrecedenceBasis,
+  type ClaimFormInput,
+  type ClaimServiceDependencies
+} from "../claim-service.js";
 import { CanonicalAliasService } from "../canonical-alias-service.js";
 import type { SlotElectionResult } from "../slot-service.js";
 
@@ -428,6 +433,75 @@ describe("ClaimService", () => {
       message: "Slot service is required for claim activation"
     });
   });
+  describe("derivePrecedenceBasis", () => {
+    it("returns evidence_strength for a normal Garden compile claim", () => {
+      expect(
+        derivePrecedenceBasis({
+          source: "garden_compile",
+          enforcement_level: "preferred"
+        })
+      ).toBe("evidence_strength");
+    });
+
+    it("returns recency when the new claim supersedes a prior one", () => {
+      expect(
+        derivePrecedenceBasis({
+          source: "garden_compile",
+          enforcement_level: "preferred",
+          is_supersede: true
+        })
+      ).toBe("recency");
+    });
+
+    it("returns authority when enforcement_level is strict", () => {
+      expect(
+        derivePrecedenceBasis({
+          source: "garden_compile",
+          enforcement_level: "strict"
+        })
+      ).toBe("authority");
+    });
+
+    it("returns user_override when source is user_seed", () => {
+      expect(
+        derivePrecedenceBasis({
+          source: "user_seed",
+          enforcement_level: "preferred"
+        })
+      ).toBe("user_override");
+    });
+
+    it("returns user_override when signal carries an explicit override marker", () => {
+      expect(
+        derivePrecedenceBasis({
+          source: "model_tool",
+          enforcement_level: "preferred",
+          user_override: true
+        })
+      ).toBe("user_override");
+    });
+
+    it("prefers authority over recency when both conditions match", () => {
+      expect(
+        derivePrecedenceBasis({
+          source: "garden_compile",
+          enforcement_level: "strict",
+          is_supersede: true
+        })
+      ).toBe("authority");
+    });
+
+    it("prefers user_override over authority when both conditions match", () => {
+      expect(
+        derivePrecedenceBasis({
+          source: "user_seed",
+          enforcement_level: "strict",
+          is_supersede: true
+        })
+      ).toBe("user_override");
+    });
+  });
+
   it("rejects invalid lifecycle transitions", async () => {
     const existing = createClaimForm({ claim_status: ClaimLifecycleState.DRAFT });
 

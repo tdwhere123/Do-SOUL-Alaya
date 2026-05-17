@@ -53,9 +53,24 @@ export interface SurfaceDriftEventPublisherPort {
   ): Promise<T>;
 }
 
+// invariant: optional health-journal port. When wired, governance-critical
+// DriftAlerts are mirrored into the Inspector health inbox via a
+// health_journal entry so operators see them alongside OrphanRadar /
+// evidence_failure aggregates instead of only via raw EventLog.
+export interface SurfaceDriftHealthJournalPort {
+  record(entry: {
+    readonly event_kind: "garden_backlog";
+    readonly workspace_id: string;
+    readonly run_id: string | null;
+    readonly summary: string;
+    readonly detail_json: Record<string, unknown>;
+  }): Promise<void>;
+}
+
 export interface SurfaceDriftServiceDependencies {
   readonly leaseRepo: DriftLeaseRepoPort;
   readonly eventPublisher: SurfaceDriftEventPublisherPort;
+  readonly healthJournal?: SurfaceDriftHealthJournalPort;
   readonly generateId?: () => string;
   readonly now?: () => string;
 }
@@ -260,6 +275,22 @@ export class SurfaceDriftService {
         alerted_at: alert.alerted_at
       })
     });
+
+    if (this.dependencies.healthJournal !== undefined) {
+      await this.dependencies.healthJournal.record({
+        event_kind: "garden_backlog",
+        workspace_id: alert.workspace_id,
+        run_id: null,
+        summary: alert.message,
+        detail_json: {
+          alert_id: alert.alert_id,
+          drift_id: alert.drift_id,
+          drift_type: parsedClassification.drift_type,
+          severity: alert.severity,
+          alerted_at: alert.alerted_at
+        }
+      });
+    }
 
     return alert;
   }

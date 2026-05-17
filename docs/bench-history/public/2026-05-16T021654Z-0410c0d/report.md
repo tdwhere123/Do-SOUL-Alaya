@@ -1,7 +1,7 @@
 # Bench Report — public / longmemeval-s
 
 - Run at: 2026-05-16T02:16:54.183Z
-- Sample size: 500 (evaluated 100/500, label=full)
+- Sample size: 500 (evaluated 100/500, label=staged)
 - Harness mode: mcp_propose_review
 - Alaya commit: 0410c0d (0.3.8)
 - Embedding: none
@@ -32,14 +32,7 @@ Worst verdict: **OK** ✓
 Absolute target gates:
 - ✓ LongMemEval-S disabled-100 smoke target: 77.00% >= target 70.00%
 
-## Δ vs previous
-
-| KPI | previous | current | delta | verdict |
-|---|---|---|---|---|
-| r_at_5 | 0.7700 | 0.7700 | 0 | ✓ OK |
-| r_at_10 | 0.8000 | 0.8000 | 0 | ✓ OK |
-| token_saved_ratio_vs_full_prompt | 0.0000 | 0.0000 | 0 | ✓ OK |
-| latency_ms_p95 | 149.0000 | 143.0000 | -6.0000 | ✓ OK |
+_No previous baseline; this is the first entry._
 
 ## Absolute KPIs
 

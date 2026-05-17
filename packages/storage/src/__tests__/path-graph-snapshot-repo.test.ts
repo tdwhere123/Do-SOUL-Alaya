@@ -126,7 +126,6 @@ function createSnapshotFixture(overrides: Partial<PathGraphSnapshot> = {}): Path
     snapshot_id: "snapshot-1",
     workspace_id: "workspace-1",
     total_active_paths: 3,
-    total_retired_paths: 1,
     strength_distribution: {
       very_weak: 0,
       weak: 1,
@@ -155,7 +154,6 @@ function createSnapshotFixture(overrides: Partial<PathGraphSnapshot> = {}): Path
     },
     paths_reinforced_since_last: 2,
     paths_weakened_since_last: 1,
-    paths_retired_since_last: 1,
     paths_created_since_last: 3,
     snapshot_at: "2026-04-17T00:05:00.000Z",
     ...overrides

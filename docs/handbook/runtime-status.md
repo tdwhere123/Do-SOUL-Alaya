@@ -1,9 +1,40 @@
 # Runtime Status
 
 Single source of truth for what is wired and what is not. Update after
-each Phase Gate.
+each release.
 
-## Readiness Vocabulary
+## Canonical 4-Level Readiness (current vocabulary)
+
+v0.3.9 adopts a 4-level readiness model. New readiness claims after
+v0.3.9 must use one of these four labels; the legacy vocabulary below
+is retained for historical entries in this file but should not be
+used for new rows.
+
+| Level | Meaning | Promotion evidence required |
+|---|---|---|
+| `schema_only` | Zod / type / migration exists; no production code reads or writes it. | Promote to `implementation_wired` by landing the production producer **and** at least one production consumer in the daemon's startup graph. |
+| `implementation_wired` | Producer and consumer code both exist in the daemon wiring; service is constructed at startup; targeted unit / integration tests prove the call path under fixture conditions. No live durable evidence has been observed outside the test harness. | Promote to `live_event_proven` when at least one of: (a) a non-test EventLog row produced by this subsystem appears under a real attached MCP session (Codex / Claude Code or another adapter), recorded in `docs/v0.3/v0.3.x/host-autonomy-fixtures/` or equivalent witness path; OR (b) a live SQLite portrait (post-fix snapshot under `.do-it/findings/v0.3.x-live-data-portrait*.md` or similar) confirms the producer is firing against a real workspace; OR (c) `bench-runner` end-to-end output exercises the surface under a non-mock run. |
+| `live_event_proven` | The subsystem has been observed producing durable artefacts in a real workspace — via attached MCP session, live SQLite portrait, or `bench-runner` end-to-end — not only in test fixtures. The agent did not necessarily decide autonomously to use it; the trigger may have been the host operator, another subsystem, or the bench harness. | Promote to `agent_used` when an attached host agent (Codex or Claude Code) is observed autonomously invoking the surface during a normal conversation, with EventLog evidence chained across the recall / open / respond / report cycle. |
+| `agent_used` | A real host agent autonomously chose the surface during a normal conversation; the EventLog chain is committed durable. Strongest claim on this scale. | — (terminal level) |
+
+**Legacy vocabulary cross-walk** (used in pre-v0.3.9 rows below; the
+mapping is one-to-many in places because the legacy vocabulary
+overloaded promotion evidence with surface-shape claims):
+
+| Legacy label | New 4-level mapping |
+|---|---|
+| `not-started` | drop the row (no readiness claim) |
+| `schema-ready` | `schema_only` |
+| `implementation-ready` | `implementation_wired` if the production wiring exists; otherwise `schema_only`. The legacy label does not distinguish. |
+| `live-event-ready` | `live_event_proven` |
+| `mcp-callable` | `live_event_proven` (the MCP SDK harness counts as a live event, but the host did not necessarily autonomously call it) |
+| `agent-used` | `agent_used` |
+| `host-worker-ready` | `live_event_proven` for the workload surface; `agent_used` if an external host has autonomously claimed and completed a task on the live system |
+| `mcp-consumable` | `live_event_proven` (deprecated legacy alias for `mcp-callable`) |
+| `cli-consumable` | `live_event_proven` for the CLI verb (the E2E run counts as live event) |
+| `docs-truth-ready` | not a readiness level on the new scale; tracked separately as doc audit notes |
+
+## Legacy Readiness Vocabulary (kept for historical rows only)
 
 | Label | Meaning |
 |---|---|
@@ -17,6 +48,65 @@ each Phase Gate.
 | `mcp-consumable` | **deprecated alias for `mcp-callable`**, retained for one release. Pre-v0.1.1 docs use this term to mean what `mcp-callable` now means; new claims must use `mcp-callable` (current proof) or `agent-used` (host-autonomy proof, v0.2 deferred). |
 | `cli-consumable` | exposed via CLI command and proven by at least one E2E run |
 | `docs-truth-ready` | cross-doc contract wording is aligned and matches current runtime/governance behavior |
+
+## v0.3.9 Subsystem Readiness (current truth, 4-level)
+
+The table below uses only the new 4-level vocabulary and audits every
+subsystem touched in v0.3.0 — v0.3.9, not the pre-port history. For
+historical context on subsystems first introduced before v0.3.0, see
+the legacy table further down.
+
+| Subsystem | Level | Evidence |
+|---|---|---|
+| MCP tool surface — legacy 12 verbs (10 `soul.*` minus `soul.resolve` + 3 `garden.*`) | `live_event_proven` for the legacy catalog. `agent_used` for `soul.recall` + `soul.report_context_usage` only (the v0.3.0 host-autonomy witness). | `apps/core-daemon/src/mcp-memory-tool-catalog.ts:3-17`. `agent_used` evidence: `docs/v0.3/v0.3.0/host-autonomy-fixtures/`. |
+| `soul.resolve` verb (new in v0.3.9) | `implementation_wired`. Production handler is mounted; end-to-end tests cover all 6 resolutions; optimistic concurrency guard live. No real host has been observed autonomously calling it yet. | Handler: `apps/core-daemon/src/mcp-memory-resolve-handler.ts`. Dispatcher: `packages/core/src/resolution-service.ts`. E2E: `apps/core-daemon/src/__tests__/soul-resolve-e2e.test.ts`. |
+| `staged_warnings[]` on recall payload (additive) | `implementation_wired`. Recall handler attaches warnings when policies fire; protocol schema field is optional. Production producers exist; an attached host has not yet been observed reacting to a warning autonomously. | `apps/core-daemon/src/mcp-memory-tool-handler.ts`; `packages/protocol/src/recall-payload.ts`; descriptor: catalog `soul.recall` description. |
+| Garden's `MaterializationRouter` (draft-only claim output, `object_kind` routing, `potential_conflict` route) | `live_event_proven`. The bench harness drives `MaterializationRouter` on every seeded turn via the rotated `object_kind` set (see `apps/bench-runner/src/harness/seed-rotation.ts`); the post-fix archives at `docs/bench-history/public-locomo/2026-05-17T064415Z-75d418c/` (LoCoMo 10-conv full, sample_size=1982), `docs/bench-history/public/2026-05-17T065105Z-75d418c/` (LongMemEval-S 100 disabled, label=staged), and `docs/bench-history/public/2026-05-17T104037Z-294070f/` (LongMemEval-S 100 embedding-on, label=staged) durably persist both the `memory_entry` and the `claim_form (draft)` rows produced by the router on real workspace state. | `packages/soul/src/garden/materialization-router.ts`. |
+| Producer-side ontology diversification (`pickEvidenceKind`, `toFormationKind`, `derivePrecedenceBasis`) | `live_event_proven`. The bench seed rotation (`fact / preference / decision / constraint / outcome` × N turns × M questions) flows through `MaterializationRouter.routeByObjectKind` — 3/5 of seeds land in `memory_and_claim_draft` and run `derivePrecedenceBasis`, 2/5 land in `memory_entry_only`. Witnessed by the three archives above: every seeded turn writes a `memory_entry` row with the diversified `dimension` field per the rotation, and the claim-capable rows write `claim_form` rows with the derived `precedence_basis`. The same rotation runs across both the embedding-off and embedding-on configurations. | `packages/soul/src/garden/materialization-router.ts`; `packages/core/src/claim-service.ts`. Tests: `materialization-router-routing.test.ts`, `seed-rotation.test.ts`. |
+| `ClaimService.transitionLifecycle` + optimistic concurrency on claim status | `implementation_wired`. Both the inline `soul.resolve` path and the proposal-accept path go through the CAS; tests prove the path. Live witness requires an attached host calling `soul.resolve.confirm` against a draft claim, which is the `soul.resolve` host-autonomy gate. | `packages/core/src/claim-service.ts`; `updateStatusStatement` adds `AND claim_status = ?`. CAS-first / audit-second order enforced in `applyLifecycleTransition`. |
+| `PathRelation` → `ActivationCandidate` producer | `implementation_wired`. Producer wired in the daemon; `verification_bias` consumed by `AuditorSchedulingAdvisor`; `unfinishedness_bias` carried into the recall sidecar. The 2-conv LoCoMo smoke does not yet reach K=3 co-usage to materialise paths; a longer bench or live workspace portrait is the gate. | `packages/core/src/path-activation-candidate-producer.ts`; `packages/core/src/manifestation-resolver.ts`. |
+| `PathRelation.governance_class` → manifestation policy | `implementation_wired`. `ManifestationResolver` reads `governance_class` as the manifestation ceiling per the four-class table; promotion requires a workspace with paths past the strictly_governed threshold. | `packages/core/src/path-manifestation-policy.ts`; `packages/core/src/manifestation-resolver.ts`. |
+| `PathRelation.stability_class` evolver | `implementation_wired`. Promotion ladder requires cumulative `support_events_count` and `contradiction_events_count = 0`; tests cover the matrix. Live witness requires a workspace with K=3+ co-usage which the 2-conv bench cannot generate. | `packages/core/src/path-plasticity-service.ts`. |
+| `AuditorSchedulingAdvisor` | `schema_only` for the production wire (exported but not yet on the production Auditor schedule call); `implementation_wired` for the in-test path. | `packages/soul/src/garden/auditor-scheduling-advisor.ts`. Carry-forward item; see closeout. |
+| `ManifestationBudgetConfigProviderPort` | `schema_only`. Stub returns `null`; persistent repo-backed provider is the follow-up. | Stub: `packages/core/src/manifestation-budget-config-provider.ts`. Carry-forward item. |
+| `karma_events` (`reuse_gain` / `evidence_gain` / `supersede_penalty` producers) | `implementation_wired`. Each producer is wired into its trigger site (recall hit / evidence health change / contradiction edge create); unit + integration tests prove each scenario. Live witness requires a workspace where the trigger sites actually fire (recall-twice / questionable→verified evidence flip / contradicts edge). | `packages/core/src/dynamics-service.ts`. |
+| `HealthIssueGroup` projection + Inspector Health Inbox | `implementation_wired`. Migration `071-health-issue-groups.sql` defines the table; Auditor / OrphanRadar / Green producers upsert by `(target_memory_id, cause_kind)`; Inspector `/health-inbox` renders the grouped view; tests cover the route. Live witness requires an Auditor pass against a workspace that has orphans or failed evidence. | `apps/inspector/web/src/pages/HealthInbox.tsx`; `packages/soul/src/garden/auditor.ts`. |
+| Promote-to-`strictly_governed` Inspector Proposal | `implementation_wired` for the origination button (posts a typed `path_relation` Proposal); accept-apply handler is the carry-forward gap. | `apps/inspector/web/src/pages/MemoryBrowser.tsx`. Carry-forward item. |
+| `surface_identities` per `(workspace_id, agent_target)` | `implementation_wired`. First attach per host writes the row via `SurfaceService.createSurface` (idempotent on CONFLICT); registrar covered by tests. Live witness requires a real attach from Codex / Claude Code that populates the table. | `apps/core-daemon/src/attach-surface-registrar.ts`. |
+| Recall utilization 5-bucket telemetry | `implementation_wired`. Route returns per-workspace per-`agent_target` 5-bucket counts derived from EventLog. Live witness requires a workspace that has accumulated recall deliveries + usage reports through the route. | `apps/core-daemon/src/routes/recall-utilization.ts`; `packages/eval/src/utilization-buckets.ts`. |
+| `SOUL_SINGLE_USED_ANCHOR` telemetry | `implementation_wired`. Emits when pointer_count===1 reports land; helper looks up the delivered_object_id; does **not** advance PathRelation co-usage counter. The 2-conv LoCoMo smoke does not yet emit a real single-used-anchor row. | `apps/core-daemon/src/routes/recall-utilization.ts`; `apps/core-daemon/src/index.ts`. |
+| `GreenStatus` silent-UPDATE repair (v0.3.9 Cat-0) | `implementation_wired`. Revoke guard + workspace predicate + `green_revoke_noop` EventLog row are in the production code path; tests prove no silent overwrite. Live witness requires a workspace where the prior anti-pattern (21 446 silent revoke events) is no longer reproduced — captured when the next v0.3.9 portrait runs against a populated workspace. | `packages/storage/src/repos/garden-data-ports.ts`. |
+| `PathRelation` EventLog-first atomicity (v0.3.9 Cat-0) | `implementation_wired`. `PathRelationProposalService.propose`, `MemoryGraphEdgeRepo.ensureEdge`, and `GraphExploreService.addEdge` all route through `publishEventLogMutation`; tests cover the rollback path. Live witness requires a workspace where the producer fires against real consolidation activity. | `packages/core/src/path-relation-proposal-service.ts`. |
+| `SynthesisCapsule.promotion` | **Retired in v0.3.9.** Schema columns dropped via migration `072`; `SOUL_SYNTHESIS_PROMOTED` event registration kept as deprecated per invariant §25 (no producer). | Migration `072-drop-synthesis-promotion.sql`. |
+| `NodeInstance` | **Retired in v0.3.9.** Single-instance runtime engine; no consumer needed. Schema dropped via migration `069`. | Migration `069-drop-node-instances.sql`. |
+| `DeferredObligation` | `implementation_wired`. Service instantiated in the daemon; `soul.resolve.defer` is the only producer; tests cover the obligation create path. Live witness chains on `soul.resolve` host-autonomy. | `packages/core/src/deferred-obligation-service.ts`. |
+| `UpgradeAssessmentAxis` (5 fields on `GapRecord` / `HandoffRecord`) | `schema_only` — deferred decision. Producer and consumer pending; see `docs/v0.3/v0.3.9/closeout-deferred-conditions.md` for the closure condition. | Carry-forward item. |
+| Bench harness data correctness (LoCoMo denominator, cohort guard, sample-size label, baseline pointer hygiene, shared version helper, producer-chain seed rotation) | `live_event_proven`. The denominator fix is observable in `public-locomo/2026-05-17T064415Z-75d418c/kpi.json` (`sample_size = 1982`, `evaluated_count = 1982`, `label = full`). The label cascade renders `staged` on `public/2026-05-17T065105Z-75d418c` (100 evaluated, disabled) and on `public/2026-05-17T104037Z-294070f` (100 evaluated, embedding-on). Shared version helper writes `alaya_version: 0.3.9` to all three archives. The embedding-on baseline pointer hygiene fix is observable in `public/latest-baseline-embedding-on.json` (no longer `{ "slug": null }`). Seed rotation persists mixed-dimension memories across all three archives. See `docs/v0.3/v0.3.9/reports/v0.3.9-bench-diff.md` for the full diff. | `apps/bench-runner/src/locomo/runner.ts`; `apps/bench-runner/src/version.ts`; `apps/bench-runner/src/harness/seed-rotation.ts`; `packages/eval/src/wilson-ci.ts`; `packages/eval/src/cohort-attribution.ts`. |
+
+**Deliberately not promoted past `implementation_wired` for most
+v0.3.9-new subsystems.** The release shipped production code +
+tests + the bench-runner smoke that exercises the
+`MaterializationRouter` producer chain, but most subsystems require
+a live workspace witness that the 2-conversation LoCoMo smoke does
+not yet produce (paths past K=3 co-usage; karma trigger sites
+firing; Auditor passes against a workspace with orphans). Each row
+above documents the specific witness needed. Promotion to
+`live_event_proven` for these rows happens when one of: (a) a longer
+bench run (LongMemEval-S 500 staged + cross-question-100) emits the
+durable artefacts the subsystem produces; (b) a live SQLite portrait
+under `.do-it/findings/v0.3.9-*-live-data-portrait.md` is captured
+against a populated workspace; (c) an attached host (Codex / Claude
+Code) drives the surface during a real session. Promotion to
+`agent_used` requires (c) with the attached host AUTONOMOUSLY
+choosing the surface during a normal conversation, parallel to the
+v0.3.0 witness for `soul.recall`.
+Both witnesses are tracked as v0.3.x follow-on work.
+
+## Legacy Subsystem Readiness Table (pre-v0.3.9, kept for historical record)
+
+The table below uses the legacy vocabulary. New rows should not be
+added here; use the v0.3.9 4-level table above. Status columns
+reflect the state at the time of the row's last update.
 
 ## v0.1 Phase Status
 
@@ -254,6 +344,117 @@ Both lessons are process-level — neither requires a code change in
 v0.1-closeout. They are pinned here so the v0.1.x maintenance waves and
 v0.2 planning agents can reference them at the source rather than
 re-discovering them from `.do-it/findings/{a1,a2,a3}.md`.
+
+## v0.3.9 Release (2026-05-17)
+
+Trustworthy memory loop closure across three structural layers
+(producer-side ontology, structure registry, runtime control + typed
+governance). Three new storage migrations: `069-drop-node-instances.sql`
+(table drop), `071-health-issue-groups.sql` (new projection),
+`072-drop-synthesis-promotion.sql` (drops 3 columns + dependent
+index). Migration sequence number 070 is intentionally skipped.
+
+MCP surface adds **one verb** — `soul.resolve` — bringing the live
+catalog to **13 tools** (10 `soul.*` + 3 `garden.*`). Recall results
+gain an additive optional `staged_warnings[]`. No other MCP tool name
+or request-schema change.
+
+New / changed runtime-visible surfaces:
+
+- **`soul.resolve` MCP verb** is `implementation_wired`. Six
+  resolutions (`confirm` / `reject` / `correct` / `stale` / `defer` /
+  `not_relevant`) dispatch through `ResolutionService` and atomically
+  transition `ClaimService.transitionLifecycle(draft → active)` or
+  the appropriate alternative. Optimistic concurrency at the SQL
+  boundary; CAS-first / audit-second ordering enforced.
+- **Garden's only legal claim output is `draft`** (invariant §35).
+  `MaterializationRouter` routes by `object_kind` to one of five
+  targets (`signal_only` / `evidence_only` / `evidence_short_ttl` /
+  `memory_entry_only` / `memory_and_claim_draft`); the
+  `potential_conflict` signal kind routes through
+  `ConflictDetectionPort.evaluate` instead of the questionable-evidence
+  fallback.
+- **`staged_warnings[]` on recall payload** is additive. Each warning
+  carries `kind` (`low_confidence` / `contradiction_pending` /
+  `supersede_candidate` / `evidence_missing` / `policy_violation`),
+  `severity` (`info` / `warning` / `blocking`), `policy`, `summary`,
+  and `resolution_options`. Older agents skip the field.
+- **`GovernancePolicy` agent-side classifier**: optional
+  `policy_classification` on `SoulResolveRequestSchema`
+  (`ask_now` / `apply_silently` / `track_only` / `inspect_later`)
+  with a per-turn `ask_now` budget; overflow degrades to
+  `inspect_later` so the Inspector still surfaces warnings.
+- **Recall utilization 5-bucket split**: per-workspace per-`agent_target`
+  buckets (`no_recall` / `empty_recall` / `delivered_not_reported` /
+  `reported_skipped_or_na` / `reported_used`) sum to deliveries +
+  EventLog `no_recall` events; `SOUL_SINGLE_USED_ANCHOR` telemetry
+  emits without advancing the PathRelation co-usage counter.
+- **`PathRelation` becomes a first-class producer + consumer**:
+  governance class drives the `ManifestationResolver` ceiling
+  (`hint_only → none`, `attention_only → lens_entry`,
+  `recall_allowed → lens_entry + dialogue_nudge`,
+  `strictly_governed → all three including stance_bias`);
+  `stability_class` evolves on cumulative `support_events_count`
+  thresholds (3 / 8); `AuditorSchedulingAdvisor` reads
+  `verification_bias`; `path-activation-candidate-producer.ts`
+  bridges path data into manifestation.
+- **`HealthIssueGroup` Inspector Health Inbox**: new projection
+  table (migration `071`), aggregated by `(target_memory_id,
+  cause_kind)` from Auditor / OrphanRadar / Green / `evidence_failure`
+  producers; Inspector `/health-inbox` page renders the grouped view;
+  Memory Browser ships "Promote to strictly_governed" button that
+  posts a typed `path_relation` Proposal (origination only — invariant
+  §35 / §36).
+- **`surface_identities` per `(workspace_id, agent_target)`**: first
+  attach writes a row via `SurfaceService.createSurface`; idempotent
+  on CONFLICT; routes `governance_critical` DriftAlerts through
+  `HealthJournal`.
+- **`SynthesisCapsule.promotion` ladder retired**. Three columns
+  dropped via migration `072`; `SOUL_SYNTHESIS_PROMOTED` event
+  registration kept as deprecated for legacy EventLog replay
+  (invariant §25); no producer emits it. The replacement is
+  `soul.resolve.confirm`.
+- **`NodeInstance` retired** (migration `069`). The daemon runtime
+  engine is single-instance; the schema slot is removed.
+- **`DeferredObligation` wired into production**. `soul.resolve.defer`
+  writes obligations; replaces the retired `cooldown_until` field.
+- **PathRelation / graph-edge EventLog-first atomicity**
+  (`v0.3.9-blocking-p0` tag): `PathRelationProposalService.propose`,
+  `MemoryGraphEdgeRepo.ensureEdge`, and `GraphExploreService.addEdge`
+  now route through `publishEventLogMutation`. `GreenStatus` silent
+  UPDATE bug closed with affected-row guard + `green_revoke_noop`
+  EventLog row.
+
+Bench feedback loop:
+
+- LoCoMo `evaluated_count` denominator now uses `totalQa` instead of
+  successfully scored entries; sample-size label cascades through
+  `smoke` ≤ 50 / `staged` 51–200 / `shard_merged` 201–499 /
+  `full` ≥ 500; cohort-attribution cross-question metric bounded ≤
+  50%; `latest-baseline.json` no longer points at a FAIL archive.
+  See `docs/v0.3/v0.3.9/reports/v0.3.9-bench-diff.md` for pre/post
+  numbers per category.
+
+Closed backlog: `#BL-044` (recall utilization follow-through,
+deferred from v0.3.8; closed by the new 5-bucket recall-utilization
+telemetry and the Inspector Health Inbox operator drill-down). No
+other open backlog at release.
+
+Carry-forward into v0.3.10+ (consolidated):
+`mapping_revoked` auto-trigger from `MemoryService.update`;
+`ManifestationBudgetConfigProviderPort` persistent repo;
+`AuditorSchedulingAdvisor` production wire;
+Promote-strictly-governed Proposal accept-apply handler;
+`UpgradeAssessmentAxis` 5-field cutover (see
+`docs/v0.3/v0.3.9/closeout-deferred-conditions.md`); full atomic
+boundary for claim transition (CAS-success / audit-append-failure
+crash window remains); threshold unification between
+`DYNAMICS_CONSTANTS.path_plasticity` and the new plasticity policy
+module. Full list lives in
+`docs/v0.3/v0.3.9/reports/v0.3.9-closeout.md` §Consolidated
+carry-forward.
+
+Workspace packages bumped `0.3.8` → `0.3.9`. See `docs/v0.3/v0.3.9/`.
 
 ## v0.3.8 Release (2026-05-16)
 

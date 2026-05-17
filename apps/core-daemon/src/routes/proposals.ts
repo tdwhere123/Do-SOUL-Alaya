@@ -1,12 +1,57 @@
 import { randomUUID } from "node:crypto";
 import type { Context, Hono } from "hono";
 import type { MemoryService, ProposalService, WorkspaceService } from "@do-soul/alaya-core";
+import {
+  ControlPlaneObjectKind,
+  MemoryGovernanceEventType,
+  PathGovernanceClass,
+  ProposalOptionKind,
+  ProposalResolutionState,
+  ProposalSchema,
+  RetentionPolicy,
+  SoulProposalCreatedPayloadSchema,
+  type EventLogEntry,
+  type Proposal
+} from "@do-soul/alaya-protocol";
 import type { McpMemoryToolHandler } from "../mcp-memory-tool-handler.js";
+
+// invariant: governance_class promotion to strictly_governed is an
+// auditable change (handbook invariants §3) and therefore must travel
+// through the same Proposal lifecycle as memory mutations. The promote
+// endpoint creates a pending Proposal with target_object_kind =
+// "path_relation"; the underlying PathRelation row is not touched until
+// the proposal is reviewed. The Proposal carries the requested
+// governance_class in proposed_change_summary so the Inspector pending
+// queue surfaces it without a downstream join.
+// see also: packages/protocol/src/soul/path-relation.ts — PathGovernanceClass enum
+
+export type PromoteStrictlyGovernedProposalRepoPort = {
+  createProposalWithEvents(
+    input: {
+      readonly proposal: Proposal;
+      readonly workspace_id: string;
+      readonly run_id: string | null;
+      readonly target_object_kind: string;
+      readonly proposed_change_summary?: string;
+      readonly created_at?: string;
+    },
+    events: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly events: readonly EventLogEntry[];
+  }>>;
+};
+
+export type PromoteStrictlyGovernedRuntimeNotifier = {
+  notifyEntry(entry: EventLogEntry): void | Promise<void>;
+};
 
 export interface ProposalRouteServices {
   readonly workspaceService: WorkspaceService;
   readonly memoryService: Pick<MemoryService, "findByIdScoped">;
   readonly proposalService: ProposalService;
+  readonly proposalRepo: PromoteStrictlyGovernedProposalRepoPort;
+  readonly runtimeNotifier: PromoteStrictlyGovernedRuntimeNotifier;
   // A1 (HITL daemon backbone) — the Inspector loopback uses these
   // workspace-scoped HTTP wrappers around the same MCP handler that
   // attached agents call. The wrappers exist on the daemon HTTP plane
@@ -192,6 +237,94 @@ export function registerProposalRoutes(app: Hono, services: ProposalRouteService
       reason: `Downgrade memory ${memoryId}: Inspector user requested weaker trust.`
     });
   });
+
+  app.post(
+    "/workspaces/:wsId/soul/memory/:memoryId/proposals/promote-strictly-governed",
+    async (context) => {
+      const workspaceId = context.req.param("wsId");
+      const memoryId = context.req.param("memoryId");
+      await services.workspaceService.getById(workspaceId);
+      const memory = await services.memoryService.findByIdScoped(memoryId, workspaceId);
+      if (memory === null) {
+        return context.json(
+          { success: false, error: { code: "NOT_FOUND", message: "Memory entry not found" } },
+          404
+        );
+      }
+      const body = await readJsonObject(context);
+      const reason =
+        body !== null && typeof body.reason === "string" && body.reason.trim().length > 0
+          ? body.reason.trim()
+          : `Promote ${memoryId}: Inspector user requested PathRelation governance_class = strictly_governed.`;
+      const proposalId = randomUUID();
+      const timestamp = new Date().toISOString();
+      const proposal = ProposalSchema.parse({
+        runtime_id: proposalId,
+        object_kind: ControlPlaneObjectKind.PROPOSAL,
+        task_surface_ref: null,
+        expires_at: null,
+        derived_from: memoryId,
+        retention_policy: RetentionPolicy.SESSION_ONLY,
+        proposal_id: proposalId,
+        dossier_ref: null,
+        recommended_option_id: null,
+        proposal_options: [
+          {
+            option_id: `promote_strictly_governed_${proposalId}`,
+            option_kind: ProposalOptionKind.REQUEST_CONFIRMATION,
+            preserves_protected_constraints: true,
+            dropped_candidates: [],
+            unresolved_after_apply: [],
+            requires_confirmation: true
+          }
+        ],
+        resolution_state: ProposalResolutionState.PENDING,
+        last_updated_at: timestamp
+      });
+      const creationEvent: Omit<EventLogEntry, "event_id" | "created_at" | "revision"> = {
+        event_type: MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED,
+        entity_type: "proposal",
+        entity_id: proposal.proposal_id,
+        workspace_id: workspaceId,
+        run_id: null,
+        caused_by: "inspector",
+        payload_json: SoulProposalCreatedPayloadSchema.parse({
+          object_id: proposal.runtime_id,
+          object_kind: proposal.object_kind,
+          workspace_id: workspaceId,
+          run_id: null
+        })
+      };
+      const summary = `${reason} Target PathRelation legitimacy.governance_class = ${PathGovernanceClass.STRICTLY_GOVERNED}.`;
+      const created = await services.proposalRepo.createProposalWithEvents(
+        {
+          proposal,
+          workspace_id: workspaceId,
+          run_id: null,
+          target_object_kind: "path_relation",
+          proposed_change_summary: summary,
+          created_at: timestamp
+        },
+        [creationEvent]
+      );
+      for (const event of created.events) {
+        await services.runtimeNotifier.notifyEntry(event);
+      }
+      return context.json(
+        {
+          success: true,
+          data: {
+            proposal_id: created.proposal.proposal_id,
+            status: "created",
+            target_object_id: memoryId,
+            target_object_kind: "path_relation",
+            requested_governance_class: PathGovernanceClass.STRICTLY_GOVERNED
+          }
+        },
+        200
+      );
+    }
+  );
 
   app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/retire", async (context) => {
     const workspaceId = context.req.param("wsId");

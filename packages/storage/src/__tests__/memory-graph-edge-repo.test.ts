@@ -113,8 +113,8 @@ describe("SqliteMemoryGraphEdgeRepo", () => {
       created_at: "2026-03-28T00:00:01.000Z"
     });
 
-    await expect(repo.create(outbound)).resolves.toEqual(outbound);
-    await expect(repo.create(inbound)).resolves.toEqual(inbound);
+    expect(repo.create(outbound)).toEqual(outbound);
+    expect(repo.create(inbound)).toEqual(inbound);
     await expect(repo.findById("edge-1")).resolves.toEqual(outbound);
     await expect(repo.findByMemoryId(sourceMemoryId, "workspace-1")).resolves.toEqual([
       outbound,
@@ -341,7 +341,7 @@ describe("SqliteMemoryGraphEdgeRepo", () => {
     const { database } = await createRepo();
     const repo = new SqliteMemoryGraphEdgeRepo(database);
 
-    await expect(
+    expect(() =>
       repo.create(
         createGraphEdge({
           edge_id: "edge-missing-parent",
@@ -349,10 +349,12 @@ describe("SqliteMemoryGraphEdgeRepo", () => {
           target_memory_id: createMemoryId(901)
         })
       )
-    ).rejects.toMatchObject({
-      name: "StorageError",
-      code: "QUERY_FAILED"
-    });
+    ).toThrowError(
+      expect.objectContaining({
+        name: "StorageError",
+        code: "QUERY_FAILED"
+      }) as unknown as Error
+    );
   });
 
   it("cascades edge deletion when a parent memory is removed", async () => {

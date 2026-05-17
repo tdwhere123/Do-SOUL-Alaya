@@ -28,6 +28,8 @@ import {
   RecallBudgetStateSchema,
   RecallScoreFactorsSchema
 } from "./recall-candidate.js";
+import { StagedWarningArraySchema } from "./staged-warning.js";
+import { SoulResolveRequestSchema } from "./resolution.js";
 
 const GARDEN_COMPLETE_CANDIDATE_SIGNAL_MAX = 64;
 const GARDEN_COMPLETE_EXTRACTED_PROPOSAL_MAX = 32;
@@ -60,7 +62,14 @@ export const MemorySearchResultSchema = z
     selection_reason: BoundedReasonSchema,
     source_channels: z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
     score_factors: RecallScoreFactorsSchema,
-    budget_state: RecallBudgetStateSchema
+    budget_state: RecallBudgetStateSchema,
+    // invariant: optional governance warnings forwarded from the
+    // RecallCandidate. Older agents that do not understand the field
+    // simply skip it; soul.resolve-aware agents and the Inspector
+    // Health Inbox branch on the listed kind / severity / policy.
+    // see also: staged-warning.ts (schema),
+    // recall-candidate.ts (producer-side field).
+    staged_warnings: StagedWarningArraySchema.optional()
   })
   .readonly();
 
@@ -478,6 +487,7 @@ type SoulToolName =
   | "soul.apply_override"
   | "soul.explore_graph"
   | "soul.report_context_usage"
+  | "soul.resolve"
   | "garden.list_pending_tasks"
   | "garden.claim_task"
   | "garden.complete_task";
@@ -492,6 +502,7 @@ const soulToolRequestSchemas: Record<SoulToolName, z.ZodTypeAny> = {
   "soul.apply_override": SoulApplyOverrideRequestSchema,
   "soul.explore_graph": SoulExploreGraphRequestSchema,
   "soul.report_context_usage": SoulReportContextUsageRequestSchema,
+  "soul.resolve": SoulResolveRequestSchema,
   "garden.list_pending_tasks": GardenListPendingTasksRequestSchema,
   "garden.claim_task": GardenClaimTaskRequestSchema,
   "garden.complete_task": GardenCompleteTaskRequestSchema

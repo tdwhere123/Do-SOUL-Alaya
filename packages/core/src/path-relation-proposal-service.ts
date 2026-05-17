@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
 import {
   PathRelationSchema,
+  RuntimeGovernanceEventType,
+  parseRuntimeGovernanceEventPayload,
+  type EventLogEntry,
   type PathRelation
 } from "@do-soul/alaya-protocol";
+import type { EventPublisher, EventPublisherInput } from "./event-publisher.js";
 
 // invariant: PathRelationProposalService is the producer of PathRelation
 // entities. When K co-usage events arrive for the same memory pair, this
@@ -13,6 +17,10 @@ import {
 // can periodically call evictExpired(now, ttlMs) to discard stale pairs
 // that never reached the threshold. Pairs that reach the threshold are
 // already dropped when their PathRelation is written.
+// invariant: row insert and `path.relation_created` EventLog row are
+// emitted in one SQLite transaction via EventPublisher.appendManyWithMutation,
+// matching the PathPlasticityService pattern. Crash-mid-write cannot leave
+// a path_relations row without its audit event or vice versa.
 // see also: crossLinkRecalledMemories — caller hook
 // see also: PathPlasticityService — strength evolution
 // see also: PathRelationRepo — durable write side
@@ -21,15 +29,21 @@ export const PATH_RELATION_PROPOSE_THRESHOLD = 3;
 export const PATH_RELATION_COUNTER_DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface PathRelationProposalRepoPort {
-  create(relation: PathRelation): Promise<Readonly<PathRelation>> | Readonly<PathRelation>;
+  create(relation: PathRelation): Readonly<PathRelation>;
   findByAnchorMemoryId?(
     memoryId: string,
     workspaceId: string
   ): Promise<readonly Readonly<PathRelation>[]>;
 }
 
+export type PathRelationProposalEventPublisherPort = Pick<
+  EventPublisher,
+  "appendManyWithMutation"
+>;
+
 export interface PathRelationProposalServiceDeps {
   readonly repo: PathRelationProposalRepoPort;
+  readonly eventPublisher: PathRelationProposalEventPublisherPort;
   readonly threshold?: number;
   readonly now?: () => string;
   readonly nowMs?: () => number;
@@ -183,7 +197,36 @@ export class PathRelationProposalService {
       updated_at: occurredAt
     });
 
-    await this.deps.repo.create(relation);
+    const payload = parseRuntimeGovernanceEventPayload(
+      RuntimeGovernanceEventType.PATH_RELATION_CREATED,
+      {
+        path_id: relation.path_id,
+        workspace_id: relation.workspace_id,
+        relation_kind: relation.constitution.relation_kind,
+        source_anchor_kind: relation.anchors.source_anchor.kind,
+        target_anchor_kind: relation.anchors.target_anchor.kind,
+        initial_strength: relation.plasticity_state.strength,
+        governance_class: relation.legitimacy.governance_class,
+        created_at: relation.created_at
+      }
+    );
+
+    const eventInput: EventPublisherInput = {
+      event_type: RuntimeGovernanceEventType.PATH_RELATION_CREATED,
+      entity_type: "path_relation",
+      entity_id: relation.path_id,
+      workspace_id: relation.workspace_id,
+      run_id: null,
+      caused_by: "system",
+      payload_json: payload as unknown as Record<string, unknown>
+    };
+
+    await this.deps.eventPublisher.appendManyWithMutation(
+      [eventInput],
+      (_entries: readonly EventLogEntry[]) => {
+        this.deps.repo.create(relation);
+      }
+    );
   }
 
   private warn(message: string, meta: Record<string, unknown>): void {

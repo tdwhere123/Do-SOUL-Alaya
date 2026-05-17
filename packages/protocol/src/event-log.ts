@@ -6,6 +6,7 @@ import { ObligationTrustNarrativeEventTypeSchema } from "./events/obligation-tru
 import { RuntimeGovernanceEventTypeSchema } from "./events/runtime-governance.js";
 import { ComputeRecallGardenEventTypeSchema } from "./events/compute-recall-garden.js";
 import { MemoryGovernanceEventTypeSchema } from "./events/memory-governance.js";
+import { GovernanceResolutionEventTypeSchema } from "./events/governance-resolution.js";
 import { SlotEventTypeSchema } from "./events/slot.js";
 import { SurfaceEventTypeSchema } from "./events/surface.js";
 import { RecallContextEventTypeSchema } from "./events/recall-context.js";
@@ -60,6 +61,7 @@ export const EventTypeSchema = z.union([
   RuntimeGovernanceEventTypeSchema,
   ComputeRecallGardenEventTypeSchema,
   MemoryGovernanceEventTypeSchema,
+  GovernanceResolutionEventTypeSchema,
   SlotEventTypeSchema,
   SurfaceEventTypeSchema,
   RecallContextEventTypeSchema,

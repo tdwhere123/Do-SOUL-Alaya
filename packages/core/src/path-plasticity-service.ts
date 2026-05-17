@@ -6,11 +6,14 @@ import {
   type DirectionBias,
   type EventLogEntry,
   type PathAnchorRef,
+  type PathGovernanceClass,
   type PathPlasticityState,
   type PathRelation,
+  type StabilityClass,
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
 import { EventPublisher, type EventPublisherInput } from "./event-publisher.js";
+import { planPromotion, type PromotionPlan } from "./path-manifestation-policy.js";
 
 /**
  * Plasticity tuning constants. Derived authoritatively from
@@ -86,11 +89,18 @@ export interface PathPlasticityServiceDependencies {
   readonly now?: () => string;
 }
 
+export interface PathPlasticityPromotionRecord {
+  readonly path_id: string;
+  readonly governance_promoted: PromotionPlan["governance"];
+  readonly stability_promoted: PromotionPlan["stability"];
+}
+
 export interface PathPlasticityComputeResult {
   readonly reinforced: number;
   readonly weakened: number;
   readonly retired: number;
   readonly affectedPathIds: readonly string[];
+  readonly promotions: readonly PathPlasticityPromotionRecord[];
 }
 
 /**
@@ -142,7 +152,13 @@ export class PathPlasticityService {
     throwIfPathPlasticityAborted(params.abortSignal);
 
     if (usageRecords.length === 0) {
-      return Object.freeze({ reinforced: 0, weakened: 0, retired: 0, affectedPathIds: [] });
+      return Object.freeze({
+        reinforced: 0,
+        weakened: 0,
+        retired: 0,
+        affectedPathIds: [],
+        promotions: []
+      });
     }
 
     // B1 dedup: aggregate per-path, not per-object. A single PathRelation P
@@ -167,6 +183,7 @@ export class PathPlasticityService {
     let weakened = 0;
     let retired = 0;
     const mutationPlans: PathPlasticityMutationPlan[] = [];
+    const promotions: PathPlasticityPromotionRecord[] = [];
 
     for (const { path, counts } of pathAggregates.values()) {
       // Retired paths are durable lifecycle state, not a strength heuristic
@@ -197,6 +214,15 @@ export class PathPlasticityService {
       } else if (plan.outcome === "redirected") {
         affected.add(plan.pathId);
       }
+      if (plan.promotion.governance !== null || plan.promotion.stability !== null) {
+        promotions.push(
+          Object.freeze({
+            path_id: plan.pathId,
+            governance_promoted: plan.promotion.governance,
+            stability_promoted: plan.promotion.stability
+          })
+        );
+      }
     }
 
     this.applyMutationPlans(
@@ -209,7 +235,8 @@ export class PathPlasticityService {
       reinforced,
       weakened,
       retired,
-      affectedPathIds: Object.freeze([...affected])
+      affectedPathIds: Object.freeze([...affected]),
+      promotions: Object.freeze(promotions)
     });
   }
 
@@ -400,6 +427,16 @@ export class PathPlasticityService {
       occurredAt
     );
 
+    const nextSupportEventsCount =
+      path.plasticity_state.support_events_count + counts.used;
+    const nextContradictionEventsCount =
+      path.plasticity_state.contradiction_events_count + counts.notApplicable;
+    const promotion = planPromotion({
+      path,
+      nextSupportEventsCount,
+      nextContradictionEventsCount
+    });
+
     // Determine whether this aggregate net-reinforces or net-weakens. If the
     // net delta is zero AND there is a contradiction signal, we still want to
     // record the contradiction, but classify the publication as "weakened" so
@@ -418,16 +455,12 @@ export class PathPlasticityService {
       this.isInactive(path.plasticity_state.last_reinforced_at, occurredAt);
 
     if (netDelta > 0) {
-      const nextSupportCount =
-        path.plasticity_state.support_events_count + counts.used;
-      const nextContradictionCount =
-        path.plasticity_state.contradiction_events_count + counts.notApplicable;
       const nextPlasticity = parsePlasticityState({
         ...path.plasticity_state,
         strength: proposedStrength,
         direction_bias: nextDirectionBias,
-        support_events_count: nextSupportCount,
-        contradiction_events_count: nextContradictionCount,
+        support_events_count: nextSupportEventsCount,
+        contradiction_events_count: nextContradictionEventsCount,
         last_reinforced_at: occurredAt
       });
       return this.createReinforcedPlan({
@@ -435,7 +468,8 @@ export class PathPlasticityService {
         previousStrength,
         nextStrength: proposedStrength,
         nextPlasticity,
-        supportEventsCount: nextSupportCount,
+        supportEventsCount: nextSupportEventsCount,
+        promotion,
         occurredAt,
         ...(redirection === undefined ? {} : { redirection })
       });
@@ -443,10 +477,6 @@ export class PathPlasticityService {
 
     if (netDelta < 0) {
       const nextStrength = proposedStrength;
-      const nextSupportCount =
-        path.plasticity_state.support_events_count + counts.used;
-      const nextContradictionCount =
-        path.plasticity_state.contradiction_events_count + counts.notApplicable;
       // Retirement: weak path with no recent reinforcement → emit
       // PathRelationRetired instead of PathRelationWeakened.
       if (retirementEligible) {
@@ -454,8 +484,8 @@ export class PathPlasticityService {
           ...path.plasticity_state,
           strength: nextStrength,
           direction_bias: nextDirectionBias,
-          support_events_count: nextSupportCount,
-          contradiction_events_count: nextContradictionCount,
+          support_events_count: nextSupportEventsCount,
+          contradiction_events_count: nextContradictionEventsCount,
           last_weakened_at: occurredAt
         });
         return this.createRetiredPlan({
@@ -463,6 +493,7 @@ export class PathPlasticityService {
           finalStrength: nextStrength,
           nextPlasticity,
           reason: "strength_below_threshold_and_inactive",
+          promotion,
           occurredAt,
           ...(redirection === undefined ? {} : { redirection })
         });
@@ -472,8 +503,8 @@ export class PathPlasticityService {
         ...path.plasticity_state,
         strength: nextStrength,
         direction_bias: nextDirectionBias,
-        support_events_count: nextSupportCount,
-        contradiction_events_count: nextContradictionCount,
+        support_events_count: nextSupportEventsCount,
+        contradiction_events_count: nextContradictionEventsCount,
         last_weakened_at: occurredAt
       });
       return this.createWeakenedPlan({
@@ -481,8 +512,9 @@ export class PathPlasticityService {
         previousStrength,
         nextStrength,
         nextPlasticity,
-        contradictionEventsCount: nextContradictionCount,
+        contradictionEventsCount: nextContradictionEventsCount,
         reason: counts.skipped > 0 ? "skipped_usage" : "contradiction_only",
+        promotion,
         occurredAt,
         ...(redirection === undefined ? {} : { redirection })
       });
@@ -494,15 +526,11 @@ export class PathPlasticityService {
       // trace, even though strength itself does not change.
       // Mixed-receipt fix: include any `used` count in support_events_count
       // even when the tick net-weakens or net-zeros (per D2 reviewer-I2).
-      const nextSupportCount =
-        path.plasticity_state.support_events_count + counts.used;
-      const nextContradictionCount =
-        path.plasticity_state.contradiction_events_count + counts.notApplicable;
       const nextPlasticity = parsePlasticityState({
         ...path.plasticity_state,
         direction_bias: nextDirectionBias,
-        support_events_count: nextSupportCount,
-        contradiction_events_count: nextContradictionCount,
+        support_events_count: nextSupportEventsCount,
+        contradiction_events_count: nextContradictionEventsCount,
         last_weakened_at: occurredAt
       });
       return this.createWeakenedPlan({
@@ -510,8 +538,9 @@ export class PathPlasticityService {
         previousStrength,
         nextStrength: previousStrength,
         nextPlasticity,
-        contradictionEventsCount: nextContradictionCount,
+        contradictionEventsCount: nextContradictionEventsCount,
         reason: "not_applicable_recurrence",
+        promotion,
         occurredAt,
         ...(redirection === undefined ? {} : { redirection })
       });
@@ -527,13 +556,11 @@ export class PathPlasticityService {
     // last record on the path before retirement reflects every used
     // receipt that contributed.
     if (retirementEligible && counts.skipped > 0) {
-      const nextSupportCount =
-        path.plasticity_state.support_events_count + counts.used;
       const nextPlasticity = parsePlasticityState({
         ...path.plasticity_state,
         strength: proposedStrength,
         direction_bias: nextDirectionBias,
-        support_events_count: nextSupportCount,
+        support_events_count: nextSupportEventsCount,
         last_weakened_at: occurredAt
       });
       return this.createRetiredPlan({
@@ -541,6 +568,7 @@ export class PathPlasticityService {
         finalStrength: proposedStrength,
         nextPlasticity,
         reason: "strength_below_threshold_and_inactive",
+        promotion,
         occurredAt,
         ...(redirection === undefined ? {} : { redirection })
       });
@@ -555,6 +583,7 @@ export class PathPlasticityService {
         path,
         nextPlasticity,
         redirection,
+        promotion,
         occurredAt
       });
     }
@@ -599,6 +628,7 @@ export class PathPlasticityService {
     readonly nextPlasticity: Readonly<PathPlasticityState>;
     readonly supportEventsCount: number;
     readonly redirection?: RedirectionPublication;
+    readonly promotion: PromotionPlan;
     readonly occurredAt: string;
   }): PathPlasticityMutationPlan {
     const payload = parseRuntimeGovernanceEventPayload(
@@ -627,11 +657,14 @@ export class PathPlasticityService {
           payload_json: payload as unknown as Record<string, unknown>
         }
       ]),
-      updates: Object.freeze({
-        plasticity_state: params.nextPlasticity,
-        lifecycle: withLifecycleStatus(params.path.lifecycle, "active"),
-        updated_at: params.occurredAt
-      })
+      updates: buildUpdatesWithPromotion({
+        path: params.path,
+        nextPlasticity: params.nextPlasticity,
+        lifecycleStatus: "active",
+        promotion: params.promotion,
+        occurredAt: params.occurredAt
+      }),
+      promotion: params.promotion
     });
   }
 
@@ -643,6 +676,7 @@ export class PathPlasticityService {
     readonly contradictionEventsCount: number;
     readonly reason: string;
     readonly redirection?: RedirectionPublication;
+    readonly promotion: PromotionPlan;
     readonly occurredAt: string;
   }): PathPlasticityMutationPlan {
     const payload = parseRuntimeGovernanceEventPayload(
@@ -672,11 +706,14 @@ export class PathPlasticityService {
           payload_json: payload as unknown as Record<string, unknown>
         }
       ]),
-      updates: Object.freeze({
-        plasticity_state: params.nextPlasticity,
-        lifecycle: withLifecycleStatus(params.path.lifecycle, "active"),
-        updated_at: params.occurredAt
-      })
+      updates: buildUpdatesWithPromotion({
+        path: params.path,
+        nextPlasticity: params.nextPlasticity,
+        lifecycleStatus: "active",
+        promotion: params.promotion,
+        occurredAt: params.occurredAt
+      }),
+      promotion: params.promotion
     });
   }
 
@@ -686,6 +723,7 @@ export class PathPlasticityService {
     readonly nextPlasticity: Readonly<PathPlasticityState>;
     readonly reason: string;
     readonly redirection?: RedirectionPublication;
+    readonly promotion: PromotionPlan;
     readonly occurredAt: string;
   }): PathPlasticityMutationPlan {
     const payload = parseRuntimeGovernanceEventPayload(
@@ -713,11 +751,14 @@ export class PathPlasticityService {
           payload_json: payload as unknown as Record<string, unknown>
         }
       ]),
-      updates: Object.freeze({
-        plasticity_state: params.nextPlasticity,
-        lifecycle: withLifecycleStatus(params.path.lifecycle, "retired"),
-        updated_at: params.occurredAt
-      })
+      updates: buildUpdatesWithPromotion({
+        path: params.path,
+        nextPlasticity: params.nextPlasticity,
+        lifecycleStatus: "retired",
+        promotion: params.promotion,
+        occurredAt: params.occurredAt
+      }),
+      promotion: params.promotion
     });
   }
 
@@ -725,17 +766,21 @@ export class PathPlasticityService {
     readonly path: Readonly<PathRelation>;
     readonly nextPlasticity: Readonly<PathPlasticityState>;
     readonly redirection: RedirectionPublication;
+    readonly promotion: PromotionPlan;
     readonly occurredAt: string;
   }): PathPlasticityMutationPlan {
     return Object.freeze({
       pathId: params.path.path_id,
       outcome: "redirected",
       eventInputs: this.createRedirectionInputs(params.path, params.redirection),
-      updates: Object.freeze({
-        plasticity_state: params.nextPlasticity,
-        lifecycle: withLifecycleStatus(params.path.lifecycle, "active"),
-        updated_at: params.occurredAt
-      })
+      updates: buildUpdatesWithPromotion({
+        path: params.path,
+        nextPlasticity: params.nextPlasticity,
+        lifecycleStatus: "active",
+        promotion: params.promotion,
+        occurredAt: params.occurredAt
+      }),
+      promotion: params.promotion
     });
   }
 
@@ -810,6 +855,7 @@ interface PathPlasticityMutationPlan {
   readonly outcome: PathPlasticityMutationOutcome;
   readonly eventInputs: readonly EventPublisherInput[];
   readonly updates: Readonly<PathPlasticityRepoUpdate>;
+  readonly promotion: PromotionPlan;
 }
 
 function clampStrength(value: number): number {
@@ -887,6 +933,43 @@ function withLifecycleStatus(
     ...lifecycle,
     status
   } as PathRelation["lifecycle"];
+}
+
+// Applies a PromotionPlan to the durable update payload. When the plan carries
+// a stability promotion we rewrite plasticity_state.stability_class; when the
+// plan carries a governance promotion we rewrite legitimacy.governance_class.
+// see also: path-manifestation-policy.ts (PromotionPlan producer).
+function buildUpdatesWithPromotion(params: {
+  readonly path: Readonly<PathRelation>;
+  readonly nextPlasticity: Readonly<PathPlasticityState>;
+  readonly lifecycleStatus: NonNullable<PathLifecycleWithStatus["status"]>;
+  readonly promotion: PromotionPlan;
+  readonly occurredAt: string;
+}): PathPlasticityRepoUpdate {
+  const plasticityWithPromotion =
+    params.promotion.stability === null
+      ? params.nextPlasticity
+      : PathPlasticityStateSchema.parse({
+          ...params.nextPlasticity,
+          stability_class: params.promotion.stability.next as StabilityClass
+        });
+
+  const legitimacyUpdate =
+    params.promotion.governance === null
+      ? null
+      : {
+          legitimacy: {
+            ...params.path.legitimacy,
+            governance_class: params.promotion.governance.next as PathGovernanceClass
+          }
+        };
+
+  return Object.freeze({
+    plasticity_state: plasticityWithPromotion,
+    lifecycle: withLifecycleStatus(params.path.lifecycle, params.lifecycleStatus),
+    updated_at: params.occurredAt,
+    ...(legitimacyUpdate ?? {})
+  });
 }
 
 type PathLifecycleWithStatus = PathRelation["lifecycle"] & {

@@ -1,0 +1,33 @@
+-- v0.3.9 Cat-E.1 / D1: HealthIssueGroup is the control-plane projection
+-- that aggregates raw OrphanRadar / GreenStatus revoke / evidence_failure
+-- signals by target object + cause_kind so the Inspector inbox can
+-- fatigue-dedupe and dispatch typed actions without polluting memory
+-- ontology.
+
+CREATE TABLE IF NOT EXISTS health_issue_groups (
+  group_id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  target_object_id TEXT NOT NULL,
+  target_object_kind TEXT NOT NULL,
+  cause_kind TEXT NOT NULL CHECK (cause_kind IN (
+    'orphan_radar', 'green_revoked', 'evidence_failure'
+  )),
+  severity TEXT NOT NULL CHECK (severity IN ('info', 'warn', 'blocking')),
+  confidence REAL NOT NULL,
+  first_seen_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  count INTEGER NOT NULL,
+  suggested_actions_json TEXT NOT NULL,
+  resolution_state TEXT NOT NULL CHECK (resolution_state IN (
+    'pending', 'resolved', 'suppressed'
+  )),
+  resolved_at TEXT,
+  resolved_by TEXT,
+  UNIQUE (workspace_id, target_object_id, cause_kind)
+);
+
+CREATE INDEX IF NOT EXISTS idx_health_issue_groups_workspace_state
+  ON health_issue_groups (workspace_id, resolution_state, last_seen_at);
+
+CREATE INDEX IF NOT EXISTS idx_health_issue_groups_target
+  ON health_issue_groups (target_object_id);

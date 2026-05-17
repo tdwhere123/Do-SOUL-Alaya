@@ -63,7 +63,7 @@ describe("Auditor 4B", () => {
         findExpiringGreenStatuses: vi.fn(async () => []),
         renewGreenPassiveStable: vi.fn(async () => undefined),
         requestActiveVerification: vi.fn(async () => undefined),
-        revokeGreen: vi.fn(async () => undefined)
+        revokeGreen: vi.fn(() => ({ affected: 0 }))
       },
       bootstrappingPort: {
         assessColdStart: vi.fn(async () => ({ is_cold_start: false, memory_count: 10, claim_count: 10 })),
@@ -152,7 +152,7 @@ describe("Auditor 4B", () => {
         findExpiringGreenStatuses: vi.fn(async () => []),
         renewGreenPassiveStable: vi.fn(async () => undefined),
         requestActiveVerification: vi.fn(async () => undefined),
-        revokeGreen: vi.fn(async () => undefined)
+        revokeGreen: vi.fn(() => ({ affected: 0 }))
       },
       bootstrappingPort: {
         assessColdStart: vi.fn(async () => ({ is_cold_start: false, memory_count: 10, claim_count: 10 })),
@@ -221,7 +221,7 @@ describe("Auditor 4B", () => {
         findExpiringGreenStatuses: vi.fn(async () => []),
         renewGreenPassiveStable: vi.fn(async () => undefined),
         requestActiveVerification: vi.fn(async () => undefined),
-        revokeGreen: vi.fn(async () => undefined)
+        revokeGreen: vi.fn(() => ({ affected: 0 }))
       },
       bootstrappingPort: {
         assessColdStart: vi.fn(async () => ({ is_cold_start: false, memory_count: 10, claim_count: 10 })),
@@ -276,7 +276,7 @@ describe("Auditor 4B", () => {
         findExpiringGreenStatuses: vi.fn(async () => []),
         renewGreenPassiveStable: vi.fn(async () => undefined),
         requestActiveVerification: vi.fn(async () => undefined),
-        revokeGreen: vi.fn(async () => undefined)
+        revokeGreen: vi.fn(() => ({ affected: 0 }))
       },
       bootstrappingPort: {
         assessColdStart: vi.fn(async () => ({ is_cold_start: false, memory_count: 10, claim_count: 10 })),
@@ -337,7 +337,7 @@ describe("Auditor 4B", () => {
         findExpiringGreenStatuses: vi.fn(async () => []),
         renewGreenPassiveStable: vi.fn(async () => undefined),
         requestActiveVerification: vi.fn(async () => undefined),
-        revokeGreen: vi.fn(async () => undefined)
+        revokeGreen: vi.fn(() => ({ affected: 0 }))
       },
       bootstrappingPort: {
         assessColdStart: vi.fn(async () => ({ is_cold_start: false, memory_count: 10, claim_count: 10 })),
@@ -427,7 +427,7 @@ describe("Auditor 4B", () => {
         findExpiringGreenStatuses: vi.fn(async () => []),
         renewGreenPassiveStable: vi.fn(async () => undefined),
         requestActiveVerification: vi.fn(async () => undefined),
-        revokeGreen: vi.fn(async () => undefined)
+        revokeGreen: vi.fn(() => ({ affected: 0 }))
       },
       bootstrappingPort: {
         assessColdStart: vi.fn(async () => ({ is_cold_start: false, memory_count: 10, claim_count: 10 })),
@@ -528,7 +528,7 @@ describe("Auditor 4B", () => {
         findExpiringGreenStatuses: vi.fn(async () => []),
         renewGreenPassiveStable: vi.fn(async () => undefined),
         requestActiveVerification: vi.fn(async () => undefined),
-        revokeGreen: vi.fn(async () => undefined)
+        revokeGreen: vi.fn(() => ({ affected: 0 }))
       },
       bootstrappingPort: {
         assessColdStart: vi.fn(async () => ({ is_cold_start: false, memory_count: 10, claim_count: 10 })),

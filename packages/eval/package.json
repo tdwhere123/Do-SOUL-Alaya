@@ -1,6 +1,6 @@
 {
   "name": "@do-soul/alaya-eval",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "private": true,
   "description": "Reproducible recall benchmark schemas for Do-SOUL Alaya — self, public LongMemEval, and live strict-real history archive with threshold-driven diff engine.",
   "license": "MIT",

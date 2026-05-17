@@ -1,999 +1,716 @@
-# v0.3.9 Implementation Plan
+# v0.3.9 — Trustworthy Memory Loop Closure (Three-Layer Repair)
 
-Six phases (P0-P5) cover eleven categories (Cat-0 + A-J). Each phase
-ends with `do-it-review-loop` (reviewer + codex adversarial lens per
-`feedback_review_loop_codex_lens`) until zero Blocking + zero Important.
+Single-source plan for the v0.3.9 release. Supersedes the original
+`README.md` + `decisions.md` + `plan.md` triplet (folded into this file)
+and the interim `orchestration-plan.md` (folded into §5 / §6 / §7
+below). All execution sequencing answers come from this document.
 
-Worktree default per `feedback_release_workflow` — recommended branch
-`work/v0.3.9-three-layer-repair` off `main`.
-
-Conventions used below:
-- **Files** lists owning files (relative to repo root).
-- **Action** is the surgical change required.
-- **Verify** is the post-task gate (lives DB query, test name, or doc
-  assertion).
-- **Risk** flags rollout / migration / interface concerns.
-
----
-
-## P0 — Blocking fixes (Cat-0, Cat-I.1)
-
-Goal: close the two handbook-invariant violations before any other
-work. Independently merge-able as `v0.3.9-blocking-p0`.
-
-### P0.1 — Cat-0.1: PathRelation EventLog-first
-
-**Files**:
-- `packages/core/src/path-relation-proposal-service.ts:146-186`
-- `packages/storage/src/repos/path-relation-repo.ts:170-185`
-- `apps/core-daemon/src/event-publisher.ts` (or equivalent `publishEventLogMutation` host)
-- `packages/protocol/src/events/runtime-governance.ts:69-75` (event shape — no schema change expected, verify)
-
-**Action**:
-1. Lift `propose(...)` to accept the EventPublisher port (matches
-   `PathPlasticityService` constructor shape).
-2. Wrap `repo.create(...)` in `publishEventLogMutation(eventPublisher, …)`
-   that emits `path.relation_created` with the row payload and inserts
-   the row in the same SQLite tx.
-3. Daemon wiring: pass the existing EventPublisher into the proposal
-   service in `apps/core-daemon/src/index.ts` (where the service is
-   constructed).
-
-**Verify**:
-- New unit test `path-relation-proposal-service.event-first.test.ts`
-  asserts an `event_log` row with `event_type=path.relation_created`
-  precedes/co-exists-with the `path_relations` row insert.
-- Live SQLite snapshot after a K=3 co-usage simulation must show one
-  `event_log` row of `event_type=path.relation_created` per new
-  PathRelation row.
-- `rtk pnpm test` clean.
-
-**Risk**: PathRelation creation tx may serialise with concurrent
-recall writes. Mitigate by using the same WAL-aware tx helper that
-plasticity already uses; spike a parallel-write integration test.
-
-### P0.2 — Cat-0.2: graph-edge audit/insert atomicity
-
-**Files**:
-- `packages/storage/src/repos/memory-graph-edge-repo.ts:63-90, 138-170`
-- `packages/protocol/src/soul/memory-graph.ts:43-54` (audit comment updated post-fix)
-- `apps/core-daemon/src/mcp-memory-tool-handler.ts:1198-1231` (caller, may need to pass EventPublisher through)
-
-**Action**:
-1. Define typed event in `packages/protocol/src/events/runtime-governance.ts`
-   if missing — e.g. `memory_graph_edge.created` carrying
-   `source_memory_id`, `target_memory_id`, `edge_type`, `workspace_id`.
-2. Wrap `ensureEdge` insert in `publishEventLogMutation`.
-3. Remove the audit-atomicity warning comment in `memory-graph.ts:43-54`.
-
-**Verify**:
-- Test: `memory-graph-edge-repo.event-first.test.ts` proves
-  insert + event row are atomic.
-- Live DB: cross-question replay produces a 1:1 ratio of
-  `memory_graph_edge.created` events to new `memory_graph_edges` rows
-  (no orphan events, no orphan rows).
-
-**Risk**: callers other than `crossLinkRecalledMemories` may exist
-that bypass the new helper. `rtk pnpm exec grep "ensureEdge\|graph-edge-repo"`
-sweep before merge.
-
-### P0.3 — Cat-I.1: GreenStatus silent UPDATE
-
-**Files**:
-- `packages/storage/src/repos/garden-data-ports.ts:459-485`
-- `packages/soul/src/garden/auditor.ts:117-169`
-- `apps/core-daemon/src/event-publisher.ts` (EventPublisher mandatory wire)
-
-**Action**:
-1. `revokeStatement` adds `workspace_id = ?` predicate and
-   `green_state IN ('active', 'contested')` (or current valid
-   pre-revoke states) predicate.
-2. `revokeGreen` checks affected-row count; when 0, writes a
-   `health_journal` no-op entry (`event_kind: green_revoke_noop`) and
-   skips the `soul.green.revoked` EventLog write.
-3. `publishEventLogMutation` requires non-null EventLog repo at this
-   call site (remove the `eventLogRepo === undefined` branch for
-   GreenService path).
-
-**Verify**:
-- New test: `green-service-revoke-guard.test.ts` covers (a) row-exists
-  → revoke + event, (b) no row → health_journal noop + no event.
-- Live DB after one Auditor pass: number of `soul.green.revoked` events
-  no longer exceeds `green_statuses` row count by more than the active
-  workspace baseline (validate after migration).
-
-**Risk**: existing 21k+ `soul.green.revoked` events stay as
-historical record. Document in release notes that the pre-v0.3.9
-events were silent no-ops and do not represent real revoke actions.
-
-### P0 review-loop gate
-
-- `do-it-review-loop` (reviewer + codex adversarial) until zero
-  Blocking + Important.
-- Tag `v0.3.9-blocking-p0` on the last commit in P0.
+The release is the structural-repair pass that closes the three-layer
+breakages diagnosed by `.do-it/findings/v0.3.8-live-data-portrait.md`
+and the codex root-cause deep-dive (`.do-it/findings/v0.3.9-root-cause-deep-dive/`,
+reports `01-architecture-contract-vs-runtime` through
+`05-live-data-and-doc-truth`). v0.3.9 does **not** chase a benchmark
+number — synthetic R@K does not represent Alaya's real use shape; this
+release targets the trust-loop closure observed in the operator's live
+SQLite snapshot.
 
 ---
 
-## P1 — Schema cleanup (Cat-H, Cat-G)
+## 1. Diagnosis — three-layer breakage
 
-Goal: clean schema and dead-abstraction surfaces before behaviour
-rewires depend on the cleaned ontology.
+| Layer | Diagnosis | Live evidence |
+|---|---|---|
+| **L1 Memory ontology generated heavily but quality weak** | All 316 durable memories from `garden_compile` deterministic triage; 312 `fact` + 4 `constraint` (8-enum collapse); 316/316 evidence `inferred` + `questionable`; 316/316 claims `draft` | live DB query 2026-05-16 |
+| **L2 Structure registry has schema and partial recall consumption, but real path learning has not started** | 1 bootstrap `PathRelation`; 92 `RECALLS` graph edges; 0 staged edges (supersedes / contradicts / exception_to / incompatible_with); 0 conflict matrix; 0 synthesis capsule; 0 strong_ref; 0 slot; 21 446 `green.revoked` events against `green_statuses = 0` (silent UPDATE) | live DB + codex 04 + 05 |
+| **L3 Runtime control usage/governance feedback too narrow** | 169 deliveries, 101 usage proofs, 47 used; `report_context_usage` required ≥ 2 used object ids before cross-link and PathRelation propose; 12 791 `orphan_radar.reported` with no consumer; Inspector queue is a flat raw list | live DB + codex 02 + 04 |
 
-### P1.1 — Cat-H.1: Retire NodeInstance
+Five repeating anti-patterns confirmed across four schema layers (see
+live-data portrait §K.5):
 
-**Files** (delete or empty):
-- `packages/storage/src/repos/node-instance-repo.ts`
-- `packages/storage/src/migrations/<NN>-node-instances.sql` table dropper migration (new)
-- `packages/protocol/src/soul/node-instance.ts` (if exists)
-- Any imports in `apps/core-daemon/src/index.ts` (verify no live wire)
-
-**Action**:
-1. Confirm no live wire (codex audit B-11 already states none).
-2. Write migration `0NN-drop-node-instances.sql` that drops the table.
-3. Remove repo file, schema file, exports.
-
-**Verify**:
-- `rtk pnpm exec grep -r "NodeInstance\|node_instances"` returns only
-  the new migration file and historical archive paths.
-- `rtk pnpm test` + `rtk pnpm build` clean.
-
-**Risk**: zero (no live wire).
-
-### P1.2 — Cat-H.2: Retire SynthesisCapsule promotion lifecycle
-
-**Files**:
-- `packages/protocol/src/soul/synthesis-capsule.ts` — remove
-  `authority_round_count`, `cooldown_until`, `promotion_state` fields
-  and the corresponding zod schema.
-- `packages/storage/src/migrations/<NN>-synthesis-capsule-drop-promotion.sql`
-  (new column dropper).
-- `packages/core/src/synthesis-service.ts` (or equivalent) — remove
-  `requestPromotion`, `resolvePromotionDecision`, `incrementAuthority`.
-- `packages/core/src/proposal-service.ts:148-201, 390-409` — remove
-  the legacy synthesis-promotion proposal code path.
-
-**Action**:
-1. Migrate `synthesis_capsules` table — drop the three columns; keep
-   the row.
-2. Remove three service methods + their tests.
-3. Remove the synthesis-promotion code path in `ProposalService`.
-4. Leave `SynthesisCapsule` schema in place for its original
-   synthesis-of-facts purpose, but **do not reuse it for Category E
-   health-inbox aggregation** (that conflates control-plane signals
-   with memory ontology — codex review Important #7). Category E
-   builds a new `HealthIssueGroup` control-plane projection
-   (covered in P4.4 + a new P1.7 below).
-
-**Verify**:
-- `rtk pnpm test` clean.
-- No remaining import of the removed methods.
-
-**Risk**: any test relying on synthesis promotion fails — update or
-delete those tests.
-
-### P1.3 — Cat-H.3: Retire UpgradeAssessmentAxis
-
-**Files**:
-- `packages/protocol/src/soul/gap-record.ts` (or equivalent)
-- `packages/protocol/src/soul/handoff-record.ts` (or equivalent)
-- `packages/storage/src/migrations/<NN>-drop-upgrade-axis-fields.sql`
-
-**Action**:
-1. Drop fields `recurrence_runs`, `recurrence_surfaces`,
-   `governance_impact`, `unresolved_age_ms`, `upgrade_candidate` from
-   both records.
-2. Migration drops the columns from `gap_records` + `handoff_records`.
-
-**Verify**:
-- `rtk pnpm test` clean.
-
-**Risk**: zero (fields were hardcoded null).
-
-### P1.4 — Cat-H.4: Keep & Wire DeferredObligation (preparation)
-
-**Files**:
-- `packages/core/src/deferred-obligation-service.ts` (verify entry
-  points exist).
-- `apps/core-daemon/src/index.ts` (wire service into daemon if not
-  already wired).
-
-**Action**:
-1. Verify `DeferredObligationService.create()` signature is callable
-   from materialization-router and from Category A `soul.resolve.defer`.
-2. Add daemon wiring if missing (DI binding); add EventPublisher pass
-   for any new events the service publishes.
-
-**Verify**:
-- A noop integration test that instantiates the service via daemon
-  init and confirms `create()` writes a row + event.
-
-**Risk**: if the service has stale APIs that conflict with the new
-caller shape, slot a small adapter rather than rewriting the service.
-
-### P1.5 — Cat-H.5: Keep & Wire SurfaceService (narrow)
-
-**Files**:
-- `apps/core-daemon/src/index.ts:431` (currently creates orphan
-  instance — wire downstream).
-- `apps/core-daemon/src/cli/attach.ts` or MCP attach path — register
-  `surface_identities` row per host (`agent_target` discriminator).
-- `packages/soul/src/garden/auditor.ts` — emit `governance_critical`
-  DriftAlert through SurfaceService's notification port.
-
-**Action**:
-1. Pass `surfaceService` to attach path so codex/mcp/claude-code
-   attaches each create a `surface_identities` row.
-2. Wire `governance_critical` DriftAlert classification result into
-   SurfaceService's surface-bound notification port (used by Cat-E
-   Inspector inbox).
-3. Other surface APIs (anchor mutation, binding updates) remain in
-   place but unused — document as v0.4 scope in the surface module
-   doc.
-
-**Verify**:
-- Live DB after one fresh attach: `surface_identities` row exists for
-  the attaching `agent_target`.
-- Live DB after auditor pass: a `governance_critical` DriftAlert
-  produces a `health_journal` entry routed via SurfaceService rather
-  than the bare EventLog.
-
-**Risk**: surface_identities row contention if multiple attaches
-overlap — add `INSERT … ON CONFLICT` guard.
-
-### P1.6 — Cat-G: Schema Field Reclamation
-
-For every dead/half-dead field in `K.1-K.4` of the live-data portrait,
-take one of two actions:
-
-| Field group | Action |
-|---|---|
-| `EvidenceCapsule.physical_anchor`, `source_hash`, `semantic_anchor`, `event_anchor` (B-extra K.1 💀) | **Cat-B feeds these** — `semantic_anchor` populated when signal carries dia_id or path anchor; `event_anchor` populated when signal carries turn boundary; `physical_anchor` populated when signal carries file/line ref; `source_hash` populated by garden compile. Add reader in recall scoring for `semantic_anchor`. |
-| `MemoryEntry.contradiction_count` (K.1 ❌) | **Add consumer** — recall scoring degradation factor `-0.05 * min(contradiction_count, 5)`. Also feeds Cat-F `verification_bias`. |
-| `EvidenceCapsule.evidence_kind` enum (K.1 ❌) | **Diversify producer** — `MaterializationRouter` writes `inferred` only when signal source is LLM; writes `referenced` when signal has explicit `evidence_refs`; writes `attested` when signal source is `user_override`. |
-| `ClaimForm.precedence_basis.recency`/`authority` (K.1 ❌) | **Add producer** — `recency` written when newer claim supersedes older same-subject; `authority` written when claim's `enforcement_level=strict`. |
-| `MemoryEntry.confidence` (K.1 🟡) | **Add direct read** — recall scoring uses `confidence` as a sub-weight (currently goes through `retention_score` indirection). |
-| `Proposal.expires_at` (K.2 💀) | **Add sweeper** — daemon-side periodic sweep marks pending proposals past `expires_at` as `expired`. Or remove the field if no use case (D2 says Cat-A `soul.resolve.defer` can extend). |
-| `ProposalResolutionState.expired` / `superseded` (K.2 💀) | If `expires_at` sweeper added → `expired` becomes live; `superseded` resolved by Cat-A `soul.resolve.correct` writing a new proposal that supersedes the old. |
-| `ProposalOption.unresolved_after_apply` (K.2 ❌) | **Add reader** — Inspector pending list shows count of `unresolved_after_apply` items as a "still-pending downstream" badge. |
-| `GreenStatus.revoke_reason='mapping_revoked'` (K.2 ❌) | **Add producer** — emitted when a memory's evidence ref is rewritten to point at a different capsule. Tie-in with Cat-I.2 OrphanRadar resolution. |
-| `ContextDeliveryRecord.run_id` / `UsageProofRecord.reason` (K.2 ❌) | **Add Inspector consumer** — Cat-C telemetry split surface uses `run_id` for per-run drill-down; `reason` shown when `usage_state` ∈ {skipped, not_applicable}. |
-| `karma_events.reuse_gain` / `evidence_gain` / `supersede_penalty` (K.3 💀) | **Add producers** — `reuse_gain` emitted by Cat-C 1-used loosening; `evidence_gain` emitted by `EvidenceService.update` when health goes `questionable → verified`; `supersede_penalty` emitted by `ConflictDetectionService` when an existing memory is superseded. |
-| `PathRelation.stability_class` (K.3 💀) | **Add evolver** — `PathPlasticityService` plan-step transitions `volatile → normal` after `support_events_count ≥ 5`, `normal → stable` after `≥ 15`, `stable → pinned` only on `governance_class=strictly_governed`. |
-| `direction_bias` (K.3) | **Already live — no Cat-G action** — recall path expansion already reads it (`packages/core/src/recall-service.ts:2038`) and plasticity uses it (`apps/core-daemon/src/path-plasticity-runtime.ts:398-418`). Earlier classification as 🟡 computed-then-discarded was a finding-stage error; corrected here. |
-| `governance_critical` DriftAlert (K.3 🟡) | **Cat-H.5 wires** through SurfaceService. |
-| `PathGraphSnapshot` 11 fields (K.4 🟡) | **Add Inspector consumer** — `apps/inspector/web/src/pages/PathSnapshot.tsx` (or similar) renders distributions + deltas. Or remove the fields. Decision per field: keep `total_active_paths`, `isolated_anchors` (live); remove the 9 unused unless an Inspector view ships in v0.3.9. |
-| `FormationKind.inferred`/`derived` (K.1 🟡) | **Either add `toFormationKind` cases or remove** — decision: remove (no live producer path identified). |
-| `CandidateMemorySignal.signal_kind = potential_conflict` (K.1 🟡) | **Add route** — `MaterializationRouter` routes `potential_conflict` signals through `ConflictDetectionService.evaluate()` rather than evidence-only fallback. |
-
-**Verify (per group)**:
-- A reader-side test demonstrating the consumer fires for the new
-  producer.
-- Live DB after one workflow run shows the previously-empty field
-  populated for at least one row.
-
-**Risk**: G is the largest sub-category by file count. Recommended
-order: producer-only first (evidence_kind diversification, karma
-producers), then consumer-only (Inspector readers), then bi-directional
-(stability_class evolver). Single phase but multiple commits, each
-reviewed.
-
-### P1 review-loop gate
-
-- `do-it-review-loop` until zero Blocking + Important.
-- Schema migrations applied to test DB and live DB (operator's
-  alaya.db backed up before).
+1. **Enum complete, producer single** — `MemoryEntry.dimension`,
+   `EvidenceCapsule.evidence_kind`, `CandidateMemorySignal.signal_kind`,
+   `karma_events`, `MemoryGraphEdge.edge_type`, `ClaimForm.precedence_basis`,
+   `PathRelation.governance_class`.
+2. **Evolution fields producer-write defaults** — `PathRelation.stability_class`
+   hardcoded `"stable"`, `effect_vector` defaults, `contradiction_count` /
+   `support_events_count` zero, `evidence_health_state` default
+   `questionable`.
+3. **Computed-then-discarded** — `governance_critical` DriftAlert logged
+   but no Inspector route; `ProposalOption.unresolved_after_apply`
+   written but unread; `EvidenceCapsule.semantic_anchor` / `event_anchor`
+   written as JSON but no deserialiser; `PathGraphSnapshot` 11 fields
+   unread. Note: `direction_bias` is **not** discarded — recall path
+   expansion reads it (`packages/core/src/recall-service.ts:2038`) and
+   plasticity uses it (`apps/core-daemon/src/path-plasticity-runtime.ts:398-418`).
+4. **21k+ pure sink** — `orphan_radar.reported`, `green.revoked`,
+   `evidence_failure`.
+5. **Entire abstractions dead-coded** — `NodeInstance`, `SurfaceService`,
+   `DeferredObligation`, `SynthesisCapsule` promotion lifecycle,
+   `GapRecord` / `HandoffRecord.UpgradeAssessmentAxis`.
 
 ---
 
-## P2 — Memory-loop rewire (Cat-B, Cat-C)
+## 2. Three load-bearing decisions
 
-Goal: the core change to how durable memory is produced and how usage
-loops back.
+These three decisions shape every Cat-H retire and every Cat-G
+reclamation. They were taken with user authorisation on 2026-05-16.
 
-### P2.1 — Cat-B.1: Materialization routing by object_kind
+### D1 — Dead-abstraction action
 
-**Files**:
-- `packages/soul/src/garden/materialization-router.ts:164-273, 540-599, 657`
+| Abstraction | Action | Rationale |
+|---|---|---|
+| `DeferredObligation` | **Keep & Wire** | Category F requires `obligation` `PathAnchorRef` producer. Schema and service already complete; wiring cost is small (insert obligation creation at materialization-router decision boundaries + at `soul.resolve.defer` outcome). |
+| `SurfaceService` | **Keep & Wire (narrow)** | Daemon currently constructs the service but never trades it onward. Narrow scope is `surface_identities` per host (codex / mcp / claude_code) + routing `governance_critical` `DriftAlert` through the surface-bound notification port to the Inspector inbox. Wider surface APIs stay deferred. |
+| `NodeInstance` | **Retire** | Runtime engine single-instance is sufficient for the attach model (one daemon, multiple MCP sessions); no user-surfaced scenario requires multi-engine binding. Repo is complete but daemon never mounts it. Retirement removes one table + one repo + the schema. Future re-introduction is cheap. |
+| `SynthesisCapsule.promotion` lifecycle | **Retire promotion fully — but ONLY after the replacement promoter ships** | Promotion fields (`authority_round_count`, `cooldown_until`, `promotion_state`) + three service methods + the legacy synthesis-promotion proposal code path are unwired. The replacement is `soul.resolve.confirm` (Cat-A.2). **Retire must follow `soul.resolve` going live, not precede it** — a P1 retire ahead of P4 leaves Garden compile output without a promoter (mid-air state). |
+| `HealthIssueGroup` (new control-plane projection) | **Build** | Replaces the earlier (rejected) idea of reusing `SynthesisCapsule` for health-inbox aggregation. Groups `OrphanRadar` / `Green` / `evidence_failure` entries by `target_memory_id × cause_kind`. New `health_issue_groups` table + repo. |
+| `UpgradeAssessmentAxis` (5 fields on `GapRecord` / `HandoffRecord`) | **Decide at L0 close** | All five fields (`recurrence_runs`, `recurrence_surfaces`, `governance_impact`, `unresolved_age_ms`, `upgrade_candidate`) are hardcoded `null` at creation because the computer that would populate them was never built. **Do not retire unless an upgrade-candidate computer ships in v0.3.9.** If no computer ships, L0 closeout records the deferred condition and the schema slot stays so the future computer has a target. |
 
-**Action**:
-1. Replace the `confidence ≥ 0.5 → memory_and_claim` blanket route
-   with a routing function keyed on `detected_object.object_kind`:
+### D2 — Garden deterministic triage governance status
 
-```ts
-type RouteTarget =
-  | "signal_only"            // scope statements, transient
-  | "evidence_only"          // activity reports, status snapshots
-  | "evidence_short_ttl"     // workspace_status (TTL via Auditor staleness)
-  | "memory_entry_only"      // facts, references, observations
-  | "memory_and_claim_draft";// preferences / decisions (always draft, per D2)
-```
-
-2. Specific mappings:
-   - `scope` / `task_scope` / `workflow_preference` (transient) → `signal_only`
-   - `activity` / `review_scope` → `evidence_only`
-   - `workspace_status` / `project_state` → `evidence_short_ttl`
-   - `decision` / `preference` (any confidence) → `memory_and_claim_draft`
-   - `outcome` / `reference` / `task_state` → `memory_entry_only`
-   - Unknown / unmapped → `evidence_only` (current `questionable`
-     fallback, but no longer creates memory_entry + claim)
-
-   Note: no `memory_and_claim_active` route. Per D2, Garden's
-   only legal claim output is `draft`. Active promotion requires
-   `soul.resolve.confirm` (Cat-A) or Proposal/HITL.
-
-3. Update `dimension` mapping in `toMemoryEntryDimension` so unknown
-   object_kind no longer collapses to `fact` — instead, the routing
-   function above gates whether a memory_entry is even created.
-
-4. Remove the universal 1:1:1 trio creation; let each route create
-   only the rows it semantically maps to.
-
-**Verify**:
-- New test `materialization-router-routing.test.ts` covers each route
-  with a fixture signal.
-- Live DB after one Garden compile pass: `evidence_kind` distribution
-  diversifies (no longer 100% `inferred`); `dimension` distribution
-  diversifies; some signals stop at `signal_only` (no memory_entry
-  row created).
-
-**Risk**: existing test fixtures assume 1:1:1. Update or refresh.
-
-### P2.2 — Cat-B.2: WITHDRAWN (rejected by codex review)
-
-**Status**: Withdrawn. The earlier draft of this task allowed
-`MaterializationRouter` to create `claim_status=active` directly when
-both `confidence ≥ 0.7` and `signal.evidence_refs.length > 0`.
-
-**Why withdrawn**: presence of `evidence_refs` is a syntactic property
+**Unified typed-resolution governance.** Garden's deterministic
+`SignalService.evaluateTriage` + `MaterializationRouter` remains the
+**low-trust durable producer**, but its **only legal claim output is
+`claim_status = draft`**. There is no "high-confidence + evidence_refs
+auto-active" fast path — evidence_refs presence is a syntactic property
 of the signal, not a verification fact about the referenced capsule.
-Verification is a separate event chain (`EvidenceService.update`,
-`green_statuses.verified_at`, Auditor). Allowing
-`MaterializationRouter` to skip the typed-resolution step would
-short-circuit verification and bind active runtime governance to an
-unverified ontology row. See `decisions.md` §D2 "Rejected
-alternatives".
 
-**Replacement path**: Garden's only legal claim output is
-`claim_status=draft`. Active promotion is gated by
-`soul.resolve.confirm` (Cat-A) or `soul.propose_memory_update +
-review` (Proposal/HITL, unchanged from v0.3.8). No
-`memory_and_claim_active` route target exists in Cat-B.
+Active promotion requires a **typed resolution recorded in EventLog**
+through one of two reviewer-bound routes:
 
-**Files unchanged**: this section now has no implementation footprint;
-referenced files remain on the v0.3.8 behaviour for direct
-activation (i.e. they do not directly activate from materialization).
+1. **Inline typed resolution (`soul.resolve`)** — agent receives a
+   `staged_warning` on a draft claim during recall, invokes
+   `soul.resolve` with `resolution = confirm` and a typed payload; the
+   handler atomically writes the audit event, calls
+   `ClaimService.transitionLifecycle(draft → active)`, and binds the
+   active claim to the agent's MCP session identity.
+2. **Out-of-band Proposal (`soul.propose_memory_update` + review)** —
+   explicit host assertion or operator manual review through Inspector /
+   CLI / MCP review. Unchanged from v0.3.8.
 
-### P2.3 — Cat-C.1: Single-used-object → telemetry + anchor, NOT relation synthesis
+Both routes share the same audit shape and reviewer identity binding.
+`SoulToolGovernanceAdapter` continues to gate active runtime governance
+on `claim_status ∈ {active, contested, winner}`; Garden's draft output
+never enters runtime governance until a typed resolution promotes it.
 
-**Files**:
-- `apps/core-daemon/src/mcp-memory-tool-handler.ts:929-942, 1200-1242, 1329-1345`
+**Inspector cannot directly mutate durable state.** Any Inspector
+action that appears to "promote" / "retire" / "relink" routes through
+one of the two typed-resolution paths above; Inspector is the
+origination surface, not the persistence surface (invariant §21 + §21b).
 
-**Action**:
-1. `resolveUsedObjectIds` returns the explicit `used` set without
-   the `length >= 2` precondition (so single-used reports are no
-   longer dropped before downstream telemetry).
-2. **Single-used reports** trigger only:
-   - usage proof persistence (current behaviour)
-   - HOT tier promotion of the single used memory (current behaviour
-     when count ≥ 1)
-   - a `single_used_anchor` telemetry event for Cat-C.2 bucket
-     classification.
-   They do **not** create any graph edge and do **not** advance
-   `PathRelationProposalService` counters.
-3. **PathRelation co-usage semantics preserved**: only ≥ 2 used object
-   ids in the same report contribute one tick to the K=3 counter.
-   PathRelation is by definition a relation between two co-used
-   memories; single-used reports are anchor data, not relation data.
-   Synthesising a 0.5 co-usage from "1 used + next-highest delivered"
-   would conflate "user used this memory" with "user co-used these
-   two memories" — codex review Blocking #1 rejection.
-4. **No new edge type.** The earlier proposal of a `recalls_anchor`
-   typed edge from used memory to next-highest delivered is dropped;
-   that information lives in the telemetry stream and the
-   single-used anchor signal in the next recall's
-   `staged_warnings` payload (Cat-A).
+Handbook prose updated to two co-existing governance routes
+(low-trust deterministic + typed-resolution promotion). The single
+"proposal route" language is dropped.
 
-**Verify**:
-- Test confirms single-used report writes usage proof + HOT promote
-  but **does not** insert any `memory_graph_edges` row or increment
-  `PathRelationProposalService`'s counter.
-- Test confirms ≥ 2 used reports continue producing RECALLS edges +
-  PathRelation co-usage as before.
-- Live DB after a 1-used `report_context_usage`: `memory_graph_edges`
-  count unchanged; single-used telemetry bucket increments.
+### D3 — PathRelation EventLog-first fix approach
 
-**Risk**: telemetry bucket name `single_used_anchor` must not be
-misread as relation data. Document at the call site + in the
-telemetry surface (Cat-C.2) that the bucket counts standalone usage,
-not relation evidence.
-
-### P2.4 — Cat-C.2: Usage telemetry split 5 buckets
-
-**Files**:
-- `apps/inspector/src/routes/bench-summary.ts` (or new
-  `recall-utilization.ts` route)
-- `apps/inspector/web/src/pages/Overview.tsx`
-- New eval helper in `packages/eval/src/utilization-buckets.ts`
-
-**Action**:
-1. Daemon route returns counts per workspace / per `agent_target`:
-   - `no_recall` — turn finished with no `soul.recall` call
-   - `empty_recall` — `pointer_count = 0`
-   - `delivered_not_reported` — delivery without `report_context_usage`
-   - `reported_skipped_or_na` — `report_context_usage` with `usage_state ∈ {skipped, not_applicable}`
-   - `reported_used` — ≥1 used object id
-2. Inspector Overview shows a stacked bar / list per `agent_target`.
-3. Resolves `#BL-044`.
-
-**Verify**:
-- Live DB query path returns the 5 buckets summing to the count of
-  delivered events + `no_recall` count from EventLog.
-- Inspector page visually splits the buckets and identifies which
-  bucket dominates per host.
-
-**Risk**: `no_recall` requires turn detection on the daemon side
-which Alaya does not have (turns are host-defined). Implementation
-uses `runs` table activity windows as a proxy and labels the metric
-"approximate" in the UI.
-
-### P2 review-loop gate
-
-- `do-it-review-loop` until zero Blocking + Important.
-- Live snapshot diff verified: `evidence_kind` and `dimension` no
-  longer single-value.
+**Transactional `publishEventLogMutation` wrap.**
+`PathRelationProposalService.propose` routes its `repo.create(...)`
+through `publishEventLogMutation`, emitting `path.relation_created` in
+the same SQLite transaction as the row insert. Pattern matches
+`PathPlasticityService` reinforcement / weakening / retirement /
+redirection. The graph-edge audit/insert atomicity gap noted in
+`packages/protocol/src/soul/memory-graph.ts:43-54` is closed the same
+way for `MemoryGraphEdgeRepo.ensureEdge` /
+`GraphExploreService.addEdge`.
 
 ---
 
-## P3 — Behaviour activation + sink repair (Cat-F, Cat-I.2-3)
+## 3. Eleven categories (status table)
 
-### P3.1 — Cat-F.1: PathRelation → ActivationCandidate producer
+Categories from the original triage. Status reflects state at the head
+of `worktree-v0.3.9-three-layer-repair` (current snapshot is §4 below).
 
-**Files**:
-- New `packages/core/src/path-activation-candidate-producer.ts`
-- `packages/core/src/manifestation-resolver.ts:201-228, 410-412` (verify consumer hook)
-- `apps/core-daemon/src/index.ts` (wire producer)
-
-**Action**:
-1. New service reads stored `PathRelation` rows on demand (or via a
-   recall-side trigger) and emits `ActivationCandidate` rows containing
-   `effect_vector_snapshot` (full 5 fields including
-   `verification_bias`, `unfinishedness_bias`, `default_manifestation_preference`).
-2. `ManifestationResolver` already consumes `effect_vector_snapshot`
-   (`manifestation-resolver.ts:219-225`) but only `default_manifestation_preference`.
-   Extend to consume `verification_bias` and `unfinishedness_bias`:
-   - `verification_bias`: feeds Auditor scheduling priority (high bias →
-     higher priority for evidence recheck).
-   - `unfinishedness_bias`: feeds `pending` / `incomplete` memory
-     surface flag (shown in Inspector + carried in recall sidecar).
-
-**Verify**:
-- New integration test: stored PathRelation row →
-  ActivationCandidate → ManifestationResolver decision with all 3
-  effect fields read.
-- Live behaviour: an active `PathRelation` row with non-zero
-  `verification_bias` causes Auditor to schedule its evidence
-  recheck before a path with `verification_bias=0`.
-
-**Risk**: ActivationCandidate has a clear schema
-(`packages/protocol/src/soul/activation-candidate.ts`) but production
-calls need design. Initial scope: produce on-demand at recall time
-when a `PathRelation` would be admitted as a `path_expansion`
-candidate.
-
-### P3.2 — Cat-F.2: Governance-class → manifestation-preference policy
-
-**Files**:
-- New `packages/core/src/path-manifestation-policy.ts`
-- `packages/core/src/manifestation-resolver.ts:268-286`
-
-**Action**:
-1. Policy module defines which `governance_class` may produce which
-   `manifestation_preference`:
-   - `hint_only` → no manifestation effect
-   - `attention_only` → may produce `lens_entry` only
-   - `recall_allowed` → may produce `lens_entry` and `dialogue_nudge`
-   - `strictly_governed` → may produce all three including `stance_bias`
-2. `ManifestationResolver` consults the policy before lifting the
-   preference into a decision.
-
-**Verify**:
-- Test for each (`governance_class`, preference) pair.
-- Live observation: an `attention_only` path no longer produces a
-  `stance_bias` decision.
-
-**Risk**: changes recall sidecar payload shape. Document in tool
-description that `manifestation_decision` field may be richer than
-before.
-
-### P3.3 — Cat-F.3: governance_class promotion ladder
-
-**Files**:
-- `packages/core/src/path-plasticity-service.ts:573-592` (extend plan
-  output)
-- New helper in same file for promotion thresholds
-
-**Action**:
-1. Add plan step `promote_governance_class` that, when
-   `support_events_count ≥ N` and `contradiction_events_count = 0`,
-   suggests `hint_only → attention_only`, then `attention_only →
-   recall_allowed` (thresholds N: 3 / 8 / not-applicable).
-2. `strictly_governed` remains user-set via Inspector (Cat-E).
-3. Promotion emits `path.governance_promoted` audit event.
-
-**Verify**:
-- Test: 8 successful reinforcements promotes a path from
-  `hint_only` to `recall_allowed`.
-
-**Risk**: thresholds need empirical calibration. Initial values are
-guesses; can be tuned post-v0.3.9 without breaking the contract.
-
-### P3.4 — Cat-I.2: OrphanRadar into Inspector inbox
-
-**Files**:
-- `packages/soul/src/garden/auditor.ts:284-414`
-- New daemon route `apps/core-daemon/src/routes/health-inbox.ts`
-- `packages/storage/src/repos/orphan-radar-repo.ts` (extend reader)
-
-**Action**:
-1. Auditor `OrphanRadar` creation continues, but Inspector inbox route
-   exposes a grouped view (by `target_memory_id` × `suspected_surface_gaps`)
-   with counts, age, confidence.
-2. Each group has typed actions (Cat-A `soul.resolve` verbs):
-   `relink` / `retire` / `suppress` / `defer`.
-
-**Verify**:
-- Live DB query returns grouped OrphanRadar with action counts.
-- Inspector page shows the grouped list.
-
-### P3.5 — Cat-I.3: evidence_failure aggregation
-
-**Files**:
-- `packages/soul/src/garden/auditor.ts:117-169` (stale evidence path)
-- Daemon route extends Cat-I.2 with `evidence_failure` group.
-
-**Action**:
-1. Auditor stale-evidence aggregates by `target_memory_id` and emits
-   a single `health_journal evidence_failure_grouped` entry per pass
-   per memory, rather than one per scan.
-2. Inspector inbox surfaces the grouped entry with typed actions:
-   `request_evidence` / `retire_memory` / `mark_questionable_ok`.
-
-**Verify**:
-- Live DB: per-pass `health_journal` `evidence_failure` count drops
-  from 1160 to bounded-by-memory-count.
-
-**Risk**: aggregation must not lose audit truth — keep individual scan
-events at a lower-resolution event type, or drop them entirely if
-aggregation is sufficient. Documented in release notes.
-
-### P3 review-loop gate
-
-- `do-it-review-loop` until zero Blocking + Important.
-- Live snapshot: at least one PathRelation row with non-default
-  `effect_vector`; at least one `health_journal` grouped entry.
-
----
-
-## P4 — New surfaces (Cat-A, Cat-E)
-
-Goal: the user-facing parts of the trust loop closure.
-
-### P4.1 — Cat-A.1: `soul_recall` payload extension with `staged_warnings`
-
-**Files**:
-- `apps/core-daemon/src/mcp-memory-tool-handler.ts:402-456` (recall handler)
-- `apps/core-daemon/src/mcp-memory-tool-catalog.ts:39-57` (tool description)
-- `packages/protocol/src/recall-payload.ts` (or equivalent)
-
-**Action**:
-1. Each pointer in the recall response may carry
-   `staged_warnings: StagedWarning[]`. Each warning has:
-   - `kind: "stale" | "conflict" | "draft_claim" | "orphan_candidate" | "supersede_candidate"`
-   - `severity: "info" | "warn" | "blocking"`
-   - `policy: "ask_now" | "apply_silently" | "track_only" | "inspect_later"`
-   - `summary: string`
-   - `resolution_options: SoulResolveAction[]`
-2. Daemon GovernancePolicy resolver (new module) computes the `policy`
-   value per warning based on severity, host's recent resolve cadence,
-   and global per-turn `ask_now` budget.
-
-**Verify**:
-- Test: recall with one stale memory returns a `staged_warnings`
-  array with `kind=stale` and `policy=ask_now` or `apply_silently`
-  depending on conditions.
-
-**Risk**: existing recall consumers expect a flat pointer payload.
-Bump tool description with a `staged_warnings` example; mark the field
-optional so older agents skip it.
-
-### P4.2 — Cat-A.2: New MCP verb `soul.resolve`
-
-**Files**:
-- `apps/core-daemon/src/mcp-memory-tool-catalog.ts` (new verb registration)
-- New handler `apps/core-daemon/src/mcp-memory-resolve-handler.ts`
-- `packages/core/src/resolution-service.ts` (new — typed action dispatcher)
-
-**Action**:
-1. Verb signature:
-
-```ts
-soul.resolve({
-  delivery_id: string,
-  warning_id: string,
-  resolution: "confirm" | "reject" | "correct" | "stale" | "defer" | "not_relevant",
-  payload?: { /* per-resolution */ }
-})
-```
-
-2. Dispatcher routes per resolution kind:
-   - `confirm` → calls promotion / activation depending on warning
-     kind (e.g. draft_claim confirm → `ClaimService.transitionLifecycle`
-     active).
-   - `reject` → marks the warning as user-rejected; if it was a
-     supersede candidate, the candidate is dropped.
-   - `correct` → opens a typed Proposal carrying the correction
-     payload.
-   - `stale` → `EvidenceService.update` marks the capsule
-     `disputed`/`refuted`; memory may be tombstoned.
-   - `defer` → creates a `DeferredObligation` (Cat-H.4) so the
-     warning re-surfaces at the right time.
-   - `not_relevant` → suppress this exact warning shape for the
-     workspace + session (decay over time, not permanent).
-
-3. All resolutions emit `soul.resolved` audit event with the typed
-   payload.
-
-**Verify**:
-- Per-resolution test in `mcp-memory-resolve-handler.test.ts`.
-- Integration: end-to-end recall → staged_warning → soul.resolve →
-  apply chain proven.
-
-**Risk**: this is a new MCP verb. Adds to the 13-verb surface →
-becomes 14 verbs. Document in README.md + CLI help.
-
-### P4.3 — Cat-A.3: Fatigue controls
-
-**Files**:
-- New `packages/core/src/governance-policy.ts`
-- `apps/core-daemon/src/mcp-memory-tool-handler.ts` (consults policy
-  module before stamping `policy` on each warning)
-
-**Action**:
-1. Policy module exposes:
-
-```ts
-classifyWarning(input: {
-  warning: StagedWarning,
-  recent_resolutions: ResolveActionRecord[],
-  turn_budget: { ask_now_used_this_turn: number },
-  workspace_governance: WorkspaceGovernancePrefs
-}): "ask_now" | "apply_silently" | "track_only" | "inspect_later"
-```
-
-2. Defaults:
-   - `ask_now` budget per turn: 1 (configurable via
-     `ALAYA_GOVERNANCE_ASK_NOW_PER_TURN`).
-   - `apply_silently`: clear-cut stale, low-severity orphan candidates
-     where user has resolved the same shape ≥ 3 times the same way
-     (auto-policy learning).
-   - `track_only`: low-severity info that doesn't block recall use.
-   - `inspect_later`: routed to Cat-E inbox.
-
-**Verify**:
-- Test: 5 stale warnings in one recall — only 1 emerges as `ask_now`,
-  others split between `apply_silently` and `inspect_later`.
-
-### P4.4 — Cat-E.1: Inspector Health Inbox page (over `HealthIssueGroup`)
-
-**Files**:
-- New `apps/inspector/web/src/pages/HealthInbox.tsx`
-- New daemon route `apps/core-daemon/src/routes/health-inbox.ts`
-  (already touched in Cat-I.2)
-- New `packages/protocol/src/control-plane/health-issue-group.ts`
-  (control-plane projection schema)
-- New `packages/storage/src/repos/health-issue-group-repo.ts`
-- New `packages/storage/src/migrations/<NN>-health-issue-groups.sql`
-- Inspector navigation update.
-
-**Action**:
-1. New control-plane projection `HealthIssueGroup` (per `decisions.md`
-   §D1, replacing the earlier idea of reusing `SynthesisCapsule`).
-   Shape:
-   - `group_id`
-   - `target_object_id` (memory_entry or evidence_capsule)
-   - `cause_kind` (`orphan` / `green_revoked` / `evidence_failure` / ...)
-   - `severity` / `confidence` / `first_seen_at` / `last_seen_at`
-   - `count` (de-duped from raw stream)
-   - `suggested_action` (typed verb list)
-   - `resolution_state` (`pending` / `resolved` / `suppressed`)
-2. Cat-I.2 / Cat-I.3 producers (OrphanRadar, evidence_failure)
-   emit into the projection rather than into raw event streams.
-3. Health Inbox shows three sections:
-   - **Pending actions** (typed verbs from `suggested_action`)
-   - **Recent resolved** (`resolution_state=resolved`, last 7 days)
-   - **System silence** (low-severity items, audit-only)
-4. Each row exposes the suggested typed action; clicking triggers a
-   typed Proposal (or, for low-risk cases, a `soul.resolve` invocation
-   that the inspector copies to the operator's clipboard per
-   invariant §21a). Inspector never directly mutates durable state;
-   actions travel through the audit-trail apply path.
-
-**Verify**:
-- Inspector page renders with at least 5 grouped entries from a live
-  workspace.
-
-### P4.5 — Cat-E.2: `strictly_governed` PathRelation promotion via Proposal
-
-**Files**:
-- Inspector Memory Browser extension (`apps/inspector/web/src/pages/MemoryBrowser.tsx`)
-- New filter chip "strictly governed paths"
-- `apps/core-daemon/src/mcp-memory-proposal-workflow.ts` — extend
-  Proposal target kinds to include `path_relation` with the
-  `governance_class` mutation shape
-- `packages/core/src/path-plasticity-service.ts` — `transitionGovernance`
-  helper invoked by the Proposal apply path
-
-**Action**:
-1. Inspector exposes "Promote to strictly_governed" as an **origination
-   surface** only. The button does **not** directly call
-   `PathPlasticityService.transitionGovernance` and does **not** write
-   `path_relations` rows from the inspector worker.
-2. Instead, the button posts a typed Proposal via the existing daemon
-   review surface:
-   - `target_object_kind: path_relation`
-   - `proposed_changes: { governance_class: "strictly_governed" }`
-   - `reviewer_identity` bound to the inspector operator
-3. Operator reviews + accepts through Inspector's Proposals page.
-4. Accept path applies via `PathPlasticityService.transitionGovernance`,
-   which publishes `path.governance_promoted` in the same transaction
-   as the row update (`publishEventLogMutation` pattern from Cat-0).
-
-This preserves invariant §21+§21b: Inspector is the origination
-surface, not the persistence surface; durable path state changes
-travel through the typed-resolution / Proposal audit trail before
-landing.
-
-**Verify**:
-- Test: Inspector "Promote" button creates a `path_relation` Proposal
-  with the correct `proposed_changes` payload — does not mutate
-  `path_relations` directly.
-- Test: accepting the Proposal applies via `transitionGovernance` +
-  emits `path.governance_promoted` event atomically.
-- Live: a manually-promoted path appears with
-  `governance_class=strictly_governed` and the audit trail shows
-  Proposal creation → accept → governance promotion event in
-  chronological order.
-
-### P4 review-loop gate
-
-- `do-it-review-loop` until zero Blocking + Important.
-- New MCP verb tool tested via CLI: `alaya tools call soul.resolve`.
-
----
-
-## P5 — Data correctness + docs (Cat-D, Cat-J, closeout)
-
-### P5.1 — Cat-D.1: LoCoMo `evaluated_count` denominator
-
-**Files**:
-- `apps/bench-runner/src/locomo/runner.ts:95`
-- `packages/eval/src/diff.ts:54`
-
-**Action**: `evaluated_count` reflects `totalQa` (scored QA), not
-conversation count.
-
-**Verify**: re-run LoCoMo bench; `evaluated_count` ≈ 1986 (not 10);
-Wilson CI half-width sensible at that N.
-
-### P5.2 — Cat-D.2: Cohort metric ≤ 50% (cross-question)
-
-**Files**: `packages/core/src/recall-service.ts` (re-check cohort guard
-implementation post-v0.3.8 fix); test fixtures.
-
-**Action**: confirm guard actually drops cross-question 34/41 (83%)
-admission ratio below 50%. Adjust if still exceeded.
-
-**Verify**: cross-question-100 bench run shows cohort attribution ≤ 50%.
-
-### P5.3 — Cat-D.3: sample-size label correctness
-
-**Files**: `packages/eval/src/report.ts`.
-
-**Action**: 100/500 sample run no longer labelled `full`; correct
-label cascade: `smoke` (≤ 50), `staged` (51-200), `shard_merged`
-(201-499), `full` (≥ 500 or `limit = total`).
-
-**Verify**: existing 100/500 archives re-rendered show
-`label = staged` not `full`.
-
-### P5.4 — Cat-D.4: runtime-status doc sync
-
-**Files**: `docs/handbook/runtime-status.md`.
-
-**Action**: per codex 01 report §Recommended priority #5, split
-readiness into 4 levels:
-- `schema_only` — zod schema exists, no runtime path
-- `implementation_wired` — daemon wires producer + consumer, no live
-  proof
-- `live_event_proven` — integration test + live SQLite snapshot proves
-  the path
-- `agent_used` — live workspace shows the agent (codex / claude-code)
-  uses the feature
-
-Each producer/consumer path tagged separately.
-
-**Verify**: a manual walk-through of the doc against the live DB shows
-no overstatement; cohort, PathRelation, edge producers, embedding all
-labelled accurately.
-
-### P5.5 — Cat-D.5: embedding-on baseline policy
-
-**Files**: `docs/bench-history/README.md`,
-`docs/bench-history/public/<embedding-on archives>/findings.md`,
-`docs/bench-history/public/latest-baseline.json` policy doc.
-
-**Action**: per codex#1 review Blocking #3 — separate embedding-on
-archives from disabled baseline cadence; `latest-baseline.json`
-points only at disabled-500 full runs. Embedding-on archives live in
-a new sibling pointer `latest-baseline-embedding-on.json`.
-
-**Verify**: `latest-baseline.json` no longer points at a FAIL archive.
-
-### P5.6 — Cat-D.6: Phase 6 bench truth-up
-
-**Files**: `docs/v0.3/v0.3.8/reports/v0.3.8-closeout.md`, release
-notes, backlog notes.
-
-**Action**: retroactively annotate v0.3.8 closeout/release-notes
-where bench claims overstated actual run scale (cross-question 50,
-embedding-on 100, OOM 464). Either declare "downgraded" or schedule
-the full-scale re-run in v0.3.9 P5 bench pass.
-
-**Verify**: closeout reflects actual archive sample sizes; no claim
-exceeds archive evidence.
-
-### P5.X — Bench-as-diagnostic pass (pre/post diff)
-
-Benchmarks are diagnostic mirrors of the three-layer repairs. They
-are run **not because we need a number**, but because their results
-reveal which system layer is still not working. A bad benchmark
-number is a diagnosis prompt ("Category Y did not fully land"), not a
-trigger for score-chasing patches. Per user directive
-("不要为了测试的分数而盲目做内容") and the benchmark-as-feedback-loop
-principle.
-
-Two passes:
-
-**Pass A — pre-v0.3.9 baseline reaffirmation** (at P0 start):
-- `disabled-500 longmemeval-s` (the existing v0.3.8 archive serves
-  here; do not re-run unless changed)
-- `cross-question-100 longmemeval-s`
-- `locomo10` (with the FIXED `evaluated_count` from Cat-D.1)
-- `embedding-on-500` (only for reference; not a baseline)
-- All archives committed under
-  `docs/bench-history/public-pre-v0.3.9/`.
-
-**Pass B — post-v0.3.9 diff** (at P5 close):
-- Re-run the same four configurations against the v0.3.9 daemon.
-- Archive under `docs/bench-history/public/` per the existing
-  cadence (full sample sizes — see `latest-baseline.json` policy from
-  P5.5).
-
-**Diff lens** (`docs/v0.3/v0.3.9/reports/v0.3.9-bench-diff.md`):
-For each Category, list the expected reflection signal and the
-observed value. Examples:
-
-| Category | Expected reflection | Pass A observation | Pass B observation |
+| Cat | Aim | Layer | Status |
 |---|---|---|---|
-| B | `EvidenceCapsule.evidence_kind` distribution diversifies | 100% inferred | (post) |
-| B | `MemoryEntry.dimension` distribution diversifies | 99% fact | (post) |
-| C | `reported_used` ratio of total deliveries | 47/169 (28%) | (post) |
-| C | 5-bucket telemetry split visible per host | absent | (post) |
-| C | `single_used_anchor` telemetry events emitted on 1-used reports (does NOT advance PathRelation counter; does NOT insert graph edge) | absent | (post) |
-| F | Non-bootstrap PathRelation count | 0 | (post) |
-| F | Paths with non-default `effect_vector` | 0 | (post) |
-| F | Paths with `governance_class ∈ {recall_allowed, strictly_governed}` | 0 | (post) |
-| I.1 | `green.revoked` event rate / `green_statuses` row count | 21k / 0 (silent fail) | (post) |
-| I.2 | `orphan_radar` row count vs grouped Inspector inbox entries | 12k / 0 | (post) |
-| I.3 | `evidence_failure` health_journal entries per Auditor pass | per-scan-per-memory | (post) |
-| 0 | `path.relation_created` event count vs `path_relations` row count | mismatched (no event published) | (post) — should be 1:1 |
-| 0 | `memory_graph_edge.created` event count vs row insertion | mismatched | (post) — should be 1:1 |
-| D | LoCoMo R@K (real denominator) | (Pass A) | (post) |
+| **0** | PathRelation EventLog-first + graph-edge audit atomicity | L2+L3 | **Done** — tagged `v0.3.9-blocking-p0` |
+| **A** | Inline Governance Loop — `staged_warnings` on recall payload, `GovernancePolicy` resolver, new `soul.resolve` typed verb, fatigue controls | L3 | Pending L3 |
+| **B** | Memory Quality Lift — materialization routes by `object_kind`; Garden's only legal claim output is `draft`; `potential_conflict` signal kind routed | L1 | Pending L1 |
+| **C** | Usage Loop Widening — `resolveUsedObjectIds` allows single used object for telemetry / HOT promote / usage anchor (no PathRelation synthesis from a single used); 5-bucket usage telemetry split | L3 | Single-used path already correct in code (verify); 5-bucket split pending L3 |
+| **D** | Data correctness — codex review blocking + important findings (LoCoMo `evaluated_count` denominator, cohort metric ≤ 50%, sample-size label, runtime-status sync, embedding-on baseline policy, Phase 6 bench truth-up) | All | Pending L0 |
+| **E** | Inspector Health Inbox — aggregate Auditor / OrphanRadar / Green by memory / evidence_ref / root cause; typed actions per class; fatigue dedupe | L3 | Schema + repo done (D1); Inspector page + producer aggregation pending L3 |
+| **F** | Path-Driven Manifestation Activation — stored `PathRelation` → `ActivationCandidate` → `ManifestationResolver` producer; explicit governance-class → stance/nudge/lens policy; `verification_bias` + `unfinishedness_bias` landing strategy | L2 | Pending L2 |
+| **G** | Schema Field Reclamation — every K.1-K.4 dead/half-dead/computed-then-discarded field: wire consumer or remove from schema; evaluate enum-single-producer extension vs retraction | All | **Partial.** Done: `evidence_kind` diversification, `MemoryEntry.contradiction_count` recall consumer, `FormationKind` producer refresh (inferred / derived path). Pending: precedence_basis recency / authority producer, confidence direct read, expires_at sweeper, mapping_revoked producer, `karma_events` three producers, `PathRelation.stability_class` evolver, `PathGraphSnapshot` 11-field decision, `potential_conflict` route, ContextDeliveryRecord.run_id / UsageProofRecord.reason Inspector consumer. |
+| **H** | Dead-abstraction action — execute D1 | All | **Partial.** Done: H.1 NodeInstance retire; H.4 DeferredObligation wire; H.5 narrow SurfaceDrift → HealthJournal. Pending: H.2 SynthesisCapsule.promotion retire (deferred until L3 ships `soul.resolve`); H.5 full surface_identities-per-attach; H.3 UpgradeAssessmentAxis (decide at L0 close). |
+| **I** | 21k+ sink repair — GreenStatus silent UPDATE (affected-row guard + workspace predicate + EventLog mandatory); OrphanRadar feeds Category E; evidence_failure aggregates upward to E | L3 | I.1 done as part of P0. I.2/I.3 pending L2-C (HealthIssueGroup ingest). |
+| **J** | Docs truth alignment — `runtime-status.md` readiness split into 4 levels; every producer/consumer path tagged separately; v0.3.8 closeout retroactively annotated where labels were overstated | Docs meta | Pending L0 |
 
-Bench is read as **diagnostic signal**, not release gate. If a
-reflection signal moves in the wrong direction, that triggers a fix
-within the relevant Category, not a release block.
+Backlog inclusion: **#BL-044** (recall utilization follow-through,
+deferred from v0.3.8) is resolved by Cat-C 5-bucket split + Cat-E
+operator drill-down. No other open backlog. `#BL-039 / 040 / 041 / 042 /
+045 / 046` already closed in v0.3.8.
 
-**Files**:
-- `docs/v0.3/v0.3.9/reports/v0.3.9-bench-diff.md` (new)
-- `docs/bench-history/public-pre-v0.3.9/` (new sibling cadence dir,
-  archives only)
-- `docs/bench-history/public/<post-v0.3.9 archives>` (existing cadence)
-
-**Verify**: bench diff doc filled in for every row in the table.
-
-**Risk**: LongMemEval-S R@5 may stay at ~77% post-v0.3.9 — Alaya is
-not optimising for that workload, and the three-layer repairs target
-the live operator loop (where the actual evidence is). Document this
-in the diff doc: explain R@5 stability is not a regression; the new
-signals (non-bootstrap PathRelation rows, diversified
-`evidence_kind`, `staged_warnings` resolution rate, the 5-bucket
-usage telemetry split) are the real success metrics. Conversely, if
-a reflection signal moves in the wrong direction, treat it as a
-diagnosis prompt and reopen the relevant Category — do not patch the
-bench score.
-
-### P5.7 — Cat-J: Docs truth alignment (already mostly D.4)
-
-Encapsulates Cat-D.4 plus any prose updates needed for D2's
-"two co-existing governance routes" handbook language.
-
-**Files**: `docs/handbook/invariants.md:57-77`,
-`docs/handbook/architecture.md`,
-`docs/handbook/runtime-status.md`,
-`README.md` (project root) governance-route section.
-
-**Action**: prose updates per D2 decision (deterministic + Proposal
-co-exist with promotion gates).
-
-**Verify**: doc walkthrough.
-
-### P5.8 — Release notes + closeout
-
-**Files**:
-- `docs/v0.3/v0.3.9/release-notes.md`
-- `docs/v0.3/v0.3.9/reports/v0.3.9-closeout.md`
-- `docs/handbook/backlog.md` (close `#BL-044`; record any new findings
-  not absorbed — should be empty)
-
-**Action**: full release notes including the three load-bearing
-decisions, the 11 categories executed, and any acknowledgements where
-intended behaviour deviates from naive reader expectation.
-
-### P5 review-loop gate
-
-- Final `do-it-review-loop` round (reviewer + codex adversarial)
-  until zero Blocking + Important.
-- All 11 categories' verify gates green.
+Out of scope (explicit): no R@K chasing; no new MCP verbs beyond
+`soul.resolve` (14th); no agent-frontend GUI / conversation TUI
+(invariant §21a); embedding provider semantics unchanged.
 
 ---
 
-## Rollout sequencing
+## 4. Current snapshot (frozen at the head of this plan)
 
-```
-P0 (Blocking)  ──┐
-                 ├──→ P1 (Schema)  ──→ P2 (Memory loop)
-                 │                          │
-                 │                          v
-                 │                      P3 (Behaviour) ──→ P4 (Surfaces) ──→ P5 (Docs)
-                 │                                                                │
-                 └──→ tag v0.3.9-blocking-p0                                       │
-                                                                                  v
-                                                                            tag v0.3.9
-```
+- **Branch / worktree:** `.claude/worktrees/v0.3.9-three-layer-repair`
+  on branch `worktree-v0.3.9-three-layer-repair`.
+- **Tag `v0.3.9-blocking-p0`** at commit `b71566e` — Cat-0.1 / Cat-0.2 /
+  Cat-I.1, reviewer + Codex two-round review-loop verdict clean.
+- **Most recent commit** when this consolidated plan landed: see
+  `git log --oneline -5` for the current head. The `commit` that
+  introduced this single-file plan also deletes the original
+  `README.md` / `decisions.md` / interim `orchestration-plan.md`.
+- **Tests at HEAD:** 2665 / 2665.
 
-P0 ships as hotfix tag if user wants to merge silent-UPDATE +
-EventLog-first fixes ahead of the rest of the schedule. Otherwise the
-six phases ship as one v0.3.9 release after P5 closeout.
+### What landed and stays (do NOT redo)
 
-## Risk register
+| Slot | Landed | Justification |
+|---|---|---|
+| Cat-0.1 PathRelation EventLog-first | `087efb3` + `b71566e` review-loop fix | Atomicity invariant restored |
+| Cat-0.2 GraphExploreService.addEdge atomicity | Same | Atomicity invariant restored |
+| Cat-I.1 GreenStatus revoke guard + `green_revoke_noop` | Same | Silent UPDATE bug closed |
+| Cat-H.1 NodeInstance retire (table + repo + zod + migration 069) | `0200573` (part of P1 first pass) | Single-instance runtime engine is the decided shape (D1); reintroduction is cheap |
+| Cat-H.4 `DeferredObligationService` instantiated in daemon | `b5d60f0` | Producer for Cat-F `obligation` `PathAnchorRef` + Cat-A `soul.resolve.defer` |
+| Cat-H.5 (narrow) `SurfaceDriftService` → `HealthJournal` | `b5d60f0` | `governance_critical` drift alerts surface in Inspector inbox via D1 projection |
+| D1 `HealthIssueGroup` projection (zod + repo + migration 071) | `b5d60f0` | Inspector health inbox aggregation target |
+| Cat-G `evidence_kind` diversification | `b5d60f0` | Producer no longer collapses to 100% `inferred` |
+| Cat-G `MemoryEntry.contradiction_count` recall consumer | `7e09666` | Adds `contradiction_penalty` to recall score |
+| Cat-G `FormationKind` producer refresh (inferred / derived) | `7e09666` | `toFormationKind(signal)` picks `derived` for LLM-with-`source_memory_refs`, `inferred` otherwise |
 
-| Risk | Mitigation |
-|---|---|
-| P1 schema migrations to live DB. Operator's `alaya.db` has 4 days of dogfood data. | Backup `~/.config/alaya/alaya.db` to `alaya.db.pre-v0.3.9` before P1 deploy. Migrations are column drops + table drops (no data loss for kept rows). |
-| Cat-A new `soul.resolve` verb is a 14th MCP verb, breaks "13 verbs" invariant copy. | Update invariant prose to "14 verbs" with `soul.resolve` enumerated. User-facing CLI gains corresponding cmd (no breaking rename). |
-| Cat-B routing change drops some signals to `signal_only` that today produce memory rows. | Document as intentional. Daily run-rate of new memory rows is expected to drop (this is a quality lift, not a quantity regression). |
-| Cat-E new `HealthIssueGroup` projection adds a new table (`health_issue_groups`) and new repo. | Schema is control-plane (not memory ontology); migration is additive only; rollback by table drop if needed. |
-| Cat-F new ActivationCandidate producer adds load to recall path. | Producer is on-demand at recall time; expected O(path_expansion_seed_count) which is bounded by tier pool. Benchmark in P3. |
-| P3 OrphanRadar aggregation may hide individual issues from operators who relied on the raw stream. | Inspector inbox shows individual rows on drill-down; aggregation only at the inbox-list level. |
+### What was rolled back and is **explicitly deferred until a prerequisite ships**
 
-## Out-of-scope continuation
+| Slot | Deferred until | Reason |
+|---|---|---|
+| **Cat-H.2 SynthesisCapsule.promotion retire** | L3 closes Cat-A.2 `soul.resolve` | Without `soul.resolve`, Garden compile produces synthesis candidates with no promoter. Retiring promotion early leaves them as a graveyard. The original plan §P1.2 (pre-rewrite) put the retire in P1 ahead of the P4 replacement — an execution-order bug. |
+| **Cat-H.3 UpgradeAssessmentAxis retire** | An upgrade-candidate computer ships in L2, OR L0 closeout records the deferred condition | The 5 fields are the schema slot for meta-cognitive gap aggregation; retiring without a replacement loses the slot. The original plan §P1.3 logged `Risk: zero (fields were hardcoded null)`, missing the slot-purpose question entirely. |
 
-- **v0.4 scope candidates**: SurfaceService full API (anchor mutation,
-  binding rebinds), `time_concern` / `risk_concern` PathAnchorRef
-  producers (only `obligation` lands in v0.3.9), Inspector
-  Synthesis-aggregation view (basic shape only; rich grouping
-  deferred).
-- **Bench infrastructure** beyond data-correctness fixes (Cat-D)
-  remains deferred until a real-use-case bench is designed (post-v0.4
-  candidate).
+### Architecture-first checklist (mandatory before any Cat-H retire or Cat-G reclamation)
+
+Every retire / wire decision MUST answer two questions in the commit
+message AND in the subagent return schema:
+
+1. **What does this slot serve in the architecture?** (one sentence)
+2. **Who serves it now if we retire / who consumes it if we wire?**
+   (one sentence; if "nobody", that is grounds to NOT retire and to
+   write a deferred condition into L0 closeout instead)
+
+The two rolled-back retires (H.2 / H.3) both skipped this checklist.
+The orchestration model below treats the checklist as a hard gate,
+not a recommendation.
+
+### Open architecture questions to answer before each remaining lens starts
+
+1. **Cat-B routing-by-`object_kind`** (L1) — when the router stops
+   creating the 1:1:1 trio for some `object_kind` values, what does
+   Garden actually write for those signals? L1-A owner MUST decide for
+   each `RouteTarget` value and verify no downstream reader breaks when
+   a signal stops at the earlier tier.
+2. **Cat-G `precedence_basis.recency` / `authority` producer** (L1) —
+   `ClaimService.create` (and the supersede path) must choose
+   `precedence_basis` based on signal source + enforcement level. L1-B
+   locks the truth table before coding.
+3. **Cat-F `governance_class → manifestation_preference` policy** (L2)
+   — policy module defines which `governance_class` may emit
+   `lens_entry` / `dialogue_nudge` / `stance_bias`. L2-B locks the
+   table before wiring.
+4. **`PathGraphSnapshot` 11 unused fields** (L2) — per-field decision:
+   wire into Inspector view, or remove from schema. Kept set today is
+   `total_active_paths` + `isolated_anchors`; the other 9 either land
+   a consumer or get a remove migration. L2-C returns the per-field
+   decision.
+5. **`Proposal.expires_at` sweeper** (L2 or L3) — if added, sweeper
+   moves pending proposals to `expired` after the timestamp. If not
+   added the field stays unused; choose explicitly.
+
+---
+
+## 5. Execution lenses (order: L1 → L2 → L3 → L0)
+
+Each lens block is **self-contained** so the orchestrating thread can
+re-enter after context compression without re-deriving scope.
+
+### Lens L1 — Memory ontology producer diversification
+
+**Goal:** stop the producer-side single-value collapses
+(`100% inferred`, `99% fact`, `100% draft`) so the live ontology has the
+shape recall + governance expect. Closes Cat-B + the L1 portion of
+Cat-G.
+
+**Three subagent task packages, dispatch in parallel:**
+
+#### L1-A: MaterializationRouter routing-by-`object_kind` + Garden `claim_status=draft` lock (D2) + `potential_conflict` route
+
+- **Owner:** `typescript-pro`
+- **Write ownership:**
+  - `packages/soul/src/garden/materialization-router.ts`
+  - `packages/soul/src/__tests__/materialization-router.test.ts`
+  - new test `packages/soul/src/__tests__/materialization-router-routing.test.ts`
+- **Forbidden paths:** anything outside `packages/soul/`; do not touch
+  the protocol zod schema in this pack — the router consumes the
+  existing `signal.object_kind`.
+- **Architecture-first answers (mandatory in return schema):**
+  1. What does each new `RouteTarget` serve? (signal_only / evidence_only
+     / evidence_short_ttl / memory_entry_only / memory_and_claim_draft)
+  2. Who consumes the rows produced by each route? (per-route reader)
+- **Must verify before stop:**
+  - `rtk pnpm exec vitest run packages/soul/src/__tests__/` clean
+  - `route()` mapping: `scope` / `task_scope` / `workflow_preference`
+    → `signal_only`; `activity` / `review_scope` → `evidence_only`;
+    `workspace_status` / `project_state` → `evidence_short_ttl`;
+    `preference` / `decision` → `memory_and_claim_draft`; `outcome` /
+    `reference` / `task_state` → `memory_entry_only`; unknown →
+    `evidence_only`
+  - `potential_conflict` signal kind routes to a path that invokes
+    `ConflictDetectionPort.evaluate`, not the questionable-evidence
+    fallback
+  - claim_status default through this router is **always** `draft`
+    (assertion in test)
+  - existing 25 materialization-router tests still pass (update only
+    fixtures where the new routing rule actually changes the expected
+    outcome)
+- **Stop condition:** all asserts above + new routing test green
+- **Return schema:**
+  - `files_touched`: list
+  - `routes_added`: list of `{signal_kind | object_kind, RouteTarget}`
+  - `routes_removed`: any removed targets
+  - `architecture_answers`: object with `slot_purpose` + `consumer`
+    for each route
+  - `test_summary`: pass / fail counts
+  - `migrations_added`: should be empty
+  - `open_questions`: anything the owner could not lock without
+    orchestrator input
+
+#### L1-B: `precedence_basis.recency` / `authority` producer in `ClaimService.create` + supersede path
+
+- **Owner:** `typescript-pro`
+- **Write ownership:**
+  - `packages/core/src/claim-service.ts`
+  - `packages/core/src/__tests__/claim-service.test.ts`
+  - `packages/soul/src/garden/materialization-router.ts` — only
+    `buildClaimInput()`, to thread the right `precedence_basis` from
+    the signal
+- **Forbidden paths:** schema files (do not touch `PrecedenceBasis`
+  enum)
+- **Architecture-first answers:**
+  1. What does each `precedence_basis` value (`recency` / `authority` /
+     `evidence_strength` / `user_override`) signal downstream?
+  2. Who reads `precedence_basis` to make arbitration / governance
+     decisions? (audit the consumer side)
+- **Must verify:**
+  - `recency` when a new claim supersedes an older same-subject claim
+  - `authority` when the new claim has `enforcement_level = strict`
+  - `evidence_strength` default for normal Garden compile output
+  - `user_override` when source is `user_seed` or signal carries an
+    override marker
+  - claim-service tests pass
+- **Return schema:** same shape as L1-A plus `precedence_table`
+  (4-way mapping)
+
+#### L1-C: Recall scoring reads `MemoryEntry.confidence` directly
+
+- **Owner:** `typescript-pro`
+- **Write ownership:**
+  - `packages/core/src/recall-service.ts` (`computeEffectiveScoreDetails`)
+  - `packages/core/src/recall-candidate-builder.ts` (small wiring if
+    needed)
+  - `packages/protocol/src/soul/recall-candidate.ts` (only if a new
+    factor needs a schema field; `contradiction_penalty` already exists)
+  - tests in `packages/core/src/__tests__/recall-*`
+- **Forbidden paths:** materialization router, claim service,
+  plasticity
+- **Architecture-first answers:**
+  1. What does `confidence` semantically promise (vs `retention_score`
+     vs `activation_score`)?
+  2. Who else reads `confidence` today? (don't break their contract)
+- **Must verify:**
+  - recall scoring uses `entry.confidence` as a sub-weight, not only
+    via `retention_score`
+  - new sub-weight bounded, score still clamped `[0, 1]`
+  - `recall-8factor.test.ts` and `recall-service-tier-cascade.test.ts`
+    still pass
+  - new test: two memories identical except for `confidence` produce
+    ordered scores
+- **Return schema:** same as L1-A
+
+**L1 orchestrator gate:**
+
+After all three subagents return, the orchestrator:
+
+1. Runs `rtk pnpm build` and `rtk pnpm test`.
+2. Dispatches review-loop:
+   - `Agent({subagent_type: "reviewer", ...})` — Claude lens
+   - `Skill({skill: "codex:rescue", args: "adversarial review of L1 ..."})`
+   - Findings to `.do-it/v0.3.9-l1-review/`
+3. Fix-loop until verdict `clean` on both lenses
+   (`feedback_review_loop_until_clean`)
+4. **Commits + tags `v0.3.9-l1`** on the final clean commit
+
+---
+
+### Lens L2 — Structure registry activation
+
+**Goal:** `PathRelation` + staged edges + governance / plasticity
+vectors stop being inert schema and become first-class producers +
+consumers. Closes Cat-F + the L2 portion of Cat-G + Cat-I.2 / I.3.
+
+**Three subagent task packages, dispatch in parallel:**
+
+#### L2-A: Cat-F PathRelation → ActivationCandidate producer + ManifestationResolver consumes `verification_bias` / `unfinishedness_bias`
+
+- **Owner:** `architecture-strategist` (to draft the producer-vs-resolver
+  interface) THEN `typescript-pro` (to implement). Orchestrator chains
+  them; strategist returns a design as input to the implementer.
+- **Write ownership:**
+  - new `packages/core/src/path-activation-candidate-producer.ts`
+  - `packages/core/src/manifestation-resolver.ts` (extension)
+  - `apps/core-daemon/src/index.ts` (wire producer)
+  - tests
+- **Architecture-first answers:**
+  1. What does each `effect_vector` field promise downstream
+     (`salience` / `recall_bias` / `verification_bias` /
+     `unfinishedness_bias` / `default_manifestation_preference`)?
+  2. Who consumes `verification_bias` (Auditor scheduling)? Who
+     consumes `unfinishedness_bias` (recall sidecar `pending` flag)?
+- **Must verify:**
+  - stored `PathRelation` with non-zero `verification_bias` causes
+    Auditor evidence-recheck for its anchor memory to be scheduled
+    before a path with `verification_bias = 0`
+  - `unfinishedness_bias` carried through to the recall sidecar as a
+    `pending` / `incomplete` flag
+- **Return schema:** standard
+
+#### L2-B: `governance_class` → manifestation policy + promotion ladder + `stability_class` evolver
+
+- **Owner:** `typescript-pro`
+- **Write ownership:**
+  - new `packages/core/src/path-manifestation-policy.ts`
+  - `packages/core/src/path-plasticity-service.ts` (extend plan output
+    with promotion plan-step + `stability_class` transitions)
+  - `packages/core/src/manifestation-resolver.ts` (consume policy)
+  - new tests
+- **Architecture-first answers:**
+  1. What does each `governance_class` (`hint_only` / `attention_only`
+     / `recall_allowed` / `strictly_governed`) authorise / forbid?
+  2. What does each `stability_class` (`volatile` / `normal` / `stable`
+     / `pinned`) buy at recall and at retention?
+- **Must verify:**
+  - `hint_only → no manifestation`; `attention_only → lens_entry`;
+    `recall_allowed → lens_entry + dialogue_nudge`;
+    `strictly_governed → all three including stance_bias`
+  - `stability_class` evolves `volatile → normal → stable` on cumulative
+    `support_events_count` thresholds (defaults 3 / 8);
+    `stable → pinned` only when `governance_class = strictly_governed`
+  - promotion ladder: `hint_only → attention_only` after
+    `support_events_count ≥ 3` with `contradiction_events_count = 0`;
+    `attention_only → recall_allowed` after `≥ 8`; `strictly_governed`
+    stays user-set; each promotion writes `path.governance_promoted`
+- **Return schema:** standard
+
+#### L2-C: `karma_events` three producers + Cat-I.2/I.3 → `HealthIssueGroup` + `PathGraphSnapshot` 11 fields decision + `mapping_revoked` producer
+
+- **Owner:** `typescript-pro` (orchestrator may split into two if the
+  scope feels large; prefer a single owner so decisions stay consistent)
+- **Write ownership:**
+  - `packages/core/src/dynamics-service.ts` (or
+    `karma-event-store.ts`) — three producers (`reuse_gain` from Cat-C
+    single-used loosening; `evidence_gain` from `EvidenceService.update`
+    when health goes `questionable → verified`; `supersede_penalty` from
+    `ConflictDetectionService` when an existing memory is superseded)
+  - `packages/soul/src/garden/auditor.ts` + new `HealthIssueGroup`
+    writers — Cat-I.2 OrphanRadar entries upsert into
+    `HealthIssueGroupRepo` grouped by `target_memory_id × cause_kind`;
+    Cat-I.3 aggregates `evidence_failure` into the same projection
+  - `packages/storage/src/repos/garden-data-ports.ts` — produce
+    `revoke_reason = 'mapping_revoked'` when an evidence ref is
+    rewritten to point at a different capsule
+  - `packages/protocol/src/soul/path-graph-snapshot.ts` (or equivalent)
+    — keep `total_active_paths` + `isolated_anchors`; for each of the
+    other 9 fields either ship a remove migration OR wire an Inspector
+    consumer (owner returns the per-field decision)
+  - migrations as needed
+- **Architecture-first answers:**
+  1. What does each `karma_events` kind represent
+     (`accept_gain` / `reject_penalty` / `reuse_gain` / `evidence_gain`
+     / `supersede_penalty`)?
+  2. For each of the 9 unused snapshot fields, what was it meant to
+     serve, and what's the closure (wire / remove)?
+- **Must verify:**
+  - each karma producer fires in its own scenario
+  - `HealthIssueGroup` rows appear after one Auditor pass over a
+    workspace with orphans + failed evidence
+  - `revoke_reason = 'mapping_revoked'` shows up for a re-anchored
+    evidence
+  - `PathGraphSnapshot` schema lines up with the per-field decision
+    (no unread fields after this lens)
+- **Return schema:** standard plus `decisions_taken` (the 9 snapshot
+  fields outcome list)
+
+**L2 orchestrator gate:** standard review-loop, then tag `v0.3.9-l2`.
+
+---
+
+### Lens L3 — Runtime control + governance loop closure
+
+**Goal:** trust loop closes end-to-end — recall payload carries
+`staged_warnings`, `soul.resolve` is reachable from every attached
+agent, Inspector Health Inbox renders aggregated entries, and **only
+then** the legacy SynthesisCapsule promotion is safe to retire.
+
+Closes Cat-A + Cat-C 5-bucket + Cat-E + Cat-H.5 completion +
+**Cat-H.2 retire as the final step**.
+
+**Four subagent task packages; dispatch in two waves.**
+
+#### Wave 1 (parallel)
+
+##### L3-A: Cat-A.1 `soul_recall` payload extension with `staged_warnings`
+
+- **Owner:** `typescript-pro`
+- **Write ownership:**
+  - `apps/core-daemon/src/mcp-memory-tool-handler.ts` (recall handler)
+  - `apps/core-daemon/src/mcp-memory-tool-catalog.ts` (tool description)
+  - `packages/protocol/src/recall-payload.ts` (or matching schema)
+  - new test
+- **Must verify:**
+  - each pointer can carry `staged_warnings: StagedWarning[]`
+  - each warning has `kind`, `severity`, `policy`, `summary`,
+    `resolution_options`
+  - field optional so older agents skip it
+- **Return schema:** standard
+
+##### L3-B: Cat-C.2 5-bucket usage telemetry split (server-side route)
+
+- **Owner:** `typescript-pro`
+- **Write ownership:**
+  - `apps/inspector/src/routes/recall-utilization.ts` (new daemon
+    route) — buckets `no_recall` / `empty_recall` /
+    `delivered_not_reported` / `reported_skipped_or_na` / `reported_used`
+  - new eval helper `packages/eval/src/utilization-buckets.ts` if
+    needed for reuse
+  - tests
+- **Forbidden paths:** the Inspector web UI for this bucket (L3-D owns
+  it)
+- **Must verify:**
+  - route returns per-workspace per-`agent_target` 5-bucket counts
+    summing to deliveries + `no_recall` from EventLog
+  - `single_used_anchor` telemetry event emitted on 1-used reports
+    (does NOT advance PathRelation counter)
+- **Return schema:** standard
+
+#### Wave 2 (after Wave 1 returns; parallel)
+
+##### L3-C: Cat-A.2 new MCP verb `soul.resolve` + Cat-A.3 `GovernancePolicy`
+
+- **Owner:** `typescript-pro`
+- **Write ownership:**
+  - `apps/core-daemon/src/mcp-memory-tool-catalog.ts` (register the 14th
+    verb)
+  - new handler `apps/core-daemon/src/mcp-memory-resolve-handler.ts`
+  - new `packages/core/src/resolution-service.ts` (typed dispatcher)
+  - new `packages/core/src/governance-policy.ts` (`classifyWarning`
+    returns `ask_now` / `apply_silently` / `track_only` /
+    `inspect_later`; per-turn `ask_now` budget)
+  - `packages/engine-gateway/src/provider/soul-tool-specs.ts`
+  - tests including end-to-end recall → staged_warning → soul.resolve
+    → apply
+- **Must verify:**
+  - each of the six resolutions (`confirm` / `reject` / `correct` /
+    `stale` / `defer` / `not_relevant`) routes correctly and emits the
+    typed audit event
+  - `defer` creates a `DeferredObligation` via the service wired in P1
+  - tool-spec snapshot reflects the new verb
+  - README + invariants prose flagged for L0 to update (stage the diff
+    but defer the final word to L0)
+- **Return schema:** standard
+
+##### L3-D: Cat-E.1 Inspector Health Inbox page + Cat-E.2 strictly_governed Proposal + Cat-H.5 completion (surface_identities-per-attach)
+
+- **Owner:** `react-specialist` + `typescript-pro` (orchestrator may
+  split into two subagents; prefer one owner who owns the contract
+  between route and page)
+- **Write ownership:**
+  - new `apps/inspector/web/src/pages/HealthInbox.tsx`
+  - new `apps/core-daemon/src/routes/health-inbox.ts` if not already
+    added by L2-C
+  - `apps/inspector/web/src/pages/MemoryBrowser.tsx` — add "Promote to
+    strictly_governed" button that posts a typed `path_relation`
+    Proposal (origination surface only)
+  - `apps/core-daemon/src/cli/attach.ts` (or matching MCP attach path)
+    — call `SurfaceService.createSurface` once per host attach so
+    `surface_identities` rows exist for `codex` / `mcp` / `claude_code`
+    per workspace
+  - tests
+- **Must verify:**
+  - Inspector page renders with at least 5 grouped entries against a
+    fresh DB seeded by tests
+  - clicking the promote button creates a `path_relation` Proposal
+    (not a direct mutation)
+  - daemon writes a `surface_identities` row on first attach per
+    `agent_target` per workspace
+- **Return schema:** standard
+
+#### Wave 3 (orchestrator-only) — Cat-H.2 retire as the final L3 step
+
+After Wave 1 + Wave 2 return cleanly AND the L3 review-loop reports
+verdict `clean`, the orchestrator finally lands the deferred retire:
+
+##### L3-E: Cat-H.2 SynthesisCapsule.promotion retire (only after `soul.resolve` proven)
+
+- **Orchestrator action** (not a subagent — small but cross-cutting):
+  drop the three promotion fields, remove the three SynthesisService
+  methods, drop the synthesis-promotion code path in `ProposalService`.
+  This now has a working replacement: `soul.resolve.confirm` triggers
+  `ClaimService.transitionLifecycle(draft → active)` directly, and
+  `defer` writes a `DeferredObligation`. Add the drop-columns migration
+  + corresponding index drop; verify all tests pass.
+- **Architecture-first answers (in commit message):**
+  1. What did `promotion_state` / `authority_round_count` /
+     `cooldown_until` serve in the old architecture?
+  2. Who serves the equivalent now? (`soul.resolve.confirm` writes the
+     audit event + claim transition; `soul.resolve.defer` writes the
+     obligation that replaces `cooldown_until`; the `authority_round_count`
+     read was redundant with `support_events_count` on the PathRelation
+     side)
+- **Must verify before commit:**
+  - `Garden compile → claim` flow still produces an `active` claim
+    via `soul.resolve.confirm` (end-to-end integration test added as
+    part of L3-C must cover this)
+  - no test depends on `promotion_state` anymore
+  - drop migration matches existing pattern (drop dependent indexes
+    before columns)
+
+**L3 orchestrator gate:** standard review-loop, then tag `v0.3.9-l3`.
+
+---
+
+### Lens L0 — Truth alignment + bench feedback + closeout
+
+**Goal:** docs match what the system actually does (not what it
+could); benchmarks act as diagnostic mirrors of L1 / L2 / L3 (per the
+user directive "不要为了测试的分数而盲目做内容"); release ready to
+merge. Closes Cat-D + Cat-J + the Cat-H.3 final decision + release
+artefacts.
+
+**Two subagent task packages; can run in parallel.**
+
+#### L0-A: Cat-D.1–6 data correctness + bench pre/post diff
+
+- **Owner:** `test-automator` (+ optional `sql-pro` for the cohort
+  metric)
+- **Write ownership:**
+  - `apps/bench-runner/src/locomo/runner.ts` (`evaluated_count`
+    denominator → `totalQa`)
+  - `packages/eval/src/diff.ts`
+  - `packages/eval/src/report.ts` (sample-size label cascade: `smoke`
+    ≤ 50 / `staged` 51-200 / `shard_merged` 201-499 / `full` ≥ 500)
+  - `docs/bench-history/README.md` +
+    `docs/bench-history/public/latest-baseline.json` + new sibling
+    `docs/bench-history/public/latest-baseline-embedding-on.json`
+  - new directory `docs/bench-history/public-pre-v0.3.9/` for Pass A
+    archives
+  - `docs/v0.3/v0.3.9/reports/v0.3.9-bench-diff.md` (filled per
+    category)
+  - `docs/v0.3/v0.3.8/reports/v0.3.8-closeout.md` retroactive truth-up
+- **Must verify:**
+  - LoCoMo bench rerun reports `evaluated_count ≈ totalQa`
+  - cross-question-100 rerun shows cohort attribution ≤ 50%
+  - existing 100/500 archives rerendered show `label = staged` not
+    `full`
+  - `latest-baseline.json` no longer points at a FAIL archive
+  - bench diff doc table filled for every row
+- **Return schema:** standard
+
+#### L0-B: Cat-J doc truth alignment + Cat-H.3 final decision + release-notes + closeout
+
+- **Owner:** `documentation-engineer`
+- **Write ownership:**
+  - `docs/handbook/runtime-status.md` (rewrite per 4-level readiness:
+    `schema_only` / `implementation_wired` / `live_event_proven` /
+    `agent_used`)
+  - `docs/handbook/invariants.md` §57-77 (D2 two-route governance
+    language)
+  - `docs/handbook/architecture.md` (low-trust draft + typed-resolution
+    chain prose)
+  - `README.md` (root project README — governance-route section + new
+    14-verb surface note)
+  - `docs/v0.3/v0.3.9/release-notes.md`
+  - `docs/v0.3/v0.3.9/reports/v0.3.9-closeout.md`
+  - **Cat-H.3 decision**: if L2 did not ship an upgrade-candidate
+    computer, this lens MUST write a closeout-deferred-condition
+    section naming the next release that closes the gap and keep the
+    5 fields on the schema. If L2 did ship the computer, this lens
+    removes the 5 fields via migration + records the cutover.
+- **Must verify:**
+  - doc walkthrough confirms no readiness level overstated
+  - release notes call out the three load-bearing decisions, the 11
+    categories executed (or deferred), and the new 14th MCP verb
+  - closeout names every Cat-G decision (per-field outcome)
+- **Return schema:** standard
+
+**L0 orchestrator gate:** standard review-loop. Final tag: **`v0.3.9`**
+(no suffix).
+
+---
+
+## 6. Main-thread orchestration discipline
+
+Per `feedback_subagent_dispatch_discipline` and
+`feedback_delegate_heavy_code_to_codex`:
+
+- The main thread is the **orchestrator**, not the implementer. Heavy
+  code lives in subagents.
+- Every dispatch carries the **task-package frame**: write ownership,
+  forbidden paths, architecture-first answers, must-verify list, stop
+  condition, return schema. The shape is fixed (see L1-A above).
+- Subagents return one message; the orchestrator does NOT message them
+  again. If a subagent returns blocked or unclean, the orchestrator
+  decides: re-dispatch a fresh subagent with the gap added, or land a
+  small orchestrator-side fix.
+- After every subagent batch, the orchestrator runs `rtk pnpm build`
+  and `rtk pnpm test` on the worktree before any commit.
+- After every lens the orchestrator runs the **review-loop**:
+  1. `Agent({subagent_type: "reviewer", ...})` — Claude lens
+  2. `Skill({skill: "codex:rescue", args: "adversarial review of ..."})`
+     — Codex lens
+  3. Findings under `.do-it/v0.3.9-<lens>-review/`
+  4. Orchestrator merges, applies fixes (main thread or follow-up
+     subagent), re-dispatches the same review-loop until verdict
+     `clean` on both lenses (`feedback_review_loop_until_clean`)
+- Tags landed by the orchestrator only after review-loop closes clean:
+  `v0.3.9-l1` → `v0.3.9-l2` → `v0.3.9-l3` → `v0.3.9`.
+
+### Comments discipline (the hook catches this anyway)
+
+Per `feedback_no_stage_history_comments` and the
+`do-it-comments-discipline` skill: comments may be `invariant:`,
+`see also:`, type annotations, anchors, or tool directives. **No**
+phase numbers, BL-XXX, `Cat-X.Y` markers, version markers, "before
+vX.Y", "removed in …", or other narrative. Every subagent task package
+inherits this; the orchestrator rejects any returned diff that
+violates.
+
+---
+
+## 7. Quick-restart pointer for the orchestrator
+
+After context compression the orchestrator should:
+
+1. `cat docs/v0.3/v0.3.9/plan.md` (this file).
+2. `git log --oneline v0.3.9-blocking-p0..HEAD` to see what landed
+   since P0.
+3. `cat .do-it/v0.3.9-l<N>-review/*.md` to load any open review
+   findings for the current lens.
+4. Pick the next lens that has no clean tag yet and dispatch its task
+   packages in parallel.
+5. Drive the review-loop to clean before moving on.
+
+---
+
+## 8. Source documents this plan integrates
+
+- `.do-it/findings/v0.3.8-live-data-portrait.md` (sections A through L)
+- `.do-it/findings/v0.3.9-root-cause-deep-dive/01-architecture-contract-vs-runtime.md`
+- `.do-it/findings/v0.3.9-root-cause-deep-dive/02-memory-pipeline-callpath.md`
+- `.do-it/findings/v0.3.9-root-cause-deep-dive/03-path-driven-behavior.md`
+- `.do-it/findings/v0.3.9-root-cause-deep-dive/04-governance-evidence-health.md`
+- `.do-it/findings/v0.3.9-root-cause-deep-dive/05-live-data-and-doc-truth.md`
+- `.do-it/findings/v0.3.9-claude/v0.3.8-schema-consumer-audit-memory-object.md`
+- `.do-it/findings/v0.3.9-claude/v0.3.8-schema-consumer-audit-governance-conflict.md`
+- `.do-it/findings/v0.3.9-claude/v0.3.8-schema-consumer-audit-plasticity-evolution.md`
+- `.do-it/findings/v0.3.9-claude/v0.3.8-schema-consumer-audit-synthesis-anchor.md`

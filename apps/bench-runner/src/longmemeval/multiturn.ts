@@ -2,6 +2,8 @@ import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveBenchRunnerVersion } from "../version.js";
+import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import {
   diffKpis,
   entrySlug,
@@ -83,7 +85,7 @@ export async function runLongMemEvalMultiturn(
   const window = questions.slice(offset, sliceEnd);
   const rounds = Math.max(1, opts.rounds ?? 3);
 
-  const alayaVersion = resolveAlayaVersion();
+  const alayaVersion = resolveBenchRunnerVersion();
   const commitSha7 = resolveCommitSha7();
   const runAt = new Date();
   const embeddingProviderLabel = resolveBenchEmbeddingProviderLabel(
@@ -104,6 +106,8 @@ export async function runLongMemEvalMultiturn(
       let seedTurnsTruncated = 0;
       let answerTurnsTruncated = 0;
       let seedCharsClipped = 0;
+      // see also: apps/bench-runner/src/harness/seed-rotation.ts
+      let seedIndexMt = 0;
 
       for (let si = 0; si < question.haystack_sessions.length; si++) {
         const session = question.haystack_sessions[si];
@@ -115,7 +119,10 @@ export async function runLongMemEvalMultiturn(
           if (turn === undefined) continue;
 
           const evidenceRef = `${question.question_id}-mt-s${si}-t${ti}`;
-          const seed = await daemon.proposeMemory(turn.content, evidenceRef);
+          const seed = await daemon.proposeMemory(turn.content, evidenceRef, {
+            objectKind: rotatingSeedObjectKind(seedIndexMt)
+          });
+          seedIndexMt += 1;
           if (seed.truncated) {
             seedTurnsTruncated++;
             seedCharsClipped += seed.charsClipped;
@@ -468,18 +475,7 @@ function truncateExcerpt(value: string): string {
   return value.length <= 500 ? value : `${value.slice(0, 497)}...`;
 }
 
-function resolveAlayaVersion(): string {
-  try {
-    const pkgPath = resolve(
-      dirname(fileURLToPath(import.meta.url)),
-      "../../../package.json"
-    );
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
-    return pkg.version;
-  } catch {
-    return "0.3.8";
-  }
-}
+// see also: apps/bench-runner/src/version.ts
 
 function resolveCommitSha7(): string {
   try {
