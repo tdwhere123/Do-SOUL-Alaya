@@ -39,6 +39,13 @@ export function createDaemonMcpMemoryToolHandler(input: {
   // and delivery scope from the trusted MCP call context before
   // dispatching to the service.
   readonly resolutionService: SoulResolveHandlerDependencies["resolutionService"];
+  // invariant: indirect scope check resolver. Reads a claim's
+  // source_object_refs so the resolve handler can authorise
+  // claim_form resolutions through the memory_entry rows that recall
+  // actually delivered.
+  // see also: apps/core-daemon/src/mcp-memory-resolve-handler.ts
+  //   assertDeliveryInScope
+  readonly claimSourceReader?: SoulResolveHandlerDependencies["claimSourceReader"];
 }) {
   const soulResolveHandler = createSoulResolveHandler({
     resolutionService: input.resolutionService,
@@ -56,7 +63,10 @@ export function createDaemonMcpMemoryToolHandler(input: {
           delivered_object_ids: delivery.delivered_object_ids
         };
       }
-    }
+    },
+    ...(input.claimSourceReader === undefined
+      ? {}
+      : { claimSourceReader: input.claimSourceReader })
   });
   return createMcpMemoryToolHandler({
     recallService: input.recallService,

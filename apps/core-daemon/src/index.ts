@@ -998,7 +998,13 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     proposalRepo,
     runtimeNotifier,
     attachSurfaceRegistrar,
-    resolutionService
+    resolutionService,
+    claimSourceReader: {
+      findSourceObjectRefs: async (targetObjectId: string) => {
+        const claim = await claimFormRepo.findById(targetObjectId);
+        return claim === null ? null : claim.source_object_refs;
+      }
+    }
   });
   recordStartupStep(startupSteps, "mcp-tooling");
 

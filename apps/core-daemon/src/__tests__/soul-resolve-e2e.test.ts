@@ -177,6 +177,12 @@ function createHarness(): E2EHarness {
     resolutionService,
     trustStateRecorder: {
       findDeliveryById: async (id) => deliveries.get(id) ?? null
+    },
+    claimSourceReader: {
+      findSourceObjectRefs: async (targetObjectId) => {
+        const claim = claims.get(targetObjectId);
+        return claim === undefined ? null : claim.source_object_refs;
+      }
     }
   });
 
@@ -193,11 +199,11 @@ function createHarness(): E2EHarness {
       recall: vi.fn(async () => ({
         candidates: [
           {
-            object_id: "claim-draft-1",
-            object_kind: "claim_form" as const,
+            object_id: "mem-source-1",
+            object_kind: "memory_entry" as const,
             activation_score: 0.9,
             relevance_score: 0.8,
-            content_preview: "draft claim awaiting confirmation",
+            content_preview: "memory backing a draft claim",
             token_estimate: 12,
             manifestation: "excerpt" as const,
             dimension: MemoryDimension.PROCEDURE,
@@ -208,7 +214,7 @@ function createHarness(): E2EHarness {
                 kind: "contradiction_pending" as const,
                 severity: "blocking" as const,
                 policy: "conflict_detection.v1",
-                summary: "Contradicts memory-42.",
+                summary: "Memory contradicts memory-42; draft claim-draft-1 stages it.",
                 resolution_options: [
                   "accept_pending",
                   "reject_pending",
@@ -330,7 +336,15 @@ function buildMemory(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
 describe("soul.recall -> staged_warning -> soul.resolve -> apply", () => {
   it("confirm path: garden-compiled draft claim becomes active via soul.resolve.confirm", async () => {
     const harness = createHarness();
-    harness.claims.set("claim-draft-1", buildClaim());
+    // invariant: recall delivers a memory_entry that backs a draft
+    // claim; the agent then resolves the claim through the indirect
+    // source_object_refs scope path. This is the production-realistic
+    // shape — RecallCandidate.object_kind is locked to "memory_entry".
+    harness.memories.set("mem-source-1", buildMemory({ object_id: "mem-source-1" }));
+    harness.claims.set(
+      "claim-draft-1",
+      buildClaim({ object_id: "claim-draft-1", source_object_refs: ["mem-source-1"] })
+    );
 
     const recallResult = await harness.handler.call({
       toolName: "soul.recall",
@@ -349,7 +363,7 @@ describe("soul.recall -> staged_warning -> soul.resolve -> apply", () => {
       readonly delivery_id: string;
       readonly results: readonly { readonly object_id: string; readonly staged_warnings?: unknown }[];
     };
-    expect(recallOutput.results[0]?.object_id).toBe("claim-draft-1");
+    expect(recallOutput.results[0]?.object_id).toBe("mem-source-1");
     expect(recallOutput.results[0]?.staged_warnings).toBeDefined();
 
     const resolveResult = await harness.handler.call({

@@ -35,6 +35,18 @@ export interface SoulResolveHandlerDependencies {
       readonly delivered_object_ids: readonly string[];
     }> | null>;
   };
+  // invariant: indirect scope check for claim_form resolutions. Recall
+  // delivers MemoryEntry rows; draft claim_form rows are not directly
+  // deliverable but are reachable through their source_object_refs.
+  // When target_object_id resolves to a claim_form and at least one of
+  // its source_object_refs is in delivered_object_ids, the agent has
+  // legitimate context to resolve the claim. Absent reader degrades to
+  // direct-membership-only.
+  // see also: packages/protocol/src/soul/recall-candidate.ts
+  //   (object_kind = "memory_entry")
+  readonly claimSourceReader?: {
+    findSourceObjectRefs(targetObjectId: string): Promise<readonly string[] | null>;
+  };
 }
 
 export class SoulResolveScopeError extends Error {
@@ -55,6 +67,7 @@ export function createSoulResolveHandler(deps: SoulResolveHandlerDependencies) {
       const request = SoulResolveRequestSchema.parse(rawArguments);
       await assertDeliveryInScope(
         deps.trustStateRecorder,
+        deps.claimSourceReader,
         request.delivery_id,
         request.target_object_id,
         context
@@ -91,6 +104,7 @@ export function createSoulResolveHandler(deps: SoulResolveHandlerDependencies) {
 
 async function assertDeliveryInScope(
   trustStateRecorder: SoulResolveHandlerDependencies["trustStateRecorder"],
+  claimSourceReader: SoulResolveHandlerDependencies["claimSourceReader"],
   deliveryId: string,
   targetObjectId: string,
   context: SoulResolveCallContext
@@ -116,10 +130,24 @@ async function assertDeliveryInScope(
   // actually delivered. Anything else is scope-confusion: a valid
   // delivery_id paired with an arbitrary target_object_id would let
   // the agent mutate workspace objects it never saw via recall.
-  if (!delivery.delivered_object_ids.includes(targetObjectId)) {
-    throw new SoulResolveScopeError(
-      "VALIDATION",
-      `target_object_id ${targetObjectId} was not in delivery ${deliveryId}`
-    );
+  if (delivery.delivered_object_ids.includes(targetObjectId)) {
+    return;
   }
+  // invariant: indirect scope path — recall delivers MemoryEntry rows,
+  // but a draft claim_form is reachable through its source_object_refs.
+  // If the target is a claim whose source memories intersect what was
+  // delivered, the agent has legitimate context to resolve it.
+  if (claimSourceReader !== undefined) {
+    const sourceRefs = await claimSourceReader.findSourceObjectRefs(targetObjectId);
+    if (sourceRefs !== null) {
+      const deliveredSet = new Set(delivery.delivered_object_ids);
+      if (sourceRefs.some((ref) => deliveredSet.has(ref))) {
+        return;
+      }
+    }
+  }
+  throw new SoulResolveScopeError(
+    "VALIDATION",
+    `target_object_id ${targetObjectId} was not in delivery ${deliveryId}`
+  );
 }
