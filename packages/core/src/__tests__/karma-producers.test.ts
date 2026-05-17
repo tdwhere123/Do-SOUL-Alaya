@@ -136,7 +136,7 @@ function createDynamicsHarness(memoryEntries: readonly MemoryEntry[]): {
   };
 }
 
-describe("karma producers L2-C", () => {
+describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () => {
   describe("reuse_gain", () => {
     it("emits reuse_gain with the canonical karma constant and bumps reinforcement_count", async () => {
       const { dynamics, entriesById, karmaEvents } = createDynamicsHarness([createMemoryEntry()]);
