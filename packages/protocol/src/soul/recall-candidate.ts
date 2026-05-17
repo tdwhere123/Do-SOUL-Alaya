@@ -9,6 +9,7 @@ import {
 import { ManifestationStateSchema, MemoryDimensionSchema } from "./memory-entry.js";
 import { ScopeClassSchema } from "./object-kind.js";
 import { ActivationWeightsSchema } from "./recall-policy.js";
+import { StagedWarningArraySchema } from "./staged-warning.js";
 
 const recallOriginPlaneValues = ["workspace_local", "global"] as const;
 
@@ -74,7 +75,15 @@ export const RecallCandidateSchema = z
     score_factors: RecallScoreFactorsSchema.optional(),
     budget_state: RecallBudgetStateSchema.optional(),
     pending_incomplete: z.boolean().optional(),
-    unfinishedness_bias: UnfinishednessBiasSchema.optional()
+    unfinishedness_bias: UnfinishednessBiasSchema.optional(),
+    // invariant: optional governance annotations attached when the row
+    // is staged (low confidence, contradiction, supersede candidate,
+    // missing evidence, or policy violation). Consumed by both the
+    // attached agent's stop-time decision (via soul.resolve) and the
+    // Inspector Health Inbox. Absent on rows the producer judges
+    // safe to cite without warning.
+    // see also: staged-warning.ts (schema)
+    staged_warnings: StagedWarningArraySchema.optional()
   })
   .strict()
   .readonly();

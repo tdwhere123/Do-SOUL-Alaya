@@ -13,7 +13,7 @@ export function buildMemorySearchResult(
   index: number,
   usedTokensBeforeCandidate: number
 ): MemorySearchResult {
-  return {
+  const base: MemorySearchResult = {
     object_id: candidate.object_id,
     object_kind: candidate.object_kind,
     relevance_score: candidate.relevance_score,
@@ -24,6 +24,13 @@ export function buildMemorySearchResult(
     score_factors: candidate.score_factors ?? buildScoreFactors(candidate),
     budget_state: candidate.budget_state ?? buildBudgetState(candidate, policy, index, usedTokensBeforeCandidate)
   };
+  // Forward governance warnings only when the producer attached any.
+  // Older candidates without the field stay omitted so the public
+  // payload remains additive.
+  if (candidate.staged_warnings !== undefined && candidate.staged_warnings.length > 0) {
+    return { ...base, staged_warnings: candidate.staged_warnings };
+  }
+  return base;
 }
 
 export function buildRecallStrategyMix(

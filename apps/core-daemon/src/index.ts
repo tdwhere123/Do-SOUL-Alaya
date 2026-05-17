@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import {
   ComputeProviderPriority,
   HealthEventKind,
+  RecallContextEventType,
   type RuntimeGardenComputeConfig
 } from "@do-soul/alaya-protocol";
 import {
@@ -166,6 +167,10 @@ import {
   derivePrincipalCodingAvailability
 } from "./services/principal-coding-availability.js";
 import { createRecallUtilizationService } from "./services/recall-utilization-service.js";
+import {
+  buildSingleUsedAnchorPayload,
+  type SingleUsedAnchorTelemetryEmitter
+} from "./routes/recall-utilization.js";
 import { createSoulApprovalService } from "./services/soul-approval-service.js";
 import { SoulTopologyAuditService } from "./services/soul-topology-audit-service.js";
 import { SqliteWorkspaceEngineConfigRepo } from "./services/workspace-engine-config-repo.js";
@@ -582,6 +587,32 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     }
   };
   const recallUtilizationService = createRecallUtilizationService({ eventLogRepo });
+  const singleUsedAnchorEmitter: SingleUsedAnchorTelemetryEmitter = {
+    async emit(input) {
+      const event = {
+        event_type: RecallContextEventType.SOUL_SINGLE_USED_ANCHOR,
+        entity_type: "context_delivery",
+        entity_id: input.deliveryId,
+        workspace_id: input.workspaceId,
+        run_id: input.runId,
+        caused_by: input.agentTarget,
+        payload_json: buildSingleUsedAnchorPayload({
+          deliveryId: input.deliveryId,
+          sessionId: input.sessionId,
+          runId: input.runId,
+          agentTarget: input.agentTarget,
+          workspaceId: input.workspaceId,
+          occurredAt: input.occurredAt,
+          usedAnchorObjectId: null
+        })
+      } as const;
+      try {
+        await eventPublisher.appendManyWithMutation([event], () => undefined);
+      } catch {
+        // invariant: telemetry emission never propagates failure to the route.
+      }
+    }
+  };
   const recallService = new RecallService({
     memoryRepo: memoryEntryRepo,
     slotRepo,
@@ -985,6 +1016,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     arbitrationService,
     recallService,
     recallUtilizationService,
+    singleUsedAnchorEmitter,
     taskSurfaceBuilder,
     synthesisService,
     claimService,

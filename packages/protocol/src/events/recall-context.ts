@@ -6,7 +6,8 @@ const recallContextEventTypeValues = [
   "soul.recall.completed",
   "soul.context_lens.assembled",
   "soul.recall.delivered",
-  "soul.context_usage.reported"
+  "soul.context_usage.reported",
+  "soul.single_used_anchor"
 ] as const;
 
 export const RecallContextEventType = {
@@ -14,7 +15,12 @@ export const RecallContextEventType = {
   SOUL_RECALL_COMPLETED: "soul.recall.completed",
   SOUL_CONTEXT_LENS_ASSEMBLED: "soul.context_lens.assembled",
   SOUL_RECALL_DELIVERED: "soul.recall.delivered",
-  SOUL_CONTEXT_USAGE_REPORTED: "soul.context_usage.reported"
+  SOUL_CONTEXT_USAGE_REPORTED: "soul.context_usage.reported",
+  // invariant: this event is a passive telemetry signal; emitters MUST NOT
+  // advance PathRelation counters from this code path. PathPlasticityService
+  // owns counter advancement; this signal is read by recall-utilization
+  // bucket consumers and the karma `reuse_gain` producer.
+  SOUL_SINGLE_USED_ANCHOR: "soul.single_used_anchor"
 } as const;
 
 export const RecallContextEventTypeSchema = z.enum(recallContextEventTypeValues);
@@ -85,12 +91,29 @@ export const SoulContextUsageReportedPayloadSchema = z
   })
   .readonly();
 
+// see also: apps/core-daemon/src/routes/recall-utilization.ts — the
+// recall-utilization route emits this signal when it observes a usage
+// report whose linked delivery carried exactly one pointer (the reuse
+// signal the `reuse_gain` karma producer keys on).
+export const SoulSingleUsedAnchorPayloadSchema = z
+  .object({
+    delivery_id: NonEmptyStringSchema,
+    session_id: NonEmptyStringSchema,
+    run_id: NonEmptyStringSchema.nullable(),
+    agent_target: NonEmptyStringSchema,
+    used_anchor_object_id: NonEmptyStringSchema.nullable(),
+    workspace_id: NonEmptyStringSchema,
+    occurred_at: IsoDatetimeStringSchema
+  })
+  .readonly();
+
 const recallContextPayloadSchemas = {
   [RecallContextEventType.SOUL_TASK_SURFACE_CREATED]: SoulTaskSurfaceCreatedPayloadSchema,
   [RecallContextEventType.SOUL_RECALL_COMPLETED]: SoulRecallCompletedPayloadSchema,
   [RecallContextEventType.SOUL_CONTEXT_LENS_ASSEMBLED]: SoulContextLensAssembledPayloadSchema,
   [RecallContextEventType.SOUL_RECALL_DELIVERED]: SoulRecallDeliveredPayloadSchema,
-  [RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED]: SoulContextUsageReportedPayloadSchema
+  [RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED]: SoulContextUsageReportedPayloadSchema,
+  [RecallContextEventType.SOUL_SINGLE_USED_ANCHOR]: SoulSingleUsedAnchorPayloadSchema
 } as const;
 
 export function createRecallContextEventObjectSchema<T extends keyof typeof recallContextPayloadSchemas>(
@@ -120,12 +143,17 @@ const SoulContextUsageReportedEventObjectSchema = createRecallContextEventObject
   RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
   SoulContextUsageReportedPayloadSchema
 );
+const SoulSingleUsedAnchorEventObjectSchema = createRecallContextEventObjectSchema(
+  RecallContextEventType.SOUL_SINGLE_USED_ANCHOR,
+  SoulSingleUsedAnchorPayloadSchema
+);
 
 export const SoulTaskSurfaceCreatedEventSchema = SoulTaskSurfaceCreatedEventObjectSchema.readonly();
 export const SoulRecallCompletedEventSchema = SoulRecallCompletedEventObjectSchema.readonly();
 export const SoulContextLensAssembledEventSchema = SoulContextLensAssembledEventObjectSchema.readonly();
 export const SoulRecallDeliveredEventSchema = SoulRecallDeliveredEventObjectSchema.readonly();
 export const SoulContextUsageReportedEventSchema = SoulContextUsageReportedEventObjectSchema.readonly();
+export const SoulSingleUsedAnchorEventSchema = SoulSingleUsedAnchorEventObjectSchema.readonly();
 
 export const RecallContextEventUnionSchema = z
   .discriminatedUnion("type", [
@@ -133,7 +161,8 @@ export const RecallContextEventUnionSchema = z
     SoulRecallCompletedEventObjectSchema,
     SoulContextLensAssembledEventObjectSchema,
     SoulRecallDeliveredEventObjectSchema,
-    SoulContextUsageReportedEventObjectSchema
+    SoulContextUsageReportedEventObjectSchema,
+    SoulSingleUsedAnchorEventObjectSchema
   ])
   .readonly();
 

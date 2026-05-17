@@ -18,6 +18,7 @@ export * from "./soul/factual-policy-boundary.js";
 export * from "./soul/memory-constants.js";
 export * from "./soul/karma-event.js";
 export * from "./soul/task-object-surface.js";
+export * from "./soul/staged-warning.js";
 export * from "./soul/recall-candidate.js";
 export * from "./soul/recall-policy.js";
 export * from "./soul/embedding-status.js";

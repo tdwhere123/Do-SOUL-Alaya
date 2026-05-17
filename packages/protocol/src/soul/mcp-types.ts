@@ -28,6 +28,7 @@ import {
   RecallBudgetStateSchema,
   RecallScoreFactorsSchema
 } from "./recall-candidate.js";
+import { StagedWarningArraySchema } from "./staged-warning.js";
 
 const GARDEN_COMPLETE_CANDIDATE_SIGNAL_MAX = 64;
 const GARDEN_COMPLETE_EXTRACTED_PROPOSAL_MAX = 32;
@@ -60,7 +61,14 @@ export const MemorySearchResultSchema = z
     selection_reason: BoundedReasonSchema,
     source_channels: z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
     score_factors: RecallScoreFactorsSchema,
-    budget_state: RecallBudgetStateSchema
+    budget_state: RecallBudgetStateSchema,
+    // invariant: optional governance warnings forwarded from the
+    // RecallCandidate. Older agents that do not understand the field
+    // simply skip it; soul.resolve-aware agents and the Inspector
+    // Health Inbox branch on the listed kind / severity / policy.
+    // see also: staged-warning.ts (schema),
+    // recall-candidate.ts (producer-side field).
+    staged_warnings: StagedWarningArraySchema.optional()
   })
   .readonly();
 

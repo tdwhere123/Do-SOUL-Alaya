@@ -190,6 +190,93 @@ describe("mcp memory tool handler", () => {
     );
   });
 
+  it("forwards staged_warnings from recall candidates onto the public result", async () => {
+    const deps = createDeps();
+    deps.recallService.recall = vi.fn(async () => ({
+      candidates: [
+        {
+          object_id: "mem1",
+          object_kind: "memory_entry" as const,
+          activation_score: 0.9,
+          relevance_score: 0.8,
+          content_preview: "deployment rules",
+          token_estimate: 12,
+          manifestation: "excerpt" as const,
+          dimension: MemoryDimension.PROCEDURE,
+          scope_class: ScopeClass.PROJECT,
+          origin_plane: "workspace_local" as const,
+          staged_warnings: [
+            {
+              kind: "contradiction_pending" as const,
+              severity: "blocking" as const,
+              policy: "conflict_detection.v1",
+              summary: "Contradicts memory-42.",
+              resolution_options: ["accept_pending", "reject_pending", "escalate_human"] as const
+            }
+          ]
+        }
+      ],
+      total_scanned: 1,
+      coarse_filter_count: 1,
+      fine_assessment_count: 1
+    })) as typeof deps.recallService.recall;
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const result = await handler.call({
+      toolName: "soul.recall",
+      arguments: {
+        query: "deployment rules",
+        scope_class: null,
+        dimension: null,
+        domain_tags: null,
+        max_results: 3
+      },
+      context
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    const output = result.output as { readonly results: ReadonlyArray<Record<string, unknown>> };
+    expect(output.results).toHaveLength(1);
+    expect(output.results[0]).toMatchObject({
+      object_id: "mem1",
+      staged_warnings: [
+        {
+          kind: "contradiction_pending",
+          severity: "blocking",
+          policy: "conflict_detection.v1",
+          resolution_options: ["accept_pending", "reject_pending", "escalate_human"]
+        }
+      ]
+    });
+  });
+
+  it("omits staged_warnings on the public result when the recall candidate has none", async () => {
+    const deps = createDeps();
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const result = await handler.call({
+      toolName: "soul.recall",
+      arguments: {
+        query: "deployment rules",
+        scope_class: null,
+        dimension: null,
+        domain_tags: null,
+        max_results: 3
+      },
+      context
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    const output = result.output as { readonly results: ReadonlyArray<Record<string, unknown>> };
+    expect(output.results[0]?.staged_warnings).toBeUndefined();
+  });
+
   it("prefers cascade degradation over explainability partial degradation", async () => {
     const deps = createDeps();
     deps.recallService.recall = vi.fn(async () => ({

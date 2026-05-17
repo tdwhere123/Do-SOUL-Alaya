@@ -34,7 +34,7 @@ soul:mcp-types.ts#GardenListPendingTasksResponseSchema(tasks)#5bc7339
 soul:mcp-types.ts#GardenMcpWorkerRoleSchema()#db60c46|enum=auditor|host_worker|janitor|librarian
 soul:mcp-types.ts#GardenPendingTaskSnapshotSchema(created_at,kind,payload,role,task_id)#f545860
 soul:mcp-types.ts#GardenTaskResultEnvelopeSchema(candidate_signals,extracted_proposals,notes)#ae1b9c4
-soul:mcp-types.ts#MemorySearchResultSchema(budget_state,content_preview,evidence_pointers,object_id,object_kind,relevance_score,score_factors,selection_reason,source_channels)#608ed2a
+soul:mcp-types.ts#MemorySearchResultSchema(budget_state,content_preview,evidence_pointers,object_id,object_kind,relevance_score,score_factors,selection_reason,source_channels,staged_warnings)#4366701
 soul:mcp-types.ts#RecallTimeFieldSchema()#8864eb5|enum=created_at|last_used_at
 soul:mcp-types.ts#SoulApplyOverrideRequestSchema(correction,priority,target_object)#7bb9146
 soul:mcp-types.ts#SoulApplyOverrideResponseSchema(override_id,status)#2f0822a
@@ -52,7 +52,7 @@ soul:mcp-types.ts#SoulListPendingProposalsRequestSchema(limit,since)#f6ed9a7
 soul:mcp-types.ts#SoulListPendingProposalsResponseSchema(proposals,total_count)#887900d
 soul:mcp-types.ts#SoulMemorySearchDegradationReasonSchema()#a8fdf75|enum=cold_cascade_engaged|recall_explainability_partial|warm_cascade_engaged
 soul:mcp-types.ts#SoulMemorySearchRequestSchema(dimension,domain_tags,host_context,max_results,query,recent_turn,scope_class,since,time_field,until)#1dd1f43
-soul:mcp-types.ts#SoulMemorySearchResponseSchema(degradation_reason,delivery_id,results,strategy_mix,total_count)#490f5be
+soul:mcp-types.ts#SoulMemorySearchResponseSchema(degradation_reason,delivery_id,results,strategy_mix,total_count)#b508b58
 soul:mcp-types.ts#SoulOpenPointerContentSchema(content,domain_tags,evidence_refs,excerpt,gist,object_id,object_kind,schema_version)#fcdde3f
 soul:mcp-types.ts#SoulOpenPointerRequestSchema(object_id)#a961e8f
 soul:mcp-types.ts#SoulOpenPointerResponseSchema(content,object_id,object_kind)#7eb611f
@@ -157,6 +157,7 @@ evt:recall-context.ts#SoulContextLensAssembledPayloadSchema(lens_entry_count,occ
 evt:recall-context.ts#SoulContextUsageReportedPayloadSchema(agent_target,delivery_id,occurred_at,run_id,session_id,usage_state,workspace_id)#afc5c15
 evt:recall-context.ts#SoulRecallCompletedPayloadSchema(coarse_filter_count,fine_assessment_count,node_strategy,occurred_at,task_surface_ref,total_scanned,workspace_id)#2783db6
 evt:recall-context.ts#SoulRecallDeliveredPayloadSchema(agent_target,delivery_id,latency_ms,occurred_at,pointer_count,query_hash,run_id,session_id,workspace_id)#7b4182e
+evt:recall-context.ts#SoulSingleUsedAnchorPayloadSchema(agent_target,delivery_id,occurred_at,run_id,session_id,used_anchor_object_id,workspace_id)#880383b
 evt:recall-context.ts#SoulTaskSurfaceCreatedPayloadSchema(display_name,expires_at,node_strategy,object_kind,occurred_at,run_id,runtime_id,surface_kind,workspace_id)#79bba55
 evt:runtime-governance.ts#BootstrappingPathsPlantedPayloadSchema(paths_planted,planted_at,record_id,template_ids,workspace_id)#c8c34e6
 evt:runtime-governance.ts#CanonicalizationAliasResolvedPayloadSchema(alias,canonical,domain,language,resolved_at)#31c395c

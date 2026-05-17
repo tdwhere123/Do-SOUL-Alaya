@@ -50,3 +50,15 @@ export {
 } from "./wilson-ci.js";
 
 export { runCli } from "./cli.js";
+
+export {
+  UtilizationBucketDeliverySchema,
+  UtilizationBucketReportSchema,
+  computeUtilizationBuckets,
+  rollUpUtilizationBucketsByCohort,
+  listSingleUsedAnchorDeliveries,
+  type UtilizationBucketDelivery,
+  type UtilizationBucketReport,
+  type UtilizationBucketCounts,
+  type UtilizationBucketCohortRow
+} from "./utilization-buckets.js";
