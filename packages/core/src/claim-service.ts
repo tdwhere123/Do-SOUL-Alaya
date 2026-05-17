@@ -271,6 +271,21 @@ export class ClaimService {
     deferredNotificationEvents?: EventLogEntry[]
   ): Promise<Readonly<ClaimForm>> {
     const occurredAt = this.now();
+    // invariant: CAS-guarded state mutation runs BEFORE the lifecycle
+    // audit append. Concurrent confirm/reject races against the same
+    // starting state: the loser fails the CAS check and exits before
+    // emitting an audit row that does not match a real state change.
+    // The winner's audit row reflects a transition that actually
+    // happened durably.
+    // see also: packages/storage/src/repos/claim-form-repo.ts
+    //   updateStatusStatement (WHERE claim_status = ?)
+    const updated = await this.dependencies.claimFormRepo.updateStatus(
+      existing.object_id,
+      newState,
+      occurredAt,
+      existing.claim_status
+    );
+
     const event = await this.dependencies.eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_CLAIM_LIFECYCLE_CHANGED,
       entity_type: "claim_form",
@@ -291,13 +306,6 @@ export class ClaimService {
         occurred_at: occurredAt
       })
     });
-
-    const updated = await this.dependencies.claimFormRepo.updateStatus(
-      existing.object_id,
-      newState,
-      occurredAt,
-      existing.claim_status
-    );
 
     if (deferredNotificationEvents !== undefined) {
       deferredNotificationEvents.push(event);
