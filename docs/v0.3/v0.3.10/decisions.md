@@ -1,0 +1,748 @@
+# v0.3.10 Load-Bearing Decisions
+
+> 12 个 load-bearing decisions。D1+D2+D5+D6 是用户在 2026-05-17 多轮对话中
+> 拍板；D3+D4 是主线程综合判断（用户授权）；D7-D12 是用户与主线程多轮对答
+> 后定型。每个决定记录：选择 / 拒绝的备选 / 证据 / 风险 / 不可逆性。
+>
+> 一个未定项（cold-mode latch 修复方向）等 subagent handbook 考古返回后
+> 在 plan.md 敲定，不进 D 列表。
+
+---
+
+## D1 — KPI 目标：各数据集 stretch 均 ≥ 90%
+
+### Decision
+
+v0.3.10 的 KPI 矩阵分三档（must / should / stretch），见 `kpi-targets.md`。
+**用户原话："实际上我是觉得各个 benchmark 我都想跑到很高的分数"** —— stretch
+统一定为 90%，不再 LongMemEval 90% / LoCoMo 65% 分级。
+
+release 必须达到的硬线（must）：
+
+- LongMemEval-S 100 R@5 (embedding-on): **must ≥ 60%**, should ≥ 80%, stretch ≥ 90%
+- LongMemEval-S 100 R@5 (embedding-off): **must ≥ 40%**, should ≥ 60%, stretch ≥ 80%
+- LongMemEval-S 500 R@5 (embedding-on): **must ≥ 50%**, should ≥ 70%, stretch ≥ 85%
+- LoCoMo full R@5 (embedding-on): **must ≥ 40%**, should ≥ 60%, stretch ≥ 80%
+  - LoCoMo stretch 写 80% 而非 90% 的原因见下 "Risk"
+
+### Rationale
+
+用户在多轮对话中三度强调：
+1. "全部都得做完" (scope 决定)
+2. "目标 90%" (LongMemEval target)
+3. "各个 benchmark 我都想跑到很高的分数" (跨数据集 target)
+
+stretch 是 release-ambition 不是 release-commitment：未达 stretch 不阻断
+release（写进 release notes 列入 v0.3.11 backlog），但走到 must 以下必须
+推迟。
+
+### Rejected alternatives
+
+- **stretch LongMemEval 90% + LoCoMo 65%（原方案）**：违反用户"各个 benchmark
+  跑高分"的纠正。
+- **must = 30% 全数据集**：放弃 path traversal + conditional factor 修复带来的
+  ranking lever。
+- **stretch = 90% 全部 + must = 80% 全部**：too aggressive；LoCoMo 80% must 在
+  v0.3.10 不靠 cross-encoder 极难达到。
+
+### Risk
+
+- **LoCoMo R@5 90% 在 v0.3.10 极难达到**。LoCoMo 是 multi-turn dialog
+  reasoning（业界 SOTA 量级 R@5 = 60-70%）。v0.3.10 单靠 ranking + path
+  system + conditional factor 修复（不引入 cross-encoder rerank 模型），
+  实测预估 50-70%。**Stretch 90% 是方向**，v0.3.10 不承诺达到；release notes
+  必须明文说明 "LoCoMo 90% 需 cross-encoder（v0.4 候选）"。stretch 写 80% 而非
+  90% 反映"v0.3.10 ranker-only fix 的诚实上限"。
+- **80% / 60% should 也是宽松估算**。Phase 0 weight sweep 后会知道更准确。
+- **数据集偏好风险**：optimizing for LongMemEval 可能让 LoCoMo 下降。M3
+  双数据集对照必须每轮 sweep 都跑。
+
+### Reversibility
+
+数字写在 `kpi-targets.md` 而非 schema，可随 bench 调整。但
+**stretch ≠ release 阻断线** 这个 decision 本身不可逆。
+
+### Evidence
+
+- 用户 2026-05-17 turn："各个 benchmark 我都想跑到很高的分数"
+- `.do-it/findings/v0.3.10/01-root-cause.md` Layer 1 数据表（170 gold / 68
+  delivered / 67 在 rank 6-10）
+- LoCoMo 业界 SOTA 评估（公开论文，无 inline 引用）
+
+---
+
+## D2 — 显式 rerank stage 进 v0.3.10（不是 v0.4）
+
+### Decision
+
+在 candidate fusion 与 top-K cut 之间加 **显式 rerank stage**（Cat-F）。本释放
+只实现 **`linear_fusion` strategy**（per-signal 权重融合，无 ML cross-encoder），
+但留 `RerankStrategy` enum + hook 给 v0.4 的 `cross_encoder` strategy。
+
+具体落点：
+
+```
+candidate gathering → fusion stage [NEW] → rerank stage [NEW] → top-K cut
+```
+
+- fusion stage：把当前散在 `computeEffectiveScoreDetails` 里的 9 项 signal
+  显式 normalize 到 `[0,1]` + 显式 weights table + `signal_contributions[]` 输出
+- rerank stage：取 fusion score 后用 `RerankStrategy.linear_fusion`（默认）做
+  最终排序——**保证 top-K 全局 score 单调**（修 Codex non_monotonic=70/100）
+- `plane_winning_admission` 改为 "对 fused score 贡献最大的 signal"（修 SG-5）
+- diagnostics sidecar schema 扩展
+
+### Rationale
+
+4-lens 第一轮判 P4 reranker "out-of-scope / v0.4 候选"，理由是 (a) 1-2 release
+工作量；(b) 让 v0.3.9 cohort attribution 立刻作废；(c) v0.3.10 必须 narrow。
+
+**用户三个决定推翻了三个理由**：
+1. "全部都得做完" + "项目未公开" → scope 不再 narrow，schema 改动无成本
+2. "目标 90%" → 不做 reranker 数学上不可能（详 D1 算术分析）
+3. Codex 自己强调 `non_monotonic=70/100` 本质上就是 admission append 无最终
+   global sort 的直接后果——修这个等于在最小成本下做 reranker stage
+
+**不引入 cross-encoder 模型**：cross-encoder 选型（BGE-reranker / Cohere /
+Voyage / 自训练）独立工作量大；引入 latency 二次问题；linear_fusion 已能解决
+non_monotonic 主因；cross-encoder 是从 80% R@5 推到 90% R@5 的杠杆，v0.3.10
+实际碰到上限再做。
+
+### Rejected alternatives
+
+- P4 推到 v0.4 (4-lens 原判): 用户三决定已推翻
+- 直接做 cross-encoder rerank: v0.3.10 sprawl + 选型独立工作; 推 v0.4
+- 不分 fusion / rerank 两 stage 只加全局 sort: 能修 non_monotonic 但拿不到
+  "显式 contribution attribution" 副产品
+
+### Risk
+
+- fusion 公式 hand-tune 仍是手工活：linear weights 需 Cat-M1 weight sweep 确定
+- diagnostics schema 改 + Inspector trend panel 改：v0.3.9 刚卖 cohort
+  attribution 作 release-grade metric。**项目未公开，没有外部消费者**
+- 中途 degradation 风险：必须有 controlled replay (M3) 保证退化方向不颠倒
+
+### Reversibility
+
+中。新 stage 是显式分支，可关 (`RerankStrategy.legacy` enum 留 escape hatch，
+7 天后 remove)。但一旦上线运行，相关 metrics / tests / Inspector 都依赖新
+shape，回退等于 v0.3.11。
+
+### Evidence
+
+- `.do-it/findings/v0.3.10/_drafts/lens-B-architecture-cost.md` 方向 Y
+- `.do-it/findings/v0.3.10/v0.3.9-benchmark-regression-and-architecture-review.md`
+  B1 (non_monotonic=70/100)
+- Codex I1 + I2
+
+---
+
+## D3 — Embedding opt-in 不变，bench 双跑必须，§18 prose 不动（主线程决定）
+
+### Decision
+
+**用户原话只说**："嵌入式的都要跑的，额度非常够用。不用担心"——这是要 bench
+**双跑 on/off** 测试覆盖完整，没说 daemon default 改、也没说 read-side
+first-class。
+
+主线程判断（用户在 2026-05-17 turn 明确"接受"）：
+
+- daemon embedding 默认仍 **opt-in**（保 v0.3.8 状态）
+- bench 双跑 on / off 是 **release-grade must**（Cat-E5）
+- `invariants.md §18` "embedding is recall supplement only" prose **不动**
+- Cat-E 大幅简化：只保 E5 (bench 双跑) + E2 (latency 监控，不退化但不强求
+  ≤300ms)
+- 删除原 Cat-E1 (default-on) / E3 (first-class fusion signal) / E4 (强 timeout)
+
+### Rationale
+
+1. §18 是 invariant 不轻易动
+2. 用户原话只说测试要双跑，没要求 daemon 默认开
+3. 90% R@5 stretch 动力应该来自 **path system 真活 + conditional factor +
+   mandatoryCap 独立 channel**，让"修对 ranking 就能到 90%" 成为可证伪假设；
+   不靠 embedding 蒙分
+4. WSL2 无 keychain onboarding 痛点不放大 (`project_local_alaya_env`)
+5. embedding 仍可作 ranking signal（保现状），fusion stage 把 embedding_score
+   当 signal 之一但 weight 不主导
+
+### Rejected alternatives
+
+- embedding daemon default-on + read-side first-class（主线程之前误读用户决定的
+  版本）：用户明确 "我做的啥决策"，纠错
+- embedding 完全砍掉：用户明确 bench 要双跑
+
+### Risk
+
+- 90% R@5 stretch 失去 embedding 蒙分这个 fallback → 必须靠 ranker 修对。
+  如果 Phase 2 跑出来仍达不到 should，user 可能回头重启 D3
+- bench archive 翻倍存储 + 跑时长（已在 Cat-B 计入）
+
+### Reversibility
+
+高。改 default config 一行回退到 default-on（如果 Phase 2 后需要）。
+
+### Evidence
+
+- 用户 2026-05-17 turn："2.嵌入式的都要跑的，额度非常够用。不用担心"
+- 用户后续 turn："embedding read-side first-class这个是我做的啥决策？" → 纠错
+- 用户后续 turn："接受" (主线程提出 D3 = opt-in 不变 + bench 双跑 + §18 不动)
+- `docs/handbook/invariants.md` §18
+
+---
+
+## D4 — release notes 明文承认 v0.3.9 引爆 read-side ranker bias（用户决定）
+
+### Decision
+
+`docs/v0.3/v0.3.10/release-notes.md` 必须包含一段明文承认：
+
+> v0.3.9 的三层 trust-loop 修复（producer-side dimension diversification +
+> structure registry activation + runtime control loop closure）触发了 v0.3.0
+> 时代遗留的 read-side ranker bias 的暴露。pre-v0.3.9 的 R@5=77% 是建立在
+> uniform `fact` workspace artifact 之上的伪信号；v0.3.9 producer 正常化后
+> R@5 立刻跌到 1.0%（embedding-off）/ 17%（embedding-on）。问题是 ranking，
+> 不是 retrieval——R@10 = 63% 证明 gold 一直在召回池里，只是被排到了 rank 6-10。
+> v0.3.10 正面重做 RecallService 的打分公式与 plane admission 模型来修复这个
+> 多年隐藏的 bias。
+
+不允许：软化为 "continued recall quality improvements"、把退化归因为
+"realistic 场景下的诚实数字"、隐去 LongMemEval / LoCoMo 具体退化数据。
+
+### Rationale (用户决定 + project memory)
+
+用户原话："1.承认问题"。
+
+吻合 project memory：
+- `feedback_readme_honesty`：宁可 400-500 行也别精简；不允许弱化缺口
+- `feedback_no_backlog`：review 发现的问题必须当场出根因+切实修复方案
+
+### Risk
+
+- 项目尚未公开，narrative 控制窗口在未来。release notes 一旦写明就是历史记录
+- 内部团队（如有 contributor）看到 1% R@5 会有第一印象冲击 → release notes
+  必须配套讲清完整图景
+
+### Reversibility
+
+不可逆。**这正是 D4 的价值**：把 "v0.3.9 引爆 v0.3.0 ranker bias" 锁进 release
+record，下一次同类回归立刻可识别。
+
+### Evidence
+
+- 用户 2026-05-17 turn："1.承认问题"
+- `feedback_readme_honesty` + `feedback_no_backlog` (memory)
+
+---
+
+## D5 — Wide scope（9 Cat / ~5-6 周），不再 narrow v0.3.10 = 1 cat（用户决定）
+
+### Decision
+
+v0.3.10 接受 9 个 Cat：M / R / F / **P (新)** / E (简化) / G / A / D / B
+（详 `plan.md`）。Phase 化执行（4 phase / ~5-6 周）。每个 Cat 独立 verify、
+独立 review-loop。
+
+### Rationale
+
+用户原话："3.全部都得做完。这个非常重要！"
+
+加 Cat-P 是因为 v0.3.10 设计深化后（D7 + D8 + D9 + D10），path-related 工作
+（gate 取消 / fusion signal / time_concern producer / mandatoryCap 独立
+channel 实现）足以独立成一个 Cat。
+
+### Rejected alternatives
+
+- narrow = 1 cat 仅 Cat-R: 用户决定推翻
+- v0.3.10 = 全部 + cross-encoder: cross-encoder 留 v0.4
+- v0.3.10 = full + sprawl 11+ cat: 9 Cat 已经接近边界
+
+### Risk
+
+- 5-6 周 timeline 容易飘 → 必须 phase 化 + worktree (`feedback_release_workflow`)
+- Cat 间依赖管理（Cat-M 必须 Phase 0 完成；Cat-R / Cat-F / Cat-P 在 Phase 1-2
+  强依赖 Cat-M；Cat-G / Cat-A / Cat-D 在 Phase 3；Cat-B 在 Phase 4）
+- review-loop 控制在 3 round 内（v0.3.9 L3 是 6 round 反例）
+
+### Reversibility
+
+中。可 Phase 0+1 done 之后判断是否继续 Phase 2/3/4，或 ship mid-release
+v0.3.10-alpha。
+
+### Evidence
+
+- 用户 2026-05-17 turn："3.全部都得做完。这个非常重要！"
+- `feedback_no_backlog`、`feedback_release_workflow` (memory)
+
+---
+
+## D6 — Budget 不扩，max_entries 保 10，chat 也降到 10（用户决定）
+
+### Decision
+
+- `apps/bench-runner/src/harness/daemon.ts:692-699` `max_entries = 10` **保持**
+- `packages/core/src/task-surface-builder.ts:72-78` `max_entries = 15` → **改为 10**
+- `DYNAMIC_RECALL_TOTAL_CANDIDATE_CAP = 1000` **保持**
+- R7 (Recall budget 化) 仅做配置化（从 hardcoded 改为 RecallPolicy config），
+  默认值 10 不变
+- v0.3.10 delivery recall 提升靠 **path traversal + conditional factor 自然
+  召回更多相关对象**，不靠扩 budget
+
+### Rationale (用户决定)
+
+用户原话："我决定 budget 不应该扩大，其实按理来说，有的问题是需要通过路径
+去找到下一个对象的。"
+
+这条决定与 invariant §12 "recall is runtime manifestation of paths" 完全
+对齐。把 "delivery recall 不够 → 扩 budget 蛮力召回更多" 的反射式 fix 否决；
+让 v0.3.10 必须解决 "path 真活" 这个核心问题。
+
+bench (max=10) vs chat (max=15) 不一致是 Codex B2 finding，必须修；不通过
+"bench 升到 15" 修，通过 "chat 降到 10 + 配置化" 修。
+
+### Rejected alternatives
+
+- max_entries 10 → 15: 用户明确否决
+- 仅 chat 升到 15，bench 仍 10: 不解决 B2 finding
+- 完全删除 R7: 失去 config 灵活性，无法 future tune
+
+### Risk
+
+- delivery recall 仍然是 68/170 = 40% 起步；path traversal + conditional
+  factor 修对后才能升上去
+- 如果 path system 修复后 delivery recall 仍然 < 70%，90% stretch goal 数学
+  上不可达 → 但用户已知这个数学约束（D1 算术分析），愿意承担
+
+### Reversibility
+
+高。改 config 一行回退（但用户已明确否决）。
+
+### Evidence
+
+- 用户 2026-05-17 turn："我决定 budget 不应该扩大"
+- 用户原话："有的问题是需要通过路径去找到下一个对象的"
+- `docs/handbook/invariants.md` §12
+
+---
+
+## D7 — Path expansion score 走 fusion stage independent signal（用户决定）
+
+### Decision
+
+`packages/core/src/recall-service.ts:2106-2123` `scorePathRelationExpansion(path)`
+当前**只看 path 自身属性**（marginal score），改为 fusion stage 独立 signal：
+
+- path expansion candidate 进 fusion stage 时，**两个 signal 独立传入**：
+  - `path_base`（path 自身：governance / stability / plasticity_state.strength /
+    recall_bias）
+  - `seed_quality`（seed 的 lexical_rank / embedding_score / activation）
+- Cat-F1 fusion stage 用显式 weights table 调和（不预定权重，让 Cat-M1 weight
+  sweep 决定）
+
+### Rationale (用户决定)
+
+用户原话："我在想乘积这种，会不会导致我原先设想的，动态属性就变弱了？"
+
+→ 拒绝乘积形式（怕摊薄 path plasticity 动态属性）。
+→ 选 independent fusion signal，让 path_base 和 seed_quality 分别贡献，fusion
+   stage weights 决定调和。
+→ path 学到的东西（plasticity_state.strength / governance_class）独立保护。
+
+实现层路径：path expansion 仍在 candidate gathering 阶段被 `addCandidate`
+emit，但 `scorePathRelationExpansion` 的输出**不再是 final 0-1 score**——它是
+一个 multi-component signal pack `{path_base, seed_id, direction_eligible}`，
+传到 fusion stage 由 fusion 调和。
+
+### Rejected alternatives
+
+- 保留 marginal score (当前): weak seed × strong path 拉 garbage 不修
+- 乘积 `path_base × seed_quality`: 用户担心摊薄 path plasticity
+- Clamped 乘积 `path_base × max(0.5, seed_quality)`: 折中但仍非独立信号；
+  用户选了更优雅的 independent fusion
+- Bayesian sigmoid: 数学优雅但 α/β/γ 难 sweep
+
+### Risk
+
+- 依赖 Cat-F1 fusion stage 落地（Phase 2）；Phase 1 上半段 path expansion 仍
+  用旧 marginal score（过渡期接受）
+- fusion weights 调参由 Cat-M1 weight sweep 决定，sweep 工作量增加
+
+### Reversibility
+
+中。改回 marginal score 是一行代码；但 fusion stage 一旦上线，相关 metrics /
+test 依赖。
+
+### Evidence
+
+- 用户 2026-05-17 turn："Independent fusion stage signal (优雅但扣 Phase 2)"
+- `packages/core/src/recall-service.ts:2106-2123` (当前 marginal 实现)
+- `docs/handbook/architecture.md` §Four Axes：path = conditional relation
+  structure
+
+---
+
+## D8 — usage_proof gate 取消，三层防护：seed_quality_floor + PLANE_CAP + fusion weights（用户决定）
+
+### Decision
+
+`packages/core/src/recall-service.ts:904-918, 983-998` 当前的 usage_proof gate
+（要求 seed 有 inbound RECALLS edge 或 governance winner 才能 qualify path /
+graph expansion）**完全取消**。
+
+替代三层防护：
+1. **seed_quality_floor**：candidate emission 前先 filter seed_quality > θ
+   （θ 由 Cat-M1 weight sweep 决定，预估 0.3）；weak seed 不 emit path
+   expansion candidate
+2. **DYNAMIC_RECALL_PLANE_CAP**（已存在）：限制每个 plane 每次 recall 最多 emit
+   N 个 candidate
+3. **fusion stage weights**：fusion weights 决定 path_base 与 seed_quality 的
+   相对贡献；垃圾邀出在 fusion 阶段自然得低分
+
+### Rationale (用户决定 + invariant)
+
+用户原话："同意取消，靠 clamped 乘积 seed_quality floor + PLANE_CAP +
+conditional factor 三层防"（用户在 Q3 选了第一项；D7 在 Q2 选了 independent
+fusion 实际上 supersede 了"clamped 乘积"具体公式——三层防的**概念**保留：
+seed_quality_floor 过滤 + PLANE_CAP + fusion weights）。
+
+invariant 视角（**关键论证**）：
+- §20 说 "Delivered ≠ used"
+- 关键推论：**`used` 本身也不是 third-party verified truth**（host self-attest，
+  无第三方校验）
+- 当前 usage_proof gate 把 RECALLS edge（used 报告留下的副产品）当 path
+  expansion gate → 把 self-attest 衍生品当 truth 用 → **违反 §20 精神**
+- **取消 gate 反而更对齐 invariant**
+
+### Rejected alternatives
+
+- 保留 gate + lexical-strong (>0.85) seed bootstrap exception: v0.3.9
+  invariant 不动但反方向小补丁；用户否
+- 保留 gate + lexical seed weak gate 折扣 0.5: 同上
+- 完全取消 gate 但加 audit 每个 path expansion 来源 trace: 备选；可与
+  D8 主决定并存（per §13 plasticity changes auditable），plan.md Cat-A2 会
+  落实 audit 部分
+
+### Risk
+
+- cold-start workspace path expansion 可能 emit 太多垃圾候选（被 fusion
+  weights 折低分但 emit 本身有 latency 成本）→ seed_quality_floor 必须调对
+- 失去"RECALLS edge 作 verified-by-history 信号"这一现有保护 → 但本质上
+  这个信号也是 host self-attest 衍生品
+
+### Reversibility
+
+中。重启 gate 是一段代码；但 path/graph expansion 一旦在新模式下产生数据，
+gate 重启会让相关 metric 断裂。
+
+### Evidence
+
+- 用户 2026-05-17 turn："同意取消"
+- 用户 Q1 选 "按 invariant 重新推导：gate 该不该存在的问题重新谈"
+- `docs/handbook/invariants.md` §20
+
+---
+
+## D9 — Temporal_proximity plane 退役，靠 PathAnchorRef.time_concern 表达（用户决定）
+
+### Decision
+
+`packages/core/src/recall-service.ts:778, 787-797` 的 temporal_proximity plane
+**完全退役**。时间维度通过 `PathAnchorRef.time_concern` (`path-relation.ts:91-97`
+已 schema) 走 path system 表达。
+
+配套：**Garden 必须新增 time_concern PathRelation producer**：从 query / memory
+含明确时间词（"yesterday" / "2026-05" / "last week" / "上周" / "今天" 等）时
+**自动创建以 time_concern 为 anchor 的 PathRelation candidate signal**。走常规
+propose 路径。
+
+详细落地见 plan.md Cat-P3。
+
+### Rationale (用户决定 + invariant)
+
+用户原话："违能退出 temporal_proximity plane，temporal 靠 path system 才表达
+(TimeConcernPathAnchorRef 已存在)"
+
+理由：
+1. `PathAnchorRef.time_concern` 在 schema 已存在（`path-relation.ts:91-97`），
+   是 v0.1 port 时就设计的（path system 一等公民）
+2. temporal_proximity plane 用 content-blind 硬编码 0.65-0.7 是 hack
+3. 走 path system 表达时间维度对齐 §12 "recall is runtime manifestation of
+   paths"
+4. 退役 temporal_proximity plane 同时减少 plane 复杂度
+
+### Rejected alternatives
+
+- R2a + R2b 都做（query 无 date_terms 不 emit + 有 date_terms 降权）: 用户否，
+  方向不对
+- 只做 R2a（无 date_terms 不 emit），保 hardcoded 分数: 用户否
+- freshness 走 fusion signal，temporal plane 另议: 用户不选
+
+### Risk
+
+- **time_concern PathRelation producer 是新动作**：v0.3.10 必须 ship，否则
+  退役 temporal_proximity 等于让 "时间维度" 从系统消失
+- Garden 时间词检测要 i18n（中文 / 英文）；初版可只覆盖英文 + 简体中文常用
+  时间词，后续扩展
+- 自动创建 PathRelation 走 propose 路径意味着首批 time_concern PathRelation
+  是 draft；需要 governance promotion 才生效 → 需要 promote-strictly-governed
+  Proposal accept-apply（已是 v0.3.9 carry-forward #11）
+
+### Reversibility
+
+中。退役 plane 是删一段代码；但配套的 time_concern producer 一旦投产，相关
+数据建立后回退路径复杂。
+
+### Evidence
+
+- 用户 2026-05-17 turn："违能退出 temporal_proximity plane"
+- `packages/protocol/src/soul/path-relation.ts:91-97` (time_concern schema)
+- `docs/handbook/invariants.md` §12
+
+---
+
+## D10 — mandatoryCap 独立 channel：active_constraints[] 不挤 top-K（用户决定）
+
+### Decision
+
+`packages/core/src/recall-service.ts:1410` mandatoryCap 机制 **退役** —— 不再用
+`isProtectedDimension` 把 protected dimension 按 budget 豁免硬塞进 top-K。
+
+替代设计：
+
+- `soul.recall` MCP response 拆 **两个独立 list**：
+  - `relevant_memories[]`：当前的 candidate pool 按 fused score 排序 + top-K cut
+    （max_entries 只限这个）
+  - `active_constraints[]`：当前 workspace 中所有 active CONSTRAINT / HAZARD /
+    strictly_governed PathRelation 标记的 memory list（独立 budget，常规
+    workspace 通常 < 20 项）
+- agent 端语义清晰：top-K 是 semantic-relevant 召回；constraints 是必须知道的
+  硬约束
+- `MemorySearchResultSchema` 加 `active_constraints[]` 字段
+
+### Rationale (用户决定 + invariant)
+
+用户原话："C: 独立 channel。recall 返回 relevant_memories[] + active_constraints[]
+两 list，后者独立不挤 top-K"
+
+用户洞察（关键启发）："硬规则不是自然就会被召回的么？"
+
+→ 用户判断 mandatoryCap 本身是个错误的设计 hack。
+→ Path system 修活 + conditional factor 修对后，硬规则会**自然被召回**
+   （path expansion: query → seed → strictly_governed PathRelation →
+   anchored CONSTRAINT）。
+→ 但有些硬约束跟当前 query lexical/structural 都不相关（如 "不要 push main"），
+   path traversal 也覆盖不到。这些应该走**独立 channel** 总是返回，agent
+   总是可读。
+→ 独立 channel 不挤 top-K → semantic recall 完全 score-driven → fusion stage
+   + rerank 修对就到 90% R@5。
+
+invariant 视角：
+- §35-36：governance state 在 ClaimForm.claim_status / PathRelation
+  legitimacy.governance_class，不在 dimension
+- 当前 mandatoryCap 用 `isProtectedDimension(entry.dimension)` 当 governance
+  proxy 是**范畴错误**（ontology 层属性当 structure registry 层 proxy）
+- 独立 channel 直接读 governance state → 跳过 dimension proxy
+
+### Rejected alternatives
+
+- A: 按 governance state 划线但保留 mandatoryCap: 保守修；用户选了"最长效、
+  最有意义"否决
+- B: 完全取消 mandatoryCap，CONSTRAINT/HAZARD 走 conditional factor + boost:
+  硬约束可能 lexical irrelevant 时漏召（path 也走不出来）
+- D: B + alaya CLI / MCP 主动 query: agent 端主动负责拿 constraints；用户没选
+
+### Risk
+
+- **`MemorySearchResultSchema` 改动是 MCP contract 变化**：根据 §25 SemVer，
+  additive 是 minor 但要更新 sibling agent。**项目未公开，sunk cost = 0**
+- 如果 active_constraints[] list 太大（如 workspace 有 100 个 CONSTRAINT），
+  会膨胀 recall payload → 必须有 per-workspace `active_constraints_cap`
+  （默认 20）
+- agent 端需更新读 `active_constraints[]` 字段才能完整接收硬规则（Codex /
+  Claude Code MCP 调用代码要同步更新）
+
+### Reversibility
+
+低。Schema 改 + 客户端代码改 + governance 数据流改；回退是 v0.3.11 工作。
+
+### Evidence
+
+- 用户 2026-05-17 turn："C: 独立 channel"
+- 用户洞察："硬规则不是自然就会被召回的么？"
+- `docs/handbook/invariants.md` §35-36
+- `packages/protocol/src/soul/mcp-types.ts` (MemorySearchResultSchema)
+
+---
+
+## D11 — Cat-E 简化（embedding 不做 default-on / first-class）
+
+### Decision
+
+Cat-E（Embedding）从 5 工作项简化为 2 工作项：
+
+- **E1 (删除)**：daemon embedding default-on
+- **E2 (保留但简化)**：embedding latency 监控（不做大改：not aim for ≤300ms p95，
+  but must not regress beyond current 1049ms by 20%）
+- **E3 (删除)**：embedding 进入 fusion stage 作 first-class signal
+- **E4 (简化)**：保留 graceful degradation（embedding provider 失败时不让 recall
+  完全失败），但不做激进 timeout + circuit breaker
+- **E5 (保留)**：bench 双跑 embedding-on / embedding-off 作 release-grade
+  baseline
+
+### Rationale
+
+D3 决定的连锁结果：embedding 仍 opt-in supplement，不需要做 default-on 配套
+工作。
+
+90% R@5 stretch 的动力转给 Cat-P (path activation) + Cat-F (fusion + rerank)
++ Cat-R 的 ranking 修复。embedding 仍作 supplement signal（如果用户配了 key），
+fusion weights 决定其贡献，但 v0.3.10 不强推。
+
+### Risk
+
+- 如果 Phase 2 跑出来 90% R@5 仍达不到 should，用户可能回头 reopen D3 → Cat-E
+  恢复 E1+E3+E4
+- WSL2 onboarding 痛点保持现状，不放大但也不解决
+
+### Reversibility
+
+高。Cat-E 简化是工作 scope 调整，不动 schema / invariant；Reopen E1+E3+E4
+随时可（增工作量但不破现有）。
+
+### Evidence
+
+- D3 决定的连锁
+- 用户 2026-05-17 turn："接受" (主线程提出 D3 = opt-in 不变)
+
+---
+
+## D12 — 新增 Cat-P (Path activation) 独立 Cat
+
+### Decision
+
+把原 Cat-R / Cat-F / Cat-G 里 path 相关工作项抽出，组成新的 **Cat-P (Path
+activation)**：
+
+- **P1**：取消 usage_proof gate（recall-service.ts:904-918, 983-998）
+- **P2**：path expansion score → fusion stage independent signal（D7 实现）
+- **P3**：time_concern PathRelation Garden producer（D9 实现）
+- **P4**：mandatoryCap → independent channel 实现（D10 实现）；
+  `MemorySearchResultSchema` 扩展 `active_constraints[]`；governance state
+  reader（读 ClaimForm.claim_status / PathRelation governance_class）
+- **P5**：cold-mode latch 修复方向（subagent handbook 考古后定 R5a 渐变 +
+  audit 还是其它）—— **未定项**
+
+### Rationale
+
+- path 相关工作项数量 + 影响面（涉及 recall-service + protocol + Garden +
+  storage）独立成 Cat 更好管理
+- Cat-R 聚焦"打分公式 + ranking"，Cat-P 聚焦"path 系统活化"，分工清晰
+- 用户原话"path 之前应该有设计过的"+ "硬规则不是自然就会被召回的么" → path
+  activation 是 v0.3.10 的 architecture 核心动作，应该独立呈现
+
+### Risk
+
+- Cat 数量从 8 增加到 9，scope 风险略升 → 通过 Phase 排程（Cat-P 与 Cat-R
+  同 Phase 1，Cat-F 同 Phase 2）控制
+- P5 (cold-mode latch) 等 subagent handbook 考古，是 plan-stage 未定项 → 不
+  应阻塞其他 P1-P4 落地
+
+### Reversibility
+
+中。可在 Phase 2 后合并 Cat-P 回 Cat-R (作为 P 子项)。但保独立成 Cat 更易
+review-loop。
+
+### Evidence
+
+- 主线程综合判断
+- 用户原话 + Q1+Q2+Q3+Q4 答案对答（Path is first-class, conditional
+  factor, gate cancel, temporal retire 全 cluster path）
+
+---
+
+## Net code-size delta estimate (revised)
+
+| Cat | + LOC | − LOC | 净 |
+|---|---|---|---|
+| M (measurement) | +800 | 0 | +800 |
+| R (ranking core, 简化后) | +400 | -400 | 0 |
+| F (fusion + rerank stage) | +1200 | -300 | +900 |
+| **P (path activation, 新)** | **+700** | **-300** | **+400** |
+| E (embedding, 简化后) | +200 | -100 | +100 |
+| G (governance consolidation) | +400 | -800 | -400 |
+| A (invariant alignment) | +100 | 0 | +100 (doc-heavy) |
+| D (documentation + carry-forward) | +600 | -200 | +400 (doc-heavy) |
+| B (bench reproducibility) | +700 | -100 | +600 |
+| **Total** | **+5100** | **-2200** | **+2900** |
+
+v0.3.9 净 delta 约 +3500 LOC。v0.3.10 估算 +2900 略小但量级类似。
+
+---
+
+## D13 — Cold-mode latch 方向：R5a 渐变 + audit（subagent handbook 考古后定型）
+
+### Decision
+
+`packages/core/src/recall-service.ts:2181-2194` `resolveDynamicActivationWeights`
+当前是 **hard one-time latch**（第一条 RECALLS edge 后永久切换）。
+
+v0.3.10 改为 **R5a 渐变 + audit**：
+- 基于 `RECALLS_edge_count / threshold` 线性插值（threshold 初值 50，M1 sweep
+  调）
+- weight 转移本身入 audit（per §13 plasticity changes auditable）
+- 退化路径：如果 RECALLS_edge_count 因事件归档/超期下降，weight 应能渐变回 cold
+  状态（不是永久切换）
+
+### Rationale
+
+Subagent handbook 考古（`.do-it/findings/v0.3.10/_drafts/handbook-archaeology.md`）
+找到 **v0.3.3 设计原意**：
+
+> 动态权重重分配，直到显式 PathRelation 活动存在 — 即**条件性临时机制**，不是
+> 永久硬锁。当 path plasticity 信号转正后，权重应恢复，不应永久转移。
+
+**结论**：当前 hard one-time latch 与 v0.3.3 设计意图**不符**。这是 implementation
+bug（v0.3.4 - v0.3.9 在 path 系统薄弱期被简化为 hard latch 但没修回去）。
+
+**用户 2026-05-17 原话** "不是说 path 修活了有点就没有意义的" → 完全对齐
+handbook 原意：cold-mode 机制本身有意义（path 系统启动期间需要 weight transfer），
+但**实现要是条件性临时不是永久**。R5a 渐变 + audit 是正确的对齐回归，不是新设计。
+
+### Rejected alternatives
+
+- **R5b: 加 demotion path（recall 找不到 path 候选时 fallback 到 cold weights）**：
+  比 R5a 更复杂，没有 handbook 证据支持
+- **R5c: 完全取消 cold-mode latch**：用户已明确否决（"不是说 path 修活了有点就
+  没有意义"），且违反 v0.3.3 设计原意
+
+### Risk
+
+- threshold 50 是 hand-tuned 初值，需 M1 sweep 校
+- 渐变范围内 weight 计算复杂度略增；性能影响 < 1ms 可接受
+- audit log 体积增加（每次 weight 转移记录一行）
+
+### Reversibility
+
+中。改回 hard latch 简单；但渐变上线后 plasticity 学习数据建立后回退路径复杂。
+
+### Evidence
+
+- `.do-it/findings/v0.3.10/_drafts/handbook-archaeology.md` (subagent return
+  2026-05-18)
+- v0.3.3 design intent 引用
+- `docs/handbook/invariants.md` §13 (plasticity changes auditable)
+- 用户 2026-05-17 turn: "不是说 path 修活了有点就没有意义的"
+
+---
+
+## 仍未定项（plan.md 中追踪，**不阻塞 Phase 1 入口**）
+
+| 未定项 | 解锁手段 | 备选方向 |
+|---|---|---|
+| LongMemEval R@5 stretch 90% 是否可达 | Cat-M1 weight sweep + Phase 2 实测 | 调 stretch ↓ 80%（极不情愿）或 增 cross-encoder (v0.4 边界) |
+| LoCoMo R@5 stretch 80% 是否可达 | Cat-M1 + Phase 2 实测 | 调 stretch ↓ 65% 或 v0.3.11 + cross-encoder |
+| seed_quality_floor 阈值 θ | Cat-M1 weight sweep | 预估 0.3 |
+| Cat-G claim_kind 扩展数 (Codex I4) | Phase 3 决定 | 9 kind 全扩 / 5 kind 收紧 |
+| Cat-P5 渐变 threshold 值 | M1 sweep | 初值 50 |
+
+每个 unknown 在 plan.md 的对应 Cat 段标 **Phase decision point**，user 拍板，
+不允许 Claude / Codex 自决。
