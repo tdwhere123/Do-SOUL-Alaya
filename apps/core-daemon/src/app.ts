@@ -21,6 +21,10 @@ import { registerGardenBacklogRoutes } from "./routes/garden-backlog.js";
 import { registerGlobalMemoryRoutes, type GlobalMemoryRouteServices } from "./routes/global-memory.js";
 import { registerGovernanceRoutes, type GovernanceRouteServices } from "./routes/governance.js";
 import { registerGreenStatusRoutes, type GreenStatusRouteServices } from "./routes/green-status.js";
+import {
+  registerHealthInboxRoutes,
+  type HealthInboxRouteServices
+} from "./routes/health-inbox.js";
 import { registerHealthJournalRoutes, type HealthJournalRouteServices } from "./routes/health-journal.js";
 import { registerMemoryRoutes, type MemoryRouteServices } from "./routes/memories.js";
 import { registerOverrideRoutes, type OverrideRouteServices } from "./routes/overrides.js";
@@ -76,6 +80,7 @@ export interface CoreDaemonRouteServices {
   readonly globalMemory?: GlobalMemoryRouteServices;
   readonly governance?: GovernanceRouteServices;
   readonly greenStatus?: GreenStatusRouteServices;
+  readonly healthInbox?: HealthInboxRouteServices;
   readonly healthJournal?: HealthJournalRouteServices;
   readonly memories?: MemoryRouteServices;
   readonly overrides?: OverrideRouteServices;
@@ -272,6 +277,7 @@ function registerConfiguredRoutes(app: Hono, routes: CoreDaemonRouteServices | u
   if (routes.gardenBacklog !== undefined) registerGardenBacklogRoutes(app, routes.gardenBacklog);
   if (routes.memories !== undefined) registerMemoryRoutes(app, routes.memories);
   if (routes.greenStatus !== undefined) registerGreenStatusRoutes(app, routes.greenStatus);
+  if (routes.healthInbox !== undefined) registerHealthInboxRoutes(app, routes.healthInbox);
   if (routes.healthJournal !== undefined) registerHealthJournalRoutes(app, routes.healthJournal);
   if (routes.config !== undefined) registerConfigRoutes(app, routes.config);
   if (routes.overrides !== undefined) registerOverrideRoutes(app, routes.overrides);

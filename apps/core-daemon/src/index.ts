@@ -33,6 +33,7 @@ import {
   PATH_RELATION_COUNTER_DEFAULT_TTL_MS,
   ProjectMappingService,
   ProposalService,
+  ResolutionService,
   type ConflictDetectionLlmPort,
   RecallService,
   RunService,
@@ -115,6 +116,7 @@ import {
 import { createCoreDaemonApp } from "./daemon-app-composition.js";
 import { createDaemonEmbeddingRuntime } from "./daemon-embedding-runtime.js";
 import { createDaemonMcpMemoryToolHandler } from "./daemon-mcp-memory-handler.js";
+import { createAttachSurfaceRegistrar } from "./attach-surface-registrar.js";
 import { createBudgetProposalPort } from "./budget-wiring.js";
 import { defaultBootstrappingTemplates, defaultCanonicalAliasMap } from "./daemon-defaults.js";
 import { bootstrapDaemonMcpTooling } from "./daemon-mcp-tooling.js";
@@ -738,7 +740,20 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     repo: deferredObligationRepo,
     eventPublisher
   });
-  void deferredObligationService;
+  // invariant: ResolutionService is the typed dispatcher behind
+  // soul.resolve. confirm activates draft claims; defer creates
+  // obligations through DeferredObligationService; stale flips
+  // memory_entry active -> dormant.
+  // see also: packages/core/src/resolution-service.ts
+  // see also: apps/core-daemon/src/mcp-memory-resolve-handler.ts
+  const resolutionService = new ResolutionService({
+    eventPublisher,
+    claimRepo: claimFormRepo,
+    memoryRepo: memoryEntryRepo,
+    claimService,
+    memoryService,
+    deferredObligationService
+  });
   const pathRelationEvictionIntervalMs = pathRelationCounterTtlMs ?? PATH_RELATION_COUNTER_DEFAULT_TTL_MS;
   const pathRelationEvictionTimer = setInterval(() => {
     pathRelationProposalService.evictExpired();
@@ -955,6 +970,10 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   });
   await rebuildCountersFromEventLog(eventLogRepo, trustStateRecorder);
   trustStateRecorder.markReady();
+  const attachSurfaceRegistrar = createAttachSurfaceRegistrar({
+    surfaceService,
+    warn: warnLogger.warn
+  });
   const mcpMemoryToolHandler = createDaemonMcpMemoryToolHandler({
     recallService,
     memoryService,
@@ -973,7 +992,9 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     ...(gardenTaskRepo === undefined ? {} : { gardenTaskRepo }),
     eventLogRepo,
     proposalRepo,
-    runtimeNotifier
+    runtimeNotifier,
+    attachSurfaceRegistrar,
+    resolutionService
   });
   recordStartupStep(startupSteps, "mcp-tooling");
 
@@ -1021,6 +1042,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     synthesisService,
     claimService,
     proposalService,
+    proposalRepo,
+    healthIssueGroupRepo,
     // A1 (HITL daemon backbone) — Inspector loopback HTTP routes need
     // the same MCP handler that attached agents call.
     mcpMemoryToolHandler,

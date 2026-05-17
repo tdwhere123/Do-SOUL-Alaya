@@ -23,6 +23,7 @@ const expectedMemoryTools = [
   "soul.apply_override",
   "soul.explore_graph",
   "soul.report_context_usage",
+  "soul.resolve",
   "garden.list_pending_tasks",
   "garden.claim_task",
   "garden.complete_task"
@@ -58,8 +59,11 @@ describe("P5 final-review status", () => {
     // the report was sealed; the doc cite-loop here only checks the
     // pre-A1 set, so the existing evidence stays a stable lock.
     // The catalog-equality test above already pins the full A1 set.
+    // invariant: this doc was sealed with the pre-A1 catalog; skip
+    // tool names the catalog-equality assertion above already pins.
+    const postSealAdditions = new Set(["soul.list_pending_proposals", "soul.resolve"]);
     const preA1MemoryTools = expectedMemoryTools.filter(
-      (toolName) => toolName !== "soul.list_pending_proposals" && !toolName.startsWith("garden.")
+      (toolName) => !postSealAdditions.has(toolName) && !toolName.startsWith("garden.")
     );
     for (const toolName of preA1MemoryTools) {
       expect(finalReview).toContain(`\`${toolName}\``);

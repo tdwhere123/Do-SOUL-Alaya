@@ -872,6 +872,7 @@ vi.mock("@do-soul/alaya-core", () => {
     ClaudeRuntimeAdapter: makeClass(),
     DynamicsService: makeClass(),
     DeferredObligationService: makeClass(),
+    ResolutionService: makeClass(),
     DirtyStatePanicService: makeClass(),
     EngineBindingService: makeClass({
       resolveConversationBinding: vi.fn(async () => ({

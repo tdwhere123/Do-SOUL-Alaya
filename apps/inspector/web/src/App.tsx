@@ -4,6 +4,7 @@ import { getInspectorToken, setInspectorToken, setUnauthorizedHandler, setWorksp
 
 import ConfigPage from "./pages/Config";
 import GraphPage from "./pages/Graph";
+import HealthInboxPage from "./pages/HealthInbox";
 import MemoryBrowserPage from "./pages/MemoryBrowser";
 import OverviewPage from "./pages/Overview";
 import ProposalsPage from "./pages/Proposals";
@@ -89,6 +90,7 @@ export function AppContent() {
           <Route path="/proposals" element={<ProposalsPage />} />
           <Route path="/recall" element={<RecallPage />} />
           <Route path="/memory-browser" element={<MemoryBrowserPage />} />
+          <Route path="/health-inbox" element={<HealthInboxPage />} />
           <Route path="/status" element={<StatusPage />} />
           <Route path="/" element={<Navigate to="/overview" replace />} />
         </Route>
