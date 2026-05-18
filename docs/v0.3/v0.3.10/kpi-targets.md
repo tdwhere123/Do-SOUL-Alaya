@@ -161,7 +161,7 @@ stretch  = release-ambition。未达 → release notes 列入 v0.3.11 backlog。
 |---|---|
 | `active_constraints[]` 出现率 (when workspace 有 CONSTRAINT/HAZARD) | must ≥ 95% |
 | `active_constraints[]` budget cap (per-workspace) | default 20，max 50 |
-| `active_constraints[]` 与 `relevant_memories[]` 去重 | must 100% 去重 (overlapping object_id 只在 active_constraints[] 出现) |
+| `active_constraints[]` 与 `results[]` 去重 | must 100% 去重 (overlapping object_id 只在 active_constraints[] 出现) |
 
 ---
 
@@ -212,16 +212,20 @@ stretch  = release-ambition。未达 → release notes 列入 v0.3.11 backlog。
 | Cat | 编号 | 总数 | must 闭合 | 备注 |
 |---|---|---|---|---|
 | Doc / prose | 1-3 | 3 | 100% (3) | Cat-D1 |
-| Schema / type | 4-7 | 4 | 100% (4) | Cat-G2 + Cat-F4 |
-| Production wiring | 8-12 | 5 | 100% (5) | Cat-G3 / G4 / G5 |
-| Atomic / concurrency | 13 | 1 | 100% (1) | Cat-R |
-| Threshold / policy | 14-15 | 2 | 100% (2) | Cat-A + threshold unify |
-| Pre-existing baseline noise | 16-18 | 3 | 100% (3) | Cat-D sweep |
-| Lens-level doc | 19-20 | 2 | 100% (2) | Cat-D + Cat-A |
+| Schema / type | 4-7 | 4 | 100% (4) | Cat-G2 + Cat-D6 + Cat-P4/F4 |
+| Production wiring | 8-12 | 5 | 100% (5) | Cat-G3 / G4 / G5 / G6 |
+| Atomic / concurrency | 13 | 1 | 100% (1) | Cat-G6 |
+| Threshold / policy | 14-15 | 2 | 100% (2) | Cat-G6 + Cat-D6 |
+| Pre-existing baseline noise | 16-18 | 3 | 100% (3) | Cat-D6 + Cat-B4/K6.2 |
+| Lens-level doc | 19-20 | 2 | 100% (2) | Cat-D6 + Cat-A4/D5 |
 | Plane attribution | 22-23 | 2 | 100% (2) | Cat-F3 + Cat-P |
 | Dimension sensitivity | 21 | 1 | 100% (1) | Cat-R + Cat-F fusion |
 | Bench harness pointer | 24 | 1 | 100% (1) | Cat-M + Cat-B |
 | **Total** | | **24** | **must 24 / 24** | |
+
+K4.1 uses the D0 coverage matrix in `plan.md` as the canonical item-level
+owner list. A category row is not closed until every numbered item in that row
+has direct code/doc/test evidence.
 
 ### K4.2 Codex I-series 闭合率
 
@@ -248,9 +252,10 @@ stretch  = release-ambition。未达 → release notes 列入 v0.3.11 backlog。
 
 | 项 | must |
 |---|---|
-| `MemorySearchResultSchema` 加 `active_constraints[]` 字段 | yes |
+| `SoulMemorySearchResponseSchema` response root 加 `active_constraints[]` 字段 | yes |
+| 现有 `results[]` 保留，不 rename / 不删除 | yes |
 | `mandatoryCap` + `isProtectedDimension` 退役 | yes |
-| recall response `relevant_memories[]` 全 semantic-driven | yes |
+| recall response `results[]` 全 semantic-driven | yes |
 | `active_constraints[]` 按 ClaimForm.claim_status / PathRelation governance_class 实读 | yes |
 | sibling agent (Codex / Claude Code) MCP client 更新支持新字段 | document 必须明示，client 同步留 backlog |
 
@@ -294,6 +299,16 @@ stretch  = release-ambition。未达 → release notes 列入 v0.3.11 backlog。
 | bench 跑出有 RECALLS edge / PathRelation 的 warm-workspace mode | yes |
 | cold vs warm workspace 双 mode 对比 archive | yes (must, 升级自 should) |
 
+### K5.4 controlled replay contribution split（RF-4 / M0）
+
+| 项 | must |
+|---|---|
+| same content + same questions replay | yes |
+| uniform `fact` vs rotated object-kind replay | yes |
+| stress policy vs chat policy replay | yes |
+| cold vs warm `report_context_usage` replay | yes |
+| 输出 contribution suspects: mandatory ordering / conflict penalty / lexical-structural blend / seed rotation / cold latch | yes |
+
 ---
 
 ## K6 — Regression 防御
@@ -306,7 +321,7 @@ stretch  = release-ambition。未达 → release notes 列入 v0.3.11 backlog。
 | mixed-dimension workspace top-K monotonic | ≥ 3 |
 | budget_drop=max_entries 在 expected range | ≥ 2 |
 | plane_winning_admission semantic (first vs winning) | ≥ 2 |
-| cold-mode latch 修复方向 (待定) | ≥ 2 |
+| cold-mode latch 渐变 + audit (D13) | ≥ 2 |
 | temporal_proximity 在无 date_terms query 上不 emit | ≥ 2 |
 | **active_constraints[] 出现率 + 去重 (Cat-P4 新)** | **≥ 3** |
 | **time_concern PathRelation producer (Cat-P3 新)** | **≥ 2** |
@@ -333,7 +348,7 @@ stretch  = release-ambition。未达 → release notes 列入 v0.3.11 backlog。
 | `docs/handbook/runtime-status.md` 全部 readiness label 与实际 wiring 一致 | yes (Cat-D + Cat-A) |
 | `docs/handbook/backlog.md` 与 closeout list 一致 | yes (Cat-D2 = Codex I8) |
 | 所有 invariant 在 implementation 中 traceable | should (Cat-A) |
-| **`MemorySearchResultSchema` schema 变化 (D10) 在 §25 SemVer 下声明 minor + sibling 通知** | **yes (Cat-D)** |
+| **`SoulMemorySearchResponseSchema` additive schema 变化 (D10) 在 §25 SemVer 下声明 minor + sibling 通知** | **yes (Cat-D)** |
 
 ---
 
@@ -341,24 +356,25 @@ stretch  = release-ambition。未达 → release notes 列入 v0.3.11 backlog。
 
 | Phase | gate KPI (must) |
 |---|---|
-| **Phase 0** (Cat-M + Cat-D 部分) | K5.1 + K5.2 + K5.3 yes; K4.1 #24 + K4.2 I3+I8 闭合 |
-| **Phase 1** (Cat-R + Cat-P + Cat-E2) | K1.1 must ≥ 60%; K1.2 must ≥ 40%; K2.1 ≤ 20; K2.4 ≤ 20%; K3.1 ≤ 1100ms; K4.5 P1+P2 完成 |
-| **Phase 2** (Cat-F + Cat-P 收尾) | K1.1 should ≥ 80%; K2.1 ≤ 10; K2.3 cohort 健康; K4.4 active_constraints[] 完成; K4.5 P3+P4 完成 |
-| **Phase 3** (Cat-G + Cat-A) | K4.1 + K4.2 全 100%; K4.3 routes ≤ 4 |
-| **Phase 4** (Cat-B + closeout) | K1.3 must + K1.4 must; K6.1 ≥ 21 tests; K6.2 全绿; K7 全 yes |
+| **Phase 0** (D0 + Cat-M + Cat-D 部分) | D0 coverage matrix maps 24+8; K5.2 + K5.3 + K5.4 yes; K4.1 #24 + K4.2 I3/I7/I8 closed |
+| **Phase 1** (dependency-safe Cat-R/P/E first repair) | M0 contribution split still supports the repair path; K2.4 improves; K3.1/K3.2 not worse; K4.5 P1+P2 complete; R2/R3/R6 not started before dependencies |
+| **Phase 2** (Cat-F + P3/P4 + R2/R3/R6) | K1.1 must ≥ 60%; K1.2 must ≥ 40%; K2.1 ≤ 10; K2.3 cohort healthy; K4.4 active_constraints[] root channel complete; K4.5 P3+P4 complete |
+| **Phase 3** (Cat-G + Cat-A + P5 + D6) | K4.1 + K4.2 全 100%; K4.3 routes ≤ 4; D6 residual items closed |
+| **Phase 4** (Cat-B + closeout) | K1.3 must + K1.4 must; K5.1 daily job ready; K6.1 ≥ 21 tests; K6.2 全绿; K7 全 yes |
 
 ---
 
 ## Phase decision points (user 拍板，不允许 Claude/Codex 自决)
 
-- **Phase 0 exit**: 如果 weight-sweep harness 跑出来 "R@5 上限受制于 delivery
-  recall (40%) → 即使 ranker 完美也 ≤ 40%"，**user 决策**：
+- **Phase 0 exit**: 如果 M0 controlled replay / M1 weight-sweep 跑出来
+  "R@5 上限受制于 delivery recall (40%) → 即使 ranker 完美也 ≤ 40%"，
+  **user 决策**：
   - (D6 锁定了 budget 不扩) → 那继续推进 Cat-P，靠 path traversal 把 delivery
     recall 自然推上去
   - 不允许扩 budget（用户已决）
-- **Phase 1 exit**: 如果 K1.1 must 60% 未达：
-  - 是否需提早进入 Cat-F (rerank stage)？
-  - 还是 Cat-M1 weight sweep 再多迭代一轮？
+- **Phase 1 exit**: 如果 K2.4 / non_monotonic / cold-warm replay 与 root-cause
+  假设冲突：
+  - 先修 replay/diagnostics 还是重排 Cat-F 提前进入？
   - 是否 Cat-P 哪个工作项未达预期需重做？
 - **Phase 2 exit**: 如果 K1.4 LoCoMo must 40% 未达：
   - 是否需要 cross-encoder 提早进入（突破 v0.4 边界）？
@@ -366,8 +382,8 @@ stretch  = release-ambition。未达 → release notes 列入 v0.3.11 backlog。
   - 是否 fusion weights 在 LoCoMo 上需另调？
 - **Phase 3 exit**: 如果 K4.3 routes 收敛到 3 路径有 breaking change 风险：
   - 是否保留 4 路径（K4.3 should ≥ 4）？
-- **Cold-mode latch 方向**: 等 subagent handbook 考古返回后定（不阻塞 Phase 1
-  其他工作）
+- **Cat-P5 渐变 threshold 值**: D13 已定方向；threshold 初值 50，最终值由
+  M1 sweep + Phase 2/3 warm replay 决定
 
 ---
 
@@ -393,7 +409,7 @@ K4.2 闭合率 = 100%
 K4.3 routes ≤ 4 AND 有文档化边界
 K4.4 (mandatoryCap 独立 channel) 全 yes
 K4.5 (path activation) P1-P4 must 全 yes
-K5.1 + K5.2 + K5.3 = yes
+K5.1 + K5.2 + K5.3 + K5.4 = yes
 K6.1 ≥ 21 tests AND K6.2 全绿
 K7 全 yes
 ```

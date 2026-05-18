@@ -1,11 +1,9 @@
 # v0.3.10 Load-Bearing Decisions
 
-> 12 个 load-bearing decisions。D1+D2+D5+D6 是用户在 2026-05-17 多轮对话中
+> 13 个 load-bearing decisions。D1+D2+D5+D6 是用户在 2026-05-17 多轮对话中
 > 拍板；D3+D4 是主线程综合判断（用户授权）；D7-D12 是用户与主线程多轮对答
-> 后定型。每个决定记录：选择 / 拒绝的备选 / 证据 / 风险 / 不可逆性。
->
-> 一个未定项（cold-mode latch 修复方向）等 subagent handbook 考古返回后
-> 在 plan.md 敲定，不进 D 列表。
+> 后定型；D13 在 subagent handbook 考古返回后定型。每个决定记录：选择 /
+> 拒绝的备选 / 证据 / 风险 / 不可逆性。
 
 ---
 
@@ -239,7 +237,7 @@ record，下一次同类回归立刻可识别。
 ### Decision
 
 v0.3.10 接受 9 个 Cat：M / R / F / **P (新)** / E (简化) / G / A / D / B
-（详 `plan.md`）。Phase 化执行（4 phase / ~5-6 周）。每个 Cat 独立 verify、
+（详 `plan.md`）。Phase 化执行（5 phase / ~5-6 周）。每个 Cat 独立 verify、
 独立 review-loop。
 
 ### Rationale
@@ -259,8 +257,8 @@ channel 实现）足以独立成一个 Cat。
 ### Risk
 
 - 5-6 周 timeline 容易飘 → 必须 phase 化 + worktree (`feedback_release_workflow`)
-- Cat 间依赖管理（Cat-M 必须 Phase 0 完成；Cat-R / Cat-F / Cat-P 在 Phase 1-2
-  强依赖 Cat-M；Cat-G / Cat-A / Cat-D 在 Phase 3；Cat-B 在 Phase 4）
+- Cat 间依赖管理（D0+Cat-M 必须 Phase 0 完成；R2 必须等 P3，R3 必须等
+  P4，R6 必须等 F1；Cat-G / Cat-A / D6 在 Phase 3；Cat-B 在 Phase 4）
 - review-loop 控制在 3 round 内（v0.3.9 L3 是 6 round 反例）
 
 ### Reversibility
@@ -509,19 +507,25 @@ propose 路径。
 替代设计：
 
 - `soul.recall` MCP response 拆 **两个独立 list**：
-  - `relevant_memories[]`：当前的 candidate pool 按 fused score 排序 + top-K cut
-    （max_entries 只限这个）
+  - 保留现有 root `results[]`：当前的 candidate pool 按 fused score 排序 +
+    top-K cut（max_entries 只限这个）。文档可称 semantic relevant memories，
+    但 wire shape 不 rename。
   - `active_constraints[]`：当前 workspace 中所有 active CONSTRAINT / HAZARD /
     strictly_governed PathRelation 标记的 memory list（独立 budget，常规
     workspace 通常 < 20 项）
 - agent 端语义清晰：top-K 是 semantic-relevant 召回；constraints 是必须知道的
   硬约束
-- `MemorySearchResultSchema` 加 `active_constraints[]` 字段
+- `SoulMemorySearchResponseSchema` response root 加 `active_constraints[]` 字段；
+  `MemorySearchResultSchema` 不承载 list
 
 ### Rationale (用户决定 + invariant)
 
 用户原话："C: 独立 channel。recall 返回 relevant_memories[] + active_constraints[]
 两 list，后者独立不挤 top-K"
+
+实现口径（2026-05-18 plan-review 修正）：用户语义上的 `relevant_memories[]`
+对应当前 wire `results[]`；v0.3.10 做 additive root field，不 rename / remove
+现有 `results[]`。
 
 用户洞察（关键启发）："硬规则不是自然就会被召回的么？"
 
@@ -552,7 +556,7 @@ invariant 视角：
 
 ### Risk
 
-- **`MemorySearchResultSchema` 改动是 MCP contract 变化**：根据 §25 SemVer，
+- **`SoulMemorySearchResponseSchema` 改动是 MCP contract 变化**：根据 §25 SemVer，
   additive 是 minor 但要更新 sibling agent。**项目未公开，sunk cost = 0**
 - 如果 active_constraints[] list 太大（如 workspace 有 100 个 CONSTRAINT），
   会膨胀 recall payload → 必须有 per-workspace `active_constraints_cap`
@@ -569,7 +573,7 @@ invariant 视角：
 - 用户 2026-05-17 turn："C: 独立 channel"
 - 用户洞察："硬规则不是自然就会被召回的么？"
 - `docs/handbook/invariants.md` §35-36
-- `packages/protocol/src/soul/mcp-types.ts` (MemorySearchResultSchema)
+- `packages/protocol/src/soul/mcp-types.ts` (`SoulMemorySearchResponseSchema`)
 
 ---
 
@@ -626,10 +630,10 @@ activation)**：
 - **P2**：path expansion score → fusion stage independent signal（D7 实现）
 - **P3**：time_concern PathRelation Garden producer（D9 实现）
 - **P4**：mandatoryCap → independent channel 实现（D10 实现）；
-  `MemorySearchResultSchema` 扩展 `active_constraints[]`；governance state
+  `SoulMemorySearchResponseSchema` response root 扩展 `active_constraints[]`；
+  governance state
   reader（读 ClaimForm.claim_status / PathRelation governance_class）
-- **P5**：cold-mode latch 修复方向（subagent handbook 考古后定 R5a 渐变 +
-  audit 还是其它）—— **未定项**
+- **P5**：cold-mode latch 渐变 + audit（D13）
 
 ### Rationale
 
@@ -641,9 +645,10 @@ activation)**：
 
 ### Risk
 
-- Cat 数量从 8 增加到 9，scope 风险略升 → 通过 Phase 排程（Cat-P 与 Cat-R
-  同 Phase 1，Cat-F 同 Phase 2）控制
-- P5 (cold-mode latch) 等 subagent handbook 考古，是 plan-stage 未定项 → 不
+- Cat 数量从 8 增加到 9，scope 风险略升 → 通过 Phase 排程控制：P1/P2
+  配 Phase 1 first repair，P3/P4 配 Phase 2 R2/R3，P5 配 Phase 3 governance
+  closure
+- P5 (cold-mode latch) 已由 D13 定型，但 threshold 仍需 M1 sweep 校准 → 不
   应阻塞其他 P1-P4 落地
 
 ### Reversibility

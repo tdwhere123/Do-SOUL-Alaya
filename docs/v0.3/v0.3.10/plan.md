@@ -1,6 +1,6 @@
 # v0.3.10 Execution Plan
 
-> 9 Cat × 4 Phase 完整执行计划。每条工作项给：scope / target file:line /
+> 9 Cat × 5 Phase 完整执行计划。每条工作项给：scope / target file:line /
 > acceptance / dependency / KPI link / risk。
 >
 > **关键调整 vs 之前版本**（用户 2026-05-17 多轮对答后定型）：
@@ -8,11 +8,14 @@
 > - **Cat-E** 大幅简化（D11：embedding opt-in 不变，bench 双跑必须）
 > - **Cat-R** 调整（D6：budget 不扩；D10：mandatoryCap 退役）
 > - **D7+D8+D9** 落地分布到 Cat-P 工作项
-> - **P5 cold-mode latch 方向** 为待定项（等 subagent handbook 考古返回）
+> - **P5 cold-mode latch 方向** 已由 D13 锁定为渐变 + audit
+> - **2026-05-18 plan-review 修正**：全量 scope 保留；补 controlled replay
+>   前置、24 carry-forward 显式覆盖、P4 response-root additive schema、依赖
+>   安全 Phase 顺序。
 >
 > 必读前置：
 > - `README.md` (本目录) — scope / goals / unknowns
-> - `decisions.md` (本目录) — 12 个 load-bearing decisions
+> - `decisions.md` (本目录) — 13 个 load-bearing decisions
 > - `kpi-targets.md` (本目录) — 量化目标 + phase gate
 > - `.do-it/findings/v0.3.10/01-root-cause.md` — 7 处 smoking gun + 4 层证据
 > - `.do-it/findings/v0.3.10/02-fix-strategy.md` — 8 候选修复路径
@@ -24,36 +27,99 @@
 
 | Phase | 时间 | Cat | gate |
 |---|---|---|---|
-| **Phase 0** | Week 1 | M（基础设施全部）+ D1+D2+D3 (carry-forward 索引/doc truth) | K5.1 + K5.2 + K5.3 yes; K4.1#24, K4.2#I3+I8 闭合 |
-| **Phase 1** | Week 2 | R（排序核心）+ **P (path activation P1+P2)** + E2 (latency 监控) | K1.1 must≥60%; K1.2 must≥40%; K2.1≤20; K2.4≤20%; K3.1≤1100ms; K4.5 P1+P2 完成 |
-| **Phase 2** | Week 3-4 | F（fusion+rerank 全部）+ **P (P3+P4 收尾)** + E5 (bench 双跑) | K1.1 should≥80%; K2.1≤10; K2.3 cohort 健康; K4.4+K4.5 完成 |
-| **Phase 3** | Week 5 | G（治理收敛全部）+ A（invariant 对齐）+ **P5 (cold-mode latch 落定后实现)** | K4.1 + K4.2 全 100%; K4.3 routes≤4 |
-| **Phase 4** | Week 6 | B（bench 升级）+ D4+D5 (release notes 收尾) + closeout | K1.3+K1.4 must; K6.1≥21 tests; K6.2 全绿; K7 全 yes |
+| **Phase 0** | Week 1 | **D0** truth/tracker freeze + **M0-M5** measurement/replay + D1-D3 doc-truth repairs | K4.1/K4.2 coverage matrix maps 24+8 to owners; M0 controlled replay archive exists; K5.2+K5.3 infra green; D1-D3/I7/I8/#24 closed |
+| **Phase 1** | Week 2 | Dependency-safe first repair: R1+R4+R5 + P1+P2 + E2 | Replay shows contribution split; R2/R3 explicitly remain blocked until P3/P4; K2.4 improves; K3 not worse; no final K1 release claim yet |
+| **Phase 2** | Week 3-4 | F1-F4 + R6 + P3/P4 + then R2/R3 + E5 | K1.1/K1.2 must, K2.1≤10, K2.3 cohort healthy, K4.4 active_constraints root channel, K4.5 P1-P4 complete |
+| **Phase 3** | Week 5 | G1-G6 + A1-A4 + P5 + D6 residual carry-forward closure | K4.1 + K4.2 = 100%; K4.3 routes≤4; #5-#20 residual items have code/docs/test proof |
+| **Phase 4** | Week 6 | B1-B4 + D4+D5 release truth + full closeout | K1.3+K1.4 must; K5.1 daily job ready; K6.1≥21 tests; K6.2 full green; K7 all yes |
 
-Phase 间不允许跨档跳。每 phase 收尾必跑 `do-it-review-loop`（Claude lens +
-Codex adversarial lens），review 至 zero Blocking + zero Important 才 close。
+Phase 间不允许跨档跳。R2 不能早于 P3；R3 不能早于 P4；R6 不能早于 F1；任何
+schema/public-contract 改动必须先通过 §25 SemVer 检查。每 phase 收尾必跑
+`do-it-review-loop`（Claude lens + Codex adversarial lens），review 至 zero
+Blocking + zero Important 才 close。
 
 ## Cat 总览
 
 | Cat | 名字 | 工作项数 | Phase |
 |---|---|---|---|
-| **M** | Measurement infrastructure | M1-M5 (5) | Phase 0 |
-| **R** | Ranking core repair (调整) | R1-R6 (6) | Phase 1 |
+| **M** | Measurement infrastructure | M0-M5 (6) | Phase 0 |
+| **R** | Ranking core repair (调整) | R1-R6 (6) | Phase 1 + 2 |
 | **F** | Fusion + explicit rerank stage | F1-F5 (5) | Phase 2 |
 | **P** | **Path activation (新)** | P1-P5 (5) | Phase 1 + 2 + 3 |
-| **E** | Embedding (大幅简化) | E2 + E5 (2) | Phase 0 + 4 |
-| **G** | Governance consolidation | G1-G5 (5) | Phase 3 |
+| **E** | Embedding (大幅简化) | E2 + E5 (2) | Phase 1 + 4 |
+| **G** | Governance consolidation | G1-G6 (6) | Phase 3 |
 | **A** | Architecture invariant alignment | A1-A4 (4) | Phase 3 |
-| **D** | Documentation truth + carry-forward | D1-D5 (5) | Phase 0+4 |
+| **D** | Documentation truth + carry-forward | D0-D6 (7) | Phase 0+3+4 |
 | **B** | Bench reproducibility | B1-B4 (4) | Phase 4 |
 
-**Total: 41 工作项**。每项必须有 commit、可 verify、有 KPI link。
+**Total: 45 工作项**。每项必须有 commit、可 verify、有 KPI link。
+
+## 2026-05-18 Review Findings Folded In
+
+| ID | Finding | Plan change |
+|---|---|---|
+| RF-1 | Phase 1 原计划让 R2/R3/R6 早于自身依赖（P3/P4/F1）执行 | Phase table 重排；依赖规则写入 phase gate |
+| RF-2 | 24 个 v0.3.9 carry-forward 不是逐项可执行计划 | 新增 D0 coverage matrix + D6 residual closure；K4.1 改为 item-level ownership |
+| RF-3 | P4 把 `relevant_memories[]` 写进 item schema，层级错误且有 breaking 风险 | P4 改为 response-root additive `active_constraints[]`；保留 `results[]` |
+| RF-4 | Codex 要求 controlled replay 先证明贡献拆分，但原计划只把 replay 当风险 | 新增 M0，作为 Phase 0 hard gate |
+| RF-5 | `decisions.md` / README / plan 仍有 12 vs D13、4 vs 5 phase 口径漂移 | D0/D5 负责同步；本计划先修执行口径 |
+| RF-6 | LoCoMo 90% 是用户目标；外部 SOTA 只作风险假设 | KPI 保留用户目标/ambition，release notes 明确未达时的事实边界 |
+
+## Dependency Graph
+
+```text
+D0 + M0 -> M1/M2/M3/M4/M5
+M0 + M1 + M3 -> R1/R4/R5 + P1/P2 + E2
+P3 -> R2
+P4 -> R3
+F1 -> R6 -> F2/F3/F4/F5
+G3 + P3 -> time_concern active-path proof
+G6 + D6 + B4 -> K4.1 24/24 closeout
+Phase 0..3 gates -> B1/B2/B3/B4 -> D4/D5 release closeout
+```
 
 ---
 
 # Cat-M — Measurement Infrastructure
 
 > Phase 0。Cat-R/F/P/E 一切都建立在此之上。**没有 M，所有调参都是盲调**。
+
+## M0 — Controlled replay + contribution decomposition（RF-4）
+
+### Scope
+Codex 独立报告要求先做 controlled replay，证明 mixed object-kind rotation、
+mandatory ordering、conflict penalty、lexical/structural blend、cold/warm mode
+各自贡献，而不是直接调权重。
+
+### Target
+- 新 replay fixture：same seeded content + same questions，分别跑：
+  - uniform `fact`
+  - rotated `fact/preference/decision/constraint/outcome`
+  - stress policy (`max=10, conflict=true`)
+  - chat policy (`max=10, conflict=false`, per D6)
+  - cold mode (`report_context_usage=none`)
+  - warm mode (`report_context_usage=mixed`)
+- 输出 `controlled-replay.json`：rank distribution、non_monotonic、
+  protectedMandatory count、budget_drop=max_entries、high_lexical_demoted、
+  conflict penalty count、cold/warm delta。
+
+### Acceptance
+- replay 可在 Phase 0 独立运行，不依赖 Cat-R/F/P 实现
+- replay 明确列出 top 3 contribution suspects；如果 contribution split
+  与 root-cause 假设冲突，Phase 1 不开工，先修计划
+- replay archive 入 `docs/bench-history/public/<timestamp>/controlled-replay.json`
+
+### Dependency
+无。M0 必须早于 R1/R4/R5/P1/P2。
+
+### KPI
+K5.4 + K2.1/K2.2/K2.4 baseline
+
+### Risk
+- replay harness 本身可能引入 synthetic proof；必须复用 production recall
+  path，不允许 mock score function
+
+---
 
 ## M1 — Bench weight-sweep harness
 
@@ -217,9 +283,10 @@ K2.1 / K2.2 / K2.4 / K2.3 / K4.5 / K5.1
 
 # Cat-R — Ranking Core Repair (调整版)
 
-> Phase 1。原 R1-R7 调整为 R1-R6。删 R7 (budget 扩，per D6)；R3 调整为对齐
-> D10 (mandatoryCap 退役)；删 R6 (reweight 转交 Cat-F fusion weights + M1
-> sweep)。
+> Phase 1 + 2。原 R1-R7 调整为 R1-R6。删 R7 (budget 扩，per D6)；
+> R2/R3/R6 拆到 Phase 2，分别等待 P3/P4/F1。R3 调整为对齐 D10
+> (mandatoryCap 退役)；R6 不再做旧式 isolated reweight，而是在 Cat-F fusion
+> stage 后按 M1 sweep 校准综合 score factor。
 
 ## R1 — 删 SG-2: lexical plane structural=0 强制
 
@@ -386,7 +453,7 @@ K1.1 R@10 + K2.4
 M1 (sweep harness 校 threshold 值) + Cat-P1 (gate 取消，让 path 候选真活)
 
 ### KPI
-K1.1 (warm mode) + K6.1 + K4.1 (#13 plasticity auditability)
+K1.1 (warm mode) + K6.1 + K4.5 P5
 
 ### Risk
 - threshold 初值 50 hand-tune；M1 sweep 调参成本
@@ -469,7 +536,8 @@ Stage 5 — Top-K cut (budget-aware)
 - diagnostic sidecar schema 加 `fused_score` + `signal_contributions[]`
 
 ### Dependency
-Phase 1 完成 (R1-R6 落定) + Cat-P (P1+P2 path 信号方式定型)
+Phase 1 first repair 完成 (R1/R4/R5 + P1/P2 + E2) 且 M0/M1/M3 提供 replay
+baseline。R2/R3/R6 不阻塞 F1；它们在 P3/P4/F1 后进入 Phase 2。
 
 ### KPI
 K1.1 + K2.1 (依赖 F2)
@@ -727,42 +795,44 @@ K4.5 P3 + K2.3 (time_concern share > 0%)
 ## P4 — mandatoryCap → independent channel (D10)
 
 ### Scope
-`MemorySearchResultSchema` 加 `active_constraints[]` 独立字段。`max_entries`
-只限 `relevant_memories[]`。硬规则总是可访问且不挤 top-K。
+`SoulMemorySearchResponseSchema` 在 response root 加 `active_constraints[]`
+独立字段。`max_entries` 只限现有 `results[]`。硬规则总是可访问且不挤
+top-K。
 
 ### Target
-- `packages/protocol/src/soul/mcp-types.ts` `MemorySearchResultSchema` 扩展：
-  - `relevant_memories[]` (现 `results[]` rename 或 alias)
+- `packages/protocol/src/soul/mcp-types.ts` `SoulMemorySearchResponseSchema` 扩展：
+  - **保留现有 `results[]`**（不 rename，不删除，避免 breaking surface）
   - `active_constraints[]`：每个 entry 含 object_id + content + governance
     state (claim_status / governance_class)
   - `active_constraints_count` (per workspace 计数)
+- `MemorySearchResultSchema` 只允许 additive per-result 字段；不承载
+  `active_constraints[]` list
 - 新 storage query helper `findActiveConstraints(workspaceId, cap=20)`：
   - 读所有 ClaimForm.claim_status ∈ {active, winner, contested} 的 backing
     memory
   - 读所有 strictly_governed PathRelation 的 anchor memory
   - 去重 + cap (default 20, max 50)
-- recall-service 重构：返回 `{relevant_memories[], active_constraints[]}`
-  独立两 list
+- recall response shape：返回 `{results[], active_constraints[]}` 两个独立 list
 - 配置 `active_constraints_cap` per workspace（default 20）
 
 ### Acceptance
 - 集成测：workspace 有 5 个 active CONSTRAINT → 任意 recall 返回的
   active_constraints[] 含全 5 个
-- 集成测：`relevant_memories[]` 长度 ≤ max_entries (10)
+- 集成测：`results[]` 长度 ≤ max_entries (10)
 - K4.4 全 yes
 - K2.5 active constraints channel coverage 全 must
 
 ### Dependency
 - Cat-R3 (mandatoryCap 退役) 同步落地；本 P4 必须 ship 否则 R3 让 CONSTRAINT
   失保护
-- §25 SemVer：MemorySearchResultSchema 改 additive → minor 释放（声明
+- §25 SemVer：SoulMemorySearchResponseSchema 改 additive → minor 释放（声明
   必须）；Cat-D / sibling agent 通知
 
 ### KPI
 K4.4 + K2.5 + K4.1 (governance route 收敛配合)
 
 ### Risk
-- MemorySearchResultSchema 改是 MCP contract change；项目未公开 sunk cost = 0
+- SoulMemorySearchResponseSchema 改是 MCP contract change；项目未公开 sunk cost = 0
 - agent 端（Codex / Claude Code MCP client）需更新读新字段才能完整接收硬规则
   → 当前 Codex / Claude Code 不识别 active_constraints[]，得到的 recall
   payload 仍可用（向后兼容；只是缺硬规则视图）；client 升级走 backlog
@@ -791,7 +861,7 @@ transfer 行为）。
 Cat-R5 完成（公式重构）
 
 ### KPI
-K4.5 P5 + K1.1 warm mode + K4.1 (#13 plasticity audit)
+K4.5 P5 + K1.1 warm mode
 
 ---
 
@@ -1009,6 +1079,44 @@ K4.1 #10 + K4.2 #I5
 
 ---
 
+## G6 — Residual governance producer + atomic carry-forward closure（RF-2）
+
+### Scope
+v0.3.9 carry-forward 中仍有几项不属于纯文档，也不应混进 Cat-R：
+
+- #8 `mapping_revoked` auto-trigger from `MemoryService.update`
+- #12 `HealthIssueGroup` severity calibration
+- #13 claim transition full atomic boundary（CAS success + audit append crash window）
+- #14 path plasticity threshold unification (`5/15` vs `3/8`)
+
+### Target
+- `MemoryService.update` evidence_refs rewrite 触发 `mapping_revoked`
+- HealthIssueGroup severity defaults 做 first-pass calibration + operator-visible
+  reason
+- claim transition 走单一 storage-owned transaction；CAS mutation + audit append
+  不再分裂
+- `DYNAMICS_CONSTANTS.path_plasticity` 与 plasticity policy module 阈值合一，
+  或明确一个为 canonical source 并删/废弃另一个
+
+### Acceptance
+- K4.1 #8/#12/#13/#14 闭合
+- stateful checklist 通过：EventLog-first、audit-before-broadcast、rollback /
+  idempotency proof
+- regression tests 覆盖 claim transition crash-window 修复和 mapping_revoked
+  producer
+
+### Dependency
+G1 governance route boundary + G3 proposal accept-apply；#14 依赖 R5/P5 最终阈值。
+
+### KPI
+K4.1 #8 + #12 + #13 + #14
+
+### Risk
+- #13 是真实状态风险，不能用文档解释替代；若 transaction 签名改动面超过
+  Phase 3 budget，必须先停下来重切一个 atomicity slice，不能标 deferred
+
+---
+
 # Cat-A — Architecture Invariant Alignment
 
 > Phase 3。4 项 prose 修正 + 文档同步。
@@ -1132,7 +1240,56 @@ K7
 
 # Cat-D — Documentation Truth + Carry-Forward
 
-> Phase 0 (D1+D2+D3) + Phase 4 (D4+D5)。
+> Phase 0 (D0+D1+D2+D3) + Phase 3 (D6) + Phase 4 (D4+D5)。
+
+## D0 — Carry-forward coverage matrix + canonical tracker（RF-2）
+
+### Scope
+v0.3.9 closeout declares 24 carry-forward items and Codex declares I1-I8.
+v0.3.10 必须全做，但 plan 必须先把每一项映射到 owner / phase / AC / verify，
+否则 K4.1/K4.2 会变成口号。
+
+### Target
+在本计划或 companion tracker 中维护 table：
+
+| Item | Owner |
+|---|---|
+| #1-#3 doc/prose alignment | D1 |
+| #4 claim_kind compression | G2 |
+| #5 pending_incomplete / unfinishedness_bias MCP exposure | D6 + P4/F4 |
+| #6 StagedWarning typed target_object_id | D6 + P4 schema pass |
+| #7 SnapshotTrend required-key truth | D6 |
+| #8 mapping_revoked auto-trigger | G6 |
+| #9 budget provider repo | G4 |
+| #10 Auditor scheduling production wire | G5 |
+| #11 path_relation proposal accept-apply | G3 |
+| #12 HealthIssueGroup severity calibration | G6 |
+| #13 claim transition atomic boundary | G6 |
+| #14 threshold unification | G6 + R5/P5 |
+| #15 BL-022 docstring | D6 |
+| #16-#18 baseline build/test noise | D6 + B4/K6.2 |
+| #19 narrative comments | D6 + comments lens |
+| #20 verb-count discrepancy | D6 |
+| #21 dimension sensitivity | R1/R4/R6 + F1/F2 |
+| #22 plane attribution null / mismatch | M4 + F3/F4 |
+| #23 plane admission concentration | R2/R3/R4 + F2/F3 + P4 |
+| #24 bench pointer hygiene | M5 + B3 |
+| I1-I8 | K4.2 table owners |
+
+### Acceptance
+- K4.1/K4.2 table has no "implicit" owner
+- Any future closeout line can cite this mapping and a fresh verify command
+- `docs/handbook/backlog.md` vs `runtime-status.md` canonical source is chosen
+  before Phase 1 code work
+
+### KPI
+K4.1 + K4.2 + K7
+
+### Risk
+- This is a planning artifact, but it gates code work; skipping it recreates
+  v0.3.9 tail ambiguity
+
+---
 
 ## D1 — v0.3.9 carry-forward #1-#3 关（doc/prose alignment）
 
@@ -1229,6 +1386,47 @@ Phase 3 完成 + Cat-A4 完成
 
 ### KPI
 K7
+
+---
+
+## D6 — Residual carry-forward doc/schema/test closure（RF-2）
+
+### Scope
+收口 D0 matrix 中没有专属实现 Cat 的 residual items：
+
+- #5 `pending_incomplete` / `unfinishedness_bias` MCP-facing exposure decision
+- #6 `StagedWarning` typed `target_object_id`
+- #7 `SoulPathGraphSnapshotTrend` required-key truth
+- #15 BL-022 docstring
+- #16-#18 pre-existing build/test baseline noise
+- #19 narrative comments in touched files
+- #20 `soul.resolve` verb-count discrepancy
+
+### Target
+- #5：随 P4/F4 schema pass 加 optional MCP fields，或明确 producer/consumer 后
+  改 runtime-status；不能只在 closeout 里留口头说明
+- #6：`StagedWarning` schema 增加 typed `target_object_id`，daemon producers 填写；
+  older payload 兼容为 optional
+- #7：确认 `SoulPathGraphSnapshotTrend` 是否 Inspector-internal；若无 public
+  contract，维护文档写明 out-of-SemVer；若已有 public consumer，则补 schema/test
+- #15/#19/#20：只在触碰相关文件时修评论/术语；comments lens 复核
+- #16/#18：B4/K6.2 前不允许再带着 pre-existing failing tests 进入 release
+  closeout
+- #17：保留 defensive `never` guard 则写明 intentional；否则删除 warning
+
+### Acceptance
+- K4.1 #5/#6/#7/#15/#16/#17/#18/#19/#20 全部有证明
+- `rtk pnpm build` + `rtk pnpm test` 不再以 "pre-existing" 豁免失败
+- comments-discipline lens 对 touched comments 无 Blocking/Important
+
+### Dependency
+P4/F4 schema pass + B4 regression suite + A4 handbook sync。
+
+### KPI
+K4.1 residual closure + K6.2 + K7
+
+### Risk
+- #5/#6 触碰 MCP surface；必须按 §25 走 additive minor，不允许顺手 rename/remove
 
 ---
 
@@ -1404,7 +1602,7 @@ per `feedback_release_workflow`:
 # Pointers
 
 - `README.md` — scope / goals / unknowns
-- `decisions.md` — 12 load-bearing decisions
+- `decisions.md` — 13 load-bearing decisions
 - `kpi-targets.md` — 量化目标 + must/should/stretch + phase gate
 - `.do-it/findings/v0.3.10/` — root-cause 完整调查 (Claude + Codex)
 - `.do-it/findings/v0.3.10/_drafts/handbook-archaeology.md` — subagent 考古
