@@ -11,6 +11,7 @@ import {
   type MemoryEntry,
   type ProjectMappingAnchor,
   type RecallPolicy,
+  type SoulActiveConstraint,
   type Slot,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
@@ -79,6 +80,21 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   };
 }
 
+function createActiveConstraint(memory: Readonly<MemoryEntry>): SoulActiveConstraint {
+  return {
+    object_id: memory.object_id,
+    object_kind: memory.object_kind,
+    content: memory.content,
+    dimension: memory.dimension,
+    scope_class: memory.scope_class,
+    governance_state: {
+      claim_status: null,
+      governance_class: null,
+      source_channels: ["dimension"]
+    }
+  };
+}
+
 function createSlot(overrides: Partial<Slot> = {}): Slot {
   return {
     object_id: "slot-1",
@@ -126,7 +142,8 @@ function createDependencies(
   memories: readonly MemoryEntry[],
   slots: readonly Slot[] = [],
   // Maps claim object_id -> source_object_refs (backing memory IDs).
-  claimSourceRefs: Readonly<Record<string, readonly string[]>> = {}
+  claimSourceRefs: Readonly<Record<string, readonly string[]>> = {},
+  activeConstraints: readonly Readonly<SoulActiveConstraint>[] = []
 ): {
   readonly dependencies: RecallServiceDependencies;
   readonly appendSpy: ReturnType<typeof vi.fn>;
@@ -163,6 +180,12 @@ function createDependencies(
             .filter((id) => claimSourceRefs[id] !== undefined)
             .map((id) => ({ object_id: id, source_object_refs: claimSourceRefs[id] ?? [] }))
         )
+      },
+      activeConstraintsPort: {
+        findActiveConstraints: vi.fn(async () => ({
+          constraints: activeConstraints,
+          total_count: activeConstraints.length
+        }))
       }
     },
     appendSpy,
@@ -719,7 +742,7 @@ describe("RecallService", () => {
     });
   });
 
-  it("applies coarse scope filters to optional global-source candidates while keeping protected dimensions", async () => {
+  it("applies coarse scope filters to all global-source candidates", async () => {
     const recordClassifications = vi.fn(async () => {});
     const globalRecall = vi.fn(async () => [
       {
@@ -778,12 +801,7 @@ describe("RecallService", () => {
     });
 
     expect(globalRecall).toHaveBeenCalled();
-    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["global-hazard"]);
-    expect(result.candidates[0]).toMatchObject({
-      object_id: "global-hazard",
-      dimension: MemoryDimension.HAZARD,
-      origin_plane: "global"
-    });
+    expect(result.candidates).toEqual([]);
     expect(recordClassifications).toHaveBeenCalledWith([
       {
         workspaceId: "workspace-1",
@@ -793,7 +811,7 @@ describe("RecallService", () => {
       {
         workspaceId: "workspace-1",
         globalObjectId: "global-hazard",
-        classification: "included"
+        classification: "excluded"
       }
     ]);
   });
@@ -914,13 +932,13 @@ describe("RecallService", () => {
     expect(analyze.candidates.length).toBeGreaterThan(build.candidates.length);
   });
 
-  it("build strategy only returns project scope plus protected quota", async () => {
+  it("build strategy applies scope filters while active constraints stay separate", async () => {
     const memories = [
       createMemoryEntry({ object_id: "memory-1", scope_class: ScopeClass.PROJECT, dimension: MemoryDimension.PROCEDURE, activation_score: 0.8 }),
       createMemoryEntry({ object_id: "memory-2", scope_class: ScopeClass.GLOBAL_DOMAIN, dimension: MemoryDimension.PROCEDURE, activation_score: 0.9 }),
       createMemoryEntry({ object_id: "memory-3", scope_class: ScopeClass.GLOBAL_DOMAIN, dimension: MemoryDimension.HAZARD, activation_score: 0.01 })
     ];
-    const { dependencies } = createDependencies(memories);
+    const { dependencies } = createDependencies(memories, [], {}, [createActiveConstraint(memories[2]!)]);
     const service = new RecallService(dependencies);
 
     const result = await service.recall({
@@ -929,17 +947,18 @@ describe("RecallService", () => {
       strategy: "build"
     });
 
-    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["memory-3", "memory-1"]);
-    expect(result.candidates.every((candidate) => candidate.scope_class === ScopeClass.PROJECT || candidate.dimension === MemoryDimension.HAZARD)).toBe(true);
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["memory-1"]);
+    expect(result.candidates.every((candidate) => candidate.scope_class === ScopeClass.PROJECT)).toBe(true);
+    expect(result.active_constraints.map((constraint) => constraint.object_id)).toEqual(["memory-3"]);
   });
 
-  it("build strategy only returns constraint procedure hazard dimensions", async () => {
+  it("build strategy applies dimension filters while active constraints stay separate", async () => {
     const memories = [
       createMemoryEntry({ object_id: "memory-1", dimension: MemoryDimension.PROCEDURE, activation_score: 0.7 }),
       createMemoryEntry({ object_id: "memory-2", dimension: MemoryDimension.PREFERENCE, activation_score: 0.9 }),
       createMemoryEntry({ object_id: "memory-3", dimension: MemoryDimension.CONSTRAINT, activation_score: 0.01 })
     ];
-    const { dependencies } = createDependencies(memories);
+    const { dependencies } = createDependencies(memories, [], {}, [createActiveConstraint(memories[2]!)]);
     const service = new RecallService(dependencies);
 
     const result = await service.recall({
@@ -949,9 +968,9 @@ describe("RecallService", () => {
     });
 
     expect(result.candidates.map((candidate) => candidate.dimension)).toEqual([
-      MemoryDimension.CONSTRAINT,
       MemoryDimension.PROCEDURE
     ]);
+    expect(result.active_constraints.map((constraint) => constraint.object_id)).toEqual(["memory-3"]);
   });
 
   it("min_activation_score filters low-activation optional entries", async () => {
@@ -1124,7 +1143,7 @@ describe("RecallService", () => {
     expect(cohortDiagnostic, "matching memory should be admitted via the cohort plane").toBeDefined();
   });
 
-  it("mandatory share guard caps mandatory dimensions at 2/3 of max_entries so ranked optionals keep capacity", async () => {
+  it("keeps active constraints independent from the score-ranked result budget", async () => {
     const constraintMemories = [
       createMemoryEntry({ object_id: "c-1", dimension: MemoryDimension.CONSTRAINT, activation_score: 0.50 }),
       createMemoryEntry({ object_id: "c-2", dimension: MemoryDimension.CONSTRAINT, activation_score: 0.55 }),
@@ -1133,12 +1152,8 @@ describe("RecallService", () => {
       createMemoryEntry({ object_id: "c-5", dimension: MemoryDimension.CONSTRAINT, activation_score: 0.70 }),
       createMemoryEntry({ object_id: "c-6", dimension: MemoryDimension.CONSTRAINT, activation_score: 0.75 })
     ];
-    const procedureMemories = [
-      createMemoryEntry({ object_id: "p-1", dimension: MemoryDimension.PROCEDURE, activation_score: 0.80 }),
-      createMemoryEntry({ object_id: "p-2", dimension: MemoryDimension.PROCEDURE, activation_score: 0.85 }),
-      createMemoryEntry({ object_id: "p-3", dimension: MemoryDimension.PROCEDURE, activation_score: 0.90 })
-    ];
-    const { dependencies } = createDependencies([...constraintMemories, ...procedureMemories]);
+    const activeConstraints = constraintMemories.map(createActiveConstraint);
+    const { dependencies } = createDependencies(constraintMemories, [], {}, activeConstraints);
     const service = new RecallService(dependencies);
     const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
     const policy = overridePolicy(basePolicy, {
@@ -1146,7 +1161,7 @@ describe("RecallService", () => {
         ...basePolicy.fine_assessment,
         budgets: {
           max_total_tokens: 10_000,
-          max_entries: 6,
+          max_entries: 3,
           per_dimension_limits: null
         }
       }
@@ -1159,51 +1174,35 @@ describe("RecallService", () => {
       policyOverride: policy
     });
 
-    expect(result.candidates.length).toBeLessThanOrEqual(6);
-    const constraintCount = result.candidates.filter(
-      (candidate) => candidate.dimension === MemoryDimension.CONSTRAINT
-    ).length;
-    expect(constraintCount).toBeLessThanOrEqual(4);
-    const procedureCount = result.candidates.filter(
-      (candidate) => candidate.dimension === MemoryDimension.PROCEDURE
-    ).length;
-    expect(procedureCount).toBeGreaterThanOrEqual(1);
-  });
-
-  it("mandatory share guard preserves all mandatories when they fit under the cap", async () => {
-    const memories = [
-      createMemoryEntry({ object_id: "c-1", dimension: MemoryDimension.CONSTRAINT, activation_score: 0.7 }),
-      createMemoryEntry({ object_id: "c-2", dimension: MemoryDimension.CONSTRAINT, activation_score: 0.6 }),
-      createMemoryEntry({ object_id: "p-1", dimension: MemoryDimension.PROCEDURE, activation_score: 0.9 }),
-      createMemoryEntry({ object_id: "p-2", dimension: MemoryDimension.PROCEDURE, activation_score: 0.8 })
-    ];
-    const { dependencies } = createDependencies(memories);
-    const service = new RecallService(dependencies);
-    const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
-    const policy = overridePolicy(basePolicy, {
-      fine_assessment: {
-        ...basePolicy.fine_assessment,
-        budgets: {
-          max_total_tokens: 10_000,
-          max_entries: 6,
-          per_dimension_limits: null
-        }
-      }
-    });
-
-    const result = await service.recall({
-      taskSurface: createTaskSurface(),
-      workspaceId: "workspace-1",
-      strategy: "analyze",
-      policyOverride: policy
-    });
-
-    expect(result.candidates.map((candidate) => candidate.object_id).sort()).toEqual([
+    expect(result.candidates).toHaveLength(3);
+    expect(result.active_constraints.map((constraint) => constraint.object_id)).toEqual([
       "c-1",
       "c-2",
-      "p-1",
-      "p-2"
+      "c-3",
+      "c-4",
+      "c-5",
+      "c-6"
     ]);
+    expect(result.active_constraints_count).toBe(6);
+  });
+
+  it("forwards active constraints cap to the active constraints port", async () => {
+    const memory = createMemoryEntry({ object_id: "c-1", dimension: MemoryDimension.CONSTRAINT });
+    const { dependencies } = createDependencies([memory], [], {}, [createActiveConstraint(memory)]);
+    const service = new RecallService(dependencies);
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      activeConstraintsCap: 5
+    });
+
+    expect(dependencies.activeConstraintsPort?.findActiveConstraints).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      cap: 5
+    });
+    expect(result.active_constraints_count).toBe(1);
   });
 
   it("keeps pre-budget diagnostics for candidates dropped by final delivery budget", async () => {
@@ -1272,20 +1271,9 @@ describe("RecallService", () => {
     ];
     const { dependencies } = createDependencies(memories);
     const graphExpansionPort = {
-      // usage_proof gate: seed-memory carries a prior RECALLS edge so the
-      // graph_expansion / path_expansion planes recognize it as historically
-      // used (see filterUsageProofSeeds in recall-service.ts).
       findByMemoryId: vi.fn(async (memoryId: string) =>
         memoryId === "seed-memory"
           ? [
-              {
-                edge_id: "edge-recalls",
-                source_memory_id: "prior-recall",
-                target_memory_id: "seed-memory",
-                edge_type: "recalls" as const,
-                workspace_id: "workspace-1",
-                created_at: "2026-03-19T00:00:00.000Z"
-              },
               {
                 edge_id: "edge-1",
                 source_memory_id: "seed-memory",
@@ -1934,23 +1922,23 @@ describe("RecallService", () => {
     expect(result.candidates).toHaveLength(2);
   });
 
-  it("records lexical_rank in diagnostics without conflating it with structural score", async () => {
+  it("uses direct lexical FTS rank as lexical structural evidence", async () => {
     const memories = [
       createMemoryEntry({
         object_id: "memory-alpha",
         activation_score: 0.6,
-        content: "alpha beta gamma delta epsilon zeta eta theta iota kappa."
+        content: "unrelated first memory body."
       }),
       createMemoryEntry({
         object_id: "memory-beta",
         activation_score: 0.6,
-        content: "alpha beta gamma."
+        content: "unrelated second memory body."
       })
     ];
     const { dependencies } = createDependencies(memories);
     const searchByKeyword = vi.fn(async () => [
       { object_id: "memory-alpha", normalized_rank: 1 },
-      { object_id: "memory-beta", normalized_rank: 0.5 }
+      { object_id: "memory-beta", normalized_rank: 0.8 }
     ]);
     const service = new RecallService({
       ...dependencies,
@@ -1977,12 +1965,9 @@ describe("RecallService", () => {
       (candidate) => candidate.object_id === "memory-beta"
     );
     expect(alphaDiagnostic?.lexical_rank).toBe(1);
-    expect(betaDiagnostic?.lexical_rank).toBe(0.5);
-    // FTS rank is reported as a separate field; it must not be silently copied
-    // into structural_score. structural_score reflects content/structural
-    // evidence (e.g. query_probe_lexical match, evidence_anchor) and may
-    // legitimately differ from lexical_rank in either direction.
-    expect(alphaDiagnostic?.structural_score).not.toBe(alphaDiagnostic?.lexical_rank);
+    expect(betaDiagnostic?.lexical_rank).toBe(0.8);
+    expect(alphaDiagnostic?.structural_score).toBe(1);
+    expect(betaDiagnostic?.structural_score).toBe(0.8);
   });
 
   it("merges semantic supplement candidates without duplicating existing matches", async () => {
@@ -2217,9 +2202,9 @@ describe("RecallService", () => {
     expect(result.candidates[0]?.object_id).toBe("memory-strong-lexical");
   });
 
-  it("preserves base lexical ordering on a moderate gap (activation 0.7 vs 0.4) — fully-plastic weaker candidate cannot flip the rank under PATH_PLASTICITY_WEIGHT=0.15", async () => {
-    // I3-fix locking test. Activation contribution gap = (0.7 - 0.4) *
-    // 0.7 = 0.21 (the activation-weight base sums to 0.70). Max plasticity
+  it("preserves base lexical ordering on a moderate gap under PATH_PLASTICITY_WEIGHT=0.15", async () => {
+    // Activation contribution gap = (0.7 - 0.4) * 0.7 = 0.21
+    // because the activation-weight base sums to 0.70. Max plasticity
     // boost gap = (1.0 - 0.0) * 0.15 = 0.15. Since 0.21 > 0.15, the
     // stronger-activation candidate must rank first even when the weaker
     // candidate is fully plastic and the stronger has zero plasticity.

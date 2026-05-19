@@ -500,6 +500,37 @@ describe("MaterializationRouter claim_status draft lock", () => {
     expect(deps.claimServiceLastStatus()).toBe("draft");
   });
 
+  for (const claimCase of [
+    ["preference", "preference"],
+    ["decision", "decision"],
+    ["constraint", "constraint"],
+    ["procedure", "procedure"],
+    ["hazard", "hazard"],
+    ["factual_policy", "factual_policy"],
+    ["exception", "exception"],
+    ["glossary", "glossary"],
+    ["episode", "episode"]
+  ] as const) {
+    it(`preserves object_kind=${claimCase[0]} as claim_kind=${claimCase[1]}`, async () => {
+      const deps = createDeps();
+      const router = new MaterializationRouter(deps);
+
+      const result = await router.materializeSignal(
+        createSignal({
+          object_kind: claimCase[0],
+          signal_kind: "potential_claim",
+          confidence: 0.9,
+          evidence_refs: ["msg-1"]
+        })
+      );
+
+      expect(result.route_target).toBe("memory_and_claim_draft");
+      expect(deps.claimService.create).toHaveBeenCalledTimes(1);
+      const claimInput = deps.claimService.create.mock.calls[0][0] as Record<string, unknown>;
+      expect(claimInput.claim_kind).toBe(claimCase[1]);
+    });
+  }
+
   it("memory_entry_only path produces evidence + memory but no claim", async () => {
     const deps = createDeps();
     const router = new MaterializationRouter(deps);

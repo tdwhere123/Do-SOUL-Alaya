@@ -1,13 +1,19 @@
 export {
   BenchName,
+  BenchPolicyShapeSchema,
+  BenchSimulateReportModeSchema,
   BenchSplit,
   HarnessMode,
   KpiPayloadSchema,
+  RecallWeightOverridesSummarySchema,
   Verdict,
   type DegradationReasons,
   type DiffVsPrevious,
   type KpiCore,
   type KpiPayload,
+  type RecallWeightOverridesSummary,
+  type BenchPolicyShape,
+  type BenchSimulateReportMode,
   type PerScenarioRow,
   type TierDistribution
 } from "./kpi-schema.js";
@@ -28,11 +34,14 @@ export {
 export { diffKpis, verdictBadge } from "./diff.js";
 
 export {
+  benchArchiveDiscriminator,
   entrySlug,
   listEntries,
+  policyShapeSlug,
   readEntry,
   readLatest,
   readPrevious,
+  simulateReportSlug,
   writeEntry,
   type HistoryEntry,
   type HistoryLayout

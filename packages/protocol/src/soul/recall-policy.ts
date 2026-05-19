@@ -65,12 +65,30 @@ export const ActivationWeightsSchema = z.object(ActivationWeightsShape).strict()
 
 export const ActivationWeightsPatchSchema = z.object(ActivationWeightsShape).partial().strict().readonly();
 
+export const RecallAdditiveScoringWeightsSchema = z
+  .object({
+    NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT: z.number().finite().nonnegative().optional(),
+    CONFIDENCE_DIRECT_WEIGHT: z.number().finite().nonnegative().optional(),
+    PATH_PLASTICITY_WEIGHT: z.number().finite().nonnegative().optional()
+  })
+  .strict()
+  .readonly();
+
+export const RecallScoringWeightOverridesSchema = z
+  .object({
+    additive: RecallAdditiveScoringWeightsSchema.optional(),
+    fusion_weights: z.record(NonEmptyStringSchema, z.number().finite().nonnegative()).optional()
+  })
+  .strict()
+  .readonly();
+
 export const RecallPolicySchema = ControlPlaneEnvelopeSchema.unwrap()
   .extend({
     object_kind: z.literal(ControlPlaneObjectKind.RECALL_POLICY),
     coarse_filter: CoarseFilterConfigSchema,
     fine_assessment: FineAssessmentConfigSchema,
-    domain_weight_overrides: z.record(NonEmptyStringSchema, ActivationWeightsPatchSchema).optional()
+    domain_weight_overrides: z.record(NonEmptyStringSchema, ActivationWeightsPatchSchema).optional(),
+    scoring_weight_overrides: RecallScoringWeightOverridesSchema.optional()
   })
   .readonly();
 
@@ -82,4 +100,6 @@ export type RecallBudgets = z.infer<typeof RecallBudgetsSchema>;
 export type FineAssessmentConfig = z.infer<typeof FineAssessmentConfigSchema>;
 export type ActivationWeights = z.infer<typeof ActivationWeightsSchema>;
 export type ActivationWeightsPatch = z.infer<typeof ActivationWeightsPatchSchema>;
+export type RecallAdditiveScoringWeights = z.infer<typeof RecallAdditiveScoringWeightsSchema>;
+export type RecallScoringWeightOverrides = z.infer<typeof RecallScoringWeightOverridesSchema>;
 export type RecallPolicy = z.infer<typeof RecallPolicySchema>;

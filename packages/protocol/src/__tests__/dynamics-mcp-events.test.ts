@@ -338,6 +338,58 @@ describe("MCP tool request/response schemas", () => {
     }).success).toBe(false);
   });
 
+  it("parses active constraints on recall response without requiring them on older payloads", () => {
+    const baseResponse = {
+      delivery_id: "delivery-1",
+      results: [],
+      total_count: 0,
+      strategy_mix: {
+        deterministic_match: true,
+        precomputed_rank: true,
+        semantic_supplement: false,
+        graph_support: false,
+        path_plasticity: false,
+        global_recall: false
+      }
+    };
+
+    expect(SoulMemorySearchResponseSchema.parse(baseResponse).active_constraints).toBeUndefined();
+    expect(SoulMemorySearchResponseSchema.parse({
+      ...baseResponse,
+      active_constraints: [
+        {
+          object_id: "memory-constraint-1",
+          object_kind: "memory_entry",
+          content: "Do not push directly to main.",
+          dimension: "constraint",
+          scope_class: "project",
+          governance_state: {
+            claim_status: "active",
+            governance_class: null,
+            source_channels: ["claim_status"]
+          }
+        }
+      ],
+      active_constraints_count: 1
+    }).active_constraints_count).toBe(1);
+    expect(SoulMemorySearchRequestSchema.parse({
+      query: "repo workflow",
+      scope_class: null,
+      dimension: null,
+      domain_tags: null,
+      max_results: 5,
+      active_constraints_cap: 50
+    }).active_constraints_cap).toBe(50);
+    expect(SoulMemorySearchRequestSchema.safeParse({
+      query: "repo workflow",
+      scope_class: null,
+      dimension: null,
+      domain_tags: null,
+      max_results: 5,
+      active_constraints_cap: 51
+    }).success).toBe(false);
+  });
+
   it("rejects the legacy generic graph explore contract", () => {
     expect(() =>
       SoulExploreGraphRequestSchema.parse({

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  ComputeRecallGardenEventType,
+  type ComputeRecallGardenEventTypeValue,
   RecallContextEventType,
   type EventLogEntry,
   type RecallContextEventTypeValue
@@ -13,7 +15,7 @@ const WORKSPACE_ID = "workspace-1";
 const ISO = "2026-05-10T00:00:00.000Z";
 
 function makeRow(input: {
-  readonly type: RecallContextEventTypeValue;
+  readonly type: RecallContextEventTypeValue | ComputeRecallGardenEventTypeValue;
   readonly entityId: string;
   readonly runId: string | null;
   readonly payload: Record<string, unknown>;
@@ -31,6 +33,23 @@ function makeRow(input: {
     revision: 1,
     payload_json: input.payload,
     created_at: input.createdAt ?? ISO
+  };
+}
+
+function embeddingQueriedPayload(input: {
+  readonly queryId: string;
+  readonly runId: string | null;
+  readonly latencyMs: number;
+  readonly returnedCandidateCount: number;
+}): Record<string, unknown> {
+  return {
+    workspace_id: WORKSPACE_ID,
+    run_id: input.runId,
+    query_id: input.queryId,
+    requested_limit: 5,
+    returned_candidate_count: input.returnedCandidateCount,
+    latency_ms: input.latencyMs,
+    queried_at: ISO
   };
 }
 
@@ -110,9 +129,80 @@ describe("recall-utilization-service", () => {
     expect(stats.recall.miss_ratio).toBe(0);
     expect(stats.recall.p50_pointer_count).toBe(0);
     expect(stats.recall.p50_latency_ms).toBe(0);
+    expect(stats.embedding).toEqual({
+      total_queries: 0,
+      returned_candidate_count: 0,
+      p50_latency_ms: 0,
+      p95_latency_ms: 0,
+      p99_latency_ms: 0,
+      latency_buckets: [
+        { label: "<=150ms", count: 0 },
+        { label: "<=300ms", count: 0 },
+        { label: "<=800ms", count: 0 },
+        { label: "<=1100ms", count: 0 },
+        { label: ">1100ms", count: 0 }
+      ]
+    });
     expect(stats.usage.total).toBe(0);
     expect(stats.usage.used_ratio).toBe(0);
     expect(stats.usage.follow_through_ratio).toBe(0);
+  });
+
+  it("aggregates embedding supplement latency percentiles and buckets", async () => {
+    const rows = [
+      makeRow({
+        type: ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_QUERIED,
+        entityId: "query-1",
+        runId: "run-1",
+        payload: embeddingQueriedPayload({
+          queryId: "query-1",
+          runId: "run-1",
+          latencyMs: 120,
+          returnedCandidateCount: 2
+        })
+      }),
+      makeRow({
+        type: ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_QUERIED,
+        entityId: "query-2",
+        runId: "run-1",
+        payload: embeddingQueriedPayload({
+          queryId: "query-2",
+          runId: "run-1",
+          latencyMs: 280,
+          returnedCandidateCount: 1
+        })
+      }),
+      makeRow({
+        type: ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_QUERIED,
+        entityId: "query-3",
+        runId: "run-2",
+        payload: embeddingQueriedPayload({
+          queryId: "query-3",
+          runId: "run-2",
+          latencyMs: 1250,
+          returnedCandidateCount: 0
+        })
+      })
+    ];
+
+    const stats = await createRecallUtilizationService({
+      eventLogRepo: fakeEventLogRepo(rows)
+    }).getStats({ workspaceId: WORKSPACE_ID });
+
+    expect(stats.embedding).toEqual({
+      total_queries: 3,
+      returned_candidate_count: 3,
+      p50_latency_ms: 280,
+      p95_latency_ms: 1250,
+      p99_latency_ms: 1250,
+      latency_buckets: [
+        { label: "<=150ms", count: 1 },
+        { label: "<=300ms", count: 1 },
+        { label: "<=800ms", count: 0 },
+        { label: "<=1100ms", count: 0 },
+        { label: ">1100ms", count: 1 }
+      ]
+    });
   });
 
   it("computes a single recall with no usage report", async () => {

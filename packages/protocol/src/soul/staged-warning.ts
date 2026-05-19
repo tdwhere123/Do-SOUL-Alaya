@@ -74,6 +74,10 @@ export const StagedWarningSchema = z
     // summary: bounded one-line digest the agent or Inspector can echo
     // to the user without opening the underlying object.
     summary: BoundedReasonSchema,
+    // target_object_id: typed target for the warning. Optional so
+    // older recall payloads remain valid; daemon recall formatting fills
+    // it from the containing candidate when a producer omits it.
+    target_object_id: NonEmptyStringSchema.optional(),
     // resolution_options: canonical actions soul.resolve accepts for
     // this warning. May be empty when only human inbox review applies.
     resolution_options: z

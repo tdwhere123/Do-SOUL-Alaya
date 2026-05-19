@@ -112,10 +112,10 @@ describe("diffKpis", () => {
     expect(result.fixture_regressions).toHaveLength(0);
   });
 
-  // @anchor min-sample-test — see thresholds.min_sample_for_ratio_diff
+  // @anchor min-sample-test: see thresholds.min_sample_for_ratio_diff
   // ci-aware band widening absorbs small-N noise on ratio KPIs, so the
   // verdict comes out ok directly; the sample-size downgrade still
-  // matters for non-ratio KPIs (latency, hot share) — see the next test.
+  // matters for non-ratio KPIs (latency, hot share). See the next test.
   it("ci-aware band absorbs ratio-KPI noise when current evaluated_count is small", () => {
     const previous: KpiPayload = {
       ...buildPayload({ r_at_5: 1.0, r_at_10: 1.0 }),
@@ -141,11 +141,11 @@ describe("diffKpis", () => {
     expect(result.worst_verdict).not.toBe("fail");
   });
 
-  // @anchor sample-too-small-symmetric — current-undersampled case
+  // @anchor sample-too-small-symmetric: current-undersampled case
   it("downgrades fail to warn when CURRENT run is below min sample size", () => {
     // Previous is a healthy 500-q baseline at R@5=80%; current is a
     // 5-q smoke that happens to land at R@5=0%. The 80pp drop would
-    // cross FAIL — but the smoke is the unstable side, not the
+    // cross FAIL, but the smoke is the unstable side, not the
     // baseline. The guard must downgrade FAIL here too.
     const previous: KpiPayload = {
       ...buildPayload({ r_at_5: 0.8 }),

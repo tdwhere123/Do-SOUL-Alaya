@@ -58,20 +58,23 @@ the legacy table further down.
 
 | Subsystem | Level | Evidence |
 |---|---|---|
-| MCP tool surface — legacy 12 verbs (10 `soul.*` minus `soul.resolve` + 3 `garden.*`) | `live_event_proven` for the legacy catalog. `agent_used` for `soul.recall` + `soul.report_context_usage` only (the v0.3.0 host-autonomy witness). | `apps/core-daemon/src/mcp-memory-tool-catalog.ts:3-17`. `agent_used` evidence: `docs/v0.3/v0.3.0/host-autonomy-fixtures/`. |
+| MCP tool surface — legacy 12 tools (9 pre-`soul.resolve` `soul.*` + 3 `garden.*`) | `live_event_proven` for the legacy catalog. `agent_used` for `soul.recall` + `soul.report_context_usage` only (the v0.3.0 host-autonomy witness). The live catalog remains 13 tools after `soul.resolve`. | `apps/core-daemon/src/mcp-memory-tool-catalog.ts:3-17`. `agent_used` evidence: `docs/v0.3/v0.3.0/host-autonomy-fixtures/`. |
 | `soul.resolve` verb (new in v0.3.9) | `implementation_wired`. Production handler is mounted; end-to-end tests cover all 6 resolutions; optimistic concurrency guard live. No real host has been observed autonomously calling it yet. | Handler: `apps/core-daemon/src/mcp-memory-resolve-handler.ts`. Dispatcher: `packages/core/src/resolution-service.ts`. E2E: `apps/core-daemon/src/__tests__/soul-resolve-e2e.test.ts`. |
-| `staged_warnings[]` on recall payload (additive) | `implementation_wired`. Recall handler attaches warnings when policies fire; protocol schema field is optional. Production producers exist; an attached host has not yet been observed reacting to a warning autonomously. | `apps/core-daemon/src/mcp-memory-tool-handler.ts`; `packages/protocol/src/recall-payload.ts`; descriptor: catalog `soul.recall` description. |
+| `staged_warnings[]` on recall payload (additive) | `implementation_wired`. Recall handler attaches warnings when policies fire; protocol schema field is optional and now carries typed `target_object_id` so `soul.resolve` scope checks do not infer the target from array position. Production producers exist; an attached host has not yet been observed reacting to a warning autonomously. | `apps/core-daemon/src/mcp-memory-tool-handler.ts`; `packages/protocol/src/soul/staged-warning.ts`; descriptor: catalog `soul.recall` description. |
+| `active_constraints[]` recall root channel | `implementation_wired`. Hard CONSTRAINT / HAZARD / active governance facts are returned outside `results[]`, deduped from ordinary recall results, and capped by workspace config. This is an additive root field; `results[]` remains the existing recall result list. | `packages/protocol/src/soul/mcp-types.ts`; `packages/storage/src/repos/active-constraints.ts`; `packages/core/src/recall-service.ts`; `apps/core-daemon/src/mcp-memory-recall-result.ts`; tests: `active-constraints.test.ts`, `recall-service-tier-cascade.test.ts`, `mcp-memory-tool-handler.test.ts`. |
+| `soul.report_context_usage.trust_mode` | `implementation_wired`. Usage proof accepts optional `trust_mode` (`manual` / `automatic`), persists it in EventLog / storage, and PathPlasticityService halves automatic used-report reinforcement while keeping integer support-event counts. | `packages/protocol/src/soul/mcp-types.ts`; `packages/storage/src/migrations/076-trust-usage-trust-mode.sql`; `apps/core-daemon/src/trust-state.ts`; `packages/core/src/path-plasticity-service.ts`; tests: `trust-state.test.ts`, `trust-state-repo.test.ts`, `path-plasticity-service.test.ts`. |
 | Garden's `MaterializationRouter` (draft-only claim output, `object_kind` routing, `potential_conflict` route) | `live_event_proven`. The bench harness drives `MaterializationRouter` on every seeded turn via the rotated `object_kind` set (see `apps/bench-runner/src/harness/seed-rotation.ts`); the post-fix archives at `docs/bench-history/public-locomo/2026-05-17T064415Z-75d418c/` (LoCoMo 10-conv full, sample_size=1982), `docs/bench-history/public/2026-05-17T065105Z-75d418c/` (LongMemEval-S 100 disabled, label=staged), and `docs/bench-history/public/2026-05-17T104037Z-294070f/` (LongMemEval-S 100 embedding-on, label=staged) durably persist both the `memory_entry` and the `claim_form (draft)` rows produced by the router on real workspace state. | `packages/soul/src/garden/materialization-router.ts`. |
 | Producer-side ontology diversification (`pickEvidenceKind`, `toFormationKind`, `derivePrecedenceBasis`) | `live_event_proven`. The bench seed rotation (`fact / preference / decision / constraint / outcome` × N turns × M questions) flows through `MaterializationRouter.routeByObjectKind` — 3/5 of seeds land in `memory_and_claim_draft` and run `derivePrecedenceBasis`, 2/5 land in `memory_entry_only`. Witnessed by the three archives above: every seeded turn writes a `memory_entry` row with the diversified `dimension` field per the rotation, and the claim-capable rows write `claim_form` rows with the derived `precedence_basis`. The same rotation runs across both the embedding-off and embedding-on configurations. | `packages/soul/src/garden/materialization-router.ts`; `packages/core/src/claim-service.ts`. Tests: `materialization-router-routing.test.ts`, `seed-rotation.test.ts`. |
-| `ClaimService.transitionLifecycle` + optimistic concurrency on claim status | `implementation_wired`. Both the inline `soul.resolve` path and the proposal-accept path go through the CAS; tests prove the path. Live witness requires an attached host calling `soul.resolve.confirm` against a draft claim, which is the `soul.resolve` host-autonomy gate. | `packages/core/src/claim-service.ts`; `updateStatusStatement` adds `AND claim_status = ?`. CAS-first / audit-second order enforced in `applyLifecycleTransition`. |
-| `PathRelation` → `ActivationCandidate` producer | `implementation_wired`. Producer wired in the daemon; `verification_bias` consumed by `AuditorSchedulingAdvisor`; `unfinishedness_bias` carried into the recall sidecar. The 2-conv LoCoMo smoke does not yet reach K=3 co-usage to materialise paths; a longer bench or live workspace portrait is the gate. | `packages/core/src/path-activation-candidate-producer.ts`; `packages/core/src/manifestation-resolver.ts`. |
+| `ClaimService.transitionLifecycle` + optimistic concurrency on claim status | `implementation_wired`. Inline `soul.resolve` promotion runs through the storage-CAS lifecycle path; production wiring uses the EventPublisher append-and-mutate transaction so the lifecycle audit row and status change close together. Live witness requires an attached host calling `soul.resolve.confirm` against a draft claim, which is the `soul.resolve` host-autonomy gate. | `packages/core/src/claim-service.ts`; `packages/storage/src/repos/claim-form-repo.ts`; tests: `claim-service.test.ts`, `claim-form-repo.test.ts`. |
+| `PathRelation` → `ActivationCandidate` producer | `implementation_wired`. Producer wired in the daemon; `verification_bias` consumed by `AuditorSchedulingAdvisor`; `pending_incomplete` and `unfinishedness_bias` are carried into the public recall sidecar. The 2-conv LoCoMo smoke does not yet reach K=3 co-usage to materialise paths; a longer bench or live workspace portrait is the gate. | `packages/core/src/path-activation-candidate-producer.ts`; `packages/core/src/manifestation-resolver.ts`; `apps/core-daemon/src/mcp-memory-recall-result.ts`. |
+| `SoulPathGraphSnapshotTrend` | `implementation_wired`. `snapshot_trend` is optional on the graph contract, but when present its nested snapshot keys are required by protocol. Runtime omits the trend only when history is unavailable or unreadable; it does not emit partial trend objects. | `packages/protocol/src/soul/graph.ts`; `packages/core/src/graph-contract-service.ts`; tests: `soul-graph.test.ts`, `graph-contract-service.test.ts`. |
 | `PathRelation.governance_class` → manifestation policy | `implementation_wired`. `ManifestationResolver` reads `governance_class` as the manifestation ceiling per the four-class table; promotion requires a workspace with paths past the strictly_governed threshold. | `packages/core/src/path-manifestation-policy.ts`; `packages/core/src/manifestation-resolver.ts`. |
-| `PathRelation.stability_class` evolver | `implementation_wired`. Promotion ladder requires cumulative `support_events_count` and `contradiction_events_count = 0`; tests cover the matrix. Live witness requires a workspace with K=3+ co-usage which the 2-conv bench cannot generate. | `packages/core/src/path-plasticity-service.ts`. |
-| `AuditorSchedulingAdvisor` | `schema_only` for the production wire (exported but not yet on the production Auditor schedule call); `implementation_wired` for the in-test path. | `packages/soul/src/garden/auditor-scheduling-advisor.ts`. Carry-forward item; see closeout. |
-| `ManifestationBudgetConfigProviderPort` | `schema_only`. Stub returns `null`; persistent repo-backed provider is the follow-up. | Stub: `packages/core/src/manifestation-budget-config-provider.ts`. Carry-forward item. |
+| `PathRelation.stability_class` evolver | `implementation_wired`. Promotion ladder requires cumulative `support_events_count` and `contradiction_events_count = 0`; repeated used reports decay for strength, automatic trust-mode used reports are half-weighted, and support counts remain integer event counts. Tests cover the matrix. Live witness requires a workspace with K=3+ co-usage which the 2-conv bench cannot generate. | `packages/core/src/path-plasticity-service.ts`; `apps/core-daemon/src/path-plasticity-runtime.ts`. |
+| `AuditorSchedulingAdvisor` | `implementation_wired`. Production Garden runtime wraps the Auditor evidence-staleness port with advisor ordering from active PathRelation `verification_bias`, so biased paths are rechecked first. | `packages/core/src/auditor-scheduling-advisor.ts`; `apps/core-daemon/src/garden-runtime.ts`; tests: `garden-runtime.test.ts`, `path-activation-candidate-producer.test.ts`. |
+| `ManifestationBudgetConfigProviderPort` | `implementation_wired`. Daemon startup injects a persistent repo-backed provider from `manifestation_budget_configs`; absent workspace config still falls back to resolver defaults. Inspector config can read and patch the workspace budget through the daemon route. | `packages/storage/src/repos/manifestation-budget-config-repo.ts`; migration `075`; `apps/core-daemon/src/index.ts`; `apps/core-daemon/src/routes/config.ts`; `apps/inspector/web/src/components/ManifestationBudgetForm.tsx`; tests: `manifestation-budget-config-repo.test.ts`, `routes-config-port.test.ts`, `Config.test.tsx`. |
 | `karma_events` (`reuse_gain` / `evidence_gain` / `supersede_penalty` producers) | `implementation_wired`. Each producer is wired into its trigger site (recall hit / evidence health change / contradiction edge create); unit + integration tests prove each scenario. Live witness requires a workspace where the trigger sites actually fire (recall-twice / questionable→verified evidence flip / contradicts edge). | `packages/core/src/dynamics-service.ts`. |
-| `HealthIssueGroup` projection + Inspector Health Inbox | `implementation_wired`. Migration `071-health-issue-groups.sql` defines the table; Auditor / OrphanRadar / Green producers upsert by `(target_memory_id, cause_kind)`; Inspector `/health-inbox` renders the grouped view; tests cover the route. Live witness requires an Auditor pass against a workspace that has orphans or failed evidence. | `apps/inspector/web/src/pages/HealthInbox.tsx`; `packages/soul/src/garden/auditor.ts`. |
-| Promote-to-`strictly_governed` Inspector Proposal | `implementation_wired` for the origination button (posts a typed `path_relation` Proposal); accept-apply handler is the carry-forward gap. | `apps/inspector/web/src/pages/MemoryBrowser.tsx`. Carry-forward item. |
+| `HealthIssueGroup` projection + Inspector Health Inbox | `implementation_wired`. Migration `071-health-issue-groups.sql` defines the table; Auditor / OrphanRadar / Green producers upsert by `(target_memory_id, cause_kind)` with calibrated severity and operator-visible summaries; Inspector `/health-inbox` renders the grouped view; tests cover the route. Live witness requires an Auditor pass against a workspace that has orphans or failed evidence. | `apps/inspector/web/src/pages/HealthInbox.tsx`; `packages/soul/src/garden/auditor.ts`; tests: `auditor-health-issue-group.test.ts`, `routes-health-inbox.test.ts`. |
+| Promote-to-`strictly_governed` Inspector Proposal | `implementation_wired`. Inspector posts a typed `path_relation` Proposal and the accept-apply workflow creates or updates the corresponding `path_relations` row. | `apps/inspector/web/src/pages/MemoryBrowser.tsx`; `apps/core-daemon/src/routes/proposals.ts`; `apps/core-daemon/src/mcp-memory-proposal-workflow.ts`; `packages/storage/src/repos/proposal-repo.ts`; migration `073`. |
 | `surface_identities` per `(workspace_id, agent_target)` | `implementation_wired`. First attach per host writes the row via `SurfaceService.createSurface` (idempotent on CONFLICT); registrar covered by tests. Live witness requires a real attach from Codex / Claude Code that populates the table. | `apps/core-daemon/src/attach-surface-registrar.ts`. |
 | Recall utilization 5-bucket telemetry | `implementation_wired`. Route returns per-workspace per-`agent_target` 5-bucket counts derived from EventLog. Live witness requires a workspace that has accumulated recall deliveries + usage reports through the route. | `apps/core-daemon/src/routes/recall-utilization.ts`; `packages/eval/src/utilization-buckets.ts`. |
 | `SOUL_SINGLE_USED_ANCHOR` telemetry | `implementation_wired`. Emits when pointer_count===1 reports land; helper looks up the delivered_object_id; does **not** advance PathRelation co-usage counter. The 2-conv LoCoMo smoke does not yet emit a real single-used-anchor row. | `apps/core-daemon/src/routes/recall-utilization.ts`; `apps/core-daemon/src/index.ts`. |
@@ -398,13 +401,19 @@ New / changed runtime-visible surfaces:
   thresholds (3 / 8); `AuditorSchedulingAdvisor` reads
   `verification_bias`; `path-activation-candidate-producer.ts`
   bridges path data into manifestation.
+- **Governance routes are documented as four route families**:
+  scoring pressure, recall-time warning, out-of-band review queue,
+  and inline typed resolution. The five compatible runtime surfaces
+  remain for schema compatibility, but `HealthIssueGroup` and
+  `Proposal` now share the out-of-band review queue concept. See
+  `docs/handbook/governance-routes.md`.
 - **`HealthIssueGroup` Inspector Health Inbox**: new projection
   table (migration `071`), aggregated by `(target_memory_id,
   cause_kind)` from Auditor / OrphanRadar / Green / `evidence_failure`
   producers; Inspector `/health-inbox` page renders the grouped view;
   Memory Browser ships "Promote to strictly_governed" button that
-  posts a typed `path_relation` Proposal (origination only — invariant
-  §35 / §36).
+  posts a typed `path_relation` Proposal whose accept-apply path writes
+  the `path_relations` row through the audited proposal workflow.
 - **`surface_identities` per `(workspace_id, agent_target)`**: first
   attach writes a row via `SurfaceService.createSurface`; idempotent
   on CONFLICT; routes `governance_critical` DriftAlerts through
@@ -435,24 +444,22 @@ Bench feedback loop:
   See `docs/v0.3/v0.3.9/reports/v0.3.9-bench-diff.md` for pre/post
   numbers per category.
 
-Closed backlog: `#BL-044` (recall utilization follow-through,
-deferred from v0.3.8; closed by the new 5-bucket recall-utilization
-telemetry and the Inspector Health Inbox operator drill-down). No
-other open backlog at release.
-
-Carry-forward into v0.3.10+ (consolidated):
-`mapping_revoked` auto-trigger from `MemoryService.update`;
-`ManifestationBudgetConfigProviderPort` persistent repo;
-`AuditorSchedulingAdvisor` production wire;
-Promote-strictly-governed Proposal accept-apply handler;
-`UpgradeAssessmentAxis` 5-field cutover (see
-`docs/v0.3/v0.3.9/closeout-deferred-conditions.md`); full atomic
-boundary for claim transition (CAS-success / audit-append-failure
-crash window remains); threshold unification between
-`DYNAMICS_CONSTANTS.path_plasticity` and the new plasticity policy
-module. Full list lives in
-`docs/v0.3/v0.3.9/reports/v0.3.9-closeout.md` §Consolidated
-carry-forward.
+Backlog status: `#BL-044` is closed in v0.3.9 (recall utilization
+follow-through addressed by 5-bucket telemetry + Inspector drill-down).
+During v0.3.10 implementation, the residual carry-forward items in
+this section are closed in the controller branch: `mapping_revoked`
+fires from `MemoryService.update` and atomic proposal accept-apply,
+`ManifestationBudgetConfigProviderPort` uses the persistent repo,
+`AuditorSchedulingAdvisor` is wired into production Garden runtime,
+promote-to-`strictly_governed` Proposal accept-apply writes
+`path_relations`, claim lifecycle transitions use the EventPublisher
+transaction path, and path plasticity support thresholds are unified
+under `DYNAMICS_CONSTANTS.path_plasticity`. `report_context_usage`
+also carries optional `trust_mode`, path plasticity applies repeated-use
+decay plus automatic-mode half weight, and recall diagnostics record
+path expansion source seed/path/target triples. The long-lived
+`UpgradeAssessmentAxis` cutover stays tracked by
+`docs/v0.3/v0.3.9/closeout-deferred-conditions.md`.
 
 Workspace packages bumped `0.3.8` → `0.3.9`. See `docs/v0.3/v0.3.9/`.
 

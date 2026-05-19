@@ -634,9 +634,9 @@ place to look. The full project layout is documented in
 
 ## Where this is going
 
-### Current state (2026-05-17)
+### Current state (2026-05-18)
 
-v0.3.9 is the current checkpoint; v0.3.4 was the first publicly
+v0.3.9 is the current implemented checkpoint; v0.3.4 was the first publicly
 released v0.3.x line. Cumulative since v0.3.0: real Codex and Claude
 Code MCP sessions autonomously run `soul.recall` →
 `soul.report_context_usage` during normal conversations, with a
@@ -662,6 +662,10 @@ Health Inbox aggregates Auditor / OrphanRadar / Green into typed
 operator actions; and `SynthesisCapsule.promotion` is retired now
 that a replacement exists. The live MCP catalog is **13 tools** (10
 `soul.*` + 3 `garden.*`).
+
+v0.3.10 is under controller implementation/fix-loop. It is not
+release-ready until every phase fix-loop is clean and the Phase 4
+LongMemEval / LoCoMo full bench gates are archived.
 
 `keychain:` secret refs are code-reviewed across Linux / macOS /
 Windows adapters (runtime cross-platform write→read still deferred —

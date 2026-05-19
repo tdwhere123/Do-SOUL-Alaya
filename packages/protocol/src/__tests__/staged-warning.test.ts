@@ -48,6 +48,7 @@ describe("StagedWarning protocol schema", () => {
       severity: StagedWarningSeverity.BLOCKING,
       policy: "conflict_detection.v1",
       summary: "Contradicts memory-42; resolve before citing as durable truth.",
+      target_object_id: "memory-1",
       resolution_options: [
         StagedWarningResolutionOption.ACCEPT_PENDING,
         StagedWarningResolutionOption.REJECT_PENDING,
@@ -58,6 +59,7 @@ describe("StagedWarning protocol schema", () => {
     expect(warning.kind).toBe("contradiction_pending");
     expect(warning.severity).toBe("blocking");
     expect(warning.policy).toBe("conflict_detection.v1");
+    expect(warning.target_object_id).toBe("memory-1");
     expect(warning.resolution_options).toEqual([
       "accept_pending",
       "reject_pending",
@@ -157,6 +159,7 @@ describe("RecallCandidate staged_warnings round trip", () => {
           severity: StagedWarningSeverity.BLOCKING,
           policy: "conflict_detection.v1",
           summary: "contradicts memory-42.",
+          target_object_id: "memory-1",
           resolution_options: [StagedWarningResolutionOption.ESCALATE_HUMAN]
         }
       ]
@@ -168,6 +171,7 @@ describe("RecallCandidate staged_warnings round trip", () => {
         severity: "blocking",
         policy: "conflict_detection.v1",
         summary: "contradicts memory-42.",
+        target_object_id: "memory-1",
         resolution_options: ["escalate_human"]
       }
     ]);
@@ -189,6 +193,7 @@ describe("MemorySearchResult staged_warnings round trip", () => {
           severity: StagedWarningSeverity.INFO,
           policy: "confidence_floor.v1",
           summary: "confidence 0.22 below floor 0.3.",
+          target_object_id: "memory-1",
           resolution_options: [StagedWarningResolutionOption.DEFER]
         }
       ]
@@ -200,6 +205,7 @@ describe("MemorySearchResult staged_warnings round trip", () => {
         severity: "info",
         policy: "confidence_floor.v1",
         summary: "confidence 0.22 below floor 0.3.",
+        target_object_id: "memory-1",
         resolution_options: ["defer"]
       }
     ]);

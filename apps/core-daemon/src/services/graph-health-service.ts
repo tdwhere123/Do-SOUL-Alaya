@@ -34,6 +34,7 @@ const MEMORY_GRAPH_EDGE_TYPES = Object.values(MemoryGraphEdgeType);
 
 const PATH_RELATION_EVENT_TYPES = [
   RuntimeGovernanceEventType.PATH_RELATION_CREATED,
+  RuntimeGovernanceEventType.PATH_RELATION_LEGITIMACY_UPDATED,
   RuntimeGovernanceEventType.PATH_RELATION_REINFORCED,
   RuntimeGovernanceEventType.PATH_RELATION_WEAKENED,
   RuntimeGovernanceEventType.PATH_RELATION_REDIRECTED,

@@ -21,6 +21,7 @@ import {
 import {
   initDatabase,
   createGardenBackgroundDataPorts,
+  getCurrentSchemaSummary,
   SqliteMemoryEntryRepo,
   SqliteRunRepo,
   SqliteWorkspaceRepo
@@ -98,7 +99,9 @@ describe("trust state SQL persistence", () => {
 
     expect(existsSync(databasePath)).toBe(true);
     expect(process.env.DATA_DIR).toBe(dataDir);
-    expect(readMaxSchemaVersion(dataDir)).toBe(72);
+    const schemaSummary = readSchemaSummary(dataDir);
+    expect(schemaSummary.schemaOk).toBe(true);
+    expect(schemaSummary.persistedMaxVersion).toBe(schemaSummary.knownMaxVersion);
     expect(firstStatus).not.toBeNull();
     if (firstStatus === null) {
       throw new Error("first daemon lifetime did not produce a trust status");
@@ -472,13 +475,10 @@ async function seedCrossWorkspaceFixture(dataDir: string): Promise<void> {
   }
 }
 
-function readMaxSchemaVersion(dataDir: string): number {
+function readSchemaSummary(dataDir: string): ReturnType<typeof getCurrentSchemaSummary> {
   const database = initDatabase({ filename: join(dataDir, "alaya.db") });
   try {
-    const row = database.connection.prepare("SELECT MAX(version) AS version FROM schema_version").get() as {
-      readonly version: number;
-    };
-    return row.version;
+    return getCurrentSchemaSummary(database);
   } finally {
     database.close();
   }

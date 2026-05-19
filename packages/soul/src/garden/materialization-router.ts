@@ -2,6 +2,7 @@ import {
   EvidenceHealthState,
   MemoryDimension,
   MemoryGraphEdgeType,
+  PathGovernanceClass,
   ScopeClass,
   SourceKind,
   StorageTier,
@@ -17,6 +18,7 @@ import {
   type MemoryEntry,
   type MemoryGraphEdgeTypeValue,
   type OriginTier,
+  type PathRelation,
   type PrecedenceBasis as PrecedenceBasisValue,
   type ScopeClass as ScopeClassValue,
   type SourceKind as SourceKindValue,
@@ -48,6 +50,7 @@ export type RouteTarget =
   | "memory_entry_only"
   | "memory_and_claim_draft"
   | "conflict_evaluation"
+  | "path_relation_proposal"
   | "synthesis"
   | "handoff_gap"
   | "deferred";
@@ -144,6 +147,26 @@ interface ClaimMaterializationPort {
   create(input: ClaimMaterializationInput): Promise<MaterializationCreatedObject>;
 }
 
+export interface PathRelationProposalPayload {
+  readonly target_anchor: PathRelation["anchors"]["target_anchor"];
+  readonly constitution: PathRelation["constitution"];
+  readonly effect_vector: PathRelation["effect_vector"];
+  readonly plasticity_state: PathRelation["plasticity_state"];
+  readonly lifecycle: PathRelation["lifecycle"];
+  readonly legitimacy: PathRelation["legitimacy"];
+}
+
+export interface PathRelationProposalPort {
+  createPathRelationProposal(input: {
+    readonly workspaceId: string;
+    readonly runId: string;
+    readonly sourceSignalId: string;
+    readonly targetObjectId: string;
+    readonly reason: string;
+    readonly proposedPathRelation: PathRelationProposalPayload;
+  }): Promise<MaterializationCreatedObject>;
+}
+
 export interface GraphEdgeCreationPort {
   createEdge(params: {
     readonly sourceMemoryId: string;
@@ -186,6 +209,7 @@ export interface MaterializationRouterDeps {
   readonly memoryService: MemoryMaterializationPort;
   readonly synthesisService: SynthesisMaterializationPort;
   readonly claimService: ClaimMaterializationPort;
+  readonly pathRelationProposalPort?: PathRelationProposalPort;
   readonly handoffGapHandler: HandoffGapHandler;
   readonly graphEdgePort?: GraphEdgeCreationPort;
   readonly conflictDetectionPort?: ConflictDetectionPort;
@@ -248,6 +272,14 @@ export class MaterializationRouter {
       };
     }
 
+    if (signal.signal_kind === "potential_claim" && signal.object_kind === "path_relation") {
+      return {
+        kind: "deferred",
+        route_target: "path_relation_proposal",
+        routing_reason: "object_kind=path_relation -> path_relation_proposal"
+      };
+    }
+
     if (
       (signal.signal_kind === "potential_claim" || signal.signal_kind === "potential_preference") &&
       signal.confidence >= 0.5
@@ -300,6 +332,9 @@ export class MaterializationRouter {
     }
     if (target.route_target === "conflict_evaluation") {
       return await this.materializeConflictEvaluation(signal, target);
+    }
+    if (target.route_target === "path_relation_proposal") {
+      return await this.materializePathRelationProposal(signal, target);
     }
     if (target.route_target === "signal_only") {
       return this.materializeDeferred(signal, target);
@@ -391,6 +426,13 @@ export class MaterializationRouter {
         "incompatible_with_refs",
         MemoryGraphEdgeType.INCOMPATIBLE_WITH
       );
+      const timeConcernProposal = await this.createTimeConcernPathRelationProposal(
+        memory.object_id,
+        signal
+      );
+      if (timeConcernProposal !== null) {
+        createdObjects.push(timeConcernProposal);
+      }
       // ConflictDetectionService: rule-based + optional LLM scan for
       // memories in the same workspace that contradict / are incompatible
       // with the freshly materialized one. Edges created here complement
@@ -550,6 +592,13 @@ export class MaterializationRouter {
 
       const memory = await this.dependencies.memoryService.create(buildMemoryInput(signal, [evidence.object_id]));
       createdObjects.push({ object_kind: memory.object_kind, object_id: memory.object_id });
+      const timeConcernProposal = await this.createTimeConcernPathRelationProposal(
+        memory.object_id,
+        signal
+      );
+      if (timeConcernProposal !== null) {
+        createdObjects.push(timeConcernProposal);
+      }
 
       return {
         signal_id: signal.signal_id,
@@ -574,6 +623,55 @@ export class MaterializationRouter {
         error: readErrorMessage(error)
       };
     }
+  }
+
+  private async materializePathRelationProposal(
+    signal: CandidateMemorySignal,
+    target: MaterializationTarget
+  ): Promise<MaterializationResult> {
+    const targetObjectId = readStringPayload(signal.raw_payload, "target_object_id");
+    if (targetObjectId === null) {
+      return {
+        signal_id: signal.signal_id,
+        target_kind: "deferred",
+        route_target: target.route_target,
+        routing_reason: `${target.routing_reason} — deferred: target_object_id missing`,
+        created_objects: [],
+        success: true
+      };
+    }
+
+    const created = await this.createTimeConcernPathRelationProposal(targetObjectId, signal);
+    return {
+      signal_id: signal.signal_id,
+      target_kind: "deferred",
+      route_target: target.route_target,
+      routing_reason: target.routing_reason,
+      created_objects: created === null ? [] : [created],
+      success: true
+    };
+  }
+
+  private async createTimeConcernPathRelationProposal(
+    targetObjectId: string,
+    signal: CandidateMemorySignal
+  ): Promise<MaterializationCreatedObject | null> {
+    const port = this.dependencies.pathRelationProposalPort;
+    if (port === undefined) {
+      return null;
+    }
+    const timeConcern = readTimeConcernPayload(signal.raw_payload);
+    if (timeConcern === null) {
+      return null;
+    }
+    return await port.createPathRelationProposal({
+      workspaceId: signal.workspace_id,
+      runId: signal.run_id,
+      sourceSignalId: signal.signal_id,
+      targetObjectId,
+      reason: `Create time_concern PathRelation for ${timeConcern.matched_text}.`,
+      proposedPathRelation: buildTimeConcernPathRelationProposal(targetObjectId, timeConcern)
+    });
   }
 
   // invariant: potential_conflict route sink. evaluate is the only
@@ -777,6 +875,79 @@ function routeByObjectKind(objectKind: string): MaterializationTarget | null {
     default:
       return null;
   }
+}
+
+interface TimeConcernPayload {
+  readonly window_digest: string;
+  readonly matched_text: string;
+}
+
+function readTimeConcernPayload(rawPayload: CandidateMemorySignal["raw_payload"]): TimeConcernPayload | null {
+  const timeConcern = rawPayload.time_concern;
+  if (timeConcern === null || typeof timeConcern !== "object" || Array.isArray(timeConcern)) {
+    return null;
+  }
+  const candidate = timeConcern as Record<string, unknown>;
+  const windowDigest = normalizePayloadString(candidate.window_digest);
+  const matchedText = normalizePayloadString(candidate.matched_text);
+  if (windowDigest === null || matchedText === null) {
+    return null;
+  }
+  return { window_digest: windowDigest, matched_text: matchedText };
+}
+
+function readStringPayload(
+  rawPayload: CandidateMemorySignal["raw_payload"],
+  key: string
+): string | null {
+  return normalizePayloadString(rawPayload[key]);
+}
+
+function normalizePayloadString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim();
+  return normalized.length === 0 ? null : normalized;
+}
+
+function buildTimeConcernPathRelationProposal(
+  targetObjectId: string,
+  timeConcern: TimeConcernPayload
+): PathRelationProposalPayload {
+  return {
+    target_anchor: {
+      kind: "time_concern",
+      source_object_id: targetObjectId,
+      window_digest: timeConcern.window_digest
+    },
+    constitution: {
+      relation_kind: "time_concern",
+      why_this_relation_exists: [`matched temporal expression: ${timeConcern.matched_text}`]
+    },
+    effect_vector: {
+      salience: 0.6,
+      recall_bias: 0.7,
+      verification_bias: 0.1,
+      unfinishedness_bias: 0,
+      default_manifestation_preference: "lens_entry"
+    },
+    plasticity_state: {
+      strength: 0.4,
+      direction_bias: "source_to_target",
+      stability_class: "normal",
+      support_events_count: 1,
+      contradiction_events_count: 0
+    },
+    lifecycle: {
+      status: "active",
+      retirement_rule: "janitor_ttl_low_strength"
+    },
+    legitimacy: {
+      evidence_basis: ["garden:time_concern"],
+      governance_class: PathGovernanceClass.RECALL_ALLOWED
+    }
+  };
 }
 
 function computeEvidenceHealthState(signal: CandidateMemorySignal): EvidenceHealthStateValue {
@@ -1003,12 +1174,20 @@ function toClaimKind(objectKind: string): ClaimKind {
   switch (objectKind) {
     case "preference":
       return "preference";
+    case "decision":
+      return "decision";
     case "procedure":
       return "procedure";
+    case "hazard":
+      return "hazard";
     case "factual_policy":
       return "factual_policy";
     case "exception":
       return "exception";
+    case "glossary":
+      return "glossary";
+    case "episode":
+      return "episode";
     case "constraint":
     default:
       return "constraint";

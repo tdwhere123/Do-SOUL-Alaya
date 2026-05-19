@@ -1,14 +1,17 @@
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { KpiPayloadSchema } from "@do-soul/alaya-eval";
+import { dirname, join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { KpiPayloadSchema, type KpiPayload } from "@do-soul/alaya-eval";
+import { LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME } from "../longmemeval/archive-evidence.js";
 import { buildQuestionDiagnostic } from "../longmemeval/diagnostics.js";
 import { runLongMemEvalMultiturn } from "../longmemeval/multiturn.js";
 import {
+  buildLongMemEvalReportContextUsage,
   resolveBenchEmbeddingProviderLabel,
-  runLongMemEval
+  runLongMemEval,
+  runLongMemEvalRecallCycle
 } from "../longmemeval/runner.js";
 import type { LongMemEvalQuestion } from "../longmemeval/dataset.js";
 
@@ -41,6 +44,90 @@ function buildMockQuestion(id: string, answerSessionId: string): LongMemEvalQues
       ]
     ],
     answer_session_ids: [answerSessionId]
+  };
+}
+
+function buildLongMemEvalArchivePayload(
+  overrides: Partial<KpiPayload> = {}
+): KpiPayload {
+  return {
+    bench_name: "public",
+    split: "longmemeval-oracle",
+    run_at: "2026-05-14T10:00:00.000Z",
+    alaya_commit: "abc1234",
+    alaya_version: "0.3.10-test",
+    embedding_provider: "none",
+    chat_provider: "none",
+    policy_shape: "chat",
+    simulate_report: "none",
+    dataset: {
+      name: "longmemeval_oracle",
+      size: 2,
+      source: "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned"
+    },
+    sample_size: 2,
+    evaluated_count: 2,
+    harness_mode: "mcp_propose_review",
+    kpi: {
+      r_at_1: 0,
+      r_at_5: 0.5,
+      r_at_10: 0.5,
+      latency_ms_p50: 10,
+      latency_ms_p95: 20,
+      latency_source: "exact",
+      token_saved_ratio_vs_full_prompt: 0,
+      tier_distribution: { hot: 0, warm: 1, cold: 1 },
+      degradation_reasons: {
+        none: 2,
+        warm_cascade_engaged: 0,
+        cold_cascade_engaged: 0,
+        recall_explainability_partial: 0
+      },
+      seed_truncation: {
+        seed_turns_truncated: 0,
+        answer_turns_truncated: 0,
+        seed_chars_clipped: 0
+      },
+      per_scenario: [
+        { id: "q001", version: 1, hit_at_5: false, tier: "cold" },
+        { id: "q002", version: 1, hit_at_5: true, tier: "warm" }
+      ]
+    },
+    ...overrides
+  };
+}
+
+function buildRecallResult(deliveryId: string, objectIds: readonly string[]) {
+  return {
+    delivery_id: deliveryId,
+    results: objectIds.map((objectId, index) => ({
+      object_id: objectId,
+      object_kind: "memory_entry",
+      relevance_score: 0.9 - index * 0.1,
+      content_preview: objectId,
+      evidence_pointers: [objectId],
+      selection_reason: "test",
+      source_channels: [],
+      score_factors: { relevance: 0.9 - index * 0.1 },
+      budget_state: {
+        token_estimate: 1,
+        max_entries: 10,
+        max_total_tokens: 2000,
+        remaining_entries: 9 - index,
+        remaining_tokens: 1999 - index,
+        within_budget: true
+      }
+    })),
+    total_count: objectIds.length,
+    strategy_mix: {
+      deterministic_match: true,
+      precomputed_rank: true,
+      semantic_supplement: false,
+      graph_support: false,
+      path_plasticity: false,
+      global_recall: false
+    },
+    degradation_reason: null
   };
 }
 
@@ -102,6 +189,61 @@ describe("LongMemEval runner", () => {
     expect(JSON.stringify(row)).not.toContain("raw_memory_content");
   });
 
+  it("keeps delivered_results plane attribution for cohort diagnostics consumers", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-delivered-plane-attribution",
+      goldMemoryIds: ["memory-gold"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [
+        {
+          object_id: "memory-gold",
+          rank: 1,
+          relevance_score: 0.91,
+          plane_first_admitted: "activation",
+          plane_winning_admission: "protected_winner"
+        },
+        { object_id: "memory-fallback", rank: 2, relevance_score: 0.72 }
+      ],
+      hitAt1: true,
+      hitAt5: true,
+      hitAt10: true,
+      degradationReason: null,
+      embeddingMode: "env",
+      recallResult: {
+        diagnostics: {
+          provider_state: "provider_returned",
+          candidate_pool: [
+            {
+              object_id: "memory-fallback",
+              plane_first_admitted: "lexical",
+              plane_winning_admission: "lexical",
+              source_planes: ["lexical"]
+            }
+          ]
+        }
+      }
+    });
+
+    expect(row.delivered_results).toEqual([
+      {
+        object_id: "memory-gold",
+        rank: 1,
+        relevance_score: 0.91,
+        plane_first_admitted: "activation",
+        plane_winning_admission: "protected_winner",
+        score_factors: null
+      },
+      {
+        object_id: "memory-fallback",
+        rank: 2,
+        relevance_score: 0.72,
+        plane_first_admitted: "lexical",
+        plane_winning_admission: "lexical",
+        score_factors: null
+      }
+    ]);
+  });
+
   it("redacts arbitrary provider degradation text from diagnostics sidecars", () => {
     const row = buildQuestionDiagnostic({
       questionId: "q-secret-provider-text",
@@ -149,6 +291,139 @@ describe("LongMemEval runner", () => {
     expect(resolveBenchEmbeddingProviderLabel("disabled", {})).toBe("none");
   });
 
+  it("builds simulate-report usage from delivered results only", () => {
+    const delivered = [
+      { object_id: "decoy-top", relevance_score: 0.9 },
+      { object_id: "gold-delivered", relevance_score: 0.8 },
+      { object_id: "decoy-tail", relevance_score: 0.7 }
+    ];
+
+    expect(
+      buildLongMemEvalReportContextUsage({
+        simulateReport: "none",
+        deliveryId: "delivery-1",
+        results: delivered,
+        goldMemoryIds: ["gold-delivered"],
+        turnIndex: 3,
+        questionText: "Which memory was used?"
+      }).reportInput
+    ).toBeNull();
+
+    const goldOnly = buildLongMemEvalReportContextUsage({
+      simulateReport: "gold-only",
+      deliveryId: "delivery-2",
+      results: delivered,
+      goldMemoryIds: ["gold-delivered", "gold-not-delivered"],
+      turnIndex: 3,
+      questionText: "Which memory was used?"
+    });
+    expect(goldOnly.reportInput?.usageState).toBe("used");
+    expect(goldOnly.reportInput?.usedObjectIds).toEqual(["gold-delivered"]);
+    expect(goldOnly.reportInput?.deliveredObjects).toEqual([
+      { objectId: "decoy-top", usageStatus: "skipped" },
+      { objectId: "gold-delivered", usageStatus: "used" },
+      { objectId: "decoy-tail", usageStatus: "skipped" }
+    ]);
+
+    const mixedFallback = buildLongMemEvalReportContextUsage({
+      simulateReport: "mixed",
+      deliveryId: "delivery-3",
+      results: delivered,
+      goldMemoryIds: ["gold-not-delivered"],
+      turnIndex: 4,
+      questionText: "Which fallback was used?"
+    });
+    expect(mixedFallback.reportInput?.usageState).toBe("used");
+    expect(mixedFallback.reportInput?.usedObjectIds).toEqual(["decoy-top"]);
+
+    const skippedGoldOnly = buildLongMemEvalReportContextUsage({
+      simulateReport: "gold-only",
+      deliveryId: "delivery-4",
+      results: delivered,
+      goldMemoryIds: ["gold-not-delivered"],
+      turnIndex: 5,
+      questionText: "Was gold delivered?"
+    });
+    expect(skippedGoldOnly.reportInput?.usageState).toBe("skipped");
+    expect(skippedGoldOnly.reportInput?.usedObjectIds).toBeUndefined();
+    expect(skippedGoldOnly.reportInput?.deliveredObjects?.every(
+      (item) => item.usageStatus === "skipped"
+    )).toBe(true);
+
+    const alwaysUsedEmpty = buildLongMemEvalReportContextUsage({
+      simulateReport: "always-used",
+      deliveryId: "delivery-5",
+      results: [],
+      goldMemoryIds: ["gold-not-delivered"],
+      turnIndex: 6,
+      questionText: "No results?"
+    });
+    expect(alwaysUsedEmpty.reportInput?.usageState).toBe("skipped");
+    expect(alwaysUsedEmpty.reportInput?.deliveredObjects).toEqual([]);
+    expect(alwaysUsedEmpty.stats).toEqual({
+      reportsAttempted: 1,
+      reportsUsed: 0,
+      reportsSkipped: 1,
+      usedObjectCount: 0
+    });
+  });
+
+  it("uses a pre-report recall before the scored recall for simulate_report warm modes", async () => {
+    const recall = vi
+      .fn()
+      .mockResolvedValueOnce(buildRecallResult("delivery-pre", ["gold", "decoy"]))
+      .mockResolvedValueOnce(buildRecallResult("delivery-scored", ["decoy", "gold"]));
+    const reportContextUsage = vi.fn().mockResolvedValue(undefined);
+
+    const result = await runLongMemEvalRecallCycle({
+      daemon: { recall, reportContextUsage },
+      query: "Which memory was used?",
+      recallOptions: { maxResults: 10, conflictAwareness: true },
+      simulateReport: "mixed",
+      goldMemoryIds: ["gold"],
+      turnIndex: 7,
+      questionText: "Which memory was used?"
+    });
+
+    expect(recall).toHaveBeenCalledTimes(2);
+    expect(reportContextUsage).toHaveBeenCalledTimes(1);
+    expect(reportContextUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryId: "delivery-pre",
+        usedObjectIds: ["gold", "decoy"]
+      })
+    );
+    expect(result.scoredRecallResult.delivery_id).toBe("delivery-scored");
+    expect(result.scoredRecallResult.results[0]?.object_id).toBe("decoy");
+    expect(result.reportUsageStats).toMatchObject({
+      reportsAttempted: 1,
+      reportsUsed: 1,
+      usedObjectCount: 2
+    });
+  });
+
+  it("keeps simulate_report=none as a single scored recall", async () => {
+    const recall = vi
+      .fn()
+      .mockResolvedValueOnce(buildRecallResult("delivery-scored", ["gold"]));
+    const reportContextUsage = vi.fn().mockResolvedValue(undefined);
+
+    const result = await runLongMemEvalRecallCycle({
+      daemon: { recall, reportContextUsage },
+      query: "Which memory was used?",
+      recallOptions: { maxResults: 10, conflictAwareness: true },
+      simulateReport: "none",
+      goldMemoryIds: ["gold"],
+      turnIndex: 8,
+      questionText: "Which memory was used?"
+    });
+
+    expect(recall).toHaveBeenCalledTimes(1);
+    expect(reportContextUsage).not.toHaveBeenCalled();
+    expect(result.scoredRecallResult.delivery_id).toBe("delivery-scored");
+    expect(result.reportUsageStats.reportsAttempted).toBe(0);
+  });
+
   it(
     "runs 2-question mock dataset through the real MCP propose+review chain and produces a valid kpi.json with mcp_propose_review harness_mode",
     async () => {
@@ -186,24 +461,76 @@ describe("LongMemEval runner", () => {
         "utf8"
       );
 
+      const priorColdSlug = "2026-05-14T100000Z-abc1234-policy-chat";
+      const priorColdRoot = join(historyRoot, "public", priorColdSlug);
+      await mkdir(priorColdRoot, { recursive: true });
+      await writeFile(
+        join(priorColdRoot, "kpi.json"),
+        JSON.stringify(
+          buildLongMemEvalArchivePayload({
+            run_at: "2026-05-14T10:00:00.000Z",
+            policy_shape: "chat",
+            simulate_report: "none"
+          }),
+          null,
+          2
+        ) + "\n",
+        "utf8"
+      );
+      await writeFile(join(priorColdRoot, "report.md"), "cold report\n", "utf8");
+
+      const weightOverridesJson = JSON.stringify({
+        activation_weights_phase4b: {
+          scope_match: 0.08,
+          relevance: 0.2
+        },
+        additive: {
+          CONFIDENCE_DIRECT_WEIGHT: 0.1
+        },
+        fusion_weights: {
+          future_signal: 0.5
+        }
+      });
+
       const result = await runLongMemEval({
         variant,
         limit: 2,
         historyRoot,
         dataDir,
-        pinnedMetaRoot
+        pinnedMetaRoot,
+        policyShape: "chat",
+        simulateReport: "mixed",
+        weightOverridesJson
       });
 
       // Slug format must match SLUG_PATTERN
-      expect(result.slug).toMatch(/^\d{4}-\d{2}-\d{2}T\d{6}Z-[0-9a-f]{7,40}$/);
+      expect(result.slug).toMatch(
+        /^\d{4}-\d{2}-\d{2}T\d{6}Z-[0-9a-f]{7,40}-policy-chat-report-mixed$/
+      );
 
-      // harness_mode must reflect the real MCP chain — never direct_db_seed.
+      // harness_mode must reflect the real MCP chain, never direct_db_seed.
       expect(result.payload.harness_mode).toBe("mcp_propose_review");
       expect(result.payload.embedding_provider).toBe("none");
+      expect(result.payload.policy_shape).toBe("chat");
+      expect(result.payload.simulate_report).toBe("mixed");
+      expect(result.payload.recall_weight_overrides).toMatchObject({
+        source: "cli",
+        activation_weights_phase4b: {
+          scope_match: 0.08,
+          relevance: 0.2
+        },
+        additive: {
+          CONFIDENCE_DIRECT_WEIGHT: 0.1
+        },
+        fusion_weights: {
+          future_signal: 0.5
+        }
+      });
 
       // KPI payload must pass schema validation
       const parseResult = KpiPayloadSchema.safeParse(result.payload);
       expect(parseResult.success).toBe(true);
+      expect(await readFile(result.reportPath, "utf8")).toContain("Recall weights: source=cli");
 
       // Structural assertions
       expect(result.payload.bench_name).toBe("public");
@@ -219,9 +546,33 @@ describe("LongMemEval runner", () => {
         await readFile(result.diagnosticsPath!, "utf8")
       ) as {
         schema_version: number;
+        policy_shape: string;
+        simulate_report: string;
+        report_usage: {
+          mode: string;
+          reports_attempted: number;
+          reports_used: number;
+          reports_skipped: number;
+          used_object_count: number;
+        };
         provider_state_summary: {
           provider_not_requested: number;
           provider_returned_rate: number;
+        };
+        report_side_effects: {
+          recalls_edge_count: number;
+          memory_graph_edges_by_type: Record<string, number>;
+          path_relations_total: number;
+          snapshots: Array<{
+            memory_graph_edges_by_type: Record<string, number>;
+          }>;
+        };
+        scored_recall_evidence: {
+          delivered_result_count: number;
+          graph_support_gold_count: number;
+          path_plasticity_gold_count: number;
+          graph_expansion_plane_count: number;
+          path_expansion_plane_count: number;
         };
         questions: Array<{
           question_id: string;
@@ -231,14 +582,56 @@ describe("LongMemEval runner", () => {
         }>;
       };
       expect(diagnostics.schema_version).toBe(1);
+      expect(diagnostics.policy_shape).toBe("chat");
+      expect(diagnostics.simulate_report).toBe("mixed");
+      expect(diagnostics.report_usage.mode).toBe("mixed");
+      expect(diagnostics.report_usage.reports_attempted).toBe(2);
+      expect(
+        diagnostics.report_usage.reports_used + diagnostics.report_usage.reports_skipped
+      ).toBe(2);
+      expect(diagnostics.report_usage.used_object_count).toBeGreaterThanOrEqual(0);
       expect(diagnostics.provider_state_summary.provider_not_requested).toBe(2);
       expect(diagnostics.provider_state_summary.provider_returned_rate).toBe(0);
+      expect(diagnostics.report_side_effects.recalls_edge_count).toBeGreaterThanOrEqual(0);
+      expect(diagnostics.report_side_effects.memory_graph_edges_by_type).toHaveProperty("recalls");
+      expect(diagnostics.report_side_effects.path_relations_total).toBeGreaterThanOrEqual(0);
+      expect(diagnostics.report_side_effects.snapshots).toHaveLength(2);
+      expect(diagnostics.scored_recall_evidence.delivered_result_count).toBeGreaterThan(0);
+      expect(diagnostics.scored_recall_evidence.graph_support_gold_count).toBeGreaterThanOrEqual(0);
+      expect(diagnostics.scored_recall_evidence.path_plasticity_gold_count).toBeGreaterThanOrEqual(0);
+      expect(diagnostics.scored_recall_evidence.path_expansion_plane_count).toBeGreaterThanOrEqual(0);
       expect(diagnostics.questions).toHaveLength(2);
       expect(diagnostics.questions[0]?.question_id).toBe("q001");
       expect(diagnostics.questions[0]?.gold_memory_ids.length).toBeGreaterThan(0);
       expect(diagnostics.questions[0]?.recall_diagnostics_present).toBe(true);
       expect(diagnostics.questions[0]?.recall_diagnostics_keys).toContain("candidates");
       expect(JSON.stringify(diagnostics)).not.toContain("correct fact");
+      const comparison = JSON.parse(
+        await readFile(
+          join(dirname(result.kpiPath), LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME),
+          "utf8"
+        )
+      ) as {
+        current: { simulate_report: string; r_at_5: number };
+        opposite: { simulate_report: string; r_at_5: number } | null;
+        delta_current_minus_opposite: {
+          r_at_5: number;
+          report_side_effects: { recalls_edge_count: number | null };
+          scored_recall_evidence: { path_expansion_plane_count: number | null };
+        } | null;
+      };
+      expect(comparison.current.simulate_report).toBe("mixed");
+      expect(comparison.opposite?.simulate_report).toBe("none");
+      expect(comparison.opposite?.r_at_5).toBe(0.5);
+      expect(comparison.delta_current_minus_opposite?.r_at_5).toBeCloseTo(
+        result.payload.kpi.r_at_5 - 0.5
+      );
+      expect(
+        comparison.delta_current_minus_opposite?.report_side_effects.recalls_edge_count
+      ).toBeNull();
+      expect(
+        comparison.delta_current_minus_opposite?.scored_recall_evidence.path_expansion_plane_count
+      ).toBeNull();
 
       // All rate values are in [0, 1]
       const kpi = result.payload.kpi;
@@ -249,7 +642,7 @@ describe("LongMemEval runner", () => {
       expect(kpi.r_at_10).toBeGreaterThanOrEqual(0);
       expect(kpi.r_at_10).toBeLessThanOrEqual(1);
 
-      // Degradation reasons sum to the number of evaluated questions —
+      // Degradation reasons sum to the number of evaluated questions;
       // the values come from the daemon's recall response, not seed counts.
       const degradeTotal =
         kpi.degradation_reasons.none +

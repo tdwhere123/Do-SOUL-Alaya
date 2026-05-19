@@ -21,6 +21,20 @@ const SAMPLE_STATS = {
     p50_pointer_count: 3,
     p50_latency_ms: 120
   },
+  embedding: {
+    total_queries: 3,
+    returned_candidate_count: 5,
+    p50_latency_ms: 280,
+    p95_latency_ms: 900,
+    p99_latency_ms: 1250,
+    latency_buckets: [
+      { label: "<=150ms", count: 1 },
+      { label: "<=300ms", count: 1 },
+      { label: "<=800ms", count: 0 },
+      { label: "<=1100ms", count: 0 },
+      { label: ">1100ms", count: 1 }
+    ]
+  },
   usage: {
     total: 30,
     used: 18,

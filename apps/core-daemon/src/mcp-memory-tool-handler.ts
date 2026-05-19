@@ -58,6 +58,7 @@ import {
   type RecallCandidate,
   type RecallPolicy,
   type SoulApplyOverrideRequest,
+  type SoulActiveConstraint,
   type SoulEmitCandidateSignalRequest,
   type SoulExploreGraphRequest,
   type SoulListPendingProposalsRequest,
@@ -142,8 +143,11 @@ export interface McpMemoryToolHandlerDependencies {
         readonly field?: "created_at" | "last_used_at";
       }>;
       readonly hostContext?: Readonly<SoulRecallHostContext>;
+      readonly activeConstraintsCap?: number | null;
     }): Promise<Readonly<{
       readonly candidates: readonly Readonly<RecallCandidate>[];
+      readonly active_constraints: readonly Readonly<SoulActiveConstraint>[];
+      readonly active_constraints_count: number;
       readonly total_scanned: number;
       readonly coarse_filter_count: number;
       readonly fine_assessment_count: number;
@@ -460,11 +464,16 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       runId: context.runId,
       policyOverride,
       timeFilter,
-      hostContext: request.host_context
+      hostContext: request.host_context,
+      activeConstraintsCap: request.active_constraints_cap ?? null
     });
     let usedTokens = 0;
     let explainabilityPartial = false;
-    const results = recallResult.candidates.slice(0, request.max_results).map((candidate, index) => {
+    const activeConstraintIds = new Set(recallResult.active_constraints.map((constraint) => constraint.object_id));
+    const resultCandidates = recallResult.candidates
+      .filter((candidate) => !activeConstraintIds.has(candidate.object_id))
+      .slice(0, request.max_results);
+    const results = resultCandidates.map((candidate, index) => {
       if (
         candidate.selection_reason === undefined ||
         candidate.source_channels === undefined ||
@@ -478,7 +487,10 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       return result;
     });
     const deliveryId = `delivery_${generateId()}`;
-    const deliveredObjectIds = results.map((result) => result.object_id);
+    const deliveredObjectIds = [...new Set([
+      ...results.map((result) => result.object_id),
+      ...recallResult.active_constraints.map((constraint) => constraint.object_id)
+    ])];
     await deps.trustStateRecorder.recordDelivery({
       delivery_id: deliveryId,
       agent_target: context.agentTarget,
@@ -493,7 +505,7 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     await emitRecallDeliveredTelemetry({
       deliveryId,
       query: request.query,
-      pointerCount: results.length,
+      pointerCount: deliveredObjectIds.length,
       latencyMs: Date.now() - recallStartedAt,
       context
     });
@@ -504,7 +516,9 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     return SoulMemorySearchResponseSchema.parse({
       delivery_id: deliveryId,
       results,
-      total_count: recallResult.fine_assessment_count,
+      active_constraints: recallResult.active_constraints,
+      active_constraints_count: recallResult.active_constraints_count,
+      total_count: resultCandidates.length,
       strategy_mix: buildRecallStrategyMix(policyOverride, results),
       degradation_reason: degradationReason
     });
@@ -669,11 +683,8 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     if (deps.proposalWorkflow === undefined) {
       throw new ToolUnavailableError("Memory proposal workflow is not available.");
     }
-    // A1 fix-loop (finding-2): workspace_id has been removed from the
-    // public request schema; workspace is bound from the trusted MCP
-    // call context. The previous handler-level "must match" guard is
-    // therefore unnecessary — the workflow reads context.workspaceId
-    // directly. Pattern matches soul.explore_graph.
+    // invariant: workspace identity comes from the trusted MCP context,
+    // not public proposal-list input.
     const result = await deps.proposalWorkflow.listPendingProposals(request, context);
     return SoulListPendingProposalsResponseSchema.parse({
       proposals: result.proposals,
@@ -983,6 +994,7 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
         delivery_id: request.delivery_id,
         usage_state: usageState,
         used_object_ids: usedObjectIds,
+        ...(request.trust_mode === undefined ? {} : { trust_mode: request.trust_mode }),
         ...(request.per_anchor_usage === undefined
           ? {}
           : { per_anchor_usage: request.per_anchor_usage }),

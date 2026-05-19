@@ -157,7 +157,8 @@ export async function runLongMemEvalMultiturn(
         const deliveredResults = results.slice(0, 10).map((pointer, index) => ({
           object_id: pointer.object_id,
           rank: index + 1,
-          relevance_score: pointer.relevance_score
+          relevance_score: pointer.relevance_score,
+          score_factors: pointer.score_factors ?? null
         }));
 
         let hitAt1 = false;
@@ -314,6 +315,8 @@ export async function runLongMemEvalMultiturn(
     alaya_version: alayaVersion,
     embedding_provider: embeddingProviderLabel,
     chat_provider: "none",
+    policy_shape: "stress",
+    simulate_report: "none",
     dataset: {
       name: `${opts.variant}:multiturn`,
       size: datasetSize,

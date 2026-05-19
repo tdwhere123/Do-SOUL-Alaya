@@ -164,6 +164,114 @@ describe("PathRelation end-to-end (propose K=3 -> recall path_expansion)", () =>
     database.close();
     databases.delete(database);
   });
+
+  it("recalls dated memories through time_concern path expansion without the retired date plane", async () => {
+    const { database, memoryEntryRepo, pathRelationRepo } = await createRealStorage();
+
+    await memoryEntryRepo.create(createMemoryEntry({
+      object_id: MEM_QUERY_HIT,
+      content: "Artifact zeta was triaged during the release checkpoint.",
+      domain_tags: ["release"]
+    }));
+
+    pathRelationRepo.create({
+      path_id: "22222222-2222-4222-8222-aaaaaaaaaaaa",
+      workspace_id: WS,
+      anchors: {
+        source_anchor: { kind: "object", object_id: MEM_QUERY_HIT },
+        target_anchor: {
+          kind: "time_concern",
+          source_object_id: MEM_QUERY_HIT,
+          window_digest: "yesterday"
+        }
+      },
+      constitution: {
+        relation_kind: "time_concern",
+        why_this_relation_exists: ["matched temporal expression: yesterday"]
+      },
+      effect_vector: {
+        salience: 1,
+        recall_bias: 1,
+        verification_bias: 0,
+        unfinishedness_bias: 0,
+        default_manifestation_preference: "lens_entry"
+      },
+      plasticity_state: {
+        strength: 1,
+        direction_bias: "source_to_target",
+        stability_class: "stable",
+        support_events_count: 1,
+        contradiction_events_count: 0,
+        last_reinforced_at: "2026-05-16T00:00:00.000Z"
+      },
+      lifecycle: {
+        status: "active",
+        retirement_rule: "janitor_ttl_low_strength"
+      },
+      legitimacy: {
+        evidence_basis: ["garden:time_concern"],
+        governance_class: "recall_allowed"
+      },
+      created_at: "2026-05-16T00:00:00.000Z",
+      updated_at: "2026-05-16T00:00:00.000Z"
+    });
+
+    const memories = await memoryEntryRepo.findByWorkspaceId(WS, StorageTier.HOT);
+    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): Promise<EventLogEntry> => ({
+      event_id: `event-${entry.event_type}`,
+      created_at: "2026-05-16T00:00:00.000Z",
+      revision: 0,
+      ...entry
+    }));
+    const pathExpansionPort: RecallServiceDependencies["pathExpansionPort"] = {
+      findByAnchors: pathRelationRepo.findByAnchors.bind(pathRelationRepo),
+      findByTimeConcernWindowDigests: async (workspaceId, windowDigests) => {
+        const normalized = new Set(windowDigests);
+        const paths = await pathRelationRepo.findByWorkspace(workspaceId);
+        return paths.filter((path) =>
+          [path.anchors.source_anchor, path.anchors.target_anchor].some((anchor) =>
+            anchor.kind === "time_concern" && normalized.has(anchor.window_digest)
+          )
+        );
+      }
+    };
+    const recallService = new RecallService({
+      now: () => "2026-05-16T00:00:00.000Z",
+      generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
+      memoryRepo: {
+        findByWorkspaceId: vi.fn(async () => memories),
+        findByDimension: vi.fn(async () => memories),
+        findByScopeClass: vi.fn(async () => memories),
+        searchByKeyword: vi.fn(async () => [])
+      } as RecallServiceDependencies["memoryRepo"],
+      slotRepo: {
+        findByWorkspace: vi.fn(async () => [])
+      },
+      eventLogRepo: {
+        append,
+        queryByEntity: vi.fn(async () => [])
+      },
+      pathExpansionPort
+    });
+
+    const result = await recallService.recall({
+      taskSurface: createTaskSurface("What happened yesterday?"),
+      workspaceId: WS,
+      runId: "run-1",
+      strategy: "build"
+    });
+
+    const datedCandidate = result.candidates.find((c) => c.object_id === MEM_QUERY_HIT);
+    const retiredDatePlane = ["temporal", "proximity"].join("_");
+    expect(datedCandidate, "MEM_QUERY_HIT should appear through time_concern path_expansion").toBeDefined();
+    expect(datedCandidate?.source_channels).toContain("time_concern");
+    expect(datedCandidate?.source_channels).toContain("plane:path_expansion");
+    expect(datedCandidate?.source_channels).not.toContain(retiredDatePlane);
+    expect(datedCandidate?.source_channels).not.toContain(`plane:${retiredDatePlane}`);
+
+    database.close();
+    databases.delete(database);
+  });
 });
 
 async function createRealStorage() {

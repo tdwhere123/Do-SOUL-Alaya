@@ -79,7 +79,7 @@ export const soulToolDefs: readonly SoulToolSpec[] = [
   {
     name: "soul.report_context_usage",
     description:
-      "WHEN: you used recalled memory in your answer and need to close the delivery loop. Report whether recalled context for a delivery was used, skipped, or not applicable. Supports delivered-vs-used trust state. Include `turn_index` and `turn_digest.last_messages` (the turn's verbatim messages) so Alaya extracts durable candidates from this turn even when nothing was recalled.",
+      "WHEN: you used recalled memory in your answer and need to close the delivery loop. Report whether recalled context for a delivery was used, skipped, or not applicable. Supports delivered-vs-used trust state. Optional `trust_mode` distinguishes manual vs automatic usage attribution; automatic used reports carry lower path-plasticity weight. Include `turn_index` and `turn_digest.last_messages` (the turn's verbatim messages) so Alaya extracts durable candidates from this turn even when nothing was recalled.",
     parametersSchema: SoulReportContextUsageRequestSchema
   },
   {

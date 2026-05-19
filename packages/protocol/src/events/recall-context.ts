@@ -1,10 +1,12 @@
 import { z } from "zod";
 import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../schema-primitives.js";
+import { SoulContextUsageTrustModeSchema } from "../soul/mcp-types.js";
 
 const recallContextEventTypeValues = [
   "soul.task_surface.created",
   "soul.recall.completed",
   "soul.context_lens.assembled",
+  "soul.recall.weight_transfer",
   "soul.recall.delivered",
   "soul.context_usage.reported",
   "soul.single_used_anchor"
@@ -14,6 +16,7 @@ export const RecallContextEventType = {
   SOUL_TASK_SURFACE_CREATED: "soul.task_surface.created",
   SOUL_RECALL_COMPLETED: "soul.recall.completed",
   SOUL_CONTEXT_LENS_ASSEMBLED: "soul.context_lens.assembled",
+  SOUL_RECALL_WEIGHT_TRANSFER: "soul.recall.weight_transfer",
   SOUL_RECALL_DELIVERED: "soul.recall.delivered",
   SOUL_CONTEXT_USAGE_REPORTED: "soul.context_usage.reported",
   // invariant: this event is a passive telemetry signal; emitters MUST NOT
@@ -63,6 +66,18 @@ export const SoulContextLensAssembledPayloadSchema = z
   })
   .readonly();
 
+export const SoulRecallWeightTransferPayloadSchema = z
+  .object({
+    workspace_id: NonEmptyStringSchema,
+    run_id: NonEmptyStringSchema.nullable(),
+    cold_score: z.number().min(0).max(1),
+    recalls_edge_count: NonNegativeIntSchema,
+    recalls_threshold: NonNegativeIntSchema,
+    transferred_amount: z.number().min(0).max(1),
+    occurred_at: IsoDatetimeStringSchema
+  })
+  .readonly();
+
 export const SoulRecallDeliveredPayloadSchema = z
   .object({
     delivery_id: NonEmptyStringSchema,
@@ -86,6 +101,7 @@ export const SoulContextUsageReportedPayloadSchema = z
     run_id: NonEmptyStringSchema.nullable(),
     agent_target: NonEmptyStringSchema,
     usage_state: ContextUsageStateSchema,
+    trust_mode: SoulContextUsageTrustModeSchema.optional(),
     workspace_id: NonEmptyStringSchema,
     occurred_at: IsoDatetimeStringSchema
   })
@@ -111,6 +127,7 @@ const recallContextPayloadSchemas = {
   [RecallContextEventType.SOUL_TASK_SURFACE_CREATED]: SoulTaskSurfaceCreatedPayloadSchema,
   [RecallContextEventType.SOUL_RECALL_COMPLETED]: SoulRecallCompletedPayloadSchema,
   [RecallContextEventType.SOUL_CONTEXT_LENS_ASSEMBLED]: SoulContextLensAssembledPayloadSchema,
+  [RecallContextEventType.SOUL_RECALL_WEIGHT_TRANSFER]: SoulRecallWeightTransferPayloadSchema,
   [RecallContextEventType.SOUL_RECALL_DELIVERED]: SoulRecallDeliveredPayloadSchema,
   [RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED]: SoulContextUsageReportedPayloadSchema,
   [RecallContextEventType.SOUL_SINGLE_USED_ANCHOR]: SoulSingleUsedAnchorPayloadSchema
@@ -135,6 +152,10 @@ const SoulContextLensAssembledEventObjectSchema = createRecallContextEventObject
   RecallContextEventType.SOUL_CONTEXT_LENS_ASSEMBLED,
   SoulContextLensAssembledPayloadSchema
 );
+const SoulRecallWeightTransferEventObjectSchema = createRecallContextEventObjectSchema(
+  RecallContextEventType.SOUL_RECALL_WEIGHT_TRANSFER,
+  SoulRecallWeightTransferPayloadSchema
+);
 const SoulRecallDeliveredEventObjectSchema = createRecallContextEventObjectSchema(
   RecallContextEventType.SOUL_RECALL_DELIVERED,
   SoulRecallDeliveredPayloadSchema
@@ -151,6 +172,7 @@ const SoulSingleUsedAnchorEventObjectSchema = createRecallContextEventObjectSche
 export const SoulTaskSurfaceCreatedEventSchema = SoulTaskSurfaceCreatedEventObjectSchema.readonly();
 export const SoulRecallCompletedEventSchema = SoulRecallCompletedEventObjectSchema.readonly();
 export const SoulContextLensAssembledEventSchema = SoulContextLensAssembledEventObjectSchema.readonly();
+export const SoulRecallWeightTransferEventSchema = SoulRecallWeightTransferEventObjectSchema.readonly();
 export const SoulRecallDeliveredEventSchema = SoulRecallDeliveredEventObjectSchema.readonly();
 export const SoulContextUsageReportedEventSchema = SoulContextUsageReportedEventObjectSchema.readonly();
 export const SoulSingleUsedAnchorEventSchema = SoulSingleUsedAnchorEventObjectSchema.readonly();
@@ -160,6 +182,7 @@ export const RecallContextEventUnionSchema = z
     SoulTaskSurfaceCreatedEventObjectSchema,
     SoulRecallCompletedEventObjectSchema,
     SoulContextLensAssembledEventObjectSchema,
+    SoulRecallWeightTransferEventObjectSchema,
     SoulRecallDeliveredEventObjectSchema,
     SoulContextUsageReportedEventObjectSchema,
     SoulSingleUsedAnchorEventObjectSchema
@@ -180,3 +203,4 @@ export function parseRecallContextEventPayload<T extends keyof typeof recallCont
 
 export type RecallContextEventTypeValue = z.infer<typeof RecallContextEventTypeSchema>;
 export type RecallContextEvent = z.infer<typeof RecallContextEventUnionSchema>;
+export type SoulRecallWeightTransferPayload = z.infer<typeof SoulRecallWeightTransferPayloadSchema>;

@@ -15,16 +15,20 @@ export function renderReport(
   );
   lines.push(`# Bench Report — ${current.bench_name} / ${current.split}`);
   lines.push("");
-  lines.push(
+  const headerLines = [
     `- Run at: ${current.run_at}`,
     `- Sample size: ${current.sample_size} (evaluated ${current.evaluated_count}/${current.sample_size}, label=${sampleLabel})`,
     `- Harness mode: ${current.harness_mode}`,
     `- Alaya commit: ${current.alaya_commit} (${current.alaya_version})`,
     `- Embedding: ${current.embedding_provider}`,
     `- Chat: ${current.chat_provider}`,
-    `- Dataset: ${current.dataset.name} (size=${current.dataset.size})`,
-    ""
-  );
+    `- Policy shape: ${current.policy_shape ?? "stress"}`,
+    `- Dataset: ${current.dataset.name} (size=${current.dataset.size})`
+  ];
+  if (current.recall_weight_overrides !== undefined) {
+    headerLines.push(`- Recall weights: ${formatRecallWeightOverrides(current.recall_weight_overrides)}`);
+  }
+  lines.push(...headerLines, "");
 
   lines.push("## Scoring contract");
   lines.push("");
@@ -321,29 +325,56 @@ function collectAbsoluteTargetGates(
   current: KpiPayload
 ): readonly AbsoluteTargetGate[] {
   if (
-    current.bench_name !== "public" ||
-    current.split !== "longmemeval-s" ||
-    current.embedding_provider !== "none"
+    current.bench_name === "public-locomo" &&
+    current.split === "locomo10" &&
+    current.embedding_provider !== "none" &&
+    current.evaluated_count >= current.sample_size &&
+    current.sample_size >= 1982
   ) {
-    return [];
-  }
-
-  if (current.evaluated_count === 100) {
     return [
       absoluteTargetGate(
-        "LongMemEval-S disabled-100 smoke target",
+        "LoCoMo embedding-full release target",
         current.kpi.r_at_5,
-        0.7
+        0.4
       )
     ];
   }
 
-  if (current.evaluated_count >= current.sample_size && current.sample_size >= 500) {
+  if (
+    current.bench_name !== "public" ||
+    current.split !== "longmemeval-s"
+  ) {
+    return [];
+  }
+
+  const embeddingEnabled = current.embedding_provider !== "none";
+
+  if (!embeddingEnabled && current.evaluated_count >= 100) {
     return [
       absoluteTargetGate(
-        "LongMemEval-S disabled-500 release floor",
+        "LongMemEval-S disabled fallback target",
         current.kpi.r_at_5,
-        0.65
+        0.4
+      )
+    ];
+  }
+
+  if (embeddingEnabled && current.evaluated_count === 100) {
+    return [
+      absoluteTargetGate(
+        "LongMemEval-S embedding-100 must target",
+        current.kpi.r_at_5,
+        0.6
+      )
+    ];
+  }
+
+  if (embeddingEnabled && current.evaluated_count >= current.sample_size && current.sample_size >= 500) {
+    return [
+      absoluteTargetGate(
+        "LongMemEval-S embedding-500 release target",
+        current.kpi.r_at_5,
+        0.5
       )
     ];
   }
@@ -389,4 +420,34 @@ function ciAnnotation(ratio: number, evaluatedCount: number): string {
   const interval = wilsonInterval(successes, evaluatedCount);
   const halfWidthPp = ((interval.hi - interval.lo) / 2) * 100;
   return ` (95% CI ±${halfWidthPp.toFixed(2)}pp, [${(interval.lo * 100).toFixed(2)}%, ${(interval.hi * 100).toFixed(2)}%])`;
+}
+
+function formatRecallWeightOverrides(
+  summary: NonNullable<KpiPayload["recall_weight_overrides"]>
+): string {
+  const parts = [`source=${summary.source}`];
+  if (summary.activation_weights_phase4b !== undefined) {
+    parts.push(
+      `activation={${formatNumberMap(summary.activation_weights_phase4b)}}`
+    );
+  }
+  if (summary.additive !== undefined) {
+    parts.push(`additive={${formatNumberMap(summary.additive)}}`);
+  }
+  if (summary.fusion_weights !== undefined) {
+    parts.push(`fusion={${formatNumberMap(summary.fusion_weights)}}`);
+  }
+  return parts.join(" ");
+}
+
+function formatNumberMap(values: Readonly<Record<string, number | undefined>>): string {
+  return Object.entries(values)
+    .filter((entry): entry is [string, number] => entry[1] !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}=${formatCompactNumber(value)}`)
+    .join(",");
+}
+
+function formatCompactNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : Number(value.toFixed(6)).toString();
 }

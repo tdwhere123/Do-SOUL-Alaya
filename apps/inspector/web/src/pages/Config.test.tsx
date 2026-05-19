@@ -49,6 +49,26 @@ describe("ConfigPage", () => {
           embedding_enabled: false
         });
       }
+      if (url.endsWith("/config/ws-1/manifestation-budget")) {
+        return jsonResponse({
+          success: true,
+          data: {
+            workspace_id: "ws-1",
+            stance_bias_cap: 10,
+            dialogue_nudge_cap: 3,
+            lens_entry_cap: 1,
+            escalation_policy: {
+              nudge_min_pressure: 0.4,
+              nudge_min_confidence: 0.5,
+              lens_min_pressure: 0.7,
+              lens_min_confidence: 0.7,
+              lens_requires_task_coupling: true,
+              lens_requires_governance_ceiling: true
+            },
+            updated_at: "2026-05-18T00:00:00.000Z"
+          }
+        });
+      }
       return jsonResponse({});
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -88,6 +108,19 @@ describe("ConfigPage", () => {
       expect(
         fetchMock.mock.calls.some(
           ([url]) => typeof url === "string" && url.endsWith("/api/config/ws-1/strategy")
+        )
+      ).toBe(true);
+    });
+  });
+
+  it("renders manifestation budget controls from the workspace config route", async () => {
+    renderConfig();
+    expect(await screen.findByRole("heading", { name: /Manifestation Budget/i })).toBeTruthy();
+    expect((await screen.findByLabelText(/stance bias cap/i) as HTMLInputElement).value).toBe("10");
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url]) => typeof url === "string" && url.endsWith("/api/config/ws-1/manifestation-budget")
         )
       ).toBe(true);
     });

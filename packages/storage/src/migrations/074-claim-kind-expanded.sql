@@ -1,0 +1,3 @@
+-- ClaimKind is expanded at the protocol/schema layer.
+-- claim_forms.claim_kind is TEXT with no SQLite CHECK constraint, so stored
+-- rows need no table rewrite.

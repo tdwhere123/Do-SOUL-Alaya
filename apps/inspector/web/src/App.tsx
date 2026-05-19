@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from "react-router-dom";
 import { getInspectorToken, setInspectorToken, setUnauthorizedHandler, setWorkspaceId } from "./api";
 
+import BenchTrendPage from "./pages/BenchTrend";
 import ConfigPage from "./pages/Config";
 import GraphPage from "./pages/Graph";
 import HealthInboxPage from "./pages/HealthInbox";
@@ -85,6 +86,7 @@ export function AppContent() {
       <Routes>
         <Route element={<Layout />}>
           <Route path="/overview" element={<OverviewPage />} />
+          <Route path="/bench-trend" element={<BenchTrendPage />} />
           <Route path="/config" element={<ConfigPage />} />
           <Route path="/graph" element={<GraphPage />} />
           <Route path="/proposals" element={<ProposalsPage />} />

@@ -14,8 +14,8 @@ import {
 import { EventPublisher, type RuntimeNotifier } from "../event-publisher.js";
 
 const NOW_ISO = "2026-05-04T12:00:00.000Z";
-const PAST_REINFORCED_ISO = "2026-04-01T12:00:00.000Z"; // > 30 days before NOW
-const RECENT_REINFORCED_ISO = "2026-05-04T11:00:00.000Z"; // 1 hour before NOW
+const PAST_REINFORCED_ISO = "2026-04-01T12:00:00.000Z";
+const RECENT_REINFORCED_ISO = "2026-05-04T11:00:00.000Z";
 
 function createPath(overrides: Partial<PathRelation> = {}): PathRelation {
   return {
@@ -59,11 +59,8 @@ function createPath(overrides: Partial<PathRelation> = {}): PathRelation {
 let usageRecordSeq = 0;
 
 function createUsageRecord(overrides: Partial<UsageProofRecord> = {}): UsageProofRecord {
-  // audit_event_id is the dedup key the service uses to make aggregation
-  // idempotent across overlapping ticks (I8). Tests must NOT rely on the
-  // default constant value across multiple receipts in the same test;
-  // defaulting to a sequence keeps each receipt distinct unless the test
-  // is explicitly verifying overlap-dedup behavior.
+  // invariant: audit_event_id is the durable dedupe key. A generated
+  // sequence keeps fixtures distinct unless a test overrides it.
   usageRecordSeq += 1;
   return {
     delivery_id: "delivery-1",
@@ -610,10 +607,9 @@ describe("PathPlasticityService", () => {
   });
 
   it("aggregates multiple used receipts on the same path into one reinforced event with combined support_events_count", async () => {
-    // Two distinct used receipts (distinct audit_event_ids, distinct
-    // delivery_ids) targeting the same path collapse into ONE reinforced
-    // event (we aggregate per-path counts), and revision is computed at 0
-    // when the path has no prior path_relation events.
+    // invariant: distinct used receipts targeting one path collapse into a
+    // single reinforced event, while repeated use applies a decayed strength
+    // signal instead of a linear multiplier.
     const path = createPath();
     const harness = buildHarness({
       usageRecords: [
@@ -631,21 +627,44 @@ describe("PathPlasticityService", () => {
     const reinforcedEvents = harness.publishedEvents.filter(
       (event) => event.event_type === RuntimeGovernanceEventType.PATH_RELATION_REINFORCED
     );
-    // One aggregated reinforcement, support count credited with both used receipts.
     expect(reinforcedEvents).toHaveLength(1);
     expect(reinforcedEvents[0]?.payload_json).toMatchObject({
       support_events_count: 2,
-      new_strength: 0.5 + 2 * PATH_PLASTICITY_CONSTANTS.USED_DELTA
+      new_strength: 0.5 + 1.5 * PATH_PLASTICITY_CONSTANTS.USED_DELTA
     });
   });
 
-  // ----- B1 regression: dedup when both anchors hit in a single receipt --
+  it("halves the strength signal for automatic trust-mode used receipts", async () => {
+    const path = createPath({ plasticity_state: { strength: 0.4, direction_bias: "source_to_target", stability_class: "normal", support_events_count: 2, contradiction_events_count: 0 } });
+    const harness = buildHarness({
+      usageRecords: [
+        createUsageRecord({
+          delivery_id: "delivery-auto",
+          used_object_ids: ["obj-target"],
+          trust_mode: "automatic"
+        })
+      ],
+      pathsByObjectId: { "obj-target": [path] }
+    });
+
+    await harness.service.computeAndApplyPlasticity({
+      workspaceId: "workspace-1",
+      sinceIso: "2026-05-03T00:00:00.000Z"
+    });
+
+    const reinforcedEvents = harness.publishedEvents.filter(
+      (event) => event.event_type === RuntimeGovernanceEventType.PATH_RELATION_REINFORCED
+    );
+    expect(reinforcedEvents).toHaveLength(1);
+    expect(reinforcedEvents[0]?.payload_json).toMatchObject({
+      support_events_count: 3,
+      new_strength: 0.4 + PATH_PLASTICITY_CONSTANTS.USED_DELTA * 0.5
+    });
+  });
 
   it("dedupes a path whose source_anchor and target_anchor object_ids both appear in one usage receipt — exactly one delta and one audit event", async () => {
-    // Build a single PathRelation P whose source_anchor.object_id = M1 and
-    // target_anchor.object_id = M2. A usage receipt that cites BOTH M1 and
-    // M2 must produce exactly ONE reinforced event for P (with combined
-    // support_events_count) and exactly ONE durable repo update — not two.
+    // invariant: citing both anchors of the same PathRelation in one usage
+    // receipt produces one logical reinforcement and one durable update.
     const dualAnchorPath = createPath({
       path_id: "path-dual-anchor",
       anchors: {
@@ -660,10 +679,8 @@ describe("PathPlasticityService", () => {
         contradiction_events_count: 0
       }
     });
-    // findByAnchor returns the same dualAnchorPath whether queried by
-    // obj-source-M1 or obj-target-M2 (the real SqlitePathRelationRepo
-    // returns rows where the anchor matches EITHER side). The test mock
-    // mirrors this: the same path appears under both keys.
+    // invariant: the repository may return the same path from either anchor
+    // lookup; aggregation dedupes the path before applying the receipt.
     const harness = buildHarness({
       usageRecords: [
         createUsageRecord({
@@ -682,29 +699,20 @@ describe("PathPlasticityService", () => {
       sinceIso: "2026-05-03T00:00:00.000Z"
     });
 
-    // Exactly one reinforcement counted.
     expect(result.reinforced).toBe(1);
     expect(result.affectedPathIds).toEqual(["path-dual-anchor"]);
 
-    // Exactly one PATH_RELATION_REINFORCED event in the audit log.
     const reinforcedEvents = harness.publishedEvents.filter(
       (event) => event.event_type === RuntimeGovernanceEventType.PATH_RELATION_REINFORCED
     );
     expect(reinforcedEvents).toHaveLength(1);
 
-    // The single event reports support_events_count=1 (the receipt counts
-    // as ONE logical use of the path, not two — even though the path's
-    // source and target anchors are both cited) and the CORRECT new_strength
-    // (one delta application of USED_DELTA, NOT two). The strength MUST be
-    // 0.4+0.05, not 0.4+0.10 — because the path was reinforced exactly once
-    // for the logical "both anchors used" event.
     expect(reinforcedEvents[0]?.payload_json).toMatchObject({
       previous_strength: 0.4,
       new_strength: 0.4 + PATH_PLASTICITY_CONSTANTS.USED_DELTA,
       support_events_count: 1
     });
 
-    // Exactly one repo update — NOT two clobbering each other.
     expect(harness.repoUpdates).toHaveLength(1);
     expect(harness.repoUpdates[0]?.pathId).toBe("path-dual-anchor");
     expect(harness.repoUpdates[0]?.updates.plasticity_state?.strength).toBeCloseTo(
@@ -712,8 +720,6 @@ describe("PathPlasticityService", () => {
       10
     );
   });
-
-  // ----- I7: missing-path / retired-path receipts ----------------------
 
   it("emits no event and does not throw when the receipt cites an object_id with no matching PathRelation", async () => {
     const harness = buildHarness({
@@ -818,13 +824,9 @@ describe("PathPlasticityService", () => {
     });
   });
 
-  // ----- I8: idempotency across overlapping ticks ----------------------
-
   it("processes each usage receipt exactly once across two consecutive ticks even when the second sinceIso overlaps the first window (audit_event_id high-water-mark dedup)", async () => {
-    // The same UsageProofRecord (same audit_event_id) is returned by the
-    // reader on BOTH ticks. The service must dedupe internally so the path
-    // sees exactly ONE reinforcement, not two — even if the daemon's
-    // sinceIso watermark is misconfigured to include the boundary record.
+    // invariant: duplicate audit_event_id rows inside one compute call are
+    // one logical usage receipt.
     const path = createPath({
       plasticity_state: {
         strength: 0.4,
@@ -837,7 +839,7 @@ describe("PathPlasticityService", () => {
     const sharedReceipt = createUsageRecord({
       delivery_id: "delivery-overlap",
       used_object_ids: ["obj-target"],
-      audit_event_id: "audit-overlap-stable" // same id across both ticks
+      audit_event_id: "audit-overlap-stable"
     });
 
     const harness = buildHarness({
@@ -845,7 +847,6 @@ describe("PathPlasticityService", () => {
       pathsByObjectId: { "obj-target": [path] }
     });
 
-    // Tick 1.
     const result1 = await harness.service.computeAndApplyPlasticity({
       workspaceId: "workspace-1",
       sinceIso: "2026-05-03T00:00:00.000Z"
@@ -856,26 +857,12 @@ describe("PathPlasticityService", () => {
     ).length;
     expect(reinforcedAfterTick1).toBe(1);
 
-    // Tick 2 — sinceIso overlaps; the reader returns the same receipt
-    // again (simulating a misconfigured-watermark scenario). The dedup
-    // keyed on audit_event_id MUST prevent a second reinforcement within
-    // a single computeAndApplyPlasticity call. Note that across two
-    // separate calls the service does not maintain state — true cross-tick
-    // dedup must come from a high-water-mark in the daemon. The
-    // intra-tick dedup tested here ensures the service itself never
-    // double-counts when the reader returns duplicates.
     const result2 = await harness.service.computeAndApplyPlasticity({
       workspaceId: "workspace-1",
-      sinceIso: "2026-05-02T00:00:00.000Z" // earlier — overlapping window
+      sinceIso: "2026-05-02T00:00:00.000Z"
     });
-    // Tick 2 returns one reinforced because the underlying receipt is
-    // returned anew by the reader — the durable contract is documented in
-    // the listRecentUsage docstring (exclusive sinceIso). The intra-tick
-    // dedup keeps the audit log clean WITHIN a tick.
     expect(result2.reinforced).toBe(1);
 
-    // Within a single tick that returned the same receipt twice (e.g. via
-    // a buggy reader) the service emits exactly one reinforced event.
     const harness3 = buildHarness({
       usageRecords: [sharedReceipt, sharedReceipt],
       pathsByObjectId: { "obj-target": [path] }
@@ -890,8 +877,6 @@ describe("PathPlasticityService", () => {
     ).length;
     expect(reinforcedTick3).toBe(1);
   });
-
-  // ----- I4: contradiction_events_count is included in WEAKENED payload --
 
   it("includes contradiction_events_count in PATH_RELATION_WEAKENED payload (symmetric with REINFORCED.support_events_count)", async () => {
     const path = createPath({
@@ -922,13 +907,9 @@ describe("PathPlasticityService", () => {
     });
   });
 
-  it("rolls back the runtime-governance EventLog row when pathRelationRepo.update throws (#BL-022 atomicity for path_relation writes)", async () => {
-    // The post-D2 fix migrated path-plasticity publishers from the legacy
-    // async mutate helper to atomic `appendManyWithMutation`.
-    // This test pins the BL-022 closure for path_relation writes: if the
-    // SQL mutate raises after the EventLog row has been appended-in-
-    // transaction, the row must be rolled back so audit log + durable state
-    // stay consistent.
+  it("rolls back the runtime-governance EventLog row when pathRelationRepo.update throws", async () => {
+    // invariant: if the SQL mutate raises after the EventLog row is appended
+    // in-transaction, the row rolls back with the durable state mutation.
     const path = createPath({ path_id: "path-roll-1" });
     const harness = buildHarness({
       pathsByObjectId: { "obj-target": [path] },
@@ -1173,12 +1154,9 @@ describe("PathPlasticityService", () => {
     expect(notifyEntry).toHaveBeenCalledTimes(1);
   });
 
-  it("preserves support_events_count on mixed receipts that net-weaken (D2 reviewer-I2)", async () => {
-    // Mixed receipt aggregate: 2 used + 5 skipped → strength net-weakens
-    // but the 2 'used' receipts still count as support evidence. Pre-fix
-    // the weakened branch dropped `counts.used` from `support_events_count`,
-    // so the cumulative support tally lost the increment whenever any tick
-    // net-weakened.
+  it("preserves support_events_count on mixed receipts that net-weaken", async () => {
+    // invariant: used receipts remain support evidence even when skipped
+    // receipts make the weighted strength delta net-weaken.
     const path = createPath({
       path_id: "path-mixed-1",
       plasticity_state: {
@@ -1194,10 +1172,8 @@ describe("PathPlasticityService", () => {
     const harness = buildHarness({
       pathsByObjectId: { "obj-target": [path] },
       usageRecords: [
-        // 2 'used'
         createUsageRecord({ usage_state: "used", used_object_ids: ["obj-target"] }),
         createUsageRecord({ usage_state: "used", used_object_ids: ["obj-target"] }),
-        // 5 'skipped' for the same delivery
         createUsageRecord({ usage_state: "skipped", used_object_ids: [] }),
         createUsageRecord({ usage_state: "skipped", used_object_ids: [] }),
         createUsageRecord({ usage_state: "skipped", used_object_ids: [] }),
@@ -1215,22 +1191,16 @@ describe("PathPlasticityService", () => {
     expect(result.weakened).toBe(1);
     const updated = harness.repoUpdates.find((entry) => entry.pathId === "path-mixed-1");
     expect(updated?.updates.plasticity_state).toMatchObject({
-      // 3 (prior) + 2 (this tick's 'used' receipts) = 5
       support_events_count: 5
     });
   });
 
-  it("preserves support_events_count on mixed receipts that net-zero into retirement (D2 codex-fixloop-I1)", async () => {
-    // Mixed receipt aggregate: 1 used (0.1) + 2 skipped (0.05 × 2 = 0.1)
-    // = strength net delta 0. Path is at floor strength, has been
-    // inactive for the retirement window, has a skipped receipt → enters
-    // the `retirementEligible && counts.skipped > 0` branch with
-    // counts.used > 0. Pre-fix the retirement branch dropped the used
-    // tally; post-fix it carries it forward into the retirement record.
+  it("preserves support_events_count on mixed receipts that net-zero into retirement", async () => {
+    // invariant: a floor-strength path can retire on skipped receipts while
+    // still carrying forward any used support seen in the same aggregate.
     const path = createPath({
       path_id: "path-zero-retire-1",
       plasticity_state: {
-        // At floor strength + last_reinforced_at = long ago → eligible.
         strength: 0,
         direction_bias: "bidirectional_asymmetric",
         stability_class: "volatile",
@@ -1258,7 +1228,6 @@ describe("PathPlasticityService", () => {
     expect(result.retired).toBe(1);
     const updated = harness.repoUpdates.find((entry) => entry.pathId === "path-zero-retire-1");
     expect(updated?.updates.plasticity_state).toMatchObject({
-      // 4 (prior) + 1 (this tick's 'used' receipt) = 5
       support_events_count: 5
     });
   });

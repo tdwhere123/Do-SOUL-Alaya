@@ -17,34 +17,17 @@ D2 fix-loops, then resolved by Gate-5F under
 `#BL-044` was opened by the v0.3.7 benchmark intake, and
 `#BL-045` / `#BL-046` were opened by the v0.3.8 round-1 review-loop.
 v0.3.8 closes `#BL-039` / `#BL-040` / `#BL-041` / `#BL-042` /
-`#BL-045` / `#BL-046`; `#BL-044` remains open and is the sole
-deferred item targeted at v0.3.9 by user directive
-(2026-05-16) — see [Open Issues](#open-issues).
+`#BL-045` / `#BL-046`. v0.3.9 closes `#BL-044` by shipping the
+5-bucket recall-utilization telemetry + Inspector operator drill-down.
+For v0.3.10 planning, keep `docs/v0.3/v0.3.9/reports/v0.3.9-closeout.md`
+as the canonical carry-forward tracker (24 items) until v0.3.10
+closeout republishes the consolidated open/closed list.
 
 ## Open Issues
 
-### #BL-044 — Recall utilization follow-through remains under-explained
-
-**Status**: Open, deferred to v0.3.9 by user directive (2026-05-16).
-
-**Why open**: v0.3.6 added recall utilization telemetry and Inspector
-cards, but operator use still shows low follow-through from delivered
-recall pointers to `soul.report_context_usage(used)`. That number is
-not self-explanatory: it can mean the host did not call recall, recall
-returned weak/noisy candidates, the host used context without reporting
-usage, or the UI/CLI surfaced the metric too coarsely.
-
-**Close condition**:
-
-1. Add a report or Inspector drill-down that separates `no recall`,
-   `empty recall`, `delivered but not reported`, and `reported used`
-   by agent target / run.
-2. Link at least one live strict-real or host-autonomy run to the
-   utilization counters so delivered→used math is audit-traceable by
-   `delivery_id`.
-3. Open a concrete follow-up fix for whichever root cause dominates:
-   ranking quality, host instructions, usage-report ergonomics, or
-   telemetry classification.
+No open `#BL-*` issues at this time. During v0.3.10 plan-stage, open
+work is tracked in the v0.3.9 closeout carry-forward list (24 items)
+rather than as BL tickets.
 
 ## Resolved in v0.3.8 (2026-05-16)
 

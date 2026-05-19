@@ -6,6 +6,7 @@ import {
   RecallContextEventType,
   RetentionPolicy,
   SoulRecallCompletedPayloadSchema,
+  SoulRecallWeightTransferPayloadSchema,
   StorageTier,
   type FineAssessmentConfig,
   type ActivationWeights,
@@ -15,6 +16,7 @@ import {
   type PathAnchorRef,
   type PathRelation,
   type ProjectMappingAnchor,
+  type RecallAdditiveScoringWeights,
   type RecallCandidate,
   type RecallScoreFactors,
   type RecallPolicy,
@@ -49,7 +51,6 @@ import {
   filterMemoriesByTimeWindow,
   getGlobalRecallLimit,
   isClaimLikeDimension,
-  isProtectedDimension,
   mapBudgetPenalty,
   matchesConfiguredCoarseFilter,
   matchesDeterministicFilter,
@@ -69,6 +70,7 @@ import type {
   RecallCandidateDropReason,
   RecallDiagnostics,
   RecallEmbeddingProviderStatus,
+  RecallPathExpansionSourceDiagnostic,
   RecallResult,
   RecallServiceDependencies,
   RecallServiceWarnPort,
@@ -84,6 +86,7 @@ export type {
   RecallCandidate,
   RecallResult,
   RecallServiceBudgetPenaltyPort,
+  RecallServiceActiveConstraintsPort,
   RecallServiceClaimResolverPort,
   RecallServiceDependencies,
   RecallServiceEmbeddingRecallPort,
@@ -102,10 +105,12 @@ export { makeTokenEstimator } from "./recall-service-types.js";
 const DYNAMIC_RECALL_PLANE_CAP = 240;
 const DYNAMIC_RECALL_TOTAL_CANDIDATE_CAP = 1000;
 const DYNAMIC_RECALL_SEED_CAP = 50;
-const DYNAMIC_RECALL_TEMPORAL_RADIUS = 3;
 const DYNAMIC_RECALL_COHORT_RADIUS = 8;
 const DYNAMIC_RECALL_EDGE_FANOUT = 12;
+const RECALLS_EDGE_COLD_THRESHOLD = 50;
 const NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT = 0.24;
+const QUERY_EVIDENCE_BASE_TRANSFER_MAX = 0.25;
+const QUERY_EVIDENCE_BASE_WEIGHT_FLOOR = 0.35;
 // invariant: confidence sub-weight is additive (outside sum-to-1
 // activation_weights). MemoryEntry.confidence is propose/accept-updated
 // epistemic certainty; reading it directly here keeps later confidence
@@ -119,13 +124,15 @@ interface CoarseCandidateDraft {
   readonly firstAdmissionPlane: RecallAdmissionPlane;
   readonly sourceChannels: readonly string[];
   readonly structuralScore: number;
+  readonly pathExpansionSources: readonly RecallPathExpansionSourceDiagnostic[];
 }
 
 type CoarseCandidateAdder = (
   entry: Readonly<MemoryEntry>,
   plane: RecallAdmissionPlane,
   structuralScore?: number,
-  sourceChannel?: string
+  sourceChannel?: string,
+  pathExpansionSource?: RecallPathExpansionSourceDiagnostic
 ) => void;
 
 export class RecallService {
@@ -148,12 +155,16 @@ export class RecallService {
     readonly policyOverride?: Readonly<RecallPolicy>;
     readonly timeFilter?: RecallTimeFilter;
     readonly hostContext?: Readonly<SoulRecallHostContext>;
+    readonly activeConstraintsCap?: number | null;
   }): Promise<RecallResult> {
     const policy = this.resolvePolicy(params.strategy, params.taskSurface.runtime_id, params.policyOverride);
     const tokenEstimator = makeTokenEstimator({ hint: params.hostContext?.tokenizer_hint });
     const queryText = normalizeQueryText(params.taskSurface.display_name);
     const queryProbes = compileRecallQueryProbes(queryText);
-    const slots = await this.dependencies.slotRepo.findByWorkspace(params.workspaceId);
+    const [slots, activeConstraints] = await Promise.all([
+      this.dependencies.slotRepo.findByWorkspace(params.workspaceId),
+      this.loadActiveConstraints(params.workspaceId, params.activeConstraintsCap ?? null)
+    ]);
     const winnerClaimIds = new Set(slots.flatMap((slot) => (slot.winner_claim_id === null ? [] : [slot.winner_claim_id])));
     // Resolve claim IDs to their backing memory entry IDs.
     // winner_claim_id is a ClaimForm.object_id; the conflict-penalty check needs
@@ -298,10 +309,19 @@ export class RecallService {
         occurred_at: occurredAt
       })
     });
+    await this.appendWeightTransferTelemetry({
+      workspaceId: params.workspaceId,
+      runId: params.runId ?? null,
+      graphAndPathColdScore: supplementaryData.graphAndPathColdScore,
+      recallsEdgeCount: supplementaryData.recallsEdgeCount,
+      weightTransferAmount: supplementaryData.weightTransferAmount
+    });
     await this.recordGlobalRecallClassificationsSafely(globalRecallClassifications);
 
     return Object.freeze({
       candidates,
+      active_constraints: activeConstraints.constraints,
+      active_constraints_count: activeConstraints.total_count,
       total_scanned: coarseFilter.total_scanned + globalCoarseFilter.total_scanned,
       coarse_filter_count: combinedCoarseCandidates.length,
       fine_assessment_count: candidates.length,
@@ -318,6 +338,23 @@ export class RecallService {
         candidates: candidateDiagnostics
       })
     });
+  }
+
+  private async loadActiveConstraints(
+    workspaceId: string,
+    cap: number | null
+  ): Promise<Readonly<{
+    readonly constraints: RecallResult["active_constraints"];
+    readonly total_count: number;
+  }>> {
+    const port = this.dependencies.activeConstraintsPort;
+    if (port === undefined) {
+      return Object.freeze({
+        constraints: Object.freeze([]),
+        total_count: 0
+      });
+    }
+    return port.findActiveConstraints({ workspaceId, cap });
   }
 
   private async applyManifestationBiasSidecar(params: Readonly<{
@@ -477,9 +514,7 @@ export class RecallService {
     const byId = new Map(tierMemories.map((memory) => [memory.object_id, memory]));
     const queryProbes = options.queryProbes ?? compileRecallQueryProbes(queryText);
     const winnerMemoryIds = options.winnerMemoryIds ?? new Set<string>();
-    const protectedCandidates = tierMemories.filter(
-      (entry) => isProtectedDimension(entry.dimension) || winnerMemoryIds.has(entry.object_id)
-    );
+    const protectedCandidates = tierMemories.filter((entry) => winnerMemoryIds.has(entry.object_id));
     const protectedIds = new Set(protectedCandidates.map((entry) => entry.object_id));
     const deterministicMatches = tierMemories.filter(
       (entry) => !protectedIds.has(entry.object_id) && matchesDeterministicFilter(entry, config)
@@ -497,19 +532,19 @@ export class RecallService {
       entry: Readonly<MemoryEntry>,
       plane: RecallAdmissionPlane,
       structuralScore = 0,
-      sourceChannel?: string
+      sourceChannel?: string,
+      pathExpansionSource?: RecallPathExpansionSourceDiagnostic
     ): void => {
       if (
         plane !== "protected_winner" &&
         plane !== "lexical" &&
-        !isProtectedDimension(entry.dimension) &&
         !winnerMemoryIds.has(entry.object_id) &&
         !matchesDeterministicFilter(entry, config)
       ) {
         return;
       }
       const current = drafts.get(entry.object_id);
-      const evidenceStructuralScore = sourceChannel === "lexical" ? 0 : clamp01(structuralScore);
+      const evidenceStructuralScore = clamp01(structuralScore);
       const nextStructuralScore = Math.max(current?.structuralScore ?? 0, evidenceStructuralScore);
       drafts.set(entry.object_id, {
         entry,
@@ -519,7 +554,11 @@ export class RecallService {
           ...(current?.sourceChannels ?? []),
           ...(sourceChannel === undefined ? [] : [sourceChannel])
         ]),
-        structuralScore: nextStructuralScore
+        structuralScore: nextStructuralScore,
+        pathExpansionSources: uniquePathExpansionSources([
+          ...(current?.pathExpansionSources ?? []),
+          ...(pathExpansionSource === undefined ? [] : [pathExpansionSource])
+        ])
       });
       structuralScores.set(
         entry.object_id,
@@ -642,15 +681,14 @@ export class RecallService {
       workspaceId,
       byId,
       drafts,
-      addCandidate,
-      winnerMemoryIds
+      addCandidate
     });
     await this.addPathExpansionCandidates({
       workspaceId,
       byId,
       drafts,
-      addCandidate,
-      winnerMemoryIds
+      queryProbes,
+      addCandidate
     });
 
     const anchorMap = new Map(projectMappings.map((mapping) => [mapping.global_object_id, mapping]));
@@ -679,6 +717,7 @@ export class RecallService {
               ...(options.sourceChannel === undefined ? [] : [options.sourceChannel])
             ])),
             structuralScore: draft.structuralScore,
+            pathExpansionSources: Object.freeze([...draft.pathExpansionSources]),
             ...(options.sourceChannel === undefined ? {} : { sourceChannel: options.sourceChannel }),
             ...(options.scoreMultiplier === undefined ? {} : { scoreMultiplier: options.scoreMultiplier })
           })
@@ -764,46 +803,12 @@ export class RecallService {
       }
     }
 
-    const sortedByCreatedAt = [...params.tierMemories].sort((left, right) => {
-      const createdAtComparison = left.created_at.localeCompare(right.created_at);
-      return createdAtComparison === 0 ? left.object_id.localeCompare(right.object_id) : createdAtComparison;
-    });
-    const createdAtIndex = new Map(sortedByCreatedAt.map((entry, index) => [entry.object_id, index]));
-    const datePrefixes = params.queryProbes.date_terms.filter((term) => /^\d{4}-\d{2}-\d{2}$/u.test(term));
-    if (datePrefixes.length > 0) {
-      const byDate = params.tierMemories
-        .filter((entry) => datePrefixes.some((datePrefix) => entry.created_at.startsWith(datePrefix)))
-        .slice(0, DYNAMIC_RECALL_PLANE_CAP);
-      for (const entry of byDate) {
-        params.addCandidate(entry, "temporal_proximity", 0.7, "temporal_proximity");
-      }
-    }
-    if (structuralSeeds.length > 0 || params.queryProbes.date_terms.length > 0) {
-      for (const seed of seeds.slice(0, DYNAMIC_RECALL_SEED_CAP)) {
-        const center = createdAtIndex.get(seed.object_id);
-        if (center === undefined) {
-          continue;
-        }
-        for (let offset = -DYNAMIC_RECALL_TEMPORAL_RADIUS; offset <= DYNAMIC_RECALL_TEMPORAL_RADIUS; offset += 1) {
-          if (offset === 0) {
-            continue;
-          }
-          const entry = sortedByCreatedAt[center + offset];
-          if (entry === undefined) {
-            continue;
-          }
-          const score = clamp01(0.65 - Math.abs(offset) * 0.08);
-          params.addCandidate(entry, "temporal_proximity", score, "temporal_proximity");
-        }
-      }
-    }
-
     // invariant: cohort dominance guard runs per-branch. Each branch's
     // would-be admissions are compared against tier pool size; a branch
     // is skipped when its own coverage exceeds 50% of tierMemories. The
     // exact branch (query-attested surface_id/run_id) is admitted even
     // on saturated workspaces unless its own match-set alone exceeds
-    // 50% — query attestation is stronger evidence than seed proximity.
+    // 50%; query attestation is stronger evidence than seed proximity.
     const querySurfaceIds = new Set(params.queryProbes.surface_ids);
     const queryRunIds = new Set(params.queryProbes.run_ids);
     const exactCohortMatches = params.tierMemories
@@ -877,7 +882,6 @@ export class RecallService {
     readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
     readonly drafts: ReadonlyMap<string, CoarseCandidateDraft>;
     readonly addCandidate: CoarseCandidateAdder;
-    readonly winnerMemoryIds: ReadonlySet<string>;
   }>): Promise<void> {
     const graphExpansionPort = this.dependencies.graphExpansionPort;
     if (graphExpansionPort === undefined || params.drafts.size === 0) {
@@ -901,21 +905,6 @@ export class RecallService {
         });
         continue;
       }
-      // usage_proof gate: a seed only qualifies to project its graph
-      // neighbors when there is independent evidence that the seed was
-      // *used* historically — not just lexically matched in this query.
-      // Two sources count as proof:
-      //   1. an inbound RECALLS edge (left behind by a prior
-      //      report_context_usage on this memory), or
-      //   2. governance attestation via winnerMemoryIds (the seed is the
-      //      backing memory of a slot's winner_claim).
-      // Without this gate, graph_expansion degrades into "lexical-match
-      // neighborhood discovery" and pollutes the structural score band.
-      const hasRecallsEdge = edges.some((edge) => edge.edge_type === "recalls");
-      const isWinnerBackedSeed = params.winnerMemoryIds.has(seed.entry.object_id);
-      if (!hasRecallsEdge && !isWinnerBackedSeed) {
-        continue;
-      }
       for (const edge of edges.slice(0, DYNAMIC_RECALL_EDGE_FANOUT)) {
         const neighborId = edge.source_memory_id === seed.entry.object_id
           ? edge.target_memory_id
@@ -933,65 +922,24 @@ export class RecallService {
     }
   }
 
-  // see also: addGraphExpansionCandidates — same gate inlined there
-  private async filterUsageProofSeeds(
-    seeds: readonly Readonly<CoarseCandidateDraft>[],
-    workspaceId: string,
-    winnerMemoryIds: ReadonlySet<string>,
-    graphExpansionPort: typeof this.dependencies.graphExpansionPort
-  ): Promise<readonly Readonly<CoarseCandidateDraft>[]> {
-    if (graphExpansionPort === undefined) {
-      return seeds.filter((seed) => winnerMemoryIds.has(seed.entry.object_id));
-    }
-    const qualified: Readonly<CoarseCandidateDraft>[] = [];
-    for (const seed of seeds) {
-      if (winnerMemoryIds.has(seed.entry.object_id)) {
-        qualified.push(seed);
-        continue;
-      }
-      try {
-        const edges = await graphExpansionPort.findByMemoryId(
-          seed.entry.object_id,
-          workspaceId
-        );
-        if (edges.some((edge) => edge.edge_type === "recalls")) {
-          qualified.push(seed);
-        }
-      } catch (error) {
-        this.warn("usage_proof seed gate lookup failed", {
-          workspace_id: workspaceId,
-          seed_memory_id: seed.entry.object_id,
-          error: toErrorMessage(error)
-        });
-      }
-    }
-    return qualified;
-  }
-
   private async addPathExpansionCandidates(params: Readonly<{
     readonly workspaceId: string;
     readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
     readonly drafts: ReadonlyMap<string, CoarseCandidateDraft>;
+    readonly queryProbes: Readonly<RecallQueryProbes>;
     readonly addCandidate: CoarseCandidateAdder;
-    readonly winnerMemoryIds: ReadonlySet<string>;
   }>): Promise<void> {
     const pathExpansionPort = this.dependencies.pathExpansionPort;
-    if (pathExpansionPort === undefined || params.drafts.size === 0) {
+    if (pathExpansionPort === undefined) {
       return;
     }
 
-    // invariant: usage_proof seed gate (also enforced in
-    // addGraphExpansionCandidates): a PathRelation anchor must be either
-    // governance-attested (winnerMemoryIds) or have at least one inbound
-    // RECALLS edge. Lexical-only seeds do not qualify.
-    const graphExpansionPort = this.dependencies.graphExpansionPort;
-    const allSeeds = selectExpansionSeedDrafts(params.drafts).slice(0, DYNAMIC_RECALL_SEED_CAP);
-    const seeds: readonly Readonly<CoarseCandidateDraft>[] = await this.filterUsageProofSeeds(
-      allSeeds,
-      params.workspaceId,
-      params.winnerMemoryIds,
-      graphExpansionPort
-    );
+    let added = await this.addTimeConcernPathExpansionCandidates(params);
+    if (added >= DYNAMIC_RECALL_PLANE_CAP || params.drafts.size === 0) {
+      return;
+    }
+
+    const seeds = selectExpansionSeedDrafts(params.drafts).slice(0, DYNAMIC_RECALL_SEED_CAP);
     if (seeds.length === 0) {
       return;
     }
@@ -1012,7 +960,6 @@ export class RecallService {
       return;
     }
 
-    let added = 0;
     for (const path of paths) {
       if (added >= DYNAMIC_RECALL_PLANE_CAP) {
         return;
@@ -1020,18 +967,102 @@ export class RecallService {
       if (isRetiredPathRelation(path)) {
         continue;
       }
-      for (const targetId of directionEligiblePathExpansionTargets(path, seedIds)) {
-        const entry = params.byId.get(targetId);
+      for (const target of directionEligiblePathExpansionTargets(path, seedIds)) {
+        const entry = params.byId.get(target.targetId);
         if (entry === undefined) {
           continue;
         }
-        params.addCandidate(entry, "path_expansion", scorePathRelationExpansion(path), "path_expansion");
+        params.addCandidate(
+          entry,
+          "path_expansion",
+          scorePathRelationExpansion(path),
+          "path_expansion",
+          {
+            path_id: path.path_id,
+            seed_id: target.seedId,
+            seed_kind: "memory",
+            target_object_id: target.targetId,
+            source_channel: "path_expansion"
+          }
+        );
         added += 1;
         if (added >= DYNAMIC_RECALL_PLANE_CAP) {
           return;
         }
       }
     }
+  }
+
+  private async addTimeConcernPathExpansionCandidates(params: Readonly<{
+    readonly workspaceId: string;
+    readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
+    readonly queryProbes: Readonly<RecallQueryProbes>;
+    readonly addCandidate: CoarseCandidateAdder;
+  }>): Promise<number> {
+    const pathExpansionPort = this.dependencies.pathExpansionPort;
+    const findByTimeConcernWindowDigests = pathExpansionPort?.findByTimeConcernWindowDigests;
+    if (findByTimeConcernWindowDigests === undefined || params.queryProbes.date_terms.length === 0) {
+      return 0;
+    }
+
+    const windowDigests = uniqueStrings(
+      params.queryProbes.date_terms
+        .map((term) => normalizeTimeConcernWindowDigest(term))
+        .filter((term) => term.length > 0)
+    );
+    if (windowDigests.length === 0) {
+      return 0;
+    }
+
+    let paths: readonly Readonly<PathRelation>[];
+    try {
+      paths = await findByTimeConcernWindowDigests.call(
+        pathExpansionPort,
+        params.workspaceId,
+        windowDigests
+      );
+    } catch (error) {
+      this.warn("time concern path expansion lookup failed", {
+        workspace_id: params.workspaceId,
+        window_digest_count: windowDigests.length,
+        error: toErrorMessage(error)
+      });
+      return 0;
+    }
+
+    let added = 0;
+    for (const path of paths) {
+      if (added >= DYNAMIC_RECALL_PLANE_CAP) {
+        return added;
+      }
+      if (isRetiredPathRelation(path) || !pathMatchesTimeConcernWindowDigest(path, windowDigests)) {
+        continue;
+      }
+      for (const targetId of pathRelationMemoryIds(path)) {
+        const entry = params.byId.get(targetId);
+        if (entry === undefined) {
+          continue;
+        }
+        params.addCandidate(
+          entry,
+          "path_expansion",
+          scorePathRelationExpansion(path),
+          "time_concern",
+          {
+            path_id: path.path_id,
+            seed_id: firstTimeConcernSeedId(path, windowDigests),
+            seed_kind: "time_concern",
+            target_object_id: targetId,
+            source_channel: "time_concern"
+          }
+        );
+        added += 1;
+        if (added >= DYNAMIC_RECALL_PLANE_CAP) {
+          return added;
+        }
+      }
+    }
+    return added;
   }
 
   private async expandTierCascade(params: {
@@ -1105,6 +1136,7 @@ export class RecallService {
       workspaceId: params.workspaceId,
       runId: params.runId,
       queryText: params.queryText,
+      policy: params.policy,
       coarseFtsRanks: params.coarseFilter.ftsRanks,
       coarseStructuralScores: params.coarseFilter.structuralScores
     });
@@ -1158,22 +1190,44 @@ export class RecallService {
     readonly workspaceId: string;
     readonly runId: string | null;
     readonly queryText: string | null;
+    readonly policy: Readonly<RecallPolicy>;
     readonly coarseFtsRanks: Readonly<Record<string, number>>;
     readonly coarseStructuralScores: Readonly<Record<string, number>>;
   }): Promise<RecallSupplementaryData> {
     // graph_support is a weighted inbound aggregate across edge types; the
     // storage repo owns the concrete edge_type weight map.
-    const graphSupportCounts = Object.fromEntries(
+    const graphSupportCounts: Record<string, number> = Object.fromEntries(
       await Promise.all(
-        params.candidates.map(async (candidate) => [
-          candidate.object_id,
-          this.dependencies.graphSupportPort === undefined
-            ? 0
-            : await this.dependencies.graphSupportPort.countInboundEdgesWeighted(
-                candidate.object_id,
-                params.workspaceId
-              )
-        ])
+        params.candidates.map(async (candidate): Promise<readonly [string, number]> => {
+          const count =
+            this.dependencies.graphSupportPort === undefined
+              ? 0
+              : await this.dependencies.graphSupportPort.countInboundEdgesWeighted(
+                  candidate.object_id,
+                  params.workspaceId
+                );
+          return [
+            candidate.object_id,
+            count
+          ];
+        })
+      )
+    );
+    const recallEdgeCounts: Record<string, number> = Object.fromEntries(
+      await Promise.all(
+        params.candidates.map(async (candidate): Promise<readonly [string, number]> => {
+          const count =
+            this.dependencies.graphSupportPort?.countInboundRecalls === undefined
+              ? 0
+              : await this.dependencies.graphSupportPort.countInboundRecalls(
+                  candidate.object_id,
+                  params.workspaceId
+                );
+          return [
+            candidate.object_id,
+            count
+          ];
+        })
       )
     );
 
@@ -1213,6 +1267,17 @@ export class RecallService {
           normalizeGraphSupport(graphSupportCounts[candidate.object_id] ?? 0) === 0 &&
           clamp01(plasticityFactors[candidate.object_id] ?? 0) === 0
       );
+    const recallsEdgeCount = Object.values(recallEdgeCounts).reduce((sum, count) => sum + count, 0);
+    const recallsColdScore =
+      this.dependencies.graphSupportPort?.countInboundRecalls === undefined
+        ? (graphAndPathCold ? 1 : 0)
+        : clamp01(1 - recallsEdgeCount / RECALLS_EDGE_COLD_THRESHOLD);
+    const graphAndPathColdScore = graphAndPathCold ? recallsColdScore : 0;
+    const weightTransferAmount = this.computeMaxWeightTransferAmount(
+      params.candidates,
+      params.policy,
+      graphAndPathColdScore
+    );
 
     return Object.freeze({
       ftsRanks: params.coarseFtsRanks,
@@ -1220,8 +1285,66 @@ export class RecallService {
       graphSupportCounts: Object.freeze(graphSupportCounts),
       budgetPenaltyFactor,
       plasticityFactors,
-      graphAndPathCold
+      graphAndPathColdScore,
+      recallsEdgeCount,
+      weightTransferAmount
     });
+  }
+
+  private computeMaxWeightTransferAmount(
+    candidates: readonly Readonly<MemoryEntry>[],
+    policy: Readonly<RecallPolicy>,
+    graphAndPathColdScore: number
+  ): number {
+    if (candidates.length === 0 || graphAndPathColdScore <= 0) {
+      return 0;
+    }
+    const additiveWeights = resolveAdditiveScoringWeights(policy);
+    return clamp01(
+      Math.max(
+        ...candidates.map((candidate) => {
+          const weights = this.resolveEffectiveActivationWeights(candidate, policy);
+          return (weights.graph_support + additiveWeights.PATH_PLASTICITY_WEIGHT) * graphAndPathColdScore;
+        })
+      )
+    );
+  }
+
+  private async appendWeightTransferTelemetry(input: Readonly<{
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly graphAndPathColdScore: number;
+    readonly recallsEdgeCount: number;
+    readonly weightTransferAmount: number;
+  }>): Promise<void> {
+    if (input.weightTransferAmount <= 0) {
+      return;
+    }
+    try {
+      await this.dependencies.eventLogRepo.append({
+        event_type: RecallContextEventType.SOUL_RECALL_WEIGHT_TRANSFER,
+        entity_type: "recall_weight_transfer",
+        entity_id: input.runId ?? input.workspaceId,
+        workspace_id: input.workspaceId,
+        run_id: input.runId,
+        caused_by: "system",
+        payload_json: SoulRecallWeightTransferPayloadSchema.parse({
+          workspace_id: input.workspaceId,
+          run_id: input.runId,
+          cold_score: clamp01(input.graphAndPathColdScore),
+          recalls_edge_count: Math.max(0, Math.trunc(input.recallsEdgeCount)),
+          recalls_threshold: RECALLS_EDGE_COLD_THRESHOLD,
+          transferred_amount: clamp01(input.weightTransferAmount),
+          occurred_at: this.now()
+        })
+      });
+    } catch (error) {
+      this.warn("recall weight transfer telemetry append failed", {
+        workspace_id: input.workspaceId,
+        run_id: input.runId,
+        error: toErrorMessage(error)
+      });
+    }
   }
 
   private async mergeEmbeddingSupplementCandidates(params: {
@@ -1399,18 +1522,6 @@ export class RecallService {
     }
     const config = policy.fine_assessment;
 
-    // invariant: mandatory share cap. winner-attested candidates always
-    // bypass budget; protected-dimension non-winners are capped at
-    // floor(max_entries * 2/3) so the remaining slots are reserved for
-    // ranked non-mandatory candidates. Excess protected-dimension entries
-    // are not re-admitted via the optional pool (they would otherwise
-    // out-rank precise non-mandatory candidates and defeat the cap).
-    const mandatoryShareDenominator = 3;
-    const mandatoryShareNumerator = 2;
-    const mandatoryCap = Math.max(
-      1,
-      Math.floor(config.budgets.max_entries * mandatoryShareNumerator / mandatoryShareDenominator)
-    );
     const scoredCandidates = candidates.map((candidate) => Object.freeze({
       ...candidate,
       effectiveScore: this.computeEffectiveScore(
@@ -1422,15 +1533,7 @@ export class RecallService {
         candidate.scoreMultiplier ?? 1
       )
     }));
-    const winnerMandatory = scoredCandidates.filter(({ entry }) => winnerMemoryIds.has(entry.object_id));
-    const protectedMandatoryAll = scoredCandidates
-      .filter(({ entry }) => isProtectedDimension(entry.dimension) && !winnerMemoryIds.has(entry.object_id))
-      .sort((left, right) => compareEffectiveScores(right, left));
-    const protectedSlots = Math.max(0, mandatoryCap - winnerMandatory.length);
-    const protectedMandatory = protectedMandatoryAll.slice(0, protectedSlots);
-    const mandatory = [...winnerMandatory, ...protectedMandatory];
-    const optional = scoredCandidates
-      .filter(({ entry }) => !isProtectedDimension(entry.dimension) && !winnerMemoryIds.has(entry.object_id))
+    const rankedCandidates = scoredCandidates
       .sort((left, right) => compareEffectiveScores(right, left));
 
     type FineAssessmentAccumulator = {
@@ -1452,7 +1555,6 @@ export class RecallService {
     const appendCandidate = (
       accumulator: FineAssessmentAccumulator,
       candidate: Readonly<CoarseRecallCandidate>,
-      mandatoryEntry: boolean,
       preBudgetRank: number
     ): FineAssessmentAccumulator => {
       const entry = candidate.entry;
@@ -1470,11 +1572,15 @@ export class RecallService {
         finalRank: number | null
       ): Readonly<RecallCandidateDiagnostic> => {
         const admissionPlanes = Object.freeze([...(candidate.admissionPlanes ?? ["activation"])]);
+        const attributionPlane = selectRecallAdmissionAttributionPlane(
+          admissionPlanes,
+          candidate.firstAdmissionPlane
+        );
         return Object.freeze({
           object_id: entry.object_id,
           admission_planes: admissionPlanes,
           plane_first_admitted: candidate.firstAdmissionPlane ?? admissionPlanes[0] ?? "activation",
-          plane_winning_admission: admissionPlanes[admissionPlanes.length - 1] ?? candidate.firstAdmissionPlane ?? "activation",
+          plane_winning_admission: attributionPlane,
           pre_budget_rank: preBudgetRank,
           final_rank: finalRank,
           dropped_reason: droppedReason,
@@ -1482,12 +1588,14 @@ export class RecallService {
           relevance_score: scored.score,
           lexical_rank: supplementaryData.ftsRanks[entry.object_id] ?? null,
           structural_score: clamp01(candidate.structuralScore ?? supplementaryData.structuralScores[entry.object_id] ?? 0),
+          score_factors: scored.factors,
           source_channels: Object.freeze(uniqueStrings([
             candidate.originPlane ?? "workspace_local",
             candidate.sourceChannel ?? "",
             ...(candidate.sourceChannels ?? []),
             ...(admissionPlanes).map((plane) => `plane:${plane}`)
-          ].filter((channel) => channel.length > 0)))
+          ].filter((channel) => channel.length > 0))),
+          path_expansion_sources: Object.freeze([...(candidate.pathExpansionSources ?? [])])
         });
       };
 
@@ -1507,36 +1615,34 @@ export class RecallService {
       const nextEntryCount = accumulator.selected.length + 1;
       const nextTokenCount = accumulator.totalTokens + tokenEstimate;
 
-      if (!mandatoryEntry) {
-        if (dimensionLimit !== null && dimensionCount >= dimensionLimit) {
-          return {
-            ...accumulator,
-            diagnostics: Object.freeze([
-              ...accumulator.diagnostics,
-              createDiagnostic("dimension_limit", null)
-            ])
-          };
-        }
+      if (dimensionLimit !== null && dimensionCount >= dimensionLimit) {
+        return {
+          ...accumulator,
+          diagnostics: Object.freeze([
+            ...accumulator.diagnostics,
+            createDiagnostic("dimension_limit", null)
+          ])
+        };
+      }
 
-        if (nextEntryCount > config.budgets.max_entries) {
-          return {
-            ...accumulator,
-            diagnostics: Object.freeze([
-              ...accumulator.diagnostics,
-              createDiagnostic("max_entries", null)
-            ])
-          };
-        }
+      if (nextEntryCount > config.budgets.max_entries) {
+        return {
+          ...accumulator,
+          diagnostics: Object.freeze([
+            ...accumulator.diagnostics,
+            createDiagnostic("max_entries", null)
+          ])
+        };
+      }
 
-        if (nextTokenCount > config.budgets.max_total_tokens) {
-          return {
-            ...accumulator,
-            diagnostics: Object.freeze([
-              ...accumulator.diagnostics,
-              createDiagnostic("max_total_tokens", null)
-            ])
-          };
-        }
+      if (nextTokenCount > config.budgets.max_total_tokens) {
+        return {
+          ...accumulator,
+          diagnostics: Object.freeze([
+            ...accumulator.diagnostics,
+            createDiagnostic("max_total_tokens", null)
+          ])
+        };
       }
 
       const nextCandidate = buildRecallCandidate({
@@ -1565,13 +1671,9 @@ export class RecallService {
       };
     };
 
-    const withMandatory = mandatory.reduce(
-      (accumulator, candidate, index) => appendCandidate(accumulator, candidate, true, index + 1),
+    const finalAccumulator = rankedCandidates.reduce(
+      (accumulator, candidate, index) => appendCandidate(accumulator, candidate, index + 1),
       initialAccumulator
-    );
-    const finalAccumulator = optional.reduce(
-      (accumulator, candidate, index) => appendCandidate(accumulator, candidate, false, mandatory.length + index + 1),
-      withMandatory
     );
 
     return Object.freeze({
@@ -1607,9 +1709,11 @@ export class RecallService {
     scoreMultiplier = 1
   ): Readonly<{ readonly score: number; readonly factors: RecallScoreFactors }> {
     const config = policy.fine_assessment;
+    const additiveWeights = resolveAdditiveScoringWeights(policy);
     const weights = resolveDynamicActivationWeights(
       this.resolveEffectiveActivationWeights(entry, policy),
-      supplementaryData.graphAndPathCold
+      supplementaryData.graphAndPathColdScore,
+      additiveWeights.PATH_PLASTICITY_WEIGHT
     );
     const activationScore = normalizeActivationScore(entry.activation_score);
     const ftsFactor = supplementaryData.ftsRanks[entry.object_id] ?? 0;
@@ -1644,17 +1748,36 @@ export class RecallService {
       weights.domain_match +
       weights.retention +
       weights.freshness;
-    const pathPlasticityWeight = supplementaryData.graphAndPathCold ? 0 : PATH_PLASTICITY_WEIGHT;
+    const pathPlasticityWeight =
+      additiveWeights.PATH_PLASTICITY_WEIGHT * (1 - supplementaryData.graphAndPathColdScore);
+    const fusionWeights = resolveFusionScoringWeights(policy);
+    const queryEvidenceTransfer = computeQueryEvidenceBaseTransfer(
+      baseWeight,
+      relevanceFactor,
+      fusionWeights
+    );
+    const adjustedBaseWeight = Math.max(0, baseWeight - queryEvidenceTransfer);
+    const weightedActivation = activationScore * adjustedBaseWeight;
+    const weightedRelevance = relevanceFactor * weights.relevance;
+    const weightedRelevanceDirect =
+      relevanceFactor * additiveWeights.NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT;
+    const weightedQueryEvidenceTransfer = relevanceFactor * queryEvidenceTransfer;
+    const weightedGraphSupport = graphSupportFactor * weights.graph_support;
+    const weightedPathPlasticity = plasticityFactor * pathPlasticityWeight;
+    const weightedConfidence = confidenceFactor * additiveWeights.CONFIDENCE_DIRECT_WEIGHT;
+    const weightedBudgetPenalty = budgetPenalty * weights.budget_penalty;
+    const weightedConflictPenalty = conflictPenalty * weights.conflict_penalty;
 
     const rawScore = clamp01(
-      activationScore * baseWeight +
-        relevanceFactor * weights.relevance +
-        relevanceFactor * NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT +
-        graphSupportFactor * weights.graph_support +
-        plasticityFactor * pathPlasticityWeight +
-        confidenceFactor * CONFIDENCE_DIRECT_WEIGHT -
-        budgetPenalty * weights.budget_penalty -
-        conflictPenalty * weights.conflict_penalty -
+      weightedActivation +
+        weightedRelevance +
+        weightedRelevanceDirect +
+        weightedQueryEvidenceTransfer +
+        weightedGraphSupport +
+        weightedPathPlasticity +
+        weightedConfidence -
+        weightedBudgetPenalty -
+        weightedConflictPenalty -
         contradictionPenalty
     );
     const score = clamp01(rawScore * scoreMultiplier);
@@ -1667,9 +1790,30 @@ export class RecallService {
         graph_support: graphSupportFactor,
         path_plasticity: plasticityFactor,
         budget_penalty: budgetPenalty,
+        content_relevance: relevanceFactor,
+        base_weight: baseWeight,
+        weighted_activation: weightedActivation,
+        weighted_relevance: weightedRelevance,
+        weighted_relevance_direct: weightedRelevanceDirect,
+        weighted_query_evidence_transfer: weightedQueryEvidenceTransfer,
+        weighted_graph_support: weightedGraphSupport,
+        weighted_path_plasticity: weightedPathPlasticity,
+        weighted_confidence: weightedConfidence,
+        weighted_budget_penalty: weightedBudgetPenalty,
+        weighted_conflict_penalty: weightedConflictPenalty,
+        weighted_contradiction_penalty: contradictionPenalty,
+        query_evidence_transfer: queryEvidenceTransfer,
+        adjusted_base_weight: adjustedBaseWeight,
+        effective_relevance_weight:
+          weights.relevance +
+          additiveWeights.NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT +
+          queryEvidenceTransfer,
         conflict_penalty: conflictPenalty,
         contradiction_penalty: contradictionPenalty,
         confidence: confidenceFactor,
+        graph_path_cold_score: supplementaryData.graphAndPathColdScore,
+        recalls_edge_count: supplementaryData.recallsEdgeCount,
+        weight_transfer_amount: supplementaryData.weightTransferAmount,
         resolved_activation_weights: weights
       })
     });
@@ -2086,7 +2230,6 @@ function draftPriority(draft: Readonly<CoarseCandidateDraft>): number {
   if (draft.admissionPlanes.some((plane) =>
     plane === "evidence_anchor" ||
     plane === "domain_tag_cluster" ||
-    plane === "temporal_proximity" ||
     plane === "session_surface_cohort" ||
     plane === "graph_expansion" ||
     plane === "path_expansion"
@@ -2125,29 +2268,76 @@ function scorePathRelationExpansion(path: Readonly<PathRelation>): number {
 function directionEligiblePathExpansionTargets(
   path: Readonly<PathRelation>,
   seedIds: ReadonlySet<string>
-): readonly string[] {
+): readonly DirectionEligiblePathExpansionTarget[] {
   const sourceId = anchorMemoryId(path.anchors.source_anchor);
   const targetId = anchorMemoryId(path.anchors.target_anchor);
   if (sourceId === undefined || targetId === undefined || sourceId === targetId) {
     return [];
   }
 
-  const targets = new Set<string>();
+  const targets = new Map<string, DirectionEligiblePathExpansionTarget>();
   if (
     seedIds.has(sourceId) &&
     (path.plasticity_state.direction_bias === "source_to_target" ||
       path.plasticity_state.direction_bias === "bidirectional_asymmetric")
   ) {
-    targets.add(targetId);
+    targets.set(`${sourceId}->${targetId}`, { seedId: sourceId, targetId });
   }
   if (
     seedIds.has(targetId) &&
     (path.plasticity_state.direction_bias === "target_to_source" ||
       path.plasticity_state.direction_bias === "bidirectional_asymmetric")
   ) {
-    targets.add(sourceId);
+    targets.set(`${targetId}->${sourceId}`, { seedId: targetId, targetId: sourceId });
   }
-  return [...targets];
+  return [...targets.values()];
+}
+
+interface DirectionEligiblePathExpansionTarget {
+  readonly seedId: string;
+  readonly targetId: string;
+}
+
+function pathRelationMemoryIds(path: Readonly<PathRelation>): readonly string[] {
+  return uniqueStrings([
+    anchorMemoryId(path.anchors.source_anchor),
+    anchorMemoryId(path.anchors.target_anchor)
+  ].filter((value): value is string => value !== undefined));
+}
+
+function pathMatchesTimeConcernWindowDigest(
+  path: Readonly<PathRelation>,
+  windowDigests: readonly string[]
+): boolean {
+  const queryDigests = new Set(windowDigests);
+  return [
+    path.anchors.source_anchor,
+    path.anchors.target_anchor
+  ].some((anchor) =>
+    anchor.kind === "time_concern" &&
+    queryDigests.has(normalizeTimeConcernWindowDigest(anchor.window_digest))
+  );
+}
+
+function firstTimeConcernSeedId(
+  path: Readonly<PathRelation>,
+  windowDigests: readonly string[]
+): string {
+  const queryDigests = new Set(windowDigests);
+  const anchor = [
+    path.anchors.source_anchor,
+    path.anchors.target_anchor
+  ].find((candidate) =>
+    candidate.kind === "time_concern" &&
+    queryDigests.has(normalizeTimeConcernWindowDigest(candidate.window_digest))
+  );
+  return anchor?.kind === "time_concern"
+    ? `time_concern:${normalizeTimeConcernWindowDigest(anchor.window_digest)}`
+    : "time_concern:unknown";
+}
+
+function normalizeTimeConcernWindowDigest(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/gu, "_");
 }
 
 function anchorMemoryId(anchor: PathAnchorRef): string | undefined {
@@ -2170,8 +2360,48 @@ function uniqueStrings(values: readonly string[]): readonly string[] {
   return [...new Set(values)];
 }
 
+function uniquePathExpansionSources(
+  values: readonly RecallPathExpansionSourceDiagnostic[]
+): readonly RecallPathExpansionSourceDiagnostic[] {
+  const seen = new Set<string>();
+  const result: RecallPathExpansionSourceDiagnostic[] = [];
+  for (const value of values) {
+    const key = `${value.source_channel}:${value.path_id}:${value.seed_kind}:${value.seed_id}:${value.target_object_id}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(value);
+  }
+  return result;
+}
+
 function uniquePlanes(values: readonly RecallAdmissionPlane[]): readonly RecallAdmissionPlane[] {
   return [...new Set(values)];
+}
+
+const RECALL_ADMISSION_ATTRIBUTION_ORDER: readonly RecallAdmissionPlane[] = [
+  "lexical",
+  "path_expansion",
+  "graph_expansion",
+  "evidence_anchor",
+  "object_probe",
+  "protected_winner",
+  "domain_tag_cluster",
+  "session_surface_cohort",
+  "activation"
+];
+
+function selectRecallAdmissionAttributionPlane(
+  admissionPlanes: readonly RecallAdmissionPlane[],
+  fallback: RecallAdmissionPlane | undefined
+): RecallAdmissionPlane {
+  for (const plane of RECALL_ADMISSION_ATTRIBUTION_ORDER) {
+    if (admissionPlanes.includes(plane)) {
+      return plane;
+    }
+  }
+  return fallback ?? admissionPlanes[0] ?? "activation";
 }
 
 function isWorkspaceLocalRecallCandidate(candidate: Readonly<RecallCandidate>): boolean {
@@ -2180,15 +2410,67 @@ function isWorkspaceLocalRecallCandidate(candidate: Readonly<RecallCandidate>): 
 
 function resolveDynamicActivationWeights(
   weights: ActivationWeights,
-  graphAndPathCold: boolean
+  graphAndPathColdScore: number,
+  pathPlasticityWeight: number
 ): ActivationWeights {
-  if (!graphAndPathCold) {
+  const coldScore = clamp01(graphAndPathColdScore);
+  if (coldScore === 0) {
     return weights;
   }
 
   return Object.freeze({
     ...weights,
-    relevance: weights.relevance + weights.graph_support + PATH_PLASTICITY_WEIGHT,
-    graph_support: 0
+    relevance: weights.relevance + (weights.graph_support + pathPlasticityWeight) * coldScore,
+    graph_support: weights.graph_support * (1 - coldScore)
   });
+}
+
+type ResolvedAdditiveScoringWeights = Required<RecallAdditiveScoringWeights>;
+type ResolvedFusionScoringWeights = Readonly<{
+  readonly QUERY_EVIDENCE_BASE_TRANSFER_MAX: number;
+  readonly QUERY_EVIDENCE_BASE_WEIGHT_FLOOR: number;
+}>;
+
+function resolveAdditiveScoringWeights(
+  policy: Readonly<RecallPolicy>
+): Readonly<ResolvedAdditiveScoringWeights> {
+  const overrides = policy.scoring_weight_overrides?.additive;
+  return Object.freeze({
+    NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT:
+      overrides?.NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT ?? NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT,
+    CONFIDENCE_DIRECT_WEIGHT:
+      overrides?.CONFIDENCE_DIRECT_WEIGHT ?? CONFIDENCE_DIRECT_WEIGHT,
+    PATH_PLASTICITY_WEIGHT:
+      overrides?.PATH_PLASTICITY_WEIGHT ?? PATH_PLASTICITY_WEIGHT
+  });
+}
+
+function resolveFusionScoringWeights(
+  policy: Readonly<RecallPolicy>
+): ResolvedFusionScoringWeights {
+  const overrides = policy.scoring_weight_overrides?.fusion_weights;
+  return Object.freeze({
+    QUERY_EVIDENCE_BASE_TRANSFER_MAX: clamp01(
+      overrides?.QUERY_EVIDENCE_BASE_TRANSFER_MAX ?? QUERY_EVIDENCE_BASE_TRANSFER_MAX
+    ),
+    QUERY_EVIDENCE_BASE_WEIGHT_FLOOR: clamp01(
+      overrides?.QUERY_EVIDENCE_BASE_WEIGHT_FLOOR ?? QUERY_EVIDENCE_BASE_WEIGHT_FLOOR
+    )
+  });
+}
+
+function computeQueryEvidenceBaseTransfer(
+  baseWeight: number,
+  relevanceFactor: number,
+  fusionWeights: ResolvedFusionScoringWeights
+): number {
+  const transferableBase = Math.max(
+    0,
+    baseWeight - fusionWeights.QUERY_EVIDENCE_BASE_WEIGHT_FLOOR
+  );
+  const maxTransfer = Math.min(
+    fusionWeights.QUERY_EVIDENCE_BASE_TRANSFER_MAX,
+    transferableBase
+  );
+  return clamp01(relevanceFactor) * maxTransfer;
 }

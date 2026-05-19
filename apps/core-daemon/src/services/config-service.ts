@@ -4,9 +4,11 @@ import {
   DEFAULT_ENVIRONMENT_CONFIG,
   DEFAULT_SOUL_CONFIG,
   DEFAULT_STRATEGY_CONFIG,
+  DYNAMICS_CONSTANTS,
   EnvironmentConfigSchema,
   HealthEventKind,
   GardenEventType,
+  ManifestationBudgetConfigSchema,
   RuntimeGardenComputeConfigSchema,
   RuntimeGardenProviderKindSchema,
   RuntimeEmbeddingConfigSchema,
@@ -16,6 +18,7 @@ import {
   StrategyConfigSchema,
   type EnvironmentConfig,
   type EventLogEntry,
+  type ManifestationBudgetConfig,
   type RuntimeGardenComputeConfig,
   type RuntimeEmbeddingConfig,
   type SoulConfig,
@@ -56,11 +59,18 @@ export interface AppConfigService {
   patchStrategyConfig(workspaceId: string, patch: unknown): Promise<StrategyConfig>;
   getEnvironmentConfig(workspaceId: string): Promise<EnvironmentConfig>;
   patchEnvironmentConfig(workspaceId: string, patch: unknown): Promise<EnvironmentConfig>;
+  getManifestationBudgetConfig(workspaceId: string): Promise<ManifestationBudgetConfigRead>;
+  patchManifestationBudgetConfig(workspaceId: string, patch: unknown): Promise<ManifestationBudgetConfig>;
   getRuntimeEmbeddingConfig(): Promise<RuntimeEmbeddingConfig>;
   patchRuntimeEmbeddingConfig(patch: unknown): Promise<RuntimeEmbeddingConfig>;
   getGardenCredentialProvenance(): Promise<GardenCredentialProvenance>;
   getRuntimeGardenComputeConfig(): Promise<RuntimeGardenComputeConfig>;
   patchRuntimeGardenComputeConfig(patch: unknown): Promise<RuntimeGardenComputeConfig>;
+}
+
+export interface ManifestationBudgetConfigRead {
+  readonly config: ManifestationBudgetConfig;
+  readonly source: "default" | "stored";
 }
 
 interface ConfigEventPublisher {
@@ -76,10 +86,12 @@ const EnvironmentConfigPatchSchema = EnvironmentConfigSchema.unwrap().partial();
 
 const RUNTIME_EMBEDDING_CONFIG_KEY = "runtime:embedding-supplement";
 const RUNTIME_GARDEN_COMPUTE_CONFIG_KEY = "runtime:garden-compute";
+const MANIFESTATION_BUDGET_CONFIG_SECTION = "manifestation_budget";
 const RUNTIME_EMBEDDING_ENTITY_TYPE = "runtime_config";
 const RUNTIME_EMBEDDING_ENTITY_ID = "runtime:embedding-supplement";
 const RUNTIME_GARDEN_COMPUTE_ENTITY_ID = "runtime:garden-compute";
 const RUNTIME_CONFIG_WORKSPACE_ID = "runtime";
+const WORKSPACE_CONFIG_ENTITY_TYPE = "workspace_config";
 const RUNTIME_EMBEDDING_CONFIG_FIELDS = [
   "provider_url",
   "secret_ref",
@@ -92,6 +104,19 @@ const RUNTIME_GARDEN_COMPUTE_CONFIG_FIELDS = [
   "secret_ref",
   "model_id",
   "enabled"
+] as const;
+const MANIFESTATION_BUDGET_CAP_FIELDS = [
+  "stance_bias_cap",
+  "dialogue_nudge_cap",
+  "lens_entry_cap"
+] as const;
+const MANIFESTATION_ESCALATION_POLICY_FIELDS = [
+  "nudge_min_pressure",
+  "nudge_min_confidence",
+  "lens_min_pressure",
+  "lens_min_confidence",
+  "lens_requires_task_coupling",
+  "lens_requires_governance_ceiling"
 ] as const;
 
 const DEFAULT_RUNTIME_EMBEDDING_CONFIG: RuntimeEmbeddingConfig = {
@@ -168,6 +193,17 @@ export function createConfigService(dependencies: {
         patch,
         "Invalid environment config patch"
       ),
+    getManifestationBudgetConfig: async (workspaceId) =>
+      await getManifestationBudgetConfig(configRepo, workspaceId, clock),
+    patchManifestationBudgetConfig: async (workspaceId, patch) =>
+      await patchManifestationBudgetConfig({
+        repo: configRepo,
+        eventPublisher,
+        workspaceId,
+        patch,
+        clock,
+        generateAuditId
+      }),
     getRuntimeEmbeddingConfig: async () => await getRuntimeEmbeddingConfig(configRepo),
     patchRuntimeEmbeddingConfig: async (patch) =>
       await patchRuntimeEmbeddingConfig({
@@ -202,7 +238,7 @@ export function createConfigService(dependencies: {
   };
 }
 
-function keyFor(workspaceId: string, section: "soul" | "strategy" | "environment"): string {
+function keyFor(workspaceId: string, section: "soul" | "strategy" | "environment" | typeof MANIFESTATION_BUDGET_CONFIG_SECTION): string {
   return `workspace:${workspaceId}:${section}`;
 }
 
@@ -242,6 +278,112 @@ async function getRuntimeEmbeddingConfig(repo: ConfigRepo): Promise<RuntimeEmbed
   );
 }
 
+async function getManifestationBudgetConfig(
+  repo: ConfigRepo,
+  workspaceId: string,
+  clock: () => string
+): Promise<ManifestationBudgetConfigRead> {
+  const stored = await repo.get<ManifestationBudgetConfig>(
+    keyFor(workspaceId, MANIFESTATION_BUDGET_CONFIG_SECTION)
+  );
+  return {
+    config: ManifestationBudgetConfigSchema.parse(
+      stored ?? defaultManifestationBudgetConfig(workspaceId, clock)
+    ),
+    source: stored === null ? "default" : "stored"
+  };
+}
+
+async function patchManifestationBudgetConfig(input: {
+  readonly repo: ConfigRepo;
+  readonly eventPublisher: ConfigEventPublisher;
+  readonly workspaceId: string;
+  readonly patch: unknown;
+  readonly clock: () => string;
+  readonly generateAuditId: () => string;
+}): Promise<ManifestationBudgetConfig> {
+  const patch = asRecord(input.patch);
+  const current = (
+    await getManifestationBudgetConfig(input.repo, input.workspaceId, input.clock)
+  ).config;
+  const occurredAt = parseIsoTimestamp(input.clock(), "Invalid manifestation budget config patch");
+  const next = ManifestationBudgetConfigSchema.parse({
+    ...current,
+    ...patch,
+    workspace_id: input.workspaceId,
+    escalation_policy: {
+      ...current.escalation_policy,
+      ...asRecord(patch.escalation_policy)
+    },
+    updated_at: occurredAt
+  });
+  const auditEntryId = input.generateAuditId();
+  const configKey = keyFor(input.workspaceId, MANIFESTATION_BUDGET_CONFIG_SECTION);
+
+  return await input.eventPublisher.appendManyWithMutation(
+    [
+      {
+        event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
+        entity_type: WORKSPACE_CONFIG_ENTITY_TYPE,
+        entity_id: configKey,
+        workspace_id: input.workspaceId,
+        run_id: null,
+        caused_by: "inspector",
+        payload_json: SoulHealthJournalRecordedPayloadSchema.parse({
+          entry_id: auditEntryId,
+          event_kind: HealthEventKind.RECALL_TUNING,
+          workspace_id: input.workspaceId,
+          occurred_at: occurredAt,
+          change_summary: buildManifestationBudgetChangeSummary(patch)
+        })
+      }
+    ],
+    () => {
+      input.repo.set(configKey, next);
+      return next;
+    }
+  );
+}
+
+function defaultManifestationBudgetConfig(
+  workspaceId: string,
+  clock: () => string
+): ManifestationBudgetConfig {
+  return ManifestationBudgetConfigSchema.parse({
+    workspace_id: workspaceId,
+    stance_bias_cap: DYNAMICS_CONSTANTS.manifestation_budget.default_stance_bias_cap,
+    dialogue_nudge_cap: DYNAMICS_CONSTANTS.manifestation_budget.default_dialogue_nudge_cap,
+    lens_entry_cap: DYNAMICS_CONSTANTS.manifestation_budget.default_lens_entry_cap,
+    escalation_policy: {
+      nudge_min_pressure: DYNAMICS_CONSTANTS.manifestation_budget.default_nudge_min_pressure,
+      nudge_min_confidence: DYNAMICS_CONSTANTS.manifestation_budget.default_nudge_min_confidence,
+      lens_min_pressure: DYNAMICS_CONSTANTS.manifestation_budget.default_lens_min_pressure,
+      lens_min_confidence: DYNAMICS_CONSTANTS.manifestation_budget.default_lens_min_confidence,
+      lens_requires_task_coupling: true,
+      lens_requires_governance_ceiling: true
+    },
+    updated_at: clock()
+  });
+}
+
+function buildManifestationBudgetChangeSummary(patch: Record<string, unknown>): {
+  readonly fields_changed: readonly string[];
+} {
+  const fieldsChanged = [
+    ...MANIFESTATION_BUDGET_CAP_FIELDS.filter((field) => patch[field] !== undefined),
+    ...MANIFESTATION_ESCALATION_POLICY_FIELDS
+      .filter((field) => asRecord(patch.escalation_policy)[field] !== undefined)
+      .map((field) => `escalation_policy.${field}`)
+  ];
+  return { fields_changed: fieldsChanged };
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
 async function getRuntimeGardenComputeConfig(
   repo: ConfigRepo,
   paths: AlayaConfigPaths,
@@ -254,7 +396,7 @@ async function getRuntimeGardenComputeConfig(
 
 // Keep malformed rows from making runtime config unreadable. Keychain refs
 // that are schema-compatible but operationally invalid are handled later by
-// resolveSecretRef/doctor so v0.3.3 does not narrow the runtime config schema.
+// resolveSecretRef/doctor so this parser does not narrow the runtime config schema.
 function parseGardenComputeConfigWithLegacyFallback(
   input: unknown,
   source: string,

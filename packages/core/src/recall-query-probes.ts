@@ -117,7 +117,10 @@ export function compileRecallQueryProbes(queryText: string | null): Readonly<Rec
     lexical_terms: lexicalTerms,
     phrases: extractPhrases(normalized, lexicalTerms),
     char_ngrams: extractCharNgrams(normalized),
-    date_terms: collectFullMatches(normalized, /\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}\/\d{1,2}\/\d{2,4}\b|\b(?:today|yesterday|tomorrow)\b|(?:上次|昨天|今天|明天)/giu)
+    date_terms: collectFullMatches(
+      normalized,
+      /\b\d{4}-\d{2}(?:-\d{2})?\b|\b\d{1,2}\/\d{1,2}\/\d{2,4}\b|\b(?:today|yesterday|tomorrow|tonight|last\s+(?:week|month|year)|next\s+(?:week|month|year)|this\s+(?:week|month|year))\b|(?:上次|昨天|今天|明天|今晚|上周|上个月|去年|下周|下个月|明年|今年|\d{4}年\d{1,2}月(?:\d{1,2}日)?)/giu
+    )
   });
 }
 

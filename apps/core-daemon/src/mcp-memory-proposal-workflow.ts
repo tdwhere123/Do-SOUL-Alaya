@@ -38,6 +38,27 @@ export class SourceDeliveryAnchorValidationError extends Error {
 type ProposalResolutionEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 type ProposalCreationEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
+type AcceptedProposalApply =
+  | Readonly<{
+      readonly kind: "memory_update";
+      readonly memoryUpdate: Readonly<{
+        readonly target_object_id: string;
+        readonly workspace_id: string;
+        readonly proposed_changes: MemoryEntryMutableFields;
+        readonly caused_by: string;
+        readonly expected_baseline_updated_at: string | null;
+      }>;
+    }>
+  | Readonly<{
+      readonly kind: "path_relation_governance";
+      readonly pathRelationGovernance: Readonly<{
+        readonly target_object_id: string;
+        readonly workspace_id: string;
+        readonly path_id_on_create: string;
+        readonly caused_by: string;
+      }>;
+    }>;
+
 export interface McpMemoryProposalWorkflowProposalRepo {
   create(input: {
     readonly proposal: Proposal;
@@ -81,7 +102,7 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     readonly proposal: Readonly<Proposal>;
     readonly workspace_id: string;
     readonly run_id: string | null;
-    // A1 — null until the proposal is reviewed. The workflow does not
+    // Null until the proposal is reviewed. The workflow does not
     // depend on this field (it is informational for callers), so legacy
     // test fakes that omit it remain compatible via the optional shape.
     readonly reviewer_identity?: string | null;
@@ -90,13 +111,13 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     // Keep optional for compatibility with legacy storage fakes; accept
     // path returns NEEDS_CONTEXT when unavailable.
     readonly target_object_id?: string | null;
+    readonly target_object_kind?: string | null;
     readonly proposed_changes?: Readonly<MemoryEntryMutableFields> | null;
     readonly target_baseline_updated_at?: string | null;
     readonly source_delivery_ids?: readonly string[] | null;
   }> | null>;
-  // A1 (HITL daemon backbone) — pending-queue projection. The repo
-  // already enforces workspace scoping; the workflow simply forwards
-  // since/limit through.
+  // Pending-queue projection. The repo already enforces workspace
+  // scoping; the workflow simply forwards since/limit through.
   findPendingSummaries(
     workspaceId: string,
     options?: {
@@ -120,6 +141,22 @@ export interface McpMemoryProposalWorkflowProposalRepo {
       // storage layer asserts the live row is still at this baseline before
       // applying; mismatch becomes a stale-snapshot CONFLICT.
       readonly expected_baseline_updated_at?: string | null;
+    },
+    options?: { readonly reviewerIdentity?: string }
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+      readonly events: readonly EventLogEntry[];
+    }>>;
+  acceptPendingPathRelationGovernanceWithEvents?(
+    proposalId: string,
+    updatedAt: string,
+    events: readonly ProposalResolutionEventInput[],
+    pathRelationGovernance: {
+      readonly target_object_id: string;
+      readonly workspace_id: string;
+      readonly path_id_on_create: string;
+      readonly updated_at: string;
+      readonly caused_by: string;
     },
     options?: { readonly reviewerIdentity?: string }
   ): Promise<Readonly<{
@@ -268,7 +305,7 @@ export function createMcpMemoryProposalWorkflow(
         proposal,
         workspace_id: context.workspaceId,
         run_id: context.runId,
-        // A1 — store HITL projection metadata so soul.list_pending_proposals
+        // Store projection metadata so soul.list_pending_proposals
         // can serve a useful summary without joining event_log payloads.
         // The MCP-driven proposeMemoryUpdate path always targets memory
         // entries; the reason text is the agent-supplied change summary.
@@ -314,8 +351,8 @@ export function createMcpMemoryProposalWorkflow(
       input.verdict === "accept"
         ? await prepareAcceptedProposalApply(scopedProposal, context)
         : undefined;
-    // A1 (HITL daemon backbone) — review-related event_log rows record
-    // reviewer_identity in caused_by so the audit trail names the human
+    // Review-related event_log rows record reviewer_identity in caused_by
+    // so the audit trail names the human
     // (or principal) who approved/rejected, not just the surface that
     // delivered the call. The propose path keeps caused_by=agentTarget
     // because that is who *created* the proposal.
@@ -394,13 +431,21 @@ export function createMcpMemoryProposalWorkflow(
               reviewEvents,
               { reviewerIdentity }
             )
-          : await acceptProposalWithDurableMemoryUpdate(
-              proposal.proposal_id,
-              reviewedAt,
-              reviewEvents,
-              acceptedMemoryUpdate,
-              reviewerIdentity
-            );
+          : acceptedMemoryUpdate.kind === "memory_update"
+            ? await acceptProposalWithDurableMemoryUpdate(
+                proposal.proposal_id,
+                reviewedAt,
+                reviewEvents,
+                acceptedMemoryUpdate.memoryUpdate,
+                reviewerIdentity
+              )
+            : await acceptProposalWithDurablePathRelationGovernance(
+                proposal.proposal_id,
+                reviewedAt,
+                reviewEvents,
+                acceptedMemoryUpdate.pathRelationGovernance,
+                reviewerIdentity
+              );
     } catch (error) {
       throw normalizeResolutionError(error);
     }
@@ -420,8 +465,8 @@ export function createMcpMemoryProposalWorkflow(
     readonly proposals: readonly Readonly<SoulPendingProposalSummary>[];
     readonly total_count: number;
   }>> {
-    // A1 fix-loop (finding-2): workspace_id is server-bound from the
-    // trusted MCP call context (invariants §29 Default Scope) and is
+    // workspace_id is server-bound from the trusted MCP call context
+    // (invariants §29 Default Scope) and is
     // no longer present on the request schema. The workflow forwards
     // context.workspaceId — never input — to the repo.
     const summaries = await deps.proposalRepo.findPendingSummaries(context.workspaceId, {
@@ -439,18 +484,24 @@ export function createMcpMemoryProposalWorkflow(
     scopedProposal: Readonly<{
       readonly proposal: Readonly<Proposal>;
       readonly workspace_id: string;
+      readonly target_object_kind?: string | null;
       readonly target_object_id?: string | null;
       readonly proposed_changes?: Readonly<MemoryEntryMutableFields> | null;
       readonly target_baseline_updated_at?: string | null;
     }>,
     context: McpMemoryToolCallContext
-  ): Promise<Readonly<{
-    readonly target_object_id: string;
-    readonly workspace_id: string;
-    readonly proposed_changes: MemoryEntryMutableFields;
-    readonly caused_by: string;
-    readonly expected_baseline_updated_at: string | null;
-  }>> {
+  ): Promise<AcceptedProposalApply> {
+    const targetObjectKind = scopedProposal.target_object_kind ?? "memory_entry";
+    if (targetObjectKind === "path_relation") {
+      return await prepareAcceptedPathRelationGovernance(scopedProposal, context);
+    }
+    if (targetObjectKind !== "memory_entry") {
+      throw createWorkflowError(
+        "NEEDS_CONTEXT",
+        `Proposal ${scopedProposal.proposal.proposal_id} has unsupported target_object_kind ${targetObjectKind}.`
+      );
+    }
+
     const memoryService = deps.memoryService;
     if (memoryService === undefined) {
       throw createWorkflowError(
@@ -478,11 +529,49 @@ export function createMcpMemoryProposalWorkflow(
     await memoryService.validateUpdate(targetObjectId, proposedChanges);
 
     return {
-      target_object_id: targetObjectId,
-      workspace_id: context.workspaceId,
-      proposed_changes: proposedChanges,
-      caused_by: `proposal_accept:${proposalId}`,
-      expected_baseline_updated_at: scopedProposal.target_baseline_updated_at ?? null
+      kind: "memory_update",
+      memoryUpdate: {
+        target_object_id: targetObjectId,
+        workspace_id: context.workspaceId,
+        proposed_changes: proposedChanges,
+        caused_by: `proposal_accept:${proposalId}`,
+        expected_baseline_updated_at: scopedProposal.target_baseline_updated_at ?? null
+      }
+    };
+  }
+
+  async function prepareAcceptedPathRelationGovernance(
+    scopedProposal: Readonly<{
+      readonly proposal: Readonly<Proposal>;
+      readonly workspace_id: string;
+      readonly target_object_id?: string | null;
+    }>,
+    context: McpMemoryToolCallContext
+  ): Promise<AcceptedProposalApply> {
+    const memoryService = deps.memoryService;
+    if (memoryService === undefined) {
+      throw createWorkflowError(
+        "NEEDS_CONTEXT",
+        "Memory read port is unavailable; wire memoryService into MCP proposal workflow."
+      );
+    }
+    const proposalId = scopedProposal.proposal.proposal_id;
+    const targetObjectId = resolveProposalTargetObjectId(scopedProposal, proposalId);
+    const scopedTarget = await memoryService.findByIdScoped(targetObjectId, context.workspaceId);
+    if (scopedTarget === null) {
+      throw createWorkflowError(
+        "NOT_FOUND",
+        `Target memory object not found in workspace: ${targetObjectId}`
+      );
+    }
+    return {
+      kind: "path_relation_governance",
+      pathRelationGovernance: {
+        target_object_id: targetObjectId,
+        workspace_id: context.workspaceId,
+        path_id_on_create: generateObjectId(),
+        caused_by: `proposal_accept:${proposalId}`
+      }
     };
   }
 
@@ -515,6 +604,40 @@ export function createMcpMemoryProposalWorkflow(
       reviewEvents,
       {
         ...memoryUpdate,
+        updated_at: reviewedAt
+      },
+      { reviewerIdentity }
+    );
+  }
+
+  async function acceptProposalWithDurablePathRelationGovernance(
+    proposalId: string,
+    reviewedAt: string,
+    reviewEvents: readonly ProposalResolutionEventInput[],
+    pathRelationGovernance: Readonly<{
+      readonly target_object_id: string;
+      readonly workspace_id: string;
+      readonly path_id_on_create: string;
+      readonly caused_by: string;
+    }>,
+    reviewerIdentity: string
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly events: readonly EventLogEntry[];
+  }>> {
+    if (deps.proposalRepo.acceptPendingPathRelationGovernanceWithEvents === undefined) {
+      throw createWorkflowError(
+        "NEEDS_CONTEXT",
+        "Atomic proposal accept + path relation governance apply port is unavailable."
+      );
+    }
+
+    return await deps.proposalRepo.acceptPendingPathRelationGovernanceWithEvents(
+      proposalId,
+      reviewedAt,
+      reviewEvents,
+      {
+        ...pathRelationGovernance,
         updated_at: reviewedAt
       },
       { reviewerIdentity }
@@ -626,7 +749,7 @@ function assertProposalContext(
   }>,
   context: McpMemoryToolCallContext
 ): void {
-  // A1 fix-loop (finding-1): the original strict check required
+  // The original strict check required
   //   scopedProposal.run_id === context.runId
   // even when the call came in from the human-reviewer surfaces (the
   // Inspector POST and `alaya review accept`), which always pass

@@ -325,9 +325,20 @@ describe("RecallService global project-mapping filter", () => {
 
     const accepted = result.candidates.find((candidate) => candidate.object_id === "global-accepted");
     const advisory = result.candidates.find((candidate) => candidate.object_id === "global-suggested");
+    const acceptedFactors = accepted?.score_factors;
+    const advisoryFactors = advisory?.score_factors;
+    const expectedDynamicGap =
+      (acceptedFactors?.weighted_activation ?? 0) -
+      (advisoryFactors?.weighted_activation ?? 0) +
+      (acceptedFactors?.weighted_query_evidence_transfer ?? 0) -
+      (advisoryFactors?.weighted_query_evidence_transfer ?? 0);
 
     expect(accepted?.relevance_score).toBeGreaterThan(advisory?.relevance_score ?? 0);
-    expect((accepted?.relevance_score ?? 0) - (advisory?.relevance_score ?? 0)).toBeCloseTo(0.144);
+    expect((acceptedFactors?.base_weight ?? 0) - (advisoryFactors?.base_weight ?? 0)).toBeCloseTo(0.18);
+    expect((accepted?.relevance_score ?? 0) - (advisory?.relevance_score ?? 0)).toBeCloseTo(
+      expectedDynamicGap
+    );
+    expect((accepted?.relevance_score ?? 0) - (advisory?.relevance_score ?? 0)).toBeCloseTo(0.1362);
     expect(accepted?.is_advisory).toBe(false);
     expect(advisory?.is_advisory).toBe(true);
   });

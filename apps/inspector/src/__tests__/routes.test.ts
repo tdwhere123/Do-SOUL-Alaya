@@ -17,15 +17,18 @@ describe("inspector routes", () => {
       "PATCH /api/config/runtime/embedding-supplement",
       "GET /api/config/:workspaceId/garden-compute",
       "PATCH /api/config/runtime/garden-compute",
+      "GET /api/config/:workspaceId/manifestation-budget",
+      "PATCH /api/config/:workspaceId/manifestation-budget",
       "GET /api/bench-summary",
+      "GET /api/bench-trend",
       "GET /api/embedding-status/:workspaceId",
       "GET /api/graph/:workspaceId",
       "GET /api/memory-entries/:workspaceId",
       "GET /api/pointers/:workspaceId/:objectId",
       "GET /api/recall-stats/:workspaceId",
       "GET /api/status",
-      // A1 (HITL daemon backbone) — Inspector loopback for the new
-      // pending-proposals listing tool plus accept/reject.
+      // Inspector loopback routes share the attached-agent proposal review
+      // workflow for pending-proposals listing plus accept/reject.
       "GET /api/proposals/:workspaceId/pending",
       "POST /api/proposals/:workspaceId/:proposalId/review",
       "POST /api/proposals/:workspaceId/memory/:memoryId/keep",
@@ -73,6 +76,12 @@ describe("inspector routes", () => {
       }),
       headers: { "content-type": "application/json" }
     });
+    await app.request("/api/config/ws1/manifestation-budget?token=token");
+    await app.request("/api/config/ws1/manifestation-budget?token=token", {
+      method: "PATCH",
+      body: JSON.stringify({ stance_bias_cap: 8 }),
+      headers: { "content-type": "application/json" }
+    });
     await app.request("/api/config/ws1/strategy?token=token", {
       method: "PATCH",
       body: JSON.stringify({ auto_approve_readonly: true }),
@@ -97,6 +106,16 @@ describe("inspector routes", () => {
         url: "http://daemon.local/config/runtime/garden-compute",
         method: "PATCH",
         body: "{\"provider_kind\":\"official_api\",\"secret_ref_mode\":\"env\",\"secret_value\":\"ALAYA_OFFICIAL_GARDEN_API_KEY\"}"
+      },
+      {
+        url: "http://daemon.local/workspaces/ws1/config/manifestation-budget",
+        method: "GET",
+        body: null
+      },
+      {
+        url: "http://daemon.local/workspaces/ws1/config/manifestation-budget",
+        method: "PATCH",
+        body: "{\"stance_bias_cap\":8}"
       },
       {
         url: "http://daemon.local/workspaces/ws1/config/strategy",
@@ -267,9 +286,9 @@ describe("inspector routes", () => {
     expect(await missingResponse.json()).toEqual({ error: "frontend_bundle_missing" });
   });
 
-  // A1 (HITL daemon backbone) — Inspector forwards proposal review
-  // calls to the daemon's workspace-scoped HTTP wrapper around the MCP
-  // handler. The Inspector backend itself never imports daemon code.
+  // Inspector forwards proposal review calls to the daemon's
+  // workspace-scoped HTTP wrapper around the MCP handler. The Inspector
+  // backend itself never imports daemon code.
   it("proxies pending-proposals listing and accept/reject through to the daemon", async () => {
     const calls: {
       url: string;
@@ -643,6 +662,107 @@ describe("inspector routes", () => {
     expect(body.data.errors.live).toBeNull();
     expect(body.data.public?.history_count).toBe(1);
     expect(body.data.public?.latest_slug).toBe("2026-05-14T100000Z-abcdef0");
+  });
+
+  it("returns a 30-day bench trend payload with path expansion shares", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "bench-history-trend-"));
+    const first = path.join(root, "public", "2026-05-14T100000Z-aaaaaaa");
+    const second = path.join(root, "public", "2026-05-15T100000Z-bbbbbbb");
+    await mkdir(first, { recursive: true });
+    await mkdir(second, { recursive: true });
+
+    const basePayload = {
+      bench_name: "public",
+      split: "longmemeval-s",
+      alaya_commit: "aaaaaaa",
+      alaya_version: "0.3.10",
+      embedding_provider: "none",
+      chat_provider: "none",
+      policy_shape: "stress",
+      simulate_report: "none",
+      dataset: { name: "LongMemEval-S", size: 500, source: "github:xiaowu0162/LongMemEval" },
+      sample_size: 500,
+      evaluated_count: 100,
+      harness_mode: "mcp_propose_review",
+      kpi: {
+        r_at_1: 0.2,
+        r_at_5: 0.6,
+        r_at_10: 0.7,
+        latency_ms_p50: 80,
+        latency_ms_p95: 150,
+        token_saved_ratio_vs_full_prompt: 0.8,
+        tier_distribution: { hot: 3, warm: 5, cold: 2 },
+        degradation_reasons: {
+          none: 8,
+          warm_cascade_engaged: 1,
+          cold_cascade_engaged: 1
+        },
+        per_scenario: []
+      }
+    };
+    await writeFile(
+      path.join(first, "kpi.json"),
+      JSON.stringify({ ...basePayload, run_at: "2026-05-14T10:00:00.000Z" }),
+      "utf8"
+    );
+    await writeFile(
+      path.join(second, "kpi.json"),
+      JSON.stringify({
+        ...basePayload,
+        alaya_commit: "bbbbbbb",
+        run_at: "2026-05-15T10:00:00.000Z",
+        kpi: { ...basePayload.kpi, r_at_5: 0.72, latency_ms_p95: 130 }
+      }),
+      "utf8"
+    );
+    await writeFile(
+      path.join(second, "longmemeval-diagnostics.json"),
+      JSON.stringify({
+        scored_recall_evidence: {
+          delivered_result_count: 10,
+          path_expansion_plane_count: 3,
+          graph_expansion_plane_count: 2
+        }
+      }),
+      "utf8"
+    );
+
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      benchHistoryRoot: root,
+      staticRoot: await mkdtemp(path.join(tmpdir(), "inspector-static-")),
+      fetchImpl: async () => Response.json({}, { status: 500 })
+    });
+
+    const response = await app.request("/api/bench-trend?token=token&limit=30");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      readonly data: {
+        readonly public: {
+          readonly history_count: number;
+          readonly points: readonly {
+            readonly slug: string;
+            readonly r_at_5: number;
+            readonly path_expansion_share: number | null;
+            readonly graph_expansion_share: number | null;
+          }[];
+        };
+        readonly errors: { readonly public: string | null };
+      };
+    };
+    expect(body.data.errors.public).toBeNull();
+    expect(body.data.public.history_count).toBe(2);
+    expect(body.data.public.points.map((point) => point.slug)).toEqual([
+      "2026-05-14T100000Z-aaaaaaa",
+      "2026-05-15T100000Z-bbbbbbb"
+    ]);
+    expect(body.data.public.points[1]).toMatchObject({
+      r_at_5: 0.72,
+      path_expansion_share: 0.3,
+      graph_expansion_share: 0.2
+    });
   });
 
   it("rejects workspace-scoped API paths when the Inspector app is missing its launch workspace", async () => {

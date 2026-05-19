@@ -277,6 +277,52 @@ describe("Runtime Control Plane Schemas", () => {
     );
   });
 
+  it("parses optional recall scoring weight overrides for bench policy construction", () => {
+    const parsed = RecallPolicySchema.parse({
+      ...recallPolicyBase,
+      scoring_weight_overrides: {
+        additive: {
+          NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT: 0.2,
+          CONFIDENCE_DIRECT_WEIGHT: 0.1,
+          PATH_PLASTICITY_WEIGHT: 0.12
+        },
+        fusion_weights: {
+          future_signal: 0.5
+        }
+      }
+    });
+
+    expect(parsed.scoring_weight_overrides?.additive).toEqual({
+      NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT: 0.2,
+      CONFIDENCE_DIRECT_WEIGHT: 0.1,
+      PATH_PLASTICITY_WEIGHT: 0.12
+    });
+    expect(parsed.scoring_weight_overrides?.fusion_weights).toEqual({
+      future_signal: 0.5
+    });
+    expect(RecallPolicySchema.parse(recallPolicyBase).scoring_weight_overrides).toBeUndefined();
+    expect(
+      RecallPolicySchema.safeParse({
+        ...recallPolicyBase,
+        scoring_weight_overrides: {
+          additive: {
+            CONFIDENCE_DIRECT_WEIGHT: -0.1
+          }
+        }
+      }).success
+    ).toBe(false);
+    expect(
+      RecallPolicySchema.safeParse({
+        ...recallPolicyBase,
+        scoring_weight_overrides: {
+          fusion_weights: {
+            future_signal: -0.5
+          }
+        }
+      }).success
+    ).toBe(false);
+  });
+
   it("enforces [0,1] relevance_score in ContextLensEntry", () => {
     expect(ContextLensSchema.parse(contextLensBase)).toEqual(contextLensBase);
     expect(

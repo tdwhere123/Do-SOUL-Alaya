@@ -294,13 +294,61 @@ describe("garden runtime path plasticity queue", () => {
       })
     );
   });
+
+  it("prioritizes Auditor evidence staleness by path verification bias", async () => {
+    const revokeOrder: string[] = [];
+    const gardenDataPorts = createGardenDataPorts({
+      evidenceCheckPort: {
+        findMemoriesWithStaleEvidence: vi.fn(async () => [
+          { memory_entry_id: "memory-low", stale_evidence_refs: ["evidence-1"] },
+          { memory_entry_id: "memory-high", stale_evidence_refs: ["evidence-2"] }
+        ])
+      },
+      greenMaintenancePort: {
+        revokeGreen: vi.fn((memoryId: string) => {
+          revokeOrder.push(memoryId);
+          return { affected: 1 };
+        })
+      }
+    });
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        computeAndApplyPlasticity: vi.fn(async () => ({
+          reinforced: 0,
+          weakened: 0,
+          retired: 0,
+          affectedPathIds: []
+        })),
+        gardenDataPorts,
+        pathRelationRepo: {
+          findActive: vi.fn(async () => []),
+          findByAnchors: vi.fn(async (_workspaceId: string, anchors: readonly { readonly object_id: string }[]) =>
+            anchors.some((anchor) => anchor.object_id === "memory-high")
+              ? [
+                  {
+                    lifecycle: { status: "active" },
+                    effect_vector: { verification_bias: 0.9 }
+                  }
+                ]
+              : [])
+        } as unknown as GardenRuntimeInput["pathRelationRepo"]
+      })
+    );
+
+    await getService(runtime, "Auditor").task();
+    await getService(runtime, "GardenScheduler").task();
+
+    expect(revokeOrder).toEqual(["memory-high", "memory-low"]);
+  });
 });
 
 function createRuntimeInput(options: {
   readonly computeAndApplyPlasticity: NonNullable<
     GardenRuntimeInput["pathPlasticityService"]
   >["computeAndApplyPlasticity"];
+  readonly gardenDataPorts?: GardenRuntimeInput["gardenDataPorts"];
   readonly healthJournalRepo?: GardenRuntimeInput["healthJournalRepo"];
+  readonly pathRelationRepo?: GardenRuntimeInput["pathRelationRepo"];
   readonly pathPlasticityWatermarkRepo?: GardenRuntimeInput["pathPlasticityWatermarkRepo"];
   readonly workspaceRepo?: GardenRuntimeInput["workspaceRepo"];
 }): GardenRuntimeInput {
@@ -336,7 +384,7 @@ function createRuntimeInput(options: {
           )
       )
     } as unknown as GardenRuntimeInput["eventPublisher"],
-    gardenDataPorts: createGardenDataPorts(),
+    gardenDataPorts: options.gardenDataPorts ?? createGardenDataPorts(),
     healthJournalRepo:
       options.healthJournalRepo ??
       ({
@@ -356,9 +404,12 @@ function createRuntimeInput(options: {
       findHistory: vi.fn(async () => (latestSnapshot === null ? [] : [latestSnapshot])),
       deleteOlderThan: vi.fn(async () => undefined)
     } as unknown as GardenRuntimeInput["pathGraphSnapshotRepo"],
-    pathRelationRepo: {
-      findActive: vi.fn(async () => [])
-    } as unknown as GardenRuntimeInput["pathRelationRepo"],
+    pathRelationRepo:
+      options.pathRelationRepo ??
+      ({
+        findActive: vi.fn(async () => []),
+        findByAnchors: vi.fn(async () => [])
+      } as unknown as GardenRuntimeInput["pathRelationRepo"]),
     ...(options.pathPlasticityWatermarkRepo === undefined
       ? {}
       : { pathPlasticityWatermarkRepo: options.pathPlasticityWatermarkRepo }),
@@ -376,15 +427,18 @@ function createRuntimeInput(options: {
   };
 }
 
-function createGardenDataPorts(): GardenRuntimeInput["gardenDataPorts"] {
+function createGardenDataPorts(
+  overrides: Partial<GardenRuntimeInput["gardenDataPorts"]> = {}
+): GardenRuntimeInput["gardenDataPorts"] {
   return {
-    evidenceCheckPort: { findMemoriesWithStaleEvidence: vi.fn(async () => []) },
+    evidenceCheckPort: overrides.evidenceCheckPort ?? { findMemoriesWithStaleEvidence: vi.fn(async () => []) },
     pointerHealthPort: { findBrokenPointers: vi.fn(async () => []) },
     greenMaintenancePort: {
       findExpiringGreenStatuses: vi.fn(async () => []),
       renewGreenPassiveStable: vi.fn(async () => undefined),
       requestActiveVerification: vi.fn(async () => undefined),
-      revokeGreen: vi.fn(() => ({ affected: 0 }))
+      revokeGreen: vi.fn(() => ({ affected: 0 })),
+      ...(overrides.greenMaintenancePort ?? {})
     },
     bootstrappingPort: {
       assessColdStart: vi.fn(async () => ({

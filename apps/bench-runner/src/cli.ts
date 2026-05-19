@@ -1,4 +1,3 @@
-import { execSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
@@ -6,10 +5,13 @@ import {
   diffKpis,
   entrySlug,
   KpiPayloadSchema,
+  benchArchiveDiscriminator,
   readLatest,
   renderFindings,
   renderReport,
   writeEntry,
+  type BenchPolicyShape,
+  type BenchSimulateReportMode,
   type HistoryLayout,
   type KpiPayload,
   type PerScenarioRow
@@ -17,11 +19,30 @@ import {
 import { fetchLongMemEval } from "./longmemeval/fetch.js";
 import { runLongMemEvalMultiturn } from "./longmemeval/multiturn.js";
 import { runLongMemEvalCrossQuestion } from "./longmemeval/crossquestion.js";
+import {
+  aggregateLongMemEvalArchiveEvidence,
+  archiveEvidenceFromDiagnostics,
+  buildLongMemEvalColdWarmComparisonSidecar,
+  LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
+  LONGMEMEVAL_DIAGNOSTICS_FILENAME,
+  readLatestLongMemEvalOppositeArchive,
+  readLongMemEvalDiagnosticsSidecar,
+  type LongMemEvalArchiveEvidenceSummary,
+  renderLongMemEvalColdWarmComparisonSidecar
+} from "./longmemeval/archive-evidence.js";
+import {
+  renderDiagnosticsSidecar,
+  summarizeProviderStates,
+  type LongMemEvalDiagnosticsSidecar,
+  type LongMemEvalReportUsageSummary
+} from "./longmemeval/diagnostics.js";
 import { runLiveBench } from "./live/runner.js";
 import { runLongMemEval } from "./longmemeval/runner.js";
 import { runSelfBench } from "./self/runner.js";
 import { fetchLocomo } from "./locomo/fetch.js";
 import { runLocomo } from "./locomo/runner.js";
+import { runControlledReplay } from "./controlled-replay/runner.js";
+import { resolveBenchCommitSha7 } from "./version.js";
 import type { BenchEmbeddingMode } from "./harness/daemon.js";
 import type { LongMemEvalVariant } from "./longmemeval/dataset.js";
 
@@ -31,13 +52,14 @@ const HELP_TEXT = `alaya-bench-runner — daemon-attached benchmark harness
 
 Usage:
   alaya-bench-runner fetch-longmemeval [--variant oracle|s|m]
-  alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--history-root <path>]
+  alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--policy-shape stress|chat] [--simulate-report none|always-used|gold-only|mixed] [--weights '<json>'] [--history-root <path>]
   alaya-bench-runner longmemeval-multiturn [--variant oracle|s|m] [--limit N] [--offset N] [--rounds N] [--embedding disabled|env] [--history-root <path>]
   alaya-bench-runner longmemeval-crossquestion [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--history-root <path>]
   alaya-bench-runner fetch-locomo
   alaya-bench-runner locomo [--limit N] [--offset N] [--embedding disabled|env] [--history-root <path>]
   alaya-bench-runner self [--history-root <path>]
   alaya-bench-runner live [--source <main-check.json|main-check-run.json>] [--history-root <path>]
+  alaya-bench-runner controlled-replay [--history-root <path>]
   alaya-bench-runner merge-longmemeval --shards <dir1> <dir2> ... --variant <v> --history-root <path>
   alaya-bench-runner --help
 
@@ -92,6 +114,8 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
       return runSelfCommand(opts);
     case "live":
       return runLiveCommand(opts);
+    case "controlled-replay":
+      return runControlledReplayCommand(opts);
     case "merge-longmemeval":
       return runMergeLongMemEvalCommand(opts);
     default:
@@ -111,6 +135,9 @@ interface ParsedFlags {
   readonly shards?: ReadonlyArray<string>;
   readonly source?: string;
   readonly embeddingMode: BenchEmbeddingMode;
+  readonly policyShape: BenchPolicyShape;
+  readonly simulateReport: BenchSimulateReportMode;
+  readonly weightOverridesJson?: string;
   readonly rounds?: number;
 }
 
@@ -122,6 +149,9 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   let dataDir: string | undefined;
   let source: string | undefined;
   let embeddingMode: BenchEmbeddingMode = "disabled";
+  let policyShape: BenchPolicyShape = "stress";
+  let simulateReport: BenchSimulateReportMode = "none";
+  let weightOverridesJson: string | undefined;
   let rounds: number | undefined;
   const shards: string[] = [];
   let collectingShards = false;
@@ -162,6 +192,40 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
       }
       embeddingMode = raw;
       collectingShards = false;
+    } else if (token === "--policy-shape" || token.startsWith("--policy-shape=")) {
+      const raw = token.startsWith("--policy-shape=")
+        ? token.slice("--policy-shape=".length)
+        : args[++i] ?? "stress";
+      if (raw !== "stress" && raw !== "chat") {
+        throw new Error("--policy-shape must be one of: stress, chat");
+      }
+      policyShape = raw;
+      collectingShards = false;
+    } else if (token === "--simulate-report" || token.startsWith("--simulate-report=")) {
+      const raw = token.startsWith("--simulate-report=")
+        ? token.slice("--simulate-report=".length)
+        : args[++i] ?? "none";
+      if (
+        raw !== "none" &&
+        raw !== "always-used" &&
+        raw !== "gold-only" &&
+        raw !== "mixed"
+      ) {
+        throw new Error(
+          "--simulate-report must be one of: none, always-used, gold-only, mixed"
+        );
+      }
+      simulateReport = raw;
+      collectingShards = false;
+    } else if (token === "--weights" || token.startsWith("--weights=")) {
+      const raw = token.startsWith("--weights=")
+        ? token.slice("--weights=".length)
+        : args[++i];
+      if (raw === undefined) {
+        throw new Error("--weights requires a JSON value");
+      }
+      weightOverridesJson = raw;
+      collectingShards = false;
     } else if (token === "--data-dir") {
       dataDir = args[++i];
       collectingShards = false;
@@ -195,6 +259,9 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
     shards: shards.length > 0 ? shards : undefined,
     source,
     embeddingMode,
+    policyShape,
+    simulateReport,
+    weightOverridesJson,
     rounds
   };
 }
@@ -227,6 +294,9 @@ async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
         (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
         (opts.limit !== undefined ? ` limit=${opts.limit}` : "") +
         (opts.embeddingMode !== "disabled" ? ` embedding=${opts.embeddingMode}` : "") +
+        ` policy_shape=${opts.policyShape}` +
+        (opts.simulateReport !== "none" ? ` simulate_report=${opts.simulateReport}` : "") +
+        (opts.weightOverridesJson !== undefined ? " weights=cli" : "") +
         "...\n"
     );
     const result = await runLongMemEval({
@@ -235,11 +305,16 @@ async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
       offset: opts.offset,
       historyRoot: opts.historyRoot,
       dataDir: opts.dataDir,
-      embeddingMode: opts.embeddingMode
+      embeddingMode: opts.embeddingMode,
+      policyShape: opts.policyShape,
+      simulateReport: opts.simulateReport,
+      weightOverridesJson: opts.weightOverridesJson
     });
     const kpi = result.payload.kpi;
     process.stdout.write(
       `Done. Slug: ${result.slug}\n` +
+        `  Policy shape: ${result.payload.policy_shape ?? "stress"}\n` +
+        `  Simulate report: ${result.payload.simulate_report ?? "none"}\n` +
         `  R@1=${pct(kpi.r_at_1)} R@5=${pct(kpi.r_at_5)} R@10=${pct(kpi.r_at_10)}\n` +
         `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
         `  KPI: ${result.kpiPath}\n`
@@ -422,6 +497,23 @@ async function runLiveCommand(opts: ParsedFlags): Promise<number> {
   }
 }
 
+async function runControlledReplayCommand(opts: ParsedFlags): Promise<number> {
+  try {
+    process.stdout.write("Running controlled replay...\n");
+    const result = await runControlledReplay({ historyRoot: opts.historyRoot });
+    process.stdout.write(
+      `Controlled replay complete. Slug: ${result.slug}\n` +
+        `  Archive: ${result.archivePath}\n`
+    );
+    return 0;
+  } catch (err) {
+    process.stderr.write(
+      `alaya-bench-runner controlled-replay: ${err instanceof Error ? err.message : String(err)}\n`
+    );
+    return 2;
+  }
+}
+
 /**
  * Pick the worst verdict across all gated KPIs. A previous version of this
  * mapping only inspected verdict_per_kpi["r_at_5"], which masked latency /
@@ -446,6 +538,67 @@ function pct(ratio: number): string {
 
 function ratio(count: number, total: number): number {
   return total === 0 ? 0 : count / total;
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJson).join(",")}]`;
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableJson(entryValue)}`);
+  return `{${entries.join(",")}}`;
+}
+
+function buildMergedLongMemEvalDiagnosticsSidecar(
+  payload: KpiPayload,
+  shardDiagnostics: readonly (LongMemEvalDiagnosticsSidecar | null)[],
+  evidence: LongMemEvalArchiveEvidenceSummary
+): LongMemEvalDiagnosticsSidecar {
+  const questions = shardDiagnostics.flatMap((diagnostics) => diagnostics?.questions ?? []);
+  const embeddingMode =
+    shardDiagnostics.find((diagnostics): diagnostics is LongMemEvalDiagnosticsSidecar => diagnostics !== null)?.embedding_mode ??
+    (payload.embedding_provider === "none" ? "disabled" : "env");
+  const reportUsage = aggregateReportUsage(
+    shardDiagnostics
+      .map((diagnostics) => diagnostics?.report_usage)
+      .filter((usage): usage is LongMemEvalReportUsageSummary => usage !== undefined)
+  );
+
+  return {
+    schema_version: 1,
+    bench_name: "public",
+    split: payload.split,
+    run_at: payload.run_at,
+    alaya_commit: payload.alaya_commit,
+    embedding_provider: payload.embedding_provider,
+    embedding_mode: embeddingMode,
+    policy_shape: payload.policy_shape,
+    simulate_report: payload.simulate_report,
+    ...(reportUsage === null ? {} : { report_usage: reportUsage }),
+    ...(evidence.report_side_effects === null ? {} : { report_side_effects: evidence.report_side_effects }),
+    ...(evidence.scored_recall_evidence === null ? {} : { scored_recall_evidence: evidence.scored_recall_evidence }),
+    provider_state_summary: summarizeProviderStates(questions),
+    questions
+  };
+}
+
+function aggregateReportUsage(
+  usages: readonly LongMemEvalReportUsageSummary[]
+): LongMemEvalReportUsageSummary | null {
+  if (usages.length === 0) {
+    return null;
+  }
+  return {
+    mode: usages[0]?.mode ?? "none",
+    reports_attempted: usages.reduce((sum, usage) => sum + usage.reports_attempted, 0),
+    reports_used: usages.reduce((sum, usage) => sum + usage.reports_used, 0),
+    reports_skipped: usages.reduce((sum, usage) => sum + usage.reports_skipped, 0),
+    used_object_count: usages.reduce((sum, usage) => sum + usage.used_object_count, 0)
+  };
 }
 
 /**
@@ -479,6 +632,7 @@ async function runMergeLongMemEvalCommand(
     process.stdout.write(`Merging ${shards.length} shard(s)...\n`);
 
     const shardPayloads: KpiPayload[] = [];
+    const shardArchiveRefs: Array<{ readonly root: string; readonly slug: string }> = [];
     for (const shardRoot of shards) {
       const pointerPath = path.join(shardRoot, "public", "latest-baseline.json");
       const pointer = JSON.parse(await readFile(pointerPath, "utf8")) as {
@@ -492,6 +646,7 @@ async function runMergeLongMemEvalCommand(
       const raw = await readFile(kpiPath, "utf8");
       const payload = KpiPayloadSchema.parse(JSON.parse(raw));
       shardPayloads.push(payload);
+      shardArchiveRefs.push({ root: shardRoot, slug: pointer.slug });
       process.stdout.write(
         `  shard ${shardRoot}: ${payload.evaluated_count} questions, ` +
           `R@5=${pct(payload.kpi.r_at_5)}\n`
@@ -503,14 +658,14 @@ async function runMergeLongMemEvalCommand(
       throw new Error("no shards loaded");
     }
 
-    // @anchor merge-shard-validations — refuse incompatible shards.
+    // @anchor merge-shard-validations: refuse incompatible shards.
     // Scalar identity branches expressed as a table; dataset composite
     // and duplicate-id / over-eval guards remain inline below because
     // they don't reduce to a single-field equality.
     // see also: packages/eval/src/kpi-schema.ts §harness_mode for the
     // mcp_propose_review vs direct_db_seed audit-distinguishability
     // contract.
-    // @anchor scalar-identity-field-narrowing — the union literal
+    // @anchor scalar-identity-field-narrowing: the union literal
     // shape (vs `keyof KpiPayload`) makes adding a non-scalar key like
     // `dataset` or `kpi` a compile error rather than a silent
     // object-reference comparison.
@@ -520,6 +675,8 @@ async function runMergeLongMemEvalCommand(
       | "harness_mode"
       | "embedding_provider"
       | "chat_provider"
+      | "policy_shape"
+      | "simulate_report"
       | "bench_name"
       | "alaya_version"
       | "alaya_commit";
@@ -529,6 +686,8 @@ async function runMergeLongMemEvalCommand(
       "harness_mode",
       "embedding_provider",
       "chat_provider",
+      "policy_shape",
+      "simulate_report",
       "bench_name",
       "alaya_version",
       "alaya_commit"
@@ -550,6 +709,14 @@ async function runMergeLongMemEvalCommand(
       ) {
         throw new Error(
           `merge refused: shard[${i}] dataset identity (${shard.dataset.name}/${shard.dataset.size}/${shard.dataset.source}) != shard[0] (${first.dataset.name}/${first.dataset.size}/${first.dataset.source})`
+        );
+      }
+      if (
+        stableJson(shard.recall_weight_overrides ?? null) !==
+        stableJson(first.recall_weight_overrides ?? null)
+      ) {
+        throw new Error(
+          `merge refused: shard[${i}] recall_weight_overrides != shard[0] recall_weight_overrides`
         );
       }
     }
@@ -648,6 +815,8 @@ async function runMergeLongMemEvalCommand(
         `merge refused: evaluated_total=${evaluatedTotal} > sample_size=${first.sample_size} (shards collectively over-evaluated; check --offset/--limit ranges)`
       );
     }
+    const policyShape = first.policy_shape ?? "stress";
+    const simulateReport = first.simulate_report ?? "none";
 
     const n = evaluatedTotal;
     const rAt1 = n === 0 ? 0 : totalHitAt1 / n;
@@ -656,7 +825,7 @@ async function runMergeLongMemEvalCommand(
     const rAt10 = n === 0 ? 0 : totalHitAt10 / n;
 
     // Latency percentiles across shards: report the worst (max) shard
-    // p50 / p95 — a conservative upper bound. kpi.latency_source =
+    // p50 / p95 as a conservative upper bound. kpi.latency_source =
     // "worst_shard_bound" marks this for downstream readers. Exact
     // union-percentile would require shard kpi.json to carry the raw
     // latency array.
@@ -664,13 +833,7 @@ async function runMergeLongMemEvalCommand(
     const latencyP95 = latencyP95Max;
 
     const runAt = new Date();
-    const commitSha7 = (() => {
-      try {
-        return execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
-      } catch {
-        return "0000000";
-      }
-    })();
+    const commitSha7 = resolveBenchCommitSha7();
 
     const merged: KpiPayload = {
       bench_name: first.bench_name,
@@ -680,6 +843,11 @@ async function runMergeLongMemEvalCommand(
       alaya_version: first.alaya_version,
       embedding_provider: first.embedding_provider,
       chat_provider: first.chat_provider,
+      policy_shape: policyShape,
+      simulate_report: simulateReport,
+      ...(first.recall_weight_overrides === undefined
+        ? {}
+        : { recall_weight_overrides: first.recall_weight_overrides }),
       dataset: first.dataset,
       sample_size: first.sample_size,
       evaluated_count: evaluatedTotal,
@@ -706,7 +874,7 @@ async function runMergeLongMemEvalCommand(
           : {}),
         latency_ms_p50: latencyP50,
         latency_ms_p95: latencyP95,
-        // @anchor merged-latency-source — see kpi-schema @latency-source.
+        // @anchor merged-latency-source: see kpi-schema @latency-source.
         latency_source: "worst_shard_bound",
         token_saved_ratio_vs_full_prompt: 0,
         tier_distribution: { hot: tierHot, warm: tierWarm, cold: tierCold },
@@ -726,18 +894,70 @@ async function runMergeLongMemEvalCommand(
     };
 
     const layout: HistoryLayout = { historyRoot: opts.historyRoot };
-    const previous = await readLatest(layout, "public", { split: first.split });
+    const previous = await readLatest(layout, "public", {
+      split: first.split,
+      policyShape,
+      simulateReport
+    });
     const diff = diffKpis(merged, previous);
-    const slug = entrySlug(runAt, commitSha7);
+    const slug = entrySlug(
+      runAt,
+      commitSha7,
+      benchArchiveDiscriminator(policyShape, simulateReport)
+    );
     const report = renderReport(merged, previous, diff);
     const findings = renderFindings(merged, diff);
+    const shardDiagnostics = await Promise.all(
+      shardArchiveRefs.map(async (shard) =>
+        readLongMemEvalDiagnosticsSidecar(
+          { historyRoot: shard.root },
+          "public",
+          shard.slug
+        )
+      )
+    );
+    const shardEvidence = shardDiagnostics.map((diagnostics) =>
+      archiveEvidenceFromDiagnostics(diagnostics)
+    );
+    const currentEvidence = aggregateLongMemEvalArchiveEvidence(shardEvidence);
+    const diagnosticsSidecar = renderDiagnosticsSidecar(
+      buildMergedLongMemEvalDiagnosticsSidecar(
+        merged,
+        shardDiagnostics,
+        currentEvidence
+      )
+    );
+    const opposite = await readLatestLongMemEvalOppositeArchive({
+      layout,
+      current: merged
+    });
+    const comparisonSidecar = renderLongMemEvalColdWarmComparisonSidecar(
+      buildLongMemEvalColdWarmComparisonSidecar({
+        currentSlug: slug,
+        current: merged,
+        currentEvidence,
+        opposite
+      })
+    );
     const entry = await writeEntry(
       layout,
       "public",
       slug,
       merged,
       report,
-      findings
+      findings,
+      {
+        sidecars: [
+          {
+            filename: LONGMEMEVAL_DIAGNOSTICS_FILENAME,
+            contents: diagnosticsSidecar
+          },
+          {
+            filename: LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
+            contents: comparisonSidecar
+          }
+        ]
+      }
     );
 
     process.stdout.write(

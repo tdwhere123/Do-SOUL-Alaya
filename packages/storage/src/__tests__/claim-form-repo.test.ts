@@ -139,6 +139,22 @@ describe("SqliteClaimFormRepo", () => {
     expect(updated.updated_at).toBe("2026-03-21T01:00:00.000Z");
   });
 
+  it("updates claim lifecycle status through the sync CAS path", async () => {
+    const { repo } = await createRepo();
+    const claim = createClaimForm();
+    await repo.create(claim);
+
+    const updated = repo.updateStatusSync(
+      claim.object_id,
+      ClaimLifecycleState.ACTIVE,
+      "2026-03-21T01:00:00.000Z",
+      claim.claim_status
+    );
+
+    expect(updated.claim_status).toBe(ClaimLifecycleState.ACTIVE);
+    expect(updated.updated_at).toBe("2026-03-21T01:00:00.000Z");
+  });
+
   it("throws not found when updating status for a missing claim", async () => {
     const { repo } = await createRepo();
 

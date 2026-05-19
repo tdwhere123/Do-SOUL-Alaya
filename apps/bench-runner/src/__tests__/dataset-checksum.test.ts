@@ -93,7 +93,7 @@ describe("loadDataset checksum verification", () => {
     await seedLocalDataset();
     // Intentionally do NOT seed pinned meta.
     await unlink(join(pinnedMetaRoot, `${VARIANT}.meta.json`)).catch(() => {
-      // Already absent — that is the precondition under test.
+      // Already absent; that is the precondition under test.
     });
 
     await expect(

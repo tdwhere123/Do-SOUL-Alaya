@@ -29,6 +29,15 @@ export {
   type MemoryEntryRepoUpdateFields
 } from "./repos/memory-entry-repo.js";
 export {
+  DEFAULT_ACTIVE_CONSTRAINTS_CAP,
+  MAX_ACTIVE_CONSTRAINTS_CAP,
+  findActiveConstraints,
+  normalizeActiveConstraintsCap,
+  type ActiveConstraintQueryResult,
+  type ActiveConstraintRecord,
+  type ActiveConstraintSourceChannel
+} from "./repos/active-constraints.js";
+export {
   SqliteGlobalMemoryRepo,
   type GlobalMemoryRepo,
   type GlobalMemoryRepoListFilters
@@ -62,6 +71,8 @@ export {
 export {
   SqliteProposalRepo,
   type AcceptedMemoryUpdateInput,
+  type AcceptedPathRelationGovernanceInput,
+  type PathRelationProposalPayload,
   type ProposalCreateInput,
   type ProposalResolutionEventInput,
   type ProposalRepo

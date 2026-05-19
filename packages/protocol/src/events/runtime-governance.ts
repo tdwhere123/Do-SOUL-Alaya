@@ -38,6 +38,7 @@ const runtimeGovernanceEventTypeValues = [
   "stance.policy_evaluated",
   "stance.resolution_changed",
   "path.relation_created",
+  "path.relation_legitimacy_updated",
   "path.relation_reinforced",
   "path.relation_weakened",
   "path.relation_redirected",
@@ -72,6 +73,7 @@ export const RuntimeGovernanceEventType = {
   STANCE_POLICY_EVALUATED: "stance.policy_evaluated",
   STANCE_RESOLUTION_CHANGED: "stance.resolution_changed",
   PATH_RELATION_CREATED: "path.relation_created",
+  PATH_RELATION_LEGITIMACY_UPDATED: "path.relation_legitimacy_updated",
   PATH_RELATION_REINFORCED: "path.relation_reinforced",
   PATH_RELATION_WEAKENED: "path.relation_weakened",
   PATH_RELATION_REDIRECTED: "path.relation_redirected",
@@ -184,6 +186,19 @@ export const PathRelationCreatedPayloadSchema = z
     initial_strength: z.number(),
     governance_class: PathGovernanceClassSchema,
     created_at: IsoDatetimeStringSchema
+  })
+  .strict()
+  .readonly();
+
+export const PathRelationLegitimacyUpdatedPayloadSchema = z
+  .object({
+    path_id: NonEmptyStringSchema,
+    workspace_id: NonEmptyStringSchema,
+    previous_governance_class: PathGovernanceClassSchema,
+    new_governance_class: PathGovernanceClassSchema,
+    previous_evidence_basis: z.array(NonEmptyStringSchema).readonly(),
+    new_evidence_basis: z.array(NonEmptyStringSchema).readonly(),
+    updated_at: IsoDatetimeStringSchema
   })
   .strict()
   .readonly();
@@ -489,6 +504,8 @@ const runtimeGovernancePayloadSchemas = {
   [RuntimeGovernanceEventType.COMPUTE_PROVIDER_ROUTED]: ComputeProviderRoutedPayloadSchema,
   [RuntimeGovernanceEventType.BOOTSTRAPPING_PATHS_PLANTED]: BootstrappingPathsPlantedPayloadSchema,
   [RuntimeGovernanceEventType.PATH_RELATION_CREATED]: PathRelationCreatedPayloadSchema,
+  [RuntimeGovernanceEventType.PATH_RELATION_LEGITIMACY_UPDATED]:
+    PathRelationLegitimacyUpdatedPayloadSchema,
   [RuntimeGovernanceEventType.PATH_RELATION_REINFORCED]: PathRelationReinforcedPayloadSchema,
   [RuntimeGovernanceEventType.PATH_RELATION_WEAKENED]: PathRelationWeakenedPayloadSchema,
   [RuntimeGovernanceEventType.PATH_RELATION_REDIRECTED]: PathRelationRedirectedPayloadSchema,
@@ -562,6 +579,10 @@ const BootstrappingPathsPlantedEventObjectSchema = createRuntimeGovernanceEventO
 const PathRelationCreatedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
   RuntimeGovernanceEventType.PATH_RELATION_CREATED,
   PathRelationCreatedPayloadSchema
+);
+const PathRelationLegitimacyUpdatedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
+  RuntimeGovernanceEventType.PATH_RELATION_LEGITIMACY_UPDATED,
+  PathRelationLegitimacyUpdatedPayloadSchema
 );
 const PathRelationReinforcedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
   RuntimeGovernanceEventType.PATH_RELATION_REINFORCED,
@@ -669,6 +690,8 @@ export const ComputeProviderRoutedEventSchema = ComputeProviderRoutedEventObject
 export const BootstrappingPathsPlantedEventSchema =
   BootstrappingPathsPlantedEventObjectSchema.readonly();
 export const PathRelationCreatedEventSchema = PathRelationCreatedEventObjectSchema.readonly();
+export const PathRelationLegitimacyUpdatedEventSchema =
+  PathRelationLegitimacyUpdatedEventObjectSchema.readonly();
 export const PathRelationReinforcedEventSchema = PathRelationReinforcedEventObjectSchema.readonly();
 export const PathRelationWeakenedEventSchema = PathRelationWeakenedEventObjectSchema.readonly();
 export const PathRelationRedirectedEventSchema = PathRelationRedirectedEventObjectSchema.readonly();
@@ -717,6 +740,7 @@ export const RuntimeGovernanceEventUnionSchema = z
     ComputeProviderRoutedEventObjectSchema,
     BootstrappingPathsPlantedEventObjectSchema,
     PathRelationCreatedEventObjectSchema,
+    PathRelationLegitimacyUpdatedEventObjectSchema,
     PathRelationReinforcedEventObjectSchema,
     PathRelationWeakenedEventObjectSchema,
     PathRelationRedirectedEventObjectSchema,
@@ -773,6 +797,9 @@ export type BootstrappingPathsPlantedPayload = z.infer<
   typeof BootstrappingPathsPlantedPayloadSchema
 >;
 export type PathRelationCreatedPayload = z.infer<typeof PathRelationCreatedPayloadSchema>;
+export type PathRelationLegitimacyUpdatedPayload = z.infer<
+  typeof PathRelationLegitimacyUpdatedPayloadSchema
+>;
 export type PathRelationReinforcedPayload = z.infer<typeof PathRelationReinforcedPayloadSchema>;
 export type PathRelationWeakenedPayload = z.infer<typeof PathRelationWeakenedPayloadSchema>;
 export type PathRelationRedirectedPayload = z.infer<typeof PathRelationRedirectedPayloadSchema>;

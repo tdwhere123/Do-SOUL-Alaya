@@ -7,6 +7,7 @@ import {
   Gauge,
   HeartPulse,
   LayoutDashboard,
+  LineChart,
   Network,
   type LucideIcon
 } from "lucide-react";
@@ -27,6 +28,7 @@ interface NavItem {
 
 const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { to: "/overview", labelKey: "nav:overview", Icon: LayoutDashboard },
+  { to: "/bench-trend", labelKey: "nav:benchTrend", Icon: LineChart },
   { to: "/graph", labelKey: "nav:memoryGraph", Icon: Network },
   { to: "/memory-browser", labelKey: "nav:memoryBrowser", Icon: BookOpen },
   { to: "/proposals", labelKey: "nav:pendingProposals", Icon: CheckSquare },
@@ -91,7 +93,7 @@ export default function Layout() {
 
       <nav
         data-testid="inspector-mobile-tabs"
-        className="sm:hidden fixed bottom-0 inset-x-0 z-40 h-14 grid grid-cols-8 border-t border-beige-200 bg-beige-100/95 backdrop-blur-sm"
+        className="sm:hidden fixed bottom-0 inset-x-0 z-40 h-14 grid grid-cols-9 border-t border-beige-200 bg-beige-100/95 backdrop-blur-sm"
       >
         {NAV_ITEMS.map(({ to, labelKey, Icon }) => (
           <NavLink

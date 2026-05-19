@@ -83,6 +83,67 @@ describe("LocalHeuristics", () => {
     expect(CandidateMemorySignalSchema.parse(signals[0])).toEqual(signals[0]);
   });
 
+  it("extracts a time_concern fact signal from dated factual phrasing", async () => {
+    const provider = new LocalHeuristics();
+
+    const signals = await provider.compile(
+      "We reviewed the release blocker yesterday and agreed to keep the fix loop open.",
+      createContext()
+    );
+
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toMatchObject({
+      source: SignalSource.GARDEN_COMPILE,
+      signal_kind: "potential_claim",
+      object_kind: "fact",
+      domain_tags: ["time_concern"],
+      confidence: 0.52,
+      raw_payload: expect.objectContaining({
+        pattern_category: "time_concern",
+        matched_text: "yesterday",
+        time_concern: {
+          window_digest: "yesterday",
+          matched_text: "yesterday"
+        },
+        schema_grounding: expect.objectContaining({ status: "valid" }),
+        detected_object: expect.objectContaining({ object_kind: "fact" })
+      })
+    });
+    expect(signals[0].raw_payload.field_candidates).toEqual([
+      {
+        field_name: "fact",
+        value: "We reviewed the release blocker yesterday and agreed to keep the fix loop open.",
+        evidence: "We reviewed the release blocker yesterday and agreed to keep the fix loop open.",
+        confidence: 0.52
+      }
+    ]);
+    expect(CandidateMemorySignalSchema.parse(signals[0])).toEqual(signals[0]);
+  });
+
+  it("extracts a time_concern fact signal from Chinese dated phrasing", async () => {
+    const provider = new LocalHeuristics();
+
+    const signals = await provider.compile(
+      "昨天我们确认继续完成全部修复。",
+      createContext()
+    );
+
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toMatchObject({
+      signal_kind: "potential_claim",
+      object_kind: "fact",
+      domain_tags: ["time_concern"],
+      raw_payload: expect.objectContaining({
+        matched_text: "昨天",
+        time_concern: {
+          window_digest: "昨天",
+          matched_text: "昨天"
+        }
+      })
+    });
+    expect(CandidateMemorySignalSchema.parse(signals[0])).toEqual(signals[0]);
+  });
+
   it("returns zero signals for small-talk or non-declarative content", async () => {
     const provider = new LocalHeuristics();
 

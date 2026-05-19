@@ -1,6 +1,6 @@
-import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   diffKpis,
@@ -13,9 +13,16 @@ import {
   type KpiPayload,
   type PerScenarioRow
 } from "@do-soul/alaya-eval";
-import { resolveBenchRunnerVersion } from "../version.js";
+import { resolveBenchCommitSha7, resolveBenchRunnerVersion } from "../version.js";
 import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import { startBenchDaemon, type BenchEmbeddingMode } from "../harness/daemon.js";
+import {
+  buildQuestionDiagnostic,
+  rAt5WithProviderReturned,
+  summarizeLongMemEvalRecallEvidence,
+  summarizeProviderStates,
+  type LongMemEvalQuestionDiagnostic
+} from "../longmemeval/diagnostics.js";
 import { extractSessions, type LocomoQa, type LocomoSample, type LocomoVariant } from "./dataset.js";
 import { loadLocomo, type LocomoFetchResult } from "./fetch.js";
 
@@ -37,7 +44,21 @@ export interface LocomoRunResult {
   readonly kpiPath: string;
   readonly reportPath: string;
   readonly findingsPath: string;
+  readonly diagnosticsPath: string;
   readonly payload: KpiPayload;
+}
+
+interface LocomoDiagnosticsSidecar {
+  readonly schema_version: 1;
+  readonly bench_name: "public-locomo";
+  readonly split: "locomo10";
+  readonly run_at: string;
+  readonly alaya_commit: string;
+  readonly embedding_provider: string;
+  readonly embedding_mode: BenchEmbeddingMode;
+  readonly provider_state_summary: ReturnType<typeof summarizeProviderStates>;
+  readonly scored_recall_evidence: ReturnType<typeof summarizeLongMemEvalRecallEvidence>;
+  readonly questions: readonly LongMemEvalQuestionDiagnostic[];
 }
 
 export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult> {
@@ -52,9 +73,11 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   const alayaVersion = resolveBenchRunnerVersion();
   const commitSha7 = resolveCommitSha7();
   const runAt = new Date();
-  const embeddingProvider = opts.embeddingMode === "env" ? "yunwu:text-embedding-3-small" : "none";
+  const embeddingMode = opts.embeddingMode ?? "disabled";
+  const embeddingProvider = embeddingMode === "env" ? "yunwu:text-embedding-3-small" : "none";
 
   const perScenario: PerScenarioRow[] = [];
+  const questionDiagnostics: LongMemEvalQuestionDiagnostic[] = [];
   const latencies: number[] = [];
   let tierHot = 0;
   let tierWarm = 0;
@@ -75,6 +98,7 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
     tierHot += convResult.tierHot;
     tierWarm += convResult.tierWarm;
     tierCold += convResult.tierCold;
+    questionDiagnostics.push(...convResult.questionDiagnostics);
     for (const latency of convResult.latencies) {
       latencies.push(latency);
     }
@@ -97,6 +121,8 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   const rAt1 = totalQa === 0 ? 0 : totalHitAt1 / totalQa;
   const rAt5 = totalQa === 0 ? 0 : totalHitAt5 / totalQa;
   const rAt10 = totalQa === 0 ? 0 : totalHitAt10 / totalQa;
+  const providerStateSummary = summarizeProviderStates(questionDiagnostics);
+  const rAt5EmbeddingReturned = rAt5WithProviderReturned(questionDiagnostics);
 
   const payload: KpiPayload = {
     bench_name: "public-locomo",
@@ -106,6 +132,8 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
     alaya_version: alayaVersion,
     embedding_provider: embeddingProvider,
     chat_provider: "none",
+    policy_shape: "stress",
+    simulate_report: "none",
     dataset: {
       name: opts.variant,
       size: opts.fetchResult?.conversationCount ?? conversations.length,
@@ -124,6 +152,12 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
       r_at_1: rAt1,
       r_at_5: rAt5,
       r_at_10: rAt10,
+      ...(rAt5EmbeddingReturned === undefined
+        ? {}
+        : { r_at_5_with_embedding_returned: rAt5EmbeddingReturned }),
+      provider_returned_rate: providerStateSummary.provider_returned_rate,
+      provider_pending_rate: providerStateSummary.provider_pending_rate,
+      provider_failed_rate: providerStateSummary.provider_failed_rate,
       latency_ms_p50: computePercentile(latencies, 50),
       latency_ms_p95: computePercentile(latencies, 95),
       latency_source: "exact",
@@ -151,12 +185,30 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   const report = renderReport(payload, previous, diff);
   const findings = renderFindings(payload, diff);
   const entry = await writeEntry(layout, "public-locomo", slug, payload, report, findings);
+  const diagnosticsPath = join(dirname(entry.kpiPath), "locomo-diagnostics.json");
+  await writeFile(
+    diagnosticsPath,
+    renderLocomoDiagnosticsSidecar({
+      schema_version: 1,
+      bench_name: "public-locomo",
+      split: "locomo10",
+      run_at: payload.run_at,
+      alaya_commit: payload.alaya_commit,
+      embedding_provider: payload.embedding_provider,
+      embedding_mode: embeddingMode,
+      provider_state_summary: providerStateSummary,
+      scored_recall_evidence: summarizeLongMemEvalRecallEvidence(questionDiagnostics),
+      questions: questionDiagnostics
+    }),
+    "utf8"
+  );
 
   return {
     slug,
     kpiPath: entry.kpiPath,
     reportPath: entry.reportPath,
     findingsPath: entry.findingsPath,
+    diagnosticsPath,
     payload
   };
 }
@@ -170,19 +222,22 @@ interface ConversationResult {
   readonly tierWarm: number;
   readonly tierCold: number;
   readonly latencies: readonly number[];
+  readonly questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[];
 }
 
 async function runOneConversation(
   conversation: LocomoSample,
   opts: LocomoRunOptions
 ): Promise<ConversationResult> {
+  const embeddingMode = opts.embeddingMode ?? "disabled";
   const daemon = await startBenchDaemon({
     workspaceId: `locomo-${conversation.sample_id}`,
     runId: `run-${conversation.sample_id}`,
-    embeddingMode: opts.embeddingMode ?? "disabled"
+    embeddingMode
   });
   try {
     const diaIdByMemoryId = new Map<string, string>();
+    const memoryIdByDiaId = new Map<string, string>();
     const sessions = extractSessions(conversation.conversation);
     // invariant: rotate the seeded object_kind across each turn so the
     // archive witnesses both MaterializationRouter branches (memory-
@@ -198,6 +253,7 @@ async function runOneConversation(
           objectKind: rotatingSeedObjectKind(seedIndex)
         });
         diaIdByMemoryId.set(seed.memoryId, turn.dia_id);
+        memoryIdByDiaId.set(turn.dia_id, seed.memoryId);
         seedIndex += 1;
       }
     }
@@ -214,6 +270,7 @@ async function runOneConversation(
     let tierCold = 0;
     let scoredCount = 0;
     const latencies: number[] = [];
+    const questionDiagnostics: LongMemEvalQuestionDiagnostic[] = [];
 
     // invariant: R@K denominator counts only QAs with non-empty evidence.
     // LoCoMo category-5 (adversarial) and some other rows carry no
@@ -231,13 +288,37 @@ async function runOneConversation(
       const ranked = result.pointers
         .slice(0, 10)
         .map((pointer) => diaIdByMemoryId.get(pointer.object_id));
-      if (ranked[0] !== undefined && evidenceSet.has(ranked[0])) hitAt1 += 1;
-      if (ranked.slice(0, 5).some((dia) => dia !== undefined && evidenceSet.has(dia))) hitAt5 += 1;
-      if (ranked.some((dia) => dia !== undefined && evidenceSet.has(dia))) hitAt10 += 1;
+      const hit1 = ranked[0] !== undefined && evidenceSet.has(ranked[0]);
+      const hit5 = ranked.slice(0, 5).some((dia) => dia !== undefined && evidenceSet.has(dia));
+      const hit10 = ranked.some((dia) => dia !== undefined && evidenceSet.has(dia));
+      if (hit1) hitAt1 += 1;
+      if (hit5) hitAt5 += 1;
+      if (hit10) hitAt10 += 1;
       const firstScore = result.pointers[0]?.relevance_score ?? 0;
       if (firstScore >= 0.7) tierHot += 1;
       else if (firstScore >= 0.4) tierWarm += 1;
       else tierCold += 1;
+      const evidenceIds = [...evidenceSet];
+      questionDiagnostics.push(
+        buildQuestionDiagnostic({
+          questionId: `${conversation.sample_id}:${scoredCount}`,
+          goldMemoryIds: evidenceIds
+            .map((diaId) => memoryIdByDiaId.get(diaId))
+            .filter((memoryId): memoryId is string => memoryId !== undefined),
+          answerSessionIds: evidenceIds,
+          deliveredResults: result.pointers.map((pointer, index) => ({
+            object_id: pointer.object_id,
+            rank: index + 1,
+            relevance_score: pointer.relevance_score
+          })),
+          hitAt1: hit1,
+          hitAt5: hit5,
+          hitAt10: hit10,
+          degradationReason: result.degradationReason,
+          recallResult: result.recallResult,
+          embeddingMode
+        })
+      );
     }
 
     return {
@@ -248,7 +329,8 @@ async function runOneConversation(
       tierHot,
       tierWarm,
       tierCold,
-      latencies
+      latencies,
+      questionDiagnostics
     };
   } finally {
     await daemon.shutdown();
@@ -258,6 +340,8 @@ async function runOneConversation(
 interface QaResult {
   readonly latencyMs: number;
   readonly pointers: ReadonlyArray<{ readonly object_id: string; readonly relevance_score: number }>;
+  readonly degradationReason: string | null;
+  readonly recallResult: unknown;
 }
 
 async function runQuestion(
@@ -271,7 +355,12 @@ async function runQuestion(
     object_id: pointer.object_id,
     relevance_score: pointer.relevance_score
   }));
-  return { latencyMs, pointers };
+  return {
+    latencyMs,
+    pointers,
+    degradationReason: recallResult.degradation_reason ?? null,
+    recallResult
+  };
 }
 
 function computePercentile(values: readonly number[], p: number): number {
@@ -281,14 +370,8 @@ function computePercentile(values: readonly number[], p: number): number {
   return sorted[Math.max(0, idx)] ?? 0;
 }
 
-// see also: apps/bench-runner/src/version.ts resolveBenchRunnerVersion
-
 function resolveCommitSha7(): string {
-  try {
-    return execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
-  } catch {
-    return "0000000";
-  }
+  return resolveBenchCommitSha7();
 }
 
 // invariant: sample_size counts the scoreable-QA upper bound across
@@ -296,9 +379,6 @@ function resolveCommitSha7(): string {
 // number of conversations. evaluated_count is the subset this run
 // actually scored, so evaluated_count <= sample_size holds even when
 // --limit slices the conversation window.
-// see also: apps/bench-runner/src/locomo/dataset.ts — LoCoMo
-// category-5 adversarial entries omit evidence by design and are
-// excluded from the denominator.
 export function resolveLocomoSampleSize(
   conversations: readonly LocomoSample[]
 ): number {
@@ -311,4 +391,8 @@ export function resolveLocomoSampleSize(
     }
   }
   return total;
+}
+
+function renderLocomoDiagnosticsSidecar(sidecar: LocomoDiagnosticsSidecar): string {
+  return JSON.stringify(sidecar, null, 2) + "\n";
 }

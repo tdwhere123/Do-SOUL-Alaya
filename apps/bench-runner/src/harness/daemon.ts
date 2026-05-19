@@ -26,6 +26,7 @@ import {
   type RecallCandidate,
   type RecallScoreFactors,
   type SoulEmitCandidateSignalResponse,
+  type SoulActiveConstraint,
   type SoulMemorySearchResponse,
   type SoulRecallStrategyMix,
   type SoulProposeMemoryUpdateResponse,
@@ -47,12 +48,17 @@ import {
 import { createAlayaMcpServer } from "@do-soul/alaya/mcp-server";
 import { createAlayaCliBridge } from "@do-soul/alaya/cli/bridge";
 import { registerAlayaCliCommands } from "@do-soul/alaya/cli/register";
+import {
+  applyBenchRecallWeightOverrides,
+  type BenchRecallWeightOverrides
+} from "./recall-weight-overrides.js";
 
 export interface BenchDaemonOptions {
   readonly dataDirRoot?: string;
   readonly workspaceId?: string;
   readonly runId?: string;
   readonly embeddingMode?: BenchEmbeddingMode;
+  readonly recallWeightOverrides?: BenchRecallWeightOverrides;
 }
 
 export type BenchEmbeddingMode = "disabled" | "env";
@@ -90,6 +96,11 @@ export interface BenchReportContextUsageInput {
   readonly reason?: string;
 }
 
+export interface BenchRecallOptions {
+  readonly maxResults?: number;
+  readonly conflictAwareness?: boolean;
+}
+
 export interface BenchDaemonHandle {
   readonly runtime: AlayaDaemonRuntime;
   readonly mcpClient: Client;
@@ -99,7 +110,7 @@ export interface BenchDaemonHandle {
   dispatchCli(argv: readonly string[]): Promise<{ exitCode: number; json?: unknown }>;
   recall(
     query: string,
-    opts?: { maxResults?: number }
+    opts?: BenchRecallOptions
   ): Promise<SoulMemorySearchResponse & { readonly diagnostics?: unknown }>;
   reportContextUsage(input: BenchReportContextUsageInput): Promise<void>;
   /**
@@ -169,6 +180,7 @@ export async function startBenchDaemon(
   const workspaceId = opts.workspaceId ?? "bench-workspace-1";
   const runId = opts.runId ?? "bench-run-1";
   const embeddingMode = opts.embeddingMode ?? "disabled";
+  const recallWeightOverrides = opts.recallWeightOverrides;
 
   const dataDir =
     opts.dataDirRoot ?? (await mkdtemp(join(tmpdir(), "alaya-bench-")));
@@ -270,14 +282,14 @@ export async function startBenchDaemon(
       throw new Error(`alaya attach failed with exitCode=${attach.exitCode}`);
     }
 
-    // @anchor bench-workspace-seed — signals.workspace_id / signals.run_id are
+    // @anchor bench-workspace-seed: signals.workspace_id / signals.run_id are
     // FK-constrained to workspaces / runs (migration 003-signals.sql). The
     // install command writes the daemon config but does not create rows in
     // those tables. Seed the bench workspace + run directly so the MCP
     // call context (which binds these ids from the trusted context provider)
     // resolves to existing FK rows.
     // see also: apps/core-daemon/src/__tests__/phase6-agent-use-protocol.test.ts
-    //   — workspace + run seeding fixture using the same repos.
+    //   workspace + run seeding fixture using the same repos.
     await seedBenchWorkspaceAndRun(dataDir, workspaceId, runId);
   } catch (err) {
     try {
@@ -307,9 +319,10 @@ export async function startBenchDaemon(
 
   async function recall(
     query: string,
-    recallOpts: { maxResults?: number } = {}
+    recallOpts: BenchRecallOptions = {}
   ): Promise<SoulMemorySearchResponse & { readonly diagnostics?: unknown }> {
     const maxResults = recallOpts.maxResults ?? 10;
+    const conflictAwareness = recallOpts.conflictAwareness ?? true;
     const taskSurface = TaskObjectSurfaceSchema.parse({
       runtime_id: randomUUID(),
       object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
@@ -321,7 +334,14 @@ export async function startBenchDaemon(
       display_name: query,
       context_refs: []
     });
-    const policy = buildBenchDiagnosticRecallPolicy(taskSurface.runtime_id, maxResults);
+    const policy = applyBenchRecallWeightOverrides(
+      buildBenchDiagnosticRecallPolicy(
+        taskSurface.runtime_id,
+        maxResults,
+        conflictAwareness
+      ),
+      recallWeightOverrides
+    );
     const diagnosticRuntime = activeRuntime as unknown as {
       readonly services: {
         readonly recallService: {
@@ -333,6 +353,8 @@ export async function startBenchDaemon(
             readonly policyOverride: Readonly<RecallPolicy>;
           }): Promise<Readonly<{
             readonly candidates: readonly Readonly<RecallCandidate>[];
+            readonly active_constraints: readonly Readonly<SoulActiveConstraint>[];
+            readonly active_constraints_count: number;
             readonly fine_assessment_count: number;
             readonly degradation_reason?: SoulMemorySearchResponse["degradation_reason"];
             readonly diagnostics?: unknown;
@@ -358,7 +380,11 @@ export async function startBenchDaemon(
       policyOverride: policy
     });
     let usedTokens = 0;
-    const results = recallResult.candidates.slice(0, maxResults).map((candidate, index) => {
+    const activeConstraintIds = new Set(recallResult.active_constraints.map((constraint) => constraint.object_id));
+    const resultCandidates = recallResult.candidates
+      .filter((candidate) => !activeConstraintIds.has(candidate.object_id))
+      .slice(0, maxResults);
+    const results = resultCandidates.map((candidate, index) => {
       const result = buildBenchMemorySearchResult(candidate, policy, index, usedTokens);
       usedTokens += candidate.token_estimate;
       return result;
@@ -369,13 +395,18 @@ export async function startBenchDaemon(
       agent_target: "bench-runner",
       workspace_id: workspaceId,
       run_id: runId,
-      delivered_object_ids: results.map((result) => result.object_id),
+      delivered_object_ids: [...new Set([
+        ...results.map((result) => result.object_id),
+        ...recallResult.active_constraints.map((constraint) => constraint.object_id)
+      ])],
       delivered_at: new Date().toISOString()
     });
     const response = SoulMemorySearchResponseSchema.parse({
       delivery_id: deliveryId,
       results,
-      total_count: recallResult.fine_assessment_count,
+      active_constraints: recallResult.active_constraints,
+      active_constraints_count: recallResult.active_constraints_count,
+      total_count: resultCandidates.length,
       strategy_mix: buildBenchRecallStrategyMix(policy, results),
       degradation_reason: recallResult.degradation_reason ?? null
     });
@@ -425,13 +456,13 @@ export async function startBenchDaemon(
     options: { readonly objectKind?: SeedObjectKind } = {}
   ): Promise<SeededMemoryResult> {
     const objectKind: SeedObjectKind = options.objectKind ?? "fact";
-    // @anchor bench-seed-content-cap — protocol §soul.emit_candidate_signal
+    // @anchor bench-seed-content-cap: protocol §soul.emit_candidate_signal
     // caps raw_payload at 16384 characters JSON-serialized. The bench
     // harness seeds dataset turns; LongMemEval-S has turn contents that
     // can exceed 16K chars. Truncate to a safe length (leaving room for
     // the {"excerpt":"..."} JSON wrapper) instead of crashing the run.
     // Trade-off: if the has_answer fact lives past the cutoff, recall
-    // cannot find it — that's a structural cap, documented in the bench
+    // cannot find it. That is a structural cap, documented in the bench
     // report.md Scoring contract.
     const SEED_CONTENT_MAX = 15_000;
     const wasTruncated = content.length > SEED_CONTENT_MAX;
@@ -441,7 +472,7 @@ export async function startBenchDaemon(
         ` [truncated at ${SEED_CONTENT_MAX} chars]`
       : content;
 
-    // Step 1 — emit candidate signal. signal_kind=potential_preference at
+    // Step 1: emit candidate signal. signal_kind=potential_preference at
     // confidence 0.9 with evidence_refs >= 1 routes per object_kind
     // (see materialization-router.ts routeByObjectKind): claim-capable
     // kinds land in memory_and_claim_draft; fact / outcome land in
@@ -466,7 +497,7 @@ export async function startBenchDaemon(
       );
     }
 
-    // Step 2 — read SOUL_SIGNAL_MATERIALIZED from event_log to find the
+    // Step 2: read SOUL_SIGNAL_MATERIALIZED from event_log to find the
     // memory object_id created synchronously by the materialization router.
     // The MCP surface returns only signal_id, so the bench harness consults
     // the daemon's event log directly (read-only). This is an
@@ -476,7 +507,7 @@ export async function startBenchDaemon(
       signalResponse.signal_id
     );
 
-    // Step 3 — propose update on the materialized memory so the
+    // Step 3: propose update on the materialized memory so the
     // propose+review event chain (SOUL_PROPOSAL_CREATED, SOUL_REVIEW_*,
     // SOUL_PROPOSAL_RESOLVED, SOUL_MEMORY_UPDATED) is written to the
     // audit trail. The change is a no-op-ish domain_tag append; what
@@ -498,7 +529,7 @@ export async function startBenchDaemon(
       );
     }
 
-    // Step 4 — accept the proposal under the bench reviewer identity.
+    // Step 4: accept the proposal under the bench reviewer identity.
     const reviewResponse = await callMcpTool<SoulReviewMemoryProposalResponse>(
       activeMcpClient,
       "soul.review_memory_proposal",
@@ -661,7 +692,8 @@ async function callMcpTool<TOutput>(
 
 function buildBenchDiagnosticRecallPolicy(
   taskSurfaceId: string,
-  maxResultsInput: number
+  maxResultsInput: number,
+  conflictAwareness = true
 ): RecallPolicy {
   const maxResults = Math.max(maxResultsInput, 1);
   const coarseCandidateLimit = Math.min(Math.max(maxResults * 10, maxResults), 1000);
@@ -695,7 +727,7 @@ function buildBenchDiagnosticRecallPolicy(
         max_entries: maxResults,
         per_dimension_limits: null
       },
-      conflict_awareness: true
+      conflict_awareness: conflictAwareness
     }
   };
 }
@@ -788,12 +820,12 @@ function clampScore(value: number): number {
   return Math.min(Math.max(value, 0), 1);
 }
 
-// @anchor readMaterializedMemoryId — bridges signal_id -> durable memory_id
+// @anchor readMaterializedMemoryId: bridges signal_id -> durable memory_id
 // The MCP surface intentionally does not expose materialization side-effects
 // (the agent should only know it emitted a signal). The bench harness reads
 // the event_log directly, which is the canonical audit-trail record of the
 // materialization. initDatabase caches connections by path so this opens the
-// same handle the daemon already uses — do not close the connection here or
+// same handle the daemon already uses. Do not close the connection here or
 // the daemon will lose its DB.
 async function readMaterializedMemoryId(
   dataDir: string,

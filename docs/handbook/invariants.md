@@ -81,7 +81,11 @@ These rules always win over lower-level docs and task-card convenience.
     so the non-null signal and memory-entry run contract still holds.
 20. **Delivered ≠ used.** Context delivery to a consumer agent is not
     proof of usage. Trust state distinguishes installed / configured /
-    delivered / used / skipped / unverifiable / mixed.
+    delivered / used / skipped / unverifiable / mixed. A reported
+    `used` receipt is a soft read-side signal: repeated used receipts
+    decay for path-strength reinforcement, `trust_mode = automatic`
+    carries reduced weight, and durable truth still requires the
+    proposal/governance path.
 
 ## Surface
 
@@ -251,12 +255,11 @@ required防复发 step per `docs/handbook/workflow/review-protocol.md`
 
     - **Inline typed resolution** via the `soul.resolve` MCP verb.
       Six resolutions (`confirm` / `reject` / `correct` / `stale` /
-      `defer` / `not_relevant`). The handler atomically performs the
-      CAS state mutation (`ClaimService.transitionLifecycle(draft →
-      active)`) before appending the typed
-      `soul.resolution.*_applied` audit row; optimistic concurrency
-      at the SQL boundary (`AND claim_status = ?`) ensures a
-      concurrent confirm / reject race resolves to a single winner.
+      `defer` / `not_relevant`). The claim lifecycle transition is a
+      storage-CAS mutation paired with its EventLog row through the
+      EventPublisher transaction path; optimistic concurrency at the
+      SQL boundary (`AND claim_status = ?`) ensures a concurrent
+      confirm / reject race resolves to a single winner.
     - **Out-of-band Proposal** via `soul.propose_memory_update` plus
       `soul.review_memory_proposal`. Unchanged from v0.3.8; this is
       the explicit host-assertion or operator-review path. Inspector
@@ -267,3 +270,6 @@ required防复发 step per `docs/handbook/workflow/review-protocol.md`
     surface — it cannot directly mutate durable state (consistent
     with §21 and §21b). The two-route language replaces any prior
     "single proposal route" wording in lower-level docs.
+
+    For the broader governance route map, see
+    `docs/handbook/governance-routes.md`.

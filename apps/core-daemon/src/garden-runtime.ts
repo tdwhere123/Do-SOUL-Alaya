@@ -28,10 +28,15 @@ import {
   type ConversationMessage
 } from "@do-soul/alaya-protocol";
 import type {
+  AuditorSchedulingAdvisor,
   EmbeddingBackfillHandler,
   EventPublisher,
   PathPlasticityService,
   StrongRefService
+} from "@do-soul/alaya-core";
+import {
+  AuditorSchedulingAdvisor as CoreAuditorSchedulingAdvisor,
+  createVerificationBiasReaderFromPathLookup
 } from "@do-soul/alaya-core";
 import {
   createGardenBackgroundDataPorts,
@@ -320,6 +325,47 @@ export function createGardenRuntime(input: {
         mutate
       )
   };
+  const auditorSchedulingAdvisor: AuditorSchedulingAdvisor = new CoreAuditorSchedulingAdvisor({
+    verificationBiasReader: createVerificationBiasReaderFromPathLookup({
+      findActiveByAnchorObjectIds: async (workspaceId, memoryObjectIds) => {
+        if (memoryObjectIds.length === 0) {
+          return [];
+        }
+        const anchors = memoryObjectIds.map((objectId) => ({
+          kind: "object" as const,
+          object_id: objectId
+        }));
+        const paths = await input.pathRelationRepo.findByAnchors(workspaceId, anchors);
+        return paths.filter((path) => path.lifecycle.status !== "retired");
+      }
+    })
+  });
+  const auditorEvidenceCheckPort = {
+    findMemoriesWithStaleEvidence: async (workspaceId: string) => {
+      const staleEntries =
+        await input.gardenDataPorts.evidenceCheckPort.findMemoriesWithStaleEvidence(workspaceId);
+      if (staleEntries.length <= 1) {
+        return staleEntries;
+      }
+      const prioritized = await auditorSchedulingAdvisor.prioritizeRechecksByBias(
+        workspaceId,
+        staleEntries.map((entry) => ({
+          memoryObjectId: entry.memory_entry_id,
+          enqueuedAt: "1970-01-01T00:00:00.000Z"
+        }))
+      );
+      const priorityByMemoryId = new Map(
+        prioritized.map((entry, index) => [entry.memoryObjectId, index])
+      );
+      return Object.freeze(
+        [...staleEntries].sort((left, right) => {
+          const leftRank = priorityByMemoryId.get(left.memory_entry_id) ?? Number.MAX_SAFE_INTEGER;
+          const rightRank = priorityByMemoryId.get(right.memory_entry_id) ?? Number.MAX_SAFE_INTEGER;
+          return leftRank - rightRank;
+        })
+      );
+    }
+  };
   const pathPlasticityPort =
     input.pathPlasticityService === undefined
       ? undefined
@@ -360,7 +406,7 @@ export function createGardenRuntime(input: {
           }
         };
   const auditor = new Auditor({
-    evidenceCheckPort: input.gardenDataPorts.evidenceCheckPort,
+    evidenceCheckPort: auditorEvidenceCheckPort,
     pointerHealthPort: input.gardenDataPorts.pointerHealthPort,
     greenMaintenancePort: input.gardenDataPorts.greenMaintenancePort,
     bootstrappingPort: input.gardenDataPorts.bootstrappingPort,

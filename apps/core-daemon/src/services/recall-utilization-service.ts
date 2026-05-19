@@ -1,5 +1,7 @@
 import {
+  ComputeRecallGardenEventType,
   RecallContextEventType,
+  parseComputeRecallGardenEventPayload,
   parseRecallContextEventPayload,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
@@ -12,6 +14,18 @@ import {
 // call` (cli/tools.ts) — keep this set in sync with the human-reviewer
 // surfaces guarded at handler boundaries.
 const NON_AGENT_TARGETS: ReadonlySet<string> = new Set(["inspector", "cli", "tools-cli"]);
+const EMBEDDING_LATENCY_BUCKETS: readonly Readonly<{ label: string; upperMs: number }>[] = [
+  { label: "<=150ms", upperMs: 150 },
+  { label: "<=300ms", upperMs: 300 },
+  { label: "<=800ms", upperMs: 800 },
+  { label: "<=1100ms", upperMs: 1100 },
+  { label: ">1100ms", upperMs: Number.POSITIVE_INFINITY }
+];
+
+export interface RecallLatencyBucket {
+  readonly label: string;
+  readonly count: number;
+}
 
 export interface RecallUtilizationStats {
   readonly window: Readonly<{
@@ -29,6 +43,14 @@ export interface RecallUtilizationStats {
     readonly miss_ratio: number;
     readonly p50_pointer_count: number;
     readonly p50_latency_ms: number;
+  }>;
+  readonly embedding: Readonly<{
+    readonly total_queries: number;
+    readonly returned_candidate_count: number;
+    readonly p50_latency_ms: number;
+    readonly p95_latency_ms: number;
+    readonly p99_latency_ms: number;
+    readonly latency_buckets: readonly RecallLatencyBucket[];
   }>;
   readonly usage: Readonly<{
     readonly total: number;
@@ -78,7 +100,7 @@ export function createRecallUtilizationService(deps: {
       const sinceArg = since ?? undefined;
       const untilArg = until ?? undefined;
       const exclusion = new Set(excludeAgentTargets ?? Array.from(NON_AGENT_TARGETS));
-      const [deliveredRows, usageRows] = await Promise.all([
+      const [deliveredRows, usageRows, embeddingRows] = await Promise.all([
         deps.eventLogRepo.queryByWorkspaceAndType(
           workspaceId,
           RecallContextEventType.SOUL_RECALL_DELIVERED,
@@ -88,6 +110,12 @@ export function createRecallUtilizationService(deps: {
         deps.eventLogRepo.queryByWorkspaceAndType(
           workspaceId,
           RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
+          sinceArg,
+          untilArg
+        ),
+        deps.eventLogRepo.queryByWorkspaceAndType(
+          workspaceId,
+          ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_QUERIED,
           sinceArg,
           untilArg
         )
@@ -109,6 +137,12 @@ export function createRecallUtilizationService(deps: {
           )
         )
         .filter((payload) => !exclusion.has(payload.agent_target));
+      const embeddingPayloads = embeddingRows.map((row) =>
+        parseComputeRecallGardenEventPayload(
+          ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_QUERIED,
+          row.payload_json as Record<string, unknown>
+        )
+      );
 
       const total = deliveredPayloads.length;
       const runIds = deliveredPayloads.map((payload) => payload.run_id);
@@ -125,6 +159,7 @@ export function createRecallUtilizationService(deps: {
       const notApplicable = usagePayloads.filter(
         (payload) => payload.usage_state === "not_applicable"
       ).length;
+      const embeddingLatencies = embeddingPayloads.map((payload) => payload.latency_ms);
 
       return {
         window: {
@@ -142,6 +177,17 @@ export function createRecallUtilizationService(deps: {
           miss_ratio: total === 0 ? 0 : missCount / total,
           p50_pointer_count: percentile50(pointerCounts),
           p50_latency_ms: percentile50(latencies)
+        },
+        embedding: {
+          total_queries: embeddingPayloads.length,
+          returned_candidate_count: embeddingPayloads.reduce(
+            (sum, payload) => sum + payload.returned_candidate_count,
+            0
+          ),
+          p50_latency_ms: percentile50(embeddingLatencies),
+          p95_latency_ms: percentileNearestRank(embeddingLatencies, 95),
+          p99_latency_ms: percentileNearestRank(embeddingLatencies, 99),
+          latency_buckets: bucketEmbeddingLatencies(embeddingLatencies)
         },
         usage: {
           total: totalUsage,
@@ -163,4 +209,29 @@ function percentile50(values: readonly number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
+}
+
+function percentileNearestRank(values: readonly number[], percentile: number): number {
+  if (values.length === 0) {
+    return 0;
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.min(
+    sorted.length - 1,
+    Math.max(0, Math.ceil((percentile / 100) * sorted.length) - 1)
+  );
+  return sorted[index]!;
+}
+
+function bucketEmbeddingLatencies(values: readonly number[]): readonly RecallLatencyBucket[] {
+  const buckets = EMBEDDING_LATENCY_BUCKETS.map((bucket) => ({
+    label: bucket.label,
+    upperMs: bucket.upperMs,
+    count: 0
+  }));
+  for (const value of values) {
+    const bucket = buckets.find((candidate) => value <= candidate.upperMs) ?? buckets[buckets.length - 1]!;
+    bucket.count += 1;
+  }
+  return buckets.map(({ label, count }) => Object.freeze({ label, count }));
 }

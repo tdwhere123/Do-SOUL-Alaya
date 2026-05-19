@@ -33,6 +33,20 @@ const SAMPLE_STATS = {
     p50_pointer_count: 3,
     p50_latency_ms: 120
   },
+  embedding: {
+    total_queries: 3,
+    returned_candidate_count: 5,
+    p50_latency_ms: 280,
+    p95_latency_ms: 900,
+    p99_latency_ms: 1250,
+    latency_buckets: [
+      { label: "<=150ms", count: 1 },
+      { label: "<=300ms", count: 1 },
+      { label: "<=800ms", count: 0 },
+      { label: "<=1100ms", count: 0 },
+      { label: ">1100ms", count: 1 }
+    ]
+  },
   usage: {
     total: 30,
     used: 18,
@@ -82,6 +96,10 @@ describe("RecallPage", () => {
     expect(screen.getByTestId("recall-kpi-miss").textContent).toContain("9.5%");
     expect(screen.getByTestId("recall-kpi-used").textContent).toContain("60.0%");
     expect(screen.getByTestId("recall-kpi-follow").textContent).toContain("71.4%");
+    expect(screen.getByText("embedding queries").parentElement?.textContent).toContain("3");
+    expect(screen.getByText("embedding latency").parentElement?.textContent).toContain(
+      "p50 280 / p95 900 / p99 1250 ms"
+    );
   });
 
   it("includes a since query parameter on the daemon request", async () => {

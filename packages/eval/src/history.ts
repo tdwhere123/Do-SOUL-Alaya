@@ -14,6 +14,8 @@ import path from "node:path";
 import {
   KpiPayloadSchema,
   type BenchName,
+  type BenchPolicyShape,
+  type BenchSimulateReportMode,
   type BenchSplit,
   type KpiPayload
 } from "./kpi-schema.js";
@@ -44,13 +46,45 @@ const REPORT_FILENAME = "report.md";
 const FINDINGS_FILENAME = "findings.md";
 const LATEST_BASELINE_FILENAME = "latest-baseline.json";
 
-export function entrySlug(runAt: Date, commitSha7: string): string {
+export function entrySlug(
+  runAt: Date,
+  commitSha7: string,
+  discriminator?: string
+): string {
   const iso = runAt.toISOString();
   const stamp = `${iso.slice(0, 10)}T${iso.slice(11, 13)}${iso.slice(14, 16)}${iso.slice(17, 19)}Z`;
-  return `${stamp}-${commitSha7}`;
+  if (discriminator === undefined) {
+    return `${stamp}-${commitSha7}`;
+  }
+  if (!SLUG_DISCRIMINATOR_PATTERN.test(discriminator)) {
+    throw new Error(
+      `invalid slug discriminator: '${discriminator}' must use lowercase letters, digits, and hyphens`
+    );
+  }
+  return `${stamp}-${commitSha7}-${discriminator}`;
 }
 
-const SLUG_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{6}Z-[0-9a-f]{7,40}$/;
+export function policyShapeSlug(policyShape: BenchPolicyShape): string {
+  return `policy-${policyShape}`;
+}
+
+export function simulateReportSlug(
+  simulateReport: BenchSimulateReportMode
+): string {
+  return `report-${simulateReport}`;
+}
+
+export function benchArchiveDiscriminator(
+  policyShape: BenchPolicyShape,
+  simulateReport: BenchSimulateReportMode
+): string {
+  const policySlug = policyShapeSlug(policyShape);
+  if (simulateReport === "none") return policySlug;
+  return `${policySlug}-${simulateReportSlug(simulateReport)}`;
+}
+
+const SLUG_DISCRIMINATOR_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
+const SLUG_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{6}Z-[0-9a-f]{7,40}(?:-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)?$/;
 
 /**
  * @anchor write-entry-atomic — stage in a sibling .tmp- directory
@@ -147,10 +181,10 @@ export async function writeEntry(
   return { slug, kpiPath, reportPath, findingsPath, sidecarPaths };
 }
 
-// @anchor write-entry-tmp-filter — staging directories created by
+// @anchor write-entry-tmp-filter: staging directories created by
 // writeEntry must never surface as "slugs" to readers. Pattern matches
 // `.tmp-<slug>-<mkdtemp-suffix>`. listEntries also skips any directory
-// whose name does not match the canonical SLUG_PATTERN — that is a
+// whose name does not match the canonical SLUG_PATTERN; that is a
 // silent skip by design (a future archive may carry sidecar dirs like
 // `evidence/` or `datasets/` at the bench root that are not slugs).
 const STAGING_PREFIX = ".tmp-";
@@ -212,15 +246,30 @@ export async function readEntry(
 export async function readLatest(
   layout: HistoryLayout,
   benchName: BenchName,
-  opts: { split?: BenchSplit } = {}
+  opts: {
+    split?: BenchSplit;
+    policyShape?: BenchPolicyShape;
+    simulateReport?: BenchSimulateReportMode;
+  } = {}
 ): Promise<KpiPayload | null> {
-  if (opts.split !== undefined) {
+  if (
+    opts.split !== undefined ||
+    opts.policyShape !== undefined ||
+    opts.simulateReport !== undefined
+  ) {
     const slugs = await listEntries(layout, benchName);
     for (let i = slugs.length - 1; i >= 0; i--) {
       const slug = slugs[i];
       if (slug === undefined) continue;
       const entry = await readEntry(layout, benchName, slug);
-      if (entry !== null && entry.split === opts.split) {
+      if (
+        entry !== null &&
+        (opts.split === undefined || entry.split === opts.split) &&
+        (opts.policyShape === undefined ||
+          (entry.policy_shape ?? "stress") === opts.policyShape) &&
+        (opts.simulateReport === undefined ||
+          (entry.simulate_report ?? "none") === opts.simulateReport)
+      ) {
         return entry;
       }
     }

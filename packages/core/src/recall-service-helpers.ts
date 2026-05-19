@@ -166,8 +166,7 @@ export function normalizeGraphSupport(count: number): number {
   // Negative inbound edges therefore *suppress* graph_support that
   // positive edges would have otherwise accumulated for the same memory,
   // but cannot drag graph_support below zero. Lifting the floor needs
-  // a co-evaluated bench sweep — see the same invariant on the weights
-  // table.
+  // a co-evaluated bench sweep. See the same invariant on the weights table.
   return Math.min(Math.max(count, 0), 3) / 3;
 }
 
@@ -222,10 +221,6 @@ export function getGlobalRecallLimit(policy: Readonly<RecallPolicy>): number {
 
 export function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
-}
-
-export function isProtectedDimension(value: MemoryDimensionType): boolean {
-  return value === MemoryDimension.CONSTRAINT || value === MemoryDimension.HAZARD;
 }
 
 export function isClaimLikeDimension(value: MemoryDimensionType): boolean {
@@ -309,10 +304,6 @@ export function matchesConfiguredCoarseFilter(
   entry: Readonly<MemoryEntry>,
   config: Readonly<RecallPolicy>["coarse_filter"]
 ): boolean {
-  if (isProtectedDimension(entry.dimension)) {
-    return true;
-  }
-
   return matchesDeterministicFilter(entry, config) && matchesPrecomputedRankFilter(entry, config);
 }
 
@@ -356,7 +347,7 @@ export function createContentPreview(
   // workspace_local and global candidates use the same gate; the
   // previous origin_plane discrimination meant workspace_local could
   // never serve full content even when its activation_score put it in
-  // the full_eligible band — see DynamicsService.assignInitialDynamics.
+  // the full_eligible band; see DynamicsService.assignInitialDynamics.
   if (manifestation === "full_eligible") {
     return content;
   }

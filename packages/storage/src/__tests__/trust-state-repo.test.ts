@@ -67,6 +67,7 @@ describe("SqliteTrustStateRepo", () => {
       usage_state: "used",
       used_object_ids: ["memory-target"],
       per_anchor_usage: [{ object_id: "memory-target", anchor_role: "target" }],
+      trust_mode: "automatic",
       reason: "target anchor cited",
       reported_at: "2026-04-30T10:01:00.000Z",
       audit_event_id: "event-usage-directional"
@@ -78,6 +79,7 @@ describe("SqliteTrustStateRepo", () => {
         usage_state: "used",
         used_object_ids: ["memory-target"],
         per_anchor_usage: [{ object_id: "memory-target", anchor_role: "target" }],
+        trust_mode: "automatic",
         reason: "target anchor cited",
         reported_at: "2026-04-30T10:01:00.000Z",
         audit_event_id: "event-usage-directional"

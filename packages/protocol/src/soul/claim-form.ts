@@ -4,7 +4,17 @@ import { PersistentObjectEnvelopeSchema } from "./envelope.js";
 import { GovernanceSubjectSchema } from "./governance-subject.js";
 import { ObjectKind, ScopeClassSchema } from "./object-kind.js";
 
-const claimKindValues = ["constraint", "preference", "procedure", "exception", "factual_policy"] as const;
+const claimKindValues = [
+  "constraint",
+  "preference",
+  "procedure",
+  "exception",
+  "factual_policy",
+  "decision",
+  "hazard",
+  "glossary",
+  "episode"
+] as const;
 
 const enforcementLevelValues = ["strict", "preferred"] as const;
 
@@ -19,7 +29,11 @@ export const ClaimKind = {
   PREFERENCE: "preference",
   PROCEDURE: "procedure",
   EXCEPTION: "exception",
-  FACTUAL_POLICY: "factual_policy"
+  FACTUAL_POLICY: "factual_policy",
+  DECISION: "decision",
+  HAZARD: "hazard",
+  GLOSSARY: "glossary",
+  EPISODE: "episode"
 } as const;
 
 export const EnforcementLevel = {
@@ -59,11 +73,15 @@ export const PrecedenceBasisSchema = z.enum(precedenceBasisValues);
 export const ClaimLifecycleStateSchema = z.enum(claimLifecycleStateValues);
 
 export const CLAIM_KIND_PRIORITY: Readonly<Record<ClaimKind, number>> = Object.freeze({
-  exception: 5,
-  constraint: 4,
-  procedure: 3,
-  preference: 2,
-  factual_policy: 1
+  exception: 9,
+  constraint: 8,
+  hazard: 7,
+  procedure: 6,
+  decision: 5,
+  preference: 4,
+  factual_policy: 3,
+  glossary: 2,
+  episode: 1
 });
 
 const claimTransitions: Readonly<Record<ClaimLifecycleState, readonly ClaimLifecycleState[]>> = {

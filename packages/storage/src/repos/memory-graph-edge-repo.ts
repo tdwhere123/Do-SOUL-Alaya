@@ -41,13 +41,13 @@ export interface MemoryGraphEdgeRepo {
     edgeType: MemoryGraphEdgeTypeValue,
     workspaceId: string
   ): Promise<Readonly<MemoryGraphEdge> | null>;
-  /** @deprecated since v0.3.3 — use `countInboundEdgesWeighted`. Retained
-   * for one release for diagnostic surfaces (e.g. inspector tooling) that
-   * still need a raw supports-only count; remove in v0.4.0. */
+  /** @deprecated use `countInboundEdgesWeighted`. Retained for diagnostic
+   * surfaces that still need a raw supports-only count. */
   countInboundSupports(memoryId: string, workspaceId: string): Promise<number>;
   // Aggregates inbound edges into a single signed graph-support score using
   // MEMORY_GRAPH_EDGE_RECALL_WEIGHTS. The caller normalizes the result.
   countInboundEdgesWeighted(memoryId: string, workspaceId: string): Promise<number>;
+  countInboundRecalls(memoryId: string, workspaceId: string): Promise<number>;
   delete(edgeId: string): Promise<void>;
 }
 
@@ -253,6 +253,29 @@ export class SqliteMemoryGraphEdgeRepo implements MemoryGraphEdgeRepo {
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to compute weighted inbound edges for memory ${parsedMemoryId}.`,
+        error
+      );
+    }
+  }
+
+  public async countInboundRecalls(memoryId: string, workspaceId: string): Promise<number> {
+    const parsedMemoryId = parseNonEmptyString(memoryId, "memory id");
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
+
+    try {
+      const row = this.db.connection
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM memory_graph_edges
+           WHERE target_memory_id = ? AND workspace_id = ? AND edge_type = 'recalls'`
+        )
+        .get(parsedMemoryId, parsedWorkspaceId) as { readonly count: number } | undefined;
+
+      return row?.count ?? 0;
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to count inbound recalls for memory ${parsedMemoryId}.`,
         error
       );
     }

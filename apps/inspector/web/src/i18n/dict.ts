@@ -14,6 +14,7 @@ export type DictKey = keyof typeof zh;
 export const zh = {
   // ── nav ─────────────────────────────────────────────────────────────
   "nav:overview": "总览",
+  "nav:benchTrend": "跑分趋势",
   "nav:configuration": "配置",
   "nav:memoryGraph": "记忆图谱",
   "nav:pendingProposals": "待审记忆",
@@ -62,6 +63,14 @@ export const zh = {
   "overview:bench.delta": "Δ vs 上一版 {delta}",
   "overview:bench.firstBaseline": "首份 baseline",
   "overview:bench.history": "共 {count} 份历史记录",
+
+  // ── bench trend page ───────────────────────────────────────────────
+  "benchTrend:title": "Benchmark 趋势",
+  "benchTrend:subtitle": "最近 30 条 bench-history 归档的 R@K、延迟、token 节省与路径贡献。",
+  "benchTrend:loading": "加载趋势中…",
+  "benchTrend:error": "趋势加载失败：{message}",
+  "benchTrend:empty": "尚无可展示的 benchmark 趋势。",
+  "benchTrend:historySuffix": "份历史记录",
 
   // ── common ──────────────────────────────────────────────────────────
   "common:loading": "加载中…",
@@ -194,6 +203,9 @@ export const zh = {
   "recall:kpi.follow": "回填闭环率",
   "recall:detail.p50Pointer": "p50 命中数量",
   "recall:detail.p50Latency": "p50 延迟",
+  "recall:detail.embeddingQueries": "embedding 查询",
+  "recall:detail.embeddingReturned": "返回候选总数：{count}",
+  "recall:detail.embeddingLatency": "embedding 延迟",
   "recall:detail.nullRun": "空 run_id 次数",
   "recall:detail.usageTotal": "used / skipped / n.a.",
   "recall:detail.usageHint": "三种 usage_state 的计数",
@@ -235,6 +247,7 @@ export const zh = {
 export const en: Record<DictKey, string> = {
   // nav
   "nav:overview": "Overview",
+  "nav:benchTrend": "Bench Trend",
   "nav:configuration": "Configuration",
   "nav:memoryGraph": "Memory Graph",
   "nav:pendingProposals": "Pending Proposals",
@@ -283,6 +296,14 @@ export const en: Record<DictKey, string> = {
   "overview:bench.delta": "Δ vs prev {delta}",
   "overview:bench.firstBaseline": "first baseline",
   "overview:bench.history": "{count} historical entries",
+
+  // bench trend page
+  "benchTrend:title": "Benchmark Trend",
+  "benchTrend:subtitle": "R@K, latency, token savings, and path contribution from the latest 30 bench-history archives.",
+  "benchTrend:loading": "Loading trend…",
+  "benchTrend:error": "Trend failed to load: {message}",
+  "benchTrend:empty": "No benchmark trend entries yet.",
+  "benchTrend:historySuffix": "historical entries",
 
   // common
   "common:loading": "Loading…",
@@ -415,6 +436,9 @@ export const en: Record<DictKey, string> = {
   "recall:kpi.follow": "follow-through",
   "recall:detail.p50Pointer": "p50 pointer count",
   "recall:detail.p50Latency": "p50 latency",
+  "recall:detail.embeddingQueries": "embedding queries",
+  "recall:detail.embeddingReturned": "returned candidates: {count}",
+  "recall:detail.embeddingLatency": "embedding latency",
   "recall:detail.nullRun": "null run_id count",
   "recall:detail.usageTotal": "used / skipped / n.a.",
   "recall:detail.usageHint": "Counts of the three usage_state values",

@@ -765,7 +765,9 @@ vi.mock("@do-soul/alaya-storage", async () => {
     }),
     SqliteStrongRefRepo: makeRepo(),
     SqlitePathRelationRepo: makeRepo({
-      findActive: vi.fn(async () => [])
+      findActive: vi.fn(async () => []),
+      findByAnchors: vi.fn(async () => []),
+      findByWorkspace: vi.fn(async () => [])
     }),
     SqliteBootstrappingRecordRepo: makeRepo({
       create: vi.fn(async (record: unknown) => record),
@@ -935,6 +937,23 @@ vi.mock("@do-soul/alaya-core", () => {
       };
       hoisted.gardenBacklogTelemetryServices.push(instance);
       return instance;
+    }),
+    AuditorSchedulingAdvisor: vi.fn().mockImplementation(function AuditorSchedulingAdvisor() {
+      return {
+        prioritizeRechecksByBias: vi.fn(
+          async (
+            _workspaceId: string,
+            candidates: readonly {
+              readonly memoryObjectId: string;
+              readonly enqueuedAt: string;
+            }[]
+          ) =>
+            candidates.map((candidate) => ({
+              ...candidate,
+              verificationBias: 0
+            }))
+        )
+      };
     }),
     GreenService: makeClass(),
     HealthJournalService: makeClass(),
@@ -1114,6 +1133,9 @@ vi.mock("@do-soul/alaya-core", () => {
         affectedPathIds: []
       }))
     }),
+    createVerificationBiasReaderFromPathLookup: vi.fn(() => ({
+      getMaxVerificationBias: vi.fn(async () => 0)
+    })),
     WorkspaceService: makeClass()
   };
 });

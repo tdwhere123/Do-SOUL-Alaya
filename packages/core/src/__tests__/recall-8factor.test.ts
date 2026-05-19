@@ -4,6 +4,7 @@ import {
   ControlPlaneObjectKind,
   DYNAMICS_CONSTANTS,
   MemoryDimension,
+  RecallContextEventType,
   RetentionPolicy,
   ScopeClass,
   type ActivationWeights,
@@ -96,6 +97,7 @@ function createDependencies(
   claimSourceRefs: Readonly<Record<string, readonly string[]>> = {},
   supportOptions: Readonly<{
     readonly graphSupportByMemoryId?: Readonly<Record<string, number>>;
+    readonly recallsEdgeCountByMemoryId?: Readonly<Record<string, number>>;
     readonly pathPlasticityByMemoryId?: Readonly<Record<string, number>>;
   }> = {}
 ): {
@@ -103,6 +105,7 @@ function createDependencies(
   readonly searchByKeyword: ReturnType<typeof vi.fn>;
   readonly countInboundSupports: ReturnType<typeof vi.fn>;
   readonly countInboundEdgesWeighted: ReturnType<typeof vi.fn>;
+  readonly append: ReturnType<typeof vi.fn>;
   readonly getSnapshot: ReturnType<typeof vi.fn>;
 } {
   const searchByKeyword = vi.fn(async () => [{ object_id: memories[1]?.object_id ?? "memory-2", normalized_rank: 1 }]);
@@ -112,6 +115,9 @@ function createDependencies(
     }
     return memoryId === "memory-2" ? 3 : 0;
   });
+  const countInboundRecalls = vi.fn(async (memoryId: string) =>
+    supportOptions.recallsEdgeCountByMemoryId?.[memoryId] ?? 0
+  );
   const getStrengthByMemoryId = vi.fn(async (_workspaceId: string, memoryIds: readonly string[]) =>
     new Map(
       memoryIds.flatMap((memoryId) => {
@@ -157,7 +163,8 @@ function createDependencies(
       },
       graphSupportPort: {
         countInboundSupports,
-        countInboundEdgesWeighted: countInboundSupports
+        countInboundEdgesWeighted: countInboundSupports,
+        countInboundRecalls
       },
       budgetPenaltyPort: {
         getSnapshot
@@ -180,6 +187,7 @@ function createDependencies(
     searchByKeyword,
     countInboundSupports,
     countInboundEdgesWeighted: countInboundSupports,
+    append,
     getSnapshot
   };
 }
@@ -259,7 +267,7 @@ describe("RecallService 8-factor scoring", () => {
     });
   });
 
-  it("adds FTS supplement candidates without treating FTS rank as structural evidence", async () => {
+  it("adds FTS supplement candidates and treats direct FTS rank as lexical structural evidence", async () => {
     const memories = [
       createMemoryEntry({ object_id: "memory-1", content: "Alpha", activation_score: 0.72 }),
       createMemoryEntry({ object_id: "memory-2", content: "Implement recall", activation_score: 0.55 })
@@ -299,7 +307,7 @@ describe("RecallService 8-factor scoring", () => {
     expect(ftsDiagnostic).toMatchObject({
       lexical_rank: 1
     });
-    expect(ftsDiagnostic?.structural_score).toBeLessThan(1);
+    expect(ftsDiagnostic?.structural_score).toBe(1);
     expect(ftsDiagnostic?.admission_planes).toContain("lexical");
     expect(ftsDiagnostic?.source_channels).toContain("lexical");
   });
@@ -366,6 +374,111 @@ describe("RecallService 8-factor scoring", () => {
       scope_match: 0.08,
       relevance: 0.2
     });
+  });
+
+  it("applies explicit additive scoring weight overrides from RecallPolicy", async () => {
+    const { dependencies } = createDependencies([
+      createMemoryEntry({
+        object_id: "memory-1",
+        content: "Confidence weighted recall candidate",
+        confidence: 1,
+        activation_score: 0.7,
+        domain_tags: ["bench-seed", "bench-reviewed"]
+      })
+    ]);
+    const service = new RecallService(dependencies);
+    const taskSurface = createTaskSurface("Confidence weighted recall candidate");
+    const basePolicy = service.buildDefaultPolicy("build", taskSurface.runtime_id);
+    const override = overridePolicy(basePolicy, {
+      scoring_weight_overrides: {
+        additive: {
+          CONFIDENCE_DIRECT_WEIGHT: 0.2
+        }
+      }
+    });
+
+    const baseResult = await service.recall({
+      taskSurface,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      strategy: "build",
+      policyOverride: basePolicy
+    });
+    const overrideResult = await service.recall({
+      taskSurface,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      strategy: "build",
+      policyOverride: override
+    });
+
+    expect(overrideResult.candidates[0]?.relevance_score).toBeGreaterThan(
+      baseResult.candidates[0]?.relevance_score ?? 0
+    );
+    expect(
+      (overrideResult.candidates[0]?.relevance_score ?? 0) -
+        (baseResult.candidates[0]?.relevance_score ?? 0)
+    ).toBeGreaterThan(0.08);
+  });
+
+  it("dynamically transfers base prior weight to strong query evidence", async () => {
+    const memories = [
+      createMemoryEntry({
+        object_id: "stale-prior",
+        content: "Generic workspace habit",
+        activation_score: 1,
+        confidence: 0.9
+      }),
+      createMemoryEntry({
+        object_id: "query-match",
+        content: "Exact query evidence needle",
+        activation_score: 0.6,
+        confidence: 0.9
+      })
+    ];
+    const { dependencies, searchByKeyword } = createDependencies(
+      memories,
+      [],
+      {},
+      {
+        graphSupportByMemoryId: { "stale-prior": 0, "query-match": 0 },
+        recallsEdgeCountByMemoryId: { "stale-prior": 50, "query-match": 50 }
+      }
+    );
+    searchByKeyword.mockResolvedValue([{ object_id: "query-match", normalized_rank: 1 }]);
+    const service = new RecallService(dependencies);
+    const taskSurface = createTaskSurface("Exact query evidence needle");
+    const basePolicy = service.buildDefaultPolicy("build", taskSurface.runtime_id);
+    const noTransferPolicy = overridePolicy(basePolicy, {
+      scoring_weight_overrides: {
+        fusion_weights: {
+          QUERY_EVIDENCE_BASE_TRANSFER_MAX: 0
+        }
+      }
+    });
+
+    const withoutTransfer = await service.recall({
+      taskSurface,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      strategy: "build",
+      policyOverride: noTransferPolicy
+    });
+    const withTransfer = await service.recall({
+      taskSurface,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      strategy: "build",
+      policyOverride: basePolicy
+    });
+
+    expect(withoutTransfer.candidates[0]?.object_id).toBe("stale-prior");
+    expect(withTransfer.candidates[0]?.object_id).toBe("query-match");
+    expect(withTransfer.candidates[0]?.score_factors?.content_relevance).toBeCloseTo(1);
+    expect(withTransfer.candidates[0]?.score_factors?.query_evidence_transfer).toBeCloseTo(0.25);
+    expect(withTransfer.candidates[0]?.score_factors?.adjusted_base_weight).toBeCloseTo(0.45);
+    expect(withTransfer.candidates[0]?.score_factors?.effective_relevance_weight).toBeCloseTo(0.59);
+    expect(withTransfer.candidates[0]?.score_factors?.weighted_query_evidence_transfer).toBeCloseTo(0.25);
   });
 
   it.each([
@@ -457,19 +570,66 @@ describe("RecallService 8-factor scoring", () => {
     }
   );
 
-  // v0.3.4 — cold reallocation must fire at the candidate-set level, not per
-  // candidate. When even one candidate has non-zero graph_support, the whole
-  // set is not "cold" and reallocation must stay off — otherwise we would
-  // silently inflate relevance weight for the candidates that still have
-  // graph evidence. Production data on a real workspace tends to land in this
-  // mixed state (some recall hits are in the RECALLS edge graph, most are
-  // not), which is exactly the boundary that natural recall traffic did not
-  // exercise during the v0.3.3 dogfood pass.
+  it("graduates cold-mode transfer by inbound RECALLS edge count and records audit telemetry", async () => {
+    const { dependencies, searchByKeyword, append } = createDependencies(
+      [
+        createMemoryEntry({
+          object_id: "memory-1",
+          content: "Graduated cold score evidence"
+        })
+      ],
+      [],
+      {},
+      {
+        graphSupportByMemoryId: { "memory-1": 0 },
+        recallsEdgeCountByMemoryId: { "memory-1": 25 }
+      }
+    );
+    searchByKeyword.mockResolvedValue([{ object_id: "memory-1", normalized_rank: 1 }]);
+    const service = new RecallService(dependencies);
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface("Graduated cold score evidence"),
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      strategy: "build"
+    });
+
+    const factors = result.candidates[0]?.score_factors;
+    const weights = factors?.resolved_activation_weights;
+    expect(weights).toBeDefined();
+    expect(weights?.relevance).toBeCloseTo(0.2);
+    expect(weights?.graph_support).toBeCloseTo(0.025);
+    expect(factors?.graph_path_cold_score).toBeCloseTo(0.5);
+    expect(factors?.recalls_edge_count).toBe(25);
+    expect(factors?.weight_transfer_amount).toBeCloseTo(0.1);
+    expectScoreWeightTotalConserved(weights as ActivationWeights, 0.075);
+    const transferEvent = append.mock.calls
+      .map((call) => call[0])
+      .find((entry) => entry.event_type === RecallContextEventType.SOUL_RECALL_WEIGHT_TRANSFER);
+    expect(transferEvent).toMatchObject({
+      entity_type: "recall_weight_transfer",
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      payload_json: expect.objectContaining({
+        cold_score: 0.5,
+        recalls_edge_count: 25,
+        recalls_threshold: 50
+      })
+    });
+    expect(
+      (transferEvent?.payload_json as { readonly transferred_amount?: number })?.transferred_amount
+    ).toBeCloseTo(0.1);
+  });
+
+  // invariant: cold graph/path transfer is candidate-set scoped. Mixed candidate
+  // sets with any graph/path support keep baseline weights so candidates with
+  // real graph evidence are not inflated by a cold-path transfer.
   it("keeps baseline weights when only some candidates have graph/path support (mixed)", async () => {
     const memories = [
       createMemoryEntry({
         object_id: "memory-cold",
-        content: "Cold candidate — no graph, no path"
+        content: "Cold candidate - no graph, no path"
       }),
       createMemoryEntry({
         object_id: "memory-warm",

@@ -32,4 +32,16 @@ describe("compileRecallQueryProbes", () => {
     ]));
     expect(probes.scope_classes).toContain(ScopeClass.PROJECT);
   });
+
+  it("extracts the same time_concern windows produced by local heuristics", () => {
+    const probes = compileRecallQueryProbes(
+      "What did we decide last week, and what changed in 2026-05? 上周的结论是什么？"
+    );
+
+    expect(probes.date_terms).toEqual(expect.arrayContaining([
+      "last week",
+      "2026-05",
+      "上周"
+    ]));
+  });
 });

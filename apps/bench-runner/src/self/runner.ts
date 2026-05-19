@@ -98,7 +98,7 @@ export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBench
       }
 
       // Distractors expand the recall search space. Their memoryId is not
-      // recorded — if the recall returns one, it occupies a top-K slot
+      // recorded. If the recall returns one, it occupies a top-K slot
       // but the scoring loop sees `sidecar.get` return undefined and
       // counts no hit.
       for (let i = 0; i < scenario.distractors.length; i++) {
@@ -157,8 +157,8 @@ export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBench
       // degradation_reason is read directly off the daemon's recall response.
       // For self-bench scenarios the workspace is small (2 setups +
       // 3-5 distractors), so the warm/cold cascade fires for many probes
-      // — that is real recall behavior, not a harness bug. See
-      // README §"Bench harness — degradation diagnostics" for the
+      // That is real recall behavior, not a harness bug. See
+      // README "Bench harness - degradation diagnostics" for the
       // operator-facing diagnosis.
       const degradationReason = recallResult.degradation_reason ?? null;
       if (degradationReason === "warm_cascade_engaged") degradeWarm++;
@@ -192,6 +192,8 @@ export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBench
     alaya_version: alayaVersion,
     embedding_provider: "none",
     chat_provider: "none",
+    policy_shape: "stress",
+    simulate_report: "none",
     dataset: {
       name: "alaya-synthetic-v1",
       size: SYNTHETIC_SCENARIOS.length,
@@ -268,7 +270,7 @@ function resolveCommitSha7(): string {
   }
 }
 
-// @anchor self-bench-dedup — join-path for history output to avoid fs race
+// @anchor self-bench-dedup: join-path for history output to avoid fs race
 export function buildSelfHistoryPath(historyRoot: string, slug: string): string {
   return join(historyRoot, "self", slug);
 }

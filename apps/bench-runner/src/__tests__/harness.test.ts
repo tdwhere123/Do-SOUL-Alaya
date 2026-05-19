@@ -220,7 +220,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       expect(seed.memoryId).not.toBe(seed.proposalId);
 
       // Recall must find the seeded memory and the recall pointer's
-      // object_id MUST equal the durable memoryId — the scoring contract.
+      // object_id MUST equal the durable memoryId. That is the scoring contract.
       const recallResult = await daemon.recall("pnpm workspace commands", { maxResults: 5 });
       expect(Array.isArray(recallResult.results)).toBe(true);
       const recalledIds = recallResult.results.map((r) => r.object_id);

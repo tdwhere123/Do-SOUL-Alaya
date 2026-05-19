@@ -26,7 +26,7 @@ interface WorkspaceTypeEventLogReader {
 }
 
 /**
- * Daemon-side wiring for the A3 path-axis plasticity feedback loop.
+ * Daemon-side wiring for the path-axis plasticity feedback loop.
  *
  * Provides four pieces:
  *
@@ -67,6 +67,7 @@ interface WorkspaceTypeEventLogReader {
 interface MemoryUsageReportedPayload {
   readonly delivery_id: string;
   readonly usage_state: UsageProofRecord["usage_state"];
+  readonly trust_mode?: NonNullable<UsageProofRecord["trust_mode"]>;
   readonly used_object_ids: readonly string[];
   readonly per_anchor_usage?: NonNullable<UsageProofRecord["per_anchor_usage"]>;
   readonly reason: string | null;
@@ -99,8 +100,8 @@ export function createUsageProofReader(deps: {
           continue;
         }
         const reportedMs = Date.parse(payload.reported_at);
-        // Exclusive sinceIso (>) per A3 review Q4 — avoids double-processing
-        // the boundary record across two consecutive ticks.
+        // invariant: the lower bound is exclusive so adjacent ticks do not
+        // process the boundary record twice.
         if (Number.isFinite(sinceMs) && reportedMs <= sinceMs) {
           continue;
         }
@@ -110,6 +111,7 @@ export function createUsageProofReader(deps: {
         records.push({
           delivery_id: payload.delivery_id,
           usage_state: payload.usage_state,
+          ...(payload.trust_mode === undefined ? {} : { trust_mode: payload.trust_mode }),
           used_object_ids: [...payload.used_object_ids],
           ...(payload.per_anchor_usage === undefined
             ? {}
@@ -153,6 +155,10 @@ function parseMemoryUsageReportedPayload(
   const usedObjectIds = Array.isArray(candidate.used_object_ids)
     ? candidate.used_object_ids.filter((value): value is string => typeof value === "string")
     : [];
+  const trustMode =
+    candidate.trust_mode === "automatic" || candidate.trust_mode === "manual"
+      ? candidate.trust_mode
+      : undefined;
   const perAnchorUsage = parsePerAnchorUsage(candidate.per_anchor_usage);
   const reason =
     typeof candidate.reason === "string" || candidate.reason === null
@@ -161,6 +167,7 @@ function parseMemoryUsageReportedPayload(
   return {
     delivery_id: candidate.delivery_id,
     usage_state: candidate.usage_state as UsageProofRecord["usage_state"],
+    ...(trustMode === undefined ? {} : { trust_mode: trustMode }),
     used_object_ids: usedObjectIds,
     ...(perAnchorUsage === undefined ? {} : { per_anchor_usage: perAnchorUsage }),
     reason,

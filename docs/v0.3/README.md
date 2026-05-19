@@ -17,6 +17,9 @@
 | [`v0.3.5`](v0.3.5/README.md) | Patch-internal CLI/MCP startup and local execution hardening | done |
 | [`v0.3.6`](v0.3.6/release-notes.md) | Inspector Overview/Recall UI and reproducible bench-history loop | done |
 | [`v0.3.7`](v0.3.7/README.md) | Dynamic no-embedding recall + bench diagnostics + Inspector graph-action 403 repair | implementation checkpoint; disabled-100 smoke gate met, disabled-500/env gates open |
+| [`v0.3.8`](v0.3.8/README.md) | Ontology mid-layer recapture + codex-review wiring repair | done |
+| [`v0.3.9`](v0.3.9/README.md) | Three-layer trust-loop closeout + bench truth-up + 24 carry-forward tracking | done (with carry-forward into v0.3.10+) |
+| [`v0.3.10`](v0.3.10/README.md) | Read-side ranker repair + carry-forward closure program | controller implementation/fix-loop in progress; not release-ready until every phase fix-loop and full bench gate are clean |
 
 ## What v0.3.0 is
 

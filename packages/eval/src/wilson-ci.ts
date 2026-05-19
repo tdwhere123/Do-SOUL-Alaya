@@ -2,7 +2,7 @@
 // in percentage points at 95% confidence. The Wilson interval is preferred
 // over the normal (Wald) approximation for small samples and proportions
 // near 0 or 1 because it does not over-extend below 0 or above 1.
-// see also: packages/eval/src/diff.ts — ratio diff uses this to gate
+// see also: packages/eval/src/diff.ts. Ratio diff uses this to gate
 // regression verdicts on small-N runs.
 
 export const WILSON_Z_95 = 1.96;
@@ -49,7 +49,7 @@ export function wilsonHalfWidthPp(
 // Asymmetry note: the caller (packages/eval/src/diff.ts) drives the
 // band from the *current* run's evaluated_count and observed
 // proportion only. When the previous baseline is also undersampled,
-// the previous run's wider CI is not blended into the current band —
+// the previous run's wider CI is not blended into the current band;
 // the regression verdict reflects today's confidence in today's
 // number, not a joint confidence with stale baseline noise. This is
 // intentional and matches the report.md narrative ("the current run
@@ -80,11 +80,11 @@ export function ciAwareBand(
 // real run-wide percentile.
 //
 // Thresholds:
-//   smoke         — evaluatedCount <= 50           (tripwire; not a quality claim)
-//   staged        — 51 <= evaluatedCount <= 200    (staged confidence; mid-run sanity)
-//   shard_merged  — 201 <= evaluatedCount <= 499   OR latency_source = worst_shard_bound
+//   smoke: evaluatedCount <= 50 (tripwire; not a quality claim)
+//   staged: 51 <= evaluatedCount <= 200 (staged confidence; mid-run sanity)
+//   shard_merged: 201 <= evaluatedCount <= 499 OR latency_source = worst_shard_bound
 //                  (cross-shard merge; latency is upper bound)
-//   full          — evaluatedCount >= 500          (full dataset; release-grade)
+//   full: evaluatedCount >= 500 (full dataset; release-grade)
 export type SampleSizeLabel = "smoke" | "staged" | "shard_merged" | "full";
 
 export const SAMPLE_SIZE_LABEL_THRESHOLDS = Object.freeze({

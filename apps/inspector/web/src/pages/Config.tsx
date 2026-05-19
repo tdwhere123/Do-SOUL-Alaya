@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Cpu, Globe, KeyRound, RotateCcw, Save, ShieldCheck, X } from "lucide-react";
+import { Cpu, Globe, KeyRound, RotateCcw, Save, ShieldCheck, SlidersHorizontal, X } from "lucide-react";
 import { clsx } from "clsx";
 import { apiFetch, getWorkspaceId, type ApiError } from "../api";
 import { useToasts } from "../components/Toast";
 import EmbeddingSupplementForm from "../components/EmbeddingSupplementForm";
 import GardenComputeForm from "../components/GardenComputeForm";
+import ManifestationBudgetForm from "../components/ManifestationBudgetForm";
 import { useI18n } from "../i18n/Locale";
 
 interface PatchResult {
@@ -165,6 +166,18 @@ export default function ConfigPage() {
           onRequiresRestart={handleRestartRequired}
           workspaceId={workspaceId}
         />
+      </div>
+
+      <div className="mb-12 border-b border-beige-200 pb-8">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="text-ink-600">
+            <SlidersHorizontal className="w-6 h-6" />
+          </div>
+          <h2 className="text-xl font-bold text-ink-600 uppercase tracking-wider">
+            Manifestation Budget
+          </h2>
+        </div>
+        <ManifestationBudgetForm workspaceId={workspaceId} />
       </div>
 
       <div className="mt-12 p-6 bg-beige-200/30 rounded-lg border border-beige-200">

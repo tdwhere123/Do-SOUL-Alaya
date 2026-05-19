@@ -11,7 +11,7 @@ soul.list_pending_proposals|desc16=925e6974b20e161a
 soul.open_pointer|desc16=0997adbea3835160
 soul.propose_memory_update|desc16=f07db7ac6cd1ef5f
 soul.recall|desc16=d07ab8a86dc64a59
-soul.report_context_usage|desc16=8dbdd7f81a645327
+soul.report_context_usage|desc16=0c0b3105a1ee11cf
 soul.resolve|desc16=2855fb014ef5e5c4
 soul.review_memory_proposal|desc16=5dd212b22f7ecbd4"
 `;

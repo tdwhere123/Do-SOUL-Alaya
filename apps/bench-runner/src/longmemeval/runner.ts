@@ -1,34 +1,56 @@
-import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveBenchRunnerVersion } from "../version.js";
+import { resolveBenchCommitSha7, resolveBenchRunnerVersion } from "../version.js";
 import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import {
+  benchArchiveDiscriminator,
   diffKpis,
   entrySlug,
   readLatest,
   renderFindings,
   renderReport,
   writeEntry,
+  type BenchPolicyShape,
+  type BenchSimulateReportMode,
   type BenchSplit,
   type HistoryLayout,
   type KpiPayload,
   type PerScenarioRow
 } from "@do-soul/alaya-eval";
-import { startBenchDaemon, type BenchEmbeddingMode } from "../harness/daemon.js";
+import {
+  startBenchDaemon,
+  type BenchDaemonHandle,
+  type BenchEmbeddingMode,
+  type BenchRecallOptions,
+  type BenchReportContextUsageInput
+} from "../harness/daemon.js";
+import {
+  ALAYA_RECALL_WEIGHT_OVERRIDES_ENV,
+  formatBenchRecallWeightOverrides,
+  resolveBenchRecallWeightOverrides
+} from "../harness/recall-weight-overrides.js";
 import {
   buildQuestionDiagnostic,
   rAt5WithProviderReturned,
   renderDiagnosticsSidecar,
+  summarizeLongMemEvalRecallEvidence,
+  summarizeLongMemEvalReportSideEffects,
   summarizeProviderStates,
-  type LongMemEvalQuestionDiagnostic
+  type LongMemEvalQuestionDiagnostic,
+  type LongMemEvalReportSideEffectSnapshot
 } from "./diagnostics.js";
+import {
+  buildLongMemEvalColdWarmComparisonSidecar,
+  LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
+  LONGMEMEVAL_DIAGNOSTICS_FILENAME,
+  readLatestLongMemEvalOppositeArchive,
+  renderLongMemEvalColdWarmComparisonSidecar
+} from "./archive-evidence.js";
 import { loadDataset, type FetchResult } from "./fetch.js";
 import type { LongMemEvalVariant } from "./dataset.js";
 
 const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
-const LONGMEMEVAL_DIAGNOSTICS_FILENAME = "longmemeval-diagnostics.json";
 
 export interface LongMemEvalRunOptions {
   readonly variant: LongMemEvalVariant;
@@ -37,11 +59,14 @@ export interface LongMemEvalRunOptions {
   readonly dataDir?: string;
   readonly fetchResult?: FetchResult;
   readonly embeddingMode?: BenchEmbeddingMode;
+  readonly policyShape?: BenchPolicyShape;
+  readonly simulateReport?: BenchSimulateReportMode;
+  readonly weightOverridesJson?: string;
   // Override the pinned-checksum lookup root (test-only). Production
   // callers should leave this undefined so the canonical
   // docs/bench-history/datasets path is used.
   readonly pinnedMetaRoot?: string;
-  // @anchor longmemeval-offset — skip the first N questions before
+  // @anchor longmemeval-offset: skip the first N questions before
   // `limit`. Pairs with process-level sharding in
   // apps/bench-runner/scripts/run-full-public-bench.sh.
   readonly offset?: number;
@@ -74,6 +99,16 @@ export interface LongMemEvalRunResult {
 export async function runLongMemEval(
   opts: LongMemEvalRunOptions
 ): Promise<LongMemEvalRunResult> {
+  const recallWeightOverrides = resolveBenchRecallWeightOverrides({
+    cliJson: opts.weightOverridesJson,
+    envJson: process.env[ALAYA_RECALL_WEIGHT_OVERRIDES_ENV]
+  });
+  if (recallWeightOverrides !== undefined) {
+    process.stdout.write(
+      `[longmemeval weights] ${formatBenchRecallWeightOverrides(recallWeightOverrides)}\n`
+    );
+  }
+
   const questions = await loadDataset(opts.variant, {
     dataDir: opts.dataDir,
     pinnedMetaRoot: opts.pinnedMetaRoot
@@ -89,6 +124,9 @@ export async function runLongMemEval(
   const embeddingProviderLabel = resolveBenchEmbeddingProviderLabel(
     opts.embeddingMode ?? "disabled"
   );
+  const policyShape = opts.policyShape ?? "stress";
+  const simulateReport = opts.simulateReport ?? "none";
+  const recallOptions = recallOptionsForPolicyShape(policyShape);
 
   // Sidecar maps durable memory object_id -> seed metadata. The harness
   // owns this map (the daemon doesn't need it). hasAnswer flags whether
@@ -107,15 +145,19 @@ export async function runLongMemEval(
     answerTurnsTruncated: number;
     seedCharsClipped: number;
     diagnostics: LongMemEvalQuestionDiagnostic;
+    reportUsageStats: LongMemEvalReportSimulationStats;
+    reportSideEffectSnapshot: LongMemEvalReportSideEffectSnapshot;
   };
 
   async function runOneQuestion(
-    question: typeof window[number]
+    question: typeof window[number],
+    turnIndex: number
   ): Promise<WorkerResult> {
     const daemon = await startBenchDaemon({
       workspaceId: `lme-${question.question_id.slice(0, 8)}`,
       runId: `run-${question.question_id.slice(0, 8)}`,
-      embeddingMode: opts.embeddingMode ?? "disabled"
+      embeddingMode: opts.embeddingMode ?? "disabled",
+      recallWeightOverrides
     });
     try {
       const sidecar = new Map<string, SidecarEntry>();
@@ -158,21 +200,30 @@ export async function runLongMemEval(
         await daemon.runtime.runGardenBackgroundPass();
       }
 
-      const recallStart = Date.now();
-      const recallResult = await daemon.recall(question.question, { maxResults: 10 });
-      const latencyMs = Date.now() - recallStart;
-
-      const results = recallResult.results;
       const goldMemoryIds = [...sidecar.entries()]
         .filter(
           ([, meta]) =>
             meta.hasAnswer && answerSessionSet.has(meta.sessionId)
         )
         .map(([memoryId]) => memoryId);
+
+      const recallCycle = await runLongMemEvalRecallCycle({
+        daemon,
+        query: question.question,
+        recallOptions,
+        simulateReport,
+        goldMemoryIds,
+        turnIndex,
+        questionText: question.question
+      });
+      const recallResult = recallCycle.scoredRecallResult;
+      const latencyMs = recallCycle.scoredRecallLatencyMs;
+      const results = recallResult.results;
       const deliveredResults = results.slice(0, 10).map((pointer, index) => ({
         object_id: pointer.object_id,
         rank: index + 1,
-        relevance_score: pointer.relevance_score
+        relevance_score: pointer.relevance_score,
+        score_factors: pointer.score_factors ?? null
       }));
 
       let hitAt1 = false;
@@ -209,6 +260,8 @@ export async function runLongMemEval(
         recallResult,
         embeddingMode: opts.embeddingMode ?? "disabled"
       });
+      const reportSideEffectSnapshot =
+        await readLongMemEvalReportSideEffectSnapshot(question.question_id, daemon);
 
       return {
         questionId: question.question_id,
@@ -221,14 +274,16 @@ export async function runLongMemEval(
         seedTurnsTruncated,
         answerTurnsTruncated,
         seedCharsClipped,
-        diagnostics
+        diagnostics,
+        reportUsageStats: recallCycle.reportUsageStats,
+        reportSideEffectSnapshot
       };
     } finally {
       await daemon.shutdown();
     }
   }
 
-  // @anchor longmemeval-sequential — intra-process concurrency races
+  // @anchor longmemeval-sequential: intra-process concurrency races
   // on the process.env mutated by startBenchDaemon (DATA_DIR /
   // ALAYA_CONFIG_DIR / HOME / ALAYA_REVIEWER_*).
   // see also: apps/bench-runner/scripts/run-full-public-bench.sh for
@@ -237,7 +292,7 @@ export async function runLongMemEval(
   for (let i = 0; i < window.length; i++) {
     const q = window[i];
     if (q === undefined) continue;
-    const res = await runOneQuestion(q);
+    const res = await runOneQuestion(q, i + 1);
     collected.push(res);
     process.stdout.write(
       `[${i + 1}/${window.length}] ${q.question_id.slice(0, 8)} ` +
@@ -259,7 +314,12 @@ export async function runLongMemEval(
   let truncSeedTotal = 0;
   let truncAnswerTotal = 0;
   let truncCharsTotal = 0;
+  let reportsAttempted = 0;
+  let reportsUsed = 0;
+  let reportsSkipped = 0;
+  let reportUsedObjectCount = 0;
   const questionDiagnostics: LongMemEvalQuestionDiagnostic[] = [];
+  const reportSideEffectSnapshots: LongMemEvalReportSideEffectSnapshot[] = [];
 
   for (let i = 0; i < collected.length; i++) {
     const res = collected[i];
@@ -278,6 +338,11 @@ export async function runLongMemEval(
     truncSeedTotal += res.seedTurnsTruncated;
     truncAnswerTotal += res.answerTurnsTruncated;
     truncCharsTotal += res.seedCharsClipped;
+    reportsAttempted += res.reportUsageStats.reportsAttempted;
+    reportsUsed += res.reportUsageStats.reportsUsed;
+    reportsSkipped += res.reportUsageStats.reportsSkipped;
+    reportUsedObjectCount += res.reportUsageStats.usedObjectCount;
+    reportSideEffectSnapshots.push(res.reportSideEffectSnapshot);
     perScenario.push({
       id: res.questionId,
       version: 1,
@@ -297,7 +362,7 @@ export async function runLongMemEval(
 
   const datasetSize = opts.fetchResult?.questionCount ?? questions.length;
 
-  // @anchor variant-to-split — exhaustive Record so a new
+  // @anchor variant-to-split: exhaustive Record so a new
   // LongMemEvalVariant without a split mapping is a compile error.
   // see also: packages/eval/src/kpi-schema.ts BenchSplit enum.
   const VARIANT_TO_SPLIT: Record<typeof opts.variant, BenchSplit> = {
@@ -315,6 +380,11 @@ export async function runLongMemEval(
     alaya_version: alayaVersion,
     embedding_provider: embeddingProviderLabel,
     chat_provider: "none",
+    policy_shape: policyShape,
+    simulate_report: simulateReport,
+    ...(recallWeightOverrides === undefined
+      ? {}
+      : { recall_weight_overrides: recallWeightOverrides.summary }),
     dataset: {
       name: opts.variant,
       size: datasetSize,
@@ -341,7 +411,7 @@ export async function runLongMemEval(
       latency_ms_p50: latencyP50,
       latency_ms_p95: latencyP95,
       latency_source: "exact",
-      // @anchor token_saved_ratio — set to 0 until a token-budget baseline exists
+      // @anchor token_saved_ratio: set to 0 until a token-budget baseline exists
       token_saved_ratio_vs_full_prompt: 0,
       tier_distribution: { hot: tierHot, warm: tierWarm, cold: tierCold },
       degradation_reasons: {
@@ -360,16 +430,30 @@ export async function runLongMemEval(
   };
 
   const layout: HistoryLayout = { historyRoot: opts.historyRoot };
-  // Diff against the latest entry of the SAME split — Oracle vs S are
+  // Diff against the latest entry of the SAME split. Oracle vs S are
   // not comparable retrieval evaluations (Oracle's session filter is
   // no-op, S's is meaningful). See packages/eval/src/history.ts
   // @anchor read-latest-split-aware.
-  const previous = await readLatest(layout, "public", { split: payload.split });
+  const previous = await readLatest(layout, "public", {
+    split: payload.split,
+    policyShape,
+    simulateReport
+  });
   const diff = diffKpis(payload, previous);
-  const slug = entrySlug(runAt, commitSha7);
+  const slug = entrySlug(
+    runAt,
+    commitSha7,
+    benchArchiveDiscriminator(policyShape, simulateReport)
+  );
 
   const report = renderReport(payload, previous, diff);
   const findings = renderFindings(payload, diff);
+  const reportSideEffects = summarizeLongMemEvalReportSideEffects({
+    mode: simulateReport,
+    snapshots: reportSideEffectSnapshots
+  });
+  const scoredRecallEvidence =
+    summarizeLongMemEvalRecallEvidence(questionDiagnostics);
 
   const diagnosticsSidecar = renderDiagnosticsSidecar({
     schema_version: 1,
@@ -379,14 +463,45 @@ export async function runLongMemEval(
     alaya_commit: payload.alaya_commit,
     embedding_provider: payload.embedding_provider,
     embedding_mode: opts.embeddingMode ?? "disabled",
+    policy_shape: policyShape,
+    simulate_report: simulateReport,
+    report_usage: {
+      mode: simulateReport,
+      reports_attempted: reportsAttempted,
+      reports_used: reportsUsed,
+      reports_skipped: reportsSkipped,
+      used_object_count: reportUsedObjectCount
+    },
+    report_side_effects: reportSideEffects,
+    scored_recall_evidence: scoredRecallEvidence,
     provider_state_summary: providerSummary,
     questions: questionDiagnostics
   });
+  const currentEvidence = {
+    report_side_effects: reportSideEffects,
+    scored_recall_evidence: scoredRecallEvidence
+  };
+  const opposite = await readLatestLongMemEvalOppositeArchive({
+    layout,
+    current: payload
+  });
+  const comparisonSidecar = renderLongMemEvalColdWarmComparisonSidecar(
+    buildLongMemEvalColdWarmComparisonSidecar({
+      currentSlug: slug,
+      current: payload,
+      currentEvidence,
+      opposite
+    })
+  );
   const entry = await writeEntry(layout, "public", slug, payload, report, findings, {
     sidecars: [
       {
         filename: LONGMEMEVAL_DIAGNOSTICS_FILENAME,
         contents: diagnosticsSidecar
+      },
+      {
+        filename: LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
+        contents: comparisonSidecar
       }
     ]
   });
@@ -397,6 +512,188 @@ export async function runLongMemEval(
     findingsPath: entry.findingsPath,
     diagnosticsPath: entry.sidecarPaths[LONGMEMEVAL_DIAGNOSTICS_FILENAME] ?? null,
     payload
+  };
+}
+
+interface LongMemEvalReportSimulationStats {
+  readonly reportsAttempted: number;
+  readonly reportsUsed: number;
+  readonly reportsSkipped: number;
+  readonly usedObjectCount: number;
+}
+
+export type LongMemEvalBenchRecallResult = Awaited<
+  ReturnType<BenchDaemonHandle["recall"]>
+>;
+
+export interface LongMemEvalRecallCycleResult {
+  readonly scoredRecallResult: LongMemEvalBenchRecallResult;
+  readonly scoredRecallLatencyMs: number;
+  readonly reportUsageStats: LongMemEvalReportSimulationStats;
+}
+
+export async function runLongMemEvalRecallCycle(input: {
+  readonly daemon: Pick<BenchDaemonHandle, "recall" | "reportContextUsage">;
+  readonly query: string;
+  readonly recallOptions: BenchRecallOptions;
+  readonly simulateReport: BenchSimulateReportMode;
+  readonly goldMemoryIds: readonly string[];
+  readonly turnIndex: number;
+  readonly questionText: string;
+}): Promise<LongMemEvalRecallCycleResult> {
+  if (input.simulateReport === "none") {
+    const recallStart = Date.now();
+    const scoredRecallResult = await input.daemon.recall(
+      input.query,
+      input.recallOptions
+    );
+    return {
+      scoredRecallResult,
+      scoredRecallLatencyMs: Date.now() - recallStart,
+      reportUsageStats: {
+        reportsAttempted: 0,
+        reportsUsed: 0,
+        reportsSkipped: 0,
+        usedObjectCount: 0
+      }
+    };
+  }
+
+  const preReportRecallResult = await input.daemon.recall(
+    input.query,
+    input.recallOptions
+  );
+  const reportUsage = buildLongMemEvalReportContextUsage({
+    simulateReport: input.simulateReport,
+    deliveryId: preReportRecallResult.delivery_id,
+    results: preReportRecallResult.results,
+    goldMemoryIds: input.goldMemoryIds,
+    turnIndex: input.turnIndex,
+    questionText: input.questionText
+  });
+  if (reportUsage.reportInput !== null) {
+    await input.daemon.reportContextUsage(reportUsage.reportInput);
+  }
+
+  const recallStart = Date.now();
+  const scoredRecallResult = await input.daemon.recall(
+    input.query,
+    input.recallOptions
+  );
+  return {
+    scoredRecallResult,
+    scoredRecallLatencyMs: Date.now() - recallStart,
+    reportUsageStats: reportUsage.stats
+  };
+}
+
+async function readLongMemEvalReportSideEffectSnapshot(
+  questionId: string,
+  daemon: Pick<BenchDaemonHandle, "runtime" | "workspaceId">
+): Promise<LongMemEvalReportSideEffectSnapshot> {
+  const status = await daemon.runtime.services.graphHealthService.getStatus(
+    daemon.workspaceId
+  );
+  const byType = { ...status.memory_graph_edges_by_type };
+  return {
+    question_id: questionId,
+    workspace_id: status.workspace_id,
+    memory_graph_edges_total: status.memory_graph_edges_total,
+    memory_graph_edges_by_type: byType,
+    recalls_edge_count: byType.recalls ?? 0,
+    path_relations_total: status.path_relations_total,
+    latest_path_event_at: status.latest_path_event_at,
+    warnings: status.warnings
+  };
+}
+
+export function buildLongMemEvalReportContextUsage(input: {
+  readonly simulateReport: BenchSimulateReportMode;
+  readonly deliveryId: string;
+  readonly results: readonly { readonly object_id: string }[];
+  readonly goldMemoryIds: readonly string[];
+  readonly turnIndex: number;
+  readonly questionText: string;
+}): {
+  readonly reportInput: BenchReportContextUsageInput | null;
+  readonly stats: LongMemEvalReportSimulationStats;
+} {
+  if (input.simulateReport === "none") {
+    return {
+      reportInput: null,
+      stats: {
+        reportsAttempted: 0,
+        reportsUsed: 0,
+        reportsSkipped: 0,
+        usedObjectCount: 0
+      }
+    };
+  }
+
+  const deliveredResults = input.results.slice(0, 10);
+  const deliveredIds = new Set(deliveredResults.map((result) => result.object_id));
+  const goldIds = new Set(input.goldMemoryIds);
+  const deliveredGoldIds = deliveredResults
+    .map((result) => result.object_id)
+    .filter((objectId) => goldIds.has(objectId));
+
+  let usedObjectIds: string[] = [];
+  if (input.simulateReport === "gold-only") {
+    usedObjectIds = deliveredGoldIds;
+  } else if (input.simulateReport === "mixed") {
+    if (deliveredGoldIds.length > 0) {
+      const firstNonGold = deliveredResults.find(
+        (result) => !goldIds.has(result.object_id)
+      );
+      usedObjectIds =
+        firstNonGold === undefined
+          ? deliveredGoldIds
+          : [...deliveredGoldIds, firstNonGold.object_id];
+    } else {
+      usedObjectIds =
+        deliveredResults[0] === undefined ? [] : [deliveredResults[0].object_id];
+    }
+  } else if (input.simulateReport === "always-used") {
+    usedObjectIds =
+      deliveredResults[0] === undefined ? [] : [deliveredResults[0].object_id];
+  }
+
+  const safeUsedObjectIds = usedObjectIds.filter((objectId) => deliveredIds.has(objectId));
+  const usedSet = new Set(safeUsedObjectIds);
+  const usageState = safeUsedObjectIds.length > 0 ? "used" : "skipped";
+  const reportInput: BenchReportContextUsageInput = {
+    deliveryId: input.deliveryId,
+    usageState,
+    ...(safeUsedObjectIds.length === 0
+      ? {}
+      : { usedObjectIds: safeUsedObjectIds }),
+    deliveredObjects: deliveredResults.map((result) => ({
+      objectId: result.object_id,
+      usageStatus: usedSet.has(result.object_id) ? "used" : "skipped"
+    })),
+    turnIndex: input.turnIndex,
+    turnDigest: {
+      lastMessages: [
+        {
+          role: "user",
+          contentExcerpt: truncateExcerpt(input.questionText)
+        }
+      ]
+    },
+    reason:
+      usageState === "used"
+        ? `LongMemEval simulate_report=${input.simulateReport}: reported delivered object usage.`
+        : `LongMemEval simulate_report=${input.simulateReport}: no delivered object selected.`
+  };
+
+  return {
+    reportInput,
+    stats: {
+      reportsAttempted: 1,
+      reportsUsed: usageState === "used" ? 1 : 0,
+      reportsSkipped: usageState === "skipped" ? 1 : 0,
+      usedObjectCount: safeUsedObjectIds.length
+    }
   };
 }
 
@@ -430,6 +727,15 @@ function labelEmbeddingProviderUrl(providerUrl: string): string {
   return "openai-compatible";
 }
 
+function recallOptionsForPolicyShape(
+  policyShape: BenchPolicyShape
+): { readonly maxResults: 10; readonly conflictAwareness: boolean } {
+  return {
+    maxResults: 10,
+    conflictAwareness: policyShape === "stress"
+  };
+}
+
 function inferTier(relevanceScore: number): "hot" | "warm" | "cold" {
   if (relevanceScore >= 0.7) return "hot";
   if (relevanceScore >= 0.4) return "warm";
@@ -443,14 +749,14 @@ function computePercentile(values: number[], p: number): number {
   return sorted[Math.max(0, idx)] ?? 0;
 }
 
+function truncateExcerpt(value: string): string {
+  return value.length <= 500 ? value : `${value.slice(0, 497)}...`;
+}
+
 // see also: apps/bench-runner/src/version.ts
 
 function resolveCommitSha7(): string {
-  try {
-    return execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
-  } catch {
-    return "0000000";
-  }
+  return resolveBenchCommitSha7();
 }
 
 export type { LongMemEvalVariant };

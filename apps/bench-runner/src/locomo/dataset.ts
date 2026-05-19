@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 // LoCoMo (Long-Conversation Memory) dataset by Snap Research, public
-// release snap-research/locomo/data/locomo10.json — 10 conversations,
+// release snap-research/locomo/data/locomo10.json: 10 conversations,
 // 1986 QA pairs across 5 categories, ~5882 dialog turns total.
 // see also: https://snap-research.github.io/locomo/
 //          https://github.com/snap-research/locomo

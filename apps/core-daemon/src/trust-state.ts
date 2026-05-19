@@ -27,10 +27,9 @@ type TrustEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision
 
 interface TrustStateEventPublisherPort {
   /**
-   * Atomic append + sync mutation primitive (#BL-022). Trust-state migrated
-   * to this in A2 so audit_event_id is captured inside the same SQLite
-   * transaction as the delivery / usage row, eliminating the orphan-window
-   * formerly registered as #BL-021.
+   * Atomic append + sync mutation primitive. The audit_event_id is captured
+   * inside the same SQLite transaction as the delivery or usage row, so
+   * durable trust-state rows cannot be orphaned from their audit event.
    */
   appendManyWithMutation<T>(
     inputs: readonly TrustEventInput[],
@@ -61,11 +60,9 @@ export class TrustStateRecorderNotReady extends Error {
 }
 
 export class TrustStateUnknownDeliveryError extends Error {
-  // D2 codex-fixloop-B3 follow-up: classify as NOT_FOUND so the MCP handler
-  // returns 404 (not 500 INTERNAL) for both legitimate unknown-delivery
-  // and the cross-workspace mismatch (MERGED-B3) which throws the same
-  // error. Both cases observably present as 404 — no information leak
-  // between the two scenarios for an attacker probing delivery_ids.
+  // invariant: unknown delivery and cross-workspace delivery mismatch share
+  // the same public error class, so probing delivery_ids leaks no workspace
+  // boundary information.
   public readonly code = "NOT_FOUND" as const;
   public constructor(public readonly deliveryId: string) {
     super(`Unknown delivery_id: ${deliveryId}`);
@@ -156,8 +153,8 @@ export class TrustStateRecorder {
         }
       ],
       (entries) => {
-        // Atomic with the EventLog INSERT (#BL-022); audit_event_id is the
-        // exact persisted event_id (#BL-021 closure).
+        // invariant: audit_event_id mirrors the EventLog row created in the
+        // same transaction.
         const auditEntry = entries[0];
         const finalRecord = ContextDeliveryRecordSchema.parse({
           ...draftRecord,
@@ -183,14 +180,9 @@ export class TrustStateRecorder {
       throw new TrustStateUnknownDeliveryError(input.delivery_id);
     }
 
-    // Cross-workspace guard: when the caller supplies a workspace
-    // context, refuse to record usage against a delivery from a
-    // different workspace. Without this guard, an attached agent in
-    // `attacker_ws` could call `soul.report_context_usage` with any
-    // `delivery_id` it observed (e.g. via SSE) and write a
-    // `MEMORY_USAGE_REPORTED` row that flows into A3 plasticity in
-    // `victim_ws`. The error mirrors UnknownDelivery so cross-workspace
-    // probes leak no observable difference vs unknown deliveries.
+    // invariant: workspace-bound usage reports cannot write usage proof rows
+    // for deliveries from another workspace. The public error mirrors an
+    // unknown delivery so probes leak no boundary information.
     if (
       options?.expectedWorkspaceId !== undefined &&
       linkedDelivery.workspace_id !== options.expectedWorkspaceId
@@ -215,6 +207,7 @@ export class TrustStateRecorder {
           payload_json: {
             delivery_id: draftRecord.delivery_id,
             usage_state: draftRecord.usage_state,
+            trust_mode: draftRecord.trust_mode ?? "manual",
             used_object_ids: draftRecord.used_object_ids,
             ...(draftRecord.per_anchor_usage === undefined
               ? {}
@@ -226,8 +219,8 @@ export class TrustStateRecorder {
         }
       ],
       (entries) => {
-        // Atomic with the EventLog INSERT (#BL-022); audit_event_id is the
-        // exact persisted event_id (#BL-021 closure).
+        // invariant: audit_event_id mirrors the EventLog row created in the
+        // same transaction.
         const auditEntry = entries[0];
         const finalRecord = UsageProofRecordSchema.parse({
           ...draftRecord,
@@ -246,7 +239,8 @@ export class TrustStateRecorder {
       counterName: "installed",
       target,
       mutate: () => {
-        // Process-local counter; durable persistence is tracked by #BL-020.
+        // invariant: process-local counters replay durable EventLog rows
+        // before the recorder is marked ready.
         incrementCounter(this.installedCountsByTarget, target);
       }
     });
@@ -260,7 +254,8 @@ export class TrustStateRecorder {
       counterName: "configured",
       target,
       mutate: () => {
-        // Process-local counter; durable persistence is tracked by #BL-020.
+        // invariant: process-local counters replay durable EventLog rows
+        // before the recorder is marked ready.
         incrementCounter(this.configuredCountsByTarget, target);
       }
     });
@@ -281,7 +276,8 @@ export class TrustStateRecorder {
       target,
       sessionId,
       mutate: () => {
-        // Process-local counter; durable persistence is tracked by #BL-020.
+        // invariant: process-local counters replay durable EventLog rows
+        // before the recorder is marked ready.
         incrementCounter(this.unverifiableCountsByTarget, target);
       }
     });

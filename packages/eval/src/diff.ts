@@ -27,12 +27,12 @@ export function diffKpis(
     };
   }
 
-  // @anchor sample-too-small — see thresholds.min_sample_for_ratio_diff.
+  // @anchor sample-too-small: see thresholds.min_sample_for_ratio_diff.
   // Whenever either side of the diff has evaluated_count below the
   // guard, ratio-based + latency + tier-share aggregates are variance
   // noise (e.g. smoke 1-shard vs full 2-shard latency, or current=smoke
   // vs previous=full giving spurious deltas). Downgrade FAIL to WARN
-  // universally. Fixture flips remain FAIL — pass/fail per row is not
+  // universally. Fixture flips remain FAIL; pass/fail per row is not
   // sample-size sensitive.
   const undersampled =
     Math.min(previous.evaluated_count, current.evaluated_count) <

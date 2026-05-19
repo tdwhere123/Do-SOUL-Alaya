@@ -483,6 +483,114 @@ describe("MaterializationRouter", () => {
     expect(deps.claimService.create).not.toHaveBeenCalled();
   });
 
+  it("creates a time_concern path relation proposal after memory_entry_only materialization", async () => {
+    const pathRelationProposalPort = {
+      createPathRelationProposal: vi.fn(async () => ({
+        object_kind: "proposal",
+        object_id: "proposal-1"
+      }))
+    };
+    const deps = {
+      ...createDeps(),
+      pathRelationProposalPort
+    };
+    const router = new MaterializationRouter(deps);
+
+    const result = await router.materializeSignal(
+      createSignal({
+        object_kind: "fact",
+        domain_tags: ["time_concern"],
+        raw_payload: {
+          excerpt: "We reviewed the issue yesterday.",
+          distilled_fact: "We reviewed the issue yesterday.",
+          time_concern: {
+            window_digest: "yesterday",
+            matched_text: "yesterday"
+          }
+        }
+      })
+    );
+
+    expect(result).toMatchObject({
+      target_kind: "evidence_only",
+      route_target: "memory_entry_only",
+      success: true,
+      created_objects: [
+        { object_kind: "evidence_capsule", object_id: "evidence-1" },
+        { object_kind: "memory_entry", object_id: "memory-1" },
+        { object_kind: "proposal", object_id: "proposal-1" }
+      ]
+    });
+    expect(pathRelationProposalPort.createPathRelationProposal).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1",
+      targetObjectId: "memory-1",
+      reason: "Create time_concern PathRelation for yesterday.",
+      proposedPathRelation: expect.objectContaining({
+        target_anchor: {
+          kind: "time_concern",
+          source_object_id: "memory-1",
+          window_digest: "yesterday"
+        },
+        constitution: expect.objectContaining({
+          relation_kind: "time_concern"
+        })
+      })
+    });
+  });
+
+  it("routes direct path_relation signals to a path relation proposal sink", async () => {
+    const pathRelationProposalPort = {
+      createPathRelationProposal: vi.fn(async () => ({
+        object_kind: "proposal",
+        object_id: "proposal-1"
+      }))
+    };
+    const deps = {
+      ...createDeps(),
+      pathRelationProposalPort
+    };
+    const router = new MaterializationRouter(deps);
+    const signal = createSignal({
+      object_kind: "path_relation",
+      raw_payload: {
+        target_object_id: "memory-target-1",
+        time_concern: {
+          window_digest: "2026-05",
+          matched_text: "2026-05"
+        }
+      }
+    });
+
+    expect(router.route(signal)).toEqual({
+      kind: "deferred",
+      route_target: "path_relation_proposal",
+      routing_reason: "object_kind=path_relation -> path_relation_proposal"
+    });
+
+    const result = await router.materializeSignal(signal);
+
+    expect(result).toMatchObject({
+      target_kind: "deferred",
+      route_target: "path_relation_proposal",
+      success: true,
+      created_objects: [{ object_kind: "proposal", object_id: "proposal-1" }]
+    });
+    expect(pathRelationProposalPort.createPathRelationProposal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetObjectId: "memory-target-1",
+        proposedPathRelation: expect.objectContaining({
+          target_anchor: {
+            kind: "time_concern",
+            source_object_id: "memory-target-1",
+            window_digest: "2026-05"
+          }
+        })
+      })
+    );
+  });
+
   it("keeps failure isolated and returns unsuccessful result", async () => {
     const deps = createDeps();
     deps.memoryService.create.mockRejectedValueOnce(new Error("memory repo down"));

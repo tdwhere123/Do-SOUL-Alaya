@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,4 +28,18 @@ export function resolveBenchRunnerVersion(): string {
   }
   cachedVersion = parsed.version;
   return cachedVersion;
+}
+
+export function resolveBenchCommitSha7(
+  env: Readonly<Record<string, string | undefined>> = process.env
+): string {
+  const fromEnv = env.BENCH_COMMIT_SHA7?.trim();
+  if (fromEnv !== undefined && /^[0-9a-f]{7,40}$/iu.test(fromEnv)) {
+    return fromEnv.slice(0, 7);
+  }
+  try {
+    return execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
+  } catch {
+    return "0000000";
+  }
 }

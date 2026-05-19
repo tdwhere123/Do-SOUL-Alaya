@@ -1,5 +1,5 @@
 // invariant: the bench harness diversifies seeded object_kinds so
-// every archive exercises BOTH MaterializationRouter branches —
+// every archive exercises BOTH MaterializationRouter branches:
 // memory_entry_only (fact / outcome / reference / task_state) AND
 // memory_and_claim_draft (preference / decision / constraint /
 // procedure / hazard / glossary / episode / factual_policy /

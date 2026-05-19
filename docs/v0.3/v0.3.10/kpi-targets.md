@@ -226,6 +226,8 @@ stretch  = release-ambition。未达 → release notes 列入 v0.3.11 backlog。
 K4.1 uses the D0 coverage matrix in `plan.md` as the canonical item-level
 owner list. A category row is not closed until every numbered item in that row
 has direct code/doc/test evidence.
+Item identity source is fixed: #1-#24 from
+`docs/v0.3/v0.3.9/reports/v0.3.9-closeout.md`; I1-I8 from this file's K4.2.
 
 ### K4.2 Codex I-series 闭合率
 
@@ -245,8 +247,8 @@ has direct code/doc/test evidence.
 
 | 项 | baseline (v0.3.9) | must | should |
 |---|---|---|---|
-| 治理路径数量 | **5** (ConflictDetectionService / HealthIssueGroup / staged_warnings / Proposal / soul.resolve) | ≤ 4 (Cat-G1 文档化边界) | ≤ 3 (Cat-G1 合并) |
-| 5 路径有文档说明边界？ | no | **yes** (Cat-G1) | yes |
+| governance route family 数量 | **5** (ConflictDetectionService / HealthIssueGroup / staged_warnings / Proposal / soul.resolve) | **4** via Cat-G1 文档化边界 | ≤ 3 (future schema merge) |
+| 5 个兼容 runtime surface 有文档说明边界？ | no | **yes** (Cat-G1) | yes |
 
 ### K4.4 mandatoryCap → independent channel 完成度 (D10 / Cat-P4)
 
@@ -356,7 +358,7 @@ has direct code/doc/test evidence.
 
 | Phase | gate KPI (must) |
 |---|---|
-| **Phase 0** (D0 + Cat-M + Cat-D 部分) | D0 coverage matrix maps 24+8; K5.2 + K5.3 + K5.4 yes; K4.1 #24 + K4.2 I3/I7/I8 closed |
+| **Phase 0** (D0 + M0/M1/M2/M3/M5 + M4a + Cat-D 部分; M4b/full M4 waits for Phase 2 Cat-F3+Cat-F1) | D0 coverage matrix maps 24+8; K5.2 + K5.3 + K5.4 yes; K4.1 #24 + K4.2 I3/I7/I8 closed |
 | **Phase 1** (dependency-safe Cat-R/P/E first repair) | M0 contribution split still supports the repair path; K2.4 improves; K3.1/K3.2 not worse; K4.5 P1+P2 complete; R2/R3/R6 not started before dependencies |
 | **Phase 2** (Cat-F + P3/P4 + R2/R3/R6) | K1.1 must ≥ 60%; K1.2 must ≥ 40%; K2.1 ≤ 10; K2.3 cohort healthy; K4.4 active_constraints[] root channel complete; K4.5 P3+P4 complete |
 | **Phase 3** (Cat-G + Cat-A + P5 + D6) | K4.1 + K4.2 全 100%; K4.3 routes ≤ 4; D6 residual items closed |

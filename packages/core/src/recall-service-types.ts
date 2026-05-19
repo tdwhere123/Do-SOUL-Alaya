@@ -9,7 +9,9 @@ import type {
   PathRelation,
   ProjectMappingAnchor,
   RecallCandidate,
+  RecallScoreFactors,
   RecallOriginPlane,
+  SoulActiveConstraint,
   SoulRecallHostContext,
   SoulRecallTokenizerHint,
   SoulMemorySearchDegradationReason,
@@ -45,7 +47,7 @@ export interface RecallServiceMemoryRepoPort {
     limit: number,
     objectIds: readonly string[]
   ): Promise<readonly KeywordSearchResult[]>;
-  // see also: 068-evidence-capsule-fts.sql — used by lexical plane to admit
+  // see also: 068-evidence-capsule-fts.sql. Used by lexical plane to admit
   // memories whose distilled content lost keywords but whose underlying
   // EvidenceCapsule.gist still matches the query.
   findByEvidenceRefs?(
@@ -81,8 +83,12 @@ export interface RecallServiceGraphSupportPort {
   // Aggregates inbound graph edges by edge_type weight into one signed
   // support score. The recall service consumes this so that derives_from /
   // recalls signals also lift graph_support, and supersedes pulls it down
-  // (floor-clamped to zero baseline — see MEMORY_GRAPH_EDGE_RECALL_WEIGHTS invariant).
+  // (floor-clamped to zero baseline; see MEMORY_GRAPH_EDGE_RECALL_WEIGHTS invariant).
   countInboundEdgesWeighted(memoryId: string, workspaceId: string): Promise<number>;
+  // Counts inbound RECALLS edges only. Cold-mode transfer uses this as explicit
+  // evidence that recall graph activity exists, independent of other
+  // graph-support edge types.
+  countInboundRecalls?(memoryId: string, workspaceId: string): Promise<number>;
 }
 
 export interface RecallServiceBudgetPenaltyPort {
@@ -135,13 +141,27 @@ export interface RecallServicePathExpansionPort {
     workspaceId: string,
     anchorRefs: readonly PathAnchorRef[]
   ): Promise<readonly Readonly<PathRelation>[]>;
+  findByTimeConcernWindowDigests?(
+    workspaceId: string,
+    windowDigests: readonly string[]
+  ): Promise<readonly Readonly<PathRelation>[]>;
+}
+
+export interface RecallServiceActiveConstraintsPort {
+  findActiveConstraints(params: Readonly<{
+    readonly workspaceId: string;
+    readonly cap?: number | null;
+  }>): Promise<Readonly<{
+    readonly constraints: readonly Readonly<SoulActiveConstraint>[];
+    readonly total_count: number;
+  }>>;
 }
 
 // invariant: ManifestationSidecarApplierPort produces the bias sidecar
 // the recall service forwards into RecallCandidate.pending_incomplete
 // and RecallCandidate.unfinishedness_bias. Implementations are expected
 // to call PathActivationCandidateProducer and ManifestationResolver in
-// sequence. The port is optional — when absent the recall service skips
+// sequence. The port is optional. When absent the recall service skips
 // the sidecar step and emits candidates unchanged.
 export interface RecallServiceManifestationSidecarPort {
   buildBiasSidecar(params: Readonly<{
@@ -172,7 +192,7 @@ function resolveCharsPerToken(hint: SoulRecallTokenizerHint | null): number {
   switch (hint) {
     case "cl100k":
       // OpenAI tokenizer docs cite ~4 chars/token for common English text;
-      // this v0.2.0 hint is a conservative heuristic, not a native tokenizer.
+      // the hint is a conservative heuristic, not a native tokenizer.
       return 3.6;
     case "o200k":
       return 3.2;
@@ -231,6 +251,7 @@ export interface RecallServiceDependencies {
   readonly pathPlasticityPort?: RecallServicePathPlasticityPort;
   readonly graphExpansionPort?: RecallServiceGraphExpansionPort;
   readonly pathExpansionPort?: RecallServicePathExpansionPort;
+  readonly activeConstraintsPort?: RecallServiceActiveConstraintsPort;
   readonly evidenceSearchPort?: RecallServiceEvidenceSearchPort;
   readonly manifestationSidecarPort?: RecallServiceManifestationSidecarPort;
   readonly generateRuntimeId?: () => string;
@@ -244,7 +265,6 @@ export type RecallAdmissionPlane =
   | "object_probe"
   | "evidence_anchor"
   | "domain_tag_cluster"
-  | "temporal_proximity"
   | "session_surface_cohort"
   | "graph_expansion"
   | "path_expansion"
@@ -274,7 +294,17 @@ export interface RecallCandidateDiagnostic {
   readonly relevance_score: number;
   readonly lexical_rank: number | null;
   readonly structural_score: number;
+  readonly score_factors: Readonly<RecallScoreFactors>;
   readonly source_channels: readonly string[];
+  readonly path_expansion_sources: readonly RecallPathExpansionSourceDiagnostic[];
+}
+
+export interface RecallPathExpansionSourceDiagnostic {
+  readonly path_id: string;
+  readonly seed_id: string;
+  readonly seed_kind: "memory" | "time_concern";
+  readonly target_object_id: string;
+  readonly source_channel: "path_expansion" | "time_concern";
 }
 
 export interface RecallDiagnostics {
@@ -306,6 +336,8 @@ export interface RecallDiagnostics {
 
 export interface RecallResult {
   readonly candidates: readonly Readonly<RecallCandidate>[];
+  readonly active_constraints: readonly Readonly<SoulActiveConstraint>[];
+  readonly active_constraints_count: number;
   readonly total_scanned: number;
   readonly coarse_filter_count: number;
   readonly fine_assessment_count: number;
@@ -320,7 +352,9 @@ export interface RecallSupplementaryData {
   readonly graphSupportCounts: Readonly<Record<string, number>>;
   readonly budgetPenaltyFactor: number;
   readonly plasticityFactors: Readonly<Record<string, number>>;
-  readonly graphAndPathCold: boolean;
+  readonly graphAndPathColdScore: number;
+  readonly recallsEdgeCount: number;
+  readonly weightTransferAmount: number;
 }
 
 export interface CoarseRecallCandidate {
@@ -333,6 +367,7 @@ export interface CoarseRecallCandidate {
   readonly firstAdmissionPlane?: RecallAdmissionPlane;
   readonly structuralScore?: number;
   readonly scoreMultiplier?: number;
+  readonly pathExpansionSources?: readonly RecallPathExpansionSourceDiagnostic[];
 }
 
 export interface RecallServiceWarnPort {

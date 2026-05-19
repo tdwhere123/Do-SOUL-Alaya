@@ -165,7 +165,8 @@ export async function runLongMemEvalCrossQuestion(
       const deliveredResults = results.slice(0, 10).map((pointer, index) => ({
         object_id: pointer.object_id,
         rank: index + 1,
-        relevance_score: pointer.relevance_score
+        relevance_score: pointer.relevance_score,
+        score_factors: pointer.score_factors ?? null
       }));
 
       let hitAt1 = false;
@@ -275,7 +276,7 @@ export async function runLongMemEvalCrossQuestion(
   const rAt1 = ratio(collected.filter((r) => r.hitAt1).length, n);
   const rAt5 = ratio(collected.filter((r) => r.hitAt5).length, n);
   const rAt10 = ratio(collected.filter((r) => r.hitAt10).length, n);
-  // First-half vs last-half R@5 — the headline cross-question signal.
+  // First-half vs last-half R@5 is the headline cross-question signal.
   // If shared-workspace accumulation does anything, last_half > first_half.
   const half = Math.floor(n / 2);
   const firstHalf = collected.slice(0, half);
@@ -317,6 +318,8 @@ export async function runLongMemEvalCrossQuestion(
     alaya_version: alayaVersion,
     embedding_provider: embeddingProviderLabel,
     chat_provider: "none",
+    policy_shape: "stress",
+    simulate_report: "none",
     dataset: {
       name: `${opts.variant}:crossquestion`,
       size: datasetSize,

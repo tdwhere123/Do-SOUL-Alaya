@@ -32,9 +32,22 @@ interface RecallStatsUsage {
   readonly follow_through_ratio: number;
 }
 
+interface RecallStatsEmbedding {
+  readonly total_queries: number;
+  readonly returned_candidate_count: number;
+  readonly p50_latency_ms: number;
+  readonly p95_latency_ms: number;
+  readonly p99_latency_ms: number;
+  readonly latency_buckets: readonly Readonly<{
+    readonly label: string;
+    readonly count: number;
+  }>[];
+}
+
 interface RecallStats {
   readonly window: RecallStatsWindow;
   readonly recall: RecallStatsRecall;
+  readonly embedding: RecallStatsEmbedding;
   readonly usage: RecallStatsUsage;
 }
 
@@ -243,6 +256,18 @@ export default function RecallPage() {
                 value={`${stats.recall.p50_latency_ms} ms`}
               />
               <DetailRow
+                label={t("recall:detail.embeddingQueries")}
+                value={String(stats.embedding.total_queries)}
+                hint={t("recall:detail.embeddingReturned", {
+                  count: String(stats.embedding.returned_candidate_count)
+                })}
+              />
+              <DetailRow
+                label={t("recall:detail.embeddingLatency")}
+                value={`p50 ${stats.embedding.p50_latency_ms} / p95 ${stats.embedding.p95_latency_ms} / p99 ${stats.embedding.p99_latency_ms} ms`}
+                hint={formatLatencyBuckets(stats.embedding.latency_buckets)}
+              />
+              <DetailRow
                 label={t("recall:detail.nullRun")}
                 value={String(stats.recall.null_run)}
               />
@@ -359,4 +384,10 @@ function DetailRow({ label, value, hint }: DetailRowProps) {
 function formatRatio(ratio: number): string {
   if (!Number.isFinite(ratio) || Number.isNaN(ratio)) return "—";
   return `${(ratio * 100).toFixed(1)}%`;
+}
+
+function formatLatencyBuckets(
+  buckets: readonly Readonly<{ readonly label: string; readonly count: number }>[]
+): string {
+  return buckets.map((bucket) => `${bucket.label}: ${bucket.count}`).join(" · ");
 }

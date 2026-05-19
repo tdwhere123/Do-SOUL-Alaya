@@ -1,9 +1,18 @@
+import { randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ComputeProviderPriority,
+  ControlPlaneObjectKind,
   HealthEventKind,
+  MemoryGovernanceEventType,
+  ProposalOptionKind,
+  ProposalResolutionState,
+  ProposalSchema,
   RecallContextEventType,
+  RetentionPolicy,
+  SoulActiveConstraintSchema,
+  SoulProposalCreatedPayloadSchema,
   type RuntimeGardenComputeConfig
 } from "@do-soul/alaya-protocol";
 import {
@@ -96,6 +105,7 @@ import {
   SqliteWorkerRunRepo,
   SqliteWorkspaceRepo,
   createGardenBackgroundDataPorts,
+  findActiveConstraints,
   initDatabase
 } from "@do-soul/alaya-storage";
 import {
@@ -111,7 +121,8 @@ import {
   SoulWorkerSafetyAdapter,
   SoulWorkerSafetyReader,
   TopologyService,
-  type ComputeRoutingCandidate
+  type ComputeRoutingCandidate,
+  type PathRelationProposalPort
 } from "@do-soul/alaya-soul";
 import { createCoreDaemonApp } from "./daemon-app-composition.js";
 import { createDaemonEmbeddingRuntime } from "./daemon-embedding-runtime.js";
@@ -121,6 +132,7 @@ import { createBudgetProposalPort } from "./budget-wiring.js";
 import { defaultBootstrappingTemplates, defaultCanonicalAliasMap } from "./daemon-defaults.js";
 import { bootstrapDaemonMcpTooling } from "./daemon-mcp-tooling.js";
 import {
+  createManifestationBudgetConfigProvider,
   createTargetCurrencyCheckPort,
   createWarnLogger,
   reconcileBootstrapPathsForAllWorkspaces
@@ -291,6 +303,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     eventPublisher,
     configPathsProvider: () => configPaths
   });
+  const manifestationBudgetConfigProvider = createManifestationBudgetConfigProvider(configRepo);
   const trustStateRecorder = createTrustStateRecorder({
     eventPublisher,
     repo: trustStateRepo,
@@ -549,9 +562,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const getManifestationResolver = (): ManifestationResolver => {
     if (manifestationResolverInstance === null) {
       manifestationResolverInstance = new ManifestationResolver({
-        budgetConfigProvider: {
-          getConfig: async () => null
-        },
+        budgetConfigProvider: manifestationBudgetConfigProvider,
         eventLogWriter: {
           append: async (entry) => eventLogRepo.append(entry)
         }
@@ -619,6 +630,53 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       return delivery === null ? null : delivery.delivered_object_ids;
     }
   };
+  const recallPathExpansionPort = {
+    findByAnchors: pathRelationRepo.findByAnchors.bind(pathRelationRepo),
+    findByTimeConcernWindowDigests: async (
+      workspaceId: string,
+      windowDigests: readonly string[]
+    ) => {
+      const normalized = new Set(windowDigests.map(normalizeRecallTimeConcernWindowDigest));
+      const paths = await pathRelationRepo.findByWorkspace(workspaceId);
+      return paths.filter((path) =>
+        path.lifecycle.status !== "retired" &&
+        [path.anchors.source_anchor, path.anchors.target_anchor].some((anchor) =>
+          anchor.kind === "time_concern" &&
+          normalized.has(normalizeRecallTimeConcernWindowDigest(anchor.window_digest))
+        )
+      );
+    }
+  };
+  const recallActiveConstraintsPort = {
+    findActiveConstraints: async (
+      input: Readonly<{ readonly workspaceId: string; readonly cap?: number | null }>
+    ) => {
+      const result = await findActiveConstraints({
+        workspaceId: input.workspaceId,
+        memoryRepo: memoryEntryRepo,
+        claimFormRepo,
+        pathRelationRepo,
+        cap: input.cap
+      });
+      return Object.freeze({
+        constraints: Object.freeze(result.constraints.map((record) =>
+          SoulActiveConstraintSchema.parse({
+            object_id: record.memory.object_id,
+            object_kind: record.memory.object_kind,
+            content: record.memory.content,
+            dimension: record.memory.dimension,
+            scope_class: record.memory.scope_class,
+            governance_state: {
+              claim_status: record.claim_status,
+              governance_class: record.governance_class,
+              source_channels: record.source_channels
+            }
+          })
+        )),
+        total_count: result.total_count
+      });
+    }
+  };
   const recallService = new RecallService({
     memoryRepo: memoryEntryRepo,
     slotRepo,
@@ -627,7 +685,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     graphExpansionPort: memoryGraphEdgeRepo,
     projectMappingPort: projectMappingService,
     pathPlasticityPort: recallPathPlasticityPort,
-    pathExpansionPort: pathRelationRepo,
+    pathExpansionPort: recallPathExpansionPort,
+    activeConstraintsPort: recallActiveConstraintsPort,
     evidenceSearchPort: {
       searchByKeyword: async (workspaceId, queryText, limit) =>
         evidenceCapsuleRepo.searchByKeyword === undefined
@@ -763,11 +822,75 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     pathRelationProposalService.evictExpired();
   }, pathRelationEvictionIntervalMs);
   pathRelationEvictionTimer.unref?.();
+  const pathRelationProposalPort: PathRelationProposalPort = {
+    createPathRelationProposal: async (input) => {
+      const timestamp = new Date().toISOString();
+      const proposalId = randomUUID();
+      const proposal = ProposalSchema.parse({
+        runtime_id: proposalId,
+        object_kind: ControlPlaneObjectKind.PROPOSAL,
+        task_surface_ref: null,
+        expires_at: null,
+        derived_from: input.targetObjectId,
+        retention_policy: RetentionPolicy.SESSION_ONLY,
+        proposal_id: proposalId,
+        dossier_ref: null,
+        recommended_option_id: null,
+        proposal_options: [
+          {
+            option_id: `path_relation_${proposalId}`,
+            option_kind: ProposalOptionKind.REQUEST_CONFIRMATION,
+            preserves_protected_constraints: true,
+            dropped_candidates: [],
+            unresolved_after_apply: [],
+            requires_confirmation: true
+          }
+        ],
+        resolution_state: ProposalResolutionState.PENDING,
+        last_updated_at: timestamp
+      });
+      const created = await proposalRepo.createProposalWithEvents(
+        {
+          proposal,
+          workspace_id: input.workspaceId,
+          run_id: input.runId,
+          target_object_kind: "path_relation",
+          proposed_change_summary: `${input.reason} Source signal: ${input.sourceSignalId}.`,
+          proposed_path_relation: input.proposedPathRelation,
+          created_at: timestamp
+        },
+        [
+          {
+            event_type: MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED,
+            entity_type: "proposal",
+            entity_id: proposal.proposal_id,
+            workspace_id: input.workspaceId,
+            run_id: input.runId,
+            caused_by: "garden",
+            payload_json: SoulProposalCreatedPayloadSchema.parse({
+              object_id: proposal.runtime_id,
+              object_kind: proposal.object_kind,
+              workspace_id: input.workspaceId,
+              run_id: input.runId
+            })
+          }
+        ]
+      );
+      for (const event of created.events) {
+        await runtimeNotifier.notifyEntry(event);
+      }
+      return {
+        object_kind: "proposal",
+        object_id: created.proposal.proposal_id
+      };
+    }
+  };
   const materializationRouter = new MaterializationRouter({
     evidenceService,
     memoryService,
     synthesisService,
     claimService,
+    pathRelationProposalPort,
     graphEdgePort,
     ...(conflictDetectionService === null
       ? {}
@@ -1055,8 +1178,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     proposalService,
     proposalRepo,
     healthIssueGroupRepo,
-    // A1 (HITL daemon backbone) — Inspector loopback HTTP routes need
-    // the same MCP handler that attached agents call.
+    // invariant: Inspector loopback HTTP routes use the same MCP
+    // handler that attached agents call.
     mcpMemoryToolHandler,
     fileRepo,
     runtimeNotifier,
@@ -1301,6 +1424,10 @@ function createConflictDetectionLlmPort(): ConflictDetectionLlmPort | null {
       }
     }
   };
+}
+
+function normalizeRecallTimeConcernWindowDigest(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/gu, "_");
 }
 
 export async function startDaemon(options: AlayaDaemonListenOptions = {}): Promise<AlayaDaemonServer> {

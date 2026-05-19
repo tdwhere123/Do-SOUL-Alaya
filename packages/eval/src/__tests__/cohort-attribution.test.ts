@@ -108,12 +108,12 @@ describe("extractPlaneAttributionRows", () => {
             object_id: "g1",
             candidate_status: "delivered",
             final_rank: 2,
-            plane_winning_admission: "temporal_proximity"
+            plane_winning_admission: "path_expansion"
           }
         ]
       }
     ]);
-    expect(rows[0]?.plane_winning_admission).toBe("temporal_proximity");
+    expect(rows[0]?.plane_winning_admission).toBe("path_expansion");
   });
 
   it("returns null plane when no delivered gold within top-5 carries a plane", () => {

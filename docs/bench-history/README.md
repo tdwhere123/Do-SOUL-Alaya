@@ -66,6 +66,13 @@ docs/bench-history/
 │   │   ├── report.md
 │   │   └── findings.md (optional)
 │   └── latest-baseline.json
+├── public-locomo/
+│   ├── <YYYY-MM-DDTHHMMSSZ>-<sha7>/
+│   │   ├── kpi.json
+│   │   ├── locomo-diagnostics.json
+│   │   ├── report.md
+│   │   └── findings.md (optional)
+│   └── latest-baseline.json
 └── live/
     ├── <YYYY-MM-DDTHHMMSSZ>-<sha7>/
     │   ├── kpi.json                       # normalized strict-real KPIs
@@ -319,6 +326,11 @@ memory ids, delivered object ids/ranks, miss classification, optional
 normalized `recallResult.diagnostics` fields when the daemon supplies
 them, and embedding provider state counts/rates. It must not include
 raw turn text, raw provider transcripts, API keys, or secret refs.
+
+LoCoMo entries include the same diagnostic evidence in
+`locomo-diagnostics.json`. Gold references are still stored as memory
+object ids plus source `dia_id` values; raw conversation text remains
+outside the sidecar.
 
 When the daemon does not yet return `recallResult.diagnostics`, the
 sidecar records `recall_diagnostics_present=false` and falls back to

@@ -21,6 +21,48 @@ export const BenchName = z.enum([
 ]);
 export type BenchName = z.infer<typeof BenchName>;
 
+export const BenchPolicyShapeSchema = z.enum(["stress", "chat"]);
+export type BenchPolicyShape = z.infer<typeof BenchPolicyShapeSchema>;
+
+export const BenchSimulateReportModeSchema = z.enum([
+  "none",
+  "always-used",
+  "gold-only",
+  "mixed"
+]);
+export type BenchSimulateReportMode = z.infer<typeof BenchSimulateReportModeSchema>;
+
+const ActivationWeightsSummarySchema = z
+  .object({
+    scope_match: z.number().min(0).max(1),
+    domain_match: z.number().min(0).max(1),
+    retention: z.number().min(0).max(1),
+    freshness: z.number().min(0).max(1),
+    relevance: z.number().min(0).max(1),
+    graph_support: z.number().min(0).max(1),
+    budget_penalty: z.number().min(0).max(1),
+    conflict_penalty: z.number().min(0).max(1)
+  })
+  .strict();
+
+const AdditiveScoringWeightsSummarySchema = z
+  .object({
+    NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT: z.number().finite().nonnegative().optional(),
+    CONFIDENCE_DIRECT_WEIGHT: z.number().finite().nonnegative().optional(),
+    PATH_PLASTICITY_WEIGHT: z.number().finite().nonnegative().optional()
+  })
+  .strict();
+
+export const RecallWeightOverridesSummarySchema = z
+  .object({
+    source: z.enum(["cli", "env"]),
+    activation_weights_phase4b: ActivationWeightsSummarySchema.optional(),
+    additive: AdditiveScoringWeightsSummarySchema.optional(),
+    fusion_weights: z.record(z.number().finite().nonnegative()).optional()
+  })
+  .strict();
+export type RecallWeightOverridesSummary = z.infer<typeof RecallWeightOverridesSummarySchema>;
+
 export const Verdict = z.enum(["ok", "warn", "fail"]);
 export type Verdict = z.infer<typeof Verdict>;
 
@@ -31,7 +73,7 @@ const TierDistributionSchema = z.object({
 });
 export type TierDistribution = z.infer<typeof TierDistributionSchema>;
 
-// @anchor degradation-reasons-mirror — kept in 1:1 correspondence with
+// @anchor degradation-reasons-mirror: kept in 1:1 correspondence with
 // protocol §SoulMemorySearchDegradationReasonSchema. recall_explainability_partial
 // defaults to 0 (optional) so older kpi.json records remain schema-valid.
 const DegradationReasonsSchema = z.object({
@@ -50,16 +92,16 @@ const PerScenarioRowSchema = z.object({
 });
 export type PerScenarioRow = z.infer<typeof PerScenarioRowSchema>;
 
-// @anchor latency-source — "exact" when latencies are union percentiles
+// @anchor latency-source: "exact" when latencies are union percentiles
 // of a single run; "worst_shard_bound" when merged from N shards as
-// max(shard_p) (upper-bound only — raw latency arrays are not carried
-// across shards in v0.3.6). see also: apps/bench-runner/src/cli.ts
+// max(shard_p) (upper-bound only; raw latency arrays are not carried
+// across shards in legacy merges). see also: apps/bench-runner/src/cli.ts
 // @merge-longmemeval.
 const LatencySourceSchema = z
   .enum(["exact", "worst_shard_bound"])
   .default("exact");
 
-// @anchor seed-truncation — count of bench-seeded turns whose content
+// @anchor seed-truncation: count of bench-seeded turns whose content
 // exceeded the protocol raw_payload cap and was clipped before propose.
 // answer_truncated counts only the subset that carried has_answer=true
 // (the worry case for honest retrieval). see also: harness/daemon.ts
@@ -151,6 +193,9 @@ export const KpiPayloadSchema = z
     alaya_version: z.string().min(1),
     embedding_provider: z.string(),
     chat_provider: z.string(),
+    policy_shape: BenchPolicyShapeSchema.default("stress"),
+    simulate_report: BenchSimulateReportModeSchema.default("none"),
+    recall_weight_overrides: RecallWeightOverridesSummarySchema.optional(),
     dataset: z.object({
       name: z.string(),
       size: z.number().int().nonnegative(),

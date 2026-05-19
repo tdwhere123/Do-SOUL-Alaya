@@ -238,6 +238,9 @@ function writeRecallStatsSummary(stream: NodeJS.WritableStream, stats: RecallUti
     `  recall: total=${stats.recall.total} unique_runs=${stats.recall.unique_runs} null_run=${stats.recall.null_run} miss=${stats.recall.miss_count}/${stats.recall.total} (${formatRatio(stats.recall.miss_ratio)}) p50_pointers=${stats.recall.p50_pointer_count} p50_latency_ms=${stats.recall.p50_latency_ms}\n`
   );
   stream.write(
+    `  embedding: queries=${stats.embedding.total_queries} returned=${stats.embedding.returned_candidate_count} p50_ms=${stats.embedding.p50_latency_ms} p95_ms=${stats.embedding.p95_latency_ms} p99_ms=${stats.embedding.p99_latency_ms}\n`
+  );
+  stream.write(
     `  usage:  total=${stats.usage.total} used=${stats.usage.used} skipped=${stats.usage.skipped} not_applicable=${stats.usage.not_applicable} used_ratio=${formatRatio(stats.usage.used_ratio)} follow_through=${formatRatio(stats.usage.follow_through_ratio)}\n`
   );
 }

@@ -6,6 +6,7 @@ import {
   MemoryEntrySchema,
   ObjectLifecycleStateSchema,
   MemoryGovernanceEventType,
+  RevokeReason,
   SoulMemoryArchivedPayloadSchema,
   SoulMemoryCreatedPayloadSchema,
   SoulMemoryStateChangedPayloadSchema,
@@ -123,6 +124,12 @@ export interface MemoryServiceGreenPort {
   reevaluate(params: {
     readonly targetObjectId: string;
     readonly workspaceId: string;
+  }): Promise<unknown>;
+  pierce?(params: {
+    readonly targetObjectId: string;
+    readonly workspaceId: string;
+    readonly reason: typeof RevokeReason.MAPPING_REVOKED;
+    readonly runId?: string;
   }): Promise<unknown>;
 }
 
@@ -534,6 +541,17 @@ export class MemoryService {
         : await this.updateRepoScoped(parsedObjectId, parsedWorkspaceId, repoFields);
 
     await this.dependencies.runtimeNotifier.notifyEntry(event);
+    if (
+      parsedFields.evidence_refs !== undefined &&
+      shouldRevokeGreenForEvidenceRewrite(existing.evidence_refs, parsedFields.evidence_refs)
+    ) {
+      await this.dependencies.greenService?.pierce?.({
+        targetObjectId: existing.object_id,
+        workspaceId: existing.workspace_id,
+        reason: RevokeReason.MAPPING_REVOKED,
+        runId: existing.run_id
+      });
+    }
     return updated;
   }
 
@@ -659,6 +677,17 @@ function parseUpdateFields(fields: MemoryEntryUpdateFields): MemoryEntryUpdateFi
     last_used_at: parsedLastUsedAt,
     last_hit_at: parsedLastHitAt
   };
+}
+
+function shouldRevokeGreenForEvidenceRewrite(
+  previousEvidenceRefs: readonly string[],
+  nextEvidenceRefs: readonly string[]
+): boolean {
+  if (previousEvidenceRefs.length === 0) {
+    return false;
+  }
+  const next = new Set(nextEvidenceRefs);
+  return !previousEvidenceRefs.some((ref) => next.has(ref));
 }
 
 function parseIsoDatetime(value: string): string {

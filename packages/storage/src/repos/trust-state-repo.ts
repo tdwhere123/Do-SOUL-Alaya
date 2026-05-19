@@ -31,6 +31,7 @@ interface DeliveryRow {
 interface UsageRow {
   readonly delivery_id: string;
   readonly usage_state: string;
+  readonly trust_mode: string | null;
   readonly used_object_ids_json: string;
   readonly per_anchor_usage_json: string;
   readonly reason: string | null;
@@ -61,12 +62,13 @@ export class SqliteTrustStateRepo implements TrustStateRepo {
       INSERT INTO trust_usage_proof (
         delivery_id,
         usage_state,
+        trust_mode,
         used_object_ids_json,
         per_anchor_usage_json,
         reason,
         reported_at,
         audit_event_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     this.findDeliveryByIdStatement = db.connection.prepare(`
@@ -125,6 +127,7 @@ export class SqliteTrustStateRepo implements TrustStateRepo {
       this.createUsageStatement.run(
         parsed.delivery_id,
         parsed.usage_state,
+        parsed.trust_mode ?? null,
         JSON.stringify(parsed.used_object_ids),
         JSON.stringify(parsed.per_anchor_usage ?? []),
         parsed.reason,
@@ -172,6 +175,7 @@ export class SqliteTrustStateRepo implements TrustStateRepo {
           SELECT
             delivery_id,
             usage_state,
+            trust_mode,
             used_object_ids_json,
             per_anchor_usage_json,
             reason,
@@ -209,6 +213,7 @@ function parseUsageRow(row: UsageRow): Readonly<UsageProofRecord> {
     UsageProofRecordSchema.parse({
       delivery_id: row.delivery_id,
       usage_state: row.usage_state,
+      ...(row.trust_mode === null ? {} : { trust_mode: row.trust_mode }),
       used_object_ids: parseJsonStringArray(row.used_object_ids_json),
       ...(perAnchorUsage.length === 0 ? {} : { per_anchor_usage: perAnchorUsage }),
       reason: row.reason,

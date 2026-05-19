@@ -55,7 +55,7 @@ export interface UtilizationBucketCohortRow {
 // deliveries have nothing to report by construction).
 //
 // no_recall counts distinct session_id values whose reports reference a
-// delivery_id that has no matching SOUL_RECALL_DELIVERED in the window —
+// delivery_id that has no matching SOUL_RECALL_DELIVERED in the window;
 // i.e., the agent attached but did not call recall in those sessions.
 // see also: apps/core-daemon/src/routes/recall-utilization.ts
 // computeBuckets (must stay in lockstep on this denominator).

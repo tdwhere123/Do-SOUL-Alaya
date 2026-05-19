@@ -230,6 +230,8 @@ reachable indirectly through the `claimSourceReader` port (so a
 delivered memory's draft claim form is in-scope without delivering
 the claim form itself). Active claims promoted through this route are
 bound to the agent's MCP session identity for downstream attribution.
+Recall warnings carry the target explicitly; consumers should not infer
+the target from result array position.
 
 ### Route 2 — Out-of-band Proposal
 
