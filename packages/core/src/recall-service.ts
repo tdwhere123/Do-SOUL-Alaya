@@ -114,6 +114,7 @@ const DYNAMIC_RECALL_SOURCE_PROXIMITY_RADIUS = 6;
 const DYNAMIC_RECALL_SOURCE_PROXIMITY_SEED_CAP = 12;
 const DYNAMIC_RECALL_SOURCE_PROXIMITY_ADMISSION_CAP = 120;
 const DYNAMIC_RECALL_SOURCE_PROXIMITY_NEIGHBORS_PER_SEED = 8;
+const SOURCE_PROXIMITY_STRUCTURAL_CARRY_MAX = 0.25;
 const DYNAMIC_RECALL_EDGE_FANOUT = 12;
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
 const NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT = 0.24;
@@ -610,7 +611,10 @@ export class RecallService {
       }
       const current = drafts.get(entry.object_id);
       const planeScore = clamp01(structuralScore);
-      const evidenceStructuralScore = plane === "source_proximity" ? 0 : planeScore;
+      const evidenceStructuralScore =
+        plane === "source_proximity"
+          ? Math.min(planeScore, SOURCE_PROXIMITY_STRUCTURAL_CARRY_MAX)
+          : planeScore;
       const nextStructuralScore = Math.max(current?.structuralScore ?? 0, evidenceStructuralScore);
       drafts.set(entry.object_id, {
         entry,

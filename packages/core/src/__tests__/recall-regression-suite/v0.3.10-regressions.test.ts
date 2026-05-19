@@ -114,12 +114,16 @@ describe("recall regression suite", () => {
     const seed = memory({
       object_id: "seed",
       content: "needle source chunk",
-      evidence_refs: ["source-a-s1-t3"]
+      evidence_refs: ["source-a-s1-t3"],
+      domain_tags: ["seed-only"],
+      run_id: "run-seed"
     });
     const neighbor = memory({
       object_id: "neighbor",
       content: "nearby answer payload",
       evidence_refs: ["source-a-s1-t4"],
+      domain_tags: ["neighbor-only"],
+      run_id: "run-neighbor",
       activation_score: 0.1
     });
     const { dependencies } = deps([seed, neighbor], {
@@ -137,6 +141,10 @@ describe("recall regression suite", () => {
     expect(diag?.source_channels).toContain("source_proximity");
     expect(diag?.per_stream_rank.source_proximity).not.toBeNull();
     expect(diag?.fused_rank_contribution_per_stream.source_proximity).toBeGreaterThan(0);
+    expect(diag?.structural_score).toBeGreaterThan(0);
+    expect(diag?.structural_score).toBeLessThanOrEqual(0.25);
+    expect(diag?.per_stream_rank.structural).not.toBeNull();
+    expect(diag?.per_stream_rank.evidence_structural_agreement).toBeNull();
   });
 
   it("uses evidence capsule artifact refs for source proximity when memory refs are capsule ids", async () => {
