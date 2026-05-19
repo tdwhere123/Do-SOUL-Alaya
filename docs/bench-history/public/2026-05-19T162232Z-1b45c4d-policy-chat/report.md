@@ -1,9 +1,10 @@
 # Bench Report — public / longmemeval-s
 
-- Run at: 2026-05-19T15:49:33.088Z
+- Run at: 2026-05-19T16:22:32.294Z
 - Sample size: 500 (evaluated 100/500, label=staged)
 - Harness mode: mcp_propose_review
-- Alaya commit: 1d5a5e4 (0.3.9)
+- Alaya commit: 1b45c4d (0.3.9)
+- Recall pipeline: fusion-rrf-v1
 - Embedding: none
 - Chat: none
 - Policy shape: chat
@@ -37,7 +38,7 @@ Release hard gates:
 - ✓ longmemeval_s_budget_dropped_max_entries budget_dropped_entries: 0 <= target 8
 - ✓ longmemeval_s_candidate_absent candidate_absent: 0 <= target 6
 - ✓ longmemeval_s_evidence_stream_gold_delivery evidence stream gold delivery: 100.00% >= target 15.00%
-- ✓ recall_p95_embedding_off recall p95 embedding-off: 196ms <= target 200ms
+- ✓ recall_p95_embedding_off recall p95 embedding-off: 148ms <= target 200ms
 
 ## Δ vs previous
 
@@ -46,15 +47,15 @@ Release hard gates:
 | r_at_5 | 0.7300 | 0.7300 | 0 | ✓ OK |
 | r_at_10 | 0.8200 | 0.8200 | 0 | ✓ OK |
 | token_saved_ratio_vs_full_prompt | 0.0000 | 0.0000 | 0 | ✓ OK |
-| latency_ms_p95 | 174.0000 | 196.0000 | +22.0000 | ✓ OK |
+| latency_ms_p95 | 196.0000 | 148.0000 | -48.0000 | ✓ OK |
 
 ## Absolute KPIs
 
-- R@1: 33.00% (95% CI ±9.07pp, [24.56%, 42.69%])
+- R@1: 34.00% (95% CI ±9.13pp, [25.46%, 43.72%])
 - R@5: 73.00% (95% CI ±8.58pp, [63.57%, 80.73%])
 - R@10: 82.00% (95% CI ±7.48pp, [73.33%, 88.30%])
-- Latency p50: 113 ms
-- Latency p95: 196 ms
+- Latency p50: 103 ms
+- Latency p95: 148 ms
 - Token saved vs full-prompt baseline: 0.00%
 - Tier distribution: hot=100 warm=0 cold=0
 - Degradation reasons: none=100 warm_cascade=0 cold_cascade=0 explainability_partial=0
@@ -90,7 +91,7 @@ Release hard gates:
 | 6b168ec8 | 1 | ✓ | hot |
 | 75499fd8 | 1 | ✗ | hot |
 | 21436231 | 1 | ✓ | hot |
-| 95bcc1c8 | 1 | ✗ | hot |
+| 95bcc1c8 | 1 | ✓ | hot |
 | 0862e8bf | 1 | ✓ | hot |
 | 853b0a1d | 1 | ✓ | hot |
 | a06e4cfe | 1 | ✓ | hot |
@@ -128,7 +129,7 @@ Release hard gates:
 | c14c00dd | 1 | ✓ | hot |
 | 36580ce8 | 1 | ✓ | hot |
 | 3d86fd0a | 1 | ✓ | hot |
-| a82c026e | 1 | ✓ | hot |
+| a82c026e | 1 | ✗ | hot |
 | 0862e8bf_abs | 1 | ✗ | hot |
 | 15745da0_abs | 1 | ✗ | hot |
 | bc8a6e93_abs | 1 | ✗ | hot |

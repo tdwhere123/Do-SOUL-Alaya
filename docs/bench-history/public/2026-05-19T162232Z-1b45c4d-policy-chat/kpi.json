@@ -1,9 +1,10 @@
 {
   "bench_name": "public",
   "split": "longmemeval-s",
-  "run_at": "2026-05-19T15:49:33.088Z",
-  "alaya_commit": "1d5a5e4",
+  "run_at": "2026-05-19T16:22:32.294Z",
+  "alaya_commit": "1b45c4d",
   "alaya_version": "0.3.9",
+  "recall_pipeline_version": "fusion-rrf-v1",
   "embedding_provider": "none",
   "chat_provider": "none",
   "policy_shape": "chat",
@@ -25,11 +26,11 @@
   "evaluated_count": 100,
   "harness_mode": "mcp_propose_review",
   "kpi": {
-    "r_at_1": 0.33,
+    "r_at_1": 0.34,
     "r_at_5": 0.73,
     "r_at_10": 0.82,
-    "latency_ms_p50": 113,
-    "latency_ms_p95": 196,
+    "latency_ms_p50": 103,
+    "latency_ms_p95": 148,
     "latency_source": "exact",
     "token_saved_ratio_vs_full_prompt": 0,
     "tier_distribution": {
@@ -60,16 +61,16 @@
           "denominator": 170
         }
       },
-      "high_lexical_demoted_rate": 0.13513513513513514,
-      "high_lexical_demoted_count": 10,
-      "high_lexical_demoted_denominator": 74,
+      "high_lexical_demoted_rate": 0.1506849315068493,
+      "high_lexical_demoted_count": 11,
+      "high_lexical_demoted_denominator": 73,
       "candidate_absent_count": 0,
       "candidate_absent_denominator": 100,
       "no_gold_count": 6,
       "no_gold_denominator": 100,
       "evidence_stream_gold_delivery_rate": 1,
-      "evidence_stream_gold_delivery_count": 79,
-      "evidence_stream_gold_delivery_denominator": 79,
+      "evidence_stream_gold_delivery_count": 78,
+      "evidence_stream_gold_delivery_denominator": 78,
       "path_stream_top10_rate": 0,
       "path_stream_top10_count": 0,
       "path_stream_top10_denominator": 1000,
@@ -85,56 +86,56 @@
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 246
+        "latency_ms": 175
       },
       {
         "id": "118b2229",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 249
+        "latency_ms": 124
       },
       {
         "id": "51a45a95",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 196
+        "latency_ms": 112
       },
       {
         "id": "58bf7951",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 218
+        "latency_ms": 132
       },
       {
         "id": "1e043500",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 124
+        "latency_ms": 100
       },
       {
         "id": "c5e8278d",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 110
+        "latency_ms": 96
       },
       {
         "id": "6ade9755",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 101
+        "latency_ms": 80
       },
       {
         "id": "6f9b354f",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 87
+        "latency_ms": 89
       },
       {
         "id": "58ef2f1c",
@@ -148,392 +149,392 @@
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 108
+        "latency_ms": 97
       },
       {
         "id": "5d3d2817",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 98
+        "latency_ms": 86
       },
       {
         "id": "7527f7e2",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 117
+        "latency_ms": 88
       },
       {
         "id": "c960da58",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 146
+        "latency_ms": 107
       },
       {
         "id": "3b6f954b",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 92
+        "latency_ms": 99
       },
       {
         "id": "726462e0",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 133
+        "latency_ms": 118
       },
       {
         "id": "94f70d80",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 135
+        "latency_ms": 107
       },
       {
         "id": "66f24dbb",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 92
+        "latency_ms": 113
       },
       {
         "id": "ad7109d1",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 105
+        "latency_ms": 100
       },
       {
         "id": "af8d2e46",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 104
+        "latency_ms": 118
       },
       {
         "id": "dccbc061",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 89
+        "latency_ms": 103
       },
       {
         "id": "c8c3f81d",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 92
+        "latency_ms": 96
       },
       {
         "id": "8ebdbe50",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 103
+        "latency_ms": 89
       },
       {
         "id": "6b168ec8",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 135
+        "latency_ms": 97
       },
       {
         "id": "75499fd8",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 89
+        "latency_ms": 101
       },
       {
         "id": "21436231",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 108
+        "latency_ms": 124
       },
       {
         "id": "95bcc1c8",
         "version": 1,
-        "hit_at_5": false,
+        "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 132
+        "latency_ms": 118
       },
       {
         "id": "0862e8bf",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 91
+        "latency_ms": 95
       },
       {
         "id": "853b0a1d",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 153
+        "latency_ms": 104
       },
       {
         "id": "a06e4cfe",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 170
+        "latency_ms": 120
       },
       {
         "id": "37d43f65",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 102
+        "latency_ms": 111
       },
       {
         "id": "b86304ba",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 106
+        "latency_ms": 95
       },
       {
         "id": "d52b4f67",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 78
+        "latency_ms": 90
       },
       {
         "id": "25e5aa4f",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 99
+        "latency_ms": 96
       },
       {
         "id": "caf9ead2",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 114
+        "latency_ms": 99
       },
       {
         "id": "8550ddae",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 101
+        "latency_ms": 95
       },
       {
         "id": "60d45044",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 98
+        "latency_ms": 92
       },
       {
         "id": "3f1e9474",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 144
+        "latency_ms": 117
       },
       {
         "id": "86b68151",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 115
+        "latency_ms": 94
       },
       {
         "id": "577d4d32",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 147
+        "latency_ms": 118
       },
       {
         "id": "ec81a493",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 113
+        "latency_ms": 110
       },
       {
         "id": "15745da0",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 105
+        "latency_ms": 103
       },
       {
         "id": "e01b8e2f",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 111
+        "latency_ms": 103
       },
       {
         "id": "bc8a6e93",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 105
+        "latency_ms": 90
       },
       {
         "id": "ccb36322",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 202
+        "latency_ms": 108
       },
       {
         "id": "001be529",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 106
+        "latency_ms": 99
       },
       {
         "id": "b320f3f8",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 101
+        "latency_ms": 98
       },
       {
         "id": "19b5f2b3",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 117
+        "latency_ms": 140
       },
       {
         "id": "4fd1909e",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 98
+        "latency_ms": 95
       },
       {
         "id": "545bd2b5",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 125
+        "latency_ms": 108
       },
       {
         "id": "8a137a7f",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 100
+        "latency_ms": 90
       },
       {
         "id": "76d63226",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 283
+        "latency_ms": 90
       },
       {
         "id": "86f00804",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 184
+        "latency_ms": 92
       },
       {
         "id": "8e9d538c",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 129
+        "latency_ms": 100
       },
       {
         "id": "311778f1",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 152
+        "latency_ms": 108
       },
       {
         "id": "c19f7a0b",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 106
+        "latency_ms": 100
       },
       {
         "id": "4100d0a0",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 91
+        "latency_ms": 84
       },
       {
         "id": "29f2956b",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 107
+        "latency_ms": 101
       },
       {
         "id": "1faac195",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 87
+        "latency_ms": 88
       },
       {
         "id": "faba32e5",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 117
+        "latency_ms": 107
       },
       {
         "id": "f4f1d8a4",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 135
+        "latency_ms": 106
       },
       {
         "id": "c14c00dd",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 109
+        "latency_ms": 99
       },
       {
         "id": "36580ce8",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 147
+        "latency_ms": 107
       },
       {
         "id": "3d86fd0a",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 97
+        "latency_ms": 86
       },
       {
         "id": "a82c026e",
         "version": 1,
-        "hit_at_5": true,
+        "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 94
+        "latency_ms": 80
       },
       {
         "id": "0862e8bf_abs",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 103
+        "latency_ms": 91
       },
       {
         "id": "15745da0_abs",
@@ -547,168 +548,168 @@
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 111
+        "latency_ms": 97
       },
       {
         "id": "19b5f2b3_abs",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 86
+        "latency_ms": 88
       },
       {
         "id": "29f2956b_abs",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 121
+        "latency_ms": 105
       },
       {
         "id": "f4f1d8a4_abs",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 98
+        "latency_ms": 87
       },
       {
         "id": "0a995998",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 165
+        "latency_ms": 148
       },
       {
         "id": "6d550036",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 113
+        "latency_ms": 132
       },
       {
         "id": "gpt4_59c863d7",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 108
+        "latency_ms": 100
       },
       {
         "id": "b5ef892d",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 121
+        "latency_ms": 151
       },
       {
         "id": "e831120c",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 130
+        "latency_ms": 139
       },
       {
         "id": "3a704032",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 98
+        "latency_ms": 106
       },
       {
         "id": "gpt4_d84a3211",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 122
+        "latency_ms": 123
       },
       {
         "id": "aae3761f",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 115
+        "latency_ms": 124
       },
       {
         "id": "gpt4_f2262a51",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 103
+        "latency_ms": 87
       },
       {
         "id": "dd2973ad",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 135
+        "latency_ms": 118
       },
       {
         "id": "c4a1ceb8",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 148
+        "latency_ms": 195
       },
       {
         "id": "gpt4_a56e767c",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 112
+        "latency_ms": 159
       },
       {
         "id": "6cb6f249",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 104
+        "latency_ms": 95
       },
       {
         "id": "46a3abf7",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 189
+        "latency_ms": 148
       },
       {
         "id": "36b9f61e",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 129
+        "latency_ms": 102
       },
       {
         "id": "28dc39ac",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 109
+        "latency_ms": 101
       },
       {
         "id": "gpt4_2f8be40d",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 125
+        "latency_ms": 111
       },
       {
         "id": "2e6d26dc",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 128
+        "latency_ms": 101
       },
       {
         "id": "gpt4_15e38248",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 131
+        "latency_ms": 112
       },
       {
         "id": "88432d0a",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 113
+        "latency_ms": 109
       },
       {
         "id": "80ec1f4f",
@@ -722,21 +723,21 @@
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 148
+        "latency_ms": 136
       },
       {
         "id": "gpt4_7fce9456",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 192
+        "latency_ms": 115
       },
       {
         "id": "d682f1a2",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 139
+        "latency_ms": 112
       },
       {
         "id": "7024f17c",
@@ -750,35 +751,35 @@
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 132
+        "latency_ms": 127
       },
       {
         "id": "gpt4_2ba83207",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 114
+        "latency_ms": 106
       },
       {
         "id": "2318644b",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 127
+        "latency_ms": 135
       },
       {
         "id": "2ce6a0f2",
         "version": 1,
         "hit_at_5": false,
         "tier": "hot",
-        "latency_ms": 134
+        "latency_ms": 100
       },
       {
         "id": "gpt4_d12ceb0e",
         "version": 1,
         "hit_at_5": true,
         "tier": "hot",
-        "latency_ms": 164
+        "latency_ms": 101
       }
     ]
   }
