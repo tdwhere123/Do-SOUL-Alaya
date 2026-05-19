@@ -816,3 +816,187 @@ surface。但概念上收敛成四类 route family：
 
 每个 unknown 在 plan.md 的对应 Cat 段标 **Phase decision point**，user 拍板，
 不允许 Claude / Codex 自决。
+
+---
+
+## D16 — v0.3.10 走 β：多流 RRF 融合 + fused-rank budget cut（用户决定 2026-05-19）
+
+### Decision
+
+v0.3.10 不再在加性 single-score 公式（`computeEffectiveScoreDetails`）内部调
+权重。改为 **多流 rank 融合（RRF over 8 streams）+ budget cut 在 fused rank
+上**。既有 score 仍 emit，但角色从"排序决策者"降级为"tiebreaker + diagnostic"。
+
+实施范围（详见新 `plan.md` Phase A→D）：
+- B.B1 — `recall-service.ts:1721-1724` 融合公式替换为 RRF（k=60，stream weights 初值全 1.0）
+- B.B2 — `recall-service.ts:1628` budget cut 排序键改为 `fused_rank DESC, effective_score DESC (tiebreaker)`
+- B.B3 — `recall-service.ts:2239` lexical priority 从 2 提到 3（顺手）
+- A.M4b — per-factor 因子分解 emit 到 `diagnostics.fusion_breakdown[]`（独立 channel）
+- A.B0 — archive header 加 `recall_pipeline_version` 字段（区分 additive vs fusion-rrf-v1）
+
+8 streams：lexical_fts / evidence_fts / structural / embedding_similarity /
+graph_expansion / path_expansion / temporal_recency / workspace_activation。
+详见 `.do-it/findings/v0.3.10-architecture-review/DECISION-01-fusion-proposal.md`。
+
+### Rationale
+
+- Codex 在 v0.3.10-controller（HEAD `9b05d2b`）上花一周尝试在加性公式内部
+  通过 `QUERY_EVIDENCE_BASE_TRANSFER_MAX/FLOOR` 动态转移权重，**R@5 没动**。
+- 第二次尝试 stopword-free FTS admission query，反向退化，revert。
+- Codex 自己在 `.do-it/findings/v0.3.10/05-algorithm-gap-and-external-baseline.md`
+  承认 "current single additive score saturates"。
+- 三个独立 lens（architecture-strategist / red-team-reviewer / end-user-advocate）
+  2026-05-19 收敛同一结论：多流 rank 融合（Codex 假设 2+4 合体）是真原语。
+- 这是 D2 的具体化——D2 写 "linear fusion + cross-encoder hook 留 v0.4"，
+  D16 把 "linear fusion" 改为 "RRF"（更明确、更经验证、不需要新模型）。
+- 完整决策推理：`.do-it/findings/v0.3.10-architecture-review/DECISION.md`
+
+### Trade-off acknowledgement
+
+- v0.3.10 scope 从"调权重 + 加 rerank stage"变为"换公式 + 守护既有 KPI"
+- v0.3.9 刚 ship 的 K2.3 cohort attribution KPI 需要显式守护（红队 worst finding）；
+  K2.3 总占比偏移 < 15pp 升为 ship-blocker
+- 既有 caller 不会被打破（融合默认开启，archive 标版本，dashboard 分组）
+- 周期从 Era 1 估的 5-6 周 → β 估的 1.5-2 周
+- v0.4 接力：cross-encoder rerank（F5）+ `RecallHints` per-call adjunct +
+  temporal_proximity stream 重新设计
+
+### Evidence
+
+- `.do-it/findings/v0.3.10-architecture-review/DECISION.md` — 决策包入口
+- `.do-it/findings/v0.3.10-architecture-review/DECISION-01-fusion-proposal.md` — RRF 形状
+- `.do-it/findings/v0.3.10-architecture-review/DECISION-02-lens-verdicts.md` — 3 lens 收敛
+- `.do-it/findings/v0.3.10-architecture-review/DECISION-04-preservation-and-risk.md` — 5 ship-blockers + 5 falsification
+- `.do-it/findings/v0.3.10/05-algorithm-gap-and-external-baseline.md` — Codex 撞墙报告
+- `packages/protocol/src/soul/dynamics-constants.ts:22-31` — `relevance: 0.10` 不改
+- `packages/core/src/recall-service.ts:1721-1724` — D1 fusion 公式替换位点
+- `packages/core/src/recall-service.ts:1628` — G1 budget cut 排序键改位点
+
+---
+
+## D17 — `RecallPolicy.intent` knob 显式撤回，不在 v0.3.10 / v0.4 引入（主线程决定 2026-05-19）
+
+### Decision
+
+撤回 2026-05-19 早些时候主线程提出的 `RecallPolicy.intent ∈ {warmth, query,
+blended}` 设计提议。**v0.3.10 不引入，v0.4 也不引入。** 如未来确需意图分离，
+正确的实施位置是：
+
+1. **per-call `RecallHints` adjunct（非 RecallPolicy 字段）**：避免污染
+   control-plane governance audit（§3 invariant）
+2. **daemon 推断（caller 零动作）**：避免 MCP system prompt 必须更新所有
+   integrator 的协议负担
+3. **仅在 streams 存在后启用**：意图分离调的是 stream weights，没有 streams
+   就没有 dispatch 维度
+
+### Rationale
+
+三个独立 lens 2026-05-19 收敛否决：
+
+- **red-team #worst-finding**：intent split 破坏 v0.3.9 刚 ship 的 K2.3 cohort
+  attribution——同一 memory 在 warmth/query 下被分到不同 cohort，KPI 数值
+  随 caller 行为漂移，**KPI 立刻不可证伪**
+- **red-team Blocking #1**：`RecallPolicy` 是 `ControlPlaneEnvelopeSchema.unwrap()`
+  control-plane truth，挂 per-call hint 违反 §3 governance audit invariant
+- **red-team Blocking #2**：framing 反了——current 就是 warmth 模式，
+  "blended = current behavior" 这句话本身不成立
+- **red-team Blocking #3**：bench harness + MCP system prompt 都不会 set 这个
+  字段，破坏 `feedback_benchmark_as_feedback_loop` invariant
+- **architecture-strategist**：`domain_weight_overrides` hook 按 `domain_tag`
+  dispatch，不按 caller intent；intent 需要新建第二条 dispatch 轴
+- **end-user-advocate**：caller 不会知道 knob 存在；turn-start 调用同时
+  是 warmth + query（"What did we decide about auth"），blended 是唯一合理 mode
+  而不是 fallback
+
+### Evidence
+
+- `.do-it/findings/v0.3.10-architecture-review/DECISION-02-lens-verdicts.md`
+- `.do-it/findings/v0.3.10-architecture-review/DECISION-04-preservation-and-risk.md` § 红队 #worst-finding
+- `.do-it/findings/v0.3.10-architecture-review/DECISION-05-handoff-questions.md` § F 撤回理由
+
+---
+
+## D18 — Era 1 老 plan 归档到 `_archive-additive-score/`，新 plan 从零写（用户决定 2026-05-19）
+
+### Decision
+
+- `docs/v0.3/v0.3.10/_archive-additive-score/` 子文件夹存放 Era 1 原文档
+  （README.md / plan.md / kpi-targets.md），不删除、不修改
+- 新 `README.md` / `plan.md` / `kpi-targets.md` 从零写，结构对齐 β
+- `decisions.md` **不归档**，原位 append 新决策（D16 / D17 / D18）保持
+  项目决策记账本的时间线连续性
+
+### Rationale
+
+- 用户原话："新建一个文件夹把老的那些存进去，然后接着老的去写新计划，我觉得要严格的实行"
+- Era 1 plan.md (56K) 含详细 file:line 引用，作为 β 实施 reference 仍有价值
+- decisions.md 是 append-only 历史账本（per Era 1 D1-D15 都以这种方式累积），
+  归档会切断时间线，原位 append 保留连续性
+
+### Evidence
+
+- 老 plan：`docs/v0.3/v0.3.10/_archive-additive-score/plan.md`
+- 老 kpi：`docs/v0.3/v0.3.10/_archive-additive-score/kpi-targets.md`
+- 老 README：`docs/v0.3/v0.3.10/_archive-additive-score/README.md`
+- 新 plan 中 § "Era 1 work items 处理表" 显式标注每个 Era 1 work item 在 β 后的去向
+
+---
+
+## D19 — γ 双轨 KPI + scope 大扩：6 条 K1.* 双轨硬线全过才 release（用户决定 2026-05-19）
+
+### Decision
+
+v0.3.10 KPI 改为 **embedding-off + embedding-on 双轨硬线**：
+
+```
+embedding-off 轨（核心：不开嵌入也得有用）
+  ├─ K1.1-off  LongMemEval-S 100 R@5 ≥ 75%
+  ├─ K1.3-off  LongMemEval-S 500 R@5 ≥ 70%
+  └─ K1.4-off  LoCoMo full R@5    ≥ 55%  (承认 reasoning 物理瓶颈)
+
+embedding-on 轨（70% 全线 must）
+  ├─ K1.1-on   LongMemEval-S 100 R@5 ≥ 70%
+  ├─ K1.3-on   LongMemEval-S 500 R@5 ≥ 70%
+  └─ K1.4-on   LoCoMo full R@5    ≥ 70%
+```
+
+**6 条 must 同时达标才 release。** 任一条没达 → 进 fix-loop。
+
+为达 6 条硬线，v0.3.10 scope 大扩：
+
+1. **新增 Cat-X retrieval expansion**：lexical 同义词/词干/trigram + evidence partial-phrase + session-id query parser + date-aware query expansion。embedding-off 轨的 candidate pool 覆盖率从当前 ~38% 推到 ≥75%。
+2. **Cat-F5 cross-encoder rerank 从 v0.4 提前到 v0.3.10**（撤回 DECISION-04 IV-1 的 park）。embedding-on 轨的 70% 全线 must 必需。模型选型走 research-first，派 `architecture-taste-reviewer` 审查后用户拍板。
+3. **embedding 仍 opt-in（D11 / D3 不变）**：不默认开，不强制 provider 依赖。但 bench 必须双轨同跑——这才是"诚实的双轨 release"。
+
+周期：β 估 1.5-2 周 → γ 估 4-5 周。
+
+### Rationale
+
+- 用户原话："核心还是没有开嵌入模型就要有用"——决定了"embedding-off 必须有 must 线"
+- 用户原话："每个都得至少 70% 往上我们才达到别人的底线水平吧"——决定了 embedding-on 全线 ≥ 70%
+- 用户原话："现在我们离别人的差距非常大"——决定了 stretch 要看齐 AgentMemory 95.2%（不再"延后到 v0.4"包装）
+- 主线程诚实告知：LoCoMo embedding-off 70% 在 multi-turn reasoning 数据集上**物理不可达**（gold 不含 query 字面词，没语义召回到不了）；用户接受 LoCoMo embedding-off 单独低线（55%）+ embedding-on 70% 的 γ 方案
+- embedding-off 70% 必需 Cat-X retrieval expansion；embedding-on 70% 必需 Cat-F5 cross-encoder rerank——所以 scope 大扩是 KPI 决定的必然推论，不是 nice-to-have
+
+### Trade-off acknowledgement
+
+- v0.3.10 不再是单聚焦的 ranking 改造 release，而是 "ranking + retrieval + rerank" 三件套
+- Cat-F5 cross-encoder 引入新依赖（ML 模型 + inference runtime + 模型文件管理）；走 research-first 流程不可省
+- LoCoMo embedding-off 55% must 是诚实承认，不是降标；release notes 必明示
+- bench archive 数量翻倍（每数据集 off + on 两份）；存储 / CI 开销增加
+- Cat-G / Cat-A / Cat-D 等正交 Cat 不受影响，仍按 Era 1 计划闭合
+
+### Evidence
+
+- `.do-it/findings/v0.3.10/05-algorithm-gap-and-external-baseline.md` § External Baselines Checked（AgentMemory 95.2% / Supermemory 81.6-85.2%）
+- LoCoMo full archive 现状：`docs/bench-history/public-locomo/2026-05-17T064415Z-75d418c/kpi.json`（R@5=1.3% / R@10=37.8%）
+- 物理上限论证：本 plan §"Phase X 的 retrieval pool 上限"
+- LongMemEval-S 100 现状：`docs/bench-history/public/2026-05-18T140203Z-2b73f66-policy-chat/`（R@5=66%）
+- 用户约束："embedding 不要默认开"——D11 / D3 invariant 不变
+
+### Implementation pointers
+
+- `docs/v0.3/v0.3.10/plan.md` Phase X / Phase F — 新增工作项
+- `docs/v0.3/v0.3.10/kpi-targets.md` K1.* 双轨重设
+- `docs/v0.3/v0.3.10/README.md` 量化目标表更新
+
