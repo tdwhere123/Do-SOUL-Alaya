@@ -357,7 +357,8 @@ export async function runLongMemEvalMultiturn(
 
   const layout: HistoryLayout = { historyRoot: opts.historyRoot };
   const previous = await readLatest(layout, "public-multiturn", {
-    split: payload.split
+    split: payload.split,
+    embeddingProvider: payload.embedding_provider
   });
   const diff = diffKpis(payload, previous);
   const slug = entrySlug(runAt, commitSha7);

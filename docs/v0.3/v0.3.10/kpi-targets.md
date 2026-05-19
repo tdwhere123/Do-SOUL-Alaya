@@ -6,6 +6,10 @@
 > **硬线（hard floor）**：未达 → 进 fix-loop 不进 release（per `feedback_review_loop_until_clean`）。
 > Era 1 KPI 大部分继承；本份显式标注哪些硬线由 β 上调、哪些是新增。
 
+> **命名边界**：`K1.3-off` / `KN.5` 等是本文件的 v0.3.10 计划标签；
+> 可复用代码、CLI 报告和 `kpi.json` archive 使用稳定语义 ID，不把
+> v0.3.10 阶段名写进 machine key。
+
 ## Goal hierarchy（D20 Alaya-native 主线 + R@5 credibility floors 并列）
 
 > 用户决策 2026-05-19 D20：v0.3.10 走 **Alaya-native 主线**，不走 RAG 全配置路。
@@ -41,7 +45,7 @@ Tier 1 组 C — Pipeline integrity（β 守护）
   ├─ K2.2  budget_dropped ≤ 8                  [β 上调，原 ≤ 20]
   ├─ K2.3  cohort 总占比偏移 < 15pp            [β 新增 ship-blocker 守护]
   ├─ K2.6  candidate_absent ≤ 6                [β 新增硬线]
-  ├─ K3.2  recall p95 ≤ 300ms (embedding-off)  [D20 修订；移除 rerank 预算]
+  ├─ K3.2  recall p95 ≤ 200ms (embedding-off)  [D20 修订；移除 rerank 预算]
   ├─ K3.1  recall p95 ≤ 1100ms (embedding-on)  [D20 修订；移除 rerank 预算]
   └─ K4.1  + K4.2  carry-forward 闭合率 = 100% [继承 Era 1]
 
@@ -286,7 +290,7 @@ Tier 3（stretch）— release notes 标注，不阻塞
 ### K4.2 Codex I-series 闭合率
 
 - target：100%（I1-I8 全闭合）
-- 继承 Era 1；I1（plane_winning_admission）已在 HEAD `9b05d2b` 闭合
+- 继承 Era 1；I1（plane_winning_admission）已在 Era 1 checkpoint `9b05d2b` 闭合
 - gate：Phase D 出口
 
 ### K4.3 Governance route count
@@ -384,7 +388,8 @@ Tier 3（stretch）— release notes 标注，不阻塞
 |---|---|---|
 | A | K5.4（6 baseline archive 落地）+ K4.6 + K4.7 + K5.5 守护 test 通过 | fix-loop in Phase A |
 | B | K6.2（既有测试不破）+ B 三个新测试通过 + 既有 score 仍 emit | fix-loop in Phase B |
-| C | K1.2 ≥ 75% / K2.1 ≤ 10 / K2.2 ≤ 8 / K2.3 < 15pp / K2.6 ≤ 6 / K3.2 ≤ 200ms 全过 | fix-loop in Phase C |
+| Y | Retained Era 1 closure：P1/P3/P4/G/A/D/B 均有 owner、acceptance、verification evidence | fix-loop in Phase Y |
+| C | D20 六条 K1.* must floor 全过 / KN.1-KN.5 全过 / K2.1 ≤ 10 / K2.2 ≤ 8 / K2.3 < 15pp / K2.6 ≤ 6 / K3.1 ≤ 1100ms / K3.2 ≤ 200ms 全过 | fix-loop in Phase C |
 | D | K4.1 + K4.2 = 100% / K7.* 全过 / review-loop zero Blocking/Important | fix-loop in Phase D |
 
 ---
@@ -394,10 +399,10 @@ Tier 3（stretch）— release notes 标注，不阻塞
 | Decision point | 触发 | 状态 |
 |---|---|---|
 | Q1 — controlled-replay 6 场景全跑 | Phase A 入口 | ✅ A 已拍板 |
-| Q2 — R@5 < 75% 是否 release | Phase C 出口 | ✅ A 已拍板 不 release |
+| Q2 — 任一 D20 K1 must floor 未达是否 release | Phase C 出口 | ✅ A 已拍板 不 release |
 | Q3 — release notes 明文承认 | Phase D 出口 | ✅ A 已拍板 明文 |
 | Q8 — M4b emit 到哪 | Phase A 设计 | ✅ B 已拍板 独立 diagnostic |
-| 如 sweep 全 < 75%，调 RRF k vs 补 stream | Phase C 中段 | ⏸ 待触发 |
+| 如 sweep 未达 D20 must floors，调 RRF k vs 补 stream | Phase C 中段 | ⏸ 待触发 |
 | 如 K2.3 偏移 ≥ 15pp 是否回退融合 | Phase C 出口 | ⏸ 待触发 |
 
 ---

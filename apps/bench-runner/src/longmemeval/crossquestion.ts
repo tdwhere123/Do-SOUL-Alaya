@@ -359,7 +359,8 @@ export async function runLongMemEvalCrossQuestion(
 
   const layout: HistoryLayout = { historyRoot: opts.historyRoot };
   const previous = await readLatest(layout, "public-crossquestion", {
-    split: payload.split
+    split: payload.split,
+    embeddingProvider: payload.embedding_provider
   });
   const diff = diffKpis(payload, previous);
   const slug = entrySlug(runAt, commitSha7);

@@ -9,12 +9,14 @@ import {
   readLatest,
   renderFindings,
   renderReport,
+  releaseHardGateVerdict,
   writeEntry,
   type BenchPolicyShape,
   type BenchSimulateReportMode,
   type HistoryLayout,
   type KpiPayload,
-  type PerScenarioRow
+  type PerScenarioRow,
+  type QualityMetrics
 } from "@do-soul/alaya-eval";
 import { fetchLongMemEval } from "./longmemeval/fetch.js";
 import { runLongMemEvalMultiturn } from "./longmemeval/multiturn.js";
@@ -51,12 +53,12 @@ const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
 const HELP_TEXT = `alaya-bench-runner — daemon-attached benchmark harness
 
 Usage:
-  alaya-bench-runner fetch-longmemeval [--variant oracle|s|m]
-  alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--policy-shape stress|chat] [--simulate-report none|always-used|gold-only|mixed] [--weights '<json>'] [--history-root <path>]
-  alaya-bench-runner longmemeval-multiturn [--variant oracle|s|m] [--limit N] [--offset N] [--rounds N] [--embedding disabled|env] [--history-root <path>]
-  alaya-bench-runner longmemeval-crossquestion [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--history-root <path>]
-  alaya-bench-runner fetch-locomo
-  alaya-bench-runner locomo [--limit N] [--offset N] [--embedding disabled|env] [--history-root <path>]
+  alaya-bench-runner fetch-longmemeval [--variant oracle|s|m] [--data-dir <path>] [--force]
+  alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--policy-shape stress|chat] [--simulate-report none|always-used|gold-only|mixed] [--weights '<json>'] [--data-dir <path>] [--history-root <path>]
+  alaya-bench-runner longmemeval-multiturn [--variant oracle|s|m] [--limit N] [--offset N] [--rounds N] [--embedding disabled|env] [--data-dir <path>] [--history-root <path>]
+  alaya-bench-runner longmemeval-crossquestion [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--data-dir <path>] [--history-root <path>]
+  alaya-bench-runner fetch-locomo [--data-dir <path>]
+  alaya-bench-runner locomo [--limit N] [--offset N] [--embedding disabled|env] [--data-dir <path>] [--history-root <path>]
   alaya-bench-runner self [--history-root <path>]
   alaya-bench-runner live [--source <main-check.json|main-check-run.json>] [--history-root <path>]
   alaya-bench-runner controlled-replay [--history-root <path>]
@@ -139,6 +141,7 @@ interface ParsedFlags {
   readonly simulateReport: BenchSimulateReportMode;
   readonly weightOverridesJson?: string;
   readonly rounds?: number;
+  readonly force: boolean;
 }
 
 function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
@@ -153,6 +156,7 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   let simulateReport: BenchSimulateReportMode = "none";
   let weightOverridesJson: string | undefined;
   let rounds: number | undefined;
+  let force = false;
   const shards: string[] = [];
   let collectingShards = false;
 
@@ -229,6 +233,9 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
     } else if (token === "--data-dir") {
       dataDir = args[++i];
       collectingShards = false;
+    } else if (token === "--force") {
+      force = true;
+      collectingShards = false;
     } else if (token === "--source") {
       source = args[++i];
       collectingShards = false;
@@ -262,7 +269,8 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
     policyShape,
     simulateReport,
     weightOverridesJson,
-    rounds
+    rounds,
+    force
   };
 }
 
@@ -271,7 +279,7 @@ async function runFetchLongMemEval(opts: ParsedFlags): Promise<number> {
     process.stdout.write(`Fetching ${opts.variant} from HuggingFace...\n`);
     const result = await fetchLongMemEval(opts.variant, {
       dataDir: opts.dataDir,
-      force: false
+      force: opts.force
     });
     process.stdout.write(
       `Cached: ${result.localPath}\n` +
@@ -319,7 +327,7 @@ async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
         `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
         `  KPI: ${result.kpiPath}\n`
     );
-    return exitCodeForVerdicts(result.payload.diff_vs_previous?.verdict_per_kpi);
+    return exitCodeForBenchmarkResult(result.payload);
   } catch (err) {
     process.stderr.write(
       `alaya-bench-runner longmemeval: ${err instanceof Error ? err.message : String(err)}\n`
@@ -355,7 +363,7 @@ async function runLongMemEvalMultiturnCommand(opts: ParsedFlags): Promise<number
         `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
         `  KPI: ${result.kpiPath}\n`
     );
-    return exitCodeForVerdicts(result.payload.diff_vs_previous?.verdict_per_kpi);
+    return exitCodeForBenchmarkResult(result.payload);
   } catch (err) {
     process.stderr.write(
       `alaya-bench-runner longmemeval-multiturn: ${err instanceof Error ? err.message : String(err)}\n`
@@ -389,7 +397,7 @@ async function runLongMemEvalCrossQuestionCommand(opts: ParsedFlags): Promise<nu
         `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
         `  KPI: ${result.kpiPath}\n`
     );
-    return exitCodeForVerdicts(result.payload.diff_vs_previous?.verdict_per_kpi);
+    return exitCodeForBenchmarkResult(result.payload);
   } catch (err) {
     process.stderr.write(
       `alaya-bench-runner longmemeval-crossquestion: ${err instanceof Error ? err.message : String(err)}\n`
@@ -443,7 +451,7 @@ async function runLocomoCommand(opts: ParsedFlags): Promise<number> {
         `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
         `  KPI: ${result.kpiPath}\n`
     );
-    return exitCodeForVerdicts(result.payload.diff_vs_previous?.verdict_per_kpi);
+    return exitCodeForBenchmarkResult(result.payload);
   } catch (err) {
     process.stderr.write(
       `alaya-bench-runner locomo: ${err instanceof Error ? err.message : String(err)}\n`
@@ -501,10 +509,20 @@ async function runControlledReplayCommand(opts: ParsedFlags): Promise<number> {
   try {
     process.stdout.write("Running controlled replay...\n");
     const result = await runControlledReplay({ historyRoot: opts.historyRoot });
+    const failedGateIds = result.archive.native_health_gates.gates
+      .filter((gate) => !gate.passed)
+      .map((gate) => gate.id);
     process.stdout.write(
       `Controlled replay complete. Slug: ${result.slug}\n` +
+        `  Native health: ${result.archive.native_health_gates.verdict}\n` +
         `  Archive: ${result.archivePath}\n`
     );
+    if (failedGateIds.length > 0) {
+      process.stderr.write(
+        `controlled-replay native health gates failed: ${failedGateIds.join(", ")}\n`
+      );
+      return 1;
+    }
     return 0;
   } catch (err) {
     process.stderr.write(
@@ -532,12 +550,24 @@ function exitCodeForVerdicts(
   return 0;
 }
 
+function exitCodeForBenchmarkResult(payload: KpiPayload): number {
+  if (releaseHardGateVerdict(payload) === "fail") return 1;
+  return exitCodeForVerdicts(payload.diff_vs_previous?.verdict_per_kpi);
+}
+
 function pct(ratio: number): string {
   return `${(ratio * 100).toFixed(1)}%`;
 }
 
 function ratio(count: number, total: number): number {
   return total === 0 ? 0 : count / total;
+}
+
+function computePercentile(values: readonly number[], p: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = Math.ceil((p / 100) * sorted.length) - 1;
+  return sorted[Math.max(0, idx)] ?? 0;
 }
 
 function stableJson(value: unknown): string {
@@ -607,11 +637,9 @@ function aggregateReportUsage(
  * Each shard was produced by `longmemeval --offset X --limit Y --history-root
  * /tmp/shard-N`. Reads each shard's `latest-baseline.json` -> kpi.json,
  * concatenates per_scenario, sums tier_distribution / degradation_reasons,
- * recomputes R@K from per_scenario, picks merged latency percentiles from
- * the union of per-question latencies (approximated via min/max bracketing
- * — exact p50/p95 across shards would require carrying the raw latency
- * array through shard kpi.json, which we do not today; if you need exact
- * p50/p95 fidelity across shards, rerun sequentially or extend the schema).
+ * recomputes R@K from per_scenario, and uses exact merged latency
+ * percentiles when shard rows carry per-question latency. Legacy shards
+ * without row latency fall back to a conservative worst-shard bound.
  *
  * Writes the merged entry under `--history-root` and rewrites
  * `latest-baseline.json` for split `longmemeval-{s|oracle}` based on the
@@ -705,11 +733,16 @@ async function runMergeLongMemEvalCommand(
       if (
         shard.dataset.name !== first.dataset.name ||
         shard.dataset.size !== first.dataset.size ||
-        shard.dataset.source !== first.dataset.source
+        shard.dataset.source !== first.dataset.source ||
+        shard.dataset.checksum_sha256 !== first.dataset.checksum_sha256 ||
+        shard.dataset.checksum_source !== first.dataset.checksum_source
       ) {
         throw new Error(
           `merge refused: shard[${i}] dataset identity (${shard.dataset.name}/${shard.dataset.size}/${shard.dataset.source}) != shard[0] (${first.dataset.name}/${first.dataset.size}/${first.dataset.source})`
         );
+      }
+      if (JSON.stringify(shard.seed_policy ?? null) !== JSON.stringify(first.seed_policy ?? null)) {
+        throw new Error(`merge refused: shard[${i}] seed_policy differs from shard[0]`);
       }
       if (
         stableJson(shard.recall_weight_overrides ?? null) !==
@@ -823,14 +856,19 @@ async function runMergeLongMemEvalCommand(
     const rAt5 =
       n === 0 ? 0 : perScenario.filter((r) => r.hit_at_5).length / n;
     const rAt10 = n === 0 ? 0 : totalHitAt10 / n;
+    const qualityMetrics = mergeQualityMetrics(shardPayloads);
 
-    // Latency percentiles across shards: report the worst (max) shard
-    // p50 / p95 as a conservative upper bound. kpi.latency_source =
-    // "worst_shard_bound" marks this for downstream readers. Exact
-    // union-percentile would require shard kpi.json to carry the raw
-    // latency array.
-    const latencyP50 = latencyP50Max;
-    const latencyP95 = latencyP95Max;
+    const mergedLatencies = perScenario
+      .map((row) => row.latency_ms)
+      .filter((latency): latency is number => latency !== undefined);
+    const hasExactMergedLatency =
+      evaluatedTotal > 0 && mergedLatencies.length === evaluatedTotal;
+    const latencyP50 = hasExactMergedLatency
+      ? computePercentile(mergedLatencies, 50)
+      : latencyP50Max;
+    const latencyP95 = hasExactMergedLatency
+      ? computePercentile(mergedLatencies, 95)
+      : latencyP95Max;
 
     const runAt = new Date();
     const commitSha7 = resolveBenchCommitSha7();
@@ -848,6 +886,7 @@ async function runMergeLongMemEvalCommand(
       ...(first.recall_weight_overrides === undefined
         ? {}
         : { recall_weight_overrides: first.recall_weight_overrides }),
+      ...(first.seed_policy === undefined ? {} : { seed_policy: first.seed_policy }),
       dataset: first.dataset,
       sample_size: first.sample_size,
       evaluated_count: evaluatedTotal,
@@ -875,7 +914,7 @@ async function runMergeLongMemEvalCommand(
         latency_ms_p50: latencyP50,
         latency_ms_p95: latencyP95,
         // @anchor merged-latency-source: see kpi-schema @latency-source.
-        latency_source: "worst_shard_bound",
+        latency_source: hasExactMergedLatency ? "exact" : "worst_shard_bound",
         token_saved_ratio_vs_full_prompt: 0,
         tier_distribution: { hot: tierHot, warm: tierWarm, cold: tierCold },
         degradation_reasons: {
@@ -889,6 +928,9 @@ async function runMergeLongMemEvalCommand(
           answer_turns_truncated: truncAnswerTotal,
           seed_chars_clipped: truncCharsTotal
         },
+        ...(qualityMetrics === undefined
+          ? {}
+          : { quality_metrics: qualityMetrics }),
         per_scenario: perScenario
       }
     };
@@ -897,7 +939,8 @@ async function runMergeLongMemEvalCommand(
     const previous = await readLatest(layout, "public", {
       split: first.split,
       policyShape,
-      simulateReport
+      simulateReport,
+      embeddingProvider: merged.embedding_provider
     });
     const diff = diffKpis(merged, previous);
     const slug = entrySlug(
@@ -963,14 +1006,107 @@ async function runMergeLongMemEvalCommand(
     process.stdout.write(
       `Merged ${shards.length} shards → slug ${slug}\n` +
         `  evaluated=${evaluatedTotal} R@1=${pct(rAt1)} R@5=${pct(rAt5)} R@10=${pct(rAt10)}\n` +
-        `  latency p50≤${latencyP50}ms p95≤${latencyP95}ms (worst-shard upper bound)\n` +
+        (hasExactMergedLatency
+          ? `  latency p50=${latencyP50}ms p95=${latencyP95}ms\n`
+          : `  latency p50≤${latencyP50}ms p95≤${latencyP95}ms (worst-shard upper bound)\n`) +
         `  KPI: ${entry.kpiPath}\n`
     );
-    return 0;
+    return exitCodeForBenchmarkResult(merged);
   } catch (err) {
     process.stderr.write(
       `alaya-bench-runner merge-longmemeval: ${err instanceof Error ? err.message : String(err)}\n`
     );
     return 2;
   }
+}
+
+function mergeQualityMetrics(
+  shards: readonly KpiPayload[]
+): QualityMetrics | undefined {
+  if (shards.length === 0) return undefined;
+  const metrics = shards.map((shard) => shard.kpi.quality_metrics);
+  if (metrics.every((item) => item === undefined)) return undefined;
+  if (metrics.some((item) => item === undefined)) return undefined;
+
+  let nonMonotonicCount = 0;
+  let nonMonotonicDenominator = 0;
+  let highLexicalDemotedCount = 0;
+  let highLexicalDemotedDenominator = 0;
+  let candidateAbsentCount = 0;
+  let candidateAbsentDenominator = 0;
+  let noGoldCount = 0;
+  let noGoldDenominator = 0;
+  let evidenceStreamGoldDeliveryCount = 0;
+  let evidenceStreamGoldDeliveryDenominator = 0;
+  let pathStreamTop10Count = 0;
+  let pathStreamTop10Denominator = 0;
+  const budgetCounts = new Map<string, { count: number; denominator: number }>();
+  const missDistribution: Record<string, number> = {};
+
+  for (const metric of metrics) {
+    if (metric === undefined) continue;
+    nonMonotonicCount += metric.non_monotonic_count;
+    nonMonotonicDenominator += metric.non_monotonic_denominator;
+    highLexicalDemotedCount += metric.high_lexical_demoted_count;
+    highLexicalDemotedDenominator += metric.high_lexical_demoted_denominator;
+    candidateAbsentCount += metric.candidate_absent_count;
+    candidateAbsentDenominator += metric.candidate_absent_denominator;
+    noGoldCount += metric.no_gold_count;
+    noGoldDenominator += metric.no_gold_denominator;
+    evidenceStreamGoldDeliveryCount += metric.evidence_stream_gold_delivery_count;
+    evidenceStreamGoldDeliveryDenominator += metric.evidence_stream_gold_delivery_denominator;
+    pathStreamTop10Count += metric.path_stream_top10_count;
+    pathStreamTop10Denominator += metric.path_stream_top10_denominator;
+    for (const [key, entry] of Object.entries(metric.budget_drop_distribution)) {
+      const existing = budgetCounts.get(key) ?? { count: 0, denominator: 0 };
+      budgetCounts.set(key, {
+        count: existing.count + entry.count,
+        denominator: existing.denominator + entry.denominator
+      });
+    }
+    for (const [key, count] of Object.entries(metric.miss_distribution)) {
+      missDistribution[key] = (missDistribution[key] ?? 0) + count;
+    }
+  }
+
+  const budgetDropDistribution = Object.fromEntries(
+    [...budgetCounts.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([key, entry]) => [
+        key,
+        {
+          count: entry.count,
+          share: ratio(entry.count, entry.denominator),
+          denominator: entry.denominator
+        }
+      ])
+  );
+
+  return {
+    schema_version: "bench-quality-metrics.v1",
+    non_monotonic_rate: ratio(nonMonotonicCount, nonMonotonicDenominator),
+    non_monotonic_count: nonMonotonicCount,
+    non_monotonic_denominator: nonMonotonicDenominator,
+    budget_drop_distribution: budgetDropDistribution,
+    high_lexical_demoted_rate: ratio(
+      highLexicalDemotedCount,
+      highLexicalDemotedDenominator
+    ),
+    high_lexical_demoted_count: highLexicalDemotedCount,
+    high_lexical_demoted_denominator: highLexicalDemotedDenominator,
+    candidate_absent_count: candidateAbsentCount,
+    candidate_absent_denominator: candidateAbsentDenominator,
+    no_gold_count: noGoldCount,
+    no_gold_denominator: noGoldDenominator,
+    evidence_stream_gold_delivery_rate: ratio(
+      evidenceStreamGoldDeliveryCount,
+      evidenceStreamGoldDeliveryDenominator
+    ),
+    evidence_stream_gold_delivery_count: evidenceStreamGoldDeliveryCount,
+    evidence_stream_gold_delivery_denominator: evidenceStreamGoldDeliveryDenominator,
+    path_stream_top10_rate: ratio(pathStreamTop10Count, pathStreamTop10Denominator),
+    path_stream_top10_count: pathStreamTop10Count,
+    path_stream_top10_denominator: pathStreamTop10Denominator,
+    miss_distribution: missDistribution
+  };
 }

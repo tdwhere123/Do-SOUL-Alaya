@@ -11,12 +11,20 @@ export {
   type DiffVsPrevious,
   type KpiCore,
   type KpiPayload,
+  type QualityMetrics,
   type RecallWeightOverridesSummary,
   type BenchPolicyShape,
   type BenchSimulateReportMode,
   type PerScenarioRow,
   type TierDistribution
 } from "./kpi-schema.js";
+
+export {
+  collectReleaseHardGates,
+  combineVerdicts,
+  releaseHardGateVerdict,
+  type BenchmarkHardGate
+} from "./release-gates.js";
 
 export {
   DEFAULT_THRESHOLDS,

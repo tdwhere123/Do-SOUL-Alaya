@@ -1,10 +1,8 @@
 import {
   ClaimLifecycleState,
-  MemoryDimension,
   ObjectLifecycleState,
   PathGovernanceClass,
   RetentionState,
-  StorageTier,
   type ClaimLifecycleState as ClaimStatus,
   type MemoryEntry,
   type PathAnchorRef,
@@ -56,16 +54,8 @@ export async function findActiveConstraints(input: {
     ...claimedMemoryIds,
     ...pathMemoryIds
   ]);
-  const dimensionMemories = (await Promise.all([
-    input.memoryRepo.findByWorkspaceId(input.workspaceId, StorageTier.HOT),
-    input.memoryRepo.findByWorkspaceId(input.workspaceId, StorageTier.WARM),
-    input.memoryRepo.findByWorkspaceId(input.workspaceId, StorageTier.COLD)
-  ])).flat().filter((memory) =>
-    memory.dimension === MemoryDimension.CONSTRAINT ||
-    memory.dimension === MemoryDimension.HAZARD
-  );
   const memoryById = new Map(
-    [...linkedMemories, ...dimensionMemories]
+    linkedMemories
       .filter((memory) => isSelectableActiveConstraintMemory(memory, input.workspaceId))
       .map((memory) => [memory.object_id, memory])
   );
@@ -104,9 +94,6 @@ export async function findActiveConstraints(input: {
     ]) {
       upsert(memoryId, "path_relation", null, path.legitimacy.governance_class);
     }
-  }
-  for (const memory of dimensionMemories) {
-    upsert(memory.object_id, "dimension", null, null);
   }
 
   const sorted = [...records.values()].sort(compareActiveConstraintRecords);

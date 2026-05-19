@@ -52,6 +52,7 @@ import {
   applyBenchRecallWeightOverrides,
   type BenchRecallWeightOverrides
 } from "./recall-weight-overrides.js";
+import { BenchRecallDiagnosticsSchema } from "./recall-diagnostics-schema.js";
 
 export interface BenchDaemonOptions {
   readonly dataDirRoot?: string;
@@ -149,7 +150,10 @@ export interface BenchDaemonHandle {
   proposeMemory(
     content: string,
     evidenceRef: string,
-    options?: { readonly objectKind?: SeedObjectKind }
+    options?: {
+      readonly objectKind?: SeedObjectKind;
+      readonly distilledFact?: string;
+    }
   ): Promise<SeededMemoryResult>;
   shutdown(): Promise<void>;
 }
@@ -410,9 +414,12 @@ export async function startBenchDaemon(
       strategy_mix: buildBenchRecallStrategyMix(policy, results),
       degradation_reason: recallResult.degradation_reason ?? null
     });
+    const diagnostics = recallResult.diagnostics === undefined
+      ? undefined
+      : BenchRecallDiagnosticsSchema.parse(recallResult.diagnostics);
     return Object.freeze({
       ...response,
-      diagnostics: recallResult.diagnostics
+      diagnostics
     });
   }
 
@@ -453,7 +460,10 @@ export async function startBenchDaemon(
   async function proposeMemory(
     content: string,
     evidenceRef: string,
-    options: { readonly objectKind?: SeedObjectKind } = {}
+    options: {
+      readonly objectKind?: SeedObjectKind;
+      readonly distilledFact?: string;
+    } = {}
   ): Promise<SeededMemoryResult> {
     const objectKind: SeedObjectKind = options.objectKind ?? "fact";
     // @anchor bench-seed-content-cap: protocol §soul.emit_candidate_signal
@@ -471,13 +481,21 @@ export async function startBenchDaemon(
       ? content.slice(0, SEED_CONTENT_MAX) +
         ` [truncated at ${SEED_CONTENT_MAX} chars]`
       : content;
+    const safeDistilledFact =
+      options.distilledFact === undefined
+        ? undefined
+        : options.distilledFact.length > SEED_CONTENT_MAX
+          ? options.distilledFact.slice(0, SEED_CONTENT_MAX) +
+            ` [truncated at ${SEED_CONTENT_MAX} chars]`
+          : options.distilledFact;
 
     // Step 1: emit candidate signal. signal_kind=potential_preference at
     // confidence 0.9 with evidence_refs >= 1 routes per object_kind
     // (see materialization-router.ts routeByObjectKind): claim-capable
     // kinds land in memory_and_claim_draft; fact / outcome land in
-    // memory_entry_only. raw_payload.excerpt becomes the materialized
-    // memory_entry.content via buildSignalSummary.
+    // memory_entry_only. raw_payload.distilled_fact, when supplied,
+    // becomes memory_entry.content; raw_payload.excerpt remains the
+    // evidence text reachable through evidence_refs.
     const signalResponse = await callMcpTool<SoulEmitCandidateSignalResponse>(
       activeMcpClient,
       "soul.emit_candidate_signal",
@@ -488,7 +506,12 @@ export async function startBenchDaemon(
         domain_tags: ["bench-seed"],
         confidence: 0.9,
         evidence_refs: [evidenceRef],
-        raw_payload: { excerpt: safeContent }
+        raw_payload: {
+          excerpt: safeContent,
+          ...(safeDistilledFact === undefined
+            ? {}
+            : { distilled_fact: safeDistilledFact })
+        }
       }
     );
     if (signalResponse.status !== "emitted") {

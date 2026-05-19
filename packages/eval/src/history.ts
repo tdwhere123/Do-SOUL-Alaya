@@ -250,12 +250,14 @@ export async function readLatest(
     split?: BenchSplit;
     policyShape?: BenchPolicyShape;
     simulateReport?: BenchSimulateReportMode;
+    embeddingProvider?: string;
   } = {}
 ): Promise<KpiPayload | null> {
   if (
     opts.split !== undefined ||
     opts.policyShape !== undefined ||
-    opts.simulateReport !== undefined
+    opts.simulateReport !== undefined ||
+    opts.embeddingProvider !== undefined
   ) {
     const slugs = await listEntries(layout, benchName);
     for (let i = slugs.length - 1; i >= 0; i--) {
@@ -268,7 +270,9 @@ export async function readLatest(
         (opts.policyShape === undefined ||
           (entry.policy_shape ?? "stress") === opts.policyShape) &&
         (opts.simulateReport === undefined ||
-          (entry.simulate_report ?? "none") === opts.simulateReport)
+          (entry.simulate_report ?? "none") === opts.simulateReport) &&
+        (opts.embeddingProvider === undefined ||
+          entry.embedding_provider === opts.embeddingProvider)
       ) {
         return entry;
       }

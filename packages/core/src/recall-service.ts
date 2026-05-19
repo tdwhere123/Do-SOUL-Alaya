@@ -18,18 +18,21 @@ import {
   type ProjectMappingAnchor,
   type RecallAdditiveScoringWeights,
   type RecallCandidate,
+  type RecallOriginPlane,
   type RecallScoreFactors,
   type RecallPolicy,
   type SoulRecallHostContext,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
-import type { PreparedEmbeddingQueryHandle } from "./embedding-recall-service.js";
+import type {
+  EmbeddingRecallSupplementResult,
+  PreparedEmbeddingQueryHandle
+} from "./embedding-recall-service.js";
 import { loadGlobalRecallCandidates } from "./global-memory-recall-service.js";
 import { compileRecallQueryProbes, type RecallQueryProbes } from "./recall-query-probes.js";
 import {
   buildRecallCandidate,
-  rebuildRecallBudgetStateForDelivery,
-  selectCandidatesWithinBudgets
+  rebuildRecallBudgetStateForDelivery
 } from "./recall-candidate-builder.js";
 import { STRATEGY_RECALL_DEFAULTS, type NodeStrategy } from "./task-surface-builder.js";
 import {
@@ -38,15 +41,12 @@ import {
   MIN_RECALL_RESULTS,
   PATH_PLASTICITY_WEIGHT,
   WARM_CASCADE_DECAY,
-  applySimilarityBoost,
   assertActivationWeightsSumToOne,
   buildRecallCandidateDedupeKey,
   classifyGlobalCandidate,
   classifyProjectMappingCandidate,
   clamp01,
-  compareEffectiveScores,
   compareMemoryEntries,
-  compareRecallCandidates,
   entryMatchesTimeFilter,
   filterMemoriesByTimeWindow,
   getGlobalRecallLimit,
@@ -68,6 +68,10 @@ import type {
   RecallAdmissionPlane,
   RecallCandidateDiagnostic,
   RecallCandidateDropReason,
+  RecallFusionBreakdown,
+  RecallFusionStream,
+  RecallFusionStreamContributions,
+  RecallFusionStreamRanks,
   RecallDiagnostics,
   RecallEmbeddingProviderStatus,
   RecallPathExpansionSourceDiagnostic,
@@ -106,11 +110,46 @@ const DYNAMIC_RECALL_PLANE_CAP = 240;
 const DYNAMIC_RECALL_TOTAL_CANDIDATE_CAP = 1000;
 const DYNAMIC_RECALL_SEED_CAP = 50;
 const DYNAMIC_RECALL_COHORT_RADIUS = 8;
+const DYNAMIC_RECALL_SOURCE_PROXIMITY_RADIUS = 6;
+const DYNAMIC_RECALL_SOURCE_PROXIMITY_SEED_CAP = 12;
+const DYNAMIC_RECALL_SOURCE_PROXIMITY_ADMISSION_CAP = 120;
+const DYNAMIC_RECALL_SOURCE_PROXIMITY_NEIGHBORS_PER_SEED = 8;
 const DYNAMIC_RECALL_EDGE_FANOUT = 12;
+const COHORT_RESCUE_MAX_SLOTS = 3;
+const COHORT_RESCUE_MAX_SHARE = 0.3;
+const COHORT_RESCUE_MIN_ANCHORS = 5;
+const COHORT_RESCUE_MAX_FUSED_RANK_MULTIPLIER = 20;
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
 const NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT = 0.24;
 const QUERY_EVIDENCE_BASE_TRANSFER_MAX = 0.25;
 const QUERY_EVIDENCE_BASE_WEIGHT_FLOOR = 0.35;
+const RECALL_RRF_DEFAULT_K = 60;
+const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
+  "lexical_fts",
+  "evidence_fts",
+  "evidence_structural_agreement",
+  "source_proximity",
+  "structural",
+  "existing_score",
+  "embedding_similarity",
+  "graph_expansion",
+  "path_expansion",
+  "temporal_recency",
+  "workspace_activation"
+];
+const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>> = Object.freeze({
+  lexical_fts: 1,
+  evidence_fts: 1,
+  evidence_structural_agreement: 20,
+  source_proximity: 0.25,
+  structural: 1,
+  existing_score: 1,
+  embedding_similarity: 1,
+  graph_expansion: 1,
+  path_expansion: 1,
+  temporal_recency: 0,
+  workspace_activation: 1
+});
 // invariant: confidence sub-weight is additive (outside sum-to-1
 // activation_weights). MemoryEntry.confidence is propose/accept-updated
 // epistemic certainty; reading it directly here keeps later confidence
@@ -125,6 +164,11 @@ interface CoarseCandidateDraft {
   readonly sourceChannels: readonly string[];
   readonly structuralScore: number;
   readonly pathExpansionSources: readonly RecallPathExpansionSourceDiagnostic[];
+}
+
+interface SourceProximitySeedDraft {
+  readonly draft: Readonly<CoarseCandidateDraft>;
+  readonly strength: number;
 }
 
 type CoarseCandidateAdder = (
@@ -237,7 +281,7 @@ export class RecallService {
       ...filteredGlobalCandidates
     ]) as readonly Readonly<CoarseRecallCandidate>[];
 
-    const assessment = await this.assessCoarseFilter({
+    const initialAssessment = await this.assessCoarseFilter({
       coarseFilter: Object.freeze({
         ...coarseFilter,
         candidates: combinedCoarseCandidates
@@ -249,8 +293,7 @@ export class RecallService {
       winnerMemoryIds,
       tokenEstimator
     });
-    const supplementaryData = assessment.supplementaryData;
-    const lexicalCandidates = assessment.candidates;
+    const lexicalCandidates = initialAssessment.candidates;
     const preparedEmbeddingQuery = await this.prepareEmbeddingSupplementQuery({
       config: policy,
       workspaceId: params.workspaceId,
@@ -259,25 +302,41 @@ export class RecallService {
       localEligibleCandidates: coarseFilter.candidates,
       lexicalFallbackCount: lexicalCandidates.length
     });
-    const mergedCandidates = await this.mergeEmbeddingSupplementCandidates({
-      baseCandidates: lexicalCandidates,
+    const embeddingSupplement = await this.collectEmbeddingSupplement({
+      baseCandidateIds: lexicalCandidates.map((candidate) => candidate.object_id),
       localEligibleCandidates: coarseFilter.candidates,
       config: policy,
       workspaceId: params.workspaceId,
       runId: params.runId ?? null,
       queryText,
-      winnerMemoryIds,
-      supplementaryData,
-      preparedEmbeddingQuery: preparedEmbeddingQuery.handle,
-      tokenEstimator
+      preparedEmbeddingQuery: preparedEmbeddingQuery.handle
     });
+    const supplementaryData = withEmbeddingSimilarityScores(
+      initialAssessment.supplementaryData,
+      embeddingSupplement.similarityHintsByObjectId
+    );
+    const finalAssessment =
+      Object.keys(embeddingSupplement.similarityHintsByObjectId).length === 0
+        ? initialAssessment
+        : this.fineAssess(
+            combinedCoarseCandidates,
+            policy,
+            winnerMemoryIds,
+            supplementaryData,
+            tokenEstimator
+          );
     const embeddingProviderStatus = resolveEmbeddingProviderStatus(
       policy,
       preparedEmbeddingQuery.handle,
       preparedEmbeddingQuery.degradedReason
     );
+    const providerDegradationReason = resolveEmbeddingProviderDegradationReason(
+      policy,
+      preparedEmbeddingQuery.handle,
+      preparedEmbeddingQuery.degradedReason
+    );
     const rebuiltCandidates = rebuildRecallBudgetStateForDelivery(
-      mergedCandidates,
+      finalAssessment.candidates,
       policy.fine_assessment
     );
     const candidates = await this.applyManifestationBiasSidecar({
@@ -287,7 +346,7 @@ export class RecallService {
       candidates: rebuiltCandidates
     });
     const candidateDiagnostics = finalizeRecallCandidateDiagnostics(
-      assessment.diagnostics,
+      finalAssessment.diagnostics,
       candidates
     );
     const occurredAt = this.now();
@@ -334,7 +393,7 @@ export class RecallService {
         preBudgetCount: candidateDiagnostics.length,
         deliveredCount: candidates.length,
         embeddingProviderStatus,
-        providerDegradationReason: preparedEmbeddingQuery.degradedReason,
+        providerDegradationReason,
         candidates: candidateDiagnostics
       })
     });
@@ -500,7 +559,12 @@ export class RecallService {
     readonly total_scanned: number;
     readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
     readonly ftsRanks: Readonly<Record<string, number>>;
+    readonly evidenceFtsRanks: Readonly<Record<string, number>>;
+    readonly sourceProximityScores: Readonly<Record<string, number>>;
+    readonly sourceCohortKeys: Readonly<Record<string, string>>;
     readonly structuralScores: Readonly<Record<string, number>>;
+    readonly graphExpansionScores: Readonly<Record<string, number>>;
+    readonly pathExpansionScores: Readonly<Record<string, number>>;
     readonly degradation_reason: RecallResult["degradation_reason"];
   }> {
     const tier = options.tier ?? StorageTier.HOT;
@@ -527,7 +591,12 @@ export class RecallService {
 
     const drafts = new Map<string, CoarseCandidateDraft>();
     const ftsRanks = new Map<string, number>();
+    const evidenceFtsRanks = new Map<string, number>();
+    const sourceProximityScores = new Map<string, number>();
+    let sourceCohortKeys: Readonly<Record<string, string>> = Object.freeze({});
     const structuralScores = new Map<string, number>();
+    const graphExpansionScores = new Map<string, number>();
+    const pathExpansionScores = new Map<string, number>();
     const addCandidate = (
       entry: Readonly<MemoryEntry>,
       plane: RecallAdmissionPlane,
@@ -544,7 +613,8 @@ export class RecallService {
         return;
       }
       const current = drafts.get(entry.object_id);
-      const evidenceStructuralScore = clamp01(structuralScore);
+      const planeScore = clamp01(structuralScore);
+      const evidenceStructuralScore = plane === "source_proximity" ? 0 : planeScore;
       const nextStructuralScore = Math.max(current?.structuralScore ?? 0, evidenceStructuralScore);
       drafts.set(entry.object_id, {
         entry,
@@ -564,6 +634,24 @@ export class RecallService {
         entry.object_id,
         Math.max(structuralScores.get(entry.object_id) ?? 0, evidenceStructuralScore)
       );
+      if (plane === "graph_expansion") {
+        graphExpansionScores.set(
+          entry.object_id,
+          Math.max(graphExpansionScores.get(entry.object_id) ?? 0, evidenceStructuralScore)
+        );
+      }
+      if (plane === "path_expansion") {
+        pathExpansionScores.set(
+          entry.object_id,
+          Math.max(pathExpansionScores.get(entry.object_id) ?? 0, evidenceStructuralScore)
+        );
+      }
+      if (plane === "source_proximity") {
+        sourceProximityScores.set(
+          entry.object_id,
+          Math.max(sourceProximityScores.get(entry.object_id) ?? 0, planeScore)
+        );
+      }
     };
 
     for (const entry of protectedCandidates.sort(compareMemoryEntries)) {
@@ -627,10 +715,22 @@ export class RecallService {
         this.dependencies.memoryRepo.findByEvidenceRefs !== undefined
       ) {
         try {
-          const evidenceMatches = await this.dependencies.evidenceSearchPort.searchByKeyword(
-            workspaceId,
-            queryText,
-            config.semantic_supplement.max_supplement
+          const evidenceMatchById = new Map<string, number>();
+          for (const evidenceQuery of buildEvidenceSearchQueries(queryText, queryProbes)) {
+            const evidenceMatches = await this.dependencies.evidenceSearchPort.searchByKeyword(
+              workspaceId,
+              evidenceQuery,
+              config.semantic_supplement.max_supplement
+            );
+            for (const match of evidenceMatches) {
+              evidenceMatchById.set(
+                match.object_id,
+                Math.max(evidenceMatchById.get(match.object_id) ?? 0, clamp01(match.normalized_rank))
+              );
+            }
+          }
+          const evidenceMatches = [...evidenceMatchById.entries()].map(([object_id, normalized_rank]) =>
+            Object.freeze({ object_id, normalized_rank })
           );
           if (evidenceMatches.length > 0) {
             const evidenceRankById = new Map<string, number>();
@@ -655,10 +755,10 @@ export class RecallService {
               if (bestRank <= 0) {
                 continue;
               }
-              const existingRank = ftsRanks.get(memory.object_id) ?? 0;
-              if (bestRank > existingRank) {
-                ftsRanks.set(memory.object_id, bestRank);
-              }
+              evidenceFtsRanks.set(
+                memory.object_id,
+                Math.max(evidenceFtsRanks.get(memory.object_id) ?? 0, bestRank)
+              );
               addCandidate(memory, "lexical", bestRank, "evidence_fts");
             }
           }
@@ -675,6 +775,12 @@ export class RecallService {
       tierMemories,
       drafts,
       queryProbes,
+      addCandidate
+    });
+    sourceCohortKeys = await this.addSourceProximityCandidates({
+      workspaceId,
+      tierMemories,
+      drafts,
       addCandidate
     });
     await this.addGraphExpansionCandidates({
@@ -729,7 +835,12 @@ export class RecallService {
       total_scanned: tierMemories.length,
       candidates: supplementedCandidates,
       ftsRanks: Object.freeze(Object.fromEntries(ftsRanks.entries())),
+      evidenceFtsRanks: Object.freeze(Object.fromEntries(evidenceFtsRanks.entries())),
+      sourceProximityScores: Object.freeze(Object.fromEntries(sourceProximityScores.entries())),
+      sourceCohortKeys,
       structuralScores: Object.freeze(Object.fromEntries(structuralScores.entries())),
+      graphExpansionScores: Object.freeze(Object.fromEntries(graphExpansionScores.entries())),
+      pathExpansionScores: Object.freeze(Object.fromEntries(pathExpansionScores.entries())),
       degradation_reason: null
     });
   }
@@ -875,6 +986,135 @@ export class RecallService {
         }
       }
     }
+  }
+
+  private async addSourceProximityCandidates(params: Readonly<{
+    readonly workspaceId: string;
+    readonly tierMemories: readonly Readonly<MemoryEntry>[];
+    readonly drafts: ReadonlyMap<string, CoarseCandidateDraft>;
+    readonly addCandidate: CoarseCandidateAdder;
+  }>): Promise<Readonly<Record<string, string>>> {
+    if (params.drafts.size === 0) {
+      return Object.freeze({});
+    }
+
+    const seedDrafts = selectSourceProximitySeedDrafts(params.drafts);
+    if (seedDrafts.length === 0) {
+      return Object.freeze({});
+    }
+
+    const sourceRefsByMemoryId = await this.loadEvidenceSourceRefsByMemoryId(
+      params.workspaceId,
+      params.tierMemories
+    );
+    const sourceCohortKeys = buildEvidenceSourceCohortKeys(params.tierMemories, sourceRefsByMemoryId);
+    const bySource = buildEvidenceSourceChunkIndex(params.tierMemories, sourceRefsByMemoryId);
+    if (bySource.size === 0) {
+      return sourceCohortKeys;
+    }
+
+    const newlyAdmitted = new Set<string>();
+    for (const seed of seedDrafts) {
+      const neighborById = new Map<string, {
+        readonly entry: Readonly<MemoryEntry>;
+        readonly score: number;
+      }>();
+      for (const ref of sourceRefsByMemoryId.get(seed.draft.entry.object_id) ?? seed.draft.entry.evidence_refs) {
+        const parsed = parseEvidenceSourceChunkRef(ref);
+        if (parsed === null) {
+          continue;
+        }
+        const neighbors = bySource.get(parsed.sourceKey) ?? [];
+        for (const neighbor of neighbors) {
+          if (neighbor.entry.object_id === seed.draft.entry.object_id) {
+            continue;
+          }
+          const distance = Math.abs(neighbor.chunkIndex - parsed.chunkIndex);
+          if (distance > DYNAMIC_RECALL_SOURCE_PROXIMITY_RADIUS) {
+            continue;
+          }
+          const score = clamp01(seed.strength * (1 - distance / (DYNAMIC_RECALL_SOURCE_PROXIMITY_RADIUS + 1)));
+          if (score <= 0) {
+            continue;
+          }
+          const current = neighborById.get(neighbor.entry.object_id);
+          if (current === undefined || score > current.score) {
+            neighborById.set(neighbor.entry.object_id, { entry: neighbor.entry, score });
+          }
+        }
+      }
+
+      const candidates = [...neighborById.values()]
+        .sort((left, right) =>
+          right.score === left.score
+            ? compareMemoryEntries(left.entry, right.entry)
+            : right.score - left.score
+        )
+        .slice(0, DYNAMIC_RECALL_SOURCE_PROXIMITY_NEIGHBORS_PER_SEED);
+      for (const candidate of candidates) {
+        const wasDrafted = params.drafts.has(candidate.entry.object_id);
+        params.addCandidate(candidate.entry, "source_proximity", candidate.score, "source_proximity");
+        if (!wasDrafted) {
+          newlyAdmitted.add(candidate.entry.object_id);
+          if (newlyAdmitted.size >= DYNAMIC_RECALL_SOURCE_PROXIMITY_ADMISSION_CAP) {
+            return sourceCohortKeys;
+          }
+        }
+      }
+    }
+    return sourceCohortKeys;
+  }
+
+  private async loadEvidenceSourceRefsByMemoryId(
+    workspaceId: string,
+    entries: readonly Readonly<MemoryEntry>[]
+  ): Promise<ReadonlyMap<string, readonly string[]>> {
+    const sourceRefsByMemoryId = new Map<string, readonly string[]>();
+    for (const entry of entries) {
+      sourceRefsByMemoryId.set(entry.object_id, uniqueStrings(entry.evidence_refs));
+    }
+
+    const evidenceSearchPort = this.dependencies.evidenceSearchPort;
+    if (evidenceSearchPort?.findByIds === undefined) {
+      return sourceRefsByMemoryId;
+    }
+
+    const evidenceObjectIds = uniqueStrings(entries.flatMap((entry) => entry.evidence_refs));
+    if (evidenceObjectIds.length === 0) {
+      return sourceRefsByMemoryId;
+    }
+
+    try {
+      const evidenceCapsules = await evidenceSearchPort.findByIds(workspaceId, evidenceObjectIds);
+      const sourceRefByEvidenceId = new Map<string, string>();
+      for (const evidence of evidenceCapsules) {
+        if (evidence.workspace_id !== workspaceId) {
+          continue;
+        }
+        const artifactRef = evidence.physical_anchor?.artifact_ref?.trim() ?? "";
+        if (artifactRef.length > 0) {
+          sourceRefByEvidenceId.set(evidence.object_id, artifactRef);
+        }
+      }
+      for (const entry of entries) {
+        sourceRefsByMemoryId.set(
+          entry.object_id,
+          uniqueStrings([
+            ...entry.evidence_refs,
+            ...entry.evidence_refs
+              .map((ref) => sourceRefByEvidenceId.get(ref))
+              .filter((ref): ref is string => ref !== undefined)
+          ])
+        );
+      }
+    } catch (error) {
+      this.warn("evidence source-anchor lookup failed", {
+        workspace_id: workspaceId,
+        error: toErrorMessage(error)
+      });
+    }
+
+    return sourceRefsByMemoryId;
   }
 
   private async addGraphExpansionCandidates(params: Readonly<{
@@ -1138,7 +1378,12 @@ export class RecallService {
       queryText: params.queryText,
       policy: params.policy,
       coarseFtsRanks: params.coarseFilter.ftsRanks,
-      coarseStructuralScores: params.coarseFilter.structuralScores
+      coarseEvidenceFtsRanks: params.coarseFilter.evidenceFtsRanks,
+      coarseSourceProximityScores: params.coarseFilter.sourceProximityScores,
+      coarseSourceCohortKeys: params.coarseFilter.sourceCohortKeys,
+      coarseStructuralScores: params.coarseFilter.structuralScores,
+      coarseGraphExpansionScores: params.coarseFilter.graphExpansionScores,
+      coarsePathExpansionScores: params.coarseFilter.pathExpansionScores
     });
     const assessment = this.fineAssess(
       params.coarseFilter.candidates,
@@ -1177,9 +1422,29 @@ export class RecallService {
         ...current.ftsRanks,
         ...next.ftsRanks
       }),
+      evidenceFtsRanks: Object.freeze({
+        ...current.evidenceFtsRanks,
+        ...next.evidenceFtsRanks
+      }),
+      sourceProximityScores: Object.freeze({
+        ...current.sourceProximityScores,
+        ...next.sourceProximityScores
+      }),
+      sourceCohortKeys: Object.freeze({
+        ...current.sourceCohortKeys,
+        ...next.sourceCohortKeys
+      }),
       structuralScores: Object.freeze({
         ...current.structuralScores,
         ...next.structuralScores
+      }),
+      graphExpansionScores: Object.freeze({
+        ...current.graphExpansionScores,
+        ...next.graphExpansionScores
+      }),
+      pathExpansionScores: Object.freeze({
+        ...current.pathExpansionScores,
+        ...next.pathExpansionScores
       }),
       degradation_reason: degradationReason
     });
@@ -1192,7 +1457,12 @@ export class RecallService {
     readonly queryText: string | null;
     readonly policy: Readonly<RecallPolicy>;
     readonly coarseFtsRanks: Readonly<Record<string, number>>;
+    readonly coarseEvidenceFtsRanks: Readonly<Record<string, number>>;
+    readonly coarseSourceProximityScores: Readonly<Record<string, number>>;
+    readonly coarseSourceCohortKeys: Readonly<Record<string, string>>;
     readonly coarseStructuralScores: Readonly<Record<string, number>>;
+    readonly coarseGraphExpansionScores: Readonly<Record<string, number>>;
+    readonly coarsePathExpansionScores: Readonly<Record<string, number>>;
   }): Promise<RecallSupplementaryData> {
     // graph_support is a weighted inbound aggregate across edge types; the
     // storage repo owns the concrete edge_type weight map.
@@ -1281,7 +1551,13 @@ export class RecallService {
 
     return Object.freeze({
       ftsRanks: params.coarseFtsRanks,
+      evidenceFtsRanks: params.coarseEvidenceFtsRanks,
+      sourceProximityScores: params.coarseSourceProximityScores,
+      sourceCohortKeys: params.coarseSourceCohortKeys,
       structuralScores: params.coarseStructuralScores,
+      graphExpansionScores: params.coarseGraphExpansionScores,
+      pathExpansionScores: params.coarsePathExpansionScores,
+      embeddingSimilarityScores: Object.freeze({}),
       graphSupportCounts: Object.freeze(graphSupportCounts),
       budgetPenaltyFactor,
       plasticityFactors,
@@ -1347,18 +1623,15 @@ export class RecallService {
     }
   }
 
-  private async mergeEmbeddingSupplementCandidates(params: {
-    readonly baseCandidates: readonly Readonly<RecallCandidate>[];
+  private async collectEmbeddingSupplement(params: {
+    readonly baseCandidateIds: readonly string[];
     readonly localEligibleCandidates: readonly Readonly<CoarseRecallCandidate>[];
     readonly config: Readonly<RecallPolicy>;
     readonly workspaceId: string;
     readonly runId: string | null;
     readonly queryText: string | null;
-    readonly winnerMemoryIds: ReadonlySet<string>;
-    readonly supplementaryData: RecallSupplementaryData;
     readonly preparedEmbeddingQuery: PreparedEmbeddingQueryHandle | null;
-    readonly tokenEstimator: TokenEstimator;
-  }): Promise<readonly Readonly<RecallCandidate>[]> {
+  }): Promise<EmbeddingRecallSupplementResult> {
     const embeddingRecallService = this.dependencies.embeddingRecallService;
     if (
       embeddingRecallService === undefined ||
@@ -1367,76 +1640,26 @@ export class RecallService {
       params.config.coarse_filter.semantic_supplement.max_supplement <= 0 ||
       params.localEligibleCandidates.length === 0
     ) {
-      return params.baseCandidates;
+      return emptyEmbeddingSupplementResult();
     }
 
     if (
       params.preparedEmbeddingQuery === null ||
       typeof embeddingRecallService.querySupplementIfReady !== "function"
     ) {
-      return params.baseCandidates;
+      return emptyEmbeddingSupplementResult();
     }
 
     const supplement = await embeddingRecallService.querySupplementIfReady({
       workspaceId: params.workspaceId,
       runId: params.runId,
       eligibleMemories: params.localEligibleCandidates.map((candidate) => candidate.entry),
-      baseCandidateIds: params.baseCandidates.map((candidate) => candidate.object_id),
+      baseCandidateIds: params.baseCandidateIds,
       maxSupplement: params.config.coarse_filter.semantic_supplement.max_supplement,
       preparedQuery: params.preparedEmbeddingQuery
     });
 
-    if (
-      supplement.supplementaryEntries.length === 0 &&
-      Object.keys(supplement.similarityHintsByObjectId).length === 0
-    ) {
-      return params.baseCandidates;
-    }
-
-    const localCandidateById = new Map(
-      params.localEligibleCandidates.map((candidate) => [candidate.entry.object_id, candidate] as const)
-    );
-    const boostedBaseCandidates = params.baseCandidates.map((candidate) =>
-      applySimilarityBoost(
-        candidate,
-        isWorkspaceLocalRecallCandidate(candidate)
-          ? supplement.similarityHintsByObjectId[candidate.object_id]
-          : undefined
-      )
-    );
-    const seenLocalIds = new Set(
-      boostedBaseCandidates
-        .filter(isWorkspaceLocalRecallCandidate)
-        .map((candidate) => candidate.object_id)
-    );
-    const additiveCandidates = supplement.supplementaryEntries.flatMap((entry) => {
-      if (seenLocalIds.has(entry.object_id)) {
-        return [];
-      }
-
-      const coarseCandidate = localCandidateById.get(entry.object_id);
-      const similarityHint = supplement.similarityHintsByObjectId[entry.object_id];
-      if (coarseCandidate === undefined || similarityHint === undefined) {
-        return [];
-      }
-
-      seenLocalIds.add(entry.object_id);
-      return [
-        this.buildSupplementaryRecallCandidate(
-          coarseCandidate,
-          params.config,
-          params.winnerMemoryIds,
-          params.supplementaryData,
-          similarityHint.normalized_similarity,
-          params.tokenEstimator
-        )
-      ];
-    });
-
-    return selectCandidatesWithinBudgets(
-      [...boostedBaseCandidates, ...additiveCandidates].sort(compareRecallCandidates),
-      params.config.fine_assessment
-    );
+    return supplement;
   }
 
   private async prepareEmbeddingSupplementQuery(params: {
@@ -1522,19 +1745,39 @@ export class RecallService {
     }
     const config = policy.fine_assessment;
 
-    const scoredCandidates = candidates.map((candidate) => Object.freeze({
-      ...candidate,
-      effectiveScore: this.computeEffectiveScore(
+    const additiveScoredCandidates = candidates.map((candidate) => {
+      const scored = this.computeEffectiveScoreDetails(
         candidate.entry,
         policy,
         winnerMemoryIds,
         supplementaryData,
+        candidate.originPlane ?? "workspace_local",
         candidate.isAdvisory ?? false,
         candidate.scoreMultiplier ?? 1
-      )
+      );
+      return Object.freeze({
+        ...candidate,
+        effectiveScore: scored.score,
+        effectiveFactors: scored.factors
+      });
+    });
+    const fusionByCandidateKey = buildRecallFusionDetails({
+      candidates: additiveScoredCandidates,
+      policy,
+      supplementaryData,
+      nowIso: this.now()
+    });
+    const scoredCandidates = additiveScoredCandidates.map((candidate) => Object.freeze({
+      ...candidate,
+      fusion: fusionByCandidateKey.get(buildRecallCandidateDedupeKey(candidate)) ?? buildEmptyRecallFusionBreakdown(candidate.entry.object_id)
     }));
     const rankedCandidates = scoredCandidates
-      .sort((left, right) => compareEffectiveScores(right, left));
+      .sort(compareFusedRecallCandidates);
+    const deliveryOrderedCandidates = applyCohortAwareBudgetOrdering(
+      rankedCandidates,
+      config.budgets.max_entries,
+      supplementaryData
+    );
 
     type FineAssessmentAccumulator = {
       readonly selected: readonly Readonly<RecallCandidate>[];
@@ -1554,19 +1797,17 @@ export class RecallService {
 
     const appendCandidate = (
       accumulator: FineAssessmentAccumulator,
-      candidate: Readonly<CoarseRecallCandidate>,
-      preBudgetRank: number
+      candidate: Readonly<CoarseRecallCandidate & {
+        readonly effectiveScore: number;
+        readonly effectiveFactors: RecallScoreFactors;
+        readonly fusion: RecallFusionBreakdown;
+      }>,
+      selectionOrder: number
     ): FineAssessmentAccumulator => {
       const entry = candidate.entry;
       const candidateKey = buildRecallCandidateDedupeKey(candidate);
-      const scored = this.computeEffectiveScoreDetails(
-        entry,
-        policy,
-        winnerMemoryIds,
-        supplementaryData,
-        candidate.isAdvisory ?? false,
-        candidate.scoreMultiplier ?? 1
-      );
+      const originPlane = candidate.originPlane ?? "workspace_local";
+      const scoreFactors = candidate.effectiveFactors;
       const createDiagnostic = (
         droppedReason: RecallCandidateDropReason | null,
         finalRank: number | null
@@ -1577,22 +1818,30 @@ export class RecallService {
           candidate.firstAdmissionPlane
         );
         return Object.freeze({
+          candidate_key: candidateKey,
           object_id: entry.object_id,
+          origin_plane: originPlane,
           admission_planes: admissionPlanes,
           plane_first_admitted: candidate.firstAdmissionPlane ?? admissionPlanes[0] ?? "activation",
           plane_winning_admission: attributionPlane,
-          pre_budget_rank: preBudgetRank,
+          pre_budget_rank: candidate.fusion.fused_rank,
+          selection_order: selectionOrder,
+          fused_rank: candidate.fusion.fused_rank,
+          fused_score: candidate.fusion.fused_score,
+          per_stream_rank: candidate.fusion.per_stream_rank,
+          fused_rank_contribution_per_stream: candidate.fusion.fused_rank_contribution_per_stream,
           final_rank: finalRank,
           dropped_reason: droppedReason,
           within_budget: droppedReason === null,
-          relevance_score: scored.score,
+          relevance_score: candidate.effectiveScore,
           lexical_rank: supplementaryData.ftsRanks[entry.object_id] ?? null,
           structural_score: clamp01(candidate.structuralScore ?? supplementaryData.structuralScores[entry.object_id] ?? 0),
-          score_factors: scored.factors,
+          score_factors: scoreFactors,
           source_channels: Object.freeze(uniqueStrings([
             candidate.originPlane ?? "workspace_local",
             candidate.sourceChannel ?? "",
             ...(candidate.sourceChannels ?? []),
+            ...((scoreFactors.embedding_similarity ?? 0) > 0 ? ["semantic_supplement"] : []),
             ...(admissionPlanes).map((plane) => `plane:${plane}`)
           ].filter((channel) => channel.length > 0))),
           path_expansion_sources: Object.freeze([...(candidate.pathExpansionSources ?? [])])
@@ -1647,8 +1896,8 @@ export class RecallService {
 
       const nextCandidate = buildRecallCandidate({
         candidate,
-        relevanceScore: scored.score,
-        scoreFactors: scored.factors,
+        relevanceScore: candidate.effectiveScore,
+        scoreFactors,
         tokenEstimator,
         tokenEstimate,
         budgets: config.budgets,
@@ -1671,7 +1920,7 @@ export class RecallService {
       };
     };
 
-    const finalAccumulator = rankedCandidates.reduce(
+    const finalAccumulator = deliveryOrderedCandidates.reduce(
       (accumulator, candidate, index) => appendCandidate(accumulator, candidate, index + 1),
       initialAccumulator
     );
@@ -1682,29 +1931,12 @@ export class RecallService {
     });
   }
 
-  private computeEffectiveScore(
-    entry: Readonly<MemoryEntry>,
-    policy: Readonly<RecallPolicy>,
-    winnerMemoryIds: ReadonlySet<string>,
-    supplementaryData: RecallSupplementaryData,
-    isAdvisory: boolean,
-    scoreMultiplier = 1
-  ): number {
-    return this.computeEffectiveScoreDetails(
-      entry,
-      policy,
-      winnerMemoryIds,
-      supplementaryData,
-      isAdvisory,
-      scoreMultiplier
-    ).score;
-  }
-
   private computeEffectiveScoreDetails(
     entry: Readonly<MemoryEntry>,
     policy: Readonly<RecallPolicy>,
     winnerMemoryIds: ReadonlySet<string>,
     supplementaryData: RecallSupplementaryData,
+    originPlane: RecallOriginPlane,
     isAdvisory: boolean,
     scoreMultiplier = 1
   ): Readonly<{ readonly score: number; readonly factors: RecallScoreFactors }> {
@@ -1715,19 +1947,27 @@ export class RecallService {
       supplementaryData.graphAndPathColdScore,
       additiveWeights.PATH_PLASTICITY_WEIGHT
     );
+    const isGlobalCandidate = originPlane === "global";
     const activationScore = normalizeActivationScore(entry.activation_score);
-    const ftsFactor = supplementaryData.ftsRanks[entry.object_id] ?? 0;
-    const structuralFactor = supplementaryData.structuralScores[entry.object_id] ?? 0;
+    const ftsFactor = isGlobalCandidate ? 0 : supplementaryData.ftsRanks[entry.object_id] ?? 0;
+    const structuralFactor = isGlobalCandidate ? 0 : supplementaryData.structuralScores[entry.object_id] ?? 0;
     const relevanceFactor =
       ftsFactor > 0 && structuralFactor > 0
         ? clamp01(ftsFactor * 0.24 + structuralFactor * 0.76)
         : Math.max(ftsFactor * 0.62, structuralFactor);
-    const graphSupportFactor = normalizeGraphSupport(supplementaryData.graphSupportCounts[entry.object_id] ?? 0);
+    const graphSupportFactor = isGlobalCandidate
+      ? 0
+      : normalizeGraphSupport(supplementaryData.graphSupportCounts[entry.object_id] ?? 0);
+    const embeddingSimilarityFactor = isGlobalCandidate
+      ? 0
+      : clamp01(supplementaryData.embeddingSimilarityScores[entry.object_id] ?? 0);
     const budgetPenalty = supplementaryData.budgetPenaltyFactor;
     // PathPlasticity is supplementary, like the embedding similarity hint:
     // it boosts the score additively but the final value is still clamp01,
     // so a small plasticity boost cannot override a large lexical-rank gap.
-    const plasticityFactor = clamp01(supplementaryData.plasticityFactors[entry.object_id] ?? 0);
+    const plasticityFactor = isGlobalCandidate
+      ? 0
+      : clamp01(supplementaryData.plasticityFactors[entry.object_id] ?? 0);
     const conflictPenalty =
       config.conflict_awareness &&
       isClaimLikeDimension(entry.dimension) &&
@@ -1763,6 +2003,7 @@ export class RecallService {
       relevanceFactor * additiveWeights.NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT;
     const weightedQueryEvidenceTransfer = relevanceFactor * queryEvidenceTransfer;
     const weightedGraphSupport = graphSupportFactor * weights.graph_support;
+    const weightedEmbeddingSimilarity = embeddingSimilarityFactor * EMBEDDING_SIMILARITY_WEIGHT;
     const weightedPathPlasticity = plasticityFactor * pathPlasticityWeight;
     const weightedConfidence = confidenceFactor * additiveWeights.CONFIDENCE_DIRECT_WEIGHT;
     const weightedBudgetPenalty = budgetPenalty * weights.budget_penalty;
@@ -1774,6 +2015,7 @@ export class RecallService {
         weightedRelevanceDirect +
         weightedQueryEvidenceTransfer +
         weightedGraphSupport +
+        weightedEmbeddingSimilarity +
         weightedPathPlasticity +
         weightedConfidence -
         weightedBudgetPenalty -
@@ -1788,6 +2030,7 @@ export class RecallService {
         activation: activationScore,
         relevance: score,
         graph_support: graphSupportFactor,
+        ...(embeddingSimilarityFactor > 0 ? { embedding_similarity: embeddingSimilarityFactor } : {}),
         path_plasticity: plasticityFactor,
         budget_penalty: budgetPenalty,
         content_relevance: relevanceFactor,
@@ -1849,44 +2092,325 @@ export class RecallService {
       return resolveActivationWeights();
     }
   }
+}
 
-  private buildSupplementaryRecallCandidate(
-    candidate: Readonly<CoarseRecallCandidate>,
-    policy: Readonly<RecallPolicy>,
-    winnerMemoryIds: ReadonlySet<string>,
-    supplementaryData: RecallSupplementaryData,
-    normalizedSimilarity: number,
-    tokenEstimator: TokenEstimator
-  ): Readonly<RecallCandidate> {
-    const scored = this.computeEffectiveScoreDetails(
-      candidate.entry,
-      policy,
-      winnerMemoryIds,
-      supplementaryData,
-      candidate.isAdvisory ?? false,
-      candidate.scoreMultiplier ?? 1
-    );
-    const normalizedEmbeddingSimilarity = clamp01(normalizedSimilarity);
-    const relevanceScore = clamp01(
-      scored.score + normalizedEmbeddingSimilarity * EMBEDDING_SIMILARITY_WEIGHT
-    );
-    const scoreFactors = Object.freeze({
-      ...scored.factors,
-      relevance: relevanceScore,
-      embedding_similarity: normalizedEmbeddingSimilarity
-    });
+type RecallFusionCandidateInput = Readonly<CoarseRecallCandidate & {
+  readonly effectiveScore: number;
+  readonly effectiveFactors: RecallScoreFactors;
+}>;
+type FusedRecallCandidateInput = Readonly<RecallFusionCandidateInput & {
+  readonly fusion: RecallFusionBreakdown;
+}>;
 
-    return buildRecallCandidate({
-      candidate,
-      relevanceScore,
-      scoreFactors,
-      tokenEstimator,
-      budgets: policy.fine_assessment.budgets,
-      index: 0,
-      usedTokensBeforeCandidate: 0,
-      extraSourceChannel: "semantic_supplement"
-    });
+type ResolvedRecallFusionWeights = Readonly<{
+  readonly k: number;
+  readonly weights: Readonly<Record<RecallFusionStream, number>>;
+}>;
+
+function buildRecallFusionDetails(params: Readonly<{
+  readonly candidates: readonly RecallFusionCandidateInput[];
+  readonly policy: Readonly<RecallPolicy>;
+  readonly supplementaryData: RecallSupplementaryData;
+  readonly nowIso: string;
+}>): ReadonlyMap<string, RecallFusionBreakdown> {
+  const resolved = resolveRrfFusionWeights(params.policy);
+  const ranksByStream = new Map<RecallFusionStream, ReadonlyMap<string, number>>();
+
+  for (const stream of RECALL_FUSION_STREAMS) {
+    const scored = params.candidates
+      .map((candidate) => Object.freeze({
+        candidateKey: buildRecallCandidateDedupeKey(candidate),
+        objectId: candidate.entry.object_id,
+        entry: candidate.entry,
+        score: scoreRecallFusionStream(candidate, stream, params.supplementaryData, params.nowIso)
+      }))
+      .filter((candidate) => candidate.score > 0)
+      .sort((left, right) =>
+        right.score === left.score
+          ? compareMemoryEntries(left.entry, right.entry)
+          : right.score - left.score
+      );
+    ranksByStream.set(
+      stream,
+      Object.freeze(new Map(scored.map((candidate, index) => [candidate.candidateKey, index + 1] as const)))
+    );
   }
+
+  const prelim = params.candidates.map((candidate) => {
+    const candidateKey = buildRecallCandidateDedupeKey(candidate);
+    const perStreamRank = buildEmptyFusionStreamRanks();
+    const contributions = buildEmptyFusionStreamContributions();
+    let fusedScore = 0;
+    for (const stream of RECALL_FUSION_STREAMS) {
+      const rank = ranksByStream.get(stream)?.get(candidateKey) ?? null;
+      perStreamRank[stream] = rank;
+      if (rank !== null) {
+        const contribution = resolved.weights[stream] / (resolved.k + rank);
+        contributions[stream] = contribution;
+        fusedScore += contribution;
+      }
+    }
+    return Object.freeze({
+      candidateKey,
+      objectId: candidate.entry.object_id,
+      originPlane: candidate.originPlane ?? "workspace_local",
+      entry: candidate.entry,
+      effectiveScore: candidate.effectiveScore,
+      perStreamRank: Object.freeze(perStreamRank) as RecallFusionStreamRanks,
+      contributions: Object.freeze(contributions) as RecallFusionStreamContributions,
+      fusedScore
+    });
+  });
+
+  const ranked = [...prelim].sort((left, right) => {
+    const fusionDelta = right.fusedScore - left.fusedScore;
+    if (fusionDelta !== 0) {
+      return fusionDelta;
+    }
+    const effectiveDelta = right.effectiveScore - left.effectiveScore;
+    if (effectiveDelta !== 0) {
+      return effectiveDelta;
+    }
+    return compareMemoryEntries(left.entry, right.entry);
+  });
+  const fusedRankByCandidateKey = new Map(ranked.map((candidate, index) => [candidate.candidateKey, index + 1] as const));
+
+  return Object.freeze(
+    new Map(
+      prelim.map((candidate) => [
+        candidate.candidateKey,
+        Object.freeze({
+          candidate_key: candidate.candidateKey,
+          object_id: candidate.objectId,
+          origin_plane: candidate.originPlane,
+          per_stream_rank: candidate.perStreamRank,
+          fused_rank: fusedRankByCandidateKey.get(candidate.candidateKey) ?? Number.MAX_SAFE_INTEGER,
+          fused_score: candidate.fusedScore,
+          fused_rank_contribution_per_stream: candidate.contributions
+        })
+      ] as const)
+    )
+  );
+}
+
+function scoreRecallFusionStream(
+  candidate: RecallFusionCandidateInput,
+  stream: RecallFusionStream,
+  supplementaryData: RecallSupplementaryData,
+  nowIso: string
+): number {
+  const objectId = candidate.entry.object_id;
+  const isGlobalCandidate = candidate.originPlane === "global";
+  switch (stream) {
+    case "lexical_fts":
+      if (isGlobalCandidate) {
+        return 0;
+      }
+      return clamp01(supplementaryData.ftsRanks[objectId] ?? 0);
+    case "evidence_fts":
+      if (isGlobalCandidate) {
+        return 0;
+      }
+      return clamp01(supplementaryData.evidenceFtsRanks[objectId] ?? 0);
+    case "evidence_structural_agreement":
+      if (isGlobalCandidate) {
+        return 0;
+      }
+      return scoreEvidenceStructuralAgreement(candidate, supplementaryData);
+    case "source_proximity":
+      if (isGlobalCandidate) {
+        return 0;
+      }
+      return clamp01(supplementaryData.sourceProximityScores[objectId] ?? 0);
+    case "structural":
+      return clamp01(
+        candidate.structuralScore ?? (isGlobalCandidate ? 0 : supplementaryData.structuralScores[objectId] ?? 0)
+      );
+    case "existing_score":
+      return clamp01(candidate.effectiveScore);
+    case "embedding_similarity":
+      return clamp01(candidate.effectiveFactors.embedding_similarity ?? 0);
+    case "graph_expansion":
+      if (isGlobalCandidate) {
+        return 0;
+      }
+      return clamp01(Math.max(
+        supplementaryData.graphExpansionScores[objectId] ?? 0,
+        normalizeGraphSupport(supplementaryData.graphSupportCounts[objectId] ?? 0)
+      ));
+    case "path_expansion":
+      if (isGlobalCandidate) {
+        return 0;
+      }
+      return clamp01(supplementaryData.pathExpansionScores[objectId] ?? 0);
+    case "temporal_recency":
+      return scoreTemporalRecency(candidate.entry, nowIso);
+    case "workspace_activation":
+      return normalizeActivationScore(candidate.entry.activation_score);
+  }
+}
+
+function scoreEvidenceStructuralAgreement(
+  candidate: RecallFusionCandidateInput,
+  supplementaryData: RecallSupplementaryData
+): number {
+  const objectId = candidate.entry.object_id;
+  const evidenceScore = clamp01(supplementaryData.evidenceFtsRanks[objectId] ?? 0);
+  const structuralScore = clamp01(candidate.structuralScore ?? supplementaryData.structuralScores[objectId] ?? 0);
+  if (evidenceScore <= 0 || structuralScore <= 0) {
+    return 0;
+  }
+  return Math.sqrt(evidenceScore * structuralScore) + Math.min(evidenceScore, structuralScore) * 0.1;
+}
+
+function applyCohortAwareBudgetOrdering(
+  rankedCandidates: readonly FusedRecallCandidateInput[],
+  maxEntries: number,
+  supplementaryData: RecallSupplementaryData
+): readonly FusedRecallCandidateInput[] {
+  if (maxEntries <= COHORT_RESCUE_MIN_ANCHORS || rankedCandidates.length <= maxEntries) {
+    return rankedCandidates;
+  }
+
+  const rescueSlots = Math.min(
+    COHORT_RESCUE_MAX_SLOTS,
+    Math.max(0, Math.floor(maxEntries * COHORT_RESCUE_MAX_SHARE))
+  );
+  if (rescueSlots <= 0) {
+    return rankedCandidates;
+  }
+
+  const anchorCount = Math.max(COHORT_RESCUE_MIN_ANCHORS, maxEntries - rescueSlots);
+  if (anchorCount >= maxEntries) {
+    return rankedCandidates;
+  }
+
+  const head = rankedCandidates.slice(0, anchorCount);
+  const selectedKeys = new Set(head.map((candidate) => buildRecallCandidateDedupeKey(candidate)));
+  const anchorCohortOrder = new Map<string, number>();
+  for (const [index, candidate] of head.entries()) {
+    const cohortKey = supplementaryData.sourceCohortKeys[candidate.entry.object_id];
+    if (cohortKey !== undefined && !anchorCohortOrder.has(cohortKey)) {
+      anchorCohortOrder.set(cohortKey, index);
+    }
+  }
+
+  if (anchorCohortOrder.size === 0) {
+    return rankedCandidates;
+  }
+
+  const maxRescueFusedRank = maxEntries * COHORT_RESCUE_MAX_FUSED_RANK_MULTIPLIER;
+  const rescueCandidates = rankedCandidates
+    .slice(anchorCount)
+    .filter((candidate) => {
+      const candidateKey = buildRecallCandidateDedupeKey(candidate);
+      if (selectedKeys.has(candidateKey) || candidate.fusion.fused_rank > maxRescueFusedRank) {
+        return false;
+      }
+      const cohortKey = supplementaryData.sourceCohortKeys[candidate.entry.object_id];
+      return cohortKey !== undefined &&
+        anchorCohortOrder.has(cohortKey) &&
+        hasCohortRescueSignal(candidate, supplementaryData);
+    })
+    .sort((left, right) => {
+      const leftCohortRank = anchorCohortOrder.get(supplementaryData.sourceCohortKeys[left.entry.object_id] ?? "") ?? Number.MAX_SAFE_INTEGER;
+      const rightCohortRank = anchorCohortOrder.get(supplementaryData.sourceCohortKeys[right.entry.object_id] ?? "") ?? Number.MAX_SAFE_INTEGER;
+      if (leftCohortRank !== rightCohortRank) {
+        return leftCohortRank - rightCohortRank;
+      }
+      return compareFusedRecallCandidates(left, right);
+    })
+    .slice(0, rescueSlots)
+    .map((candidate) => Object.freeze({
+      ...candidate,
+      sourceChannels: uniqueStrings([...(candidate.sourceChannels ?? []), "cohort_rescue"])
+    }) as FusedRecallCandidateInput);
+
+  if (rescueCandidates.length === 0) {
+    return rankedCandidates;
+  }
+
+  const rescuedKeys = new Set(rescueCandidates.map((candidate) => buildRecallCandidateDedupeKey(candidate)));
+  const tail = rankedCandidates
+    .slice(anchorCount)
+    .filter((candidate) => !rescuedKeys.has(buildRecallCandidateDedupeKey(candidate)));
+
+  return Object.freeze([...head, ...rescueCandidates, ...tail]);
+}
+
+function hasCohortRescueSignal(
+  candidate: FusedRecallCandidateInput,
+  supplementaryData: RecallSupplementaryData
+): boolean {
+  const objectId = candidate.entry.object_id;
+  return candidate.fusion.per_stream_rank.source_proximity !== null ||
+    (supplementaryData.sourceProximityScores[objectId] ?? 0) > 0 ||
+    candidate.fusion.per_stream_rank.evidence_fts !== null ||
+    candidate.fusion.per_stream_rank.lexical_fts !== null ||
+    (candidate.structuralScore ?? supplementaryData.structuralScores[objectId] ?? 0) >= 0.5;
+}
+
+function compareFusedRecallCandidates(
+  left: FusedRecallCandidateInput,
+  right: FusedRecallCandidateInput
+): number {
+  const fusionDelta = right.fusion.fused_score - left.fusion.fused_score;
+  if (fusionDelta !== 0) {
+    return fusionDelta;
+  }
+  const effectiveDelta = right.effectiveScore - left.effectiveScore;
+  if (effectiveDelta !== 0) {
+    return effectiveDelta;
+  }
+  return compareMemoryEntries(left.entry, right.entry);
+}
+
+function buildEmptyRecallFusionBreakdown(objectId: string): Readonly<RecallFusionBreakdown> {
+  return Object.freeze({
+    candidate_key: `workspace_local:${objectId}`,
+    object_id: objectId,
+    origin_plane: "workspace_local",
+    per_stream_rank: Object.freeze(buildEmptyFusionStreamRanks()) as RecallFusionStreamRanks,
+    fused_rank: Number.MAX_SAFE_INTEGER,
+    fused_score: 0,
+    fused_rank_contribution_per_stream: Object.freeze(buildEmptyFusionStreamContributions()) as RecallFusionStreamContributions
+  });
+}
+
+function buildEmptyFusionStreamRanks(): Record<RecallFusionStream, number | null> {
+  return Object.fromEntries(RECALL_FUSION_STREAMS.map((stream) => [stream, null])) as Record<RecallFusionStream, number | null>;
+}
+
+function buildEmptyFusionStreamContributions(): Record<RecallFusionStream, number> {
+  return Object.fromEntries(RECALL_FUSION_STREAMS.map((stream) => [stream, 0])) as Record<RecallFusionStream, number>;
+}
+
+function resolveRrfFusionWeights(policy: Readonly<RecallPolicy>): ResolvedRecallFusionWeights {
+  const overrides = policy.scoring_weight_overrides?.fusion_weights;
+  const kOverride = overrides?.RRF_K ?? overrides?.rrf_k;
+  const k = typeof kOverride === "number" && Number.isFinite(kOverride) && kOverride > 0
+    ? Math.trunc(kOverride)
+    : RECALL_RRF_DEFAULT_K;
+  const weights = Object.fromEntries(
+    RECALL_FUSION_STREAMS.map((stream) => [
+      stream,
+      Math.max(0, overrides?.[stream] ?? RECALL_FUSION_DEFAULT_WEIGHTS[stream])
+    ])
+  ) as Record<RecallFusionStream, number>;
+  return Object.freeze({
+    k: Math.max(1, k),
+    weights: Object.freeze(weights)
+  });
+}
+
+function scoreTemporalRecency(entry: Readonly<MemoryEntry>, nowIso: string): number {
+  const createdAtMs = Date.parse(entry.created_at);
+  const nowMs = Date.parse(nowIso);
+  if (!Number.isFinite(createdAtMs) || !Number.isFinite(nowMs)) {
+    return 0;
+  }
+  const ageDays = Math.max(0, (nowMs - createdAtMs) / 86_400_000);
+  return clamp01(1 - ageDays / 30);
 }
 
 function buildRecallDiagnostics(params: Readonly<{
@@ -1923,6 +2447,17 @@ function buildRecallDiagnostics(params: Readonly<{
     delivered_count: params.deliveredCount,
     embedding_provider_status: params.embeddingProviderStatus,
     provider_degradation_reason: params.providerDegradationReason,
+    fusion_breakdown: Object.freeze(
+      params.candidates.map((candidate) => Object.freeze({
+        candidate_key: candidate.candidate_key,
+        object_id: candidate.object_id,
+        origin_plane: candidate.origin_plane,
+        per_stream_rank: candidate.per_stream_rank,
+        fused_rank: candidate.fused_rank,
+        fused_score: candidate.fused_score,
+        fused_rank_contribution_per_stream: candidate.fused_rank_contribution_per_stream
+      }))
+    ),
     candidates: Object.freeze([...params.candidates])
   });
 }
@@ -1931,12 +2466,15 @@ function finalizeRecallCandidateDiagnostics(
   diagnostics: readonly Readonly<RecallCandidateDiagnostic>[],
   deliveredCandidates: readonly Readonly<RecallCandidate>[]
 ): readonly Readonly<RecallCandidateDiagnostic>[] {
-  const deliveredRankByObjectId = new Map(
-    deliveredCandidates.map((candidate, index) => [candidate.object_id, index + 1] as const)
+  const deliveredRankByCandidateKey = new Map<string, number>(
+    deliveredCandidates.map((candidate, index) => [
+      `${candidate.origin_plane ?? "workspace_local"}:${candidate.object_id}`,
+      index + 1
+    ] as const)
   );
   return Object.freeze(
     diagnostics.map((diagnostic) => {
-      const deliveredRank = deliveredRankByObjectId.get(diagnostic.object_id) ?? null;
+      const deliveredRank = deliveredRankByCandidateKey.get(diagnostic.candidate_key) ?? null;
       if (deliveredRank !== null) {
         return Object.freeze({
           ...diagnostic,
@@ -1983,16 +2521,82 @@ function resolveEmbeddingProviderStatus(
   }
 }
 
+function resolveEmbeddingProviderDegradationReason(
+  policy: Readonly<RecallPolicy>,
+  preparedEmbeddingQuery: PreparedEmbeddingQueryHandle | null,
+  degradedReason: string | null
+): string | null {
+  if (degradedReason !== null) {
+    return degradedReason;
+  }
+  if (
+    policy.coarse_filter.semantic_supplement.embedding_enabled !== true ||
+    preparedEmbeddingQuery === null
+  ) {
+    return null;
+  }
+  const snapshot = preparedEmbeddingQuery.getSnapshot();
+  if (snapshot.status === "failed") {
+    return normalizeEmbeddingProviderDegradationReason(snapshot.reason);
+  }
+  if (snapshot.status === "pending") {
+    return "query_embedding_pending";
+  }
+  return null;
+}
+
 function normalizeEmbeddingProviderDegradationReason(reason: string): string | null {
   const normalized = reason.trim().toLowerCase();
   if (
     normalized === "query_embedding_failed" ||
     normalized === "provider_unavailable" ||
-    normalized === "local_vector_lookup_failed"
+    normalized === "local_vector_lookup_failed" ||
+    normalized === "query_embedding_pending"
   ) {
     return normalized;
   }
   return "provider_unavailable";
+}
+
+function emptyEmbeddingSupplementResult(): EmbeddingRecallSupplementResult {
+  return Object.freeze({
+    supplementaryEntries: Object.freeze([]),
+    similarityHintsByObjectId: Object.freeze({})
+  });
+}
+
+function withEmbeddingSimilarityScores(
+  supplementaryData: RecallSupplementaryData,
+  hintsByObjectId: EmbeddingRecallSupplementResult["similarityHintsByObjectId"]
+): RecallSupplementaryData {
+  const entries = Object.entries(hintsByObjectId)
+    .map(([objectId, hint]) => [objectId, clamp01(hint.normalized_similarity)] as const)
+    .filter(([, score]) => score > 0);
+  if (entries.length === 0) {
+    return supplementaryData;
+  }
+
+  return Object.freeze({
+    ...supplementaryData,
+    embeddingSimilarityScores: Object.freeze(Object.fromEntries(entries))
+  });
+}
+
+function buildEvidenceSearchQueries(
+  queryText: string,
+  queryProbes: Readonly<RecallQueryProbes>
+): readonly string[] {
+  const phraseQueries = queryProbes.phrases
+    .filter((phrase) => phrase.length >= 3)
+    .slice(0, 8);
+  const multiKeyQuery = queryProbes.lexical_terms.slice(0, 8).join(" ");
+  const dateQueries = queryProbes.date_terms.slice(0, 6);
+  return uniqueStrings([
+    queryText,
+    ...phraseQueries,
+    ...(multiKeyQuery.length === 0 ? [] : [multiKeyQuery]),
+    ...dateQueries
+  ].map((value) => value.trim()).filter((value) => value.length > 0));
 }
 
 function scoreQueryEvidenceMatch(
@@ -2181,6 +2785,92 @@ function selectExpansionSeedEntries(
   return [...fallbackEntries].sort(compareMemoryEntries).slice(0, DYNAMIC_RECALL_SEED_CAP);
 }
 
+interface EvidenceSourceChunkRef {
+  readonly sourceKey: string;
+  readonly chunkIndex: number;
+}
+
+interface EvidenceSourceChunkEntry {
+  readonly entry: Readonly<MemoryEntry>;
+  readonly chunkIndex: number;
+}
+
+function buildEvidenceSourceChunkIndex(
+  entries: readonly Readonly<MemoryEntry>[],
+  sourceRefsByMemoryId?: ReadonlyMap<string, readonly string[]>
+): ReadonlyMap<string, readonly EvidenceSourceChunkEntry[]> {
+  const bySource = new Map<string, EvidenceSourceChunkEntry[]>();
+  for (const entry of entries) {
+    for (const ref of sourceRefsByMemoryId?.get(entry.object_id) ?? entry.evidence_refs) {
+      const parsed = parseEvidenceSourceChunkRef(ref);
+      if (parsed === null) {
+        continue;
+      }
+      const current = bySource.get(parsed.sourceKey) ?? [];
+      current.push({ entry, chunkIndex: parsed.chunkIndex });
+      bySource.set(parsed.sourceKey, current);
+    }
+  }
+  return new Map(
+    [...bySource.entries()].map(([sourceKey, values]) => [
+      sourceKey,
+      Object.freeze(
+        values.sort((left, right) => {
+          const chunkDelta = left.chunkIndex - right.chunkIndex;
+          return chunkDelta === 0 ? compareMemoryEntries(left.entry, right.entry) : chunkDelta;
+        })
+      )
+    ] as const)
+  );
+}
+
+function buildEvidenceSourceCohortKeys(
+  entries: readonly Readonly<MemoryEntry>[],
+  sourceRefsByMemoryId: ReadonlyMap<string, readonly string[]>
+): Readonly<Record<string, string>> {
+  const keys: Record<string, string> = {};
+  for (const entry of entries) {
+    const cohortKey = selectEvidenceSourceCohortKey(sourceRefsByMemoryId.get(entry.object_id) ?? entry.evidence_refs);
+    if (cohortKey !== null) {
+      keys[entry.object_id] = cohortKey;
+    }
+  }
+  return Object.freeze(keys);
+}
+
+function selectEvidenceSourceCohortKey(refs: readonly string[]): string | null {
+  for (const ref of refs) {
+    const parsed = parseEvidenceSourceChunkRef(ref);
+    if (parsed !== null && parsed.sourceKey.length > 0) {
+      return parsed.sourceKey;
+    }
+  }
+  return null;
+}
+
+function parseEvidenceSourceChunkRef(ref: string): EvidenceSourceChunkRef | null {
+  const normalized = ref.trim().toLowerCase();
+  const sessionTurn = /^(.*?)(?:[-_./#:])s(?:ession)?[-_]?(\d+)(?:[-_./#:])t(?:urn)?[-_]?(\d+)$/.exec(normalized);
+  if (sessionTurn !== null) {
+    const [, prefix, session, turn] = sessionTurn;
+    return {
+      sourceKey: `${prefix ?? ""}|session:${session ?? ""}`,
+      chunkIndex: Number.parseInt(turn ?? "", 10)
+    };
+  }
+
+  const chunk = /^(.*?)(?:[-_./#:])(?:chunk|turn|t)[-_]?(\d+)$/.exec(normalized);
+  if (chunk !== null) {
+    const [, prefix, index] = chunk;
+    return {
+      sourceKey: prefix ?? "",
+      chunkIndex: Number.parseInt(index ?? "", 10)
+    };
+  }
+
+  return null;
+}
+
 function selectPreferredExpansionSeedEntries(
   drafts: ReadonlyMap<string, CoarseCandidateDraft>
 ): readonly Readonly<MemoryEntry>[] {
@@ -2202,6 +2892,45 @@ function selectExpansionSeedDrafts(
     ...preferred,
     ...ranked.filter((draft) => !preferredIds.has(draft.entry.object_id))
   ].slice(0, DYNAMIC_RECALL_SEED_CAP);
+}
+
+function selectSourceProximitySeedDrafts(
+  drafts: ReadonlyMap<string, CoarseCandidateDraft>
+): readonly SourceProximitySeedDraft[] {
+  return rankCoarseCandidateDrafts([...drafts.values()])
+    .map((draft) => Object.freeze({
+      draft,
+      strength: scoreSourceProximitySeedDraft(draft)
+    }))
+    .filter((seed) => seed.strength > 0)
+    .sort((left, right) => {
+      const strengthDelta = right.strength - left.strength;
+      if (strengthDelta !== 0) {
+        return strengthDelta;
+      }
+      return compareMemoryEntries(left.draft.entry, right.draft.entry);
+    })
+    .slice(0, DYNAMIC_RECALL_SOURCE_PROXIMITY_SEED_CAP);
+}
+
+function scoreSourceProximitySeedDraft(draft: Readonly<CoarseCandidateDraft>): number {
+  let strength = 0;
+  if (draft.admissionPlanes.includes("protected_winner")) {
+    strength = 1;
+  }
+  if (draft.admissionPlanes.includes("evidence_anchor")) {
+    strength = Math.max(strength, 0.95);
+  }
+  if (draft.admissionPlanes.includes("object_probe")) {
+    strength = Math.max(strength, 0.9);
+  }
+  if (draft.admissionPlanes.includes("session_surface_cohort")) {
+    strength = Math.max(strength, 0.75);
+  }
+  if (draft.admissionPlanes.includes("lexical")) {
+    strength = Math.max(strength, draft.structuralScore);
+  }
+  return strength >= 0.35 ? clamp01(strength) : 0;
 }
 
 function rankCoarseCandidateDrafts(
@@ -2231,13 +2960,14 @@ function draftPriority(draft: Readonly<CoarseCandidateDraft>): number {
     plane === "evidence_anchor" ||
     plane === "domain_tag_cluster" ||
     plane === "session_surface_cohort" ||
+    plane === "source_proximity" ||
     plane === "graph_expansion" ||
     plane === "path_expansion"
   )) {
     return 3;
   }
   if (draft.admissionPlanes.includes("lexical")) {
-    return 2;
+    return 3;
   }
   return 1;
 }
@@ -2382,6 +3112,7 @@ function uniquePlanes(values: readonly RecallAdmissionPlane[]): readonly RecallA
 
 const RECALL_ADMISSION_ATTRIBUTION_ORDER: readonly RecallAdmissionPlane[] = [
   "lexical",
+  "source_proximity",
   "path_expansion",
   "graph_expansion",
   "evidence_anchor",

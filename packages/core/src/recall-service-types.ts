@@ -1,6 +1,7 @@
 import type {
   BudgetSnapshot,
   EventLogEntry,
+  EvidenceCapsule,
   MemoryDimension as MemoryDimensionType,
   MemoryEntry,
   MemoryGraphEdge,
@@ -65,6 +66,10 @@ export interface RecallServiceEvidenceSearchPort {
     queryText: string,
     limit: number
   ): Promise<readonly KeywordSearchResult[]>;
+  findByIds?(
+    workspaceId: string,
+    evidenceObjectIds: readonly string[]
+  ): Promise<readonly Readonly<EvidenceCapsule>[]>;
 }
 
 export interface RecallServiceSlotRepoPort {
@@ -266,6 +271,7 @@ export type RecallAdmissionPlane =
   | "evidence_anchor"
   | "domain_tag_cluster"
   | "session_surface_cohort"
+  | "source_proximity"
   | "graph_expansion"
   | "path_expansion"
   | "lexical";
@@ -282,12 +288,45 @@ export type RecallEmbeddingProviderStatus =
   | "provider_failed"
   | "provider_not_requested";
 
-export interface RecallCandidateDiagnostic {
+export type RecallFusionStream =
+  | "lexical_fts"
+  | "evidence_fts"
+  | "evidence_structural_agreement"
+  | "source_proximity"
+  | "structural"
+  | "existing_score"
+  | "embedding_similarity"
+  | "graph_expansion"
+  | "path_expansion"
+  | "temporal_recency"
+  | "workspace_activation";
+
+export type RecallFusionStreamRanks = Readonly<Record<RecallFusionStream, number | null>>;
+export type RecallFusionStreamContributions = Readonly<Record<RecallFusionStream, number>>;
+
+export interface RecallFusionBreakdown {
+  readonly candidate_key: string;
   readonly object_id: string;
+  readonly origin_plane: RecallOriginPlane;
+  readonly per_stream_rank: RecallFusionStreamRanks;
+  readonly fused_rank: number;
+  readonly fused_score: number;
+  readonly fused_rank_contribution_per_stream: RecallFusionStreamContributions;
+}
+
+export interface RecallCandidateDiagnostic {
+  readonly candidate_key: string;
+  readonly object_id: string;
+  readonly origin_plane: RecallOriginPlane;
   readonly admission_planes: readonly RecallAdmissionPlane[];
   readonly plane_first_admitted: RecallAdmissionPlane;
   readonly plane_winning_admission: RecallAdmissionPlane;
   readonly pre_budget_rank: number;
+  readonly selection_order: number;
+  readonly fused_rank: number;
+  readonly fused_score: number;
+  readonly per_stream_rank: RecallFusionStreamRanks;
+  readonly fused_rank_contribution_per_stream: RecallFusionStreamContributions;
   readonly final_rank: number | null;
   readonly dropped_reason: RecallCandidateDropReason | null;
   readonly within_budget: boolean;
@@ -331,6 +370,7 @@ export interface RecallDiagnostics {
   readonly delivered_count: number;
   readonly embedding_provider_status: RecallEmbeddingProviderStatus;
   readonly provider_degradation_reason: string | null;
+  readonly fusion_breakdown: readonly Readonly<RecallFusionBreakdown>[];
   readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
 }
 
@@ -348,7 +388,13 @@ export interface RecallResult {
 
 export interface RecallSupplementaryData {
   readonly ftsRanks: Readonly<Record<string, number>>;
+  readonly evidenceFtsRanks: Readonly<Record<string, number>>;
+  readonly sourceProximityScores: Readonly<Record<string, number>>;
+  readonly sourceCohortKeys: Readonly<Record<string, string>>;
   readonly structuralScores: Readonly<Record<string, number>>;
+  readonly graphExpansionScores: Readonly<Record<string, number>>;
+  readonly pathExpansionScores: Readonly<Record<string, number>>;
+  readonly embeddingSimilarityScores: Readonly<Record<string, number>>;
   readonly graphSupportCounts: Readonly<Record<string, number>>;
   readonly budgetPenaltyFactor: number;
   readonly plasticityFactors: Readonly<Record<string, number>>;

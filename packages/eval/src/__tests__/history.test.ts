@@ -49,6 +49,36 @@ function buildPayload(commit: string): KpiPayload {
   };
 }
 
+function passingQualityMetrics(): NonNullable<KpiPayload["kpi"]["quality_metrics"]> {
+  return {
+    schema_version: "bench-quality-metrics.v1",
+    non_monotonic_rate: 0,
+    non_monotonic_count: 0,
+    non_monotonic_denominator: 100,
+    budget_drop_distribution: {
+      max_entries: {
+        count: 0,
+        share: 0,
+        denominator: 100
+      }
+    },
+    high_lexical_demoted_rate: 0,
+    high_lexical_demoted_count: 0,
+    high_lexical_demoted_denominator: 0,
+    candidate_absent_count: 0,
+    candidate_absent_denominator: 100,
+    no_gold_count: 0,
+    no_gold_denominator: 100,
+    evidence_stream_gold_delivery_rate: 0.2,
+    evidence_stream_gold_delivery_count: 20,
+    evidence_stream_gold_delivery_denominator: 100,
+    path_stream_top10_rate: 0.12,
+    path_stream_top10_count: 12,
+    path_stream_top10_denominator: 100,
+    miss_distribution: {}
+  };
+}
+
 describe("history archive", () => {
   let layout: HistoryLayout;
   let root: string;
@@ -477,6 +507,60 @@ describe("history archive", () => {
     expect(latestWarm?.simulate_report).toBe("mixed");
   });
 
+  it("readLatest can filter same-split archives by embedding provider", async () => {
+    const basePayload: KpiPayload = {
+      ...buildPayload("abc1234"),
+      bench_name: "public",
+      split: "longmemeval-s",
+      policy_shape: "chat",
+      simulate_report: "none",
+      sample_size: 500,
+      dataset: {
+        name: "longmemeval_s",
+        size: 500,
+        source: "hf"
+      }
+    };
+    await writeEntry(
+      layout,
+      "public",
+      "2026-05-14T100000Z-abc1234-policy-chat",
+      { ...basePayload, embedding_provider: "none" },
+      "embedding off report",
+      null
+    );
+    await writeEntry(
+      layout,
+      "public",
+      "2026-05-14T110000Z-def5678-policy-chat",
+      {
+        ...basePayload,
+        alaya_commit: "def5678",
+        embedding_provider: "yunwu:text-embedding-3-small"
+      },
+      "embedding on report",
+      null
+    );
+
+    const latestOff = await readLatest(layout, "public", {
+      split: "longmemeval-s",
+      policyShape: "chat",
+      simulateReport: "none",
+      embeddingProvider: "none"
+    });
+    const latestOn = await readLatest(layout, "public", {
+      split: "longmemeval-s",
+      policyShape: "chat",
+      simulateReport: "none",
+      embeddingProvider: "yunwu:text-embedding-3-small"
+    });
+
+    expect(latestOff?.embedding_provider).toBe("none");
+    expect(latestOff?.alaya_commit).toBe("abc1234");
+    expect(latestOn?.embedding_provider).toBe("yunwu:text-embedding-3-small");
+    expect(latestOn?.alaya_commit).toBe("def5678");
+  });
+
   it("accepts public-multiturn archives and optional embedding diagnostic KPIs", async () => {
     const payload: KpiPayload = {
       ...buildPayload("abc1234"),
@@ -527,7 +611,7 @@ describe("history archive", () => {
     expect(latest?.kpi.r_at_5_with_embedding_returned).toBe(0.71);
   });
 
-  it("flags LongMemEval-S disabled fallback reports below the target", () => {
+  it("flags LongMemEval-S 100 embedding-off reports below the release gate", () => {
     const payload: KpiPayload = {
       ...buildPayload("beef123"),
       bench_name: "public",
@@ -542,7 +626,9 @@ describe("history archive", () => {
       },
       kpi: {
         ...buildPayload("beef123").kpi,
-        r_at_5: 0.38
+        r_at_5: 0.68,
+        latency_ms_p95: 110,
+        quality_metrics: passingQualityMetrics()
       }
     };
     const parsedPayload = KpiPayloadSchema.parse(payload);
@@ -552,16 +638,21 @@ describe("history archive", () => {
     });
 
     const report = renderReport(parsedPayload, parsedPayload, diff);
-    expect(report).toContain("Worst verdict: **OK**");
-    expect(report).toContain("LongMemEval-S disabled fallback target");
-    expect(report).toContain("38.00% < target 40.00%");
+    expect(report).toContain("Worst verdict: **FAIL**");
+    expect(report).toContain("Release hard gates");
+    expect(report).toContain(
+      "longmemeval_s_100_embedding_off_r_at_5 LongMemEval-S 100 embedding-off R@5"
+    );
+    expect(report).toContain("68.00% < target 70.00%");
+    expect(report).toContain("candidate_absent: 0 <= target 6");
+    expect(report).toContain("recall p95 embedding-off: 110ms <= target 200ms");
 
     const findings = renderFindings(parsedPayload, diff);
-    expect(findings).toContain("Absolute target gaps");
-    expect(findings).toContain("current 38.00% < target 40.00%");
+    expect(findings).toContain("Release hard gate gaps");
+    expect(findings).toContain("current 68.00% < target 70.00%");
   });
 
-  it("flags LongMemEval-S embedding full reports below the release target", () => {
+  it("flags LongMemEval-S embedding full reports below the release gate", () => {
     const payload: KpiPayload = {
       ...buildPayload("beef123"),
       bench_name: "public",
@@ -576,7 +667,9 @@ describe("history archive", () => {
       },
       kpi: {
         ...buildPayload("beef123").kpi,
-        r_at_5: 0.49
+        r_at_5: 0.49,
+        latency_ms_p95: 900,
+        quality_metrics: passingQualityMetrics()
       }
     };
     const parsedPayload = KpiPayloadSchema.parse(payload);
@@ -586,11 +679,13 @@ describe("history archive", () => {
     });
 
     const report = renderReport(parsedPayload, parsedPayload, diff);
-    expect(report).toContain("LongMemEval-S embedding-500 release target");
-    expect(report).toContain("49.00% < target 50.00%");
+    expect(report).toContain(
+      "longmemeval_s_500_embedding_on_r_at_5 LongMemEval-S 500 embedding-on R@5"
+    );
+    expect(report).toContain("49.00% < target 55.00%");
   });
 
-  it("flags LoCoMo embedding full reports below the release target", () => {
+  it("flags LoCoMo embedding full reports below the release gate", () => {
     const payload: KpiPayload = {
       ...buildPayload("beef123"),
       bench_name: "public-locomo",
@@ -605,7 +700,9 @@ describe("history archive", () => {
       },
       kpi: {
         ...buildPayload("beef123").kpi,
-        r_at_5: 0.39
+        r_at_5: 0.39,
+        latency_ms_p95: 900,
+        quality_metrics: passingQualityMetrics()
       }
     };
     const parsedPayload = KpiPayloadSchema.parse(payload);
@@ -615,7 +712,9 @@ describe("history archive", () => {
     });
 
     const report = renderReport(parsedPayload, parsedPayload, diff);
-    expect(report).toContain("LoCoMo embedding-full release target");
-    expect(report).toContain("39.00% < target 40.00%");
+    expect(report).toContain(
+      "locomo_full_embedding_on_r_at_5 LoCoMo full embedding-on R@5"
+    );
+    expect(report).toContain("39.00% < target 50.00%");
   });
 });

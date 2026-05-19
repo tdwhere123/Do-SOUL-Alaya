@@ -11,7 +11,7 @@
 # Usage:
 #   apps/bench-runner/scripts/run-full-public-bench.sh \
 #     [--variant s|oracle] [--embedding disabled|env] [--shards N] [--limit M] [--policy-shape stress|chat] \
-#     [--simulate-report none|always-used|gold-only|mixed] [--weights '<json>'] [--history-root path]
+#     [--simulate-report none|always-used|gold-only|mixed] [--weights '<json>'] [--data-dir path] [--history-root path]
 #
 # Defaults: variant=s, embedding=disabled+env sequentially,
 # policy_shape=stress+chat sequentially, simulate_report=none, shards=2
@@ -34,8 +34,88 @@ SIMULATE_REPORT="none"
 SHARDS=""
 LIMIT=""
 WEIGHTS=""
+DATA_DIR="${BENCH_DATA_DIR:-apps/bench-runner/data/longmemeval}"
 HISTORY_ROOT="${BENCH_PUBLIC_HISTORY_ROOT:-docs/bench-history}"
 LOG_DIR="${BENCH_LOG_DIR:-/tmp/alaya-bench-logs}"
+BENCH_RUNNER_CLI="apps/bench-runner/dist/cli.js"
+
+runtime_dist_for_src() {
+  local src="$1"
+  local base=""
+  local rel=""
+  local dist=""
+  case "$src" in
+    apps/bench-runner/src/*)
+      base="apps/bench-runner"
+      rel="${src#apps/bench-runner/src/}"
+      dist="$base/dist/$rel"
+      ;;
+    apps/core-daemon/src/*)
+      base="apps/core-daemon"
+      rel="${src#apps/core-daemon/src/}"
+      dist="$base/dist/$rel"
+      ;;
+    packages/*/src/*)
+      base="${src%%/src/*}"
+      rel="${src#"$base"/src/}"
+      dist="$base/dist/$rel"
+      ;;
+    *)
+      dist=""
+      ;;
+  esac
+  case "$dist" in
+    *.tsx) dist="${dist%.tsx}.js" ;;
+    *.ts) dist="${dist%.ts}.js" ;;
+  esac
+  printf '%s' "$dist"
+}
+
+ensure_bench_runner_build_fresh() {
+  if [[ ! -f "$BENCH_RUNNER_CLI" ]]; then
+    echo "bench runner dist is missing: $BENCH_RUNNER_CLI" >&2
+    echo "Run: rtk pnpm build" >&2
+    exit 2
+  fi
+
+  local checked_dirs=(
+    "apps/bench-runner/src"
+    "apps/core-daemon/src"
+    "packages/core/src"
+    "packages/eval/src"
+    "packages/protocol/src"
+    "packages/soul/src"
+    "packages/storage/src"
+  )
+  local stale_src=""
+  local stale_dist=""
+  local dir=""
+  for dir in "${checked_dirs[@]}"; do
+    [[ -d "$dir" ]] || continue
+    while IFS= read -r -d '' src; do
+      local dist
+      dist="$(runtime_dist_for_src "$src")"
+      if [[ -z "$dist" || ! -f "$dist" || "$src" -nt "$dist" ]]; then
+        stale_src="$src"
+        stale_dist="$dist"
+        break
+      fi
+    done < <(find "$dir" -type f \( -name '*.ts' -o -name '*.tsx' \) \
+      ! -path '*/__tests__/*' \
+      ! -name '*.test.ts' \
+      ! -name '*.test.tsx' \
+      -print0)
+    [[ -z "$stale_src" ]] || break
+  done
+
+  if [[ -n "$stale_src" ]]; then
+    echo "bench runner dist appears stale: $stale_src is newer than ${stale_dist:-its dist output}" >&2
+    echo "Run: rtk pnpm build" >&2
+    exit 2
+  fi
+}
+
+ensure_bench_runner_build_fresh
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -44,6 +124,7 @@ while [[ $# -gt 0 ]]; do
     --policy-shape) POLICY_SHAPE="$2"; POLICY_SHAPE_SPECIFIED=1; shift 2;;
     --simulate-report) SIMULATE_REPORT="$2"; shift 2;;
     --weights) WEIGHTS="$2"; shift 2;;
+    --data-dir) DATA_DIR="$2"; shift 2;;
     --shards) SHARDS="$2"; shift 2;;
     --limit) LIMIT="$2"; shift 2;;
     --history-root) HISTORY_ROOT="$2"; shift 2;;
@@ -119,11 +200,37 @@ mkdir -p "$LOG_DIR"
 # full dataset JSON in the driver). Dataset variants are pinned under
 # docs/bench-history/datasets/<variant>.meta.json.
 case "$VARIANT" in
-  oracle) META="docs/bench-history/datasets/longmemeval_oracle.meta.json";;
-  s) META="docs/bench-history/datasets/longmemeval_s.meta.json";;
-  m) META="docs/bench-history/datasets/longmemeval_m.meta.json";;
+  oracle) DATASET_ID="longmemeval_oracle"; META="docs/bench-history/datasets/longmemeval_oracle.meta.json";;
+  s) DATASET_ID="longmemeval_s"; META="docs/bench-history/datasets/longmemeval_s.meta.json";;
+  m) DATASET_ID="longmemeval_m"; META="docs/bench-history/datasets/longmemeval_m.meta.json";;
   *) echo "unknown variant: $VARIANT" >&2; exit 2;;
 esac
+
+printf -v warmup_command 'rtk node apps/bench-runner/bin/alaya-bench-runner.mjs fetch-longmemeval --variant %q --data-dir %q' "$VARIANT" "$DATA_DIR"
+printf -v refresh_command 'rtk node apps/bench-runner/bin/alaya-bench-runner.mjs fetch-longmemeval --variant %q --data-dir %q --force' "$VARIANT" "$DATA_DIR"
+if [[ ! -r "$META" ]]; then
+  echo "pinned dataset meta missing or unreadable: $META" >&2
+  exit 2
+fi
+DATASET_JSON="$DATA_DIR/${DATASET_ID}.json"
+SCRATCH_META="$DATA_DIR/${DATASET_ID}.meta.json"
+if [[ ! -r "$DATASET_JSON" ]]; then
+  echo "dataset cache missing: $DATASET_JSON" >&2
+  echo "warm it first with: $warmup_command" >&2
+  exit 2
+fi
+if [[ ! -r "$SCRATCH_META" ]]; then
+  echo "dataset scratch meta missing: $SCRATCH_META" >&2
+  echo "warm it first with: $warmup_command" >&2
+  exit 2
+fi
+PINNED_SHA=$(node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); if (!p.sha256) throw new Error('missing sha256'); process.stdout.write(p.sha256);" "$META")
+ACTUAL_SHA=$(node -e "const fs=require('fs');const crypto=require('crypto');process.stdout.write(crypto.createHash('sha256').update(fs.readFileSync(process.argv[1])).digest('hex'));" "$DATASET_JSON")
+if [[ "$ACTUAL_SHA" != "$PINNED_SHA" ]]; then
+  echo "dataset checksum mismatch: $DATASET_ID pinned=$PINNED_SHA actual=$ACTUAL_SHA" >&2
+  echo "refresh the cache with: $refresh_command" >&2
+  exit 2
+fi
 TOTAL=$(node -e "const d=JSON.parse(require('fs').readFileSync('$META','utf8'));console.log(d.question_count);")
 EFFECTIVE_TOTAL="${LIMIT:-$TOTAL}"
 
@@ -166,7 +273,7 @@ run_one() {
   # Shard size: ceil(effective_total / shards_for_run)
   local shard_size=$(( (EFFECTIVE_TOTAL + shards_for_run - 1) / shards_for_run ))
 
-  echo "[$(date -u -Iseconds)] driver=$run_tag variant=$VARIANT embedding=$embedding policy_shape=$policy_shape simulate_report=$SIMULATE_REPORT shards=$shards_for_run total=$EFFECTIVE_TOTAL shard_size=$shard_size weights=${WEIGHTS:-none}" | tee "$master_log"
+  echo "[$(date -u -Iseconds)] driver=$run_tag variant=$VARIANT embedding=$embedding policy_shape=$policy_shape simulate_report=$SIMULATE_REPORT shards=$shards_for_run total=$EFFECTIVE_TOTAL shard_size=$shard_size data_dir=$DATA_DIR weights=${WEIGHTS:-none}" | tee "$master_log"
 
   local -a shard_pids=()
   local -a shard_roots=()
@@ -196,6 +303,7 @@ run_one() {
         --policy-shape "$policy_shape" \
         --simulate-report "$SIMULATE_REPORT" \
         "${weights_args[@]}" \
+        --data-dir "$DATA_DIR" \
         --history-root "$shard_root" \
         >"$shard_log" 2>&1
     ) &
@@ -204,10 +312,18 @@ run_one() {
 
   echo "[$(date -u -Iseconds)] waiting for ${#shard_pids[@]} shard(s)..." | tee -a "$master_log"
   local exit_fail=0
-  for pid in "${shard_pids[@]}"; do
-    if ! wait "$pid"; then
-      echo "[$(date -u -Iseconds)] shard pid=$pid exited non-zero" | tee -a "$master_log"
-      exit_fail=1
+  for i in "${!shard_pids[@]}"; do
+    local pid="${shard_pids[$i]}"
+    local shard_root="${shard_roots[$i]}"
+    local shard_status=0
+    wait "$pid" || shard_status=$?
+    if (( shard_status != 0 )); then
+      if (( shard_status == 1 )) && find "$shard_root/public" -name kpi.json -print -quit | grep -q .; then
+        echo "[$(date -u -Iseconds)] shard pid=$pid exited 1 after writing KPI; allowing merge to enforce release hard gates" | tee -a "$master_log"
+      else
+        echo "[$(date -u -Iseconds)] shard pid=$pid exited non-zero status=$shard_status" | tee -a "$master_log"
+        exit_fail=1
+      fi
     fi
   done
 

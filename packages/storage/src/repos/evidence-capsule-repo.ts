@@ -17,6 +17,7 @@ export interface EvidenceCapsuleKeywordHit {
 export interface EvidenceCapsuleRepo {
   create(capsule: EvidenceCapsule): Promise<Readonly<EvidenceCapsule>>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;
+  findByIds(objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findByRunId(runId: string): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findByHealth(health: EvidenceHealthState): Promise<readonly Readonly<EvidenceCapsule>[]>;
@@ -294,6 +295,49 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
       return row === undefined ? null : parseEvidenceCapsuleRow(row);
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to load evidence capsule ${objectId}.`, error);
+    }
+  }
+
+  public async findByIds(objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]> {
+    const uniqueIds = [...new Set(objectIds.map((objectId) => objectId.trim()).filter((objectId) => objectId.length > 0))];
+    if (uniqueIds.length === 0) {
+      return [];
+    }
+
+    try {
+      const rows: EvidenceCapsuleRow[] = [];
+      for (let offset = 0; offset < uniqueIds.length; offset += 500) {
+        const chunk = uniqueIds.slice(offset, offset + 500);
+        const placeholders = chunk.map(() => "?").join(", ");
+        const statement = this.db.connection.prepare(`
+          SELECT
+            object_id,
+            object_kind,
+            schema_version,
+            lifecycle_state,
+            created_at,
+            updated_at,
+            created_by,
+            evidence_kind,
+            semantic_anchor,
+            event_anchor,
+            physical_anchor,
+            evidence_health_state,
+            gist,
+            excerpt,
+            source_hash,
+            run_id,
+            workspace_id,
+            surface_id
+          FROM evidence_capsules
+          WHERE object_id IN (${placeholders})
+          ORDER BY created_at ASC, object_id ASC
+        `);
+        rows.push(...statement.all(...chunk) as EvidenceCapsuleRow[]);
+      }
+      return rows.map((row) => parseEvidenceCapsuleRow(row));
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to load evidence capsules by ids.", error);
     }
   }
 

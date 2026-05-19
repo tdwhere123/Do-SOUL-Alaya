@@ -148,8 +148,11 @@ export async function loadDataset(
   const raw = await readFile(localPath, "utf8");
   const actualSha = createHash("sha256").update(raw, "utf8").digest("hex");
   if (actualSha !== pinnedSha) {
+    const dataDirArg = options.dataDir === undefined
+      ? ""
+      : ` --data-dir ${shellQuote(options.dataDir)}`;
     throw new Error(
-      `dataset checksum mismatch: ${variant}; pinned=${pinnedSha}; actual=${actualSha}; re-fetch with 'alaya-bench-runner fetch-longmemeval --variant ${variant}'`
+      `dataset checksum mismatch: ${variant}; pinned=${pinnedSha}; actual=${actualSha}; refresh with 'alaya-bench-runner fetch-longmemeval --variant ${variant}${dataDirArg} --force'`
     );
   }
 
@@ -171,4 +174,8 @@ function validateDataset(raw: unknown): LongMemEvalQuestion[] {
     }
     return result.data;
   });
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }

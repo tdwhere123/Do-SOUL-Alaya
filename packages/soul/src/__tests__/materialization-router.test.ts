@@ -272,6 +272,7 @@ describe("MaterializationRouter", () => {
     const evidenceInput = deps.evidenceService.create.mock.calls[0][0] as {
       readonly gist: string;
       readonly semantic_anchor: { readonly summary: string };
+      readonly physical_anchor: { readonly artifact_ref: string } | null;
     };
     const memoryInput = deps.memoryService.create.mock.calls[0][0] as {
       readonly content: string;
@@ -282,6 +283,7 @@ describe("MaterializationRouter", () => {
 
     expect(evidenceInput.gist).toBe("Never print secrets.");
     expect(evidenceInput.semantic_anchor.summary).toBe("Never print secrets.");
+    expect(evidenceInput.physical_anchor?.artifact_ref).toBe("msg-1");
     expect(memoryInput.content).toBe("Never print secrets.");
     expect(claimInput.proposition_digest).toBe("Never print secrets.");
   });

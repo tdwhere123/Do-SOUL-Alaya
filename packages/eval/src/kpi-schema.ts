@@ -88,14 +88,15 @@ const PerScenarioRowSchema = z.object({
   id: z.string().min(1),
   version: z.number().int().positive(),
   hit_at_5: z.boolean(),
-  tier: z.enum(["hot", "warm", "cold"])
+  tier: z.enum(["hot", "warm", "cold"]),
+  latency_ms: z.number().nonnegative().optional()
 });
 export type PerScenarioRow = z.infer<typeof PerScenarioRowSchema>;
 
 // @anchor latency-source: "exact" when latencies are union percentiles
-// of a single run; "worst_shard_bound" when merged from N shards as
-// max(shard_p) (upper-bound only; raw latency arrays are not carried
-// across shards in legacy merges). see also: apps/bench-runner/src/cli.ts
+// of a single run or merged from per-scenario latency rows;
+// "worst_shard_bound" when merged from legacy shards as max(shard_p)
+// (upper-bound only). see also: apps/bench-runner/src/cli.ts
 // @merge-longmemeval.
 const LatencySourceSchema = z
   .enum(["exact", "worst_shard_bound"])
@@ -119,6 +120,43 @@ const SeedTruncationSchema = z
   });
 
 const RatioSchema = z.number().min(0).max(1);
+
+const CountDistributionEntrySchema = z
+  .object({
+    count: z.number().int().nonnegative(),
+    share: RatioSchema,
+    denominator: z.number().int().nonnegative()
+  })
+  .strict();
+
+const QualityMetricsSchema = z
+  .object({
+    schema_version: z.literal("bench-quality-metrics.v1"),
+    non_monotonic_rate: RatioSchema,
+    non_monotonic_count: z.number().int().nonnegative(),
+    non_monotonic_denominator: z.number().int().nonnegative(),
+    budget_drop_distribution: z
+      .object({
+        max_entries: CountDistributionEntrySchema.optional()
+      })
+      .catchall(CountDistributionEntrySchema),
+    high_lexical_demoted_rate: RatioSchema,
+    high_lexical_demoted_count: z.number().int().nonnegative(),
+    high_lexical_demoted_denominator: z.number().int().nonnegative(),
+    candidate_absent_count: z.number().int().nonnegative(),
+    candidate_absent_denominator: z.number().int().nonnegative(),
+    no_gold_count: z.number().int().nonnegative(),
+    no_gold_denominator: z.number().int().nonnegative(),
+    evidence_stream_gold_delivery_rate: RatioSchema.default(0),
+    evidence_stream_gold_delivery_count: z.number().int().nonnegative().default(0),
+    evidence_stream_gold_delivery_denominator: z.number().int().nonnegative().default(0),
+    path_stream_top10_rate: RatioSchema.default(0),
+    path_stream_top10_count: z.number().int().nonnegative().default(0),
+    path_stream_top10_denominator: z.number().int().nonnegative().default(0),
+    miss_distribution: z.record(z.number().int().nonnegative())
+  })
+  .strict();
+export type QualityMetrics = z.infer<typeof QualityMetricsSchema>;
 
 const KpiCoreSchema = z.object({
   r_at_1: RatioSchema,
@@ -147,6 +185,7 @@ const KpiCoreSchema = z.object({
   tier_distribution: TierDistributionSchema,
   degradation_reasons: DegradationReasonsSchema,
   seed_truncation: SeedTruncationSchema,
+  quality_metrics: QualityMetricsSchema.optional(),
   per_scenario: z.array(PerScenarioRowSchema)
 });
 export type KpiCore = z.infer<typeof KpiCoreSchema>;
@@ -157,6 +196,17 @@ const DiffVsPreviousSchema = z.object({
   verdict_per_kpi: z.record(Verdict)
 });
 export type DiffVsPrevious = z.infer<typeof DiffVsPreviousSchema>;
+
+export const SeedPolicySchema = z
+  .object({
+    mode: z.string().min(1),
+    label_independent: z.boolean(),
+    object_kind: z.string().min(1).optional(),
+    description: z.string().min(1).optional()
+  })
+  .strict()
+  .readonly();
+export type SeedPolicy = z.infer<typeof SeedPolicySchema>;
 
 /**
  * @anchor harness_mode — bench data-ingestion path; an audit-distinguishable label.
@@ -196,10 +246,13 @@ export const KpiPayloadSchema = z
     policy_shape: BenchPolicyShapeSchema.default("stress"),
     simulate_report: BenchSimulateReportModeSchema.default("none"),
     recall_weight_overrides: RecallWeightOverridesSummarySchema.optional(),
+    seed_policy: SeedPolicySchema.optional(),
     dataset: z.object({
       name: z.string(),
       size: z.number().int().nonnegative(),
-      source: z.string()
+      source: z.string(),
+      checksum_sha256: z.string().min(1).optional(),
+      checksum_source: z.string().min(1).optional()
     }),
     // sample_size = the total questions / scenarios the dataset offers.
     //   LongMemEval Oracle full set = 500 (HuggingFace

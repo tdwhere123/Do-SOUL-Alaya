@@ -40,6 +40,8 @@ describe("bench-runner CLI", () => {
     expect(stdoutBuf).toContain("--policy-shape stress|chat");
     expect(stdoutBuf).toContain("--simulate-report none|always-used|gold-only|mixed");
     expect(stdoutBuf).toContain("--weights '<json>'");
+    expect(stdoutBuf).toContain("--data-dir <path>");
+    expect(stdoutBuf).toContain("--force");
   });
 
   it("rejects invalid embedding modes instead of silently disabling embeddings", async () => {
@@ -85,15 +87,20 @@ describe("bench-runner CLI", () => {
 
       expect(exitCode).toBe(0);
       expect(stdoutBuf).toContain("Controlled replay");
+      expect(stdoutBuf).toContain("Native health: ok");
       const archivePath = stdoutBuf.match(/Archive: (.+controlled-replay\.json)/)?.[1];
       expect(archivePath).toBeDefined();
-      expect(archivePath).toContain(join(historyRoot, "public"));
+      expect(archivePath).toContain(join(historyRoot, "controlled-replay"));
       expect(basename(dirname(archivePath!))).toMatch(canonicalSlugPattern);
       const archive = JSON.parse(await readFile(archivePath!, "utf8")) as {
         readonly scenarios: readonly { readonly label: string }[];
         readonly contribution_suspects: readonly unknown[];
         readonly metrics: {
           readonly cold_warm_delta: unknown;
+        };
+        readonly native_health_gates: {
+          readonly verdict: "ok" | "fail";
+          readonly gates: readonly unknown[];
         };
         readonly evidence: {
           readonly harness_mode: string;
@@ -110,6 +117,8 @@ describe("bench-runner CLI", () => {
       ]);
       expect(archive.contribution_suspects).toHaveLength(3);
       expect(archive.metrics.cold_warm_delta).toBeDefined();
+      expect(archive.native_health_gates.verdict).toBe("ok");
+      expect(archive.native_health_gates.gates).toHaveLength(2);
       expect(archive.evidence.harness_mode).toBe("mcp_propose_review");
       expect(archive.evidence.recall_path).toBe("production_recall_service");
     },

@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveBenchCommitSha7, resolveBenchRunnerVersion } from "../version.js";
-import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import {
   benchArchiveDiscriminator,
   diffKpis,
@@ -23,7 +22,8 @@ import {
   type BenchDaemonHandle,
   type BenchEmbeddingMode,
   type BenchRecallOptions,
-  type BenchReportContextUsageInput
+  type BenchReportContextUsageInput,
+  type SeedObjectKind
 } from "../harness/daemon.js";
 import {
   ALAYA_RECALL_WEIGHT_OVERRIDES_ENV,
@@ -31,6 +31,7 @@ import {
   resolveBenchRecallWeightOverrides
 } from "../harness/recall-weight-overrides.js";
 import {
+  buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic,
   rAt5WithProviderReturned,
   renderDiagnosticsSidecar,
@@ -50,7 +51,19 @@ import {
 import { loadDataset, type FetchResult } from "./fetch.js";
 import type { LongMemEvalVariant } from "./dataset.js";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
+const PINNED_META_ROOT = resolve(
+  __dirname,
+  "../../../../docs/bench-history/datasets"
+);
+const LONGMEMEVAL_SEED_POLICY = Object.freeze({
+  mode: "label_independent_all_fact",
+  label_independent: true,
+  object_kind: "fact",
+  description:
+    "LongMemEval public recall evaluation seeds every haystack turn as a factual memory; has_answer labels are used only for scoring sidecars."
+});
 
 export interface LongMemEvalRunOptions {
   readonly variant: LongMemEvalVariant;
@@ -81,6 +94,27 @@ export interface LongMemEvalRunResult {
   readonly payload: KpiPayload;
 }
 
+export interface LongMemEvalSidecarEntry {
+  readonly sessionId: string;
+  readonly hasAnswer: boolean;
+}
+
+export interface LongMemEvalHitScoringInput {
+  readonly results: readonly {
+    readonly object_id: string;
+    readonly relevance_score: number;
+  }[];
+  readonly sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>;
+  readonly answerSessionIds: ReadonlySet<string>;
+}
+
+export interface LongMemEvalHitScoringResult {
+  readonly hitAt1: boolean;
+  readonly hitAt5: boolean;
+  readonly hitAt10: boolean;
+  readonly firstTier: "hot" | "warm" | "cold";
+}
+
 /**
  * @anchor longmemeval-runner — per-question workspace, seed-then-recall
  *
@@ -93,6 +127,8 @@ export interface LongMemEvalRunResult {
  * Hit rule: a recall result is a hit iff its object_id maps in the sidecar
  * to a seed whose hasAnswer === true AND whose sessionId is in
  * question.answer_session_ids.
+ * `active_constraints[]` is an independent governance channel and is
+ * recorded in diagnostics only; it is never counted toward R@K.
  *
  * see also: apps/bench-runner/src/harness/daemon.ts — proposeMemory chain
  */
@@ -128,11 +164,6 @@ export async function runLongMemEval(
   const simulateReport = opts.simulateReport ?? "none";
   const recallOptions = recallOptionsForPolicyShape(policyShape);
 
-  // Sidecar maps durable memory object_id -> seed metadata. The harness
-  // owns this map (the daemon doesn't need it). hasAnswer flags whether
-  // the seed turn was tagged has_answer=true in the dataset.
-  type SidecarEntry = { sessionId: string; hasAnswer: boolean };
-
   type WorkerResult = {
     questionId: string;
     hitAt1: boolean;
@@ -160,15 +191,12 @@ export async function runLongMemEval(
       recallWeightOverrides
     });
     try {
-      const sidecar = new Map<string, SidecarEntry>();
+      const sidecar = new Map<string, LongMemEvalSidecarEntry>();
       const answerSessionSet = new Set(question.answer_session_ids);
       let seedTurnsTruncated = 0;
       let answerTurnsTruncated = 0;
       let seedCharsClipped = 0;
 
-      // invariant: rotate seeded object_kind across turns so the
-      // archive witnesses both MaterializationRouter branches.
-      // see also: apps/bench-runner/src/harness/seed-rotation.ts
       let seedIndex = 0;
       for (let si = 0; si < question.haystack_sessions.length; si++) {
         const session = question.haystack_sessions[si];
@@ -180,8 +208,11 @@ export async function runLongMemEval(
           if (turn === undefined) continue;
 
           const evidenceRef = `${question.question_id}-s${si}-t${ti}`;
+          const objectKind = resolveLongMemEvalSeedObjectKind({
+            seedIndex
+          });
           const seed = await daemon.proposeMemory(turn.content, evidenceRef, {
-            objectKind: rotatingSeedObjectKind(seedIndex)
+            objectKind
           });
           seedIndex += 1;
           if (seed.truncated) {
@@ -219,6 +250,10 @@ export async function runLongMemEval(
       const recallResult = recallCycle.scoredRecallResult;
       const latencyMs = recallCycle.scoredRecallLatencyMs;
       const results = recallResult.results;
+      const activeConstraintResults = (recallResult.active_constraints ?? []).map((constraint, index) => ({
+        object_id: constraint.object_id,
+        rank: index + 1
+      }));
       const deliveredResults = results.slice(0, 10).map((pointer, index) => ({
         object_id: pointer.object_id,
         rank: index + 1,
@@ -226,36 +261,20 @@ export async function runLongMemEval(
         score_factors: pointer.score_factors ?? null
       }));
 
-      let hitAt1 = false;
-      let hitAt5 = false;
-      let hitAt10 = false;
-      let firstTier: "hot" | "warm" | "cold" = "cold";
-
-      for (let rank = 0; rank < results.length && rank < 10; rank++) {
-        const pointer = results[rank];
-        if (pointer === undefined) continue;
-        if (rank === 0) {
-          firstTier = inferTier(pointer.relevance_score);
-        }
-        const meta = sidecar.get(pointer.object_id);
-        const isHit =
-          meta !== undefined &&
-          meta.hasAnswer &&
-          answerSessionSet.has(meta.sessionId);
-        if (isHit) {
-          if (rank === 0) hitAt1 = true;
-          if (rank < 5) hitAt5 = true;
-          hitAt10 = true;
-        }
-      }
+      const hitScoring = scoreLongMemEvalRecallHits({
+        results,
+        sidecar,
+        answerSessionIds: answerSessionSet
+      });
       const diagnostics = buildQuestionDiagnostic({
         questionId: question.question_id,
         goldMemoryIds,
         answerSessionIds: question.answer_session_ids,
         deliveredResults,
-        hitAt1,
-        hitAt5,
-        hitAt10,
+        activeConstraintResults,
+        hitAt1: hitScoring.hitAt1,
+        hitAt5: hitScoring.hitAt5,
+        hitAt10: hitScoring.hitAt10,
         degradationReason: recallResult.degradation_reason ?? null,
         recallResult,
         embeddingMode: opts.embeddingMode ?? "disabled"
@@ -265,10 +284,10 @@ export async function runLongMemEval(
 
       return {
         questionId: question.question_id,
-        hitAt1,
-        hitAt5,
-        hitAt10,
-        firstTier,
+        hitAt1: hitScoring.hitAt1,
+        hitAt5: hitScoring.hitAt5,
+        hitAt10: hitScoring.hitAt10,
+        firstTier: hitScoring.firstTier,
         latencyMs,
         degradationReason: recallResult.degradation_reason ?? null,
         seedTurnsTruncated,
@@ -347,7 +366,8 @@ export async function runLongMemEval(
       id: res.questionId,
       version: 1,
       hit_at_5: res.hitAt5,
-      tier: res.firstTier
+      tier: res.firstTier,
+      latency_ms: res.latencyMs
     });
   }
 
@@ -361,6 +381,10 @@ export async function runLongMemEval(
   const rAt5EmbeddingReturned = rAt5WithProviderReturned(questionDiagnostics);
 
   const datasetSize = opts.fetchResult?.questionCount ?? questions.length;
+  const pinnedMeta = readLongMemEvalPinnedMeta(
+    opts.variant,
+    opts.pinnedMetaRoot
+  );
 
   // @anchor variant-to-split: exhaustive Record so a new
   // LongMemEvalVariant without a split mapping is a compile error.
@@ -385,10 +409,13 @@ export async function runLongMemEval(
     ...(recallWeightOverrides === undefined
       ? {}
       : { recall_weight_overrides: recallWeightOverrides.summary }),
+    seed_policy: LONGMEMEVAL_SEED_POLICY,
     dataset: {
       name: opts.variant,
       size: datasetSize,
-      source: "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned"
+      source: "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned",
+      checksum_sha256: pinnedMeta.sha256,
+      checksum_source: pinnedMeta.source
     },
     sample_size: datasetSize,
     evaluated_count: window.length,
@@ -425,6 +452,7 @@ export async function runLongMemEval(
         answer_turns_truncated: truncAnswerTotal,
         seed_chars_clipped: truncCharsTotal
       },
+      quality_metrics: buildLongMemEvalQualityMetrics(questionDiagnostics),
       per_scenario: perScenario
     }
   };
@@ -437,7 +465,8 @@ export async function runLongMemEval(
   const previous = await readLatest(layout, "public", {
     split: payload.split,
     policyShape,
-    simulateReport
+    simulateReport,
+    embeddingProvider: payload.embedding_provider
   });
   const diff = diffKpis(payload, previous);
   const slug = entrySlug(
@@ -734,6 +763,56 @@ function recallOptionsForPolicyShape(
     maxResults: 10,
     conflictAwareness: policyShape === "stress"
   };
+}
+
+export function scoreLongMemEvalRecallHits(
+  input: LongMemEvalHitScoringInput
+): LongMemEvalHitScoringResult {
+  let hitAt1 = false;
+  let hitAt5 = false;
+  let hitAt10 = false;
+  let firstTier: "hot" | "warm" | "cold" = "cold";
+
+  for (let rank = 0; rank < input.results.length && rank < 10; rank++) {
+    const pointer = input.results[rank];
+    if (pointer === undefined) continue;
+    if (rank === 0) {
+      firstTier = inferTier(pointer.relevance_score);
+    }
+    const meta = input.sidecar.get(pointer.object_id);
+    const isHit =
+      meta !== undefined &&
+      meta.hasAnswer &&
+      input.answerSessionIds.has(meta.sessionId);
+    if (isHit) {
+      if (rank === 0) hitAt1 = true;
+      if (rank < 5) hitAt5 = true;
+      hitAt10 = true;
+    }
+  }
+
+  return { hitAt1, hitAt5, hitAt10, firstTier };
+}
+
+export function resolveLongMemEvalSeedObjectKind(input: {
+  readonly seedIndex: number;
+}): SeedObjectKind {
+  void input;
+  return "fact";
+}
+
+function readLongMemEvalPinnedMeta(
+  variant: LongMemEvalVariant,
+  root?: string
+): { readonly sha256: string; readonly source: string } {
+  const source = resolve(root ?? PINNED_META_ROOT, `${variant}.meta.json`);
+  const parsed = JSON.parse(readFileSync(source, "utf8")) as {
+    sha256?: unknown;
+  };
+  if (typeof parsed.sha256 !== "string" || parsed.sha256.length === 0) {
+    throw new Error(`LongMemEval pinned meta missing sha256: ${source}`);
+  }
+  return { sha256: parsed.sha256, source };
 }
 
 function inferTier(relevanceScore: number): "hot" | "warm" | "cold" {

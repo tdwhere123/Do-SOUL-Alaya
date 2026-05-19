@@ -1580,6 +1580,9 @@ describe("RecallService", () => {
       })
     ];
     const { dependencies } = createDependencies(memories);
+    dependencies.memoryRepo.searchByKeywordWithinObjectIds = vi.fn(async () => [
+      { object_id: "memory-first-lexical", normalized_rank: 1 }
+    ]);
     const preparedQuery = createPreparedQueryHandle("prepared-query-budget-state");
     const service = new RecallService({
       ...dependencies,
@@ -1774,7 +1777,7 @@ describe("RecallService", () => {
       }
     });
 
-    await service.recall({
+    const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
@@ -1856,7 +1859,7 @@ describe("RecallService", () => {
       }
     });
 
-    await service.recall({
+    const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
@@ -1876,6 +1879,10 @@ describe("RecallService", () => {
       baseCandidateCount: 1,
       fallbackCandidateCount: 1
     });
+    expect(result.diagnostics?.embedding_provider_status).toBe("provider_failed");
+    expect(result.diagnostics?.provider_degradation_reason).toBe(
+      "local_vector_lookup_failed"
+    );
     expect(prepareQueryEmbedding).not.toHaveBeenCalled();
     expect(querySupplementIfReady).not.toHaveBeenCalled();
   });

@@ -2,6 +2,10 @@ import type { KpiPayload } from "./kpi-schema.js";
 import { verdictBadge } from "./diff.js";
 import type { KpiDiffResult } from "./thresholds.js";
 import { deriveSampleSizeLabel, wilsonInterval } from "./wilson-ci.js";
+import {
+  collectReleaseHardGates,
+  combineVerdicts
+} from "./release-gates.js";
 
 export function renderReport(
   current: KpiPayload,
@@ -25,6 +29,12 @@ export function renderReport(
     `- Policy shape: ${current.policy_shape ?? "stress"}`,
     `- Dataset: ${current.dataset.name} (size=${current.dataset.size})`
   ];
+  if (current.seed_policy !== undefined) {
+    headerLines.push(
+      `- Seed policy: ${current.seed_policy.mode}` +
+        (current.seed_policy.label_independent ? " (label-independent)" : " (uses labels)")
+    );
+  }
   if (current.recall_weight_overrides !== undefined) {
     headerLines.push(`- Recall weights: ${formatRecallWeightOverrides(current.recall_weight_overrides)}`);
   }
@@ -103,21 +113,28 @@ export function renderReport(
 
   lines.push("## Verdict");
   lines.push("");
+  const releaseGates = collectReleaseHardGates(current);
+  const releaseGateVerdict = releaseGates.some((gate) => !gate.passed)
+    ? "fail"
+    : "ok";
+  const worstVerdict = combineVerdicts(diff.worst_verdict, releaseGateVerdict);
   lines.push(
-    `Worst verdict: **${diff.worst_verdict.toUpperCase()}** ${verdictBadge(diff.worst_verdict)}`
+    `Worst verdict: **${worstVerdict.toUpperCase()}** ${verdictBadge(worstVerdict)}`
   );
-  const targetGates = collectAbsoluteTargetGates(current);
-  if (targetGates.length > 0) {
+  if (releaseGates.length > 0) {
     lines.push("");
-    lines.push("Absolute target gates:");
-    for (const gate of targetGates) {
+    lines.push("Release hard gates:");
+    for (const gate of releaseGates) {
+      const comparator = gate.direction === "min"
+        ? gate.passed ? ">=" : "<"
+        : gate.passed ? "<=" : ">";
       lines.push(
-        `- ${gate.passed ? "✓" : "⚠"} ${gate.label}: ${formatRatio(gate.current)} ${gate.passed ? ">=" : "<"} target ${formatRatio(gate.target)}`
+        `- ${gate.passed ? "✓" : "✗"} ${formatHardGateName(gate)}: ${formatGateValue(gate.current, gate.unit)} ${comparator} target ${formatGateValue(gate.target, gate.unit)}`
       );
     }
-    if (targetGates.some((gate) => !gate.passed)) {
+    if (releaseGates.some((gate) => !gate.passed)) {
       lines.push(
-        "  - The delta verdict above is only a regression check against the previous archive entry; this artifact is below an absolute stage/release target."
+        "  - The delta verdict is only a regression check against the previous archive entry; failed release hard gates block the archive even when no previous baseline exists."
       );
     }
   }
@@ -231,6 +248,12 @@ export function renderReport(
       `  - ⚠ ${trunc.answer_turns_truncated} answer-bearing turn(s) had their content clipped at the protocol cap; recall cannot retrieve text past the cutoff.`
     );
   }
+  if (current.kpi.quality_metrics !== undefined) {
+    const metrics = current.kpi.quality_metrics;
+    lines.push(
+      `- Quality metrics: non_monotonic=${formatRatio(metrics.non_monotonic_rate)} (${metrics.non_monotonic_count}/${metrics.non_monotonic_denominator}) budget_drop_loss=${metrics.miss_distribution.budget_dropped ?? 0} budget_dropped_entries=${metrics.budget_drop_distribution.max_entries?.count ?? 0} candidate_absent=${metrics.candidate_absent_count} no_gold=${metrics.no_gold_count} evidence_gold=${formatRatio(metrics.evidence_stream_gold_delivery_rate)} path_top10=${formatRatio(metrics.path_stream_top10_rate)}`
+    );
+  }
   lines.push("");
 
   if (current.kpi.per_scenario.length > 0) {
@@ -254,7 +277,7 @@ export function renderFindings(
   diff: KpiDiffResult
 ): string | null {
   const failures = diff.deltas.filter((d) => d.verdict === "fail");
-  const targetFailures = collectAbsoluteTargetGates(current).filter(
+  const targetFailures = collectReleaseHardGates(current).filter(
     (gate) => !gate.passed
   );
   if (
@@ -278,11 +301,12 @@ export function renderFindings(
   }
   lines.push("");
   if (targetFailures.length > 0) {
-    lines.push("## Absolute target gaps");
+    lines.push("## Release hard gate gaps");
     lines.push("");
     for (const failure of targetFailures) {
+      const comparator = failure.direction === "min" ? "<" : ">";
       lines.push(
-        `- **${failure.label}**: current ${formatRatio(failure.current)} < target ${formatRatio(failure.target)}`
+        `- **${formatHardGateName(failure)}**: current ${formatGateValue(failure.current, failure.unit)} ${comparator} target ${formatGateValue(failure.target, failure.unit)}`
       );
     }
     lines.push("");
@@ -314,85 +338,23 @@ export function renderFindings(
   return lines.join("\n");
 }
 
-interface AbsoluteTargetGate {
-  readonly label: string;
-  readonly current: number;
-  readonly target: number;
-  readonly passed: boolean;
-}
-
-function collectAbsoluteTargetGates(
-  current: KpiPayload
-): readonly AbsoluteTargetGate[] {
-  if (
-    current.bench_name === "public-locomo" &&
-    current.split === "locomo10" &&
-    current.embedding_provider !== "none" &&
-    current.evaluated_count >= current.sample_size &&
-    current.sample_size >= 1982
-  ) {
-    return [
-      absoluteTargetGate(
-        "LoCoMo embedding-full release target",
-        current.kpi.r_at_5,
-        0.4
-      )
-    ];
-  }
-
-  if (
-    current.bench_name !== "public" ||
-    current.split !== "longmemeval-s"
-  ) {
-    return [];
-  }
-
-  const embeddingEnabled = current.embedding_provider !== "none";
-
-  if (!embeddingEnabled && current.evaluated_count >= 100) {
-    return [
-      absoluteTargetGate(
-        "LongMemEval-S disabled fallback target",
-        current.kpi.r_at_5,
-        0.4
-      )
-    ];
-  }
-
-  if (embeddingEnabled && current.evaluated_count === 100) {
-    return [
-      absoluteTargetGate(
-        "LongMemEval-S embedding-100 must target",
-        current.kpi.r_at_5,
-        0.6
-      )
-    ];
-  }
-
-  if (embeddingEnabled && current.evaluated_count >= current.sample_size && current.sample_size >= 500) {
-    return [
-      absoluteTargetGate(
-        "LongMemEval-S embedding-500 release target",
-        current.kpi.r_at_5,
-        0.5
-      )
-    ];
-  }
-
-  return [];
-}
-
-function absoluteTargetGate(
-  label: string,
-  current: number,
-  target: number
-): AbsoluteTargetGate {
-  return { label, current, target, passed: current >= target };
-}
-
 function formatRatio(value: number): string {
   if (!Number.isFinite(value)) return "—";
   return `${(value * 100).toFixed(2)}%`;
+}
+
+function formatGateValue(
+  value: number | null,
+  unit: ReturnType<typeof collectReleaseHardGates>[number]["unit"]
+): string {
+  if (value === null || !Number.isFinite(value)) return "missing";
+  if (unit === "ratio") return formatRatio(value);
+  if (unit === "ms") return `${value}ms`;
+  return String(value);
+}
+
+function formatHardGateName(gate: ReturnType<typeof collectReleaseHardGates>[number]): string {
+  return `${gate.id} ${gate.label}`;
 }
 
 function formatMaybeRatio(value: number | undefined): string {

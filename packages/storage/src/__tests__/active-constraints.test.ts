@@ -34,21 +34,25 @@ afterEach(() => {
 });
 
 describe("findActiveConstraints", () => {
-  it("returns constraint memories and governance-backed anchor memories with cap metadata", async () => {
+  it("returns governance-backed constraints and excludes draft dimension-only memories", async () => {
     const { memoryRepo, claimFormRepo, pathRelationRepo } = await createRepos();
-    const constraints = Array.from({ length: 5 }, (_, index) =>
+    const dimensionOnlyConstraints = Array.from({ length: 2 }, (_, index) =>
       createMemoryEntry({
         object_id: constraintId(index + 1),
         dimension: MemoryDimension.CONSTRAINT,
-        content: `Hard rule ${index + 1}`,
-        storage_tier: index === 4 ? StorageTier.COLD : index === 3 ? StorageTier.WARM : StorageTier.HOT,
+        content: `Draft-only hard rule ${index + 1}`,
         created_at: `2026-05-18T00:0${index}:00.000Z`,
         updated_at: `2026-05-18T00:0${index}:00.000Z`
       })
     );
-    for (const memory of constraints) {
+    for (const memory of dimensionOnlyConstraints) {
       await memoryRepo.create(memory);
     }
+    await claimFormRepo.create(createClaimForm({
+      object_id: "20000000-0000-4000-8000-000000000010",
+      source_object_refs: [constraintId(1)],
+      claim_status: ClaimLifecycleState.DRAFT
+    }));
 
     await memoryRepo.create(createMemoryEntry({
       object_id: CLAIM_BACKED_MEMORY_ID,
@@ -61,6 +65,18 @@ describe("findActiveConstraints", () => {
       object_id: "20000000-0000-4000-8000-000000000001",
       source_object_refs: [CLAIM_BACKED_MEMORY_ID],
       claim_status: ClaimLifecycleState.ACTIVE
+    }));
+    await memoryRepo.create(createMemoryEntry({
+      object_id: CLAIM_BACKED_CONSTRAINT_ID,
+      dimension: MemoryDimension.CONSTRAINT,
+      content: "Constraint backed by a winning claim.",
+      created_at: "2026-05-18T00:09:00.000Z",
+      updated_at: "2026-05-18T00:09:00.000Z"
+    }));
+    await claimFormRepo.create(createClaimForm({
+      object_id: "20000000-0000-4000-8000-000000000003",
+      source_object_refs: [CLAIM_BACKED_CONSTRAINT_ID],
+      claim_status: ClaimLifecycleState.WINNER
     }));
 
     await memoryRepo.create(createMemoryEntry({
@@ -130,20 +146,25 @@ describe("findActiveConstraints", () => {
       pathRelationRepo
     });
 
-    expect(result.total_count).toBe(7);
+    expect(result.total_count).toBe(3);
     expect(result.constraints.map((record) => record.memory.object_id)).toEqual([
+      CLAIM_BACKED_CONSTRAINT_ID,
       CLAIM_BACKED_MEMORY_ID,
-      PATH_BACKED_MEMORY_ID,
-      constraintId(1),
-      constraintId(2),
-      constraintId(3),
-      constraintId(4),
-      constraintId(5)
+      PATH_BACKED_MEMORY_ID
+    ]);
+    expect(result.constraints.map((record) => record.source_channels)).toEqual([
+      ["claim_status"],
+      ["claim_status"],
+      ["path_relation"]
     ]);
     expect(result.constraints.find((record) => record.memory.object_id === CLAIM_BACKED_MEMORY_ID)?.claim_status)
       .toBe(ClaimLifecycleState.ACTIVE);
+    expect(result.constraints.find((record) => record.memory.object_id === CLAIM_BACKED_CONSTRAINT_ID)?.claim_status)
+      .toBe(ClaimLifecycleState.WINNER);
     expect(result.constraints.find((record) => record.memory.object_id === PATH_BACKED_MEMORY_ID)?.governance_class)
       .toBe(PathGovernanceClass.STRICTLY_GOVERNED);
+    expect(result.constraints.map((record) => record.memory.object_id)).not.toContain(constraintId(1));
+    expect(result.constraints.map((record) => record.memory.object_id)).not.toContain(constraintId(2));
 
     const capped = await findActiveConstraints({
       workspaceId: "workspace-1",
@@ -152,12 +173,13 @@ describe("findActiveConstraints", () => {
       pathRelationRepo,
       cap: 1
     });
-    expect(capped.total_count).toBe(7);
+    expect(capped.total_count).toBe(3);
     expect(capped.constraints).toHaveLength(1);
   });
 });
 
 const CLAIM_BACKED_MEMORY_ID = "10000000-0000-4000-8000-000000000010";
+const CLAIM_BACKED_CONSTRAINT_ID = "10000000-0000-4000-8000-000000000015";
 const PATH_BACKED_MEMORY_ID = "10000000-0000-4000-8000-000000000011";
 const ARCHIVED_CLAIM_BACKED_MEMORY_ID = "10000000-0000-4000-8000-000000000012";
 const TOMBSTONED_PATH_BACKED_MEMORY_ID = "10000000-0000-4000-8000-000000000013";

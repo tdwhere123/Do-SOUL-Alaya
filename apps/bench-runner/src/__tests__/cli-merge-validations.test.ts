@@ -26,6 +26,11 @@ function makeShardKpi(overrides: Partial<KpiPayload> = {}): KpiPayload {
     chat_provider: "none",
     policy_shape: "stress",
     simulate_report: "none",
+    seed_policy: {
+      mode: "label_independent_all_fact",
+      label_independent: true,
+      object_kind: "fact"
+    },
     dataset: {
       name: "longmemeval_s",
       size: 500,
@@ -54,11 +59,56 @@ function makeShardKpi(overrides: Partial<KpiPayload> = {}): KpiPayload {
         answer_turns_truncated: 0,
         seed_chars_clipped: 0
       },
+      quality_metrics: makeQualityMetrics(),
       per_scenario: [
         { id: "q-shard-default-1", version: 1, hit_at_5: true, tier: "warm" }
       ]
     },
     ...overrides
+  };
+}
+
+function makeQualityMetrics(
+  input: {
+    readonly denominator?: number;
+    readonly budgetDropped?: number;
+    readonly candidateAbsent?: number;
+    readonly nonMonotonic?: number;
+  } = {}
+): NonNullable<KpiPayload["kpi"]["quality_metrics"]> {
+  const denominator = input.denominator ?? 5;
+  const budgetDropped = input.budgetDropped ?? 0;
+  const candidateAbsent = input.candidateAbsent ?? 0;
+  const nonMonotonic = input.nonMonotonic ?? 0;
+  return {
+    schema_version: "bench-quality-metrics.v1",
+    non_monotonic_rate: denominator === 0 ? 0 : nonMonotonic / denominator,
+    non_monotonic_count: nonMonotonic,
+    non_monotonic_denominator: denominator,
+    budget_drop_distribution: {
+      max_entries: {
+        count: budgetDropped,
+        share: denominator === 0 ? 0 : budgetDropped / denominator,
+        denominator
+      }
+    },
+    high_lexical_demoted_rate: 0,
+    high_lexical_demoted_count: 0,
+    high_lexical_demoted_denominator: 0,
+    candidate_absent_count: candidateAbsent,
+    candidate_absent_denominator: denominator,
+    no_gold_count: 0,
+    no_gold_denominator: denominator,
+    evidence_stream_gold_delivery_rate: 0.2,
+    evidence_stream_gold_delivery_count: Math.ceil(denominator * 0.2),
+    evidence_stream_gold_delivery_denominator: denominator,
+    path_stream_top10_rate: 0.2,
+    path_stream_top10_count: Math.ceil(denominator * 0.2),
+    path_stream_top10_denominator: denominator,
+    miss_distribution: {
+      budget_dropped: budgetDropped,
+      candidate_absent: candidateAbsent
+    }
   };
 }
 
@@ -194,6 +244,79 @@ describe("merge-longmemeval validations", () => {
   afterEach(async () => {
     process.stderr.write = originalWrite;
     await rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("uses exact merged latency when shard rows carry per-question latency", async () => {
+    const shardA = path.join(tmpRoot, "shard-a");
+    const shardB = path.join(tmpRoot, "shard-b");
+    const rowsA = Array.from({ length: 10 }, (_, index) => ({
+      id: `lat-a-${index}`,
+      version: 1,
+      hit_at_5: true,
+      tier: "warm" as const,
+      latency_ms: index + 1
+    }));
+    const rowsB = Array.from({ length: 10 }, (_, index) => ({
+      id: `lat-b-${index}`,
+      version: 1,
+      hit_at_5: true,
+      tier: "warm" as const,
+      latency_ms: index + 11
+    }));
+    await writeShardRoot(
+      shardA,
+      makeShardKpi({
+        evaluated_count: 10,
+        kpi: {
+          ...makeShardKpi().kpi,
+          latency_ms_p50: 500,
+          latency_ms_p95: 1000,
+          tier_distribution: { hot: 0, warm: 10, cold: 0 },
+          quality_metrics: makeQualityMetrics({ denominator: 10 }),
+          per_scenario: rowsA
+        }
+      })
+    );
+    await writeShardRoot(
+      shardB,
+      makeShardKpi({
+        evaluated_count: 10,
+        kpi: {
+          ...makeShardKpi().kpi,
+          latency_ms_p50: 500,
+          latency_ms_p95: 1000,
+          tier_distribution: { hot: 0, warm: 10, cold: 0 },
+          quality_metrics: makeQualityMetrics({ denominator: 10 }),
+          per_scenario: rowsB
+        }
+      })
+    );
+
+    const historyRoot = path.join(tmpRoot, "history-latency");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shardA,
+      shardB
+    ]);
+
+    expect(exitCode).toBe(0);
+    const pointer = JSON.parse(
+      await readFile(path.join(historyRoot, "public", "latest-baseline.json"), "utf8")
+    ) as { slug: string };
+    const merged = JSON.parse(
+      await readFile(
+        path.join(historyRoot, "public", pointer.slug, "kpi.json"),
+        "utf8"
+      )
+    ) as KpiPayload;
+    expect(merged.kpi.latency_source).toBe("exact");
+    expect(merged.kpi.latency_ms_p50).toBe(10);
+    expect(merged.kpi.latency_ms_p95).toBe(19);
   });
 
   it("refuses shards whose split differs", async () => {
@@ -536,6 +659,42 @@ describe("merge-longmemeval validations", () => {
     );
   });
 
+  it("refuses shards whose seed policy differs", async () => {
+    const shardA = path.join(tmpRoot, "shard-a");
+    const shardB = path.join(tmpRoot, "shard-b");
+    await writeShardRoot(shardA, makeShardKpi({ alaya_commit: "abc1234" }));
+    await writeShardRoot(
+      shardB,
+      makeShardKpi({
+        alaya_commit: "abc1234",
+        seed_policy: {
+          mode: "rotating_object_kind",
+          label_independent: true
+        },
+        kpi: {
+          ...makeShardKpi().kpi,
+          per_scenario: [
+            { id: "q-shard-b-1", version: 1, hit_at_5: true, tier: "warm" }
+          ]
+        }
+      })
+    );
+    const historyRoot = path.join(tmpRoot, "history");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shardA,
+      shardB
+    ]);
+
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toMatch(/seed_policy differs from shard\[0\]/);
+  });
+
   it("refuses shards whose recall weight overrides differ", async () => {
     const shardA = path.join(tmpRoot, "shard-a");
     const shardB = path.join(tmpRoot, "shard-b");
@@ -545,7 +704,7 @@ describe("merge-longmemeval validations", () => {
         alaya_commit: "abc1234",
         recall_weight_overrides: {
           source: "cli",
-          fusion_weights: { future_signal: 0.5 }
+          fusion_weights: { lexical_fts: 0.5 }
         }
       })
     );
@@ -555,7 +714,7 @@ describe("merge-longmemeval validations", () => {
         alaya_commit: "abc1234",
         recall_weight_overrides: {
           source: "cli",
-          fusion_weights: { future_signal: 0.6 }
+          fusion_weights: { lexical_fts: 0.6 }
         },
         kpi: {
           ...makeShardKpi().kpi,
@@ -668,8 +827,161 @@ describe("merge-longmemeval validations", () => {
       "utf8"
     );
     expect(merged.policy_shape).toBe("chat");
+    expect(merged.seed_policy?.mode).toBe("label_independent_all_fact");
+    expect(report).toContain("Seed policy: label_independent_all_fact");
     expect(report).toContain("| r_at_5 | 0.4000 | 0.8000 | +0.4000 |");
     expect(report).not.toContain("| r_at_5 | 1.0000 | 0.8000 |");
+  });
+
+  it("returns non-zero when release hard gates fail without a previous baseline", async () => {
+    const shardA = path.join(tmpRoot, "shard-gate-a");
+    const shardB = path.join(tmpRoot, "shard-gate-b");
+    const rowsA = Array.from({ length: 50 }, (_, index) => ({
+      id: `gate-a-${index}`,
+      version: 1,
+      hit_at_5: index < 36,
+      tier: "warm" as const
+    }));
+    const rowsB = Array.from({ length: 50 }, (_, index) => ({
+      id: `gate-b-${index}`,
+      version: 1,
+      hit_at_5: index < 35,
+      tier: "warm" as const
+    }));
+    await writeShardRoot(
+      shardA,
+      makeShardKpi({
+        evaluated_count: 50,
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 36 / 50,
+          quality_metrics: makeQualityMetrics({
+            denominator: 50,
+            budgetDropped: 4
+          }),
+          per_scenario: rowsA
+        }
+      })
+    );
+    await writeShardRoot(
+      shardB,
+      makeShardKpi({
+        evaluated_count: 50,
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 35 / 50,
+          quality_metrics: makeQualityMetrics({
+            denominator: 50,
+            budgetDropped: 5
+          }),
+          per_scenario: rowsB
+        }
+      })
+    );
+    const historyRoot = path.join(tmpRoot, "history-hard-gates");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shardA,
+      shardB
+    ]);
+    expect(exitCode).toBe(1);
+
+    const pointer = JSON.parse(
+      await readFile(path.join(historyRoot, "public", "latest-baseline.json"), "utf8")
+    ) as { slug: string };
+    const report = await readFile(
+      path.join(historyRoot, "public", pointer.slug, "report.md"),
+      "utf8"
+    );
+    const findings = await readFile(
+      path.join(historyRoot, "public", pointer.slug, "findings.md"),
+      "utf8"
+    );
+    expect(report).toContain("Worst verdict: **FAIL**");
+    expect(report).toContain(
+      "longmemeval_s_budget_dropped_max_entries budget_dropped_entries: 9 > target 8"
+    );
+    expect(findings).toContain("Release hard gate gaps");
+  });
+
+  it("fails the hard gate when max_entries budget drops exceed the target even without direct hit loss", async () => {
+    const shardA = path.join(tmpRoot, "shard-gate-drops-a");
+    const shardB = path.join(tmpRoot, "shard-gate-drops-b");
+    const rowsA = Array.from({ length: 50 }, (_, index) => ({
+      id: `q-gate-drops-a-${index + 1}`,
+      version: 1,
+      hit_at_5: index < 40,
+      tier: "hot" as const
+    }));
+    const rowsB = Array.from({ length: 50 }, (_, index) => ({
+      id: `q-gate-drops-b-${index + 1}`,
+      version: 1,
+      hit_at_5: index < 40,
+      tier: "hot" as const
+    }));
+    const metricsA = makeQualityMetrics({
+      denominator: 50,
+      budgetDropped: 5
+    });
+    const metricsB = makeQualityMetrics({
+      denominator: 50,
+      budgetDropped: 4
+    });
+    metricsA.miss_distribution.budget_dropped = 0;
+    metricsB.miss_distribution.budget_dropped = 0;
+    await writeShardRoot(
+      shardA,
+      makeShardKpi({
+        evaluated_count: 50,
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 40 / 50,
+          quality_metrics: metricsA,
+          per_scenario: rowsA
+        }
+      })
+    );
+    await writeShardRoot(
+      shardB,
+      makeShardKpi({
+        evaluated_count: 50,
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 40 / 50,
+          quality_metrics: metricsB,
+          per_scenario: rowsB
+        }
+      })
+    );
+
+    const historyRoot = path.join(tmpRoot, "history-budget-entry-gate");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shardA,
+      shardB
+    ]);
+
+    expect(exitCode).toBe(1);
+    const pointer = JSON.parse(
+      await readFile(path.join(historyRoot, "public", "latest-baseline.json"), "utf8")
+    ) as { slug: string };
+    const report = await readFile(
+      path.join(historyRoot, "public", pointer.slug, "report.md"),
+      "utf8"
+    );
+    expect(report).toContain(
+      "longmemeval_s_budget_dropped_max_entries budget_dropped_entries: 9 > target 8"
+    );
   });
 
   it("diffs merged shards against the matching simulate_report baseline", async () => {

@@ -5,6 +5,7 @@ import {
   RetentionPolicy,
   ScopeClass,
   StorageTier,
+  type EvidenceCapsule,
   type EventLogEntry,
   type MemoryEntry,
   type PathRelation,
@@ -109,6 +110,137 @@ describe("recall regression suite", () => {
     ]);
   });
 
+  it("uses source proximity as an independent fusion stream for neighboring evidence chunks", async () => {
+    const seed = memory({
+      object_id: "seed",
+      content: "needle source chunk",
+      evidence_refs: ["source-a-s1-t3"]
+    });
+    const neighbor = memory({
+      object_id: "neighbor",
+      content: "nearby answer payload",
+      evidence_refs: ["source-a-s1-t4"],
+      activation_score: 0.1
+    });
+    const { dependencies } = deps([seed, neighbor], {
+      searchByKeyword: async () => [{ object_id: "seed", normalized_rank: 1 }]
+    });
+
+    const result = await new RecallService(dependencies).recall({
+      taskSurface: task("needle source chunk"),
+      workspaceId: WS,
+      strategy: "analyze"
+    });
+
+    const diag = result.diagnostics?.candidates.find((item) => item.object_id === "neighbor");
+    expect(diag?.admission_planes).toContain("source_proximity");
+    expect(diag?.source_channels).toContain("source_proximity");
+    expect(diag?.per_stream_rank.source_proximity).not.toBeNull();
+    expect(diag?.fused_rank_contribution_per_stream.source_proximity).toBeGreaterThan(0);
+  });
+
+  it("uses evidence capsule artifact refs for source proximity when memory refs are capsule ids", async () => {
+    const seed = memory({
+      object_id: "seed",
+      content: "needle source chunk",
+      evidence_refs: ["evidence-seed"]
+    });
+    const neighbor = memory({
+      object_id: "neighbor",
+      content: "nearby answer payload",
+      evidence_refs: ["evidence-neighbor"],
+      activation_score: 0.1
+    });
+    const evidenceById = new Map([
+      ["evidence-seed", evidenceCapsule("evidence-seed", "source-a-s1-t3")],
+      ["evidence-neighbor", evidenceCapsule("evidence-neighbor", "source-a-s1-t4")]
+    ]);
+    const findByIds = vi.fn(async (_workspaceId: string, ids: readonly string[]) =>
+      ids.flatMap((id) => {
+        const evidence = evidenceById.get(id);
+        return evidence === undefined ? [] : [evidence];
+      })
+    );
+    const { dependencies } = deps([seed, neighbor], {
+      searchByKeyword: async () => [{ object_id: "seed", normalized_rank: 1 }],
+      evidenceSearchPort: {
+        searchByKeyword: vi.fn(async () => []),
+        findByIds
+      }
+    });
+
+    const result = await new RecallService(dependencies).recall({
+      taskSurface: task("needle source chunk"),
+      workspaceId: WS,
+      strategy: "analyze"
+    });
+
+    expect(findByIds).toHaveBeenCalled();
+    const diag = result.diagnostics?.candidates.find((item) => item.object_id === "neighbor");
+    expect(diag?.admission_planes).toContain("source_proximity");
+    expect(diag?.per_stream_rank.source_proximity).not.toBeNull();
+    expect(diag?.fused_rank_contribution_per_stream.source_proximity).toBeGreaterThan(0);
+  });
+
+  it("reserves bounded delivery budget for same-source evidence siblings without increasing max_entries", async () => {
+    const anchor = memory({
+      object_id: "anchor",
+      content: "needle answer primary",
+      evidence_refs: ["source-a-s1-t3"],
+      activation_score: 0.95
+    });
+    const sibling = memory({
+      object_id: "filler-12-sibling",
+      content: "same-source sibling detail",
+      evidence_refs: ["source-a-s1-t4"],
+      activation_score: 0.01
+    });
+    const outsideRadius = memory({
+      object_id: "outside-radius",
+      content: "same-source distant detail",
+      evidence_refs: ["source-a-s1-t30"],
+      activation_score: 0.01
+    });
+    const fillers = Array.from({ length: 30 }, (_, index) =>
+      memory({
+        object_id: `filler-${index}`,
+        content: `needle distractor ${index}`,
+        evidence_refs: [`source-z-s${index}-t1`],
+        activation_score: 0.9 - index * 0.01
+      })
+    );
+    const { dependencies } = deps([anchor, ...fillers, sibling, outsideRadius], {
+      searchByKeyword: async () => [
+        { object_id: "anchor", normalized_rank: 1 },
+        ...fillers.map((entry, index) => ({
+          object_id: entry.object_id,
+          normalized_rank: 0.99 - index * 0.01
+        }))
+      ]
+    });
+    const service = new RecallService(dependencies);
+    const policy = withBudgets(service.buildDefaultPolicy("analyze", task().runtime_id), {
+      max_entries: 10,
+      max_total_tokens: 1000
+    });
+
+    const result = await service.recall({
+      taskSurface: task("needle answer primary"),
+      workspaceId: WS,
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    expect(result.candidates).toHaveLength(10);
+    expect(result.candidates.map((candidate) => candidate.object_id)).toContain("filler-12-sibling");
+    const siblingDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "filler-12-sibling");
+    expect(siblingDiagnostic?.final_rank).not.toBeNull();
+    expect(siblingDiagnostic?.admission_planes).toEqual(["source_proximity"]);
+    expect(siblingDiagnostic?.source_channels).toContain("cohort_rescue");
+    const outsideDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "outside-radius");
+    expect(outsideDiagnostic).toBeUndefined();
+  });
+
   it.each([
     ["yesterday", "What changed yesterday?"],
     ["last-week-cn", "上周做了什么决定？"]
@@ -165,6 +297,150 @@ describe("recall regression suite", () => {
       activeConstraintsCap: 3
     });
     expect(findActiveConstraints).toHaveBeenCalledWith({ workspaceId: WS, cap: 3 });
+  });
+
+  it("cuts max_entries by fused rank before additive relevance score", async () => {
+    const highActivation = memory({
+      object_id: "high-activation",
+      content: "ordinary activation-heavy memory",
+      activation_score: 1
+    });
+    const lexicalGold = memory({
+      object_id: "lexical-gold",
+      content: "rare fused-rank needle",
+      activation_score: 0.1
+    });
+    const { dependencies } = deps([highActivation, lexicalGold], {
+      searchByKeyword: async () => [{ object_id: "lexical-gold", normalized_rank: 1 }]
+    });
+    const service = new RecallService(dependencies);
+    const policy = withBudgets(service.buildDefaultPolicy("analyze", task().runtime_id), {
+      max_entries: 1,
+      max_total_tokens: 1000
+    });
+    const result = await service.recall({
+      taskSurface: task("rare fused-rank needle"),
+      workspaceId: WS,
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    expect(result.candidates.map((item) => item.object_id)).toEqual(["lexical-gold"]);
+    const goldDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "lexical-gold");
+    const droppedDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "high-activation");
+    expect(goldDiagnostic?.fused_rank).toBe(1);
+    expect(goldDiagnostic?.per_stream_rank.lexical_fts).toBe(1);
+    expect(droppedDiagnostic?.dropped_reason).toBe("max_entries");
+    expect(droppedDiagnostic?.fused_rank).toBeGreaterThan(1);
+    expect(droppedDiagnostic?.per_stream_rank.existing_score).toBe(1);
+    expect(droppedDiagnostic?.fused_rank_contribution_per_stream.existing_score).toBeLessThanOrEqual(
+      goldDiagnostic?.fused_rank_contribution_per_stream.lexical_fts ?? 0
+    );
+  });
+
+  it("promotes memories when evidence FTS and structural evidence agree", async () => {
+    const decoys = Array.from({ length: 6 }, (_, index) =>
+      memory({
+        object_id: `decoy-${index}`,
+        content: `Computer Science degree planning decoy ${index}`,
+        activation_score: 1 - index * 0.01
+      })
+    );
+    const gold = memory({
+      object_id: "ucla-gold",
+      content: "I completed my Bachelor's degree in Computer Science at UCLA.",
+      evidence_refs: ["evidence-ucla"],
+      activation_score: 0.1
+    });
+    const { dependencies } = deps([...decoys, gold], {
+      searchByKeyword: async () =>
+        decoys.map((entry, index) => ({
+          object_id: entry.object_id,
+          normalized_rank: 1 - index * 0.01
+        })),
+      evidenceSearchPort: {
+        searchByKeyword: vi.fn(async () => [{ object_id: "evidence-ucla", normalized_rank: 1 }])
+      }
+    });
+    const service = new RecallService(dependencies);
+    const policy = withBudgets(service.buildDefaultPolicy("analyze", task().runtime_id), {
+      max_entries: 1,
+      max_total_tokens: 1000
+    });
+
+    const result = await service.recall({
+      taskSurface: task("Where did I complete my Bachelor's degree in Computer Science?"),
+      workspaceId: WS,
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    expect(result.candidates.map((item) => item.object_id)).toEqual(["ucla-gold"]);
+    const goldDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "ucla-gold");
+    expect(goldDiagnostic?.per_stream_rank.evidence_fts).toBe(1);
+    expect(goldDiagnostic?.per_stream_rank.evidence_structural_agreement).toBe(1);
+    expect(goldDiagnostic?.fused_rank).toBe(1);
+  });
+
+  it("lets embedding-on supplements participate in the fused-rank budget cut", async () => {
+    const lexicalPeer = memory({
+      object_id: "lexical-peer",
+      content: "ordinary activation peer memory",
+      activation_score: 0.2
+    });
+    const semanticGold = memory({
+      object_id: "semantic-gold",
+      content: "semantically related memory",
+      activation_score: 0.19
+    });
+    const querySupplementIfReady = vi.fn(async () => ({
+      supplementaryEntries: [semanticGold],
+      similarityHintsByObjectId: {
+        "semantic-gold": {
+          object_id: "semantic-gold",
+          normalized_similarity: 1
+        }
+      }
+    }));
+    const { dependencies } = deps([lexicalPeer, semanticGold], {
+      embeddingRecallService: {
+        hasStoredVectors: vi.fn(async () => true),
+        prepareQueryEmbedding: vi.fn(() => ({
+          queryId: "q-embedding",
+          getSnapshot: () => ({
+            status: "ready" as const,
+            embedding: new Float32Array([1])
+          })
+        })),
+        querySupplementIfReady,
+        querySupplement: vi.fn(async () => ({
+          supplementaryEntries: [],
+          similarityHintsByObjectId: {}
+        }))
+      }
+    });
+    const service = new RecallService(dependencies);
+    const policy = withBudgets(withEmbedding(service.buildDefaultPolicy("analyze", task().runtime_id)), {
+      max_entries: 1,
+      max_total_tokens: 1000
+    });
+
+    const result = await service.recall({
+      taskSurface: task("semantic query"),
+      workspaceId: WS,
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    expect(querySupplementIfReady).toHaveBeenCalled();
+    expect(result.candidates.map((item) => item.object_id)).toEqual(["semantic-gold"]);
+    expect(result.candidates[0]?.source_channels).toContain("semantic_supplement");
+    const goldDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "semantic-gold");
+    const droppedDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "lexical-peer");
+    expect(goldDiagnostic?.per_stream_rank.embedding_similarity).toBe(1);
+    expect(goldDiagnostic?.fused_rank).toBe(1);
+    expect(goldDiagnostic?.source_channels).toContain("semantic_supplement");
+    expect(droppedDiagnostic?.dropped_reason).toBe("max_entries");
   });
 
   it("uses path expansion in a cold workspace without usage proof lookup", async () => {
@@ -237,6 +513,7 @@ describe("recall regression suite", () => {
     });
     expect(result.candidates.map((item) => item.object_id)).toContain("lexical");
     expect(result.diagnostics?.embedding_provider_status).toBe("provider_failed");
+    expect(result.diagnostics?.provider_degradation_reason).toBe("query_embedding_failed");
   });
 
   it("falls back to lexical results while embedding query is pending", async () => {
@@ -268,6 +545,7 @@ describe("recall regression suite", () => {
     });
     expect(result.candidates.map((item) => item.object_id)).toContain("lexical");
     expect(result.diagnostics?.embedding_provider_status).toBe("provider_pending");
+    expect(result.diagnostics?.provider_degradation_reason).toBe("query_embedding_pending");
   });
 });
 
@@ -355,6 +633,7 @@ function deps(
     readonly embeddingRecallService?: RecallServiceDependencies["embeddingRecallService"];
     readonly pathExpansionPort?: RecallServiceDependencies["pathExpansionPort"];
     readonly queryByEntity?: RecallServiceDependencies["eventLogRepo"]["queryByEntity"];
+    readonly evidenceSearchPort?: RecallServiceDependencies["evidenceSearchPort"];
     readonly searchByKeyword?: RecallServiceDependencies["memoryRepo"]["searchByKeyword"];
   } = {}
 ): { readonly dependencies: RecallServiceDependencies } {
@@ -370,7 +649,11 @@ function deps(
           memories.filter((entry) => entry.dimension === dimension),
         findByScopeClass: async (_workspaceId, scopeClass) =>
           memories.filter((entry) => entry.scope_class === scopeClass),
-        searchByKeyword: options.searchByKeyword
+        searchByKeyword: options.searchByKeyword,
+        findByEvidenceRefs: async (_workspaceId, evidenceObjectIds) =>
+          memories.filter((entry) =>
+            entry.evidence_refs.some((ref) => evidenceObjectIds.includes(ref))
+          )
       },
       slotRepo: {
         findByWorkspace: async (): Promise<readonly Slot[]> => []
@@ -397,7 +680,8 @@ function deps(
               })
             }),
       embeddingRecallService: options.embeddingRecallService,
-      pathExpansionPort: options.pathExpansionPort
+      pathExpansionPort: options.pathExpansionPort,
+      evidenceSearchPort: options.evidenceSearchPort
     }
   };
 }
@@ -434,6 +718,38 @@ function memory(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
     contradiction_count: null,
     superseded_by: null,
     ...overrides
+  };
+}
+
+function evidenceCapsule(objectId: string, artifactRef: string): EvidenceCapsule {
+  return {
+    object_id: objectId,
+    object_kind: "evidence_capsule",
+    schema_version: 1,
+    lifecycle_state: "active",
+    created_at: NOW,
+    updated_at: NOW,
+    created_by: "test",
+    evidence_kind: "external_reference",
+    semantic_anchor: {
+      topic: "regression",
+      keywords: ["regression"],
+      summary: "source chunk"
+    },
+    event_anchor: null,
+    physical_anchor: {
+      file_path: null,
+      line_range: null,
+      symbol_name: null,
+      artifact_ref: artifactRef
+    },
+    evidence_health_state: "verified",
+    gist: "source chunk",
+    excerpt: "source chunk",
+    source_hash: null,
+    run_id: "run-regression",
+    workspace_id: WS,
+    surface_id: null
   };
 }
 

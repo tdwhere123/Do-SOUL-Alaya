@@ -238,6 +238,31 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
   );
 
   it(
+    "does not expose draft claim-backed constraint seeds as active constraints",
+    async () => {
+      const daemon = await startBenchDaemon({
+        workspaceId: "harness-draft-constraint-ws",
+        runId: "harness-draft-constraint-run"
+      });
+      handles.push(daemon);
+
+      const seed = await daemon.proposeMemory(
+        "Do not mark draft agent suggestions as hard constraints.",
+        "harness-evidence-draft-constraint",
+        { objectKind: "constraint" }
+      );
+
+      const recallResult = await daemon.recall("draft agent hard constraints", { maxResults: 5 });
+      expect(recallResult.results.map((result) => result.object_id)).toContain(seed.memoryId);
+      expect((recallResult.active_constraints ?? []).map((constraint) => constraint.object_id)).not.toContain(
+        seed.memoryId
+      );
+      expect(recallResult.active_constraints_count ?? 0).toBe(0);
+    },
+    60_000
+  );
+
+  it(
     "rejects seeds when signal does not materialize a memory_entry",
     async () => {
       // A low-confidence emission should route to "deferred" (no memory created).

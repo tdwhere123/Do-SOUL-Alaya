@@ -20,6 +20,24 @@ const ADDITIVE_WEIGHT_KEYS = [
   "PATH_PLASTICITY_WEIGHT"
 ] as const;
 
+const FUSION_WEIGHT_KEYS = [
+  "lexical_fts",
+  "evidence_fts",
+  "evidence_structural_agreement",
+  "source_proximity",
+  "structural",
+  "existing_score",
+  "embedding_similarity",
+  "graph_expansion",
+  "path_expansion",
+  "temporal_recency",
+  "workspace_activation",
+  "RRF_K",
+  "rrf_k",
+  "QUERY_EVIDENCE_BASE_TRANSFER_MAX",
+  "QUERY_EVIDENCE_BASE_WEIGHT_FLOOR"
+] as const;
+
 type AdditiveWeightKey = (typeof ADDITIVE_WEIGHT_KEYS)[number];
 
 type AdditiveWeightPatch = Partial<Record<AdditiveWeightKey, number>>;
@@ -203,6 +221,7 @@ function parseFusionWeights(value: unknown): Readonly<Record<string, number>> | 
     return undefined;
   }
   const object = parseObject(value, "fusion_weights");
+  rejectUnknownKeys(object, new Set(FUSION_WEIGHT_KEYS), "fusion_weights");
   const weights: Record<string, number> = {};
   for (const [key, rawValue] of Object.entries(object)) {
     if (key.trim().length === 0) {

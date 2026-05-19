@@ -1,3 +1,7 @@
+import type { QualityMetrics } from "@do-soul/alaya-eval";
+
+const DELIVERY_BUDGET_LOSS_RANK = 10;
+
 export type BenchEmbeddingProviderState =
   | "provider_returned"
   | "provider_pending"
@@ -9,31 +13,50 @@ export interface DiagnosticRecallResult {
   readonly object_id: string;
   readonly rank: number;
   readonly relevance_score: number;
+  readonly fused_rank: number | null;
+  readonly fused_score: number | null;
+  readonly per_stream_rank: DiagnosticStreamRanks | null;
+  readonly fused_rank_contribution_per_stream: DiagnosticStreamContributions | null;
   readonly plane_first_admitted: string | null;
   readonly plane_winning_admission: string | null;
   readonly score_factors: DiagnosticScoreFactors | null;
+}
+
+export interface DiagnosticActiveConstraintResult {
+  readonly object_id: string;
+  readonly rank: number;
 }
 
 interface DiagnosticRecallResultInput {
   readonly object_id: string;
   readonly rank: number;
   readonly relevance_score: number;
+  readonly fused_rank?: number | null;
   readonly plane_first_admitted?: string | null;
   readonly plane_winning_admission?: string | null;
   readonly score_factors?: DiagnosticScoreFactors | null;
 }
 
 export type DiagnosticScoreFactors = Readonly<Record<string, unknown>>;
+export type DiagnosticStreamRanks = Readonly<Record<string, number | null>>;
+export type DiagnosticStreamContributions = Readonly<Record<string, number>>;
 
 export interface LongMemEvalGoldDiagnostic {
   readonly object_id: string;
   readonly candidate_status:
     | "delivered"
+    | "active_constraint_delivered"
     | "candidate_not_delivered"
     | "candidate_absent"
     | "unknown";
   readonly final_rank: number | null;
+  readonly active_constraint_rank: number | null;
   readonly pre_budget_rank: number | null;
+  readonly selection_order: number | null;
+  readonly fused_rank: number | null;
+  readonly fused_score: number | null;
+  readonly per_stream_rank: DiagnosticStreamRanks | null;
+  readonly fused_rank_contribution_per_stream: DiagnosticStreamContributions | null;
   readonly plane_first_admitted: string | null;
   readonly plane_winning_admission: string | null;
   readonly source_planes: readonly string[];
@@ -50,6 +73,7 @@ export interface LongMemEvalQuestionDiagnostic {
   readonly gold_memory_ids: readonly string[];
   readonly answer_session_ids: readonly string[];
   readonly delivered_results: readonly DiagnosticRecallResult[];
+  readonly active_constraint_results: readonly DiagnosticActiveConstraintResult[];
   readonly hit_at_1: boolean;
   readonly hit_at_5: boolean;
   readonly hit_at_10: boolean;
@@ -57,15 +81,21 @@ export interface LongMemEvalQuestionDiagnostic {
     | "hit_at_5"
     | "budget_dropped"
     | "under_ranked"
+    | "active_constraint_only"
     | "structural_gap"
     | "lexical_gap"
     | "candidate_absent"
+    | "no_gold"
     | "diagnostics_unavailable";
   readonly degradation_reason: string | null;
   readonly recall_diagnostics_present: boolean;
   readonly recall_diagnostics_keys: readonly string[];
   readonly provider_state: BenchEmbeddingProviderState;
   readonly provider_degradation_reason: string | null;
+  readonly candidate_key_collisions: readonly Readonly<{
+    readonly object_id: string;
+    readonly candidate_keys: readonly string[];
+  }>[];
   readonly gold: readonly LongMemEvalGoldDiagnostic[];
 }
 
@@ -146,14 +176,23 @@ export interface LongMemEvalDiagnosticsSidecar {
 interface NarrowRecallDiagnostics {
   readonly keys: readonly string[];
   readonly candidatesByObjectId: ReadonlyMap<string, CandidateDiagnostic>;
+  readonly candidatesByCandidateKey: ReadonlyMap<string, CandidateDiagnostic>;
+  readonly candidateKeysByObjectId: ReadonlyMap<string, readonly string[]>;
   readonly providerState: BenchEmbeddingProviderState;
   readonly providerDegradationReason: string | null;
 }
 
 interface CandidateDiagnostic {
+  readonly candidateKey: string;
   readonly objectId: string;
+  readonly originPlane: string;
   readonly preBudgetRank: number | null;
+  readonly selectionOrder: number | null;
   readonly finalRank: number | null;
+  readonly fusedRank: number | null;
+  readonly fusedScore: number | null;
+  readonly perStreamRank: DiagnosticStreamRanks | null;
+  readonly fusedRankContributionPerStream: DiagnosticStreamContributions | null;
   readonly planeFirstAdmitted: string | null;
   readonly planeWinningAdmission: string | null;
   readonly sourcePlanes: readonly string[];
@@ -164,6 +203,12 @@ interface CandidateDiagnostic {
   readonly budgetDropReason: string | null;
 }
 
+interface ReadCandidateDiagnosticsResult {
+  readonly byObjectId: ReadonlyMap<string, CandidateDiagnostic>;
+  readonly byCandidateKey: ReadonlyMap<string, CandidateDiagnostic>;
+  readonly keysByObjectId: ReadonlyMap<string, readonly string[]>;
+}
+
 const DIAGNOSTIC_ADMISSION_PLANES = Object.freeze([
   "protected_winner",
   "activation",
@@ -172,6 +217,7 @@ const DIAGNOSTIC_ADMISSION_PLANES = Object.freeze([
   "evidence_anchor",
   "domain_tag_cluster",
   "session_surface_cohort",
+  "source_proximity",
   "graph_expansion",
   "path_expansion"
 ] as const);
@@ -197,6 +243,7 @@ export function buildQuestionDiagnostic(input: {
   readonly goldMemoryIds: readonly string[];
   readonly answerSessionIds: readonly string[];
   readonly deliveredResults: readonly DiagnosticRecallResultInput[];
+  readonly activeConstraintResults?: readonly DiagnosticActiveConstraintResult[];
   readonly hitAt1: boolean;
   readonly hitAt5: boolean;
   readonly hitAt10: boolean;
@@ -213,13 +260,20 @@ export function buildQuestionDiagnostic(input: {
   const deliveredRankById = new Map(
     deliveredResults.map((result) => [result.object_id, result.rank])
   );
+  const activeConstraintResults = input.activeConstraintResults ?? [];
+  const activeConstraintRankById = new Map(
+    activeConstraintResults.map((result) => [result.object_id, result.rank])
+  );
 
   const gold = input.goldMemoryIds.map((objectId): LongMemEvalGoldDiagnostic => {
     const deliveredRank = deliveredRankById.get(objectId) ?? null;
+    const activeConstraintRank = activeConstraintRankById.get(objectId) ?? null;
     const candidate = diagnostics?.candidatesByObjectId.get(objectId);
     const candidateStatus =
       deliveredRank !== null
         ? "delivered"
+        : activeConstraintRank !== null
+          ? "active_constraint_delivered"
         : candidate !== undefined
           ? "candidate_not_delivered"
           : diagnostics === null
@@ -228,8 +282,15 @@ export function buildQuestionDiagnostic(input: {
     return {
       object_id: objectId,
       candidate_status: candidateStatus,
-      final_rank: deliveredRank ?? candidate?.finalRank ?? null,
+      final_rank: deliveredRank,
+      active_constraint_rank: activeConstraintRank,
       pre_budget_rank: candidate?.preBudgetRank ?? null,
+      selection_order: candidate?.selectionOrder ?? null,
+      fused_rank: candidate?.fusedRank ?? null,
+      fused_score: candidate?.fusedScore ?? null,
+      per_stream_rank: candidate?.perStreamRank ?? null,
+      fused_rank_contribution_per_stream:
+        candidate?.fusedRankContributionPerStream ?? null,
       plane_first_admitted: candidate?.planeFirstAdmitted ?? null,
       plane_winning_admission: candidate?.planeWinningAdmission ?? null,
       source_planes: candidate?.sourcePlanes ?? [],
@@ -247,6 +308,7 @@ export function buildQuestionDiagnostic(input: {
     gold_memory_ids: input.goldMemoryIds,
     answer_session_ids: input.answerSessionIds,
     delivered_results: deliveredResults,
+    active_constraint_results: activeConstraintResults,
     hit_at_1: input.hitAt1,
     hit_at_5: input.hitAt5,
     hit_at_10: input.hitAt10,
@@ -258,6 +320,14 @@ export function buildQuestionDiagnostic(input: {
       diagnostics?.providerState ??
       (input.embeddingMode === "disabled" ? "provider_not_requested" : "unknown"),
     provider_degradation_reason: diagnostics?.providerDegradationReason ?? null,
+    candidate_key_collisions: diagnostics === null
+      ? []
+      : [...diagnostics.candidateKeysByObjectId.entries()]
+          .filter(([, candidateKeys]) => candidateKeys.length > 1)
+          .map(([objectId, candidateKeys]) => ({
+            object_id: objectId,
+            candidate_keys: candidateKeys
+          })),
     gold
   };
 }
@@ -272,6 +342,11 @@ function normalizeDeliveredResults(
       object_id: result.object_id,
       rank: result.rank,
       relevance_score: result.relevance_score,
+      fused_rank: result.fused_rank ?? candidate?.fusedRank ?? null,
+      fused_score: candidate?.fusedScore ?? null,
+      per_stream_rank: candidate?.perStreamRank ?? null,
+      fused_rank_contribution_per_stream:
+        candidate?.fusedRankContributionPerStream ?? null,
       plane_first_admitted:
         result.plane_first_admitted ?? candidate?.planeFirstAdmitted ?? null,
       plane_winning_admission:
@@ -310,6 +385,165 @@ export function summarizeProviderStates(
     provider_failed_rate: ratio(providerFailed, total),
     unknown_rate: ratio(unknown, total)
   };
+}
+
+export function buildLongMemEvalQualityMetrics(
+  diagnostics: readonly LongMemEvalQuestionDiagnostic[]
+): QualityMetrics {
+  const missDistribution: Record<string, number> = {};
+  const budgetDropCounts = new Map<string, number>();
+  let nonMonotonicCount = 0;
+  let nonMonotonicDenominator = 0;
+  let highLexicalDemotedCount = 0;
+  let highLexicalDemotedDenominator = 0;
+  let candidateAbsentCount = 0;
+  let noGoldCount = 0;
+  let budgetDropDenominator = 0;
+  let evidenceStreamGoldDeliveryCount = 0;
+  let evidenceStreamGoldDeliveryDenominator = 0;
+  let pathStreamTop10Count = 0;
+  let pathStreamTop10Denominator = 0;
+
+  for (const question of diagnostics) {
+    missDistribution[question.miss_classification] =
+      (missDistribution[question.miss_classification] ?? 0) + 1;
+    if (question.miss_classification === "candidate_absent") {
+      candidateAbsentCount++;
+    }
+    if (question.miss_classification === "no_gold") {
+      noGoldCount++;
+    }
+
+    if (question.delivered_results.length >= 2) {
+      nonMonotonicDenominator++;
+      if (isDeliveredOrderNonMonotonic(question.delivered_results)) {
+        nonMonotonicCount++;
+      }
+    }
+
+    for (const delivered of question.delivered_results) {
+      pathStreamTop10Denominator++;
+      if (hasPathStreamContribution(delivered)) {
+        pathStreamTop10Count++;
+      }
+    }
+
+    for (const gold of question.gold) {
+      budgetDropDenominator++;
+      if (gold.budget_drop_reason !== null) {
+        budgetDropCounts.set(
+          gold.budget_drop_reason,
+          (budgetDropCounts.get(gold.budget_drop_reason) ?? 0) + 1
+        );
+      }
+      if (gold.lexical_rank !== null && gold.final_rank !== null) {
+        highLexicalDemotedDenominator++;
+        if (gold.lexical_rank > 0.8 && gold.final_rank > 5) {
+          highLexicalDemotedCount++;
+        }
+      }
+      if (gold.final_rank !== null && gold.final_rank <= 5) {
+        evidenceStreamGoldDeliveryDenominator++;
+        if (hasEvidenceStreamContribution(gold)) {
+          evidenceStreamGoldDeliveryCount++;
+        }
+      }
+    }
+  }
+
+  const questionDenominator = diagnostics.length;
+  if (!budgetDropCounts.has("max_entries")) {
+    budgetDropCounts.set("max_entries", 0);
+  }
+  return {
+    schema_version: "bench-quality-metrics.v1",
+    non_monotonic_rate: ratio(nonMonotonicCount, questionDenominator),
+    non_monotonic_count: nonMonotonicCount,
+    non_monotonic_denominator: questionDenominator,
+    budget_drop_distribution: Object.fromEntries(
+      [...budgetDropCounts.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([key, count]) => [
+          key,
+          {
+            count,
+            share: ratio(count, budgetDropDenominator),
+            denominator: budgetDropDenominator
+          }
+        ])
+    ),
+    high_lexical_demoted_rate: ratio(
+      highLexicalDemotedCount,
+      highLexicalDemotedDenominator
+    ),
+    high_lexical_demoted_count: highLexicalDemotedCount,
+    high_lexical_demoted_denominator: highLexicalDemotedDenominator,
+    candidate_absent_count: candidateAbsentCount,
+    candidate_absent_denominator: questionDenominator,
+    no_gold_count: noGoldCount,
+    no_gold_denominator: questionDenominator,
+    evidence_stream_gold_delivery_rate: ratio(
+      evidenceStreamGoldDeliveryCount,
+      evidenceStreamGoldDeliveryDenominator
+    ),
+    evidence_stream_gold_delivery_count: evidenceStreamGoldDeliveryCount,
+    evidence_stream_gold_delivery_denominator: evidenceStreamGoldDeliveryDenominator,
+    path_stream_top10_rate: ratio(pathStreamTop10Count, pathStreamTop10Denominator),
+    path_stream_top10_count: pathStreamTop10Count,
+    path_stream_top10_denominator: pathStreamTop10Denominator,
+    miss_distribution: missDistribution
+  };
+}
+
+function hasEvidenceStreamContribution(gold: LongMemEvalGoldDiagnostic): boolean {
+  return (
+    gold.source_planes.includes("evidence_anchor") ||
+    gold.source_planes.includes("evidence_fts") ||
+    gold.source_channels.includes("evidence_anchor") ||
+    gold.source_channels.includes("evidence_fts") ||
+    (gold.per_stream_rank?.evidence_fts ?? null) !== null ||
+    (gold.per_stream_rank?.evidence_structural_agreement ?? null) !== null
+  );
+}
+
+function hasPathStreamContribution(delivered: DiagnosticRecallResult): boolean {
+  return (
+    delivered.plane_first_admitted === "path_expansion" ||
+    delivered.plane_winning_admission === "path_expansion" ||
+    (delivered.per_stream_rank?.path_expansion ?? null) !== null
+  );
+}
+
+function isDeliveredOrderNonMonotonic(
+  results: readonly DiagnosticRecallResult[]
+): boolean {
+  const fusedRanks = results.map((result) => result.fused_rank);
+  if (fusedRanks.every((rank): rank is number => rank !== null)) {
+    return isDeliveredRankOrderNonMonotonic(fusedRanks);
+  }
+  return isDeliveredScoreOrderNonMonotonic(
+    results.map((result) => result.relevance_score)
+  );
+}
+
+function isDeliveredRankOrderNonMonotonic(ranks: readonly number[]): boolean {
+  for (let i = 1; i < ranks.length; i++) {
+    const current = ranks[i];
+    const previous = ranks[i - 1];
+    if (current === undefined || previous === undefined) continue;
+    if (current < previous) return true;
+  }
+  return false;
+}
+
+function isDeliveredScoreOrderNonMonotonic(scores: readonly number[]): boolean {
+  for (let i = 1; i < scores.length; i++) {
+    const current = scores[i];
+    const previous = scores[i - 1];
+    if (current === undefined || previous === undefined) continue;
+    if (current > previous) return true;
+  }
+  return false;
 }
 
 export function rAt5WithProviderReturned(
@@ -441,9 +675,12 @@ function readRecallDiagnostics(
   const raw = (recallResult as { readonly diagnostics?: unknown }).diagnostics;
   if (raw === null || typeof raw !== "object") return null;
   const record = raw as Readonly<Record<string, unknown>>;
+  const candidates = readCandidates(record);
   return {
     keys: Object.keys(record).sort(),
-    candidatesByObjectId: readCandidates(record),
+    candidatesByObjectId: candidates.byObjectId,
+    candidatesByCandidateKey: candidates.byCandidateKey,
+    candidateKeysByObjectId: candidates.keysByObjectId,
     providerState: readProviderState(record, embeddingMode),
     providerDegradationReason: readProviderDegradationReason(record)
   };
@@ -451,13 +688,15 @@ function readRecallDiagnostics(
 
 function readCandidates(
   diagnostics: Readonly<Record<string, unknown>>
-): ReadonlyMap<string, CandidateDiagnostic> {
+): ReadCandidateDiagnosticsResult {
   const source =
     readArray(diagnostics.candidate_pool) ??
     readArray(diagnostics.candidates) ??
     readArray(diagnostics.pool) ??
     [];
   const byObjectId = new Map<string, CandidateDiagnostic>();
+  const byCandidateKey = new Map<string, CandidateDiagnostic>();
+  const mutableKeysByObjectId = new Map<string, string[]>();
   for (let i = 0; i < source.length; i++) {
     const raw = source[i];
     if (raw === null || typeof raw !== "object") continue;
@@ -467,11 +706,20 @@ function readCandidates(
       readString(record.memory_id) ??
       readString(record.id);
     if (objectId === null) continue;
-    byObjectId.set(objectId, {
+    const originPlane = readString(record.origin_plane) ?? "workspace_local";
+    const candidate: CandidateDiagnostic = {
+      candidateKey: readString(record.candidate_key) ?? `${originPlane}:${objectId}`,
       objectId,
+      originPlane,
       preBudgetRank:
         readNumber(record.pre_budget_rank) ?? readNumber(record.internal_rank),
+      selectionOrder: readNumber(record.selection_order),
       finalRank: readNumber(record.final_rank) ?? readNumber(record.rank),
+      fusedRank: readNumber(record.fused_rank),
+      fusedScore: readNumber(record.fused_score),
+      perStreamRank: readNullableNumberRecord(record.per_stream_rank),
+      fusedRankContributionPerStream:
+        readNumberRecord(record.fused_rank_contribution_per_stream),
       planeFirstAdmitted: readString(record.plane_first_admitted),
       planeWinningAdmission:
         readString(record.plane_winning_admission) ??
@@ -489,9 +737,50 @@ function readCandidates(
         readString(record.budget_drop_reason) ??
         readString(record.drop_reason) ??
         readString(record.dropped_reason)
-    });
+    };
+    byCandidateKey.set(candidate.candidateKey, candidate);
+    const keysForObject = mutableKeysByObjectId.get(objectId) ?? [];
+    keysForObject.push(candidate.candidateKey);
+    mutableKeysByObjectId.set(objectId, keysForObject);
+    const existing = byObjectId.get(objectId);
+    if (existing === undefined || shouldPreferCandidateDiagnostic(candidate, existing)) {
+      byObjectId.set(objectId, candidate);
+    }
   }
-  return byObjectId;
+  const keysByObjectId = new Map(
+    [...mutableKeysByObjectId.entries()].map(([objectId, keys]) => [
+      objectId,
+      Object.freeze([...keys].sort())
+    ] as const)
+  );
+  return {
+    byObjectId: Object.freeze(byObjectId),
+    byCandidateKey: Object.freeze(byCandidateKey),
+    keysByObjectId: Object.freeze(keysByObjectId)
+  };
+}
+
+function shouldPreferCandidateDiagnostic(
+  candidate: CandidateDiagnostic,
+  existing: CandidateDiagnostic
+): boolean {
+  const candidateFinal = candidate.finalRank ?? Number.MAX_SAFE_INTEGER;
+  const existingFinal = existing.finalRank ?? Number.MAX_SAFE_INTEGER;
+  if (candidateFinal !== existingFinal) {
+    return candidateFinal < existingFinal;
+  }
+
+  const candidateFused = candidate.fusedRank ?? Number.MAX_SAFE_INTEGER;
+  const existingFused = existing.fusedRank ?? Number.MAX_SAFE_INTEGER;
+  if (candidateFused !== existingFused) {
+    return candidateFused < existingFused;
+  }
+
+  if (candidate.originPlane !== existing.originPlane) {
+    return candidate.originPlane === "workspace_local";
+  }
+
+  return candidate.candidateKey.localeCompare(existing.candidateKey) < 0;
 }
 
 function readScoreFactors(value: unknown): DiagnosticScoreFactors | null {
@@ -518,6 +807,20 @@ function readNumberRecord(value: unknown): Readonly<Record<string, number>> | nu
   for (const [key, raw] of Object.entries(record)) {
     if (typeof raw === "number" && Number.isFinite(raw)) {
       result[key] = raw;
+    }
+  }
+  return Object.keys(result).length === 0 ? null : Object.freeze(result);
+}
+
+function readNullableNumberRecord(value: unknown): Readonly<Record<string, number | null>> | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Readonly<Record<string, unknown>>;
+  const result: Record<string, number | null> = {};
+  for (const [key, raw] of Object.entries(record)) {
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      result[key] = raw;
+    } else if (raw === null) {
+      result[key] = null;
     }
   }
   return Object.keys(result).length === 0 ? null : Object.freeze(result);
@@ -597,6 +900,7 @@ function sanitizeProviderDegradationReason(value: string | null): string | null 
   const normalized = value.trim().toLowerCase();
   if (
     normalized === "query_embedding_failed" ||
+    normalized === "query_embedding_pending" ||
     normalized === "provider_unavailable" ||
     normalized === "local_vector_lookup_failed"
   ) {
@@ -612,11 +916,26 @@ function classifyMiss(
 ): LongMemEvalQuestionDiagnostic["miss_classification"] {
   if (hitAt5) return "hit_at_5";
   if (!diagnosticsAvailable) return "diagnostics_unavailable";
-  if (gold.some((item) => item.budget_drop_reason !== null)) {
+  if (gold.length === 0) return "no_gold";
+  if (gold.some(isDeliveryBudgetLoss)) {
     return "budget_dropped";
   }
-  if (gold.some((item) => item.final_rank !== null && item.final_rank > 5)) {
+  if (
+    gold.some(
+      (item) =>
+        (item.final_rank !== null && item.final_rank > 5) ||
+        item.pre_budget_rank !== null ||
+        item.fused_rank !== null
+    )
+  ) {
     return "under_ranked";
+  }
+  if (
+    gold.some(
+      (item) => item.candidate_status === "active_constraint_delivered"
+    )
+  ) {
+    return "active_constraint_only";
   }
   const notDelivered = gold.filter(
     (item) => item.candidate_status === "candidate_not_delivered"
@@ -630,6 +949,12 @@ function classifyMiss(
   return "candidate_absent";
 }
 
+function isDeliveryBudgetLoss(item: LongMemEvalGoldDiagnostic): boolean {
+  if (item.budget_drop_reason === null) return false;
+  const candidateRank = item.pre_budget_rank ?? item.fused_rank;
+  return candidateRank !== null && candidateRank <= DELIVERY_BUDGET_LOSS_RANK;
+}
+
 function hasStructuralPlane(planes: readonly string[]): boolean {
   return planes.some((plane) =>
     [
@@ -637,6 +962,7 @@ function hasStructuralPlane(planes: readonly string[]): boolean {
       "evidence_anchor",
       "domain_tag_cluster",
       "session_surface_cohort",
+      "source_proximity",
       "graph_expansion",
       "path_expansion"
     ].includes(plane)

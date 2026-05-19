@@ -207,7 +207,10 @@ export async function runLiveBench(
   };
 
   const layout: HistoryLayout = { historyRoot: opts.historyRoot };
-  const previous = await readLatest(layout, "live", { split: "strict-real" });
+  const previous = await readLatest(layout, "live", {
+    split: "strict-real",
+    embeddingProvider: payload.embedding_provider
+  });
   const diff = diffKpis(payload, previous);
   const slug = entrySlug(runAt, commitSha7);
   const report = renderLiveReport(payload, previous, diff, source, providerMode, keywordMode);

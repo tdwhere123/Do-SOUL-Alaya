@@ -68,6 +68,26 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     await expect(repo.findById(capsule.object_id)).resolves.toEqual(capsule);
   });
 
+  it("loads evidence capsules by ids in a batch", async () => {
+    const { repo } = await createRepo();
+
+    await repo.create(createEvidenceCapsule({ object_id: "f6c1b587-be07-4410-b2ca-8bfbc4d82db4" }));
+    await repo.create(createEvidenceCapsule({ object_id: "3ca5f78f-b5fd-4543-99eb-ce72ab2578ab" }));
+    await repo.create(createEvidenceCapsule({ object_id: "256a7ff5-6150-4a82-9a53-99dbfd08cb77" }));
+
+    const rows = await repo.findByIds([
+      "256a7ff5-6150-4a82-9a53-99dbfd08cb77",
+      "missing-id",
+      "3ca5f78f-b5fd-4543-99eb-ce72ab2578ab",
+      "3ca5f78f-b5fd-4543-99eb-ce72ab2578ab"
+    ]);
+
+    expect(rows.map((row) => row.object_id)).toEqual([
+      "256a7ff5-6150-4a82-9a53-99dbfd08cb77",
+      "3ca5f78f-b5fd-4543-99eb-ce72ab2578ab"
+    ]);
+  });
+
   it("lists by run id", async () => {
     const { repo } = await createRepo();
 

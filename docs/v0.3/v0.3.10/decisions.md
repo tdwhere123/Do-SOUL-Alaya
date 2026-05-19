@@ -156,8 +156,8 @@ first-class。
 - daemon embedding 默认仍 **opt-in**（保 v0.3.8 状态）
 - bench 双跑 on / off 是 **release-grade must**（Cat-E5）
 - `invariants.md §18` "embedding is recall supplement only" prose **不动**
-- Cat-E 大幅简化：只保 E5 (bench 双跑) + E2 (latency 监控，不退化但不强求
-  ≤300ms)
+- Cat-E 大幅简化：只保 E5 (bench 双跑) + E2 (latency 监控；D20 后
+  embedding-off 以 K3.2 ≤200ms 为准，embedding-on 以 K3.1 ≤1100ms 为准)
 - 删除原 Cat-E1 (default-on) / E3 (first-class fusion signal) / E4 (强 timeout)
 
 ### Rationale
@@ -518,9 +518,10 @@ propose 路径。
   - 保留现有 root `results[]`：当前的 candidate pool 按 fused score 排序 +
     top-K cut（max_entries 只限这个）。文档可称 semantic relevant memories，
     但 wire shape 不 rename。
-  - `active_constraints[]`：当前 workspace 中所有 active CONSTRAINT / HAZARD /
-    strictly_governed PathRelation 标记的 memory list（独立 budget，常规
-    workspace 通常 < 20 项）
+  - `active_constraints[]`：当前 workspace 中 active / winner / contested
+    ClaimForm 或 strictly_governed PathRelation 背书的 constraint/hazard/governance
+    memory list（独立 budget，常规 workspace 通常 < 20 项）。单靠
+    memory dimension=CONSTRAINT/HAZARD 或 draft claim 不进入这个 hard channel。
 - agent 端语义清晰：top-K 是 semantic-relevant 召回；constraints 是必须知道的
   硬约束
 - `SoulMemorySearchResponseSchema` response root 加 `active_constraints[]` 字段；
@@ -566,7 +567,7 @@ invariant 视角：
 
 - **`SoulMemorySearchResponseSchema` 改动是 MCP contract 变化**：根据 §25 SemVer，
   additive 是 minor 但要更新 sibling agent。**项目未公开，sunk cost = 0**
-- 如果 active_constraints[] list 太大（如 workspace 有 100 个 CONSTRAINT），
+- 如果 active_constraints[] list 太大（如 workspace 有 100 个治理背书 constraints），
   会膨胀 recall payload → 必须有 per-workspace `active_constraints_cap`
   （默认 20）
 - agent 端需更新读 `active_constraints[]` 字段才能完整接收硬规则（Codex /
@@ -592,8 +593,8 @@ invariant 视角：
 Cat-E（Embedding）从 5 工作项简化为 2 工作项：
 
 - **E1 (删除)**：daemon embedding default-on
-- **E2 (保留但简化)**：embedding latency 监控（不做大改：not aim for ≤300ms p95，
-  but must not regress beyond current 1049ms by 20%）
+- **E2 (保留但简化)**：embedding latency 监控；D20 后 embedding-off 以
+  K3.2 ≤200ms 为准，embedding-on 以 K3.1 ≤1100ms 为准
 - **E3 (删除)**：embedding 进入 fusion stage 作 first-class signal
 - **E4 (简化)**：保留 graceful degradation（embedding provider 失败时不让 recall
   完全失败），但不做激进 timeout + circuit breaker
@@ -1063,4 +1064,3 @@ D20 修订后 v0.3.10 周期回归 3-3.5 周（D19 估 4-5 周；β 原估 1.5-2
 - `docs/v0.3/v0.3.10/kpi-targets.md` K1.* must 线下调为 honest 数字；新增 KN.1-KN.5 节；终极 release gate 三组并列
 - `docs/v0.3/v0.3.10/README.md` 量化目标表三组并列；honest acknowledgement 立场版重写
 - `.do-it/findings/v0.3.10-architecture-review/DECISION-04-preservation-and-risk.md` IV park 列表 P4/Cat-F5 re-park 到 v0.4
-

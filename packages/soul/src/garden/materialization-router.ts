@@ -993,7 +993,7 @@ function buildEvidenceInput(
       event_id: null,
       occurred_at: signal.created_at
     },
-    physical_anchor: null,
+    physical_anchor: buildSignalPhysicalAnchor(signal),
     evidence_health_state: computeEvidenceHealthState(signal),
     gist: appendSummarySuffix(excerpt, summarySuffix),
     excerpt,
@@ -1001,6 +1001,20 @@ function buildEvidenceInput(
     run_id: signal.run_id,
     workspace_id: signal.workspace_id,
     surface_id: signal.surface_id
+  };
+}
+
+function buildSignalPhysicalAnchor(signal: CandidateMemorySignal): EvidenceCapsule["physical_anchor"] {
+  const artifactRef = signal.evidence_refs.find((ref) => ref.trim().length > 0)?.trim() ?? null;
+  if (artifactRef === null) {
+    return null;
+  }
+
+  return {
+    file_path: null,
+    line_range: null,
+    symbol_name: null,
+    artifact_ref: artifactRef
   };
 }
 

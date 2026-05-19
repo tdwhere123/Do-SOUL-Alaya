@@ -179,7 +179,10 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   };
 
   const layout: HistoryLayout = { historyRoot: opts.historyRoot };
-  const previous = await readLatest(layout, "public-locomo", { split: "locomo10" });
+  const previous = await readLatest(layout, "public-locomo", {
+    split: "locomo10",
+    embeddingProvider: payload.embedding_provider
+  });
   const diff = diffKpis(payload, previous);
   const slug = entrySlug(runAt, commitSha7);
   const report = renderReport(payload, previous, diff);

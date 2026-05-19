@@ -17,6 +17,8 @@ import type {
   SoulMemorySearchResponse
 } from "@do-soul/alaya-protocol";
 
+const CONTROLLED_REPLAY_HISTORY_SPLIT = "controlled-replay";
+
 const SCENARIO_LABELS = [
   "uniform-fact",
   "rotated-kind",
@@ -31,6 +33,7 @@ type ScenarioLabel = (typeof SCENARIO_LABELS)[number];
 interface FixtureSeed {
   readonly id: string;
   readonly content: string;
+  readonly distilledFact?: string;
 }
 
 interface FixtureQuestion {
@@ -50,6 +53,7 @@ interface SeedSidecar {
 interface CandidateDiagnostic {
   readonly object_id: string;
   readonly pre_budget_rank: number | null;
+  readonly fused_rank: number | null;
   readonly final_rank: number | null;
   readonly dropped_reason: string | null;
   readonly lexical_rank: number | null;
@@ -68,6 +72,11 @@ interface RecallObservation {
 
 interface ScenarioMetrics {
   readonly rank_distribution: Record<string, number>;
+  readonly expected_rank_by_question: Record<string, number | null>;
+  readonly hit_at_5: {
+    readonly count: number;
+    readonly rate: number;
+  };
   readonly average_expected_rank: number | null;
   readonly non_monotonic: { readonly count: number };
   readonly active_constraints: { readonly count: number };
@@ -86,7 +95,20 @@ interface ScenarioArchive {
     readonly conflict_awareness: boolean;
   };
   readonly report_context_usage: "none" | "mixed";
+  readonly pre_report_metrics?: ScenarioMetrics;
   readonly metrics: ScenarioMetrics;
+}
+
+interface NativeHealthGate {
+  readonly id:
+    | "trust_loop_activation_gain"
+    | "plasticity_gradient_rank_gain";
+  readonly label: string;
+  readonly current: number | null;
+  readonly target: number;
+  readonly direction: "min";
+  readonly passed: boolean;
+  readonly missing: boolean;
 }
 
 export interface ControlledReplayArchive {
@@ -105,6 +127,10 @@ export interface ControlledReplayArchive {
   readonly scenarios: readonly ScenarioArchive[];
   readonly metrics: ScenarioMetrics & {
     readonly cold_warm_delta: Record<string, number | null>;
+  };
+  readonly native_health_gates: {
+    readonly verdict: "ok" | "fail";
+    readonly gates: readonly NativeHealthGate[];
   };
   readonly contribution_suspects: readonly {
     readonly label: string;
@@ -193,6 +219,19 @@ const FIXTURE_SEEDS: readonly FixtureSeed[] = Object.freeze([
   {
     id: "lima-suspect",
     content: "Controlled replay lima suspect: top contribution suspects compare object kind, budget, conflict, and warm deltas."
+  },
+  {
+    id: "mike-evidence-only",
+    content: "Controlled replay mike evidence-only: raw source excerpt contains the talisman phrase nebula-quartz bridge.",
+    distilledFact: "Controlled replay mike evidence-only: source evidence carries the retrieval-only phrase."
+  },
+  {
+    id: "november-path-source",
+    content: "Controlled replay november path source: repeated warm usage links this seed to a separate paired answer."
+  },
+  {
+    id: "oscar-path-target",
+    content: "Controlled replay oscar paired answer: orange-ridge answer is only taught through co-usage."
   }
 ]);
 
@@ -211,6 +250,31 @@ const FIXTURE_QUESTIONS: readonly FixtureQuestion[] = Object.freeze([
     id: "q-warm",
     question: "Which controlled replay warm memory mentions using a delivery id for report context usage?",
     expectedSeedIds: ["foxtrot-outcome", "juliet-warm"]
+  },
+  {
+    id: "q-evidence-only",
+    question: "Which controlled replay source evidence contains the nebula-quartz phrase?",
+    expectedSeedIds: ["mike-evidence-only"]
+  },
+  {
+    id: "q-path-target",
+    question: "Which controlled replay memory should november path source lead to after repeated use?",
+    expectedSeedIds: ["oscar-path-target"]
+  },
+  {
+    id: "q-path-pair-a",
+    question: "Which controlled replay november path source and orange-ridge answer belong together?",
+    expectedSeedIds: ["november-path-source", "oscar-path-target"]
+  },
+  {
+    id: "q-path-pair-b",
+    question: "Which controlled replay orange-ridge answer is paired with the november path source?",
+    expectedSeedIds: ["november-path-source", "oscar-path-target"]
+  },
+  {
+    id: "q-path-pair-c",
+    question: "Which controlled replay november path source repeats with the orange-ridge paired answer?",
+    expectedSeedIds: ["november-path-source", "oscar-path-target"]
   }
 ]);
 
@@ -232,6 +296,7 @@ export async function runControlledReplay(
   }
 
   const aggregateMetrics = aggregateScenarioMetrics(scenarios);
+  const nativeHealthGates = buildNativeHealthGates(scenarios);
   const archive: ControlledReplayArchive = {
     schema_version: 1,
     bench_name: "controlled-replay",
@@ -249,6 +314,10 @@ export async function runControlledReplay(
     metrics: {
       ...aggregateMetrics,
       cold_warm_delta: buildColdWarmDelta(scenarios)
+    },
+    native_health_gates: {
+      verdict: nativeHealthGates.every((gate) => gate.passed) ? "ok" : "fail",
+      gates: nativeHealthGates
     },
     contribution_suspects: buildContributionSuspects(scenarios),
     evidence: {
@@ -298,6 +367,7 @@ async function runScenario(
     const sidecar = new Map(seeds.map((seed) => [seed.memoryId, seed] as const));
 
     if (scenarioConfig.reportContextUsage === "mixed") {
+      const preReportObservations: RecallObservation[] = [];
       for (let index = 0; index < FIXTURE_QUESTIONS.length; index++) {
         const question = FIXTURE_QUESTIONS[index];
         if (question === undefined) continue;
@@ -305,9 +375,33 @@ async function runScenario(
           maxResults: scenarioConfig.maxEntries,
           conflictAwareness: scenarioConfig.conflictAwareness
         });
+        preReportObservations.push(buildObservation(question, recall, sidecar));
         await reportMixedUsage(daemon, recall, question, sidecar, index + 1);
         reportDeliveryIds.push(recall.delivery_id);
       }
+      await daemon.runtime.runGardenBackgroundPass();
+      const observations: RecallObservation[] = [];
+      for (const question of FIXTURE_QUESTIONS) {
+        const recall = await daemon.recall(question.question, {
+          maxResults: scenarioConfig.maxEntries,
+          conflictAwareness: scenarioConfig.conflictAwareness
+        });
+        observations.push(buildObservation(question, recall, sidecar));
+      }
+      return {
+        seeds,
+        archive: {
+          label,
+          seed_object_kinds: seeds.map((seed) => seed.objectKind),
+          recall_policy: {
+            max_entries: scenarioConfig.maxEntries,
+            conflict_awareness: scenarioConfig.conflictAwareness
+          },
+          report_context_usage: scenarioConfig.reportContextUsage,
+          pre_report_metrics: computeMetrics(preReportObservations),
+          metrics: computeMetrics(observations)
+        }
+      };
     }
 
     const observations: RecallObservation[] = [];
@@ -390,7 +484,12 @@ async function seedFixture(
     const seed = await daemon.proposeMemory(
       fixtureSeed.content,
       `controlled-replay-${fixtureSeed.id}`,
-      { objectKind }
+      {
+        objectKind,
+        ...(fixtureSeed.distilledFact === undefined
+          ? {}
+          : { distilledFact: fixtureSeed.distilledFact })
+      }
     );
     seeds.push({
       fixtureId: fixtureSeed.id,
@@ -416,7 +515,6 @@ async function reportMixedUsage(
       const seed = sidecar.get(result.object_id);
       return seed !== undefined && expected.has(seed.fixtureId);
     })
-    .slice(0, 1)
     .map((result) => result.object_id);
   const fallbackUsed = usedObjectIds.length === 0 && recall.results[0] !== undefined
     ? [recall.results[0].object_id]
@@ -470,8 +568,10 @@ function buildObservation(
 
 function computeMetrics(observations: readonly RecallObservation[]): ScenarioMetrics {
   const rankDistribution = emptyRankDistribution();
+  const expectedRankByQuestion: Record<string, number | null> = {};
   let rankTotal = 0;
   let rankedCount = 0;
+  let hitAt5 = 0;
   let nonMonotonic = 0;
   let activeConstraints = 0;
   let budgetDropMaxEntries = 0;
@@ -480,11 +580,15 @@ function computeMetrics(observations: readonly RecallObservation[]): ScenarioMet
   let diagnosticsCount = 0;
 
   for (const observation of observations) {
+    expectedRankByQuestion[observation.questionId] = observation.expectedRank;
     const bucket = rankBucket(observation.expectedRank);
     rankDistribution[bucket] = (rankDistribution[bucket] ?? 0) + 1;
     if (observation.expectedRank !== null) {
       rankTotal += observation.expectedRank;
       rankedCount++;
+      if (observation.expectedRank <= 5) {
+        hitAt5++;
+      }
     }
     activeConstraints += observation.activeConstraints.length;
     for (const diagnostic of observation.diagnostics) {
@@ -516,6 +620,11 @@ function computeMetrics(observations: readonly RecallObservation[]): ScenarioMet
 
   return {
     rank_distribution: rankDistribution,
+    expected_rank_by_question: expectedRankByQuestion,
+    hit_at_5: {
+      count: hitAt5,
+      rate: ratio(hitAt5, observations.length)
+    },
     average_expected_rank: rankedCount === 0 ? null : round(rankTotal / rankedCount),
     non_monotonic: { count: nonMonotonic },
     active_constraints: { count: activeConstraints },
@@ -529,8 +638,11 @@ function computeMetrics(observations: readonly RecallObservation[]): ScenarioMet
 
 function aggregateScenarioMetrics(scenarios: readonly ScenarioArchive[]): ScenarioMetrics {
   const rankDistribution = emptyRankDistribution();
+  const expectedRankByQuestion: Record<string, number | null> = {};
   let rankTotal = 0;
   let rankedScenarioCount = 0;
+  let hitAt5Count = 0;
+  let hitAt5Denominator = 0;
   let nonMonotonic = 0;
   let activeConstraints = 0;
   let budgetDropMaxEntries = 0;
@@ -540,6 +652,9 @@ function aggregateScenarioMetrics(scenarios: readonly ScenarioArchive[]): Scenar
   let diagnosticsCount = 0;
 
   for (const scenario of scenarios) {
+    for (const [questionId, rank] of Object.entries(scenario.metrics.expected_rank_by_question)) {
+      expectedRankByQuestion[`${scenario.label}/${questionId}`] = rank;
+    }
     for (const [bucket, count] of Object.entries(scenario.metrics.rank_distribution)) {
       rankDistribution[bucket] = (rankDistribution[bucket] ?? 0) + count;
     }
@@ -547,6 +662,8 @@ function aggregateScenarioMetrics(scenarios: readonly ScenarioArchive[]): Scenar
       rankTotal += scenario.metrics.average_expected_rank;
       rankedScenarioCount++;
     }
+    hitAt5Count += scenario.metrics.hit_at_5.count;
+    hitAt5Denominator += scenario.metrics.delivery_count;
     nonMonotonic += scenario.metrics.non_monotonic.count;
     activeConstraints += scenario.metrics.active_constraints.count;
     budgetDropMaxEntries += scenario.metrics.budget_drop.max_entries;
@@ -558,6 +675,11 @@ function aggregateScenarioMetrics(scenarios: readonly ScenarioArchive[]): Scenar
 
   return {
     rank_distribution: rankDistribution,
+    expected_rank_by_question: expectedRankByQuestion,
+    hit_at_5: {
+      count: hitAt5Count,
+      rate: ratio(hitAt5Count, hitAt5Denominator)
+    },
     average_expected_rank:
       rankedScenarioCount === 0 ? null : round(rankTotal / rankedScenarioCount),
     non_monotonic: { count: nonMonotonic },
@@ -595,6 +717,74 @@ function buildColdWarmDelta(
     budget_drop_max_entries_delta:
       warm.metrics.budget_drop.max_entries - cold.metrics.budget_drop.max_entries
   };
+}
+
+function buildNativeHealthGates(
+  scenarios: readonly ScenarioArchive[]
+): readonly NativeHealthGate[] {
+  const warm = scenarios.find((scenario) => scenario.label === "warm-report-context-usage-mixed");
+  const cold = scenarios.find((scenario) => scenario.label === "cold-report-context-usage-none");
+  const trustLoopGain =
+    warm?.pre_report_metrics === undefined
+      ? null
+      : round(warm.metrics.hit_at_5.rate - warm.pre_report_metrics.hit_at_5.rate);
+  const plasticityRankGain = computeQuestionRankGain(
+    cold?.metrics.expected_rank_by_question ?? null,
+    warm?.metrics.expected_rank_by_question ?? null,
+    "q-path-target"
+  );
+
+  return Object.freeze([
+    minNativeHealthGate(
+      "trust_loop_activation_gain",
+      "trust loop activation gain",
+      trustLoopGain,
+      0.05
+    ),
+    minNativeHealthGate(
+      "plasticity_gradient_rank_gain",
+      "plasticity canary rank gain",
+      plasticityRankGain,
+      2
+    )
+  ]);
+}
+
+function minNativeHealthGate(
+  id: NativeHealthGate["id"],
+  label: string,
+  current: number | null,
+  target: number
+): NativeHealthGate {
+  return {
+    id,
+    label,
+    current,
+    target,
+    direction: "min",
+    passed: current !== null && current >= target,
+    missing: current === null
+  };
+}
+
+function computeQuestionRankGain(
+  coldRanks: Readonly<Record<string, number | null>> | null,
+  warmRanks: Readonly<Record<string, number | null>> | null,
+  questionId: string
+): number | null {
+  if (
+    coldRanks === null ||
+    warmRanks === null ||
+    !(questionId in coldRanks) ||
+    !(questionId in warmRanks)
+  ) {
+    return null;
+  }
+  return round(rankOrMissPenalty(coldRanks[questionId]) - rankOrMissPenalty(warmRanks[questionId]));
+}
+
+function rankOrMissPenalty(rank: number | null | undefined): number {
+  return rank === null || rank === undefined ? 11 : rank;
 }
 
 function buildContributionSuspects(
@@ -681,6 +871,7 @@ function readCandidateDiagnostics(raw: unknown): readonly CandidateDiagnostic[] 
     return [{
       object_id: objectId,
       pre_budget_rank: readNumber(record.pre_budget_rank),
+      fused_rank: readNumber(record.fused_rank),
       final_rank: readNumber(record.final_rank),
       dropped_reason: readString(record.dropped_reason),
       lexical_rank: readNumber(record.lexical_rank),
@@ -737,7 +928,7 @@ function resolveCommitSha7(): string {
 }
 
 async function assertArchiveSlotFree(historyRoot: string, slug: string): Promise<void> {
-  const entryDir = join(historyRoot, "public", slug);
+  const entryDir = join(historyRoot, CONTROLLED_REPLAY_HISTORY_SPLIT, slug);
   try {
     await access(entryDir);
   } catch (error) {
@@ -752,7 +943,7 @@ async function writeControlledReplayArchive(
   slug: string,
   archive: ControlledReplayArchive
 ): Promise<string> {
-  const benchRoot = join(historyRoot, "public");
+  const benchRoot = join(historyRoot, CONTROLLED_REPLAY_HISTORY_SPLIT);
   const entryDir = join(benchRoot, slug);
   await mkdir(benchRoot, { recursive: true });
   try {
@@ -795,4 +986,9 @@ function isNodeErrorCode(error: unknown, code: string): boolean {
 
 function round(value: number): number {
   return Math.round(value * 1000) / 1000;
+}
+
+function ratio(numerator: number, denominator: number): number {
+  if (denominator <= 0) return 0;
+  return round(numerator / denominator);
 }

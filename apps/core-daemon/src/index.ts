@@ -691,7 +691,17 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       searchByKeyword: async (workspaceId, queryText, limit) =>
         evidenceCapsuleRepo.searchByKeyword === undefined
           ? []
-          : await evidenceCapsuleRepo.searchByKeyword(workspaceId, queryText, limit)
+          : await evidenceCapsuleRepo.searchByKeyword(workspaceId, queryText, limit),
+      findByIds: async (workspaceId, evidenceObjectIds) => {
+        const results = await evidenceCapsuleRepo.findByIds(evidenceObjectIds);
+        const scoped = [];
+        for (const evidence of results) {
+          if (evidence.workspace_id === workspaceId) {
+            scoped.push(evidence);
+          }
+        }
+        return scoped;
+      }
     },
     ...(globalMemoryRepo === null
       ? {}

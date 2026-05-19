@@ -160,6 +160,7 @@ export async function readLatestLongMemEvalOppositeArchive(input: {
     if (
       payload !== null &&
       payload.split === input.current.split &&
+      payload.embedding_provider === input.current.embedding_provider &&
       (payload.policy_shape ?? "stress") === policyShape &&
       (payload.simulate_report ?? "none") === oppositeMode
     ) {
@@ -223,7 +224,7 @@ export function buildLongMemEvalColdWarmComparisonSidecar(input: {
       oppositeMode === null
         ? `simulate_report=${currentMode} is outside the cold-none/warm-mixed comparison pair`
         : opposite === null
-          ? `No prior same split/policy simulate_report=${oppositeMode} archive found`
+          ? `No prior same split/policy/embedding_provider simulate_report=${oppositeMode} archive found`
           : null
   };
 }

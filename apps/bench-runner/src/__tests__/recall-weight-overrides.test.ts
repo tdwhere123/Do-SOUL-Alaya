@@ -57,7 +57,7 @@ describe("bench recall weight overrides", () => {
           PATH_PLASTICITY_WEIGHT: 0.12
         },
         fusion_weights: {
-          future_signal: 0.5
+          lexical_fts: 0.5
         }
       })
     });
@@ -67,7 +67,7 @@ describe("bench recall weight overrides", () => {
       scope_match: 0.08,
       relevance: 0.2
     });
-    expect(formatBenchRecallWeightOverrides(overrides!)).toContain("future_signal=0.5");
+    expect(formatBenchRecallWeightOverrides(overrides!)).toContain("lexical_fts=0.5");
 
     const policy = applyBenchRecallWeightOverrides(basePolicy(), overrides);
     expect(policy.domain_weight_overrides?.["bench-seed"]).toEqual({
@@ -84,7 +84,7 @@ describe("bench recall weight overrides", () => {
       PATH_PLASTICITY_WEIGHT: 0.12
     });
     expect(policy.scoring_weight_overrides?.fusion_weights).toEqual({
-      future_signal: 0.5
+      lexical_fts: 0.5
     });
   });
 
@@ -115,21 +115,31 @@ describe("bench recall weight overrides", () => {
       resolveBenchRecallWeightOverrides({
         cliJson: JSON.stringify({
           fusion_weights: {
-            future_signal: -0.5
+            lexical_fts: -0.5
           }
         })
       })
-    ).toThrow(/fusion_weights\.future_signal must be >= 0/);
+    ).toThrow(/fusion_weights\.lexical_fts must be >= 0/);
+
+    expect(() =>
+      resolveBenchRecallWeightOverrides({
+        cliJson: JSON.stringify({
+          fusion_weights: {
+            lexcial_fts: 0.5
+          }
+        })
+      })
+    ).toThrow(/fusion_weights contains unknown key\(s\): lexcial_fts/);
   });
 
   it("lets direct CLI JSON take precedence over the env JSON", () => {
     const overrides = resolveBenchRecallWeightOverrides({
-      cliJson: JSON.stringify({ fusion_weights: { cli_signal: 1 } }),
-      envJson: JSON.stringify({ fusion_weights: { env_signal: 1 } })
+      cliJson: JSON.stringify({ fusion_weights: { lexical_fts: 1 } }),
+      envJson: JSON.stringify({ fusion_weights: { evidence_fts: 1 } })
     });
 
     expect(overrides?.source).toBe("cli");
-    expect(overrides?.summary.fusion_weights).toEqual({ cli_signal: 1 });
+    expect(overrides?.summary.fusion_weights).toEqual({ lexical_fts: 1 });
   });
 
   it("parses env JSON when direct CLI JSON is absent", () => {
@@ -154,7 +164,13 @@ describe("bench recall weight overrides", () => {
     );
 
     expect(script).toContain("--weights) WEIGHTS=\"$2\"; shift 2;;");
+    expect(script).toContain("--data-dir) DATA_DIR=\"$2\"; shift 2;;");
     expect(script).toContain("weights_args=(--weights \"$WEIGHTS\")");
     expect(script).toContain("\"${weights_args[@]}\"");
+    expect(script).toContain("--data-dir \"$DATA_DIR\"");
+    expect(script).toContain("! -path '*/__tests__/*'");
+    expect(script).toContain("! -name '*.test.ts'");
+    expect(script).toContain("exited 1 after writing KPI; allowing merge");
+    expect(script).toContain("allowing merge to enforce release hard gates");
   });
 });

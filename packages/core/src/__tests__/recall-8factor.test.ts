@@ -472,8 +472,9 @@ describe("RecallService 8-factor scoring", () => {
       policyOverride: basePolicy
     });
 
-    expect(withoutTransfer.candidates[0]?.object_id).toBe("stale-prior");
+    expect(withoutTransfer.candidates[0]?.object_id).toBe("query-match");
     expect(withTransfer.candidates[0]?.object_id).toBe("query-match");
+    expect(withoutTransfer.candidates[0]?.score_factors?.query_evidence_transfer).toBeCloseTo(0);
     expect(withTransfer.candidates[0]?.score_factors?.content_relevance).toBeCloseTo(1);
     expect(withTransfer.candidates[0]?.score_factors?.query_evidence_transfer).toBeCloseTo(0.25);
     expect(withTransfer.candidates[0]?.score_factors?.adjusted_base_weight).toBeCloseTo(0.45);
