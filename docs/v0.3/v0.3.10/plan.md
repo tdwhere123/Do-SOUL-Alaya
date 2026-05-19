@@ -13,9 +13,9 @@
 
 ## TL;DR
 
-> 2026-05-19 用户选 γ 双轨 KPI 后 scope 大扩：embedding-off + embedding-on 两轨都得过；
-> Cat-F5 cross-encoder 从 v0.4 提前到 v0.3.10；新增 Cat-X retrieval expansion。
-> 周期从 1.5-2 周变 4-5 周。
+> 2026-05-19 用户 D20 决策：v0.3.10 走 **Alaya-native 主线**——不变 RAG。
+> Cat-F5 cross-encoder（任何形式）**re-park 到 v0.4**；Cat-X 仅保留 Alaya-native 项（X2/X3/X4）；
+> KPI 主线 = R@5 credibility floors **并列** Alaya-native health 指标；embedding 仍 opt-in。
 
 ```
 Phase A (3-4 天) — 测量基础设施前置
@@ -25,53 +25,48 @@ Phase B (4-5 天) — β 融合公式 + budget cut 改造
   └─ 真正改代码的只有 2 处：D1 (recall-service.ts:1721-1724) + G1 (recall-service.ts:1628)
   └─ 出口验证 K1.1-off 至少能跑到 70%（融合本身的贡献）
 
-Phase X (5-7 天) — Cat-X retrieval expansion（γ embedding-off 70% 必需）
-  └─ Lexical 同义词/词干/trigram；Evidence partial-phrase；Session/Date query expansion
-  └─ 出口验证 K1.1-off 接近 75% 硬线 + K1.4-off 显著好于 1.3%
+Phase X (3-4 天) — Cat-X Alaya-native retrieval expansion（修剪版）
+  └─ X2 Evidence partial-phrase + multi-key（Alaya-native：evidence 是独家）
+  └─ X3 Session-id query parser（Alaya-native：session 是独家概念）
+  └─ X4 Date-aware query expansion（agent-native）
+  └─ ❌ X1 lexical 同义词/词干/trigram 砍（generic RAG，不做）
 
-Phase F (7-9 天) — Cat-F5 Cross-encoder rerank（γ embedding-on 70% 必需）
-  └─ 模型选型走 research-first（architecture-taste-reviewer gate）
-  └─ Inference runtime 集成 + bench 双轨集成
-  └─ 出口验证 K1.1-on / K1.4-on 都达 70% 硬线
-
-Phase C (5-6 天) — Stream/rerank weight sweep + 6 场景 controlled-replay 双轨 + 守护验证
-  └─ 这里决定 6 条 K1.* 双轨硬线能不能全过
+Phase C (4-5 天) — Stream weight sweep + 6 场景 controlled-replay 双轨 + 守护 + Alaya-native 指标验证
+  └─ R@5 双轨 + KN.1-KN.5 一并测；这里决定 must 线能不能全过
 
 Phase D (3-4 天) — review-loop + release notes + closeout
   └─ K2.3 cohort 必须守稳；零 Blocking/Important 才 release
-  └─ release notes 明示 LoCoMo embedding-off 55% 的 trade-off
+  └─ release notes 立场：达 hybrid retrieval baseline；不上 rerank；Alaya 独家结构 ship-grade
 ```
 
-总计 27-35 天（约 4-5 周）。**这不是 hotfix，是真 release。**
+总计 17-22 天（约 3-3.5 周）。**β 范围 + Alaya-native 主线；不打 RAG 全配置牌。**
 
-## Phase 排程（γ 大扩 scope 后）
+## Phase 排程（D20 Alaya-native 主线后）
 
 | Phase | 起止 (估) | 范围 | 出口条件 |
 |---|---|---|---|
 | A | D1-D4 | 5 项 ship-blocker 基础设施 + Era 1 carry-forward 必需项 | controlled-replay archive ≥ 1；M4b emit；quality_metrics 进 kpi.json；archive 标 pipeline 版本；既有 score 守护 tested |
 | B | D5-D9 | RRF 融合公式（D1）+ fused-rank budget cut（G1）+ E1 lexical priority + 8 streams emit | 既有 score 仍 emit；diagnostic shape 加 `fused_rank`；K1.1-off ≥ 70%（融合本身贡献）|
-| X | D10-D16 | Cat-X retrieval expansion (X1-X4)：lexical 同义词/词干/trigram + evidence partial-phrase + session/date query parser | K1.1-off 接近 75% 硬线；K1.4-off 显著好于 1.3%；新 streams 在 RRF 内 emit rank |
-| F | D17-D25 | Cat-F5 cross-encoder rerank：模型选型 (research-first) + runtime 集成 + bench 双轨集成 | K1.1-on / K1.4-on 双双 ≥ 70%；rerank latency probe ≤ 1500ms p95 (on)；cross-encoder 模型本地化 ship-ready |
-| C | D26-D31 | Sweep（stream weights + RRF k + rerank threshold）+ 6 场景 controlled-replay 双轨 + 5 ship-blocker 守护测量 | 6 条 K1.* 双轨硬线全过；F-1..F-5 falsification 全通过；K2.3 cohort 偏移 < 15pp |
-| D | D32-D35 | review-loop（architecture + red-team + spec-compliance + codex adversarial）+ Cat-G/A/D 收尾 + release notes 明文版 | zero Blocking + zero Important；release notes 含 LoCoMo-off 55% trade-off 解释；closeout 写完 |
+| X | D10-D13 | Cat-X Alaya-native expansion (X2/X3/X4)：evidence partial-phrase + session/date query parser | K1.1-off ≥ 70%（must）；K1.4-off ≥ 35%（must）；新 streams 在 RRF 内 emit rank |
+| C | D14-D18 | Stream weight sweep + 6 场景 controlled-replay 双轨 + 5 ship-blocker 守护测量 + KN.1-KN.5 Alaya-native 指标验证 | 6 条 K1.* 双轨硬线全过 + 5 条 KN.* 全过 + F-1..F-5 falsification 全通过 + K2.3 cohort 偏移 < 15pp |
+| D | D19-D22 | review-loop（architecture + red-team + spec-compliance + codex adversarial）+ Cat-G/A/D 收尾 + release notes 明文版 | zero Blocking + zero Important；release notes 含 Alaya-native 立场说明；closeout 写完 |
 
-**Phase X 和 Phase F 内部可部分并行**（Phase X 集中在 retrieval pool 端，Phase F 集中在 rerank 端），如人手充足可叠交。但 Phase X 出口必须先于 Phase F 出口（embedding-off 不依赖 rerank 也能跑 baseline；embedding-on 依赖 rerank）。
+## Cat 总览（D20 Alaya-native 主线版）
 
-## Cat 总览（γ 大扩 scope 后）
-
-| Cat | 名字 | γ 后状态 | 主要变化 vs Era 1 |
+| Cat | 名字 | D20 后状态 | 主要变化 vs γ |
 |---|---|---|---|
 | **M** | Measurement infrastructure | **保留 + 强化** | M0 controlled-replay 必须跑出 archive；M4b 升为硬前置 |
 | **R** | Ranking core repair | **大部已完成** | R1/R2/R3/R5/SG-5 已 commit；R6 score factor 调撤回（β 不再调权重）|
 | **F** | Fusion + budget cut | **重塑** | "linear fusion + rerank stage" → "RRF over 8 streams + fused-rank budget cut" |
-| **F5** | **Cross-encoder rerank**（γ 提前 v0.4 → v0.3.10）| **新增 / un-park** | embedding-on 70% must 线的必需 stage；模型选型走 research-first |
-| **X** | **Retrieval expansion**（γ 新增 Cat）| **新增** | embedding-off 75%/55% must 线的必需手段；lexical + evidence + session + date query expansion |
+| ~~**F5**~~ | ~~Cross-encoder rerank~~ | **re-park 到 v0.4**（D20）| D19 提前 v0.4→v0.3.10 撤回；任何形式（API / local）都不做。本 release 不走 RAG 全配置路 |
+| **X** | **Alaya-native retrieval expansion**（修剪版）| **保留 X2/X3/X4，砍 X1** | X1 lexical 同义词砍（generic RAG）；保留 evidence partial-phrase + session/date query parser（Alaya-native）|
+| **KN** | **Alaya-native health 指标**（D20 新增 Cat）| **新增** | KN.1-KN.5 trust loop / cohort / evidence stream / path stream / plasticity 主线 KPI |
 | **P** | Path activation | **保留** | path 作 stream S6；P1-P4 work items 大部分仍有效 |
-| **E** | Embedding (双轨必跑) | **强化** | bench 必须**双轨同跑**；不做 default-on（D11 不变）|
+| **E** | Embedding (双轨 measurement) | **从 deliverable 降为 measurement axis** | bench 双轨同跑只为度量"开嵌入多少提升"；不再是 must 线主体 |
 | **G** | Governance consolidation | **保留** | 与 β 正交；维持 Era 1 G1-G5 work items |
 | **A** | Architecture invariant alignment | **保留** | §12 / §20 / §35-36 prose 修正 |
-| **D** | Documentation truth + carry-forward | **保留 + γ 增量** | release notes 含 Q3=A 明文承认 + LoCoMo-off 55% trade-off 解释；24 + 8 carry-forward 闭合 |
-| **B** | Bench reproducibility | **保留 + γ 增量** | archive header 必带 `recall_pipeline_version`；双轨 archive 双倍数量 |
+| **D** | Documentation truth + carry-forward | **保留 + D20 增量** | release notes 立场转变："达 hybrid retrieval baseline；不上 rerank；Alaya 独家结构 ship-grade"；24 + 8 carry-forward 闭合 |
+| **B** | Bench reproducibility | **保留** | archive header 必带 `recall_pipeline_version`；双轨 archive |
 
 ## Dependency Graph (β 后)
 
@@ -96,25 +91,20 @@ Phase C (parallel where possible)
   ├─ C4 — non_monotonic_rate / budget_dropped / candidate_absent 实测
   └─ C5 — latency probe（embedding-off ≤ 200ms 硬线）
 
-Phase X (parallel with Phase F where possible, 但 X 出口必先于 F 出口)
-  ├─ X1 — Lexical FTS 同义词/词干/trigram 扩展
-  ├─ X2 — Evidence FTS partial-phrase + multi-key
-  ├─ X3 — Session-id query parser（"yesterday/last session" → 抽 session 范围）
+Phase X (sequential, Alaya-native 修剪版)
+  ├─ X2 — Evidence FTS partial-phrase + multi-key (Alaya-native)
+  ├─ X3 — Session-id query parser（"yesterday/last session" → 抽 session 范围, Alaya-native）
   ├─ X4 — Date-aware query expansion（"April 28" → 抽时间窗）
-  └─ X5 — bench 测 K1.*-off 接近硬线
+  └─ X5 — bench 测 K1.*-off 接近 must 线
+  ❌ X1 — Lexical FTS 同义词/词干/trigram 砍（generic RAG，违 Alaya-native 立场）
 
-Phase F (sequential, 强依赖 Phase X，因为 rerank 依赖 candidate pool 已经富集)
-  ├─ F5a — Cross-encoder 模型选型（research-first decision；架构师 gate）
-  ├─ F5b — Inference runtime 集成（onnxruntime-node / 类似）
-  ├─ F5c — Rerank 接在 fused-rank cut 之后（cut 出 top-30, rerank 取 top-10）
-  ├─ F5d — Bench fixture 加 rerank 路径，双轨 archive
-  └─ F5e — Latency probe（rerank 加持下 embedding-on p95 ≤ 1500ms）
+[Phase F deleted — Cat-F5 cross-encoder re-park 到 v0.4]
 
 Phase D (sequential)
   ├─ D1 — multi-lens review-loop（architect + red-team + spec-compliance + codex adversarial）
   ├─ D2 — fix-loop 循环到 zero Blocking/Important
   ├─ D3 — Cat-G / Cat-A / Cat-D carry-forward 收口
-  └─ D4 — closeout + release notes 明文版（含 LoCoMo-off 55% trade-off 解释）
+  └─ D4 — closeout + release notes Alaya-native 立场版
 ```
 
 ---
@@ -232,19 +222,16 @@ Phase D (sequential)
 
 ---
 
-# Phase X — Retrieval Expansion (γ embedding-off 70% 必需)
+# Phase X — Alaya-Native Retrieval Expansion (修剪版)
 
-> 目的：把 embedding-off candidate pool 覆盖率从 ~38% 推到 ≥75%。
-> 没有这一 Phase，K1.1-off (75%) 和 K1.4-off (55%) 物理不可达。
+> 目的：把 embedding-off candidate pool 覆盖率从 ~38% 推到 ≥55-60%。
+> 只保留 Alaya-native 项（evidence / session / date 是 Alaya 独家概念），
+> 砍掉 generic RAG 项（X1 lexical synonyms）。
+> 没有这一 Phase，K1.1-off ≥ 70% 和 K1.4-off ≥ 35% 物理不可达。
 
-## X.X1 — Lexical FTS 同义词 / 词干 / trigram 扩展
+## ~~X.X1 — Lexical FTS 同义词 / 词干 / trigram 扩展~~（砍）
 
-- **scope**：FTS 加 trigram 索引 + PostgreSQL `pg_trgm` 类似 fuzzy；同义词词表（小规模）+ 词干 stemming
-- **target files**：`packages/storage/src/migrations/`（新 trigram migration）+ `packages/core/src/recall-service.ts` FTS 查询路径
-- **acceptance**：lexical pool 候选数提升 ≥ 30%（同测试集对比）
-- **dependency**：A.B0（archive 版本标）
-- **KPI**：K1.*-off must；K2.6 candidate_absent
-- **risk**：trigram 增加 FTS latency；mitigation = 配置化开关
+D20 决策：**不做**。X1 是 generic RAG 的标准 trick，违反 Alaya-native 立场。如果未来确实需要更宽 lexical 召回，应优先评估是否能通过 Alaya 的 evidence / claim / synthesis 结构覆盖，而不是搬 RAG 的 trigram。
 
 ## X.X2 — Evidence FTS partial-phrase + multi-key
 
@@ -270,87 +257,41 @@ Phase D (sequential)
 - **dependency**：无
 - **KPI**：K1.1-off / K1.1-on
 
-## X.X5 — Bench 测 K1.*-off 接近硬线
+## X.X5 — Bench 测 K1.*-off 接近 must 线
 
-- **scope**：完成 X1-X4 后跑 LongMemEval-S 100 + LoCoMo 100 子集 archive，确认接近 K1.1-off 75% / K1.4-off 55% 硬线
-- **acceptance**：未达硬线进 fix-loop（X 内部）；达线进 Phase F
-- **dependency**：X.X1-X.X4
-
----
-
-# Phase F — Cross-Encoder Rerank (γ embedding-on 70% 必需)
-
-> 目的：embedding-on 路径下加显式 rerank stage，把 candidate 池中的 gold 推进 top-K。
-> Cross-encoder 在 embedding-off 路径下也可工作（不依赖 embedding），但 latency 代价较高，
-> 默认只在 embedding-on policy 启用；embedding-off 走 X 路径不强求 rerank。
-
-## F.F5a — Cross-encoder 模型选型（research-first decision）
-
-- **scope**：评估候选模型（ms-marco-MiniLM-L-6-v2 / bge-reranker-base / bge-reranker-large）
-- **research-first triggers**：新依赖（ML 模型）+ 新 runtime（onnxruntime-node 或类似）+ 新存储（模型文件 ~90MB-1GB）
-- **必走 gate**：派 `architecture-taste-reviewer` 审查（per skill 触发条件）；审通过 + 用户拍板才进入 F5b
-- **target output**：`.do-it/findings/v0.3.10/cross-encoder-model-selection.md` decision 文档
-- **acceptance**：选型 decision 文档落地；reviewer 通过；用户拍板
-- **dependency**：无
-- **KPI**：影响 K1.*-on must 是否可达
-
-## F.F5b — Inference runtime 集成
-
-- **scope**：把选型的模型 runtime 集成到 daemon；模型文件管理（首次下载 / 校验 / 本地缓存）
-- **target files**：`apps/core-daemon/src/`（runtime wiring）+ `packages/core/src/`（rerank service port）
-- **acceptance**：单 (query, doc) pair rerank inference ≤ 20ms p95（CPU）；模型加载在 daemon 启动时 ≤ 5s
-- **dependency**：F.F5a
-
-## F.F5c — Rerank 接在 fused-rank cut 之后
-
-- **scope**：fused-rank cut 输出 top-30；rerank 计算 (query, candidate.content) score；按 rerank score 重排，取 top-`max_entries`
-- **target files**：`packages/core/src/recall-service.ts` 在 G.G1 之后加 rerank stage
-- **acceptance**：rerank 接入后既有 K2.3 cohort 守护仍守得住（plane_first_admitted 不漂移）
-- **dependency**：F.F5b + B.B2
-
-## F.F5d — Bench fixture 加 rerank 路径，双轨 archive
-
-- **scope**：bench-runner 加 rerank toggle；每个 K1.* 跑双轨 archive
-- **target files**：`apps/bench-runner/src/longmemeval/runner.ts` + `apps/bench-runner/src/locomo/runner.ts`
-- **acceptance**：每数据集 4 个 archive（embedding × rerank 笛卡尔积）
-- **dependency**：F.F5c
-
-## F.F5e — Latency probe
-
-- **scope**：rerank 加持下 embedding-on / embedding-off 双轨 latency probe
-- **acceptance**：
-  - embedding-on p95 ≤ 1500ms（rerank top-30 = +30 × 20ms = +600ms over base）
-  - embedding-off p95 ≤ 400ms（rerank optional，默认 off）
-- **dependency**：F.F5d
+- **scope**：完成 X2-X4 后跑 LongMemEval-S 100 + LoCoMo 100 子集 archive，确认接近 K1.1-off ≥ 70% / K1.4-off ≥ 35% must 线
+- **acceptance**：未达 must 进 fix-loop（X 内部）；达线进 Phase C
+- **dependency**：X.X2-X.X4
 
 ---
 
-# Phase C — Stream weight sweep + 5 ship-blocker 守护验证
+# Phase C — Stream weight sweep + 5 ship-blocker 守护 + Alaya-native 指标验证
 
 > Phase B 落地 = 架构改对了。Phase C = 调对 + 守护没破。
 > 任何 ship-blocker（I-1..I-6）守护没过的，立刻进 Phase D fix-loop，不放到 Phase D 末尾。
 
-## C.C1 — Stream / Rerank weight sweep (γ 双轨)
+## C.C1 — Stream weight sweep (Alaya-native 双轨 measurement)
 
-- **scope**：用 M1 weight-sweep harness 跑 stream weight + RRF k + rerank threshold 矢量；
-  双轨同跑（embedding-off / embedding-on）
+- **scope**：用 M1 weight-sweep harness 跑 stream weight + RRF k 矢量；双轨同跑（embedding-off / embedding-on）
 - **sweep 维度**：
-  - stream weights：等权 / lexical 加重 / structural 加重 / embedding 加重 / temporal 加重
+  - stream weights：等权 / lexical 加重 / structural 加重 / embedding 加重 / temporal 加重 / evidence 加重 / path 加重
   - RRF k：30 / 60 / 90
-  - rerank top-N（只在 embedding-on）：20 / 30 / 50
 - **target output**：每组 sweep 产出 1 对 archive（off + on）；trend dashboard 对比 R@5
-- **acceptance**：选 best vector，**6 条 K1.* 双轨硬线全过**：K1.1-off ≥75% / K1.3-off ≥70% / K1.4-off ≥55% / K1.1-on ≥70% / K1.3-on ≥70% / K1.4-on ≥70%
-- **dependency**：B.B1-B.B4 + X.X1-X.X5 + F.F5a-F.F5e 全部落地
+- **acceptance**：选 best vector，**6 条 K1.* 双轨 must 线全过**：
+  - K1.1-off ≥ 70% / K1.1-on ≥ 55%
+  - K1.3-off ≥ 65% / K1.3-on ≥ 55%
+  - K1.4-off ≥ 35% / K1.4-on ≥ 50%
+- **dependency**：B.B1-B.B4 + X.X2-X.X5 全部落地
 - **KPI**：K1.* 主指标双轨
-- **decision point**（user 拍板）：如果 sweep 全部某轨 < 硬线，user 决定调 RRF k / 补 stream / 调 rerank threshold / 增 Phase X-X5 retrieval pass
+- **decision point**（user 拍板）：如果 sweep 全部某轨 < must 线，user 决定调 RRF k / 补 stream / 增 Phase X retrieval pass / 或接受降低 must 写 carry-forward
 
 ## C.C2 — 6 场景 controlled-replay 全融合双轨 archive
 
-- **scope**：6 场景在融合 + rerank 开启下各跑 1 对 archive（off + on）= 12 archive（Q1=A 全 6 场景硬线 × γ 双轨）
-- **acceptance**：12 archive 落地；对比 Phase A.M0 的 6 baseline archive（baseline 单轨），建立"融合前 vs 融合后" + "off vs on"两维对照
+- **scope**：6 场景在融合开启下各跑 1 对 archive（off + on）= 12 archive（Q1=A 全 6 场景硬线 × 双轨）
+- **acceptance**：12 archive 落地；对比 Phase A.M0 的 6 baseline archive，建立"融合前 vs 融合后" + "off vs on"两维对照
 - **dependency**：C.C1 选定 weights
 - **KPI**：K5.4 controlled replay contribution split
-- **ship-blocker**：F-5 + Q1=A 用户拍板 + γ 双轨
+- **ship-blocker**：F-5 + Q1=A 用户拍板 + 双轨
 
 ## C.C3 — K2.3 cohort 守护实测
 
@@ -370,15 +311,28 @@ Phase D (sequential)
 - **dependency**：C.C2
 - **KPI**：K2.1 + K2.2
 
-## C.C5 — Latency probe (γ 双轨)
+## C.C5 — Latency probe (双轨)
 
 - **scope**：跑 latency probe（同样 100 题，重复 5 次取 p95）
 - **acceptance**：
-  - embedding-off p95 ≤ 400ms（γ 修订：β 原计划 200ms，但加 Cat-X retrieval expansion 后预期上升）
-  - embedding-on p95 ≤ 1500ms（γ 修订：加 cross-encoder rerank 后 +600ms 预算）
-- **dependency**：C.C2 + F.F5e
+  - embedding-off p95 ≤ 300ms（D20 修订：去掉 rerank 预算；保留 Cat-X 适度上升空间）
+  - embedding-on p95 ≤ 1100ms（D20 修订：去掉 rerank 预算）
+- **dependency**：C.C2
 - **KPI**：K3.1 + K3.2
-- **risk**：streams + rerank 串跑可能超线；如超线进 Phase D fix-loop（Risk I-c）；mitigation = rerank top-N 调小
+- **risk**：streams 串跑可能超线；如超线进 Phase D fix-loop（Risk I-c）
+
+## C.C6 — Alaya-native 指标验证 (D20 新增)
+
+- **scope**：跑 KN.1-KN.5 5 项 Alaya-native 健康指标测量
+- **acceptance**：
+  - KN.1 Trust loop activation gain：第二轮 recall vs 第一轮 R@5 提升 ≥ 5pp（用 controlled-replay `warm-report-context-usage-mixed` 场景）
+  - KN.2 Cohort attribution stability：K2.3 偏移 < 15pp（共用 K2.3 守护）
+  - KN.3 Evidence stream contribution：当 MemoryEntry FTS miss 时，evidence_fts 贡献 ≥ 15% gold delivery
+  - KN.4 Path stream contribution：warm scenario 下 path_expansion 贡献 ≥ 10% top-10
+  - KN.5 Plasticity gradient activation：同 candidate 在 cold→warm 演化下 rank 提升可观测
+- **dependency**：C.C2 + A.M0 archive
+- **KPI**：KN 系列主指标
+- **ship-blocker**：D20 立场基础
 
 ---
 
@@ -458,7 +412,7 @@ Phase D (sequential)
 | F2 | Rerank stage + final global sort | **重塑为 B.B2**（fused-rank budget cut；不加新 stage）|
 | F3 | plane_winning_admission 真语义 | **已完成**（SG-5 in HEAD `9b05d2b`）|
 | F4 | Diagnostics sidecar schema 升级 | **重塑为 A.M4b + B.B4**（diagnostic 加 fused_rank + fusion_breakdown）|
-| F5 | cross-encoder rerank hook（v0.4 placeholder）| **un-park / 提前到 v0.3.10**（γ 决策 D19；embedding-on 70% must 必需；详 Phase F）|
+| F5 | cross-encoder rerank hook（v0.4 placeholder）| **re-park 到 v0.4**（D20 决策；走 Alaya-native 主线不走 RAG 全配置路；任何形式 API/local 都不做）|
 
 ## Cat-P（Path activation）
 
@@ -524,11 +478,12 @@ D1-D4：
 
 完整见 `DECISION-04 § IV`：
 
-1. ~~P4 reranker stage~~ → **un-park 为 Cat-F5 / Phase F**（γ 决策 D19）
+1. **P4 / Cat-F5 cross-encoder rerank** ✅ **re-park 到 v0.4**（D20 决策；D19 提前撤回）
 2. `RecallHints` per-call adjunct（v0.4+ 议题）
 3. `RECALL_ADMISSION_ATTRIBUTION_ORDER` 调序（融合稳定后再评估）
 4. temporal_proximity 重新设计为 stream（v0.4）
 5. embedding-default-on 政策（D11 不变，仍 opt-in；不是 park 而是 invariant）
 6. `assertActivationWeightsSumToOne` override 路径 audit（v0.4）
+7. **X1 lexical 同义词/词干/trigram**（D20：generic RAG，违 Alaya-native 立场；如未来需要更宽 lexical 召回，优先评估 Alaya 结构性方案）
 
-park 即不做，**不是被遗漏**。Cat-F5 已从 park 提到 v0.3.10。
+park 即不做，**不是被遗漏**。

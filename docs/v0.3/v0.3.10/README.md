@@ -55,49 +55,68 @@ relevance，**没移动 R@5**。stopword-free FTS 也试了，反向退化，rev
 | 周期 | 5-6 周 | 1.5-2 周 |
 
 Era 1 的其他 8 Cat（M / R / P / E / G / A / D / B）大部分仍有效。本 release plan
-**继承**这些 Cat 的工作项，**重塑** Cat-F、**un-park 提前** Cat-F5（cross-encoder rerank）、**新增** Cat-X（retrieval expansion），加 5 项 ship-blocker 守护。
+**继承**这些 Cat 的工作项，**重塑** Cat-F、**新增** Cat-X 修剪版（只保留 X2/X3/X4 Alaya-native 项），**新增** Cat-KN（Alaya-native health 指标），加 5 项 ship-blocker 守护。
 
-γ 大扩 scope 后周期 4-5 周（原 β 估 1.5-2 周）。
+**Cat-F5 cross-encoder（任何形式：API / local）re-park 到 v0.4**（D20 撤回 D19 的 un-park）——本 release 不走 RAG 全配置路。
 
-## Quantitative goals (γ 双轨)
+D20 修订后周期回归 3-3.5 周（D19 γ 估 4-5 周；β 原估 1.5-2 周）。
 
-> embedding 仍 opt-in（不默认开，D11 不变）；但 bench 必须双轨同跑，**两轨 must 都得过**。
+## Quantitative goals (D20 Alaya-native 主线)
 
-### Recall quality (K1.* 双轨)
+> embedding 仍 opt-in（不默认开，D11 不变）；rerank 不在 release（D20 撤回）。
+> Tier 1 三组并列必跑：R@5 credibility + Alaya-native health + Pipeline integrity。
 
-| 数据集 | embedding-off must | embedding-on must | should (on) | stretch (on) |
-|---|---|---|---|---|
-| LongMemEval-S 100 | **≥ 75% 硬线** | **≥ 70% 硬线** | ≥ 85% | ≥ 95% (AgentMemory baseline) |
-| LongMemEval-S 500 | **≥ 70% 硬线** | **≥ 70% 硬线** | ≥ 85% | ≥ 92% |
-| LoCoMo full 1982 | **≥ 55% 硬线** (reasoning 物理瓶颈) | **≥ 70% 硬线** | ≥ 80% | ≥ 90% |
+### Tier 1 组 A — R@5 credibility floors（对得起公开 hybrid retrieval baseline）
 
-**关于 LoCoMo embedding-off 单独 55% 的诚实说明**（release notes 必含）：LoCoMo 是 multi-turn dialog reasoning，gold 不一定含 query 字面关键词。即使 retrieval expansion + cross-encoder rerank + RRF 全部做对，没 embedding 的物理上限约 70%。安全 must 线设 55%，承认数据集本质差异。
+| 数据集 | embedding-off must | embedding-on must |
+|---|---|---|
+| LongMemEval-S 100 | **≥ 70%** | **≥ 55%** |
+| LongMemEval-S 500 | **≥ 65%** | **≥ 55%** |
+| LoCoMo full 1982 | **≥ 35%** | **≥ 50%** |
 
-### Pipeline integrity (共通硬线)
+**对标说明**：达公开 hybrid retrieval baseline 水平（无 rerank 加持下），不追 AgentMemory 95% / Supermemory 81-85% 这种全配置 RAG 数字。
 
-| 维度 | must | should | stretch |
-|---|---|---|---|
-| `non_monotonic_rate` (Codex hard metric) | **≤ 10/100** | ≤ 5/100 | ≤ 2/100 |
-| `budget_dropped` | **≤ 8** | ≤ 5 | ≤ 3 |
-| `candidate_absent` | **≤ 6** | ≤ 4 | ≤ 2 |
-| K2.3 cohort 总占比偏移 | **< 15pp** | < 10pp | < 5pp |
-| `soul.recall` p95 (embedding-on, with rerank) | **≤ 1500ms** | ≤ 1000ms | ≤ 700ms |
-| `soul.recall` p95 (embedding-off, with X expansion) | **≤ 400ms** | ≤ 250ms | ≤ 150ms |
+**LoCoMo embedding-off 35% 的诚实说明**（release notes 必含）：LoCoMo 是 multi-turn dialog reasoning，gold 不一定含 query 字面关键词。无 embedding 的物理上限约 50-60%；must 35% 是修好排序 + Alaya-native 扩展能达到的现实底线。
 
-**硬线的含义**：未达 → 进 fix-loop 不进 release（per `feedback_review_loop_until_clean`）。
+### Tier 1 组 B — Alaya-native health（差异化指标）
+
+| KN | 必跑 must |
+|---|---|
+| KN.1 Trust loop activation gain | 第二轮 R@5 比第一轮 ≥ +5pp |
+| KN.2 Cohort attribution stability | K2.3 偏移 < 15pp |
+| KN.3 Evidence stream contribution | 当 memory FTS miss 时 ≥ 15% gold delivery |
+| KN.4 Path stream contribution | warm 场景 ≥ 10% top-10 |
+| KN.5 Plasticity gradient activation | cold→warm rank 提升可观测 |
+
+这是 Alaya 区别于"另一个 RAG 实现"的核心。任何一项 KN.* 未达 → fix-loop。
+
+### Tier 1 组 C — Pipeline integrity (β 守护)
+
+| 维度 | must |
+|---|---|
+| `non_monotonic_rate` (Codex hard metric) | **≤ 10/100** |
+| `budget_dropped` | **≤ 8** |
+| `candidate_absent` | **≤ 6** |
+| K2.3 cohort 总占比偏移 | **< 15pp** |
+| `soul.recall` p95 (embedding-on) | **≤ 1100ms** |
+| `soul.recall` p95 (embedding-off) | **≤ 300ms** |
+
+**硬线的含义**：A / B / C 任一项未达 → 进 fix-loop 不进 release（per `feedback_review_loop_until_clean`）。
 
 ## Load-bearing decisions (delta vs Era 1)
 
-Era 1 的 D1-D15 大部分继续生效；β / γ 加 **D16-D19** 四条新决策：
+Era 1 的 D1-D15 大部分继续生效；β / γ / D20 加 **D16-D20** 五条新决策：
 
 - **D16** — v0.3.10 走 β：多流 RRF 融合 + fused-rank budget cut；既有 score 不删
 - **D17** — `RecallPolicy.intent` knob **显式撤回**；不在 v0.3.10 / v0.4 引入
 - **D18** — Era 1 老 plan 归档 `_archive-additive-score/`；新 plan 从零写
-- **D19** — **γ 双轨 KPI + scope 大扩**：6 条 K1.* 双轨硬线全过才 release；
-  Cat-F5 cross-encoder un-park 到 v0.3.10；新增 Cat-X retrieval expansion；
-  embedding 仍 opt-in（D11 不变），但 bench 必须双轨同跑
+- **D19** — γ 双轨 KPI + scope 大扩（**D20 修订**：见下）
+- **D20** — **Alaya-native 主线修正**：撤回 D19 的 "RAG 全配置 + 70% 全线" 走偏方向。
+  Cat-F5 cross-encoder（任何形式）**re-park 到 v0.4**；Cat-X 砍 X1（generic RAG）；
+  KPI 主线 = R@5 credibility floors **并列** Alaya-native health 指标（KN.1-KN.5）；
+  R@5 must 按数据集 honest 设定（不全线 70%）；embedding 仍 opt-in 双轨 measurement
 
-D16-D19 完整记录在 [`decisions.md`](./decisions.md)（原位 append）。
+D16-D20 完整记录在 [`decisions.md`](./decisions.md)（原位 append）。
 D1-D15 历史决策保持有效但实施细节按 β 重塑：
 - D2（rerank stage 进 v0.3.10）→ 改 "linear fusion + rerank stage" 为 "RRF + fused-rank budget cut"
 - D7（path expansion score → fusion signal）→ 成为 stream S6（path_expansion）
@@ -125,26 +144,37 @@ D1-D15 历史决策保持有效但实施细节按 β 重塑：
 - bench：每 Phase 收尾跑一次，跟 `latest-baseline.json` diff，退化必入 backlog
 - archive header 必带 `recall_pipeline_version`（区分 additive vs fusion-rrf-v1）
 
-## Honest acknowledgement (release notes 蓝本)
+## Honest acknowledgement (release notes 蓝本，D20 立场版)
 
-按 D4 + Q3=A + D19 的明文承认要求，release notes 必包含：
+按 D4 + Q3=A + D20 的明文承认要求，release notes 必包含：
 
-> v0.3.10 正面改造了 read-side scoring 架构：从 single additive score 改为
-> 多流 rank 融合（RRF）+ Cat-X retrieval expansion + Cat-F5 cross-encoder
-> rerank。这次改造的导火索是 v0.3.9 的 producer-side dimension rotation
-> 引爆了 v0.3.0 时代就在的 read-side ranker bias——当 workspace 内 dimension
-> 不再 uniform，加性公式里 70% 的过去状态权重主导排序，导致 LongMemEval-S
-> 100 R@5 从 77%（uniform-FACT artifact）直接跌至 1%。Codex 在 v0.3.10-controller
-> 上花了一周尝试在加性公式内部通过动态权重转移修复，R@5 恢复到 66% 后
-> 无法继续推进。本 release 接受这个事实，把 read-side scoring 从加性单分
-> 换成多流 rank 融合 + 后续 cross-encoder rerank。
+> **架构改造**：v0.3.10 正面改造了 read-side scoring 架构——从 single additive
+> score 改为多流 RRF 融合 + budget cut 在 fused rank 上。这次改造的导火索是
+> v0.3.9 的 producer-side dimension rotation 引爆了 v0.3.0 时代就在的 read-side
+> ranker bias——加性公式里 70% 的过去状态权重主导排序，导致 LongMemEval-S 100
+> R@5 从 77%（uniform-FACT artifact）跌至 1%。Codex 尝试在加性公式内部通过
+> 动态权重转移修复，R@5 恢复到 66% 后无法继续推进。本 release 接受这个事实，
+> 把 read-side scoring 换成多流 rank 融合。
 >
-> **关于 LoCoMo 数据集的 embedding-off 表现**：LoCoMo 是 multi-turn dialog
+> **关于不引入 cross-encoder rerank**：业界 RAG 系统（AgentMemory 95% /
+> Supermemory 81-85%）普遍 cross-encoder rerank + embedding 全配置。我们**不走**
+> 这条路。理由：Alaya 不是文档检索系统，是 **agent 用过、治理过、记账过的内容的
+> 记忆面**。如果把 cross-encoder 也搬进来，Alaya 就退化为"另一个 RAG 实现"——
+> trust loop / governance / evidence / plane attribution / plasticity 这些独家
+> 结构变成中间不重要的 plumbing。v0.3.10 选择**用 Alaya 自己的结构（多流 RRF
+> 把每个 Alaya-native 信号作为独立 stream）证明这套结构本身值钱**，达公开
+> hybrid retrieval baseline 水平（无 rerank 加持），同时 Alaya 独家指标 ship-grade
+> 验证。cross-encoder 是 v0.4+ 议题。
+>
+> **关于 LoCoMo embedding-off 35% must**：LoCoMo 是 multi-turn dialog
 > reasoning，gold 不一定含 query 字面关键词（典型："我女儿生日礼物" 对应
-> "Emma's birthday gift will be a violin"）。即使做了所有 retrieval expansion
-> + cross-encoder rerank + RRF 融合，没 embedding 的物理上限约 70%。本 release
-> 在 LoCoMo embedding-off 路径上设 must ≥ 55%，这是诚实的"承认数据集本质
-> 差异"，不是降标。embedding-on 路径所有数据集 must ≥ 70%。Alaya 仍坚持
-> embedding opt-in 不默认开（local-first invariant §21a）；但 bench 必须
-> 双轨同跑，用户得到的不是单点数字而是 "开嵌入是什么样、没开是什么样"
-> 的完整画像。
+> "Emma's birthday gift will be a violin"）。embedding-off 物理上限约 50-60%；
+> must 35% 是修好排序 + Alaya-native 扩展能达到的现实底线。embedding-on 路径
+> must ≥ 50%。Alaya 仍坚持 embedding opt-in 不默认开（D11 / §21a 不变）；
+> bench 双轨同跑给用户呈现完整画像。
+>
+> **关于 Alaya-native 健康指标**：本 release 把 trust loop activation /
+> evidence stream contribution / path stream contribution / plasticity gradient /
+> cohort attribution 这 5 项 ship-grade 验证作为 R@5 数字的**并列硬线**。
+> 用户买 Alaya 不是为了"R@5 多 5 个点"，是为了"我的 agent 用过的东西真的
+> 会变得更容易被找到"——这套结构必须能被测出来。

@@ -1000,3 +1000,67 @@ embedding-on 轨（70% 全线 must）
 - `docs/v0.3/v0.3.10/kpi-targets.md` K1.* 双轨重设
 - `docs/v0.3/v0.3.10/README.md` 量化目标表更新
 
+---
+
+## D20 — Alaya-native 主线修正：撤回 D19 RAG 全配置路；R@5 + Alaya-native 健康指标并列（用户决定 2026-05-19）
+
+### Decision
+
+撤回 D19 的"γ 双轨 + Cat-F5 cross-encoder 提前 + 全线 70% must"方向。**v0.3.10 走 Alaya-native 主线**。具体：
+
+1. **Cat-F5 cross-encoder（任何形式：API 或 local）re-park 到 v0.4**。理由：cross-encoder 是普通 RAG 系统的标准 trick；引入它就把 Alaya 变成"另一个 RAG 实现"，trust loop / governance / evidence / plane attribution / plasticity 这些独家结构变成中间不重要的 plumbing。
+2. **Cat-X retrieval expansion 砍 X1（lexical 同义词/词干/trigram）**，保留 X2（evidence partial-phrase, Alaya-native）+ X3（session-id query parser, Alaya-native）+ X4（date-aware query expansion, agent-native）。
+3. **KPI 主线 = R@5 credibility floors + Alaya-native health 指标 + Pipeline integrity 三组并列 Tier 1**。任一组任一项未达 → fix-loop 不 release。
+4. **R@5 must 线按数据集物理性质 honest 设定**，不机械全线 70%：
+
+   ```
+   embedding-off:  K1.1-off ≥ 70% / K1.3-off ≥ 65% / K1.4-off ≥ 35%
+   embedding-on:   K1.1-on  ≥ 55% / K1.3-on  ≥ 55% / K1.4-on  ≥ 50%
+   ```
+
+5. **新增 KN.1-KN.5 Alaya-native health 指标作为 Tier 1 并列主线**：
+
+   - KN.1 Trust loop activation gain ≥ 5pp（第二轮 vs 第一轮 R@5）
+   - KN.2 Cohort attribution stability（K2.3 守护）
+   - KN.3 Evidence stream contribution ≥ 15%（memory FTS miss 时）
+   - KN.4 Path stream contribution ≥ 10%（warm scenario）
+   - KN.5 Plasticity gradient activation 可观测
+
+6. **embedding 仍 opt-in（D11 / D3 不变）**：bench 双轨同跑只为 measurement，不再是"两轨都必须 70%"那种 deliverable。
+7. **release notes 立场转变**：从"对标 AgentMemory / Supermemory 业界 baseline"转为"达公开 hybrid retrieval baseline 水平 + Alaya 独家结构 ship-grade 验证"。
+
+D20 修订后 v0.3.10 周期回归 3-3.5 周（D19 估 4-5 周；β 原估 1.5-2 周）。
+
+### Rationale
+
+- 用户原话："我们就变为老的，依赖这些模型的 RAG 路线了，我觉得走偏了"——明确指出 D19 把 v0.3.10 推成"普通 RAG 系统的剧本"，丧失 Alaya 独家价值
+- 用户原话："不用超过 AgentMemory，但是我们也不能太低了"——R@5 数字仍是 release 立得住的必要条件，不能完全降为 measurement-only
+- 主线程复盘：D19 的走偏链条是"设 KPI = 对标 AgentMemory 95%" → 倒推必须 rerank → 倒推必须 embedding default-on → 倒推 lexical synonyms → 一步步变成 RAG clone。修正起点是把 KPI 从"对标 RAG"改回"对得起公开 hybrid baseline + Alaya 独家结构 ship-grade"
+- Alaya 真正的产品差异化是 trust loop / governance / evidence / plane / plasticity，不是 R@5 数字本身——D20 把这一点写成 Tier 1 硬线，让"Alaya 跟 RAG 不一样"从 marketing 措辞变成 ship-blocker KPI
+
+### Trade-off acknowledgement
+
+- 撤回 D19 等于承认 2026-05-19 早些时候的方向走偏。decisions.md 保留 D19 历史记录但被 D20 取代——可追溯不修改
+- LongMemEval-on must 从 D19 的 ≥ 70% 降为 D20 的 ≥ 55%。理由：不上 rerank 后公开 hybrid baseline 中位约 50-65%；55% must 是 honest 估算
+- LoCoMo-off must 从 D19 的 ≥ 55% 降为 D20 的 ≥ 35%。理由：β 修排序后 R@5 应能接近 R@10 (37.8%)；+ Alaya-native Cat-X 再加 10pp 估算
+- Alaya-native 5 项 must 线之前未被作为 release 硬线测过；存在"上线后达不到"风险——但这恰恰是 D20 的意义：把 Alaya 独家价值变成可证伪的 ship 标准
+- Cat-X X1 砍掉可能让 K1.*-off 数字略低于"X1 也做"的估算；接受这个 trade-off 以守住 "Alaya-native vs generic RAG" 的产品边界
+
+### Evidence
+
+- `.do-it/findings/v0.3.10-architecture-review/DECISION.md` 决策包（β 阶段）
+- `.do-it/findings/v0.3.10/05-algorithm-gap-and-external-baseline.md` Codex 撞墙报告
+- Web research（2026-05-19）：
+  - [Hybrid Search: BM25 and Dense Retrieval Combined](https://mbrenndoerfer.com/writing/hybrid-search-bm25-dense-retrieval-fusion)：纯 RRF (k=60) R@5 ≈ 0.695；convex α=0.5 R@5 ≈ 0.726；无 rerank
+  - [Hybrid Search Done Right](https://ashutoshkumars1ngh.medium.com/hybrid-search-done-right-fixing-rag-retrieval-failures-using-bm25-hnsw-reciprocal-rank-fusion-a73596652d22)：hybrid 15-30% recall gain
+  - 一份匿名分析："hybrid 91.4% LongMemEval accuracy without rerank"
+- 业界对比：AgentMemory 95.2% / Supermemory 81-85% 都用了 cross-encoder + embedding 全配置；Alaya v0.3.10 不走这条路
+- 现状基线：`docs/bench-history/public/2026-05-18T140203Z-2b73f66-policy-chat/` R@5=66% (embedding-off, β R1-R5 已落地)
+
+### Implementation pointers
+
+- `docs/v0.3/v0.3.10/plan.md` Phase F 删除；Phase X 修剪；新增 C.C6 Alaya-native 指标验证；Cat 总览加 KN 行
+- `docs/v0.3/v0.3.10/kpi-targets.md` K1.* must 线下调为 honest 数字；新增 KN.1-KN.5 节；终极 release gate 三组并列
+- `docs/v0.3/v0.3.10/README.md` 量化目标表三组并列；honest acknowledgement 立场版重写
+- `.do-it/findings/v0.3.10-architecture-review/DECISION-04-preservation-and-risk.md` IV park 列表 P4/Cat-F5 re-park 到 v0.4
+
