@@ -25,6 +25,7 @@ const FUSION_WEIGHT_KEYS = [
   "evidence_fts",
   "evidence_structural_agreement",
   "source_proximity",
+  "source_evidence_agreement",
   "structural",
   "existing_score",
   "embedding_similarity",

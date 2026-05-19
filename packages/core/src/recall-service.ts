@@ -126,6 +126,7 @@ const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
   "evidence_fts",
   "evidence_structural_agreement",
   "source_proximity",
+  "source_evidence_agreement",
   "structural",
   "existing_score",
   "embedding_similarity",
@@ -139,11 +140,12 @@ const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>
   evidence_fts: 1,
   evidence_structural_agreement: 20,
   source_proximity: 1,
+  source_evidence_agreement: 1,
   structural: 1,
   existing_score: 1,
   embedding_similarity: 1,
   graph_expansion: 1,
-  path_expansion: 1,
+  path_expansion: 3,
   temporal_recency: 0,
   workspace_activation: 0
 });
@@ -2218,6 +2220,11 @@ function scoreRecallFusionStream(
         return 0;
       }
       return clamp01(supplementaryData.sourceProximityScores[objectId] ?? 0);
+    case "source_evidence_agreement":
+      if (isGlobalCandidate) {
+        return 0;
+      }
+      return scoreSourceEvidenceAgreement(candidate, supplementaryData);
     case "structural":
       return clamp01(
         candidate.structuralScore ?? (isGlobalCandidate ? 0 : supplementaryData.structuralScores[objectId] ?? 0)
@@ -2257,6 +2264,19 @@ function scoreEvidenceStructuralAgreement(
     return 0;
   }
   return Math.sqrt(evidenceScore * structuralScore) + Math.min(evidenceScore, structuralScore) * 0.1;
+}
+
+function scoreSourceEvidenceAgreement(
+  candidate: RecallFusionCandidateInput,
+  supplementaryData: RecallSupplementaryData
+): number {
+  const objectId = candidate.entry.object_id;
+  const evidenceScore = clamp01(supplementaryData.evidenceFtsRanks[objectId] ?? 0);
+  const sourceScore = clamp01(supplementaryData.sourceProximityScores[objectId] ?? 0);
+  if (evidenceScore <= 0 || sourceScore <= 0) {
+    return 0;
+  }
+  return clamp01(Math.sqrt(evidenceScore * sourceScore) + Math.min(evidenceScore, sourceScore) * 0.1);
 }
 
 function compareFusedRecallCandidates(

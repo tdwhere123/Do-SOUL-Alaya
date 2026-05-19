@@ -505,7 +505,8 @@ function hasEvidenceStreamContribution(gold: LongMemEvalGoldDiagnostic): boolean
     gold.source_channels.includes("evidence_anchor") ||
     gold.source_channels.includes("evidence_fts") ||
     (gold.per_stream_rank?.evidence_fts ?? null) !== null ||
-    (gold.per_stream_rank?.evidence_structural_agreement ?? null) !== null
+    (gold.per_stream_rank?.evidence_structural_agreement ?? null) !== null ||
+    (gold.per_stream_rank?.source_evidence_agreement ?? null) !== null
   );
 }
 

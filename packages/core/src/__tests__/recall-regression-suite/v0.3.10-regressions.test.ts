@@ -145,6 +145,74 @@ describe("recall regression suite", () => {
     expect(diag?.structural_score).toBeLessThanOrEqual(0.25);
     expect(diag?.per_stream_rank.structural).not.toBeNull();
     expect(diag?.per_stream_rank.evidence_structural_agreement).toBeNull();
+    expect(diag?.per_stream_rank.source_evidence_agreement).toBeNull();
+  });
+
+  it("promotes answerable source-window neighbors without lifting source-only neighbors", async () => {
+    const seed = memory({
+      object_id: "seed",
+      content: "bookshelf purchase context",
+      evidence_refs: ["source-a-s1-t3"],
+      activation_score: 0.9
+    });
+    const answerableNeighbor = memory({
+      object_id: "answerable-neighbor",
+      content: "I bought my new bookshelf from IKEA after comparing Target shelves.",
+      evidence_refs: ["evidence-answer", "source-a-s1-t4"],
+      activation_score: 0.05
+    });
+    const sourceOnlyNeighbor = memory({
+      object_id: "source-only-neighbor",
+      content: "The same conversation also mentioned room lighting.",
+      evidence_refs: ["source-a-s1-t5"],
+      activation_score: 0.04
+    });
+    const decoys = Array.from({ length: 4 }, (_, index) =>
+      memory({
+        object_id: `evidence-decoy-${index}`,
+        content: `Bookshelf store comparison decoy ${index}`,
+        evidence_refs: [`evidence-decoy-${index}`, `source-decoy-${index}-s1-t1`],
+        activation_score: 0.8 - index * 0.01
+      })
+    );
+    const evidenceRanks = new Map([
+      ...decoys.map((entry, index) => [entry.evidence_refs[0] ?? "", 1 - index * 0.01] as const),
+      ["evidence-answer", 0.95] as const
+    ]);
+    const { dependencies } = deps([seed, ...decoys, answerableNeighbor, sourceOnlyNeighbor], {
+      searchByKeyword: async () => [{ object_id: "seed", normalized_rank: 1 }],
+      evidenceSearchPort: {
+        searchByKeyword: vi.fn(async () =>
+          [...evidenceRanks.entries()].map(([object_id, normalized_rank]) => ({
+            object_id,
+            normalized_rank
+          }))
+        )
+      }
+    });
+    const service = new RecallService(dependencies);
+    const policy = withBudgets(service.buildDefaultPolicy("analyze", task().runtime_id), {
+      max_entries: 5,
+      max_total_tokens: 1000
+    });
+
+    const result = await service.recall({
+      taskSurface: task("Where did I buy my new bookshelf?"),
+      workspaceId: WS,
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    expect(result.candidates.map((item) => item.object_id)).toContain("answerable-neighbor");
+    expect(result.candidates.map((item) => item.object_id)).not.toContain("source-only-neighbor");
+    const answerDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "answerable-neighbor");
+    const sourceOnlyDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "source-only-neighbor");
+    expect(answerDiagnostic?.per_stream_rank.evidence_fts).not.toBeNull();
+    expect(answerDiagnostic?.per_stream_rank.source_proximity).not.toBeNull();
+    expect(answerDiagnostic?.per_stream_rank.source_evidence_agreement).not.toBeNull();
+    expect(answerDiagnostic?.fused_rank_contribution_per_stream.source_evidence_agreement).toBeGreaterThan(0);
+    expect(sourceOnlyDiagnostic?.per_stream_rank.source_proximity).not.toBeNull();
+    expect(sourceOnlyDiagnostic?.per_stream_rank.source_evidence_agreement).toBeNull();
   });
 
   it("uses evidence capsule artifact refs for source proximity when memory refs are capsule ids", async () => {

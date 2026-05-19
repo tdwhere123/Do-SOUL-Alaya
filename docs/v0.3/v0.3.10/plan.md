@@ -51,7 +51,7 @@ Phase D (3-4 天) — review-loop + release notes + closeout
 | Phase | 起止 (估) | 范围 | 出口条件 |
 |---|---|---|---|
 | A | D1-D4 | 5 项 ship-blocker 基础设施 + Era 1 carry-forward 必需项 | controlled-replay archive ≥ 1；M4b emit；quality_metrics 进 kpi.json；archive 标 pipeline 版本；既有 score 守护 tested |
-| B | D5-D9 | RRF 融合公式（D1）+ fused-rank budget cut（G1）+ E1 lexical priority + 11 streams emit | 既有 score 仍 emit；diagnostic shape 加 `fused_rank`；K1.1-off ≥ 70%（融合本身贡献）|
+| B | D5-D9 | RRF 融合公式（D1）+ fused-rank budget cut（G1）+ E1 lexical priority + 12 streams emit | 既有 score 仍 emit；diagnostic shape 加 `fused_rank`；K1.1-off ≥ 70%（融合本身贡献）|
 | X | D10-D13 | Cat-X Alaya-native expansion (X2/X3/X4)：evidence partial-phrase + session/date query parser | K1.1-off ≥ 70%（must）；K1.4-off ≥ 35%（must）；新 streams 在 RRF 内 emit rank |
 | Y | D14-D16 | Retained Era 1 closure：P1/P3/P4/G/A/D/B 全部补 owner、acceptance、verification lane 并闭合证据 | retained work 不再 carry-forward 到 final review 后；K4/K7 doc truth 可验证 |
 | C | D17-D21 | Stream weight sweep + 6 场景 controlled-replay 双轨 + 5 ship-blocker 守护测量 + KN.1-KN.5 Alaya-native 指标验证 | 6 条 K1.* 双轨硬线全过 + 5 条 KN.* 全过 + F-1..F-5 falsification 全通过 + K2.3 cohort 偏移 < 15pp |
@@ -63,7 +63,7 @@ Phase D (3-4 天) — review-loop + release notes + closeout
 |---|---|---|---|
 | **M** | Measurement infrastructure | **保留 + 强化** | M0 controlled-replay 必须跑出 archive；M4b 升为硬前置 |
 | **R** | Ranking core repair | **大部已完成** | R1/R2/R3/R5/SG-5 已 commit；R6 score factor 调撤回（β 不再调权重）|
-| **F** | Fusion + budget cut | **重塑** | "linear fusion + rerank stage" → "RRF over 11 streams + fused-rank budget cut" |
+| **F** | Fusion + budget cut | **重塑** | "linear fusion + rerank stage" → "RRF over 12 streams + fused-rank budget cut" |
 | ~~**F5**~~ | ~~Cross-encoder rerank~~ | **re-park 到 v0.4**（D20）| D19 提前 v0.4→v0.3.10 撤回；任何形式（API / local）都不做。本 release 不走 RAG 全配置路 |
 | **X** | **Alaya-native retrieval expansion**（修剪版）| **保留 X2/X3/X4，砍 X1** | X1 lexical 同义词砍（generic RAG）；保留 evidence partial-phrase + session/date query parser（Alaya-native）|
 | **KN** | **Alaya-native health 指标**（D20 新增 Cat）| **新增** | KN.1-KN.5 trust loop / cohort / evidence stream / path stream / plasticity 主线 KPI |
@@ -183,20 +183,21 @@ Phase D (sequential)
 ## B.B1 — RRF 融合公式实现
 
 - **scope**：把 `recall-service.ts:1721-1724` 的 `relevanceFactor = clamp01(ftsFactor × 0.24 + structuralFactor × 0.76)` 替换为 RRF 多流融合
-- **11 streams**（详见 `DECISION-01 § 2` + B.B4 diagnostic closure；implementation adds `source_proximity` as a stable runtime stream）：
+- **12 streams**（详见 `DECISION-01 § 2` + B.B4 diagnostic closure；implementation adds stable runtime streams for source-window ordering）：
   - S1 `lexical_fts`：`match.normalized_rank` 在 lexical pool 内的 rank
   - S2 `evidence_fts`：EvidenceCapsule gist/excerpt 命中 rank
   - S3 `evidence_structural_agreement`：EvidenceCapsule FTS 与 structural evidence 同时支持的 agreement rank
   - S4 `source_proximity`：same evidence-source chunk window 的 distance-decayed rank；同时给 `structural` 提供 capped weak carry（max 0.25），但不能单独制造 `evidence_structural_agreement`
-  - S5 `structural`：plane admission structural score 在 pool 内 rank
-  - S6 `existing_score`：legacy effective/relevance score rank，保留为兼容诊断和低权重 RRF stream；默认权重与普通 stream 一致为 1，防止 embedding / semantic supplement 抢掉强 lexical baseline，但不恢复 single-score budget cut
-  - S7 `embedding_similarity`：cosine similarity rank（embedding-on 时）
-  - S8 `graph_expansion`：RECALLS edge weight rank
-  - S9 `path_expansion`：PathRelation strength rank
-  - S10 `temporal_recency`：freshness decay rank
-  - S11 `workspace_activation`：activation_score rank
+  - S5 `source_evidence_agreement`：same candidate 同时有 EvidenceCapsule FTS 和 source-window support 时 emit；使用 uncapped source-proximity score，但不提升 source-only neighbor
+  - S6 `structural`：plane admission structural score 在 pool 内 rank
+  - S7 `existing_score`：legacy effective/relevance score rank，保留为兼容诊断和低权重 RRF stream；默认权重与普通 stream 一致为 1，防止 embedding / semantic supplement 抢掉强 lexical baseline，但不恢复 single-score budget cut
+  - S8 `embedding_similarity`：cosine similarity rank（embedding-on 时）
+  - S9 `graph_expansion`：RECALLS edge weight rank
+  - S10 `path_expansion`：PathRelation strength rank
+  - S11 `temporal_recency`：freshness decay rank
+  - S12 `workspace_activation`：activation_score rank
 - **RRF 公式**：`fused_rank(i) = Σ_streams ( w_stream / (k + rank_stream(i)) )`，k=60
-- **stream weights baseline**：A/B 使用全部 `w_stream = 1.0` 建立等权 baseline；Phase C fix-loop 当前默认权重收敛为 `existing_score=1`、`evidence_structural_agreement=20`、`temporal_recency=0`、`workspace_activation=0`、其余 stream `=1`，保留 CLI/env `fusion_weights` 覆盖继续扫
+- **stream weights baseline**：A/B 使用全部 `w_stream = 1.0` 建立等权 baseline；Phase C fix-loop 当前默认权重收敛为 `existing_score=1`、`evidence_structural_agreement=20`、`path_expansion=3`、`temporal_recency=0`、`workspace_activation=0`、其余 stream `=1`，保留 CLI/env `fusion_weights` 覆盖继续扫
 - **既有 score 处理**：`computeEffectiveScoreDetails` **不删**，仍 emit；`existing_score` rank 作为 diagnostic + low-weight compatibility stream 保留；`effectiveScore` 继续作为 fused-score tie-breaker（Q6=A）
 - **target files**：`packages/core/src/recall-service.ts`（融合公式 + per-stream rank 计算）+ `apps/bench-runner/src/harness/recall-weight-overrides.ts`（bench sweep stream_weights validation；不改 public protocol schema）
 - **acceptance**：
@@ -442,7 +443,7 @@ D20 决策：**不做**。X1 是 generic RAG 的标准 trick，违反 Alaya-nati
 
 | Era 1 ID | 描述 | β 处理 |
 |---|---|---|
-| F1 | Candidate fusion stage 显式化 | **重塑为 B.B1**（RRF over 11 streams 而非 "linear fusion"）|
+| F1 | Candidate fusion stage 显式化 | **重塑为 B.B1**（RRF over 12 streams 而非 "linear fusion"）|
 | F2 | Rerank stage + final global sort | **重塑为 B.B2**（fused-rank budget cut；不加新 stage）|
 | F3 | plane_winning_admission 真语义 | **已完成**（SG-5 in Era 1 checkpoint `9b05d2b`）|
 | F4 | Diagnostics sidecar schema 升级 | **重塑为 A.M4b + B.B4**（diagnostic 加 fused_rank + fusion_breakdown）|
