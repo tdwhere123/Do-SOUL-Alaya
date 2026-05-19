@@ -24,6 +24,7 @@ export function renderReport(
     `- Sample size: ${current.sample_size} (evaluated ${current.evaluated_count}/${current.sample_size}, label=${sampleLabel})`,
     `- Harness mode: ${current.harness_mode}`,
     `- Alaya commit: ${current.alaya_commit} (${current.alaya_version})`,
+    `- Recall pipeline: ${current.recall_pipeline_version ?? "unknown"}`,
     `- Embedding: ${current.embedding_provider}`,
     `- Chat: ${current.chat_provider}`,
     `- Policy shape: ${current.policy_shape ?? "stress"}`,

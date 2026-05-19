@@ -604,6 +604,7 @@ function buildMergedLongMemEvalDiagnosticsSidecar(
     split: payload.split,
     run_at: payload.run_at,
     alaya_commit: payload.alaya_commit,
+    recall_pipeline_version: payload.recall_pipeline_version,
     embedding_provider: payload.embedding_provider,
     embedding_mode: embeddingMode,
     policy_shape: payload.policy_shape,
@@ -707,7 +708,8 @@ async function runMergeLongMemEvalCommand(
       | "simulate_report"
       | "bench_name"
       | "alaya_version"
-      | "alaya_commit";
+      | "alaya_commit"
+      | "recall_pipeline_version";
     const SCALAR_IDENTITY_FIELDS: ReadonlyArray<ScalarIdentityField> = [
       "split",
       "sample_size",
@@ -718,7 +720,8 @@ async function runMergeLongMemEvalCommand(
       "simulate_report",
       "bench_name",
       "alaya_version",
-      "alaya_commit"
+      "alaya_commit",
+      "recall_pipeline_version"
     ];
     for (let i = 1; i < shardPayloads.length; i++) {
       const shard = shardPayloads[i];
@@ -879,6 +882,7 @@ async function runMergeLongMemEvalCommand(
       run_at: runAt.toISOString(),
       alaya_commit: commitSha7,
       alaya_version: first.alaya_version,
+      recall_pipeline_version: first.recall_pipeline_version,
       embedding_provider: first.embedding_provider,
       chat_provider: first.chat_provider,
       policy_shape: policyShape,

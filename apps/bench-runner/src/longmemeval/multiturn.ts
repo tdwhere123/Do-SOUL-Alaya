@@ -2,7 +2,7 @@ import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveBenchRunnerVersion } from "../version.js";
+import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../version.js";
 import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import {
   diffKpis,
@@ -313,6 +313,7 @@ export async function runLongMemEvalMultiturn(
     run_at: runAt.toISOString(),
     alaya_commit: commitSha7,
     alaya_version: alayaVersion,
+    recall_pipeline_version: RECALL_PIPELINE_VERSION,
     embedding_provider: embeddingProviderLabel,
     chat_provider: "none",
     policy_shape: "stress",
@@ -370,6 +371,7 @@ export async function runLongMemEvalMultiturn(
     split,
     run_at: payload.run_at,
     alaya_commit: payload.alaya_commit,
+    recall_pipeline_version: payload.recall_pipeline_version,
     embedding_provider: payload.embedding_provider,
     embedding_mode: opts.embeddingMode ?? "disabled",
     provider_state_summary: providerSummary,

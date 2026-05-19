@@ -12,6 +12,8 @@ import { fileURLToPath } from "node:url";
 // see also: apps/bench-runner/package.json
 let cachedVersion: string | null = null;
 
+export const RECALL_PIPELINE_VERSION = "fusion-rrf-v1";
+
 export function resolveBenchRunnerVersion(): string {
   if (cachedVersion !== null) {
     return cachedVersion;

@@ -880,6 +880,7 @@ describe("LongMemEval runner", () => {
 
       // harness_mode must reflect the real MCP chain, never direct_db_seed.
       expect(result.payload.harness_mode).toBe("mcp_propose_review");
+      expect(result.payload.recall_pipeline_version).toBe("fusion-rrf-v1");
       expect(result.payload.embedding_provider).toBe("none");
       expect(result.payload.policy_shape).toBe("chat");
       expect(result.payload.simulate_report).toBe("mixed");
@@ -908,6 +909,9 @@ describe("LongMemEval runner", () => {
       expect(parseResult.success).toBe(true);
       expect(await readFile(result.reportPath, "utf8")).toContain("Recall weights: source=cli");
       expect(await readFile(result.reportPath, "utf8")).toContain(
+        "Recall pipeline: fusion-rrf-v1"
+      );
+      expect(await readFile(result.reportPath, "utf8")).toContain(
         "Seed policy: label_independent_all_fact (label-independent)"
       );
 
@@ -925,6 +929,7 @@ describe("LongMemEval runner", () => {
         await readFile(result.diagnosticsPath!, "utf8")
       ) as {
         schema_version: number;
+        recall_pipeline_version: string;
         policy_shape: string;
         simulate_report: string;
         report_usage: {
@@ -961,6 +966,7 @@ describe("LongMemEval runner", () => {
         }>;
       };
       expect(diagnostics.schema_version).toBe(1);
+      expect(diagnostics.recall_pipeline_version).toBe("fusion-rrf-v1");
       expect(diagnostics.policy_shape).toBe("chat");
       expect(diagnostics.simulate_report).toBe("mixed");
       expect(diagnostics.report_usage.mode).toBe("mixed");

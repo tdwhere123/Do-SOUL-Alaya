@@ -2,7 +2,7 @@ import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveBenchRunnerVersion } from "../version.js";
+import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../version.js";
 import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import {
   diffKpis,
@@ -190,6 +190,7 @@ export async function runSelfBench(opts: SelfBenchRunOptions): Promise<SelfBench
     run_at: runAt.toISOString(),
     alaya_commit: commitSha7,
     alaya_version: alayaVersion,
+    recall_pipeline_version: RECALL_PIPELINE_VERSION,
     embedding_provider: "none",
     chat_provider: "none",
     policy_shape: "stress",

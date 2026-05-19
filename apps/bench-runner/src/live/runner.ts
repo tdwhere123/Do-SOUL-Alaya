@@ -13,7 +13,7 @@ import {
   type HistoryLayout,
   type KpiPayload
 } from "@do-soul/alaya-eval";
-import { resolveBenchRunnerVersion } from "../version.js";
+import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../version.js";
 
 export interface LiveBenchOptions {
   readonly historyRoot: string;
@@ -162,6 +162,7 @@ export async function runLiveBench(
     run_at: runAt.toISOString(),
     alaya_commit: commitSha7,
     alaya_version: resolveBenchRunnerVersion(),
+    recall_pipeline_version: RECALL_PIPELINE_VERSION,
     embedding_provider: source.metrics.provider_health.embedding.ok
       ? providerMode.mode
       : "unavailable",

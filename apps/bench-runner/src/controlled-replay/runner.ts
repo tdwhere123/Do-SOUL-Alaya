@@ -3,7 +3,7 @@ import { execSync } from "node:child_process";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { entrySlug } from "@do-soul/alaya-eval";
-import { resolveBenchRunnerVersion } from "../version.js";
+import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../version.js";
 import {
   BENCH_SEED_ROTATION,
   rotatingSeedObjectKind,
@@ -117,6 +117,7 @@ export interface ControlledReplayArchive {
   readonly run_at: string;
   readonly alaya_commit: string;
   readonly alaya_version: string;
+  readonly recall_pipeline_version: string;
   readonly fixture: {
     readonly seed_count: number;
     readonly question_count: number;
@@ -303,6 +304,7 @@ export async function runControlledReplay(
     run_at: runAt.toISOString(),
     alaya_commit: commitSha,
     alaya_version: resolveBenchRunnerVersion(),
+    recall_pipeline_version: RECALL_PIPELINE_VERSION,
     fixture: {
       seed_count: FIXTURE_SEEDS.length,
       question_count: FIXTURE_QUESTIONS.length,

@@ -162,6 +162,7 @@ export interface LongMemEvalDiagnosticsSidecar {
   readonly split: string;
   readonly run_at: string;
   readonly alaya_commit: string;
+  readonly recall_pipeline_version?: string;
   readonly embedding_provider: string;
   readonly embedding_mode: "disabled" | "env";
   readonly policy_shape?: "stress" | "chat";

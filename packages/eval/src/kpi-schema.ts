@@ -241,6 +241,7 @@ export const KpiPayloadSchema = z
     run_at: z.string(),
     alaya_commit: z.string().min(7),
     alaya_version: z.string().min(1),
+    recall_pipeline_version: z.string().min(1).optional(),
     embedding_provider: z.string(),
     chat_provider: z.string(),
     policy_shape: BenchPolicyShapeSchema.default("stress"),

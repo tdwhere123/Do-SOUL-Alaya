@@ -13,7 +13,11 @@ import {
   type KpiPayload,
   type PerScenarioRow
 } from "@do-soul/alaya-eval";
-import { resolveBenchCommitSha7, resolveBenchRunnerVersion } from "../version.js";
+import {
+  RECALL_PIPELINE_VERSION,
+  resolveBenchCommitSha7,
+  resolveBenchRunnerVersion
+} from "../version.js";
 import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import { startBenchDaemon, type BenchEmbeddingMode } from "../harness/daemon.js";
 import {
@@ -130,6 +134,7 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
     run_at: runAt.toISOString(),
     alaya_commit: commitSha7,
     alaya_version: alayaVersion,
+    recall_pipeline_version: RECALL_PIPELINE_VERSION,
     embedding_provider: embeddingProvider,
     chat_provider: "none",
     policy_shape: "stress",
