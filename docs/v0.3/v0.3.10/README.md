@@ -133,7 +133,7 @@ D1-D15 历史决策保持有效但实施细节按 β 重塑：
 - [`decisions.md`](./decisions.md) — 历史 D1-D15 + 新增 D16-D17
 - [`_archive-additive-score/`](./_archive-additive-score/) — Era 1 文档原貌（README + plan + kpi-targets），不删除，作历史 reference
 - [`../../../.do-it/findings/v0.3.10-architecture-review/DECISION.md`](../../../.do-it/findings/v0.3.10-architecture-review/DECISION.md) — β 决策包入口
-- [`../../../.do-it/findings/v0.3.10-architecture-review/DECISION-01-fusion-proposal.md`](../../../.do-it/findings/v0.3.10-architecture-review/DECISION-01-fusion-proposal.md) — RRF 具体形状 + 8 Alaya-native streams；本实现另加 `existing_score` 兼容 stream 与 `evidence_structural_agreement` agreement stream
+- [`../../../.do-it/findings/v0.3.10-architecture-review/DECISION-01-fusion-proposal.md`](../../../.do-it/findings/v0.3.10-architecture-review/DECISION-01-fusion-proposal.md) — RRF 具体形状 + 8 Alaya-native streams；本实现另加 low-weight `existing_score` compatibility stream 与 `evidence_structural_agreement` agreement stream
 - [`../../../.do-it/findings/v0.3.10-architecture-review/DECISION-04-preservation-and-risk.md`](../../../.do-it/findings/v0.3.10-architecture-review/DECISION-04-preservation-and-risk.md) — 5 ship-blockers + 11 风险表 + 5 falsification 条件
 - [`../../../.do-it/findings/v0.3.10/`](../../../.do-it/findings/v0.3.10/) — Era 1 finding（01-05），β 论证的上游证据
 

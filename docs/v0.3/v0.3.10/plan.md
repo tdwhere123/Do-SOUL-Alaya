@@ -188,15 +188,15 @@ Phase D (sequential)
   - S2 `evidence_fts`：EvidenceCapsule gist/excerpt 命中 rank
   - S3 `evidence_structural_agreement`：EvidenceCapsule FTS 与 structural evidence 同时支持的 agreement rank
   - S4 `structural`：plane admission structural score 在 pool 内 rank
-  - S5 `existing_score`：legacy effective/relevance score rank，保留为兼容诊断和 RRF stream，不恢复 single-score budget cut
+  - S5 `existing_score`：legacy effective/relevance score rank，保留为兼容诊断和低权重 RRF stream；默认权重与普通 stream 一致为 1，防止 embedding / semantic supplement 抢掉强 lexical baseline，但不恢复 single-score budget cut
   - S6 `embedding_similarity`：cosine similarity rank（embedding-on 时）
   - S7 `graph_expansion`：RECALLS edge weight rank
   - S8 `path_expansion`：PathRelation strength rank
   - S9 `temporal_recency`：freshness decay rank
   - S10 `workspace_activation`：activation_score rank
 - **RRF 公式**：`fused_rank(i) = Σ_streams ( w_stream / (k + rank_stream(i)) )`，k=60
-- **stream weights baseline**：A/B 使用全部 `w_stream = 1.0` 建立等权 baseline；Phase C fix-loop 当前默认权重收敛为 `existing_score=20`、`evidence_structural_agreement=20`、`temporal_recency=0`、`workspace_activation=0`、其余 stream `=1`，保留 CLI/env `fusion_weights` 覆盖继续扫
-- **既有 score 处理**：`computeEffectiveScoreDetails` **不删**，仍 emit；作为 `existing_score` stream + tiebreaker + diagnostic（Q6=A）
+- **stream weights baseline**：A/B 使用全部 `w_stream = 1.0` 建立等权 baseline；Phase C fix-loop 当前默认权重收敛为 `existing_score=1`、`evidence_structural_agreement=20`、`temporal_recency=0`、`workspace_activation=0`、其余 stream `=1`，保留 CLI/env `fusion_weights` 覆盖继续扫
+- **既有 score 处理**：`computeEffectiveScoreDetails` **不删**，仍 emit；`existing_score` rank 作为 diagnostic + low-weight compatibility stream 保留；`effectiveScore` 继续作为 fused-score tie-breaker（Q6=A）
 - **target files**：`packages/core/src/recall-service.ts`（融合公式 + per-stream rank 计算）+ `apps/bench-runner/src/harness/recall-weight-overrides.ts`（bench sweep stream_weights validation；不改 public protocol schema）
 - **acceptance**：
   - `rtk pnpm build` 全绿

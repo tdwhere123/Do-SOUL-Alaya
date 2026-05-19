@@ -339,10 +339,28 @@ describe("recall regression suite", () => {
     expect(droppedDiagnostic?.dropped_reason).toBe("max_entries");
     expect(droppedDiagnostic?.fused_rank).toBeGreaterThan(1);
     expect(droppedDiagnostic?.per_stream_rank.existing_score).toBe(1);
-    expect(droppedDiagnostic?.fused_rank_contribution_per_stream.existing_score).toBeGreaterThan(
-      goldDiagnostic?.fused_rank_contribution_per_stream.lexical_fts ?? 0
-    );
+    expect(droppedDiagnostic?.fused_rank_contribution_per_stream.existing_score).toBeGreaterThan(0);
     expect(goldDiagnostic?.per_stream_rank.lexical_fts).toBe(1);
+
+    const legacyWeightedPolicy = {
+      ...policy,
+      scoring_weight_overrides: {
+        fusion_weights: {
+          existing_score: 5
+        }
+      }
+    } satisfies RecallPolicy;
+    const legacyWeightedResult = await service.recall({
+      taskSurface: task("rare fused-rank needle"),
+      workspaceId: WS,
+      strategy: "analyze",
+      policyOverride: legacyWeightedPolicy
+    });
+    const legacyWeightedDiagnostic = legacyWeightedResult.diagnostics?.candidates.find(
+      (item) => item.object_id === "high-activation"
+    );
+    expect(legacyWeightedDiagnostic?.per_stream_rank.existing_score).toBe(1);
+    expect(legacyWeightedDiagnostic?.fused_rank_contribution_per_stream.existing_score).toBeGreaterThan(0);
   });
 
   it("promotes memories when evidence FTS and structural evidence agree", async () => {

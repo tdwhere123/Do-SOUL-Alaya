@@ -139,7 +139,7 @@ const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>
   evidence_structural_agreement: 20,
   source_proximity: 1,
   structural: 1,
-  existing_score: 20,
+  existing_score: 1,
   embedding_similarity: 1,
   graph_expansion: 1,
   path_expansion: 1,
