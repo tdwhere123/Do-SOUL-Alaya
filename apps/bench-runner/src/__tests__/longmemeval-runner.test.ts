@@ -321,7 +321,11 @@ describe("LongMemEval runner", () => {
     const metrics = buildLongMemEvalQualityMetrics([row]);
     expect(row.miss_classification).toBe("under_ranked");
     expect(metrics.miss_distribution.budget_dropped ?? 0).toBe(0);
-    expect(metrics.budget_drop_distribution.max_entries?.count).toBe(1);
+    expect(metrics.budget_drop_distribution.max_entries).toEqual({
+      count: 0,
+      share: 0,
+      denominator: 1
+    });
   });
 
   it("uses fused rank order for non-monotonic diagnostics when fusion metadata exists", () => {

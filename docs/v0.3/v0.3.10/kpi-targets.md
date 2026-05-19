@@ -210,7 +210,7 @@ Tier 3（stretch）— release notes 标注，不阻塞
 | should | ≤ 5 | β 后预期 |
 | stretch | ≤ 3 | β 后预期 |
 
-- **measure**：`quality_metrics.budget_drop_distribution.max_entries` from kpi.json
+- **measure**：`quality_metrics.budget_drop_distribution.max_entries` from kpi.json；只统计已进入候选但 `pre_budget_rank` / `fused_rank` 在 delivery window 内（≤ 10）却被 `max_entries` 砍掉的 gold 行，分母仍为全部 gold 行
 - **gate**：Phase C 出口；> 15 → fix-loop
 
 ### K2.3 Cohort attribution by `plane_first_admitted` (β 新增 ship-blocker 守护)

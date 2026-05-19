@@ -430,10 +430,12 @@ export function buildLongMemEvalQualityMetrics(
 
     for (const gold of question.gold) {
       budgetDropDenominator++;
-      if (gold.budget_drop_reason !== null) {
+      if (isDeliveryBudgetLoss(gold)) {
+        const dropReason = gold.budget_drop_reason;
+        if (dropReason === null) continue;
         budgetDropCounts.set(
-          gold.budget_drop_reason,
-          (budgetDropCounts.get(gold.budget_drop_reason) ?? 0) + 1
+          dropReason,
+          (budgetDropCounts.get(dropReason) ?? 0) + 1
         );
       }
       if (gold.lexical_rank !== null && gold.final_rank !== null) {

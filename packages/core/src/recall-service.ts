@@ -115,10 +115,6 @@ const DYNAMIC_RECALL_SOURCE_PROXIMITY_SEED_CAP = 12;
 const DYNAMIC_RECALL_SOURCE_PROXIMITY_ADMISSION_CAP = 120;
 const DYNAMIC_RECALL_SOURCE_PROXIMITY_NEIGHBORS_PER_SEED = 8;
 const DYNAMIC_RECALL_EDGE_FANOUT = 12;
-const COHORT_RESCUE_MAX_SLOTS = 3;
-const COHORT_RESCUE_MAX_SHARE = 0.3;
-const COHORT_RESCUE_MIN_ANCHORS = 5;
-const COHORT_RESCUE_MAX_FUSED_RANK_MULTIPLIER = 20;
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
 const NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT = 0.24;
 const QUERY_EVIDENCE_BASE_TRANSFER_MAX = 0.25;
@@ -141,14 +137,14 @@ const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>
   lexical_fts: 1,
   evidence_fts: 1,
   evidence_structural_agreement: 20,
-  source_proximity: 0.25,
+  source_proximity: 1,
   structural: 1,
-  existing_score: 1,
+  existing_score: 20,
   embedding_similarity: 1,
   graph_expansion: 1,
   path_expansion: 1,
   temporal_recency: 0,
-  workspace_activation: 1
+  workspace_activation: 0
 });
 // invariant: confidence sub-weight is additive (outside sum-to-1
 // activation_weights). MemoryEntry.confidence is propose/accept-updated
@@ -1773,11 +1769,7 @@ export class RecallService {
     }));
     const rankedCandidates = scoredCandidates
       .sort(compareFusedRecallCandidates);
-    const deliveryOrderedCandidates = applyCohortAwareBudgetOrdering(
-      rankedCandidates,
-      config.budgets.max_entries,
-      supplementaryData
-    );
+    const deliveryOrderedCandidates = rankedCandidates;
 
     type FineAssessmentAccumulator = {
       readonly selected: readonly Readonly<RecallCandidate>[];
@@ -2261,93 +2253,6 @@ function scoreEvidenceStructuralAgreement(
     return 0;
   }
   return Math.sqrt(evidenceScore * structuralScore) + Math.min(evidenceScore, structuralScore) * 0.1;
-}
-
-function applyCohortAwareBudgetOrdering(
-  rankedCandidates: readonly FusedRecallCandidateInput[],
-  maxEntries: number,
-  supplementaryData: RecallSupplementaryData
-): readonly FusedRecallCandidateInput[] {
-  if (maxEntries <= COHORT_RESCUE_MIN_ANCHORS || rankedCandidates.length <= maxEntries) {
-    return rankedCandidates;
-  }
-
-  const rescueSlots = Math.min(
-    COHORT_RESCUE_MAX_SLOTS,
-    Math.max(0, Math.floor(maxEntries * COHORT_RESCUE_MAX_SHARE))
-  );
-  if (rescueSlots <= 0) {
-    return rankedCandidates;
-  }
-
-  const anchorCount = Math.max(COHORT_RESCUE_MIN_ANCHORS, maxEntries - rescueSlots);
-  if (anchorCount >= maxEntries) {
-    return rankedCandidates;
-  }
-
-  const head = rankedCandidates.slice(0, anchorCount);
-  const selectedKeys = new Set(head.map((candidate) => buildRecallCandidateDedupeKey(candidate)));
-  const anchorCohortOrder = new Map<string, number>();
-  for (const [index, candidate] of head.entries()) {
-    const cohortKey = supplementaryData.sourceCohortKeys[candidate.entry.object_id];
-    if (cohortKey !== undefined && !anchorCohortOrder.has(cohortKey)) {
-      anchorCohortOrder.set(cohortKey, index);
-    }
-  }
-
-  if (anchorCohortOrder.size === 0) {
-    return rankedCandidates;
-  }
-
-  const maxRescueFusedRank = maxEntries * COHORT_RESCUE_MAX_FUSED_RANK_MULTIPLIER;
-  const rescueCandidates = rankedCandidates
-    .slice(anchorCount)
-    .filter((candidate) => {
-      const candidateKey = buildRecallCandidateDedupeKey(candidate);
-      if (selectedKeys.has(candidateKey) || candidate.fusion.fused_rank > maxRescueFusedRank) {
-        return false;
-      }
-      const cohortKey = supplementaryData.sourceCohortKeys[candidate.entry.object_id];
-      return cohortKey !== undefined &&
-        anchorCohortOrder.has(cohortKey) &&
-        hasCohortRescueSignal(candidate, supplementaryData);
-    })
-    .sort((left, right) => {
-      const leftCohortRank = anchorCohortOrder.get(supplementaryData.sourceCohortKeys[left.entry.object_id] ?? "") ?? Number.MAX_SAFE_INTEGER;
-      const rightCohortRank = anchorCohortOrder.get(supplementaryData.sourceCohortKeys[right.entry.object_id] ?? "") ?? Number.MAX_SAFE_INTEGER;
-      if (leftCohortRank !== rightCohortRank) {
-        return leftCohortRank - rightCohortRank;
-      }
-      return compareFusedRecallCandidates(left, right);
-    })
-    .slice(0, rescueSlots)
-    .map((candidate) => Object.freeze({
-      ...candidate,
-      sourceChannels: uniqueStrings([...(candidate.sourceChannels ?? []), "cohort_rescue"])
-    }) as FusedRecallCandidateInput);
-
-  if (rescueCandidates.length === 0) {
-    return rankedCandidates;
-  }
-
-  const rescuedKeys = new Set(rescueCandidates.map((candidate) => buildRecallCandidateDedupeKey(candidate)));
-  const tail = rankedCandidates
-    .slice(anchorCount)
-    .filter((candidate) => !rescuedKeys.has(buildRecallCandidateDedupeKey(candidate)));
-
-  return Object.freeze([...head, ...rescueCandidates, ...tail]);
-}
-
-function hasCohortRescueSignal(
-  candidate: FusedRecallCandidateInput,
-  supplementaryData: RecallSupplementaryData
-): boolean {
-  const objectId = candidate.entry.object_id;
-  return candidate.fusion.per_stream_rank.source_proximity !== null ||
-    (supplementaryData.sourceProximityScores[objectId] ?? 0) > 0 ||
-    candidate.fusion.per_stream_rank.evidence_fts !== null ||
-    candidate.fusion.per_stream_rank.lexical_fts !== null ||
-    (candidate.structuralScore ?? supplementaryData.structuralScores[objectId] ?? 0) >= 0.5;
 }
 
 function compareFusedRecallCandidates(

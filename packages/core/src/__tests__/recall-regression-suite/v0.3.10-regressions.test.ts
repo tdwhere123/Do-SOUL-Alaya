@@ -182,7 +182,7 @@ describe("recall regression suite", () => {
     expect(diag?.fused_rank_contribution_per_stream.source_proximity).toBeGreaterThan(0);
   });
 
-  it("reserves bounded delivery budget for same-source evidence siblings without increasing max_entries", async () => {
+  it("keeps final delivery budget monotonic by fused rank after source proximity admission", async () => {
     const anchor = memory({
       object_id: "anchor",
       content: "needle answer primary",
@@ -232,11 +232,17 @@ describe("recall regression suite", () => {
     });
 
     expect(result.candidates).toHaveLength(10);
-    expect(result.candidates.map((candidate) => candidate.object_id)).toContain("filler-12-sibling");
     const siblingDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "filler-12-sibling");
-    expect(siblingDiagnostic?.final_rank).not.toBeNull();
     expect(siblingDiagnostic?.admission_planes).toEqual(["source_proximity"]);
-    expect(siblingDiagnostic?.source_channels).toContain("cohort_rescue");
+    expect(siblingDiagnostic?.per_stream_rank.source_proximity).not.toBeNull();
+    const diagnostics = result.diagnostics?.candidates ?? [];
+    const deliveredDiagnostics = diagnostics.filter((item) => item.final_rank !== null);
+    expect(deliveredDiagnostics.every((item) => item.fused_rank <= 10)).toBe(true);
+    expect(
+      diagnostics
+        .filter((item) => item.fused_rank <= 10)
+        .every((item) => item.dropped_reason === null && item.final_rank !== null)
+    ).toBe(true);
     const outsideDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "outside-radius");
     expect(outsideDiagnostic).toBeUndefined();
   });
@@ -333,9 +339,10 @@ describe("recall regression suite", () => {
     expect(droppedDiagnostic?.dropped_reason).toBe("max_entries");
     expect(droppedDiagnostic?.fused_rank).toBeGreaterThan(1);
     expect(droppedDiagnostic?.per_stream_rank.existing_score).toBe(1);
-    expect(droppedDiagnostic?.fused_rank_contribution_per_stream.existing_score).toBeLessThanOrEqual(
+    expect(droppedDiagnostic?.fused_rank_contribution_per_stream.existing_score).toBeGreaterThan(
       goldDiagnostic?.fused_rank_contribution_per_stream.lexical_fts ?? 0
     );
+    expect(goldDiagnostic?.per_stream_rank.lexical_fts).toBe(1);
   });
 
   it("promotes memories when evidence FTS and structural evidence agree", async () => {
