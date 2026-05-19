@@ -42,6 +42,8 @@ across upstream edits. The contract is:
    used by the warmup fetch; missing local bytes or scratch meta fail in
    preflight with the exact warmup command. Checksum mismatch prints a
    `fetch-longmemeval ... --force` refresh command so stale bytes do not
-   loop through the normal cache-hit path.
+   loop through the normal cache-hit path. LoCoMo uses the same split with
+   `fetch-locomo --data-dir <shared-cache>/locomo` and
+   `run-full-locomo-bench.sh --data-dir <shared-cache>/locomo`.
 3. Bench-history entries cite the dataset checksum in their `kpi.json`
    `dataset.source` field.

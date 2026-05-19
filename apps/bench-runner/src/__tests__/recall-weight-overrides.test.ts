@@ -173,4 +173,19 @@ describe("bench recall weight overrides", () => {
     expect(script).toContain("exited 1 after writing KPI; allowing merge");
     expect(script).toContain("allowing merge to enforce release hard gates");
   });
+
+  it("preflights and forwards --data-dir from the full LoCoMo bench script", async () => {
+    const script = await readFile(
+      path.resolve(process.cwd(), "apps/bench-runner/scripts/run-full-locomo-bench.sh"),
+      "utf8"
+    );
+
+    expect(script).toContain("--data-dir) DATA_DIR=\"$2\"; shift 2;;");
+    expect(script).toContain("docs/bench-history/datasets/locomo10.meta.json");
+    expect(script).toContain("apps/bench-runner/bin/alaya-bench-runner.mjs fetch-locomo --data-dir %q");
+    expect(script).toContain("dataset cache missing: $DATASET_JSON");
+    expect(script).toContain("dataset scratch meta missing: $SCRATCH_META");
+    expect(script).toContain("dataset checksum mismatch: locomo10");
+    expect(script).toContain("--data-dir \"$DATA_DIR\"");
+  });
 });

@@ -57,7 +57,7 @@ Usage:
   alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--policy-shape stress|chat] [--simulate-report none|always-used|gold-only|mixed] [--weights '<json>'] [--data-dir <path>] [--history-root <path>]
   alaya-bench-runner longmemeval-multiturn [--variant oracle|s|m] [--limit N] [--offset N] [--rounds N] [--embedding disabled|env] [--data-dir <path>] [--history-root <path>]
   alaya-bench-runner longmemeval-crossquestion [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--data-dir <path>] [--history-root <path>]
-  alaya-bench-runner fetch-locomo [--data-dir <path>]
+  alaya-bench-runner fetch-locomo [--data-dir <path>] [--force]
   alaya-bench-runner locomo [--limit N] [--offset N] [--embedding disabled|env] [--data-dir <path>] [--history-root <path>]
   alaya-bench-runner self [--history-root <path>]
   alaya-bench-runner live [--source <main-check.json|main-check-run.json>] [--history-root <path>]
@@ -411,7 +411,7 @@ async function runFetchLocomoCommand(opts: ParsedFlags): Promise<number> {
     process.stdout.write("Fetching locomo10 from snap-research/locomo...\n");
     const result = await fetchLocomo("locomo10", {
       dataDir: opts.dataDir,
-      force: false
+      force: opts.force
     });
     process.stdout.write(
       `Cached: ${result.localPath}\n` +
