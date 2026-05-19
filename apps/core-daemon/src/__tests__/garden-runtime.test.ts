@@ -212,6 +212,46 @@ describe("garden runtime path plasticity queue", () => {
     );
   });
 
+  it("records embedding backfill failures without aborting the scheduler pass", async () => {
+    const embeddingBackfillHandler = {
+      handle: vi.fn(async () => {
+        throw new Error("Embedding request transport failed for host embedding.example.test. cause=EHOSTUNREACH");
+      })
+    };
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        computeAndApplyPlasticity: vi.fn(async () => ({
+          reinforced: 0,
+          weakened: 0,
+          retired: 0,
+          affectedPathIds: []
+        })),
+        embeddingBackfillHandler
+      })
+    );
+    const scheduler = currentScheduler();
+    const schedulerService = getService(runtime, "GardenScheduler");
+
+    await enqueueMaintenanceTick(runtime);
+    await schedulerService.task();
+    await expect(schedulerService.task()).resolves.not.toThrow();
+
+    expect(embeddingBackfillHandler.handle).toHaveBeenCalledTimes(1);
+    expect(scheduler.completions).toContainEqual(
+      expect.objectContaining({
+        task_kind: GardenTaskKind.EMBEDDING_BACKFILL,
+        role: GardenRole.LIBRARIAN,
+        tier: GardenTier.TIER_2,
+        success: false,
+        error_message: "Embedding request transport failed for host embedding.example.test. cause=EHOSTUNREACH"
+      })
+    );
+
+    await getService(runtime, "Librarian").task();
+
+    expect(scheduler.queue.some((task) => task.task_kind === GardenTaskKind.EMBEDDING_BACKFILL)).toBe(true);
+  });
+
   it("does not leave a workspace pending when watermark lookup fails before enqueue", async () => {
     const computeAndApplyPlasticity = vi.fn(async () => ({
       reinforced: 0,
@@ -348,6 +388,7 @@ function createRuntimeInput(options: {
   >["computeAndApplyPlasticity"];
   readonly gardenDataPorts?: GardenRuntimeInput["gardenDataPorts"];
   readonly healthJournalRepo?: GardenRuntimeInput["healthJournalRepo"];
+  readonly embeddingBackfillHandler?: GardenRuntimeInput["embeddingBackfillHandler"];
   readonly pathRelationRepo?: GardenRuntimeInput["pathRelationRepo"];
   readonly pathPlasticityWatermarkRepo?: GardenRuntimeInput["pathPlasticityWatermarkRepo"];
   readonly workspaceRepo?: GardenRuntimeInput["workspaceRepo"];
@@ -416,6 +457,9 @@ function createRuntimeInput(options: {
     pathPlasticityService: {
       computeAndApplyPlasticity: options.computeAndApplyPlasticity
     },
+    ...(options.embeddingBackfillHandler === undefined
+      ? {}
+      : { embeddingBackfillHandler: options.embeddingBackfillHandler }),
     strongRefService: {
       isProtected: vi.fn(async () => false)
     } as unknown as GardenRuntimeInput["strongRefService"],

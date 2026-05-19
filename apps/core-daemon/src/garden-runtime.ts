@@ -691,6 +691,7 @@ export function createGardenRuntime(input: {
         completed_at: completedAt
       });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       await gardenScheduler.reportCompletion({
         task_id: task.task_id,
         task_kind: task.task_kind,
@@ -700,11 +701,13 @@ export function createGardenRuntime(input: {
         success: false,
         objects_affected: [],
         audit_entries: [],
-        error_message: error instanceof Error ? error.message : String(error),
+        error_message: errorMessage,
         completed_at: completedAt
       });
-
-      throw error;
+      warn("embedding backfill task failed; continuing Garden background pass", {
+        workspace_id: task.workspace_id,
+        error: errorMessage
+      });
     } finally {
       pendingEmbeddingBackfillWorkspaces.delete(task.workspace_id);
     }

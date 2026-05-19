@@ -117,6 +117,17 @@ function collectPipelineIntegrityGates(
   const embeddingEnabled = current.embedding_provider !== "none";
   const metrics = current.kpi.quality_metrics;
   const gates: BenchmarkHardGate[] = [];
+  if (embeddingEnabled) {
+    gates.push(
+      minGate(
+        "embedding_provider_returned_rate",
+        "embedding provider returned",
+        current.kpi.provider_returned_rate ?? null,
+        0.95,
+        "ratio"
+      )
+    );
+  }
   if (current.bench_name === "public" && current.split === "longmemeval-s") {
     gates.push(
       maxGate(

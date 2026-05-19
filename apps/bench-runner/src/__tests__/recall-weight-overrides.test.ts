@@ -7,6 +7,7 @@ import {
   formatBenchRecallWeightOverrides,
   resolveBenchRecallWeightOverrides
 } from "../harness/recall-weight-overrides.js";
+import { preflightEmbeddingProvider } from "../harness/embedding-provider-preflight.js";
 
 function basePolicy(): RecallPolicy {
   return {
@@ -168,6 +169,7 @@ describe("bench recall weight overrides", () => {
     expect(script).toContain("weights_args=(--weights \"$WEIGHTS\")");
     expect(script).toContain("\"${weights_args[@]}\"");
     expect(script).toContain("--data-dir \"$DATA_DIR\"");
+    expect(script).toContain("node apps/bench-runner/bin/embedding-provider-preflight.mjs");
     expect(script).toContain("! -path '*/__tests__/*'");
     expect(script).toContain("! -name '*.test.ts'");
     expect(script).toContain("exited 1 after writing KPI; allowing merge");
@@ -187,5 +189,62 @@ describe("bench recall weight overrides", () => {
     expect(script).toContain("dataset scratch meta missing: $SCRATCH_META");
     expect(script).toContain("dataset checksum mismatch: locomo10");
     expect(script).toContain("--data-dir \"$DATA_DIR\"");
+    expect(script).toContain("node apps/bench-runner/bin/embedding-provider-preflight.mjs");
+  });
+
+  it("preflights with the production secret-ref resolver before provider fetch", async () => {
+    let fetchCalls = 0;
+    const result = await preflightEmbeddingProvider({
+      env: {
+        ALAYA_OPENAI_SECRET_REF: "file:relative-token",
+        OPENAI_EMBEDDING_PROVIDER_URL: "https://embedding.example.test/v1"
+      },
+      fetchImpl: (async () => {
+        fetchCalls += 1;
+        return new Response("{}", { status: 200 });
+      }) as typeof fetch
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      message: "embedding provider preflight failed: secret_ref is malformed"
+    });
+    expect(fetchCalls).toBe(0);
+  });
+
+  it("does not include the resolved embedding secret in preflight failures", async () => {
+    const env = {
+      ALAYA_OPENAI_SECRET_REF: "env:ALAYA_TEST_OPENAI_KEY",
+      ALAYA_TEST_OPENAI_KEY: "sk-test-secret",
+      OPENAI_EMBEDDING_PROVIDER_URL: "https://embedding.example.test/v1"
+    };
+    const transportError = new TypeError("fetch failed") as TypeError & {
+      cause: { code: string };
+    };
+    transportError.cause = { code: "EHOSTUNREACH" };
+
+    const result = await preflightEmbeddingProvider({
+      env,
+      secretRefReader: {
+        readEnv: (name) => env[name as keyof typeof env],
+        readFile: () => {
+          throw new Error("not used");
+        },
+        readKeychain: (service, account) => ({
+          kind: "keychain_tooling_unavailable",
+          service,
+          account,
+          reason: "not used"
+        })
+      },
+      fetchImpl: (async () => {
+        throw transportError;
+      }) as typeof fetch
+    });
+
+    expect(result.message).toBe(
+      "embedding provider preflight failed: host=embedding.example.test cause=EHOSTUNREACH"
+    );
+    expect(result.message).not.toContain("sk-test-secret");
   });
 });

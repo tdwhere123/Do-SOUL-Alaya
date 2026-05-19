@@ -273,7 +273,14 @@ Tier 3（stretch）— release notes 标注，不阻塞
 - **rationale**：β 融合让所有 stream 必须跑完（不能 short-circuit），latency 上升是已知风险
 - **gate**：Phase C 出口（C.C5）；> 200ms → fix-loop（Risk I-c）
 
-### K3.3 `report_context_usage` p95
+### K3.3 Embedding provider returned coverage (embedding-on)
+
+- **must (硬线)**：`provider_returned_rate` ≥ **95%**
+- **measure**：embedding-on release archive 的 `kpi.provider_returned_rate`
+- **rationale**：embedding-on archive 必须证明 provider 实际返回 query embeddings；provider unreachable 时不能退化成 keyword-only 后仍冒充 embedding-on gate
+- **gate**：Phase C 出口；未达 → 修 provider/network/config 或标记 embedding-on blocked，不接受该 archive 作为 K1-on 证据
+
+### K3.4 `report_context_usage` p95
 
 - 继承 Era 1，不变
 
@@ -432,7 +439,7 @@ v0.3.10 release 需要**同时**满足：
    - KN.3 Evidence stream contribution ≥ 15%
    - KN.4 Path stream contribution ≥ 10%
    - KN.5 Plasticity gradient activation 可观测
-3. **Tier 1 组 C 全过**（Pipeline integrity）：K2.1 / K2.2 / K2.3 / K2.6 / K3.1 / K3.2 / K4.1 / K4.2 / K4.6 / K4.7
+3. **Tier 1 组 C 全过**（Pipeline integrity）：K2.1 / K2.2 / K2.3 / K2.6 / K3.1 / K3.2 / K3.3 / K4.1 / K4.2 / K4.6 / K4.7
 4. **K6.2 既有测试不破**
 5. **K7.3 release notes 含 Alaya-native 立场说明 + LoCoMo embedding-off 35% trade-off 解释**
 6. **review-loop zero Blocking + zero Important**

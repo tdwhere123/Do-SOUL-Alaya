@@ -15,6 +15,7 @@ import {
 } from "../history.js";
 import { KpiPayloadSchema, type KpiPayload } from "../kpi-schema.js";
 import { renderFindings, renderReport } from "../report.js";
+import { collectReleaseHardGates } from "../release-gates.js";
 
 function buildPayload(commit: string): KpiPayload {
   return {
@@ -683,6 +684,45 @@ describe("history archive", () => {
       "longmemeval_s_500_embedding_on_r_at_5 LongMemEval-S 500 embedding-on R@5"
     );
     expect(report).toContain("49.00% < target 55.00%");
+  });
+
+  it("fails embedding-on release gates when the provider never returns", () => {
+    const payload: KpiPayload = {
+      ...buildPayload("beef123"),
+      bench_name: "public",
+      split: "longmemeval-s",
+      embedding_provider: "yunwu:text-embedding-3-small",
+      sample_size: 100,
+      evaluated_count: 100,
+      dataset: {
+        name: "longmemeval_s",
+        size: 500,
+        source: "fixture"
+      },
+      kpi: {
+        ...buildPayload("beef123").kpi,
+        r_at_5: 0.72,
+        latency_ms_p95: 900,
+        provider_returned_rate: 0,
+        provider_pending_rate: 0,
+        provider_failed_rate: 0,
+        quality_metrics: passingQualityMetrics()
+      }
+    };
+    const parsedPayload = KpiPayloadSchema.parse(payload);
+    const gates = collectReleaseHardGates(parsedPayload);
+
+    expect(gates).toContainEqual(
+      expect.objectContaining({
+        id: "embedding_provider_returned_rate",
+        current: 0,
+        target: 0.95,
+        passed: false
+      })
+    );
+    expect(renderReport(parsedPayload, parsedPayload, diffKpis(parsedPayload, null))).toContain(
+      "embedding_provider_returned_rate embedding provider returned"
+    );
   });
 
   it("flags LoCoMo embedding full reports below the release gate", () => {

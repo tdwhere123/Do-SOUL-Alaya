@@ -9,7 +9,11 @@ import {
   type HealthJournalRecordInput,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
-import { EmbeddingRecallService, type EmbeddingVectorRecord } from "../embedding-recall-service.js";
+import {
+  EmbeddingRecallService,
+  OpenAIEmbeddingClient,
+  type EmbeddingVectorRecord
+} from "../embedding-recall-service.js";
 import type { TestMock } from "./mock-types.js";
 
 describe("EmbeddingRecallService", () => {
@@ -622,6 +626,36 @@ describe("EmbeddingRecallService queryTimeoutMs configuration", () => {
       ["hello"],
       expect.objectContaining({ timeoutMs: 2500 })
     );
+  });
+});
+
+describe("OpenAIEmbeddingClient", () => {
+  it("reports provider host and transport cause without including the secret", async () => {
+    const transportError = new TypeError("fetch failed") as TypeError & {
+      cause: { code: string };
+    };
+    transportError.cause = { code: "EHOSTUNREACH" };
+    const fetchImpl = vi.fn(async () => {
+      throw transportError;
+    }) as unknown as typeof fetch;
+    const client = new OpenAIEmbeddingClient({
+      apiKey: "sk-test-secret",
+      baseUrl: "https://embedding.example.test/v1",
+      fetchImpl
+    });
+
+    await expect(
+      client.embedTexts(["smoke"], {
+        timeoutMs: 1000
+      })
+    ).rejects.toThrow(
+      "Embedding request transport failed for host embedding.example.test. cause=EHOSTUNREACH"
+    );
+    await expect(
+      client.embedTexts(["smoke"], {
+        timeoutMs: 1000
+      })
+    ).rejects.not.toThrow("sk-test-secret");
   });
 });
 

@@ -665,21 +665,28 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
     timeoutHandle.unref?.();
 
     try {
-      const response = await this.fetchImpl(`${this.baseUrl}/embeddings`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify({
-          model: this.modelId,
-          input: texts
-        }),
-        signal: abortController.signal
-      });
+      let response: Response;
+      try {
+        response = await this.fetchImpl(`${this.baseUrl}/embeddings`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${this.apiKey}`
+          },
+          body: JSON.stringify({
+            model: this.modelId,
+            input: texts
+          }),
+          signal: abortController.signal
+        });
+      } catch (error) {
+        throw new Error(formatEmbeddingTransportError(this.baseUrl, error));
+      }
 
       if (!response.ok) {
-        throw new Error(`Embedding request failed with status ${response.status}.`);
+        throw new Error(
+          `Embedding request failed with status ${response.status} for host ${formatEmbeddingHost(this.baseUrl)}.`
+        );
       }
 
       const payload = (await response.json()) as {
@@ -708,6 +715,25 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
     } finally {
       clearTimeout(timeoutHandle);
     }
+  }
+}
+
+function formatEmbeddingTransportError(baseUrl: string, error: unknown): string {
+  const causeCode =
+    typeof error === "object" &&
+    error !== null &&
+    "cause" in error &&
+    typeof (error as { readonly cause?: { readonly code?: unknown } }).cause?.code === "string"
+      ? ` cause=${(error as { readonly cause: { readonly code: string } }).cause.code}`
+      : "";
+  return `Embedding request transport failed for host ${formatEmbeddingHost(baseUrl)}.${causeCode}`;
+}
+
+function formatEmbeddingHost(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return "unknown";
   }
 }
 

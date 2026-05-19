@@ -182,6 +182,8 @@ if (( requires_env_embedding == 1 )); then
       exit 2
       ;;
   esac
+
+  node apps/bench-runner/bin/embedding-provider-preflight.mjs
 fi
 
 case "$SIMULATE_REPORT" in
