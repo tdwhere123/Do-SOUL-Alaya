@@ -1,7 +1,10 @@
 import { MemoryDimension, ScopeClass, type MemoryDimension as MemoryDimensionType, type ScopeClass as ScopeClassType } from "@do-soul/alaya-protocol";
 
+export type RecallQuerySubjectHint = "self_reference";
+
 export interface RecallQueryProbes {
   readonly normalized_query: string | null;
+  readonly subject_hints: readonly RecallQuerySubjectHint[];
   readonly object_ids: readonly string[];
   readonly evidence_refs: readonly string[];
   readonly run_ids: readonly string[];
@@ -81,6 +84,7 @@ export function compileRecallQueryProbes(queryText: string | null): Readonly<Rec
   if (normalized === null) {
     return freezeProbes({
       normalized_query: null,
+      subject_hints: [],
       object_ids: [],
       evidence_refs: [],
       run_ids: [],
@@ -102,6 +106,7 @@ export function compileRecallQueryProbes(queryText: string | null): Readonly<Rec
   const lexicalTerms = extractLexicalTerms(normalized);
   return freezeProbes({
     normalized_query: normalized,
+    subject_hints: inferSubjectHints(normalized),
     object_ids: collectMatches(normalized, /\b(?:memory|mem|object|obj)[_-]?([a-z0-9][a-z0-9_-]{5,})\b/giu),
     evidence_refs: collectMatches(normalized, /\b(?:evidence|ev|ref)[_-]?([a-z0-9][a-z0-9_.:-]{3,})\b/giu),
     run_ids: collectFullMatches(normalized, /\brun[-_][a-z0-9][a-z0-9_-]*\b/giu),
@@ -170,6 +175,12 @@ function inferScopeClasses(value: string): readonly ScopeClassType[] {
   return unique(scopes);
 }
 
+function inferSubjectHints(value: string): readonly RecallQuerySubjectHint[] {
+  return /\b(?:i|me|my|mine|we|our|ours)\b|(?:我|我的|我们|咱们|咱)/iu.test(value)
+    ? Object.freeze(["self_reference"] as const)
+    : Object.freeze([]);
+}
+
 function collectMatches(value: string, pattern: RegExp): readonly string[] {
   const matches: string[] = [];
   for (const match of value.matchAll(pattern)) {
@@ -197,6 +208,7 @@ function unique<T>(values: readonly T[]): readonly T[] {
 function freezeProbes(probes: RecallQueryProbes): Readonly<RecallQueryProbes> {
   return Object.freeze({
     ...probes,
+    subject_hints: Object.freeze([...probes.subject_hints]),
     object_ids: Object.freeze([...probes.object_ids]),
     evidence_refs: Object.freeze([...probes.evidence_refs]),
     run_ids: Object.freeze([...probes.run_ids]),

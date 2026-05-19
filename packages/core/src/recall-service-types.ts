@@ -294,6 +294,7 @@ export type RecallFusionStream =
   | "evidence_structural_agreement"
   | "source_proximity"
   | "source_evidence_agreement"
+  | "subject_alignment"
   | "structural"
   | "existing_score"
   | "embedding_similarity"
@@ -349,6 +350,7 @@ export interface RecallPathExpansionSourceDiagnostic {
 
 export interface RecallDiagnostics {
   readonly query_probes: {
+    readonly subject_hints: readonly string[];
     readonly object_ids: readonly string[];
     readonly evidence_refs: readonly string[];
     readonly run_ids: readonly string[];
@@ -388,6 +390,7 @@ export interface RecallResult {
 }
 
 export interface RecallSupplementaryData {
+  readonly queryProbes: Readonly<import("./recall-query-probes.js").RecallQueryProbes>;
   readonly ftsRanks: Readonly<Record<string, number>>;
   readonly evidenceFtsRanks: Readonly<Record<string, number>>;
   readonly sourceProximityScores: Readonly<Record<string, number>>;

@@ -215,6 +215,54 @@ describe("recall regression suite", () => {
     expect(sourceOnlyDiagnostic?.per_stream_rank.source_evidence_agreement).toBeNull();
   });
 
+  it("uses subject alignment only for self-referential personal-memory queries", async () => {
+    const genericAdvice = memory({
+      object_id: "generic-advice",
+      content: "You can buy a new bookshelf from several stores, including Target and IKEA.",
+      activation_score: 0.9
+    });
+    const personalFact = memory({
+      object_id: "personal-fact",
+      content: "I bought my new bookshelf from IKEA after checking Target first.",
+      activation_score: 0.1
+    });
+    const { dependencies } = deps([genericAdvice, personalFact], {
+      searchByKeyword: async () => [
+        { object_id: "generic-advice", normalized_rank: 1 },
+        { object_id: "personal-fact", normalized_rank: 0.99 }
+      ]
+    });
+    const service = new RecallService(dependencies);
+    const policy = withBudgets(service.buildDefaultPolicy("analyze", task().runtime_id), {
+      max_entries: 1,
+      max_total_tokens: 1000
+    });
+
+    const personalResult = await service.recall({
+      taskSurface: task("Where did I buy my new bookshelf?"),
+      workspaceId: WS,
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    expect(personalResult.candidates.map((item) => item.object_id)).toEqual(["personal-fact"]);
+    const personalDiagnostic = personalResult.diagnostics?.candidates.find((item) => item.object_id === "personal-fact");
+    const adviceDiagnostic = personalResult.diagnostics?.candidates.find((item) => item.object_id === "generic-advice");
+    expect(personalDiagnostic?.per_stream_rank.subject_alignment).toBe(1);
+    expect(adviceDiagnostic?.per_stream_rank.subject_alignment).toBeNull();
+
+    const thirdPersonResult = await service.recall({
+      taskSurface: task("Where did Alex buy the new bookshelf?"),
+      workspaceId: WS,
+      strategy: "analyze",
+      policyOverride: policy
+    });
+    const thirdPersonPersonalDiagnostic = thirdPersonResult.diagnostics?.candidates.find(
+      (item) => item.object_id === "personal-fact"
+    );
+    expect(thirdPersonPersonalDiagnostic?.per_stream_rank.subject_alignment).toBeNull();
+  });
+
   it("uses evidence capsule artifact refs for source proximity when memory refs are capsule ids", async () => {
     const seed = memory({
       object_id: "seed",

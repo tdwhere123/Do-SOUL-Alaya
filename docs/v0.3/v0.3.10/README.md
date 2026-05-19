@@ -48,7 +48,7 @@ relevance，**没移动 R@5**。stopword-free FTS 也试了，反向退化，rev
 
 | 维度 | Era 1（已归档）| Era 2 — β（本 release）|
 |---|---|---|
-| 主要算法改动 | 调权重 + 加 linear_fusion + 加 rerank stage | **RRF over 12 streams + budget cut on fused rank** |
+| 主要算法改动 | 调权重 + 加 linear_fusion + 加 rerank stage | **RRF over 13 streams + budget cut on fused rank** |
 | Cat-F 内涵 | "linear fusion + cross-encoder hook" | "RRF 融合公式 + 既有 score 降级为 tiebreaker" |
 | 真正动的代码 | 9 Cat × 45 work items | **2 处**（D1 公式 + G1 budget cut）+ 顺手 E1（lexical priority）|
 | measurement 前置 | M0-M5 | **强化**：controlled-replay 6 场景全 baseline + M4b 因子分解硬前置 |
@@ -133,7 +133,7 @@ D1-D15 历史决策保持有效但实施细节按 β 重塑：
 - [`decisions.md`](./decisions.md) — 历史 D1-D15 + 新增 D16-D17
 - [`_archive-additive-score/`](./_archive-additive-score/) — Era 1 文档原貌（README + plan + kpi-targets），不删除，作历史 reference
 - [`../../../.do-it/findings/v0.3.10-architecture-review/DECISION.md`](../../../.do-it/findings/v0.3.10-architecture-review/DECISION.md) — β 决策包入口
-- [`../../../.do-it/findings/v0.3.10-architecture-review/DECISION-01-fusion-proposal.md`](../../../.do-it/findings/v0.3.10-architecture-review/DECISION-01-fusion-proposal.md) — RRF 具体形状 + 8 Alaya-native streams；本实现另加 low-weight `existing_score` compatibility stream、`evidence_structural_agreement` agreement stream、stable `source_proximity` source-window stream 与 `source_evidence_agreement` answerability stream
+- [`../../../.do-it/findings/v0.3.10-architecture-review/DECISION-01-fusion-proposal.md`](../../../.do-it/findings/v0.3.10-architecture-review/DECISION-01-fusion-proposal.md) — RRF 具体形状 + 8 Alaya-native streams；本实现另加 low-weight `existing_score` compatibility stream、`evidence_structural_agreement` agreement stream、stable `source_proximity` source-window stream、`source_evidence_agreement` answerability stream 与 `subject_alignment` personal-memory stream
 - [`../../../.do-it/findings/v0.3.10-architecture-review/DECISION-04-preservation-and-risk.md`](../../../.do-it/findings/v0.3.10-architecture-review/DECISION-04-preservation-and-risk.md) — 5 ship-blockers + 11 风险表 + 5 falsification 条件
 - [`../../../.do-it/findings/v0.3.10/`](../../../.do-it/findings/v0.3.10/) — Era 1 finding（01-05），β 论证的上游证据
 

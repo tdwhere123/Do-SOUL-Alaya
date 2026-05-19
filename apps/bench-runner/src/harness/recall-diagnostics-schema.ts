@@ -7,6 +7,7 @@ const RecallFusionStreamRankSchema = z
     evidence_structural_agreement: z.number().int().positive().nullable(),
     source_proximity: z.number().int().positive().nullable(),
     source_evidence_agreement: z.number().int().positive().nullable(),
+    subject_alignment: z.number().int().positive().nullable(),
     structural: z.number().int().positive().nullable(),
     existing_score: z.number().int().positive().nullable(),
     embedding_similarity: z.number().int().positive().nullable(),
@@ -25,6 +26,7 @@ const RecallFusionStreamContributionSchema = z
     evidence_structural_agreement: z.number().min(0),
     source_proximity: z.number().min(0),
     source_evidence_agreement: z.number().min(0),
+    subject_alignment: z.number().min(0),
     structural: z.number().min(0),
     existing_score: z.number().min(0),
     embedding_similarity: z.number().min(0),
@@ -79,6 +81,7 @@ export const BenchRecallDiagnosticsSchema = z
     query_probes: z
       .object({
         object_ids: z.array(z.string()).readonly(),
+        subject_hints: z.array(z.string()).readonly(),
         evidence_refs: z.array(z.string()).readonly(),
         run_ids: z.array(z.string()).readonly(),
         surface_ids: z.array(z.string()).readonly(),

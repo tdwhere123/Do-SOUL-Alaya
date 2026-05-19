@@ -26,6 +26,7 @@ describe("compileRecallQueryProbes", () => {
     expect(probes.evidence_refs).toContain("ref-9");
     expect(probes.run_ids).toContain("run-42");
     expect(probes.surface_ids).toContain("surface-alpha");
+    expect(probes.subject_hints).toContain("self_reference");
     expect(probes.dimensions).toEqual(expect.arrayContaining([
       MemoryDimension.PROCEDURE,
       MemoryDimension.DECISION
@@ -43,5 +44,9 @@ describe("compileRecallQueryProbes", () => {
       "2026-05",
       "上周"
     ]));
+    expect(compileRecallQueryProbes("Where did I buy my new bookshelf?").subject_hints)
+      .toEqual(["self_reference"]);
+    expect(compileRecallQueryProbes("Where did Alex buy the bookshelf?").subject_hints)
+      .toEqual([]);
   });
 });

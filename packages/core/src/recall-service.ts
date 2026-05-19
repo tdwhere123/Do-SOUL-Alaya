@@ -127,6 +127,7 @@ const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
   "evidence_structural_agreement",
   "source_proximity",
   "source_evidence_agreement",
+  "subject_alignment",
   "structural",
   "existing_score",
   "embedding_similarity",
@@ -141,6 +142,7 @@ const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>
   evidence_structural_agreement: 20,
   source_proximity: 1,
   source_evidence_agreement: 1,
+  subject_alignment: 1,
   structural: 1,
   existing_score: 1,
   embedding_similarity: 1,
@@ -289,6 +291,7 @@ export class RecallService {
       runId: params.runId ?? null,
       queryText,
       policy,
+      queryProbes,
       winnerMemoryIds,
       tokenEstimator
     });
@@ -1365,6 +1368,7 @@ export class RecallService {
     readonly workspaceId: string;
     readonly runId: string | null;
     readonly queryText: string | null;
+    readonly queryProbes: Readonly<RecallQueryProbes>;
     readonly policy: Readonly<RecallPolicy>;
     readonly winnerMemoryIds: ReadonlySet<string>;
     readonly tokenEstimator: TokenEstimator;
@@ -1378,6 +1382,7 @@ export class RecallService {
       workspaceId: params.workspaceId,
       runId: params.runId,
       queryText: params.queryText,
+      queryProbes: params.queryProbes,
       policy: params.policy,
       coarseFtsRanks: params.coarseFilter.ftsRanks,
       coarseEvidenceFtsRanks: params.coarseFilter.evidenceFtsRanks,
@@ -1457,6 +1462,7 @@ export class RecallService {
     readonly workspaceId: string;
     readonly runId: string | null;
     readonly queryText: string | null;
+    readonly queryProbes: Readonly<RecallQueryProbes>;
     readonly policy: Readonly<RecallPolicy>;
     readonly coarseFtsRanks: Readonly<Record<string, number>>;
     readonly coarseEvidenceFtsRanks: Readonly<Record<string, number>>;
@@ -1552,6 +1558,7 @@ export class RecallService {
     );
 
     return Object.freeze({
+      queryProbes: params.queryProbes,
       ftsRanks: params.coarseFtsRanks,
       evidenceFtsRanks: params.coarseEvidenceFtsRanks,
       sourceProximityScores: params.coarseSourceProximityScores,
@@ -2225,6 +2232,8 @@ function scoreRecallFusionStream(
         return 0;
       }
       return scoreSourceEvidenceAgreement(candidate, supplementaryData);
+    case "subject_alignment":
+      return scoreSubjectAlignment(candidate.entry, supplementaryData.queryProbes);
     case "structural":
       return clamp01(
         candidate.structuralScore ?? (isGlobalCandidate ? 0 : supplementaryData.structuralScores[objectId] ?? 0)
@@ -2277,6 +2286,31 @@ function scoreSourceEvidenceAgreement(
     return 0;
   }
   return clamp01(Math.sqrt(evidenceScore * sourceScore) + Math.min(evidenceScore, sourceScore) * 0.1);
+}
+
+function scoreSubjectAlignment(
+  entry: Readonly<MemoryEntry>,
+  queryProbes: Readonly<RecallQueryProbes>
+): number {
+  if (!queryProbes.subject_hints.includes("self_reference")) {
+    return 0;
+  }
+
+  const content = normalizeEvidenceText(entry.content);
+  if (content.length === 0) {
+    return 0;
+  }
+
+  const explicitSelf = /\b(?:i|i'm|i've|i'd|i'll|me|my|mine|we|we're|we've|our|ours)\b|(?:我|我的|我们|咱们|咱)/iu.test(content);
+  const userFramed = /\b(?:the user|user|operator|principal)\b/iu.test(content);
+  if (!explicitSelf && !userFramed) {
+    return 0;
+  }
+
+  const genericAssistant =
+    /\b(?:as an ai|i (?:do not|don't) have|i can help|here are|you can|you could|you should|there are many|some suggestions|popular (?:ones|options))\b/iu.test(content);
+  const baseScore = explicitSelf ? 1 : 0.55;
+  return clamp01(genericAssistant ? baseScore * 0.25 : baseScore);
 }
 
 function compareFusedRecallCandidates(
@@ -2355,6 +2389,7 @@ function buildRecallDiagnostics(params: Readonly<{
   return Object.freeze({
     query_probes: Object.freeze({
       object_ids: Object.freeze([...params.queryProbes.object_ids]),
+      subject_hints: Object.freeze([...params.queryProbes.subject_hints]),
       evidence_refs: Object.freeze([...params.queryProbes.evidence_refs]),
       run_ids: Object.freeze([...params.queryProbes.run_ids]),
       surface_ids: Object.freeze([...params.queryProbes.surface_ids]),
