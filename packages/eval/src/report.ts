@@ -88,7 +88,14 @@ export function renderReport(
       "  *given the question, how often does the top-K recall surface a",
       "  `has_answer=true` turn from an answer session, when distractor",
       "  sessions are present in the haystack*. This is the honest",
-      "  retrieval number; quote it directly."
+      "  retrieval number; quote it directly.",
+      "- **Atomic-fact ingestion basis (v0.3.10).** Each turn is now",
+      "  LLM-extracted into N atomic facts; an answer turn seeds N gold",
+      "  `object_id`s and a hit means recalling ANY one of them. R@K is",
+      "  therefore measured on a new basis and is NOT directly comparable",
+      "  to the pre-extraction `2026-05-20T110623Z` baseline; the first",
+      "  post-extraction full run is the reference baseline for later",
+      "  recall-optimization slices."
     );
   }
   if (current.bench_name === "live" || current.split === "strict-real") {
