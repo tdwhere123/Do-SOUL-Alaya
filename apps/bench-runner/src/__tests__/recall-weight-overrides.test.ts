@@ -192,6 +192,10 @@ describe("bench recall weight overrides", () => {
     expect(script).toContain("dataset checksum mismatch: locomo10");
     expect(script).toContain("--data-dir \"$DATA_DIR\"");
     expect(script).toContain("BENCH_NODE_USE_ENV_PROXY");
+    expect(script).toContain("ensure_bench_runner_build_fresh");
+    expect(script).toContain("bench runner dist appears stale");
+    expect(script).toContain("! -path '*/__tests__/*'");
+    expect(script).toContain("! -name '*.test.ts'");
     expect(script).toContain("\"${NODE_RUNNER[@]}\" apps/bench-runner/bin/embedding-provider-preflight.mjs");
     expect(script).toContain("\"${NODE_RUNNER[@]}\" apps/bench-runner/bin/alaya-bench-runner.mjs locomo");
   });

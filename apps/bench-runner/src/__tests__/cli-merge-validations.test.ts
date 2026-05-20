@@ -1291,7 +1291,7 @@ describe("merge-longmemeval validations", () => {
     expect(stderrBuf).toMatch(/evaluated_total=16 > sample_size=10/);
   });
 
-  it("merges env embedding provider-rate KPIs by evaluated question count", async () => {
+  it("merges env provider-rate KPIs by evaluated count and cache rates by cache counts", async () => {
     const shardA = path.join(tmpRoot, "shard-a");
     const shardB = path.join(tmpRoot, "shard-b");
     const rowsA = Array.from({ length: 5 }, (_, index) => ({
@@ -1359,6 +1359,9 @@ describe("merge-longmemeval validations", () => {
           provider_returned_rate: 2 / 5,
           provider_pending_rate: 2 / 5,
           provider_failed_rate: 1 / 5,
+          // Deliberately inconsistent with diagnostics. Merged cache KPIs
+          // must use cache denominators, not evaluated question counts or
+          // shard-level scalar claims.
           embedding_vector_cache_ready_rate: 1,
           query_embedding_cache_ready_rate: 1,
           per_scenario: rowsB
@@ -1368,19 +1371,19 @@ describe("merge-longmemeval validations", () => {
         embedding_provider: "yunwu:text-embedding-3-small",
         embedding_mode: "env",
         embedding_vector_cache: {
-          expected_count: 60,
-          ready_count: 60,
-          not_ready_count: 0,
-          ready_rate: 1,
+          expected_count: 100,
+          ready_count: 0,
+          not_ready_count: 100,
+          ready_rate: 0,
           max_pass_count: 3
         },
         query_embedding_cache: {
-          requested_count: 5,
-          ready_count: 5,
-          not_ready_count: 0,
-          ready_rate: 1,
+          requested_count: 15,
+          ready_count: 0,
+          not_ready_count: 15,
+          ready_rate: 0,
           cache_hit_count: 1,
-          provider_requested_count: 4
+          provider_requested_count: 14
         }
       })
     );
@@ -1412,8 +1415,8 @@ describe("merge-longmemeval validations", () => {
     expect(merged.kpi.provider_pending_rate).toBe(0.3);
     expect(merged.kpi.provider_failed_rate).toBe(0.2);
     expect(merged.kpi.r_at_5_with_embedding_returned).toBe(0.8);
-    expect(merged.kpi.embedding_vector_cache_ready_rate).toBe(1);
-    expect(merged.kpi.query_embedding_cache_ready_rate).toBe(1);
+    expect(merged.kpi.embedding_vector_cache_ready_rate).toBe(50 / 150);
+    expect(merged.kpi.query_embedding_cache_ready_rate).toBe(5 / 20);
 
     const diagnostics = JSON.parse(
       await readFile(
@@ -1435,14 +1438,15 @@ describe("merge-longmemeval validations", () => {
       };
     };
     expect(diagnostics.embedding_vector_cache).toMatchObject({
-      expected_count: 110,
+      expected_count: 150,
+      ready_count: 50,
       max_pass_count: 3
     });
     expect(diagnostics.query_embedding_cache).toMatchObject({
-      requested_count: 10,
-      ready_count: 10,
+      requested_count: 20,
+      ready_count: 5,
       cache_hit_count: 1,
-      provider_requested_count: 9
+      provider_requested_count: 19
     });
   });
 });

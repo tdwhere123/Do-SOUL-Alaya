@@ -24,6 +24,85 @@ NODE_RUNNER=("$NODE_BIN")
 if [[ "${BENCH_NODE_USE_ENV_PROXY:-0}" == "1" ]]; then
   NODE_RUNNER+=(--use-env-proxy)
 fi
+BENCH_RUNNER_CLI="apps/bench-runner/dist/cli.js"
+
+runtime_dist_for_src() {
+  local src="$1"
+  local base=""
+  local rel=""
+  local dist=""
+  case "$src" in
+    apps/bench-runner/src/*)
+      base="apps/bench-runner"
+      rel="${src#apps/bench-runner/src/}"
+      dist="$base/dist/$rel"
+      ;;
+    apps/core-daemon/src/*)
+      base="apps/core-daemon"
+      rel="${src#apps/core-daemon/src/}"
+      dist="$base/dist/$rel"
+      ;;
+    packages/*/src/*)
+      base="${src%%/src/*}"
+      rel="${src#"$base"/src/}"
+      dist="$base/dist/$rel"
+      ;;
+    *)
+      dist=""
+      ;;
+  esac
+  case "$dist" in
+    *.tsx) dist="${dist%.tsx}.js" ;;
+    *.ts) dist="${dist%.ts}.js" ;;
+  esac
+  printf '%s' "$dist"
+}
+
+ensure_bench_runner_build_fresh() {
+  if [[ ! -f "$BENCH_RUNNER_CLI" ]]; then
+    echo "bench runner dist is missing: $BENCH_RUNNER_CLI" >&2
+    echo "Run: rtk pnpm build" >&2
+    exit 2
+  fi
+
+  local checked_dirs=(
+    "apps/bench-runner/src"
+    "apps/core-daemon/src"
+    "packages/core/src"
+    "packages/eval/src"
+    "packages/protocol/src"
+    "packages/soul/src"
+    "packages/storage/src"
+  )
+  local stale_src=""
+  local stale_dist=""
+  local dir=""
+  for dir in "${checked_dirs[@]}"; do
+    [[ -d "$dir" ]] || continue
+    while IFS= read -r -d '' src; do
+      local dist
+      dist="$(runtime_dist_for_src "$src")"
+      if [[ -z "$dist" || ! -f "$dist" || "$src" -nt "$dist" ]]; then
+        stale_src="$src"
+        stale_dist="$dist"
+        break
+      fi
+    done < <(find "$dir" -type f \( -name '*.ts' -o -name '*.tsx' \) \
+      ! -path '*/__tests__/*' \
+      ! -name '*.test.ts' \
+      ! -name '*.test.tsx' \
+      -print0)
+    [[ -z "$stale_src" ]] || break
+  done
+
+  if [[ -n "$stale_src" ]]; then
+    echo "bench runner dist appears stale: $stale_src is newer than ${stale_dist:-its dist output}" >&2
+    echo "Run: rtk pnpm build" >&2
+    exit 2
+  fi
+}
+
+ensure_bench_runner_build_fresh
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

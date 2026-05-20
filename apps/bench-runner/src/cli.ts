@@ -874,12 +874,8 @@ async function runMergeLongMemEvalCommand(
     let providerFailedTotal = 0;
     let providerNotRequestedTotal = 0;
     let providerReturnedHitAt5 = 0;
-    let embeddingVectorCacheReadyWeightedTotal = 0;
-    let queryEmbeddingCacheReadyWeightedTotal = 0;
     let hasProviderRates = false;
     let hasReturnedSubsetRAt5 = false;
-    let hasEmbeddingVectorCacheRate = false;
-    let hasQueryEmbeddingCacheRate = false;
     let evaluatedTotal = 0;
     let latencyP50Max = 0;
     let latencyP95Max = 0;
@@ -935,16 +931,6 @@ async function runMergeLongMemEvalCommand(
           );
         }
       }
-      if (shard.kpi.embedding_vector_cache_ready_rate !== undefined) {
-        hasEmbeddingVectorCacheRate = true;
-        embeddingVectorCacheReadyWeightedTotal +=
-          shard.kpi.embedding_vector_cache_ready_rate * shard.evaluated_count;
-      }
-      if (shard.kpi.query_embedding_cache_ready_rate !== undefined) {
-        hasQueryEmbeddingCacheRate = true;
-        queryEmbeddingCacheReadyWeightedTotal +=
-          shard.kpi.query_embedding_cache_ready_rate * shard.evaluated_count;
-      }
       evaluatedTotal += shard.evaluated_count;
       latencyP50Max = Math.max(latencyP50Max, shard.kpi.latency_ms_p50);
       latencyP95Max = Math.max(latencyP95Max, shard.kpi.latency_ms_p95);
@@ -980,7 +966,7 @@ async function runMergeLongMemEvalCommand(
     const runAt = new Date();
     const commitSha7 = resolveBenchCommitSha7();
 
-    const merged: KpiPayload = {
+    let merged: KpiPayload = {
       bench_name: first.bench_name,
       split: first.split,
       run_at: runAt.toISOString(),
@@ -1023,22 +1009,6 @@ async function runMergeLongMemEvalCommand(
               )
             }
           : {}),
-        ...(hasEmbeddingVectorCacheRate
-          ? {
-              embedding_vector_cache_ready_rate: ratio(
-                embeddingVectorCacheReadyWeightedTotal,
-                evaluatedTotal
-              )
-            }
-          : {}),
-        ...(hasQueryEmbeddingCacheRate
-          ? {
-              query_embedding_cache_ready_rate: ratio(
-                queryEmbeddingCacheReadyWeightedTotal,
-                evaluatedTotal
-              )
-            }
-          : {}),
         latency_ms_p50: latencyP50,
         latency_ms_p95: latencyP95,
         // @anchor merged-latency-source: see kpi-schema @latency-source.
@@ -1063,6 +1033,50 @@ async function runMergeLongMemEvalCommand(
       }
     };
 
+    const shardDiagnostics = await Promise.all(
+      shardArchiveRefs.map(async (shard) =>
+        readLongMemEvalDiagnosticsSidecar(
+          { historyRoot: shard.root },
+          "public",
+          shard.slug
+        )
+      )
+    );
+    const mergedEmbeddingVectorCache = aggregateEmbeddingVectorCache(
+      shardDiagnostics
+        .map((diagnostics) => diagnostics?.embedding_vector_cache)
+        .filter(
+          (summary): summary is LongMemEvalEmbeddingVectorCacheSummary =>
+            summary !== undefined
+        )
+    );
+    const mergedQueryEmbeddingCache = aggregateQueryEmbeddingCache(
+      shardDiagnostics
+        .map((diagnostics) => diagnostics?.query_embedding_cache)
+        .filter(
+          (summary): summary is LongMemEvalQueryEmbeddingCacheSummary =>
+            summary !== undefined
+        )
+    );
+    merged = {
+      ...merged,
+      kpi: {
+        ...merged.kpi,
+        ...(mergedEmbeddingVectorCache === null
+          ? {}
+          : {
+              embedding_vector_cache_ready_rate:
+                mergedEmbeddingVectorCache.ready_rate
+            }),
+        ...(mergedQueryEmbeddingCache === null
+          ? {}
+          : {
+              query_embedding_cache_ready_rate:
+                mergedQueryEmbeddingCache.ready_rate
+            })
+      }
+    };
+
     const layout: HistoryLayout = { historyRoot: opts.historyRoot };
     const previous = await readLatest(layout, "public", {
       split: first.split,
@@ -1078,15 +1092,6 @@ async function runMergeLongMemEvalCommand(
     );
     const report = renderReport(merged, previous, diff);
     const findings = renderFindings(merged, diff);
-    const shardDiagnostics = await Promise.all(
-      shardArchiveRefs.map(async (shard) =>
-        readLongMemEvalDiagnosticsSidecar(
-          { historyRoot: shard.root },
-          "public",
-          shard.slug
-        )
-      )
-    );
     const shardEvidence = shardDiagnostics.map((diagnostics) =>
       archiveEvidenceFromDiagnostics(diagnostics)
     );
