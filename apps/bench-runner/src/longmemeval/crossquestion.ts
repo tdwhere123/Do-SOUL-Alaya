@@ -27,6 +27,10 @@ import {
 import type { LongMemEvalVariant } from "./dataset.js";
 import { loadDataset, type FetchResult } from "./fetch.js";
 import { resolveBenchEmbeddingProviderLabel } from "./runner.js";
+import {
+  createAtomicFactExtractor,
+  seedTurnAsAtomicFacts
+} from "./atomic-fact-extraction.js";
 
 const LONGMEMEVAL_DIAGNOSTICS_FILENAME = "longmemeval-diagnostics.json";
 
@@ -104,6 +108,9 @@ export async function runLongMemEvalCrossQuestion(
 
   const sidecar = new Map<string, SidecarEntry>();
   const collected: QuestionResult[] = [];
+  // invariant: one extractor for the whole run so the on-disk fact cache
+  // and extraction stats accumulate across questions; seed-time only.
+  const atomicFactExtractor = createAtomicFactExtractor();
 
   try {
     for (let qi = 0; qi < window.length; qi++) {
@@ -125,20 +132,30 @@ export async function runLongMemEvalCrossQuestion(
           const turn = session[ti];
           if (turn === undefined) continue;
           const evidenceRef = `${question.question_id}-cq-s${si}-t${ti}`;
-          const seed = await daemon.proposeMemory(turn.content, evidenceRef, {
+          // invariant: one turn -> N atomic-fact memory_entry rows; every
+          // object_id is mapped into the shared sidecar (no partial map).
+          const seedResult = await seedTurnAsAtomicFacts({
+            daemon,
+            extractor: atomicFactExtractor,
+            turnContent: turn.content,
+            evidenceRefBase: evidenceRef,
             objectKind: rotatingSeedObjectKind(seedIndex)
           });
           seedIndex += 1;
-          if (seed.truncated) {
-            seedTurnsTruncated++;
-            seedCharsClipped += seed.charsClipped;
-            if (turn.has_answer === true) answerTurnsTruncated++;
+          if (seedResult.truncatedCount > 0) {
+            seedTurnsTruncated += seedResult.truncatedCount;
+            seedCharsClipped += seedResult.charsClipped;
+            if (turn.has_answer === true) {
+              answerTurnsTruncated += seedResult.truncatedCount;
+            }
           }
-          sidecar.set(seed.memoryId, {
-            questionId: question.question_id,
-            sessionId,
-            hasAnswer: turn.has_answer === true
-          });
+          for (const seed of seedResult.seeds) {
+            sidecar.set(seed.memoryId, {
+              questionId: question.question_id,
+              sessionId,
+              hasAnswer: turn.has_answer === true
+            });
+          }
         }
       }
 
@@ -258,6 +275,12 @@ export async function runLongMemEvalCrossQuestion(
           `R@5=${hitAt5 ? "✓" : "✗"} pool=${sidecar.size}\n`
       );
     }
+    process.stdout.write(
+      `[longmemeval atomic-fact] cache_hits=${atomicFactExtractor.stats.cacheHits} ` +
+        `llm_calls=${atomicFactExtractor.stats.llmCalls} ` +
+        `offline_fallbacks=${atomicFactExtractor.stats.offlineFallbacks} ` +
+        `facts=${atomicFactExtractor.stats.factsProduced}\n`
+    );
   } finally {
     await daemon.shutdown();
   }

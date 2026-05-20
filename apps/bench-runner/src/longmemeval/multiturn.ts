@@ -27,6 +27,11 @@ import {
 import type { LongMemEvalVariant } from "./dataset.js";
 import { loadDataset, type FetchResult } from "./fetch.js";
 import { resolveBenchEmbeddingProviderLabel } from "./runner.js";
+import {
+  createAtomicFactExtractor,
+  seedTurnAsAtomicFacts,
+  type AtomicFactExtractor
+} from "./atomic-fact-extraction.js";
 
 const LONGMEMEVAL_DIAGNOSTICS_FILENAME = "longmemeval-diagnostics.json";
 
@@ -93,7 +98,8 @@ export async function runLongMemEvalMultiturn(
   );
 
   async function runOneQuestion(
-    question: typeof window[number]
+    question: typeof window[number],
+    extractor: AtomicFactExtractor
   ): Promise<QuestionResult> {
     const daemon = await startBenchDaemon({
       workspaceId: `lme-mt-${question.question_id.slice(0, 8)}`,
@@ -119,19 +125,29 @@ export async function runLongMemEvalMultiturn(
           if (turn === undefined) continue;
 
           const evidenceRef = `${question.question_id}-mt-s${si}-t${ti}`;
-          const seed = await daemon.proposeMemory(turn.content, evidenceRef, {
+          // invariant: one turn -> N atomic-fact memory_entry rows; every
+          // object_id is mapped into the sidecar (no partial map).
+          const seedResult = await seedTurnAsAtomicFacts({
+            daemon,
+            extractor,
+            turnContent: turn.content,
+            evidenceRefBase: evidenceRef,
             objectKind: rotatingSeedObjectKind(seedIndexMt)
           });
           seedIndexMt += 1;
-          if (seed.truncated) {
-            seedTurnsTruncated++;
-            seedCharsClipped += seed.charsClipped;
-            if (turn.has_answer === true) answerTurnsTruncated++;
+          if (seedResult.truncatedCount > 0) {
+            seedTurnsTruncated += seedResult.truncatedCount;
+            seedCharsClipped += seedResult.charsClipped;
+            if (turn.has_answer === true) {
+              answerTurnsTruncated += seedResult.truncatedCount;
+            }
           }
-          sidecar.set(seed.memoryId, {
-            sessionId,
-            hasAnswer: turn.has_answer === true
-          });
+          for (const seed of seedResult.seeds) {
+            sidecar.set(seed.memoryId, {
+              sessionId,
+              hasAnswer: turn.has_answer === true
+            });
+          }
         }
       }
 
@@ -251,11 +267,14 @@ export async function runLongMemEvalMultiturn(
     }
   }
 
+  // invariant: one extractor for the whole run so the on-disk fact cache
+  // and extraction stats accumulate across questions; seed-time only.
+  const atomicFactExtractor = createAtomicFactExtractor();
   const collected: QuestionResult[] = [];
   for (let i = 0; i < window.length; i++) {
     const q = window[i];
     if (q === undefined) continue;
-    const res = await runOneQuestion(q);
+    const res = await runOneQuestion(q, atomicFactExtractor);
     collected.push(res);
     const finalRound = res.rounds[res.rounds.length - 1];
     process.stdout.write(

@@ -58,6 +58,11 @@ import {
 } from "./archive-evidence.js";
 import { loadDataset, type FetchResult } from "./fetch.js";
 import type { LongMemEvalVariant } from "./dataset.js";
+import {
+  createAtomicFactExtractor,
+  seedTurnAsAtomicFacts,
+  type AtomicFactExtractor
+} from "./atomic-fact-extraction.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
@@ -192,7 +197,8 @@ export async function runLongMemEval(
 
   async function runOneQuestion(
     question: typeof window[number],
-    turnIndex: number
+    turnIndex: number,
+    extractor: AtomicFactExtractor
   ): Promise<WorkerResult> {
     const daemon = await startBenchDaemon({
       workspaceId: `lme-${question.question_id.slice(0, 8)}`,
@@ -221,19 +227,30 @@ export async function runLongMemEval(
           const objectKind = resolveLongMemEvalSeedObjectKind({
             seedIndex
           });
-          const seed = await daemon.proposeMemory(turn.content, evidenceRef, {
+          // invariant: one turn -> N atomic-fact memory_entry rows. Every
+          // resulting object_id is mapped into the sidecar; a partial map
+          // would silently undercount recall.
+          const seedResult = await seedTurnAsAtomicFacts({
+            daemon,
+            extractor,
+            turnContent: turn.content,
+            evidenceRefBase: evidenceRef,
             objectKind
           });
           seedIndex += 1;
-          if (seed.truncated) {
-            seedTurnsTruncated++;
-            seedCharsClipped += seed.charsClipped;
-            if (turn.has_answer === true) answerTurnsTruncated++;
+          if (seedResult.truncatedCount > 0) {
+            seedTurnsTruncated += seedResult.truncatedCount;
+            seedCharsClipped += seedResult.charsClipped;
+            if (turn.has_answer === true) {
+              answerTurnsTruncated += seedResult.truncatedCount;
+            }
           }
-          sidecar.set(seed.memoryId, {
-            sessionId,
-            hasAnswer: turn.has_answer === true
-          });
+          for (const seed of seedResult.seeds) {
+            sidecar.set(seed.memoryId, {
+              sessionId,
+              hasAnswer: turn.has_answer === true
+            });
+          }
         }
       }
 
@@ -324,17 +341,28 @@ export async function runLongMemEval(
   // ALAYA_CONFIG_DIR / HOME / ALAYA_REVIEWER_*).
   // see also: apps/bench-runner/scripts/run-full-public-bench.sh for
   // safe process-level sharding.
+  // invariant: one extractor for the whole run so the on-disk fact cache
+  // and extraction stats accumulate across every question. Extraction
+  // happens at seed time only — never on the recall path below.
+  const atomicFactExtractor = createAtomicFactExtractor();
   const collected: WorkerResult[] = [];
   for (let i = 0; i < window.length; i++) {
     const q = window[i];
     if (q === undefined) continue;
-    const res = await runOneQuestion(q, i + 1);
+    const res = await runOneQuestion(q, i + 1, atomicFactExtractor);
     collected.push(res);
     process.stdout.write(
       `[${i + 1}/${window.length}] ${q.question_id.slice(0, 8)} ` +
         `R@5=${res.hitAt5 ? "✓" : "✗"} latency=${res.latencyMs}ms\n`
     );
   }
+  const extractionStats = atomicFactExtractor.stats;
+  process.stdout.write(
+    `[longmemeval atomic-fact] cache_hits=${extractionStats.cacheHits} ` +
+      `llm_calls=${extractionStats.llmCalls} ` +
+      `offline_fallbacks=${extractionStats.offlineFallbacks} ` +
+      `facts=${extractionStats.factsProduced}\n`
+  );
 
   const perScenario: PerScenarioRow[] = [];
   const latencies: number[] = [];
