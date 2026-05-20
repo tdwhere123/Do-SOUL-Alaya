@@ -9,6 +9,7 @@ export * from "./context-lens-assembler.js";
 export * from "./conversation-service.js";
 export * from "./cross-cutting-permission-service.js";
 export * from "./conflict-detection-service.js";
+export * from "./consolidation-executor.js";
 export * from "./deferred-obligation-service.js";
 export * from "./path-relation-proposal-service.js";
 export * from "./dirty-state-panic-service.js";
