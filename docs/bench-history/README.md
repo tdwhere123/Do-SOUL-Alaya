@@ -57,8 +57,6 @@ docs/bench-history/
 │   │   └── findings.md (optional)
 │   ├── latest-baseline.json               # embedding=none canonical pointer
 │   └── latest-baseline-embedding-on.json  # embedding-on sibling pointer
-├── public-pre-v0.3.9/                     # frozen pre-v0.3.9 Pass A archives
-│   └── <YYYY-MM-DDTHHMMSSZ>-<sha7>/       # historical record, not diffed
 ├── public-multiturn/
 │   ├── <YYYY-MM-DDTHHMMSSZ>-<sha7>/
 │   │   ├── kpi.json
@@ -100,17 +98,6 @@ docs/bench-history/
   that explicitly opens it (`readFileSync` of this exact path) will
   see a populated slug. Until that rerun, treat this pointer as
   reserved-for-future-use.
-
-### Pre-v0.3.9 frozen archives
-
-`public-pre-v0.3.9/` holds the bench archives written before the
-v0.3.9 denominator + label-cascade fix. They are kept for historical
-reference and are not diffed by the runner. The most recent non-FAIL
-disabled-embedding archive was promoted back into `public/` as the
-anchor so the v0.3.9 reruns have a valid previous-baseline to diff
-against; everything else (including the latency-FAIL archives and the
-single mixed embedding-on FAIL archive) lives under
-`public-pre-v0.3.9/`.
 
 ### Sample-size label cascade
 
