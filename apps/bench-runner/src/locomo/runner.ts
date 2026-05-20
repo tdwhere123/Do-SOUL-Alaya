@@ -19,7 +19,11 @@ import {
   resolveBenchRunnerVersion
 } from "../version.js";
 import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
-import { startBenchDaemon, type BenchEmbeddingMode } from "../harness/daemon.js";
+import {
+  startBenchDaemon,
+  type BenchEmbeddingMode,
+  type BenchEmbeddingWarmupSummary
+} from "../harness/daemon.js";
 import {
   buildQuestionDiagnostic,
   rAt5WithProviderReturned,
@@ -60,9 +64,18 @@ interface LocomoDiagnosticsSidecar {
   readonly alaya_commit: string;
   readonly embedding_provider: string;
   readonly embedding_mode: BenchEmbeddingMode;
+  readonly embedding_vector_cache?: LocomoEmbeddingVectorCacheSummary;
   readonly provider_state_summary: ReturnType<typeof summarizeProviderStates>;
   readonly scored_recall_evidence: ReturnType<typeof summarizeLongMemEvalRecallEvidence>;
   readonly questions: readonly LongMemEvalQuestionDiagnostic[];
+}
+
+interface LocomoEmbeddingVectorCacheSummary {
+  readonly expected_count: number;
+  readonly ready_count: number;
+  readonly not_ready_count: number;
+  readonly ready_rate: number;
+  readonly max_pass_count: number;
 }
 
 export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult> {
@@ -90,11 +103,13 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   let totalHitAt5 = 0;
   let totalHitAt10 = 0;
   let totalQa = 0;
+  const conversationResults: ConversationResult[] = [];
 
   for (let i = 0; i < window.length; i++) {
     const conversation = window[i];
     if (conversation === undefined) continue;
     const convResult = await runOneConversation(conversation, opts);
+    conversationResults.push(convResult);
     totalQa += convResult.qaCount;
     totalHitAt1 += convResult.hitAt1;
     totalHitAt5 += convResult.hitAt5;
@@ -127,6 +142,11 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   const rAt10 = totalQa === 0 ? 0 : totalHitAt10 / totalQa;
   const providerStateSummary = summarizeProviderStates(questionDiagnostics);
   const rAt5EmbeddingReturned = rAt5WithProviderReturned(questionDiagnostics);
+  const embeddingVectorCache = summarizeEmbeddingVectorCache(
+    conversationResults.flatMap((result) =>
+      result.embeddingWarmup === null ? [] : [result.embeddingWarmup]
+    )
+  );
 
   const payload: KpiPayload = {
     bench_name: "public-locomo",
@@ -163,6 +183,13 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
       provider_returned_rate: providerStateSummary.provider_returned_rate,
       provider_pending_rate: providerStateSummary.provider_pending_rate,
       provider_failed_rate: providerStateSummary.provider_failed_rate,
+      provider_not_requested_rate: providerStateSummary.provider_not_requested_rate,
+      ...(embeddingVectorCache === null
+        ? {}
+        : {
+            embedding_vector_cache_ready_rate:
+              embeddingVectorCache.ready_rate
+          }),
       latency_ms_p50: computePercentile(latencies, 50),
       latency_ms_p95: computePercentile(latencies, 95),
       latency_source: "exact",
@@ -204,6 +231,9 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
       alaya_commit: payload.alaya_commit,
       embedding_provider: payload.embedding_provider,
       embedding_mode: embeddingMode,
+      ...(embeddingVectorCache === null
+        ? {}
+        : { embedding_vector_cache: embeddingVectorCache }),
       provider_state_summary: providerStateSummary,
       scored_recall_evidence: summarizeLongMemEvalRecallEvidence(questionDiagnostics),
       questions: questionDiagnostics
@@ -231,6 +261,7 @@ interface ConversationResult {
   readonly tierCold: number;
   readonly latencies: readonly number[];
   readonly questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[];
+  readonly embeddingWarmup: BenchEmbeddingWarmupSummary | null;
 }
 
 async function runOneConversation(
@@ -266,9 +297,10 @@ async function runOneConversation(
       }
     }
 
-    if (opts.embeddingMode === "env") {
-      await daemon.runtime.runGardenBackgroundPass();
-    }
+    const embeddingWarmup =
+      opts.embeddingMode === "env"
+        ? await daemon.warmEmbeddingCache([...memoryIdByDiaId.values()])
+        : null;
 
     let hitAt1 = 0;
     let hitAt5 = 0;
@@ -338,7 +370,8 @@ async function runOneConversation(
       tierWarm,
       tierCold,
       latencies,
-      questionDiagnostics
+      questionDiagnostics,
+      embeddingWarmup
     };
   } finally {
     await daemon.shutdown();
@@ -376,6 +409,36 @@ function computePercentile(values: readonly number[], p: number): number {
   const sorted = [...values].sort((a, b) => a - b);
   const idx = Math.ceil((p / 100) * sorted.length) - 1;
   return sorted[Math.max(0, idx)] ?? 0;
+}
+
+function summarizeEmbeddingVectorCache(
+  summaries: readonly BenchEmbeddingWarmupSummary[]
+): LocomoEmbeddingVectorCacheSummary | null {
+  const readySummaries = summaries.filter((summary) => summary.status === "ready");
+  if (readySummaries.length === 0) {
+    return null;
+  }
+
+  const expectedCount = readySummaries.reduce(
+    (sum, summary) => sum + summary.expected_count,
+    0
+  );
+  const readyCount = readySummaries.reduce(
+    (sum, summary) => sum + summary.ready_count,
+    0
+  );
+  const maxPassCount = readySummaries.reduce(
+    (max, summary) => Math.max(max, summary.pass_count),
+    0
+  );
+
+  return {
+    expected_count: expectedCount,
+    ready_count: readyCount,
+    not_ready_count: Math.max(0, expectedCount - readyCount),
+    ready_rate: expectedCount === 0 ? 0 : readyCount / expectedCount,
+    max_pass_count: maxPassCount
+  };
 }
 
 function resolveCommitSha7(): string {
