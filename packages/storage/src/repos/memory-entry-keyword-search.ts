@@ -123,7 +123,7 @@ export function mergeKeywordSearchRows(
   );
 }
 
-function buildGroupedOrdinalScores<T>(
+export function buildGroupedOrdinalScores<T>(
   rows: readonly T[],
   getGroupValue: (row: T) => number
 ): readonly number[] {

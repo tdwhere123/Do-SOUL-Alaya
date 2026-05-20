@@ -7,6 +7,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../db.js";
 import { StorageError } from "../errors.js";
+import { buildGroupedOrdinalScores } from "./memory-entry-keyword-search.js";
 import { deepFreeze } from "./shared/deep-freeze.js";
 import { parseTimestamp } from "./shared/validators.js";
 
@@ -304,28 +305,59 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
               limit
             );
 
-      const byObjectId = new Map<string, number>();
-      for (const hit of [...porterHits, ...trigramHits]) {
-        const existing = byObjectId.get(hit.object_id);
-        if (existing === undefined || hit.normalized_rank > existing) {
-          byObjectId.set(hit.object_id, hit.normalized_rank);
+      // Cross-lane fusion mirrors the memory-entry side: each lane is scored by
+      // ordinal rank (position-only, BM25-magnitude-independent) so the porter
+      // and trigram lanes share one comparable scale. A lane-priority tiebreak
+      // (porter 0 outranks trigram 1) makes an exact score tie deterministic
+      // toward the higher-trust word lane rather than an arbitrary id sort.
+      const merged = new Map<
+        string,
+        Readonly<{ normalizedRank: number; lanePriority: number; laneOrder: number }>
+      >();
+      const considerLaneHit = (
+        hit: EvidenceCapsuleKeywordHit,
+        lanePriority: number,
+        laneOrder: number
+      ): void => {
+        const existing = merged.get(hit.object_id);
+        if (
+          existing !== undefined &&
+          (existing.normalizedRank > hit.normalized_rank ||
+            (existing.normalizedRank === hit.normalized_rank &&
+              existing.lanePriority <= lanePriority))
+        ) {
+          return;
         }
-      }
-      if (byObjectId.size === 0) {
+        merged.set(
+          hit.object_id,
+          Object.freeze({ normalizedRank: hit.normalized_rank, lanePriority, laneOrder })
+        );
+      };
+      porterHits.forEach((hit, index) => considerLaneHit(hit, 0, index));
+      trigramHits.forEach((hit, index) => considerLaneHit(hit, 1, index));
+      if (merged.size === 0) {
         return Object.freeze([]);
       }
       return Object.freeze(
-        [...byObjectId.entries()]
+        [...merged.entries()]
           .sort((left, right) => {
-            const rankDelta = right[1] - left[1];
+            const rankDelta = right[1].normalizedRank - left[1].normalizedRank;
             if (rankDelta !== 0) {
               return rankDelta;
+            }
+            const priorityDelta = left[1].lanePriority - right[1].lanePriority;
+            if (priorityDelta !== 0) {
+              return priorityDelta;
+            }
+            const orderDelta = left[1].laneOrder - right[1].laneOrder;
+            if (orderDelta !== 0) {
+              return orderDelta;
             }
             return left[0].localeCompare(right[0]);
           })
           .slice(0, limit)
-          .map(([objectId, normalizedRank]) =>
-            Object.freeze({ object_id: objectId, normalized_rank: normalizedRank })
+          .map(([objectId, entry]) =>
+            Object.freeze({ object_id: objectId, normalized_rank: entry.normalizedRank })
           )
       );
     } catch (error) {
@@ -351,15 +383,16 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     if (rows.length === 0) {
       return [];
     }
-    // bm25 returns negative scores; normalize so 1.0 = top, 0.0 = bottom.
-    const ranks = rows.map((row) => row.raw_rank);
-    const maxRank = Math.max(...ranks);
-    const minRank = Math.min(...ranks);
-    const span = maxRank - minRank;
-    return rows.map((row) =>
+    // Rows arrive ordered by raw bm25 (best first). Score by ordinal rank, not
+    // raw bm25 magnitude: an affine min-max would pin a lane's own best hit to
+    // 1.0 regardless of absolute match quality, so a weak hit in a narrow-span
+    // lane could outrank a strong hit in a wide-span lane after merge. Ordinal
+    // scores share one comparable scale across the porter and trigram lanes.
+    const scores = buildGroupedOrdinalScores(rows, (row) => row.raw_rank);
+    return rows.map((row, index) =>
       Object.freeze({
         object_id: row.object_id,
-        normalized_rank: span <= 0 ? 1 : 1 - (row.raw_rank - minRank) / span
+        normalized_rank: scores[index] ?? 0
       })
     );
   }
