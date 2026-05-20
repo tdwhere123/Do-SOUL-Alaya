@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { entrySlug } from "@do-soul/alaya-eval";
-import { runControlledReplay } from "../controlled-replay/runner.js";
+import {
+  controlledReplayTestHooks,
+  runControlledReplay
+} from "../controlled-replay/runner.js";
 
 const CANONICAL_SLUG_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{6}Z-[0-9a-f]{7,40}$/;
 
@@ -149,6 +152,33 @@ describe("controlled replay runner", () => {
     180_000
   );
 
+  it("counts KN.4 path contribution against all top-10 candidates", () => {
+    const diagnostics = [
+      buildDiagnostic("gold-path", 1, { path_expansion: 0.25 }),
+      ...Array.from({ length: 9 }, (_, index) =>
+        buildDiagnostic(`decoy-${index + 1}`, index + 2, {})
+      )
+    ];
+
+    const metrics = controlledReplayTestHooks.computeMetrics([
+      {
+        questionId: "q-path-target",
+        deliveryId: "delivery-1",
+        results: [],
+        activeConstraints: [],
+        diagnostics,
+        expectedObjectIds: ["gold-path"],
+        expectedRank: 1
+      }
+    ]);
+
+    expect(metrics.path_stream_top10).toEqual({
+      count: 1,
+      denominator: 10,
+      rate: 0.1
+    });
+  });
+
   it(
     "refuses to overwrite an existing deterministic archive slug",
     async () => {
@@ -175,4 +205,22 @@ function resolveCommitSha7ForTest(): string {
   } catch {
     return "0000000";
   }
+}
+
+function buildDiagnostic(
+  objectId: string,
+  finalRank: number,
+  fusedRankContributionPerStream: Readonly<Record<string, number>>
+) {
+  return {
+    object_id: objectId,
+    pre_budget_rank: finalRank,
+    fused_rank: finalRank,
+    final_rank: finalRank,
+    dropped_reason: null,
+    lexical_rank: finalRank,
+    fused_rank_contribution_per_stream: fusedRankContributionPerStream,
+    admission_planes: [],
+    source_channels: []
+  };
 }

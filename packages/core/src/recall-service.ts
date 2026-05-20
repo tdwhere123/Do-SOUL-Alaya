@@ -1701,9 +1701,12 @@ export class RecallService {
     readonly degradedReason: string | null;
   }>> {
     const embeddingRecallService = this.dependencies.embeddingRecallService;
+    const hasSupplementPreparation =
+      typeof embeddingRecallService?.prepareQuerySupplement === "function" ||
+      typeof embeddingRecallService?.prepareQueryEmbedding === "function";
     if (
       embeddingRecallService === undefined ||
-      typeof embeddingRecallService.prepareQueryEmbedding !== "function" ||
+      !hasSupplementPreparation ||
       params.queryText === null ||
       params.config.coarse_filter.semantic_supplement.embedding_enabled !== true ||
       params.config.coarse_filter.semantic_supplement.max_supplement <= 0 ||
@@ -1728,6 +1731,11 @@ export class RecallService {
             ? null
             : normalizeEmbeddingProviderDegradationReason(prepared.degradedReason)
       });
+    }
+
+    const prepareQueryEmbedding = embeddingRecallService.prepareQueryEmbedding;
+    if (typeof prepareQueryEmbedding !== "function") {
+      return Object.freeze({ handle: null, storedVectors: null, degradedReason: null });
     }
 
     if (typeof embeddingRecallService.hasStoredVectors === "function") {
@@ -1764,7 +1772,7 @@ export class RecallService {
     }
 
     return Object.freeze({
-      handle: embeddingRecallService.prepareQueryEmbedding({
+      handle: prepareQueryEmbedding({
         workspaceId: params.workspaceId,
         runId: params.runId,
         queryText: params.queryText

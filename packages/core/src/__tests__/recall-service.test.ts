@@ -20,6 +20,7 @@ import {
   classifyGlobalCandidate,
   type RecallServiceDependencies
 } from "../recall-service.js";
+import type { EmbeddingVectorRecord } from "../embedding-recall-service.js";
 
 function createTaskSurface(): TaskObjectSurface {
   return {
@@ -1952,6 +1953,86 @@ describe("RecallService", () => {
     } finally {
       process.off("unhandledRejection", onUnhandled);
     }
+  });
+
+  it("uses prepared embedding supplements without the legacy query-embedding port", async () => {
+    const memories = [
+      createMemoryEntry({
+        object_id: "memory-lexical",
+        dimension: MemoryDimension.PROCEDURE,
+        activation_score: 0.9,
+        content: "Lexical baseline procedure."
+      })
+    ];
+    const { dependencies } = createDependencies(memories);
+    const preparedQuery = createPreparedQueryHandle("prepared-query-supplement-only");
+    const storedVectors: readonly Readonly<EmbeddingVectorRecord>[] = Object.freeze([
+      {
+        object_id: "memory-lexical",
+        workspace_id: "workspace-1",
+        content_hash: "hash-memory-lexical",
+        provider_kind: "openai",
+        model_id: "text-embedding-3-small",
+        schema_version: 1,
+        dimensions: 2,
+        embedding: new Float32Array([1, 0]),
+        created_at: "2026-04-23T00:00:00.000Z",
+        updated_at: "2026-04-23T00:00:00.000Z"
+      }
+    ]);
+    const prepareQuerySupplement = vi.fn(async () => ({
+      preparedQuery,
+      storedVectors,
+      degradedReason: null
+    }));
+    const querySupplementIfReady = vi.fn(async () => ({
+      supplementaryEntries: Object.freeze([]),
+      similarityHintsByObjectId: Object.freeze({})
+    }));
+    const service = new RecallService({
+      ...dependencies,
+      embeddingRecallService: {
+        prepareQuerySupplement,
+        querySupplementIfReady,
+        querySupplement: vi.fn(async () => ({
+          supplementaryEntries: Object.freeze([]),
+          similarityHintsByObjectId: Object.freeze({})
+        }))
+      }
+    });
+    const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+    const policy = overridePolicy(basePolicy, {
+      coarse_filter: {
+        ...basePolicy.coarse_filter,
+        semantic_supplement: {
+          ...basePolicy.coarse_filter.semantic_supplement,
+          embedding_enabled: true
+        }
+      }
+    });
+
+    await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    expect(prepareQuerySupplement).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      runId: null,
+      queryText: "Implement recall",
+      eligibleMemories: expect.arrayContaining([
+        expect.objectContaining({ object_id: "memory-lexical" })
+      ]),
+      baseCandidateCount: 1
+    });
+    expect(querySupplementIfReady).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preparedQuery,
+        storedVectors
+      })
+    );
   });
 
   it("merges keyword supplement candidates without duplicating deterministic matches", async () => {

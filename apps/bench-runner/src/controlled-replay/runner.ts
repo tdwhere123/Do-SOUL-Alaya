@@ -617,11 +617,7 @@ function computeMetrics(observations: readonly RecallObservation[]): ScenarioMet
     activeConstraints += observation.activeConstraints.length;
     for (const diagnostic of observation.diagnostics) {
       diagnosticsCount++;
-      if (
-        expectedObjectIds.has(diagnostic.object_id) &&
-        diagnostic.final_rank !== null &&
-        diagnostic.final_rank <= 10
-      ) {
+      if (diagnostic.final_rank !== null && diagnostic.final_rank <= 10) {
         pathStreamTop10Denominator++;
         if (hasPathStreamContribution(diagnostic)) {
           pathStreamTop10Count++;
@@ -1043,6 +1039,10 @@ function readNumberRecord(value: unknown): Readonly<Record<string, number>> {
     )
   );
 }
+
+export const controlledReplayTestHooks = Object.freeze({
+  computeMetrics
+});
 
 function readStringArray(value: unknown): readonly string[] {
   return Array.isArray(value)
