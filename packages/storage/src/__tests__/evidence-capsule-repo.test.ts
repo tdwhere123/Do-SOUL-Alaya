@@ -181,6 +181,64 @@ describe("SqliteEvidenceCapsuleRepo", () => {
       (created as any).gist = "mutated";
     }).toThrow(TypeError);
   });
+
+  it("recalls an English evidence excerpt via the porter word lane", async () => {
+    const { repo } = await createRepo();
+    await repo.create(
+      createEvidenceCapsule({
+        object_id: "1f5c2a90-0000-4000-8000-000000000001",
+        gist: "build gist",
+        excerpt: "The deployment pipeline rotates the staging credentials nightly."
+      })
+    );
+    await repo.create(
+      createEvidenceCapsule({
+        object_id: "1f5c2a90-0000-4000-8000-000000000002",
+        gist: "other gist",
+        excerpt: "An unrelated note about lunch preferences."
+      })
+    );
+
+    const hits = await repo.searchByKeyword!("workspace-1", "deployment credentials", 10);
+    expect(hits.map((hit) => hit.object_id)).toContain("1f5c2a90-0000-4000-8000-000000000001");
+    expect(hits.map((hit) => hit.object_id)).not.toContain("1f5c2a90-0000-4000-8000-000000000002");
+  });
+
+  it("recalls a Chinese evidence excerpt via the trigram lane (previously CJK-blind)", async () => {
+    const { repo } = await createRepo();
+    await repo.create(
+      createEvidenceCapsule({
+        object_id: "2f5c2a90-0000-4000-8000-000000000001",
+        gist: "中文摘要",
+        excerpt: "用户每天晚上轮换部署流水线的临时凭证。"
+      })
+    );
+    await repo.create(
+      createEvidenceCapsule({
+        object_id: "2f5c2a90-0000-4000-8000-000000000002",
+        gist: "无关摘要",
+        excerpt: "关于午餐偏好的一段无关记录。"
+      })
+    );
+
+    const hits = await repo.searchByKeyword!("workspace-1", "部署流水线", 10);
+    expect(hits.map((hit) => hit.object_id)).toContain("2f5c2a90-0000-4000-8000-000000000001");
+    expect(hits.map((hit) => hit.object_id)).not.toContain("2f5c2a90-0000-4000-8000-000000000002");
+  });
+
+  it("recalls a mixed-script evidence excerpt by fanning out to both lanes", async () => {
+    const { repo } = await createRepo();
+    await repo.create(
+      createEvidenceCapsule({
+        object_id: "3f5c2a90-0000-4000-8000-000000000001",
+        gist: "mixed gist",
+        excerpt: "The 部署 pipeline rotates 凭证 every night."
+      })
+    );
+
+    const hits = await repo.searchByKeyword!("workspace-1", "pipeline 凭证", 10);
+    expect(hits.map((hit) => hit.object_id)).toContain("3f5c2a90-0000-4000-8000-000000000001");
+  });
 });
 
 async function createRepo(): Promise<{

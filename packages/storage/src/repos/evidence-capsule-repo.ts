@@ -1,3 +1,4 @@
+import type BetterSqlite3 from "better-sqlite3";
 import {
   EvidenceCapsuleSchema,
   EvidenceHealthStateSchema,
@@ -55,6 +56,48 @@ interface EvidenceCapsuleRow {
   readonly surface_id: string | null;
 }
 
+// Trigram FTS5 tables only index runs of >= 3 codepoints; shorter terms can
+// never match and must not be sent to the trigram lane.
+const TRIGRAM_MIN_CODEPOINTS = 3;
+// A token routed to the trigram lane if it carries any CJK-family character;
+// unicode61 collapses such a run into one token and is effectively blind to it.
+const CJK_SCRIPT_PATTERN =
+  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+
+interface EvidenceFtsLaneSplit {
+  readonly porterTokens: readonly string[];
+  readonly trigramTokens: readonly string[];
+}
+
+/**
+ * Route evidence FTS query tokens by character script. CJK-bearing tokens go
+ * to the trigram lane (substring-capable); plain word tokens go to the porter
+ * unicode61 lane (English BM25 + stemming). A mixed-script query fans out to
+ * both lanes. Kept evidence-local so the shared `tokenizeFtsQuery` helper
+ * (memory-entry side) stays untouched.
+ */
+function splitEvidenceFtsLanes(tokens: readonly string[]): EvidenceFtsLaneSplit {
+  const porterTokens: string[] = [];
+  const trigramTokens: string[] = [];
+  for (const token of tokens) {
+    if (CJK_SCRIPT_PATTERN.test(token)) {
+      if (Array.from(token).length >= TRIGRAM_MIN_CODEPOINTS) {
+        trigramTokens.push(token);
+      }
+    } else {
+      porterTokens.push(token);
+    }
+  }
+  return Object.freeze({
+    porterTokens: Object.freeze(porterTokens),
+    trigramTokens: Object.freeze(trigramTokens)
+  });
+}
+
+function buildEvidenceFtsMatchExpression(tokens: readonly string[]): string {
+  return tokens.map((token) => `"${token.replace(/"/g, '""')}"`).join(" OR ");
+}
+
 export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
   private readonly createStatement;
   private readonly findByIdStatement;
@@ -62,8 +105,10 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
   private readonly findByWorkspaceIdStatement;
   private readonly findByHealthStatement;
   private readonly updateHealthStatement;
-  // see also: 068-evidence-capsule-fts.sql — virtual FTS5 table.
+  // see also: 078-evidence-capsule-fts-dual.sql — porter unicode61 word lane.
   private readonly searchByKeywordStatement;
+  // see also: 078-evidence-capsule-fts-dual.sql — trigram CJK/substring lane.
+  private readonly searchByKeywordTrigramStatement;
 
   public constructor(private readonly db: StorageDatabase) {
     this.createStatement = db.connection.prepare(`
@@ -202,6 +247,20 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
       ORDER BY raw_rank ASC, evidence_capsule_fts.object_id ASC
       LIMIT ?
     `);
+    this.searchByKeywordTrigramStatement = db.connection.prepare(`
+      SELECT
+        evidence_capsule_fts_trigram.object_id,
+        bm25(evidence_capsule_fts_trigram) AS raw_rank
+      FROM evidence_capsule_fts_trigram
+      JOIN evidence_capsules
+        ON evidence_capsules.object_id = evidence_capsule_fts_trigram.object_id
+      WHERE
+        evidence_capsule_fts_trigram.workspace_id = ?
+        AND evidence_capsule_fts_trigram MATCH ?
+        AND COALESCE(evidence_capsules.lifecycle_state, '') != 'retired'
+      ORDER BY raw_rank ASC, evidence_capsule_fts_trigram.object_id ASC
+      LIMIT ?
+    `);
   }
 
   public async searchByKeyword(
@@ -222,28 +281,52 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
       if (tokens.length === 0) {
         return Object.freeze([]);
       }
-      const matchExpression = tokens.map((token) => `"${token.replace(/"/g, '""')}"`).join(" OR ");
-      const rows = this.searchByKeywordStatement.all(
-        workspaceId,
-        matchExpression,
-        limit
-      ) as ReadonlyArray<{ readonly object_id: string; readonly raw_rank: number }>;
-      if (rows.length === 0) {
+      // Script-routed dual-lane FTS: word tokens to the porter unicode61 lane,
+      // CJK-bearing tokens to the trigram lane. The merged result preserves the
+      // EvidenceCapsuleKeywordHit contract (normalized_rank, 1.0 = top).
+      const { porterTokens, trigramTokens } = splitEvidenceFtsLanes(tokens);
+      const porterHits =
+        porterTokens.length === 0
+          ? []
+          : this.queryEvidenceFtsLane(
+              this.searchByKeywordStatement,
+              workspaceId,
+              porterTokens,
+              limit
+            );
+      const trigramHits =
+        trigramTokens.length === 0
+          ? []
+          : this.queryEvidenceFtsLane(
+              this.searchByKeywordTrigramStatement,
+              workspaceId,
+              trigramTokens,
+              limit
+            );
+
+      const byObjectId = new Map<string, number>();
+      for (const hit of [...porterHits, ...trigramHits]) {
+        const existing = byObjectId.get(hit.object_id);
+        if (existing === undefined || hit.normalized_rank > existing) {
+          byObjectId.set(hit.object_id, hit.normalized_rank);
+        }
+      }
+      if (byObjectId.size === 0) {
         return Object.freeze([]);
       }
-      // bm25 returns negative scores; normalize so 1.0 = top, 0.0 = bottom.
-      const ranks = rows.map((row) => row.raw_rank);
-      const maxRank = Math.max(...ranks);
-      const minRank = Math.min(...ranks);
-      const span = maxRank - minRank;
       return Object.freeze(
-        rows.map((row) =>
-          Object.freeze({
-            object_id: row.object_id,
-            normalized_rank:
-              span <= 0 ? 1 : 1 - (row.raw_rank - minRank) / span
+        [...byObjectId.entries()]
+          .sort((left, right) => {
+            const rankDelta = right[1] - left[1];
+            if (rankDelta !== 0) {
+              return rankDelta;
+            }
+            return left[0].localeCompare(right[0]);
           })
-        )
+          .slice(0, limit)
+          .map(([objectId, normalizedRank]) =>
+            Object.freeze({ object_id: objectId, normalized_rank: normalizedRank })
+          )
       );
     } catch (error) {
       throw new StorageError(
@@ -252,6 +335,33 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
         error
       );
     }
+  }
+
+  private queryEvidenceFtsLane(
+    statement: BetterSqlite3.Statement,
+    workspaceId: string,
+    laneTokens: readonly string[],
+    limit: number
+  ): readonly EvidenceCapsuleKeywordHit[] {
+    const matchExpression = buildEvidenceFtsMatchExpression(laneTokens);
+    const rows = statement.all(workspaceId, matchExpression, limit) as ReadonlyArray<{
+      readonly object_id: string;
+      readonly raw_rank: number;
+    }>;
+    if (rows.length === 0) {
+      return [];
+    }
+    // bm25 returns negative scores; normalize so 1.0 = top, 0.0 = bottom.
+    const ranks = rows.map((row) => row.raw_rank);
+    const maxRank = Math.max(...ranks);
+    const minRank = Math.min(...ranks);
+    const span = maxRank - minRank;
+    return rows.map((row) =>
+      Object.freeze({
+        object_id: row.object_id,
+        normalized_rank: span <= 0 ? 1 : 1 - (row.raw_rank - minRank) / span
+      })
+    );
   }
 
   public async create(capsule: EvidenceCapsule): Promise<Readonly<EvidenceCapsule>> {
