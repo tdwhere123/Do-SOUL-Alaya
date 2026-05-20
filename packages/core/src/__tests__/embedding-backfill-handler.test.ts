@@ -152,7 +152,7 @@ describe("EmbeddingBackfillHandler", () => {
     expect(result.auditEntries).toEqual(["embedding_skipped:stale_content:memory-1"]);
   });
 
-  it("continues embedding later batches when one provider batch fails", async () => {
+  it("retries failed provider batches as smaller batches before moving on", async () => {
     const hotMemories = Array.from({ length: 17 }, (_, index) =>
       createMemoryEntry({
         object_id: `memory-${index}`,
@@ -160,11 +160,10 @@ describe("EmbeddingBackfillHandler", () => {
       })
     );
     const embedTexts = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("provider timeout"))
-      .mockImplementationOnce(async (texts: readonly string[]) =>
+      .fn(async (texts: readonly string[]) =>
         texts.map(() => new Float32Array([0.4, 0.5, 0.6]))
-      );
+      )
+      .mockRejectedValueOnce(new Error("provider timeout"));
     const upsert = vi.fn(async (record: EmbeddingVectorRecord) => record);
     const handler = new EmbeddingBackfillHandler({
       memoryRepo: {
@@ -183,13 +182,51 @@ describe("EmbeddingBackfillHandler", () => {
       workspace_id: "workspace-1"
     });
 
-    expect(embedTexts).toHaveBeenCalledTimes(2);
+    expect(embedTexts).toHaveBeenCalledTimes(4);
     expect(embedTexts.mock.calls[0]?.[0]).toHaveLength(16);
-    expect(embedTexts.mock.calls[1]?.[0]).toEqual(["Semantic recall content 16."]);
-    expect(result.objectsAffected).toEqual(["memory-16"]);
-    expect(result.auditEntries).toContain("embedding_failed:provider:memory-0");
-    expect(result.auditEntries).toContain("embedding_failed:provider:memory-15");
+    expect(embedTexts.mock.calls[1]?.[0]).toHaveLength(8);
+    expect(embedTexts.mock.calls[2]?.[0]).toHaveLength(8);
+    expect(embedTexts.mock.calls[3]?.[0]).toEqual(["Semantic recall content 16."]);
+    expect(result.objectsAffected).toEqual(hotMemories.map((memory) => memory.object_id));
+    expect(result.auditEntries).not.toContain("embedding_failed:provider:memory-0");
     expect(result.auditEntries).toContain("embedding_upserted:memory-16");
+  });
+
+  it("isolates a persistently failing embedding input after split retries", async () => {
+    const hotMemories = [
+      createMemoryEntry({ object_id: "memory-ok-1", content: "Stable recall content one." }),
+      createMemoryEntry({ object_id: "memory-bad", content: "Provider rejects this bad input." }),
+      createMemoryEntry({ object_id: "memory-ok-2", content: "Stable recall content two." }),
+      createMemoryEntry({ object_id: "memory-ok-3", content: "Stable recall content three." })
+    ];
+    const embedTexts = vi.fn(async (texts: readonly string[]) => {
+      if (texts.some((text) => text.includes("bad input"))) {
+        throw new Error("provider rejected input");
+      }
+      return texts.map(() => new Float32Array([0.4, 0.5, 0.6]));
+    });
+    const handler = new EmbeddingBackfillHandler({
+      memoryRepo: {
+        findByWorkspaceId: vi.fn(async () => hotMemories)
+      },
+      memoryEmbeddingRepo: {
+        findByObjectId: vi.fn(async () => null),
+        upsert: vi.fn(async (record: EmbeddingVectorRecord) => record),
+        upsertIfContentHashMatchesCurrentMemory: vi.fn(async (record: EmbeddingVectorRecord) => record)
+      },
+      provider: createProvider({ embedTexts }),
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+
+    const result = await handler.handle({
+      workspace_id: "workspace-1"
+    });
+
+    expect(result.objectsAffected).toEqual(["memory-ok-1", "memory-ok-2", "memory-ok-3"]);
+    expect(result.auditEntries).toContain("embedding_failed:provider:memory-bad");
+    expect(result.auditEntries).toContain("embedding_upserted:memory-ok-1");
+    expect(result.auditEntries).toContain("embedding_upserted:memory-ok-2");
+    expect(result.auditEntries).toContain("embedding_upserted:memory-ok-3");
   });
 
   it("splits large embedding requests by input character budget", async () => {

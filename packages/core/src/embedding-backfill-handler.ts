@@ -109,29 +109,8 @@ export class EmbeddingBackfillHandler {
 
     const batches = buildEmbeddingBackfillBatches(memoriesToEmbed);
     for (const batch of batches) {
-      let embeddings: readonly Float32Array[];
-      try {
-        embeddings = await this.dependencies.provider.embedTexts(
-          batch.map((entry) => entry.memory.content),
-          {
-            timeoutMs: BACKFILL_TIMEOUT_MS
-          }
-        );
-
-        if (embeddings.length !== batch.length) {
-          throw new Error(`Expected ${batch.length} embeddings but received ${embeddings.length}.`);
-        }
-      } catch (error) {
-        const message = toErrorMessage(error);
-        this.warn("embedding backfill batch failed; continuing with remaining batches", {
-          workspace_id: task.workspace_id,
-          batch_size: batch.length,
-          batch_input_chars: batch.reduce((total, entry) => total + entry.memory.content.length, 0),
-          error: message
-        });
-        for (const entry of batch) {
-          auditEntries.push(`embedding_failed:provider:${entry.memory.object_id}`);
-        }
+      const embeddedBatch = await this.embedBatchWithFallback(task.workspace_id, batch, auditEntries);
+      if (embeddedBatch.length === 0) {
         continue;
       }
 
@@ -141,7 +120,7 @@ export class EmbeddingBackfillHandler {
         ).map((memory) => [memory.object_id, memory] as const)
       );
 
-      for (const [batchIndex, entry] of batch.entries()) {
+      for (const { entry, embedding } of embeddedBatch) {
         const latestMemory = latestHotMemories.get(entry.memory.object_id);
         const latestHash = latestMemory === undefined ? null : hashMemoryContent(latestMemory.content);
 
@@ -150,7 +129,7 @@ export class EmbeddingBackfillHandler {
           continue;
         }
 
-        const vector = new Float32Array(embeddings[batchIndex]!);
+        const vector = new Float32Array(embedding);
         try {
           const persisted =
             this.dependencies.memoryEmbeddingRepo.upsertIfContentHashMatchesCurrentMemory ===
@@ -203,12 +182,73 @@ export class EmbeddingBackfillHandler {
       auditEntries: Object.freeze(auditEntries)
     });
   }
+
+  private async embedBatchWithFallback(
+    workspaceId: string,
+    batch: readonly EmbeddingBackfillCandidate[],
+    auditEntries: string[]
+  ): Promise<readonly EmbeddedBackfillCandidate[]> {
+    try {
+      const embeddings = await this.dependencies.provider.embedTexts(
+        batch.map((entry) => entry.memory.content),
+        {
+          timeoutMs: BACKFILL_TIMEOUT_MS
+        }
+      );
+
+      if (embeddings.length !== batch.length) {
+        throw new Error(`Expected ${batch.length} embeddings but received ${embeddings.length}.`);
+      }
+
+      return Object.freeze(
+        batch.map((entry, index) =>
+          Object.freeze({
+            entry,
+            embedding: embeddings[index]!
+          })
+        )
+      );
+    } catch (error) {
+      const message = toErrorMessage(error);
+      const batchInputChars = batch.reduce((total, entry) => total + entry.memory.content.length, 0);
+
+      if (batch.length <= 1) {
+        const entry = batch[0];
+        if (entry !== undefined) {
+          this.warn("embedding backfill item failed; continuing with remaining batches", {
+            workspace_id: workspaceId,
+            object_id: entry.memory.object_id,
+            input_chars: batchInputChars,
+            error: message
+          });
+          auditEntries.push(`embedding_failed:provider:${entry.memory.object_id}`);
+        }
+        return Object.freeze([]);
+      }
+
+      this.warn("embedding backfill batch failed; retrying split batches", {
+        workspace_id: workspaceId,
+        batch_size: batch.length,
+        batch_input_chars: batchInputChars,
+        error: message
+      });
+      const splitIndex = Math.ceil(batch.length / 2);
+      const left = await this.embedBatchWithFallback(workspaceId, batch.slice(0, splitIndex), auditEntries);
+      const right = await this.embedBatchWithFallback(workspaceId, batch.slice(splitIndex), auditEntries);
+      return Object.freeze([...left, ...right]);
+    }
+  }
 }
 
 type EmbeddingBackfillCandidate = Readonly<{
   readonly memory: Readonly<MemoryEntry>;
   readonly contentHash: string;
   readonly existing: Readonly<EmbeddingVectorRecord> | null;
+}>;
+
+type EmbeddedBackfillCandidate = Readonly<{
+  readonly entry: EmbeddingBackfillCandidate;
+  readonly embedding: Float32Array;
 }>;
 
 function buildEmbeddingBackfillBatches(
