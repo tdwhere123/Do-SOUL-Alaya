@@ -113,6 +113,17 @@ export interface BenchEmbeddingWarmupSummary {
   readonly model_id: string | null;
 }
 
+export interface BenchQueryEmbeddingWarmupSummary {
+  readonly status: "not_requested" | "ready";
+  readonly requested_count: number;
+  readonly ready_count: number;
+  readonly cache_hit_count: number;
+  readonly provider_requested_count: number;
+  readonly missing_count: number;
+  readonly provider_kind: string | null;
+  readonly model_id: string | null;
+}
+
 export interface BenchRecallOptions {
   readonly maxResults?: number;
   readonly conflictAwareness?: boolean;
@@ -133,6 +144,9 @@ export interface BenchDaemonHandle {
     objectIds: readonly string[],
     opts?: BenchEmbeddingWarmupOptions
   ): Promise<BenchEmbeddingWarmupSummary>;
+  warmQueryEmbeddingCache(
+    queryTexts: readonly string[]
+  ): Promise<BenchQueryEmbeddingWarmupSummary>;
   reportContextUsage(input: BenchReportContextUsageInput): Promise<void>;
   /**
    * @anchor proposeMemory — full propose+review chain
@@ -543,6 +557,39 @@ export async function startBenchDaemon(
     return summary;
   }
 
+  async function warmQueryEmbeddingCache(
+    queryTexts: readonly string[]
+  ): Promise<BenchQueryEmbeddingWarmupSummary> {
+    if (embeddingMode !== "env") {
+      return Object.freeze({
+        status: "not_requested",
+        requested_count: 0,
+        ready_count: 0,
+        cache_hit_count: 0,
+        provider_requested_count: 0,
+        missing_count: 0,
+        provider_kind: null,
+        model_id: null
+      });
+    }
+    const embeddingRecallService = activeRuntime.services.embeddingRecallService;
+    if (embeddingRecallService === undefined) {
+      throw new Error("embedding query warm cache unavailable: embedding recall service is not configured");
+    }
+    const summary = await embeddingRecallService.warmQueryEmbeddings({
+      workspaceId,
+      runId,
+      queryTexts
+    });
+    if (summary.status !== "ready" || summary.ready_count !== summary.requested_count) {
+      throw new Error(
+        `embedding query warm cache not ready: ready=${summary.ready_count} ` +
+          `expected=${summary.requested_count} missing=${summary.missing_count}`
+      );
+    }
+    return summary;
+  }
+
   async function proposeMemory(
     content: string,
     evidenceRef: string,
@@ -687,6 +734,7 @@ export async function startBenchDaemon(
     dispatchCli: activeDispatchCli,
     recall,
     warmEmbeddingCache,
+    warmQueryEmbeddingCache,
     reportContextUsage,
     proposeMemory,
     shutdown

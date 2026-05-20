@@ -246,6 +246,11 @@ export function renderReport(
       `- Embedding vector cache ready: ${formatMaybeRatio(current.kpi.embedding_vector_cache_ready_rate)}`
     );
   }
+  if (current.kpi.query_embedding_cache_ready_rate !== undefined) {
+    lines.push(
+      `- Query embedding cache ready: ${formatMaybeRatio(current.kpi.query_embedding_cache_ready_rate)}`
+    );
+  }
   const trunc = current.kpi.seed_truncation;
   lines.push(
     `- Seed truncation: turns=${trunc.seed_turns_truncated} answer_bearing=${trunc.answer_turns_truncated} chars_clipped=${trunc.seed_chars_clipped}`

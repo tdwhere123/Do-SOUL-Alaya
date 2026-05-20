@@ -74,6 +74,7 @@ export interface EmbeddingRecallServiceDependencies {
    * compatible providers room to land within the recall window while still bounded.
    */
   readonly queryTimeoutMs?: number;
+  readonly queryEmbeddingCacheSize?: number;
 }
 
 export type PreparedEmbeddingQuerySnapshot =
@@ -101,6 +102,17 @@ export interface PreparedEmbeddingSupplement {
   readonly degradedReason: string | null;
 }
 
+export interface EmbeddingQueryWarmupSummary {
+  readonly status: "not_requested" | "ready";
+  readonly requested_count: number;
+  readonly ready_count: number;
+  readonly cache_hit_count: number;
+  readonly provider_requested_count: number;
+  readonly missing_count: number;
+  readonly provider_kind: string | null;
+  readonly model_id: string | null;
+}
+
 interface EmbeddingRecallPrecheckError extends Error {
   readonly reason: "local_vector_lookup_failed";
 }
@@ -108,12 +120,21 @@ interface EmbeddingRecallPrecheckError extends Error {
 export const DEFAULT_QUERY_TIMEOUT_MS = 2500;
 export const MAX_QUERY_TIMEOUT_MS = 5000;
 export const MIN_QUERY_TIMEOUT_MS = 50;
+const DEFAULT_QUERY_EMBEDDING_CACHE_SIZE = 512;
+const MAX_QUERY_EMBEDDING_CACHE_SIZE = 4096;
 
 function clampQueryTimeout(value: number): number {
   if (!Number.isFinite(value) || value <= 0) {
     return DEFAULT_QUERY_TIMEOUT_MS;
   }
   return Math.min(MAX_QUERY_TIMEOUT_MS, Math.max(MIN_QUERY_TIMEOUT_MS, value));
+}
+
+function clampQueryEmbeddingCacheSize(value: number): number {
+  if (!Number.isFinite(value) || value < 0) {
+    return DEFAULT_QUERY_EMBEDDING_CACHE_SIZE;
+  }
+  return Math.min(MAX_QUERY_EMBEDDING_CACHE_SIZE, Math.floor(value));
 }
 
 const EMPTY_SUPPLEMENT_RESULT: EmbeddingRecallSupplementResult = Object.freeze({
@@ -126,12 +147,17 @@ export class EmbeddingRecallService {
   private readonly now: () => string;
   private readonly warn: (message: string, meta: Record<string, unknown>) => void;
   private readonly queryTimeoutMs: number;
+  private readonly queryEmbeddingCacheSize: number;
+  private readonly queryEmbeddingCache = new Map<string, Float32Array>();
 
   public constructor(private readonly dependencies: EmbeddingRecallServiceDependencies) {
     this.generateQueryId = dependencies.generateQueryId ?? (() => `recall-embedding-${randomUUID()}`);
     this.now = dependencies.now ?? (() => new Date().toISOString());
     this.warn = dependencies.warn ?? (() => undefined);
     this.queryTimeoutMs = clampQueryTimeout(dependencies.queryTimeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS);
+    this.queryEmbeddingCacheSize = clampQueryEmbeddingCacheSize(
+      dependencies.queryEmbeddingCacheSize ?? DEFAULT_QUERY_EMBEDDING_CACHE_SIZE
+    );
   }
 
   public prepareQueryEmbedding(params: {
@@ -147,6 +173,18 @@ export class EmbeddingRecallService {
         Object.freeze({
           status: "failed",
           reason: "provider_unavailable"
+        })
+      );
+    }
+
+    const queryCacheKey = this.queryCacheKey(params.queryText);
+    const cachedEmbedding = this.getCachedQueryEmbedding(queryCacheKey);
+    if (cachedEmbedding !== null) {
+      return createPreparedEmbeddingQueryHandle(
+        queryId,
+        Object.freeze({
+          status: "ready",
+          embedding: cachedEmbedding
         })
       );
     }
@@ -168,6 +206,7 @@ export class EmbeddingRecallService {
           status: "ready",
           embedding: new Float32Array(embeddings[0]!)
         });
+        this.putCachedQueryEmbedding(queryCacheKey, snapshot.embedding);
       })
       .catch(() => {
         snapshot = Object.freeze({
@@ -183,6 +222,74 @@ export class EmbeddingRecallService {
 
       await waitForPreparedQuery(settled, timeoutMs);
       return snapshot;
+    });
+  }
+
+  public async warmQueryEmbeddings(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly queryTexts: readonly string[];
+  }): Promise<EmbeddingQueryWarmupSummary> {
+    const uniqueQueryTexts = [...new Set(params.queryTexts.map((text) => text.trim()))]
+      .filter((text) => text.length > 0);
+    if (uniqueQueryTexts.length === 0) {
+      return Object.freeze({
+        status: "ready",
+        requested_count: 0,
+        ready_count: 0,
+        cache_hit_count: 0,
+        provider_requested_count: 0,
+        missing_count: 0,
+        provider_kind: this.dependencies.provider.providerKind,
+        model_id: this.dependencies.provider.modelId
+      });
+    }
+    if (!this.dependencies.provider.isAvailable) {
+      return Object.freeze({
+        status: "not_requested",
+        requested_count: uniqueQueryTexts.length,
+        ready_count: 0,
+        cache_hit_count: 0,
+        provider_requested_count: 0,
+        missing_count: uniqueQueryTexts.length,
+        provider_kind: null,
+        model_id: null
+      });
+    }
+
+    const missingQueryTexts = uniqueQueryTexts.filter(
+      (queryText) => this.getCachedQueryEmbedding(this.queryCacheKey(queryText)) === null
+    );
+    if (missingQueryTexts.length > 0) {
+      const embeddings = await this.dependencies.provider.embedTexts(missingQueryTexts, {
+        timeoutMs: this.queryTimeoutMs
+      });
+      if (embeddings.length !== missingQueryTexts.length) {
+        throw new Error(
+          `Expected ${missingQueryTexts.length} warmed query embeddings, received ${embeddings.length}.`
+        );
+      }
+      for (let i = 0; i < missingQueryTexts.length; i++) {
+        const queryText = missingQueryTexts[i]!;
+        this.putCachedQueryEmbedding(
+          this.queryCacheKey(queryText),
+          new Float32Array(embeddings[i]!)
+        );
+      }
+    }
+
+    const readyCount = uniqueQueryTexts.filter(
+      (queryText) => this.getCachedQueryEmbedding(this.queryCacheKey(queryText)) !== null
+    ).length;
+    return Object.freeze({
+      status: "ready",
+      requested_count: uniqueQueryTexts.length,
+      ready_count: readyCount,
+      cache_hit_count: uniqueQueryTexts.length - missingQueryTexts.length,
+      provider_requested_count: missingQueryTexts.length,
+      missing_count: Math.max(0, uniqueQueryTexts.length - readyCount),
+      provider_kind: this.dependencies.provider.providerKind,
+      model_id: this.dependencies.provider.modelId
     });
   }
 
@@ -271,6 +378,35 @@ export class EmbeddingRecallService {
       storedVectors,
       degradedReason: null
     });
+  }
+
+  private queryCacheKey(queryText: string): string {
+    return `sha256:${createHash("sha256").update(queryText.trim()).digest("hex")}`;
+  }
+
+  private getCachedQueryEmbedding(cacheKey: string): Float32Array | null {
+    const cached = this.queryEmbeddingCache.get(cacheKey);
+    if (cached === undefined) {
+      return null;
+    }
+    this.queryEmbeddingCache.delete(cacheKey);
+    this.queryEmbeddingCache.set(cacheKey, cached);
+    return new Float32Array(cached);
+  }
+
+  private putCachedQueryEmbedding(cacheKey: string, embedding: Float32Array): void {
+    if (this.queryEmbeddingCacheSize <= 0) {
+      return;
+    }
+    this.queryEmbeddingCache.delete(cacheKey);
+    this.queryEmbeddingCache.set(cacheKey, new Float32Array(embedding));
+    while (this.queryEmbeddingCache.size > this.queryEmbeddingCacheSize) {
+      const oldestKey = this.queryEmbeddingCache.keys().next().value as string | undefined;
+      if (oldestKey === undefined) {
+        break;
+      }
+      this.queryEmbeddingCache.delete(oldestKey);
+    }
   }
 
   public async recordPrecheckDegraded(params: {

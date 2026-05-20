@@ -26,6 +26,7 @@ import {
   type BenchDaemonHandle,
   type BenchEmbeddingWarmupSummary,
   type BenchEmbeddingMode,
+  type BenchQueryEmbeddingWarmupSummary,
   type BenchRecallOptions,
   type BenchReportContextUsageInput,
   type SeedObjectKind
@@ -44,6 +45,7 @@ import {
   summarizeLongMemEvalReportSideEffects,
   summarizeProviderStates,
   type LongMemEvalEmbeddingVectorCacheSummary,
+  type LongMemEvalQueryEmbeddingCacheSummary,
   type LongMemEvalQuestionDiagnostic,
   type LongMemEvalReportSideEffectSnapshot
 } from "./diagnostics.js";
@@ -183,6 +185,7 @@ export async function runLongMemEval(
     seedCharsClipped: number;
     diagnostics: LongMemEvalQuestionDiagnostic;
     embeddingWarmup: BenchEmbeddingWarmupSummary | null;
+    queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null;
     reportUsageStats: LongMemEvalReportSimulationStats;
     reportSideEffectSnapshot: LongMemEvalReportSideEffectSnapshot;
   };
@@ -237,6 +240,10 @@ export async function runLongMemEval(
       const embeddingWarmup =
         opts.embeddingMode === "env"
           ? await daemon.warmEmbeddingCache([...sidecar.keys()])
+          : null;
+      const queryEmbeddingWarmup =
+        opts.embeddingMode === "env"
+          ? await daemon.warmQueryEmbeddingCache([question.question])
           : null;
 
       const goldMemoryIds = [...sidecar.entries()]
@@ -303,6 +310,7 @@ export async function runLongMemEval(
         seedCharsClipped,
         diagnostics,
         embeddingWarmup,
+        queryEmbeddingWarmup,
         reportUsageStats: recallCycle.reportUsageStats,
         reportSideEffectSnapshot
       };
@@ -349,6 +357,7 @@ export async function runLongMemEval(
   const questionDiagnostics: LongMemEvalQuestionDiagnostic[] = [];
   const reportSideEffectSnapshots: LongMemEvalReportSideEffectSnapshot[] = [];
   const embeddingWarmups: BenchEmbeddingWarmupSummary[] = [];
+  const queryEmbeddingWarmups: BenchQueryEmbeddingWarmupSummary[] = [];
 
   for (let i = 0; i < collected.length; i++) {
     const res = collected[i];
@@ -356,6 +365,9 @@ export async function runLongMemEval(
     questionDiagnostics.push(res.diagnostics);
     if (res.embeddingWarmup !== null) {
       embeddingWarmups.push(res.embeddingWarmup);
+    }
+    if (res.queryEmbeddingWarmup !== null) {
+      queryEmbeddingWarmups.push(res.queryEmbeddingWarmup);
     }
     latencies.push(res.latencyMs);
     if (res.hitAt1) totalHitAt1++;
@@ -393,6 +405,7 @@ export async function runLongMemEval(
   const providerSummary = summarizeProviderStates(questionDiagnostics);
   const rAt5EmbeddingReturned = rAt5WithProviderReturned(questionDiagnostics);
   const embeddingVectorCache = summarizeEmbeddingVectorCache(embeddingWarmups);
+  const queryEmbeddingCache = summarizeQueryEmbeddingCache(queryEmbeddingWarmups);
 
   const datasetSize = opts.fetchResult?.questionCount ?? questions.length;
   const pinnedMeta = readLongMemEvalPinnedMeta(
@@ -455,6 +468,12 @@ export async function runLongMemEval(
               : {
                   embedding_vector_cache_ready_rate:
                     embeddingVectorCache.ready_rate
+                }),
+            ...(queryEmbeddingCache === null
+              ? {}
+              : {
+                  query_embedding_cache_ready_rate:
+                    queryEmbeddingCache.ready_rate
                 })
           }
         : {}),
@@ -530,6 +549,9 @@ export async function runLongMemEval(
     ...(embeddingVectorCache === null
       ? {}
       : { embedding_vector_cache: embeddingVectorCache }),
+    ...(queryEmbeddingCache === null
+      ? {}
+      : { query_embedding_cache: queryEmbeddingCache }),
     provider_state_summary: providerSummary,
     questions: questionDiagnostics
   });
@@ -882,6 +904,41 @@ function summarizeEmbeddingVectorCache(
     not_ready_count: Math.max(0, expectedCount - readyCount),
     ready_rate: ratio(readyCount, expectedCount),
     max_pass_count: maxPassCount
+  };
+}
+
+function summarizeQueryEmbeddingCache(
+  summaries: readonly BenchQueryEmbeddingWarmupSummary[]
+): LongMemEvalQueryEmbeddingCacheSummary | null {
+  const readySummaries = summaries.filter((summary) => summary.status === "ready");
+  if (readySummaries.length === 0) {
+    return null;
+  }
+
+  const requestedCount = readySummaries.reduce(
+    (sum, summary) => sum + summary.requested_count,
+    0
+  );
+  const readyCount = readySummaries.reduce(
+    (sum, summary) => sum + summary.ready_count,
+    0
+  );
+  const cacheHitCount = readySummaries.reduce(
+    (sum, summary) => sum + summary.cache_hit_count,
+    0
+  );
+  const providerRequestedCount = readySummaries.reduce(
+    (sum, summary) => sum + summary.provider_requested_count,
+    0
+  );
+
+  return {
+    requested_count: requestedCount,
+    ready_count: readyCount,
+    not_ready_count: Math.max(0, requestedCount - readyCount),
+    ready_rate: ratio(readyCount, requestedCount),
+    cache_hit_count: cacheHitCount,
+    provider_requested_count: providerRequestedCount
   };
 }
 

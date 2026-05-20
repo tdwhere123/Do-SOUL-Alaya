@@ -121,6 +121,15 @@ export interface LongMemEvalEmbeddingVectorCacheSummary {
   readonly max_pass_count: number;
 }
 
+export interface LongMemEvalQueryEmbeddingCacheSummary {
+  readonly requested_count: number;
+  readonly ready_count: number;
+  readonly not_ready_count: number;
+  readonly ready_rate: number;
+  readonly cache_hit_count: number;
+  readonly provider_requested_count: number;
+}
+
 export interface LongMemEvalReportUsageSummary {
   readonly mode: "none" | "always-used" | "gold-only" | "mixed";
   readonly reports_attempted: number;
@@ -180,6 +189,7 @@ export interface LongMemEvalDiagnosticsSidecar {
   readonly report_side_effects?: LongMemEvalReportSideEffectSummary;
   readonly scored_recall_evidence?: LongMemEvalRecallEvidenceSummary;
   readonly embedding_vector_cache?: LongMemEvalEmbeddingVectorCacheSummary;
+  readonly query_embedding_cache?: LongMemEvalQueryEmbeddingCacheSummary;
   readonly provider_state_summary: ProviderStateSummary;
   readonly questions: readonly LongMemEvalQuestionDiagnostic[];
 }

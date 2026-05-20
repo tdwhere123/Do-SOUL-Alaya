@@ -96,6 +96,7 @@ describe("LoCoMo runner", () => {
       readonly kpi: {
         readonly provider_returned_rate?: number;
         readonly embedding_vector_cache_ready_rate?: number;
+        readonly query_embedding_cache_ready_rate?: number;
       };
     };
     const diagnostics = JSON.parse(await readFile(result.diagnosticsPath, "utf8")) as {
@@ -104,14 +105,27 @@ describe("LoCoMo runner", () => {
         readonly ready_count: number;
         readonly ready_rate: number;
       };
+      readonly query_embedding_cache?: {
+        readonly requested_count: number;
+        readonly ready_count: number;
+        readonly ready_rate: number;
+      };
     };
 
     expect(kpi.kpi.provider_returned_rate).toBe(1);
     expect(kpi.kpi.embedding_vector_cache_ready_rate).toBe(1);
+    expect(kpi.kpi.query_embedding_cache_ready_rate).toBe(1);
     expect(diagnostics.embedding_vector_cache).toEqual(
       expect.objectContaining({
         expected_count: 2,
         ready_count: 2,
+        ready_rate: 1
+      })
+    );
+    expect(diagnostics.query_embedding_cache).toEqual(
+      expect.objectContaining({
+        requested_count: 1,
+        ready_count: 1,
         ready_rate: 1
       })
     );
@@ -121,6 +135,7 @@ describe("LoCoMo runner", () => {
 function buildMockDaemon(overrides: {
   readonly recall?: ReturnType<typeof vi.fn>;
   readonly warmEmbeddingCache?: ReturnType<typeof vi.fn>;
+  readonly warmQueryEmbeddingCache?: ReturnType<typeof vi.fn>;
 }) {
   const recall = overrides.recall ?? vi.fn(async () => buildRecallResult());
   const warmEmbeddingCache =
@@ -132,6 +147,18 @@ function buildMockDaemon(overrides: {
       ready_rate: 1,
       pass_count: 1,
       missing_object_ids: [],
+      provider_kind: "openai",
+      model_id: "text-embedding-3-small"
+    }));
+  const warmQueryEmbeddingCache =
+    overrides.warmQueryEmbeddingCache ??
+    vi.fn(async (queryTexts: readonly string[]) => ({
+      status: "ready" as const,
+      requested_count: queryTexts.length,
+      ready_count: queryTexts.length,
+      cache_hit_count: 0,
+      provider_requested_count: queryTexts.length,
+      missing_count: 0,
       provider_kind: "openai",
       model_id: "text-embedding-3-small"
     }));
@@ -147,6 +174,7 @@ function buildMockDaemon(overrides: {
       };
     }),
     warmEmbeddingCache,
+    warmQueryEmbeddingCache,
     recall,
     shutdown: vi.fn(async () => undefined)
   };

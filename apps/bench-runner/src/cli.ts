@@ -829,9 +829,11 @@ async function runMergeLongMemEvalCommand(
     let providerNotRequestedTotal = 0;
     let providerReturnedHitAt5 = 0;
     let embeddingVectorCacheReadyWeightedTotal = 0;
+    let queryEmbeddingCacheReadyWeightedTotal = 0;
     let hasProviderRates = false;
     let hasReturnedSubsetRAt5 = false;
     let hasEmbeddingVectorCacheRate = false;
+    let hasQueryEmbeddingCacheRate = false;
     let evaluatedTotal = 0;
     let latencyP50Max = 0;
     let latencyP95Max = 0;
@@ -891,6 +893,11 @@ async function runMergeLongMemEvalCommand(
         hasEmbeddingVectorCacheRate = true;
         embeddingVectorCacheReadyWeightedTotal +=
           shard.kpi.embedding_vector_cache_ready_rate * shard.evaluated_count;
+      }
+      if (shard.kpi.query_embedding_cache_ready_rate !== undefined) {
+        hasQueryEmbeddingCacheRate = true;
+        queryEmbeddingCacheReadyWeightedTotal +=
+          shard.kpi.query_embedding_cache_ready_rate * shard.evaluated_count;
       }
       evaluatedTotal += shard.evaluated_count;
       latencyP50Max = Math.max(latencyP50Max, shard.kpi.latency_ms_p50);
@@ -974,6 +981,14 @@ async function runMergeLongMemEvalCommand(
           ? {
               embedding_vector_cache_ready_rate: ratio(
                 embeddingVectorCacheReadyWeightedTotal,
+                evaluatedTotal
+              )
+            }
+          : {}),
+        ...(hasQueryEmbeddingCacheRate
+          ? {
+              query_embedding_cache_ready_rate: ratio(
+                queryEmbeddingCacheReadyWeightedTotal,
                 evaluatedTotal
               )
             }

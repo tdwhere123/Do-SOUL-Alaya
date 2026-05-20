@@ -22,7 +22,8 @@ import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import {
   startBenchDaemon,
   type BenchEmbeddingMode,
-  type BenchEmbeddingWarmupSummary
+  type BenchEmbeddingWarmupSummary,
+  type BenchQueryEmbeddingWarmupSummary
 } from "../harness/daemon.js";
 import {
   buildQuestionDiagnostic,
@@ -65,6 +66,7 @@ interface LocomoDiagnosticsSidecar {
   readonly embedding_provider: string;
   readonly embedding_mode: BenchEmbeddingMode;
   readonly embedding_vector_cache?: LocomoEmbeddingVectorCacheSummary;
+  readonly query_embedding_cache?: LocomoQueryEmbeddingCacheSummary;
   readonly provider_state_summary: ReturnType<typeof summarizeProviderStates>;
   readonly scored_recall_evidence: ReturnType<typeof summarizeLongMemEvalRecallEvidence>;
   readonly questions: readonly LongMemEvalQuestionDiagnostic[];
@@ -76,6 +78,15 @@ interface LocomoEmbeddingVectorCacheSummary {
   readonly not_ready_count: number;
   readonly ready_rate: number;
   readonly max_pass_count: number;
+}
+
+interface LocomoQueryEmbeddingCacheSummary {
+  readonly requested_count: number;
+  readonly ready_count: number;
+  readonly not_ready_count: number;
+  readonly ready_rate: number;
+  readonly cache_hit_count: number;
+  readonly provider_requested_count: number;
 }
 
 export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult> {
@@ -147,6 +158,11 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
       result.embeddingWarmup === null ? [] : [result.embeddingWarmup]
     )
   );
+  const queryEmbeddingCache = summarizeQueryEmbeddingCache(
+    conversationResults.flatMap((result) =>
+      result.queryEmbeddingWarmup === null ? [] : [result.queryEmbeddingWarmup]
+    )
+  );
 
   const payload: KpiPayload = {
     bench_name: "public-locomo",
@@ -189,6 +205,12 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
         : {
             embedding_vector_cache_ready_rate:
               embeddingVectorCache.ready_rate
+          }),
+      ...(queryEmbeddingCache === null
+        ? {}
+        : {
+            query_embedding_cache_ready_rate:
+              queryEmbeddingCache.ready_rate
           }),
       latency_ms_p50: computePercentile(latencies, 50),
       latency_ms_p95: computePercentile(latencies, 95),
@@ -234,6 +256,9 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
       ...(embeddingVectorCache === null
         ? {}
         : { embedding_vector_cache: embeddingVectorCache }),
+      ...(queryEmbeddingCache === null
+        ? {}
+        : { query_embedding_cache: queryEmbeddingCache }),
       provider_state_summary: providerStateSummary,
       scored_recall_evidence: summarizeLongMemEvalRecallEvidence(questionDiagnostics),
       questions: questionDiagnostics
@@ -262,6 +287,7 @@ interface ConversationResult {
   readonly latencies: readonly number[];
   readonly questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[];
   readonly embeddingWarmup: BenchEmbeddingWarmupSummary | null;
+  readonly queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null;
 }
 
 async function runOneConversation(
@@ -300,6 +326,11 @@ async function runOneConversation(
     const embeddingWarmup =
       opts.embeddingMode === "env"
         ? await daemon.warmEmbeddingCache([...memoryIdByDiaId.values()])
+        : null;
+    const scoredQuestions = conversation.qa.filter((qa) => qa.evidence.length > 0);
+    const queryEmbeddingWarmup =
+      opts.embeddingMode === "env"
+        ? await daemon.warmQueryEmbeddingCache(scoredQuestions.map((qa) => qa.question))
         : null;
 
     let hitAt1 = 0;
@@ -371,7 +402,8 @@ async function runOneConversation(
       tierCold,
       latencies,
       questionDiagnostics,
-      embeddingWarmup
+      embeddingWarmup,
+      queryEmbeddingWarmup
     };
   } finally {
     await daemon.shutdown();
@@ -438,6 +470,41 @@ function summarizeEmbeddingVectorCache(
     not_ready_count: Math.max(0, expectedCount - readyCount),
     ready_rate: expectedCount === 0 ? 0 : readyCount / expectedCount,
     max_pass_count: maxPassCount
+  };
+}
+
+function summarizeQueryEmbeddingCache(
+  summaries: readonly BenchQueryEmbeddingWarmupSummary[]
+): LocomoQueryEmbeddingCacheSummary | null {
+  const readySummaries = summaries.filter((summary) => summary.status === "ready");
+  if (readySummaries.length === 0) {
+    return null;
+  }
+
+  const requestedCount = readySummaries.reduce(
+    (sum, summary) => sum + summary.requested_count,
+    0
+  );
+  const readyCount = readySummaries.reduce(
+    (sum, summary) => sum + summary.ready_count,
+    0
+  );
+  const cacheHitCount = readySummaries.reduce(
+    (sum, summary) => sum + summary.cache_hit_count,
+    0
+  );
+  const providerRequestedCount = readySummaries.reduce(
+    (sum, summary) => sum + summary.provider_requested_count,
+    0
+  );
+
+  return {
+    requested_count: requestedCount,
+    ready_count: readyCount,
+    not_ready_count: Math.max(0, requestedCount - readyCount),
+    ready_rate: requestedCount === 0 ? 0 : readyCount / requestedCount,
+    cache_hit_count: cacheHitCount,
+    provider_requested_count: providerRequestedCount
   };
 }
 

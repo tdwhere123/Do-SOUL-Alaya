@@ -1228,6 +1228,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       daemonMcpCatalog: mcpTooling.daemonMcpCatalog,
       environmentStatusService,
       embeddingStatusService,
+      ...(embeddingRecallService === undefined ? {} : { embeddingRecallService }),
       graphHealthService,
       configService,
       mcpMemoryToolHandler,
