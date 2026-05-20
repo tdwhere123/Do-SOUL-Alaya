@@ -118,7 +118,7 @@ describe("bench-runner CLI", () => {
       expect(archive.contribution_suspects).toHaveLength(3);
       expect(archive.metrics.cold_warm_delta).toBeDefined();
       expect(archive.native_health_gates.verdict).toBe("ok");
-      expect(archive.native_health_gates.gates).toHaveLength(2);
+      expect(archive.native_health_gates.gates).toHaveLength(4);
       expect(archive.evidence.harness_mode).toBe("mcp_propose_review");
       expect(archive.evidence.recall_path).toBe("production_recall_service");
     },

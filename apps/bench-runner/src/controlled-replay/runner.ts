@@ -617,7 +617,11 @@ function computeMetrics(observations: readonly RecallObservation[]): ScenarioMet
     activeConstraints += observation.activeConstraints.length;
     for (const diagnostic of observation.diagnostics) {
       diagnosticsCount++;
-      if (diagnostic.final_rank !== null && diagnostic.final_rank <= 10) {
+      if (
+        expectedObjectIds.has(diagnostic.object_id) &&
+        diagnostic.final_rank !== null &&
+        diagnostic.final_rank <= 10
+      ) {
         pathStreamTop10Denominator++;
         if (hasPathStreamContribution(diagnostic)) {
           pathStreamTop10Count++;

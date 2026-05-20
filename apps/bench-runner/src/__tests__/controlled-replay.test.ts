@@ -114,6 +114,8 @@ describe("controlled replay runner", () => {
         .toBeGreaterThan(0);
       expect(warmScenario?.metrics.path_stream_top10.rate)
         .toBeGreaterThanOrEqual(0.1);
+      expect(warmScenario?.metrics.expected_rank_by_question["q-path-target"])
+        .toBeLessThanOrEqual(5);
       expect(archive.metrics.cold_warm_delta).toBeDefined();
       expect(archive.native_health_gates.gates.map((gate) => gate.id)).toEqual([
         "trust_loop_activation_gain",
