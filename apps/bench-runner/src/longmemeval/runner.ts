@@ -931,6 +931,7 @@ function summarizeQueryEmbeddingCache(
     (sum, summary) => sum + summary.provider_requested_count,
     0
   );
+  const lastError = [...readySummaries].reverse().find((summary) => summary.last_error !== undefined)?.last_error;
 
   return {
     requested_count: requestedCount,
@@ -938,7 +939,8 @@ function summarizeQueryEmbeddingCache(
     not_ready_count: Math.max(0, requestedCount - readyCount),
     ready_rate: ratio(readyCount, requestedCount),
     cache_hit_count: cacheHitCount,
-    provider_requested_count: providerRequestedCount
+    provider_requested_count: providerRequestedCount,
+    ...(lastError === undefined ? {} : { last_error: lastError })
   };
 }
 

@@ -128,6 +128,7 @@ export interface LongMemEvalQueryEmbeddingCacheSummary {
   readonly ready_rate: number;
   readonly cache_hit_count: number;
   readonly provider_requested_count: number;
+  readonly last_error?: string;
 }
 
 export interface LongMemEvalReportUsageSummary {

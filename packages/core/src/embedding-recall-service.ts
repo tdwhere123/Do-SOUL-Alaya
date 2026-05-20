@@ -111,6 +111,7 @@ export interface EmbeddingQueryWarmupSummary {
   readonly missing_count: number;
   readonly provider_kind: string | null;
   readonly model_id: string | null;
+  readonly last_error?: string;
 }
 
 interface EmbeddingRecallPrecheckError extends Error {
@@ -122,6 +123,11 @@ export const MAX_QUERY_TIMEOUT_MS = 5000;
 export const MIN_QUERY_TIMEOUT_MS = 50;
 const DEFAULT_QUERY_EMBEDDING_CACHE_SIZE = 512;
 const MAX_QUERY_EMBEDDING_CACHE_SIZE = 4096;
+const DEFAULT_EMBEDDING_REQUEST_MAX_ATTEMPTS = 5;
+const MAX_EMBEDDING_REQUEST_ATTEMPTS = 5;
+const DEFAULT_EMBEDDING_REQUEST_RETRY_DELAY_MS = 250;
+const MAX_EMBEDDING_REQUEST_RETRY_DELAY_MS = 2_000;
+const QUERY_EMBEDDING_WARMUP_BATCH_SIZE = 16;
 
 function clampQueryTimeout(value: number): number {
   if (!Number.isFinite(value) || value <= 0) {
@@ -135,6 +141,20 @@ function clampQueryEmbeddingCacheSize(value: number): number {
     return DEFAULT_QUERY_EMBEDDING_CACHE_SIZE;
   }
   return Math.min(MAX_QUERY_EMBEDDING_CACHE_SIZE, Math.floor(value));
+}
+
+function clampEmbeddingRequestAttempts(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) {
+    return DEFAULT_EMBEDDING_REQUEST_MAX_ATTEMPTS;
+  }
+  return Math.min(MAX_EMBEDDING_REQUEST_ATTEMPTS, Math.max(1, Math.floor(value)));
+}
+
+function clampEmbeddingRequestRetryDelayMs(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value) || value < 0) {
+    return DEFAULT_EMBEDDING_REQUEST_RETRY_DELAY_MS;
+  }
+  return Math.min(MAX_EMBEDDING_REQUEST_RETRY_DELAY_MS, Math.floor(value));
 }
 
 const EMPTY_SUPPLEMENT_RESULT: EmbeddingRecallSupplementResult = Object.freeze({
@@ -260,21 +280,29 @@ export class EmbeddingRecallService {
     const missingQueryTexts = uniqueQueryTexts.filter(
       (queryText) => this.getCachedQueryEmbedding(this.queryCacheKey(queryText)) === null
     );
-    if (missingQueryTexts.length > 0) {
-      const embeddings = await this.dependencies.provider.embedTexts(missingQueryTexts, {
-        timeoutMs: this.queryTimeoutMs
-      });
-      if (embeddings.length !== missingQueryTexts.length) {
-        throw new Error(
-          `Expected ${missingQueryTexts.length} warmed query embeddings, received ${embeddings.length}.`
-        );
-      }
-      for (let i = 0; i < missingQueryTexts.length; i++) {
-        const queryText = missingQueryTexts[i]!;
-        this.putCachedQueryEmbedding(
-          this.queryCacheKey(queryText),
-          new Float32Array(embeddings[i]!)
-        );
+    let lastError: string | undefined;
+    for (
+      let offset = 0;
+      offset < missingQueryTexts.length;
+      offset += QUERY_EMBEDDING_WARMUP_BATCH_SIZE
+    ) {
+      const batch = missingQueryTexts.slice(offset, offset + QUERY_EMBEDDING_WARMUP_BATCH_SIZE);
+      try {
+        const embeddings = await this.dependencies.provider.embedTexts(batch, {
+          timeoutMs: this.queryTimeoutMs
+        });
+        if (embeddings.length !== batch.length) {
+          throw new Error(`Expected ${batch.length} warmed query embeddings, received ${embeddings.length}.`);
+        }
+        for (let i = 0; i < batch.length; i++) {
+          const queryText = batch[i]!;
+          this.putCachedQueryEmbedding(
+            this.queryCacheKey(queryText),
+            new Float32Array(embeddings[i]!)
+          );
+        }
+      } catch (error) {
+        lastError = toErrorMessage(error);
       }
     }
 
@@ -289,7 +317,8 @@ export class EmbeddingRecallService {
       provider_requested_count: missingQueryTexts.length,
       missing_count: Math.max(0, uniqueQueryTexts.length - readyCount),
       provider_kind: this.dependencies.provider.providerKind,
-      model_id: this.dependencies.provider.modelId
+      model_id: this.dependencies.provider.modelId,
+      ...(lastError === undefined ? {} : { last_error: lastError })
     });
   }
 
@@ -832,6 +861,8 @@ export interface OpenAIEmbeddingClientOptions {
   readonly model?: string;
   readonly baseUrl?: string;
   readonly fetchImpl?: typeof fetch;
+  readonly maxAttempts?: number;
+  readonly retryDelayMs?: number;
 }
 
 export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
@@ -843,12 +874,16 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
   private readonly apiKey: string | null;
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly maxAttempts: number;
+  private readonly retryDelayMs: number;
 
   public constructor(options: OpenAIEmbeddingClientOptions) {
     this.apiKey = options.apiKey;
     this.modelId = options.model?.trim() || "text-embedding-3-small";
     this.baseUrl = normalizeBaseUrl(options.baseUrl ?? "https://api.openai.com/v1");
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
+    this.maxAttempts = clampEmbeddingRequestAttempts(options.maxAttempts);
+    this.retryDelayMs = clampEmbeddingRequestRetryDelayMs(options.retryDelayMs);
     this.isAvailable = typeof this.apiKey === "string" && this.apiKey.length > 0;
   }
 
@@ -871,23 +906,7 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
     timeoutHandle.unref?.();
 
     try {
-      let response: Response;
-      try {
-        response = await this.fetchImpl(`${this.baseUrl}/embeddings`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            authorization: `Bearer ${this.apiKey}`
-          },
-          body: JSON.stringify({
-            model: this.modelId,
-            input: texts
-          }),
-          signal: abortController.signal
-        });
-      } catch (error) {
-        throw new Error(formatEmbeddingTransportError(this.baseUrl, error));
-      }
+      const response = await this.fetchEmbeddingWithRetry(texts, abortController.signal);
 
       if (!response.ok) {
         throw new Error(
@@ -922,6 +941,54 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
       clearTimeout(timeoutHandle);
     }
   }
+
+  private async fetchEmbeddingWithRetry(
+    texts: readonly string[],
+    signal: AbortSignal
+  ): Promise<Response> {
+    for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
+      try {
+        const response = await this.fetchImpl(`${this.baseUrl}/embeddings`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${this.apiKey}`
+          },
+          body: JSON.stringify({
+            model: this.modelId,
+            input: texts
+          }),
+          signal
+        });
+        if (attempt < this.maxAttempts && isRetryableEmbeddingStatus(response.status)) {
+          await sleepEmbeddingRetry(this.retryDelayMs * attempt, signal);
+          continue;
+        }
+        return response;
+      } catch (error) {
+        if (attempt >= this.maxAttempts || signal.aborted) {
+          throw new Error(formatEmbeddingTransportError(this.baseUrl, error));
+        }
+        await sleepEmbeddingRetry(this.retryDelayMs * attempt, signal);
+      }
+    }
+
+    throw new Error(`Embedding request retry loop exhausted for host ${formatEmbeddingHost(this.baseUrl)}.`);
+  }
+}
+
+function isRetryableEmbeddingStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+async function sleepEmbeddingRetry(delayMs: number, signal: AbortSignal): Promise<void> {
+  if (delayMs <= 0 || signal.aborted) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    const timeout = setTimeout(resolve, delayMs);
+    timeout.unref?.();
+  });
 }
 
 function formatEmbeddingTransportError(baseUrl: string, error: unknown): string {

@@ -87,6 +87,7 @@ interface LocomoQueryEmbeddingCacheSummary {
   readonly ready_rate: number;
   readonly cache_hit_count: number;
   readonly provider_requested_count: number;
+  readonly last_error?: string;
 }
 
 export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult> {
@@ -497,6 +498,7 @@ function summarizeQueryEmbeddingCache(
     (sum, summary) => sum + summary.provider_requested_count,
     0
   );
+  const lastError = [...readySummaries].reverse().find((summary) => summary.last_error !== undefined)?.last_error;
 
   return {
     requested_count: requestedCount,
@@ -504,7 +506,8 @@ function summarizeQueryEmbeddingCache(
     not_ready_count: Math.max(0, requestedCount - readyCount),
     ready_rate: requestedCount === 0 ? 0 : readyCount / requestedCount,
     cache_hit_count: cacheHitCount,
-    provider_requested_count: providerRequestedCount
+    provider_requested_count: providerRequestedCount,
+    ...(lastError === undefined ? {} : { last_error: lastError })
   };
 }
 

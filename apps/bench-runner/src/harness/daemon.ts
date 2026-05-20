@@ -122,6 +122,7 @@ export interface BenchQueryEmbeddingWarmupSummary {
   readonly missing_count: number;
   readonly provider_kind: string | null;
   readonly model_id: string | null;
+  readonly last_error?: string;
 }
 
 export interface BenchRecallOptions {
@@ -520,6 +521,7 @@ export async function startBenchDaemon(
       options.maxPasses ?? DEFAULT_EMBEDDING_WARMUP_PASSES
     );
     let passCount = 0;
+    let lastPassError: string | null = null;
     let summary = await readEmbeddingWarmupSummary({
       dataDir,
       workspaceId,
@@ -531,7 +533,12 @@ export async function startBenchDaemon(
     });
 
     while (summary.ready_count < summary.expected_count && passCount < maxPasses) {
-      await activeRuntime.runGardenBackgroundPass();
+      try {
+        await activeRuntime.runGardenBackgroundPass();
+        lastPassError = null;
+      } catch (error) {
+        lastPassError = toErrorMessage(error);
+      }
       passCount++;
       summary = await readEmbeddingWarmupSummary({
         dataDir,
@@ -550,7 +557,8 @@ export async function startBenchDaemon(
         `embedding warm cache not ready after ${summary.pass_count} pass(es): ` +
           `ready=${summary.ready_count} expected=${summary.expected_count} ` +
           `missing=${summary.missing_object_ids.length}` +
-          (preview.length === 0 ? "" : ` first_missing=${preview}`)
+          (preview.length === 0 ? "" : ` first_missing=${preview}`) +
+          (lastPassError === null ? "" : ` last_error=${lastPassError}`)
       );
     }
 
@@ -581,12 +589,6 @@ export async function startBenchDaemon(
       runId,
       queryTexts
     });
-    if (summary.status !== "ready" || summary.ready_count !== summary.requested_count) {
-      throw new Error(
-        `embedding query warm cache not ready: ready=${summary.ready_count} ` +
-          `expected=${summary.requested_count} missing=${summary.missing_count}`
-      );
-    }
     return summary;
   }
 
@@ -1104,6 +1106,10 @@ function restoreEnv(saved: Partial<Record<ManagedEnvKey, string | undefined>>): 
       process.env[key] = prev;
     }
   }
+}
+
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 // see also: apps/bench-runner/src/version.ts

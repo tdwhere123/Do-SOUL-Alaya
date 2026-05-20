@@ -130,6 +130,54 @@ describe("LoCoMo runner", () => {
       })
     );
   });
+
+  it("archives partial query warm-cache readiness without aborting scoring", async () => {
+    const warmQueryEmbeddingCache = vi.fn(async (queryTexts: readonly string[]) => ({
+      status: "ready" as const,
+      requested_count: queryTexts.length,
+      ready_count: 0,
+      cache_hit_count: 0,
+      provider_requested_count: queryTexts.length,
+      missing_count: queryTexts.length,
+      provider_kind: "openai",
+      model_id: "text-embedding-3-small",
+      last_error: "provider temporarily unreachable"
+    }));
+    const recall = vi.fn(async () => buildRecallResult());
+    startBenchDaemonMock.mockResolvedValue(
+      buildMockDaemon({ recall, warmQueryEmbeddingCache })
+    );
+
+    const result = await runLocomo({
+      variant: "locomo10",
+      historyRoot: tmpDir,
+      embeddingMode: "env"
+    });
+    const kpi = JSON.parse(await readFile(result.kpiPath, "utf8")) as {
+      readonly kpi: {
+        readonly query_embedding_cache_ready_rate?: number;
+      };
+    };
+    const diagnostics = JSON.parse(await readFile(result.diagnosticsPath, "utf8")) as {
+      readonly query_embedding_cache?: {
+        readonly requested_count: number;
+        readonly ready_count: number;
+        readonly ready_rate: number;
+        readonly last_error?: string;
+      };
+    };
+
+    expect(recall).toHaveBeenCalledTimes(1);
+    expect(kpi.kpi.query_embedding_cache_ready_rate).toBe(0);
+    expect(diagnostics.query_embedding_cache).toEqual(
+      expect.objectContaining({
+        requested_count: 1,
+        ready_count: 0,
+        ready_rate: 0,
+        last_error: "provider temporarily unreachable"
+      })
+    );
+  });
 });
 
 function buildMockDaemon(overrides: {

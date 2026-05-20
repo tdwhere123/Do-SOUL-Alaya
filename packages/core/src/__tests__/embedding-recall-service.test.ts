@@ -294,6 +294,42 @@ describe("EmbeddingRecallService", () => {
     expect(result.supplementaryEntries.map((entry) => entry.object_id)).toEqual(["memory-2"]);
   });
 
+  it("keeps partial query warmup evidence when one provider batch fails", async () => {
+    const queries = Array.from({ length: 33 }, (_, index) => `query-${index}`);
+    const embedTexts = vi.fn(async (texts: readonly string[]) => {
+      if (texts.includes("query-16")) {
+        throw new Error("provider temporarily unreachable");
+      }
+      return texts.map(() => new Float32Array([0, 1]));
+    });
+    const service = new EmbeddingRecallService({
+      embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
+      provider: createProvider({ embedTexts }),
+      eventLogRepo: {
+        append: vi.fn(),
+        queryByEntity: vi.fn(async () => [])
+      },
+      generateQueryId: () => "partial-query-warmup",
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+
+    const warmup = await service.warmQueryEmbeddings({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryTexts: queries
+    });
+
+    expect(embedTexts).toHaveBeenCalledTimes(3);
+    expect(warmup).toMatchObject({
+      status: "ready",
+      requested_count: 33,
+      ready_count: 17,
+      provider_requested_count: 33,
+      missing_count: 16,
+      last_error: "provider temporarily unreachable"
+    });
+  });
+
   it("waits briefly for a prepared query embedding before degrading", async () => {
     const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       event_id: `event-${entry.event_type}`,
@@ -771,7 +807,8 @@ describe("OpenAIEmbeddingClient", () => {
     const client = new OpenAIEmbeddingClient({
       apiKey: "sk-test-secret",
       baseUrl: "https://embedding.example.test/v1",
-      fetchImpl
+      fetchImpl,
+      maxAttempts: 1
     });
 
     await expect(
@@ -786,6 +823,70 @@ describe("OpenAIEmbeddingClient", () => {
         timeoutMs: 1000
       })
     ).rejects.not.toThrow("sk-test-secret");
+  });
+
+  it("retries transient transport failures before returning embeddings", async () => {
+    const transportError = new TypeError("fetch failed") as TypeError & {
+      cause: { code: string };
+    };
+    transportError.cause = { code: "EHOSTUNREACH" };
+    const fetchImpl = vi.fn()
+      .mockRejectedValueOnce(transportError)
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [{ index: 0, embedding: [0.2, 0.8] }]
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      ) as unknown as typeof fetch;
+    const client = new OpenAIEmbeddingClient({
+      apiKey: "sk-test-secret",
+      baseUrl: "https://embedding.example.test/v1",
+      fetchImpl,
+      maxAttempts: 2,
+      retryDelayMs: 0
+    });
+
+    const embeddings = await client.embedTexts(["smoke"], {
+      timeoutMs: 1000
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect([...embeddings[0]!]).toEqual([
+      expect.closeTo(0.2),
+      expect.closeTo(0.8)
+    ]);
+  });
+
+  it("retries transient 5xx responses before returning embeddings", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response("temporary", { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [{ index: 0, embedding: [0.4, 0.6] }]
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      ) as unknown as typeof fetch;
+    const client = new OpenAIEmbeddingClient({
+      apiKey: "sk-test-secret",
+      baseUrl: "https://embedding.example.test/v1",
+      fetchImpl,
+      maxAttempts: 2,
+      retryDelayMs: 0
+    });
+
+    const embeddings = await client.embedTexts(["smoke"], {
+      timeoutMs: 1000
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect([...embeddings[0]!]).toEqual([
+      expect.closeTo(0.4),
+      expect.closeTo(0.6)
+    ]);
   });
 });
 
