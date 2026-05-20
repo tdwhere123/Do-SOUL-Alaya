@@ -36,7 +36,7 @@ describe("atomic-fact-extraction", () => {
 
   it("extracts a list of atomic facts via the LLM on a cache miss", async () => {
     const llmComplete = vi
-      .fn<[string, AtomicFactExtractionConfig], Promise<readonly string[]>>()
+      .fn<(turnContent: string, config: AtomicFactExtractionConfig) => Promise<readonly string[]>>()
       .mockResolvedValue([
         "Alice lives in Berlin.",
         "Alice started her job on 2024-03-01."
@@ -64,7 +64,7 @@ describe("atomic-fact-extraction", () => {
   it("serves a second run from the on-disk cache with zero LLM calls", async () => {
     const turn = "The deploy ran at 09:00 UTC and it succeeded.";
     const llmComplete = vi
-      .fn<[string, AtomicFactExtractionConfig], Promise<readonly string[]>>()
+      .fn<(turnContent: string, config: AtomicFactExtractionConfig) => Promise<readonly string[]>>()
       .mockResolvedValue(["The deploy ran at 09:00 UTC.", "The deploy succeeded."]);
 
     const firstRun = createAtomicFactExtractor({
@@ -109,7 +109,7 @@ describe("atomic-fact-extraction", () => {
   it("falls back to the full turn when the LLM call fails", async () => {
     const turn = "A turn whose extraction will fail.";
     const llmComplete = vi
-      .fn<[string, AtomicFactExtractionConfig], Promise<readonly string[]>>()
+      .fn<(turnContent: string, config: AtomicFactExtractionConfig) => Promise<readonly string[]>>()
       .mockRejectedValue(new Error("garden extraction HTTP 500"));
     const extractor = createAtomicFactExtractor({
       config: CREDENTIALLED_CONFIG,
@@ -125,7 +125,7 @@ describe("atomic-fact-extraction", () => {
 
   it("dedupes and caps the extracted fact list", async () => {
     const llmComplete = vi
-      .fn<[string, AtomicFactExtractionConfig], Promise<readonly string[]>>()
+      .fn<(turnContent: string, config: AtomicFactExtractionConfig) => Promise<readonly string[]>>()
       .mockResolvedValue(["Same fact.", "same fact.", "  ", "Other fact."]);
     const extractor = createAtomicFactExtractor({
       config: CREDENTIALLED_CONFIG,
