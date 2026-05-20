@@ -39,6 +39,16 @@ describe("controlled replay runner", () => {
           readonly budget_drop: { readonly max_entries: number };
           readonly high_lexical_demoted: { readonly count: number };
           readonly conflict_penalty: { readonly count: number };
+          readonly evidence_stream_gold_delivery: {
+            readonly count: number;
+            readonly denominator: number;
+            readonly rate: number;
+          };
+          readonly path_stream_top10: {
+            readonly count: number;
+            readonly denominator: number;
+            readonly rate: number;
+          };
           readonly cold_warm_delta: Record<string, unknown>;
         };
         readonly native_health_gates: {
@@ -96,9 +106,19 @@ describe("controlled replay runner", () => {
       expect(archive.metrics.budget_drop.max_entries).toBeGreaterThanOrEqual(0);
       expect(archive.metrics.high_lexical_demoted.count).toBeGreaterThanOrEqual(0);
       expect(archive.metrics.conflict_penalty.count).toBeGreaterThanOrEqual(0);
+      expect(archive.metrics.evidence_stream_gold_delivery.denominator)
+        .toBeGreaterThan(0);
+      expect(archive.metrics.evidence_stream_gold_delivery.rate)
+        .toBeGreaterThanOrEqual(0.15);
+      expect(warmScenario?.metrics.path_stream_top10.denominator)
+        .toBeGreaterThan(0);
+      expect(warmScenario?.metrics.path_stream_top10.rate)
+        .toBeGreaterThanOrEqual(0.1);
       expect(archive.metrics.cold_warm_delta).toBeDefined();
       expect(archive.native_health_gates.gates.map((gate) => gate.id)).toEqual([
         "trust_loop_activation_gain",
+        "evidence_stream_gold_delivery",
+        "path_stream_top10_contribution",
         "plasticity_gradient_rank_gain"
       ]);
       expect(archive.native_health_gates.gates.every((gate) => gate.passed)).toBe(true);

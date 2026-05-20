@@ -57,6 +57,7 @@ interface CandidateDiagnostic {
   readonly final_rank: number | null;
   readonly dropped_reason: string | null;
   readonly lexical_rank: number | null;
+  readonly fused_rank_contribution_per_stream: Readonly<Record<string, number>>;
   readonly admission_planes: readonly string[];
   readonly source_channels: readonly string[];
 }
@@ -67,6 +68,7 @@ interface RecallObservation {
   readonly results: readonly MemorySearchResult[];
   readonly activeConstraints: readonly SoulActiveConstraint[];
   readonly diagnostics: readonly CandidateDiagnostic[];
+  readonly expectedObjectIds: readonly string[];
   readonly expectedRank: number | null;
 }
 
@@ -83,6 +85,16 @@ interface ScenarioMetrics {
   readonly budget_drop: { readonly max_entries: number };
   readonly high_lexical_demoted: { readonly count: number };
   readonly conflict_penalty: { readonly count: number };
+  readonly evidence_stream_gold_delivery: {
+    readonly count: number;
+    readonly denominator: number;
+    readonly rate: number;
+  };
+  readonly path_stream_top10: {
+    readonly count: number;
+    readonly denominator: number;
+    readonly rate: number;
+  };
   readonly delivery_count: number;
   readonly diagnostics_count: number;
 }
@@ -102,6 +114,8 @@ interface ScenarioArchive {
 interface NativeHealthGate {
   readonly id:
     | "trust_loop_activation_gain"
+    | "evidence_stream_gold_delivery"
+    | "path_stream_top10_contribution"
     | "plasticity_gradient_rank_gain";
   readonly label: string;
   readonly current: number | null;
@@ -297,7 +311,7 @@ export async function runControlledReplay(
   }
 
   const aggregateMetrics = aggregateScenarioMetrics(scenarios);
-  const nativeHealthGates = buildNativeHealthGates(scenarios);
+  const nativeHealthGates = buildNativeHealthGates(scenarios, aggregateMetrics);
   const archive: ControlledReplayArchive = {
     schema_version: 1,
     bench_name: "controlled-replay",
@@ -564,6 +578,9 @@ function buildObservation(
     results: recall.results,
     activeConstraints: recall.active_constraints ?? [],
     diagnostics: readCandidateDiagnostics(recall.diagnostics),
+    expectedObjectIds: [...sidecar.entries()]
+      .filter(([, seed]) => expected.has(seed.fixtureId))
+      .map(([objectId]) => objectId),
     expectedRank
   };
 }
@@ -579,9 +596,14 @@ function computeMetrics(observations: readonly RecallObservation[]): ScenarioMet
   let budgetDropMaxEntries = 0;
   let highLexicalDemoted = 0;
   let conflictPenalty = 0;
+  let evidenceStreamGoldDeliveryCount = 0;
+  let evidenceStreamGoldDeliveryDenominator = 0;
+  let pathStreamTop10Count = 0;
+  let pathStreamTop10Denominator = 0;
   let diagnosticsCount = 0;
 
   for (const observation of observations) {
+    const expectedObjectIds = new Set(observation.expectedObjectIds);
     expectedRankByQuestion[observation.questionId] = observation.expectedRank;
     const bucket = rankBucket(observation.expectedRank);
     rankDistribution[bucket] = (rankDistribution[bucket] ?? 0) + 1;
@@ -595,6 +617,22 @@ function computeMetrics(observations: readonly RecallObservation[]): ScenarioMet
     activeConstraints += observation.activeConstraints.length;
     for (const diagnostic of observation.diagnostics) {
       diagnosticsCount++;
+      if (diagnostic.final_rank !== null && diagnostic.final_rank <= 10) {
+        pathStreamTop10Denominator++;
+        if (hasPathStreamContribution(diagnostic)) {
+          pathStreamTop10Count++;
+        }
+      }
+      if (expectedObjectIds.has(diagnostic.object_id)) {
+        evidenceStreamGoldDeliveryDenominator++;
+        if (
+          diagnostic.final_rank !== null &&
+          diagnostic.final_rank <= 10 &&
+          hasEvidenceStreamContribution(diagnostic)
+        ) {
+          evidenceStreamGoldDeliveryCount++;
+        }
+      }
       if (
         diagnostic.final_rank !== null &&
         diagnostic.pre_budget_rank !== null &&
@@ -633,6 +671,19 @@ function computeMetrics(observations: readonly RecallObservation[]): ScenarioMet
     budget_drop: { max_entries: budgetDropMaxEntries },
     high_lexical_demoted: { count: highLexicalDemoted },
     conflict_penalty: { count: conflictPenalty },
+    evidence_stream_gold_delivery: {
+      count: evidenceStreamGoldDeliveryCount,
+      denominator: evidenceStreamGoldDeliveryDenominator,
+      rate: ratio(
+        evidenceStreamGoldDeliveryCount,
+        evidenceStreamGoldDeliveryDenominator
+      )
+    },
+    path_stream_top10: {
+      count: pathStreamTop10Count,
+      denominator: pathStreamTop10Denominator,
+      rate: ratio(pathStreamTop10Count, pathStreamTop10Denominator)
+    },
     delivery_count: observations.length,
     diagnostics_count: diagnosticsCount
   };
@@ -650,6 +701,10 @@ function aggregateScenarioMetrics(scenarios: readonly ScenarioArchive[]): Scenar
   let budgetDropMaxEntries = 0;
   let highLexicalDemoted = 0;
   let conflictPenalty = 0;
+  let evidenceStreamGoldDeliveryCount = 0;
+  let evidenceStreamGoldDeliveryDenominator = 0;
+  let pathStreamTop10Count = 0;
+  let pathStreamTop10Denominator = 0;
   let deliveryCount = 0;
   let diagnosticsCount = 0;
 
@@ -671,6 +726,12 @@ function aggregateScenarioMetrics(scenarios: readonly ScenarioArchive[]): Scenar
     budgetDropMaxEntries += scenario.metrics.budget_drop.max_entries;
     highLexicalDemoted += scenario.metrics.high_lexical_demoted.count;
     conflictPenalty += scenario.metrics.conflict_penalty.count;
+    evidenceStreamGoldDeliveryCount +=
+      scenario.metrics.evidence_stream_gold_delivery.count;
+    evidenceStreamGoldDeliveryDenominator +=
+      scenario.metrics.evidence_stream_gold_delivery.denominator;
+    pathStreamTop10Count += scenario.metrics.path_stream_top10.count;
+    pathStreamTop10Denominator += scenario.metrics.path_stream_top10.denominator;
     deliveryCount += scenario.metrics.delivery_count;
     diagnosticsCount += scenario.metrics.diagnostics_count;
   }
@@ -689,6 +750,19 @@ function aggregateScenarioMetrics(scenarios: readonly ScenarioArchive[]): Scenar
     budget_drop: { max_entries: budgetDropMaxEntries },
     high_lexical_demoted: { count: highLexicalDemoted },
     conflict_penalty: { count: conflictPenalty },
+    evidence_stream_gold_delivery: {
+      count: evidenceStreamGoldDeliveryCount,
+      denominator: evidenceStreamGoldDeliveryDenominator,
+      rate: ratio(
+        evidenceStreamGoldDeliveryCount,
+        evidenceStreamGoldDeliveryDenominator
+      )
+    },
+    path_stream_top10: {
+      count: pathStreamTop10Count,
+      denominator: pathStreamTop10Denominator,
+      rate: ratio(pathStreamTop10Count, pathStreamTop10Denominator)
+    },
     delivery_count: deliveryCount,
     diagnostics_count: diagnosticsCount
   };
@@ -722,7 +796,8 @@ function buildColdWarmDelta(
 }
 
 function buildNativeHealthGates(
-  scenarios: readonly ScenarioArchive[]
+  scenarios: readonly ScenarioArchive[],
+  aggregateMetrics: ScenarioMetrics
 ): readonly NativeHealthGate[] {
   const warm = scenarios.find((scenario) => scenario.label === "warm-report-context-usage-mixed");
   const cold = scenarios.find((scenario) => scenario.label === "cold-report-context-usage-none");
@@ -735,6 +810,9 @@ function buildNativeHealthGates(
     warm?.metrics.expected_rank_by_question ?? null,
     "q-path-target"
   );
+  const evidenceStreamGoldDelivery =
+    aggregateMetrics.evidence_stream_gold_delivery.rate;
+  const pathStreamTop10Contribution = warm?.metrics.path_stream_top10.rate ?? null;
 
   return Object.freeze([
     minNativeHealthGate(
@@ -742,6 +820,18 @@ function buildNativeHealthGates(
       "trust loop activation gain",
       trustLoopGain,
       0.05
+    ),
+    minNativeHealthGate(
+      "evidence_stream_gold_delivery",
+      "evidence stream gold delivery",
+      evidenceStreamGoldDelivery,
+      0.15
+    ),
+    minNativeHealthGate(
+      "path_stream_top10_contribution",
+      "path stream top-10 contribution",
+      pathStreamTop10Contribution,
+      0.1
     ),
     minNativeHealthGate(
       "plasticity_gradient_rank_gain",
@@ -877,6 +967,8 @@ function readCandidateDiagnostics(raw: unknown): readonly CandidateDiagnostic[] 
       final_rank: readNumber(record.final_rank),
       dropped_reason: readString(record.dropped_reason),
       lexical_rank: readNumber(record.lexical_rank),
+      fused_rank_contribution_per_stream:
+        readNumberRecord(record.fused_rank_contribution_per_stream),
       admission_planes: readStringArray(record.admission_planes),
       source_channels: readStringArray(record.source_channels)
     }];
@@ -896,6 +988,29 @@ function rankBucket(rank: number | null): string {
   return "miss";
 }
 
+function hasEvidenceStreamContribution(diagnostic: CandidateDiagnostic): boolean {
+  return (
+    diagnostic.admission_planes.includes("evidence_anchor") ||
+    diagnostic.admission_planes.includes("evidence_fts") ||
+    diagnostic.source_channels.includes("evidence_anchor") ||
+    diagnostic.source_channels.includes("evidence_fts") ||
+    diagnostic.source_channels.includes("plane:evidence_anchor") ||
+    diagnostic.source_channels.includes("plane:evidence_fts") ||
+    (diagnostic.fused_rank_contribution_per_stream.evidence_fts ?? 0) > 0 ||
+    (diagnostic.fused_rank_contribution_per_stream.evidence_structural_agreement ?? 0) > 0 ||
+    (diagnostic.fused_rank_contribution_per_stream.source_evidence_agreement ?? 0) > 0
+  );
+}
+
+function hasPathStreamContribution(diagnostic: CandidateDiagnostic): boolean {
+  return (
+    diagnostic.admission_planes.includes("path_expansion") ||
+    diagnostic.source_channels.includes("path_expansion") ||
+    diagnostic.source_channels.includes("plane:path_expansion") ||
+    (diagnostic.fused_rank_contribution_per_stream.path_expansion ?? 0) > 0
+  );
+}
+
 function absDelta(left: number | null | undefined, right: number | null | undefined): number {
   if (left === null || left === undefined || right === null || right === undefined) {
     return 0;
@@ -909,6 +1024,20 @@ function readString(value: unknown): string | null {
 
 function readNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readNumberRecord(value: unknown): Readonly<Record<string, number>> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return Object.freeze({});
+  }
+  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).flatMap(([key, entryValue]) => {
+        const numberValue = readNumber(entryValue);
+        return numberValue === null ? [] : [[key, numberValue] as const];
+      })
+    )
+  );
 }
 
 function readStringArray(value: unknown): readonly string[] {
