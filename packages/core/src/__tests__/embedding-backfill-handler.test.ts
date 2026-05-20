@@ -36,6 +36,7 @@ describe("EmbeddingBackfillHandler", () => {
         upsertIfContentHashMatchesCurrentMemory: upsert
       },
       provider: createProvider({ embedTexts }),
+      retryDelayMs: 0,
       now: () => "2026-04-23T00:00:00.000Z"
     });
 
@@ -215,6 +216,7 @@ describe("EmbeddingBackfillHandler", () => {
         upsertIfContentHashMatchesCurrentMemory: vi.fn(async (record: EmbeddingVectorRecord) => record)
       },
       provider: createProvider({ embedTexts }),
+      retryDelayMs: 0,
       now: () => "2026-04-23T00:00:00.000Z"
     });
 
@@ -227,6 +229,47 @@ describe("EmbeddingBackfillHandler", () => {
     expect(result.auditEntries).toContain("embedding_upserted:memory-ok-1");
     expect(result.auditEntries).toContain("embedding_upserted:memory-ok-2");
     expect(result.auditEntries).toContain("embedding_upserted:memory-ok-3");
+  });
+
+  it("recovers a single embedding input after an item-level transport retry", async () => {
+    const hotMemories = [
+      createMemoryEntry({ object_id: "memory-ok", content: "Stable recall content." }),
+      createMemoryEntry({ object_id: "memory-flaky", content: "Flaky provider transport input." })
+    ];
+    let flakySingleAttempts = 0;
+    const embedTexts = vi.fn(async (texts: readonly string[]) => {
+      if (texts.some((text) => text.includes("Flaky"))) {
+        if (texts.length === 1) {
+          flakySingleAttempts++;
+          if (flakySingleAttempts >= 2) {
+            return [new Float32Array([0.4, 0.5, 0.6])];
+          }
+        }
+        throw new Error("provider transport failed");
+      }
+      return texts.map(() => new Float32Array([0.1, 0.2, 0.3]));
+    });
+    const handler = new EmbeddingBackfillHandler({
+      memoryRepo: {
+        findByWorkspaceId: vi.fn(async () => hotMemories)
+      },
+      memoryEmbeddingRepo: {
+        findByObjectId: vi.fn(async () => null),
+        upsert: vi.fn(async (record: EmbeddingVectorRecord) => record),
+        upsertIfContentHashMatchesCurrentMemory: vi.fn(async (record: EmbeddingVectorRecord) => record)
+      },
+      provider: createProvider({ embedTexts }),
+      retryDelayMs: 0,
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+
+    const result = await handler.handle({
+      workspace_id: "workspace-1"
+    });
+
+    expect(result.objectsAffected).toEqual(["memory-ok", "memory-flaky"]);
+    expect(result.auditEntries).not.toContain("embedding_failed:provider:memory-flaky");
+    expect(result.auditEntries).toContain("embedding_upserted:memory-flaky");
   });
 
   it("splits large embedding requests by input character budget", async () => {

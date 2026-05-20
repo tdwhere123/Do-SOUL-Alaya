@@ -28,19 +28,25 @@ export interface EmbeddingBackfillHandlerDependencies {
   readonly memoryEmbeddingRepo: EmbeddingBackfillRepoPort;
   readonly provider: EmbeddingProviderPort;
   readonly now?: () => string;
+  readonly retryDelayMs?: number;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }
 
 const BACKFILL_TIMEOUT_MS = 10_000;
 const BACKFILL_BATCH_SIZE = 16;
 const BACKFILL_BATCH_MAX_INPUT_CHARS = 32_000;
+const BACKFILL_ITEM_RETRY_ATTEMPTS = 3;
+const BACKFILL_ITEM_RETRY_DELAY_MS = 1_000;
 
 export class EmbeddingBackfillHandler {
   private readonly now: () => string;
+  private readonly retryDelayMs: number;
   private readonly warn: (message: string, meta: Record<string, unknown>) => void;
 
   public constructor(private readonly dependencies: EmbeddingBackfillHandlerDependencies) {
     this.now = dependencies.now ?? (() => new Date().toISOString());
+    this.retryDelayMs =
+      dependencies.retryDelayMs === undefined ? BACKFILL_ITEM_RETRY_DELAY_MS : Math.max(0, dependencies.retryDelayMs);
     this.warn = dependencies.warn ?? (() => undefined);
   }
 
@@ -215,6 +221,10 @@ export class EmbeddingBackfillHandler {
       if (batch.length <= 1) {
         const entry = batch[0];
         if (entry !== undefined) {
+          const retried = await this.retrySingleItemEmbedding(workspaceId, entry, message);
+          if (retried !== null) {
+            return Object.freeze([retried]);
+          }
           this.warn("embedding backfill item failed; continuing with remaining batches", {
             workspace_id: workspaceId,
             object_id: entry.memory.object_id,
@@ -237,6 +247,42 @@ export class EmbeddingBackfillHandler {
       const right = await this.embedBatchWithFallback(workspaceId, batch.slice(splitIndex), auditEntries);
       return Object.freeze([...left, ...right]);
     }
+  }
+
+  private async retrySingleItemEmbedding(
+    workspaceId: string,
+    entry: EmbeddingBackfillCandidate,
+    firstError: string
+  ): Promise<EmbeddedBackfillCandidate | null> {
+    let lastError = firstError;
+    for (let attempt = 2; attempt <= BACKFILL_ITEM_RETRY_ATTEMPTS; attempt++) {
+      this.warn("embedding backfill item failed; retrying item", {
+        workspace_id: workspaceId,
+        object_id: entry.memory.object_id,
+        input_chars: entry.memory.content.length,
+        attempt,
+        max_attempts: BACKFILL_ITEM_RETRY_ATTEMPTS,
+        error: lastError
+      });
+      await sleepBackfillRetry(this.retryDelayMs * (attempt - 1));
+
+      try {
+        const embeddings = await this.dependencies.provider.embedTexts([entry.memory.content], {
+          timeoutMs: BACKFILL_TIMEOUT_MS
+        });
+        if (embeddings.length !== 1) {
+          throw new Error(`Expected 1 embedding but received ${embeddings.length}.`);
+        }
+        return Object.freeze({
+          entry,
+          embedding: embeddings[0]!
+        });
+      } catch (error) {
+        lastError = toErrorMessage(error);
+      }
+    }
+
+    return null;
   }
 }
 
@@ -283,4 +329,14 @@ function buildEmbeddingBackfillBatches(
 
 function hashMemoryContent(content: string): string {
   return `sha256:${createHash("sha256").update(content).digest("hex")}`;
+}
+
+async function sleepBackfillRetry(delayMs: number): Promise<void> {
+  if (delayMs <= 0) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    const timeout = setTimeout(resolve, delayMs);
+    timeout.unref?.();
+  });
 }

@@ -214,7 +214,7 @@ const REVIEWER_TOKEN = "bench-review-token";
 const BENCH_EMBEDDING_PROVIDER_KIND = "openai";
 const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
 const BENCH_EMBEDDING_SCHEMA_VERSION = 1;
-const DEFAULT_EMBEDDING_WARMUP_PASSES = 6;
+const DEFAULT_EMBEDDING_WARMUP_PASSES = 10;
 let activeBenchDaemonCount = 0;
 
 export async function startBenchDaemon(
