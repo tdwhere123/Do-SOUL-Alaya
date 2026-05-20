@@ -22,6 +22,7 @@ import type {
 import type { ScopeClass } from "@do-soul/alaya-protocol";
 import type {
   EmbeddingRecallSupplementResult,
+  PreparedEmbeddingSupplement,
   PreparedEmbeddingQueryHandle
 } from "./embedding-recall-service.js";
 import type {
@@ -208,6 +209,13 @@ function resolveCharsPerToken(hint: SoulRecallTokenizerHint | null): number {
 }
 
 export interface RecallServiceEmbeddingRecallPort {
+  prepareQuerySupplement?(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly queryText: string;
+    readonly eligibleMemories: readonly Readonly<MemoryEntry>[];
+    readonly baseCandidateCount: number;
+  }): Promise<PreparedEmbeddingSupplement>;
   hasStoredVectors?(params: {
     readonly workspaceId: string;
     readonly eligibleMemories: readonly Readonly<MemoryEntry>[];
@@ -231,6 +239,7 @@ export interface RecallServiceEmbeddingRecallPort {
     readonly baseCandidateIds: readonly string[];
     readonly maxSupplement: number;
     readonly preparedQuery: PreparedEmbeddingQueryHandle;
+    readonly storedVectors?: PreparedEmbeddingSupplement["storedVectors"];
   }): Promise<EmbeddingRecallSupplementResult>;
   querySupplement(params: {
     readonly workspaceId: string;

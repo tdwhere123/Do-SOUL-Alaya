@@ -1887,6 +1887,73 @@ describe("RecallService", () => {
     expect(querySupplementIfReady).not.toHaveBeenCalled();
   });
 
+  it("handles overlapped embedding preparation rejection when assessment fails", async () => {
+    const memories = [
+      createMemoryEntry({
+        object_id: "memory-lexical",
+        dimension: MemoryDimension.PROCEDURE,
+        activation_score: 0.9,
+        content: "Lexical baseline procedure."
+      })
+    ];
+    const { dependencies } = createDependencies(memories);
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    const hasStoredVectors = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      throw new Error("unexpected vector precheck failure");
+    });
+    const service = new RecallService({
+      ...dependencies,
+      graphSupportPort: {
+        countInboundEdgesWeighted: vi.fn(async () => {
+          throw new Error("graph support unavailable");
+        })
+      },
+      embeddingRecallService: {
+        hasStoredVectors,
+        prepareQueryEmbedding: vi.fn(() => createPreparedQueryHandle("prepared-query-unused")),
+        querySupplementIfReady: vi.fn(async () => ({
+          supplementaryEntries: Object.freeze([]),
+          similarityHintsByObjectId: Object.freeze({})
+        })),
+        querySupplement: vi.fn(async () => ({
+          supplementaryEntries: Object.freeze([]),
+          similarityHintsByObjectId: Object.freeze({})
+        }))
+      }
+    });
+    const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+    const policy = overridePolicy(basePolicy, {
+      coarse_filter: {
+        ...basePolicy.coarse_filter,
+        semantic_supplement: {
+          ...basePolicy.coarse_filter.semantic_supplement,
+          embedding_enabled: true
+        }
+      }
+    });
+
+    try {
+      await expect(
+        service.recall({
+          taskSurface: createTaskSurface(),
+          workspaceId: "workspace-1",
+          strategy: "analyze",
+          policyOverride: policy
+        })
+      ).rejects.toThrow("graph support unavailable");
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(hasStoredVectors).toHaveBeenCalled();
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+
   it("merges keyword supplement candidates without duplicating deterministic matches", async () => {
     const memories = [
       createMemoryEntry({ object_id: "memory-1", scope_class: ScopeClass.PROJECT, dimension: MemoryDimension.PROCEDURE, activation_score: 0.9 }),

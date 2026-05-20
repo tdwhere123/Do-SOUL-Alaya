@@ -26,6 +26,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type {
   EmbeddingRecallSupplementResult,
+  PreparedEmbeddingSupplement,
   PreparedEmbeddingQueryHandle
 } from "./embedding-recall-service.js";
 import { loadGlobalRecallCandidates } from "./global-memory-recall-service.js";
@@ -291,7 +292,10 @@ export class RecallService {
         combinedCoarseCandidates.length,
         policy.fine_assessment.budgets.max_entries
       )
-    });
+    }).then(
+      (value) => ({ status: "fulfilled" as const, value }),
+      (reason: unknown) => ({ status: "rejected" as const, reason })
+    );
 
     const initialAssessment = await this.assessCoarseFilter({
       coarseFilter: Object.freeze({
@@ -307,7 +311,11 @@ export class RecallService {
       tokenEstimator
     });
     const lexicalCandidates = initialAssessment.candidates;
-    const preparedEmbeddingQuery = await preparedEmbeddingQueryPromise;
+    const preparedEmbeddingQueryResult = await preparedEmbeddingQueryPromise;
+    if (preparedEmbeddingQueryResult.status === "rejected") {
+      throw preparedEmbeddingQueryResult.reason;
+    }
+    const preparedEmbeddingQuery = preparedEmbeddingQueryResult.value;
     const embeddingSupplement = await this.collectEmbeddingSupplement({
       baseCandidateIds: lexicalCandidates.map((candidate) => candidate.object_id),
       localEligibleCandidates: coarseFilter.candidates,
@@ -315,7 +323,8 @@ export class RecallService {
       workspaceId: params.workspaceId,
       runId: params.runId ?? null,
       queryText,
-      preparedEmbeddingQuery: preparedEmbeddingQuery.handle
+      preparedEmbeddingQuery: preparedEmbeddingQuery.handle,
+      preparedStoredVectors: preparedEmbeddingQuery.storedVectors
     });
     const supplementaryData = withEmbeddingSimilarityScores(
       initialAssessment.supplementaryData,
@@ -1644,6 +1653,7 @@ export class RecallService {
     readonly runId: string | null;
     readonly queryText: string | null;
     readonly preparedEmbeddingQuery: PreparedEmbeddingQueryHandle | null;
+    readonly preparedStoredVectors: PreparedEmbeddingSupplement["storedVectors"] | null;
   }): Promise<EmbeddingRecallSupplementResult> {
     const embeddingRecallService = this.dependencies.embeddingRecallService;
     if (
@@ -1669,7 +1679,10 @@ export class RecallService {
       eligibleMemories: params.localEligibleCandidates.map((candidate) => candidate.entry),
       baseCandidateIds: params.baseCandidateIds,
       maxSupplement: params.config.coarse_filter.semantic_supplement.max_supplement,
-      preparedQuery: params.preparedEmbeddingQuery
+      preparedQuery: params.preparedEmbeddingQuery,
+      ...(params.preparedStoredVectors === null
+        ? {}
+        : { storedVectors: params.preparedStoredVectors })
     });
 
     return supplement;
@@ -1684,6 +1697,7 @@ export class RecallService {
     readonly lexicalFallbackCount: number;
   }): Promise<Readonly<{
     readonly handle: PreparedEmbeddingQueryHandle | null;
+    readonly storedVectors: PreparedEmbeddingSupplement["storedVectors"] | null;
     readonly degradedReason: string | null;
   }>> {
     const embeddingRecallService = this.dependencies.embeddingRecallService;
@@ -1695,7 +1709,25 @@ export class RecallService {
       params.config.coarse_filter.semantic_supplement.max_supplement <= 0 ||
       params.localEligibleCandidates.length === 0
     ) {
-      return Object.freeze({ handle: null, degradedReason: null });
+      return Object.freeze({ handle: null, storedVectors: null, degradedReason: null });
+    }
+
+    if (typeof embeddingRecallService.prepareQuerySupplement === "function") {
+      const prepared = await embeddingRecallService.prepareQuerySupplement({
+        workspaceId: params.workspaceId,
+        runId: params.runId,
+        queryText: params.queryText,
+        eligibleMemories: params.localEligibleCandidates.map((candidate) => candidate.entry),
+        baseCandidateCount: params.lexicalFallbackCount
+      });
+      return Object.freeze({
+        handle: prepared.preparedQuery,
+        storedVectors: prepared.storedVectors,
+        degradedReason:
+          prepared.degradedReason === null
+            ? null
+            : normalizeEmbeddingProviderDegradationReason(prepared.degradedReason)
+      });
     }
 
     if (typeof embeddingRecallService.hasStoredVectors === "function") {
@@ -1721,12 +1753,13 @@ export class RecallService {
         });
         return Object.freeze({
           handle: null,
+          storedVectors: null,
           degradedReason: normalizeEmbeddingProviderDegradationReason(reason)
         });
       }
 
       if (!hasStoredVectors) {
-        return Object.freeze({ handle: null, degradedReason: null });
+        return Object.freeze({ handle: null, storedVectors: null, degradedReason: null });
       }
     }
 
@@ -1736,6 +1769,7 @@ export class RecallService {
         runId: params.runId,
         queryText: params.queryText
       }),
+      storedVectors: null,
       degradedReason: null
     });
   }

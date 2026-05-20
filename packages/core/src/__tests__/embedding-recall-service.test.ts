@@ -164,6 +164,65 @@ describe("EmbeddingRecallService", () => {
     ]);
   });
 
+  it("reuses prepared stored vectors instead of reading the vector table twice", async () => {
+    const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+      event_id: `event-${entry.event_type}`,
+      created_at: "2026-04-23T00:00:00.000Z",
+      revision: 0,
+      ...entry
+    }));
+    const listByObjectIds = vi.fn(async () => [
+      createEmbeddingRecord({
+        object_id: "memory-1",
+        content_hash: hashMemoryContent("Lexical baseline."),
+        embedding: new Float32Array([0.8, 0.2])
+      }),
+      createEmbeddingRecord({
+        object_id: "memory-2",
+        content_hash: hashMemoryContent("Semantic supplement."),
+        embedding: new Float32Array([0.1, 0.99])
+      })
+    ]);
+    const service = new EmbeddingRecallService({
+      embeddingRepo: { listByObjectIds },
+      provider: createProvider({
+        embedTexts: vi.fn(async () => [new Float32Array([0, 1])])
+      }),
+      eventLogRepo: {
+        append: appendSpy,
+        queryByEntity: vi.fn(async () => [])
+      },
+      generateQueryId: () => "prepared-supplement-query",
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+    const eligibleMemories = [
+      createMemoryEntry({ object_id: "memory-1", content: "Lexical baseline." }),
+      createMemoryEntry({ object_id: "memory-2", content: "Semantic supplement." })
+    ];
+
+    const prepared = await service.prepareQuerySupplement({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "Semantic recall ranking",
+      eligibleMemories,
+      baseCandidateCount: 1
+    });
+    expect(prepared.preparedQuery).not.toBeNull();
+    await Promise.resolve();
+    const result = await service.querySupplementIfReady({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      eligibleMemories,
+      baseCandidateIds: ["memory-1"],
+      maxSupplement: 1,
+      preparedQuery: prepared.preparedQuery!,
+      storedVectors: prepared.storedVectors
+    });
+
+    expect(listByObjectIds).toHaveBeenCalledTimes(1);
+    expect(result.supplementaryEntries.map((entry) => entry.object_id)).toEqual(["memory-2"]);
+  });
+
   it("waits briefly for a prepared query embedding before degrading", async () => {
     const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       event_id: `event-${entry.event_type}`,
