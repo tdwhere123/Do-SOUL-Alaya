@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { StorageTier, type GardenTaskDescriptor, type MemoryEntry } from "@do-soul/alaya-protocol";
 import type { EmbeddingProviderPort, EmbeddingVectorRecord } from "./embedding-recall-service.js";
+import { toErrorMessage } from "./recall-service-helpers.js";
 
 export interface EmbeddingBackfillMemoryRepoPort {
   findByWorkspaceId(
@@ -32,6 +33,7 @@ export interface EmbeddingBackfillHandlerDependencies {
 
 const BACKFILL_TIMEOUT_MS = 10_000;
 const BACKFILL_BATCH_SIZE = 16;
+const BACKFILL_BATCH_MAX_INPUT_CHARS = 32_000;
 
 export class EmbeddingBackfillHandler {
   private readonly now: () => string;
@@ -105,17 +107,32 @@ export class EmbeddingBackfillHandler {
     const objectsAffected: string[] = [];
     const auditEntries = [...unchangedAuditEntries];
 
-    for (let index = 0; index < memoriesToEmbed.length; index += BACKFILL_BATCH_SIZE) {
-      const batch = memoriesToEmbed.slice(index, index + BACKFILL_BATCH_SIZE);
-      const embeddings = await this.dependencies.provider.embedTexts(
-        batch.map((entry) => entry.memory.content),
-        {
-          timeoutMs: BACKFILL_TIMEOUT_MS
-        }
-      );
+    const batches = buildEmbeddingBackfillBatches(memoriesToEmbed);
+    for (const batch of batches) {
+      let embeddings: readonly Float32Array[];
+      try {
+        embeddings = await this.dependencies.provider.embedTexts(
+          batch.map((entry) => entry.memory.content),
+          {
+            timeoutMs: BACKFILL_TIMEOUT_MS
+          }
+        );
 
-      if (embeddings.length !== batch.length) {
-        throw new Error(`Expected ${batch.length} embeddings but received ${embeddings.length}.`);
+        if (embeddings.length !== batch.length) {
+          throw new Error(`Expected ${batch.length} embeddings but received ${embeddings.length}.`);
+        }
+      } catch (error) {
+        const message = toErrorMessage(error);
+        this.warn("embedding backfill batch failed; continuing with remaining batches", {
+          workspace_id: task.workspace_id,
+          batch_size: batch.length,
+          batch_input_chars: batch.reduce((total, entry) => total + entry.memory.content.length, 0),
+          error: message
+        });
+        for (const entry of batch) {
+          auditEntries.push(`embedding_failed:provider:${entry.memory.object_id}`);
+        }
+        continue;
       }
 
       const latestHotMemories = new Map(
@@ -186,6 +203,42 @@ export class EmbeddingBackfillHandler {
       auditEntries: Object.freeze(auditEntries)
     });
   }
+}
+
+type EmbeddingBackfillCandidate = Readonly<{
+  readonly memory: Readonly<MemoryEntry>;
+  readonly contentHash: string;
+  readonly existing: Readonly<EmbeddingVectorRecord> | null;
+}>;
+
+function buildEmbeddingBackfillBatches(
+  entries: readonly EmbeddingBackfillCandidate[]
+): readonly (readonly EmbeddingBackfillCandidate[])[] {
+  const batches: EmbeddingBackfillCandidate[][] = [];
+  let currentBatch: EmbeddingBackfillCandidate[] = [];
+  let currentChars = 0;
+
+  for (const entry of entries) {
+    const entryChars = entry.memory.content.length;
+    const wouldExceedCount = currentBatch.length >= BACKFILL_BATCH_SIZE;
+    const wouldExceedChars =
+      currentBatch.length > 0 &&
+      currentChars + entryChars > BACKFILL_BATCH_MAX_INPUT_CHARS;
+    if (wouldExceedCount || wouldExceedChars) {
+      batches.push(currentBatch);
+      currentBatch = [];
+      currentChars = 0;
+    }
+
+    currentBatch.push(entry);
+    currentChars += entryChars;
+  }
+
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
+  }
+
+  return Object.freeze(batches.map((batch) => Object.freeze([...batch])));
 }
 
 function hashMemoryContent(content: string): string {
