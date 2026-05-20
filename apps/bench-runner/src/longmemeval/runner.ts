@@ -131,19 +131,33 @@ export interface LongMemEvalHitScoringResult {
 /**
  * @anchor longmemeval-runner — per-question workspace, seed-then-recall
  *
- * Scoring: object_id sidecar. Each seeded turn produces a durable memory
- * via the MCP propose+review chain (see harness/daemon.ts proposeMemory).
- * The returned memoryId is the durable object_id that soul.recall returns
- * in pointer.object_id, so scoring is by id equality — never by string
- * preview overlap.
+ * Scoring: object_id sidecar. Each haystack turn is LLM-extracted into N
+ * atomic facts and seeded as N durable memory_entry rows via the MCP
+ * propose+review chain (see harness/daemon.ts proposeMemory and
+ * longmemeval/atomic-fact-extraction.ts). Every returned memoryId is the
+ * durable object_id that soul.recall returns in pointer.object_id, so
+ * scoring is by id equality — never by string preview overlap.
  *
  * Hit rule: a recall result is a hit iff its object_id maps in the sidecar
  * to a seed whose hasAnswer === true AND whose sessionId is in
- * question.answer_session_ids.
+ * question.answer_session_ids. Because one answer turn now seeds N atomic
+ * facts, an answer turn maps to N gold object_ids, and a hit means
+ * recalling ANY one atomic fact of that answer turn.
+ *
+ * Measurement-basis note: before atomic-fact extraction one answer turn
+ * seeded exactly 1 gold object; it now seeds N. R@K is therefore measured
+ * on a NEW basis ("did any atomic fragment of the answer turn surface")
+ * and is NOT directly comparable to the pre-extraction 110623Z baseline.
+ * The first post-extraction full run is the reference baseline for later
+ * recall-optimization slices.
+ *
  * `active_constraints[]` is an independent governance channel and is
  * recorded in diagnostics only; it is never counted toward R@K.
  *
  * see also: apps/bench-runner/src/harness/daemon.ts — proposeMemory chain
+ * see also: packages/eval/src/report.ts — report.md "Scoring contract"
+ *   section; its LongMemEval-S text must mirror this measurement-basis
+ *   note (the report.md prose lives there, not in this package).
  */
 export async function runLongMemEval(
   opts: LongMemEvalRunOptions
@@ -238,11 +252,11 @@ export async function runLongMemEval(
             objectKind
           });
           seedIndex += 1;
-          if (seedResult.truncatedCount > 0) {
-            seedTurnsTruncated += seedResult.truncatedCount;
+          if (seedResult.turnTruncated) {
+            seedTurnsTruncated += 1;
             seedCharsClipped += seedResult.charsClipped;
             if (turn.has_answer === true) {
-              answerTurnsTruncated += seedResult.truncatedCount;
+              answerTurnsTruncated += 1;
             }
           }
           for (const seed of seedResult.seeds) {

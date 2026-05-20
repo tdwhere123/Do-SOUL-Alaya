@@ -25,10 +25,16 @@ import type {
  * Extraction runs at seed/ingest time only — never at recall time.
  *
  * Repeatability: extraction is cached to an on-disk fixture keyed by a
- * hash of (model + turn content). The first run extracts and writes the
- * fixture; every later run reuses it with zero LLM calls. The fixture
- * directory is committed so the bench stays one-click repeatable across
- * fresh checkouts and CI.
+ * hash of (model + turn content). The fixture directory is EMPTY on a
+ * fresh checkout — it is not pre-populated. The first credentialled
+ * bench run extracts via the garden LLM and writes the fixture; that
+ * fixture must then be committed. Only after it is committed does a
+ * later run (including CI and other contributors) reuse it with zero
+ * LLM calls and become one-click repeatable. Until the fixture is
+ * committed, a fresh checkout with credentials re-extracts live, and a
+ * fresh checkout without credentials takes the deterministic no-LLM
+ * single-fact fallback (see the `config.apiKey === null` branch in
+ * `extract`) — those two paths produce different ingestion granularity.
  *
  * see also: apps/bench-runner/src/harness/daemon.ts proposeMemory
  * see also: packages/soul/src/garden/compute-provider.ts — the garden
@@ -37,9 +43,12 @@ import type {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// invariant: the cache fixture lives beside the pinned dataset metadata
-// under docs/bench-history/datasets so it is committed and shared, the
-// same repeatable-fixture discipline used by the pinned dataset meta.
+// The cache fixture lives beside the pinned dataset metadata under
+// docs/bench-history/datasets so that, once a credentialled run has
+// populated it, it can be committed and shared — the same repeatable-
+// fixture discipline used by the pinned dataset meta. The directory is
+// created lazily by writeCachedFacts on the first credentialled run; it
+// is empty (absent) until then.
 const ATOMIC_FACT_CACHE_ROOT = resolve(
   __dirname,
   "../../../../docs/bench-history/datasets/longmemeval-atomic-facts"
@@ -397,9 +406,16 @@ export interface AtomicFactSeedDaemon {
 export interface AtomicFactSeedResult {
   /** One SeededMemoryResult per extracted atomic fact (N per turn). */
   readonly seeds: readonly SeededMemoryResult[];
-  /** Count of seeds whose distilled fact exceeded the seed content cap. */
-  readonly truncatedCount: number;
-  /** Total chars clipped across all truncated seeds. */
+  /**
+   * Whether THIS turn's source content exceeded the seed content cap.
+   * Truncation is a property of the turn, not of each extracted fact:
+   * every fact of one turn carries the same full `turnContent` as
+   * evidence, so the daemon flags `truncated` identically for all N
+   * seeds. This boolean is counted once per turn so the bench report.md
+   * truncation diagnostics reflect turns, not the fact fan-out factor.
+   */
+  readonly turnTruncated: boolean;
+  /** Chars clipped from this turn's content (counted once, not per fact). */
   readonly charsClipped: number;
 }
 
@@ -425,7 +441,7 @@ export async function seedTurnAsAtomicFacts(input: {
 }): Promise<AtomicFactSeedResult> {
   const facts = await input.extractor.extract(input.turnContent);
   const seeds: SeededMemoryResult[] = [];
-  let truncatedCount = 0;
+  let turnTruncated = false;
   let charsClipped = 0;
   for (let factIndex = 0; factIndex < facts.length; factIndex++) {
     const fact = facts[factIndex];
@@ -443,10 +459,13 @@ export async function seedTurnAsAtomicFacts(input: {
       distilledFact: fact
     });
     seeds.push(seed);
+    // Truncation is keyed on the turn's source content, which is the
+    // same string for every fact of this turn — record it once instead
+    // of summing it N times across the fact fan-out.
     if (seed.truncated) {
-      truncatedCount += 1;
-      charsClipped += seed.charsClipped;
+      turnTruncated = true;
+      charsClipped = seed.charsClipped;
     }
   }
-  return { seeds, truncatedCount, charsClipped };
+  return { seeds, turnTruncated, charsClipped };
 }

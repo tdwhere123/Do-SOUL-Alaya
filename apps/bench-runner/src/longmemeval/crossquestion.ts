@@ -139,11 +139,11 @@ export async function runLongMemEvalCrossQuestion(
             objectKind: rotatingSeedObjectKind(seedIndex)
           });
           seedIndex += 1;
-          if (seedResult.truncatedCount > 0) {
-            seedTurnsTruncated += seedResult.truncatedCount;
+          if (seedResult.turnTruncated) {
+            seedTurnsTruncated += 1;
             seedCharsClipped += seedResult.charsClipped;
             if (turn.has_answer === true) {
-              answerTurnsTruncated += seedResult.truncatedCount;
+              answerTurnsTruncated += 1;
             }
           }
           for (const seed of seedResult.seeds) {
