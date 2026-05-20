@@ -114,8 +114,10 @@ const DYNAMIC_RECALL_COHORT_RADIUS = 8;
 const DYNAMIC_RECALL_SOURCE_PROXIMITY_RADIUS = 6;
 const DYNAMIC_RECALL_SOURCE_PROXIMITY_SEED_CAP = 12;
 const DYNAMIC_RECALL_SOURCE_PROXIMITY_ADMISSION_CAP = 120;
+const DYNAMIC_RECALL_SOURCE_PROXIMITY_ADMISSION_BUDGET_MULTIPLIER = 4;
 const DYNAMIC_RECALL_SOURCE_PROXIMITY_NEIGHBORS_PER_SEED = 8;
 const SOURCE_PROXIMITY_STRUCTURAL_CARRY_MAX = 0.25;
+const STRONG_LEXICAL_DELIVERY_RANK = 0.85;
 const DYNAMIC_RECALL_EDGE_FANOUT = 12;
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
 const NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT = 0.24;
@@ -230,7 +232,8 @@ export class RecallService {
     const hotCoarseFilter = await this.coarseFilter(params.workspaceId, policy.coarse_filter, queryText, {
       timeFilter: params.timeFilter,
       queryProbes,
-      winnerMemoryIds
+      winnerMemoryIds,
+      deliveryMaxEntries: policy.fine_assessment.budgets.max_entries
     });
     const globalCoarseFilter = await loadGlobalRecallCandidates({
       workspaceId: params.workspaceId,
@@ -569,6 +572,7 @@ export class RecallService {
       readonly timeFilter?: RecallTimeFilter;
       readonly queryProbes?: Readonly<RecallQueryProbes>;
       readonly winnerMemoryIds?: ReadonlySet<string>;
+      readonly deliveryMaxEntries?: number;
     }> = {}
   ): Promise<{
     readonly total_scanned: number;
@@ -799,7 +803,8 @@ export class RecallService {
       workspaceId,
       tierMemories,
       drafts,
-      addCandidate
+      addCandidate,
+      admissionLimit: resolveSourceProximityAdmissionLimit(options.deliveryMaxEntries)
     });
     await this.addGraphExpansionCandidates({
       workspaceId,
@@ -1011,8 +1016,9 @@ export class RecallService {
     readonly tierMemories: readonly Readonly<MemoryEntry>[];
     readonly drafts: ReadonlyMap<string, CoarseCandidateDraft>;
     readonly addCandidate: CoarseCandidateAdder;
+    readonly admissionLimit: number;
   }>): Promise<Readonly<Record<string, string>>> {
-    if (params.drafts.size === 0) {
+    if (params.drafts.size === 0 || params.admissionLimit <= 0) {
       return Object.freeze({});
     }
 
@@ -1074,7 +1080,7 @@ export class RecallService {
         params.addCandidate(candidate.entry, "source_proximity", candidate.score, "source_proximity");
         if (!wasDrafted) {
           newlyAdmitted.add(candidate.entry.object_id);
-          if (newlyAdmitted.size >= DYNAMIC_RECALL_SOURCE_PROXIMITY_ADMISSION_CAP) {
+          if (newlyAdmitted.size >= params.admissionLimit) {
             return sourceCohortKeys;
           }
         }
@@ -1355,7 +1361,8 @@ export class RecallService {
       scoreMultiplier: WARM_CASCADE_DECAY,
       timeFilter: params.timeFilter,
       queryProbes: params.queryProbes,
-      winnerMemoryIds: params.winnerMemoryIds
+      winnerMemoryIds: params.winnerMemoryIds,
+      deliveryMaxEntries: params.fineAssessmentConfig.budgets.max_entries
     });
     const warmMerged = this.mergeCoarseFilters(params.hotCoarseFilter, warmFilter, "warm_cascade_engaged");
     // Use coarse-filter candidate counts for cascade gates; supplementary
@@ -1371,7 +1378,8 @@ export class RecallService {
       scoreMultiplier: COLD_CASCADE_DECAY,
       timeFilter: params.timeFilter,
       queryProbes: params.queryProbes,
-      winnerMemoryIds: params.winnerMemoryIds
+      winnerMemoryIds: params.winnerMemoryIds,
+      deliveryMaxEntries: params.fineAssessmentConfig.budgets.max_entries
     });
     return this.mergeCoarseFilters(warmMerged, coldFilter, "cold_cascade_engaged");
   }
@@ -1828,7 +1836,11 @@ export class RecallService {
     }));
     const rankedCandidates = scoredCandidates
       .sort(compareFusedRecallCandidates);
-    const deliveryOrderedCandidates = rankedCandidates;
+    const deliveryOrderedCandidates = prioritizeStrongLexicalDeliveryWindowCandidates(
+      rankedCandidates,
+      supplementaryData,
+      config.budgets.max_entries
+    );
 
     type FineAssessmentAccumulator = {
       readonly selected: readonly Readonly<RecallCandidate>[];
@@ -2372,6 +2384,68 @@ function compareFusedRecallCandidates(
     return effectiveDelta;
   }
   return compareMemoryEntries(left.entry, right.entry);
+}
+
+function prioritizeStrongLexicalDeliveryWindowCandidates<T extends FusedRecallCandidateInput>(
+  rankedCandidates: readonly T[],
+  supplementaryData: RecallSupplementaryData,
+  maxEntries: number
+): readonly T[] {
+  const deliveryWindowSize = Math.min(Math.max(0, maxEntries), rankedCandidates.length);
+  if (deliveryWindowSize <= 1) {
+    return rankedCandidates;
+  }
+
+  const deliveryWindow = rankedCandidates.slice(0, deliveryWindowSize);
+  if (!deliveryWindow.some((candidate) => isStrongLexicalCandidate(candidate, supplementaryData))) {
+    return rankedCandidates;
+  }
+
+  if (!deliveryWindow.some((candidate) => isSourceProximityLocalOnlyCandidate(candidate))) {
+    return rankedCandidates;
+  }
+
+  const reorderedWindow: T[] = [];
+  const deferredSourceLocalOnly: T[] = [];
+  for (const candidate of deliveryWindow) {
+    if (isSourceProximityLocalOnlyCandidate(candidate)) {
+      deferredSourceLocalOnly.push(candidate);
+      continue;
+    }
+    reorderedWindow.push(candidate);
+    if (isStrongLexicalCandidate(candidate, supplementaryData) && deferredSourceLocalOnly.length > 0) {
+      reorderedWindow.push(...deferredSourceLocalOnly);
+      deferredSourceLocalOnly.length = 0;
+      continue;
+    }
+  }
+  reorderedWindow.push(...deferredSourceLocalOnly);
+
+  return Object.freeze([
+    ...reorderedWindow,
+    ...rankedCandidates.slice(deliveryWindowSize)
+  ]);
+}
+
+function isStrongLexicalCandidate(
+  candidate: FusedRecallCandidateInput,
+  supplementaryData: RecallSupplementaryData
+): boolean {
+  return clamp01(supplementaryData.ftsRanks[candidate.entry.object_id] ?? 0) >= STRONG_LEXICAL_DELIVERY_RANK;
+}
+
+function isSourceProximityLocalOnlyCandidate(candidate: FusedRecallCandidateInput): boolean {
+  const ranks = candidate.fusion.per_stream_rank;
+  return (
+    ranks.source_proximity !== null &&
+    ranks.lexical_fts === null &&
+    ranks.evidence_fts === null &&
+    ranks.evidence_structural_agreement === null &&
+    ranks.source_evidence_agreement === null &&
+    ranks.embedding_similarity === null &&
+    ranks.graph_expansion === null &&
+    ranks.path_expansion === null
+  );
 }
 
 function buildEmptyRecallFusionBreakdown(objectId: string): Readonly<RecallFusionBreakdown> {
@@ -2941,6 +3015,20 @@ function scoreSourceProximitySeedDraft(draft: Readonly<CoarseCandidateDraft>): n
     strength = Math.max(strength, draft.structuralScore);
   }
   return strength >= 0.35 ? clamp01(strength) : 0;
+}
+
+function resolveSourceProximityAdmissionLimit(maxDeliveryEntries: number | undefined): number {
+  if (maxDeliveryEntries !== undefined && maxDeliveryEntries <= 0) {
+    return 0;
+  }
+  const budgetBound =
+    maxDeliveryEntries === undefined
+      ? DYNAMIC_RECALL_SOURCE_PROXIMITY_ADMISSION_CAP
+      : Math.max(
+          DYNAMIC_RECALL_SOURCE_PROXIMITY_NEIGHBORS_PER_SEED,
+          maxDeliveryEntries * DYNAMIC_RECALL_SOURCE_PROXIMITY_ADMISSION_BUDGET_MULTIPLIER
+        );
+  return Math.min(DYNAMIC_RECALL_SOURCE_PROXIMITY_ADMISSION_CAP, budgetBound);
 }
 
 function rankCoarseCandidateDrafts(

@@ -371,6 +371,168 @@ describe("recall regression suite", () => {
     expect(outsideDiagnostic).toBeUndefined();
   });
 
+  it("bounds source-proximity admission by the delivery budget", async () => {
+    const seeds = Array.from({ length: 12 }, (_, index) =>
+      memory({
+        object_id: `source-seed-${index}`,
+        content: `source proximity seed ${index}`,
+        evidence_refs: [`source-wide-s1-t${index * 20 + 10}`],
+        activation_score: 0.95 - index * 0.01
+      })
+    );
+    const neighbors = seeds.flatMap((seed, seedIndex) =>
+      Array.from({ length: 6 }, (_, neighborIndex) =>
+        memory({
+          object_id: `${seed.object_id}-neighbor-${neighborIndex}`,
+          content: `nearby source-only neighbor ${seedIndex}-${neighborIndex}`,
+          evidence_refs: [`source-wide-s1-t${seedIndex * 20 + 11 + neighborIndex}`],
+          activation_score: 0.01
+        })
+      )
+    );
+    const { dependencies } = deps([...seeds, ...neighbors], {
+      searchByKeyword: async () =>
+        seeds.map((entry, index) => ({
+          object_id: entry.object_id,
+          normalized_rank: 1 - index * 0.01
+        }))
+    });
+    const service = new RecallService(dependencies);
+    const policy = withBudgets(service.buildDefaultPolicy("analyze", task().runtime_id), {
+      max_entries: 5,
+      max_total_tokens: 1000
+    });
+
+    const result = await service.recall({
+      taskSurface: task("source proximity seed"),
+      workspaceId: WS,
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    const sourceOnlyDiagnostics = (result.diagnostics?.candidates ?? [])
+      .filter((item) => item.admission_planes.includes("source_proximity"))
+      .filter((item) => !item.admission_planes.includes("lexical"));
+    expect(sourceOnlyDiagnostics.length).toBeLessThanOrEqual(20);
+  });
+
+  it("keeps strong lexical delivery-window hits in the top five", async () => {
+    const sourceSeed = memory({
+      object_id: "source-seed",
+      content: "local adjacency seed",
+      evidence_refs: ["source-lexical-s1-t10"],
+      activation_score: 0.7
+    });
+    const sourceNeighbors = Array.from({ length: 6 }, (_, index) =>
+      memory({
+        object_id: `source-neighbor-${index}`,
+        content: `source proximity local-only decoy ${index}`,
+        evidence_refs: [`source-lexical-s1-t${11 + index}`],
+        activation_score: 0.9 - index * 0.01
+      })
+    );
+    const lexicalGold = memory({
+      object_id: "strong-lexical-gold",
+      content: "rare lexical protected answer",
+      activation_score: 0.05
+    });
+    const { dependencies } = deps([sourceSeed, ...sourceNeighbors, lexicalGold], {
+      searchByKeyword: async () => [
+        { object_id: "source-seed", normalized_rank: 0.7 },
+        { object_id: "strong-lexical-gold", normalized_rank: 0.98 }
+      ]
+    });
+    const service = new RecallService(dependencies);
+    const policy = withBudgets({
+      ...service.buildDefaultPolicy("analyze", task().runtime_id),
+      scoring_weight_overrides: {
+        fusion_weights: {
+          source_proximity: 20
+        }
+      }
+    }, {
+      max_entries: 10,
+      max_total_tokens: 1000
+    });
+
+    const result = await service.recall({
+      taskSurface: task("rare lexical protected answer"),
+      workspaceId: WS,
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    const finalRank = result.diagnostics?.candidates.find(
+      (item) => item.object_id === "strong-lexical-gold"
+    )?.final_rank;
+    expect(finalRank).not.toBeNull();
+    expect(finalRank).toBeLessThanOrEqual(5);
+  });
+
+  it("does not demote strong lexical hits behind later non-source candidates", async () => {
+    const sourceSeed = memory({
+      object_id: "ordering-source-seed",
+      content: "ordering source seed",
+      evidence_refs: ["source-order-s1-t10"],
+      activation_score: 0.2
+    });
+    const sourceNeighbor = memory({
+      object_id: "ordering-source-neighbor",
+      content: "ordering source proximity decoy",
+      evidence_refs: ["source-order-s1-t11"],
+      activation_score: 0.05
+    });
+    const lexicalGold = memory({
+      object_id: "ordering-strong-lexical",
+      content: "ordering strong lexical answer",
+      activation_score: 0.3
+    });
+    const lexicalPeer = memory({
+      object_id: "ordering-lexical-peer",
+      content: "ordering weaker lexical peer",
+      activation_score: 0.01
+    });
+    const { dependencies } = deps([sourceSeed, sourceNeighbor, lexicalGold, lexicalPeer], {
+      searchByKeyword: async () => [
+        { object_id: "ordering-strong-lexical", normalized_rank: 1 },
+        { object_id: "ordering-source-seed", normalized_rank: 0.2 },
+        { object_id: "ordering-lexical-peer", normalized_rank: 0.1 }
+      ]
+    });
+    const service = new RecallService(dependencies);
+    const policy = withBudgets({
+      ...service.buildDefaultPolicy("analyze", task().runtime_id),
+      scoring_weight_overrides: {
+        fusion_weights: {
+          source_proximity: 20
+        }
+      }
+    }, {
+      max_entries: 5,
+      max_total_tokens: 1000
+    });
+
+    const result = await service.recall({
+      taskSurface: task("ordering strong lexical answer"),
+      workspaceId: WS,
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    const diagnosticsById = new Map(
+      (result.diagnostics?.candidates ?? []).map((item) => [item.object_id, item] as const)
+    );
+    const gold = diagnosticsById.get("ordering-strong-lexical");
+    const peer = diagnosticsById.get("ordering-lexical-peer");
+    const sourceOnly = diagnosticsById.get("ordering-source-neighbor");
+    expect(sourceOnly?.per_stream_rank.source_proximity).not.toBeNull();
+    expect(sourceOnly?.per_stream_rank.lexical_fts).toBeNull();
+    expect(sourceOnly?.fused_rank).toBeLessThan(gold?.fused_rank ?? Number.MAX_SAFE_INTEGER);
+    expect(gold?.fused_rank).toBeLessThan(peer?.fused_rank ?? Number.MAX_SAFE_INTEGER);
+    expect(gold?.final_rank).toBeLessThan(sourceOnly?.final_rank ?? Number.MAX_SAFE_INTEGER);
+    expect(gold?.final_rank).toBeLessThan(peer?.final_rank ?? Number.MAX_SAFE_INTEGER);
+  });
+
   it.each([
     ["yesterday", "What changed yesterday?"],
     ["last-week-cn", "上周做了什么决定？"]
