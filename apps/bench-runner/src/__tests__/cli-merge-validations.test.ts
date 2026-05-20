@@ -1320,7 +1320,28 @@ describe("merge-longmemeval validations", () => {
           provider_returned_rate: 3 / 5,
           provider_pending_rate: 1 / 5,
           provider_failed_rate: 1 / 5,
+          embedding_vector_cache_ready_rate: 1,
+          query_embedding_cache_ready_rate: 1,
           per_scenario: rowsA
+        }
+      }),
+      makeShardDiagnostics({
+        embedding_provider: "yunwu:text-embedding-3-small",
+        embedding_mode: "env",
+        embedding_vector_cache: {
+          expected_count: 50,
+          ready_count: 50,
+          not_ready_count: 0,
+          ready_rate: 1,
+          max_pass_count: 2
+        },
+        query_embedding_cache: {
+          requested_count: 5,
+          ready_count: 5,
+          not_ready_count: 0,
+          ready_rate: 1,
+          cache_hit_count: 0,
+          provider_requested_count: 5
         }
       })
     );
@@ -1338,7 +1359,28 @@ describe("merge-longmemeval validations", () => {
           provider_returned_rate: 2 / 5,
           provider_pending_rate: 2 / 5,
           provider_failed_rate: 1 / 5,
+          embedding_vector_cache_ready_rate: 1,
+          query_embedding_cache_ready_rate: 1,
           per_scenario: rowsB
+        }
+      }),
+      makeShardDiagnostics({
+        embedding_provider: "yunwu:text-embedding-3-small",
+        embedding_mode: "env",
+        embedding_vector_cache: {
+          expected_count: 60,
+          ready_count: 60,
+          not_ready_count: 0,
+          ready_rate: 1,
+          max_pass_count: 3
+        },
+        query_embedding_cache: {
+          requested_count: 5,
+          ready_count: 5,
+          not_ready_count: 0,
+          ready_rate: 1,
+          cache_hit_count: 1,
+          provider_requested_count: 4
         }
       })
     );
@@ -1370,5 +1412,37 @@ describe("merge-longmemeval validations", () => {
     expect(merged.kpi.provider_pending_rate).toBe(0.3);
     expect(merged.kpi.provider_failed_rate).toBe(0.2);
     expect(merged.kpi.r_at_5_with_embedding_returned).toBe(0.8);
+    expect(merged.kpi.embedding_vector_cache_ready_rate).toBe(1);
+    expect(merged.kpi.query_embedding_cache_ready_rate).toBe(1);
+
+    const diagnostics = JSON.parse(
+      await readFile(
+        path.join(
+          historyRoot,
+          "public",
+          pointer.slug,
+          LONGMEMEVAL_DIAGNOSTICS_FILENAME
+        ),
+        "utf8"
+      )
+    ) as {
+      embedding_vector_cache?: { expected_count: number; max_pass_count: number };
+      query_embedding_cache?: {
+        requested_count: number;
+        ready_count: number;
+        cache_hit_count: number;
+        provider_requested_count: number;
+      };
+    };
+    expect(diagnostics.embedding_vector_cache).toMatchObject({
+      expected_count: 110,
+      max_pass_count: 3
+    });
+    expect(diagnostics.query_embedding_cache).toMatchObject({
+      requested_count: 10,
+      ready_count: 10,
+      cache_hit_count: 1,
+      provider_requested_count: 9
+    });
   });
 });

@@ -37,6 +37,7 @@ import {
   summarizeProviderStates,
   type LongMemEvalDiagnosticsSidecar,
   type LongMemEvalEmbeddingVectorCacheSummary,
+  type LongMemEvalQueryEmbeddingCacheSummary,
   type LongMemEvalReportUsageSummary
 } from "./longmemeval/diagnostics.js";
 import { runLiveBench } from "./live/runner.js";
@@ -606,6 +607,14 @@ function buildMergedLongMemEvalDiagnosticsSidecar(
           summary !== undefined
       )
   );
+  const queryEmbeddingCache = aggregateQueryEmbeddingCache(
+    shardDiagnostics
+      .map((diagnostics) => diagnostics?.query_embedding_cache)
+      .filter(
+        (summary): summary is LongMemEvalQueryEmbeddingCacheSummary =>
+          summary !== undefined
+      )
+  );
 
   return {
     schema_version: 1,
@@ -624,6 +633,9 @@ function buildMergedLongMemEvalDiagnosticsSidecar(
     ...(embeddingVectorCache === null
       ? {}
       : { embedding_vector_cache: embeddingVectorCache }),
+    ...(queryEmbeddingCache === null
+      ? {}
+      : { query_embedding_cache: queryEmbeddingCache }),
     provider_state_summary: summarizeProviderStates(questions),
     questions
   };
@@ -668,6 +680,38 @@ function aggregateEmbeddingVectorCache(
     not_ready_count: Math.max(0, expectedCount - readyCount),
     ready_rate: ratio(readyCount, expectedCount),
     max_pass_count: maxPassCount
+  };
+}
+
+function aggregateQueryEmbeddingCache(
+  summaries: readonly LongMemEvalQueryEmbeddingCacheSummary[]
+): LongMemEvalQueryEmbeddingCacheSummary | null {
+  if (summaries.length === 0) {
+    return null;
+  }
+  const requestedCount = summaries.reduce(
+    (sum, summary) => sum + summary.requested_count,
+    0
+  );
+  const readyCount = summaries.reduce(
+    (sum, summary) => sum + summary.ready_count,
+    0
+  );
+  const cacheHitCount = summaries.reduce(
+    (sum, summary) => sum + summary.cache_hit_count,
+    0
+  );
+  const providerRequestedCount = summaries.reduce(
+    (sum, summary) => sum + summary.provider_requested_count,
+    0
+  );
+  return {
+    requested_count: requestedCount,
+    ready_count: readyCount,
+    not_ready_count: Math.max(0, requestedCount - readyCount),
+    ready_rate: ratio(readyCount, requestedCount),
+    cache_hit_count: cacheHitCount,
+    provider_requested_count: providerRequestedCount
   };
 }
 
