@@ -234,10 +234,16 @@ export function renderReport(
   if (
     current.kpi.provider_returned_rate !== undefined ||
     current.kpi.provider_pending_rate !== undefined ||
-    current.kpi.provider_failed_rate !== undefined
+    current.kpi.provider_failed_rate !== undefined ||
+    current.kpi.provider_not_requested_rate !== undefined
   ) {
     lines.push(
-      `- Embedding provider states: returned=${formatMaybeRatio(current.kpi.provider_returned_rate)} pending=${formatMaybeRatio(current.kpi.provider_pending_rate)} failed=${formatMaybeRatio(current.kpi.provider_failed_rate)}`
+      `- Embedding provider states: returned=${formatMaybeRatio(current.kpi.provider_returned_rate)} pending=${formatMaybeRatio(current.kpi.provider_pending_rate)} failed=${formatMaybeRatio(current.kpi.provider_failed_rate)} not_requested=${formatMaybeRatio(current.kpi.provider_not_requested_rate)}`
+    );
+  }
+  if (current.kpi.embedding_vector_cache_ready_rate !== undefined) {
+    lines.push(
+      `- Embedding vector cache ready: ${formatMaybeRatio(current.kpi.embedding_vector_cache_ready_rate)}`
     );
   }
   const trunc = current.kpi.seed_truncation;

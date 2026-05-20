@@ -176,6 +176,7 @@ function makeShardDiagnostics(
       provider_returned_rate: 0,
       provider_pending_rate: 0,
       provider_failed_rate: 0,
+      provider_not_requested_rate: 1,
       unknown_rate: 0
     },
     questions: [],

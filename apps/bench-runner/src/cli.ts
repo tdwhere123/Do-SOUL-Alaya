@@ -36,6 +36,7 @@ import {
   renderDiagnosticsSidecar,
   summarizeProviderStates,
   type LongMemEvalDiagnosticsSidecar,
+  type LongMemEvalEmbeddingVectorCacheSummary,
   type LongMemEvalReportUsageSummary
 } from "./longmemeval/diagnostics.js";
 import { runLiveBench } from "./live/runner.js";
@@ -597,6 +598,14 @@ function buildMergedLongMemEvalDiagnosticsSidecar(
       .map((diagnostics) => diagnostics?.report_usage)
       .filter((usage): usage is LongMemEvalReportUsageSummary => usage !== undefined)
   );
+  const embeddingVectorCache = aggregateEmbeddingVectorCache(
+    shardDiagnostics
+      .map((diagnostics) => diagnostics?.embedding_vector_cache)
+      .filter(
+        (summary): summary is LongMemEvalEmbeddingVectorCacheSummary =>
+          summary !== undefined
+      )
+  );
 
   return {
     schema_version: 1,
@@ -612,6 +621,9 @@ function buildMergedLongMemEvalDiagnosticsSidecar(
     ...(reportUsage === null ? {} : { report_usage: reportUsage }),
     ...(evidence.report_side_effects === null ? {} : { report_side_effects: evidence.report_side_effects }),
     ...(evidence.scored_recall_evidence === null ? {} : { scored_recall_evidence: evidence.scored_recall_evidence }),
+    ...(embeddingVectorCache === null
+      ? {}
+      : { embedding_vector_cache: embeddingVectorCache }),
     provider_state_summary: summarizeProviderStates(questions),
     questions
   };
@@ -629,6 +641,33 @@ function aggregateReportUsage(
     reports_used: usages.reduce((sum, usage) => sum + usage.reports_used, 0),
     reports_skipped: usages.reduce((sum, usage) => sum + usage.reports_skipped, 0),
     used_object_count: usages.reduce((sum, usage) => sum + usage.used_object_count, 0)
+  };
+}
+
+function aggregateEmbeddingVectorCache(
+  summaries: readonly LongMemEvalEmbeddingVectorCacheSummary[]
+): LongMemEvalEmbeddingVectorCacheSummary | null {
+  if (summaries.length === 0) {
+    return null;
+  }
+  const expectedCount = summaries.reduce(
+    (sum, summary) => sum + summary.expected_count,
+    0
+  );
+  const readyCount = summaries.reduce(
+    (sum, summary) => sum + summary.ready_count,
+    0
+  );
+  const maxPassCount = summaries.reduce(
+    (max, summary) => Math.max(max, summary.max_pass_count),
+    0
+  );
+  return {
+    expected_count: expectedCount,
+    ready_count: readyCount,
+    not_ready_count: Math.max(0, expectedCount - readyCount),
+    ready_rate: ratio(readyCount, expectedCount),
+    max_pass_count: maxPassCount
   };
 }
 
@@ -787,9 +826,12 @@ async function runMergeLongMemEvalCommand(
     let providerReturnedTotal = 0;
     let providerPendingTotal = 0;
     let providerFailedTotal = 0;
+    let providerNotRequestedTotal = 0;
     let providerReturnedHitAt5 = 0;
+    let embeddingVectorCacheReadyWeightedTotal = 0;
     let hasProviderRates = false;
     let hasReturnedSubsetRAt5 = false;
+    let hasEmbeddingVectorCacheRate = false;
     let evaluatedTotal = 0;
     let latencyP50Max = 0;
     let latencyP95Max = 0;
@@ -821,7 +863,8 @@ async function runMergeLongMemEvalCommand(
       if (
         shard.kpi.provider_returned_rate !== undefined ||
         shard.kpi.provider_pending_rate !== undefined ||
-        shard.kpi.provider_failed_rate !== undefined
+        shard.kpi.provider_failed_rate !== undefined ||
+        shard.kpi.provider_not_requested_rate !== undefined
       ) {
         hasProviderRates = true;
         const returned = Math.round(
@@ -834,12 +877,20 @@ async function runMergeLongMemEvalCommand(
         providerFailedTotal += Math.round(
           (shard.kpi.provider_failed_rate ?? 0) * shard.evaluated_count
         );
+        providerNotRequestedTotal += Math.round(
+          (shard.kpi.provider_not_requested_rate ?? 0) * shard.evaluated_count
+        );
         if (shard.kpi.r_at_5_with_embedding_returned !== undefined) {
           hasReturnedSubsetRAt5 = true;
           providerReturnedHitAt5 += Math.round(
             shard.kpi.r_at_5_with_embedding_returned * returned
           );
         }
+      }
+      if (shard.kpi.embedding_vector_cache_ready_rate !== undefined) {
+        hasEmbeddingVectorCacheRate = true;
+        embeddingVectorCacheReadyWeightedTotal +=
+          shard.kpi.embedding_vector_cache_ready_rate * shard.evaluated_count;
       }
       evaluatedTotal += shard.evaluated_count;
       latencyP50Max = Math.max(latencyP50Max, shard.kpi.latency_ms_p50);
@@ -912,7 +963,19 @@ async function runMergeLongMemEvalCommand(
           ? {
               provider_returned_rate: ratio(providerReturnedTotal, evaluatedTotal),
               provider_pending_rate: ratio(providerPendingTotal, evaluatedTotal),
-              provider_failed_rate: ratio(providerFailedTotal, evaluatedTotal)
+              provider_failed_rate: ratio(providerFailedTotal, evaluatedTotal),
+              provider_not_requested_rate: ratio(
+                providerNotRequestedTotal,
+                evaluatedTotal
+              )
+            }
+          : {}),
+        ...(hasEmbeddingVectorCacheRate
+          ? {
+              embedding_vector_cache_ready_rate: ratio(
+                embeddingVectorCacheReadyWeightedTotal,
+                evaluatedTotal
+              )
             }
           : {}),
         latency_ms_p50: latencyP50,

@@ -36,6 +36,7 @@ import {
 import {
   initDatabase,
   SqliteEventLogRepo,
+  SqliteMemoryEmbeddingRepo,
   SqliteRunRepo,
   SqliteWorkspaceRepo
 } from "@do-soul/alaya-storage";
@@ -97,6 +98,21 @@ export interface BenchReportContextUsageInput {
   readonly reason?: string;
 }
 
+export interface BenchEmbeddingWarmupOptions {
+  readonly maxPasses?: number;
+}
+
+export interface BenchEmbeddingWarmupSummary {
+  readonly status: "not_requested" | "ready";
+  readonly expected_count: number;
+  readonly ready_count: number;
+  readonly ready_rate: number;
+  readonly pass_count: number;
+  readonly missing_object_ids: readonly string[];
+  readonly provider_kind: string | null;
+  readonly model_id: string | null;
+}
+
 export interface BenchRecallOptions {
   readonly maxResults?: number;
   readonly conflictAwareness?: boolean;
@@ -113,6 +129,10 @@ export interface BenchDaemonHandle {
     query: string,
     opts?: BenchRecallOptions
   ): Promise<SoulMemorySearchResponse & { readonly diagnostics?: unknown }>;
+  warmEmbeddingCache(
+    objectIds: readonly string[],
+    opts?: BenchEmbeddingWarmupOptions
+  ): Promise<BenchEmbeddingWarmupSummary>;
   reportContextUsage(input: BenchReportContextUsageInput): Promise<void>;
   /**
    * @anchor proposeMemory — full propose+review chain
@@ -176,6 +196,10 @@ type ManagedEnvKey = (typeof MANAGED_ENV_KEYS)[number];
 
 const REVIEWER_IDENTITY = "user:bench-runner";
 const REVIEWER_TOKEN = "bench-review-token";
+const BENCH_EMBEDDING_PROVIDER_KIND = "openai";
+const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
+const BENCH_EMBEDDING_SCHEMA_VERSION = 1;
+const DEFAULT_EMBEDDING_WARMUP_PASSES = 6;
 let activeBenchDaemonCount = 0;
 
 export async function startBenchDaemon(
@@ -457,6 +481,68 @@ export async function startBenchDaemon(
     );
   }
 
+  async function warmEmbeddingCache(
+    objectIds: readonly string[],
+    options: BenchEmbeddingWarmupOptions = {}
+  ): Promise<BenchEmbeddingWarmupSummary> {
+    if (embeddingMode !== "env") {
+      return Object.freeze({
+        status: "not_requested",
+        expected_count: 0,
+        ready_count: 0,
+        ready_rate: 0,
+        pass_count: 0,
+        missing_object_ids: Object.freeze([]),
+        provider_kind: null,
+        model_id: null
+      });
+    }
+
+    const uniqueObjectIds = [...new Set(objectIds)];
+    const modelId =
+      process.env.OPENAI_EMBEDDING_MODEL?.trim() || DEFAULT_BENCH_EMBEDDING_MODEL;
+    const maxPasses = Math.max(
+      1,
+      options.maxPasses ?? DEFAULT_EMBEDDING_WARMUP_PASSES
+    );
+    let passCount = 0;
+    let summary = await readEmbeddingWarmupSummary({
+      dataDir,
+      workspaceId,
+      objectIds: uniqueObjectIds,
+      providerKind: BENCH_EMBEDDING_PROVIDER_KIND,
+      modelId,
+      schemaVersion: BENCH_EMBEDDING_SCHEMA_VERSION,
+      passCount
+    });
+
+    while (summary.ready_count < summary.expected_count && passCount < maxPasses) {
+      await activeRuntime.runGardenBackgroundPass();
+      passCount++;
+      summary = await readEmbeddingWarmupSummary({
+        dataDir,
+        workspaceId,
+        objectIds: uniqueObjectIds,
+        providerKind: BENCH_EMBEDDING_PROVIDER_KIND,
+        modelId,
+        schemaVersion: BENCH_EMBEDDING_SCHEMA_VERSION,
+        passCount
+      });
+    }
+
+    if (summary.ready_count !== summary.expected_count) {
+      const preview = summary.missing_object_ids.slice(0, 5).join(", ");
+      throw new Error(
+        `embedding warm cache not ready after ${summary.pass_count} pass(es): ` +
+          `ready=${summary.ready_count} expected=${summary.expected_count} ` +
+          `missing=${summary.missing_object_ids.length}` +
+          (preview.length === 0 ? "" : ` first_missing=${preview}`)
+      );
+    }
+
+    return summary;
+  }
+
   async function proposeMemory(
     content: string,
     evidenceRef: string,
@@ -600,14 +686,72 @@ export async function startBenchDaemon(
     dataDir,
     dispatchCli: activeDispatchCli,
     recall,
+    warmEmbeddingCache,
     reportContextUsage,
     proposeMemory,
     shutdown
   };
 }
 
+async function readEmbeddingWarmupSummary(input: {
+  readonly dataDir: string;
+  readonly workspaceId: string;
+  readonly objectIds: readonly string[];
+  readonly providerKind: string;
+  readonly modelId: string;
+  readonly schemaVersion: number;
+  readonly passCount: number;
+}): Promise<BenchEmbeddingWarmupSummary> {
+  const expectedIds = [...new Set(input.objectIds)];
+  if (expectedIds.length === 0) {
+    return Object.freeze({
+      status: "ready",
+      expected_count: 0,
+      ready_count: 0,
+      ready_rate: 0,
+      pass_count: input.passCount,
+      missing_object_ids: Object.freeze([]),
+      provider_kind: input.providerKind,
+      model_id: input.modelId
+    });
+  }
+
+  const db = initDatabase({ filename: join(input.dataDir, "alaya.db") });
+  const embeddingRepo = new SqliteMemoryEmbeddingRepo(db);
+  const records = await embeddingRepo.listByObjectIds(
+    input.workspaceId,
+    expectedIds
+  );
+  const readyIds = new Set(
+    records
+      .filter(
+        (record) =>
+          record.provider_kind === input.providerKind &&
+          record.model_id === input.modelId &&
+          record.schema_version === input.schemaVersion
+      )
+      .map((record) => record.object_id)
+  );
+  const missingObjectIds = expectedIds.filter((objectId) => !readyIds.has(objectId));
+
+  return Object.freeze({
+    status: "ready",
+    expected_count: expectedIds.length,
+    ready_count: readyIds.size,
+    ready_rate: ratio(readyIds.size, expectedIds.length),
+    pass_count: input.passCount,
+    missing_object_ids: Object.freeze(missingObjectIds),
+    provider_kind: input.providerKind,
+    model_id: input.modelId
+  });
+}
+
 function hasUsableEnvValue(value: string | undefined): boolean {
   return value !== undefined && value.trim().length > 0;
+}
+
+function ratio(count: number, total: number): number {
+  return total === 0 ? 0 : count / total;
 }
 
 function resolveBenchOpenAiSecretRef(

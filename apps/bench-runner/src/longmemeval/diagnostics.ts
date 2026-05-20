@@ -109,7 +109,16 @@ export interface ProviderStateSummary {
   readonly provider_returned_rate: number;
   readonly provider_pending_rate: number;
   readonly provider_failed_rate: number;
+  readonly provider_not_requested_rate: number;
   readonly unknown_rate: number;
+}
+
+export interface LongMemEvalEmbeddingVectorCacheSummary {
+  readonly expected_count: number;
+  readonly ready_count: number;
+  readonly not_ready_count: number;
+  readonly ready_rate: number;
+  readonly max_pass_count: number;
 }
 
 export interface LongMemEvalReportUsageSummary {
@@ -170,6 +179,7 @@ export interface LongMemEvalDiagnosticsSidecar {
   readonly report_usage?: LongMemEvalReportUsageSummary;
   readonly report_side_effects?: LongMemEvalReportSideEffectSummary;
   readonly scored_recall_evidence?: LongMemEvalRecallEvidenceSummary;
+  readonly embedding_vector_cache?: LongMemEvalEmbeddingVectorCacheSummary;
   readonly provider_state_summary: ProviderStateSummary;
   readonly questions: readonly LongMemEvalQuestionDiagnostic[];
 }
@@ -384,6 +394,7 @@ export function summarizeProviderStates(
     provider_returned_rate: ratio(providerReturned, total),
     provider_pending_rate: ratio(providerPending, total),
     provider_failed_rate: ratio(providerFailed, total),
+    provider_not_requested_rate: ratio(providerNotRequested, total),
     unknown_rate: ratio(unknown, total)
   };
 }

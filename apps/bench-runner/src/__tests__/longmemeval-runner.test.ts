@@ -950,6 +950,7 @@ describe("LongMemEval runner", () => {
         provider_state_summary: {
           provider_not_requested: number;
           provider_returned_rate: number;
+          provider_not_requested_rate: number;
         };
         report_side_effects: {
           recalls_edge_count: number;
@@ -985,6 +986,7 @@ describe("LongMemEval runner", () => {
       expect(diagnostics.report_usage.used_object_count).toBeGreaterThanOrEqual(0);
       expect(diagnostics.provider_state_summary.provider_not_requested).toBe(2);
       expect(diagnostics.provider_state_summary.provider_returned_rate).toBe(0);
+      expect(diagnostics.provider_state_summary.provider_not_requested_rate).toBe(1);
       expect(diagnostics.report_side_effects.recalls_edge_count).toBeGreaterThanOrEqual(0);
       expect(diagnostics.report_side_effects.memory_graph_edges_by_type).toHaveProperty("recalls");
       expect(diagnostics.report_side_effects.path_relations_total).toBeGreaterThanOrEqual(0);

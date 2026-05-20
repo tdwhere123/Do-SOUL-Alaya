@@ -169,7 +169,9 @@ describe("bench recall weight overrides", () => {
     expect(script).toContain("weights_args=(--weights \"$WEIGHTS\")");
     expect(script).toContain("\"${weights_args[@]}\"");
     expect(script).toContain("--data-dir \"$DATA_DIR\"");
-    expect(script).toContain("node apps/bench-runner/bin/embedding-provider-preflight.mjs");
+    expect(script).toContain("BENCH_NODE_USE_ENV_PROXY");
+    expect(script).toContain("\"${NODE_RUNNER[@]}\" apps/bench-runner/bin/embedding-provider-preflight.mjs");
+    expect(script).toContain("\"${NODE_RUNNER[@]}\" apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval");
     expect(script).toContain("! -path '*/__tests__/*'");
     expect(script).toContain("! -name '*.test.ts'");
     expect(script).toContain("exited 1 after writing KPI; allowing merge");
@@ -189,7 +191,9 @@ describe("bench recall weight overrides", () => {
     expect(script).toContain("dataset scratch meta missing: $SCRATCH_META");
     expect(script).toContain("dataset checksum mismatch: locomo10");
     expect(script).toContain("--data-dir \"$DATA_DIR\"");
-    expect(script).toContain("node apps/bench-runner/bin/embedding-provider-preflight.mjs");
+    expect(script).toContain("BENCH_NODE_USE_ENV_PROXY");
+    expect(script).toContain("\"${NODE_RUNNER[@]}\" apps/bench-runner/bin/embedding-provider-preflight.mjs");
+    expect(script).toContain("\"${NODE_RUNNER[@]}\" apps/bench-runner/bin/alaya-bench-runner.mjs locomo");
   });
 
   it("preflights with the production secret-ref resolver before provider fetch", async () => {

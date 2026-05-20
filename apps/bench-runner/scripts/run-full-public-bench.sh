@@ -18,6 +18,9 @@
 # (memory-guarded per shape; see @anchor sharding-default below), no limit (full 500).
 set -euo pipefail
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+cd "$REPO_ROOT"
+
 VARIANT="s"
 EMBEDDING=""
 EMBEDDING_SPECIFIED=0
@@ -38,6 +41,11 @@ DATA_DIR="${BENCH_DATA_DIR:-apps/bench-runner/data/longmemeval}"
 HISTORY_ROOT="${BENCH_PUBLIC_HISTORY_ROOT:-docs/bench-history}"
 LOG_DIR="${BENCH_LOG_DIR:-/tmp/alaya-bench-logs}"
 BENCH_RUNNER_CLI="apps/bench-runner/dist/cli.js"
+NODE_BIN="${BENCH_NODE_BIN:-node}"
+NODE_RUNNER=("$NODE_BIN")
+if [[ "${BENCH_NODE_USE_ENV_PROXY:-0}" == "1" ]]; then
+  NODE_RUNNER+=(--use-env-proxy)
+fi
 
 runtime_dist_for_src() {
   local src="$1"
@@ -183,7 +191,7 @@ if (( requires_env_embedding == 1 )); then
       ;;
   esac
 
-  node apps/bench-runner/bin/embedding-provider-preflight.mjs
+  "${NODE_RUNNER[@]}" apps/bench-runner/bin/embedding-provider-preflight.mjs
 fi
 
 case "$SIMULATE_REPORT" in
@@ -191,8 +199,6 @@ case "$SIMULATE_REPORT" in
   *) echo "unknown simulate-report mode: $SIMULATE_REPORT" >&2; exit 2;;
 esac
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-cd "$REPO_ROOT"
 BENCH_COMMIT_SHA7="${BENCH_COMMIT_SHA7:-$(git rev-parse --short HEAD 2>/dev/null || echo 0000000)}"
 export BENCH_COMMIT_SHA7
 
@@ -226,14 +232,14 @@ if [[ ! -r "$SCRATCH_META" ]]; then
   echo "warm it first with: $warmup_command" >&2
   exit 2
 fi
-PINNED_SHA=$(node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); if (!p.sha256) throw new Error('missing sha256'); process.stdout.write(p.sha256);" "$META")
-ACTUAL_SHA=$(node -e "const fs=require('fs');const crypto=require('crypto');process.stdout.write(crypto.createHash('sha256').update(fs.readFileSync(process.argv[1])).digest('hex'));" "$DATASET_JSON")
+PINNED_SHA=$("${NODE_RUNNER[@]}" -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); if (!p.sha256) throw new Error('missing sha256'); process.stdout.write(p.sha256);" "$META")
+ACTUAL_SHA=$("${NODE_RUNNER[@]}" -e "const fs=require('fs');const crypto=require('crypto');process.stdout.write(crypto.createHash('sha256').update(fs.readFileSync(process.argv[1])).digest('hex'));" "$DATASET_JSON")
 if [[ "$ACTUAL_SHA" != "$PINNED_SHA" ]]; then
   echo "dataset checksum mismatch: $DATASET_ID pinned=$PINNED_SHA actual=$ACTUAL_SHA" >&2
   echo "refresh the cache with: $refresh_command" >&2
   exit 2
 fi
-TOTAL=$(node -e "const d=JSON.parse(require('fs').readFileSync('$META','utf8'));console.log(d.question_count);")
+TOTAL=$("${NODE_RUNNER[@]}" -e "const d=JSON.parse(require('fs').readFileSync('$META','utf8'));console.log(d.question_count);")
 EFFECTIVE_TOTAL="${LIMIT:-$TOTAL}"
 
 run_one() {
@@ -297,7 +303,7 @@ run_one() {
     shard_roots+=("$shard_root")
     echo "[$(date -u -Iseconds)] launching shard $i offset=$offset limit=$slice root=$shard_root log=$shard_log" | tee -a "$master_log"
     (
-      node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval \
+      "${NODE_RUNNER[@]}" apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval \
         --variant "$VARIANT" \
         --offset "$offset" \
         --limit "$slice" \
@@ -340,7 +346,7 @@ run_one() {
   fi
 
   echo "[$(date -u -Iseconds)] merging shards..." | tee -a "$master_log"
-  node apps/bench-runner/bin/alaya-bench-runner.mjs merge-longmemeval \
+  "${NODE_RUNNER[@]}" apps/bench-runner/bin/alaya-bench-runner.mjs merge-longmemeval \
     --variant "$VARIANT" \
     --shards "${shard_roots[@]}" \
     --history-root "$HISTORY_ROOT" \

@@ -24,6 +24,7 @@ import {
 import {
   startBenchDaemon,
   type BenchDaemonHandle,
+  type BenchEmbeddingWarmupSummary,
   type BenchEmbeddingMode,
   type BenchRecallOptions,
   type BenchReportContextUsageInput,
@@ -42,6 +43,7 @@ import {
   summarizeLongMemEvalRecallEvidence,
   summarizeLongMemEvalReportSideEffects,
   summarizeProviderStates,
+  type LongMemEvalEmbeddingVectorCacheSummary,
   type LongMemEvalQuestionDiagnostic,
   type LongMemEvalReportSideEffectSnapshot
 } from "./diagnostics.js";
@@ -180,6 +182,7 @@ export async function runLongMemEval(
     answerTurnsTruncated: number;
     seedCharsClipped: number;
     diagnostics: LongMemEvalQuestionDiagnostic;
+    embeddingWarmup: BenchEmbeddingWarmupSummary | null;
     reportUsageStats: LongMemEvalReportSimulationStats;
     reportSideEffectSnapshot: LongMemEvalReportSideEffectSnapshot;
   };
@@ -231,9 +234,10 @@ export async function runLongMemEval(
         }
       }
 
-      if (opts.embeddingMode === "env") {
-        await daemon.runtime.runGardenBackgroundPass();
-      }
+      const embeddingWarmup =
+        opts.embeddingMode === "env"
+          ? await daemon.warmEmbeddingCache([...sidecar.keys()])
+          : null;
 
       const goldMemoryIds = [...sidecar.entries()]
         .filter(
@@ -298,6 +302,7 @@ export async function runLongMemEval(
         answerTurnsTruncated,
         seedCharsClipped,
         diagnostics,
+        embeddingWarmup,
         reportUsageStats: recallCycle.reportUsageStats,
         reportSideEffectSnapshot
       };
@@ -343,11 +348,15 @@ export async function runLongMemEval(
   let reportUsedObjectCount = 0;
   const questionDiagnostics: LongMemEvalQuestionDiagnostic[] = [];
   const reportSideEffectSnapshots: LongMemEvalReportSideEffectSnapshot[] = [];
+  const embeddingWarmups: BenchEmbeddingWarmupSummary[] = [];
 
   for (let i = 0; i < collected.length; i++) {
     const res = collected[i];
     if (res === null || res === undefined) continue;
     questionDiagnostics.push(res.diagnostics);
+    if (res.embeddingWarmup !== null) {
+      embeddingWarmups.push(res.embeddingWarmup);
+    }
     latencies.push(res.latencyMs);
     if (res.hitAt1) totalHitAt1++;
     if (res.hitAt10) totalHitAt10++;
@@ -383,6 +392,7 @@ export async function runLongMemEval(
   const latencyP95 = computePercentile(latencies, 95);
   const providerSummary = summarizeProviderStates(questionDiagnostics);
   const rAt5EmbeddingReturned = rAt5WithProviderReturned(questionDiagnostics);
+  const embeddingVectorCache = summarizeEmbeddingVectorCache(embeddingWarmups);
 
   const datasetSize = opts.fetchResult?.questionCount ?? questions.length;
   const pinnedMeta = readLongMemEvalPinnedMeta(
@@ -437,7 +447,15 @@ export async function runLongMemEval(
               : { r_at_5_with_embedding_returned: rAt5EmbeddingReturned }),
             provider_returned_rate: providerSummary.provider_returned_rate,
             provider_pending_rate: providerSummary.provider_pending_rate,
-            provider_failed_rate: providerSummary.provider_failed_rate
+            provider_failed_rate: providerSummary.provider_failed_rate,
+            provider_not_requested_rate:
+              providerSummary.provider_not_requested_rate,
+            ...(embeddingVectorCache === null
+              ? {}
+              : {
+                  embedding_vector_cache_ready_rate:
+                    embeddingVectorCache.ready_rate
+                })
           }
         : {}),
       latency_ms_p50: latencyP50,
@@ -509,6 +527,9 @@ export async function runLongMemEval(
     },
     report_side_effects: reportSideEffects,
     scored_recall_evidence: scoredRecallEvidence,
+    ...(embeddingVectorCache === null
+      ? {}
+      : { embedding_vector_cache: embeddingVectorCache }),
     provider_state_summary: providerSummary,
     questions: questionDiagnostics
   });
@@ -832,6 +853,40 @@ function computePercentile(values: number[], p: number): number {
   const sorted = [...values].sort((a, b) => a - b);
   const idx = Math.ceil((p / 100) * sorted.length) - 1;
   return sorted[Math.max(0, idx)] ?? 0;
+}
+
+function summarizeEmbeddingVectorCache(
+  summaries: readonly BenchEmbeddingWarmupSummary[]
+): LongMemEvalEmbeddingVectorCacheSummary | null {
+  const readySummaries = summaries.filter((summary) => summary.status === "ready");
+  if (readySummaries.length === 0) {
+    return null;
+  }
+
+  const expectedCount = readySummaries.reduce(
+    (sum, summary) => sum + summary.expected_count,
+    0
+  );
+  const readyCount = readySummaries.reduce(
+    (sum, summary) => sum + summary.ready_count,
+    0
+  );
+  const maxPassCount = readySummaries.reduce(
+    (max, summary) => Math.max(max, summary.pass_count),
+    0
+  );
+
+  return {
+    expected_count: expectedCount,
+    ready_count: readyCount,
+    not_ready_count: Math.max(0, expectedCount - readyCount),
+    ready_rate: ratio(readyCount, expectedCount),
+    max_pass_count: maxPassCount
+  };
+}
+
+function ratio(count: number, total: number): number {
+  return total === 0 ? 0 : count / total;
 }
 
 function truncateExcerpt(value: string): string {

@@ -19,6 +19,11 @@ OFFSET=""
 DATA_DIR="${BENCH_LOCOMO_DATA_DIR:-apps/bench-runner/data/locomo}"
 HISTORY_ROOT="${BENCH_LOCOMO_HISTORY_ROOT:-docs/bench-history}"
 LOG_DIR="${BENCH_LOG_DIR:-/tmp/alaya-bench-logs}"
+NODE_BIN="${BENCH_NODE_BIN:-node}"
+NODE_RUNNER=("$NODE_BIN")
+if [[ "${BENCH_NODE_USE_ENV_PROXY:-0}" == "1" ]]; then
+  NODE_RUNNER+=(--use-env-proxy)
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -72,7 +77,7 @@ if (( requires_env_embedding == 1 )); then
       ;;
   esac
 
-  node apps/bench-runner/bin/embedding-provider-preflight.mjs
+  "${NODE_RUNNER[@]}" apps/bench-runner/bin/embedding-provider-preflight.mjs
 fi
 
 mkdir -p "$LOG_DIR"
@@ -96,8 +101,8 @@ if [[ ! -r "$SCRATCH_META" ]]; then
   echo "warm it first with: $warmup_command" >&2
   exit 2
 fi
-PINNED_SHA=$(node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); if (!p.sha256) throw new Error('missing sha256'); process.stdout.write(p.sha256);" "$META")
-ACTUAL_SHA=$(node -e "const fs=require('fs');const crypto=require('crypto');process.stdout.write(crypto.createHash('sha256').update(fs.readFileSync(process.argv[1])).digest('hex'));" "$DATASET_JSON")
+PINNED_SHA=$("${NODE_RUNNER[@]}" -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); if (!p.sha256) throw new Error('missing sha256'); process.stdout.write(p.sha256);" "$META")
+ACTUAL_SHA=$("${NODE_RUNNER[@]}" -e "const fs=require('fs');const crypto=require('crypto');process.stdout.write(crypto.createHash('sha256').update(fs.readFileSync(process.argv[1])).digest('hex'));" "$DATASET_JSON")
 if [[ "$ACTUAL_SHA" != "$PINNED_SHA" ]]; then
   echo "dataset checksum mismatch: locomo10 pinned=$PINNED_SHA actual=$ACTUAL_SHA" >&2
   echo "refresh the cache with: $refresh_command" >&2
@@ -118,7 +123,7 @@ run_one() {
   fi
 
   echo "[$(date -u -Iseconds)] locomo full embedding=$embedding limit=${LIMIT:-full} offset=${OFFSET:-0} data_dir=$DATA_DIR" | tee "$log"
-  node apps/bench-runner/bin/alaya-bench-runner.mjs locomo \
+  "${NODE_RUNNER[@]}" apps/bench-runner/bin/alaya-bench-runner.mjs locomo \
     --embedding "$embedding" \
     "${optional_args[@]}" \
     --data-dir "$DATA_DIR" \
