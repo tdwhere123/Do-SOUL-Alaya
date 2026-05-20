@@ -281,6 +281,17 @@ export class RecallService {
       ...coarseFilter.candidates,
       ...filteredGlobalCandidates
     ]) as readonly Readonly<CoarseRecallCandidate>[];
+    const preparedEmbeddingQueryPromise = this.prepareEmbeddingSupplementQuery({
+      config: policy,
+      workspaceId: params.workspaceId,
+      runId: params.runId ?? null,
+      queryText,
+      localEligibleCandidates: coarseFilter.candidates,
+      lexicalFallbackCount: Math.min(
+        combinedCoarseCandidates.length,
+        policy.fine_assessment.budgets.max_entries
+      )
+    });
 
     const initialAssessment = await this.assessCoarseFilter({
       coarseFilter: Object.freeze({
@@ -296,14 +307,7 @@ export class RecallService {
       tokenEstimator
     });
     const lexicalCandidates = initialAssessment.candidates;
-    const preparedEmbeddingQuery = await this.prepareEmbeddingSupplementQuery({
-      config: policy,
-      workspaceId: params.workspaceId,
-      runId: params.runId ?? null,
-      queryText,
-      localEligibleCandidates: coarseFilter.candidates,
-      lexicalFallbackCount: lexicalCandidates.length
-    });
+    const preparedEmbeddingQuery = await preparedEmbeddingQueryPromise;
     const embeddingSupplement = await this.collectEmbeddingSupplement({
       baseCandidateIds: lexicalCandidates.map((candidate) => candidate.object_id),
       localEligibleCandidates: coarseFilter.candidates,
