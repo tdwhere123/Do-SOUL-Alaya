@@ -41,49 +41,56 @@ export function normalizeKeywordSearchObjectIds(objectIds: readonly string[]): r
 export function mergeKeywordSearchRows(
   exactRows: readonly ExactKeywordSearchRow[],
   trigramRows: readonly FtsKeywordSearchRow[],
-  limit: number
+  limit: number,
+  porterRows: readonly FtsKeywordSearchRow[] = []
 ): readonly Readonly<MemoryEntryKeywordSearchResult>[] {
   const exactScores = buildGroupedOrdinalScores(exactRows, (row) => row.matched_token_count);
   const trigramScores = buildGroupedOrdinalScores(trigramRows, (row) => row.raw_rank);
+  const porterScores = buildGroupedOrdinalScores(porterRows, (row) => row.raw_rank);
   const byObjectId = new Map<
     string,
     Readonly<MemoryEntryKeywordSearchResult & { sourcePriority: number; sourceOrder: number }>
   >();
 
-  exactRows.forEach((row, index) => {
-    const normalizedRank = exactScores[index] ?? 0;
-    byObjectId.set(
-      row.object_id,
-      Object.freeze({
-        object_id: row.object_id,
-        normalized_rank: normalizedRank,
-        sourcePriority: 0,
-        sourceOrder: index
-      })
-    );
-  });
-
-  trigramRows.forEach((row, index) => {
-    const normalizedRank = trigramScores[index] ?? 0;
-    const existing = byObjectId.get(row.object_id);
+  // A lower sourcePriority wins ties: exact short-token matches (0) outrank
+  // word-level porter BM25 (1), which outranks trigram substring matches (2).
+  const considerRow = (
+    objectId: string,
+    normalizedRank: number,
+    sourcePriority: number,
+    sourceOrder: number
+  ): void => {
+    const existing = byObjectId.get(objectId);
 
     if (
       existing !== undefined &&
       (existing.normalized_rank > normalizedRank ||
-        (existing.normalized_rank === normalizedRank && existing.sourcePriority <= 1))
+        (existing.normalized_rank === normalizedRank && existing.sourcePriority <= sourcePriority))
     ) {
       return;
     }
 
     byObjectId.set(
-      row.object_id,
+      objectId,
       Object.freeze({
-        object_id: row.object_id,
+        object_id: objectId,
         normalized_rank: normalizedRank,
-        sourcePriority: 1,
-        sourceOrder: index
+        sourcePriority,
+        sourceOrder
       })
     );
+  };
+
+  exactRows.forEach((row, index) => {
+    considerRow(row.object_id, exactScores[index] ?? 0, 0, index);
+  });
+
+  porterRows.forEach((row, index) => {
+    considerRow(row.object_id, porterScores[index] ?? 0, 1, index);
+  });
+
+  trigramRows.forEach((row, index) => {
+    considerRow(row.object_id, trigramScores[index] ?? 0, 2, index);
   });
 
   return Object.freeze(
@@ -169,6 +176,19 @@ export function tokenizeFtsQuery(queryText: string): readonly string[] {
 
 export function countQueryCodepoints(value: string): number {
   return Array.from(value).length;
+}
+
+// Script routing for the dual-index FTS. The porter+unicode61 table only
+// tokenizes space-delimited / Latin-script words; CJK runs collapse to a
+// single token there. The trigram table is script-agnostic. A token that
+// bears any CJK codepoint must be routed to the trigram table; a word-like
+// Latin/Cyrillic/etc. token is additionally routed to the porter table for
+// word-level stemmed BM25 while still consulting trigram for substrings.
+const CJK_TOKEN_PATTERN =
+  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+
+export function tokenBearsCjk(token: string): boolean {
+  return CJK_TOKEN_PATTERN.test(token);
 }
 
 export function createShortKeywordMatcher(token: string): (content: string) => boolean {
