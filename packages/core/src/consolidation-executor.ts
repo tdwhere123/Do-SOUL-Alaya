@@ -32,8 +32,10 @@ export interface ConsolidationPathRelationPort {
 
 /**
  * Read/write port for the `consolidation_trigger_budgets` table
- * (migration 035). `attempts_used` is incremented per cycle attempt;
- * `cooldown_until` gates re-entry per trigger source.
+ * (migration 035). `attempts_used` is a rolling per-window counter — it
+ * climbs per charged cycle and restarts at 1 once the window (bounded by
+ * `cooldown_until`) has elapsed. `cooldown_until` gates re-entry per trigger
+ * source and also marks the window boundary.
  *
  * see also: packages/storage/src/migrations/035-consolidation-trigger-budgets.sql
  */
@@ -76,9 +78,14 @@ interface PreparedMutation {
  *
  * Budget: every committed cycle is charged against the
  * `consolidation_trigger_budgets` row for its trigger source. When the row's
- * cooldown is still active, or `max_attempts_within_window` is exhausted, the
- * executor refuses the cycle, sets `fuse_state.blown`, persists the cooldown,
- * and emits `PATH_CONSOLIDATION_FUSED`.
+ * cooldown is still active, or `max_attempts_within_window` is exhausted
+ * within an unexpired window, the executor refuses the cycle, sets
+ * `fuse_state.blown`, persists the cooldown, and emits
+ * `PATH_CONSOLIDATION_FUSED`. The attempt counter is a rolling window — it
+ * restarts at 1 once `cooldown_until` lapses — so a fused trigger source
+ * recovers rather than wedging permanently. The charge is committed only
+ * after the event-log + path-mutation transaction, so a failed cycle never
+ * burns budget without a matching completed event.
  *
  * This operates strictly on PathRelation lifecycle. It does NOT touch
  * synthesis-capsule promotion (migration 072 retired that separate ladder).
@@ -97,10 +104,11 @@ export class ConsolidationExecutor {
 
     const budget = await this.dependencies.budgetStore.findByTriggerSource(triggerSource);
 
+    const cooldownUntilMs = budget === null ? null : Date.parse(budget.cooldown_until);
     const cooldownActive =
-      budget !== null &&
-      Number.isFinite(Date.parse(budget.cooldown_until)) &&
-      Date.parse(budget.cooldown_until) > occurredAtMs;
+      cooldownUntilMs !== null &&
+      Number.isFinite(cooldownUntilMs) &&
+      cooldownUntilMs > occurredAtMs;
     if (cooldownActive) {
       return this.refuse({
         plan,
@@ -111,9 +119,20 @@ export class ConsolidationExecutor {
       });
     }
 
+    // `cooldown_until` doubles as the rolling-window boundary: once it has
+    // lapsed the prior window has elapsed and `attempts_used` no longer gates
+    // a new cycle. The exhaustion check below is skipped when the window has
+    // elapsed, and `chargeAttempt` restarts the count at 1. Without this the
+    // maxed counter behind an expired cooldown would re-trip the fuse forever.
+    const windowElapsed =
+      budget === null ||
+      cooldownUntilMs === null ||
+      !Number.isFinite(cooldownUntilMs) ||
+      cooldownUntilMs <= occurredAtMs;
+
     const attemptsUsed = budget?.attempts_used ?? 0;
     const maxAttempts = budget?.max_attempts_within_window ?? CONSOLIDATION_FUSE_MAX_RETRIES;
-    if (attemptsUsed >= maxAttempts) {
+    if (!windowElapsed && attemptsUsed >= maxAttempts) {
       return this.refuse({
         plan,
         budget,
@@ -137,8 +156,7 @@ export class ConsolidationExecutor {
 
     const mutations = await this.prepareMutations(plan, occurredAt);
 
-    const consumedBudget = this.chargeAttempt(budget, triggerSource, occurredAt);
-    await this.dependencies.budgetStore.upsert(consumedBudget);
+    const consumedBudget = this.chargeAttempt(budget, triggerSource, occurredAtMs, windowElapsed);
 
     const completedEvent: EventPublisherInput = {
       event_type: RuntimeGovernanceEventType.PATH_CONSOLIDATION_COMPLETED,
@@ -169,6 +187,12 @@ export class ConsolidationExecutor {
         }
       }
     );
+
+    // The attempt is charged only after the event-log + path-mutation
+    // transaction commits. If `prepareMutations` or the transaction throws,
+    // this line is unreachable, so a failed cycle never burns budget without
+    // a matching PATH_CONSOLIDATION_COMPLETED audit event.
+    await this.dependencies.budgetStore.upsert(consumedBudget);
 
     return Object.freeze({
       workspace_id: plan.workspace_id,
@@ -253,7 +277,8 @@ export class ConsolidationExecutor {
   private chargeAttempt(
     budget: ConsolidationTriggerBudget | null,
     triggerSource: ConsolidationTriggerSource,
-    occurredAt: string
+    occurredAtMs: number,
+    windowElapsed: boolean
   ): ConsolidationTriggerBudget {
     if (budget === null) {
       return Object.freeze({
@@ -261,12 +286,18 @@ export class ConsolidationExecutor {
         trigger_source: triggerSource,
         max_attempts_within_window: CONSOLIDATION_FUSE_MAX_RETRIES,
         attempts_used: 1,
-        cooldown_until: occurredAt
+        cooldown_until: new Date(occurredAtMs).toISOString()
       });
     }
+    // `max_attempts_within_window` is a rolling cap, not a lifetime cap.
+    // When the prior window has elapsed (`windowElapsed`, decided by
+    // `runCycle` from `cooldown_until`) the count restarts at 1 instead of
+    // incrementing, so a fused trigger source recovers once its window
+    // passes. Without this reset the counter only ever climbs and the
+    // trigger source wedges permanently after the first window fills.
     return Object.freeze({
       ...budget,
-      attempts_used: budget.attempts_used + 1
+      attempts_used: windowElapsed ? 1 : budget.attempts_used + 1
     });
   }
 

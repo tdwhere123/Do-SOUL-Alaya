@@ -222,18 +222,22 @@ describe("ConsolidationExecutor", () => {
       plan: emptyPlan()
     });
 
+    // The prior window (cooldown_until in the past) has elapsed, so the
+    // committed cycle restarts the rolling counter at 1 rather than climbing.
     expect(harness.budgetUpserts).toHaveLength(1);
-    expect(harness.budgetUpserts[0]?.attempts_used).toBe(2);
+    expect(harness.budgetUpserts[0]?.attempts_used).toBe(1);
   });
 
-  it("blows the fuse and refuses the cycle when the budget is exhausted", async () => {
+  it("refuses with cooldown_active and persists cooldown when the budget is cooling", async () => {
+    // A maxed budget whose cooldown window is still open: the cooldown gate
+    // refuses re-entry. This is the in-window backpressure path.
     const harness = buildHarness({
       budget: {
         trigger_id: "consolidation-native_surface_drift",
         trigger_source: "native_surface_drift",
         max_attempts_within_window: 3,
         attempts_used: 3,
-        cooldown_until: "1970-01-01T00:00:00.000Z"
+        cooldown_until: "2999-01-01T00:00:00.000Z"
       }
     });
 
@@ -246,7 +250,7 @@ describe("ConsolidationExecutor", () => {
       })
     });
 
-    expect(result.fuse_outcome).toBe("tripped");
+    expect(result.fuse_outcome).toBe("cooldown_active");
     expect(result.promotions_committed).toBe(0);
     expect(harness.repoUpdates).toHaveLength(0);
     const fused = harness.publishedEvents.find(
@@ -258,6 +262,35 @@ describe("ConsolidationExecutor", () => {
     expect(Date.parse(harness.budgetUpserts[0]!.cooldown_until)).toBeGreaterThan(
       Date.parse(NOW_ISO)
     );
+  });
+
+  it("recovers a maxed budget once its cooldown window has elapsed", async () => {
+    // The B2 regression guard: a budget at the cap whose cooldown lapsed must
+    // NOT stay fused. The window has elapsed, so the cycle commits and the
+    // counter restarts — the trigger source is not wedged permanently.
+    const harness = buildHarness({
+      budget: {
+        trigger_id: "consolidation-native_surface_drift",
+        trigger_source: "native_surface_drift",
+        max_attempts_within_window: 3,
+        attempts_used: 3,
+        cooldown_until: "1970-01-01T00:00:00.000Z"
+      }
+    });
+
+    const result = await harness.executor.runCycle({
+      triggerSource: "native_surface_drift",
+      plan: emptyPlan()
+    });
+
+    expect(result.fuse_outcome).toBe("ok");
+    expect(harness.budgetUpserts).toHaveLength(1);
+    expect(harness.budgetUpserts[0]?.attempts_used).toBe(1);
+    expect(
+      harness.publishedEvents.some(
+        (event) => event.event_type === RuntimeGovernanceEventType.PATH_CONSOLIDATION_FUSED
+      )
+    ).toBe(false);
   });
 
   it("refuses the cycle while the budget cooldown is still active", async () => {
@@ -278,6 +311,92 @@ describe("ConsolidationExecutor", () => {
 
     expect(result.fuse_outcome).toBe("cooldown_active");
     expect(harness.repoUpdates).toHaveLength(0);
+  });
+
+  it("does not charge within an unexpired window — the cooldown gate refuses first", async () => {
+    // Cooldown is in the future: the window has NOT elapsed. The cooldown
+    // gate refuses the cycle before any charge, so the counter is not reset
+    // and not incremented by a committed cycle.
+    const harness = buildHarness({
+      budget: {
+        trigger_id: "consolidation-native_surface_drift",
+        trigger_source: "native_surface_drift",
+        max_attempts_within_window: 3,
+        attempts_used: 1,
+        cooldown_until: "2999-01-01T00:00:00.000Z"
+      }
+    });
+
+    const result = await harness.executor.runCycle({
+      triggerSource: "native_surface_drift",
+      plan: emptyPlan()
+    });
+
+    expect(result.fuse_outcome).toBe("cooldown_active");
+    // The only upsert is the cooldown refresh from refuse(); attempts_used is
+    // carried unchanged (not reset to 1, not incremented).
+    expect(harness.budgetUpserts).toHaveLength(1);
+    expect(harness.budgetUpserts[0]?.attempts_used).toBe(1);
+  });
+
+  it("charges the budget only after the cycle commits", async () => {
+    const harness = buildHarness({
+      budget: {
+        trigger_id: "consolidation-native_surface_drift",
+        trigger_source: "native_surface_drift",
+        max_attempts_within_window: 3,
+        attempts_used: 1,
+        cooldown_until: "1970-01-01T00:00:00.000Z"
+      }
+    });
+
+    await harness.executor.runCycle({
+      triggerSource: "native_surface_drift",
+      plan: emptyPlan()
+    });
+
+    // A single charge, and it carries the post-window-reset value (1).
+    expect(harness.budgetUpserts).toHaveLength(1);
+    expect(harness.budgetUpserts[0]?.attempts_used).toBe(1);
+    // The completed event was published before the budget charge committed.
+    expect(
+      harness.publishedEvents.some(
+        (event) => event.event_type === RuntimeGovernanceEventType.PATH_CONSOLIDATION_COMPLETED
+      )
+    ).toBe(true);
+  });
+
+  it("does not burn budget when the cycle's path mutation fails", async () => {
+    // A plan that references a missing path makes prepareMutations throw
+    // before the transaction; the budget must not be charged.
+    const harness = buildHarness({
+      budget: {
+        trigger_id: "consolidation-native_surface_drift",
+        trigger_source: "native_surface_drift",
+        max_attempts_within_window: 3,
+        attempts_used: 1,
+        cooldown_until: "1970-01-01T00:00:00.000Z"
+      }
+    });
+
+    await expect(
+      harness.executor.runCycle({
+        triggerSource: "native_surface_drift",
+        plan: emptyPlan({
+          promotions: [
+            { path_id: "missing-path", from_stability: "normal", to_stability: "stable" }
+          ]
+        })
+      })
+    ).rejects.toThrow(/missing path relation/);
+
+    // No attempt was charged — a failed cycle leaves the budget untouched.
+    expect(harness.budgetUpserts).toHaveLength(0);
+    expect(
+      harness.publishedEvents.some(
+        (event) => event.event_type === RuntimeGovernanceEventType.PATH_CONSOLIDATION_COMPLETED
+      )
+    ).toBe(false);
   });
 
   it("honors a plan that arrives with the fuse already blown", async () => {
