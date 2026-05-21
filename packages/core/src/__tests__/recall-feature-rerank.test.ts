@@ -3,6 +3,7 @@ import { compileRecallQueryProbes } from "../recall-query-probes.js";
 import {
   RECALL_RERANK_EVIDENCE_ONLY_FACTOR,
   RECALL_RERANK_TOP_N,
+  buildRerankPoolIdf,
   computeRerankFeatures,
   rerankTopN,
   type RerankCandidate
@@ -322,5 +323,195 @@ describe("recall feature rerank — rerankTopN", () => {
     const result = rerankTopN(query, candidates);
 
     expect(ids(result)).toEqual(["content-hit", "evidence-only"]);
+  });
+});
+
+describe("recall feature rerank — pool-local IDF", () => {
+  it("counts each candidate once per distinct term", () => {
+    const pool = buildRerankPoolIdf([
+      "rust rust rust language",
+      "python language",
+      "golang language"
+    ]);
+
+    expect(pool.poolSize).toBe(3);
+    // "language" in all 3; "rust" in 1 even though it repeats in that doc.
+    expect(pool.documentFrequency.get("language")).toBe(3);
+    expect(pool.documentFrequency.get("rust")).toBe(1);
+  });
+
+  it("yields no rare-term signal for an empty pool", () => {
+    const query = compileRecallQueryProbes("database connection timeout");
+    const emptyPool = buildRerankPoolIdf([]);
+    const features = computeRerankFeatures(
+      query,
+      { content: "database connection timeout reported", hasEvidenceLexicalHit: false },
+      emptyPool
+    );
+
+    expect(emptyPool.poolSize).toBe(0);
+    expect(features.rareTermCoverage).toBe(0);
+    // term_coverage still fires, so the score is non-zero and bounded.
+    expect(features.score).toBeGreaterThan(0);
+    expect(features.score).toBeLessThanOrEqual(1);
+  });
+
+  it("yields no rare-term signal when no pool IDF is supplied", () => {
+    const query = compileRecallQueryProbes("database connection timeout");
+    const features = computeRerankFeatures(query, {
+      content: "database connection timeout reported",
+      hasEvidenceLexicalHit: false
+    });
+
+    expect(features.rareTermCoverage).toBe(0);
+  });
+
+  it("is safe for a single-candidate pool", () => {
+    const query = compileRecallQueryProbes("database connection timeout");
+    const pool = buildRerankPoolIdf(["database connection timeout reported"]);
+    const features = computeRerankFeatures(
+      query,
+      { content: "database connection timeout reported", hasEvidenceLexicalHit: false },
+      pool
+    );
+
+    // poolSize 1, every matched term has df 1 → idf = log(2/2) = 0 → no
+    // rarity signal, but well-defined (not NaN / Infinity).
+    expect(pool.poolSize).toBe(1);
+    expect(features.rareTermCoverage).toBe(0);
+    expect(Number.isFinite(features.score)).toBe(true);
+  });
+
+  it("scores a rare-term match above a common-term match at equal coverage", () => {
+    const query = compileRecallQueryProbes("database connection retrypolicy");
+    // "database" and "connection" saturate the pool; "retrypolicy" is rare.
+    const pool = buildRerankPoolIdf([
+      "database connection note one",
+      "database connection note two",
+      "database connection note three",
+      "database connection retrypolicy answer"
+    ]);
+    const rareHit = computeRerankFeatures(
+      query,
+      { content: "database connection retrypolicy answer", hasEvidenceLexicalHit: false },
+      pool
+    );
+    const commonHit = computeRerankFeatures(
+      query,
+      { content: "database connection note one", hasEvidenceLexicalHit: false },
+      pool
+    );
+
+    // Plain term_coverage cannot tell them apart…
+    expect(rareHit.termCoverage).toBeGreaterThan(commonHit.termCoverage);
+    // …but rare_term_coverage rewards the discriminative term.
+    expect(rareHit.rareTermCoverage).toBeGreaterThan(commonHit.rareTermCoverage);
+  });
+
+  it("keeps the lexical score within [0, 1] with the rare-term feature active", () => {
+    const query = compileRecallQueryProbes("alpha beta gamma");
+    const pool = buildRerankPoolIdf([
+      "alpha beta gamma",
+      "alpha beta gamma",
+      "alpha beta gamma"
+    ]);
+    const features = computeRerankFeatures(
+      query,
+      { content: "alpha beta gamma alpha beta gamma", hasEvidenceLexicalHit: false },
+      pool
+    );
+
+    expect(features.score).toBeGreaterThan(0);
+    expect(features.score).toBeLessThanOrEqual(1);
+  });
+
+  it("counts document frequency independent of candidate order", () => {
+    const contents = [
+      "alpha shared term",
+      "beta shared term",
+      "gamma shared rareone"
+    ];
+    const forward = buildRerankPoolIdf(contents);
+    const reversed = buildRerankPoolIdf([...contents].reverse());
+
+    expect(reversed.poolSize).toBe(forward.poolSize);
+    expect([...reversed.documentFrequency.keys()].sort()).toEqual(
+      [...forward.documentFrequency.keys()].sort()
+    );
+    for (const term of forward.documentFrequency.keys()) {
+      expect(reversed.documentFrequency.get(term)).toBe(
+        forward.documentFrequency.get(term)
+      );
+    }
+  });
+
+  it("dampens the score when a rare query term matches no pool candidate", () => {
+    // "alpha" saturates the pool; "rarematch" is rare and present in the
+    // candidate; "zetaunmatched" appears in no pool candidate at all.
+    const pool = buildRerankPoolIdf([
+      "alpha note one",
+      "alpha note two",
+      "alpha note three",
+      "alpha rarematch answer"
+    ]);
+    const text = { content: "alpha rarematch answer", hasEvidenceLexicalHit: false };
+
+    const matched = computeRerankFeatures(
+      compileRecallQueryProbes("alpha rarematch"),
+      text,
+      pool
+    );
+    const withUnmatchedRareTerm = computeRerankFeatures(
+      compileRecallQueryProbes("alpha rarematch zetaunmatched"),
+      text,
+      pool
+    );
+
+    // The unmatched rare term inflates totalIdf (the denominator) without
+    // adding to matchedIdf, so it legitimately dampens the score.
+    expect(withUnmatchedRareTerm.rareTermCoverage).toBeGreaterThan(0);
+    expect(withUnmatchedRareTerm.rareTermCoverage).toBeLessThan(
+      matched.rareTermCoverage
+    );
+  });
+});
+
+describe("recall feature rerank — IDF tie-break in rerankTopN", () => {
+  it("promotes the rare-term gold above saturated topical distractors", () => {
+    // The saturation case: every candidate is on-topic and shares the
+    // common topic terms; only the gold carries the rare answer term. All
+    // fusion scores are flat so the rerank decides alone.
+    const query = compileRecallQueryProbes("deployment rollback retryconcurrency");
+    const candidates = [
+      candidate("distractor-1", "deployment rollback steps overview"),
+      candidate("distractor-2", "deployment rollback timing discussion"),
+      candidate("distractor-3", "deployment rollback ownership notes"),
+      candidate(
+        "gold",
+        "deployment rollback retryconcurrency was set to four in the runbook"
+      )
+    ];
+
+    const result = rerankTopN(query, candidates);
+
+    expect(result[0]?.id).toBe("gold");
+  });
+
+  it("reorders golds that sit in the rank 21-50 band the old window missed", () => {
+    const query = compileRecallQueryProbes("exact target phrase");
+    const head: RerankCandidate<FakeCandidate>[] = [];
+    for (let i = 0; i < 30; i += 1) {
+      head.push(candidate(`filler-${i}`, `irrelevant filler content number ${i}`));
+    }
+    // The strong lexical match sits at rank 31 — beyond the old top-N of
+    // 20, inside the widened top-N of 50.
+    const gold = candidate("gold-rank-31", "this carries the exact target phrase verbatim");
+    const candidates = [...head, gold];
+
+    const result = rerankTopN(query, candidates);
+
+    expect(RECALL_RERANK_TOP_N).toBe(50);
+    // The gold is pulled into the reordered head, not stranded at rank 31.
+    expect(result[0]?.id).toBe("gold-rank-31");
   });
 });

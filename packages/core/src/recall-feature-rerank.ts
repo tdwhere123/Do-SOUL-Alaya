@@ -16,9 +16,10 @@ import { splitLexicalTokens, type RecallQueryProbes } from "./recall-query-probe
 
 /**
  * Number of head candidates the rerank reorders. Candidates below this
- * cut keep their incoming fusion order untouched.
+ * cut keep their incoming fusion order untouched. The cut also bounds the
+ * pool over which pool-local IDF (`rare_term_coverage`) is computed.
  */
-export const RECALL_RERANK_TOP_N = 20;
+export const RECALL_RERANK_TOP_N = 50;
 
 /**
  * Blend weights for the final rerank score:
@@ -43,6 +44,14 @@ export const RECALL_RERANK_WEIGHTS = Object.freeze({
   exact_phrase: 1.0,
   /** Fraction of distinct query content-terms present in the candidate. */
   term_coverage: 0.8,
+  /**
+   * Matched query terms weighted by their rarity across the rerank
+   * candidate pool. A term present in few candidates is discriminative
+   * (it marks the answer-bearing memory); a term present in most is
+   * generic topic noise. This separates the gold from saturated topical
+   * neighbours where plain `term_coverage` cannot.
+   */
+  rare_term_coverage: 0.9,
   /** Matched query terms appear close together (small window). */
   proximity: 0.4
 });
@@ -76,10 +85,26 @@ export interface RerankCandidateText {
 export interface RerankFeatureBreakdown {
   readonly exactPhrase: number;
   readonly termCoverage: number;
+  /** IDF-weighted term coverage in [0, 1]; 0 when no pool IDF is supplied. */
+  readonly rareTermCoverage: number;
   readonly proximity: number;
   readonly fieldFactor: number;
   /** Lexical feature score in [0, 1] (pre-blend). */
   readonly score: number;
+}
+
+/**
+ * Pool-local inverse-document-frequency over the rerank candidate set.
+ * `idf(term)` is high for a term present in few candidates (discriminative)
+ * and low for a term present in most (generic topic noise). Built once per
+ * rerank pass from the top-N candidates' content the rerank already holds —
+ * no retrieval, no corpus scan, deterministic.
+ */
+export interface RerankPoolIdf {
+  /** Number of candidates the document-frequency was counted over. */
+  readonly poolSize: number;
+  /** Document frequency: distinct candidates whose content contains the term. */
+  readonly documentFrequency: ReadonlyMap<string, number>;
 }
 
 export interface RerankCandidate<T> {
@@ -92,6 +117,7 @@ export interface RerankCandidate<T> {
 const WEIGHT_TOTAL =
   RECALL_RERANK_WEIGHTS.exact_phrase +
   RECALL_RERANK_WEIGHTS.term_coverage +
+  RECALL_RERANK_WEIGHTS.rare_term_coverage +
   RECALL_RERANK_WEIGHTS.proximity;
 
 /**
@@ -103,6 +129,41 @@ const WEIGHT_TOTAL =
  */
 function tokenize(value: string): readonly string[] {
   return splitLexicalTokens(value);
+}
+
+/**
+ * Build pool-local document-frequency counts over a set of candidate
+ * contents — one tokenize per candidate, distinct terms per candidate
+ * counted once. Deterministic and order-independent. Exported for unit
+ * testing the IDF stage in isolation.
+ */
+export function buildRerankPoolIdf(contents: readonly string[]): RerankPoolIdf {
+  const documentFrequency = new Map<string, number>();
+  for (const content of contents) {
+    const distinct = new Set(tokenize(content ?? ""));
+    for (const term of distinct) {
+      documentFrequency.set(term, (documentFrequency.get(term) ?? 0) + 1);
+    }
+  }
+  return Object.freeze({
+    poolSize: contents.length,
+    documentFrequency
+  });
+}
+
+/**
+ * Standard smoothed inverse document frequency over the rerank pool:
+ *   idf(term) = log((N + 1) / (df(term) + 1))
+ * The `+1` smoothing keeps the value finite and non-negative for every
+ * term, including a term absent from the pool. A pool of size 0 has no
+ * frequency signal and yields 0.
+ */
+function poolTermIdf(pool: RerankPoolIdf, term: string): number {
+  if (pool.poolSize <= 0) {
+    return 0;
+  }
+  const df = pool.documentFrequency.get(term) ?? 0;
+  return Math.log((pool.poolSize + 1) / (df + 1));
 }
 
 /**
@@ -151,6 +212,51 @@ function scoreTermCoverage(
     }
   }
   return hits / queryTerms.length;
+}
+
+/**
+ * Rare-term-coverage feature: like term-coverage, but each matched query
+ * term contributes its pool-local IDF weight instead of a flat 1. The
+ * result is the matched IDF mass over the total query IDF mass, so it
+ * stays in [0, 1]. A candidate that matches the rare, answer-bearing
+ * terms scores high; one that matches only common topic terms scores low,
+ * even when its plain term-coverage is identical.
+ *
+ * Yields 0 when the query is too thin (mirrors term-coverage), when no
+ * pool IDF is supplied, or when the total query IDF mass is 0 (every
+ * matched-or-unmatched term is maximally common — no rarity signal).
+ *
+ * Two consequences worth stating: (1) on a fully topic-saturated pool —
+ * every query term in every candidate — this feature contributes 0 even
+ * to a full-coverage candidate, and `term_coverage` carries that case
+ * alone; the discriminating gain therefore comes from *partially*
+ * saturated pools, which is the LongMemEval distractor-cluster shape this
+ * targets. (2) A query term absent from the whole pool earns the maximum
+ * IDF and so inflates `totalIdf` (the denominator) without ever adding to
+ * `matchedIdf` — it legitimately dampens every candidate's score, since
+ * "no candidate matches a rare query term" means none is a strong hit.
+ */
+function scoreRareTermCoverage(
+  queryTerms: readonly string[],
+  haystackTerms: ReadonlySet<string>,
+  pool: RerankPoolIdf | null
+): number {
+  if (queryTerms.length < RECALL_RERANK_MIN_QUERY_TERMS || pool === null) {
+    return 0;
+  }
+  let matchedIdf = 0;
+  let totalIdf = 0;
+  for (const term of queryTerms) {
+    const idf = poolTermIdf(pool, term);
+    totalIdf += idf;
+    if (haystackTerms.has(term)) {
+      matchedIdf += idf;
+    }
+  }
+  if (totalIdf <= 0) {
+    return 0;
+  }
+  return matchedIdf / totalIdf;
 }
 
 /**
@@ -220,10 +326,16 @@ function scoreProximity(
  * Compute the deterministic lexical rerank feature breakdown for one
  * candidate. The `score` is in [0, 1]. Exported for unit testing the
  * scorer in isolation.
+ *
+ * `poolIdf` carries pool-local term rarity over the rerank candidate set;
+ * when omitted (or `null`) the `rare_term_coverage` feature contributes 0,
+ * so the scorer stays well-defined for an empty pool or a single-candidate
+ * call.
  */
 export function computeRerankFeatures(
   query: Readonly<RecallQueryProbes>,
-  text: RerankCandidateText
+  text: RerankCandidateText,
+  poolIdf: RerankPoolIdf | null = null
 ): RerankFeatureBreakdown {
   const queryTerms = query.lexical_terms;
   const content = text.content ?? "";
@@ -237,6 +349,7 @@ export function computeRerankFeatures(
     content
   );
   const termCoverage = scoreTermCoverage(queryTerms, haystackTermSet);
+  const rareTermCoverage = scoreRareTermCoverage(queryTerms, haystackTermSet, poolIdf);
   const proximity = scoreProximity(queryTerms, haystackTokens);
 
   // Field-aware weighting: full credit when the query matched the distilled
@@ -252,11 +365,13 @@ export function computeRerankFeatures(
   const weighted =
     RECALL_RERANK_WEIGHTS.exact_phrase * exactPhrase +
     RECALL_RERANK_WEIGHTS.term_coverage * termCoverage +
+    RECALL_RERANK_WEIGHTS.rare_term_coverage * rareTermCoverage +
     RECALL_RERANK_WEIGHTS.proximity * proximity;
 
   return Object.freeze({
     exactPhrase,
     termCoverage,
+    rareTermCoverage,
     proximity,
     fieldFactor,
     score: (weighted / WEIGHT_TOTAL) * fieldFactor
@@ -303,6 +418,12 @@ export function rerankTopN<T>(
   const head = candidates.slice(0, cut);
   const tail = candidates.slice(cut);
 
+  // Pool-local IDF over exactly the head the rerank reorders: a query term
+  // present in few head candidates is discriminative; one present in most
+  // is generic topic noise. This is the signal that separates the gold
+  // from its saturated topical neighbours.
+  const poolIdf = buildRerankPoolIdf(head.map((candidate) => candidate.text.content));
+
   // Normalize fusion scores by the head maximum. Dividing by the max (not
   // min-max) keeps each candidate's proportional gap intact: a decisive
   // fusion lead stays a wide gap the lexical headroom cannot close, while
@@ -319,7 +440,7 @@ export function rerankTopN<T>(
   const scored = head.map((candidate, fusionIndex) => {
     const normalizedFusion =
       maxFusion > 0 ? candidate.fusionScore / maxFusion : 1;
-    const lexicalScore = computeRerankFeatures(query, candidate.text).score;
+    const lexicalScore = computeRerankFeatures(query, candidate.text, poolIdf).score;
     const blended =
       RECALL_RERANK_BLEND.fusion_weight * normalizedFusion +
       RECALL_RERANK_BLEND.rerank_weight * lexicalScore;
