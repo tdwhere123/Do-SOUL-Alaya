@@ -134,13 +134,22 @@ function normalizeQuery(queryText: string | null): string | null {
   return trimmed.length === 0 ? null : trimmed;
 }
 
-function extractLexicalTerms(value: string): readonly string[] {
-  const terms = value
+/**
+ * Split text into deterministic lowercased terms: shared split regex,
+ * lowercase+trim, drop empties, and a length>2-or-CJK-script keep rule.
+ * Does NOT drop stop words. The feature-rerank tokenizer reuses this so
+ * query terms and candidate terms tokenize under one identical rule.
+ */
+export function splitLexicalTokens(value: string): readonly string[] {
+  return value
     .split(/[^\p{L}\p{N}_./@#-]+/u)
     .map((term) => term.trim().toLocaleLowerCase())
     .filter((term) => term.length > 0)
-    .filter((term) => !STOP_WORDS.has(term))
     .filter((term) => term.length > 2 || /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(term));
+}
+
+function extractLexicalTerms(value: string): readonly string[] {
+  const terms = splitLexicalTokens(value).filter((term) => !STOP_WORDS.has(term));
   return unique(terms).slice(0, 48);
 }
 

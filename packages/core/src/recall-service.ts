@@ -31,6 +31,7 @@ import type {
 } from "./embedding-recall-service.js";
 import { loadGlobalRecallCandidates } from "./global-memory-recall-service.js";
 import { compileRecallQueryProbes, type RecallQueryProbes } from "./recall-query-probes.js";
+import { rerankTopN, type RerankCandidate } from "./recall-feature-rerank.js";
 import {
   buildRecallCandidate,
   rebuildRecallBudgetStateForDelivery
@@ -1836,8 +1837,9 @@ export class RecallService {
     }));
     const rankedCandidates = scoredCandidates
       .sort(compareFusedRecallCandidates);
+    const featureRerankedCandidates = applyFeatureRerank(rankedCandidates, supplementaryData);
     const deliveryOrderedCandidates = prioritizeStrongLexicalDeliveryWindowCandidates(
-      rankedCandidates,
+      featureRerankedCandidates,
       supplementaryData,
       config.budgets.max_entries
     );
@@ -2425,6 +2427,24 @@ function prioritizeStrongLexicalDeliveryWindowCandidates<T extends FusedRecallCa
     ...reorderedWindow,
     ...rankedCandidates.slice(deliveryWindowSize)
   ]);
+}
+
+function applyFeatureRerank<T extends FusedRecallCandidateInput>(
+  rankedCandidates: readonly T[],
+  supplementaryData: RecallSupplementaryData
+): readonly T[] {
+  const rerankInputs: readonly RerankCandidate<T>[] = rankedCandidates.map((candidate) =>
+    Object.freeze({
+      item: candidate,
+      fusionScore: candidate.fusion.fused_score,
+      text: Object.freeze({
+        content: candidate.entry.content,
+        hasEvidenceLexicalHit:
+          (supplementaryData.evidenceFtsRanks[candidate.entry.object_id] ?? 0) > 0
+      })
+    })
+  );
+  return rerankTopN(supplementaryData.queryProbes, rerankInputs);
 }
 
 function isStrongLexicalCandidate(
