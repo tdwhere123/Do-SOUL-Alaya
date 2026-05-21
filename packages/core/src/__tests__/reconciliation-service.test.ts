@@ -455,13 +455,13 @@ describe("ReconciliationService", () => {
   });
 
   it("a max-length distilled fact round-trips through the NOOP audit row untruncated", async () => {
-    // The audit cap (AUDIT_DROPPED_CONTENT_MAX_CHARS = 500) must stay
-    // above the distilled-fact cap (DISTILLED_FACT_MAX_CHARS = 280) so a
-    // dropped fact at the longest length the ingest path can produce is
-    // still fully reconstructable from caused_by. A 280-char fact must
+    // The audit cap (AUDIT_DROPPED_CONTENT_MAX_CHARS = 500) must stay at
+    // or above the distilled-fact cap (DISTILLED_FACT_MAX_CHARS = 500) so
+    // a dropped fact at the longest length the ingest path can produce is
+    // still fully reconstructable from caused_by. A 500-char fact must
     // appear in caused_by byte-for-byte after URI-decoding.
-    const maxLengthFact = `Berlin ${"x".repeat(273)}`;
-    expect(maxLengthFact.length).toBe(280);
+    const maxLengthFact = `Berlin ${"x".repeat(493)}`;
+    expect(maxLengthFact.length).toBe(500);
     const neighbor = createMemoryEntry({ content: maxLengthFact });
     const { deps, append } = createDeps([neighbor]);
     const service = new ReconciliationService(deps);

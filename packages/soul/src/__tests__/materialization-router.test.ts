@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  DISTILLED_FACT_MAX_CHARS,
   InMemoryHandoffGapHandler,
   MaterializationRouter,
   normalizeSchemaGroundedSignal
@@ -662,11 +663,11 @@ describe("MaterializationRouter", () => {
     expect(memoryInput.content).not.toContain("第三句");
   });
 
-  it("caps distilled fact at 280 chars even when caller supplies a long string", async () => {
+  it("hard-clamps an over-cap caller distilled_fact without appending an ellipsis", async () => {
     const deps = createDeps();
     const router = new MaterializationRouter(deps);
 
-    const longDistilled = "a".repeat(500);
+    const longDistilled = "a".repeat(DISTILLED_FACT_MAX_CHARS + 200);
     await router.materializeSignal(
       createSignal({
         raw_payload: { excerpt: "raw", distilled_fact: longDistilled }
@@ -676,8 +677,28 @@ describe("MaterializationRouter", () => {
     const memoryInput = deps.memoryService.create.mock.calls[0][0] as {
       readonly content: string;
     };
-    expect(memoryInput.content.length).toBeLessThanOrEqual(280);
-    expect(memoryInput.content.endsWith("...")).toBe(true);
+    // A supplied distilled_fact is already a resolved one-assertion fact;
+    // it is clamped to the cap but never "..."-truncated. The ellipsis
+    // belongs only to ruleDistillFromRaw (raw text -> distilled).
+    expect(memoryInput.content.length).toBe(DISTILLED_FACT_MAX_CHARS);
+    expect(memoryInput.content.endsWith("...")).toBe(false);
+  });
+
+  it("uses a within-cap caller distilled_fact verbatim", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    const fact = "The operator prefers concise replies in English.";
+    await router.materializeSignal(
+      createSignal({
+        raw_payload: { excerpt: "raw turn text", distilled_fact: fact }
+      })
+    );
+
+    const memoryInput = deps.memoryService.create.mock.calls[0][0] as {
+      readonly content: string;
+    };
+    expect(memoryInput.content).toBe(fact);
   });
 
   it("creates supersedes / exception_to / contradicts / incompatible_with edges from raw_payload refs", async () => {

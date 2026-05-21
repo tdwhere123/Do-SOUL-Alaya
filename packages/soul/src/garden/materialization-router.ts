@@ -1463,17 +1463,28 @@ function buildSignalSummary(signal: CandidateMemorySignal): string {
 // in EvidenceCapsule.gist / .excerpt. Caller (LLM / user / bench harness)
 // may supply raw_payload.distilled_fact directly; otherwise a rule-based
 // fallback takes the first two sentences capped at DISTILLED_FACT_MAX_CHARS.
-export const DISTILLED_FACT_MAX_CHARS = 280;
+// Single source of truth for the distilled-fact length budget: the
+// official-API garden provider clamps raw_payload.distilled_fact to this
+// same constant. see also: garden/compute-provider.ts.
+// invariant: kept <= AUDIT_DROPPED_CONTENT_MAX_CHARS (500) in
+// packages/core/src/reconciliation-service.ts so a dropped fact stays
+// fully reconstructable from the reconciliation audit row.
+export const DISTILLED_FACT_MAX_CHARS = 500;
 const DISTILLED_FACT_MAX_SENTENCES = 2;
 
-function buildDistilledFact(signal: CandidateMemorySignal): string {
+export function buildDistilledFact(signal: CandidateMemorySignal): string {
   const providedDistilled = signal.raw_payload.distilled_fact;
   if (typeof providedDistilled === "string") {
     const trimmed = providedDistilled.trim();
     if (trimmed.length > 0) {
+      // A caller-supplied distilled_fact is already a resolved
+      // one-assertion fact; use it verbatim when within cap. The "..."
+      // truncation belongs only to ruleDistillFromRaw (raw -> distilled).
+      // An over-cap supplied fact is not the normal path once the
+      // provider clamps to DISTILLED_FACT_MAX_CHARS — clamp defensively.
       return trimmed.length <= DISTILLED_FACT_MAX_CHARS
         ? trimmed
-        : `${trimmed.slice(0, DISTILLED_FACT_MAX_CHARS - 3)}...`;
+        : trimmed.slice(0, DISTILLED_FACT_MAX_CHARS);
     }
   }
   return ruleDistillFromRaw(buildSignalSummary(signal));

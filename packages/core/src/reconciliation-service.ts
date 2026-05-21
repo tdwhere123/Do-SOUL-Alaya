@@ -200,7 +200,7 @@ export interface ReconciliationServiceDependencies {
   readonly mutex?: KeyedMutex;
 }
 
-// Defaults tuned for short distilled facts (≤ 280 chars per
+// Defaults tuned for short distilled facts (≤ DISTILLED_FACT_MAX_CHARS per
 // buildDistilledFact). Below the floor the topic barely overlaps and a
 // semantic check would be noise; at or above it — unless the fact is
 // normalized-string-identical to a neighbor — "refines vs distinct"
@@ -674,13 +674,13 @@ function jaccardIndex(left: ReadonlySet<string>, right: ReadonlySet<string>): nu
 // the fact text cannot corrupt the delimiter structure, and capped so a
 // long fact cannot bloat the audit row unboundedly.
 //
-// invariant: this cap MUST stay >= DISTILLED_FACT_MAX_CHARS (280) in
+// invariant: this cap MUST stay >= DISTILLED_FACT_MAX_CHARS (500) in
 // packages/soul/src/garden/materialization-router.ts. Every fact that
-// reaches reconciliation is a distilled fact already capped at 280, so
-// 500 >= 280 guarantees the audit content is never truncated and a
-// dropped fact stays fully reconstructable from the event log. If the
-// distilled-fact cap is ever raised above 500, this cap must be raised
-// in lockstep or the audit silently truncates.
+// reaches reconciliation is a distilled fact already capped at that
+// value, so 500 >= 500 guarantees the audit content is never truncated
+// and a dropped fact stays fully reconstructable from the event log. If
+// the distilled-fact cap is ever raised above 500, this cap must be
+// raised in lockstep or the audit silently truncates.
 // see also: packages/soul/src/garden/materialization-router.ts
 //   buildDistilledFact (DISTILLED_FACT_MAX_CHARS)
 export const AUDIT_DROPPED_CONTENT_MAX_CHARS = 500;

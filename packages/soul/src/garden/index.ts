@@ -36,11 +36,14 @@ export {
   GardenProviderKind,
   GardenProviderError,
   OFFICIAL_API_GARDEN_MODEL,
+  OFFICIAL_API_SYSTEM_PROMPT,
   OfficialApiGardenProvider,
   CustomApiGardenProvider,
   LocalModelGardenProvider,
+  parseOfficialApiSignals,
   type GardenCompileContext,
-  type GardenComputeProvider
+  type GardenComputeProvider,
+  type OfficialApiSignalDraft
 } from "./compute-provider.js";
 export {
   SignalExtractorError,
