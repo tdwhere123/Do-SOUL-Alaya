@@ -515,6 +515,20 @@ export class MemoryService {
 
     const updatedFields = toUpdatedFieldNames(parsedFields);
     const occurredAt = this.now();
+
+    // The repo write and the audit append are not transactional. Append
+    // SOUL_MEMORY_UPDATED only after the repo write succeeds, so a failed
+    // write never leaves an EventLog row asserting a rewrite that did not
+    // happen.
+    const repoFields = {
+      ...parsedFields,
+      updated_at: occurredAt
+    };
+    const updated =
+      parsedWorkspaceId === undefined
+        ? await this.dependencies.memoryEntryRepo.update(parsedObjectId, repoFields)
+        : await this.updateRepoScoped(parsedObjectId, parsedWorkspaceId, repoFields);
+
     const event = await this.dependencies.eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_UPDATED,
       entity_type: "memory_entry",
@@ -530,15 +544,6 @@ export class MemoryService {
         updated_fields: updatedFields
       })
     });
-
-    const repoFields = {
-      ...parsedFields,
-      updated_at: occurredAt
-    };
-    const updated =
-      parsedWorkspaceId === undefined
-        ? await this.dependencies.memoryEntryRepo.update(parsedObjectId, repoFields)
-        : await this.updateRepoScoped(parsedObjectId, parsedWorkspaceId, repoFields);
 
     await this.dependencies.runtimeNotifier.notifyEntry(event);
     if (

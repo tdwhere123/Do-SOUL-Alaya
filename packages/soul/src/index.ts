@@ -55,6 +55,7 @@ export {
   LocalModelGardenProvider,
   SessionOverrideRemediation,
   toModelRef,
+  DISTILLED_FACT_MAX_CHARS,
   type AuditorBootstrappingPort,
   type AuditorDependencies,
   type AuditorEvidenceCheckPort,

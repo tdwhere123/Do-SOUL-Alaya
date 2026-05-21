@@ -317,7 +317,7 @@ describe("MemoryService", () => {
     expect(created.superseded_by).toBeNull();
   });
 
-  it("writes soul.memory.updated before persistence and runtime notification with computed revision", async () => {
+  it("writes soul.memory.updated after persistence and before runtime notification with computed revision", async () => {
     const order: string[] = [];
     const existing = createMemoryEntry();
 
@@ -378,7 +378,7 @@ describe("MemoryService", () => {
       "manual_update"
     );
 
-    expect(order).toEqual(["event_log", "repo_update", "notify"]);
+    expect(order).toEqual(["repo_update", "event_log", "notify"]);
     expect(updated.content).toBe("Updated content");
     expect(updated.storage_tier).toBe(StorageTier.COLD);
 

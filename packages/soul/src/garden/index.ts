@@ -99,6 +99,7 @@ export {
 } from "./topology-service.js";
 export {
   MaterializationRouter,
+  DISTILLED_FACT_MAX_CHARS,
   type MaterializationResult,
   type MaterializationRouterDeps,
   type MaterializationTarget,

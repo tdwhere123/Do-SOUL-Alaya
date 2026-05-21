@@ -204,6 +204,54 @@ export interface ConflictDetectionPort {
   }): Promise<void>;
 }
 
+// invariant: ingest-time reconciliation. The router asks this port what
+// to do with an incoming distilled fact before appending it: ADD (create
+// as today), UPDATE (an in-place refine applied to an existing row), or
+// NOOP (a near-exact lexical duplicate). The decision is computed in
+// @do-soul/alaya-core (the truth boundary) over the lexical FTS pool
+// plus, for the ambiguous band, an ingest-time LLM judge — Garden cannot
+// import core (invariants §6), so the decision arrives through this
+// port. When the port is absent the ingest path appends every fact
+// unchanged, so default production behavior is unchanged unless the
+// daemon wires it.
+//
+// decide-then-create: the decision is computed BEFORE any object is
+// created. The core service calls the router-supplied `applyVerdict`
+// callback once the verdict is known, inside its per-workspace lock:
+//   - add    -> the router creates the evidence_capsule + memory_entry
+//   - update -> the router creates the evidence_capsule; the core service
+//               then rewrites the target row and relinks that fresh
+//               evidence ref so durable content keeps matching evidence
+//   - noop   -> the router creates nothing; the drop is audited
+// NOOP creating no object is what makes a re-seed of the same haystack
+// idempotent — no fresh capsule is minted to accumulate on the surviving
+// row. `survivingObjectId` is the row that ends up holding the fact for
+// UPDATE / NOOP — the bench scoring sidecar remaps object_id -> answer
+// turn through it.
+// see also: packages/core/src/reconciliation-service.ts
+export interface ReconciliationDecisionView {
+  readonly kind: "add" | "update" | "noop";
+  /** The row that ends up holding the fact for UPDATE / NOOP. */
+  readonly survivingObjectId?: string;
+  readonly runConflictScan: boolean;
+  readonly reason: string;
+}
+
+export interface ReconciliationPort {
+  runWithDecision(
+    input: {
+      readonly workspaceId: string;
+      readonly runId: string;
+      readonly signalId: string;
+      readonly incomingContent: string;
+      readonly incomingDomainTags: readonly string[];
+    },
+    applyVerdict: (
+      verdict: ReconciliationDecisionView
+    ) => Promise<{ readonly incomingEvidenceRef?: string }>
+  ): Promise<ReconciliationDecisionView>;
+}
+
 export interface MaterializationRouterDeps {
   readonly evidenceService: EvidenceMaterializationPort;
   readonly memoryService: MemoryMaterializationPort;
@@ -213,6 +261,7 @@ export interface MaterializationRouterDeps {
   readonly handoffGapHandler: HandoffGapHandler;
   readonly graphEdgePort?: GraphEdgeCreationPort;
   readonly conflictDetectionPort?: ConflictDetectionPort;
+  readonly reconciliationPort?: ReconciliationPort;
 }
 
 export class MaterializationRouter {
@@ -366,6 +415,11 @@ export class MaterializationRouter {
     }
   }
 
+  // invariant: ingest reconciliation covers the materializeMemoryEntryOnly
+  // path only (the bench `fact` object_kind). materialize_and_claim is
+  // intentionally NOT reconciled in v0.3.10 — a claim-bearing signal
+  // carries governance structure whose dedup is the conflict / claim
+  // surface's job, not the lexical ingest gate.
   private async materializeMemoryAndClaim(
     signal: CandidateMemorySignal,
     target: MaterializationTarget
@@ -433,29 +487,9 @@ export class MaterializationRouter {
       if (timeConcernProposal !== null) {
         createdObjects.push(timeConcernProposal);
       }
-      // ConflictDetectionService: rule-based + optional LLM scan for
-      // memories in the same workspace that contradict / are incompatible
-      // with the freshly materialized one. Edges created here complement
-      // the caller-explicit hints above.
-      if (this.dependencies.conflictDetectionPort !== undefined) {
-        try {
-          await this.dependencies.conflictDetectionPort.detectAndLinkConflicts({
-            newMemoryId: memory.object_id,
-            newMemoryDimension: toMemoryDimension(signal.object_kind),
-            newMemoryScopeClass: toScopeClass(signal.scope_hint),
-            newMemoryContent: buildDistilledFact(signal),
-            newMemoryDomainTags: signal.domain_tags,
-            workspaceId: signal.workspace_id,
-            runId: signal.run_id
-          });
-        } catch (err) {
-          console.warn("materialization-router: conflict detection failed", {
-            memoryId: memory.object_id,
-            signalId: signal.signal_id,
-            error: err instanceof Error ? err.message : String(err)
-          });
-        }
-      }
+      // Edges created by the conflict scan complement the caller-explicit
+      // hints above. see also: runConflictScan.
+      await this.runConflictScan(memory.object_id, signal);
 
       return {
         signal_id: signal.signal_id,
@@ -580,18 +614,43 @@ export class MaterializationRouter {
   // remembering but not governance-mutating (a claim would over-promote
   // the signal into a draft awaiting review).
   // see also: materializeMemoryAndClaim — adds the claim_form layer.
+  // When a reconciliationPort is wired the incoming distilled fact is
+  // reconciled against the existing lexical pool: a near-exact lexical
+  // duplicate is dropped (NOOP), an LLM-judged refinement updates an
+  // existing row in place (UPDATE), and only a distinct fact is appended
+  // (ADD). Without the port every fact is appended — the unchanged
+  // default behavior.
   private async materializeMemoryEntryOnly(
     signal: CandidateMemorySignal,
     target: MaterializationTarget
   ): Promise<MaterializationResult> {
-    const createdObjects: Array<{ object_kind: string; object_id: string }> = [];
+    if (this.dependencies.reconciliationPort !== undefined) {
+      return await this.materializeReconciledMemoryEntry(
+        signal,
+        target,
+        this.dependencies.reconciliationPort
+      );
+    }
+    return await this.materializeMemoryEntryAppend(signal, target);
+  }
 
+  // invariant: the unchanged default ingest path — every fact is
+  // appended (evidence_capsule + memory_entry), no reconciliation. Also
+  // the fallback when reconciliation throws.
+  private async materializeMemoryEntryAppend(
+    signal: CandidateMemorySignal,
+    target: MaterializationTarget
+  ): Promise<MaterializationResult> {
+    const createdObjects: Array<{ object_kind: string; object_id: string }> = [];
     try {
       const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal));
       createdObjects.push({ object_kind: evidence.object_kind, object_id: evidence.object_id });
 
-      const memory = await this.dependencies.memoryService.create(buildMemoryInput(signal, [evidence.object_id]));
+      const memory = await this.dependencies.memoryService.create(
+        buildMemoryInput(signal, [evidence.object_id])
+      );
       createdObjects.push({ object_kind: memory.object_kind, object_id: memory.object_id });
+
       const timeConcernProposal = await this.createTimeConcernPathRelationProposal(
         memory.object_id,
         signal
@@ -622,6 +681,153 @@ export class MaterializationRouter {
         success: false,
         error: readErrorMessage(error)
       };
+    }
+  }
+
+  // invariant: decide-then-create ingest path. The core service computes
+  // the verdict FIRST, then calls the applyVerdict callback inside its
+  // per-workspace lock. The callback creates objects strictly per
+  // verdict: ADD -> evidence_capsule + memory_entry; UPDATE ->
+  // evidence_capsule only (the core service then rewrites the target row
+  // and relinks the ref); NOOP -> nothing. NOOP minting no fresh capsule
+  // is what keeps a re-seed of the same haystack idempotent.
+  //
+  // The evidence_capsule is created lazily and at most once: on a rare
+  // UPDATE-apply failure the core service re-invokes applyVerdict with a
+  // degraded ADD verdict, and the cached capsule ref is reused so the
+  // memory_entry is appended against the already-created evidence.
+  private async materializeReconciledMemoryEntry(
+    signal: CandidateMemorySignal,
+    target: MaterializationTarget,
+    port: ReconciliationPort
+  ): Promise<MaterializationResult> {
+    const createdObjects: Array<{ object_kind: string; object_id: string }> = [];
+    let evidenceId: string | undefined;
+    let appendedMemoryId: string | undefined;
+    let conflictScanMemoryId: string | undefined;
+
+    const ensureEvidence = async (): Promise<string> => {
+      if (evidenceId === undefined) {
+        const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal));
+        evidenceId = evidence.object_id;
+        createdObjects.push({ object_kind: evidence.object_kind, object_id: evidence.object_id });
+      }
+      return evidenceId;
+    };
+
+    try {
+      const decision = await port.runWithDecision(
+        {
+          workspaceId: signal.workspace_id,
+          runId: signal.run_id,
+          signalId: signal.signal_id,
+          incomingContent: buildDistilledFact(signal),
+          incomingDomainTags: signal.domain_tags
+        },
+        async (verdict) => {
+          if (verdict.kind === "noop") {
+            // NOOP creates nothing — no evidence_capsule, no
+            // memory_entry. There is no orphan to relink.
+            return {};
+          }
+          const evidenceRef = await ensureEvidence();
+          if (verdict.kind === "update") {
+            // The core service rewrites the target row and relinks this
+            // ref; the router creates no memory_entry on this branch.
+            return { incomingEvidenceRef: evidenceRef };
+          }
+          // ADD: append the memory_entry against the fresh evidence.
+          const memory = await this.dependencies.memoryService.create(
+            buildMemoryInput(signal, [evidenceRef])
+          );
+          appendedMemoryId = memory.object_id;
+          createdObjects.push({ object_kind: memory.object_kind, object_id: memory.object_id });
+          if (verdict.runConflictScan) {
+            conflictScanMemoryId = memory.object_id;
+          }
+          return { incomingEvidenceRef: evidenceRef };
+        }
+      );
+
+      if (appendedMemoryId !== undefined) {
+        const timeConcernProposal = await this.createTimeConcernPathRelationProposal(
+          appendedMemoryId,
+          signal
+        );
+        if (timeConcernProposal !== null) {
+          createdObjects.push(timeConcernProposal);
+        }
+      }
+
+      // invariant: DELETE / supersede is the ConflictDetectionService's
+      // job. Reconciliation only flags that the new fact has a same-topic
+      // divergent neighbor; the contradicts / superseded_by edge + karma
+      // are produced by the existing conflict scan, not a new path.
+      if (conflictScanMemoryId !== undefined) {
+        await this.runConflictScan(conflictScanMemoryId, signal);
+      }
+
+      const reconciledObjects =
+        decision.kind !== "add" && decision.survivingObjectId !== undefined
+          ? [
+              ...createdObjects,
+              { object_kind: "memory_entry", object_id: decision.survivingObjectId }
+            ]
+          : createdObjects;
+
+      return {
+        signal_id: signal.signal_id,
+        target_kind: "evidence_only",
+        route_target: target.route_target,
+        routing_reason:
+          decision.kind === "add"
+            ? target.routing_reason
+            : `${target.routing_reason} — reconciled: ${decision.reason}`,
+        created_objects: reconciledObjects,
+        success: true
+      };
+    } catch (error) {
+      // A reconciliation backend failure must never drop the fact:
+      // fall back to the unchanged blind-append path. The evidence
+      // capsule may already exist from a partial applyVerdict run; the
+      // append path mints its own, so a transient failure costs at most
+      // one orphan capsule, never a lost fact.
+      console.warn("materialization-router: reconciliation failed", {
+        signalId: signal.signal_id,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return await this.materializeMemoryEntryAppend(signal, target);
+    }
+  }
+
+  // ConflictDetectionService: rule-based + optional LLM scan for memories
+  // in the same workspace that contradict / are incompatible with the
+  // freshly materialized one. Detection failure must not break a
+  // successful memory creation.
+  private async runConflictScan(
+    memoryId: string,
+    signal: CandidateMemorySignal
+  ): Promise<void> {
+    const port = this.dependencies.conflictDetectionPort;
+    if (port === undefined) {
+      return;
+    }
+    try {
+      await port.detectAndLinkConflicts({
+        newMemoryId: memoryId,
+        newMemoryDimension: toMemoryDimension(signal.object_kind),
+        newMemoryScopeClass: toScopeClass(signal.scope_hint),
+        newMemoryContent: buildDistilledFact(signal),
+        newMemoryDomainTags: signal.domain_tags,
+        workspaceId: signal.workspace_id,
+        runId: signal.run_id
+      });
+    } catch (err) {
+      console.warn("materialization-router: conflict detection failed", {
+        memoryId,
+        signalId: signal.signal_id,
+        error: err instanceof Error ? err.message : String(err)
+      });
     }
   }
 
@@ -1257,7 +1463,7 @@ function buildSignalSummary(signal: CandidateMemorySignal): string {
 // in EvidenceCapsule.gist / .excerpt. Caller (LLM / user / bench harness)
 // may supply raw_payload.distilled_fact directly; otherwise a rule-based
 // fallback takes the first two sentences capped at DISTILLED_FACT_MAX_CHARS.
-const DISTILLED_FACT_MAX_CHARS = 280;
+export const DISTILLED_FACT_MAX_CHARS = 280;
 const DISTILLED_FACT_MAX_SENTENCES = 2;
 
 function buildDistilledFact(signal: CandidateMemorySignal): string {
