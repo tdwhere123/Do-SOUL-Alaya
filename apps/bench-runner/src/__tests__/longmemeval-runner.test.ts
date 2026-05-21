@@ -13,7 +13,6 @@ import { runLongMemEvalMultiturn } from "../longmemeval/multiturn.js";
 import {
   buildLongMemEvalReportContextUsage,
   resolveBenchEmbeddingProviderLabel,
-  resolveLongMemEvalSeedObjectKind,
   runLongMemEval,
   runLongMemEvalRecallCycle,
   scoreLongMemEvalRecallHits
@@ -534,11 +533,6 @@ describe("LongMemEval runner", () => {
       final_rank: null,
       active_constraint_rank: 1
     });
-  });
-
-  it("keeps LongMemEval gate seeding label-independent", () => {
-    expect(resolveLongMemEvalSeedObjectKind({ seedIndex: 0 })).toBe("fact");
-    expect(resolveLongMemEvalSeedObjectKind({ seedIndex: 3 })).toBe("fact");
   });
 
   it("classifies empty-gold rows separately from candidate absence", () => {

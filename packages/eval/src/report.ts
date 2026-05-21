@@ -89,13 +89,14 @@ export function renderReport(
       "  `has_answer=true` turn from an answer session, when distractor",
       "  sessions are present in the haystack*. This is the honest",
       "  retrieval number; quote it directly.",
-      "- **Atomic-fact ingestion basis (v0.3.10).** Each turn is now",
-      "  LLM-extracted into N atomic facts; an answer turn seeds N gold",
-      "  `object_id`s and a hit means recalling ANY one of them. R@K is",
-      "  therefore measured on a new basis and is NOT directly comparable",
-      "  to the pre-extraction `2026-05-20T110623Z` baseline; the first",
-      "  post-extraction full run is the reference baseline for later",
-      "  recall-optimization slices."
+      "- **Production-extraction ingestion basis (v0.3.10).** Each turn is",
+      "  run through the production garden extraction",
+      "  (`OfficialApiGardenProvider.compile`) into N typed candidate",
+      "  signals; an answer turn seeds N gold `object_id`s and a hit means",
+      "  recalling ANY one of them. R@K is therefore measured on a new",
+      "  basis and is NOT directly comparable to the pre-extraction",
+      "  `2026-05-20T110623Z` baseline; the first post-extraction full run",
+      "  is the reference baseline for later recall-optimization slices."
     );
   }
   if (current.bench_name === "live" || current.split === "strict-real") {
@@ -266,6 +267,44 @@ export function renderReport(
     lines.push(
       `  - ⚠ ${trunc.answer_turns_truncated} answer-bearing turn(s) had their content clipped at the protocol cap; recall cannot retrieve text past the cutoff.`
     );
+  }
+  const extractionPath = current.kpi.seed_extraction_path;
+  if (extractionPath !== undefined) {
+    lines.push(
+      `- Seed extraction path: ${extractionPath.path} ` +
+        `(cache_hits=${extractionPath.cache_hits} llm_calls=${extractionPath.llm_calls} ` +
+        `offline_fallbacks=${extractionPath.offline_fallbacks} ` +
+        `facts=${extractionPath.facts_produced} signals_dropped=${extractionPath.signals_dropped} ` +
+        `[parse_dropped=${extractionPath.parse_dropped} ` +
+        `compile_overflow_dropped=${extractionPath.compile_overflow_dropped}])`
+    );
+    if (extractionPath.path === "no_credentials_fallback") {
+      lines.push(
+        "  - ⚠ This run took the no-credentials fallback: each turn was",
+        "    seeded as one full-turn fact, NOT the production multi-signal",
+        "    garden extraction. The keyword-rich full turn can out-score a",
+        "    tight production `distilled_fact`, so this R@K is NOT comparable",
+        "    to an `official_api_compile` run."
+      );
+    }
+    if (extractionPath.signals_dropped > 0) {
+      // signals_dropped also absorbs whole-turn batches lost when seed
+      // materialization throws, which parse_dropped / compile_overflow_dropped
+      // do not attribute — surface that residual so the breakdown still sums.
+      const seedMaterializationDropped = Math.max(
+        0,
+        extractionPath.signals_dropped -
+          extractionPath.parse_dropped -
+          extractionPath.compile_overflow_dropped
+      );
+      lines.push(
+        `  - ⚠ ${extractionPath.signals_dropped} extracted signal(s) were lost before seeding ` +
+          `(${extractionPath.parse_dropped} dropped by the parser as malformed / over the 64-signal cap, ` +
+          `${extractionPath.compile_overflow_dropped} dropped by compile() as oversized, ` +
+          `${seedMaterializationDropped} dropped when a seed-materialization batch failed); ` +
+          `a dropped answer-bearing signal inflates the miss rate.`
+      );
+    }
   }
   if (current.kpi.quality_metrics !== undefined) {
     const metrics = current.kpi.quality_metrics;

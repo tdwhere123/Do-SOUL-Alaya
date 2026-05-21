@@ -47,7 +47,7 @@ import { KeyedMutex } from "./shared/keyed-mutex.js";
 // see also: packages/core/src/conflict-detection-service.ts
 //   (DELETE / supersede machinery)
 // see also: packages/core/src/memory-service.ts update() (UPDATE applier)
-// see also: apps/bench-runner/src/longmemeval/atomic-fact-extraction.ts
+// see also: apps/bench-runner/src/longmemeval/compile-seed.ts
 //   (the disk-cached garden-LLM transport this LLM port mirrors)
 
 export type ReconciliationDecisionKind = "add" | "update" | "noop";
@@ -152,7 +152,7 @@ export interface ReconciliationEventLogPort {
 // invariant: the semantic-judge LLM port. Given the incoming fact and
 // the ambiguous-band candidate neighbors, returns ADD / UPDATE / NOOP.
 // The daemon wires a disk-cached garden-LLM implementation (mirroring
-// atomic-fact-extraction.ts) so re-runs are zero-LLM and repeatable.
+// compile-seed.ts) so re-runs are zero-LLM and repeatable.
 // Garden cannot import core; the LLM transport lives in the daemon and
 // is injected here, like every other reconciliation port.
 export interface ReconciliationLlmDecisionPort {

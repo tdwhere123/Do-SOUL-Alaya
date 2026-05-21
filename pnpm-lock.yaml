@@ -35,6 +35,9 @@ importers:
       '@do-soul/alaya-protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@do-soul/alaya-soul':
+        specifier: workspace:*
+        version: link:../../packages/soul
       '@do-soul/alaya-storage':
         specifier: workspace:*
         version: link:../../packages/storage

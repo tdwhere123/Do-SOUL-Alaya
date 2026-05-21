@@ -17,12 +17,12 @@ import type { ReconciliationLlmDecisionPort } from "@do-soul/alaya-core";
  *
  * Repeatability: every decision is cached to an on-disk fixture keyed by
  * a hash of (model + incoming fact + neighbor contents) — exactly the
- * caching discipline of the LongMemEval atomic-fact extraction cache. A
+ * caching discipline of the LongMemEval compile-seed extraction cache. A
  * cached decision re-runs with zero LLM calls. The cache directory lives
  * beside the extraction cache under docs/bench-history/datasets so a
  * credentialled run can populate and commit it.
  *
- * see also: apps/bench-runner/src/longmemeval/atomic-fact-extraction.ts
+ * see also: apps/bench-runner/src/longmemeval/compile-seed.ts
  *   (the extraction cache whose shape this mirrors)
  * see also: packages/core/src/reconciliation-service.ts
  *   (ReconciliationLlmDecisionPort consumer)

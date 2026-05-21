@@ -70,12 +70,13 @@ export class GardenProviderError extends Error {
 const DEFAULT_OFFICIAL_API_REQUEST_TIMEOUT_MS = 10_000;
 export const OFFICIAL_API_GARDEN_MODEL = "gpt-4.1-mini";
 
-// see also: apps/bench-runner/src/longmemeval/atomic-fact-extraction.ts
-//   EXTRACTION_SYSTEM_PROMPT — the distilled_fact contract below is the
-//   same field-standard atomic-fact wording, adapted to this provider's
-//   {"signals":[...]} envelope so the production passive-extraction path
-//   emits resolved one-assertion facts instead of falling through to the
-//   rule distiller in materialization-router.ts buildDistilledFact.
+// The distilled_fact contract below is the field-standard atomic-fact
+// wording, adapted to this provider's {"signals":[...]} envelope so the
+// production passive-extraction path emits resolved one-assertion facts
+// instead of falling through to the rule distiller in
+// materialization-router.ts buildDistilledFact.
+// see also: apps/bench-runner/src/longmemeval/compile-seed.ts
+//   (the LongMemEval bench seed path that drives this provider)
 export const OFFICIAL_API_SYSTEM_PROMPT = [
   "You extract candidate durable memory signals from a single operator turn.",
   'Return strict JSON only with shape {"signals":[...]} and no markdown.',
@@ -273,8 +274,8 @@ const MAX_OFFICIAL_API_REASON_CHARS = 400;
 
 // Exported so the LongMemEval bench seed path can drive its ingestion
 // through this exact production parse instead of a divergent bench-only
-// copy. anti-patterns-lint-allow: consumer lands in the bench rewire.
-// see also: apps/bench-runner/src/longmemeval/atomic-fact-extraction.ts
+// copy.
+// see also: apps/bench-runner/src/longmemeval/compile-seed.ts
 export function parseOfficialApiSignals(content: string): readonly OfficialApiSignalDraft[] {
   const parsed = JSON.parse(content) as unknown;
   // invariant: a malformed *envelope* (response is not an object, or has no

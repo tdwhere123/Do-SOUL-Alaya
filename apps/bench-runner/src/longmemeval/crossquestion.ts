@@ -1,6 +1,5 @@
 import { execSync } from "node:child_process";
 import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../version.js";
-import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import {
   diffKpis,
   entrySlug,
@@ -25,9 +24,9 @@ import type { LongMemEvalVariant } from "./dataset.js";
 import { loadDataset, type FetchResult } from "./fetch.js";
 import { resolveBenchEmbeddingProviderLabel } from "./runner.js";
 import {
-  createAtomicFactExtractor,
-  seedTurnAsAtomicFacts
-} from "./atomic-fact-extraction.js";
+  createCompileSeedRunner,
+  toSeedExtractionPathKpi
+} from "./compile-seed.js";
 
 const LONGMEMEVAL_DIAGNOSTICS_FILENAME = "longmemeval-diagnostics.json";
 
@@ -105,9 +104,9 @@ export async function runLongMemEvalCrossQuestion(
 
   const sidecar = new Map<string, SidecarEntry>();
   const collected: QuestionResult[] = [];
-  // invariant: one extractor for the whole run so the on-disk fact cache
-  // and extraction stats accumulate across questions; seed-time only.
-  const atomicFactExtractor = createAtomicFactExtractor();
+  // invariant: one seed runner for the whole run so the on-disk extraction
+  // cache and stats accumulate across questions; seed-time only.
+  const seedRunner = createCompileSeedRunner();
 
   try {
     for (let qi = 0; qi < window.length; qi++) {
@@ -129,14 +128,16 @@ export async function runLongMemEvalCrossQuestion(
           const turn = session[ti];
           if (turn === undefined) continue;
           const evidenceRef = `${question.question_id}-cq-s${si}-t${ti}`;
-          // invariant: one turn -> N atomic-fact memory_entry rows; every
-          // object_id is mapped into the shared sidecar (no partial map).
-          const seedResult = await seedTurnAsAtomicFacts({
+          // invariant: one turn -> N production-extracted memory_entry rows;
+          // every object_id is mapped into the shared sidecar (no partial
+          // map).
+          const seedResult = await seedRunner.seedTurn({
             daemon,
-            extractor: atomicFactExtractor,
             turnContent: turn.content,
             evidenceRefBase: evidenceRef,
-            objectKind: rotatingSeedObjectKind(seedIndex)
+            seedIndex,
+            workspaceId: daemon.workspaceId,
+            runId: daemon.runId
           });
           seedIndex += 1;
           if (seedResult.turnTruncated) {
@@ -272,11 +273,15 @@ export async function runLongMemEvalCrossQuestion(
           `R@5=${hitAt5 ? "✓" : "✗"} pool=${sidecar.size}\n`
       );
     }
+    // Disclose which seed path ran: official_api_compile (production garden
+    // extraction) vs no_credentials_fallback (degraded full-turn single-fact).
     process.stdout.write(
-      `[longmemeval atomic-fact] cache_hits=${atomicFactExtractor.stats.cacheHits} ` +
-        `llm_calls=${atomicFactExtractor.stats.llmCalls} ` +
-        `offline_fallbacks=${atomicFactExtractor.stats.offlineFallbacks} ` +
-        `facts=${atomicFactExtractor.stats.factsProduced}\n`
+      `[longmemeval compile-seed] path=${seedRunner.stats.path} ` +
+        `cache_hits=${seedRunner.stats.cacheHits} ` +
+        `llm_calls=${seedRunner.stats.llmCalls} ` +
+        `offline_fallbacks=${seedRunner.stats.offlineFallbacks} ` +
+        `facts=${seedRunner.stats.factsProduced} ` +
+        `signals_dropped=${seedRunner.stats.signalsDropped}\n`
     );
   } finally {
     await daemon.shutdown();
@@ -374,6 +379,7 @@ export async function runLongMemEvalCrossQuestion(
       tier_distribution: tierDistribution,
       degradation_reasons: degradationReasons,
       seed_truncation: truncation,
+      seed_extraction_path: toSeedExtractionPathKpi(seedRunner.stats),
       per_scenario: perScenario
     }
   };

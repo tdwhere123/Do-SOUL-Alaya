@@ -119,6 +119,40 @@ const SeedTruncationSchema = z
     seed_chars_clipped: 0
   });
 
+// @anchor seed-extraction-path: which ingestion path produced the seed
+// store. official_api_compile = real production garden extraction
+// (OfficialApiGardenProvider.compile, 1 turn -> N typed signals);
+// no_credentials_fallback = the degraded no-LLM path (1 turn -> 1 full-turn
+// fact). A no-creds run re-seeds the keyword-rich full turn and can
+// out-score the tight production distilled_fact, so the two paths must
+// never be indistinguishable in the persisted report. cache_hits / llm_calls
+// / offline_fallbacks / facts_produced are the per-run extraction counters.
+// signals_dropped is the TOTAL signals lost between the model envelope and
+// a seeded memory_entry — a visible recall hole. parse_dropped and
+// compile_overflow_dropped attribute the two extraction-time drop stages:
+// parse_dropped counts malformed single entries and over-64-cap signals
+// discarded inside parseOfficialApiSignals; compile_overflow_dropped counts
+// parsed drafts dropped inside compile() for raw_payload past the 16 KB cap.
+// A third, non-attributed source also rolls into signals_dropped: a whole
+// turn's signals lost when the seed-materialization batch throws (e.g. a
+// garden-task complete mismatch). So the invariant is
+// signals_dropped >= parse_dropped + compile_overflow_dropped, not a clean
+// equality. see also:
+// apps/bench-runner/src/longmemeval/compile-seed.ts CompileSeedExtractionStats.
+const SeedExtractionPathSchema = z
+  .object({
+    path: z.enum(["official_api_compile", "no_credentials_fallback"]),
+    cache_hits: z.number().int().nonnegative(),
+    llm_calls: z.number().int().nonnegative(),
+    offline_fallbacks: z.number().int().nonnegative(),
+    facts_produced: z.number().int().nonnegative(),
+    signals_dropped: z.number().int().nonnegative(),
+    parse_dropped: z.number().int().nonnegative(),
+    compile_overflow_dropped: z.number().int().nonnegative()
+  })
+  .strict();
+export type SeedExtractionPath = z.infer<typeof SeedExtractionPathSchema>;
+
 const RatioSchema = z.number().min(0).max(1);
 
 const CountDistributionEntrySchema = z
@@ -188,6 +222,9 @@ const KpiCoreSchema = z.object({
   tier_distribution: TierDistributionSchema,
   degradation_reasons: DegradationReasonsSchema,
   seed_truncation: SeedTruncationSchema,
+  // Optional so older kpi.json records (pre seed-extraction disclosure)
+  // stay schema-valid; new LongMemEval runs always populate it.
+  seed_extraction_path: SeedExtractionPathSchema.optional(),
   quality_metrics: QualityMetricsSchema.optional(),
   per_scenario: z.array(PerScenarioRowSchema)
 });

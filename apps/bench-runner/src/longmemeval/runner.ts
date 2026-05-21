@@ -28,8 +28,7 @@ import {
   type BenchEmbeddingMode,
   type BenchQueryEmbeddingWarmupSummary,
   type BenchRecallOptions,
-  type BenchReportContextUsageInput,
-  type SeedObjectKind
+  type BenchReportContextUsageInput
 } from "../harness/daemon.js";
 import {
   ALAYA_RECALL_WEIGHT_OVERRIDES_ENV,
@@ -59,10 +58,10 @@ import {
 import { loadDataset, type FetchResult } from "./fetch.js";
 import type { LongMemEvalVariant } from "./dataset.js";
 import {
-  createAtomicFactExtractor,
-  seedTurnAsAtomicFacts,
-  type AtomicFactExtractor
-} from "./atomic-fact-extraction.js";
+  createCompileSeedRunner,
+  toSeedExtractionPathKpi,
+  type CompileSeedRunner
+} from "./compile-seed.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
@@ -131,30 +130,31 @@ export interface LongMemEvalHitScoringResult {
 /**
  * @anchor longmemeval-runner — per-question workspace, seed-then-recall
  *
- * Scoring: object_id sidecar. Each haystack turn is LLM-extracted into N
- * atomic facts and seeded as N durable memory_entry rows via the MCP
- * propose+review chain (see harness/daemon.ts proposeMemory and
- * longmemeval/atomic-fact-extraction.ts). Every returned memoryId is the
- * durable object_id that soul.recall returns in pointer.object_id, so
- * scoring is by id equality — never by string preview overlap.
+ * Scoring: object_id sidecar. Each haystack turn is run through the
+ * production garden extraction (OfficialApiGardenProvider.compile) into N
+ * typed candidate signals, each seeded as a durable memory_entry row via the
+ * MCP propose+review chain (see harness/daemon.ts proposeMemoryFromSignal
+ * and longmemeval/compile-seed.ts). Every returned memoryId is the durable
+ * object_id that soul.recall returns in pointer.object_id, so scoring is by
+ * id equality — never by string preview overlap.
  *
  * Hit rule: a recall result is a hit iff its object_id maps in the sidecar
  * to a seed whose hasAnswer === true AND whose sessionId is in
- * question.answer_session_ids. Because one answer turn now seeds N atomic
- * facts, an answer turn maps to N gold object_ids, and a hit means
- * recalling ANY one atomic fact of that answer turn.
+ * question.answer_session_ids. Because one answer turn now seeds N
+ * extracted facts, an answer turn maps to N gold object_ids, and a hit
+ * means recalling ANY one fact of that answer turn.
  *
- * Measurement-basis note: before atomic-fact extraction one answer turn
- * seeded exactly 1 gold object; it now seeds N. R@K is therefore measured
- * on a NEW basis ("did any atomic fragment of the answer turn surface")
- * and is NOT directly comparable to the pre-extraction 110623Z baseline.
- * The first post-extraction full run is the reference baseline for later
+ * Measurement-basis note: an answer turn seeds N gold objects (the
+ * extraction fan-out), not 1. R@K is measured on that basis ("did any
+ * extracted fact of the answer turn surface") and is NOT directly
+ * comparable to the pre-extraction 110623Z baseline. The first
+ * post-extraction full run is the reference baseline for later
  * recall-optimization slices.
  *
  * `active_constraints[]` is an independent governance channel and is
  * recorded in diagnostics only; it is never counted toward R@K.
  *
- * see also: apps/bench-runner/src/harness/daemon.ts — proposeMemory chain
+ * see also: apps/bench-runner/src/harness/daemon.ts — proposeMemoryFromSignal
  * see also: packages/eval/src/report.ts — report.md "Scoring contract"
  *   section; its LongMemEval-S text must mirror this measurement-basis
  *   note (the report.md prose lives there, not in this package).
@@ -212,7 +212,7 @@ export async function runLongMemEval(
   async function runOneQuestion(
     question: typeof window[number],
     turnIndex: number,
-    extractor: AtomicFactExtractor
+    seedRunner: CompileSeedRunner
   ): Promise<WorkerResult> {
     const daemon = await startBenchDaemon({
       workspaceId: `lme-${question.question_id.slice(0, 8)}`,
@@ -238,18 +238,16 @@ export async function runLongMemEval(
           if (turn === undefined) continue;
 
           const evidenceRef = `${question.question_id}-s${si}-t${ti}`;
-          const objectKind = resolveLongMemEvalSeedObjectKind({
-            seedIndex
-          });
-          // invariant: one turn -> N atomic-fact memory_entry rows. Every
-          // resulting object_id is mapped into the sidecar; a partial map
-          // would silently undercount recall.
-          const seedResult = await seedTurnAsAtomicFacts({
+          // invariant: one turn -> N production-extracted memory_entry rows.
+          // Every resulting object_id is mapped into the sidecar; a partial
+          // map would silently undercount recall.
+          const seedResult = await seedRunner.seedTurn({
             daemon,
-            extractor,
             turnContent: turn.content,
             evidenceRefBase: evidenceRef,
-            objectKind
+            seedIndex,
+            workspaceId: daemon.workspaceId,
+            runId: daemon.runId
           });
           seedIndex += 1;
           if (seedResult.turnTruncated) {
@@ -355,27 +353,31 @@ export async function runLongMemEval(
   // ALAYA_CONFIG_DIR / HOME / ALAYA_REVIEWER_*).
   // see also: apps/bench-runner/scripts/run-full-public-bench.sh for
   // safe process-level sharding.
-  // invariant: one extractor for the whole run so the on-disk fact cache
-  // and extraction stats accumulate across every question. Extraction
-  // happens at seed time only — never on the recall path below.
-  const atomicFactExtractor = createAtomicFactExtractor();
+  // invariant: one seed runner for the whole run so the on-disk extraction
+  // cache and stats accumulate across every question. Extraction happens at
+  // seed time only — never on the recall path below.
+  const seedRunner = createCompileSeedRunner();
   const collected: WorkerResult[] = [];
   for (let i = 0; i < window.length; i++) {
     const q = window[i];
     if (q === undefined) continue;
-    const res = await runOneQuestion(q, i + 1, atomicFactExtractor);
+    const res = await runOneQuestion(q, i + 1, seedRunner);
     collected.push(res);
     process.stdout.write(
       `[${i + 1}/${window.length}] ${q.question_id.slice(0, 8)} ` +
         `R@5=${res.hitAt5 ? "✓" : "✗"} latency=${res.latencyMs}ms\n`
     );
   }
-  const extractionStats = atomicFactExtractor.stats;
+  const extractionStats = seedRunner.stats;
+  // Disclose which seed path ran: official_api_compile (production garden
+  // extraction) vs no_credentials_fallback (degraded full-turn single-fact).
   process.stdout.write(
-    `[longmemeval atomic-fact] cache_hits=${extractionStats.cacheHits} ` +
+    `[longmemeval compile-seed] path=${extractionStats.path} ` +
+      `cache_hits=${extractionStats.cacheHits} ` +
       `llm_calls=${extractionStats.llmCalls} ` +
       `offline_fallbacks=${extractionStats.offlineFallbacks} ` +
-      `facts=${extractionStats.factsProduced}\n`
+      `facts=${extractionStats.factsProduced} ` +
+      `signals_dropped=${extractionStats.signalsDropped}\n`
   );
 
   const perScenario: PerScenarioRow[] = [];
@@ -536,6 +538,7 @@ export async function runLongMemEval(
         answer_turns_truncated: truncAnswerTotal,
         seed_chars_clipped: truncCharsTotal
       },
+      seed_extraction_path: toSeedExtractionPathKpi(extractionStats),
       quality_metrics: buildLongMemEvalQualityMetrics(questionDiagnostics),
       per_scenario: perScenario
     }
@@ -883,13 +886,6 @@ export function scoreLongMemEvalRecallHits(
   }
 
   return { hitAt1, hitAt5, hitAt10, firstTier };
-}
-
-export function resolveLongMemEvalSeedObjectKind(input: {
-  readonly seedIndex: number;
-}): SeedObjectKind {
-  void input;
-  return "fact";
 }
 
 function readLongMemEvalPinnedMeta(

@@ -16,6 +16,7 @@ export {
   type BenchPolicyShape,
   type BenchSimulateReportMode,
   type PerScenarioRow,
+  type SeedExtractionPath,
   type TierDistribution
 } from "./kpi-schema.js";
 

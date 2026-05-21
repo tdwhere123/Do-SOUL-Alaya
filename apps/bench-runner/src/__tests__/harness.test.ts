@@ -2,7 +2,23 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { startBenchDaemon, type BenchDaemonHandle } from "../harness/daemon.js";
+import {
+  initDatabase,
+  SqliteGardenTaskRepo,
+  SqliteSignalRepo,
+  type GardenTaskEventPublisherPort
+} from "@do-soul/alaya-storage";
+import {
+  GardenRole,
+  GardenTaskKind,
+  SignalSource,
+  type GardenClaimTaskResponse
+} from "@do-soul/alaya-protocol";
+import {
+  startBenchDaemon,
+  type BenchDaemonHandle,
+  type BenchSignalSeedInput
+} from "../harness/daemon.js";
 
 const handles: BenchDaemonHandle[] = [];
 const tmpRoots: string[] = [];
@@ -273,6 +289,168 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       // the materialization-router unit tests in packages/soul.
       expect(true).toBe(true);
     }
+  );
+
+  it(
+    "proposeMemoriesFromGardenTask materializes signals with source=garden_compile",
+    async () => {
+      // The compile-based bench seed path must materialize through the
+      // garden.complete_task production completion seam, NOT
+      // soul.emit_candidate_signal. emit_candidate_signal hardcodes
+      // source=model_tool, which downstream toFormationKind maps to
+      // `inferred` (confidence base 0.4) rather than `extracted` (0.6),
+      // seeding ~33% lower retention than the production POST_TURN_EXTRACT
+      // path. This test reads the persisted signal and asserts the source
+      // is garden_compile — production-faithful — for every seeded signal.
+      const daemon = await startBenchDaemon({
+        workspaceId: "harness-garden-source-ws",
+        runId: "harness-garden-source-run"
+      });
+      handles.push(daemon);
+
+      const inputs: readonly BenchSignalSeedInput[] = [
+        {
+          signalKind: "potential_preference",
+          objectKind: "preference",
+          confidence: 0.9,
+          distilledFact: "Alice lives in Berlin.",
+          turnContent: "I moved to Berlin last spring.",
+          matchedText: "moved to Berlin",
+          evidenceRef: "garden-source-q0-f0",
+          extractionProvider: "official_api_compile"
+        },
+        {
+          signalKind: "potential_preference",
+          objectKind: "fact",
+          confidence: 0.85,
+          distilledFact: "Alice started her job on 2024-03-01.",
+          turnContent: "I moved to Berlin last spring.",
+          matchedText: "started my job",
+          evidenceRef: "garden-source-q0-f1",
+          extractionProvider: "official_api_compile"
+        }
+      ];
+
+      const seeds = await daemon.proposeMemoriesFromGardenTask(inputs);
+
+      expect(seeds).toHaveLength(2);
+      expect(new Set(seeds.map((seed) => seed.memoryId)).size).toBe(2);
+
+      // Read each materialized signal's persisted record and assert
+      // source=garden_compile (the production POST_TURN_EXTRACT source).
+      const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
+      const signalRepo = new SqliteSignalRepo(db);
+      for (const seed of seeds) {
+        const signal = await signalRepo.getById(seed.signalId);
+        expect(signal).not.toBeNull();
+        expect(signal?.source).toBe(SignalSource.GARDEN_COMPILE);
+      }
+
+      // The full audit/accept chain still ran: every seed carries a
+      // distinct durable memory id, a signal id, and a proposal id.
+      for (const seed of seeds) {
+        expect(seed.memoryId.length).toBeGreaterThan(0);
+        expect(seed.proposalId.length).toBeGreaterThan(0);
+        expect(seed.memoryId).not.toBe(seed.signalId);
+      }
+
+      // The seeded memories are recallable by their durable object_id.
+      const recallResult = await daemon.recall("Berlin job", { maxResults: 5 });
+      const recalledIds = new Set(recallResult.results.map((r) => r.object_id));
+      expect(seeds.some((seed) => recalledIds.has(seed.memoryId))).toBe(true);
+    },
+    60_000
+  );
+
+  it(
+    "proposeMemoryFromSignal keeps source=model_tool for the no-credentials fallback",
+    async () => {
+      // The no-credentials / extraction-failure fallback seeds a full-turn
+      // fact through soul.emit_candidate_signal. That genuinely IS an
+      // agent-style proposal, so source=model_tool is the honest label —
+      // this divergence from the compile path is correct and must stay.
+      const daemon = await startBenchDaemon({
+        workspaceId: "harness-fallback-source-ws",
+        runId: "harness-fallback-source-run"
+      });
+      handles.push(daemon);
+
+      const seed = await daemon.proposeMemoryFromSignal({
+        signalKind: "potential_preference",
+        objectKind: "fact",
+        confidence: 0.9,
+        distilledFact: "A full degraded-path turn fact.",
+        turnContent: "A full degraded-path turn fact.",
+        evidenceRef: "fallback-source-q0",
+        extractionProvider: "no_credentials_fallback"
+      });
+
+      const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
+      const signal = await new SqliteSignalRepo(db).getById(seed.signalId);
+      expect(signal?.source).toBe(SignalSource.MODEL_TOOL);
+    },
+    60_000
+  );
+
+  it(
+    "does not autonomously sweep an enqueued POST_TURN_EXTRACT task",
+    async () => {
+      // The bench daemon must NOT start the daemon's autonomous
+      // GardenScheduler (the 60s interval + startup pass). That scheduler
+      // peekPendings POST_TURN_EXTRACT tasks across all workspaces and would
+      // race the bench's explicit proposeMemoriesFromGardenTask claim+complete
+      // sequence. This test enqueues a POST_TURN_EXTRACT task directly, then
+      // asserts it stays `pending` (no background tick / startup pass swept
+      // it) and is still claimable by the bench itself.
+      const daemon = await startBenchDaemon({
+        workspaceId: "harness-no-autotick-ws",
+        runId: "harness-no-autotick-run"
+      });
+      handles.push(daemon);
+
+      // enqueue() is a plain INSERT that never publishes events; this repo
+      // instance is used only to enqueue, so the publisher must never run.
+      const enqueueOnlyEventPublisher: GardenTaskEventPublisherPort = {
+        appendManyWithMutation: () => {
+          throw new Error("enqueue() must not publish events");
+        }
+      };
+      const gardenTaskRepo = new SqliteGardenTaskRepo(
+        initDatabase({ filename: join(daemon.dataDir, "alaya.db") }).connection,
+        enqueueOnlyEventPublisher
+      );
+      const { task_id: taskId } = gardenTaskRepo.enqueue({
+        workspace_id: daemon.workspaceId,
+        role: GardenRole.LIBRARIAN,
+        kind: GardenTaskKind.POST_TURN_EXTRACT,
+        payload: { run_id: daemon.runId }
+      });
+
+      // Give any startup pass / interval tick a real window to fire. Without
+      // the autonomous scheduler this is a no-op; with it, the startup
+      // runBackgroundPass would have processed the task by now.
+      await new Promise<void>((resolve) => setTimeout(resolve, 250));
+
+      // The task must still be pending — not claimed / completed / failed by
+      // an autonomous tick.
+      const afterWait = gardenTaskRepo.findById(taskId);
+      expect(afterWait).not.toBeNull();
+      expect(afterWait?.status).toBe("pending");
+
+      // And it is still claimable by the bench's own explicit garden-task
+      // path — the deterministic control the bench relies on.
+      const claimResult = await daemon.mcpClient.callTool({
+        name: "garden.claim_task",
+        arguments: { task_id: taskId }
+      });
+      expect(claimResult.isError).not.toBe(true);
+      const claimStructured = claimResult.structuredContent as
+        | Readonly<{ ok: true; output: GardenClaimTaskResponse }>
+        | undefined;
+      expect(claimStructured?.ok).toBe(true);
+      expect(claimStructured?.output.status).toBe("claimed");
+    },
+    60_000
   );
 });
 

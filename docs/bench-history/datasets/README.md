@@ -47,3 +47,28 @@ across upstream edits. The contract is:
    `run-full-locomo-bench.sh --data-dir <shared-cache>/locomo`.
 3. Bench-history entries cite the dataset checksum in their `kpi.json`
    `dataset.source` field.
+
+## Extraction cache fixture
+
+`longmemeval-extraction-cache/` holds the on-disk cache of the LongMemEval
+bench seed path's production garden extraction. Each haystack turn is run
+through `OfficialApiGardenProvider.compile()` (one LLM call → N typed
+candidate signals); the raw LLM response is cached here keyed by a SHA-256
+of the load-bearing extraction inputs only (model + system prompt + turn
+content) — never the volatile routing context (run_id / workspace_id) —
+sharded by the first two hex
+chars.
+
+This directory is **EMPTY on a fresh checkout** — it is not pre-populated.
+The first credentialled bench run extracts via the garden LLM and writes the
+fixture; that fixture must then be committed. Only after it is committed
+does a later run (CI, other contributors) reuse it with zero LLM calls and
+become one-click repeatable. Until the fixture is committed:
+
+- a fresh checkout **with** garden credentials re-extracts live, and
+- a fresh checkout **without** credentials takes the degraded no-LLM
+  single-fact fallback (the full turn becomes one candidate fact).
+
+Those two paths produce different ingestion granularity; the bench report
+discloses which path ran. See
+`apps/bench-runner/src/longmemeval/compile-seed.ts`.

@@ -1,0 +1,7 @@
+# Crash-orphaned atomic-write temp shards from createCachingSignalExtractor's
+# write-tmp-then-rename. A WSL2 OOM crash between writeFileSync and renameSync
+# leaves a `<key>.json.<uuid>.tmp` behind; it must never be committed as a
+# fixture. The whole `<key>.json` shards ARE committed (the repeatable bench
+# fixture) — only the temp shards are ignored.
+# see also: apps/bench-runner/src/longmemeval/compile-seed.ts writeCachedExtraction
+*.tmp
