@@ -50,6 +50,12 @@ export interface BenchTrendPoint {
   readonly r_at_10: number;
   readonly latency_ms_p95: number;
   readonly token_saved_ratio_vs_full_prompt: number;
+  // Event-sourced token-economy figures (S6). null on pre-S6 archives
+  // whose kpi.json carries no token_economy block.
+  readonly raw_history_tokens: number | null;
+  readonly stored_memory_tokens: number | null;
+  readonly recalled_context_tokens_mean: number | null;
+  readonly seed_event_count: number | null;
   readonly path_expansion_share: number | null;
   readonly graph_expansion_share: number | null;
 }
@@ -220,6 +226,12 @@ async function summarizeTrend(
       r_at_10: payload.kpi.r_at_10,
       latency_ms_p95: payload.kpi.latency_ms_p95,
       token_saved_ratio_vs_full_prompt: payload.kpi.token_saved_ratio_vs_full_prompt,
+      raw_history_tokens: payload.kpi.token_economy?.raw_history_tokens ?? null,
+      stored_memory_tokens:
+        payload.kpi.token_economy?.stored_memory_tokens ?? null,
+      recalled_context_tokens_mean:
+        payload.kpi.token_economy?.recalled_context_tokens_mean ?? null,
+      seed_event_count: payload.kpi.token_economy?.seed_event_count ?? null,
       path_expansion_share: expansion.pathExpansionShare,
       graph_expansion_share: expansion.graphExpansionShare
     });

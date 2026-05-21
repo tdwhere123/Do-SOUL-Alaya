@@ -1,6 +1,8 @@
 import { execSync } from "node:child_process";
 import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../version.js";
 import {
+  buildTokenEconomy,
+  computeTokenSavedRatio,
   diffKpis,
   entrySlug,
   readLatest,
@@ -12,7 +14,12 @@ import {
   type KpiPayload,
   type PerScenarioRow
 } from "@do-soul/alaya-eval";
-import { startBenchDaemon, type BenchEmbeddingMode } from "../harness/daemon.js";
+import {
+  startBenchDaemon,
+  type BenchEmbeddingMode,
+  type BenchTokenMetrics
+} from "../harness/daemon.js";
+import { aggregateBenchTokenMetrics } from "./token-economy.js";
 import {
   buildQuestionDiagnostic,
   rAt5WithProviderReturned,
@@ -71,6 +78,7 @@ interface QuestionResult {
   readonly seedTurnsTruncated: number;
   readonly answerTurnsTruncated: number;
   readonly seedCharsClipped: number;
+  readonly tokenMetrics: BenchTokenMetrics;
 }
 
 export async function runLongMemEvalMultiturn(
@@ -257,12 +265,17 @@ export async function runLongMemEvalMultiturn(
         });
       }
 
+      // Event-sourced token economy for this question's run; read back
+      // from the EventLog after every round's recall, before shutdown.
+      const tokenMetrics = await daemon.queryTokenMetrics();
+
       return {
         questionId: question.question_id,
         rounds: roundResults,
         seedTurnsTruncated,
         answerTurnsTruncated,
-        seedCharsClipped
+        seedCharsClipped,
+        tokenMetrics
       };
     } finally {
       await daemon.shutdown();
@@ -336,6 +349,12 @@ export async function runLongMemEvalMultiturn(
     )
   };
 
+  const tokenEconomyInput = aggregateBenchTokenMetrics(
+    collected.map((result) => result.tokenMetrics)
+  );
+  const tokenEconomy = buildTokenEconomy(tokenEconomyInput);
+  const tokenSavedRatio = computeTokenSavedRatio(tokenEconomyInput);
+
   const datasetSize = opts.fetchResult?.questionCount ?? questions.length;
   const split = variantToSplit(opts.variant);
   const payload: KpiPayload = {
@@ -379,7 +398,8 @@ export async function runLongMemEvalMultiturn(
       latency_ms_p50: latencyP50,
       latency_ms_p95: latencyP95,
       latency_source: "exact",
-      token_saved_ratio_vs_full_prompt: 0,
+      token_saved_ratio_vs_full_prompt: tokenSavedRatio,
+      token_economy: tokenEconomy,
       tier_distribution: tierDistribution,
       degradation_reasons: degradationReasons,
       seed_truncation: truncation,

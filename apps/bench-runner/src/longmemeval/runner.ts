@@ -17,6 +17,8 @@ import {
   type BenchPolicyShape,
   type BenchSimulateReportMode,
   type BenchSplit,
+  buildTokenEconomy,
+  computeTokenSavedRatio,
   type HistoryLayout,
   type KpiPayload,
   type PerScenarioRow
@@ -28,8 +30,10 @@ import {
   type BenchEmbeddingMode,
   type BenchQueryEmbeddingWarmupSummary,
   type BenchRecallOptions,
-  type BenchReportContextUsageInput
+  type BenchReportContextUsageInput,
+  type BenchTokenMetrics
 } from "../harness/daemon.js";
+import { aggregateBenchTokenMetrics } from "./token-economy.js";
 import {
   ALAYA_RECALL_WEIGHT_OVERRIDES_ENV,
   formatBenchRecallWeightOverrides,
@@ -207,6 +211,7 @@ export async function runLongMemEval(
     queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null;
     reportUsageStats: LongMemEvalReportSimulationStats;
     reportSideEffectSnapshot: LongMemEvalReportSideEffectSnapshot;
+    tokenMetrics: BenchTokenMetrics;
   };
 
   async function runOneQuestion(
@@ -332,6 +337,11 @@ export async function runLongMemEval(
       });
       const reportSideEffectSnapshot =
         await readLongMemEvalReportSideEffectSnapshot(question.question_id, daemon);
+      // Event-sourced token-economy figures for this question's run: read
+      // back from the EventLog after the seed loop and every recall, so
+      // each contributing SOUL_SIGNAL_EMITTED / SOUL_CONTEXT_LENS_ASSEMBLED
+      // row is already persisted. Must run before the finally-shutdown.
+      const tokenMetrics = await daemon.queryTokenMetrics();
 
       return {
         questionId: question.question_id,
@@ -348,7 +358,8 @@ export async function runLongMemEval(
         embeddingWarmup,
         queryEmbeddingWarmup,
         reportUsageStats: recallCycle.reportUsageStats,
-        reportSideEffectSnapshot
+        reportSideEffectSnapshot,
+        tokenMetrics
       };
     } finally {
       await daemon.shutdown();
@@ -406,6 +417,7 @@ export async function runLongMemEval(
   let reportsSkipped = 0;
   let reportUsedObjectCount = 0;
   const questionDiagnostics: LongMemEvalQuestionDiagnostic[] = [];
+  const tokenMetricsPerQuestion: BenchTokenMetrics[] = [];
   const reportSideEffectSnapshots: LongMemEvalReportSideEffectSnapshot[] = [];
   const embeddingWarmups: BenchEmbeddingWarmupSummary[] = [];
   const queryEmbeddingWarmups: BenchQueryEmbeddingWarmupSummary[] = [];
@@ -438,6 +450,7 @@ export async function runLongMemEval(
     reportsSkipped += res.reportUsageStats.reportsSkipped;
     reportUsedObjectCount += res.reportUsageStats.usedObjectCount;
     reportSideEffectSnapshots.push(res.reportSideEffectSnapshot);
+    tokenMetricsPerQuestion.push(res.tokenMetrics);
     perScenario.push({
       id: res.questionId,
       version: 1,
@@ -473,6 +486,12 @@ export async function runLongMemEval(
     longmemeval_m: "longmemeval-m"
   };
   const split = VARIANT_TO_SPLIT[opts.variant];
+
+  // Event-sourced token economy: aggregate the per-question EventLog-derived
+  // figures into one run total, then derive the headline saved ratio.
+  const tokenEconomyInput = aggregateBenchTokenMetrics(tokenMetricsPerQuestion);
+  const tokenEconomy = buildTokenEconomy(tokenEconomyInput);
+  const tokenSavedRatio = computeTokenSavedRatio(tokenEconomyInput);
 
   const payload: KpiPayload = {
     bench_name: "public",
@@ -531,8 +550,8 @@ export async function runLongMemEval(
       latency_ms_p50: latencyP50,
       latency_ms_p95: latencyP95,
       latency_source: "exact",
-      // @anchor token_saved_ratio: set to 0 until a token-budget baseline exists
-      token_saved_ratio_vs_full_prompt: 0,
+      token_saved_ratio_vs_full_prompt: tokenSavedRatio,
+      token_economy: tokenEconomy,
       tier_distribution: { hot: tierHot, warm: tierWarm, cold: tierCold },
       degradation_reasons: {
         none: degradeNone,

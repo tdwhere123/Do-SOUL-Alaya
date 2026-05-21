@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import {
+  buildTokenEconomy,
+  computeTokenSavedRatio,
   diffKpis,
   entrySlug,
   KpiPayloadSchema,
@@ -47,7 +49,8 @@ import { fetchLocomo } from "./locomo/fetch.js";
 import { runLocomo } from "./locomo/runner.js";
 import { runControlledReplay } from "./controlled-replay/runner.js";
 import { resolveBenchCommitSha7 } from "./version.js";
-import type { BenchEmbeddingMode } from "./harness/daemon.js";
+import type { BenchEmbeddingMode, BenchTokenMetrics } from "./harness/daemon.js";
+import { aggregateBenchTokenMetrics } from "./longmemeval/token-economy.js";
 import type { LongMemEvalVariant } from "./longmemeval/dataset.js";
 
 const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
@@ -879,8 +882,16 @@ async function runMergeLongMemEvalCommand(
     let evaluatedTotal = 0;
     let latencyP50Max = 0;
     let latencyP95Max = 0;
+    // Event-sourced token-economy blocks, one per shard that carries one.
+    // A merge is honest only when EVERY shard reported token_economy; a
+    // partial set would silently undercount, so the merged block is
+    // emitted only when all shards have it.
+    const shardTokenEconomies: BenchTokenMetrics[] = [];
 
     for (const shard of shardPayloads) {
+      if (shard.kpi.token_economy !== undefined) {
+        shardTokenEconomies.push(shard.kpi.token_economy);
+      }
       for (const row of shard.kpi.per_scenario) {
         perScenario.push(row);
       }
@@ -951,6 +962,23 @@ async function runMergeLongMemEvalCommand(
     const rAt10 = n === 0 ? 0 : totalHitAt10 / n;
     const qualityMetrics = mergeQualityMetrics(shardPayloads);
 
+    // Merge the event-sourced token economy across shards. Honest only
+    // when every shard carried a token_economy block; otherwise the
+    // merged block is dropped and the headline ratio falls back to 0.
+    const allShardsHaveTokenEconomy =
+      shardTokenEconomies.length === shardPayloads.length;
+    const mergedTokenEconomyInput = allShardsHaveTokenEconomy
+      ? aggregateBenchTokenMetrics(shardTokenEconomies)
+      : null;
+    const mergedTokenEconomy =
+      mergedTokenEconomyInput === null
+        ? undefined
+        : buildTokenEconomy(mergedTokenEconomyInput);
+    const mergedTokenSavedRatio =
+      mergedTokenEconomyInput === null
+        ? 0
+        : computeTokenSavedRatio(mergedTokenEconomyInput);
+
     const mergedLatencies = perScenario
       .map((row) => row.latency_ms)
       .filter((latency): latency is number => latency !== undefined);
@@ -1013,7 +1041,10 @@ async function runMergeLongMemEvalCommand(
         latency_ms_p95: latencyP95,
         // @anchor merged-latency-source: see kpi-schema @latency-source.
         latency_source: hasExactMergedLatency ? "exact" : "worst_shard_bound",
-        token_saved_ratio_vs_full_prompt: 0,
+        token_saved_ratio_vs_full_prompt: mergedTokenSavedRatio,
+        ...(mergedTokenEconomy === undefined
+          ? {}
+          : { token_economy: mergedTokenEconomy }),
         tier_distribution: { hot: tierHot, warm: tierWarm, cold: tierCold },
         degradation_reasons: {
           none: degradeNone,

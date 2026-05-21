@@ -192,6 +192,37 @@ const QualityMetricsSchema = z
   .strict();
 export type QualityMetrics = z.infer<typeof QualityMetricsSchema>;
 
+// @anchor token-economy: event-sourced token-economy figures, all
+// derived from the bench run's EventLog (SOUL_SIGNAL_EMITTED for the
+// ingested/stored sides, SOUL_CONTEXT_LENS_ASSEMBLED for the recalled
+// side — see apps/bench-runner/src/harness/daemon.ts queryTokenMetrics).
+// The block is OPTIONAL so pre-S6 kpi.json records stay schema-valid;
+// new LongMemEval runs always populate it. token_saved_ratio_vs_full_prompt
+// (KpiCore) is the headline ratio derived from these raw counts.
+const TokenEconomySchema = z
+  .object({
+    schema_version: z.literal("bench-token-economy.v1"),
+    // Token size of the full ingested haystack — what an agent would
+    // otherwise carry as raw conversation context. Each source turn is
+    // counted exactly once (a turn that the production extractor fans out
+    // into N fact signals is not multiplied by N).
+    raw_history_tokens: z.number().int().nonnegative(),
+    // Tokens held in the materialized durable memory after ingestion,
+    // summed over every seeded fact.
+    stored_memory_tokens: z.number().int().nonnegative(),
+    // Tokens delivered, summed over every recall in the run.
+    recalled_context_tokens_total: z.number().int().nonnegative(),
+    // Number of recalls (SOUL_CONTEXT_LENS_ASSEMBLED events) observed.
+    recall_event_count: z.number().int().nonnegative(),
+    // Mean tokens delivered per recall: what an agent receives to answer
+    // one question instead of re-reading the whole history.
+    recalled_context_tokens_mean: z.number().nonnegative(),
+    // Count of SOUL_SIGNAL_EMITTED events the figures were derived from.
+    seed_event_count: z.number().int().nonnegative()
+  })
+  .strict();
+export type TokenEconomy = z.infer<typeof TokenEconomySchema>;
+
 const KpiCoreSchema = z.object({
   r_at_1: RatioSchema,
   r_at_5: RatioSchema,
@@ -219,6 +250,9 @@ const KpiCoreSchema = z.object({
   latency_ms_p95: z.number().nonnegative(),
   latency_source: LatencySourceSchema,
   token_saved_ratio_vs_full_prompt: z.number(),
+  // Optional so pre-S6 kpi.json records stay schema-valid. When present,
+  // token_saved_ratio_vs_full_prompt is derived from this block.
+  token_economy: TokenEconomySchema.optional(),
   tier_distribution: TierDistributionSchema,
   degradation_reasons: DegradationReasonsSchema,
   seed_truncation: SeedTruncationSchema,

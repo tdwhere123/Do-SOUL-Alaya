@@ -11,11 +11,13 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
   CandidateMemorySignalSchema,
   ControlPlaneObjectKind,
+  RecallContextEventType,
   RunMode,
   RunState,
   ScopeClass,
   SignalEventType,
   SignalSource,
+  SoulContextLensAssembledPayloadSchema,
   SoulSignalMaterializedPayloadSchema,
   RetentionPolicy,
   SoulMemorySearchResponseSchema,
@@ -58,6 +60,13 @@ import {
   type BenchRecallWeightOverrides
 } from "./recall-weight-overrides.js";
 import { BenchRecallDiagnosticsSchema } from "./recall-diagnostics-schema.js";
+import {
+  BENCH_FULL_TURN_CONTENT_KEY,
+  BENCH_SEED_MARKER_KEY,
+  BENCH_STORED_CONTENT_KEY,
+  BENCH_TURN_SEED_INDEX_KEY,
+  deriveBenchTokenMetrics
+} from "../longmemeval/token-economy.js";
 
 export interface BenchDaemonOptions {
   readonly dataDirRoot?: string;
@@ -119,6 +128,13 @@ export interface BenchSignalSeedInput {
   readonly productionRawPayload?: Readonly<Record<string, unknown>>;
   /** Distinct evidence ref so the per-fact materialized object_id stays 1:1. */
   readonly evidenceRef: string;
+  /**
+   * Monotonic per-turn index within the bench run's daemon. One source turn
+   * fans out into N fact signals; every signal of the same turn carries the
+   * same turnSeedIndex. The token-economy fold uses it to count one turn's
+   * full-turn token size exactly ONCE, not once per fact.
+   */
+  readonly turnSeedIndex: number;
   /** Which extraction path produced this fact (audit / report disclosure). */
   readonly extractionProvider: "official_api_compile" | "no_credentials_fallback";
 }
@@ -141,6 +157,47 @@ export interface BenchReportContextUsageInput {
     }[];
   };
   readonly reason?: string;
+}
+
+/**
+ * @anchor BenchTokenMetrics — event-sourced token-economy figures.
+ *
+ * Every field is DERIVED from the bench run's EventLog, never recomputed
+ * ad hoc against in-memory state. The reader (queryTokenMetrics) scans:
+ *
+ * - SOUL_SIGNAL_EMITTED — every seed signal carries a bench-stamped KPI
+ *   block in raw_payload: `bench_full_turn_content` is the verbatim full
+ *   ingested turn, `bench_stored_content` is the durable fact the harness
+ *   seeded as memory_entry.content, `bench_turn_seed_index` is the source
+ *   turn's index. raw_history_tokens counts `bench_full_turn_content`
+ *   exactly ONCE per distinct turn index (a turn that fans out into N fact
+ *   signals is not counted N times); stored_memory_tokens sums
+ *   `bench_stored_content` over every fact signal (each is a distinct
+ *   memory_entry). These keys are written on BOTH the credentialled
+ *   compile path and the no-credentials fallback, so the figure is correct
+ *   regardless of which seed path ran.
+ * - SOUL_CONTEXT_LENS_ASSEMBLED — its total_token_estimate is the tokens
+ *   actually delivered for one recall. The harness emits this event from
+ *   the bench recall path (the bench bypasses ContextLensAssembler).
+ *
+ * raw_history_tokens   — token size of the full ingested haystack: what an
+ *                        agent would otherwise carry as raw context,
+ *                        counted once per source turn.
+ * stored_memory_tokens — tokens held in the materialized durable memory,
+ *                        summed over every seeded fact.
+ * recalled_context_tokens_total — tokens delivered summed over all recalls.
+ * recall_event_count   — number of SOUL_CONTEXT_LENS_ASSEMBLED events.
+ * recalled_context_tokens_mean — total / count (0 when count is 0): the
+ *                        tokens an agent receives for ONE recall.
+ */
+export interface BenchTokenMetrics {
+  readonly raw_history_tokens: number;
+  readonly stored_memory_tokens: number;
+  readonly recalled_context_tokens_total: number;
+  readonly recall_event_count: number;
+  readonly recalled_context_tokens_mean: number;
+  /** Count of SOUL_SIGNAL_EMITTED events the reader derived seeds from. */
+  readonly seed_event_count: number;
 }
 
 export interface BenchEmbeddingWarmupOptions {
@@ -290,6 +347,15 @@ export interface BenchDaemonHandle {
   proposeMemoriesFromCompileSignals(
     inputs: readonly BenchSignalSeedInput[]
   ): Promise<readonly SeededMemoryResult[]>;
+  /**
+   * @anchor queryTokenMetrics — event-sourced token-economy reader.
+   *
+   * Re-reads the bench run's EventLog (the SAME read pattern as
+   * readMaterializedMemoryId) and derives the token-economy figures from
+   * SOUL_SIGNAL_EMITTED + SOUL_CONTEXT_LENS_ASSEMBLED events. Call it after
+   * the seed loop and all recalls so every contributing event is present.
+   */
+  queryTokenMetrics(): Promise<BenchTokenMetrics>;
   shutdown(): Promise<void>;
 }
 
@@ -532,6 +598,10 @@ export async function startBenchDaemon(
       runId,
       policyOverride: policy
     });
+    // usedTokens (the lens event's total_token_estimate) sums only the
+    // recalled fact candidates — active constraints are delivered context
+    // but are governance rails, not recalled facts, so they are excluded
+    // from the token-economy figure by design.
     let usedTokens = 0;
     const activeConstraintIds = new Set(recallResult.active_constraints.map((constraint) => constraint.object_id));
     const resultCandidates = recallResult.candidates
@@ -553,6 +623,26 @@ export async function startBenchDaemon(
         ...recallResult.active_constraints.map((constraint) => constraint.object_id)
       ])],
       delivered_at: new Date().toISOString()
+    });
+    // @anchor bench-lens-event: the bench recall path drives recallService
+    // directly and does NOT route through ContextLensAssembler, so the
+    // SOUL_CONTEXT_LENS_ASSEMBLED event the production assembler emits is
+    // absent here. The token-economy KPI is event-sourced (S6), so the
+    // harness emits the SAME event type with the SAME payload schema after
+    // each bench recall: total_token_estimate is usedTokens — the summed
+    // token_estimate of the candidates actually delivered to the agent
+    // (recalled context). It uses the SAME summed-token-estimate
+    // construction the production assembler uses, but reuses each recall
+    // candidate's pre-computed token_estimate rather than re-estimating a
+    // lens-entry snapshot; same estimator and content, so the figures
+    // agree. The event is the single source of truth queryTokenMetrics
+    // reads back.
+    emitBenchContextLensAssembledEvent(dataDir, {
+      taskSurfaceRef: taskSurface.runtime_id,
+      lensEntryCount: results.length,
+      totalTokenEstimate: usedTokens,
+      runId,
+      workspaceId
     });
     const response = SoulMemorySearchResponseSchema.parse({
       delivery_id: deliveryId,
@@ -755,7 +845,21 @@ export async function startBenchDaemon(
           excerpt: safeContent,
           ...(safeDistilledFact === undefined
             ? {}
-            : { distilled_fact: safeDistilledFact })
+            : { distilled_fact: safeDistilledFact }),
+          // Event-sourced token-economy KPI block (S6). Each proposeMemory
+          // call seeds one self-contained turn, so it is its own turn for
+          // raw_history counting; the durable memory_entry.content is the
+          // distilled fact when supplied, else the seeded content itself.
+          // excerpt IS the full turn here and distilled_fact (when present)
+          // IS the durable fact, so the bench keys collapse to the
+          // turn-seed-index alone (here: absent) — the fold falls back to
+          // excerpt / distilled_fact, no second verbatim copy is serialized.
+          ...benchTokenEconomyPayload({
+            fullTurnContent: safeContent,
+            storedContent: safeDistilledFact ?? safeContent,
+            excerptSibling: safeContent,
+            distilledFactSibling: safeDistilledFact
+          })
         }
       }
     );
@@ -880,16 +984,35 @@ export async function startBenchDaemon(
     // extraction-failure fallback has no production payload; it carries the
     // full turn as excerpt (the degraded path, labelled extraction_provider
     // = no_credentials_fallback).
+    // Event-sourced token-economy KPI block (S6): the bench stamps the
+    // verbatim full ingested turn and the durable fact it seeds, plus the
+    // source turn index. The fold reads these back from the EventLog so the
+    // figure does not depend on the production raw_payload shape (which
+    // carries only a windowed turn_content_excerpt, never the full turn).
+    // The no-creds branch's excerpt / distilled_fact ARE the full turn /
+    // durable fact, so the content keys collapse away (fold falls back);
+    // the creds branch's production raw_payload has no such sibling, so the
+    // full turn IS stamped — exactly where it is needed.
+    const tokenEconomy = benchTokenEconomyPayload({
+      fullTurnContent: safeExcerpt,
+      storedContent: safeDistilledFact,
+      turnSeedIndex: input.turnSeedIndex,
+      ...(input.productionRawPayload === undefined
+        ? { excerptSibling: safeExcerpt, distilledFactSibling: safeDistilledFact }
+        : {})
+    });
     const rawPayload: Record<string, unknown> =
       input.productionRawPayload === undefined
         ? {
             excerpt: safeExcerpt,
             distilled_fact: safeDistilledFact,
-            extraction_provider: input.extractionProvider
+            extraction_provider: input.extractionProvider,
+            ...tokenEconomy
           }
         : {
             ...input.productionRawPayload,
-            extraction_provider: input.extractionProvider
+            extraction_provider: input.extractionProvider,
+            ...tokenEconomy
           };
 
     // The candidate's real signal_kind / object_kind are preserved so the
@@ -985,16 +1108,27 @@ export async function startBenchDaemon(
         input.distilledFact.length > SEED_CONTENT_MAX
           ? `${input.distilledFact.slice(0, SEED_CONTENT_MAX)} [truncated at ${SEED_CONTENT_MAX} chars]`
           : input.distilledFact;
+      // Event-sourced token-economy KPI block (S6) — see proposeMemoryFromSignal.
+      const tokenEconomy = benchTokenEconomyPayload({
+        fullTurnContent: clip.safe,
+        storedContent: safeDistilledFact,
+        turnSeedIndex: input.turnSeedIndex,
+        ...(input.productionRawPayload === undefined
+          ? { excerptSibling: clip.safe, distilledFactSibling: safeDistilledFact }
+          : {})
+      });
       const rawPayload: Record<string, unknown> =
         input.productionRawPayload === undefined
           ? {
               excerpt: clip.safe,
               distilled_fact: safeDistilledFact,
-              extraction_provider: input.extractionProvider
+              extraction_provider: input.extractionProvider,
+              ...tokenEconomy
             }
           : {
               ...input.productionRawPayload,
-              extraction_provider: input.extractionProvider
+              extraction_provider: input.extractionProvider,
+              ...tokenEconomy
             };
 
       const signal: CandidateMemorySignal = normalizeSchemaGroundedSignal(
@@ -1067,6 +1201,7 @@ export async function startBenchDaemon(
     proposeMemory,
     proposeMemoryFromSignal,
     proposeMemoriesFromCompileSignals,
+    queryTokenMetrics: () => queryTokenMetrics(dataDir),
     shutdown
   };
 }
@@ -1411,6 +1546,66 @@ async function findMaterializedMemoryId(
   return null;
 }
 
+// @anchor emitBenchContextLensAssembledEvent: append a
+// SOUL_CONTEXT_LENS_ASSEMBLED event from the bench recall path so the
+// token-economy KPI stays event-sourced. The bench recall path drives
+// recallService directly and skips ContextLensAssembler (which is the
+// production emitter of this event), so without this the EventLog carries
+// no recalled-context token figure. The payload is built through the
+// protocol's own SoulContextLensAssembledPayloadSchema — the same schema
+// the production assembler writes, so the event is schema-faithful.
+// initDatabase caches the connection by path
+// (the same handle the daemon holds); the connection is NOT closed here.
+function emitBenchContextLensAssembledEvent(
+  dataDir: string,
+  input: {
+    readonly taskSurfaceRef: string;
+    readonly lensEntryCount: number;
+    readonly totalTokenEstimate: number;
+    readonly runId: string;
+    readonly workspaceId: string;
+  }
+): void {
+  const db = initDatabase({ filename: join(dataDir, "alaya.db") });
+  const eventLogRepo = new SqliteEventLogRepo(db);
+  const lensRuntimeId = `bench_lens_${randomUUID().replace(/-/gu, "")}`;
+  eventLogRepo.append({
+    event_type: RecallContextEventType.SOUL_CONTEXT_LENS_ASSEMBLED,
+    entity_type: "context_lens",
+    entity_id: lensRuntimeId,
+    workspace_id: input.workspaceId,
+    run_id: input.runId,
+    caused_by: "bench-runner",
+    payload_json: SoulContextLensAssembledPayloadSchema.parse({
+      runtime_id: lensRuntimeId,
+      task_surface_ref: input.taskSurfaceRef,
+      lens_entry_count: input.lensEntryCount,
+      total_token_estimate: input.totalTokenEstimate,
+      run_id: input.runId,
+      workspace_id: input.workspaceId,
+      occurred_at: new Date().toISOString()
+    })
+  });
+}
+
+// @anchor queryTokenMetrics: event-sourced token-economy reader. Mirrors
+// readMaterializedMemoryId — opens the bench DB via the cached connection
+// and reads EventLog rows, never in-memory bench state. The pure event ->
+// metrics fold lives in longmemeval/token-economy.ts deriveBenchTokenMetrics
+// so it is unit-testable against a stubbed EventLog. The connection is NOT
+// closed here.
+async function queryTokenMetrics(dataDir: string): Promise<BenchTokenMetrics> {
+  const db = initDatabase({ filename: join(dataDir, "alaya.db") });
+  const eventLogRepo = new SqliteEventLogRepo(db);
+  const emittedEvents = await eventLogRepo.queryByType(
+    SignalEventType.SOUL_SIGNAL_EMITTED
+  );
+  const lensEvents = await eventLogRepo.queryByType(
+    RecallContextEventType.SOUL_CONTEXT_LENS_ASSEMBLED
+  );
+  return deriveBenchTokenMetrics(emittedEvents, lensEvents);
+}
+
 async function seedBenchWorkspaceAndRun(
   dataDir: string,
   workspaceId: string,
@@ -1453,6 +1648,54 @@ function restoreEnv(saved: Partial<Record<ManagedEnvKey, string | undefined>>): 
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+// @anchor benchTokenEconomyPayload: the bench KPI block stamped on every
+// seed signal's raw_payload so queryTokenMetrics can derive raw_history /
+// stored_memory from the EventLog. fullTurnContent is the verbatim ingested
+// turn (raw_history, counted once per turnSeedIndex); storedContent is the
+// durable fact the harness seeds as memory_entry.content (stored_memory,
+// summed per fact). turnSeedIndex de-duplicates a turn's N-fact fan-out;
+// omit it for a self-contained single-turn seed (proposeMemory).
+//
+// A bench content key is stamped ONLY when it would not byte-duplicate a
+// sibling raw_payload field: on the no-credentials path `excerpt` already IS
+// the full turn and `distilled_fact` already IS the durable fact, so
+// stamping a second verbatim copy would near-double the serialized
+// raw_payload and risk an over-cap drop. The fold falls back along
+// bench_full_turn_content -> excerpt and bench_stored_content ->
+// distilled_fact -> excerpt when the bench key is absent (token-economy.ts),
+// so the KPI is still complete. The stored fallback's terminal `excerpt`
+// mirrors the harness rule storedContent = distilledFact ?? content: when no
+// distilled fact is supplied the seeded content itself is the durable fact.
+// On the credentialled path `excerpt` carries only a narrow
+// turn_content_excerpt window, so the keys differ and ARE stamped.
+// see also: apps/bench-runner/src/longmemeval/token-economy.ts
+function benchTokenEconomyPayload(input: {
+  readonly fullTurnContent: string;
+  readonly storedContent: string;
+  readonly turnSeedIndex?: number;
+  readonly excerptSibling?: string;
+  readonly distilledFactSibling?: string;
+}): Record<string, unknown> {
+  const storedDuplicatesSibling =
+    input.storedContent === input.distilledFactSibling ||
+    (input.distilledFactSibling === undefined &&
+      input.storedContent === input.excerptSibling);
+  return {
+    // Content-free marker: always present so the fold can recognise a bench
+    // seed row even when every content key collapses away.
+    [BENCH_SEED_MARKER_KEY]: true,
+    ...(input.fullTurnContent === input.excerptSibling
+      ? {}
+      : { [BENCH_FULL_TURN_CONTENT_KEY]: input.fullTurnContent }),
+    ...(storedDuplicatesSibling
+      ? {}
+      : { [BENCH_STORED_CONTENT_KEY]: input.storedContent }),
+    ...(input.turnSeedIndex === undefined
+      ? {}
+      : { [BENCH_TURN_SEED_INDEX_KEY]: input.turnSeedIndex })
+  };
 }
 
 // see also: apps/bench-runner/src/version.ts

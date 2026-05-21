@@ -18,6 +18,9 @@ interface BenchTrendPoint {
   readonly r_at_10: number;
   readonly latency_ms_p95: number;
   readonly token_saved_ratio_vs_full_prompt: number;
+  readonly raw_history_tokens: number | null;
+  readonly stored_memory_tokens: number | null;
+  readonly recalled_context_tokens_mean: number | null;
   readonly path_expansion_share: number | null;
   readonly graph_expansion_share: number | null;
 }
@@ -55,6 +58,7 @@ const METRICS = [
   { key: "r_at_10", label: "R@10", format: formatPercent },
   { key: "latency_ms_p95", label: "p95", format: formatMs },
   { key: "token_saved_ratio_vs_full_prompt", label: "Saved", format: formatPercent },
+  { key: "recalled_context_tokens_mean", label: "Recall tok", format: formatTokensOrDash },
   { key: "path_expansion_share", label: "Path", format: formatPercentOrDash },
   { key: "graph_expansion_share", label: "Graph", format: formatPercentOrDash }
 ] as const;
@@ -246,4 +250,8 @@ function formatPercentOrDash(value: number | null): string {
 
 function formatMs(value: number | null): string {
   return value === null ? "—" : `${Math.round(value)} ms`;
+}
+
+function formatTokensOrDash(value: number | null): string {
+  return value === null ? "—" : `${Math.round(value).toLocaleString()} tok`;
 }

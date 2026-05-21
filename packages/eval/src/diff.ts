@@ -79,6 +79,32 @@ export function diffKpis(
     downgradeFail
   );
 
+  // @anchor token-economy-diff: secondary token-economy signal. The ratio
+  // above is the headline; this surfaces a swelling per-recall payload even
+  // when the ratio happens to stay flat (e.g. raw history grew in step).
+  // Gated on BOTH sides carrying the event-sourced token_economy block so a
+  // pre-S6 baseline never produces a spurious delta. Reuses the latency
+  // growth classifier — a bigger recalled-context mean is "growth_bad".
+  const currentEconomy = current.kpi.token_economy;
+  const previousEconomy = previous.kpi.token_economy;
+  if (currentEconomy !== undefined && previousEconomy !== undefined) {
+    const meanVerdict = classifyLatencyGrowth(
+      currentEconomy.recalled_context_tokens_mean,
+      previousEconomy.recalled_context_tokens_mean,
+      thresholds.latency_p95_growth_ratio
+    );
+    deltas.push({
+      key: "token_economy.recalled_context_tokens_mean",
+      current: currentEconomy.recalled_context_tokens_mean,
+      previous: previousEconomy.recalled_context_tokens_mean,
+      delta:
+        currentEconomy.recalled_context_tokens_mean -
+        previousEconomy.recalled_context_tokens_mean,
+      verdict: downgradeFail(meanVerdict.verdict),
+      direction: "growth_bad"
+    });
+  }
+
   const latencyVerdict = classifyLatencyGrowth(
     current.kpi.latency_ms_p95,
     previous.kpi.latency_ms_p95,

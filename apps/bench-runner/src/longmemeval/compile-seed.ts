@@ -724,6 +724,7 @@ async function extractSeedInputs(input: {
         confidence: 0.9,
         distilledFact: input.turnContent,
         turnContent: input.turnContent,
+        turnSeedIndex: input.seedIndex,
         extractionProvider: "no_credentials_fallback"
       }
     ];
@@ -748,6 +749,7 @@ async function extractSeedInputs(input: {
         confidence: 0.9,
         distilledFact: input.turnContent,
         turnContent: input.turnContent,
+        turnSeedIndex: input.seedIndex,
         extractionProvider: "no_credentials_fallback"
       }
     ];
@@ -811,6 +813,7 @@ async function extractSeedInputs(input: {
       confidence: signal.confidence,
       distilledFact: distilled,
       turnContent: input.turnContent,
+      turnSeedIndex: input.seedIndex,
       ...(matchedText === null ? {} : { matchedText }),
       // Forward the production signal's content-bearing raw_payload so the
       // bench evidence_capsule is built from the same matched_text span
@@ -840,6 +843,7 @@ async function extractSeedInputs(input: {
         confidence: 0.9,
         distilledFact: input.turnContent,
         turnContent: input.turnContent,
+        turnSeedIndex: input.seedIndex,
         extractionProvider: "official_api_compile"
       }
     ];

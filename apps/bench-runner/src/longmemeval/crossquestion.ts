@@ -1,6 +1,8 @@
 import { execSync } from "node:child_process";
 import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../version.js";
 import {
+  buildTokenEconomy,
+  computeTokenSavedRatio,
   diffKpis,
   entrySlug,
   readLatest,
@@ -12,7 +14,12 @@ import {
   type KpiPayload,
   type PerScenarioRow
 } from "@do-soul/alaya-eval";
-import { startBenchDaemon, type BenchEmbeddingMode } from "../harness/daemon.js";
+import {
+  startBenchDaemon,
+  type BenchEmbeddingMode,
+  type BenchTokenMetrics
+} from "../harness/daemon.js";
+import { aggregateBenchTokenMetrics } from "./token-economy.js";
 import {
   buildQuestionDiagnostic,
   rAt5WithProviderReturned,
@@ -104,6 +111,11 @@ export async function runLongMemEvalCrossQuestion(
 
   const sidecar = new Map<string, SidecarEntry>();
   const collected: QuestionResult[] = [];
+  // Event-sourced token economy: one shared daemon for the whole question
+  // sequence, so a single EventLog read after the loop yields the run
+  // totals directly. Captured inside the try, before the finally-shutdown;
+  // the empty-aggregate is the zero baseline if the run throws first.
+  let tokenEconomyInput: BenchTokenMetrics = aggregateBenchTokenMetrics([]);
   // invariant: one seed runner for the whole run so the on-disk extraction
   // cache and stats accumulate across questions; seed-time only.
   const seedRunner = createCompileSeedRunner();
@@ -288,9 +300,12 @@ export async function runLongMemEvalCrossQuestion(
         `facts=${seedRunner.stats.factsProduced} ` +
         `signals_dropped=${seedRunner.stats.signalsDropped}\n`
     );
+    tokenEconomyInput = await daemon.queryTokenMetrics();
   } finally {
     await daemon.shutdown();
   }
+  const tokenEconomy = buildTokenEconomy(tokenEconomyInput);
+  const tokenSavedRatio = computeTokenSavedRatio(tokenEconomyInput);
 
   const perScenario: PerScenarioRow[] = collected.map((result) => ({
     id: result.questionId,
@@ -380,7 +395,8 @@ export async function runLongMemEvalCrossQuestion(
       latency_ms_p50: latencyP50,
       latency_ms_p95: latencyP95,
       latency_source: "exact",
-      token_saved_ratio_vs_full_prompt: 0,
+      token_saved_ratio_vs_full_prompt: tokenSavedRatio,
+      token_economy: tokenEconomy,
       tier_distribution: tierDistribution,
       degradation_reasons: degradationReasons,
       seed_truncation: truncation,

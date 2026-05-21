@@ -17,8 +17,15 @@ export {
   type BenchSimulateReportMode,
   type PerScenarioRow,
   type SeedExtractionPath,
-  type TierDistribution
+  type TierDistribution,
+  type TokenEconomy
 } from "./kpi-schema.js";
+
+export {
+  buildTokenEconomy,
+  computeTokenSavedRatio,
+  type TokenEconomyInput
+} from "./token-economy.js";
 
 export {
   collectReleaseHardGates,

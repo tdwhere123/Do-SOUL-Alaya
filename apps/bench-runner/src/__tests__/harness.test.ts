@@ -322,6 +322,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
           turnContent: "I moved to Berlin last spring.",
           matchedText: "moved to Berlin",
           evidenceRef: "garden-source-q0-f0",
+          turnSeedIndex: 0,
           extractionProvider: "official_api_compile"
         },
         {
@@ -332,6 +333,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
           turnContent: "I moved to Berlin last spring.",
           matchedText: "started my job",
           evidenceRef: "garden-source-q0-f1",
+          turnSeedIndex: 0,
           extractionProvider: "official_api_compile"
         }
       ];
@@ -387,6 +389,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
         distilledFact: "A full degraded-path turn fact.",
         turnContent: "A full degraded-path turn fact.",
         evidenceRef: "fallback-source-q0",
+        turnSeedIndex: 0,
         extractionProvider: "no_credentials_fallback"
       });
 
@@ -552,6 +555,95 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       expect(
         result.seeds.some((seed) => recalledIds.has(seed.memoryId))
       ).toBe(true);
+    },
+    60_000
+  );
+
+  it(
+    "queryTokenMetrics derives the token economy from the EventLog end-to-end",
+    async () => {
+      // Integration round-trip for the S6 token-economy KPI: a compile turn
+      // that fans out into 2 fact signals, then a recall. The seed path
+      // appends 2 SOUL_SIGNAL_EMITTED events and the recall path emits 1
+      // SOUL_CONTEXT_LENS_ASSEMBLED event; queryTokenMetrics reads them all
+      // back. raw_history_tokens must count the ONE source turn once (not
+      // once per fact), and the recalled-context figures must round-trip the
+      // emitted lens event.
+      const daemon = await startBenchDaemon({
+        workspaceId: "harness-token-economy-ws",
+        runId: "harness-token-economy-run"
+      });
+      handles.push(daemon);
+
+      const cacheRoot = await mkdtemp(join(tmpdir(), "harness-tokenecon-cache-"));
+      tmpRoots.push(cacheRoot);
+      const runner = createCompileSeedRunner({
+        config: {
+          providerUrl: "https://example.test/v1",
+          model: "test-model",
+          apiKey: "test-key"
+        },
+        cacheRoot,
+        extractorFactory: () => ({
+          extract: async () => ({
+            rawJson: JSON.stringify({
+              signals: [
+                {
+                  signal_kind: "potential_preference",
+                  object_kind: "preference",
+                  confidence: 0.92,
+                  matched_text: "spend three days in Kyoto",
+                  distilled_fact: "The user plans three days in Kyoto."
+                },
+                {
+                  signal_kind: "potential_preference",
+                  object_kind: "fact",
+                  confidence: 0.88,
+                  matched_text: "prefers low-impact morning workouts",
+                  distilled_fact: "The user prefers low-impact morning workouts."
+                }
+              ]
+            })
+          })
+        })
+      });
+
+      const fullTurn =
+        "I'd like to spend three days in Kyoto, and I prefer low-impact morning workouts.";
+      const result = await runner.seedTurn({
+        daemon,
+        turnContent: fullTurn,
+        evidenceRefBase: "tokenecon-q0-t0",
+        seedIndex: 0,
+        workspaceId: daemon.workspaceId,
+        runId: daemon.runId
+      });
+      expect(result.seeds).toHaveLength(2);
+
+      await daemon.recall("Kyoto morning workouts", { maxResults: 5 });
+
+      const metrics = await daemon.queryTokenMetrics();
+
+      // Two fact signals were emitted for the one turn.
+      expect(metrics.seed_event_count).toBe(2);
+      // raw_history is the FULL turn counted ONCE (4 chars/token heuristic),
+      // not the per-fact sum and not a windowed excerpt.
+      expect(metrics.raw_history_tokens).toBe(Math.ceil(fullTurn.length / 4));
+      // stored_memory sums both distilled facts.
+      expect(metrics.stored_memory_tokens).toBe(
+        Math.ceil("The user plans three days in Kyoto.".length / 4) +
+          Math.ceil(
+            "The user prefers low-impact morning workouts.".length / 4
+          )
+      );
+      // The recall emitted exactly one SOUL_CONTEXT_LENS_ASSEMBLED event;
+      // with a single recall the mean equals the total (the emit->query
+      // round-trip of total_token_estimate).
+      expect(metrics.recall_event_count).toBe(1);
+      expect(metrics.recalled_context_tokens_total).toBe(
+        metrics.recalled_context_tokens_mean
+      );
+      expect(metrics.recalled_context_tokens_total).toBeGreaterThan(0);
     },
     60_000
   );
