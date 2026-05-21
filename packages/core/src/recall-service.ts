@@ -141,13 +141,13 @@ const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
 ];
 const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>> = Object.freeze({
   lexical_fts: 1,
-  evidence_fts: 1,
-  evidence_structural_agreement: 20,
+  evidence_fts: 3,
+  evidence_structural_agreement: 6,
   source_proximity: 1,
   source_evidence_agreement: 1,
   subject_alignment: 1,
   structural: 1,
-  existing_score: 1,
+  existing_score: 8,
   embedding_similarity: 1,
   graph_expansion: 1,
   path_expansion: 3,
