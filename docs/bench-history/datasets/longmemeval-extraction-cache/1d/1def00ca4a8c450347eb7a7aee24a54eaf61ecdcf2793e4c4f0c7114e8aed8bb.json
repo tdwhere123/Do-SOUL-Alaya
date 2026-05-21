@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "1def00ca4a8c450347eb7a7aee24a54eaf61ecdcf2793e4c4f0c7114e8aed8bb",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"opinion\",\"confidence\":0.83,\"matched_text\":\"based on the research data and reviews from food enthusiasts, the cacao and chili pairing seems to be a popular and recommended combination.\",\"distilled_fact\":\"The cacao and chili pairing seems to be a popular and recommended combination based on research data and reviews from food enthusiasts.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"description\",\"confidence\":0.8,\"matched_text\":\"The subtle bitterness of cacao and the heat of chili together provide a unique flavor experience that is both sweet and spicy.\",\"distilled_fact\":\"The subtle bitterness of cacao and the heat of chili together provide a unique flavor experience that is both sweet and spicy.\"}]}",
+  "extracted_at": "2026-05-21T07:45:48.524Z"
+}

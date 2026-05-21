@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "934ea2dce5e8b333581f7641c5c1717f4eb97e9c6fa3cfd5402b0b18712a8299",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"room_state\",\"confidence\":0.88,\"matched_text\":\"you've already converted the guest room into an office\",\"distilled_fact\":\"The guest room has already been converted into an office.\"}]}",
+  "extracted_at": "2026-05-21T09:09:48.220Z"
+}

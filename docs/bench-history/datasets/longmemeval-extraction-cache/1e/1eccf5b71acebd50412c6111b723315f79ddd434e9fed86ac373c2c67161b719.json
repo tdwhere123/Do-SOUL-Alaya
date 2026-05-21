@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "1eccf5b71acebd50412c6111b723315f79ddd434e9fed86ac373c2c67161b719",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"policy_query\",\"confidence\":0.86,\"matched_text\":\"Does the GDPR mention data locality\",\"distilled_fact\":\"The user asked whether the GDPR mentions data locality.\"}]}",
+  "extracted_at": "2026-05-21T07:58:17.071Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "2594236b40702b9827e07ff0aaaf51a6b13c95e85d18f5023f3924960a113284",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"music_genre\",\"confidence\":0.92,\"matched_text\":\"I've been meaning to explore more of the singer-songwriter and Americana genres\",\"distilled_fact\":\"The user has been meaning to explore more of the singer-songwriter and Americana genres.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.9,\"matched_text\":\"I've also been thinking about attending more concerts and music festivals this summer\",\"distilled_fact\":\"The user has been thinking about attending more concerts and music festivals in summer 2026.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"music_event\",\"confidence\":0.77,\"matched_text\":\"recommend some artists that would be a good fit for a summer festival\",\"distilled_fact\":\"The user is interested in artists that would be a good fit for a summer festival.\"}]}",
+  "extracted_at": "2026-05-21T09:12:20.326Z"
+}

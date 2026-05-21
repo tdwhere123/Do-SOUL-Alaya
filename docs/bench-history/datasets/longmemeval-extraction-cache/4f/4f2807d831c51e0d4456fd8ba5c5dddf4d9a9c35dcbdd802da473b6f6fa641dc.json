@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "4f2807d831c51e0d4456fd8ba5c5dddf4d9a9c35dcbdd802da473b6f6fa641dc",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"tool_preference\",\"confidence\":0.86,\"matched_text\":\"I'm trying to organize my life a bit better\",\"distilled_fact\":\"The user is trying to organize their life a bit better.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"task_management_app_preference\",\"confidence\":0.92,\"matched_text\":\"can you recommend some task management apps that can help me prioritize my work and personal tasks?\",\"distilled_fact\":\"The user wants task management apps that can help prioritize work tasks and personal tasks.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"planner_vs_digital_preference\",\"confidence\":0.89,\"matched_text\":\"I've been using a planner, but I think I need something more digital.\",\"distilled_fact\":\"The user has been using a planner.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"planner_vs_digital_preference\",\"confidence\":0.91,\"matched_text\":\"I've been using a planner, but I think I need something more digital.\",\"distilled_fact\":\"The user thinks they need something more digital than a planner.\"}]}",
+  "extracted_at": "2026-05-21T08:09:41.418Z"
+}

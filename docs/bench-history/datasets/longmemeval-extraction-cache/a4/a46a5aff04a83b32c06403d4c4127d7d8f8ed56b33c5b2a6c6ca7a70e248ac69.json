@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "a46a5aff04a83b32c06403d4c4127d7d8f8ed56b33c5b2a6c6ca7a70e248ac69",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"event\",\"confidence\":0.9,\"matched_text\":\"it's been three weeks since I last went to a barbecue party at Alex's house\",\"distilled_fact\":\"Three weeks have passed since the speaker last went to a barbecue party at Alex's house.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"action\",\"confidence\":0.74,\"matched_text\":\"I think I'll call ahead to check the wait times at Smokey's\",\"distilled_fact\":\"The speaker intends to call ahead to check the wait times at Smokey's.\"}]}",
+  "extracted_at": "2026-05-21T07:40:46.948Z"
+}

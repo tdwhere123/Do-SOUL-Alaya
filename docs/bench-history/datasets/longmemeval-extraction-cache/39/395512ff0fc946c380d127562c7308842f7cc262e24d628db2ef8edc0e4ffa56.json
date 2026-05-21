@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "395512ff0fc946c380d127562c7308842f7cc262e24d628db2ef8edc0e4ffa56",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"rules_question\",\"confidence\":0.96,\"matched_text\":\"how can a 5th level sorcerer cast the 2nd level druid spell flame blade\",\"distilled_fact\":\"A 5th level sorcerer can cast the 2nd level druid spell flame blade.\"}]}",
+  "extracted_at": "2026-05-21T07:55:47.188Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "3ce45734e0dee5bd2be99ec74410b6f316f347979d8c84ffcf85d447e7d372a2",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"action\",\"confidence\":0.92,\"matched_text\":\"I'm going to start with the article from McKinsey & Company.\",\"distilled_fact\":\"The user is going to start with the article from McKinsey & Company.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"workplace_action\",\"confidence\":0.88,\"matched_text\":\"Do you think it would be beneficial to also share these resources with my team at work, especially the ones on inclusive hiring practices and creating a mentorship program?\",\"distilled_fact\":\"The user is considering sharing the resources with the user's team at work, especially the resources on inclusive hiring practices and creating a mentorship program.\"}]}",
+  "extracted_at": "2026-05-21T09:05:49.268Z"
+}

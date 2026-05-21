@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "fac2c9aec67fc11786e0be5f63bb9d00a8fc80e2f624924fa96adb4ec668df4f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_opinion\",\"object_kind\":\"belief\",\"confidence\":0.78,\"matched_text\":\"Do you think that national identity based on shared experiences could ever be replaced by a more global identity?\",\"distilled_fact\":\"The speaker asked whether national identity based on shared experiences could ever be replaced by a more global identity.\"},{\"signal_kind\":\"potential_opinion\",\"object_kind\":\"belief\",\"confidence\":0.73,\"matched_text\":\"Or is national identity too ingrained in human nature?\",\"distilled_fact\":\"The speaker asked whether national identity is too ingrained in human nature.\"}]}",
+  "extracted_at": "2026-05-21T07:59:37.443Z"
+}

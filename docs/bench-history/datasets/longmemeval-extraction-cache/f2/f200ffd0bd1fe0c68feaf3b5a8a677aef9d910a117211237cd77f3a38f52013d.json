@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "f200ffd0bd1fe0c68feaf3b5a8a677aef9d910a117211237cd77f3a38f52013d",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"writing_project\",\"confidence\":0.9,\"matched_text\":\"I think I'll try to start small and focus on a specific region in my fantasy world, like the kingdom where my main character is from.\",\"distilled_fact\":\"The user wants to start small and focus on a specific region in the user's fantasy world, like the kingdom where the user's main character is from.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"writing_project\",\"confidence\":0.72,\"matched_text\":\"I'll ask myself questions about its history, culture, and magical systems.\",\"distilled_fact\":\"The user plans to ask the user questions about the kingdom's history, culture, and magical systems.\"}]}",
+  "extracted_at": "2026-05-21T09:14:49.868Z"
+}

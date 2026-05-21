@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "53dd7f2a4eeebd5d0be00c55b2bc942b9b9d58c4fee6ee1787af081efc3807b3",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"media_title\",\"confidence\":0.93,\"matched_text\":\"I think I'll go with \\\"The Shawshank Redemption\\\" on Amazon Prime.\",\"distilled_fact\":\"The user intends to watch \\\"The Shawshank Redemption\\\" on Amazon Prime.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"media_title\",\"confidence\":0.78,\"matched_text\":\"I've heard great things about it and I've been meaning to watch it for a while.\",\"distilled_fact\":\"The user has heard great things about \\\"The Shawshank Redemption\\\".\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"media_title\",\"confidence\":0.81,\"matched_text\":\"I've heard great things about it and I've been meaning to watch it for a while.\",\"distilled_fact\":\"The user has been meaning to watch \\\"The Shawshank Redemption\\\" for a while.\"}]}",
+  "extracted_at": "2026-05-21T09:03:16.690Z"
+}

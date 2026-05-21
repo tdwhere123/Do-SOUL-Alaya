@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7b5579e98d8c0980a3ba04a1ab7f592ccc7eff64537a46ea1432ca1d3df1cad1",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"task_instruction\",\"confidence\":0.91,\"matched_text\":\"Pretend you are a teacher lecturing a class about topic 4, plan a class around that.\",\"distilled_fact\":\"The user wants the assistant to pretend to be a teacher lecturing a class about topic 4 and to plan a class around topic 4.\"}]}",
+  "extracted_at": "2026-05-21T07:03:40.619Z"
+}

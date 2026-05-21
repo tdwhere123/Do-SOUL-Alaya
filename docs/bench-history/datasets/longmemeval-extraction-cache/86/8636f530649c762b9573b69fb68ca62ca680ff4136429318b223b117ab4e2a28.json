@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "8636f530649c762b9573b69fb68ca62ca680ff4136429318b223b117ab4e2a28",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"habit\",\"confidence\":0.93,\"matched_text\":\"you're aiming to use it at least three times a week\",\"distilled_fact\":\"The user aims to use foam rolling at least three times a week.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"activity\",\"confidence\":0.9,\"matched_text\":\"Using a foam roller after your morning yoga sessions\",\"distilled_fact\":\"The user uses a foam roller after morning yoga sessions.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"health_outcome\",\"confidence\":0.84,\"matched_text\":\"it's been helping with reducing muscle soreness\",\"distilled_fact\":\"Foam rolling has been helping the user reduce muscle soreness.\"}]}",
+  "extracted_at": "2026-05-21T07:02:08.112Z"
+}

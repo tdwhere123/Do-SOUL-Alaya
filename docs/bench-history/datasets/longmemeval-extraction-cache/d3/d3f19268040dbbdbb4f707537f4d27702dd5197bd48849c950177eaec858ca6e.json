@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "d3f19268040dbbdbb4f707537f4d27702dd5197bd48849c950177eaec858ca6e",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"event_plan\",\"confidence\":0.86,\"matched_text\":\"I'm trying to plan a dinner party for this weekend\",\"distilled_fact\":\"The user is trying to plan a dinner party for this weekend.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"meal_theme\",\"confidence\":0.9,\"matched_text\":\"I was thinking of doing an Italian-themed night\",\"distilled_fact\":\"The user is considering an Italian-themed dinner party.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"request\",\"confidence\":0.98,\"matched_text\":\"Can you give me some ideas for main courses and desserts?\",\"distilled_fact\":\"The user wants ideas for main courses and desserts.\"}]}",
+  "extracted_at": "2026-05-21T09:08:00.060Z"
+}

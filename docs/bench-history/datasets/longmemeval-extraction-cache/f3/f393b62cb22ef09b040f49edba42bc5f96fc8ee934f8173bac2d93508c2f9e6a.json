@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "f393b62cb22ef09b040f49edba42bc5f96fc8ee934f8173bac2d93508c2f9e6a",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"watch_collection_item\",\"confidence\":0.83,\"matched_text\":\"* **Repair Needed:** New leather strap\",\"distilled_fact\":\"The first watch in the watch collection requires a new leather strap.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"watch_collection_item\",\"confidence\":0.83,\"matched_text\":\"* **Repair Status:** Pending\",\"distilled_fact\":\"The repair status of the first watch in the watch collection is pending.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"watch_collection_item\",\"confidence\":0.83,\"matched_text\":\"* **Repair Needed:** Battery replacement\",\"distilled_fact\":\"The second watch in the watch collection requires a battery replacement.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"watch_collection_item\",\"confidence\":0.83,\"matched_text\":\"* **Repair Status:** Pending\",\"distilled_fact\":\"The repair status of the second watch in the watch collection is pending.\"}]}",
+  "extracted_at": "2026-05-21T08:05:36.624Z"
+}

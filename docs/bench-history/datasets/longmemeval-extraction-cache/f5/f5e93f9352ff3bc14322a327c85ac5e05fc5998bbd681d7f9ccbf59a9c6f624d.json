@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "f5e93f9352ff3bc14322a327c85ac5e05fc5998bbd681d7f9ccbf59a9c6f624d",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"topic\",\"confidence\":0.92,\"matched_text\":\"I've been trying to apply some of the concepts I learned from Crash Course to real-life situations\",\"distilled_fact\":\"The user has been trying to apply some of the concepts learned from Crash Course to real-life situations.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"interest\",\"confidence\":0.95,\"matched_text\":\"have you got any recommendations on astronomy apps that I can use to learn more about the night sky and celestial events?\",\"distilled_fact\":\"The user wants recommendations on astronomy apps that can be used to learn more about the night sky and celestial events.\"}]}",
+  "extracted_at": "2026-05-21T09:16:58.851Z"
+}

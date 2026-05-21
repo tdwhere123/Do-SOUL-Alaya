@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "219c35e3823dd019c90f528c640297f655898fccd69ecb01de3cbd2746bda210",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"game\",\"confidence\":0.93,\"matched_text\":\"I've been loving the action-adventure games like the one I'm currently playing, you know, the one with the Vikings?\",\"distilled_fact\":\"The user is currently playing an action-adventure game with Vikings.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"game\",\"confidence\":0.9,\"matched_text\":\"I think you might be referring to Assassin's Creed Valhalla!\",\"distilled_fact\":\"The game with Vikings is Assassin's Creed Valhalla.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"game_genre\",\"confidence\":0.95,\"matched_text\":\"I've been loving the action-adventure games\",\"distilled_fact\":\"The user likes action-adventure games.\"}]}",
+  "extracted_at": "2026-05-21T09:11:52.565Z"
+}

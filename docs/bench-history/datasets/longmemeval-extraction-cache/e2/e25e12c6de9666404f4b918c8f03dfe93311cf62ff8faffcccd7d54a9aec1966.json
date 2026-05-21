@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "e25e12c6de9666404f4b918c8f03dfe93311cf62ff8faffcccd7d54a9aec1966",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"media_preference\",\"confidence\":0.97,\"matched_text\":\"I've already seen Schitt's Creek and Brooklyn Nine-Nine\",\"distilled_fact\":\"The user has already seen Schitt's Creek and Brooklyn Nine-Nine.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"content_preference\",\"confidence\":0.88,\"matched_text\":\"Have you got any documentary recommendations?\",\"distilled_fact\":\"The user is interested in documentary recommendations.\"}]}",
+  "extracted_at": "2026-05-21T09:16:37.773Z"
+}

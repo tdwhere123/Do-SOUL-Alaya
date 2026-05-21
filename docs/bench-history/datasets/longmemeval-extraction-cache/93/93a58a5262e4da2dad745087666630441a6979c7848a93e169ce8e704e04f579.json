@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "93a58a5262e4da2dad745087666630441a6979c7848a93e169ce8e704e04f579",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"purchase\",\"confidence\":0.96,\"matched_text\":\"I just got my new Instant Pot and kitchen knives from the Amazon Prime Day sales\",\"distilled_fact\":\"The speaker got a new Instant Pot from the Amazon Prime Day sales.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"purchase\",\"confidence\":0.96,\"matched_text\":\"I just got my new Instant Pot and kitchen knives from the Amazon Prime Day sales\",\"distilled_fact\":\"The speaker got kitchen knives from the Amazon Prime Day sales.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.81,\"matched_text\":\"I'm excited to start cooking with them\",\"distilled_fact\":\"The speaker is excited to start cooking with the Instant Pot and kitchen knives.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"skill_level\",\"confidence\":0.88,\"matched_text\":\"Can you give me some recipe ideas for a beginner like me?\",\"distilled_fact\":\"The speaker is a beginner.\"}]}",
+  "extracted_at": "2026-05-21T08:10:23.471Z"
+}

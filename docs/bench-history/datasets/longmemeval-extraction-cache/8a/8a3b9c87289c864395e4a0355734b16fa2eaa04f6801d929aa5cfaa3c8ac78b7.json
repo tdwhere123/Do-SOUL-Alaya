@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "8a3b9c87289c864395e4a0355734b16fa2eaa04f6801d929aa5cfaa3c8ac78b7",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"writing_request_response\",\"confidence\":0.92,\"matched_text\":\"here's another haiku for your cover letter\",\"distilled_fact\":\"The assistant provided another haiku for the user's cover letter.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"poem_content\",\"confidence\":0.97,\"matched_text\":\"Destiny calls me,\\nTo Dash's team I must belong,\\nMy skills on display.\",\"distilled_fact\":\"The haiku contains the lines \\\"Destiny calls me,\\\" \\\"To Dash's team I must belong,\\\" and \\\"My skills on display.\\\"\"}]}",
+  "extracted_at": "2026-05-21T08:04:16.535Z"
+}

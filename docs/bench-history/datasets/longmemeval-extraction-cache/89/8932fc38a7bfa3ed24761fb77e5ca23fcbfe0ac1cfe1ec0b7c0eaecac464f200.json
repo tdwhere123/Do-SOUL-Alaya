@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "8932fc38a7bfa3ed24761fb77e5ca23fcbfe0ac1cfe1ec0b7c0eaecac464f200",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"flavor combinations\",\"confidence\":0.42,\"matched_text\":\"those all sound like interesting flavor combinations with cacao\",\"distilled_fact\":\"The speaker considers those flavor combinations with cacao interesting.\"},{\"signal_kind\":\"potential_request\",\"object_kind\":\"recommendation preference\",\"confidence\":0.55,\"matched_text\":\"which one would you recommend the most?\",\"distilled_fact\":\"The speaker asks which one would be recommended the most.\"}]}",
+  "extracted_at": "2026-05-21T07:45:46.485Z"
+}

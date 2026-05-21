@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "06a9c24cbb344c25ebf816ade3b879d978b43c31e7ebecd991789c9a68f2bdc7",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"future_event\",\"confidence\":0.92,\"matched_text\":\"I'm planning to give the blanket to Rachel and Lucas at their next family gathering.\",\"distilled_fact\":\"The user plans to give the blanket to Rachel and Lucas at their next family gathering.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"family_gathering\",\"confidence\":0.88,\"matched_text\":\"Speaking of which, I've been meaning to ask, do you have any ideas for fun baby games or activities that I can suggest to Rachel for their next family gathering?\",\"distilled_fact\":\"The user wants ideas for fun baby games or activities to suggest to Rachel for Rachel and Lucas's next family gathering.\"}]}",
+  "extracted_at": "2026-05-21T09:09:06.154Z"
+}

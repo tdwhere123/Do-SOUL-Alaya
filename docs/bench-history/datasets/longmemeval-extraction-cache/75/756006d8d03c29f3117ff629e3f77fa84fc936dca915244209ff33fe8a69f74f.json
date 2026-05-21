@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "756006d8d03c29f3117ff629e3f77fa84fc936dca915244209ff33fe8a69f74f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"communication\",\"confidence\":0.66,\"matched_text\":\"It can be overwhelming to make decisions with so many factors to consider, but these tips are helpful.\",\"distilled_fact\":\"The speaker finds it overwhelming to make decisions with so many factors to consider, and considers these tips helpful.\"},{\"signal_kind\":\"potential_request\",\"object_kind\":\"communication\",\"confidence\":0.92,\"matched_text\":\"Do you have any suggestions for where to start my research?\",\"distilled_fact\":\"The speaker asks for suggestions for where to start research.\"}]}",
+  "extracted_at": "2026-05-21T07:43:45.952Z"
+}

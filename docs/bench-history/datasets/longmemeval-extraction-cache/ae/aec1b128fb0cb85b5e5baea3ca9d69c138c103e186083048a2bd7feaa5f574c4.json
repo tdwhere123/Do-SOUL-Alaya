@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "aec1b128fb0cb85b5e5baea3ca9d69c138c103e186083048a2bd7feaa5f574c4",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"general_communication\",\"confidence\":0.79,\"matched_text\":\"It's really interesting how much body language and vocalizations can convey!\",\"distilled_fact\":\"Body language and vocalizations can convey a great deal.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"animal_communication\",\"confidence\":0.87,\"matched_text\":\"Do other animals communicate in similar ways?\",\"distilled_fact\":\"Other animals may communicate in similar ways.\"}]}",
+  "extracted_at": "2026-05-21T08:01:52.813Z"
+}

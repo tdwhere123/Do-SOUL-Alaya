@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "5e16d81659092e76375df45d225f46f4bec1d32e8f34687135b5f6df79aafca2",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"topic\",\"confidence\":0.62,\"matched_text\":\"How has the role of women in politics and society changed over time around the world?\",\"distilled_fact\":\"The user is interested in how the role of women in politics and society has changed over time around the world.\"}]}",
+  "extracted_at": "2026-05-21T07:52:32.156Z"
+}

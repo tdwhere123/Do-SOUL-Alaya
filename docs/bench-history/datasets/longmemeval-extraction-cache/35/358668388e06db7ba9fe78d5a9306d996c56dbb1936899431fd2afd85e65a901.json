@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "358668388e06db7ba9fe78d5a9306d996c56dbb1936899431fd2afd85e65a901",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"schedule\",\"confidence\":0.96,\"matched_text\":\"I'm still waking up around 8:30 AM\",\"distilled_fact\":\"The user is still waking up around 8:30 AM on non-yoga days.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"goal\",\"confidence\":0.96,\"matched_text\":\"I'd like to get closer to my 7:45 AM goal\",\"distilled_fact\":\"The user's wake-up-time goal on non-yoga days is 7:45 AM.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"schedule\",\"confidence\":0.92,\"matched_text\":\"you're already waking up at 6:45 AM on yoga days\",\"distilled_fact\":\"The user is waking up at 6:45 AM on yoga days.\"}]}",
+  "extracted_at": "2026-05-21T09:00:50.717Z"
+}

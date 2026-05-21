@@ -16,7 +16,10 @@ import {
   type GardenCompileContext
 } from "@do-soul/alaya-soul";
 import type { BenchSignalSeedInput, SeededMemoryResult } from "../harness/daemon.js";
-import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
+import {
+  canonicalizeSeedObjectKind,
+  rotatingSeedObjectKind
+} from "../harness/seed-rotation.js";
 
 /**
  * @anchor longmemeval-compile-seed
@@ -475,12 +478,12 @@ export function createGardenHttpExtractor(
 /** Minimal daemon surface the compile seed path needs — test-stubbable. */
 export interface CompileSeedDaemon {
   /**
-   * Seeds the production-extracted signals of ONE turn through the garden
-   * task completion path so they materialize with source = garden_compile —
-   * faithful to production POST_TURN_EXTRACT. Used for the credentialled
-   * compile path.
+   * Seeds the production-extracted signals of ONE round through the daemon's
+   * in-process signalService.receiveSignal — the same seam production
+   * POST_TURN_EXTRACT completion uses — so they materialize with
+   * source = garden_compile. Used for the credentialled compile path.
    */
-  proposeMemoriesFromGardenTask(
+  proposeMemoriesFromCompileSignals(
     inputs: readonly BenchSignalSeedInput[]
   ): Promise<readonly SeededMemoryResult[]>;
   /**
@@ -625,25 +628,37 @@ export function createCompileSeedRunner(options?: {
     );
 
     let seeds: readonly SeededMemoryResult[];
-    // extractSeedInputs returns a homogeneous list per turn — every signal
+    // extractSeedInputs returns a homogeneous list per round — every signal
     // is either official_api_compile (credentialled extraction) or
-    // no_credentials_fallback (degraded path). The compile path materializes
-    // through garden.complete_task so the seeded signals carry source =
-    // garden_compile, faithful to the production POST_TURN_EXTRACT
-    // completion; the fallback path uses soul.emit_candidate_signal, whose
-    // source = model_tool is the honest label for an agent-style full-turn
-    // proposal.
+    // no_credentials_fallback (degraded path). The compile path seeds through
+    // the daemon's in-process signalService.receiveSignal — the exact seam
+    // production POST_TURN_EXTRACT completion uses — so the seeded signals
+    // carry source = garden_compile, faithful to production; the fallback
+    // path uses soul.emit_candidate_signal, whose source = model_tool is the
+    // honest label for an agent-style full-round proposal.
     if (signalInputs[0]?.extractionProvider === "official_api_compile") {
-      // The whole turn's signals go through ONE garden task, matching
-      // production where one POST_TURN_EXTRACT task carries all of a turn's
-      // compile() signals. A bad signal kind aborts the batch — the same
-      // all-or-nothing per-task behaviour the production completion has.
+      // A signal the MaterializationRouter routed to evidence_only / deferred
+      // (no memory_entry — e.g. a sub-0.5-confidence signal) is skipped
+      // per-signal by proposeMemoriesFromCompileSignals, so the round's other
+      // healthy facts still seed; that signal surfaces here as a shortfall
+      // between requested inputs and returned seeds. A harder failure (a
+      // schema-parse error) still throws and aborts the round batch.
       try {
-        seeds = await input.daemon.proposeMemoriesFromGardenTask(signalInputs);
+        seeds = await input.daemon.proposeMemoriesFromCompileSignals(signalInputs);
+        const evidenceOnlySkipped = signalInputs.length - seeds.length;
+        if (evidenceOnlySkipped > 0) {
+          stats.signalsDropped += evidenceOnlySkipped;
+          process.stderr.write(
+            `[longmemeval compile-seed] ${evidenceOnlySkipped} signal(s) of ` +
+              `${signalInputs.length} did not materialize a memory_entry ` +
+              `(routed to evidence_only / deferred); the round's other facts ` +
+              `seeded normally\n`
+          );
+        }
       } catch (error) {
         stats.signalsDropped += signalInputs.length;
         process.stderr.write(
-          `[longmemeval compile-seed] dropped ${signalInputs.length} signal(s) during garden-task seed: ${stringifyError(error)}\n`
+          `[longmemeval compile-seed] dropped ${signalInputs.length} signal(s) during compile seed: ${stringifyError(error)}\n`
         );
         return { seeds: [], turnTruncated: false, charsClipped: 0 };
       }
@@ -776,19 +791,39 @@ async function extractSeedInputs(input: {
       continue;
     }
     const matchedText = readRawString(signal.raw_payload, "matched_text");
+    // invariant: the production compile() LLM emits a free-form object_kind
+    // (travel_itinerary / podcast / health_advice / …). MaterializationRouter
+    // routeByObjectKind only mints a memory_entry for its enumerated
+    // dimension table; any other kind on a high-confidence
+    // potential_claim / potential_preference signal routes to evidence_only
+    // — an evidence_capsule with NO memory_entry — so the seeded turn fact
+    // never lands in the recall store. Canonicalize the kind onto a
+    // memory_entry-producing route; preserve the LLM's choice in
+    // raw_payload.extracted_object_kind for audit fidelity.
+    // see also: apps/bench-runner/src/harness/seed-rotation.ts
+    //   canonicalizeSeedObjectKind
+    // see also: packages/soul/src/garden/materialization-router.ts
+    //   routeByObjectKind
+    const seedObjectKind = canonicalizeSeedObjectKind(signal.object_kind);
     drafts.push({
       signalKind: signal.signal_kind,
-      objectKind: signal.object_kind,
+      objectKind: seedObjectKind,
       confidence: signal.confidence,
       distilledFact: distilled,
       turnContent: input.turnContent,
       ...(matchedText === null ? {} : { matchedText }),
-      // Forward the production signal's schema-grounded raw_payload verbatim
-      // so the bench evidence_capsule is built from the same matched_text
-      // span production materializes (buildSignalSummary reads
-      // field_candidates[0].value). Without this the bench would carry the
-      // full turn as evidence — richer than production.
-      productionRawPayload: signal.raw_payload,
+      // Forward the production signal's content-bearing raw_payload so the
+      // bench evidence_capsule is built from the same matched_text span
+      // production materializes. The compile()-attached schema-grounding
+      // block (schema_grounding / detected_object / field_candidates /
+      // validation_result) is stripped here: it pins detected_object.
+      // object_kind to the ORIGINAL extracted kind, which — once the kind is
+      // canonicalized above — would mismatch signal.object_kind and trip
+      // signal-service.ts hasInvalidSchemaGrounding (→ deferred, no
+      // memory_entry). completeGardenTask re-runs normalizeSchemaGroundedSignal,
+      // which rebuilds a consistent schema-grounding block from the
+      // canonicalized object_kind + the matched_text retained below.
+      productionRawPayload: stripSchemaGrounding(signal.raw_payload, signal.object_kind),
       extractionProvider: "official_api_compile"
     });
   }
@@ -812,6 +847,40 @@ async function extractSeedInputs(input: {
 
   input.stats.factsProduced += drafts.length;
   return drafts;
+}
+
+/**
+ * Strip the compile()-attached schema-grounding block from a raw_payload so
+ * the bench seed signal can be re-grounded against a canonicalized
+ * object_kind. The four schema-grounding keys
+ * (`schema_grounding` / `detected_object` / `field_candidates` /
+ * `validation_result`) pin `detected_object.object_kind` to the ORIGINAL
+ * LLM-extracted kind. Once the bench canonicalizes the routing object_kind
+ * (canonicalizeSeedObjectKind), keeping that stale block makes
+ * signal-service.ts `hasInvalidSchemaGrounding` see
+ * `detected_object.object_kind !== signal.object_kind` and defer the signal
+ * (no memory_entry). Dropping the block lets completeGardenTask's
+ * `normalizeSchemaGroundedSignal` rebuild a consistent block from the
+ * canonicalized kind plus the retained `matched_text`.
+ *
+ * The original kind is preserved under `extracted_object_kind` for audit
+ * fidelity so the bench archive still records what the LLM actually chose.
+ */
+function stripSchemaGrounding(
+  rawPayload: Readonly<Record<string, unknown>>,
+  extractedObjectKind: string
+): Readonly<Record<string, unknown>> {
+  const {
+    schema_grounding: _schemaGrounding,
+    detected_object: _detectedObject,
+    field_candidates: _fieldCandidates,
+    validation_result: _validationResult,
+    ...contentBearing
+  } = rawPayload;
+  return {
+    ...contentBearing,
+    extracted_object_kind: extractedObjectKind
+  };
 }
 
 function readRawString(

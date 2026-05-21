@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "9ad63c23278d1db3c4a1869b4707c8c51ee93e9a29fd3cecd82426e3bf6f5bc7",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"meal_planning_preference\",\"confidence\":0.91,\"matched_text\":\"I'm thinking of serving a mix of pasta and non-pasta dishes.\",\"distilled_fact\":\"The user is thinking of serving a mix of pasta and non-pasta dishes.\"},{\"signal_kind\":\"potential_request\",\"object_kind\":\"food_planning_request\",\"confidence\":0.88,\"matched_text\":\"Can you give me some ideas for sides and appetizers that would complement the main courses?\",\"distilled_fact\":\"The user wants ideas for sides and appetizers that would complement the main courses.\"}]}",
+  "extracted_at": "2026-05-21T08:02:39.480Z"
+}

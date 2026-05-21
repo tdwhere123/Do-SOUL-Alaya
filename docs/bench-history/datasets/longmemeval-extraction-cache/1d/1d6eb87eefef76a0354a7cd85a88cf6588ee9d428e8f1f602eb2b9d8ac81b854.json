@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "1d6eb87eefef76a0354a7cd85a88cf6588ee9d428e8f1f602eb2b9d8ac81b854",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"device\",\"confidence\":0.92,\"matched_text\":\"I'm actually thinking of getting a smart plug for my floor lamp in the living room, so I can turn it on and off with my phone.\",\"distilled_fact\":\"The user is considering getting a smart plug for a floor lamp in the living room so the lamp can be turned on and off with a phone.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"device\",\"confidence\":0.88,\"matched_text\":\"I replaced the bulb in my bedside lamp with an LED one about three weeks ago\",\"distilled_fact\":\"The user replaced the bulb in the user's bedside lamp with an LED bulb about three weeks ago.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"opinion\",\"confidence\":0.8,\"matched_text\":\"it's been a game-changer.\",\"distilled_fact\":\"The user считает that replacing the bulb in the user's bedside lamp with an LED bulb has been a game-changer.\"}]}",
+  "extracted_at": "2026-05-21T09:04:44.414Z"
+}

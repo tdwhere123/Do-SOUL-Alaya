@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "81370c92d13cc5e3f82e4bf16172e993cba0ba70fe08afc45c79e3576ae4578a",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"home office design\",\"confidence\":0.96,\"matched_text\":\"I'm thinking of having a dedicated area for working from home, and also a comfortable reading nook with a floor lamp and a plush armchair.\",\"distilled_fact\":\"The user is thinking of having a dedicated area for working from home.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"reading nook design\",\"confidence\":0.96,\"matched_text\":\"I'm thinking of having a dedicated area for working from home, and also a comfortable reading nook with a floor lamp and a plush armchair.\",\"distilled_fact\":\"The user is thinking of having a comfortable reading nook with a floor lamp.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"reading nook furniture\",\"confidence\":0.96,\"matched_text\":\"I'm thinking of having a dedicated area for working from home, and also a comfortable reading nook with a floor lamp and a plush armchair.\",\"distilled_fact\":\"The user is thinking of having a comfortable reading nook with a plush armchair.\"}]}",
+  "extracted_at": "2026-05-21T09:09:46.547Z"
+}

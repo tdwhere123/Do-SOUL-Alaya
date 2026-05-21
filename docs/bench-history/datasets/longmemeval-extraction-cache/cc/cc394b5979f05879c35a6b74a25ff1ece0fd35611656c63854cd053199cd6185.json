@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "cc394b5979f05879c35a6b74a25ff1ece0fd35611656c63854cd053199cd6185",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"personal_experience\",\"confidence\":0.94,\"matched_text\":\"I actually attended a cocktail-making class recently and we learned how to make a classic Daiquiri and a Whiskey Sour.\",\"distilled_fact\":\"The user attended a cocktail-making class recently and learned how to make a classic Daiquiri and a Whiskey Sour.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"recipe_knowledge\",\"confidence\":0.91,\"matched_text\":\"The Daiquiri was surprisingly simple, just rum, lime juice, and simple syrup.\",\"distilled_fact\":\"The classic Daiquiri uses rum, lime juice, and simple syrup.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"cocktail\",\"confidence\":0.97,\"matched_text\":\"back to the Negroni\",\"distilled_fact\":\"The user is interested in a Negroni.\"}]}",
+  "extracted_at": "2026-05-21T09:17:30.094Z"
+}

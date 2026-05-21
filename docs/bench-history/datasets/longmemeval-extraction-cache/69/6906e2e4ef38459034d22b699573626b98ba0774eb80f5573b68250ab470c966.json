@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "6906e2e4ef38459034d22b699573626b98ba0774eb80f5573b68250ab470c966",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.91,\"matched_text\":\"I'm looking for some tips on how to take better photos of flowers.\",\"distilled_fact\":\"The user wants tips on how to take better photos of flowers.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"experience\",\"confidence\":0.89,\"matched_text\":\"I recently took some shots of blooming flowers in the park during my lunch break on February 22nd\",\"distilled_fact\":\"On February 22nd, the user took some shots of blooming flowers in the park during the user's lunch break.\"}]}",
+  "extracted_at": "2026-05-21T09:18:58.003Z"
+}

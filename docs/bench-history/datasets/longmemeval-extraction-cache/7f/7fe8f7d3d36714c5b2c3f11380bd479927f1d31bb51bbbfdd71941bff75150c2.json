@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7fe8f7d3d36714c5b2c3f11380bd479927f1d31bb51bbbfdd71941bff75150c2",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"movie_preference\",\"confidence\":0.92,\"matched_text\":\"I'm enjoying my movie-watching habits!\",\"distilled_fact\":\"The user is enjoying their movie-watching habits.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"movie_preference\",\"confidence\":0.97,\"matched_text\":\"recommend some sci-fi and action movies that prioritize storytelling and character development\",\"distilled_fact\":\"The user prefers sci-fi and action movies that prioritize storytelling and character development.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"movie_preference\",\"confidence\":0.84,\"matched_text\":\"These movies prioritize storytelling and character development, making them engaging and emotionally resonant.\",\"distilled_fact\":\"The user values movies that are engaging and emotionally resonant.\"}]}",
+  "extracted_at": "2026-05-21T07:53:28.884Z"
+}

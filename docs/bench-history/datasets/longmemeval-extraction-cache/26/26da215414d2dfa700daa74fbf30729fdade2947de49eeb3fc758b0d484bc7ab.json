@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "26da215414d2dfa700daa74fbf30729fdade2947de49eeb3fc758b0d484bc7ab",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"food_preference\",\"confidence\":0.95,\"matched_text\":\"I'm obsessed with hummus too!\",\"distilled_fact\":\"The speaker is obsessed with hummus.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"recipe_interest\",\"confidence\":0.91,\"matched_text\":\"Do you have any new hummus recipes I can try?\",\"distilled_fact\":\"The speaker wants to try new hummus recipes.\"}]}",
+  "extracted_at": "2026-05-21T07:53:49.100Z"
+}

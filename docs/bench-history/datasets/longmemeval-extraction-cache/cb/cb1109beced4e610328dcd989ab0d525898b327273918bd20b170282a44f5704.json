@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "cb1109beced4e610328dcd989ab0d525898b327273918bd20b170282a44f5704",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_request\",\"object_kind\":\"feature_request\",\"confidence\":0.89,\"matched_text\":\"add mouse click on chart to set alarm and stop trading lines which is draggable\",\"distilled_fact\":\"The user wants mouse click on chart to set an alarm.\"},{\"signal_kind\":\"potential_request\",\"object_kind\":\"feature_request\",\"confidence\":0.88,\"matched_text\":\"add mouse click on chart to set alarm and stop trading lines which is draggable\",\"distilled_fact\":\"The user wants mouse click on chart to stop trading lines.\"},{\"signal_kind\":\"potential_request\",\"object_kind\":\"feature_request\",\"confidence\":0.86,\"matched_text\":\"add mouse click on chart to set alarm and stop trading lines which is draggable\",\"distilled_fact\":\"The user wants the trading lines to be draggable.\"}]}",
+  "extracted_at": "2026-05-21T07:38:23.487Z"
+}

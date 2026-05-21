@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "d4aad2093dc1c2e62b1b053c2e0b529b77a582755fa25fe1eaef131618ea35b1",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"user\",\"confidence\":0.89,\"matched_text\":\"I think I'll definitely check out the temples and rice terraces.\",\"distilled_fact\":\"The user plans to check out the temples and rice terraces in Bali.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"user\",\"confidence\":0.96,\"matched_text\":\"I love trying new foods.\",\"distilled_fact\":\"The user loves trying new foods.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user\",\"confidence\":0.72,\"matched_text\":\"Do you have any recommendations for good places to eat in Bali?\",\"distilled_fact\":\"The user is interested in recommendations for good places to eat in Bali.\"}]}",
+  "extracted_at": "2026-05-21T08:12:52.727Z"
+}

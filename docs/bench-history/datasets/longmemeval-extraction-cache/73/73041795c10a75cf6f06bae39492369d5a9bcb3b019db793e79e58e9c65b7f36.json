@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "73041795c10a75cf6f06bae39492369d5a9bcb3b019db793e79e58e9c65b7f36",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"question\",\"confidence\":0.86,\"matched_text\":\"Do all mussel species have these defense mechanisms?\",\"distilled_fact\":\"The user asked whether all mussel species have these defense mechanisms.\"}]}",
+  "extracted_at": "2026-05-21T07:10:48.704Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "5aff823f5f31ceeb6cbb09de16a921e9d1fa2db2ec358a7721a6f180276281e5",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"organization\",\"confidence\":0.62,\"matched_text\":\"The local tourism board might not have information about local classes or workshops, as their primary focus is on promoting tourism and events in the area.\",\"distilled_fact\":\"The local tourism board's primary focus is on promoting tourism and events in the area.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"organization\",\"confidence\":0.6,\"matched_text\":\"However, they might be able to point you in the right direction or provide recommendations on who to contact for that information.\",\"distilled_fact\":\"The local tourism board might be able to point the user in the right direction or provide recommendations on who to contact for information about local classes or workshops.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"person\",\"confidence\":0.64,\"matched_text\":\"you can also ask other artisans or crafters in your network, like Rachel the jewelry maker, if they know of any good classes or workshops in the area.\",\"distilled_fact\":\"Rachel the jewelry maker is in the user's network.\"}]}",
+  "extracted_at": "2026-05-21T08:03:52.026Z"
+}

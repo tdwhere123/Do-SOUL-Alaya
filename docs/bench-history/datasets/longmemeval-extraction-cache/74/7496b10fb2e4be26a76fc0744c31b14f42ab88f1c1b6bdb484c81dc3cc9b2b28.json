@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7496b10fb2e4be26a76fc0744c31b14f42ab88f1c1b6bdb484c81dc3cc9b2b28",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"trip_preference\",\"confidence\":0.82,\"matched_text\":\"we'll look into a small luxury ship\",\"distilled_fact\":\"The user wants to look into a small luxury ship.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"trip_preference\",\"confidence\":0.86,\"matched_text\":\"sounds perfect for a romantic getaway\",\"distilled_fact\":\"The user considers a small luxury ship perfect for a romantic getaway.\"}]}",
+  "extracted_at": "2026-05-21T07:14:26.589Z"
+}

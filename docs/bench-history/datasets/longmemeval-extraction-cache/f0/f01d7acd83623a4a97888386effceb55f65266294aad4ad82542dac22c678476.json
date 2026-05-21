@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "f01d7acd83623a4a97888386effceb55f65266294aad4ad82542dac22c678476",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_preference\",\"confidence\":0.91,\"matched_text\":\"I've tried it before, but it turned out a bit too bitter.\",\"distilled_fact\":\"The user's previous Negroni turned out a bit too bitter.\"}]}",
+  "extracted_at": "2026-05-21T09:17:28.119Z"
+}

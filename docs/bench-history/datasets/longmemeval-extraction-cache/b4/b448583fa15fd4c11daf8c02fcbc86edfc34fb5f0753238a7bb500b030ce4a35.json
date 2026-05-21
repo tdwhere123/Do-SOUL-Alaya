@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "b448583fa15fd4c11daf8c02fcbc86edfc34fb5f0753238a7bb500b030ce4a35",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"financial_habit\",\"confidence\":0.98,\"matched_text\":\"I usually use my cashback earnings to offset my household expenses or save up for future purchases.\",\"distilled_fact\":\"The user usually uses cashback earnings to offset household expenses or save up for future purchases.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"financial_habit\",\"confidence\":0.94,\"matched_text\":\"It's always nice to have a little extra cash on hand to cover unexpected expenses or splurge on something I've been wanting.\",\"distilled_fact\":\"The user likes having a little extra cash on hand to cover unexpected expenses or splurge on something the user has been wanting.\"}]}",
+  "extracted_at": "2026-05-21T09:01:52.050Z"
+}

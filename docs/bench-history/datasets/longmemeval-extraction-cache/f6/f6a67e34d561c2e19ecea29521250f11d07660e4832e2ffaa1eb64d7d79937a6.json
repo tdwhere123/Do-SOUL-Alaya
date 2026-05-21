@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "f6a67e34d561c2e19ecea29521250f11d07660e4832e2ffaa1eb64d7d79937a6",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.92,\"matched_text\":\"I'll definitely try a flight of beers next time I'm at a brewery.\",\"distilled_fact\":\"The user will definitely try a flight of beers the next time the user is at a brewery.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"preference\",\"confidence\":0.84,\"matched_text\":\"beer and food pairing are highly dependent on your personal preferences\",\"distilled_fact\":\"Beer and food pairing are highly dependent on a person's personal preferences.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"advice\",\"confidence\":0.88,\"matched_text\":\"don't be afraid to try different combinations to find what works best for you. Experiment and have fun!\",\"distilled_fact\":\"A person should try different combinations to find what works best for that person.\"}]}",
+  "extracted_at": "2026-05-21T09:12:51.106Z"
+}

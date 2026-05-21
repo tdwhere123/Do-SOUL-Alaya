@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "51eac591bb6817cddd57aa09073220a3857e03e90000a7c78c97ed7a659e2a66",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"pet\",\"confidence\":0.89,\"matched_text\":\"I'm thinking of getting a new leash for Max.\",\"distilled_fact\":\"The user's pet Max needs a new leash.\"}]}",
+  "extracted_at": "2026-05-21T08:57:01.909Z"
+}

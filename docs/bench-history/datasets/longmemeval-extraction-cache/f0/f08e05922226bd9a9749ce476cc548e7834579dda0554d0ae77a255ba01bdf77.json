@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "f08e05922226bd9a9749ce476cc548e7834579dda0554d0ae77a255ba01bdf77",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"media_preference\",\"confidence\":0.92,\"matched_text\":\"I've been watching a lot of movies on weekends lately, and I think I've watched around 10 out of my last 15 movies on either Saturday or Sunday.\",\"distilled_fact\":\"The user has watched around 10 out of the user's last 15 movies on either Saturday or Sunday.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"media_preference\",\"confidence\":0.97,\"matched_text\":\"recommend some sci-fi or action movies that are less than 2 hours long\",\"distilled_fact\":\"The user wants recommendations for sci-fi or action movies that are less than 2 hours long.\"}]}",
+  "extracted_at": "2026-05-21T09:03:09.757Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "fc893618dc27b8d0b28b078dc5f74231372e2c4a1e654b3d131b0864c74d52ab",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity_travel_interest\",\"confidence\":0.86,\"matched_text\":\"I'm excited to start my surfing adventure in Bali now.\",\"distilled_fact\":\"The user is excited to start a surfing adventure in Bali now.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"travel_destination\",\"confidence\":0.81,\"matched_text\":\"I'm excited to start my surfing adventure in Bali now.\",\"distilled_fact\":\"The user is in Bali now.\"}]}",
+  "extracted_at": "2026-05-21T08:12:46.078Z"
+}

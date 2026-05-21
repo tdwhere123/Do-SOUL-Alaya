@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "bb33ef5ea4e02d050521400540fcd536584cd1c7e9704cf16f1d110d0fc92f6a",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"routine\",\"confidence\":0.91,\"matched_text\":\"I like this routine\",\"distilled_fact\":\"The user likes this routine.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"sleep_schedule\",\"confidence\":0.95,\"matched_text\":\"I've been waking up at 7:30 am lately\",\"distilled_fact\":\"The user has been waking up at 7:30 am lately.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"schedule_constraint\",\"confidence\":0.89,\"matched_text\":\"I'm worried about waking up at 7:00 am on days with morning meetings\",\"distilled_fact\":\"The user is worried about waking up at 7:00 am on days with morning meetings.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"capability\",\"confidence\":0.86,\"matched_text\":\"I'm not sure if I can wake up 30 minutes earlier consistently\",\"distilled_fact\":\"The user is not sure whether they can wake up 30 minutes earlier consistently.\"}]}",
+  "extracted_at": "2026-05-21T07:51:14.552Z"
+}

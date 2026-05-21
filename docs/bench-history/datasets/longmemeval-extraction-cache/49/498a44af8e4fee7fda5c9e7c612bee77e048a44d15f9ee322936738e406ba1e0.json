@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "498a44af8e4fee7fda5c9e7c612bee77e048a44d15f9ee322936738e406ba1e0",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"schedule\",\"confidence\":0.92,\"matched_text\":\"I need to leave for work at 8:45 am on regular days, and around 8:15 am on days with morning meetings.\",\"distilled_fact\":\"The speaker needs to leave for work at 8:45 am on regular days.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"schedule\",\"confidence\":0.92,\"matched_text\":\"I need to leave for work at 8:45 am on regular days, and around 8:15 am on days with morning meetings.\",\"distilled_fact\":\"The speaker needs to leave for work at around 8:15 am on days with morning meetings.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"time_requirement\",\"confidence\":0.89,\"matched_text\":\"It usually takes me about 45 minutes to get ready.\",\"distilled_fact\":\"It usually takes the speaker about 45 minutes to get ready.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"meal_routine\",\"confidence\":0.9,\"matched_text\":\"I'd like to spend about 30 minutes eating my oatmeal and enjoying my breakfast.\",\"distilled_fact\":\"The speaker would like to spend about 30 minutes eating oatmeal and enjoying breakfast.\"}]}",
+  "extracted_at": "2026-05-21T07:51:05.113Z"
+}

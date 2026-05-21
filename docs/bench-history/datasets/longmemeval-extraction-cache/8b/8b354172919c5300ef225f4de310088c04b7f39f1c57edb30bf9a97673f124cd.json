@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "8b354172919c5300ef225f4de310088c04b7f39f1c57edb30bf9a97673f124cd",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"schedule_goal\",\"confidence\":0.96,\"matched_text\":\"I think a more gradual approach to adjusting my wake-up time on non-yoga days is a great idea.\",\"distilled_fact\":\"The user prefers a more gradual approach to adjusting wake-up time on non-yoga days.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"plan\",\"confidence\":0.98,\"matched_text\":\"I'll try to wake up 15-30 minutes earlier each day and work my way up to my desired wake-up time of 7:45 AM.\",\"distilled_fact\":\"The user plans to wake up 15-30 minutes earlier each day.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"schedule_goal\",\"confidence\":0.99,\"matched_text\":\"I'll try to wake up 15-30 minutes earlier each day and work my way up to my desired wake-up time of 7:45 AM.\",\"distilled_fact\":\"The user's desired wake-up time is 7:45 AM on non-yoga days.\"}]}",
+  "extracted_at": "2026-05-21T09:00:58.302Z"
+}

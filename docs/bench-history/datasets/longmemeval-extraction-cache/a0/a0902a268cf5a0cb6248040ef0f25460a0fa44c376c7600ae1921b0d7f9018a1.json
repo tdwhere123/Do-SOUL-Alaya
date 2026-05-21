@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "a0902a268cf5a0cb6248040ef0f25460a0fa44c376c7600ae1921b0d7f9018a1",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"task_request\",\"confidence\":0.89,\"matched_text\":\"Can you give me numbered topics on radiation therapy that could be used to lecture a class on that subject ?\",\"distilled_fact\":\"The user wants numbered topics on radiation therapy that could be used to lecture a class on that subject.\"}]}",
+  "extracted_at": "2026-05-21T07:02:55.838Z"
+}

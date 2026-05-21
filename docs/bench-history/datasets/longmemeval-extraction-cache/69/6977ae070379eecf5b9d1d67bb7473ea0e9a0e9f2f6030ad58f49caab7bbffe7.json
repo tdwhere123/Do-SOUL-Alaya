@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "6977ae070379eecf5b9d1d67bb7473ea0e9a0e9f2f6030ad58f49caab7bbffe7",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"event_memory\",\"confidence\":0.77,\"matched_text\":\"My favorite moment was probably when Jose Altuve hit that walk-off homer in Game 2.\",\"distilled_fact\":\"The user’s favorite moment was probably when Jose Altuve hit that walk-off homer in Game 2.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"personal_experience\",\"confidence\":0.74,\"matched_text\":\"I was watching it with my dad, and we both went nuts!\",\"distilled_fact\":\"The user was watching it with their dad during the game.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"relationship_memory\",\"confidence\":0.66,\"matched_text\":\"I was watching it with my dad, and we both went nuts!\",\"distilled_fact\":\"The user and the user's dad both went nuts while watching the game.\"}]}",
+  "extracted_at": "2026-05-21T09:00:02.226Z"
+}

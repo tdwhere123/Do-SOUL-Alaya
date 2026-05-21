@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BENCH_SEED_ROTATION,
+  canonicalizeSeedObjectKind,
   rotatingSeedObjectKind,
   type SeedObjectKind
 } from "../harness/seed-rotation.js";
@@ -45,5 +46,53 @@ describe("rotatingSeedObjectKind", () => {
     const memoryHits = [...memoryOnly].filter((kind) => set.has(kind));
     expect(claimHits.length).toBeGreaterThan(0);
     expect(memoryHits.length).toBeGreaterThan(0);
+  });
+});
+
+describe("canonicalizeSeedObjectKind", () => {
+  // invariant: routeByObjectKind only mints a memory_entry for its
+  // enumerated dimension table. Any other object_kind on a high-confidence
+  // potential_claim / potential_preference signal routes to evidence_only
+  // (no memory_entry). The bench seed needs a durable memory_entry per turn
+  // fact, so a free-form extracted kind must be canonicalized.
+  // see also: packages/soul/src/garden/materialization-router.ts
+  //   routeByObjectKind
+  it("maps a free-form extracted object_kind onto the fact route", () => {
+    for (const freeForm of [
+      "travel_itinerary",
+      "health_advice",
+      "podcast",
+      "landmark",
+      "user_preference",
+      "concept",
+      "lesson plan"
+    ]) {
+      expect(canonicalizeSeedObjectKind(freeForm)).toBe("fact");
+    }
+  });
+
+  it("keeps a kind that already routes to a memory_entry verbatim", () => {
+    for (const routed of [
+      "preference",
+      "decision",
+      "constraint",
+      "procedure",
+      "hazard",
+      "factual_policy",
+      "exception",
+      "glossary",
+      "episode",
+      "outcome",
+      "reference",
+      "task_state",
+      "fact"
+    ]) {
+      expect(canonicalizeSeedObjectKind(routed)).toBe(routed);
+    }
+  });
+
+  it("normalizes case and surrounding whitespace before matching", () => {
+    expect(canonicalizeSeedObjectKind("  Preference  ")).toBe("preference");
+    expect(canonicalizeSeedObjectKind("DECISION")).toBe("decision");
   });
 });

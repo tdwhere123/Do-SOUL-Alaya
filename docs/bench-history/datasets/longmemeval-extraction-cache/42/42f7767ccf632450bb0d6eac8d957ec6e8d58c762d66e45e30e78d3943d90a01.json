@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "42f7767ccf632450bb0d6eac8d957ec6e8d58c762d66e45e30e78d3943d90a01",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"belief\",\"confidence\":0.78,\"matched_text\":\"empowering women and engaging men can help reduce gender-based violence\",\"distilled_fact\":\"Empowering women and engaging men can help reduce gender-based violence.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"question\",\"confidence\":0.61,\"matched_text\":\"How can we encourage more men to get involved in promoting gender equality?\",\"distilled_fact\":\"The speaker asks how to encourage more men to get involved in promoting gender equality.\"}]}",
+  "extracted_at": "2026-05-21T07:52:53.018Z"
+}

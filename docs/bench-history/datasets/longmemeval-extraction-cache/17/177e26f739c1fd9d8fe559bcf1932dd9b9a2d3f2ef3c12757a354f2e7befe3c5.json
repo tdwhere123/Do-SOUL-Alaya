@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "177e26f739c1fd9d8fe559bcf1932dd9b9a2d3f2ef3c12757a354f2e7befe3c5",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"behavioral_intention\",\"confidence\":0.89,\"matched_text\":\"I'm definitely going to try to do better about that from now on.\",\"distilled_fact\":\"The speaker intends to do better about properly disposing of plastic waste from now on.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"belief\",\"confidence\":0.84,\"matched_text\":\"I never realized how important it is to properly dispose of plastic waste.\",\"distilled_fact\":\"The speaker believes that properly disposing of plastic waste is important.\"}]}",
+  "extracted_at": "2026-05-21T07:54:53.933Z"
+}

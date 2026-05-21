@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7bbc349b204305acd2121fada659bbe573ee29c655cc4be0213964089fe3d915",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user situation\",\"confidence\":0.79,\"matched_text\":\"you're well-prepared to host a fantastic dinner party\",\"distilled_fact\":\"The user is well-prepared to host a fantastic dinner party.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"home improvement\",\"confidence\":0.84,\"matched_text\":\"replacing the kitchen faucet has made a big difference in your kitchen\",\"distilled_fact\":\"Replacing the kitchen faucet has made a big difference in the user's kitchen.\"}]}",
+  "extracted_at": "2026-05-21T08:03:17.405Z"
+}

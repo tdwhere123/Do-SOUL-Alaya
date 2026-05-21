@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "72407efe5888858e99e318c11a66c39844c6d6e958fd2ba8b188ef243b781c32",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"exercise_focus\",\"confidence\":0.94,\"matched_text\":\"especially since I've been doing a lot of cardio with the 5K run and recreational soccer league. Do you have any tips on how to create a strength training plan that focuses on exercises for my legs, core, and glutes?\",\"distilled_fact\":\"The user wants a strength training plan that focuses on exercises for the user's legs, core, and glutes.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"exercise_routine\",\"confidence\":0.89,\"matched_text\":\"especially since I've been doing a lot of cardio with the 5K run and recreational soccer league.\",\"distilled_fact\":\"The user has been doing a lot of cardio with a 5K run and a recreational soccer league.\"}]}",
+  "extracted_at": "2026-05-21T09:15:29.728Z"
+}

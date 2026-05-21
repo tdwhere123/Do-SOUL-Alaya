@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7a0476ff950ba2693e4eaa69210e667b59e69670bb8bd3583adb9b44c49fa20c",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"health/footwear\",\"confidence\":0.74,\"matched_text\":\"I think new insoles might help alleviate it.\",\"distilled_fact\":\"The speaker thinks new insoles might help alleviate the speaker's foot pain.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"health/location\",\"confidence\":0.86,\"matched_text\":\"I've been meaning to go to the running store near my house to get some advice on which ones to get.\",\"distilled_fact\":\"The speaker has been meaning to go to the running store near the speaker's house to get advice on which insoles to get.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"health/footwear\",\"confidence\":0.63,\"matched_text\":\"Do you think I should get custom-made orthotics or just a regular support insole?\",\"distilled_fact\":\"The speaker is considering custom-made orthotics or a regular support insole.\"}]}",
+  "extracted_at": "2026-05-21T08:11:45.719Z"
+}

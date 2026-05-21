@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "23a7c84e3c4e72d514fba9822008b4567d46e88f0cb149f9a5422871fd8a0a0e",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"plan\",\"confidence\":0.72,\"matched_text\":\"I'll consult with my trainer\",\"distilled_fact\":\"The speaker will consult with their trainer.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"routine\",\"confidence\":0.66,\"matched_text\":\"a pre-workout supplement would be a good addition to my routine\",\"distilled_fact\":\"The speaker considers a pre-workout supplement a possible good addition to their routine.\"}]}",
+  "extracted_at": "2026-05-21T08:00:42.635Z"
+}

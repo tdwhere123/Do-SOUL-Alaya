@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "453cfe24589e298f5f98f9c6c7f8592c42dbdd5cc880fd3f4a41a45d73fce175",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"pet_camera\",\"confidence\":0.84,\"matched_text\":\"I'm thinking of getting a new pet camera to keep an eye on Luna and Max when I'm not at home.\",\"distilled_fact\":\"The speaker is thinking of getting a new pet camera to keep an eye on Luna and Max when the speaker is not at home.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"pet_bed\",\"confidence\":0.9,\"matched_text\":\"I recently got a new pet bed for Luna\",\"distilled_fact\":\"The speaker recently got a new pet bed for Luna.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"pet_bed\",\"confidence\":0.88,\"matched_text\":\"I want to make sure she's using it properly.\",\"distilled_fact\":\"The speaker wants to make sure Luna is using the new pet bed properly.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"pet_bed\",\"confidence\":0.93,\"matched_text\":\"the original price of Luna's pet bed was $40.\",\"distilled_fact\":\"The original price of Luna's pet bed was $40.\"}]}",
+  "extracted_at": "2026-05-21T07:10:22.603Z"
+}

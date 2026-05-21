@@ -20,7 +20,7 @@ import {
   summarizeProviderStates,
   type LongMemEvalQuestionDiagnostic
 } from "./diagnostics.js";
-import type { LongMemEvalVariant } from "./dataset.js";
+import { pairSessionIntoRounds, type LongMemEvalVariant } from "./dataset.js";
 import { loadDataset, type FetchResult } from "./fetch.js";
 import { resolveBenchEmbeddingProviderLabel } from "./runner.js";
 import {
@@ -124,16 +124,21 @@ export async function runLongMemEvalCrossQuestion(
         const session = question.haystack_sessions[si];
         const sessionId = question.haystack_session_ids[si] ?? `${question.question_id}-session-${si}`;
         if (session === undefined) continue;
-        for (let ti = 0; ti < session.length; ti++) {
-          const turn = session[ti];
-          if (turn === undefined) continue;
-          const evidenceRef = `${question.question_id}-cq-s${si}-t${ti}`;
-          // invariant: one turn -> N production-extracted memory_entry rows;
+        // invariant: extract per ROUND (user message + assistant response),
+        // not per bare message — production POST_TURN_EXTRACT extracts per
+        // round. see also: apps/bench-runner/src/longmemeval/dataset.ts
+        // pairSessionIntoRounds.
+        const rounds = pairSessionIntoRounds(session);
+        for (let ri = 0; ri < rounds.length; ri++) {
+          const round = rounds[ri];
+          if (round === undefined) continue;
+          const evidenceRef = `${question.question_id}-cq-s${si}-r${ri}`;
+          // invariant: one round -> N production-extracted memory_entry rows;
           // every object_id is mapped into the shared sidecar (no partial
           // map).
           const seedResult = await seedRunner.seedTurn({
             daemon,
-            turnContent: turn.content,
+            turnContent: round.content,
             evidenceRefBase: evidenceRef,
             seedIndex,
             workspaceId: daemon.workspaceId,
@@ -143,7 +148,7 @@ export async function runLongMemEvalCrossQuestion(
           if (seedResult.turnTruncated) {
             seedTurnsTruncated += 1;
             seedCharsClipped += seedResult.charsClipped;
-            if (turn.has_answer === true) {
+            if (round.hasAnswer) {
               answerTurnsTruncated += 1;
             }
           }
@@ -151,7 +156,7 @@ export async function runLongMemEvalCrossQuestion(
             sidecar.set(seed.memoryId, {
               questionId: question.question_id,
               sessionId,
-              hasAnswer: turn.has_answer === true
+              hasAnswer: round.hasAnswer
             });
           }
         }

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "d6305434d384d91648f3b0e495a2e0f677f2606d88c2190a75749b2925b8ab4d",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"workspace_preference\",\"confidence\":0.82,\"matched_text\":\"I'm thinking of adding some bookshelves to the office\",\"distilled_fact\":\"The speaker is considering adding some bookshelves to the office.\"},{\"signal_kind\":\"potential_request\",\"object_kind\":\"design_preference_query\",\"confidence\":0.9,\"matched_text\":\"I'm wondering if you have any recommendations for bookshelf styles or designs that would fit well with the room's current aesthetic\",\"distilled_fact\":\"The speaker wants recommendations for bookshelf styles or designs that would fit well with the office's current aesthetic.\"}]}",
+  "extracted_at": "2026-05-21T08:08:24.144Z"
+}

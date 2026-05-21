@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "18cdaa3a7c58865d178311443d108b8cb35d2e09f1e093960a5bd49b9002efb0",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"assistant_behavior\",\"confidence\":0.72,\"matched_text\":\"I am always here to assist you with any information you need or help you with any task you have.\",\"distilled_fact\":\"The assistant is always here to assist with any information the user needs or help with any task the user has.\"}]}",
+  "extracted_at": "2026-05-21T09:08:47.215Z"
+}

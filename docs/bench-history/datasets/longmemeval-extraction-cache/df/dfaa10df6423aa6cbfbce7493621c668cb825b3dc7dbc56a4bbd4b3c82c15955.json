@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "dfaa10df6423aa6cbfbce7493621c668cb825b3dc7dbc56a4bbd4b3c82c15955",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"game_genre\",\"confidence\":0.92,\"matched_text\":\"I've been loving the action-adventure games\",\"distilled_fact\":\"The user likes action-adventure games.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"game_theme\",\"confidence\":0.83,\"matched_text\":\"like the one I'm currently playing, you know, the one with the Vikings?\",\"distilled_fact\":\"The user is currently playing a game with Vikings.\"}]}",
+  "extracted_at": "2026-05-21T08:13:12.728Z"
+}

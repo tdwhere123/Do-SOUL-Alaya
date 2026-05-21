@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "8991662ac0755fc10b492fd8107e12f76cc87f9c6f6e5917b25f6bc55d49f94a",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"food\",\"confidence\":0.93,\"matched_text\":\"I think I want to try making some homemade fruit popsicles for dessert!\",\"distilled_fact\":\"The user wants to try making homemade fruit popsicles for dessert.\"}]}",
+  "extracted_at": "2026-05-21T09:02:32.650Z"
+}

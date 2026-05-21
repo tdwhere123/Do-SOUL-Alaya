@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "1d1c1aebec227ee1f30819df5a5a37d50d56cbc12c36017e7aec537df48fb986",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_intent\",\"object_kind\":\"future_action\",\"confidence\":0.93,\"matched_text\":\"I'll contact the local tourism board to get more information about the International Market and the Holiday Market.\",\"distilled_fact\":\"The speaker intends to contact the local tourism board to get more information about the International Market and the Holiday Market.\"},{\"signal_kind\":\"potential_intent\",\"object_kind\":\"future_action\",\"confidence\":0.91,\"matched_text\":\"I've been meaning to reach out to Rachel, the jewelry maker I met at the Craft Fair, to collaborate on a future project.\",\"distilled_fact\":\"The speaker intends to reach out to Rachel, the jewelry maker the speaker met at the Craft Fair, to collaborate on a future project.\"},{\"signal_kind\":\"potential_intent\",\"object_kind\":\"future_action\",\"confidence\":0.88,\"matched_text\":\"Do you think I could also ask the tourism board if they know of any upcoming craft fairs or artisan markets in the area?\",\"distilled_fact\":\"The speaker intends to ask the local tourism board if it knows of any upcoming craft fairs or artisan markets in the area.\"}]}",
+  "extracted_at": "2026-05-21T08:03:41.937Z"
+}

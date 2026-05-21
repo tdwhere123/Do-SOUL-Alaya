@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "f6573e98e0f789165a000550411f954b54b9d61913200bf4d9a4ab867873c2d9",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"cocktail ingredient experiment\",\"confidence\":0.91,\"matched_text\":\"I'm actually thinking of experimenting with bitters in a Negroni, and I think a smoked orange bitters would pair well with the Campari and gin.\",\"distilled_fact\":\"The user is thinking of experimenting with bitters in a Negroni using smoked orange bitters with Campari and gin.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"cocktail recipe advice\",\"confidence\":0.89,\"matched_text\":\"Do you think I should try it with a classic Negroni recipe or modify it somehow to accommodate the smoky flavor?\",\"distilled_fact\":\"The user is asking whether to use a classic Negroni recipe or modify it to accommodate the smoky flavor.\"}]}",
+  "extracted_at": "2026-05-21T09:17:44.501Z"
+}

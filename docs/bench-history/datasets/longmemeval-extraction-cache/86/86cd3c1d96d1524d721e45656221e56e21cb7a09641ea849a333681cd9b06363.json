@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "86cd3c1d96d1524d721e45656221e56e21cb7a09641ea849a333681cd9b06363",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"analysis_request\",\"confidence\":0.93,\"matched_text\":\"in the above 9 interviews what are the attributes, benefits and consequences from mean end theory perspective\",\"distilled_fact\":\"The user asked about the attributes, benefits, and consequences from a means-end theory perspective in the above 9 interviews.\"}]}",
+  "extracted_at": "2026-05-21T07:49:44.890Z"
+}

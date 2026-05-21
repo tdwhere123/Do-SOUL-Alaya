@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "acd0a3c5a30a7416d231091e2824a36153ba5ef20b9cbd87bf5d7b28894781a2",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.94,\"matched_text\":\"I've been wanting to try meditation and mindfulness practices\",\"distilled_fact\":\"The user wants to try meditation and mindfulness practices.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"knowledge_gap\",\"confidence\":0.9,\"matched_text\":\"but I don't know where to start.\",\"distilled_fact\":\"The user does not know where to start with meditation and mindfulness practices.\"}]}",
+  "extracted_at": "2026-05-21T07:57:30.291Z"
+}

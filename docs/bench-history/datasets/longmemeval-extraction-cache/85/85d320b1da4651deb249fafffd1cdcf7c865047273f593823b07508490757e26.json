@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "85d320b1da4651deb249fafffd1cdcf7c865047273f593823b07508490757e26",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"request\",\"confidence\":0.92,\"matched_text\":\"Can you provide tips for resolving conflicts with roommates peacefully?\",\"distilled_fact\":\"The user asked for tips for resolving conflicts with roommates peacefully.\"}]}",
+  "extracted_at": "2026-05-21T08:05:38.435Z"
+}

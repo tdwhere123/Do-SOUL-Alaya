@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "b4d041a07c32ecaa1ea86d54cfc4d5a8fcec2f3a7b67b7eee1951adb21a71270",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"food_flavor_combination\",\"confidence\":0.91,\"matched_text\":\"I'll definitely try the cacao and chili combination.\",\"distilled_fact\":\"The user will definitely try the cacao and chili combination.\"}]}",
+  "extracted_at": "2026-05-21T08:59:52.467Z"
+}

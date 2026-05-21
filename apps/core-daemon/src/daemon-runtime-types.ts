@@ -12,6 +12,7 @@ import type {
   EmbeddingRecallService,
   RecallService,
   RunService,
+  SignalService,
   WorkspaceService
 } from "@do-soul/alaya-core";
 
@@ -57,6 +58,11 @@ export interface AlayaDaemonRuntimeServices {
   readonly configService: Pick<AppConfigService, "getGardenCredentialProvenance" | "getRuntimeGardenComputeConfig">;
   readonly mcpMemoryToolHandler: McpMemoryToolHandler;
   readonly recallService: Pick<RecallService, "recall">;
+  // invariant: the bench harness seeds compile()-extracted signals through
+  // the SAME in-process receiveSignal seam the production garden host-worker
+  // completion uses (garden-runtime.ts processPostTurnExtractTask), so a
+  // bench-seeded signal materializes a memory_entry exactly as production.
+  readonly signalService: Pick<SignalService, "receiveSignal">;
   readonly recallUtilizationService: RecallUtilizationService;
   readonly runService: Pick<RunService, "getById" | "ensureAttachedMcpSessionRun">;
   readonly trustStateRecorder: TrustStateRecorder;

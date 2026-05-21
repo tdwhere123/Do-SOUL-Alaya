@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "913e550ba75a4a9832b71cfe3b8bb67c8d51bf2b5afb8a0070d7b541c0d55733",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"preference\",\"confidence\":0.63,\"matched_text\":\"User: Generate code to plot the second by second action intensity on a graph.\",\"distilled_fact\":\"The user wants code to plot the second-by-second action intensity on a graph.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"technical_instruction\",\"confidence\":0.58,\"matched_text\":\"You can use Python with the Matplotlib and Pandas libraries.\",\"distilled_fact\":\"Python with the Matplotlib and Pandas libraries can be used to generate the graph.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"technical_instruction\",\"confidence\":0.55,\"matched_text\":\"For simplicity, let's assume you have manually assigned an intensity value (0 to 10) for each second of the scene.\",\"distilled_fact\":\"For simplicity, an intensity value from 0 to 10 can be manually assigned for each second of the scene.\"}]}",
+  "extracted_at": "2026-05-21T08:56:29.464Z"
+}

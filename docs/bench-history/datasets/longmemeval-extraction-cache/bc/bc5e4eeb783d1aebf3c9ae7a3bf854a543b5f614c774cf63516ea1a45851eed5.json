@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "bc5e4eeb783d1aebf3c9ae7a3bf854a543b5f614c774cf63516ea1a45851eed5",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"user_advice_preference\",\"confidence\":0.88,\"matched_text\":\"Do you have any advice on how to handle situations where roommates aren't following agreed-upon rules or schedules?\",\"distilled_fact\":\"The user wants advice on how to handle situations where roommates are not following agreed-upon rules or schedules.\"}]}",
+  "extracted_at": "2026-05-21T09:09:26.651Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "682028730ddbeadb9255b467611c86a109d160a3e6951c167ded54f003c968ba",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"routine\",\"confidence\":0.84,\"matched_text\":\"this revised routine is more realistic for me\",\"distilled_fact\":\"The speaker prefers the revised routine because it is more realistic for the speaker.\"},{\"signal_kind\":\"potential_intent\",\"object_kind\":\"plan\",\"confidence\":0.79,\"matched_text\":\"I'll try to stick to it\",\"distilled_fact\":\"The speaker intends to try to stick to the revised routine.\"}]}",
+  "extracted_at": "2026-05-21T07:51:36.042Z"
+}

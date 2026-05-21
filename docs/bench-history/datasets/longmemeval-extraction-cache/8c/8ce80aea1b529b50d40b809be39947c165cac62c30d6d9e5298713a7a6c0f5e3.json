@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "8ce80aea1b529b50d40b809be39947c165cac62c30d6d9e5298713a7a6c0f5e3",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"general_fact\",\"confidence\":0.84,\"matched_text\":\"cats use touch to communicate so much\",\"distilled_fact\":\"Cats use touch to communicate so much.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"user_interest\",\"confidence\":0.76,\"matched_text\":\"That's really interesting\",\"distilled_fact\":\"The speaker finds that fact really interesting.\"}]}",
+  "extracted_at": "2026-05-21T08:02:15.311Z"
+}

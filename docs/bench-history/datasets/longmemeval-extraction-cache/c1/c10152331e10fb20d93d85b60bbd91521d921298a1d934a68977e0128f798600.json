@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c10152331e10fb20d93d85b60bbd91521d921298a1d934a68977e0128f798600",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"tool/service\",\"confidence\":0.88,\"matched_text\":\"I'll try out Mint and Personal Capital to see which one I like better.\",\"distilled_fact\":\"The user plans to try out Mint and Personal Capital to see which one they like better.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"service/opinion\",\"confidence\":0.73,\"matched_text\":\"I've heard great things about both of them.\",\"distilled_fact\":\"The user has heard great things about Mint and Personal Capital.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"financial_behavior\",\"confidence\":0.84,\"matched_text\":\"I feel like I'm spending a lot on those things and I want to cut back.\",\"distilled_fact\":\"The user feels like they are spending a lot on groceries and household items and wants to cut back.\"}]}",
+  "extracted_at": "2026-05-21T08:10:03.051Z"
+}

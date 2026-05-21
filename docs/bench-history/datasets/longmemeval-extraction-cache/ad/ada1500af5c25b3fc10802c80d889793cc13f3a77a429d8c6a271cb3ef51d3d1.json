@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "ada1500af5c25b3fc10802c80d889793cc13f3a77a429d8c6a271cb3ef51d3d1",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"shopping_preference\",\"confidence\":0.93,\"matched_text\":\"I'm thinking of buying some new lamps online\",\"distilled_fact\":\"The user is considering buying some new lamps online.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"shopping_preference\",\"confidence\":0.91,\"matched_text\":\"I'm looking for some modern styles and good deals.\",\"distilled_fact\":\"The user is looking for modern styles.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"shopping_preference\",\"confidence\":0.9,\"matched_text\":\"I'm looking for some modern styles and good deals.\",\"distilled_fact\":\"The user is looking for good deals.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"shopping_request\",\"confidence\":0.88,\"matched_text\":\"can you recommend any good websites for home decor shopping?\",\"distilled_fact\":\"The user wants recommendations for good websites for home decor shopping.\"}]}",
+  "extracted_at": "2026-05-21T07:55:54.713Z"
+}

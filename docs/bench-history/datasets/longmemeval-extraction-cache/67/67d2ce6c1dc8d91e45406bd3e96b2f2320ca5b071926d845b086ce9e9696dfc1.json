@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "67d2ce6c1dc8d91e45406bd3e96b2f2320ca5b071926d845b086ce9e9696dfc1",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"room_use\",\"confidence\":0.92,\"matched_text\":\"Now that the guest room has been transformed into a home office\",\"distilled_fact\":\"The guest room has been transformed into a home office.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"project_state\",\"confidence\":0.88,\"matched_text\":\"you've got a blank slate\",\"distilled_fact\":\"The home office is a blank slate.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"room_design\",\"confidence\":0.74,\"matched_text\":\"creating a space that's tailored to your needs and work style\",\"distilled_fact\":\"The home office should be tailored to the user's needs and work style.\"}]}",
+  "extracted_at": "2026-05-21T08:08:15.289Z"
+}

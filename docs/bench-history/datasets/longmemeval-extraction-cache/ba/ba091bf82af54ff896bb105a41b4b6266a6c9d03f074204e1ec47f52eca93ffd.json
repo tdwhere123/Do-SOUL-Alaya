@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "ba091bf82af54ff896bb105a41b4b6266a6c9d03f074204e1ec47f52eca93ffd",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_ranking\",\"confidence\":0.93,\"matched_text\":\"being ranked 10th in your county\",\"distilled_fact\":\"The user is ranked 10th in the user's county.\"},{\"signal_kind\":\"potential_goal\",\"object_kind\":\"user_goal\",\"confidence\":0.91,\"matched_text\":\"Reaching the top 5 by the end of the summer is definitely an achievable goal\",\"distilled_fact\":\"The user's goal is to reach the top 5 by the end of the summer.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.72,\"matched_text\":\"an avid eBirder\",\"distilled_fact\":\"The user is an avid eBirder.\"}]}",
+  "extracted_at": "2026-05-21T08:08:44.290Z"
+}

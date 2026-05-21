@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c78aaebb68385c192dd41954e250870cd9f31c83de0b29e7dc7eb004397b2daa",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"topic\",\"confidence\":0.91,\"matched_text\":\"What factors influence the decision-making process of consumers when choosing which products to buy?\",\"distilled_fact\":\"The turn asks about factors that influence consumers' decision-making process when choosing which products to buy.\"}]}",
+  "extracted_at": "2026-05-21T07:42:41.491Z"
+}

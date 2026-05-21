@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "6657ad7b777069dfb8c52941361d40fccb975c4c4367b3312f40cc0ee5e6c7c9",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"topic_interest\",\"confidence\":0.95,\"matched_text\":\"I'm looking for some resources on improving gender diversity in the workplace.\",\"distilled_fact\":\"The user is looking for resources on improving gender diversity in the workplace.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"personal_activity\",\"confidence\":0.92,\"matched_text\":\"I've been taking an online course on diversity and inclusion\",\"distilled_fact\":\"The user has been taking an online course on diversity and inclusion.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"personal_experience\",\"confidence\":0.9,\"matched_text\":\"I attended a networking event last week\",\"distilled_fact\":\"The user attended a networking event last week.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"personal_action\",\"confidence\":0.93,\"matched_text\":\"made an effort to talk to women and non-binary attendees\",\"distilled_fact\":\"At the networking event last week, the user made an effort to talk to women and non-binary attendees.\"}]}",
+  "extracted_at": "2026-05-21T07:58:24.012Z"
+}

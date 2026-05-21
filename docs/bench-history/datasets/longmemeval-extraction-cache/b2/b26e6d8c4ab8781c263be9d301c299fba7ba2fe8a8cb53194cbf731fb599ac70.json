@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "b26e6d8c4ab8781c263be9d301c299fba7ba2fe8a8cb53194cbf731fb599ac70",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"schedule\",\"confidence\":0.93,\"matched_text\":\"you've already established a consistent wake-up time on Tuesdays and Thursdays\",\"distilled_fact\":\"The user has established a consistent wake-up time on Tuesdays and Thursdays.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"schedule\",\"confidence\":0.95,\"matched_text\":\"waking up at 6:45 AM on Mondays, Wednesdays, and Fridays\",\"distilled_fact\":\"The user should wake up at 6:45 AM on Mondays, Wednesdays, and Fridays.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"routine\",\"confidence\":0.88,\"matched_text\":\"following a similar morning routine that works for you\",\"distilled_fact\":\"The user should follow a similar morning routine on Mondays, Wednesdays, and Fridays.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"preference\",\"confidence\":0.9,\"matched_text\":\"you've noticed that you're more productive on your yoga days\",\"distilled_fact\":\"The user has noticed being more productive on yoga days.\"}]}",
+  "extracted_at": "2026-05-21T07:49:20.710Z"
+}

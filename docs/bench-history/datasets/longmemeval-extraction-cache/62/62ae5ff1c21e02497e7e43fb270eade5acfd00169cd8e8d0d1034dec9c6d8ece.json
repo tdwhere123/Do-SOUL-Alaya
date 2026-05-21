@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "62ae5ff1c21e02497e7e43fb270eade5acfd00169cd8e8d0d1034dec9c6d8ece",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"request\",\"confidence\":0.88,\"matched_text\":\"I want to hear the words come to life.\",\"distilled_fact\":\"The user wants to hear words come to life through a poem recitation.\"}]}",
+  "extracted_at": "2026-05-21T09:13:48.608Z"
+}

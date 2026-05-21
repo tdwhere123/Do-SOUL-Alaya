@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "20bd95c7b6a42ac1e9103552205ea863fe995b25f5db22863ddfdc056ef82fb5",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"food_preference\",\"confidence\":0.84,\"matched_text\":\"I think I'll also make some steamed dumplings to go along with my stir-fry.\",\"distilled_fact\":\"The user plans to make some steamed dumplings to go along with the user's stir-fry.\"}]}",
+  "extracted_at": "2026-05-21T09:22:35.762Z"
+}

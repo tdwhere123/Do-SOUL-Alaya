@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "2256823f885df0a9284c5ad4f3bb95ab842525abda1191392e964726f1329e99",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"jewelry_item\",\"confidence\":0.93,\"matched_text\":\"I'll add my mother's locket to the list.\",\"distilled_fact\":\"The user has a jewelry item that is their mother's locket.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"jewelry_item\",\"confidence\":0.86,\"matched_text\":\"It's an old locket and I'm not sure when I acquired it, but I wore it to my cousin's wedding on June 15th.\",\"distilled_fact\":\"The user's mother's locket is an old locket.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"jewelry_item\",\"confidence\":0.84,\"matched_text\":\"It's an old locket and I'm not sure when I acquired it, but I wore it to my cousin's wedding on June 15th.\",\"distilled_fact\":\"The user is not sure when they acquired their mother's locket.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"jewelry_item\",\"confidence\":0.89,\"matched_text\":\"It's an old locket and I'm not sure when I acquired it, but I wore it to my cousin's wedding on June 15th.\",\"distilled_fact\":\"The user wore their mother's locket to their cousin's wedding on June 15th.\"}]}",
+  "extracted_at": "2026-05-21T09:09:14.758Z"
+}

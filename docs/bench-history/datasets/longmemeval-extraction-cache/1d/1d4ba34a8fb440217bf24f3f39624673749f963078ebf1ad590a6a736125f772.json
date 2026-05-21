@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "1d4ba34a8fb440217bf24f3f39624673749f963078ebf1ad590a6a736125f772",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"podcast\",\"confidence\":0.96,\"matched_text\":\"I'm particularly interested in \\\"The Tim Ferriss Show\\\"\",\"distilled_fact\":\"The speaker is particularly interested in The Tim Ferriss Show.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"listening_history\",\"confidence\":0.93,\"matched_text\":\"I've already been listening to it on and off for the past few months.\",\"distilled_fact\":\"The speaker has been listening to The Tim Ferriss Show on and off for the past few months.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"podcast_episode\",\"confidence\":0.91,\"matched_text\":\"I remember listening to it on December 20th\",\"distilled_fact\":\"The speaker listened to the episode with Naval Ravikant on December 20th.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"reflection\",\"confidence\":0.9,\"matched_text\":\"it really made me think about my own goals and priorities.\",\"distilled_fact\":\"The episode with Naval Ravikant really made the speaker think about the speaker's own goals and priorities.\"}]}",
+  "extracted_at": "2026-05-21T07:06:44.509Z"
+}

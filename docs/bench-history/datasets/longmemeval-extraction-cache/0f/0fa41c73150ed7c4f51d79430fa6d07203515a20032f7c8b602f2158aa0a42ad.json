@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "0fa41c73150ed7c4f51d79430fa6d07203515a20032f7c8b602f2158aa0a42ad",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"lighting_style\",\"confidence\":0.86,\"matched_text\":\"something modern and sleek\",\"distilled_fact\":\"The user is interested in a pendant light that is modern and sleek.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"lighting_interest\",\"confidence\":0.72,\"matched_text\":\"I've been thinking about getting a new pendant light above the table as well\",\"distilled_fact\":\"The user is considering getting a new pendant light above the table.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"source_of_inspiration\",\"confidence\":0.63,\"matched_text\":\"I've seen some really cool designs on Pinterest\",\"distilled_fact\":\"The user has seen some really cool pendant light designs on Pinterest.\"}]}",
+  "extracted_at": "2026-05-21T07:56:26.087Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "26673a17c0e52f948d3908883fcdf717c58c2a82ee75ec9720fd5ea3c2c0e698",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"wine\",\"confidence\":0.92,\"matched_text\":\"I'll go with Pinot Grigio and Chianti\",\"distilled_fact\":\"The speaker prefers Pinot Grigio and Chianti.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"event_planning\",\"confidence\":0.71,\"matched_text\":\"Can you give me some tips on how to set the table and create a warm ambiance for the dinner party?\",\"distilled_fact\":\"The speaker is planning a dinner party.\"}]}",
+  "extracted_at": "2026-05-21T08:02:59.042Z"
+}

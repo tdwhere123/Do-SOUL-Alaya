@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c1181d431dd174595c46ecf100662998d982823dc15399e63a0fd9a52f9cda5d",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"food_preference\",\"confidence\":0.82,\"matched_text\":\"I think I'll try roasting some vegetables to go with my chicken next time.\",\"distilled_fact\":\"The user plans to try roasting some vegetables to go with chicken next time.\"}]}",
+  "extracted_at": "2026-05-21T09:02:26.620Z"
+}

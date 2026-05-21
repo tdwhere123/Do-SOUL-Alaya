@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "cb7b144132226e338e4a5de533052d7a5311a053fef099469502b6b782fe268f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"event_detail\",\"confidence\":0.92,\"matched_text\":\"The soiled diaper\",\"distilled_fact\":\"The mother flushed the soiled diaper down the toilet in the story.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"event_detail\",\"confidence\":0.92,\"matched_text\":\"The wipes used to clean up the diaper blowout\",\"distilled_fact\":\"The mother flushed the wipes used to clean up the diaper blowout down the toilet in the story.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"event_detail\",\"confidence\":0.92,\"matched_text\":\"Emma's soiled shirt\",\"distilled_fact\":\"The mother flushed Emma's soiled shirt down the toilet in the story.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"event_detail\",\"confidence\":0.92,\"matched_text\":\"Emma's soiled overalls\",\"distilled_fact\":\"The mother flushed Emma's soiled overalls down the toilet in the story.\"}]}",
+  "extracted_at": "2026-05-21T09:14:36.610Z"
+}

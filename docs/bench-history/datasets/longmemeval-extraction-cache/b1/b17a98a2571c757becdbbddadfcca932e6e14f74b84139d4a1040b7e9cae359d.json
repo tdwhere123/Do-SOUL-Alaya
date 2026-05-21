@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "b17a98a2571c757becdbbddadfcca932e6e14f74b84139d4a1040b7e9cae359d",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"outline_structure\",\"confidence\":0.95,\"matched_text\":\"An assessment could be added at the end of the course after the Conclusion section\",\"distilled_fact\":\"An assessment could be added at the end of the course after the Conclusion section.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"outline_structure\",\"confidence\":0.98,\"matched_text\":\"VIII. Assessment\",\"distilled_fact\":\"The outline includes VIII. Assessment.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"assessment_content\",\"confidence\":0.96,\"matched_text\":\"* Quiz or exam to test participants' understanding of the course material\",\"distilled_fact\":\"The assessment includes a quiz or exam to test participants' understanding of the course material.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"assessment_content\",\"confidence\":0.94,\"matched_text\":\"* Feedback and recommendations for further learning or development.\",\"distilled_fact\":\"The assessment includes feedback and recommendations for further learning or development.\"}]}",
+  "extracted_at": "2026-05-21T09:16:30.767Z"
+}

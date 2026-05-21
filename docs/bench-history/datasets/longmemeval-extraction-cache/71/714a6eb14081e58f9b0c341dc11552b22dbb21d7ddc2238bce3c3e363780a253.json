@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "714a6eb14081e58f9b0c341dc11552b22dbb21d7ddc2238bce3c3e363780a253",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity_plan\",\"confidence\":0.86,\"matched_text\":\"I'm also planning to take my road bike out for a longer ride this weekend\",\"distilled_fact\":\"The user is planning to take their road bike out for a longer ride this weekend.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"maintenance_need\",\"confidence\":0.81,\"matched_text\":\"I need to inflate the tires, I think they're a bit low.\",\"distilled_fact\":\"The user's road bike tires need inflation because they are thought to be a bit low.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"bike_property\",\"confidence\":0.79,\"matched_text\":\"my road bike\",\"distilled_fact\":\"The user has a road bike.\"}]}",
+  "extracted_at": "2026-05-21T07:48:28.732Z"
+}

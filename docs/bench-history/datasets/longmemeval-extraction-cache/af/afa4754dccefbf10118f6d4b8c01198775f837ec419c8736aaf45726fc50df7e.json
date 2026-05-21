@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "afa4754dccefbf10118f6d4b8c01198775f837ec419c8736aaf45726fc50df7e",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"attitude\",\"confidence\":0.89,\"matched_text\":\"It's frustrating that such an iconic city is facing such challenges.\",\"distilled_fact\":\"The speaker feels frustrated that such an iconic city is facing such challenges.\"}]}",
+  "extracted_at": "2026-05-21T08:00:02.597Z"
+}

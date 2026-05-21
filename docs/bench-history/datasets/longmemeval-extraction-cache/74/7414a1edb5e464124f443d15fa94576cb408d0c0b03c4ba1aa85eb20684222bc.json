@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7414a1edb5e464124f443d15fa94576cb408d0c0b03c4ba1aa85eb20684222bc",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"storage_method\",\"confidence\":0.94,\"matched_text\":\"I think I'll definitely invest in a binder with clear plastic sleeves to store my physical coupons.\",\"distilled_fact\":\"The speaker plans to invest in a binder with clear plastic sleeves to store physical coupons.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"digital_storage_need\",\"confidence\":0.86,\"matched_text\":\"I'm not sure how to organize my digital coupons on my phone.\",\"distilled_fact\":\"The speaker is unsure how to organize digital coupons on the speaker's phone.\"}]}",
+  "extracted_at": "2026-05-21T07:50:27.596Z"
+}

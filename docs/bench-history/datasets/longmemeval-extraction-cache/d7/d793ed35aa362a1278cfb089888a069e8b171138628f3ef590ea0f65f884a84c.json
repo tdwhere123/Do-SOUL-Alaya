@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "d793ed35aa362a1278cfb089888a069e8b171138628f3ef590ea0f65f884a84c",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"assistant_state\",\"confidence\":0.79,\"matched_text\":\"I don't see your company's diversity and inclusion statement in the chat history.\",\"distilled_fact\":\"The assistant does not see the user's company's diversity and inclusion statement in the chat history.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"assistant_request\",\"confidence\":0.74,\"matched_text\":\"Could you please share it with me?\",\"distilled_fact\":\"The assistant requests that the user share the company's diversity and inclusion statement.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"assistant_intent\",\"confidence\":0.71,\"matched_text\":\"I'll be happy to provide you with feedback on its effectiveness in conveying your commitment to diversity and inclusion.\",\"distilled_fact\":\"The assistant intends to provide feedback on the statement's effectiveness in conveying the user's commitment to diversity and inclusion.\"}]}",
+  "extracted_at": "2026-05-21T07:58:57.812Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "4f084befd26c596e556944043595c5ad918ba94f39287c8b679b3edbe3df0807",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"item\",\"confidence\":0.94,\"matched_text\":\"I like the idea of a personalized baby blanket with Lucas' name on it.\",\"distilled_fact\":\"The user likes the idea of a personalized baby blanket with Lucas' name on it.\"}]}",
+  "extracted_at": "2026-05-21T09:08:51.510Z"
+}

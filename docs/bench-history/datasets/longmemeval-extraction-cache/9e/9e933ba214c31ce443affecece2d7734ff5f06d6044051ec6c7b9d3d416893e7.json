@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "9e933ba214c31ce443affecece2d7734ff5f06d6044051ec6c7b9d3d416893e7",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"personal_experience\",\"confidence\":0.95,\"matched_text\":\"I've been testing out my new binoculars on my daily walks and they're making a huge difference - I received them in the mail last Thursday and they're so much lighter and clearer than my old pair.\",\"distilled_fact\":\"The user has been testing out new binoculars on daily walks.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"purchase_event\",\"confidence\":0.93,\"matched_text\":\"I received them in the mail last Thursday\",\"distilled_fact\":\"The user received the new binoculars in the mail on last Thursday.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"product_comparison\",\"confidence\":0.92,\"matched_text\":\"they're so much lighter and clearer than my old pair\",\"distilled_fact\":\"The user prefers the new binoculars over the old pair because the new binoculars are much lighter and clearer than the old pair.\"}]}",
+  "extracted_at": "2026-05-21T09:09:53.197Z"
+}

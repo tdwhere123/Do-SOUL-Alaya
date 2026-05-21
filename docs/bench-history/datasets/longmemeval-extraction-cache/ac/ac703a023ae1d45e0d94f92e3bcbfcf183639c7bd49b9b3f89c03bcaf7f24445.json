@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "ac703a023ae1d45e0d94f92e3bcbfcf183639c7bd49b9b3f89c03bcaf7f24445",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"response_content\",\"confidence\":0.86,\"matched_text\":\"it seems that you have already asked this question.\",\"distilled_fact\":\"The user has already asked this question.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"response_content\",\"confidence\":0.79,\"matched_text\":\"Based on the 9 interviews\",\"distilled_fact\":\"The response is based on 9 interviews.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"response_content\",\"confidence\":0.72,\"matched_text\":\"the means-end theory of perception towards augmented reality in\",\"distilled_fact\":\"The response references the means-end theory of perception towards augmented reality.\"}]}",
+  "extracted_at": "2026-05-21T07:50:13.926Z"
+}

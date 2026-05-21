@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "6df475eb1373b6f1b45510cb4f9cb4a71eee5c5efb46068997629e252c3eb265",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"self_reported_personal_state\",\"confidence\":0.89,\"matched_text\":\"I really struggle with staying motivated to exercise regularly.\",\"distilled_fact\":\"The speaker really struggles with staying motivated to exercise regularly.\"}]}",
+  "extracted_at": "2026-05-21T08:00:56.833Z"
+}

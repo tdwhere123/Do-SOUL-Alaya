@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "65902f9b3acf0badfe9e6bf6e3370fb65b80c89971387eefe0eb63c06b29806c",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"preference\",\"confidence\":0.78,\"matched_text\":\"I'm also thinking of tracking my run to see how far and fast I go\",\"distilled_fact\":\"The user is thinking of tracking their run to see how far and fast they go.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"interest\",\"confidence\":0.67,\"matched_text\":\"do you know any good apps or devices that can help me do that?\",\"distilled_fact\":\"The user wants apps or devices that can help them track their run.\"}]}",
+  "extracted_at": "2026-05-21T09:04:52.861Z"
+}

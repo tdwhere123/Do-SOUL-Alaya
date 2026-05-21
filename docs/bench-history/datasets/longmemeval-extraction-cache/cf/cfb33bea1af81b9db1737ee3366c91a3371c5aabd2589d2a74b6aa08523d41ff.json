@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "cfb33bea1af81b9db1737ee3366c91a3371c5aabd2589d2a74b6aa08523d41ff",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_home_decoration_event\",\"confidence\":0.94,\"matched_text\":\"I was inspired to rearrange my furniture after seeing a Pinterest post, and I swapped the positions of my dresser and nightstand.\",\"distilled_fact\":\"The user rearranged the positions of the user's dresser and nightstand after seeing a Pinterest post.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_home_decoration_state\",\"confidence\":0.88,\"matched_text\":\"It's made a big difference in the flow of the room.\",\"distilled_fact\":\"The rearrangement made a big difference in the flow of the room.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_home_decoration_state\",\"confidence\":0.84,\"matched_text\":\"the addition of the area rug.\",\"distilled_fact\":\"An area rug has been added to the room.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"area_rug_design\",\"confidence\":0.9,\"matched_text\":\"the rug's Moroccan-inspired design and blue and cream shades\",\"distilled_fact\":\"The area rug has a Moroccan-inspired design and blue and cream shades.\"}]}",
+  "extracted_at": "2026-05-21T09:22:42.954Z"
+}

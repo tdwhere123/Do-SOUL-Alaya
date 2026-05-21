@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "4d8731fa977d15937fcb302ac7768600d56aa79dd7c1876d4175f7ebc6123e32",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_intent\",\"confidence\":0.78,\"matched_text\":\"I think I've got everything I need to get ready for my run this weekend.\",\"distilled_fact\":\"The user is getting ready for a run this weekend.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_possession\",\"confidence\":0.85,\"matched_text\":\"my new running shoes\",\"distilled_fact\":\"The user has new running shoes.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_plan\",\"confidence\":0.8,\"matched_text\":\"the route I've chosen\",\"distilled_fact\":\"The user has chosen a route for the run this weekend.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"user_experience\",\"confidence\":0.74,\"matched_text\":\"Since they've been a game-changer for my morning jogs\",\"distilled_fact\":\"The user's new running shoes have been a game-changer for the user's morning jogs.\"}]}",
+  "extracted_at": "2026-05-21T09:05:04.375Z"
+}

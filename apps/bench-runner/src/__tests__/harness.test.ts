@@ -19,6 +19,10 @@ import {
   type BenchDaemonHandle,
   type BenchSignalSeedInput
 } from "../harness/daemon.js";
+import {
+  createCompileSeedRunner,
+  type CompileSeedExtractionConfig
+} from "../longmemeval/compile-seed.js";
 
 const handles: BenchDaemonHandle[] = [];
 const tmpRoots: string[] = [];
@@ -292,11 +296,12 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
   );
 
   it(
-    "proposeMemoriesFromGardenTask materializes signals with source=garden_compile",
+    "proposeMemoriesFromCompileSignals materializes signals with source=garden_compile",
     async () => {
       // The compile-based bench seed path must materialize through the
-      // garden.complete_task production completion seam, NOT
-      // soul.emit_candidate_signal. emit_candidate_signal hardcodes
+      // daemon's in-process signalService.receiveSignal — the same seam
+      // production POST_TURN_EXTRACT completion uses — with source built as
+      // garden_compile. soul.emit_candidate_signal would instead hardcode
       // source=model_tool, which downstream toFormationKind maps to
       // `inferred` (confidence base 0.4) rather than `extracted` (0.6),
       // seeding ~33% lower retention than the production POST_TURN_EXTRACT
@@ -331,7 +336,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
         }
       ];
 
-      const seeds = await daemon.proposeMemoriesFromGardenTask(inputs);
+      const seeds = await daemon.proposeMemoriesFromCompileSignals(inputs);
 
       expect(seeds).toHaveLength(2);
       expect(new Set(seeds.map((seed) => seed.memoryId)).size).toBe(2);
@@ -398,10 +403,9 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       // The bench daemon must NOT start the daemon's autonomous
       // GardenScheduler (the 60s interval + startup pass). That scheduler
       // peekPendings POST_TURN_EXTRACT tasks across all workspaces and would
-      // race the bench's explicit proposeMemoriesFromGardenTask claim+complete
-      // sequence. This test enqueues a POST_TURN_EXTRACT task directly, then
-      // asserts it stays `pending` (no background tick / startup pass swept
-      // it) and is still claimable by the bench itself.
+      // process tasks non-deterministically mid-run. This test enqueues a
+      // POST_TURN_EXTRACT task directly, then asserts it stays `pending` (no
+      // background tick / startup pass swept it) and is still claimable.
       const daemon = await startBenchDaemon({
         workspaceId: "harness-no-autotick-ws",
         runId: "harness-no-autotick-run"
@@ -449,6 +453,105 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
         | undefined;
       expect(claimStructured?.ok).toBe(true);
       expect(claimStructured?.output.status).toBe("claimed");
+    },
+    60_000
+  );
+  it(
+    "compile() seed of a free-form extracted object_kind materializes a memory_entry",
+    async () => {
+      // Regression: the production OfficialApiGardenProvider.compile LLM
+      // emits a FREE-FORM object_kind (travel_itinerary / podcast /
+      // health_advice / …) that the MaterializationRouter routeByObjectKind
+      // table does not enumerate. A high-confidence potential_claim /
+      // potential_preference signal with such a kind routes to evidence_only
+      // — an evidence_capsule with NO memory_entry — so the seeded turn fact
+      // never lands in the recall store and readMaterializedMemoryId throws
+      // "did not materialize a memory_entry", dropping the whole turn batch.
+      //
+      // The compile-seed path now canonicalizes an unrouted extracted
+      // object_kind onto `fact` (a memory_entry-producing route) and strips
+      // the stale schema-grounding block so normalizeSchemaGroundedSignal
+      // re-grounds the signal consistently. This test drives the real
+      // in-process signalService.receiveSignal seam with a compile()-shaped
+      // envelope whose object_kind is free-form, and asserts a durable
+      // memory_entry is created and recallable.
+      const daemon = await startBenchDaemon({
+        workspaceId: "harness-freeform-kind-ws",
+        runId: "harness-freeform-kind-run"
+      });
+      handles.push(daemon);
+
+      const credentialledConfig: CompileSeedExtractionConfig = {
+        providerUrl: "https://example.test/v1",
+        model: "test-model",
+        apiKey: "test-key"
+      };
+      const cacheRoot = await mkdtemp(join(tmpdir(), "harness-freeform-cache-"));
+      tmpRoots.push(cacheRoot);
+
+      // A compile()-shaped envelope: signal_kind potential_claim, a free-form
+      // object_kind the router does NOT enumerate (the exact bug trigger),
+      // high confidence. Two signals so the whole-turn batch is exercised.
+      const runner = createCompileSeedRunner({
+        config: credentialledConfig,
+        cacheRoot,
+        extractorFactory: () => ({
+          extract: async () => ({
+            rawJson: JSON.stringify({
+              signals: [
+                {
+                  signal_kind: "potential_claim",
+                  object_kind: "travel_itinerary",
+                  confidence: 0.92,
+                  matched_text: "spend three days in Kyoto",
+                  distilled_fact: "The user plans three days in Kyoto."
+                },
+                {
+                  signal_kind: "potential_preference",
+                  object_kind: "health_advice",
+                  confidence: 0.88,
+                  matched_text: "prefers low-impact morning workouts",
+                  distilled_fact: "The user prefers low-impact morning workouts."
+                }
+              ]
+            })
+          })
+        })
+      });
+
+      const result = await runner.seedTurn({
+        daemon,
+        turnContent:
+          "I'd like to spend three days in Kyoto, and I prefer low-impact morning workouts.",
+        evidenceRefBase: "freeform-q0-t0",
+        seedIndex: 0,
+        workspaceId: daemon.workspaceId,
+        runId: daemon.runId
+      });
+
+      // Both compile()-extracted signals must have materialized a durable
+      // memory_entry — NOT been dropped as "did not materialize a
+      // memory_entry". The seed path ran the credentialled compile route.
+      expect(runner.stats.path).toBe("official_api_compile");
+      expect(runner.stats.signalsDropped).toBe(0);
+      expect(result.seeds).toHaveLength(2);
+      for (const seed of result.seeds) {
+        expect(seed.memoryId.length).toBeGreaterThan(0);
+        expect(seed.memoryId).not.toBe(seed.signalId);
+        expect(seed.proposalId.length).toBeGreaterThan(0);
+      }
+      expect(new Set(result.seeds.map((seed) => seed.memoryId)).size).toBe(2);
+
+      // The seeded facts are recallable by their durable memory_entry id.
+      const recallResult = await daemon.recall("Kyoto morning workouts", {
+        maxResults: 5
+      });
+      const recalledIds = new Set(
+        recallResult.results.map((entry) => entry.object_id)
+      );
+      expect(
+        result.seeds.some((seed) => recalledIds.has(seed.memoryId))
+      ).toBe(true);
     },
     60_000
   );

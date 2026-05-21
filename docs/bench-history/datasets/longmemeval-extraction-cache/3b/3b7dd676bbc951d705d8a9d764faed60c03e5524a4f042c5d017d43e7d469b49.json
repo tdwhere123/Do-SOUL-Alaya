@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "3b7dd676bbc951d705d8a9d764faed60c03e5524a4f042c5d017d43e7d469b49",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"project_goal\",\"confidence\":0.86,\"matched_text\":\"I'll look into those tools and start tracking our diversity metrics.\",\"distilled_fact\":\"The speaker will look into those tools and start tracking the speaker's diversity metrics.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"communication_goal\",\"confidence\":0.91,\"matched_text\":\"I want to make sure we're transparent and accountable.\",\"distilled_fact\":\"The speaker wants to be transparent and accountable when communicating diversity and inclusion goals and progress to stakeholders.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"stakeholder_communication\",\"confidence\":0.82,\"matched_text\":\"do you have any advice on how to communicate our diversity and inclusion goals and progress to our stakeholders, including employees, customers, and investors?\",\"distilled_fact\":\"The speaker wants advice on how to communicate the speaker's diversity and inclusion goals and progress to stakeholders, including employees, customers, and investors.\"}]}",
+  "extracted_at": "2026-05-21T07:58:43.052Z"
+}

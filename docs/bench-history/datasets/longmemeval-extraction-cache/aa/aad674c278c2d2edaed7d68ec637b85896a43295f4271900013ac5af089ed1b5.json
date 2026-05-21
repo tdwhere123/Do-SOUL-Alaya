@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "aad674c278c2d2edaed7d68ec637b85896a43295f4271900013ac5af089ed1b5",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"product_preference\",\"confidence\":0.86,\"matched_text\":\"I've been meaning to get some waterproofing spray for my boots\",\"distilled_fact\":\"The speaker wants to get waterproofing spray for the speaker's boots.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"product_request\",\"confidence\":0.82,\"matched_text\":\"can you recommend a good brand?\",\"distilled_fact\":\"The speaker is asking for a recommendation for a good brand of waterproofing spray.\"}]}",
+  "extracted_at": "2026-05-21T08:11:20.732Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c9c51ae92953b191e5d0615c92dc04eb49fb2ec2600e48413c7fc977c051b67e",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity_preference\",\"confidence\":0.95,\"matched_text\":\"I've noticed that I tend to retain more information from audiobooks than e-books, maybe because audiobooks are more engaging or because I can multitask while listening to them.\",\"distilled_fact\":\"The user tends to retain more information from audiobooks than e-books.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"note_taking_habit\",\"confidence\":0.96,\"matched_text\":\"I've started taking notes while listening to audiobooks, especially if it's a non-fiction book with valuable insights or information.\",\"distilled_fact\":\"The user has started taking notes while listening to audiobooks.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"note_taking_habit\",\"confidence\":0.93,\"matched_text\":\"I've started taking notes while listening to audiobooks, especially if it's a non-fiction book with valuable insights or information.\",\"distilled_fact\":\"The user especially takes notes while listening to non-fiction audiobooks with valuable insights or information.\"}]}",
+  "extracted_at": "2026-05-21T09:13:11.215Z"
+}

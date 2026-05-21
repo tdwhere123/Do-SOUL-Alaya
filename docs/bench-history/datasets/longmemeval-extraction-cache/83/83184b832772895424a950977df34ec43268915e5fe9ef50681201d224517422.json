@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "83184b832772895424a950977df34ec43268915e5fe9ef50681201d224517422",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.88,\"matched_text\":\"I've been meaning to attend more concerts and music festivals\",\"distilled_fact\":\"The speaker wants to attend more concerts and music festivals.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.76,\"matched_text\":\"I've also been thinking about taking guitar lessons again\",\"distilled_fact\":\"The speaker is considering taking guitar lessons again.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"community\",\"confidence\":0.67,\"matched_text\":\"it sounds like there are some great opportunities in my community\",\"distilled_fact\":\"There are some great opportunities in the speaker's community.\"}]}",
+  "extracted_at": "2026-05-21T08:14:31.481Z"
+}

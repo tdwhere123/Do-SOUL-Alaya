@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "4779d452037d8fd5d9a2a20cb902cded0e6dfdf82b957e3a87775f282184c227",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"preference\",\"confidence\":0.59,\"matched_text\":\"I'm thinking of repainting my bedroom and I'm having trouble deciding on a color.\",\"distilled_fact\":\"The user is thinking of repainting the user's bedroom and is having trouble deciding on a color.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"event\",\"confidence\":0.63,\"matched_text\":\"I was inspired to rearrange my furniture recently after seeing a Pinterest post\",\"distilled_fact\":\"The user was inspired to rearrange the user's furniture recently after seeing a Pinterest post.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"goal\",\"confidence\":0.67,\"matched_text\":\"now I want to take it to the next step.\",\"distilled_fact\":\"The user wants to take the rearranged furniture project to the next step.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"request\",\"confidence\":0.94,\"matched_text\":\"Can you give me some tips on choosing a paint color that will complement my new layout?\",\"distilled_fact\":\"The user wants tips on choosing a paint color that will complement the user's new layout.\"}]}",
+  "extracted_at": "2026-05-21T09:22:37.631Z"
+}

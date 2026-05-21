@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "ac4fabf2b56e50cb9292345a6c0b2a0d19c4d9171076fe553f19d0b66df72387",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"home_office_design_goal\",\"confidence\":0.88,\"matched_text\":\"I've been thinking about rearranging my home office to improve my workflow.\",\"distilled_fact\":\"The user is thinking about rearranging the user's home office to improve the user's workflow.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"chair_maintenance_intent\",\"confidence\":0.84,\"matched_text\":\"I'll definitely follow those tips to keep my office chair in good condition.\",\"distilled_fact\":\"The user will definitely follow those tips to keep the user's office chair in good condition.\"}]}",
+  "extracted_at": "2026-05-21T09:20:36.547Z"
+}

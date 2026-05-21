@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c05687a45bb9b2793fa69263fc5eda1e5120def9be6e366391c63601cd9ec171",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"schedule_preference\",\"confidence\":0.95,\"matched_text\":\"I'd like to get closer to my 7:45 AM goal.\",\"distilled_fact\":\"The user wants to get closer to a 7:45 AM wake-up time goal.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"schedule_state\",\"confidence\":0.93,\"matched_text\":\"Right now, I'm still waking up around 8:30 AM\",\"distilled_fact\":\"The user is currently waking up around 8:30 AM.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"schedule_preference\",\"confidence\":0.84,\"matched_text\":\"how to make that transition smoothly\",\"distilled_fact\":\"The user prefers to transition to the earlier wake-up time smoothly.\"}]}",
+  "extracted_at": "2026-05-21T07:49:11.038Z"
+}

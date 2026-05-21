@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "0a0a2e43841ebb2c4c89a2f52047eabcfea925ece080df05f14b23a5450662fb",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"music_genre\",\"confidence\":0.96,\"matched_text\":\"I've been meaning to explore more of the singer-songwriter and Americana genres\",\"distilled_fact\":\"The user wants to explore the singer-songwriter genre and the Americana genre more.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"music_mood\",\"confidence\":0.94,\"matched_text\":\"I tend to lean towards more melancholic and introspective music during the winter months\",\"distilled_fact\":\"The user tends to prefer more melancholic and introspective music during the winter months.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"music_mood\",\"confidence\":0.94,\"matched_text\":\"whereas in the summer I prefer more upbeat and energetic music\",\"distilled_fact\":\"The user prefers more upbeat and energetic music in the summer.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"personal_habit\",\"confidence\":0.9,\"matched_text\":\"In my music journal, I've been tracking my listening habits\",\"distilled_fact\":\"The user has a music journal in which the user has been tracking the user's listening habits.\"}]}",
+  "extracted_at": "2026-05-21T08:14:10.162Z"
+}

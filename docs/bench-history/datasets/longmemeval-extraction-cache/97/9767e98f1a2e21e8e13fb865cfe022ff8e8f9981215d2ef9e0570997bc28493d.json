@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "9767e98f1a2e21e8e13fb865cfe022ff8e8f9981215d2ef9e0570997bc28493d",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"travel_destination_interest\",\"confidence\":0.86,\"matched_text\":\"must-visit wineries and vineyards in Tuscany and Umbria\",\"distilled_fact\":\"The user is interested in must-visit wineries and vineyards in Tuscany and Umbria.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"itinerary_planning_request\",\"confidence\":0.8,\"matched_text\":\"that I should consider adding to my itinerary\",\"distilled_fact\":\"The user is considering adding wineries and vineyards in Tuscany and Umbria to the user's itinerary.\"}]}",
+  "extracted_at": "2026-05-21T07:20:50.924Z"
+}

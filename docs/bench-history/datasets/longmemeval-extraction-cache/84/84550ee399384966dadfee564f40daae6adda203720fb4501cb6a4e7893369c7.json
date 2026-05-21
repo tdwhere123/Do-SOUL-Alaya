@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "84550ee399384966dadfee564f40daae6adda203720fb4501cb6a4e7893369c7",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"product_experience\",\"confidence\":0.93,\"matched_text\":\"I've heard of Nikwax before, but I've never tried it.\",\"distilled_fact\":\"The speaker has heard of Nikwax before but has never tried it.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"question\",\"confidence\":0.88,\"matched_text\":\"How often would I need to reapply the waterproofing spray to my boots?\",\"distilled_fact\":\"The speaker is asking how often they need to reapply the waterproofing spray to their boots.\"}]}",
+  "extracted_at": "2026-05-21T08:11:30.082Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "8c07f8f2682f881b0897658661936f4245b440b94ddd45d2e90315da2654f40a",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"purchase_event\",\"confidence\":0.93,\"matched_text\":\"I just bought a new vacuum cleaner online during a sale with a 15% off coupon code today\",\"distilled_fact\":\"The user bought a new vacuum cleaner online during a sale with a 15% off coupon code on 2026-05-21.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"organization_habit\",\"confidence\":0.88,\"matched_text\":\"I'm looking for some advice on organizing my coupons.\",\"distilled_fact\":\"The user is looking for advice on organizing coupons.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"coupon_collection\",\"confidence\":0.9,\"matched_text\":\"I've got a bunch of physical ones from the Sunday paper and some digital ones on my grocery store app.\",\"distilled_fact\":\"The user has physical coupons from the Sunday paper and digital coupons on a grocery store app.\"}]}",
+  "extracted_at": "2026-05-21T09:01:36.601Z"
+}

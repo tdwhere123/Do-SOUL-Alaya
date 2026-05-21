@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "47a9704f860daa747f6b6b2c2adac6e2176f068fd3652279a46ba28b3b70e798",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.83,\"matched_text\":\"I've been playing with my friends every Saturday morning\",\"distilled_fact\":\"The speaker has been playing tennis with friends every Saturday morning.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"plan\",\"confidence\":0.92,\"matched_text\":\"I'm also planning to take my tennis racket to get restrung soon\",\"distilled_fact\":\"The speaker is planning to take the speaker's tennis racket to get restrung soon.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"possession\",\"confidence\":0.81,\"matched_text\":\"I actually got my racket restrung at the start of the tennis season\",\"distilled_fact\":\"The speaker got the speaker's racket restrung at the start of the tennis season.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"state\",\"confidence\":0.77,\"matched_text\":\"it's been feeling a bit loose lately\",\"distilled_fact\":\"The speaker's racket has been feeling a bit loose lately.\"}]}",
+  "extracted_at": "2026-05-21T07:48:21.969Z"
+}

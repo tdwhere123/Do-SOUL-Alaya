@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c2e926a7adeadfab5b6df00ce5224c31bf37e89b1d7deb0925b519705aca9636",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"behavioral_intent\",\"confidence\":0.92,\"matched_text\":\"I'm definitely going to try to do better about that from now on.\",\"distilled_fact\":\"The user intends to try to do better about properly disposing of plastic waste from now on.\"}]}",
+  "extracted_at": "2026-05-21T09:03:59.581Z"
+}

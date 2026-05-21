@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "2506f65a424dc1c30133469b1f49e32376b73584a14b7b76f34f6709cbc718c8",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"routine\",\"confidence\":0.94,\"matched_text\":\"commitment to that morning yoga class on Tuesdays and Thursdays\",\"distilled_fact\":\"The person has committed to a morning yoga class on Tuesdays and Thursdays.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"routine\",\"confidence\":0.92,\"matched_text\":\"you've found it helpful\",\"distilled_fact\":\"The morning yoga class on Tuesdays and Thursdays has been helpful.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"schedule\",\"confidence\":0.9,\"matched_text\":\"you're already waking up at 6:45 AM on Tuesdays and Thursdays\",\"distilled_fact\":\"The person wakes up at 6:45 AM on Tuesdays and Thursdays.\"}]}",
+  "extracted_at": "2026-05-21T07:49:01.927Z"
+}

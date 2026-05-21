@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "d6709b0c7b1a23aeb5522db9c07c1b6997baad0b47f1d7526e6069b7a3fe9a63",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"event_attendance\",\"confidence\":0.94,\"matched_text\":\"I just saw them live for the first time at the Music Festival at the Outdoors Pavilion\",\"distilled_fact\":\"The user saw The Electric Storm live for the first time at the Music Festival at the Outdoors Pavilion.\"}]}",
+  "extracted_at": "2026-05-21T08:59:07.708Z"
+}

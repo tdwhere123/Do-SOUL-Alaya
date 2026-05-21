@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "d85162311b1f353e5f0ac8f7e6e8dca63086117a4f6d711281b535fa46136fae",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"restaurant\",\"confidence\":0.83,\"matched_text\":\"I'll call Smokey's to check their wait times\",\"distilled_fact\":\"The speaker plans to call Smokey's to check its wait times.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"person\",\"confidence\":0.84,\"matched_text\":\"I've been meaning to ask Alex for his secret BBQ recipe\",\"distilled_fact\":\"The speaker has been meaning to ask Alex for his secret BBQ recipe.\"}]}",
+  "extracted_at": "2026-05-21T07:40:52.199Z"
+}

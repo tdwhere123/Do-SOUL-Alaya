@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7fcc446fa9b3a19abaa3518b96bd0084dea06fbd1999b461718f832d531901b3",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"app_preference\",\"confidence\":0.82,\"matched_text\":\"I'm also thinking of using cashback apps like Ibotta and Fetch Rewards\",\"distilled_fact\":\"The user is considering using cashback apps like Ibotta and Fetch Rewards.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"goal\",\"confidence\":0.77,\"matched_text\":\"to earn money back on my purchases\",\"distilled_fact\":\"The user wants to earn money back on purchases.\"}]}",
+  "extracted_at": "2026-05-21T07:50:41.883Z"
+}

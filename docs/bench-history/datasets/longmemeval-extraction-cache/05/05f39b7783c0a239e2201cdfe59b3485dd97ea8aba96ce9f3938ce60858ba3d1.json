@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "05f39b7783c0a239e2201cdfe59b3485dd97ea8aba96ce9f3938ce60858ba3d1",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.78,\"matched_text\":\"I've actually been using eBird to track my sightings\",\"distilled_fact\":\"The speaker has been using eBird to track their sightings.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"ranking\",\"confidence\":0.93,\"matched_text\":\"I'm currently ranked 10th in my county for the number of species seen this year.\",\"distilled_fact\":\"The speaker is currently ranked 10th in their county for the number of species seen this year.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"goal\",\"confidence\":0.66,\"matched_text\":\"Do you think I could reach the top 5 by the end of the summer if I keep up my daily walks and improve my identification skills?\",\"distilled_fact\":\"The speaker wants to reach the top 5 in their county by the end of the summer.\"}]}",
+  "extracted_at": "2026-05-21T08:08:42.421Z"
+}

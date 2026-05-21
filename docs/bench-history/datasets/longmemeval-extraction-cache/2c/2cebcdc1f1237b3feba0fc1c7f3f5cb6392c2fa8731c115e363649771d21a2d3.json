@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "2cebcdc1f1237b3feba0fc1c7f3f5cb6392c2fa8731c115e363649771d21a2d3",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"assistant_identity\",\"confidence\":0.97,\"matched_text\":\"I'm an AI, I don't have a company or a diversity and inclusion statement.\",\"distilled_fact\":\"The assistant is an AI and does not have a company or a diversity and inclusion statement.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"assistant_purpose\",\"confidence\":0.95,\"matched_text\":\"I exist solely to provide information and assist with inquiries.\",\"distilled_fact\":\"The assistant exists solely to provide information and assist with inquiries.\"}]}",
+  "extracted_at": "2026-05-21T09:05:56.731Z"
+}

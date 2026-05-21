@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "ed0c3d9f2d4271ac5143f4f0b1387f33006cfb7b8cd0c010299e2314accf8198",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"plan\",\"confidence\":0.96,\"matched_text\":\"I think I'll go with the Telstra Medium Plan.\",\"distilled_fact\":\"The user will go with the Telstra Medium Plan.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"education_program\",\"confidence\":0.91,\"matched_text\":\"I'm really excited to start my master's program at the University of Melbourne.\",\"distilled_fact\":\"The user is starting a master's program at the University of Melbourne.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"document\",\"confidence\":0.84,\"matched_text\":\"I received my acceptance letter back in February\",\"distilled_fact\":\"The user received an acceptance letter in February.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"role\",\"confidence\":0.82,\"matched_text\":\"I'm really excited to start my master's program\",\"distilled_fact\":\"The user is a university student.\"}]}",
+  "extracted_at": "2026-05-21T09:20:21.173Z"
+}

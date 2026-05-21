@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "f0aa1ab716b6fc0cc0c8e78401e128b21faa6a47cff563a234070635ead354fd",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"assistant_capability\",\"confidence\":0.84,\"matched_text\":\"I am always here to assist you with any information you need or help you with any task you have.\",\"distilled_fact\":\"The assistant is always available to assist with any information the user needs or with any task the user has.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"assistant_offer\",\"confidence\":0.8,\"matched_text\":\"If there's anything else I can do for you, please don't hesitate to let me know.\",\"distilled_fact\":\"The assistant invites the user to ask if there is anything else the assistant can do for the user.\"}]}",
+  "extracted_at": "2026-05-21T08:04:19.053Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "e5bec6c8ed215b37670ce1a40fb5f97a8bd906b9a2fb7b55865eff167205d97f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"interest\",\"confidence\":0.95,\"matched_text\":\"I'm really interested in getting involved in beach cleanups\",\"distilled_fact\":\"The user is really interested in getting involved in beach cleanups.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"goal\",\"confidence\":0.93,\"matched_text\":\"to help remove plastic litter\",\"distilled_fact\":\"The user wants to help remove plastic litter.\"}]}",
+  "extracted_at": "2026-05-21T07:54:58.211Z"
+}

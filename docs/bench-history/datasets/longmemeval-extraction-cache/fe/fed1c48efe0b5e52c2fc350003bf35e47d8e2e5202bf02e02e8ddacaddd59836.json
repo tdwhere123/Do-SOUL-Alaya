@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "fed1c48efe0b5e52c2fc350003bf35e47d8e2e5202bf02e02e8ddacaddd59836",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"event_or_state\",\"confidence\":0.78,\"matched_text\":\"the tourism industry in Venice has been affected by the floods\",\"distilled_fact\":\"The tourism industry in Venice has been affected by the floods.\"}]}",
+  "extracted_at": "2026-05-21T08:00:08.080Z"
+}

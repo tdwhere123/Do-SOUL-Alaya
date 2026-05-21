@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "f371f5d5d9950edfb4a5169aa6921afc88ac387f7f167748f726c168c03c62e2",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"product_preference\",\"confidence\":0.93,\"matched_text\":\"I like the idea of a personalized baby blanket with Lucas' name on it.\",\"distilled_fact\":\"The user likes the idea of a personalized baby blanket with Lucas' name on it.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"goal_or_request\",\"confidence\":0.88,\"matched_text\":\"Do you have any recommendations for websites or stores that offer customized baby blankets?\",\"distilled_fact\":\"The user is asking for recommendations for websites or stores that offer customized baby blankets.\"}]}",
+  "extracted_at": "2026-05-21T08:04:28.274Z"
+}

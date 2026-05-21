@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "6c6e07c19f255009d46bad342da1ac4d819d2d3b4e3f03d42acf18a9bc97898c",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"band\",\"confidence\":0.74,\"matched_text\":\"I'm still unable to find any information on a band called \\\"The Electric Storm\\\" or \\\"Whiskey Wanderers\\\" that matches your description.\",\"distilled_fact\":\"The band called \\\"The Electric Storm\\\" does not match the description provided in this turn, and the band called \\\"Whiskey Wanderers\\\" does not match the description provided in this turn.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"band\",\"confidence\":0.61,\"matched_text\":\"It's possible that they're a local or up-and-coming band that doesn't have a strong online presence yet.\",\"distilled_fact\":\"\\\"The Electric Storm\\\" or \\\"Whiskey Wanderers\\\" may be a local or up-and-coming band with no strong online presence yet.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"music_genre\",\"confidence\":0.96,\"matched_text\":\"A mix of classic rock and indie is a pretty broad genre\",\"distilled_fact\":\"The described music style is a mix of classic rock and indie.\"}]}",
+  "extracted_at": "2026-05-21T07:41:15.213Z"
+}

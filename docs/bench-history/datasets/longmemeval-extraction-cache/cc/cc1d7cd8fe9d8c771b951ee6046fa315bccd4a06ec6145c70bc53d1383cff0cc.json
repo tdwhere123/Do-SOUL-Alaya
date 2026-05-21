@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "cc1d7cd8fe9d8c771b951ee6046fa315bccd4a06ec6145c70bc53d1383cff0cc",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"preference\",\"confidence\":0.58,\"matched_text\":\"I'm excited to try them out and see which one I like best.\",\"distilled_fact\":\"The speaker is excited to try the ideas out and see which one they like best.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"interest\",\"confidence\":0.74,\"matched_text\":\"Can you recommend any dessert recipes that use this flavor combination as well?\",\"distilled_fact\":\"The speaker wants dessert recipes that use the cacao and chili combination.\"}]}",
+  "extracted_at": "2026-05-21T07:45:58.029Z"
+}

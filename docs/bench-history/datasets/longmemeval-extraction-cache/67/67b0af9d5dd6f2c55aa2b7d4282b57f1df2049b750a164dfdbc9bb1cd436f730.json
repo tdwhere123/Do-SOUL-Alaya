@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "67b0af9d5dd6f2c55aa2b7d4282b57f1df2049b750a164dfdbc9bb1cd436f730",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"goal\",\"confidence\":0.97,\"matched_text\":\"I'm also planning to cook more at home and reduce food waste.\",\"distilled_fact\":\"The user is planning to cook more at home and reduce food waste.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"advice_request\",\"confidence\":0.95,\"matched_text\":\"Can you give me some tips on meal planning and grocery shopping?\",\"distilled_fact\":\"The user is asking for tips on meal planning and grocery shopping.\"}]}",
+  "extracted_at": "2026-05-21T09:10:49.629Z"
+}

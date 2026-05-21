@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "b3c0745efc76780a2add87eedaf749813d7af6e08e0462b1b0f2bcc22212c951",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_activity\",\"confidence\":0.91,\"matched_text\":\"I've been collecting donations for a charity yard sale that's happening next month\",\"distilled_fact\":\"The user has been collecting donations for a charity yard sale that is happening next month.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"user_preference\",\"confidence\":0.88,\"matched_text\":\"Can you help me find some charity events that are more low-key, like a charity yard sale or a food drive?\",\"distilled_fact\":\"The user prefers low-key charity events such as a charity yard sale or a food drive.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"user_preference\",\"confidence\":0.84,\"matched_text\":\"I'd love to find more events like that.\",\"distilled_fact\":\"The user wants to find more charity events like a charity yard sale or a food drive.\"}]}",
+  "extracted_at": "2026-05-21T09:15:43.136Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "e9c725eda42ef0813a8766e2bf581848104de623f64198fd0168c154e43453fa",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"general_question\",\"confidence\":0.88,\"matched_text\":\"Are there any animals that use touch to communicate with each other?\",\"distilled_fact\":\"The speaker asked whether any animals use touch to communicate with each other.\"}]}",
+  "extracted_at": "2026-05-21T08:02:05.651Z"
+}

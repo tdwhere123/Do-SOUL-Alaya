@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "bfbc3753e115d3ab304c6cfc59fa1a455662f65d3865cdcfa38d1fcebf57abd0",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"assistant_knowledge_limitation\",\"confidence\":0.95,\"matched_text\":\"I am not aware of any specific information regarding the impact of pricing on bicycles after Brexit.\",\"distilled_fact\":\"The assistant is not aware of any specific information regarding the impact of pricing on bicycles after Brexit.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"economic_effect\",\"confidence\":0.74,\"matched_text\":\"it is possible that the changes in tariffs and trade agreements resulting from Brexit could have affected the price of bicycles imported to or exported from the United Kingdom.\",\"distilled_fact\":\"The changes in tariffs and trade agreements resulting from Brexit could have affected the price of bicycles imported to or exported from the United Kingdom.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"economic_effect\",\"confidence\":0.74,\"matched_text\":\"Additionally, fluctuations in currency exchange rates could also have affected the price of bicycles.\",\"distilled_fact\":\"Fluctuations in currency exchange rates could also have affected the price of bicycles.\"}]}",
+  "extracted_at": "2026-05-21T09:23:15.903Z"
+}

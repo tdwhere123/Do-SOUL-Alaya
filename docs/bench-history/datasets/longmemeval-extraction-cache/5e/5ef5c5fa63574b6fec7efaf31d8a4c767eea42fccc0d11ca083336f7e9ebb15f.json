@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "5ef5c5fa63574b6fec7efaf31d8a4c767eea42fccc0d11ca083336f7e9ebb15f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_experience\",\"confidence\":0.95,\"matched_text\":\"I've been trying to get back into writing after a six-month break\",\"distilled_fact\":\"The user has been trying to get back into writing after a six-month break.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"user_preference\",\"confidence\":0.94,\"matched_text\":\"it's been really helpful to focus on my journaling and writing short stories again\",\"distilled_fact\":\"The user has found focusing on journaling and writing short stories again to be really helpful.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_output\",\"confidence\":0.98,\"matched_text\":\"I've written four stories so far\",\"distilled_fact\":\"The user has written four stories so far.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_challenge\",\"confidence\":0.97,\"matched_text\":\"I'm struggling to come up with new ideas for my fantasy series\",\"distilled_fact\":\"The user is struggling to come up with new ideas for the user's fantasy series.\"}]}",
+  "extracted_at": "2026-05-21T09:14:48.343Z"
+}

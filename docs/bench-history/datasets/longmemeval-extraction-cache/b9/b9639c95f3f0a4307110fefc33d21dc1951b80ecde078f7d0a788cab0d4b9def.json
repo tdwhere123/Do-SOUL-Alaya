@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "b9639c95f3f0a4307110fefc33d21dc1951b80ecde078f7d0a788cab0d4b9def",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"pet\",\"confidence\":0.94,\"matched_text\":\"Since they have different coat types and needs\",\"distilled_fact\":\"Luna and Max have different coat types and grooming needs.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"pet\",\"confidence\":0.98,\"matched_text\":\"For Max (Golden Retriever):\",\"distilled_fact\":\"Max is a Golden Retriever.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"pet\",\"confidence\":0.93,\"matched_text\":\"For Luna (Cat):\",\"distilled_fact\":\"Luna is a cat.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"pet_care\",\"confidence\":0.9,\"matched_text\":\"Since you're already giving Luna Omega-3 supplements\",\"distilled_fact\":\"Luna is already receiving Omega-3 supplements.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"pet_care_product\",\"confidence\":0.78,\"matched_text\":\"you might want to consider the following products to complement them\",\"distilled_fact\":\"The recommended complementary products are intended to complement Luna's Omega-3 supplements.\"}]}",
+  "extracted_at": "2026-05-21T07:09:43.555Z"
+}

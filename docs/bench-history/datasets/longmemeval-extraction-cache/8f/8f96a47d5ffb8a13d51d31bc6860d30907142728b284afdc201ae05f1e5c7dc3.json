@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "8f96a47d5ffb8a13d51d31bc6860d30907142728b284afdc201ae05f1e5c7dc3",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"creative_approach\",\"confidence\":0.62,\"matched_text\":\"what colors would you try and use for the focal point\",\"distilled_fact\":\"The speaker is asking for a color choice for the focal point of an abstract painting.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"artwork_description\",\"confidence\":0.83,\"matched_text\":\"an abstract painting with a subdued green background and a lot of yellow in the foreground\",\"distilled_fact\":\"The abstract painting has a subdued green background and a lot of yellow in the foreground.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"desired_viewer_response\",\"confidence\":0.78,\"matched_text\":\"if you wanted someone to feel harmony when viewing the piece\",\"distilled_fact\":\"The intended viewer response for the piece is a feeling of harmony.\"}]}",
+  "extracted_at": "2026-05-21T08:12:05.642Z"
+}

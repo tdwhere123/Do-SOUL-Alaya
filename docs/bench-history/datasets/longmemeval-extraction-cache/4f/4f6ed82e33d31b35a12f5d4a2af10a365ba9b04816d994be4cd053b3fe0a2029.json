@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "4f6ed82e33d31b35a12f5d4a2af10a365ba9b04816d994be4cd053b3fe0a2029",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"opinion\",\"confidence\":0.81,\"matched_text\":\"I'd like to see him keep up this pace for a few more months before making any bold predictions.\",\"distilled_fact\":\"The speaker would like to see him keep up this pace for a few more months before making any bold predictions.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"sports_opinion\",\"confidence\":0.69,\"matched_text\":\"I think he's definitely a top contender, but it's still early in the season.\",\"distilled_fact\":\"The speaker thinks he is definitely a top contender, but it is still early in the season.\"}]}",
+  "extracted_at": "2026-05-21T07:46:40.100Z"
+}

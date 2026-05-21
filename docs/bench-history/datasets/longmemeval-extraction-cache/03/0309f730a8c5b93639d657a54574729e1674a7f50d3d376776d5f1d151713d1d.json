@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "0309f730a8c5b93639d657a54574729e1674a7f50d3d376776d5f1d151713d1d",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"pet_name\",\"confidence\":0.92,\"matched_text\":\"Max\",\"distilled_fact\":\"The user has a pet named Max.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"intent\",\"confidence\":0.84,\"matched_text\":\"I'm thinking of getting a new leash for Max.\",\"distilled_fact\":\"The user is thinking of getting a new leash for Max.\"}]}",
+  "extracted_at": "2026-05-21T07:09:47.786Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "0ecb437d60ebb0fb6316309186e6be984ccb4d6ca2903422454c301462de6ae8",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_intent\",\"confidence\":0.92,\"matched_text\":\"I'll definitely share these resources with my team and start a conversation about implementing some of these practices.\",\"distilled_fact\":\"The user will share these resources with their team and start a conversation about implementing some of these practices.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_goal\",\"confidence\":0.95,\"matched_text\":\"I want to make sure we're making progress and not just talking about it.\",\"distilled_fact\":\"The user wants to make sure their team is making progress and not just talking about it.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"measurement_topic\",\"confidence\":0.91,\"matched_text\":\"do you have any recommendations for tracking diversity metrics, such as gender balance in hiring or promotion rates?\",\"distilled_fact\":\"The user is interested in tracking diversity metrics such as gender balance in hiring and promotion rates.\"}]}",
+  "extracted_at": "2026-05-21T09:05:51.335Z"
+}

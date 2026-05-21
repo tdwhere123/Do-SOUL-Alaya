@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "75aefa77be6966c6788e6fd8fa6bfd2021a02a41c1752871ddd1de8f587869a2",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"question\",\"confidence\":0.72,\"matched_text\":\"Is the target hash the same for every miner at a given time? If so, how is this possible?\",\"distilled_fact\":\"The operator asked whether the target hash is the same for every miner at a given time and, if so, how that is possible.\"}]}",
+  "extracted_at": "2026-05-21T07:38:29.754Z"
+}

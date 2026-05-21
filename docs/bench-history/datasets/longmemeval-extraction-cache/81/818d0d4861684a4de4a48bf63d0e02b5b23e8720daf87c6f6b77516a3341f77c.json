@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "818d0d4861684a4de4a48bf63d0e02b5b23e8720daf87c6f6b77516a3341f77c",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"course\",\"confidence\":0.95,\"matched_text\":\"I've already taken a course on regression analysis on Coursera\",\"distilled_fact\":\"The user has already taken a course on regression analysis on Coursera.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"resource_topic\",\"confidence\":0.92,\"matched_text\":\"I'd like to explore more resources on the topic.\",\"distilled_fact\":\"The user would like to explore more resources on regression analysis.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"podcast_topic\",\"confidence\":0.94,\"matched_text\":\"Can you recommend any podcasts that discuss data science and machine learning?\",\"distilled_fact\":\"The user wants podcast recommendations that discuss data science and machine learning.\"}]}",
+  "extracted_at": "2026-05-21T09:15:52.159Z"
+}

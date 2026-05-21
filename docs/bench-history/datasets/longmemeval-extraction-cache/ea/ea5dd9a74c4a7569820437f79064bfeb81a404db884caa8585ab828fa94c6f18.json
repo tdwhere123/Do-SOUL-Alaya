@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "ea5dd9a74c4a7569820437f79064bfeb81a404db884caa8585ab828fa94c6f18",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"pet_grooming_tool\",\"confidence\":0.91,\"matched_text\":\"I've been using a Furminator brush on Luna\",\"distilled_fact\":\"The user has been using a Furminator brush on Luna.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"pet\",\"confidence\":0.88,\"matched_text\":\"I've been using a Furminator brush on Luna, but I'm wondering if there are other products that could help with her shedding.\",\"distilled_fact\":\"Luna sheds, and the user is wondering whether other products could help with her shedding.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"purchase\",\"confidence\":0.93,\"matched_text\":\"I recently got her a new pet bed from Petco, and it was originally $40\",\"distilled_fact\":\"The user recently got Luna a new pet bed from Petco that was originally $40.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"purchase_evaluation\",\"confidence\":0.84,\"matched_text\":\"I'm really happy with the purchase!\",\"distilled_fact\":\"The user is really happy with the purchase of the new pet bed from Petco.\"}]}",
+  "extracted_at": "2026-05-21T07:09:12.868Z"
+}

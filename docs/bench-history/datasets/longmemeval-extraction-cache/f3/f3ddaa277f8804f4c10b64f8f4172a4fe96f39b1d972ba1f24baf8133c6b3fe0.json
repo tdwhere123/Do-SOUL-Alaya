@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "f3ddaa277f8804f4c10b64f8f4172a4fe96f39b1d972ba1f24baf8133c6b3fe0",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"travel_destination_interest\",\"confidence\":0.92,\"matched_text\":\"I'm thinking of planning a trip to Europe, possibly to Italy or Spain\",\"distilled_fact\":\"The user is thinking of planning a trip to Europe, possibly to Italy or Spain.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"travel_plan\",\"confidence\":0.95,\"matched_text\":\"I'm actually starting to plan a road trip with friends to the Pacific Coast Highway in California today\",\"distilled_fact\":\"The user is starting to plan a road trip with friends to the Pacific Coast Highway in California today.\"}]}",
+  "extracted_at": "2026-05-21T07:18:26.352Z"
+}

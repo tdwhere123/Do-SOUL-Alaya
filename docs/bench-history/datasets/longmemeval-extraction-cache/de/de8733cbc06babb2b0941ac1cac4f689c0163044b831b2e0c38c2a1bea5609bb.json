@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "de8733cbc06babb2b0941ac1cac4f689c0163044b831b2e0c38c2a1bea5609bb",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"food\",\"confidence\":0.92,\"matched_text\":\"I'm actually planning to try out a new BBQ sauce recipe this weekend, and I was thinking of experimenting with different types of wood chips for smoking too.\",\"distilled_fact\":\"The user plans to try out a new BBQ sauce recipe this weekend and to experiment with different types of wood chips for smoking this weekend.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"food_experience\",\"confidence\":0.86,\"matched_text\":\"I had an amazing slow-cooked ribs at Alex's house a few weeks back\",\"distilled_fact\":\"A few weeks before 2026-05-21, the user had amazing slow-cooked ribs at Alex's house.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"food_craving\",\"confidence\":0.84,\"matched_text\":\"I've been craving for them ever since.\",\"distilled_fact\":\"Since a few weeks before 2026-05-21, the user has been craving the slow-cooked ribs from Alex's house.\"}]}",
+  "extracted_at": "2026-05-21T08:58:54.149Z"
+}

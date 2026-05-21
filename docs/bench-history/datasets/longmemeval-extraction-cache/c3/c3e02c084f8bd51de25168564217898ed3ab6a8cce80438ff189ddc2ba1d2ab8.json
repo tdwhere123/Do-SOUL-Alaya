@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c3e02c084f8bd51de25168564217898ed3ab6a8cce80438ff189ddc2ba1d2ab8",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"experience\",\"confidence\":0.96,\"matched_text\":\"I've seen Ospreys before, actually - my mom and I saw a pair nesting on a platform during our Mother's Day trip to a nearby lake.\",\"distilled_fact\":\"The user and the user's mom saw a pair of Ospreys nesting on a platform during their Mother's Day trip to a nearby lake.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"preference\",\"confidence\":0.84,\"matched_text\":\"I've been hoping to spot some new species on this upcoming trip\",\"distilled_fact\":\"The user is hoping to spot some new species on the user's upcoming trip.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"interest\",\"confidence\":0.72,\"matched_text\":\"Do you think I'll be able to spot any hummingbirds near the lake?\",\"distilled_fact\":\"The user wants to spot hummingbirds near the lake.\"}]}",
+  "extracted_at": "2026-05-21T09:10:02.564Z"
+}

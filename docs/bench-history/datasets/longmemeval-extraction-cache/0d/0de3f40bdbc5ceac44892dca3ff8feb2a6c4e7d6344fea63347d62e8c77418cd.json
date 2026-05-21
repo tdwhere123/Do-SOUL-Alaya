@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "0de3f40bdbc5ceac44892dca3ff8feb2a6c4e7d6344fea63347d62e8c77418cd",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"paint color selection criterion\",\"confidence\":0.95,\"matched_text\":\"Can I also consider the color of the new area rug I recently got when choosing the paint color? I feel like it really ties the room together.\",\"distilled_fact\":\"The user wants to consider the color of a new area rug recently acquired when choosing a paint color for the room.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"room styling preference\",\"confidence\":0.84,\"matched_text\":\"I feel like it really ties the room together.\",\"distilled_fact\":\"The user believes the new area rug ties the room together.\"}]}",
+  "extracted_at": "2026-05-21T09:22:41.023Z"
+}

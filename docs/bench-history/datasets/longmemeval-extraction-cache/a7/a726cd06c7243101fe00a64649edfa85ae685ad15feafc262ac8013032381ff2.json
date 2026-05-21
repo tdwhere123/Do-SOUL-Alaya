@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "a726cd06c7243101fe00a64649edfa85ae685ad15feafc262ac8013032381ff2",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"room_use_history\",\"confidence\":0.97,\"matched_text\":\"my sister stayed in the guest room for two weeks last month\",\"distilled_fact\":\"The user's sister stayed in the guest room for two weeks in April 2026.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"room_transformation\",\"confidence\":0.97,\"matched_text\":\"now that she's gone, I converted the room into a home office\",\"distilled_fact\":\"The user converted the guest room into a home office in April 2026.\"}]}",
+  "extracted_at": "2026-05-21T09:09:44.368Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "ff55b2afad93d24acd9eec6aa6db6f4d75aef9898fe17dc7dae1f10e30d4e781",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"self_reported_activity\",\"confidence\":0.86,\"matched_text\":\"you attended a networking event\",\"distilled_fact\":\"The user attended a networking event.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"self_reported_activity\",\"confidence\":0.86,\"matched_text\":\"made an effort to engage with women and non-binary attendees\",\"distilled_fact\":\"The user made an effort to engage with women and non-binary attendees at the networking event.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"topic_interest\",\"confidence\":0.74,\"matched_text\":\"Here are some recommended resources on improving gender diversity in the workplace\",\"distilled_fact\":\"The turn concerns improving gender diversity in the workplace.\"}]}",
+  "extracted_at": "2026-05-21T07:58:26.091Z"
+}

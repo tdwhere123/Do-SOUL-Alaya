@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "4ade7caf8c8667faf21978538ae27a64a76bee3812ff0111a269d0f93e1bf5dc",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"food_snack\",\"confidence\":0.92,\"matched_text\":\"If you like Kind Bar's Fruit & Nut and LaraBar's Coconut Cream Pie, you might enjoy other healthy snack options that offer a similar texture and flavor profile.\",\"distilled_fact\":\"The user likes Kind Bar's Fruit & Nut and LaraBar's Coconut Cream Pie.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"food_snack\",\"confidence\":0.83,\"matched_text\":\"Here are some crunchy and crispy snack options you might like:\",\"distilled_fact\":\"The user may like crunchy and crispy snack options.\"}]}",
+  "extracted_at": "2026-05-21T07:54:31.978Z"
+}

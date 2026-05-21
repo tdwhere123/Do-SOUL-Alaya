@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "64f522899e55f604e82021b6fb507712168326d69353bdc84a2123d67f0821f9",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.96,\"matched_text\":\"I love trying local street food!\",\"distilled_fact\":\"The user loves trying local street food.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"preference\",\"confidence\":0.9,\"matched_text\":\"I don't want to overspend.\",\"distilled_fact\":\"The user does not want to overspend.\"}]}",
+  "extracted_at": "2026-05-21T08:13:05.393Z"
+}

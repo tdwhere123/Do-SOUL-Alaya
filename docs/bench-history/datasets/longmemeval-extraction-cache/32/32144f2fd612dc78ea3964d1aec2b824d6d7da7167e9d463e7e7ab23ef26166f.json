@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "32144f2fd612dc78ea3964d1aec2b824d6d7da7167e9d463e7e7ab23ef26166f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"trip_plan\",\"confidence\":0.97,\"matched_text\":\"I'm located in the northeastern United States, and my trip is planned for early May\",\"distilled_fact\":\"The user's trip is planned for early May in the northeastern United States.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_belief\",\"confidence\":0.89,\"matched_text\":\"which I believe is spring migration season\",\"distilled_fact\":\"The user believes that early May is spring migration season.\"}]}",
+  "extracted_at": "2026-05-21T09:22:05.766Z"
+}

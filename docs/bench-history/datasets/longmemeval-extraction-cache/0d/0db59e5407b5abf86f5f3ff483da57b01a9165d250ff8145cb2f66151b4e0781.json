@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "0db59e5407b5abf86f5f3ff483da57b01a9165d250ff8145cb2f66151b4e0781",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"historical_generalization\",\"confidence\":0.41,\"matched_text\":\"It's interesting how a shared military experience can shape a national identity.\",\"distilled_fact\":\"A shared military experience can shape a national identity.\"}]}",
+  "extracted_at": "2026-05-21T07:59:17.454Z"
+}

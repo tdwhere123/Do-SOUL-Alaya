@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "bf1bbce860639c92285763d092927929b31cfed13c9d0e1908fd7be3c1462bc8",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"food_ingredient_combination\",\"confidence\":0.95,\"matched_text\":\"I think I'll try making my own peanut sauce with peanuts, soy sauce, garlic, and chili peppers.\",\"distilled_fact\":\"The user wants to try making their own peanut sauce with peanuts, soy sauce, garlic, and chili peppers.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"personal_action\",\"confidence\":0.92,\"matched_text\":\"I'm glad I finally fixed those kitchen shelves last weekend.\",\"distilled_fact\":\"The user finally fixed the kitchen shelves last weekend.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"personal_state\",\"confidence\":0.89,\"matched_text\":\"It's amazing how much more organized my kitchen feels now.\",\"distilled_fact\":\"The user's kitchen feels much more organized now.\"}]}",
+  "extracted_at": "2026-05-21T09:22:34.120Z"
+}

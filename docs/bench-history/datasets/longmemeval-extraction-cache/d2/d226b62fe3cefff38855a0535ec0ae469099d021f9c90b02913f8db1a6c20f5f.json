@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "d226b62fe3cefff38855a0535ec0ae469099d021f9c90b02913f8db1a6c20f5f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"feature\",\"confidence\":0.94,\"matched_text\":\"I've been using their radio stations and playlists, but I'm looking for more personalized recommendations.\",\"distilled_fact\":\"The user has been using Apple Music radio stations and playlists but is looking for more personalized recommendations.\"}]}",
+  "extracted_at": "2026-05-21T09:24:22.243Z"
+}

@@ -9,21 +9,20 @@ export { rotatingSeedObjectKind, type SeedObjectKind, BENCH_SEED_ROTATION } from
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
+  CandidateMemorySignalSchema,
   ControlPlaneObjectKind,
-  GardenEventType,
-  GardenRole,
-  GardenTaskKind,
   RunMode,
   RunState,
   ScopeClass,
   SignalEventType,
-  SoulGardenTaskCompletedPayloadSchema,
+  SignalSource,
   SoulSignalMaterializedPayloadSchema,
   RetentionPolicy,
   SoulMemorySearchResponseSchema,
   TaskObjectSurfaceSchema,
   WorkspaceKind,
   WorkspaceState,
+  type CandidateMemorySignal,
   type MemorySearchResult,
   type RecallPolicy,
   type RecallBudgetState,
@@ -35,18 +34,15 @@ import {
   type SoulRecallStrategyMix,
   type SoulProposeMemoryUpdateResponse,
   type SoulReportContextUsageResponse,
-  type SoulReviewMemoryProposalResponse,
-  type GardenClaimTaskResponse,
-  type GardenCompleteTaskResponse
+  type SoulReviewMemoryProposalResponse
 } from "@do-soul/alaya-protocol";
+import { normalizeSchemaGroundedSignal } from "@do-soul/alaya-soul";
 import {
   initDatabase,
   SqliteEventLogRepo,
-  SqliteGardenTaskRepo,
   SqliteMemoryEmbeddingRepo,
   SqliteRunRepo,
-  SqliteWorkspaceRepo,
-  type GardenTaskEventPublisherPort
+  SqliteWorkspaceRepo
 } from "@do-soul/alaya-storage";
 import {
   createAlayaDaemonRuntime,
@@ -248,8 +244,8 @@ export interface BenchDaemonHandle {
    * garden extraction. Used ONLY for the no-credentials / extraction-failure
    * fallback, where a full-turn fact genuinely IS an agent-style proposal,
    * so model_tool / inferred is the production-honest source. The
-   * credentialled compile path uses proposeMemoriesFromGardenTask instead so
-   * its signals carry source = garden_compile.
+   * credentialled compile path uses proposeMemoriesFromCompileSignals
+   * instead so its signals carry source = garden_compile.
    *
    * see also: apps/bench-runner/src/longmemeval/compile-seed.ts
    */
@@ -257,32 +253,41 @@ export interface BenchDaemonHandle {
     input: BenchSignalSeedInput
   ): Promise<SeededMemoryResult>;
   /**
-   * @anchor proposeMemoriesFromGardenTask — production-faithful compile seed
+   * @anchor proposeMemoriesFromCompileSignals — production-faithful compile seed
    *
-   * Seeds a turn's production-extracted candidate signals as durable
-   * memory_entry rows through the SAME path production POST_TURN_EXTRACT
-   * completion uses: enqueue a post_turn_extract Garden task, claim it, then
-   * garden.complete_task with the content-only candidate_signals. The MCP
-   * completeGardenTask handler stamps source = SignalSource.GARDEN_COMPILE on
-   * every emitted signal (mcp-memory-tool-handler.ts) — exactly as the
-   * in-process host-worker completion does. soul.emit_candidate_signal would
-   * instead hardcode source = model_tool, which downstream toFormationKind
-   * maps to `inferred` (confidence base 0.4) rather than `extracted` (0.6),
-   * seeding ~33% lower retention than production. Routing through
-   * garden.complete_task is what keeps the bench-seeded fact's retention
-   * faithful to what production builds.
+   * Seeds a round's production-extracted candidate signals as durable
+   * memory_entry rows through the SAME in-process seam production
+   * POST_TURN_EXTRACT completion uses: garden-runtime.ts
+   * processPostTurnExtractTask calls `input.signalReceiver.receiveSignal` on
+   * each compile() signal; this method calls the daemon's own
+   * `signalService.receiveSignal` directly.
    *
-   * One Garden task carries the whole turn's signals (garden.complete_task
-   * materializes them as a batch, matching production). Steps 2-4
-   * (materialize lookup + propose + review, via materializeAndAcceptSeed)
-   * then run per materialized signal, so every seed writes the same audit
-   * trail proposeMemory / proposeMemoryFromSignal write. Returns one
-   * SeededMemoryResult per input signal, in input order.
+   * The bench builds each signal with source = SignalSource.GARDEN_COMPILE
+   * (which `receiveSignal` preserves on the emitted event) and runs
+   * `normalizeSchemaGroundedSignal` — the same normalization the production
+   * POST_TURN_EXTRACT path applies — so the bench signal is byte-faithful
+   * to the production
+   * POST_TURN_EXTRACT signal. soul.emit_candidate_signal would instead
+   * hardcode source = model_tool, which downstream toFormationKind maps to
+   * `inferred` (confidence base 0.4) rather than `extracted` (0.6), seeding
+   * ~33% lower retention than production.
+   *
+   * Going direct (rather than enqueue -> garden.claim_task ->
+   * garden.complete_task) drops the per-turn garden_task rows and the MCP
+   * round-trips — pure overhead for a benchmark that already drives Garden
+   * deterministically. `receiveSignal`'s return carries
+   * `materialization.created_objects`, so the memory_entry object_id is read
+   * straight from the result with no event-log scan.
+   *
+   * Returns one SeededMemoryResult per signal that materialized a durable
+   * memory_entry. A signal the MaterializationRouter routed to evidence_only
+   * / deferred (no memory_entry) is skipped, so the returned list may be
+   * SHORTER than `inputs`; the shortfall is the caller's drop count.
    *
    * see also: apps/bench-runner/src/longmemeval/compile-seed.ts
-   * see also: apps/core-daemon/src/garden-runtime.ts compilePostTurnExtractTask
+   * see also: apps/core-daemon/src/garden-runtime.ts processPostTurnExtractTask
    */
-  proposeMemoriesFromGardenTask(
+  proposeMemoriesFromCompileSignals(
     inputs: readonly BenchSignalSeedInput[]
   ): Promise<readonly SeededMemoryResult[]>;
   shutdown(): Promise<void>;
@@ -380,8 +385,8 @@ export async function startBenchDaemon(
     // That would start the daemon's autonomous GardenScheduler (a 60s setInterval
     // plus a startup pass), which peekPendings POST_TURN_EXTRACT tasks across all
     // workspaces and would fire mid-seed-loop — racing the bench's explicit
-    // proposeMemoriesFromGardenTask enqueue -> garden.claim_task -> garden.complete_task
-    // sequence. A benchmark needs deterministic Garden control: the bench drives
+    // in-process compile-signal seed path. A benchmark needs deterministic
+    // Garden control: the bench drives
     // every garden task explicitly, and runs an explicit garden background pass
     // via runtime.runGardenBackgroundPass() (e.g. for embedding warmup) after the
     // seed loop completes, when no bench-enqueued task is in flight.
@@ -790,7 +795,18 @@ export async function startBenchDaemon(
     // daemon's event log directly (read-only) — an implementation-of-record
     // lookup, not a bypass of governance.
     const memoryId = await readMaterializedMemoryId(dataDir, signalId);
+    const accepted = await acceptSeededMemory(memoryId, evidenceRef);
+    return { memoryId, proposalId: accepted.proposalId };
+  }
 
+  // The propose+review accept tail, given an already-resolved memory_entry
+  // id. Split out of materializeAndAcceptSeed so the garden-task seed loop
+  // can run the non-throwing memory-id lookup itself (and skip an
+  // evidence-only signal) before committing to the accept chain.
+  async function acceptSeededMemory(
+    memoryId: string,
+    evidenceRef: string
+  ): Promise<{ readonly proposalId: string }> {
     // Propose update on the materialized memory so the propose+review event
     // chain (SOUL_PROPOSAL_CREATED, SOUL_REVIEW_*, SOUL_PROPOSAL_RESOLVED,
     // SOUL_MEMORY_UPDATED) is written. The change is a no-op-ish domain_tag
@@ -829,7 +845,7 @@ export async function startBenchDaemon(
       );
     }
 
-    return { memoryId, proposalId: proposeResponse.proposal_id };
+    return { proposalId: proposeResponse.proposal_id };
   }
 
   async function proposeMemoryFromSignal(
@@ -934,71 +950,37 @@ export async function startBenchDaemon(
     };
   }
 
-  async function proposeMemoriesFromGardenTask(
+  async function proposeMemoriesFromCompileSignals(
     inputs: readonly BenchSignalSeedInput[]
   ): Promise<readonly SeededMemoryResult[]> {
     if (inputs.length === 0) {
       return [];
     }
 
-    // Step 1: enqueue a post_turn_extract Garden task on the same DB the
-    // daemon uses, so garden.claim_task / garden.complete_task can drive it.
-    // The payload carries run_id because completeGardenTask resolves the
-    // signal scope's run_id from row.payload.run_id; agentTarget on the
-    // bench MCP context is "bench-runner", which becomes the task claimant.
+    // Seed each compile()-extracted signal through the daemon's in-process
+    // signalService.receiveSignal — the EXACT seam the production garden
+    // host-worker completion uses (garden-runtime.ts processPostTurnExtractTask
+    // -> input.signalReceiver.receiveSignal). receiveSignal stamps no source
+    // itself; the bench builds the signal with source = GARDEN_COMPILE so it
+    // is byte-faithful to the production POST_TURN_EXTRACT signal, and runs
+    // normalizeSchemaGroundedSignal (the same normalization the production
+    // POST_TURN_EXTRACT path applies) so the rebuilt schema-grounding block
+    // is consistent with the
+    // canonicalized object_kind. Going direct avoids the garden_task
+    // enqueue/claim/complete MCP round-trip and the per-turn garden_task rows
+    // — pure overhead for a benchmark that drives Garden deterministically.
     //
-    // SqliteGardenTaskRepo needs an event publisher only for the
-    // claim/complete/gc transactions — enqueue() is a plain INSERT that
-    // never publishes. The bench drives claim + complete through the MCP
-    // handler (which uses the daemon's own properly-wired repo), so this
-    // repo instance is used ONLY for enqueue; the publisher must never be
-    // reached, and throws loudly if a future code path tries.
-    const enqueueOnlyEventPublisher: GardenTaskEventPublisherPort = {
-      appendManyWithMutation: () => {
-        throw new Error(
-          "bench garden-task seed repo: event publisher reached — enqueue() must not publish events"
-        );
-      }
-    };
-    const gardenTaskRepo = new SqliteGardenTaskRepo(
-      initDatabase({ filename: join(dataDir, "alaya.db") }).connection,
-      enqueueOnlyEventPublisher
-    );
-    const { task_id: taskId } = gardenTaskRepo.enqueue({
-      workspace_id: workspaceId,
-      role: GardenRole.LIBRARIAN,
-      kind: GardenTaskKind.POST_TURN_EXTRACT,
-      payload: { run_id: runId }
-    });
-
-    // Step 2: claim the task as this host. POST_TURN_EXTRACT tasks surface
-    // under the host_worker role, the same claim path an attached CLI agent
-    // host worker uses.
-    const claimResponse = await callMcpTool<GardenClaimTaskResponse>(
-      activeMcpClient,
-      "garden.claim_task",
-      { task_id: taskId }
-    );
-    if (claimResponse.status !== "claimed") {
-      throw new Error(
-        `garden.claim_task returned unexpected status=${claimResponse.status} for bench seed task ${taskId}`
-      );
-    }
-
-    // Per-input truncation bookkeeping, indexed 1:1 with the candidate
-    // signals submitted below.
-    const clips = inputs.map((input) => clipSeedContent(input.turnContent));
-
-    // Step 3: complete the task with the production-extracted signals as the
-    // content-only candidate_signals envelope. completeGardenTask stamps
-    // source = SignalSource.GARDEN_COMPILE on every signal and routes each
-    // through deps.signalService.receiveSignal — the same materialization
-    // seam the in-process garden host-worker completion uses. raw_payload is
-    // forwarded verbatim (or built full-turn for the fallback) exactly as
-    // proposeMemoryFromSignal builds it, so the bench evidence_capsule stays
-    // the production matched_text span.
-    const candidateSignals = inputs.map((input, index) => {
-      const clip = clips[index] ?? clipSeedContent(input.turnContent);
+    // receiveSignal's return carries materialization.created_objects directly,
+    // so the memory_entry object_id is read from the result — no event-log
+    // scan. A signal the MaterializationRouter routed to evidence_only /
+    // deferred (no memory_entry — e.g. a sub-0.5-confidence signal) is SKIPPED
+    // per-signal, not fatal: the turn's other healthy facts still seed. The
+    // returned list may be SHORTER than `inputs`; the shortfall is the caller's
+    // drop count.
+    // see also: apps/bench-runner/src/longmemeval/compile-seed.ts seedTurn
+    const results: SeededMemoryResult[] = [];
+    for (const input of inputs) {
+      const clip = clipSeedContent(input.turnContent);
       const safeDistilledFact =
         input.distilledFact.length > SEED_CONTENT_MAX
           ? `${input.distilledFact.slice(0, SEED_CONTENT_MAX)} [truncated at ${SEED_CONTENT_MAX} chars]`
@@ -1014,56 +996,42 @@ export async function startBenchDaemon(
               ...input.productionRawPayload,
               extraction_provider: input.extractionProvider
             };
-      return {
-        signal_kind: input.signalKind,
-        object_kind: input.objectKind,
-        scope_hint: ScopeClass.PROJECT,
-        domain_tags: ["bench-seed"],
-        confidence: input.confidence,
-        evidence_refs: [input.evidenceRef],
-        raw_payload: rawPayload
-      };
-    });
 
-    const completeResponse = await callMcpTool<GardenCompleteTaskResponse>(
-      activeMcpClient,
-      "garden.complete_task",
-      {
-        task_id: taskId,
-        status: "completed",
-        result_envelope: { candidate_signals: candidateSignals }
-      }
-    );
-    if (completeResponse.status !== "completed") {
-      throw new Error(
-        `garden.complete_task returned unexpected status=${completeResponse.status} for bench seed task ${taskId}`
+      const signal: CandidateMemorySignal = normalizeSchemaGroundedSignal(
+        CandidateMemorySignalSchema.parse({
+          signal_id: `bench_signal_${randomUUID().replace(/-/gu, "")}`,
+          workspace_id: workspaceId,
+          run_id: runId,
+          surface_id: null,
+          source: SignalSource.GARDEN_COMPILE,
+          signal_kind: input.signalKind,
+          object_kind: input.objectKind,
+          scope_hint: ScopeClass.PROJECT,
+          domain_tags: ["bench-seed"],
+          confidence: input.confidence,
+          evidence_refs: [input.evidenceRef],
+          raw_payload: rawPayload,
+          created_at: new Date().toISOString()
+        })
       );
-    }
 
-    // Recover the materialized signal ids from the SOUL_GARDEN_TASK_COMPLETED
-    // event's objects_affected, which lists them in candidate_signals order.
-    const signalIds = await readGardenTaskSignalIds(dataDir, taskId);
-    if (signalIds.length !== inputs.length) {
-      throw new Error(
-        `garden.complete_task materialized ${signalIds.length} signal(s) for ${inputs.length} bench seed input(s) on task ${taskId}`
+      const received = await activeRuntime.services.signalService.receiveSignal(signal);
+      const memoryObject = received.materialization?.created_objects.find(
+        (obj) => obj.object_kind === "memory_entry"
       );
-    }
-
-    // Steps 2-4 of the seed tail: per materialized signal, read its
-    // memory_entry id and run the propose+review chain — the same audit
-    // trail proposeMemory / proposeMemoryFromSignal write.
-    const results: SeededMemoryResult[] = [];
-    for (let index = 0; index < inputs.length; index++) {
-      const input = inputs[index];
-      const signalId = signalIds[index];
-      const clip = clips[index];
-      if (input === undefined || signalId === undefined || clip === undefined) {
+      if (memoryObject === undefined) {
+        process.stderr.write(
+          `[bench compile-seed] signal ${received.signal.signal_id} ` +
+            `triage=${received.triage_result} ` +
+            `routing=${received.materialization?.routing_reason ?? "n/a"} ` +
+            `did not materialize a memory_entry — skipped, turn batch continues\n`
+        );
         continue;
       }
-      const accepted = await materializeAndAcceptSeed(signalId, input.evidenceRef);
+      const accepted = await acceptSeededMemory(memoryObject.object_id, input.evidenceRef);
       results.push({
-        memoryId: accepted.memoryId,
-        signalId,
+        memoryId: memoryObject.object_id,
+        signalId: received.signal.signal_id,
         proposalId: accepted.proposalId,
         truncated: clip.truncated,
         charsClipped: clip.charsClipped
@@ -1098,7 +1066,7 @@ export async function startBenchDaemon(
     reportContextUsage,
     proposeMemory,
     proposeMemoryFromSignal,
-    proposeMemoriesFromGardenTask,
+    proposeMemoriesFromCompileSignals,
     shutdown
   };
 }
@@ -1404,6 +1372,27 @@ async function readMaterializedMemoryId(
   dataDir: string,
   signalId: string
 ): Promise<string> {
+  const memoryId = await findMaterializedMemoryId(dataDir, signalId);
+  if (memoryId === null) {
+    throw new Error(
+      `Signal ${signalId} did not materialize a memory_entry — check signal_kind / confidence / evidence_refs routing.`
+    );
+  }
+  return memoryId;
+}
+
+// @anchor findMaterializedMemoryId: non-throwing readMaterializedMemoryId.
+// Returns the durable memory_entry id a signal materialized, or null when
+// the signal's SOUL_SIGNAL_MATERIALIZED event has no memory_entry in
+// created_objects (e.g. a low-confidence signal the MaterializationRouter
+// legitimately routed to evidence_only — an evidence_capsule with no
+// memory_entry). The bench garden-task seed loop uses this so ONE
+// evidence-only signal does not abort a whole turn's batch of otherwise
+// healthy facts.
+async function findMaterializedMemoryId(
+  dataDir: string,
+  signalId: string
+): Promise<string | null> {
   const db = initDatabase({ filename: join(dataDir, "alaya.db") });
   const eventLogRepo = new SqliteEventLogRepo(db);
   const events = await eventLogRepo.queryByEntity("candidate_memory_signal", signalId);
@@ -1419,33 +1408,7 @@ async function readMaterializedMemoryId(
       return memoryObject.object_id;
     }
   }
-  throw new Error(
-    `Signal ${signalId} did not materialize a memory_entry — check signal_kind / confidence / evidence_refs routing.`
-  );
-}
-
-// @anchor readGardenTaskSignalIds: bridges a completed Garden task -> the
-// ordered materialized signal ids. completeGardenTask appends one
-// SOUL_GARDEN_TASK_COMPLETED event whose objects_affected lists the emitted
-// signal ids in candidate_signals order. The bench reads the event_log
-// directly (read-only) — the canonical audit-trail record — to recover them.
-async function readGardenTaskSignalIds(
-  dataDir: string,
-  taskId: string
-): Promise<readonly string[]> {
-  const db = initDatabase({ filename: join(dataDir, "alaya.db") });
-  const eventLogRepo = new SqliteEventLogRepo(db);
-  const events = await eventLogRepo.queryByEntity("garden_task", taskId);
-  for (const event of events) {
-    if (event.event_type !== GardenEventType.SOUL_GARDEN_TASK_COMPLETED) {
-      continue;
-    }
-    const payload = SoulGardenTaskCompletedPayloadSchema.parse(event.payload_json);
-    return payload.objects_affected;
-  }
-  throw new Error(
-    `Garden task ${taskId} has no SOUL_GARDEN_TASK_COMPLETED event — completion did not materialize signals.`
-  );
+  return null;
 }
 
 async function seedBenchWorkspaceAndRun(

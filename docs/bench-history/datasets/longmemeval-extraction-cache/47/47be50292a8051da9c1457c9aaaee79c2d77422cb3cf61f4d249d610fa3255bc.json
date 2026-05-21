@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "47be50292a8051da9c1457c9aaaee79c2d77422cb3cf61f4d249d610fa3255bc",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"health_monitoring_habit\",\"confidence\":0.97,\"matched_text\":\"I've also been tracking my blood pressure regularly with my new wireless blood pressure monitor from Omron, which I got on March 10th.\",\"distilled_fact\":\"The user has been tracking their blood pressure regularly with a new wireless blood pressure monitor from Omron acquired on March 10th.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"health_status\",\"confidence\":0.9,\"matched_text\":\"I've been trying to keep an eye on it since my last check-up showed slightly higher than normal readings.\",\"distilled_fact\":\"The user's last check-up showed slightly higher than normal blood pressure readings.\"}]}",
+  "extracted_at": "2026-05-21T08:55:52.867Z"
+}

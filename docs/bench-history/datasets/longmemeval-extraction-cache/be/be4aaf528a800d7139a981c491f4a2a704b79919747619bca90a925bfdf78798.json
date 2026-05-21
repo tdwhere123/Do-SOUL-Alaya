@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "be4aaf528a800d7139a981c491f4a2a704b79919747619bca90a925bfdf78798",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"general_knowledge\",\"confidence\":0.86,\"matched_text\":\"How have humans contributed to the extinction of certain animal species?\",\"distilled_fact\":\"Humans have contributed to the extinction of certain animal species.\"}]}",
+  "extracted_at": "2026-05-21T08:09:13.127Z"
+}

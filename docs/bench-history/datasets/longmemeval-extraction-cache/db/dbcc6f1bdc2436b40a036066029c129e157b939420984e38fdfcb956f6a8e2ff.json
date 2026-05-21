@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "dbcc6f1bdc2436b40a036066029c129e157b939420984e38fdfcb956f6a8e2ff",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"dessert preference\",\"confidence\":0.86,\"matched_text\":\"Maybe something light and refreshing?\",\"distilled_fact\":\"The user prefers a dessert that is light and refreshing.\"}]}",
+  "extracted_at": "2026-05-21T07:52:19.386Z"
+}

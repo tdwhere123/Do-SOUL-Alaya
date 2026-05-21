@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "72d379323b9ba0488200ac4652e4bb45152436df83aff5820c097b1bc97701f0",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"product\",\"confidence\":0.78,\"matched_text\":\"I'm thinking of getting the Western Digital Black P50 Game Drive.\",\"distilled_fact\":\"The user is considering getting a Western Digital Black P50 Game Drive.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"product_variant\",\"confidence\":0.84,\"matched_text\":\"Do you think it's a good idea to get a 1TB or 2TB model?\",\"distilled_fact\":\"The user is considering a 1TB or 2TB model of the Western Digital Black P50 Game Drive.\"}]}",
+  "extracted_at": "2026-05-21T08:13:41.998Z"
+}

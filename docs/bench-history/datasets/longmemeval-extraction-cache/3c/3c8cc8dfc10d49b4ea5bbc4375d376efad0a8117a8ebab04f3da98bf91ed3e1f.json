@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "3c8cc8dfc10d49b4ea5bbc4375d376efad0a8117a8ebab04f3da98bf91ed3e1f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"story_detail\",\"confidence\":0.87,\"matched_text\":\"In the story, it is not mentioned what kind of overalls Emma was wearing.\",\"distilled_fact\":\"The story does not mention what kind of overalls Emma was wearing.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"story_detail\",\"confidence\":0.82,\"matched_text\":\"The overalls are only described as being soiled in the diaper blowout and needing to be flushed away.\",\"distilled_fact\":\"The overalls were described as being soiled in the diaper blowout and needing to be flushed away.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"story_detail\",\"confidence\":0.9,\"matched_text\":\"The specific type of overalls Emma was wearing is not mentioned in the text, so it is impossible for me to provide any information about them.\",\"distilled_fact\":\"The specific type of overalls Emma was wearing was not mentioned in the text.\"}]}",
+  "extracted_at": "2026-05-21T09:14:34.699Z"
+}

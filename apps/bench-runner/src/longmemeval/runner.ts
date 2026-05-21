@@ -56,7 +56,7 @@ import {
   renderLongMemEvalColdWarmComparisonSidecar
 } from "./archive-evidence.js";
 import { loadDataset, type FetchResult } from "./fetch.js";
-import type { LongMemEvalVariant } from "./dataset.js";
+import { pairSessionIntoRounds, type LongMemEvalVariant } from "./dataset.js";
 import {
   createCompileSeedRunner,
   toSeedExtractionPathKpi,
@@ -233,17 +233,24 @@ export async function runLongMemEval(
         const sessionId = question.haystack_session_ids[si] ?? `session-${si}`;
         if (session === undefined) continue;
 
-        for (let ti = 0; ti < session.length; ti++) {
-          const turn = session[ti];
-          if (turn === undefined) continue;
+        // invariant: extract per ROUND (a user message + its assistant
+        // response), not per bare message — production POST_TURN_EXTRACT
+        // extracts per round and a lone message gives the extractor no
+        // context to resolve pronouns/dates. round.hasAnswer is true iff
+        // any covered message is answer-bearing, so the sidecar still maps
+        // every answer round and recall scoring stays accurate.
+        const rounds = pairSessionIntoRounds(session);
+        for (let ri = 0; ri < rounds.length; ri++) {
+          const round = rounds[ri];
+          if (round === undefined) continue;
 
-          const evidenceRef = `${question.question_id}-s${si}-t${ti}`;
-          // invariant: one turn -> N production-extracted memory_entry rows.
+          const evidenceRef = `${question.question_id}-s${si}-r${ri}`;
+          // invariant: one round -> N production-extracted memory_entry rows.
           // Every resulting object_id is mapped into the sidecar; a partial
           // map would silently undercount recall.
           const seedResult = await seedRunner.seedTurn({
             daemon,
-            turnContent: turn.content,
+            turnContent: round.content,
             evidenceRefBase: evidenceRef,
             seedIndex,
             workspaceId: daemon.workspaceId,
@@ -253,14 +260,14 @@ export async function runLongMemEval(
           if (seedResult.turnTruncated) {
             seedTurnsTruncated += 1;
             seedCharsClipped += seedResult.charsClipped;
-            if (turn.has_answer === true) {
+            if (round.hasAnswer) {
               answerTurnsTruncated += 1;
             }
           }
           for (const seed of seedResult.seeds) {
             sidecar.set(seed.memoryId, {
               sessionId,
-              hasAnswer: turn.has_answer === true
+              hasAnswer: round.hasAnswer
             });
           }
         }

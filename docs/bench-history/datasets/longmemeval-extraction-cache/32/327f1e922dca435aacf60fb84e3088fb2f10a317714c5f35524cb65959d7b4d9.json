@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "327f1e922dca435aacf60fb84e3088fb2f10a317714c5f35524cb65959d7b4d9",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"poem_author_preference\",\"confidence\":0.93,\"matched_text\":\"Can you recite another poem, perhaps one by Langston Hughes this time?\",\"distilled_fact\":\"The user wants a poem recited by Langston Hughes.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"poem_appreciation\",\"confidence\":0.88,\"matched_text\":\"Your recitation of \\\"Still I Rise\\\" by Maya Angelou gave me chills.\",\"distilled_fact\":\"The user felt chills from the assistant's recitation of \\\"Still I Rise\\\" by Maya Angelou.\"}]}",
+  "extracted_at": "2026-05-21T09:13:52.529Z"
+}

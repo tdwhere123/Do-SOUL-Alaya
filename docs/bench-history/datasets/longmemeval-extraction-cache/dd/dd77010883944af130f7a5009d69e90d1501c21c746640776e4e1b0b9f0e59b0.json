@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "dd77010883944af130f7a5009d69e90d1501c21c746640776e4e1b0b9f0e59b0",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_request\",\"object_kind\":\"task\",\"confidence\":0.93,\"matched_text\":\"Can you write the texts for the PowerPoint presentation ?\",\"distilled_fact\":\"The user wants texts written for the PowerPoint presentation.\"}]}",
+  "extracted_at": "2026-05-21T07:04:01.289Z"
+}

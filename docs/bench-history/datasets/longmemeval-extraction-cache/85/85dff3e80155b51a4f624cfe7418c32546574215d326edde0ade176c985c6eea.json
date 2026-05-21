@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "85dff3e80155b51a4f624cfe7418c32546574215d326edde0ade176c985c6eea",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"social_preference\",\"confidence\":0.42,\"matched_text\":\"thank you for being a good sport\",\"distilled_fact\":\"The speaker appreciates someone for being a good sport.\"}]}",
+  "extracted_at": "2026-05-21T08:04:17.646Z"
+}

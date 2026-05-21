@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "b4bb5d0157c9d6f67e04b5ebf61947a1598c92779db9fedd03d0991b10b93662",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"venue\",\"confidence\":0.93,\"matched_text\":\"the Underground Club doesn't seem to be a real venue.\",\"distilled_fact\":\"The Underground Club does not seem to be a real venue.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"venue\",\"confidence\":0.84,\"matched_text\":\"It sounds like a generic name that could apply to many different clubs or venues.\",\"distilled_fact\":\"The Underground Club sounds like a generic name that could apply to many different clubs or venues.\"}]}",
+  "extracted_at": "2026-05-21T08:59:16.940Z"
+}

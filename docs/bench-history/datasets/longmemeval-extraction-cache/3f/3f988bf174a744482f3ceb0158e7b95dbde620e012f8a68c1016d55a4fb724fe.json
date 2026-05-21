@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "3f988bf174a744482f3ceb0158e7b95dbde620e012f8a68c1016d55a4fb724fe",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"writing_style\",\"confidence\":0.86,\"matched_text\":\"Rewrite the ending to be less cliche\",\"distilled_fact\":\"The user prefers the ending to be less cliche.\"}]}",
+  "extracted_at": "2026-05-21T07:05:15.833Z"
+}

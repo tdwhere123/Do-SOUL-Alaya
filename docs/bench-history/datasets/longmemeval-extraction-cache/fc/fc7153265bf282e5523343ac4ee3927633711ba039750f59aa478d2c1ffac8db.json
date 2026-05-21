@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "fc7153265bf282e5523343ac4ee3927633711ba039750f59aa478d2c1ffac8db",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"collection_item\",\"confidence\":0.86,\"matched_text\":\"I just got a replacement pair of earrings, no price mentioned, and I want to make sure I add those to the list.\",\"distilled_fact\":\"The user wants to add a replacement pair of earrings with no price mentioned to the user's jewelry list.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"possession\",\"confidence\":0.73,\"matched_text\":\"I just got a replacement pair of earrings, no price mentioned\",\"distilled_fact\":\"The user just got a replacement pair of earrings with no price mentioned.\"}]}",
+  "extracted_at": "2026-05-21T09:09:08.198Z"
+}

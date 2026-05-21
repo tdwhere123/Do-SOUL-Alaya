@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7a6c06bded5fa87719e28cc56b9712316fb03e40b78fac0fb68ca31b98d460de",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"product_category\",\"confidence\":0.93,\"matched_text\":\"I've been meaning to get some waterproofing spray for my boots, can you recommend a good brand?\",\"distilled_fact\":\"The user wants a good brand of waterproofing spray for boots.\"}]}",
+  "extracted_at": "2026-05-21T09:11:06.376Z"
+}

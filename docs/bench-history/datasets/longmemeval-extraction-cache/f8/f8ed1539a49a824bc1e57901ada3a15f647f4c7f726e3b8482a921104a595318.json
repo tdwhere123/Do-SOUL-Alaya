@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "f8ed1539a49a824bc1e57901ada3a15f647f4c7f726e3b8482a921104a595318",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"wearing_habit\",\"confidence\":0.85,\"matched_text\":\"I've been wearing my new boots almost daily since January 15th\",\"distilled_fact\":\"The speaker has been wearing the speaker's new boots almost daily since January 15th.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"boot_care_need\",\"confidence\":0.78,\"matched_text\":\"I want to make sure they last long.\",\"distilled_fact\":\"The speaker wants the speaker's leather boots to last long.\"}]}",
+  "extracted_at": "2026-05-21T08:11:12.683Z"
+}

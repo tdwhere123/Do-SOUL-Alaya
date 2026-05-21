@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7ae1ca1e850bfabff325f28bb5dc331af7563ac669ef9b103a075059553b9926",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"topic_interest\",\"confidence\":0.86,\"matched_text\":\"Can you tell me more about specific events or battles that helped to shape the ANZAC identity?\",\"distilled_fact\":\"The user is interested in specific events or battles that helped to shape the ANZAC identity.\"}]}",
+  "extracted_at": "2026-05-21T07:59:09.856Z"
+}

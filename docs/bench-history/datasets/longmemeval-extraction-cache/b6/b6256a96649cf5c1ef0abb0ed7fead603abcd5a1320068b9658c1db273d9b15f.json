@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "b6256a96649cf5c1ef0abb0ed7fead603abcd5a1320068b9658c1db273d9b15f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity_preference\",\"confidence\":0.88,\"matched_text\":\"I'm planning to do a hike in the area, and I was thinking of doing a challenging hike, something similar to the hike I did at Mount Tamalpais State Park a few weeks ago.\",\"distilled_fact\":\"The user is planning to do a challenging hike in the area similar to a hike the user did at Mount Tamalpais State Park a few weeks ago.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"location_visit\",\"confidence\":0.81,\"matched_text\":\"the hike I did at Mount Tamalpais State Park a few weeks ago\",\"distilled_fact\":\"The user did a hike at Mount Tamalpais State Park a few weeks ago.\"}]}",
+  "extracted_at": "2026-05-21T09:19:58.891Z"
+}

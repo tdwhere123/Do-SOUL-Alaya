@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "4a469ca3f61961a5bf935c62df0f19cd3849b6fe2f5ae6739b95d9d1df7fde3f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"stance\",\"confidence\":0.87,\"matched_text\":\"It's frustrating to see the slow progress in addressing the flooding in Venice. Do you think there should be more pressure put on the government to take action?\",\"distilled_fact\":\"The speaker feels frustrated about the slow progress in addressing the flooding in Venice.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"stance\",\"confidence\":0.81,\"matched_text\":\"Do you think there should be more pressure put on the government to take action?\",\"distilled_fact\":\"The speaker is asking whether more pressure should be put on the government to take action.\"}]}",
+  "extracted_at": "2026-05-21T08:00:14.423Z"
+}

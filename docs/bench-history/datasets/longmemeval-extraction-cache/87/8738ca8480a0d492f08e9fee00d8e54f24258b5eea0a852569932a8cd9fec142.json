@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "8738ca8480a0d492f08e9fee00d8e54f24258b5eea0a852569932a8cd9fec142",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"mediation\",\"confidence\":0.84,\"matched_text\":\"I think involving a mediator could be a good idea\",\"distilled_fact\":\"The speaker thinks involving a mediator could be a good idea.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"roommate conflict resolution\",\"confidence\":0.71,\"matched_text\":\"if my roommates and I can't come to a compromise\",\"distilled_fact\":\"The speaker and the speaker's roommates may be unable to come to a compromise.\"}]}",
+  "extracted_at": "2026-05-21T08:07:46.770Z"
+}

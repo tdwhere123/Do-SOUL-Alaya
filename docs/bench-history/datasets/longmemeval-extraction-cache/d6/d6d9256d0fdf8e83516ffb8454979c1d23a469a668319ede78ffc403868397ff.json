@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "d6d9256d0fdf8e83516ffb8454979c1d23a469a668319ede78ffc403868397ff",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"place\",\"confidence\":0.85,\"matched_text\":\"I can't wait to try all the delicious food in Bali.\",\"distilled_fact\":\"The speaker wants to try all the delicious food in Bali.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"place\",\"confidence\":0.72,\"matched_text\":\"I heard they have some tasty street food there.\",\"distilled_fact\":\"Bali has tasty street food.\"}]}",
+  "extracted_at": "2026-05-21T08:12:59.436Z"
+}

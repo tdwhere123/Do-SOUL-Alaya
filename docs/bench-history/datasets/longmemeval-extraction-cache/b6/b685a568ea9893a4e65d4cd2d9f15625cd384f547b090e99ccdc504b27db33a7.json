@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "b685a568ea9893a4e65d4cd2d9f15625cd384f547b090e99ccdc504b27db33a7",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"team\",\"confidence\":0.95,\"matched_text\":\"I was rooting for the Astros all the way.\",\"distilled_fact\":\"The user was rooting for the Astros all the way.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"team\",\"confidence\":0.91,\"matched_text\":\"I'm still on a high from their win!\",\"distilled_fact\":\"The Astros won the World Series.\"},{\"signal_kind\":\"potential_interest\",\"object_kind\":\"topic\",\"confidence\":0.74,\"matched_text\":\"I'm looking for some sports news updates.\",\"distilled_fact\":\"The user is looking for sports news updates.\"}]}",
+  "extracted_at": "2026-05-21T07:46:13.995Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "2cc24797813e8fdc3e38b3a7df95ee4c8cf71e3655f82a7484c8815cae905ef7",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"recommendation_request\",\"confidence\":0.72,\"matched_text\":\"What can be done in future to increase the acceptance of social media retail.\",\"distilled_fact\":\"The user asks what can be done in the future to increase the acceptance of social media retail.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"methodology_constraint\",\"confidence\":0.86,\"matched_text\":\"State the response based on the cognitive structure and the hierarchical value map above\",\"distilled_fact\":\"The user requests that the response be based on the cognitive structure and the hierarchical value map above.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"assistant_response\",\"confidence\":0.88,\"matched_text\":\"Based on the cognitive structure and hierarchical value map developed earlier, the following recommendations\",\"distilled_fact\":\"The assistant response is based on the cognitive structure and hierarchical value map developed earlier.\"}]}",
+  "extracted_at": "2026-05-21T09:01:29.214Z"
+}

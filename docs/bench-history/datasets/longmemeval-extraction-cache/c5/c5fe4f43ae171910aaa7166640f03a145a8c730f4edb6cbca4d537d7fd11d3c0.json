@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c5fe4f43ae171910aaa7166640f03a145a8c730f4edb6cbca4d537d7fd11d3c0",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.94,\"matched_text\":\"I like those suggestions.\",\"distilled_fact\":\"The user likes those suggestions.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"routine_effect\",\"confidence\":0.93,\"matched_text\":\"The yoga classes have definitely given me a energy boost on those days,\",\"distilled_fact\":\"The user's yoga classes have definitely given the user an energy boost on the user's yoga days.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"routine_effect\",\"confidence\":0.91,\"matched_text\":\"I've noticed that I tend to have more productive mornings when I wake up earlier.\",\"distilled_fact\":\"The user tends to have more productive mornings when the user wakes up earlier.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"morning_activity\",\"confidence\":0.89,\"matched_text\":\"I've been using the extra time to catch up on news, respond to emails, or do some light stretching.\",\"distilled_fact\":\"The user has been using the extra time to catch up on news, respond to emails, or do some light stretching.\"}]}",
+  "extracted_at": "2026-05-21T09:00:48.490Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "8ef723946a43d69564b6e8550f509eb40261104be1ea327ea69f63b5947e46f4",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"personal_experience\",\"confidence\":0.94,\"matched_text\":\"I've seen Ospreys before, actually - my mom and I saw a pair nesting on a platform during our Mother's Day trip to a nearby lake.\",\"distilled_fact\":\"The speaker and the speaker's mom saw a pair of Ospreys nesting on a platform during a Mother's Day trip to a nearby lake.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"goal\",\"confidence\":0.91,\"matched_text\":\"I've been hoping to spot some new species on this upcoming trip, so thanks for the tips!\",\"distilled_fact\":\"The speaker is hoping to spot some new species on the upcoming trip.\"}]}",
+  "extracted_at": "2026-05-21T08:08:51.714Z"
+}

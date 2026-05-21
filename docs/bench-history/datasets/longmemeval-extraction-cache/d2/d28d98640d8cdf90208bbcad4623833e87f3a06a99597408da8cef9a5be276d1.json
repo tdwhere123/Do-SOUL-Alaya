@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "d28d98640d8cdf90208bbcad4623833e87f3a06a99597408da8cef9a5be276d1",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_need\",\"confidence\":0.93,\"matched_text\":\"I'm trying to organize my life a bit better\",\"distilled_fact\":\"The user is trying to organize their life a bit better.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_preference\",\"confidence\":0.89,\"matched_text\":\"can you recommend some task management apps that can help me prioritize my work and personal tasks?\",\"distilled_fact\":\"The user wants task management apps that can help prioritize work and personal tasks.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_usage\",\"confidence\":0.95,\"matched_text\":\"I've been using a planner\",\"distilled_fact\":\"The user has been using a planner.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"user_preference\",\"confidence\":0.91,\"matched_text\":\"but I think I need something more digital\",\"distilled_fact\":\"The user thinks they need something more digital than a planner.\"}]}",
+  "extracted_at": "2026-05-21T09:10:28.033Z"
+}

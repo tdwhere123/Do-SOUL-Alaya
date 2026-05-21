@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "69a729eb0bf9170b4c177cb523e5437b8eb76c24014209638be4f40b28e3b435",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"product\",\"confidence\":0.93,\"matched_text\":\"I was thinking of getting a hands-free leash from REI, maybe one that would allow me to run with Max if I want to.\",\"distilled_fact\":\"The user is considering getting a hands-free leash from REI.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.88,\"matched_text\":\"I was thinking of getting a hands-free leash from REI, maybe one that would allow me to run with Max if I want to.\",\"distilled_fact\":\"The user is considering a hands-free leash that would allow running with Max.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"pet_name\",\"confidence\":0.9,\"matched_text\":\"I was thinking of getting a hands-free leash from REI, maybe one that would allow me to run with Max if I want to.\",\"distilled_fact\":\"The user's dog's name is Max.\"}]}",
+  "extracted_at": "2026-05-21T08:57:04.613Z"
+}

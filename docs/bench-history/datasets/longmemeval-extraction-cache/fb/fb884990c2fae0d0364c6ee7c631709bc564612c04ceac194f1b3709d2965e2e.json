@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "fb884990c2fae0d0364c6ee7c631709bc564612c04ceac194f1b3709d2965e2e",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"product\",\"confidence\":0.86,\"matched_text\":\"I think I'll try out the Seventh Generation detergent.\",\"distilled_fact\":\"The user intends to try Seventh Generation detergent.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"item\",\"confidence\":0.81,\"matched_text\":\"I've been meaning to get my brown boots resoled\",\"distilled_fact\":\"The user has been meaning to get the user's brown boots resoled.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"item\",\"confidence\":0.66,\"matched_text\":\"do you know where I can find a good cobbler in my area?\",\"distilled_fact\":\"The user wants to find a good cobbler in the user's area.\"}]}",
+  "extracted_at": "2026-05-21T09:18:34.983Z"
+}

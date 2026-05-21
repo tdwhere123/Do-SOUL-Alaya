@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "12afb67fbaff0ecbd47b7308ce4a8d8b59383e243d3edfac150ac37dfb203819",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"future_action\",\"confidence\":0.91,\"matched_text\":\"I'll contact the local tourism board to get more information about the International Market and the Holiday Market.\",\"distilled_fact\":\"The user will contact the local tourism board to get more information about the International Market and the Holiday Market.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"future_action\",\"confidence\":0.9,\"matched_text\":\"I've been meaning to reach out to Rachel, the jewelry maker I met at the Craft Fair, to collaborate on a future project.\",\"distilled_fact\":\"The user has been meaning to reach out to Rachel, the jewelry maker the user met at the Craft Fair, to collaborate on a future project.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"future_action\",\"confidence\":0.88,\"matched_text\":\"Do you think I could also ask the tourism board if they know of any upcoming craft fairs or artisan markets in the area?\",\"distilled_fact\":\"The user could also ask the local tourism board if it knows of any upcoming craft fairs or artisan markets in the area.\"}]}",
+  "extracted_at": "2026-05-21T09:08:29.425Z"
+}

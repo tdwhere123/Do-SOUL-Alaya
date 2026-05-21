@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "9c9701f88e1b496dcc5550e11d7f58c49146ca9730d4b415354f73b2d1f20aaf",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_plan\",\"confidence\":0.92,\"matched_text\":\"I'm trying to get into a better morning routine.\",\"distilled_fact\":\"The user is trying to get into a better morning routine.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_plan\",\"confidence\":0.92,\"matched_text\":\"I need to leave earlier on the days I have morning meetings to ensure I arrive on time, which is about 45 minutes before the meeting starts.\",\"distilled_fact\":\"On days when the user has morning meetings, the user needs to leave earlier to ensure arrival about 45 minutes before the meeting starts.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"daily_habit\",\"confidence\":0.84,\"matched_text\":\"like eating oatmeal and getting ready for work\",\"distilled_fact\":\"The user's daily habits include eating oatmeal and getting ready for work.\"}]}",
+  "extracted_at": "2026-05-21T09:01:54.198Z"
+}

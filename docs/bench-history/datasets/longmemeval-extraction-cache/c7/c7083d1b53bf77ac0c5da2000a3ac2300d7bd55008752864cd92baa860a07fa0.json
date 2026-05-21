@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c7083d1b53bf77ac0c5da2000a3ac2300d7bd55008752864cd92baa860a07fa0",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"user_question\",\"confidence\":0.88,\"matched_text\":\"is it possible to maintain two spells requiring concentration concurrently\",\"distilled_fact\":\"The user asked whether it is possible to maintain two spells requiring concentration concurrently.\"}]}",
+  "extracted_at": "2026-05-21T07:55:23.000Z"
+}

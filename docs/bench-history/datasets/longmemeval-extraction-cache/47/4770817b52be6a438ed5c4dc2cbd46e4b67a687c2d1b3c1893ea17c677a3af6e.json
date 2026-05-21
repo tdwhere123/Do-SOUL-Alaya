@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "4770817b52be6a438ed5c4dc2cbd46e4b67a687c2d1b3c1893ea17c677a3af6e",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"product_interest\",\"confidence\":0.86,\"matched_text\":\"I've also been thinking about upgrading my bed frame and mattress\",\"distilled_fact\":\"The user has been thinking about upgrading their bed frame and mattress.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"web_resource\",\"confidence\":0.9,\"matched_text\":\"I'm sure online resources or websites that specialize in bed frames and mattresses\",\"distilled_fact\":\"The user asked for online resources or websites that specialize in bed frames and mattresses.\"}]}",
+  "extracted_at": "2026-05-21T09:20:32.612Z"
+}

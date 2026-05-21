@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c0ab6f2cb48ef95ecadeb9952fce86c3cf813525bd6ace97116b0f43b2ad898c",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"question\",\"confidence\":0.86,\"matched_text\":\"Who specify what is the target hash?\",\"distilled_fact\":\"The turn asks who specifies what the target hash is.\"}]}",
+  "extracted_at": "2026-05-21T07:16:14.021Z"
+}

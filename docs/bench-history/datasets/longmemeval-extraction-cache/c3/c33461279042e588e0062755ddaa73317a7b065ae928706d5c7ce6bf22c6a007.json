@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c33461279042e588e0062755ddaa73317a7b065ae928706d5c7ce6bf22c6a007",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"assistant_response\",\"confidence\":0.93,\"matched_text\":\"Yes, my response above is tailored to Maiko Haga's background as an aspiring data analyst.\",\"distilled_fact\":\"The assistant response above is tailored to Maiko Haga's background as an aspiring data analyst.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"assistant_response\",\"confidence\":0.9,\"matched_text\":\"The answer statement highlights the relevance of the concepts learned in the Financial Management and Decision Making course, such as Capital Budgeting – Processes & Metrics and Performance Management Systems & Key Performance Indicators (KPIs), to her future role in data analysis.\",\"distilled_fact\":\"The assistant response above highlights the relevance of the concepts learned in the Financial Management and Decision Making course, including Capital Budgeting – Processes & Metrics and Performance Management Systems & Key Performance Indicators (KPIs), to Maiko Haga's future role in data analysis.\"}]}",
+  "extracted_at": "2026-05-21T09:19:43.189Z"
+}

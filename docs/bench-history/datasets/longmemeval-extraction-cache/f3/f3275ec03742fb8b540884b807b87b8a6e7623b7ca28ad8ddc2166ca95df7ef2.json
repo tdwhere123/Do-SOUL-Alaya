@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "f3275ec03742fb8b540884b807b87b8a6e7623b7ca28ad8ddc2166ca95df7ef2",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"topic\",\"confidence\":0.82,\"matched_text\":\"artificial intelligence will eventually replace radio personalities in the future\",\"distilled_fact\":\"Artificial intelligence will eventually replace radio personalities in the future.\"}]}",
+  "extracted_at": "2026-05-21T08:14:42.586Z"
+}

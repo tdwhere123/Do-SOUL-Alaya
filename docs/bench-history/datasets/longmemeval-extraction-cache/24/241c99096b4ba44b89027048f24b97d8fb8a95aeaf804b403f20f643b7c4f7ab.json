@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "241c99096b4ba44b89027048f24b97d8fb8a95aeaf804b403f20f643b7c4f7ab",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"routine\",\"confidence\":0.89,\"matched_text\":\"I think this revised routine is more realistic for me.\",\"distilled_fact\":\"The user thinks this revised routine is more realistic for the user.\"},{\"signal_kind\":\"potential_intent\",\"object_kind\":\"routine adherence\",\"confidence\":0.93,\"matched_text\":\"I'll try to stick to it and see how it goes.\",\"distilled_fact\":\"The user will try to stick to the revised routine and see how it goes.\"}]}",
+  "extracted_at": "2026-05-21T09:02:07.674Z"
+}

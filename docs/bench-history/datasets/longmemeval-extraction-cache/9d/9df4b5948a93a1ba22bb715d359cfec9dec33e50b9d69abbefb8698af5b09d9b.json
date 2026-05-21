@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "9df4b5948a93a1ba22bb715d359cfec9dec33e50b9d69abbefb8698af5b09d9b",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"gift_history\",\"confidence\":0.95,\"matched_text\":\"I've already given Rachel a personalized onesie with Lucas' name on it at her baby shower\",\"distilled_fact\":\"The speaker already gave Rachel a personalized onesie with Lucas' name on it at her baby shower.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"gift_preference\",\"confidence\":0.83,\"matched_text\":\"I think a blanket would be a great complementary gift\",\"distilled_fact\":\"The speaker thinks a blanket would be a great complementary gift.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"design_preference\",\"confidence\":0.88,\"matched_text\":\"Do you have any recommendations for fonts or designs that would be suitable for a baby boy?\",\"distilled_fact\":\"The speaker wants recommendations for fonts or designs that would be suitable for a baby boy.\"}]}",
+  "extracted_at": "2026-05-21T08:04:35.305Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "347340adaab691b62c3eeb8ab235a2bf9c188c11c76224fcbd0ef7c795deb9b4",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"task_preference\",\"confidence\":0.86,\"matched_text\":\"I'd like to get some more ideas on how to organize my kitchen pantry.\",\"distilled_fact\":\"The user wants more ideas on how to organize the user's kitchen pantry.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"task_preference\",\"confidence\":0.84,\"matched_text\":\"Can you give me some suggestions on how to maximize the storage space in my pantry?\",\"distilled_fact\":\"The user wants suggestions on how to maximize the storage space in the user's pantry.\"}]}",
+  "extracted_at": "2026-05-21T08:11:02.564Z"
+}

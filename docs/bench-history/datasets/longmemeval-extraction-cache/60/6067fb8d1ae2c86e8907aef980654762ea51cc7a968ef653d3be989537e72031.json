@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "6067fb8d1ae2c86e8907aef980654762ea51cc7a968ef653d3be989537e72031",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"user\",\"confidence\":0.97,\"matched_text\":\"I like the idea of involving my team in the goal-setting process.\",\"distilled_fact\":\"The user likes the idea of involving the user's team in the goal-setting process.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"project_plan\",\"confidence\":0.89,\"matched_text\":\"Since we're working on a new product feature, I think it would be beneficial to create a prototype to visualize our progress and gather feedback from stakeholders.\",\"distilled_fact\":\"The user is working on a new product feature.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"project_plan\",\"confidence\":0.93,\"matched_text\":\"Since we're working on a new product feature, I think it would be beneficial to create a prototype to visualize our progress and gather feedback from stakeholders.\",\"distilled_fact\":\"The user thinks it would be beneficial to create a prototype to visualize progress and gather feedback from stakeholders.\"}]}",
+  "extracted_at": "2026-05-21T09:18:47.921Z"
+}

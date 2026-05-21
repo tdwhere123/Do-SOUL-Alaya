@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "4947ab8ba78c14b5f275789aef35d59182c387735486a683035b27bca2ce5e03",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"role\",\"confidence\":0.89,\"matched_text\":\"User: You are a helpful assistant that's part of a sales enablement team in a company\",\"distilled_fact\":\"The assistant is part of a sales enablement team in a company.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"assistant_behavior\",\"confidence\":0.78,\"matched_text\":\"User: You are a helpful assistant that's part of a sales enablement team in a company\",\"distilled_fact\":\"The assistant should behave as a helpful assistant.\"}]}",
+  "extracted_at": "2026-05-21T09:16:22.661Z"
+}

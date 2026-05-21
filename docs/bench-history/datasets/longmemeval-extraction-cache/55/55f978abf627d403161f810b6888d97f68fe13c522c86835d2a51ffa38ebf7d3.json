@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "55f978abf627d403161f810b6888d97f68fe13c522c86835d2a51ffa38ebf7d3",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"food_preference\",\"confidence\":0.89,\"matched_text\":\"I've been making a big batch of hummus every weekend, and I'd love to try some new flavors.\",\"distilled_fact\":\"The user makes a big batch of hummus every weekend.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"recipe_interest\",\"confidence\":0.96,\"matched_text\":\"I'd love to try some new flavors. Do you have any recipes that use roasted garlic?\",\"distilled_fact\":\"The user wants to try new hummus flavors that use roasted garlic.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"culinary_fact\",\"confidence\":0.74,\"matched_text\":\"I've heard it adds a deep, nutty flavor to hummus.\",\"distilled_fact\":\"Roasted garlic adds a deep, nutty flavor to hummus.\"}]}",
+  "extracted_at": "2026-05-21T09:03:26.673Z"
+}

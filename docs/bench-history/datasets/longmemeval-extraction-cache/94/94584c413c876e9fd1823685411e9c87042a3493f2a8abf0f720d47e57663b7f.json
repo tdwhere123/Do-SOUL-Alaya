@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "94584c413c876e9fd1823685411e9c87042a3493f2a8abf0f720d47e57663b7f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_interest\",\"object_kind\":\"feature_category\",\"confidence\":0.76,\"matched_text\":\"I've heard that some external SSDs are specifically designed for gaming, with features like heat management and rugged design.\",\"distilled_fact\":\"The user is interested in external SSDs designed for gaming, including features such as heat management and rugged design.\"}]}",
+  "extracted_at": "2026-05-21T08:13:34.775Z"
+}

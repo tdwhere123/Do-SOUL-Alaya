@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "6d6ac4043bd563637fd6d20ffe4b6b8de348876c41ba3e0425bbc237de98d3c1",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"health_action\",\"confidence\":0.84,\"matched_text\":\"I've been meaning to get a flu shot, but I haven't gotten around to it yet.\",\"distilled_fact\":\"The speaker has been meaning to get a flu shot.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"health_action\",\"confidence\":0.92,\"matched_text\":\"I need to schedule an appointment with my doctor for that.\",\"distilled_fact\":\"The speaker needs to schedule an appointment with the speaker's doctor for a flu shot.\"}]}",
+  "extracted_at": "2026-05-21T07:02:49.416Z"
+}

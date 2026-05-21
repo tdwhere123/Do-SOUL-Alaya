@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "db95cccd04c35f317c7ac5c022beb43128268067087ca096b52517e42464f905",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"event_planning_preference\",\"confidence\":0.91,\"matched_text\":\"using some fresh herbs like basil and rosemary as decorations, and maybe some candles to create a warm ambiance\",\"distilled_fact\":\"The speaker wants to use fresh herbs like basil and rosemary as decorations and maybe some candles to create a warm ambiance for the party.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"event_preparation_preference\",\"confidence\":0.89,\"matched_text\":\"I also want to make sure I have enough serving utensils and plates\",\"distilled_fact\":\"The speaker wants to make sure they have enough serving utensils and plates for the party.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"past_event_claim\",\"confidence\":0.86,\"matched_text\":\"since I had to use all the extra ones I had stored away in the kitchen cabinets during the last dinner party\",\"distilled_fact\":\"The speaker had to use all the extra serving utensils and plates they had stored away in the kitchen cabinets during the last dinner party.\"}]}",
+  "extracted_at": "2026-05-21T08:03:06.778Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "70228b74560d3247516904338ab954c253a2bdff94c33076c4269577f358de7a",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"person\",\"confidence\":0.93,\"matched_text\":\"I recently bought a new pair of running shoes that have been a game-changer for my morning jogs, with extra support and cushioning that has pretty much eliminated my blister and arch pain issues.\",\"distilled_fact\":\"The user recently bought a new pair of running shoes with extra support and cushioning.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"person\",\"confidence\":0.91,\"matched_text\":\"I recently bought a new pair of running shoes that have been a game-changer for my morning jogs, with extra support and cushioning that has pretty much eliminated my blister and arch pain issues.\",\"distilled_fact\":\"The user's new running shoes have pretty much eliminated the user's blister and arch pain issues.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"person\",\"confidence\":0.88,\"matched_text\":\"I'm planning to go for a run this weekend\",\"distilled_fact\":\"The user is planning to go for a run this weekend.\"}]}",
+  "extracted_at": "2026-05-21T09:04:51.052Z"
+}

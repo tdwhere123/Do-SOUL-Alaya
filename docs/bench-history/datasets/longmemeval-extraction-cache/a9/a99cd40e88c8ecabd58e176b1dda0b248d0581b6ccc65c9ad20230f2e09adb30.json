@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "a99cd40e88c8ecabd58e176b1dda0b248d0581b6ccc65c9ad20230f2e09adb30",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"assistant_capability\",\"confidence\":0.92,\"matched_text\":\"I haven’t tried any of these flavor combinations personally\",\"distilled_fact\":\"The assistant has not tried any of these flavor combinations personally.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"assistant_activity\",\"confidence\":0.87,\"matched_text\":\"I have analyzed various food articles and recipes to suggest unique flavor combinations with cacao.\",\"distilled_fact\":\"The assistant has analyzed various food articles and recipes to suggest unique flavor combinations with cacao.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"food_pairing_recommendation\",\"confidence\":0.9,\"matched_text\":\"based on the research data and reviews from food enthusiasts, the cacao and chili pairing seems to be a popular and recommended combination.\",\"distilled_fact\":\"The cacao and chili pairing seems to be a popular and recommended combination based on the research data and reviews from food enthusiasts.\"}]}",
+  "extracted_at": "2026-05-21T08:59:50.821Z"
+}

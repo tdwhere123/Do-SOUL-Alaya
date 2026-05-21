@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "8728e253f9beffd21783348d6676e2c8b5805a4665ef33fbb8826265c44ed48b",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"pet_bed\",\"confidence\":0.94,\"matched_text\":\"Luna is loving her new pet bed!\",\"distilled_fact\":\"Luna has a new pet bed.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"pet_behavior\",\"confidence\":0.91,\"matched_text\":\"She's been sleeping in it every night\",\"distilled_fact\":\"Luna has been sleeping in her new pet bed every night.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"pet_bed\",\"confidence\":0.89,\"matched_text\":\"it's so soft and plush\",\"distilled_fact\":\"Luna's new pet bed is soft and plush.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"purchase\",\"confidence\":0.92,\"matched_text\":\"I got it from Petco\",\"distilled_fact\":\"The new pet bed was bought from Petco.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"purchase_price\",\"confidence\":0.9,\"matched_text\":\"the original price was $40\",\"distilled_fact\":\"The original price of the new pet bed was $40.\"}]}",
+  "extracted_at": "2026-05-21T07:10:31.601Z"
+}

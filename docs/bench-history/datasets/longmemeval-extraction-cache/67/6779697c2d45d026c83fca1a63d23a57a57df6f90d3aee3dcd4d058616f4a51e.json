@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "6779697c2d45d026c83fca1a63d23a57a57df6f90d3aee3dcd4d058616f4a51e",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"poem\",\"confidence\":0.96,\"matched_text\":\"I love that poem.\",\"distilled_fact\":\"The user loves \\\"Still I Rise\\\" by Maya Angelou.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"request\",\"confidence\":0.94,\"matched_text\":\"Can you recite \\\"Still I Rise\\\" by Maya Angelou for me?\",\"distilled_fact\":\"The user asked the assistant to recite \\\"Still I Rise\\\" by Maya Angelou.\"}]}",
+  "extracted_at": "2026-05-21T09:13:51.135Z"
+}

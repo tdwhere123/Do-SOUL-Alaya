@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "bf66a6bc96dae3d5441d331d3d5fc43c4c44f7e1125856c0dfd2b4e33dd9f7dd",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"advice\",\"confidence\":0.78,\"matched_text\":\"It's always a good idea to consult with your trainer or a healthcare professional before starting any new supplement regimen.\",\"distilled_fact\":\"The speaker advises consulting with a trainer or a healthcare professional before starting any new supplement regimen.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"advice\",\"confidence\":0.72,\"matched_text\":\"They can help you determine if a pre-workout supplement is right for you and recommend a product that aligns with your goals and individual needs.\",\"distilled_fact\":\"A trainer or a healthcare professional can help determine whether a pre-workout supplement is right for the user and recommend a product that aligns with the user's goals and individual needs.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"advice\",\"confidence\":0.71,\"matched_text\":\"Remember to always read the label and use supplements as directed.\",\"distilled_fact\":\"The speaker advises always reading the label and using supplements as directed.\"}]}",
+  "extracted_at": "2026-05-21T08:00:44.341Z"
+}

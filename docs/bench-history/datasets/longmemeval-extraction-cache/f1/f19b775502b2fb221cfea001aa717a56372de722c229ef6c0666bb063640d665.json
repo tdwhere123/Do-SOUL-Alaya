@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "f19b775502b2fb221cfea001aa717a56372de722c229ef6c0666bb063640d665",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"gameplay_preference\",\"confidence\":0.94,\"matched_text\":\"which sorceror spells available at 5th level are the best for enhancing a monk damage output\",\"distilled_fact\":\"The user is asking for the best sorceror spells available at 5th level for enhancing a monk's damage output.\"}]}",
+  "extracted_at": "2026-05-21T07:55:41.061Z"
+}

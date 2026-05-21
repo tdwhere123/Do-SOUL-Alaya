@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "460082599daf9a1e02340efcd99b61102a87e669beac830d7f8dbd84b5e2d117",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"linguistic_style\",\"confidence\":0.92,\"matched_text\":\"can you use a different word than \\\"own\\\"\",\"distilled_fact\":\"The user prefers a different word than \\\"own\\\".\"}]}",
+  "extracted_at": "2026-05-21T08:04:10.818Z"
+}

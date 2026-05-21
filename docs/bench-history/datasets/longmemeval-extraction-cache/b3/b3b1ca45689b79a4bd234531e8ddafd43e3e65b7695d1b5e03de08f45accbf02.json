@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "b3b1ca45689b79a4bd234531e8ddafd43e3e65b7695d1b5e03de08f45accbf02",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"topic_interest\",\"confidence\":0.74,\"matched_text\":\"What are some unique flavor combinations with cacao in food products?\",\"distilled_fact\":\"The user is interested in unique flavor combinations with cacao in food products.\"}]}",
+  "extracted_at": "2026-05-21T07:45:13.747Z"
+}

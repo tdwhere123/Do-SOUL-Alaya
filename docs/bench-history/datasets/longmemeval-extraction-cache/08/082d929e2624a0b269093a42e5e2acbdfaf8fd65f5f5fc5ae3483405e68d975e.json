@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "082d929e2624a0b269093a42e5e2acbdfaf8fd65f5f5fc5ae3483405e68d975e",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_request\",\"object_kind\":\"task\",\"confidence\":0.74,\"matched_text\":\"How can customer centric AR Marketing design be created based on the above cognitive structure diagram\",\"distilled_fact\":\"The user asked how customer centric AR Marketing design can be created based on the above cognitive structure diagram.\"}]}",
+  "extracted_at": "2026-05-21T07:49:57.388Z"
+}

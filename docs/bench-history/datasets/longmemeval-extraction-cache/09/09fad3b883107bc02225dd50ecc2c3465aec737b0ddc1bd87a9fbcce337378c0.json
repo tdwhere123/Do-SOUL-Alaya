@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "09fad3b883107bc02225dd50ecc2c3465aec737b0ddc1bd87a9fbcce337378c0",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity_preference\",\"confidence\":0.86,\"matched_text\":\"I'll try the apple slices with almond butter before my next workout\",\"distilled_fact\":\"The speaker plans to try apple slices with almond butter before the speaker's next workout.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"information_need\",\"confidence\":0.78,\"matched_text\":\"Do you have any tips for staying motivated to exercise consistently?\",\"distilled_fact\":\"The speaker is seeking tips for staying motivated to exercise consistently.\"}]}",
+  "extracted_at": "2026-05-21T08:00:51.929Z"
+}

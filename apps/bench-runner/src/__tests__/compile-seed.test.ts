@@ -4,11 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  OfficialApiGardenProvider,
-  readSchemaGroundedContent
-} from "@do-soul/alaya-soul";
-import { CandidateMemorySignalSchema } from "@do-soul/alaya-protocol";
+import { OfficialApiGardenProvider } from "@do-soul/alaya-soul";
 import {
   createCachingSignalExtractor,
   createCompileSeedRunner,
@@ -22,17 +18,17 @@ import type { BenchSignalSeedInput, SeededMemoryResult } from "../harness/daemon
 
 /**
  * A test CompileSeedDaemon stub. The compile (credentialled) seed path
- * materializes a turn's signals through proposeMemoriesFromGardenTask (the
- * production garden.complete_task seam); the no-credentials fallback path
- * uses proposeMemoryFromSignal. Both delegate to one per-signal handler so
- * tests can inspect every BenchSignalSeedInput regardless of path.
+ * materializes a round's signals through proposeMemoriesFromCompileSignals
+ * (the in-process signalService.receiveSignal seam); the no-credentials
+ * fallback path uses proposeMemoryFromSignal. Both delegate to one per-signal
+ * handler so tests can inspect every BenchSignalSeedInput regardless of path.
  */
 function buildCompileSeedDaemon(
   onSignal: (input: BenchSignalSeedInput) => SeededMemoryResult
 ): CompileSeedDaemon {
   return {
     proposeMemoryFromSignal: async (input) => onSignal(input),
-    proposeMemoriesFromGardenTask: async (inputs) => inputs.map(onSignal)
+    proposeMemoriesFromCompileSignals: async (inputs) => inputs.map(onSignal)
   };
 }
 
@@ -564,28 +560,22 @@ describe("bench evidence capsule — production-faithful span", () => {
     expect(seeded).toHaveLength(1);
     const raw = seeded[0]?.productionRawPayload;
     expect(raw).toBeDefined();
-    // The bench forwards compile()'s schema-grounded raw_payload verbatim, so
-    // readSchemaGroundedContent (the function production buildSignalSummary
-    // calls first) returns the matched_text span — the SAME evidence
-    // production materializes. It must NOT be the full turn.
-    const signal = CandidateMemorySignalSchema.parse({
-      signal_id: "signal-evidence-test",
-      workspace_id: "ws-test",
-      run_id: "run-test",
-      surface_id: null,
-      source: "garden_compile",
-      signal_kind: seeded[0]?.signalKind,
-      object_kind: seeded[0]?.objectKind,
-      scope_hint: null,
-      domain_tags: [],
-      confidence: seeded[0]?.confidence ?? 0.9,
-      evidence_refs: [],
-      raw_payload: raw,
-      created_at: new Date().toISOString()
-    });
-    const evidenceContent = readSchemaGroundedContent(signal);
-    expect(evidenceContent).toBe("I moved to Berlin");
-    expect(evidenceContent).not.toBe(fullTurn);
+    // The bench forwards compile()'s CONTENT-bearing raw_payload but strips
+    // the schema-grounding block (it pins detected_object.object_kind to the
+    // pre-canonicalization extracted kind — see stripSchemaGrounding). The
+    // load-bearing matched_text span survives: completeGardenTask's
+    // normalizeSchemaGroundedSignal re-grounds the signal from it, and
+    // production buildSignalSummary falls back to raw_payload.matched_text.
+    // It is the SAME span production materializes — NOT the full turn.
+    expect(raw?.matched_text).toBe("I moved to Berlin");
+    expect(raw?.matched_text).not.toBe(fullTurn);
+    // The pre-strip schema-grounding keys are gone; the original
+    // LLM-extracted object_kind is preserved for audit fidelity.
+    expect(raw?.schema_grounding).toBeUndefined();
+    expect(raw?.detected_object).toBeUndefined();
+    expect(raw?.field_candidates).toBeUndefined();
+    expect(raw?.validation_result).toBeUndefined();
+    expect(raw?.extracted_object_kind).toBe("user_preference");
   });
 
   it("carries the full turn only on the no-credentials fallback", async () => {

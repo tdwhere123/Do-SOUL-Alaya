@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "015a7fd94de7af1f0b507569033cc6518c0bb54dfaa03b11f4b69ee05e9a802b",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"concept_relation\",\"confidence\":0.88,\"matched_text\":\"What constitutes a valid transaction?\",\"distilled_fact\":\"The user is asking what constitutes a valid transaction.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"concept_relation\",\"confidence\":0.84,\"matched_text\":\"What is the relationship between validation transactions and mining?\",\"distilled_fact\":\"The user is asking about the relationship between validation transactions and mining.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"concept_relation\",\"confidence\":0.79,\"matched_text\":\"Because you say mining is finding a target hash.\",\"distilled_fact\":\"The user states that mining is finding a target hash.\"}]}",
+  "extracted_at": "2026-05-21T07:18:12.655Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "f9d604a3bf8274b064ad88e2f6115bc15441322cb396af8cee372cad629f94e1",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_life_event\",\"confidence\":0.92,\"matched_text\":\"my sister stayed for two weeks last month\",\"distilled_fact\":\"The user's sister stayed for two weeks last month.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"home_space_change\",\"confidence\":0.87,\"matched_text\":\"I converted the guest room\",\"distilled_fact\":\"The user converted the guest room.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"home_space_use\",\"confidence\":0.84,\"matched_text\":\"having that extra space was really helpful\",\"distilled_fact\":\"The extra space was really helpful.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"current_project\",\"confidence\":0.9,\"matched_text\":\"Now, I'm trying to make the most of this new office space.\",\"distilled_fact\":\"The user is trying to make the most of this new office space.\"}]}",
+  "extracted_at": "2026-05-21T09:09:42.166Z"
+}

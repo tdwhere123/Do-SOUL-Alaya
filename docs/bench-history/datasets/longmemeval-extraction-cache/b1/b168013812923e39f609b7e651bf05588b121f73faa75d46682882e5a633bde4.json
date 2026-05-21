@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "b168013812923e39f609b7e651bf05588b121f73faa75d46682882e5a633bde4",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"pet_product\",\"confidence\":0.89,\"matched_text\":\"The Furminator is a great tool for reducing shedding\",\"distilled_fact\":\"The Furminator is a great tool for reducing shedding.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"pet_name\",\"confidence\":0.91,\"matched_text\":\"can you tell me a bit more about Luna? What's her breed, age, and coat type?\",\"distilled_fact\":\"Luna is a pet whose breed, age, and coat type are being asked about.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"pet_product\",\"confidence\":0.78,\"matched_text\":\"Also, yay for the new pet bed from Petco!\",\"distilled_fact\":\"There is a new pet bed from Petco.\"}]}",
+  "extracted_at": "2026-05-21T07:09:18.408Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "96cefcc505fe9c2771c097df03fc21b62b1d0794bc7eeeca39d66c7dbdc5e305",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"topic_interest\",\"confidence\":0.78,\"matched_text\":\"best spell to increase AC for a sorceror / monk\",\"distilled_fact\":\"The user is interested in the best spell to increase AC for a sorceror / monk.\"}]}",
+  "extracted_at": "2026-05-21T07:55:28.047Z"
+}

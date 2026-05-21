@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "9167ec4729f7f8c679f63e2f06937aa9c62c30a85a031ddc6741c7d5a9d5625d",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_request\",\"object_kind\":\"task\",\"confidence\":0.94,\"matched_text\":\"Can you plan a class about the secondary effects of external radiation therapy ?\",\"distilled_fact\":\"The user requested a plan for a class about the secondary effects of external radiation therapy.\"}]}",
+  "extracted_at": "2026-05-21T07:04:08.246Z"
+}

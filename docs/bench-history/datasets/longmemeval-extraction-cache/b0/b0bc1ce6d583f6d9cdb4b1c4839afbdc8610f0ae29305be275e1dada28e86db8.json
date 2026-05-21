@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "b0bc1ce6d583f6d9cdb4b1c4839afbdc8610f0ae29305be275e1dada28e86db8",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"design_choice\",\"confidence\":0.96,\"matched_text\":\"I'll go with a simple design\",\"distilled_fact\":\"The user prefers a simple design.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"design_choice\",\"confidence\":0.95,\"matched_text\":\"featuring Lucas' name in a bold sans-serif font\",\"distilled_fact\":\"The user prefers a design featuring Lucas' name in a bold sans-serif font.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"design_choice\",\"confidence\":0.95,\"matched_text\":\"with a blue and white color scheme\",\"distilled_fact\":\"The user prefers a design with a blue and white color scheme.\"}]}",
+  "extracted_at": "2026-05-21T08:04:43.772Z"
+}

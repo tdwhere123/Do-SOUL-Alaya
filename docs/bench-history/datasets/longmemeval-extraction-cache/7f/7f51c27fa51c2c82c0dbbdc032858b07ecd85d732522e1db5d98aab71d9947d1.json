@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7f51c27fa51c2c82c0dbbdc032858b07ecd85d732522e1db5d98aab71d9947d1",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"recipe_preference\",\"confidence\":0.83,\"matched_text\":\"The soy ginger marinade is a delicious choice!\",\"distilled_fact\":\"The soy ginger marinade is a delicious choice.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"recipe_recommendation\",\"confidence\":0.78,\"matched_text\":\"Enjoy your flavorful and tender chicken breast with the soy ginger marinade!\",\"distilled_fact\":\"The soy ginger marinade is used with chicken breast.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"food_description\",\"confidence\":0.75,\"matched_text\":\"Enjoy your flavorful and tender chicken breast with the soy ginger marinade!\",\"distilled_fact\":\"The chicken breast is flavorful and tender.\"}]}",
+  "extracted_at": "2026-05-21T07:52:08.234Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "219bf1cdfd81c0961e8630442006cd2bf47720661df4682da2417cdde3654396",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"team_size\",\"confidence\":0.98,\"matched_text\":\"I'm leading a team of five engineers\",\"distilled_fact\":\"The user is leading a team of five engineers.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"management_style\",\"confidence\":0.91,\"matched_text\":\"I think it would be beneficial to involve them in the goal-setting process.\",\"distilled_fact\":\"The user thinks it would be beneficial to involve the user's team in the goal-setting process.\"}]}",
+  "extracted_at": "2026-05-21T09:18:45.922Z"
+}

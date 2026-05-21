@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "6d4e04734b341777753b126dcab38b720aa81cdcb6c4b09f8729f677d391d79f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"societal_attitude\",\"confidence\":0.86,\"matched_text\":\"the rise of mindfulness and meditation practices affected societal attitudes towards mental health and well-being\",\"distilled_fact\":\"The rise of mindfulness and meditation practices has affected societal attitudes towards mental health and well-being.\"}]}",
+  "extracted_at": "2026-05-21T07:57:24.121Z"
+}

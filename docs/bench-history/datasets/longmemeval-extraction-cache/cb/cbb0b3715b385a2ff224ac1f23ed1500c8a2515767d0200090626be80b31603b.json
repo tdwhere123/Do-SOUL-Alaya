@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "cbb0b3715b385a2ff224ac1f23ed1500c8a2515767d0200090626be80b31603b",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"tool\",\"confidence\":0.97,\"matched_text\":\"I've been using Lightroom for my edits, and I really like it.\",\"distilled_fact\":\"The user really likes Lightroom for their edits.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"creative_process\",\"confidence\":0.92,\"matched_text\":\"I've been experimenting with different presets and techniques to find a style that works for me.\",\"distilled_fact\":\"The user has been experimenting with different presets and techniques to find a style that works for them.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"plan\",\"confidence\":0.93,\"matched_text\":\"I was thinking of entering another photography contest soon.\",\"distilled_fact\":\"The user was thinking of entering another photography contest soon.\"}]}",
+  "extracted_at": "2026-05-21T09:19:06.184Z"
+}

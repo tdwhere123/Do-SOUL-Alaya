@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "36030759aa5adcd927be428a85fa317d36fd98048df5645e4359fc08fd29b818",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"style_preference\",\"confidence\":0.82,\"matched_text\":\"their silly jokes and ridiculous advice\",\"distilled_fact\":\"The speaker found their silly jokes and ridiculous advice funny.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"event\",\"confidence\":0.9,\"matched_text\":\"They were answering a question about how to deal with a noisy neighbor\",\"distilled_fact\":\"They were answering a question about how to deal with a noisy neighbor.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"evaluation\",\"confidence\":0.88,\"matched_text\":\"their suggestions were just so over-the-top and absurd\",\"distilled_fact\":\"Their suggestions were over-the-top and absurd.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"event\",\"confidence\":0.86,\"matched_text\":\"I was trying to stifle my laughter so I wouldn't disturb the other people on the bus\",\"distilled_fact\":\"The speaker was on a bus with other people and was trying to stifle laughter so as not to disturb them.\"}]}",
+  "extracted_at": "2026-05-21T07:08:41.402Z"
+}

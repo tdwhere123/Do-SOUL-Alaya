@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "2ed500b87311ae1cabc2ce5623b471becd919769805b0c739ac4e86a521184b1",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"personal_possession\",\"confidence\":0.87,\"matched_text\":\"I just got a replacement pair of earrings\",\"distilled_fact\":\"The user just got a replacement pair of earrings.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"organizational_preference\",\"confidence\":0.78,\"matched_text\":\"I'm trying to organize my jewelry collection and was wondering if you could help me create a list to keep track of everything.\",\"distilled_fact\":\"The user wants help creating a list to keep track of their jewelry collection.\"}]}",
+  "extracted_at": "2026-05-21T08:05:04.918Z"
+}

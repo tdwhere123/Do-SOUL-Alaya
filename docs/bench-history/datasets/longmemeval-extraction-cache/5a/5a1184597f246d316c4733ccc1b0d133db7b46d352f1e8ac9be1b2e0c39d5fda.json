@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "5a1184597f246d316c4733ccc1b0d133db7b46d352f1e8ac9be1b2e0c39d5fda",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"item\",\"confidence\":0.96,\"matched_text\":\"I also found a single pearl earring while cleaning out my jewelry box last weekend, July 3rd.\",\"distilled_fact\":\"On July 3rd, the user found a single pearl earring while cleaning out the user's jewelry box.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"item\",\"confidence\":0.84,\"matched_text\":\"I have no idea where it came from or who it belonged to\",\"distilled_fact\":\"The user does not know where the single pearl earring came from or who it belonged to.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"task\",\"confidence\":0.71,\"matched_text\":\"Can I add it to the list as well?\",\"distilled_fact\":\"The user wants to add the single pearl earring to a list.\"}]}",
+  "extracted_at": "2026-05-21T09:09:18.956Z"
+}

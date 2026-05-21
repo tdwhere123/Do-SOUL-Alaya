@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "07daaf89a5d970ee15bf9ca2a7f5edae2c9a451891d2cb552a30f4f49a3abf07",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"cooking_preference\",\"confidence\":0.86,\"matched_text\":\"my weeknight meals\",\"distilled_fact\":\"The user makes weeknight meals a cooking context.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"cooking_goal\",\"confidence\":0.93,\"matched_text\":\"make tender and flavorful chicken breast\",\"distilled_fact\":\"The user wants chicken breast to be tender and flavorful.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"cooking_avoidance\",\"confidence\":0.91,\"matched_text\":\"what cooking methods should I avoid using to prevent dryness\",\"distilled_fact\":\"The user wants to avoid cooking methods that cause dryness.\"}]}",
+  "extracted_at": "2026-05-21T07:51:49.735Z"
+}

@@ -1261,6 +1261,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       configService,
       mcpMemoryToolHandler,
       recallService,
+      signalService,
       recallUtilizationService,
       runService,
       trustStateRecorder,

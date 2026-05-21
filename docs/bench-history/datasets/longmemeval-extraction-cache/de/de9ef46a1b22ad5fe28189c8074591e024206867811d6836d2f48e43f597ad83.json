@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "de9ef46a1b22ad5fe28189c8074591e024206867811d6836d2f48e43f597ad83",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"statement\",\"confidence\":0.46,\"matched_text\":\"It's always great to hear when individuals are taking steps to reduce their plastic consumption and properly dispose of plastic waste.\",\"distilled_fact\":\"The speaker considers it great when individuals take steps to reduce their plastic consumption and properly dispose of plastic waste.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"statement\",\"confidence\":0.41,\"matched_text\":\"Every small step we take can make a difference in conserving our ocean and protecting the wildlife that calls it home.\",\"distilled_fact\":\"Every small step can make a difference in conserving the ocean and protecting the wildlife that lives in the ocean.\"}]}",
+  "extracted_at": "2026-05-21T07:54:56.181Z"
+}

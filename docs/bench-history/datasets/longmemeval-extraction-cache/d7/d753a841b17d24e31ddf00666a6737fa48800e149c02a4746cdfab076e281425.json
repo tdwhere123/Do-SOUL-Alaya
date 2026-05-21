@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "d753a841b17d24e31ddf00666a6737fa48800e149c02a4746cdfab076e281425",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"preference\",\"confidence\":0.88,\"matched_text\":\"I'm also experimenting with essential oils for stress relief\",\"distilled_fact\":\"The speaker is experimenting with essential oils for stress relief.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"event\",\"confidence\":0.95,\"matched_text\":\"I recently got a new diffuser on March 22nd.\",\"distilled_fact\":\"The speaker got a new diffuser on March 22nd.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"opinion\",\"confidence\":0.84,\"matched_text\":\"It's been a game-changer for unwinding before bed.\",\"distilled_fact\":\"The new diffuser has been a game-changer for unwinding before bed.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"usage\",\"confidence\":0.92,\"matched_text\":\"I've been using a lavender and chamomile blend that I got from a local health food store.\",\"distilled_fact\":\"The speaker has been using a lavender and chamomile blend from a local health food store.\"}]}",
+  "extracted_at": "2026-05-21T07:02:33.699Z"
+}

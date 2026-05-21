@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "bd4b73ee1fd5f64c61a75efa7bcd3dce0dee8f1bb7f192af25936a55c4f4f654",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"habit\",\"confidence\":0.97,\"matched_text\":\"I've been listening to audiobooks during my daily commute, which takes 45 minutes each way.\",\"distilled_fact\":\"The user has been listening to audiobooks during the user's daily commute.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"commute\",\"confidence\":0.98,\"matched_text\":\"I've been listening to audiobooks during my daily commute, which takes 45 minutes each way.\",\"distilled_fact\":\"The user's daily commute takes 45 minutes each way.\"}]}",
+  "extracted_at": "2026-05-21T09:13:09.206Z"
+}

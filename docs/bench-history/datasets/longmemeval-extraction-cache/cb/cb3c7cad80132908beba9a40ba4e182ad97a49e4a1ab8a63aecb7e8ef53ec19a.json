@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "cb3c7cad80132908beba9a40ba4e182ad97a49e4a1ab8a63aecb7e8ef53ec19a",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"product_usage\",\"confidence\":0.91,\"matched_text\":\"I've been using them for about 6 months now\",\"distilled_fact\":\"The speaker has been using Nike Dri-FIT running socks for about 6 months.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"product_usage\",\"confidence\":0.9,\"matched_text\":\"they've been great\",\"distilled_fact\":\"The speaker considers the Nike Dri-FIT running socks to be great.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"product_usage\",\"confidence\":0.94,\"matched_text\":\"I've been using them non-stop for my morning jogs\",\"distilled_fact\":\"The speaker has been using the Nike Dri-FIT running socks non-stop for morning jogs.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"purchase\",\"confidence\":0.96,\"matched_text\":\"my new Asics Gel-Kayano shoes, which I got last month\",\"distilled_fact\":\"The speaker got new Asics Gel-Kayano shoes last month.\"}]}",
+  "extracted_at": "2026-05-21T07:48:06.252Z"
+}

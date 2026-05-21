@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "8689f65245e326d1bec37fad798c287efd8b5b7365dcc760a91505eee8d098c1",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"device_issue\",\"confidence\":0.86,\"matched_text\":\"I've used a fitness tracker before, but it's been giving me inaccurate readings lately\",\"distilled_fact\":\"The speaker's fitness tracker has been giving inaccurate readings lately.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"device_issue\",\"confidence\":0.86,\"matched_text\":\"and the battery life has been really short.\",\"distilled_fact\":\"The speaker's fitness tracker has had really short battery life lately.\"}]}",
+  "extracted_at": "2026-05-21T07:56:44.876Z"
+}

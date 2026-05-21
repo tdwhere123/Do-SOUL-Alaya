@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "1f1b40395fca41af6ce7aeec3429d7e36ac25dc85cd81b765b0671154540db52",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"advice\",\"confidence\":0.62,\"matched_text\":\"open communication and a willingness to compromise can go a long way in resolving any issues that may arise\",\"distilled_fact\":\"Open communication can go a long way in resolving issues that may arise with roommates.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"advice\",\"confidence\":0.62,\"matched_text\":\"open communication and a willingness to compromise can go a long way in resolving any issues that may arise\",\"distilled_fact\":\"A willingness to compromise can go a long way in resolving issues that may arise with roommates.\"}]}",
+  "extracted_at": "2026-05-21T08:08:04.458Z"
+}

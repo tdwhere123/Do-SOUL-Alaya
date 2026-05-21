@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "02f6ad4bd5828f8fca66079e1d9f4915bfa33de5a4e457035a16f00104673204",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.87,\"matched_text\":\"I've been doing some yoga in the morning\",\"distilled_fact\":\"The user has been doing yoga in the morning.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"goal\",\"confidence\":0.84,\"matched_text\":\"I'm curious to know if there are any specific yoga poses that can help improve my sleep quality.\",\"distilled_fact\":\"The user wants to find specific yoga poses that can help improve the user's sleep quality.\"}]}",
+  "extracted_at": "2026-05-21T07:47:34.227Z"
+}

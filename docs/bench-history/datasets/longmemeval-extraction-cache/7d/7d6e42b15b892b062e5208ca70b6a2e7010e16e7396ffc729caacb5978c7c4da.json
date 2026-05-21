@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7d6e42b15b892b062e5208ca70b6a2e7010e16e7396ffc729caacb5978c7c4da",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"music_taste\",\"confidence\":0.86,\"matched_text\":\"a similar sound to theirs - a mix of classic rock and indie\",\"distilled_fact\":\"The user is looking for bands with a similar sound to The Electric Storm, specifically a mix of classic rock and indie.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"band_reference\",\"confidence\":0.79,\"matched_text\":\"similar bands to The Electric Storm\",\"distilled_fact\":\"The Electric Storm is the band that the user wants similar-band recommendations for.\"}]}",
+  "extracted_at": "2026-05-21T07:42:09.181Z"
+}
