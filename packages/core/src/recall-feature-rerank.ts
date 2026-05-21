@@ -30,7 +30,7 @@ export const RECALL_RERANK_TOP_N = 50;
  */
 export const RECALL_RERANK_BLEND = Object.freeze({
   fusion_weight: 1.0,
-  rerank_weight: 0.35
+  rerank_weight: 0.65
 });
 
 /**

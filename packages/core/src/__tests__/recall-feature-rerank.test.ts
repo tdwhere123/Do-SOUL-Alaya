@@ -199,10 +199,10 @@ describe("recall feature rerank — rerankTopN", () => {
 
   it("flips a moderate fusion gap inside the rerank_weight headroom", () => {
     const query = compileRecallQueryProbes("favorite text editor");
-    // The blend is `1.0·(fusion/maxFusion) + 0.35·lexical`. A maximal
+    // The blend is `1.0·(fusion/maxFusion) + 0.65·lexical`. A maximal
     // lexical score (exact phrase + full coverage + adjacency → 1.0) flips
     // the leader once the trailing candidate's normalized fusion ratio
-    // exceeds ~0.65. 0.24 / 0.30 = 0.80 is inside that window.
+    // exceeds ~0.35. 0.24 / 0.30 = 0.80 is well inside that window.
     const candidates = [
       candidate("moderate-leader", "a short unrelated note", { fusionScore: 0.3 }),
       candidate("moderate-strong", "their favorite text editor is Helix", {
@@ -217,12 +217,12 @@ describe("recall feature rerank — rerankTopN", () => {
 
   it("does not flip a fusion gap just outside the rerank_weight headroom", () => {
     const query = compileRecallQueryProbes("favorite text editor");
-    // 0.15 / 0.30 = 0.50 is below the ~0.65 flip threshold, so even a
+    // 0.09 / 0.30 = 0.30 is below the ~0.35 flip threshold, so even a
     // maximal lexical score cannot promote the trailing candidate.
     const candidates = [
       candidate("wide-leader", "a short unrelated note", { fusionScore: 0.3 }),
       candidate("wide-strong", "their favorite text editor is Helix", {
-        fusionScore: 0.15
+        fusionScore: 0.09
       })
     ];
 
