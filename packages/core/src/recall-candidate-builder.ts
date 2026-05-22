@@ -61,7 +61,20 @@ export function buildRecallCandidate(input: BuildRecallCandidateInput): Readonly
   });
 }
 
-export function appendAdditiveCandidatesWithinRemainingBudgets(
+/**
+ * Merge additive (synthesis) candidates into the fused memory delivery
+ * list by `relevance_score`, then re-apply the delivery budget.
+ *
+ * Each additive candidate is spliced in before the first base candidate
+ * whose `relevance_score` is lower — the base candidates keep their
+ * relative fusion+rerank order, while an additive candidate lands at a
+ * relevance-appropriate position. `selectCandidatesWithinBudgets` then
+ * re-cuts to `max_entries` / `max_total_tokens` / per-dimension limits, so
+ * a high-relevance additive candidate displaces a weak tail base candidate
+ * out of the delivery window and a weak one is cut itself. A no-op
+ * (returns the base list unchanged) when there are no additive candidates.
+ */
+export function mergeAdditiveCandidatesByRelevanceScore(
   baseCandidates: readonly Readonly<RecallCandidate>[],
   additiveCandidates: readonly Readonly<RecallCandidate>[],
   config: Readonly<FineAssessmentConfig>
@@ -70,39 +83,20 @@ export function appendAdditiveCandidatesWithinRemainingBudgets(
     return baseCandidates;
   }
 
-  const selected = [...baseCandidates];
-  const perDimensionCounts = new Map<MemoryDimensionType, number>();
-  let totalTokens = 0;
-
-  for (const candidate of baseCandidates) {
-    const dimensionCount = perDimensionCounts.get(candidate.dimension) ?? 0;
-    perDimensionCounts.set(candidate.dimension, dimensionCount + 1);
-    totalTokens += candidate.token_estimate;
+  const merged: Readonly<RecallCandidate>[] = [...baseCandidates];
+  for (const additive of additiveCandidates) {
+    let insertAt = merged.length;
+    for (let i = 0; i < merged.length; i += 1) {
+      const base = merged[i];
+      if (base !== undefined && base.relevance_score < additive.relevance_score) {
+        insertAt = i;
+        break;
+      }
+    }
+    merged.splice(insertAt, 0, additive);
   }
 
-  for (const candidate of additiveCandidates) {
-    const dimensionCount = perDimensionCounts.get(candidate.dimension) ?? 0;
-    const dimensionLimit = config.budgets.per_dimension_limits?.[candidate.dimension] ?? null;
-    const nextEntryCount = selected.length + 1;
-    const nextTokenCount = totalTokens + candidate.token_estimate;
-
-    if (dimensionLimit !== null && dimensionCount >= dimensionLimit) {
-      continue;
-    }
-
-    if (
-      nextEntryCount > config.budgets.max_entries ||
-      nextTokenCount > config.budgets.max_total_tokens
-    ) {
-      continue;
-    }
-
-    selected.push(candidate);
-    perDimensionCounts.set(candidate.dimension, dimensionCount + 1);
-    totalTokens = nextTokenCount;
-  }
-
-  return Object.freeze(selected);
+  return selectCandidatesWithinBudgets(merged, config);
 }
 
 export interface SynthesisRecallCandidateInput {
@@ -113,36 +107,48 @@ export interface SynthesisRecallCandidateInput {
 }
 
 /**
+ * Damping applied to a synthesis candidate's FTS relevance before it
+ * competes for a delivery slot. The synthesis FTS normalized rank and the
+ * memory fusion+rerank `relevance_score` are different scales; damping
+ * places a synthesis candidate in the memory mid-range so a strong one
+ * competes for a slot without automatically out-ranking memory, and a weak
+ * one is cut. Single tunable constant — the bench loop sweeps it.
+ */
+const SYNTHESIS_RELEVANCE_DAMPING = 0.86;
+
+/**
  * Build a delivered RecallCandidate from an L2 synthesis_capsule FTS hit.
  *
  * A synthesis candidate is an additional recall source — it joins the fused
- * memory_entry result through appendAdditiveCandidatesWithinRemainingBudgets,
+ * memory_entry result through mergeAdditiveCandidatesByRelevanceScore,
  * never a new fusion stream. Its content is the synthesis `summary`; its
- * relevance is the synthesis FTS normalized rank; it is delivered with
- * object_kind `synthesis_capsule`. Dimension `episode` matches the L2
- * aggregate-observation shape (synthesis_capsule has no MemoryDimension of
- * its own); scope `project` matches the bench/consolidation seed scope.
+ * `relevance_score` is the damped synthesis FTS normalized rank; it is
+ * delivered with object_kind `synthesis_capsule`. Dimension `episode`
+ * matches the L2 aggregate-observation shape (synthesis_capsule has no
+ * MemoryDimension of its own); scope `project` matches the bench /
+ * consolidation seed scope.
  */
 export function buildSynthesisRecallCandidate(
   input: SynthesisRecallCandidateInput
 ): Readonly<RecallCandidate> {
-  const relevance = clamp01(input.normalizedRank);
+  const ftsRelevance = clamp01(input.normalizedRank);
+  const relevance = ftsRelevance * SYNTHESIS_RELEVANCE_DAMPING;
   const summary = input.synthesis.summary;
   const tokenEstimate = estimateTokens(summary, input.tokenEstimator);
-  // Activation tracks the FTS relevance so a strong-keyword synthesis is
-  // delivered at full content rather than gated to a hint.
-  const manifestation = assignManifestation(relevance);
+  // Manifestation tracks the undamped FTS relevance so a strong-keyword
+  // synthesis is delivered at full content rather than gated to a hint.
+  const manifestation = assignManifestation(ftsRelevance);
   return RecallCandidateSchema.parse({
     object_id: input.synthesis.object_id,
     object_kind: "synthesis_capsule" as const,
-    activation_score: relevance,
+    activation_score: ftsRelevance,
     relevance_score: relevance,
     content_preview: createContentPreview(summary, manifestation),
     token_estimate: tokenEstimate,
     manifestation,
     dimension: "episode" as const,
     scope_class: "project" as const,
-    selection_reason: `Selected by synthesis recall; FTS relevance ${relevance.toFixed(3)}.`,
+    selection_reason: `Selected by synthesis recall; FTS relevance ${ftsRelevance.toFixed(3)}.`,
     source_channels: Object.freeze(["ranked_recall", "workspace_local", "synthesis_fts"]),
     budget_state: buildRecallBudgetState({
       tokenEstimate,

@@ -33,9 +33,9 @@ import { loadGlobalRecallCandidates } from "./global-memory-recall-service.js";
 import { compileRecallQueryProbes, type RecallQueryProbes } from "./recall-query-probes.js";
 import { rerankTopN, type RerankCandidate } from "./recall-feature-rerank.js";
 import {
-  appendAdditiveCandidatesWithinRemainingBudgets,
   buildRecallCandidate,
   buildSynthesisRecallCandidate,
+  mergeAdditiveCandidatesByRelevanceScore,
   rebuildRecallBudgetStateForDelivery
 } from "./recall-candidate-builder.js";
 import { STRATEGY_RECALL_DEFAULTS, type NodeStrategy } from "./task-surface-builder.js";
@@ -357,10 +357,12 @@ export class RecallService {
       preparedEmbeddingQuery.degradedReason
     );
     // Join L2 synthesis_capsule candidates as an ADDITIONAL recall source
-    // into the existing fused result — not a new fusion stream. A synthesis
-    // hit is sourced from the synthesis FTS port, ranked among synthesis
-    // rows by FTS relevance, then admitted within the remaining delivery
-    // budget. see also: recall-candidate-builder.ts buildSynthesisRecallCandidate.
+    // into the fused memory_entry result — not a new fusion stream. A
+    // synthesis hit is sourced from the synthesis FTS port; it is merged
+    // into the delivery list by damped relevance_score so a strong one
+    // competes for a slot (displacing a weak tail memory candidate) and a
+    // weak one is cut. see also: recall-candidate-builder.ts
+    // buildSynthesisRecallCandidate / mergeAdditiveCandidatesByRelevanceScore.
     const synthesisCandidates = await this.collectSynthesisCandidates({
       workspaceId: params.workspaceId,
       queryText,
@@ -368,7 +370,7 @@ export class RecallService {
       policy,
       tokenEstimator
     });
-    const fusedWithSynthesis = appendAdditiveCandidatesWithinRemainingBudgets(
+    const fusedWithSynthesis = mergeAdditiveCandidatesByRelevanceScore(
       finalAssessment.candidates,
       synthesisCandidates,
       policy.fine_assessment
