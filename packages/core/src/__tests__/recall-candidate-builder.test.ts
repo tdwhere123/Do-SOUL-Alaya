@@ -8,9 +8,9 @@ import {
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import {
+  appendAdditiveCandidatesWithinRemainingBudgets,
   buildRecallCandidate,
   buildSynthesisRecallCandidate,
-  mergeAdditiveCandidatesByRelevanceScore,
   rebuildRecallBudgetStateForDelivery
 } from "../recall-candidate-builder.js";
 import type { CoarseRecallCandidate, TokenEstimator } from "../recall-service-types.js";
@@ -153,51 +153,38 @@ describe("recall-candidate-builder", () => {
 
     expect(candidate.object_kind).toBe("synthesis_capsule");
     expect(candidate.object_id).toBe("synthesis-1");
-    // relevance_score is the FTS rank damped by SYNTHESIS_RELEVANCE_DAMPING
-    // (0.86); activation_score keeps the undamped FTS rank.
-    expect(candidate.relevance_score).toBeCloseTo(0.8 * 0.86, 5);
-    expect(candidate.activation_score).toBe(0.8);
+    expect(candidate.relevance_score).toBe(0.8);
     expect(candidate.dimension).toBe("episode");
     expect(candidate.source_channels).toContain("synthesis_fts");
   });
 
-  it("merges a synthesis candidate into the delivery list by relevance_score", () => {
-    const budgets = { max_entries: 5, max_total_tokens: 2000, per_dimension_limits: {} };
-    const config = { budgets, conflict_awareness: true };
+  it("appends a synthesis candidate additively within the remaining delivery budget", () => {
     const base = buildRecallCandidate({
       candidate: createCoarseCandidate(),
       relevanceScore: 0.6,
       scoreFactors: createScoreFactors(),
       tokenEstimator,
-      budgets,
+      budgets: { max_entries: 5, max_total_tokens: 200, per_dimension_limits: {} },
       index: 0,
       usedTokensBeforeCandidate: 0
     });
-    // damped relevance = normalizedRank * 0.86: 0.5 -> 0.43 (below base 0.6),
-    // 0.95 -> 0.817 (above base 0.6).
-    const weakSynthesis = buildSynthesisRecallCandidate({
+    const synthesis = buildSynthesisRecallCandidate({
       synthesis: createSynthesisCapsule(),
-      normalizedRank: 0.5,
+      normalizedRank: 0.7,
       tokenEstimator,
-      budgets
-    });
-    const strongSynthesis = buildSynthesisRecallCandidate({
-      synthesis: createSynthesisCapsule(),
-      normalizedRank: 0.95,
-      tokenEstimator,
-      budgets
+      budgets: { max_entries: 5, max_total_tokens: 200, per_dimension_limits: {} }
     });
 
-    expect(
-      mergeAdditiveCandidatesByRelevanceScore([base], [weakSynthesis], config).map(
-        (candidate) => candidate.object_kind
-      )
-    ).toEqual(["memory_entry", "synthesis_capsule"]);
-    expect(
-      mergeAdditiveCandidatesByRelevanceScore([base], [strongSynthesis], config).map(
-        (candidate) => candidate.object_kind
-      )
-    ).toEqual(["synthesis_capsule", "memory_entry"]);
+    const merged = appendAdditiveCandidatesWithinRemainingBudgets(
+      [base],
+      [synthesis],
+      { budgets: { max_entries: 5, max_total_tokens: 200, per_dimension_limits: {} }, conflict_awareness: true }
+    );
+
+    expect(merged.map((candidate) => candidate.object_kind)).toEqual([
+      "memory_entry",
+      "synthesis_capsule"
+    ]);
   });
 
   // DELIBERATE COUPLING (S4 review): buildSynthesisRecallCandidate stamps
@@ -221,16 +208,14 @@ describe("recall-candidate-builder", () => {
       index: 0,
       usedTokensBeforeCandidate: 0
     });
-    // normalizedRank 0.5 damps to 0.43, below the memory's 0.6 — the memory
-    // sorts first and takes the single episode slot.
     const synthesis = buildSynthesisRecallCandidate({
       synthesis: createSynthesisCapsule(),
-      normalizedRank: 0.5,
+      normalizedRank: 0.7,
       tokenEstimator,
       budgets: { max_entries: 5, max_total_tokens: 200, per_dimension_limits: {} }
     });
 
-    const merged = mergeAdditiveCandidatesByRelevanceScore(
+    const merged = appendAdditiveCandidatesWithinRemainingBudgets(
       [episodeMemory],
       [synthesis],
       {
