@@ -112,10 +112,8 @@ export interface BenchSynthesisSeedInput {
 }
 
 export interface SeededSynthesisResult {
-  /** Durable synthesis_capsule object_id, or null when none materialized. */
+  /** Durable synthesis_capsule object_id created by SynthesisService.create. */
   readonly synthesisId: string | null;
-  /** Signal id that produced the synthesis (audit trail anchor). */
-  readonly signalId: string;
 }
 
 /**
@@ -1232,12 +1230,12 @@ export async function startBenchDaemon(
     return results;
   }
 
-  // @anchor bench-synthesis-seed: emit ONE session-level potential_synthesis
-  // signal. The MaterializationRouter routes a potential_synthesis signal
-  // carrying evidence_refs.length >= 2 to synthesisService.create; the
-  // synthesis summary is read from raw_payload.distilled_fact. The caller
-  // supplies a deterministic, LLM-free digest of the session's turns.
-  // see also: packages/soul/src/garden/materialization-router.ts materializeSynthesis
+  // @anchor bench-synthesis-seed: create ONE session-level synthesis_capsule
+  // directly via SynthesisService.create. The potential_synthesis signal
+  // route (materializeSynthesis) is bypassed on purpose — that route mints
+  // a fresh evidence_capsule row per evidence_ref, which would flood the
+  // recall store and pollute the evidence FTS streams. Here the capsule
+  // references the real evidence ids the session's turns already minted.
   async function proposeSynthesis(
     input: BenchSynthesisSeedInput
   ): Promise<SeededSynthesisResult> {
@@ -1246,35 +1244,17 @@ export async function startBenchDaemon(
         `proposeSynthesis requires >= 2 evidence_refs; got ${input.evidenceRefs.length}.`
       );
     }
-    const clip = clipSeedContent(input.summary);
-    const signalResponse = await callMcpTool<SoulEmitCandidateSignalResponse>(
-      activeMcpClient,
-      "soul.emit_candidate_signal",
-      {
-        signal_kind: "potential_synthesis",
-        object_kind: "synthesis_capsule",
-        scope_hint: ScopeClass.PROJECT,
-        // domain_tags[0] feeds materialization buildTopicKey; the bench
-        // session id keeps each synthesis topic-distinct.
-        domain_tags: ["bench-seed", input.topicKey],
-        confidence: 0.9,
-        evidence_refs: [...input.evidenceRefs],
-        raw_payload: {
-          excerpt: clip.safe,
-          distilled_fact: clip.safe
-        }
-      }
-    );
-    if (signalResponse.status !== "emitted") {
-      throw new Error(
-        `soul.emit_candidate_signal (synthesis) returned unexpected status=${signalResponse.status}`
-      );
-    }
-    const synthesisId = await readMaterializedSynthesisId(
-      dataDir,
-      signalResponse.signal_id
-    );
-    return { synthesisId, signalId: signalResponse.signal_id };
+    const synthesis = await activeRuntime.services.synthesisService.create({
+      created_by: "bench_synthesis_seed",
+      topic_key: input.topicKey,
+      synthesis_type: "cross_evidence",
+      summary: input.summary,
+      evidence_refs: [...input.evidenceRefs],
+      source_memory_refs: [],
+      workspace_id: workspaceId,
+      run_id: runId
+    });
+    return { synthesisId: synthesis.object_id };
   }
 
   async function shutdown(): Promise<void> {
@@ -1639,32 +1619,6 @@ async function readMaterializedObjects(
     );
   }
   return { memoryId, evidenceId };
-}
-
-// Non-throwing variant returning the durable synthesis_capsule id a
-// potential_synthesis signal materialized, or null when the router minted
-// none (e.g. fewer than 2 evidence_refs). The session-level synthesis seed
-// uses this so a single failed synthesis does not abort a bench question.
-async function readMaterializedSynthesisId(
-  dataDir: string,
-  signalId: string
-): Promise<string | null> {
-  const db = initDatabase({ filename: join(dataDir, "alaya.db") });
-  const eventLogRepo = new SqliteEventLogRepo(db);
-  const events = await eventLogRepo.queryByEntity("candidate_memory_signal", signalId);
-  for (const event of events) {
-    if (event.event_type !== SignalEventType.SOUL_SIGNAL_MATERIALIZED) {
-      continue;
-    }
-    const payload = SoulSignalMaterializedPayloadSchema.parse(event.payload_json);
-    const synthesisObject = payload.created_objects.find(
-      (obj) => obj.object_kind === "synthesis_capsule"
-    );
-    if (synthesisObject !== undefined) {
-      return synthesisObject.object_id;
-    }
-  }
-  return null;
 }
 
 // @anchor emitBenchContextLensAssembledEvent: append a
