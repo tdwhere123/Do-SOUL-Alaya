@@ -13,6 +13,8 @@ coverage/
 var/
 data/
 apps/bench-runner/data/
+# Regenerated bench extraction cache (hash-keyed; not source truth)
+docs/bench-history/datasets/longmemeval-extraction-cache/
 *.db
 *.db-journal
 *.db-wal
