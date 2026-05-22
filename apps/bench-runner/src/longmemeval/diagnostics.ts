@@ -1,4 +1,8 @@
 import type { QualityMetrics } from "@do-soul/alaya-eval";
+import {
+  ABSTENTION_FALSE_CONFIDENT_THRESHOLD,
+  isAbstentionQuestionId
+} from "./abstention.js";
 
 const DELIVERY_BUDGET_LOSS_RANK = 10;
 
@@ -86,6 +90,8 @@ export interface LongMemEvalQuestionDiagnostic {
     | "lexical_gap"
     | "candidate_absent"
     | "no_gold"
+    | "abstained_correctly"
+    | "abstain_false_confident"
     | "diagnostics_unavailable";
   readonly degradation_reason: string | null;
   readonly recall_diagnostics_present: boolean;
@@ -269,6 +275,11 @@ export function buildQuestionDiagnostic(input: {
   readonly hitAt1: boolean;
   readonly hitAt5: boolean;
   readonly hitAt10: boolean;
+  // True for LongMemEval abstention questions (`question_id` ending
+  // `_abs`): the hit booleans then carry the calibrated-confidence verdict
+  // and miss classification is `abstained_correctly` /
+  // `abstain_false_confident` instead of `no_gold`.
+  readonly isAbstention?: boolean;
   readonly degradationReason: string | null;
   readonly recallResult: unknown;
   readonly embeddingMode: "disabled" | "env";
@@ -334,7 +345,12 @@ export function buildQuestionDiagnostic(input: {
     hit_at_1: input.hitAt1,
     hit_at_5: input.hitAt5,
     hit_at_10: input.hitAt10,
-    miss_classification: classifyMiss(input.hitAt5, gold, diagnostics !== null),
+    miss_classification: classifyMiss(
+      input.hitAt5,
+      gold,
+      diagnostics !== null,
+      input.isAbstention === true
+    ),
     degradation_reason: input.degradationReason,
     recall_diagnostics_present: diagnostics !== null,
     recall_diagnostics_keys: diagnostics?.keys ?? [],
@@ -426,6 +442,11 @@ export function buildLongMemEvalQualityMetrics(
   let evidenceStreamGoldDeliveryDenominator = 0;
   let pathStreamTop10Count = 0;
   let pathStreamTop10Denominator = 0;
+  // @anchor longmemeval-abstention: calibrated-confidence audit counters.
+  let abstentionTotal = 0;
+  let abstentionCorrectAt1 = 0;
+  let abstentionCorrectAt5 = 0;
+  let abstentionCorrectAt10 = 0;
 
   for (const question of diagnostics) {
     missDistribution[question.miss_classification] =
@@ -435,6 +456,12 @@ export function buildLongMemEvalQualityMetrics(
     }
     if (question.miss_classification === "no_gold") {
       noGoldCount++;
+    }
+    if (isAbstentionQuestionId(question.question_id)) {
+      abstentionTotal++;
+      if (question.hit_at_1) abstentionCorrectAt1++;
+      if (question.hit_at_5) abstentionCorrectAt5++;
+      if (question.hit_at_10) abstentionCorrectAt10++;
     }
 
     if (question.delivered_results.length >= 2) {
@@ -516,6 +543,21 @@ export function buildLongMemEvalQualityMetrics(
     path_stream_top10_rate: ratio(pathStreamTop10Count, pathStreamTop10Denominator),
     path_stream_top10_count: pathStreamTop10Count,
     path_stream_top10_denominator: pathStreamTop10Denominator,
+    // Calibrated-confidence audit block: how many `_abs` questions were
+    // scored, how many stayed appropriately unconfident at each k, and the
+    // false-confident threshold the verdict used. A future benchmark swap
+    // can re-derive the threshold from this record.
+    abstention: {
+      schema_version: "bench-abstention.v1",
+      total: abstentionTotal,
+      false_confident_threshold: ABSTENTION_FALSE_CONFIDENT_THRESHOLD,
+      correct_at_1: abstentionCorrectAt1,
+      correct_at_5: abstentionCorrectAt5,
+      correct_at_10: abstentionCorrectAt10,
+      false_confident_at_1: abstentionTotal - abstentionCorrectAt1,
+      false_confident_at_5: abstentionTotal - abstentionCorrectAt5,
+      false_confident_at_10: abstentionTotal - abstentionCorrectAt10
+    },
     miss_distribution: missDistribution
   };
 }
@@ -938,8 +980,15 @@ function sanitizeProviderDegradationReason(value: string | null): string | null 
 function classifyMiss(
   hitAt5: boolean,
   gold: readonly LongMemEvalGoldDiagnostic[],
-  diagnosticsAvailable: boolean
+  diagnosticsAvailable: boolean,
+  isAbstention: boolean
 ): LongMemEvalQuestionDiagnostic["miss_classification"] {
+  // Abstention questions have no gold and never produce an id-equality
+  // hit; `hitAt5` here carries the calibrated correct-at-5 verdict, so the
+  // classification is purely "did recall stay unconfident".
+  if (isAbstention) {
+    return hitAt5 ? "abstained_correctly" : "abstain_false_confident";
+  }
   if (hitAt5) return "hit_at_5";
   if (!diagnosticsAvailable) return "diagnostics_unavailable";
   if (gold.length === 0) return "no_gold";

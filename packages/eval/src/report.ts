@@ -311,6 +311,12 @@ export function renderReport(
     lines.push(
       `- Quality metrics: non_monotonic=${formatRatio(metrics.non_monotonic_rate)} (${metrics.non_monotonic_count}/${metrics.non_monotonic_denominator}) budget_drop_loss=${metrics.miss_distribution.budget_dropped ?? 0} budget_dropped_entries=${metrics.budget_drop_distribution.max_entries?.count ?? 0} candidate_absent=${metrics.candidate_absent_count} no_gold=${metrics.no_gold_count} evidence_gold=${formatRatio(metrics.evidence_stream_gold_delivery_rate)} path_top10=${formatRatio(metrics.path_stream_top10_rate)}`
     );
+    const abstention = metrics.abstention;
+    if (abstention !== undefined && abstention.total > 0) {
+      lines.push(
+        `- Abstention (calibrated confidence, threshold=${abstention.false_confident_threshold}): ${abstention.total} questions, correct@1=${abstention.correct_at_1} correct@5=${abstention.correct_at_5} correct@10=${abstention.correct_at_10}; these correct-at-k counts are credited to the recall@k numerator (denominator unchanged).`
+      );
+    }
   }
   lines.push("");
 

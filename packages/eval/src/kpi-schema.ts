@@ -187,6 +187,28 @@ const QualityMetricsSchema = z
     path_stream_top10_rate: RatioSchema.default(0),
     path_stream_top10_count: z.number().int().nonnegative().default(0),
     path_stream_top10_denominator: z.number().int().nonnegative().default(0),
+    // @anchor longmemeval-abstention: calibrated-confidence scoring of the
+    // LongMemEval-S abstention questions (`question_id` ending `_abs`).
+    // Optional so pre-abstention-scoring kpi.json records stay valid; new
+    // LongMemEval runs always populate it. correct_at_k counts the `_abs`
+    // questions whose top-k delivered results all stayed below
+    // false_confident_threshold (recall stayed appropriately unconfident);
+    // these are credited to the recall@k numerator without changing the
+    // 500-question denominator.
+    abstention: z
+      .object({
+        schema_version: z.literal("bench-abstention.v1"),
+        total: z.number().int().nonnegative(),
+        false_confident_threshold: z.number(),
+        correct_at_1: z.number().int().nonnegative(),
+        correct_at_5: z.number().int().nonnegative(),
+        correct_at_10: z.number().int().nonnegative(),
+        false_confident_at_1: z.number().int().nonnegative(),
+        false_confident_at_5: z.number().int().nonnegative(),
+        false_confident_at_10: z.number().int().nonnegative()
+      })
+      .strict()
+      .optional(),
     miss_distribution: z.record(z.number().int().nonnegative())
   })
   .strict();

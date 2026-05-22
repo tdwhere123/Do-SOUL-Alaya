@@ -59,6 +59,10 @@ import {
   readLatestLongMemEvalOppositeArchive,
   renderLongMemEvalColdWarmComparisonSidecar
 } from "./archive-evidence.js";
+import {
+  isAbstentionQuestionId,
+  scoreAbstentionQuestion
+} from "./abstention.js";
 import { loadDataset, type FetchResult } from "./fetch.js";
 import { pairSessionIntoRounds, type LongMemEvalVariant } from "./dataset.js";
 import {
@@ -356,7 +360,13 @@ export async function runLongMemEval(
         score_factors: pointer.score_factors ?? null
       }));
 
-      const hitScoring = scoreLongMemEvalRecallHits({
+      // Numerator rule: answerable questions score by id-equality hits;
+      // abstention (`_abs`) questions score by calibrated confidence — the
+      // top-k must stay below the false-confident threshold. The recall@k
+      // denominator stays at the full question count for both.
+      const isAbstention = isAbstentionQuestionId(question.question_id);
+      const scoredHits = resolveLongMemEvalHitVerdict({
+        isAbstention,
         results,
         sidecar,
         answerSessionIds: answerSessionSet
@@ -367,9 +377,10 @@ export async function runLongMemEval(
         answerSessionIds: question.answer_session_ids,
         deliveredResults,
         activeConstraintResults,
-        hitAt1: hitScoring.hitAt1,
-        hitAt5: hitScoring.hitAt5,
-        hitAt10: hitScoring.hitAt10,
+        hitAt1: scoredHits.hitAt1,
+        hitAt5: scoredHits.hitAt5,
+        hitAt10: scoredHits.hitAt10,
+        isAbstention,
         degradationReason: recallResult.degradation_reason ?? null,
         recallResult,
         embeddingMode: opts.embeddingMode ?? "disabled"
@@ -384,10 +395,10 @@ export async function runLongMemEval(
 
       return {
         questionId: question.question_id,
-        hitAt1: hitScoring.hitAt1,
-        hitAt5: hitScoring.hitAt5,
-        hitAt10: hitScoring.hitAt10,
-        firstTier: hitScoring.firstTier,
+        hitAt1: scoredHits.hitAt1,
+        hitAt5: scoredHits.hitAt5,
+        hitAt10: scoredHits.hitAt10,
+        firstTier: scoredHits.firstTier,
         latencyMs,
         degradationReason: recallResult.degradation_reason ?? null,
         seedTurnsTruncated,
@@ -921,6 +932,35 @@ function recallOptionsForPolicyShape(
   return {
     maxResults: 10,
     conflictAwareness: policyShape === "stress"
+  };
+}
+
+/**
+ * Resolve the per-k hit verdict for one LongMemEval question.
+ *
+ * Answerable questions keep the byte-identical id-equality scoring of
+ * {@link scoreLongMemEvalRecallHits}. Abstention questions are re-scored by
+ * calibrated confidence (see longmemeval/abstention.ts): "hit at k" means
+ * recall stayed appropriately unconfident across the top-k. `firstTier` is
+ * always derived from the actual top-1 relevance_score so tier reporting is
+ * unchanged.
+ */
+export function resolveLongMemEvalHitVerdict(
+  input: LongMemEvalHitScoringInput & { readonly isAbstention: boolean }
+): LongMemEvalHitScoringResult {
+  if (!input.isAbstention) {
+    return scoreLongMemEvalRecallHits(input);
+  }
+  const abstention = scoreAbstentionQuestion({ results: input.results });
+  const firstResult = input.results[0];
+  return {
+    hitAt1: abstention.correctAt1,
+    hitAt5: abstention.correctAt5,
+    hitAt10: abstention.correctAt10,
+    firstTier:
+      firstResult === undefined
+        ? "cold"
+        : inferTier(firstResult.relevance_score)
   };
 }
 

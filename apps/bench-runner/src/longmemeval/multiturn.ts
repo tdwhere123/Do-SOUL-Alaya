@@ -27,6 +27,10 @@ import {
   summarizeProviderStates,
   type LongMemEvalQuestionDiagnostic
 } from "./diagnostics.js";
+import {
+  isAbstentionQuestionId,
+  scoreAbstentionQuestion
+} from "./abstention.js";
 import { pairSessionIntoRounds, type LongMemEvalVariant } from "./dataset.js";
 import { loadDataset, type FetchResult } from "./fetch.js";
 import { resolveBenchEmbeddingProviderLabel } from "./runner.js";
@@ -241,6 +245,21 @@ export async function runLongMemEvalMultiturn(
           }
         }
 
+        // Abstention questions never produce an id-equality hit; re-score
+        // them by calibrated confidence so the recall@k numerator stays
+        // consistent with the single-turn runner. invariant: only
+        // hit_at_k is overridden — firstTier is kept from the id-equality
+        // loop above, which derives it from the top-1 relevance_score for
+        // every row regardless of hit, so that loop must keep running for
+        // `_abs` rows.
+        const isAbstention = isAbstentionQuestionId(question.question_id);
+        if (isAbstention) {
+          const abstention = scoreAbstentionQuestion({ results });
+          hitAt1 = abstention.correctAt1;
+          hitAt5 = abstention.correctAt5;
+          hitAt10 = abstention.correctAt10;
+        }
+
         const diagnostics = buildQuestionDiagnostic({
           questionId: question.question_id,
           roundIndex,
@@ -250,6 +269,7 @@ export async function runLongMemEvalMultiturn(
           hitAt1,
           hitAt5,
           hitAt10,
+          isAbstention,
           degradationReason: recallResult.degradation_reason ?? null,
           recallResult,
           embeddingMode: opts.embeddingMode ?? "disabled"
