@@ -31,9 +31,11 @@ import { pairSessionIntoRounds, type LongMemEvalVariant } from "./dataset.js";
 import { loadDataset, type FetchResult } from "./fetch.js";
 import { resolveBenchEmbeddingProviderLabel } from "./runner.js";
 import {
+  buildSessionSynthesisInput,
   createCompileSeedRunner,
   toSeedExtractionPathKpi,
-  type CompileSeedRunner
+  type CompileSeedRunner,
+  type SessionSeededTurn
 } from "./compile-seed.js";
 
 const LONGMEMEVAL_DIAGNOSTICS_FILENAME = "longmemeval-diagnostics.json";
@@ -129,6 +131,9 @@ export async function runLongMemEvalMultiturn(
         // round. see also: apps/bench-runner/src/longmemeval/dataset.ts
         // pairSessionIntoRounds.
         const rounds = pairSessionIntoRounds(session);
+        // Per-session turns collected for the L2 synthesis seed below.
+        const sessionTurns: SessionSeededTurn[] = [];
+        let sessionHasAnswer = false;
         for (let ri = 0; ri < rounds.length; ri++) {
           const round = rounds[ri];
           if (round === undefined) continue;
@@ -152,10 +157,34 @@ export async function runLongMemEvalMultiturn(
               answerTurnsTruncated += 1;
             }
           }
+          if (round.hasAnswer) {
+            sessionHasAnswer = true;
+          }
           for (const seed of seedResult.seeds) {
             sidecar.set(seed.memoryId, {
               sessionId,
               hasAnswer: round.hasAnswer
+            });
+            sessionTurns.push({
+              turnContent: round.content,
+              evidenceId: seed.evidenceId
+            });
+          }
+        }
+
+        // L2 synthesis seed — see runner.ts for the rationale. The synthesis
+        // object_id joins the same sidecar so a delivered synthesis_capsule
+        // covering an answer session counts as a hit.
+        const synthesisInput = buildSessionSynthesisInput({
+          topicKey: `${question.question_id}-mt-s${si}`,
+          turns: sessionTurns
+        });
+        if (synthesisInput !== null) {
+          const synthesisResult = await daemon.proposeSynthesis(synthesisInput);
+          if (synthesisResult.synthesisId !== null) {
+            sidecar.set(synthesisResult.synthesisId, {
+              sessionId,
+              hasAnswer: sessionHasAnswer
             });
           }
         }

@@ -65,7 +65,7 @@ soul:mcp-types.ts#SoulProposeMemoryUpdateResponseSchema(proposal_id,status)#cde6
 soul:mcp-types.ts#SoulRecallHostContextSchema(tokenizer_hint)#ef47782
 soul:mcp-types.ts#SoulRecallStrategyMixSchema(deterministic_match,global_recall,graph_support,path_plasticity,precomputed_rank,semantic_supplement)#7106699
 soul:mcp-types.ts#SoulRecallTokenizerHintSchema()#fc878ed|enum=approx_chars_per_token|cl100k|o200k
-soul:mcp-types.ts#SoulReportContextUsageRequestSchema(delivered_objects,delivery_id,per_anchor_usage,reason,trust_mode,turn_digest,turn_index,usage_state,used_object_ids)#2b391cd
+soul:mcp-types.ts#SoulReportContextUsageRequestSchema(delivered_objects,delivery_id,per_anchor_usage,reason,turn_digest,turn_index,usage_state,used_object_ids)#dfccee7
 soul:mcp-types.ts#SoulReportContextUsageResponseSchema(delivery_id,status)#267633a
 soul:mcp-types.ts#SoulReviewMemoryProposalRequestSchema(proposal_id,reason,reviewer_identity,reviewer_token,verdict)#90ad96e
 soul:mcp-types.ts#SoulReviewMemoryProposalResponseSchema(proposal_id,resolution_state)#2c6cd0b

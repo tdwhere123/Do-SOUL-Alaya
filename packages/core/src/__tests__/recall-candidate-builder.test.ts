@@ -2,11 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   MemoryDimension,
   ScopeClass,
+  SynthesisStatus,
   type MemoryEntry,
-  type RecallScoreFactors
+  type RecallScoreFactors,
+  type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import {
+  appendAdditiveCandidatesWithinRemainingBudgets,
   buildRecallCandidate,
+  buildSynthesisRecallCandidate,
   rebuildRecallBudgetStateForDelivery
 } from "../recall-candidate-builder.js";
 import type { CoarseRecallCandidate, TokenEstimator } from "../recall-service-types.js";
@@ -138,4 +142,115 @@ describe("recall-candidate-builder", () => {
     expect(rebuilt[0]?.budget_state?.within_budget).toBe(true);
     expect(rebuilt[1]?.budget_state?.within_budget).toBe(false);
   });
+
+  it("builds a synthesis_capsule candidate from an L2 synthesis row", () => {
+    const candidate = buildSynthesisRecallCandidate({
+      synthesis: createSynthesisCapsule(),
+      normalizedRank: 0.8,
+      tokenEstimator,
+      budgets: { max_entries: 5, max_total_tokens: 200, per_dimension_limits: {} }
+    });
+
+    expect(candidate.object_kind).toBe("synthesis_capsule");
+    expect(candidate.object_id).toBe("synthesis-1");
+    expect(candidate.relevance_score).toBe(0.8);
+    expect(candidate.dimension).toBe("episode");
+    expect(candidate.source_channels).toContain("synthesis_fts");
+  });
+
+  it("appends a synthesis candidate additively within the remaining delivery budget", () => {
+    const base = buildRecallCandidate({
+      candidate: createCoarseCandidate(),
+      relevanceScore: 0.6,
+      scoreFactors: createScoreFactors(),
+      tokenEstimator,
+      budgets: { max_entries: 5, max_total_tokens: 200, per_dimension_limits: {} },
+      index: 0,
+      usedTokensBeforeCandidate: 0
+    });
+    const synthesis = buildSynthesisRecallCandidate({
+      synthesis: createSynthesisCapsule(),
+      normalizedRank: 0.7,
+      tokenEstimator,
+      budgets: { max_entries: 5, max_total_tokens: 200, per_dimension_limits: {} }
+    });
+
+    const merged = appendAdditiveCandidatesWithinRemainingBudgets(
+      [base],
+      [synthesis],
+      { budgets: { max_entries: 5, max_total_tokens: 200, per_dimension_limits: {} }, conflict_awareness: true }
+    );
+
+    expect(merged.map((candidate) => candidate.object_kind)).toEqual([
+      "memory_entry",
+      "synthesis_capsule"
+    ]);
+  });
+
+  // DELIBERATE COUPLING (S4 review): buildSynthesisRecallCandidate stamps
+  // dimension "episode", so a synthesis candidate shares the `episode`
+  // per-dimension budget with L1 episode memory candidates. In every
+  // production recall policy and the bench harness `per_dimension_limits`
+  // is null, so the coupling is LATENT — no synthesis is dropped today.
+  // This test locks the coupling: if a future policy sets a non-null
+  // episode limit, the synthesis candidate IS subject to it. The decision
+  // is to document-and-lock rather than exempt synthesis, keeping the
+  // additive-join logic (a part 1-2 surface) untouched.
+  it("subjects a synthesis candidate to a non-null episode per-dimension limit", () => {
+    const episodeMemory = buildRecallCandidate({
+      candidate: createCoarseCandidate({
+        entry: createMemoryEntry({ object_id: "memory-1", dimension: MemoryDimension.EPISODE })
+      }),
+      relevanceScore: 0.6,
+      scoreFactors: createScoreFactors(),
+      tokenEstimator,
+      budgets: { max_entries: 5, max_total_tokens: 200, per_dimension_limits: {} },
+      index: 0,
+      usedTokensBeforeCandidate: 0
+    });
+    const synthesis = buildSynthesisRecallCandidate({
+      synthesis: createSynthesisCapsule(),
+      normalizedRank: 0.7,
+      tokenEstimator,
+      budgets: { max_entries: 5, max_total_tokens: 200, per_dimension_limits: {} }
+    });
+
+    const merged = appendAdditiveCandidatesWithinRemainingBudgets(
+      [episodeMemory],
+      [synthesis],
+      {
+        budgets: {
+          max_entries: 5,
+          max_total_tokens: 200,
+          per_dimension_limits: { episode: 1 }
+        },
+        conflict_awareness: true
+      }
+    );
+
+    // The one episode slot is consumed by the L1 memory; the synthesis
+    // candidate (also dimension "episode") is dropped under the limit.
+    expect(merged.map((candidate) => candidate.object_id)).toEqual(["memory-1"]);
+  });
 });
+
+function createSynthesisCapsule(overrides: Partial<SynthesisCapsule> = {}): SynthesisCapsule {
+  return {
+    object_id: "synthesis-1",
+    object_kind: "synthesis_capsule",
+    schema_version: 1,
+    lifecycle_state: "active",
+    created_at: "2026-05-13T00:00:00.000Z",
+    updated_at: "2026-05-13T00:00:00.000Z",
+    created_by: "system",
+    topic_key: "tooling/pnpm",
+    synthesis_type: "cross_evidence",
+    summary: "Cross-evidence synthesis of the workspace tooling decisions.",
+    evidence_refs: ["evidence-1", "evidence-2"],
+    source_memory_refs: ["memory-1"],
+    workspace_id: "workspace-1",
+    run_id: "run-1",
+    synthesis_status: SynthesisStatus.WORKING,
+    ...overrides
+  };
+}

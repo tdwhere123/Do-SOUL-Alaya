@@ -447,7 +447,13 @@ export const SoulReportContextUsageRequestSchema = z
     turn_index: NonNegativeIntSchema.optional(),
     turn_digest: SoulContextUsageTurnDigestSchema.optional(),
     per_anchor_usage: z.array(SoulContextPerAnchorUsageSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
-    trust_mode: SoulContextUsageTrustModeSchema.optional(),
+    // invariant (agents propose, Alaya decides): trust_mode is NOT a
+    // request field. Usage trust weight is server-derived — an MCP usage
+    // report is an unverified agent self-report, always recorded as
+    // `automatic` (lower path-plasticity weight). A caller cannot
+    // self-declare `manual` to claim full reinforcement weight. The
+    // SoulContextUsageTrustModeSchema enum still types the durable
+    // UsageProofRecord, where the server sets the mode.
     reason: BoundedReasonSchema.nullable().optional()
   })
   .readonly();

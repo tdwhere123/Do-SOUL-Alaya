@@ -62,9 +62,11 @@ import {
 import { loadDataset, type FetchResult } from "./fetch.js";
 import { pairSessionIntoRounds, type LongMemEvalVariant } from "./dataset.js";
 import {
+  buildSessionSynthesisInput,
   createCompileSeedRunner,
   toSeedExtractionPathKpi,
-  type CompileSeedRunner
+  type CompileSeedRunner,
+  type SessionSeededTurn
 } from "./compile-seed.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -147,6 +149,13 @@ export interface LongMemEvalHitScoringResult {
  * question.answer_session_ids. Because one answer turn now seeds N
  * extracted facts, an answer turn maps to N gold object_ids, and a hit
  * means recalling ANY one fact of that answer turn.
+ *
+ * Synthesis crediting: each session also seeds one L2 synthesis_capsule
+ * (potential_synthesis -> synthesisService.create). Its durable object_id
+ * is mapped into the SAME sidecar with the session's hasAnswer / sessionId,
+ * so a delivered synthesis_capsule that covers an answer session counts as
+ * a hit at its delivered rank under the unchanged hit rule above. R@K
+ * semantics for memory_entry hits are untouched.
  *
  * Measurement-basis note: an answer turn seeds N gold objects (the
  * extraction fan-out), not 1. R@K is measured on that basis ("did any
@@ -245,6 +254,9 @@ export async function runLongMemEval(
         // any covered message is answer-bearing, so the sidecar still maps
         // every answer round and recall scoring stays accurate.
         const rounds = pairSessionIntoRounds(session);
+        // Per-session turns collected for the L2 synthesis seed below.
+        const sessionTurns: SessionSeededTurn[] = [];
+        let sessionHasAnswer = false;
         for (let ri = 0; ri < rounds.length; ri++) {
           const round = rounds[ri];
           if (round === undefined) continue;
@@ -269,10 +281,37 @@ export async function runLongMemEval(
               answerTurnsTruncated += 1;
             }
           }
+          if (round.hasAnswer) {
+            sessionHasAnswer = true;
+          }
           for (const seed of seedResult.seeds) {
             sidecar.set(seed.memoryId, {
               sessionId,
               hasAnswer: round.hasAnswer
+            });
+            sessionTurns.push({
+              turnContent: round.content,
+              evidenceId: seed.evidenceId
+            });
+          }
+        }
+
+        // L2 synthesis seed: emit ONE session-level potential_synthesis
+        // signal pointing at this session's real evidence_capsule ids. The
+        // synthesis_capsule object_id is mapped into the sidecar with the
+        // session's hasAnswer / sessionId so a delivered synthesis counts
+        // as a hit under the unchanged scoring rule. Null when fewer than 2
+        // turns minted a real evidence id (router needs >= 2 refs).
+        const synthesisInput = buildSessionSynthesisInput({
+          topicKey: `${question.question_id}-s${si}`,
+          turns: sessionTurns
+        });
+        if (synthesisInput !== null) {
+          const synthesisResult = await daemon.proposeSynthesis(synthesisInput);
+          if (synthesisResult.synthesisId !== null) {
+            sidecar.set(synthesisResult.synthesisId, {
+              sessionId,
+              hasAnswer: sessionHasAnswer
             });
           }
         }

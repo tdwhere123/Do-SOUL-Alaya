@@ -207,7 +207,13 @@ export class TrustStateRecorder {
           payload_json: {
             delivery_id: draftRecord.delivery_id,
             usage_state: draftRecord.usage_state,
-            trust_mode: draftRecord.trust_mode ?? "manual",
+            // invariant (agents propose, Alaya decides): a usage report
+            // with no server-derived trust_mode defaults to `automatic`,
+            // the lower-trust path-plasticity weight. `manual` is the
+            // full-reinforcement mode reserved for an Alaya-verified
+            // attribution path; defaulting a missing mode to `manual`
+            // would fail open and grant unearned reinforcement weight.
+            trust_mode: draftRecord.trust_mode ?? "automatic",
             used_object_ids: draftRecord.used_object_ids,
             ...(draftRecord.per_anchor_usage === undefined
               ? {}

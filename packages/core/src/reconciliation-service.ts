@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   SignalEventType,
   SoulSignalTriagedPayloadSchema,
@@ -149,6 +150,24 @@ export interface ReconciliationEventLogPort {
   ): EventLogEntry | Promise<EventLogEntry>;
 }
 
+// invariant: the storage-level advisory-lease port. A multi-process
+// reconciliation cannot wrap its LLM round trip in one SQLite
+// transaction, so cross-process mutual exclusion is a compare-and-set
+// lease instead: tryAcquire INSERTs-OR-CONFLICTs a row keyed by
+// workspace_id and wins only when no live lease exists (or the existing
+// one is expired and reclaimable). The daemon wires
+// SqliteReconciliationLeaseRepo; in a single-process Garden deployment
+// the port may be omitted and the in-process KeyedMutex alone suffices.
+export interface ReconciliationLeasePort {
+  tryAcquire(
+    leaseKey: string,
+    ownerToken: string,
+    nowIso: string,
+    expiresAtIso: string
+  ): { readonly owner_token: string } | null;
+  release(leaseKey: string, ownerToken: string): void;
+}
+
 // invariant: the semantic-judge LLM port. Given the incoming fact and
 // the ambiguous-band candidate neighbors, returns ADD / UPDATE / NOOP.
 // The daemon wires a disk-cached garden-LLM implementation (mirroring
@@ -198,6 +217,19 @@ export interface ReconciliationServiceDependencies {
    * mutex (sufficient when one instance handles all ingest).
    */
   readonly mutex?: KeyedMutex;
+  /**
+   * Optional storage-level advisory lease. When wired, the whole
+   * decide->write section is additionally guarded by a per-workspace
+   * compare-and-set lease so a second daemon (or out-of-process Garden
+   * worker) cannot interleave a concurrent reconcile. When omitted, only
+   * the in-process KeyedMutex guards — sufficient for a single-process
+   * deployment.
+   */
+  readonly lease?: ReconciliationLeasePort;
+  /** Lease TTL in milliseconds; defaults to RECONCILE_LEASE_TTL_MS. */
+  readonly leaseTtlMs?: number;
+  /** Clock for lease acquire/expiry; defaults to Date.now-backed ISO. */
+  readonly now?: () => Date;
 }
 
 // Defaults tuned for short distilled facts (≤ DISTILLED_FACT_MAX_CHARS per
@@ -209,6 +241,16 @@ const DEFAULT_SIMILARITY_FLOOR = 0.35;
 const DEFAULT_CONFLICT_TAG_OVERLAP_THRESHOLD = 0.5;
 const DEFAULT_TOP_K = 8;
 const DEFAULT_MAX_LLM_CANDIDATES = 4;
+
+// invariant: the reconciliation advisory-lease TTL. It MUST outlast the
+// slowest single reconciliation pass — most of which is one cold-cache
+// LLM `decide()` round trip plus a few async repo writes. Five minutes
+// is generous headroom over a worst-case cold call so a still-running
+// holder is never reclaimed mid-pass, while still being short enough
+// that a crashed holder unwedges ingest within minutes rather than
+// indefinitely. The lease is released explicitly in the normal path; the
+// TTL is only the crash-recovery backstop.
+export const RECONCILE_LEASE_TTL_MS = 5 * 60 * 1000;
 
 // invariant: Jaccard stopword filter. A handful of high-frequency
 // function words inflates the overlap between unrelated short facts; a
@@ -245,6 +287,9 @@ export class ReconciliationService {
   private readonly topK: number;
   private readonly maxLlmCandidates: number;
   private readonly mutex: KeyedMutex;
+  private readonly lease?: ReconciliationLeasePort;
+  private readonly leaseTtlMs: number;
+  private readonly now: () => Date;
 
   public constructor(private readonly deps: ReconciliationServiceDependencies) {
     const thresholds = deps.thresholds ?? {};
@@ -254,6 +299,9 @@ export class ReconciliationService {
     this.topK = thresholds.topK ?? DEFAULT_TOP_K;
     this.maxLlmCandidates = thresholds.maxLlmCandidates ?? DEFAULT_MAX_LLM_CANDIDATES;
     this.mutex = deps.mutex ?? new KeyedMutex();
+    this.lease = deps.lease;
+    this.leaseTtlMs = deps.leaseTtlMs ?? RECONCILE_LEASE_TTL_MS;
+    this.now = deps.now ?? (() => new Date());
   }
 
   // invariant: decide-then-create. retrieve -> decide -> applyVerdict ->
@@ -279,52 +327,119 @@ export class ReconciliationService {
   // DB transaction, so it blocks no DB connection), a cache HIT in the
   // LLM port holds no network call at all, and ingest reconciliation is
   // opt-in. Distinct workspaces never contend.
+  //
+  // CONCURRENCY SCOPE: two layers guard the decide->write section.
+  //   1. `mutex` — a process-local KeyedMutex, in-process defense-in-depth.
+  //   2. `lease` — an optional storage-level compare-and-set advisory
+  //      lease (reconciliation_leases, INSERT-OR-CONFLICT). It is the
+  //      cross-process guard the mutex cannot give: a second daemon or an
+  //      out-of-process Garden worker would each pass their own mutex but
+  //      only one wins the lease. A true single SQLite transaction is
+  //      impossible here — `decide()` contains an un-transactionable LLM
+  //      round trip and `applyVerdict` spans several async repo writes —
+  //      so the lease is held across the whole section instead, with a TTL
+  //      (RECONCILE_LEASE_TTL_MS) and expired-lease reclaim so a crashed
+  //      holder cannot wedge ingest. When the lease port is not wired the
+  //      mutex alone guards; single-process Garden deployments are correct
+  //      either way.
+  // If the lease is held by another process the reconcile degrades to a
+  // direct ADD — the fact is never lost; the conflict scan reconciles a
+  // near-duplicate downstream.
   public async runWithDecision(
     input: ReconciliationInput,
     applyVerdict: ReconciliationVerdictApplier
   ): Promise<ReconciliationDecision> {
     return await this.mutex.runExclusive(input.workspaceId, async () => {
-      const decision = await this.decide(input);
-
-      if (decision.kind === "update" && decision.survivingObjectId !== undefined) {
-        // UPDATE: the router creates the evidence_capsule first so the
-        // refined row can cite it; then the in-place rewrite runs while
-        // the lock is still held. If the rewrite cannot be applied the
-        // fact must not be lost — degrade to ADD and re-drive the router
-        // so it creates the memory_entry instead.
-        const { incomingEvidenceRef } = await applyVerdict(decision);
-        const applied = await this.applyUpdate(
-          decision.survivingObjectId,
-          input.incomingContent.trim(),
-          input.incomingDomainTags,
-          incomingEvidenceRef
-        );
-        if (applied) {
-          return decision;
-        }
+      if (this.lease === undefined) {
+        return await this.runDecisionSection(input, applyVerdict);
+      }
+      const ownerToken = randomUUID();
+      const nowDate = this.now();
+      const acquired = this.lease.tryAcquire(
+        input.workspaceId,
+        ownerToken,
+        nowDate.toISOString(),
+        new Date(nowDate.getTime() + this.leaseTtlMs).toISOString()
+      );
+      if (acquired === null) {
+        // A live reconcile for this workspace is held by another process.
+        // Degrade to a direct ADD with a conflict scan rather than block
+        // or risk an interleaved decision; the fact stays durable.
+        this.warn("reconciliation lease busy — degrading to ADD", {
+          workspace_id: input.workspaceId,
+          signal_id: input.signalId
+        });
         const degraded = addDecision(
-          decision.bestSimilarity,
+          0,
           true,
-          "LLM UPDATE could not be applied — added with conflict scan"
+          "reconciliation lease held by another process — added with conflict scan"
         );
         await applyVerdict(degraded);
         return degraded;
       }
+      try {
+        return await this.runDecisionSection(input, applyVerdict);
+      } finally {
+        try {
+          this.lease.release(input.workspaceId, ownerToken);
+        } catch (error) {
+          // A failed release is not fatal: the TTL reclaims the lease.
+          this.warn("reconciliation lease release failed", {
+            workspace_id: input.workspaceId,
+            error: errorMessage(error)
+          });
+        }
+      }
+    });
+  }
 
-      if (decision.kind === "noop" && decision.survivingObjectId !== undefined) {
-        // NOOP creates nothing — no evidence_capsule, no memory_entry.
-        // The verdict is still surfaced to the router for the bench
-        // sidecar remap; the router creates no object on this branch.
-        await applyVerdict(decision);
-        await this.auditDrop(input, decision.survivingObjectId, decision.bestSimilarity);
+  // invariant: the guarded decide->write critical section. Runs inside
+  // both the in-process mutex and (when wired) the storage-level lease —
+  // see runWithDecision's CONCURRENCY SCOPE note.
+  private async runDecisionSection(
+    input: ReconciliationInput,
+    applyVerdict: ReconciliationVerdictApplier
+  ): Promise<ReconciliationDecision> {
+    const decision = await this.decide(input);
+
+    if (decision.kind === "update" && decision.survivingObjectId !== undefined) {
+      // UPDATE: the router creates the evidence_capsule first so the
+      // refined row can cite it; then the in-place rewrite runs while
+      // the lock is still held. If the rewrite cannot be applied the
+      // fact must not be lost — degrade to ADD and re-drive the router
+      // so it creates the memory_entry instead.
+      const { incomingEvidenceRef } = await applyVerdict(decision);
+      const applied = await this.applyUpdate(
+        decision.survivingObjectId,
+        input.incomingContent.trim(),
+        input.incomingDomainTags,
+        incomingEvidenceRef
+      );
+      if (applied) {
         return decision;
       }
+      const degraded = addDecision(
+        decision.bestSimilarity,
+        true,
+        "LLM UPDATE could not be applied — added with conflict scan"
+      );
+      await applyVerdict(degraded);
+      return degraded;
+    }
 
-      // ADD (or an unactionable update/noop without a target): the router
-      // creates the evidence_capsule + memory_entry inside the lock.
+    if (decision.kind === "noop" && decision.survivingObjectId !== undefined) {
+      // NOOP creates nothing — no evidence_capsule, no memory_entry.
+      // The verdict is still surfaced to the router for the bench
+      // sidecar remap; the router creates no object on this branch.
       await applyVerdict(decision);
+      await this.auditDrop(input, decision.survivingObjectId, decision.bestSimilarity);
       return decision;
-    });
+    }
+
+    // ADD (or an unactionable update/noop without a target): the router
+    // creates the evidence_capsule + memory_entry inside the lock.
+    await applyVerdict(decision);
+    return decision;
   }
 
   // invariant: the pure decision step — retrieve + classify, no durable

@@ -724,6 +724,7 @@ vi.mock("@do-soul/alaya-storage", async () => {
     SqliteOrphanRadarRepo: makeRepo(),
     SqliteProjectMappingAnchorRepo: makeRepo(),
     SqliteSynthesisCapsuleRepo: makeRepo(),
+    SqliteReconciliationLeaseRepo: makeRepo(),
     SqliteClaimFormRepo: makeRepo({
       findByWorkspaceId: vi.fn(async () => [])
     }),

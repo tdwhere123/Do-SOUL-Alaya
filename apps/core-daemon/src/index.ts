@@ -87,6 +87,7 @@ import {
   SqlitePathRelationRepo,
   SqliteProjectMappingAnchorRepo,
   SqliteProposalRepo,
+  SqliteReconciliationLeaseRepo,
   SqliteRunRepo,
   SqliteSignalRepo,
   SqliteSlotRepo,
@@ -218,6 +219,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const bootstrappingRecordRepo = new SqliteBootstrappingRecordRepo(database);
   const configRepo = new SqliteConfigRepo(database);
   const eventLogRepo = new SqliteEventLogRepo(database);
+  const reconciliationLeaseRepo = new SqliteReconciliationLeaseRepo(database);
   const signalRepo = new SqliteSignalRepo(database);
   const evidenceCapsuleRepo = new SqliteEvidenceCapsuleRepo(database);
   const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
@@ -666,6 +668,24 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
         return scoped;
       }
     },
+    // L2 synthesis FTS source. Recall joins synthesis_capsule hits as an
+    // additional candidate channel. see also: migration 079.
+    synthesisSearchPort: {
+      searchByKeyword: async (workspaceId, queryText, limit) =>
+        synthesisCapsuleRepo.searchByKeyword === undefined
+          ? []
+          : await synthesisCapsuleRepo.searchByKeyword(workspaceId, queryText, limit),
+      findByIds: async (objectIds) => {
+        const scoped = [];
+        for (const objectId of objectIds) {
+          const synthesis = await synthesisCapsuleRepo.findById(objectId);
+          if (synthesis !== null) {
+            scoped.push(synthesis);
+          }
+        }
+        return scoped;
+      }
+    },
     ...(globalMemoryRepo === null
       ? {}
       : {
@@ -843,6 +863,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
             append: (event) => eventLogRepo.append(event)
           },
           llmDecision: reconciliationLlmDecisionPort,
+          lease: reconciliationLeaseRepo,
           warn: warnLogger.warn
         })
       : null;

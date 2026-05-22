@@ -75,10 +75,19 @@ export const RecallBudgetStateSchema = z
   .strict()
   .readonly();
 
+// invariant: a recall candidate is sourced from a memory_entry (L1 distilled
+// fact) or a synthesis_capsule (L2 cross-evidence summary). The synthesis
+// source joins the existing fusion as an additional candidate channel.
+// see also: packages/core/src/recall-service.ts — synthesis candidate join.
+const RecallCandidateObjectKindSchema = z.enum([
+  "memory_entry",
+  "synthesis_capsule"
+]);
+
 export const RecallCandidateSchema = z
   .object({
     object_id: NonEmptyStringSchema,
-    object_kind: z.literal("memory_entry"),
+    object_kind: RecallCandidateObjectKindSchema,
     activation_score: z.number().min(0).max(1),
     relevance_score: z.number().min(0).max(1),
     content_preview: NonEmptyStringSchema,

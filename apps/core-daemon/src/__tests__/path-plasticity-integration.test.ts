@@ -150,6 +150,10 @@ describe("path plasticity daemon wiring", () => {
           usage_state: "used",
           used_object_ids: ["memory-target"],
           per_anchor_usage: [{ object_id: "memory-target", anchor_role: "target" }],
+          // Explicit `manual` to exercise the full-reinforcement weight:
+          // a usage proof with no trust_mode now fail-safes to `automatic`
+          // (lower weight). This test asserts the full 0.10 increment.
+          trust_mode: "manual",
           reason: "integration use",
           reported_at: "2026-05-04T11:00:00.000Z"
         },
@@ -288,7 +292,12 @@ describe("path plasticity daemon wiring", () => {
         const updatedPath = await pathRelationRepo.findById("path-redirection-live");
         expect(updatedPath).not.toBeNull();
         expect(updatedPath?.plasticity_state.direction_bias).toBe("source_to_target");
-        expect(updatedPath?.plasticity_state.strength).toBeCloseTo(0.7, 10);
+        // Expected strength: 0.6 + reinforcement_increment * automatic
+        // weight (0.10 * AUTOMATIC_TRUST_USED_MULTIPLIER 0.5 = 0.05). The
+        // MCP soul.report_context_usage surface records every self-report
+        // as `automatic` (server-derived trust_mode), so it carries the
+        // lower path-plasticity weight.
+        expect(updatedPath?.plasticity_state.strength).toBeCloseTo(0.65, 10);
         expect(updatedPath?.plasticity_state.support_events_count).toBe(1);
 
         const pathEvents = await eventLogRepo.queryByEntity(
@@ -307,7 +316,7 @@ describe("path plasticity daemon wiring", () => {
           pathEvents.some(
             (event) =>
               event.event_type === RuntimeGovernanceEventType.PATH_RELATION_REINFORCED &&
-              event.payload_json.new_strength === 0.7
+              event.payload_json.new_strength === 0.65
           )
         ).toBe(true);
 

@@ -1,4 +1,3 @@
-import type BetterSqlite3 from "better-sqlite3";
 import {
   EvidenceCapsuleSchema,
   EvidenceHealthStateSchema,
@@ -7,8 +6,13 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../db.js";
 import { StorageError } from "../errors.js";
-import { buildGroupedOrdinalScores } from "./memory-entry-keyword-search.js";
 import { deepFreeze } from "./shared/deep-freeze.js";
+import {
+  mergeFtsLanes,
+  queryFtsLane,
+  splitFtsLanes,
+  tokenizeFtsQuery
+} from "./shared/fts-lane-routing.js";
 import { parseTimestamp } from "./shared/validators.js";
 
 export interface EvidenceCapsuleKeywordHit {
@@ -57,48 +61,8 @@ interface EvidenceCapsuleRow {
   readonly surface_id: string | null;
 }
 
-// Trigram FTS5 tables only index runs of >= 3 codepoints; shorter terms can
-// never match and must not be sent to the trigram lane.
-const TRIGRAM_MIN_CODEPOINTS = 3;
-// A token routed to the trigram lane if it carries any CJK-family character;
-// unicode61 collapses such a run into one token and is effectively blind to it.
-const CJK_SCRIPT_PATTERN =
-  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
-
-interface EvidenceFtsLaneSplit {
-  readonly porterTokens: readonly string[];
-  readonly trigramTokens: readonly string[];
-}
-
-/**
- * Route evidence FTS query tokens by character script. CJK-bearing tokens go
- * to the trigram lane (substring-capable); plain word tokens go to the porter
- * unicode61 lane (English BM25 + stemming). A mixed-script query fans out to
- * both lanes. Kept evidence-local so the shared `tokenizeFtsQuery` helper
- * (memory-entry side) stays untouched.
- */
-function splitEvidenceFtsLanes(tokens: readonly string[]): EvidenceFtsLaneSplit {
-  const porterTokens: string[] = [];
-  const trigramTokens: string[] = [];
-  for (const token of tokens) {
-    if (CJK_SCRIPT_PATTERN.test(token)) {
-      if (Array.from(token).length >= TRIGRAM_MIN_CODEPOINTS) {
-        trigramTokens.push(token);
-      }
-    } else {
-      porterTokens.push(token);
-    }
-  }
-  return Object.freeze({
-    porterTokens: Object.freeze(porterTokens),
-    trigramTokens: Object.freeze(trigramTokens)
-  });
-}
-
-function buildEvidenceFtsMatchExpression(tokens: readonly string[]): string {
-  return tokens.map((token) => `"${token.replace(/"/g, '""')}"`).join(" OR ");
-}
-
+// see also: ./shared/fts-lane-routing.ts — the porter/trigram dual-lane
+// query split and ordinal-rank merge shared with synthesis-capsule-repo.ts.
 export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
   private readonly createStatement;
   private readonly findByIdStatement;
@@ -274,92 +238,28 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
       return Object.freeze([]);
     }
     try {
-      const tokens = trimmed
-        .normalize("NFKC")
-        .split(/[^\p{L}\p{N}_]+/u)
-        .filter((token) => token.length >= 2)
-        .slice(0, 16);
+      const tokens = tokenizeFtsQuery(trimmed);
       if (tokens.length === 0) {
         return Object.freeze([]);
       }
       // Script-routed dual-lane FTS: word tokens to the porter unicode61 lane,
       // CJK-bearing tokens to the trigram lane. The merged result preserves the
       // EvidenceCapsuleKeywordHit contract (normalized_rank, 1.0 = top).
-      const { porterTokens, trigramTokens } = splitEvidenceFtsLanes(tokens);
+      const { porterTokens, trigramTokens } = splitFtsLanes(tokens);
       const porterHits =
         porterTokens.length === 0
           ? []
-          : this.queryEvidenceFtsLane(
-              this.searchByKeywordStatement,
-              workspaceId,
-              porterTokens,
-              limit
-            );
+          : queryFtsLane(this.searchByKeywordStatement, workspaceId, porterTokens, limit);
       const trigramHits =
         trigramTokens.length === 0
           ? []
-          : this.queryEvidenceFtsLane(
+          : queryFtsLane(
               this.searchByKeywordTrigramStatement,
               workspaceId,
               trigramTokens,
               limit
             );
-
-      // Cross-lane fusion mirrors the memory-entry side: each lane is scored by
-      // ordinal rank (position-only, BM25-magnitude-independent) so the porter
-      // and trigram lanes share one comparable scale. A lane-priority tiebreak
-      // (porter 0 outranks trigram 1) makes an exact score tie deterministic
-      // toward the higher-trust word lane rather than an arbitrary id sort.
-      const merged = new Map<
-        string,
-        Readonly<{ normalizedRank: number; lanePriority: number; laneOrder: number }>
-      >();
-      const considerLaneHit = (
-        hit: EvidenceCapsuleKeywordHit,
-        lanePriority: number,
-        laneOrder: number
-      ): void => {
-        const existing = merged.get(hit.object_id);
-        if (
-          existing !== undefined &&
-          (existing.normalizedRank > hit.normalized_rank ||
-            (existing.normalizedRank === hit.normalized_rank &&
-              existing.lanePriority <= lanePriority))
-        ) {
-          return;
-        }
-        merged.set(
-          hit.object_id,
-          Object.freeze({ normalizedRank: hit.normalized_rank, lanePriority, laneOrder })
-        );
-      };
-      porterHits.forEach((hit, index) => considerLaneHit(hit, 0, index));
-      trigramHits.forEach((hit, index) => considerLaneHit(hit, 1, index));
-      if (merged.size === 0) {
-        return Object.freeze([]);
-      }
-      return Object.freeze(
-        [...merged.entries()]
-          .sort((left, right) => {
-            const rankDelta = right[1].normalizedRank - left[1].normalizedRank;
-            if (rankDelta !== 0) {
-              return rankDelta;
-            }
-            const priorityDelta = left[1].lanePriority - right[1].lanePriority;
-            if (priorityDelta !== 0) {
-              return priorityDelta;
-            }
-            const orderDelta = left[1].laneOrder - right[1].laneOrder;
-            if (orderDelta !== 0) {
-              return orderDelta;
-            }
-            return left[0].localeCompare(right[0]);
-          })
-          .slice(0, limit)
-          .map(([objectId, entry]) =>
-            Object.freeze({ object_id: objectId, normalized_rank: entry.normalizedRank })
-          )
-      );
+      return mergeFtsLanes(porterHits, trigramHits, limit);
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -367,34 +267,6 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
         error
       );
     }
-  }
-
-  private queryEvidenceFtsLane(
-    statement: BetterSqlite3.Statement,
-    workspaceId: string,
-    laneTokens: readonly string[],
-    limit: number
-  ): readonly EvidenceCapsuleKeywordHit[] {
-    const matchExpression = buildEvidenceFtsMatchExpression(laneTokens);
-    const rows = statement.all(workspaceId, matchExpression, limit) as ReadonlyArray<{
-      readonly object_id: string;
-      readonly raw_rank: number;
-    }>;
-    if (rows.length === 0) {
-      return [];
-    }
-    // Rows arrive ordered by raw bm25 (best first). Score by ordinal rank, not
-    // raw bm25 magnitude: an affine min-max would pin a lane's own best hit to
-    // 1.0 regardless of absolute match quality, so a weak hit in a narrow-span
-    // lane could outrank a strong hit in a wide-span lane after merge. Ordinal
-    // scores share one comparable scale across the porter and trigram lanes.
-    const scores = buildGroupedOrdinalScores(rows, (row) => row.raw_rank);
-    return rows.map((row, index) =>
-      Object.freeze({
-        object_id: row.object_id,
-        normalized_rank: scores[index] ?? 0
-      })
-    );
   }
 
   public async create(capsule: EvidenceCapsule): Promise<Readonly<EvidenceCapsule>> {

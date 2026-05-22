@@ -994,7 +994,16 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
         delivery_id: request.delivery_id,
         usage_state: usageState,
         used_object_ids: usedObjectIds,
-        ...(request.trust_mode === undefined ? {} : { trust_mode: request.trust_mode }),
+        // INVARIANT (agents propose, Alaya decides): trust_mode is
+        // server-derived, not caller-controlled. report_context_usage is an
+        // unverified agent self-report — the daemon never confirms the
+        // memory was genuinely used — so every MCP-surface usage report is
+        // recorded as `automatic` and carries the lower path-plasticity
+        // weight. A caller cannot self-declare `manual` to claim full
+        // reinforcement weight. `manual` is reserved for an Alaya-verified
+        // attribution path, which the MCP surface does not provide. The
+        // request field `trust_mode` is intentionally ignored here.
+        trust_mode: "automatic",
         ...(request.per_anchor_usage === undefined
           ? {}
           : { per_anchor_usage: request.per_anchor_usage }),

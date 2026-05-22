@@ -17,7 +17,8 @@ import type {
   SoulRecallTokenizerHint,
   SoulMemorySearchDegradationReason,
   Slot,
-  StorageTier as StorageTierType
+  StorageTier as StorageTierType,
+  SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import type { ScopeClass } from "@do-soul/alaya-protocol";
 import type {
@@ -71,6 +72,22 @@ export interface RecallServiceEvidenceSearchPort {
     workspaceId: string,
     evidenceObjectIds: readonly string[]
   ): Promise<readonly Readonly<EvidenceCapsule>[]>;
+}
+
+// Synthesis FTS port consumed by the recall service. The implementing repo
+// is SqliteSynthesisCapsuleRepo (migration 079). Recall queries it on the
+// FTS-backed keyword path and joins each hit as an additional
+// synthesis_capsule candidate into the existing fused result.
+// see also: packages/storage/src/repos/synthesis-capsule-repo.ts
+export interface RecallServiceSynthesisSearchPort {
+  searchByKeyword(
+    workspaceId: string,
+    queryText: string,
+    limit: number
+  ): Promise<readonly KeywordSearchResult[]>;
+  findByIds(
+    objectIds: readonly string[]
+  ): Promise<readonly Readonly<SynthesisCapsule>[]>;
 }
 
 export interface RecallServiceSlotRepoPort {
@@ -267,6 +284,7 @@ export interface RecallServiceDependencies {
   readonly pathExpansionPort?: RecallServicePathExpansionPort;
   readonly activeConstraintsPort?: RecallServiceActiveConstraintsPort;
   readonly evidenceSearchPort?: RecallServiceEvidenceSearchPort;
+  readonly synthesisSearchPort?: RecallServiceSynthesisSearchPort;
   readonly manifestationSidecarPort?: RecallServiceManifestationSidecarPort;
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;
@@ -427,6 +445,10 @@ export interface CoarseRecallCandidate {
   readonly structuralScore?: number;
   readonly scoreMultiplier?: number;
   readonly pathExpansionSources?: readonly RecallPathExpansionSourceDiagnostic[];
+  // Set to "synthesis_capsule" when the candidate is sourced from an L2
+  // synthesis row rather than an L1 memory_entry. The `entry` is then a
+  // synthesis-shaped pseudo memory carrying the synthesis summary as content.
+  readonly objectKind?: RecallCandidate["object_kind"];
 }
 
 export interface RecallServiceWarnPort {

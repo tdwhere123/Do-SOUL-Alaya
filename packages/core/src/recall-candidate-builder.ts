@@ -4,10 +4,12 @@ import {
   type MemoryDimension as MemoryDimensionType,
   type RecallBudgetState,
   type RecallCandidate,
-  type RecallScoreFactors
+  type RecallScoreFactors,
+  type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import {
   assignManifestation,
+  clamp01,
   createContentPreview,
   estimateTokens,
   normalizeActivationScore
@@ -34,7 +36,9 @@ export function buildRecallCandidate(input: BuildRecallCandidateInput): Readonly
 
   return RecallCandidateSchema.parse({
     object_id: entry.object_id,
-    object_kind: "memory_entry" as const,
+    // A synthesis-derived candidate carries object_kind synthesis_capsule;
+    // its CoarseRecallCandidate.entry is a synthesis-shaped pseudo memory.
+    object_kind: input.candidate.objectKind ?? ("memory_entry" as const),
     activation_score: activationScore,
     relevance_score: input.relevanceScore,
     content_preview: createContentPreview(entry.content, manifestation, input.candidate.originPlane),
@@ -99,6 +103,55 @@ export function appendAdditiveCandidatesWithinRemainingBudgets(
   }
 
   return Object.freeze(selected);
+}
+
+export interface SynthesisRecallCandidateInput {
+  readonly synthesis: Readonly<SynthesisCapsule>;
+  readonly normalizedRank: number;
+  readonly tokenEstimator: TokenEstimator;
+  readonly budgets: Readonly<FineAssessmentConfig["budgets"]>;
+}
+
+/**
+ * Build a delivered RecallCandidate from an L2 synthesis_capsule FTS hit.
+ *
+ * A synthesis candidate is an additional recall source — it joins the fused
+ * memory_entry result through appendAdditiveCandidatesWithinRemainingBudgets,
+ * never a new fusion stream. Its content is the synthesis `summary`; its
+ * relevance is the synthesis FTS normalized rank; it is delivered with
+ * object_kind `synthesis_capsule`. Dimension `episode` matches the L2
+ * aggregate-observation shape (synthesis_capsule has no MemoryDimension of
+ * its own); scope `project` matches the bench/consolidation seed scope.
+ */
+export function buildSynthesisRecallCandidate(
+  input: SynthesisRecallCandidateInput
+): Readonly<RecallCandidate> {
+  const relevance = clamp01(input.normalizedRank);
+  const summary = input.synthesis.summary;
+  const tokenEstimate = estimateTokens(summary, input.tokenEstimator);
+  // Activation tracks the FTS relevance so a strong-keyword synthesis is
+  // delivered at full content rather than gated to a hint.
+  const manifestation = assignManifestation(relevance);
+  return RecallCandidateSchema.parse({
+    object_id: input.synthesis.object_id,
+    object_kind: "synthesis_capsule" as const,
+    activation_score: relevance,
+    relevance_score: relevance,
+    content_preview: createContentPreview(summary, manifestation),
+    token_estimate: tokenEstimate,
+    manifestation,
+    dimension: "episode" as const,
+    scope_class: "project" as const,
+    selection_reason: `Selected by synthesis recall; FTS relevance ${relevance.toFixed(3)}.`,
+    source_channels: Object.freeze(["ranked_recall", "workspace_local", "synthesis_fts"]),
+    budget_state: buildRecallBudgetState({
+      tokenEstimate,
+      maxEntries: input.budgets.max_entries,
+      maxTotalTokens: input.budgets.max_total_tokens,
+      index: input.budgets.max_entries,
+      usedTokensBeforeCandidate: 0
+    })
+  });
 }
 
 export function selectCandidatesWithinBudgets(

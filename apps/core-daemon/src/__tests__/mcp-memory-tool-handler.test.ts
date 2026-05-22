@@ -530,6 +530,30 @@ describe("mcp memory tool handler", () => {
     );
   });
 
+  it("derives trust_mode server-side — a caller cannot self-declare manual", async () => {
+    const deps = createDeps();
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const result = await handler.call({
+      toolName: "soul.report_context_usage",
+      arguments: {
+        delivery_id: "delivery_1",
+        usage_state: "used",
+        used_object_ids: ["mem1"],
+        // A caller tries to claim full path-plasticity weight by sending
+        // trust_mode=manual. The server must ignore the request field and
+        // record `automatic` — an unverified self-report.
+        trust_mode: "manual",
+        reason: "cited"
+      },
+      context
+    });
+
+    expect(result.ok).toBe(true);
+    const [recordedUsage] = deps.trustStateRecorder.recordUsage.mock.calls[0]!;
+    expect(recordedUsage.trust_mode).toBe("automatic");
+  });
+
   it("uses delivered_objects as the canonical used object list", async () => {
     const deps = createDeps();
     const handler = createMcpMemoryToolHandler(deps);

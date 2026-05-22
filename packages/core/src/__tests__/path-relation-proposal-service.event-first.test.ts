@@ -67,7 +67,7 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
       path_id: "path-fixed-1",
       workspace_id: "workspace-1",
       relation_kind: "supports_recall",
-      governance_class: "recall_allowed",
+      governance_class: "attention_only",
       source_anchor_kind: "object",
       target_anchor_kind: "object"
     });

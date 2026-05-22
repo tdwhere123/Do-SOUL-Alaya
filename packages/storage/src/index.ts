@@ -19,7 +19,8 @@ export {
 export { SqliteSignalRepo, type SignalRepo } from "./repos/signal-repo.js";
 export {
   SqliteEvidenceCapsuleRepo,
-  type EvidenceCapsuleRepo
+  type EvidenceCapsuleRepo,
+  type EvidenceCapsuleKeywordHit
 } from "./repos/evidence-capsule-repo.js";
 export {
   SqliteMemoryEntryRepo,
@@ -54,7 +55,8 @@ export {
 } from "./repos/green-status-repo.js";
 export {
   SqliteSynthesisCapsuleRepo,
-  type SynthesisCapsuleRepo
+  type SynthesisCapsuleRepo,
+  type SynthesisCapsuleKeywordHit
 } from "./repos/synthesis-capsule-repo.js";
 export {
   SqliteMemoryGraphEdgeRepo,
@@ -164,6 +166,12 @@ export {
   SqliteDriftLeaseRepo,
   type DriftLeaseRepo
 } from "./repos/drift-lease-repo.js";
+
+export {
+  SqliteReconciliationLeaseRepo,
+  type ReconciliationLease,
+  type ReconciliationLeaseRepo
+} from "./repos/reconciliation-lease-repo.js";
 
 export {
   SqliteCrossCuttingPermissionRepo,

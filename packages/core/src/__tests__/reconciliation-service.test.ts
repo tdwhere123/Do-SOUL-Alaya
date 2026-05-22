@@ -668,3 +668,84 @@ describe("ReconciliationService", () => {
     expect(maxActive).toBe(1);
   });
 });
+
+describe("ReconciliationService storage-level lease", () => {
+  it("acquires and releases the lease around a normal decide->write pass", async () => {
+    const { deps } = createDeps([]);
+    const acquireCalls: string[] = [];
+    const releaseCalls: string[] = [];
+    const lease = {
+      tryAcquire: (leaseKey: string, ownerToken: string) => {
+        acquireCalls.push(`${leaseKey}:${ownerToken}`);
+        return { owner_token: ownerToken };
+      },
+      release: (leaseKey: string, ownerToken: string) => {
+        releaseCalls.push(`${leaseKey}:${ownerToken}`);
+      }
+    };
+    const service = new ReconciliationService({ ...deps, lease });
+
+    const driven = drive(service, {
+      incomingContent: "The user prefers tabs over spaces.",
+      incomingDomainTags: ["bench-seed"]
+    });
+    const decision = await driven.decision;
+
+    expect(decision.kind).toBe("add");
+    expect(acquireCalls).toHaveLength(1);
+    // The lease is released after the pass, by the same owner token.
+    expect(releaseCalls).toEqual(acquireCalls);
+  });
+
+  it("degrades to ADD with a conflict scan when the lease is held by another process", async () => {
+    // A neighbor that would normally NOOP — proving the lease-busy path
+    // short-circuits BEFORE the decision so it never reaches the gate.
+    const neighbor = createMemoryEntry({ content: "The user lives in Berlin." });
+    const { deps, decide, searchByKeyword } = createDeps([neighbor]);
+    const lease = {
+      tryAcquire: () => null,
+      release: vi.fn()
+    };
+    const service = new ReconciliationService({ ...deps, lease });
+
+    const driven = drive(service, {
+      incomingContent: "The user lives in Berlin.",
+      incomingDomainTags: ["bench-seed"]
+    });
+    const decision = await driven.decision;
+
+    expect(decision.kind).toBe("add");
+    expect(decision.runConflictScan).toBe(true);
+    expect(driven.appliedVerdicts).toEqual(["add"]);
+    // The decide path was never entered — no retrieval, no LLM judge.
+    expect(searchByKeyword).not.toHaveBeenCalled();
+    expect(decide).not.toHaveBeenCalled();
+    // A lease that was never acquired is never released.
+    expect(lease.release).not.toHaveBeenCalled();
+  });
+
+  it("releases the lease even when the decide->write pass throws", async () => {
+    const { deps } = createDeps([]);
+    const releaseCalls: string[] = [];
+    const lease = {
+      tryAcquire: (leaseKey: string, ownerToken: string) => ({ owner_token: ownerToken }),
+      release: (leaseKey: string, ownerToken: string) => {
+        releaseCalls.push(`${leaseKey}:${ownerToken}`);
+      }
+    };
+    const service = new ReconciliationService({ ...deps, lease });
+
+    const applyVerdict: ReconciliationVerdictApplier = async () => {
+      throw new Error("synthetic applyVerdict failure");
+    };
+
+    await expect(
+      service.runWithDecision(
+        { ...baseInput, incomingContent: "a brand new fact", incomingDomainTags: [] },
+        applyVerdict
+      )
+    ).rejects.toThrow("synthetic applyVerdict failure");
+    // The finally block releases the lease so a crash cannot wedge ingest.
+    expect(releaseCalls).toHaveLength(1);
+  });
+});

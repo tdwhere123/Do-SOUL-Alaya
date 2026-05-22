@@ -84,11 +84,24 @@ function createHarness(): E2EHarness {
     findById: async (id: string) => memories.get(id) ?? null
   };
   const claimService = {
+    // The mock honors the atomic-audit-composition contract: the
+    // lifecycle-change event and every additional audit event the caller
+    // composed are published in the same logical transaction as the
+    // claim_status mutation, and the persisted audit rows are pushed into
+    // additionalEventsSink in input order — exactly like
+    // ClaimService.transitionLifecycle does.
     transitionLifecycle: async (
       objectId: string,
       newState: ClaimForm["claim_status"],
       _reason: string,
-      _causedBy: "user" | "system" | "review" | "deterministic_rule" | "auditor" | "bootstrap"
+      _causedBy: "user" | "system" | "review" | "deterministic_rule" | "auditor" | "bootstrap",
+      options?: {
+        readonly additionalEventInputs?: readonly Omit<
+          EventLogEntry,
+          "event_id" | "created_at" | "revision"
+        >[];
+        readonly additionalEventsSink?: EventLogEntry[];
+      }
     ): Promise<Readonly<ClaimForm>> => {
       claimTransitionCounter += 1;
       const current = claims.get(objectId);
@@ -111,6 +124,10 @@ function createHarness(): E2EHarness {
           transition_index: claimTransitionCounter
         }
       });
+      for (const eventInput of options?.additionalEventInputs ?? []) {
+        const persisted = publish(eventInput);
+        options?.additionalEventsSink?.push(persisted);
+      }
       return updated;
     }
   };

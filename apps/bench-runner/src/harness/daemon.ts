@@ -85,10 +85,37 @@ export interface SeededMemoryResult {
   readonly signalId: string;
   /** Proposal id created by soul.propose_memory_update on the new memory. */
   readonly proposalId: string;
+  /**
+   * evidence_capsule object_id the same signal materialized, or null when
+   * no evidence row was created. The session-level potential_synthesis seed
+   * points its evidence_refs at these real evidence ids.
+   */
+  readonly evidenceId: string | null;
   /** true iff the source content exceeded SEED_CONTENT_MAX and was truncated. */
   readonly truncated: boolean;
   /** chars clipped from source content; 0 when not truncated. */
   readonly charsClipped: number;
+}
+
+/**
+ * One session-level synthesis seed input. The bench, after seeding a
+ * session's turns, emits one potential_synthesis signal so the L2
+ * synthesis_capsule layer is exercised on the no-LLM bench path.
+ */
+export interface BenchSynthesisSeedInput {
+  /** >= 2 real evidence_capsule object_ids the session's turns materialized. */
+  readonly evidenceRefs: readonly string[];
+  /** Deterministic, LLM-free digest of the session content → synthesis summary. */
+  readonly summary: string;
+  /** Topic key grouping the synthesis (bench session id). */
+  readonly topicKey: string;
+}
+
+export interface SeededSynthesisResult {
+  /** Durable synthesis_capsule object_id, or null when none materialized. */
+  readonly synthesisId: string | null;
+  /** Signal id that produced the synthesis (audit trail anchor). */
+  readonly signalId: string;
 }
 
 /**
@@ -347,6 +374,23 @@ export interface BenchDaemonHandle {
   proposeMemoriesFromCompileSignals(
     inputs: readonly BenchSignalSeedInput[]
   ): Promise<readonly SeededMemoryResult[]>;
+  /**
+   * @anchor proposeSynthesis — session-level L2 synthesis seed
+   *
+   * Emits one potential_synthesis candidate signal so the L2
+   * synthesis_capsule layer is exercised on the no-LLM bench path. The
+   * MaterializationRouter routes a potential_synthesis signal with
+   * evidence_refs.length >= 2 to synthesisService.create (see
+   * packages/soul/src/garden/materialization-router.ts route /
+   * materializeSynthesis). raw_payload.distilled_fact becomes the synthesis
+   * summary via buildDistilledFact.
+   *
+   * The synthesis summary is a deterministic, LLM-free digest of the
+   * session's seeded turn content — the bench never calls an LLM here.
+   *
+   * see also: apps/bench-runner/src/longmemeval/compile-seed.ts seedSynthesis
+   */
+  proposeSynthesis(input: BenchSynthesisSeedInput): Promise<SeededSynthesisResult>;
   /**
    * @anchor queryTokenMetrics — event-sourced token-economy reader.
    *
@@ -881,6 +925,7 @@ export async function startBenchDaemon(
       memoryId: accepted.memoryId,
       signalId: signalResponse.signal_id,
       proposalId: accepted.proposalId,
+      evidenceId: accepted.evidenceId,
       truncated: wasTruncated,
       charsClipped
     };
@@ -892,15 +937,23 @@ export async function startBenchDaemon(
   async function materializeAndAcceptSeed(
     signalId: string,
     evidenceRef: string
-  ): Promise<{ readonly memoryId: string; readonly proposalId: string }> {
+  ): Promise<{
+    readonly memoryId: string;
+    readonly proposalId: string;
+    readonly evidenceId: string | null;
+  }> {
     // Read SOUL_SIGNAL_MATERIALIZED from event_log to find the memory
     // object_id created synchronously by the materialization router. The
     // MCP surface returns only signal_id, so the bench harness consults the
     // daemon's event log directly (read-only) — an implementation-of-record
     // lookup, not a bypass of governance.
-    const memoryId = await readMaterializedMemoryId(dataDir, signalId);
-    const accepted = await acceptSeededMemory(memoryId, evidenceRef);
-    return { memoryId, proposalId: accepted.proposalId };
+    const materialized = await readMaterializedObjects(dataDir, signalId);
+    const accepted = await acceptSeededMemory(materialized.memoryId, evidenceRef);
+    return {
+      memoryId: materialized.memoryId,
+      proposalId: accepted.proposalId,
+      evidenceId: materialized.evidenceId
+    };
   }
 
   // The propose+review accept tail, given an already-resolved memory_entry
@@ -1047,6 +1100,7 @@ export async function startBenchDaemon(
       memoryId: accepted.memoryId,
       signalId: signalResponse.signal_id,
       proposalId: accepted.proposalId,
+      evidenceId: accepted.evidenceId,
       truncated: wasTruncated,
       charsClipped
     };
@@ -1162,16 +1216,65 @@ export async function startBenchDaemon(
         );
         continue;
       }
+      const evidenceObject = received.materialization?.created_objects.find(
+        (obj) => obj.object_kind === "evidence_capsule"
+      );
       const accepted = await acceptSeededMemory(memoryObject.object_id, input.evidenceRef);
       results.push({
         memoryId: memoryObject.object_id,
         signalId: received.signal.signal_id,
         proposalId: accepted.proposalId,
+        evidenceId: evidenceObject?.object_id ?? null,
         truncated: clip.truncated,
         charsClipped: clip.charsClipped
       });
     }
     return results;
+  }
+
+  // @anchor bench-synthesis-seed: emit ONE session-level potential_synthesis
+  // signal. The MaterializationRouter routes a potential_synthesis signal
+  // carrying evidence_refs.length >= 2 to synthesisService.create; the
+  // synthesis summary is read from raw_payload.distilled_fact. The caller
+  // supplies a deterministic, LLM-free digest of the session's turns.
+  // see also: packages/soul/src/garden/materialization-router.ts materializeSynthesis
+  async function proposeSynthesis(
+    input: BenchSynthesisSeedInput
+  ): Promise<SeededSynthesisResult> {
+    if (input.evidenceRefs.length < 2) {
+      throw new Error(
+        `proposeSynthesis requires >= 2 evidence_refs; got ${input.evidenceRefs.length}.`
+      );
+    }
+    const clip = clipSeedContent(input.summary);
+    const signalResponse = await callMcpTool<SoulEmitCandidateSignalResponse>(
+      activeMcpClient,
+      "soul.emit_candidate_signal",
+      {
+        signal_kind: "potential_synthesis",
+        object_kind: "synthesis_capsule",
+        scope_hint: ScopeClass.PROJECT,
+        // domain_tags[0] feeds materialization buildTopicKey; the bench
+        // session id keeps each synthesis topic-distinct.
+        domain_tags: ["bench-seed", input.topicKey],
+        confidence: 0.9,
+        evidence_refs: [...input.evidenceRefs],
+        raw_payload: {
+          excerpt: clip.safe,
+          distilled_fact: clip.safe
+        }
+      }
+    );
+    if (signalResponse.status !== "emitted") {
+      throw new Error(
+        `soul.emit_candidate_signal (synthesis) returned unexpected status=${signalResponse.status}`
+      );
+    }
+    const synthesisId = await readMaterializedSynthesisId(
+      dataDir,
+      signalResponse.signal_id
+    );
+    return { synthesisId, signalId: signalResponse.signal_id };
   }
 
   async function shutdown(): Promise<void> {
@@ -1201,6 +1304,7 @@ export async function startBenchDaemon(
     proposeMemory,
     proposeMemoryFromSignal,
     proposeMemoriesFromCompileSignals,
+    proposeSynthesis,
     queryTokenMetrics: () => queryTokenMetrics(dataDir),
     shutdown
   };
@@ -1496,35 +1600,52 @@ function clampScore(value: number): number {
   return Math.min(Math.max(value, 0), 1);
 }
 
-// @anchor readMaterializedMemoryId: bridges signal_id -> durable memory_id
+// @anchor readMaterializedObjects: bridges signal_id -> durable object ids.
 // The MCP surface intentionally does not expose materialization side-effects
 // (the agent should only know it emitted a signal). The bench harness reads
 // the event_log directly, which is the canonical audit-trail record of the
-// materialization. initDatabase caches connections by path so this opens the
-// same handle the daemon already uses. Do not close the connection here or
-// the daemon will lose its DB.
-async function readMaterializedMemoryId(
+// materialization. Returns the durable memory_entry id (throwing when the
+// signal materialized none — a routing fault the bench must surface) plus
+// the evidence_capsule id when one was created (null otherwise: not every
+// route mints an evidence row). initDatabase caches connections by path so
+// this opens the same handle the daemon already uses. Do not close the
+// connection here or the daemon will lose its DB.
+async function readMaterializedObjects(
   dataDir: string,
   signalId: string
-): Promise<string> {
-  const memoryId = await findMaterializedMemoryId(dataDir, signalId);
+): Promise<{ readonly memoryId: string; readonly evidenceId: string | null }> {
+  const db = initDatabase({ filename: join(dataDir, "alaya.db") });
+  const eventLogRepo = new SqliteEventLogRepo(db);
+  const events = await eventLogRepo.queryByEntity("candidate_memory_signal", signalId);
+  let memoryId: string | null = null;
+  let evidenceId: string | null = null;
+  for (const event of events) {
+    if (event.event_type !== SignalEventType.SOUL_SIGNAL_MATERIALIZED) {
+      continue;
+    }
+    const payload = SoulSignalMaterializedPayloadSchema.parse(event.payload_json);
+    for (const obj of payload.created_objects) {
+      if (obj.object_kind === "memory_entry" && memoryId === null) {
+        memoryId = obj.object_id;
+      }
+      if (obj.object_kind === "evidence_capsule" && evidenceId === null) {
+        evidenceId = obj.object_id;
+      }
+    }
+  }
   if (memoryId === null) {
     throw new Error(
       `Signal ${signalId} did not materialize a memory_entry — check signal_kind / confidence / evidence_refs routing.`
     );
   }
-  return memoryId;
+  return { memoryId, evidenceId };
 }
 
-// @anchor findMaterializedMemoryId: non-throwing readMaterializedMemoryId.
-// Returns the durable memory_entry id a signal materialized, or null when
-// the signal's SOUL_SIGNAL_MATERIALIZED event has no memory_entry in
-// created_objects (e.g. a low-confidence signal the MaterializationRouter
-// legitimately routed to evidence_only — an evidence_capsule with no
-// memory_entry). The bench garden-task seed loop uses this so ONE
-// evidence-only signal does not abort a whole turn's batch of otherwise
-// healthy facts.
-async function findMaterializedMemoryId(
+// Non-throwing variant returning the durable synthesis_capsule id a
+// potential_synthesis signal materialized, or null when the router minted
+// none (e.g. fewer than 2 evidence_refs). The session-level synthesis seed
+// uses this so a single failed synthesis does not abort a bench question.
+async function readMaterializedSynthesisId(
   dataDir: string,
   signalId: string
 ): Promise<string | null> {
@@ -1536,11 +1657,11 @@ async function findMaterializedMemoryId(
       continue;
     }
     const payload = SoulSignalMaterializedPayloadSchema.parse(event.payload_json);
-    const memoryObject = payload.created_objects.find(
-      (obj) => obj.object_kind === "memory_entry"
+    const synthesisObject = payload.created_objects.find(
+      (obj) => obj.object_kind === "synthesis_capsule"
     );
-    if (memoryObject !== undefined) {
-      return memoryObject.object_id;
+    if (synthesisObject !== undefined) {
+      return synthesisObject.object_id;
     }
   }
   return null;

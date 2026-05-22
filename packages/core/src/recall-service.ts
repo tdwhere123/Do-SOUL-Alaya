@@ -33,7 +33,9 @@ import { loadGlobalRecallCandidates } from "./global-memory-recall-service.js";
 import { compileRecallQueryProbes, type RecallQueryProbes } from "./recall-query-probes.js";
 import { rerankTopN, type RerankCandidate } from "./recall-feature-rerank.js";
 import {
+  appendAdditiveCandidatesWithinRemainingBudgets,
   buildRecallCandidate,
+  buildSynthesisRecallCandidate,
   rebuildRecallBudgetStateForDelivery
 } from "./recall-candidate-builder.js";
 import { STRATEGY_RECALL_DEFAULTS, type NodeStrategy } from "./task-surface-builder.js";
@@ -354,8 +356,25 @@ export class RecallService {
       preparedEmbeddingQuery.handle,
       preparedEmbeddingQuery.degradedReason
     );
-    const rebuiltCandidates = rebuildRecallBudgetStateForDelivery(
+    // Join L2 synthesis_capsule candidates as an ADDITIONAL recall source
+    // into the existing fused result — not a new fusion stream. A synthesis
+    // hit is sourced from the synthesis FTS port, ranked among synthesis
+    // rows by FTS relevance, then admitted within the remaining delivery
+    // budget. see also: recall-candidate-builder.ts buildSynthesisRecallCandidate.
+    const synthesisCandidates = await this.collectSynthesisCandidates({
+      workspaceId: params.workspaceId,
+      queryText,
+      queryProbes,
+      policy,
+      tokenEstimator
+    });
+    const fusedWithSynthesis = appendAdditiveCandidatesWithinRemainingBudgets(
       finalAssessment.candidates,
+      synthesisCandidates,
+      policy.fine_assessment
+    );
+    const rebuiltCandidates = rebuildRecallBudgetStateForDelivery(
+      fusedWithSynthesis,
       policy.fine_assessment
     );
     const candidates = await this.applyManifestationBiasSidecar({
@@ -1695,6 +1714,70 @@ export class RecallService {
     });
 
     return supplement;
+  }
+
+  // Query the L2 synthesis FTS port and build delivered synthesis_capsule
+  // candidates. Returns [] when no synthesis port is wired or the query is
+  // empty — recall then degrades cleanly to the memory_entry-only result.
+  private async collectSynthesisCandidates(params: {
+    readonly workspaceId: string;
+    readonly queryText: string | null;
+    readonly queryProbes: Readonly<RecallQueryProbes>;
+    readonly policy: Readonly<RecallPolicy>;
+    readonly tokenEstimator: TokenEstimator;
+  }): Promise<readonly Readonly<RecallCandidate>[]> {
+    const synthesisSearchPort = this.dependencies.synthesisSearchPort;
+    if (synthesisSearchPort === undefined || params.queryText === null) {
+      return Object.freeze([]);
+    }
+    const limit = params.policy.coarse_filter.semantic_supplement.max_supplement;
+    if (limit <= 0) {
+      return Object.freeze([]);
+    }
+    try {
+      const rankById = new Map<string, number>();
+      for (const synthesisQuery of buildEvidenceSearchQueries(
+        params.queryText,
+        params.queryProbes
+      )) {
+        const matches = await synthesisSearchPort.searchByKeyword(
+          params.workspaceId,
+          synthesisQuery,
+          limit
+        );
+        for (const match of matches) {
+          rankById.set(
+            match.object_id,
+            Math.max(rankById.get(match.object_id) ?? 0, clamp01(match.normalized_rank))
+          );
+        }
+      }
+      if (rankById.size === 0) {
+        return Object.freeze([]);
+      }
+      const synthesisRows = await synthesisSearchPort.findByIds([...rankById.keys()]);
+      const candidates = synthesisRows
+        .filter((synthesis) => synthesis.workspace_id === params.workspaceId)
+        .map((synthesis) =>
+          buildSynthesisRecallCandidate({
+            synthesis,
+            normalizedRank: rankById.get(synthesis.object_id) ?? 0,
+            tokenEstimator: params.tokenEstimator,
+            budgets: params.policy.fine_assessment.budgets
+          })
+        )
+        .sort((left, right) => {
+          const delta = right.relevance_score - left.relevance_score;
+          return delta !== 0 ? delta : left.object_id.localeCompare(right.object_id);
+        });
+      return Object.freeze(candidates);
+    } catch (error) {
+      this.warn("synthesis FTS lookup failed", {
+        workspace_id: params.workspaceId,
+        error: toErrorMessage(error)
+      });
+      return Object.freeze([]);
+    }
   }
 
   private async prepareEmbeddingSupplementQuery(params: {

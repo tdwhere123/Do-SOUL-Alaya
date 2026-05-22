@@ -7,12 +7,14 @@ import {
   ProjectMappingState,
   RetentionPolicy,
   ScopeClass,
+  SynthesisStatus,
   type EventLogEntry,
   type MemoryEntry,
   type ProjectMappingAnchor,
   type RecallPolicy,
   type SoulActiveConstraint,
   type Slot,
+  type SynthesisCapsule,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import {
@@ -2432,5 +2434,87 @@ describe("RecallService", () => {
       "path plasticity port lookup failed",
       expect.objectContaining({ workspace_id: "workspace-1" })
     );
+  });
+
+  // see also: packages/core/src/recall-service.ts collectSynthesisCandidates —
+  // the L2 synthesis_capsule rows join the fused memory_entry result as an
+  // additional recall source, not a new fusion stream.
+  it("sources an L2 synthesis_capsule candidate additively into the fused result", async () => {
+    const memories = [
+      createMemoryEntry({
+        object_id: "memory-1",
+        scope_class: ScopeClass.PROJECT,
+        dimension: MemoryDimension.PROCEDURE,
+        activation_score: 0.9
+      })
+    ];
+    const { dependencies } = createDependencies(memories);
+    const synthesis: SynthesisCapsule = {
+      object_id: "synthesis-1",
+      object_kind: "synthesis_capsule",
+      schema_version: 1,
+      lifecycle_state: "active",
+      created_at: "2026-03-23T00:00:00.000Z",
+      updated_at: "2026-03-23T00:00:00.000Z",
+      created_by: "system",
+      topic_key: "recall/synthesis",
+      synthesis_type: "cross_evidence",
+      summary: "Cross-evidence synthesis covering the recall implementation.",
+      evidence_refs: ["evidence-1", "evidence-2"],
+      source_memory_refs: ["memory-1"],
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      synthesis_status: SynthesisStatus.WORKING
+    };
+    const synthesisSearchByKeyword = vi.fn(async () => [
+      { object_id: "synthesis-1", normalized_rank: 1 }
+    ]);
+    const synthesisFindByIds = vi.fn(async () => [synthesis]);
+    const service = new RecallService({
+      ...dependencies,
+      synthesisSearchPort: {
+        searchByKeyword: synthesisSearchByKeyword,
+        findByIds: synthesisFindByIds
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "build"
+    });
+
+    expect(synthesisSearchByKeyword).toHaveBeenCalled();
+    const synthesisCandidate = result.candidates.find(
+      (candidate) => candidate.object_kind === "synthesis_capsule"
+    );
+    expect(synthesisCandidate?.object_id).toBe("synthesis-1");
+    // The memory_entry candidate is still delivered — synthesis is additive.
+    expect(
+      result.candidates.some((candidate) => candidate.object_id === "memory-1")
+    ).toBe(true);
+  });
+
+  it("degrades cleanly to memory_entry-only when no synthesis port is wired", async () => {
+    const memories = [
+      createMemoryEntry({
+        object_id: "memory-1",
+        scope_class: ScopeClass.PROJECT,
+        dimension: MemoryDimension.PROCEDURE,
+        activation_score: 0.9
+      })
+    ];
+    const { dependencies } = createDependencies(memories);
+    const service = new RecallService(dependencies);
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "build"
+    });
+
+    expect(
+      result.candidates.every((candidate) => candidate.object_kind === "memory_entry")
+    ).toBe(true);
   });
 });

@@ -77,6 +77,32 @@ describe("PathRelationProposalService", () => {
     expect(eventInputs[0].workspace_id).toBe("workspace-1");
   });
 
+  it("mints a co-usage path at attention_only — not a recall-eligible class", async () => {
+    // A co-usage path is an agent self-report aggregate. It must be born
+    // below the recall-eligible governance band: attention_only is
+    // auditable and lens-visible but earns no recall-expansion boost and
+    // cannot bias agent dialogue until it accrues support_events_count >= 8
+    // through the legitimate path-manifestation-policy ladder.
+    const repo = {
+      create: vi.fn((relation: any) => relation),
+      findByAnchorMemoryId: vi.fn(async () => [])
+    };
+    const { publisher, appendManyWithMutation } = createEventPublisher();
+    const service = new PathRelationProposalService({ repo, eventPublisher: publisher });
+
+    for (let i = 0; i < PATH_RELATION_PROPOSE_THRESHOLD; i += 1) {
+      await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
+    }
+
+    const written = repo.create.mock.calls[0][0];
+    expect(written.legitimacy.governance_class).toBe("attention_only");
+    expect(written.legitimacy.governance_class).not.toBe("recall_allowed");
+    expect(written.legitimacy.governance_class).not.toBe("strictly_governed");
+
+    const [eventInputs] = appendManyWithMutation.mock.calls[0]!;
+    expect(eventInputs[0].payload_json.governance_class).toBe("attention_only");
+  });
+
   it("does not double-propose the same pair", async () => {
     const repo = {
       create: vi.fn((relation: any) => relation),
