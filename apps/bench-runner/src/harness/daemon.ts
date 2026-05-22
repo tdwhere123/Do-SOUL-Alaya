@@ -166,6 +166,7 @@ export interface BenchSignalSeedInput {
 
 export interface BenchContextUsageObject {
   readonly objectId: string;
+  readonly objectKind?: string;
   readonly usageStatus: "used" | "skipped" | "not_applicable";
 }
 
@@ -628,6 +629,10 @@ export async function startBenchDaemon(
             readonly workspace_id: string;
             readonly run_id: string;
             readonly delivered_object_ids: readonly string[];
+            readonly delivered_objects?: readonly {
+              readonly object_id: string;
+              readonly object_kind: string;
+            }[];
             readonly delivered_at: string;
           }): Promise<unknown>;
         };
@@ -655,15 +660,25 @@ export async function startBenchDaemon(
       return result;
     });
     const deliveryId = `delivery_${randomUUID()}`;
+    const deliveredObjects = [
+      ...results.map((result) => ({
+        object_id: result.object_id,
+        object_kind: result.object_kind
+      })),
+      ...recallResult.active_constraints.map((constraint) => ({
+        object_id: constraint.object_id,
+        object_kind: constraint.object_kind
+      }))
+    ];
     await diagnosticRuntime.services.trustStateRecorder.recordDelivery({
       delivery_id: deliveryId,
       agent_target: "bench-runner",
       workspace_id: workspaceId,
       run_id: runId,
-      delivered_object_ids: [...new Set([
-        ...results.map((result) => result.object_id),
-        ...recallResult.active_constraints.map((constraint) => constraint.object_id)
-      ])],
+      delivered_object_ids: [...new Set(deliveredObjects.map((object) => object.object_id))],
+      delivered_objects: [...new Map(
+        deliveredObjects.map((object) => [`${object.object_kind}\0${object.object_id}`, object])
+      ).values()],
       delivered_at: new Date().toISOString()
     });
     // @anchor bench-lens-event: the bench recall path drives recallService
@@ -719,6 +734,7 @@ export async function startBenchDaemon(
           : {
               delivered_objects: input.deliveredObjects.map((item) => ({
                 object_id: item.objectId,
+                ...(item.objectKind === undefined ? {} : { object_kind: item.objectKind }),
                 usage_status: item.usageStatus
               }))
             }),

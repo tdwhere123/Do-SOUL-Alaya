@@ -2,6 +2,7 @@ import {
   TrustStateEventType,
   type EventLogEntry,
   type PathRelation,
+  type SoulContextObjectIdentity,
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
 import {
@@ -133,6 +134,16 @@ export function createUsageProofReader(deps: {
         return null;
       }
       return [...delivery.delivered_object_ids];
+    },
+
+    findDeliveredObjects: async (
+      deliveryId: string
+    ): Promise<readonly SoulContextObjectIdentity[] | null> => {
+      const delivery = await deps.trustStateRepo.findDeliveryById(deliveryId);
+      if (delivery === null || delivery.delivered_objects === undefined) {
+        return null;
+      }
+      return [...delivery.delivered_objects];
     }
   };
 }
@@ -185,18 +196,24 @@ function parsePerAnchorUsage(
     return [];
   }
   return value
-    .filter((entry): entry is { readonly object_id: string; readonly anchor_role: "source" | "target" } => {
+    .filter((entry): entry is {
+      readonly object_id: string;
+      readonly object_kind?: string;
+      readonly anchor_role: "source" | "target";
+    } => {
       if (typeof entry !== "object" || entry === null) {
         return false;
       }
       const candidate = entry as Record<string, unknown>;
       return (
         typeof candidate.object_id === "string" &&
+        (candidate.object_kind === undefined || typeof candidate.object_kind === "string") &&
         (candidate.anchor_role === "source" || candidate.anchor_role === "target")
       );
     })
     .map((entry) => ({
       object_id: entry.object_id,
+      ...(entry.object_kind === undefined ? {} : { object_kind: entry.object_kind }),
       anchor_role: entry.anchor_role
     }));
 }

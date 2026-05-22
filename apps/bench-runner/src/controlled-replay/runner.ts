@@ -541,6 +541,7 @@ async function reportMixedUsage(
     ...(fallbackUsed.length === 0 ? {} : { usedObjectIds: fallbackUsed }),
     deliveredObjects: recall.results.slice(0, 10).map((result) => ({
       objectId: result.object_id,
+      objectKind: result.object_kind,
       usageStatus: fallbackUsed.includes(result.object_id) ? "used" : "skipped"
     })),
     turnIndex,

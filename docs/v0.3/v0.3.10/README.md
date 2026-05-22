@@ -145,7 +145,7 @@ D1-D15 历史决策保持有效但实施细节按 β 重塑：
 - 每 Phase 收尾跑 `do-it-review-loop`（Claude lens + Codex adversarial lens 各一份）
 - review-loop **循环到 zero Blocking + zero Important**（硬规则）
 - bench：每 Phase 收尾跑一次，跟 `latest-baseline.json` diff，退化必入 backlog
-- archive header 必带 `recall_pipeline_version`（区分 additive vs fusion-rrf-v1）
+- archive header 必带 `recall_pipeline_version`（区分 additive、fusion-rrf-v1 与 fusion-rrf-synthesis-v2）
 
 ## Honest acknowledgement (release notes 蓝本，D20 立场版)
 

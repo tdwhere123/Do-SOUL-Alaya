@@ -1,8 +1,7 @@
--- v0.3.9 Cat-E.1 / D1: HealthIssueGroup is the control-plane projection
--- that aggregates raw OrphanRadar / GreenStatus revoke / evidence_failure
--- signals by target object + cause_kind so the Inspector inbox can
--- fatigue-dedupe and dispatch typed actions without polluting memory
--- ontology.
+-- HealthIssueGroup is the control-plane projection that aggregates raw
+-- OrphanRadar, GreenStatus revoke, and evidence_failure signals by target
+-- object plus cause_kind so operator inboxes can dedupe actions without
+-- polluting memory ontology.
 
 CREATE TABLE IF NOT EXISTS health_issue_groups (
   group_id TEXT PRIMARY KEY,

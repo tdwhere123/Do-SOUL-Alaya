@@ -33,10 +33,8 @@ import { loadGlobalRecallCandidates } from "./global-memory-recall-service.js";
 import { compileRecallQueryProbes, type RecallQueryProbes } from "./recall-query-probes.js";
 import { rerankTopN, type RerankCandidate } from "./recall-feature-rerank.js";
 import {
-  appendAdditiveCandidatesWithinRemainingBudgets,
   buildRecallCandidate,
-  buildSynthesisRecallCandidate,
-  rebuildRecallBudgetStateForDelivery
+  buildSynthesisCoarseRecallCandidate
 } from "./recall-candidate-builder.js";
 import { STRATEGY_RECALL_DEFAULTS, type NodeStrategy } from "./task-surface-builder.js";
 import {
@@ -129,6 +127,7 @@ const QUERY_EVIDENCE_BASE_WEIGHT_FLOOR = 0.35;
 const RECALL_RRF_DEFAULT_K = 60;
 const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
   "lexical_fts",
+  "synthesis_fts",
   "evidence_fts",
   "evidence_structural_agreement",
   "source_proximity",
@@ -144,6 +143,12 @@ const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
 ];
 const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>> = Object.freeze({
   lexical_fts: 1,
+  // synthesis_fts no longer drives cross-kind fusion: a synthesis candidate
+  // cannot out-RRF a multi-stream memory_entry, so delivery is handled by
+  // reserveSynthesisDeliverySlots, not this weight. The weight is retained
+  // only to rank synthesis rows among themselves; its value is inert for
+  // delivery. see also: reserveSynthesisDeliverySlots.
+  synthesis_fts: 8,
   evidence_fts: 3,
   evidence_structural_agreement: 6,
   source_proximity: 1,
@@ -284,9 +289,16 @@ export class RecallService {
       winnerMemoryIds,
       timeFilter: params.timeFilter
     });
+    const synthesisCoarseFilter = await this.collectSynthesisCoarseCandidates({
+      workspaceId: params.workspaceId,
+      queryText,
+      queryProbes,
+      policy
+    });
     const combinedCoarseCandidates = Object.freeze([
       ...coarseFilter.candidates,
-      ...filteredGlobalCandidates
+      ...filteredGlobalCandidates,
+      ...synthesisCoarseFilter.candidates
     ]) as readonly Readonly<CoarseRecallCandidate>[];
     const preparedEmbeddingQueryPromise = this.prepareEmbeddingSupplementQuery({
       config: policy,
@@ -306,7 +318,8 @@ export class RecallService {
     const initialAssessment = await this.assessCoarseFilter({
       coarseFilter: Object.freeze({
         ...coarseFilter,
-        candidates: combinedCoarseCandidates
+        candidates: combinedCoarseCandidates,
+        synthesisFtsRanks: synthesisCoarseFilter.synthesisFtsRanks
       }),
       workspaceId: params.workspaceId,
       runId: params.runId ?? null,
@@ -356,32 +369,11 @@ export class RecallService {
       preparedEmbeddingQuery.handle,
       preparedEmbeddingQuery.degradedReason
     );
-    // Join L2 synthesis_capsule candidates as an ADDITIONAL recall source
-    // into the existing fused result — not a new fusion stream. A synthesis
-    // hit is sourced from the synthesis FTS port, ranked among synthesis
-    // rows by FTS relevance, then admitted within the remaining delivery
-    // budget. see also: recall-candidate-builder.ts buildSynthesisRecallCandidate.
-    const synthesisCandidates = await this.collectSynthesisCandidates({
-      workspaceId: params.workspaceId,
-      queryText,
-      queryProbes,
-      policy,
-      tokenEstimator
-    });
-    const fusedWithSynthesis = appendAdditiveCandidatesWithinRemainingBudgets(
-      finalAssessment.candidates,
-      synthesisCandidates,
-      policy.fine_assessment
-    );
-    const rebuiltCandidates = rebuildRecallBudgetStateForDelivery(
-      fusedWithSynthesis,
-      policy.fine_assessment
-    );
     const candidates = await this.applyManifestationBiasSidecar({
       workspaceId: params.workspaceId,
       runId: params.runId ?? null,
       taskSurfaceRef: params.taskSurface,
-      candidates: rebuiltCandidates
+      candidates: finalAssessment.candidates
     });
     const candidateDiagnostics = finalizeRecallCandidateDiagnostics(
       finalAssessment.diagnostics,
@@ -598,6 +590,7 @@ export class RecallService {
     readonly total_scanned: number;
     readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
     readonly ftsRanks: Readonly<Record<string, number>>;
+    readonly synthesisFtsRanks: Readonly<Record<string, number>>;
     readonly evidenceFtsRanks: Readonly<Record<string, number>>;
     readonly sourceProximityScores: Readonly<Record<string, number>>;
     readonly sourceCohortKeys: Readonly<Record<string, string>>;
@@ -878,6 +871,7 @@ export class RecallService {
       total_scanned: tierMemories.length,
       candidates: supplementedCandidates,
       ftsRanks: Object.freeze(Object.fromEntries(ftsRanks.entries())),
+      synthesisFtsRanks: Object.freeze({}),
       evidenceFtsRanks: Object.freeze(Object.fromEntries(evidenceFtsRanks.entries())),
       sourceProximityScores: Object.freeze(Object.fromEntries(sourceProximityScores.entries())),
       sourceCohortKeys,
@@ -1426,6 +1420,7 @@ export class RecallService {
       queryProbes: params.queryProbes,
       policy: params.policy,
       coarseFtsRanks: params.coarseFilter.ftsRanks,
+      coarseSynthesisFtsRanks: params.coarseFilter.synthesisFtsRanks,
       coarseEvidenceFtsRanks: params.coarseFilter.evidenceFtsRanks,
       coarseSourceProximityScores: params.coarseFilter.sourceProximityScores,
       coarseSourceCohortKeys: params.coarseFilter.sourceCohortKeys,
@@ -1470,6 +1465,10 @@ export class RecallService {
         ...current.ftsRanks,
         ...next.ftsRanks
       }),
+      synthesisFtsRanks: Object.freeze({
+        ...current.synthesisFtsRanks,
+        ...next.synthesisFtsRanks
+      }),
       evidenceFtsRanks: Object.freeze({
         ...current.evidenceFtsRanks,
         ...next.evidenceFtsRanks
@@ -1506,6 +1505,7 @@ export class RecallService {
     readonly queryProbes: Readonly<RecallQueryProbes>;
     readonly policy: Readonly<RecallPolicy>;
     readonly coarseFtsRanks: Readonly<Record<string, number>>;
+    readonly coarseSynthesisFtsRanks: Readonly<Record<string, number>>;
     readonly coarseEvidenceFtsRanks: Readonly<Record<string, number>>;
     readonly coarseSourceProximityScores: Readonly<Record<string, number>>;
     readonly coarseSourceCohortKeys: Readonly<Record<string, string>>;
@@ -1601,6 +1601,7 @@ export class RecallService {
     return Object.freeze({
       queryProbes: params.queryProbes,
       ftsRanks: params.coarseFtsRanks,
+      synthesisFtsRanks: params.coarseSynthesisFtsRanks,
       evidenceFtsRanks: params.coarseEvidenceFtsRanks,
       sourceProximityScores: params.coarseSourceProximityScores,
       sourceCohortKeys: params.coarseSourceCohortKeys,
@@ -1716,23 +1717,22 @@ export class RecallService {
     return supplement;
   }
 
-  // Query the L2 synthesis FTS port and build delivered synthesis_capsule
-  // candidates. Returns [] when no synthesis port is wired or the query is
-  // empty — recall then degrades cleanly to the memory_entry-only result.
-  private async collectSynthesisCandidates(params: {
+  private async collectSynthesisCoarseCandidates(params: {
     readonly workspaceId: string;
     readonly queryText: string | null;
     readonly queryProbes: Readonly<RecallQueryProbes>;
     readonly policy: Readonly<RecallPolicy>;
-    readonly tokenEstimator: TokenEstimator;
-  }): Promise<readonly Readonly<RecallCandidate>[]> {
+  }): Promise<Readonly<{
+    readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
+    readonly synthesisFtsRanks: Readonly<Record<string, number>>;
+  }>> {
     const synthesisSearchPort = this.dependencies.synthesisSearchPort;
     if (synthesisSearchPort === undefined || params.queryText === null) {
-      return Object.freeze([]);
+      return emptySynthesisCoarseFilter();
     }
     const limit = params.policy.coarse_filter.semantic_supplement.max_supplement;
     if (limit <= 0) {
-      return Object.freeze([]);
+      return emptySynthesisCoarseFilter();
     }
     try {
       const rankById = new Map<string, number>();
@@ -1753,30 +1753,40 @@ export class RecallService {
         }
       }
       if (rankById.size === 0) {
-        return Object.freeze([]);
+        return emptySynthesisCoarseFilter();
       }
       const synthesisRows = await synthesisSearchPort.findByIds([...rankById.keys()]);
       const candidates = synthesisRows
         .filter((synthesis) => synthesis.workspace_id === params.workspaceId)
         .map((synthesis) =>
-          buildSynthesisRecallCandidate({
+          buildSynthesisCoarseRecallCandidate({
             synthesis,
-            normalizedRank: rankById.get(synthesis.object_id) ?? 0,
-            tokenEstimator: params.tokenEstimator,
-            budgets: params.policy.fine_assessment.budgets
+            normalizedRank: rankById.get(synthesis.object_id) ?? 0
           })
         )
         .sort((left, right) => {
-          const delta = right.relevance_score - left.relevance_score;
-          return delta !== 0 ? delta : left.object_id.localeCompare(right.object_id);
+          const leftRank = rankById.get(left.entry.object_id) ?? 0;
+          const rightRank = rankById.get(right.entry.object_id) ?? 0;
+          const delta = rightRank - leftRank;
+          return delta !== 0 ? delta : compareMemoryEntries(left.entry, right.entry);
         });
-      return Object.freeze(candidates);
+      return Object.freeze({
+        candidates: Object.freeze(candidates),
+        synthesisFtsRanks: Object.freeze(
+          Object.fromEntries(
+            candidates.map((candidate) => [
+              candidate.entry.object_id,
+              rankById.get(candidate.entry.object_id) ?? 0
+            ] as const)
+          )
+        )
+      });
     } catch (error) {
       this.warn("synthesis FTS lookup failed", {
         workspace_id: params.workspaceId,
         error: toErrorMessage(error)
       });
-      return Object.freeze([]);
+      return emptySynthesisCoarseFilter();
     }
   }
 
@@ -1900,7 +1910,8 @@ export class RecallService {
         supplementaryData,
         candidate.originPlane ?? "workspace_local",
         candidate.isAdvisory ?? false,
-        candidate.scoreMultiplier ?? 1
+        candidate.scoreMultiplier ?? 1,
+        candidate.objectKind ?? "memory_entry"
       );
       return Object.freeze({
         ...candidate,
@@ -1921,8 +1932,12 @@ export class RecallService {
     const rankedCandidates = scoredCandidates
       .sort(compareFusedRecallCandidates);
     const featureRerankedCandidates = applyFeatureRerank(rankedCandidates, supplementaryData);
-    const deliveryOrderedCandidates = prioritizeStrongLexicalDeliveryWindowCandidates(
-      featureRerankedCandidates,
+    const deliveryOrderedCandidates = reserveSynthesisDeliverySlots(
+      prioritizeStrongLexicalDeliveryWindowCandidates(
+        featureRerankedCandidates,
+        supplementaryData,
+        config.budgets.max_entries
+      ),
       supplementaryData,
       config.budgets.max_entries
     );
@@ -1953,6 +1968,7 @@ export class RecallService {
       selectionOrder: number
     ): FineAssessmentAccumulator => {
       const entry = candidate.entry;
+      const objectKind = candidate.objectKind ?? "memory_entry";
       const candidateKey = buildRecallCandidateDedupeKey(candidate);
       const originPlane = candidate.originPlane ?? "workspace_local";
       const scoreFactors = candidate.effectiveFactors;
@@ -1968,6 +1984,7 @@ export class RecallService {
         return Object.freeze({
           candidate_key: candidateKey,
           object_id: entry.object_id,
+          object_kind: objectKind,
           origin_plane: originPlane,
           admission_planes: admissionPlanes,
           plane_first_admitted: candidate.firstAdmissionPlane ?? admissionPlanes[0] ?? "activation",
@@ -1982,7 +1999,9 @@ export class RecallService {
           dropped_reason: droppedReason,
           within_budget: droppedReason === null,
           relevance_score: candidate.effectiveScore,
-          lexical_rank: supplementaryData.ftsRanks[entry.object_id] ?? null,
+          lexical_rank: candidate.objectKind === "synthesis_capsule"
+            ? supplementaryData.synthesisFtsRanks[entry.object_id] ?? null
+            : supplementaryData.ftsRanks[entry.object_id] ?? null,
           structural_score: clamp01(candidate.structuralScore ?? supplementaryData.structuralScores[entry.object_id] ?? 0),
           score_factors: scoreFactors,
           source_channels: Object.freeze(uniqueStrings([
@@ -2086,7 +2105,8 @@ export class RecallService {
     supplementaryData: RecallSupplementaryData,
     originPlane: RecallOriginPlane,
     isAdvisory: boolean,
-    scoreMultiplier = 1
+    scoreMultiplier = 1,
+    objectKind: RecallCandidate["object_kind"] = "memory_entry"
   ): Readonly<{ readonly score: number; readonly factors: RecallScoreFactors }> {
     const config = policy.fine_assessment;
     const additiveWeights = resolveAdditiveScoringWeights(policy);
@@ -2096,26 +2116,33 @@ export class RecallService {
       additiveWeights.PATH_PLASTICITY_WEIGHT
     );
     const isGlobalCandidate = originPlane === "global";
+    const isSynthesisCandidate = objectKind === "synthesis_capsule";
+    const canUseMemorySupplement = !isGlobalCandidate && !isSynthesisCandidate;
     const activationScore = normalizeActivationScore(entry.activation_score);
-    const ftsFactor = isGlobalCandidate ? 0 : supplementaryData.ftsRanks[entry.object_id] ?? 0;
-    const structuralFactor = isGlobalCandidate ? 0 : supplementaryData.structuralScores[entry.object_id] ?? 0;
+    const ftsFactor = canUseMemorySupplement ? supplementaryData.ftsRanks[entry.object_id] ?? 0 : 0;
+    const synthesisFtsFactor =
+      isGlobalCandidate || !isSynthesisCandidate
+        ? 0
+        : supplementaryData.synthesisFtsRanks[entry.object_id] ?? 0;
+    const structuralFactor = canUseMemorySupplement ? supplementaryData.structuralScores[entry.object_id] ?? 0 : 0;
+    const queryFtsFactor = Math.max(ftsFactor, synthesisFtsFactor);
     const relevanceFactor =
-      ftsFactor > 0 && structuralFactor > 0
-        ? clamp01(ftsFactor * 0.24 + structuralFactor * 0.76)
-        : Math.max(ftsFactor * 0.62, structuralFactor);
-    const graphSupportFactor = isGlobalCandidate
-      ? 0
-      : normalizeGraphSupport(supplementaryData.graphSupportCounts[entry.object_id] ?? 0);
-    const embeddingSimilarityFactor = isGlobalCandidate
-      ? 0
-      : clamp01(supplementaryData.embeddingSimilarityScores[entry.object_id] ?? 0);
+      queryFtsFactor > 0 && structuralFactor > 0
+        ? clamp01(queryFtsFactor * 0.24 + structuralFactor * 0.76)
+        : Math.max(queryFtsFactor * 0.62, structuralFactor);
+    const graphSupportFactor = canUseMemorySupplement
+      ? normalizeGraphSupport(supplementaryData.graphSupportCounts[entry.object_id] ?? 0)
+      : 0;
+    const embeddingSimilarityFactor = canUseMemorySupplement
+      ? clamp01(supplementaryData.embeddingSimilarityScores[entry.object_id] ?? 0)
+      : 0;
     const budgetPenalty = supplementaryData.budgetPenaltyFactor;
     // PathPlasticity is supplementary, like the embedding similarity hint:
     // it boosts the score additively but the final value is still clamp01,
     // so a small plasticity boost cannot override a large lexical-rank gap.
-    const plasticityFactor = isGlobalCandidate
-      ? 0
-      : clamp01(supplementaryData.plasticityFactors[entry.object_id] ?? 0);
+    const plasticityFactor = canUseMemorySupplement
+      ? clamp01(supplementaryData.plasticityFactors[entry.object_id] ?? 0)
+      : 0;
     const conflictPenalty =
       config.conflict_awareness &&
       isClaimLikeDimension(entry.dimension) &&
@@ -2301,6 +2328,7 @@ function buildRecallFusionDetails(params: Readonly<{
     return Object.freeze({
       candidateKey,
       objectId: candidate.entry.object_id,
+      objectKind: candidate.objectKind ?? "memory_entry",
       originPlane: candidate.originPlane ?? "workspace_local",
       entry: candidate.entry,
       effectiveScore: candidate.effectiveScore,
@@ -2330,6 +2358,7 @@ function buildRecallFusionDetails(params: Readonly<{
         Object.freeze({
           candidate_key: candidate.candidateKey,
           object_id: candidate.objectId,
+          object_kind: candidate.objectKind,
           origin_plane: candidate.originPlane,
           per_stream_rank: candidate.perStreamRank,
           fused_rank: fusedRankByCandidateKey.get(candidate.candidateKey) ?? Number.MAX_SAFE_INTEGER,
@@ -2349,12 +2378,23 @@ function scoreRecallFusionStream(
 ): number {
   const objectId = candidate.entry.object_id;
   const isGlobalCandidate = candidate.originPlane === "global";
+  // invariant: synthesis_capsule candidates score ONLY on synthesis_fts —
+  // their dimension/source_kind/created_at are faked pseudo-memory_entry
+  // fields, so any other stream is fail-closed for them here.
+  // see also: recall-candidate-builder.ts buildSynthesisCoarseRecallCandidate
+  if (candidate.objectKind === "synthesis_capsule") {
+    return stream === "synthesis_fts"
+      ? clamp01(supplementaryData.synthesisFtsRanks[objectId] ?? 0)
+      : 0;
+  }
   switch (stream) {
     case "lexical_fts":
       if (isGlobalCandidate) {
         return 0;
       }
       return clamp01(supplementaryData.ftsRanks[objectId] ?? 0);
+    case "synthesis_fts":
+      return 0;
     case "evidence_fts":
       if (isGlobalCandidate) {
         return 0;
@@ -2523,18 +2563,93 @@ function applyFeatureRerank<T extends FusedRecallCandidateInput>(
       text: Object.freeze({
         content: candidate.entry.content,
         hasEvidenceLexicalHit:
-          (supplementaryData.evidenceFtsRanks[candidate.entry.object_id] ?? 0) > 0
+          (supplementaryData.evidenceFtsRanks[candidate.entry.object_id] ?? 0) > 0 ||
+          (candidate.objectKind === "synthesis_capsule" &&
+            (supplementaryData.synthesisFtsRanks[candidate.entry.object_id] ?? 0) > 0)
       })
     })
   );
   return rerankTopN(supplementaryData.queryProbes, rerankInputs);
 }
 
+/**
+ * Delivery slots reserved for L2 synthesis_capsule candidates.
+ *
+ * A synthesis candidate fires on exactly one fusion stream (synthesis_fts).
+ * RRF rewards multi-stream presence, so a synthesis row's fused score is
+ * capped near `weight/(k+1)` while a multi-stream memory_entry accumulates
+ * well past it — synthesis never reaches the delivery budget on fused rank
+ * alone. The reserve guarantees the top synthesis rows (by synthesis FTS
+ * relevance) a bounded presence so the L2 layer is reachable through recall.
+ */
+const SYNTHESIS_DELIVERY_RESERVE = 2;
+
+/**
+ * Reserve the tail of the delivery budget window for the strongest synthesis
+ * candidates. Tail placement keeps high-rank memory_entry results at the head
+ * undisplaced; only the lowest in-budget memory rows yield their slot. Returns
+ * the input unchanged when no synthesis candidate is present, so memory-only
+ * recall is a guaranteed no-op.
+ *
+ * The reserve is against the ENTRY-COUNT budget only. The downstream
+ * `appendCandidate` reduce still enforces `max_total_tokens`, so a
+ * tail-placed reserved synthesis can still be evicted under a tight token
+ * budget — the reserve is a best-effort entry-count guarantee, not a hard
+ * delivery guarantee. Because placement is tail-only, a synthesis row is
+ * reachable by a consumer that reads the whole delivery window but not by
+ * one that reads only the top few. A scored, fusion-comparable synthesis
+ * signal that would let synthesis place by merit is a v0.3.11 concern.
+ */
+function reserveSynthesisDeliverySlots<T extends FusedRecallCandidateInput>(
+  deliveryOrdered: readonly T[],
+  supplementaryData: RecallSupplementaryData,
+  maxEntries: number
+): readonly T[] {
+  const synthesisCandidates = deliveryOrdered.filter(
+    (candidate) => candidate.objectKind === "synthesis_capsule"
+  );
+  if (synthesisCandidates.length === 0 || maxEntries <= 1) {
+    return deliveryOrdered;
+  }
+  const reserveCount = Math.min(
+    SYNTHESIS_DELIVERY_RESERVE,
+    synthesisCandidates.length,
+    maxEntries - 1
+  );
+  if (reserveCount <= 0) {
+    return deliveryOrdered;
+  }
+  const reservedSynthesis = [...synthesisCandidates]
+    .sort((left, right) => {
+      const leftRank = supplementaryData.synthesisFtsRanks[left.entry.object_id] ?? 0;
+      const rightRank = supplementaryData.synthesisFtsRanks[right.entry.object_id] ?? 0;
+      return rightRank - leftRank !== 0
+        ? rightRank - leftRank
+        : compareMemoryEntries(left.entry, right.entry);
+    })
+    .slice(0, reserveCount);
+  const reservedKeys = new Set(
+    reservedSynthesis.map((candidate) => buildRecallCandidateDedupeKey(candidate))
+  );
+  const rest = deliveryOrdered.filter(
+    (candidate) => !reservedKeys.has(buildRecallCandidateDedupeKey(candidate))
+  );
+  const headCount = Math.max(0, maxEntries - reserveCount);
+  return Object.freeze([
+    ...rest.slice(0, headCount),
+    ...reservedSynthesis,
+    ...rest.slice(headCount)
+  ]);
+}
+
 function isStrongLexicalCandidate(
   candidate: FusedRecallCandidateInput,
   supplementaryData: RecallSupplementaryData
 ): boolean {
-  return clamp01(supplementaryData.ftsRanks[candidate.entry.object_id] ?? 0) >= STRONG_LEXICAL_DELIVERY_RANK;
+  const rank = candidate.objectKind === "synthesis_capsule"
+    ? supplementaryData.synthesisFtsRanks[candidate.entry.object_id] ?? 0
+    : supplementaryData.ftsRanks[candidate.entry.object_id] ?? 0;
+  return clamp01(rank) >= STRONG_LEXICAL_DELIVERY_RANK;
 }
 
 function isSourceProximityLocalOnlyCandidate(candidate: FusedRecallCandidateInput): boolean {
@@ -2542,6 +2657,7 @@ function isSourceProximityLocalOnlyCandidate(candidate: FusedRecallCandidateInpu
   return (
     ranks.source_proximity !== null &&
     ranks.lexical_fts === null &&
+    ranks.synthesis_fts === null &&
     ranks.evidence_fts === null &&
     ranks.evidence_structural_agreement === null &&
     ranks.source_evidence_agreement === null &&
@@ -2553,8 +2669,9 @@ function isSourceProximityLocalOnlyCandidate(candidate: FusedRecallCandidateInpu
 
 function buildEmptyRecallFusionBreakdown(objectId: string): Readonly<RecallFusionBreakdown> {
   return Object.freeze({
-    candidate_key: `workspace_local:${objectId}`,
+    candidate_key: `workspace_local:memory_entry:${objectId}`,
     object_id: objectId,
+    object_kind: "memory_entry",
     origin_plane: "workspace_local",
     per_stream_rank: Object.freeze(buildEmptyFusionStreamRanks()) as RecallFusionStreamRanks,
     fused_rank: Number.MAX_SAFE_INTEGER,
@@ -2638,6 +2755,7 @@ function buildRecallDiagnostics(params: Readonly<{
       params.candidates.map((candidate) => Object.freeze({
         candidate_key: candidate.candidate_key,
         object_id: candidate.object_id,
+        object_kind: candidate.object_kind,
         origin_plane: candidate.origin_plane,
         per_stream_rank: candidate.per_stream_rank,
         fused_rank: candidate.fused_rank,
@@ -2655,7 +2773,7 @@ function finalizeRecallCandidateDiagnostics(
 ): readonly Readonly<RecallCandidateDiagnostic>[] {
   const deliveredRankByCandidateKey = new Map<string, number>(
     deliveredCandidates.map((candidate, index) => [
-      `${candidate.origin_plane ?? "workspace_local"}:${candidate.object_id}`,
+      `${candidate.origin_plane ?? "workspace_local"}:${candidate.object_kind}:${candidate.object_id}`,
       index + 1
     ] as const)
   );
@@ -2749,6 +2867,16 @@ function emptyEmbeddingSupplementResult(): EmbeddingRecallSupplementResult {
   return Object.freeze({
     supplementaryEntries: Object.freeze([]),
     similarityHintsByObjectId: Object.freeze({})
+  });
+}
+
+function emptySynthesisCoarseFilter(): Readonly<{
+  readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
+  readonly synthesisFtsRanks: Readonly<Record<string, number>>;
+}> {
+  return Object.freeze({
+    candidates: Object.freeze([]),
+    synthesisFtsRanks: Object.freeze({})
   });
 }
 

@@ -33,7 +33,12 @@ import {
 } from "./abstention.js";
 import { pairSessionIntoRounds, type LongMemEvalVariant } from "./dataset.js";
 import { loadDataset, type FetchResult } from "./fetch.js";
-import { resolveBenchEmbeddingProviderLabel } from "./runner.js";
+import {
+  buildLongMemEvalSidecarKey,
+  deriveLongMemEvalGoldMemoryIds,
+  resolveBenchEmbeddingProviderLabel,
+  type LongMemEvalSidecarEntry
+} from "./runner.js";
 import {
   buildSessionSynthesisInput,
   createCompileSeedRunner,
@@ -65,7 +70,7 @@ export interface LongMemEvalMultiturnRunResult {
   readonly payload: KpiPayload;
 }
 
-type SidecarEntry = { sessionId: string; hasAnswer: boolean };
+type SidecarEntry = LongMemEvalSidecarEntry;
 
 interface RoundResult {
   readonly roundIndex: number;
@@ -165,7 +170,9 @@ export async function runLongMemEvalMultiturn(
             sessionHasAnswer = true;
           }
           for (const seed of seedResult.seeds) {
-            sidecar.set(seed.memoryId, {
+            sidecar.set(buildLongMemEvalSidecarKey("memory_entry", seed.memoryId), {
+              objectId: seed.memoryId,
+              objectKind: "memory_entry",
               sessionId,
               hasAnswer: round.hasAnswer
             });
@@ -177,8 +184,8 @@ export async function runLongMemEvalMultiturn(
         }
 
         // L2 synthesis seed — see runner.ts for the rationale. The synthesis
-        // object_id joins the same sidecar so a delivered synthesis_capsule
-        // covering an answer session counts as a hit.
+        // object_id is sidecar-tracked for diagnostics but does not enter
+        // memory_entry gold scoring.
         const synthesisInput = buildSessionSynthesisInput({
           topicKey: `${question.question_id}-mt-s${si}`,
           turns: sessionTurns
@@ -186,7 +193,9 @@ export async function runLongMemEvalMultiturn(
         if (synthesisInput !== null) {
           const synthesisResult = await daemon.proposeSynthesis(synthesisInput);
           if (synthesisResult.synthesisId !== null) {
-            sidecar.set(synthesisResult.synthesisId, {
+            sidecar.set(buildLongMemEvalSidecarKey("synthesis_capsule", synthesisResult.synthesisId), {
+              objectId: synthesisResult.synthesisId,
+              objectKind: "synthesis_capsule",
               sessionId,
               hasAnswer: sessionHasAnswer
             });
@@ -198,12 +207,7 @@ export async function runLongMemEvalMultiturn(
         await daemon.runtime.runGardenBackgroundPass();
       }
 
-      const goldMemoryIds = [...sidecar.entries()]
-        .filter(
-          ([, meta]) =>
-            meta.hasAnswer && answerSessionSet.has(meta.sessionId)
-        )
-        .map(([memoryId]) => memoryId);
+      const goldMemoryIds = deriveLongMemEvalGoldMemoryIds(sidecar, answerSessionSet);
       const roundResults: RoundResult[] = [];
 
       for (let roundIndex = 1; roundIndex <= rounds; roundIndex++) {
@@ -215,6 +219,7 @@ export async function runLongMemEvalMultiturn(
         const results = recallResult.results;
         const deliveredResults = results.slice(0, 10).map((pointer, index) => ({
           object_id: pointer.object_id,
+          object_kind: pointer.object_kind,
           rank: index + 1,
           relevance_score: pointer.relevance_score,
           score_factors: pointer.score_factors ?? null
@@ -232,7 +237,10 @@ export async function runLongMemEvalMultiturn(
           if (rank === 0) {
             firstTier = inferTier(pointer.relevance_score);
           }
-          const meta = sidecar.get(pointer.object_id);
+          if (!isLongMemEvalGoldEligibleResult(pointer)) {
+            continue;
+          }
+          const meta = sidecar.get(buildLongMemEvalSidecarKey("memory_entry", pointer.object_id));
           const isHit =
             meta !== undefined &&
             meta.hasAnswer &&
@@ -283,7 +291,10 @@ export async function runLongMemEvalMultiturn(
             : { usedObjectIds: usedGoldObjectIds }),
           deliveredObjects: results.slice(0, 10).map((pointer) => ({
             objectId: pointer.object_id,
-            usageStatus: usedGoldObjectIds.includes(pointer.object_id)
+            objectKind: pointer.object_kind ?? "memory_entry",
+            usageStatus:
+              isLongMemEvalGoldEligibleResult(pointer) &&
+              usedGoldObjectIds.includes(pointer.object_id)
               ? "used"
               : "skipped"
           })),
@@ -580,6 +591,12 @@ function ratio(count: number, total: number): number {
 
 function truncateExcerpt(value: string): string {
   return value.length <= 500 ? value : `${value.slice(0, 497)}...`;
+}
+
+function isLongMemEvalGoldEligibleResult(result: Readonly<{
+  readonly object_kind?: string | null;
+}>): boolean {
+  return (result.object_kind ?? "memory_entry") === "memory_entry";
 }
 
 // see also: apps/bench-runner/src/version.ts

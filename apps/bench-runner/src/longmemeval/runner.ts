@@ -117,6 +117,8 @@ export interface LongMemEvalRunResult {
 }
 
 export interface LongMemEvalSidecarEntry {
+  readonly objectId: string;
+  readonly objectKind: "memory_entry" | "synthesis_capsule";
   readonly sessionId: string;
   readonly hasAnswer: boolean;
 }
@@ -124,6 +126,7 @@ export interface LongMemEvalSidecarEntry {
 export interface LongMemEvalHitScoringInput {
   readonly results: readonly {
     readonly object_id: string;
+    readonly object_kind?: string;
     readonly relevance_score: number;
   }[];
   readonly sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>;
@@ -148,18 +151,16 @@ export interface LongMemEvalHitScoringResult {
  * object_id that soul.recall returns in pointer.object_id, so scoring is by
  * id equality — never by string preview overlap.
  *
- * Hit rule: a recall result is a hit iff its object_id maps in the sidecar
- * to a seed whose hasAnswer === true AND whose sessionId is in
- * question.answer_session_ids. Because one answer turn now seeds N
- * extracted facts, an answer turn maps to N gold object_ids, and a hit
- * means recalling ANY one fact of that answer turn.
+ * Hit rule: a recall result is a hit iff it is a memory_entry whose object_id
+ * maps in the sidecar to a seed whose hasAnswer === true AND whose sessionId
+ * is in question.answer_session_ids. Because one answer turn now seeds N
+ * extracted facts, an answer turn maps to N gold object_ids, and a hit means
+ * recalling ANY one fact of that answer turn.
  *
- * Synthesis crediting: each session also seeds one L2 synthesis_capsule
- * (potential_synthesis -> synthesisService.create). Its durable object_id
- * is mapped into the SAME sidecar with the session's hasAnswer / sessionId,
- * so a delivered synthesis_capsule that covers an answer session counts as
- * a hit at its delivered rank under the unchanged hit rule above. R@K
- * semantics for memory_entry hits are untouched.
+ * Synthesis seed: each session also seeds one L2 synthesis_capsule
+ * (potential_synthesis -> synthesisService.create). Its durable object_id is
+ * tracked in the sidecar under an object-kind namespace so diagnostics can
+ * prove it competed in recall without counting it as memory gold.
  *
  * Measurement-basis note: an answer turn seeds N gold objects (the
  * extraction fan-out), not 1. R@K is measured on that basis ("did any
@@ -289,7 +290,9 @@ export async function runLongMemEval(
             sessionHasAnswer = true;
           }
           for (const seed of seedResult.seeds) {
-            sidecar.set(seed.memoryId, {
+            sidecar.set(buildLongMemEvalSidecarKey("memory_entry", seed.memoryId), {
+              objectId: seed.memoryId,
+              objectKind: "memory_entry",
               sessionId,
               hasAnswer: round.hasAnswer
             });
@@ -300,12 +303,9 @@ export async function runLongMemEval(
           }
         }
 
-        // L2 synthesis seed: emit ONE session-level potential_synthesis
-        // signal pointing at this session's real evidence_capsule ids. The
-        // synthesis_capsule object_id is mapped into the sidecar with the
-        // session's hasAnswer / sessionId so a delivered synthesis counts
-        // as a hit under the unchanged scoring rule. Null when fewer than 2
-        // turns minted a real evidence id (router needs >= 2 refs).
+        // L2 synthesis seed: emit ONE session-level synthesis capsule pointing
+        // at this session's real evidence_capsule ids. It is sidecar-tracked
+        // for diagnostics, but memory-gold scoring remains memory_entry-only.
         const synthesisInput = buildSessionSynthesisInput({
           topicKey: `${question.question_id}-s${si}`,
           turns: sessionTurns
@@ -313,7 +313,9 @@ export async function runLongMemEval(
         if (synthesisInput !== null) {
           const synthesisResult = await daemon.proposeSynthesis(synthesisInput);
           if (synthesisResult.synthesisId !== null) {
-            sidecar.set(synthesisResult.synthesisId, {
+            sidecar.set(buildLongMemEvalSidecarKey("synthesis_capsule", synthesisResult.synthesisId), {
+              objectId: synthesisResult.synthesisId,
+              objectKind: "synthesis_capsule",
               sessionId,
               hasAnswer: sessionHasAnswer
             });
@@ -323,19 +325,14 @@ export async function runLongMemEval(
 
       const embeddingWarmup =
         opts.embeddingMode === "env"
-          ? await daemon.warmEmbeddingCache([...sidecar.keys()])
+          ? await daemon.warmEmbeddingCache(deriveLongMemEvalMemoryObjectIds(sidecar))
           : null;
       const queryEmbeddingWarmup =
         opts.embeddingMode === "env"
           ? await daemon.warmQueryEmbeddingCache([question.question])
           : null;
 
-      const goldMemoryIds = [...sidecar.entries()]
-        .filter(
-          ([, meta]) =>
-            meta.hasAnswer && answerSessionSet.has(meta.sessionId)
-        )
-        .map(([memoryId]) => memoryId);
+      const goldMemoryIds = deriveLongMemEvalGoldMemoryIds(sidecar, answerSessionSet);
 
       const recallCycle = await runLongMemEvalRecallCycle({
         daemon,
@@ -355,6 +352,7 @@ export async function runLongMemEval(
       }));
       const deliveredResults = results.slice(0, 10).map((pointer, index) => ({
         object_id: pointer.object_id,
+        object_kind: pointer.object_kind,
         rank: index + 1,
         relevance_score: pointer.relevance_score,
         score_factors: pointer.score_factors ?? null
@@ -809,7 +807,10 @@ async function readLongMemEvalReportSideEffectSnapshot(
 export function buildLongMemEvalReportContextUsage(input: {
   readonly simulateReport: BenchSimulateReportMode;
   readonly deliveryId: string;
-  readonly results: readonly { readonly object_id: string }[];
+  readonly results: readonly {
+    readonly object_id: string;
+    readonly object_kind?: string;
+  }[];
   readonly goldMemoryIds: readonly string[];
   readonly turnIndex: number;
   readonly questionText: string;
@@ -830,9 +831,10 @@ export function buildLongMemEvalReportContextUsage(input: {
   }
 
   const deliveredResults = input.results.slice(0, 10);
-  const deliveredIds = new Set(deliveredResults.map((result) => result.object_id));
+  const deliveredMemoryResults = deliveredResults.filter(isLongMemEvalGoldEligibleResult);
+  const deliveredMemoryIds = new Set(deliveredMemoryResults.map((result) => result.object_id));
   const goldIds = new Set(input.goldMemoryIds);
-  const deliveredGoldIds = deliveredResults
+  const deliveredGoldIds = deliveredMemoryResults
     .map((result) => result.object_id)
     .filter((objectId) => goldIds.has(objectId));
 
@@ -841,7 +843,7 @@ export function buildLongMemEvalReportContextUsage(input: {
     usedObjectIds = deliveredGoldIds;
   } else if (input.simulateReport === "mixed") {
     if (deliveredGoldIds.length > 0) {
-      const firstNonGold = deliveredResults.find(
+      const firstNonGold = deliveredMemoryResults.find(
         (result) => !goldIds.has(result.object_id)
       );
       usedObjectIds =
@@ -850,14 +852,14 @@ export function buildLongMemEvalReportContextUsage(input: {
           : [...deliveredGoldIds, firstNonGold.object_id];
     } else {
       usedObjectIds =
-        deliveredResults[0] === undefined ? [] : [deliveredResults[0].object_id];
+        deliveredMemoryResults[0] === undefined ? [] : [deliveredMemoryResults[0].object_id];
     }
   } else if (input.simulateReport === "always-used") {
     usedObjectIds =
-      deliveredResults[0] === undefined ? [] : [deliveredResults[0].object_id];
+      deliveredMemoryResults[0] === undefined ? [] : [deliveredMemoryResults[0].object_id];
   }
 
-  const safeUsedObjectIds = usedObjectIds.filter((objectId) => deliveredIds.has(objectId));
+  const safeUsedObjectIds = usedObjectIds.filter((objectId) => deliveredMemoryIds.has(objectId));
   const usedSet = new Set(safeUsedObjectIds);
   const usageState = safeUsedObjectIds.length > 0 ? "used" : "skipped";
   const reportInput: BenchReportContextUsageInput = {
@@ -868,7 +870,12 @@ export function buildLongMemEvalReportContextUsage(input: {
       : { usedObjectIds: safeUsedObjectIds }),
     deliveredObjects: deliveredResults.map((result) => ({
       objectId: result.object_id,
-      usageStatus: usedSet.has(result.object_id) ? "used" : "skipped"
+      objectKind: result.object_kind ?? "memory_entry",
+      usageStatus:
+        isLongMemEvalGoldEligibleResult(result) &&
+        usedSet.has(result.object_id)
+          ? "used"
+          : "skipped"
     })),
     turnIndex: input.turnIndex,
     turnDigest: {
@@ -978,7 +985,12 @@ export function scoreLongMemEvalRecallHits(
     if (rank === 0) {
       firstTier = inferTier(pointer.relevance_score);
     }
-    const meta = input.sidecar.get(pointer.object_id);
+    if (!isLongMemEvalGoldEligibleResult(pointer)) {
+      continue;
+    }
+    const meta = input.sidecar.get(
+      buildLongMemEvalSidecarKey("memory_entry", pointer.object_id)
+    );
     const isHit =
       meta !== undefined &&
       meta.hasAnswer &&
@@ -991,6 +1003,45 @@ export function scoreLongMemEvalRecallHits(
   }
 
   return { hitAt1, hitAt5, hitAt10, firstTier };
+}
+
+function isLongMemEvalGoldEligibleResult(result: Readonly<{
+  readonly object_kind?: string | null;
+}>): boolean {
+  return (result.object_kind ?? "memory_entry") === "memory_entry";
+}
+
+export function buildLongMemEvalSidecarKey(
+  objectKind: LongMemEvalSidecarEntry["objectKind"],
+  objectId: string
+): string {
+  return `${objectKind}:${objectId}`;
+}
+
+export function deriveLongMemEvalGoldMemoryIds(
+  sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>,
+  answerSessionIds: ReadonlySet<string>
+): readonly string[] {
+  return Object.freeze(
+    [...sidecar.values()]
+      .filter(
+        (entry) =>
+          entry.objectKind === "memory_entry" &&
+          entry.hasAnswer &&
+          answerSessionIds.has(entry.sessionId)
+      )
+      .map((entry) => entry.objectId)
+  );
+}
+
+function deriveLongMemEvalMemoryObjectIds(
+  sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>
+): readonly string[] {
+  return Object.freeze(
+    [...sidecar.values()]
+      .filter((entry) => entry.objectKind === "memory_entry")
+      .map((entry) => entry.objectId)
+  );
 }
 
 function readLongMemEvalPinnedMeta(

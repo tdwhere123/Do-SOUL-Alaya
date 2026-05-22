@@ -147,6 +147,9 @@ export class TrustStateRecorder {
             delivery_id: draftRecord.delivery_id,
             agent_target: draftRecord.agent_target,
             delivered_object_ids: draftRecord.delivered_object_ids,
+            ...(draftRecord.delivered_objects === undefined
+              ? {}
+              : { delivered_objects: draftRecord.delivered_objects }),
             delivered_at: draftRecord.delivered_at,
             recorded_at: this.nowIso()
           }
@@ -383,7 +386,7 @@ function validateUsageProofAgainstDelivery(
 ): void {
   const deliveredObjectIds = new Set(delivery.delivered_object_ids);
   for (const objectId of record.used_object_ids) {
-    if (!deliveredObjectIds.has(objectId)) {
+    if (!isMemoryEntryDelivered(delivery, objectId)) {
       throw new TrustStateInvalidUsageProofError(
         `Usage proof references object_id that was not delivered: ${objectId}`
       );
@@ -392,7 +395,16 @@ function validateUsageProofAgainstDelivery(
 
   const usedObjectIds = new Set(record.used_object_ids);
   for (const usage of record.per_anchor_usage ?? []) {
-    if (!deliveredObjectIds.has(usage.object_id)) {
+    const usageObjectKind = usage.object_kind ?? "memory_entry";
+    if (
+      delivery.delivered_objects === undefined
+        ? !deliveredObjectIds.has(usage.object_id)
+        : !delivery.delivered_objects.some(
+            (object) =>
+              object.object_id === usage.object_id &&
+              object.object_kind === usageObjectKind
+          )
+    ) {
       throw new TrustStateInvalidUsageProofError(
         `Per-anchor usage references object_id that was not delivered: ${usage.object_id}`
       );
@@ -404,6 +416,20 @@ function validateUsageProofAgainstDelivery(
       );
     }
   }
+}
+
+function isMemoryEntryDelivered(
+  delivery: Readonly<ContextDeliveryRecord>,
+  objectId: string
+): boolean {
+  if (delivery.delivered_objects === undefined) {
+    return delivery.delivered_object_ids.includes(objectId);
+  }
+  return delivery.delivered_objects.some(
+    (object) =>
+      object.object_id === objectId &&
+      object.object_kind === "memory_entry"
+  );
 }
 
 class InMemoryTrustStateRepo implements TrustStatePersistenceRepoPort {

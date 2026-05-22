@@ -60,7 +60,10 @@ export function createDaemonMcpMemoryToolHandler(input: {
           agent_target: delivery.agent_target,
           workspace_id: delivery.workspace_id,
           run_id: delivery.run_id,
-          delivered_object_ids: delivery.delivered_object_ids
+          delivered_object_ids: delivery.delivered_object_ids,
+          ...(delivery.delivered_objects === undefined
+            ? {}
+            : { delivered_objects: delivery.delivered_objects })
         };
       }
     },

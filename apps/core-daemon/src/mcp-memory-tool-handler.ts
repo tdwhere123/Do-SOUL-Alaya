@@ -487,16 +487,24 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       return result;
     });
     const deliveryId = `delivery_${generateId()}`;
-    const deliveredObjectIds = [...new Set([
-      ...results.map((result) => result.object_id),
-      ...recallResult.active_constraints.map((constraint) => constraint.object_id)
-    ])];
+    const deliveredObjects = dedupeDeliveredObjectIdentities([
+      ...results.map((result) => ({
+        object_id: result.object_id,
+        object_kind: result.object_kind
+      })),
+      ...recallResult.active_constraints.map((constraint) => ({
+        object_id: constraint.object_id,
+        object_kind: constraint.object_kind
+      }))
+    ]);
+    const deliveredObjectIds = uniqueObjectIds(deliveredObjects);
     await deps.trustStateRecorder.recordDelivery({
       delivery_id: deliveryId,
       agent_target: context.agentTarget,
       workspace_id: context.workspaceId,
       run_id: context.runId,
       delivered_object_ids: deliveredObjectIds,
+      delivered_objects: deliveredObjects,
       delivered_at: now()
     });
 
@@ -1451,16 +1459,24 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
   }
 }
 
-// One canonical "used object id" list for the report_context_usage handler:
+// One canonical memory-entry "used object id" list for the report_context_usage handler:
 // the recall-hit → tier promotion path and the POST_TURN_EXTRACT enqueue path
 // both consume this, so a request that fills only one shape never produces a
 // half side-effect. Modern shape (preferred): `delivered_objects[]` with
-// per-object `usage_status` — take only those whose status is "used". Legacy
-// shape: top-level `usage_state === "used"` + `used_object_ids`.
+// per-object `usage_status` — take only used memory_entry objects. Legacy
+// shape: top-level `usage_state === "used"` + `used_object_ids`, interpreted
+// as memory_entry-only.
+// invariant: a synthesis_capsule may be delivered by recall but MUST NEVER
+// feed reinforcement or extraction. This memory_entry-only filter is the
+// enforcement point — synthesis is a recall projection, never durable truth.
 function resolveUsedObjectIds(request: SoulReportContextUsageRequest): readonly string[] {
   if (request.delivered_objects !== undefined && request.delivered_objects.length > 0) {
     const usedIds = request.delivered_objects
-      .filter((object) => object.usage_status === "used")
+      .filter(
+        (object) =>
+          object.usage_status === "used" &&
+          resolveReportObjectKind(object) === "memory_entry"
+      )
       .map((object) => object.object_id);
     return Object.freeze(Array.from(new Set(usedIds)));
   }
@@ -1490,7 +1506,11 @@ function validateUsageStateConsistency(request: SoulReportContextUsageRequest): 
       const reportedIds = [...new Set(request.used_object_ids)].sort();
       const deliveredUsedIds = [...new Set(
         deliveredObjects
-          .filter((object) => object.usage_status === "used")
+          .filter(
+            (object) =>
+              object.usage_status === "used" &&
+              resolveReportObjectKind(object) === "memory_entry"
+          )
           .map((object) => object.object_id)
       )].sort();
       if (reportedIds.join("\0") !== deliveredUsedIds.join("\0")) {
@@ -1526,6 +1546,34 @@ function resolveDeliveredObjectIds(request: SoulReportContextUsageRequest): read
       ? request.used_object_ids ?? []
       : request.delivered_objects.map((object) => object.object_id);
   return Object.freeze([...new Set(ids)]);
+}
+
+function resolveReportObjectKind(
+  object: NonNullable<SoulReportContextUsageRequest["delivered_objects"]>[number]
+): string {
+  return object.object_kind ?? "memory_entry";
+}
+
+function dedupeDeliveredObjectIdentities(
+  objects: readonly { readonly object_id: string; readonly object_kind: string }[]
+): readonly { readonly object_id: string; readonly object_kind: string }[] {
+  const seen = new Set<string>();
+  const result: Array<{ readonly object_id: string; readonly object_kind: string }> = [];
+  for (const object of objects) {
+    const key = `${object.object_kind}\0${object.object_id}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(object);
+  }
+  return Object.freeze(result);
+}
+
+function uniqueObjectIds(
+  objects: readonly { readonly object_id: string }[]
+): readonly string[] {
+  return Object.freeze([...new Set(objects.map((object) => object.object_id))]);
 }
 
 function buildGardenCompletionEnvelopeJson(

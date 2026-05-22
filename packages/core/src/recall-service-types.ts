@@ -76,8 +76,8 @@ export interface RecallServiceEvidenceSearchPort {
 
 // Synthesis FTS port consumed by the recall service. The implementing repo
 // is SqliteSynthesisCapsuleRepo (migration 079). Recall queries it on the
-// FTS-backed keyword path and joins each hit as an additional
-// synthesis_capsule candidate into the existing fused result.
+// FTS-backed keyword path and joins each hit as a synthesis_capsule candidate
+// before fusion, rerank, and delivery-budget selection.
 // see also: packages/storage/src/repos/synthesis-capsule-repo.ts
 export interface RecallServiceSynthesisSearchPort {
   searchByKeyword(
@@ -317,6 +317,7 @@ export type RecallEmbeddingProviderStatus =
 
 export type RecallFusionStream =
   | "lexical_fts"
+  | "synthesis_fts"
   | "evidence_fts"
   | "evidence_structural_agreement"
   | "source_proximity"
@@ -336,6 +337,7 @@ export type RecallFusionStreamContributions = Readonly<Record<RecallFusionStream
 export interface RecallFusionBreakdown {
   readonly candidate_key: string;
   readonly object_id: string;
+  readonly object_kind: RecallCandidate["object_kind"];
   readonly origin_plane: RecallOriginPlane;
   readonly per_stream_rank: RecallFusionStreamRanks;
   readonly fused_rank: number;
@@ -346,6 +348,7 @@ export interface RecallFusionBreakdown {
 export interface RecallCandidateDiagnostic {
   readonly candidate_key: string;
   readonly object_id: string;
+  readonly object_kind: RecallCandidate["object_kind"];
   readonly origin_plane: RecallOriginPlane;
   readonly admission_planes: readonly RecallAdmissionPlane[];
   readonly plane_first_admitted: RecallAdmissionPlane;
@@ -419,6 +422,7 @@ export interface RecallResult {
 export interface RecallSupplementaryData {
   readonly queryProbes: Readonly<import("./recall-query-probes.js").RecallQueryProbes>;
   readonly ftsRanks: Readonly<Record<string, number>>;
+  readonly synthesisFtsRanks: Readonly<Record<string, number>>;
   readonly evidenceFtsRanks: Readonly<Record<string, number>>;
   readonly sourceProximityScores: Readonly<Record<string, number>>;
   readonly sourceCohortKeys: Readonly<Record<string, string>>;

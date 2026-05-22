@@ -200,6 +200,7 @@ export async function runLongMemEvalCrossQuestion(
       const results = recallResult.results;
       const deliveredResults = results.slice(0, 10).map((pointer, index) => ({
         object_id: pointer.object_id,
+        object_kind: pointer.object_kind,
         rank: index + 1,
         relevance_score: pointer.relevance_score,
         score_factors: pointer.score_factors ?? null
@@ -216,6 +217,9 @@ export async function runLongMemEvalCrossQuestion(
         if (pointer === undefined) continue;
         if (rank === 0) {
           firstTier = inferTier(pointer.relevance_score);
+        }
+        if (!isLongMemEvalGoldEligibleResult(pointer)) {
+          continue;
         }
         const meta = sidecar.get(pointer.object_id);
         // hit only if the recalled memory belongs to THIS question AND its
@@ -271,7 +275,10 @@ export async function runLongMemEvalCrossQuestion(
           : { usedObjectIds: usedGoldObjectIds }),
         deliveredObjects: results.slice(0, 10).map((pointer) => ({
           objectId: pointer.object_id,
-          usageStatus: usedGoldObjectIds.includes(pointer.object_id)
+          objectKind: pointer.object_kind ?? "memory_entry",
+          usageStatus:
+            isLongMemEvalGoldEligibleResult(pointer) &&
+            usedGoldObjectIds.includes(pointer.object_id)
             ? "used"
             : "skipped"
         })),
@@ -541,6 +548,12 @@ function ratio(count: number, total: number): number {
 
 function truncateExcerpt(value: string): string {
   return value.length <= 500 ? value : `${value.slice(0, 497)}...`;
+}
+
+function isLongMemEvalGoldEligibleResult(result: Readonly<{
+  readonly object_kind?: string | null;
+}>): boolean {
+  return (result.object_kind ?? "memory_entry") === "memory_entry";
 }
 
 // see also: apps/bench-runner/src/version.ts

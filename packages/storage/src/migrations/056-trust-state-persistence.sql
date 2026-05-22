@@ -1,7 +1,5 @@
--- #BL-015 trust-state persistence follow-up.
---
--- This migration is Alaya-only: the vendor snapshot has no delivered-vs-used
--- trust model and no companion SQL tables for agent context delivery.
+-- Trust-state persistence records delivered-vs-used context receipts as
+-- auditable SQL rows tied one-to-one to EventLog entries.
 -- `delivery_id` remains the primary key so duplicate delivery messages cannot
 -- overwrite the original row. `audit_event_id` is also UNIQUE so every durable
 -- trust row maps to exactly one EventLog entry and INSERT OR REPLACE cannot

@@ -55,7 +55,7 @@ export const PATH_PLASTICITY_WEIGHT = 0.15;
 
 
 export function buildRecallCandidateDedupeKey(candidate: Readonly<CoarseRecallCandidate>): string {
-  return `${candidate.originPlane ?? "workspace_local"}:${candidate.entry.object_id}`;
+  return `${candidate.originPlane ?? "workspace_local"}:${candidate.objectKind ?? "memory_entry"}:${candidate.entry.object_id}`;
 }
 
 export function parseEmbeddingPrecheckReason(error: unknown): string | null {

@@ -9,6 +9,7 @@ import {
   type PathGovernanceClass,
   type PathPlasticityState,
   type PathRelation,
+  type SoulContextObjectIdentity,
   type StabilityClass,
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
@@ -55,8 +56,18 @@ export interface UsageProofReaderPort {
   ): Promise<readonly Readonly<UsageProofRecord>[]>;
 
   /**
-   * Returns the delivered_object_ids for the given delivery, used to credit
-   * a `skipped` usage receipt against every memory the agent had in hand.
+   * Returns delivered object identities for the given delivery. Modern
+   * callers use this so object-kind collisions cannot credit synthesis
+   * capsules as memory-entry path anchors.
+   */
+  findDeliveredObjects?(
+    deliveryId: string
+  ): Promise<readonly SoulContextObjectIdentity[] | null>;
+
+  /**
+   * Legacy fallback for deliveries persisted before object_kind was tracked.
+   * The service treats these bare ids as memory_entry ids only when
+   * findDeliveredObjects is unavailable or returns null.
    */
   findDeliveredObjectIds(deliveryId: string): Promise<readonly string[] | null>;
 }
@@ -257,7 +268,9 @@ export class PathPlasticityService {
       if (record.usage_state === "used") {
         targetObjectIds = uniqueStrings([
           ...record.used_object_ids,
-          ...(record.per_anchor_usage ?? []).map((usage) => usage.object_id)
+          ...(record.per_anchor_usage ?? [])
+            .filter(isMemoryEntryAnchorUsage)
+            .map((usage) => usage.object_id)
         ]);
       } else if (record.usage_state === "skipped" || record.usage_state === "not_applicable") {
         // skipped / not_applicable receipts weight every memory the agent
@@ -265,9 +278,7 @@ export class PathPlasticityService {
         targetObjectIds =
           record.used_object_ids.length > 0
             ? record.used_object_ids
-            : (await this.dependencies.usageProofReader.findDeliveredObjectIds(
-                record.delivery_id
-              )) ?? [];
+            : await this.resolveDeliveredMemoryObjectIds(record.delivery_id);
         throwIfPathPlasticityAborted(abortSignal);
       } else {
         continue;
@@ -353,12 +364,30 @@ export class PathPlasticityService {
     return pathAggregates;
   }
 
+  private async resolveDeliveredMemoryObjectIds(deliveryId: string): Promise<readonly string[]> {
+    const deliveredObjects =
+      await this.dependencies.usageProofReader.findDeliveredObjects?.(deliveryId);
+    if (deliveredObjects !== undefined && deliveredObjects !== null) {
+      return uniqueStrings(
+        deliveredObjects
+          .filter((object) => object.object_kind === "memory_entry")
+          .map((object) => object.object_id)
+      );
+    }
+
+    return (await this.dependencies.usageProofReader.findDeliveredObjectIds(deliveryId)) ?? [];
+  }
+
   private async resolveDirectionalPathUsage(
     workspaceId: string,
     record: Readonly<UsageProofRecord>,
     abortSignal?: AbortSignal
   ): Promise<ReadonlyMap<string, DirectionalPathUsage>> {
-    const perAnchorUsage = record.per_anchor_usage ?? [];
+    // invariant: only memory_entry anchors drive PathRelation direction bias.
+    // A synthesis_capsule shares the delivered-objects scope with memory and
+    // could collide with a path anchor object_id, so it is filtered here too,
+    // not only on the used/skipped strength-crediting paths above.
+    const perAnchorUsage = (record.per_anchor_usage ?? []).filter(isMemoryEntryAnchorUsage);
     if (record.usage_state !== "used" || perAnchorUsage.length === 0) {
       return new Map();
     }
@@ -918,6 +947,12 @@ function isRetiredPath(path: Readonly<PathRelation>): boolean {
 
 function isObjectAnchor(anchor: PathAnchorRef, objectId: string): boolean {
   return anchor.kind === "object" && anchor.object_id === objectId;
+}
+
+function isMemoryEntryAnchorUsage(
+  usage: NonNullable<UsageProofRecord["per_anchor_usage"]>[number]
+): boolean {
+  return (usage.object_kind ?? "memory_entry") === "memory_entry";
 }
 
 function uniqueStrings(values: readonly string[]): readonly string[] {

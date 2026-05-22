@@ -15,6 +15,7 @@ export type BenchEmbeddingProviderState =
 
 export interface DiagnosticRecallResult {
   readonly object_id: string;
+  readonly object_kind?: string;
   readonly rank: number;
   readonly relevance_score: number;
   readonly fused_rank: number | null;
@@ -33,6 +34,7 @@ export interface DiagnosticActiveConstraintResult {
 
 interface DiagnosticRecallResultInput {
   readonly object_id: string;
+  readonly object_kind?: string | null;
   readonly rank: number;
   readonly relevance_score: number;
   readonly fused_rank?: number | null;
@@ -204,6 +206,7 @@ export interface LongMemEvalDiagnosticsSidecar {
 interface NarrowRecallDiagnostics {
   readonly keys: readonly string[];
   readonly candidatesByObjectId: ReadonlyMap<string, CandidateDiagnostic>;
+  readonly candidatesByObjectIdentity: ReadonlyMap<string, CandidateDiagnostic>;
   readonly candidatesByCandidateKey: ReadonlyMap<string, CandidateDiagnostic>;
   readonly candidateKeysByObjectId: ReadonlyMap<string, readonly string[]>;
   readonly providerState: BenchEmbeddingProviderState;
@@ -213,6 +216,7 @@ interface NarrowRecallDiagnostics {
 interface CandidateDiagnostic {
   readonly candidateKey: string;
   readonly objectId: string;
+  readonly objectKind: string;
   readonly originPlane: string;
   readonly preBudgetRank: number | null;
   readonly selectionOrder: number | null;
@@ -233,6 +237,7 @@ interface CandidateDiagnostic {
 
 interface ReadCandidateDiagnosticsResult {
   readonly byObjectId: ReadonlyMap<string, CandidateDiagnostic>;
+  readonly byObjectIdentity: ReadonlyMap<string, CandidateDiagnostic>;
   readonly byCandidateKey: ReadonlyMap<string, CandidateDiagnostic>;
   readonly keysByObjectId: ReadonlyMap<string, readonly string[]>;
 }
@@ -291,7 +296,9 @@ export function buildQuestionDiagnostic(input: {
     diagnostics
   );
   const deliveredRankById = new Map(
-    deliveredResults.map((result) => [result.object_id, result.rank])
+    deliveredResults
+      .filter(isLongMemEvalGoldEligibleDiagnosticResult)
+      .map((result) => [result.object_id, result.rank] as const)
   );
   const activeConstraintResults = input.activeConstraintResults ?? [];
   const activeConstraintRankById = new Map(
@@ -301,7 +308,9 @@ export function buildQuestionDiagnostic(input: {
   const gold = input.goldMemoryIds.map((objectId): LongMemEvalGoldDiagnostic => {
     const deliveredRank = deliveredRankById.get(objectId) ?? null;
     const activeConstraintRank = activeConstraintRankById.get(objectId) ?? null;
-    const candidate = diagnostics?.candidatesByObjectId.get(objectId);
+    const candidate = diagnostics?.candidatesByObjectIdentity.get(
+      buildObjectIdentityKey("memory_entry", objectId)
+    );
     const candidateStatus =
       deliveredRank !== null
         ? "delivered"
@@ -375,9 +384,13 @@ function normalizeDeliveredResults(
   diagnostics: NarrowRecallDiagnostics | null
 ): readonly DiagnosticRecallResult[] {
   return deliveredResults.map((result): DiagnosticRecallResult => {
-    const candidate = diagnostics?.candidatesByObjectId.get(result.object_id);
+    const objectKind = result.object_kind ?? "memory_entry";
+    const candidate = diagnostics?.candidatesByObjectIdentity.get(
+      buildObjectIdentityKey(objectKind, result.object_id)
+    );
     return {
       object_id: result.object_id,
+      ...(objectKind === "memory_entry" ? {} : { object_kind: objectKind }),
       rank: result.rank,
       relevance_score: result.relevance_score,
       fused_rank: result.fused_rank ?? candidate?.fusedRank ?? null,
@@ -747,6 +760,7 @@ function readRecallDiagnostics(
   return {
     keys: Object.keys(record).sort(),
     candidatesByObjectId: candidates.byObjectId,
+    candidatesByObjectIdentity: candidates.byObjectIdentity,
     candidatesByCandidateKey: candidates.byCandidateKey,
     candidateKeysByObjectId: candidates.keysByObjectId,
     providerState: readProviderState(record, embeddingMode),
@@ -763,6 +777,7 @@ function readCandidates(
     readArray(diagnostics.pool) ??
     [];
   const byObjectId = new Map<string, CandidateDiagnostic>();
+  const byObjectIdentity = new Map<string, CandidateDiagnostic>();
   const byCandidateKey = new Map<string, CandidateDiagnostic>();
   const mutableKeysByObjectId = new Map<string, string[]>();
   for (let i = 0; i < source.length; i++) {
@@ -775,9 +790,11 @@ function readCandidates(
       readString(record.id);
     if (objectId === null) continue;
     const originPlane = readString(record.origin_plane) ?? "workspace_local";
+    const objectKind = readString(record.object_kind) ?? "memory_entry";
     const candidate: CandidateDiagnostic = {
-      candidateKey: readString(record.candidate_key) ?? `${originPlane}:${objectId}`,
+      candidateKey: readString(record.candidate_key) ?? `${originPlane}:${objectKind}:${objectId}`,
       objectId,
+      objectKind,
       originPlane,
       preBudgetRank:
         readNumber(record.pre_budget_rank) ?? readNumber(record.internal_rank),
@@ -806,7 +823,15 @@ function readCandidates(
         readString(record.drop_reason) ??
         readString(record.dropped_reason)
     };
+    const objectIdentityKey = buildObjectIdentityKey(candidate.objectKind, candidate.objectId);
     byCandidateKey.set(candidate.candidateKey, candidate);
+    const existingByIdentity = byObjectIdentity.get(objectIdentityKey);
+    if (
+      existingByIdentity === undefined ||
+      shouldPreferCandidateDiagnostic(candidate, existingByIdentity)
+    ) {
+      byObjectIdentity.set(objectIdentityKey, candidate);
+    }
     const keysForObject = mutableKeysByObjectId.get(objectId) ?? [];
     keysForObject.push(candidate.candidateKey);
     mutableKeysByObjectId.set(objectId, keysForObject);
@@ -823,9 +848,20 @@ function readCandidates(
   );
   return {
     byObjectId: Object.freeze(byObjectId),
+    byObjectIdentity: Object.freeze(byObjectIdentity),
     byCandidateKey: Object.freeze(byCandidateKey),
     keysByObjectId: Object.freeze(keysByObjectId)
   };
+}
+
+function buildObjectIdentityKey(objectKind: string, objectId: string): string {
+  return `${objectKind}:${objectId}`;
+}
+
+function isLongMemEvalGoldEligibleDiagnosticResult(
+  result: Readonly<{ readonly object_kind?: string | null }>
+): boolean {
+  return (result.object_kind ?? "memory_entry") === "memory_entry";
 }
 
 function shouldPreferCandidateDiagnostic(

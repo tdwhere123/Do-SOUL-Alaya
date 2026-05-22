@@ -53,7 +53,8 @@ describe("mcp memory tool handler", () => {
         agent_target: "codex",
         workspace_id: "ws1",
         run_id: "run1",
-        delivered_object_ids: ["mem1"]
+        delivered_object_ids: ["mem1"],
+        delivered_objects: [{ object_id: "mem1", object_kind: "memory_entry" }]
       })
     );
     expect(result.ok && result.output).toMatchObject({
@@ -108,7 +109,12 @@ describe("mcp memory tool handler", () => {
     ]);
     expect(result.output.active_constraints_count).toBe(2);
     expect(deps.trustStateRecorder.recordDelivery).toHaveBeenCalledWith(expect.objectContaining({
-      delivered_object_ids: ["mem2", "mem1", "constraint-2"]
+      delivered_object_ids: ["mem2", "mem1", "constraint-2"],
+      delivered_objects: [
+        { object_id: "mem2", object_kind: "memory_entry" },
+        { object_id: "mem1", object_kind: "memory_entry" },
+        { object_id: "constraint-2", object_kind: "memory_entry" }
+      ]
     }));
   });
 
@@ -595,6 +601,36 @@ describe("mcp memory tool handler", () => {
       }),
       "recall_usage_reported"
     );
+  });
+
+  it("does not promote memory usage from a used synthesis_capsule with the same object_id", async () => {
+    const deps = createDeps();
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const result = await handler.call({
+      toolName: "soul.report_context_usage",
+      arguments: {
+        delivery_id: "delivery_1",
+        usage_state: "used",
+        delivered_objects: [
+          { object_id: "mem1", object_kind: "synthesis_capsule", usage_status: "used" }
+        ],
+        reason: "synthesis was useful"
+      },
+      context
+    });
+
+    expect(result.ok).toBe(true);
+    expect(deps.trustStateRecorder.recordUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        delivery_id: "delivery_1",
+        usage_state: "used",
+        used_object_ids: []
+      }),
+      { expectedWorkspaceId: context.workspaceId }
+    );
+    expect(deps.memoryService.findByIdScoped).not.toHaveBeenCalled();
+    expect(deps.memoryService.updateScoped).not.toHaveBeenCalled();
   });
 
   it("rejects report_context_usage when aggregate usage_state contradicts delivered_objects", async () => {

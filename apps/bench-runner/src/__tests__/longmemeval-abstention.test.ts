@@ -8,7 +8,10 @@ import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic
 } from "../longmemeval/diagnostics.js";
-import { resolveLongMemEvalHitVerdict } from "../longmemeval/runner.js";
+import {
+  buildLongMemEvalSidecarKey,
+  resolveLongMemEvalHitVerdict
+} from "../longmemeval/runner.js";
 
 const THR = ABSTENTION_FALSE_CONFIDENT_THRESHOLD;
 
@@ -107,8 +110,24 @@ describe("LongMemEval abstention scoring (calibrated confidence)", () => {
 describe("resolveLongMemEvalHitVerdict — abstention routing", () => {
   it("keeps id-equality scoring byte-identical for answerable questions", () => {
     const sidecar = new Map([
-      ["gold-a", { sessionId: "session-a", hasAnswer: true }],
-      ["decoy", { sessionId: "session-b", hasAnswer: false }]
+      [
+        buildLongMemEvalSidecarKey("memory_entry", "gold-a"),
+        {
+          objectId: "gold-a",
+          objectKind: "memory_entry" as const,
+          sessionId: "session-a",
+          hasAnswer: true
+        }
+      ],
+      [
+        buildLongMemEvalSidecarKey("memory_entry", "decoy"),
+        {
+          objectId: "decoy",
+          objectKind: "memory_entry" as const,
+          sessionId: "session-b",
+          hasAnswer: false
+        }
+      ]
     ]);
     const input = {
       results: [

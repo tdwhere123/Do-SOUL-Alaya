@@ -1,9 +1,11 @@
 import {
   ContextDeliveryRecordSchema,
   NonEmptyStringSchema,
+  SoulContextObjectIdentitySchema,
   SoulContextPerAnchorUsageSchema,
   UsageProofRecordSchema,
   type ContextDeliveryRecord,
+  type SoulContextObjectIdentity,
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../db.js";
@@ -108,7 +110,7 @@ export class SqliteTrustStateRepo implements TrustStateRepo {
         parsed.agent_target,
         parsed.workspace_id,
         parsed.run_id,
-        JSON.stringify(parsed.delivered_object_ids),
+        JSON.stringify(parsed.delivered_objects ?? parsed.delivered_object_ids),
         parsed.delivered_at,
         parsed.audit_event_id
       );
@@ -194,13 +196,17 @@ export class SqliteTrustStateRepo implements TrustStateRepo {
 }
 
 function parseDeliveryRow(row: DeliveryRow): Readonly<ContextDeliveryRecord> {
+  const deliveredPayload = parseDeliveredObjectPayload(row.delivered_object_ids_json);
   return deepFreeze(
     ContextDeliveryRecordSchema.parse({
       delivery_id: row.delivery_id,
       agent_target: row.agent_target,
       workspace_id: row.workspace_id,
       run_id: row.run_id,
-      delivered_object_ids: parseJsonStringArray(row.delivered_object_ids_json),
+      delivered_object_ids: deliveredPayload.ids,
+      ...(deliveredPayload.objects === undefined
+        ? {}
+        : { delivered_objects: deliveredPayload.objects }),
       delivered_at: row.delivered_at,
       audit_event_id: row.audit_event_id
     })
@@ -221,6 +227,32 @@ function parseUsageRow(row: UsageRow): Readonly<UsageProofRecord> {
       audit_event_id: row.audit_event_id
     })
   );
+}
+
+// invariant: delivered_object_ids_json is the single stored column and the
+// single source of truth. `ids` is ALWAYS a derived projection — never write
+// the two independently. A legacy string array (rows written before
+// delivered_objects existed) carries no kind and degrades to ids-only; those
+// rows predate synthesis-in-recall, so the bare-id scope check is exactly
+// correct for them, not a weakening.
+function parseDeliveredObjectPayload(value: string): {
+  readonly ids: readonly string[];
+  readonly objects?: readonly SoulContextObjectIdentity[];
+} {
+  const parsed = JSON.parse(value) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new StorageError("VALIDATION_FAILED", "Trust delivery delivered object payload must be an array.");
+  }
+  if (parsed.every((item) => typeof item === "string")) {
+    return {
+      ids: parseJsonStringArray(value)
+    };
+  }
+  const objects = parsed.map((item) => SoulContextObjectIdentitySchema.parse(item));
+  return {
+    ids: [...new Set(objects.map((object) => object.object_id))],
+    objects
+  };
 }
 
 function parseJsonStringArray(value: string): readonly string[] {

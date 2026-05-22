@@ -50,6 +50,32 @@ describe("SqliteTrustStateRepo", () => {
     ]);
   });
 
+  it("persists delivered object identities while preserving legacy id projection", async () => {
+    const repo = createRepo();
+
+    await repo.createDelivery({
+      delivery_id: "delivery-identities",
+      agent_target: "codex",
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      delivered_object_ids: ["shared-object"],
+      delivered_objects: [
+        { object_id: "shared-object", object_kind: "synthesis_capsule" },
+        { object_id: "shared-object", object_kind: "memory_entry" }
+      ],
+      delivered_at: "2026-04-30T10:00:00.000Z",
+      audit_event_id: "event-delivery-identities"
+    });
+
+    await expect(repo.findDeliveryById("delivery-identities")).resolves.toMatchObject({
+      delivered_object_ids: ["shared-object"],
+      delivered_objects: [
+        { object_id: "shared-object", object_kind: "synthesis_capsule" },
+        { object_id: "shared-object", object_kind: "memory_entry" }
+      ]
+    });
+  });
+
   it("persists and reloads per-anchor usage proof signals", async () => {
     const repo = createRepo();
 

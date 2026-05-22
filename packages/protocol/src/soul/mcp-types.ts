@@ -401,11 +401,24 @@ export const SoulApplyOverrideResponseSchema = z
 export const SoulContextUsageStateSchema = z.enum(["used", "skipped", "not_applicable"]);
 export const SoulContextUsageTrustModeSchema = z.enum(["manual", "automatic"]);
 
+// object_kind is an open BoundedLabel, not a closed enum, on purpose: it is
+// the same open vocabulary as SoulActiveConstraint.object_kind and must admit
+// kinds the wire does not yet model. Consumers fail closed — an unknown kind
+// simply never tuple-matches a delivered/expected (object_id, object_kind).
+export const SoulContextObjectIdentitySchema = z
+  .object({
+    object_id: BoundedIdSchema,
+    object_kind: BoundedLabelSchema
+  })
+  .strict()
+  .readonly();
+
 export const SoulContextUsageAnchorRoleSchema = z.enum(["source", "target"]);
 
 export const SoulContextPerAnchorUsageSchema = z
   .object({
     object_id: BoundedIdSchema,
+    object_kind: BoundedLabelSchema.optional(),
     anchor_role: SoulContextUsageAnchorRoleSchema
   })
   .strict()
@@ -414,6 +427,7 @@ export const SoulContextPerAnchorUsageSchema = z
 export const SoulContextDeliveredObjectUsageSchema = z
   .object({
     object_id: BoundedIdSchema,
+    object_kind: BoundedLabelSchema.optional(),
     usage_status: SoulContextUsageStateSchema
   })
   .strict()
@@ -499,6 +513,7 @@ export type SoulEmitCandidateSignalResponse = z.infer<typeof SoulEmitCandidateSi
 export type SoulApplyOverrideRequest = z.infer<typeof SoulApplyOverrideRequestSchema>;
 export type SoulApplyOverrideResponse = z.infer<typeof SoulApplyOverrideResponseSchema>;
 export type SoulContextUsageState = z.infer<typeof SoulContextUsageStateSchema>;
+export type SoulContextObjectIdentity = z.infer<typeof SoulContextObjectIdentitySchema>;
 export type SoulContextUsageAnchorRole = z.infer<typeof SoulContextUsageAnchorRoleSchema>;
 export type SoulContextPerAnchorUsage = z.infer<typeof SoulContextPerAnchorUsageSchema>;
 export type SoulReportContextUsageRequest = z.infer<typeof SoulReportContextUsageRequestSchema>;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildSessionSynthesisInput } from "../longmemeval/compile-seed.js";
 import {
+  buildLongMemEvalSidecarKey,
   scoreLongMemEvalRecallHits,
   type LongMemEvalSidecarEntry
 } from "../longmemeval/runner.js";
@@ -58,41 +59,67 @@ describe("buildSessionSynthesisInput (S4 synthesis emission)", () => {
   });
 });
 
-// S4 part 4 — a delivered synthesis_capsule whose object_id maps to an
-// answer session in the sidecar scores as a hit at its delivered rank.
-describe("synthesis scoring credit (S4 part 4)", () => {
-  it("credits a delivered synthesis_capsule that covers the answer session", () => {
+describe("synthesis scoring boundary (S4 part 4)", () => {
+  it("does not count a delivered synthesis_capsule as a LongMemEval memory-gold hit", () => {
     const sidecar = new Map<string, LongMemEvalSidecarEntry>([
-      // L1 memory_entry of the answer session.
-      ["memory-gold", { sessionId: "session-a", hasAnswer: true }],
-      // L2 synthesis_capsule of the SAME answer session.
-      ["synthesis-a", { sessionId: "session-a", hasAnswer: true }],
-      ["decoy", { sessionId: "session-b", hasAnswer: false }]
+      [
+        buildLongMemEvalSidecarKey("memory_entry", "memory-gold"),
+        {
+          objectId: "memory-gold",
+          objectKind: "memory_entry",
+          sessionId: "session-a",
+          hasAnswer: true
+        }
+      ],
+      [
+        buildLongMemEvalSidecarKey("synthesis_capsule", "synthesis-a"),
+        {
+          objectId: "synthesis-a",
+          objectKind: "synthesis_capsule",
+          sessionId: "session-a",
+          hasAnswer: true
+        }
+      ],
+      [
+        buildLongMemEvalSidecarKey("memory_entry", "decoy"),
+        {
+          objectId: "decoy",
+          objectKind: "memory_entry",
+          sessionId: "session-b",
+          hasAnswer: false
+        }
+      ]
     ]);
 
-    // The synthesis_capsule is delivered at rank 1; the memory_entry is not
-    // delivered at all. The synthesis hit alone must register R@1.
     const scoring = scoreLongMemEvalRecallHits({
       results: [
-        { object_id: "synthesis-a", relevance_score: 0.88 },
-        { object_id: "decoy", relevance_score: 0.4 }
+        { object_id: "synthesis-a", object_kind: "synthesis_capsule", relevance_score: 0.88 },
+        { object_id: "decoy", object_kind: "memory_entry", relevance_score: 0.4 }
       ],
       sidecar,
       answerSessionIds: new Set(["session-a"])
     });
 
-    expect(scoring.hitAt1).toBe(true);
-    expect(scoring.hitAt5).toBe(true);
-    expect(scoring.hitAt10).toBe(true);
+    expect(scoring.hitAt1).toBe(false);
+    expect(scoring.hitAt5).toBe(false);
+    expect(scoring.hitAt10).toBe(false);
   });
 
   it("does not credit a synthesis_capsule of a non-answer session", () => {
     const sidecar = new Map<string, LongMemEvalSidecarEntry>([
-      ["synthesis-b", { sessionId: "session-b", hasAnswer: false }]
+      [
+        buildLongMemEvalSidecarKey("synthesis_capsule", "synthesis-b"),
+        {
+          objectId: "synthesis-b",
+          objectKind: "synthesis_capsule",
+          sessionId: "session-b",
+          hasAnswer: false
+        }
+      ]
     ]);
 
     const scoring = scoreLongMemEvalRecallHits({
-      results: [{ object_id: "synthesis-b", relevance_score: 0.9 }],
+      results: [{ object_id: "synthesis-b", object_kind: "synthesis_capsule", relevance_score: 0.9 }],
       sidecar,
       answerSessionIds: new Set(["session-a"])
     });
@@ -101,19 +128,33 @@ describe("synthesis scoring credit (S4 part 4)", () => {
     expect(scoring.hitAt10).toBe(false);
   });
 
-  it("keeps memory_entry R@K semantics intact alongside synthesis crediting", () => {
+  it("keeps memory_entry R@K semantics intact alongside synthesis candidates", () => {
     const sidecar = new Map<string, LongMemEvalSidecarEntry>([
-      ["memory-gold", { sessionId: "session-a", hasAnswer: true }],
-      ["synthesis-a", { sessionId: "session-a", hasAnswer: true }]
+      [
+        buildLongMemEvalSidecarKey("memory_entry", "memory-gold"),
+        {
+          objectId: "memory-gold",
+          objectKind: "memory_entry",
+          sessionId: "session-a",
+          hasAnswer: true
+        }
+      ],
+      [
+        buildLongMemEvalSidecarKey("synthesis_capsule", "synthesis-a"),
+        {
+          objectId: "synthesis-a",
+          objectKind: "synthesis_capsule",
+          sessionId: "session-a",
+          hasAnswer: true
+        }
+      ]
     ]);
 
-    // A memory_entry hit at rank 3 — R@1 false, R@5 true — regardless of
-    // the synthesis row's presence in the sidecar.
     const scoring = scoreLongMemEvalRecallHits({
       results: [
-        { object_id: "noise-1", relevance_score: 0.7 },
-        { object_id: "noise-2", relevance_score: 0.6 },
-        { object_id: "memory-gold", relevance_score: 0.5 }
+        { object_id: "noise-1", object_kind: "memory_entry", relevance_score: 0.7 },
+        { object_id: "noise-2", object_kind: "memory_entry", relevance_score: 0.6 },
+        { object_id: "memory-gold", object_kind: "memory_entry", relevance_score: 0.5 }
       ],
       sidecar,
       answerSessionIds: new Set(["session-a"])

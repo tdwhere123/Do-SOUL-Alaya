@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { NonEmptyStringSchema } from "../schema-primitives.js";
 import {
+  SoulContextObjectIdentitySchema,
   SoulContextPerAnchorUsageSchema,
   SoulContextUsageStateSchema,
   SoulContextUsageTrustModeSchema
@@ -39,6 +40,7 @@ export const ContextDeliveryRecordSchema = z
     workspace_id: NonEmptyStringSchema.nullable(),
     run_id: NonEmptyStringSchema.nullable(),
     delivered_object_ids: z.array(NonEmptyStringSchema).readonly(),
+    delivered_objects: z.array(SoulContextObjectIdentitySchema).readonly().optional(),
     delivered_at: z.string().datetime(),
     audit_event_id: NonEmptyStringSchema
   })

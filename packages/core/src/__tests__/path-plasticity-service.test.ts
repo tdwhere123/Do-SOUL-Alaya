@@ -3,6 +3,7 @@ import {
   RuntimeGovernanceEventType,
   type EventLogEntry,
   type PathRelation,
+  type SoulContextObjectIdentity,
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
 import {
@@ -98,6 +99,7 @@ interface Harness {
   readonly usageReader: {
     listRecentUsage: ReturnType<typeof vi.fn>;
     findDeliveredObjectIds: ReturnType<typeof vi.fn>;
+    findDeliveredObjects: ReturnType<typeof vi.fn>;
   };
   readonly pathRepo: {
     findByAnchor: ReturnType<typeof vi.fn>;
@@ -110,6 +112,7 @@ function buildHarness(params: {
   readonly usageRecords: readonly UsageProofRecord[];
   readonly pathsByObjectId: Readonly<Record<string, readonly PathRelation[]>>;
   readonly deliveredObjectIdsByDeliveryId?: Readonly<Record<string, readonly string[]>>;
+  readonly deliveredObjectsByDeliveryId?: Readonly<Record<string, readonly SoulContextObjectIdentity[]>>;
   readonly runtimeNotifier?: Partial<RuntimeNotifier>;
 }): Harness {
   const publishedEvents: EventLogEntry[] = [];
@@ -218,10 +221,14 @@ function buildHarness(params: {
   const usageReader: UsageProofReaderPort & {
     listRecentUsage: ReturnType<typeof vi.fn>;
     findDeliveredObjectIds: ReturnType<typeof vi.fn>;
+    findDeliveredObjects: ReturnType<typeof vi.fn>;
   } = {
     listRecentUsage: vi.fn(async () => params.usageRecords),
     findDeliveredObjectIds: vi.fn(async (deliveryId: string) => {
       return params.deliveredObjectIdsByDeliveryId?.[deliveryId] ?? null;
+    }),
+    findDeliveredObjects: vi.fn(async (deliveryId: string) => {
+      return params.deliveredObjectsByDeliveryId?.[deliveryId] ?? null;
     })
   };
 
@@ -477,6 +484,96 @@ describe("PathPlasticityService", () => {
     expect(harness.repoUpdates[0]?.updates.lifecycle).toMatchObject({
       status: "active"
     });
+  });
+
+  it.each(["skipped", "not_applicable"] as const)(
+    "ignores synthesis-only delivered objects for %s fallback plasticity",
+    async (usageState) => {
+      const path = createPath({
+        path_id: "path-shared-object",
+        anchors: {
+          source_anchor: { kind: "object", object_id: "shared-object" },
+          target_anchor: { kind: "object", object_id: "other-object" }
+        }
+      });
+      const harness = buildHarness({
+        usageRecords: [
+          createUsageRecord({
+            delivery_id: "delivery-synthesis-only",
+            usage_state: usageState,
+            used_object_ids: []
+          })
+        ],
+        pathsByObjectId: { "shared-object": [path] },
+        deliveredObjectIdsByDeliveryId: { "delivery-synthesis-only": ["shared-object"] },
+        deliveredObjectsByDeliveryId: {
+          "delivery-synthesis-only": [
+            { object_id: "shared-object", object_kind: "synthesis_capsule" }
+          ]
+        }
+      });
+
+      const result = await harness.service.computeAndApplyPlasticity({
+        workspaceId: "workspace-1",
+        sinceIso: "2026-05-03T00:00:00.000Z"
+      });
+
+      expect(result).toMatchObject({
+        reinforced: 0,
+        weakened: 0,
+        retired: 0,
+        affectedPathIds: []
+      });
+      expect(harness.usageReader.findDeliveredObjects).toHaveBeenCalledWith(
+        "delivery-synthesis-only"
+      );
+      expect(harness.usageReader.findDeliveredObjectIds).not.toHaveBeenCalled();
+      expect(harness.repoUpdates).toEqual([]);
+      expect(harness.publishedEvents).toEqual([]);
+    }
+  );
+
+  it("ignores synthesis per-anchor usage for used path plasticity", async () => {
+    // direction_bias target_to_source makes the test non-tautological: an
+    // UNFILTERED synthesis target-anchor usage would reverse the bias and
+    // emit PathRelationRedirected (see the redirect test above), so the
+    // empty-events assertion only holds because resolveDirectionalPathUsage
+    // filters synthesis_capsule per-anchor usage out.
+    const path = createPath({
+      path_id: "path-synthesis-anchor",
+      plasticity_state: {
+        strength: 0.5,
+        direction_bias: "target_to_source",
+        stability_class: "normal",
+        support_events_count: 0,
+        contradiction_events_count: 0
+      }
+    });
+    const harness = buildHarness({
+      usageRecords: [
+        createUsageRecord({
+          usage_state: "used",
+          used_object_ids: [],
+          per_anchor_usage: [
+            {
+              object_id: "obj-target",
+              object_kind: "synthesis_capsule",
+              anchor_role: "target"
+            }
+          ]
+        })
+      ],
+      pathsByObjectId: { "obj-target": [path] }
+    });
+
+    const result = await harness.service.computeAndApplyPlasticity({
+      workspaceId: "workspace-1",
+      sinceIso: "2026-05-03T00:00:00.000Z"
+    });
+
+    expect(result.affectedPathIds).toEqual([]);
+    expect(harness.repoUpdates).toEqual([]);
+    expect(harness.publishedEvents).toEqual([]);
   });
 
   it("emits PathRelationRetired when a skipped receipt drops strength to the threshold and the path has been inactive for more than the retirement window", async () => {

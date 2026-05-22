@@ -207,6 +207,34 @@ describe("trust state recorder", () => {
     });
   });
 
+  it("rejects memory usage when the linked delivery only carried a same-id synthesis capsule", async () => {
+    const { recorder, appendManyWithMutation } = createRecorder({ ready: true });
+    await recorder.recordDelivery(
+      buildDeliveryInput("delivery-synthesis-only", {
+        delivered_object_ids: ["shared-object"],
+        delivered_objects: [
+          { object_id: "shared-object", object_kind: "synthesis_capsule" }
+        ]
+      })
+    );
+    appendManyWithMutation.mockClear();
+
+    await expect(
+      recorder.recordUsage(
+        buildUsageInput("delivery-synthesis-only", "used", {
+          used_object_ids: ["shared-object"]
+        }),
+        { expectedWorkspaceId: "workspace-1" }
+      )
+    ).rejects.toBeInstanceOf(TrustStateInvalidUsageProofError);
+
+    expect(appendManyWithMutation).not.toHaveBeenCalled();
+    await expect(recorder.summarize("codex")).resolves.toMatchObject({
+      delivered_count: 1,
+      used_count: 0
+    });
+  });
+
   it("B3 delivered_count accumulates across calls", async () => {
     const { recorder } = createRecorder({ ready: true });
 

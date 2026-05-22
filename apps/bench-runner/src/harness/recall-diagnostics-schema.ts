@@ -3,6 +3,7 @@ import { z } from "zod";
 const RecallFusionStreamRankSchema = z
   .object({
     lexical_fts: z.number().int().positive().nullable(),
+    synthesis_fts: z.number().int().positive().nullable(),
     evidence_fts: z.number().int().positive().nullable(),
     evidence_structural_agreement: z.number().int().positive().nullable(),
     source_proximity: z.number().int().positive().nullable(),
@@ -22,6 +23,7 @@ const RecallFusionStreamRankSchema = z
 const RecallFusionStreamContributionSchema = z
   .object({
     lexical_fts: z.number().min(0),
+    synthesis_fts: z.number().min(0),
     evidence_fts: z.number().min(0),
     evidence_structural_agreement: z.number().min(0),
     source_proximity: z.number().min(0),
@@ -53,6 +55,7 @@ const RecallCandidateDiagnosticSchema = z
   .object({
     candidate_key: z.string().min(1),
     object_id: z.string().min(1),
+    object_kind: z.enum(["memory_entry", "synthesis_capsule"]),
     origin_plane: z.enum(["workspace_local", "global"]),
     admission_planes: z.array(z.string().min(1)).readonly(),
     plane_first_admitted: z.string().min(1),
@@ -116,6 +119,7 @@ export const BenchRecallDiagnosticsSchema = z
           .object({
             candidate_key: z.string().min(1),
             object_id: z.string().min(1),
+            object_kind: z.enum(["memory_entry", "synthesis_capsule"]),
             origin_plane: z.enum(["workspace_local", "global"]),
             per_stream_rank: RecallFusionStreamRankSchema,
             fused_rank: z.number().int().positive(),

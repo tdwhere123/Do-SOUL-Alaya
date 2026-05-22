@@ -139,9 +139,9 @@ Phase D (sequential)
 ## A.M4b — per-factor 因子分解 emit（Q8=B 独立 diagnostic channel）
 
 - **scope**：扩独立 diagnostic channel 加 `fusion_breakdown[]` 字段；按 `candidate_key` join，保留 `object_id` 供 dataset gold lookup
-- **emit shape**：每行 `{ candidate_key, object_id, origin_plane, per_stream_rank: { lexical_fts: 3, evidence_fts: null, evidence_structural_agreement: null, structural: 7, existing_score: 2, embedding_similarity: null, graph_expansion: 12, path_expansion: null, temporal_recency: 8, workspace_activation: 5 }, fused_rank, fused_rank_contribution_per_stream }`
+- **emit shape**：每行 `{ candidate_key, object_id, origin_plane, per_stream_rank: { lexical_fts: 3, synthesis_fts: null, evidence_fts: null, evidence_structural_agreement: null, structural: 7, existing_score: 2, embedding_similarity: null, graph_expansion: 12, path_expansion: null, temporal_recency: 8, workspace_activation: 5 }, fused_rank, fused_rank_contribution_per_stream }`
 - **target files**：`packages/core/src/recall-service.ts`（emit）+ `apps/bench-runner/src/harness/recall-diagnostics-schema.ts`（diagnostic-sidecar schema）；不改 MCP public schema
-- **acceptance**：diagnostic 包含每行 10 stream 的 rank；schema test 通过
+- **acceptance**：diagnostic 包含每行 11 stream 的 rank；schema test 通过
 - **dependency**：无
 - **KPI**：K2 ordering correctness 主指标可观测
 - **ship-blocker**：F-5 falsification 条件第 1 项
@@ -157,7 +157,7 @@ Phase D (sequential)
 
 ## A.B0 — archive header 加 `recall_pipeline_version`
 
-- **scope**：bench-runner archive 输出加版本字段；当前所有 archive 默认 `additive`；β 后输出 `fusion-rrf-v1`
+- **scope**：bench-runner archive 输出加版本字段；历史 archive 默认 `additive`，β 基线输出 `fusion-rrf-v1`；synthesis 竞争排序修复后输出 `fusion-rrf-synthesis-v2`
 - **target files**：`apps/bench-runner/src/longmemeval/runner.ts` + `apps/bench-runner/src/locomo/runner.ts`
 - **acceptance**：新 archive header 带版本字段；trend dashboard（Inspector BenchTrend）按版本分组展示
 - **dependency**：无

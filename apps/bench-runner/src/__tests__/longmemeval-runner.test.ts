@@ -11,7 +11,9 @@ import {
 } from "../longmemeval/diagnostics.js";
 import { runLongMemEvalMultiturn } from "../longmemeval/multiturn.js";
 import {
+  buildLongMemEvalSidecarKey,
   buildLongMemEvalReportContextUsage,
+  deriveLongMemEvalGoldMemoryIds,
   resolveBenchEmbeddingProviderLabel,
   runLongMemEval,
   runLongMemEvalRecallCycle,
@@ -159,6 +161,7 @@ describe("LongMemEval runner", () => {
               fused_score: 0.25,
               per_stream_rank: {
                 lexical_fts: 3,
+                synthesis_fts: null,
                 evidence_fts: null,
                 evidence_structural_agreement: null,
                 source_proximity: null,
@@ -174,6 +177,7 @@ describe("LongMemEval runner", () => {
               },
               fused_rank_contribution_per_stream: {
                 lexical_fts: 0.01,
+                synthesis_fts: 0,
                 evidence_fts: 0,
                 evidence_structural_agreement: 0,
                 source_proximity: 0,
@@ -219,6 +223,7 @@ describe("LongMemEval runner", () => {
       fused_score: 0.25,
       per_stream_rank: {
         lexical_fts: 3,
+        synthesis_fts: null,
         evidence_fts: null,
         evidence_structural_agreement: null,
         source_proximity: null,
@@ -234,6 +239,7 @@ describe("LongMemEval runner", () => {
       },
       fused_rank_contribution_per_stream: {
         lexical_fts: 0.01,
+        synthesis_fts: 0,
         evidence_fts: 0,
         evidence_structural_agreement: 0,
         source_proximity: 0,
@@ -257,6 +263,59 @@ describe("LongMemEval runner", () => {
     expect(JSON.stringify(row)).not.toContain("sk_live_secret");
     expect(JSON.stringify(row)).not.toContain("openai_api_key");
     expect(JSON.stringify(row)).not.toContain("raw_memory_content");
+  });
+
+  it("does not attribute same-id synthesis diagnostics to LongMemEval memory gold", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-kind-collision",
+      goldMemoryIds: ["shared-object"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [
+        {
+          object_id: "shared-object",
+          object_kind: "synthesis_capsule",
+          rank: 1,
+          relevance_score: 0.99
+        }
+      ],
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: false,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: {
+        diagnostics: {
+          candidate_pool: [
+            {
+              candidate_key: "workspace_local:synthesis_capsule:shared-object",
+              object_id: "shared-object",
+              object_kind: "synthesis_capsule",
+              final_rank: 1,
+              pre_budget_rank: 1,
+              fused_rank: 1,
+              per_stream_rank: {
+                synthesis_fts: 1,
+                lexical_fts: null,
+                existing_score: null
+              }
+            }
+          ]
+        }
+      }
+    });
+
+    expect(row.delivered_results[0]).toMatchObject({
+      object_id: "shared-object",
+      object_kind: "synthesis_capsule",
+      fused_rank: 1
+    });
+    expect(row.gold[0]).toMatchObject({
+      object_id: "shared-object",
+      candidate_status: "candidate_absent",
+      final_rank: null,
+      fused_rank: null,
+      per_stream_rank: null
+    });
   });
 
   it("keeps budget-drop reason counts separate from question miss classes", () => {
@@ -486,8 +545,24 @@ describe("LongMemEval runner", () => {
 
   it("scores LongMemEval R@K from ranked results only, not active constraints", () => {
     const sidecar = new Map([
-      ["gold-constraint", { sessionId: "session-a", hasAnswer: true }],
-      ["decoy-top", { sessionId: "session-b", hasAnswer: false }]
+      [
+        buildLongMemEvalSidecarKey("memory_entry", "gold-constraint"),
+        {
+          objectId: "gold-constraint",
+          objectKind: "memory_entry" as const,
+          sessionId: "session-a",
+          hasAnswer: true
+        }
+      ],
+      [
+        buildLongMemEvalSidecarKey("memory_entry", "decoy-top"),
+        {
+          objectId: "decoy-top",
+          objectKind: "memory_entry" as const,
+          sessionId: "session-b",
+          hasAnswer: false
+        }
+      ]
     ]);
     const scoring = scoreLongMemEvalRecallHits({
       results: [{ object_id: "decoy-top", relevance_score: 0.91 }],
@@ -533,6 +608,87 @@ describe("LongMemEval runner", () => {
       final_rank: null,
       active_constraint_rank: 1
     });
+  });
+
+  it("does not count same-id synthesis_capsule results as LongMemEval memory gold hits", () => {
+    const sidecar = new Map([
+      [
+        buildLongMemEvalSidecarKey("memory_entry", "shared-object"),
+        {
+          objectId: "shared-object",
+          objectKind: "memory_entry" as const,
+          sessionId: "session-a",
+          hasAnswer: true
+        }
+      ]
+    ]);
+
+    const synthesisOnly = scoreLongMemEvalRecallHits({
+      results: [
+        {
+          object_id: "shared-object",
+          object_kind: "synthesis_capsule",
+          relevance_score: 0.99
+        }
+      ],
+      sidecar,
+      answerSessionIds: new Set(["session-a"])
+    });
+    expect(synthesisOnly).toMatchObject({
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: false,
+      firstTier: "hot"
+    });
+
+    const memoryEntry = scoreLongMemEvalRecallHits({
+      results: [
+        {
+          object_id: "shared-object",
+          object_kind: "memory_entry",
+          relevance_score: 0.99
+        }
+      ],
+      sidecar,
+      answerSessionIds: new Set(["session-a"])
+    });
+    expect(memoryEntry.hitAt1).toBe(true);
+  });
+
+  it("derives LongMemEval gold ids from memory_entry sidecar entries only", () => {
+    const sidecar = new Map([
+      [
+        buildLongMemEvalSidecarKey("memory_entry", "shared-object"),
+        {
+          objectId: "shared-object",
+          objectKind: "memory_entry" as const,
+          sessionId: "session-a",
+          hasAnswer: true
+        }
+      ],
+      [
+        buildLongMemEvalSidecarKey("synthesis_capsule", "shared-object"),
+        {
+          objectId: "shared-object",
+          objectKind: "synthesis_capsule" as const,
+          sessionId: "session-a",
+          hasAnswer: true
+        }
+      ],
+      [
+        buildLongMemEvalSidecarKey("memory_entry", "decoy-object"),
+        {
+          objectId: "decoy-object",
+          objectKind: "memory_entry" as const,
+          sessionId: "session-b",
+          hasAnswer: true
+        }
+      ]
+    ]);
+
+    expect(deriveLongMemEvalGoldMemoryIds(sidecar, new Set(["session-a"]))).toEqual([
+      "shared-object"
+    ]);
   });
 
   it("classifies empty-gold rows separately from candidate absence", () => {
@@ -666,9 +822,9 @@ describe("LongMemEval runner", () => {
     expect(goldOnly.reportInput?.usageState).toBe("used");
     expect(goldOnly.reportInput?.usedObjectIds).toEqual(["gold-delivered"]);
     expect(goldOnly.reportInput?.deliveredObjects).toEqual([
-      { objectId: "decoy-top", usageStatus: "skipped" },
-      { objectId: "gold-delivered", usageStatus: "used" },
-      { objectId: "decoy-tail", usageStatus: "skipped" }
+      { objectId: "decoy-top", objectKind: "memory_entry", usageStatus: "skipped" },
+      { objectId: "gold-delivered", objectKind: "memory_entry", usageStatus: "used" },
+      { objectId: "decoy-tail", objectKind: "memory_entry", usageStatus: "skipped" }
     ]);
 
     const mixedFallback = buildLongMemEvalReportContextUsage({
@@ -681,6 +837,54 @@ describe("LongMemEval runner", () => {
     });
     expect(mixedFallback.reportInput?.usageState).toBe("used");
     expect(mixedFallback.reportInput?.usedObjectIds).toEqual(["decoy-top"]);
+
+    const synthesisCollision = buildLongMemEvalReportContextUsage({
+      simulateReport: "gold-only",
+      deliveryId: "delivery-synthesis-collision",
+      results: [
+        {
+          object_id: "gold-delivered",
+          object_kind: "synthesis_capsule"
+        }
+      ],
+      goldMemoryIds: ["gold-delivered"],
+      turnIndex: 4,
+      questionText: "Which memory was used?"
+    });
+    expect(synthesisCollision.reportInput?.usageState).toBe("skipped");
+    expect(synthesisCollision.reportInput?.usedObjectIds).toBeUndefined();
+
+    const mixedSynthesisOnly = buildLongMemEvalReportContextUsage({
+      simulateReport: "mixed",
+      deliveryId: "delivery-mixed-synthesis",
+      results: [
+        {
+          object_id: "shared-object",
+          object_kind: "synthesis_capsule"
+        }
+      ],
+      goldMemoryIds: ["other-gold"],
+      turnIndex: 4,
+      questionText: "Which fallback was used?"
+    });
+    expect(mixedSynthesisOnly.reportInput?.usageState).toBe("skipped");
+    expect(mixedSynthesisOnly.reportInput?.usedObjectIds).toBeUndefined();
+
+    const alwaysUsedSynthesisOnly = buildLongMemEvalReportContextUsage({
+      simulateReport: "always-used",
+      deliveryId: "delivery-always-synthesis",
+      results: [
+        {
+          object_id: "shared-object",
+          object_kind: "synthesis_capsule"
+        }
+      ],
+      goldMemoryIds: ["other-gold"],
+      turnIndex: 4,
+      questionText: "Which fallback was used?"
+    });
+    expect(alwaysUsedSynthesisOnly.reportInput?.usageState).toBe("skipped");
+    expect(alwaysUsedSynthesisOnly.reportInput?.usedObjectIds).toBeUndefined();
 
     const skippedGoldOnly = buildLongMemEvalReportContextUsage({
       simulateReport: "gold-only",
@@ -882,7 +1086,7 @@ describe("LongMemEval runner", () => {
 
       // harness_mode must reflect the real MCP chain, never direct_db_seed.
       expect(result.payload.harness_mode).toBe("mcp_propose_review");
-      expect(result.payload.recall_pipeline_version).toBe("fusion-rrf-v1");
+      expect(result.payload.recall_pipeline_version).toBe("fusion-rrf-synthesis-v2");
       expect(result.payload.embedding_provider).toBe("none");
       expect(result.payload.policy_shape).toBe("chat");
       expect(result.payload.simulate_report).toBe("mixed");
@@ -911,7 +1115,7 @@ describe("LongMemEval runner", () => {
       expect(parseResult.success).toBe(true);
       expect(await readFile(result.reportPath, "utf8")).toContain("Recall weights: source=cli");
       expect(await readFile(result.reportPath, "utf8")).toContain(
-        "Recall pipeline: fusion-rrf-v1"
+        "Recall pipeline: fusion-rrf-synthesis-v2"
       );
       expect(await readFile(result.reportPath, "utf8")).toContain(
         "Seed policy: label_independent_all_fact (label-independent)"
@@ -969,7 +1173,7 @@ describe("LongMemEval runner", () => {
         }>;
       };
       expect(diagnostics.schema_version).toBe(1);
-      expect(diagnostics.recall_pipeline_version).toBe("fusion-rrf-v1");
+      expect(diagnostics.recall_pipeline_version).toBe("fusion-rrf-synthesis-v2");
       expect(diagnostics.policy_shape).toBe("chat");
       expect(diagnostics.simulate_report).toBe("mixed");
       expect(diagnostics.report_usage.mode).toBe("mixed");
