@@ -4,6 +4,7 @@ import process from "node:process";
 import {
   buildTokenEconomy,
   computeTokenSavedRatio,
+  buildDiffVsPrevious,
   diffKpis,
   entrySlug,
   KpiPayloadSchema,
@@ -35,6 +36,7 @@ import {
   renderLongMemEvalColdWarmComparisonSidecar
 } from "./longmemeval/archive-evidence.js";
 import {
+  buildPerPlaneRecallCoverage,
   renderDiagnosticsSidecar,
   summarizeProviderStates,
   type LongMemEvalDiagnosticsSidecar,
@@ -1116,6 +1118,11 @@ async function runMergeLongMemEvalCommand(
       embeddingProvider: merged.embedding_provider
     });
     const diff = diffKpis(merged, previous);
+    merged.diff_vs_previous = buildDiffVsPrevious(
+      merged,
+      previous,
+      previous?.run_at ?? ""
+    );
     const slug = entrySlug(
       runAt,
       commitSha7,
@@ -1206,9 +1213,23 @@ function mergeQualityMetrics(
   let pathStreamTop10Denominator = 0;
   const budgetCounts = new Map<string, { count: number; denominator: number }>();
   const missDistribution: Record<string, number> = {};
+  const planeGoldCounts = new Map<string, number>();
+  const planeHitAt5Counts = new Map<string, number>();
 
   for (const metric of metrics) {
     if (metric === undefined) continue;
+    for (const [plane, entry] of Object.entries(
+      metric.per_plane_recall_coverage
+    )) {
+      planeGoldCounts.set(
+        plane,
+        (planeGoldCounts.get(plane) ?? 0) + entry.gold_count
+      );
+      planeHitAt5Counts.set(
+        plane,
+        (planeHitAt5Counts.get(plane) ?? 0) + entry.hit_at_5_count
+      );
+    }
     nonMonotonicCount += metric.non_monotonic_count;
     nonMonotonicDenominator += metric.non_monotonic_denominator;
     highLexicalDemotedCount += metric.high_lexical_demoted_count;
@@ -1271,6 +1292,10 @@ function mergeQualityMetrics(
     path_stream_top10_rate: ratio(pathStreamTop10Count, pathStreamTop10Denominator),
     path_stream_top10_count: pathStreamTop10Count,
     path_stream_top10_denominator: pathStreamTop10Denominator,
+    per_plane_recall_coverage: buildPerPlaneRecallCoverage(
+      planeGoldCounts,
+      planeHitAt5Counts
+    ),
     miss_distribution: missDistribution
   };
 }

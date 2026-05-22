@@ -3,6 +3,13 @@ import {
   ABSTENTION_FALSE_CONFIDENT_THRESHOLD,
   isAbstentionQuestionId
 } from "./abstention.js";
+import {
+  DiagnosticActiveConstraintResultSchema,
+  DiagnosticRecallResultSchema,
+  LongMemEvalGoldDiagnosticSchema,
+  LongMemEvalQuestionDiagnosticSchema
+} from "./diagnostics-schema.js";
+import type { z } from "zod";
 
 const DELIVERY_BUDGET_LOSS_RANK = 10;
 
@@ -13,24 +20,13 @@ export type BenchEmbeddingProviderState =
   | "provider_not_requested"
   | "unknown";
 
-export interface DiagnosticRecallResult {
-  readonly object_id: string;
-  readonly object_kind?: string;
-  readonly rank: number;
-  readonly relevance_score: number;
-  readonly fused_rank: number | null;
-  readonly fused_score: number | null;
-  readonly per_stream_rank: DiagnosticStreamRanks | null;
-  readonly fused_rank_contribution_per_stream: DiagnosticStreamContributions | null;
-  readonly plane_first_admitted: string | null;
-  readonly plane_winning_admission: string | null;
-  readonly score_factors: DiagnosticScoreFactors | null;
-}
+// @anchor diagnostics-schema: the persisted shape of these records is owned
+// by diagnostics-schema.ts; these aliases keep one source of truth.
+export type DiagnosticRecallResult = z.infer<typeof DiagnosticRecallResultSchema>;
 
-export interface DiagnosticActiveConstraintResult {
-  readonly object_id: string;
-  readonly rank: number;
-}
+export type DiagnosticActiveConstraintResult = z.infer<
+  typeof DiagnosticActiveConstraintResultSchema
+>;
 
 interface DiagnosticRecallResultInput {
   readonly object_id: string;
@@ -47,65 +43,13 @@ export type DiagnosticScoreFactors = Readonly<Record<string, unknown>>;
 export type DiagnosticStreamRanks = Readonly<Record<string, number | null>>;
 export type DiagnosticStreamContributions = Readonly<Record<string, number>>;
 
-export interface LongMemEvalGoldDiagnostic {
-  readonly object_id: string;
-  readonly candidate_status:
-    | "delivered"
-    | "active_constraint_delivered"
-    | "candidate_not_delivered"
-    | "candidate_absent"
-    | "unknown";
-  readonly final_rank: number | null;
-  readonly active_constraint_rank: number | null;
-  readonly pre_budget_rank: number | null;
-  readonly selection_order: number | null;
-  readonly fused_rank: number | null;
-  readonly fused_score: number | null;
-  readonly per_stream_rank: DiagnosticStreamRanks | null;
-  readonly fused_rank_contribution_per_stream: DiagnosticStreamContributions | null;
-  readonly plane_first_admitted: string | null;
-  readonly plane_winning_admission: string | null;
-  readonly source_planes: readonly string[];
-  readonly lexical_rank: number | null;
-  readonly structural_score: number | null;
-  readonly score_factors: DiagnosticScoreFactors | null;
-  readonly source_channels: readonly string[];
-  readonly budget_drop_reason: string | null;
-}
+export type LongMemEvalGoldDiagnostic = z.infer<
+  typeof LongMemEvalGoldDiagnosticSchema
+>;
 
-export interface LongMemEvalQuestionDiagnostic {
-  readonly question_id: string;
-  readonly round_index: number | null;
-  readonly gold_memory_ids: readonly string[];
-  readonly answer_session_ids: readonly string[];
-  readonly delivered_results: readonly DiagnosticRecallResult[];
-  readonly active_constraint_results: readonly DiagnosticActiveConstraintResult[];
-  readonly hit_at_1: boolean;
-  readonly hit_at_5: boolean;
-  readonly hit_at_10: boolean;
-  readonly miss_classification:
-    | "hit_at_5"
-    | "budget_dropped"
-    | "under_ranked"
-    | "active_constraint_only"
-    | "structural_gap"
-    | "lexical_gap"
-    | "candidate_absent"
-    | "no_gold"
-    | "abstained_correctly"
-    | "abstain_false_confident"
-    | "diagnostics_unavailable";
-  readonly degradation_reason: string | null;
-  readonly recall_diagnostics_present: boolean;
-  readonly recall_diagnostics_keys: readonly string[];
-  readonly provider_state: BenchEmbeddingProviderState;
-  readonly provider_degradation_reason: string | null;
-  readonly candidate_key_collisions: readonly Readonly<{
-    readonly object_id: string;
-    readonly candidate_keys: readonly string[];
-  }>[];
-  readonly gold: readonly LongMemEvalGoldDiagnostic[];
-}
+export type LongMemEvalQuestionDiagnostic = z.infer<
+  typeof LongMemEvalQuestionDiagnosticSchema
+>;
 
 export interface ProviderStateSummary {
   readonly total: number;
@@ -460,6 +404,10 @@ export function buildLongMemEvalQualityMetrics(
   let abstentionCorrectAt1 = 0;
   let abstentionCorrectAt5 = 0;
   let abstentionCorrectAt10 = 0;
+  // invariant: per-plane recall coverage keys are driven by the gold
+  // candidates' source_planes, never a hardcoded plane list.
+  const planeGoldCounts = new Map<string, number>();
+  const planeHitAt5Counts = new Map<string, number>();
 
   for (const question of diagnostics) {
     missDistribution[question.miss_classification] =
@@ -493,6 +441,16 @@ export function buildLongMemEvalQualityMetrics(
 
     for (const gold of question.gold) {
       budgetDropDenominator++;
+      const goldHitAt5 = gold.final_rank !== null && gold.final_rank <= 5;
+      for (const plane of new Set(gold.source_planes)) {
+        planeGoldCounts.set(plane, (planeGoldCounts.get(plane) ?? 0) + 1);
+        if (goldHitAt5) {
+          planeHitAt5Counts.set(
+            plane,
+            (planeHitAt5Counts.get(plane) ?? 0) + 1
+          );
+        }
+      }
       if (isDeliveryBudgetLoss(gold)) {
         const dropReason = gold.budget_drop_reason;
         if (dropReason === null) continue;
@@ -556,6 +514,10 @@ export function buildLongMemEvalQualityMetrics(
     path_stream_top10_rate: ratio(pathStreamTop10Count, pathStreamTop10Denominator),
     path_stream_top10_count: pathStreamTop10Count,
     path_stream_top10_denominator: pathStreamTop10Denominator,
+    per_plane_recall_coverage: buildPerPlaneRecallCoverage(
+      planeGoldCounts,
+      planeHitAt5Counts
+    ),
     // Calibrated-confidence audit block: how many `_abs` questions were
     // scored, how many stayed appropriately unconfident at each k, and the
     // false-confident threshold the verdict used. A future benchmark swap
@@ -1124,4 +1086,28 @@ function lastString(values: readonly string[] | null): string | null {
 
 function ratio(count: number, total: number): number {
   return total === 0 ? 0 : count / total;
+}
+
+// @anchor per-plane-recall-coverage: shared by buildLongMemEvalQualityMetrics
+// and cli.ts mergeQualityMetrics so single-shard and merged kpi.json carry
+// the same per-plane block shape.
+export function buildPerPlaneRecallCoverage(
+  goldCounts: ReadonlyMap<string, number>,
+  hitAt5Counts: ReadonlyMap<string, number>
+): QualityMetrics["per_plane_recall_coverage"] {
+  return Object.fromEntries(
+    [...goldCounts.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([plane, goldCount]) => {
+        const hitCount = hitAt5Counts.get(plane) ?? 0;
+        return [
+          plane,
+          {
+            gold_count: goldCount,
+            hit_at_5_count: hitCount,
+            hit_at_5_rate: ratio(hitCount, goldCount)
+          }
+        ];
+      })
+  );
 }

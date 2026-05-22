@@ -8,6 +8,7 @@ import {
 } from "../version.js";
 import {
   benchArchiveDiscriminator,
+  buildDiffVsPrevious,
   diffKpis,
   entrySlug,
   readLatest,
@@ -630,6 +631,11 @@ export async function runLongMemEval(
     embeddingProvider: payload.embedding_provider
   });
   const diff = diffKpis(payload, previous);
+  payload.diff_vs_previous = buildDiffVsPrevious(
+    payload,
+    previous,
+    previous?.run_at ?? ""
+  );
   const slug = entrySlug(
     runAt,
     commitSha7,

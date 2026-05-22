@@ -3,6 +3,7 @@ import { writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  buildDiffVsPrevious,
   diffKpis,
   entrySlug,
   readLatest,
@@ -26,6 +27,7 @@ import {
   type BenchQueryEmbeddingWarmupSummary
 } from "../harness/daemon.js";
 import {
+  buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic,
   rAt5WithProviderReturned,
   summarizeLongMemEvalRecallEvidence,
@@ -229,6 +231,7 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
         answer_turns_truncated: 0,
         seed_chars_clipped: 0
       },
+      quality_metrics: buildLongMemEvalQualityMetrics(questionDiagnostics),
       per_scenario: perScenario
     }
   };
@@ -239,6 +242,11 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
     embeddingProvider: payload.embedding_provider
   });
   const diff = diffKpis(payload, previous);
+  payload.diff_vs_previous = buildDiffVsPrevious(
+    payload,
+    previous,
+    previous?.run_at ?? ""
+  );
   const slug = entrySlug(runAt, commitSha7);
   const report = renderReport(payload, previous, diff);
   const findings = renderFindings(payload, diff);

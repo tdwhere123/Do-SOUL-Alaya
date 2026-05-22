@@ -163,6 +163,19 @@ const CountDistributionEntrySchema = z
   })
   .strict();
 
+// Per-plane recall coverage: for one candidate-generating plane, how many
+// gold candidates carried that plane and how many of those landed in the
+// delivered top-5. Plane keys are driven by the planes actually observed in
+// gold candidates' source_planes, so a new plane (e.g. a future trigram
+// plane) appears here without a schema change.
+const PerPlaneRecallCoverageEntrySchema = z
+  .object({
+    gold_count: z.number().int().nonnegative(),
+    hit_at_5_count: z.number().int().nonnegative(),
+    hit_at_5_rate: RatioSchema
+  })
+  .strict();
+
 const QualityMetricsSchema = z
   .object({
     schema_version: z.literal("bench-quality-metrics.v1"),
@@ -187,6 +200,12 @@ const QualityMetricsSchema = z
     path_stream_top10_rate: RatioSchema.default(0),
     path_stream_top10_count: z.number().int().nonnegative().default(0),
     path_stream_top10_denominator: z.number().int().nonnegative().default(0),
+    // Optional so pre-per-plane-coverage kpi.json records stay valid; new
+    // bench runs always populate it. Keyed by plane label; the key set is
+    // whatever planes the run's gold candidates actually exposed.
+    per_plane_recall_coverage: z
+      .record(PerPlaneRecallCoverageEntrySchema)
+      .default({}),
     // @anchor longmemeval-abstention: calibrated-confidence scoring of the
     // LongMemEval-S abstention questions (`question_id` ending `_abs`).
     // Optional so pre-abstention-scoring kpi.json records stay valid; new

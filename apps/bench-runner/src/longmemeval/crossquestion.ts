@@ -3,6 +3,7 @@ import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../version.j
 import {
   buildTokenEconomy,
   computeTokenSavedRatio,
+  buildDiffVsPrevious,
   diffKpis,
   entrySlug,
   readLatest,
@@ -21,6 +22,7 @@ import {
 } from "../harness/daemon.js";
 import { aggregateBenchTokenMetrics } from "./token-economy.js";
 import {
+  buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic,
   rAt5WithProviderReturned,
   renderDiagnosticsSidecar,
@@ -428,6 +430,7 @@ export async function runLongMemEvalCrossQuestion(
       degradation_reasons: degradationReasons,
       seed_truncation: truncation,
       seed_extraction_path: toSeedExtractionPathKpi(seedRunner.stats),
+      quality_metrics: buildLongMemEvalQualityMetrics(allDiagnostics),
       per_scenario: perScenario
     }
   };
@@ -438,6 +441,11 @@ export async function runLongMemEvalCrossQuestion(
     embeddingProvider: payload.embedding_provider
   });
   const diff = diffKpis(payload, previous);
+  payload.diff_vs_previous = buildDiffVsPrevious(
+    payload,
+    previous,
+    previous?.run_at ?? ""
+  );
   const slug = entrySlug(runAt, commitSha7);
   const report = renderReport(payload, previous, diff);
   const findings = renderFindings(payload, diff);

@@ -38,6 +38,8 @@ try {
       applyLongMemEvalDiagnostics(archive, result);
     } else if (result.source.archive_kind === "controlled-replay") {
       applyControlledReplay(archive, result);
+    } else if (result.source.archive_kind === "kpi-payload") {
+      applyKpiPayload(archive, result);
     } else {
       result.warnings.push(
         `unrecognized archive shape in ${source.selectedPath}; emitting neutral metrics`
@@ -68,7 +70,8 @@ function createEmptyResult(input) {
     cohort_first_admitted: {},
     cohort_winning_admission: {},
     path_expansion_share: 0,
-    active_constraints_count: 0
+    active_constraints_count: 0,
+    per_plane_recall_coverage: {}
   };
 }
 
@@ -91,6 +94,7 @@ function resolveArchiveSource(inputPath, warnings) {
 
   const preferredNames = [
     "longmemeval-diagnostics.json",
+    "locomo-diagnostics.json",
     "controlled-replay.json",
     "diagnostics.json",
     "kpi.json"
@@ -131,8 +135,16 @@ function detectArchiveKind(archive, selectedPath) {
   if (basename(selectedPath) === "longmemeval-diagnostics.json") {
     return "longmemeval-diagnostics";
   }
+  if (basename(selectedPath) === "locomo-diagnostics.json") {
+    return "longmemeval-diagnostics";
+  }
   if (basename(selectedPath) === "controlled-replay.json") {
     return "controlled-replay";
+  }
+  // A KpiPayload archive (kpi.json) carries the bench-runner's own
+  // quality_metrics block; read per-plane coverage straight from it.
+  if (isRecord(archive?.kpi) && isRecord(archive?.kpi?.quality_metrics)) {
+    return "kpi-payload";
   }
   return "unknown";
 }
@@ -212,9 +224,19 @@ function applyLongMemEvalDiagnostics(archive, output) {
     }
   }
 
+  const planeGoldCounts = new Map();
+  const planeHitAt5Counts = new Map();
   for (const gold of allGold) {
     if (hasOwnField(gold, "budget_drop_reason")) {
       budgetDropFieldCount += 1;
+    }
+    const goldFinalRank = readNumber(gold?.final_rank);
+    const goldHitAt5 = goldFinalRank !== null && goldFinalRank <= 5;
+    for (const plane of new Set(asStringArray(gold?.source_planes))) {
+      planeGoldCounts.set(plane, (planeGoldCounts.get(plane) ?? 0) + 1);
+      if (goldHitAt5) {
+        planeHitAt5Counts.set(plane, (planeHitAt5Counts.get(plane) ?? 0) + 1);
+      }
     }
     const budgetDropReason = readString(gold?.budget_drop_reason);
     if (budgetDropReason !== null) {
@@ -254,6 +276,10 @@ function applyLongMemEvalDiagnostics(archive, output) {
     firstRows.path_expansion?.gold_hit_share ??
     0;
   output.active_constraints_count = activeConstraints.count;
+  output.per_plane_recall_coverage = buildPerPlaneRecallCoverage(
+    planeGoldCounts,
+    planeHitAt5Counts
+  );
 
   output.metadata.longmemeval = {
     questions_count: questions.length,
@@ -304,6 +330,11 @@ function applyLongMemEvalDiagnostics(archive, output) {
   if (activeConstraints.sources.length === 0) {
     output.warnings.push(
       "active_constraints[] or active_constraints_count not present; active_constraints_count set to 0"
+    );
+  }
+  if (Object.keys(output.per_plane_recall_coverage).length === 0) {
+    output.warnings.push(
+      "gold[].source_planes missing or empty; per_plane_recall_coverage set to empty"
     );
   }
 }
@@ -367,6 +398,41 @@ function applyControlledReplay(archive, output) {
   }
 }
 
+// Read the bench-runner's own quality_metrics out of a kpi.json. This keeps
+// the four bench surfaces comparable: a kpi.json from any of them yields the
+// same per-plane-coverage shape this script also derives from a sidecar.
+function applyKpiPayload(archive, output) {
+  const quality = archive?.kpi?.quality_metrics ?? {};
+  output.non_monotonic_rate = readNumber(quality.non_monotonic_rate) ?? 0;
+  output.high_lexical_demoted_rate =
+    readNumber(quality.high_lexical_demoted_rate) ?? 0;
+  output.budget_drop_distribution = isRecord(quality.budget_drop_distribution)
+    ? quality.budget_drop_distribution
+    : {};
+  output.per_plane_recall_coverage = isRecord(
+    quality.per_plane_recall_coverage
+  )
+    ? quality.per_plane_recall_coverage
+    : {};
+  const diff = archive?.diff_vs_previous;
+  output.metadata.kpi_payload = {
+    bench_name: readString(archive?.bench_name),
+    r_at_5: readNumber(archive?.kpi?.r_at_5),
+    r_at_5_delta_pp: isRecord(diff)
+      ? readNumber(diff.r_at_5_delta_pp)
+      : null,
+    previous_run: isRecord(diff) ? readString(diff.previous_run) : null
+  };
+  const activeConstraints = countActiveConstraints(archive);
+  output.active_constraints_count = activeConstraints.count;
+  output.metadata.active_constraints_sources = activeConstraints.sources;
+  if (Object.keys(output.per_plane_recall_coverage).length === 0) {
+    output.warnings.push(
+      "kpi.quality_metrics.per_plane_recall_coverage missing or empty; set to empty"
+    );
+  }
+}
+
 function applyGenericArchiveMetrics(archive, output) {
   const activeConstraints = countActiveConstraints(archive);
   output.active_constraints_count = activeConstraints.count;
@@ -420,6 +486,26 @@ function buildCohort(counters, goldHitCount) {
           gold_hit_denominator: goldHitCount
         }
       ])
+  );
+}
+
+// invariant: plane keys are whatever source_planes the gold candidates
+// exposed; no static plane list. Mirrors diagnostics.ts buildPerPlaneRecallCoverage.
+function buildPerPlaneRecallCoverage(goldCounts, hitAt5Counts) {
+  return Object.fromEntries(
+    [...goldCounts.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([plane, goldCount]) => {
+        const hitCount = hitAt5Counts.get(plane) ?? 0;
+        return [
+          plane,
+          {
+            gold_count: goldCount,
+            hit_at_5_count: hitCount,
+            hit_at_5_rate: share(hitCount, goldCount)
+          }
+        ];
+      })
   );
 }
 
