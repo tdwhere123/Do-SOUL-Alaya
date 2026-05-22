@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MemoryDimension, ScopeClass } from "@do-soul/alaya-protocol";
-import { compileRecallQueryProbes } from "../recall-query-probes.js";
+import { compileRecallQueryProbes, expandLexicalTerms } from "../recall-query-probes.js";
 
 describe("compileRecallQueryProbes", () => {
   it("extracts multilingual structural probes without a provider", () => {
@@ -48,5 +48,57 @@ describe("compileRecallQueryProbes", () => {
       .toEqual(["self_reference"]);
     expect(compileRecallQueryProbes("Where did Alex buy the bookshelf?").subject_hints)
       .toEqual([]);
+  });
+});
+
+describe("expandLexicalTerms", () => {
+  it("is deterministic: identical input yields identical output", () => {
+    const terms = ["recalls", "embeddings", "directories", "running", "config"];
+    const first = expandLexicalTerms(terms);
+    const second = expandLexicalTerms(terms);
+    expect(second).toEqual(first);
+  });
+
+  it("folds regular English morphology into additive variants", () => {
+    const expanded = expandLexicalTerms(["recalls"]);
+    // plural -> singular stem
+    expect(expanded).toContain("recall");
+    // verb-suffix folding
+    expect(expandLexicalTerms(["running"])).toContain("run");
+    expect(expandLexicalTerms(["reviewed"])).toContain("review");
+    // forward plural so a singular query term reaches a pluralized memory
+    expect(expandLexicalTerms(["candidate"])).toContain("candidates");
+    expect(expandLexicalTerms(["match"])).toContain("matches");
+  });
+
+  it("applies the static domain synonym table bidirectionally", () => {
+    expect(expandLexicalTerms(["embedding"])).toEqual(expect.arrayContaining(["vector"]));
+    expect(expandLexicalTerms(["vector"])).toEqual(expect.arrayContaining(["embedding"]));
+    expect(expandLexicalTerms(["repo"])).toContain("repository");
+    expect(expandLexicalTerms(["db"])).toContain("database");
+  });
+
+  it("never echoes the original surface terms back as expansions", () => {
+    const surface = ["recall", "config", "embedding"];
+    const expanded = expandLexicalTerms(surface);
+    for (const term of surface) {
+      expect(expanded).not.toContain(term);
+    }
+  });
+
+  it("leaves CJK and non-alphabetic terms unfolded by morphology", () => {
+    const expanded = expandLexicalTerms(["召回方案"]);
+    // no Latin morphology applies; only synonym-table lookups could add terms
+    expect(expanded.every((term) => /[a-z]/u.test(term) || !/[一-鿿]/u.test(term))).toBe(true);
+  });
+
+  it("surfaces expanded_terms on the compiled probes without polluting lexical_terms", () => {
+    const probes = compileRecallQueryProbes("which embeddings did the recalls use");
+    expect(probes.lexical_terms).toEqual(expect.arrayContaining(["embeddings", "recalls"]));
+    expect(probes.expanded_terms).toEqual(expect.arrayContaining(["vector", "recall"]));
+    // expansions stay out of the surface lexical_terms set
+    for (const expanded of probes.expanded_terms) {
+      expect(probes.lexical_terms).not.toContain(expanded);
+    }
   });
 });

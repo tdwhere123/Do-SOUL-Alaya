@@ -3,6 +3,7 @@ import { z } from "zod";
 const RecallFusionStreamRankSchema = z
   .object({
     lexical_fts: z.number().int().positive().nullable(),
+    trigram_fts: z.number().int().positive().nullable(),
     synthesis_fts: z.number().int().positive().nullable(),
     evidence_fts: z.number().int().positive().nullable(),
     evidence_structural_agreement: z.number().int().positive().nullable(),
@@ -23,6 +24,7 @@ const RecallFusionStreamRankSchema = z
 const RecallFusionStreamContributionSchema = z
   .object({
     lexical_fts: z.number().min(0),
+    trigram_fts: z.number().min(0),
     synthesis_fts: z.number().min(0),
     evidence_fts: z.number().min(0),
     evidence_structural_agreement: z.number().min(0),
@@ -96,6 +98,7 @@ export const BenchRecallDiagnosticsSchema = z
         scope_classes: z.array(z.string()).readonly(),
         domain_tags: z.array(z.string()).readonly(),
         lexical_terms: z.array(z.string()).readonly(),
+        expanded_terms: z.array(z.string()).readonly(),
         phrases: z.array(z.string()).readonly(),
         char_ngrams: z.array(z.string()).readonly(),
         date_terms: z.array(z.string()).readonly()

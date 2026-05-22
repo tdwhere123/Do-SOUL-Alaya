@@ -212,7 +212,15 @@ const DIAGNOSTIC_SOURCE_LABELS = new Set<string>([
   "workspace_local",
   "project",
   "global",
-  "advisory"
+  "advisory",
+  // Lexical-coverage source channels: word-level/exact lexical FTS,
+  // deterministic query-expansion hits, and the evidence-capsule FTS join.
+  // Listed so per-plane coverage counts them. The trigram substring lane is
+  // a fusion stream (per_stream_rank.trigram_fts), not a source channel, so
+  // it is intentionally absent here.
+  "lexical",
+  "lexical_expanded",
+  "evidence_fts"
 ]);
 
 export function buildQuestionDiagnostic(input: {

@@ -125,8 +125,13 @@ const NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT = 0.24;
 const QUERY_EVIDENCE_BASE_TRANSFER_MAX = 0.25;
 const QUERY_EVIDENCE_BASE_WEIGHT_FLOOR = 0.35;
 const RECALL_RRF_DEFAULT_K = 60;
+// Expanded-query lexical hits (morphology / synonym variants) are admitted at
+// this fraction of their raw fts rank so an inflected-only match cannot
+// out-RRF a memory that matched the original query surface terms.
+const EXPANDED_QUERY_RANK_DISCOUNT = 0.6;
 const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
   "lexical_fts",
+  "trigram_fts",
   "synthesis_fts",
   "evidence_fts",
   "evidence_structural_agreement",
@@ -143,6 +148,9 @@ const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
 ];
 const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>> = Object.freeze({
   lexical_fts: 1,
+  // trigram_fts rescues substring / spelling-variant / CJK matches the
+  // word-level lexical lane misses. Initial low weight; grid-tuned later.
+  trigram_fts: 1,
   // synthesis_fts no longer drives cross-kind fusion: a synthesis candidate
   // cannot out-RRF a multi-stream memory_entry, so delivery is handled by
   // reserveSynthesisDeliverySlots, not this weight. The weight is retained
@@ -590,6 +598,7 @@ export class RecallService {
     readonly total_scanned: number;
     readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
     readonly ftsRanks: Readonly<Record<string, number>>;
+    readonly trigramFtsRanks: Readonly<Record<string, number>>;
     readonly synthesisFtsRanks: Readonly<Record<string, number>>;
     readonly evidenceFtsRanks: Readonly<Record<string, number>>;
     readonly sourceProximityScores: Readonly<Record<string, number>>;
@@ -623,6 +632,7 @@ export class RecallService {
 
     const drafts = new Map<string, CoarseCandidateDraft>();
     const ftsRanks = new Map<string, number>();
+    const trigramFtsRanks = new Map<string, number>();
     const evidenceFtsRanks = new Map<string, number>();
     const sourceProximityScores = new Map<string, number>();
     let sourceCohortKeys: Readonly<Record<string, string>> = Object.freeze({});
@@ -735,9 +745,54 @@ export class RecallService {
             );
       for (const match of supplement) {
         ftsRanks.set(match.object_id, clamp01(match.normalized_rank));
+        if (match.trigram_rank !== undefined && match.trigram_rank > 0) {
+          trigramFtsRanks.set(match.object_id, clamp01(match.trigram_rank));
+        }
         const entry = byId.get(match.object_id);
         if (entry !== undefined) {
           addCandidate(entry, "lexical", clamp01(match.normalized_rank), "lexical");
+        }
+      }
+
+      // Deterministic query expansion (morphology folding + static domain
+      // synonyms) widens lexical coverage for memories whose distilled wording
+      // diverges from the query surface. Expanded hits are admitted at a
+      // discounted rank so they cannot out-RRF an exact lexical match, and
+      // their original fts rank is not overwritten when both passes hit.
+      const expandedQuery = buildExpandedKeywordQuery(queryProbes);
+      if (expandedQuery !== null) {
+        const expandedSupplement =
+          this.dependencies.memoryRepo.searchByKeywordWithinObjectIds !== undefined
+            ? await this.dependencies.memoryRepo.searchByKeywordWithinObjectIds(
+                workspaceId,
+                expandedQuery,
+                config.semantic_supplement.max_supplement,
+                [...byId.keys()]
+              )
+            : await this.dependencies.memoryRepo.searchByKeyword!(
+                workspaceId,
+                expandedQuery,
+                config.semantic_supplement.max_supplement
+              );
+        for (const match of expandedSupplement) {
+          const discounted = clamp01(match.normalized_rank) * EXPANDED_QUERY_RANK_DISCOUNT;
+          if (discounted <= 0) {
+            continue;
+          }
+          if (!ftsRanks.has(match.object_id)) {
+            ftsRanks.set(match.object_id, discounted);
+          }
+          if (
+            match.trigram_rank !== undefined &&
+            match.trigram_rank > 0 &&
+            !trigramFtsRanks.has(match.object_id)
+          ) {
+            trigramFtsRanks.set(match.object_id, clamp01(match.trigram_rank) * EXPANDED_QUERY_RANK_DISCOUNT);
+          }
+          const entry = byId.get(match.object_id);
+          if (entry !== undefined) {
+            addCandidate(entry, "lexical", discounted, "lexical_expanded");
+          }
         }
       }
 
@@ -871,6 +926,7 @@ export class RecallService {
       total_scanned: tierMemories.length,
       candidates: supplementedCandidates,
       ftsRanks: Object.freeze(Object.fromEntries(ftsRanks.entries())),
+      trigramFtsRanks: Object.freeze(Object.fromEntries(trigramFtsRanks.entries())),
       synthesisFtsRanks: Object.freeze({}),
       evidenceFtsRanks: Object.freeze(Object.fromEntries(evidenceFtsRanks.entries())),
       sourceProximityScores: Object.freeze(Object.fromEntries(sourceProximityScores.entries())),
@@ -1420,6 +1476,7 @@ export class RecallService {
       queryProbes: params.queryProbes,
       policy: params.policy,
       coarseFtsRanks: params.coarseFilter.ftsRanks,
+      coarseTrigramFtsRanks: params.coarseFilter.trigramFtsRanks,
       coarseSynthesisFtsRanks: params.coarseFilter.synthesisFtsRanks,
       coarseEvidenceFtsRanks: params.coarseFilter.evidenceFtsRanks,
       coarseSourceProximityScores: params.coarseFilter.sourceProximityScores,
@@ -1465,6 +1522,10 @@ export class RecallService {
         ...current.ftsRanks,
         ...next.ftsRanks
       }),
+      trigramFtsRanks: Object.freeze({
+        ...current.trigramFtsRanks,
+        ...next.trigramFtsRanks
+      }),
       synthesisFtsRanks: Object.freeze({
         ...current.synthesisFtsRanks,
         ...next.synthesisFtsRanks
@@ -1505,6 +1566,7 @@ export class RecallService {
     readonly queryProbes: Readonly<RecallQueryProbes>;
     readonly policy: Readonly<RecallPolicy>;
     readonly coarseFtsRanks: Readonly<Record<string, number>>;
+    readonly coarseTrigramFtsRanks: Readonly<Record<string, number>>;
     readonly coarseSynthesisFtsRanks: Readonly<Record<string, number>>;
     readonly coarseEvidenceFtsRanks: Readonly<Record<string, number>>;
     readonly coarseSourceProximityScores: Readonly<Record<string, number>>;
@@ -1601,6 +1663,7 @@ export class RecallService {
     return Object.freeze({
       queryProbes: params.queryProbes,
       ftsRanks: params.coarseFtsRanks,
+      trigramFtsRanks: params.coarseTrigramFtsRanks,
       synthesisFtsRanks: params.coarseSynthesisFtsRanks,
       evidenceFtsRanks: params.coarseEvidenceFtsRanks,
       sourceProximityScores: params.coarseSourceProximityScores,
@@ -2393,6 +2456,11 @@ function scoreRecallFusionStream(
         return 0;
       }
       return clamp01(supplementaryData.ftsRanks[objectId] ?? 0);
+    case "trigram_fts":
+      if (isGlobalCandidate) {
+        return 0;
+      }
+      return clamp01(supplementaryData.trigramFtsRanks[objectId] ?? 0);
     case "synthesis_fts":
       return 0;
     case "evidence_fts":
@@ -2741,6 +2809,7 @@ function buildRecallDiagnostics(params: Readonly<{
       scope_classes: Object.freeze([...params.queryProbes.scope_classes]),
       domain_tags: Object.freeze([...params.queryProbes.domain_tags]),
       lexical_terms: Object.freeze([...params.queryProbes.lexical_terms]),
+      expanded_terms: Object.freeze([...params.queryProbes.expanded_terms]),
       phrases: Object.freeze([...params.queryProbes.phrases]),
       char_ngrams: Object.freeze([...params.queryProbes.char_ngrams]),
       date_terms: Object.freeze([...params.queryProbes.date_terms])
@@ -2905,13 +2974,25 @@ function buildEvidenceSearchQueries(
     .filter((phrase) => phrase.length >= 3)
     .slice(0, 8);
   const multiKeyQuery = queryProbes.lexical_terms.slice(0, 8).join(" ");
+  const expandedKeyQuery = queryProbes.expanded_terms.slice(0, 8).join(" ");
   const dateQueries = queryProbes.date_terms.slice(0, 6);
   return uniqueStrings([
     queryText,
     ...phraseQueries,
     ...(multiKeyQuery.length === 0 ? [] : [multiKeyQuery]),
+    ...(expandedKeyQuery.length === 0 ? [] : [expandedKeyQuery]),
     ...dateQueries
   ].map((value) => value.trim()).filter((value) => value.length > 0));
+}
+
+// Deterministic OR-query of expanded lexical terms (morphology + synonym
+// variants). Returns null when there is nothing to expand so callers can skip
+// the extra FTS pass. see also: recall-query-probes.ts expandLexicalTerms.
+function buildExpandedKeywordQuery(queryProbes: Readonly<RecallQueryProbes>): string | null {
+  const expanded = uniqueStrings(
+    queryProbes.expanded_terms.slice(0, 16).map((term) => term.trim()).filter((term) => term.length > 0)
+  );
+  return expanded.length === 0 ? null : expanded.join(" ");
 }
 
 function scoreQueryEvidenceMatch(
