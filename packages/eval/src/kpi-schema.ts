@@ -21,6 +21,48 @@ export const BenchName = z.enum([
 ]);
 export type BenchName = z.infer<typeof BenchName>;
 
+export const BenchPolicyShapeSchema = z.enum(["stress", "chat"]);
+export type BenchPolicyShape = z.infer<typeof BenchPolicyShapeSchema>;
+
+export const BenchSimulateReportModeSchema = z.enum([
+  "none",
+  "always-used",
+  "gold-only",
+  "mixed"
+]);
+export type BenchSimulateReportMode = z.infer<typeof BenchSimulateReportModeSchema>;
+
+const ActivationWeightsSummarySchema = z
+  .object({
+    scope_match: z.number().min(0).max(1),
+    domain_match: z.number().min(0).max(1),
+    retention: z.number().min(0).max(1),
+    freshness: z.number().min(0).max(1),
+    relevance: z.number().min(0).max(1),
+    graph_support: z.number().min(0).max(1),
+    budget_penalty: z.number().min(0).max(1),
+    conflict_penalty: z.number().min(0).max(1)
+  })
+  .strict();
+
+const AdditiveScoringWeightsSummarySchema = z
+  .object({
+    NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT: z.number().finite().nonnegative().optional(),
+    CONFIDENCE_DIRECT_WEIGHT: z.number().finite().nonnegative().optional(),
+    PATH_PLASTICITY_WEIGHT: z.number().finite().nonnegative().optional()
+  })
+  .strict();
+
+export const RecallWeightOverridesSummarySchema = z
+  .object({
+    source: z.enum(["cli", "env"]),
+    activation_weights_phase4b: ActivationWeightsSummarySchema.optional(),
+    additive: AdditiveScoringWeightsSummarySchema.optional(),
+    fusion_weights: z.record(z.number().finite().nonnegative()).optional()
+  })
+  .strict();
+export type RecallWeightOverridesSummary = z.infer<typeof RecallWeightOverridesSummarySchema>;
+
 export const Verdict = z.enum(["ok", "warn", "fail"]);
 export type Verdict = z.infer<typeof Verdict>;
 
@@ -31,7 +73,7 @@ const TierDistributionSchema = z.object({
 });
 export type TierDistribution = z.infer<typeof TierDistributionSchema>;
 
-// @anchor degradation-reasons-mirror — kept in 1:1 correspondence with
+// @anchor degradation-reasons-mirror: kept in 1:1 correspondence with
 // protocol §SoulMemorySearchDegradationReasonSchema. recall_explainability_partial
 // defaults to 0 (optional) so older kpi.json records remain schema-valid.
 const DegradationReasonsSchema = z.object({
@@ -46,20 +88,21 @@ const PerScenarioRowSchema = z.object({
   id: z.string().min(1),
   version: z.number().int().positive(),
   hit_at_5: z.boolean(),
-  tier: z.enum(["hot", "warm", "cold"])
+  tier: z.enum(["hot", "warm", "cold"]),
+  latency_ms: z.number().nonnegative().optional()
 });
 export type PerScenarioRow = z.infer<typeof PerScenarioRowSchema>;
 
-// @anchor latency-source — "exact" when latencies are union percentiles
-// of a single run; "worst_shard_bound" when merged from N shards as
-// max(shard_p) (upper-bound only — raw latency arrays are not carried
-// across shards in v0.3.6). see also: apps/bench-runner/src/cli.ts
+// @anchor latency-source: "exact" when latencies are union percentiles
+// of a single run or merged from per-scenario latency rows;
+// "worst_shard_bound" when merged from legacy shards as max(shard_p)
+// (upper-bound only). see also: apps/bench-runner/src/cli.ts
 // @merge-longmemeval.
 const LatencySourceSchema = z
   .enum(["exact", "worst_shard_bound"])
   .default("exact");
 
-// @anchor seed-truncation — count of bench-seeded turns whose content
+// @anchor seed-truncation: count of bench-seeded turns whose content
 // exceeded the protocol raw_payload cap and was clipped before propose.
 // answer_truncated counts only the subset that carried has_answer=true
 // (the worry case for honest retrieval). see also: harness/daemon.ts
@@ -76,7 +119,131 @@ const SeedTruncationSchema = z
     seed_chars_clipped: 0
   });
 
+// @anchor seed-extraction-path: which ingestion path produced the seed
+// store. official_api_compile = real production garden extraction
+// (OfficialApiGardenProvider.compile, 1 turn -> N typed signals);
+// no_credentials_fallback = the degraded no-LLM path (1 turn -> 1 full-turn
+// fact). A no-creds run re-seeds the keyword-rich full turn and can
+// out-score the tight production distilled_fact, so the two paths must
+// never be indistinguishable in the persisted report. cache_hits / llm_calls
+// / offline_fallbacks / facts_produced are the per-run extraction counters.
+// signals_dropped is the TOTAL signals lost between the model envelope and
+// a seeded memory_entry — a visible recall hole. parse_dropped and
+// compile_overflow_dropped attribute the two extraction-time drop stages:
+// parse_dropped counts malformed single entries and over-64-cap signals
+// discarded inside parseOfficialApiSignals; compile_overflow_dropped counts
+// parsed drafts dropped inside compile() for raw_payload past the 16 KB cap.
+// A third, non-attributed source also rolls into signals_dropped: a whole
+// turn's signals lost when the seed-materialization batch throws (e.g. a
+// garden-task complete mismatch). So the invariant is
+// signals_dropped >= parse_dropped + compile_overflow_dropped, not a clean
+// equality. see also:
+// apps/bench-runner/src/longmemeval/compile-seed.ts CompileSeedExtractionStats.
+const SeedExtractionPathSchema = z
+  .object({
+    path: z.enum(["official_api_compile", "no_credentials_fallback"]),
+    cache_hits: z.number().int().nonnegative(),
+    llm_calls: z.number().int().nonnegative(),
+    offline_fallbacks: z.number().int().nonnegative(),
+    facts_produced: z.number().int().nonnegative(),
+    signals_dropped: z.number().int().nonnegative(),
+    parse_dropped: z.number().int().nonnegative(),
+    compile_overflow_dropped: z.number().int().nonnegative()
+  })
+  .strict();
+export type SeedExtractionPath = z.infer<typeof SeedExtractionPathSchema>;
+
 const RatioSchema = z.number().min(0).max(1);
+
+const CountDistributionEntrySchema = z
+  .object({
+    count: z.number().int().nonnegative(),
+    share: RatioSchema,
+    denominator: z.number().int().nonnegative()
+  })
+  .strict();
+
+const QualityMetricsSchema = z
+  .object({
+    schema_version: z.literal("bench-quality-metrics.v1"),
+    non_monotonic_rate: RatioSchema,
+    non_monotonic_count: z.number().int().nonnegative(),
+    non_monotonic_denominator: z.number().int().nonnegative(),
+    budget_drop_distribution: z
+      .object({
+        max_entries: CountDistributionEntrySchema.optional()
+      })
+      .catchall(CountDistributionEntrySchema),
+    high_lexical_demoted_rate: RatioSchema,
+    high_lexical_demoted_count: z.number().int().nonnegative(),
+    high_lexical_demoted_denominator: z.number().int().nonnegative(),
+    candidate_absent_count: z.number().int().nonnegative(),
+    candidate_absent_denominator: z.number().int().nonnegative(),
+    no_gold_count: z.number().int().nonnegative(),
+    no_gold_denominator: z.number().int().nonnegative(),
+    evidence_stream_gold_delivery_rate: RatioSchema.default(0),
+    evidence_stream_gold_delivery_count: z.number().int().nonnegative().default(0),
+    evidence_stream_gold_delivery_denominator: z.number().int().nonnegative().default(0),
+    path_stream_top10_rate: RatioSchema.default(0),
+    path_stream_top10_count: z.number().int().nonnegative().default(0),
+    path_stream_top10_denominator: z.number().int().nonnegative().default(0),
+    // @anchor longmemeval-abstention: calibrated-confidence scoring of the
+    // LongMemEval-S abstention questions (`question_id` ending `_abs`).
+    // Optional so pre-abstention-scoring kpi.json records stay valid; new
+    // LongMemEval runs always populate it. correct_at_k counts the `_abs`
+    // questions whose top-k delivered results all stayed below
+    // false_confident_threshold (recall stayed appropriately unconfident);
+    // these are credited to the recall@k numerator without changing the
+    // 500-question denominator.
+    abstention: z
+      .object({
+        schema_version: z.literal("bench-abstention.v1"),
+        total: z.number().int().nonnegative(),
+        false_confident_threshold: z.number(),
+        correct_at_1: z.number().int().nonnegative(),
+        correct_at_5: z.number().int().nonnegative(),
+        correct_at_10: z.number().int().nonnegative(),
+        false_confident_at_1: z.number().int().nonnegative(),
+        false_confident_at_5: z.number().int().nonnegative(),
+        false_confident_at_10: z.number().int().nonnegative()
+      })
+      .strict()
+      .optional(),
+    miss_distribution: z.record(z.number().int().nonnegative())
+  })
+  .strict();
+export type QualityMetrics = z.infer<typeof QualityMetricsSchema>;
+
+// @anchor token-economy: event-sourced token-economy figures, all
+// derived from the bench run's EventLog (SOUL_SIGNAL_EMITTED for the
+// ingested/stored sides, SOUL_CONTEXT_LENS_ASSEMBLED for the recalled
+// side — see apps/bench-runner/src/harness/daemon.ts queryTokenMetrics).
+// The block is OPTIONAL so pre-S6 kpi.json records stay schema-valid;
+// new LongMemEval runs always populate it. token_saved_ratio_vs_full_prompt
+// (KpiCore) is the headline ratio derived from these raw counts.
+const TokenEconomySchema = z
+  .object({
+    schema_version: z.literal("bench-token-economy.v1"),
+    // Token size of the full ingested haystack — what an agent would
+    // otherwise carry as raw conversation context. Each source turn is
+    // counted exactly once (a turn that the production extractor fans out
+    // into N fact signals is not multiplied by N).
+    raw_history_tokens: z.number().int().nonnegative(),
+    // Tokens held in the materialized durable memory after ingestion,
+    // summed over every seeded fact.
+    stored_memory_tokens: z.number().int().nonnegative(),
+    // Tokens delivered, summed over every recall in the run.
+    recalled_context_tokens_total: z.number().int().nonnegative(),
+    // Number of recalls (SOUL_CONTEXT_LENS_ASSEMBLED events) observed.
+    recall_event_count: z.number().int().nonnegative(),
+    // Mean tokens delivered per recall: what an agent receives to answer
+    // one question instead of re-reading the whole history.
+    recalled_context_tokens_mean: z.number().nonnegative(),
+    // Count of SOUL_SIGNAL_EMITTED events the figures were derived from.
+    seed_event_count: z.number().int().nonnegative()
+  })
+  .strict();
+export type TokenEconomy = z.infer<typeof TokenEconomySchema>;
 
 const KpiCoreSchema = z.object({
   r_at_1: RatioSchema,
@@ -98,13 +265,23 @@ const KpiCoreSchema = z.object({
   provider_returned_rate: RatioSchema.optional(),
   provider_pending_rate: RatioSchema.optional(),
   provider_failed_rate: RatioSchema.optional(),
+  provider_not_requested_rate: RatioSchema.optional(),
+  embedding_vector_cache_ready_rate: RatioSchema.optional(),
+  query_embedding_cache_ready_rate: RatioSchema.optional(),
   latency_ms_p50: z.number().nonnegative(),
   latency_ms_p95: z.number().nonnegative(),
   latency_source: LatencySourceSchema,
   token_saved_ratio_vs_full_prompt: z.number(),
+  // Optional so pre-S6 kpi.json records stay schema-valid. When present,
+  // token_saved_ratio_vs_full_prompt is derived from this block.
+  token_economy: TokenEconomySchema.optional(),
   tier_distribution: TierDistributionSchema,
   degradation_reasons: DegradationReasonsSchema,
   seed_truncation: SeedTruncationSchema,
+  // Optional so older kpi.json records (pre seed-extraction disclosure)
+  // stay schema-valid; new LongMemEval runs always populate it.
+  seed_extraction_path: SeedExtractionPathSchema.optional(),
+  quality_metrics: QualityMetricsSchema.optional(),
   per_scenario: z.array(PerScenarioRowSchema)
 });
 export type KpiCore = z.infer<typeof KpiCoreSchema>;
@@ -115,6 +292,17 @@ const DiffVsPreviousSchema = z.object({
   verdict_per_kpi: z.record(Verdict)
 });
 export type DiffVsPrevious = z.infer<typeof DiffVsPreviousSchema>;
+
+export const SeedPolicySchema = z
+  .object({
+    mode: z.string().min(1),
+    label_independent: z.boolean(),
+    object_kind: z.string().min(1).optional(),
+    description: z.string().min(1).optional()
+  })
+  .strict()
+  .readonly();
+export type SeedPolicy = z.infer<typeof SeedPolicySchema>;
 
 /**
  * @anchor harness_mode — bench data-ingestion path; an audit-distinguishable label.
@@ -149,12 +337,19 @@ export const KpiPayloadSchema = z
     run_at: z.string(),
     alaya_commit: z.string().min(7),
     alaya_version: z.string().min(1),
+    recall_pipeline_version: z.string().min(1).optional(),
     embedding_provider: z.string(),
     chat_provider: z.string(),
+    policy_shape: BenchPolicyShapeSchema.default("stress"),
+    simulate_report: BenchSimulateReportModeSchema.default("none"),
+    recall_weight_overrides: RecallWeightOverridesSummarySchema.optional(),
+    seed_policy: SeedPolicySchema.optional(),
     dataset: z.object({
       name: z.string(),
       size: z.number().int().nonnegative(),
-      source: z.string()
+      source: z.string(),
+      checksum_sha256: z.string().min(1).optional(),
+      checksum_source: z.string().min(1).optional()
     }),
     // sample_size = the total questions / scenarios the dataset offers.
     //   LongMemEval Oracle full set = 500 (HuggingFace

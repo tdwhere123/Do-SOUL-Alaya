@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "bb9a2bd3848a8e0ee8915356ff4a8c3c4b5f9922f8dcdf9e611c648dfd4def8d",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"lighting\",\"confidence\":0.94,\"matched_text\":\"I've been loving the bright light from my new LED bulb in my bedside lamp - it's made a big difference.\",\"distilled_fact\":\"The user likes the bright light from a new LED bulb in the user's bedside lamp.\"}]}",
+  "extracted_at": "2026-05-21T09:04:38.702Z"
+}

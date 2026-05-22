@@ -2,6 +2,7 @@ import {
   EvidenceHealthState,
   MemoryDimension,
   MemoryGraphEdgeType,
+  PathGovernanceClass,
   ScopeClass,
   SourceKind,
   StorageTier,
@@ -17,6 +18,7 @@ import {
   type MemoryEntry,
   type MemoryGraphEdgeTypeValue,
   type OriginTier,
+  type PathRelation,
   type PrecedenceBasis as PrecedenceBasisValue,
   type ScopeClass as ScopeClassValue,
   type SourceKind as SourceKindValue,
@@ -48,6 +50,7 @@ export type RouteTarget =
   | "memory_entry_only"
   | "memory_and_claim_draft"
   | "conflict_evaluation"
+  | "path_relation_proposal"
   | "synthesis"
   | "handoff_gap"
   | "deferred";
@@ -144,6 +147,26 @@ interface ClaimMaterializationPort {
   create(input: ClaimMaterializationInput): Promise<MaterializationCreatedObject>;
 }
 
+export interface PathRelationProposalPayload {
+  readonly target_anchor: PathRelation["anchors"]["target_anchor"];
+  readonly constitution: PathRelation["constitution"];
+  readonly effect_vector: PathRelation["effect_vector"];
+  readonly plasticity_state: PathRelation["plasticity_state"];
+  readonly lifecycle: PathRelation["lifecycle"];
+  readonly legitimacy: PathRelation["legitimacy"];
+}
+
+export interface PathRelationProposalPort {
+  createPathRelationProposal(input: {
+    readonly workspaceId: string;
+    readonly runId: string;
+    readonly sourceSignalId: string;
+    readonly targetObjectId: string;
+    readonly reason: string;
+    readonly proposedPathRelation: PathRelationProposalPayload;
+  }): Promise<MaterializationCreatedObject>;
+}
+
 export interface GraphEdgeCreationPort {
   createEdge(params: {
     readonly sourceMemoryId: string;
@@ -181,14 +204,64 @@ export interface ConflictDetectionPort {
   }): Promise<void>;
 }
 
+// invariant: ingest-time reconciliation. The router asks this port what
+// to do with an incoming distilled fact before appending it: ADD (create
+// as today), UPDATE (an in-place refine applied to an existing row), or
+// NOOP (a near-exact lexical duplicate). The decision is computed in
+// @do-soul/alaya-core (the truth boundary) over the lexical FTS pool
+// plus, for the ambiguous band, an ingest-time LLM judge — Garden cannot
+// import core (invariants §6), so the decision arrives through this
+// port. When the port is absent the ingest path appends every fact
+// unchanged, so default production behavior is unchanged unless the
+// daemon wires it.
+//
+// decide-then-create: the decision is computed BEFORE any object is
+// created. The core service calls the router-supplied `applyVerdict`
+// callback once the verdict is known, inside its per-workspace lock:
+//   - add    -> the router creates the evidence_capsule + memory_entry
+//   - update -> the router creates the evidence_capsule; the core service
+//               then rewrites the target row and relinks that fresh
+//               evidence ref so durable content keeps matching evidence
+//   - noop   -> the router creates nothing; the drop is audited
+// NOOP creating no object is what makes a re-seed of the same haystack
+// idempotent — no fresh capsule is minted to accumulate on the surviving
+// row. `survivingObjectId` is the row that ends up holding the fact for
+// UPDATE / NOOP — the bench scoring sidecar remaps object_id -> answer
+// turn through it.
+// see also: packages/core/src/reconciliation-service.ts
+export interface ReconciliationDecisionView {
+  readonly kind: "add" | "update" | "noop";
+  /** The row that ends up holding the fact for UPDATE / NOOP. */
+  readonly survivingObjectId?: string;
+  readonly runConflictScan: boolean;
+  readonly reason: string;
+}
+
+export interface ReconciliationPort {
+  runWithDecision(
+    input: {
+      readonly workspaceId: string;
+      readonly runId: string;
+      readonly signalId: string;
+      readonly incomingContent: string;
+      readonly incomingDomainTags: readonly string[];
+    },
+    applyVerdict: (
+      verdict: ReconciliationDecisionView
+    ) => Promise<{ readonly incomingEvidenceRef?: string }>
+  ): Promise<ReconciliationDecisionView>;
+}
+
 export interface MaterializationRouterDeps {
   readonly evidenceService: EvidenceMaterializationPort;
   readonly memoryService: MemoryMaterializationPort;
   readonly synthesisService: SynthesisMaterializationPort;
   readonly claimService: ClaimMaterializationPort;
+  readonly pathRelationProposalPort?: PathRelationProposalPort;
   readonly handoffGapHandler: HandoffGapHandler;
   readonly graphEdgePort?: GraphEdgeCreationPort;
   readonly conflictDetectionPort?: ConflictDetectionPort;
+  readonly reconciliationPort?: ReconciliationPort;
 }
 
 export class MaterializationRouter {
@@ -248,6 +321,14 @@ export class MaterializationRouter {
       };
     }
 
+    if (signal.signal_kind === "potential_claim" && signal.object_kind === "path_relation") {
+      return {
+        kind: "deferred",
+        route_target: "path_relation_proposal",
+        routing_reason: "object_kind=path_relation -> path_relation_proposal"
+      };
+    }
+
     if (
       (signal.signal_kind === "potential_claim" || signal.signal_kind === "potential_preference") &&
       signal.confidence >= 0.5
@@ -301,6 +382,9 @@ export class MaterializationRouter {
     if (target.route_target === "conflict_evaluation") {
       return await this.materializeConflictEvaluation(signal, target);
     }
+    if (target.route_target === "path_relation_proposal") {
+      return await this.materializePathRelationProposal(signal, target);
+    }
     if (target.route_target === "signal_only") {
       return this.materializeDeferred(signal, target);
     }
@@ -331,6 +415,11 @@ export class MaterializationRouter {
     }
   }
 
+  // invariant: ingest reconciliation covers the materializeMemoryEntryOnly
+  // path only (the bench `fact` object_kind). materialize_and_claim is
+  // intentionally NOT reconciled in v0.3.10 — a claim-bearing signal
+  // carries governance structure whose dedup is the conflict / claim
+  // surface's job, not the lexical ingest gate.
   private async materializeMemoryAndClaim(
     signal: CandidateMemorySignal,
     target: MaterializationTarget
@@ -391,29 +480,16 @@ export class MaterializationRouter {
         "incompatible_with_refs",
         MemoryGraphEdgeType.INCOMPATIBLE_WITH
       );
-      // ConflictDetectionService: rule-based + optional LLM scan for
-      // memories in the same workspace that contradict / are incompatible
-      // with the freshly materialized one. Edges created here complement
-      // the caller-explicit hints above.
-      if (this.dependencies.conflictDetectionPort !== undefined) {
-        try {
-          await this.dependencies.conflictDetectionPort.detectAndLinkConflicts({
-            newMemoryId: memory.object_id,
-            newMemoryDimension: toMemoryDimension(signal.object_kind),
-            newMemoryScopeClass: toScopeClass(signal.scope_hint),
-            newMemoryContent: buildDistilledFact(signal),
-            newMemoryDomainTags: signal.domain_tags,
-            workspaceId: signal.workspace_id,
-            runId: signal.run_id
-          });
-        } catch (err) {
-          console.warn("materialization-router: conflict detection failed", {
-            memoryId: memory.object_id,
-            signalId: signal.signal_id,
-            error: err instanceof Error ? err.message : String(err)
-          });
-        }
+      const timeConcernProposal = await this.createTimeConcernPathRelationProposal(
+        memory.object_id,
+        signal
+      );
+      if (timeConcernProposal !== null) {
+        createdObjects.push(timeConcernProposal);
       }
+      // Edges created by the conflict scan complement the caller-explicit
+      // hints above. see also: runConflictScan.
+      await this.runConflictScan(memory.object_id, signal);
 
       return {
         signal_id: signal.signal_id,
@@ -538,18 +614,50 @@ export class MaterializationRouter {
   // remembering but not governance-mutating (a claim would over-promote
   // the signal into a draft awaiting review).
   // see also: materializeMemoryAndClaim — adds the claim_form layer.
+  // When a reconciliationPort is wired the incoming distilled fact is
+  // reconciled against the existing lexical pool: a near-exact lexical
+  // duplicate is dropped (NOOP), an LLM-judged refinement updates an
+  // existing row in place (UPDATE), and only a distinct fact is appended
+  // (ADD). Without the port every fact is appended — the unchanged
+  // default behavior.
   private async materializeMemoryEntryOnly(
     signal: CandidateMemorySignal,
     target: MaterializationTarget
   ): Promise<MaterializationResult> {
-    const createdObjects: Array<{ object_kind: string; object_id: string }> = [];
+    if (this.dependencies.reconciliationPort !== undefined) {
+      return await this.materializeReconciledMemoryEntry(
+        signal,
+        target,
+        this.dependencies.reconciliationPort
+      );
+    }
+    return await this.materializeMemoryEntryAppend(signal, target);
+  }
 
+  // invariant: the unchanged default ingest path — every fact is
+  // appended (evidence_capsule + memory_entry), no reconciliation. Also
+  // the fallback when reconciliation throws.
+  private async materializeMemoryEntryAppend(
+    signal: CandidateMemorySignal,
+    target: MaterializationTarget
+  ): Promise<MaterializationResult> {
+    const createdObjects: Array<{ object_kind: string; object_id: string }> = [];
     try {
       const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal));
       createdObjects.push({ object_kind: evidence.object_kind, object_id: evidence.object_id });
 
-      const memory = await this.dependencies.memoryService.create(buildMemoryInput(signal, [evidence.object_id]));
+      const memory = await this.dependencies.memoryService.create(
+        buildMemoryInput(signal, [evidence.object_id])
+      );
       createdObjects.push({ object_kind: memory.object_kind, object_id: memory.object_id });
+
+      const timeConcernProposal = await this.createTimeConcernPathRelationProposal(
+        memory.object_id,
+        signal
+      );
+      if (timeConcernProposal !== null) {
+        createdObjects.push(timeConcernProposal);
+      }
 
       return {
         signal_id: signal.signal_id,
@@ -574,6 +682,202 @@ export class MaterializationRouter {
         error: readErrorMessage(error)
       };
     }
+  }
+
+  // invariant: decide-then-create ingest path. The core service computes
+  // the verdict FIRST, then calls the applyVerdict callback inside its
+  // per-workspace lock. The callback creates objects strictly per
+  // verdict: ADD -> evidence_capsule + memory_entry; UPDATE ->
+  // evidence_capsule only (the core service then rewrites the target row
+  // and relinks the ref); NOOP -> nothing. NOOP minting no fresh capsule
+  // is what keeps a re-seed of the same haystack idempotent.
+  //
+  // The evidence_capsule is created lazily and at most once: on a rare
+  // UPDATE-apply failure the core service re-invokes applyVerdict with a
+  // degraded ADD verdict, and the cached capsule ref is reused so the
+  // memory_entry is appended against the already-created evidence.
+  private async materializeReconciledMemoryEntry(
+    signal: CandidateMemorySignal,
+    target: MaterializationTarget,
+    port: ReconciliationPort
+  ): Promise<MaterializationResult> {
+    const createdObjects: Array<{ object_kind: string; object_id: string }> = [];
+    let evidenceId: string | undefined;
+    let appendedMemoryId: string | undefined;
+    let conflictScanMemoryId: string | undefined;
+
+    const ensureEvidence = async (): Promise<string> => {
+      if (evidenceId === undefined) {
+        const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal));
+        evidenceId = evidence.object_id;
+        createdObjects.push({ object_kind: evidence.object_kind, object_id: evidence.object_id });
+      }
+      return evidenceId;
+    };
+
+    try {
+      const decision = await port.runWithDecision(
+        {
+          workspaceId: signal.workspace_id,
+          runId: signal.run_id,
+          signalId: signal.signal_id,
+          incomingContent: buildDistilledFact(signal),
+          incomingDomainTags: signal.domain_tags
+        },
+        async (verdict) => {
+          if (verdict.kind === "noop") {
+            // NOOP creates nothing — no evidence_capsule, no
+            // memory_entry. There is no orphan to relink.
+            return {};
+          }
+          const evidenceRef = await ensureEvidence();
+          if (verdict.kind === "update") {
+            // The core service rewrites the target row and relinks this
+            // ref; the router creates no memory_entry on this branch.
+            return { incomingEvidenceRef: evidenceRef };
+          }
+          // ADD: append the memory_entry against the fresh evidence.
+          const memory = await this.dependencies.memoryService.create(
+            buildMemoryInput(signal, [evidenceRef])
+          );
+          appendedMemoryId = memory.object_id;
+          createdObjects.push({ object_kind: memory.object_kind, object_id: memory.object_id });
+          if (verdict.runConflictScan) {
+            conflictScanMemoryId = memory.object_id;
+          }
+          return { incomingEvidenceRef: evidenceRef };
+        }
+      );
+
+      if (appendedMemoryId !== undefined) {
+        const timeConcernProposal = await this.createTimeConcernPathRelationProposal(
+          appendedMemoryId,
+          signal
+        );
+        if (timeConcernProposal !== null) {
+          createdObjects.push(timeConcernProposal);
+        }
+      }
+
+      // invariant: DELETE / supersede is the ConflictDetectionService's
+      // job. Reconciliation only flags that the new fact has a same-topic
+      // divergent neighbor; the contradicts / superseded_by edge + karma
+      // are produced by the existing conflict scan, not a new path.
+      if (conflictScanMemoryId !== undefined) {
+        await this.runConflictScan(conflictScanMemoryId, signal);
+      }
+
+      const reconciledObjects =
+        decision.kind !== "add" && decision.survivingObjectId !== undefined
+          ? [
+              ...createdObjects,
+              { object_kind: "memory_entry", object_id: decision.survivingObjectId }
+            ]
+          : createdObjects;
+
+      return {
+        signal_id: signal.signal_id,
+        target_kind: "evidence_only",
+        route_target: target.route_target,
+        routing_reason:
+          decision.kind === "add"
+            ? target.routing_reason
+            : `${target.routing_reason} — reconciled: ${decision.reason}`,
+        created_objects: reconciledObjects,
+        success: true
+      };
+    } catch (error) {
+      // A reconciliation backend failure must never drop the fact:
+      // fall back to the unchanged blind-append path. The evidence
+      // capsule may already exist from a partial applyVerdict run; the
+      // append path mints its own, so a transient failure costs at most
+      // one orphan capsule, never a lost fact.
+      console.warn("materialization-router: reconciliation failed", {
+        signalId: signal.signal_id,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return await this.materializeMemoryEntryAppend(signal, target);
+    }
+  }
+
+  // ConflictDetectionService: rule-based + optional LLM scan for memories
+  // in the same workspace that contradict / are incompatible with the
+  // freshly materialized one. Detection failure must not break a
+  // successful memory creation.
+  private async runConflictScan(
+    memoryId: string,
+    signal: CandidateMemorySignal
+  ): Promise<void> {
+    const port = this.dependencies.conflictDetectionPort;
+    if (port === undefined) {
+      return;
+    }
+    try {
+      await port.detectAndLinkConflicts({
+        newMemoryId: memoryId,
+        newMemoryDimension: toMemoryDimension(signal.object_kind),
+        newMemoryScopeClass: toScopeClass(signal.scope_hint),
+        newMemoryContent: buildDistilledFact(signal),
+        newMemoryDomainTags: signal.domain_tags,
+        workspaceId: signal.workspace_id,
+        runId: signal.run_id
+      });
+    } catch (err) {
+      console.warn("materialization-router: conflict detection failed", {
+        memoryId,
+        signalId: signal.signal_id,
+        error: err instanceof Error ? err.message : String(err)
+      });
+    }
+  }
+
+  private async materializePathRelationProposal(
+    signal: CandidateMemorySignal,
+    target: MaterializationTarget
+  ): Promise<MaterializationResult> {
+    const targetObjectId = readStringPayload(signal.raw_payload, "target_object_id");
+    if (targetObjectId === null) {
+      return {
+        signal_id: signal.signal_id,
+        target_kind: "deferred",
+        route_target: target.route_target,
+        routing_reason: `${target.routing_reason} — deferred: target_object_id missing`,
+        created_objects: [],
+        success: true
+      };
+    }
+
+    const created = await this.createTimeConcernPathRelationProposal(targetObjectId, signal);
+    return {
+      signal_id: signal.signal_id,
+      target_kind: "deferred",
+      route_target: target.route_target,
+      routing_reason: target.routing_reason,
+      created_objects: created === null ? [] : [created],
+      success: true
+    };
+  }
+
+  private async createTimeConcernPathRelationProposal(
+    targetObjectId: string,
+    signal: CandidateMemorySignal
+  ): Promise<MaterializationCreatedObject | null> {
+    const port = this.dependencies.pathRelationProposalPort;
+    if (port === undefined) {
+      return null;
+    }
+    const timeConcern = readTimeConcernPayload(signal.raw_payload);
+    if (timeConcern === null) {
+      return null;
+    }
+    return await port.createPathRelationProposal({
+      workspaceId: signal.workspace_id,
+      runId: signal.run_id,
+      sourceSignalId: signal.signal_id,
+      targetObjectId,
+      reason: `Create time_concern PathRelation for ${timeConcern.matched_text}.`,
+      proposedPathRelation: buildTimeConcernPathRelationProposal(targetObjectId, timeConcern)
+    });
   }
 
   // invariant: potential_conflict route sink. evaluate is the only
@@ -779,6 +1083,79 @@ function routeByObjectKind(objectKind: string): MaterializationTarget | null {
   }
 }
 
+interface TimeConcernPayload {
+  readonly window_digest: string;
+  readonly matched_text: string;
+}
+
+function readTimeConcernPayload(rawPayload: CandidateMemorySignal["raw_payload"]): TimeConcernPayload | null {
+  const timeConcern = rawPayload.time_concern;
+  if (timeConcern === null || typeof timeConcern !== "object" || Array.isArray(timeConcern)) {
+    return null;
+  }
+  const candidate = timeConcern as Record<string, unknown>;
+  const windowDigest = normalizePayloadString(candidate.window_digest);
+  const matchedText = normalizePayloadString(candidate.matched_text);
+  if (windowDigest === null || matchedText === null) {
+    return null;
+  }
+  return { window_digest: windowDigest, matched_text: matchedText };
+}
+
+function readStringPayload(
+  rawPayload: CandidateMemorySignal["raw_payload"],
+  key: string
+): string | null {
+  return normalizePayloadString(rawPayload[key]);
+}
+
+function normalizePayloadString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim();
+  return normalized.length === 0 ? null : normalized;
+}
+
+function buildTimeConcernPathRelationProposal(
+  targetObjectId: string,
+  timeConcern: TimeConcernPayload
+): PathRelationProposalPayload {
+  return {
+    target_anchor: {
+      kind: "time_concern",
+      source_object_id: targetObjectId,
+      window_digest: timeConcern.window_digest
+    },
+    constitution: {
+      relation_kind: "time_concern",
+      why_this_relation_exists: [`matched temporal expression: ${timeConcern.matched_text}`]
+    },
+    effect_vector: {
+      salience: 0.6,
+      recall_bias: 0.7,
+      verification_bias: 0.1,
+      unfinishedness_bias: 0,
+      default_manifestation_preference: "lens_entry"
+    },
+    plasticity_state: {
+      strength: 0.4,
+      direction_bias: "source_to_target",
+      stability_class: "normal",
+      support_events_count: 1,
+      contradiction_events_count: 0
+    },
+    lifecycle: {
+      status: "active",
+      retirement_rule: "janitor_ttl_low_strength"
+    },
+    legitimacy: {
+      evidence_basis: ["garden:time_concern"],
+      governance_class: PathGovernanceClass.RECALL_ALLOWED
+    }
+  };
+}
+
 function computeEvidenceHealthState(signal: CandidateMemorySignal): EvidenceHealthStateValue {
   // Invariant #16: objects without evidence_refs must default to questionable,
   // not verified. Signals from local heuristics carry no supporting evidence.
@@ -822,7 +1199,7 @@ function buildEvidenceInput(
       event_id: null,
       occurred_at: signal.created_at
     },
-    physical_anchor: null,
+    physical_anchor: buildSignalPhysicalAnchor(signal),
     evidence_health_state: computeEvidenceHealthState(signal),
     gist: appendSummarySuffix(excerpt, summarySuffix),
     excerpt,
@@ -830,6 +1207,20 @@ function buildEvidenceInput(
     run_id: signal.run_id,
     workspace_id: signal.workspace_id,
     surface_id: signal.surface_id
+  };
+}
+
+function buildSignalPhysicalAnchor(signal: CandidateMemorySignal): EvidenceCapsule["physical_anchor"] {
+  const artifactRef = signal.evidence_refs.find((ref) => ref.trim().length > 0)?.trim() ?? null;
+  if (artifactRef === null) {
+    return null;
+  }
+
+  return {
+    file_path: null,
+    line_range: null,
+    symbol_name: null,
+    artifact_ref: artifactRef
   };
 }
 
@@ -1003,12 +1394,20 @@ function toClaimKind(objectKind: string): ClaimKind {
   switch (objectKind) {
     case "preference":
       return "preference";
+    case "decision":
+      return "decision";
     case "procedure":
       return "procedure";
+    case "hazard":
+      return "hazard";
     case "factual_policy":
       return "factual_policy";
     case "exception":
       return "exception";
+    case "glossary":
+      return "glossary";
+    case "episode":
+      return "episode";
     case "constraint":
     default:
       return "constraint";
@@ -1064,17 +1463,28 @@ function buildSignalSummary(signal: CandidateMemorySignal): string {
 // in EvidenceCapsule.gist / .excerpt. Caller (LLM / user / bench harness)
 // may supply raw_payload.distilled_fact directly; otherwise a rule-based
 // fallback takes the first two sentences capped at DISTILLED_FACT_MAX_CHARS.
-const DISTILLED_FACT_MAX_CHARS = 280;
+// Single source of truth for the distilled-fact length budget: the
+// official-API garden provider clamps raw_payload.distilled_fact to this
+// same constant. see also: garden/compute-provider.ts.
+// invariant: kept <= AUDIT_DROPPED_CONTENT_MAX_CHARS (500) in
+// packages/core/src/reconciliation-service.ts so a dropped fact stays
+// fully reconstructable from the reconciliation audit row.
+export const DISTILLED_FACT_MAX_CHARS = 500;
 const DISTILLED_FACT_MAX_SENTENCES = 2;
 
-function buildDistilledFact(signal: CandidateMemorySignal): string {
+export function buildDistilledFact(signal: CandidateMemorySignal): string {
   const providedDistilled = signal.raw_payload.distilled_fact;
   if (typeof providedDistilled === "string") {
     const trimmed = providedDistilled.trim();
     if (trimmed.length > 0) {
+      // A caller-supplied distilled_fact is already a resolved
+      // one-assertion fact; use it verbatim when within cap. The "..."
+      // truncation belongs only to ruleDistillFromRaw (raw -> distilled).
+      // An over-cap supplied fact is not the normal path once the
+      // provider clamps to DISTILLED_FACT_MAX_CHARS — clamp defensively.
       return trimmed.length <= DISTILLED_FACT_MAX_CHARS
         ? trimmed
-        : `${trimmed.slice(0, DISTILLED_FACT_MAX_CHARS - 3)}...`;
+        : trimmed.slice(0, DISTILLED_FACT_MAX_CHARS);
     }
   }
   return ruleDistillFromRaw(buildSignalSummary(signal));

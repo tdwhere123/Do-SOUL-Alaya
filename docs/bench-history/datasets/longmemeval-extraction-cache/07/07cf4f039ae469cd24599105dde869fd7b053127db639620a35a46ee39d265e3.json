@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "07cf4f039ae469cd24599105dde869fd7b053127db639620a35a46ee39d265e3",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"media_interest\",\"confidence\":0.78,\"matched_text\":\"recommend some sci-fi movies\",\"distilled_fact\":\"The user is interested in sci-fi movies.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"platform_availability_request\",\"confidence\":0.66,\"matched_text\":\"currently available on Netflix\",\"distilled_fact\":\"The user wants sci-fi movies that are currently available on Netflix.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"time_planning\",\"confidence\":0.61,\"matched_text\":\"I'm trying to plan my weekend\",\"distilled_fact\":\"The user is trying to plan their weekend.\"}]}",
+  "extracted_at": "2026-05-21T07:52:58.784Z"
+}

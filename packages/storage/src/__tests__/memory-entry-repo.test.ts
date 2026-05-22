@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   FormationKind,
@@ -853,6 +856,158 @@ describe("SqliteMemoryEntryRepo", () => {
     expect(() => {
       (created as any).content = "mutated";
     }).toThrow(TypeError);
+  });
+
+  it("matches an English query through the porter word-stemmed FTS index", async () => {
+    const { repo } = await createRepo();
+    await repo.create(
+      createMemoryEntry({
+        object_id: "e1111111-1111-4111-8111-111111111111",
+        content: "The team agreed to refactor the recall ranking pipeline."
+      })
+    );
+    await repo.create(
+      createMemoryEntry({
+        object_id: "e2222222-2222-4222-8222-222222222222",
+        run_id: "run-2",
+        content: "Governance reviews need durable evidence."
+      })
+    );
+
+    // "agree" / "refactoring" only match via porter stemming of the stored
+    // "agreed" / "refactor"; the trigram table cannot bridge these.
+    await expect(repo.searchByKeyword("workspace-1", "agree", 5)).resolves.toEqual([
+      { object_id: "e1111111-1111-4111-8111-111111111111", normalized_rank: 1 }
+    ]);
+    await expect(repo.searchByKeyword("workspace-1", "refactoring", 5)).resolves.toEqual([
+      { object_id: "e1111111-1111-4111-8111-111111111111", normalized_rank: 1 }
+    ]);
+  });
+
+  it("matches a Chinese query through the trigram index in the dual-index setup", async () => {
+    const { repo } = await createRepo();
+    await repo.create(
+      createMemoryEntry({
+        object_id: "c1111111-1111-4111-8111-111111111111",
+        content: "请记住中文路径需要逐字保留，避免命名漂移。"
+      })
+    );
+    await repo.create(
+      createMemoryEntry({
+        object_id: "c2222222-2222-4222-8222-222222222222",
+        run_id: "run-2",
+        content: "英文路径在这个用例里不重要。"
+      })
+    );
+
+    await expect(repo.searchByKeyword("workspace-1", "中文路径", 5)).resolves.toEqual([
+      { object_id: "c1111111-1111-4111-8111-111111111111", normalized_rank: 1 }
+    ]);
+  });
+
+  it("routes a mixed Chinese-and-English query across both FTS indexes", async () => {
+    const { repo } = await createRepo();
+    await repo.create(
+      createMemoryEntry({
+        object_id: "d1111111-1111-4111-8111-111111111111",
+        content: "The migration agreed to keep 中文路径 stable."
+      })
+    );
+    await repo.create(
+      createMemoryEntry({
+        object_id: "d2222222-2222-4222-8222-222222222222",
+        run_id: "run-2",
+        content: "An unrelated note about deployment scripts."
+      })
+    );
+
+    const matches = await repo.searchByKeyword("workspace-1", "agreed 中文路径", 5);
+    expect(matches.map((match) => match.object_id)).toEqual([
+      "d1111111-1111-4111-8111-111111111111"
+    ]);
+  });
+
+  it("backfills the porter FTS index from rows that pre-date the porter table", async () => {
+    const { database, repo } = await createRepo();
+    await repo.create(
+      createMemoryEntry({
+        object_id: "f1111111-1111-4111-8111-111111111111",
+        content: "Indexing reconciliation collapses duplicated facts."
+      })
+    );
+
+    // Simulate an existing database that pre-dates migration 077: drop the
+    // porter table and its triggers, then re-run the migration's backfill +
+    // trigger SQL. A correct migration must reindex the pre-existing row.
+    database.connection.exec(`
+      DROP TRIGGER IF EXISTS memory_content_fts_porter_ai;
+      DROP TRIGGER IF EXISTS memory_content_fts_porter_ad;
+      DROP TRIGGER IF EXISTS memory_content_fts_porter_au;
+      DROP TABLE IF EXISTS memory_content_fts_porter;
+    `);
+
+    const migrationsDir = path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "../migrations"
+    );
+    const migrationSql = fs.readFileSync(
+      path.join(migrationsDir, "077-memory-content-fts-dual.sql"),
+      "utf8"
+    );
+    database.connection.exec(migrationSql);
+
+    const porterRows = database.connection
+      .prepare(
+        `SELECT object_id FROM memory_content_fts_porter
+         WHERE workspace_id = ? AND memory_content_fts_porter MATCH ?`
+      )
+      .all("workspace-1", '"duplicate"') as Array<{ readonly object_id: string }>;
+
+    expect(porterRows.map((row) => row.object_id)).toEqual([
+      "f1111111-1111-4111-8111-111111111111"
+    ]);
+  });
+
+  it("keeps the porter FTS index live on delete and content update", async () => {
+    const { database, repo } = await createRepo();
+    const entry = await repo.create(
+      createMemoryEntry({
+        object_id: "a9999999-1111-4111-8111-111111111111",
+        content: "The scheduler retried the stalled task."
+      })
+    );
+
+    const porterMatch = (token: string): readonly string[] =>
+      (
+        database.connection
+          .prepare(
+            `SELECT object_id FROM memory_content_fts_porter
+             WHERE workspace_id = ? AND memory_content_fts_porter MATCH ?`
+          )
+          .all("workspace-1", `"${token}"`) as Array<{ readonly object_id: string }>
+      ).map((row) => row.object_id);
+
+    expect(porterMatch("retry")).toEqual(["a9999999-1111-4111-8111-111111111111"]);
+
+    await repo.update(entry.object_id, {
+      content: "The scheduler cancelled the queued job.",
+      updated_at: "2026-03-21T01:00:00.000Z"
+    });
+    expect(porterMatch("retry")).toEqual([]);
+    expect(porterMatch("cancel")).toEqual(["a9999999-1111-4111-8111-111111111111"]);
+
+    await repo.hardDeleteTombstoned(entry.object_id).catch(() => undefined);
+    await repo.create(
+      createMemoryEntry({
+        object_id: "b9999999-2222-4222-8222-222222222222",
+        run_id: "run-2",
+        content: "A second deletable note about caching."
+      })
+    );
+    database.connection
+      .prepare("DELETE FROM memory_entries WHERE object_id = ?")
+      .run("b9999999-2222-4222-8222-222222222222");
+    expect(porterMatch("cach")).toEqual([]);
   });
 });
 

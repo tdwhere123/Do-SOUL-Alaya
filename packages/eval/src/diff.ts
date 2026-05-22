@@ -27,12 +27,12 @@ export function diffKpis(
     };
   }
 
-  // @anchor sample-too-small — see thresholds.min_sample_for_ratio_diff.
+  // @anchor sample-too-small: see thresholds.min_sample_for_ratio_diff.
   // Whenever either side of the diff has evaluated_count below the
   // guard, ratio-based + latency + tier-share aggregates are variance
   // noise (e.g. smoke 1-shard vs full 2-shard latency, or current=smoke
   // vs previous=full giving spurious deltas). Downgrade FAIL to WARN
-  // universally. Fixture flips remain FAIL — pass/fail per row is not
+  // universally. Fixture flips remain FAIL; pass/fail per row is not
   // sample-size sensitive.
   const undersampled =
     Math.min(previous.evaluated_count, current.evaluated_count) <
@@ -78,6 +78,32 @@ export function diffKpis(
     thresholds.token_saved_drop_pp,
     downgradeFail
   );
+
+  // @anchor token-economy-diff: secondary token-economy signal. The ratio
+  // above is the headline; this surfaces a swelling per-recall payload even
+  // when the ratio happens to stay flat (e.g. raw history grew in step).
+  // Gated on BOTH sides carrying the event-sourced token_economy block so a
+  // pre-S6 baseline never produces a spurious delta. Reuses the latency
+  // growth classifier — a bigger recalled-context mean is "growth_bad".
+  const currentEconomy = current.kpi.token_economy;
+  const previousEconomy = previous.kpi.token_economy;
+  if (currentEconomy !== undefined && previousEconomy !== undefined) {
+    const meanVerdict = classifyLatencyGrowth(
+      currentEconomy.recalled_context_tokens_mean,
+      previousEconomy.recalled_context_tokens_mean,
+      thresholds.latency_p95_growth_ratio
+    );
+    deltas.push({
+      key: "token_economy.recalled_context_tokens_mean",
+      current: currentEconomy.recalled_context_tokens_mean,
+      previous: previousEconomy.recalled_context_tokens_mean,
+      delta:
+        currentEconomy.recalled_context_tokens_mean -
+        previousEconomy.recalled_context_tokens_mean,
+      verdict: downgradeFail(meanVerdict.verdict),
+      direction: "growth_bad"
+    });
+  }
 
   const latencyVerdict = classifyLatencyGrowth(
     current.kpi.latency_ms_p95,

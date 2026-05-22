@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "bc0f3f49dd53ee746f074a10822e1d1f19f5b930909900bbed2e23515df15438",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"topic\",\"confidence\":0.91,\"matched_text\":\"how do you calculate a sorcerors spell save dc\",\"distilled_fact\":\"The user is asking how to calculate a sorceror's spell save DC.\"}]}",
+  "extracted_at": "2026-05-21T07:55:16.116Z"
+}

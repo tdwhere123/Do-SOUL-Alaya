@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "24aeed599dbd17060f6105e1c1ce4d87e49d77f2c4c735f845114825250673cc",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"plant\",\"confidence\":0.81,\"matched_text\":\"I'll make sure to prune it regularly to keep it bushy and healthy.\",\"distilled_fact\":\"The user will prune their Mint plant regularly to keep it bushy and healthy.\"},{\"signal_kind\":\"potential_interest\",\"object_kind\":\"plant_type\",\"confidence\":0.84,\"matched_text\":\"I was thinking about getting some new plants for my living room.\",\"distilled_fact\":\"The user is thinking about getting some new plants for their living room.\"},{\"signal_kind\":\"potential_request\",\"object_kind\":\"recommendation\",\"confidence\":0.77,\"matched_text\":\"Do you have any recommendations for low-maintenance plants that can tolerate indoor conditions?\",\"distilled_fact\":\"The user wants recommendations for low-maintenance plants that can tolerate indoor conditions.\"}]}",
+  "extracted_at": "2026-05-21T09:20:56.677Z"
+}

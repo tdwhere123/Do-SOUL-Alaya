@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "f0e50b829d5bb48847c1f65d6fe8d8909dd2d93016babdc436fa8db339aad77c",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"presentation_topic\",\"confidence\":0.94,\"matched_text\":\"User: Write a topic outline for a presentation on the pricing strategy for a company that produces bicycles in Britain during the period of 2014 to 2021.\",\"distilled_fact\":\"The presentation topic is the pricing strategy for a company that produces bicycles in Britain during the period from 2014 to 2021.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"presentation_content\",\"confidence\":0.91,\"matched_text\":\"Specifically, cover major trends in supply and demand, and factors related to price elasticity.\",\"distilled_fact\":\"The presentation should cover major trends in supply and demand and factors related to price elasticity.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"presentation_conclusion\",\"confidence\":0.89,\"matched_text\":\"Conclude if the company should change its pricing strategy from 2020 going forward.\",\"distilled_fact\":\"The presentation should conclude whether the company should change its pricing strategy from 2020 going forward.\"}]}",
+  "extracted_at": "2026-05-21T09:23:23.677Z"
+}

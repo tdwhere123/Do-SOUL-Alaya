@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "59dd265c1f04c1295a4e3a0635ba5a50bfd81ebd7a79754b80574f8231f5eba0",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"concern\",\"confidence\":0.78,\"matched_text\":\"I didn't know plastic pollution was such a big problem for sea turtles.\",\"distilled_fact\":\"The speaker did not know that plastic pollution was such a big problem for sea turtles.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"intent\",\"confidence\":0.74,\"matched_text\":\"What can I do to help reduce the amount of plastic in the ocean?\",\"distilled_fact\":\"The speaker wants to help reduce the amount of plastic in the ocean.\"}]}",
+  "extracted_at": "2026-05-21T07:54:48.460Z"
+}

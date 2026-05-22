@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "20b9980f9848033aab9da3fcde9737e3932975080f99110004f1e787efb81b50",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"cooking_preference\",\"confidence\":0.96,\"matched_text\":\"I think I'll try to add some garlic and ginger to my stir-fry for extra flavor.\",\"distilled_fact\":\"The user plans to add some garlic and ginger to their stir-fry for extra flavor.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"food_usage\",\"confidence\":0.94,\"matched_text\":\"I've been using soy sauce and hoisin sauce, but I'd like to try something new.\",\"distilled_fact\":\"The user has been using soy sauce and hoisin sauce in their stir-fry.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"food_preference\",\"confidence\":0.91,\"matched_text\":\"I'd like to try something new.\",\"distilled_fact\":\"The user would like to try a new stir-fry sauce.\"}]}",
+  "extracted_at": "2026-05-21T09:22:31.770Z"
+}

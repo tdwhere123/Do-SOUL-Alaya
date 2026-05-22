@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "97335fa504ae0b37eac400c2f4ce712d06e6ef715809ae84f2ad53b68655ebc0",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user\",\"confidence\":0.96,\"matched_text\":\"User: I graduated with a degree in Business Administration\",\"distilled_fact\":\"The user graduated with a degree in Business Administration.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user\",\"confidence\":0.77,\"matched_text\":\"which has definitely helped me in my new role.\",\"distilled_fact\":\"The user's degree in Business Administration has definitely helped the user in the user's new role.\"}]}",
+  "extracted_at": "2026-05-21T09:10:33.399Z"
+}

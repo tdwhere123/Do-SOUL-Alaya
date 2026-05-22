@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "a2a1c3866e30b89c448eda971c8ad27e57049bde644e9b92bdce14fbf3787c99",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"game_titles\",\"confidence\":0.86,\"matched_text\":\"I'll definitely check those out, especially God of War and Horizon Zero Dawn.\",\"distilled_fact\":\"The speaker definitely plans to check out God of War and Horizon Zero Dawn.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"opinion\",\"confidence\":0.66,\"matched_text\":\"I've heard great things about them.\",\"distilled_fact\":\"The speaker has heard great things about God of War and Horizon Zero Dawn.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"hardware\",\"confidence\":0.72,\"matched_text\":\"Do you think I'll need to upgrade my PS5's storage capacity to play these games, or will the default storage be enough?\",\"distilled_fact\":\"The speaker has a PS5 with default storage capacity.\"}]}",
+  "extracted_at": "2026-05-21T08:13:23.026Z"
+}

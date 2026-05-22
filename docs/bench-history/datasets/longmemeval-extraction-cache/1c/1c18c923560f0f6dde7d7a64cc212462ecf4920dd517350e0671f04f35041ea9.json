@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "1c18c923560f0f6dde7d7a64cc212462ecf4920dd517350e0671f04f35041ea9",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.72,\"matched_text\":\"I'm also thinking of getting my road bike tuned up\",\"distilled_fact\":\"The speaker is thinking of getting their road bike tuned up.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"experience\",\"confidence\":0.86,\"matched_text\":\"I've been noticing a loud rattling noise when I ride\",\"distilled_fact\":\"The speaker has been noticing a loud rattling noise when they ride their road bike.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"preference_consideration\",\"confidence\":0.55,\"matched_text\":\"Do you think I should take it to a bike shop or can I do it myself with some basic tools?\",\"distilled_fact\":\"The speaker is considering whether to take their road bike to a bike shop or do the tune-up themselves with some basic tools.\"}]}",
+  "extracted_at": "2026-05-21T07:48:14.733Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7689fb419e99c91059034003ef6af9abf48415df8e6e046d0e48eb70e1fa923f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"question\",\"confidence\":0.63,\"matched_text\":\"Are there specific supplements that are more effective for bodybuilding?\",\"distilled_fact\":\"The user asked whether specific supplements are more effective for bodybuilding.\"}]}",
+  "extracted_at": "2026-05-21T08:00:25.660Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "53b30de265e9e78530554b39fee1bbfda19fb9e23238dfff87938e5421752728",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"topic_interest\",\"confidence\":0.82,\"matched_text\":\"Do you have any recommendations for affordable surf schools in those areas?\",\"distilled_fact\":\"The user is interested in recommendations for affordable surf schools in those areas.\"}]}",
+  "extracted_at": "2026-05-21T08:12:33.998Z"
+}

@@ -1,16 +1,23 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   FormationKind,
+  GreenGovernanceEventType,
+  GreenState,
   MemoryDimension,
   MemoryGovernanceEventType,
+  RevokeReason,
   RetentionPolicy,
   ScopeClass,
   SourceKind,
   StorageTier,
+  VerificationBasis,
+  VerifiedBy,
+  type GreenStatus,
   type MemoryEntry,
   type Proposal
 } from "@do-soul/alaya-protocol";
 import { initDatabase, type StorageDatabase } from "../db.js";
+import { SqliteGreenStatusRepo } from "../repos/green-status-repo.js";
 import { SqliteMemoryEntryRepo } from "../repos/memory-entry-repo.js";
 import { SqliteProposalRepo, type ProposalResolutionEventInput } from "../repos/proposal-repo.js";
 
@@ -86,6 +93,31 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   };
 }
 
+function createGreenStatus(overrides: Partial<GreenStatus> = {}): GreenStatus {
+  return {
+    object_id: "9a20e051-a559-4e0c-9a9a-09221dd87453",
+    object_kind: "green_status",
+    schema_version: 1,
+    lifecycle_state: "active",
+    created_at: "2026-03-21T00:00:00.000Z",
+    updated_at: "2026-03-21T00:00:00.000Z",
+    created_by: "system",
+    target_object_id: "f8b2124d-4954-4ea0-a77e-ad4b137ed8ee",
+    target_object_kind: "memory_entry",
+    green_state: GreenState.ELIGIBLE,
+    verification_basis: VerificationBasis.PASSIVE_STABLE,
+    verified_by: VerifiedBy.AUDITOR,
+    verified_at: "2026-03-21T00:00:00.000Z",
+    valid_until: null,
+    bound_surfaces: [],
+    bound_scope_class: ScopeClass.PROJECT,
+    revoke_reason: RevokeReason.NONE,
+    last_transition_at: "2026-03-21T00:00:00.000Z",
+    workspace_id: "workspace-1",
+    ...overrides
+  };
+}
+
 describe("SqliteProposalRepo", () => {
   it("creates and loads proposal by proposal id", async () => {
     const { repo } = createRepo();
@@ -101,14 +133,15 @@ describe("SqliteProposalRepo", () => {
     ).resolves.toEqual(proposal);
 
     await expect(repo.findById(proposal.proposal_id)).resolves.toEqual(proposal);
-    // A1: ScopedProposal now carries reviewer_identity (null until reviewed).
     await expect(repo.findScopedById(proposal.proposal_id)).resolves.toEqual({
       proposal,
       workspace_id: "workspace-1",
       run_id: "run-1",
+      target_object_kind: "memory_entry",
       reviewer_identity: null,
       reviewer_assignment: null,
       proposed_changes: null,
+      proposed_path_relation: null,
       target_baseline_updated_at: null,
       source_delivery_ids: null
     });
@@ -506,6 +539,51 @@ describe("SqliteProposalRepo", () => {
     });
   });
 
+  it("atomically revokes green mapping when accepted evidence changes lose every prior anchor", async () => {
+    const { repo, database } = createRepo();
+    const memoryRepo = new SqliteMemoryEntryRepo(database);
+    const greenRepo = new SqliteGreenStatusRepo(database);
+    const proposal = createProposal();
+    await memoryRepo.create(createMemoryEntry({ evidence_refs: ["evidence-1"] }));
+    await greenRepo.upsert(createGreenStatus());
+    await repo.create({
+      proposal,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_kind: "memory_entry",
+      proposed_change_summary: "Replace evidence anchors",
+      proposed_changes: { evidence_refs: ["evidence-2"] }
+    });
+
+    const result = await repo.acceptPendingMemoryUpdateWithEvents(
+      proposal.proposal_id,
+      "2026-03-21T03:00:00.000Z",
+      createReviewEvents(proposal),
+      {
+        target_object_id: proposal.derived_from ?? "",
+        workspace_id: "workspace-1",
+        proposed_changes: { evidence_refs: ["evidence-2"] },
+        updated_at: "2026-03-21T03:00:00.000Z",
+        caused_by: `proposal_accept:${proposal.proposal_id}`
+      },
+      { reviewerIdentity: "user:alice" }
+    );
+
+    expect(result.events.map((event) => event.event_type)).toEqual([
+      MemoryGovernanceEventType.SOUL_REVIEW_CREATED,
+      MemoryGovernanceEventType.SOUL_REVIEW_COMPLETED,
+      MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED,
+      MemoryGovernanceEventType.SOUL_MEMORY_UPDATED,
+      GreenGovernanceEventType.SOUL_GREEN_PIERCED
+    ]);
+    await expect(greenRepo.findByTargetObjectId(proposal.derived_from ?? "")).resolves.toMatchObject({
+      green_state: GreenState.REVOKED,
+      revoke_reason: RevokeReason.MAPPING_REVOKED,
+      updated_at: "2026-03-21T03:00:00.000Z"
+    });
+    expect(countGreenPiercedEvents(database, proposal.derived_from ?? "")).toBe(1);
+  });
+
   it("accepts Inspector trust and retire proposals only through audited apply", async () => {
     const { repo, database } = createRepo();
     const memoryRepo = new SqliteMemoryEntryRepo(database);
@@ -874,5 +952,14 @@ function countMemoryUpdatedEvents(database: StorageDatabase, memoryId: string): 
       "SELECT COUNT(*) AS count FROM event_log WHERE event_type = ? AND entity_type = 'memory_entry' AND entity_id = ?"
     )
     .get(MemoryGovernanceEventType.SOUL_MEMORY_UPDATED, memoryId) as { readonly count: number };
+  return row.count;
+}
+
+function countGreenPiercedEvents(database: StorageDatabase, memoryId: string): number {
+  const row = database.connection
+    .prepare(
+      "SELECT COUNT(*) AS count FROM event_log WHERE event_type = ? AND json_extract(payload_json, '$.target_object_id') = ?"
+    )
+    .get(GreenGovernanceEventType.SOUL_GREEN_PIERCED, memoryId) as { readonly count: number };
   return row.count;
 }

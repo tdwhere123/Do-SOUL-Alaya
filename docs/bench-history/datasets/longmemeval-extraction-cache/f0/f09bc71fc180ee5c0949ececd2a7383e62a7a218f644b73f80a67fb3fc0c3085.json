@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "f09bc71fc180ee5c0949ececd2a7383e62a7a218f644b73f80a67fb3fc0c3085",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"food_product\",\"confidence\":0.91,\"matched_text\":\"I've tried RXBAR and Quest Bar before, but I'm interested in trying some new options.\",\"distilled_fact\":\"The speaker has tried RXBAR and Quest Bar before.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"food_product\",\"confidence\":0.93,\"matched_text\":\"I'm interested in trying some new options.\",\"distilled_fact\":\"The speaker is interested in trying new options.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"food_product\",\"confidence\":0.87,\"matched_text\":\"Can you tell me more about Kind Bar and LaraBar?\",\"distilled_fact\":\"The speaker wants more information about Kind Bar and LaraBar.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"food_product\",\"confidence\":0.84,\"matched_text\":\"What are some of their popular flavors and what makes them stand out from other healthy snack bars?\",\"distilled_fact\":\"The speaker wants to know some popular flavors of Kind Bar and LaraBar and what makes them stand out from other healthy snack bars.\"}]}",
+  "extracted_at": "2026-05-21T07:54:24.364Z"
+}

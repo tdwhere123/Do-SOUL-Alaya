@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "821dc63da4bd39cc60bbf3ea09ed41b6210c85bcedcc1ddb59bd19e56479977f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"utterance\",\"confidence\":0.94,\"matched_text\":\"Hello, this is testing.\",\"distilled_fact\":\"The operator said \\\"Hello, this is testing.\\\"\"}]}",
+  "extracted_at": "2026-05-21T08:04:20.554Z"
+}

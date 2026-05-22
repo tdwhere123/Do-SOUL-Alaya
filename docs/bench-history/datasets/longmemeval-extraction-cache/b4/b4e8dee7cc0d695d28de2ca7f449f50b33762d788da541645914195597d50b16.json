@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "b4e8dee7cc0d695d28de2ca7f449f50b33762d788da541645914195597d50b16",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.96,\"matched_text\":\"I like the idea of finding a workout buddy.\",\"distilled_fact\":\"The user likes the idea of finding a workout buddy.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"recommendation\",\"confidence\":0.89,\"matched_text\":\"Yes, there are several apps and websites that can help you find a workout buddy with similar fitness goals and interests.\",\"distilled_fact\":\"There are several apps and websites that can help a person find a workout buddy with similar fitness goals and interests.\"}]}",
+  "extracted_at": "2026-05-21T09:15:37.274Z"
+}

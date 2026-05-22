@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "45edbc3bfac6ed82d0216f572b78c97a06edf527924e354625545c2be76e917a",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"plan\",\"confidence\":0.86,\"matched_text\":\"I'll consult with my trainer to see if a pre-workout supplement would be a good addition to my routine.\",\"distilled_fact\":\"The user will consult with the user's trainer to see whether a pre-workout supplement would be a good addition to the user's routine.\"}]}",
+  "extracted_at": "2026-05-21T09:06:56.513Z"
+}

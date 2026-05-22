@@ -9,7 +9,11 @@ import {
   type HealthJournalRecordInput,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
-import { EmbeddingRecallService, type EmbeddingVectorRecord } from "../embedding-recall-service.js";
+import {
+  EmbeddingRecallService,
+  OpenAIEmbeddingClient,
+  type EmbeddingVectorRecord
+} from "../embedding-recall-service.js";
 import type { TestMock } from "./mock-types.js";
 
 describe("EmbeddingRecallService", () => {
@@ -158,6 +162,172 @@ describe("EmbeddingRecallService", () => {
       ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_QUERIED,
       ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_MERGED
     ]);
+  });
+
+  it("reuses prepared stored vectors instead of reading the vector table twice", async () => {
+    const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+      event_id: `event-${entry.event_type}`,
+      created_at: "2026-04-23T00:00:00.000Z",
+      revision: 0,
+      ...entry
+    }));
+    const listByObjectIds = vi.fn(async () => [
+      createEmbeddingRecord({
+        object_id: "memory-1",
+        content_hash: hashMemoryContent("Lexical baseline."),
+        embedding: new Float32Array([0.8, 0.2])
+      }),
+      createEmbeddingRecord({
+        object_id: "memory-2",
+        content_hash: hashMemoryContent("Semantic supplement."),
+        embedding: new Float32Array([0.1, 0.99])
+      })
+    ]);
+    const service = new EmbeddingRecallService({
+      embeddingRepo: { listByObjectIds },
+      provider: createProvider({
+        embedTexts: vi.fn(async () => [new Float32Array([0, 1])])
+      }),
+      eventLogRepo: {
+        append: appendSpy,
+        queryByEntity: vi.fn(async () => [])
+      },
+      generateQueryId: () => "prepared-supplement-query",
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+    const eligibleMemories = [
+      createMemoryEntry({ object_id: "memory-1", content: "Lexical baseline." }),
+      createMemoryEntry({ object_id: "memory-2", content: "Semantic supplement." })
+    ];
+
+    const prepared = await service.prepareQuerySupplement({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "Semantic recall ranking",
+      eligibleMemories,
+      baseCandidateCount: 1
+    });
+    expect(prepared.preparedQuery).not.toBeNull();
+    await Promise.resolve();
+    const result = await service.querySupplementIfReady({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      eligibleMemories,
+      baseCandidateIds: ["memory-1"],
+      maxSupplement: 1,
+      preparedQuery: prepared.preparedQuery!,
+      storedVectors: prepared.storedVectors
+    });
+
+    expect(listByObjectIds).toHaveBeenCalledTimes(1);
+    expect(result.supplementaryEntries.map((entry) => entry.object_id)).toEqual(["memory-2"]);
+  });
+
+  it("uses warmed query embeddings without calling the provider during recall preparation", async () => {
+    const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+      event_id: `event-${entry.event_type}`,
+      created_at: "2026-04-23T00:00:00.000Z",
+      revision: 0,
+      ...entry
+    }));
+    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+      texts.map(() => new Float32Array([0, 1]))
+    );
+    const service = new EmbeddingRecallService({
+      embeddingRepo: {
+        listByObjectIds: vi.fn(async () => [
+          createEmbeddingRecord({
+            object_id: "memory-1",
+            content_hash: hashMemoryContent("Lexical baseline."),
+            embedding: new Float32Array([0.8, 0.2])
+          }),
+          createEmbeddingRecord({
+            object_id: "memory-2",
+            content_hash: hashMemoryContent("Semantic supplement."),
+            embedding: new Float32Array([0.1, 0.99])
+          })
+        ])
+      },
+      provider: createProvider({ embedTexts }),
+      eventLogRepo: {
+        append: appendSpy,
+        queryByEntity: vi.fn(async () => [])
+      },
+      generateQueryId: () => "warmed-query",
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+    const eligibleMemories = [
+      createMemoryEntry({ object_id: "memory-1", content: "Lexical baseline." }),
+      createMemoryEntry({ object_id: "memory-2", content: "Semantic supplement." })
+    ];
+
+    const warmup = await service.warmQueryEmbeddings({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryTexts: ["Semantic recall ranking"]
+    });
+    const prepared = await service.prepareQuerySupplement({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "Semantic recall ranking",
+      eligibleMemories,
+      baseCandidateCount: 1
+    });
+    const result = await service.querySupplementIfReady({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      eligibleMemories,
+      baseCandidateIds: ["memory-1"],
+      maxSupplement: 1,
+      preparedQuery: prepared.preparedQuery!,
+      storedVectors: prepared.storedVectors
+    });
+
+    expect(warmup).toMatchObject({
+      status: "ready",
+      requested_count: 1,
+      ready_count: 1,
+      provider_requested_count: 1
+    });
+    expect(prepared.preparedQuery?.getSnapshot().status).toBe("ready");
+    expect(embedTexts).toHaveBeenCalledTimes(1);
+    expect(result.supplementaryEntries.map((entry) => entry.object_id)).toEqual(["memory-2"]);
+  });
+
+  it("keeps partial query warmup evidence when one provider batch fails", async () => {
+    const queries = Array.from({ length: 33 }, (_, index) => `query-${index}`);
+    const embedTexts = vi.fn(async (texts: readonly string[]) => {
+      if (texts.includes("query-16")) {
+        throw new Error("provider temporarily unreachable");
+      }
+      return texts.map(() => new Float32Array([0, 1]));
+    });
+    const service = new EmbeddingRecallService({
+      embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
+      provider: createProvider({ embedTexts }),
+      eventLogRepo: {
+        append: vi.fn(),
+        queryByEntity: vi.fn(async () => [])
+      },
+      generateQueryId: () => "partial-query-warmup",
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+
+    const warmup = await service.warmQueryEmbeddings({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryTexts: queries
+    });
+
+    expect(embedTexts).toHaveBeenCalledTimes(3);
+    expect(warmup).toMatchObject({
+      status: "ready",
+      requested_count: 33,
+      ready_count: 17,
+      provider_requested_count: 33,
+      missing_count: 16,
+      last_error: "provider temporarily unreachable"
+    });
   });
 
   it("waits briefly for a prepared query embedding before degrading", async () => {
@@ -622,6 +792,101 @@ describe("EmbeddingRecallService queryTimeoutMs configuration", () => {
       ["hello"],
       expect.objectContaining({ timeoutMs: 2500 })
     );
+  });
+});
+
+describe("OpenAIEmbeddingClient", () => {
+  it("reports provider host and transport cause without including the secret", async () => {
+    const transportError = new TypeError("fetch failed") as TypeError & {
+      cause: { code: string };
+    };
+    transportError.cause = { code: "EHOSTUNREACH" };
+    const fetchImpl = vi.fn(async () => {
+      throw transportError;
+    }) as unknown as typeof fetch;
+    const client = new OpenAIEmbeddingClient({
+      apiKey: "sk-test-secret",
+      baseUrl: "https://embedding.example.test/v1",
+      fetchImpl,
+      maxAttempts: 1
+    });
+
+    await expect(
+      client.embedTexts(["smoke"], {
+        timeoutMs: 1000
+      })
+    ).rejects.toThrow(
+      "Embedding request transport failed for host embedding.example.test. cause=EHOSTUNREACH"
+    );
+    await expect(
+      client.embedTexts(["smoke"], {
+        timeoutMs: 1000
+      })
+    ).rejects.not.toThrow("sk-test-secret");
+  });
+
+  it("retries transient transport failures before returning embeddings", async () => {
+    const transportError = new TypeError("fetch failed") as TypeError & {
+      cause: { code: string };
+    };
+    transportError.cause = { code: "EHOSTUNREACH" };
+    const fetchImpl = vi.fn()
+      .mockRejectedValueOnce(transportError)
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [{ index: 0, embedding: [0.2, 0.8] }]
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      ) as unknown as typeof fetch;
+    const client = new OpenAIEmbeddingClient({
+      apiKey: "sk-test-secret",
+      baseUrl: "https://embedding.example.test/v1",
+      fetchImpl,
+      maxAttempts: 2,
+      retryDelayMs: 0
+    });
+
+    const embeddings = await client.embedTexts(["smoke"], {
+      timeoutMs: 1000
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect([...embeddings[0]!]).toEqual([
+      expect.closeTo(0.2),
+      expect.closeTo(0.8)
+    ]);
+  });
+
+  it("retries transient 5xx responses before returning embeddings", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response("temporary", { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [{ index: 0, embedding: [0.4, 0.6] }]
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      ) as unknown as typeof fetch;
+    const client = new OpenAIEmbeddingClient({
+      apiKey: "sk-test-secret",
+      baseUrl: "https://embedding.example.test/v1",
+      fetchImpl,
+      maxAttempts: 2,
+      retryDelayMs: 0
+    });
+
+    const embeddings = await client.embedTexts(["smoke"], {
+      timeoutMs: 1000
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect([...embeddings[0]!]).toEqual([
+      expect.closeTo(0.4),
+      expect.closeTo(0.6)
+    ]);
   });
 });
 

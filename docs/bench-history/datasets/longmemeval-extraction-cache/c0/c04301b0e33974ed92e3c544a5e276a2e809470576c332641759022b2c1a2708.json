@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c04301b0e33974ed92e3c544a5e276a2e809470576c332641759022b2c1a2708",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"travel_interest\",\"confidence\":0.92,\"matched_text\":\"What is the best time to visit Bali for surfing, and what beaches are recommended for beginners?\",\"distilled_fact\":\"The user is interested in visiting Bali for surfing.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"travel_interest\",\"confidence\":0.91,\"matched_text\":\"What is the best time to visit Bali for surfing, and what beaches are recommended for beginners?\",\"distilled_fact\":\"The user is interested in beginner-friendly beaches in Bali.\"}]}",
+  "extracted_at": "2026-05-21T08:12:29.054Z"
+}

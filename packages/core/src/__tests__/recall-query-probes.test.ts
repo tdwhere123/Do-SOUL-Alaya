@@ -26,10 +26,27 @@ describe("compileRecallQueryProbes", () => {
     expect(probes.evidence_refs).toContain("ref-9");
     expect(probes.run_ids).toContain("run-42");
     expect(probes.surface_ids).toContain("surface-alpha");
+    expect(probes.subject_hints).toContain("self_reference");
     expect(probes.dimensions).toEqual(expect.arrayContaining([
       MemoryDimension.PROCEDURE,
       MemoryDimension.DECISION
     ]));
     expect(probes.scope_classes).toContain(ScopeClass.PROJECT);
+  });
+
+  it("extracts the same time_concern windows produced by local heuristics", () => {
+    const probes = compileRecallQueryProbes(
+      "What did we decide last week, and what changed in 2026-05? 上周的结论是什么？"
+    );
+
+    expect(probes.date_terms).toEqual(expect.arrayContaining([
+      "last week",
+      "2026-05",
+      "上周"
+    ]));
+    expect(compileRecallQueryProbes("Where did I buy my new bookshelf?").subject_hints)
+      .toEqual(["self_reference"]);
+    expect(compileRecallQueryProbes("Where did Alex buy the bookshelf?").subject_hints)
+      .toEqual([]);
   });
 });

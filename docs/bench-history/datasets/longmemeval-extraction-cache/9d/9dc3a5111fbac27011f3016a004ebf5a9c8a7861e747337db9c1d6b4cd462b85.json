@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "9dc3a5111fbac27011f3016a004ebf5a9c8a7861e747337db9c1d6b4cd462b85",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"food_preference\",\"confidence\":0.92,\"matched_text\":\"I just tried the soy ginger marinade and it was amazing!\",\"distilled_fact\":\"The user found the soy ginger marinade amazing.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"meal_component\",\"confidence\":0.88,\"matched_text\":\"Do you have any suggestions for side dishes to pair with the chicken?\",\"distilled_fact\":\"The user wants side dish suggestions to pair with the chicken.\"}]}",
+  "extracted_at": "2026-05-21T09:02:24.751Z"
+}

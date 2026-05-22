@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "006649b354f5339a11079afa84746cf7ce58015a86422dc87579de0266dd5aba",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"person\",\"confidence\":0.82,\"matched_text\":\"he's not drunk\",\"distilled_fact\":\"The person referred to as \\\"he\\\" is not drunk.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"person\",\"confidence\":0.71,\"matched_text\":\"just very pirate'y\",\"distilled_fact\":\"The person referred to as \\\"he\\\" is very pirate'y.\"}]}",
+  "extracted_at": "2026-05-21T08:04:03.564Z"
+}

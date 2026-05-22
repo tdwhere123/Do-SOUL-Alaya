@@ -36,11 +36,14 @@ export {
   GardenProviderKind,
   GardenProviderError,
   OFFICIAL_API_GARDEN_MODEL,
+  OFFICIAL_API_SYSTEM_PROMPT,
   OfficialApiGardenProvider,
   CustomApiGardenProvider,
   LocalModelGardenProvider,
+  parseOfficialApiSignals,
   type GardenCompileContext,
-  type GardenComputeProvider
+  type GardenComputeProvider,
+  type OfficialApiSignalDraft
 } from "./compute-provider.js";
 export {
   SignalExtractorError,
@@ -99,9 +102,12 @@ export {
 } from "./topology-service.js";
 export {
   MaterializationRouter,
+  DISTILLED_FACT_MAX_CHARS,
   type MaterializationResult,
   type MaterializationRouterDeps,
   type MaterializationTarget,
+  type PathRelationProposalPayload,
+  type PathRelationProposalPort,
   type RouteTarget,
   type GraphEdgeCreationPort
 } from "./materialization-router.js";

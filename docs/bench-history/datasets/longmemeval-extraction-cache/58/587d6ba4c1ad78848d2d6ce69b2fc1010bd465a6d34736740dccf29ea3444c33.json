@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "587d6ba4c1ad78848d2d6ce69b2fc1010bd465a6d34736740dccf29ea3444c33",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"recipe\",\"confidence\":0.93,\"matched_text\":\"I think I'll try the soy ginger marinade first.\",\"distilled_fact\":\"The user plans to try the soy ginger marinade first.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"food\",\"confidence\":0.81,\"matched_text\":\"I think I'll try the soy ginger marinade first.\",\"distilled_fact\":\"The user prefers the soy ginger marinade first among the marinade recipes mentioned in the turn.\"}]}",
+  "extracted_at": "2026-05-21T09:02:22.556Z"
+}

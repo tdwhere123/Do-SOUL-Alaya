@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "e39407125b31b2999631ad1d848e0d230d536b1f4516faf564e4f9f1ee706ab4",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"education\",\"confidence\":0.93,\"matched_text\":\"I graduated with a degree in Business Administration\",\"distilled_fact\":\"The speaker graduated with a degree in Business Administration.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"employment\",\"confidence\":0.86,\"matched_text\":\"which has definitely helped me in my new role\",\"distilled_fact\":\"The speaker is in a new role.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"advice_topic\",\"confidence\":0.91,\"matched_text\":\"Do you have any advice on how to stay organized when it comes to paperwork and documentation, especially when it comes to tracking expenses and reimbursements?\",\"distilled_fact\":\"The speaker wants advice on staying organized for paperwork and documentation, especially for tracking expenses and reimbursements.\"}]}",
+  "extracted_at": "2026-05-21T08:09:51.072Z"
+}

@@ -74,6 +74,7 @@ export interface EmbeddingRecallServiceDependencies {
    * compatible providers room to land within the recall window while still bounded.
    */
   readonly queryTimeoutMs?: number;
+  readonly queryEmbeddingCacheSize?: number;
 }
 
 export type PreparedEmbeddingQuerySnapshot =
@@ -95,6 +96,24 @@ export interface PreparedEmbeddingQueryHandle {
   waitForSnapshot?(timeoutMs: number): Promise<PreparedEmbeddingQuerySnapshot>;
 }
 
+export interface PreparedEmbeddingSupplement {
+  readonly preparedQuery: PreparedEmbeddingQueryHandle | null;
+  readonly storedVectors: readonly Readonly<EmbeddingVectorRecord>[];
+  readonly degradedReason: string | null;
+}
+
+export interface EmbeddingQueryWarmupSummary {
+  readonly status: "not_requested" | "ready";
+  readonly requested_count: number;
+  readonly ready_count: number;
+  readonly cache_hit_count: number;
+  readonly provider_requested_count: number;
+  readonly missing_count: number;
+  readonly provider_kind: string | null;
+  readonly model_id: string | null;
+  readonly last_error?: string;
+}
+
 interface EmbeddingRecallPrecheckError extends Error {
   readonly reason: "local_vector_lookup_failed";
 }
@@ -102,12 +121,40 @@ interface EmbeddingRecallPrecheckError extends Error {
 export const DEFAULT_QUERY_TIMEOUT_MS = 2500;
 export const MAX_QUERY_TIMEOUT_MS = 5000;
 export const MIN_QUERY_TIMEOUT_MS = 50;
+const DEFAULT_QUERY_EMBEDDING_CACHE_SIZE = 512;
+const MAX_QUERY_EMBEDDING_CACHE_SIZE = 4096;
+const DEFAULT_EMBEDDING_REQUEST_MAX_ATTEMPTS = 5;
+const MAX_EMBEDDING_REQUEST_ATTEMPTS = 5;
+const DEFAULT_EMBEDDING_REQUEST_RETRY_DELAY_MS = 250;
+const MAX_EMBEDDING_REQUEST_RETRY_DELAY_MS = 2_000;
+const QUERY_EMBEDDING_WARMUP_BATCH_SIZE = 16;
 
 function clampQueryTimeout(value: number): number {
   if (!Number.isFinite(value) || value <= 0) {
     return DEFAULT_QUERY_TIMEOUT_MS;
   }
   return Math.min(MAX_QUERY_TIMEOUT_MS, Math.max(MIN_QUERY_TIMEOUT_MS, value));
+}
+
+function clampQueryEmbeddingCacheSize(value: number): number {
+  if (!Number.isFinite(value) || value < 0) {
+    return DEFAULT_QUERY_EMBEDDING_CACHE_SIZE;
+  }
+  return Math.min(MAX_QUERY_EMBEDDING_CACHE_SIZE, Math.floor(value));
+}
+
+function clampEmbeddingRequestAttempts(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) {
+    return DEFAULT_EMBEDDING_REQUEST_MAX_ATTEMPTS;
+  }
+  return Math.min(MAX_EMBEDDING_REQUEST_ATTEMPTS, Math.max(1, Math.floor(value)));
+}
+
+function clampEmbeddingRequestRetryDelayMs(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value) || value < 0) {
+    return DEFAULT_EMBEDDING_REQUEST_RETRY_DELAY_MS;
+  }
+  return Math.min(MAX_EMBEDDING_REQUEST_RETRY_DELAY_MS, Math.floor(value));
 }
 
 const EMPTY_SUPPLEMENT_RESULT: EmbeddingRecallSupplementResult = Object.freeze({
@@ -120,12 +167,17 @@ export class EmbeddingRecallService {
   private readonly now: () => string;
   private readonly warn: (message: string, meta: Record<string, unknown>) => void;
   private readonly queryTimeoutMs: number;
+  private readonly queryEmbeddingCacheSize: number;
+  private readonly queryEmbeddingCache = new Map<string, Float32Array>();
 
   public constructor(private readonly dependencies: EmbeddingRecallServiceDependencies) {
     this.generateQueryId = dependencies.generateQueryId ?? (() => `recall-embedding-${randomUUID()}`);
     this.now = dependencies.now ?? (() => new Date().toISOString());
     this.warn = dependencies.warn ?? (() => undefined);
     this.queryTimeoutMs = clampQueryTimeout(dependencies.queryTimeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS);
+    this.queryEmbeddingCacheSize = clampQueryEmbeddingCacheSize(
+      dependencies.queryEmbeddingCacheSize ?? DEFAULT_QUERY_EMBEDDING_CACHE_SIZE
+    );
   }
 
   public prepareQueryEmbedding(params: {
@@ -141,6 +193,18 @@ export class EmbeddingRecallService {
         Object.freeze({
           status: "failed",
           reason: "provider_unavailable"
+        })
+      );
+    }
+
+    const queryCacheKey = this.queryCacheKey(params.queryText);
+    const cachedEmbedding = this.getCachedQueryEmbedding(queryCacheKey);
+    if (cachedEmbedding !== null) {
+      return createPreparedEmbeddingQueryHandle(
+        queryId,
+        Object.freeze({
+          status: "ready",
+          embedding: cachedEmbedding
         })
       );
     }
@@ -162,6 +226,7 @@ export class EmbeddingRecallService {
           status: "ready",
           embedding: new Float32Array(embeddings[0]!)
         });
+        this.putCachedQueryEmbedding(queryCacheKey, snapshot.embedding);
       })
       .catch(() => {
         snapshot = Object.freeze({
@@ -177,6 +242,83 @@ export class EmbeddingRecallService {
 
       await waitForPreparedQuery(settled, timeoutMs);
       return snapshot;
+    });
+  }
+
+  public async warmQueryEmbeddings(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly queryTexts: readonly string[];
+  }): Promise<EmbeddingQueryWarmupSummary> {
+    const uniqueQueryTexts = [...new Set(params.queryTexts.map((text) => text.trim()))]
+      .filter((text) => text.length > 0);
+    if (uniqueQueryTexts.length === 0) {
+      return Object.freeze({
+        status: "ready",
+        requested_count: 0,
+        ready_count: 0,
+        cache_hit_count: 0,
+        provider_requested_count: 0,
+        missing_count: 0,
+        provider_kind: this.dependencies.provider.providerKind,
+        model_id: this.dependencies.provider.modelId
+      });
+    }
+    if (!this.dependencies.provider.isAvailable) {
+      return Object.freeze({
+        status: "not_requested",
+        requested_count: uniqueQueryTexts.length,
+        ready_count: 0,
+        cache_hit_count: 0,
+        provider_requested_count: 0,
+        missing_count: uniqueQueryTexts.length,
+        provider_kind: null,
+        model_id: null
+      });
+    }
+
+    const missingQueryTexts = uniqueQueryTexts.filter(
+      (queryText) => this.getCachedQueryEmbedding(this.queryCacheKey(queryText)) === null
+    );
+    let lastError: string | undefined;
+    for (
+      let offset = 0;
+      offset < missingQueryTexts.length;
+      offset += QUERY_EMBEDDING_WARMUP_BATCH_SIZE
+    ) {
+      const batch = missingQueryTexts.slice(offset, offset + QUERY_EMBEDDING_WARMUP_BATCH_SIZE);
+      try {
+        const embeddings = await this.dependencies.provider.embedTexts(batch, {
+          timeoutMs: this.queryTimeoutMs
+        });
+        if (embeddings.length !== batch.length) {
+          throw new Error(`Expected ${batch.length} warmed query embeddings, received ${embeddings.length}.`);
+        }
+        for (let i = 0; i < batch.length; i++) {
+          const queryText = batch[i]!;
+          this.putCachedQueryEmbedding(
+            this.queryCacheKey(queryText),
+            new Float32Array(embeddings[i]!)
+          );
+        }
+      } catch (error) {
+        lastError = toErrorMessage(error);
+      }
+    }
+
+    const readyCount = uniqueQueryTexts.filter(
+      (queryText) => this.getCachedQueryEmbedding(this.queryCacheKey(queryText)) !== null
+    ).length;
+    return Object.freeze({
+      status: "ready",
+      requested_count: uniqueQueryTexts.length,
+      ready_count: readyCount,
+      cache_hit_count: uniqueQueryTexts.length - missingQueryTexts.length,
+      provider_requested_count: missingQueryTexts.length,
+      missing_count: Math.max(0, uniqueQueryTexts.length - readyCount),
+      provider_kind: this.dependencies.provider.providerKind,
+      model_id: this.dependencies.provider.modelId,
+      ...(lastError === undefined ? {} : { last_error: lastError })
     });
   }
 
@@ -203,6 +345,96 @@ export class EmbeddingRecallService {
       throw Object.assign(new Error("embedding supplement precheck failed"), {
         reason: "local_vector_lookup_failed"
       } satisfies Pick<EmbeddingRecallPrecheckError, "reason">);
+    }
+  }
+
+  public async prepareQuerySupplement(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly queryText: string;
+    readonly eligibleMemories: readonly Readonly<MemoryEntry>[];
+    readonly baseCandidateCount: number;
+  }): Promise<PreparedEmbeddingSupplement> {
+    if (params.eligibleMemories.length === 0) {
+      return Object.freeze({
+        preparedQuery: null,
+        storedVectors: Object.freeze([]),
+        degradedReason: null
+      });
+    }
+
+    let storedVectors: readonly Readonly<EmbeddingVectorRecord>[];
+    try {
+      storedVectors = await this.dependencies.embeddingRepo.listByObjectIds(
+        params.workspaceId,
+        params.eligibleMemories.map((memory) => memory.object_id)
+      );
+    } catch (error) {
+      this.warn("embedding supplement precheck failed", {
+        workspace_id: params.workspaceId,
+        reason: "local_vector_lookup_failed",
+        error: toErrorMessage(error)
+      });
+      await this.recordDegraded({
+        workspaceId: params.workspaceId,
+        runId: params.runId,
+        queryId: this.generateQueryId(),
+        reason: "local_vector_lookup_failed",
+        baseCandidateCount: params.baseCandidateCount,
+        fallbackCandidateCount: params.baseCandidateCount
+      });
+      return Object.freeze({
+        preparedQuery: null,
+        storedVectors: Object.freeze([]),
+        degradedReason: "local_vector_lookup_failed"
+      });
+    }
+
+    if (storedVectors.length === 0) {
+      return Object.freeze({
+        preparedQuery: null,
+        storedVectors: Object.freeze([]),
+        degradedReason: null
+      });
+    }
+
+    return Object.freeze({
+      preparedQuery: this.prepareQueryEmbedding({
+        workspaceId: params.workspaceId,
+        runId: params.runId,
+        queryText: params.queryText
+      }),
+      storedVectors,
+      degradedReason: null
+    });
+  }
+
+  private queryCacheKey(queryText: string): string {
+    return `sha256:${createHash("sha256").update(queryText.trim()).digest("hex")}`;
+  }
+
+  private getCachedQueryEmbedding(cacheKey: string): Float32Array | null {
+    const cached = this.queryEmbeddingCache.get(cacheKey);
+    if (cached === undefined) {
+      return null;
+    }
+    this.queryEmbeddingCache.delete(cacheKey);
+    this.queryEmbeddingCache.set(cacheKey, cached);
+    return new Float32Array(cached);
+  }
+
+  private putCachedQueryEmbedding(cacheKey: string, embedding: Float32Array): void {
+    if (this.queryEmbeddingCacheSize <= 0) {
+      return;
+    }
+    this.queryEmbeddingCache.delete(cacheKey);
+    this.queryEmbeddingCache.set(cacheKey, new Float32Array(embedding));
+    while (this.queryEmbeddingCache.size > this.queryEmbeddingCacheSize) {
+      const oldestKey = this.queryEmbeddingCache.keys().next().value as string | undefined;
+      if (oldestKey === undefined) {
+        break;
+      }
+      this.queryEmbeddingCache.delete(oldestKey);
     }
   }
 
@@ -291,18 +523,21 @@ export class EmbeddingRecallService {
     readonly baseCandidateIds: readonly string[];
     readonly maxSupplement: number;
     readonly preparedQuery: PreparedEmbeddingQueryHandle;
+    readonly storedVectors?: readonly Readonly<EmbeddingVectorRecord>[];
   }): Promise<EmbeddingRecallSupplementResult> {
     if (params.maxSupplement <= 0 || params.eligibleMemories.length === 0) {
       return EMPTY_SUPPLEMENT_RESULT;
     }
 
-    const storedVectors = await this.loadStoredVectors({
-      workspaceId: params.workspaceId,
-      runId: params.runId,
-      queryId: params.preparedQuery.queryId,
-      eligibleMemories: params.eligibleMemories,
-      baseCandidateCount: params.baseCandidateIds.length
-    });
+    const storedVectors =
+      params.storedVectors ??
+      await this.loadStoredVectors({
+        workspaceId: params.workspaceId,
+        runId: params.runId,
+        queryId: params.preparedQuery.queryId,
+        eligibleMemories: params.eligibleMemories,
+        baseCandidateCount: params.baseCandidateIds.length
+      });
 
     if (storedVectors === null || storedVectors.length === 0) {
       return EMPTY_SUPPLEMENT_RESULT;
@@ -626,6 +861,8 @@ export interface OpenAIEmbeddingClientOptions {
   readonly model?: string;
   readonly baseUrl?: string;
   readonly fetchImpl?: typeof fetch;
+  readonly maxAttempts?: number;
+  readonly retryDelayMs?: number;
 }
 
 export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
@@ -637,12 +874,16 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
   private readonly apiKey: string | null;
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly maxAttempts: number;
+  private readonly retryDelayMs: number;
 
   public constructor(options: OpenAIEmbeddingClientOptions) {
     this.apiKey = options.apiKey;
     this.modelId = options.model?.trim() || "text-embedding-3-small";
     this.baseUrl = normalizeBaseUrl(options.baseUrl ?? "https://api.openai.com/v1");
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
+    this.maxAttempts = clampEmbeddingRequestAttempts(options.maxAttempts);
+    this.retryDelayMs = clampEmbeddingRequestRetryDelayMs(options.retryDelayMs);
     this.isAvailable = typeof this.apiKey === "string" && this.apiKey.length > 0;
   }
 
@@ -665,21 +906,12 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
     timeoutHandle.unref?.();
 
     try {
-      const response = await this.fetchImpl(`${this.baseUrl}/embeddings`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify({
-          model: this.modelId,
-          input: texts
-        }),
-        signal: abortController.signal
-      });
+      const response = await this.fetchEmbeddingWithRetry(texts, abortController.signal);
 
       if (!response.ok) {
-        throw new Error(`Embedding request failed with status ${response.status}.`);
+        throw new Error(
+          `Embedding request failed with status ${response.status} for host ${formatEmbeddingHost(this.baseUrl)}.`
+        );
       }
 
       const payload = (await response.json()) as {
@@ -708,6 +940,73 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
     } finally {
       clearTimeout(timeoutHandle);
     }
+  }
+
+  private async fetchEmbeddingWithRetry(
+    texts: readonly string[],
+    signal: AbortSignal
+  ): Promise<Response> {
+    for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
+      try {
+        const response = await this.fetchImpl(`${this.baseUrl}/embeddings`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${this.apiKey}`
+          },
+          body: JSON.stringify({
+            model: this.modelId,
+            input: texts
+          }),
+          signal
+        });
+        if (attempt < this.maxAttempts && isRetryableEmbeddingStatus(response.status)) {
+          await sleepEmbeddingRetry(this.retryDelayMs * attempt, signal);
+          continue;
+        }
+        return response;
+      } catch (error) {
+        if (attempt >= this.maxAttempts || signal.aborted) {
+          throw new Error(formatEmbeddingTransportError(this.baseUrl, error));
+        }
+        await sleepEmbeddingRetry(this.retryDelayMs * attempt, signal);
+      }
+    }
+
+    throw new Error(`Embedding request retry loop exhausted for host ${formatEmbeddingHost(this.baseUrl)}.`);
+  }
+}
+
+function isRetryableEmbeddingStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+async function sleepEmbeddingRetry(delayMs: number, signal: AbortSignal): Promise<void> {
+  if (delayMs <= 0 || signal.aborted) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    const timeout = setTimeout(resolve, delayMs);
+    timeout.unref?.();
+  });
+}
+
+function formatEmbeddingTransportError(baseUrl: string, error: unknown): string {
+  const causeCode =
+    typeof error === "object" &&
+    error !== null &&
+    "cause" in error &&
+    typeof (error as { readonly cause?: { readonly code?: unknown } }).cause?.code === "string"
+      ? ` cause=${(error as { readonly cause: { readonly code: string } }).cause.code}`
+      : "";
+  return `Embedding request transport failed for host ${formatEmbeddingHost(baseUrl)}.${causeCode}`;
+}
+
+function formatEmbeddingHost(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return "unknown";
   }
 }
 

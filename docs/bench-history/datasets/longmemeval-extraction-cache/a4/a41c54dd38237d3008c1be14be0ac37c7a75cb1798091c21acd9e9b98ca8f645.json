@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "a41c54dd38237d3008c1be14be0ac37c7a75cb1798091c21acd9e9b98ca8f645",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"purchase\",\"confidence\":0.93,\"matched_text\":\"I recently bought a new Instant Pot and kitchen knives\",\"distilled_fact\":\"The speaker recently bought a new Instant Pot.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"purchase\",\"confidence\":0.93,\"matched_text\":\"I recently bought a new Instant Pot and kitchen knives\",\"distilled_fact\":\"The speaker recently bought kitchen knives.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"state\",\"confidence\":0.84,\"matched_text\":\"my kitchen is feeling a bit cluttered\",\"distilled_fact\":\"The speaker's kitchen is feeling a bit cluttered.\"}]}",
+  "extracted_at": "2026-05-21T08:10:49.951Z"
+}

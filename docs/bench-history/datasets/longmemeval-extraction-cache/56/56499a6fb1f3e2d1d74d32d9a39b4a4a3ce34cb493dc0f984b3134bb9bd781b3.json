@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "56499a6fb1f3e2d1d74d32d9a39b4a4a3ce34cb493dc0f984b3134bb9bd781b3",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"topic_interest\",\"confidence\":0.88,\"matched_text\":\"I'm also interested in learning more about sea turtle conservation organizations.\",\"distilled_fact\":\"The user is interested in learning more about sea turtle conservation organizations.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"support_intent\",\"confidence\":0.84,\"matched_text\":\"Do you have any recommendations for reputable ones that I can support?\",\"distilled_fact\":\"The user wants recommendations for reputable sea turtle conservation organizations that the user can support.\"}]}",
+  "extracted_at": "2026-05-21T09:04:06.115Z"
+}

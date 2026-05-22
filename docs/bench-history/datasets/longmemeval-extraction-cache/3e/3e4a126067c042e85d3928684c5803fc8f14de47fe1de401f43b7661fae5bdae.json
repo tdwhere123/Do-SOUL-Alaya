@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "3e4a126067c042e85d3928684c5803fc8f14de47fe1de401f43b7661fae5bdae",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"event_attendance_plan\",\"confidence\":0.84,\"matched_text\":\"I'm thinking of participating in the International Market next month\",\"distilled_fact\":\"The user is thinking of participating in the International Market next month.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"information_request\",\"confidence\":0.91,\"matched_text\":\"I need to confirm the details. Can you tell me what's the process for registering as a vendor and what are the fees involved?\",\"distilled_fact\":\"The user wants to confirm the process for registering as a vendor and the fees involved.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"information_need\",\"confidence\":0.76,\"matched_text\":\"I need to confirm the details.\",\"distilled_fact\":\"The user needs to confirm the details before proceeding.\"}]}",
+  "extracted_at": "2026-05-21T09:08:22.132Z"
+}

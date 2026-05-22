@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "243e60287d49849c2efbeac93315d9ef70c170d4f92551c258d73f29bfb97470",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"basketball_team_analysis\",\"confidence\":0.84,\"matched_text\":\"they need to find a way to improve their three-point shooting consistency.\",\"distilled_fact\":\"The team needs to improve its three-point shooting consistency.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"basketball_team_analysis\",\"confidence\":0.81,\"matched_text\":\"They've had some games where they've shot really well from beyond the arc, but others where they've struggled.\",\"distilled_fact\":\"The team has had some games in which it shot really well from beyond the arc and other games in which it struggled from beyond the arc.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"basketball_team_analysis\",\"confidence\":0.79,\"matched_text\":\"If they can find a way to be more consistent from three, it'll open up the floor for Luka to operate and make them a tougher team to defend.\",\"distilled_fact\":\"If the team becomes more consistent from three, it will open up the floor for Luka to operate and make the team tougher to defend.\"}]}",
+  "extracted_at": "2026-05-21T07:47:52.831Z"
+}

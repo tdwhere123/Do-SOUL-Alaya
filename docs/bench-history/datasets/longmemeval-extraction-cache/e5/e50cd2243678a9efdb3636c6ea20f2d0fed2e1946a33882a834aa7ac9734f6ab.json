@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "e50cd2243678a9efdb3636c6ea20f2d0fed2e1946a33882a834aa7ac9734f6ab",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"experience\",\"confidence\":0.89,\"matched_text\":\"I took photos of blooming flowers in the park\",\"distilled_fact\":\"The user took photos of blooming flowers in the park.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"preference\",\"confidence\":0.96,\"matched_text\":\"my favorite part was experimenting with different angles and perspectives using my new wide-angle lens\",\"distilled_fact\":\"The user's favorite part was experimenting with different angles and perspectives using the user's new wide-angle lens.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"possession\",\"confidence\":0.94,\"matched_text\":\"using my new wide-angle lens\",\"distilled_fact\":\"The user has a new wide-angle lens.\"}]}",
+  "extracted_at": "2026-05-21T09:19:02.118Z"
+}

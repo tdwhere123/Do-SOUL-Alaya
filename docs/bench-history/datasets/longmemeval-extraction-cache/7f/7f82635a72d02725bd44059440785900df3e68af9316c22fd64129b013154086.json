@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7f82635a72d02725bd44059440785900df3e68af9316c22fd64129b013154086",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"genre\",\"confidence\":0.95,\"matched_text\":\"I'm particularly interested in exploring more of the singer-songwriter and Americana genres.\",\"distilled_fact\":\"The user is particularly interested in exploring more of the singer-songwriter and Americana genres.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"artist_similarity\",\"confidence\":0.9,\"matched_text\":\"Do you think you could suggest some artists that are similar to Bon Iver, Fleet Foxes, and Sufjan Stevens?\",\"distilled_fact\":\"The user wants artist suggestions similar to Bon Iver, Fleet Foxes, and Sufjan Stevens.\"}]}",
+  "extracted_at": "2026-05-21T08:14:00.528Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "095e71eb2b366110b3a6a198cd8b06a152c2014963cb88420843324d202a2afe",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"location\",\"confidence\":0.86,\"matched_text\":\"the floods have caused so much damage to Venice's beautiful architecture\",\"distilled_fact\":\"Floods have caused so much damage to Venice's beautiful architecture.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"event\",\"confidence\":0.79,\"matched_text\":\"the flooding\",\"distilled_fact\":\"Flooding has occurred in Venice.\"}]}",
+  "extracted_at": "2026-05-21T07:59:54.596Z"
+}

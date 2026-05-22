@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "241f7d69bd2240679e5a379007d880b7be5b586e1e2068ab67e63fc0804a0db0",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"appliance\",\"confidence\":0.86,\"matched_text\":\"my new Instant Pot and kitchen knives\",\"distilled_fact\":\"The user has a new Instant Pot and kitchen knives.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"preference\",\"confidence\":0.78,\"matched_text\":\"I want to make sure they last a long time and stay in good condition.\",\"distilled_fact\":\"The user wants the user's new Instant Pot and kitchen knives to last a long time and stay in good condition.\"}]}",
+  "extracted_at": "2026-05-21T08:10:29.076Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7f1e70251e7d9cff44cbb05f2e59aee1a2b088cf2ce8864ea1db529b0ec48214",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"purchase\",\"confidence\":0.95,\"matched_text\":\"I also need to add the aquamarine ring I got on sale at 20% off to the list.\",\"distilled_fact\":\"The speaker got an aquamarine ring on sale at 20% off.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"purchase\",\"confidence\":0.92,\"matched_text\":\"I bought it on June 1st, but I don't know the original price.\",\"distilled_fact\":\"The speaker bought the aquamarine ring on June 1st.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"purchase\",\"confidence\":0.86,\"matched_text\":\"I bought it on June 1st, but I don't know the original price.\",\"distilled_fact\":\"The speaker does not know the original price of the aquamarine ring.\"}]}",
+  "extracted_at": "2026-05-21T08:05:22.918Z"
+}

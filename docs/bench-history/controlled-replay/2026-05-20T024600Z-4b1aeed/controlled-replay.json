@@ -1,0 +1,730 @@
+{
+  "schema_version": 1,
+  "bench_name": "controlled-replay",
+  "run_at": "2026-05-20T02:46:00.658Z",
+  "alaya_commit": "4b1aeed",
+  "alaya_version": "0.3.9",
+  "recall_pipeline_version": "fusion-rrf-v1",
+  "fixture": {
+    "seed_count": 15,
+    "question_count": 8,
+    "seed_content_hash": "5eb07365e5c58c1a7eda6912ff5fe80cda22c0b4e1494969b777ff8747f58327",
+    "question_hash": "6438d42c9ba3471d69f2346aa432f1dee193c260770cdbf8bb8a3c4c4c8dfefc",
+    "object_kind_rotation": [
+      "fact",
+      "preference",
+      "decision",
+      "constraint",
+      "outcome"
+    ]
+  },
+  "scenarios": [
+    {
+      "label": "uniform-fact",
+      "seed_object_kinds": [
+        "fact",
+        "fact",
+        "fact",
+        "fact",
+        "fact",
+        "fact",
+        "fact",
+        "fact",
+        "fact",
+        "fact",
+        "fact",
+        "fact",
+        "fact",
+        "fact",
+        "fact"
+      ],
+      "recall_policy": {
+        "max_entries": 10,
+        "conflict_awareness": true
+      },
+      "report_context_usage": "none",
+      "metrics": {
+        "rank_distribution": {
+          "1": 2,
+          "2": 4,
+          "3": 1,
+          "4-5": 0,
+          "6-10": 0,
+          "miss": 1
+        },
+        "expected_rank_by_question": {
+          "q-owner": 1,
+          "q-archive": 1,
+          "q-warm": 2,
+          "q-evidence-only": 2,
+          "q-path-target": null,
+          "q-path-pair-a": 2,
+          "q-path-pair-b": 2,
+          "q-path-pair-c": 3
+        },
+        "hit_at_5": {
+          "count": 7,
+          "rate": 0.875
+        },
+        "average_expected_rank": 1.857,
+        "non_monotonic": {
+          "count": 0
+        },
+        "active_constraints": {
+          "count": 0
+        },
+        "budget_drop": {
+          "max_entries": 40
+        },
+        "high_lexical_demoted": {
+          "count": 9
+        },
+        "conflict_penalty": {
+          "count": 0
+        },
+        "evidence_stream_gold_delivery": {
+          "count": 12,
+          "denominator": 13,
+          "rate": 0.923
+        },
+        "path_stream_top10": {
+          "count": 0,
+          "denominator": 80,
+          "rate": 0
+        },
+        "delivery_count": 8,
+        "diagnostics_count": 120
+      }
+    },
+    {
+      "label": "rotated-kind",
+      "seed_object_kinds": [
+        "fact",
+        "preference",
+        "decision",
+        "constraint",
+        "outcome",
+        "fact",
+        "preference",
+        "decision",
+        "constraint",
+        "outcome",
+        "fact",
+        "preference",
+        "decision",
+        "constraint",
+        "outcome"
+      ],
+      "recall_policy": {
+        "max_entries": 10,
+        "conflict_awareness": true
+      },
+      "report_context_usage": "none",
+      "metrics": {
+        "rank_distribution": {
+          "1": 2,
+          "2": 4,
+          "3": 1,
+          "4-5": 0,
+          "6-10": 0,
+          "miss": 1
+        },
+        "expected_rank_by_question": {
+          "q-owner": 1,
+          "q-archive": 1,
+          "q-warm": 2,
+          "q-evidence-only": 2,
+          "q-path-target": null,
+          "q-path-pair-a": 2,
+          "q-path-pair-b": 2,
+          "q-path-pair-c": 3
+        },
+        "hit_at_5": {
+          "count": 7,
+          "rate": 0.875
+        },
+        "average_expected_rank": 1.857,
+        "non_monotonic": {
+          "count": 0
+        },
+        "active_constraints": {
+          "count": 0
+        },
+        "budget_drop": {
+          "max_entries": 40
+        },
+        "high_lexical_demoted": {
+          "count": 9
+        },
+        "conflict_penalty": {
+          "count": 35
+        },
+        "evidence_stream_gold_delivery": {
+          "count": 12,
+          "denominator": 13,
+          "rate": 0.923
+        },
+        "path_stream_top10": {
+          "count": 0,
+          "denominator": 80,
+          "rate": 0
+        },
+        "delivery_count": 8,
+        "diagnostics_count": 120
+      }
+    },
+    {
+      "label": "stress-policy-max10-conflict-true",
+      "seed_object_kinds": [
+        "fact",
+        "preference",
+        "decision",
+        "constraint",
+        "outcome",
+        "fact",
+        "preference",
+        "decision",
+        "constraint",
+        "outcome",
+        "fact",
+        "preference",
+        "decision",
+        "constraint",
+        "outcome"
+      ],
+      "recall_policy": {
+        "max_entries": 10,
+        "conflict_awareness": true
+      },
+      "report_context_usage": "none",
+      "metrics": {
+        "rank_distribution": {
+          "1": 2,
+          "2": 4,
+          "3": 1,
+          "4-5": 0,
+          "6-10": 0,
+          "miss": 1
+        },
+        "expected_rank_by_question": {
+          "q-owner": 1,
+          "q-archive": 1,
+          "q-warm": 2,
+          "q-evidence-only": 2,
+          "q-path-target": null,
+          "q-path-pair-a": 2,
+          "q-path-pair-b": 2,
+          "q-path-pair-c": 3
+        },
+        "hit_at_5": {
+          "count": 7,
+          "rate": 0.875
+        },
+        "average_expected_rank": 1.857,
+        "non_monotonic": {
+          "count": 0
+        },
+        "active_constraints": {
+          "count": 0
+        },
+        "budget_drop": {
+          "max_entries": 40
+        },
+        "high_lexical_demoted": {
+          "count": 9
+        },
+        "conflict_penalty": {
+          "count": 35
+        },
+        "evidence_stream_gold_delivery": {
+          "count": 12,
+          "denominator": 13,
+          "rate": 0.923
+        },
+        "path_stream_top10": {
+          "count": 0,
+          "denominator": 80,
+          "rate": 0
+        },
+        "delivery_count": 8,
+        "diagnostics_count": 120
+      }
+    },
+    {
+      "label": "chat-policy-max10-conflict-false",
+      "seed_object_kinds": [
+        "fact",
+        "preference",
+        "decision",
+        "constraint",
+        "outcome",
+        "fact",
+        "preference",
+        "decision",
+        "constraint",
+        "outcome",
+        "fact",
+        "preference",
+        "decision",
+        "constraint",
+        "outcome"
+      ],
+      "recall_policy": {
+        "max_entries": 10,
+        "conflict_awareness": false
+      },
+      "report_context_usage": "none",
+      "metrics": {
+        "rank_distribution": {
+          "1": 2,
+          "2": 4,
+          "3": 1,
+          "4-5": 0,
+          "6-10": 0,
+          "miss": 1
+        },
+        "expected_rank_by_question": {
+          "q-owner": 1,
+          "q-archive": 1,
+          "q-warm": 2,
+          "q-evidence-only": 2,
+          "q-path-target": null,
+          "q-path-pair-a": 2,
+          "q-path-pair-b": 2,
+          "q-path-pair-c": 3
+        },
+        "hit_at_5": {
+          "count": 7,
+          "rate": 0.875
+        },
+        "average_expected_rank": 1.857,
+        "non_monotonic": {
+          "count": 0
+        },
+        "active_constraints": {
+          "count": 0
+        },
+        "budget_drop": {
+          "max_entries": 40
+        },
+        "high_lexical_demoted": {
+          "count": 9
+        },
+        "conflict_penalty": {
+          "count": 0
+        },
+        "evidence_stream_gold_delivery": {
+          "count": 12,
+          "denominator": 13,
+          "rate": 0.923
+        },
+        "path_stream_top10": {
+          "count": 0,
+          "denominator": 80,
+          "rate": 0
+        },
+        "delivery_count": 8,
+        "diagnostics_count": 120
+      }
+    },
+    {
+      "label": "cold-report-context-usage-none",
+      "seed_object_kinds": [
+        "fact",
+        "preference",
+        "decision",
+        "constraint",
+        "outcome",
+        "fact",
+        "preference",
+        "decision",
+        "constraint",
+        "outcome",
+        "fact",
+        "preference",
+        "decision",
+        "constraint",
+        "outcome"
+      ],
+      "recall_policy": {
+        "max_entries": 10,
+        "conflict_awareness": true
+      },
+      "report_context_usage": "none",
+      "metrics": {
+        "rank_distribution": {
+          "1": 2,
+          "2": 4,
+          "3": 1,
+          "4-5": 0,
+          "6-10": 0,
+          "miss": 1
+        },
+        "expected_rank_by_question": {
+          "q-owner": 1,
+          "q-archive": 1,
+          "q-warm": 2,
+          "q-evidence-only": 2,
+          "q-path-target": null,
+          "q-path-pair-a": 2,
+          "q-path-pair-b": 2,
+          "q-path-pair-c": 3
+        },
+        "hit_at_5": {
+          "count": 7,
+          "rate": 0.875
+        },
+        "average_expected_rank": 1.857,
+        "non_monotonic": {
+          "count": 0
+        },
+        "active_constraints": {
+          "count": 0
+        },
+        "budget_drop": {
+          "max_entries": 40
+        },
+        "high_lexical_demoted": {
+          "count": 9
+        },
+        "conflict_penalty": {
+          "count": 35
+        },
+        "evidence_stream_gold_delivery": {
+          "count": 12,
+          "denominator": 13,
+          "rate": 0.923
+        },
+        "path_stream_top10": {
+          "count": 0,
+          "denominator": 80,
+          "rate": 0
+        },
+        "delivery_count": 8,
+        "diagnostics_count": 120
+      }
+    },
+    {
+      "label": "warm-report-context-usage-mixed",
+      "seed_object_kinds": [
+        "fact",
+        "preference",
+        "decision",
+        "constraint",
+        "outcome",
+        "fact",
+        "preference",
+        "decision",
+        "constraint",
+        "outcome",
+        "fact",
+        "preference",
+        "decision",
+        "constraint",
+        "outcome"
+      ],
+      "recall_policy": {
+        "max_entries": 10,
+        "conflict_awareness": true
+      },
+      "report_context_usage": "mixed",
+      "pre_report_metrics": {
+        "rank_distribution": {
+          "1": 3,
+          "2": 2,
+          "3": 2,
+          "4-5": 0,
+          "6-10": 0,
+          "miss": 1
+        },
+        "expected_rank_by_question": {
+          "q-owner": 1,
+          "q-archive": 1,
+          "q-warm": 2,
+          "q-evidence-only": 3,
+          "q-path-target": null,
+          "q-path-pair-a": 3,
+          "q-path-pair-b": 2,
+          "q-path-pair-c": 1
+        },
+        "hit_at_5": {
+          "count": 7,
+          "rate": 0.875
+        },
+        "average_expected_rank": 1.857,
+        "non_monotonic": {
+          "count": 0
+        },
+        "active_constraints": {
+          "count": 0
+        },
+        "budget_drop": {
+          "max_entries": 40
+        },
+        "high_lexical_demoted": {
+          "count": 9
+        },
+        "conflict_penalty": {
+          "count": 35
+        },
+        "evidence_stream_gold_delivery": {
+          "count": 12,
+          "denominator": 13,
+          "rate": 0.923
+        },
+        "path_stream_top10": {
+          "count": 0,
+          "denominator": 80,
+          "rate": 0
+        },
+        "delivery_count": 8,
+        "diagnostics_count": 120
+      },
+      "metrics": {
+        "rank_distribution": {
+          "1": 3,
+          "2": 0,
+          "3": 3,
+          "4-5": 2,
+          "6-10": 0,
+          "miss": 0
+        },
+        "expected_rank_by_question": {
+          "q-owner": 4,
+          "q-archive": 3,
+          "q-warm": 3,
+          "q-evidence-only": 5,
+          "q-path-target": 3,
+          "q-path-pair-a": 1,
+          "q-path-pair-b": 1,
+          "q-path-pair-c": 1
+        },
+        "hit_at_5": {
+          "count": 8,
+          "rate": 1
+        },
+        "average_expected_rank": 2.625,
+        "non_monotonic": {
+          "count": 0
+        },
+        "active_constraints": {
+          "count": 0
+        },
+        "budget_drop": {
+          "max_entries": 40
+        },
+        "high_lexical_demoted": {
+          "count": 11
+        },
+        "conflict_penalty": {
+          "count": 35
+        },
+        "evidence_stream_gold_delivery": {
+          "count": 13,
+          "denominator": 13,
+          "rate": 1
+        },
+        "path_stream_top10": {
+          "count": 15,
+          "denominator": 80,
+          "rate": 0.188
+        },
+        "delivery_count": 8,
+        "diagnostics_count": 120
+      }
+    }
+  ],
+  "metrics": {
+    "rank_distribution": {
+      "1": 13,
+      "2": 20,
+      "3": 8,
+      "4-5": 2,
+      "6-10": 0,
+      "miss": 5
+    },
+    "expected_rank_by_question": {
+      "uniform-fact/q-owner": 1,
+      "uniform-fact/q-archive": 1,
+      "uniform-fact/q-warm": 2,
+      "uniform-fact/q-evidence-only": 2,
+      "uniform-fact/q-path-target": null,
+      "uniform-fact/q-path-pair-a": 2,
+      "uniform-fact/q-path-pair-b": 2,
+      "uniform-fact/q-path-pair-c": 3,
+      "rotated-kind/q-owner": 1,
+      "rotated-kind/q-archive": 1,
+      "rotated-kind/q-warm": 2,
+      "rotated-kind/q-evidence-only": 2,
+      "rotated-kind/q-path-target": null,
+      "rotated-kind/q-path-pair-a": 2,
+      "rotated-kind/q-path-pair-b": 2,
+      "rotated-kind/q-path-pair-c": 3,
+      "stress-policy-max10-conflict-true/q-owner": 1,
+      "stress-policy-max10-conflict-true/q-archive": 1,
+      "stress-policy-max10-conflict-true/q-warm": 2,
+      "stress-policy-max10-conflict-true/q-evidence-only": 2,
+      "stress-policy-max10-conflict-true/q-path-target": null,
+      "stress-policy-max10-conflict-true/q-path-pair-a": 2,
+      "stress-policy-max10-conflict-true/q-path-pair-b": 2,
+      "stress-policy-max10-conflict-true/q-path-pair-c": 3,
+      "chat-policy-max10-conflict-false/q-owner": 1,
+      "chat-policy-max10-conflict-false/q-archive": 1,
+      "chat-policy-max10-conflict-false/q-warm": 2,
+      "chat-policy-max10-conflict-false/q-evidence-only": 2,
+      "chat-policy-max10-conflict-false/q-path-target": null,
+      "chat-policy-max10-conflict-false/q-path-pair-a": 2,
+      "chat-policy-max10-conflict-false/q-path-pair-b": 2,
+      "chat-policy-max10-conflict-false/q-path-pair-c": 3,
+      "cold-report-context-usage-none/q-owner": 1,
+      "cold-report-context-usage-none/q-archive": 1,
+      "cold-report-context-usage-none/q-warm": 2,
+      "cold-report-context-usage-none/q-evidence-only": 2,
+      "cold-report-context-usage-none/q-path-target": null,
+      "cold-report-context-usage-none/q-path-pair-a": 2,
+      "cold-report-context-usage-none/q-path-pair-b": 2,
+      "cold-report-context-usage-none/q-path-pair-c": 3,
+      "warm-report-context-usage-mixed/q-owner": 4,
+      "warm-report-context-usage-mixed/q-archive": 3,
+      "warm-report-context-usage-mixed/q-warm": 3,
+      "warm-report-context-usage-mixed/q-evidence-only": 5,
+      "warm-report-context-usage-mixed/q-path-target": 3,
+      "warm-report-context-usage-mixed/q-path-pair-a": 1,
+      "warm-report-context-usage-mixed/q-path-pair-b": 1,
+      "warm-report-context-usage-mixed/q-path-pair-c": 1
+    },
+    "hit_at_5": {
+      "count": 43,
+      "rate": 0.896
+    },
+    "average_expected_rank": 1.985,
+    "non_monotonic": {
+      "count": 0
+    },
+    "active_constraints": {
+      "count": 0
+    },
+    "budget_drop": {
+      "max_entries": 240
+    },
+    "high_lexical_demoted": {
+      "count": 56
+    },
+    "conflict_penalty": {
+      "count": 140
+    },
+    "evidence_stream_gold_delivery": {
+      "count": 73,
+      "denominator": 78,
+      "rate": 0.936
+    },
+    "path_stream_top10": {
+      "count": 15,
+      "denominator": 480,
+      "rate": 0.031
+    },
+    "delivery_count": 48,
+    "diagnostics_count": 720,
+    "cold_warm_delta": {
+      "average_expected_rank_delta": 0.768,
+      "conflict_penalty_delta": 0,
+      "active_constraints_delta": 0,
+      "budget_drop_max_entries_delta": 0
+    }
+  },
+  "native_health_gates": {
+    "verdict": "ok",
+    "gates": [
+      {
+        "id": "trust_loop_activation_gain",
+        "label": "trust loop activation gain",
+        "current": 0.125,
+        "target": 0.05,
+        "direction": "min",
+        "passed": true,
+        "missing": false
+      },
+      {
+        "id": "evidence_stream_gold_delivery",
+        "label": "evidence stream gold delivery",
+        "current": 0.936,
+        "target": 0.15,
+        "direction": "min",
+        "passed": true,
+        "missing": false
+      },
+      {
+        "id": "path_stream_top10_contribution",
+        "label": "path stream top-10 contribution",
+        "current": 0.188,
+        "target": 0.1,
+        "direction": "min",
+        "passed": true,
+        "missing": false
+      },
+      {
+        "id": "plasticity_gradient_rank_gain",
+        "label": "plasticity canary rank gain",
+        "current": 8,
+        "target": 2,
+        "direction": "min",
+        "passed": true,
+        "missing": false
+      }
+    ]
+  },
+  "contribution_suspects": [
+    {
+      "label": "delivery_budget",
+      "score": 40,
+      "evidence": {
+        "stress_budget_drop_max_entries": 40
+      }
+    },
+    {
+      "label": "conflict_awareness",
+      "score": 35,
+      "evidence": {
+        "stress_conflict_penalty": 35,
+        "chat_conflict_penalty": 0
+      }
+    },
+    {
+      "label": "lexical_structural_blend",
+      "score": 9,
+      "evidence": {
+        "high_lexical_demoted": 9
+      }
+    }
+  ],
+  "evidence": {
+    "harness_mode": "mcp_propose_review",
+    "recall_path": "production_recall_service",
+    "archive_policy": {
+      "writes_latest_baseline": false,
+      "writes_kpi_json": false
+    },
+    "mcp_propose_review": {
+      "seed_count": 90,
+      "signal_count": 90,
+      "proposal_count": 90
+    },
+    "production_recall": {
+      "delivery_count": 48,
+      "diagnostics_count": 720
+    },
+    "report_context_usage": {
+      "mode": "mixed",
+      "delivery_ids": [
+        "delivery_f190aeb2-c9aa-4252-923f-a77bf98e74b2",
+        "delivery_1b5bce25-3172-4d8c-83e0-9a8f0a9dcb08",
+        "delivery_1c4c58a8-5107-4f60-ba5a-fa80aa5bec91",
+        "delivery_5b56ef9a-52cf-4ecc-a04c-3a3e033acf31",
+        "delivery_3eb32605-0e3e-4aa7-96e7-38e611a7cb8d",
+        "delivery_c93a5634-8c97-42c2-a764-125091593248",
+        "delivery_9b4a9fe0-f21e-4cfa-a6e2-b50f0282003f",
+        "delivery_e70cb9da-3110-4059-8a4d-ae800d264b2a"
+      ]
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "fe9d59e650dde4ea607b7350ed68d1f74f37ed01b4d4d5d13f522331f2aa81b0",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"belief_or_knowledge\",\"confidence\":0.79,\"matched_text\":\"I had no idea that mussels could produce toxins to protect themselves.\",\"distilled_fact\":\"The speaker did not know that mussels could produce toxins to protect themselves.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"topic_interest\",\"confidence\":0.86,\"matched_text\":\"That's really cool!\",\"distilled_fact\":\"The speaker thinks that mussels producing toxins to protect themselves is really cool.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"question_interest\",\"confidence\":0.66,\"matched_text\":\"Do these toxins have any other effects on the environment?\",\"distilled_fact\":\"The speaker wants to know whether mussel toxins have any other effects on the environment.\"}]}",
+  "extracted_at": "2026-05-21T07:11:07.914Z"
+}

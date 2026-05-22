@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "9baec7c1cdc59fcd2e2a78a02b417b313df0306fce12f71ba481e45e90cc163e",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"self_reported_feeling\",\"confidence\":0.89,\"matched_text\":\"I feel much more confident in my ability to handle conflicts with my roommates now.\",\"distilled_fact\":\"The user feels much more confident in the user's ability to handle conflicts with the user's roommates now.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"self_reported_ability\",\"confidence\":0.82,\"matched_text\":\"I feel much more confident in my ability to handle conflicts with my roommates now.\",\"distilled_fact\":\"The user reports greater confidence in the user's ability to handle conflicts with the user's roommates now.\"}]}",
+  "extracted_at": "2026-05-21T09:09:37.705Z"
+}

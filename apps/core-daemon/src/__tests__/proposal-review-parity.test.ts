@@ -477,11 +477,15 @@ function createBaseDeps(): Omit<McpMemoryToolHandlerDependencies, "proposalWorkf
         readonly policyOverride?: Readonly<RecallPolicy>;
       }): Promise<{
         readonly candidates: readonly Readonly<RecallCandidate>[];
+        readonly active_constraints: readonly [];
+        readonly active_constraints_count: 0;
         readonly total_scanned: number;
         readonly coarse_filter_count: number;
         readonly fine_assessment_count: number;
       }> => ({
         candidates: [],
+        active_constraints: [],
+        active_constraints_count: 0,
         total_scanned: 0,
         coarse_filter_count: 0,
         fine_assessment_count: 0

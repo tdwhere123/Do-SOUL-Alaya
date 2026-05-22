@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "fa63d3f367b37bec16333e39c6e067040ee2d3a5a06fe51ee34af37c2d99a6b4",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_experience\",\"confidence\":0.92,\"matched_text\":\"I've been trying to apply some of the concepts I learned from Crash Course to real-life situations.\",\"distilled_fact\":\"The user has been trying to apply some of the concepts learned from Crash Course to real-life situations.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_experience\",\"confidence\":0.91,\"matched_text\":\"I've been using some of the astronomy concepts I learned to better understand the news about space exploration and exoplanets.\",\"distilled_fact\":\"The user has been using some of the astronomy concepts learned to better understand news about space exploration and exoplanets.\"}]}",
+  "extracted_at": "2026-05-21T09:16:57.175Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "55792a1737e670555da7df5961c91356bd3cf8932e126e5fe6b4fe2f903b3763",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"product_purchase\",\"confidence\":0.78,\"matched_text\":\"I'm excited to receive my new product and see how it performs.\",\"distilled_fact\":\"The speaker is excited to receive their new product and see how it performs.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"request_for_advice\",\"confidence\":0.84,\"matched_text\":\"Do you have any tips for making the most out of my purchase?\",\"distilled_fact\":\"The speaker asks for tips for making the most out of their purchase.\"}]}",
+  "extracted_at": "2026-05-21T07:44:39.252Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7ac2de0a5cd0ae60ab5b573e7b2bde539d9f04ae9dee5a8c78a7901a26537402",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"personal_life_event\",\"confidence\":0.96,\"matched_text\":\"I actually already found a shared apartment in Carlton back in February, right after I got accepted.\",\"distilled_fact\":\"The user found a shared apartment in Carlton in February 2026, right after being accepted.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"residence_location\",\"confidence\":0.93,\"matched_text\":\"I actually already found a shared apartment in Carlton back in February, right after I got accepted.\",\"distilled_fact\":\"The user's shared apartment is in Carlton.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"timeline\",\"confidence\":0.9,\"matched_text\":\"It's within walking distance to the university, so I'm all set.\",\"distilled_fact\":\"The user's shared apartment in Carlton is within walking distance to the university.\"}]}",
+  "extracted_at": "2026-05-21T09:20:09.469Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "1bdd46fbdd54f1bcaa8d17c7e90fa28c47483bed0a2da7ec3f2ba27f35a43ccf",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"trip_plan\",\"confidence\":0.95,\"matched_text\":\"I'm actually starting to plan a road trip with friends to the Pacific Coast Highway in California today\",\"distilled_fact\":\"The user is starting to plan a road trip with friends to the Pacific Coast Highway in California on 2026-05-21.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"travel_interest\",\"confidence\":0.9,\"matched_text\":\"I'm thinking of planning a trip to Europe, possibly to Italy or Spain\",\"distilled_fact\":\"The user is considering planning a trip to Europe, possibly to Italy or Spain.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"travel_assistance\",\"confidence\":0.8,\"matched_text\":\"I was wondering if you could recommend some popular destinations and itineraries\",\"distilled_fact\":\"The user wants recommendations for popular destinations and itineraries for a trip to Europe.\"}]}",
+  "extracted_at": "2026-05-21T08:58:25.391Z"
+}

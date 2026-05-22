@@ -37,6 +37,8 @@ Reading Matrix`. Do not treat this page as a second workflow table.
   runtime wiring change.
 - `runtime-status.md` tracks current implementation status and known
   wiring gaps.
+- `governance-routes.md` defines the four governance route families and
+  maps the five compatible runtime surfaces onto them.
 - `backlog.md` tracks unresolved cross-area issues. Each issue carries
   an explicit close condition.
 - `glossary.md` defines the Alaya / SOUL vocabulary.

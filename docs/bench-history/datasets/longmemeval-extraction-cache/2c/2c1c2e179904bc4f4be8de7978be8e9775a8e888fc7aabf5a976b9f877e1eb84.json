@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "2c1c2e179904bc4f4be8de7978be8e9775a8e888fc7aabf5a976b9f877e1eb84",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"activity\",\"confidence\":0.68,\"matched_text\":\"Congratulations on redeeming your Ibotta rewards and getting a nice deposit into your PayPal account!\",\"distilled_fact\":\"The user redeemed Ibotta rewards and got a deposit into a PayPal account.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"app\",\"confidence\":0.77,\"matched_text\":\"I'm glad I could introduce you to Fetch Rewards\",\"distilled_fact\":\"The assistant introduced the user to Fetch Rewards.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"preference_question\",\"confidence\":0.41,\"matched_text\":\"what do you usually do with your cashback earnings? Do you save them up for a big purchase, use them for everyday expenses, or treat yourself to something special?\",\"distilled_fact\":\"The user usually does something with cashback earnings, but the specific use is not stated in the turn.\"}]}",
+  "extracted_at": "2026-05-21T07:50:50.221Z"
+}

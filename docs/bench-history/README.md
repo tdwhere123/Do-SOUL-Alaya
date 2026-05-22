@@ -57,12 +57,20 @@ docs/bench-history/
 │   │   └── findings.md (optional)
 │   ├── latest-baseline.json               # embedding=none canonical pointer
 │   └── latest-baseline-embedding-on.json  # embedding-on sibling pointer
-├── public-pre-v0.3.9/                     # frozen pre-v0.3.9 Pass A archives
-│   └── <YYYY-MM-DDTHHMMSSZ>-<sha7>/       # historical record, not diffed
 ├── public-multiturn/
 │   ├── <YYYY-MM-DDTHHMMSSZ>-<sha7>/
 │   │   ├── kpi.json
 │   │   ├── longmemeval-diagnostics.json
+│   │   ├── report.md
+│   │   └── findings.md (optional)
+│   └── latest-baseline.json
+├── controlled-replay/
+│   └── <YYYY-MM-DDTHHMMSSZ>-<sha7>/
+│       └── controlled-replay.json          # diagnostic archive; no KPI pointer
+├── public-locomo/
+│   ├── <YYYY-MM-DDTHHMMSSZ>-<sha7>/
+│   │   ├── kpi.json
+│   │   ├── locomo-diagnostics.json
 │   │   ├── report.md
 │   │   └── findings.md (optional)
 │   └── latest-baseline.json
@@ -91,17 +99,6 @@ docs/bench-history/
   see a populated slug. Until that rerun, treat this pointer as
   reserved-for-future-use.
 
-### Pre-v0.3.9 frozen archives
-
-`public-pre-v0.3.9/` holds the bench archives written before the
-v0.3.9 denominator + label-cascade fix. They are kept for historical
-reference and are not diffed by the runner. The most recent non-FAIL
-disabled-embedding archive was promoted back into `public/` as the
-anchor so the v0.3.9 reruns have a valid previous-baseline to diff
-against; everything else (including the latency-FAIL archives and the
-single mixed embedding-on FAIL archive) lives under
-`public-pre-v0.3.9/`.
-
 ### Sample-size label cascade
 
 `packages/eval/src/wilson-ci.ts` derives the sample-size label from
@@ -128,6 +125,12 @@ single mixed embedding-on FAIL archive) lives under
   these into `docs/handbook/backlog.md`.
 
 ## KPI schema (`kpi.json`)
+
+Version-scoped planning labels such as `K1.3-off` belong in the
+release initiative docs only. Machine-readable hard gates, reports, and
+archives use stable semantic identifiers from
+`packages/eval/src/release-gates.ts` so future releases can reuse the
+same gates without inheriting v0.3.10 phase names.
 
 ```jsonc
 {
@@ -320,6 +323,11 @@ normalized `recallResult.diagnostics` fields when the daemon supplies
 them, and embedding provider state counts/rates. It must not include
 raw turn text, raw provider transcripts, API keys, or secret refs.
 
+LoCoMo entries include the same diagnostic evidence in
+`locomo-diagnostics.json`. Gold references are still stored as memory
+object ids plus source `dia_id` values; raw conversation text remains
+outside the sidecar.
+
 When the daemon does not yet return `recallResult.diagnostics`, the
 sidecar records `recall_diagnostics_present=false` and falls back to
 final delivered-rank evidence plus `diagnostics_unavailable` for misses.
@@ -343,19 +351,21 @@ rtk pnpm build
 # 1. (LongMemEval only) Fetch the public dataset before the first run.
 #    Verifies sha256 against datasets/<name>.meta.json and caches the JSON
 #    under <data-dir>/longmemeval/.
-rtk node apps/bench-runner/bin/alaya-bench-runner.mjs fetch-longmemeval --variant oracle
-rtk node apps/bench-runner/bin/alaya-bench-runner.mjs fetch-longmemeval --variant s
+rtk node apps/bench-runner/bin/alaya-bench-runner.mjs fetch-longmemeval --variant oracle --data-dir <shared-cache>/longmemeval
+rtk node apps/bench-runner/bin/alaya-bench-runner.mjs fetch-longmemeval --variant s --data-dir <shared-cache>/longmemeval
+# If a checksum mismatch proves the cache bytes are stale/corrupt:
+rtk node apps/bench-runner/bin/alaya-bench-runner.mjs fetch-longmemeval --variant s --data-dir <shared-cache>/longmemeval --force
 
 # 2. Run the benches. Each writes <split>/<date>T<HHMMSS>Z-<sha7>/ and
 #    rewrites the corresponding latest-baseline.json pointer.
 rtk node apps/bench-runner/bin/alaya-bench-runner.mjs self
-rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval --variant oracle
+rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval --variant oracle --data-dir <shared-cache>/longmemeval
 rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval-multiturn --variant s --rounds 3 --limit 20
 # Optional: opt into the daemon's real embedding env for a cost-bearing
 # semantic-supplement run. Keep local credentials outside git, for example
 # in `.do-it/bench-env/alaya-api.env`, then source them before the run.
 set -a; . .do-it/bench-env/alaya-api.env; set +a
-rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval --variant s --embedding env
+rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval --variant s --embedding env --data-dir <shared-cache>/longmemeval
 
 # 3. (Live only, operator with a newly generated local source) Archive a
 #    strict-real live check into the tracked bench-history/live/ tree.

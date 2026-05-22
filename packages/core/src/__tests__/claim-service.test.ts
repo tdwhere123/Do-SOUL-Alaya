@@ -307,7 +307,66 @@ describe("ClaimService", () => {
     expect(broadcastSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("supports active to contested transition in Phase 2A", async () => {
+  it("uses the atomic EventPublisher path for lifecycle transitions when the repo exposes sync CAS", async () => {
+    const existing = createClaimForm({ claim_status: ClaimLifecycleState.DRAFT });
+    const publishedBatches: Array<readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[]> = [];
+    const updateStatusSync = vi.fn((_objectId, status, updatedAt) =>
+      Object.freeze({ ...existing, claim_status: status, updated_at: updatedAt })
+    );
+    const appendManyWithMutation = vi.fn(
+      async (
+        events: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+        mutate: (entries: readonly EventLogEntry[]) => Readonly<ClaimForm>
+      ) => {
+        publishedBatches.push(events);
+        const persisted = events.map((event, idx) => ({
+          ...event,
+          event_id: `evt_${idx}`,
+          created_at: "2026-03-21T01:00:00.000Z",
+          revision: idx
+        }));
+        return mutate(persisted);
+      }
+    );
+    const { dependencies, appendSpy, broadcastSpy } = createDependencies({
+      claimFormRepo: {
+        create: vi.fn((claim) => claim),
+        findById: vi.fn(async () => existing),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByStatus: vi.fn(async () => []),
+        findByCanonicalKey: vi.fn(async () => []),
+        updateStatus: vi.fn(async () => {
+          throw new Error("async updateStatus must not be used");
+        }),
+        updateStatusSync
+      },
+      eventPublisher: {
+        appendManyWithMutation
+      } as any
+    });
+
+    const service = new ClaimService(dependencies);
+    const updated = await service.transitionLifecycle(
+      existing.object_id,
+      ClaimLifecycleState.ACTIVE,
+      "review_accept",
+      TransitionCausedBy.REVIEW,
+      { skipSlotElection: true }
+    );
+
+    expect(updated.claim_status).toBe(ClaimLifecycleState.ACTIVE);
+    expect(updateStatusSync).toHaveBeenCalledWith(
+      existing.object_id,
+      ClaimLifecycleState.ACTIVE,
+      "2026-03-21T01:00:00.000Z",
+      ClaimLifecycleState.DRAFT
+    );
+    expect(publishedBatches[0]?.map((event) => event.event_type)).toEqual(["soul.claim.lifecycle_changed"]);
+    expect(appendSpy).not.toHaveBeenCalled();
+    expect(broadcastSpy).not.toHaveBeenCalled();
+  });
+
+  it("supports active to contested transition", async () => {
     const existing = createClaimForm({ claim_status: ClaimLifecycleState.ACTIVE });
 
     const { dependencies } = createDependencies({

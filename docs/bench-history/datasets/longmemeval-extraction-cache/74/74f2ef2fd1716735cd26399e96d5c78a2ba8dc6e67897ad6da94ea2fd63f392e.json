@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "74f2ef2fd1716735cd26399e96d5c78a2ba8dc6e67897ad6da94ea2fd63f392e",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"person\",\"confidence\":0.93,\"matched_text\":\"Congratulations to Rachel and her little bundle of joy, Lucas!\",\"distilled_fact\":\"Rachel has a baby boy named Lucas.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"person\",\"confidence\":0.74,\"matched_text\":\"Remember to consider Rachel's preferences and values when choosing a gift.\",\"distilled_fact\":\"Rachel has preferences and values that should be considered when choosing a gift for Lucas.\"}]}",
+  "extracted_at": "2026-05-21T08:04:26.382Z"
+}

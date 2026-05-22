@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "af820464409b7c8eb3127c16ec31df6b661a892bf585823dae2f0fa0e66dbb3a",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity_interest\",\"confidence\":0.92,\"matched_text\":\"I've been wanting to try meditation and mindfulness practices\",\"distilled_fact\":\"The user wants to try meditation and mindfulness practices.\"}]}",
+  "extracted_at": "2026-05-21T09:05:18.992Z"
+}

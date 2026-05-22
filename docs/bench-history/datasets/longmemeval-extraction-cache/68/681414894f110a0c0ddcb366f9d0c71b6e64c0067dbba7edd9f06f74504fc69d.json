@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "681414894f110a0c0ddcb366f9d0c71b6e64c0067dbba7edd9f06f74504fc69d",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"stance\",\"confidence\":0.74,\"matched_text\":\"It's encouraging to see the progress made in women's rights, but there's still a long way to go.\",\"distilled_fact\":\"The speaker believes progress has been made in women's rights, but there is still a long way to go.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"topic\",\"confidence\":0.71,\"matched_text\":\"What do you think are some of the biggest barriers that women still face in achieving equality?\",\"distilled_fact\":\"The speaker asks about the biggest barriers that women still face in achieving equality.\"}]}",
+  "extracted_at": "2026-05-21T07:52:38.381Z"
+}

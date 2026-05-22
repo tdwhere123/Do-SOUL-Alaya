@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "512671f380dea3f0fe55a225aace78804477fa6bee8d82735885f84756ef289e",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"location_preference\",\"confidence\":0.88,\"matched_text\":\"I'm planning to go to the beach near Santa Cruz, so I was thinking of trying out some other seafood spots in the area.\",\"distilled_fact\":\"The user is planning to go to the beach near Santa Cruz and is thinking of trying out some other seafood spots in the area.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"past_activity\",\"confidence\":0.95,\"matched_text\":\"We actually visited the Santa Cruz Wharf during our day trip last week, it was a lot of fun.\",\"distilled_fact\":\"The user visited the Santa Cruz Wharf during the user's day trip last week.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"sentiment\",\"confidence\":0.74,\"matched_text\":\"We actually visited the Santa Cruz Wharf during our day trip last week, it was a lot of fun.\",\"distilled_fact\":\"The user's day trip to the Santa Cruz Wharf last week was a lot of fun.\"}]}",
+  "extracted_at": "2026-05-21T09:19:46.688Z"
+}

@@ -112,10 +112,10 @@ describe("diffKpis", () => {
     expect(result.fixture_regressions).toHaveLength(0);
   });
 
-  // @anchor min-sample-test — see thresholds.min_sample_for_ratio_diff
+  // @anchor min-sample-test: see thresholds.min_sample_for_ratio_diff
   // ci-aware band widening absorbs small-N noise on ratio KPIs, so the
   // verdict comes out ok directly; the sample-size downgrade still
-  // matters for non-ratio KPIs (latency, hot share) — see the next test.
+  // matters for non-ratio KPIs (latency, hot share). See the next test.
   it("ci-aware band absorbs ratio-KPI noise when current evaluated_count is small", () => {
     const previous: KpiPayload = {
       ...buildPayload({ r_at_5: 1.0, r_at_10: 1.0 }),
@@ -141,11 +141,11 @@ describe("diffKpis", () => {
     expect(result.worst_verdict).not.toBe("fail");
   });
 
-  // @anchor sample-too-small-symmetric — current-undersampled case
+  // @anchor sample-too-small-symmetric: current-undersampled case
   it("downgrades fail to warn when CURRENT run is below min sample size", () => {
     // Previous is a healthy 500-q baseline at R@5=80%; current is a
     // 5-q smoke that happens to land at R@5=0%. The 80pp drop would
-    // cross FAIL — but the smoke is the unstable side, not the
+    // cross FAIL, but the smoke is the unstable side, not the
     // baseline. The guard must downgrade FAIL here too.
     const previous: KpiPayload = {
       ...buildPayload({ r_at_5: 0.8 }),
@@ -199,5 +199,77 @@ describe("diffKpis", () => {
 
     expect(result.deltas.some((delta) => delta.key === "tier_distribution.hot_share")).toBe(false);
     expect(result.worst_verdict).toBe("ok");
+  });
+
+  it("diffs the token_saved ratio drop as a regression signal", () => {
+    const previous: KpiPayload = {
+      ...buildPayload({ token_saved_ratio_vs_full_prompt: 0.98 }),
+      sample_size: 500,
+      evaluated_count: 500
+    };
+    const current: KpiPayload = {
+      ...buildPayload({ token_saved_ratio_vs_full_prompt: 0.9 }),
+      sample_size: 500,
+      evaluated_count: 500
+    };
+    const result = diffKpis(current, previous);
+    const tokenDelta = result.deltas.find(
+      (d) => d.key === "token_saved_ratio_vs_full_prompt"
+    );
+    expect(tokenDelta).toBeDefined();
+    expect(tokenDelta?.delta).toBeCloseTo(-0.08, 10);
+    expect(tokenDelta?.verdict).toBe("fail");
+  });
+
+  it("emits a recalled_context_tokens_mean delta only when both sides carry token_economy", () => {
+    const economy = (mean: number) => ({
+      schema_version: "bench-token-economy.v1" as const,
+      raw_history_tokens: 10_000,
+      stored_memory_tokens: 1_000,
+      recalled_context_tokens_total: mean * 10,
+      recall_event_count: 10,
+      recalled_context_tokens_mean: mean,
+      seed_event_count: 40
+    });
+    const previous: KpiPayload = {
+      ...buildPayload({ token_economy: economy(200) }),
+      sample_size: 500,
+      evaluated_count: 500
+    };
+    const current: KpiPayload = {
+      ...buildPayload({ token_economy: economy(400) }),
+      sample_size: 500,
+      evaluated_count: 500
+    };
+    const result = diffKpis(current, previous);
+    const meanDelta = result.deltas.find(
+      (d) => d.key === "token_economy.recalled_context_tokens_mean"
+    );
+    expect(meanDelta).toBeDefined();
+    expect(meanDelta?.delta).toBe(200);
+    expect(meanDelta?.direction).toBe("growth_bad");
+    // a 2x growth in the per-recall payload is well past the fail band.
+    expect(meanDelta?.verdict).toBe("fail");
+  });
+
+  it("omits the token_economy delta when a pre-S6 baseline has no token_economy block", () => {
+    const previous = buildPayload({});
+    const current = buildPayload({
+      token_economy: {
+        schema_version: "bench-token-economy.v1",
+        raw_history_tokens: 10_000,
+        stored_memory_tokens: 1_000,
+        recalled_context_tokens_total: 2_000,
+        recall_event_count: 10,
+        recalled_context_tokens_mean: 200,
+        seed_event_count: 40
+      }
+    });
+    const result = diffKpis(current, previous);
+    expect(
+      result.deltas.some(
+        (d) => d.key === "token_economy.recalled_context_tokens_mean"
+      )
+    ).toBe(false);
   });
 });

@@ -12,7 +12,7 @@ import {
   type SoulResolutionKind as SoulResolutionKindType
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
-import type { EventPublisher } from "./event-publisher.js";
+import type { EventPublisher, EventPublisherInput } from "./event-publisher.js";
 import type { DeferredObligationService } from "./deferred-obligation-service.js";
 
 // invariant: producer-side input shape. workspace_id / run_id /
@@ -59,7 +59,17 @@ export interface ResolutionServiceClaimServicePort {
     objectId: string,
     newState: ClaimForm["claim_status"],
     reason: string,
-    causedBy: typeof TransitionCausedBy[keyof typeof TransitionCausedBy]
+    causedBy: typeof TransitionCausedBy[keyof typeof TransitionCausedBy],
+    // invariant: confirm/reject thread the resolution audit event through
+    // `additionalEventInputs` so the claim_status mutation and the
+    // governance-resolution audit row are appended in one SQLite
+    // transaction. The persisted audit row is read back via
+    // `additionalEventsSink`. A crash can no longer leave an activated /
+    // archived claim without its resolution audit (CLAUDE.md invariants §13).
+    options?: {
+      readonly additionalEventInputs?: readonly EventPublisherInput[];
+      readonly additionalEventsSink?: EventLogEntry[];
+    }
   ): Promise<Readonly<ClaimForm>>;
 }
 
@@ -111,6 +121,10 @@ export class ResolutionService {
   // draft → active is the L3 replacement for the retired
   // SynthesisCapsule.promotion path; the audit event records the
   // activated_claim_id so EventLog readers can correlate.
+  // invariant: the claim_status mutation and the governance-resolution
+  // audit event are appended in one SQLite transaction (composed through
+  // claimService.transitionLifecycle additionalEventInputs). A crash can
+  // no longer leave an ACTIVE claim with no resolution audit row.
   // see also: ClaimService.transitionLifecycle (lifecycle gate)
   private async applyConfirm(input: ResolveInput): Promise<ResolveOutcome> {
     const claim = await this.deps.claimRepo.findById(input.targetObjectId);
@@ -132,15 +146,18 @@ export class ResolutionService {
         `Claim form ${input.targetObjectId} is not in draft (current: ${claim.claim_status})`
       );
     }
+    const auditEventInput = this.buildAuditEventInput(input, {
+      activatedClaimId: claim.object_id
+    });
+    const auditEventsSink: EventLogEntry[] = [];
     const activated = await this.deps.claimService.transitionLifecycle(
       claim.object_id,
       ClaimLifecycleState.ACTIVE,
       input.reason ?? "soul_resolve_confirm",
-      TransitionCausedBy.USER
+      TransitionCausedBy.USER,
+      { additionalEventInputs: [auditEventInput], additionalEventsSink: auditEventsSink }
     );
-    const entry = await this.emitAuditEvent(input, {
-      activatedClaimId: activated.object_id
-    });
+    const entry = requireAuditEntry(auditEventsSink);
     return {
       resolution: input.resolution,
       status: "applied",
@@ -156,24 +173,37 @@ export class ResolutionService {
   // winner / superseded archive through the standard path. For
   // memory_entry targets the resolution emits the audit event only —
   // durable memory is not mutated by the reject path.
+  // invariant: when reject archives a claim, the claim_status mutation
+  // and the resolution audit event are appended in one SQLite
+  // transaction. The audit-only branches (already-archived claim,
+  // memory_entry target) publish the audit event standalone — no
+  // governance mutation to pair it with.
   // see also: packages/protocol/src/soul/claim-form.ts claimTransitions
   private async applyReject(input: ResolveInput): Promise<ResolveOutcome> {
     const claim = await this.deps.claimRepo.findById(input.targetObjectId);
-    if (claim !== null) {
-      if (claim.workspace_id !== input.workspaceId) {
-        throw new CoreError(
-          "VALIDATION",
-          `Claim form ${input.targetObjectId} is not in workspace ${input.workspaceId}`
-        );
-      }
-      if (claim.claim_status !== ClaimLifecycleState.ARCHIVED) {
-        await this.deps.claimService.transitionLifecycle(
-          claim.object_id,
-          ClaimLifecycleState.ARCHIVED,
-          input.reason ?? "soul_resolve_reject",
-          TransitionCausedBy.USER
-        );
-      }
+    if (claim !== null && claim.workspace_id !== input.workspaceId) {
+      throw new CoreError(
+        "VALIDATION",
+        `Claim form ${input.targetObjectId} is not in workspace ${input.workspaceId}`
+      );
+    }
+    if (claim !== null && claim.claim_status !== ClaimLifecycleState.ARCHIVED) {
+      const auditEventInput = this.buildAuditEventInput(input, {});
+      const auditEventsSink: EventLogEntry[] = [];
+      await this.deps.claimService.transitionLifecycle(
+        claim.object_id,
+        ClaimLifecycleState.ARCHIVED,
+        input.reason ?? "soul_resolve_reject",
+        TransitionCausedBy.USER,
+        { additionalEventInputs: [auditEventInput], additionalEventsSink: auditEventsSink }
+      );
+      const entry = requireAuditEntry(auditEventsSink);
+      return {
+        resolution: input.resolution,
+        status: "applied",
+        auditEventType: entry.event_type,
+        auditEventId: entry.event_id
+      };
     }
     const entry = await this.emitAuditEvent(input, {});
     return {
@@ -331,13 +361,17 @@ export class ResolutionService {
     }
   }
 
-  private async emitAuditEvent(
+  // invariant: pure builder for the governance-resolution audit EventLog
+  // input. Kept separate from the publish so confirm/reject can compose
+  // this row into the claim lifecycle transaction (atomic audit), while
+  // correct/stale/defer/not_relevant publish it directly.
+  private buildAuditEventInput(
     input: ResolveInput,
     extras: Readonly<{
       readonly obligationId?: string;
       readonly activatedClaimId?: string;
     }>
-  ): Promise<Readonly<EventLogEntry>> {
+  ): EventPublisherInput {
     const eventType = RESOLUTION_KIND_TO_EVENT_TYPE[input.resolution];
     const occurredAt = this.now();
     const payload = GovernanceResolutionPayloadSchema.parse({
@@ -354,7 +388,7 @@ export class ResolutionService {
       activated_claim_id: extras.activatedClaimId ?? null,
       occurred_at: occurredAt
     });
-    return await this.deps.eventPublisher.publish({
+    return {
       event_type: eventType,
       entity_type: "soul_resolution",
       entity_id: input.targetObjectId,
@@ -362,6 +396,34 @@ export class ResolutionService {
       run_id: input.runId,
       caused_by: input.agentTarget,
       payload_json: payload
-    });
+    };
   }
+
+  private async emitAuditEvent(
+    input: ResolveInput,
+    extras: Readonly<{
+      readonly obligationId?: string;
+      readonly activatedClaimId?: string;
+    }>
+  ): Promise<Readonly<EventLogEntry>> {
+    return await this.deps.eventPublisher.publish(
+      this.buildAuditEventInput(input, extras)
+    );
+  }
+}
+
+// invariant: a composed claim transition must yield exactly its one
+// additional audit row in the sink. An empty sink means the claim service
+// took a path that did not append the audit event atomically — surfacing
+// it as an error is correct: a silently-skipped governance audit is the
+// exact failure this fix exists to prevent.
+function requireAuditEntry(sink: readonly EventLogEntry[]): Readonly<EventLogEntry> {
+  const entry = sink[0];
+  if (entry === undefined) {
+    throw new CoreError(
+      "CONFLICT",
+      "Resolution audit event was not appended atomically with the claim transition"
+    );
+  }
+  return entry;
 }

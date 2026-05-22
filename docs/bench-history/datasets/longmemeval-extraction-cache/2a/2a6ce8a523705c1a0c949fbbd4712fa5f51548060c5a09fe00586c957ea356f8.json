@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "2a6ce8a523705c1a0c949fbbd4712fa5f51548060c5a09fe00586c957ea356f8",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"routine\",\"confidence\":0.95,\"matched_text\":\"I've also been using a foam roller for post-workout stretching, and it's made a huge difference in reducing muscle soreness.\",\"distilled_fact\":\"The user has been using a foam roller for post-workout stretching, and it has made a huge difference in reducing muscle soreness.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"purchase_event\",\"confidence\":0.92,\"matched_text\":\"I got it from Amazon, and it arrived on March 2nd.\",\"distilled_fact\":\"The user got the foam roller from Amazon, and it arrived on March 2nd.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"routine\",\"confidence\":0.9,\"matched_text\":\"I've been trying to use it at least three times a week, usually after my morning yoga sessions.\",\"distilled_fact\":\"The user has been trying to use the foam roller at least three times a week, usually after the user's morning yoga sessions.\"}]}",
+  "extracted_at": "2026-05-21T08:55:51.234Z"
+}

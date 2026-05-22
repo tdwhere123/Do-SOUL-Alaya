@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "502a9ad4641cdb9f47c13ffc80f8f2485fe14c690e1fe870530ffe55217d819f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_need\",\"confidence\":0.79,\"matched_text\":\"Can you give me specific details on how to file a claim for damages caused by the recent hurricane in my area?\",\"distilled_fact\":\"The user wants specific details on how to file a claim for damages caused by the recent hurricane in the user's area.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"assistant_capability_limitation\",\"confidence\":0.92,\"matched_text\":\"As an AI language model, I do not have access to real-time information on recent disasters.\",\"distilled_fact\":\"The assistant does not have access to real-time information on recent disasters.\"}]}",
+  "extracted_at": "2026-05-21T09:16:14.287Z"
+}

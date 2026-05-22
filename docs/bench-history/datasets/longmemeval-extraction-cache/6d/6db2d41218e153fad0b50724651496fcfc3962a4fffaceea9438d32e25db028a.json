@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "6db2d41218e153fad0b50724651496fcfc3962a4fffaceea9438d32e25db028a",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity_plan\",\"confidence\":0.89,\"matched_text\":\"I'll ask the staff at the running store to assess my foot shape and gait to determine the best insole option for me.\",\"distilled_fact\":\"The speaker plans to ask the staff at a running store to assess the speaker's foot shape and gait to determine the best insole option for the speaker.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"interest\",\"confidence\":0.86,\"matched_text\":\"I'll also ask them about the different types of insoles and materials\",\"distilled_fact\":\"The speaker plans to ask the staff at a running store about the different types of insoles and materials.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"activity_plan\",\"confidence\":0.86,\"matched_text\":\"whether they have any recommendations based on my running habits and foot pain.\",\"distilled_fact\":\"The speaker plans to ask the staff at a running store whether they have any recommendations based on the speaker's running habits and foot pain.\"}]}",
+  "extracted_at": "2026-05-21T08:11:51.782Z"
+}

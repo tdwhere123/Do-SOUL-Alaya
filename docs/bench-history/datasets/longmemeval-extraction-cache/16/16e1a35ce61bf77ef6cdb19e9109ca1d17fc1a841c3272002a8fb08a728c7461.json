@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "16e1a35ce61bf77ef6cdb19e9109ca1d17fc1a841c3272002a8fb08a728c7461",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"historical_topic\",\"confidence\":0.62,\"matched_text\":\"What factors led to the formation of the ANZAC organization, and how did this contribute to shaping national identity?\",\"distilled_fact\":\"The turn asks about the factors that led to the formation of the ANZAC organization and its contribution to shaping national identity.\"}]}",
+  "extracted_at": "2026-05-21T07:59:01.181Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c5b4baf9cbf0adb73296b87d367a97cb0312eec6eab06936fad181475c5f97ab",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"observation\",\"confidence\":0.95,\"matched_text\":\"I've been tracking the Ruby-throated Hummingbirds in my backyard, and I've seen up to five hummingbirds at a time on my feeder.\",\"distilled_fact\":\"The user has been tracking Ruby-throated Hummingbirds in the user's backyard and has seen up to five hummingbirds at a time on the user's feeder.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.87,\"matched_text\":\"I'm hoping to spot some new species on this trip\",\"distilled_fact\":\"The user hopes to spot some new species on this trip.\"},{\"signal_kind\":\"potential_intent\",\"object_kind\":\"activity\",\"confidence\":0.84,\"matched_text\":\"so I'll keep an eye out for the areas you mentioned.\",\"distilled_fact\":\"The user will keep an eye out for the areas the assistant mentioned earlier on this trip.\"}]}",
+  "extracted_at": "2026-05-21T09:10:05.337Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "ec00dc664efb997218adc92728409cfc9cc9573010e501e170040611b5ce0b3d",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"personal_item\",\"confidence\":0.97,\"matched_text\":\"I have two watches that need attention: one needs a new leather strap and the other needs its batteries replaced.\",\"distilled_fact\":\"The user has two watches, and one needs a new leather strap while the other needs its batteries replaced.\"}]}",
+  "extracted_at": "2026-05-21T09:09:20.295Z"
+}

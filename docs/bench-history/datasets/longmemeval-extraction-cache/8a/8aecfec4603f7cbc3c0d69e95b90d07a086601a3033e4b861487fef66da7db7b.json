@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "8aecfec4603f7cbc3c0d69e95b90d07a086601a3033e4b861487fef66da7db7b",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"state_of_possession\",\"confidence\":0.92,\"matched_text\":\"the overalls are no longer accessible and cannot be retrieved\",\"distilled_fact\":\"Emma's overalls are no longer accessible and cannot be retrieved.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"possession_status\",\"confidence\":0.9,\"matched_text\":\"They have been disposed of and are no longer in Emma's possession.\",\"distilled_fact\":\"Emma's overalls have been disposed of and are no longer in Emma's possession.\"}]}",
+  "extracted_at": "2026-05-21T09:14:32.465Z"
+}

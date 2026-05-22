@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "56b2be5ff198ba768b9543710227d9025d9b6828b5e15ec0db91c70d548c25e3",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"beer_style\",\"confidence\":0.89,\"matched_text\":\"if you're new to beer, you could start with a lighter style such as a pilsner or a wheat beer.\",\"distilled_fact\":\"The assistant suggested a pilsner or a wheat beer as a lighter beer style to try first if the user is new to beer.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"beer_style\",\"confidence\":0.84,\"matched_text\":\"if you prefer more hoppy or bitter flavors, an ipa might be a good choice.\",\"distilled_fact\":\"The assistant suggested an IPA as a beer style to try if the user prefers more hoppy or bitter flavors.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"beer_style\",\"confidence\":0.84,\"matched_text\":\"for those who prefer a darker, richer flavor, a stout or porter might be more appealing.\",\"distilled_fact\":\"The assistant suggested a stout or porter as a beer style to try if the user prefers a darker, richer flavor.\"}]}",
+  "extracted_at": "2026-05-21T09:12:49.500Z"
+}

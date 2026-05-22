@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "81eb50115c04a9aa6c9d45a37575ff961aba96d12baafe3b96395e991afb1196",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"preference\",\"confidence\":0.79,\"matched_text\":\"I want to create a cozy and inviting atmosphere in my bedroom.\",\"distilled_fact\":\"The user wants to create a cozy and inviting atmosphere in the user's bedroom.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"home_decor_context\",\"confidence\":0.91,\"matched_text\":\"your Moroccan-inspired rug and gray paint\",\"distilled_fact\":\"The user's bedroom has a Moroccan-inspired rug and gray paint.\"}]}",
+  "extracted_at": "2026-05-21T09:22:49.265Z"
+}

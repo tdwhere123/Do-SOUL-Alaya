@@ -89,7 +89,10 @@ neighbour consolidation.
 **ConsolidationLoop** — Garden's primary mechanism for path plasticity
 maintenance. Gate-5F owns this through the Librarian (TIER_2)
 `path_plasticity_update` task, keeping the work off the recall request
-path while matching the role that owns path consolidation.
+path while matching the role that owns path consolidation. v0.3.10
+keeps used-report evidence soft: repeated use decays for strength,
+`trust_mode = automatic` is half-weighted, and support counters remain
+event counts rather than host-attested truth.
 
 ## Governance
 

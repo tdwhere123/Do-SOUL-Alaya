@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c4aeed9d44d081a8093e7daaa4865423cc91469ca130887ba9f640239ec1a3a1",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"podcast_preference\",\"confidence\":0.94,\"matched_text\":\"I was wondering if you could recommend some inspiring podcasts about entrepreneurship, aside from \\\"How I Built This\\\" which I've been listening to for months now.\",\"distilled_fact\":\"The user is interested in inspiring podcasts about entrepreneurship and has been listening to \\\"How I Built This\\\" for months.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"podcast_listening_event\",\"confidence\":0.9,\"matched_text\":\"I just finished listening to a true crime podcast that my sister recommended to me on January 15th\",\"distilled_fact\":\"The user finished listening to a true crime podcast that the user's sister recommended on January 15th.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"value_statement\",\"confidence\":0.74,\"matched_text\":\"it got me thinking about how important it is to take risks and pursue my passions.\",\"distilled_fact\":\"The user thinks it is important to take risks and pursue their passions.\"}]}",
+  "extracted_at": "2026-05-21T07:06:20.088Z"
+}

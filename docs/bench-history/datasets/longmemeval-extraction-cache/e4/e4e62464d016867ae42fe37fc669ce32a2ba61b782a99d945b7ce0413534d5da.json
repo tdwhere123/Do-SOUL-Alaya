@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "e4e62464d016867ae42fe37fc669ce32a2ba61b782a99d945b7ce0413534d5da",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"habit\",\"confidence\":0.87,\"matched_text\":\"I've also been using a foam roller for post-workout stretching\",\"distilled_fact\":\"The speaker has been using a foam roller for post-workout stretching.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"experience\",\"confidence\":0.88,\"matched_text\":\"it's made a huge difference in reducing muscle soreness\",\"distilled_fact\":\"Using a foam roller for post-workout stretching has made a huge difference in reducing the speaker's muscle soreness.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"purchase_history\",\"confidence\":0.84,\"matched_text\":\"I got it from Amazon, and it arrived on March 2nd\",\"distilled_fact\":\"The foam roller was purchased from Amazon and arrived on March 2nd.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"habit\",\"confidence\":0.86,\"matched_text\":\"I've been trying to use it at least three times a week, usually after my morning yoga sessions\",\"distilled_fact\":\"The speaker has been trying to use the foam roller at least three times a week, usually after morning yoga sessions.\"}]}",
+  "extracted_at": "2026-05-21T07:02:06.435Z"
+}

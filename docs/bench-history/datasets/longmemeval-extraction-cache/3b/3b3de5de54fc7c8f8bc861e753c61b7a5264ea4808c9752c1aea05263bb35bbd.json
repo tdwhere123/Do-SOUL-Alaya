@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "3b3de5de54fc7c8f8bc861e753c61b7a5264ea4808c9752c1aea05263bb35bbd",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"food_preference\",\"confidence\":0.93,\"matched_text\":\"I've been meaning to try Kind Bar's Fruit & Nut flavor, and LaraBar's Coconut Cream Pie flavor sounds intriguing.\",\"distilled_fact\":\"The user is interested in trying Kind Bar's Fruit & Nut flavor and LaraBar's Coconut Cream Pie flavor.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"snack_texture_preference\",\"confidence\":0.9,\"matched_text\":\"Maybe something crunchy or crispy?\",\"distilled_fact\":\"The user is looking for healthy snack options that are crunchy or crispy.\"}]}",
+  "extracted_at": "2026-05-21T09:03:45.079Z"
+}

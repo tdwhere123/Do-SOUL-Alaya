@@ -4,6 +4,7 @@ import path from "node:path";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import {
+  DYNAMICS_CONSTANTS,
   HealthEventKind,
   GardenEventType,
   type EventLogEntry
@@ -100,6 +101,83 @@ describe("routes-config port batch", () => {
       requires_daemon_restart: false
     });
     expect(configService.patchRuntimeGardenComputeConfig).toHaveBeenCalledWith(body);
+  });
+
+  it("reads and patches workspace manifestation budget config through the config service and EventLog audit", async () => {
+    const harness = await createServiceHarness();
+    const app = new Hono();
+    registerConfigRoutes(app, {
+      workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-budget" })) },
+      configService: harness.service
+    } as any);
+
+    const initial = await app.request("/workspaces/ws-budget/config/manifestation-budget");
+    expect(initial.status).toBe(200);
+    await expect(initial.json()).resolves.toMatchObject({
+      success: true,
+      source: "default",
+      data: {
+        workspace_id: "ws-budget",
+        stance_bias_cap: DYNAMICS_CONSTANTS.manifestation_budget.default_stance_bias_cap,
+        dialogue_nudge_cap: DYNAMICS_CONSTANTS.manifestation_budget.default_dialogue_nudge_cap,
+        lens_entry_cap: DYNAMICS_CONSTANTS.manifestation_budget.default_lens_entry_cap
+      }
+    });
+    expect(harness.publishedEvents).toHaveLength(0);
+
+    const patch = await app.request("/workspaces/ws-budget/config/manifestation-budget", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        stance_bias_cap: 7,
+        escalation_policy: {
+          nudge_min_pressure: 0.45
+        }
+      })
+    });
+
+    expect(patch.status).toBe(200);
+    await expect(patch.json()).resolves.toMatchObject({
+      success: true,
+      requires_daemon_restart: false,
+      data: {
+        workspace_id: "ws-budget",
+        stance_bias_cap: 7,
+        escalation_policy: {
+          nudge_min_pressure: 0.45,
+          lens_requires_task_coupling: true
+        }
+      }
+    });
+    expect(harness.publishedEvents).toHaveLength(1);
+    expect(harness.publishedEvents[0]).toMatchObject({
+      event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
+      entity_type: "workspace_config",
+      entity_id: "workspace:ws-budget:manifestation_budget",
+      workspace_id: "ws-budget",
+      caused_by: "inspector",
+      payload_json: {
+        entry_id: "audit-1",
+        event_kind: HealthEventKind.RECALL_TUNING,
+        workspace_id: "ws-budget",
+        change_summary: {
+          fields_changed: ["stance_bias_cap", "escalation_policy.nudge_min_pressure"]
+        }
+      }
+    });
+
+    const stored = await app.request("/workspaces/ws-budget/config/manifestation-budget");
+    await expect(stored.json()).resolves.toMatchObject({
+      success: true,
+      source: "stored",
+      data: {
+        workspace_id: "ws-budget",
+        stance_bias_cap: 7,
+        escalation_policy: {
+          nudge_min_pressure: 0.45
+        }
+      }
+    });
   });
 
   it("persists runtime embedding config through the config service envelope and EventLog audit", async () => {
@@ -515,9 +593,8 @@ describe("routes-config port batch", () => {
     // Gate the first call's atomic publish so the second call queues on the
     // FS lock; when the first call's persist throws, applyRuntimeEmbeddingConfigFiles
     // restores the FS files, then the second call proceeds and writes its own
-    // pasted secret. Mirrors the prior design where the gate lived in the
-    // (async) repo.patch override; under #BL-022 the repo write is sync so we
-    // gate at the publish boundary instead.
+    // pasted secret. The repo write is sync, so the gate lives at the publish
+    // boundary.
     const backingRepo = createMemoryConfigRepo();
     const firstPublishStarted = createDeferred<void>();
     const firstPublishCanFail = createDeferred<void>();

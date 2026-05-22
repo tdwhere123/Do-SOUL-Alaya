@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "af0736596a6e146511faa07105f6bf023b65279a2b4d50d211b1c19579e205d2",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"movie_watch_preference\",\"confidence\":0.89,\"matched_text\":\"I'm actually thinking of watching a classic movie this weekend.\",\"distilled_fact\":\"The user is thinking of watching a classic movie this weekend.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"streaming_service_preference\",\"confidence\":0.84,\"matched_text\":\"Do you think you could recommend some highly rated classic movies that are available on Netflix or Amazon Prime?\",\"distilled_fact\":\"The user wants recommendations for highly rated classic movies available on Netflix or Amazon Prime.\"}]}",
+  "extracted_at": "2026-05-21T09:03:14.319Z"
+}

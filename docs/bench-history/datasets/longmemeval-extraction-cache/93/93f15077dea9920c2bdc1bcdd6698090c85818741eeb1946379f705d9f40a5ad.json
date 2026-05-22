@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "93f15077dea9920c2bdc1bcdd6698090c85818741eeb1946379f705d9f40a5ad",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"podcast_topic\",\"confidence\":0.89,\"matched_text\":\"I've been listening to the \\\"How I Built This\\\" podcast lately, and it's really inspiring to hear the stories of entrepreneurs and innovators.\",\"distilled_fact\":\"The user has been listening to the \\\"How I Built This\\\" podcast lately.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"content_topic\",\"confidence\":0.88,\"matched_text\":\"Do you know of any podcasts that focus specifically on data science entrepreneurship or startup stories in the data science and AI space?\",\"distilled_fact\":\"The user is interested in podcasts that focus specifically on data science entrepreneurship or startup stories in the data science and AI space.\"}]}",
+  "extracted_at": "2026-05-21T09:15:53.906Z"
+}

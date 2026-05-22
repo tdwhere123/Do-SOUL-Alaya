@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Context, Hono } from "hono";
 import type { MemoryService, ProposalService, WorkspaceService } from "@do-soul/alaya-core";
+import type { PathRelationProposalPayload } from "@do-soul/alaya-storage";
 import {
   ControlPlaneObjectKind,
   MemoryGovernanceEventType,
@@ -23,7 +24,7 @@ import type { McpMemoryToolHandler } from "../mcp-memory-tool-handler.js";
 // the proposal is reviewed. The Proposal carries the requested
 // governance_class in proposed_change_summary so the Inspector pending
 // queue surfaces it without a downstream join.
-// see also: packages/protocol/src/soul/path-relation.ts — PathGovernanceClass enum
+// see also: packages/protocol/src/soul/path-relation.ts for PathGovernanceClass.
 
 export type PromoteStrictlyGovernedProposalRepoPort = {
   createProposalWithEvents(
@@ -33,6 +34,7 @@ export type PromoteStrictlyGovernedProposalRepoPort = {
       readonly run_id: string | null;
       readonly target_object_kind: string;
       readonly proposed_change_summary?: string;
+      readonly proposed_path_relation?: PathRelationProposalPayload | null;
       readonly created_at?: string;
     },
     events: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>
@@ -52,13 +54,12 @@ export interface ProposalRouteServices {
   readonly proposalService: ProposalService;
   readonly proposalRepo: PromoteStrictlyGovernedProposalRepoPort;
   readonly runtimeNotifier: PromoteStrictlyGovernedRuntimeNotifier;
-  // A1 (HITL daemon backbone) — the Inspector loopback uses these
-  // workspace-scoped HTTP wrappers around the same MCP handler that
-  // attached agents call. The wrappers exist on the daemon HTTP plane
-  // (not the agent control plane): they are workspace-scoped at the
-  // URL level, so the prior `#BL-024` concern (non-atomic + no workspace
-  // scoping in the removed POST /proposals/:id/review route) does not
-  // re-open. Per invariant §21 (Inspector loopback only) the durable
+  // invariant: the Inspector loopback uses these workspace-scoped HTTP
+  // wrappers around the same MCP handler that attached agents call. The
+  // wrappers exist on the daemon HTTP plane (not the agent control
+  // plane): they are workspace-scoped at the URL level, so the removed
+  // unscoped POST /proposals/:id/review route does not re-open. Per
+  // invariant §21 (Inspector loopback only) the durable
   // promotion still routes through `proposalRepo.updatePendingResolutionWithEvents`
   // via the same MCP handler attached agents use; this HTTP wrapper does
   // not own the storage-atomic path.
@@ -74,9 +75,8 @@ export interface ProposalRouteServices {
 //   GET  /workspaces/:wsId/proposals/pending            (Inspector summary)
 //   POST /workspaces/:wsId/proposals/:proposalId/review (Inspector accept/reject)
 // The bare POST /proposals/:id/review and GET /proposals/:id are still
-// removed (MR-B01 / MR-B02 sibling) — every endpoint here binds the
-// workspace from the URL and delegates downstream services to enforce
-// that scope.
+// removed: every endpoint here binds the workspace from the URL and
+// delegates downstream services to enforce that scope.
 export function registerProposalRoutes(app: Hono, services: ProposalRouteServices): void {
   app.get("/workspaces/:wsId/proposals", async (context) => {
     const workspaceId = context.req.param("wsId");
@@ -97,8 +97,8 @@ export function registerProposalRoutes(app: Hono, services: ProposalRouteService
     const since = context.req.query("since") ?? undefined;
     const limitRaw = context.req.query("limit");
     const limit = limitRaw === undefined ? undefined : Number.parseInt(limitRaw, 10);
-    // A1 fix-loop (finding-2): workspace is bound server-side from the
-    // McpMemoryToolCallContext below; the request body no longer carries
+    // Workspace is bound server-side from the McpMemoryToolCallContext
+    // below; the request body no longer carries
     // workspace_id (mirrors soul.explore_graph).
     const args: Record<string, unknown> = {};
     if (since !== undefined) args.since = since;
@@ -303,6 +303,7 @@ export function registerProposalRoutes(app: Hono, services: ProposalRouteService
           run_id: null,
           target_object_kind: "path_relation",
           proposed_change_summary: summary,
+          proposed_path_relation: buildStrictlyGovernedPathRelationProposal(memoryId),
           created_at: timestamp
         },
         [creationEvent]
@@ -359,8 +360,8 @@ async function createMemoryActionProposal(
     readonly reason: string;
   }
 ): Promise<Response> {
-  // M-1 dedupe — second click of the same Inspector action button on the
-  // same memory should NOT spam-create duplicate pending proposals. We
+  // Second clicks of the same Inspector action button on the same memory
+  // should not spam-create duplicate pending proposals. We
   // best-effort scan up to 100 pending proposals (the soul.list_pending_proposals
   // tool's max limit) and reuse an existing proposal whose target + proposed_changes
   // canonically match. Workspaces with >100 pending proposals may miss tail matches;
@@ -426,6 +427,42 @@ function clamp01(value: number): number {
   if (value <= 0) return 0;
   if (value >= 1) return 1;
   return Number(value.toFixed(6));
+}
+
+function buildStrictlyGovernedPathRelationProposal(memoryId: string): PathRelationProposalPayload {
+  return {
+    target_anchor: {
+      kind: "object_facet",
+      object_id: memoryId,
+      facet_key: "strictly_governed_constraint"
+    },
+    constitution: {
+      relation_kind: "governance_constraint",
+      why_this_relation_exists: ["operator requested strictly_governed governance promotion"]
+    },
+    effect_vector: {
+      salience: 1,
+      recall_bias: 1,
+      verification_bias: 1,
+      unfinishedness_bias: 0,
+      default_manifestation_preference: "stance_bias"
+    },
+    plasticity_state: {
+      strength: 1,
+      direction_bias: "source_to_target",
+      stability_class: "pinned",
+      support_events_count: 1,
+      contradiction_events_count: 0
+    },
+    lifecycle: {
+      status: "active",
+      retirement_rule: "manual"
+    },
+    legitimacy: {
+      evidence_basis: ["inspector:promote-strictly-governed"],
+      governance_class: PathGovernanceClass.STRICTLY_GOVERNED
+    }
+  };
 }
 
 async function findExistingPendingMatch(

@@ -82,6 +82,27 @@ export function registerConfigRoutes(app: Hono, services: ConfigRouteServices): 
     });
   }
 
+  if (services.configService !== undefined) {
+    app.get("/workspaces/:workspaceId/config/manifestation-budget", async (context) => {
+      const workspaceId = await requireWorkspace(services.workspaceService, context.req.param("workspaceId"));
+      const result = await services.configService!.getManifestationBudgetConfig(workspaceId);
+      return context.json({
+        success: true,
+        data: result.config,
+        source: result.source
+      }, 200);
+    });
+
+    app.patch("/workspaces/:workspaceId/config/manifestation-budget", async (context) => {
+      const workspaceId = await requireWorkspace(services.workspaceService, context.req.param("workspaceId"));
+      const saved = await services.configService!.patchManifestationBudgetConfig(
+        workspaceId,
+        await parseJsonBody(context.req.json.bind(context.req))
+      );
+      return context.json({ success: true, data: saved, requires_daemon_restart: false }, 200);
+    });
+  }
+
   if (services.environmentStatusService !== undefined) {
     app.get("/workspaces/:workspaceId/environment-status", async (context) => {
       await requireWorkspace(services.workspaceService, context.req.param("workspaceId"));

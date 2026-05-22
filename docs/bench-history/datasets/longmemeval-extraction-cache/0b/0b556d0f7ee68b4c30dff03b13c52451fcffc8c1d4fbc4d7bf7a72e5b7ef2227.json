@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "0b556d0f7ee68b4c30dff03b13c52451fcffc8c1d4fbc4d7bf7a72e5b7ef2227",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"venue\",\"confidence\":0.76,\"matched_text\":\"I was thinking of checking out the Underground Club\",\"distilled_fact\":\"The user is considering checking out the Underground Club.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"venue\",\"confidence\":0.84,\"matched_text\":\"I've heard they have a great selection of indie and up-and-coming bands.\",\"distilled_fact\":\"The Underground Club has a great selection of indie and up-and-coming bands.\"}]}",
+  "extracted_at": "2026-05-21T07:41:58.907Z"
+}

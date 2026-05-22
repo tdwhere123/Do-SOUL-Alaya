@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "e1cfa07d527d7f9ab439d4a24dd5b7a31a52016b8ee976a5e5248bef98ad09fe",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"preference\",\"confidence\":0.88,\"matched_text\":\"I'll definitely consider getting a humidifier for my bedroom.\",\"distilled_fact\":\"The user will definitely consider getting a humidifier for the user's bedroom.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"plant\",\"confidence\":0.9,\"matched_text\":\"my Spider Plant\",\"distilled_fact\":\"The user has a Spider Plant.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"intention\",\"confidence\":0.86,\"matched_text\":\"I've been thinking of taking some cuttings from it to give to friends as gifts.\",\"distilled_fact\":\"The user has been thinking of taking some cuttings from the user's Spider Plant to give to friends as gifts.\"}]}",
+  "extracted_at": "2026-05-21T09:20:48.227Z"
+}

@@ -28,6 +28,12 @@ export interface ClaimFormRepo {
     updatedAt: string,
     expectedFromStatus: ClaimLifecycleState
   ): Promise<Readonly<ClaimForm>>;
+  updateStatusSync(
+    objectId: string,
+    status: ClaimLifecycleState,
+    updatedAt: string,
+    expectedFromStatus: ClaimLifecycleState
+  ): Readonly<ClaimForm>;
 }
 
 const CLAIM_FORM_SELECT_COLUMNS = `
@@ -192,6 +198,10 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
   }
 
   public async findById(objectId: string): Promise<Readonly<ClaimForm> | null> {
+    return this.findByIdSync(objectId);
+  }
+
+  public findByIdSync(objectId: string): Readonly<ClaimForm> | null {
     try {
       const row = this.findByIdStatement.get(objectId) as ClaimFormRow | undefined;
       return row === undefined ? null : parseClaimFormRow(row);
@@ -268,6 +278,15 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
     updatedAt: string,
     expectedFromStatus: ClaimLifecycleState
   ): Promise<Readonly<ClaimForm>> {
+    return this.updateStatusSync(objectId, status, updatedAt, expectedFromStatus);
+  }
+
+  public updateStatusSync(
+    objectId: string,
+    status: ClaimLifecycleState,
+    updatedAt: string,
+    expectedFromStatus: ClaimLifecycleState
+  ): Readonly<ClaimForm> {
     const parsedStatus = parseClaimLifecycleState(status);
     const parsedFrom = parseClaimLifecycleState(expectedFromStatus);
     const parsedUpdatedAt = parseUpdatedAt(updatedAt);
@@ -285,7 +304,7 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
         // not exist OR another transition raced ahead and the row no
         // longer matches expectedFromStatus. The race case is
         // semantically a conflict, not a not-found.
-        const current = await this.findById(objectId);
+        const current = this.findByIdSync(objectId);
         if (current === null) {
           throw new StorageError("NOT_FOUND", `Claim form ${objectId} was not found.`);
         }
@@ -295,7 +314,7 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
         );
       }
 
-      const updated = await this.findById(objectId);
+      const updated = this.findByIdSync(objectId);
 
       if (updated === null) {
         throw new StorageError("NOT_FOUND", `Claim form ${objectId} was not found after update.`);

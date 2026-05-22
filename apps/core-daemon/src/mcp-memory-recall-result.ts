@@ -22,13 +22,18 @@ export function buildMemorySearchResult(
     selection_reason: candidate.selection_reason ?? buildSelectionReason(candidate),
     source_channels: candidate.source_channels ?? buildSourceChannels(candidate),
     score_factors: candidate.score_factors ?? buildScoreFactors(candidate),
-    budget_state: candidate.budget_state ?? buildBudgetState(candidate, policy, index, usedTokensBeforeCandidate)
+    budget_state: candidate.budget_state ?? buildBudgetState(candidate, policy, index, usedTokensBeforeCandidate),
+    ...(candidate.pending_incomplete === undefined ? {} : { pending_incomplete: candidate.pending_incomplete }),
+    ...(candidate.unfinishedness_bias === undefined ? {} : { unfinishedness_bias: candidate.unfinishedness_bias })
   };
-  // Forward governance warnings only when the producer attached any.
-  // Older candidates without the field stay omitted so the public
-  // payload remains additive.
   if (candidate.staged_warnings !== undefined && candidate.staged_warnings.length > 0) {
-    return { ...base, staged_warnings: candidate.staged_warnings };
+    return {
+      ...base,
+      staged_warnings: candidate.staged_warnings.map((warning) => ({
+        target_object_id: candidate.object_id,
+        ...warning
+      }))
+    };
   }
   return base;
 }

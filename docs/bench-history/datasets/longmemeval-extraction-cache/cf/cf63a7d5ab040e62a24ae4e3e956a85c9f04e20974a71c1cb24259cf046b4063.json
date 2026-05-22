@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "cf63a7d5ab040e62a24ae4e3e956a85c9f04e20974a71c1cb24259cf046b4063",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"experience\",\"confidence\":0.93,\"matched_text\":\"I remember listening to an episode of \\\"My Brother, My Brother and Me\\\" on January 25th\",\"distilled_fact\":\"The speaker listened to an episode of \\\"My Brother, My Brother and Me\\\" on January 25th.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"experience\",\"confidence\":0.9,\"matched_text\":\"and it had me giggling out loud on the bus\",\"distilled_fact\":\"The episode of \\\"My Brother, My Brother and Me\\\" had the speaker giggling out loud on the bus.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"opinion\",\"confidence\":0.89,\"matched_text\":\"The brothers' humor is just so infectious!\",\"distilled_fact\":\"The speaker thinks the brothers' humor is very infectious.\"}]}",
+  "extracted_at": "2026-05-21T07:08:06.562Z"
+}

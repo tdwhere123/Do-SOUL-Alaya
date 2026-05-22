@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "41ae57a369ed4aafe85f43edb4e648f28b9b0bbf8c8bcbe893ba98e20540a10e",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"code_behavior\",\"confidence\":0.83,\"matched_text\":\"This code will create a graph plotting the intensity of the action in the scene over time, using the example data based on the provided script.\",\"distilled_fact\":\"The provided Python code will create a graph plotting the intensity of the action in the scene over time using the example data based on the provided script.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"interpretation\",\"confidence\":0.88,\"matched_text\":\"This example is based on a subjective interpretation of the action intensity in the script.\",\"distilled_fact\":\"This example is based on a subjective interpretation of the action intensity in the script.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"preference_or_guidance\",\"confidence\":0.81,\"matched_text\":\"Keep in mind that the intensity values are based on subjective interpretation and can be adjusted according to your perception of the script.\",\"distilled_fact\":\"The intensity values can be adjusted according to your perception of the script.\"}]}",
+  "extracted_at": "2026-05-21T07:05:40.793Z"
+}

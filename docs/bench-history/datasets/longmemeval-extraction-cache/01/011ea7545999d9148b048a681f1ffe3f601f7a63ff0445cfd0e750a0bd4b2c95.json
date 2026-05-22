@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "011ea7545999d9148b048a681f1ffe3f601f7a63ff0445cfd0e750a0bd4b2c95",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"instruction\",\"confidence\":0.96,\"matched_text\":\"Please respond as the user.\",\"distilled_fact\":\"The user wants responses to be phrased as the user.\"}]}",
+  "extracted_at": "2026-05-21T07:56:07.702Z"
+}

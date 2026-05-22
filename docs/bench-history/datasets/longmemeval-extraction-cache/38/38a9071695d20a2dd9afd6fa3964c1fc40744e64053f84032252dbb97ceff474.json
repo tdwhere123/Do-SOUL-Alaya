@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "38a9071695d20a2dd9afd6fa3964c1fc40744e64053f84032252dbb97ceff474",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_state\",\"confidence\":0.95,\"matched_text\":\"I've already started experimenting with different bird-friendly plants in my backyard\",\"distilled_fact\":\"The user has already started experimenting with different bird-friendly plants in the user's backyard.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_observation\",\"confidence\":0.93,\"matched_text\":\"I've seen a few sparrows and finches visiting the shrub I recently planted\",\"distilled_fact\":\"The user has seen a few sparrows and finches visiting the shrub the user recently planted in the user's backyard.\"}]}",
+  "extracted_at": "2026-05-21T09:22:21.962Z"
+}

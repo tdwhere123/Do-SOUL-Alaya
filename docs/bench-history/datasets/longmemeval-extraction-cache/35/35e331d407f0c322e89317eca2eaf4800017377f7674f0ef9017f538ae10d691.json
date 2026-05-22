@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "35e331d407f0c322e89317eca2eaf4800017377f7674f0ef9017f538ae10d691",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"question\",\"confidence\":0.63,\"matched_text\":\"How do they know that they solved the hash function?\",\"distilled_fact\":\"The speaker asked how they know that they solved the hash function.\"}]}",
+  "extracted_at": "2026-05-21T07:16:02.978Z"
+}

@@ -88,6 +88,7 @@ describe("trust state schemas", () => {
         ...(state === "used"
           ? { per_anchor_usage: [{ object_id: "memory-1", anchor_role: "target" }] }
           : {}),
+        trust_mode: state === "used" ? "automatic" : "manual",
         reason: null,
         reported_at: REPORTED_AT,
         audit_event_id: "event-usage-1"
@@ -95,6 +96,7 @@ describe("trust state schemas", () => {
 
       expect(record.usage_state).toBe(state);
       expect(record.reported_at).toBe(REPORTED_AT);
+      expect(record.trust_mode).toBe(state === "used" ? "automatic" : "manual");
       if (state === "used") {
         expect(record.per_anchor_usage).toEqual([{ object_id: "memory-1", anchor_role: "target" }]);
       }

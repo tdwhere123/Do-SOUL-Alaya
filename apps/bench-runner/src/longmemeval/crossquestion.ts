@@ -1,10 +1,8 @@
 import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { resolveBenchRunnerVersion } from "../version.js";
-import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
+import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../version.js";
 import {
+  buildTokenEconomy,
+  computeTokenSavedRatio,
   diffKpis,
   entrySlug,
   readLatest,
@@ -16,7 +14,12 @@ import {
   type KpiPayload,
   type PerScenarioRow
 } from "@do-soul/alaya-eval";
-import { startBenchDaemon, type BenchEmbeddingMode } from "../harness/daemon.js";
+import {
+  startBenchDaemon,
+  type BenchEmbeddingMode,
+  type BenchTokenMetrics
+} from "../harness/daemon.js";
+import { aggregateBenchTokenMetrics } from "./token-economy.js";
 import {
   buildQuestionDiagnostic,
   rAt5WithProviderReturned,
@@ -24,9 +27,17 @@ import {
   summarizeProviderStates,
   type LongMemEvalQuestionDiagnostic
 } from "./diagnostics.js";
-import type { LongMemEvalVariant } from "./dataset.js";
+import {
+  isAbstentionQuestionId,
+  scoreAbstentionQuestion
+} from "./abstention.js";
+import { pairSessionIntoRounds, type LongMemEvalVariant } from "./dataset.js";
 import { loadDataset, type FetchResult } from "./fetch.js";
 import { resolveBenchEmbeddingProviderLabel } from "./runner.js";
+import {
+  createCompileSeedRunner,
+  toSeedExtractionPathKpi
+} from "./compile-seed.js";
 
 const LONGMEMEVAL_DIAGNOSTICS_FILENAME = "longmemeval-diagnostics.json";
 
@@ -104,6 +115,14 @@ export async function runLongMemEvalCrossQuestion(
 
   const sidecar = new Map<string, SidecarEntry>();
   const collected: QuestionResult[] = [];
+  // Event-sourced token economy: one shared daemon for the whole question
+  // sequence, so a single EventLog read after the loop yields the run
+  // totals directly. Captured inside the try, before the finally-shutdown;
+  // the empty-aggregate is the zero baseline if the run throws first.
+  let tokenEconomyInput: BenchTokenMetrics = aggregateBenchTokenMetrics([]);
+  // invariant: one seed runner for the whole run so the on-disk extraction
+  // cache and stats accumulate across questions; seed-time only.
+  const seedRunner = createCompileSeedRunner();
 
   try {
     for (let qi = 0; qi < window.length; qi++) {
@@ -121,24 +140,41 @@ export async function runLongMemEvalCrossQuestion(
         const session = question.haystack_sessions[si];
         const sessionId = question.haystack_session_ids[si] ?? `${question.question_id}-session-${si}`;
         if (session === undefined) continue;
-        for (let ti = 0; ti < session.length; ti++) {
-          const turn = session[ti];
-          if (turn === undefined) continue;
-          const evidenceRef = `${question.question_id}-cq-s${si}-t${ti}`;
-          const seed = await daemon.proposeMemory(turn.content, evidenceRef, {
-            objectKind: rotatingSeedObjectKind(seedIndex)
+        // invariant: extract per ROUND (user message + assistant response),
+        // not per bare message — production POST_TURN_EXTRACT extracts per
+        // round. see also: apps/bench-runner/src/longmemeval/dataset.ts
+        // pairSessionIntoRounds.
+        const rounds = pairSessionIntoRounds(session);
+        for (let ri = 0; ri < rounds.length; ri++) {
+          const round = rounds[ri];
+          if (round === undefined) continue;
+          const evidenceRef = `${question.question_id}-cq-s${si}-r${ri}`;
+          // invariant: one round -> N production-extracted memory_entry rows;
+          // every object_id is mapped into the shared sidecar (no partial
+          // map).
+          const seedResult = await seedRunner.seedTurn({
+            daemon,
+            turnContent: round.content,
+            evidenceRefBase: evidenceRef,
+            seedIndex,
+            workspaceId: daemon.workspaceId,
+            runId: daemon.runId
           });
           seedIndex += 1;
-          if (seed.truncated) {
-            seedTurnsTruncated++;
-            seedCharsClipped += seed.charsClipped;
-            if (turn.has_answer === true) answerTurnsTruncated++;
+          if (seedResult.turnTruncated) {
+            seedTurnsTruncated += 1;
+            seedCharsClipped += seedResult.charsClipped;
+            if (round.hasAnswer) {
+              answerTurnsTruncated += 1;
+            }
           }
-          sidecar.set(seed.memoryId, {
-            questionId: question.question_id,
-            sessionId,
-            hasAnswer: turn.has_answer === true
-          });
+          for (const seed of seedResult.seeds) {
+            sidecar.set(seed.memoryId, {
+              questionId: question.question_id,
+              sessionId,
+              hasAnswer: round.hasAnswer
+            });
+          }
         }
       }
 
@@ -164,8 +200,10 @@ export async function runLongMemEvalCrossQuestion(
       const results = recallResult.results;
       const deliveredResults = results.slice(0, 10).map((pointer, index) => ({
         object_id: pointer.object_id,
+        object_kind: pointer.object_kind,
         rank: index + 1,
-        relevance_score: pointer.relevance_score
+        relevance_score: pointer.relevance_score,
+        score_factors: pointer.score_factors ?? null
       }));
 
       let hitAt1 = false;
@@ -179,6 +217,9 @@ export async function runLongMemEvalCrossQuestion(
         if (pointer === undefined) continue;
         if (rank === 0) {
           firstTier = inferTier(pointer.relevance_score);
+        }
+        if (!isLongMemEvalGoldEligibleResult(pointer)) {
+          continue;
         }
         const meta = sidecar.get(pointer.object_id);
         // hit only if the recalled memory belongs to THIS question AND its
@@ -197,6 +238,21 @@ export async function runLongMemEvalCrossQuestion(
         }
       }
 
+      // Abstention questions never produce an id-equality hit; re-score
+      // them by calibrated confidence so the recall@k numerator stays
+      // consistent with the single-turn runner. invariant: only hit_at_k
+      // is overridden — firstTier is kept from the id-equality loop
+      // above, which derives it from the top-1 relevance_score for every
+      // row regardless of hit, so that loop must keep running for `_abs`
+      // rows.
+      const isAbstention = isAbstentionQuestionId(question.question_id);
+      if (isAbstention) {
+        const abstention = scoreAbstentionQuestion({ results });
+        hitAt1 = abstention.correctAt1;
+        hitAt5 = abstention.correctAt5;
+        hitAt10 = abstention.correctAt10;
+      }
+
       const diagnostics = buildQuestionDiagnostic({
         questionId: question.question_id,
         goldMemoryIds,
@@ -205,6 +261,7 @@ export async function runLongMemEvalCrossQuestion(
         hitAt1,
         hitAt5,
         hitAt10,
+        isAbstention,
         degradationReason: recallResult.degradation_reason ?? null,
         recallResult,
         embeddingMode: opts.embeddingMode ?? "disabled"
@@ -218,7 +275,10 @@ export async function runLongMemEvalCrossQuestion(
           : { usedObjectIds: usedGoldObjectIds }),
         deliveredObjects: results.slice(0, 10).map((pointer) => ({
           objectId: pointer.object_id,
-          usageStatus: usedGoldObjectIds.includes(pointer.object_id)
+          objectKind: pointer.object_kind ?? "memory_entry",
+          usageStatus:
+            isLongMemEvalGoldEligibleResult(pointer) &&
+            usedGoldObjectIds.includes(pointer.object_id)
             ? "used"
             : "skipped"
         })),
@@ -257,9 +317,22 @@ export async function runLongMemEvalCrossQuestion(
           `R@5=${hitAt5 ? "✓" : "✗"} pool=${sidecar.size}\n`
       );
     }
+    // Disclose which seed path ran: official_api_compile (production garden
+    // extraction) vs no_credentials_fallback (degraded full-turn single-fact).
+    process.stdout.write(
+      `[longmemeval compile-seed] path=${seedRunner.stats.path} ` +
+        `cache_hits=${seedRunner.stats.cacheHits} ` +
+        `llm_calls=${seedRunner.stats.llmCalls} ` +
+        `offline_fallbacks=${seedRunner.stats.offlineFallbacks} ` +
+        `facts=${seedRunner.stats.factsProduced} ` +
+        `signals_dropped=${seedRunner.stats.signalsDropped}\n`
+    );
+    tokenEconomyInput = await daemon.queryTokenMetrics();
   } finally {
     await daemon.shutdown();
   }
+  const tokenEconomy = buildTokenEconomy(tokenEconomyInput);
+  const tokenSavedRatio = computeTokenSavedRatio(tokenEconomyInput);
 
   const perScenario: PerScenarioRow[] = collected.map((result) => ({
     id: result.questionId,
@@ -275,7 +348,7 @@ export async function runLongMemEvalCrossQuestion(
   const rAt1 = ratio(collected.filter((r) => r.hitAt1).length, n);
   const rAt5 = ratio(collected.filter((r) => r.hitAt5).length, n);
   const rAt10 = ratio(collected.filter((r) => r.hitAt10).length, n);
-  // First-half vs last-half R@5 — the headline cross-question signal.
+  // First-half vs last-half R@5 is the headline cross-question signal.
   // If shared-workspace accumulation does anything, last_half > first_half.
   const half = Math.floor(n / 2);
   const firstHalf = collected.slice(0, half);
@@ -315,8 +388,11 @@ export async function runLongMemEvalCrossQuestion(
     run_at: runAt.toISOString(),
     alaya_commit: commitSha7,
     alaya_version: alayaVersion,
+    recall_pipeline_version: RECALL_PIPELINE_VERSION,
     embedding_provider: embeddingProviderLabel,
     chat_provider: "none",
+    policy_shape: "stress",
+    simulate_report: "none",
     dataset: {
       name: `${opts.variant}:crossquestion`,
       size: datasetSize,
@@ -346,17 +422,20 @@ export async function runLongMemEvalCrossQuestion(
       latency_ms_p50: latencyP50,
       latency_ms_p95: latencyP95,
       latency_source: "exact",
-      token_saved_ratio_vs_full_prompt: 0,
+      token_saved_ratio_vs_full_prompt: tokenSavedRatio,
+      token_economy: tokenEconomy,
       tier_distribution: tierDistribution,
       degradation_reasons: degradationReasons,
       seed_truncation: truncation,
+      seed_extraction_path: toSeedExtractionPathKpi(seedRunner.stats),
       per_scenario: perScenario
     }
   };
 
   const layout: HistoryLayout = { historyRoot: opts.historyRoot };
   const previous = await readLatest(layout, "public-crossquestion", {
-    split: payload.split
+    split: payload.split,
+    embeddingProvider: payload.embedding_provider
   });
   const diff = diffKpis(payload, previous);
   const slug = entrySlug(runAt, commitSha7);
@@ -368,6 +447,7 @@ export async function runLongMemEvalCrossQuestion(
     split,
     run_at: payload.run_at,
     alaya_commit: payload.alaya_commit,
+    recall_pipeline_version: payload.recall_pipeline_version,
     embedding_provider: payload.embedding_provider,
     embedding_mode: opts.embeddingMode ?? "disabled",
     provider_state_summary: providerSummary,
@@ -468,6 +548,12 @@ function ratio(count: number, total: number): number {
 
 function truncateExcerpt(value: string): string {
   return value.length <= 500 ? value : `${value.slice(0, 497)}...`;
+}
+
+function isLongMemEvalGoldEligibleResult(result: Readonly<{
+  readonly object_kind?: string | null;
+}>): boolean {
+  return (result.object_kind ?? "memory_entry") === "memory_entry";
 }
 
 // see also: apps/bench-runner/src/version.ts

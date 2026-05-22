@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "ccbe544370c6b7405ea0dfb7b190d2c37d9ff1f822154dc0a4533eb82ca2c04f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"radio show format\",\"confidence\":0.91,\"matched_text\":\"I just can't imagine listening to a radio show hosted entirely by AI, it would be so impersonal!\",\"distilled_fact\":\"The user does not want to listen to a radio show hosted entirely by AI because the user finds it impersonal.\"}]}",
+  "extracted_at": "2026-05-21T08:14:48.854Z"
+}

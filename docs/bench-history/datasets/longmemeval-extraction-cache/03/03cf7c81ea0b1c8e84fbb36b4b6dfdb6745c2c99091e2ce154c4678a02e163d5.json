@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "03cf7c81ea0b1c8e84fbb36b4b6dfdb6745c2c99091e2ce154c4678a02e163d5",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"pet\",\"confidence\":0.94,\"matched_text\":\"I'm thinking of getting a new pet camera to keep an eye on Luna and Max when I'm not at home.\",\"distilled_fact\":\"The user is thinking of getting a new pet camera to keep an eye on Luna and Max when the user is not at home.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"pet\",\"confidence\":0.92,\"matched_text\":\"I recently got a new pet bed for Luna, and I want to make sure she's using it properly.\",\"distilled_fact\":\"The user recently got a new pet bed for Luna.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"pet\",\"confidence\":0.93,\"matched_text\":\"I recently got a new pet bed for Luna, and I want to make sure she's using it properly.\",\"distilled_fact\":\"The user wants to make sure Luna is using the new pet bed properly.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"pet_item\",\"confidence\":0.91,\"matched_text\":\"By the way, the original price of Luna's pet bed was $40.\",\"distilled_fact\":\"The original price of Luna's pet bed was $40.\"}]}",
+  "extracted_at": "2026-05-21T08:57:07.069Z"
+}

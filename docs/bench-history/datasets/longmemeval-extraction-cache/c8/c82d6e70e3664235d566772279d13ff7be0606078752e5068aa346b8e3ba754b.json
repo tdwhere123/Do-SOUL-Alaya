@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c82d6e70e3664235d566772279d13ff7be0606078752e5068aa346b8e3ba754b",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"advice\",\"confidence\":0.86,\"matched_text\":\"good communication and setting clear boundaries are key to maintaining a positive relationship with your roommate\",\"distilled_fact\":\"Good communication and setting clear boundaries are key to maintaining a positive relationship with one's roommate.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"advice\",\"confidence\":0.82,\"matched_text\":\"by communicating openly and respectfully, you can avoid conflicts and create a more comfortable living environment\",\"distilled_fact\":\"Communicating openly and respectfully can help avoid conflicts and create a more comfortable living environment.\"}]}",
+  "extracted_at": "2026-05-21T08:07:45.345Z"
+}

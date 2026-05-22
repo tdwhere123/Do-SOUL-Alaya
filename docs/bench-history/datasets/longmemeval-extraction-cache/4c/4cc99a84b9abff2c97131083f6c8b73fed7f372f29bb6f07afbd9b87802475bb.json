@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "4cc99a84b9abff2c97131083f6c8b73fed7f372f29bb6f07afbd9b87802475bb",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_state\",\"confidence\":0.86,\"matched_text\":\"I've been doing a lot of charity events lately, and I want to keep the momentum going.\",\"distilled_fact\":\"The user has been doing a lot of charity events lately.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_goal\",\"confidence\":0.84,\"matched_text\":\"I've been doing a lot of charity events lately, and I want to keep the momentum going.\",\"distilled_fact\":\"The user wants to keep the momentum going from the user's charity events.\"}]}",
+  "extracted_at": "2026-05-21T09:15:35.478Z"
+}

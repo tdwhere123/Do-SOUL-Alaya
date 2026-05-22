@@ -1,5 +1,6 @@
 import {
   EnvironmentConfigSchema,
+  ManifestationBudgetConfigSchema,
   SoulConfigSchema,
   StrategyConfigSchema
 } from "@do-soul/alaya-protocol";
@@ -48,9 +49,29 @@ export function registerInspectorConfigRoutes(
     });
   });
 
-  // U2: surface embedding init/runtime failures inline in the Inspector
-  // config form. The daemon already records degraded_reason via the health
-  // journal; this proxy gives the form a clean read path.
+  app.get("/api/config/:workspaceId/manifestation-budget", async (context) => {
+    const forbidden = assertInspectorWorkspace(context, options, context.req.param("workspaceId"));
+    if (forbidden !== null) return forbidden;
+    return await proxyDaemonJson(context, options, {
+      method: "GET",
+      path: `/workspaces/${encodeURIComponent(context.req.param("workspaceId"))}/config/manifestation-budget`
+    });
+  });
+
+  app.patch("/api/config/:workspaceId/manifestation-budget", async (context) => {
+    const workspaceId = context.req.param("workspaceId");
+    const forbidden = assertInspectorWorkspace(context, options, workspaceId);
+    if (forbidden !== null) return forbidden;
+    const body = ManifestationBudgetConfigSchema.unwrap().partial().strict().parse(await context.req.json());
+    return await proxyDaemonJson(context, options, {
+      method: "PATCH",
+      path: `/workspaces/${encodeURIComponent(workspaceId)}/config/manifestation-budget`,
+      body
+    });
+  });
+
+  // The daemon records embedding degraded_reason via the health journal;
+  // this proxy gives the Inspector config form a clean read path.
   app.get("/api/embedding-status/:workspaceId", async (context) => {
     const forbidden = assertInspectorWorkspace(context, options, context.req.param("workspaceId"));
     if (forbidden !== null) return forbidden;

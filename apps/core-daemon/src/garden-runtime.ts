@@ -25,13 +25,25 @@ import {
   type PathGraphSnapshot,
   type RuntimeGardenComputeConfig,
   type CandidateMemorySignal,
-  type ConversationMessage
+  type ConsolidationCyclePlan,
+  type ConsolidationTriggerBudget,
+  type ConsolidationTriggerSource,
+  ConsolidationTriggerBudgetSchema,
+  type ConversationMessage,
+  type SoulConfig
 } from "@do-soul/alaya-protocol";
 import type {
+  AuditorSchedulingAdvisor,
+  ConsolidationBudgetStorePort,
   EmbeddingBackfillHandler,
   EventPublisher,
   PathPlasticityService,
   StrongRefService
+} from "@do-soul/alaya-core";
+import {
+  AuditorSchedulingAdvisor as CoreAuditorSchedulingAdvisor,
+  ConsolidationExecutor,
+  createVerificationBiasReaderFromPathLookup
 } from "@do-soul/alaya-core";
 import {
   createGardenBackgroundDataPorts,
@@ -117,8 +129,86 @@ const LIBRARIAN_RUNTIME_TASK_KINDS = [
   GardenTaskKind.TEMPLATE_CANDIDATE,
   GardenTaskKind.SYNTHESIS_REVIEW,
   GardenTaskKind.EMBEDDING_BACKFILL,
-  GardenTaskKind.PATH_PLASTICITY_UPDATE
+  GardenTaskKind.PATH_PLASTICITY_UPDATE,
+  GardenTaskKind.CONSOLIDATION_CYCLE
 ] as const satisfies readonly GardenTaskKindValue[];
+
+// invariant: the executor charges every consolidation cycle against the
+// consolidation_trigger_budgets row for its trigger source (migration 035).
+// see also: packages/core/src/consolidation-executor.ts
+class SqliteConsolidationBudgetStore implements ConsolidationBudgetStorePort {
+  private readonly findStatement;
+  private readonly upsertStatement;
+
+  public constructor(connection: { prepare(sql: string): SqlitePreparedStatement }) {
+    this.findStatement = connection.prepare(`
+      SELECT trigger_id, trigger_source, governance_subject, source_object_ref,
+             max_attempts_within_window, attempts_used, cooldown_until
+      FROM consolidation_trigger_budgets
+      WHERE trigger_source = ?
+      ORDER BY cooldown_until DESC
+      LIMIT 1
+    `);
+    this.upsertStatement = connection.prepare(`
+      INSERT INTO consolidation_trigger_budgets (
+        trigger_id, trigger_source, governance_subject, source_object_ref,
+        max_attempts_within_window, attempts_used, cooldown_until
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(trigger_id) DO UPDATE SET
+        trigger_source = excluded.trigger_source,
+        governance_subject = excluded.governance_subject,
+        source_object_ref = excluded.source_object_ref,
+        max_attempts_within_window = excluded.max_attempts_within_window,
+        attempts_used = excluded.attempts_used,
+        cooldown_until = excluded.cooldown_until
+    `);
+  }
+
+  public async findByTriggerSource(
+    triggerSource: ConsolidationTriggerSource
+  ): Promise<ConsolidationTriggerBudget | null> {
+    const row = this.findStatement.get(triggerSource) as
+      | {
+          readonly trigger_id: string;
+          readonly trigger_source: string;
+          readonly governance_subject: string | null;
+          readonly source_object_ref: string | null;
+          readonly max_attempts_within_window: number;
+          readonly attempts_used: number;
+          readonly cooldown_until: string;
+        }
+      | undefined;
+    if (row === undefined) {
+      return null;
+    }
+    return ConsolidationTriggerBudgetSchema.parse({
+      trigger_id: row.trigger_id,
+      trigger_source: row.trigger_source,
+      ...(row.governance_subject === null ? {} : { governance_subject: row.governance_subject }),
+      ...(row.source_object_ref === null ? {} : { source_object_ref: row.source_object_ref }),
+      max_attempts_within_window: row.max_attempts_within_window,
+      attempts_used: row.attempts_used,
+      cooldown_until: row.cooldown_until
+    });
+  }
+
+  public async upsert(budget: ConsolidationTriggerBudget): Promise<void> {
+    this.upsertStatement.run(
+      budget.trigger_id,
+      budget.trigger_source,
+      budget.governance_subject ?? null,
+      budget.source_object_ref ?? null,
+      budget.max_attempts_within_window,
+      budget.attempts_used,
+      budget.cooldown_until
+    );
+  }
+}
+
+interface SqlitePreparedStatement {
+  get(...params: readonly unknown[]): unknown;
+  run(...params: readonly unknown[]): unknown;
+}
 
 export interface GardenBacklogTelemetryObserver {
   capture(): Promise<void>;
@@ -180,6 +270,7 @@ export function createGardenRuntime(input: {
   readonly embeddingBackfillHandler?: Pick<EmbeddingBackfillHandler, "handle">;
   readonly configService?: {
     getRuntimeGardenComputeConfig(): Promise<RuntimeGardenComputeConfig>;
+    getSoulConfig?(workspaceId: string): Promise<SoulConfig>;
   };
   readonly officialApiGardenProvider?: GardenComputeProvider | null;
   readonly localHeuristicsProvider?: GardenComputeProvider;
@@ -247,6 +338,24 @@ export function createGardenRuntime(input: {
   const pathGraphSnapshotter = new PathGraphSnapshotter({
     pathRelationRepo: input.pathRelationRepo
   });
+  // invariant: the budget table (migration 035) is the only authority on
+  // consolidation re-entry; the executor refuses cycles whose budget row is
+  // exhausted or cooling. A missing prepare() means the in-memory test
+  // database — consolidation is then skipped (no durable budget table).
+  const consolidationBudgetStore =
+    typeof (input.databaseConnection as { readonly prepare?: unknown }).prepare === "function"
+      ? new SqliteConsolidationBudgetStore(
+          input.databaseConnection as { prepare(sql: string): SqlitePreparedStatement }
+        )
+      : null;
+  const consolidationExecutor =
+    consolidationBudgetStore === null
+      ? null
+      : new ConsolidationExecutor({
+          pathRelationRepo: input.pathRelationRepo,
+          budgetStore: consolidationBudgetStore,
+          eventPublisher: input.eventPublisher
+        });
 
   const cleanupPort: JanitorControlPlaneCleanupPort = {
     findExpiredObjects: async (workspaceId: string, nowIso: string) =>
@@ -320,6 +429,47 @@ export function createGardenRuntime(input: {
         mutate
       )
   };
+  const auditorSchedulingAdvisor: AuditorSchedulingAdvisor = new CoreAuditorSchedulingAdvisor({
+    verificationBiasReader: createVerificationBiasReaderFromPathLookup({
+      findActiveByAnchorObjectIds: async (workspaceId, memoryObjectIds) => {
+        if (memoryObjectIds.length === 0) {
+          return [];
+        }
+        const anchors = memoryObjectIds.map((objectId) => ({
+          kind: "object" as const,
+          object_id: objectId
+        }));
+        const paths = await input.pathRelationRepo.findByAnchors(workspaceId, anchors);
+        return paths.filter((path) => path.lifecycle.status !== "retired");
+      }
+    })
+  });
+  const auditorEvidenceCheckPort = {
+    findMemoriesWithStaleEvidence: async (workspaceId: string) => {
+      const staleEntries =
+        await input.gardenDataPorts.evidenceCheckPort.findMemoriesWithStaleEvidence(workspaceId);
+      if (staleEntries.length <= 1) {
+        return staleEntries;
+      }
+      const prioritized = await auditorSchedulingAdvisor.prioritizeRechecksByBias(
+        workspaceId,
+        staleEntries.map((entry) => ({
+          memoryObjectId: entry.memory_entry_id,
+          enqueuedAt: "1970-01-01T00:00:00.000Z"
+        }))
+      );
+      const priorityByMemoryId = new Map(
+        prioritized.map((entry, index) => [entry.memoryObjectId, index])
+      );
+      return Object.freeze(
+        [...staleEntries].sort((left, right) => {
+          const leftRank = priorityByMemoryId.get(left.memory_entry_id) ?? Number.MAX_SAFE_INTEGER;
+          const rightRank = priorityByMemoryId.get(right.memory_entry_id) ?? Number.MAX_SAFE_INTEGER;
+          return leftRank - rightRank;
+        })
+      );
+    }
+  };
   const pathPlasticityPort =
     input.pathPlasticityService === undefined
       ? undefined
@@ -360,7 +510,7 @@ export function createGardenRuntime(input: {
           }
         };
   const auditor = new Auditor({
-    evidenceCheckPort: input.gardenDataPorts.evidenceCheckPort,
+    evidenceCheckPort: auditorEvidenceCheckPort,
     pointerHealthPort: input.gardenDataPorts.pointerHealthPort,
     greenMaintenancePort: input.gardenDataPorts.greenMaintenancePort,
     bootstrappingPort: input.gardenDataPorts.bootstrappingPort,
@@ -645,6 +795,7 @@ export function createGardenRuntime(input: {
         completed_at: completedAt
       });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       await gardenScheduler.reportCompletion({
         task_id: task.task_id,
         task_kind: task.task_kind,
@@ -654,14 +805,87 @@ export function createGardenRuntime(input: {
         success: false,
         objects_affected: [],
         audit_entries: [],
-        error_message: error instanceof Error ? error.message : String(error),
+        error_message: errorMessage,
         completed_at: completedAt
       });
-
-      throw error;
+      warn("embedding backfill task failed; continuing Garden background pass", {
+        workspace_id: task.workspace_id,
+        error: errorMessage
+      });
     } finally {
       pendingEmbeddingBackfillWorkspaces.delete(task.workspace_id);
     }
+  };
+
+  // invariant: memory_consolidation_enabled (SoulConfig, default true) gates
+  // the executor. When false the task is reported complete as a no-op so the
+  // queue drains. The plan is empty here: no planner produces structural
+  // PathRelation mutations yet, so each cycle is a budget-charged no-op that
+  // exercises the executor + budget + fuse path end-to-end.
+  const runConsolidationCycleTask = async (
+    task: Readonly<GardenTaskDescriptor>
+  ): Promise<void> => {
+    const completedAt = new Date().toISOString();
+    try {
+      if (consolidationExecutor === null) {
+        await reportConsolidationCycleCompletion(task, completedAt, true, [
+          "consolidation_skipped:no_durable_budget_table"
+        ]);
+        return;
+      }
+
+      const soulConfig = await input.configService?.getSoulConfig?.(task.workspace_id);
+      if (soulConfig !== undefined && !soulConfig.memory_consolidation_enabled) {
+        await reportConsolidationCycleCompletion(task, completedAt, true, [
+          "consolidation_skipped:memory_consolidation_disabled"
+        ]);
+        return;
+      }
+
+      const plan: ConsolidationCyclePlan = {
+        workspace_id: task.workspace_id,
+        planned_at: completedAt,
+        promotions: [],
+        retirements: [],
+        governance_changes: [],
+        direction_changes: [],
+        fuse_state: { blown: false, retry_count: 0 }
+      };
+      const result = await consolidationExecutor.runCycle({
+        triggerSource: "native_surface_drift",
+        plan
+      });
+      await reportConsolidationCycleCompletion(task, completedAt, true, [
+        `consolidation_cycle:fuse_${result.fuse_outcome}`
+      ]);
+    } catch (error) {
+      await reportConsolidationCycleCompletion(task, completedAt, false, [], error);
+      warn("consolidation cycle task failed; continuing Garden background pass", {
+        workspace_id: task.workspace_id,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  };
+
+  const reportConsolidationCycleCompletion = async (
+    task: Readonly<GardenTaskDescriptor>,
+    completedAt: string,
+    success: boolean,
+    auditEntries: readonly string[],
+    error?: unknown
+  ): Promise<void> => {
+    await gardenScheduler.reportCompletion({
+      task_id: task.task_id,
+      task_kind: task.task_kind,
+      role: GardenRole.LIBRARIAN,
+      tier: GardenTier.TIER_2,
+      workspace_id: task.workspace_id,
+      success,
+      objects_affected: [],
+      audit_entries: [...auditEntries],
+      error_message: success ? null : error instanceof Error ? error.message : String(error),
+      completed_at: completedAt
+    });
   };
 
   const processPostTurnExtractTask = async (): Promise<void> => {
@@ -937,6 +1161,13 @@ export function createGardenRuntime(input: {
           GardenTier.TIER_2,
           (workspaceId) => [workspaceId]
         );
+        if (consolidationExecutor !== null) {
+          await enqueueForAllWorkspaces(
+            GardenTaskKind.CONSOLIDATION_CYCLE,
+            GardenTier.TIER_2,
+            (workspaceId) => [workspaceId]
+          );
+        }
         markBackgroundPassCompleted();
       }
     },
@@ -969,6 +1200,11 @@ export function createGardenRuntime(input: {
 
           if (task.task_kind === GardenTaskKind.EMBEDDING_BACKFILL) {
             await runEmbeddingBackfillTask(task);
+            continue;
+          }
+
+          if (task.task_kind === GardenTaskKind.CONSOLIDATION_CYCLE) {
+            await runConsolidationCycleTask(task);
             continue;
           }
 

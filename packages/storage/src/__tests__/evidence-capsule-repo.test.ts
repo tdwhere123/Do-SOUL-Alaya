@@ -68,6 +68,26 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     await expect(repo.findById(capsule.object_id)).resolves.toEqual(capsule);
   });
 
+  it("loads evidence capsules by ids in a batch", async () => {
+    const { repo } = await createRepo();
+
+    await repo.create(createEvidenceCapsule({ object_id: "f6c1b587-be07-4410-b2ca-8bfbc4d82db4" }));
+    await repo.create(createEvidenceCapsule({ object_id: "3ca5f78f-b5fd-4543-99eb-ce72ab2578ab" }));
+    await repo.create(createEvidenceCapsule({ object_id: "256a7ff5-6150-4a82-9a53-99dbfd08cb77" }));
+
+    const rows = await repo.findByIds([
+      "256a7ff5-6150-4a82-9a53-99dbfd08cb77",
+      "missing-id",
+      "3ca5f78f-b5fd-4543-99eb-ce72ab2578ab",
+      "3ca5f78f-b5fd-4543-99eb-ce72ab2578ab"
+    ]);
+
+    expect(rows.map((row) => row.object_id)).toEqual([
+      "256a7ff5-6150-4a82-9a53-99dbfd08cb77",
+      "3ca5f78f-b5fd-4543-99eb-ce72ab2578ab"
+    ]);
+  });
+
   it("lists by run id", async () => {
     const { repo } = await createRepo();
 
@@ -160,6 +180,141 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     expect(() => {
       (created as any).gist = "mutated";
     }).toThrow(TypeError);
+  });
+
+  it("recalls an English evidence excerpt via the porter word lane", async () => {
+    const { repo } = await createRepo();
+    await repo.create(
+      createEvidenceCapsule({
+        object_id: "1f5c2a90-0000-4000-8000-000000000001",
+        gist: "build gist",
+        excerpt: "The deployment pipeline rotates the staging credentials nightly."
+      })
+    );
+    await repo.create(
+      createEvidenceCapsule({
+        object_id: "1f5c2a90-0000-4000-8000-000000000002",
+        gist: "other gist",
+        excerpt: "An unrelated note about lunch preferences."
+      })
+    );
+
+    const hits = await repo.searchByKeyword!("workspace-1", "deployment credentials", 10);
+    expect(hits.map((hit) => hit.object_id)).toContain("1f5c2a90-0000-4000-8000-000000000001");
+    expect(hits.map((hit) => hit.object_id)).not.toContain("1f5c2a90-0000-4000-8000-000000000002");
+  });
+
+  it("recalls a Chinese evidence excerpt via the trigram lane (previously CJK-blind)", async () => {
+    const { repo } = await createRepo();
+    await repo.create(
+      createEvidenceCapsule({
+        object_id: "2f5c2a90-0000-4000-8000-000000000001",
+        gist: "中文摘要",
+        excerpt: "用户每天晚上轮换部署流水线的临时凭证。"
+      })
+    );
+    await repo.create(
+      createEvidenceCapsule({
+        object_id: "2f5c2a90-0000-4000-8000-000000000002",
+        gist: "无关摘要",
+        excerpt: "关于午餐偏好的一段无关记录。"
+      })
+    );
+
+    const hits = await repo.searchByKeyword!("workspace-1", "部署流水线", 10);
+    expect(hits.map((hit) => hit.object_id)).toContain("2f5c2a90-0000-4000-8000-000000000001");
+    expect(hits.map((hit) => hit.object_id)).not.toContain("2f5c2a90-0000-4000-8000-000000000002");
+  });
+
+  it("recalls a mixed-script evidence excerpt by fanning out to both lanes", async () => {
+    const { repo } = await createRepo();
+    await repo.create(
+      createEvidenceCapsule({
+        object_id: "3f5c2a90-0000-4000-8000-000000000001",
+        gist: "mixed gist",
+        excerpt: "The 部署 pipeline rotates 凭证 every night."
+      })
+    );
+
+    const hits = await repo.searchByKeyword!("workspace-1", "pipeline 凭证", 10);
+    expect(hits.map((hit) => hit.object_id)).toContain("3f5c2a90-0000-4000-8000-000000000001");
+  });
+
+  it("ranks a strong match above a weak one across lanes", async () => {
+    const { repo } = await createRepo();
+    // Trigram lane: a strong full-phrase match plus a weaker partial match, so
+    // the lane has multiple hits and a wide bm25 span.
+    await repo.create(
+      createEvidenceCapsule({
+        object_id: "4f5c2a90-0000-4000-8000-000000000001",
+        gist: "中文摘要",
+        excerpt: "部署流水线轮换部署流水线的临时凭证，部署流水线全程自动化。"
+      })
+    );
+    await repo.create(
+      createEvidenceCapsule({
+        object_id: "4f5c2a90-0000-4000-8000-000000000002",
+        gist: "弱匹配",
+        excerpt: "这段记录只在结尾顺带提到部署流水线一次。"
+      })
+    );
+    // Porter lane: a single mediocre hit. Under per-lane min-max this single
+    // hit pinned to 1.0 and could thereby beat the trigram lane's genuine
+    // weaker rows. Ordinal scoring keeps it comparable across lanes.
+    await repo.create(
+      createEvidenceCapsule({
+        object_id: "4f5c2a90-0000-4000-8000-000000000003",
+        gist: "porter weak",
+        excerpt: "A long unrelated note that mentions deployment once in passing."
+      })
+    );
+
+    const hits = await repo.searchByKeyword!("workspace-1", "部署流水线 deployment", 10);
+    const ranks = new Map(hits.map((hit) => [hit.object_id, hit.normalized_rank]));
+
+    const strongTrigramRank = ranks.get("4f5c2a90-0000-4000-8000-000000000001")!;
+    const weakTrigramRank = ranks.get("4f5c2a90-0000-4000-8000-000000000002")!;
+    const porterRank = ranks.get("4f5c2a90-0000-4000-8000-000000000003")!;
+
+    // The strong full-phrase match is the top of its lane; the weak partial
+    // match scores strictly lower in the same lane.
+    expect(strongTrigramRank).toBeGreaterThan(weakTrigramRank);
+    // Cross-lane soundness: the single mediocre porter hit must never outrank
+    // the genuine strong trigram match. Under the old per-lane min-max it did
+    // (the lone porter hit pinned to 1.0 while the strong trigram hit, sharing
+    // a wide span, could land below it).
+    expect(strongTrigramRank).toBeGreaterThanOrEqual(porterRank);
+    // The weak trigram match must rank below the lone porter hit's score is
+    // not asserted here (lane-relative); the load-bearing guarantee is that a
+    // weak match never beats a strong one across lanes.
+    expect(weakTrigramRank).toBeLessThan(strongTrigramRank);
+  });
+
+  it("breaks an exact cross-lane score tie by lane priority, not object_id", async () => {
+    const { repo } = await createRepo();
+    // A porter-lane top hit and a trigram-lane top hit both score 1.0 (each is
+    // the best of its lane). The tie must resolve toward the porter lane, not
+    // toward whichever object_id sorts first lexically. The trigram capsule is
+    // given the lexically-smaller id so an object_id tiebreak would wrongly
+    // surface it first.
+    await repo.create(
+      createEvidenceCapsule({
+        object_id: "0a000000-0000-4000-8000-000000000001",
+        gist: "trigram top",
+        excerpt: "部署流水线"
+      })
+    );
+    await repo.create(
+      createEvidenceCapsule({
+        object_id: "f0000000-0000-4000-8000-000000000001",
+        gist: "porter top",
+        excerpt: "deployment pipeline"
+      })
+    );
+
+    const hits = await repo.searchByKeyword!("workspace-1", "部署流水线 deployment", 10);
+    expect(hits[0]?.object_id).toBe("f0000000-0000-4000-8000-000000000001");
+    expect(hits[0]?.normalized_rank).toBe(1);
   });
 });
 

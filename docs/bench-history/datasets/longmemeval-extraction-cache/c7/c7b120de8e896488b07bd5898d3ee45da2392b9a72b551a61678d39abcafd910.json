@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c7b120de8e896488b07bd5898d3ee45da2392b9a72b551a61678d39abcafd910",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"preference\",\"confidence\":0.82,\"matched_text\":\"It's nice to have an impartial perspective on how to handle conflicts with my roommates.\",\"distilled_fact\":\"The speaker likes having an impartial perspective on how to handle conflicts with their roommates.\"}]}",
+  "extracted_at": "2026-05-21T08:07:56.858Z"
+}

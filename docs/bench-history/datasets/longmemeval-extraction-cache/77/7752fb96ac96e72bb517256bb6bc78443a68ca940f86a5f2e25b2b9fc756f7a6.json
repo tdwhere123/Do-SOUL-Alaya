@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7752fb96ac96e72bb517256bb6bc78443a68ca940f86a5f2e25b2b9fc756f7a6",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"person\",\"confidence\":0.96,\"matched_text\":\"She's one of my favorite radio interviewers.\",\"distilled_fact\":\"The user’s one of the user’s favorite radio interviewers is Terry Gross.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"person\",\"confidence\":0.94,\"matched_text\":\"Have you ever heard of Terry Gross?\",\"distilled_fact\":\"Terry Gross is a radio interviewer.\"}]}",
+  "extracted_at": "2026-05-21T09:12:34.954Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "1491c61faef0fa2d4cae7fa3f70b10d9e13a630c60e83e02df47d31514370bd4",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"habit\",\"confidence\":0.87,\"matched_text\":\"I've been waking up at 6:45 AM on Tuesdays and Thursdays for my yoga class\",\"distilled_fact\":\"The speaker wakes up at 6:45 AM on Tuesdays and Thursdays for yoga class.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"habit\",\"confidence\":0.81,\"matched_text\":\"which has helped me establish a consistent wake-up time on those days.\",\"distilled_fact\":\"The speaker has established a consistent wake-up time on Tuesdays and Thursdays.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"self_observation\",\"confidence\":0.84,\"matched_text\":\"I've also noticed that I tend to have more productive mornings when I wake up earlier\",\"distilled_fact\":\"The speaker tends to have more productive mornings when the speaker wakes up earlier.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"plan\",\"confidence\":0.78,\"matched_text\":\"so I'm hoping to apply that to my non-yoga days as well.\",\"distilled_fact\":\"The speaker hopes to apply earlier wake-up times to non-yoga days as well.\"}]}",
+  "extracted_at": "2026-05-21T07:49:18.376Z"
+}

@@ -84,11 +84,24 @@ function createHarness(): E2EHarness {
     findById: async (id: string) => memories.get(id) ?? null
   };
   const claimService = {
+    // The mock honors the atomic-audit-composition contract: the
+    // lifecycle-change event and every additional audit event the caller
+    // composed are published in the same logical transaction as the
+    // claim_status mutation, and the persisted audit rows are pushed into
+    // additionalEventsSink in input order — exactly like
+    // ClaimService.transitionLifecycle does.
     transitionLifecycle: async (
       objectId: string,
       newState: ClaimForm["claim_status"],
       _reason: string,
-      _causedBy: "user" | "system" | "review" | "deterministic_rule" | "auditor" | "bootstrap"
+      _causedBy: "user" | "system" | "review" | "deterministic_rule" | "auditor" | "bootstrap",
+      options?: {
+        readonly additionalEventInputs?: readonly Omit<
+          EventLogEntry,
+          "event_id" | "created_at" | "revision"
+        >[];
+        readonly additionalEventsSink?: EventLogEntry[];
+      }
     ): Promise<Readonly<ClaimForm>> => {
       claimTransitionCounter += 1;
       const current = claims.get(objectId);
@@ -111,6 +124,10 @@ function createHarness(): E2EHarness {
           transition_index: claimTransitionCounter
         }
       });
+      for (const eventInput of options?.additionalEventInputs ?? []) {
+        const persisted = publish(eventInput);
+        options?.additionalEventsSink?.push(persisted);
+      }
       return updated;
     }
   };
@@ -224,6 +241,8 @@ function createHarness(): E2EHarness {
             ]
           }
         ],
+        active_constraints: [],
+        active_constraints_count: 0,
         total_scanned: 1,
         coarse_filter_count: 1,
         fine_assessment_count: 1
@@ -634,6 +653,47 @@ describe("soul.recall -> staged_warning -> soul.resolve -> apply", () => {
     expect(
       harness.events.some(
         (event) => event.event_type === GovernanceResolutionEventType.SOUL_RESOLUTION_CONFIRM_APPLIED
+      )
+    ).toBe(false);
+  });
+
+  it("scope check: rejects memory resolution when delivery only carried a same-id synthesis capsule", async () => {
+    const harness = createHarness();
+    harness.memories.set(
+      "shared-object",
+      buildMemory({
+        object_id: "shared-object",
+        lifecycle_state: ObjectLifecycleState.ACTIVE
+      })
+    );
+    harness.deliveries.set("delivery-synthesis-only", {
+      delivery_id: "delivery-synthesis-only",
+      agent_target: context.agentTarget,
+      workspace_id: context.workspaceId,
+      run_id: context.runId,
+      delivered_object_ids: ["shared-object"],
+      delivered_objects: [
+        { object_id: "shared-object", object_kind: "synthesis_capsule" }
+      ],
+      delivered_at: FIXED_NOW,
+      audit_event_id: "delivery-evt-synthesis-only"
+    });
+
+    const result = await harness.handler.call({
+      toolName: "soul.resolve",
+      arguments: {
+        target_object_id: "shared-object",
+        resolution: SoulResolutionKind.STALE,
+        delivery_id: "delivery-synthesis-only"
+      },
+      context
+    });
+
+    expect(result.ok).toBe(false);
+    expect(harness.memories.get("shared-object")?.lifecycle_state).toBe(ObjectLifecycleState.ACTIVE);
+    expect(
+      harness.events.some(
+        (event) => event.event_type === GovernanceResolutionEventType.SOUL_RESOLUTION_STALE_APPLIED
       )
     ).toBe(false);
   });

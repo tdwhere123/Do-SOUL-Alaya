@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "9d7950912d100811aefd5674ce3a159a40de2399b19aa161b8756761d7b97f1d",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"writing_style\",\"confidence\":0.91,\"matched_text\":\"can you write my cover letter in haiku\",\"distilled_fact\":\"The user wants their cover letter written in haiku form.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"job_application_content\",\"confidence\":0.87,\"matched_text\":\"Animation skills I own,\\nDash's team I wish to join,\\nExciting journey.\",\"distilled_fact\":\"The cover letter haiku says, \\\"Animation skills I own, Dash's team I wish to join, Exciting journey.\\\"\"}]}",
+  "extracted_at": "2026-05-21T09:08:42.584Z"
+}

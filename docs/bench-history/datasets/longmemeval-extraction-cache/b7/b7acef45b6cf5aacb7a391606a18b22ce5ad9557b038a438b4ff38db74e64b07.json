@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "b7acef45b6cf5aacb7a391606a18b22ce5ad9557b038a438b4ff38db74e64b07",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"style_request\",\"confidence\":0.86,\"matched_text\":\"Make it longer\",\"distilled_fact\":\"The user prefers a longer response.\"}]}",
+  "extracted_at": "2026-05-21T08:01:15.980Z"
+}

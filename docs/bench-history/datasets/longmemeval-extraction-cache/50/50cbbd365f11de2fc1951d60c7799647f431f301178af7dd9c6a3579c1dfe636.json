@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "50cbbd365f11de2fc1951d60c7799647f431f301178af7dd9c6a3579c1dfe636",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"room_description\",\"confidence\":0.95,\"matched_text\":\"I have a light blue-walled room with a lot of darker wood furniture and a white ceiling.\",\"distilled_fact\":\"The user has a room with light blue walls, a lot of darker wood furniture, and a white ceiling.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"room_description\",\"confidence\":0.94,\"matched_text\":\"the rug is a warm off-white.\",\"distilled_fact\":\"The rug in the user's room is a warm off-white.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"lamp_request\",\"confidence\":0.96,\"matched_text\":\"I want to add a lamp.\",\"distilled_fact\":\"The user wants to add a lamp to the room.\"}]}",
+  "extracted_at": "2026-05-21T08:12:19.020Z"
+}

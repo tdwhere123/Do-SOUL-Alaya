@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "e315f733d67d2c0b1533fde6ea58ccdf690272a44385c6993c6699def5d050e7",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_interest\",\"object_kind\":\"topic\",\"confidence\":0.74,\"matched_text\":\"It's fascinating how wolves communicate with each other through body language and vocalizations.\",\"distilled_fact\":\"The user is interested in how wolves communicate with each other through body language and vocalizations.\"},{\"signal_kind\":\"potential_interest\",\"object_kind\":\"topic\",\"confidence\":0.72,\"matched_text\":\"Do they ever show affection towards each other in this way?\",\"distilled_fact\":\"The user is interested in whether wolves show affection towards each other through body language and vocalizations.\"}]}",
+  "extracted_at": "2026-05-21T08:01:47.157Z"
+}

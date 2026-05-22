@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "0374414add0a9ae1f19bda589098943a5dc972419352eb58c1e33fb691937f6c",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"advice\",\"confidence\":0.61,\"matched_text\":\"It's always better to be prepared for any potential situation.\",\"distilled_fact\":\"The speaker prefers being prepared for any potential situation.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"advice\",\"confidence\":0.58,\"matched_text\":\"with good communication and a willingness to compromise, you'll be able to resolve any conflicts with your roommates without the need for a mediator.\",\"distilled_fact\":\"Good communication and a willingness to compromise can help resolve conflicts with roommates without the need for a mediator.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"advice\",\"confidence\":0.55,\"matched_text\":\"it's always good to know that there are resources available if you need them.\",\"distilled_fact\":\"There are resources available if they are needed.\"}]}",
+  "extracted_at": "2026-05-21T08:07:54.894Z"
+}

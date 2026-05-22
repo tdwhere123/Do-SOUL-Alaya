@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c297721cb6b090d4bbf3f7ad4044ccad84b720465ebd8adbe2d11ac8361b0247",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"assistant_role\",\"confidence\":0.77,\"matched_text\":\"as an impartial party, i strive to provide the best advice possible\",\"distilled_fact\":\"The assistant describes itself as an impartial party that strives to provide the best advice possible.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"assistant_behavior\",\"confidence\":0.72,\"matched_text\":\"don't hesitate to reach out if you have any more questions\",\"distilled_fact\":\"The assistant encourages the user to reach out if the user has any more questions.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_context\",\"confidence\":0.69,\"matched_text\":\"i wish you the best in your roommate relationships\",\"distilled_fact\":\"The user has roommate relationships.\"}]}",
+  "extracted_at": "2026-05-21T08:08:00.504Z"
+}

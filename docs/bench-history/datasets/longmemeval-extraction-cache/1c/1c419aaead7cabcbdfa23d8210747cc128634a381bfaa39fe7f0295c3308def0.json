@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "1c419aaead7cabcbdfa23d8210747cc128634a381bfaa39fe7f0295c3308def0",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"writing_style\",\"confidence\":0.71,\"matched_text\":\"great. can you write another one, stressing how this job was meant to be\",\"distilled_fact\":\"The user wants another piece of writing that stresses how this job was meant to be.\"}]}",
+  "extracted_at": "2026-05-21T08:04:13.968Z"
+}

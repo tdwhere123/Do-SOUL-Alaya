@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "71501cf92d7ee48c7e80b9ebbde284d899a51f07824b2a3879fb92ef2a2194e8",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"trip_preference\",\"confidence\":0.89,\"matched_text\":\"I think we'll look into a small luxury ship, sounds perfect for a romantic getaway.\",\"distilled_fact\":\"The user is interested in a small luxury ship for a romantic getaway.\"}]}",
+  "extracted_at": "2026-05-21T08:57:51.385Z"
+}

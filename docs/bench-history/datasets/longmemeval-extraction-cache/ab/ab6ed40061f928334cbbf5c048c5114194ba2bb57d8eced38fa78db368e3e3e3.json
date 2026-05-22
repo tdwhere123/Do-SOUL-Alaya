@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "ab6ed40061f928334cbbf5c048c5114194ba2bb57d8eced38fa78db368e3e3e3",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"animal\",\"confidence\":0.76,\"matched_text\":\"sea turtles have a lot of challenges to face\",\"distilled_fact\":\"Sea turtles have a lot of challenges to face.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"topic_interest\",\"confidence\":0.67,\"matched_text\":\"Is there anything we can do to help protect them from predators and other threats?\",\"distilled_fact\":\"The speaker is interested in ways to help protect sea turtles from predators and other threats.\"}]}",
+  "extracted_at": "2026-05-21T07:54:43.976Z"
+}

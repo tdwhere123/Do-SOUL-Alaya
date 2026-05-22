@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "0de421305e246b407e725457a7c0ad8213d4974ad059923aff9b9bca93cda98d",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"topic\",\"confidence\":0.81,\"matched_text\":\"Describe the social hierarchies of pack animals like wolves and how they communicate through body language.\",\"distilled_fact\":\"The user wants a description of the social hierarchies of pack animals like wolves and how they communicate through body language.\"}]}",
+  "extracted_at": "2026-05-21T08:01:39.612Z"
+}

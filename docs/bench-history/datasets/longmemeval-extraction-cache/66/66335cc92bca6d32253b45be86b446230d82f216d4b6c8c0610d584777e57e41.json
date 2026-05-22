@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "66335cc92bca6d32253b45be86b446230d82f216d4b6c8c0610d584777e57e41",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"fitness_goal\",\"confidence\":0.87,\"matched_text\":\"I'm trying to stay on top of my fitness goals\",\"distilled_fact\":\"The user is trying to stay on top of the user's fitness goals.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"activity_goal\",\"confidence\":0.92,\"matched_text\":\"increase my step count\",\"distilled_fact\":\"The user wants to increase the user's step count.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"device\",\"confidence\":0.96,\"matched_text\":\"my new Fitbit Inspire HR, which I bought on February 15th\",\"distilled_fact\":\"The user bought a new Fitbit Inspire HR on February 15th.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"motivation_state\",\"confidence\":0.78,\"matched_text\":\"it's been really motivating me to move more!\",\"distilled_fact\":\"The user's new Fitbit Inspire HR has been really motivating the user to move more.\"}]}",
+  "extracted_at": "2026-05-21T06:59:50.726Z"
+}

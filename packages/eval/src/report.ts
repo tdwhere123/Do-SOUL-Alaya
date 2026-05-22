@@ -2,6 +2,10 @@ import type { KpiPayload } from "./kpi-schema.js";
 import { verdictBadge } from "./diff.js";
 import type { KpiDiffResult } from "./thresholds.js";
 import { deriveSampleSizeLabel, wilsonInterval } from "./wilson-ci.js";
+import {
+  collectReleaseHardGates,
+  combineVerdicts
+} from "./release-gates.js";
 
 export function renderReport(
   current: KpiPayload,
@@ -15,16 +19,27 @@ export function renderReport(
   );
   lines.push(`# Bench Report — ${current.bench_name} / ${current.split}`);
   lines.push("");
-  lines.push(
+  const headerLines = [
     `- Run at: ${current.run_at}`,
     `- Sample size: ${current.sample_size} (evaluated ${current.evaluated_count}/${current.sample_size}, label=${sampleLabel})`,
     `- Harness mode: ${current.harness_mode}`,
     `- Alaya commit: ${current.alaya_commit} (${current.alaya_version})`,
+    `- Recall pipeline: ${current.recall_pipeline_version ?? "unknown"}`,
     `- Embedding: ${current.embedding_provider}`,
     `- Chat: ${current.chat_provider}`,
-    `- Dataset: ${current.dataset.name} (size=${current.dataset.size})`,
-    ""
-  );
+    `- Policy shape: ${current.policy_shape ?? "stress"}`,
+    `- Dataset: ${current.dataset.name} (size=${current.dataset.size})`
+  ];
+  if (current.seed_policy !== undefined) {
+    headerLines.push(
+      `- Seed policy: ${current.seed_policy.mode}` +
+        (current.seed_policy.label_independent ? " (label-independent)" : " (uses labels)")
+    );
+  }
+  if (current.recall_weight_overrides !== undefined) {
+    headerLines.push(`- Recall weights: ${formatRecallWeightOverrides(current.recall_weight_overrides)}`);
+  }
+  lines.push(...headerLines, "");
 
   lines.push("## Scoring contract");
   lines.push("");
@@ -73,7 +88,15 @@ export function renderReport(
       "  *given the question, how often does the top-K recall surface a",
       "  `has_answer=true` turn from an answer session, when distractor",
       "  sessions are present in the haystack*. This is the honest",
-      "  retrieval number; quote it directly."
+      "  retrieval number; quote it directly.",
+      "- **Production-extraction ingestion basis (v0.3.10).** Each turn is",
+      "  run through the production garden extraction",
+      "  (`OfficialApiGardenProvider.compile`) into N typed candidate",
+      "  signals; an answer turn seeds N gold `object_id`s and a hit means",
+      "  recalling ANY one of them. R@K is therefore measured on a new",
+      "  basis and is NOT directly comparable to the pre-extraction",
+      "  `2026-05-20T110623Z` baseline; the first post-extraction full run",
+      "  is the reference baseline for later recall-optimization slices."
     );
   }
   if (current.bench_name === "live" || current.split === "strict-real") {
@@ -99,21 +122,28 @@ export function renderReport(
 
   lines.push("## Verdict");
   lines.push("");
+  const releaseGates = collectReleaseHardGates(current);
+  const releaseGateVerdict = releaseGates.some((gate) => !gate.passed)
+    ? "fail"
+    : "ok";
+  const worstVerdict = combineVerdicts(diff.worst_verdict, releaseGateVerdict);
   lines.push(
-    `Worst verdict: **${diff.worst_verdict.toUpperCase()}** ${verdictBadge(diff.worst_verdict)}`
+    `Worst verdict: **${worstVerdict.toUpperCase()}** ${verdictBadge(worstVerdict)}`
   );
-  const targetGates = collectAbsoluteTargetGates(current);
-  if (targetGates.length > 0) {
+  if (releaseGates.length > 0) {
     lines.push("");
-    lines.push("Absolute target gates:");
-    for (const gate of targetGates) {
+    lines.push("Release hard gates:");
+    for (const gate of releaseGates) {
+      const comparator = gate.direction === "min"
+        ? gate.passed ? ">=" : "<"
+        : gate.passed ? "<=" : ">";
       lines.push(
-        `- ${gate.passed ? "✓" : "⚠"} ${gate.label}: ${formatRatio(gate.current)} ${gate.passed ? ">=" : "<"} target ${formatRatio(gate.target)}`
+        `- ${gate.passed ? "✓" : "✗"} ${formatHardGateName(gate)}: ${formatGateValue(gate.current, gate.unit)} ${comparator} target ${formatGateValue(gate.target, gate.unit)}`
       );
     }
-    if (targetGates.some((gate) => !gate.passed)) {
+    if (releaseGates.some((gate) => !gate.passed)) {
       lines.push(
-        "  - The delta verdict above is only a regression check against the previous archive entry; this artifact is below an absolute stage/release target."
+        "  - The delta verdict is only a regression check against the previous archive entry; failed release hard gates block the archive even when no previous baseline exists."
       );
     }
   }
@@ -212,10 +242,21 @@ export function renderReport(
   if (
     current.kpi.provider_returned_rate !== undefined ||
     current.kpi.provider_pending_rate !== undefined ||
-    current.kpi.provider_failed_rate !== undefined
+    current.kpi.provider_failed_rate !== undefined ||
+    current.kpi.provider_not_requested_rate !== undefined
   ) {
     lines.push(
-      `- Embedding provider states: returned=${formatMaybeRatio(current.kpi.provider_returned_rate)} pending=${formatMaybeRatio(current.kpi.provider_pending_rate)} failed=${formatMaybeRatio(current.kpi.provider_failed_rate)}`
+      `- Embedding provider states: returned=${formatMaybeRatio(current.kpi.provider_returned_rate)} pending=${formatMaybeRatio(current.kpi.provider_pending_rate)} failed=${formatMaybeRatio(current.kpi.provider_failed_rate)} not_requested=${formatMaybeRatio(current.kpi.provider_not_requested_rate)}`
+    );
+  }
+  if (current.kpi.embedding_vector_cache_ready_rate !== undefined) {
+    lines.push(
+      `- Embedding vector cache ready: ${formatMaybeRatio(current.kpi.embedding_vector_cache_ready_rate)}`
+    );
+  }
+  if (current.kpi.query_embedding_cache_ready_rate !== undefined) {
+    lines.push(
+      `- Query embedding cache ready: ${formatMaybeRatio(current.kpi.query_embedding_cache_ready_rate)}`
     );
   }
   const trunc = current.kpi.seed_truncation;
@@ -226,6 +267,56 @@ export function renderReport(
     lines.push(
       `  - ⚠ ${trunc.answer_turns_truncated} answer-bearing turn(s) had their content clipped at the protocol cap; recall cannot retrieve text past the cutoff.`
     );
+  }
+  const extractionPath = current.kpi.seed_extraction_path;
+  if (extractionPath !== undefined) {
+    lines.push(
+      `- Seed extraction path: ${extractionPath.path} ` +
+        `(cache_hits=${extractionPath.cache_hits} llm_calls=${extractionPath.llm_calls} ` +
+        `offline_fallbacks=${extractionPath.offline_fallbacks} ` +
+        `facts=${extractionPath.facts_produced} signals_dropped=${extractionPath.signals_dropped} ` +
+        `[parse_dropped=${extractionPath.parse_dropped} ` +
+        `compile_overflow_dropped=${extractionPath.compile_overflow_dropped}])`
+    );
+    if (extractionPath.path === "no_credentials_fallback") {
+      lines.push(
+        "  - ⚠ This run took the no-credentials fallback: each turn was",
+        "    seeded as one full-turn fact, NOT the production multi-signal",
+        "    garden extraction. The keyword-rich full turn can out-score a",
+        "    tight production `distilled_fact`, so this R@K is NOT comparable",
+        "    to an `official_api_compile` run."
+      );
+    }
+    if (extractionPath.signals_dropped > 0) {
+      // signals_dropped also absorbs whole-turn batches lost when seed
+      // materialization throws, which parse_dropped / compile_overflow_dropped
+      // do not attribute — surface that residual so the breakdown still sums.
+      const seedMaterializationDropped = Math.max(
+        0,
+        extractionPath.signals_dropped -
+          extractionPath.parse_dropped -
+          extractionPath.compile_overflow_dropped
+      );
+      lines.push(
+        `  - ⚠ ${extractionPath.signals_dropped} extracted signal(s) were lost before seeding ` +
+          `(${extractionPath.parse_dropped} dropped by the parser as malformed / over the 64-signal cap, ` +
+          `${extractionPath.compile_overflow_dropped} dropped by compile() as oversized, ` +
+          `${seedMaterializationDropped} dropped when a seed-materialization batch failed); ` +
+          `a dropped answer-bearing signal inflates the miss rate.`
+      );
+    }
+  }
+  if (current.kpi.quality_metrics !== undefined) {
+    const metrics = current.kpi.quality_metrics;
+    lines.push(
+      `- Quality metrics: non_monotonic=${formatRatio(metrics.non_monotonic_rate)} (${metrics.non_monotonic_count}/${metrics.non_monotonic_denominator}) budget_drop_loss=${metrics.miss_distribution.budget_dropped ?? 0} budget_dropped_entries=${metrics.budget_drop_distribution.max_entries?.count ?? 0} candidate_absent=${metrics.candidate_absent_count} no_gold=${metrics.no_gold_count} evidence_gold=${formatRatio(metrics.evidence_stream_gold_delivery_rate)} path_top10=${formatRatio(metrics.path_stream_top10_rate)}`
+    );
+    const abstention = metrics.abstention;
+    if (abstention !== undefined && abstention.total > 0) {
+      lines.push(
+        `- Abstention (calibrated confidence, threshold=${abstention.false_confident_threshold}): ${abstention.total} questions, correct@1=${abstention.correct_at_1} correct@5=${abstention.correct_at_5} correct@10=${abstention.correct_at_10}; these correct-at-k counts are credited to the recall@k numerator (denominator unchanged).`
+      );
+    }
   }
   lines.push("");
 
@@ -250,7 +341,7 @@ export function renderFindings(
   diff: KpiDiffResult
 ): string | null {
   const failures = diff.deltas.filter((d) => d.verdict === "fail");
-  const targetFailures = collectAbsoluteTargetGates(current).filter(
+  const targetFailures = collectReleaseHardGates(current).filter(
     (gate) => !gate.passed
   );
   if (
@@ -274,11 +365,12 @@ export function renderFindings(
   }
   lines.push("");
   if (targetFailures.length > 0) {
-    lines.push("## Absolute target gaps");
+    lines.push("## Release hard gate gaps");
     lines.push("");
     for (const failure of targetFailures) {
+      const comparator = failure.direction === "min" ? "<" : ">";
       lines.push(
-        `- **${failure.label}**: current ${formatRatio(failure.current)} < target ${formatRatio(failure.target)}`
+        `- **${formatHardGateName(failure)}**: current ${formatGateValue(failure.current, failure.unit)} ${comparator} target ${formatGateValue(failure.target, failure.unit)}`
       );
     }
     lines.push("");
@@ -310,58 +402,23 @@ export function renderFindings(
   return lines.join("\n");
 }
 
-interface AbsoluteTargetGate {
-  readonly label: string;
-  readonly current: number;
-  readonly target: number;
-  readonly passed: boolean;
-}
-
-function collectAbsoluteTargetGates(
-  current: KpiPayload
-): readonly AbsoluteTargetGate[] {
-  if (
-    current.bench_name !== "public" ||
-    current.split !== "longmemeval-s" ||
-    current.embedding_provider !== "none"
-  ) {
-    return [];
-  }
-
-  if (current.evaluated_count === 100) {
-    return [
-      absoluteTargetGate(
-        "LongMemEval-S disabled-100 smoke target",
-        current.kpi.r_at_5,
-        0.7
-      )
-    ];
-  }
-
-  if (current.evaluated_count >= current.sample_size && current.sample_size >= 500) {
-    return [
-      absoluteTargetGate(
-        "LongMemEval-S disabled-500 release floor",
-        current.kpi.r_at_5,
-        0.65
-      )
-    ];
-  }
-
-  return [];
-}
-
-function absoluteTargetGate(
-  label: string,
-  current: number,
-  target: number
-): AbsoluteTargetGate {
-  return { label, current, target, passed: current >= target };
-}
-
 function formatRatio(value: number): string {
   if (!Number.isFinite(value)) return "—";
   return `${(value * 100).toFixed(2)}%`;
+}
+
+function formatGateValue(
+  value: number | null,
+  unit: ReturnType<typeof collectReleaseHardGates>[number]["unit"]
+): string {
+  if (value === null || !Number.isFinite(value)) return "missing";
+  if (unit === "ratio") return formatRatio(value);
+  if (unit === "ms") return `${value}ms`;
+  return String(value);
+}
+
+function formatHardGateName(gate: ReturnType<typeof collectReleaseHardGates>[number]): string {
+  return `${gate.id} ${gate.label}`;
 }
 
 function formatMaybeRatio(value: number | undefined): string {
@@ -389,4 +446,34 @@ function ciAnnotation(ratio: number, evaluatedCount: number): string {
   const interval = wilsonInterval(successes, evaluatedCount);
   const halfWidthPp = ((interval.hi - interval.lo) / 2) * 100;
   return ` (95% CI ±${halfWidthPp.toFixed(2)}pp, [${(interval.lo * 100).toFixed(2)}%, ${(interval.hi * 100).toFixed(2)}%])`;
+}
+
+function formatRecallWeightOverrides(
+  summary: NonNullable<KpiPayload["recall_weight_overrides"]>
+): string {
+  const parts = [`source=${summary.source}`];
+  if (summary.activation_weights_phase4b !== undefined) {
+    parts.push(
+      `activation={${formatNumberMap(summary.activation_weights_phase4b)}}`
+    );
+  }
+  if (summary.additive !== undefined) {
+    parts.push(`additive={${formatNumberMap(summary.additive)}}`);
+  }
+  if (summary.fusion_weights !== undefined) {
+    parts.push(`fusion={${formatNumberMap(summary.fusion_weights)}}`);
+  }
+  return parts.join(" ");
+}
+
+function formatNumberMap(values: Readonly<Record<string, number | undefined>>): string {
+  return Object.entries(values)
+    .filter((entry): entry is [string, number] => entry[1] !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}=${formatCompactNumber(value)}`)
+    .join(",");
+}
+
+function formatCompactNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : Number(value.toFixed(6)).toString();
 }

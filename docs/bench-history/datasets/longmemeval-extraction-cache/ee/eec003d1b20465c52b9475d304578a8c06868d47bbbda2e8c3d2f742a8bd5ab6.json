@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "eec003d1b20465c52b9475d304578a8c06868d47bbbda2e8c3d2f742a8bd5ab6",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"interest\",\"confidence\":0.92,\"matched_text\":\"I'm especially interested in meal prep\",\"distilled_fact\":\"The speaker is especially interested in meal prep.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"belief\",\"confidence\":0.84,\"matched_text\":\"as I've heard it can be a game-changer for saving time and money.\",\"distilled_fact\":\"The speaker has heard that meal prep can be a game-changer for saving time and money.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"request\",\"confidence\":0.9,\"matched_text\":\"Do you have any recommendations for meal prep containers or tools that can make the process easier?\",\"distilled_fact\":\"The speaker is asking for recommendations for meal prep containers or tools that can make meal prep easier.\"}]}",
+  "extracted_at": "2026-05-21T08:10:11.432Z"
+}

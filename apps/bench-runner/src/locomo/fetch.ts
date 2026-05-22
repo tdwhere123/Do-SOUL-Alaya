@@ -12,7 +12,7 @@ const UPSTREAM_FILENAME: Record<LocomoVariant, string> = {
   locomo10: "locomo10.json"
 };
 
-// see also: docs/bench-history/datasets/<variant>.meta.json — pinned sha256
+// see also: docs/bench-history/datasets/<variant>.meta.json. Pinned sha256
 const PINNED_META_ROOT = path.resolve(__dirname, "../../../../docs/bench-history/datasets");
 
 function pinnedMetaPath(variant: LocomoVariant, root?: string): string {

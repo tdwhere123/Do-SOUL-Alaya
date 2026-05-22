@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "8dd86bd5511a78f1bb1d39538615c41821f568145694c7ef552abff11a27920f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"travel_plan\",\"confidence\":0.98,\"matched_text\":\"I'm thinking of a 7-10 day trip to Europe\",\"distilled_fact\":\"The user is thinking of a 7-10 day trip to Europe.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"transportation_mode\",\"confidence\":0.95,\"matched_text\":\"I'm open to renting a car or using public transportation, depending on the itinerary.\",\"distilled_fact\":\"The user is open to renting a car or using public transportation depending on the itinerary.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"travel_interest\",\"confidence\":0.97,\"matched_text\":\"I'm interested in history, culture, and trying local food and drinks.\",\"distilled_fact\":\"The user is interested in history, culture, and trying local food and drinks.\"}]}",
+  "extracted_at": "2026-05-21T08:58:27.654Z"
+}

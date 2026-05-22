@@ -21,7 +21,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { CanonicalAliasService } from "./canonical-alias-service.js";
 import { CoreError } from "./errors.js";
-import type { EventPublisher } from "./event-publisher.js";
+import type { EventPublisher, EventPublisherInput } from "./event-publisher.js";
 import { parseObjectId } from "./shared/validators.js";
 import type { SlotElectionResult } from "./slot-service.js";
 
@@ -93,6 +93,12 @@ export interface ClaimServiceClaimFormRepoPort {
     updatedAt: string,
     expectedFromStatus: ClaimLifecycleStateType
   ): Promise<Readonly<ClaimForm>>;
+  updateStatusSync?(
+    objectId: string,
+    status: ClaimLifecycleStateType,
+    updatedAt: string,
+    expectedFromStatus: ClaimLifecycleStateType
+  ): Readonly<ClaimForm>;
 }
 
 export interface ClaimServiceSlotServicePort {
@@ -198,12 +204,42 @@ export class ClaimService {
     options: {
       readonly skipSlotElection?: boolean;
       readonly deferredNotificationEvents?: EventLogEntry[];
+      // invariant: extra EventLog rows the caller needs appended in the
+      // SAME SQLite transaction as the lifecycle-change event and the
+      // claim_status mutation. The resolution audit event (ResolutionService
+      // confirm/reject) rides this seam so a crash cannot leave an activated
+      // claim without its governance-resolution audit row — governance
+      // changes stay atomically auditable (CLAUDE.md invariants §13).
+      // The persisted rows (with their final event_id) are pushed into
+      // `additionalEventsSink` in input order so the caller can read back
+      // the audit event id.
+      readonly additionalEventInputs?: readonly EventPublisherInput[];
+      readonly additionalEventsSink?: EventLogEntry[];
     } = {}
   ): Promise<Readonly<ClaimForm>> {
     const parsedObjectId = parseObjectId(objectId);
     const parsedNewState = parseClaimLifecycleState(newState);
     const parsedReason = parseReason(reason);
     const parsedCausedBy = parseTransitionCausedBy(causedBy);
+
+    const additionalEventInputs = options.additionalEventInputs ?? [];
+    // invariant: additional audit rows can only be guaranteed atomic with
+    // the claim mutation on the appendManyWithMutation path. If that path
+    // is unavailable (no eventPublisher / no synchronous status update) or
+    // is bypassed by deferredNotificationEvents, refuse rather than append
+    // the audit row in a separate, crash-exposed write.
+    if (additionalEventInputs.length > 0) {
+      const atomicTransitionAvailable =
+        this.dependencies.eventPublisher !== undefined &&
+        this.dependencies.claimFormRepo.updateStatusSync !== undefined &&
+        options.deferredNotificationEvents === undefined;
+      if (!atomicTransitionAvailable) {
+        throw new CoreError(
+          "CONFLICT",
+          "Atomic claim transition with additional audit events is not available"
+        );
+      }
+    }
 
     const existing = await this.dependencies.claimFormRepo.findById(parsedObjectId);
 
@@ -224,7 +260,8 @@ export class ClaimService {
     }
 
     const updated = await this.applyLifecycleTransition(
-      existing, parsedNewState, parsedReason, parsedCausedBy, options.deferredNotificationEvents
+      existing, parsedNewState, parsedReason, parsedCausedBy, options.deferredNotificationEvents,
+      { additionalEventInputs, additionalEventsSink: options.additionalEventsSink }
     );
 
     if (shouldRunSlotElection) {
@@ -268,25 +305,14 @@ export class ClaimService {
     newState: ClaimLifecycleStateType,
     reason: string,
     causedBy: TransitionCausedByType,
-    deferredNotificationEvents?: EventLogEntry[]
+    deferredNotificationEvents?: EventLogEntry[],
+    auditComposition: {
+      readonly additionalEventInputs?: readonly EventPublisherInput[];
+      readonly additionalEventsSink?: EventLogEntry[];
+    } = {}
   ): Promise<Readonly<ClaimForm>> {
     const occurredAt = this.now();
-    // invariant: CAS-guarded state mutation runs BEFORE the lifecycle
-    // audit append. Concurrent confirm/reject races against the same
-    // starting state: the loser fails the CAS check and exits before
-    // emitting an audit row that does not match a real state change.
-    // The winner's audit row reflects a transition that actually
-    // happened durably.
-    // see also: packages/storage/src/repos/claim-form-repo.ts
-    //   updateStatusStatement (WHERE claim_status = ?)
-    const updated = await this.dependencies.claimFormRepo.updateStatus(
-      existing.object_id,
-      newState,
-      occurredAt,
-      existing.claim_status
-    );
-
-    const event = await this.dependencies.eventLogRepo.append({
+    const eventInput = {
       event_type: MemoryGovernanceEventType.SOUL_CLAIM_LIFECYCLE_CHANGED,
       entity_type: "claim_form",
       entity_id: existing.object_id,
@@ -305,7 +331,69 @@ export class ClaimService {
         evidence_refs: null,
         occurred_at: occurredAt
       })
-    });
+    };
+
+    const additionalEventInputs = auditComposition.additionalEventInputs ?? [];
+    const syncStatusUpdate = this.dependencies.claimFormRepo.updateStatusSync;
+    if (
+      this.dependencies.eventPublisher !== undefined &&
+      syncStatusUpdate !== undefined &&
+      deferredNotificationEvents === undefined
+    ) {
+      // invariant: ON THIS BRANCH the lifecycle-change event, every
+      // additional audit event the caller composed, and the claim_status
+      // mutation all land in one SQLite transaction. appendManyWithMutation
+      // appends in input order, so persistedEntries[1..] are the additional
+      // events 1:1 with input. The non-atomic branch below CANNOT honor
+      // additionalEventInputs and would silently drop them — that branch is
+      // never reached with additionalEventInputs because the public
+      // `transitionLifecycle` caller fail-closed rejects (CoreError CONFLICT)
+      // any call that carries additional audit events when this atomic path
+      // is unavailable. The guard lives in the public caller; this branch
+      // assumes it already passed.
+      return await this.dependencies.eventPublisher.appendManyWithMutation(
+        [eventInput, ...additionalEventInputs],
+        (persistedEntries) => {
+          if (auditComposition.additionalEventsSink !== undefined) {
+            for (let i = 0; i < additionalEventInputs.length; i += 1) {
+              const persisted = persistedEntries[i + 1];
+              if (persisted !== undefined) {
+                auditComposition.additionalEventsSink.push(persisted);
+              }
+            }
+          }
+          return syncStatusUpdate.call(
+            this.dependencies.claimFormRepo,
+            existing.object_id,
+            newState,
+            occurredAt,
+            existing.claim_status
+          );
+        }
+      );
+    }
+
+    // invariant: the non-atomic branch cannot append additional audit
+    // events atomically with the claim mutation, so it must never silently
+    // drop them. The public `transitionLifecycle` caller already guards
+    // this; the assertion re-asserts it at the seam so a future internal
+    // caller that reaches applyLifecycleTransition directly fails closed
+    // instead of dropping a governance audit row.
+    if (additionalEventInputs.length > 0) {
+      throw new CoreError(
+        "CONFLICT",
+        "Atomic claim transition with additional audit events is not available"
+      );
+    }
+
+    const updated = await this.dependencies.claimFormRepo.updateStatus(
+      existing.object_id,
+      newState,
+      occurredAt,
+      existing.claim_status
+    );
+
+    const event = await this.dependencies.eventLogRepo.append(eventInput);
 
     if (deferredNotificationEvents !== undefined) {
       deferredNotificationEvents.push(event);

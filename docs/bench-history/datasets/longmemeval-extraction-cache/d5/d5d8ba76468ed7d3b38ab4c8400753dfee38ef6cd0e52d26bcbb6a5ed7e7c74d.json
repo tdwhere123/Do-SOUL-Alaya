@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "d5d8ba76468ed7d3b38ab4c8400753dfee38ef6cd0e52d26bcbb6a5ed7e7c74d",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"bike_maintenance_history\",\"confidence\":0.91,\"matched_text\":\"it's been making a loud rattling noise.\",\"distilled_fact\":\"The user's road bike chain has been making a loud rattling noise.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"bike_maintenance_history\",\"confidence\":0.89,\"matched_text\":\"I think the last time I did it was back in April when I took it to the bike shop for a tune-up.\",\"distilled_fact\":\"The user last cleaned and lubed the chain in April when the user took the road bike to the bike shop for a tune-up.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"product_preference\",\"confidence\":0.77,\"matched_text\":\"Do you have any recommendations for a good chain lube?\",\"distilled_fact\":\"The user is asking for recommendations for a good chain lube.\"}]}",
+  "extracted_at": "2026-05-21T07:48:35.457Z"
+}

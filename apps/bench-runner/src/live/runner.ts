@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
@@ -13,7 +13,7 @@ import {
   type HistoryLayout,
   type KpiPayload
 } from "@do-soul/alaya-eval";
-import { resolveBenchRunnerVersion } from "../version.js";
+import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../version.js";
 
 export interface LiveBenchOptions {
   readonly historyRoot: string;
@@ -162,12 +162,15 @@ export async function runLiveBench(
     run_at: runAt.toISOString(),
     alaya_commit: commitSha7,
     alaya_version: resolveBenchRunnerVersion(),
+    recall_pipeline_version: RECALL_PIPELINE_VERSION,
     embedding_provider: source.metrics.provider_health.embedding.ok
       ? providerMode.mode
       : "unavailable",
     chat_provider: source.metrics.provider_health.garden.ok
       ? "garden-real-provider"
       : "unavailable",
+    policy_shape: "stress",
+    simulate_report: "none",
     dataset: {
       name: "alaya-live-strict-real",
       size: source.metrics.samples.requested,
@@ -205,7 +208,10 @@ export async function runLiveBench(
   };
 
   const layout: HistoryLayout = { historyRoot: opts.historyRoot };
-  const previous = await readLatest(layout, "live", { split: "strict-real" });
+  const previous = await readLatest(layout, "live", {
+    split: "strict-real",
+    embeddingProvider: payload.embedding_provider
+  });
   const diff = diffKpis(payload, previous);
   const slug = entrySlug(runAt, commitSha7);
   const report = renderLiveReport(payload, previous, diff, source, providerMode, keywordMode);
@@ -426,11 +432,76 @@ function parseRunDate(value: string): Date {
 
 // see also: apps/bench-runner/src/version.ts resolveBenchRunnerVersion
 function resolveCommitSha7(): string {
-  const sha = execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
+  const sha = resolveGitHeadSha(process.cwd()).slice(0, 7);
   if (sha.length === 0) {
-    throw new Error("git rev-parse --short HEAD returned an empty value");
+    throw new Error("git HEAD resolution returned an empty value");
   }
   return sha;
+}
+
+function resolveGitHeadSha(repoRoot: string): string {
+  const gitDir = resolveGitDir(repoRoot);
+  const head = readTrimmed(path.join(gitDir, "HEAD"));
+  if (/^[0-9a-f]{40}$/iu.test(head)) {
+    return head;
+  }
+  const refMatch = /^ref:\s+(.+)$/u.exec(head);
+  if (refMatch === null) {
+    throw new Error(`Unsupported git HEAD format: ${head}`);
+  }
+  const refName = refMatch[1];
+  const commonDir = resolveCommonGitDir(gitDir);
+  for (const root of [gitDir, commonDir]) {
+    const refPath = path.join(root, refName);
+    if (existsSync(refPath)) {
+      return readTrimmed(refPath);
+    }
+  }
+  const packedSha = readPackedRef(commonDir, refName) ?? readPackedRef(gitDir, refName);
+  if (packedSha !== null) {
+    return packedSha;
+  }
+  throw new Error(`Unable to resolve git ref: ${refName}`);
+}
+
+function resolveGitDir(repoRoot: string): string {
+  const gitPath = path.join(repoRoot, ".git");
+  const raw = readTrimmed(gitPath);
+  const gitDirMatch = /^gitdir:\s+(.+)$/u.exec(raw);
+  if (gitDirMatch === null) {
+    return gitPath;
+  }
+  const gitDir = gitDirMatch[1];
+  return path.resolve(repoRoot, gitDir);
+}
+
+function resolveCommonGitDir(gitDir: string): string {
+  const commonDirPath = path.join(gitDir, "commondir");
+  if (!existsSync(commonDirPath)) {
+    return gitDir;
+  }
+  return path.resolve(gitDir, readTrimmed(commonDirPath));
+}
+
+function readPackedRef(gitDir: string, refName: string): string | null {
+  const packedRefsPath = path.join(gitDir, "packed-refs");
+  if (!existsSync(packedRefsPath)) {
+    return null;
+  }
+  for (const line of readFileSync(packedRefsPath, "utf8").split(/\r?\n/u)) {
+    if (line.startsWith("#") || line.startsWith("^")) {
+      continue;
+    }
+    const [sha, name] = line.split(" ");
+    if (name === refName && /^[0-9a-f]{40}$/iu.test(sha)) {
+      return sha;
+    }
+  }
+  return null;
+}
+
+function readTrimmed(filePath: string): string {
+  return readFileSync(filePath, "utf8").trim();
 }
 
 function relativeToCwd(value: string): string {

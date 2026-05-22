@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "17d7266007751327eecf8b35cde722247d9c5c93da4e19b5834b60836b1dd9d3",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_state\",\"confidence\":0.86,\"matched_text\":\"I've looked at some reviews and compared prices, but I'm still having a hard time deciding between two products.\",\"distilled_fact\":\"The user has looked at some reviews and compared prices.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_state\",\"confidence\":0.9,\"matched_text\":\"I'm still having a hard time deciding between two products.\",\"distilled_fact\":\"The user is having a hard time deciding between two products.\"}]}",
+  "extracted_at": "2026-05-21T07:44:16.685Z"
+}

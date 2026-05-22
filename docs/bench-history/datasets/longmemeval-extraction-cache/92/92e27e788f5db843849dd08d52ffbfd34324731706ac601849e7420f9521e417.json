@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "92e27e788f5db843849dd08d52ffbfd34324731706ac601849e7420f9521e417",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"app\",\"confidence\":0.94,\"matched_text\":\"Cashback apps like Ibotta and Fetch Rewards are a fantastic way to earn money back on your purchases.\",\"distilled_fact\":\"The speaker considers cashback apps like Ibotta and Fetch Rewards a fantastic way to earn money back on purchases.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"app\",\"confidence\":0.89,\"matched_text\":\"Invite friends and family to join Ibotta and earn $10 for each referral.\",\"distilled_fact\":\"Ibotta pays $10 for each referral.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"app\",\"confidence\":0.87,\"matched_text\":\"Invite friends and family to join Fetch Rewards and earn points for each referral.\",\"distilled_fact\":\"Fetch Rewards awards points for each referral.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"app\",\"confidence\":0.86,\"matched_text\":\"Use cashback portals like Rakuten (formerly known as Ebates) or TopCashback for online purchases to earn additional cashback.\",\"distilled_fact\":\"Rakuten was formerly known as Ebates.\"}]}",
+  "extracted_at": "2026-05-21T07:50:45.119Z"
+}

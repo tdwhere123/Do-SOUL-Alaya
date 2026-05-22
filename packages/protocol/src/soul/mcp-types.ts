@@ -23,6 +23,8 @@ import {
 } from "./memory-graph.js";
 import { MemoryDimensionSchema, PublicMemoryEntryMutableFieldsSchema } from "./memory-entry.js";
 import { ScopeClassSchema } from "./object-kind.js";
+import { ClaimLifecycleStateSchema } from "./claim-form.js";
+import { PathGovernanceClassSchema } from "./path-relation.js";
 import { ProposalResolutionStateSchema } from "./proposal.js";
 import {
   RecallBudgetStateSchema,
@@ -63,6 +65,8 @@ export const MemorySearchResultSchema = z
     source_channels: z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
     score_factors: RecallScoreFactorsSchema,
     budget_state: RecallBudgetStateSchema,
+    pending_incomplete: z.boolean().optional(),
+    unfinishedness_bias: z.number().min(0).max(1).optional(),
     // invariant: optional governance warnings forwarded from the
     // RecallCandidate. Older agents that do not understand the field
     // simply skip it; soul.resolve-aware agents and the Inspector
@@ -70,6 +74,26 @@ export const MemorySearchResultSchema = z
     // see also: staged-warning.ts (schema),
     // recall-candidate.ts (producer-side field).
     staged_warnings: StagedWarningArraySchema.optional()
+  })
+  .readonly();
+
+export const SoulActiveConstraintGovernanceStateSchema = z
+  .object({
+    claim_status: ClaimLifecycleStateSchema.nullable(),
+    governance_class: PathGovernanceClassSchema.nullable(),
+    source_channels: z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly()
+  })
+  .strict()
+  .readonly();
+
+export const SoulActiveConstraintSchema = z
+  .object({
+    object_id: NonEmptyStringSchema,
+    object_kind: NonEmptyStringSchema,
+    content: NonEmptyStringSchema,
+    dimension: MemoryDimensionSchema,
+    scope_class: ScopeClassSchema,
+    governance_state: SoulActiveConstraintGovernanceStateSchema
   })
   .readonly();
 
@@ -106,7 +130,8 @@ export const SoulMemorySearchRequestSchema = z
     // can passively extract durable candidates from the turn the host is
     // already recalling for, without depending on the host echoing a
     // turn_digest on report_context_usage. Falls back to `query` when absent.
-    recent_turn: BoundedQuerySchema.optional()
+    recent_turn: BoundedQuerySchema.optional(),
+    active_constraints_cap: NonNegativeIntSchema.max(50).optional()
   })
   .readonly();
 
@@ -114,6 +139,8 @@ export const SoulMemorySearchResponseSchema = z
   .object({
     delivery_id: NonEmptyStringSchema,
     results: z.array(MemorySearchResultSchema).readonly(),
+    active_constraints: z.array(SoulActiveConstraintSchema).readonly().optional(),
+    active_constraints_count: NonNegativeIntSchema.optional(),
     total_count: NonNegativeIntSchema,
     strategy_mix: SoulRecallStrategyMixSchema,
     degradation_reason: SoulMemorySearchDegradationReasonSchema.nullable().optional()
@@ -372,12 +399,26 @@ export const SoulApplyOverrideResponseSchema = z
   .readonly();
 
 export const SoulContextUsageStateSchema = z.enum(["used", "skipped", "not_applicable"]);
+export const SoulContextUsageTrustModeSchema = z.enum(["manual", "automatic"]);
+
+// object_kind is an open BoundedLabel, not a closed enum, on purpose: it is
+// the same open vocabulary as SoulActiveConstraint.object_kind and must admit
+// kinds the wire does not yet model. Consumers fail closed — an unknown kind
+// simply never tuple-matches a delivered/expected (object_id, object_kind).
+export const SoulContextObjectIdentitySchema = z
+  .object({
+    object_id: BoundedIdSchema,
+    object_kind: BoundedLabelSchema
+  })
+  .strict()
+  .readonly();
 
 export const SoulContextUsageAnchorRoleSchema = z.enum(["source", "target"]);
 
 export const SoulContextPerAnchorUsageSchema = z
   .object({
     object_id: BoundedIdSchema,
+    object_kind: BoundedLabelSchema.optional(),
     anchor_role: SoulContextUsageAnchorRoleSchema
   })
   .strict()
@@ -386,6 +427,7 @@ export const SoulContextPerAnchorUsageSchema = z
 export const SoulContextDeliveredObjectUsageSchema = z
   .object({
     object_id: BoundedIdSchema,
+    object_kind: BoundedLabelSchema.optional(),
     usage_status: SoulContextUsageStateSchema
   })
   .strict()
@@ -419,6 +461,13 @@ export const SoulReportContextUsageRequestSchema = z
     turn_index: NonNegativeIntSchema.optional(),
     turn_digest: SoulContextUsageTurnDigestSchema.optional(),
     per_anchor_usage: z.array(SoulContextPerAnchorUsageSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+    // invariant (agents propose, Alaya decides): trust_mode is NOT a
+    // request field. Usage trust weight is server-derived — an MCP usage
+    // report is an unverified agent self-report, always recorded as
+    // `automatic` (lower path-plasticity weight). A caller cannot
+    // self-declare `manual` to claim full reinforcement weight. The
+    // SoulContextUsageTrustModeSchema enum still types the durable
+    // UsageProofRecord, where the server sets the mode.
     reason: BoundedReasonSchema.nullable().optional()
   })
   .readonly();
@@ -431,6 +480,8 @@ export const SoulReportContextUsageResponseSchema = z
   .readonly();
 
 export type MemorySearchResult = z.infer<typeof MemorySearchResultSchema>;
+export type SoulActiveConstraintGovernanceState = z.infer<typeof SoulActiveConstraintGovernanceStateSchema>;
+export type SoulActiveConstraint = z.infer<typeof SoulActiveConstraintSchema>;
 export type SoulRecallStrategyMix = z.infer<typeof SoulRecallStrategyMixSchema>;
 export type SoulMemorySearchDegradationReason = z.infer<typeof SoulMemorySearchDegradationReasonSchema>;
 export type SoulRecallTokenizerHint = z.infer<typeof SoulRecallTokenizerHintSchema>;
@@ -462,6 +513,7 @@ export type SoulEmitCandidateSignalResponse = z.infer<typeof SoulEmitCandidateSi
 export type SoulApplyOverrideRequest = z.infer<typeof SoulApplyOverrideRequestSchema>;
 export type SoulApplyOverrideResponse = z.infer<typeof SoulApplyOverrideResponseSchema>;
 export type SoulContextUsageState = z.infer<typeof SoulContextUsageStateSchema>;
+export type SoulContextObjectIdentity = z.infer<typeof SoulContextObjectIdentitySchema>;
 export type SoulContextUsageAnchorRole = z.infer<typeof SoulContextUsageAnchorRoleSchema>;
 export type SoulContextPerAnchorUsage = z.infer<typeof SoulContextPerAnchorUsageSchema>;
 export type SoulReportContextUsageRequest = z.infer<typeof SoulReportContextUsageRequestSchema>;

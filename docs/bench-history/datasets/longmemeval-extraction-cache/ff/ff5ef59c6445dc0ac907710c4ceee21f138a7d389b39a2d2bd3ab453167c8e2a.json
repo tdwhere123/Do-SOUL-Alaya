@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "ff5ef59c6445dc0ac907710c4ceee21f138a7d389b39a2d2bd3ab453167c8e2a",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"framework\",\"confidence\":0.98,\"matched_text\":\"I like the OKR framework\",\"distilled_fact\":\"The user likes the OKR framework.\"},{\"signal_kind\":\"potential_intent\",\"object_kind\":\"action\",\"confidence\":0.96,\"matched_text\":\"I'll definitely give it a try\",\"distilled_fact\":\"The user will definitely give the OKR framework a try.\"}]}",
+  "extracted_at": "2026-05-21T09:18:43.903Z"
+}

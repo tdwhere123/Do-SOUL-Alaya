@@ -14,6 +14,7 @@ describe("Phase 3A event schemas", () => {
       "soul.task_surface.created",
       "soul.recall.completed",
       "soul.context_lens.assembled",
+      "soul.recall.weight_transfer",
       "soul.recall.delivered",
       "soul.context_usage.reported",
       "soul.single_used_anchor"
@@ -65,6 +66,20 @@ describe("Phase 3A event schemas", () => {
     } as const;
 
     expect(parseRecallContextEventPayload(RecallContextEventType.SOUL_CONTEXT_LENS_ASSEMBLED, payload)).toEqual(payload);
+  });
+
+  it("parses soul.recall.weight_transfer payload", () => {
+    const payload = {
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      cold_score: 0.5,
+      recalls_edge_count: 25,
+      recalls_threshold: 50,
+      transferred_amount: 0.1,
+      occurred_at: validTimestamp
+    } as const;
+
+    expect(parseRecallContextEventPayload(RecallContextEventType.SOUL_RECALL_WEIGHT_TRANSFER, payload)).toEqual(payload);
   });
 
   it("parses soul.recall.delivered payload", () => {
@@ -146,6 +161,9 @@ describe("Phase 3A event schemas", () => {
     );
     expect(EventTypeSchema.parse(RecallContextEventType.SOUL_RECALL_COMPLETED)).toBe(
       RecallContextEventType.SOUL_RECALL_COMPLETED
+    );
+    expect(EventTypeSchema.parse(RecallContextEventType.SOUL_RECALL_WEIGHT_TRANSFER)).toBe(
+      RecallContextEventType.SOUL_RECALL_WEIGHT_TRANSFER
     );
     expect(EventTypeSchema.parse(RecallContextEventType.SOUL_RECALL_DELIVERED)).toBe(
       RecallContextEventType.SOUL_RECALL_DELIVERED

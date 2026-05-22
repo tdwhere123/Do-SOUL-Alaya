@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "9fccdefa82f5dac287d2bb03f9be63684330dffe545f4684ccf84ecbf41f11a0",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"topic\",\"confidence\":0.72,\"matched_text\":\"I've also been following the NBA season\",\"distilled_fact\":\"The user has been following the NBA season.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"player\",\"confidence\":0.86,\"matched_text\":\"I'm impressed by Luka Doncic's performance so far\",\"distilled_fact\":\"The user is impressed by Luka Doncic's performance so far.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"sports_stats\",\"confidence\":0.78,\"matched_text\":\"Can you give me some updates on his stats and how the Mavericks are doing?\",\"distilled_fact\":\"The user wants updates on Luka Doncic's stats and the Dallas Mavericks' results.\"}]}",
+  "extracted_at": "2026-05-21T09:00:04.233Z"
+}

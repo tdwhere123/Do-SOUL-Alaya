@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "ed92448ea37d9d459d20d76a835e078d3d94b6c63c3435ebf20c5793da9b3c69",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"belief_question\",\"confidence\":0.78,\"matched_text\":\"Do you think that the formation of national identities based on shared experiences can ever be a bad thing?\",\"distilled_fact\":\"The user asks whether the formation of national identities based on shared experiences can ever be a bad thing.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"belief_question\",\"confidence\":0.74,\"matched_text\":\"Are there any negative impacts?\",\"distilled_fact\":\"The user asks whether there are any negative impacts from the formation of national identities based on shared experiences.\"}]}",
+  "extracted_at": "2026-05-21T07:59:26.980Z"
+}

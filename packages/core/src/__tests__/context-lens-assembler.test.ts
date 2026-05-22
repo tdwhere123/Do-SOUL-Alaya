@@ -1072,6 +1072,8 @@ function createRecallPolicy(
 function createRecallResult(candidates: readonly Readonly<RecallCandidate>[]) {
   return Object.freeze({
     candidates: Object.freeze([...candidates]),
+    active_constraints: Object.freeze([]),
+    active_constraints_count: 0,
     total_scanned: candidates.length,
     coarse_filter_count: candidates.length,
     fine_assessment_count: candidates.length,

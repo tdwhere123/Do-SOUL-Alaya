@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "28c60ea985dbd91ac4e2b4cbefc2d58b482ec93345d0e391386e4ad862c7ccec",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"workflow_preference\",\"confidence\":0.78,\"matched_text\":\"I'd like to involve my team in the prototyping process to get their input and feedback.\",\"distilled_fact\":\"The user would like to involve their team in the prototyping process to get their input and feedback.\"}]}",
+  "extracted_at": "2026-05-21T09:18:49.214Z"
+}

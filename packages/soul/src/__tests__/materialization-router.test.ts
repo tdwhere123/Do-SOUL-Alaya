@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  DISTILLED_FACT_MAX_CHARS,
   InMemoryHandoffGapHandler,
   MaterializationRouter,
   normalizeSchemaGroundedSignal
@@ -272,6 +273,7 @@ describe("MaterializationRouter", () => {
     const evidenceInput = deps.evidenceService.create.mock.calls[0][0] as {
       readonly gist: string;
       readonly semantic_anchor: { readonly summary: string };
+      readonly physical_anchor: { readonly artifact_ref: string } | null;
     };
     const memoryInput = deps.memoryService.create.mock.calls[0][0] as {
       readonly content: string;
@@ -282,6 +284,7 @@ describe("MaterializationRouter", () => {
 
     expect(evidenceInput.gist).toBe("Never print secrets.");
     expect(evidenceInput.semantic_anchor.summary).toBe("Never print secrets.");
+    expect(evidenceInput.physical_anchor?.artifact_ref).toBe("msg-1");
     expect(memoryInput.content).toBe("Never print secrets.");
     expect(claimInput.proposition_digest).toBe("Never print secrets.");
   });
@@ -483,6 +486,114 @@ describe("MaterializationRouter", () => {
     expect(deps.claimService.create).not.toHaveBeenCalled();
   });
 
+  it("creates a time_concern path relation proposal after memory_entry_only materialization", async () => {
+    const pathRelationProposalPort = {
+      createPathRelationProposal: vi.fn(async () => ({
+        object_kind: "proposal",
+        object_id: "proposal-1"
+      }))
+    };
+    const deps = {
+      ...createDeps(),
+      pathRelationProposalPort
+    };
+    const router = new MaterializationRouter(deps);
+
+    const result = await router.materializeSignal(
+      createSignal({
+        object_kind: "fact",
+        domain_tags: ["time_concern"],
+        raw_payload: {
+          excerpt: "We reviewed the issue yesterday.",
+          distilled_fact: "We reviewed the issue yesterday.",
+          time_concern: {
+            window_digest: "yesterday",
+            matched_text: "yesterday"
+          }
+        }
+      })
+    );
+
+    expect(result).toMatchObject({
+      target_kind: "evidence_only",
+      route_target: "memory_entry_only",
+      success: true,
+      created_objects: [
+        { object_kind: "evidence_capsule", object_id: "evidence-1" },
+        { object_kind: "memory_entry", object_id: "memory-1" },
+        { object_kind: "proposal", object_id: "proposal-1" }
+      ]
+    });
+    expect(pathRelationProposalPort.createPathRelationProposal).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1",
+      targetObjectId: "memory-1",
+      reason: "Create time_concern PathRelation for yesterday.",
+      proposedPathRelation: expect.objectContaining({
+        target_anchor: {
+          kind: "time_concern",
+          source_object_id: "memory-1",
+          window_digest: "yesterday"
+        },
+        constitution: expect.objectContaining({
+          relation_kind: "time_concern"
+        })
+      })
+    });
+  });
+
+  it("routes direct path_relation signals to a path relation proposal sink", async () => {
+    const pathRelationProposalPort = {
+      createPathRelationProposal: vi.fn(async () => ({
+        object_kind: "proposal",
+        object_id: "proposal-1"
+      }))
+    };
+    const deps = {
+      ...createDeps(),
+      pathRelationProposalPort
+    };
+    const router = new MaterializationRouter(deps);
+    const signal = createSignal({
+      object_kind: "path_relation",
+      raw_payload: {
+        target_object_id: "memory-target-1",
+        time_concern: {
+          window_digest: "2026-05",
+          matched_text: "2026-05"
+        }
+      }
+    });
+
+    expect(router.route(signal)).toEqual({
+      kind: "deferred",
+      route_target: "path_relation_proposal",
+      routing_reason: "object_kind=path_relation -> path_relation_proposal"
+    });
+
+    const result = await router.materializeSignal(signal);
+
+    expect(result).toMatchObject({
+      target_kind: "deferred",
+      route_target: "path_relation_proposal",
+      success: true,
+      created_objects: [{ object_kind: "proposal", object_id: "proposal-1" }]
+    });
+    expect(pathRelationProposalPort.createPathRelationProposal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetObjectId: "memory-target-1",
+        proposedPathRelation: expect.objectContaining({
+          target_anchor: {
+            kind: "time_concern",
+            source_object_id: "memory-target-1",
+            window_digest: "2026-05"
+          }
+        })
+      })
+    );
+  });
+
   it("keeps failure isolated and returns unsuccessful result", async () => {
     const deps = createDeps();
     deps.memoryService.create.mockRejectedValueOnce(new Error("memory repo down"));
@@ -552,20 +663,42 @@ describe("MaterializationRouter", () => {
     expect(memoryInput.content).not.toContain("第三句");
   });
 
-  it("caps distilled fact at 280 chars even when caller supplies a long string", async () => {
+  it("hard-clamps an over-cap caller distilled_fact without appending an ellipsis", async () => {
     const deps = createDeps();
     const router = new MaterializationRouter(deps);
 
-    const longDistilled = "a".repeat(500);
+    const longDistilled = "a".repeat(DISTILLED_FACT_MAX_CHARS + 200);
     await router.materializeSignal(
       createSignal({
         raw_payload: { excerpt: "raw", distilled_fact: longDistilled }
       })
     );
 
-    const memoryInput = deps.memoryService.create.mock.calls[0][0];
-    expect(memoryInput.content.length).toBeLessThanOrEqual(280);
-    expect(memoryInput.content.endsWith("...")).toBe(true);
+    const memoryInput = deps.memoryService.create.mock.calls[0][0] as {
+      readonly content: string;
+    };
+    // A supplied distilled_fact is already a resolved one-assertion fact;
+    // it is clamped to the cap but never "..."-truncated. The ellipsis
+    // belongs only to ruleDistillFromRaw (raw text -> distilled).
+    expect(memoryInput.content.length).toBe(DISTILLED_FACT_MAX_CHARS);
+    expect(memoryInput.content.endsWith("...")).toBe(false);
+  });
+
+  it("uses a within-cap caller distilled_fact verbatim", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    const fact = "The operator prefers concise replies in English.";
+    await router.materializeSignal(
+      createSignal({
+        raw_payload: { excerpt: "raw turn text", distilled_fact: fact }
+      })
+    );
+
+    const memoryInput = deps.memoryService.create.mock.calls[0][0] as {
+      readonly content: string;
+    };
+    expect(memoryInput.content).toBe(fact);
   });
 
   it("creates supersedes / exception_to / contradicts / incompatible_with edges from raw_payload refs", async () => {
@@ -584,14 +717,12 @@ describe("MaterializationRouter", () => {
       })
     );
 
-    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args: unknown[]) => args[0]);
-    const edgeTypes = calls.map((edge: { edgeType: string }) => edge.edgeType);
+    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args) => args[0]);
+    const edgeTypes = calls.map((edge) => edge.edgeType);
     expect(edgeTypes).toEqual(
       expect.arrayContaining(["supersedes", "exception_to", "contradicts", "incompatible_with"])
     );
-    const supersedesEdge = calls.find(
-      (edge: { edgeType: string; targetMemoryId: string }) => edge.edgeType === "supersedes"
-    );
+    const supersedesEdge = calls.find((edge) => edge.edgeType === "supersedes");
     expect(supersedesEdge).toMatchObject({
       sourceMemoryId: "memory-1",
       targetMemoryId: "mem-old-1"
@@ -600,7 +731,7 @@ describe("MaterializationRouter", () => {
 
   it("invokes conflictDetectionPort with the new memory facts when wired", async () => {
     const deps = createDeps();
-    const detectAndLinkConflicts = vi.fn(async () => undefined);
+    const detectAndLinkConflicts = vi.fn<DetectFn>(async () => undefined);
     const router = new MaterializationRouter({
       ...deps,
       conflictDetectionPort: { detectAndLinkConflicts }
@@ -624,49 +755,282 @@ describe("MaterializationRouter", () => {
   });
 });
 
+// invariant: ingest reconciliation gate on the memory_entry_only path.
+// With no reconciliationPort the router appends every fact (the unchanged
+// default). With the port wired the core service decides FIRST and then
+// drives the router's applyVerdict callback per verdict: ADD creates the
+// evidence_capsule + memory_entry, UPDATE creates the evidence_capsule
+// only (the core service relinks it), NOOP creates nothing — keeping a
+// re-seed of the same fact idempotent. A runConflictScan flag drives the
+// existing ConflictDetectionService.
+// see also: packages/core/src/reconciliation-service.ts
+type RunWithDecisionFn = NonNullable<
+  ConstructorParameters<typeof MaterializationRouter>[0]["reconciliationPort"]
+>["runWithDecision"];
+type DetectFn = NonNullable<
+  ConstructorParameters<typeof MaterializationRouter>[0]["conflictDetectionPort"]
+>["detectAndLinkConflicts"];
+
+// invariant: a fake reconciliation port that runs the router's
+// applyVerdict callback exactly as the core service would — emit the
+// verdict, invoke the callback, and on an UPDATE-apply failure re-drive
+// the callback with a degraded ADD. The `verdict` describes the decision
+// and an optional `updateFails` flag exercises the degrade path.
+function fakeReconciliationPort(
+  verdict: {
+    readonly kind: "add" | "update" | "noop";
+    readonly survivingObjectId?: string;
+    readonly runConflictScan?: boolean;
+    readonly reason?: string;
+  },
+  options: { readonly updateFails?: boolean } = {}
+): {
+  readonly reconciliationPort: { runWithDecision: ReturnType<typeof vi.fn<RunWithDecisionFn>> };
+  readonly appliedVerdicts: string[];
+} {
+  const appliedVerdicts: string[] = [];
+  const runWithDecision = vi.fn<RunWithDecisionFn>(async (_input, applyVerdict) => {
+    const decisionView = {
+      kind: verdict.kind,
+      ...(verdict.survivingObjectId === undefined
+        ? {}
+        : { survivingObjectId: verdict.survivingObjectId }),
+      runConflictScan: verdict.runConflictScan ?? false,
+      reason: verdict.reason ?? "verdict"
+    } as const;
+    appliedVerdicts.push(decisionView.kind);
+    await applyVerdict(decisionView);
+    if (verdict.kind === "update" && options.updateFails) {
+      const degraded = {
+        kind: "add" as const,
+        runConflictScan: true,
+        reason: "LLM UPDATE could not be applied — added with conflict scan"
+      };
+      appliedVerdicts.push(degraded.kind);
+      await applyVerdict(degraded);
+      return degraded;
+    }
+    return decisionView;
+  });
+  return { reconciliationPort: { runWithDecision }, appliedVerdicts };
+}
+
+describe("MaterializationRouter ingest reconciliation", () => {
+  function factSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
+    return createSignal({
+      object_kind: "fact",
+      signal_kind: "potential_claim",
+      confidence: 0.8,
+      raw_payload: { excerpt: "The user lives in Berlin.", distilled_fact: "The user lives in Berlin." },
+      ...overrides
+    });
+  }
+
+  it("appends every fact when no reconciliationPort is wired (unchanged default)", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    const result = await router.materializeSignal(factSignal());
+
+    expect(result.success).toBe(true);
+    expect(deps.memoryService.create).toHaveBeenCalledTimes(1);
+    expect(result.created_objects).toContainEqual({
+      object_kind: "memory_entry",
+      object_id: "memory-1"
+    });
+  });
+
+  it("ADD verdict creates the evidence capsule then the memory entry", async () => {
+    const deps = createDeps();
+    const { reconciliationPort } = fakeReconciliationPort({ kind: "add" });
+    const router = new MaterializationRouter({ ...deps, reconciliationPort });
+
+    const result = await router.materializeSignal(factSignal());
+
+    expect(result.success).toBe(true);
+    expect(deps.evidenceService.create).toHaveBeenCalledTimes(1);
+    expect(deps.memoryService.create).toHaveBeenCalledTimes(1);
+    // The router passes the freshly-created evidence ref into memory creation.
+    const memoryInput = deps.memoryService.create.mock.calls[0][0] as {
+      readonly evidence_refs: readonly string[];
+    };
+    expect(memoryInput.evidence_refs).toEqual(["evidence-1"]);
+    expect(result.created_objects).toEqual([
+      { object_kind: "evidence_capsule", object_id: "evidence-1" },
+      { object_kind: "memory_entry", object_id: "memory-1" }
+    ]);
+  });
+
+  it("ADD verdict runs the conflict scan when flagged", async () => {
+    const deps = createDeps();
+    const { reconciliationPort } = fakeReconciliationPort({ kind: "add", runConflictScan: true });
+    const detectAndLinkConflicts = vi.fn<DetectFn>(async () => undefined);
+    const router = new MaterializationRouter({
+      ...deps,
+      reconciliationPort,
+      conflictDetectionPort: { detectAndLinkConflicts }
+    });
+
+    const result = await router.materializeSignal(factSignal());
+
+    expect(result.success).toBe(true);
+    expect(deps.memoryService.create).toHaveBeenCalledTimes(1);
+    expect(detectAndLinkConflicts).toHaveBeenCalledTimes(1);
+    expect(detectAndLinkConflicts.mock.calls[0][0].newMemoryId).toBe("memory-1");
+  });
+
+  it("ADD verdict without the conflict-scan flag does not run the scan", async () => {
+    const deps = createDeps();
+    const { reconciliationPort } = fakeReconciliationPort({ kind: "add", runConflictScan: false });
+    const detectAndLinkConflicts = vi.fn<DetectFn>(async () => undefined);
+    const router = new MaterializationRouter({
+      ...deps,
+      reconciliationPort,
+      conflictDetectionPort: { detectAndLinkConflicts }
+    });
+
+    await router.materializeSignal(factSignal());
+
+    expect(detectAndLinkConflicts).not.toHaveBeenCalled();
+  });
+
+  it("NOOP verdict creates nothing — no evidence capsule, no memory entry", async () => {
+    const deps = createDeps();
+    const { reconciliationPort } = fakeReconciliationPort({
+      kind: "noop",
+      survivingObjectId: "memory-existing",
+      reason: "near-exact lexical duplicate of memory-existing"
+    });
+    const router = new MaterializationRouter({ ...deps, reconciliationPort });
+
+    const result = await router.materializeSignal(factSignal());
+
+    expect(result.success).toBe(true);
+    expect(deps.memoryService.create).not.toHaveBeenCalled();
+    // NOOP mints no evidence capsule — a re-seed of the same fact does
+    // not accumulate evidence on the surviving row.
+    expect(deps.evidenceService.create).not.toHaveBeenCalled();
+    expect(result.created_objects).toEqual([
+      { object_kind: "memory_entry", object_id: "memory-existing" }
+    ]);
+    expect(result.routing_reason).toContain(
+      "reconciled: near-exact lexical duplicate of memory-existing"
+    );
+  });
+
+  it("UPDATE verdict creates the evidence capsule, skips the append, surfaces the surviving row", async () => {
+    const deps = createDeps();
+    const { reconciliationPort } = fakeReconciliationPort({
+      kind: "update",
+      survivingObjectId: "memory-refined",
+      reason: "refines memory-refined"
+    });
+    const router = new MaterializationRouter({ ...deps, reconciliationPort });
+
+    const result = await router.materializeSignal(factSignal());
+
+    expect(result.success).toBe(true);
+    expect(deps.memoryService.create).not.toHaveBeenCalled();
+    // The evidence capsule is created so the core service can relink it;
+    // the surviving refined row is reported for the bench sidecar.
+    expect(deps.evidenceService.create).toHaveBeenCalledTimes(1);
+    expect(result.created_objects).toEqual([
+      { object_kind: "evidence_capsule", object_id: "evidence-1" },
+      { object_kind: "memory_entry", object_id: "memory-refined" }
+    ]);
+  });
+
+  it("UPDATE that cannot be applied re-drives applyVerdict and creates the memory entry once", async () => {
+    const deps = createDeps();
+    const { reconciliationPort, appliedVerdicts } = fakeReconciliationPort(
+      { kind: "update", survivingObjectId: "memory-refined" },
+      { updateFails: true }
+    );
+    const router = new MaterializationRouter({ ...deps, reconciliationPort });
+
+    const result = await router.materializeSignal(factSignal());
+
+    expect(result.success).toBe(true);
+    expect(appliedVerdicts).toEqual(["update", "add"]);
+    // The evidence capsule is created once and reused for the degraded
+    // ADD; the memory entry is appended exactly once.
+    expect(deps.evidenceService.create).toHaveBeenCalledTimes(1);
+    expect(deps.memoryService.create).toHaveBeenCalledTimes(1);
+    expect(result.created_objects).toEqual([
+      { object_kind: "evidence_capsule", object_id: "evidence-1" },
+      { object_kind: "memory_entry", object_id: "memory-1" }
+    ]);
+  });
+
+  it("degrades to the blind-append path when the reconciliationPort throws", async () => {
+    const deps = createDeps();
+    const runWithDecision = vi.fn<RunWithDecisionFn>(async () => {
+      throw new Error("reconciliation backend unavailable");
+    });
+    const router = new MaterializationRouter({
+      ...deps,
+      reconciliationPort: { runWithDecision }
+    });
+
+    const result = await router.materializeSignal(factSignal());
+
+    expect(result.success).toBe(true);
+    expect(deps.memoryService.create).toHaveBeenCalledTimes(1);
+  });
+});
+
 function createRouter() {
   return new MaterializationRouter(createDeps());
 }
+
+// invariant: the materialization-port mocks carry an explicit one-arg
+// signature so `.mock.calls[0][0]` is a typed argument record rather
+// than an out-of-range index into an empty params tuple. The arg type
+// is the structural shape the assertions read; behavior is unchanged.
+interface MockCreatedObject {
+  readonly object_kind: string;
+  readonly object_id: string;
+}
+type MockServiceInput = Record<string, unknown>;
+type MockEdgeInput = {
+  readonly sourceMemoryId: string;
+  readonly targetMemoryId: string;
+  readonly edgeType: string;
+};
 
 function createDeps() {
   let evidenceCounter = 0;
 
   return {
     evidenceService: {
-      create: vi.fn(async () => {
+      create: vi.fn<(input: MockServiceInput) => Promise<MockCreatedObject>>(async () => {
         evidenceCounter += 1;
         return {
           object_kind: "evidence_capsule",
           object_id: `evidence-${evidenceCounter}`
-        } as any;
+        };
       })
     },
     memoryService: {
-      create: vi.fn(async () =>
-        ({
-          object_kind: "memory_entry",
-          object_id: "memory-1"
-        }) as any
-      )
+      create: vi.fn<(input: MockServiceInput) => Promise<MockCreatedObject>>(async () => ({
+        object_kind: "memory_entry",
+        object_id: "memory-1"
+      }))
     },
     synthesisService: {
-      create: vi.fn(async () =>
-        ({
-          object_kind: "synthesis_capsule",
-          object_id: "synthesis-1"
-        }) as any
-      )
+      create: vi.fn<(input: MockServiceInput) => Promise<MockCreatedObject>>(async () => ({
+        object_kind: "synthesis_capsule",
+        object_id: "synthesis-1"
+      }))
     },
     claimService: {
-      create: vi.fn(async () =>
-        ({
-          object_kind: "claim_form",
-          object_id: "claim-1"
-        }) as any
-      )
+      create: vi.fn<(input: MockServiceInput) => Promise<MockCreatedObject>>(async () => ({
+        object_kind: "claim_form",
+        object_id: "claim-1"
+      }))
     },
     graphEdgePort: {
-      createEdge: vi.fn(async () => undefined)
+      createEdge: vi.fn<(input: MockEdgeInput) => Promise<void>>(async () => undefined)
     },
     handoffGapHandler: new InMemoryHandoffGapHandler()
   };

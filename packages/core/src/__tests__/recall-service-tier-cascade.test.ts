@@ -217,13 +217,11 @@ describe("RecallService tier cascade", () => {
     const baseline = await recallWith({
       hot: [createMemoryEntry({ object_id: "candidate-0", activation_score: 0.8 })]
     });
-    // Reviewer-final F2: assert collectSupplementaryData runs exactly
-    // once on the cascade path. Pre-fix (M5 only), the HOT-only assess
-    // would have called the spy MIN_RECALL_RESULTS times, then the
-    // cascade-merged assess would have called it again — totalling
-    // 2 × MIN_RECALL_RESULTS calls. After the I2 fix, the HOT-only
-    // assess is gone and the spy is called exactly once per candidate
-    // on the final merged filter.
+    // Assert collectSupplementaryData runs exactly once on the cascade path.
+    // The obsolete HOT-only assess used to call the spy MIN_RECALL_RESULTS
+    // times, then the cascade-merged assess called it again. The HOT-only
+    // assess is gone, so the spy is called exactly once per candidate on the
+    // final merged filter.
     const cascadeGraphSpy = vi.fn(async () => 0);
     const warm = await recallWith({
       warm: Array.from({ length: 3 }, (_, index) =>
@@ -303,7 +301,7 @@ describe("RecallService tier cascade", () => {
     expect(result.candidates).toHaveLength(6);
   });
 
-  it("keeps protected WARM constraints included when HOT is empty", async () => {
+  it("includes WARM constraints through normal cascade when HOT is empty", async () => {
     const { result } = await recallWith({
       warm: [
         createMemoryEntry({

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "d6356d2dcab854b2b9dda07dad80cd629185452d2e7063aec6261118a8e6ca8d",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"movie\",\"confidence\":0.94,\"matched_text\":\"it's one of my favorite sci-fi movies from the past 3 months\",\"distilled_fact\":\"The speaker's favorite sci-fi movies include Blade Runner 2049 from the past 3 months.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"movie\",\"confidence\":0.88,\"matched_text\":\"I've already seen Blade Runner 2049\",\"distilled_fact\":\"The speaker has already seen Blade Runner 2049.\"}]}",
+  "extracted_at": "2026-05-21T07:53:13.770Z"
+}

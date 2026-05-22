@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7b5988d27680ff7d015736fcd171192acdda646b21a44e39493a9b0ae48809f9",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"recipe\",\"confidence\":0.86,\"matched_text\":\"Alex telling me that his grandfather's secret recipe involved a dry rub that he let marinate for 24 hours before grilling.\",\"distilled_fact\":\"Alex's grandfather's secret recipe involved a dry rub that marinated for 24 hours before grilling.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"restaurant\",\"confidence\":0.78,\"matched_text\":\"I've been meaning to check out Smokey's downtown.\",\"distilled_fact\":\"The speaker has been meaning to check out Smokey's downtown.\"}]}",
+  "extracted_at": "2026-05-21T07:39:36.952Z"
+}

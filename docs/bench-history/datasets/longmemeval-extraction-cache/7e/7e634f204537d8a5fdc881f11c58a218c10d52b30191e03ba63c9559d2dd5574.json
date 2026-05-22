@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7e634f204537d8a5fdc881f11c58a218c10d52b30191e03ba63c9559d2dd5574",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"communication_priority\",\"confidence\":0.89,\"matched_text\":\"I'll definitely consider these tips when communicating our diversity and inclusion goals and progress to our stakeholders.\",\"distilled_fact\":\"The speaker will definitely consider these tips when communicating the company's diversity and inclusion goals and progress to its stakeholders.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"company_statement_review_request\",\"confidence\":0.86,\"matched_text\":\"I'd like to get some feedback on our company's diversity and inclusion statement.\",\"distilled_fact\":\"The speaker would like to get feedback on the company's diversity and inclusion statement.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"company_statement_evaluation_request\",\"confidence\":0.84,\"matched_text\":\"Do you think it's effective in conveying our commitment to diversity and inclusion?\",\"distilled_fact\":\"The speaker is asking whether the company's diversity and inclusion statement is effective in conveying its commitment to diversity and inclusion.\"}]}",
+  "extracted_at": "2026-05-21T07:58:52.078Z"
+}

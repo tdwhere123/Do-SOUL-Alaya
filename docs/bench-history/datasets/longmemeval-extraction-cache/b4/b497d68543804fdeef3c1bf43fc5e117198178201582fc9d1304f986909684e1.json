@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "b497d68543804fdeef3c1bf43fc5e117198178201582fc9d1304f986909684e1",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.93,\"matched_text\":\"I'll definitely do more research and talk to my trainer before I try any supplements.\",\"distilled_fact\":\"The user will do more research and talk to the user's trainer before the user tries any supplements.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"pre-workout snack recommendation\",\"confidence\":0.91,\"matched_text\":\"Do you have any recommendations for healthy snacks to eat before a workout?\",\"distilled_fact\":\"The user is asking for recommendations for healthy snacks to eat before a workout.\"}]}",
+  "extracted_at": "2026-05-21T09:06:58.852Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "e0a139b5f5017fe6e1ee727c87dda01254f07aa2e3fcaeb14730e9d80bfbdd80",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.86,\"matched_text\":\"I've been meaning to attend more concerts and music festivals\",\"distilled_fact\":\"The user has been meaning to attend more concerts and music festivals.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"interest\",\"confidence\":0.84,\"matched_text\":\"I've also been thinking about exploring more of the music scene in my local community\",\"distilled_fact\":\"The user has been thinking about exploring more of the music scene in the user's local community.\"}]}",
+  "extracted_at": "2026-05-21T09:12:22.207Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "e08d1bee47993eea10fb056d87363b917be05f20aa50d88d7c18464a48c971ab",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"travel_destination\",\"confidence\":0.96,\"matched_text\":\"I'd like to visit Fattoria La Vialla and Frantoio di Siena in Tuscany, and Frantoio Oleificio dell'Umbria in Umbria.\",\"distilled_fact\":\"The user would like to visit Fattoria La Vialla and Frantoio di Siena in Tuscany, and Frantoio Oleificio dell'Umbria in Umbria.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"travel_interests\",\"confidence\":0.82,\"matched_text\":\"They all seem like great options for learning about the production process and tasting some of the region's best olive oils.\",\"distilled_fact\":\"Fattoria La Vialla, Frantoio di Siena, and Frantoio Oleificio dell'Umbria are considered great options for learning about the production process and tasting some of the region's best olive oils.\"}]}",
+  "extracted_at": "2026-05-21T08:58:45.778Z"
+}

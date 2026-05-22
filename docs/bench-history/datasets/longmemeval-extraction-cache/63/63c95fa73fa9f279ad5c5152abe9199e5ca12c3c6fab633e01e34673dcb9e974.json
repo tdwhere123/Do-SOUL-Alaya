@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "63c95fa73fa9f279ad5c5152abe9199e5ca12c3c6fab633e01e34673dcb9e974",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"preference\",\"confidence\":0.86,\"matched_text\":\"I'm thinking of getting some new throw pillows to add a pop of color to my bedroom.\",\"distilled_fact\":\"The user is thinking of getting some new throw pillows to add a pop of color to the user's bedroom.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"object\",\"confidence\":0.92,\"matched_text\":\"my bedroom\",\"distilled_fact\":\"The user has a bedroom.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"object\",\"confidence\":0.95,\"matched_text\":\"the Moroccan-inspired design of my area rug\",\"distilled_fact\":\"The user's area rug has a Moroccan-inspired design.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"object\",\"confidence\":0.91,\"matched_text\":\"the gray paint color I'm considering\",\"distilled_fact\":\"The user is considering a gray paint color.\"}]}",
+  "extracted_at": "2026-05-21T09:22:44.608Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "658cd7707b165bce11e4f31f13ab8373fb44f54173f9bd298c66069588765c65",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"style preference\",\"confidence\":0.98,\"matched_text\":\"I'm interested in a mid-century modern style\",\"distilled_fact\":\"The user is interested in a mid-century modern style for coffee tables.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"purchase consideration\",\"confidence\":0.93,\"matched_text\":\"I found a great deal on Craigslist, but I'm not sure if I should go for it.\",\"distilled_fact\":\"The user found a great deal on Craigslist for a coffee table and is unsure whether to buy it.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"furniture repair\",\"confidence\":0.95,\"matched_text\":\"I recently had my office chair repaired for $50\",\"distilled_fact\":\"The user had an office chair repaired for $50.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"work-from-home comfort\",\"confidence\":0.9,\"matched_text\":\"it's made a huge difference in my work-from-home comfort\",\"distilled_fact\":\"The repaired office chair has made a huge difference in the user's work-from-home comfort.\"}]}",
+  "extracted_at": "2026-05-21T09:20:23.501Z"
+}

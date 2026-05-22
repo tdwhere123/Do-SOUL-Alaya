@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "6b26679049d375a0558d8c75eef3ad2487df3bbfbc13e0b84cdaa7db93a66e3a",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"instruction\",\"confidence\":0.88,\"matched_text\":\"Explain bitcoin like I'm 10\",\"distilled_fact\":\"The user wants bitcoin explained at a level appropriate for a 10-year-old.\"}]}",
+  "extracted_at": "2026-05-21T07:15:18.060Z"
+}

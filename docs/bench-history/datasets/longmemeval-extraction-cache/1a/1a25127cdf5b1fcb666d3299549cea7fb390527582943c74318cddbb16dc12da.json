@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "1a25127cdf5b1fcb666d3299549cea7fb390527582943c74318cddbb16dc12da",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"food_ingredient_combination\",\"confidence\":0.94,\"matched_text\":\"I think I'll try the classic combination with broccoli, bell peppers, carrots, onions, and mushrooms.\",\"distilled_fact\":\"The user intends to try the classic combination with broccoli, bell peppers, carrots, onions, and mushrooms.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"inventory_state\",\"confidence\":0.87,\"matched_text\":\"I have most of those in my fridge already.\",\"distilled_fact\":\"The user has most of broccoli, bell peppers, carrots, onions, and mushrooms in their fridge already.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"cooking_texture_preference\",\"confidence\":0.96,\"matched_text\":\"Can you give me some tips on how to cook the veggies so they're all perfectly tender but still crisp?\",\"distilled_fact\":\"The user wants the veggies to be perfectly tender but still crisp.\"}]}",
+  "extracted_at": "2026-05-21T09:22:29.994Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "ba3a7b7b03152a89bdcea684375eb280d68caaf03003a8b3e38871b895ca7e93",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"cooking_advice\",\"confidence\":0.76,\"matched_text\":\"Roasting vegetables is a great way to add some extra flavor and nutrition to any meal.\",\"distilled_fact\":\"Roasting vegetables is a great way to add extra flavor and nutrition to any meal.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"cooking_advice\",\"confidence\":0.7,\"matched_text\":\"Enjoy pairing your tender and flavorful chicken with some tasty roasted vegetables!\",\"distilled_fact\":\"Tender and flavorful chicken can be paired with tasty roasted vegetables.\"}]}",
+  "extracted_at": "2026-05-21T07:52:18.086Z"
+}

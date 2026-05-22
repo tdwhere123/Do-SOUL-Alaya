@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "e819304ae977d91b0de6d501c9beeb660c7b95d371d6cc5dc5cb1d0da177dcfa",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"travel_destination\",\"confidence\":0.96,\"matched_text\":\"I'm leaning towards the Italy option, probably the Tuscany and Umbria food and wine adventure.\",\"distilled_fact\":\"The user is leaning towards the Italy option, probably the Tuscany and Umbria food and wine adventure.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"interest\",\"confidence\":0.91,\"matched_text\":\"I've always been fascinated by the rolling hills and medieval towns of Tuscany\",\"distilled_fact\":\"The user has always been fascinated by the rolling hills and medieval towns of Tuscany.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"preference\",\"confidence\":0.89,\"matched_text\":\"I'd love to try some of the local wines and dishes.\",\"distilled_fact\":\"The user would love to try some of the local wines and dishes in Tuscany and Umbria.\"}]}",
+  "extracted_at": "2026-05-21T08:58:30.183Z"
+}

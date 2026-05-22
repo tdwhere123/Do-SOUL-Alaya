@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c6d6221fd49b56eae4f4b0d65227cb625777172668936957107f3b26548a952e",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"issue_opinion\",\"confidence\":0.86,\"matched_text\":\"It's frustrating to see that gender-based violence is still such a big issue.\",\"distilled_fact\":\"The speaker finds that gender-based violence is still such a big issue frustrating.\"}]}",
+  "extracted_at": "2026-05-21T07:52:46.718Z"
+}

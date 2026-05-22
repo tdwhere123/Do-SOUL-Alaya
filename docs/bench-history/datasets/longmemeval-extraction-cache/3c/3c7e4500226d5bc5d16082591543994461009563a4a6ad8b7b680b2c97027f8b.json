@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "3c7e4500226d5bc5d16082591543994461009563a4a6ad8b7b680b2c97027f8b",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"tool\",\"confidence\":0.84,\"matched_text\":\"I think I'll try out Todoist and Trello.\",\"distilled_fact\":\"The speaker plans to try out Todoist and Trello.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"schedule\",\"confidence\":0.89,\"matched_text\":\"I'm still getting used to the 9-to-5 schedule\",\"distilled_fact\":\"The speaker is still getting used to a 9-to-5 schedule.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"job\",\"confidence\":0.81,\"matched_text\":\"my new job\",\"distilled_fact\":\"The speaker has a new job.\"}]}",
+  "extracted_at": "2026-05-21T08:09:47.604Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7f3fb783cec8b032e73e61b34250166162db1363e99e5aa6dbcc1d882557419e",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"animal_biology_question\",\"confidence\":0.95,\"matched_text\":\"How does the physical anatomy of a sea turtle enable it to swim and dive for hours without needing to resurface for air?\",\"distilled_fact\":\"The user asked how the physical anatomy of a sea turtle enables it to swim and dive for hours without needing to resurface for air.\"}]}",
+  "extracted_at": "2026-05-21T07:54:34.496Z"
+}

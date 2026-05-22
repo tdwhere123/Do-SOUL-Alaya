@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "861623f713a0e23d520affc43823467fcb8b846c811c8b42bdbc4f29b0b86888",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"place\",\"confidence\":0.92,\"matched_text\":\"the flooding on Venice's cultural and historical landmarks\",\"distilled_fact\":\"Flooding affects Venice's cultural and historical landmarks.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"information_need\",\"confidence\":0.88,\"matched_text\":\"Is there any data available on the rate of deterioration of these assets as a result of the floods?\",\"distilled_fact\":\"There is a request for data on the rate of deterioration of Venice's cultural and historical landmarks as a result of the floods.\"}]}",
+  "extracted_at": "2026-05-21T08:00:20.799Z"
+}

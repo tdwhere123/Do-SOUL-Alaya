@@ -16,6 +16,12 @@ interface PatternDefinition {
   readonly confidence: number;
 }
 
+interface TimeConcernMatch {
+  readonly matched_text: string;
+  readonly window_digest: string;
+  readonly excerpt: string;
+}
+
 const PATTERNS: readonly PatternDefinition[] = [
   {
     pattern: /\bI always use\b[^.!?\n]*[.!?]?/gi,
@@ -134,6 +140,9 @@ const PATTERNS: readonly PatternDefinition[] = [
   }
 ] as const;
 
+const TIME_CONCERN_PATTERN =
+  /\b(?:today|yesterday|tomorrow|tonight|last\s+(?:week|month|year)|next\s+(?:week|month|year)|this\s+(?:week|month|year)|\d{4}-\d{2}(?:-\d{2})?)\b|(?:今天|昨天|明天|今晚|上周|上个月|去年|下周|下个月|明年|今年|\d{4}年\d{1,2}月(?:\d{1,2}日)?|\d{4}-\d{2}(?:-\d{2})?)/giu;
+
 export class LocalHeuristics implements GardenComputeProvider {
   public readonly provider_kind = GardenProviderKind.LOCAL_HEURISTICS;
 
@@ -192,6 +201,58 @@ export class LocalHeuristics implements GardenComputeProvider {
       }
     }
 
+    for (const timeConcern of extractTimeConcerns(normalizedTurnContent)) {
+      const dedupeKey = `potential_claim:time_concern:${timeConcern.window_digest}:${timeConcern.excerpt.toLowerCase()}`;
+      if (seenMatches.has(dedupeKey)) {
+        continue;
+      }
+
+      seenMatches.add(dedupeKey);
+      signals.push(
+        CandidateMemorySignalSchema.parse({
+          signal_id: randomUUID(),
+          workspace_id: context.workspace_id,
+          run_id: context.run_id,
+          surface_id: context.surface_id,
+          source: SignalSource.GARDEN_COMPILE,
+          signal_kind: "potential_claim",
+          object_kind: "fact",
+          scope_hint: null,
+          domain_tags: ["time_concern"],
+          confidence: 0.52,
+          evidence_refs: [],
+          raw_payload: buildSchemaGroundedRawPayload({
+            signalKind: "potential_claim",
+            objectKind: "fact",
+            confidence: 0.52,
+              rawPayload: {
+                matched_text: timeConcern.matched_text,
+                pattern_category: "time_concern",
+                detected_object: {
+                  object_kind: "fact",
+                  confidence: 0.52
+                },
+                time_concern: {
+                  window_digest: timeConcern.window_digest,
+                  matched_text: timeConcern.matched_text
+                },
+                distilled_fact: timeConcern.excerpt,
+                field_candidates: [
+                  {
+                    field_name: "fact",
+                    value: timeConcern.excerpt,
+                    evidence: timeConcern.excerpt,
+                    confidence: 0.52
+                  }
+                ],
+                turn_content_excerpt: buildTurnExcerpt(normalizedTurnContent, timeConcern.excerpt)
+              }
+            }),
+          created_at: createdAt
+        })
+      );
+    }
+
     return signals;
   }
 }
@@ -209,4 +270,42 @@ function buildTurnExcerpt(turnContent: string, matchedText: string): string {
   const start = Math.max(0, index - 40);
   const end = Math.min(turnContent.length, index + matchedText.length + 40);
   return turnContent.slice(start, end).trim();
+}
+
+function extractTimeConcerns(turnContent: string): readonly TimeConcernMatch[] {
+  const matches: TimeConcernMatch[] = [];
+  for (const sentence of splitSentences(turnContent)) {
+    if (isQuestion(sentence)) {
+      continue;
+    }
+
+    TIME_CONCERN_PATTERN.lastIndex = 0;
+    for (const match of sentence.matchAll(TIME_CONCERN_PATTERN)) {
+      const matchedText = normalizeMatchedText(match[0]);
+      if (matchedText.length === 0) {
+        continue;
+      }
+      matches.push({
+        matched_text: matchedText,
+        window_digest: normalizeWindowDigest(matchedText),
+        excerpt: sentence
+      });
+    }
+  }
+  return matches;
+}
+
+function splitSentences(turnContent: string): readonly string[] {
+  return turnContent
+    .split(/(?<=[.!?。！？])\s+|\n+/u)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 0);
+}
+
+function isQuestion(sentence: string): boolean {
+  return /[?？]\s*$/u.test(sentence);
+}
+
+function normalizeWindowDigest(matchedText: string): string {
+  return matchedText.trim().toLowerCase().replace(/\s+/gu, "_");
 }

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "d546708525edfbdc0f7fd4edb2a3ddfee5688c6c9fb203b2fc1e30d7396bb507",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"product_configuration\",\"confidence\":0.93,\"matched_text\":\"I think I'll go with the 2TB model.\",\"distilled_fact\":\"The user prefers the 2TB model.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"personal_context\",\"confidence\":0.85,\"matched_text\":\"I've got a pretty big game library\",\"distilled_fact\":\"The user has a pretty big game library.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"usage_preference\",\"confidence\":0.9,\"matched_text\":\"I don't want to have to constantly delete games to make room for new ones.\",\"distilled_fact\":\"The user does not want to constantly delete games to make room for new ones.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"storage_intent\",\"confidence\":0.82,\"matched_text\":\"I've been thinking about storing some of my other files like music and videos on the drive as well.\",\"distilled_fact\":\"The user has been thinking about storing some of the user's other files like music and videos on the drive on the drive as well.\"}]}",
+  "extracted_at": "2026-05-21T08:13:48.501Z"
+}

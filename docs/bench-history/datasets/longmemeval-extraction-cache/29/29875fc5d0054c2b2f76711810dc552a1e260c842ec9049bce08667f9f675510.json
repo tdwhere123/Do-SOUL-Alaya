@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "29875fc5d0054c2b2f76711810dc552a1e260c842ec9049bce08667f9f675510",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"home_decor_preference\",\"confidence\":0.95,\"matched_text\":\"I'm thinking of getting a few throw pillows with a geometric pattern, maybe something with a mix of blue, yellow, and coral.\",\"distilled_fact\":\"The user is thinking of getting a few throw pillows with a geometric pattern and a mix of blue, yellow, and coral.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"home_decor_context\",\"confidence\":0.91,\"matched_text\":\"my rug and gray paint\",\"distilled_fact\":\"The user has a rug and gray paint.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"home_decor_style\",\"confidence\":0.89,\"matched_text\":\"your Moroccan-inspired rug\",\"distilled_fact\":\"The user's rug is Moroccan-inspired.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"home_decor_context\",\"confidence\":0.84,\"matched_text\":\"your bedroom\",\"distilled_fact\":\"The user's bedroom is the room being discussed.\"}]}",
+  "extracted_at": "2026-05-21T09:22:47.353Z"
+}

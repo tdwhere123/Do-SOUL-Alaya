@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c105aac50ea498c2c1648c5906e9f5b9cf020c2fe80bbf65a76f5859c13cc925",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"preference\",\"confidence\":0.43,\"matched_text\":\"Congratulations on your new vacuum cleaner and the 15% off coupon code score!\",\"distilled_fact\":\"The user has a new vacuum cleaner.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"preference\",\"confidence\":0.42,\"matched_text\":\"Congratulations on your new vacuum cleaner and the 15% off coupon code score!\",\"distilled_fact\":\"The user has a 15% off coupon code score.\"}]}",
+  "extracted_at": "2026-05-21T07:50:25.299Z"
+}

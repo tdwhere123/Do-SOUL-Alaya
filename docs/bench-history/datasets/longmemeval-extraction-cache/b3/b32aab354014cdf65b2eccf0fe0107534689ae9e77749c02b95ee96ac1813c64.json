@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "b32aab354014cdf65b2eccf0fe0107534689ae9e77749c02b95ee96ac1813c64",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"assistant\",\"confidence\":0.94,\"matched_text\":\"I'm a hypothetical AI, I don't have personal needs or goals\",\"distilled_fact\":\"The assistant is a hypothetical AI and does not have personal needs or goals.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"assistant\",\"confidence\":0.84,\"matched_text\":\"I think we've covered a lot of ground already, and I'm grateful for the detailed strength training plan you've provided.\",\"distilled_fact\":\"The assistant is grateful for the detailed strength training plan provided by the user.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"assistant\",\"confidence\":0.78,\"matched_text\":\"It's always better to have a comprehensive plan and adjust it as needed rather than starting from scratch.\",\"distilled_fact\":\"The assistant prefers having a comprehensive plan and adjusting it as needed rather than starting from scratch.\"}]}",
+  "extracted_at": "2026-05-21T09:15:31.663Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "43029116d59489c0fb4ac3e6ca087dfb0b3d98ab0769d19ee0f9c4c314149557",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"personal_experience\",\"confidence\":0.95,\"matched_text\":\"I actually participated in a 5K run for cancer research last month.\",\"distilled_fact\":\"The user participated in a 5K run for cancer research in April 2026.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"event_preference\",\"confidence\":0.9,\"matched_text\":\"I'm looking forward to doing more charity events like that.\",\"distilled_fact\":\"The user wants to do more charity events like a 5K run for cancer research.\"},{\"signal_kind\":\"potential_request\",\"object_kind\":\"assistance_request\",\"confidence\":0.87,\"matched_text\":\"Do you think you could help me find some charity runs or cycling events in my area?\",\"distilled_fact\":\"The user wants help finding charity runs or cycling events in the user's area.\"}]}",
+  "extracted_at": "2026-05-21T09:15:41.398Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "9fa3d482cdc0aeb6ca58eeb98eff050d37adfc34a5f3dd9b9e7a04dd9da373b7",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"snack_preference\",\"confidence\":0.89,\"matched_text\":\"I'm looking for some new healthy snack ideas, something easy to grab and go.\",\"distilled_fact\":\"The user is looking for new healthy snack ideas that are easy to grab and go.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"snack_guidance\",\"confidence\":0.74,\"matched_text\":\"Remember, portion control is key when it comes to snacking. Aim for 100-200 calorie snacks to keep you satisfied between meals.\",\"distilled_fact\":\"The user should aim for 100-200 calorie snacks to stay satisfied between meals.\"}]}",
+  "extracted_at": "2026-05-21T09:03:18.743Z"
+}

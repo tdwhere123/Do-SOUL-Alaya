@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "0bad0096e88713ce73020290e77333843fafdc736710f840576f1aae39a660a8",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"meditation_tip\",\"confidence\":0.82,\"matched_text\":\"Do you have any tips for dealing with distracting thoughts during meditation?\",\"distilled_fact\":\"The user wants tips for dealing with distracting thoughts during meditation.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"experience\",\"confidence\":0.76,\"matched_text\":\"I find it hard to stay focused sometimes.\",\"distilled_fact\":\"The user finds it hard to stay focused sometimes during meditation.\"}]}",
+  "extracted_at": "2026-05-21T09:05:28.529Z"
+}

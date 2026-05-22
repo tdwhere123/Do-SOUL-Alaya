@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c9f56006497d9d484940f626d8e58dcf0ffcacb4b624d671d20be056dce77b08",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"user\",\"confidence\":0.86,\"matched_text\":\"It's great that you're making time for movies on the weekends!\",\"distilled_fact\":\"The user makes time for movies on the weekends.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"user\",\"confidence\":0.95,\"matched_text\":\"I'd be happy to recommend some sci-fi and action movies that are under 2 hours long, perfect for fitting into your busy weekend schedule.\",\"distilled_fact\":\"The user has a busy weekend schedule.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"user\",\"confidence\":0.93,\"matched_text\":\"sci-fi and action movies that are under 2 hours long\",\"distilled_fact\":\"The user wants sci-fi movies under 2 hours long.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"user\",\"confidence\":0.93,\"matched_text\":\"sci-fi and action movies that are under 2 hours long\",\"distilled_fact\":\"The user wants action movies under 2 hours long.\"}]}",
+  "extracted_at": "2026-05-21T07:53:25.546Z"
+}

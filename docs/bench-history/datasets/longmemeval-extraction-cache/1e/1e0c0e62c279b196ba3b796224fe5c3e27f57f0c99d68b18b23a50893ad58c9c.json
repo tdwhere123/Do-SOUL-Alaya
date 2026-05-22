@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "1e0c0e62c279b196ba3b796224fe5c3e27f57f0c99d68b18b23a50893ad58c9c",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"workspace_preference\",\"confidence\":0.93,\"matched_text\":\"I'm thinking of having a dedicated area for working from home\",\"distilled_fact\":\"The user is thinking of having a dedicated area for working from home.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"home_furnishing_preference\",\"confidence\":0.92,\"matched_text\":\"a comfortable reading nook with a floor lamp and a plush armchair\",\"distilled_fact\":\"The user is thinking of having a comfortable reading nook with a floor lamp and a plush armchair.\"}]}",
+  "extracted_at": "2026-05-21T08:08:16.850Z"
+}

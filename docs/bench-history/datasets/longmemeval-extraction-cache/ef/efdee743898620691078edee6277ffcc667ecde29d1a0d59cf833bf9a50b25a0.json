@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "efdee743898620691078edee6277ffcc667ecde29d1a0d59cf833bf9a50b25a0",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"preference_or_goal\",\"confidence\":0.86,\"matched_text\":\"Since you're aiming to wake up at 7:45 AM on your non-yoga days\",\"distilled_fact\":\"The user is aiming to wake up at 7:45 AM on their non-yoga days.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"schedule_habit\",\"confidence\":0.8,\"matched_text\":\"You're already mirroring your yoga days by trying to wake up at a similar time on your non-yoga days.\",\"distilled_fact\":\"The user is trying to wake up at a similar time on their non-yoga days as on their yoga days.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"approach_preference\",\"confidence\":0.74,\"matched_text\":\"I'd like to suggest a slight adjustment to your approach. Instead of trying to wake up at 6:45 AM on your non-yoga days, why not try to wake up 15-30 minutes earlier each day and gradually work your way up to your desired wake-up time?\",\"distilled_fact\":\"The suggested adjustment is to wake up 15-30 minutes earlier each day on non-yoga days and gradually work up to the desired wake-up time.\"}]}",
+  "extracted_at": "2026-05-21T07:49:23.881Z"
+}

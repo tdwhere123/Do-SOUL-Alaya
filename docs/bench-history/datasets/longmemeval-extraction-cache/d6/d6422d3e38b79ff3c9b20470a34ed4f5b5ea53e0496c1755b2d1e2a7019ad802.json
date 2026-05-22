@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "d6422d3e38b79ff3c9b20470a34ed4f5b5ea53e0496c1755b2d1e2a7019ad802",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"personal_project\",\"confidence\":0.91,\"matched_text\":\"I'm excited to get started on the prep work and make this dinner party a success.\",\"distilled_fact\":\"The user is planning to start prep work for a dinner party and wants the dinner party to be a success.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"home_improvement\",\"confidence\":0.95,\"matched_text\":\"I replaced that kitchen faucet - it was leaking for months, and it's amazing how much of a difference it's made in the kitchen.\",\"distilled_fact\":\"The user replaced a kitchen faucet that had been leaking for months.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"home_improvement\",\"confidence\":0.9,\"matched_text\":\"I replaced that kitchen faucet - it was leaking for months, and it's amazing how much of a difference it's made in the kitchen.\",\"distilled_fact\":\"Replacing the kitchen faucet made a big difference in the user's kitchen.\"}]}",
+  "extracted_at": "2026-05-21T09:08:20.498Z"
+}

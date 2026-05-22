@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "e7a638f0221a5ea0d5f2e32ab47c24212d18a56746fe4fc69bb71082daae4de6",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"behavioral_preference\",\"confidence\":0.81,\"matched_text\":\"I'm definitely going to try to communicate more openly with my roommates and set boundaries.\",\"distilled_fact\":\"The speaker intends to communicate more openly with the speaker's roommates.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"behavioral_preference\",\"confidence\":0.8,\"matched_text\":\"I'm definitely going to try to communicate more openly with my roommates and set boundaries.\",\"distilled_fact\":\"The speaker intends to set boundaries with the speaker's roommates.\"}]}",
+  "extracted_at": "2026-05-21T08:05:49.879Z"
+}

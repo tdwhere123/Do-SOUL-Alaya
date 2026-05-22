@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "8f51ac3cb91fc945a71d4a62bb6e798fe19a765941ee9724c766c096794ebdd4",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"resource_usage\",\"confidence\":0.78,\"matched_text\":\"I'll definitely look into those resources if I need a mediator.\",\"distilled_fact\":\"The speaker would look into those resources if the speaker needs a mediator.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"future_expectation\",\"confidence\":0.69,\"matched_text\":\"Hopefully it won't come to that, but it's good to have options.\",\"distilled_fact\":\"The speaker hopes that the situation will not require a mediator.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"future_expectation\",\"confidence\":0.74,\"matched_text\":\"Hopefully it won't come to that, but it's good to have options.\",\"distilled_fact\":\"The speaker considers having options to be good.\"}]}",
+  "extracted_at": "2026-05-21T08:07:52.744Z"
+}

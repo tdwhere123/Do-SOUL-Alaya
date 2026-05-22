@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "9db032b31d3aa3194fe801e0075443e8509daf9c15261fd7e1f3474cf322dbaa",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"movie\",\"confidence\":0.87,\"matched_text\":\"I've already seen Blade Runner 2049, it's one of my favorite sci-fi movies from the past 3 months.\",\"distilled_fact\":\"The user has seen Blade Runner 2049 and considers Blade Runner 2049 one of the user's favorite sci-fi movies from the past 3 months.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"movie\",\"confidence\":0.93,\"matched_text\":\"I've already seen Blade Runner 2049\",\"distilled_fact\":\"The user has already seen Blade Runner 2049.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"movie genre\",\"confidence\":0.82,\"matched_text\":\"Can you recommend some action movies on Netflix as well?\",\"distilled_fact\":\"The user wants recommendations for action movies on Netflix.\"}]}",
+  "extracted_at": "2026-05-21T09:03:06.779Z"
+}

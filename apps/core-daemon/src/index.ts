@@ -1,9 +1,18 @@
+import { randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ComputeProviderPriority,
+  ControlPlaneObjectKind,
   HealthEventKind,
+  MemoryGovernanceEventType,
+  ProposalOptionKind,
+  ProposalResolutionState,
+  ProposalSchema,
   RecallContextEventType,
+  RetentionPolicy,
+  SoulActiveConstraintSchema,
+  SoulProposalCreatedPayloadSchema,
   type RuntimeGardenComputeConfig
 } from "@do-soul/alaya-protocol";
 import {
@@ -13,7 +22,6 @@ import {
   ClaimService,
   ConversationService,
   ContextLensAssembler,
-  CrossCuttingPermissionService,
   DynamicsService,
   EngineBindingService,
   EvidenceService,
@@ -28,11 +36,11 @@ import {
   MemoryService,
   ConflictDetectionService,
   DeferredObligationService,
-  NarrativeBudgetService,
   PathRelationProposalService,
   PATH_RELATION_COUNTER_DEFAULT_TTL_MS,
   ProjectMappingService,
   ProposalService,
+  ReconciliationService,
   ResolutionService,
   type ConflictDetectionLlmPort,
   RecallService,
@@ -46,9 +54,7 @@ import {
   SurfaceService,
   SynthesisService,
   TaskSurfaceBuilder,
-  ToolGovernanceClient,
   ToolSpecService,
-  WorkspaceService,
   ZeroDaySecurityLayer,
   rebuildCountersFromEventLog,
   type ConversationServiceDependencies,
@@ -61,7 +67,6 @@ import {
   SqliteConflictMatrixRepo,
   SqliteCrossCuttingPermissionRepo,
   SqliteDeferredObligationRepo,
-  SqliteDirtyStateDossierRepo,
   SqliteDriftLeaseRepo,
   SqliteEngineBindingRepo,
   SqliteEventLogRepo,
@@ -82,6 +87,7 @@ import {
   SqlitePathRelationRepo,
   SqliteProjectMappingAnchorRepo,
   SqliteProposalRepo,
+  SqliteReconciliationLeaseRepo,
   SqliteRunRepo,
   SqliteSignalRepo,
   SqliteSlotRepo,
@@ -96,6 +102,7 @@ import {
   SqliteWorkerRunRepo,
   SqliteWorkspaceRepo,
   createGardenBackgroundDataPorts,
+  findActiveConstraints,
   initDatabase
 } from "@do-soul/alaya-storage";
 import {
@@ -106,12 +113,9 @@ import {
   MaterializationRouter,
   OFFICIAL_API_GARDEN_MODEL,
   OfficialApiGardenProvider,
-  SoulSignalHandler,
-  SoulToolGovernanceAdapter,
-  SoulWorkerSafetyAdapter,
-  SoulWorkerSafetyReader,
   TopologyService,
-  type ComputeRoutingCandidate
+  type ComputeRoutingCandidate,
+  type PathRelationProposalPort
 } from "@do-soul/alaya-soul";
 import { createCoreDaemonApp } from "./daemon-app-composition.js";
 import { createDaemonEmbeddingRuntime } from "./daemon-embedding-runtime.js";
@@ -121,31 +125,31 @@ import { createBudgetProposalPort } from "./budget-wiring.js";
 import { defaultBootstrappingTemplates, defaultCanonicalAliasMap } from "./daemon-defaults.js";
 import { bootstrapDaemonMcpTooling } from "./daemon-mcp-tooling.js";
 import {
-  createTargetCurrencyCheckPort,
+  createManifestationBudgetConfigProvider,
   createWarnLogger,
   reconcileBootstrapPathsForAllWorkspaces
 } from "./daemon-runtime-helpers.js";
 import { createCoreDaemonLifecycleState, createDaemonLifecycleControls } from "./daemon-runtime-lifecycle.js";
 import {
-  createConversationToolExecutor,
   createEngineBindingTester,
   createGardenBacklogThresholds,
   createGlobalMemoryRecallCachePort,
   createGlobalMemoryRecallPort,
   createGlobalMemoryRouteService,
-  createKarmaEventStore,
   createOptionalGlobalMemoryRecallCacheRepo,
   createOptionalGlobalMemoryRepo,
   createRequestProtection,
   createSoulGraphService,
-  createUnavailableRuntimeAdapter,
   listServerHardConstraints,
   loadConfigEnv,
   patchArbitrationClaimService,
+  readOfficialGardenModelId,
+  readOfficialGardenProviderUrl,
   recordStartupStep,
   resolveDatabasePath
 } from "./daemon-runtime-support.js";
-import { resolveAlayaConfigDir, resolveAlayaConfigPaths, type AlayaConfigPaths } from "./cli/config-files.js";
+import { createReconciliationLlmDecisionPort } from "./reconciliation-llm-decision.js";
+import { resolveAlayaConfigDir, resolveAlayaConfigPaths } from "./cli/config-files.js";
 import { resolveCoreDaemonFilesDirectory } from "./files-data-dir.js";
 import { createGardenRuntime } from "./garden-runtime.js";
 import { resolveSecretRef, type ResolveSecretError } from "./secrets.js";
@@ -155,7 +159,6 @@ import {
 } from "./path-plasticity-runtime.js";
 import { SqliteHandoffGapAdapter } from "./handoff-gap-adapter.js";
 import { createManifestationContextLensAssembler } from "./manifestation-context-lens-assembler.js";
-import { createNarrativeBudgetRepo } from "./narrative-budget-repo.js";
 import { parseZeroDayPoliciesJson } from "./zero-day-policies.js";
 import { createRuntimeNotifier } from "./runtime-notifier.js";
 import { createSecurityStatusBootstrapServices } from "./security-status-bootstrap.js";
@@ -177,7 +180,6 @@ import { createSoulApprovalService } from "./services/soul-approval-service.js";
 import { SoulTopologyAuditService } from "./services/soul-topology-audit-service.js";
 import { SqliteWorkspaceEngineConfigRepo } from "./services/workspace-engine-config-repo.js";
 import { createTrustStateRecorder } from "./trust-state.js";
-import { createWorkerRuntimeWiring } from "./worker-runtime-wiring.js";
 import { getBuiltinConversationToolSpecs } from "./builtin-conversation-tool-specs.js";
 import type {
   AlayaDaemonListenOptions,
@@ -217,6 +219,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const bootstrappingRecordRepo = new SqliteBootstrappingRecordRepo(database);
   const configRepo = new SqliteConfigRepo(database);
   const eventLogRepo = new SqliteEventLogRepo(database);
+  const reconciliationLeaseRepo = new SqliteReconciliationLeaseRepo(database);
   const signalRepo = new SqliteSignalRepo(database);
   const evidenceCapsuleRepo = new SqliteEvidenceCapsuleRepo(database);
   const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
@@ -248,7 +251,6 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const pathPlasticityWatermarkRepo = new SqlitePathPlasticityWatermarkRepo(database);
   const pathGraphSnapshotRepo = new SqlitePathGraphSnapshotRepo(database);
   const deferredObligationRepo = new SqliteDeferredObligationRepo(database);
-  const dirtyStateDossierRepo = new SqliteDirtyStateDossierRepo(database);
   const workerRunRepo = new SqliteWorkerRunRepo(database);
   const workspaceEngineConfigRepo = new SqliteWorkspaceEngineConfigRepo(database);
   const sqliteHandoffGapRepo = new SqliteHandoffGapRepo(database);
@@ -291,37 +293,17 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     eventPublisher,
     configPathsProvider: () => configPaths
   });
+  const manifestationBudgetConfigProvider = createManifestationBudgetConfigProvider(configRepo);
   const trustStateRecorder = createTrustStateRecorder({
     eventPublisher,
     repo: trustStateRepo,
     clock: () => new Date().toISOString()
   });
   const toolSpecService = new ToolSpecService({ toolSpecRepo });
-  const toolGovernanceClient = new ToolGovernanceClient({
-    port: new SoulToolGovernanceAdapter({
-      listClaimsForProject: async (projectRef) => await claimFormRepo.findByWorkspaceId(projectRef),
-      listSlotsForProject: async (projectRef) => await slotRepo.findByWorkspace(projectRef)
-    })
-  });
   const strongRefService = new StrongRefService({ repo: strongRefRepo });
-  const targetRevalidateService = {
-    checkCurrency: createTargetCurrencyCheckPort({
-      claimFormRepo,
-      slotRepo
-    }).checkCurrency
-  };
   const canonicalAliasService = new CanonicalAliasService({
     aliasMap: defaultCanonicalAliasMap,
     eventPublisher
-  });
-  const conversationToolExecutor = createConversationToolExecutor({
-    eventLogRepo,
-    runtimeNotifier,
-    toolExecutionRecordRepo,
-    toolGovernanceClient,
-    targetRevalidateService,
-    strongRefService,
-    canonicalAliasService
   });
   // invariant: dynamicsService is constructed below; EvidenceService
   // calls into it via this ref so the evidence_gain karma emit on
@@ -445,10 +427,6 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     eventLogRepo,
     runtimeNotifier
   });
-  const crossCuttingPermissionService = new CrossCuttingPermissionService({
-    crossCuttingRepo: crossCuttingPermissionRepo,
-    runtimeNotifier
-  });
   const surfaceDriftService = new SurfaceDriftService({
     leaseRepo: new SqliteDriftLeaseRepo(database),
     eventPublisher,
@@ -549,9 +527,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const getManifestationResolver = (): ManifestationResolver => {
     if (manifestationResolverInstance === null) {
       manifestationResolverInstance = new ManifestationResolver({
-        budgetConfigProvider: {
-          getConfig: async () => null
-        },
+        budgetConfigProvider: manifestationBudgetConfigProvider,
         eventLogWriter: {
           append: async (entry) => eventLogRepo.append(entry)
         }
@@ -619,6 +595,53 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       return delivery === null ? null : delivery.delivered_object_ids;
     }
   };
+  const recallPathExpansionPort = {
+    findByAnchors: pathRelationRepo.findByAnchors.bind(pathRelationRepo),
+    findByTimeConcernWindowDigests: async (
+      workspaceId: string,
+      windowDigests: readonly string[]
+    ) => {
+      const normalized = new Set(windowDigests.map(normalizeRecallTimeConcernWindowDigest));
+      const paths = await pathRelationRepo.findByWorkspace(workspaceId);
+      return paths.filter((path) =>
+        path.lifecycle.status !== "retired" &&
+        [path.anchors.source_anchor, path.anchors.target_anchor].some((anchor) =>
+          anchor.kind === "time_concern" &&
+          normalized.has(normalizeRecallTimeConcernWindowDigest(anchor.window_digest))
+        )
+      );
+    }
+  };
+  const recallActiveConstraintsPort = {
+    findActiveConstraints: async (
+      input: Readonly<{ readonly workspaceId: string; readonly cap?: number | null }>
+    ) => {
+      const result = await findActiveConstraints({
+        workspaceId: input.workspaceId,
+        memoryRepo: memoryEntryRepo,
+        claimFormRepo,
+        pathRelationRepo,
+        cap: input.cap
+      });
+      return Object.freeze({
+        constraints: Object.freeze(result.constraints.map((record) =>
+          SoulActiveConstraintSchema.parse({
+            object_id: record.memory.object_id,
+            object_kind: record.memory.object_kind,
+            content: record.memory.content,
+            dimension: record.memory.dimension,
+            scope_class: record.memory.scope_class,
+            governance_state: {
+              claim_status: record.claim_status,
+              governance_class: record.governance_class,
+              source_channels: record.source_channels
+            }
+          })
+        )),
+        total_count: result.total_count
+      });
+    }
+  };
   const recallService = new RecallService({
     memoryRepo: memoryEntryRepo,
     slotRepo,
@@ -627,12 +650,41 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     graphExpansionPort: memoryGraphEdgeRepo,
     projectMappingPort: projectMappingService,
     pathPlasticityPort: recallPathPlasticityPort,
-    pathExpansionPort: pathRelationRepo,
+    pathExpansionPort: recallPathExpansionPort,
+    activeConstraintsPort: recallActiveConstraintsPort,
     evidenceSearchPort: {
       searchByKeyword: async (workspaceId, queryText, limit) =>
         evidenceCapsuleRepo.searchByKeyword === undefined
           ? []
-          : await evidenceCapsuleRepo.searchByKeyword(workspaceId, queryText, limit)
+          : await evidenceCapsuleRepo.searchByKeyword(workspaceId, queryText, limit),
+      findByIds: async (workspaceId, evidenceObjectIds) => {
+        const results = await evidenceCapsuleRepo.findByIds(evidenceObjectIds);
+        const scoped = [];
+        for (const evidence of results) {
+          if (evidence.workspace_id === workspaceId) {
+            scoped.push(evidence);
+          }
+        }
+        return scoped;
+      }
+    },
+    // L2 synthesis FTS source. Recall joins synthesis_capsule hits as an
+    // additional candidate channel. see also: migration 079.
+    synthesisSearchPort: {
+      searchByKeyword: async (workspaceId, queryText, limit) =>
+        synthesisCapsuleRepo.searchByKeyword === undefined
+          ? []
+          : await synthesisCapsuleRepo.searchByKeyword(workspaceId, queryText, limit),
+      findByIds: async (objectIds) => {
+        const scoped = [];
+        for (const objectId of objectIds) {
+          const synthesis = await synthesisCapsuleRepo.findById(objectId);
+          if (synthesis !== null) {
+            scoped.push(synthesis);
+          }
+        }
+        return scoped;
+      }
     },
     ...(globalMemoryRepo === null
       ? {}
@@ -713,6 +765,108 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
         warn: warnLogger.warn
       })
     : null;
+  // invariant: ingest reconciliation is opt-in and a deliberate,
+  // recorded v0.3.10 decision — the bench enables it via
+  // ALAYA_INGEST_RECONCILIATION_ENABLED to measure token economy; the
+  // production default is unchanged blind append. The two ingest
+  // behaviors diverging by flag is intentional for this release, not an
+  // oversight (recall-optimization §18a). It covers the
+  // materializeMemoryEntryOnly path (the bench `fact` kind);
+  // materialize_and_claim is intentionally not reconciled in v0.3.10.
+  // When enabled each fact pays one lexical FTS query, a findByIds
+  // fetch, and — only for an ambiguous-band neighbor — one disk-cached
+  // garden-LLM decision call. The LLM is the field-standard semantic
+  // judge of refines-vs-distinct; a token-superset heuristic wrongly
+  // merges distinct facts and erases answers. The DELETE / supersede
+  // path stays owned by ConflictDetectionService; reconciliation only
+  // flags it.
+  // see also: packages/core/src/reconciliation-service.ts
+  const ingestReconciliationEnabled =
+    process.env.ALAYA_INGEST_RECONCILIATION_ENABLED === "1" ||
+    process.env.ALAYA_INGEST_RECONCILIATION_ENABLED?.toLowerCase() === "true";
+  // The ambiguous-band decision needs the garden LLM. The credential is
+  // the canonical garden compute config's secret_ref — the same one the
+  // garden compute provider resolves — RESOLVED here to the live key.
+  // Passing the secret-ref string straight through would send
+  // `Authorization: Bearer file:/…` and 401 every decision.
+  //
+  // The whole config — provider_url, model_id, secret_ref — is read ONCE
+  // so providerUrl and model are always a matched pair (two independent
+  // reads could pair a stale URL with a fresh model). The secret_ref is
+  // resolved ONLY when the config satisfies the same enabled /
+  // provider_kind condition canResolveOfficialGardenProvider uses, so a
+  // disabled or local-heuristics garden never credentials reconciliation
+  // off a config it does not actually drive. An unresolved ref yields
+  // apiKey:null so createReconciliationLlmDecisionPort returns null and
+  // reconciliation cleanly stays off — an honest no-op beats a silently
+  // weakened gate.
+  const reconciliationGardenComputeConfig =
+    ingestReconciliationEnabled
+      ? await rawConfigService.getRuntimeGardenComputeConfig()
+      : null;
+  const reconciliationGardenApiKey = ((): string | null => {
+    if (
+      reconciliationGardenComputeConfig === null ||
+      !canResolveOfficialGardenProvider(reconciliationGardenComputeConfig)
+    ) {
+      return null;
+    }
+    try {
+      return resolveGardenSecretRefValue(reconciliationGardenComputeConfig.secret_ref as string);
+    } catch {
+      return null;
+    }
+  })();
+  // providerUrl + model are resolved as one unit from one source tier so
+  // a stale URL can never pair with a fresh model: when the garden
+  // compute config is present BOTH come from it (a missing field on that
+  // config takes the canonical default, never the configEnv tier);
+  // otherwise BOTH come from the configEnv tier with the canonical
+  // fallback. The two tiers are never mixed across the pair.
+  const reconciliationProviderPair = ((): { providerUrl: string; model: string } => {
+    if (reconciliationGardenComputeConfig !== null) {
+      return {
+        providerUrl: reconciliationGardenComputeConfig.provider_url ?? "https://yunwu.ai/v1",
+        model: reconciliationGardenComputeConfig.model_id ?? OFFICIAL_API_GARDEN_MODEL
+      };
+    }
+    return {
+      providerUrl: readOfficialGardenProviderUrl(configEnv) ?? "https://yunwu.ai/v1",
+      model: readOfficialGardenModelId(configEnv) ?? OFFICIAL_API_GARDEN_MODEL
+    };
+  })();
+  const reconciliationLlmDecisionPort =
+    ingestReconciliationEnabled
+      ? createReconciliationLlmDecisionPort({
+          config: {
+            providerUrl: reconciliationProviderPair.providerUrl,
+            model: reconciliationProviderPair.model,
+            apiKey: reconciliationGardenApiKey
+          }
+        })
+      : null;
+  const reconciliationService =
+    ingestReconciliationEnabled && reconciliationLlmDecisionPort !== null
+      ? new ReconciliationService({
+          keywordSearch: {
+            searchByKeyword: async (workspaceId, queryText, limit) =>
+              await memoryEntryRepo.searchByKeyword(workspaceId, queryText, limit)
+          },
+          memoryRepo: {
+            findByIds: async (objectIds) => await memoryEntryRepo.findByIds(objectIds)
+          },
+          memoryUpdate: {
+            update: async (objectId, fields, reason) =>
+              await memoryService.update(objectId, fields, reason)
+          },
+          eventLog: {
+            append: (event) => eventLogRepo.append(event)
+          },
+          llmDecision: reconciliationLlmDecisionPort,
+          lease: reconciliationLeaseRepo,
+          warn: warnLogger.warn
+        })
+      : null;
   const pathRelationCounterTtlMs = (() => {
     const raw = process.env.ALAYA_PATHREL_COUNTER_TTL_MS;
     if (raw === undefined || raw === "") {
@@ -763,15 +917,82 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     pathRelationProposalService.evictExpired();
   }, pathRelationEvictionIntervalMs);
   pathRelationEvictionTimer.unref?.();
+  const pathRelationProposalPort: PathRelationProposalPort = {
+    createPathRelationProposal: async (input) => {
+      const timestamp = new Date().toISOString();
+      const proposalId = randomUUID();
+      const proposal = ProposalSchema.parse({
+        runtime_id: proposalId,
+        object_kind: ControlPlaneObjectKind.PROPOSAL,
+        task_surface_ref: null,
+        expires_at: null,
+        derived_from: input.targetObjectId,
+        retention_policy: RetentionPolicy.SESSION_ONLY,
+        proposal_id: proposalId,
+        dossier_ref: null,
+        recommended_option_id: null,
+        proposal_options: [
+          {
+            option_id: `path_relation_${proposalId}`,
+            option_kind: ProposalOptionKind.REQUEST_CONFIRMATION,
+            preserves_protected_constraints: true,
+            dropped_candidates: [],
+            unresolved_after_apply: [],
+            requires_confirmation: true
+          }
+        ],
+        resolution_state: ProposalResolutionState.PENDING,
+        last_updated_at: timestamp
+      });
+      const created = await proposalRepo.createProposalWithEvents(
+        {
+          proposal,
+          workspace_id: input.workspaceId,
+          run_id: input.runId,
+          target_object_kind: "path_relation",
+          proposed_change_summary: `${input.reason} Source signal: ${input.sourceSignalId}.`,
+          proposed_path_relation: input.proposedPathRelation,
+          created_at: timestamp
+        },
+        [
+          {
+            event_type: MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED,
+            entity_type: "proposal",
+            entity_id: proposal.proposal_id,
+            workspace_id: input.workspaceId,
+            run_id: input.runId,
+            caused_by: "garden",
+            payload_json: SoulProposalCreatedPayloadSchema.parse({
+              object_id: proposal.runtime_id,
+              object_kind: proposal.object_kind,
+              workspace_id: input.workspaceId,
+              run_id: input.runId
+            })
+          }
+        ]
+      );
+      for (const event of created.events) {
+        await runtimeNotifier.notifyEntry(event);
+      }
+      return {
+        object_kind: "proposal",
+        object_id: created.proposal.proposal_id
+      };
+    }
+  };
   const materializationRouter = new MaterializationRouter({
     evidenceService,
     memoryService,
     synthesisService,
     claimService,
+    pathRelationProposalPort,
     graphEdgePort,
     ...(conflictDetectionService === null
       ? {}
       : { conflictDetectionPort: conflictDetectionService }),
+    ...(reconciliationService === null
+      ? {}
+      : { reconciliationPort: reconciliationService }),
     handoffGapHandler: sqliteHandoffGapAdapter
   });
   const signalService = new SignalService({
@@ -781,21 +1002,6 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     postTriageMaterializer: {
       materialize: async (signal) => await materializationRouter.materializeSignal(signal)
     }
-  });
-  const soulHandler = new SoulSignalHandler({
-    receiveSignal: async (signal) => {
-      await signalService.receiveSignal(signal);
-    },
-    graphExplorePort: graphExploreService,
-    applyOverride: async (params) =>
-      await sessionOverrideService.apply({
-        runId: params.runId,
-        workspaceId: params.workspaceId,
-        targetObject: params.targetObject,
-        correction: params.correction,
-        priority: params.priority,
-        derivedFrom: params.derivedFrom
-      })
   });
   const localHeuristicsProvider = new LocalHeuristics();
   const gardenComputeProviderResolver = new GardenComputeProviderResolver({
@@ -870,30 +1076,6 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   });
   const topologyAuditService = new SoulTopologyAuditService({
     eventLogRepo
-  });
-  const workerSafetyReader = new SoulWorkerSafetyReader({
-    claimRegistryReader: {
-      listClaimsForWorkspace: async (workspaceId) => await claimFormRepo.findByWorkspaceId(workspaceId)
-    },
-    hazardProjectionReader: {
-      listActiveHazardObjectRefs: async () => []
-    },
-    policyProjectionReader: {
-      listGlobalDeniedToolCategories: async () => [],
-      listWorkspaceHardStopRefs: async () => []
-    }
-  });
-  const workerRuntimeWiring = createWorkerRuntimeWiring({
-    deferredObligationRepo,
-    dirtyStateDossierRepo,
-    eventLogRepo,
-    eventPublisher,
-    runtimeAdapterFactory: createUnavailableRuntimeAdapter,
-    runtimeNotifier,
-    strongRefService,
-    workerSafetyPort: new SoulWorkerSafetyAdapter({ reader: workerSafetyReader }),
-    workerRunRepo,
-    zeroDaySecurityLayer
   });
   recordStartupStep(startupSteps, "core-services");
 
@@ -1055,8 +1237,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     proposalService,
     proposalRepo,
     healthIssueGroupRepo,
-    // A1 (HITL daemon backbone) — Inspector loopback HTTP routes need
-    // the same MCP handler that attached agents call.
+    // invariant: Inspector loopback HTTP routes use the same MCP
+    // handler that attached agents call.
     mcpMemoryToolHandler,
     fileRepo,
     runtimeNotifier,
@@ -1095,10 +1277,13 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       daemonMcpCatalog: mcpTooling.daemonMcpCatalog,
       environmentStatusService,
       embeddingStatusService,
+      ...(embeddingRecallService === undefined ? {} : { embeddingRecallService }),
       graphHealthService,
       configService,
       mcpMemoryToolHandler,
       recallService,
+      signalService,
+      synthesisService,
       recallUtilizationService,
       runService,
       trustStateRecorder,
@@ -1301,6 +1486,10 @@ function createConflictDetectionLlmPort(): ConflictDetectionLlmPort | null {
       }
     }
   };
+}
+
+function normalizeRecallTimeConcernWindowDigest(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/gu, "_");
 }
 
 export async function startDaemon(options: AlayaDaemonListenOptions = {}): Promise<AlayaDaemonServer> {

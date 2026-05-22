@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "9abcf3081904bd00e8d87190b256a193cfdf9e00004e2a0f63b9ec59ad0c3df4",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"text_output\",\"confidence\":0.94,\"matched_text\":\"Here's a haiku for your cover letter:\\n\\nAnimation skills I wield,\\nDash's team I wish to join,\\nExciting journey.\",\"distilled_fact\":\"The turn content includes a haiku for a cover letter with the lines \\\"Animation skills I wield,\\\" \\\"Dash's team I wish to join,\\\" and \\\"Exciting journey.\\\"\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"team_or_organization\",\"confidence\":0.83,\"matched_text\":\"Dash's team I wish to join\",\"distilled_fact\":\"The speaker wishes to join Dash's team.\"}]}",
+  "extracted_at": "2026-05-21T08:04:12.222Z"
+}

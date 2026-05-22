@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "b06e957ae556e04dfb3fe8340a9de53fc0b4bae51173bb58f83e23d8ca81346c",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"tool\",\"confidence\":0.86,\"matched_text\":\"Todoist and Trello are both excellent choices for task management.\",\"distilled_fact\":\"The speaker considers Todoist and Trello excellent choices for task management.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"tool\",\"confidence\":0.78,\"matched_text\":\"Use technology to your advantage: Utilize tools like Todoist, Trello, or other project management software to stay organized and on top of your tasks.\",\"distilled_fact\":\"The speaker recommends using Todoist, Trello, or other project management software to stay organized and on top of tasks.\"}]}",
+  "extracted_at": "2026-05-21T08:09:49.061Z"
+}

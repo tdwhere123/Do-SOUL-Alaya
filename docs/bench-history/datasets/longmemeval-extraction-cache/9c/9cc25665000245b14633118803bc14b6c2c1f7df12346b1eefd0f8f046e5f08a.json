@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "9cc25665000245b14633118803bc14b6c2c1f7df12346b1eefd0f8f046e5f08a",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"trip\",\"confidence\":0.91,\"matched_text\":\"I just went on a day trip to Santa Cruz with my family a week ago\",\"distilled_fact\":\"The user went on a day trip to Santa Cruz with the user's family one week before the turn.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"meal_experience\",\"confidence\":0.96,\"matched_text\":\"we had an amazing lunch at The Fisherman's Grotto, their fish and chips were incredible!\",\"distilled_fact\":\"The user had an amazing lunch at The Fisherman's Grotto in Santa Cruz during the day trip one week before the turn.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"food_item\",\"confidence\":0.92,\"matched_text\":\"their fish and chips were incredible!\",\"distilled_fact\":\"The fish and chips at The Fisherman's Grotto were incredible.\"}]}",
+  "extracted_at": "2026-05-21T09:19:44.750Z"
+}

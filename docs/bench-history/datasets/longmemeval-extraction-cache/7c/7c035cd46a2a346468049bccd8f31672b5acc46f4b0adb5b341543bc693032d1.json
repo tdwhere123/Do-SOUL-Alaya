@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7c035cd46a2a346468049bccd8f31672b5acc46f4b0adb5b341543bc693032d1",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"food_preference\",\"confidence\":0.88,\"matched_text\":\"I'm looking for some new healthy snack ideas, something easy to grab and go.\",\"distilled_fact\":\"The user is looking for healthy snack ideas that are easy to grab and go.\"}]}",
+  "extracted_at": "2026-05-21T07:53:44.154Z"
+}

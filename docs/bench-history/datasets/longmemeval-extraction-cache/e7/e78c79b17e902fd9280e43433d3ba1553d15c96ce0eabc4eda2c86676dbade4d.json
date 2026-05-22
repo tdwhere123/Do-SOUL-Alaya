@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "e78c79b17e902fd9280e43433d3ba1553d15c96ce0eabc4eda2c86676dbade4d",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"concern\",\"confidence\":0.74,\"matched_text\":\"It seems overwhelming to know where to start with so many problems causing species extinction.\",\"distilled_fact\":\"The speaker feels overwhelmed by the number of problems causing species extinction.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"question\",\"confidence\":0.66,\"matched_text\":\"How do we know what actions will have the most impact?\",\"distilled_fact\":\"The speaker asks how to determine which actions will have the most impact.\"}]}",
+  "extracted_at": "2026-05-21T08:09:28.908Z"
+}

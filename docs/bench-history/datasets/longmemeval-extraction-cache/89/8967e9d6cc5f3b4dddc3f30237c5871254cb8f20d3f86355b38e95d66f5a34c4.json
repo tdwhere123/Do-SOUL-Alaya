@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "8967e9d6cc5f3b4dddc3f30237c5871254cb8f20d3f86355b38e95d66f5a34c4",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"game_interest\",\"confidence\":0.93,\"matched_text\":\"I'll definitely check those out, especially God of War and Horizon Zero Dawn.\",\"distilled_fact\":\"The user is especially interested in God of War and Horizon Zero Dawn.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"gaming_console\",\"confidence\":0.9,\"matched_text\":\"Do you think I'll need to upgrade my PS5's storage capacity to play these games, or will the default storage be enough?\",\"distilled_fact\":\"The user has a PS5.\"}]}",
+  "extracted_at": "2026-05-21T09:11:53.937Z"
+}

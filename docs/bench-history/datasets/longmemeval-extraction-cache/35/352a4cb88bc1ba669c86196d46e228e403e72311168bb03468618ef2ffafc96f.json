@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "352a4cb88bc1ba669c86196d46e228e403e72311168bb03468618ef2ffafc96f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"user_goal\",\"confidence\":0.84,\"matched_text\":\"What can I, as an individual, do to make a difference in preventing species extinction?\",\"distilled_fact\":\"The user wants to make a difference in preventing species extinction as an individual.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"belief\",\"confidence\":0.78,\"matched_text\":\"It seems like all of these solutions require a lot of effort from governments and organizations.\",\"distilled_fact\":\"The user believes all of these solutions require a lot of effort from governments and organizations.\"}]}",
+  "extracted_at": "2026-05-21T08:09:23.652Z"
+}

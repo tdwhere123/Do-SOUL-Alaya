@@ -17,6 +17,8 @@ function makeMinimalDeps(
     recallService: {
       recall: vi.fn(async () => ({
         candidates: [],
+        active_constraints: [],
+        active_constraints_count: 0,
         total_scanned: 0,
         coarse_filter_count: 0,
         fine_assessment_count: 0

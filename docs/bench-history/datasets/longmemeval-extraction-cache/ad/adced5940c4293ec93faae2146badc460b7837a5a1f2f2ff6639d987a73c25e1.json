@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "adced5940c4293ec93faae2146badc460b7837a5a1f2f2ff6639d987a73c25e1",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_request\",\"object_kind\":\"query\",\"confidence\":0.61,\"matched_text\":\"What are some of the main predators of mussel larvae and juveniles, and how do mussels defend themselves?\",\"distilled_fact\":\"The user asked about the main predators of mussel larvae and juveniles and about how mussels defend themselves.\"}]}",
+  "extracted_at": "2026-05-21T07:10:35.365Z"
+}

@@ -8,7 +8,14 @@ import type { GraphHealthService } from "./services/graph-health-service.js";
 import type { McpMemoryToolHandler } from "./mcp-memory-tool-handler.js";
 import type { RecallUtilizationService } from "./services/recall-utilization-service.js";
 import type { TrustStateRecorder } from "./trust-state.js";
-import type { RecallService, RunService, WorkspaceService } from "@do-soul/alaya-core";
+import type {
+  EmbeddingRecallService,
+  RecallService,
+  RunService,
+  SignalService,
+  SynthesisService,
+  WorkspaceService
+} from "@do-soul/alaya-core";
 
 export type StartupStep =
   | "database"
@@ -47,10 +54,21 @@ export interface AlayaDaemonRuntimeServices {
   }>;
   readonly environmentStatusService: EnvironmentStatusService;
   readonly embeddingStatusService: EmbeddingStatusService;
+  readonly embeddingRecallService?: Pick<EmbeddingRecallService, "warmQueryEmbeddings">;
   readonly graphHealthService: GraphHealthService;
   readonly configService: Pick<AppConfigService, "getGardenCredentialProvenance" | "getRuntimeGardenComputeConfig">;
   readonly mcpMemoryToolHandler: McpMemoryToolHandler;
   readonly recallService: Pick<RecallService, "recall">;
+  // invariant: the bench harness seeds compile()-extracted signals through
+  // the SAME in-process receiveSignal seam the production garden host-worker
+  // completion uses (garden-runtime.ts processPostTurnExtractTask), so a
+  // bench-seeded signal materializes a memory_entry exactly as production.
+  readonly signalService: Pick<SignalService, "receiveSignal">;
+  // invariant: the bench harness seeds session-level synthesis_capsule rows
+  // by calling SynthesisService.create directly, bypassing the
+  // potential_synthesis signal route (materializeSynthesis) so no duplicate
+  // evidence_capsule rows are minted into the recall store.
+  readonly synthesisService: Pick<SynthesisService, "create">;
   readonly recallUtilizationService: RecallUtilizationService;
   readonly runService: Pick<RunService, "getById" | "ensureAttachedMcpSessionRun">;
   readonly trustStateRecorder: TrustStateRecorder;

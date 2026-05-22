@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "65e48b901d19657cfa9d5fc1829b7ad5b1393695ff11f680c118e835053d58bd",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.86,\"matched_text\":\"I'm definitely going to try out some local breweries and experiment with beer and food pairings.\",\"distilled_fact\":\"The user is going to try out some local breweries.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.84,\"matched_text\":\"I'm definitely going to try out some local breweries and experiment with beer and food pairings.\",\"distilled_fact\":\"The user is going to experiment with beer and food pairings.\"}]}",
+  "extracted_at": "2026-05-21T09:12:53.547Z"
+}

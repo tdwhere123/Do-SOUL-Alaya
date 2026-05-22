@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "61afcba84f0c1b09dfab4ddbf88e5d50484fbdcac9cec6a2161d1ea2a695a05e",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"dessert\",\"confidence\":0.79,\"matched_text\":\"These dessert ideas sound amazing, especially the chocolate chili brownies.\",\"distilled_fact\":\"The user is interested in chocolate chili brownies.\"}]}",
+  "extracted_at": "2026-05-21T08:59:55.740Z"
+}

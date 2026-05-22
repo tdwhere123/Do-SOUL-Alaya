@@ -13,6 +13,15 @@ import type { EventPublisher, EventPublisherInput } from "./event-publisher.js";
 // service writes a new PathRelation with default plasticity. The plasticity
 // strength is later evolved by PathPlasticityService. Counter state is
 // in-memory per daemon process (suitable for K small, e.g. 3).
+// invariant: a co-usage path is born at governance_class=attention_only,
+// not recall_allowed. attention_only authorises only the lens_entry
+// manifestation level and earns no recall-expansion governance boost — the
+// path is auditable but cannot silently bias agent dialogue. Agents
+// propose; Alaya decides durable recall topology. A co-usage path reaches
+// recall_allowed only by accruing support_events_count >= 8 through the
+// legitimate path-manifestation-policy ladder, which PathPlasticityService
+// drives from anchor-matched usage receipts independently of this
+// service's in-memory co-usage counter.
 // invariant: counter entries carry firstSeenAt timestamps so the daemon
 // can periodically call evictExpired(now, ttlMs) to discard stale pairs
 // that never reached the threshold. Pairs that reach the threshold are
@@ -191,7 +200,8 @@ export class PathRelationProposalService {
       },
       legitimacy: {
         evidence_basis: ["recalls_edge_co_usage"],
-        governance_class: "recall_allowed"
+        // see also: path-manifestation-policy.ts GOVERNANCE_PROMOTION_THRESHOLDS
+        governance_class: "attention_only"
       },
       created_at: occurredAt,
       updated_at: occurredAt

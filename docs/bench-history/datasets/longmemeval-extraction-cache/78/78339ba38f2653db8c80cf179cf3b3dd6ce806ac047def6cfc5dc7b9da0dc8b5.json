@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "78339ba38f2653db8c80cf179cf3b3dd6ce806ac047def6cfc5dc7b9da0dc8b5",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"user_goal\",\"confidence\":0.82,\"matched_text\":\"my run this weekend\",\"distilled_fact\":\"The user has a run this weekend.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_state\",\"confidence\":0.67,\"matched_text\":\"I think I've got everything covered for my run this weekend.\",\"distilled_fact\":\"The user thinks they have everything covered for their run this weekend.\"},{\"signal_kind\":\"potential_request\",\"object_kind\":\"user_request\",\"confidence\":0.9,\"matched_text\":\"do you have any tips on how to stay motivated and avoid boredom during long runs?\",\"distilled_fact\":\"The user wants tips on how to stay motivated and avoid boredom during long runs.\"}]}",
+  "extracted_at": "2026-05-21T07:57:10.087Z"
+}

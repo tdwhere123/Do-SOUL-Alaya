@@ -1,16 +1,38 @@
 export {
   BenchName,
+  BenchPolicyShapeSchema,
+  BenchSimulateReportModeSchema,
   BenchSplit,
   HarnessMode,
   KpiPayloadSchema,
+  RecallWeightOverridesSummarySchema,
   Verdict,
   type DegradationReasons,
   type DiffVsPrevious,
   type KpiCore,
   type KpiPayload,
+  type QualityMetrics,
+  type RecallWeightOverridesSummary,
+  type BenchPolicyShape,
+  type BenchSimulateReportMode,
   type PerScenarioRow,
-  type TierDistribution
+  type SeedExtractionPath,
+  type TierDistribution,
+  type TokenEconomy
 } from "./kpi-schema.js";
+
+export {
+  buildTokenEconomy,
+  computeTokenSavedRatio,
+  type TokenEconomyInput
+} from "./token-economy.js";
+
+export {
+  collectReleaseHardGates,
+  combineVerdicts,
+  releaseHardGateVerdict,
+  type BenchmarkHardGate
+} from "./release-gates.js";
 
 export {
   DEFAULT_THRESHOLDS,
@@ -28,11 +50,14 @@ export {
 export { diffKpis, verdictBadge } from "./diff.js";
 
 export {
+  benchArchiveDiscriminator,
   entrySlug,
   listEntries,
+  policyShapeSlug,
   readEntry,
   readLatest,
   readPrevious,
+  simulateReportSlug,
   writeEntry,
   type HistoryEntry,
   type HistoryLayout

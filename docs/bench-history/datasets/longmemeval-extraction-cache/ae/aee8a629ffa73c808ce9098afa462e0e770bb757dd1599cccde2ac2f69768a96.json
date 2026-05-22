@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "aee8a629ffa73c808ce9098afa462e0e770bb757dd1599cccde2ac2f69768a96",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"task_request\",\"confidence\":0.79,\"matched_text\":\"content analysis of the 9 interviews and provide positive and negative implicationsof all attributes\",\"distilled_fact\":\"The user wants content analysis of 9 interviews and wants positive and negative implications of all attributes.\"}]}",
+  "extracted_at": "2026-05-21T07:50:11.815Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "e77629f8c06d18dacef14da36feb405ccc0ca8cdd5994f4e85d7d6f2876713d5",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user\",\"confidence\":0.92,\"matched_text\":\"I'm moving to Melbourne soon\",\"distilled_fact\":\"The user is moving to Melbourne soon.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user\",\"confidence\":0.92,\"matched_text\":\"I'm really excited to start my master's program at the University of Melbourne\",\"distilled_fact\":\"The user is really excited to start a master's program at the University of Melbourne.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user\",\"confidence\":0.9,\"matched_text\":\"which I got accepted into back in February\",\"distilled_fact\":\"The user got accepted into a master's program at the University of Melbourne back in February.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"user\",\"confidence\":0.74,\"matched_text\":\"I'm looking for some tips on finding affordable accommodation options\",\"distilled_fact\":\"The user is looking for tips on finding affordable accommodation options.\"}]}",
+  "extracted_at": "2026-05-21T09:20:07.591Z"
+}

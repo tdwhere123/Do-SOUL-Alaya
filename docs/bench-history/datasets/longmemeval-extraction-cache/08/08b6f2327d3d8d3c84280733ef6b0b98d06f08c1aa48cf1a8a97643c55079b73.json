@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "08b6f2327d3d8d3c84280733ef6b0b98d06f08c1aa48cf1a8a97643c55079b73",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"creative_request\",\"confidence\":0.96,\"matched_text\":\"Rewrite the script for the bank heist and escape scenes in Heat, but replace Neil McCauley with the Joker from the Dark Knight.\",\"distilled_fact\":\"The user wants the bank heist and escape scenes in Heat rewritten with Neil McCauley replaced by the Joker from The Dark Knight.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"work_reference\",\"confidence\":0.93,\"matched_text\":\"Heat\",\"distilled_fact\":\"Heat is the work referenced for the bank heist and escape scenes.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"character_reference\",\"confidence\":0.91,\"matched_text\":\"Neil McCauley\",\"distilled_fact\":\"Neil McCauley is the character to be replaced in the requested rewrite.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"character_reference\",\"confidence\":0.9,\"matched_text\":\"the Joker from the Dark Knight\",\"distilled_fact\":\"The Joker from The Dark Knight is the replacement character in the requested rewrite.\"}]}",
+  "extracted_at": "2026-05-21T07:05:01.917Z"
+}

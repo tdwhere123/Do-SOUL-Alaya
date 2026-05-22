@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "34cf328fa1b5bbe7c9492eebdd690809af16f398fad358ed10032b6f939693d0",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"advice_request\",\"confidence\":0.61,\"matched_text\":\"Do you have any tips for making the decision-making process easier?\",\"distilled_fact\":\"The user asks for tips for making the decision-making process easier when buying a product.\"}]}",
+  "extracted_at": "2026-05-21T07:43:27.238Z"
+}

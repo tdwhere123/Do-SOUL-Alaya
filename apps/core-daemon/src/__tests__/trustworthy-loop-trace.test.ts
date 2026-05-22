@@ -353,6 +353,8 @@ async function createTrustworthyLoopHarness(
     recallService: {
       recall: async () => ({
         candidates: [createRecallCandidate()],
+        active_constraints: [],
+        active_constraints_count: 0,
         total_scanned: 1,
         coarse_filter_count: 1,
         fine_assessment_count: 1

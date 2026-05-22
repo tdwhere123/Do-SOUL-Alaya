@@ -38,7 +38,8 @@ describe("Phase C extension protocol schemas", () => {
       "synthesis_review",
       "embedding_backfill",
       "path_plasticity_update",
-      "post_turn_extract"
+      "post_turn_extract",
+      "consolidation_cycle"
     ]);
     expect(GardenTaskKindSchema.parse("embedding_backfill")).toBe("embedding_backfill");
     expect(GardenTaskKind.EMBEDDING_BACKFILL).toBe("embedding_backfill");
@@ -77,6 +78,20 @@ describe("Phase C extension protocol schemas", () => {
     expect(
       GARDEN_ROLE_PERMISSIONS[GardenRole.JANITOR].allowed_task_kinds
     ).not.toContain(GardenTaskKind.POST_TURN_EXTRACT);
+
+    // consolidation_cycle is PathRelation structural maintenance — a TIER_2
+    // Librarian task, not Auditor or Janitor.
+    expect(GardenTaskKindSchema.parse("consolidation_cycle")).toBe("consolidation_cycle");
+    expect(GardenTaskKind.CONSOLIDATION_CYCLE).toBe("consolidation_cycle");
+    expect(
+      GARDEN_ROLE_PERMISSIONS[GardenRole.LIBRARIAN].allowed_task_kinds
+    ).toContain(GardenTaskKind.CONSOLIDATION_CYCLE);
+    expect(
+      GARDEN_ROLE_PERMISSIONS[GardenRole.AUDITOR].allowed_task_kinds
+    ).not.toContain(GardenTaskKind.CONSOLIDATION_CYCLE);
+    expect(
+      GARDEN_ROLE_PERMISSIONS[GardenRole.JANITOR].allowed_task_kinds
+    ).not.toContain(GardenTaskKind.CONSOLIDATION_CYCLE);
 
     expect(Object.values(HealthEventKind)).toEqual([
       "bankruptcy",

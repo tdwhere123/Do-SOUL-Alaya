@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "95d614ae2efbe3efbf7def38a9dadcc93e143ea53294199527f4ec74071a3ef0",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"team_strategy\",\"confidence\":0.88,\"matched_text\":\"The Mavericks do have some capable three-point shooters in players like Reggie Bullock, Dorian Finney-Smith, and Tim Hardaway Jr.\",\"distilled_fact\":\"The Mavericks have capable three-point shooters in Reggie Bullock, Dorian Finney-Smith, and Tim Hardaway Jr.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"team_strategy\",\"confidence\":0.86,\"matched_text\":\"One potential solution could be to incorporate more movement and ball movement on offense, creating more open looks and driving opportunities.\",\"distilled_fact\":\"A potential solution for the Mavericks is to incorporate more movement and ball movement on offense.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"team_strategy\",\"confidence\":0.82,\"matched_text\":\"Do you think the Mavericks should explore adding another three-point shooter or playmaker through trade or free agency to bolster their offense?\",\"distilled_fact\":\"The Mavericks should explore adding another three-point shooter or playmaker through trade or free agency to bolster their offense.\"}]}",
+  "extracted_at": "2026-05-21T07:47:54.948Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "6b46a827dda5d2ec38fc85647c70345a32d577dae7b97cd6d8550132b4f22eb9",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"cooking_method\",\"confidence\":0.86,\"matched_text\":\"I'll try the brine solution and pounding the chicken breasts next time\",\"distilled_fact\":\"The speaker plans to try the brine solution next time.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"cooking_method\",\"confidence\":0.86,\"matched_text\":\"I'll try the brine solution and pounding the chicken breasts next time\",\"distilled_fact\":\"The speaker plans to try pounding the chicken breasts next time.\"}]}",
+  "extracted_at": "2026-05-21T07:51:56.022Z"
+}

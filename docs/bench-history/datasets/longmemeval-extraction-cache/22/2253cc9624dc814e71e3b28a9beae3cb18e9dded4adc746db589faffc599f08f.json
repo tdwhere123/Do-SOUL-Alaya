@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "2253cc9624dc814e71e3b28a9beae3cb18e9dded4adc746db589faffc599f08f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"office chair\",\"confidence\":0.91,\"matched_text\":\"I'm really happy with my office chair now that it's been repaired.\",\"distilled_fact\":\"The user is really happy with the user's office chair now that the office chair has been repaired.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"office chair repair\",\"confidence\":0.95,\"matched_text\":\"It only cost $50\",\"distilled_fact\":\"The repair of the user's office chair cost $50.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"office chair repair\",\"confidence\":0.88,\"matched_text\":\"it's made a huge difference in my work-from-home experience.\",\"distilled_fact\":\"The repaired office chair has made a huge difference in the user's work-from-home experience.\"}]}",
+  "extracted_at": "2026-05-21T09:20:34.270Z"
+}

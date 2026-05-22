@@ -1,7 +1,10 @@
 import { MemoryDimension, ScopeClass, type MemoryDimension as MemoryDimensionType, type ScopeClass as ScopeClassType } from "@do-soul/alaya-protocol";
 
+export type RecallQuerySubjectHint = "self_reference";
+
 export interface RecallQueryProbes {
   readonly normalized_query: string | null;
+  readonly subject_hints: readonly RecallQuerySubjectHint[];
   readonly object_ids: readonly string[];
   readonly evidence_refs: readonly string[];
   readonly run_ids: readonly string[];
@@ -81,6 +84,7 @@ export function compileRecallQueryProbes(queryText: string | null): Readonly<Rec
   if (normalized === null) {
     return freezeProbes({
       normalized_query: null,
+      subject_hints: [],
       object_ids: [],
       evidence_refs: [],
       run_ids: [],
@@ -102,6 +106,7 @@ export function compileRecallQueryProbes(queryText: string | null): Readonly<Rec
   const lexicalTerms = extractLexicalTerms(normalized);
   return freezeProbes({
     normalized_query: normalized,
+    subject_hints: inferSubjectHints(normalized),
     object_ids: collectMatches(normalized, /\b(?:memory|mem|object|obj)[_-]?([a-z0-9][a-z0-9_-]{5,})\b/giu),
     evidence_refs: collectMatches(normalized, /\b(?:evidence|ev|ref)[_-]?([a-z0-9][a-z0-9_.:-]{3,})\b/giu),
     run_ids: collectFullMatches(normalized, /\brun[-_][a-z0-9][a-z0-9_-]*\b/giu),
@@ -117,7 +122,10 @@ export function compileRecallQueryProbes(queryText: string | null): Readonly<Rec
     lexical_terms: lexicalTerms,
     phrases: extractPhrases(normalized, lexicalTerms),
     char_ngrams: extractCharNgrams(normalized),
-    date_terms: collectFullMatches(normalized, /\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}\/\d{1,2}\/\d{2,4}\b|\b(?:today|yesterday|tomorrow)\b|(?:上次|昨天|今天|明天)/giu)
+    date_terms: collectFullMatches(
+      normalized,
+      /\b\d{4}-\d{2}(?:-\d{2})?\b|\b\d{1,2}\/\d{1,2}\/\d{2,4}\b|\b(?:today|yesterday|tomorrow|tonight|last\s+(?:week|month|year)|next\s+(?:week|month|year)|this\s+(?:week|month|year))\b|(?:上次|昨天|今天|明天|今晚|上周|上个月|去年|下周|下个月|明年|今年|\d{4}年\d{1,2}月(?:\d{1,2}日)?)/giu
+    )
   });
 }
 
@@ -126,13 +134,22 @@ function normalizeQuery(queryText: string | null): string | null {
   return trimmed.length === 0 ? null : trimmed;
 }
 
-function extractLexicalTerms(value: string): readonly string[] {
-  const terms = value
+/**
+ * Split text into deterministic lowercased terms: shared split regex,
+ * lowercase+trim, drop empties, and a length>2-or-CJK-script keep rule.
+ * Does NOT drop stop words. The feature-rerank tokenizer reuses this so
+ * query terms and candidate terms tokenize under one identical rule.
+ */
+export function splitLexicalTokens(value: string): readonly string[] {
+  return value
     .split(/[^\p{L}\p{N}_./@#-]+/u)
     .map((term) => term.trim().toLocaleLowerCase())
     .filter((term) => term.length > 0)
-    .filter((term) => !STOP_WORDS.has(term))
     .filter((term) => term.length > 2 || /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(term));
+}
+
+function extractLexicalTerms(value: string): readonly string[] {
+  const terms = splitLexicalTokens(value).filter((term) => !STOP_WORDS.has(term));
   return unique(terms).slice(0, 48);
 }
 
@@ -167,6 +184,12 @@ function inferScopeClasses(value: string): readonly ScopeClassType[] {
   return unique(scopes);
 }
 
+function inferSubjectHints(value: string): readonly RecallQuerySubjectHint[] {
+  return /\b(?:i|me|my|mine|we|our|ours)\b|(?:我|我的|我们|咱们|咱)/iu.test(value)
+    ? Object.freeze(["self_reference"] as const)
+    : Object.freeze([]);
+}
+
 function collectMatches(value: string, pattern: RegExp): readonly string[] {
   const matches: string[] = [];
   for (const match of value.matchAll(pattern)) {
@@ -194,6 +217,7 @@ function unique<T>(values: readonly T[]): readonly T[] {
 function freezeProbes(probes: RecallQueryProbes): Readonly<RecallQueryProbes> {
   return Object.freeze({
     ...probes,
+    subject_hints: Object.freeze([...probes.subject_hints]),
     object_ids: Object.freeze([...probes.object_ids]),
     evidence_refs: Object.freeze([...probes.evidence_refs]),
     run_ids: Object.freeze([...probes.run_ids]),

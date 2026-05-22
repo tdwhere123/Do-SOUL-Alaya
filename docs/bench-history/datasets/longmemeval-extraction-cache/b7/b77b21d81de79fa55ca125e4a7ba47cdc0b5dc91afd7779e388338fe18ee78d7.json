@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "b77b21d81de79fa55ca125e4a7ba47cdc0b5dc91afd7779e388338fe18ee78d7",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"person\",\"confidence\":0.93,\"matched_text\":\"I'm looking for some gift ideas for a baby boy.\",\"distilled_fact\":\"The user is looking for gift ideas for a baby boy.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"person\",\"confidence\":0.95,\"matched_text\":\"I recently attended my best friend Rachel's baby shower, celebrating with games, food, and gifts\",\"distilled_fact\":\"The user recently attended Rachel's baby shower, and the shower included games, food, and gifts.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"person\",\"confidence\":0.95,\"matched_text\":\"I want to get something for her little one Lucas.\",\"distilled_fact\":\"The user wants to get a gift for Rachel's little one Lucas.\"}]}",
+  "extracted_at": "2026-05-21T09:08:50.221Z"
+}

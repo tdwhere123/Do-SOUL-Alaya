@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "49634b13b8abe9e0dabfd7378a4bfb470c9ce6c3404ccdf3b6ba8afe1f79a890",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_activity\",\"confidence\":0.96,\"matched_text\":\"I'll start by searching online for cobblers in my area.\",\"distilled_fact\":\"The user will start by searching online for cobblers in their area.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_plan\",\"confidence\":0.93,\"matched_text\":\"I've been meaning to get my boots resoled for months now\",\"distilled_fact\":\"The user has been meaning to get their boots resoled for months now.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_history\",\"confidence\":0.9,\"matched_text\":\"ever since I wore them almost daily during the winter.\",\"distilled_fact\":\"The user wore their boots almost daily during the winter.\"}]}",
+  "extracted_at": "2026-05-21T09:18:36.797Z"
+}

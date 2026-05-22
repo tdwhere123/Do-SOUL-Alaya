@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c9dc37924428c2f3bcfa8f47bbded638d308d2542a02799fd47e910eb205cdba",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"relationship_context\",\"confidence\":0.78,\"matched_text\":\"It's nice to have an impartial perspective on how to handle conflicts with my roommates.\",\"distilled_fact\":\"The user values an impartial perspective when handling conflicts with their roommates.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"relationship_context\",\"confidence\":0.74,\"matched_text\":\"how to handle conflicts with my roommates\",\"distilled_fact\":\"The user has roommates.\"}]}",
+  "extracted_at": "2026-05-21T09:09:36.390Z"
+}

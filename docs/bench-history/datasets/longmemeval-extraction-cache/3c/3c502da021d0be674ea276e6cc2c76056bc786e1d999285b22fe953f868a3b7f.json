@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "3c502da021d0be674ea276e6cc2c76056bc786e1d999285b22fe953f868a3b7f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"activity_event\",\"confidence\":0.91,\"matched_text\":\"I'm considering signing up for a cycling event in two months, a 20-mile ride along the coast.\",\"distilled_fact\":\"The user is considering signing up for a cycling event in two months that is a 20-mile ride along the coast.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"exercise_habit\",\"confidence\":0.86,\"matched_text\":\"I've only been doing shorter rides on the weekends?\",\"distilled_fact\":\"The user has only been doing shorter rides on the weekends.\"}]}",
+  "extracted_at": "2026-05-21T09:15:26.637Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "154e5f1176e9df3b2b0c6297a1d8c8871c9b812b229b992d392aa16ccbb17f8c",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"interaction_style\",\"confidence\":0.24,\"matched_text\":\"Thank you\",\"distilled_fact\":\"The user expressed thanks.\"}]}",
+  "extracted_at": "2026-05-21T08:56:38.407Z"
+}

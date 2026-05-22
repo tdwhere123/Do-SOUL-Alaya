@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "a2933cde36191fa09bb6e4c2c92599e943291f750404dd0951472bf62dd38b11",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"strategy_question\",\"confidence\":0.61,\"matched_text\":\"How should brand use AR in marketing to promote their offerings based on the learnings through the above cognitive structure\",\"distilled_fact\":\"The user asked how a brand should use AR in marketing to promote its offerings based on learnings through the above cognitive structure.\"}]}",
+  "extracted_at": "2026-05-21T07:50:04.682Z"
+}

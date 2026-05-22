@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "2d445c072216903b604ee31a6064cf03525075024fbe316ebf308f72e1b41071",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"laundry detergent\",\"confidence\":0.89,\"matched_text\":\"Can you also help me find a good laundry detergent that's gentle on clothes, especially my favorite distressed denim jeans that I haven't worn in a while?\",\"distilled_fact\":\"The user wants a laundry detergent that is gentle on clothes.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"jeans\",\"confidence\":0.87,\"matched_text\":\"my favorite distressed denim jeans that I haven't worn in a while\",\"distilled_fact\":\"The user has favorite distressed denim jeans that the user has not worn in a while.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"shopping preference\",\"confidence\":0.76,\"matched_text\":\"I'll try out OxiClean.\",\"distilled_fact\":\"The user will try out OxiClean.\"}]}",
+  "extracted_at": "2026-05-21T09:18:33.273Z"
+}

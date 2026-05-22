@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "3eef8e11425143aed0b164915aea428f4d5b84d2e0a57f1ccf9f875f42b46295",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"task_or_goal\",\"confidence\":0.91,\"matched_text\":\"I'm thinking of implementing a system to track my personal expenses as well, not just work-related ones.\",\"distilled_fact\":\"The user is thinking of implementing a system to track personal expenses in addition to work-related expenses.\"}]}",
+  "extracted_at": "2026-05-21T08:09:54.526Z"
+}

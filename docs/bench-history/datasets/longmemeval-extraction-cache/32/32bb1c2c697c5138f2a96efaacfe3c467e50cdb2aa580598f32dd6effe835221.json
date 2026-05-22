@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "32bb1c2c697c5138f2a96efaacfe3c467e50cdb2aa580598f32dd6effe835221",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"podcast\",\"confidence\":0.95,\"matched_text\":\"\\\"The Daily\\\" is an excellent podcast from The New York Times!\",\"distilled_fact\":\"The Daily is a podcast from The New York Times.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"podcast episode\",\"confidence\":0.88,\"matched_text\":\"The episode about the COVID-19 vaccine rollout on February 10th was likely a very timely and informative episode\",\"distilled_fact\":\"The Daily had an episode about the COVID-19 vaccine rollout on February 10th.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"podcast hosts\",\"confidence\":0.92,\"matched_text\":\"The podcast's hosts, Michael Barbaro and Sabrina Tavernise, do an excellent job\",\"distilled_fact\":\"The hosts of The Daily are Michael Barbaro and Sabrina Tavernise.\"}]}",
+  "extracted_at": "2026-05-21T07:07:26.097Z"
+}

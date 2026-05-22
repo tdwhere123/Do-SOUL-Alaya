@@ -1,12 +1,21 @@
 import {
+  GreenGovernanceEventType,
   MemoryGovernanceEventType,
+  PathGovernanceClass,
+  PathRelationSchema,
   ProposalResolutionStateSchema,
   ProposalSchema,
   PublicMemoryEntryMutableFieldsSchema,
+  RevokeReason,
+  RuntimeGovernanceEventType,
+  SoulGreenPiercedPayloadSchema,
   SoulMemoryUpdatedPayloadSchema,
+  parseRuntimeGovernanceEventPayload,
+  serializePathAnchorRef,
   type EventLogEntry,
   type MemoryEntry,
   type MemoryEntryMutableFields,
+  type PathRelation,
   type Proposal,
   type ProposalResolutionState
 } from "@do-soul/alaya-protocol";
@@ -33,7 +42,7 @@ export interface ProposalCreateInput {
   // `target_object_kind` is required at the repository boundary.
   // Migration `058-reviewer-identity.sql` left
   // `target_object_kind TEXT NOT NULL DEFAULT 'memory_entry'` as a
-  // one-time backfill for pre-A1 rows; the default would silently
+  // one-time backfill for legacy rows; the default would silently
   // mislabel future inserts that omit the column. Type-system
   // enforcement is cheaper than dropping the SQL default (SQLite has
   // no `ALTER COLUMN ... DROP DEFAULT`). Production callers pass it
@@ -45,23 +54,35 @@ export interface ProposalCreateInput {
   readonly target_object_kind: string;
   readonly proposed_change_summary?: string;
   readonly proposed_changes?: MemoryEntryMutableFields | null;
+  readonly proposed_path_relation?: PathRelationProposalPayload | null;
   readonly created_at?: string;
   readonly target_baseline_updated_at?: string | null;
   readonly source_delivery_ids?: readonly string[] | null;
+}
+
+export interface PathRelationProposalPayload {
+  readonly target_anchor: PathRelation["anchors"]["target_anchor"];
+  readonly constitution: PathRelation["constitution"];
+  readonly effect_vector: PathRelation["effect_vector"];
+  readonly plasticity_state: PathRelation["plasticity_state"];
+  readonly lifecycle: PathRelation["lifecycle"];
+  readonly legitimacy: PathRelation["legitimacy"];
 }
 
 export interface ScopedProposal {
   readonly proposal: Readonly<Proposal>;
   readonly workspace_id: string;
   readonly run_id: string | null;
-  // A1 — null until the proposal is reviewed; carries the explicit
+  readonly target_object_kind: string;
+  // Null until the proposal is reviewed; carries the explicit
   // reviewer identity once review_memory_proposal completes.
   readonly reviewer_identity: string | null;
   readonly reviewer_assignment: Readonly<ProposalReviewerAssignment> | null;
-  // Phase 6 — scoped governance payload. Stored for accept-as-apply
-  // workflow only; intentionally not exposed through the public Proposal
+  // Scoped governance payload for accept-as-apply workflow only. Intentionally
+  // not exposed through the public Proposal
   // domain projection returned by findById/findPending.
   readonly proposed_changes: Readonly<MemoryEntryMutableFields> | null;
+  readonly proposed_path_relation: Readonly<PathRelationProposalPayload> | null;
   readonly target_baseline_updated_at: string | null;
   readonly source_delivery_ids: readonly string[] | null;
 }
@@ -124,6 +145,14 @@ export interface AcceptedMemoryUpdateInput {
   readonly expected_baseline_updated_at?: string | null;
 }
 
+export interface AcceptedPathRelationGovernanceInput {
+  readonly target_object_id: string;
+  readonly workspace_id: string;
+  readonly path_id_on_create: string;
+  readonly updated_at: string;
+  readonly caused_by: string;
+}
+
 export interface CreateProposalWithEventsOptions {
   readonly reviewerAssignment?: ProposalReviewerAssignmentInput;
 }
@@ -159,9 +188,9 @@ export interface ProposalRepo {
   findPendingByRunId(runId: string): Promise<Readonly<Proposal> | null>;
   assignReviewer(input: ProposalReviewerAssignmentInput): Promise<Readonly<ProposalReviewerAssignment>>;
   findReviewerAssignment(proposalId: string): Promise<Readonly<ProposalReviewerAssignment> | null>;
-  // A1 fix-loop (finding-5): reviewerIdentity is optional at the repo
-  // boundary so legacy callers (claim-promotion flows, fixtures) keep
-  // compiling, but every code path that should write
+  // reviewerIdentity is optional at the repo boundary so legacy callers
+  // (claim-promotion flows, fixtures) keep compiling, but every code path
+  // that should write
   // resolution_state ∈ ('accepted','rejected') now passes it. The
   // SqliteProposalRepo writes the column when present and leaves it
   // untouched when omitted.
@@ -197,6 +226,17 @@ export interface ProposalRepo {
     readonly memory: Readonly<MemoryEntry>;
     readonly events: readonly EventLogEntry[];
   }>>;
+  acceptPendingPathRelationGovernanceWithEvents(
+    proposalId: string,
+    updatedAt: string,
+    events: readonly ProposalResolutionEventInput[],
+    pathRelationGovernance: AcceptedPathRelationGovernanceInput,
+    options?: UpdatePendingResolutionOptions
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly path_relation: Readonly<PathRelation>;
+    readonly events: readonly EventLogEntry[];
+  }>>;
 }
 
 const PROPOSAL_SELECT_COLUMNS = `
@@ -218,6 +258,7 @@ const PROPOSAL_SELECT_COLUMNS = `
         target_object_kind,
         proposed_change_summary,
         proposed_changes,
+        proposed_path_relation,
         created_at,
         target_baseline_updated_at,
         source_delivery_ids
@@ -236,17 +277,31 @@ interface ProposalRow {
   readonly resolution_state: string;
   readonly expires_at: string | null;
   readonly last_updated_at: string;
-  // Scope metadata — available for workspace validation, not exposed in domain type.
+  // Scope metadata is available for workspace validation, not exposed in domain type.
   readonly workspace_id: string;
   readonly run_id: string | null;
-  // A1 — review identity + HITL summary projection columns.
+  // Review identity + HITL summary projection columns.
   readonly reviewer_identity: string | null;
   readonly target_object_kind: string;
   readonly proposed_change_summary: string;
   readonly proposed_changes: string | null;
+  readonly proposed_path_relation: string | null;
   readonly created_at: string | null;
   readonly target_baseline_updated_at: string | null;
   readonly source_delivery_ids: string | null;
+}
+
+interface ProposalPathRelationRow {
+  readonly path_id: string;
+  readonly workspace_id: string;
+  readonly anchors_json: string;
+  readonly constitution_json: string;
+  readonly effect_vector_json: string;
+  readonly plasticity_state_json: string;
+  readonly lifecycle_json: string;
+  readonly legitimacy_json: string;
+  readonly created_at: string;
+  readonly updated_at: string;
 }
 
 interface ProposalReviewerAssignmentRow {
@@ -264,6 +319,10 @@ interface PendingProposalSummaryRow extends ProposalRow {
   readonly is_overdue: 0 | 1;
 }
 
+interface RevokableGreenStatusRow {
+  readonly object_id: string;
+}
+
 export class SqliteProposalRepo implements ProposalRepo {
   private readonly createStatement;
   private readonly findByIdStatement;
@@ -279,10 +338,15 @@ export class SqliteProposalRepo implements ProposalRepo {
   private readonly updatePendingResolutionWithIdentityStatement;
   private readonly findMemoryEntryByIdStatement;
   private readonly updateMemoryEntryStatement;
+  private readonly findRevokableGreenStatusStatement;
+  private readonly revokeGreenStatusStatement;
+  private readonly findPathRelationByAnchorMemoryIdStatement;
+  private readonly createPathRelationStatement;
+  private readonly updatePathRelationLegitimacyStatement;
   private readonly eventLogWriter;
 
   public constructor(private readonly db: StorageDatabase) {
-    // A1 — INSERT now also writes the HITL projection columns
+    // INSERT also writes the HITL projection columns
     // (target_object_kind, proposed_change_summary, created_at).
     // Defaults from migration 058 keep legacy callers compatible if
     // they pass undefined for those fields.
@@ -305,10 +369,11 @@ export class SqliteProposalRepo implements ProposalRepo {
         target_object_kind,
         proposed_change_summary,
         proposed_changes,
+        proposed_path_relation,
         created_at,
         target_baseline_updated_at,
         source_delivery_ids
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     this.findByIdStatement = db.connection.prepare(`
@@ -379,8 +444,8 @@ export class SqliteProposalRepo implements ProposalRepo {
       WHERE proposal_id = ?
     `);
 
-    // A1 fix-loop (finding-5): companion statement for the legacy
-    // updateResolution path that also persists reviewer_identity.
+    // Companion statement for the legacy updateResolution path that
+    // also persists reviewer_identity.
     this.updateResolutionWithIdentityStatement = db.connection.prepare(`
       UPDATE proposals
       SET resolution_state = ?, last_updated_at = ?, reviewer_identity = ?
@@ -419,6 +484,75 @@ export class SqliteProposalRepo implements ProposalRepo {
       WHERE object_id = ?
     `);
 
+    this.findRevokableGreenStatusStatement = db.connection.prepare(`
+      SELECT object_id
+      FROM green_statuses
+      WHERE target_object_id = ?
+        AND workspace_id = ?
+        AND green_state IN ('eligible', 'grace')
+      LIMIT 1
+    `);
+
+    this.revokeGreenStatusStatement = db.connection.prepare(`
+      UPDATE green_statuses
+      SET
+        green_state = 'revoked',
+        revoke_reason = ?,
+        updated_at = ?,
+        last_transition_at = ?
+      WHERE object_id = ?
+        AND target_object_id = ?
+        AND workspace_id = ?
+        AND green_state IN ('eligible', 'grace')
+    `);
+
+    this.findPathRelationByAnchorMemoryIdStatement = db.connection.prepare(`
+      SELECT
+        path_id,
+        workspace_id,
+        anchors_json,
+        constitution_json,
+        effect_vector_json,
+        plasticity_state_json,
+        lifecycle_json,
+        legitimacy_json,
+        created_at,
+        updated_at
+      FROM path_relations
+      WHERE workspace_id = ?
+        AND (
+          json_extract(anchors_json, '$.source_anchor.object_id') = ?
+          OR json_extract(anchors_json, '$.target_anchor.object_id') = ?
+          OR json_extract(anchors_json, '$.source_anchor.source_object_id') = ?
+          OR json_extract(anchors_json, '$.target_anchor.source_object_id') = ?
+        )
+      ORDER BY
+        CASE WHEN COALESCE(json_extract(lifecycle_json, '$.status'), 'active') = 'retired' THEN 1 ELSE 0 END,
+        created_at ASC,
+        path_id ASC
+    `);
+
+    this.createPathRelationStatement = db.connection.prepare(`
+      INSERT INTO path_relations (
+        path_id,
+        workspace_id,
+        anchors_json,
+        constitution_json,
+        effect_vector_json,
+        plasticity_state_json,
+        lifecycle_json,
+        legitimacy_json,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    this.updatePathRelationLegitimacyStatement = db.connection.prepare(`
+      UPDATE path_relations
+      SET legitimacy_json = ?, updated_at = ?
+      WHERE path_id = ?
+    `);
+
     this.eventLogWriter = getEventLogWriter(db.connection);
   }
 
@@ -429,6 +563,7 @@ export class SqliteProposalRepo implements ProposalRepo {
     const targetObjectKind = parseNonEmptyString(input.target_object_kind, "target_object_kind");
     const proposedChangeSummary = input.proposed_change_summary ?? "";
     const proposedChanges = serializeProposedChanges(input.proposed_changes ?? null);
+    const proposedPathRelation = serializeProposedPathRelation(input.proposed_path_relation ?? null);
     const createdAt = input.created_at ?? parsedProposal.last_updated_at;
     const targetBaselineUpdatedAt = parseNullableTimestamp(input.target_baseline_updated_at ?? null);
     const sourceDeliveryIds = serializeSourceDeliveryIds(input.source_delivery_ids ?? null);
@@ -452,6 +587,7 @@ export class SqliteProposalRepo implements ProposalRepo {
         targetObjectKind,
         proposedChangeSummary,
         proposedChanges,
+        proposedPathRelation,
         createdAt,
         targetBaselineUpdatedAt,
         sourceDeliveryIds
@@ -481,6 +617,7 @@ export class SqliteProposalRepo implements ProposalRepo {
     const targetObjectKind = parseNonEmptyString(input.target_object_kind, "target_object_kind");
     const proposedChangeSummary = input.proposed_change_summary ?? "";
     const proposedChanges = serializeProposedChanges(input.proposed_changes ?? null);
+    const proposedPathRelation = serializeProposedPathRelation(input.proposed_path_relation ?? null);
     const createdAt = input.created_at ?? parsedProposal.last_updated_at;
     const targetBaselineUpdatedAt = parseNullableTimestamp(input.target_baseline_updated_at ?? null);
     const sourceDeliveryIds = serializeSourceDeliveryIds(input.source_delivery_ids ?? null);
@@ -510,6 +647,7 @@ export class SqliteProposalRepo implements ProposalRepo {
           targetObjectKind,
           proposedChangeSummary,
           proposedChanges,
+          proposedPathRelation,
           createdAt,
           targetBaselineUpdatedAt,
           sourceDeliveryIds
@@ -558,9 +696,11 @@ export class SqliteProposalRepo implements ProposalRepo {
             proposal: parseProposalRow(row),
             workspace_id: row.workspace_id,
             run_id: row.run_id,
+            target_object_kind: row.target_object_kind,
             reviewer_identity: row.reviewer_identity,
             reviewer_assignment: assignment,
             proposed_changes: parseProposedChanges(row.proposed_changes),
+            proposed_path_relation: parseProposedPathRelation(row.proposed_path_relation),
             target_baseline_updated_at: row.target_baseline_updated_at,
             source_delivery_ids: parseSourceDeliveryIds(row.source_delivery_ids)
           });
@@ -655,8 +795,8 @@ export class SqliteProposalRepo implements ProposalRepo {
     }
   }
 
-  // A1 (HITL daemon backbone) — projects pending rows into the
-  // soul.list_pending_proposals summary shape. Built dynamically so the
+  // Projects pending rows into the soul.list_pending_proposals summary
+  // shape. Built dynamically so the
   // optional since / limit filters compose; the underlying findPending
   // result is already workspace-scoped to keep the SECURITY invariant.
   public async findPendingSummaries(
@@ -810,8 +950,8 @@ export class SqliteProposalRepo implements ProposalRepo {
     const parsedProposalId = parseProposalId(proposalId);
     const parsedState = parseProposalResolutionState(state);
     const parsedUpdatedAt = parseUpdatedAt(updatedAt);
-    // A1 fix-loop (finding-5): persist reviewer_identity through the
-    // legacy update path. Empty/whitespace identities are rejected;
+    // Persist reviewer_identity through the legacy update path.
+    // Empty/whitespace identities are rejected;
     // when omitted, the column is left untouched (back-compat for
     // claim-promotion / auto-applied bankruptcy paths).
     const parsedReviewerIdentity =
@@ -907,8 +1047,8 @@ export class SqliteProposalRepo implements ProposalRepo {
     const parsedProposalId = parseProposalId(proposalId);
     const parsedState = parseProposalResolutionState(state);
     const parsedUpdatedAt = parseUpdatedAt(updatedAt);
-    // A1 — empty/whitespace identities are rejected; if the caller did
-    // not pass reviewerIdentity (legacy callers, e.g. claim-promotion
+    // Empty/whitespace identities are rejected; if the caller did not
+    // pass reviewerIdentity (legacy callers, e.g. claim-promotion
     // flows), the column is left untouched.
     const reviewerIdentity =
       options.reviewerIdentity === undefined
@@ -1059,6 +1199,32 @@ export class SqliteProposalRepo implements ProposalRepo {
             updated_fields: toUpdatedFieldNames(parsedMemoryUpdate.proposed_changes)
           })
         });
+        const revokableGreenStatus =
+          parsedFields.evidence_refs !== undefined &&
+          shouldRevokeGreenForEvidenceRewrite(existingMemory.evidence_refs, parsedFields.evidence_refs)
+            ? (this.findRevokableGreenStatusStatement.get(
+                existingMemory.object_id,
+                existingMemory.workspace_id
+              ) as RevokableGreenStatusRow | undefined)
+            : undefined;
+        const greenEvent =
+          revokableGreenStatus === undefined
+            ? undefined
+            : insertEventLogEntry(this.eventLogWriter, {
+                event_type: GreenGovernanceEventType.SOUL_GREEN_PIERCED,
+                entity_type: "green_status",
+                entity_id: revokableGreenStatus.object_id,
+                workspace_id: existingMemory.workspace_id,
+                run_id: existingMemory.run_id,
+                caused_by: parsedMemoryUpdate.caused_by,
+                payload_json: SoulGreenPiercedPayloadSchema.parse({
+                  object_id: revokableGreenStatus.object_id,
+                  target_object_id: existingMemory.object_id,
+                  revoke_reason: RevokeReason.MAPPING_REVOKED,
+                  workspace_id: existingMemory.workspace_id,
+                  occurred_at: parsedUpdatedAt
+                })
+              });
         const memoryResult = this.updateMemoryEntryStatement.run(
           parsedFields.content ?? null,
           parsedFields.domain_tags === undefined ? null : JSON.stringify(parsedFields.domain_tags),
@@ -1074,6 +1240,22 @@ export class SqliteProposalRepo implements ProposalRepo {
             "NOT_FOUND",
             `Memory entry ${parsedMemoryUpdate.target_object_id} was not found during update.`
           );
+        }
+        if (revokableGreenStatus !== undefined) {
+          const greenResult = this.revokeGreenStatusStatement.run(
+            RevokeReason.MAPPING_REVOKED,
+            parsedUpdatedAt,
+            parsedUpdatedAt,
+            revokableGreenStatus.object_id,
+            existingMemory.object_id,
+            existingMemory.workspace_id
+          );
+          if (greenResult.changes === 0) {
+            throw new StorageError(
+              "CONFLICT",
+              `Green status ${revokableGreenStatus.object_id} was not revokable during memory update.`
+            );
+          }
         }
 
         const updatedMemoryRow = this.findMemoryEntryByIdStatement.get(
@@ -1095,7 +1277,9 @@ export class SqliteProposalRepo implements ProposalRepo {
         return deepFreeze({
           proposal: parseProposalRow(updatedProposalRow),
           memory: updatedMemory,
-          events: [...storedReviewEvents, memoryEvent]
+          events: greenEvent === undefined
+            ? [...storedReviewEvents, memoryEvent]
+            : [...storedReviewEvents, memoryEvent, greenEvent]
         });
       })();
     } catch (error) {
@@ -1106,6 +1290,110 @@ export class SqliteProposalRepo implements ProposalRepo {
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to accept proposal ${parsedProposalId} with durable memory update.`,
+        error
+      );
+    }
+  }
+
+  public async acceptPendingPathRelationGovernanceWithEvents(
+    proposalId: string,
+    updatedAt: string,
+    events: readonly ProposalResolutionEventInput[],
+    pathRelationGovernance: AcceptedPathRelationGovernanceInput,
+    options: UpdatePendingResolutionOptions = {}
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly path_relation: Readonly<PathRelation>;
+    readonly events: readonly EventLogEntry[];
+  }>> {
+    const parsedProposalId = parseProposalId(proposalId);
+    const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+    const reviewerIdentity =
+      options.reviewerIdentity === undefined
+        ? undefined
+        : parseNonEmptyString(options.reviewerIdentity, "reviewer_identity");
+    const parsedPathRelationGovernance = parseAcceptedPathRelationGovernanceInput(
+      pathRelationGovernance
+    );
+
+    try {
+      return this.db.connection.transaction(() => {
+        const proposalRow = this.findByIdStatement.get(parsedProposalId) as ProposalRow | undefined;
+        if (proposalRow === undefined) {
+          throw new StorageError("NOT_FOUND", `Proposal ${parsedProposalId} was not found.`);
+        }
+        if (proposalRow.resolution_state !== "pending") {
+          throw this.createPendingResolutionFailure(parsedProposalId);
+        }
+        assertAcceptedPathRelationGovernanceMatchesProposal(
+          proposalRow,
+          parsedPathRelationGovernance
+        );
+
+        const memoryRow = this.findMemoryEntryByIdStatement.get(
+          parsedPathRelationGovernance.target_object_id
+        ) as MemoryEntryRow | undefined;
+        if (memoryRow === undefined) {
+          throw new StorageError(
+            "NOT_FOUND",
+            `Memory entry ${parsedPathRelationGovernance.target_object_id} was not found.`
+          );
+        }
+        const memory = parseMemoryEntryRow(memoryRow);
+        if (memory.workspace_id !== parsedPathRelationGovernance.workspace_id) {
+          throw new StorageError(
+            "NOT_FOUND",
+            `Memory entry ${parsedPathRelationGovernance.target_object_id} was not found in workspace ${parsedPathRelationGovernance.workspace_id}.`
+          );
+        }
+
+        const storedReviewEvents = events.map((event) => insertEventLogEntry(this.eventLogWriter, event));
+        const acceptedState = "accepted" satisfies ProposalResolutionState;
+        const result =
+          reviewerIdentity === undefined
+            ? this.updatePendingResolutionStatement.run(
+                acceptedState,
+                parsedUpdatedAt,
+                parsedProposalId
+              )
+            : this.updatePendingResolutionWithIdentityStatement.run(
+                acceptedState,
+                parsedUpdatedAt,
+                reviewerIdentity,
+                parsedProposalId
+              );
+
+        if (result.changes === 0) {
+          throw this.createPendingResolutionFailure(parsedProposalId);
+        }
+
+        const pathApply = this.upsertStrictlyGovernedPathRelation(
+          parsedPathRelationGovernance,
+          proposalRow
+        );
+
+        const updatedProposalRow = this.findByIdStatement.get(parsedProposalId) as ProposalRow | undefined;
+        if (updatedProposalRow === undefined) {
+          throw new StorageError("NOT_FOUND", `Proposal ${parsedProposalId} was not found after update.`);
+        }
+
+        return deepFreeze({
+          proposal: parseProposalRow(updatedProposalRow),
+          path_relation: pathApply.pathRelation,
+          events:
+            pathApply.event === null
+              ? storedReviewEvents
+              : [...storedReviewEvents, pathApply.event]
+        });
+      })();
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to accept proposal ${parsedProposalId} with durable path relation governance update.`,
         error
       );
     }
@@ -1135,6 +1423,103 @@ export class SqliteProposalRepo implements ProposalRepo {
       | ProposalReviewerAssignmentRow
       | undefined;
     return row === undefined ? null : parseProposalReviewerAssignmentRow(row);
+  }
+
+  private upsertStrictlyGovernedPathRelation(
+    input: ReturnType<typeof parseAcceptedPathRelationGovernanceInput>,
+    proposalRow: ProposalRow
+  ): Readonly<{ readonly pathRelation: Readonly<PathRelation>; readonly event: EventLogEntry | null }> {
+    const proposedPathRelation = parseProposedPathRelation(proposalRow.proposed_path_relation);
+    const existingRows = this.findPathRelationByAnchorMemoryIdStatement.all(
+      input.workspace_id,
+      input.target_object_id,
+      input.target_object_id,
+      input.target_object_id,
+      input.target_object_id
+    ) as ProposalPathRelationRow[];
+    const existingRow =
+      proposedPathRelation === null
+        ? existingRows[0]
+        : existingRows.find((row) =>
+            pathRelationMatchesProposalPayload(
+              parseProposalPathRelationRow(row),
+              input.target_object_id,
+              proposedPathRelation
+            )
+          );
+
+    if (existingRow !== undefined) {
+      const existing = parseProposalPathRelationRow(existingRow);
+      const updated = applyPathRelationProposal(existing, input, proposedPathRelation);
+      const result = this.updatePathRelationLegitimacyStatement.run(
+        JSON.stringify(updated.legitimacy),
+        updated.updated_at,
+        updated.path_id
+      );
+      if (result.changes === 0) {
+        throw new StorageError("NOT_FOUND", `Path relation ${updated.path_id} was not found.`);
+      }
+      const pathEvent = insertEventLogEntry(this.eventLogWriter, {
+        event_type: RuntimeGovernanceEventType.PATH_RELATION_LEGITIMACY_UPDATED,
+        entity_type: "path_relation",
+        entity_id: updated.path_id,
+        workspace_id: updated.workspace_id,
+        run_id: proposalRow.run_id,
+        caused_by: input.caused_by,
+        payload_json: parseRuntimeGovernanceEventPayload(
+          RuntimeGovernanceEventType.PATH_RELATION_LEGITIMACY_UPDATED,
+          {
+            path_id: updated.path_id,
+            workspace_id: updated.workspace_id,
+            previous_governance_class: existing.legitimacy.governance_class,
+            new_governance_class: updated.legitimacy.governance_class,
+            previous_evidence_basis: existing.legitimacy.evidence_basis,
+            new_evidence_basis: updated.legitimacy.evidence_basis,
+            updated_at: updated.updated_at
+          }
+        ) as unknown as Record<string, unknown>
+      });
+      return deepFreeze({ pathRelation: updated, event: pathEvent });
+    }
+
+    const created =
+      proposedPathRelation === null
+        ? createStrictlyGovernedPathRelation(input)
+        : createPathRelationFromProposalPayload(input, proposedPathRelation);
+    const pathEvent = insertEventLogEntry(this.eventLogWriter, {
+      event_type: RuntimeGovernanceEventType.PATH_RELATION_CREATED,
+      entity_type: "path_relation",
+      entity_id: created.path_id,
+      workspace_id: created.workspace_id,
+      run_id: proposalRow.run_id,
+      caused_by: input.caused_by,
+      payload_json: parseRuntimeGovernanceEventPayload(
+        RuntimeGovernanceEventType.PATH_RELATION_CREATED,
+        {
+          path_id: created.path_id,
+          workspace_id: created.workspace_id,
+          relation_kind: created.constitution.relation_kind,
+          source_anchor_kind: created.anchors.source_anchor.kind,
+          target_anchor_kind: created.anchors.target_anchor.kind,
+          initial_strength: created.plasticity_state.strength,
+          governance_class: created.legitimacy.governance_class,
+          created_at: created.created_at
+        }
+      ) as unknown as Record<string, unknown>
+    });
+    this.createPathRelationStatement.run(
+      created.path_id,
+      created.workspace_id,
+      JSON.stringify(created.anchors),
+      JSON.stringify(created.constitution),
+      JSON.stringify(created.effect_vector),
+      JSON.stringify(created.plasticity_state),
+      JSON.stringify(created.lifecycle),
+      JSON.stringify(created.legitimacy),
+      created.created_at,
+      created.updated_at
+    );
+    return deepFreeze({ pathRelation: created, event: pathEvent });
   }
 }
 
@@ -1210,6 +1595,66 @@ function parseProposedChanges(value: string | null): Readonly<MemoryEntryMutable
   }
 }
 
+function serializeProposedPathRelation(
+  value: PathRelationProposalPayload | null
+): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  const parsed = parsePathRelationProposalPayload(value);
+  return JSON.stringify(parsed);
+}
+
+function parseProposedPathRelation(value: string | null): Readonly<PathRelationProposalPayload> | null {
+  if (value === null) {
+    return null;
+  }
+
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(value);
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to parse proposal proposed_path_relation JSON.", error);
+  }
+
+  return parsePathRelationProposalPayload(parsedJson);
+}
+
+function parsePathRelationProposalPayload(value: unknown): Readonly<PathRelationProposalPayload> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate proposal proposed_path_relation.");
+  }
+  const candidate = value as Partial<PathRelationProposalPayload>;
+  try {
+    const relation = PathRelationSchema.parse({
+      path_id: "proposal-payload-validation",
+      workspace_id: "proposal-payload-validation-workspace",
+      anchors: {
+        source_anchor: { kind: "object", object_id: "proposal-payload-validation-source" },
+        target_anchor: candidate.target_anchor
+      },
+      constitution: candidate.constitution,
+      effect_vector: candidate.effect_vector,
+      plasticity_state: candidate.plasticity_state,
+      lifecycle: candidate.lifecycle,
+      legitimacy: candidate.legitimacy,
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z"
+    });
+    return deepFreeze({
+      target_anchor: relation.anchors.target_anchor,
+      constitution: relation.constitution,
+      effect_vector: relation.effect_vector,
+      plasticity_state: relation.plasticity_state,
+      lifecycle: relation.lifecycle,
+      legitimacy: relation.legitimacy
+    });
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate proposal proposed_path_relation.", error);
+  }
+}
+
 function serializeSourceDeliveryIds(value: readonly string[] | null): string | null {
   if (value === null) {
     return null;
@@ -1272,6 +1717,24 @@ function parseAcceptedMemoryUpdateInput(
   });
 }
 
+function parseAcceptedPathRelationGovernanceInput(
+  input: AcceptedPathRelationGovernanceInput
+): Readonly<{
+  readonly target_object_id: string;
+  readonly workspace_id: string;
+  readonly path_id_on_create: string;
+  readonly updated_at: string;
+  readonly caused_by: string;
+}> {
+  return deepFreeze({
+    target_object_id: parseNonEmptyString(input.target_object_id, "target_object_id"),
+    workspace_id: parseWorkspaceId(input.workspace_id),
+    path_id_on_create: parseNonEmptyString(input.path_id_on_create, "path_id_on_create"),
+    updated_at: parseUpdatedAt(input.updated_at),
+    caused_by: parseNonEmptyString(input.caused_by, "caused_by")
+  });
+}
+
 function assertAcceptedMemoryUpdateMatchesProposal(
   row: ProposalRow,
   update: ReturnType<typeof parseAcceptedMemoryUpdateInput>
@@ -1294,11 +1757,184 @@ function assertAcceptedMemoryUpdateMatchesProposal(
   }
 }
 
+function assertAcceptedPathRelationGovernanceMatchesProposal(
+  row: ProposalRow,
+  update: ReturnType<typeof parseAcceptedPathRelationGovernanceInput>
+): void {
+  if (
+    row.workspace_id !== update.workspace_id ||
+    row.target_object_kind !== "path_relation" ||
+    row.derived_from !== update.target_object_id
+  ) {
+    throw createAcceptedPathRelationGovernanceMismatch(row.proposal_id);
+  }
+}
+
 function createAcceptedMemoryUpdateMismatch(proposalId: string): StorageError {
   return new StorageError(
     "CONFLICT",
     `Accepted memory update does not match proposal ${proposalId}.`
   );
+}
+
+function createAcceptedPathRelationGovernanceMismatch(proposalId: string): StorageError {
+  return new StorageError(
+    "CONFLICT",
+    `Accepted path relation governance update does not match proposal ${proposalId}.`
+  );
+}
+
+function createStrictlyGovernedPathRelation(
+  input: ReturnType<typeof parseAcceptedPathRelationGovernanceInput>
+): Readonly<PathRelation> {
+  return PathRelationSchema.parse({
+    path_id: input.path_id_on_create,
+    workspace_id: input.workspace_id,
+    anchors: {
+      source_anchor: { kind: "object", object_id: input.target_object_id },
+      target_anchor: {
+        kind: "object_facet",
+        object_id: input.target_object_id,
+        facet_key: "strictly_governed_constraint"
+      }
+    },
+    constitution: {
+      relation_kind: "governance_constraint",
+      why_this_relation_exists: ["operator accepted strictly_governed governance promotion"]
+    },
+    effect_vector: {
+      salience: 1,
+      recall_bias: 1,
+      verification_bias: 1,
+      unfinishedness_bias: 0,
+      default_manifestation_preference: "stance_bias"
+    },
+    plasticity_state: {
+      strength: 1,
+      direction_bias: "source_to_target",
+      stability_class: "pinned",
+      support_events_count: 1,
+      contradiction_events_count: 0,
+      last_reinforced_at: input.updated_at
+    },
+    lifecycle: {
+      status: "active",
+      retirement_rule: "manual"
+    },
+    legitimacy: {
+      evidence_basis: [input.caused_by],
+      governance_class: PathGovernanceClass.STRICTLY_GOVERNED
+    },
+    created_at: input.updated_at,
+    updated_at: input.updated_at
+  });
+}
+
+function createPathRelationFromProposalPayload(
+  input: ReturnType<typeof parseAcceptedPathRelationGovernanceInput>,
+  payload: Readonly<PathRelationProposalPayload>
+): Readonly<PathRelation> {
+  return PathRelationSchema.parse({
+    path_id: input.path_id_on_create,
+    workspace_id: input.workspace_id,
+    anchors: {
+      source_anchor: { kind: "object", object_id: input.target_object_id },
+      target_anchor: payload.target_anchor
+    },
+    constitution: payload.constitution,
+    effect_vector: payload.effect_vector,
+    plasticity_state: {
+      ...payload.plasticity_state,
+      last_reinforced_at: payload.plasticity_state.last_reinforced_at ?? input.updated_at
+    },
+    lifecycle: payload.lifecycle,
+    legitimacy: {
+      ...payload.legitimacy,
+      evidence_basis: appendUniqueEvidenceBasis(
+        payload.legitimacy.evidence_basis,
+        input.caused_by
+      )
+    },
+    created_at: input.updated_at,
+    updated_at: input.updated_at
+  });
+}
+
+function applyPathRelationProposal(
+  existing: Readonly<PathRelation>,
+  input: ReturnType<typeof parseAcceptedPathRelationGovernanceInput>,
+  payload: Readonly<PathRelationProposalPayload> | null
+): Readonly<PathRelation> {
+  const proposedLegitimacy = payload?.legitimacy ?? existing.legitimacy;
+  return PathRelationSchema.parse({
+    ...existing,
+    legitimacy: {
+      ...proposedLegitimacy,
+      evidence_basis: appendUniqueEvidenceBasis(
+        existing.legitimacy.evidence_basis,
+        ...proposedLegitimacy.evidence_basis,
+        input.caused_by
+      ),
+      governance_class:
+        payload === null
+          ? PathGovernanceClass.STRICTLY_GOVERNED
+          : proposedLegitimacy.governance_class
+    },
+    updated_at: input.updated_at
+  });
+}
+
+function pathRelationMatchesProposalPayload(
+  relation: Readonly<PathRelation>,
+  sourceObjectId: string,
+  payload: Readonly<PathRelationProposalPayload>
+): boolean {
+  return (
+    relation.anchors.source_anchor.kind === "object" &&
+    relation.anchors.source_anchor.object_id === sourceObjectId &&
+    serializePathAnchorRef(relation.anchors.target_anchor) ===
+      serializePathAnchorRef(payload.target_anchor)
+  );
+}
+
+function parseProposalPathRelationRow(row: ProposalPathRelationRow): Readonly<PathRelation> {
+  return PathRelationSchema.parse({
+    path_id: row.path_id,
+    workspace_id: row.workspace_id,
+    anchors: parseJsonField(row.anchors_json, "anchors"),
+    constitution: parseJsonField(row.constitution_json, "constitution"),
+    effect_vector: parseJsonField(row.effect_vector_json, "effect_vector"),
+    plasticity_state: parseJsonField(row.plasticity_state_json, "plasticity_state"),
+    lifecycle: parseJsonField(row.lifecycle_json, "lifecycle"),
+    legitimacy: parseJsonField(row.legitimacy_json, "legitimacy"),
+    created_at: row.created_at,
+    updated_at: row.updated_at
+  });
+}
+
+function parseJsonField(value: string, fieldName: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch (error) {
+    throw new StorageError(
+      "VALIDATION_FAILED",
+      `Failed to parse path relation ${fieldName}.`,
+      error
+    );
+  }
+}
+
+function appendUniqueEvidenceBasis(
+  current: readonly string[],
+  ...nextValues: readonly string[]
+): readonly string[] {
+  const result = [...current];
+  for (const next of nextValues) {
+    if (!result.includes(next)) {
+      result.push(next);
+    }
+  }
+  return result;
 }
 
 function proposedChangesMatch(
@@ -1324,6 +1960,17 @@ function stringArraysMatch(
   }
 
   return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function shouldRevokeGreenForEvidenceRewrite(
+  previousEvidenceRefs: readonly string[],
+  nextEvidenceRefs: readonly string[]
+): boolean {
+  if (previousEvidenceRefs.length === 0) {
+    return false;
+  }
+  const next = new Set(nextEvidenceRefs);
+  return !previousEvidenceRefs.some((ref) => next.has(ref));
 }
 
 function toUpdatedFieldNames(fields: MemoryEntryMutableFields): string[] {

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "cbc2a0396bf179fb1a07ea962ed3ba975872015904345eec858caeef11e1ddb2",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"item\",\"confidence\":0.88,\"matched_text\":\"I also need to add the aquamarine ring I got on sale at 20% off to the list.\",\"distilled_fact\":\"The user wants to add an aquamarine ring to a list.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"item\",\"confidence\":0.93,\"matched_text\":\"I bought it on June 1st, but I don't know the original price.\",\"distilled_fact\":\"The user bought the aquamarine ring on June 1st.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"item\",\"confidence\":0.91,\"matched_text\":\"I bought it on June 1st, but I don't know the original price.\",\"distilled_fact\":\"The user does not know the original price of the aquamarine ring.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"item\",\"confidence\":0.9,\"matched_text\":\"I also need to add the aquamarine ring I got on sale at 20% off to the list.\",\"distilled_fact\":\"The aquamarine ring was purchased on sale at 20% off.\"}]}",
+  "extracted_at": "2026-05-21T09:09:17.021Z"
+}

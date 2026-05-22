@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "fe24b8424195f2903ae78cd578682bf8183386607774126ee8c535db95eec386",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity_preference\",\"confidence\":0.94,\"matched_text\":\"I'm definitely going to try pairing an IPA with a spicy curry.\",\"distilled_fact\":\"The user is definitely going to try pairing an IPA with a spicy curry.\"}]}",
+  "extracted_at": "2026-05-21T09:12:52.315Z"
+}

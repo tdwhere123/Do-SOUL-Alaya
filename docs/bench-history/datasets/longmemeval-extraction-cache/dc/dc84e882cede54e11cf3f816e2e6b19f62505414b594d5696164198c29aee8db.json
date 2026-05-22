@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "dc84e882cede54e11cf3f816e2e6b19f62505414b594d5696164198c29aee8db",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"concept\",\"confidence\":0.72,\"matched_text\":\"the formation of national identity through shared experiences can also lead to divisions and conflicts between nations\",\"distilled_fact\":\"The formation of national identity through shared experiences can also lead to divisions and conflicts between nations.\"}]}",
+  "extracted_at": "2026-05-21T07:59:21.864Z"
+}

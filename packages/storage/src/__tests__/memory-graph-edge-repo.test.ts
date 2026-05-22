@@ -263,10 +263,13 @@ describe("SqliteMemoryGraphEdgeRepo", () => {
 
     // 2.0 + 0.5 + 0.6 - 0.5 - 0.4 = 2.2
     await expect(repo.countInboundEdgesWeighted(targetId, "workspace-1")).resolves.toBeCloseTo(2.2, 10);
+    await expect(repo.countInboundRecalls(targetId, "workspace-1")).resolves.toBe(2);
     // outsideTargetId has one inbound supports edge (wedge-out-1) → 1.0
     await expect(repo.countInboundEdgesWeighted(outsideTargetId, "workspace-1")).resolves.toBeCloseTo(1.0, 10);
+    await expect(repo.countInboundRecalls(outsideTargetId, "workspace-1")).resolves.toBe(0);
     // wrong workspace → 0
     await expect(repo.countInboundEdgesWeighted(targetId, "workspace-other")).resolves.toBe(0);
+    await expect(repo.countInboundRecalls(targetId, "workspace-other")).resolves.toBe(0);
   });
 
   it("limits neighbor lists to 200 edges with deterministic ordering", async () => {

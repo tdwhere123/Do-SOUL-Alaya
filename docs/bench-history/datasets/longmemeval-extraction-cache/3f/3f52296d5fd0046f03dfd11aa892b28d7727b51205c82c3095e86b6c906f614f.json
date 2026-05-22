@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "3f52296d5fd0046f03dfd11aa892b28d7727b51205c82c3095e86b6c906f614f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"travel_itinerary\",\"confidence\":0.93,\"matched_text\":\"I think I'll add Castello di Brolio and Cantina Fratelli Pardi to my itinerary, as they both seem like great options for wine tastings and tours.\",\"distilled_fact\":\"The user plans to add Castello di Brolio and Cantina Fratelli Pardi to the user's itinerary for wine tastings and tours.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"travel_interest\",\"confidence\":0.95,\"matched_text\":\"I'm also interested in visiting some local olive oil producers to learn more about the production process and taste some of the region's best olive oils.\",\"distilled_fact\":\"The user is interested in visiting local olive oil producers to learn more about the production process and taste some of the region's best olive oils.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"place\",\"confidence\":0.88,\"matched_text\":\"Can you recommend any olive oil producers or farms in Tuscany and Umbria that I should visit?\",\"distilled_fact\":\"The user is considering visiting olive oil producers or farms in Tuscany and Umbria.\"}]}",
+  "extracted_at": "2026-05-21T08:58:43.824Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "cfdbd252bc9980a6133a14e8419fa0ca87bc71620fcac3f74e53b209515e4bee",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"music genre\",\"confidence\":0.94,\"matched_text\":\"Based on your interest in indie-folk\",\"distilled_fact\":\"The user has an interest in indie-folk.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.86,\"matched_text\":\"I love that you're keeping a music journal!\",\"distilled_fact\":\"The user is keeping a music journal.\"}]}",
+  "extracted_at": "2026-05-21T08:13:57.694Z"
+}

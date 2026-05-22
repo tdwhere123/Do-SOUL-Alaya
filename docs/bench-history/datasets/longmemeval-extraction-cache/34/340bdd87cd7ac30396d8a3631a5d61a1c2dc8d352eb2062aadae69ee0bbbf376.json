@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "340bdd87cd7ac30396d8a3631a5d61a1c2dc8d352eb2062aadae69ee0bbbf376",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"schedule_routine\",\"confidence\":0.93,\"matched_text\":\"I think this revised routine is more realistic for me.\",\"distilled_fact\":\"The user thinks this revised morning routine is more realistic for them.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"ability_constraint\",\"confidence\":0.95,\"matched_text\":\"I'm worried that I might not be able to get ready in just 30 minutes.\",\"distilled_fact\":\"The user is worried that they might not be able to get ready in just 30 minutes.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"schedule_routine\",\"confidence\":0.97,\"matched_text\":\"Can I allocate a bit more time for getting ready, and maybe cut back on my breakfast time instead?\",\"distilled_fact\":\"The user wants to allocate a bit more time for getting ready and cut back on breakfast time instead.\"}]}",
+  "extracted_at": "2026-05-21T09:02:05.762Z"
+}

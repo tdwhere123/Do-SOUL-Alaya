@@ -7,6 +7,12 @@ import {
 import type { StorageDatabase } from "../db.js";
 import { StorageError } from "../errors.js";
 import { deepFreeze } from "./shared/deep-freeze.js";
+import {
+  mergeFtsLanes,
+  queryFtsLane,
+  splitFtsLanes,
+  tokenizeFtsQuery
+} from "./shared/fts-lane-routing.js";
 import { parseTimestamp } from "./shared/validators.js";
 
 export interface EvidenceCapsuleKeywordHit {
@@ -17,6 +23,7 @@ export interface EvidenceCapsuleKeywordHit {
 export interface EvidenceCapsuleRepo {
   create(capsule: EvidenceCapsule): Promise<Readonly<EvidenceCapsule>>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;
+  findByIds(objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findByRunId(runId: string): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findByHealth(health: EvidenceHealthState): Promise<readonly Readonly<EvidenceCapsule>[]>;
@@ -54,6 +61,8 @@ interface EvidenceCapsuleRow {
   readonly surface_id: string | null;
 }
 
+// see also: ./shared/fts-lane-routing.ts — the porter/trigram dual-lane
+// query split and ordinal-rank merge shared with synthesis-capsule-repo.ts.
 export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
   private readonly createStatement;
   private readonly findByIdStatement;
@@ -61,8 +70,10 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
   private readonly findByWorkspaceIdStatement;
   private readonly findByHealthStatement;
   private readonly updateHealthStatement;
-  // see also: 068-evidence-capsule-fts.sql — virtual FTS5 table.
+  // see also: 078-evidence-capsule-fts-dual.sql — porter unicode61 word lane.
   private readonly searchByKeywordStatement;
+  // see also: 078-evidence-capsule-fts-dual.sql — trigram CJK/substring lane.
+  private readonly searchByKeywordTrigramStatement;
 
   public constructor(private readonly db: StorageDatabase) {
     this.createStatement = db.connection.prepare(`
@@ -201,6 +212,20 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
       ORDER BY raw_rank ASC, evidence_capsule_fts.object_id ASC
       LIMIT ?
     `);
+    this.searchByKeywordTrigramStatement = db.connection.prepare(`
+      SELECT
+        evidence_capsule_fts_trigram.object_id,
+        bm25(evidence_capsule_fts_trigram) AS raw_rank
+      FROM evidence_capsule_fts_trigram
+      JOIN evidence_capsules
+        ON evidence_capsules.object_id = evidence_capsule_fts_trigram.object_id
+      WHERE
+        evidence_capsule_fts_trigram.workspace_id = ?
+        AND evidence_capsule_fts_trigram MATCH ?
+        AND COALESCE(evidence_capsules.lifecycle_state, '') != 'retired'
+      ORDER BY raw_rank ASC, evidence_capsule_fts_trigram.object_id ASC
+      LIMIT ?
+    `);
   }
 
   public async searchByKeyword(
@@ -213,37 +238,28 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
       return Object.freeze([]);
     }
     try {
-      const tokens = trimmed
-        .normalize("NFKC")
-        .split(/[^\p{L}\p{N}_]+/u)
-        .filter((token) => token.length >= 2)
-        .slice(0, 16);
+      const tokens = tokenizeFtsQuery(trimmed);
       if (tokens.length === 0) {
         return Object.freeze([]);
       }
-      const matchExpression = tokens.map((token) => `"${token.replace(/"/g, '""')}"`).join(" OR ");
-      const rows = this.searchByKeywordStatement.all(
-        workspaceId,
-        matchExpression,
-        limit
-      ) as ReadonlyArray<{ readonly object_id: string; readonly raw_rank: number }>;
-      if (rows.length === 0) {
-        return Object.freeze([]);
-      }
-      // bm25 returns negative scores; normalize so 1.0 = top, 0.0 = bottom.
-      const ranks = rows.map((row) => row.raw_rank);
-      const maxRank = Math.max(...ranks);
-      const minRank = Math.min(...ranks);
-      const span = maxRank - minRank;
-      return Object.freeze(
-        rows.map((row) =>
-          Object.freeze({
-            object_id: row.object_id,
-            normalized_rank:
-              span <= 0 ? 1 : 1 - (row.raw_rank - minRank) / span
-          })
-        )
-      );
+      // Script-routed dual-lane FTS: word tokens to the porter unicode61 lane,
+      // CJK-bearing tokens to the trigram lane. The merged result preserves the
+      // EvidenceCapsuleKeywordHit contract (normalized_rank, 1.0 = top).
+      const { porterTokens, trigramTokens } = splitFtsLanes(tokens);
+      const porterHits =
+        porterTokens.length === 0
+          ? []
+          : queryFtsLane(this.searchByKeywordStatement, workspaceId, porterTokens, limit);
+      const trigramHits =
+        trigramTokens.length === 0
+          ? []
+          : queryFtsLane(
+              this.searchByKeywordTrigramStatement,
+              workspaceId,
+              trigramTokens,
+              limit
+            );
+      return mergeFtsLanes(porterHits, trigramHits, limit);
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -294,6 +310,49 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
       return row === undefined ? null : parseEvidenceCapsuleRow(row);
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to load evidence capsule ${objectId}.`, error);
+    }
+  }
+
+  public async findByIds(objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]> {
+    const uniqueIds = [...new Set(objectIds.map((objectId) => objectId.trim()).filter((objectId) => objectId.length > 0))];
+    if (uniqueIds.length === 0) {
+      return [];
+    }
+
+    try {
+      const rows: EvidenceCapsuleRow[] = [];
+      for (let offset = 0; offset < uniqueIds.length; offset += 500) {
+        const chunk = uniqueIds.slice(offset, offset + 500);
+        const placeholders = chunk.map(() => "?").join(", ");
+        const statement = this.db.connection.prepare(`
+          SELECT
+            object_id,
+            object_kind,
+            schema_version,
+            lifecycle_state,
+            created_at,
+            updated_at,
+            created_by,
+            evidence_kind,
+            semantic_anchor,
+            event_anchor,
+            physical_anchor,
+            evidence_health_state,
+            gist,
+            excerpt,
+            source_hash,
+            run_id,
+            workspace_id,
+            surface_id
+          FROM evidence_capsules
+          WHERE object_id IN (${placeholders})
+          ORDER BY created_at ASC, object_id ASC
+        `);
+        rows.push(...statement.all(...chunk) as EvidenceCapsuleRow[]);
+      }
+      return rows.map((row) => parseEvidenceCapsuleRow(row));
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to load evidence capsules by ids.", error);
     }
   }
 

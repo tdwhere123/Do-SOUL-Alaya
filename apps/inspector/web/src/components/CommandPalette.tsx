@@ -18,6 +18,7 @@ interface PaletteItem {
 
 const PAGE_ITEMS: ReadonlyArray<Omit<PaletteItem, "action"> & { readonly to: string }> = [
   { id: "page-overview", kind: "page", title: "Overview", subtitle: "/overview", to: "/overview" },
+  { id: "page-bench-trend", kind: "page", title: "Bench Trend", subtitle: "/bench-trend", to: "/bench-trend" },
   { id: "page-graph", kind: "page", title: "Memory Graph", subtitle: "/graph", to: "/graph" },
   { id: "page-memory-browser", kind: "page", title: "Memory Browser", subtitle: "/memory-browser", to: "/memory-browser" },
   { id: "page-proposals", kind: "page", title: "Pending Proposals", subtitle: "/proposals", to: "/proposals" },

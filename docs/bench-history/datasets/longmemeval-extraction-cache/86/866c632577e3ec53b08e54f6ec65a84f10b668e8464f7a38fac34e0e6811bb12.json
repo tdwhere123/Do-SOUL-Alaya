@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "866c632577e3ec53b08e54f6ec65a84f10b668e8464f7a38fac34e0e6811bb12",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"task_request\",\"confidence\":0.94,\"matched_text\":\"create the focal, sub-ordinate and super-ordinate goals based on the above 9 interviews and means end theory of Perception towards augmented reality in marketing\",\"distilled_fact\":\"The user requested creation of the focal, sub-ordinate, and super-ordinate goals based on the above 9 interviews and means-end theory of perception towards augmented reality in marketing.\"}]}",
+  "extracted_at": "2026-05-21T07:49:49.812Z"
+}

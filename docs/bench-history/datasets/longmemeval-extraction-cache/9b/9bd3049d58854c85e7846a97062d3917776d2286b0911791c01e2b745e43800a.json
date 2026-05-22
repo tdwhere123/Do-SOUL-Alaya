@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "9bd3049d58854c85e7846a97062d3917776d2286b0911791c01e2b745e43800a",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"assistant\",\"confidence\":0.74,\"matched_text\":\"I really appreciate your help and advice.\",\"distilled_fact\":\"The speaker appreciates the assistant's help and advice.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"speaker\",\"confidence\":0.88,\"matched_text\":\"I find it hard to stay focused sometimes.\",\"distilled_fact\":\"The speaker finds it hard to stay focused sometimes.\"}]}",
+  "extracted_at": "2026-05-21T07:57:49.345Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "6d27a650e2e4d2d1018384d36f5b401ea4c3cf23afa8a625c00f53c9725bcfdb",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"entity\",\"confidence\":0.44,\"matched_text\":\"the miner\",\"distilled_fact\":\"The conversation refers to a miner.\"}]}",
+  "extracted_at": "2026-05-21T07:15:35.411Z"
+}

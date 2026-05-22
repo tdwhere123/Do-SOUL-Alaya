@@ -40,6 +40,7 @@ export interface GraphExploreServiceEdgeRepoPort {
    * diagnostic surfaces that still need a raw supports-only count. */
   countInboundSupports(memoryId: string, workspaceId: string): Promise<number>;
   countInboundEdgesWeighted(memoryId: string, workspaceId: string): Promise<number>;
+  countInboundRecalls?(memoryId: string, workspaceId: string): Promise<number>;
   delete(edgeId: string): Promise<void>;
 }
 
@@ -226,6 +227,13 @@ export class GraphExploreService {
       parseObjectId(memoryId),
       parseObjectId(workspaceId)
     );
+  }
+
+  public async countInboundRecalls(memoryId: string, workspaceId: string): Promise<number> {
+    return await (this.dependencies.edgeRepo.countInboundRecalls?.(
+      parseObjectId(memoryId),
+      parseObjectId(workspaceId)
+    ) ?? Promise.resolve(0));
   }
 
   public async deleteEdge(edgeId: string): Promise<void> {

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "97dd964769e13bda0ddc55692ac25fdf269fe5e346f22f54046155c5e537754c",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"tv_show\",\"confidence\":0.93,\"matched_text\":\"User: Can you recommend some TV shows similar to \\\"Avenue 5\\\" that I might enjoy?\",\"distilled_fact\":\"The user might enjoy TV shows similar to \\\"Avenue 5\\\".\"}]}",
+  "extracted_at": "2026-05-21T09:16:44.613Z"
+}

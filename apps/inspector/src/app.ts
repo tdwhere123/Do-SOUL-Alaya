@@ -23,15 +23,18 @@ export const INSPECTOR_ROUTE_SURFACE = Object.freeze([
   "PATCH /api/config/runtime/embedding-supplement",
   "GET /api/config/:workspaceId/garden-compute",
   "PATCH /api/config/runtime/garden-compute",
+  "GET /api/config/:workspaceId/manifestation-budget",
+  "PATCH /api/config/:workspaceId/manifestation-budget",
   "GET /api/bench-summary",
+  "GET /api/bench-trend",
   "GET /api/embedding-status/:workspaceId",
   "GET /api/graph/:workspaceId",
   "GET /api/memory-entries/:workspaceId",
   "GET /api/pointers/:workspaceId/:objectId",
   "GET /api/recall-stats/:workspaceId",
   "GET /api/status",
-  // A1 (HITL daemon backbone) — Inspector loopback for the new
-  // pending-proposals listing tool plus accept/reject.
+  // Inspector loopback routes share the attached-agent proposal review
+  // workflow for pending-proposals listing plus accept/reject.
   "GET /api/proposals/:workspaceId/pending",
   "POST /api/proposals/:workspaceId/:proposalId/review",
   "POST /api/proposals/:workspaceId/memory/:memoryId/keep",

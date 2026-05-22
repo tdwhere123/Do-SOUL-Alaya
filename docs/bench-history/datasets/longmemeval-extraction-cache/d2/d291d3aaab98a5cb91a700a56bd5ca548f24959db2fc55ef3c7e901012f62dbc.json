@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "d291d3aaab98a5cb91a700a56bd5ca548f24959db2fc55ef3c7e901012f62dbc",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"food_flavor_combination\",\"confidence\":0.92,\"matched_text\":\"I'll definitely try the cacao and chili combination.\",\"distilled_fact\":\"The speaker wants to try the cacao and chili combination.\"},{\"signal_kind\":\"potential_request\",\"object_kind\":\"food_preference_query\",\"confidence\":0.84,\"matched_text\":\"Do you have any suggestions for savory dishes that use this flavor combination?\",\"distilled_fact\":\"The speaker wants suggestions for savory dishes that use the cacao and chili flavor combination.\"}]}",
+  "extracted_at": "2026-05-21T07:45:52.679Z"
+}

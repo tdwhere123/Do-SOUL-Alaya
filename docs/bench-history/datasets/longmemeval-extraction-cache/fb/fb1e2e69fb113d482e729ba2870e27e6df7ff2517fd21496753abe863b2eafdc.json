@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "fb1e2e69fb113d482e729ba2870e27e6df7ff2517fd21496753abe863b2eafdc",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"topic\",\"confidence\":0.84,\"matched_text\":\"These are some great ideas for incorporating the cacao and chili combination into savory dishes.\",\"distilled_fact\":\"The user likes ideas for incorporating the cacao and chili combination into savory dishes.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"topic\",\"confidence\":0.87,\"matched_text\":\"I'm excited to try them out and see which one I like best.\",\"distilled_fact\":\"The user is excited to try the ideas and see which one the user likes best.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"preference_request\",\"confidence\":0.86,\"matched_text\":\"Can you recommend any dessert recipes that use this flavor combination as well?\",\"distilled_fact\":\"The user wants dessert recipes that use the cacao and chili flavor combination.\"}]}",
+  "extracted_at": "2026-05-21T08:59:54.303Z"
+}

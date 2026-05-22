@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "1afd7dc93fad1a56723ebc54d217a9e82ed78f087191a01aa677b54df00706e1",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"ingredient_preference\",\"confidence\":0.91,\"matched_text\":\"I'm looking for some BBQ sauce recipes that use apple cider vinegar.\",\"distilled_fact\":\"The user is looking for BBQ sauce recipes that use apple cider vinegar.\"},{\"signal_kind\":\"potential_request\",\"object_kind\":\"topic_request\",\"confidence\":0.86,\"matched_text\":\"Can you give me some suggestions?\",\"distilled_fact\":\"The user is asking for suggestions.\"}]}",
+  "extracted_at": "2026-05-21T07:39:04.901Z"
+}

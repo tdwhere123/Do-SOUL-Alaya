@@ -13,7 +13,7 @@ const DATA_DIR_ROOT = path.resolve(__dirname, "../../data/longmemeval");
 const HUGGINGFACE_BASE =
   "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main";
 
-// @anchor upstream-filename-map — variant id is logical (matches our
+// @anchor upstream-filename-map: variant id is logical (matches our
 // dataset.ts enum); upstream filenames in the HuggingFace repo are
 // inconsistently suffixed. Keep the variant <-> upstream filename
 // translation centralized here so the rest of the code can use clean
@@ -24,7 +24,7 @@ const UPSTREAM_FILENAME: Record<LongMemEvalVariant, string> = {
   longmemeval_m: "longmemeval_m_cleaned.json"
 };
 
-// @anchor pinned-meta-root — pinned (committed) dataset checksums live under
+// @anchor pinned-meta-root: pinned (committed) dataset checksums live under
 // docs/bench-history/datasets/<variant>.meta.json. This is the trusted
 // reference for loadDataset; the gitignored data/longmemeval/<variant>.meta.json
 // is only a fetch-time scratch record and is NOT load-bearing.
@@ -32,7 +32,7 @@ const PINNED_META_ROOT = path.resolve(
   __dirname,
   "../../../../docs/bench-history/datasets"
 );
-// @anchor pinned-meta-root-path — 4 segments up from
+// @anchor pinned-meta-root-path: 4 segments up from
 // apps/bench-runner/dist/longmemeval/ -> apps/bench-runner/dist/ ->
 // apps/bench-runner/ -> apps/ -> repo-root, then docs/bench-history/datasets.
 
@@ -74,7 +74,7 @@ export async function fetchLongMemEval(
       };
       return { variant, localPath, sha256: meta.sha256, questionCount: meta.questionCount };
     } catch {
-      // Cache miss — proceed with fetch
+      // Cache miss; proceed with fetch.
     }
   }
 
@@ -148,8 +148,11 @@ export async function loadDataset(
   const raw = await readFile(localPath, "utf8");
   const actualSha = createHash("sha256").update(raw, "utf8").digest("hex");
   if (actualSha !== pinnedSha) {
+    const dataDirArg = options.dataDir === undefined
+      ? ""
+      : ` --data-dir ${shellQuote(options.dataDir)}`;
     throw new Error(
-      `dataset checksum mismatch: ${variant}; pinned=${pinnedSha}; actual=${actualSha}; re-fetch with 'alaya-bench-runner fetch-longmemeval --variant ${variant}'`
+      `dataset checksum mismatch: ${variant}; pinned=${pinnedSha}; actual=${actualSha}; refresh with 'alaya-bench-runner fetch-longmemeval --variant ${variant}${dataDirArg} --force'`
     );
   }
 
@@ -171,4 +174,8 @@ function validateDataset(raw: unknown): LongMemEvalQuestion[] {
     }
     return result.data;
   });
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }

@@ -77,7 +77,7 @@ export interface ConflictDetectionServiceDeps {
 }
 
 // Rule-based comparator constants. Values tuned for short distilled facts
-// (≤ 280 chars per buildDistilledFact). High tag overlap + low content
+// (≤ DISTILLED_FACT_MAX_CHARS per buildDistilledFact). High tag overlap + low content
 // overlap = contradicts. Cross-scope or cross-dimension classification
 // is reported by the caller before invoking; this service refines on
 // content evidence within the same dimension.

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "1be4b5b60281e72842d4dfee14bf0654cd9ee0182f06d5020e1bb0dd4095381e",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"pet\",\"confidence\":0.93,\"matched_text\":\"Luna is enjoying her new pet bed\",\"distilled_fact\":\"Luna is enjoying her new pet bed.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"purchase\",\"confidence\":0.91,\"matched_text\":\"you got it from Petco\",\"distilled_fact\":\"The new pet bed was purchased from Petco.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"purchase\",\"confidence\":0.9,\"matched_text\":\"$40 is a great price for a high-quality pet bed\",\"distilled_fact\":\"The pet bed cost $40.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"pet\",\"confidence\":0.76,\"matched_text\":\"she's appreciating the comfort and softness it provides\",\"distilled_fact\":\"Luna appreciates the comfort and softness of the new pet bed.\"}]}",
+  "extracted_at": "2026-05-21T07:10:33.590Z"
+}

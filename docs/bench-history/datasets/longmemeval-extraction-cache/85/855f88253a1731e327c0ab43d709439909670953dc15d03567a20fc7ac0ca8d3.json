@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "855f88253a1731e327c0ab43d709439909670953dc15d03567a20fc7ac0ca8d3",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"media_content\",\"confidence\":0.96,\"matched_text\":\"I've also been listening to some comedy podcasts, like \\\"My Brother, My Brother and Me\\\" and \\\"improv4humans\\\".\",\"distilled_fact\":\"The user has been listening to the comedy podcasts \\\"My Brother, My Brother and Me\\\" and \\\"improv4humans\\\".\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"media_content\",\"confidence\":0.91,\"matched_text\":\"They always make me laugh, and they're great for when I need a break from more serious topics.\",\"distilled_fact\":\"The user finds \\\"My Brother, My Brother and Me\\\" and \\\"improv4humans\\\" funny.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"media_content\",\"confidence\":0.86,\"matched_text\":\"they're great for when I need a break from more serious topics.\",\"distilled_fact\":\"The user uses \\\"My Brother, My Brother and Me\\\" and \\\"improv4humans\\\" as a break from more serious topics.\"}]}",
+  "extracted_at": "2026-05-21T08:56:48.057Z"
+}

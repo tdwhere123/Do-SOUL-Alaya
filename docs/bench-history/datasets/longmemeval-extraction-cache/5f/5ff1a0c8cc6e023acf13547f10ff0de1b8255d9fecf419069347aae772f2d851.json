@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "5ff1a0c8cc6e023acf13547f10ff0de1b8255d9fecf419069347aae772f2d851",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"writing_focus\",\"confidence\":0.96,\"matched_text\":\"I think I'll start by brainstorming the founder's backstory and the circumstances that led them to make the pact. I want to explore their motivations and what drove them to seek out a magical being's power.\",\"distilled_fact\":\"The user wants to start by brainstorming the founder's backstory and the circumstances that led them to make the pact.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"writing_focus\",\"confidence\":0.95,\"matched_text\":\"I think I'll start by brainstorming the founder's backstory and the circumstances that led them to make the pact. I want to explore their motivations and what drove them to seek out a magical being's power.\",\"distilled_fact\":\"The user wants to explore the founder's motivations and what drove the founder to seek out a magical being's power.\"}]}",
+  "extracted_at": "2026-05-21T09:14:54.342Z"
+}

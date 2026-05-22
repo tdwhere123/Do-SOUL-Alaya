@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "f195cc272ee35a2bcfadc8f61d71ef4d878d56101c563a507b1efafda428536d",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.82,\"matched_text\":\"I'm also thinking of tracking my run to see how far and fast I go\",\"distilled_fact\":\"The user is considering tracking their run to measure how far and fast they go.\"},{\"signal_kind\":\"potential_request\",\"object_kind\":\"information_need\",\"confidence\":0.79,\"matched_text\":\"do you know any good apps or devices that can help me do that?\",\"distilled_fact\":\"The user wants recommendations for apps or devices that can help track a run to measure distance and speed.\"}]}",
+  "extracted_at": "2026-05-21T07:56:40.423Z"
+}

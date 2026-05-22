@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "ab0d9ae4eab792cb244d1a35aced9ca5c7c34e66a4f921d7f2752ae5ecf46604",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"routine_preference\",\"confidence\":0.91,\"matched_text\":\"I'm still worried about waking up at 7:00 am consistently.\",\"distilled_fact\":\"The speaker is worried about waking up at 7:00 am consistently.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"schedule_constraint\",\"confidence\":0.95,\"matched_text\":\"on days with morning meetings\",\"distilled_fact\":\"On days with morning meetings, the speaker wants to wake up at 7:30 am and leave for work at 8:15 am.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"schedule_goal\",\"confidence\":0.95,\"matched_text\":\"so I can still wake up at 7:30 am and leave for work at 8:15 am\",\"distilled_fact\":\"The speaker wants to wake up at 7:30 am and leave for work at 8:15 am.\"}]}",
+  "extracted_at": "2026-05-21T07:51:23.990Z"
+}

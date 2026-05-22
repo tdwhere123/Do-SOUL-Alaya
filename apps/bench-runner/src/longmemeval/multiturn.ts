@@ -1,10 +1,8 @@
 import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { resolveBenchRunnerVersion } from "../version.js";
-import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
+import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../version.js";
 import {
+  buildTokenEconomy,
+  computeTokenSavedRatio,
   diffKpis,
   entrySlug,
   readLatest,
@@ -16,7 +14,12 @@ import {
   type KpiPayload,
   type PerScenarioRow
 } from "@do-soul/alaya-eval";
-import { startBenchDaemon, type BenchEmbeddingMode } from "../harness/daemon.js";
+import {
+  startBenchDaemon,
+  type BenchEmbeddingMode,
+  type BenchTokenMetrics
+} from "../harness/daemon.js";
+import { aggregateBenchTokenMetrics } from "./token-economy.js";
 import {
   buildQuestionDiagnostic,
   rAt5WithProviderReturned,
@@ -24,9 +27,25 @@ import {
   summarizeProviderStates,
   type LongMemEvalQuestionDiagnostic
 } from "./diagnostics.js";
-import type { LongMemEvalVariant } from "./dataset.js";
+import {
+  isAbstentionQuestionId,
+  scoreAbstentionQuestion
+} from "./abstention.js";
+import { pairSessionIntoRounds, type LongMemEvalVariant } from "./dataset.js";
 import { loadDataset, type FetchResult } from "./fetch.js";
-import { resolveBenchEmbeddingProviderLabel } from "./runner.js";
+import {
+  buildLongMemEvalSidecarKey,
+  deriveLongMemEvalGoldMemoryIds,
+  resolveBenchEmbeddingProviderLabel,
+  type LongMemEvalSidecarEntry
+} from "./runner.js";
+import {
+  buildSessionSynthesisInput,
+  createCompileSeedRunner,
+  toSeedExtractionPathKpi,
+  type CompileSeedRunner,
+  type SessionSeededTurn
+} from "./compile-seed.js";
 
 const LONGMEMEVAL_DIAGNOSTICS_FILENAME = "longmemeval-diagnostics.json";
 
@@ -51,7 +70,7 @@ export interface LongMemEvalMultiturnRunResult {
   readonly payload: KpiPayload;
 }
 
-type SidecarEntry = { sessionId: string; hasAnswer: boolean };
+type SidecarEntry = LongMemEvalSidecarEntry;
 
 interface RoundResult {
   readonly roundIndex: number;
@@ -70,6 +89,7 @@ interface QuestionResult {
   readonly seedTurnsTruncated: number;
   readonly answerTurnsTruncated: number;
   readonly seedCharsClipped: number;
+  readonly tokenMetrics: BenchTokenMetrics;
 }
 
 export async function runLongMemEvalMultiturn(
@@ -93,7 +113,8 @@ export async function runLongMemEvalMultiturn(
   );
 
   async function runOneQuestion(
-    question: typeof window[number]
+    question: typeof window[number],
+    seedRunner: CompileSeedRunner
   ): Promise<QuestionResult> {
     const daemon = await startBenchDaemon({
       workspaceId: `lme-mt-${question.question_id.slice(0, 8)}`,
@@ -114,24 +135,71 @@ export async function runLongMemEvalMultiturn(
         const sessionId = question.haystack_session_ids[si] ?? `session-${si}`;
         if (session === undefined) continue;
 
-        for (let ti = 0; ti < session.length; ti++) {
-          const turn = session[ti];
-          if (turn === undefined) continue;
+        // invariant: extract per ROUND (user message + assistant response),
+        // not per bare message — production POST_TURN_EXTRACT extracts per
+        // round. see also: apps/bench-runner/src/longmemeval/dataset.ts
+        // pairSessionIntoRounds.
+        const rounds = pairSessionIntoRounds(session);
+        // Per-session turns collected for the L2 synthesis seed below.
+        const sessionTurns: SessionSeededTurn[] = [];
+        let sessionHasAnswer = false;
+        for (let ri = 0; ri < rounds.length; ri++) {
+          const round = rounds[ri];
+          if (round === undefined) continue;
 
-          const evidenceRef = `${question.question_id}-mt-s${si}-t${ti}`;
-          const seed = await daemon.proposeMemory(turn.content, evidenceRef, {
-            objectKind: rotatingSeedObjectKind(seedIndexMt)
+          const evidenceRef = `${question.question_id}-mt-s${si}-r${ri}`;
+          // invariant: one round -> N production-extracted memory_entry rows;
+          // every object_id is mapped into the sidecar (no partial map).
+          const seedResult = await seedRunner.seedTurn({
+            daemon,
+            turnContent: round.content,
+            evidenceRefBase: evidenceRef,
+            seedIndex: seedIndexMt,
+            workspaceId: daemon.workspaceId,
+            runId: daemon.runId
           });
           seedIndexMt += 1;
-          if (seed.truncated) {
-            seedTurnsTruncated++;
-            seedCharsClipped += seed.charsClipped;
-            if (turn.has_answer === true) answerTurnsTruncated++;
+          if (seedResult.turnTruncated) {
+            seedTurnsTruncated += 1;
+            seedCharsClipped += seedResult.charsClipped;
+            if (round.hasAnswer) {
+              answerTurnsTruncated += 1;
+            }
           }
-          sidecar.set(seed.memoryId, {
-            sessionId,
-            hasAnswer: turn.has_answer === true
-          });
+          if (round.hasAnswer) {
+            sessionHasAnswer = true;
+          }
+          for (const seed of seedResult.seeds) {
+            sidecar.set(buildLongMemEvalSidecarKey("memory_entry", seed.memoryId), {
+              objectId: seed.memoryId,
+              objectKind: "memory_entry",
+              sessionId,
+              hasAnswer: round.hasAnswer
+            });
+            sessionTurns.push({
+              turnContent: round.content,
+              evidenceId: seed.evidenceId
+            });
+          }
+        }
+
+        // L2 synthesis seed — see runner.ts for the rationale. The synthesis
+        // object_id is sidecar-tracked for diagnostics but does not enter
+        // memory_entry gold scoring.
+        const synthesisInput = buildSessionSynthesisInput({
+          topicKey: `${question.question_id}-mt-s${si}`,
+          turns: sessionTurns
+        });
+        if (synthesisInput !== null) {
+          const synthesisResult = await daemon.proposeSynthesis(synthesisInput);
+          if (synthesisResult.synthesisId !== null) {
+            sidecar.set(buildLongMemEvalSidecarKey("synthesis_capsule", synthesisResult.synthesisId), {
+              objectId: synthesisResult.synthesisId,
+              objectKind: "synthesis_capsule",
+              sessionId,
+              hasAnswer: sessionHasAnswer
+            });
+          }
         }
       }
 
@@ -139,12 +207,7 @@ export async function runLongMemEvalMultiturn(
         await daemon.runtime.runGardenBackgroundPass();
       }
 
-      const goldMemoryIds = [...sidecar.entries()]
-        .filter(
-          ([, meta]) =>
-            meta.hasAnswer && answerSessionSet.has(meta.sessionId)
-        )
-        .map(([memoryId]) => memoryId);
+      const goldMemoryIds = deriveLongMemEvalGoldMemoryIds(sidecar, answerSessionSet);
       const roundResults: RoundResult[] = [];
 
       for (let roundIndex = 1; roundIndex <= rounds; roundIndex++) {
@@ -156,8 +219,10 @@ export async function runLongMemEvalMultiturn(
         const results = recallResult.results;
         const deliveredResults = results.slice(0, 10).map((pointer, index) => ({
           object_id: pointer.object_id,
+          object_kind: pointer.object_kind,
           rank: index + 1,
-          relevance_score: pointer.relevance_score
+          relevance_score: pointer.relevance_score,
+          score_factors: pointer.score_factors ?? null
         }));
 
         let hitAt1 = false;
@@ -172,7 +237,10 @@ export async function runLongMemEvalMultiturn(
           if (rank === 0) {
             firstTier = inferTier(pointer.relevance_score);
           }
-          const meta = sidecar.get(pointer.object_id);
+          if (!isLongMemEvalGoldEligibleResult(pointer)) {
+            continue;
+          }
+          const meta = sidecar.get(buildLongMemEvalSidecarKey("memory_entry", pointer.object_id));
           const isHit =
             meta !== undefined &&
             meta.hasAnswer &&
@@ -185,6 +253,21 @@ export async function runLongMemEvalMultiturn(
           }
         }
 
+        // Abstention questions never produce an id-equality hit; re-score
+        // them by calibrated confidence so the recall@k numerator stays
+        // consistent with the single-turn runner. invariant: only
+        // hit_at_k is overridden — firstTier is kept from the id-equality
+        // loop above, which derives it from the top-1 relevance_score for
+        // every row regardless of hit, so that loop must keep running for
+        // `_abs` rows.
+        const isAbstention = isAbstentionQuestionId(question.question_id);
+        if (isAbstention) {
+          const abstention = scoreAbstentionQuestion({ results });
+          hitAt1 = abstention.correctAt1;
+          hitAt5 = abstention.correctAt5;
+          hitAt10 = abstention.correctAt10;
+        }
+
         const diagnostics = buildQuestionDiagnostic({
           questionId: question.question_id,
           roundIndex,
@@ -194,6 +277,7 @@ export async function runLongMemEvalMultiturn(
           hitAt1,
           hitAt5,
           hitAt10,
+          isAbstention,
           degradationReason: recallResult.degradation_reason ?? null,
           recallResult,
           embeddingMode: opts.embeddingMode ?? "disabled"
@@ -207,7 +291,10 @@ export async function runLongMemEvalMultiturn(
             : { usedObjectIds: usedGoldObjectIds }),
           deliveredObjects: results.slice(0, 10).map((pointer) => ({
             objectId: pointer.object_id,
-            usageStatus: usedGoldObjectIds.includes(pointer.object_id)
+            objectKind: pointer.object_kind ?? "memory_entry",
+            usageStatus:
+              isLongMemEvalGoldEligibleResult(pointer) &&
+              usedGoldObjectIds.includes(pointer.object_id)
               ? "used"
               : "skipped"
           })),
@@ -238,23 +325,31 @@ export async function runLongMemEvalMultiturn(
         });
       }
 
+      // Event-sourced token economy for this question's run; read back
+      // from the EventLog after every round's recall, before shutdown.
+      const tokenMetrics = await daemon.queryTokenMetrics();
+
       return {
         questionId: question.question_id,
         rounds: roundResults,
         seedTurnsTruncated,
         answerTurnsTruncated,
-        seedCharsClipped
+        seedCharsClipped,
+        tokenMetrics
       };
     } finally {
       await daemon.shutdown();
     }
   }
 
+  // invariant: one seed runner for the whole run so the on-disk extraction
+  // cache and stats accumulate across questions; seed-time only.
+  const seedRunner = createCompileSeedRunner();
   const collected: QuestionResult[] = [];
   for (let i = 0; i < window.length; i++) {
     const q = window[i];
     if (q === undefined) continue;
-    const res = await runOneQuestion(q);
+    const res = await runOneQuestion(q, seedRunner);
     collected.push(res);
     const finalRound = res.rounds[res.rounds.length - 1];
     process.stdout.write(
@@ -262,6 +357,16 @@ export async function runLongMemEvalMultiturn(
         `rounds=${rounds} final_R@5=${finalRound?.hitAt5 ? "✓" : "✗"}\n`
     );
   }
+  // Disclose which seed path ran: official_api_compile (production garden
+  // extraction) vs no_credentials_fallback (degraded full-turn single-fact).
+  process.stdout.write(
+    `[longmemeval compile-seed] path=${seedRunner.stats.path} ` +
+      `cache_hits=${seedRunner.stats.cacheHits} ` +
+      `llm_calls=${seedRunner.stats.llmCalls} ` +
+      `offline_fallbacks=${seedRunner.stats.offlineFallbacks} ` +
+      `facts=${seedRunner.stats.factsProduced} ` +
+      `signals_dropped=${seedRunner.stats.signalsDropped}\n`
+  );
 
   const finalRounds = collected
     .map((result) => result.rounds[result.rounds.length - 1])
@@ -304,6 +409,12 @@ export async function runLongMemEvalMultiturn(
     )
   };
 
+  const tokenEconomyInput = aggregateBenchTokenMetrics(
+    collected.map((result) => result.tokenMetrics)
+  );
+  const tokenEconomy = buildTokenEconomy(tokenEconomyInput);
+  const tokenSavedRatio = computeTokenSavedRatio(tokenEconomyInput);
+
   const datasetSize = opts.fetchResult?.questionCount ?? questions.length;
   const split = variantToSplit(opts.variant);
   const payload: KpiPayload = {
@@ -312,8 +423,11 @@ export async function runLongMemEvalMultiturn(
     run_at: runAt.toISOString(),
     alaya_commit: commitSha7,
     alaya_version: alayaVersion,
+    recall_pipeline_version: RECALL_PIPELINE_VERSION,
     embedding_provider: embeddingProviderLabel,
     chat_provider: "none",
+    policy_shape: "stress",
+    simulate_report: "none",
     dataset: {
       name: `${opts.variant}:multiturn`,
       size: datasetSize,
@@ -344,17 +458,20 @@ export async function runLongMemEvalMultiturn(
       latency_ms_p50: latencyP50,
       latency_ms_p95: latencyP95,
       latency_source: "exact",
-      token_saved_ratio_vs_full_prompt: 0,
+      token_saved_ratio_vs_full_prompt: tokenSavedRatio,
+      token_economy: tokenEconomy,
       tier_distribution: tierDistribution,
       degradation_reasons: degradationReasons,
       seed_truncation: truncation,
+      seed_extraction_path: toSeedExtractionPathKpi(seedRunner.stats),
       per_scenario: perScenario
     }
   };
 
   const layout: HistoryLayout = { historyRoot: opts.historyRoot };
   const previous = await readLatest(layout, "public-multiturn", {
-    split: payload.split
+    split: payload.split,
+    embeddingProvider: payload.embedding_provider
   });
   const diff = diffKpis(payload, previous);
   const slug = entrySlug(runAt, commitSha7);
@@ -366,6 +483,7 @@ export async function runLongMemEvalMultiturn(
     split,
     run_at: payload.run_at,
     alaya_commit: payload.alaya_commit,
+    recall_pipeline_version: payload.recall_pipeline_version,
     embedding_provider: payload.embedding_provider,
     embedding_mode: opts.embeddingMode ?? "disabled",
     provider_state_summary: providerSummary,
@@ -473,6 +591,12 @@ function ratio(count: number, total: number): number {
 
 function truncateExcerpt(value: string): string {
   return value.length <= 500 ? value : `${value.slice(0, 497)}...`;
+}
+
+function isLongMemEvalGoldEligibleResult(result: Readonly<{
+  readonly object_kind?: string | null;
+}>): boolean {
+  return (result.object_kind ?? "memory_entry") === "memory_entry";
 }
 
 // see also: apps/bench-runner/src/version.ts

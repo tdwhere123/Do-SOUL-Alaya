@@ -1,13 +1,16 @@
 import {
   RecallCandidateSchema,
-  type FineAssessmentConfig,
   type MemoryDimension as MemoryDimensionType,
+  type MemoryEntry,
+  type FineAssessmentConfig,
   type RecallBudgetState,
   type RecallCandidate,
-  type RecallScoreFactors
+  type RecallScoreFactors,
+  type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import {
   assignManifestation,
+  clamp01,
   createContentPreview,
   estimateTokens,
   normalizeActivationScore
@@ -34,7 +37,9 @@ export function buildRecallCandidate(input: BuildRecallCandidateInput): Readonly
 
   return RecallCandidateSchema.parse({
     object_id: entry.object_id,
-    object_kind: "memory_entry" as const,
+    // A synthesis-derived candidate carries object_kind synthesis_capsule;
+    // its CoarseRecallCandidate.entry is a synthesis-shaped pseudo memory.
+    object_kind: input.candidate.objectKind ?? ("memory_entry" as const),
     activation_score: activationScore,
     relevance_score: input.relevanceScore,
     content_preview: createContentPreview(entry.content, manifestation, input.candidate.originPlane),
@@ -57,48 +62,82 @@ export function buildRecallCandidate(input: BuildRecallCandidateInput): Readonly
   });
 }
 
-export function appendAdditiveCandidatesWithinRemainingBudgets(
-  baseCandidates: readonly Readonly<RecallCandidate>[],
-  additiveCandidates: readonly Readonly<RecallCandidate>[],
-  config: Readonly<FineAssessmentConfig>
-): readonly Readonly<RecallCandidate>[] {
-  if (additiveCandidates.length === 0) {
-    return baseCandidates;
-  }
+export interface SynthesisCoarseRecallCandidateInput {
+  readonly synthesis: Readonly<SynthesisCapsule>;
+  readonly normalizedRank: number;
+}
 
-  const selected = [...baseCandidates];
-  const perDimensionCounts = new Map<MemoryDimensionType, number>();
-  let totalTokens = 0;
+/**
+ * Delivered-content cap for a synthesis_capsule recall candidate. A
+ * synthesis summary is an L2 aggregate that can run long; recall delivers a
+ * bounded preview, not the whole digest, so a reserved synthesis slot costs
+ * a memory-entry-comparable share of the delivery token budget. FTS still
+ * indexes the full summary (migration 079) — only the delivered excerpt is
+ * clipped.
+ */
+const SYNTHESIS_RECALL_PREVIEW_CHARS = 600;
 
-  for (const candidate of baseCandidates) {
-    const dimensionCount = perDimensionCounts.get(candidate.dimension) ?? 0;
-    perDimensionCounts.set(candidate.dimension, dimensionCount + 1);
-    totalTokens += candidate.token_estimate;
-  }
+function clipSynthesisSummary(summary: string): string {
+  const trimmed = summary.trim();
+  return trimmed.length > SYNTHESIS_RECALL_PREVIEW_CHARS
+    ? `${trimmed.slice(0, SYNTHESIS_RECALL_PREVIEW_CHARS).trimEnd()}…`
+    : trimmed;
+}
 
-  for (const candidate of additiveCandidates) {
-    const dimensionCount = perDimensionCounts.get(candidate.dimension) ?? 0;
-    const dimensionLimit = config.budgets.per_dimension_limits?.[candidate.dimension] ?? null;
-    const nextEntryCount = selected.length + 1;
-    const nextTokenCount = totalTokens + candidate.token_estimate;
+export function buildSynthesisCoarseRecallCandidate(
+  input: SynthesisCoarseRecallCandidateInput
+): Readonly<CoarseRecallCandidate> {
+  const relevance = clamp01(input.normalizedRank);
+  // invariant: a synthesis_capsule is shaped into a MemoryEntry only so it can
+  // ride the shared coarse->fusion candidate pipeline. dimension/source_kind/
+  // formation_kind/scope_class are NOT true synthesis ontology — they are the
+  // schema-valid placeholders that let RecallCandidateSchema parse. Callers
+  // MUST branch on objectKind === "synthesis_capsule", never trust these
+  // fields. scoreRecallFusionStream enforces this (synthesis scores only on
+  // synthesis_fts); any new consumer of CoarseRecallCandidate.entry must do
+  // the same. see also: recall-service.ts scoreRecallFusionStream
+  const entry: MemoryEntry = {
+    object_id: input.synthesis.object_id,
+    object_kind: "memory_entry",
+    schema_version: 1,
+    lifecycle_state: input.synthesis.lifecycle_state,
+    created_at: input.synthesis.created_at,
+    updated_at: input.synthesis.updated_at,
+    created_by: input.synthesis.created_by,
+    dimension: "episode" as const,
+    source_kind: "compiler" as const,
+    formation_kind: "derived" as const,
+    scope_class: "project" as const,
+    content: clipSynthesisSummary(input.synthesis.summary),
+    domain_tags: Object.freeze(["synthesis", input.synthesis.topic_key]),
+    evidence_refs: Object.freeze([...input.synthesis.evidence_refs]),
+    workspace_id: input.synthesis.workspace_id,
+    run_id: input.synthesis.run_id,
+    surface_id: null,
+    storage_tier: "hot" as const,
+    activation_score: relevance,
+    retention_score: null,
+    manifestation_state: null,
+    retention_state: null,
+    decay_profile: null,
+    confidence: null,
+    last_used_at: null,
+    last_hit_at: null,
+    reinforcement_count: null,
+    contradiction_count: null,
+    superseded_by: null
+  };
 
-    if (dimensionLimit !== null && dimensionCount >= dimensionLimit) {
-      continue;
-    }
-
-    if (
-      nextEntryCount > config.budgets.max_entries ||
-      nextTokenCount > config.budgets.max_total_tokens
-    ) {
-      continue;
-    }
-
-    selected.push(candidate);
-    perDimensionCounts.set(candidate.dimension, dimensionCount + 1);
-    totalTokens = nextTokenCount;
-  }
-
-  return Object.freeze(selected);
+  return Object.freeze({
+    entry,
+    objectKind: "synthesis_capsule" as const,
+    originPlane: "workspace_local" as const,
+    sourceChannel: "synthesis_fts",
+    sourceChannels: Object.freeze(["synthesis_fts"]),
+    admissionPlanes: Object.freeze(["lexical" as const]),
+    firstAdmissionPlane: "lexical" as const,
+    structuralScore: 0
+  });
 }
 
 export function selectCandidatesWithinBudgets(
@@ -142,33 +181,7 @@ export function selectCandidatesWithinBudgets(
 }
 
 function buildRecallCandidateSelectionKey(candidate: Readonly<RecallCandidate>): string {
-  return `${candidate.origin_plane ?? "workspace_local"}:${candidate.object_id}`;
-}
-
-export function rebuildRecallBudgetStateForDelivery(
-  candidates: readonly Readonly<RecallCandidate>[],
-  config: Readonly<FineAssessmentConfig>
-): readonly Readonly<RecallCandidate>[] {
-  let usedTokensBeforeCandidate = 0;
-
-  return Object.freeze(
-    candidates.map((candidate, index) => {
-      const tokenEstimate = candidate.token_estimate;
-      const rebuilt = RecallCandidateSchema.parse({
-        ...candidate,
-        budget_state: buildRecallBudgetState({
-          tokenEstimate,
-          maxEntries: config.budgets.max_entries,
-          maxTotalTokens: config.budgets.max_total_tokens,
-          index,
-          usedTokensBeforeCandidate
-        })
-      });
-
-      usedTokensBeforeCandidate += tokenEstimate;
-      return rebuilt;
-    })
-  );
+  return `${candidate.origin_plane ?? "workspace_local"}:${candidate.object_kind}:${candidate.object_id}`;
 }
 
 export function buildRecallBudgetState(params: Readonly<{

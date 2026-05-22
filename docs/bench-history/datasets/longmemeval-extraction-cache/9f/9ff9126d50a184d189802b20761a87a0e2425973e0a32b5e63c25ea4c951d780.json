@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "9ff9126d50a184d189802b20761a87a0e2425973e0a32b5e63c25ea4c951d780",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"opinion\",\"confidence\":0.77,\"matched_text\":\"It's really sad to see how much damage humans have caused to the animal kingdom.\",\"distilled_fact\":\"The speaker thinks it is really sad to see how much damage humans have caused to the animal kingdom.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"question\",\"confidence\":0.64,\"matched_text\":\"What can we do to prevent the extinction of more species?\",\"distilled_fact\":\"The speaker asks what can be done to prevent the extinction of more species.\"}]}",
+  "extracted_at": "2026-05-21T08:09:17.804Z"
+}

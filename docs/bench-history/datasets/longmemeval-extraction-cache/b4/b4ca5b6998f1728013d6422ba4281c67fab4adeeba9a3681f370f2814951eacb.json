@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "b4ca5b6998f1728013d6422ba4281c67fab4adeeba9a3681f370f2814951eacb",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_inquiry\",\"object_kind\":\"topic\",\"confidence\":0.42,\"matched_text\":\"What math problem do they solve?\",\"distilled_fact\":\"The speaker asked what math problem they solve.\"}]}",
+  "extracted_at": "2026-05-21T07:15:46.329Z"
+}

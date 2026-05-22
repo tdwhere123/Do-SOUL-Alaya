@@ -7,7 +7,18 @@ import {
 import type { StorageDatabase } from "../db.js";
 import { StorageError } from "../errors.js";
 import { deepFreeze } from "./shared/deep-freeze.js";
+import {
+  mergeFtsLanes,
+  queryFtsLane,
+  splitFtsLanes,
+  tokenizeFtsQuery
+} from "./shared/fts-lane-routing.js";
 import { parseNonEmptyString, parseTimestamp } from "./shared/validators.js";
+
+export interface SynthesisCapsuleKeywordHit {
+  readonly object_id: string;
+  readonly normalized_rank: number;
+}
 
 export interface SynthesisCapsuleRepo {
   create(capsule: SynthesisCapsule): Promise<Readonly<SynthesisCapsule>>;
@@ -25,6 +36,13 @@ export interface SynthesisCapsuleRepo {
     status: SynthesisStatus,
     updatedAt: string
   ): Promise<Readonly<SynthesisCapsule>>;
+  // see also: 079-synthesis-capsule-fts-dual.sql — porter + trigram FTS
+  // over `summary`. Optional, mirroring evidence-capsule-repo.ts.
+  searchByKeyword?(
+    workspaceId: string,
+    query: string,
+    limit: number
+  ): Promise<readonly SynthesisCapsuleKeywordHit[]>;
 }
 
 const SYNTHESIS_SELECT_COLUMNS = `
@@ -63,6 +81,8 @@ interface SynthesisCapsuleRow {
   readonly synthesis_status: string;
 }
 
+// see also: ./shared/fts-lane-routing.ts — the porter/trigram dual-lane
+// query split and ordinal-rank merge shared with evidence-capsule-repo.ts.
 export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
   private readonly createStatement;
   private readonly findByIdStatement;
@@ -71,6 +91,10 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
   private readonly updateEvidenceRefsStatement;
   private readonly updateSourceMemoryRefsStatement;
   private readonly updateStatusStatement;
+  // see also: 079-synthesis-capsule-fts-dual.sql — porter unicode61 word lane.
+  private readonly searchByKeywordStatement;
+  // see also: 079-synthesis-capsule-fts-dual.sql — trigram CJK/substring lane.
+  private readonly searchByKeywordTrigramStatement;
 
   public constructor(db: StorageDatabase) {
     this.createStatement = db.connection.prepare(`
@@ -132,6 +156,76 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
       SET synthesis_status = ?, updated_at = ?
       WHERE object_id = ?
     `);
+
+    this.searchByKeywordStatement = db.connection.prepare(`
+      SELECT
+        synthesis_capsule_fts.object_id,
+        bm25(synthesis_capsule_fts) AS raw_rank
+      FROM synthesis_capsule_fts
+      JOIN synthesis_capsules ON synthesis_capsules.object_id = synthesis_capsule_fts.object_id
+      WHERE
+        synthesis_capsule_fts.workspace_id = ?
+        AND synthesis_capsule_fts MATCH ?
+        AND COALESCE(synthesis_capsules.lifecycle_state, '') != 'retired'
+      ORDER BY raw_rank ASC, synthesis_capsule_fts.object_id ASC
+      LIMIT ?
+    `);
+    this.searchByKeywordTrigramStatement = db.connection.prepare(`
+      SELECT
+        synthesis_capsule_fts_trigram.object_id,
+        bm25(synthesis_capsule_fts_trigram) AS raw_rank
+      FROM synthesis_capsule_fts_trigram
+      JOIN synthesis_capsules
+        ON synthesis_capsules.object_id = synthesis_capsule_fts_trigram.object_id
+      WHERE
+        synthesis_capsule_fts_trigram.workspace_id = ?
+        AND synthesis_capsule_fts_trigram MATCH ?
+        AND COALESCE(synthesis_capsules.lifecycle_state, '') != 'retired'
+      ORDER BY raw_rank ASC, synthesis_capsule_fts_trigram.object_id ASC
+      LIMIT ?
+    `);
+  }
+
+  public async searchByKeyword(
+    workspaceId: string,
+    queryText: string,
+    limit: number
+  ): Promise<readonly SynthesisCapsuleKeywordHit[]> {
+    const trimmed = queryText.trim();
+    if (trimmed.length === 0 || !Number.isInteger(limit) || limit <= 0) {
+      return Object.freeze([]);
+    }
+    try {
+      const tokens = tokenizeFtsQuery(trimmed);
+      if (tokens.length === 0) {
+        return Object.freeze([]);
+      }
+      // Script-routed dual-lane FTS over synthesis_capsules.summary: word
+      // tokens to the porter unicode61 lane, CJK-bearing tokens to the trigram
+      // lane. The merged result preserves the SynthesisCapsuleKeywordHit
+      // contract (normalized_rank, 1.0 = top).
+      const { porterTokens, trigramTokens } = splitFtsLanes(tokens);
+      const porterHits =
+        porterTokens.length === 0
+          ? []
+          : queryFtsLane(this.searchByKeywordStatement, workspaceId, porterTokens, limit);
+      const trigramHits =
+        trigramTokens.length === 0
+          ? []
+          : queryFtsLane(
+              this.searchByKeywordTrigramStatement,
+              workspaceId,
+              trigramTokens,
+              limit
+            );
+      return mergeFtsLanes(porterHits, trigramHits, limit);
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to search synthesis capsules for workspace ${workspaceId}.`,
+        error
+      );
+    }
   }
 
   public async create(capsule: SynthesisCapsule): Promise<Readonly<SynthesisCapsule>> {

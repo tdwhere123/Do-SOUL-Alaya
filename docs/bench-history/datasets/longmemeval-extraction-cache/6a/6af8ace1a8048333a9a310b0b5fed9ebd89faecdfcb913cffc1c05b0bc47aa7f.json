@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "6af8ace1a8048333a9a310b0b5fed9ebd89faecdfcb913cffc1c05b0bc47aa7f",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_experience\",\"confidence\":0.92,\"matched_text\":\"I've already been listening to it on and off for the past few months.\",\"distilled_fact\":\"The user has been listening to \\\"The Tim Ferriss Show\\\" on and off for the past few months.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_episode_memory\",\"confidence\":0.95,\"matched_text\":\"I remember listening to it on December 20th\",\"distilled_fact\":\"The user listened to the episode with Naval Ravikant on December 20th.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_thoughts\",\"confidence\":0.9,\"matched_text\":\"it really made me think about my own goals and priorities.\",\"distilled_fact\":\"The episode with Naval Ravikant made the user think about the user's own goals and priorities.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"podcast_interest\",\"confidence\":0.86,\"matched_text\":\"I'm particularly interested in \\\"The Tim Ferriss Show\\\"\",\"distilled_fact\":\"The user is particularly interested in \\\"The Tim Ferriss Show\\\".\"}]}",
+  "extracted_at": "2026-05-21T08:56:43.672Z"
+}

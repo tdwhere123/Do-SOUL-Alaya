@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c4ff4d65212d5a73314b3d64ed19242f14e2ac1ff714ce00b97eff09be0391ed",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"user\",\"confidence\":0.87,\"matched_text\":\"it can be hard to find a quiet space to meditate\",\"distilled_fact\":\"The user finds it hard to find a quiet space to meditate.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_context\",\"confidence\":0.82,\"matched_text\":\"especially when living with roommates or in a noisy neighborhood\",\"distilled_fact\":\"The user is living with roommates or in a noisy neighborhood.\"}]}",
+  "extracted_at": "2026-05-21T07:57:53.598Z"
+}

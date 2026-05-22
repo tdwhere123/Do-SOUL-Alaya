@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "449eb62f1aca9f2512b88e176bc2ee9e7ba0f4d2f8ce458e7058abb1165728e0",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"movie_watching_habit\",\"confidence\":0.93,\"matched_text\":\"I've been pretty happy with my movie-watching habits lately, watching about 5 movies per month on average.\",\"distilled_fact\":\"The speaker watches about 5 movies per month on average.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"movie_genre_preference\",\"confidence\":0.88,\"matched_text\":\"recommend some sci-fi or action movies that have a strong focus on storytelling and character development\",\"distilled_fact\":\"The speaker is interested in sci-fi movies or action movies.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"movie_selection_criteria\",\"confidence\":0.92,\"matched_text\":\"recommend some sci-fi or action movies that have a strong focus on storytelling and character development\",\"distilled_fact\":\"The speaker prefers movies with a strong focus on storytelling and character development.\"}]}",
+  "extracted_at": "2026-05-21T07:53:27.221Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "066cbc437531a04c2a58f08ab83f330697823215d4350ed0e9f648edc0ddd7dd",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"user_preference\",\"confidence\":0.74,\"matched_text\":\"I'm looking to support more local talent\",\"distilled_fact\":\"The user is looking to support more local talent.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_experience\",\"confidence\":0.72,\"matched_text\":\"I've been to a bunch of concerts recently\",\"distilled_fact\":\"The user has been to a bunch of concerts recently.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"user_request\",\"confidence\":0.66,\"matched_text\":\"can you also recommend some local music venues in my area\",\"distilled_fact\":\"The user wants recommendations for some local music venues in the user's area.\"}]}",
+  "extracted_at": "2026-05-21T07:41:18.134Z"
+}

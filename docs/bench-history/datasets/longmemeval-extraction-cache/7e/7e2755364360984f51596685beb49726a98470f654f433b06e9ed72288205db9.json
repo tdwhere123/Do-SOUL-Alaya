@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7e2755364360984f51596685beb49726a98470f654f433b06e9ed72288205db9",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"instruction\",\"confidence\":0.78,\"matched_text\":\"please continue, provide 10 additional examples, different from the ones you already mentioned\",\"distilled_fact\":\"The user prefers the assistant to continue and provide 10 additional examples that are different from the ones already mentioned.\"}]}",
+  "extracted_at": "2026-05-21T07:05:47.054Z"
+}

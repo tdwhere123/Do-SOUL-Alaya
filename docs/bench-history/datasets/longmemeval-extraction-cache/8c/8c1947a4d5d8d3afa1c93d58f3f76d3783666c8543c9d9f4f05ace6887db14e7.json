@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "8c1947a4d5d8d3afa1c93d58f3f76d3783666c8543c9d9f4f05ace6887db14e7",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"tv_show\",\"confidence\":0.93,\"matched_text\":\"I've already seen \\\"The World According to Jeff Goldblum\\\" on Disney+, but I'll definitely check out the others.\",\"distilled_fact\":\"The user has already seen \\\"The World According to Jeff Goldblum\\\" on Disney+.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"tv_show\",\"confidence\":0.88,\"matched_text\":\"I'll definitely check out the others.\",\"distilled_fact\":\"The user will definitely check out the other recommended TV shows.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"tv_show_request\",\"confidence\":0.96,\"matched_text\":\"Have you got any recommendations for TV shows that are currently airing new episodes?\",\"distilled_fact\":\"The user is asking for recommendations for TV shows that are currently airing new episodes.\"}]}",
+  "extracted_at": "2026-05-21T09:16:39.910Z"
+}

@@ -58,6 +58,7 @@ import {
   type RecallCandidate,
   type RecallPolicy,
   type SoulApplyOverrideRequest,
+  type SoulActiveConstraint,
   type SoulEmitCandidateSignalRequest,
   type SoulExploreGraphRequest,
   type SoulListPendingProposalsRequest,
@@ -142,8 +143,11 @@ export interface McpMemoryToolHandlerDependencies {
         readonly field?: "created_at" | "last_used_at";
       }>;
       readonly hostContext?: Readonly<SoulRecallHostContext>;
+      readonly activeConstraintsCap?: number | null;
     }): Promise<Readonly<{
       readonly candidates: readonly Readonly<RecallCandidate>[];
+      readonly active_constraints: readonly Readonly<SoulActiveConstraint>[];
+      readonly active_constraints_count: number;
       readonly total_scanned: number;
       readonly coarse_filter_count: number;
       readonly fine_assessment_count: number;
@@ -460,11 +464,16 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       runId: context.runId,
       policyOverride,
       timeFilter,
-      hostContext: request.host_context
+      hostContext: request.host_context,
+      activeConstraintsCap: request.active_constraints_cap ?? null
     });
     let usedTokens = 0;
     let explainabilityPartial = false;
-    const results = recallResult.candidates.slice(0, request.max_results).map((candidate, index) => {
+    const activeConstraintIds = new Set(recallResult.active_constraints.map((constraint) => constraint.object_id));
+    const resultCandidates = recallResult.candidates
+      .filter((candidate) => !activeConstraintIds.has(candidate.object_id))
+      .slice(0, request.max_results);
+    const results = resultCandidates.map((candidate, index) => {
       if (
         candidate.selection_reason === undefined ||
         candidate.source_channels === undefined ||
@@ -478,13 +487,24 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       return result;
     });
     const deliveryId = `delivery_${generateId()}`;
-    const deliveredObjectIds = results.map((result) => result.object_id);
+    const deliveredObjects = dedupeDeliveredObjectIdentities([
+      ...results.map((result) => ({
+        object_id: result.object_id,
+        object_kind: result.object_kind
+      })),
+      ...recallResult.active_constraints.map((constraint) => ({
+        object_id: constraint.object_id,
+        object_kind: constraint.object_kind
+      }))
+    ]);
+    const deliveredObjectIds = uniqueObjectIds(deliveredObjects);
     await deps.trustStateRecorder.recordDelivery({
       delivery_id: deliveryId,
       agent_target: context.agentTarget,
       workspace_id: context.workspaceId,
       run_id: context.runId,
       delivered_object_ids: deliveredObjectIds,
+      delivered_objects: deliveredObjects,
       delivered_at: now()
     });
 
@@ -493,7 +513,7 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     await emitRecallDeliveredTelemetry({
       deliveryId,
       query: request.query,
-      pointerCount: results.length,
+      pointerCount: deliveredObjectIds.length,
       latencyMs: Date.now() - recallStartedAt,
       context
     });
@@ -504,7 +524,9 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     return SoulMemorySearchResponseSchema.parse({
       delivery_id: deliveryId,
       results,
-      total_count: recallResult.fine_assessment_count,
+      active_constraints: recallResult.active_constraints,
+      active_constraints_count: recallResult.active_constraints_count,
+      total_count: resultCandidates.length,
       strategy_mix: buildRecallStrategyMix(policyOverride, results),
       degradation_reason: degradationReason
     });
@@ -669,11 +691,8 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     if (deps.proposalWorkflow === undefined) {
       throw new ToolUnavailableError("Memory proposal workflow is not available.");
     }
-    // A1 fix-loop (finding-2): workspace_id has been removed from the
-    // public request schema; workspace is bound from the trusted MCP
-    // call context. The previous handler-level "must match" guard is
-    // therefore unnecessary — the workflow reads context.workspaceId
-    // directly. Pattern matches soul.explore_graph.
+    // invariant: workspace identity comes from the trusted MCP context,
+    // not public proposal-list input.
     const result = await deps.proposalWorkflow.listPendingProposals(request, context);
     return SoulListPendingProposalsResponseSchema.parse({
       proposals: result.proposals,
@@ -983,6 +1002,16 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
         delivery_id: request.delivery_id,
         usage_state: usageState,
         used_object_ids: usedObjectIds,
+        // INVARIANT (agents propose, Alaya decides): trust_mode is
+        // server-derived, not caller-controlled. report_context_usage is an
+        // unverified agent self-report — the daemon never confirms the
+        // memory was genuinely used — so every MCP-surface usage report is
+        // recorded as `automatic` and carries the lower path-plasticity
+        // weight. A caller cannot self-declare `manual` to claim full
+        // reinforcement weight. `manual` is reserved for an Alaya-verified
+        // attribution path, which the MCP surface does not provide. The
+        // request field `trust_mode` is intentionally ignored here.
+        trust_mode: "automatic",
         ...(request.per_anchor_usage === undefined
           ? {}
           : { per_anchor_usage: request.per_anchor_usage }),
@@ -1430,16 +1459,24 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
   }
 }
 
-// One canonical "used object id" list for the report_context_usage handler:
+// One canonical memory-entry "used object id" list for the report_context_usage handler:
 // the recall-hit → tier promotion path and the POST_TURN_EXTRACT enqueue path
 // both consume this, so a request that fills only one shape never produces a
 // half side-effect. Modern shape (preferred): `delivered_objects[]` with
-// per-object `usage_status` — take only those whose status is "used". Legacy
-// shape: top-level `usage_state === "used"` + `used_object_ids`.
+// per-object `usage_status` — take only used memory_entry objects. Legacy
+// shape: top-level `usage_state === "used"` + `used_object_ids`, interpreted
+// as memory_entry-only.
+// invariant: a synthesis_capsule may be delivered by recall but MUST NEVER
+// feed reinforcement or extraction. This memory_entry-only filter is the
+// enforcement point — synthesis is a recall projection, never durable truth.
 function resolveUsedObjectIds(request: SoulReportContextUsageRequest): readonly string[] {
   if (request.delivered_objects !== undefined && request.delivered_objects.length > 0) {
     const usedIds = request.delivered_objects
-      .filter((object) => object.usage_status === "used")
+      .filter(
+        (object) =>
+          object.usage_status === "used" &&
+          resolveReportObjectKind(object) === "memory_entry"
+      )
       .map((object) => object.object_id);
     return Object.freeze(Array.from(new Set(usedIds)));
   }
@@ -1469,7 +1506,11 @@ function validateUsageStateConsistency(request: SoulReportContextUsageRequest): 
       const reportedIds = [...new Set(request.used_object_ids)].sort();
       const deliveredUsedIds = [...new Set(
         deliveredObjects
-          .filter((object) => object.usage_status === "used")
+          .filter(
+            (object) =>
+              object.usage_status === "used" &&
+              resolveReportObjectKind(object) === "memory_entry"
+          )
           .map((object) => object.object_id)
       )].sort();
       if (reportedIds.join("\0") !== deliveredUsedIds.join("\0")) {
@@ -1505,6 +1546,34 @@ function resolveDeliveredObjectIds(request: SoulReportContextUsageRequest): read
       ? request.used_object_ids ?? []
       : request.delivered_objects.map((object) => object.object_id);
   return Object.freeze([...new Set(ids)]);
+}
+
+function resolveReportObjectKind(
+  object: NonNullable<SoulReportContextUsageRequest["delivered_objects"]>[number]
+): string {
+  return object.object_kind ?? "memory_entry";
+}
+
+function dedupeDeliveredObjectIdentities(
+  objects: readonly { readonly object_id: string; readonly object_kind: string }[]
+): readonly { readonly object_id: string; readonly object_kind: string }[] {
+  const seen = new Set<string>();
+  const result: Array<{ readonly object_id: string; readonly object_kind: string }> = [];
+  for (const object of objects) {
+    const key = `${object.object_kind}\0${object.object_id}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(object);
+  }
+  return Object.freeze(result);
+}
+
+function uniqueObjectIds(
+  objects: readonly { readonly object_id: string }[]
+): readonly string[] {
+  return Object.freeze([...new Set(objects.map((object) => object.object_id))]);
 }
 
 function buildGardenCompletionEnvelopeJson(

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "ec6a8b643f3af21a74711f4ccbe2ee85cc9fbb5553cfdcff2fccc22bf2867283",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"activity\",\"confidence\":0.89,\"matched_text\":\"I'm really looking forward to this hike because, as I mentioned earlier, I went on a day trip to Santa Cruz with my family just a week ago, and we had a great time visiting the beach and the Santa Cruz Wharf.\",\"distilled_fact\":\"The user went on a day trip to Santa Cruz with the user's family one week ago and had a great time visiting the beach and the Santa Cruz Wharf.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity\",\"confidence\":0.84,\"matched_text\":\"I'm really looking forward to this hike\",\"distilled_fact\":\"The user is really looking forward to this hike.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"activity\",\"confidence\":0.76,\"matched_text\":\"I'll make sure to pack all the necessary gear.\",\"distilled_fact\":\"The user will pack all the necessary gear for the hike.\"}]}",
+  "extracted_at": "2026-05-21T09:20:05.470Z"
+}

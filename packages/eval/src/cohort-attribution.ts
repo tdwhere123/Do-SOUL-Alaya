@@ -15,12 +15,12 @@ import { z } from "zod";
 // budget is silently collapsing. This helper exposes that collapse so
 // release diff docs can call it out.
 //
-// see also: shareOfPlane() below — bench-diff doc surfaces consume
+// see also: shareOfPlane() below. Bench-diff doc surfaces consume
 // the cohort share returned here as a recall-stack collapse gate.
 
 export const PlaneAttributionRowSchema = z
   .object({
-    // Question id — diagnostics sidecar uses `question_id`.
+    // Question id maps to the diagnostics sidecar `question_id`.
     question_id: z.string().min(1),
     hit_at_5: z.boolean(),
     // Winning admission plane for the first gold pointer that landed
@@ -100,7 +100,7 @@ export function computePlaneAttribution(
 // reaching into the per-gold `gold[*].plane_winning_admission` field
 // (older sidecars only carry the plane on the gold sub-record).
 //
-// invariant: at most one row emitted per question — the first gold
+// invariant: at most one row emitted per question. The first gold
 // delivery that landed in the top-K determines attribution, matching
 // the runner's `hit_at_5` semantics (any gold in top-5 counts the
 // question as a hit).
@@ -144,7 +144,7 @@ function pickWinningPlane(question: Record<string, unknown>): string | null {
 
 // Convenience: pull the share for one specific plane (e.g.
 // "session_surface_cohort") off the result. Returns 0 when the plane
-// is absent — absence and zero are equivalent for the gate ("plane did
+// is absent; absence and zero are equivalent for the gate ("plane did
 // not win any question").
 export function shareOfPlane(
   result: PlaneAttributionResult,

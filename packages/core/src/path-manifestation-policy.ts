@@ -1,4 +1,5 @@
 import {
+  DYNAMICS_CONSTANTS,
   ManifestationLevel,
   PathGovernanceClass,
   StabilityClass,
@@ -95,15 +96,11 @@ function isLowerInOrder(
   return candidateIndex > referenceIndex;
 }
 
-// Stability evolution thresholds. Spec defaults are 3 / 8 cumulative
-// support_events_count. They live here rather than in
-// `DYNAMICS_CONSTANTS.path_plasticity` because the shipped protocol constants
-// (`volatile_to_normal_support_count = 5`, `normal_to_stable_support_count = 15`)
-// govern a different policy surface and have other consumers.
-// see also: dynamics-constants.ts (protocol-level cumulative counters).
+// Stability evolution thresholds. The protocol dynamics constants are the
+// single source for cumulative support count gates.
 export const STABILITY_PROMOTION_THRESHOLDS = Object.freeze({
-  volatile_to_normal_support_count: 3,
-  normal_to_stable_support_count: 8
+  volatile_to_normal_support_count: DYNAMICS_CONSTANTS.path_plasticity.volatile_to_normal_support_count,
+  normal_to_stable_support_count: DYNAMICS_CONSTANTS.path_plasticity.normal_to_stable_support_count
 } as const);
 
 // Governance promotion thresholds. Spec: hint_only -> attention_only after

@@ -6,6 +6,7 @@ import { diffKpis } from "../diff.js";
 import {
   entrySlug,
   listEntries,
+  policyShapeSlug,
   readEntry,
   readLatest,
   readPrevious,
@@ -14,6 +15,7 @@ import {
 } from "../history.js";
 import { KpiPayloadSchema, type KpiPayload } from "../kpi-schema.js";
 import { renderFindings, renderReport } from "../report.js";
+import { collectReleaseHardGates } from "../release-gates.js";
 
 function buildPayload(commit: string): KpiPayload {
   return {
@@ -24,6 +26,8 @@ function buildPayload(commit: string): KpiPayload {
     alaya_version: "0.3.6",
     embedding_provider: "local-heuristic",
     chat_provider: "n/a",
+    policy_shape: "stress",
+    simulate_report: "none",
     dataset: { name: "synthetic", size: 12, source: "internal" },
     sample_size: 10,
     evaluated_count: 10,
@@ -46,6 +50,36 @@ function buildPayload(commit: string): KpiPayload {
   };
 }
 
+function passingQualityMetrics(): NonNullable<KpiPayload["kpi"]["quality_metrics"]> {
+  return {
+    schema_version: "bench-quality-metrics.v1",
+    non_monotonic_rate: 0,
+    non_monotonic_count: 0,
+    non_monotonic_denominator: 100,
+    budget_drop_distribution: {
+      max_entries: {
+        count: 0,
+        share: 0,
+        denominator: 100
+      }
+    },
+    high_lexical_demoted_rate: 0,
+    high_lexical_demoted_count: 0,
+    high_lexical_demoted_denominator: 0,
+    candidate_absent_count: 0,
+    candidate_absent_denominator: 100,
+    no_gold_count: 0,
+    no_gold_denominator: 100,
+    evidence_stream_gold_delivery_rate: 0.2,
+    evidence_stream_gold_delivery_count: 20,
+    evidence_stream_gold_delivery_denominator: 100,
+    path_stream_top10_rate: 0.12,
+    path_stream_top10_count: 12,
+    path_stream_top10_denominator: 100,
+    miss_distribution: {}
+  };
+}
+
 describe("history archive", () => {
   let layout: HistoryLayout;
   let root: string;
@@ -62,6 +96,30 @@ describe("history archive", () => {
   it("derives a sortable iso-timestamp slug for a run", () => {
     const slug = entrySlug(new Date("2026-05-14T10:30:45.000Z"), "abcdef0");
     expect(slug).toBe("2026-05-14T103045Z-abcdef0");
+  });
+
+  it("derives policy-shape slug discriminators without weakening legacy slugs", () => {
+    const runAt = new Date("2026-05-14T10:30:45.000Z");
+    expect(policyShapeSlug("stress")).toBe("policy-stress");
+    expect(policyShapeSlug("chat")).toBe("policy-chat");
+    expect(entrySlug(runAt, "abcdef0", "policy-stress"))
+      .toBe("2026-05-14T103045Z-abcdef0-policy-stress");
+    expect(entrySlug(runAt, "abcdef0", "policy-chat"))
+      .toBe("2026-05-14T103045Z-abcdef0-policy-chat");
+  });
+
+  it("parses legacy KPI archives without policy_shape as stress", () => {
+    const { policy_shape: _policyShape, ...legacyPayload } = buildPayload("abc1234");
+    const parsed = KpiPayloadSchema.parse(legacyPayload);
+
+    expect(parsed.policy_shape).toBe("stress");
+  });
+
+  it("parses legacy KPI archives without simulate_report as none", () => {
+    const { simulate_report: _simulateReport, ...legacyPayload } = buildPayload("abc1234");
+    const parsed = KpiPayloadSchema.parse(legacyPayload);
+
+    expect(parsed.simulate_report).toBe("none");
   });
 
   it("writes kpi.json + report.md + sidecars and tracks the latest-baseline pointer", async () => {
@@ -83,7 +141,7 @@ describe("history archive", () => {
   });
 
   it("orders same-day slugs by ISO timestamp, not by sha7", async () => {
-    // Two runs on the same date — the sha7 chosen for the later run is
+    // Two runs on the same date; the sha7 chosen for the later run is
     // lexicographically smaller, so a date-only slug would have put it
     // before the morning run. The ISO-T slug should keep them in the
     // correct chronological order regardless of sha7 ordering.
@@ -212,7 +270,7 @@ describe("history archive", () => {
     ).rejects.toThrow(/must match/);
   });
 
-  // @anchor write-entry-collision-test — see history.ts @write-entry-atomic.
+  // @anchor write-entry-collision-test: see history.ts @write-entry-atomic.
   // Covers kpi.json + report.md + findings.md + pointer all surviving
   // the refused overwrite intact, not just report.md.
   it("refuses to overwrite an existing slug rather than clobbering the audit trail", async () => {
@@ -280,7 +338,7 @@ describe("history archive", () => {
     ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  // @anchor orphan-staging-filter-test — see history.ts @write-entry-tmp-filter.
+  // @anchor orphan-staging-filter-test: see history.ts @write-entry-tmp-filter.
   // If a writeEntry is killed (SIGKILL / OOM) between mkdtemp and rename,
   // the .tmp-<slug>-<rand>/ staging directory is left on disk with a
   // parseable kpi.json. listEntries / readLatest must NOT return it.
@@ -315,7 +373,7 @@ describe("history archive", () => {
     expect(latest?.alaya_commit).toBe("bbbbbbb");
   });
 
-  // @anchor split-aware-readLatest-test — see history.ts @read-latest-split-aware
+  // @anchor split-aware-readLatest-test: see history.ts @read-latest-split-aware
   it("readLatest with opts.split filters to entries of the matching split", async () => {
     const oraclePayload: KpiPayload = {
       ...buildPayload("0aaaaaa"),
@@ -347,10 +405,10 @@ describe("history archive", () => {
       "report",
       null
     );
-    // Without split filter — newest pointer wins
+    // Without split filter, newest pointer wins.
     const newestAny = await readLatest(layout, "public");
     expect(newestAny?.alaya_commit).toBe("0bbbbbb");
-    // With split filter — oracle goes back to 0aaaaaa even though 0bbbbbb is newer
+    // With split filter, oracle goes back to 0aaaaaa even though 0bbbbbb is newer.
     const newestOracle = await readLatest(layout, "public", {
       split: "longmemeval-oracle"
     });
@@ -360,6 +418,148 @@ describe("history archive", () => {
     // Split with no matching entries returns null, not the newest
     const newestGolden = await readLatest(layout, "public", { split: "golden" });
     expect(newestGolden).toBeNull();
+  });
+
+  it("readLatest can filter same-split LongMemEval archives by policy shape", async () => {
+    const runAt = new Date("2026-05-14T10:30:45.000Z");
+    const basePayload: KpiPayload = {
+      ...buildPayload("abc1234"),
+      bench_name: "public",
+      split: "longmemeval-s",
+      sample_size: 500,
+      dataset: {
+        name: "longmemeval_s",
+        size: 500,
+        source: "hf"
+      }
+    };
+    await writeEntry(
+      layout,
+      "public",
+      entrySlug(runAt, "abc1234", "policy-stress"),
+      { ...basePayload, policy_shape: "stress" },
+      "stress report",
+      null
+    );
+    await writeEntry(
+      layout,
+      "public",
+      entrySlug(runAt, "abc1234", "policy-chat"),
+      { ...basePayload, policy_shape: "chat" },
+      "chat report",
+      null
+    );
+
+    const latestStress = await readLatest(layout, "public", {
+      split: "longmemeval-s",
+      policyShape: "stress"
+    });
+    const latestChat = await readLatest(layout, "public", {
+      split: "longmemeval-s",
+      policyShape: "chat"
+    });
+
+    expect(latestStress?.policy_shape).toBe("stress");
+    expect(latestChat?.policy_shape).toBe("chat");
+  });
+
+  it("readLatest can filter same-split LongMemEval archives by simulate_report mode", async () => {
+    const runAt = new Date("2026-05-14T10:30:45.000Z");
+    const basePayload: KpiPayload = {
+      ...buildPayload("abc1234"),
+      bench_name: "public",
+      split: "longmemeval-s",
+      sample_size: 500,
+      dataset: {
+        name: "longmemeval_s",
+        size: 500,
+        source: "hf"
+      }
+    };
+    await writeEntry(
+      layout,
+      "public",
+      entrySlug(runAt, "abc1234", "policy-stress"),
+      { ...basePayload, simulate_report: "none" },
+      "cold report",
+      null
+    );
+    await writeEntry(
+      layout,
+      "public",
+      entrySlug(runAt, "abc1234", "policy-stress-report-mixed"),
+      { ...basePayload, simulate_report: "mixed" },
+      "warm report",
+      null
+    );
+
+    const latestCold = await readLatest(layout, "public", {
+      split: "longmemeval-s",
+      policyShape: "stress",
+      simulateReport: "none"
+    });
+    const latestWarm = await readLatest(layout, "public", {
+      split: "longmemeval-s",
+      policyShape: "stress",
+      simulateReport: "mixed"
+    });
+
+    expect(latestCold?.simulate_report).toBe("none");
+    expect(latestWarm?.simulate_report).toBe("mixed");
+  });
+
+  it("readLatest can filter same-split archives by embedding provider", async () => {
+    const basePayload: KpiPayload = {
+      ...buildPayload("abc1234"),
+      bench_name: "public",
+      split: "longmemeval-s",
+      policy_shape: "chat",
+      simulate_report: "none",
+      sample_size: 500,
+      dataset: {
+        name: "longmemeval_s",
+        size: 500,
+        source: "hf"
+      }
+    };
+    await writeEntry(
+      layout,
+      "public",
+      "2026-05-14T100000Z-abc1234-policy-chat",
+      { ...basePayload, embedding_provider: "none" },
+      "embedding off report",
+      null
+    );
+    await writeEntry(
+      layout,
+      "public",
+      "2026-05-14T110000Z-def5678-policy-chat",
+      {
+        ...basePayload,
+        alaya_commit: "def5678",
+        embedding_provider: "yunwu:text-embedding-3-small"
+      },
+      "embedding on report",
+      null
+    );
+
+    const latestOff = await readLatest(layout, "public", {
+      split: "longmemeval-s",
+      policyShape: "chat",
+      simulateReport: "none",
+      embeddingProvider: "none"
+    });
+    const latestOn = await readLatest(layout, "public", {
+      split: "longmemeval-s",
+      policyShape: "chat",
+      simulateReport: "none",
+      embeddingProvider: "yunwu:text-embedding-3-small"
+    });
+
+    expect(latestOff?.embedding_provider).toBe("none");
+    expect(latestOff?.alaya_commit).toBe("abc1234");
+    expect(latestOn?.embedding_provider).toBe("yunwu:text-embedding-3-small");
+    expect(latestOn?.alaya_commit).toBe("def5678");
   });
 
   it("accepts public-multiturn archives and optional embedding diagnostic KPIs", async () => {
@@ -412,7 +612,7 @@ describe("history archive", () => {
     expect(latest?.kpi.r_at_5_with_embedding_returned).toBe(0.71);
   });
 
-  it("flags LongMemEval-S disabled-100 reports below the smoke target", () => {
+  it("flags LongMemEval-S 100 embedding-off reports below the release gate", () => {
     const payload: KpiPayload = {
       ...buildPayload("beef123"),
       bench_name: "public",
@@ -427,7 +627,9 @@ describe("history archive", () => {
       },
       kpi: {
         ...buildPayload("beef123").kpi,
-        r_at_5: 0.68
+        r_at_5: 0.68,
+        latency_ms_p95: 110,
+        quality_metrics: passingQualityMetrics()
       }
     };
     const parsedPayload = KpiPayloadSchema.parse(payload);
@@ -437,12 +639,122 @@ describe("history archive", () => {
     });
 
     const report = renderReport(parsedPayload, parsedPayload, diff);
-    expect(report).toContain("Worst verdict: **OK**");
-    expect(report).toContain("LongMemEval-S disabled-100 smoke target");
+    expect(report).toContain("Worst verdict: **FAIL**");
+    expect(report).toContain("Release hard gates");
+    expect(report).toContain(
+      "longmemeval_s_100_embedding_off_r_at_5 LongMemEval-S 100 embedding-off R@5"
+    );
     expect(report).toContain("68.00% < target 70.00%");
+    expect(report).toContain("candidate_absent: 0 <= target 6");
+    expect(report).toContain("recall p95 embedding-off: 110ms <= target 200ms");
 
     const findings = renderFindings(parsedPayload, diff);
-    expect(findings).toContain("Absolute target gaps");
+    expect(findings).toContain("Release hard gate gaps");
     expect(findings).toContain("current 68.00% < target 70.00%");
+  });
+
+  it("flags LongMemEval-S embedding full reports below the release gate", () => {
+    const payload: KpiPayload = {
+      ...buildPayload("beef123"),
+      bench_name: "public",
+      split: "longmemeval-s",
+      embedding_provider: "yunwu:text-embedding-3-small",
+      sample_size: 500,
+      evaluated_count: 500,
+      dataset: {
+        name: "longmemeval_s",
+        size: 500,
+        source: "fixture"
+      },
+      kpi: {
+        ...buildPayload("beef123").kpi,
+        r_at_5: 0.49,
+        latency_ms_p95: 900,
+        quality_metrics: passingQualityMetrics()
+      }
+    };
+    const parsedPayload = KpiPayloadSchema.parse(payload);
+    const diff = diffKpis(parsedPayload, {
+      ...payload,
+      alaya_commit: "c0ffee0"
+    });
+
+    const report = renderReport(parsedPayload, parsedPayload, diff);
+    expect(report).toContain(
+      "longmemeval_s_500_embedding_on_r_at_5 LongMemEval-S 500 embedding-on R@5"
+    );
+    expect(report).toContain("49.00% < target 55.00%");
+  });
+
+  it("fails embedding-on release gates when the provider never returns", () => {
+    const payload: KpiPayload = {
+      ...buildPayload("beef123"),
+      bench_name: "public",
+      split: "longmemeval-s",
+      embedding_provider: "yunwu:text-embedding-3-small",
+      sample_size: 100,
+      evaluated_count: 100,
+      dataset: {
+        name: "longmemeval_s",
+        size: 500,
+        source: "fixture"
+      },
+      kpi: {
+        ...buildPayload("beef123").kpi,
+        r_at_5: 0.72,
+        latency_ms_p95: 900,
+        provider_returned_rate: 0,
+        provider_pending_rate: 0,
+        provider_failed_rate: 0,
+        quality_metrics: passingQualityMetrics()
+      }
+    };
+    const parsedPayload = KpiPayloadSchema.parse(payload);
+    const gates = collectReleaseHardGates(parsedPayload);
+
+    expect(gates).toContainEqual(
+      expect.objectContaining({
+        id: "embedding_provider_returned_rate",
+        current: 0,
+        target: 0.95,
+        passed: false
+      })
+    );
+    expect(renderReport(parsedPayload, parsedPayload, diffKpis(parsedPayload, null))).toContain(
+      "embedding_provider_returned_rate embedding provider returned"
+    );
+  });
+
+  it("flags LoCoMo embedding full reports below the release gate", () => {
+    const payload: KpiPayload = {
+      ...buildPayload("beef123"),
+      bench_name: "public-locomo",
+      split: "locomo10",
+      embedding_provider: "yunwu:text-embedding-3-small",
+      sample_size: 1982,
+      evaluated_count: 1982,
+      dataset: {
+        name: "locomo10",
+        size: 10,
+        source: "fixture"
+      },
+      kpi: {
+        ...buildPayload("beef123").kpi,
+        r_at_5: 0.39,
+        latency_ms_p95: 900,
+        quality_metrics: passingQualityMetrics()
+      }
+    };
+    const parsedPayload = KpiPayloadSchema.parse(payload);
+    const diff = diffKpis(parsedPayload, {
+      ...payload,
+      alaya_commit: "c0ffee0"
+    });
+
+    const report = renderReport(parsedPayload, parsedPayload, diff);
+    expect(report).toContain(
+      "locomo_full_embedding_on_r_at_5 LoCoMo full embedding-on R@5"
+    );
+    expect(report).toContain("39.00% < target 50.00%");
   });
 });

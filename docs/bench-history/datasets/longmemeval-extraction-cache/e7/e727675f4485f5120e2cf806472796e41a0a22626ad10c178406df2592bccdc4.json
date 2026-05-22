@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "e727675f4485f5120e2cf806472796e41a0a22626ad10c178406df2592bccdc4",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"work_status\",\"confidence\":0.93,\"matched_text\":\"I just had a performance review with Rachel, where we discussed my progress as a senior engineer and set goals for the next quarter.\",\"distilled_fact\":\"The user just had a performance review with Rachel.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"role\",\"confidence\":0.91,\"matched_text\":\"I just had a performance review with Rachel, where we discussed my progress as a senior engineer and set goals for the next quarter.\",\"distilled_fact\":\"The user is a senior engineer.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"goal_setting\",\"confidence\":0.89,\"matched_text\":\"I just had a performance review with Rachel, where we discussed my progress as a senior engineer and set goals for the next quarter.\",\"distilled_fact\":\"The user and Rachel set goals for the next quarter.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"work_style\",\"confidence\":0.84,\"matched_text\":\"I'm trying to prioritize my tasks for the next quarter.\",\"distilled_fact\":\"The user wants to prioritize tasks for the next quarter.\"}]}",
+  "extracted_at": "2026-05-21T09:18:42.748Z"
+}

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { StorageTier, type GardenTaskDescriptor, type MemoryEntry } from "@do-soul/alaya-protocol";
 import type { EmbeddingProviderPort, EmbeddingVectorRecord } from "./embedding-recall-service.js";
+import { toErrorMessage } from "./recall-service-helpers.js";
 
 export interface EmbeddingBackfillMemoryRepoPort {
   findByWorkspaceId(
@@ -27,18 +28,25 @@ export interface EmbeddingBackfillHandlerDependencies {
   readonly memoryEmbeddingRepo: EmbeddingBackfillRepoPort;
   readonly provider: EmbeddingProviderPort;
   readonly now?: () => string;
+  readonly retryDelayMs?: number;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }
 
 const BACKFILL_TIMEOUT_MS = 10_000;
 const BACKFILL_BATCH_SIZE = 16;
+const BACKFILL_BATCH_MAX_INPUT_CHARS = 32_000;
+const BACKFILL_ITEM_RETRY_ATTEMPTS = 3;
+const BACKFILL_ITEM_RETRY_DELAY_MS = 1_000;
 
 export class EmbeddingBackfillHandler {
   private readonly now: () => string;
+  private readonly retryDelayMs: number;
   private readonly warn: (message: string, meta: Record<string, unknown>) => void;
 
   public constructor(private readonly dependencies: EmbeddingBackfillHandlerDependencies) {
     this.now = dependencies.now ?? (() => new Date().toISOString());
+    this.retryDelayMs =
+      dependencies.retryDelayMs === undefined ? BACKFILL_ITEM_RETRY_DELAY_MS : Math.max(0, dependencies.retryDelayMs);
     this.warn = dependencies.warn ?? (() => undefined);
   }
 
@@ -105,17 +113,11 @@ export class EmbeddingBackfillHandler {
     const objectsAffected: string[] = [];
     const auditEntries = [...unchangedAuditEntries];
 
-    for (let index = 0; index < memoriesToEmbed.length; index += BACKFILL_BATCH_SIZE) {
-      const batch = memoriesToEmbed.slice(index, index + BACKFILL_BATCH_SIZE);
-      const embeddings = await this.dependencies.provider.embedTexts(
-        batch.map((entry) => entry.memory.content),
-        {
-          timeoutMs: BACKFILL_TIMEOUT_MS
-        }
-      );
-
-      if (embeddings.length !== batch.length) {
-        throw new Error(`Expected ${batch.length} embeddings but received ${embeddings.length}.`);
+    const batches = buildEmbeddingBackfillBatches(memoriesToEmbed);
+    for (const batch of batches) {
+      const embeddedBatch = await this.embedBatchWithFallback(task.workspace_id, batch, auditEntries);
+      if (embeddedBatch.length === 0) {
+        continue;
       }
 
       const latestHotMemories = new Map(
@@ -124,7 +126,7 @@ export class EmbeddingBackfillHandler {
         ).map((memory) => [memory.object_id, memory] as const)
       );
 
-      for (const [batchIndex, entry] of batch.entries()) {
+      for (const { entry, embedding } of embeddedBatch) {
         const latestMemory = latestHotMemories.get(entry.memory.object_id);
         const latestHash = latestMemory === undefined ? null : hashMemoryContent(latestMemory.content);
 
@@ -133,7 +135,7 @@ export class EmbeddingBackfillHandler {
           continue;
         }
 
-        const vector = new Float32Array(embeddings[batchIndex]!);
+        const vector = new Float32Array(embedding);
         try {
           const persisted =
             this.dependencies.memoryEmbeddingRepo.upsertIfContentHashMatchesCurrentMemory ===
@@ -186,8 +188,155 @@ export class EmbeddingBackfillHandler {
       auditEntries: Object.freeze(auditEntries)
     });
   }
+
+  private async embedBatchWithFallback(
+    workspaceId: string,
+    batch: readonly EmbeddingBackfillCandidate[],
+    auditEntries: string[]
+  ): Promise<readonly EmbeddedBackfillCandidate[]> {
+    try {
+      const embeddings = await this.dependencies.provider.embedTexts(
+        batch.map((entry) => entry.memory.content),
+        {
+          timeoutMs: BACKFILL_TIMEOUT_MS
+        }
+      );
+
+      if (embeddings.length !== batch.length) {
+        throw new Error(`Expected ${batch.length} embeddings but received ${embeddings.length}.`);
+      }
+
+      return Object.freeze(
+        batch.map((entry, index) =>
+          Object.freeze({
+            entry,
+            embedding: embeddings[index]!
+          })
+        )
+      );
+    } catch (error) {
+      const message = toErrorMessage(error);
+      const batchInputChars = batch.reduce((total, entry) => total + entry.memory.content.length, 0);
+
+      if (batch.length <= 1) {
+        const entry = batch[0];
+        if (entry !== undefined) {
+          const retried = await this.retrySingleItemEmbedding(workspaceId, entry, message);
+          if (retried !== null) {
+            return Object.freeze([retried]);
+          }
+          this.warn("embedding backfill item failed; continuing with remaining batches", {
+            workspace_id: workspaceId,
+            object_id: entry.memory.object_id,
+            input_chars: batchInputChars,
+            error: message
+          });
+          auditEntries.push(`embedding_failed:provider:${entry.memory.object_id}`);
+        }
+        return Object.freeze([]);
+      }
+
+      this.warn("embedding backfill batch failed; retrying split batches", {
+        workspace_id: workspaceId,
+        batch_size: batch.length,
+        batch_input_chars: batchInputChars,
+        error: message
+      });
+      const splitIndex = Math.ceil(batch.length / 2);
+      const left = await this.embedBatchWithFallback(workspaceId, batch.slice(0, splitIndex), auditEntries);
+      const right = await this.embedBatchWithFallback(workspaceId, batch.slice(splitIndex), auditEntries);
+      return Object.freeze([...left, ...right]);
+    }
+  }
+
+  private async retrySingleItemEmbedding(
+    workspaceId: string,
+    entry: EmbeddingBackfillCandidate,
+    firstError: string
+  ): Promise<EmbeddedBackfillCandidate | null> {
+    let lastError = firstError;
+    for (let attempt = 2; attempt <= BACKFILL_ITEM_RETRY_ATTEMPTS; attempt++) {
+      this.warn("embedding backfill item failed; retrying item", {
+        workspace_id: workspaceId,
+        object_id: entry.memory.object_id,
+        input_chars: entry.memory.content.length,
+        attempt,
+        max_attempts: BACKFILL_ITEM_RETRY_ATTEMPTS,
+        error: lastError
+      });
+      await sleepBackfillRetry(this.retryDelayMs * (attempt - 1));
+
+      try {
+        const embeddings = await this.dependencies.provider.embedTexts([entry.memory.content], {
+          timeoutMs: BACKFILL_TIMEOUT_MS
+        });
+        if (embeddings.length !== 1) {
+          throw new Error(`Expected 1 embedding but received ${embeddings.length}.`);
+        }
+        return Object.freeze({
+          entry,
+          embedding: embeddings[0]!
+        });
+      } catch (error) {
+        lastError = toErrorMessage(error);
+      }
+    }
+
+    return null;
+  }
+}
+
+type EmbeddingBackfillCandidate = Readonly<{
+  readonly memory: Readonly<MemoryEntry>;
+  readonly contentHash: string;
+  readonly existing: Readonly<EmbeddingVectorRecord> | null;
+}>;
+
+type EmbeddedBackfillCandidate = Readonly<{
+  readonly entry: EmbeddingBackfillCandidate;
+  readonly embedding: Float32Array;
+}>;
+
+function buildEmbeddingBackfillBatches(
+  entries: readonly EmbeddingBackfillCandidate[]
+): readonly (readonly EmbeddingBackfillCandidate[])[] {
+  const batches: EmbeddingBackfillCandidate[][] = [];
+  let currentBatch: EmbeddingBackfillCandidate[] = [];
+  let currentChars = 0;
+
+  for (const entry of entries) {
+    const entryChars = entry.memory.content.length;
+    const wouldExceedCount = currentBatch.length >= BACKFILL_BATCH_SIZE;
+    const wouldExceedChars =
+      currentBatch.length > 0 &&
+      currentChars + entryChars > BACKFILL_BATCH_MAX_INPUT_CHARS;
+    if (wouldExceedCount || wouldExceedChars) {
+      batches.push(currentBatch);
+      currentBatch = [];
+      currentChars = 0;
+    }
+
+    currentBatch.push(entry);
+    currentChars += entryChars;
+  }
+
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
+  }
+
+  return Object.freeze(batches.map((batch) => Object.freeze([...batch])));
 }
 
 function hashMemoryContent(content: string): string {
   return `sha256:${createHash("sha256").update(content).digest("hex")}`;
+}
+
+async function sleepBackfillRetry(delayMs: number): Promise<void> {
+  if (delayMs <= 0) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    const timeout = setTimeout(resolve, delayMs);
+    timeout.unref?.();
+  });
 }

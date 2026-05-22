@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "9cf68aaf783856135e373872ab83259308833ad99aa113181db0b512170afe5c",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"workspace\",\"confidence\":0.96,\"matched_text\":\"I've recently converted my guest room into a home office\",\"distilled_fact\":\"The user's guest room has recently been converted into a home office.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"workspace_style\",\"confidence\":0.92,\"matched_text\":\"I'm looking to get some advice on setting up a comfortable home workspace.\",\"distilled_fact\":\"The user wants advice on setting up a comfortable home workspace.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"workspace_goal\",\"confidence\":0.9,\"matched_text\":\"I'm trying to make the most of the space.\",\"distilled_fact\":\"The user wants to make the most of the available workspace space.\"}]}",
+  "extracted_at": "2026-05-21T09:09:39.888Z"
+}

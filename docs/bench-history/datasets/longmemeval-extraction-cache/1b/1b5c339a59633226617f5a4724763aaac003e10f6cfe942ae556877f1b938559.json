@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "1b5c339a59633226617f5a4724763aaac003e10f6cfe942ae556877f1b938559",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_plan\",\"confidence\":0.87,\"matched_text\":\"I'm also thinking of joining a volleyball league in the summer.\",\"distilled_fact\":\"The user is thinking of joining a volleyball league in the summer.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"user_experience\",\"confidence\":0.93,\"matched_text\":\"especially since I've never played competitively before?\",\"distilled_fact\":\"The user has never played volleyball competitively before.\"}]}",
+  "extracted_at": "2026-05-21T09:15:28.028Z"
+}

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   FormationKind,
   MemoryDimension,
+  RevokeReason,
   ScopeClass,
   SourceKind,
   StorageTier,
@@ -316,7 +317,7 @@ describe("MemoryService", () => {
     expect(created.superseded_by).toBeNull();
   });
 
-  it("writes soul.memory.updated before persistence and runtime notification with computed revision", async () => {
+  it("writes soul.memory.updated after persistence and before runtime notification with computed revision", async () => {
     const order: string[] = [];
     const existing = createMemoryEntry();
 
@@ -377,7 +378,7 @@ describe("MemoryService", () => {
       "manual_update"
     );
 
-    expect(order).toEqual(["event_log", "repo_update", "notify"]);
+    expect(order).toEqual(["repo_update", "event_log", "notify"]);
     expect(updated.content).toBe("Updated content");
     expect(updated.storage_tier).toBe(StorageTier.COLD);
 
@@ -413,6 +414,49 @@ describe("MemoryService", () => {
       })
     );
     expect(updated.last_hit_at).toBe("2026-03-21T03:30:00.000Z");
+  });
+
+  it("revokes green mapping when an evidence rewrite removes every prior anchor", async () => {
+    const pierceSpy = vi.fn(async () => undefined);
+    const { dependencies } = createDependencies({
+      greenService: {
+        reevaluate: vi.fn(async () => undefined),
+        pierce: pierceSpy
+      }
+    });
+    const service = new MemoryService(dependencies);
+
+    await service.update(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      { evidence_refs: ["evidence-3"] },
+      "manual_update"
+    );
+
+    expect(pierceSpy).toHaveBeenCalledWith({
+      targetObjectId: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      workspaceId: "workspace-1",
+      reason: RevokeReason.MAPPING_REVOKED,
+      runId: "run-1"
+    });
+  });
+
+  it("keeps green mapping when an evidence rewrite preserves one prior anchor", async () => {
+    const pierceSpy = vi.fn(async () => undefined);
+    const { dependencies } = createDependencies({
+      greenService: {
+        reevaluate: vi.fn(async () => undefined),
+        pierce: pierceSpy
+      }
+    });
+    const service = new MemoryService(dependencies);
+
+    await service.update(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      { evidence_refs: ["evidence-2", "evidence-3"] },
+      "manual_update"
+    );
+
+    expect(pierceSpy).not.toHaveBeenCalled();
   });
 
   it("rejects scoped update for a foreign workspace before EventLog append", async () => {

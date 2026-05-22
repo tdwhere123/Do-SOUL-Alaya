@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "bf6f7b8d5ba7f707ffbfc309e679ebe5393ac8ad3d4427ae9f2579157a060b51",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"choice_preference\",\"confidence\":0.93,\"matched_text\":\"I think I'll go with the product that has better long-term cost and support, even if it costs a bit more upfront.\",\"distilled_fact\":\"The user prefers the product with better long-term cost and support, even if it costs a bit more upfront.\"}]}",
+  "extracted_at": "2026-05-21T07:44:28.739Z"
+}

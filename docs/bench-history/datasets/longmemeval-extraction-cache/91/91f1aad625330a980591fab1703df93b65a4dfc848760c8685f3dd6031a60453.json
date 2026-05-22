@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "91f1aad625330a980591fab1703df93b65a4dfc848760c8685f3dd6031a60453",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"meal_prep\",\"confidence\":0.84,\"matched_text\":\"I'm especially interested in meal prep\",\"distilled_fact\":\"The user is especially interested in meal prep.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"benefit_statement\",\"confidence\":0.78,\"matched_text\":\"I've heard it can be a game-changer for saving time and money.\",\"distilled_fact\":\"Meal prep can be a game-changer for saving time and money.\"}]}",
+  "extracted_at": "2026-05-21T09:10:42.185Z"
+}

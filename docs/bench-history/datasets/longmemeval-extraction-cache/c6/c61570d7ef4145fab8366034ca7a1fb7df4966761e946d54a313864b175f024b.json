@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c61570d7ef4145fab8366034ca7a1fb7df4966761e946d54a313864b175f024b",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"trip_preference\",\"confidence\":0.54,\"matched_text\":\"Which one would you recommend for a romantic getaway with my partner?\",\"distilled_fact\":\"The user is interested in a romantic getaway with the user's partner.\"}]}",
+  "extracted_at": "2026-05-21T07:14:08.018Z"
+}

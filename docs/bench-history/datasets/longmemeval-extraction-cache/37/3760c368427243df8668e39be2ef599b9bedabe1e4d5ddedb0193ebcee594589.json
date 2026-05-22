@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "3760c368427243df8668e39be2ef599b9bedabe1e4d5ddedb0193ebcee594589",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"decision criterion\",\"confidence\":0.84,\"matched_text\":\"it's a wise decision to prioritize the product's long-term cost and support\",\"distilled_fact\":\"The user prioritizes a product's long-term cost and support when making a decision.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"product attribute\",\"confidence\":0.77,\"matched_text\":\"Investing in a quality product that has good support and after-sales service can provide you with a positive experience and save you money in the long run\",\"distilled_fact\":\"The user values a quality product with good support and after-sales service.\"}]}",
+  "extracted_at": "2026-05-21T07:44:35.271Z"
+}

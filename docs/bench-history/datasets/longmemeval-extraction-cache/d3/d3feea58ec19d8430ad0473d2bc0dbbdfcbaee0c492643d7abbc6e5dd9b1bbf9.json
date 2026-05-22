@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "d3feea58ec19d8430ad0473d2bc0dbbdfcbaee0c492643d7abbc6e5dd9b1bbf9",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_request\",\"object_kind\":\"task\",\"confidence\":0.94,\"matched_text\":\"Generate code to plot the second by second action intensity on a graph.\",\"distilled_fact\":\"The user requested code to plot second-by-second action intensity on a graph.\"}]}",
+  "extracted_at": "2026-05-21T07:05:23.916Z"
+}

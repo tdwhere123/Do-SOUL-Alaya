@@ -199,24 +199,36 @@ describe("Claim enums and constants", () => {
       "preference",
       "procedure",
       "exception",
-      "factual_policy"
+      "factual_policy",
+      "decision",
+      "hazard",
+      "glossary",
+      "episode"
     ]);
     expect(Object.values(ClaimKind)).toEqual([
       "constraint",
       "preference",
       "procedure",
       "exception",
-      "factual_policy"
+      "factual_policy",
+      "decision",
+      "hazard",
+      "glossary",
+      "episode"
     ]);
   });
 
   it("exports the expected ClaimKind disambiguation priority", () => {
     expect(CLAIM_KIND_PRIORITY).toEqual({
-      exception: 5,
-      constraint: 4,
-      procedure: 3,
-      preference: 2,
-      factual_policy: 1
+      exception: 9,
+      constraint: 8,
+      hazard: 7,
+      procedure: 6,
+      decision: 5,
+      preference: 4,
+      factual_policy: 3,
+      glossary: 2,
+      episode: 1
     });
   });
 

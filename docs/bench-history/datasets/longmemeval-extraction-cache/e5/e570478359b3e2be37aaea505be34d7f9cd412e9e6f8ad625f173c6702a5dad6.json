@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "e570478359b3e2be37aaea505be34d7f9cd412e9e6f8ad625f173c6702a5dad6",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"device_accessory\",\"confidence\":0.72,\"matched_text\":\"I'll probably need to get an external SSD then.\",\"distilled_fact\":\"The speaker will probably need to get an external SSD.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"purchase_intent\",\"confidence\":0.69,\"matched_text\":\"I'll probably need to get an external SSD then.\",\"distilled_fact\":\"The speaker probably needs to get an external SSD.\"}]}",
+  "extracted_at": "2026-05-21T08:13:28.394Z"
+}

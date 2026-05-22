@@ -9,6 +9,7 @@ import {
   type PathGovernanceClass,
   type PathPlasticityState,
   type PathRelation,
+  type SoulContextObjectIdentity,
   type StabilityClass,
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
@@ -29,6 +30,8 @@ import { planPromotion, type PromotionPlan } from "./path-manifestation-policy.j
 export const PATH_PLASTICITY_CONSTANTS = Object.freeze({
   USED_DELTA: DYNAMICS_CONSTANTS.path_plasticity.reinforcement_increment,
   SKIPPED_DELTA: Math.abs(DYNAMICS_CONSTANTS.path_plasticity.weakening_decrement),
+  REPEATED_USED_DECAY_FACTOR: 0.5,
+  AUTOMATIC_TRUST_USED_MULTIPLIER: 0.5,
   STRENGTH_FLOOR: DYNAMICS_CONSTANTS.path_plasticity.strength_floor,
   STRENGTH_CEILING: DYNAMICS_CONSTANTS.path_plasticity.strength_ceiling,
   RETIREMENT_STRENGTH_THRESHOLD: DYNAMICS_CONSTANTS.path_plasticity.retirement_strength_threshold,
@@ -42,10 +45,9 @@ export interface UsageProofReaderPort {
    * Implementation may join through TrustStateRepo or directly query the
    * EventLog — the service does not care which.
    *
-   * Exclusive comparison is intentional (Q4): a tick that processes records
-   * up to-and-including `T` then advances its watermark to `T`; the next
-   * tick starts strictly after `T` to avoid double-counting the boundary
-   * record across two ticks.
+   * invariant: a tick that processes records up to-and-including `T` then
+   * advances its watermark to `T`; the next tick starts strictly after `T`
+   * to avoid double-counting the boundary record across two ticks.
    */
   listRecentUsage(
     workspaceId: string,
@@ -54,8 +56,18 @@ export interface UsageProofReaderPort {
   ): Promise<readonly Readonly<UsageProofRecord>[]>;
 
   /**
-   * Returns the delivered_object_ids for the given delivery, used to credit
-   * a `skipped` usage receipt against every memory the agent had in hand.
+   * Returns delivered object identities for the given delivery. Modern
+   * callers use this so object-kind collisions cannot credit synthesis
+   * capsules as memory-entry path anchors.
+   */
+  findDeliveredObjects?(
+    deliveryId: string
+  ): Promise<readonly SoulContextObjectIdentity[] | null>;
+
+  /**
+   * Legacy fallback for deliveries persisted before object_kind was tracked.
+   * The service treats these bare ids as memory_entry ids only when
+   * findDeliveredObjects is unavailable or returns null.
    */
   findDeliveredObjectIds(deliveryId: string): Promise<readonly string[] | null>;
 }
@@ -66,9 +78,8 @@ export interface PathPlasticityRepoPort {
     anchorRef: PathAnchorRef
   ): Promise<readonly Readonly<PathRelation>[]>;
   /** Synchronous variant required by `appendManyWithMutation`'s
-   * sync-mutate contract (see #BL-022 closure / event-publisher.ts). The
-   * plasticity batch publisher below wraps append + mutation in one SQLite
-   * transaction via this port. */
+   * sync-mutate contract. The plasticity batch publisher below wraps append
+   * and mutation in one SQLite transaction through this port. */
   update(
     pathId: string,
     updates: PathPlasticityRepoUpdate
@@ -161,16 +172,9 @@ export class PathPlasticityService {
       });
     }
 
-    // B1 dedup: aggregate per-path, not per-object. A single PathRelation P
-    // whose source_anchor and target_anchor both appear in one usage
-    // receipt R must count as exactly ONE reinforcement of P — not two —
-    // because the agent reported one logical use of the path. Naive
-    // per-object aggregation followed by anchor lookup double-counts P
-    // because findByAnchor returns P under BOTH the source-anchor and the
-    // target-anchor object_id keys.
-    //
-    // We resolve receipts → paths first (deduping P within each receipt),
-    // then aggregate counts across receipts.
+    // invariant: aggregate per path, not per object. If both anchors of the
+    // same PathRelation appear in one usage receipt, that receipt still
+    // counts as one logical reinforcement of the path.
     const pathAggregates = await this.aggregatePathUsage(
       params.workspaceId,
       usageRecords,
@@ -247,12 +251,9 @@ export class PathPlasticityService {
   ): Promise<ReadonlyMap<string, PathAggregate>> {
     const pathAggregates = new Map<string, PathAggregate>();
 
-    // I8: dedupe receipts by their durable identifier (audit_event_id) so
-    // the aggregator stays idempotent within a single call even if the
-    // reader returns the same record twice (overlapping ticks, buggy
-    // watermark, etc.). Cross-tick dedup must come from the daemon's
-    // high-water-mark in `sinceIso`; this in-memory set guards the service
-    // boundary.
+    // invariant: dedupe receipts by their durable identifier so aggregation
+    // stays idempotent inside one call even if the reader repeats a record.
+    // Cross-tick dedupe comes from the daemon's high-water mark.
     const seenAuditEventIds = new Set<string>();
 
     for (const record of usageRecords) {
@@ -267,7 +268,9 @@ export class PathPlasticityService {
       if (record.usage_state === "used") {
         targetObjectIds = uniqueStrings([
           ...record.used_object_ids,
-          ...(record.per_anchor_usage ?? []).map((usage) => usage.object_id)
+          ...(record.per_anchor_usage ?? [])
+            .filter(isMemoryEntryAnchorUsage)
+            .map((usage) => usage.object_id)
         ]);
       } else if (record.usage_state === "skipped" || record.usage_state === "not_applicable") {
         // skipped / not_applicable receipts weight every memory the agent
@@ -275,18 +278,15 @@ export class PathPlasticityService {
         targetObjectIds =
           record.used_object_ids.length > 0
             ? record.used_object_ids
-            : (await this.dependencies.usageProofReader.findDeliveredObjectIds(
-                record.delivery_id
-              )) ?? [];
+            : await this.resolveDeliveredMemoryObjectIds(record.delivery_id);
         throwIfPathPlasticityAborted(abortSignal);
       } else {
         continue;
       }
 
-      // B1 dedup: collect the set of UNIQUE PathRelation rows touched by
-      // this receipt. findByAnchor returns the same path twice when both
-      // its anchors appear in the receipt; we must count the receipt as a
-      // single logical signal against the path, not one per anchor.
+      // invariant: collect the unique PathRelation rows touched by this
+      // receipt before applying the signal, so a path matched by both
+      // anchors is reinforced once.
       const pathsTouchedByReceipt = new Map<string, Readonly<PathRelation>>();
       for (const objectId of targetObjectIds) {
         throwIfPathPlasticityAborted(abortSignal);
@@ -311,6 +311,7 @@ export class PathPlasticityService {
         const existing = pathAggregates.get(pathId);
         const counts: MutableObjectUsageCounts = existing?.counts ?? {
           used: 0,
+          usedWeight: 0,
           skipped: 0,
           notApplicable: 0,
           sourceAnchorUsage: 0,
@@ -318,6 +319,7 @@ export class PathPlasticityService {
           lastReportedAt: null
         };
         if (record.usage_state === "used") {
+          counts.usedWeight += computeUsedSignalWeight(record, counts.used);
           counts.used += 1;
         } else if (record.usage_state === "skipped") {
           counts.skipped += 1;
@@ -339,6 +341,7 @@ export class PathPlasticityService {
         const existing = pathAggregates.get(pathId);
         const counts: MutableObjectUsageCounts = existing?.counts ?? {
           used: 0,
+          usedWeight: 0,
           skipped: 0,
           notApplicable: 0,
           sourceAnchorUsage: 0,
@@ -361,12 +364,30 @@ export class PathPlasticityService {
     return pathAggregates;
   }
 
+  private async resolveDeliveredMemoryObjectIds(deliveryId: string): Promise<readonly string[]> {
+    const deliveredObjects =
+      await this.dependencies.usageProofReader.findDeliveredObjects?.(deliveryId);
+    if (deliveredObjects !== undefined && deliveredObjects !== null) {
+      return uniqueStrings(
+        deliveredObjects
+          .filter((object) => object.object_kind === "memory_entry")
+          .map((object) => object.object_id)
+      );
+    }
+
+    return (await this.dependencies.usageProofReader.findDeliveredObjectIds(deliveryId)) ?? [];
+  }
+
   private async resolveDirectionalPathUsage(
     workspaceId: string,
     record: Readonly<UsageProofRecord>,
     abortSignal?: AbortSignal
   ): Promise<ReadonlyMap<string, DirectionalPathUsage>> {
-    const perAnchorUsage = record.per_anchor_usage ?? [];
+    // invariant: only memory_entry anchors drive PathRelation direction bias.
+    // A synthesis_capsule shares the delivered-objects scope with memory and
+    // could collide with a path anchor object_id, so it is filtered here too,
+    // not only on the used/skipped strength-crediting paths above.
+    const perAnchorUsage = (record.per_anchor_usage ?? []).filter(isMemoryEntryAnchorUsage);
     if (record.usage_state !== "used" || perAnchorUsage.length === 0) {
       return new Map();
     }
@@ -412,7 +433,7 @@ export class PathPlasticityService {
   ): PathPlasticityMutationPlan | null {
     throwIfPathPlasticityAborted(abortSignal);
     const previousStrength = path.plasticity_state.strength;
-    const usedDelta = counts.used * PATH_PLASTICITY_CONSTANTS.USED_DELTA;
+    const usedDelta = counts.usedWeight * PATH_PLASTICITY_CONSTANTS.USED_DELTA;
     const skippedDelta = counts.skipped * PATH_PLASTICITY_CONSTANTS.SKIPPED_DELTA;
     const proposedStrength = clampStrength(previousStrength + usedDelta - skippedDelta);
     const occurredAt = this.now();
@@ -443,13 +464,9 @@ export class PathPlasticityService {
     // it shows up in the audit log under the correct phase-C type.
     const netDelta = proposedStrength - previousStrength;
 
-    // Verification-gap fix: retirement must be re-checked even when
-    // netDelta == 0. A path stuck at strength == 0 with skipped receipts
-    // arriving (clamped to no further movement) would otherwise never
-    // retire under the previous gating. We split the retirement check from
-    // the netDelta < 0 branch and run it whenever the path is currently at
-    // (or below) the retirement strength threshold AND has been inactive
-    // longer than the inactivity window.
+    // invariant: retirement is re-checked even when clamped strength yields
+    // zero net movement. A low-strength inactive path with fresh skipped
+    // receipts still needs a retirement audit row.
     const retirementEligible =
       proposedStrength <= PATH_PLASTICITY_CONSTANTS.RETIREMENT_STRENGTH_THRESHOLD &&
       this.isInactive(path.plasticity_state.last_reinforced_at, occurredAt);
@@ -524,8 +541,8 @@ export class PathPlasticityService {
       // Pure not_applicable signal — record the contradiction increment via a
       // weakened event with zero strength delta so the audit log carries a
       // trace, even though strength itself does not change.
-      // Mixed-receipt fix: include any `used` count in support_events_count
-      // even when the tick net-weakens or net-zeros (per D2 reviewer-I2).
+      // invariant: support_events_count records every used receipt even when
+      // the weighted strength delta net-weakens or net-zeros.
       const nextPlasticity = parsePlasticityState({
         ...path.plasticity_state,
         direction_bias: nextDirectionBias,
@@ -546,15 +563,10 @@ export class PathPlasticityService {
       });
     }
 
-    // netDelta === 0, no contradiction signal. Verification-gap fix:
-    // re-check retirement here too. A path sitting at strength == 0 with
-    // a `skipped` receipt that produces no further drop (clamped at the
-    // floor) still triggers retirement when inactivity passes the window.
-    // D2 codex-fixloop-I1: mixed receipts can also reach this branch with
-    // counts.used > 0 (e.g. {used: 1, skipped: 2} = 0.1 - 0.1 = 0). Carry
-    // the support tally forward in the retirement nextPlasticity so the
-    // last record on the path before retirement reflects every used
-    // receipt that contributed.
+    // netDelta === 0, no contradiction signal. A path at the strength floor
+    // with skipped receipts still retires after the inactivity window. Mixed
+    // receipts can also reach this branch; preserve the support tally before
+    // the path is retired.
     if (retirementEligible && counts.skipped > 0) {
       const nextPlasticity = parsePlasticityState({
         ...path.plasticity_state,
@@ -820,6 +832,7 @@ export class PathPlasticityService {
 
 interface MutableObjectUsageCounts {
   used: number;
+  usedWeight: number;
   skipped: number;
   notApplicable: number;
   sourceAnchorUsage: number;
@@ -875,6 +888,21 @@ function maxIsoNullable(left: string | null, right: string | null): string | nul
   return Date.parse(right) > Date.parse(left) ? right : left;
 }
 
+function computeUsedSignalWeight(
+  record: Readonly<UsageProofRecord>,
+  priorUsedCountForPath: number
+): number {
+  const repeatWeight = Math.pow(
+    PATH_PLASTICITY_CONSTANTS.REPEATED_USED_DECAY_FACTOR,
+    priorUsedCountForPath
+  );
+  const trustWeight =
+    record.trust_mode === "automatic"
+      ? PATH_PLASTICITY_CONSTANTS.AUTOMATIC_TRUST_USED_MULTIPLIER
+      : 1;
+  return repeatWeight * trustWeight;
+}
+
 function parsePlasticityState(value: PathPlasticityState): Readonly<PathPlasticityState> {
   return PathPlasticityStateSchema.parse(value);
 }
@@ -919,6 +947,12 @@ function isRetiredPath(path: Readonly<PathRelation>): boolean {
 
 function isObjectAnchor(anchor: PathAnchorRef, objectId: string): boolean {
   return anchor.kind === "object" && anchor.object_id === objectId;
+}
+
+function isMemoryEntryAnchorUsage(
+  usage: NonNullable<UsageProofRecord["per_anchor_usage"]>[number]
+): boolean {
+  return (usage.object_kind ?? "memory_entry") === "memory_entry";
 }
 
 function uniqueStrings(values: readonly string[]): readonly string[] {

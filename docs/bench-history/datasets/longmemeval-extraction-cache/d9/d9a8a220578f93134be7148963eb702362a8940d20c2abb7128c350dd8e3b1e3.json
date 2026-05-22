@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "d9a8a220578f93134be7148963eb702362a8940d20c2abb7128c350dd8e3b1e3",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"drink_ingredient\",\"confidence\":0.91,\"matched_text\":\"I was thinking of experimenting with bitters in a Negroni.\",\"distilled_fact\":\"The user is thinking of experimenting with bitters in a Negroni.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"drink_ingredient\",\"confidence\":0.96,\"matched_text\":\"a smoked orange bitters would pair well with the Campari and gin\",\"distilled_fact\":\"The user is considering smoked orange bitters with Campari and gin in a Negroni.\"}]}",
+  "extracted_at": "2026-05-21T09:17:42.585Z"
+}

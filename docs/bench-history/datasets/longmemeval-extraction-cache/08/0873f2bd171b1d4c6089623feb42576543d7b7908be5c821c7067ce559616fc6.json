@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "0873f2bd171b1d4c6089623feb42576543d7b7908be5c821c7067ce559616fc6",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"belief\",\"confidence\":0.94,\"matched_text\":\"It's frustrating to see how little progress has been made in addressing climate change and other factors that lead to species extinction.\",\"distilled_fact\":\"The speaker believes that little progress has been made in addressing climate change and other factors that lead to species extinction.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"belief\",\"confidence\":0.91,\"matched_text\":\"Do you think humans will ever be able to reverse the damage we've caused?\",\"distilled_fact\":\"The speaker believes that humans have caused damage.\"}]}",
+  "extracted_at": "2026-05-21T08:09:35.727Z"
+}

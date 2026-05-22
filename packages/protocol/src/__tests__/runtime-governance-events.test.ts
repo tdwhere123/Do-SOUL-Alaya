@@ -18,6 +18,7 @@ import {
   PathConsolidationFusedPayloadSchema,
   PathGraphSnapshotCreatedPayloadSchema,
   PathRelationCreatedPayloadSchema,
+  PathRelationLegitimacyUpdatedPayloadSchema,
   PathRelationRedirectedPayloadSchema,
   PathRelationReinforcedPayloadSchema,
   PathRelationRetiredPayloadSchema,
@@ -53,6 +54,7 @@ describe("Phase C event registry", () => {
       "stance.policy_evaluated",
       "stance.resolution_changed",
       "path.relation_created",
+      "path.relation_legitimacy_updated",
       "path.relation_reinforced",
       "path.relation_weakened",
       "path.relation_redirected",
@@ -128,6 +130,15 @@ describe("Phase C event registry", () => {
       new_strength: 0.4,
       support_events_count: 4,
       reinforced_at: validTimestamp
+    } as const;
+    const legitimacyUpdatedPayload = {
+      path_id: "path-1",
+      workspace_id: "workspace-1",
+      previous_governance_class: "hint_only",
+      new_governance_class: "strictly_governed",
+      previous_evidence_basis: ["proposal:old"],
+      new_evidence_basis: ["proposal:new"],
+      updated_at: validTimestamp
     } as const;
     const weakenedPayload = {
       path_id: "path-1",
@@ -320,6 +331,9 @@ describe("Phase C event registry", () => {
       bootstrappingPathsPlantedPayload
     );
     expect(PathRelationCreatedPayloadSchema.parse(pathCreatedPayload)).toEqual(pathCreatedPayload);
+    expect(PathRelationLegitimacyUpdatedPayloadSchema.parse(legitimacyUpdatedPayload)).toEqual(
+      legitimacyUpdatedPayload
+    );
     expect(PathRelationReinforcedPayloadSchema.parse(reinforcedPayload)).toEqual(reinforcedPayload);
     expect(PathRelationWeakenedPayloadSchema.parse(weakenedPayload)).toEqual(weakenedPayload);
     expect(PathRelationRedirectedPayloadSchema.parse(redirectedPayload)).toEqual(redirectedPayload);
@@ -417,6 +431,12 @@ describe("Phase C event registry", () => {
     expect(parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.PATH_RELATION_CREATED, pathCreatedPayload)).toEqual(
       pathCreatedPayload
     );
+    expect(
+      parseRuntimeGovernanceEventPayload(
+        RuntimeGovernanceEventType.PATH_RELATION_LEGITIMACY_UPDATED,
+        legitimacyUpdatedPayload
+      )
+    ).toEqual(legitimacyUpdatedPayload);
     expect(
       parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.PATH_RELATION_REINFORCED, reinforcedPayload)
     ).toEqual(reinforcedPayload);
@@ -573,6 +593,15 @@ describe("Phase C event registry", () => {
     ).toEqual({
       type: RuntimeGovernanceEventType.PATH_RELATION_CREATED,
       payload: pathCreatedPayload
+    });
+    expect(
+      RuntimeGovernanceEventUnionSchema.parse({
+        type: RuntimeGovernanceEventType.PATH_RELATION_LEGITIMACY_UPDATED,
+        payload: legitimacyUpdatedPayload
+      })
+    ).toEqual({
+      type: RuntimeGovernanceEventType.PATH_RELATION_LEGITIMACY_UPDATED,
+      payload: legitimacyUpdatedPayload
     });
     expect(
       RuntimeGovernanceEventUnionSchema.parse({

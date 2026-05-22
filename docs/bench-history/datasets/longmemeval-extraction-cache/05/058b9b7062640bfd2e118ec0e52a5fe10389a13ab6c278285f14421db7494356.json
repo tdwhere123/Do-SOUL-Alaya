@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "058b9b7062640bfd2e118ec0e52a5fe10389a13ab6c278285f14421db7494356",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"action\",\"confidence\":0.91,\"matched_text\":\"I'll look into those tools and start tracking our diversity metrics.\",\"distilled_fact\":\"The user will look into those tools and start tracking the user's organization's diversity metrics.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"communication_goal\",\"confidence\":0.89,\"matched_text\":\"I want to make sure we're transparent and accountable.\",\"distilled_fact\":\"The user wants the user's organization to be transparent and accountable.\"}]}",
+  "extracted_at": "2026-05-21T09:05:52.966Z"
+}

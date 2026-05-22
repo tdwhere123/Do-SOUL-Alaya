@@ -26,7 +26,7 @@ describe("Self bench runner", () => {
 
       expect(result.slug).toMatch(/^\d{4}-\d{2}-\d{2}T\d{6}Z-[0-9a-f]{7,40}$/);
 
-      // harness_mode must reflect the real MCP chain — never direct_db_seed.
+      // harness_mode must reflect the real MCP chain, never direct_db_seed.
       expect(result.payload.harness_mode).toBe("mcp_propose_review");
 
       // All 8 scenarios must produce a per_scenario row
@@ -66,7 +66,7 @@ describe("Self bench runner", () => {
       // no longer a tautology. The exact R@K depends on the daemon's
       // recall ranking against the FTS-derived scores; the values are
       // bounded in [0, 1] (already asserted above). R@K of 0 means the
-      // recall did not surface the seeded setup above distractors —
+      // recall did not surface the seeded setup above distractors;
       // that is real recall behavior on a 5–7-memory workspace, not a
       // harness bug. Surface the values so reviewers can see them.
       // eslint-disable-next-line no-console

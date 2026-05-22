@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "bf78f1b4204d4f1f8526eff912cc9a10c76c5b9cfff414534aaf5757e53801c2",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"product_interest\",\"confidence\":0.86,\"matched_text\":\"I'm also thinking of getting some new insoles for my running shoes\",\"distilled_fact\":\"The user is thinking about getting some new insoles for their running shoes.\"}]}",
+  "extracted_at": "2026-05-21T08:11:37.010Z"
+}

@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "2544603520da639c187b463cf71c6d734c0dd9e81b3b35c400e2227a34986903",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"topic\",\"confidence\":0.78,\"matched_text\":\"do you know anything about how dolphins communicate with touch?\",\"distilled_fact\":\"The user is interested in how dolphins communicate with touch.\"}]}",
+  "extracted_at": "2026-05-21T08:02:21.861Z"
+}

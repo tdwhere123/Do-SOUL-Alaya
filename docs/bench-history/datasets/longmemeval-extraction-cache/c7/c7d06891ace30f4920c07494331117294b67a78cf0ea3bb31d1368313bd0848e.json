@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "c7d06891ace30f4920c07494331117294b67a78cf0ea3bb31d1368313bd0848e",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"jewelry_item\",\"confidence\":0.94,\"matched_text\":\"Let's add the single pearl earring to the list.\",\"distilled_fact\":\"The jewelry inventory list includes a single pearl earring.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"jewelry_item\",\"confidence\":0.96,\"matched_text\":\"2. **Mystery Pearl Earring**\\n\\t* Description: Single pearl earring\\n\\t* Date Acquired: July 3rd (found in jewelry box)\\n\\t* Notes: Unknown origin, possibly a lost earring or a treasure from the past\",\"distilled_fact\":\"The Mystery Pearl Earring is a single pearl earring acquired on July 3rd and found in a jewelry box.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"jewelry_item\",\"confidence\":0.88,\"matched_text\":\"* Notes: Unknown origin, possibly a lost earring or a treasure from the past\",\"distilled_fact\":\"The origin of the Mystery Pearl Earring is unknown.\"}]}",
+  "extracted_at": "2026-05-21T08:05:31.338Z"
+}

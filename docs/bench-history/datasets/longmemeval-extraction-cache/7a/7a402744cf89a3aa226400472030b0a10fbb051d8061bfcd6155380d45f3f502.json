@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "7a402744cf89a3aa226400472030b0a10fbb051d8061bfcd6155380d45f3f502",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"event\",\"confidence\":0.84,\"matched_text\":\"the International Market\",\"distilled_fact\":\"The International Market is an event.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"event\",\"confidence\":0.84,\"matched_text\":\"the Holiday Market in December\",\"distilled_fact\":\"The Holiday Market is an event in December.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"intent\",\"confidence\":0.9,\"matched_text\":\"I'll try contacting the local tourism board to see if they have any information about the International Market.\",\"distilled_fact\":\"The speaker plans to contact the local tourism board to see if they have information about the International Market.\"}]}",
+  "extracted_at": "2026-05-21T08:03:35.634Z"
+}

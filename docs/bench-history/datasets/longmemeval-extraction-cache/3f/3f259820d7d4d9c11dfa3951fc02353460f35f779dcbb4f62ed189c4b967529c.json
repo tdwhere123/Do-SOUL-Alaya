@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "3f259820d7d4d9c11dfa3951fc02353460f35f779dcbb4f62ed189c4b967529c",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_claim\",\"object_kind\":\"recommendation\",\"confidence\":0.63,\"matched_text\":\"Based on the cognitive structure and hierarchical value map developed earlier, the following recommendations\",\"distilled_fact\":\"The cognitive structure and hierarchical value map were developed earlier.\"}]}",
+  "extracted_at": "2026-05-21T07:50:16.356Z"
+}

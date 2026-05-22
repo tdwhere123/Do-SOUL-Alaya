@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "94d03ac1aa51bbc5b41b9caeda122b0f4bf81845c05312f3af5cd52bc259cb9e",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"conversation_style\",\"confidence\":0.84,\"matched_text\":\"our conversations may include jokes and sarcasm\",\"distilled_fact\":\"The conversations may include jokes and sarcasm.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"sports_wagers\",\"confidence\":0.9,\"matched_text\":\"any references to sports wagers are purely hypothetical and for entertainment purposes only\",\"distilled_fact\":\"Any references to sports wagers are purely hypothetical and for entertainment purposes only.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"conversation_style\",\"confidence\":0.74,\"matched_text\":\"Let's keep it real, but also keep it legal.\",\"distilled_fact\":\"The conversation should be real and legal.\"}]}",
+  "extracted_at": "2026-05-21T07:57:22.237Z"
+}

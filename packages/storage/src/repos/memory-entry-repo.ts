@@ -13,6 +13,7 @@ import {
   createShortKeywordMatcher,
   mergeKeywordSearchRows,
   normalizeKeywordSearchObjectIds,
+  tokenBearsCjk,
   tokenizeFtsQuery,
   type ExactKeywordCandidateRow,
   type ExactKeywordSearchRow,
@@ -132,6 +133,9 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
   private readonly updateScopedStatement;
   // updateDynamics uses a dynamic SQL builder to support nullable field clearing.
   private readonly searchByKeywordStatement;
+  // see also: 077-memory-content-fts-dual.sql -- word-level porter+unicode61
+  // index alongside the trigram-tokenized memory_content_fts table.
+  private readonly searchByKeywordPorterStatement;
   private readonly findLowActivityActiveMemoriesStatement;
   private readonly findTombstonedMemoriesStatement;
   private readonly transitionLifecycleStatement;
@@ -247,6 +251,19 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
         AND memory_content_fts MATCH ?
         AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
       ORDER BY raw_rank ASC, memory_content_fts.object_id ASC
+      LIMIT ?
+    `);
+    this.searchByKeywordPorterStatement = db.connection.prepare(`
+      SELECT
+        memory_content_fts_porter.object_id,
+        bm25(memory_content_fts_porter) AS raw_rank
+      FROM memory_content_fts_porter
+      JOIN memory_entries ON memory_entries.object_id = memory_content_fts_porter.object_id
+      WHERE
+        memory_content_fts_porter.workspace_id = ?
+        AND memory_content_fts_porter MATCH ?
+        AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
+      ORDER BY raw_rank ASC, memory_content_fts_porter.object_id ASC
       LIMIT ?
     `);
     this.findLowActivityActiveMemoriesStatement = db.connection.prepare(`
@@ -867,6 +884,11 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
 
     const shortTokens = tokens.filter((token) => countQueryCodepoints(token) < 3);
     const trigramTokens = tokens.filter((token) => countQueryCodepoints(token) >= 3);
+    // Dual-index routing: the trigram table stays the substring/CJK source
+    // for every long token; word-like Latin/space-delimited tokens are
+    // additionally probed against the porter+unicode61 table so English
+    // ranking gets stemmed word-level BM25. A mixed query consults both.
+    const porterTokens = trigramTokens.filter((token) => !tokenBearsCjk(token));
     const exactRows = this.searchExactKeywordRows(
       params.workspaceId,
       shortTokens,
@@ -879,7 +901,18 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
       params.limit,
       params.candidateObjectIds
     );
-    const mergedRows = mergeKeywordSearchRows(exactRows, trigramRows, params.limit);
+    const porterRows = this.searchPorterKeywordRows(
+      params.workspaceId,
+      porterTokens,
+      params.limit,
+      params.candidateObjectIds
+    );
+    const mergedRows = mergeKeywordSearchRows(
+      exactRows,
+      trigramRows,
+      params.limit,
+      porterRows
+    );
 
     return Object.freeze(
       mergedRows.map((row) =>
@@ -985,6 +1018,64 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
     }
 
     return this.searchByKeywordStatement.all(
+      workspaceId,
+      tokens.map((token) => `"${token}"`).join(" OR "),
+      limit
+    ) as readonly FtsKeywordSearchRow[];
+  }
+
+  private searchPorterKeywordRowsWithinObjectIds(
+    workspaceId: string,
+    tokens: readonly string[],
+    limit: number,
+    candidateObjectIds: readonly string[]
+  ): readonly FtsKeywordSearchRow[] {
+    const objectIdFilter = buildObjectIdFilterSql(
+      candidateObjectIds,
+      "memory_content_fts_porter.object_id"
+    );
+
+    return this.db.connection.prepare(`
+      SELECT
+        memory_content_fts_porter.object_id,
+        bm25(memory_content_fts_porter) AS raw_rank
+      FROM memory_content_fts_porter
+      JOIN memory_entries ON memory_entries.object_id = memory_content_fts_porter.object_id
+      WHERE
+        memory_content_fts_porter.workspace_id = ?
+        AND memory_content_fts_porter MATCH ?
+        AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
+      ${objectIdFilter.sql}
+      ORDER BY raw_rank ASC, memory_content_fts_porter.object_id ASC
+      LIMIT ?
+    `).all(
+      workspaceId,
+      tokens.map((token) => `"${token}"`).join(" OR "),
+      ...objectIdFilter.params,
+      limit
+    ) as readonly FtsKeywordSearchRow[];
+  }
+
+  private searchPorterKeywordRows(
+    workspaceId: string,
+    tokens: readonly string[],
+    limit: number,
+    candidateObjectIds?: readonly string[]
+  ): readonly FtsKeywordSearchRow[] {
+    if (tokens.length === 0) {
+      return [];
+    }
+
+    if (candidateObjectIds !== undefined) {
+      return this.searchPorterKeywordRowsWithinObjectIds(
+        workspaceId,
+        tokens,
+        limit,
+        candidateObjectIds
+      );
+    }
+
+    return this.searchByKeywordPorterStatement.all(
       workspaceId,
       tokens.map((token) => `"${token}"`).join(" OR "),
       limit

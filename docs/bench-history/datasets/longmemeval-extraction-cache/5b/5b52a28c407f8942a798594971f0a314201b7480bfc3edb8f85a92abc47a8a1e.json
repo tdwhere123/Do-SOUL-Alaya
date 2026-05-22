@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "5b52a28c407f8942a798594971f0a314201b7480bfc3edb8f85a92abc47a8a1e",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"activity_plan\",\"confidence\":0.86,\"matched_text\":\"I'm planning to try out Smokey's this weekend with some friends.\",\"distilled_fact\":\"The speaker is planning to try out Smokey's this weekend with some friends.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"question\",\"confidence\":0.71,\"matched_text\":\"Do you think I should make a reservation or just walk in?\",\"distilled_fact\":\"The speaker is asking whether to make a reservation or just walk in at Smokey's this weekend.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"question\",\"confidence\":0.74,\"matched_text\":\"what's the best way to order at a BBQ joint - do I just go up to the counter and order, or is it table service?\",\"distilled_fact\":\"The speaker is asking whether ordering at a BBQ joint is done at the counter or with table service.\"}]}",
+  "extracted_at": "2026-05-21T07:40:32.973Z"
+}

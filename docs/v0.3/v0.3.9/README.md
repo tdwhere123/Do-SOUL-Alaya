@@ -60,7 +60,7 @@ Recorded with rationale in `decisions.md`.
 | `NodeInstance` | **Retire** — runtime engine single-instance already sufficient, no future multi-binding scenario surfaced |
 | `SynthesisCapsule.promotion lifecycle` | **Retire promotion fully** — drop `authority_round_count`, `cooldown_until`, `promotion_state` fields + three service methods + the legacy synthesis-promotion proposal code path. Do **not** reuse `SynthesisCapsule` for health-inbox aggregation (that conflates control-plane signals with memory ontology). `SynthesisCapsule` itself stays for its original synthesis-of-facts purpose but is unused in v0.3.9; revisit in v0.4 if a real synthesis trigger appears. Health inbox uses a new control-plane projection `HealthIssueGroup` (Category E.0) |
 | `HealthIssueGroup` (new) | **Build** — control-plane projection (not memory ontology). Groups `OrphanRadar` / `Green` / `evidence_failure` entries by `target_memory_id` × `cause_kind`; new `health_issue_groups` table. Cat-E Inspector inbox reads this. Allows fatigue dedupe + grouped typed actions without polluting ontology |
-| `UpgradeAssessmentAxis` | **Retire** — five hardcoded-null fields removed from `GapRecord` / `HandoffRecord`; computer was never implemented |
+| `UpgradeAssessmentAxis` | **Deferred, not retired** — nullable schema fields are still present; producer/computer remains unimplemented. Canonical closure condition is `reports/v0.3.9-closeout.md` §Cat-H.3. |
 
 ### D2 — Garden deterministic triage governance status
 
@@ -117,7 +117,7 @@ way (Category 0 covers both).
 | **E** | Inspector Health Inbox — aggregate Auditor / OrphanRadar / Green by memory / `evidence_ref` / root cause; typed actions per class; fatigue dedupe | L3 | New Inspector page + daemon aggregation route |
 | **F** | Path-Driven Manifestation Activation — stored `PathRelation` → `ActivationCandidate` → `ManifestationResolver` producer; explicit governance-class to stance/nudge/lens policy boundary; `verification_bias` + `unfinishedness_bias` landing strategy (non-durable) | L2 | New producer service + manifestation policy |
 | **G** | Schema Field Reclamation — every K.1-K.4 dead/half-dead/computed-then-discarded field: wire consumer or remove from schema (no "looks supported" mirage); evaluate enum-single-producer extension vs. retraction | All | Cross-package cleanup |
-| **H** | Dead-abstraction action — execute D1 (keep & wire DeferredObligation + SurfaceService narrow; retire NodeInstance + SynthesisCapsule promotion + UpgradeAssessmentAxis) | All | Schema deletion + service wiring |
+| **H** | Dead-abstraction action — execute D1 (keep & wire DeferredObligation + SurfaceService narrow; retire NodeInstance + SynthesisCapsule promotion; keep `UpgradeAssessmentAxis` deferred on schema per Cat-H.3) | All | Schema deletion + service wiring except `UpgradeAssessmentAxis` (deferred) |
 | **I** | 21k+ sink repair — GreenStatus silent UPDATE (affected-row guard + workspace predicate + EventLog mandatory); OrphanRadar feeds Category E; evidence_failure aggregates upward to E | L3 | `garden-data-ports.ts` patch + Auditor reshaping |
 | **J** | Docs truth alignment — `runtime-status.md` readiness split into 4 levels (`schema_only` / `implementation_wired` / `live_event_proven` / `agent_used`); every producer/consumer path tagged separately; v0.3.8 closeout retroactively annotated where labels were overstated | Docs meta | `docs/handbook/runtime-status.md` rewrite |
 

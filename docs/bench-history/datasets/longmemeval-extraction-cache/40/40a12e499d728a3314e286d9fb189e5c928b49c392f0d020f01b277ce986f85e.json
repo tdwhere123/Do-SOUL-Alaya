@@ -1,0 +1,6 @@
+{
+  "model": "gpt-5.4-mini",
+  "cache_key": "40a12e499d728a3314e286d9fb189e5c928b49c392f0d020f01b277ce986f85e",
+  "raw_json": "{\"signals\":[{\"signal_kind\":\"potential_preference\",\"object_kind\":\"device_preference\",\"confidence\":0.88,\"matched_text\":\"I'm actually thinking of getting a smart plug for my floor lamp in the living room, so I can turn it on and off with my phone.\",\"distilled_fact\":\"The speaker is thinking of getting a smart plug for the floor lamp in the living room so the speaker can turn it on and off with a phone.\"},{\"signal_kind\":\"potential_claim\",\"object_kind\":\"household_device_change\",\"confidence\":0.93,\"matched_text\":\"I replaced the bulb in my bedside lamp with an LED one about three weeks ago, and it's been a game-changer.\",\"distilled_fact\":\"The speaker replaced the bulb in the bedside lamp with an LED bulb about three weeks ago.\"},{\"signal_kind\":\"potential_preference\",\"object_kind\":\"household_device_opinion\",\"confidence\":0.79,\"matched_text\":\"I replaced the bulb in my bedside lamp with an LED one about three weeks ago, and it's been a game-changer.\",\"distilled_fact\":\"The speaker considers the LED bulb in the bedside lamp to be a game-changer.\"}]}",
+  "extracted_at": "2026-05-21T07:56:13.581Z"
+}
