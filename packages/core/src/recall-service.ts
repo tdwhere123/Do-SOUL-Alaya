@@ -1775,6 +1775,9 @@ export class RecallService {
         // fallback: aggregated rank > 0 but no per-ref rank populated; mirrors
         // legacy first-non-empty-gist rule so future producers that only
         // populate the aggregate stay correct.
+        // unreachable under current producer (coarseEvidenceFtsRanksPerRef
+        // always populates every ref in evidence_refs); kept for forward-compat
+        // with future producers that only emit the aggregate rank.
         if (gistsByMemory[entry.object_id] === undefined) {
           for (const ref of entry.evidence_refs) {
             const gist = gistById.get(ref);

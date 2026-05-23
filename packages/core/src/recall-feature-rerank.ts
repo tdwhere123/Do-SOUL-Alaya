@@ -82,6 +82,37 @@ export const RECALL_RERANK_EVIDENCE_ONLY_FACTOR = 0.4;
 const EVIDENCE_GIST_WEIGHT = 0.7;
 
 /**
+ * Hard safety cap on the gist text length fed to the rerank tokenizer. Gist
+ * is `EvidenceCapsule.gist` (a `NonEmptyStringSchema` with no upper bound at
+ * the protocol layer) and originates from attacker-controlled source text —
+ * unlike `memory_entry.content`, which is the output of an upstream
+ * distillation step. Without this cap an oversized gist would O(n)-expand
+ * the tokenizer + `new Set` + the proximity sliding window inside every
+ * top-N rerank pass.
+ *
+ * 8192 chars is well above any normal evidence gist (the in-corpus
+ * distribution sits under 1K) and below any plausible legitimate ceiling,
+ * so a longer payload is treated as anomalous and hard-truncated. Not
+ * configurable on purpose: this is a safety boundary, not a tuning knob.
+ */
+const GIST_MAX_CHARS = 8192;
+
+/**
+ * Diversity threshold below which the gist score is linearly damped. Defined
+ * as `distinctTokenRatio = uniqueTokens / totalTokens` inside the gist's own
+ * token list. A natural-language gist sits comfortably above 0.5; a repeated-
+ * token gist (e.g. the query phrase pasted N times to game `exact_phrase` +
+ * `term_coverage`) collapses toward 0. 0.5 is the "single-token-repeat rate
+ * of 50%" boundary — high enough to leave normal gists untouched, low enough
+ * to catch the repeat-amplification shape that bypasses pool-IDF dilution on
+ * the gist path (gist scorer is intentionally pool-IDF-free).
+ *
+ * Self-contained: depends only on the gist's own token list, no pool or IDF
+ * table required.
+ */
+const GIST_MIN_DIVERSITY_RATIO = 0.5;
+
+/**
  * Minimum distinct query terms required before term-coverage / proximity
  * features are trusted. Below this the query is too thin to rerank on and
  * those features yield 0 (exact-phrase still applies).
@@ -367,10 +398,16 @@ export function computeRerankFeatures(
     hasEvidenceLexicalHit: text.hasEvidenceLexicalHit
   });
 
-  const gistText = text.evidenceGist?.trim() ?? "";
-  if (gistText.length === 0) {
+  const rawGist = text.evidenceGist?.trim() ?? "";
+  if (rawGist.length === 0) {
     return contentBreakdown;
   }
+  // invariant: hard-cap gist text before tokenization. Source-derived input
+  // with no protocol-level length bound (EvidenceCapsule.gist), so a long
+  // payload is bounded into the tokenizer / new Set / proximity sliding
+  // window inside the top-N rerank loop. See GIST_MAX_CHARS.
+  const gistText =
+    rawGist.length > GIST_MAX_CHARS ? rawGist.slice(0, GIST_MAX_CHARS) : rawGist;
 
   // invariant: gist scorer passes null poolIdf so the content-derived
   // rerank IDF pool cannot leak into gist rareTermCoverage (pool is built
@@ -399,8 +436,19 @@ export function computeRerankFeatures(
     !contentHadSignal && text.hasEvidenceLexicalHit
       ? RECALL_RERANK_EVIDENCE_ONLY_FACTOR
       : 1;
+  // invariant: gist path is pool-IDF-free by design (no content-pool leak),
+  // so it carries no rarity-based dilution. Compensate with a self-contained
+  // diversity signal computed over the gist's own tokens: a repeated-token
+  // gist (the query phrase pasted N times to game exact-phrase + coverage)
+  // collapses uniqueTokens/totalTokens toward 0 and is damped linearly. A
+  // natural-language gist sits above GIST_MIN_DIVERSITY_RATIO and is left
+  // alone. Re-tokenizing here is cheap — gistText is already 8K-capped.
+  const gistDiversityDamp = computeGistDiversityDamp(gistText);
   const weightedGistScore =
-    gistBreakdown.score * EVIDENCE_GIST_WEIGHT * gistEvidenceOnlyDamp;
+    gistBreakdown.score *
+    EVIDENCE_GIST_WEIGHT *
+    gistEvidenceOnlyDamp *
+    gistDiversityDamp;
 
   if (weightedGistScore <= contentBreakdown.score) {
     return contentBreakdown;
@@ -411,9 +459,31 @@ export function computeRerankFeatures(
     termCoverage: gistBreakdown.termCoverage,
     rareTermCoverage: gistBreakdown.rareTermCoverage,
     proximity: gistBreakdown.proximity,
-    fieldFactor: gistEvidenceOnlyDamp,
+    fieldFactor: gistEvidenceOnlyDamp * gistDiversityDamp,
     score: weightedGistScore
   });
+}
+
+/**
+ * Self-contained token-diversity damp for the gist path. Returns 1 when the
+ * gist's distinct-token ratio is at or above GIST_MIN_DIVERSITY_RATIO; below
+ * that, scales linearly to 0 at ratio 0. The mapping
+ * `damp = ratio / GIST_MIN_DIVERSITY_RATIO` keeps the boundary continuous
+ * (ratio == threshold -> damp == 1, ratio == 0.1 -> damp == 0.2) so there is
+ * no cliff that bench tuning could exploit. Empty / single-token gists yield
+ * 1 (no signal to damp on; the content path's checks still apply).
+ */
+function computeGistDiversityDamp(gistText: string): number {
+  const tokens = tokenize(gistText);
+  if (tokens.length <= 1) {
+    return 1;
+  }
+  const distinct = new Set(tokens).size;
+  const ratio = distinct / tokens.length;
+  if (ratio >= GIST_MIN_DIVERSITY_RATIO) {
+    return 1;
+  }
+  return ratio / GIST_MIN_DIVERSITY_RATIO;
 }
 
 function computeRerankFeaturesForField(

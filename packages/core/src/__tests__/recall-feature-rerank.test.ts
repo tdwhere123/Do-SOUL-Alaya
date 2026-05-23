@@ -641,4 +641,116 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
     expect(gistOnly.score).toBeLessThan(contentOnly.score);
     expect(gistOnly.score).toBeGreaterThan(0);
   });
+
+  it("hard-caps an oversized adversarial gist without blowing the tokenizer", () => {
+    // Attacker-controlled gist text has no protocol upper bound. A huge
+    // payload must be truncated before tokenization so the scorer remains
+    // bounded under the top-N rerank loop.
+    const query = compileRecallQueryProbes("favorite text editor");
+    // ~200K chars of repeated junk plus a single answer-bearing phrase at
+    // the head so the truncated prefix still scores meaningfully.
+    const huge = `their favorite text editor is Helix. ${"junkjunk ".repeat(25000)}`;
+    expect(huge.length).toBeGreaterThan(50000);
+
+    const start = Date.now();
+    const features = computeRerankFeatures(query, {
+      content: "an unrelated distilled fact about meeting notes",
+      hasEvidenceLexicalHit: true,
+      evidenceGist: huge
+    });
+    const elapsedMs = Date.now() - start;
+
+    // Bounded compute despite the giant input — well under any plausible
+    // top-N rerank budget even on a slow CI box.
+    expect(elapsedMs).toBeLessThan(500);
+    // Answer-bearing phrase at the head survives the cap, so the gist path
+    // still recognizes the match.
+    expect(features.exactPhrase).toBe(1);
+    expect(features.score).toBeGreaterThan(0);
+    expect(features.score).toBeLessThanOrEqual(1);
+  });
+
+  it("damps a repeated-token gist below an honest content match", () => {
+    // Repeated-token attack: gist is the query phrase pasted 100 times to
+    // game exact-phrase + term-coverage. distinctTokenRatio collapses far
+    // below the diversity threshold, so the damp scales the weighted gist
+    // score down enough that an honest content match still wins.
+    const query = compileRecallQueryProbes("favorite text editor");
+    const repeated = "favorite text editor ".repeat(100).trim();
+    const attackerGist = computeRerankFeatures(query, {
+      content: "an unrelated distilled fact about lunch preferences",
+      hasEvidenceLexicalHit: false,
+      evidenceGist: repeated
+    });
+    // Diverse natural-language gist with the same phrase exactly once —
+    // should pass the diversity gate untouched.
+    const honestGist = computeRerankFeatures(query, {
+      content: "an unrelated distilled fact about lunch preferences",
+      hasEvidenceLexicalHit: false,
+      evidenceGist:
+        "the user mentioned their favorite text editor is Helix during the standup"
+    });
+
+    // Damp must measurably pull the attacker score below the honest one
+    // even though the attacker's raw lexical features would be saturated.
+    expect(attackerGist.score).toBeLessThan(honestGist.score);
+    // And the damp visibly shrinks the field factor below the no-damp
+    // baseline of 1.
+    expect(attackerGist.fieldFactor).toBeLessThan(0.5);
+  });
+
+  it("filters control / null-byte payloads through the shared tokenizer", () => {
+    // Regression guard: splitLexicalTokens splits on every non-L/N/_./@#-
+    // codepoint, so control bytes and NULs are natural delimiters. Pin the
+    // contract: a gist saturated with control characters reduces to just
+    // its real tokens — no NaN, no infinite proximity, no leaked literal
+    // control chars in the matched-term set.
+    const query = compileRecallQueryProbes("rollback procedure");
+    const gist = "the\u0000rollback\u0001procedure\u0007stays\u001fweekly\ufffdRTL\u202eend";
+    const features = computeRerankFeatures(query, {
+      content: "an unrelated distilled fact about lunch preferences",
+      hasEvidenceLexicalHit: true,
+      evidenceGist: gist
+    });
+
+    expect(Number.isFinite(features.score)).toBe(true);
+    expect(features.score).toBeGreaterThan(0);
+    expect(features.score).toBeLessThanOrEqual(1);
+    // Both query terms ("rollback", "procedure") survive the tokenizer
+    // because splitLexicalTokens treats NUL / control bytes / the unicode
+    // replacement char / RTL override as natural split codepoints.
+    expect(features.termCoverage).toBe(1);
+  });
+
+  it("uses the highest-rank ref's gist semantics — empty gist on the top ref does not block scoring", () => {
+    // The gist path scores whatever non-empty gist the caller selected. If
+    // the highest-rank ref's gist is empty the caller-side fallback (see
+    // collectEvidenceGistsByMemoryId) picks the next non-empty ref; this
+    // test pins the scorer's contract end of that handoff — given a
+    // non-empty gist string (i.e. the fallback already fired), the scorer
+    // produces a meaningful signal, and given an empty string it collapses
+    // to the content-only baseline.
+    const query = compileRecallQueryProbes("backup retention schedule");
+    const opaqueContent = "Operator chose the conservative policy in the planning thread.";
+    const fallbackGist =
+      "Operator explicitly mentioned the backup retention schedule should stay weekly.";
+
+    const withFallback = computeRerankFeatures(query, {
+      content: opaqueContent,
+      hasEvidenceLexicalHit: true,
+      evidenceGist: fallbackGist
+    });
+    const withEmpty = computeRerankFeatures(query, {
+      content: opaqueContent,
+      hasEvidenceLexicalHit: true,
+      evidenceGist: ""
+    });
+
+    // With a usable fallback gist the scorer surfaces gist-side features.
+    expect(withFallback.exactPhrase).toBe(1);
+    expect(withFallback.score).toBeGreaterThan(0);
+    // With an empty gist the scorer must collapse to the content-only
+    // baseline (no gist credit, no exception).
+    expect(withEmpty.score).toBe(0);
+  });
 });
