@@ -515,3 +515,130 @@ describe("recall feature rerank — IDF tie-break in rerankTopN", () => {
     expect(result[0]?.id).toBe("gold-rank-31");
   });
 });
+
+describe("recall feature rerank — evidence-gist field (B2)", () => {
+  it("returns identical features when no evidence gist is supplied (regression guard)", () => {
+    const query = compileRecallQueryProbes("favorite programming language");
+    const haystack = "The user said their favorite programming language is Rust.";
+
+    const baseline = computeRerankFeatures(query, {
+      content: haystack,
+      hasEvidenceLexicalHit: false
+    });
+    const withEmptyGist = computeRerankFeatures(query, {
+      content: haystack,
+      hasEvidenceLexicalHit: false,
+      evidenceGist: ""
+    });
+    const withWhitespaceGist = computeRerankFeatures(query, {
+      content: haystack,
+      hasEvidenceLexicalHit: false,
+      evidenceGist: "   "
+    });
+
+    // Absent / empty / whitespace gist → content-only behavior preserved.
+    expect(withEmptyGist).toEqual(baseline);
+    expect(withWhitespaceGist).toEqual(baseline);
+  });
+
+  it("scores by the gist path when content does not match but gist does", () => {
+    const query = compileRecallQueryProbes("backup retention schedule");
+    const features = computeRerankFeatures(query, {
+      // Content is an opaque distilled fact; the answer-bearing semantics
+      // live in the evidence paraphrase.
+      content: "Operator chose the conservative policy in the planning thread.",
+      hasEvidenceLexicalHit: true,
+      evidenceGist:
+        "Operator explicitly mentioned the backup retention schedule should stay weekly."
+    });
+
+    // Gist path contributes a non-zero lexical signal; the content path's
+    // raw exact-phrase / term-coverage features would be 0 for this query
+    // against this content. Because the gist won, the returned breakdown
+    // reflects gist-side features (non-zero exact-phrase / coverage).
+    expect(features.exactPhrase).toBe(1);
+    expect(features.termCoverage).toBeGreaterThan(0);
+    expect(features.score).toBeGreaterThan(0);
+  });
+
+  it("propagates caller hasEvidenceLexicalHit into the gist path's field factor", () => {
+    // invariant: gist path inherits caller.hasEvidenceLexicalHit
+    // see also: computeRerankFeaturesForField in recall-feature-rerank.ts
+    const query = compileRecallQueryProbes("rollback procedure schedule");
+    const withFlag = computeRerankFeatures(query, {
+      content: "an unrelated distilled fact about lunch preferences",
+      hasEvidenceLexicalHit: true,
+      evidenceGist: "the rollback procedure schedule stays weekly"
+    });
+    const withoutFlag = computeRerankFeatures(query, {
+      content: "an unrelated distilled fact about lunch preferences",
+      hasEvidenceLexicalHit: false,
+      evidenceGist: "the rollback procedure schedule stays weekly"
+    });
+
+    // hasEvidenceLexicalHit=true triggers the evidence-only damp on the
+    // gist path's own field factor; hasEvidenceLexicalHit=false does not.
+    expect(withFlag.fieldFactor).toBe(RECALL_RERANK_EVIDENCE_ONLY_FACTOR);
+    expect(withoutFlag.fieldFactor).toBe(1);
+    // The damp must reduce the overall score: a strong gist match against
+    // unrelated content earns less when the evidence-only flag is set.
+    expect(withFlag.score).toBeLessThan(withoutFlag.score);
+    expect(withFlag.score).toBeGreaterThan(0);
+  });
+
+  it("does not let gist rare-term coverage borrow content-pool IDF", () => {
+    // invariant: gist path passes null poolIdf -> rareTermCoverage = 0
+    // see also: computeRerankFeatures gist branch in recall-feature-rerank.ts
+    const query = compileRecallQueryProbes("gistonlyrareterm");
+    const pool = buildRerankPoolIdf([
+      "alpha note one",
+      "alpha note two",
+      "alpha note three"
+    ]);
+    const features = computeRerankFeatures(
+      query,
+      {
+        content: "an unrelated distilled fact",
+        hasEvidenceLexicalHit: false,
+        evidenceGist: "the gistonlyrareterm shows up only inside the gist"
+      },
+      pool
+    );
+
+    expect(features.rareTermCoverage).toBe(0);
+  });
+
+  it("prefers the higher-scoring field — content wins over an equally strong gist (max behavior)", () => {
+    const query = compileRecallQueryProbes("backup retention schedule");
+
+    // Both fields encode the same strong signal. The gist path is damped
+    // by EVIDENCE_GIST_WEIGHT (< 1), so an equally strong content match
+    // should beat the gist match under the max combinator.
+    const contentMatches = "The backup retention schedule stays weekly.";
+    const gistMatches = "The backup retention schedule stays weekly.";
+
+    const both = computeRerankFeatures(query, {
+      content: contentMatches,
+      hasEvidenceLexicalHit: false,
+      evidenceGist: gistMatches
+    });
+    const contentOnly = computeRerankFeatures(query, {
+      content: contentMatches,
+      hasEvidenceLexicalHit: false
+    });
+    const gistOnly = computeRerankFeatures(query, {
+      content: "an unrelated distilled note",
+      hasEvidenceLexicalHit: true,
+      evidenceGist: gistMatches
+    });
+
+    // With both, the content path wins (its score is undamped). The combined
+    // result must equal the content-only result — the gist path's damped
+    // score is strictly smaller, so max picks content.
+    expect(both.score).toBeCloseTo(contentOnly.score, 5);
+    // And the gist path alone yields a strictly smaller score than the
+    // content path on the same lexical signal (because of the damp).
+    expect(gistOnly.score).toBeLessThan(contentOnly.score);
+    expect(gistOnly.score).toBeGreaterThan(0);
+  });
+});

@@ -446,6 +446,13 @@ export interface RecallSupplementaryData {
   readonly graphAndPathColdScore: number;
   readonly recallsEdgeCount: number;
   readonly weightTransferAmount: number;
+  // Evidence capsule `gist` text keyed by memory_entry.object_id, populated
+  // when an evidence FTS hit resolved the candidate into the pool. The
+  // feature rerank reads this so a query whose answer-bearing semantics live
+  // in the evidence paraphrase (not the distilled content) can still be
+  // promoted. Absent / empty string → rerank falls back to content-only,
+  // bit-identical to the pre-B2 behavior.
+  readonly evidenceGistsByMemoryId: Readonly<Record<string, string>>;
 }
 
 export interface CoarseRecallCandidate {

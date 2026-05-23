@@ -64,6 +64,24 @@ export const RECALL_RERANK_WEIGHTS = Object.freeze({
 export const RECALL_RERANK_EVIDENCE_ONLY_FACTOR = 0.4;
 
 /**
+ * Evidence-gist feature weight. When the query did not match the distilled
+ * memory content but matches the evidence capsule's `gist` (the human-readable
+ * explanation of the raw turn), the candidate may still be the gold: the
+ * answer-bearing semantics live in the evidence anchor, not the distillation.
+ * Compute the lexical feature score against the gist text and take the max of
+ * `content_score` and `EVIDENCE_GIST_WEIGHT * gist_score` so a strong gist
+ * match wins over a weak content match — but stays below a strong content
+ * match. The weight stays below 1 because gist is a paraphrase of the source
+ * rather than the source itself; an explicit content match is still the
+ * higher-trust signal.
+ *
+ * Initial value 0.7: a perfect gist match is treated as roughly equivalent to
+ * a 70% content match. Tunable in B3 grid search; kept module-local because
+ * the only consumer is the gist path inside computeRerankFeatures.
+ */
+const EVIDENCE_GIST_WEIGHT = 0.7;
+
+/**
  * Minimum distinct query terms required before term-coverage / proximity
  * features are trusted. Below this the query is too thin to rerank on and
  * those features yield 0 (exact-phrase still applies).
@@ -80,6 +98,14 @@ export interface RerankCandidateText {
    * weighting so an evidence-only match keeps damped credit.
    */
   readonly hasEvidenceLexicalHit: boolean;
+  /**
+   * The evidence capsule `gist` paraphrase associated with this candidate
+   * (best-rank evidence when multiple evidence_refs hit). When present, the
+   * rerank computes lexical features against the gist as well and takes
+   * `max(content_score, EVIDENCE_GIST_WEIGHT * gist_score)`. Absent / empty
+   * → behavior identical to the pre-B2 content-only scorer.
+   */
+  readonly evidenceGist?: string;
 }
 
 export interface RerankFeatureBreakdown {
@@ -337,16 +363,74 @@ export function computeRerankFeatures(
   text: RerankCandidateText,
   poolIdf: RerankPoolIdf | null = null
 ): RerankFeatureBreakdown {
+  const contentBreakdown = computeRerankFeaturesForField(query, text.content ?? "", poolIdf, {
+    hasEvidenceLexicalHit: text.hasEvidenceLexicalHit
+  });
+
+  const gistText = text.evidenceGist?.trim() ?? "";
+  if (gistText.length === 0) {
+    return contentBreakdown;
+  }
+
+  // invariant: gist scorer passes null poolIdf so the content-derived
+  // rerank IDF pool cannot leak into gist rareTermCoverage (pool is built
+  // over content only).
+  // invariant: gist scorer passes hasEvidenceLexicalHit=false because the
+  // gist field already has its own lexical signal when this branch is
+  // entered — the evidence-only damp lives on the outer
+  // `gistEvidenceOnlyDamp` factor instead, so the damp is decided by
+  // candidate-level signal (no content hit + caller flagged evidence FTS),
+  // not by whether the gist's own scorer recognizes its own match.
+  const gistBreakdown = computeRerankFeaturesForField(query, gistText, null, {
+    hasEvidenceLexicalHit: false
+  });
+
+  // invariant: when content has no lexical signal AND caller flagged an
+  // evidence-FTS hit, the candidate's only lexical signal is evidence-side
+  // (excerpt or gist). The gist score then carries the same evidence-only
+  // damp as the content score would in that situation, so a strong gist
+  // match cannot out-score a strong content match plain
+  // (durable-content > evidence-excerpt invariant).
+  // invariant: EVIDENCE_GIST_WEIGHT < 1 keeps gist <= content at equal
+  // raw lexical signal, independent of the damp above.
+  const contentHadSignal =
+    contentBreakdown.exactPhrase > 0 || contentBreakdown.termCoverage > 0;
+  const gistEvidenceOnlyDamp =
+    !contentHadSignal && text.hasEvidenceLexicalHit
+      ? RECALL_RERANK_EVIDENCE_ONLY_FACTOR
+      : 1;
+  const weightedGistScore =
+    gistBreakdown.score * EVIDENCE_GIST_WEIGHT * gistEvidenceOnlyDamp;
+
+  if (weightedGistScore <= contentBreakdown.score) {
+    return contentBreakdown;
+  }
+
+  return Object.freeze({
+    exactPhrase: gistBreakdown.exactPhrase,
+    termCoverage: gistBreakdown.termCoverage,
+    rareTermCoverage: gistBreakdown.rareTermCoverage,
+    proximity: gistBreakdown.proximity,
+    fieldFactor: gistEvidenceOnlyDamp,
+    score: weightedGistScore
+  });
+}
+
+function computeRerankFeaturesForField(
+  query: Readonly<RecallQueryProbes>,
+  fieldText: string,
+  poolIdf: RerankPoolIdf | null,
+  options: Readonly<{ readonly hasEvidenceLexicalHit: boolean }>
+): RerankFeatureBreakdown {
   const queryTerms = query.lexical_terms;
-  const content = text.content ?? "";
-  const haystackTokens = tokenize(content);
+  const haystackTokens = tokenize(fieldText);
   const haystackTermSet = new Set(haystackTokens);
 
   const exactPhrase = scoreExactPhrase(
     query.normalized_query,
     query.phrases,
     queryTerms.length > 0,
-    content
+    fieldText
   );
   const termCoverage = scoreTermCoverage(queryTerms, haystackTermSet);
   const rareTermCoverage = scoreRareTermCoverage(queryTerms, haystackTermSet, poolIdf);
@@ -358,7 +442,7 @@ export function computeRerankFeatures(
   const hasContentSignal = exactPhrase > 0 || termCoverage > 0;
   const fieldFactor = hasContentSignal
     ? 1
-    : text.hasEvidenceLexicalHit
+    : options.hasEvidenceLexicalHit
       ? RECALL_RERANK_EVIDENCE_ONLY_FACTOR
       : 1;
 

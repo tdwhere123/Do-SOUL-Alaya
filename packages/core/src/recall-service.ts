@@ -601,6 +601,8 @@ export class RecallService {
     readonly trigramFtsRanks: Readonly<Record<string, number>>;
     readonly synthesisFtsRanks: Readonly<Record<string, number>>;
     readonly evidenceFtsRanks: Readonly<Record<string, number>>;
+    // see also: collectEvidenceGistsByMemoryId
+    readonly evidenceFtsRanksPerRef: Readonly<Record<string, number>>;
     readonly sourceProximityScores: Readonly<Record<string, number>>;
     readonly sourceCohortKeys: Readonly<Record<string, string>>;
     readonly structuralScores: Readonly<Record<string, number>>;
@@ -634,6 +636,9 @@ export class RecallService {
     const ftsRanks = new Map<string, number>();
     const trigramFtsRanks = new Map<string, number>();
     const evidenceFtsRanks = new Map<string, number>();
+    // see also: collectEvidenceGistsByMemoryId — picks best-rank ref via
+    // this per-ref map; the aggregated evidenceFtsRanks loses ref identity.
+    const evidenceFtsRanksPerRef = new Map<string, number>();
     const sourceProximityScores = new Map<string, number>();
     let sourceCohortKeys: Readonly<Record<string, string>> = Object.freeze({});
     const structuralScores = new Map<string, number>();
@@ -825,7 +830,12 @@ export class RecallService {
           if (evidenceMatches.length > 0) {
             const evidenceRankById = new Map<string, number>();
             for (const match of evidenceMatches) {
-              evidenceRankById.set(match.object_id, clamp01(match.normalized_rank));
+              const ranked = clamp01(match.normalized_rank);
+              evidenceRankById.set(match.object_id, ranked);
+              evidenceFtsRanksPerRef.set(
+                match.object_id,
+                Math.max(evidenceFtsRanksPerRef.get(match.object_id) ?? 0, ranked)
+              );
             }
             const memoriesByEvidence = await this.dependencies.memoryRepo.findByEvidenceRefs(
               workspaceId,
@@ -929,6 +939,7 @@ export class RecallService {
       trigramFtsRanks: Object.freeze(Object.fromEntries(trigramFtsRanks.entries())),
       synthesisFtsRanks: Object.freeze({}),
       evidenceFtsRanks: Object.freeze(Object.fromEntries(evidenceFtsRanks.entries())),
+      evidenceFtsRanksPerRef: Object.freeze(Object.fromEntries(evidenceFtsRanksPerRef.entries())),
       sourceProximityScores: Object.freeze(Object.fromEntries(sourceProximityScores.entries())),
       sourceCohortKeys,
       structuralScores: Object.freeze(Object.fromEntries(structuralScores.entries())),
@@ -1479,6 +1490,7 @@ export class RecallService {
       coarseTrigramFtsRanks: params.coarseFilter.trigramFtsRanks,
       coarseSynthesisFtsRanks: params.coarseFilter.synthesisFtsRanks,
       coarseEvidenceFtsRanks: params.coarseFilter.evidenceFtsRanks,
+      coarseEvidenceFtsRanksPerRef: params.coarseFilter.evidenceFtsRanksPerRef,
       coarseSourceProximityScores: params.coarseFilter.sourceProximityScores,
       coarseSourceCohortKeys: params.coarseFilter.sourceCohortKeys,
       coarseStructuralScores: params.coarseFilter.structuralScores,
@@ -1534,6 +1546,10 @@ export class RecallService {
         ...current.evidenceFtsRanks,
         ...next.evidenceFtsRanks
       }),
+      evidenceFtsRanksPerRef: Object.freeze({
+        ...current.evidenceFtsRanksPerRef,
+        ...next.evidenceFtsRanksPerRef
+      }),
       sourceProximityScores: Object.freeze({
         ...current.sourceProximityScores,
         ...next.sourceProximityScores
@@ -1569,6 +1585,7 @@ export class RecallService {
     readonly coarseTrigramFtsRanks: Readonly<Record<string, number>>;
     readonly coarseSynthesisFtsRanks: Readonly<Record<string, number>>;
     readonly coarseEvidenceFtsRanks: Readonly<Record<string, number>>;
+    readonly coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>;
     readonly coarseSourceProximityScores: Readonly<Record<string, number>>;
     readonly coarseSourceCohortKeys: Readonly<Record<string, string>>;
     readonly coarseStructuralScores: Readonly<Record<string, number>>;
@@ -1660,6 +1677,18 @@ export class RecallService {
       graphAndPathColdScore
     );
 
+    // Evidence gist piggy-back: for the small subset of candidates whose
+    // entry into the pool came through an evidence FTS hit, fetch the
+    // associated evidence capsules so the feature rerank can score against
+    // the gist paraphrase. A missing findByIds port (or fetch failure) is
+    // fail-soft → empty map → rerank falls back to content-only.
+    const evidenceGistsByMemoryId = await this.collectEvidenceGistsByMemoryId(
+      params.workspaceId,
+      params.candidates,
+      params.coarseEvidenceFtsRanks,
+      params.coarseEvidenceFtsRanksPerRef
+    );
+
     return Object.freeze({
       queryProbes: params.queryProbes,
       ftsRanks: params.coarseFtsRanks,
@@ -1677,8 +1706,93 @@ export class RecallService {
       plasticityFactors,
       graphAndPathColdScore,
       recallsEdgeCount,
-      weightTransferAmount
+      weightTransferAmount,
+      evidenceGistsByMemoryId
     });
+  }
+
+  private async collectEvidenceGistsByMemoryId(
+    workspaceId: string,
+    candidates: readonly Readonly<MemoryEntry>[],
+    coarseEvidenceFtsRanks: Readonly<Record<string, number>>,
+    coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>
+  ): Promise<Readonly<Record<string, string>>> {
+    const evidenceSearchPort = this.dependencies.evidenceSearchPort;
+    if (evidenceSearchPort?.findByIds === undefined) {
+      return Object.freeze({});
+    }
+    // Restrict to candidates that already landed in the pool through an
+    // evidence FTS hit — their gists are the ones whose paraphrase carries
+    // recall-relevant semantics. Avoids an unbounded findByIds over every
+    // memory's full evidence_refs set.
+    const relevantCandidates = candidates.filter(
+      (entry) =>
+        entry.evidence_refs.length > 0 &&
+        (coarseEvidenceFtsRanks[entry.object_id] ?? 0) > 0
+    );
+    if (relevantCandidates.length === 0) {
+      return Object.freeze({});
+    }
+    // invariant: findByIds payload bounded by evidence-FTS hit set, not the
+    // candidate's full evidence_refs cardinality. see also: P2-R2-E.
+    const evidenceIds = uniqueStrings(
+      relevantCandidates.flatMap((entry) =>
+        entry.evidence_refs.filter((ref) => (coarseEvidenceFtsRanksPerRef[ref] ?? 0) > 0)
+      )
+    );
+    if (evidenceIds.length === 0) {
+      return Object.freeze({});
+    }
+    try {
+      const evidenceCapsules = await evidenceSearchPort.findByIds(workspaceId, evidenceIds);
+      const gistById = new Map<string, string>();
+      for (const evidence of evidenceCapsules) {
+        if (evidence.workspace_id !== workspaceId) {
+          continue;
+        }
+        const gist = evidence.gist?.trim() ?? "";
+        if (gist.length > 0) {
+          gistById.set(evidence.object_id, gist);
+        }
+      }
+      const gistsByMemory: Record<string, string> = {};
+      for (const entry of relevantCandidates) {
+        // invariant: pick gist from the highest-ranked ref in evidence_refs
+        // (per coarseEvidenceFtsRanksPerRef); stable by evidence_refs order
+        // on ties. see also: P2-R2-B in collectEvidenceGistsByMemoryId callers.
+        const refsWithRank = entry.evidence_refs.map((ref) => Object.freeze({
+          ref,
+          rank: coarseEvidenceFtsRanksPerRef[ref] ?? 0
+        }));
+        const orderedRefs = [...refsWithRank].sort((left, right) => right.rank - left.rank);
+        for (const { ref } of orderedRefs) {
+          const gist = gistById.get(ref);
+          if (gist !== undefined && gist.length > 0) {
+            gistsByMemory[entry.object_id] = gist;
+            break;
+          }
+        }
+        // fallback: aggregated rank > 0 but no per-ref rank populated; mirrors
+        // legacy first-non-empty-gist rule so future producers that only
+        // populate the aggregate stay correct.
+        if (gistsByMemory[entry.object_id] === undefined) {
+          for (const ref of entry.evidence_refs) {
+            const gist = gistById.get(ref);
+            if (gist !== undefined && gist.length > 0) {
+              gistsByMemory[entry.object_id] = gist;
+              break;
+            }
+          }
+        }
+      }
+      return Object.freeze(gistsByMemory);
+    } catch (error) {
+      this.warn("evidence gist lookup for rerank failed", {
+        workspace_id: workspaceId,
+        error: toErrorMessage(error)
+      });
+      return Object.freeze({});
+    }
   }
 
   private computeMaxWeightTransferAmount(
@@ -2624,8 +2738,10 @@ function applyFeatureRerank<T extends FusedRecallCandidateInput>(
   rankedCandidates: readonly T[],
   supplementaryData: RecallSupplementaryData
 ): readonly T[] {
-  const rerankInputs: readonly RerankCandidate<T>[] = rankedCandidates.map((candidate) =>
-    Object.freeze({
+  const rerankInputs: readonly RerankCandidate<T>[] = rankedCandidates.map((candidate) => {
+    const gist = supplementaryData.evidenceGistsByMemoryId[candidate.entry.object_id];
+    const hasGist = typeof gist === "string" && gist.length > 0;
+    return Object.freeze({
       item: candidate,
       fusionScore: candidate.fusion.fused_score,
       text: Object.freeze({
@@ -2633,10 +2749,11 @@ function applyFeatureRerank<T extends FusedRecallCandidateInput>(
         hasEvidenceLexicalHit:
           (supplementaryData.evidenceFtsRanks[candidate.entry.object_id] ?? 0) > 0 ||
           (candidate.objectKind === "synthesis_capsule" &&
-            (supplementaryData.synthesisFtsRanks[candidate.entry.object_id] ?? 0) > 0)
+            (supplementaryData.synthesisFtsRanks[candidate.entry.object_id] ?? 0) > 0),
+        ...(hasGist ? { evidenceGist: gist } : {})
       })
-    })
-  );
+    });
+  });
   return rerankTopN(supplementaryData.queryProbes, rerankInputs);
 }
 
