@@ -1735,10 +1735,34 @@ export class RecallService {
     }
     // invariant: findByIds payload bounded by evidence-FTS hit set, not the
     // candidate's full evidence_refs cardinality. see also: P2-R2-E.
+    //
+    // invariant: per-memory evidence_refs cardinality is capped at
+    // MAX_REFS_PER_MEMORY before the findByIds payload is built. A typical
+    // memory carries 1-3 evidence_refs; an outlier with thousands of refs
+    // (whether legitimate aggregation or adversarial) would dominate the
+    // tokenizer / new Set fan-out inside the rerank loop. Cap reflects the
+    // semantic assumption "one memory should not need more than this many
+    // evidence anchors to recall well" — refs beyond the cap are sorted by
+    // per-ref evidence-FTS rank and only the top MAX_REFS_PER_MEMORY are
+    // forwarded; the best-rank ref (used by the gist picker below) is
+    // always preserved.
+    const MAX_REFS_PER_MEMORY = 8;
     const evidenceIds = uniqueStrings(
-      relevantCandidates.flatMap((entry) =>
-        entry.evidence_refs.filter((ref) => (coarseEvidenceFtsRanksPerRef[ref] ?? 0) > 0)
-      )
+      relevantCandidates.flatMap((entry) => {
+        const hitRefs = entry.evidence_refs.filter(
+          (ref) => (coarseEvidenceFtsRanksPerRef[ref] ?? 0) > 0
+        );
+        if (hitRefs.length <= MAX_REFS_PER_MEMORY) {
+          return hitRefs;
+        }
+        return [...hitRefs]
+          .sort(
+            (left, right) =>
+              (coarseEvidenceFtsRanksPerRef[right] ?? 0) -
+              (coarseEvidenceFtsRanksPerRef[left] ?? 0)
+          )
+          .slice(0, MAX_REFS_PER_MEMORY);
+      })
     );
     if (evidenceIds.length === 0) {
       return Object.freeze({});

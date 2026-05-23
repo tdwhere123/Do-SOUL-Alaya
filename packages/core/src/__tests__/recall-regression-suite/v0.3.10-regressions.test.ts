@@ -306,6 +306,69 @@ describe("recall regression suite", () => {
     expect(diag?.fused_rank_contribution_per_stream.source_proximity).toBeGreaterThan(0);
   });
 
+  it("caps per-memory evidence_refs forwarded to findByIds for the gist collector at 8", async () => {
+    // Bound the per-memory tokenizer / new Set fan-out inside the gist
+    // collector when a single memory aggregates many evidence_refs. The
+    // top-rank ref (which the gist picker selects) must always survive the
+    // cap; refs beyond it are sorted by per-ref evidence-FTS rank and the
+    // bottom is dropped. 8 is a generous bound over the in-corpus
+    // distribution (1-3 refs/memory) and small enough to flatten the worst
+    // case.
+    const refIds = Array.from({ length: 20 }, (_, index) => `evidence-fanout-${index}`);
+    const seed = memory({
+      object_id: "fanout-seed",
+      content: "needle answer payload",
+      // Pin the top-ranked ref to a known id (highest normalized_rank
+      // below) so the cap test can assert it survives.
+      evidence_refs: refIds
+    });
+    const evidenceById = new Map(
+      refIds.map((id, index) => [id, evidenceCapsule(id, `source-${id}`)] as const)
+    );
+    const findByIds = vi.fn(async (_workspaceId: string, ids: readonly string[]) =>
+      ids.flatMap((id) => {
+        const evidence = evidenceById.get(id);
+        return evidence === undefined ? [] : [evidence];
+      })
+    );
+    // Rank descending by index — `evidence-fanout-0` is the top ref.
+    const evidenceSearchByKeyword = vi.fn(async () =>
+      refIds.map((id, index) => ({
+        object_id: id,
+        normalized_rank: 1 - index * 0.01
+      }))
+    );
+    const { dependencies } = deps([seed], {
+      searchByKeyword: async () => [{ object_id: "fanout-seed", normalized_rank: 1 }],
+      evidenceSearchPort: {
+        searchByKeyword: evidenceSearchByKeyword,
+        findByIds
+      }
+    });
+
+    await new RecallService(dependencies).recall({
+      taskSurface: task("needle answer payload"),
+      workspaceId: WS,
+      strategy: "analyze"
+    });
+
+    expect(findByIds).toHaveBeenCalled();
+    // Find the findByIds call that came from the gist collector. The
+    // source-proximity path also calls findByIds; both flow through the
+    // same vi.fn mock. The gist collector's payload is bounded by
+    // MAX_REFS_PER_MEMORY (= 8); any source-proximity call is the full
+    // ref set. Assert at least one call satisfies the cap and that it
+    // contains the top-ranked ref.
+    const callsUnderCap = findByIds.mock.calls
+      .map((call) => call[1] as readonly string[])
+      .filter((ids) => ids.length <= 8);
+    expect(callsUnderCap.length).toBeGreaterThan(0);
+    const cappedCall = callsUnderCap[0]!;
+    expect(cappedCall.length).toBeLessThanOrEqual(8);
+    // Top-ranked ref must always survive the cap.
+    expect(cappedCall).toContain("evidence-fanout-0");
+  });
+
   it("keeps final delivery budget monotonic by fused rank after source proximity admission", async () => {
     const anchor = memory({
       object_id: "anchor",
