@@ -30,9 +30,14 @@ export const MIN_RECALL_RESULTS = 5;
 export const WARM_CASCADE_DECAY = 0.7;
 // COLD memories are cold-start fallback only and receive a stronger freshness penalty.
 export const COLD_CASCADE_DECAY = 0.45;
-// Embedding is a supplement, not an oracle. Keep the boost small enough that
-// strong lexical / activation evidence remains stable while semantic hints can
-// still break close ties and add otherwise-missed candidates.
+// Mode-invariant additive sub-weight: applied to embedding_similarity inside
+// fine-assessment scoring regardless of embedding-on / off, kept small so a
+// semantic hint can break close ties without overpowering lexical / activation
+// evidence. Embedding-on additionally (1) widens the candidate pool via
+// coarse injection (collectEmbeddingCoarseInjection) and (2) raises the
+// RRF fusion weight on the embedding_similarity stream
+// (resolveRrfFusionWeights / scoring_weight_overrides.fusion_weights),
+// neither of which is funnelled through this constant.
 export const EMBEDDING_SIMILARITY_WEIGHT = 0.15;
 export const BUDGET_PRESSURE_SOFT_THRESHOLD = 0.5;
 export const BUDGET_PRESSURE_HARD_THRESHOLD = 1;

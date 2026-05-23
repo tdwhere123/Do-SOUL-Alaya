@@ -151,6 +151,58 @@ describe("Memory embedding storage repo", () => {
     ]);
   });
 
+  it("isolates listByWorkspace results by (provider_kind, model_id) so cross-provider rows never compete for the workspace scan cap", async () => {
+    const { workspaceId, repo } = await createRepoContext();
+
+    await repo.upsert(
+      createEmbeddingRecord({
+        object_id: "11111111-1111-4111-8111-111111111111",
+        workspace_id: workspaceId,
+        provider_kind: "openai",
+        model_id: "text-embedding-3-small",
+        embedding: new Float32Array([1, 0, 0])
+      })
+    );
+    await repo.upsert(
+      createEmbeddingRecord({
+        object_id: "22222222-2222-4222-8222-222222222222",
+        workspace_id: workspaceId,
+        provider_kind: "local_onnx",
+        model_id: "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+        embedding: new Float32Array([0, 1, 0])
+      })
+    );
+
+    const openaiRows = await repo.listByWorkspace(workspaceId, {
+      providerKind: "openai",
+      modelId: "text-embedding-3-small"
+    });
+    expect(openaiRows.map((row) => row.object_id)).toEqual([
+      "11111111-1111-4111-8111-111111111111"
+    ]);
+
+    const localRows = await repo.listByWorkspace(workspaceId, {
+      providerKind: "local_onnx",
+      modelId: "Xenova/paraphrase-multilingual-MiniLM-L12-v2"
+    });
+    expect(localRows.map((row) => row.object_id)).toEqual([
+      "22222222-2222-4222-8222-222222222222"
+    ]);
+
+    const wrongModelRows = await repo.listByWorkspace(workspaceId, {
+      providerKind: "local_onnx",
+      modelId: "some-other-model"
+    });
+    expect(wrongModelRows).toEqual([]);
+
+    // No filter falls back to the original behavior: returns both rows.
+    const unfiltered = await repo.listByWorkspace(workspaceId);
+    expect(unfiltered.map((row) => row.object_id).sort()).toEqual([
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222"
+    ]);
+  });
+
   it("skips guarded upserts when the current memory content no longer matches the candidate hash", async () => {
     const { repo, memoryRepo, workspaceId } = await createRepoContext();
     const objectId = "11111111-1111-4111-8111-111111111111";
@@ -184,7 +236,15 @@ async function createRepoContext(): Promise<{
       record: MemoryEmbeddingRecord
     ): Promise<Readonly<MemoryEmbeddingRecord> | null>;
     findByObjectId(objectId: string): Promise<Readonly<MemoryEmbeddingRecord> | null>;
-    listByWorkspace(workspaceId: string): Promise<readonly Readonly<MemoryEmbeddingRecord>[]>;
+    listByWorkspace(
+      workspaceId: string,
+      options?: {
+        readonly tierFilter?: readonly ("hot" | "warm" | "cold")[];
+        readonly limit?: number;
+        readonly providerKind?: string;
+        readonly modelId?: string;
+      }
+    ): Promise<readonly Readonly<MemoryEmbeddingRecord>[]>;
     listByObjectIds(
       workspaceId: string,
       objectIds: readonly string[]

@@ -22,6 +22,7 @@ import type {
 } from "@do-soul/alaya-protocol";
 import type { ScopeClass } from "@do-soul/alaya-protocol";
 import type {
+  EmbeddingNeighborHit,
   EmbeddingRecallSupplementResult,
   PreparedEmbeddingSupplement,
   PreparedEmbeddingQueryHandle
@@ -61,6 +62,9 @@ export interface RecallServiceMemoryRepoPort {
     workspaceId: string,
     evidenceObjectIds: readonly string[]
   ): Promise<readonly Readonly<MemoryEntry>[]>;
+  // Optional id-batch lookup. Used by the embedding-on coarse-injection path
+  // to resolve workspace cosine neighbors into MemoryEntry candidates.
+  findByIds?(objectIds: readonly string[]): Promise<readonly Readonly<MemoryEntry>[]>;
 }
 
 // Evidence FTS port consumed by the recall service. The implementing repo
@@ -270,6 +274,16 @@ export interface RecallServiceEmbeddingRecallPort {
     readonly baseCandidateIds: readonly string[];
     readonly maxSupplement: number;
   }): Promise<EmbeddingRecallSupplementResult>;
+  // Embedding-on coarse-injection path: top-K workspace cosine neighbors that
+  // lexical recall never admitted. Optional so keyword-only providers and
+  // older test doubles stay valid.
+  collectWorkspaceNeighbors?(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly queryText: string;
+    readonly excludeObjectIds: readonly string[];
+    readonly maxNeighbors: number;
+  }): Promise<readonly Readonly<EmbeddingNeighborHit>[]>;
 }
 
 export interface RecallServiceDependencies {
@@ -290,6 +304,14 @@ export interface RecallServiceDependencies {
   readonly evidenceSearchPort?: RecallServiceEvidenceSearchPort;
   readonly synthesisSearchPort?: RecallServiceSynthesisSearchPort;
   readonly manifestationSidecarPort?: RecallServiceManifestationSidecarPort;
+  // Optional decorator applied to every policy buildDefaultPolicy emits.
+  // The daemon uses it to inject scoring_weight_overrides driven by runtime
+  // state (e.g. raise the embedding_similarity fusion weight when the
+  // embedding provider is wired). Decorators must return a structurally
+  // valid RecallPolicy; an identity function is the safe default.
+  readonly defaultPolicyDecorator?: (
+    policy: Readonly<import("@do-soul/alaya-protocol").RecallPolicy>
+  ) => Readonly<import("@do-soul/alaya-protocol").RecallPolicy>;
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;
   readonly warn?: RecallServiceWarnPort;
@@ -305,7 +327,11 @@ export type RecallAdmissionPlane =
   | "source_proximity"
   | "graph_expansion"
   | "path_expansion"
-  | "lexical";
+  | "lexical"
+  // Coarse-injection candidates surfaced by the embedding workspace neighbor
+  // scan. They have no lexical / structural anchor, so a separate plane name
+  // keeps source-proximity / graph-expansion seed selection honest.
+  | "semantic_supplement";
 
 export type RecallCandidateDropReason =
   | "duplicate"

@@ -73,10 +73,17 @@ export interface BenchDaemonOptions {
   readonly workspaceId?: string;
   readonly runId?: string;
   readonly embeddingMode?: BenchEmbeddingMode;
+  // Selects which provider the bench daemon points the embedding subsystem at
+  // when embeddingMode === "env". Default "openai" preserves the historical
+  // bench wiring; "local_onnx" drives the on-device ONNX provider so the same
+  // harness can exercise both cosine spaces. Ignored when embeddingMode is
+  // "disabled". see also: apps/core-daemon/src/daemon-embedding-runtime.ts
+  readonly embeddingProviderKind?: BenchEmbeddingProviderKind;
   readonly recallWeightOverrides?: BenchRecallWeightOverrides;
 }
 
 export type BenchEmbeddingMode = "disabled" | "env";
+export type BenchEmbeddingProviderKind = "openai" | "local_onnx";
 
 export interface SeededMemoryResult {
   /** Durable memory object_id assigned by the signal materializer. */
@@ -409,6 +416,9 @@ const MANAGED_ENV_KEYS = [
   "OPENAI_EMBEDDING_PROVIDER_URL",
   "ALAYA_OPENAI_SECRET_REF",
   "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT",
+  "ALAYA_EMBEDDING_PROVIDER",
+  "ALAYA_LOCAL_EMBEDDING_CACHE_DIR",
+  "ALAYA_LOCAL_EMBEDDING_MODEL",
   "ALAYA_CONFIG_DIR",
   "CODEX_HOME",
   "HOME",
@@ -420,7 +430,8 @@ type ManagedEnvKey = (typeof MANAGED_ENV_KEYS)[number];
 
 const REVIEWER_IDENTITY = "user:bench-runner";
 const REVIEWER_TOKEN = "bench-review-token";
-const BENCH_EMBEDDING_PROVIDER_KIND = "openai";
+const DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND: BenchEmbeddingProviderKind = "openai";
+const DEFAULT_LOCAL_ONNX_EMBEDDING_MODEL = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
 const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
 const BENCH_EMBEDDING_SCHEMA_VERSION = 1;
 const DEFAULT_EMBEDDING_WARMUP_PASSES = 10;
@@ -432,7 +443,22 @@ export async function startBenchDaemon(
   const workspaceId = opts.workspaceId ?? "bench-workspace-1";
   const runId = opts.runId ?? "bench-run-1";
   const embeddingMode = opts.embeddingMode ?? "disabled";
-  const recallWeightOverrides = opts.recallWeightOverrides;
+  const embeddingProviderKind: BenchEmbeddingProviderKind =
+    opts.embeddingProviderKind ?? DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND;
+  // The bench recall path supplies its own RecallPolicy via policyOverride
+  // (see recall(...) below) which bypasses RecallService.buildDefaultPolicy
+  // — and therefore bypasses the daemon's defaultPolicyDecorator that
+  // otherwise injects fusion_weights.embedding_similarity = 6 in embedding-on
+  // mode. To make bench numbers reflect the same fusion as live recall, we
+  // mirror the decorator here when embeddingMode === "env": inject the same
+  // override into recallWeightOverrides so applyBenchRecallWeightOverrides
+  // pushes it into the bench policy's scoring_weight_overrides.
+  // In embeddingMode === "disabled" we leave recallWeightOverrides untouched
+  // — the embedding-off red line requires bit-identical recall behavior.
+  const recallWeightOverrides =
+    embeddingMode === "env"
+      ? withEmbeddingFusionWeightInjected(opts.recallWeightOverrides)
+      : opts.recallWeightOverrides;
 
   const dataDir =
     opts.dataDirRoot ?? (await mkdtemp(join(tmpdir(), "alaya-bench-")));
@@ -443,8 +469,10 @@ export async function startBenchDaemon(
   }
 
   const effectiveOpenAiSecretRef =
-    embeddingMode === "env" ? resolveBenchOpenAiSecretRef(savedEnv) : "env:OPENAI_API_KEY";
-  if (embeddingMode === "env") {
+    embeddingMode === "env" && embeddingProviderKind === "openai"
+      ? resolveBenchOpenAiSecretRef(savedEnv)
+      : "env:OPENAI_API_KEY";
+  if (embeddingMode === "env" && embeddingProviderKind === "openai") {
     requireBenchOpenAiSecretRef(effectiveOpenAiSecretRef);
   }
   if (activeBenchDaemonCount > 0) {
@@ -471,14 +499,41 @@ export async function startBenchDaemon(
   try {
     process.env.DATA_DIR = dataDir;
     if (embeddingMode === "env") {
-      process.env.ALAYA_OPENAI_SECRET_REF = effectiveOpenAiSecretRef;
-      if (savedEnv.OPENAI_API_KEY === undefined) {
-        delete process.env.OPENAI_API_KEY;
-      } else {
-        process.env.OPENAI_API_KEY = savedEnv.OPENAI_API_KEY;
-      }
       process.env.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT = "true";
+      if (embeddingProviderKind === "local_onnx") {
+        process.env.ALAYA_EMBEDDING_PROVIDER = "local_onnx";
+        // Forward caller-supplied cache dir / model. Either may be unset; the
+        // LocalOnnxEmbeddingClient defaults pick a built-in MiniLM model and
+        // a transformers.js-managed cache when these are absent.
+        if (savedEnv.ALAYA_LOCAL_EMBEDDING_CACHE_DIR !== undefined) {
+          process.env.ALAYA_LOCAL_EMBEDDING_CACHE_DIR = savedEnv.ALAYA_LOCAL_EMBEDDING_CACHE_DIR;
+        } else {
+          delete process.env.ALAYA_LOCAL_EMBEDDING_CACHE_DIR;
+        }
+        if (savedEnv.ALAYA_LOCAL_EMBEDDING_MODEL !== undefined) {
+          process.env.ALAYA_LOCAL_EMBEDDING_MODEL = savedEnv.ALAYA_LOCAL_EMBEDDING_MODEL;
+        } else {
+          delete process.env.ALAYA_LOCAL_EMBEDDING_MODEL;
+        }
+        // local_onnx has no API secret; keep the OpenAI secret slot inert so
+        // the daemon's openai branch is never accidentally taken.
+        process.env.ALAYA_OPENAI_SECRET_REF = "env:OPENAI_API_KEY";
+        process.env.OPENAI_API_KEY = "test-openai-key";
+      } else {
+        delete process.env.ALAYA_EMBEDDING_PROVIDER;
+        delete process.env.ALAYA_LOCAL_EMBEDDING_CACHE_DIR;
+        delete process.env.ALAYA_LOCAL_EMBEDDING_MODEL;
+        process.env.ALAYA_OPENAI_SECRET_REF = effectiveOpenAiSecretRef;
+        if (savedEnv.OPENAI_API_KEY === undefined) {
+          delete process.env.OPENAI_API_KEY;
+        } else {
+          process.env.OPENAI_API_KEY = savedEnv.OPENAI_API_KEY;
+        }
+      }
     } else {
+      delete process.env.ALAYA_EMBEDDING_PROVIDER;
+      delete process.env.ALAYA_LOCAL_EMBEDDING_CACHE_DIR;
+      delete process.env.ALAYA_LOCAL_EMBEDDING_MODEL;
       process.env.ALAYA_OPENAI_SECRET_REF = "env:OPENAI_API_KEY";
       process.env.OPENAI_API_KEY = "test-openai-key";
       process.env.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT = "false";
@@ -773,7 +828,9 @@ export async function startBenchDaemon(
 
     const uniqueObjectIds = [...new Set(objectIds)];
     const modelId =
-      process.env.OPENAI_EMBEDDING_MODEL?.trim() || DEFAULT_BENCH_EMBEDDING_MODEL;
+      embeddingProviderKind === "local_onnx"
+        ? process.env.ALAYA_LOCAL_EMBEDDING_MODEL?.trim() || DEFAULT_LOCAL_ONNX_EMBEDDING_MODEL
+        : process.env.OPENAI_EMBEDDING_MODEL?.trim() || DEFAULT_BENCH_EMBEDDING_MODEL;
     const maxPasses = Math.max(
       1,
       options.maxPasses ?? DEFAULT_EMBEDDING_WARMUP_PASSES
@@ -784,7 +841,7 @@ export async function startBenchDaemon(
       dataDir,
       workspaceId,
       objectIds: uniqueObjectIds,
-      providerKind: BENCH_EMBEDDING_PROVIDER_KIND,
+      providerKind: embeddingProviderKind,
       modelId,
       schemaVersion: BENCH_EMBEDDING_SCHEMA_VERSION,
       passCount
@@ -802,7 +859,7 @@ export async function startBenchDaemon(
         dataDir,
         workspaceId,
         objectIds: uniqueObjectIds,
-        providerKind: BENCH_EMBEDDING_PROVIDER_KIND,
+        providerKind: embeddingProviderKind,
         modelId,
         schemaVersion: BENCH_EMBEDDING_SCHEMA_VERSION,
         passCount
@@ -1464,6 +1521,67 @@ async function callMcpTool<TOutput>(
     throw new Error(`MCP tool ${name} returned non-ok structured content`);
   }
   return structured.output;
+}
+
+const DEFAULT_EMBEDDING_FUSION_WEIGHT_ON = 6;
+const EMBEDDING_FUSION_WEIGHT_ENV = "ALAYA_EMBEDDING_FUSION_WEIGHT_ON";
+
+// Mirror of apps/core-daemon/src/daemon-embedding-runtime.ts
+// readEmbeddingFusionWeightOverride — the daemon's defaultPolicyDecorator
+// reads the same env var to override fusion_weights.embedding_similarity in
+// live recall. The bench harness drives recallService.recall directly with
+// policyOverride (bypassing the decorator), so we inject the equivalent
+// override here when embeddingMode === "env".
+function readBenchEmbeddingFusionWeight(): number {
+  const raw = process.env[EMBEDDING_FUSION_WEIGHT_ENV];
+  if (raw === undefined || raw.trim().length === 0) {
+    return DEFAULT_EMBEDDING_FUSION_WEIGHT_ON;
+  }
+  const parsed = Number.parseFloat(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return DEFAULT_EMBEDDING_FUSION_WEIGHT_ON;
+  }
+  return parsed;
+}
+
+function withEmbeddingFusionWeightInjected(
+  existing: BenchRecallWeightOverrides | undefined
+): BenchRecallWeightOverrides {
+  const fusionWeight = readBenchEmbeddingFusionWeight();
+  // A user-supplied embedding_similarity fusion weight (from CLI/env JSON)
+  // wins over the harness default so bench tuning sweeps remain authoritative.
+  const baseFusionWeights = existing?.fusionWeights ?? {};
+  const mergedFusionWeights: Readonly<Record<string, number>> = Object.freeze({
+    embedding_similarity: fusionWeight,
+    ...baseFusionWeights
+  });
+
+  // Preserve the source of the user-supplied override when present; otherwise
+  // tag the harness-injected slice as env-sourced for the summary log.
+  const source: "cli" | "env" = existing?.source ?? "env";
+
+  const summary = {
+    source,
+    ...(existing?.summary.activation_weights_phase4b === undefined
+      ? {}
+      : { activation_weights_phase4b: existing.summary.activation_weights_phase4b }),
+    ...(existing?.summary.additive === undefined
+      ? {}
+      : { additive: existing.summary.additive }),
+    fusion_weights: mergedFusionWeights
+  };
+
+  return Object.freeze({
+    source,
+    ...(existing?.activationWeightsPatch === undefined
+      ? {}
+      : { activationWeightsPatch: existing.activationWeightsPatch }),
+    ...(existing?.additive === undefined
+      ? {}
+      : { additive: existing.additive }),
+    fusionWeights: mergedFusionWeights,
+    summary
+  });
 }
 
 function buildBenchDiagnosticRecallPolicy(

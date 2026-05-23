@@ -51,7 +51,11 @@ import { fetchLocomo } from "./locomo/fetch.js";
 import { runLocomo } from "./locomo/runner.js";
 import { runControlledReplay } from "./controlled-replay/runner.js";
 import { resolveBenchCommitSha7 } from "./version.js";
-import type { BenchEmbeddingMode, BenchTokenMetrics } from "./harness/daemon.js";
+import type {
+  BenchEmbeddingMode,
+  BenchEmbeddingProviderKind,
+  BenchTokenMetrics
+} from "./harness/daemon.js";
 import { aggregateBenchTokenMetrics } from "./longmemeval/token-economy.js";
 import type { LongMemEvalVariant } from "./longmemeval/dataset.js";
 
@@ -61,11 +65,11 @@ const HELP_TEXT = `alaya-bench-runner — daemon-attached benchmark harness
 
 Usage:
   alaya-bench-runner fetch-longmemeval [--variant oracle|s|m] [--data-dir <path>] [--force]
-  alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--policy-shape stress|chat] [--simulate-report none|always-used|gold-only|mixed] [--weights '<json>'] [--data-dir <path>] [--history-root <path>]
-  alaya-bench-runner longmemeval-multiturn [--variant oracle|s|m] [--limit N] [--offset N] [--rounds N] [--embedding disabled|env] [--data-dir <path>] [--history-root <path>]
-  alaya-bench-runner longmemeval-crossquestion [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--data-dir <path>] [--history-root <path>]
+  alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--policy-shape stress|chat] [--simulate-report none|always-used|gold-only|mixed] [--weights '<json>'] [--data-dir <path>] [--history-root <path>]
+  alaya-bench-runner longmemeval-multiturn [--variant oracle|s|m] [--limit N] [--offset N] [--rounds N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--data-dir <path>] [--history-root <path>]
+  alaya-bench-runner longmemeval-crossquestion [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--data-dir <path>] [--history-root <path>]
   alaya-bench-runner fetch-locomo [--data-dir <path>] [--force]
-  alaya-bench-runner locomo [--limit N] [--offset N] [--embedding disabled|env] [--data-dir <path>] [--history-root <path>]
+  alaya-bench-runner locomo [--limit N] [--offset N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--data-dir <path>] [--history-root <path>]
   alaya-bench-runner self [--history-root <path>]
   alaya-bench-runner live [--source <main-check.json|main-check-run.json>] [--history-root <path>]
   alaya-bench-runner controlled-replay [--history-root <path>]
@@ -144,6 +148,7 @@ interface ParsedFlags {
   readonly shards?: ReadonlyArray<string>;
   readonly source?: string;
   readonly embeddingMode: BenchEmbeddingMode;
+  readonly embeddingProviderKind: BenchEmbeddingProviderKind;
   readonly policyShape: BenchPolicyShape;
   readonly simulateReport: BenchSimulateReportMode;
   readonly weightOverridesJson?: string;
@@ -159,6 +164,7 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   let dataDir: string | undefined;
   let source: string | undefined;
   let embeddingMode: BenchEmbeddingMode = "disabled";
+  let embeddingProviderKind: BenchEmbeddingProviderKind = "openai";
   let policyShape: BenchPolicyShape = "stress";
   let simulateReport: BenchSimulateReportMode = "none";
   let weightOverridesJson: string | undefined;
@@ -202,6 +208,15 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
         throw new Error("--embedding must be one of: disabled, env");
       }
       embeddingMode = raw;
+      collectingShards = false;
+    } else if (token === "--embedding-provider" || token.startsWith("--embedding-provider=")) {
+      const raw = token.startsWith("--embedding-provider=")
+        ? token.slice("--embedding-provider=".length)
+        : args[++i] ?? "openai";
+      if (raw !== "openai" && raw !== "local_onnx") {
+        throw new Error("--embedding-provider must be one of: openai, local_onnx");
+      }
+      embeddingProviderKind = raw;
       collectingShards = false;
     } else if (token === "--policy-shape" || token.startsWith("--policy-shape=")) {
       const raw = token.startsWith("--policy-shape=")
@@ -273,6 +288,7 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
     shards: shards.length > 0 ? shards : undefined,
     source,
     embeddingMode,
+    embeddingProviderKind,
     policyShape,
     simulateReport,
     weightOverridesJson,
@@ -321,6 +337,7 @@ async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
       historyRoot: opts.historyRoot,
       dataDir: opts.dataDir,
       embeddingMode: opts.embeddingMode,
+      embeddingProviderKind: opts.embeddingProviderKind,
       policyShape: opts.policyShape,
       simulateReport: opts.simulateReport,
       weightOverridesJson: opts.weightOverridesJson

@@ -1,3 +1,4 @@
+import { LocalOnnxEmbeddingClient } from "@do-soul/alaya-core";
 import { resolveSecretRef, type SecretRefReader, type ResolveSecretError } from "@do-soul/alaya";
 
 export interface EmbeddingProviderPreflightResult {
@@ -19,6 +20,52 @@ export async function preflightEmbeddingProvider(
   options: EmbeddingProviderPreflightOptions = {}
 ): Promise<EmbeddingProviderPreflightResult> {
   const env = options.env ?? process.env;
+  if (env.ALAYA_EMBEDDING_PROVIDER?.trim() === "local_onnx") {
+    return preflightLocalOnnxProvider(env, options.timeoutMs);
+  }
+  return preflightOpenAiProvider(env, options);
+}
+
+async function preflightLocalOnnxProvider(
+  env: NodeJS.ProcessEnv,
+  timeoutMs: number | undefined
+): Promise<EmbeddingProviderPreflightResult> {
+  const cacheDir = env.ALAYA_LOCAL_EMBEDDING_CACHE_DIR?.trim() || null;
+  const modelId = env.ALAYA_LOCAL_EMBEDDING_MODEL?.trim() || undefined;
+  const client = new LocalOnnxEmbeddingClient({
+    cacheDir,
+    ...(modelId === undefined ? {} : { modelId })
+  });
+  try {
+    const vectors = await client.embedTexts(["alaya embedding preflight"], {
+      timeoutMs: timeoutMs ?? 60_000
+    });
+    const dimensions = vectors[0]?.length ?? 0;
+    if (dimensions === 0) {
+      return {
+        ok: false,
+        message: "embedding provider preflight failed: local_onnx model returned an empty vector"
+      };
+    }
+    return {
+      ok: true,
+      message: `embedding provider preflight ok: provider=local_onnx model=${client.modelId} dims=${dimensions}`
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      message:
+        `embedding provider preflight failed: provider=local_onnx ${detail}; ` +
+        "run 'node scripts/fetch-local-embedding-model.mjs' to pre-fetch model weights"
+    };
+  }
+}
+
+async function preflightOpenAiProvider(
+  env: NodeJS.ProcessEnv,
+  options: EmbeddingProviderPreflightOptions
+): Promise<EmbeddingProviderPreflightResult> {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
   const secretRef = env.ALAYA_OPENAI_SECRET_REF?.trim() || "env:OPENAI_API_KEY";
   const resolved =

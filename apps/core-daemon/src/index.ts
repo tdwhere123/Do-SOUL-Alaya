@@ -487,7 +487,9 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const {
     embeddingStatusService,
     embeddingRecallService,
-    embeddingBackfillHandler
+    embeddingBackfillHandler,
+    defaultPolicyDecorator: embeddingDefaultPolicyDecorator,
+    providerWarmup: embeddingProviderWarmup
   } = createDaemonEmbeddingRuntime({
     database,
     configEnv,
@@ -496,6 +498,18 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     memoryEntryRepo,
     warn: warnLogger.warn
   });
+  // Fire-and-forget: the embedding provider warmup runs alongside the rest of
+  // daemon boot. We attach a non-blocking observer so the warmup outcome is
+  // visible in daemon logs, without gating any caller on it; the dynamic
+  // provider.isAvailable gate and the EmbeddingRecallService degradation
+  // events handle failures.
+  embeddingProviderWarmup
+    .then((status) => {
+      if (status === "ready") {
+        warnLogger.warn("embedding provider warmup ready", { status });
+      }
+    })
+    .catch(() => undefined);
   const recallPathPlasticityPort = createRecallPathPlasticityPort({
     pathRelationRepo
   });
@@ -705,6 +719,9 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     claimResolverPort: claimFormRepo,
     embeddingRecallService,
     manifestationSidecarPort,
+    ...(embeddingDefaultPolicyDecorator === undefined
+      ? {}
+      : { defaultPolicyDecorator: embeddingDefaultPolicyDecorator }),
     warn: warnLogger.warn
   });
   const contextLensAssembler = new ContextLensAssembler({

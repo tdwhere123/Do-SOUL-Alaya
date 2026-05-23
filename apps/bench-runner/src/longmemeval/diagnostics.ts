@@ -196,7 +196,8 @@ const DIAGNOSTIC_ADMISSION_PLANES = Object.freeze([
   "session_surface_cohort",
   "source_proximity",
   "graph_expansion",
-  "path_expansion"
+  "path_expansion",
+  "semantic_supplement"
 ] as const);
 
 const DIAGNOSTIC_SOURCE_LABELS = new Set<string>([

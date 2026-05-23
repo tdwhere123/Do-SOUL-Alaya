@@ -29,6 +29,7 @@ import {
   type BenchDaemonHandle,
   type BenchEmbeddingWarmupSummary,
   type BenchEmbeddingMode,
+  type BenchEmbeddingProviderKind,
   type BenchQueryEmbeddingWarmupSummary,
   type BenchRecallOptions,
   type BenchReportContextUsageInput,
@@ -95,6 +96,7 @@ export interface LongMemEvalRunOptions {
   readonly dataDir?: string;
   readonly fetchResult?: FetchResult;
   readonly embeddingMode?: BenchEmbeddingMode;
+  readonly embeddingProviderKind?: BenchEmbeddingProviderKind;
   readonly policyShape?: BenchPolicyShape;
   readonly simulateReport?: BenchSimulateReportMode;
   readonly weightOverridesJson?: string;
@@ -238,6 +240,9 @@ export async function runLongMemEval(
       workspaceId: `lme-${question.question_id.slice(0, 8)}`,
       runId: `run-${question.question_id.slice(0, 8)}`,
       embeddingMode: opts.embeddingMode ?? "disabled",
+      ...(opts.embeddingProviderKind === undefined
+        ? {}
+        : { embeddingProviderKind: opts.embeddingProviderKind }),
       recallWeightOverrides
     });
     try {

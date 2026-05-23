@@ -16,13 +16,31 @@ export interface MemoryEmbeddingRecord {
   readonly updated_at: string;
 }
 
+export interface MemoryEmbeddingListByWorkspaceOptions {
+  // Optional storage-tier whitelist. Applied at the SQL JOIN to drop WARM /
+  // COLD memories before they enter the embedding candidate pool (see also
+  // EmbeddingRecallRepoPort).
+  readonly tierFilter?: readonly ("hot" | "warm" | "cold")[];
+  // Hard cap on the rows returned. Applied after tier filtering.
+  readonly limit?: number;
+  // invariant: cosine space is valid only within one (provider_kind, model_id).
+  // SQL-level filter so the workspace scan cap admits only vectors that can
+  // compete; cross-provider rows are dropped before the cap, not after.
+  // see also: packages/core/src/embedding-recall-service.ts EMBEDDING_WORKSPACE_SCAN_CAP
+  readonly providerKind?: string;
+  readonly modelId?: string;
+}
+
 export interface MemoryEmbeddingRepo {
   upsert(record: MemoryEmbeddingRecord): Promise<Readonly<MemoryEmbeddingRecord>>;
   upsertIfContentHashMatchesCurrentMemory(
     record: MemoryEmbeddingRecord
   ): Promise<Readonly<MemoryEmbeddingRecord> | null>;
   findByObjectId(objectId: string): Promise<Readonly<MemoryEmbeddingRecord> | null>;
-  listByWorkspace(workspaceId: string): Promise<readonly Readonly<MemoryEmbeddingRecord>[]>;
+  listByWorkspace(
+    workspaceId: string,
+    options?: MemoryEmbeddingListByWorkspaceOptions
+  ): Promise<readonly Readonly<MemoryEmbeddingRecord>[]>;
   listByObjectIds(
     workspaceId: string,
     objectIds: readonly string[]
@@ -206,12 +224,66 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
   }
 
   public async listByWorkspace(
-    workspaceId: string
+    workspaceId: string,
+    options?: MemoryEmbeddingListByWorkspaceOptions
   ): Promise<readonly Readonly<MemoryEmbeddingRecord>[]> {
     const parsedWorkspaceId = parseWorkspaceId(workspaceId);
+    const tierFilter = options?.tierFilter;
+    const limit = options?.limit;
+    const providerKind = options?.providerKind;
+    const modelId = options?.modelId;
 
     try {
-      const rows = this.listByWorkspaceStatement.all(parsedWorkspaceId) as MemoryEmbeddingRow[];
+      if (
+        tierFilter === undefined &&
+        (limit === undefined || limit <= 0) &&
+        providerKind === undefined &&
+        modelId === undefined
+      ) {
+        const rows = this.listByWorkspaceStatement.all(parsedWorkspaceId) as MemoryEmbeddingRow[];
+        return Object.freeze(rows.map((row) => parseMemoryEmbeddingRow(row)));
+      }
+
+      const clauses: string[] = ["e.workspace_id = ?"];
+      const args: (string | number)[] = [parsedWorkspaceId];
+      if (tierFilter !== undefined && tierFilter.length > 0) {
+        const placeholders = tierFilter.map(() => "?").join(", ");
+        clauses.push(`m.storage_tier IN (${placeholders})`);
+        for (const tier of tierFilter) {
+          args.push(tier);
+        }
+      }
+      if (providerKind !== undefined) {
+        clauses.push("e.provider_kind = ?");
+        args.push(parseProviderKind(providerKind));
+      }
+      if (modelId !== undefined) {
+        clauses.push("e.model_id = ?");
+        args.push(parseModelId(modelId));
+      }
+      let sql = `
+        SELECT
+          e.object_id,
+          e.workspace_id,
+          e.content_hash,
+          e.provider_kind,
+          e.model_id,
+          e.schema_version,
+          e.dimensions,
+          e.embedding_blob,
+          e.created_at,
+          e.updated_at
+        FROM memory_embeddings e
+        INNER JOIN memory_entries m ON m.object_id = e.object_id
+        WHERE ${clauses.join(" AND ")}
+        ORDER BY e.object_id ASC
+      `;
+      if (limit !== undefined && limit > 0) {
+        sql += " LIMIT ?";
+        args.push(Math.floor(limit));
+      }
+      const statement = this.db.connection.prepare(sql);
+      const rows = statement.all(...args) as MemoryEmbeddingRow[];
       return Object.freeze(rows.map((row) => parseMemoryEmbeddingRow(row)));
     } catch (error) {
       if (error instanceof StorageError) {
