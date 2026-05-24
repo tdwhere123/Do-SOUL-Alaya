@@ -703,28 +703,26 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
     expect(attackerGist.fieldFactor).toBeLessThan(0.5);
   });
 
-  it("damps a padding-bypass gist that wraps the query phrase in distinct nonsense tokens", () => {
-    // Padding-bypass attack: the distinct-token damp gates on
-    // uniqueTokens/totalTokens, so an attacker who pads the query phrase
-    // with distinct nonsense tokens keeps that ratio near 1.0 (damp = 1)
-    // while exact_phrase + term_coverage still saturate. The second damp
-    // (query-term concentration) is the load-bearing protection: it gates
-    // on queryTermOccurrences/totalTokens, which stays high regardless of
-    // how distinct the padding tokens are.
+  it("damps a phrase-repetition padding-bypass via the distinct-token damp", () => {
+    // Padding-bypass attack shape A: attacker repeats the query phrase
+    // many times to saturate exact_phrase + term_coverage, and interleaves
+    // a distinct padding token after each repetition to dodge the
+    // distinct-token damp. Distinct counting in the concentration damp
+    // bounds the numerator at querySet size, so repeating the same query
+    // words K times scales the denominator by K and keeps distinct query
+    // density low — this shape no longer trips the concentration damp.
+    // But the same padding strategy still collapses uniqueTokens /
+    // totalTokens below the diversity threshold, so the distinct-token
+    // damp catches it.
     //
-    // The attacker wants to maximize lexical saturation, so the query
-    // phrase is repeated many times. To dodge the distinct-token damp
-    // they interleave distinct padding tokens — but the more padding they
-    // add, the more they dilute the lexical signal they were trying to
-    // amplify. This shape (high query density, high distinct ratio) is
-    // the load-bearing test case for the concentration damp.
+    // invariant: at least one damp must fire on a repetition-padded gist.
     const query = compileRecallQueryProbes("favorite text editor");
-    // 8 repetitions of the query phrase, each followed by 1 distinct
-    // padding token. 8 × (3 query + 1 pad) = 32 tokens, 24 of which are
-    // query terms (density 0.75) — above the concentration threshold.
-    // distinct ratio: 8 padding tokens are unique + 3 query terms = 11
-    // unique / 32 = 0.34 — also trips the distinct-token damp; the
-    // composite picks the smaller (concentration in this case).
+    // 8 × (3 query + 1 pad) = 32 tokens. distinctQueryTokensPresent = 3
+    // (alice/cook/editor reduced to {favorite, text, editor}); distinct
+    // density = 3 / 32 ≈ 0.094 — well under 0.55, concentration damp
+    // returns 1. distinctTokenRatio = (3 + 8) / 32 ≈ 0.344 — under
+    // GIST_MIN_DIVERSITY_RATIO (0.5), so diversity damp fires at
+    // 0.344 / 0.5 ≈ 0.69. Composite picks the smaller damp.
     const blocks = Array.from({ length: 8 }, (_, blockIndex) =>
       `favorite text editor pad${blockIndex}`
     );
@@ -743,10 +741,95 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
         "the user mentioned their favorite text editor is Helix during the standup"
     });
 
-    // Composite damp must visibly pull the attacker below the honest gist.
+    // At least one damp must visibly pull the attacker below the honest
+    // gist score.
     expect(attackerGist.score).toBeLessThan(honestGist.score);
     expect(attackerGist.fieldFactor).toBeLessThan(0.7);
     expect(honestGist.fieldFactor).toBe(1);
+  });
+
+  it("damps a distinct-query-saturation gist via the concentration damp", () => {
+    // Padding-bypass attack shape B: attacker assembles N distinct query
+    // terms plus minimal distinct padding, keeping distinctTokenRatio at
+    // 1.0 so the diversity damp does not fire. The concentration damp now
+    // gates on distinctQueryTokensPresent / totalTokens, which stays high
+    // because every query term is present without repetition.
+    //
+    // invariant: when distinct query terms dominate the gist, the
+    // concentration damp fires even if every token is unique.
+    const query = compileRecallQueryProbes("favorite text editor name");
+    // 4 distinct query terms + 2 distinct padding tokens = 6 tokens.
+    // distinctQueryTokensPresent = 4; distinct density = 4 / 6 ≈ 0.67 —
+    // above GIST_QUERY_CONCENTRATION_THRESHOLD (0.55). distinctTokenRatio
+    // = 6 / 6 = 1.0 — diversity damp returns 1, so concentration is the
+    // load-bearing damp here.
+    const attackerGist = computeRerankFeatures(query, {
+      content: "an unrelated distilled fact about lunch preferences",
+      hasEvidenceLexicalHit: false,
+      evidenceGist: "favorite text editor name pad alpha"
+    });
+    const honestGist = computeRerankFeatures(query, {
+      content: "an unrelated distilled fact about lunch preferences",
+      hasEvidenceLexicalHit: false,
+      evidenceGist:
+        "the user mentioned their favorite text editor name is Helix during the standup"
+    });
+
+    expect(attackerGist.score).toBeLessThan(honestGist.score);
+    expect(attackerGist.fieldFactor).toBeLessThan(1);
+    expect(honestGist.fieldFactor).toBe(1);
+  });
+
+  it("does not damp a legitimate paraphrase that repeats the same query word", () => {
+    // invariant: repeating the same query word does not raise distinct
+    // query density — the numerator is bounded by querySet size.
+    // Regression guard against the raw-occurrence formulation that would
+    // false-positive on natural paraphrases ("Alice cook ... Alice cook").
+    const query = compileRecallQueryProbes("Alice cook");
+    // Tokens: [alice, cook, yes, alice, cook, tonight] = 6 tokens.
+    // queryTerms = {alice, cook}; distinctQueryTokensPresent = 2;
+    // distinct density = 2 / 6 ≈ 0.33 — under threshold, no damp.
+    // (Raw-occurrence density would be 4 / 6 ≈ 0.67 and would have
+    // damped this legit shape.)
+    const legitParaphrase = computeRerankFeatures(query, {
+      content: "an unrelated distilled fact about lunch preferences",
+      hasEvidenceLexicalHit: false,
+      evidenceGist: "alice cook yes alice cook tonight"
+    });
+    const baselineHonestGist = computeRerankFeatures(query, {
+      content: "an unrelated distilled fact about lunch preferences",
+      hasEvidenceLexicalHit: false,
+      evidenceGist: "the user mentioned alice will cook the dinner tonight"
+    });
+
+    // No concentration damp fired — fieldFactor is dominated only by the
+    // distinct-token damp (which also passes at distinct ratio = 5/6 ≈
+    // 0.83, well above the 0.5 threshold). fieldFactor must be 1.
+    expect(legitParaphrase.fieldFactor).toBe(1);
+    expect(legitParaphrase.score).toBeGreaterThan(0);
+    // And the paraphrase scores in the same ballpark as a single-mention
+    // honest gist of comparable length — the repeated subject token does
+    // not penalize it relative to peers.
+    expect(legitParaphrase.score).toBeGreaterThan(0.5 * baselineHonestGist.score);
+  });
+
+  it("does not damp a single-occurrence multi-term paraphrase", () => {
+    // invariant: a natural-language gist that mentions each query term
+    // exactly once with light connectors stays at density well under the
+    // concentration threshold.
+    const query = compileRecallQueryProbes("rollback procedure schedule");
+    // Tokens: [the, rollback, procedure, schedule, stays, weekly] = 6
+    // tokens; queryTerms = {rollback, procedure, schedule}; distinct
+    // density = 3 / 6 = 0.5 — under threshold (0.55), no damp.
+    const features = computeRerankFeatures(query, {
+      content: "an unrelated distilled fact about lunch preferences",
+      hasEvidenceLexicalHit: false,
+      evidenceGist: "the rollback procedure schedule stays weekly"
+    });
+
+    expect(features.fieldFactor).toBe(1);
+    expect(features.exactPhrase).toBe(1);
+    expect(features.score).toBeGreaterThan(0);
   });
 
   it("leaves a short emphatic gist (yes yes yes) above the diversity / concentration damps", () => {
