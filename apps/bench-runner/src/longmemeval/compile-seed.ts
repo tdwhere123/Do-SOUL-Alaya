@@ -525,6 +525,8 @@ export interface CompileSeedRunner {
     readonly workspaceId: string;
     readonly runId: string;
     readonly surfaceId?: string | null;
+    // see also: apps/bench-runner/src/harness/daemon.ts BenchSignalSeedInput.sourceMemoryRefs
+    readonly sourceMemoryRefs?: readonly string[];
   }): Promise<CompileSeedResult>;
 }
 
@@ -606,6 +608,7 @@ export function createCompileSeedRunner(options?: {
     readonly workspaceId: string;
     readonly runId: string;
     readonly surfaceId?: string | null;
+    readonly sourceMemoryRefs?: readonly string[];
   }): Promise<CompileSeedResult> {
     const normalized = input.turnContent.trim();
     if (normalized.length === 0) {
@@ -626,14 +629,21 @@ export function createCompileSeedRunner(options?: {
     });
 
     // invariant: every fact gets a distinct evidence_ref so the audit trail
-    // and the per-fact materialized object_id stay 1:1.
+    // and the per-fact materialized object_id stay 1:1. sourceMemoryRefs
+    // (when supplied by the caller) is replicated onto every fact of the
+    // turn so each derived memory_entry carries the same derives_from edge
+    // back to the prior turn's seeds.
+    // see also: apps/bench-runner/src/harness/daemon.ts BenchSignalSeedInput.sourceMemoryRefs
     const signalInputs: BenchSignalSeedInput[] = seedInputs.map(
       (seedInput, i) => ({
         ...seedInput,
         evidenceRef:
           seedInputs.length === 1
             ? input.evidenceRefBase
-            : `${input.evidenceRefBase}-f${i}`
+            : `${input.evidenceRefBase}-f${i}`,
+        ...(input.sourceMemoryRefs === undefined || input.sourceMemoryRefs.length === 0
+          ? {}
+          : { sourceMemoryRefs: input.sourceMemoryRefs })
       })
     );
 
@@ -990,4 +1000,36 @@ export function buildSessionSynthesisInput(input: {
     evidenceRefs,
     summary
   };
+}
+
+/**
+ * @anchor longmemeval-d1-fanout — adjacent-turn derives_from handoff
+ *
+ * Compute the sourceMemoryRefs for the next turn's seed signal, given the
+ * seed result of the current turn. Single-id semantics by design: only the
+ * first seed of the current turn carries the derives_from link into the
+ * next turn's signal.
+ *
+ * invariant: returned array length is 0 or 1 — never the union of every
+ * fact in the current turn. Unioning N facts per turn would create
+ * N x M edges per adjacent pair and scale as
+ * session_count * turn_count * fact_per_turn^2; on a 500q LongMemEval run
+ * that breaches the WSL2 memory ceiling. D-1's intent is "adjacent
+ * sentence derives_from", not "every fact derives from every prior fact".
+ *
+ * invariant: returns [] when the current turn produced no seeds — the
+ * caller treats [] as "no prior turn", emitting the next signal with
+ * sourceMemoryRefs omitted (undefined), which is the same shape used for
+ * the very first turn of a session and for the first turn of a new
+ * session after a session boundary reset.
+ *
+ * see also: apps/bench-runner/src/longmemeval/runner.ts previousTurnSeedMemoryIds
+ * see also: apps/bench-runner/src/longmemeval/multiturn.ts previousTurnSeedMemoryIds
+ * see also: apps/bench-runner/src/longmemeval/crossquestion.ts previousTurnSeedMemoryIds
+ */
+export function computeNextTurnSeedRefs(
+  seedResult: Readonly<Pick<CompileSeedResult, "seeds">>
+): readonly string[] {
+  const first = seedResult.seeds.length > 0 ? seedResult.seeds[0] : undefined;
+  return first !== undefined ? [first.memoryId] : [];
 }

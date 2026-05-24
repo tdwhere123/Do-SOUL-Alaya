@@ -312,6 +312,9 @@ export interface RecallServiceDependencies {
   readonly defaultPolicyDecorator?: (
     policy: Readonly<import("@do-soul/alaya-protocol").RecallPolicy>
   ) => Readonly<import("@do-soul/alaya-protocol").RecallPolicy>;
+  // see also: packages/core/src/entity-extraction-port.ts
+  // see also: packages/core/src/entity-extraction-rules.ts RuleBasedEntityExtractor
+  readonly entityExtractionPort?: import("./entity-extraction-port.js").EntityExtractionPort;
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;
   readonly warn?: RecallServiceWarnPort;
@@ -331,7 +334,10 @@ export type RecallAdmissionPlane =
   // Coarse-injection candidates surfaced by the embedding workspace neighbor
   // scan. They have no lexical / structural anchor, so a separate plane name
   // keeps source-proximity / graph-expansion seed selection honest.
-  | "semantic_supplement";
+  | "semantic_supplement"
+  // see also: collectEntityDerivedSeeds — query-time entity FTS hits that
+  // both seed graph_expansion and admit candidates on their own plane.
+  | "entity_seed";
 
 export type RecallCandidateDropReason =
   | "duplicate"
@@ -358,6 +364,8 @@ export type RecallFusionStream =
   | "existing_score"
   | "embedding_similarity"
   | "graph_expansion"
+  // see also: scoreRecallFusionStream case "entity_seed"
+  | "entity_seed"
   | "path_expansion"
   | "temporal_recency"
   | "workspace_activation";
@@ -464,6 +472,9 @@ export interface RecallSupplementaryData {
   readonly sourceCohortKeys: Readonly<Record<string, string>>;
   readonly structuralScores: Readonly<Record<string, number>>;
   readonly graphExpansionScores: Readonly<Record<string, number>>;
+  // see also: collectEntityDerivedSeeds — per-memory entity_seed plane score
+  // produced from the FTS rank of the strongest entity surface that hit.
+  readonly entitySeedScores: Readonly<Record<string, number>>;
   readonly pathExpansionScores: Readonly<Record<string, number>>;
   readonly embeddingSimilarityScores: Readonly<Record<string, number>>;
   readonly graphSupportCounts: Readonly<Record<string, number>>;

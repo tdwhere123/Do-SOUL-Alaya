@@ -325,15 +325,21 @@ async function runOneConversation(
     // see also: apps/bench-runner/src/harness/seed-rotation.ts
     let seedIndex = 0;
     for (const session of sessions) {
+      // see also: longmemeval/runner.ts session-adjacent derives_from anchor
+      let previousTurnSeedMemoryIds: readonly string[] = [];
       for (const turn of session.turns) {
         const seedContent = `${turn.speaker}: ${turn.text}`;
         const evidenceRef = `${conversation.sample_id}-${turn.dia_id}`;
         const seed = await daemon.proposeMemory(seedContent, evidenceRef, {
-          objectKind: rotatingSeedObjectKind(seedIndex)
+          objectKind: rotatingSeedObjectKind(seedIndex),
+          ...(previousTurnSeedMemoryIds.length === 0
+            ? {}
+            : { sourceMemoryRefs: previousTurnSeedMemoryIds })
         });
         diaIdByMemoryId.set(seed.memoryId, turn.dia_id);
         memoryIdByDiaId.set(turn.dia_id, seed.memoryId);
         seedIndex += 1;
+        previousTurnSeedMemoryIds = [seed.memoryId];
       }
     }
 

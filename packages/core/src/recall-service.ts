@@ -111,6 +111,21 @@ export { makeTokenEstimator } from "./recall-service-types.js";
 const DYNAMIC_RECALL_PLANE_CAP = 240;
 const DYNAMIC_RECALL_TOTAL_CANDIDATE_CAP = 1000;
 const DYNAMIC_RECALL_SEED_CAP = 50;
+// anchor: entity_seed caps. The per-entity ceiling keeps a single common
+// surface (e.g. "config") from flooding the plane; total admit caps
+// bound the FTS-call fan-out per recall.
+const ENTITY_EXTRACTION_MAX_ENTITIES = 8;
+const ENTITY_SEED_PER_ENTITY_TOP_K_STRONG = 8;
+const ENTITY_SEED_PER_ENTITY_TOP_K_WEAK = 5;
+const ENTITY_SEED_TOTAL_ADMIT_CAP = 60;
+const ENTITY_SEED_MIN_SURFACE_LENGTH = 2;
+// anchor: entity-derived graph_expansion seeding floor. Only entities whose
+// extractor confidence meets this threshold are allowed to fan their FTS
+// hits into graph_expansion seeds. The 0.85 cut admits quoted / code_ref /
+// path / package / task_ref signals (1.0 / 0.95 / 0.9 / 0.9 / 0.85) and
+// excludes proper_noun (0.7), cjk_phrase (0.6), and unknown_long (0.35).
+// see also: packages/core/src/entity-extraction-rules.ts CONFIDENCE_*
+const ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR = 0.85;
 const DYNAMIC_RECALL_COHORT_RADIUS = 8;
 const DYNAMIC_RECALL_SOURCE_PROXIMITY_RADIUS = 6;
 const DYNAMIC_RECALL_SOURCE_PROXIMITY_SEED_CAP = 12;
@@ -142,6 +157,7 @@ const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
   "existing_score",
   "embedding_similarity",
   "graph_expansion",
+  "entity_seed",
   "path_expansion",
   "temporal_recency",
   "workspace_activation"
@@ -166,6 +182,11 @@ const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>
   existing_score: 8,
   embedding_similarity: 1,
   graph_expansion: 1,
+  // anchor: entity_seed parity with lexical_fts so entity-bearing memories
+  // can compete on the same RRF axis as direct surface-term hits without
+  // out-weighting the existing lexical lane. weight tuning is deferred to
+  // phase-6 sub-workflow D-2/D-6 once the graph plane is non-zero.
+  entity_seed: 1,
   path_expansion: 3,
   temporal_recency: 0,
   workspace_activation: 0
@@ -184,6 +205,13 @@ interface CoarseCandidateDraft {
   readonly sourceChannels: readonly string[];
   readonly structuralScore: number;
   readonly pathExpansionSources: readonly RecallPathExpansionSourceDiagnostic[];
+  // invariant: the strongest entity-extractor confidence (0..1) observed when
+  // this draft was admitted via the entity_seed plane; undefined when no
+  // entity_seed admission has occurred. selectExpansionSeedDrafts uses this
+  // to gate entity-only drafts out of graph_expansion fan-in when the entity
+  // confidence falls below ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR.
+  // see also: collectEntityDerivedSeeds (graph_expansion seed extraSeedMemoryIds path)
+  readonly entityConfidence?: number;
 }
 
 interface SourceProximitySeedDraft {
@@ -196,7 +224,10 @@ type CoarseCandidateAdder = (
   plane: RecallAdmissionPlane,
   structuralScore?: number,
   sourceChannel?: string,
-  pathExpansionSource?: RecallPathExpansionSourceDiagnostic
+  pathExpansionSource?: RecallPathExpansionSourceDiagnostic,
+  // invariant: only forwarded for plane === "entity_seed" by
+  // collectEntityDerivedSeeds; other planes leave this undefined.
+  entityConfidence?: number
 ) => void;
 
 export class RecallService {
@@ -628,6 +659,8 @@ export class RecallService {
     readonly sourceCohortKeys: Readonly<Record<string, string>>;
     readonly structuralScores: Readonly<Record<string, number>>;
     readonly graphExpansionScores: Readonly<Record<string, number>>;
+    // see also: collectEntityDerivedSeeds — entity_seed plane score by memory id.
+    readonly entitySeedScores: Readonly<Record<string, number>>;
     readonly pathExpansionScores: Readonly<Record<string, number>>;
     readonly degradation_reason: RecallResult["degradation_reason"];
   }> {
@@ -664,18 +697,26 @@ export class RecallService {
     let sourceCohortKeys: Readonly<Record<string, string>> = Object.freeze({});
     const structuralScores = new Map<string, number>();
     const graphExpansionScores = new Map<string, number>();
+    const entitySeedScores = new Map<string, number>();
     const pathExpansionScores = new Map<string, number>();
     const addCandidate = (
       entry: Readonly<MemoryEntry>,
       plane: RecallAdmissionPlane,
       structuralScore = 0,
       sourceChannel?: string,
-      pathExpansionSource?: RecallPathExpansionSourceDiagnostic
+      pathExpansionSource?: RecallPathExpansionSourceDiagnostic,
+      entityConfidence?: number
     ): void => {
       if (
         plane !== "protected_winner" &&
         plane !== "lexical" &&
         plane !== "semantic_supplement" &&
+        // invariant: entity_seed admissions still honor the deterministic
+        // filter (scope_class / retention / dimension / domain_tag). The
+        // entity helper draws from tier-filtered byId, but the underlying
+        // memories may not match the strategy's scope/dimension contract;
+        // bypassing the filter would let a cross-scope memory leak in just
+        // because its surface name appears in the query.
         !winnerMemoryIds.has(entry.object_id) &&
         !matchesDeterministicFilter(entry, config)
       ) {
@@ -688,6 +729,13 @@ export class RecallService {
           ? Math.min(planeScore, SOURCE_PROXIMITY_STRUCTURAL_CARRY_MAX)
           : planeScore;
       const nextStructuralScore = Math.max(current?.structuralScore ?? 0, evidenceStructuralScore);
+      // invariant: keep the strongest entity_seed confidence observed for
+      // this memory id. Other planes never overwrite a real entityConfidence
+      // with undefined. see also: selectExpansionSeedDrafts entity-only floor.
+      const nextEntityConfidence =
+        plane === "entity_seed" && entityConfidence !== undefined
+          ? Math.max(current?.entityConfidence ?? 0, entityConfidence)
+          : current?.entityConfidence;
       drafts.set(entry.object_id, {
         entry,
         admissionPlanes: uniquePlanes([...(current?.admissionPlanes ?? []), plane]),
@@ -700,7 +748,8 @@ export class RecallService {
         pathExpansionSources: uniquePathExpansionSources([
           ...(current?.pathExpansionSources ?? []),
           ...(pathExpansionSource === undefined ? [] : [pathExpansionSource])
-        ])
+        ]),
+        ...(nextEntityConfidence === undefined ? {} : { entityConfidence: nextEntityConfidence })
       });
       structuralScores.set(
         entry.object_id,
@@ -710,6 +759,12 @@ export class RecallService {
         graphExpansionScores.set(
           entry.object_id,
           Math.max(graphExpansionScores.get(entry.object_id) ?? 0, evidenceStructuralScore)
+        );
+      }
+      if (plane === "entity_seed") {
+        entitySeedScores.set(
+          entry.object_id,
+          Math.max(entitySeedScores.get(entry.object_id) ?? 0, evidenceStructuralScore)
         );
       }
       if (plane === "path_expansion") {
@@ -906,11 +961,29 @@ export class RecallService {
       addCandidate,
       admissionLimit: resolveSourceProximityAdmissionLimit(options.deliveryMaxEntries)
     });
+    const entityDerivedSeeds = await this.collectEntityDerivedSeeds({
+      workspaceId,
+      queryText,
+      byId,
+      addCandidate,
+      lexicalFtsRanks: ftsRanks
+    });
+    // invariant: only strong entity signals are eligible to fan into
+    // graph_expansion. Weak entities (kind=unknown / cjk_phrase /
+    // proper_noun under the floor) stay in the entity_seed plane only —
+    // graph fan-in compounds an attacker's surface manipulation across
+    // every 1-hop neighbor, so the gate to that compounding must be a
+    // high-confidence entity (quoted phrase / explicit code_ref / path /
+    // package / task_ref).
+    const graphExpansionSeedIds = entityDerivedSeeds
+      .filter((seed) => seed.entityConfidence >= ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR)
+      .map((seed) => seed.memoryId);
     await this.addGraphExpansionCandidates({
       workspaceId,
       byId,
       drafts,
-      addCandidate
+      addCandidate,
+      extraSeedMemoryIds: graphExpansionSeedIds
     });
     await this.addPathExpansionCandidates({
       workspaceId,
@@ -966,6 +1039,7 @@ export class RecallService {
       sourceCohortKeys,
       structuralScores: Object.freeze(Object.fromEntries(structuralScores.entries())),
       graphExpansionScores: Object.freeze(Object.fromEntries(graphExpansionScores.entries())),
+      entitySeedScores: Object.freeze(Object.fromEntries(entitySeedScores.entries())),
       pathExpansionScores: Object.freeze(Object.fromEntries(pathExpansionScores.entries())),
       degradation_reason: null
     });
@@ -1249,31 +1323,58 @@ export class RecallService {
     readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
     readonly drafts: ReadonlyMap<string, CoarseCandidateDraft>;
     readonly addCandidate: CoarseCandidateAdder;
+    // see also: collectEntityDerivedSeeds — entity-bearing memory ids fan
+    // into graph_expansion as additional seeds so the graph plane is reachable
+    // even when the query never hits a prior expansion seed.
+    readonly extraSeedMemoryIds?: readonly string[];
   }>): Promise<void> {
     const graphExpansionPort = this.dependencies.graphExpansionPort;
-    if (graphExpansionPort === undefined || params.drafts.size === 0) {
+    if (graphExpansionPort === undefined) {
       return;
     }
 
-    const seeds = selectExpansionSeedDrafts(params.drafts).slice(0, DYNAMIC_RECALL_SEED_CAP);
+    const draftSeeds = selectExpansionSeedDrafts(params.drafts).slice(0, DYNAMIC_RECALL_SEED_CAP);
+    const draftSeedIds = new Set(draftSeeds.map((seed) => seed.entry.object_id));
+    const extraSeedEntries: Readonly<MemoryEntry>[] = [];
+    for (const id of params.extraSeedMemoryIds ?? []) {
+      if (draftSeedIds.has(id)) {
+        continue;
+      }
+      const entry = params.byId.get(id);
+      if (entry !== undefined) {
+        extraSeedEntries.push(entry);
+        draftSeedIds.add(id);
+      }
+      if (extraSeedEntries.length + draftSeeds.length >= DYNAMIC_RECALL_SEED_CAP) {
+        break;
+      }
+    }
+    const seedEntries: readonly Readonly<MemoryEntry>[] = [
+      ...draftSeeds.map((seed) => seed.entry),
+      ...extraSeedEntries
+    ];
+    if (seedEntries.length === 0) {
+      return;
+    }
+
     let added = 0;
-    for (const seed of seeds) {
+    for (const seedEntry of seedEntries) {
       if (added >= DYNAMIC_RECALL_PLANE_CAP) {
         return;
       }
       let edges: readonly Readonly<MemoryGraphEdge>[];
       try {
-        edges = await graphExpansionPort.findByMemoryId(seed.entry.object_id, params.workspaceId);
+        edges = await graphExpansionPort.findByMemoryId(seedEntry.object_id, params.workspaceId);
       } catch (error) {
         this.warn("graph expansion lookup failed", {
           workspace_id: params.workspaceId,
-          seed_memory_id: seed.entry.object_id,
+          seed_memory_id: seedEntry.object_id,
           error: toErrorMessage(error)
         });
         continue;
       }
       for (const edge of edges.slice(0, DYNAMIC_RECALL_EDGE_FANOUT)) {
-        const neighborId = edge.source_memory_id === seed.entry.object_id
+        const neighborId = edge.source_memory_id === seedEntry.object_id
           ? edge.target_memory_id
           : edge.source_memory_id;
         const entry = params.byId.get(neighborId);
@@ -1287,6 +1388,128 @@ export class RecallService {
         }
       }
     }
+  }
+
+  // anchor: query-time entity FTS seeding. Returns the memory ids of every
+  // candidate admitted on the entity_seed plane (paired with the originating
+  // entity confidence) so the caller can fan them into graph_expansion as
+  // additional seeds subject to a confidence floor. The helper is fail-soft:
+  // if no port is wired, no query text is present, or the keyword search port
+  // is missing, returns an empty list and the recall pipeline degrades
+  // gracefully back to the pre-entity behavior.
+  // see also: packages/core/src/entity-extraction-port.ts EntityExtractionPort
+  private async collectEntityDerivedSeeds(params: Readonly<{
+    readonly workspaceId: string;
+    readonly queryText: string | null;
+    readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
+    readonly addCandidate: CoarseCandidateAdder;
+    // invariant: lexical FTS ranks observed during this coarse pass.
+    // When an entity-FTS hit overlaps a lexical_fts hit the RRF contribution
+    // must come from the lexical lane only — otherwise a single surface term
+    // gets two fusion-stream rank slots and an attacker-controlled query can
+    // roughly double a memory's fused score.
+    readonly lexicalFtsRanks: ReadonlyMap<string, number>;
+  }>): Promise<readonly Readonly<{ memoryId: string; entityConfidence: number }>[]> {
+    const port = this.dependencies.entityExtractionPort;
+    const memoryRepo = this.dependencies.memoryRepo;
+    if (
+      port === undefined ||
+      params.queryText === null ||
+      params.byId.size === 0 ||
+      (memoryRepo.searchByKeyword === undefined && memoryRepo.searchByKeywordWithinObjectIds === undefined)
+    ) {
+      return [];
+    }
+
+    let entities: readonly Readonly<{
+      readonly surface: string;
+      readonly normalized: string;
+      readonly confidence: number;
+    }>[];
+    try {
+      entities = await port.extract(params.queryText, { maxEntities: ENTITY_EXTRACTION_MAX_ENTITIES });
+    } catch (error) {
+      this.warn("entity extraction failed", {
+        workspace_id: params.workspaceId,
+        error: toErrorMessage(error)
+      });
+      return [];
+    }
+    if (entities.length === 0) {
+      return [];
+    }
+
+    // Track the strongest entity confidence we observed per memory id. The
+    // caller filters this against ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR
+    // when deciding which seeds may fan into graph_expansion.
+    const seedConfidenceById = new Map<string, number>();
+    let admittedTotal = 0;
+    const candidateIds = [...params.byId.keys()];
+    for (const entity of entities) {
+      if (admittedTotal >= ENTITY_SEED_TOTAL_ADMIT_CAP) {
+        break;
+      }
+      const surface = entity.surface.trim();
+      if (surface.length < ENTITY_SEED_MIN_SURFACE_LENGTH) {
+        continue;
+      }
+      const perEntityLimit = entity.confidence >= 0.85
+        ? ENTITY_SEED_PER_ENTITY_TOP_K_STRONG
+        : ENTITY_SEED_PER_ENTITY_TOP_K_WEAK;
+      let hits: readonly Readonly<{ readonly object_id: string; readonly normalized_rank: number }>[];
+      try {
+        hits =
+          memoryRepo.searchByKeywordWithinObjectIds !== undefined
+            ? await memoryRepo.searchByKeywordWithinObjectIds(
+                params.workspaceId,
+                surface,
+                perEntityLimit,
+                candidateIds
+              )
+            : await memoryRepo.searchByKeyword!(params.workspaceId, surface, perEntityLimit);
+      } catch (error) {
+        this.warn("entity seed lookup failed", {
+          workspace_id: params.workspaceId,
+          entity_surface: surface,
+          error: toErrorMessage(error)
+        });
+        continue;
+      }
+      for (const hit of hits) {
+        const entry = params.byId.get(hit.object_id);
+        if (entry === undefined) {
+          continue;
+        }
+        const rawScore = clamp01(hit.normalized_rank * entity.confidence);
+        if (rawScore <= 0) {
+          continue;
+        }
+        // see also: lexicalFtsRanks doc above. Lexical-overlap admissions
+        // still register on the entity_seed plane (so admission_planes
+        // diagnostics can distinguish entity-only from entity+lexical hits)
+        // but the RRF rank contribution is zeroed out — the entity_seed
+        // stream returns 0 for this id and drops out of fusion, preventing
+        // a single surface term from claiming two fusion-stream rank slots.
+        const hasLexicalOverlap = (params.lexicalFtsRanks.get(hit.object_id) ?? 0) > 0;
+        const score = hasLexicalOverlap ? 0 : rawScore;
+        // The 6th argument (entityConfidence) lets the draft pool reason
+        // about gating entity-only weak admissions out of graph_expansion
+        // fan-in via the path-1 (selectExpansionSeedDrafts) seed pool.
+        // see also: selectExpansionSeedDrafts ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR
+        params.addCandidate(entry, "entity_seed", score, "entity_seed", undefined, entity.confidence);
+        const previous = seedConfidenceById.get(entry.object_id) ?? 0;
+        if (entity.confidence > previous) {
+          seedConfidenceById.set(entry.object_id, entity.confidence);
+        }
+        admittedTotal += 1;
+        if (admittedTotal >= ENTITY_SEED_TOTAL_ADMIT_CAP) {
+          break;
+        }
+      }
+    }
+    return [...seedConfidenceById.entries()].map(([memoryId, entityConfidence]) =>
+      Object.freeze({ memoryId, entityConfidence })
+    );
   }
 
   private async addPathExpansionCandidates(params: Readonly<{
@@ -1517,6 +1740,7 @@ export class RecallService {
       coarseSourceCohortKeys: params.coarseFilter.sourceCohortKeys,
       coarseStructuralScores: params.coarseFilter.structuralScores,
       coarseGraphExpansionScores: params.coarseFilter.graphExpansionScores,
+      coarseEntitySeedScores: params.coarseFilter.entitySeedScores,
       coarsePathExpansionScores: params.coarseFilter.pathExpansionScores
     });
     const assessment = this.fineAssess(
@@ -1588,6 +1812,10 @@ export class RecallService {
         ...current.graphExpansionScores,
         ...next.graphExpansionScores
       }),
+      entitySeedScores: Object.freeze({
+        ...current.entitySeedScores,
+        ...next.entitySeedScores
+      }),
       pathExpansionScores: Object.freeze({
         ...current.pathExpansionScores,
         ...next.pathExpansionScores
@@ -1612,6 +1840,7 @@ export class RecallService {
     readonly coarseSourceCohortKeys: Readonly<Record<string, string>>;
     readonly coarseStructuralScores: Readonly<Record<string, number>>;
     readonly coarseGraphExpansionScores: Readonly<Record<string, number>>;
+    readonly coarseEntitySeedScores: Readonly<Record<string, number>>;
     readonly coarsePathExpansionScores: Readonly<Record<string, number>>;
   }): Promise<RecallSupplementaryData> {
     // graph_support is a weighted inbound aggregate across edge types; the
@@ -1721,6 +1950,7 @@ export class RecallService {
       sourceCohortKeys: params.coarseSourceCohortKeys,
       structuralScores: params.coarseStructuralScores,
       graphExpansionScores: params.coarseGraphExpansionScores,
+      entitySeedScores: params.coarseEntitySeedScores,
       pathExpansionScores: params.coarsePathExpansionScores,
       embeddingSimilarityScores: Object.freeze({}),
       graphSupportCounts: Object.freeze(graphSupportCounts),
@@ -2771,6 +3001,11 @@ function scoreRecallFusionStream(
         supplementaryData.graphExpansionScores[objectId] ?? 0,
         normalizeGraphSupport(supplementaryData.graphSupportCounts[objectId] ?? 0)
       ));
+    case "entity_seed":
+      if (isGlobalCandidate) {
+        return 0;
+      }
+      return clamp01(supplementaryData.entitySeedScores[objectId] ?? 0);
     case "path_expansion":
       if (isGlobalCandidate) {
         return 0;
@@ -3554,7 +3789,25 @@ function parseEvidenceSourceChunkRef(ref: string): EvidenceSourceChunkRef | null
 function selectPreferredExpansionSeedEntries(
   drafts: ReadonlyMap<string, CoarseCandidateDraft>
 ): readonly Readonly<MemoryEntry>[] {
+  // invariant: mirrors the weak-entity-only filter that
+  // selectExpansionSeedDrafts applies on the graph_expansion path. The
+  // seeds returned here drive the evidence_anchor / domain_tag_cluster
+  // planes in addContentDerivedExpansionCandidates (evidence_refs and
+  // domain_tags of these seeds widen the per-plane match set). A weak
+  // cjk_phrase / proper_noun / unknown surface (confidence below
+  // ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR) admitted ONLY on
+  // entity_seed must not be allowed to seed content expansion either —
+  // otherwise the same surface manipulation that the graph_expansion
+  // floor blocks would leak through evidence/tag fan-out.
+  // Defense-in-depth: today addContentDerivedExpansionCandidates is
+  // called BEFORE collectEntityDerivedSeeds, so no entity_seed draft
+  // is present at the moment this seed pool is built. The filter is
+  // applied anyway so any future reordering, or a follow-up caller
+  // that runs after entity_seed admission, cannot silently bypass
+  // the graph_expansion floor via the content-expansion lane.
+  // see also: isWeakEntityOnlyDraft, selectExpansionSeedDrafts
   return rankCoarseCandidateDrafts([...drafts.values()])
+    .filter((draft) => !isWeakEntityOnlyDraft(draft))
     // semantic_supplement candidates carry no structural anchor and must not
     // seed graph_expansion; they would expand from an unrelated neighbor.
     .filter((draft) =>
@@ -3570,7 +3823,16 @@ function selectExpansionSeedDrafts(
   drafts: ReadonlyMap<string, CoarseCandidateDraft>
 ): readonly Readonly<CoarseCandidateDraft>[] {
   const ranked = rankCoarseCandidateDrafts([...drafts.values()]);
-  const preferred = ranked
+  // invariant: a draft whose ONLY non-activation admission is entity_seed,
+  // and whose strongest observed entity confidence is below the floor, must
+  // not seed graph_expansion. Mirrors collectEntityDerivedSeeds's confidence
+  // gate on the extraSeedMemoryIds path — without this, a weak cjk_phrase /
+  // proper_noun query surface (confidence 0.35-0.7) that hit only the
+  // entity-FTS lane would still fan into the graph via path (1) and let
+  // an attacker compound surface manipulation across 1-hop neighbors.
+  // see also: ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR, addGraphExpansionCandidates
+  const survivors = ranked.filter((draft) => !isWeakEntityOnlyDraft(draft));
+  const preferred = survivors
     .filter((draft) =>
       draft.admissionPlanes.some(
         (plane) => plane !== "activation" && plane !== "semantic_supplement"
@@ -3580,8 +3842,29 @@ function selectExpansionSeedDrafts(
   const preferredIds = new Set(preferred.map((draft) => draft.entry.object_id));
   return [
     ...preferred,
-    ...ranked.filter((draft) => !preferredIds.has(draft.entry.object_id))
+    ...survivors.filter((draft) => !preferredIds.has(draft.entry.object_id))
   ].slice(0, DYNAMIC_RECALL_SEED_CAP);
+}
+
+// anchor: entity-only graph_expansion floor. A draft is "weak entity-only"
+// when its admission_planes contain entity_seed and NO other non-activation
+// plane co-admitted (no lexical, object_probe, evidence_anchor, etc.) and
+// the strongest entity confidence is below the floor. Drafts with a real
+// co-admitting plane (lexical hit, structural agreement, etc.) survive,
+// even when the entity confidence is weak.
+function isWeakEntityOnlyDraft(draft: Readonly<CoarseCandidateDraft>): boolean {
+  const planes = draft.admissionPlanes;
+  if (!planes.includes("entity_seed")) {
+    return false;
+  }
+  const hasNonEntitySupport = planes.some(
+    (plane) => plane !== "entity_seed" && plane !== "activation"
+  );
+  if (hasNonEntitySupport) {
+    return false;
+  }
+  const confidence = draft.entityConfidence ?? 0;
+  return confidence < ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR;
 }
 
 function selectSourceProximitySeedDrafts(
@@ -3670,7 +3953,7 @@ function draftPriority(draft: Readonly<CoarseCandidateDraft>): number {
   )) {
     return 3;
   }
-  if (draft.admissionPlanes.includes("lexical")) {
+  if (draft.admissionPlanes.includes("lexical") || draft.admissionPlanes.includes("entity_seed")) {
     return 3;
   }
   // Semantic-supplement injections lack lexical / structural anchors; rank

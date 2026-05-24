@@ -171,6 +171,7 @@ describe("LongMemEval runner", () => {
                 existing_score: 2,
                 embedding_similarity: null,
                 graph_expansion: null,
+                entity_seed: null,
                 path_expansion: null,
                 temporal_recency: null,
                 workspace_activation: 4
@@ -187,6 +188,7 @@ describe("LongMemEval runner", () => {
                 existing_score: 0.015,
                 embedding_similarity: 0,
                 graph_expansion: 0,
+                entity_seed: 0,
                 path_expansion: 0,
                 temporal_recency: 0,
                 workspace_activation: 0.008
@@ -233,6 +235,7 @@ describe("LongMemEval runner", () => {
         existing_score: 2,
         embedding_similarity: null,
         graph_expansion: null,
+        entity_seed: null,
         path_expansion: null,
         temporal_recency: null,
         workspace_activation: 4
@@ -249,6 +252,7 @@ describe("LongMemEval runner", () => {
         existing_score: 0.015,
         embedding_similarity: 0,
         graph_expansion: 0,
+        entity_seed: 0,
         path_expansion: 0,
         temporal_recency: 0,
         workspace_activation: 0.008

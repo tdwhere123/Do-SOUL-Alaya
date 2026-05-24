@@ -43,6 +43,7 @@ import {
 } from "./runner.js";
 import {
   buildSessionSynthesisInput,
+  computeNextTurnSeedRefs,
   createCompileSeedRunner,
   toSeedExtractionPathKpi,
   type CompileSeedRunner,
@@ -145,20 +146,23 @@ export async function runLongMemEvalMultiturn(
         // Per-session turns collected for the L2 synthesis seed below.
         const sessionTurns: SessionSeededTurn[] = [];
         let sessionHasAnswer = false;
+        // see also: longmemeval/runner.ts session-adjacent derives_from anchor
+        let previousTurnSeedMemoryIds: readonly string[] = [];
         for (let ri = 0; ri < rounds.length; ri++) {
           const round = rounds[ri];
           if (round === undefined) continue;
 
           const evidenceRef = `${question.question_id}-mt-s${si}-r${ri}`;
-          // invariant: one round -> N production-extracted memory_entry rows;
-          // every object_id is mapped into the sidecar (no partial map).
           const seedResult = await seedRunner.seedTurn({
             daemon,
             turnContent: round.content,
             evidenceRefBase: evidenceRef,
             seedIndex: seedIndexMt,
             workspaceId: daemon.workspaceId,
-            runId: daemon.runId
+            runId: daemon.runId,
+            ...(previousTurnSeedMemoryIds.length === 0
+              ? {}
+              : { sourceMemoryRefs: previousTurnSeedMemoryIds })
           });
           seedIndexMt += 1;
           if (seedResult.turnTruncated) {
@@ -183,6 +187,9 @@ export async function runLongMemEvalMultiturn(
               evidenceId: seed.evidenceId
             });
           }
+          // invariant: single-id D-1 fan-out. see also:
+          //   apps/bench-runner/src/longmemeval/compile-seed.ts computeNextTurnSeedRefs
+          previousTurnSeedMemoryIds = computeNextTurnSeedRefs(seedResult);
         }
 
         // L2 synthesis seed — see runner.ts for the rationale. The synthesis

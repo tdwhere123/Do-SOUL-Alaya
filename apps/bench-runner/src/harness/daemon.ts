@@ -169,6 +169,25 @@ export interface BenchSignalSeedInput {
   readonly turnSeedIndex: number;
   /** Which extraction path produced this fact (audit / report disclosure). */
   readonly extractionProvider: "official_api_compile" | "no_credentials_fallback";
+  /**
+   * @anchor bench-derives-from-injection
+   *
+   * Memory-entry object_ids whose previous-turn seed this signal derives
+   * from. The harness stamps `raw_payload.source_memory_refs = [...]` so
+   * materialization-router.ts createSourceMemoryEdges builds derives_from
+   * edges between adjacent turns of the same session. The rule is
+   * holistic: any conversational memory system should treat adjacent
+   * turns within one session as derives_from neighbors. Empty / absent
+   * means no inherited refs (e.g. session's first turn).
+   *
+   * Only the `memory_and_claim` materialization branch consumes this
+   * payload key today; the `memory_entry_only` branch ignores it, so the
+   * 60% bench-seed rotation slice (preference / decision / constraint)
+   * is where the edge actually lands.
+   * see also: packages/soul/src/garden/materialization-router.ts
+   *   materializeMemoryAndClaim
+   */
+  readonly sourceMemoryRefs?: readonly string[];
 }
 
 export interface BenchContextUsageObject {
@@ -323,6 +342,8 @@ export interface BenchDaemonHandle {
     options?: {
       readonly objectKind?: SeedObjectKind;
       readonly distilledFact?: string;
+      // see also: BenchSignalSeedInput.sourceMemoryRefs
+      readonly sourceMemoryRefs?: readonly string[];
     }
   ): Promise<SeededMemoryResult>;
   /**
@@ -913,6 +934,7 @@ export async function startBenchDaemon(
     options: {
       readonly objectKind?: SeedObjectKind;
       readonly distilledFact?: string;
+      readonly sourceMemoryRefs?: readonly string[];
     } = {}
   ): Promise<SeededMemoryResult> {
     const objectKind: SeedObjectKind = options.objectKind ?? "fact";
@@ -974,7 +996,8 @@ export async function startBenchDaemon(
             storedContent: safeDistilledFact ?? safeContent,
             excerptSibling: safeContent,
             distilledFactSibling: safeDistilledFact
-          })
+          }),
+          ...buildSourceMemoryRefsPayload(options.sourceMemoryRefs)
         }
       }
     );
@@ -984,9 +1007,7 @@ export async function startBenchDaemon(
       );
     }
 
-    // Steps 2-4: materialize lookup + propose + review (shared with
-    // proposeMemoryFromSignal so both seed paths write an identical
-    // propose+review audit chain).
+    // see also: materializeAndAcceptSeed
     const accepted = await materializeAndAcceptSeed(
       signalResponse.signal_id,
       evidenceRef
@@ -1125,24 +1146,24 @@ export async function startBenchDaemon(
         ? { excerptSibling: safeExcerpt, distilledFactSibling: safeDistilledFact }
         : {})
     });
+    const sourceMemoryRefsPayload = buildSourceMemoryRefsPayload(input.sourceMemoryRefs);
     const rawPayload: Record<string, unknown> =
       input.productionRawPayload === undefined
         ? {
             excerpt: safeExcerpt,
             distilled_fact: safeDistilledFact,
             extraction_provider: input.extractionProvider,
-            ...tokenEconomy
+            ...tokenEconomy,
+            ...sourceMemoryRefsPayload
           }
         : {
             ...input.productionRawPayload,
             extraction_provider: input.extractionProvider,
-            ...tokenEconomy
+            ...tokenEconomy,
+            ...sourceMemoryRefsPayload
           };
 
-    // The candidate's real signal_kind / object_kind are preserved so the
-    // materialization router routes by the kind the production extractor
-    // actually chose; raw_payload.distilled_fact → memory_entry.content via
-    // buildDistilledFact.
+    // see also: materialization-router.ts createSourceMemoryEdges
     const signalResponse = await callMcpTool<SoulEmitCandidateSignalResponse>(
       activeMcpClient,
       "soul.emit_candidate_signal",
@@ -1242,18 +1263,21 @@ export async function startBenchDaemon(
           ? { excerptSibling: clip.safe, distilledFactSibling: safeDistilledFact }
           : {})
       });
+      const sourceMemoryRefsPayload = buildSourceMemoryRefsPayload(input.sourceMemoryRefs);
       const rawPayload: Record<string, unknown> =
         input.productionRawPayload === undefined
           ? {
               excerpt: clip.safe,
               distilled_fact: safeDistilledFact,
               extraction_provider: input.extractionProvider,
-              ...tokenEconomy
+              ...tokenEconomy,
+              ...sourceMemoryRefsPayload
             }
           : {
               ...input.productionRawPayload,
               extraction_provider: input.extractionProvider,
-              ...tokenEconomy
+              ...tokenEconomy,
+              ...sourceMemoryRefsPayload
             };
 
       const signal: CandidateMemorySignal = normalizeSchemaGroundedSignal(
@@ -1905,6 +1929,23 @@ function benchTokenEconomyPayload(input: {
       ? {}
       : { [BENCH_TURN_SEED_INDEX_KEY]: input.turnSeedIndex })
   };
+}
+
+// @anchor buildSourceMemoryRefsPayload: derives_from edge injection
+// see also: packages/soul/src/garden/materialization-router.ts
+//   createSourceMemoryEdges
+// see also: apps/bench-runner/src/longmemeval/compile-seed.ts seedTurn
+function buildSourceMemoryRefsPayload(
+  refs: readonly string[] | undefined
+): Record<string, unknown> {
+  if (refs === undefined || refs.length === 0) {
+    return {};
+  }
+  const unique = [...new Set(refs.filter((ref) => typeof ref === "string" && ref.length > 0))];
+  if (unique.length === 0) {
+    return {};
+  }
+  return { source_memory_refs: unique };
 }
 
 // see also: apps/bench-runner/src/version.ts
