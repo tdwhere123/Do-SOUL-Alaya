@@ -18,7 +18,8 @@ export {
   type PerScenarioRow,
   type SeedExtractionPath,
   type TierDistribution,
-  type TokenEconomy
+  type TokenEconomy,
+  type RecallTokenEconomy
 } from "./kpi-schema.js";
 
 export {

@@ -81,6 +81,7 @@ import type {
   RecallServiceDependencies,
   RecallServiceWarnPort,
   RecallSupplementaryData,
+  RecallTokenEconomy,
   TokenEstimator
 } from "./recall-service-types.js";
 import { makeTokenEstimator } from "./recall-service-types.js";
@@ -104,6 +105,7 @@ export type {
   RecallServiceProjectMappingPort,
   RecallServiceSlotRepoPort,
   RecallServiceWarnPort,
+  RecallTokenEconomy,
   TokenEstimator
 } from "./recall-service-types.js";
 export { makeTokenEstimator } from "./recall-service-types.js";
@@ -465,6 +467,20 @@ export class RecallService {
     });
     await this.recordGlobalRecallClassificationsSafely(globalRecallClassifications);
 
+    // Pure derivation, no async work and no extra corpus reads: token
+    // economy is computed from values already materialised above. See
+    // computeRecallTokenEconomy @anchor for the latency contract.
+    const tokenEconomy = computeRecallTokenEconomy({
+      deliveredCandidates: candidates,
+      coarsePoolSize: combinedCoarseCandidates.length,
+      // fineAssess scores every coarse candidate before delivery
+      // truncation, so the evaluated count equals the pool length even
+      // when downstream budgets drop some rows.
+      fineEvaluated: combinedCoarseCandidates.length,
+      preBudgetCandidates: candidateDiagnostics,
+      embeddingProviderStatus,
+      embeddingCacheHit: preparedEmbeddingQuery.handle?.cacheHit ?? true
+    });
     return Object.freeze({
       candidates,
       active_constraints: activeConstraints.constraints,
@@ -482,7 +498,8 @@ export class RecallService {
         deliveredCount: candidates.length,
         embeddingProviderStatus,
         providerDegradationReason,
-        candidates: candidateDiagnostics
+        candidates: candidateDiagnostics,
+        tokenEconomy
       })
     });
   }
@@ -3301,6 +3318,7 @@ function buildRecallDiagnostics(params: Readonly<{
   readonly embeddingProviderStatus: RecallEmbeddingProviderStatus;
   readonly providerDegradationReason: string | null;
   readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
+  readonly tokenEconomy: Readonly<RecallTokenEconomy>;
 }>): Readonly<RecallDiagnostics> {
   return Object.freeze({
     query_probes: Object.freeze({
@@ -3340,7 +3358,61 @@ function buildRecallDiagnostics(params: Readonly<{
         fused_rank_contribution_per_stream: candidate.fused_rank_contribution_per_stream
       }))
     ),
-    candidates: Object.freeze([...params.candidates])
+    candidates: Object.freeze([...params.candidates]),
+    token_economy: params.tokenEconomy
+  });
+}
+
+/**
+ * Pure derivation of per-recall token economy from already-computed recall
+ * state. Synchronous, allocation-light, and never widens the diagnostics
+ * surface beyond integer counters and the existing token_estimate sum.
+ *
+ * @anchor compute-recall-token-economy: every figure must be derivable
+ * from data already produced for the recall result. Adding a field that
+ * needs new traversal of the corpus would push instrumentation past the
+ * "no measurable latency budget impact" red line of phase 7.
+ */
+function computeRecallTokenEconomy(params: Readonly<{
+  readonly deliveredCandidates: readonly Readonly<RecallCandidate>[];
+  readonly coarsePoolSize: number;
+  readonly fineEvaluated: number;
+  readonly preBudgetCandidates: readonly Readonly<RecallCandidateDiagnostic>[];
+  readonly embeddingProviderStatus: RecallEmbeddingProviderStatus;
+  readonly embeddingCacheHit: boolean;
+}>): Readonly<RecallTokenEconomy> {
+  let deliveredContextTokensEstimate = 0;
+  for (const candidate of params.deliveredCandidates) {
+    deliveredContextTokensEstimate += candidate.token_estimate;
+  }
+  // Count distinct fusion streams that produced at least one non-null
+  // rank across the pre-budget candidate set. Iterates over the typed
+  // RECALL_FUSION_STREAMS list so the count tracks the protocol's
+  // fusion-stream surface, not an ad-hoc subset.
+  let fusionStreamsWithHits = 0;
+  for (const stream of RECALL_FUSION_STREAMS) {
+    const hit = params.preBudgetCandidates.some(
+      (candidate) => candidate.per_stream_rank[stream] !== null
+    );
+    if (hit) {
+      fusionStreamsWithHits += 1;
+    }
+  }
+  // A successfully-served prepared query that was NOT a cache hit is the
+  // single embedding provider invocation attributable to this recall.
+  // Cache hit / provider not requested / provider failed all contribute 0,
+  // so the figure tracks fresh inference cost only.
+  const embeddingInferenceCalls =
+    params.embeddingProviderStatus === "provider_returned" &&
+    params.embeddingCacheHit === false
+      ? 1
+      : 0;
+  return Object.freeze({
+    delivered_context_tokens_estimate: deliveredContextTokensEstimate,
+    coarse_pool_size: params.coarsePoolSize,
+    fine_evaluated: params.fineEvaluated,
+    fusion_streams_with_hits: fusionStreamsWithHits,
+    embedding_inference_calls: embeddingInferenceCalls
   });
 }
 

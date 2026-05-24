@@ -37,6 +37,11 @@ import {
 } from "../harness/daemon.js";
 import { aggregateBenchTokenMetrics } from "./token-economy.js";
 import {
+  aggregateRecallTokenEconomy,
+  extractRecallTokenEconomy
+} from "./recall-token-economy.js";
+import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
+import {
   ALAYA_RECALL_WEIGHT_OVERRIDES_ENV,
   formatBenchRecallWeightOverrides,
   resolveBenchRecallWeightOverrides
@@ -230,6 +235,11 @@ export async function runLongMemEval(
     reportUsageStats: LongMemEvalReportSimulationStats;
     reportSideEffectSnapshot: LongMemEvalReportSideEffectSnapshot;
     tokenMetrics: BenchTokenMetrics;
+    // Per-recall structural token-economy sample from
+    // recallResult.diagnostics.token_economy. Null when the recall did
+    // not produce diagnostics (e.g. degraded path); the run-level
+    // aggregator drops nulls before computing distribution stats.
+    recallTokenEconomy: BenchRecallTokenEconomy | null;
   };
 
   async function runOneQuestion(
@@ -407,6 +417,12 @@ export async function runLongMemEval(
       // each contributing SOUL_SIGNAL_EMITTED / SOUL_CONTEXT_LENS_ASSEMBLED
       // row is already persisted. Must run before the finally-shutdown.
       const tokenMetrics = await daemon.queryTokenMetrics();
+      // Phase 7 per-recall STRUCTURAL token-economy sample. Pulled
+      // directly off the already-parsed BenchRecallDiagnostics, so a
+      // null here means the recall did not produce diagnostics — not a
+      // zero data point. The aggregator drops nulls before the
+      // distribution stats so degraded recalls don't dilute the run.
+      const recallTokenEconomy = extractRecallTokenEconomy(recallResult);
 
       return {
         questionId: question.question_id,
@@ -424,7 +440,8 @@ export async function runLongMemEval(
         queryEmbeddingWarmup,
         reportUsageStats: recallCycle.reportUsageStats,
         reportSideEffectSnapshot,
-        tokenMetrics
+        tokenMetrics,
+        recallTokenEconomy
       };
     } finally {
       await daemon.shutdown();
@@ -483,6 +500,7 @@ export async function runLongMemEval(
   let reportUsedObjectCount = 0;
   const questionDiagnostics: LongMemEvalQuestionDiagnostic[] = [];
   const tokenMetricsPerQuestion: BenchTokenMetrics[] = [];
+  const recallTokenEconomySamples: BenchRecallTokenEconomy[] = [];
   const reportSideEffectSnapshots: LongMemEvalReportSideEffectSnapshot[] = [];
   const embeddingWarmups: BenchEmbeddingWarmupSummary[] = [];
   const queryEmbeddingWarmups: BenchQueryEmbeddingWarmupSummary[] = [];
@@ -516,6 +534,9 @@ export async function runLongMemEval(
     reportUsedObjectCount += res.reportUsageStats.usedObjectCount;
     reportSideEffectSnapshots.push(res.reportSideEffectSnapshot);
     tokenMetricsPerQuestion.push(res.tokenMetrics);
+    if (res.recallTokenEconomy !== null) {
+      recallTokenEconomySamples.push(res.recallTokenEconomy);
+    }
     perScenario.push({
       id: res.questionId,
       version: 1,
@@ -557,6 +578,13 @@ export async function runLongMemEval(
   const tokenEconomyInput = aggregateBenchTokenMetrics(tokenMetricsPerQuestion);
   const tokenEconomy = buildTokenEconomy(tokenEconomyInput);
   const tokenSavedRatio = computeTokenSavedRatio(tokenEconomyInput);
+  // Phase 7 per-recall STRUCTURAL token-economy distribution (p50/p95/mean
+  // across all recall calls in the run). Null when no question produced
+  // diagnostics — the KPI omits the block in that case so consumers do
+  // not see a zero-filled section that looks like real data.
+  const recallTokenEconomy = aggregateRecallTokenEconomy(
+    recallTokenEconomySamples
+  );
 
   const payload: KpiPayload = {
     bench_name: "public",
@@ -617,6 +645,9 @@ export async function runLongMemEval(
       latency_source: "exact",
       token_saved_ratio_vs_full_prompt: tokenSavedRatio,
       token_economy: tokenEconomy,
+      ...(recallTokenEconomy === null
+        ? {}
+        : { recall_token_economy: recallTokenEconomy }),
       tier_distribution: { hot: tierHot, warm: tierWarm, cold: tierCold },
       degradation_reasons: {
         none: degradeNone,

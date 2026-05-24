@@ -22,6 +22,11 @@ import {
 } from "../harness/daemon.js";
 import { aggregateBenchTokenMetrics } from "./token-economy.js";
 import {
+  aggregateRecallTokenEconomy,
+  extractRecallTokenEconomy
+} from "./recall-token-economy.js";
+import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
+import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic,
   rAt5WithProviderReturned,
@@ -84,6 +89,10 @@ interface RoundResult {
   readonly latencyMs: number;
   readonly degradationReason: string | null;
   readonly diagnostics: LongMemEvalQuestionDiagnostic;
+  // Phase 7 per-recall token-economy sample for this round; null when the
+  // recall did not produce diagnostics so degraded rounds don't dilute the
+  // run-level distribution.
+  readonly recallTokenEconomy: BenchRecallTokenEconomy | null;
 }
 
 interface QuestionResult {
@@ -330,7 +339,8 @@ export async function runLongMemEvalMultiturn(
           firstTier,
           latencyMs,
           degradationReason: recallResult.degradation_reason ?? null,
-          diagnostics
+          diagnostics,
+          recallTokenEconomy: extractRecallTokenEconomy(recallResult)
         });
       }
 
@@ -423,6 +433,15 @@ export async function runLongMemEvalMultiturn(
   );
   const tokenEconomy = buildTokenEconomy(tokenEconomyInput);
   const tokenSavedRatio = computeTokenSavedRatio(tokenEconomyInput);
+  // Phase 7: aggregate across EVERY round of every question so the
+  // distribution reflects each recall call, not just the final round.
+  const recallTokenEconomy = aggregateRecallTokenEconomy(
+    collected.flatMap((result) =>
+      result.rounds
+        .map((round) => round.recallTokenEconomy)
+        .filter((sample): sample is BenchRecallTokenEconomy => sample !== null)
+    )
+  );
 
   const datasetSize = opts.fetchResult?.questionCount ?? questions.length;
   const split = variantToSplit(opts.variant);
@@ -469,6 +488,9 @@ export async function runLongMemEvalMultiturn(
       latency_source: "exact",
       token_saved_ratio_vs_full_prompt: tokenSavedRatio,
       token_economy: tokenEconomy,
+      ...(recallTokenEconomy === null
+        ? {}
+        : { recall_token_economy: recallTokenEconomy }),
       tier_distribution: tierDistribution,
       degradation_reasons: degradationReasons,
       seed_truncation: truncation,

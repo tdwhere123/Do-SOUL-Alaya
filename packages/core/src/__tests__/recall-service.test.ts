@@ -42,6 +42,11 @@ function createTaskSurface(): TaskObjectSurface {
 function createPreparedQueryHandle(queryId: string) {
   return {
     queryId,
+    // invariant: stubs mirror the cache-miss path so
+    // RecallTokenEconomy.embedding_inference_calls reads as 1 when the
+    // snapshot is `provider_returned`.
+    // see also: packages/core/src/recall-service.ts computeRecallTokenEconomy
+    cacheHit: false,
     getSnapshot: () =>
       ({
         status: "pending"
@@ -1251,6 +1256,72 @@ describe("RecallService", () => {
       dropped_reason: "max_entries",
       within_budget: false
     });
+  });
+
+  // see also: packages/core/src/recall-service.ts computeRecallTokenEconomy,
+  // apps/bench-runner/src/longmemeval/recall-token-economy.ts.
+  it("populates RecallTokenEconomy with per-call structural counters", async () => {
+    const memories = [
+      createMemoryEntry({ object_id: "memory-1", activation_score: 0.9 }),
+      createMemoryEntry({ object_id: "memory-2", activation_score: 0.8 }),
+      createMemoryEntry({ object_id: "memory-3", activation_score: 0.7 })
+    ];
+    const { dependencies } = createDependencies(memories);
+    const service = new RecallService(dependencies);
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze"
+    });
+
+    const tokenEconomy = result.diagnostics?.token_economy;
+    expect(tokenEconomy).toBeDefined();
+    // delivered_context_tokens_estimate is the sum over delivered
+    // candidates' token_estimate.
+    const expectedDelivered = result.candidates.reduce(
+      (sum, candidate) => sum + candidate.token_estimate,
+      0
+    );
+    expect(tokenEconomy?.delivered_context_tokens_estimate).toBe(
+      expectedDelivered
+    );
+    // coarse_pool_size equals candidate_pool_count (== combined coarse
+    // candidates fed into fineAssess).
+    expect(tokenEconomy?.coarse_pool_size).toBe(
+      result.diagnostics?.candidate_pool_count ?? -1
+    );
+    // fine_evaluated mirrors coarse_pool_size because fineAssess scores
+    // every coarse candidate before delivery truncation.
+    expect(tokenEconomy?.fine_evaluated).toBe(tokenEconomy?.coarse_pool_size);
+    // No embedding provider was wired into the deps factory, so the
+    // pipeline reports zero fresh provider inferences for this recall.
+    expect(tokenEconomy?.embedding_inference_calls).toBe(0);
+    // fusion_streams_with_hits is non-negative and never exceeds the
+    // total fusion stream surface.
+    expect(tokenEconomy?.fusion_streams_with_hits).toBeGreaterThanOrEqual(0);
+    expect(tokenEconomy?.fusion_streams_with_hits).toBeLessThanOrEqual(16);
+  });
+
+  it("repeats RecallTokenEconomy stably across identical recalls on a fixed corpus", async () => {
+    const memories = [
+      createMemoryEntry({ object_id: "memory-1", activation_score: 0.9 }),
+      createMemoryEntry({ object_id: "memory-2", activation_score: 0.8 })
+    ];
+    const { dependencies } = createDependencies(memories);
+    const service = new RecallService(dependencies);
+    const first = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze"
+    });
+    const second = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze"
+    });
+    expect(first.diagnostics?.token_economy).toEqual(
+      second.diagnostics?.token_economy
+    );
   });
 
   it("uses graph and path expansion as read-side candidate generators before scoring", async () => {

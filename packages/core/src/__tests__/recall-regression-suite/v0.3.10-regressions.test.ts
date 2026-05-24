@@ -781,6 +781,7 @@ describe("recall regression suite", () => {
         hasStoredVectors: vi.fn(async () => true),
         prepareQueryEmbedding: vi.fn(() => ({
           queryId: "q-embedding",
+          cacheHit: false,
           getSnapshot: () => ({
             status: "ready" as const,
             embedding: new Float32Array([1])
@@ -862,6 +863,7 @@ describe("recall regression suite", () => {
       embeddingRecallService: {
         prepareQueryEmbedding: vi.fn(() => ({
           queryId: "q-1",
+          cacheHit: false,
           getSnapshot: () => ({ status: "pending" as const })
         })),
         hasStoredVectors: vi.fn(async () => {
@@ -898,6 +900,7 @@ describe("recall regression suite", () => {
         hasStoredVectors: vi.fn(async () => true),
         prepareQueryEmbedding: vi.fn(() => ({
           queryId: "q-1",
+          cacheHit: false,
           getSnapshot: () => ({ status: "pending" as const })
         })),
         querySupplementIfReady: vi.fn(async () => ({

@@ -22,6 +22,11 @@ import {
 } from "../harness/daemon.js";
 import { aggregateBenchTokenMetrics } from "./token-economy.js";
 import {
+  aggregateRecallTokenEconomy,
+  extractRecallTokenEconomy
+} from "./recall-token-economy.js";
+import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
+import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic,
   rAt5WithProviderReturned,
@@ -87,6 +92,8 @@ interface QuestionResult {
   readonly answerTurnsTruncated: number;
   readonly seedCharsClipped: number;
   readonly diagnostics: LongMemEvalQuestionDiagnostic;
+  // Phase 7 per-recall token-economy sample, null when diagnostics absent.
+  readonly recallTokenEconomy: BenchRecallTokenEconomy | null;
 }
 
 export async function runLongMemEvalCrossQuestion(
@@ -317,7 +324,8 @@ export async function runLongMemEvalCrossQuestion(
         seedTurnsTruncated,
         answerTurnsTruncated,
         seedCharsClipped,
-        diagnostics
+        diagnostics,
+        recallTokenEconomy: extractRecallTokenEconomy(recallResult)
       });
 
       process.stdout.write(
@@ -341,6 +349,13 @@ export async function runLongMemEvalCrossQuestion(
   }
   const tokenEconomy = buildTokenEconomy(tokenEconomyInput);
   const tokenSavedRatio = computeTokenSavedRatio(tokenEconomyInput);
+  // Phase 7: per-recall structural distribution across the shared-workspace
+  // question sequence; one sample per recall call.
+  const recallTokenEconomy = aggregateRecallTokenEconomy(
+    collected
+      .map((result) => result.recallTokenEconomy)
+      .filter((sample): sample is BenchRecallTokenEconomy => sample !== null)
+  );
 
   const perScenario: PerScenarioRow[] = collected.map((result) => ({
     id: result.questionId,
@@ -432,6 +447,9 @@ export async function runLongMemEvalCrossQuestion(
       latency_source: "exact",
       token_saved_ratio_vs_full_prompt: tokenSavedRatio,
       token_economy: tokenEconomy,
+      ...(recallTokenEconomy === null
+        ? {}
+        : { recall_token_economy: recallTokenEconomy }),
       tier_distribution: tierDistribution,
       degradation_reasons: degradationReasons,
       seed_truncation: truncation,

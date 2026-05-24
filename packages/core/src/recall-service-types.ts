@@ -417,6 +417,39 @@ export interface RecallPathExpansionSourceDiagnostic {
   readonly source_channel: "path_expansion" | "time_concern";
 }
 
+// invariant: per-recall token economy is measure-only instrumentation.
+// It never feeds back into recall ranking, never gates eligibility, and
+// never becomes part of the protocol payload — it lives entirely inside
+// the in-memory RecallDiagnostics sub-object that the bench harness
+// captures via BenchRecallDiagnosticsSchema.
+// see also:
+//   recall-service.ts (buildRecallDiagnostics, computeRecallTokenEconomy)
+//   apps/bench-runner/src/harness/recall-diagnostics-schema.ts
+//   apps/bench-runner/src/longmemeval/diagnostics.ts (KPI aggregation)
+export interface RecallTokenEconomy {
+  // Sum of token_estimate over candidates actually delivered to the caller.
+  // Derived from the same chars/token heuristic the caller sees in the
+  // delivered RecallCandidate.token_estimate field, so the figure agrees
+  // with the bench's existing total_token_estimate KPI per recall.
+  readonly delivered_context_tokens_estimate: number;
+  // Coarse-stage pool size — the number of candidates flowing into
+  // fineAssess, matching candidate_pool_count.
+  readonly coarse_pool_size: number;
+  // Fine-assess evaluated count — every coarse candidate has its fused
+  // score and feature rerank computed before delivery truncation, so this
+  // equals the input pool length even when the budget drops some rows.
+  readonly fine_evaluated: number;
+  // Number of distinct fusion streams that produced at least one non-null
+  // per_stream_rank across all pre-budget candidates. Surfaces "how many
+  // recall channels actually contributed signal" per call.
+  readonly fusion_streams_with_hits: number;
+  // Embedding provider inference calls attributable to this recall. 0 when
+  // the provider was not requested, the snapshot was a cache hit, or the
+  // provider failed before returning. 1 when the recall pipeline actually
+  // consumed a fresh provider invocation for its query embedding.
+  readonly embedding_inference_calls: number;
+}
+
 export interface RecallDiagnostics {
   readonly query_probes: {
     readonly subject_hints: readonly string[];
@@ -445,6 +478,7 @@ export interface RecallDiagnostics {
   readonly provider_degradation_reason: string | null;
   readonly fusion_breakdown: readonly Readonly<RecallFusionBreakdown>[];
   readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
+  readonly token_economy: Readonly<RecallTokenEconomy>;
 }
 
 export interface RecallResult {

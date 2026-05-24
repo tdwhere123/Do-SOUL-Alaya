@@ -35,6 +35,11 @@ import {
   summarizeProviderStates,
   type LongMemEvalQuestionDiagnostic
 } from "../longmemeval/diagnostics.js";
+import {
+  aggregateRecallTokenEconomy,
+  extractRecallTokenEconomy
+} from "../longmemeval/recall-token-economy.js";
+import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
 import { extractSessions, type LocomoQa, type LocomoSample, type LocomoVariant } from "./dataset.js";
 import { loadLocomo, type LocomoFetchResult } from "./fetch.js";
 
@@ -168,6 +173,11 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
       result.queryEmbeddingWarmup === null ? [] : [result.queryEmbeddingWarmup]
     )
   );
+  // Phase 7: aggregate per-recall structural samples across every QA in
+  // every conversation; one sample per recall call.
+  const recallTokenEconomy = aggregateRecallTokenEconomy(
+    conversationResults.flatMap((result) => result.recallTokenEconomySamples)
+  );
 
   const payload: KpiPayload = {
     bench_name: "public-locomo",
@@ -221,6 +231,9 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
       latency_ms_p95: computePercentile(latencies, 95),
       latency_source: "exact",
       token_saved_ratio_vs_full_prompt: 0,
+      ...(recallTokenEconomy === null
+        ? {}
+        : { recall_token_economy: recallTokenEconomy }),
       tier_distribution: { hot: tierHot, warm: tierWarm, cold: tierCold },
       degradation_reasons: {
         none: totalQa,
@@ -299,6 +312,11 @@ interface ConversationResult {
   readonly questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[];
   readonly embeddingWarmup: BenchEmbeddingWarmupSummary | null;
   readonly queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null;
+  // Phase 7: one per-recall token-economy sample per QA in this
+  // conversation. Diagnosis-degraded recalls are skipped (not pushed
+  // as null) so the conversation-level array length matches the number
+  // of structurally-instrumented recalls.
+  readonly recallTokenEconomySamples: readonly BenchRecallTokenEconomy[];
 }
 
 async function runOneConversation(
@@ -362,6 +380,7 @@ async function runOneConversation(
     let scoredCount = 0;
     const latencies: number[] = [];
     const questionDiagnostics: LongMemEvalQuestionDiagnostic[] = [];
+    const recallTokenEconomySamples: BenchRecallTokenEconomy[] = [];
 
     // invariant: R@K denominator counts only QAs with non-empty evidence.
     // LoCoMo category-5 (adversarial) and some other rows carry no
@@ -410,6 +429,10 @@ async function runOneConversation(
           embeddingMode
         })
       );
+      const tokenEconomySample = extractRecallTokenEconomy(result.recallResult);
+      if (tokenEconomySample !== null) {
+        recallTokenEconomySamples.push(tokenEconomySample);
+      }
     }
 
     return {
@@ -423,7 +446,8 @@ async function runOneConversation(
       latencies,
       questionDiagnostics,
       embeddingWarmup,
-      queryEmbeddingWarmup
+      queryEmbeddingWarmup,
+      recallTokenEconomySamples
     };
   } finally {
     await daemon.shutdown();
