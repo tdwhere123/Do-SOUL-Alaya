@@ -121,6 +121,13 @@ export type PreparedEmbeddingQuerySnapshot =
 
 export interface PreparedEmbeddingQueryHandle {
   readonly queryId: string;
+  // True when the query embedding was served from the in-memory cache and
+  // no provider invocation was issued for this prepared query. False when
+  // the provider was called (even if the call later failed or is still
+  // pending). Stable across the handle lifetime — set at handle creation
+  // and not mutated by subsequent reads. Consumed by RecallService to
+  // populate RecallTokenEconomy.embedding_inference_calls.
+  readonly cacheHit: boolean;
   getSnapshot(): PreparedEmbeddingQuerySnapshot;
   waitForSnapshot?(timeoutMs: number): Promise<PreparedEmbeddingQuerySnapshot>;
 }
@@ -222,12 +229,16 @@ export class EmbeddingRecallService {
     const queryId = this.generateQueryId();
 
     if (!this.dependencies.provider.isAvailable) {
+      // Provider unavailable means we never even attempted an inference;
+      // count this as a cache hit (== zero inference calls) so the recall
+      // token-economy figure is not inflated by failure-only paths.
       return createPreparedEmbeddingQueryHandle(
         queryId,
         Object.freeze({
           status: "failed",
           reason: "provider_unavailable"
-        })
+        }),
+        { cacheHit: true }
       );
     }
 
@@ -239,7 +250,8 @@ export class EmbeddingRecallService {
         Object.freeze({
           status: "ready",
           embedding: cachedEmbedding
-        })
+        }),
+        { cacheHit: true }
       );
     }
 
@@ -269,13 +281,15 @@ export class EmbeddingRecallService {
         });
       });
 
-    return createPreparedEmbeddingQueryHandle(queryId, () => snapshot, async (timeoutMs) => {
-      if (snapshot.status !== "pending") {
+    return createPreparedEmbeddingQueryHandle(queryId, () => snapshot, {
+      cacheHit: false,
+      waitForSnapshot: async (timeoutMs) => {
+        if (snapshot.status !== "pending") {
+          return snapshot;
+        }
+        await waitForPreparedQuery(settled, timeoutMs);
         return snapshot;
       }
-
-      await waitForPreparedQuery(settled, timeoutMs);
-      return snapshot;
     });
   }
 
@@ -1154,15 +1168,23 @@ function createPreparedEmbeddingQueryHandle(
   snapshotOrGetter:
     | PreparedEmbeddingQuerySnapshot
     | (() => PreparedEmbeddingQuerySnapshot),
-  waitForSnapshot?: (timeoutMs: number) => Promise<PreparedEmbeddingQuerySnapshot>
+  options: {
+    readonly cacheHit: boolean;
+    readonly waitForSnapshot?: (
+      timeoutMs: number
+    ) => Promise<PreparedEmbeddingQuerySnapshot>;
+  }
 ): PreparedEmbeddingQueryHandle {
   return {
     queryId,
+    cacheHit: options.cacheHit,
     getSnapshot:
       typeof snapshotOrGetter === "function"
         ? snapshotOrGetter
         : () => snapshotOrGetter,
-    ...(waitForSnapshot === undefined ? {} : { waitForSnapshot })
+    ...(options.waitForSnapshot === undefined
+      ? {}
+      : { waitForSnapshot: options.waitForSnapshot })
   };
 }
 

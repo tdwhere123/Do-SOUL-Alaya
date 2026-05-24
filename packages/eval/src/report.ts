@@ -233,6 +233,62 @@ export function renderReport(
   lines.push(
     `- Token saved vs full-prompt baseline: ${formatRatio(current.kpi.token_saved_ratio_vs_full_prompt)}`
   );
+  const rte = current.kpi.recall_token_economy;
+  // Merged-shard KPI deliberately omits recall_token_economy because the
+  // honest cross-shard distribution needs the raw per-recall samples
+  // (only per-shard archives carry them). Surface that explicitly so a
+  // reader of the merged report does not mistake the absence for an
+  // instrumentation bug. see also: apps/bench-runner/src/cli.ts
+  // @anchor merged-recall-token-economy.
+  if (
+    rte === undefined &&
+    current.kpi.latency_source === "worst_shard_bound"
+  ) {
+    lines.push(
+      "- Per-recall token economy: omitted (multi-shard mode; see per-shard archives)"
+    );
+  }
+  if (rte !== undefined && rte.sample_count > 0) {
+    // Phase 7 per-recall structural instrument (D5 measure-only):
+    // distributions over all recall calls in the run. Numbers describe
+    // what the recall pipeline actually did per call; they are not
+    // gates and not threshold targets. The token-unit caveat (chars/4
+    // heuristic, CJK underestimated ~3-4x) lives on RecallTokenEconomy
+    // in packages/core/src/recall-service-types.ts.
+    lines.push(
+      `- Per-recall token economy (${rte.sample_count} calls, measure-only):`
+    );
+    lines.push(
+      `  - delivered_context_tokens: mean=${rte.delivered_context_tokens_estimate.mean.toFixed(1)} ` +
+        `p50=${rte.delivered_context_tokens_estimate.p50.toFixed(1)} ` +
+        `p95=${rte.delivered_context_tokens_estimate.p95.toFixed(1)} ` +
+        `max=${rte.delivered_context_tokens_estimate.max}`
+    );
+    lines.push(
+      `  - coarse_pool_size: mean=${rte.coarse_pool_size.mean.toFixed(1)} ` +
+        `p50=${rte.coarse_pool_size.p50.toFixed(1)} ` +
+        `p95=${rte.coarse_pool_size.p95.toFixed(1)} ` +
+        `max=${rte.coarse_pool_size.max}`
+    );
+    lines.push(
+      `  - fine_evaluated: mean=${rte.fine_evaluated.mean.toFixed(1)} ` +
+        `p50=${rte.fine_evaluated.p50.toFixed(1)} ` +
+        `p95=${rte.fine_evaluated.p95.toFixed(1)} ` +
+        `max=${rte.fine_evaluated.max}`
+    );
+    lines.push(
+      `  - fusion_streams_with_hits: mean=${rte.fusion_streams_with_hits.mean.toFixed(1)} ` +
+        `p50=${rte.fusion_streams_with_hits.p50.toFixed(1)} ` +
+        `p95=${rte.fusion_streams_with_hits.p95.toFixed(1)} ` +
+        `max=${rte.fusion_streams_with_hits.max}`
+    );
+    lines.push(
+      `  - embedding_inference_calls: mean=${rte.embedding_inference_calls.mean.toFixed(3)} ` +
+        `p50=${rte.embedding_inference_calls.p50.toFixed(1)} ` +
+        `p95=${rte.embedding_inference_calls.p95.toFixed(1)} ` +
+        `max=${rte.embedding_inference_calls.max}`
+    );
+  }
   lines.push(
     `- Tier distribution: hot=${current.kpi.tier_distribution.hot} warm=${current.kpi.tier_distribution.warm} cold=${current.kpi.tier_distribution.cold}`
   );

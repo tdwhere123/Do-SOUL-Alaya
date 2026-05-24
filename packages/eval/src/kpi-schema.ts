@@ -240,6 +240,70 @@ export type QualityMetrics = z.infer<typeof QualityMetricsSchema>;
 // The block is OPTIONAL so pre-S6 kpi.json records stay schema-valid;
 // new LongMemEval runs always populate it. token_saved_ratio_vs_full_prompt
 // (KpiCore) is the headline ratio derived from these raw counts.
+// @anchor recall-token-economy: per-recall STRUCTURAL token instrument,
+// aggregated across all questions in a run. Distinct from `token_economy`
+// (which counts EventLog-derived raw / stored / delivered tokens for the
+// whole run). recall_token_economy quantifies what each individual recall
+// call cost in token-shaped work — delivered tokens, pool sizes, evaluated
+// candidates, fusion-stream coverage, and embedding provider invocations.
+//
+// Wave 2 / Phase 7 (D5 decision): measure-only. The figures publish what
+// the recall pipeline ACTUALLY did, on every call, without setting a "must
+// pass" threshold. They feed honest release notes, not a marketing target;
+// the v0.3.10 "对标 95% data-driven design" anti-pattern is intentionally
+// avoided.
+//
+// @anchor recall-token-economy-token-units: every *_tokens / *_token_*
+// figure under this block is the chars/4 approximation produced by
+// makeTokenEstimator (resolveCharsPerToken in
+// packages/core/src/recall-service-types.ts). The default 4 chars/token
+// is an OpenAI-style English heuristic; CJK content is underestimated
+// by roughly 3-4x because Chinese/Japanese/Korean characters average
+// closer to 1-1.5 chars/token under cl100k/o200k. Release notes citing
+// mean / p95 figures from this block must carry the same caveat.
+// see also:
+//   packages/core/src/recall-service-types.ts RecallTokenEconomy
+//   packages/core/src/recall-service.ts computeRecallTokenEconomy
+//   apps/bench-runner/src/harness/recall-diagnostics-schema.ts
+const PerCallStatSchema = z
+  .object({
+    mean: z.number().nonnegative(),
+    p50: z.number().nonnegative(),
+    p95: z.number().nonnegative(),
+    max: z.number().nonnegative()
+  })
+  .strict();
+
+const RecallTokenEconomySchema = z
+  .object({
+    schema_version: z.literal("bench-recall-token-economy.v1"),
+    // Number of per-recall samples (one per recall call observed across
+    // all questions in the run). Zero when no recall produced diagnostics
+    // (e.g. shard with no questions); a run with this at zero will skip
+    // the rest of the block on the consumer side.
+    sample_count: z.number().int().nonnegative(),
+    // Delivered tokens per recall — `sum(candidate.token_estimate)` over
+    // the candidates actually returned. Mirrors the chars/token heuristic
+    // used by makeTokenEstimator in core.
+    delivered_context_tokens_estimate: PerCallStatSchema,
+    // Coarse-pool size — the candidate count flowing into fineAssess.
+    coarse_pool_size: PerCallStatSchema,
+    // Fine-assess evaluated count — for now equals coarse pool size, so
+    // distributions match; the field exists separately for forward
+    // compatibility when fineAssess gains early-out paths.
+    fine_evaluated: PerCallStatSchema,
+    // Distinct fusion streams that contributed at least one non-null
+    // per-stream rank across the pre-budget candidate set, per recall.
+    fusion_streams_with_hits: PerCallStatSchema,
+    // Embedding provider inference calls attributable to one recall: 1
+    // when the recall issued a fresh provider invocation, 0 otherwise.
+    // The mean across all recalls in the run is the call-weighted rate
+    // of fresh inferences.
+    embedding_inference_calls: PerCallStatSchema
+  })
+  .strict();
+export type RecallTokenEconomy = z.infer<typeof RecallTokenEconomySchema>;
+
 const TokenEconomySchema = z
   .object({
     schema_version: z.literal("bench-token-economy.v1"),
@@ -294,6 +358,10 @@ const KpiCoreSchema = z.object({
   // Optional so pre-S6 kpi.json records stay schema-valid. When present,
   // token_saved_ratio_vs_full_prompt is derived from this block.
   token_economy: TokenEconomySchema.optional(),
+  // Optional so pre-phase-7 kpi.json records stay schema-valid; runs that
+  // collect per-recall diagnostics populate it.
+  // see also: @anchor recall-token-economy
+  recall_token_economy: RecallTokenEconomySchema.optional(),
   tier_distribution: TierDistributionSchema,
   degradation_reasons: DegradationReasonsSchema,
   seed_truncation: SeedTruncationSchema,

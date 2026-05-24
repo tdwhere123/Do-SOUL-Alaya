@@ -1065,6 +1065,12 @@ async function runMergeLongMemEvalCommand(
         ...(mergedTokenEconomy === undefined
           ? {}
           : { token_economy: mergedTokenEconomy }),
+        // @anchor merged-recall-token-economy: phase 7 per-recall structural
+        // distributions live in each shard's KPI. The honest cross-shard
+        // distribution would require the raw per-recall samples (not just
+        // the shard summaries); since we do not persist samples, the merged
+        // KPI deliberately omits the block. Per-shard archives still carry
+        // their own recall_token_economy untouched.
         tier_distribution: { hot: tierHot, warm: tierWarm, cold: tierCold },
         degradation_reasons: {
           none: degradeNone,
