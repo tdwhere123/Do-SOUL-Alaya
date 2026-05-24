@@ -147,20 +147,22 @@ export async function runLongMemEvalCrossQuestion(
         // round. see also: apps/bench-runner/src/longmemeval/dataset.ts
         // pairSessionIntoRounds.
         const rounds = pairSessionIntoRounds(session);
+        // see also: longmemeval/runner.ts session-adjacent derives_from anchor
+        let previousTurnSeedMemoryIds: readonly string[] = [];
         for (let ri = 0; ri < rounds.length; ri++) {
           const round = rounds[ri];
           if (round === undefined) continue;
           const evidenceRef = `${question.question_id}-cq-s${si}-r${ri}`;
-          // invariant: one round -> N production-extracted memory_entry rows;
-          // every object_id is mapped into the shared sidecar (no partial
-          // map).
           const seedResult = await seedRunner.seedTurn({
             daemon,
             turnContent: round.content,
             evidenceRefBase: evidenceRef,
             seedIndex,
             workspaceId: daemon.workspaceId,
-            runId: daemon.runId
+            runId: daemon.runId,
+            ...(previousTurnSeedMemoryIds.length === 0
+              ? {}
+              : { sourceMemoryRefs: previousTurnSeedMemoryIds })
           });
           seedIndex += 1;
           if (seedResult.turnTruncated) {
@@ -177,6 +179,7 @@ export async function runLongMemEvalCrossQuestion(
               hasAnswer: round.hasAnswer
             });
           }
+          previousTurnSeedMemoryIds = seedResult.seeds.map((seed) => seed.memoryId);
         }
       }
 

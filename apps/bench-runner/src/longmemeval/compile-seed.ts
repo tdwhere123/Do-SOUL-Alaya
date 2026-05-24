@@ -525,6 +525,8 @@ export interface CompileSeedRunner {
     readonly workspaceId: string;
     readonly runId: string;
     readonly surfaceId?: string | null;
+    // see also: apps/bench-runner/src/harness/daemon.ts BenchSignalSeedInput.sourceMemoryRefs
+    readonly sourceMemoryRefs?: readonly string[];
   }): Promise<CompileSeedResult>;
 }
 
@@ -606,6 +608,7 @@ export function createCompileSeedRunner(options?: {
     readonly workspaceId: string;
     readonly runId: string;
     readonly surfaceId?: string | null;
+    readonly sourceMemoryRefs?: readonly string[];
   }): Promise<CompileSeedResult> {
     const normalized = input.turnContent.trim();
     if (normalized.length === 0) {
@@ -626,14 +629,21 @@ export function createCompileSeedRunner(options?: {
     });
 
     // invariant: every fact gets a distinct evidence_ref so the audit trail
-    // and the per-fact materialized object_id stay 1:1.
+    // and the per-fact materialized object_id stay 1:1. sourceMemoryRefs
+    // (when supplied by the caller) is replicated onto every fact of the
+    // turn so each derived memory_entry carries the same derives_from edge
+    // back to the prior turn's seeds.
+    // see also: apps/bench-runner/src/harness/daemon.ts BenchSignalSeedInput.sourceMemoryRefs
     const signalInputs: BenchSignalSeedInput[] = seedInputs.map(
       (seedInput, i) => ({
         ...seedInput,
         evidenceRef:
           seedInputs.length === 1
             ? input.evidenceRefBase
-            : `${input.evidenceRefBase}-f${i}`
+            : `${input.evidenceRefBase}-f${i}`,
+        ...(input.sourceMemoryRefs === undefined || input.sourceMemoryRefs.length === 0
+          ? {}
+          : { sourceMemoryRefs: input.sourceMemoryRefs })
       })
     );
 

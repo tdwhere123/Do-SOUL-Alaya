@@ -268,21 +268,27 @@ export async function runLongMemEval(
         // Per-session turns collected for the L2 synthesis seed below.
         const sessionTurns: SessionSeededTurn[] = [];
         let sessionHasAnswer = false;
+        // anchor: session-adjacent derives_from. Carries the prior turn's
+        // seeded memory_entry ids so the next turn's signal raw_payload
+        // names them as source_memory_refs.
+        // see also: packages/soul/src/garden/materialization-router.ts
+        //   createSourceMemoryEdges
+        let previousTurnSeedMemoryIds: readonly string[] = [];
         for (let ri = 0; ri < rounds.length; ri++) {
           const round = rounds[ri];
           if (round === undefined) continue;
 
           const evidenceRef = `${question.question_id}-s${si}-r${ri}`;
-          // invariant: one round -> N production-extracted memory_entry rows.
-          // Every resulting object_id is mapped into the sidecar; a partial
-          // map would silently undercount recall.
           const seedResult = await seedRunner.seedTurn({
             daemon,
             turnContent: round.content,
             evidenceRefBase: evidenceRef,
             seedIndex,
             workspaceId: daemon.workspaceId,
-            runId: daemon.runId
+            runId: daemon.runId,
+            ...(previousTurnSeedMemoryIds.length === 0
+              ? {}
+              : { sourceMemoryRefs: previousTurnSeedMemoryIds })
           });
           seedIndex += 1;
           if (seedResult.turnTruncated) {
@@ -307,6 +313,7 @@ export async function runLongMemEval(
               evidenceId: seed.evidenceId
             });
           }
+          previousTurnSeedMemoryIds = seedResult.seeds.map((seed) => seed.memoryId);
         }
 
         // L2 synthesis seed: emit ONE session-level synthesis capsule pointing
