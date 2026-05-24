@@ -111,6 +111,14 @@ export { makeTokenEstimator } from "./recall-service-types.js";
 const DYNAMIC_RECALL_PLANE_CAP = 240;
 const DYNAMIC_RECALL_TOTAL_CANDIDATE_CAP = 1000;
 const DYNAMIC_RECALL_SEED_CAP = 50;
+// anchor: entity_seed caps. The per-entity ceiling keeps a single common
+// surface (e.g. "config") from flooding the plane; total admit caps
+// bound the FTS-call fan-out per recall.
+const ENTITY_EXTRACTION_MAX_ENTITIES = 8;
+const ENTITY_SEED_PER_ENTITY_TOP_K_STRONG = 8;
+const ENTITY_SEED_PER_ENTITY_TOP_K_WEAK = 5;
+const ENTITY_SEED_TOTAL_ADMIT_CAP = 60;
+const ENTITY_SEED_MIN_SURFACE_LENGTH = 2;
 const DYNAMIC_RECALL_COHORT_RADIUS = 8;
 const DYNAMIC_RECALL_SOURCE_PROXIMITY_RADIUS = 6;
 const DYNAMIC_RECALL_SOURCE_PROXIMITY_SEED_CAP = 12;
@@ -142,6 +150,7 @@ const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
   "existing_score",
   "embedding_similarity",
   "graph_expansion",
+  "entity_seed",
   "path_expansion",
   "temporal_recency",
   "workspace_activation"
@@ -166,6 +175,11 @@ const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>
   existing_score: 8,
   embedding_similarity: 1,
   graph_expansion: 1,
+  // anchor: entity_seed parity with lexical_fts so entity-bearing memories
+  // can compete on the same RRF axis as direct surface-term hits without
+  // out-weighting the existing lexical lane. weight tuning is deferred to
+  // phase-6 sub-workflow D-2/D-6 once the graph plane is non-zero.
+  entity_seed: 1,
   path_expansion: 3,
   temporal_recency: 0,
   workspace_activation: 0
@@ -628,6 +642,8 @@ export class RecallService {
     readonly sourceCohortKeys: Readonly<Record<string, string>>;
     readonly structuralScores: Readonly<Record<string, number>>;
     readonly graphExpansionScores: Readonly<Record<string, number>>;
+    // see also: collectEntityDerivedSeeds — entity_seed plane score by memory id.
+    readonly entitySeedScores: Readonly<Record<string, number>>;
     readonly pathExpansionScores: Readonly<Record<string, number>>;
     readonly degradation_reason: RecallResult["degradation_reason"];
   }> {
@@ -664,6 +680,7 @@ export class RecallService {
     let sourceCohortKeys: Readonly<Record<string, string>> = Object.freeze({});
     const structuralScores = new Map<string, number>();
     const graphExpansionScores = new Map<string, number>();
+    const entitySeedScores = new Map<string, number>();
     const pathExpansionScores = new Map<string, number>();
     const addCandidate = (
       entry: Readonly<MemoryEntry>,
@@ -676,6 +693,10 @@ export class RecallService {
         plane !== "protected_winner" &&
         plane !== "lexical" &&
         plane !== "semantic_supplement" &&
+        // anchor: entity_seed is a query-time lexical-style admission;
+        // bypass the deterministic filter so it shares the lexical-plane
+        // contract instead of being silently dropped.
+        plane !== "entity_seed" &&
         !winnerMemoryIds.has(entry.object_id) &&
         !matchesDeterministicFilter(entry, config)
       ) {
@@ -710,6 +731,12 @@ export class RecallService {
         graphExpansionScores.set(
           entry.object_id,
           Math.max(graphExpansionScores.get(entry.object_id) ?? 0, evidenceStructuralScore)
+        );
+      }
+      if (plane === "entity_seed") {
+        entitySeedScores.set(
+          entry.object_id,
+          Math.max(entitySeedScores.get(entry.object_id) ?? 0, evidenceStructuralScore)
         );
       }
       if (plane === "path_expansion") {
@@ -906,11 +933,18 @@ export class RecallService {
       addCandidate,
       admissionLimit: resolveSourceProximityAdmissionLimit(options.deliveryMaxEntries)
     });
+    const entitySeedMemoryIds = await this.collectEntityDerivedSeeds({
+      workspaceId,
+      queryText,
+      byId,
+      addCandidate
+    });
     await this.addGraphExpansionCandidates({
       workspaceId,
       byId,
       drafts,
-      addCandidate
+      addCandidate,
+      extraSeedMemoryIds: entitySeedMemoryIds
     });
     await this.addPathExpansionCandidates({
       workspaceId,
@@ -966,6 +1000,7 @@ export class RecallService {
       sourceCohortKeys,
       structuralScores: Object.freeze(Object.fromEntries(structuralScores.entries())),
       graphExpansionScores: Object.freeze(Object.fromEntries(graphExpansionScores.entries())),
+      entitySeedScores: Object.freeze(Object.fromEntries(entitySeedScores.entries())),
       pathExpansionScores: Object.freeze(Object.fromEntries(pathExpansionScores.entries())),
       degradation_reason: null
     });
@@ -1249,31 +1284,58 @@ export class RecallService {
     readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
     readonly drafts: ReadonlyMap<string, CoarseCandidateDraft>;
     readonly addCandidate: CoarseCandidateAdder;
+    // see also: collectEntityDerivedSeeds — entity-bearing memory ids fan
+    // into graph_expansion as additional seeds so the graph plane is reachable
+    // even when the query never hits a prior expansion seed.
+    readonly extraSeedMemoryIds?: readonly string[];
   }>): Promise<void> {
     const graphExpansionPort = this.dependencies.graphExpansionPort;
-    if (graphExpansionPort === undefined || params.drafts.size === 0) {
+    if (graphExpansionPort === undefined) {
       return;
     }
 
-    const seeds = selectExpansionSeedDrafts(params.drafts).slice(0, DYNAMIC_RECALL_SEED_CAP);
+    const draftSeeds = selectExpansionSeedDrafts(params.drafts).slice(0, DYNAMIC_RECALL_SEED_CAP);
+    const draftSeedIds = new Set(draftSeeds.map((seed) => seed.entry.object_id));
+    const extraSeedEntries: Readonly<MemoryEntry>[] = [];
+    for (const id of params.extraSeedMemoryIds ?? []) {
+      if (draftSeedIds.has(id)) {
+        continue;
+      }
+      const entry = params.byId.get(id);
+      if (entry !== undefined) {
+        extraSeedEntries.push(entry);
+        draftSeedIds.add(id);
+      }
+      if (extraSeedEntries.length + draftSeeds.length >= DYNAMIC_RECALL_SEED_CAP) {
+        break;
+      }
+    }
+    const seedEntries: readonly Readonly<MemoryEntry>[] = [
+      ...draftSeeds.map((seed) => seed.entry),
+      ...extraSeedEntries
+    ];
+    if (seedEntries.length === 0) {
+      return;
+    }
+
     let added = 0;
-    for (const seed of seeds) {
+    for (const seedEntry of seedEntries) {
       if (added >= DYNAMIC_RECALL_PLANE_CAP) {
         return;
       }
       let edges: readonly Readonly<MemoryGraphEdge>[];
       try {
-        edges = await graphExpansionPort.findByMemoryId(seed.entry.object_id, params.workspaceId);
+        edges = await graphExpansionPort.findByMemoryId(seedEntry.object_id, params.workspaceId);
       } catch (error) {
         this.warn("graph expansion lookup failed", {
           workspace_id: params.workspaceId,
-          seed_memory_id: seed.entry.object_id,
+          seed_memory_id: seedEntry.object_id,
           error: toErrorMessage(error)
         });
         continue;
       }
       for (const edge of edges.slice(0, DYNAMIC_RECALL_EDGE_FANOUT)) {
-        const neighborId = edge.source_memory_id === seed.entry.object_id
+        const neighborId = edge.source_memory_id === seedEntry.object_id
           ? edge.target_memory_id
           : edge.source_memory_id;
         const entry = params.byId.get(neighborId);
@@ -1287,6 +1349,101 @@ export class RecallService {
         }
       }
     }
+  }
+
+  // anchor: query-time entity FTS seeding. Returns the memory ids of every
+  // candidate admitted on the entity_seed plane so the caller can fan them
+  // into graph_expansion as additional seeds. The helper is fail-soft: if
+  // no port is wired, no query text is present, or the keyword search port
+  // is missing, returns an empty list and the recall pipeline degrades
+  // gracefully back to the pre-entity behavior.
+  // see also: packages/core/src/entity-extraction-port.ts EntityExtractionPort
+  private async collectEntityDerivedSeeds(params: Readonly<{
+    readonly workspaceId: string;
+    readonly queryText: string | null;
+    readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
+    readonly addCandidate: CoarseCandidateAdder;
+  }>): Promise<readonly string[]> {
+    const port = this.dependencies.entityExtractionPort;
+    const memoryRepo = this.dependencies.memoryRepo;
+    if (
+      port === undefined ||
+      params.queryText === null ||
+      params.byId.size === 0 ||
+      (memoryRepo.searchByKeyword === undefined && memoryRepo.searchByKeywordWithinObjectIds === undefined)
+    ) {
+      return [];
+    }
+
+    let entities: readonly Readonly<{
+      readonly surface: string;
+      readonly normalized: string;
+      readonly confidence: number;
+    }>[];
+    try {
+      entities = await port.extract(params.queryText, { maxEntities: ENTITY_EXTRACTION_MAX_ENTITIES });
+    } catch (error) {
+      this.warn("entity extraction failed", {
+        workspace_id: params.workspaceId,
+        error: toErrorMessage(error)
+      });
+      return [];
+    }
+    if (entities.length === 0) {
+      return [];
+    }
+
+    const seedIds = new Set<string>();
+    let admittedTotal = 0;
+    const candidateIds = [...params.byId.keys()];
+    for (const entity of entities) {
+      if (admittedTotal >= ENTITY_SEED_TOTAL_ADMIT_CAP) {
+        break;
+      }
+      const surface = entity.surface.trim();
+      if (surface.length < ENTITY_SEED_MIN_SURFACE_LENGTH) {
+        continue;
+      }
+      const perEntityLimit = entity.confidence >= 0.85
+        ? ENTITY_SEED_PER_ENTITY_TOP_K_STRONG
+        : ENTITY_SEED_PER_ENTITY_TOP_K_WEAK;
+      let hits: readonly Readonly<{ readonly object_id: string; readonly normalized_rank: number }>[];
+      try {
+        hits =
+          memoryRepo.searchByKeywordWithinObjectIds !== undefined
+            ? await memoryRepo.searchByKeywordWithinObjectIds(
+                params.workspaceId,
+                surface,
+                perEntityLimit,
+                candidateIds
+              )
+            : await memoryRepo.searchByKeyword!(params.workspaceId, surface, perEntityLimit);
+      } catch (error) {
+        this.warn("entity seed lookup failed", {
+          workspace_id: params.workspaceId,
+          entity_surface: surface,
+          error: toErrorMessage(error)
+        });
+        continue;
+      }
+      for (const hit of hits) {
+        const entry = params.byId.get(hit.object_id);
+        if (entry === undefined) {
+          continue;
+        }
+        const score = clamp01(hit.normalized_rank * entity.confidence);
+        if (score <= 0) {
+          continue;
+        }
+        params.addCandidate(entry, "entity_seed", score, "entity_seed");
+        seedIds.add(entry.object_id);
+        admittedTotal += 1;
+        if (admittedTotal >= ENTITY_SEED_TOTAL_ADMIT_CAP) {
+          break;
+        }
+      }
+    }
+    return [...seedIds];
   }
 
   private async addPathExpansionCandidates(params: Readonly<{
@@ -1517,6 +1674,7 @@ export class RecallService {
       coarseSourceCohortKeys: params.coarseFilter.sourceCohortKeys,
       coarseStructuralScores: params.coarseFilter.structuralScores,
       coarseGraphExpansionScores: params.coarseFilter.graphExpansionScores,
+      coarseEntitySeedScores: params.coarseFilter.entitySeedScores,
       coarsePathExpansionScores: params.coarseFilter.pathExpansionScores
     });
     const assessment = this.fineAssess(
@@ -1588,6 +1746,10 @@ export class RecallService {
         ...current.graphExpansionScores,
         ...next.graphExpansionScores
       }),
+      entitySeedScores: Object.freeze({
+        ...current.entitySeedScores,
+        ...next.entitySeedScores
+      }),
       pathExpansionScores: Object.freeze({
         ...current.pathExpansionScores,
         ...next.pathExpansionScores
@@ -1612,6 +1774,7 @@ export class RecallService {
     readonly coarseSourceCohortKeys: Readonly<Record<string, string>>;
     readonly coarseStructuralScores: Readonly<Record<string, number>>;
     readonly coarseGraphExpansionScores: Readonly<Record<string, number>>;
+    readonly coarseEntitySeedScores: Readonly<Record<string, number>>;
     readonly coarsePathExpansionScores: Readonly<Record<string, number>>;
   }): Promise<RecallSupplementaryData> {
     // graph_support is a weighted inbound aggregate across edge types; the
@@ -1721,6 +1884,7 @@ export class RecallService {
       sourceCohortKeys: params.coarseSourceCohortKeys,
       structuralScores: params.coarseStructuralScores,
       graphExpansionScores: params.coarseGraphExpansionScores,
+      entitySeedScores: params.coarseEntitySeedScores,
       pathExpansionScores: params.coarsePathExpansionScores,
       embeddingSimilarityScores: Object.freeze({}),
       graphSupportCounts: Object.freeze(graphSupportCounts),
@@ -2771,6 +2935,11 @@ function scoreRecallFusionStream(
         supplementaryData.graphExpansionScores[objectId] ?? 0,
         normalizeGraphSupport(supplementaryData.graphSupportCounts[objectId] ?? 0)
       ));
+    case "entity_seed":
+      if (isGlobalCandidate) {
+        return 0;
+      }
+      return clamp01(supplementaryData.entitySeedScores[objectId] ?? 0);
     case "path_expansion":
       if (isGlobalCandidate) {
         return 0;
@@ -3670,7 +3839,7 @@ function draftPriority(draft: Readonly<CoarseCandidateDraft>): number {
   )) {
     return 3;
   }
-  if (draft.admissionPlanes.includes("lexical")) {
+  if (draft.admissionPlanes.includes("lexical") || draft.admissionPlanes.includes("entity_seed")) {
     return 3;
   }
   // Semantic-supplement injections lack lexical / structural anchors; rank

@@ -44,6 +44,7 @@ import {
   ResolutionService,
   type ConflictDetectionLlmPort,
   RecallService,
+  RuleBasedEntityExtractor,
   RunService,
   SessionOverrideService,
   SignalService,
@@ -722,6 +723,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     ...(embeddingDefaultPolicyDecorator === undefined
       ? {}
       : { defaultPolicyDecorator: embeddingDefaultPolicyDecorator }),
+    // see also: packages/core/src/entity-extraction-rules.ts
+    entityExtractionPort: new RuleBasedEntityExtractor(),
     warn: warnLogger.warn
   });
   const contextLensAssembler = new ContextLensAssembler({

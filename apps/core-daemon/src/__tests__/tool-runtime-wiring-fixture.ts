@@ -1017,6 +1017,9 @@ vi.mock("@do-soul/alaya-core", () => {
     ProjectMappingService: makeClass(),
     ProposalService: makeClass(),
     RecallService: makeClass(),
+    RuleBasedEntityExtractor: makeClass({
+      extract: vi.fn(async () => [])
+    }),
     RuntimeEventNormalizer: makeClass(),
     RunHotStateService: makeClass(),
     RunService: makeClass({

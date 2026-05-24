@@ -31,6 +31,7 @@ const FUSION_WEIGHT_KEYS = [
   "existing_score",
   "embedding_similarity",
   "graph_expansion",
+  "entity_seed",
   "path_expansion",
   "temporal_recency",
   "workspace_activation",

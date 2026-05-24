@@ -2886,6 +2886,190 @@ describe("RecallService", () => {
       true
     );
   });
+
+  describe("entity_seed plane", () => {
+    it("admits FTS hits for extracted entities on the entity_seed plane and fans into graph_expansion", async () => {
+      const memories = [
+        createMemoryEntry({
+          object_id: "memory-anchor",
+          dimension: MemoryDimension.PROCEDURE,
+          scope_class: ScopeClass.PROJECT,
+          domain_tags: ["repo"],
+          content: "MaterializationRouter binds memory creation."
+        }),
+        createMemoryEntry({
+          object_id: "memory-neighbor",
+          dimension: MemoryDimension.FACT,
+          scope_class: ScopeClass.PROJECT,
+          domain_tags: ["repo"],
+          content: "Downstream consumer of MaterializationRouter outcomes."
+        })
+      ];
+      const { dependencies } = createDependencies(memories);
+      const searchByKeywordWithinObjectIds = vi.fn(async (_workspace: string, query: string) => {
+        if (query.toLowerCase().includes("materializationrouter")) {
+          return [{ object_id: "memory-anchor", normalized_rank: 0.9 }];
+        }
+        return [];
+      });
+      const findByMemoryId = vi.fn(async (memoryId: string) => {
+        if (memoryId === "memory-anchor") {
+          return [
+            {
+              object_id: "edge-1",
+              object_kind: "memory_graph_edge" as const,
+              schema_version: 1,
+              lifecycle_state: "active" as const,
+              created_at: "2026-03-23T00:00:00.000Z",
+              updated_at: "2026-03-23T00:00:00.000Z",
+              created_by: "system",
+              workspace_id: "workspace-1",
+              edge_type: "derives_from" as const,
+              source_memory_id: "memory-anchor",
+              target_memory_id: "memory-neighbor",
+              confidence: 0.8
+            }
+          ];
+        }
+        return [];
+      });
+
+      const service = new RecallService({
+        ...dependencies,
+        memoryRepo: {
+          ...dependencies.memoryRepo,
+          searchByKeywordWithinObjectIds
+        },
+        graphExpansionPort: {
+          findByMemoryId
+        },
+        entityExtractionPort: {
+          extract: async () => [
+            Object.freeze({
+              surface: "MaterializationRouter",
+              normalized: "materializationrouter",
+              kind: "proper_noun" as const,
+              confidence: 0.7
+            })
+          ]
+        }
+      });
+
+      const result = await service.recall({
+        taskSurface: {
+          ...createTaskSurface(),
+          display_name: "How does MaterializationRouter coordinate writes?"
+        },
+        workspaceId: "workspace-1",
+        strategy: "chat"
+      });
+
+      const ids = new Set(result.candidates.map((c) => c.object_id));
+      expect(ids.has("memory-anchor")).toBe(true);
+      expect(ids.has("memory-neighbor")).toBe(true);
+
+      const anchorDiag = result.diagnostics?.candidates.find(
+        (c) => c.object_id === "memory-anchor"
+      );
+      expect(anchorDiag?.admission_planes).toContain("entity_seed");
+
+      const neighborDiag = result.diagnostics?.candidates.find(
+        (c) => c.object_id === "memory-neighbor"
+      );
+      expect(neighborDiag?.admission_planes).toContain("graph_expansion");
+
+      expect(findByMemoryId).toHaveBeenCalledWith("memory-anchor", "workspace-1");
+    });
+
+    it("is a no-op when entityExtractionPort is not wired", async () => {
+      const memories = [
+        createMemoryEntry({
+          object_id: "memory-x",
+          content: "MaterializationRouter binds memory creation."
+        })
+      ];
+      const { dependencies } = createDependencies(memories);
+      const searchByKeywordWithinObjectIds = vi.fn(async () => [
+        { object_id: "memory-x", normalized_rank: 0.9 }
+      ]);
+      const service = new RecallService({
+        ...dependencies,
+        memoryRepo: {
+          ...dependencies.memoryRepo,
+          searchByKeywordWithinObjectIds
+        }
+      });
+
+      const result = await service.recall({
+        taskSurface: {
+          ...createTaskSurface(),
+          display_name: "MaterializationRouter behavior"
+        },
+        workspaceId: "workspace-1",
+        strategy: "chat"
+      });
+
+      const diag = result.diagnostics?.candidates.find((c) => c.object_id === "memory-x");
+      expect(diag?.admission_planes ?? []).not.toContain("entity_seed");
+    });
+
+    it("never writes propose/accept paths from entity-seed admissions", async () => {
+      // Truth-boundary regression. proposeMemory / reviewMemoryProposal /
+      // memoryRepo.update are not exposed here; this test asserts that the
+      // entity helper only emits append-only candidate diagnostics — no
+      // governance event is written. The appendSpy comes from createDependencies
+      // and tracks every event-log append; we filter for any SOUL_PROPOSAL_* /
+      // SOUL_MEMORY_UPDATED variant to catch a leak.
+      const memories = [
+        createMemoryEntry({
+          object_id: "memory-truth",
+          content: "MaterializationRouter binds memory creation."
+        })
+      ];
+      const { dependencies, appendSpy } = createDependencies(memories);
+      const searchByKeywordWithinObjectIds = vi.fn(async () => [
+        { object_id: "memory-truth", normalized_rank: 0.9 }
+      ]);
+      const service = new RecallService({
+        ...dependencies,
+        memoryRepo: {
+          ...dependencies.memoryRepo,
+          searchByKeywordWithinObjectIds
+        },
+        entityExtractionPort: {
+          extract: async () => [
+            Object.freeze({
+              surface: "MaterializationRouter",
+              normalized: "materializationrouter",
+              kind: "proper_noun" as const,
+              confidence: 0.7
+            })
+          ]
+        }
+      });
+
+      await service.recall({
+        taskSurface: {
+          ...createTaskSurface(),
+          display_name: "MaterializationRouter behavior"
+        },
+        workspaceId: "workspace-1",
+        strategy: "chat"
+      });
+
+      const writtenEventTypes = appendSpy.mock.calls.map(
+        (args: readonly unknown[]) => (args[0] as { event_type: string }).event_type
+      );
+      expect(
+        writtenEventTypes.filter((kind: string) =>
+          kind === "SOUL_PROPOSAL_CREATED" ||
+          kind === "SOUL_PROPOSAL_RESOLVED" ||
+          kind === "SOUL_MEMORY_UPDATED" ||
+          kind === "SOUL_GRAPH_EDGE_CREATED"
+        )
+      ).toEqual([]);
+    });
+  });
 });
 
 describe("RecallService embedding-on coarse injection", () => {
