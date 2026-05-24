@@ -3789,7 +3789,25 @@ function parseEvidenceSourceChunkRef(ref: string): EvidenceSourceChunkRef | null
 function selectPreferredExpansionSeedEntries(
   drafts: ReadonlyMap<string, CoarseCandidateDraft>
 ): readonly Readonly<MemoryEntry>[] {
+  // invariant: mirrors the weak-entity-only filter that
+  // selectExpansionSeedDrafts applies on the graph_expansion path. The
+  // seeds returned here drive the evidence_anchor / domain_tag_cluster
+  // planes in addContentDerivedExpansionCandidates (evidence_refs and
+  // domain_tags of these seeds widen the per-plane match set). A weak
+  // cjk_phrase / proper_noun / unknown surface (confidence below
+  // ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR) admitted ONLY on
+  // entity_seed must not be allowed to seed content expansion either —
+  // otherwise the same surface manipulation that the graph_expansion
+  // floor blocks would leak through evidence/tag fan-out.
+  // Defense-in-depth: today addContentDerivedExpansionCandidates is
+  // called BEFORE collectEntityDerivedSeeds, so no entity_seed draft
+  // is present at the moment this seed pool is built. The filter is
+  // applied anyway so any future reordering, or a follow-up caller
+  // that runs after entity_seed admission, cannot silently bypass
+  // the graph_expansion floor via the content-expansion lane.
+  // see also: isWeakEntityOnlyDraft, selectExpansionSeedDrafts
   return rankCoarseCandidateDrafts([...drafts.values()])
+    .filter((draft) => !isWeakEntityOnlyDraft(draft))
     // semantic_supplement candidates carry no structural anchor and must not
     // seed graph_expansion; they would expand from an unrelated neighbor.
     .filter((draft) =>
@@ -3805,14 +3823,6 @@ function selectExpansionSeedDrafts(
   drafts: ReadonlyMap<string, CoarseCandidateDraft>
 ): readonly Readonly<CoarseCandidateDraft>[] {
   const ranked = rankCoarseCandidateDrafts([...drafts.values()]);
-<<<<<<< HEAD
-  const preferred = ranked
-    .filter((draft) =>
-      draft.admissionPlanes.some(
-        (plane) => plane !== "activation" && plane !== "semantic_supplement"
-      ) || draft.structuralScore > 0
-    )
-=======
   // invariant: a draft whose ONLY non-activation admission is entity_seed,
   // and whose strongest observed entity confidence is below the floor, must
   // not seed graph_expansion. Mirrors collectEntityDerivedSeeds's confidence
@@ -3823,8 +3833,11 @@ function selectExpansionSeedDrafts(
   // see also: ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR, addGraphExpansionCandidates
   const survivors = ranked.filter((draft) => !isWeakEntityOnlyDraft(draft));
   const preferred = survivors
-    .filter((draft) => draft.admissionPlanes.some((plane) => plane !== "activation") || draft.structuralScore > 0)
->>>>>>> 9d40efc (fix(core+test): phase 6a fix-loop round 2 — close 2 Important + 1 Nice-to-have)
+    .filter((draft) =>
+      draft.admissionPlanes.some(
+        (plane) => plane !== "activation" && plane !== "semantic_supplement"
+      ) || draft.structuralScore > 0
+    )
     .slice(0, DYNAMIC_RECALL_SEED_CAP);
   const preferredIds = new Set(preferred.map((draft) => draft.entry.object_id));
   return [

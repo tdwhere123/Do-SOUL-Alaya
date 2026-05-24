@@ -3080,7 +3080,12 @@ describe("RecallService", () => {
       // see also: packages/protocol/src/events/memory-governance.ts
       const TRUTH_MUTATION_EVENT_TYPES = new Set<string>(
         Object.values(MemoryGovernanceEventType).filter((value) =>
-          /\.(created|updated|deleted|retired|resolved|archived|state_changed|tier_changed|tier_promoted|retention_updated|manifestation_changed|status_changed|promoted|health_changed|lifecycle_changed|contested|won|superseded)$/.test(
+          // anchor: include `completed` for SOUL_REVIEW_COMPLETED. A
+          // review completion transitions a proposal to a settled
+          // state — semantically a truth mutation, even though the
+          // suffix differs from the create/update family. recall is
+          // read-only and must not emit it.
+          /\.(created|updated|deleted|retired|resolved|archived|completed|state_changed|tier_changed|tier_promoted|retention_updated|manifestation_changed|status_changed|promoted|health_changed|lifecycle_changed|contested|won|superseded)$/.test(
             value
           )
         )
@@ -3460,6 +3465,121 @@ describe("RecallService", () => {
       );
       expect(neighborDiag?.admission_planes).toContain("graph_expansion");
       expect(findByMemoryId).toHaveBeenCalledWith("memory-anchor", "workspace-1");
+    });
+
+    it("does not let a weak entity-only draft leak into content_expansion (evidence_anchor + domain_tag_cluster)", async () => {
+      // invariant: selectPreferredExpansionSeedEntries — which feeds the
+      // evidence_anchor and domain_tag_cluster planes inside
+      // addContentDerivedExpansionCandidates — must apply the same
+      // weak-entity-only filter as selectExpansionSeedDrafts. Today
+      // the entity_seed admission pass runs AFTER content expansion,
+      // so the gap is latent at this exact call ordering. The filter
+      // is defense-in-depth so any future reordering (or a follow-up
+      // path that calls selectPreferredExpansionSeedEntries after
+      // entity_seed has fired) cannot silently leak weak cjk_phrase /
+      // proper_noun surfaces (confidence below
+      // ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR) into evidence/tag
+      // fan-out — the same surface manipulation the graph_expansion
+      // floor blocks must stay blocked here.
+      // This test asserts the externally-observable shape: a tier
+      // memory hit only by the weak entity surface must not fan
+      // evidence_anchor / domain_tag_cluster admissions to unrelated
+      // tier memories that merely share evidence_refs / domain_tags.
+      // see also: packages/core/src/recall-service.ts
+      //   isWeakEntityOnlyDraft, selectPreferredExpansionSeedEntries
+      const memories = [
+        createMemoryEntry({
+          object_id: "memory-weak-anchor",
+          dimension: MemoryDimension.PROCEDURE,
+          scope_class: ScopeClass.PROJECT,
+          domain_tags: ["weak-anchor-rare-tag"],
+          evidence_refs: ["evidence-weak-anchor-shared"],
+          content: "MaterializationRouter binds memory creation."
+        }),
+        createMemoryEntry({
+          object_id: "memory-evidence-target",
+          dimension: MemoryDimension.FACT,
+          scope_class: ScopeClass.PROJECT,
+          // Disjoint tag set keeps domain_tag_cluster from co-admitting
+          // this memory; only evidence_refs overlap with the weak anchor.
+          domain_tags: ["unrelated-tag-A"],
+          evidence_refs: ["evidence-weak-anchor-shared"],
+          content: "Unrelated downstream observation."
+        }),
+        createMemoryEntry({
+          object_id: "memory-tag-target",
+          dimension: MemoryDimension.FACT,
+          scope_class: ScopeClass.PROJECT,
+          domain_tags: ["weak-anchor-rare-tag"],
+          // Disjoint evidence_refs keeps evidence_anchor from
+          // co-admitting; only the rare tag overlaps with the anchor.
+          evidence_refs: ["evidence-unrelated"],
+          content: "Unrelated tagged observation."
+        })
+      ];
+      const { dependencies } = createDependencies(memories);
+      // searchByKeywordWithinObjectIds returns only the weak anchor on
+      // the entity surface "MaterializationRouter" — no other lane hits
+      // memory-weak-anchor, so its sole non-activation admission is
+      // entity_seed.
+      const searchByKeywordWithinObjectIds = vi.fn(
+        async (_workspace: string, query: string) => {
+          if (query === "MaterializationRouter") {
+            return [{ object_id: "memory-weak-anchor", normalized_rank: 0.9 }];
+          }
+          return [];
+        }
+      );
+
+      const service = new RecallService({
+        ...dependencies,
+        memoryRepo: {
+          ...dependencies.memoryRepo,
+          searchByKeywordWithinObjectIds
+        },
+        entityExtractionPort: {
+          extract: async () => [
+            Object.freeze({
+              surface: "MaterializationRouter",
+              normalized: "materializationrouter",
+              kind: "proper_noun" as const,
+              // 0.7 < 0.85 floor → isWeakEntityOnlyDraft = true.
+              confidence: 0.7
+            })
+          ]
+        }
+      });
+
+      const result = await service.recall({
+        taskSurface: {
+          ...createTaskSurface(),
+          // Avoid mentioning the entity surface so the lexical lane
+          // does not co-admit and rescue memory-weak-anchor.
+          display_name: "describe the binding"
+        },
+        workspaceId: "workspace-1",
+        strategy: "chat"
+      });
+
+      const anchorDiag = result.diagnostics?.candidates.find(
+        (c) => c.object_id === "memory-weak-anchor"
+      );
+      // Precondition: weak anchor still admits on the entity_seed plane.
+      expect(anchorDiag?.admission_planes).toContain("entity_seed");
+
+      const evidenceTargetDiag = result.diagnostics?.candidates.find(
+        (c) => c.object_id === "memory-evidence-target"
+      );
+      const tagTargetDiag = result.diagnostics?.candidates.find(
+        (c) => c.object_id === "memory-tag-target"
+      );
+      // invariant under test: the weak entity-only anchor must NOT
+      // seed evidence_anchor or domain_tag_cluster expansion. Either
+      // the targets are not admitted at all, or their admission_planes
+      // do not include the content-expansion planes seeded by the
+      // weak anchor.
+      expect(evidenceTargetDiag?.admission_planes ?? []).not.toContain("evidence_anchor");
+      expect(tagTargetDiag?.admission_planes ?? []).not.toContain("domain_tag_cluster");
     });
   });
 });
