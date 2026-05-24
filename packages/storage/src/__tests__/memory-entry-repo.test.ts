@@ -639,7 +639,8 @@ describe("SqliteMemoryEntryRepo", () => {
     await expect(repo.searchByKeyword("workspace-1", "nicaliza", 5)).resolves.toEqual([
       {
         object_id: "55555555-1111-4111-8111-111111111111",
-        normalized_rank: 1
+        normalized_rank: 1,
+        trigram_rank: 1
       }
     ]);
   });
@@ -663,7 +664,8 @@ describe("SqliteMemoryEntryRepo", () => {
     await expect(repo.searchByKeyword("workspace-1", "路径需要", 5)).resolves.toEqual([
       {
         object_id: "77777777-3333-4333-8333-333333333333",
-        normalized_rank: 1
+        normalized_rank: 1,
+        trigram_rank: 1
       }
     ]);
   });
@@ -711,7 +713,8 @@ describe("SqliteMemoryEntryRepo", () => {
     await expect(repo.searchByKeyword("workspace-1", 'content:secret*', 5)).resolves.toEqual([
       {
         object_id: "33333333-3333-4333-8333-333333333333",
-        normalized_rank: 1
+        normalized_rank: 1,
+        trigram_rank: 1
       }
     ]);
   });
@@ -735,7 +738,8 @@ describe("SqliteMemoryEntryRepo", () => {
     await expect(repo.searchByKeyword("workspace-1", "alpha\0beta", 5)).resolves.toEqual([
       {
         object_id: "bbbbbbbb-1111-4111-8111-111111111111",
-        normalized_rank: 1
+        normalized_rank: 1,
+        trigram_rank: 1
       }
     ]);
   });
@@ -876,9 +880,13 @@ describe("SqliteMemoryEntryRepo", () => {
 
     // "agree" / "refactoring" only match via porter stemming of the stored
     // "agreed" / "refactor"; the trigram table cannot bridge these.
+    // "agree" is a literal substring of stored "agreed", so the trigram lane
+    // also hits and surfaces a trigram_rank alongside the porter rank.
     await expect(repo.searchByKeyword("workspace-1", "agree", 5)).resolves.toEqual([
-      { object_id: "e1111111-1111-4111-8111-111111111111", normalized_rank: 1 }
+      { object_id: "e1111111-1111-4111-8111-111111111111", normalized_rank: 1, trigram_rank: 1 }
     ]);
+    // "refactoring" only bridges via porter stemming of stored "refactor";
+    // the trigram lane cannot match it, so no trigram_rank is surfaced.
     await expect(repo.searchByKeyword("workspace-1", "refactoring", 5)).resolves.toEqual([
       { object_id: "e1111111-1111-4111-8111-111111111111", normalized_rank: 1 }
     ]);
@@ -901,7 +909,7 @@ describe("SqliteMemoryEntryRepo", () => {
     );
 
     await expect(repo.searchByKeyword("workspace-1", "中文路径", 5)).resolves.toEqual([
-      { object_id: "c1111111-1111-4111-8111-111111111111", normalized_rank: 1 }
+      { object_id: "c1111111-1111-4111-8111-111111111111", normalized_rank: 1, trigram_rank: 1 }
     ]);
   });
 

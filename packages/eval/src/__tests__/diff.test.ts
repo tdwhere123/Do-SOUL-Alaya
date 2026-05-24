@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { diffKpis } from "../diff.js";
-import type { KpiPayload } from "../kpi-schema.js";
+import { buildDiffVsPrevious, diffKpis } from "../diff.js";
+import { KpiPayloadSchema, type KpiPayload } from "../kpi-schema.js";
 
 function buildPayload(overrides: Partial<KpiPayload["kpi"]>): KpiPayload {
   return {
@@ -271,5 +271,55 @@ describe("diffKpis", () => {
         (d) => d.key === "token_economy.recalled_context_tokens_mean"
       )
     ).toBe(false);
+  });
+});
+
+describe("buildDiffVsPrevious", () => {
+  it("returns null when there is no previous baseline", () => {
+    expect(buildDiffVsPrevious(buildPayload({}), null, "")).toBeNull();
+  });
+
+  it("records the R@5 delta in percentage points and a verdict per kpi", () => {
+    const previous: KpiPayload = {
+      ...buildPayload({ r_at_5: 0.9 }),
+      run_at: "2026-05-20T10:00:00.000Z",
+      sample_size: 500,
+      evaluated_count: 500
+    };
+    const current: KpiPayload = {
+      ...buildPayload({ r_at_5: 0.82 }),
+      sample_size: 500,
+      evaluated_count: 500
+    };
+    const block = buildDiffVsPrevious(current, previous, previous.run_at);
+    expect(block).not.toBeNull();
+    expect(block?.previous_run).toBe("2026-05-20T10:00:00.000Z");
+    expect(block?.r_at_5_delta_pp).toBeCloseTo(-8, 10);
+    expect(block?.verdict_per_kpi.r_at_5).toBe("fail");
+  });
+
+  it("produces a diff_vs_previous block that satisfies KpiPayloadSchema", () => {
+    const previous = buildPayload({ r_at_5: 0.95 });
+    const current: KpiPayload = {
+      ...buildPayload({ r_at_5: 0.93 }),
+      diff_vs_previous: buildDiffVsPrevious(
+        buildPayload({ r_at_5: 0.93 }),
+        previous,
+        previous.run_at
+      )
+    };
+    expect(() => KpiPayloadSchema.parse(current)).not.toThrow();
+  });
+
+  it("flags fixture_regressions in the verdict map when a golden hit flips", () => {
+    const previous = buildPayload({});
+    const current = buildPayload({
+      per_scenario: [
+        { id: "f1", version: 1, hit_at_5: false, tier: "warm" },
+        { id: "f2", version: 1, hit_at_5: true, tier: "hot" }
+      ]
+    });
+    const block = buildDiffVsPrevious(current, previous, previous.run_at);
+    expect(block?.verdict_per_kpi.fixture_regressions).toBe("fail");
   });
 });

@@ -17,6 +17,12 @@ export interface RecallQueryProbes {
   readonly scope_classes: readonly ScopeClassType[];
   readonly domain_tags: readonly string[];
   readonly lexical_terms: readonly string[];
+  // Deterministic lexical-term expansions (morphology folding, abbreviation
+  // pairs, static domain synonyms) kept distinct from lexical_terms so phrase
+  // adjacency and feature-rerank tokenization stay computed off the original
+  // surface terms only. Recall feeds these into the lexical/evidence FTS
+  // retrievers to widen candidate coverage. see also: expandLexicalTerms.
+  readonly expanded_terms: readonly string[];
   readonly phrases: readonly string[];
   readonly char_ngrams: readonly string[];
   readonly date_terms: readonly string[];
@@ -97,6 +103,7 @@ export function compileRecallQueryProbes(queryText: string | null): Readonly<Rec
       scope_classes: [],
       domain_tags: [],
       lexical_terms: [],
+      expanded_terms: [],
       phrases: [],
       char_ngrams: [],
       date_terms: []
@@ -120,6 +127,7 @@ export function compileRecallQueryProbes(queryText: string | null): Readonly<Rec
     scope_classes: inferScopeClasses(normalized),
     domain_tags: DOMAIN_HINTS.flatMap(([tag, pattern]) => pattern.test(normalized) ? [tag] : []),
     lexical_terms: lexicalTerms,
+    expanded_terms: expandLexicalTerms(lexicalTerms),
     phrases: extractPhrases(normalized, lexicalTerms),
     char_ngrams: extractCharNgrams(normalized),
     date_terms: collectFullMatches(
@@ -151,6 +159,121 @@ export function splitLexicalTokens(value: string): readonly string[] {
 function extractLexicalTerms(value: string): readonly string[] {
   const terms = splitLexicalTokens(value).filter((term) => !STOP_WORDS.has(term));
   return unique(terms).slice(0, 48);
+}
+
+// Conservative, domain-restricted synonym/abbreviation table. Each entry is a
+// bidirectional cluster: any member present in the query expands to the other
+// members. Kept narrow on purpose — an over-broad table dilutes the candidate
+// pool with noise and depresses RRF-fused R@5. Entries are lowercased; lookup
+// reuses the lexical-term lowercasing rule so matching is deterministic.
+const DOMAIN_SYNONYM_CLUSTERS: ReadonlyArray<readonly string[]> = [
+  ["alaya", "do-soul"],
+  ["recall", "retrieval", "retrieve"],
+  ["candidate", "candidates"],
+  ["embedding", "embeddings", "vector", "vectors"],
+  ["benchmark", "benchmarks", "bench"],
+  ["longmemeval", "lme"],
+  ["config", "configuration", "settings"],
+  ["doc", "docs", "documentation"],
+  ["repo", "repository"],
+  ["dependency", "dependencies", "deps"],
+  ["database", "db"],
+  ["directory", "directories", "folder", "folders"],
+  ["delete", "deletion", "remove", "removal"],
+  ["create", "creation"],
+  ["update", "modification", "modify"],
+  ["error", "errors", "failure", "failures"]
+];
+
+// Built once: lowercased term -> sorted unique set of its cluster partners
+// (excluding the term itself). Deterministic — derived purely from the static
+// table above.
+const SYNONYM_EXPANSION_BY_TERM: ReadonlyMap<string, readonly string[]> = (() => {
+  const map = new Map<string, string[]>();
+  for (const cluster of DOMAIN_SYNONYM_CLUSTERS) {
+    for (const member of cluster) {
+      const partners = cluster.filter((other) => other !== member);
+      const existing = map.get(member) ?? [];
+      map.set(member, [...existing, ...partners]);
+    }
+  }
+  return new Map([...map.entries()].map(([term, partners]) => [term, [...new Set(partners)].sort()]));
+})();
+
+/**
+ * Deterministic lexical-term expansion. For each surface term it yields
+ * morphology-folded variants (regular English plural/verb-suffix rules) and
+ * static domain synonyms/abbreviations. Pure function: identical input always
+ * yields identical output, no ML, no network, no clock. The result excludes
+ * the original lexical terms and stop words so it is purely additive coverage.
+ */
+export function expandLexicalTerms(lexicalTerms: readonly string[]): readonly string[] {
+  const surface = new Set(lexicalTerms);
+  const expansions: string[] = [];
+  for (const term of lexicalTerms) {
+    for (const variant of foldMorphology(term)) {
+      expansions.push(variant);
+    }
+    for (const synonym of SYNONYM_EXPANSION_BY_TERM.get(term) ?? []) {
+      expansions.push(synonym);
+    }
+  }
+  return unique(
+    expansions
+      .map((term) => term.toLocaleLowerCase())
+      .filter((term) => term.length > 2 && !surface.has(term) && !STOP_WORDS.has(term))
+  ).slice(0, 64);
+}
+
+// Regular English suffix folding. Returns the deterministic set of inflected
+// forms reachable from `term` under common plural / verb-tense rules. CJK and
+// non-alphabetic terms are left unfolded (no Latin morphology applies).
+function foldMorphology(term: string): readonly string[] {
+  if (!/^[a-z][a-z'-]*$/u.test(term)) {
+    return [];
+  }
+  const variants = new Set<string>();
+  const addStem = (stem: string): void => {
+    if (stem.length > 2 && stem !== term) {
+      variants.add(stem);
+    }
+  };
+  if (term.endsWith("ies") && term.length > 4) {
+    addStem(`${term.slice(0, -3)}y`);
+  }
+  if (term.endsWith("es") && term.length > 3) {
+    addStem(term.slice(0, -2));
+  }
+  if (term.endsWith("s") && !term.endsWith("ss") && term.length > 3) {
+    addStem(term.slice(0, -1));
+  }
+  if (term.endsWith("ing") && term.length > 5) {
+    const stem = term.slice(0, -3);
+    addStem(stem);
+    addStem(`${stem}e`);
+    addStem(undoubleFinalConsonant(stem));
+  }
+  if (term.endsWith("ed") && term.length > 4) {
+    const stem = term.slice(0, -2);
+    addStem(stem);
+    addStem(`${stem}e`);
+    addStem(undoubleFinalConsonant(stem));
+  }
+  // Forward plural so a singular query term still reaches a pluralized memory.
+  if (!term.endsWith("s")) {
+    variants.add(/(?:s|x|z|ch|sh)$/u.test(term) ? `${term}es` : `${term}s`);
+  }
+  return [...variants];
+}
+
+// Collapse a doubled final consonant (the orthographic doubling that English
+// applies before -ing / -ed, e.g. "running" -> stem "runn" -> "run"). Only
+// folds a true double of the same non-vowel letter.
+function undoubleFinalConsonant(stem: string): string {
+  const last = stem.slice(-1);
+  return stem.length > 3 && stem.slice(-2, -1) === last && !/[aeiou]/u.test(last)
+    ? stem.slice(0, -1)
+    : stem;
 }
 
 function extractPhrases(value: string, lexicalTerms: readonly string[]): readonly string[] {
@@ -230,6 +353,7 @@ function freezeProbes(probes: RecallQueryProbes): Readonly<RecallQueryProbes> {
     scope_classes: Object.freeze([...probes.scope_classes]),
     domain_tags: Object.freeze([...probes.domain_tags]),
     lexical_terms: Object.freeze([...probes.lexical_terms]),
+    expanded_terms: Object.freeze([...probes.expanded_terms]),
     phrases: Object.freeze([...probes.phrases]),
     char_ngrams: Object.freeze([...probes.char_ngrams]),
     date_terms: Object.freeze([...probes.date_terms])

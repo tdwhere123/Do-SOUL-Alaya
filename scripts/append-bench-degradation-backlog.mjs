@@ -3,11 +3,29 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+// Baseline-diff degradation gate. Works uniformly across the four bench
+// surfaces (public / public-multiturn / public-crossquestion / public-locomo):
+// each writes the same KpiPayload.diff_vs_previous block, so one r_at_5
+// threshold check covers all of them. --bench selects the surface.
+const KNOWN_BENCHES = new Set([
+  "public",
+  "public-multiturn",
+  "public-crossquestion",
+  "public-locomo"
+]);
+
 const args = parseArgs(process.argv.slice(2));
 const historyRoot = args["history-root"] ?? "docs/bench-history";
 const benchName = args.bench ?? "public";
 const backlogPath = args.backlog ?? "docs/handbook/backlog.md";
 const thresholdPp = Number.parseFloat(args["threshold-pp"] ?? "5");
+
+if (!KNOWN_BENCHES.has(benchName)) {
+  console.error(
+    `unknown --bench '${benchName}'; expected one of ${[...KNOWN_BENCHES].join(", ")}`
+  );
+  process.exit(2);
+}
 
 const latest = readLatestPayload(historyRoot, benchName);
 if (latest === null) {
@@ -72,9 +90,14 @@ function readLatestPayload(root, bench) {
   if (!existsSync(benchRoot)) return null;
   const pointerPath = path.join(benchRoot, "latest-baseline.json");
   let slug = null;
+  let kpiRelPath = null;
   if (existsSync(pointerPath)) {
     const pointer = JSON.parse(readFileSync(pointerPath, "utf8"));
     slug = typeof pointer.slug === "string" ? pointer.slug : null;
+    // The pointer carries kpi_path (slug-relative); prefer it so a future
+    // archive layout change does not break this consumer.
+    kpiRelPath =
+      typeof pointer.kpi_path === "string" ? pointer.kpi_path : null;
   }
   if (slug === null) {
     const slugs = readdirSync(benchRoot)
@@ -83,7 +106,10 @@ function readLatestPayload(root, bench) {
     slug = slugs.at(-1) ?? null;
   }
   if (slug === null) return null;
-  const kpiPath = path.join(benchRoot, slug, "kpi.json");
+  const kpiPath =
+    kpiRelPath === null
+      ? path.join(benchRoot, slug, "kpi.json")
+      : path.join(benchRoot, kpiRelPath);
   if (!existsSync(kpiPath)) return null;
   return { slug, payload: JSON.parse(readFileSync(kpiPath, "utf8")) };
 }
@@ -102,6 +128,7 @@ function readNextIssueNumber(markdown) {
 
 function renderIssue({ issueId, benchName, slug, delta, thresholdPp, payload, marker }) {
   const previousRun = payload.diff_vs_previous?.previous_run ?? "unknown";
+  const planeLines = renderPlaneCoverageLines(payload);
   return [
     `### ${issueId} — Bench degradation: ${benchName} ${slug}`,
     "",
@@ -112,10 +139,25 @@ function renderIssue({ issueId, benchName, slug, delta, thresholdPp, payload, ma
     `**Trigger**: R@5 changed by ${formatPp(delta)}pp against \`${previousRun}\`, crossing the ${thresholdPp.toFixed(1)}pp daily degradation threshold.`,
     "",
     `**Scope**: Inspect \`docs/bench-history/${benchName}/${slug}/\` and the prior archive, identify whether the loss is scoring, ingestion, provider, or dataset noise, then close with a verified bench rerun.`,
+    ...planeLines,
     "",
     `<!-- ${marker} -->`,
     ""
   ].join("\n");
+}
+
+function renderPlaneCoverageLines(payload) {
+  const coverage = payload.kpi?.quality_metrics?.per_plane_recall_coverage;
+  if (coverage === undefined || coverage === null) return [];
+  const planes = Object.keys(coverage).sort();
+  if (planes.length === 0) return [];
+  const rows = planes.map((plane) => {
+    const entry = coverage[plane];
+    const rate = readNumber(entry?.hit_at_5_rate);
+    const rendered = rate === null ? "n/a" : (rate * 100).toFixed(1) + "%";
+    return `- \`${plane}\`: ${rendered} (${entry?.hit_at_5_count ?? 0}/${entry?.gold_count ?? 0})`;
+  });
+  return ["", "**Per-plane recall@5 coverage (current run)**:", ...rows];
 }
 
 function insertOpenIssue(markdown, issue) {

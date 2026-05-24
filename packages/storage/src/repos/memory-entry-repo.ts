@@ -65,6 +65,10 @@ export interface MemoryEntryRepoTierUpdateInput {
 export interface MemoryEntryKeywordSearchResult {
   readonly object_id: string;
   readonly normalized_rank: number;
+  // Trigram-lane ordinal score, present only when the object matched the
+  // substring/CJK trigram lane. Recall reads it for the trigram_fts fusion
+  // stream; absent when the hit came purely from the exact/porter lanes.
+  readonly trigram_rank?: number;
 }
 
 export interface MemoryEntryRepo {
@@ -918,7 +922,8 @@ export class SqliteMemoryEntryRepo implements MemoryEntryRepo {
       mergedRows.map((row) =>
         Object.freeze({
           object_id: row.object_id,
-          normalized_rank: row.normalized_rank
+          normalized_rank: row.normalized_rank,
+          ...(row.trigram_rank !== undefined ? { trigram_rank: row.trigram_rank } : {})
         })
       )
     );

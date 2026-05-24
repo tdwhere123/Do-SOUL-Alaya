@@ -2127,6 +2127,120 @@ describe("RecallService", () => {
     expect(betaDiagnostic?.structural_score).toBe(0.8);
   });
 
+  it("ranks the trigram_fts fusion stream from keyword-search trigram_rank", async () => {
+    const memories = [
+      createMemoryEntry({
+        object_id: "memory-trigram-strong",
+        activation_score: 0.6,
+        content: "unrelated first memory body."
+      }),
+      createMemoryEntry({
+        object_id: "memory-trigram-weak",
+        activation_score: 0.6,
+        content: "unrelated second memory body."
+      }),
+      createMemoryEntry({
+        object_id: "memory-no-trigram",
+        activation_score: 0.6,
+        content: "unrelated third memory body."
+      })
+    ];
+    const { dependencies } = createDependencies(memories);
+    const searchByKeyword = vi.fn(async () => [
+      { object_id: "memory-trigram-strong", normalized_rank: 0.9, trigram_rank: 1 },
+      { object_id: "memory-trigram-weak", normalized_rank: 0.9, trigram_rank: 0.4 },
+      { object_id: "memory-no-trigram", normalized_rank: 0.9 }
+    ]);
+    const service = new RecallService({
+      ...dependencies,
+      memoryRepo: {
+        ...dependencies.memoryRepo,
+        searchByKeyword
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "chat"
+    });
+
+    const strong = result.diagnostics?.candidates.find(
+      (candidate) => candidate.object_id === "memory-trigram-strong"
+    );
+    const weak = result.diagnostics?.candidates.find(
+      (candidate) => candidate.object_id === "memory-trigram-weak"
+    );
+    const absent = result.diagnostics?.candidates.find(
+      (candidate) => candidate.object_id === "memory-no-trigram"
+    );
+    // A higher trigram_rank wins a lower (better) trigram_fts ordinal rank.
+    expect(strong?.per_stream_rank.trigram_fts).toBe(1);
+    expect(weak?.per_stream_rank.trigram_fts).toBe(2);
+    // No trigram_rank on the hit means the trigram_fts stream stays unranked.
+    expect(absent?.per_stream_rank.trigram_fts).toBeNull();
+  });
+
+  it("ranks the trigram_fts fusion stream through the production within-object-ids supplement path", async () => {
+    const memories = [
+      createMemoryEntry({
+        object_id: "memory-trigram-strong",
+        activation_score: 0.6,
+        content: "unrelated first memory body."
+      }),
+      createMemoryEntry({
+        object_id: "memory-trigram-weak",
+        activation_score: 0.6,
+        content: "unrelated second memory body."
+      }),
+      createMemoryEntry({
+        object_id: "memory-no-trigram",
+        activation_score: 0.6,
+        content: "unrelated third memory body."
+      })
+    ];
+    const { dependencies } = createDependencies(memories);
+    // Production `MemoryEntryRepo` implements `searchByKeywordWithinObjectIds`,
+    // so recall always takes that branch rather than the `searchByKeyword`
+    // fallback. Mock it directly to exercise the path bench actually runs.
+    const searchByKeywordWithinObjectIds = vi.fn(async () => [
+      { object_id: "memory-trigram-strong", normalized_rank: 0.9, trigram_rank: 1 },
+      { object_id: "memory-trigram-weak", normalized_rank: 0.9, trigram_rank: 0.4 },
+      { object_id: "memory-no-trigram", normalized_rank: 0.9 }
+    ]);
+    const service = new RecallService({
+      ...dependencies,
+      memoryRepo: {
+        ...dependencies.memoryRepo,
+        searchByKeywordWithinObjectIds
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "chat"
+    });
+
+    expect(searchByKeywordWithinObjectIds).toHaveBeenCalled();
+    const strong = result.diagnostics?.candidates.find(
+      (candidate) => candidate.object_id === "memory-trigram-strong"
+    );
+    const weak = result.diagnostics?.candidates.find(
+      (candidate) => candidate.object_id === "memory-trigram-weak"
+    );
+    const absent = result.diagnostics?.candidates.find(
+      (candidate) => candidate.object_id === "memory-no-trigram"
+    );
+    // A higher trigram_rank wins a lower (better) trigram_fts ordinal rank,
+    // proving the production supplement path feeds trigramFtsRanks all the way
+    // through to the per_stream_rank.trigram_fts diagnostic.
+    expect(strong?.per_stream_rank.trigram_fts).toBe(1);
+    expect(weak?.per_stream_rank.trigram_fts).toBe(2);
+    // No trigram_rank on the hit means the trigram_fts stream stays unranked.
+    expect(absent?.per_stream_rank.trigram_fts).toBeNull();
+  });
+
   it("merges semantic supplement candidates without duplicating existing matches", async () => {
     const memories = [
       createMemoryEntry({

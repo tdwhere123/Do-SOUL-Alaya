@@ -47,7 +47,7 @@ export {
   type ThresholdConfig
 } from "./thresholds.js";
 
-export { diffKpis, verdictBadge } from "./diff.js";
+export { buildDiffVsPrevious, diffKpis, verdictBadge } from "./diff.js";
 
 export {
   benchArchiveDiscriminator,

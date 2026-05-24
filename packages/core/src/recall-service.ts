@@ -125,8 +125,13 @@ const NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT = 0.24;
 const QUERY_EVIDENCE_BASE_TRANSFER_MAX = 0.25;
 const QUERY_EVIDENCE_BASE_WEIGHT_FLOOR = 0.35;
 const RECALL_RRF_DEFAULT_K = 60;
+// Expanded-query lexical hits (morphology / synonym variants) are admitted at
+// this fraction of their raw fts rank so an inflected-only match cannot
+// out-RRF a memory that matched the original query surface terms.
+const EXPANDED_QUERY_RANK_DISCOUNT = 0.6;
 const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
   "lexical_fts",
+  "trigram_fts",
   "synthesis_fts",
   "evidence_fts",
   "evidence_structural_agreement",
@@ -143,6 +148,9 @@ const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
 ];
 const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>> = Object.freeze({
   lexical_fts: 1,
+  // trigram_fts rescues substring / spelling-variant / CJK matches the
+  // word-level lexical lane misses. Initial low weight; grid-tuned later.
+  trigram_fts: 1,
   // synthesis_fts no longer drives cross-kind fusion: a synthesis candidate
   // cannot out-RRF a multi-stream memory_entry, so delivery is handled by
   // reserveSynthesisDeliverySlots, not this weight. The weight is retained
@@ -590,8 +598,11 @@ export class RecallService {
     readonly total_scanned: number;
     readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
     readonly ftsRanks: Readonly<Record<string, number>>;
+    readonly trigramFtsRanks: Readonly<Record<string, number>>;
     readonly synthesisFtsRanks: Readonly<Record<string, number>>;
     readonly evidenceFtsRanks: Readonly<Record<string, number>>;
+    // see also: collectEvidenceGistsByMemoryId
+    readonly evidenceFtsRanksPerRef: Readonly<Record<string, number>>;
     readonly sourceProximityScores: Readonly<Record<string, number>>;
     readonly sourceCohortKeys: Readonly<Record<string, string>>;
     readonly structuralScores: Readonly<Record<string, number>>;
@@ -623,7 +634,11 @@ export class RecallService {
 
     const drafts = new Map<string, CoarseCandidateDraft>();
     const ftsRanks = new Map<string, number>();
+    const trigramFtsRanks = new Map<string, number>();
     const evidenceFtsRanks = new Map<string, number>();
+    // see also: collectEvidenceGistsByMemoryId — picks best-rank ref via
+    // this per-ref map; the aggregated evidenceFtsRanks loses ref identity.
+    const evidenceFtsRanksPerRef = new Map<string, number>();
     const sourceProximityScores = new Map<string, number>();
     let sourceCohortKeys: Readonly<Record<string, string>> = Object.freeze({});
     const structuralScores = new Map<string, number>();
@@ -735,9 +750,54 @@ export class RecallService {
             );
       for (const match of supplement) {
         ftsRanks.set(match.object_id, clamp01(match.normalized_rank));
+        if (match.trigram_rank !== undefined && match.trigram_rank > 0) {
+          trigramFtsRanks.set(match.object_id, clamp01(match.trigram_rank));
+        }
         const entry = byId.get(match.object_id);
         if (entry !== undefined) {
           addCandidate(entry, "lexical", clamp01(match.normalized_rank), "lexical");
+        }
+      }
+
+      // Deterministic query expansion (morphology folding + static domain
+      // synonyms) widens lexical coverage for memories whose distilled wording
+      // diverges from the query surface. Expanded hits are admitted at a
+      // discounted rank so they cannot out-RRF an exact lexical match, and
+      // their original fts rank is not overwritten when both passes hit.
+      const expandedQuery = buildExpandedKeywordQuery(queryProbes);
+      if (expandedQuery !== null) {
+        const expandedSupplement =
+          this.dependencies.memoryRepo.searchByKeywordWithinObjectIds !== undefined
+            ? await this.dependencies.memoryRepo.searchByKeywordWithinObjectIds(
+                workspaceId,
+                expandedQuery,
+                config.semantic_supplement.max_supplement,
+                [...byId.keys()]
+              )
+            : await this.dependencies.memoryRepo.searchByKeyword!(
+                workspaceId,
+                expandedQuery,
+                config.semantic_supplement.max_supplement
+              );
+        for (const match of expandedSupplement) {
+          const discounted = clamp01(match.normalized_rank) * EXPANDED_QUERY_RANK_DISCOUNT;
+          if (discounted <= 0) {
+            continue;
+          }
+          if (!ftsRanks.has(match.object_id)) {
+            ftsRanks.set(match.object_id, discounted);
+          }
+          if (
+            match.trigram_rank !== undefined &&
+            match.trigram_rank > 0 &&
+            !trigramFtsRanks.has(match.object_id)
+          ) {
+            trigramFtsRanks.set(match.object_id, clamp01(match.trigram_rank) * EXPANDED_QUERY_RANK_DISCOUNT);
+          }
+          const entry = byId.get(match.object_id);
+          if (entry !== undefined) {
+            addCandidate(entry, "lexical", discounted, "lexical_expanded");
+          }
         }
       }
 
@@ -770,7 +830,12 @@ export class RecallService {
           if (evidenceMatches.length > 0) {
             const evidenceRankById = new Map<string, number>();
             for (const match of evidenceMatches) {
-              evidenceRankById.set(match.object_id, clamp01(match.normalized_rank));
+              const ranked = clamp01(match.normalized_rank);
+              evidenceRankById.set(match.object_id, ranked);
+              evidenceFtsRanksPerRef.set(
+                match.object_id,
+                Math.max(evidenceFtsRanksPerRef.get(match.object_id) ?? 0, ranked)
+              );
             }
             const memoriesByEvidence = await this.dependencies.memoryRepo.findByEvidenceRefs(
               workspaceId,
@@ -871,8 +936,10 @@ export class RecallService {
       total_scanned: tierMemories.length,
       candidates: supplementedCandidates,
       ftsRanks: Object.freeze(Object.fromEntries(ftsRanks.entries())),
+      trigramFtsRanks: Object.freeze(Object.fromEntries(trigramFtsRanks.entries())),
       synthesisFtsRanks: Object.freeze({}),
       evidenceFtsRanks: Object.freeze(Object.fromEntries(evidenceFtsRanks.entries())),
+      evidenceFtsRanksPerRef: Object.freeze(Object.fromEntries(evidenceFtsRanksPerRef.entries())),
       sourceProximityScores: Object.freeze(Object.fromEntries(sourceProximityScores.entries())),
       sourceCohortKeys,
       structuralScores: Object.freeze(Object.fromEntries(structuralScores.entries())),
@@ -1420,8 +1487,10 @@ export class RecallService {
       queryProbes: params.queryProbes,
       policy: params.policy,
       coarseFtsRanks: params.coarseFilter.ftsRanks,
+      coarseTrigramFtsRanks: params.coarseFilter.trigramFtsRanks,
       coarseSynthesisFtsRanks: params.coarseFilter.synthesisFtsRanks,
       coarseEvidenceFtsRanks: params.coarseFilter.evidenceFtsRanks,
+      coarseEvidenceFtsRanksPerRef: params.coarseFilter.evidenceFtsRanksPerRef,
       coarseSourceProximityScores: params.coarseFilter.sourceProximityScores,
       coarseSourceCohortKeys: params.coarseFilter.sourceCohortKeys,
       coarseStructuralScores: params.coarseFilter.structuralScores,
@@ -1465,6 +1534,10 @@ export class RecallService {
         ...current.ftsRanks,
         ...next.ftsRanks
       }),
+      trigramFtsRanks: Object.freeze({
+        ...current.trigramFtsRanks,
+        ...next.trigramFtsRanks
+      }),
       synthesisFtsRanks: Object.freeze({
         ...current.synthesisFtsRanks,
         ...next.synthesisFtsRanks
@@ -1472,6 +1545,10 @@ export class RecallService {
       evidenceFtsRanks: Object.freeze({
         ...current.evidenceFtsRanks,
         ...next.evidenceFtsRanks
+      }),
+      evidenceFtsRanksPerRef: Object.freeze({
+        ...current.evidenceFtsRanksPerRef,
+        ...next.evidenceFtsRanksPerRef
       }),
       sourceProximityScores: Object.freeze({
         ...current.sourceProximityScores,
@@ -1505,8 +1582,10 @@ export class RecallService {
     readonly queryProbes: Readonly<RecallQueryProbes>;
     readonly policy: Readonly<RecallPolicy>;
     readonly coarseFtsRanks: Readonly<Record<string, number>>;
+    readonly coarseTrigramFtsRanks: Readonly<Record<string, number>>;
     readonly coarseSynthesisFtsRanks: Readonly<Record<string, number>>;
     readonly coarseEvidenceFtsRanks: Readonly<Record<string, number>>;
+    readonly coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>;
     readonly coarseSourceProximityScores: Readonly<Record<string, number>>;
     readonly coarseSourceCohortKeys: Readonly<Record<string, string>>;
     readonly coarseStructuralScores: Readonly<Record<string, number>>;
@@ -1598,9 +1677,22 @@ export class RecallService {
       graphAndPathColdScore
     );
 
+    // Evidence gist piggy-back: for the small subset of candidates whose
+    // entry into the pool came through an evidence FTS hit, fetch the
+    // associated evidence capsules so the feature rerank can score against
+    // the gist paraphrase. A missing findByIds port (or fetch failure) is
+    // fail-soft → empty map → rerank falls back to content-only.
+    const evidenceGistsByMemoryId = await this.collectEvidenceGistsByMemoryId(
+      params.workspaceId,
+      params.candidates,
+      params.coarseEvidenceFtsRanks,
+      params.coarseEvidenceFtsRanksPerRef
+    );
+
     return Object.freeze({
       queryProbes: params.queryProbes,
       ftsRanks: params.coarseFtsRanks,
+      trigramFtsRanks: params.coarseTrigramFtsRanks,
       synthesisFtsRanks: params.coarseSynthesisFtsRanks,
       evidenceFtsRanks: params.coarseEvidenceFtsRanks,
       sourceProximityScores: params.coarseSourceProximityScores,
@@ -1614,8 +1706,120 @@ export class RecallService {
       plasticityFactors,
       graphAndPathColdScore,
       recallsEdgeCount,
-      weightTransferAmount
+      weightTransferAmount,
+      evidenceGistsByMemoryId
     });
+  }
+
+  private async collectEvidenceGistsByMemoryId(
+    workspaceId: string,
+    candidates: readonly Readonly<MemoryEntry>[],
+    coarseEvidenceFtsRanks: Readonly<Record<string, number>>,
+    coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>
+  ): Promise<Readonly<Record<string, string>>> {
+    const evidenceSearchPort = this.dependencies.evidenceSearchPort;
+    if (evidenceSearchPort?.findByIds === undefined) {
+      return Object.freeze({});
+    }
+    // Restrict to candidates that already landed in the pool through an
+    // evidence FTS hit — their gists are the ones whose paraphrase carries
+    // recall-relevant semantics. Avoids an unbounded findByIds over every
+    // memory's full evidence_refs set.
+    const relevantCandidates = candidates.filter(
+      (entry) =>
+        entry.evidence_refs.length > 0 &&
+        (coarseEvidenceFtsRanks[entry.object_id] ?? 0) > 0
+    );
+    if (relevantCandidates.length === 0) {
+      return Object.freeze({});
+    }
+    // invariant: findByIds payload bounded by evidence-FTS hit set, not the
+    // candidate's full evidence_refs cardinality. see also: P2-R2-E.
+    //
+    // invariant: per-memory evidence_refs cardinality is capped at
+    // MAX_REFS_PER_MEMORY before the findByIds payload is built. A typical
+    // memory carries 1-3 evidence_refs; an outlier with thousands of refs
+    // (whether legitimate aggregation or adversarial) would dominate the
+    // tokenizer / new Set fan-out inside the rerank loop. Cap reflects the
+    // semantic assumption "one memory should not need more than this many
+    // evidence anchors to recall well" — refs beyond the cap are sorted by
+    // per-ref evidence-FTS rank and only the top MAX_REFS_PER_MEMORY are
+    // forwarded; the best-rank ref (used by the gist picker below) is
+    // always preserved.
+    const MAX_REFS_PER_MEMORY = 8;
+    const evidenceIds = uniqueStrings(
+      relevantCandidates.flatMap((entry) => {
+        const hitRefs = entry.evidence_refs.filter(
+          (ref) => (coarseEvidenceFtsRanksPerRef[ref] ?? 0) > 0
+        );
+        if (hitRefs.length <= MAX_REFS_PER_MEMORY) {
+          return hitRefs;
+        }
+        return [...hitRefs]
+          .sort(
+            (left, right) =>
+              (coarseEvidenceFtsRanksPerRef[right] ?? 0) -
+              (coarseEvidenceFtsRanksPerRef[left] ?? 0)
+          )
+          .slice(0, MAX_REFS_PER_MEMORY);
+      })
+    );
+    if (evidenceIds.length === 0) {
+      return Object.freeze({});
+    }
+    try {
+      const evidenceCapsules = await evidenceSearchPort.findByIds(workspaceId, evidenceIds);
+      const gistById = new Map<string, string>();
+      for (const evidence of evidenceCapsules) {
+        if (evidence.workspace_id !== workspaceId) {
+          continue;
+        }
+        const gist = evidence.gist?.trim() ?? "";
+        if (gist.length > 0) {
+          gistById.set(evidence.object_id, gist);
+        }
+      }
+      const gistsByMemory: Record<string, string> = {};
+      for (const entry of relevantCandidates) {
+        // invariant: pick gist from the highest-ranked ref in evidence_refs
+        // (per coarseEvidenceFtsRanksPerRef); stable by evidence_refs order
+        // on ties. see also: P2-R2-B in collectEvidenceGistsByMemoryId callers.
+        const refsWithRank = entry.evidence_refs.map((ref) => Object.freeze({
+          ref,
+          rank: coarseEvidenceFtsRanksPerRef[ref] ?? 0
+        }));
+        const orderedRefs = [...refsWithRank].sort((left, right) => right.rank - left.rank);
+        for (const { ref } of orderedRefs) {
+          const gist = gistById.get(ref);
+          if (gist !== undefined && gist.length > 0) {
+            gistsByMemory[entry.object_id] = gist;
+            break;
+          }
+        }
+        // fallback: aggregated rank > 0 but no per-ref rank populated; mirrors
+        // legacy first-non-empty-gist rule so future producers that only
+        // populate the aggregate stay correct.
+        // unreachable under current producer (coarseEvidenceFtsRanksPerRef
+        // always populates every ref in evidence_refs); kept for forward-compat
+        // with future producers that only emit the aggregate rank.
+        if (gistsByMemory[entry.object_id] === undefined) {
+          for (const ref of entry.evidence_refs) {
+            const gist = gistById.get(ref);
+            if (gist !== undefined && gist.length > 0) {
+              gistsByMemory[entry.object_id] = gist;
+              break;
+            }
+          }
+        }
+      }
+      return Object.freeze(gistsByMemory);
+    } catch (error) {
+      this.warn("evidence gist lookup for rerank failed", {
+        workspace_id: workspaceId,
+        error: toErrorMessage(error)
+      });
+      return Object.freeze({});
+    }
   }
 
   private computeMaxWeightTransferAmount(
@@ -2393,6 +2597,11 @@ function scoreRecallFusionStream(
         return 0;
       }
       return clamp01(supplementaryData.ftsRanks[objectId] ?? 0);
+    case "trigram_fts":
+      if (isGlobalCandidate) {
+        return 0;
+      }
+      return clamp01(supplementaryData.trigramFtsRanks[objectId] ?? 0);
     case "synthesis_fts":
       return 0;
     case "evidence_fts":
@@ -2556,8 +2765,10 @@ function applyFeatureRerank<T extends FusedRecallCandidateInput>(
   rankedCandidates: readonly T[],
   supplementaryData: RecallSupplementaryData
 ): readonly T[] {
-  const rerankInputs: readonly RerankCandidate<T>[] = rankedCandidates.map((candidate) =>
-    Object.freeze({
+  const rerankInputs: readonly RerankCandidate<T>[] = rankedCandidates.map((candidate) => {
+    const gist = supplementaryData.evidenceGistsByMemoryId[candidate.entry.object_id];
+    const hasGist = typeof gist === "string" && gist.length > 0;
+    return Object.freeze({
       item: candidate,
       fusionScore: candidate.fusion.fused_score,
       text: Object.freeze({
@@ -2565,10 +2776,11 @@ function applyFeatureRerank<T extends FusedRecallCandidateInput>(
         hasEvidenceLexicalHit:
           (supplementaryData.evidenceFtsRanks[candidate.entry.object_id] ?? 0) > 0 ||
           (candidate.objectKind === "synthesis_capsule" &&
-            (supplementaryData.synthesisFtsRanks[candidate.entry.object_id] ?? 0) > 0)
+            (supplementaryData.synthesisFtsRanks[candidate.entry.object_id] ?? 0) > 0),
+        ...(hasGist ? { evidenceGist: gist } : {})
       })
-    })
-  );
+    });
+  });
   return rerankTopN(supplementaryData.queryProbes, rerankInputs);
 }
 
@@ -2741,6 +2953,7 @@ function buildRecallDiagnostics(params: Readonly<{
       scope_classes: Object.freeze([...params.queryProbes.scope_classes]),
       domain_tags: Object.freeze([...params.queryProbes.domain_tags]),
       lexical_terms: Object.freeze([...params.queryProbes.lexical_terms]),
+      expanded_terms: Object.freeze([...params.queryProbes.expanded_terms]),
       phrases: Object.freeze([...params.queryProbes.phrases]),
       char_ngrams: Object.freeze([...params.queryProbes.char_ngrams]),
       date_terms: Object.freeze([...params.queryProbes.date_terms])
@@ -2905,13 +3118,25 @@ function buildEvidenceSearchQueries(
     .filter((phrase) => phrase.length >= 3)
     .slice(0, 8);
   const multiKeyQuery = queryProbes.lexical_terms.slice(0, 8).join(" ");
+  const expandedKeyQuery = queryProbes.expanded_terms.slice(0, 8).join(" ");
   const dateQueries = queryProbes.date_terms.slice(0, 6);
   return uniqueStrings([
     queryText,
     ...phraseQueries,
     ...(multiKeyQuery.length === 0 ? [] : [multiKeyQuery]),
+    ...(expandedKeyQuery.length === 0 ? [] : [expandedKeyQuery]),
     ...dateQueries
   ].map((value) => value.trim()).filter((value) => value.length > 0));
+}
+
+// Deterministic OR-query of expanded lexical terms (morphology + synonym
+// variants). Returns null when there is nothing to expand so callers can skip
+// the extra FTS pass. see also: recall-query-probes.ts expandLexicalTerms.
+function buildExpandedKeywordQuery(queryProbes: Readonly<RecallQueryProbes>): string | null {
+  const expanded = uniqueStrings(
+    queryProbes.expanded_terms.slice(0, 16).map((term) => term.trim()).filter((term) => term.length > 0)
+  );
+  return expanded.length === 0 ? null : expanded.join(" ");
 }
 
 function scoreQueryEvidenceMatch(

@@ -1,4 +1,9 @@
-import type { KpiPayload, PerScenarioRow, Verdict } from "./kpi-schema.js";
+import type {
+  DiffVsPrevious,
+  KpiPayload,
+  PerScenarioRow,
+  Verdict
+} from "./kpi-schema.js";
 import {
   DEFAULT_THRESHOLDS,
   classifyHotShareDrop,
@@ -210,6 +215,33 @@ function diffFixtures(current: KpiPayload, previous: KpiPayload): FixtureDiff {
 function shareOfHot(d: KpiPayload["kpi"]["tier_distribution"]): number {
   const total = d.hot + d.warm + d.cold;
   return total === 0 ? 0 : d.hot / total;
+}
+
+// @anchor diff-vs-previous: condense a KpiDiffResult into the persisted
+// KpiPayload.diff_vs_previous block. All four bench surfaces write this so
+// downstream baseline-diff consumers (scripts/append-bench-degradation-backlog.mjs)
+// read one shape. previous_run carries the slug-or-run identity of the
+// baseline the diff is against; null previous yields a null block.
+export function buildDiffVsPrevious(
+  current: KpiPayload,
+  previous: KpiPayload | null,
+  previousRun: string,
+  thresholds: ThresholdConfig = DEFAULT_THRESHOLDS
+): DiffVsPrevious | null {
+  if (previous === null) return null;
+  const diff = diffKpis(current, previous, thresholds);
+  const verdictPerKpi: Record<string, Verdict> = {};
+  for (const delta of diff.deltas) {
+    verdictPerKpi[delta.key] = delta.verdict;
+  }
+  if (diff.fixture_regressions.length > 0) {
+    verdictPerKpi["fixture_regressions"] = "fail";
+  }
+  return {
+    previous_run: previousRun,
+    r_at_5_delta_pp: (current.kpi.r_at_5 - previous.kpi.r_at_5) * 100,
+    verdict_per_kpi: verdictPerKpi
+  };
 }
 
 export function verdictBadge(verdict: Verdict): string {

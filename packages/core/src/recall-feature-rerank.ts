@@ -64,6 +64,119 @@ export const RECALL_RERANK_WEIGHTS = Object.freeze({
 export const RECALL_RERANK_EVIDENCE_ONLY_FACTOR = 0.4;
 
 /**
+ * Evidence-gist feature weight. When the query did not match the distilled
+ * memory content but matches the evidence capsule's `gist` (the human-readable
+ * explanation of the raw turn), the candidate may still be the gold: the
+ * answer-bearing semantics live in the evidence anchor, not the distillation.
+ * Compute the lexical feature score against the gist text and take the max of
+ * `content_score` and `EVIDENCE_GIST_WEIGHT * gist_score` so a strong gist
+ * match wins over a weak content match — but stays below a strong content
+ * match. The weight stays below 1 because gist is a paraphrase of the source
+ * rather than the source itself; an explicit content match is still the
+ * higher-trust signal.
+ *
+ * Initial value 0.7: a perfect gist match is treated as roughly equivalent to
+ * a 70% content match. Tunable in B3 grid search; kept module-local because
+ * the only consumer is the gist path inside computeRerankFeatures.
+ */
+const EVIDENCE_GIST_WEIGHT = 0.7;
+
+/**
+ * Hard safety cap on the gist text length fed to the rerank tokenizer. Gist
+ * is `EvidenceCapsule.gist` (a `NonEmptyStringSchema` with no upper bound at
+ * the protocol layer) and originates from attacker-controlled source text —
+ * unlike `memory_entry.content`, which is the output of an upstream
+ * distillation step. Without this cap an oversized gist would O(n)-expand
+ * the tokenizer + `new Set` + the proximity sliding window inside every
+ * top-N rerank pass.
+ *
+ * 8192 chars is well above any normal evidence gist (the in-corpus
+ * distribution sits under 1K) and below any plausible legitimate ceiling,
+ * so a longer payload is treated as anomalous and hard-truncated. Not
+ * configurable on purpose: this is a safety boundary, not a tuning knob.
+ */
+const GIST_MAX_CHARS = 8192;
+
+/**
+ * Diversity threshold below which the gist score is linearly damped. Defined
+ * as `distinctTokenRatio = uniqueTokens / totalTokens` inside the gist's own
+ * token list. A natural-language gist sits comfortably above 0.5; a repeated-
+ * token gist (e.g. the query phrase pasted N times to game `exact_phrase` +
+ * `term_coverage`) collapses toward 0. 0.5 is the "single-token-repeat rate
+ * of 50%" boundary — high enough to leave normal gists untouched, low enough
+ * to catch the repeat-amplification shape that bypasses pool-IDF dilution on
+ * the gist path (gist scorer is intentionally pool-IDF-free).
+ *
+ * Self-contained: depends only on the gist's own token list, no pool or IDF
+ * table required.
+ */
+const GIST_MIN_DIVERSITY_RATIO = 0.5;
+
+/**
+ * Token count below which both diversity damps are skipped. A short gist
+ * naturally has either low distinct ratio (legitimate emphatic answers like
+ * "yes yes yes" or "no thanks") or high query-term density (a one-word
+ * answer that is literally the query term). Damping these is a false
+ * positive: they carry no amplification headroom — the lexical score is
+ * already bounded by the small token set, and the upper EVIDENCE_GIST_WEIGHT
+ * cap keeps gist score below content score on equal raw signal.
+ *
+ * 4 tokens is the emphatic-answer ceiling observed in the corpus
+ * ("yes yes yes", "ok ok ok ok"). Above this threshold both damps engage
+ * because a longer gist with collapsed diversity / dense query terms
+ * carries genuine attack headroom.
+ */
+const GIST_SHORT_TOKEN_THRESHOLD = 4;
+
+/**
+ * Query-term concentration threshold for the second gist damp. Defined as
+ * `distinctQueryTokensPresent / totalTokens` over the gist's tokens —
+ * each unique query term that appears in the gist counts once, repeated
+ * occurrences of the same query word do not bump density. High density
+ * means distinct query terms saturate the gist, which is the
+ * padding-bypass attack shape: distinct nonsense tokens wrapping the
+ * query phrase keep `distinctTokenRatio` near 1.0 (so the diversity damp
+ * does not fire) while distinct query terms still dominate (so
+ * `exact_phrase` + `term_coverage` still saturate). Above this threshold
+ * the concentration damp ramps linearly to the floor, complementing the
+ * distinct-token damp.
+ *
+ * invariant: distinct counting bounds the numerator by querySet size,
+ * so repeating one query word K times cannot drive density up — it only
+ * scales the denominator. Bypass space shrinks under repetition.
+ *
+ * 0.55 is the boundary that lets natural-language paraphrases through:
+ * a 6-8 token gist that mentions a 3-term query phrase once with a couple
+ * of stop words and one content connector lands at 0.4-0.5 (e.g.
+ * "the rollback procedure schedule stays weekly" — distinct {rollback,
+ * procedure, schedule} = 3 / 6 tokens = 0.5). A paraphrase that repeats
+ * the same subject token ("Alice cooked, yes Alice cooked", query
+ * {alice, cook}) lands at distinct 2 / 5 = 0.4, also under the boundary.
+ * An attacker who relies on N distinct query terms plus M padding tokens
+ * hits the same boundary as before: density = N / (N + M), so they must
+ * still hold M < (N / 0.55 - N) padding to stay above 0.55.
+ */
+const GIST_QUERY_CONCENTRATION_THRESHOLD = 0.55;
+
+/**
+ * Ramp width of the concentration damp above
+ * `GIST_QUERY_CONCENTRATION_THRESHOLD`. `density 0.55 -> damp 1.0`;
+ * `density 1.0 -> damp 0.1 then floored to GIST_CONCENTRATION_MIN_DAMP`.
+ * The linear shape keeps the damp continuous across the threshold (no
+ * cliff a bench grid could exploit).
+ */
+const GIST_CONCENTRATION_RAMP = 0.5;
+
+/**
+ * Floor of the concentration damp. A fully query-stuffed gist (every token
+ * is a query term) is suspicious but not provably adversarial, so the damp
+ * floors at this minimum instead of collapsing to 0. Mirrors the shape of
+ * the evidence-only damp factor: pull the score down decisively without
+ * zeroing a candidate that may still carry a legitimate signal.
+ */
+const GIST_CONCENTRATION_MIN_DAMP = 0.2;
+
+/**
  * Minimum distinct query terms required before term-coverage / proximity
  * features are trusted. Below this the query is too thin to rerank on and
  * those features yield 0 (exact-phrase still applies).
@@ -80,6 +193,14 @@ export interface RerankCandidateText {
    * weighting so an evidence-only match keeps damped credit.
    */
   readonly hasEvidenceLexicalHit: boolean;
+  /**
+   * The evidence capsule `gist` paraphrase associated with this candidate
+   * (best-rank evidence when multiple evidence_refs hit). When present, the
+   * rerank computes lexical features against the gist as well and takes
+   * `max(content_score, EVIDENCE_GIST_WEIGHT * gist_score)`. Absent / empty
+   * → behavior identical to the pre-B2 content-only scorer.
+   */
+  readonly evidenceGist?: string;
 }
 
 export interface RerankFeatureBreakdown {
@@ -337,16 +458,183 @@ export function computeRerankFeatures(
   text: RerankCandidateText,
   poolIdf: RerankPoolIdf | null = null
 ): RerankFeatureBreakdown {
+  const contentBreakdown = computeRerankFeaturesForField(query, text.content ?? "", poolIdf, {
+    hasEvidenceLexicalHit: text.hasEvidenceLexicalHit
+  });
+
+  const rawGist = text.evidenceGist?.trim() ?? "";
+  if (rawGist.length === 0) {
+    return contentBreakdown;
+  }
+  // invariant: hard-cap gist text before tokenization. Source-derived input
+  // with no protocol-level length bound (EvidenceCapsule.gist), so a long
+  // payload is bounded into the tokenizer / new Set / proximity sliding
+  // window inside the top-N rerank loop. See GIST_MAX_CHARS.
+  const gistText =
+    rawGist.length > GIST_MAX_CHARS ? rawGist.slice(0, GIST_MAX_CHARS) : rawGist;
+
+  // invariant: gist scorer passes null poolIdf so the content-derived
+  // rerank IDF pool cannot leak into gist rareTermCoverage (pool is built
+  // over content only).
+  // invariant: gist scorer passes hasEvidenceLexicalHit=false because the
+  // gist field already has its own lexical signal when this branch is
+  // entered — the evidence-only damp lives on the outer
+  // `gistEvidenceOnlyDamp` factor instead, so the damp is decided by
+  // candidate-level signal (no content hit + caller flagged evidence FTS),
+  // not by whether the gist's own scorer recognizes its own match.
+  const gistBreakdown = computeRerankFeaturesForField(query, gistText, null, {
+    hasEvidenceLexicalHit: false
+  });
+
+  // invariant: when content has no lexical signal AND caller flagged an
+  // evidence-FTS hit, the candidate's only lexical signal is evidence-side
+  // (excerpt or gist). The gist score then carries the same evidence-only
+  // damp as the content score would in that situation, so a strong gist
+  // match cannot out-score a strong content match plain
+  // (durable-content > evidence-excerpt invariant).
+  // invariant: EVIDENCE_GIST_WEIGHT < 1 keeps gist <= content at equal
+  // raw lexical signal, independent of the damp above.
+  const contentHadSignal =
+    contentBreakdown.exactPhrase > 0 || contentBreakdown.termCoverage > 0;
+  const gistEvidenceOnlyDamp =
+    !contentHadSignal && text.hasEvidenceLexicalHit
+      ? RECALL_RERANK_EVIDENCE_ONLY_FACTOR
+      : 1;
+  // invariant: gist path is pool-IDF-free by design (no content-pool leak),
+  // so it carries no rarity-based dilution. Compensate with two
+  // self-contained damps over the gist's own tokens:
+  //   1. distinct-token damp — a repeated-token gist (query phrase pasted
+  //      N times) collapses uniqueTokens/totalTokens toward 0 and is
+  //      damped linearly. Catches the naive repeat-amplification shape.
+  //   2. query-term concentration damp — distinct nonsense tokens padded
+  //      around the query phrase keep distinctTokenRatio near 1.0 so the
+  //      first damp does not fire, but distinctQueryTokensPresent /
+  //      totalTokens stays high so exact_phrase + term_coverage still
+  //      saturate. Catches the padding-bypass shape that the first damp
+  //      misses. Distinct counting (not raw occurrences) keeps the damp
+  //      from firing on legitimate paraphrases that repeat the same
+  //      subject token.
+  // The final gist damp takes the min of both — either attack shape engages
+  // its damp; an honest natural-language gist clears both. Short gists
+  // (<= GIST_SHORT_TOKEN_THRESHOLD) skip both because emphatic legitimate
+  // answers ("yes yes yes") naturally trip either signal. Re-tokenizing
+  // here is cheap — gistText is already GIST_MAX_CHARS-capped.
+  const distinctTokenDamp = computeGistDiversityDamp(gistText);
+  const concentrationDamp = computeGistConcentrationDamp(gistText, query);
+  const gistDiversityDamp = Math.min(distinctTokenDamp, concentrationDamp);
+  const weightedGistScore =
+    gistBreakdown.score *
+    EVIDENCE_GIST_WEIGHT *
+    gistEvidenceOnlyDamp *
+    gistDiversityDamp;
+
+  if (weightedGistScore <= contentBreakdown.score) {
+    return contentBreakdown;
+  }
+
+  return Object.freeze({
+    exactPhrase: gistBreakdown.exactPhrase,
+    termCoverage: gistBreakdown.termCoverage,
+    rareTermCoverage: gistBreakdown.rareTermCoverage,
+    proximity: gistBreakdown.proximity,
+    // observability: fieldFactor on the gist branch is the composite of
+    // every multiplicative damp applied to the gist (evidence-only damp ×
+    // distinct-token damp × query-term concentration damp). It is exposed
+    // for diagnostics only — the score field already folds it in.
+    fieldFactor: gistEvidenceOnlyDamp * gistDiversityDamp,
+    score: weightedGistScore
+  });
+}
+
+/**
+ * Self-contained token-diversity damp for the gist path. Returns 1 when the
+ * gist's distinct-token ratio is at or above GIST_MIN_DIVERSITY_RATIO; below
+ * that, scales linearly to 0 at ratio 0. The mapping
+ * `damp = ratio / GIST_MIN_DIVERSITY_RATIO` keeps the boundary continuous
+ * (ratio == threshold -> damp == 1, ratio == 0.1 -> damp == 0.2) so there is
+ * no cliff that bench tuning could exploit. Short gists
+ * (<= GIST_SHORT_TOKEN_THRESHOLD tokens) yield 1: legitimate emphatic
+ * answers ("yes yes yes", "ok ok ok ok") naturally collapse this ratio and
+ * the upper EVIDENCE_GIST_WEIGHT cap already bounds their amplification.
+ */
+function computeGistDiversityDamp(gistText: string): number {
+  const tokens = tokenize(gistText);
+  if (tokens.length <= GIST_SHORT_TOKEN_THRESHOLD) {
+    return 1;
+  }
+  const distinct = new Set(tokens).size;
+  const ratio = distinct / tokens.length;
+  if (ratio >= GIST_MIN_DIVERSITY_RATIO) {
+    return 1;
+  }
+  return ratio / GIST_MIN_DIVERSITY_RATIO;
+}
+
+/**
+ * Self-contained query-term concentration damp for the gist path. Returns
+ * 1 when the gist's distinct-query-token density
+ * (distinctQueryTokensPresent / totalTokens — each unique query term that
+ * appears in the gist counts once regardless of repetition) is at or below
+ * GIST_QUERY_CONCENTRATION_THRESHOLD; above that, ramps linearly to
+ * GIST_CONCENTRATION_MIN_DAMP across a window of width
+ * GIST_CONCENTRATION_RAMP. Catches the padding-bypass attack the
+ * distinct-token damp misses: the attacker pads the query phrase with
+ * distinct nonsense tokens so uniqueTokens/totalTokens stays near 1.0,
+ * but distinct query terms still dominate the gist.
+ *
+ * invariant: repeating the same query word does not increase concentration —
+ * distinct counting bounds the numerator by querySet size while padding
+ * scales the denominator.
+ * invariant: short gists (<= GIST_SHORT_TOKEN_THRESHOLD tokens) skip the
+ * damp — a one-word answer that literally is the query term is a
+ * legitimate gist shape and carries no amplification headroom under the
+ * EVIDENCE_GIST_WEIGHT cap.
+ * invariant: empty query (no lexical_terms) yields 1 — nothing to
+ * concentrate on.
+ * see also: GIST_QUERY_CONCENTRATION_THRESHOLD / GIST_CONCENTRATION_RAMP
+ * / GIST_CONCENTRATION_MIN_DAMP constants above for the boundary tuning
+ * rationale.
+ */
+function computeGistConcentrationDamp(
+  gistText: string,
+  query: Readonly<RecallQueryProbes>
+): number {
   const queryTerms = query.lexical_terms;
-  const content = text.content ?? "";
-  const haystackTokens = tokenize(content);
+  if (queryTerms.length === 0) {
+    return 1;
+  }
+  const tokens = tokenize(gistText);
+  if (tokens.length <= GIST_SHORT_TOKEN_THRESHOLD) {
+    return 1;
+  }
+  const querySet = new Set(queryTerms);
+  const distinctQueryTokensPresent = new Set(
+    tokens.filter((token) => querySet.has(token))
+  ).size;
+  const density = distinctQueryTokensPresent / tokens.length;
+  if (density <= GIST_QUERY_CONCENTRATION_THRESHOLD) {
+    return 1;
+  }
+  const excess = density - GIST_QUERY_CONCENTRATION_THRESHOLD;
+  const damp = 1 - excess / GIST_CONCENTRATION_RAMP;
+  return Math.max(GIST_CONCENTRATION_MIN_DAMP, damp);
+}
+
+function computeRerankFeaturesForField(
+  query: Readonly<RecallQueryProbes>,
+  fieldText: string,
+  poolIdf: RerankPoolIdf | null,
+  options: Readonly<{ readonly hasEvidenceLexicalHit: boolean }>
+): RerankFeatureBreakdown {
+  const queryTerms = query.lexical_terms;
+  const haystackTokens = tokenize(fieldText);
   const haystackTermSet = new Set(haystackTokens);
 
   const exactPhrase = scoreExactPhrase(
     query.normalized_query,
     query.phrases,
     queryTerms.length > 0,
-    content
+    fieldText
   );
   const termCoverage = scoreTermCoverage(queryTerms, haystackTermSet);
   const rareTermCoverage = scoreRareTermCoverage(queryTerms, haystackTermSet, poolIdf);
@@ -358,7 +646,7 @@ export function computeRerankFeatures(
   const hasContentSignal = exactPhrase > 0 || termCoverage > 0;
   const fieldFactor = hasContentSignal
     ? 1
-    : text.hasEvidenceLexicalHit
+    : options.hasEvidenceLexicalHit
       ? RECALL_RERANK_EVIDENCE_ONLY_FACTOR
       : 1;
 

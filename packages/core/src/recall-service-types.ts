@@ -37,6 +37,10 @@ import type {
 export interface KeywordSearchResult {
   readonly object_id: string;
   readonly normalized_rank: number;
+  // Trigram-lane ordinal score, present only when the keyword search routed a
+  // hit through the substring/CJK trigram lane. Feeds the trigram_fts fusion
+  // stream. Absent for exact/porter-only hits.
+  readonly trigram_rank?: number;
 }
 
 export interface RecallServiceMemoryRepoPort {
@@ -317,6 +321,7 @@ export type RecallEmbeddingProviderStatus =
 
 export type RecallFusionStream =
   | "lexical_fts"
+  | "trigram_fts"
   | "synthesis_fts"
   | "evidence_fts"
   | "evidence_structural_agreement"
@@ -393,6 +398,7 @@ export interface RecallDiagnostics {
     readonly scope_classes: readonly string[];
     readonly domain_tags: readonly string[];
     readonly lexical_terms: readonly string[];
+    readonly expanded_terms: readonly string[];
     readonly phrases: readonly string[];
     readonly char_ngrams: readonly string[];
     readonly date_terms: readonly string[];
@@ -422,6 +428,10 @@ export interface RecallResult {
 export interface RecallSupplementaryData {
   readonly queryProbes: Readonly<import("./recall-query-probes.js").RecallQueryProbes>;
   readonly ftsRanks: Readonly<Record<string, number>>;
+  // Trigram-lane normalized rank, surfaced separately from ftsRanks so the
+  // trigram_fts fusion stream can read substring / spelling-variant / CJK
+  // matches without conflating them with word-level porter/exact ranks.
+  readonly trigramFtsRanks: Readonly<Record<string, number>>;
   readonly synthesisFtsRanks: Readonly<Record<string, number>>;
   readonly evidenceFtsRanks: Readonly<Record<string, number>>;
   readonly sourceProximityScores: Readonly<Record<string, number>>;
@@ -436,6 +446,13 @@ export interface RecallSupplementaryData {
   readonly graphAndPathColdScore: number;
   readonly recallsEdgeCount: number;
   readonly weightTransferAmount: number;
+  // Evidence capsule `gist` text keyed by memory_entry.object_id, populated
+  // when an evidence FTS hit resolved the candidate into the pool. The
+  // feature rerank reads this so a query whose answer-bearing semantics live
+  // in the evidence paraphrase (not the distilled content) can still be
+  // promoted. Absent / empty string → rerank falls back to content-only,
+  // bit-identical to the pre-B2 behavior.
+  readonly evidenceGistsByMemoryId: Readonly<Record<string, string>>;
 }
 
 export interface CoarseRecallCandidate {

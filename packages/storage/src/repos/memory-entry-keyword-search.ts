@@ -47,6 +47,17 @@ export function mergeKeywordSearchRows(
   const exactScores = buildGroupedOrdinalScores(exactRows, (row) => row.matched_token_count);
   const trigramScores = buildGroupedOrdinalScores(trigramRows, (row) => row.raw_rank);
   const porterScores = buildGroupedOrdinalScores(porterRows, (row) => row.raw_rank);
+  // Per-object trigram-lane ordinal score, kept distinct from the merged
+  // normalized_rank so recall can read substring/CJK matches separately from
+  // word-level porter/exact ranks. see also: recall-service trigram_fts stream.
+  const trigramScoreByObjectId = new Map<string, number>();
+  trigramRows.forEach((row, index) => {
+    const score = trigramScores[index] ?? 0;
+    trigramScoreByObjectId.set(
+      row.object_id,
+      Math.max(trigramScoreByObjectId.get(row.object_id) ?? 0, score)
+    );
+  });
   const byObjectId = new Map<
     string,
     Readonly<MemoryEntryKeywordSearchResult & { sourcePriority: number; sourceOrder: number }>
@@ -114,12 +125,14 @@ export function mergeKeywordSearchRows(
         return left.object_id.localeCompare(right.object_id);
       })
       .slice(0, limit)
-      .map((row) =>
-        Object.freeze({
+      .map((row) => {
+        const trigramRank = trigramScoreByObjectId.get(row.object_id) ?? 0;
+        return Object.freeze({
           object_id: row.object_id,
-          normalized_rank: row.normalized_rank
-        })
-      )
+          normalized_rank: row.normalized_rank,
+          ...(trigramRank > 0 ? { trigram_rank: trigramRank } : {})
+        });
+      })
   );
 }
 
