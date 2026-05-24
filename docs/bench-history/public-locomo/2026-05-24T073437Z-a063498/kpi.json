@@ -1,0 +1,191 @@
+{
+  "bench_name": "public-locomo",
+  "split": "locomo10",
+  "run_at": "2026-05-24T07:34:37.375Z",
+  "alaya_commit": "a063498",
+  "alaya_version": "0.3.9",
+  "recall_pipeline_version": "fusion-rrf-synthesis-v2",
+  "embedding_provider": "yunwu:text-embedding-3-small",
+  "chat_provider": "none",
+  "policy_shape": "stress",
+  "simulate_report": "none",
+  "dataset": {
+    "name": "locomo10",
+    "size": 10,
+    "source": "https://github.com/snap-research/locomo/blob/main/data/locomo10.json"
+  },
+  "sample_size": 1982,
+  "evaluated_count": 1982,
+  "harness_mode": "mcp_propose_review",
+  "kpi": {
+    "r_at_1": 0.25832492431886983,
+    "r_at_5": 0.47426841574167505,
+    "r_at_10": 0.6064581231079718,
+    "r_at_5_with_embedding_returned": 0.47426841574167505,
+    "provider_returned_rate": 1,
+    "provider_pending_rate": 0,
+    "provider_failed_rate": 0,
+    "provider_not_requested_rate": 0,
+    "embedding_vector_cache_ready_rate": 1,
+    "query_embedding_cache_ready_rate": 1,
+    "latency_ms_p50": 227,
+    "latency_ms_p95": 287,
+    "latency_source": "exact",
+    "token_saved_ratio_vs_full_prompt": 0,
+    "tier_distribution": {
+      "hot": 1982,
+      "warm": 0,
+      "cold": 0
+    },
+    "degradation_reasons": {
+      "none": 1982,
+      "warm_cascade_engaged": 0,
+      "cold_cascade_engaged": 0,
+      "recall_explainability_partial": 0
+    },
+    "seed_truncation": {
+      "seed_turns_truncated": 0,
+      "answer_turns_truncated": 0,
+      "seed_chars_clipped": 0
+    },
+    "quality_metrics": {
+      "schema_version": "bench-quality-metrics.v1",
+      "non_monotonic_rate": 0.9783047426841575,
+      "non_monotonic_count": 1939,
+      "non_monotonic_denominator": 1982,
+      "budget_drop_distribution": {
+        "max_entries": {
+          "count": 29,
+          "share": 0.01033868092691622,
+          "denominator": 2805
+        }
+      },
+      "high_lexical_demoted_rate": 0.12863436123348018,
+      "high_lexical_demoted_count": 146,
+      "high_lexical_demoted_denominator": 1135,
+      "candidate_absent_count": 14,
+      "candidate_absent_denominator": 1982,
+      "no_gold_count": 5,
+      "no_gold_denominator": 1982,
+      "evidence_stream_gold_delivery_rate": 1,
+      "evidence_stream_gold_delivery_count": 988,
+      "evidence_stream_gold_delivery_denominator": 988,
+      "path_stream_top10_rate": 0,
+      "path_stream_top10_count": 0,
+      "path_stream_top10_denominator": 19820,
+      "per_plane_recall_coverage": {
+        "activation": {
+          "gold_count": 587,
+          "hit_at_5_count": 183,
+          "hit_at_5_rate": 0.31175468483816016
+        },
+        "evidence_anchor": {
+          "gold_count": 1734,
+          "hit_at_5_count": 955,
+          "hit_at_5_rate": 0.5507497116493656
+        },
+        "lexical": {
+          "gold_count": 2437,
+          "hit_at_5_count": 988,
+          "hit_at_5_rate": 0.4054164956914239
+        },
+        "object_probe": {
+          "gold_count": 30,
+          "hit_at_5_count": 5,
+          "hit_at_5_rate": 0.16666666666666666
+        },
+        "semantic_supplement": {
+          "gold_count": 231,
+          "hit_at_5_count": 0,
+          "hit_at_5_rate": 0
+        },
+        "session_surface_cohort": {
+          "gold_count": 6,
+          "hit_at_5_count": 2,
+          "hit_at_5_rate": 0.3333333333333333
+        }
+      },
+      "abstention": {
+        "schema_version": "bench-abstention.v1",
+        "total": 0,
+        "false_confident_threshold": 0.91,
+        "correct_at_1": 0,
+        "correct_at_5": 0,
+        "correct_at_10": 0,
+        "false_confident_at_1": 0,
+        "false_confident_at_5": 0,
+        "false_confident_at_10": 0
+      },
+      "miss_distribution": {
+        "hit_at_5": 940,
+        "under_ranked": 1004,
+        "no_gold": 5,
+        "budget_dropped": 19,
+        "candidate_absent": 14
+      }
+    },
+    "per_scenario": [
+      {
+        "id": "conv-26",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot"
+      },
+      {
+        "id": "conv-30",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot"
+      },
+      {
+        "id": "conv-41",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot"
+      },
+      {
+        "id": "conv-42",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot"
+      },
+      {
+        "id": "conv-43",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot"
+      },
+      {
+        "id": "conv-44",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot"
+      },
+      {
+        "id": "conv-47",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot"
+      },
+      {
+        "id": "conv-48",
+        "version": 1,
+        "hit_at_5": true,
+        "tier": "hot"
+      },
+      {
+        "id": "conv-49",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot"
+      },
+      {
+        "id": "conv-50",
+        "version": 1,
+        "hit_at_5": false,
+        "tier": "hot"
+      }
+    ]
+  },
+  "diff_vs_previous": null
+}

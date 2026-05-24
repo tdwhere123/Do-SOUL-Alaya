@@ -10,7 +10,9 @@
     "url": "git+https://github.com/tdwhere123/Do-SOUL-Alaya.git",
     "directory": "packages/core"
   },
-  "files": ["dist/"],
+  "files": [
+    "dist/"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -22,7 +24,8 @@
     "test": "pnpm exec vitest run --project @do-soul/alaya-core"
   },
   "dependencies": {
-    "@do-soul/alaya-protocol": "workspace:*"
+    "@do-soul/alaya-protocol": "workspace:*",
+    "@huggingface/transformers": "^4.2.0"
   },
   "devDependencies": {
     "@do-soul/alaya-storage": "workspace:*"

@@ -41,6 +41,35 @@ export interface EmbeddingRecallRepoPort {
     workspaceId: string,
     objectIds: readonly string[]
   ): Promise<readonly Readonly<EmbeddingVectorRecord>[]>;
+  // Optional: full workspace vector scan, used by the embedding-on coarse
+  // injection path to find semantically near memories that lexical recall
+  // never admitted into the candidate pool. The optional `tierFilter` admits
+  // only memories at the requested storage tier (HOT by default in the recall
+  // hot path; WARM / COLD stay out of the embedding candidate pool, matching
+  // the cascade design). `limit` caps the scan so a workspace with millions
+  // of memories does not pay an O(workspace_size) cost per recall.
+  listByWorkspace?(
+    workspaceId: string,
+    options?: EmbeddingWorkspaceScanOptions
+  ): Promise<readonly Readonly<EmbeddingVectorRecord>[]>;
+}
+
+export interface EmbeddingWorkspaceScanOptions {
+  // Optional storage-tier whitelist. When set, callers receive only embeddings
+  // whose backing memory_entry sits in one of the listed tiers.
+  readonly tierFilter?: readonly ("hot" | "warm" | "cold")[];
+  // Hard cap on the number of records returned. Applied after tier filtering.
+  readonly limit?: number;
+  // invariant: cosine space is valid only within one (provider_kind, model_id);
+  // SQL-side restriction prevents the scan cap from being consumed by vectors
+  // the JS-side filter would discard.
+  readonly providerKind?: string;
+  readonly modelId?: string;
+}
+
+export interface EmbeddingNeighborHit {
+  readonly object_id: string;
+  readonly normalized_similarity: number;
 }
 
 export interface EmbeddingRecallEventLogPort {
@@ -128,6 +157,11 @@ const MAX_EMBEDDING_REQUEST_ATTEMPTS = 5;
 const DEFAULT_EMBEDDING_REQUEST_RETRY_DELAY_MS = 250;
 const MAX_EMBEDDING_REQUEST_RETRY_DELAY_MS = 2_000;
 const QUERY_EMBEDDING_WARMUP_BATCH_SIZE = 16;
+// Hard cap on the workspace neighbor scan. The recall path drives this every
+// query; without a cap the cost grows linearly with HOT memory count. Tuned
+// large enough that benches keep deterministic coverage and small enough that
+// the per-recall O(scan) cost stays bounded.
+export const EMBEDDING_WORKSPACE_SCAN_CAP = 5_000;
 
 function clampQueryTimeout(value: number): number {
   if (!Number.isFinite(value) || value <= 0) {
@@ -581,6 +615,111 @@ export class EmbeddingRecallService {
       baseCandidateIds: params.baseCandidateIds,
       maxSupplement: params.maxSupplement
     });
+  }
+
+  /**
+   * Rank every stored workspace vector by cosine similarity against the query
+   * and return the top-K neighbors. Unlike {@link querySupplement}, this is
+   * not constrained to a caller-supplied eligible set: it is the embedding-on
+   * coarse-injection path that surfaces memories lexical recall never admitted.
+   * Vectors are filtered to the active provider + model + schema so cosine
+   * comparison stays within one embedding space.
+   */
+  public async collectWorkspaceNeighbors(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly queryText: string;
+    readonly excludeObjectIds: readonly string[];
+    readonly maxNeighbors: number;
+  }): Promise<readonly Readonly<EmbeddingNeighborHit>[]> {
+    if (
+      params.maxNeighbors <= 0 ||
+      !this.dependencies.provider.isAvailable ||
+      typeof this.dependencies.embeddingRepo.listByWorkspace !== "function"
+    ) {
+      return Object.freeze([]);
+    }
+
+    let storedVectors: readonly Readonly<EmbeddingVectorRecord>[];
+    try {
+      // invariant: WARM / COLD memories sit behind the tier cascade gate; the
+      // embedding coarse-injection path must not pre-empt that. Cap the scan
+      // so a workspace with very many HOT vectors does not pay a worst-case
+      // O(workspace_size) cost per recall. see also: EmbeddingWorkspaceScanOptions.
+      // invariant: SQL-side provider+model isolation keeps the cap populated
+      // with cosine-comparable rows for the active provider only — without it
+      // a workspace that has switched providers would burn the cap on
+      // unusable vectors before the JS-side filter could drop them.
+      storedVectors = await this.dependencies.embeddingRepo.listByWorkspace(
+        params.workspaceId,
+        {
+          tierFilter: ["hot"],
+          limit: EMBEDDING_WORKSPACE_SCAN_CAP,
+          providerKind: this.dependencies.provider.providerKind,
+          modelId: this.dependencies.provider.modelId
+        }
+      );
+    } catch (error) {
+      this.warn("embedding workspace neighbor scan failed", {
+        workspace_id: params.workspaceId,
+        run_id: params.runId,
+        reason: "local_vector_lookup_failed",
+        error: toErrorMessage(error)
+      });
+      return Object.freeze([]);
+    }
+    if (storedVectors.length === 0) {
+      return Object.freeze([]);
+    }
+
+    let queryEmbedding: Float32Array;
+    try {
+      const embeddings = await this.dependencies.provider.embedTexts([params.queryText], {
+        timeoutMs: this.queryTimeoutMs
+      });
+      if (embeddings.length !== 1) {
+        throw new Error(`Expected exactly one query embedding, received ${embeddings.length}.`);
+      }
+      queryEmbedding = new Float32Array(embeddings[0]!);
+    } catch (error) {
+      this.warn("embedding workspace neighbor scan failed", {
+        workspace_id: params.workspaceId,
+        run_id: params.runId,
+        reason: "query_embedding_failed",
+        error: toErrorMessage(error)
+      });
+      return Object.freeze([]);
+    }
+
+    const excluded = new Set(params.excludeObjectIds);
+    const hits = storedVectors
+      .filter(
+        (record) =>
+          !excluded.has(record.object_id) &&
+          record.provider_kind === this.dependencies.provider.providerKind &&
+          record.model_id === this.dependencies.provider.modelId &&
+          record.schema_version === this.dependencies.provider.schemaVersion &&
+          record.dimensions === queryEmbedding.length
+      )
+      .flatMap((record) => {
+        const normalizedSimilarity = clamp01(cosineSimilarity(queryEmbedding, record.embedding));
+        if (normalizedSimilarity <= 0) {
+          return [];
+        }
+        return [
+          Object.freeze({
+            object_id: record.object_id,
+            normalized_similarity: normalizedSimilarity
+          })
+        ];
+      })
+      .sort((left, right) => {
+        const delta = right.normalized_similarity - left.normalized_similarity;
+        return delta !== 0 ? delta : left.object_id.localeCompare(right.object_id);
+      })
+      .slice(0, params.maxNeighbors);
+
+    return Object.freeze(hits);
   }
 
   private async loadStoredVectors(params: {

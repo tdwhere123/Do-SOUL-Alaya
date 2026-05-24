@@ -303,11 +303,28 @@ export class RecallService {
       queryProbes,
       policy
     });
-    const combinedCoarseCandidates = Object.freeze([
+    const lexicalCoarseCandidates = Object.freeze([
       ...coarseFilter.candidates,
       ...filteredGlobalCandidates,
       ...synthesisCoarseFilter.candidates
     ]) as readonly Readonly<CoarseRecallCandidate>[];
+    // invariant: embedding-off recall path stays bit-identical. When the
+    // embedding_enabled gate is false this resolves to an empty injection and
+    // combinedCoarseCandidates is the exact lexicalCoarseCandidates array.
+    const embeddingCoarseInjection = await this.collectEmbeddingCoarseInjection({
+      policy,
+      workspaceId: params.workspaceId,
+      runId: params.runId ?? null,
+      queryText,
+      poolCandidates: lexicalCoarseCandidates
+    });
+    const combinedCoarseCandidates =
+      embeddingCoarseInjection.candidates.length === 0
+        ? lexicalCoarseCandidates
+        : (Object.freeze([
+            ...lexicalCoarseCandidates,
+            ...embeddingCoarseInjection.candidates
+          ]) as readonly Readonly<CoarseRecallCandidate>[]);
     const preparedEmbeddingQueryPromise = this.prepareEmbeddingSupplementQuery({
       config: policy,
       workspaceId: params.workspaceId,
@@ -355,10 +372,12 @@ export class RecallService {
     });
     const supplementaryData = withEmbeddingSimilarityScores(
       initialAssessment.supplementaryData,
-      embeddingSupplement.similarityHintsByObjectId
+      embeddingSupplement.similarityHintsByObjectId,
+      embeddingCoarseInjection.similarityScores
     );
     const finalAssessment =
-      Object.keys(embeddingSupplement.similarityHintsByObjectId).length === 0
+      Object.keys(embeddingSupplement.similarityHintsByObjectId).length === 0 &&
+      embeddingCoarseInjection.candidates.length === 0
         ? initialAssessment
         : this.fineAssess(
             combinedCoarseCandidates,
@@ -556,7 +575,7 @@ export class RecallService {
     const defaults = STRATEGY_RECALL_DEFAULTS[strategy];
     const now = this.now();
 
-    return parseRecallPolicy({
+    const base = parseRecallPolicy({
       runtime_id: this.generateRuntimeId(),
       object_kind: ControlPlaneObjectKind.RECALL_POLICY,
       task_surface_ref: taskSurfaceRef,
@@ -566,6 +585,8 @@ export class RecallService {
       coarse_filter: defaults.coarse,
       fine_assessment: defaults.fine
     });
+    const decorator = this.dependencies.defaultPolicyDecorator;
+    return decorator === undefined ? base : parseRecallPolicy(decorator(base));
   }
 
   private resolvePolicy(
@@ -654,6 +675,7 @@ export class RecallService {
       if (
         plane !== "protected_winner" &&
         plane !== "lexical" &&
+        plane !== "semantic_supplement" &&
         !winnerMemoryIds.has(entry.object_id) &&
         !matchesDeterministicFilter(entry, config)
       ) {
@@ -1878,6 +1900,107 @@ export class RecallService {
     }
   }
 
+  /**
+   * Embedding-on coarse-injection path. Lexical coarse filtering admits only
+   * memories that match deterministic / FTS / precomputed-rank predicates, so
+   * a semantically relevant memory with zero lexical overlap never enters the
+   * candidate pool. When the embedding_enabled gate is true this fetches the
+   * top-K workspace cosine neighbors, resolves them into MemoryEntry coarse
+   * candidates tagged with the semantic_supplement source channel, and returns
+   * their similarity scores for the embedding_similarity fusion stream.
+   *
+   * invariant: returns an empty injection whenever the gate is false, so the
+   * embedding-off recall path is unchanged at the bit level.
+   */
+  private async collectEmbeddingCoarseInjection(params: {
+    readonly policy: Readonly<RecallPolicy>;
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly queryText: string | null;
+    readonly poolCandidates: readonly Readonly<CoarseRecallCandidate>[];
+  }): Promise<Readonly<{
+    readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
+    readonly similarityScores: Readonly<Record<string, number>>;
+  }>> {
+    const empty = Object.freeze({
+      candidates: Object.freeze([]) as readonly Readonly<CoarseRecallCandidate>[],
+      similarityScores: Object.freeze({})
+    });
+    const embeddingRecallService = this.dependencies.embeddingRecallService;
+    const maxSupplement = params.policy.coarse_filter.semantic_supplement.max_supplement;
+    if (
+      params.policy.coarse_filter.semantic_supplement.embedding_enabled !== true ||
+      maxSupplement <= 0 ||
+      params.queryText === null ||
+      embeddingRecallService === undefined ||
+      typeof embeddingRecallService.collectWorkspaceNeighbors !== "function" ||
+      typeof this.dependencies.memoryRepo.findByIds !== "function"
+    ) {
+      return empty;
+    }
+
+    const poolObjectIds = params.poolCandidates.map((candidate) => candidate.entry.object_id);
+    const neighbors = await embeddingRecallService.collectWorkspaceNeighbors({
+      workspaceId: params.workspaceId,
+      runId: params.runId,
+      queryText: params.queryText,
+      excludeObjectIds: poolObjectIds,
+      maxNeighbors: maxSupplement
+    });
+    if (neighbors.length === 0) {
+      return empty;
+    }
+
+    const similarityByObjectId = new Map(
+      neighbors.map((neighbor) => [neighbor.object_id, neighbor.normalized_similarity] as const)
+    );
+    let neighborEntries: readonly Readonly<MemoryEntry>[];
+    try {
+      neighborEntries = await this.dependencies.memoryRepo.findByIds([...similarityByObjectId.keys()]);
+    } catch (error) {
+      this.warn("embedding coarse injection lookup failed", {
+        workspace_id: params.workspaceId,
+        run_id: params.runId,
+        error: toErrorMessage(error)
+      });
+      return empty;
+    }
+
+    const poolObjectIdSet = new Set(poolObjectIds);
+    const candidates = neighborEntries
+      .filter(
+        (entry) =>
+          entry.workspace_id === params.workspaceId &&
+          !poolObjectIdSet.has(entry.object_id) &&
+          similarityByObjectId.has(entry.object_id)
+      )
+      .map((entry) =>
+        Object.freeze({
+          entry,
+          originPlane: "workspace_local" as const,
+          sourceChannel: "semantic_supplement",
+          sourceChannels: Object.freeze(["semantic_supplement"]),
+          admissionPlanes: Object.freeze(["semantic_supplement" as const]),
+          firstAdmissionPlane: "semantic_supplement" as const,
+          structuralScore: 0
+        })
+      ) as readonly Readonly<CoarseRecallCandidate>[];
+    if (candidates.length === 0) {
+      return empty;
+    }
+
+    const similarityScores = Object.fromEntries(
+      candidates.map((candidate) => [
+        candidate.entry.object_id,
+        similarityByObjectId.get(candidate.entry.object_id) ?? 0
+      ] as const)
+    );
+    return Object.freeze({
+      candidates: Object.freeze([...candidates]),
+      similarityScores: Object.freeze(similarityScores)
+    });
+  }
+
   private async collectEmbeddingSupplement(params: {
     readonly baseCandidateIds: readonly string[];
     readonly localEligibleCandidates: readonly Readonly<CoarseRecallCandidate>[];
@@ -2382,6 +2505,12 @@ export class RecallService {
       relevanceFactor * additiveWeights.NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT;
     const weightedQueryEvidenceTransfer = relevanceFactor * queryEvidenceTransfer;
     const weightedGraphSupport = graphSupportFactor * weights.graph_support;
+    // EMBEDDING_SIMILARITY_WEIGHT is the mode-invariant additive sub-weight: a
+    // small, clamped boost applied here regardless of embedding-on / off so the
+    // base lexical / activation rank still dominates close ties. Embedding-on
+    // strengthens recall through two SEPARATE channels — candidate injection
+    // (collectEmbeddingCoarseInjection) and the RRF fusion weight override
+    // (resolveRrfFusionWeights) — neither of which goes through this term.
     const weightedEmbeddingSimilarity = embeddingSimilarityFactor * EMBEDDING_SIMILARITY_WEIGHT;
     const weightedPathPlasticity = plasticityFactor * pathPlasticityWeight;
     const weightedConfidence = confidenceFactor * additiveWeights.CONFIDENCE_DIRECT_WEIGHT;
@@ -3095,18 +3224,29 @@ function emptySynthesisCoarseFilter(): Readonly<{
 
 function withEmbeddingSimilarityScores(
   supplementaryData: RecallSupplementaryData,
-  hintsByObjectId: EmbeddingRecallSupplementResult["similarityHintsByObjectId"]
+  hintsByObjectId: EmbeddingRecallSupplementResult["similarityHintsByObjectId"],
+  injectedSimilarityScores: Readonly<Record<string, number>>
 ): RecallSupplementaryData {
-  const entries = Object.entries(hintsByObjectId)
-    .map(([objectId, hint]) => [objectId, clamp01(hint.normalized_similarity)] as const)
-    .filter(([, score]) => score > 0);
-  if (entries.length === 0) {
+  const merged = new Map<string, number>();
+  for (const [objectId, hint] of Object.entries(hintsByObjectId)) {
+    const score = clamp01(hint.normalized_similarity);
+    if (score > 0) {
+      merged.set(objectId, Math.max(merged.get(objectId) ?? 0, score));
+    }
+  }
+  for (const [objectId, rawScore] of Object.entries(injectedSimilarityScores)) {
+    const score = clamp01(rawScore);
+    if (score > 0) {
+      merged.set(objectId, Math.max(merged.get(objectId) ?? 0, score));
+    }
+  }
+  if (merged.size === 0) {
     return supplementaryData;
   }
 
   return Object.freeze({
     ...supplementaryData,
-    embeddingSimilarityScores: Object.freeze(Object.fromEntries(entries))
+    embeddingSimilarityScores: Object.freeze(Object.fromEntries(merged))
   });
 }
 
@@ -3415,7 +3555,13 @@ function selectPreferredExpansionSeedEntries(
   drafts: ReadonlyMap<string, CoarseCandidateDraft>
 ): readonly Readonly<MemoryEntry>[] {
   return rankCoarseCandidateDrafts([...drafts.values()])
-    .filter((draft) => draft.admissionPlanes.some((plane) => plane !== "activation") || draft.structuralScore > 0)
+    // semantic_supplement candidates carry no structural anchor and must not
+    // seed graph_expansion; they would expand from an unrelated neighbor.
+    .filter((draft) =>
+      draft.admissionPlanes.some(
+        (plane) => plane !== "activation" && plane !== "semantic_supplement"
+      ) || draft.structuralScore > 0
+    )
     .slice(0, DYNAMIC_RECALL_SEED_CAP)
     .map((draft) => draft.entry);
 }
@@ -3425,7 +3571,11 @@ function selectExpansionSeedDrafts(
 ): readonly Readonly<CoarseCandidateDraft>[] {
   const ranked = rankCoarseCandidateDrafts([...drafts.values()]);
   const preferred = ranked
-    .filter((draft) => draft.admissionPlanes.some((plane) => plane !== "activation") || draft.structuralScore > 0)
+    .filter((draft) =>
+      draft.admissionPlanes.some(
+        (plane) => plane !== "activation" && plane !== "semantic_supplement"
+      ) || draft.structuralScore > 0
+    )
     .slice(0, DYNAMIC_RECALL_SEED_CAP);
   const preferredIds = new Set(preferred.map((draft) => draft.entry.object_id));
   return [
@@ -3522,6 +3672,12 @@ function draftPriority(draft: Readonly<CoarseCandidateDraft>): number {
   }
   if (draft.admissionPlanes.includes("lexical")) {
     return 3;
+  }
+  // Semantic-supplement injections lack lexical / structural anchors; rank
+  // them above raw activation-only candidates but below any plane that
+  // carries a real anchor. see also: collectEmbeddingCoarseInjection.
+  if (draft.admissionPlanes.includes("semantic_supplement")) {
+    return 2;
   }
   return 1;
 }
@@ -3674,6 +3830,9 @@ const RECALL_ADMISSION_ATTRIBUTION_ORDER: readonly RecallAdmissionPlane[] = [
   "protected_winner",
   "domain_tag_cluster",
   "session_surface_cohort",
+  // semantic_supplement is the embedding coarse-injection plane; attribute
+  // it only when no anchored plane co-admitted the candidate.
+  "semantic_supplement",
   "activation"
 ];
 

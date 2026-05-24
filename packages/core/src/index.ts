@@ -17,6 +17,7 @@ export * from "./dynamics-constants-runtime.js";
 export * from "./dynamics-service.js";
 export * from "./embedding-backfill-handler.js";
 export * from "./embedding-recall-service.js";
+export * from "./local-onnx-embedding-client.js";
 export * from "./engine-binding-service.js";
 export * from "./errors.js";
 export * from "./event-publisher.js";
