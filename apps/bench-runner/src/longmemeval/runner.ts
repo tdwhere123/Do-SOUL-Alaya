@@ -236,9 +236,11 @@ export async function runLongMemEval(
     reportSideEffectSnapshot: LongMemEvalReportSideEffectSnapshot;
     tokenMetrics: BenchTokenMetrics;
     // Per-recall structural token-economy sample from
-    // recallResult.diagnostics.token_economy. Null when the recall did
-    // not produce diagnostics (e.g. degraded path); the run-level
-    // aggregator drops nulls before computing distribution stats.
+    // recallResult.diagnostics.token_economy. Null when the degraded
+    // recall path (any non-null degradation_reason) omits the
+    // token_economy block in core, so the bench extractor returns null
+    // and the run-level aggregator drops the sample before computing
+    // distribution stats.
     recallTokenEconomy: BenchRecallTokenEconomy | null;
   };
 
@@ -418,10 +420,14 @@ export async function runLongMemEval(
       // row is already persisted. Must run before the finally-shutdown.
       const tokenMetrics = await daemon.queryTokenMetrics();
       // Phase 7 per-recall STRUCTURAL token-economy sample. Pulled
-      // directly off the already-parsed BenchRecallDiagnostics, so a
-      // null here means the recall did not produce diagnostics — not a
-      // zero data point. The aggregator drops nulls before the
+      // directly off the already-parsed BenchRecallDiagnostics. A null
+      // here means RecallService skipped the instrument because the
+      // recall was degraded (any non-null degradation_reason — warm/cold
+      // cascade or recall_explainability_partial), so diagnostics carry
+      // no token_economy block. The aggregator drops nulls before the
       // distribution stats so degraded recalls don't dilute the run.
+      // see also: packages/core/src/recall-service.ts
+      // (computeRecallTokenEconomy call site).
       const recallTokenEconomy = extractRecallTokenEconomy(recallResult);
 
       return {

@@ -90,8 +90,11 @@ interface RoundResult {
   readonly degradationReason: string | null;
   readonly diagnostics: LongMemEvalQuestionDiagnostic;
   // Phase 7 per-recall token-economy sample for this round; null when the
-  // recall did not produce diagnostics so degraded rounds don't dilute the
-  // run-level distribution.
+  // degraded recall path (any non-null degradation_reason) omits the
+  // token_economy block in core, so the bench extractor returns null and
+  // degraded rounds don't dilute the run-level distribution.
+  // see also: packages/core/src/recall-service.ts
+  // (computeRecallTokenEconomy call site).
   readonly recallTokenEconomy: BenchRecallTokenEconomy | null;
 }
 

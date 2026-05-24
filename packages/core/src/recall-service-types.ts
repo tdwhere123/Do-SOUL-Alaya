@@ -426,6 +426,13 @@ export interface RecallPathExpansionSourceDiagnostic {
 //   recall-service.ts (buildRecallDiagnostics, computeRecallTokenEconomy)
 //   apps/bench-runner/src/harness/recall-diagnostics-schema.ts
 //   apps/bench-runner/src/longmemeval/diagnostics.ts (KPI aggregation)
+//
+// @anchor recall-token-economy-token-units: every "tokens" figure is the
+// chars/4 approximation produced by makeTokenEstimator (see resolveCharsPerToken
+// above). The default 4 chars/token is OpenAI-style English heuristic; CJK
+// content is underestimated by roughly 3-4x because Chinese / Japanese /
+// Korean characters average closer to 1-1.5 chars/token under cl100k/o200k.
+// Release notes citing mean / p95 figures must qualify with this caveat.
 export interface RecallTokenEconomy {
   // Sum of token_estimate over candidates actually delivered to the caller.
   // Derived from the same chars/token heuristic the caller sees in the
@@ -478,7 +485,14 @@ export interface RecallDiagnostics {
   readonly provider_degradation_reason: string | null;
   readonly fusion_breakdown: readonly Readonly<RecallFusionBreakdown>[];
   readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
-  readonly token_economy: Readonly<RecallTokenEconomy>;
+  // Per-recall structural token instrument. Optional: degraded recall paths
+  // (any non-null SoulMemorySearchDegradationReason — warm/cold cascade or
+  // recall_explainability_partial) leave this undefined so the bench
+  // aggregator can drop the call rather than admit a `{0,0,0,0,0}` sample
+  // that biases the run-level distribution downward. The bench extractor
+  // (apps/bench-runner/src/longmemeval/recall-token-economy.ts
+  // extractRecallTokenEconomy) maps undefined → null at the boundary.
+  readonly token_economy?: Readonly<RecallTokenEconomy>;
 }
 
 export interface RecallResult {

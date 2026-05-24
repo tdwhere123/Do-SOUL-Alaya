@@ -234,11 +234,27 @@ export function renderReport(
     `- Token saved vs full-prompt baseline: ${formatRatio(current.kpi.token_saved_ratio_vs_full_prompt)}`
   );
   const rte = current.kpi.recall_token_economy;
+  // Merged-shard KPI deliberately omits recall_token_economy because the
+  // honest cross-shard distribution needs the raw per-recall samples
+  // (only per-shard archives carry them). Surface that explicitly so a
+  // reader of the merged report does not mistake the absence for an
+  // instrumentation bug. see also: apps/bench-runner/src/cli.ts
+  // @anchor merged-recall-token-economy.
+  if (
+    rte === undefined &&
+    current.kpi.latency_source === "worst_shard_bound"
+  ) {
+    lines.push(
+      "- Per-recall token economy: omitted (multi-shard mode; see per-shard archives)"
+    );
+  }
   if (rte !== undefined && rte.sample_count > 0) {
     // Phase 7 per-recall structural instrument (D5 measure-only):
     // distributions over all recall calls in the run. Numbers describe
     // what the recall pipeline actually did per call; they are not
-    // gates and not threshold targets.
+    // gates and not threshold targets. The token-unit caveat (chars/4
+    // heuristic, CJK underestimated ~3-4x) lives on RecallTokenEconomy
+    // in packages/core/src/recall-service-types.ts.
     lines.push(
       `- Per-recall token economy (${rte.sample_count} calls, measure-only):`
     );

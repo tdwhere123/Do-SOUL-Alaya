@@ -313,9 +313,13 @@ interface ConversationResult {
   readonly embeddingWarmup: BenchEmbeddingWarmupSummary | null;
   readonly queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null;
   // Phase 7: one per-recall token-economy sample per QA in this
-  // conversation. Diagnosis-degraded recalls are skipped (not pushed
-  // as null) so the conversation-level array length matches the number
-  // of structurally-instrumented recalls.
+  // conversation. Degraded recalls (any non-null degradation_reason from
+  // RecallService) emit no token_economy block, so the bench extractor
+  // returns null and those samples are skipped (not pushed) — the
+  // conversation-level array length therefore matches the number of
+  // structurally-instrumented recalls, never the total recall count.
+  // see also: packages/core/src/recall-service.ts
+  // (computeRecallTokenEconomy call site).
   readonly recallTokenEconomySamples: readonly BenchRecallTokenEconomy[];
 }
 

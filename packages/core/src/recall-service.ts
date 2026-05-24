@@ -470,17 +470,28 @@ export class RecallService {
     // Pure derivation, no async work and no extra corpus reads: token
     // economy is computed from values already materialised above. See
     // computeRecallTokenEconomy @anchor for the latency contract.
-    const tokenEconomy = computeRecallTokenEconomy({
-      deliveredCandidates: candidates,
-      coarsePoolSize: combinedCoarseCandidates.length,
-      // fineAssess scores every coarse candidate before delivery
-      // truncation, so the evaluated count equals the pool length even
-      // when downstream budgets drop some rows.
-      fineEvaluated: combinedCoarseCandidates.length,
-      preBudgetCandidates: candidateDiagnostics,
-      embeddingProviderStatus,
-      embeddingCacheHit: preparedEmbeddingQuery.handle?.cacheHit ?? true
-    });
+    //
+    // Degraded recall paths (warm_cascade_engaged / cold_cascade_engaged
+    // from expandTierCascade, or any other non-null degradation_reason)
+    // skip the instrument so the per-recall figure stays undefined and
+    // the bench aggregator excludes the sample. Producing a `{0,0,0,0,0}`
+    // record on the degraded path would otherwise inject zero samples
+    // into mean / p50 distributions and bias the release-notes numbers
+    // downward; see RecallDiagnostics.token_economy doc-comment.
+    const tokenEconomy: Readonly<RecallTokenEconomy> | undefined =
+      coarseFilter.degradation_reason === null
+        ? computeRecallTokenEconomy({
+            deliveredCandidates: candidates,
+            coarsePoolSize: combinedCoarseCandidates.length,
+            // fineAssess scores every coarse candidate before delivery
+            // truncation, so the evaluated count equals the pool length even
+            // when downstream budgets drop some rows.
+            fineEvaluated: combinedCoarseCandidates.length,
+            preBudgetCandidates: candidateDiagnostics,
+            embeddingProviderStatus,
+            embeddingCacheHit: preparedEmbeddingQuery.handle?.cacheHit ?? true
+          })
+        : undefined;
     return Object.freeze({
       candidates,
       active_constraints: activeConstraints.constraints,
@@ -3318,7 +3329,10 @@ function buildRecallDiagnostics(params: Readonly<{
   readonly embeddingProviderStatus: RecallEmbeddingProviderStatus;
   readonly providerDegradationReason: string | null;
   readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
-  readonly tokenEconomy: Readonly<RecallTokenEconomy>;
+  // Undefined on degraded recall paths so the bench aggregator drops the
+  // sample instead of polluting the run-level distribution with synthetic
+  // zeros. see RecallDiagnostics.token_economy.
+  readonly tokenEconomy: Readonly<RecallTokenEconomy> | undefined;
 }>): Readonly<RecallDiagnostics> {
   return Object.freeze({
     query_probes: Object.freeze({
@@ -3359,7 +3373,13 @@ function buildRecallDiagnostics(params: Readonly<{
       }))
     ),
     candidates: Object.freeze([...params.candidates]),
-    token_economy: params.tokenEconomy
+    // Conditional spread keeps the field absent (rather than present-with-
+    // undefined) on degraded recalls so JSON round-trips and the bench
+    // extractor's `"token_economy" in diagnostics` check both behave as
+    // "no per-recall sample for this call".
+    ...(params.tokenEconomy === undefined
+      ? {}
+      : { token_economy: params.tokenEconomy })
   });
 }
 
@@ -3372,8 +3392,14 @@ function buildRecallDiagnostics(params: Readonly<{
  * from data already produced for the recall result. Adding a field that
  * needs new traversal of the corpus would push instrumentation past the
  * "no measurable latency budget impact" red line of phase 7.
+ *
+ * Exported only so the recall-service test suite can pin the latency
+ * contract (O-1 regression: nested per-stream/per-candidate scan stays
+ * sub-50µs even at the worst-case bench cardinality). Production callers
+ * still go through RecallService.recall — there is no separate runtime
+ * entry point.
  */
-function computeRecallTokenEconomy(params: Readonly<{
+export function computeRecallTokenEconomy(params: Readonly<{
   readonly deliveredCandidates: readonly Readonly<RecallCandidate>[];
   readonly coarsePoolSize: number;
   readonly fineEvaluated: number;
