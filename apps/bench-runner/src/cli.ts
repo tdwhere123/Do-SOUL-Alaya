@@ -466,7 +466,8 @@ async function runLocomoCommand(opts: ParsedFlags): Promise<number> {
       offset: opts.offset,
       historyRoot: opts.historyRoot,
       dataDir: opts.dataDir,
-      embeddingMode: opts.embeddingMode
+      embeddingMode: opts.embeddingMode,
+      embeddingProviderKind: opts.embeddingProviderKind
     });
     const kpi = result.payload.kpi;
     process.stdout.write(

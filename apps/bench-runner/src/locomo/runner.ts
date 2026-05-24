@@ -23,6 +23,7 @@ import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import {
   startBenchDaemon,
   type BenchEmbeddingMode,
+  type BenchEmbeddingProviderKind,
   type BenchEmbeddingWarmupSummary,
   type BenchQueryEmbeddingWarmupSummary
 } from "../harness/daemon.js";
@@ -46,6 +47,7 @@ export interface LocomoRunOptions {
   readonly dataDir?: string;
   readonly fetchResult?: LocomoFetchResult;
   readonly embeddingMode?: BenchEmbeddingMode;
+  readonly embeddingProviderKind?: BenchEmbeddingProviderKind;
   readonly pinnedMetaRoot?: string;
   readonly offset?: number;
 }
@@ -307,7 +309,10 @@ async function runOneConversation(
   const daemon = await startBenchDaemon({
     workspaceId: `locomo-${conversation.sample_id}`,
     runId: `run-${conversation.sample_id}`,
-    embeddingMode
+    embeddingMode,
+    ...(opts.embeddingProviderKind === undefined
+      ? {}
+      : { embeddingProviderKind: opts.embeddingProviderKind })
   });
   try {
     const diaIdByMemoryId = new Map<string, string>();
