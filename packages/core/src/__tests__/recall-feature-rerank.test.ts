@@ -744,6 +744,14 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
     // At least one damp must visibly pull the attacker below the honest
     // gist score.
     expect(attackerGist.score).toBeLessThan(honestGist.score);
+    // concentration damp by design does NOT fire on this shape (distinct
+    // query density = 3 / 32 ≈ 0.094 << 0.55); diversity damp is the sole
+    // load-bearing protection. Pin both the numerical damp value and the
+    // semantic invariant so a future widening of GIST_MIN_DIVERSITY_RATIO
+    // (or a switch back to a raw-occurrence concentration formulation) is
+    // forced to acknowledge that this shape would silently slip past.
+    // distinctTokenRatio = 11 / 32 = 0.34375; damp = 0.34375 / 0.5 = 0.6875.
+    expect(attackerGist.fieldFactor).toBeCloseTo(11 / 16, 10);
     expect(attackerGist.fieldFactor).toBeLessThan(0.7);
     expect(honestGist.fieldFactor).toBe(1);
   });
@@ -830,6 +838,119 @@ describe("recall feature rerank — evidence-gist field (B2)", () => {
     expect(features.fieldFactor).toBe(1);
     expect(features.exactPhrase).toBe(1);
     expect(features.score).toBeGreaterThan(0);
+  });
+
+  it("concentration damp returns 1 when distinct-query density stays below the threshold (sparse query presence)", () => {
+    // Boundary: query.lexical_terms non-empty but only one of them appears
+    // in a long-enough gist. distinctQueryTokensPresent = 1, totalTokens = 8,
+    // density = 0.125 — well below GIST_QUERY_CONCENTRATION_THRESHOLD (0.55).
+    // invariant: concentration damp returns 1 on sparse query presence; the
+    // observable proxy is fieldFactor = 1 on the gist branch (diversity damp
+    // also returns 1 because distinct/total = 8/8 = 1.0).
+    const query = compileRecallQueryProbes("alpha beta");
+    const features = computeRerankFeatures(query, {
+      content: "an unrelated distilled fact about lunch preferences",
+      hasEvidenceLexicalHit: false,
+      // 8 distinct tokens, 1 of them ("alpha") is a query term. "the" is
+      // length-3 so it survives splitLexicalTokens (which does not drop stop
+      // words on the candidate side).
+      evidenceGist: "the team mentioned alpha during the standup yesterday morning"
+    });
+
+    expect(features.fieldFactor).toBe(1);
+    // Single matched term still contributes term-coverage credit, so the
+    // gist branch is the path under test (not a silent fall-through to the
+    // content-only baseline).
+    expect(features.termCoverage).toBe(0.5);
+    expect(features.score).toBeGreaterThan(0);
+  });
+
+  it("fully saturated gist (every token is a distinct query term) hits GIST_CONCENTRATION_MIN_DAMP", () => {
+    // Boundary: query terms equal gist tokens one-for-one. density = 1.0,
+    // excess = 0.45, raw damp = 1 - 0.45 / 0.5 = 0.1, clamped to
+    // GIST_CONCENTRATION_MIN_DAMP (0.2). distinctTokenDamp is 1 (every
+    // token is unique). composite gistDiversityDamp = 0.2.
+    // invariant: the concentration damp floors at GIST_CONCENTRATION_MIN_DAMP
+    // even on the maximum-density attacker shape — it pulls hard but does
+    // not zero a candidate that may carry legitimate signal.
+    // invariant: the test uses 5 tokens, just above GIST_SHORT_TOKEN_THRESHOLD
+    // (4), so the short-circuit does not fire.
+    const query = compileRecallQueryProbes("alpha beta gamma delta epsilon");
+    const features = computeRerankFeatures(query, {
+      content: "an unrelated distilled fact about lunch preferences",
+      hasEvidenceLexicalHit: false,
+      evidenceGist: "alpha beta gamma delta epsilon"
+    });
+
+    // fieldFactor on the gist branch = gistEvidenceOnlyDamp(1) ×
+    // distinctTokenDamp(1) × concentrationDamp(floor 0.2) = 0.2.
+    expect(features.fieldFactor).toBeCloseTo(0.2, 10);
+  });
+
+  it("damp path engages at tokens.length = GIST_SHORT_TOKEN_THRESHOLD + 1 (boundary transition)", () => {
+    // Boundary: 5 tokens — exactly one above GIST_SHORT_TOKEN_THRESHOLD (4).
+    // Below or equal to the threshold both damps short-circuit to 1; above
+    // it the damp path engages. Pin the transition by constructing a 5-token
+    // gist whose density (3/5 = 0.6) just clears the concentration threshold
+    // (0.55) so the damp produces an observably-non-1 fieldFactor.
+    // invariant: GIST_SHORT_TOKEN_THRESHOLD + 1 is the smallest gist length
+    // at which the damp path can fire — a regression that off-by-one'd the
+    // <= comparison to < would silently let a 5-token full-saturation gist
+    // through.
+    const query = compileRecallQueryProbes("alpha beta gamma");
+    const features = computeRerankFeatures(query, {
+      content: "an unrelated distilled fact about lunch preferences",
+      hasEvidenceLexicalHit: false,
+      // 5 tokens, 3 distinct query terms present. density = 3/5 = 0.6.
+      // excess = 0.05, damp = 1 - 0.05 / 0.5 = 0.9. distinctTokenDamp = 1.
+      evidenceGist: "alpha beta gamma delta epsilon"
+    });
+
+    expect(features.fieldFactor).toBeCloseTo(0.9, 10);
+    expect(features.fieldFactor).toBeLessThan(1);
+  });
+
+  it("documents the distinct-nonsense padding attack budget ceiling (I-1 regression)", () => {
+    // invariant: the distinct-nonsense / stop-word padding shape is a
+    // designed-open attack budget — N distinct query terms wrapped in M
+    // distinct neutral / stop-word pads where uniqueTokens / totalTokens
+    // = 1.0 (diversity damp clears) AND N / (N + M) ≤
+    // GIST_QUERY_CONCENTRATION_THRESHOLD (concentration damp clears).
+    // Concrete shape pinned here: N = 3, M = 8.
+    //   diversity damp:    uniqueTokens / totalTokens = 11 / 11 = 1.0 ≥ 0.5
+    //   concentration damp: distinctQueryTokensPresent / totalTokens
+    //                       = 3 / 11 ≈ 0.273 ≤ 0.55
+    // invariant: the only remaining brake on this shape is
+    // EVIDENCE_GIST_WEIGHT (0.7); the gist-side fieldFactor must stay 1
+    // because both hygiene damps are designed to clear.
+    // see also: tightening either damp closes this attack surface but
+    //   couples to natural short paraphrases — co-verify with the
+    //   LoCoMo bench when changing any of GIST_MIN_DIVERSITY_RATIO /
+    //   GIST_QUERY_CONCENTRATION_THRESHOLD / GIST_SHORT_TOKEN_THRESHOLD.
+    // invariant: candidate-side tokenizer (splitLexicalTokens) does NOT
+    // drop stop words. All 8 padding words below clear the length->2
+    // filter ("the"/"and"/"but"/"for" = 3; "with"/"from"/"this"/"that" = 4).
+    const query = compileRecallQueryProbes("favorite text editor");
+    const features = computeRerankFeatures(query, {
+      content: "an unrelated distilled fact about lunch preferences",
+      hasEvidenceLexicalHit: false,
+      // 3 distinct query terms + 8 distinct neutral / stop-word pads = 11
+      // distinct tokens. Every token unique.
+      evidenceGist: "favorite text editor the and but for with from this that"
+    });
+
+    // Both hygiene damps cleared — fieldFactor = 1 documents the open
+    // attack budget. The only remaining suppressor is EVIDENCE_GIST_WEIGHT
+    // (0.7), folded into the score itself, not into fieldFactor.
+    expect(features.fieldFactor).toBe(1);
+    // Exact-phrase fires because the query "favorite text editor" appears
+    // verbatim in the gist — this is the attacker's payload landing intact.
+    expect(features.exactPhrase).toBe(1);
+    expect(features.termCoverage).toBe(1);
+    // invariant: gist-branch score is bounded by EVIDENCE_GIST_WEIGHT
+    // (0.7). A regression that raises the gist multiplier or removes the
+    // cap surfaces here as a ceiling breach.
+    expect(features.score).toBeLessThanOrEqual(0.7);
   });
 
   it("leaves a short emphatic gist (yes yes yes) above the diversity / concentration damps", () => {
