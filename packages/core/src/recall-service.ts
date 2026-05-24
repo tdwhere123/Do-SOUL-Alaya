@@ -119,6 +119,13 @@ const ENTITY_SEED_PER_ENTITY_TOP_K_STRONG = 8;
 const ENTITY_SEED_PER_ENTITY_TOP_K_WEAK = 5;
 const ENTITY_SEED_TOTAL_ADMIT_CAP = 60;
 const ENTITY_SEED_MIN_SURFACE_LENGTH = 2;
+// anchor: entity-derived graph_expansion seeding floor. Only entities whose
+// extractor confidence meets this threshold are allowed to fan their FTS
+// hits into graph_expansion seeds. The 0.85 cut admits quoted / code_ref /
+// path / package / task_ref signals (1.0 / 0.95 / 0.9 / 0.9 / 0.85) and
+// excludes proper_noun (0.7), cjk_phrase (0.6), and unknown_long (0.35).
+// see also: packages/core/src/entity-extraction-rules.ts CONFIDENCE_*
+const ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR = 0.85;
 const DYNAMIC_RECALL_COHORT_RADIUS = 8;
 const DYNAMIC_RECALL_SOURCE_PROXIMITY_RADIUS = 6;
 const DYNAMIC_RECALL_SOURCE_PROXIMITY_SEED_CAP = 12;
@@ -693,10 +700,12 @@ export class RecallService {
         plane !== "protected_winner" &&
         plane !== "lexical" &&
         plane !== "semantic_supplement" &&
-        // anchor: entity_seed is a query-time lexical-style admission;
-        // bypass the deterministic filter so it shares the lexical-plane
-        // contract instead of being silently dropped.
-        plane !== "entity_seed" &&
+        // invariant: entity_seed admissions still honor the deterministic
+        // filter (scope_class / retention / dimension / domain_tag). The
+        // entity helper draws from tier-filtered byId, but the underlying
+        // memories may not match the strategy's scope/dimension contract;
+        // bypassing the filter would let a cross-scope memory leak in just
+        // because its surface name appears in the query.
         !winnerMemoryIds.has(entry.object_id) &&
         !matchesDeterministicFilter(entry, config)
       ) {
@@ -933,18 +942,29 @@ export class RecallService {
       addCandidate,
       admissionLimit: resolveSourceProximityAdmissionLimit(options.deliveryMaxEntries)
     });
-    const entitySeedMemoryIds = await this.collectEntityDerivedSeeds({
+    const entityDerivedSeeds = await this.collectEntityDerivedSeeds({
       workspaceId,
       queryText,
       byId,
-      addCandidate
+      addCandidate,
+      lexicalFtsRanks: ftsRanks
     });
+    // invariant: only strong entity signals are eligible to fan into
+    // graph_expansion. Weak entities (kind=unknown / cjk_phrase /
+    // proper_noun under the floor) stay in the entity_seed plane only —
+    // graph fan-in compounds an attacker's surface manipulation across
+    // every 1-hop neighbor, so the gate to that compounding must be a
+    // high-confidence entity (quoted phrase / explicit code_ref / path /
+    // package / task_ref).
+    const graphExpansionSeedIds = entityDerivedSeeds
+      .filter((seed) => seed.entityConfidence >= ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR)
+      .map((seed) => seed.memoryId);
     await this.addGraphExpansionCandidates({
       workspaceId,
       byId,
       drafts,
       addCandidate,
-      extraSeedMemoryIds: entitySeedMemoryIds
+      extraSeedMemoryIds: graphExpansionSeedIds
     });
     await this.addPathExpansionCandidates({
       workspaceId,
@@ -1352,9 +1372,10 @@ export class RecallService {
   }
 
   // anchor: query-time entity FTS seeding. Returns the memory ids of every
-  // candidate admitted on the entity_seed plane so the caller can fan them
-  // into graph_expansion as additional seeds. The helper is fail-soft: if
-  // no port is wired, no query text is present, or the keyword search port
+  // candidate admitted on the entity_seed plane (paired with the originating
+  // entity confidence) so the caller can fan them into graph_expansion as
+  // additional seeds subject to a confidence floor. The helper is fail-soft:
+  // if no port is wired, no query text is present, or the keyword search port
   // is missing, returns an empty list and the recall pipeline degrades
   // gracefully back to the pre-entity behavior.
   // see also: packages/core/src/entity-extraction-port.ts EntityExtractionPort
@@ -1363,7 +1384,13 @@ export class RecallService {
     readonly queryText: string | null;
     readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
     readonly addCandidate: CoarseCandidateAdder;
-  }>): Promise<readonly string[]> {
+    // invariant: lexical FTS ranks observed during this coarse pass.
+    // When an entity-FTS hit overlaps a lexical_fts hit the RRF contribution
+    // must come from the lexical lane only — otherwise a single surface term
+    // gets two fusion-stream rank slots and an attacker-controlled query can
+    // roughly double a memory's fused score.
+    readonly lexicalFtsRanks: ReadonlyMap<string, number>;
+  }>): Promise<readonly Readonly<{ memoryId: string; entityConfidence: number }>[]> {
     const port = this.dependencies.entityExtractionPort;
     const memoryRepo = this.dependencies.memoryRepo;
     if (
@@ -1393,7 +1420,10 @@ export class RecallService {
       return [];
     }
 
-    const seedIds = new Set<string>();
+    // Track the strongest entity confidence we observed per memory id. The
+    // caller filters this against ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR
+    // when deciding which seeds may fan into graph_expansion.
+    const seedConfidenceById = new Map<string, number>();
     let admittedTotal = 0;
     const candidateIds = [...params.byId.keys()];
     for (const entity of entities) {
@@ -1431,19 +1461,32 @@ export class RecallService {
         if (entry === undefined) {
           continue;
         }
-        const score = clamp01(hit.normalized_rank * entity.confidence);
-        if (score <= 0) {
+        const rawScore = clamp01(hit.normalized_rank * entity.confidence);
+        if (rawScore <= 0) {
           continue;
         }
+        // see also: lexicalFtsRanks doc above. Lexical-overlap admissions
+        // still register on the entity_seed plane (so admission_planes
+        // diagnostics can distinguish entity-only from entity+lexical hits)
+        // but the RRF rank contribution is zeroed out — the entity_seed
+        // stream returns 0 for this id and drops out of fusion, preventing
+        // a single surface term from claiming two fusion-stream rank slots.
+        const hasLexicalOverlap = (params.lexicalFtsRanks.get(hit.object_id) ?? 0) > 0;
+        const score = hasLexicalOverlap ? 0 : rawScore;
         params.addCandidate(entry, "entity_seed", score, "entity_seed");
-        seedIds.add(entry.object_id);
+        const previous = seedConfidenceById.get(entry.object_id) ?? 0;
+        if (entity.confidence > previous) {
+          seedConfidenceById.set(entry.object_id, entity.confidence);
+        }
         admittedTotal += 1;
         if (admittedTotal >= ENTITY_SEED_TOTAL_ADMIT_CAP) {
           break;
         }
       }
     }
-    return [...seedIds];
+    return [...seedConfidenceById.entries()].map(([memoryId, entityConfidence]) =>
+      Object.freeze({ memoryId, entityConfidence })
+    );
   }
 
   private async addPathExpansionCandidates(params: Readonly<{

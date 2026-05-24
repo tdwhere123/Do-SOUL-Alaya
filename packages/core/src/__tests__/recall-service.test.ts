@@ -3019,7 +3019,11 @@ describe("RecallService", () => {
       // entity helper only emits append-only candidate diagnostics — no
       // governance event is written. The appendSpy comes from createDependencies
       // and tracks every event-log append; we filter for any SOUL_PROPOSAL_* /
-      // SOUL_MEMORY_UPDATED variant to catch a leak.
+      // SOUL_MEMORY_UPDATED variant to catch a leak. The memoryRepo wired by
+      // createDependencies exposes only read methods (findByWorkspaceId /
+      // findByDimension / findByScopeClass) — surfacing a write method here
+      // would be a typed contract break, so the stricter assertion is that
+      // the event log received zero writes of any governance kind.
       const memories = [
         createMemoryEntry({
           object_id: "memory-truth",
@@ -3060,14 +3064,274 @@ describe("RecallService", () => {
       const writtenEventTypes = appendSpy.mock.calls.map(
         (args: readonly unknown[]) => (args[0] as { event_type: string }).event_type
       );
+      // invariant: zero governance / persistence writes from the recall
+      // read path. Recall is allowed to emit RECALL_CONTEXT diagnostic
+      // events; any of the listed mutation kinds would breach the truth
+      // boundary on the entity_seed plane.
+      // see also: docs/handbook/invariants.md (memory ontology is durable
+      // truth; recall is a projection)
       expect(
         writtenEventTypes.filter((kind: string) =>
           kind === "SOUL_PROPOSAL_CREATED" ||
           kind === "SOUL_PROPOSAL_RESOLVED" ||
           kind === "SOUL_MEMORY_UPDATED" ||
-          kind === "SOUL_GRAPH_EDGE_CREATED"
+          kind === "SOUL_MEMORY_CREATED" ||
+          kind === "SOUL_MEMORY_DELETED" ||
+          kind === "SOUL_GRAPH_EDGE_CREATED" ||
+          kind === "SOUL_GRAPH_EDGE_RETIRED" ||
+          kind === "SOUL_EVIDENCE_CREATED" ||
+          kind === "SOUL_EVIDENCE_RETIRED" ||
+          kind === "SOUL_CLAIM_CREATED" ||
+          kind === "SOUL_CLAIM_UPDATED"
         )
       ).toEqual([]);
+    });
+
+    it("entity_seed admissions still pass the deterministic scope/dimension filter", async () => {
+      // invariant: entity_seed admissions must pass matchesDeterministicFilter
+      // (scope_class / dimension / domain_tag). An in-tier memory whose
+      // dimension does not match the strategy's deterministic filter must
+      // not leak into recall just because its surface name appears in the
+      // query and an entity extractor picks it up.
+      // see also: packages/core/src/recall-service.ts addCandidate filter gate
+      const memories = [
+        createMemoryEntry({
+          object_id: "memory-in-scope",
+          dimension: MemoryDimension.PROCEDURE,
+          scope_class: ScopeClass.PROJECT,
+          domain_tags: ["repo"],
+          content: "MaterializationRouter binds memory creation."
+        }),
+        createMemoryEntry({
+          object_id: "memory-off-scope",
+          // PREFERENCE dimension is filtered out by the explicit
+          // dimension_filter policy override below; the entity_seed plane
+          // must not punch a hole in that gate.
+          dimension: MemoryDimension.PREFERENCE,
+          scope_class: ScopeClass.PROJECT,
+          domain_tags: ["repo"],
+          content: "MaterializationRouter mentioned elsewhere."
+        })
+      ];
+      const { dependencies } = createDependencies(memories);
+      // Lexical FTS uses the unmodified queryText; the entity helper queries
+      // by the extracted surface only. Returning the off-scope hit ONLY for
+      // the entity-surface query isolates the entity_seed plane as the sole
+      // admission path for memory-off-scope; the existing "lexical" plane
+      // bypass of the deterministic filter cannot mask the regression.
+      const searchByKeywordWithinObjectIds = vi.fn(async (_workspace: string, query: string) => {
+        if (query === "MaterializationRouter") {
+          return [
+            { object_id: "memory-in-scope", normalized_rank: 0.9 },
+            { object_id: "memory-off-scope", normalized_rank: 0.9 }
+          ];
+        }
+        return [];
+      });
+
+      const service = new RecallService({
+        ...dependencies,
+        memoryRepo: {
+          ...dependencies.memoryRepo,
+          searchByKeywordWithinObjectIds
+        },
+        entityExtractionPort: {
+          extract: async () => [
+            Object.freeze({
+              surface: "MaterializationRouter",
+              normalized: "materializationrouter",
+              kind: "proper_noun" as const,
+              confidence: 0.7
+            })
+          ]
+        }
+      });
+      const basePolicy = service.buildDefaultPolicy("chat", createTaskSurface().runtime_id);
+      const policy = overridePolicy(basePolicy, {
+        coarse_filter: {
+          ...basePolicy.coarse_filter,
+          deterministic_match: {
+            ...basePolicy.coarse_filter.deterministic_match,
+            dimension_filter: [MemoryDimension.PROCEDURE]
+          }
+        }
+      });
+
+      const result = await service.recall({
+        taskSurface: {
+          ...createTaskSurface(),
+          display_name: "coordinate writes"
+        },
+        workspaceId: "workspace-1",
+        strategy: "chat",
+        policyOverride: policy
+      });
+
+      const ids = new Set(result.candidates.map((c) => c.object_id));
+      // The off-scope PREFERENCE memory must never appear — entity_seed
+      // is not a deterministic-filter bypass.
+      expect(ids.has("memory-off-scope")).toBe(false);
+    });
+
+    it("does not double-count fusion when the same memory hits lexical_fts and entity_seed", async () => {
+      // invariant: when a memory is already ranked on lexical_fts, the
+      // entity_seed RRF rank for that memory must be zero so a single
+      // attacker-controllable surface term cannot claim two fusion-stream
+      // rank slots. The memory still admits on the entity_seed plane
+      // (the diagnostic distinguishes entity-only from entity+lexical),
+      // but the entity_seed stream contribution is null.
+      // see also: collectEntityDerivedSeeds lexicalFtsRanks dedup
+      const memories = [
+        createMemoryEntry({
+          object_id: "memory-overlap",
+          dimension: MemoryDimension.PROCEDURE,
+          scope_class: ScopeClass.PROJECT,
+          domain_tags: ["repo"],
+          content: "MaterializationRouter binds memory creation."
+        })
+      ];
+      const { dependencies } = createDependencies(memories);
+      // searchByKeywordWithinObjectIds is called for both the lexical FTS
+      // supplement AND the entity-seed pass. Both return the same memory,
+      // simulating a single surface term getting two FTS rank contributions.
+      const searchByKeywordWithinObjectIds = vi.fn(async () => [
+        { object_id: "memory-overlap", normalized_rank: 0.9 }
+      ]);
+
+      const service = new RecallService({
+        ...dependencies,
+        memoryRepo: {
+          ...dependencies.memoryRepo,
+          searchByKeywordWithinObjectIds
+        },
+        entityExtractionPort: {
+          extract: async () => [
+            Object.freeze({
+              surface: "MaterializationRouter",
+              normalized: "materializationrouter",
+              kind: "proper_noun" as const,
+              confidence: 0.7
+            })
+          ]
+        }
+      });
+
+      const result = await service.recall({
+        taskSurface: {
+          ...createTaskSurface(),
+          display_name: "MaterializationRouter behavior"
+        },
+        workspaceId: "workspace-1",
+        strategy: "chat"
+      });
+
+      const diag = result.diagnostics?.candidates.find(
+        (c) => c.object_id === "memory-overlap"
+      );
+      // Plane admission diagnostic still records entity_seed alongside
+      // lexical — the dedup happens at the RRF contribution layer, not at
+      // admission.
+      expect(diag?.admission_planes).toContain("lexical");
+      expect(diag?.admission_planes).toContain("entity_seed");
+      // entity_seed contribution is zero when there is a lexical_fts hit
+      // on the same memory; the entity_seed per-stream rank is null
+      // (filtered out at fusion because the stream score is 0).
+      const entitySeedContribution =
+        diag?.fused_rank_contribution_per_stream?.entity_seed ?? 0;
+      expect(entitySeedContribution).toBe(0);
+      expect(diag?.per_stream_rank?.entity_seed ?? null).toBeNull();
+      // lexical_fts contribution is non-zero — the surface match still
+      // earns its single fusion slot.
+      const lexicalContribution =
+        diag?.fused_rank_contribution_per_stream?.lexical_fts ?? 0;
+      expect(lexicalContribution).toBeGreaterThan(0);
+    });
+
+    it("fans a strong entity (>= 0.85) into graph_expansion", async () => {
+      // invariant: a quoted surface (confidence 1.0) is above
+      // ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR and must fan its
+      // entity-derived seed into graph_expansion as an extra seed.
+      // A floor that erroneously rejects strong entities would surface
+      // here as the neighbor missing from graph_expansion admissions.
+      // see also: ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR
+      const memories = [
+        createMemoryEntry({
+          object_id: "memory-anchor",
+          dimension: MemoryDimension.PROCEDURE,
+          scope_class: ScopeClass.PROJECT,
+          domain_tags: ["repo"],
+          content: "MaterializationRouter binds memory creation."
+        }),
+        createMemoryEntry({
+          object_id: "memory-neighbor",
+          dimension: MemoryDimension.FACT,
+          scope_class: ScopeClass.PROJECT,
+          domain_tags: ["repo"],
+          content: "Downstream consumer of MaterializationRouter outcomes."
+        })
+      ];
+      const { dependencies } = createDependencies(memories);
+      const searchByKeywordWithinObjectIds = vi.fn(async (_workspace: string, query: string) => {
+        if (query.toLowerCase().includes("materializationrouter")) {
+          return [{ object_id: "memory-anchor", normalized_rank: 0.9 }];
+        }
+        return [];
+      });
+      const findByMemoryId = vi.fn(async (memoryId: string) => {
+        if (memoryId === "memory-anchor") {
+          return [
+            {
+              object_id: "edge-1",
+              object_kind: "memory_graph_edge" as const,
+              schema_version: 1,
+              lifecycle_state: "active" as const,
+              created_at: "2026-03-23T00:00:00.000Z",
+              updated_at: "2026-03-23T00:00:00.000Z",
+              created_by: "system",
+              workspace_id: "workspace-1",
+              edge_type: "derives_from" as const,
+              source_memory_id: "memory-anchor",
+              target_memory_id: "memory-neighbor",
+              confidence: 0.8
+            }
+          ];
+        }
+        return [];
+      });
+
+      const service = new RecallService({
+        ...dependencies,
+        memoryRepo: {
+          ...dependencies.memoryRepo,
+          searchByKeywordWithinObjectIds
+        },
+        graphExpansionPort: { findByMemoryId },
+        entityExtractionPort: {
+          extract: async () => [
+            Object.freeze({
+              surface: "MaterializationRouter",
+              normalized: "materializationrouter",
+              kind: "quoted" as const,
+              confidence: 1.0
+            })
+          ]
+        }
+      });
+
+      const result = await service.recall({
+        taskSurface: {
+          ...createTaskSurface(),
+          display_name: "How does MaterializationRouter coordinate writes?"
+        },
+        workspaceId: "workspace-1",
+        strategy: "chat"
+      });
+
+      const neighborDiag = result.diagnostics?.candidates.find(
+        (c) => c.object_id === "memory-neighbor"
+      );
+      expect(neighborDiag?.admission_planes).toContain("graph_expansion");
+      expect(findByMemoryId).toHaveBeenCalledWith("memory-anchor", "workspace-1");
     });
   });
 });

@@ -729,6 +729,31 @@ describe("MaterializationRouter", () => {
     });
   });
 
+  it("creates derives_from edges from raw_payload.source_memory_refs on the memory_and_claim branch", async () => {
+    // invariant: source_memory_refs honored on memory_and_claim branch.
+    // see also: createSourceMemoryEdges
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    await router.materializeSignal(
+      createSignal({
+        raw_payload: {
+          excerpt: "Derives from prior facts.",
+          source_memory_refs: ["mem-prior-a", "mem-prior-b"]
+        }
+      })
+    );
+
+    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args) => args[0]);
+    const derivesFromEdges = calls.filter((edge) => edge.edgeType === "derives_from");
+    expect(derivesFromEdges).toHaveLength(2);
+    expect(derivesFromEdges.map((edge) => edge.targetMemoryId).sort()).toEqual([
+      "mem-prior-a",
+      "mem-prior-b"
+    ]);
+    expect(derivesFromEdges.every((edge) => edge.sourceMemoryId === "memory-1")).toBe(true);
+  });
+
   it("invokes conflictDetectionPort with the new memory facts when wired", async () => {
     const deps = createDeps();
     const detectAndLinkConflicts = vi.fn<DetectFn>(async () => undefined);
@@ -838,6 +863,146 @@ describe("MaterializationRouter ingest reconciliation", () => {
       object_kind: "memory_entry",
       object_id: "memory-1"
     });
+  });
+
+  it("memory_entry_only append branch honors raw_payload.source_memory_refs", async () => {
+    // invariant: source_memory_refs are consumed on every memory-creating
+    // materialization branch. memory_entry_only (fact / outcome / reference
+    // / task_state) must emit derives_from edges with the same semantics
+    // as memory_and_claim — otherwise D-1 KPI attribution silently drops
+    // the ~40% of bench-seed object kinds that flow through this branch.
+    // see also: createSourceMemoryEdges
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    await router.materializeSignal(
+      factSignal({
+        raw_payload: {
+          excerpt: "Derived fact for D-1 attribution.",
+          distilled_fact: "Derived fact for D-1 attribution.",
+          source_memory_refs: ["mem-prior-1", "mem-prior-2"]
+        }
+      })
+    );
+
+    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args) => args[0]);
+    const derivesFromEdges = calls.filter((edge) => edge.edgeType === "derives_from");
+    expect(derivesFromEdges).toHaveLength(2);
+    expect(derivesFromEdges.map((edge) => edge.targetMemoryId).sort()).toEqual([
+      "mem-prior-1",
+      "mem-prior-2"
+    ]);
+    expect(derivesFromEdges.every((edge) => edge.sourceMemoryId === "memory-1")).toBe(true);
+  });
+
+  it("memory_entry_only append branch does not create non-derives_from edges from claim-bearing *_refs", async () => {
+    // invariant: only derives_from is created on the memory_entry_only
+    // branch. The four claim-bearing edge hints (supersedes / exception_to
+    // / contradicts / incompatible_with) must remain exclusive to
+    // materializeMemoryAndClaim because their governance requires an
+    // attached claim — surfacing them here would auto-build edges with
+    // no claim to anchor them.
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    await router.materializeSignal(
+      factSignal({
+        raw_payload: {
+          excerpt: "Fact with stray claim-bearing refs.",
+          distilled_fact: "Fact with stray claim-bearing refs.",
+          source_memory_refs: ["mem-prior-1"],
+          supersedes_refs: ["mem-old-1"],
+          exception_to_refs: ["mem-rule-2"],
+          contradicts_refs: ["mem-conflict-3"],
+          incompatible_with_refs: ["mem-incompat-4"]
+        }
+      })
+    );
+
+    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args) => args[0]);
+    const edgeTypes = new Set(calls.map((edge) => edge.edgeType));
+    expect(edgeTypes.has("derives_from")).toBe(true);
+    expect(edgeTypes.has("supersedes")).toBe(false);
+    expect(edgeTypes.has("exception_to")).toBe(false);
+    expect(edgeTypes.has("contradicts")).toBe(false);
+    expect(edgeTypes.has("incompatible_with")).toBe(false);
+  });
+
+  it("ADD verdict (reconciled path) also creates derives_from edges from source_memory_refs", async () => {
+    // invariant: parity with the append branch. The reconciled-ADD path
+    // mints a fresh memory_entry and must honor source_memory_refs so D-1
+    // attribution covers both append and reconciled-add flows. UPDATE /
+    // NOOP do not mint a new memory_entry and intentionally skip edges.
+    const deps = createDeps();
+    const { reconciliationPort } = fakeReconciliationPort({ kind: "add" });
+    const router = new MaterializationRouter({ ...deps, reconciliationPort });
+
+    await router.materializeSignal(
+      factSignal({
+        raw_payload: {
+          excerpt: "Derived fact under reconciliation.",
+          distilled_fact: "Derived fact under reconciliation.",
+          source_memory_refs: ["mem-prior-r1"]
+        }
+      })
+    );
+
+    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args) => args[0]);
+    const derivesFromEdges = calls.filter((edge) => edge.edgeType === "derives_from");
+    expect(derivesFromEdges).toHaveLength(1);
+    expect(derivesFromEdges[0]).toMatchObject({
+      sourceMemoryId: "memory-1",
+      targetMemoryId: "mem-prior-r1"
+    });
+  });
+
+  it("UPDATE verdict (reconciled path) does not create derives_from edges", async () => {
+    // invariant: UPDATE rewrites an existing memory in place and does not
+    // mint a new memory_entry endpoint. Creating a derives_from edge from
+    // the surviving id would invent provenance the producer did not assert.
+    const deps = createDeps();
+    const { reconciliationPort } = fakeReconciliationPort({
+      kind: "update",
+      survivingObjectId: "memory-existing"
+    });
+    const router = new MaterializationRouter({ ...deps, reconciliationPort });
+
+    await router.materializeSignal(
+      factSignal({
+        raw_payload: {
+          excerpt: "Updated fact.",
+          distilled_fact: "Updated fact.",
+          source_memory_refs: ["mem-prior-u1"]
+        }
+      })
+    );
+
+    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args) => args[0]);
+    expect(calls.filter((edge) => edge.edgeType === "derives_from")).toEqual([]);
+  });
+
+  it("NOOP verdict (reconciled path) does not create derives_from edges", async () => {
+    // invariant: NOOP mints no fresh memory_entry and no fresh evidence;
+    // there is no edge endpoint to anchor a derives_from on.
+    const deps = createDeps();
+    const { reconciliationPort } = fakeReconciliationPort({
+      kind: "noop",
+      survivingObjectId: "memory-existing"
+    });
+    const router = new MaterializationRouter({ ...deps, reconciliationPort });
+
+    await router.materializeSignal(
+      factSignal({
+        raw_payload: {
+          excerpt: "Duplicate fact.",
+          distilled_fact: "Duplicate fact.",
+          source_memory_refs: ["mem-prior-n1"]
+        }
+      })
+    );
+
+    const calls = deps.graphEdgePort.createEdge.mock.calls.map((args) => args[0]);
+    expect(calls.filter((edge) => edge.edgeType === "derives_from")).toEqual([]);
   });
 
   it("ADD verdict creates the evidence capsule then the memory entry", async () => {

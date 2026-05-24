@@ -651,6 +651,21 @@ export class MaterializationRouter {
       );
       createdObjects.push({ object_kind: memory.object_kind, object_id: memory.object_id });
 
+      // invariant: source_memory_refs honored on every memory-creating
+      // materialization branch, not only memory_and_claim. The 40% of
+      // bench-seed object_kinds that route through memory_entry_only
+      // (fact / procedure / hazard / etc.) were silently dropping their
+      // caller-explicit derives_from hints, distorting D-1 KPI attribution.
+      // Only derives_from is created here — the four claim-bearing edge
+      // hints (supersedes / exception_to / contradicts / incompatible_with)
+      // remain exclusive to materializeMemoryAndClaim because their
+      // governance only makes sense with an attached claim.
+      await this.createSourceMemoryEdges(
+        memory.object_id,
+        signal,
+        MemoryGraphEdgeType.DERIVES_FROM
+      );
+
       const timeConcernProposal = await this.createTimeConcernPathRelationProposal(
         memory.object_id,
         signal
@@ -750,6 +765,17 @@ export class MaterializationRouter {
       );
 
       if (appendedMemoryId !== undefined) {
+        // invariant: parity with materializeMemoryEntryAppend — the ADD
+        // verdict creates a fresh memory_entry and must honor the
+        // caller-explicit source_memory_refs hints so D-1 KPI attribution
+        // covers both the append and the reconciled-add paths. UPDATE and
+        // NOOP intentionally do not create new derives_from edges because
+        // they do not mint a new memory_entry endpoint.
+        await this.createSourceMemoryEdges(
+          appendedMemoryId,
+          signal,
+          MemoryGraphEdgeType.DERIVES_FROM
+        );
         const timeConcernProposal = await this.createTimeConcernPathRelationProposal(
           appendedMemoryId,
           signal

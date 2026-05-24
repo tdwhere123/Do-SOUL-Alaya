@@ -179,7 +179,13 @@ export async function runLongMemEvalCrossQuestion(
               hasAnswer: round.hasAnswer
             });
           }
-          previousTurnSeedMemoryIds = seedResult.seeds.map((seed) => seed.memoryId);
+          // invariant: only the first seed of the previous turn carries the
+          // derives_from link to the next turn. see also: longmemeval/runner.ts
+          //   previousTurnSeedMemoryIds — same N x M edge-blowup rationale.
+          previousTurnSeedMemoryIds =
+            seedResult.seeds.length > 0 && seedResult.seeds[0] !== undefined
+              ? [seedResult.seeds[0].memoryId]
+              : [];
         }
       }
 
