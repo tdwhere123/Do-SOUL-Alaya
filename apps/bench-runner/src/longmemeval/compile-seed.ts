@@ -1001,3 +1001,35 @@ export function buildSessionSynthesisInput(input: {
     summary
   };
 }
+
+/**
+ * @anchor longmemeval-d1-fanout — adjacent-turn derives_from handoff
+ *
+ * Compute the sourceMemoryRefs for the next turn's seed signal, given the
+ * seed result of the current turn. Single-id semantics by design: only the
+ * first seed of the current turn carries the derives_from link into the
+ * next turn's signal.
+ *
+ * invariant: returned array length is 0 or 1 — never the union of every
+ * fact in the current turn. Unioning N facts per turn would create
+ * N x M edges per adjacent pair and scale as
+ * session_count * turn_count * fact_per_turn^2; on a 500q LongMemEval run
+ * that breaches the WSL2 memory ceiling. D-1's intent is "adjacent
+ * sentence derives_from", not "every fact derives from every prior fact".
+ *
+ * invariant: returns [] when the current turn produced no seeds — the
+ * caller treats [] as "no prior turn", emitting the next signal with
+ * sourceMemoryRefs omitted (undefined), which is the same shape used for
+ * the very first turn of a session and for the first turn of a new
+ * session after a session boundary reset.
+ *
+ * see also: apps/bench-runner/src/longmemeval/runner.ts previousTurnSeedMemoryIds
+ * see also: apps/bench-runner/src/longmemeval/multiturn.ts previousTurnSeedMemoryIds
+ * see also: apps/bench-runner/src/longmemeval/crossquestion.ts previousTurnSeedMemoryIds
+ */
+export function computeNextTurnSeedRefs(
+  seedResult: Readonly<Pick<CompileSeedResult, "seeds">>
+): readonly string[] {
+  const first = seedResult.seeds.length > 0 ? seedResult.seeds[0] : undefined;
+  return first !== undefined ? [first.memoryId] : [];
+}

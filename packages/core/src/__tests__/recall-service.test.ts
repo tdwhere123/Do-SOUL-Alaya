@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ControlPlaneObjectKind,
   MemoryDimension,
+  MemoryGovernanceEventType,
   ObjectLifecycleState,
   RecallContextEventType,
   ProjectMappingState,
@@ -2945,11 +2946,17 @@ describe("RecallService", () => {
         },
         entityExtractionPort: {
           extract: async () => [
+            // Quoted kind (confidence 1.0) clears the
+            // ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR — strong entities are
+            // eligible to seed graph_expansion fan-in. Weak kinds
+            // (proper_noun=0.7 / cjk_phrase=0.6 / unknown=0.35) are
+            // covered by the dedicated isWeakEntityOnlyDraft tests below.
+            // see also: packages/core/src/entity-extraction-rules.ts CONFIDENCE_QUOTED
             Object.freeze({
               surface: "MaterializationRouter",
               normalized: "materializationrouter",
-              kind: "proper_noun" as const,
-              confidence: 0.7
+              kind: "quoted" as const,
+              confidence: 1.0
             })
           ]
         }
@@ -3064,26 +3071,22 @@ describe("RecallService", () => {
       const writtenEventTypes = appendSpy.mock.calls.map(
         (args: readonly unknown[]) => (args[0] as { event_type: string }).event_type
       );
-      // invariant: zero governance / persistence writes from the recall
-      // read path. Recall is allowed to emit RECALL_CONTEXT diagnostic
-      // events; any of the listed mutation kinds would breach the truth
-      // boundary on the entity_seed plane.
-      // see also: docs/handbook/invariants.md (memory ontology is durable
-      // truth; recall is a projection)
-      expect(
-        writtenEventTypes.filter((kind: string) =>
-          kind === "SOUL_PROPOSAL_CREATED" ||
-          kind === "SOUL_PROPOSAL_RESOLVED" ||
-          kind === "SOUL_MEMORY_UPDATED" ||
-          kind === "SOUL_MEMORY_CREATED" ||
-          kind === "SOUL_MEMORY_DELETED" ||
-          kind === "SOUL_GRAPH_EDGE_CREATED" ||
-          kind === "SOUL_GRAPH_EDGE_RETIRED" ||
-          kind === "SOUL_EVIDENCE_CREATED" ||
-          kind === "SOUL_EVIDENCE_RETIRED" ||
-          kind === "SOUL_CLAIM_CREATED" ||
-          kind === "SOUL_CLAIM_UPDATED"
+      // invariant: recall read path emits zero MemoryGovernanceEventType
+      // mutation events; only RECALL_CONTEXT diagnostic events are allowed.
+      // invariant: blacklist derives from MemoryGovernanceEventType enum
+      // values via the mutation-suffix regex below; the enum is the
+      // single source of truth, not a hand-curated string list.
+      // see also: docs/handbook/invariants.md (memory ontology = durable truth)
+      // see also: packages/protocol/src/events/memory-governance.ts
+      const TRUTH_MUTATION_EVENT_TYPES = new Set<string>(
+        Object.values(MemoryGovernanceEventType).filter((value) =>
+          /\.(created|updated|deleted|retired|resolved|archived|state_changed|tier_changed|tier_promoted|retention_updated|manifestation_changed|status_changed|promoted|health_changed|lifecycle_changed|contested|won|superseded)$/.test(
+            value
+          )
         )
+      );
+      expect(
+        writtenEventTypes.filter((kind: string) => TRUTH_MUTATION_EVENT_TYPES.has(kind))
       ).toEqual([]);
     });
 
@@ -3247,13 +3250,15 @@ describe("RecallService", () => {
       expect(lexicalContribution).toBeGreaterThan(0);
     });
 
-    it("fans a strong entity (>= 0.85) into graph_expansion", async () => {
-      // invariant: a quoted surface (confidence 1.0) is above
-      // ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR and must fan its
-      // entity-derived seed into graph_expansion as an extra seed.
-      // A floor that erroneously rejects strong entities would surface
-      // here as the neighbor missing from graph_expansion admissions.
-      // see also: ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR
+    it("excludes a weak entity-only draft from graph_expansion fan-in (Fix-5b path 1)", async () => {
+      // invariant: when the only non-activation admission is entity_seed
+      // and the strongest entity confidence is below
+      // ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR (0.85), the draft must NOT
+      // seed graph_expansion. Without this gate, a weak cjk_phrase /
+      // proper_noun surface (confidence 0.35-0.7) admitted ONLY on
+      // entity_seed would still feed selectExpansionSeedDrafts (path 1) and
+      // compound surface manipulation across 1-hop neighbors.
+      // see also: packages/core/src/recall-service.ts isWeakEntityOnlyDraft
       const memories = [
         createMemoryEntry({
           object_id: "memory-anchor",
@@ -3271,12 +3276,19 @@ describe("RecallService", () => {
         })
       ];
       const { dependencies } = createDependencies(memories);
-      const searchByKeywordWithinObjectIds = vi.fn(async (_workspace: string, query: string) => {
-        if (query.toLowerCase().includes("materializationrouter")) {
-          return [{ object_id: "memory-anchor", normalized_rank: 0.9 }];
+      // searchByKeyword is only hit by the entity-seed pass (queried with
+      // the surface "MaterializationRouter"). Returning nothing for any
+      // other query isolates the entity_seed plane as the sole admission
+      // path for memory-anchor — no lexical / object_probe / evidence
+      // overlap can co-admit and rescue it past the weak-entity-only check.
+      const searchByKeywordWithinObjectIds = vi.fn(
+        async (_workspace: string, query: string) => {
+          if (query === "MaterializationRouter") {
+            return [{ object_id: "memory-anchor", normalized_rank: 0.9 }];
+          }
+          return [];
         }
-        return [];
-      });
+      );
       const findByMemoryId = vi.fn(async (memoryId: string) => {
         if (memoryId === "memory-anchor") {
           return [
@@ -3311,8 +3323,9 @@ describe("RecallService", () => {
             Object.freeze({
               surface: "MaterializationRouter",
               normalized: "materializationrouter",
-              kind: "quoted" as const,
-              confidence: 1.0
+              kind: "proper_noun" as const,
+              // 0.7 < 0.85 floor.
+              confidence: 0.7
             })
           ]
         }
@@ -3321,12 +3334,127 @@ describe("RecallService", () => {
       const result = await service.recall({
         taskSurface: {
           ...createTaskSurface(),
+          // Deliberately avoid mentioning the entity surface so the
+          // tier-level activation does not pre-admit memory-anchor on a
+          // non-entity plane and accidentally satisfy the gate.
+          display_name: "describe the binding"
+        },
+        workspaceId: "workspace-1",
+        strategy: "chat"
+      });
+
+      const anchorDiag = result.diagnostics?.candidates.find(
+        (c) => c.object_id === "memory-anchor"
+      );
+      // The anchor still admits on the entity_seed plane (diagnostics
+      // distinguish the entity-seed-only case).
+      expect(anchorDiag?.admission_planes).toContain("entity_seed");
+      // invariant: the weak entity-only anchor must NEVER be asked to fan
+      // into graph_expansion. Other unrelated tier memories may still be
+      // ranked as seeds by selectExpansionSeedDrafts via their own non-
+      // entity admission planes (activation / lexical), so the assertion
+      // is targeted at this specific seed memory, not at the port at all.
+      const anchorFanCalls = findByMemoryId.mock.calls.filter(
+        (call) => call[0] === "memory-anchor"
+      );
+      expect(anchorFanCalls).toEqual([]);
+    });
+
+    it("admits a weak entity into graph_expansion when a co-admitting plane carries it (Fix-5b)", async () => {
+      // invariant: the weak-entity-only floor in selectExpansionSeedDrafts
+      // ONLY excludes drafts whose sole non-activation admission is
+      // entity_seed. A weak entity that is also admitted via lexical_fts
+      // (or evidence_anchor, source_proximity, etc.) survives — the
+      // co-admitting plane is independent corroboration that the surface
+      // is meaningfully present in the corpus.
+      // see also: packages/core/src/recall-service.ts isWeakEntityOnlyDraft
+      const memories = [
+        createMemoryEntry({
+          object_id: "memory-anchor",
+          dimension: MemoryDimension.PROCEDURE,
+          scope_class: ScopeClass.PROJECT,
+          domain_tags: ["repo"],
+          content: "MaterializationRouter binds memory creation."
+        }),
+        createMemoryEntry({
+          object_id: "memory-neighbor",
+          dimension: MemoryDimension.FACT,
+          scope_class: ScopeClass.PROJECT,
+          domain_tags: ["repo"],
+          content: "Downstream consumer of MaterializationRouter outcomes."
+        })
+      ];
+      const { dependencies } = createDependencies(memories);
+      // searchByKeywordWithinObjectIds is called for both the lexical FTS
+      // supplement (queryText) AND the entity-seed pass (entity surface).
+      // The same hit shows up on BOTH lanes — entity_seed admits the
+      // anchor AND lexical co-admits it. The weak-entity-only gate must
+      // not fire because a non-entity plane co-admitted.
+      const searchByKeywordWithinObjectIds = vi.fn(async () => [
+        { object_id: "memory-anchor", normalized_rank: 0.9 }
+      ]);
+      const findByMemoryId = vi.fn(async (memoryId: string) => {
+        if (memoryId === "memory-anchor") {
+          return [
+            {
+              object_id: "edge-1",
+              object_kind: "memory_graph_edge" as const,
+              schema_version: 1,
+              lifecycle_state: "active" as const,
+              created_at: "2026-03-23T00:00:00.000Z",
+              updated_at: "2026-03-23T00:00:00.000Z",
+              created_by: "system",
+              workspace_id: "workspace-1",
+              edge_type: "derives_from" as const,
+              source_memory_id: "memory-anchor",
+              target_memory_id: "memory-neighbor",
+              confidence: 0.8
+            }
+          ];
+        }
+        return [];
+      });
+
+      const service = new RecallService({
+        ...dependencies,
+        memoryRepo: {
+          ...dependencies.memoryRepo,
+          searchByKeywordWithinObjectIds
+        },
+        graphExpansionPort: { findByMemoryId },
+        entityExtractionPort: {
+          extract: async () => [
+            Object.freeze({
+              surface: "MaterializationRouter",
+              normalized: "materializationrouter",
+              kind: "proper_noun" as const,
+              // Weak per Fix-5b's gate.
+              confidence: 0.7
+            })
+          ]
+        }
+      });
+
+      const result = await service.recall({
+        taskSurface: {
+          ...createTaskSurface(),
+          // Include the surface so the lexical FTS supplement also returns
+          // the anchor — that is the "co-admitting plane" survival path.
           display_name: "How does MaterializationRouter coordinate writes?"
         },
         workspaceId: "workspace-1",
         strategy: "chat"
       });
 
+      const anchorDiag = result.diagnostics?.candidates.find(
+        (c) => c.object_id === "memory-anchor"
+      );
+      // Confirm BOTH planes admitted — this is the precondition for the
+      // co-admitting-plane survival branch to apply.
+      expect(anchorDiag?.admission_planes).toContain("entity_seed");
+      expect(anchorDiag?.admission_planes).toContain("lexical");
+      // With co-admission present, the weak entity confidence does not
+      // block graph_expansion fan-in.
       const neighborDiag = result.diagnostics?.candidates.find(
         (c) => c.object_id === "memory-neighbor"
       );

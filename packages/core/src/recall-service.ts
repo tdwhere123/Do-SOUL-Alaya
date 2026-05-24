@@ -205,6 +205,13 @@ interface CoarseCandidateDraft {
   readonly sourceChannels: readonly string[];
   readonly structuralScore: number;
   readonly pathExpansionSources: readonly RecallPathExpansionSourceDiagnostic[];
+  // invariant: the strongest entity-extractor confidence (0..1) observed when
+  // this draft was admitted via the entity_seed plane; undefined when no
+  // entity_seed admission has occurred. selectExpansionSeedDrafts uses this
+  // to gate entity-only drafts out of graph_expansion fan-in when the entity
+  // confidence falls below ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR.
+  // see also: collectEntityDerivedSeeds (graph_expansion seed extraSeedMemoryIds path)
+  readonly entityConfidence?: number;
 }
 
 interface SourceProximitySeedDraft {
@@ -217,7 +224,10 @@ type CoarseCandidateAdder = (
   plane: RecallAdmissionPlane,
   structuralScore?: number,
   sourceChannel?: string,
-  pathExpansionSource?: RecallPathExpansionSourceDiagnostic
+  pathExpansionSource?: RecallPathExpansionSourceDiagnostic,
+  // invariant: only forwarded for plane === "entity_seed" by
+  // collectEntityDerivedSeeds; other planes leave this undefined.
+  entityConfidence?: number
 ) => void;
 
 export class RecallService {
@@ -694,7 +704,8 @@ export class RecallService {
       plane: RecallAdmissionPlane,
       structuralScore = 0,
       sourceChannel?: string,
-      pathExpansionSource?: RecallPathExpansionSourceDiagnostic
+      pathExpansionSource?: RecallPathExpansionSourceDiagnostic,
+      entityConfidence?: number
     ): void => {
       if (
         plane !== "protected_winner" &&
@@ -718,6 +729,13 @@ export class RecallService {
           ? Math.min(planeScore, SOURCE_PROXIMITY_STRUCTURAL_CARRY_MAX)
           : planeScore;
       const nextStructuralScore = Math.max(current?.structuralScore ?? 0, evidenceStructuralScore);
+      // invariant: keep the strongest entity_seed confidence observed for
+      // this memory id. Other planes never overwrite a real entityConfidence
+      // with undefined. see also: selectExpansionSeedDrafts entity-only floor.
+      const nextEntityConfidence =
+        plane === "entity_seed" && entityConfidence !== undefined
+          ? Math.max(current?.entityConfidence ?? 0, entityConfidence)
+          : current?.entityConfidence;
       drafts.set(entry.object_id, {
         entry,
         admissionPlanes: uniquePlanes([...(current?.admissionPlanes ?? []), plane]),
@@ -730,7 +748,8 @@ export class RecallService {
         pathExpansionSources: uniquePathExpansionSources([
           ...(current?.pathExpansionSources ?? []),
           ...(pathExpansionSource === undefined ? [] : [pathExpansionSource])
-        ])
+        ]),
+        ...(nextEntityConfidence === undefined ? {} : { entityConfidence: nextEntityConfidence })
       });
       structuralScores.set(
         entry.object_id,
@@ -1473,7 +1492,11 @@ export class RecallService {
         // a single surface term from claiming two fusion-stream rank slots.
         const hasLexicalOverlap = (params.lexicalFtsRanks.get(hit.object_id) ?? 0) > 0;
         const score = hasLexicalOverlap ? 0 : rawScore;
-        params.addCandidate(entry, "entity_seed", score, "entity_seed");
+        // The 6th argument (entityConfidence) lets the draft pool reason
+        // about gating entity-only weak admissions out of graph_expansion
+        // fan-in via the path-1 (selectExpansionSeedDrafts) seed pool.
+        // see also: selectExpansionSeedDrafts ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR
+        params.addCandidate(entry, "entity_seed", score, "entity_seed", undefined, entity.confidence);
         const previous = seedConfidenceById.get(entry.object_id) ?? 0;
         if (entity.confidence > previous) {
           seedConfidenceById.set(entry.object_id, entity.confidence);
@@ -3782,18 +3805,53 @@ function selectExpansionSeedDrafts(
   drafts: ReadonlyMap<string, CoarseCandidateDraft>
 ): readonly Readonly<CoarseCandidateDraft>[] {
   const ranked = rankCoarseCandidateDrafts([...drafts.values()]);
+<<<<<<< HEAD
   const preferred = ranked
     .filter((draft) =>
       draft.admissionPlanes.some(
         (plane) => plane !== "activation" && plane !== "semantic_supplement"
       ) || draft.structuralScore > 0
     )
+=======
+  // invariant: a draft whose ONLY non-activation admission is entity_seed,
+  // and whose strongest observed entity confidence is below the floor, must
+  // not seed graph_expansion. Mirrors collectEntityDerivedSeeds's confidence
+  // gate on the extraSeedMemoryIds path — without this, a weak cjk_phrase /
+  // proper_noun query surface (confidence 0.35-0.7) that hit only the
+  // entity-FTS lane would still fan into the graph via path (1) and let
+  // an attacker compound surface manipulation across 1-hop neighbors.
+  // see also: ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR, addGraphExpansionCandidates
+  const survivors = ranked.filter((draft) => !isWeakEntityOnlyDraft(draft));
+  const preferred = survivors
+    .filter((draft) => draft.admissionPlanes.some((plane) => plane !== "activation") || draft.structuralScore > 0)
+>>>>>>> 9d40efc (fix(core+test): phase 6a fix-loop round 2 — close 2 Important + 1 Nice-to-have)
     .slice(0, DYNAMIC_RECALL_SEED_CAP);
   const preferredIds = new Set(preferred.map((draft) => draft.entry.object_id));
   return [
     ...preferred,
-    ...ranked.filter((draft) => !preferredIds.has(draft.entry.object_id))
+    ...survivors.filter((draft) => !preferredIds.has(draft.entry.object_id))
   ].slice(0, DYNAMIC_RECALL_SEED_CAP);
+}
+
+// anchor: entity-only graph_expansion floor. A draft is "weak entity-only"
+// when its admission_planes contain entity_seed and NO other non-activation
+// plane co-admitted (no lexical, object_probe, evidence_anchor, etc.) and
+// the strongest entity confidence is below the floor. Drafts with a real
+// co-admitting plane (lexical hit, structural agreement, etc.) survive,
+// even when the entity confidence is weak.
+function isWeakEntityOnlyDraft(draft: Readonly<CoarseCandidateDraft>): boolean {
+  const planes = draft.admissionPlanes;
+  if (!planes.includes("entity_seed")) {
+    return false;
+  }
+  const hasNonEntitySupport = planes.some(
+    (plane) => plane !== "entity_seed" && plane !== "activation"
+  );
+  if (hasNonEntitySupport) {
+    return false;
+  }
+  const confidence = draft.entityConfidence ?? 0;
+  return confidence < ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR;
 }
 
 function selectSourceProximitySeedDrafts(

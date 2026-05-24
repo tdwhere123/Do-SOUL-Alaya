@@ -37,6 +37,7 @@ import { pairSessionIntoRounds, type LongMemEvalVariant } from "./dataset.js";
 import { loadDataset, type FetchResult } from "./fetch.js";
 import { resolveBenchEmbeddingProviderLabel } from "./runner.js";
 import {
+  computeNextTurnSeedRefs,
   createCompileSeedRunner,
   toSeedExtractionPathKpi
 } from "./compile-seed.js";
@@ -179,13 +180,9 @@ export async function runLongMemEvalCrossQuestion(
               hasAnswer: round.hasAnswer
             });
           }
-          // invariant: only the first seed of the previous turn carries the
-          // derives_from link to the next turn. see also: longmemeval/runner.ts
-          //   previousTurnSeedMemoryIds — same N x M edge-blowup rationale.
-          previousTurnSeedMemoryIds =
-            seedResult.seeds.length > 0 && seedResult.seeds[0] !== undefined
-              ? [seedResult.seeds[0].memoryId]
-              : [];
+          // invariant: single-id D-1 fan-out. see also:
+          //   apps/bench-runner/src/longmemeval/compile-seed.ts computeNextTurnSeedRefs
+          previousTurnSeedMemoryIds = computeNextTurnSeedRefs(seedResult);
         }
       }
 

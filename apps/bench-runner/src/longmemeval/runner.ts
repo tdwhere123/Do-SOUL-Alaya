@@ -69,6 +69,7 @@ import { loadDataset, type FetchResult } from "./fetch.js";
 import { pairSessionIntoRounds, type LongMemEvalVariant } from "./dataset.js";
 import {
   buildSessionSynthesisInput,
+  computeNextTurnSeedRefs,
   createCompileSeedRunner,
   toSeedExtractionPathKpi,
   type CompileSeedRunner,
@@ -313,18 +314,10 @@ export async function runLongMemEval(
               evidenceId: seed.evidenceId
             });
           }
-          // invariant: only the first seed of the previous turn carries the
-          // derives_from link to the next turn. Unioning every fact of turn N
-          // with every fact of turn N-1 produces N x M edges per turn, which
-          // scales as session_count * turn_count * fact_per_turn^2 and breaches
-          // the WSL2 memory ceiling on 500q runs. D-1 design intent is
-          // "adjacent sentence derives_from", not "every fact derives from
-          // every prior fact". see also: apps/bench-runner/src/locomo/runner.ts
-          //   previousTurnSeedMemoryIds (same single-id semantics).
-          previousTurnSeedMemoryIds =
-            seedResult.seeds.length > 0 && seedResult.seeds[0] !== undefined
-              ? [seedResult.seeds[0].memoryId]
-              : [];
+          // invariant: single-id D-1 fan-out. see also:
+          //   apps/bench-runner/src/longmemeval/compile-seed.ts computeNextTurnSeedRefs
+          //   apps/bench-runner/src/locomo/runner.ts previousTurnSeedMemoryIds
+          previousTurnSeedMemoryIds = computeNextTurnSeedRefs(seedResult);
         }
 
         // L2 synthesis seed: emit ONE session-level synthesis capsule pointing

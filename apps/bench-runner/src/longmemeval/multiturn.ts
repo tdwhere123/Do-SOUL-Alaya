@@ -43,6 +43,7 @@ import {
 } from "./runner.js";
 import {
   buildSessionSynthesisInput,
+  computeNextTurnSeedRefs,
   createCompileSeedRunner,
   toSeedExtractionPathKpi,
   type CompileSeedRunner,
@@ -186,13 +187,9 @@ export async function runLongMemEvalMultiturn(
               evidenceId: seed.evidenceId
             });
           }
-          // invariant: only the first seed of the previous turn carries the
-          // derives_from link to the next turn. see also: longmemeval/runner.ts
-          //   previousTurnSeedMemoryIds — same N x M edge-blowup rationale.
-          previousTurnSeedMemoryIds =
-            seedResult.seeds.length > 0 && seedResult.seeds[0] !== undefined
-              ? [seedResult.seeds[0].memoryId]
-              : [];
+          // invariant: single-id D-1 fan-out. see also:
+          //   apps/bench-runner/src/longmemeval/compile-seed.ts computeNextTurnSeedRefs
+          previousTurnSeedMemoryIds = computeNextTurnSeedRefs(seedResult);
         }
 
         // L2 synthesis seed — see runner.ts for the rationale. The synthesis
