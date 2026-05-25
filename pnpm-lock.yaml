@@ -29,6 +29,9 @@ importers:
       '@do-soul/alaya':
         specifier: workspace:*
         version: link:../core-daemon
+      '@do-soul/alaya-core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@do-soul/alaya-eval':
         specifier: workspace:*
         version: link:../../packages/eval
