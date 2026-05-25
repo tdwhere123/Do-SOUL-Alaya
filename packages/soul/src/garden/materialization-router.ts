@@ -1,4 +1,5 @@
 import {
+  EdgeProposalTriggerSource,
   EvidenceHealthState,
   MemoryDimension,
   MemoryGraphEdgeType,
@@ -8,6 +9,7 @@ import {
   StorageTier,
   type CandidateMemorySignal,
   type ClaimForm,
+  type EdgeProposalTriggerSourceValue,
   type ClaimKind,
   type EnforcementLevel as EnforcementLevelValue,
   type EvidenceCapsule,
@@ -174,6 +176,19 @@ export interface GraphEdgeCreationPort {
     readonly edgeType: MemoryGraphEdgeTypeValue;
     readonly workspaceId: string;
     readonly runId?: string | null;
+    readonly triggerSource?: EdgeProposalTriggerSourceValue;
+    readonly confidence?: number;
+    readonly reason?: string | null;
+    readonly sourceSignalId?: string | null;
+  }): Promise<void>;
+}
+
+export interface EdgeAutoProducerPort {
+  produceForNewMemory(params: {
+    readonly newMemoryId: string;
+    readonly workspaceId: string;
+    readonly runId: string;
+    readonly sourceSignalId: string;
   }): Promise<void>;
 }
 
@@ -260,6 +275,7 @@ export interface MaterializationRouterDeps {
   readonly pathRelationProposalPort?: PathRelationProposalPort;
   readonly handoffGapHandler: HandoffGapHandler;
   readonly graphEdgePort?: GraphEdgeCreationPort;
+  readonly edgeAutoProducerPort?: EdgeAutoProducerPort;
   readonly conflictDetectionPort?: ConflictDetectionPort;
   readonly reconciliationPort?: ReconciliationPort;
 }
@@ -438,48 +454,8 @@ export class MaterializationRouter {
       );
       createdObjects.push({ object_kind: claim.object_kind, object_id: claim.object_id });
 
-      // Create derives_from edges to any memory IDs the model tagged in raw_payload.source_memory_refs.
-      // memory_graph_edges is memory↔memory (migration 025 FK both ends → memory_entries),
-      // so evidence ids cannot be edge endpoints here — invariants §8 (memory↔evidence) is
-      // captured by memory.evidence_refs / claim.source_object_refs, not by a graph edge.
-      await this.createSourceMemoryEdges(
-        memory.object_id,
-        signal,
-        MemoryGraphEdgeType.DERIVES_FROM
-      );
-      // invariant: caller-explicit ontology hints land here. Each
-      // raw_payload.*_refs key maps 1:1 to a MemoryGraphEdgeType:
-      //   supersedes_refs        → SUPERSEDES (new replaces old)
-      //   exception_to_refs      → EXCEPTION_TO (new is exception of old)
-      //   contradicts_refs       → CONTRADICTS (new contradicts old)
-      //   incompatible_with_refs → INCOMPATIBLE_WITH (cross-dimension)
-      // see also: createEdgesFromRawPayloadRefs
-      // see also: ConflictDetectionService — rule-based + LLM producer
-      //   for contradicts / incompatible_with on top of these hints.
-      await this.createEdgesFromRawPayloadRefs(
-        memory.object_id,
-        signal,
-        "supersedes_refs",
-        MemoryGraphEdgeType.SUPERSEDES
-      );
-      await this.createEdgesFromRawPayloadRefs(
-        memory.object_id,
-        signal,
-        "exception_to_refs",
-        MemoryGraphEdgeType.EXCEPTION_TO
-      );
-      await this.createEdgesFromRawPayloadRefs(
-        memory.object_id,
-        signal,
-        "contradicts_refs",
-        MemoryGraphEdgeType.CONTRADICTS
-      );
-      await this.createEdgesFromRawPayloadRefs(
-        memory.object_id,
-        signal,
-        "incompatible_with_refs",
-        MemoryGraphEdgeType.INCOMPATIBLE_WITH
-      );
+      await this.createAllMemoryRefEdges(memory.object_id, signal);
+      await this.runEdgeAutoProducer(memory.object_id, signal);
       const timeConcernProposal = await this.createTimeConcernPathRelationProposal(
         memory.object_id,
         signal
@@ -651,20 +627,8 @@ export class MaterializationRouter {
       );
       createdObjects.push({ object_kind: memory.object_kind, object_id: memory.object_id });
 
-      // invariant: source_memory_refs honored on every memory-creating
-      // materialization branch, not only memory_and_claim. The 40% of
-      // bench-seed object_kinds that route through memory_entry_only
-      // (fact / procedure / hazard / etc.) were silently dropping their
-      // caller-explicit derives_from hints, distorting D-1 KPI attribution.
-      // Only derives_from is created here — the four claim-bearing edge
-      // hints (supersedes / exception_to / contradicts / incompatible_with)
-      // remain exclusive to materializeMemoryAndClaim because their
-      // governance only makes sense with an attached claim.
-      await this.createSourceMemoryEdges(
-        memory.object_id,
-        signal,
-        MemoryGraphEdgeType.DERIVES_FROM
-      );
+      await this.createAllMemoryRefEdges(memory.object_id, signal);
+      await this.runEdgeAutoProducer(memory.object_id, signal);
 
       const timeConcernProposal = await this.createTimeConcernPathRelationProposal(
         memory.object_id,
@@ -765,17 +729,8 @@ export class MaterializationRouter {
       );
 
       if (appendedMemoryId !== undefined) {
-        // invariant: parity with materializeMemoryEntryAppend — the ADD
-        // verdict creates a fresh memory_entry and must honor the
-        // caller-explicit source_memory_refs hints so D-1 KPI attribution
-        // covers both the append and the reconciled-add paths. UPDATE and
-        // NOOP intentionally do not create new derives_from edges because
-        // they do not mint a new memory_entry endpoint.
-        await this.createSourceMemoryEdges(
-          appendedMemoryId,
-          signal,
-          MemoryGraphEdgeType.DERIVES_FROM
-        );
+        await this.createAllMemoryRefEdges(appendedMemoryId, signal);
+        await this.runEdgeAutoProducer(appendedMemoryId, signal);
         const timeConcernProposal = await this.createTimeConcernPathRelationProposal(
           appendedMemoryId,
           signal
@@ -850,6 +805,30 @@ export class MaterializationRouter {
       });
     } catch (err) {
       console.warn("materialization-router: conflict detection failed", {
+        memoryId,
+        signalId: signal.signal_id,
+        error: err instanceof Error ? err.message : String(err)
+      });
+    }
+  }
+
+  private async runEdgeAutoProducer(
+    memoryId: string,
+    signal: CandidateMemorySignal
+  ): Promise<void> {
+    const port = this.dependencies.edgeAutoProducerPort;
+    if (port === undefined) {
+      return;
+    }
+    try {
+      await port.produceForNewMemory({
+        newMemoryId: memoryId,
+        workspaceId: signal.workspace_id,
+        runId: signal.run_id,
+        sourceSignalId: signal.signal_id
+      });
+    } catch (err) {
+      console.warn("materialization-router: edge auto-producer failed", {
         memoryId,
         signalId: signal.signal_id,
         error: err instanceof Error ? err.message : String(err)
@@ -961,42 +940,65 @@ export class MaterializationRouter {
   }
 
   /**
-   * Creates graph edges from `newObjectId` to each memory ID listed in
-   * `signal.raw_payload.source_memory_refs`. Errors are silently swallowed —
-   * edge creation must never block or fail a materialization.
+   * Creates graph proposals for every first-class memory ref carried by
+   * a memory-creating signal. Errors are swallowed per edge: proposal
+   * creation must never block materialization of the memory itself.
    */
-  private async createSourceMemoryEdges(
+  private async createAllMemoryRefEdges(
     newObjectId: string,
-    signal: CandidateMemorySignal,
-    edgeType: MemoryGraphEdgeTypeValue
+    signal: CandidateMemorySignal
   ): Promise<void> {
-    await this.createEdgesFromRawPayloadRefs(
+    await this.createEdgesFromSignalRefs(
       newObjectId,
       signal,
       "source_memory_refs",
-      edgeType
+      MemoryGraphEdgeType.DERIVES_FROM
+    );
+    await this.createEdgesFromSignalRefs(
+      newObjectId,
+      signal,
+      "supersedes_refs",
+      MemoryGraphEdgeType.SUPERSEDES
+    );
+    await this.createEdgesFromSignalRefs(
+      newObjectId,
+      signal,
+      "exception_to_refs",
+      MemoryGraphEdgeType.EXCEPTION_TO
+    );
+    await this.createEdgesFromSignalRefs(
+      newObjectId,
+      signal,
+      "contradicts_refs",
+      MemoryGraphEdgeType.CONTRADICTS
+    );
+    await this.createEdgesFromSignalRefs(
+      newObjectId,
+      signal,
+      "incompatible_with_refs",
+      MemoryGraphEdgeType.INCOMPATIBLE_WITH
     );
   }
 
-  // see also: createSourceMemoryEdges — same shape but variable payload key
-  // and edge type. Used by materializeMemoryAndClaim to honor caller-supplied
-  // supersedes / exception_to / contradicts / incompatible_with hints.
-  private async createEdgesFromRawPayloadRefs(
+  // see also: createAllMemoryRefEdges — same shape for each signal key
+  // and edge type. First-class *_refs are proposal inputs, not raw_payload
+  // conventions.
+  private async createEdgesFromSignalRefs(
     newObjectId: string,
     signal: CandidateMemorySignal,
-    rawPayloadKey: string,
+    signalRefsKey: "source_memory_refs" | "supersedes_refs" | "exception_to_refs" | "contradicts_refs" | "incompatible_with_refs",
     edgeType: MemoryGraphEdgeTypeValue
   ): Promise<void> {
     if (this.dependencies.graphEdgePort === undefined) {
       return;
     }
 
-    const rawRefs = signal.raw_payload[rawPayloadKey];
-    if (!Array.isArray(rawRefs) || rawRefs.length === 0) {
+    const refs = signal[signalRefsKey];
+    if (refs.length === 0) {
       return;
     }
 
-    for (const ref of rawRefs) {
+    for (const ref of refs) {
       if (typeof ref !== "string" || ref.trim().length === 0 || ref === newObjectId) {
         continue;
       }
@@ -1007,7 +1009,11 @@ export class MaterializationRouter {
           targetMemoryId: ref,
           edgeType,
           workspaceId: signal.workspace_id,
-          runId: signal.run_id
+          runId: signal.run_id,
+          triggerSource: EdgeProposalTriggerSource.CANDIDATE_SIGNAL_REF,
+          confidence: Math.min(signal.confidence, 0.5),
+          reason: `${signalRefsKey} on candidate signal ${signal.signal_id}`,
+          sourceSignalId: signal.signal_id
         });
       } catch (err) {
         console.warn("materialization-router: graph edge creation failed", {
@@ -1330,8 +1336,7 @@ function hasUserOverrideMarker(signal: CandidateMemorySignal): boolean {
 }
 
 function hasSupersedeIntent(signal: CandidateMemorySignal): boolean {
-  const refs = signal.raw_payload.supersedes_refs;
-  return Array.isArray(refs) && refs.some((ref) => typeof ref === "string" && ref.trim().length > 0);
+  return signal.supersedes_refs.some((ref) => ref.trim().length > 0);
 }
 
 function buildSynthesisInput(
@@ -1406,10 +1411,7 @@ function toFormationKind(signal: CandidateMemorySignal): FormationKind {
       // model_tool signals carrying source_memory_refs build on top of
       // existing memories (a derivation); plain LLM emissions without
       // such refs are inferences.
-      return Array.isArray(signal.raw_payload?.source_memory_refs) &&
-        (signal.raw_payload.source_memory_refs as unknown[]).length > 0
-        ? "derived"
-        : "inferred";
+      return signal.source_memory_refs.length > 0 ? "derived" : "inferred";
     case "garden_compile":
     default:
       return "extracted";

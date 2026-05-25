@@ -30,10 +30,12 @@ import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic,
   rAt5WithProviderReturned,
+  renderCompactDiagnosticsSidecar,
   renderDiagnosticsSidecar,
   summarizeProviderStates,
   type LongMemEvalQuestionDiagnostic
 } from "./diagnostics.js";
+import { writeExternalDiagnosticsArtifact } from "./diagnostics-artifacts.js";
 import {
   isAbstentionQuestionId,
   scoreAbstentionQuestion
@@ -467,7 +469,8 @@ export async function runLongMemEvalCrossQuestion(
   const layout: HistoryLayout = { historyRoot: opts.historyRoot };
   const previous = await readLatest(layout, "public-crossquestion", {
     split: payload.split,
-    embeddingProvider: payload.embedding_provider
+    embeddingProvider: payload.embedding_provider,
+    pointerKind: "passing"
   });
   const diff = diffKpis(payload, previous);
   payload.diff_vs_previous = buildDiffVsPrevious(
@@ -478,7 +481,7 @@ export async function runLongMemEvalCrossQuestion(
   const slug = entrySlug(runAt, commitSha7);
   const report = renderReport(payload, previous, diff);
   const findings = renderFindings(payload, diff);
-  const diagnosticsSidecar = renderDiagnosticsSidecar({
+  const diagnosticsPayload = {
     schema_version: 1,
     bench_name: "public-crossquestion",
     split,
@@ -489,7 +492,19 @@ export async function runLongMemEvalCrossQuestion(
     embedding_mode: opts.embeddingMode ?? "disabled",
     provider_state_summary: providerSummary,
     questions: allDiagnostics
+  } as const;
+  const diagnosticsSidecar = renderDiagnosticsSidecar(diagnosticsPayload);
+  const diagnosticsArtifactPath = await writeExternalDiagnosticsArtifact({
+    historyRoot: opts.historyRoot,
+    benchName: "public-crossquestion",
+    slug,
+    filename: LONGMEMEVAL_DIAGNOSTICS_FILENAME,
+    contents: diagnosticsSidecar
   });
+  const compactDiagnosticsSidecar = renderCompactDiagnosticsSidecar(
+    diagnosticsPayload,
+    diagnosticsArtifactPath
+  );
 
   const entry = await writeEntry(
     layout,
@@ -502,7 +517,7 @@ export async function runLongMemEvalCrossQuestion(
       sidecars: [
         {
           filename: LONGMEMEVAL_DIAGNOSTICS_FILENAME,
-          contents: diagnosticsSidecar
+          contents: compactDiagnosticsSidecar
         }
       ]
     }

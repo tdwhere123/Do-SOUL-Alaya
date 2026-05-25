@@ -718,6 +718,7 @@ vi.mock("@do-soul/alaya-storage", async () => {
       return hoisted.eventLogRepo;
     }),
     SqliteSignalRepo: makeRepo(),
+    SqliteEdgeProposalRepo: makeRepo(),
     SqliteEvidenceCapsuleRepo: makeRepo(),
     SqliteMemoryEntryRepo: makeRepo(),
     SqliteMemoryGraphEdgeRepo: makeRepo(),
@@ -889,6 +890,17 @@ vi.mock("@do-soul/alaya-core", () => {
     }),
     EventPublisher: makeClass(),
     EvidenceService: makeClass(),
+    EdgeAutoProducerService: makeClass({
+      produceForNewMemory: vi.fn(async () => undefined)
+    }),
+    EdgeProposalService: makeClass({
+      proposeEdge: vi.fn(async () => ({
+        proposal_id: "edge-proposal-1",
+        status: "pending"
+      })),
+      listPending: vi.fn(async () => []),
+      batchReview: vi.fn(async () => ({ reviewed: [] }))
+    }),
     ExtensionRegistryService: vi.fn().mockImplementation(function ExtensionRegistryService() {
       return {
         registerProvider: vi.fn(async (provider: Readonly<ToolProvider>) => {

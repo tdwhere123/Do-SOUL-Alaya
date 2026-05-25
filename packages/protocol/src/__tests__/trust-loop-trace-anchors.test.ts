@@ -19,6 +19,11 @@ const signalPayloadBase = {
   run_id: "run-1",
   source: SignalSource.MODEL_TOOL,
   signal_kind: SignalKind.POTENTIAL_PREFERENCE,
+  source_memory_refs: [],
+  supersedes_refs: [],
+  exception_to_refs: [],
+  contradicts_refs: [],
+  incompatible_with_refs: [],
   raw_payload: { observation: "User prefers pnpm." }
 } as const;
 

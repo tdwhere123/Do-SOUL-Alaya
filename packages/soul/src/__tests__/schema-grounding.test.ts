@@ -21,6 +21,11 @@ function createSignal(overrides: Partial<CandidateMemorySignal> = {}): Candidate
     domain_tags: ["security"],
     confidence: 0.7,
     evidence_refs: [],
+    source_memory_refs: [],
+    supersedes_refs: [],
+    exception_to_refs: [],
+    contradicts_refs: [],
+    incompatible_with_refs: [],
     raw_payload: {
       matched_text: "Never print secrets."
     },

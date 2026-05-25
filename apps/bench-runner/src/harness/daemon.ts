@@ -173,19 +173,18 @@ export interface BenchSignalSeedInput {
    * @anchor bench-derives-from-injection
    *
    * Memory-entry object_ids whose previous-turn seed this signal derives
-   * from. The harness stamps `raw_payload.source_memory_refs = [...]` so
-   * materialization-router.ts createSourceMemoryEdges builds derives_from
-   * edges between adjacent turns of the same session. The rule is
+   * from. The harness stamps top-level `source_memory_refs = [...]` so
+   * materialization-router.ts createAllMemoryRefEdges builds derives_from
+   * proposals between adjacent turns of the same session. The rule is
    * holistic: any conversational memory system should treat adjacent
    * turns within one session as derives_from neighbors. Empty / absent
    * means no inherited refs (e.g. session's first turn).
    *
-   * Only the `memory_and_claim` materialization branch consumes this
-   * payload key today; the `memory_entry_only` branch ignores it, so the
-   * 60% bench-seed rotation slice (preference / decision / constraint)
-   * is where the edge actually lands.
+   * These refs are first-class CandidateMemorySignal fields, not
+   * raw_payload conventions; every memory-creating materialization branch
+   * consumes them.
    * see also: packages/soul/src/garden/materialization-router.ts
-   *   materializeMemoryAndClaim
+   *   createAllMemoryRefEdges
    */
   readonly sourceMemoryRefs?: readonly string[];
 }
@@ -968,6 +967,7 @@ export async function startBenchDaemon(
     // memory_entry_only. raw_payload.distilled_fact, when supplied,
     // becomes memory_entry.content; raw_payload.excerpt remains the
     // evidence text reachable through evidence_refs.
+    const sourceMemoryRefsField = buildSourceMemoryRefsField(options.sourceMemoryRefs);
     const signalResponse = await callMcpTool<SoulEmitCandidateSignalResponse>(
       activeMcpClient,
       "soul.emit_candidate_signal",
@@ -978,6 +978,7 @@ export async function startBenchDaemon(
         domain_tags: ["bench-seed"],
         confidence: 0.9,
         evidence_refs: [evidenceRef],
+        ...sourceMemoryRefsField,
         raw_payload: {
           excerpt: safeContent,
           ...(safeDistilledFact === undefined
@@ -996,8 +997,7 @@ export async function startBenchDaemon(
             storedContent: safeDistilledFact ?? safeContent,
             excerptSibling: safeContent,
             distilledFactSibling: safeDistilledFact
-          }),
-          ...buildSourceMemoryRefsPayload(options.sourceMemoryRefs)
+          })
         }
       }
     );
@@ -1146,24 +1146,22 @@ export async function startBenchDaemon(
         ? { excerptSibling: safeExcerpt, distilledFactSibling: safeDistilledFact }
         : {})
     });
-    const sourceMemoryRefsPayload = buildSourceMemoryRefsPayload(input.sourceMemoryRefs);
     const rawPayload: Record<string, unknown> =
       input.productionRawPayload === undefined
         ? {
             excerpt: safeExcerpt,
             distilled_fact: safeDistilledFact,
             extraction_provider: input.extractionProvider,
-            ...tokenEconomy,
-            ...sourceMemoryRefsPayload
+            ...tokenEconomy
           }
         : {
-            ...input.productionRawPayload,
+            ...stripFirstClassMemoryRefsFromRawPayload(input.productionRawPayload),
             extraction_provider: input.extractionProvider,
-            ...tokenEconomy,
-            ...sourceMemoryRefsPayload
+            ...tokenEconomy
           };
 
-    // see also: materialization-router.ts createSourceMemoryEdges
+    // see also: materialization-router.ts createAllMemoryRefEdges
+    const sourceMemoryRefsField = buildSourceMemoryRefsField(input.sourceMemoryRefs);
     const signalResponse = await callMcpTool<SoulEmitCandidateSignalResponse>(
       activeMcpClient,
       "soul.emit_candidate_signal",
@@ -1174,6 +1172,7 @@ export async function startBenchDaemon(
         domain_tags: ["bench-seed"],
         confidence: input.confidence,
         evidence_refs: [input.evidenceRef],
+        ...sourceMemoryRefsField,
         raw_payload: rawPayload
       }
     );
@@ -1263,21 +1262,18 @@ export async function startBenchDaemon(
           ? { excerptSibling: clip.safe, distilledFactSibling: safeDistilledFact }
           : {})
       });
-      const sourceMemoryRefsPayload = buildSourceMemoryRefsPayload(input.sourceMemoryRefs);
       const rawPayload: Record<string, unknown> =
         input.productionRawPayload === undefined
           ? {
               excerpt: clip.safe,
               distilled_fact: safeDistilledFact,
               extraction_provider: input.extractionProvider,
-              ...tokenEconomy,
-              ...sourceMemoryRefsPayload
+              ...tokenEconomy
             }
           : {
-              ...input.productionRawPayload,
+              ...stripFirstClassMemoryRefsFromRawPayload(input.productionRawPayload),
               extraction_provider: input.extractionProvider,
-              ...tokenEconomy,
-              ...sourceMemoryRefsPayload
+              ...tokenEconomy
             };
 
       const signal: CandidateMemorySignal = normalizeSchemaGroundedSignal(
@@ -1293,6 +1289,7 @@ export async function startBenchDaemon(
           domain_tags: ["bench-seed"],
           confidence: input.confidence,
           evidence_refs: [input.evidenceRef],
+          ...buildSourceMemoryRefsField(input.sourceMemoryRefs),
           raw_payload: rawPayload,
           created_at: new Date().toISOString()
         })
@@ -1931,11 +1928,11 @@ function benchTokenEconomyPayload(input: {
   };
 }
 
-// @anchor buildSourceMemoryRefsPayload: derives_from edge injection
+// @anchor buildSourceMemoryRefsField: derives_from edge proposal injection
 // see also: packages/soul/src/garden/materialization-router.ts
-//   createSourceMemoryEdges
+//   createAllMemoryRefEdges
 // see also: apps/bench-runner/src/longmemeval/compile-seed.ts seedTurn
-function buildSourceMemoryRefsPayload(
+function buildSourceMemoryRefsField(
   refs: readonly string[] | undefined
 ): Record<string, unknown> {
   if (refs === undefined || refs.length === 0) {
@@ -1946,6 +1943,24 @@ function buildSourceMemoryRefsPayload(
     return {};
   }
   return { source_memory_refs: unique };
+}
+
+const FIRST_CLASS_MEMORY_REF_KEYS = [
+  "source_memory_refs",
+  "supersedes_refs",
+  "exception_to_refs",
+  "contradicts_refs",
+  "incompatible_with_refs"
+] as const;
+
+function stripFirstClassMemoryRefsFromRawPayload(
+  rawPayload: Readonly<Record<string, unknown>>
+): Record<string, unknown> {
+  const sanitized = { ...rawPayload };
+  for (const key of FIRST_CLASS_MEMORY_REF_KEYS) {
+    delete sanitized[key];
+  }
+  return sanitized;
 }
 
 // see also: apps/bench-runner/src/version.ts

@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   buildDiffVsPrevious,
@@ -31,10 +30,13 @@ import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic,
   rAt5WithProviderReturned,
+  renderCompactDiagnosticsSidecar,
+  renderDiagnosticsSidecar,
   summarizeLongMemEvalRecallEvidence,
   summarizeProviderStates,
   type LongMemEvalQuestionDiagnostic
 } from "../longmemeval/diagnostics.js";
+import { writeExternalDiagnosticsArtifact } from "../longmemeval/diagnostics-artifacts.js";
 import {
   aggregateRecallTokenEconomy,
   extractRecallTokenEconomy
@@ -64,21 +66,6 @@ export interface LocomoRunResult {
   readonly findingsPath: string;
   readonly diagnosticsPath: string;
   readonly payload: KpiPayload;
-}
-
-interface LocomoDiagnosticsSidecar {
-  readonly schema_version: 1;
-  readonly bench_name: "public-locomo";
-  readonly split: "locomo10";
-  readonly run_at: string;
-  readonly alaya_commit: string;
-  readonly embedding_provider: string;
-  readonly embedding_mode: BenchEmbeddingMode;
-  readonly embedding_vector_cache?: LocomoEmbeddingVectorCacheSummary;
-  readonly query_embedding_cache?: LocomoQueryEmbeddingCacheSummary;
-  readonly provider_state_summary: ReturnType<typeof summarizeProviderStates>;
-  readonly scored_recall_evidence: ReturnType<typeof summarizeLongMemEvalRecallEvidence>;
-  readonly questions: readonly LongMemEvalQuestionDiagnostic[];
 }
 
 interface LocomoEmbeddingVectorCacheSummary {
@@ -254,7 +241,8 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   const layout: HistoryLayout = { historyRoot: opts.historyRoot };
   const previous = await readLatest(layout, "public-locomo", {
     split: "locomo10",
-    embeddingProvider: payload.embedding_provider
+    embeddingProvider: payload.embedding_provider,
+    pointerKind: "passing"
   });
   const diff = diffKpis(payload, previous);
   payload.diff_vs_previous = buildDiffVsPrevious(
@@ -265,30 +253,45 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   const slug = entrySlug(runAt, commitSha7);
   const report = renderReport(payload, previous, diff);
   const findings = renderFindings(payload, diff);
-  const entry = await writeEntry(layout, "public-locomo", slug, payload, report, findings);
-  const diagnosticsPath = join(dirname(entry.kpiPath), "locomo-diagnostics.json");
-  await writeFile(
-    diagnosticsPath,
-    renderLocomoDiagnosticsSidecar({
-      schema_version: 1,
-      bench_name: "public-locomo",
-      split: "locomo10",
-      run_at: payload.run_at,
-      alaya_commit: payload.alaya_commit,
-      embedding_provider: payload.embedding_provider,
-      embedding_mode: embeddingMode,
-      ...(embeddingVectorCache === null
-        ? {}
-        : { embedding_vector_cache: embeddingVectorCache }),
-      ...(queryEmbeddingCache === null
-        ? {}
-        : { query_embedding_cache: queryEmbeddingCache }),
-      provider_state_summary: providerStateSummary,
-      scored_recall_evidence: summarizeLongMemEvalRecallEvidence(questionDiagnostics),
-      questions: questionDiagnostics
-    }),
-    "utf8"
+  const diagnosticsPayload = {
+    schema_version: 1,
+    bench_name: "public-locomo",
+    split: "locomo10",
+    run_at: payload.run_at,
+    alaya_commit: payload.alaya_commit,
+    embedding_provider: payload.embedding_provider,
+    embedding_mode: embeddingMode,
+    ...(embeddingVectorCache === null
+      ? {}
+      : { embedding_vector_cache: embeddingVectorCache }),
+    ...(queryEmbeddingCache === null
+      ? {}
+      : { query_embedding_cache: queryEmbeddingCache }),
+    provider_state_summary: providerStateSummary,
+    scored_recall_evidence: summarizeLongMemEvalRecallEvidence(questionDiagnostics),
+    questions: questionDiagnostics
+  } as const;
+  const diagnosticsSidecar = renderDiagnosticsSidecar(diagnosticsPayload);
+  const diagnosticsArtifactPath = await writeExternalDiagnosticsArtifact({
+    historyRoot: opts.historyRoot,
+    benchName: "public-locomo",
+    slug,
+    filename: "locomo-diagnostics.json",
+    contents: diagnosticsSidecar
+  });
+  const compactDiagnosticsSidecar = renderCompactDiagnosticsSidecar(
+    diagnosticsPayload,
+    diagnosticsArtifactPath
   );
+  const entry = await writeEntry(layout, "public-locomo", slug, payload, report, findings, {
+    sidecars: [
+      {
+        filename: "locomo-diagnostics.json",
+        contents: compactDiagnosticsSidecar
+      }
+    ]
+  });
+  const diagnosticsPath = entry.sidecarPaths["locomo-diagnostics.json"]!;
 
   return {
     slug,
@@ -579,8 +582,4 @@ export function resolveLocomoSampleSize(
     }
   }
   return total;
-}
-
-function renderLocomoDiagnosticsSidecar(sidecar: LocomoDiagnosticsSidecar): string {
-  return JSON.stringify(sidecar, null, 2) + "\n";
 }

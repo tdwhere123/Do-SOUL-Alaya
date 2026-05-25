@@ -1,5 +1,7 @@
 import {
+  EdgeProposalTriggerSource,
   MemoryGraphEdgeType,
+  type EdgeProposalTriggerSourceValue,
   type MemoryEntry,
   type MemoryGraphEdgeTypeValue
 } from "@do-soul/alaya-protocol";
@@ -7,7 +9,8 @@ import {
 // invariant: ConflictDetectionService is the producer of the staged
 // MemoryGraphEdge types contradicts / incompatible_with (the supersedes
 // and exception_to writers live in materialization-router via
-// raw_payload.*_refs). Runs at memory materialization time. Detection
+// first-class candidate signal refs). Runs at memory materialization
+// time. Detection
 // failures must not break a successful memory creation; the caller
 // catches and warns.
 // invariant: scope = HOT tier only. findByDimension on memoryRepo reads
@@ -41,6 +44,9 @@ export interface ConflictDetectionGraphPort {
     readonly edgeType: MemoryGraphEdgeTypeValue;
     readonly workspaceId: string;
     readonly runId?: string | null;
+    readonly triggerSource?: EdgeProposalTriggerSourceValue;
+    readonly confidence?: number;
+    readonly reason?: string | null;
   }): Promise<void>;
 }
 
@@ -246,7 +252,10 @@ export class ConflictDetectionService {
         targetMemoryId,
         edgeType,
         workspaceId,
-        runId
+        runId,
+        triggerSource: EdgeProposalTriggerSource.CONFLICT_DETECTION,
+        confidence: 0.5,
+        reason: "conflict detection derived edge proposal"
       });
     } catch (err) {
       this.warn("conflict detection edge create failed", {

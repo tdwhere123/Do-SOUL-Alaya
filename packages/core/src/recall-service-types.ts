@@ -23,6 +23,7 @@ import type {
 import type { ScopeClass } from "@do-soul/alaya-protocol";
 import type {
   EmbeddingNeighborHit,
+  EmbeddingWorkspaceNeighborResult,
   EmbeddingRecallSupplementResult,
   PreparedEmbeddingSupplement,
   PreparedEmbeddingQueryHandle
@@ -284,6 +285,13 @@ export interface RecallServiceEmbeddingRecallPort {
     readonly excludeObjectIds: readonly string[];
     readonly maxNeighbors: number;
   }): Promise<readonly Readonly<EmbeddingNeighborHit>[]>;
+  collectWorkspaceNeighborsWithMetadata?(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly queryText: string;
+    readonly excludeObjectIds: readonly string[];
+    readonly maxNeighbors: number;
+  }): Promise<Readonly<EmbeddingWorkspaceNeighborResult>>;
 }
 
 export interface RecallServiceDependencies {
@@ -485,13 +493,10 @@ export interface RecallDiagnostics {
   readonly provider_degradation_reason: string | null;
   readonly fusion_breakdown: readonly Readonly<RecallFusionBreakdown>[];
   readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
-  // Per-recall structural token instrument. Optional: degraded recall paths
-  // (any non-null SoulMemorySearchDegradationReason — warm/cold cascade or
-  // recall_explainability_partial) leave this undefined so the bench
-  // aggregator can drop the call rather than admit a `{0,0,0,0,0}` sample
-  // that biases the run-level distribution downward. The bench extractor
-  // (apps/bench-runner/src/longmemeval/recall-token-economy.ts
-  // extractRecallTokenEconomy) maps undefined → null at the boundary.
+  // Per-recall structural token instrument. Optional only for legacy callers
+  // and malformed diagnostics; RecallService emits it for both normal and
+  // degraded recall paths so bench token-instrument coverage can stay at
+  // 100% per recall call without inventing synthetic zero samples.
   readonly token_economy?: Readonly<RecallTokenEconomy>;
 }
 

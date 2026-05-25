@@ -297,6 +297,42 @@ describe("alaya tools", () => {
     expect(stderrChunks.join("")).toContain("use alaya review");
   });
 
+  it("does not let generic tools call impersonate the edge review CLI surface", async () => {
+    const stderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
+    let handlerCalled = false;
+    const command = createToolsCommand({
+      handler: {
+        call: async ({ toolName }) => {
+          handlerCalled = true;
+          return {
+            ok: false,
+            tool_name: toolName,
+            error: { code: "VALIDATION", message: "should not reach handler" }
+          };
+        }
+      }
+    });
+    const parsed = command.argsSchema.safeParse([
+      "call",
+      "soul.batch_review_edge_proposals",
+      "{\"verdict\":\"accept\",\"filter\":{\"proposal_ids\":[\"edge-proposal-1\"]},\"reason\":null,\"reviewer_identity\":\"user:alice\"}",
+      "--run",
+      "null",
+      "--agent",
+      "cli"
+    ]);
+
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    const result = await command.handler(createContext({ stderr }), parsed.data);
+
+    expect(result.exitCode).toBe(ALAYA_SYSEXITS.USAGE);
+    expect(handlerCalled).toBe(false);
+    expect(stderrChunks.join("")).toContain("use alaya review");
+  });
+
   it("rejects malformed JSON arguments before reaching the handler", async () => {
     const command = createToolsCommand({ handler: createHandler() });
     const parsed = command.argsSchema.safeParse([

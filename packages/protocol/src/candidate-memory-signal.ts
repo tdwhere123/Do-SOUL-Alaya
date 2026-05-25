@@ -76,6 +76,20 @@ export const SignalStateSchema = z.enum(signalStateValues);
 const ConfidenceSchema = z.number().min(0).max(1);
 const DomainTagsSchema = z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly();
 const EvidenceRefsSchema = z.array(BoundedLabelSchema).max(BOUNDED_EVIDENCE_ARRAY_MAX).readonly();
+export const CandidateMemorySignalMemoryRefKeys = [
+  "source_memory_refs",
+  "supersedes_refs",
+  "exception_to_refs",
+  "contradicts_refs",
+  "incompatible_with_refs"
+] as const;
+
+export const CandidateMemorySignalMemoryRefsSchema = z
+  .array(BoundedIdSchema)
+  .max(BOUNDED_DEFAULT_ARRAY_MAX)
+  .default([])
+  .readonly();
+const MemoryRefsSchema = CandidateMemorySignalMemoryRefsSchema;
 const RawPayloadSchema = BoundedJsonObjectSchema;
 const SourceDeliveryIdsSchema = z.array(BoundedIdSchema).min(1).max(32).readonly();
 
@@ -92,6 +106,11 @@ export const CandidateMemorySignalSchema = z.object({
   domain_tags: DomainTagsSchema,
   confidence: ConfidenceSchema,
   evidence_refs: EvidenceRefsSchema,
+  source_memory_refs: MemoryRefsSchema,
+  supersedes_refs: MemoryRefsSchema,
+  exception_to_refs: MemoryRefsSchema,
+  contradicts_refs: MemoryRefsSchema,
+  incompatible_with_refs: MemoryRefsSchema,
   raw_payload: RawPayloadSchema,
   source_delivery_ids: SourceDeliveryIdsSchema.optional(),
   created_at: IsoDatetimeStringSchema
@@ -107,6 +126,11 @@ const CandidateMemorySignalContentFieldsSchema = z.object({
   domain_tags: DomainTagsSchema,
   confidence: ConfidenceSchema,
   evidence_refs: EvidenceRefsSchema,
+  source_memory_refs: MemoryRefsSchema.optional(),
+  supersedes_refs: MemoryRefsSchema.optional(),
+  exception_to_refs: MemoryRefsSchema.optional(),
+  contradicts_refs: MemoryRefsSchema.optional(),
+  incompatible_with_refs: MemoryRefsSchema.optional(),
   raw_payload: RawPayloadSchema
 });
 

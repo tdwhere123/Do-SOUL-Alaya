@@ -75,6 +75,77 @@ describe("alaya review (A1)", () => {
     );
   });
 
+  it("lists pending edge proposals via soul.list_pending_edge_proposals with filters", async () => {
+    const stdout = new PassThrough();
+    const stdoutChunks: string[] = [];
+    stdout.on("data", (chunk) => stdoutChunks.push(chunk.toString()));
+    const handler = createHandler({
+      "soul.list_pending_edge_proposals": ({ arguments: args }) => ({
+        ok: true,
+        tool_name: "soul.list_pending_edge_proposals",
+        output: {
+          proposals: [
+            {
+              proposal_id: "edge-prop-1",
+              source_memory_id: "mem-a",
+              target_memory_id: "mem-b",
+              edge_type: "recalls",
+              trigger_source: "recall_cross_link",
+              confidence: 0.75,
+              reason: "co-used in report_context_usage",
+              source_signal_id: null,
+              run_id: "run-1",
+              created_at: "2026-05-24T00:00:00.000Z",
+              expires_at: null
+            }
+          ],
+          total_count: 1,
+          requestArgs: args
+        }
+      })
+    });
+    const command = createReviewCommand({
+      handler,
+      defaultWorkspaceId: "ws1",
+      defaultAgentTarget: "cli-test"
+    });
+    const parsed = command.argsSchema.safeParse([
+      "edges",
+      "pending",
+      "--type",
+      "recalls",
+      "--min-conf",
+      "0.7",
+      "--since",
+      "2026-05-24T00:00:00.000Z",
+      "--limit",
+      "5"
+    ]);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+
+    const result = await command.handler(createContext({ stdout }), parsed.data);
+
+    expect(result.exitCode).toBe(ALAYA_SYSEXITS.OK);
+    const output = stdoutChunks.join("");
+    expect(output).toContain(
+      "proposal_id\tsource_memory_id\ttarget_memory_id\tedge_type\ttrigger_source\tconfidence\tcreated_at\treason"
+    );
+    expect(output).toContain("edge-prop-1\tmem-a\tmem-b\trecalls\trecall_cross_link\t0.75");
+    expect(handler.call).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName: "soul.list_pending_edge_proposals",
+        arguments: {
+          edge_type: "recalls",
+          min_confidence: 0.7,
+          since: "2026-05-24T00:00:00.000Z",
+          limit: 5
+        },
+        context: expect.objectContaining({ workspaceId: "ws1" })
+      })
+    );
+  });
+
   it("requires --reviewer for accept/reject and threads it into the call", async () => {
     const stderr = new PassThrough();
     const stderrChunks: string[] = [];
@@ -181,6 +252,69 @@ describe("alaya review (A1)", () => {
         arguments: expect.objectContaining({
           reviewer_identity: "user:server-reviewer",
           reviewer_token: "review-token"
+        })
+      })
+    );
+  });
+
+  it("reviews edge proposals through the dedicated human CLI surface", async () => {
+    const handler = createHandler({
+      "soul.batch_review_edge_proposals": () => ({
+        ok: true,
+        tool_name: "soul.batch_review_edge_proposals",
+        output: {
+          accepted_count: 1,
+          rejected_count: 0,
+          reviewed_proposal_ids: ["edge-prop-1"]
+        }
+      })
+    });
+    const command = createReviewCommand({ handler, defaultWorkspaceId: "ws1" });
+    const parsed = command.argsSchema.safeParse([
+      "edges",
+      "accept",
+      "edge-prop-1",
+      "--type",
+      "recalls",
+      "--min-conf",
+      "0.5",
+      "--reason",
+      "approved",
+      "--reviewer",
+      "user:server-reviewer"
+    ]);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+
+    const result = await command.handler(
+      createContext({
+        env: {
+          ALAYA_REVIEWER_TOKEN: "review-token",
+          ALAYA_REVIEWER_IDENTITY: "user:server-reviewer"
+        }
+      }),
+      parsed.data
+    );
+
+    expect(result.exitCode).toBe(ALAYA_SYSEXITS.OK);
+    expect(handler.call).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName: "soul.batch_review_edge_proposals",
+        arguments: {
+          verdict: "accept",
+          filter: {
+            proposal_ids: ["edge-prop-1"],
+            edge_type: "recalls",
+            min_confidence: 0.5
+          },
+          reason: "approved",
+          reviewer_identity: "user:server-reviewer",
+          reviewer_token: "review-token"
+        },
+        context: expect.objectContaining({
+          workspaceId: "ws1",
+          runId: null,
+          agentTarget: "cli"
         })
       })
     );

@@ -63,6 +63,12 @@ export {
   type MemoryGraphEdgeRepo
 } from "./repos/memory-graph-edge-repo.js";
 export {
+  SqliteEdgeProposalRepo,
+  type EdgeProposalCreateInput,
+  type EdgeProposalRepo,
+  type EdgeProposalReviewInput
+} from "./repos/edge-proposal-repo.js";
+export {
   SqliteOrphanRadarRepo,
   type OrphanRadarRepo
 } from "./repos/orphan-radar-repo.js";

@@ -88,7 +88,7 @@ function parseArgs(argv) {
 function readLatestPayload(root, bench) {
   const benchRoot = path.join(root, bench);
   if (!existsSync(benchRoot)) return null;
-  const pointerPath = path.join(benchRoot, "latest-baseline.json");
+  const pointerPath = path.join(benchRoot, "latest-run.json");
   let slug = null;
   let kpiRelPath = null;
   if (existsSync(pointerPath)) {

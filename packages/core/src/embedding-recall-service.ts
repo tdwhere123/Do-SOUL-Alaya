@@ -72,6 +72,15 @@ export interface EmbeddingNeighborHit {
   readonly normalized_similarity: number;
 }
 
+export interface EmbeddingWorkspaceNeighborResult {
+  readonly hits: readonly Readonly<EmbeddingNeighborHit>[];
+  // Fresh query-embedding inference calls consumed by this workspace-neighbor
+  // scan. A cache hit or unavailable provider contributes 0; a successful
+  // fresh provider call contributes 1 even when no neighbor survives filters.
+  readonly embedding_inference_calls: number;
+  readonly query_embedding_cache_hit: boolean;
+}
+
 export interface EmbeddingRecallEventLogPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
@@ -202,6 +211,14 @@ const EMPTY_SUPPLEMENT_RESULT: EmbeddingRecallSupplementResult = Object.freeze({
   supplementaryEntries: Object.freeze([]),
   similarityHintsByObjectId: Object.freeze({})
 });
+
+function emptyWorkspaceNeighborResult(): Readonly<EmbeddingWorkspaceNeighborResult> {
+  return Object.freeze({
+    hits: Object.freeze([]) as readonly Readonly<EmbeddingNeighborHit>[],
+    embedding_inference_calls: 0,
+    query_embedding_cache_hit: true
+  });
+}
 
 export class EmbeddingRecallService {
   private readonly generateQueryId: () => string;
@@ -646,12 +663,22 @@ export class EmbeddingRecallService {
     readonly excludeObjectIds: readonly string[];
     readonly maxNeighbors: number;
   }): Promise<readonly Readonly<EmbeddingNeighborHit>[]> {
+    return (await this.collectWorkspaceNeighborsWithMetadata(params)).hits;
+  }
+
+  public async collectWorkspaceNeighborsWithMetadata(params: {
+    readonly workspaceId: string;
+    readonly runId: string | null;
+    readonly queryText: string;
+    readonly excludeObjectIds: readonly string[];
+    readonly maxNeighbors: number;
+  }): Promise<Readonly<EmbeddingWorkspaceNeighborResult>> {
     if (
       params.maxNeighbors <= 0 ||
       !this.dependencies.provider.isAvailable ||
       typeof this.dependencies.embeddingRepo.listByWorkspace !== "function"
     ) {
-      return Object.freeze([]);
+      return emptyWorkspaceNeighborResult();
     }
 
     let storedVectors: readonly Readonly<EmbeddingVectorRecord>[];
@@ -680,21 +707,32 @@ export class EmbeddingRecallService {
         reason: "local_vector_lookup_failed",
         error: toErrorMessage(error)
       });
-      return Object.freeze([]);
+      return emptyWorkspaceNeighborResult();
     }
     if (storedVectors.length === 0) {
-      return Object.freeze([]);
+      return emptyWorkspaceNeighborResult();
     }
 
     let queryEmbedding: Float32Array;
+    let queryEmbeddingCacheHit = true;
+    let embeddingInferenceCalls = 0;
     try {
-      const embeddings = await this.dependencies.provider.embedTexts([params.queryText], {
-        timeoutMs: this.queryTimeoutMs
+      const preparedQuery = this.prepareQueryEmbedding({
+        workspaceId: params.workspaceId,
+        runId: params.runId,
+        queryText: params.queryText
       });
-      if (embeddings.length !== 1) {
-        throw new Error(`Expected exactly one query embedding, received ${embeddings.length}.`);
+      queryEmbeddingCacheHit = preparedQuery.cacheHit;
+      const initialSnapshot = preparedQuery.getSnapshot();
+      const snapshot =
+        initialSnapshot.status === "pending" && typeof preparedQuery.waitForSnapshot === "function"
+          ? await preparedQuery.waitForSnapshot(this.queryTimeoutMs)
+          : initialSnapshot;
+      if (snapshot.status !== "ready") {
+        throw new Error(snapshot.status === "failed" ? snapshot.reason : "query_embedding_pending");
       }
-      queryEmbedding = new Float32Array(embeddings[0]!);
+      queryEmbedding = snapshot.embedding;
+      embeddingInferenceCalls = preparedQuery.cacheHit ? 0 : 1;
     } catch (error) {
       this.warn("embedding workspace neighbor scan failed", {
         workspace_id: params.workspaceId,
@@ -702,7 +740,11 @@ export class EmbeddingRecallService {
         reason: "query_embedding_failed",
         error: toErrorMessage(error)
       });
-      return Object.freeze([]);
+      return Object.freeze({
+        hits: Object.freeze([]) as readonly Readonly<EmbeddingNeighborHit>[],
+        embedding_inference_calls: 0,
+        query_embedding_cache_hit: queryEmbeddingCacheHit
+      });
     }
 
     const excluded = new Set(params.excludeObjectIds);
@@ -733,7 +775,11 @@ export class EmbeddingRecallService {
       })
       .slice(0, params.maxNeighbors);
 
-    return Object.freeze(hits);
+    return Object.freeze({
+      hits: Object.freeze(hits),
+      embedding_inference_calls: embeddingInferenceCalls,
+      query_embedding_cache_hit: queryEmbeddingCacheHit
+    });
   }
 
   private async loadStoredVectors(params: {

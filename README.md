@@ -10,7 +10,7 @@
 
 ### *A local-first memory plane for CLI coding agents.*
 
-[![status](https://img.shields.io/badge/status-v0.3.9-success?style=flat-square)](#where-this-is-going)
+[![status](https://img.shields.io/badge/status-v0.3.11--release--gate--ready-informational?style=flat-square)](#where-this-is-going)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![tests](https://img.shields.io/badge/tests-2839%20passing-success?style=flat-square)](#where-this-is-going)
 [![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#quickstart)
@@ -75,43 +75,50 @@ governance-first; recall accuracy is something we measure and publish as
 the [bench-history](docs/bench-history/) archive, not something we
 brand on.
 
-The first honest LongMemEval-S retrieval baseline (v0.3.6, **full set
-500/500 questions**, SQLite FTS + activation only, no embedding
-supplement, 98% distractor session ratio per question, 2-shard
-parallel via `apps/bench-runner/scripts/run-full-public-bench.sh`):
+The v0.3.11 bench surface is published through
+[`docs/bench-history`](docs/bench-history/) with stable archive roots:
 
-| Axis | Alaya v0.3.6 | Why this is the framing |
+| Root | `bench_name` / `split` | Release use |
 |---|---|---|
-| Retrieval R@5 (LongMemEval-S full set n=500) | **60.2%** | FTS + activation, no embedding. v0.3.7 will wire the real embedding provider; this number is the floor, not the ceiling. (Shard split: 52.0% on the first 250 human-authored questions, 68.4% on the last 250 GPT-4-augmented questions — the asymmetry is dataset, not stack.) |
-| Retrieval R@1 / R@10 / p95 latency | 45.8% / 60.6% / 73ms (≤ upper bound across 2 shards) | Same 500-q run. Latency is in-process daemon, not over a network. R@10 − R@5 = 0.4 pp means rank 6–10 added only **2 hits out of 500** in this run — could be top-5 concentration, could be FTS-without-embedding lacking ranking granularity past top-5. Until per-row `hit_at_10` / `first_hit_rank` is tracked (v0.3.7), do not read this as a ranking-quality claim. |
-| Governance — durable proposals require accepted review | ✅ HITL gate | `soul.propose_memory_update` → `soul.review_memory_proposal` (accept/reject). Rejection does not mutate truth. |
-| Audit completeness — every durable mutation is a SOUL_* event | ✅ 9+ event-types per propose+review chain | EventLog row per signal / proposal / review / resolution / memory update. Recoverable by `apps/bench-runner/scripts/audit-trail-witness.mjs`. |
-| Conflict & tier discipline | ✅ Tier-aware promotion + path plasticity | Recall returns tier-stamped pointers (hot/warm/cold) + degradation reason; see `Recall` Inspector page. |
-| Local-first storage | ✅ Single SQLite WAL file | No network on recall path. Backup / export / import are 13-verb CLI commands. |
+| `public/` | `public` / `longmemeval-s` | LongMemEval-S single-turn recall. |
+| `public-multiturn/` | `public-multiturn` / `longmemeval-s` | Repeated recall plus `soul.report_context_usage` rounds. |
+| `public-crossquestion/` | `public-crossquestion` / `longmemeval-s` | Cross-question LongMemEval-S recall. |
+| `public-locomo/` | `public-locomo` / `locomo10` | LoCoMo full recall gates, embedding-off and local ONNX embedding-on. |
+| `live/` | `live` / `strict-real` | Sanitized strict-real live-check imports. |
 
-For the contrast: `agentmemory`'s public README cites R@5 = 95.2% on
-LoCoMo, token-saved 92%, annual cost ~$10. Different dataset, different
-stack — quoted "as reported, link" so the reader can verify. We do not
-have a directly comparable number on LoCoMo today; that is a v0.3.7
-follow-up. What we *do* have is the v0.3.6 bench-history archive, every
-KPI reproducible by:
+Every archive write updates `latest-run*.json`. Only a run with no
+findings and passing executable hard gates updates
+`latest-passing*.json`; `latest-baseline*.json` is a legacy alias for
+older tooling. Release closeout and baseline diffs read
+`latest-passing*`, while dashboards can read `latest-run*` for the
+freshest operational truth.
+
+Tracked diagnostics are compact. Full per-question diagnostics are
+written outside the release surface under `ALAYA_BENCH_ARTIFACT_ROOT`,
+or repo-local `.bench-artifacts/` by default, and the compact sidecar
+records `full_diagnostics_artifact_path`.
+
+The core release runs are reproducible by:
 
 ```bash
-# self-bench (8 inline synthetic scenarios, ~10s)
-node apps/bench-runner/bin/alaya-bench-runner.mjs self
-# LongMemEval-S full 500-q set, 2-shard parallel (~85 min on a typical
-# laptop; sequential is ~150 min). Writes a single merged kpi.json +
-# report.md to docs/bench-history/public/<slug>/.
+# LongMemEval-S single-turn sharded run.
 apps/bench-runner/scripts/run-full-public-bench.sh --variant s --shards 2
+
+# LongMemEval-S multiturn and cross-question Tier 1 runs.
+node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval-multiturn --variant s --rounds 3 --data-dir <shared-cache>/longmemeval
+node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval-crossquestion --variant s --data-dir <shared-cache>/longmemeval
+
+# LoCoMo full release runs.
+apps/bench-runner/scripts/run-full-locomo-bench.sh --variant locomo10
+
+# Local smoke/import surfaces.
+node apps/bench-runner/bin/alaya-bench-runner.mjs self
+node apps/bench-runner/bin/alaya-bench-runner.mjs live --help
 ```
 
-(see [release-notes](docs/v0.3/v0.3.6/release-notes.md) for the full
-command list and threshold-gated regression contract.)
-
-The shape of the bet: an attached coding agent is fine with R@5 ≈ 60%
-as long as the durable claims it acts on are audited and reversible.
-A naked R@5 = 95% number is worth less than a 60% number whose decisions
-you can trace to the evidence that produced them.
+The shape of the bet is unchanged: a retrieval number is useful only
+when the durable claims an agent acts on are audited, reversible, and
+traceable to the evidence that produced them.
 
 ---
 
@@ -414,7 +421,7 @@ graph TD
     end
 
     subgraph Daemon["apps/core-daemon — wiring + dispatch"]
-        TH["MCP tool handler<br/>(13 tools: 10 soul.* + 3 garden.*)"]
+        TH["MCP tool handler<br/>(16 tools: 13 soul.* + 3 garden.*)"]
         BG["BackgroundServiceManager<br/>(Garden runtime · fire-and-forget)"]
         NOTI["InProcessRuntimeNotifier"]
     end
@@ -484,7 +491,7 @@ Two surfaces over one runtime. The agent attaches via MCP; humans
 script via CLI. Both go through the same daemon and the same truth
 boundary.
 
-**MCP tools (10 `soul.*` + 3 `garden.*`)** — all schema-bounded
+**MCP tools (13 `soul.*` + 3 `garden.*`)** — all schema-bounded
 (`maxLength`, `maxItems`, `additionalProperties: false` derived from
 the zod request schemas):
 
@@ -493,6 +500,9 @@ the zod request schemas):
 - **Perception → Governance** (proposal-side writes):
   `soul.emit_candidate_signal`, `soul.propose_memory_update`,
   `soul.review_memory_proposal`, `soul.list_pending_proposals`
+- **Edge proposal governance**: `soul.propose_edge`,
+  `soul.list_pending_edge_proposals`,
+  `soul.batch_review_edge_proposals`
 - **Inline typed resolution**: `soul.resolve` (six resolutions —
   `confirm` / `reject` / `correct` / `stale` / `defer` /
   `not_relevant` — for draft claims and staged warnings)
@@ -524,11 +534,14 @@ stdio); every mutating verb supports preview before write, attach
 > verifies the SHA256, then runs `pnpm install --frozen-lockfile && pnpm
 > build` inside `~/.local/share/do-soul-alaya`. (No GPG / sigstore
 > signing yet — tag protection on `v*` is the trust anchor.)
+> `.npmignore` and `npm pack --dry-run` are npm-artifact bloat checks
+> only; the GitHub Release source tarball is verified through the
+> tarball + `SHA256SUMS` path described here.
 
 ```bash
 # Install a pinned release. The installer then downloads the matching
 # release tarball, verifies SHA256SUMS, and builds locally.
-ALAYA_VERSION=v0.3.9
+ALAYA_VERSION=v0.3.11
 INSTALLER="$(mktemp)"
 trap 'rm -f "$INSTALLER"' EXIT
 curl -fsSL -o "$INSTALLER" \
@@ -549,7 +562,7 @@ the script):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/main/scripts/install.sh \
-  | ALAYA_VERSION=v0.3.9 bash
+  | ALAYA_VERSION=v0.3.11 bash
 ```
 
 Override install location:
@@ -609,7 +622,7 @@ pnpm alaya attach claude-code      # preview, confirm, then apply
 
 # 8) First tool call — verify the MCP surface end-to-end
 pnpm alaya tools list --json | jq '.tools | length'
-#   Expect: 13  (10 soul.* + 3 garden.* tools)
+#   Expect: 16  (13 soul.* + 3 garden.* tools)
 
 pnpm alaya tools call soul.recall \
   '{"query":"hello","scope_class":null,"dimension":null,"domain_tags":null,"max_results":5}' \
@@ -622,7 +635,7 @@ pnpm alaya tools call soul.recall \
 ```
 
 After step 7 your agent sees Alaya as an MCP server on its next
-start, and the 13 tools (10 `soul.*` + 3 `garden.*`) become callable
+start, and the 16 tools (13 `soul.*` + 3 `garden.*`) become callable
 from inside the agent.
 
 If a step fails, `pnpm alaya doctor` tells you which check failed
@@ -634,9 +647,9 @@ place to look. The full project layout is documented in
 
 ## Where this is going
 
-### Current state (2026-05-18)
+### Current state (2026-05-25)
 
-v0.3.9 is the current implemented checkpoint; v0.3.4 was the first publicly
+v0.3.11 is the current release-gate readiness checkpoint; v0.3.4 was the first publicly
 released v0.3.x line. Cumulative since v0.3.0: real Codex and Claude
 Code MCP sessions autonomously run `soul.recall` →
 `soul.report_context_usage` during normal conversations, with a
@@ -660,12 +673,12 @@ typed promotion path; recall payloads carry an additive
 governance classes and feeds `ManifestationResolver`; the Inspector
 Health Inbox aggregates Auditor / OrphanRadar / Green into typed
 operator actions; and `SynthesisCapsule.promotion` is retired now
-that a replacement exists. The live MCP catalog is **13 tools** (10
+that a replacement exists. The live MCP catalog is **16 tools** (13
 `soul.*` + 3 `garden.*`).
 
-v0.3.10 is under controller implementation/fix-loop. It is not
-release-ready until every phase fix-loop is clean and the Phase 4
-LongMemEval / LoCoMo full bench gates are archived.
+v0.3.11 is under completion/fix-loop. It is not full release-ready
+until every phase fix-loop is clean and the LongMemEval / LoCoMo full
+bench gates are archived.
 
 `keychain:` secret refs are code-reviewed across Linux / macOS /
 Windows adapters (runtime cross-platform write→read still deferred —

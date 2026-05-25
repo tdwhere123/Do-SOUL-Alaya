@@ -370,6 +370,137 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
   );
 
   it(
+    "bench seed sourceMemoryRefs are first-class signal refs and create edge proposals",
+    async () => {
+      const daemon = await startBenchDaemon({
+        workspaceId: "harness-first-class-ref-ws",
+        runId: "harness-first-class-ref-run"
+      });
+      handles.push(daemon);
+
+      const parent = await daemon.proposeMemory(
+        "Mira started maintaining the release checklist.",
+        "first-class-ref-parent",
+        { objectKind: "fact" }
+      );
+      const child = await daemon.proposeMemory(
+        "Mira now updates the release checklist every Friday.",
+        "first-class-ref-child",
+        {
+          objectKind: "fact",
+          sourceMemoryRefs: [parent.memoryId]
+        }
+      );
+
+      const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
+      const signalRepo = new SqliteSignalRepo(db);
+      const signal = await signalRepo.getById(child.signalId);
+
+      expect(signal?.source_memory_refs).toEqual([parent.memoryId]);
+      expect(signal?.raw_payload).not.toHaveProperty("source_memory_refs");
+
+      const edgeProposal = db.connection
+        .prepare(
+          `SELECT source_memory_id, target_memory_id, edge_type, status, trigger_source
+             FROM edge_proposals
+            WHERE source_memory_id = ?
+              AND target_memory_id = ?
+              AND edge_type = 'derives_from'`
+        )
+        .get(child.memoryId, parent.memoryId) as
+        | {
+            readonly source_memory_id: string;
+            readonly target_memory_id: string;
+            readonly edge_type: string;
+            readonly status: string;
+            readonly trigger_source: string;
+          }
+        | undefined;
+
+      expect(edgeProposal).toEqual({
+        source_memory_id: child.memoryId,
+        target_memory_id: parent.memoryId,
+        edge_type: "derives_from",
+        status: "pending",
+        trigger_source: "candidate_signal_ref"
+      });
+    },
+    60_000
+  );
+
+  it(
+    "compile seed sourceMemoryRefs are first-class signal refs and create edge proposals",
+    async () => {
+      const daemon = await startBenchDaemon({
+        workspaceId: "harness-compile-first-class-ref-ws",
+        runId: "harness-compile-first-class-ref-run"
+      });
+      handles.push(daemon);
+
+      const parent = await daemon.proposeMemory(
+        "Nora archived the support rotation note.",
+        "compile-first-class-ref-parent",
+        { objectKind: "fact" }
+      );
+      const inputs: readonly BenchSignalSeedInput[] = [
+        {
+          signalKind: "potential_preference",
+          objectKind: "fact",
+          confidence: 0.9,
+          distilledFact: "Nora now updates the support rotation note weekly.",
+          turnContent: "I update the support rotation note every Friday now.",
+          matchedText: "support rotation note",
+          evidenceRef: "compile-first-class-ref-child",
+          turnSeedIndex: 1,
+          extractionProvider: "official_api_compile",
+          sourceMemoryRefs: [parent.memoryId]
+        }
+      ];
+
+      const seeds = await daemon.proposeMemoriesFromCompileSignals(inputs);
+      const child = seeds[0];
+      if (child === undefined) {
+        throw new Error("compile seed did not materialize a child memory");
+      }
+
+      const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
+      const signalRepo = new SqliteSignalRepo(db);
+      const signal = await signalRepo.getById(child.signalId);
+
+      expect(signal?.source).toBe(SignalSource.GARDEN_COMPILE);
+      expect(signal?.source_memory_refs).toEqual([parent.memoryId]);
+      expect(signal?.raw_payload).not.toHaveProperty("source_memory_refs");
+
+      const edgeProposal = db.connection
+        .prepare(
+          `SELECT source_memory_id, target_memory_id, edge_type, status, trigger_source
+             FROM edge_proposals
+            WHERE source_memory_id = ?
+              AND target_memory_id = ?
+              AND edge_type = 'derives_from'`
+        )
+        .get(child.memoryId, parent.memoryId) as
+        | {
+            readonly source_memory_id: string;
+            readonly target_memory_id: string;
+            readonly edge_type: string;
+            readonly status: string;
+            readonly trigger_source: string;
+          }
+        | undefined;
+
+      expect(edgeProposal).toEqual({
+        source_memory_id: child.memoryId,
+        target_memory_id: parent.memoryId,
+        edge_type: "derives_from",
+        status: "pending",
+        trigger_source: "candidate_signal_ref"
+      });
+    },
+    60_000
+  );
+
+  it(
     "proposeMemoryFromSignal keeps source=model_tool for the no-credentials fallback",
     async () => {
       // The no-credentials / extraction-failure fallback seeds a full-turn
@@ -382,6 +513,11 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       });
       handles.push(daemon);
 
+      const parent = await daemon.proposeMemory(
+        "The degraded-path parent memory exists.",
+        "fallback-source-parent",
+        { objectKind: "fact" }
+      );
       const seed = await daemon.proposeMemoryFromSignal({
         signalKind: "potential_preference",
         objectKind: "fact",
@@ -389,13 +525,16 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
         distilledFact: "A full degraded-path turn fact.",
         turnContent: "A full degraded-path turn fact.",
         evidenceRef: "fallback-source-q0",
-        turnSeedIndex: 0,
-        extractionProvider: "no_credentials_fallback"
+        turnSeedIndex: 1,
+        extractionProvider: "no_credentials_fallback",
+        sourceMemoryRefs: [parent.memoryId]
       });
 
       const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
       const signal = await new SqliteSignalRepo(db).getById(seed.signalId);
       expect(signal?.source).toBe(SignalSource.MODEL_TOOL);
+      expect(signal?.source_memory_refs).toEqual([parent.memoryId]);
+      expect(signal?.raw_payload).not.toHaveProperty("source_memory_refs");
     },
     60_000
   );

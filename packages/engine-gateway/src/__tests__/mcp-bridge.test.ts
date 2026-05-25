@@ -311,6 +311,9 @@ describe("McpBridge", () => {
       "soul.propose_memory_update",
       "soul.review_memory_proposal",
       "soul.list_pending_proposals",
+      "soul.propose_edge",
+      "soul.list_pending_edge_proposals",
+      "soul.batch_review_edge_proposals",
       "soul.apply_override",
       "soul.explore_graph",
       "soul.report_context_usage",
@@ -365,6 +368,8 @@ describe("McpBridge", () => {
     expect(emitCandidateSignal).toMatchObject({
       description: expect.stringContaining("candidate memory signal")
     });
+    expect(emitCandidateSignal?.description).toContain("source_memory_refs");
+    expect(emitCandidateSignal?.description).toContain("not put those graph hints only in raw_payload");
     expect(emitCandidateSignal?.parametersSchema.parse(toolUse.input)).toEqual(toolUse.input);
   });
 });

@@ -943,6 +943,53 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
     expect(neighbors[0]!.normalized_similarity).toBeGreaterThan(neighbors[1]!.normalized_similarity);
   });
 
+  it("surfaces workspace-neighbor query embedding inference accounting and reuses the cache", async () => {
+    const embedTexts = vi.fn(async () => [new Float32Array([0, 1])]);
+    const service = new EmbeddingRecallService({
+      embeddingRepo: {
+        listByObjectIds: vi.fn(async () => []),
+        listByWorkspace: vi.fn(async () => [
+          createEmbeddingRecord({ object_id: "near", embedding: new Float32Array([0.05, 0.99]) })
+        ])
+      },
+      provider: createProvider({ embedTexts }),
+      eventLogRepo: {
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+          event_id: "event-1",
+          created_at: "2026-04-23T00:00:00.000Z",
+          revision: 0,
+          ...entry
+        })),
+        queryByEntity: vi.fn(async () => [])
+      },
+      generateQueryId: () => "query-neighbors-1",
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+
+    const first = await service.collectWorkspaceNeighborsWithMetadata({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "what color is the sky",
+      excludeObjectIds: [],
+      maxNeighbors: 2
+    });
+    const second = await service.collectWorkspaceNeighborsWithMetadata({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "what color is the sky",
+      excludeObjectIds: [],
+      maxNeighbors: 2
+    });
+
+    expect(first.hits.map((hit) => hit.object_id)).toEqual(["near"]);
+    expect(first.embedding_inference_calls).toBe(1);
+    expect(first.query_embedding_cache_hit).toBe(false);
+    expect(second.hits.map((hit) => hit.object_id)).toEqual(["near"]);
+    expect(second.embedding_inference_calls).toBe(0);
+    expect(second.query_embedding_cache_hit).toBe(true);
+    expect(embedTexts).toHaveBeenCalledTimes(1);
+  });
+
   it("excludes object ids that already entered the candidate pool", async () => {
     const service = buildService({
       queryEmbedding: new Float32Array([0, 1]),

@@ -1,7 +1,7 @@
 {
   "name": "@do-soul/alaya-inspector-web",
   "private": true,
-  "version": "0.3.9",
+  "version": "0.3.11",
   "type": "module",
   "engines": {
     "node": ">=20.19.0"

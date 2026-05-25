@@ -50,6 +50,7 @@ import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic,
   rAt5WithProviderReturned,
+  renderCompactDiagnosticsSidecar,
   renderDiagnosticsSidecar,
   summarizeLongMemEvalRecallEvidence,
   summarizeLongMemEvalReportSideEffects,
@@ -59,6 +60,7 @@ import {
   type LongMemEvalQuestionDiagnostic,
   type LongMemEvalReportSideEffectSnapshot
 } from "./diagnostics.js";
+import { writeExternalDiagnosticsArtifact } from "./diagnostics-artifacts.js";
 import {
   buildLongMemEvalColdWarmComparisonSidecar,
   LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
@@ -282,10 +284,10 @@ export async function runLongMemEval(
         const sessionTurns: SessionSeededTurn[] = [];
         let sessionHasAnswer = false;
         // anchor: session-adjacent derives_from. Carries the prior turn's
-        // seeded memory_entry ids so the next turn's signal raw_payload
-        // names them as source_memory_refs.
+        // seeded memory_entry ids so the next turn's signal carries
+        // top-level source_memory_refs.
         // see also: packages/soul/src/garden/materialization-router.ts
-        //   createSourceMemoryEdges
+        //   createAllMemoryRefEdges
         let previousTurnSeedMemoryIds: readonly string[] = [];
         for (let ri = 0; ri < rounds.length; ri++) {
           const round = rounds[ri];
@@ -681,7 +683,8 @@ export async function runLongMemEval(
     split: payload.split,
     policyShape,
     simulateReport,
-    embeddingProvider: payload.embedding_provider
+    embeddingProvider: payload.embedding_provider,
+    pointerKind: "passing"
   });
   const diff = diffKpis(payload, previous);
   payload.diff_vs_previous = buildDiffVsPrevious(
@@ -704,7 +707,7 @@ export async function runLongMemEval(
   const scoredRecallEvidence =
     summarizeLongMemEvalRecallEvidence(questionDiagnostics);
 
-  const diagnosticsSidecar = renderDiagnosticsSidecar({
+  const diagnosticsPayload = {
     schema_version: 1,
     bench_name: "public",
     split,
@@ -732,7 +735,19 @@ export async function runLongMemEval(
       : { query_embedding_cache: queryEmbeddingCache }),
     provider_state_summary: providerSummary,
     questions: questionDiagnostics
+  } as const;
+  const diagnosticsSidecar = renderDiagnosticsSidecar(diagnosticsPayload);
+  const diagnosticsArtifactPath = await writeExternalDiagnosticsArtifact({
+    historyRoot: opts.historyRoot,
+    benchName: "public",
+    slug,
+    filename: LONGMEMEVAL_DIAGNOSTICS_FILENAME,
+    contents: diagnosticsSidecar
   });
+  const compactDiagnosticsSidecar = renderCompactDiagnosticsSidecar(
+    diagnosticsPayload,
+    diagnosticsArtifactPath
+  );
   const currentEvidence = {
     report_side_effects: reportSideEffects,
     scored_recall_evidence: scoredRecallEvidence
@@ -753,7 +768,7 @@ export async function runLongMemEval(
     sidecars: [
       {
         filename: LONGMEMEVAL_DIAGNOSTICS_FILENAME,
-        contents: diagnosticsSidecar
+        contents: compactDiagnosticsSidecar
       },
       {
         filename: LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,

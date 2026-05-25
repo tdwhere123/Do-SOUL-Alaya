@@ -1,0 +1,10 @@
+# npm-pack bloat proof only. GitHub Release source tarballs are
+# governed by the release asset checksum path, not by this file.
+docs/bench-history/**
+.bench-artifacts/**
+.worktrees/**
+node_modules/**
+**/node_modules/**
+coverage/**
+playwright-report/**
+var/models/**

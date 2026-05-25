@@ -182,6 +182,11 @@ const candidateMemorySignalBase = {
   domain_tags: ["repo", "planning"],
   confidence: 0.75,
   evidence_refs: ["message-1", "message-2"],
+  source_memory_refs: [],
+  supersedes_refs: [],
+  exception_to_refs: [],
+  contradicts_refs: [],
+  incompatible_with_refs: [],
   raw_payload: {
     summary: "Potential synthesis candidate",
     message_ids: ["message-1", "message-2"]
@@ -843,6 +848,11 @@ describe("signal payload parsing", () => {
         run_id: "run-1",
         source: SignalSource.MODEL_TOOL,
         signal_kind: SignalKind.POTENTIAL_CLAIM,
+        source_memory_refs: ["memory-source"],
+        supersedes_refs: ["memory-old"],
+        exception_to_refs: ["memory-rule"],
+        contradicts_refs: ["memory-contradiction"],
+        incompatible_with_refs: ["memory-incompatible"],
         raw_payload: { excerpt: "hello" }
       }
     },
@@ -884,6 +894,24 @@ describe("signal payload parsing", () => {
     ).toThrow();
   });
 
+  it("preserves first-class graph refs on emitted signal event payloads", () => {
+    const payload = {
+      signal_id: "signal-1",
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      source: SignalSource.MODEL_TOOL,
+      signal_kind: SignalKind.POTENTIAL_CLAIM,
+      source_memory_refs: ["memory-source"],
+      supersedes_refs: ["memory-old"],
+      exception_to_refs: ["memory-rule"],
+      contradicts_refs: ["memory-contradiction"],
+      incompatible_with_refs: ["memory-incompatible"],
+      raw_payload: { excerpt: "hello" }
+    } as const;
+
+    expect(parseSignalEventPayload(SignalEventType.SOUL_SIGNAL_EMITTED, payload)).toEqual(payload);
+  });
+
   it("rejects an invalid triage result", () => {
     expect(() =>
       parseSignalEventPayload(SignalEventType.SOUL_SIGNAL_TRIAGED, {
@@ -918,6 +946,11 @@ describe("SignalEventSchema", () => {
         run_id: "run-1",
         source: SignalSource.MODEL_TOOL,
         signal_kind: SignalKind.POTENTIAL_SYNTHESIS,
+        source_memory_refs: [],
+        supersedes_refs: [],
+        exception_to_refs: [],
+        contradicts_refs: [],
+        incompatible_with_refs: [],
         raw_payload: { excerpt: "hello" }
       }
     };

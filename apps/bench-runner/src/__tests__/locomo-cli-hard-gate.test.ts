@@ -30,7 +30,7 @@ function buildLocomoPayload(): KpiPayload {
     harness_mode: "mcp_propose_review",
     kpi: {
       r_at_1: 0.2,
-      r_at_5: 0.34,
+      r_at_5: 0.54,
       r_at_10: 0.45,
       latency_ms_p50: 90,
       latency_ms_p95: 180,
@@ -85,7 +85,7 @@ describe("LoCoMo CLI hard gates", () => {
     const exitCode = await runCli(["locomo", "--history-root", "/tmp/locomo"]);
 
     expect(exitCode).toBe(1);
-    expect(stdoutBuf).toContain("R@5=34.0%");
+    expect(stdoutBuf).toContain("R@5=54.0%");
     expect(runLocomoMock).toHaveBeenCalledWith(
       expect.objectContaining({
         variant: "locomo10",

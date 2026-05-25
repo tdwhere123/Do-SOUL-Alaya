@@ -221,6 +221,11 @@ function normalizeSignalInput(raw: unknown): unknown {
     "domain_tags",
     "confidence",
     "evidence_refs",
+    "source_memory_refs",
+    "supersedes_refs",
+    "exception_to_refs",
+    "contradicts_refs",
+    "incompatible_with_refs",
     "raw_payload"
   ] as const;
 

@@ -37,11 +37,15 @@ export interface ReviewCommandDependencies {
 }
 
 interface ReviewArgs {
+  readonly target: "memory" | "edges";
   readonly action: "pending" | "accept" | "reject";
   readonly proposalId: string | null;
+  readonly edgeProposalIds: readonly string[];
   readonly reason: string | null;
   readonly limit: number | null;
   readonly since: string | null;
+  readonly edgeType: string | null;
+  readonly minConfidence: number | null;
   readonly reviewerIdentity: string | null;
   readonly contextOverrides: Readonly<{
     readonly workspaceId: string | null;
@@ -54,7 +58,7 @@ export function createReviewCommand(deps: ReviewCommandDependencies): AlayaSubco
   return {
     name: "review",
     description:
-      "Review pending memory proposals. Subactions: pending | accept <proposal-id> | reject <proposal-id> [--reason ...] [--reviewer ...].",
+      "Review pending memory or edge proposals. Subactions: pending | accept <proposal-id> | reject <proposal-id>; edge review uses review edges pending|accept|reject.",
     argsSchema: reviewArgsSchema(),
     requiresDaemonReady: false,
     handler: async (ctx, args) => await executeReviewCommand(ctx, args, deps)
@@ -66,6 +70,12 @@ async function executeReviewCommand(
   args: ReviewArgs,
   deps: ReviewCommandDependencies
 ): Promise<AlayaCliResult> {
+  if (args.target === "edges") {
+    if (args.action === "pending") {
+      return await runEdgePending(ctx, args, deps);
+    }
+    return await runEdgeReview(ctx, args, deps);
+  }
   if (args.action === "pending") {
     return await runPending(ctx, args, deps);
   }
@@ -129,6 +139,106 @@ async function runPending(
   };
 }
 
+async function runEdgePending(
+  ctx: AlayaCliContext,
+  args: ReviewArgs,
+  deps: ReviewCommandDependencies
+): Promise<AlayaCliResult> {
+  const callContextResult = await buildCallContext(ctx, args, deps);
+  if (!callContextResult.ok) {
+    ctx.stderr.write(`${callContextResult.message}\n`);
+    return { exitCode: ALAYA_SYSEXITS.DATAERR };
+  }
+  const requestArgs = buildEdgeFilterArguments(args, { includeProposalIds: false });
+  const result = await deps.handler.call({
+    toolName: "soul.list_pending_edge_proposals",
+    arguments: requestArgs,
+    context: callContextResult.context
+  });
+
+  if (!result.ok) {
+    ctx.stderr.write(`${result.error.code}: ${result.error.message}\n`);
+    return {
+      exitCode:
+        result.error.code === "VALIDATION" || result.error.code === "UNKNOWN_TOOL"
+          ? ALAYA_SYSEXITS.DATAERR
+          : ALAYA_SYSEXITS.SOFTWARE,
+      json: result
+    };
+  }
+
+  if (ctx.jsonRequested !== true) {
+    const summaries = (result.output as { proposals?: readonly Record<string, unknown>[] }).proposals;
+    if (summaries === undefined || summaries.length === 0) {
+      ctx.stdout.write("(no pending edge proposals)\n");
+    } else {
+      ctx.stdout.write(
+        "proposal_id\tsource_memory_id\ttarget_memory_id\tedge_type\ttrigger_source\tconfidence\tcreated_at\treason\n"
+      );
+      for (const summary of summaries) {
+        ctx.stdout.write(
+          `${formatCell(summary.proposal_id)}\t${formatCell(summary.source_memory_id)}\t${formatCell(summary.target_memory_id)}\t${formatCell(summary.edge_type)}\t${formatCell(summary.trigger_source)}\t${formatCell(summary.confidence)}\t${formatCell(summary.created_at)}\t${formatCell(summary.reason)}\n`
+        );
+      }
+    }
+  }
+  return {
+    exitCode: ALAYA_SYSEXITS.OK,
+    json: result.output
+  };
+}
+
+async function runEdgeReview(
+  ctx: AlayaCliContext,
+  args: ReviewArgs,
+  deps: ReviewCommandDependencies
+): Promise<AlayaCliResult> {
+  const callContextResult = await buildCallContext(ctx, args, deps);
+  if (!callContextResult.ok) {
+    ctx.stderr.write(`${callContextResult.message}\n`);
+    return { exitCode: ALAYA_SYSEXITS.DATAERR };
+  }
+  const reviewer = resolveReviewIdentity(ctx, args, deps);
+  if (!reviewer.ok) {
+    ctx.stderr.write(`${reviewer.message}\n`);
+    return { exitCode: ALAYA_SYSEXITS.USAGE };
+  }
+  const reviewArguments: Record<string, unknown> = {
+    verdict: args.action === "accept" ? "accept" : "reject",
+    filter: buildEdgeFilterArguments(args, { includeProposalIds: true }),
+    reason: args.reason,
+    reviewer_identity: reviewer.identity
+  };
+  if (reviewer.token !== null) {
+    reviewArguments.reviewer_token = reviewer.token;
+  }
+
+  const result = await deps.handler.call({
+    toolName: "soul.batch_review_edge_proposals",
+    arguments: reviewArguments,
+    context: callContextResult.context
+  });
+
+  if (!result.ok) {
+    ctx.stderr.write(`${result.error.code}: ${result.error.message}\n`);
+    return {
+      exitCode:
+        result.error.code === "VALIDATION" || result.error.code === "UNKNOWN_TOOL"
+          ? ALAYA_SYSEXITS.DATAERR
+          : ALAYA_SYSEXITS.SOFTWARE,
+      json: result
+    };
+  }
+
+  if (ctx.jsonRequested !== true) {
+    ctx.stdout.write(`${JSON.stringify(result.output)} durable_apply=edge-review\n`);
+  }
+  return {
+    exitCode: ALAYA_SYSEXITS.OK,
+    json: result.output
+  };
+}
+
 async function runReview(
   ctx: AlayaCliContext,
   args: ReviewArgs,
@@ -145,31 +255,9 @@ async function runReview(
     return { exitCode: ALAYA_SYSEXITS.DATAERR };
   }
   const callContext = callContextResult.context;
-  let reviewerBinding: { readonly token: string; readonly identity: string } | null;
-  try {
-    reviewerBinding = resolveReviewerBinding(ctx, deps);
-  } catch (error) {
-    ctx.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    return { exitCode: ALAYA_SYSEXITS.USAGE };
-  }
-  if (
-    reviewerBinding !== null &&
-    args.reviewerIdentity !== null &&
-    args.reviewerIdentity !== reviewerBinding.identity
-  ) {
-    ctx.stderr.write("reviewer identity does not match ALAYA_REVIEWER_IDENTITY.\n");
-    return { exitCode: ALAYA_SYSEXITS.USAGE };
-  }
-  const reviewerIdentity =
-    reviewerBinding?.identity ??
-    args.reviewerIdentity ??
-    deps.defaultReviewerIdentity ??
-    ctx.env.ALAYA_REVIEWER_IDENTITY ??
-    null;
-  if (reviewerIdentity === null || reviewerIdentity.trim().length === 0) {
-    ctx.stderr.write(
-      "review requires --reviewer <identity> (or ALAYA_REVIEWER_IDENTITY env var) so the audit trail names who approved or rejected.\n"
-    );
+  const reviewer = resolveReviewIdentity(ctx, args, deps);
+  if (!reviewer.ok) {
+    ctx.stderr.write(`${reviewer.message}\n`);
     return { exitCode: ALAYA_SYSEXITS.USAGE };
   }
 
@@ -177,10 +265,10 @@ async function runReview(
     proposal_id: args.proposalId,
     verdict: args.action === "accept" ? "accept" : "reject",
     reason: args.reason,
-    reviewer_identity: reviewerIdentity
+    reviewer_identity: reviewer.identity
   };
-  if (reviewerBinding !== null) {
-    reviewArguments.reviewer_token = reviewerBinding.token;
+  if (reviewer.token !== null) {
+    reviewArguments.reviewer_token = reviewer.token;
   }
 
   const result = await deps.handler.call({
@@ -227,13 +315,82 @@ function resolveReviewerBinding(
   return { token, identity };
 }
 
+function resolveReviewIdentity(
+  ctx: AlayaCliContext,
+  args: ReviewArgs,
+  deps: ReviewCommandDependencies
+):
+  | { readonly ok: true; readonly identity: string; readonly token: string | null }
+  | { readonly ok: false; readonly message: string } {
+  let reviewerBinding: { readonly token: string; readonly identity: string } | null;
+  try {
+    reviewerBinding = resolveReviewerBinding(ctx, deps);
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+  }
+  if (
+    reviewerBinding !== null &&
+    args.reviewerIdentity !== null &&
+    args.reviewerIdentity !== reviewerBinding.identity
+  ) {
+    return { ok: false, message: "reviewer identity does not match ALAYA_REVIEWER_IDENTITY." };
+  }
+  const reviewerIdentity =
+    reviewerBinding?.identity ??
+    args.reviewerIdentity ??
+    deps.defaultReviewerIdentity ??
+    ctx.env.ALAYA_REVIEWER_IDENTITY ??
+    null;
+  if (reviewerIdentity === null || reviewerIdentity.trim().length === 0) {
+    return {
+      ok: false,
+      message:
+        "review requires --reviewer <identity> (or ALAYA_REVIEWER_IDENTITY env var) so the audit trail names who approved or rejected."
+    };
+  }
+  return {
+    ok: true,
+    identity: reviewerIdentity,
+    token: reviewerBinding?.token ?? null
+  };
+}
+
 function normalizeOptionalString(value: string | undefined): string | null {
   const normalized = value?.trim();
   return normalized === undefined || normalized.length === 0 ? null : normalized;
 }
 
+function buildEdgeFilterArguments(
+  args: ReviewArgs,
+  options: { readonly includeProposalIds: boolean }
+): Record<string, unknown> {
+  const filter: Record<string, unknown> = {};
+  if (options.includeProposalIds && args.edgeProposalIds.length > 0) {
+    filter.proposal_ids = args.edgeProposalIds;
+  }
+  if (args.edgeType !== null) {
+    filter.edge_type = args.edgeType;
+  }
+  if (args.minConfidence !== null) {
+    filter.min_confidence = args.minConfidence;
+  }
+  if (args.since !== null) {
+    filter.since = args.since;
+  }
+  if (args.limit !== null) {
+    filter.limit = args.limit;
+  }
+  return filter;
+}
+
 function formatCell(value: unknown): string {
-  return typeof value === "string" && value.length > 0 ? value : "-";
+  if (typeof value === "string") {
+    return value.length > 0 ? value : "-";
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
+  return "-";
 }
 
 function formatJsonCell(value: unknown): string {
@@ -269,31 +426,44 @@ function parseReviewArgs(input: readonly string[]):
     return {
       ok: false,
       message:
-        "Usage: review pending [--workspace <id>] [--limit <n>] [--since <iso>] | review accept <proposal-id> --reviewer <id> [--reason ...] | review reject <proposal-id> --reviewer <id> [--reason ...]"
+        "Usage: review pending [--workspace <id>] [--limit <n>] [--since <iso>] | review accept <proposal-id> --reviewer <id> [--reason ...] | review reject <proposal-id> --reviewer <id> [--reason ...] | review edges pending|accept|reject [proposal-id ...] [--type <edge-type>] [--min-conf <n>] [--since <iso>]"
     };
   }
 
-  const action = input[0];
+  const target = input[0] === "edges" ? "edges" : "memory";
+  const actionIndex = target === "edges" ? 1 : 0;
+  const action = input[actionIndex];
+  if (action === undefined) {
+    return { ok: false, message: "review edges requires an action: pending | accept | reject." };
+  }
   if (action !== "pending" && action !== "accept" && action !== "reject") {
-    return { ok: false, message: `Unknown review action: ${action}` };
+    return {
+      ok: false,
+      message: target === "edges" ? `Unknown edge review action: ${action}` : `Unknown review action: ${action}`
+    };
   }
 
   let proposalId: string | null = null;
+  let edgeProposalIds: string[] = [];
   let reason: string | null = null;
   let limit: number | null = null;
   let since: string | null = null;
+  let edgeType: string | null = null;
+  let minConfidence: number | null = null;
   let reviewerIdentity: string | null = null;
   let workspaceId: string | null = null;
   let runId: string | null | undefined = undefined;
   let agentTarget: string | null = null;
   const positionals: string[] = [];
 
-  for (let index = 1; index < input.length; index += 1) {
+  for (let index = actionIndex + 1; index < input.length; index += 1) {
     const token = input[index]!;
     if (
       token === "--reason" ||
       token === "--limit" ||
       token === "--since" ||
+      token === "--type" ||
+      token === "--min-conf" ||
       token === "--reviewer" ||
       token === "--workspace" ||
       token === "--run" ||
@@ -318,6 +488,17 @@ function parseReviewArgs(input: readonly string[]):
         case "--since":
           since = value.trim();
           break;
+        case "--type":
+          edgeType = value.trim();
+          break;
+        case "--min-conf": {
+          const parsedConfidence = Number.parseFloat(value);
+          if (!Number.isFinite(parsedConfidence) || parsedConfidence < 0 || parsedConfidence > 1) {
+            return { ok: false, message: "--min-conf must be a number between 0 and 1." };
+          }
+          minConfidence = parsedConfidence;
+          break;
+        }
         case "--reviewer":
           reviewerIdentity = value.trim();
           break;
@@ -340,28 +521,55 @@ function parseReviewArgs(input: readonly string[]):
     positionals.push(token);
   }
 
-  if (action !== "pending" && positionals.length !== 1) {
+  if (target === "memory" && (edgeType !== null || minConfidence !== null)) {
+    return { ok: false, message: "--type and --min-conf are only valid for review edges." };
+  }
+
+  if (target === "memory" && action !== "pending" && positionals.length !== 1) {
     return {
       ok: false,
       message: `review ${action} requires exactly one proposal id positional.`
     };
   }
-  if (action === "pending" && positionals.length > 0) {
+  if (target === "memory" && action === "pending" && positionals.length > 0) {
     return { ok: false, message: "review pending takes no positionals." };
   }
 
-  if (action !== "pending") {
+  if (target === "memory" && action !== "pending") {
     proposalId = positionals[0]!;
+  }
+  if (target === "edges") {
+    if (action === "pending" && positionals.length > 0) {
+      return { ok: false, message: "review edges pending takes no positionals." };
+    }
+    if (action !== "pending") {
+      edgeProposalIds = positionals;
+      if (
+        edgeProposalIds.length === 0 &&
+        edgeType === null &&
+        minConfidence === null &&
+        since === null
+      ) {
+        return {
+          ok: false,
+          message: `review edges ${action} requires at least one proposal id or filter (--type, --min-conf, --since).`
+        };
+      }
+    }
   }
 
   return {
     ok: true,
     args: {
+      target,
       action,
       proposalId,
+      edgeProposalIds,
       reason,
       limit,
       since,
+      edgeType,
+      minConfidence,
       reviewerIdentity,
       contextOverrides: { workspaceId, runId, agentTarget }
     }

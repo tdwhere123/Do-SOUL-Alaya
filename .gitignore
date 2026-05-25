@@ -15,6 +15,8 @@ data/
 apps/bench-runner/data/
 # Regenerated bench extraction cache (hash-keyed; not source truth)
 docs/bench-history/datasets/longmemeval-extraction-cache/
+# External full bench diagnostics; tracked archives keep compact sidecars only.
+.bench-artifacts/
 *.db
 *.db-journal
 *.db-wal
@@ -36,4 +38,3 @@ Thumbs.db
 
 # do-it plugin internal artifacts (per-worktree plan stub for grill hook)
 .do-it/
-

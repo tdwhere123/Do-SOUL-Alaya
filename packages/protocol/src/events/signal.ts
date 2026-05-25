@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { SignalKindSchema, SignalSourceSchema } from "../candidate-memory-signal.js";
+import {
+  CandidateMemorySignalMemoryRefsSchema,
+  SignalKindSchema,
+  SignalSourceSchema
+} from "../candidate-memory-signal.js";
 import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../schema-primitives.js";
 
 const signalEventTypeValues = [
@@ -30,6 +34,11 @@ export const SoulSignalEmittedPayloadSchema = z.object({
   source: SignalSourceSchema,
   signal_kind: SignalKindSchema,
   source_delivery_ids: SourceDeliveryIdsSchema.optional(),
+  source_memory_refs: CandidateMemorySignalMemoryRefsSchema,
+  supersedes_refs: CandidateMemorySignalMemoryRefsSchema,
+  exception_to_refs: CandidateMemorySignalMemoryRefsSchema,
+  contradicts_refs: CandidateMemorySignalMemoryRefsSchema,
+  incompatible_with_refs: CandidateMemorySignalMemoryRefsSchema,
   raw_payload: z.record(z.unknown()).readonly()
 }).readonly();
 

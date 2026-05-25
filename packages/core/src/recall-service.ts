@@ -469,29 +469,25 @@ export class RecallService {
 
     // Pure derivation, no async work and no extra corpus reads: token
     // economy is computed from values already materialised above. See
-    // computeRecallTokenEconomy @anchor for the latency contract.
-    //
-    // Degraded recall paths (warm_cascade_engaged / cold_cascade_engaged
-    // from expandTierCascade, or any other non-null degradation_reason)
-    // skip the instrument so the per-recall figure stays undefined and
-    // the bench aggregator excludes the sample. Producing a `{0,0,0,0,0}`
-    // record on the degraded path would otherwise inject zero samples
-    // into mean / p50 distributions and bias the release-notes numbers
-    // downward; see RecallDiagnostics.token_economy doc-comment.
-    const tokenEconomy: Readonly<RecallTokenEconomy> | undefined =
-      coarseFilter.degradation_reason === null
-        ? computeRecallTokenEconomy({
-            deliveredCandidates: candidates,
-            coarsePoolSize: combinedCoarseCandidates.length,
-            // fineAssess scores every coarse candidate before delivery
-            // truncation, so the evaluated count equals the pool length even
-            // when downstream budgets drop some rows.
-            fineEvaluated: combinedCoarseCandidates.length,
-            preBudgetCandidates: candidateDiagnostics,
-            embeddingProviderStatus,
-            embeddingCacheHit: preparedEmbeddingQuery.handle?.cacheHit ?? true
-          })
-        : undefined;
+    // computeRecallTokenEconomy @anchor for the latency contract. Degraded
+    // recall paths still emit this shape so bench coverage can prove every
+    // recall call was instrumented.
+    const preparedEmbeddingInferenceCalls =
+      embeddingProviderStatus === "provider_returned" &&
+      preparedEmbeddingQuery.handle?.cacheHit === false
+        ? 1
+        : 0;
+    const tokenEconomy: Readonly<RecallTokenEconomy> = computeRecallTokenEconomy({
+      deliveredCandidates: candidates,
+      coarsePoolSize: combinedCoarseCandidates.length,
+      // fineAssess scores every coarse candidate before delivery truncation,
+      // so the evaluated count equals the pool length even when downstream
+      // budgets drop some rows.
+      fineEvaluated: combinedCoarseCandidates.length,
+      preBudgetCandidates: candidateDiagnostics,
+      embeddingInferenceCalls:
+        embeddingCoarseInjection.embeddingInferenceCalls + preparedEmbeddingInferenceCalls
+    });
     return Object.freeze({
       candidates,
       active_constraints: activeConstraints.constraints,
@@ -2179,10 +2175,12 @@ export class RecallService {
   }): Promise<Readonly<{
     readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
     readonly similarityScores: Readonly<Record<string, number>>;
+    readonly embeddingInferenceCalls: number;
   }>> {
     const empty = Object.freeze({
       candidates: Object.freeze([]) as readonly Readonly<CoarseRecallCandidate>[],
-      similarityScores: Object.freeze({})
+      similarityScores: Object.freeze({}),
+      embeddingInferenceCalls: 0
     });
     const embeddingRecallService = this.dependencies.embeddingRecallService;
     const maxSupplement = params.policy.coarse_filter.semantic_supplement.max_supplement;
@@ -2191,22 +2189,40 @@ export class RecallService {
       maxSupplement <= 0 ||
       params.queryText === null ||
       embeddingRecallService === undefined ||
-      typeof embeddingRecallService.collectWorkspaceNeighbors !== "function" ||
+      (typeof embeddingRecallService.collectWorkspaceNeighbors !== "function" &&
+        typeof embeddingRecallService.collectWorkspaceNeighborsWithMetadata !== "function") ||
       typeof this.dependencies.memoryRepo.findByIds !== "function"
     ) {
       return empty;
     }
 
     const poolObjectIds = params.poolCandidates.map((candidate) => candidate.entry.object_id);
-    const neighbors = await embeddingRecallService.collectWorkspaceNeighbors({
-      workspaceId: params.workspaceId,
-      runId: params.runId,
-      queryText: params.queryText,
-      excludeObjectIds: poolObjectIds,
-      maxNeighbors: maxSupplement
-    });
+    const neighborResult =
+      typeof embeddingRecallService.collectWorkspaceNeighborsWithMetadata === "function"
+        ? await embeddingRecallService.collectWorkspaceNeighborsWithMetadata({
+            workspaceId: params.workspaceId,
+            runId: params.runId,
+            queryText: params.queryText,
+            excludeObjectIds: poolObjectIds,
+            maxNeighbors: maxSupplement
+          })
+        : {
+            hits: await embeddingRecallService.collectWorkspaceNeighbors!({
+              workspaceId: params.workspaceId,
+              runId: params.runId,
+              queryText: params.queryText,
+              excludeObjectIds: poolObjectIds,
+              maxNeighbors: maxSupplement
+            }),
+            embedding_inference_calls: 0,
+            query_embedding_cache_hit: true
+          };
+    const neighbors = neighborResult.hits;
     if (neighbors.length === 0) {
-      return empty;
+      return Object.freeze({
+        ...empty,
+        embeddingInferenceCalls: neighborResult.embedding_inference_calls
+      });
     }
 
     const similarityByObjectId = new Map(
@@ -2221,7 +2237,10 @@ export class RecallService {
         run_id: params.runId,
         error: toErrorMessage(error)
       });
-      return empty;
+      return Object.freeze({
+        ...empty,
+        embeddingInferenceCalls: neighborResult.embedding_inference_calls
+      });
     }
 
     const poolObjectIdSet = new Set(poolObjectIds);
@@ -2242,9 +2261,12 @@ export class RecallService {
           firstAdmissionPlane: "semantic_supplement" as const,
           structuralScore: 0
         })
-      ) as readonly Readonly<CoarseRecallCandidate>[];
+    ) as readonly Readonly<CoarseRecallCandidate>[];
     if (candidates.length === 0) {
-      return empty;
+      return Object.freeze({
+        ...empty,
+        embeddingInferenceCalls: neighborResult.embedding_inference_calls
+      });
     }
 
     const similarityScores = Object.fromEntries(
@@ -2255,7 +2277,8 @@ export class RecallService {
     );
     return Object.freeze({
       candidates: Object.freeze([...candidates]),
-      similarityScores: Object.freeze(similarityScores)
+      similarityScores: Object.freeze(similarityScores),
+      embeddingInferenceCalls: neighborResult.embedding_inference_calls
     });
   }
 
@@ -3329,10 +3352,7 @@ function buildRecallDiagnostics(params: Readonly<{
   readonly embeddingProviderStatus: RecallEmbeddingProviderStatus;
   readonly providerDegradationReason: string | null;
   readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
-  // Undefined on degraded recall paths so the bench aggregator drops the
-  // sample instead of polluting the run-level distribution with synthetic
-  // zeros. see RecallDiagnostics.token_economy.
-  readonly tokenEconomy: Readonly<RecallTokenEconomy> | undefined;
+  readonly tokenEconomy: Readonly<RecallTokenEconomy>;
 }>): Readonly<RecallDiagnostics> {
   return Object.freeze({
     query_probes: Object.freeze({
@@ -3373,13 +3393,7 @@ function buildRecallDiagnostics(params: Readonly<{
       }))
     ),
     candidates: Object.freeze([...params.candidates]),
-    // Conditional spread keeps the field absent (rather than present-with-
-    // undefined) on degraded recalls so JSON round-trips and the bench
-    // extractor's `"token_economy" in diagnostics` check both behave as
-    // "no per-recall sample for this call".
-    ...(params.tokenEconomy === undefined
-      ? {}
-      : { token_economy: params.tokenEconomy })
+    token_economy: params.tokenEconomy
   });
 }
 
@@ -3404,8 +3418,7 @@ export function computeRecallTokenEconomy(params: Readonly<{
   readonly coarsePoolSize: number;
   readonly fineEvaluated: number;
   readonly preBudgetCandidates: readonly Readonly<RecallCandidateDiagnostic>[];
-  readonly embeddingProviderStatus: RecallEmbeddingProviderStatus;
-  readonly embeddingCacheHit: boolean;
+  readonly embeddingInferenceCalls: number;
 }>): Readonly<RecallTokenEconomy> {
   let deliveredContextTokensEstimate = 0;
   for (const candidate of params.deliveredCandidates) {
@@ -3424,21 +3437,12 @@ export function computeRecallTokenEconomy(params: Readonly<{
       fusionStreamsWithHits += 1;
     }
   }
-  // A successfully-served prepared query that was NOT a cache hit is the
-  // single embedding provider invocation attributable to this recall.
-  // Cache hit / provider not requested / provider failed all contribute 0,
-  // so the figure tracks fresh inference cost only.
-  const embeddingInferenceCalls =
-    params.embeddingProviderStatus === "provider_returned" &&
-    params.embeddingCacheHit === false
-      ? 1
-      : 0;
   return Object.freeze({
     delivered_context_tokens_estimate: deliveredContextTokensEstimate,
     coarse_pool_size: params.coarsePoolSize,
     fine_evaluated: params.fineEvaluated,
     fusion_streams_with_hits: fusionStreamsWithHits,
-    embedding_inference_calls: embeddingInferenceCalls
+    embedding_inference_calls: Math.max(0, Math.trunc(params.embeddingInferenceCalls))
   });
 }
 

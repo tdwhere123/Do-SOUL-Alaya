@@ -93,6 +93,40 @@ describe("Phase 4B protocol schemas", () => {
       edgeCreatedPayload
     );
 
+    const edgeProposalCreatedPayload = {
+      proposal_id: "edge-proposal-1",
+      source_memory_id: "memory-1",
+      target_memory_id: "memory-2",
+      edge_type: "recalls",
+      trigger_source: "recall_cross_link",
+      confidence: 0.5,
+      reason: "co-used in a recall report",
+      source_signal_id: null,
+      workspace_id: "workspace-1",
+      occurred_at: validTimestamp
+    } as const;
+    expect(
+      parseGraphAuditorEventPayload(
+        GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_CREATED,
+        edgeProposalCreatedPayload
+      )
+    ).toEqual(edgeProposalCreatedPayload);
+
+    const edgeProposalReviewedPayload = {
+      proposal_id: "edge-proposal-1",
+      status: "accepted",
+      reviewer_identity: "user:reviewer",
+      review_reason: "accepted by operator",
+      workspace_id: "workspace-1",
+      occurred_at: validTimestamp
+    } as const;
+    expect(
+      parseGraphAuditorEventPayload(
+        GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED,
+        edgeProposalReviewedPayload
+      )
+    ).toEqual(edgeProposalReviewedPayload);
+
     const exploreCompletedPayload = {
       exploration_kind: "memory_neighbors",
       source_memory_id: "memory-1",
@@ -153,6 +187,8 @@ describe("Phase 4B protocol schemas", () => {
 
     expect(GraphAuditorEventTypeSchema.options).toEqual([
       GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED,
+      GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_CREATED,
+      GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED,
       GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED,
       GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED,
       GraphAuditorEventType.SOUL_ORPHAN_RADAR_REPORTED
@@ -170,6 +206,9 @@ describe("Phase 4B protocol schemas", () => {
 
     expect(EventTypeSchema.parse(GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED)).toBe(
       GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED
+    );
+    expect(EventTypeSchema.parse(GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED)).toBe(
+      GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED
     );
     expect(EventTypeSchema.parse(GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED)).toBe(
       GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED

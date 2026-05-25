@@ -87,7 +87,9 @@ describe("GraphExploreService", () => {
     const service = new GraphExploreService({
       memoryRepo: {
         findById: vi.fn(async (objectId: string) =>
-          objectId === "memory-a" || objectId === "memory-b" ? { object_id: objectId } : null
+          objectId === "memory-a" || objectId === "memory-b"
+            ? { object_id: objectId, workspace_id: "workspace-1" }
+            : null
         )
       },
       edgeRepo,
@@ -144,7 +146,7 @@ describe("GraphExploreService", () => {
     };
     const service = new GraphExploreService({
       memoryRepo: {
-        findById: vi.fn(async (objectId: string) => ({ object_id: objectId }))
+        findById: vi.fn(async (objectId: string) => ({ object_id: objectId, workspace_id: "workspace-1" }))
       },
       edgeRepo,
       eventLogRepo: { append: vi.fn(async (event) => createEventLogEntry(event)) },
@@ -171,7 +173,7 @@ describe("GraphExploreService", () => {
     const { publisher, appendManyWithMutation } = createPublisher();
     const service = new GraphExploreService({
       memoryRepo: {
-        findById: vi.fn(async () => ({ object_id: "memory-a" }))
+        findById: vi.fn(async () => ({ object_id: "memory-a", workspace_id: "workspace-1" }))
       },
       edgeRepo: {
         create: vi.fn((edge: Readonly<MemoryGraphEdge>) => edge),
@@ -197,6 +199,124 @@ describe("GraphExploreService", () => {
     expect(appendManyWithMutation).not.toHaveBeenCalled();
   });
 
+  it("validates endpoint workspace before returning an existing edge", async () => {
+    const existing = createEdge();
+    const findBySourceAndTarget = vi.fn(async () => existing);
+    const { publisher, appendManyWithMutation } = createPublisher();
+    const service = new GraphExploreService({
+      memoryRepo: {
+        findById: vi.fn(async (objectId: string) => ({
+          object_id: objectId,
+          workspace_id: objectId === "memory-b" ? "workspace-2" : "workspace-1"
+        }))
+      },
+      edgeRepo: {
+        create: vi.fn((edge: Readonly<MemoryGraphEdge>) => edge),
+        findByMemoryId: vi.fn(async () => []),
+        findBySourceAndTarget,
+        countInboundSupports: vi.fn(async () => 0),
+        countInboundEdgesWeighted: vi.fn(async () => 0),
+        delete: vi.fn(async () => undefined)
+      },
+      eventLogRepo: { append: vi.fn(async (event) => createEventLogEntry(event)) },
+      runtimeNotifier: { notifyEntry: vi.fn(async () => undefined) },
+      eventPublisher: publisher
+    });
+
+    await expect(
+      service.addEdge({
+        sourceMemoryId: "memory-a",
+        targetMemoryId: "memory-b",
+        edgeType: "supports",
+        workspaceId: "workspace-1"
+      })
+    ).rejects.toMatchObject({
+      name: "CoreError",
+      code: "VALIDATION",
+      message: "Target memory does not belong to workspace workspace-1: memory-b"
+    });
+    expect(findBySourceAndTarget).not.toHaveBeenCalled();
+    expect(appendManyWithMutation).not.toHaveBeenCalled();
+  });
+
+  it("rejects an edge whose source memory belongs to another workspace", async () => {
+    const edgeRepo = {
+      create: vi.fn((edge: Readonly<MemoryGraphEdge>) => edge),
+      findByMemoryId: vi.fn(async () => []),
+      findBySourceAndTarget: vi.fn(async () => null),
+      countInboundSupports: vi.fn(async () => 0),
+      countInboundEdgesWeighted: vi.fn(async () => 0),
+      delete: vi.fn(async () => undefined)
+    };
+    const { publisher, appendManyWithMutation } = createPublisher();
+    const service = new GraphExploreService({
+      memoryRepo: {
+        findById: vi.fn(async (objectId: string) => ({
+          object_id: objectId,
+          workspace_id: objectId === "memory-a" ? "workspace-2" : "workspace-1"
+        }))
+      },
+      edgeRepo,
+      eventLogRepo: { append: vi.fn(async (event) => createEventLogEntry(event)) },
+      runtimeNotifier: { notifyEntry: vi.fn(async () => undefined) },
+      eventPublisher: publisher
+    });
+
+    await expect(
+      service.addEdge({
+        sourceMemoryId: "memory-a",
+        targetMemoryId: "memory-b",
+        edgeType: "supports",
+        workspaceId: "workspace-1"
+      })
+    ).rejects.toMatchObject({
+      name: "CoreError",
+      code: "VALIDATION",
+      message: "Source memory does not belong to workspace workspace-1: memory-a"
+    });
+    expect(edgeRepo.create).not.toHaveBeenCalled();
+    expect(appendManyWithMutation).not.toHaveBeenCalled();
+  });
+
+  it("rejects an edge whose target memory belongs to another workspace", async () => {
+    const edgeRepo = {
+      create: vi.fn((edge: Readonly<MemoryGraphEdge>) => edge),
+      findByMemoryId: vi.fn(async () => []),
+      findBySourceAndTarget: vi.fn(async () => null),
+      countInboundSupports: vi.fn(async () => 0),
+      countInboundEdgesWeighted: vi.fn(async () => 0),
+      delete: vi.fn(async () => undefined)
+    };
+    const { publisher, appendManyWithMutation } = createPublisher();
+    const service = new GraphExploreService({
+      memoryRepo: {
+        findById: vi.fn(async (objectId: string) => ({
+          object_id: objectId,
+          workspace_id: objectId === "memory-b" ? "workspace-2" : "workspace-1"
+        }))
+      },
+      edgeRepo,
+      eventLogRepo: { append: vi.fn(async (event) => createEventLogEntry(event)) },
+      runtimeNotifier: { notifyEntry: vi.fn(async () => undefined) },
+      eventPublisher: publisher
+    });
+
+    await expect(
+      service.addEdge({
+        sourceMemoryId: "memory-a",
+        targetMemoryId: "memory-b",
+        edgeType: "supports",
+        workspaceId: "workspace-1"
+      })
+    ).rejects.toMatchObject({
+      name: "CoreError",
+      code: "VALIDATION",
+      message: "Target memory does not belong to workspace workspace-1: memory-b"
+    });
+    expect(edgeRepo.create).not.toHaveBeenCalled();
+    expect(appendManyWithMutation).not.toHaveBeenCalled();
+  });
+
   it("explores one-hop neighbors in both directions by default and emits an explore event", async () => {
     const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) =>
       createEventLogEntry(event)
@@ -204,7 +324,7 @@ describe("GraphExploreService", () => {
     const { publisher } = createPublisher();
     const service = new GraphExploreService({
       memoryRepo: {
-        findById: vi.fn(async () => ({ object_id: "memory-a" }))
+        findById: vi.fn(async () => ({ object_id: "memory-a", workspace_id: "workspace-1" }))
       },
       edgeRepo: {
         create: vi.fn((edge: Readonly<MemoryGraphEdge>) => edge),
@@ -262,7 +382,7 @@ describe("GraphExploreService", () => {
     const { publisher } = createPublisher();
     const service = new GraphExploreService({
       memoryRepo: {
-        findById: vi.fn(async () => ({ object_id: "memory-a" }))
+        findById: vi.fn(async () => ({ object_id: "memory-a", workspace_id: "workspace-1" }))
       },
       edgeRepo: {
         create: vi.fn((edge: Readonly<MemoryGraphEdge>) => edge),
@@ -293,7 +413,7 @@ describe("GraphExploreService", () => {
     const { publisher } = createPublisher();
     const service = new GraphExploreService({
       memoryRepo: {
-        findById: vi.fn(async () => ({ object_id: "memory-a" }))
+        findById: vi.fn(async () => ({ object_id: "memory-a", workspace_id: "workspace-1" }))
       },
       edgeRepo,
       eventLogRepo: { append: vi.fn(async (event) => createEventLogEntry(event)) },

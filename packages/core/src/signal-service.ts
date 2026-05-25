@@ -101,6 +101,11 @@ export class SignalService {
         ...(parsedSignal.source_delivery_ids === undefined
           ? {}
           : { source_delivery_ids: parsedSignal.source_delivery_ids }),
+        source_memory_refs: parsedSignal.source_memory_refs,
+        supersedes_refs: parsedSignal.supersedes_refs,
+        exception_to_refs: parsedSignal.exception_to_refs,
+        contradicts_refs: parsedSignal.contradicts_refs,
+        incompatible_with_refs: parsedSignal.incompatible_with_refs,
         raw_payload: parsedSignal.raw_payload
       })
     });
@@ -408,6 +413,11 @@ function buildSignalReplayFingerprint(signal: CandidateMemorySignal): string {
     domain_tags: signal.domain_tags,
     confidence: signal.confidence,
     evidence_refs: signal.evidence_refs,
+    source_memory_refs: signal.source_memory_refs,
+    supersedes_refs: signal.supersedes_refs,
+    exception_to_refs: signal.exception_to_refs,
+    contradicts_refs: signal.contradicts_refs,
+    incompatible_with_refs: signal.incompatible_with_refs,
     raw_payload: signal.raw_payload,
     source_delivery_ids: signal.source_delivery_ids
   });

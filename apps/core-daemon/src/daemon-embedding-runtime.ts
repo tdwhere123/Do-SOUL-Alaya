@@ -3,6 +3,7 @@ import {
   EmbeddingRecallService,
   LocalOnnxEmbeddingClient,
   OpenAIEmbeddingClient,
+  defaultLocalOnnxCacheDir,
   type EmbeddingProviderPort,
   type EmbeddingRecallEventLogPort,
   type EmbeddingRecallServiceDependencies
@@ -29,6 +30,7 @@ export function createDaemonEmbeddingRuntime(input: {
     NonNullable<EmbeddingRecallServiceDependencies["healthJournalRecorder"]>;
   readonly memoryEntryRepo: SqliteMemoryEntryRepo;
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
+  readonly embeddingProviderOverride?: EmbeddingProviderPort | null;
 }) {
   const memoryEmbeddingRepo = createOptionalMemoryEmbeddingRepo(input.database);
   const rawEmbeddingSecretRef = readConfigEnvValue(input.configEnv, "ALAYA_OPENAI_SECRET_REF");
@@ -62,7 +64,8 @@ export function createDaemonEmbeddingRuntime(input: {
     openAiModel: configuredEmbeddingModel,
     openAiBaseUrl: configuredEmbeddingProviderUrl,
     localCacheDir: localEmbeddingCacheDir,
-    localModel: localEmbeddingModel
+    localModel: localEmbeddingModel,
+    providerOverride: input.embeddingProviderOverride
   });
   const embeddingModelId =
     embeddingProvider?.modelId ??
@@ -194,14 +197,18 @@ function resolveEmbeddingProvider(input: {
   readonly openAiBaseUrl: string | null;
   readonly localCacheDir: string | null;
   readonly localModel: string | null;
+  readonly providerOverride?: EmbeddingProviderPort | null;
 }): EmbeddingProviderPort | null {
   if (!input.storageAvailable || !input.optInEnabled) {
     return null;
   }
+  if (input.providerOverride !== undefined) {
+    return input.providerOverride;
+  }
 
   if (input.providerKind === "local_onnx") {
     return new LocalOnnxEmbeddingClient({
-      cacheDir: input.localCacheDir,
+      cacheDir: input.localCacheDir ?? defaultLocalOnnxCacheDir(),
       ...(input.localModel === null ? {} : { modelId: input.localModel })
     });
   }
@@ -215,6 +222,7 @@ function resolveEmbeddingProvider(input: {
     baseUrl: input.openAiBaseUrl ?? undefined
   });
 }
+
 
 function resolveOptionalEmbeddingApiKey(
   rawSecretRef: string | undefined,

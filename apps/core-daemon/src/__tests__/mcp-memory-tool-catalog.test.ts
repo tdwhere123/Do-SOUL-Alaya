@@ -54,6 +54,12 @@ describe("mcp memory tool catalog", () => {
     expect(daemonCatalog.find((tool) => tool.name === "soul.list_pending_proposals")?.description).toContain(
       "not durable memory writes"
     );
+    expect(daemonCatalog.find((tool) => tool.name === "soul.emit_candidate_signal")?.description).toContain(
+      "source_memory_refs"
+    );
+    expect(daemonCatalog.find((tool) => tool.name === "soul.emit_candidate_signal")?.description).toContain(
+      "not put those graph hints only in raw_payload"
+    );
     expect(daemonCatalog.find((tool) => tool.name === "garden.claim_task")?.description).toContain(
       "already_claimed"
     );

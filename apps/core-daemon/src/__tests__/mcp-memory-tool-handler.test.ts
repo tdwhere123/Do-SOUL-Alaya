@@ -895,6 +895,71 @@ describe("mcp memory tool handler", () => {
     );
   });
 
+  it("promotes raw_payload-only graph refs to first-class emit_candidate_signal fields", async () => {
+    const deps = createDeps();
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const result = await handler.call({
+      toolName: "soul.emit_candidate_signal",
+      arguments: {
+        signal_kind: "potential_preference",
+        object_kind: "memory_entry",
+        scope_hint: "project",
+        domain_tags: ["tooling"],
+        confidence: 0.9,
+        evidence_refs: ["memory-1"],
+        raw_payload: {
+          observation: "Use pnpm.",
+          source_memory_refs: ["memory-parent"],
+          contradicts_refs: ["memory-conflict"]
+        }
+      },
+      context
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(deps.signalService.receiveSignal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source_memory_refs: ["memory-parent"],
+        contradicts_refs: ["memory-conflict"],
+        raw_payload: { observation: "Use pnpm." }
+      })
+    );
+  });
+
+  it("preserves invalid raw_payload graph ref keys for emit_candidate_signal", async () => {
+    const deps = createDeps();
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const result = await handler.call({
+      toolName: "soul.emit_candidate_signal",
+      arguments: {
+        signal_kind: "potential_preference",
+        object_kind: "memory_entry",
+        scope_hint: "project",
+        domain_tags: ["tooling"],
+        confidence: 0.9,
+        evidence_refs: ["memory-1"],
+        raw_payload: {
+          observation: "Use pnpm.",
+          source_memory_refs: "legacy metadata, not a graph hint"
+        }
+      },
+      context
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(deps.signalService.receiveSignal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source_memory_refs: [],
+        raw_payload: {
+          observation: "Use pnpm.",
+          source_memory_refs: "legacy metadata, not a graph hint"
+        }
+      })
+    );
+  });
+
   it("rejects source delivery anchors that are not recorded in the trusted context table", async () => {
     const deps = createDeps();
     deps.trustStateRecorder.findDeliveryById = vi.fn(async () => null);
@@ -920,6 +985,167 @@ describe("mcp memory tool handler", () => {
       error: { code: "VALIDATION" }
     });
     expect(deps.signalService.receiveSignal).not.toHaveBeenCalled();
+  });
+
+  it("dispatches soul.propose_edge through the workspace-scoped edge proposal service", async () => {
+    const deps = createDeps();
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const result = await handler.call({
+      toolName: "soul.propose_edge",
+      arguments: {
+        source_memory_id: "mem1",
+        target_memory_id: "mem2",
+        edge_type: "recalls",
+        confidence: 0.7,
+        reason: "operator reviewed relationship"
+      },
+      context
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      output: {
+        proposal_id: "edge-proposal-1",
+        status: "pending"
+      }
+    });
+    expect(deps.edgeProposalService?.proposeExplicitEdge).toHaveBeenCalledWith({
+      sourceMemoryId: "mem1",
+      targetMemoryId: "mem2",
+      edgeType: "recalls",
+      confidence: 0.5,
+      reason: "operator reviewed relationship",
+      workspaceId: "ws1",
+      runId: "run1"
+    });
+  });
+
+  it("dispatches soul.list_pending_edge_proposals through trusted workspace scope", async () => {
+    const deps = createDeps();
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const result = await handler.call({
+      toolName: "soul.list_pending_edge_proposals",
+      arguments: {
+        edge_type: "recalls",
+        min_confidence: 0.5
+      },
+      context
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      output: {
+        total_count: 1,
+        proposals: [
+          expect.objectContaining({
+            proposal_id: "edge-proposal-1",
+            edge_type: "recalls"
+          })
+        ]
+      }
+    });
+    expect(deps.edgeProposalService?.listPending).toHaveBeenCalledWith("ws1", {
+      edge_type: "recalls",
+      min_confidence: 0.5
+    });
+  });
+
+  it("dispatches soul.batch_review_edge_proposals for explicit review", async () => {
+    const deps = createDeps();
+    const handler = createMcpMemoryToolHandler(deps);
+    const reviewContext = { ...context, agentTarget: "cli" };
+
+    const result = await handler.call({
+      toolName: "soul.batch_review_edge_proposals",
+      arguments: {
+        verdict: "accept",
+        filter: {
+          proposal_ids: ["edge-proposal-1"]
+        },
+        reason: "accepted in batch",
+        reviewer_identity: "user:reviewer"
+      },
+      context: reviewContext
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      output: {
+        accepted_count: 1,
+        rejected_count: 0,
+        reviewed_proposal_ids: ["edge-proposal-1"]
+      }
+    });
+    expect(deps.edgeProposalService?.batchReview).toHaveBeenCalledWith({
+      workspaceId: "ws1",
+      verdict: "accept",
+      filter: { proposal_ids: ["edge-proposal-1"] },
+      reason: "accepted in batch",
+      reviewerIdentity: "user:reviewer"
+    });
+  });
+
+  it("requires reviewer token binding for edge proposal review from an attached agent", async () => {
+    const deps = createDeps();
+    const handler = createMcpMemoryToolHandler({
+      ...deps,
+      reviewerIdentityBinding: {
+        token: "review-token",
+        identity: "user:server-reviewer"
+      }
+    });
+
+    const missingToken = await handler.call({
+      toolName: "soul.batch_review_edge_proposals",
+      arguments: {
+        verdict: "accept",
+        filter: { proposal_ids: ["edge-proposal-1"] },
+        reason: "missing token",
+        reviewer_identity: "user:server-reviewer"
+      },
+      context
+    });
+    expect(missingToken).toMatchObject({
+      ok: false,
+      error: { code: "VALIDATION", message: "Invalid reviewer token." }
+    });
+
+    const payloadSpoof = await handler.call({
+      toolName: "soul.batch_review_edge_proposals",
+      arguments: {
+        verdict: "accept",
+        filter: { proposal_ids: ["edge-proposal-1"] },
+        reason: "payload spoof",
+        reviewer_identity: "user:payload",
+        reviewer_token: "review-token"
+      },
+      context
+    });
+    expect(payloadSpoof).toMatchObject({
+      ok: false,
+      error: {
+        code: "VALIDATION",
+        message: "Reviewer identity does not match server-bound reviewer."
+      }
+    });
+
+    const accepted = await handler.call({
+      toolName: "soul.batch_review_edge_proposals",
+      arguments: {
+        verdict: "accept",
+        filter: { proposal_ids: ["edge-proposal-1"] },
+        reason: "server-bound reviewer",
+        reviewer_identity: "user:server-reviewer",
+        reviewer_token: "review-token"
+      },
+      context
+    });
+    expect(accepted.ok).toBe(true);
+    expect(deps.edgeProposalService?.batchReview).toHaveBeenCalledWith(expect.objectContaining({
+      reviewerIdentity: "user:server-reviewer"
+    }));
   });
 });
 
@@ -965,6 +1191,35 @@ function createDeps(): McpMemoryToolHandlerDependencies {
     },
     graphExploreService: {
       exploreOneHop: vi.fn(async () => [])
+    },
+    edgeProposalService: {
+      proposeExplicitEdge: vi.fn(async () => ({
+        proposal_id: "edge-proposal-1",
+        status: "pending"
+      })),
+      listPending: vi.fn(() => ({
+        proposals: [
+          {
+            proposal_id: "edge-proposal-1",
+            source_memory_id: "mem1",
+            target_memory_id: "mem2",
+            edge_type: "recalls",
+            trigger_source: "recall_cross_link",
+            confidence: 0.7,
+            reason: "operator reviewed relationship",
+            source_signal_id: null,
+            run_id: "run1",
+            created_at: "2026-04-30T00:00:00.000Z",
+            expires_at: null
+          }
+        ],
+        total_count: 1
+      })),
+      batchReview: vi.fn(async () => ({
+        accepted_count: 1,
+        rejected_count: 0,
+        reviewed_proposal_ids: ["edge-proposal-1"]
+      }))
     },
     sessionOverrideService: {
       apply: vi.fn(async () => ({ runtime_id: "override1" }))

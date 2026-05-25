@@ -18,6 +18,11 @@ function createSignal(overrides: Partial<CandidateMemorySignal> = {}): Candidate
     domain_tags: ["security"],
     confidence: 0.5,
     evidence_refs: ["msg-1"],
+    source_memory_refs: [],
+    supersedes_refs: [],
+    exception_to_refs: [],
+    contradicts_refs: [],
+    incompatible_with_refs: [],
     raw_payload: {
       excerpt: "Never print secrets."
     },
@@ -127,6 +132,56 @@ describe("SignalService", () => {
       payload_json: {
         signal_id: "signal-1",
         source_delivery_ids: ["delivery-1", "delivery-2"]
+      }
+    });
+  });
+
+  it("threads first-class graph refs into the emitted EventLog payload", async () => {
+    const storedEvents: EventLogEntry[] = [];
+    const service = new SignalService({
+      eventLogRepo: {
+        append: vi.fn(async (event) => {
+          const stored: EventLogEntry = {
+            event_id: `evt_${storedEvents.length + 1}`,
+            created_at: `2026-03-18T00:00:0${storedEvents.length + 1}.000Z`,
+            revision: storedEvents.length,
+            ...event
+          };
+          storedEvents.push(stored);
+          return stored;
+        }),
+        queryByEntity: vi.fn(async () => [])
+      },
+      signalRepo: {
+        create: vi.fn(async (signal) => ({ ...signal, signal_state: "emitted" })),
+        getById: vi.fn(async () => null),
+        listByRun: vi.fn(async () => []),
+        updateState: vi.fn(async (signalId, state) => createSignal({ signal_id: signalId, signal_state: state }))
+      },
+      runtimeNotifier: {
+        notifyEntry: vi.fn(async () => {})
+      }
+    });
+
+    await service.receiveSignal(
+      createSignal({
+        source_memory_refs: ["memory-source"],
+        supersedes_refs: ["memory-old"],
+        exception_to_refs: ["memory-rule"],
+        contradicts_refs: ["memory-contradiction"],
+        incompatible_with_refs: ["memory-incompatible"]
+      })
+    );
+
+    expect(storedEvents[0]).toMatchObject({
+      event_type: "soul.signal.emitted",
+      payload_json: {
+        signal_id: "signal-1",
+        source_memory_refs: ["memory-source"],
+        supersedes_refs: ["memory-old"],
+        exception_to_refs: ["memory-rule"],
+        contradicts_refs: ["memory-contradiction"],
+        incompatible_with_refs: ["memory-incompatible"]
       }
     });
   });

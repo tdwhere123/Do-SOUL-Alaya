@@ -340,6 +340,11 @@ function createSignal(
     domain_tags: domainTags,
     confidence: 0.8,
     evidence_refs: [],
+    source_memory_refs: [],
+    supersedes_refs: [],
+    exception_to_refs: [],
+    contradicts_refs: [],
+    incompatible_with_refs: [],
     raw_payload: { matched_text: matchedText },
     created_at: "2026-05-13T00:00:00.000Z"
   });

@@ -1,7 +1,10 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   CandidateMemorySignalSchema,
+  CandidateMemorySignalMemoryRefKeys,
+  CandidateMemorySignalMemoryRefsSchema,
   ControlPlaneObjectKind,
+  EdgeProposalTriggerSource,
   GARDEN_ROLE_TIER_MAP,
   GardenClaimTaskRequestSchema,
   GardenClaimTaskResponseSchema,
@@ -23,18 +26,24 @@ import {
   ScopeClassSchema,
   SignalSource,
   SoulApplyOverrideRequestSchema,
+  SoulBatchReviewEdgeProposalsRequestSchema,
+  SoulBatchReviewEdgeProposalsResponseSchema,
   SoulApplyOverrideResponseSchema,
   SoulContextUsageReportedPayloadSchema,
   SoulEmitCandidateSignalRequestSchema,
   SoulEmitCandidateSignalResponseSchema,
   SoulExploreGraphRequestSchema,
   SoulExploreGraphResponseSchema,
+  SoulListPendingEdgeProposalsRequestSchema,
+  SoulListPendingEdgeProposalsResponseSchema,
   SoulListPendingProposalsRequestSchema,
   SoulListPendingProposalsResponseSchema,
   SoulMemorySearchRequestSchema,
   SoulMemorySearchResponseSchema,
   SoulOpenPointerRequestSchema,
   SoulOpenPointerResponseSchema,
+  SoulProposeEdgeRequestSchema,
+  SoulProposeEdgeResponseSchema,
   SoulMemoryTierPromotedPayloadSchema,
   SoulProposeMemoryUpdateRequestSchema,
   SoulProposeMemoryUpdateResponseSchema,
@@ -57,14 +66,18 @@ import {
   type Proposal,
   type RecallCandidate,
   type RecallPolicy,
+  type MemoryGraphEdgeTypeValue,
   type SoulApplyOverrideRequest,
   type SoulActiveConstraint,
+  type SoulBatchReviewEdgeProposalsRequest,
   type SoulEmitCandidateSignalRequest,
   type SoulExploreGraphRequest,
+  type SoulListPendingEdgeProposalsRequest,
   type SoulListPendingProposalsRequest,
   type SoulPendingProposalSummary,
   type SoulMemorySearchRequest,
   type SoulOpenPointerRequest,
+  type SoulProposeEdgeRequest,
   type SoulProposeMemoryUpdateRequest,
   type SoulRecallHostContext,
   type SoulMemorySearchDegradationReason,
@@ -85,6 +98,7 @@ import { buildGardenTaskSignalId } from "./garden-task-signal-id.js";
 import { hasAlayaMemoryToolName, type AlayaMemoryToolName } from "./mcp-memory-tool-catalog.js";
 import { buildMemorySearchResult, buildRecallStrategyMix } from "./mcp-memory-recall-result.js";
 import type { createSoulResolveHandler } from "./mcp-memory-resolve-handler.js";
+import type { ReviewerIdentityBinding } from "./mcp-memory-proposal-workflow.js";
 
 // see also: apps/core-daemon/src/mcp-memory-resolve-handler.ts
 type SoulResolveHandler = ReturnType<typeof createSoulResolveHandler>;
@@ -226,6 +240,29 @@ export interface McpMemoryToolHandlerDependencies {
       }>
     ): Promise<readonly Readonly<{ readonly memory_id: string; readonly edge_type: string; readonly direction: string; readonly edge_id: string }>[]>;
   };
+  readonly edgeProposalService?: {
+    proposeExplicitEdge(input: {
+      readonly sourceMemoryId: string;
+      readonly targetMemoryId: string;
+      readonly edgeType: MemoryGraphEdgeTypeValue;
+      readonly confidence: number;
+      readonly reason: string | null;
+      readonly workspaceId: string;
+      readonly runId: string | null;
+    }): Promise<Readonly<{ readonly proposal_id: string; readonly status: string }>>;
+    listPending(
+      workspaceId: string,
+      filter?: SoulListPendingEdgeProposalsRequest
+    ): ReturnType<typeof SoulListPendingEdgeProposalsResponseSchema.parse>;
+    batchReview(input: {
+      readonly workspaceId: string;
+      readonly verdict: "accept" | "reject";
+      readonly filter: SoulBatchReviewEdgeProposalsRequest["filter"];
+      readonly reason: string | null;
+      readonly reviewerIdentity: string;
+    }): Promise<ReturnType<typeof SoulBatchReviewEdgeProposalsResponseSchema.parse>>;
+  };
+  readonly reviewerIdentityBinding?: ReviewerIdentityBinding;
   // Optional write port for RECALLS-edge cross-linking on used reports.
   // Single canonical declaration lives next to MaterializationRouter — re-using
   // the same port keeps the daemon-side wiring and the materializer in lockstep.
@@ -411,6 +448,12 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
             return ok(toolName, await reviewMemoryProposal(SoulReviewMemoryProposalRequestSchema.parse(rawArguments), context));
           case "soul.list_pending_proposals":
             return ok(toolName, await listPendingProposals(SoulListPendingProposalsRequestSchema.parse(rawArguments), context));
+          case "soul.propose_edge":
+            return ok(toolName, await proposeEdge(SoulProposeEdgeRequestSchema.parse(rawArguments), context));
+          case "soul.list_pending_edge_proposals":
+            return ok(toolName, await listPendingEdgeProposals(SoulListPendingEdgeProposalsRequestSchema.parse(rawArguments), context));
+          case "soul.batch_review_edge_proposals":
+            return ok(toolName, await batchReviewEdgeProposals(SoulBatchReviewEdgeProposalsRequestSchema.parse(rawArguments), context));
           case "soul.apply_override":
             return ok(toolName, await applyOverride(SoulApplyOverrideRequestSchema.parse(rawArguments), context));
           case "soul.explore_graph":
@@ -639,7 +682,7 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     await validateSourceDeliveryAnchors(request.source_delivery_ids, context);
     const signal = CandidateMemorySignalSchema.parse({
       signal_id: `signal_${generateId()}`,
-      ...request,
+      ...normalizeCandidateSignalGraphRefs(request),
       workspace_id: context.workspaceId,
       run_id: context.runId,
       surface_id: context.surfaceId ?? null,
@@ -698,6 +741,58 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       proposals: result.proposals,
       total_count: result.total_count
     });
+  }
+
+  async function proposeEdge(
+    request: SoulProposeEdgeRequest,
+    context: McpMemoryToolCallContext
+  ) {
+    if (deps.edgeProposalService === undefined) {
+      throw new ToolUnavailableError("Edge proposal service is not available.");
+    }
+    return SoulProposeEdgeResponseSchema.parse(
+      await deps.edgeProposalService.proposeExplicitEdge({
+        sourceMemoryId: request.source_memory_id,
+        targetMemoryId: request.target_memory_id,
+        edgeType: request.edge_type,
+        confidence: Math.min(request.confidence, 0.5),
+        reason: request.reason ?? null,
+        workspaceId: context.workspaceId,
+        runId: context.runId
+      })
+    );
+  }
+
+  async function listPendingEdgeProposals(
+    request: SoulListPendingEdgeProposalsRequest,
+    context: McpMemoryToolCallContext
+  ) {
+    if (deps.edgeProposalService === undefined) {
+      throw new ToolUnavailableError("Edge proposal service is not available.");
+    }
+    return SoulListPendingEdgeProposalsResponseSchema.parse(
+      deps.edgeProposalService.listPending(context.workspaceId, request)
+    );
+  }
+
+  async function batchReviewEdgeProposals(
+    request: SoulBatchReviewEdgeProposalsRequest,
+    context: McpMemoryToolCallContext
+  ) {
+    if (deps.edgeProposalService === undefined) {
+      throw new ToolUnavailableError("Edge proposal service is not available.");
+    }
+    assertEdgeReviewCallerIsAllowed(context, deps.reviewerIdentityBinding);
+    const reviewerIdentity = resolveEdgeReviewerIdentity(request, deps.reviewerIdentityBinding);
+    return SoulBatchReviewEdgeProposalsResponseSchema.parse(
+      await deps.edgeProposalService.batchReview({
+        workspaceId: context.workspaceId,
+        verdict: request.verdict,
+        filter: request.filter,
+        reason: request.reason,
+        reviewerIdentity
+      })
+    );
   }
 
   async function listPendingGardenTasks(
@@ -817,7 +912,7 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       for (const [index, signalContent] of contentOnlySignals.entries()) {
         const internalSignal = normalizeSchemaGroundedSignal(CandidateMemorySignalSchema.parse({
           signal_id: buildGardenTaskSignalId(row.id, index),
-          ...signalContent,
+          ...normalizeCandidateSignalGraphRefs(signalContent),
           workspace_id: context.workspaceId,
           run_id: resolvedRunId,
           surface_id: null,
@@ -1332,7 +1427,10 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
             targetMemoryId: target,
             edgeType: MemoryGraphEdgeType.RECALLS,
             workspaceId,
-            runId
+            runId,
+            triggerSource: EdgeProposalTriggerSource.RECALL_CROSS_LINK,
+            confidence: 0.5,
+            reason: "report_context_usage used-memory cross-link"
           });
         } catch (err) {
           // Fire-and-forget: supplementary signal, never load-bearing.
@@ -1855,6 +1953,91 @@ function fail(
     tool_name: toolName,
     error: Object.freeze({ code, message })
   });
+}
+
+const HUMAN_REVIEWER_AGENT_TARGETS: ReadonlySet<string> = new Set([
+  "inspector",
+  "cli"
+]);
+
+function assertEdgeReviewCallerIsAllowed(
+  context: McpMemoryToolCallContext,
+  binding: ReviewerIdentityBinding | undefined
+): void {
+  if (binding !== undefined || HUMAN_REVIEWER_AGENT_TARGETS.has(context.agentTarget)) {
+    return;
+  }
+
+  throw new ToolValidationError(
+    "Review requires a human reviewer surface (Inspector/alaya review) or a configured reviewer token."
+  );
+}
+
+function resolveEdgeReviewerIdentity(
+  request: SoulBatchReviewEdgeProposalsRequest,
+  binding: ReviewerIdentityBinding | undefined
+): string {
+  if (binding === undefined) {
+    return request.reviewer_identity;
+  }
+
+  if (!matchesReviewerToken(request.reviewer_token, binding.token)) {
+    throw new ToolValidationError("Invalid reviewer token.");
+  }
+  if (request.reviewer_identity !== binding.identity) {
+    throw new ToolValidationError("Reviewer identity does not match server-bound reviewer.");
+  }
+  return binding.identity;
+}
+
+function matchesReviewerToken(providedToken: string | undefined, expectedToken: string): boolean {
+  if (providedToken === undefined || providedToken.length === 0) {
+    return false;
+  }
+  const provided = Buffer.from(providedToken);
+  const expected = Buffer.from(expectedToken);
+  return provided.length === expected.length && timingSafeEqual(provided, expected);
+}
+
+type CandidateSignalGraphRefKey = (typeof CandidateMemorySignalMemoryRefKeys)[number];
+type CandidateSignalGraphRefInput = {
+  readonly raw_payload: Readonly<Record<string, unknown>>;
+} & Partial<Record<CandidateSignalGraphRefKey, readonly string[]>>;
+
+function normalizeCandidateSignalGraphRefs<T extends CandidateSignalGraphRefInput>(input: T): T {
+  let normalized: Record<string, unknown> | null = null;
+  let rawPayload: Record<string, unknown> | null = null;
+
+  for (const key of CandidateMemorySignalMemoryRefKeys) {
+    if (!hasOwnProperty(input.raw_payload, key)) {
+      continue;
+    }
+
+    if (input[key] !== undefined) {
+      continue;
+    }
+
+    const parsedRefs = CandidateMemorySignalMemoryRefsSchema.safeParse(input.raw_payload[key]);
+    if (!parsedRefs.success) {
+      continue;
+    }
+
+    normalized ??= { ...input };
+    rawPayload ??= { ...input.raw_payload };
+    delete rawPayload[key];
+    normalized[key] = parsedRefs.data;
+  }
+
+  if (normalized === null || rawPayload === null) {
+    return input;
+  }
+
+  normalized.raw_payload = rawPayload;
+  return normalized as T;
+}
+
+function hasOwnProperty(record: Readonly<Record<string, unknown>>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
 }
 
 class ToolValidationError extends Error {

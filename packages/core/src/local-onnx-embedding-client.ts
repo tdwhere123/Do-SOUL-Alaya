@@ -1,4 +1,6 @@
 import type { EmbeddingProviderPort } from "./embedding-recall-service.js";
+import os from "node:os";
+import path from "node:path";
 
 /**
  * Feature-extraction pipeline contract satisfied by the
@@ -98,7 +100,9 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
 
   public constructor(options: LocalOnnxEmbeddingClientOptions = {}) {
     this.modelId = options.modelId?.trim() || DEFAULT_LOCAL_ONNX_MODEL_ID;
-    this.cacheDir = options.cacheDir ?? null;
+    this.cacheDir = options.cacheDir === undefined
+      ? defaultLocalOnnxCacheDir()
+      : options.cacheDir;
     this.pipelineLoader = options.pipelineLoader ?? defaultLocalOnnxPipelineLoader;
     this.now = options.now ?? (() => Date.now());
   }
@@ -183,6 +187,14 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
     });
     return this.extractorPromise;
   }
+}
+
+export function defaultLocalOnnxCacheDir(): string {
+  const xdgCacheHome = process.env.XDG_CACHE_HOME?.trim();
+  const cacheHome = xdgCacheHome && xdgCacheHome.length > 0
+    ? xdgCacheHome
+    : path.join(os.homedir(), ".cache");
+  return path.join(cacheHome, "do-soul-alaya/models");
 }
 
 async function defaultLocalOnnxPipelineLoader(

@@ -507,7 +507,11 @@ describe("post-turn extract Garden task", () => {
                 domain_tags: ["preference"],
                 confidence: 0.78,
                 evidence_refs: ["evidence-1"],
-                raw_payload: { observation: "user prefers vitest watch mode" }
+                raw_payload: {
+                  observation: "user prefers vitest watch mode",
+                  source_memory_refs: ["memory-a"],
+                  incompatible_with_refs: ["memory-b"]
+                }
               }
             ]
           }
@@ -523,7 +527,66 @@ describe("post-turn extract Garden task", () => {
     expect(signals).toHaveLength(1);
     expect(signals[0]).toMatchObject({
       source: SignalSource.GARDEN_COMPILE,
-      signal_state: "triaged"
+      signal_state: "triaged",
+      source_memory_refs: ["memory-a"],
+      incompatible_with_refs: ["memory-b"],
+      raw_payload: { observation: "user prefers vitest watch mode" }
+    });
+  });
+
+  it("preserves invalid raw_payload graph ref keys when completing Garden tasks", async () => {
+    const harness = await createRoutingHarness({ provider_kind: "host_worker" });
+    harness.enqueuePostTurnTask();
+    await harness.runScheduler();
+
+    const handler = createMcpMemoryToolHandler(createMcpDeps(harness));
+    await handler.call({
+      toolName: "garden.claim_task",
+      arguments: { task_id: "post-turn-task-1" },
+      context: defaultContext()
+    });
+
+    const completeResult = unwrapOk<{
+      readonly status: string;
+      readonly events_appended: number;
+    }>(
+      await handler.call({
+        toolName: "garden.complete_task",
+        arguments: {
+          task_id: "post-turn-task-1",
+          status: "completed",
+          result_envelope: {
+            candidate_signals: [
+              {
+                signal_kind: "potential_preference",
+                object_kind: "memory_entry",
+                scope_hint: "project",
+                domain_tags: ["preference"],
+                confidence: 0.78,
+                evidence_refs: ["evidence-1"],
+                raw_payload: {
+                  observation: "user prefers vitest watch mode",
+                  source_memory_refs: "legacy metadata, not a graph hint"
+                }
+              }
+            ]
+          }
+        },
+        context: defaultContext()
+      })
+    );
+
+    expect(completeResult.status).toBe("completed");
+    const signals = await harness.signalService.listByRun("run-1");
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toMatchObject({
+      source: SignalSource.GARDEN_COMPILE,
+      signal_state: "triaged",
+      source_memory_refs: [],
+      raw_payload: {
+        observation: "user prefers vitest watch mode",
+        source_memory_refs: "legacy metadata, not a graph hint"
+      }
     });
   });
 
@@ -960,6 +1023,11 @@ function createSignal(overrides: Partial<CandidateMemorySignal> = {}): Candidate
     domain_tags: ["test"],
     confidence: 0.9,
     evidence_refs: ["memory-a"],
+    source_memory_refs: [],
+    supersedes_refs: [],
+    exception_to_refs: [],
+    contradicts_refs: [],
+    incompatible_with_refs: [],
     raw_payload: { observation: "post-turn extraction test" },
     created_at: "2026-05-07T00:11:00.000Z",
     ...overrides

@@ -10,6 +10,7 @@ import {
   buildQuestionDiagnostic
 } from "../longmemeval/diagnostics.js";
 import { runLongMemEvalMultiturn } from "../longmemeval/multiturn.js";
+import { runLongMemEvalCrossQuestion } from "../longmemeval/crossquestion.js";
 import {
   buildLongMemEvalSidecarKey,
   buildLongMemEvalReportContextUsage,
@@ -101,6 +102,26 @@ function buildLongMemEvalArchivePayload(
     },
     ...overrides
   };
+}
+
+async function writeArchiveEntry(
+  historyRoot: string,
+  benchName: KpiPayload["bench_name"],
+  slug: string,
+  payload: KpiPayload,
+  findingsMarkdown: string | null = null
+): Promise<void> {
+  const entryRoot = join(historyRoot, benchName, slug);
+  await mkdir(entryRoot, { recursive: true });
+  await writeFile(
+    join(entryRoot, "kpi.json"),
+    JSON.stringify(payload, null, 2) + "\n",
+    "utf8"
+  );
+  await writeFile(join(entryRoot, "report.md"), "report\n", "utf8");
+  if (findingsMarkdown !== null) {
+    await writeFile(join(entryRoot, "findings.md"), findingsMarkdown, "utf8");
+  }
 }
 
 function buildRecallResult(deliveryId: string, objectIds: readonly string[]) {
@@ -1059,6 +1080,36 @@ describe("LongMemEval runner", () => {
       );
       await writeFile(join(priorColdEnvRoot, "report.md"), "cold env report\n", "utf8");
 
+      const priorPassingRunAt = "2026-05-14T12:00:00.000Z";
+      const priorFailingRunAt = "2026-05-14T13:00:00.000Z";
+      await writeArchiveEntry(
+        historyRoot,
+        "public",
+        "2026-05-14T120000Z-aaa1111-policy-chat-report-mixed",
+        buildLongMemEvalArchivePayload({
+          run_at: priorPassingRunAt,
+          alaya_commit: "aaa1111",
+          split: "longmemeval-oracle",
+          policy_shape: "chat",
+          simulate_report: "mixed",
+          embedding_provider: "none"
+        })
+      );
+      await writeArchiveEntry(
+        historyRoot,
+        "public",
+        "2026-05-14T130000Z-bbb2222-policy-chat-report-mixed",
+        buildLongMemEvalArchivePayload({
+          run_at: priorFailingRunAt,
+          alaya_commit: "bbb2222",
+          split: "longmemeval-oracle",
+          policy_shape: "chat",
+          simulate_report: "mixed",
+          embedding_provider: "none"
+        }),
+        "# findings\n- regression\n"
+      );
+
       const weightOverridesJson = JSON.stringify({
         activation_weights_phase4b: {
           scope_match: 0.08,
@@ -1113,6 +1164,7 @@ describe("LongMemEval runner", () => {
           lexical_fts: 0.5
         }
       });
+      expect(result.payload.diff_vs_previous?.previous_run).toBe(priorPassingRunAt);
 
       // KPI payload must pass schema validation
       const parseResult = KpiPayloadSchema.safeParse(result.payload);
@@ -1158,9 +1210,7 @@ describe("LongMemEval runner", () => {
           recalls_edge_count: number;
           memory_graph_edges_by_type: Record<string, number>;
           path_relations_total: number;
-          snapshots: Array<{
-            memory_graph_edges_by_type: Record<string, number>;
-          }>;
+          snapshot_count: number;
         };
         scored_recall_evidence: {
           delivered_result_count: number;
@@ -1169,7 +1219,10 @@ describe("LongMemEval runner", () => {
           graph_expansion_plane_count: number;
           path_expansion_plane_count: number;
         };
-        questions: Array<{
+        compact_schema_version: number;
+        question_count: number;
+        full_diagnostics_artifact_path: string;
+        questions?: Array<{
           question_id: string;
           gold_memory_ids: string[];
           recall_diagnostics_present: boolean;
@@ -1192,16 +1245,38 @@ describe("LongMemEval runner", () => {
       expect(diagnostics.report_side_effects.recalls_edge_count).toBeGreaterThanOrEqual(0);
       expect(diagnostics.report_side_effects.memory_graph_edges_by_type).toHaveProperty("recalls");
       expect(diagnostics.report_side_effects.path_relations_total).toBeGreaterThanOrEqual(0);
-      expect(diagnostics.report_side_effects.snapshots).toHaveLength(2);
+      expect(diagnostics.report_side_effects.snapshot_count).toBe(2);
       expect(diagnostics.scored_recall_evidence.delivered_result_count).toBeGreaterThan(0);
       expect(diagnostics.scored_recall_evidence.graph_support_gold_count).toBeGreaterThanOrEqual(0);
       expect(diagnostics.scored_recall_evidence.path_plasticity_gold_count).toBeGreaterThanOrEqual(0);
       expect(diagnostics.scored_recall_evidence.path_expansion_plane_count).toBeGreaterThanOrEqual(0);
-      expect(diagnostics.questions).toHaveLength(2);
-      expect(diagnostics.questions[0]?.question_id).toBe("q001");
-      expect(diagnostics.questions[0]?.gold_memory_ids.length).toBeGreaterThan(0);
-      expect(diagnostics.questions[0]?.recall_diagnostics_present).toBe(true);
-      expect(diagnostics.questions[0]?.recall_diagnostics_keys).toContain("candidates");
+      expect(diagnostics.compact_schema_version).toBe(1);
+      expect(diagnostics.question_count).toBe(2);
+      expect(diagnostics.questions).toBeUndefined();
+      expect(diagnostics.full_diagnostics_artifact_path).not.toContain(
+        join("docs", "bench-history")
+      );
+      const fullDiagnostics = JSON.parse(
+        await readFile(diagnostics.full_diagnostics_artifact_path, "utf8")
+      ) as {
+        report_side_effects?: {
+          snapshots: Array<{
+            memory_graph_edges_by_type: Record<string, number>;
+          }>;
+        };
+        questions: Array<{
+          question_id: string;
+          gold_memory_ids: string[];
+          recall_diagnostics_present: boolean;
+          recall_diagnostics_keys: string[];
+        }>;
+      };
+      expect(fullDiagnostics.report_side_effects?.snapshots).toHaveLength(2);
+      expect(fullDiagnostics.questions).toHaveLength(2);
+      expect(fullDiagnostics.questions[0]?.question_id).toBe("q001");
+      expect(fullDiagnostics.questions[0]?.gold_memory_ids.length).toBeGreaterThan(0);
+      expect(fullDiagnostics.questions[0]?.recall_diagnostics_present).toBe(true);
+      expect(fullDiagnostics.questions[0]?.recall_diagnostics_keys).toContain("candidates");
       expect(JSON.stringify(diagnostics)).not.toContain("correct fact");
       const comparison = JSON.parse(
         await readFile(
@@ -1288,6 +1363,40 @@ describe("LongMemEval runner", () => {
         }),
         "utf8"
       );
+      const priorPassingRunAt = "2026-05-15T12:00:00.000Z";
+      await writeArchiveEntry(
+        historyRoot,
+        "public-multiturn",
+        "2026-05-15T120000Z-aaa1111",
+        buildLongMemEvalArchivePayload({
+          bench_name: "public-multiturn",
+          split: "longmemeval-s",
+          run_at: priorPassingRunAt,
+          alaya_commit: "aaa1111",
+          dataset: {
+            name: "longmemeval_s:multiturn",
+            size: 1,
+            source: "fixture"
+          }
+        })
+      );
+      await writeArchiveEntry(
+        historyRoot,
+        "public-multiturn",
+        "2026-05-15T130000Z-bbb2222",
+        buildLongMemEvalArchivePayload({
+          bench_name: "public-multiturn",
+          split: "longmemeval-s",
+          run_at: "2026-05-15T13:00:00.000Z",
+          alaya_commit: "bbb2222",
+          dataset: {
+            name: "longmemeval_s:multiturn",
+            size: 1,
+            source: "fixture"
+          }
+        }),
+        "# findings\n- regression\n"
+      );
 
       const result = await runLongMemEvalMultiturn({
         variant,
@@ -1299,15 +1408,125 @@ describe("LongMemEval runner", () => {
       });
 
       expect(result.payload.bench_name).toBe("public-multiturn");
+      expect(result.payload.diff_vs_previous?.previous_run).toBe(priorPassingRunAt);
       expect(result.payload.kpi.multiturn_rounds).toBe(2);
       expect(result.payload.kpi.r_at_5_round_1).toBeGreaterThanOrEqual(0);
       expect(result.payload.kpi.r_at_5_round_n).toBe(result.payload.kpi.r_at_5);
       expect(result.diagnosticsPath).not.toBeNull();
       const diagnostics = JSON.parse(
         await readFile(result.diagnosticsPath!, "utf8")
-      ) as { bench_name: string; questions: Array<{ round_index: number | null }> };
+      ) as {
+        bench_name: string;
+        question_count: number;
+        full_diagnostics_artifact_path: string;
+      };
       expect(diagnostics.bench_name).toBe("public-multiturn");
-      expect(diagnostics.questions.map((row) => row.round_index)).toEqual([1, 2]);
+      expect(diagnostics.question_count).toBe(2);
+      const fullDiagnostics = JSON.parse(
+        await readFile(diagnostics.full_diagnostics_artifact_path, "utf8")
+      ) as { questions: Array<{ round_index: number | null }> };
+      expect(fullDiagnostics.questions.map((row) => row.round_index)).toEqual([1, 2]);
+    },
+    180_000
+  );
+
+  it(
+    "archives public-crossquestion runs with compact diagnostics and external full artifact",
+    async () => {
+      const dataDir = join(tmpDir, "longmemeval-crossquestion");
+      await mkdir(dataDir, { recursive: true });
+      const historyRoot = join(tmpDir, "history-crossquestion");
+
+      const mockQuestions: LongMemEvalQuestion[] = [
+        buildMockQuestion("qcq001", "session-a")
+      ];
+      const variant = "longmemeval_s";
+      const datasetRaw = JSON.stringify(mockQuestions);
+      const datasetSha = createHash("sha256").update(datasetRaw, "utf8").digest("hex");
+      await writeFile(join(dataDir, `${variant}.json`), datasetRaw, "utf8");
+      await writeFile(
+        join(dataDir, `${variant}.meta.json`),
+        JSON.stringify({ variant, sha256: datasetSha, questionCount: 1 }),
+        "utf8"
+      );
+      const pinnedMetaRoot = join(tmpDir, "pinned-meta-crossquestion");
+      await mkdir(pinnedMetaRoot, { recursive: true });
+      await writeFile(
+        join(pinnedMetaRoot, `${variant}.meta.json`),
+        JSON.stringify({
+          name: variant,
+          sha256: datasetSha,
+          question_count: 1,
+          first_pinned_at: "2026-05-15T00:00:00Z",
+          pinned_by_commit: "test"
+        }),
+        "utf8"
+      );
+      const priorPassingRunAt = "2026-05-16T12:00:00.000Z";
+      await writeArchiveEntry(
+        historyRoot,
+        "public-crossquestion",
+        "2026-05-16T120000Z-aaa1111",
+        buildLongMemEvalArchivePayload({
+          bench_name: "public-crossquestion",
+          split: "longmemeval-s",
+          run_at: priorPassingRunAt,
+          alaya_commit: "aaa1111",
+          dataset: {
+            name: "longmemeval_s:crossquestion",
+            size: 1,
+            source: "fixture"
+          }
+        })
+      );
+      await writeArchiveEntry(
+        historyRoot,
+        "public-crossquestion",
+        "2026-05-16T130000Z-bbb2222",
+        buildLongMemEvalArchivePayload({
+          bench_name: "public-crossquestion",
+          split: "longmemeval-s",
+          run_at: "2026-05-16T13:00:00.000Z",
+          alaya_commit: "bbb2222",
+          dataset: {
+            name: "longmemeval_s:crossquestion",
+            size: 1,
+            source: "fixture"
+          }
+        }),
+        "# findings\n- regression\n"
+      );
+
+      const result = await runLongMemEvalCrossQuestion({
+        variant,
+        limit: 1,
+        historyRoot,
+        dataDir,
+        pinnedMetaRoot
+      });
+
+      expect(result.payload.bench_name).toBe("public-crossquestion");
+      expect(result.payload.diff_vs_previous?.previous_run).toBe(priorPassingRunAt);
+      expect(result.diagnosticsPath).not.toBeNull();
+      const diagnostics = JSON.parse(
+        await readFile(result.diagnosticsPath!, "utf8")
+      ) as {
+        bench_name: string;
+        question_count: number;
+        questions?: unknown;
+        full_diagnostics_artifact_path: string;
+      };
+      expect(diagnostics.bench_name).toBe("public-crossquestion");
+      expect(diagnostics.question_count).toBe(1);
+      expect(diagnostics.questions).toBeUndefined();
+      expect(diagnostics.full_diagnostics_artifact_path).not.toContain(
+        join("docs", "bench-history")
+      );
+      const fullDiagnostics = JSON.parse(
+        await readFile(diagnostics.full_diagnostics_artifact_path, "utf8")
+      ) as { questions: Array<{ question_id: string }> };
+      expect(fullDiagnostics.questions).toHaveLength(1);
+      expect(fullDiagnostics.questions[0]?.question_id).toBe("qcq001");
     },
     180_000
   );

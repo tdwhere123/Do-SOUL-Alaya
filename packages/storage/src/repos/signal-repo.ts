@@ -27,6 +27,11 @@ interface SignalRow {
   readonly domain_tags_json: string;
   readonly confidence: number;
   readonly evidence_refs_json: string;
+  readonly source_memory_refs_json: string;
+  readonly supersedes_refs_json: string;
+  readonly exception_to_refs_json: string;
+  readonly contradicts_refs_json: string;
+  readonly incompatible_with_refs_json: string;
   readonly raw_payload_json: string;
   readonly signal_state: string;
   readonly created_at: string;
@@ -52,10 +57,15 @@ export class SqliteSignalRepo implements SignalRepo {
         domain_tags_json,
         confidence,
         evidence_refs_json,
+        source_memory_refs_json,
+        supersedes_refs_json,
+        exception_to_refs_json,
+        contradicts_refs_json,
+        incompatible_with_refs_json,
         raw_payload_json,
         signal_state,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     this.getByIdStatement = db.connection.prepare(`
       SELECT
@@ -70,6 +80,11 @@ export class SqliteSignalRepo implements SignalRepo {
         domain_tags_json,
         confidence,
         evidence_refs_json,
+        source_memory_refs_json,
+        supersedes_refs_json,
+        exception_to_refs_json,
+        contradicts_refs_json,
+        incompatible_with_refs_json,
         raw_payload_json,
         signal_state,
         created_at
@@ -90,6 +105,11 @@ export class SqliteSignalRepo implements SignalRepo {
         domain_tags_json,
         confidence,
         evidence_refs_json,
+        source_memory_refs_json,
+        supersedes_refs_json,
+        exception_to_refs_json,
+        contradicts_refs_json,
+        incompatible_with_refs_json,
         raw_payload_json,
         signal_state,
         created_at
@@ -120,6 +140,11 @@ export class SqliteSignalRepo implements SignalRepo {
         JSON.stringify(parsedSignal.domain_tags),
         parsedSignal.confidence,
         JSON.stringify(parsedSignal.evidence_refs),
+        JSON.stringify(parsedSignal.source_memory_refs),
+        JSON.stringify(parsedSignal.supersedes_refs),
+        JSON.stringify(parsedSignal.exception_to_refs),
+        JSON.stringify(parsedSignal.contradicts_refs),
+        JSON.stringify(parsedSignal.incompatible_with_refs),
         JSON.stringify(parsedSignal.raw_payload),
         SignalState.EMITTED,
         parsedSignal.created_at
@@ -202,6 +227,11 @@ function parseSignalRow(row: SignalRow): CandidateMemorySignal {
       domain_tags: JSON.parse(row.domain_tags_json),
       confidence: row.confidence,
       evidence_refs: JSON.parse(row.evidence_refs_json),
+      source_memory_refs: JSON.parse(row.source_memory_refs_json),
+      supersedes_refs: JSON.parse(row.supersedes_refs_json),
+      exception_to_refs: JSON.parse(row.exception_to_refs_json),
+      contradicts_refs: JSON.parse(row.contradicts_refs_json),
+      incompatible_with_refs: JSON.parse(row.incompatible_with_refs_json),
       raw_payload: JSON.parse(row.raw_payload_json),
       created_at: row.created_at
     });

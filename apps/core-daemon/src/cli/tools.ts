@@ -81,7 +81,7 @@ async function executeToolsCommand(
   }
   const callContext = callContextResult.context;
   if (
-    args.toolName === "soul.review_memory_proposal" &&
+    isHumanReviewerOnlyTool(args.toolName) &&
     isHumanReviewerAgentTarget(callContext.agentTarget)
   ) {
     ctx.stderr.write(
@@ -113,6 +113,11 @@ async function executeToolsCommand(
     exitCode: ALAYA_SYSEXITS.OK,
     json: result.output
   };
+}
+
+function isHumanReviewerOnlyTool(toolName: string): boolean {
+  return toolName === "soul.review_memory_proposal" ||
+    toolName === "soul.batch_review_edge_proposals";
 }
 
 function isHumanReviewerAgentTarget(agentTarget: string): boolean {

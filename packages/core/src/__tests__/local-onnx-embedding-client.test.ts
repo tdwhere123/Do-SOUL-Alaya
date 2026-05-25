@@ -1,12 +1,12 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
   LOCAL_ONNX_EMBEDDING_DIMENSIONS,
   LOCAL_ONNX_UNAVAILABLE_FAILURE_THRESHOLD,
   LOCAL_ONNX_UNAVAILABLE_RETRY_BACKOFF_MS,
   LocalOnnxEmbeddingClient,
+  defaultLocalOnnxCacheDir,
   type LocalOnnxFeatureExtractor
 } from "../local-onnx-embedding-client.js";
 
@@ -124,6 +124,38 @@ describe("LocalOnnxEmbeddingClient", () => {
     expect(loader).toHaveBeenCalledTimes(1);
   });
 
+  it("defaults the model cache outside the repository under XDG cache", async () => {
+    const originalXdg = process.env.XDG_CACHE_HOME;
+    const originalHome = process.env.HOME;
+    process.env.XDG_CACHE_HOME = "/tmp/alaya-xdg-cache";
+    process.env.HOME = "/tmp/ignored-home";
+    try {
+      let observedCacheDir: string | null = null;
+      const client = new LocalOnnxEmbeddingClient({
+        pipelineLoader: async (_modelId, cacheDir) => {
+          observedCacheDir = cacheDir;
+          return stubExtractor([[dimRow(1)]]).extractor;
+        }
+      });
+
+      await client.embedTexts(["cache probe"], { timeoutMs: 5_000 });
+
+      expect(defaultLocalOnnxCacheDir()).toBe("/tmp/alaya-xdg-cache/do-soul-alaya/models");
+      expect(observedCacheDir).toBe("/tmp/alaya-xdg-cache/do-soul-alaya/models");
+    } finally {
+      if (originalXdg === undefined) {
+        delete process.env.XDG_CACHE_HOME;
+      } else {
+        process.env.XDG_CACHE_HOME = originalXdg;
+      }
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+    }
+  });
+
   it("returns an empty result without loading the model for empty input", async () => {
     const loader = vi.fn(async () => stubExtractor([[dimRow(1)]]).extractor);
     const client = new LocalOnnxEmbeddingClient({ pipelineLoader: loader });
@@ -158,8 +190,7 @@ describe("LocalOnnxEmbeddingClient", () => {
 // Real-model smoke check. Runs only when the model weights have been
 // pre-fetched into the worktree cache; otherwise skipped so CI without the
 // large weights stays green.
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
-const modelCacheDir = path.join(repoRoot, "var/models");
+const modelCacheDir = defaultLocalOnnxCacheDir();
 const modelPresent = existsSync(
   path.join(modelCacheDir, "Xenova/paraphrase-multilingual-MiniLM-L12-v2/onnx/model_quantized.onnx")
 );

@@ -24,6 +24,7 @@ export function createDaemonMcpMemoryToolHandler(input: {
   readonly pathRelationProposalService?: McpMemoryToolHandlerDependencies["pathRelationProposalService"];
   readonly signalService: McpMemoryToolHandlerDependencies["signalService"];
   readonly graphExploreService: McpMemoryToolHandlerDependencies["graphExploreService"];
+  readonly edgeProposalService?: McpMemoryToolHandlerDependencies["edgeProposalService"];
   readonly graphEdgePort?: McpMemoryToolHandlerDependencies["graphEdgePort"];
   readonly sessionOverrideService: McpMemoryToolHandlerDependencies["sessionOverrideService"];
   readonly trustStateRecorder: McpMemoryToolHandlerDependencies["trustStateRecorder"];
@@ -47,6 +48,8 @@ export function createDaemonMcpMemoryToolHandler(input: {
   //   assertDeliveryInScope
   readonly claimSourceReader?: SoulResolveHandlerDependencies["claimSourceReader"];
 }) {
+  const reviewerIdentityBinding =
+    input.reviewerIdentityBinding ?? createReviewerIdentityBindingFromEnv(process.env);
   const soulResolveHandler = createSoulResolveHandler({
     resolutionService: input.resolutionService,
     trustStateRecorder: {
@@ -82,6 +85,8 @@ export function createDaemonMcpMemoryToolHandler(input: {
       : { pathRelationProposalService: input.pathRelationProposalService }),
     signalService: input.signalService,
     graphExploreService: input.graphExploreService,
+    ...(input.edgeProposalService === undefined ? {} : { edgeProposalService: input.edgeProposalService }),
+    ...(reviewerIdentityBinding === undefined ? {} : { reviewerIdentityBinding }),
     ...(input.graphEdgePort === undefined ? {} : { graphEdgePort: input.graphEdgePort }),
     sessionOverrideService: input.sessionOverrideService,
     trustStateRecorder: input.trustStateRecorder,
@@ -113,8 +118,7 @@ export function createDaemonMcpMemoryToolHandler(input: {
           }
         }
       },
-      reviewerIdentityBinding:
-        input.reviewerIdentityBinding ?? createReviewerIdentityBindingFromEnv(process.env)
+      ...(reviewerIdentityBinding === undefined ? {} : { reviewerIdentityBinding })
     })
   });
 }

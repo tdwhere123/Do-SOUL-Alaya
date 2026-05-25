@@ -6,7 +6,8 @@
 // Usage:
 //   node scripts/fetch-local-embedding-model.mjs [--cache-dir <path>] [--model <repo-id>] [--force]
 //
-// Defaults: cache-dir = $ALAYA_LOCAL_EMBEDDING_CACHE_DIR or <repo>/var/models;
+// Defaults: cache-dir = $ALAYA_LOCAL_EMBEDDING_CACHE_DIR or
+//           ${XDG_CACHE_HOME:-$HOME/.cache}/do-soul-alaya/models;
 //           model = Xenova/paraphrase-multilingual-MiniLM-L12-v2.
 //
 // Mirror: set HF_ENDPOINT (e.g. https://hf-mirror.com) when huggingface.co is
@@ -15,12 +16,12 @@
 
 import { mkdirSync, statSync, createWriteStream } from "node:fs";
 import { rm } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { pipeline as streamPipeline } from "node:stream/promises";
+import { pathToFileURL } from "node:url";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_MODEL_ID = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
 // The q8 feature-extraction pipeline only needs these artifacts.
 const MODEL_FILES = [
@@ -36,7 +37,7 @@ function parseArgs(argv) {
   const args = {
     cacheDir:
       process.env.ALAYA_LOCAL_EMBEDDING_CACHE_DIR?.trim() ||
-      path.join(repoRoot, "var/models"),
+      defaultCacheDir(),
     modelId: DEFAULT_MODEL_ID,
     force: false
   };
@@ -53,6 +54,21 @@ function parseArgs(argv) {
     }
   }
   return args;
+}
+
+export function defaultCacheDir(
+  env = process.env,
+  fallbackHome = homedir(),
+  fallbackTmp = tmpdir()
+) {
+  const xdgCacheHome = env.XDG_CACHE_HOME?.trim();
+  const home = fallbackHome.trim();
+  const cacheHome = xdgCacheHome && xdgCacheHome.length > 0
+    ? xdgCacheHome
+    : home.length > 0
+      ? path.join(home, ".cache")
+      : path.join(fallbackTmp, "do-soul-alaya-cache");
+  return path.join(cacheHome, "do-soul-alaya/models");
 }
 
 function endpointBase() {
@@ -140,9 +156,11 @@ async function main() {
   );
 }
 
-main().catch((error) => {
-  process.stderr.write(
-    `fetch-local-embedding-model: ${error instanceof Error ? error.stack : String(error)}\n`
-  );
-  process.exit(1);
-});
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    process.stderr.write(
+      `fetch-local-embedding-model: ${error instanceof Error ? error.stack : String(error)}\n`
+    );
+    process.exit(1);
+  });
+}

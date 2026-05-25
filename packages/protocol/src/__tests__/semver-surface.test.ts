@@ -25,6 +25,7 @@ import * as WorkerRuntimeEvents from "../events/worker-runtime.js";
 import * as WorkspaceRunEvents from "../events/workspace-run.js";
 import * as McpTypes from "../soul/mcp-types.js";
 import * as BudgetSnapshot from "../soul/budget-snapshot.js";
+import * as EdgeProposal from "../soul/edge-proposal.js";
 import * as MemoryEntry from "../soul/memory-entry.js";
 import * as MemoryGraph from "../soul/memory-graph.js";
 import * as ObjectKind from "../soul/object-kind.js";
@@ -55,6 +56,7 @@ const mcpSchemaModules: readonly SchemaModule[] = [
   { module: "packages/protocol/src/candidate-memory-signal.ts", exports: CandidateMemorySignal },
   { module: "packages/protocol/src/schema-primitives.ts", exports: SchemaPrimitives },
   { module: "packages/protocol/src/soul/budget-snapshot.ts", exports: BudgetSnapshot },
+  { module: "packages/protocol/src/soul/edge-proposal.ts", exports: EdgeProposal },
   { module: "packages/protocol/src/soul/memory-entry.ts", exports: MemoryEntry },
   { module: "packages/protocol/src/soul/memory-graph.ts", exports: MemoryGraph },
   { module: "packages/protocol/src/soul/object-kind.ts", exports: ObjectKind },
@@ -111,6 +113,7 @@ describe("semver-surface", () => {
       expect.arrayContaining([
         "packages/protocol/src/candidate-memory-signal.ts",
         "packages/protocol/src/schema-primitives.ts",
+        "packages/protocol/src/soul/edge-proposal.ts",
         "packages/protocol/src/soul/mcp-types.ts",
         "packages/protocol/src/soul/memory-entry.ts",
         "packages/protocol/src/soul/memory-graph.ts",

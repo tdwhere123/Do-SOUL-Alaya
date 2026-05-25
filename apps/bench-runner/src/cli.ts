@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import {
@@ -37,6 +37,7 @@ import {
 } from "./longmemeval/archive-evidence.js";
 import {
   buildPerPlaneRecallCoverage,
+  renderCompactDiagnosticsSidecar,
   renderDiagnosticsSidecar,
   summarizeProviderStates,
   type LongMemEvalDiagnosticsSidecar,
@@ -44,6 +45,7 @@ import {
   type LongMemEvalQueryEmbeddingCacheSummary,
   type LongMemEvalReportUsageSummary
 } from "./longmemeval/diagnostics.js";
+import { writeExternalDiagnosticsArtifact } from "./longmemeval/diagnostics-artifacts.js";
 import { runLiveBench } from "./live/runner.js";
 import { runLongMemEval } from "./longmemeval/runner.js";
 import { runSelfBench } from "./self/runner.js";
@@ -608,6 +610,39 @@ function stableJson(value: unknown): string {
   return `{${entries.join(",")}}`;
 }
 
+const SHARD_POINTER_FILENAMES = [
+  "latest-passing.json",
+  "latest-run.json",
+  "latest-baseline.json"
+] as const;
+
+async function resolveShardPointerPath(shardRoot: string): Promise<string> {
+  const pointerRoot = path.join(shardRoot, "public");
+  for (const filename of SHARD_POINTER_FILENAMES) {
+    const pointerPath = path.join(pointerRoot, filename);
+    try {
+      await access(pointerPath);
+      return pointerPath;
+    } catch (error) {
+      if (!isNotFound(error)) {
+        throw error;
+      }
+    }
+  }
+  throw new Error(
+    `shard ${shardRoot} no usable shard pointer; checked ${SHARD_POINTER_FILENAMES.join(", ")}`
+  );
+}
+
+function isNotFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { readonly code?: unknown }).code === "ENOENT"
+  );
+}
+
 function buildMergedLongMemEvalDiagnosticsSidecar(
   payload: KpiPayload,
   shardDiagnostics: readonly (LongMemEvalDiagnosticsSidecar | null)[],
@@ -744,15 +779,16 @@ function aggregateQueryEmbeddingCache(
  * @anchor merge-longmemeval — combine N shard kpi.jsons into one final entry
  *
  * Each shard was produced by `longmemeval --offset X --limit Y --history-root
- * /tmp/shard-N`. Reads each shard's `latest-baseline.json` -> kpi.json,
+ * /tmp/shard-N`. Reads each shard's latest-passing/latest-run/legacy-baseline
+ * pointer -> kpi.json,
  * concatenates per_scenario, sums tier_distribution / degradation_reasons,
  * recomputes R@K from per_scenario, and uses exact merged latency
  * percentiles when shard rows carry per-question latency. Legacy shards
  * without row latency fall back to a conservative worst-shard bound.
  *
- * Writes the merged entry under `--history-root` and rewrites
- * `latest-baseline.json` for split `longmemeval-{s|oracle}` based on the
- * first shard's split.
+ * Writes the merged entry under `--history-root` and rewrites the latest-run
+ * and latest-passing pointer set based on the first shard's split. Legacy
+ * latest-baseline aliases are still emitted by `writeEntry` for old tools.
  */
 async function runMergeLongMemEvalCommand(
   opts: ParsedFlags
@@ -771,13 +807,13 @@ async function runMergeLongMemEvalCommand(
     const shardPayloads: KpiPayload[] = [];
     const shardArchiveRefs: Array<{ readonly root: string; readonly slug: string }> = [];
     for (const shardRoot of shards) {
-      const pointerPath = path.join(shardRoot, "public", "latest-baseline.json");
+      const pointerPath = await resolveShardPointerPath(shardRoot);
       const pointer = JSON.parse(await readFile(pointerPath, "utf8")) as {
         slug?: string;
         kpi_path?: string;
       };
       if (typeof pointer.slug !== "string") {
-        throw new Error(`shard ${shardRoot} latest-baseline.json missing slug`);
+        throw new Error(`shard ${shardRoot} ${path.basename(pointerPath)} missing slug`);
       }
       const kpiPath = path.join(shardRoot, "public", pointer.slug, "kpi.json");
       const raw = await readFile(kpiPath, "utf8");
@@ -1139,7 +1175,8 @@ async function runMergeLongMemEvalCommand(
       split: first.split,
       policyShape,
       simulateReport,
-      embeddingProvider: merged.embedding_provider
+      embeddingProvider: merged.embedding_provider,
+      pointerKind: "passing"
     });
     const diff = diffKpis(merged, previous);
     merged.diff_vs_previous = buildDiffVsPrevious(
@@ -1158,12 +1195,22 @@ async function runMergeLongMemEvalCommand(
       archiveEvidenceFromDiagnostics(diagnostics)
     );
     const currentEvidence = aggregateLongMemEvalArchiveEvidence(shardEvidence);
-    const diagnosticsSidecar = renderDiagnosticsSidecar(
-      buildMergedLongMemEvalDiagnosticsSidecar(
-        merged,
-        shardDiagnostics,
-        currentEvidence
-      )
+    const diagnosticsPayload = buildMergedLongMemEvalDiagnosticsSidecar(
+      merged,
+      shardDiagnostics,
+      currentEvidence
+    );
+    const fullDiagnosticsSidecar = renderDiagnosticsSidecar(diagnosticsPayload);
+    const fullDiagnosticsArtifactPath = await writeExternalDiagnosticsArtifact({
+      historyRoot: opts.historyRoot,
+      benchName: "public",
+      slug,
+      filename: LONGMEMEVAL_DIAGNOSTICS_FILENAME,
+      contents: fullDiagnosticsSidecar
+    });
+    const diagnosticsSidecar = renderCompactDiagnosticsSidecar(
+      diagnosticsPayload,
+      fullDiagnosticsArtifactPath
     );
     const opposite = await readLatestLongMemEvalOppositeArchive({
       layout,

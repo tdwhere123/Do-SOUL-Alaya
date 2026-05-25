@@ -18,6 +18,17 @@ export function collectReleaseHardGates(
   const gates: BenchmarkHardGate[] = [];
   gates.push(...collectRecallQualityGates(current));
   gates.push(...collectPipelineIntegrityGates(current));
+  if (gates.length === 0 && isDocumentedTier1ShipGateArchive(current)) {
+    gates.push(
+      minGate(
+        "missing_v0_3_11_tier1_release_gate",
+        "recognized v0.3.11 Tier 1 archive has no executable gate",
+        null,
+        1,
+        "count"
+      )
+    );
+  }
   return gates;
 }
 
@@ -25,6 +36,17 @@ export function releaseHardGateVerdict(current: KpiPayload): Verdict {
   return collectReleaseHardGates(current).some((gate) => !gate.passed)
     ? "fail"
     : "ok";
+}
+
+export function releaseHardGateAllowsLatestPassing(current: KpiPayload): boolean {
+  if (isTier1LatestPassingSurface(current) && !isReleaseGradeTier1Payload(current)) {
+    return false;
+  }
+  const gates = collectReleaseHardGates(current);
+  if (gates.length === 0) {
+    return !requiresExecutableReleaseGateForLatestPassing(current);
+  }
+  return gates.every((gate) => gate.passed);
 }
 
 export function combineVerdicts(...verdicts: readonly Verdict[]): Verdict {
@@ -66,7 +88,7 @@ function collectRecallQualityGates(
           "longmemeval_s_500_embedding_off_r_at_5",
           "LongMemEval-S 500 embedding-off R@5",
           current.kpi.r_at_5,
-          0.65
+          0.9
         )
       ];
     }
@@ -86,6 +108,23 @@ function collectRecallQualityGates(
     }
   }
 
+  if (isLongMemEvalFullEmbeddingOffGateArchive(current)) {
+    const labels: Partial<Record<KpiPayload["bench_name"], [string, string]>> = {
+      "public-multiturn": [
+        "longmemeval_multiturn_500_embedding_off_r_at_5",
+        "LongMemEval-S multiturn 500 embedding-off R@5"
+      ],
+      "public-crossquestion": [
+        "longmemeval_crossquestion_500_embedding_off_r_at_5",
+        "LongMemEval-S crossquestion 500 embedding-off R@5"
+      ]
+    };
+    const label = labels[current.bench_name];
+    if (label !== undefined) {
+      return [minGate(label[0], label[1], current.kpi.r_at_5, 0.9)];
+    }
+  }
+
   if (
     current.bench_name === "public-locomo" &&
     current.split === "locomo10" &&
@@ -101,7 +140,7 @@ function collectRecallQualityGates(
           ? "LoCoMo full embedding-on R@5"
           : "LoCoMo full embedding-off R@5",
         current.kpi.r_at_5,
-        embeddingEnabled ? 0.5 : 0.35
+        embeddingEnabled ? 0.9 : 0.55
       )
     ];
   }
@@ -194,6 +233,98 @@ function isReleasePublicRecallArchive(current: KpiPayload): boolean {
     current.evaluated_count >= current.sample_size &&
     current.sample_size >= 1982
   );
+}
+
+function isLongMemEvalFullEmbeddingOffGateArchive(current: KpiPayload): boolean {
+  return (
+    (current.bench_name === "public" ||
+      current.bench_name === "public-multiturn" ||
+      current.bench_name === "public-crossquestion") &&
+    current.split === "longmemeval-s" &&
+    current.embedding_provider === "none" &&
+    current.evaluated_count >= current.sample_size &&
+    current.sample_size >= 500
+  );
+}
+
+function isDocumentedTier1ShipGateArchive(current: KpiPayload): boolean {
+  if (isLongMemEvalFullEmbeddingOffGateArchive(current)) return true;
+  return (
+    current.bench_name === "public-locomo" &&
+    current.split === "locomo10" &&
+    current.evaluated_count >= current.sample_size &&
+    current.sample_size >= 1982
+  );
+}
+
+function requiresExecutableReleaseGateForLatestPassing(current: KpiPayload): boolean {
+  if (!usesV0311LatestPassingPolicy(current)) return false;
+  if (isLongMemEvalReleaseSizedTier1Surface(current)) return true;
+  if (isLiveStrictRealTier1Surface(current)) return true;
+  if (isLocomoReleaseSizedTier1Surface(current)) return true;
+  return false;
+}
+
+function isTier1LatestPassingSurface(current: KpiPayload): boolean {
+  return (
+    usesV0311LatestPassingPolicy(current) &&
+    (isLongMemEvalTier1Surface(current) ||
+      isLocomoTier1Surface(current) ||
+      isLiveStrictRealTier1Surface(current))
+  );
+}
+
+function isReleaseGradeTier1Payload(current: KpiPayload): boolean {
+  if (isLongMemEvalTier1Surface(current)) {
+    return (
+      current.sample_size >= 500 &&
+      current.evaluated_count >= current.sample_size
+    );
+  }
+  if (isLocomoTier1Surface(current)) {
+    return (
+      current.sample_size >= 1982 &&
+      current.evaluated_count >= current.sample_size
+    );
+  }
+  return false;
+}
+
+function isLongMemEvalReleaseSizedTier1Surface(current: KpiPayload): boolean {
+  return isLongMemEvalTier1Surface(current) && current.sample_size >= 500;
+}
+
+function isLocomoReleaseSizedTier1Surface(current: KpiPayload): boolean {
+  return isLocomoTier1Surface(current) && current.sample_size >= 1982;
+}
+
+function isLongMemEvalTier1Surface(current: KpiPayload): boolean {
+  return (
+    (current.bench_name === "public" ||
+      current.bench_name === "public-multiturn" ||
+      current.bench_name === "public-crossquestion") &&
+    current.split === "longmemeval-s"
+  );
+}
+
+function isLocomoTier1Surface(current: KpiPayload): boolean {
+  return current.bench_name === "public-locomo" && current.split === "locomo10";
+}
+
+function isLiveStrictRealTier1Surface(current: KpiPayload): boolean {
+  return current.bench_name === "live" && current.split === "strict-real";
+}
+
+function usesV0311LatestPassingPolicy(current: KpiPayload): boolean {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/u.exec(current.alaya_version);
+  if (match === null) return false;
+  const [, majorRaw, minorRaw, patchRaw] = match;
+  const major = Number(majorRaw);
+  const minor = Number(minorRaw);
+  const patch = Number(patchRaw);
+  if (major !== 0) return major > 0;
+  if (minor !== 3) return minor > 3;
+  return patch >= 11;
 }
 
 function readBudgetDroppedEntries(

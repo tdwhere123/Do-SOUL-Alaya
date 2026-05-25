@@ -3,6 +3,7 @@ import {
   GardenTaskKind,
   GardenTier,
   HealthEventKind,
+  EdgeProposalTriggerSource,
   MemoryGraphEdgeType,
   type GardenRoleValue,
   type GardenTaskDescriptor,
@@ -228,7 +229,10 @@ export class Librarian {
                 targetMemoryId: neighborId,
                 edgeType: MemoryGraphEdgeType.RECALLS,
                 workspaceId: task.workspace_id,
-                runId: task.run_id
+                runId: task.run_id,
+                triggerSource: EdgeProposalTriggerSource.SYSTEM,
+                confidence: 0.5,
+                reason: "librarian subject neighbor proposal"
               });
             } catch {
               // Fire-and-forget: edges are supplementary metadata, not critical.

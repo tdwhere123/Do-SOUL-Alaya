@@ -1,6 +1,7 @@
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { KpiPayload } from "@do-soul/alaya-eval";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const startBenchDaemonMock = vi.hoisted(() => vi.fn());
@@ -178,7 +179,96 @@ describe("LoCoMo runner", () => {
       })
     );
   });
+
+  it("diffs public-locomo runs against the newest passing baseline", async () => {
+    const priorPassingRunAt = "2026-05-19T12:00:00.000Z";
+    await writeLocomoArchive(
+      tmpDir,
+      "2026-05-19T120000Z-aaa1111",
+      buildPriorLocomoPayload({
+        run_at: priorPassingRunAt,
+        alaya_commit: "aaa1111"
+      })
+    );
+    await writeLocomoArchive(
+      tmpDir,
+      "2026-05-19T130000Z-bbb2222",
+      buildPriorLocomoPayload({
+        run_at: "2026-05-19T13:00:00.000Z",
+        alaya_commit: "bbb2222"
+      }),
+      "# findings\n- regression\n"
+    );
+    startBenchDaemonMock.mockResolvedValue(buildMockDaemon({}));
+
+    const result = await runLocomo({
+      variant: "locomo10",
+      historyRoot: tmpDir
+    });
+
+    expect(result.payload.diff_vs_previous?.previous_run).toBe(priorPassingRunAt);
+  });
 });
+
+async function writeLocomoArchive(
+  historyRoot: string,
+  slug: string,
+  payload: KpiPayload,
+  findingsMarkdown: string | null = null
+): Promise<void> {
+  const entryRoot = join(historyRoot, "public-locomo", slug);
+  await mkdir(entryRoot, { recursive: true });
+  await writeFile(
+    join(entryRoot, "kpi.json"),
+    JSON.stringify(payload, null, 2) + "\n",
+    "utf8"
+  );
+  await writeFile(join(entryRoot, "report.md"), "report\n", "utf8");
+  if (findingsMarkdown !== null) {
+    await writeFile(join(entryRoot, "findings.md"), findingsMarkdown, "utf8");
+  }
+}
+
+function buildPriorLocomoPayload(overrides: Partial<KpiPayload> = {}): KpiPayload {
+  return {
+    bench_name: "public-locomo",
+    split: "locomo10",
+    run_at: "2026-05-19T10:00:00.000Z",
+    alaya_commit: "0000000",
+    alaya_version: "0.3.11-test",
+    embedding_provider: "none",
+    chat_provider: "none",
+    policy_shape: "stress",
+    simulate_report: "none",
+    dataset: { name: "locomo10", size: 1, source: "fixture" },
+    sample_size: 1,
+    evaluated_count: 1,
+    harness_mode: "mcp_propose_review",
+    kpi: {
+      r_at_1: 1,
+      r_at_5: 1,
+      r_at_10: 1,
+      latency_ms_p50: 10,
+      latency_ms_p95: 20,
+      latency_source: "exact",
+      token_saved_ratio_vs_full_prompt: 0,
+      tier_distribution: { hot: 1, warm: 0, cold: 0 },
+      degradation_reasons: {
+        none: 1,
+        warm_cascade_engaged: 0,
+        cold_cascade_engaged: 0,
+        recall_explainability_partial: 0
+      },
+      seed_truncation: {
+        seed_turns_truncated: 0,
+        answer_turns_truncated: 0,
+        seed_chars_clipped: 0
+      },
+      per_scenario: []
+    },
+    ...overrides
+  };
+}
 
 function buildMockDaemon(overrides: {
   readonly recall?: ReturnType<typeof vi.fn>;

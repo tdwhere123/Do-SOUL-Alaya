@@ -19,6 +19,9 @@ const expectedMemoryTools = [
   "soul.propose_memory_update",
   "soul.review_memory_proposal",
   "soul.list_pending_proposals",
+  "soul.propose_edge",
+  "soul.list_pending_edge_proposals",
+  "soul.batch_review_edge_proposals",
   "soul.apply_override",
   "soul.explore_graph",
   "soul.report_context_usage",
@@ -60,7 +63,13 @@ describe("P5 final-review status", () => {
     // The catalog-equality test above already pins the full A1 set.
     // invariant: this doc was sealed with the pre-A1 catalog; skip
     // tool names the catalog-equality assertion above already pins.
-    const postSealAdditions = new Set(["soul.list_pending_proposals", "soul.resolve"]);
+    const postSealAdditions = new Set([
+      "soul.list_pending_proposals",
+      "soul.propose_edge",
+      "soul.list_pending_edge_proposals",
+      "soul.batch_review_edge_proposals",
+      "soul.resolve"
+    ]);
     const preA1MemoryTools = expectedMemoryTools.filter(
       (toolName) => !postSealAdditions.has(toolName) && !toolName.startsWith("garden.")
     );

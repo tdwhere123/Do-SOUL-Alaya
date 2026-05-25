@@ -7,6 +7,9 @@ export const ALAYA_MEMORY_TOOL_NAMES = Object.freeze([
   "soul.propose_memory_update",
   "soul.review_memory_proposal",
   "soul.list_pending_proposals",
+  "soul.propose_edge",
+  "soul.list_pending_edge_proposals",
+  "soul.batch_review_edge_proposals",
   "soul.apply_override",
   "soul.explore_graph",
   "soul.report_context_usage",
@@ -43,13 +46,19 @@ const providerBaseDescriptionByName: Readonly<Record<AlayaMemoryToolName, string
   "soul.open_pointer":
     "WHEN: a recall result preview is insufficient and you need the full content before citing it. Open a recalled memory object or evidence pointer by id. Read-only.",
   "soul.emit_candidate_signal":
-    "WHEN: you observe a new durable signal worth memorizing — a preference, decision, constraint, handoff, conflict, synthesis, or evidence anchor. Emit a candidate memory signal so the governance loop can promote it to a durable proposal. Optional source_delivery_ids must reference recorded recall deliveries in the current trusted context. (Language-agnostic. 当你检测到需要记忆的偏好、决定、约束、冲突或证据时，请触发此工具)",
+    "WHEN: you observe a new durable signal worth memorizing — a preference, decision, constraint, handoff, conflict, synthesis, or evidence anchor. Emit a candidate memory signal so the governance loop can promote it to a durable proposal. Optional source_delivery_ids must reference recorded recall deliveries in the current trusted context. Use first-class source_memory_refs, supersedes_refs, exception_to_refs, contradicts_refs, and incompatible_with_refs when the signal should propose graph edges; do not put those graph hints only in raw_payload. (Language-agnostic. 当你检测到需要记忆的偏好、决定、约束、冲突或证据时，请触发此工具)",
   "soul.propose_memory_update":
     "WHEN: a candidate signal has matured into a concrete memory write you want governance to review. Submit a proposed durable memory update; this does not directly write durable memory. Optional source_delivery_ids must reference recorded recall deliveries in the current trusted context.",
   "soul.review_memory_proposal":
     "WHEN: a human reviewer has explicitly approved or rejected a pending proposal and you need to record their decision. Accept or reject a pending memory proposal while preserving an explicit governance trace. Requires reviewer_identity so the review record names who approved or rejected the change.",
   "soul.list_pending_proposals":
     "WHEN: you need to present the pending governance queue to the reviewer (read-only) before calling soul.review_memory_proposal. List proposals in the pending state for a workspace.",
+  "soul.propose_edge":
+    "WHEN: a human or attached agent wants to propose a memory graph edge for review. This creates a pending edge proposal only; it does not write durable memory_graph_edges.",
+  "soul.list_pending_edge_proposals":
+    "WHEN: you need to inspect pending memory graph edge proposals before review. Read-only; filters by edge_type, confidence, trigger source, and time.",
+  "soul.batch_review_edge_proposals":
+    "WHEN: a reviewer has explicitly accepted or rejected pending edge proposals. Accepting applies the durable memory_graph_edges write through the governed graph service.",
   "soul.apply_override":
     "WHEN: the user explicitly says the current assumption, tool, or behavior is wrong and must be replaced for this run. Apply an immediate session-only correction.",
   "soul.explore_graph":
@@ -79,6 +88,12 @@ const loopSuffixByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.f
     "Use only after listing pending proposals and obtaining explicit reviewer approval; accept triggers apply, reject preserves memory as-is.",
   "soul.list_pending_proposals":
     "Review queues represent governance state only; pending items are not durable memory writes.",
+  "soul.propose_edge":
+    "Pending edge proposals are governance queue items only; durable graph edges are written only after review.",
+  "soul.list_pending_edge_proposals":
+    "Read-only inspection aid for graph governance; pending items are not durable memory_graph_edges.",
+  "soul.batch_review_edge_proposals":
+    "Use only after explicit reviewer approval; accept writes durable graph edges through the graph service, reject preserves graph state.",
   "soul.apply_override":
     "Session-only correction for the current run; it does not promote durable memory by itself.",
   "soul.explore_graph":
@@ -99,6 +114,9 @@ const descriptionByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.
   "soul.propose_memory_update": `${providerBaseDescriptionByName["soul.propose_memory_update"]} ${loopSuffixByName["soul.propose_memory_update"]}`,
   "soul.review_memory_proposal": `${providerBaseDescriptionByName["soul.review_memory_proposal"]} ${loopSuffixByName["soul.review_memory_proposal"]}`,
   "soul.list_pending_proposals": `${providerBaseDescriptionByName["soul.list_pending_proposals"]} ${loopSuffixByName["soul.list_pending_proposals"]}`,
+  "soul.propose_edge": `${providerBaseDescriptionByName["soul.propose_edge"]} ${loopSuffixByName["soul.propose_edge"]}`,
+  "soul.list_pending_edge_proposals": `${providerBaseDescriptionByName["soul.list_pending_edge_proposals"]} ${loopSuffixByName["soul.list_pending_edge_proposals"]}`,
+  "soul.batch_review_edge_proposals": `${providerBaseDescriptionByName["soul.batch_review_edge_proposals"]} ${loopSuffixByName["soul.batch_review_edge_proposals"]}`,
   "soul.apply_override": `${providerBaseDescriptionByName["soul.apply_override"]} ${loopSuffixByName["soul.apply_override"]}`,
   "soul.explore_graph": `${providerBaseDescriptionByName["soul.explore_graph"]} ${loopSuffixByName["soul.explore_graph"]}`,
   "soul.report_context_usage": `${providerBaseDescriptionByName["soul.report_context_usage"]} ${loopSuffixByName["soul.report_context_usage"]}`,
@@ -130,6 +148,9 @@ const annotationByToolName: Record<AlayaMemoryToolName, AlayaMemoryToolDefinitio
     "soul.propose_memory_update": writeAnnotation,
     "soul.review_memory_proposal": writeAnnotation,
     "soul.list_pending_proposals": readOnlyAnnotation,
+    "soul.propose_edge": writeAnnotation,
+    "soul.list_pending_edge_proposals": readOnlyAnnotation,
+    "soul.batch_review_edge_proposals": writeAnnotation,
     "soul.apply_override": writeAnnotation,
     "soul.explore_graph": readOnlyAnnotation,
     "soul.report_context_usage": writeAnnotation,

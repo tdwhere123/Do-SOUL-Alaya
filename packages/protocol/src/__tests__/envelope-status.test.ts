@@ -192,6 +192,11 @@ describe("CandidateMemorySignalSchema", () => {
       domain_tags: ["repo", "planning"],
       confidence: 0.75,
       evidence_refs: ["message-1", "message-2"],
+      source_memory_refs: [],
+      supersedes_refs: [],
+      exception_to_refs: [],
+      contradicts_refs: [],
+      incompatible_with_refs: [],
       raw_payload: {
         summary: "Potential synthesis candidate",
         message_ids: ["message-1", "message-2"]

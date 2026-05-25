@@ -32,6 +32,11 @@ function createSignal(overrides: Partial<CandidateMemorySignal> = {}): Candidate
     domain_tags: ["security"],
     confidence: 0.5,
     evidence_refs: ["msg-1"],
+    source_memory_refs: [],
+    supersedes_refs: [],
+    exception_to_refs: [],
+    contradicts_refs: [],
+    incompatible_with_refs: [],
     raw_payload: { excerpt: "Never print secrets." },
     created_at: "2026-03-18T00:00:00.000Z",
     ...restOverrides
@@ -92,6 +97,51 @@ describe("SqliteSignalRepo", () => {
       signal_state: "normalized"
     });
     expect(stored.signal_state).toBe("normalized");
+  });
+
+  it("round-trips first-class memory refs outside raw_payload", async () => {
+    const { database, signalRepo } = await createSignalRepo();
+    const signal = createSignal({
+      signal_id: "signal-memory-refs",
+      source_memory_refs: ["memory-source-1"],
+      supersedes_refs: ["memory-old-1"],
+      exception_to_refs: ["memory-rule-1"],
+      contradicts_refs: ["memory-conflict-1"],
+      incompatible_with_refs: ["memory-incompat-1"],
+      raw_payload: { excerpt: "Refs are first-class fields." }
+    });
+
+    await signalRepo.create(signal);
+
+    const loaded = await signalRepo.getById(signal.signal_id);
+    const stored = database.connection
+      .prepare(
+        `SELECT
+           source_memory_refs_json,
+           supersedes_refs_json,
+           exception_to_refs_json,
+           contradicts_refs_json,
+           incompatible_with_refs_json,
+           raw_payload_json
+         FROM signals
+         WHERE signal_id = ?`
+      )
+      .get(signal.signal_id) as {
+        readonly source_memory_refs_json: string;
+        readonly supersedes_refs_json: string;
+        readonly exception_to_refs_json: string;
+        readonly contradicts_refs_json: string;
+        readonly incompatible_with_refs_json: string;
+        readonly raw_payload_json: string;
+      };
+
+    expect(loaded).toEqual(signal);
+    expect(JSON.parse(stored.source_memory_refs_json)).toEqual(["memory-source-1"]);
+    expect(JSON.parse(stored.supersedes_refs_json)).toEqual(["memory-old-1"]);
+    expect(JSON.parse(stored.exception_to_refs_json)).toEqual(["memory-rule-1"]);
+    expect(JSON.parse(stored.contradicts_refs_json)).toEqual(["memory-conflict-1"]);
+    expect(JSON.parse(stored.incompatible_with_refs_json)).toEqual(["memory-incompat-1"]);
+    expect(JSON.parse(stored.raw_payload_json)).not.toHaveProperty("source_memory_refs");
   });
 });
 

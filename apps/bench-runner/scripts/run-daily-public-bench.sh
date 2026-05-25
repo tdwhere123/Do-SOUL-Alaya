@@ -30,23 +30,33 @@ run_one() {
   local log="$LOG_DIR/daily_longmemeval_s_${embedding}_${policy_shape}_${ts}.log"
 
   echo "[$(date -u -Iseconds)] daily bench embedding=$embedding policy_shape=$policy_shape limit=$LIMIT" | tee "$log"
-  if ! node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval \
+  set +e
+  node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval \
     --variant s \
     --limit "$LIMIT" \
     --embedding "$embedding" \
     --policy-shape "$policy_shape" \
     --simulate-report mixed \
     --history-root "$HISTORY_ROOT" \
-    2>&1 | tee -a "$log"; then
+    2>&1 | tee -a "$log"
+  local bench_status=${PIPESTATUS[0]}
+  set -e
+  if [[ "$bench_status" -ne 0 ]]; then
     echo "[$(date -u -Iseconds)] daily bench failed embedding=$embedding policy_shape=$policy_shape" | tee -a "$log"
-    return 1
   fi
 
-  node scripts/append-bench-degradation-backlog.mjs \
-    --history-root "$HISTORY_ROOT" \
-    --bench public \
-    --threshold-pp "$THRESHOLD_PP" \
-    2>&1 | tee -a "$log"
+  if [[ "$bench_status" -eq 1 ]]; then
+    node scripts/append-bench-degradation-backlog.mjs \
+      --history-root "$HISTORY_ROOT" \
+      --bench public \
+      --threshold-pp "$THRESHOLD_PP" \
+      2>&1 | tee -a "$log"
+  elif [[ "$bench_status" -ne 0 ]]; then
+    echo "[$(date -u -Iseconds)] skipped degradation backlog append because the runner failed before archived gate evidence" | tee -a "$log"
+  fi
+  if [[ "$bench_status" -ne 0 ]]; then
+    return "$bench_status"
+  fi
 }
 
 for embedding in "${EMBEDDINGS[@]}"; do

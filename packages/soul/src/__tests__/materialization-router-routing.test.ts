@@ -27,6 +27,11 @@ function createSignal(overrides: Partial<CandidateMemorySignal> = {}): Candidate
     domain_tags: ["security"],
     confidence: 0.8,
     evidence_refs: ["msg-1"],
+    source_memory_refs: [],
+    supersedes_refs: [],
+    exception_to_refs: [],
+    contradicts_refs: [],
+    incompatible_with_refs: [],
     raw_payload: {
       excerpt: "Sample distilled fact."
     },
@@ -298,7 +303,8 @@ describe("MaterializationRouter producer-side diversifiers", () => {
         object_kind: "preference",
         signal_kind: "potential_claim",
         evidence_refs: ["msg-1"],
-        raw_payload: { supersedes_refs: ["claim-prev"], excerpt: "x" }
+        supersedes_refs: ["claim-prev"],
+        raw_payload: { excerpt: "x" }
       },
       expected: "recency"
     },
@@ -319,7 +325,8 @@ describe("MaterializationRouter producer-side diversifiers", () => {
         object_kind: "constraint",
         signal_kind: "potential_claim",
         evidence_refs: ["msg-1"],
-        raw_payload: { supersedes_refs: ["claim-prev"], excerpt: "x" }
+        supersedes_refs: ["claim-prev"],
+        raw_payload: { excerpt: "x" }
       },
       expected: "user_override"
     },
@@ -330,7 +337,8 @@ describe("MaterializationRouter producer-side diversifiers", () => {
         object_kind: "constraint",
         signal_kind: "potential_claim",
         evidence_refs: ["msg-1"],
-        raw_payload: { supersedes_refs: ["claim-prev"], excerpt: "x" }
+        supersedes_refs: ["claim-prev"],
+        raw_payload: { excerpt: "x" }
       },
       expected: "authority"
     }
@@ -415,7 +423,7 @@ describe("MaterializationRouter producer-side diversifiers", () => {
   });
 
   // invariant: formation_kind for model_tool splits derived vs inferred by
-  // raw_payload.source_memory_refs. Non-empty -> derived (builds on
+  // first-class source_memory_refs. Non-empty -> derived (builds on
   // existing memory); empty/missing -> inferred (plain LLM emission).
   it("toFormationKind(model_tool): source_memory_refs non-empty produces derived", async () => {
     const deps = createDeps();
@@ -428,8 +436,8 @@ describe("MaterializationRouter producer-side diversifiers", () => {
         signal_kind: "potential_claim",
         confidence: 0.8,
         evidence_refs: ["msg-1"],
+        source_memory_refs: ["memory-prev"],
         raw_payload: {
-          source_memory_refs: ["memory-prev"],
           excerpt: "Distilled."
         }
       })

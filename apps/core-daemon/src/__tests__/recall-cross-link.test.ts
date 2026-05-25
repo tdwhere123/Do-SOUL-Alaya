@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  EdgeProposalService,
   EventPublisher,
-  GraphExploreService,
   MemoryService,
   RecallService,
   type RecallServiceDependencies,
@@ -24,6 +24,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   initDatabase,
+  SqliteEdgeProposalRepo,
   SqliteEventLogRepo,
   SqliteMemoryEntryRepo,
   SqliteMemoryGraphEdgeRepo,
@@ -48,13 +49,13 @@ const MEM_A = "11111111-aaaa-4aaa-8aaa-000000000001";
 const MEM_B = "11111111-aaaa-4aaa-8aaa-000000000002";
 const MEM_C = "11111111-aaaa-4aaa-8aaa-000000000003";
 
-describe("recall cross-link: report_context_usage(used) writes RECALLS edges", () => {
-  it("writes one RECALLS edge per ordered pair when 2 memories are reported used", async () => {
+describe("recall cross-link: report_context_usage(used) proposes RECALLS edges", () => {
+  it("proposes one RECALLS edge per ordered pair when 2 memories are reported used", async () => {
     const harness = await createHarness([MEM_A, MEM_B]);
 
     await reportUsed(harness, [MEM_A, MEM_B]);
 
-    // 2 memories → 2 ordered pairs (A→B, B→A); each edge fire-and-forget.
+    // 2 memories -> 2 ordered pairs (A->B, B->A); each proposal fire-and-forget.
     expect(harness.graphEdgePort.createEdge).toHaveBeenCalledTimes(2);
     const pairs = harness.graphEdgePort.createEdge.mock.calls.map((call) => ({
       source: call[0].sourceMemoryId,
@@ -69,7 +70,7 @@ describe("recall cross-link: report_context_usage(used) writes RECALLS edges", (
     );
   });
 
-  it("writes N*(N-1) RECALLS edges for 3 used memories", async () => {
+  it("proposes N*(N-1) RECALLS edges for 3 used memories", async () => {
     const harness = await createHarness([MEM_A, MEM_B, MEM_C]);
 
     await reportUsed(harness, [MEM_A, MEM_B, MEM_C]);
@@ -108,7 +109,7 @@ describe("recall cross-link: report_context_usage(used) writes RECALLS edges", (
 
     await reportUsed(harness, memoryIds);
 
-    // 8 ordered × 7 cross targets = 56 edge writes; truncation warned once.
+    // 8 ordered * 7 cross targets = 56 proposal writes; truncation warned once.
     expect(harness.graphEdgePort.createEdge).toHaveBeenCalledTimes(56);
     expect(warn).toHaveBeenCalledWith(
       "mcp-memory-tool-handler: cross-link truncated to fanout cap",
@@ -120,10 +121,40 @@ describe("recall cross-link: report_context_usage(used) writes RECALLS edges", (
     );
   });
 
-  it("persists RECALLS edges that a later recall reads as graph_support", async () => {
-    const harness = await createHarness([MEM_A, MEM_B, MEM_C], { realGraphEdges: true });
+  it("keeps RECALLS proposals pending until explicit accept writes graph edges", async () => {
+    const harness = await createHarness([MEM_A, MEM_B, MEM_C], { realEdgeProposals: true });
 
     await reportUsed(harness, [MEM_A, MEM_B]);
+
+    expect(await harness.graphEdgeRepo.findByWorkspace("workspace-1")).toEqual([]);
+    expect(harness.edgeProposalRepo.listPending("workspace-1").map((proposal) => ({
+      source: proposal.source_memory_id,
+      target: proposal.target_memory_id,
+      edgeType: proposal.edge_type,
+      triggerSource: proposal.trigger_source
+    }))).toEqual(
+      expect.arrayContaining([
+        { source: MEM_A, target: MEM_B, edgeType: "recalls", triggerSource: "recall_cross_link" },
+        { source: MEM_B, target: MEM_A, edgeType: "recalls", triggerSource: "recall_cross_link" }
+      ])
+    );
+
+    const reviewResult = await harness.handler.call({
+      toolName: "soul.batch_review_edge_proposals",
+      arguments: {
+        verdict: "accept",
+        filter: { edge_type: "recalls" },
+        reason: "accept recall cross-links",
+        reviewer_identity: "user:reviewer"
+      },
+      context: {
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        agentTarget: "cli",
+        sessionId: "recall-cross-link-session"
+      }
+    });
+    expect(reviewResult).toMatchObject({ ok: true });
 
     const persistedEdges = await harness.graphEdgeRepo.findByWorkspace("workspace-1");
     expect(persistedEdges).toEqual(
@@ -140,6 +171,7 @@ describe("recall cross-link: report_context_usage(used) writes RECALLS edges", (
         })
       ])
     );
+    expect(harness.edgeProposalRepo.listPending("workspace-1")).toEqual([]);
 
     const recallService = createRecallServiceWithPersistedGraph(harness);
     const result = await recallService.recall({
@@ -162,7 +194,7 @@ describe("recall cross-link: report_context_usage(used) writes RECALLS edges", (
     const harness = await createHarness([MEM_A, MEM_B]);
     harness.graphEdgePort.createEdge.mockRejectedValueOnce(new Error("edge db down"));
 
-    // Must still resolve OK — graph edges are supplementary, not load-bearing.
+    // Must still resolve OK — graph proposals are supplementary, not load-bearing.
     const result = await reportUsed(harness, [MEM_A, MEM_B]);
 
     expect(result).toMatchObject({ ok: true });
@@ -172,13 +204,14 @@ describe("recall cross-link: report_context_usage(used) writes RECALLS edges", (
 async function createHarness(
   memoryIds: readonly string[],
   options: {
-    readonly realGraphEdges?: boolean;
+    readonly realEdgeProposals?: boolean;
     readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   } = {}
 ) {
   const database = initDatabase({ filename: ":memory:" });
   databases.add(database);
   const eventLogRepo = new SqliteEventLogRepo(database);
+  const edgeProposalRepo = new SqliteEdgeProposalRepo(database);
   const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
   const graphEdgeRepo = new SqliteMemoryGraphEdgeRepo(database);
   const runRepo = new SqliteRunRepo(database);
@@ -240,20 +273,19 @@ async function createHarness(
   });
 
   let edgeCounter = 0;
-  const graphExploreService = new GraphExploreService({
+  const edgeProposalService = new EdgeProposalService({
     memoryRepo: memoryEntryRepo,
-    edgeRepo: graphEdgeRepo,
-    eventLogRepo,
-    runtimeNotifier,
+    proposalRepo: edgeProposalRepo,
+    graphPort: graphEdgeRepo,
     eventPublisher,
     now: () => "2026-05-07T00:00:01.000Z",
     generateId: () => `00000000-0000-4000-8000-${(++edgeCounter).toString().padStart(12, "0")}`
   });
 
   const graphEdgePort = {
-    createEdge: vi.fn(async (params: Parameters<GraphExploreService["addEdge"]>[0]) => {
-      if (options.realGraphEdges === true) {
-        await graphExploreService.addEdge(params);
+    createEdge: vi.fn(async (params: Parameters<typeof edgeProposalService.proposeEdge>[0]) => {
+      if (options.realEdgeProposals === true) {
+        await edgeProposalService.proposeEdge(params);
       }
     })
   };
@@ -281,6 +313,7 @@ async function createHarness(
     graphExploreService: {
       exploreOneHop: vi.fn(async () => [])
     },
+    edgeProposalService,
     graphEdgePort,
     sessionOverrideService: {
       apply: vi.fn(async () => ({ runtime_id: "override-1" }))
@@ -293,7 +326,7 @@ async function createHarness(
     ...(options.warn === undefined ? {} : { warn: options.warn })
   });
 
-  return { eventLogRepo, graphEdgePort, graphEdgeRepo, handler, memoryEntryRepo };
+  return { edgeProposalRepo, eventLogRepo, graphEdgePort, graphEdgeRepo, handler, memoryEntryRepo };
 }
 
 type ReportHarness = Pick<Awaited<ReturnType<typeof createHarness>>, "handler">;
@@ -321,7 +354,7 @@ async function reportUsage(
     context: {
       workspaceId: "workspace-1",
       runId: "run-1",
-      agentTarget: "codex",
+      agentTarget: "cli",
       sessionId: "recall-cross-link-session"
     }
   });

@@ -69,7 +69,9 @@ describe("ConflictDetectionService", () => {
         sourceMemoryId: "mem-B",
         targetMemoryId: "mem-A",
         edgeType: "contradicts",
-        workspaceId: "workspace-1"
+        workspaceId: "workspace-1",
+        triggerSource: "conflict_detection",
+        confidence: 0.5
       })
     );
   });

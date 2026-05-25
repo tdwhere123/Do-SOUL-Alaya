@@ -61,19 +61,16 @@ describe("extractRecallTokenEconomy", () => {
     expect(extractRecallTokenEconomy({ diagnostics: null })).toBeNull();
   });
 
-  // see also: packages/core/src/recall-service.ts (the
-  // computeRecallTokenEconomy call site gates on
-  // coarseFilter.degradation_reason === null). Production degraded recalls
-  // emit diagnostics WITHOUT the token_economy block; the aggregator must
-  // drop those samples rather than admit a zero record.
-  it("returns null when diagnostics omit the token_economy block (degraded recall)", () => {
+  // Legacy or malformed diagnostics may still omit token_economy; the
+  // aggregator must drop those samples rather than admit a zero record.
+  it("returns null when diagnostics omit the token_economy block", () => {
     expect(
       extractRecallTokenEconomy({
         diagnostics: {
           total_scanned: 5,
           candidate_pool_count: 3,
           delivered_count: 0
-          // intentionally no token_economy — mirrors the degraded path
+          // intentionally no token_economy — mirrors a legacy partial path
         }
       })
     ).toBeNull();

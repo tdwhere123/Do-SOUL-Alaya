@@ -19,6 +19,7 @@ import {
   type BenchSplit,
   type KpiPayload
 } from "./kpi-schema.js";
+import { releaseHardGateAllowsLatestPassing } from "./release-gates.js";
 
 export interface HistoryLayout {
   readonly historyRoot: string;
@@ -41,10 +42,20 @@ export interface WriteEntryOptions {
   readonly sidecars?: readonly HistorySidecar[];
 }
 
+export type HistoryPointerKind = "run" | "passing";
+
 const KPI_FILENAME = "kpi.json";
 const REPORT_FILENAME = "report.md";
 const FINDINGS_FILENAME = "findings.md";
 const LATEST_BASELINE_FILENAME = "latest-baseline.json";
+const LATEST_BASELINE_EMBEDDING_ON_FILENAME = "latest-baseline-embedding-on.json";
+const LATEST_RUN_FILENAME = "latest-run.json";
+const LATEST_PASSING_FILENAME = "latest-passing.json";
+const LATEST_RUN_EMBEDDING_OFF_FILENAME = "latest-run-embedding-off.json";
+const LATEST_RUN_EMBEDDING_ON_FILENAME = "latest-run-embedding-on.json";
+const LATEST_PASSING_EMBEDDING_OFF_FILENAME = "latest-passing-embedding-off.json";
+const LATEST_PASSING_EMBEDDING_ON_FILENAME = "latest-passing-embedding-on.json";
+const LIVE_GATES_FILENAME = "live-gates.json";
 
 export function entrySlug(
   runAt: Date,
@@ -165,18 +176,22 @@ export async function writeEntry(
     sidecars.map((sidecar) => [sidecar.filename, path.join(entryRoot, sidecar.filename)])
   );
 
-  const pointerPath = path.join(benchRoot, LATEST_BASELINE_FILENAME);
-  // Pointer tmp suffix combines pid + 4-byte random (8 hex chars,
-  // ~4.3e9 namespace) so two same-PID concurrent writeEntry calls
-  // (worker_threads) cannot collide on the tmp filename even though
-  // Node's main thread is single-runtime.
-  const pointerTmp = `${pointerPath}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
-  await writeFile(
-    pointerTmp,
-    JSON.stringify({ slug, kpi_path: path.relative(benchRoot, kpiPath) }, null, 2) + "\n",
-    "utf8"
-  );
-  await rename(pointerTmp, pointerPath);
+  await writePointer(benchRoot, LATEST_RUN_FILENAME, slug, kpiPath);
+  await writePointer(benchRoot, latestProviderPointerFilename("run", payload.embedding_provider), slug, kpiPath);
+
+  if (
+    findingsMarkdown === null &&
+    (await entryAllowsLatestPassing(layout, benchName, slug, payload))
+  ) {
+    await writePointer(benchRoot, LATEST_PASSING_FILENAME, slug, kpiPath);
+    await writePointer(
+      benchRoot,
+      latestProviderPointerFilename("passing", payload.embedding_provider),
+      slug,
+      kpiPath
+    );
+    await writeLegacyBaselinePointer(benchRoot, payload.embedding_provider, slug, kpiPath);
+  }
 
   return { slug, kpiPath, reportPath, findingsPath, sidecarPaths };
 }
@@ -239,9 +254,10 @@ export async function readEntry(
  * `opts.split`; callers that just want the newest entry (e.g. Inspector
  * Overview "latest run" card) leave it undefined.
  *
- * When `opts.split` is provided we ignore `latest-baseline.json` (which
- * tracks only the absolute newest entry, not per-split) and scan via
- * listEntries → readEntry → filter.
+ * When split/policy/simulate filters are provided we ignore pointer files and
+ * scan via listEntries → readEntry → filter. The scan still honors
+ * `pointerKind`, so callers can ask for the newest filtered run or newest
+ * filtered passing entry.
  */
 export async function readLatest(
   layout: HistoryLayout,
@@ -251,13 +267,14 @@ export async function readLatest(
     policyShape?: BenchPolicyShape;
     simulateReport?: BenchSimulateReportMode;
     embeddingProvider?: string;
+    pointerKind?: HistoryPointerKind;
   } = {}
 ): Promise<KpiPayload | null> {
+  const pointerKind = opts.pointerKind ?? "run";
   if (
     opts.split !== undefined ||
     opts.policyShape !== undefined ||
-    opts.simulateReport !== undefined ||
-    opts.embeddingProvider !== undefined
+    opts.simulateReport !== undefined
   ) {
     const slugs = await listEntries(layout, benchName);
     for (let i = slugs.length - 1; i >= 0; i--) {
@@ -272,7 +289,9 @@ export async function readLatest(
         (opts.simulateReport === undefined ||
           (entry.simulate_report ?? "none") === opts.simulateReport) &&
         (opts.embeddingProvider === undefined ||
-          entry.embedding_provider === opts.embeddingProvider)
+          entry.embedding_provider === opts.embeddingProvider) &&
+        (pointerKind === "run" ||
+          (await entryIsPassing(layout, benchName, slug, entry)))
       ) {
         return entry;
       }
@@ -280,23 +299,61 @@ export async function readLatest(
     return null;
   }
 
-  const pointerSlug = await readLatestPointerSlug(layout, benchName);
+  const pointerFilename =
+    opts.embeddingProvider === undefined
+      ? latestPointerFilename(pointerKind)
+      : latestProviderPointerFilename(pointerKind, opts.embeddingProvider);
+  const pointerSlug = await readLatestPointerSlug(layout, benchName, pointerFilename);
   if (pointerSlug !== null) {
     const pointed = await readEntry(layout, benchName, pointerSlug);
-    if (pointed !== null) return pointed;
+    if (
+      pointed !== null &&
+      (opts.embeddingProvider === undefined ||
+        pointed.embedding_provider === opts.embeddingProvider) &&
+      (pointerKind === "run" ||
+        (await entryIsPassing(layout, benchName, pointerSlug, pointed)))
+    ) {
+      return pointed;
+    }
+  }
+  const legacyPointer =
+    pointerKind === "passing" && opts.embeddingProvider === undefined
+      ? await readLatestPointerSlug(layout, benchName, LATEST_BASELINE_FILENAME)
+      : null;
+  if (legacyPointer !== null) {
+    const pointed = await readEntry(layout, benchName, legacyPointer);
+    if (
+      pointed !== null &&
+      (await entryIsPassing(layout, benchName, legacyPointer, pointed))
+    ) {
+      return pointed;
+    }
   }
   const slugs = await listEntries(layout, benchName);
   if (slugs.length === 0) return null;
-  const newest = slugs[slugs.length - 1];
-  if (newest === undefined) return null;
-  return await readEntry(layout, benchName, newest);
+  for (let i = slugs.length - 1; i >= 0; i -= 1) {
+    const slug = slugs[i];
+    if (slug === undefined) continue;
+    const entry = await readEntry(layout, benchName, slug);
+    if (
+      entry !== null &&
+      (opts.embeddingProvider === undefined ||
+        entry.embedding_provider === opts.embeddingProvider) &&
+      (pointerKind === "run" ||
+        (await entryIsPassing(layout, benchName, slug, entry)))
+    ) {
+      return entry;
+    }
+  }
+  return null;
 }
 
 async function readLatestPointerSlug(
   layout: HistoryLayout,
-  benchName: BenchName
+  benchName: BenchName,
+  filename: string = LATEST_RUN_FILENAME
 ): Promise<string | null> {
-  const pointerPath = path.join(layout.historyRoot, benchName, LATEST_BASELINE_FILENAME);
+  const pointerPath = path.join(layout.historyRoot, benchName, filename);
   try {
     const raw = await readFile(pointerPath, "utf8");
     const parsed = JSON.parse(raw) as { slug?: unknown };
@@ -308,6 +365,118 @@ async function readLatestPointerSlug(
     if (isNotFound(error)) return null;
     return null;
   }
+}
+
+async function entryIsPassing(
+  layout: HistoryLayout,
+  benchName: BenchName,
+  slug: string,
+  payload: KpiPayload
+): Promise<boolean> {
+  const findingsPath = path.join(layout.historyRoot, benchName, slug, FINDINGS_FILENAME);
+  try {
+    await access(findingsPath);
+    return false;
+  } catch (error) {
+    if (isNotFound(error)) {
+      return await entryAllowsLatestPassing(layout, benchName, slug, payload);
+    }
+    throw error;
+  }
+}
+
+async function entryAllowsLatestPassing(
+  layout: HistoryLayout,
+  benchName: BenchName,
+  slug: string,
+  payload: KpiPayload
+): Promise<boolean> {
+  if (payload.bench_name === "live" && payload.split === "strict-real") {
+    return await liveGatesSidecarAllowsLatestPassing(layout, benchName, slug);
+  }
+  return releaseHardGateAllowsLatestPassing(payload);
+}
+
+async function liveGatesSidecarAllowsLatestPassing(
+  layout: HistoryLayout,
+  benchName: BenchName,
+  slug: string
+): Promise<boolean> {
+  const sidecarPath = path.join(layout.historyRoot, benchName, slug, LIVE_GATES_FILENAME);
+  try {
+    const raw = await readFile(sidecarPath, "utf8");
+    return liveGatesJsonAllowsLatestPassing(JSON.parse(raw) as unknown);
+  } catch (error) {
+    if (isNotFound(error) || error instanceof SyntaxError) return false;
+    throw error;
+  }
+}
+
+function liveGatesJsonAllowsLatestPassing(sidecar: unknown): boolean {
+  if (!isRecord(sidecar)) return false;
+  if (sidecar.status !== "pass") return false;
+  if (typeof sidecar.latest_run_id !== "string" || sidecar.latest_run_id.length === 0) {
+    return false;
+  }
+  if (!Array.isArray(sidecar.gates) || sidecar.gates.length === 0) return false;
+  return sidecar.gates.some(
+    (gate) =>
+      isRecord(gate) &&
+      typeof gate.id === "string" &&
+      gate.id.length > 0 &&
+      gate.pass === true
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+async function writePointer(
+  benchRoot: string,
+  filename: string,
+  slug: string,
+  kpiPath: string
+): Promise<void> {
+  const pointerPath = path.join(benchRoot, filename);
+  // Pointer tmp suffix combines pid + 4-byte random (8 hex chars,
+  // ~4.3e9 namespace) so two same-PID concurrent writeEntry calls
+  // (worker_threads) cannot collide on the tmp filename even though
+  // Node's main thread is single-runtime.
+  const pointerTmp = `${pointerPath}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  await writeFile(
+    pointerTmp,
+    JSON.stringify({ slug, kpi_path: path.relative(benchRoot, kpiPath) }, null, 2) + "\n",
+    "utf8"
+  );
+  await rename(pointerTmp, pointerPath);
+}
+
+async function writeLegacyBaselinePointer(
+  benchRoot: string,
+  embeddingProvider: string,
+  slug: string,
+  kpiPath: string
+): Promise<void> {
+  await writePointer(benchRoot, LATEST_BASELINE_FILENAME, slug, kpiPath);
+  if (embeddingProvider !== "none") {
+    await writePointer(benchRoot, LATEST_BASELINE_EMBEDDING_ON_FILENAME, slug, kpiPath);
+  }
+}
+
+function latestPointerFilename(kind: HistoryPointerKind): string {
+  return kind === "run" ? LATEST_RUN_FILENAME : LATEST_PASSING_FILENAME;
+}
+
+function latestProviderPointerFilename(
+  kind: HistoryPointerKind,
+  embeddingProvider: string
+): string {
+  const embeddingOn = embeddingProvider !== "none";
+  if (kind === "run") {
+    return embeddingOn ? LATEST_RUN_EMBEDDING_ON_FILENAME : LATEST_RUN_EMBEDDING_OFF_FILENAME;
+  }
+  return embeddingOn ? LATEST_PASSING_EMBEDDING_ON_FILENAME : LATEST_PASSING_EMBEDDING_OFF_FILENAME;
 }
 
 export async function readPrevious(
@@ -337,7 +506,14 @@ function validateSidecarFilename(filename: string): void {
     KPI_FILENAME,
     REPORT_FILENAME,
     FINDINGS_FILENAME,
-    LATEST_BASELINE_FILENAME
+    LATEST_BASELINE_FILENAME,
+    LATEST_BASELINE_EMBEDDING_ON_FILENAME,
+    LATEST_RUN_FILENAME,
+    LATEST_PASSING_FILENAME,
+    LATEST_RUN_EMBEDDING_OFF_FILENAME,
+    LATEST_RUN_EMBEDDING_ON_FILENAME,
+    LATEST_PASSING_EMBEDDING_OFF_FILENAME,
+    LATEST_PASSING_EMBEDDING_ON_FILENAME
   ]);
   if (
     filename.length === 0 ||

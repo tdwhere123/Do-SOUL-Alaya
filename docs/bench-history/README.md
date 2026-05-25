@@ -11,6 +11,13 @@ v0.3.7 introduces the `live/strict-real` and `public-multiturn` archive
 are follow-up work; if those directories are empty you are looking at
 a pre-Phase-B v0.3.7 checkout.
 
+v0.3.11's Tier 1 release archive surfaces are `public/`,
+`public-multiturn/`, `public-crossquestion/`, `public-locomo/`, and
+`live/`. `public-crossquestion` and `public-locomo` are current archive
+roots, not future placeholders: their runners write compact diagnostics
+sidecars into this tree and write full diagnostics outside the tracked
+archive root.
+
 The premise: a single one-off benchmark number is theatre. A feedback
 loop — same harness, same data, diffed against previous baselines, with
 regression thresholds and an Inspector trend line — is engineering.
@@ -48,56 +55,97 @@ docs/bench-history/
 │   │   ├── kpi.json                       # machine-readable KPIs
 │   │   ├── report.md                      # human report + diff vs prev
 │   │   └── findings.md (optional)         # only present when ✗ fired
-│   └── latest-baseline.json               # JSON pointer → newest dir
+│   ├── latest-run.json                    # newest write, passing or failing
+│   ├── latest-passing.json                # newest release-gate passing write
+│   └── latest-baseline.json               # legacy alias of latest-passing
 ├── public/
 │   ├── <YYYY-MM-DDTHHMMSSZ>-<sha7>/
 │   │   ├── kpi.json
-│   │   ├── longmemeval-diagnostics.json (optional)
+│   │   ├── longmemeval-diagnostics.json (optional compact summary)
 │   │   ├── report.md
 │   │   └── findings.md (optional)
-│   ├── latest-baseline.json               # embedding=none canonical pointer
-│   └── latest-baseline-embedding-on.json  # embedding-on sibling pointer
+│   ├── latest-run.json                    # newest write across providers
+│   ├── latest-passing.json                # newest passing write
+│   ├── latest-run-embedding-off.json      # newest embedding=none write
+│   ├── latest-passing-embedding-off.json  # newest passing embedding=none write
+│   ├── latest-run-embedding-on.json       # newest embedding-on write
+│   ├── latest-passing-embedding-on.json   # newest passing embedding-on write
+│   ├── latest-baseline.json               # legacy alias of latest-passing
+│   └── latest-baseline-embedding-on.json  # legacy alias of latest-passing-embedding-on
 ├── public-multiturn/
 │   ├── <YYYY-MM-DDTHHMMSSZ>-<sha7>/
 │   │   ├── kpi.json
-│   │   ├── longmemeval-diagnostics.json
+│   │   ├── longmemeval-diagnostics.json   # compact summary
 │   │   ├── report.md
 │   │   └── findings.md (optional)
-│   └── latest-baseline.json
+│   ├── latest-run.json
+│   ├── latest-passing.json
+│   └── latest-baseline.json               # legacy alias
+├── public-crossquestion/
+│   ├── <YYYY-MM-DDTHHMMSSZ>-<sha7>/
+│   │   ├── kpi.json
+│   │   ├── longmemeval-diagnostics.json   # compact summary
+│   │   ├── report.md
+│   │   └── findings.md (optional)
+│   ├── latest-run.json
+│   ├── latest-passing.json
+│   └── latest-baseline.json               # legacy alias
 ├── controlled-replay/
 │   └── <YYYY-MM-DDTHHMMSSZ>-<sha7>/
 │       └── controlled-replay.json          # diagnostic archive; no KPI pointer
 ├── public-locomo/
 │   ├── <YYYY-MM-DDTHHMMSSZ>-<sha7>/
 │   │   ├── kpi.json
-│   │   ├── locomo-diagnostics.json
+│   │   ├── locomo-diagnostics.json        # compact summary
 │   │   ├── report.md
 │   │   └── findings.md (optional)
-│   └── latest-baseline.json
+│   ├── latest-run.json
+│   ├── latest-passing.json
+│   └── latest-baseline.json               # legacy alias
 └── live/
     ├── <YYYY-MM-DDTHHMMSSZ>-<sha7>/
     │   ├── kpi.json                       # normalized strict-real KPIs
     │   ├── report.md                      # gate table + live mode comparison
     │   ├── live-gates.json                # sanitized source gate summary
     │   └── findings.md (optional)
-    └── latest-baseline.json
+    ├── latest-run.json
+    ├── latest-passing.json
+    └── latest-baseline.json               # legacy alias
 ```
 
-### Two parallel pointers under `public/`
+### Latest pointers
 
-- `latest-baseline.json` — embedding=none canonical pointer. Read by
-  `readLatest` for the disabled-embedding regression chain (the audit
-  surface for "what does Alaya recall by lexical / structural planes
-  alone").
-- `latest-baseline-embedding-on.json` — embedding-on sibling pointer
-  (placeholder). Reserved for callers that opt into the cost-bearing
-  semantic supplement chain so an embedding-on FAIL does not pollute
-  the embedding-off baseline. No consumer reads this file today; it
-  ships with `slug: null` and a note. When the first non-FAIL
-  embedding-on rerun lands, this pointer activates and any reader
-  that explicitly opens it (`readFileSync` of this exact path) will
-  see a populated slug. Until that rerun, treat this pointer as
-  reserved-for-future-use.
+- `latest-run*.json` — newest archived write, even when findings or
+  release hard gates failed. Operational dashboards use this to show
+  the freshest run truth without implying it is releasable.
+- `latest-passing*.json` — newest archive whose report has no findings
+  and whose executable release hard gates pass. For v0.3.11 Tier 1 roots,
+  the run must also be release-grade: LongMemEval-S roots require
+  `sample_size >= 500` with `evaluated_count >= sample_size`, LoCoMo
+  requires `sample_size >= 1982` with `evaluated_count >= sample_size`,
+  and `live/strict-real` requires `live-gates.json` with source status
+  `pass` and at least one passing source gate. Release closeout and
+  baseline comparisons use this pointer.
+- Provider-specific suffixes split embedding-off (`embedding_provider:
+  "none"`) and embedding-on (`local_onnx`, `env`, or another provider)
+  so an embedding-on failure cannot pollute the embedding-off release
+  chain, and vice versa.
+- `latest-baseline*.json` remains only as a legacy alias written from
+  `latest-passing*.json` for old tooling. New code should read
+  `latest-run*` or `latest-passing*` explicitly.
+- v0.3.11 Tier 1 release surfaces use these archive roots and stable KPI
+  labels:
+  - `public/`: `bench_name = "public"`, `split = "longmemeval-s"` for
+    LongMemEval-S single-turn release runs.
+  - `public-multiturn/`: `bench_name = "public-multiturn"`,
+    `split = "longmemeval-s"` for repeated recall plus
+    `soul.report_context_usage` rounds.
+  - `public-crossquestion/`: `bench_name = "public-crossquestion"`,
+    `split = "longmemeval-s"` for cross-question LongMemEval-S runs.
+  - `public-locomo/`: `bench_name = "public-locomo"`,
+    `split = "locomo10"` for LoCoMo release runs.
+  - `live/`: `bench_name = "live"`, `split = "strict-real"` for sanitized
+    strict-real live-check imports.
 
 ### Sample-size label cascade
 
@@ -115,10 +163,21 @@ docs/bench-history/
   colon-stripped so the path is filesystem-safe) and the **alaya commit
   sha** the harness was run against. Same-day reruns keep their natural
   chronological order under lex sort.
-- `latest-baseline.json` is a JSON pointer (`{ "slug": ..., "kpi_path": ... }`)
-  rewritten on every successful `writeEntry`. `readLatest` checks this
-  pointer first and only falls back to directory listing when the file is
-  absent or malformed.
+- Latest pointer files are JSON pointers (`{ "slug": ..., "kpi_path": ... }`).
+  `writeEntry` rewrites `latest-run*` for every archive write and rewrites
+  `latest-passing*` only when findings are absent, release hard gates pass,
+  and the archive is eligible as release-grade Tier 1 evidence where the
+  root is one of the v0.3.11 Tier 1 surfaces above.
+  `readLatest` defaults to `latest-run*`; pass `pointerKind: "passing"` when a
+  release/baseline decision needs the newest passing entry.
+- Full LongMemEval/LoCoMo question diagnostics are not tracked under
+  `docs/bench-history/**` for new writes. The tracked diagnostics sidecar is a
+  compact summary that contains `full_diagnostics_artifact_path`. Set
+  `ALAYA_BENCH_ARTIFACT_ROOT` to choose the external artifact root; otherwise
+  the runner writes full diagnostics under repo-local `.bench-artifacts/`.
+  `.npmignore` excludes both paths for npm-pack bloat proof only; GitHub
+  Release source tarballs are verified by the release tarball + `SHA256SUMS`
+  path, not by npm-pack dry-run output.
 - `findings.md` is emitted by the diff engine when any KPI hits the `✗`
   threshold; it lists the regression, the suspected root cause, and a
   candidate `#BL-XXX` backlog entry. The release relay turn must lift
@@ -134,8 +193,8 @@ same gates without inheriting v0.3.10 phase names.
 
 ```jsonc
 {
-  "bench_name": "self" | "public" | "public-multiturn" | "live",
-  "split": "golden" | "synthetic" | "longmemeval-s" | "longmemeval-oracle" | "longmemeval-m" | "strict-real",
+  "bench_name": "self" | "public" | "public-multiturn" | "public-crossquestion" | "public-locomo" | "live",
+  "split": "golden" | "synthetic" | "longmemeval-s" | "longmemeval-oracle" | "longmemeval-m" | "locomo10" | "strict-real",
   "run_at": "2026-05-14T12:34:56Z",
   "alaya_commit": "97dbdd9",
   "alaya_version": "0.3.7",
@@ -210,11 +269,22 @@ a drop of exactly 5.0 pp registers as `fail`.
 A `✗` on any of these makes `alaya-bench-runner` exit non-zero. CI hookup is
 optional today; the contract is that the exit code is meaningful.
 
-`public-multiturn` uses a separate archive root and separate
-`latest-baseline.json` from single-turn `public`. Its threshold decision
-uses the same drop bands above, but the primary quality field is
-final-round `r_at_5` / `r_at_5_round_n`; round-curve fields are evidence
-for plasticity behavior, not a shared trend line with single-turn runs.
+`public-multiturn` uses a separate archive root and separate latest
+pointers from single-turn `public`. Its threshold decision uses the same
+drop bands above, but the primary quality field is final-round `r_at_5` /
+`r_at_5_round_n`; round-curve fields are evidence for plasticity behavior,
+not a shared trend line with single-turn runs.
+
+`public-crossquestion` uses a separate archive root and latest pointers
+from both `public` and `public-multiturn`. Its v0.3.11 full embedding-off
+ship gate is LongMemEval-S cross-question `R@5 >= 90%` at `evaluated_count
+>= sample_size` with `sample_size >= 500`.
+
+`public-locomo` uses a separate archive root and latest pointers. Its
+v0.3.11 full ship gate is LoCoMo `R@5 >= 55%` with embedding off and
+`R@5 >= 90%` with embedding on (`local_onnx` in the release run; any
+non-`none` provider is treated as embedding-on by the executable gate),
+at `evaluated_count >= sample_size` with `sample_size >= 1982`.
 
 ## Entry errata
 
@@ -263,6 +333,9 @@ history and removed the raw local run directories after import.
 - Raw `.do-it` run directories, provider transcripts, sample JSONL, and
   secrets remain outside git and may be deleted after import; `live-gates.json`
   carries only the sanitized gate summary and aggregate metrics.
+- A `live/strict-real` entry without `live-gates.json`, source status
+  `pass`, and at least one passing source gate can still archive as
+  `latest-run`, but it is not eligible for `latest-passing`.
 - `R@1` / `R@5` come from the `embedding-real-provider` mode. The live
   check records top1/top5 only, so the archive mirrors top5 into `R@10`
   and states that caveat in `report.md`.
@@ -315,18 +388,18 @@ soul.review_memory_proposal accept`). Any KPI carrying
 `harness_mode = "direct_db_seed"` is from a pre-v0.3.6 run that
 bypassed governance and should not be used as a v0.3.6 baseline.
 
-LongMemEval entries may include a `longmemeval-diagnostics.json`
-sidecar. This file is additive bench evidence, not an MCP/protocol
-schema. It records sanitized object-id diagnostics: question id, gold
-memory ids, delivered object ids/ranks, miss classification, optional
-normalized `recallResult.diagnostics` fields when the daemon supplies
-them, and embedding provider state counts/rates. It must not include
-raw turn text, raw provider transcripts, API keys, or secret refs.
+LongMemEval entries may include a compact
+`longmemeval-diagnostics.json` sidecar. This file is additive bench
+evidence, not an MCP/protocol schema. New writes keep only summary
+counts/rates, scored recall evidence, cache summaries, and
+`full_diagnostics_artifact_path` in the tracked archive. The full
+question-level diagnostics live outside `docs/bench-history/**` under
+`ALAYA_BENCH_ARTIFACT_ROOT` or the default `.bench-artifacts/` root.
 
-LoCoMo entries include the same diagnostic evidence in
-`locomo-diagnostics.json`. Gold references are still stored as memory
-object ids plus source `dia_id` values; raw conversation text remains
-outside the sidecar.
+LoCoMo entries use the same compact pattern in `locomo-diagnostics.json`.
+Gold references in the external full artifact are still memory object ids
+plus source `dia_id` values; raw conversation text remains outside both
+the tracked sidecar and the external diagnostics artifact.
 
 When the daemon does not yet return `recallResult.diagnostics`, the
 sidecar records `recall_diagnostics_present=false` and falls back to
@@ -341,6 +414,11 @@ rounds in one workspace per question. Its final-round `r_at_5` feeds
 the overview card, while `r_at_5_round_1`, `r_at_5_round_2`, and
 `r_at_5_round_n` preserve the round curve.
 
+`public-crossquestion` is also a separate archive root. It reuses
+LongMemEval-S material but scores cross-question recall sequences under
+`bench_name = "public-crossquestion"` so single-turn, multi-turn, and
+cross-question evidence cannot overwrite each other's latest pointers.
+
 ## How to add a new entry (operator handbook)
 
 ```bash
@@ -353,19 +431,28 @@ rtk pnpm build
 #    under <data-dir>/longmemeval/.
 rtk node apps/bench-runner/bin/alaya-bench-runner.mjs fetch-longmemeval --variant oracle --data-dir <shared-cache>/longmemeval
 rtk node apps/bench-runner/bin/alaya-bench-runner.mjs fetch-longmemeval --variant s --data-dir <shared-cache>/longmemeval
+rtk node apps/bench-runner/bin/alaya-bench-runner.mjs fetch-locomo --data-dir <shared-cache>/locomo
 # If a checksum mismatch proves the cache bytes are stale/corrupt:
 rtk node apps/bench-runner/bin/alaya-bench-runner.mjs fetch-longmemeval --variant s --data-dir <shared-cache>/longmemeval --force
 
-# 2. Run the benches. Each writes <split>/<date>T<HHMMSS>Z-<sha7>/ and
-#    rewrites the corresponding latest-baseline.json pointer.
+# 2. Run the benches. Each writes <split>/<date>T<HHMMSS>Z-<sha7>/,
+#    rewrites latest-run*.json, and rewrites latest-passing*.json only
+#    when findings are absent, release hard gates pass, and the Tier 1
+#    archive is release-grade rather than smoke/staged diagnostics.
 rtk node apps/bench-runner/bin/alaya-bench-runner.mjs self
 rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval --variant oracle --data-dir <shared-cache>/longmemeval
-rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval-multiturn --variant s --rounds 3 --limit 20
+rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval-multiturn --variant s --rounds 3 --data-dir <shared-cache>/longmemeval
+rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval-crossquestion --variant s --data-dir <shared-cache>/longmemeval
+rtk node apps/bench-runner/bin/alaya-bench-runner.mjs locomo --data-dir <shared-cache>/locomo
+# Add --limit only for local smoke/diagnostic runs. Limited Tier 1
+# runs rewrite latest-run*.json but are not release baselines and do
+# not advance latest-passing*.json.
 # Optional: opt into the daemon's real embedding env for a cost-bearing
 # semantic-supplement run. Keep local credentials outside git, for example
 # in `.do-it/bench-env/alaya-api.env`, then source them before the run.
 set -a; . .do-it/bench-env/alaya-api.env; set +a
 rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval --variant s --embedding env --data-dir <shared-cache>/longmemeval
+rtk node apps/bench-runner/bin/alaya-bench-runner.mjs locomo --embedding env --embedding-provider local_onnx --data-dir <shared-cache>/locomo
 
 # 3. (Live only, operator with a newly generated local source) Archive a
 #    strict-real live check into the tracked bench-history/live/ tree.
@@ -375,6 +462,6 @@ rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval --variant s --
 rtk node apps/bench-runner/bin/alaya-bench-runner.mjs live --source <local-main-check.json>
 ```
 
-Then commit the new `<date>T<HHMMSS>Z-<sha7>/` directory +
-`latest-baseline.json` update. If `findings.md` exists, open the
-corresponding backlog entry in the same PR.
+Then commit the new `<date>T<HHMMSS>Z-<sha7>/` directory plus the matching
+latest pointer updates. If `findings.md` exists, open the corresponding
+backlog entry in the same PR and expect only `latest-run*` to move.

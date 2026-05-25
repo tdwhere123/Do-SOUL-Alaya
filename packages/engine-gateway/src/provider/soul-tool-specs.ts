@@ -6,9 +6,12 @@ import {
   SoulApplyOverrideRequestSchema,
   SoulEmitCandidateSignalRequestSchema,
   SoulExploreGraphRequestSchema,
+  SoulBatchReviewEdgeProposalsRequestSchema,
+  SoulListPendingEdgeProposalsRequestSchema,
   SoulListPendingProposalsRequestSchema,
   SoulMemorySearchRequestSchema,
   SoulOpenPointerRequestSchema,
+  SoulProposeEdgeRequestSchema,
   SoulProposeMemoryUpdateRequestSchema,
   SoulReportContextUsageRequestSchema,
   SoulResolveRequestSchema,
@@ -26,7 +29,7 @@ export interface SoulToolSpec {
 }
 
 const emitCandidateSignalDescription =
-  "WHEN: you observe a new durable signal worth memorizing — a preference, decision, constraint, handoff, conflict, synthesis, or evidence anchor. Emit a candidate memory signal so the governance loop can promote it to a durable proposal. Optional source_delivery_ids must reference recorded recall deliveries in the current trusted context. (Language-agnostic. 当你检测到需要记忆的偏好、决定、约束、冲突或证据时，请触发此工具)";
+  "WHEN: you observe a new durable signal worth memorizing — a preference, decision, constraint, handoff, conflict, synthesis, or evidence anchor. Emit a candidate memory signal so the governance loop can promote it to a durable proposal. Optional source_delivery_ids must reference recorded recall deliveries in the current trusted context. Use first-class source_memory_refs, supersedes_refs, exception_to_refs, contradicts_refs, and incompatible_with_refs when the signal should propose graph edges; do not put those graph hints only in raw_payload. (Language-agnostic. 当你检测到需要记忆的偏好、决定、约束、冲突或证据时，请触发此工具)";
 
 export const soulToolDefs: readonly SoulToolSpec[] = [
   {
@@ -63,6 +66,24 @@ export const soulToolDefs: readonly SoulToolSpec[] = [
     description:
       "WHEN: you need to present the pending governance queue to the reviewer (read-only) before calling soul.review_memory_proposal. List proposals in the pending state for a workspace.",
     parametersSchema: SoulListPendingProposalsRequestSchema
+  },
+  {
+    name: "soul.propose_edge",
+    description:
+      "WHEN: a human or attached agent wants to propose a memory graph edge for review. This creates a pending edge proposal only; it does not write durable memory_graph_edges.",
+    parametersSchema: SoulProposeEdgeRequestSchema
+  },
+  {
+    name: "soul.list_pending_edge_proposals",
+    description:
+      "WHEN: you need to inspect pending memory graph edge proposals before review. Read-only; filters by edge_type, confidence, trigger source, and time.",
+    parametersSchema: SoulListPendingEdgeProposalsRequestSchema
+  },
+  {
+    name: "soul.batch_review_edge_proposals",
+    description:
+      "WHEN: a reviewer has explicitly accepted or rejected pending edge proposals. Accepting applies the durable memory_graph_edges write through the governed graph service.",
+    parametersSchema: SoulBatchReviewEdgeProposalsRequestSchema
   },
   {
     name: "soul.apply_override",

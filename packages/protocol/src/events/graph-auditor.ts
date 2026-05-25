@@ -1,10 +1,21 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../schema-primitives.js";
+import {
+  BoundedReasonSchema,
+  IsoDatetimeStringSchema,
+  NonEmptyStringSchema,
+  NonNegativeIntSchema
+} from "../schema-primitives.js";
+import {
+  EdgeProposalStatusSchema,
+  EdgeProposalTriggerSourceSchema
+} from "../soul/edge-proposal.js";
 import { MemoryGraphEdgeTypeSchema } from "../soul/memory-graph.js";
 import { OrphanRadarSuggestedActionSchema } from "../soul/orphan-radar.js";
 
 const graphAuditorEventTypeValues = [
   "soul.graph.edge_created",
+  "soul.graph.edge_proposal_created",
+  "soul.graph.edge_proposal_reviewed",
   "soul.graph.explore_completed",
   "soul.auditor.pointer_healed",
   "soul.orphan_radar.reported"
@@ -12,6 +23,8 @@ const graphAuditorEventTypeValues = [
 
 export const GraphAuditorEventType = {
   SOUL_GRAPH_EDGE_CREATED: "soul.graph.edge_created",
+  SOUL_GRAPH_EDGE_PROPOSAL_CREATED: "soul.graph.edge_proposal_created",
+  SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED: "soul.graph.edge_proposal_reviewed",
   SOUL_GRAPH_EXPLORE_COMPLETED: "soul.graph.explore_completed",
   SOUL_AUDITOR_POINTER_HEALED: "soul.auditor.pointer_healed",
   SOUL_ORPHAN_RADAR_REPORTED: "soul.orphan_radar.reported"
@@ -25,6 +38,34 @@ export const SoulGraphEdgeCreatedPayloadSchema = z
     source_memory_id: NonEmptyStringSchema,
     target_memory_id: NonEmptyStringSchema,
     edge_type: MemoryGraphEdgeTypeSchema,
+    workspace_id: NonEmptyStringSchema,
+    occurred_at: IsoDatetimeStringSchema
+  })
+  .strict()
+  .readonly();
+
+export const SoulGraphEdgeProposalCreatedPayloadSchema = z
+  .object({
+    proposal_id: NonEmptyStringSchema,
+    source_memory_id: NonEmptyStringSchema,
+    target_memory_id: NonEmptyStringSchema,
+    edge_type: MemoryGraphEdgeTypeSchema,
+    trigger_source: EdgeProposalTriggerSourceSchema,
+    confidence: z.number().min(0).max(1),
+    reason: BoundedReasonSchema.nullable(),
+    source_signal_id: NonEmptyStringSchema.nullable(),
+    workspace_id: NonEmptyStringSchema,
+    occurred_at: IsoDatetimeStringSchema
+  })
+  .strict()
+  .readonly();
+
+export const SoulGraphEdgeProposalReviewedPayloadSchema = z
+  .object({
+    proposal_id: NonEmptyStringSchema,
+    status: EdgeProposalStatusSchema,
+    reviewer_identity: NonEmptyStringSchema.nullable(),
+    review_reason: BoundedReasonSchema.nullable(),
     workspace_id: NonEmptyStringSchema,
     occurred_at: IsoDatetimeStringSchema
   })
@@ -89,6 +130,8 @@ export const SoulOrphanRadarReportedPayloadSchema = z
 
 const graphAuditorPayloadSchemas = {
   [GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED]: SoulGraphEdgeCreatedPayloadSchema,
+  [GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_CREATED]: SoulGraphEdgeProposalCreatedPayloadSchema,
+  [GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED]: SoulGraphEdgeProposalReviewedPayloadSchema,
   [GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED]: SoulGraphExploreCompletedPayloadSchema,
   [GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED]: SoulAuditorPointerHealedPayloadSchema,
   [GraphAuditorEventType.SOUL_ORPHAN_RADAR_REPORTED]: SoulOrphanRadarReportedPayloadSchema
@@ -105,6 +148,14 @@ const SoulGraphEdgeCreatedEventObjectSchema = createGraphAuditorEventObjectSchem
   GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED,
   SoulGraphEdgeCreatedPayloadSchema
 );
+const SoulGraphEdgeProposalCreatedEventObjectSchema = createGraphAuditorEventObjectSchema(
+  GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_CREATED,
+  SoulGraphEdgeProposalCreatedPayloadSchema
+);
+const SoulGraphEdgeProposalReviewedEventObjectSchema = createGraphAuditorEventObjectSchema(
+  GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED,
+  SoulGraphEdgeProposalReviewedPayloadSchema
+);
 const SoulGraphExploreCompletedEventObjectSchema = createGraphAuditorEventObjectSchema(
   GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED,
   SoulGraphExploreCompletedPayloadSchema
@@ -119,6 +170,8 @@ const SoulOrphanRadarReportedEventObjectSchema = createGraphAuditorEventObjectSc
 );
 
 export const SoulGraphEdgeCreatedEventSchema = SoulGraphEdgeCreatedEventObjectSchema.readonly();
+export const SoulGraphEdgeProposalCreatedEventSchema = SoulGraphEdgeProposalCreatedEventObjectSchema.readonly();
+export const SoulGraphEdgeProposalReviewedEventSchema = SoulGraphEdgeProposalReviewedEventObjectSchema.readonly();
 export const SoulGraphExploreCompletedEventSchema = SoulGraphExploreCompletedEventObjectSchema.readonly();
 export const SoulAuditorPointerHealedEventSchema = SoulAuditorPointerHealedEventObjectSchema.readonly();
 export const SoulOrphanRadarReportedEventSchema = SoulOrphanRadarReportedEventObjectSchema.readonly();
@@ -126,6 +179,8 @@ export const SoulOrphanRadarReportedEventSchema = SoulOrphanRadarReportedEventOb
 export const GraphAuditorEventUnionSchema = z
   .discriminatedUnion("type", [
     SoulGraphEdgeCreatedEventObjectSchema,
+    SoulGraphEdgeProposalCreatedEventObjectSchema,
+    SoulGraphEdgeProposalReviewedEventObjectSchema,
     SoulGraphExploreCompletedEventObjectSchema,
     SoulAuditorPointerHealedEventObjectSchema,
     SoulOrphanRadarReportedEventObjectSchema
@@ -150,6 +205,8 @@ export function parseGraphAuditorEventPayload<T extends keyof typeof graphAudito
 }
 
 export type SoulGraphEdgeCreatedPayload = z.infer<typeof SoulGraphEdgeCreatedPayloadSchema>;
+export type SoulGraphEdgeProposalCreatedPayload = z.infer<typeof SoulGraphEdgeProposalCreatedPayloadSchema>;
+export type SoulGraphEdgeProposalReviewedPayload = z.infer<typeof SoulGraphEdgeProposalReviewedPayloadSchema>;
 export type SoulGraphNeighborExploreCompletedPayload = z.infer<
   typeof SoulGraphNeighborExploreCompletedPayloadSchema
 >;

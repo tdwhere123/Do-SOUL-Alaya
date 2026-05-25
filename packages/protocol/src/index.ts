@@ -40,6 +40,7 @@ export * from "./soul/promotion-gate.js";
 export * from "./soul/handoff-gap.js";
 export * from "./soul/dynamics-constants.js";
 export * from "./soul/memory-graph.js";
+export * from "./soul/edge-proposal.js";
 export * from "./soul/graph.js";
 export * from "./soul/path-relation.js";
 export * from "./soul/bootstrapping.js";

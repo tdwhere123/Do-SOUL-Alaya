@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
@@ -210,12 +210,45 @@ export async function runLiveBench(
   const layout: HistoryLayout = { historyRoot: opts.historyRoot };
   const previous = await readLatest(layout, "live", {
     split: "strict-real",
-    embeddingProvider: payload.embedding_provider
+    embeddingProvider: payload.embedding_provider,
+    pointerKind: "passing"
   });
   const diff = diffKpis(payload, previous);
   const slug = entrySlug(runAt, commitSha7);
   const report = renderLiveReport(payload, previous, diff, source, providerMode, keywordMode);
-  const findings = renderFindings(payload, diff);
+  const baseFindings = renderFindings(payload, diff);
+  const failedSourceGates = source.gates.filter((gate) => !gate.pass);
+  const findingsParts: string[] = [];
+  if (baseFindings !== null) findingsParts.push(baseFindings);
+  if (source.status === "fail" || failedSourceGates.length > 0) {
+    if (baseFindings === null) {
+      findingsParts.push(
+        [
+          `# Bench Findings - ${payload.bench_name} / ${payload.split}`,
+          "",
+          `Run ${payload.alaya_commit} on ${payload.run_at} failed the imported live strict-real source gates.`
+        ].join("\n")
+      );
+    }
+    const liveGateFindings = [
+      "## Live strict-real source gate failures",
+      "",
+      `- Source status: ${source.status}`
+    ];
+    if (failedSourceGates.length === 0) {
+      liveGateFindings.push(
+        "- Failed gates: none listed by source; source status is fail."
+      );
+    } else {
+      liveGateFindings.push("- Failed gates:");
+      for (const gate of failedSourceGates) {
+        liveGateFindings.push(`  - ${sanitizeGate(gate).id}`);
+      }
+    }
+    findingsParts.push(liveGateFindings.join("\n"));
+  }
+  const findings =
+    findingsParts.length === 0 ? null : `${findingsParts.join("\n\n")}\n`;
   const entry = await writeEntry(layout, "live", slug, payload, report, findings, {
     sidecars: [
       {
@@ -464,8 +497,11 @@ function resolveGitHeadSha(repoRoot: string): string {
   throw new Error(`Unable to resolve git ref: ${refName}`);
 }
 
-function resolveGitDir(repoRoot: string): string {
+export function resolveGitDir(repoRoot: string): string {
   const gitPath = path.join(repoRoot, ".git");
+  if (statSync(gitPath).isDirectory()) {
+    return gitPath;
+  }
   const raw = readTrimmed(gitPath);
   const gitDirMatch = /^gitdir:\s+(.+)$/u.exec(raw);
   if (gitDirMatch === null) {

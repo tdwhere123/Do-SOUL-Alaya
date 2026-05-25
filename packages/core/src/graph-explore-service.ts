@@ -17,7 +17,7 @@ import type { EventPublisher, EventPublisherInput } from "./event-publisher.js";
 import { parseObjectId } from "./shared/validators.js";
 
 export interface GraphExploreServiceMemoryRepoPort {
-  findById(objectId: string): Promise<{ readonly object_id: string } | null>;
+  findById(objectId: string): Promise<{ readonly object_id: string; readonly workspace_id: string } | null>;
 }
 
 export interface GraphExploreServiceEdgeRepoPort {
@@ -103,6 +103,9 @@ export class GraphExploreService {
       throw new CoreError("VALIDATION", "Source and target memory must be different.");
     }
 
+    await this.requireMemoryInWorkspace(sourceMemoryId, "Source", workspaceId);
+    await this.requireMemoryInWorkspace(targetMemoryId, "Target", workspaceId);
+
     const existing = await this.dependencies.edgeRepo.findBySourceAndTarget(
       sourceMemoryId,
       targetMemoryId,
@@ -113,9 +116,6 @@ export class GraphExploreService {
     if (existing !== null) {
       return existing;
     }
-
-    await this.requireMemory(sourceMemoryId, "Source");
-    await this.requireMemory(targetMemoryId, "Target");
 
     const createdAt = this.now();
     const edge = MemoryGraphEdgeSchema.parse({
@@ -240,11 +240,15 @@ export class GraphExploreService {
     await this.dependencies.edgeRepo.delete(parseObjectId(edgeId));
   }
 
-  private async requireMemory(memoryId: string, label: string): Promise<void> {
+  private async requireMemoryInWorkspace(memoryId: string, label: string, workspaceId: string): Promise<void> {
     const memory = await this.dependencies.memoryRepo.findById(memoryId);
 
     if (memory === null) {
       throw new CoreError("NOT_FOUND", `${label} memory not found: ${memoryId}`);
+    }
+
+    if (memory.workspace_id !== workspaceId) {
+      throw new CoreError("VALIDATION", `${label} memory does not belong to workspace ${workspaceId}: ${memoryId}`);
     }
   }
 }

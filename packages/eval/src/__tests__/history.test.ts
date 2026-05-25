@@ -15,7 +15,7 @@ import {
 } from "../history.js";
 import { KpiPayloadSchema, type KpiPayload } from "../kpi-schema.js";
 import { renderFindings, renderReport } from "../report.js";
-import { collectReleaseHardGates } from "../release-gates.js";
+import { collectReleaseHardGates, releaseHardGateAllowsLatestPassing } from "../release-gates.js";
 
 function buildPayload(commit: string): KpiPayload {
   return {
@@ -80,6 +80,115 @@ function passingQualityMetrics(): NonNullable<KpiPayload["kpi"]["quality_metrics
   };
 }
 
+function perCallStat(value: number) {
+  return { mean: value, p50: value, p95: value, max: value };
+}
+
+function buildFullLongMemEvalPayload(
+  benchName: "public" | "public-multiturn" | "public-crossquestion",
+  commit: string,
+  rAt5: number
+): KpiPayload {
+  return {
+    ...buildPayload(commit),
+    alaya_version: "0.3.11",
+    bench_name: benchName,
+    split: "longmemeval-s",
+    embedding_provider: "none",
+    dataset: {
+      name:
+        benchName === "public"
+          ? "longmemeval_s"
+          : benchName === "public-multiturn"
+            ? "longmemeval_s:multiturn"
+            : "longmemeval_s:crossquestion",
+      size: 500,
+      source: "fixture"
+    },
+    sample_size: 500,
+    evaluated_count: 500,
+    kpi: {
+      ...buildPayload(commit).kpi,
+      r_at_5: rAt5,
+      latency_ms_p95: 120,
+      quality_metrics: passingQualityMetrics()
+    }
+  };
+}
+
+function buildLivePayload(commit: string): KpiPayload {
+  return {
+    ...buildPayload(commit),
+    alaya_version: "0.3.11",
+    bench_name: "live",
+    split: "strict-real",
+    dataset: {
+      name: "alaya-live-strict-real",
+      size: 500,
+      source: ".do-it/checks/alaya-live/main-check.json#run-1"
+    },
+    sample_size: 500,
+    evaluated_count: 500,
+    harness_mode: "live_strict_real"
+  };
+}
+
+function buildLocomoPayload(
+  commit: string,
+  sampleSize: number,
+  evaluatedCount: number,
+  rAt5: number
+): KpiPayload {
+  return {
+    ...buildPayload(commit),
+    alaya_version: "0.3.11",
+    bench_name: "public-locomo",
+    split: "locomo10",
+    embedding_provider: "none",
+    dataset: {
+      name: "locomo10",
+      size: 10,
+      source: "fixture"
+    },
+    sample_size: sampleSize,
+    evaluated_count: evaluatedCount,
+    kpi: {
+      ...buildPayload(commit).kpi,
+      r_at_5: rAt5,
+      latency_ms_p95: 110
+    }
+  };
+}
+
+async function writePointerlessPayload(
+  historyRoot: string,
+  benchName: KpiPayload["bench_name"],
+  slug: string,
+  payload: KpiPayload,
+  findingsMarkdown: string | null = null
+): Promise<void> {
+  const entryRoot = path.join(historyRoot, benchName, slug);
+  await mkdir(entryRoot, { recursive: true });
+  await writeFile(path.join(entryRoot, "kpi.json"), JSON.stringify(payload, null, 2) + "\n", "utf8");
+  await writeFile(path.join(entryRoot, "report.md"), "report\n", "utf8");
+  if (findingsMarkdown !== null) {
+    await writeFile(path.join(entryRoot, "findings.md"), findingsMarkdown, "utf8");
+  }
+}
+
+async function writeBenchPointer(
+  historyRoot: string,
+  benchName: KpiPayload["bench_name"],
+  filename: string,
+  slug: string
+): Promise<void> {
+  await writeFile(
+    path.join(historyRoot, benchName, filename),
+    JSON.stringify({ slug, kpi_path: path.join(slug, "kpi.json") }, null, 2) + "\n",
+    "utf8"
+  );
+}
+
 describe("history archive", () => {
   let layout: HistoryLayout;
   let root: string;
@@ -122,7 +231,7 @@ describe("history archive", () => {
     expect(parsed.simulate_report).toBe("none");
   });
 
-  it("writes kpi.json + report.md + sidecars and tracks the latest-baseline pointer", async () => {
+  it("writes kpi.json + report.md + sidecars and tracks latest run and passing pointers", async () => {
     const payload = buildPayload("ec44a05");
     const slug = "2026-05-14T100000Z-ec44a05";
     const entry = await writeEntry(layout, "self", slug, payload, "# report\n", null, {
@@ -138,6 +247,16 @@ describe("history archive", () => {
       "utf8"
     );
     expect(JSON.parse(baseline).slug).toBe(slug);
+    const latestRun = await readFile(
+      path.join(root, "self", "latest-run.json"),
+      "utf8"
+    );
+    const latestPassing = await readFile(
+      path.join(root, "self", "latest-passing.json"),
+      "utf8"
+    );
+    expect(JSON.parse(latestRun).slug).toBe(slug);
+    expect(JSON.parse(latestPassing).slug).toBe(slug);
   });
 
   it("orders same-day slugs by ISO timestamp, not by sha7", async () => {
@@ -215,6 +334,122 @@ describe("history archive", () => {
     expect(await readEntry(layout, "public", "missing-slug")).toBeNull();
   });
 
+  it("keeps pointerless Tier 1 no-gate archives out of passing scan fallback", async () => {
+    const stagedPublicSlug = "2026-05-14T100000Z-1111111";
+    const liveNoGateSlug = "2026-05-14T110000Z-2222222";
+    const legacySlug = "2026-05-14T120000Z-3333333";
+    const stagedLocomoSlug = "2026-05-14T130000Z-4444444";
+    const stagedPublic: KpiPayload = {
+      ...buildFullLongMemEvalPayload("public", "1111111", 0.72),
+      evaluated_count: 100,
+      kpi: {
+        ...buildFullLongMemEvalPayload("public", "1111111", 0.72).kpi,
+        latency_ms_p95: 110,
+        quality_metrics: passingQualityMetrics()
+      }
+    };
+
+    await writePointerlessPayload(root, "public", stagedPublicSlug, stagedPublic);
+    await writePointerlessPayload(root, "live", liveNoGateSlug, buildLivePayload("2222222"));
+    await writePointerlessPayload(root, "self", legacySlug, buildPayload("3333333"));
+    await writePointerlessPayload(
+      root,
+      "public-locomo",
+      stagedLocomoSlug,
+      buildLocomoPayload("4444444", 100, 100, 0.99)
+    );
+
+    expect(await readLatest(layout, "public", { pointerKind: "passing" })).toBeNull();
+    expect(await readLatest(layout, "live", { pointerKind: "passing" })).toBeNull();
+    expect(await readLatest(layout, "public-locomo", { pointerKind: "passing" })).toBeNull();
+    expect((await readLatest(layout, "self", { pointerKind: "passing" }))?.alaya_commit)
+      .toBe("3333333");
+  });
+
+  it("ignores polluted latest-passing pointers for ineligible v0.3.11 Tier 1 archives", async () => {
+    const passingSlug = "2026-05-14T100000Z-0aaaaaa";
+    const pollutedSlug = "2026-05-14T110000Z-0bbbbbb";
+    const passing = KpiPayloadSchema.parse(
+      buildFullLongMemEvalPayload("public", "0aaaaaa", 0.91)
+    );
+    const polluted: KpiPayload = {
+      ...buildFullLongMemEvalPayload("public", "0bbbbbb", 0.95),
+      sample_size: 100,
+      evaluated_count: 100
+    };
+
+    await writeEntry(layout, "public", passingSlug, passing, "report", null);
+    await writePointerlessPayload(root, "public", pollutedSlug, polluted);
+    await writeBenchPointer(root, "public", "latest-passing.json", pollutedSlug);
+
+    expect((await readLatest(layout, "public", { pointerKind: "passing" }))?.alaya_commit)
+      .toBe("0aaaaaa");
+    expect(
+      (await readLatest(layout, "public", {
+        split: "longmemeval-s",
+        embeddingProvider: "none",
+        pointerKind: "passing"
+      }))?.alaya_commit
+    ).toBe("0aaaaaa");
+  });
+
+  it("ignores polluted latest-passing pointers for staged v0.3.11 LoCoMo archives", async () => {
+    const passingSlug = "2026-05-14T100000Z-3aaaaaa";
+    const pollutedSlug = "2026-05-14T110000Z-3bbbbbb";
+    const passing = KpiPayloadSchema.parse(buildLocomoPayload("3aaaaaa", 1982, 1982, 0.56));
+    const polluted = KpiPayloadSchema.parse(buildLocomoPayload("3bbbbbb", 100, 100, 0.99));
+
+    await writeEntry(layout, "public-locomo", passingSlug, passing, "report", null);
+    await writePointerlessPayload(root, "public-locomo", pollutedSlug, polluted);
+    await writeBenchPointer(root, "public-locomo", "latest-passing.json", pollutedSlug);
+
+    expect((await readLatest(layout, "public-locomo", { pointerKind: "passing" }))?.alaya_commit)
+      .toBe("3aaaaaa");
+    expect(
+      (await readLatest(layout, "public-locomo", {
+        split: "locomo10",
+        embeddingProvider: "none",
+        pointerKind: "passing"
+      }))?.alaya_commit
+    ).toBe("3aaaaaa");
+  });
+
+  it("ignores polluted legacy baseline pointers for ineligible v0.3.11 Tier 1 archives", async () => {
+    const passingSlug = "2026-05-14T100000Z-1aaaaaa";
+    const pollutedSlug = "2026-05-14T110000Z-1bbbbbb";
+    const passing = KpiPayloadSchema.parse(
+      buildFullLongMemEvalPayload("public-crossquestion", "1aaaaaa", 0.91)
+    );
+    const polluted: KpiPayload = {
+      ...buildFullLongMemEvalPayload("public-crossquestion", "1bbbbbb", 0.95),
+      sample_size: 100,
+      evaluated_count: 100
+    };
+
+    await writePointerlessPayload(root, "public-crossquestion", passingSlug, passing);
+    await writePointerlessPayload(root, "public-crossquestion", pollutedSlug, polluted);
+    await writeBenchPointer(
+      root,
+      "public-crossquestion",
+      "latest-baseline.json",
+      pollutedSlug
+    );
+
+    expect(
+      (await readLatest(layout, "public-crossquestion", { pointerKind: "passing" }))
+        ?.alaya_commit
+    ).toBe("1aaaaaa");
+  });
+
+  it("ignores polluted live latest-passing pointers without live-gates proof", async () => {
+    const noGateSlug = "2026-05-14T100000Z-2aaaaaa";
+
+    await writePointerlessPayload(root, "live", noGateSlug, buildLivePayload("2aaaaaa"));
+    await writeBenchPointer(root, "live", "latest-passing.json", noGateSlug);
+
+    expect(await readLatest(layout, "live", { pointerKind: "passing" })).toBeNull();
+  });
+
   it("writes findings.md only when the caller passes a non-null body", async () => {
     const slug = "2026-05-15T120000Z-fafafaf";
     const entry = await writeEntry(
@@ -238,7 +473,7 @@ describe("history archive", () => {
     ).rejects.toThrow(/invalid slug/);
   });
 
-  it("prefers latest-baseline.json pointer over directory listing when present", async () => {
+  it("prefers latest-run.json pointer over directory listing when present", async () => {
     await writeEntry(
       layout,
       "self",
@@ -255,10 +490,142 @@ describe("history archive", () => {
       "report",
       null
     );
-    // writeEntry repointed the pointer to the latest write; readLatest should
+    // writeEntry repointed the latest-run pointer to the latest write; readLatest should
     // honour the pointer rather than re-scan the directory.
     const latest = await readLatest(layout, "self");
     expect(latest?.alaya_commit).toBe("0bbbbbb");
+  });
+
+  it("keeps latest-run and latest-passing split when a later run fails", async () => {
+    const passingSlug = "2026-05-14T080000Z-0aaaaaa";
+    const failingSlug = "2026-05-15T080000Z-0bbbbbb";
+    await writeEntry(
+      layout,
+      "self",
+      passingSlug,
+      buildPayload("0aaaaaa"),
+      "report",
+      null
+    );
+    await writeEntry(
+      layout,
+      "self",
+      failingSlug,
+      buildPayload("0bbbbbb"),
+      "report",
+      "# findings\n- regression\n"
+    );
+
+    expect((await readLatest(layout, "self"))?.alaya_commit).toBe("0bbbbbb");
+    expect((await readLatest(layout, "self", { pointerKind: "passing" }))?.alaya_commit)
+      .toBe("0aaaaaa");
+    expect(
+      JSON.parse(await readFile(path.join(root, "self", "latest-run.json"), "utf8")).slug
+    ).toBe(failingSlug);
+    expect(
+      JSON.parse(await readFile(path.join(root, "self", "latest-passing.json"), "utf8")).slug
+    ).toBe(passingSlug);
+    expect(
+      JSON.parse(await readFile(path.join(root, "self", "latest-baseline.json"), "utf8")).slug
+    ).toBe(passingSlug);
+  });
+
+  it.each([
+    ["public-multiturn" as const, "longmemeval_multiturn_500_embedding_off_r_at_5"],
+    ["public-crossquestion" as const, "longmemeval_crossquestion_500_embedding_off_r_at_5"]
+  ])(
+    "keeps latest-passing on the prior run when a full %s archive misses the v0.3.11 ship gate",
+    async (benchName, expectedGateId) => {
+      const passingSlug = "2026-05-14T080000Z-0aaaaaa";
+      const failingSlug = "2026-05-15T080000Z-0bbbbbb";
+      const passing = KpiPayloadSchema.parse(
+        buildFullLongMemEvalPayload(benchName, "0aaaaaa", 0.91)
+      );
+      const failing = KpiPayloadSchema.parse(
+        buildFullLongMemEvalPayload(benchName, "0bbbbbb", 0.12)
+      );
+
+      await writeEntry(layout, benchName, passingSlug, passing, "report", null);
+      await writeEntry(layout, benchName, failingSlug, failing, "report", null);
+
+      expect(collectReleaseHardGates(failing)).toContainEqual(
+        expect.objectContaining({
+          id: expectedGateId,
+          current: 0.12,
+          target: 0.9,
+          passed: false
+        })
+      );
+      expect((await readLatest(layout, benchName))?.alaya_commit).toBe("0bbbbbb");
+      expect((await readLatest(layout, benchName, { pointerKind: "passing" }))?.alaya_commit)
+        .toBe("0aaaaaa");
+      expect(
+        JSON.parse(await readFile(path.join(root, benchName, "latest-run.json"), "utf8")).slug
+      ).toBe(failingSlug);
+      expect(
+        JSON.parse(await readFile(path.join(root, benchName, "latest-passing.json"), "utf8")).slug
+      ).toBe(passingSlug);
+      expect(
+        JSON.parse(await readFile(path.join(root, benchName, "latest-baseline.json"), "utf8")).slug
+      ).toBe(passingSlug);
+    }
+  );
+
+  it("keeps latest-passing on the prior run when a non-full Tier 1 archive has no executable v0.3.11 gate", async () => {
+    const passingSlug = "2026-05-14T080000Z-0aaaaaa";
+    const limitedSlug = "2026-05-15T080000Z-0bbbbbb";
+    const passing = KpiPayloadSchema.parse(
+      buildFullLongMemEvalPayload("public-multiturn", "0aaaaaa", 0.91)
+    );
+    const limited = KpiPayloadSchema.parse({
+      ...buildFullLongMemEvalPayload("public-multiturn", "0bbbbbb", 1),
+      evaluated_count: 20
+    });
+
+    await writeEntry(layout, "public-multiturn", passingSlug, passing, "report", null);
+    await writeEntry(layout, "public-multiturn", limitedSlug, limited, "report", null);
+
+    expect(collectReleaseHardGates(limited)).toEqual([]);
+    expect(releaseHardGateAllowsLatestPassing(limited)).toBe(false);
+    expect(renderFindings(limited, diffKpis(limited, null))).toBeNull();
+    expect((await readLatest(layout, "public-multiturn"))?.alaya_commit).toBe("0bbbbbb");
+    expect((await readLatest(layout, "public-multiturn", { pointerKind: "passing" }))?.alaya_commit)
+      .toBe("0aaaaaa");
+    expect(
+      JSON.parse(await readFile(path.join(root, "public-multiturn", "latest-run.json"), "utf8"))
+        .slug
+    ).toBe(limitedSlug);
+    expect(
+      JSON.parse(
+        await readFile(path.join(root, "public-multiturn", "latest-passing.json"), "utf8")
+      ).slug
+    ).toBe(passingSlug);
+  });
+
+  it("keeps latest-passing on the prior run when a staged LoCoMo archive has no executable v0.3.11 gate", async () => {
+    const passingSlug = "2026-05-14T080000Z-3aaaaaa";
+    const stagedSlug = "2026-05-15T080000Z-3bbbbbb";
+    const passing = KpiPayloadSchema.parse(buildLocomoPayload("3aaaaaa", 1982, 1982, 0.56));
+    const staged = KpiPayloadSchema.parse(buildLocomoPayload("3bbbbbb", 100, 100, 0.99));
+
+    await writeEntry(layout, "public-locomo", passingSlug, passing, "report", null);
+    await writeEntry(layout, "public-locomo", stagedSlug, staged, "report", null);
+
+    expect(collectReleaseHardGates(staged)).toEqual([]);
+    expect(releaseHardGateAllowsLatestPassing(staged)).toBe(false);
+    expect(renderFindings(staged, diffKpis(staged, null))).toBeNull();
+    expect((await readLatest(layout, "public-locomo"))?.alaya_commit).toBe("3bbbbbb");
+    expect((await readLatest(layout, "public-locomo", { pointerKind: "passing" }))?.alaya_commit)
+      .toBe("3aaaaaa");
+    expect(
+      JSON.parse(await readFile(path.join(root, "public-locomo", "latest-run.json"), "utf8"))
+        .slug
+    ).toBe(stagedSlug);
+    expect(
+      JSON.parse(
+        await readFile(path.join(root, "public-locomo", "latest-passing.json"), "utf8")
+      ).slug
+    ).toBe(passingSlug);
   });
 
   it("rejects slugs that violate the canonical ISO-T pattern", async () => {
@@ -308,9 +675,9 @@ describe("history archive", () => {
       "utf8"
     );
     expect(firstFindings).toBe("first findings\n");
-    // Pointer still references the first slug.
+    // Latest-run pointer still references the first slug.
     const pointer = JSON.parse(
-      await readFile(path.join(root, "self", "latest-baseline.json"), "utf8")
+      await readFile(path.join(root, "self", "latest-run.json"), "utf8")
     ) as { slug: string };
     expect(pointer.slug).toBe(slug);
   });
@@ -331,11 +698,128 @@ describe("history archive", () => {
 
     expect(await listEntries(layout, "live")).toEqual([]);
     await expect(
-      readFile(path.join(root, "live", "latest-baseline.json"), "utf8")
+      readFile(path.join(root, "live", "latest-run.json"), "utf8")
     ).rejects.toMatchObject({ code: "ENOENT" });
     await expect(
       readFile(path.join(root, "live", slug, "kpi.json"), "utf8")
     ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("requires live-gates sidecar proof before live archives advance latest-passing", async () => {
+    const noGateSlug = "2026-05-15T140000Z-c0ffee1";
+    const gatedSlug = "2026-05-15T150000Z-c0ffee2";
+
+    await writeEntry(
+      layout,
+      "live",
+      noGateSlug,
+      buildLivePayload("c0ffee1"),
+      "report\n",
+      null
+    );
+    expect(
+      JSON.parse(await readFile(path.join(root, "live", "latest-run.json"), "utf8")).slug
+    ).toBe(noGateSlug);
+    await expect(
+      readFile(path.join(root, "live", "latest-passing.json"), "utf8")
+    ).rejects.toMatchObject({ code: "ENOENT" });
+
+    await writeEntry(
+      layout,
+      "live",
+      gatedSlug,
+      buildLivePayload("c0ffee2"),
+      "report\n",
+      null,
+      {
+        sidecars: [
+          {
+            filename: "live-gates.json",
+            contents: JSON.stringify({
+              latest_run_id: "run-1",
+              status: "pass",
+              gates: [{ id: "provider_top5", pass: true }]
+            }) + "\n"
+          }
+        ]
+      }
+    );
+
+    expect(
+      JSON.parse(await readFile(path.join(root, "live", "latest-run.json"), "utf8")).slug
+    ).toBe(gatedSlug);
+    expect(
+      JSON.parse(await readFile(path.join(root, "live", "latest-passing.json"), "utf8")).slug
+    ).toBe(gatedSlug);
+    expect((await readLatest(layout, "live", { pointerKind: "passing" }))?.alaya_commit)
+      .toBe("c0ffee2");
+  });
+
+  it("allows mixed live-gates sidecars with status pass and at least one passing source gate", async () => {
+    const mixedSlug = "2026-05-15T160000Z-c0ffee3";
+
+    await writeEntry(
+      layout,
+      "live",
+      mixedSlug,
+      buildLivePayload("c0ffee3"),
+      "report\n",
+      null,
+      {
+        sidecars: [
+          {
+            filename: "live-gates.json",
+            contents: JSON.stringify({
+              latest_run_id: "run-1",
+              status: "pass",
+              gates: [
+                { id: "provider_top5", pass: true },
+                { id: "optional_latency_budget", pass: false }
+              ]
+            }) + "\n"
+          }
+        ]
+      }
+    );
+
+    expect(
+      JSON.parse(await readFile(path.join(root, "live", "latest-passing.json"), "utf8")).slug
+    ).toBe(mixedSlug);
+    expect((await readLatest(layout, "live", { pointerKind: "passing" }))?.alaya_commit)
+      .toBe("c0ffee3");
+  });
+
+  it("rejects live-gates sidecars with status pass but zero passing source gates", async () => {
+    const blockedSlug = "2026-05-15T170000Z-c0ffee4";
+
+    await writeEntry(
+      layout,
+      "live",
+      blockedSlug,
+      buildLivePayload("c0ffee4"),
+      "report\n",
+      null,
+      {
+        sidecars: [
+          {
+            filename: "live-gates.json",
+            contents: JSON.stringify({
+              latest_run_id: "run-1",
+              status: "pass",
+              gates: [
+                { id: "provider_top5", pass: false },
+                { id: "optional_latency_budget", pass: false }
+              ]
+            }) + "\n"
+          }
+        ]
+      }
+    );
+
+    await expect(
+      readFile(path.join(root, "live", "latest-passing.json"), "utf8")
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readLatest(layout, "live", { pointerKind: "passing" })).toBeNull();
   });
 
   // @anchor orphan-staging-filter-test: see history.ts @write-entry-tmp-filter.
@@ -560,6 +1044,94 @@ describe("history archive", () => {
     expect(latestOff?.alaya_commit).toBe("abc1234");
     expect(latestOn?.embedding_provider).toBe("yunwu:text-embedding-3-small");
     expect(latestOn?.alaya_commit).toBe("def5678");
+    expect(
+      JSON.parse(await readFile(path.join(root, "public", "latest-run-embedding-off.json"), "utf8")).slug
+    ).toBe("2026-05-14T100000Z-abc1234-policy-chat");
+    expect(
+      JSON.parse(await readFile(path.join(root, "public", "latest-run-embedding-on.json"), "utf8")).slug
+    ).toBe("2026-05-14T110000Z-def5678-policy-chat");
+  });
+
+  it("keeps filtered latest-passing separate from a failed latest-run and advances on the next pass", async () => {
+    const passingSlug = "2026-05-14T100000Z-aaa1111-policy-chat";
+    const failingSlug = "2026-05-14T110000Z-bbb2222-policy-chat";
+    const nextPassingSlug = "2026-05-14T120000Z-ccc3333-policy-chat";
+    const basePayload: KpiPayload = {
+      ...buildPayload("aaa1111"),
+      bench_name: "public",
+      split: "longmemeval-s",
+      embedding_provider: "none",
+      policy_shape: "chat",
+      simulate_report: "none",
+      sample_size: 500,
+      evaluated_count: 500,
+      dataset: {
+        name: "longmemeval_s",
+        size: 500,
+        source: "fixture"
+      },
+      kpi: {
+        ...buildPayload("aaa1111").kpi,
+        r_at_5: 0.91,
+        latency_ms_p95: 110,
+        quality_metrics: passingQualityMetrics()
+      }
+    };
+
+    await writeEntry(layout, "public", passingSlug, basePayload, "report", null);
+    await writeEntry(
+      layout,
+      "public",
+      failingSlug,
+      {
+        ...basePayload,
+        alaya_commit: "bbb2222",
+        run_at: "2026-05-14T11:00:00.000Z"
+      },
+      "report",
+      "# findings\n- regression\n"
+    );
+
+    expect(
+      (await readLatest(layout, "public", {
+        split: "longmemeval-s",
+        policyShape: "chat",
+        simulateReport: "none",
+        embeddingProvider: "none"
+      }))?.alaya_commit
+    ).toBe("bbb2222");
+    expect(
+      (await readLatest(layout, "public", {
+        split: "longmemeval-s",
+        policyShape: "chat",
+        simulateReport: "none",
+        embeddingProvider: "none",
+        pointerKind: "passing"
+      }))?.alaya_commit
+    ).toBe("aaa1111");
+
+    await writeEntry(
+      layout,
+      "public",
+      nextPassingSlug,
+      {
+        ...basePayload,
+        alaya_commit: "ccc3333",
+        run_at: "2026-05-14T12:00:00.000Z"
+      },
+      "report",
+      null
+    );
+
+    expect(
+      (await readLatest(layout, "public", {
+        split: "longmemeval-s",
+        policyShape: "chat",
+        simulateReport: "none",
+        embeddingProvider: "none",
+        pointerKind: "passing"
+      }))?.alaya_commit
+    ).toBe("ccc3333");
   });
 
   it("accepts public-multiturn archives and optional embedding diagnostic KPIs", async () => {
@@ -653,12 +1225,36 @@ describe("history archive", () => {
     expect(findings).toContain("current 68.00% < target 70.00%");
   });
 
+  it("renders per-recall token economy in bench reports", () => {
+    const payload = KpiPayloadSchema.parse({
+      ...buildPayload("beef123"),
+      kpi: {
+        ...buildPayload("beef123").kpi,
+        recall_token_economy: {
+          schema_version: "bench-recall-token-economy.v1",
+          sample_count: 3,
+          delivered_context_tokens_estimate: perCallStat(42),
+          coarse_pool_size: perCallStat(12),
+          fine_evaluated: perCallStat(12),
+          fusion_streams_with_hits: perCallStat(4),
+          embedding_inference_calls: perCallStat(0.333)
+        }
+      }
+    });
+
+    const report = renderReport(payload, null, diffKpis(payload, null));
+
+    expect(report).toContain("Per-recall token economy (3 calls, measure-only)");
+    expect(report).toContain("delivered_context_tokens");
+    expect(report).toContain("embedding_inference_calls");
+  });
+
   it("flags LongMemEval-S embedding full reports below the release gate", () => {
     const payload: KpiPayload = {
       ...buildPayload("beef123"),
       bench_name: "public",
       split: "longmemeval-s",
-      embedding_provider: "yunwu:text-embedding-3-small",
+      embedding_provider: "none",
       sample_size: 500,
       evaluated_count: 500,
       dataset: {
@@ -681,9 +1277,9 @@ describe("history archive", () => {
 
     const report = renderReport(parsedPayload, parsedPayload, diff);
     expect(report).toContain(
-      "longmemeval_s_500_embedding_on_r_at_5 LongMemEval-S 500 embedding-on R@5"
+      "longmemeval_s_500_embedding_off_r_at_5 LongMemEval-S 500 embedding-off R@5"
     );
-    expect(report).toContain("49.00% < target 55.00%");
+    expect(report).toContain("49.00% < target 90.00%");
   });
 
   it("fails embedding-on release gates when the provider never returns", () => {
@@ -755,6 +1351,6 @@ describe("history archive", () => {
     expect(report).toContain(
       "locomo_full_embedding_on_r_at_5 LoCoMo full embedding-on R@5"
     );
-    expect(report).toContain("39.00% < target 50.00%");
+    expect(report).toContain("39.00% < target 90.00%");
   });
 });

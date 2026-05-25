@@ -23,6 +23,8 @@ import {
   ConversationService,
   ContextLensAssembler,
   DynamicsService,
+  EdgeAutoProducerService,
+  EdgeProposalService,
   EngineBindingService,
   EvidenceService,
   ManifestationResolver,
@@ -70,6 +72,7 @@ import {
   SqliteDeferredObligationRepo,
   SqliteDriftLeaseRepo,
   SqliteEngineBindingRepo,
+  SqliteEdgeProposalRepo,
   SqliteEventLogRepo,
   SqliteEvidenceCapsuleRepo,
   SqliteExtensionDescriptorRepo,
@@ -116,6 +119,7 @@ import {
   OfficialApiGardenProvider,
   TopologyService,
   type ComputeRoutingCandidate,
+  type GraphEdgeCreationPort,
   type PathRelationProposalPort
 } from "@do-soul/alaya-soul";
 import { createCoreDaemonApp } from "./daemon-app-composition.js";
@@ -222,6 +226,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const eventLogRepo = new SqliteEventLogRepo(database);
   const reconciliationLeaseRepo = new SqliteReconciliationLeaseRepo(database);
   const signalRepo = new SqliteSignalRepo(database);
+  const edgeProposalRepo = new SqliteEdgeProposalRepo(database);
   const evidenceCapsuleRepo = new SqliteEvidenceCapsuleRepo(database);
   const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
   const globalMemoryRepo = createOptionalGlobalMemoryRepo(database);
@@ -368,6 +373,12 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     edgeRepo: memoryGraphEdgeRepo,
     eventLogRepo,
     runtimeNotifier,
+    eventPublisher
+  });
+  const edgeProposalService = new EdgeProposalService({
+    memoryRepo: memoryEntryRepo,
+    proposalRepo: edgeProposalRepo,
+    graphPort: memoryGraphEdgeRepo,
     eventPublisher
   });
   const topologyService = new TopologyService({
@@ -743,13 +754,17 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     delegate: contextLensAssembler
   });
   const sqliteHandoffGapAdapter = new SqliteHandoffGapAdapter(sqliteHandoffGapRepo);
-  // Shared write port for memory-graph edges. Materialization and
-  // report_context_usage use it to keep graph writes behind core validation.
-  const graphEdgePort = {
-    createEdge: async (params: Parameters<typeof graphExploreService.addEdge>[0]) => {
-      await graphExploreService.addEdge(params);
+  // Shared automatic graph-edge producer port. Producers create reviewable
+  // proposals; only EdgeProposalService.batchReview(accept) writes edges.
+  const graphEdgePort: GraphEdgeCreationPort = {
+    createEdge: async (params) => {
+      await edgeProposalService.proposeEdge(params);
     }
   };
+  const edgeAutoProducerService = new EdgeAutoProducerService({
+    memoryRepo: memoryEntryRepo,
+    graphEdgePort
+  });
   // invariant: ConflictDetectionService is opt-in. Each materialization
   // pays O(workspace_size) for findByDimension + findByWorkspaceId;
   // high-frequency seeding paths (bench harness, bulk import) cannot
@@ -1007,6 +1022,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     claimService,
     pathRelationProposalPort,
     graphEdgePort,
+    edgeAutoProducerPort: edgeAutoProducerService,
     ...(conflictDetectionService === null
       ? {}
       : { conflictDetectionPort: conflictDetectionService }),
@@ -1191,6 +1207,7 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     pathRelationProposalService,
     signalService,
     graphExploreService,
+    edgeProposalService,
     graphEdgePort,
     sessionOverrideService,
     trustStateRecorder,

@@ -1,9 +1,9 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runCli } from "../cli.js";
-import { runLiveBench } from "../live/runner.js";
+import { resolveGitDir, runLiveBench } from "../live/runner.js";
 
 describe("live strict-real bench archive", () => {
   let tmpRoot: string;
@@ -99,11 +99,27 @@ describe("live strict-real bench archive", () => {
       expect(exitCode).toBe(0);
       expect(stdout).toContain("Archiving live strict-real check");
       expect(stdout).toContain("Live gates:");
-      expect(await readFile(path.join(historyRoot, "live", "latest-baseline.json"), "utf8"))
+      expect(await readFile(path.join(historyRoot, "live", "latest-run.json"), "utf8"))
         .toContain("kpi.json");
     } finally {
       process.stdout.write = originalWrite;
     }
+  });
+
+  it("resolves normal checkout .git directories without reading them as files", async () => {
+    const repoRoot = path.join(tmpRoot, "normal-checkout");
+    await mkdir(path.join(repoRoot, ".git"), { recursive: true });
+
+    expect(resolveGitDir(repoRoot)).toBe(path.join(repoRoot, ".git"));
+  });
+
+  it("resolves worktree .git files to the referenced gitdir", async () => {
+    const repoRoot = path.join(tmpRoot, "worktree-checkout");
+    const gitDir = path.join(tmpRoot, "main.git", "worktrees", "wt");
+    await mkdir(repoRoot, { recursive: true });
+    await writeFile(path.join(repoRoot, ".git"), `gitdir: ${gitDir}\n`, "utf8");
+
+    expect(resolveGitDir(repoRoot)).toBe(gitDir);
   });
 
   it("archives per-run main-check-run summaries from historical .do-it runs", async () => {
@@ -153,8 +169,73 @@ describe("live strict-real bench archive", () => {
     await expect(runLiveBench({ historyRoot, sourcePath }))
       .rejects.toThrow(/embedding-real-provider/);
     await expect(
-      readFile(path.join(historyRoot, "live", "latest-baseline.json"), "utf8")
+      readFile(path.join(historyRoot, "live", "latest-run.json"), "utf8")
     ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("keeps failed live source imports out of latest-passing pointers", async () => {
+    const historyRoot = path.join(tmpRoot, "failed-source-history");
+
+    const passing = await runLiveBench({ historyRoot, sourcePath });
+
+    const failingSource = buildSource() as LiveWrapperSource;
+    failingSource.latest_run_id = "2026-05-13T05-27-16-166Z-strict-real";
+    failingSource.generated_at = "2026-05-13T05:39:53.229Z";
+    failingSource.status = "fail";
+    failingSource.gates = [
+      {
+        id: "provider_top5",
+        pass: false,
+        threshold: ">= 88%",
+        observed: 0.84,
+        evidence: "embedding-real-provider/result.json"
+      }
+    ];
+    await writeFile(sourcePath, JSON.stringify(failingSource, null, 2) + "\n", "utf8");
+
+    const failed = await runLiveBench({ historyRoot, sourcePath });
+
+    expect(failed.status).toBe("fail");
+    expect(await readFile(path.join(historyRoot, "live", "latest-run.json"), "utf8"))
+      .toContain(failed.slug);
+    expect(await readFile(path.join(historyRoot, "live", "latest-passing.json"), "utf8"))
+      .toContain(passing.slug);
+    await expect(readFile(failed.findingsPath, "utf8"))
+      .resolves.toContain("Live strict-real source gate failures");
+  });
+
+  it("diffs live imports against the latest passing baseline", async () => {
+    const historyRoot = path.join(tmpRoot, "passing-baseline-history");
+    await runLiveBench({ historyRoot, sourcePath });
+
+    const failingSource = buildSource() as LiveWrapperSource;
+    failingSource.latest_run_id = "2026-05-13T05-27-16-166Z-strict-real";
+    failingSource.generated_at = "2026-05-13T05:39:53.229Z";
+    failingSource.status = "fail";
+    failingSource.metrics.modes[1]!.recall_metrics.top5_rate = 0.8;
+    failingSource.gates = [
+      {
+        id: "provider_top5",
+        pass: false,
+        threshold: ">= 88%",
+        observed: 0.8,
+        evidence: "embedding-real-provider/result.json"
+      }
+    ];
+    await writeFile(sourcePath, JSON.stringify(failingSource, null, 2) + "\n", "utf8");
+    await runLiveBench({ historyRoot, sourcePath });
+
+    const currentSource = buildSource() as LiveWrapperSource;
+    currentSource.latest_run_id = "2026-05-14T05-27-16-166Z-strict-real";
+    currentSource.generated_at = "2026-05-14T05:39:53.229Z";
+    currentSource.metrics.modes[1]!.recall_metrics.top5_rate = 0.94;
+    await writeFile(sourcePath, JSON.stringify(currentSource, null, 2) + "\n", "utf8");
+
+    const current = await runLiveBench({ historyRoot, sourcePath });
+    const report = await readFile(current.reportPath, "utf8");
+
+    expect(report).toContain("| r_at_5 | 0.9460 | 0.9400 |");
+    expect(report).not.toContain("| r_at_5 | 0.8000 | 0.9400 |");
   });
 });
 

@@ -1262,9 +1262,8 @@ describe("RecallService", () => {
   // see also: packages/core/src/recall-service.ts computeRecallTokenEconomy,
   // apps/bench-runner/src/longmemeval/recall-token-economy.ts.
   // invariant: this test exercises the non-degraded recall path, so the HOT
-  // tier must satisfy MIN_RECALL_RESULTS (= 5) to keep expandTierCascade
-  // from escalating and stamping a "warm_cascade_engaged" degradation
-  // reason — which would (correctly) omit the token_economy block.
+  // tier satisfies MIN_RECALL_RESULTS (= 5), so this pins the normal HOT
+  // path while the degraded-path regression below pins the cascade path.
   it("populates RecallTokenEconomy with per-call structural counters", async () => {
     const memories = [
       createMemoryEntry({ object_id: "memory-1", activation_score: 0.9 }),
@@ -1435,8 +1434,7 @@ describe("RecallService", () => {
         coarsePoolSize: 200,
         fineEvaluated: 200,
         preBudgetCandidates,
-        embeddingProviderStatus: "provider_returned",
-        embeddingCacheHit: false
+        embeddingInferenceCalls: 1
       });
     }
 
@@ -1452,8 +1450,7 @@ describe("RecallService", () => {
         coarsePoolSize: 200,
         fineEvaluated: 200,
         preBudgetCandidates,
-        embeddingProviderStatus: "provider_returned",
-        embeddingCacheHit: false
+        embeddingInferenceCalls: 1
       });
       const endNs = process.hrtime.bigint();
       const micros = Number(endNs - startNs) / 1000;
@@ -1464,15 +1461,13 @@ describe("RecallService", () => {
   });
 
   // The degraded recall path (any non-null degradation_reason — warm/cold
-  // cascade or recall_explainability_partial) must omit the token_economy
-  // block so the bench aggregator drops the sample rather than admit a
-  // synthetic {0,0,0,0,0} record. We exercise the cascade-engaged branch
-  // by giving the harness empty HOT and WARM tiers and a single COLD
-  // candidate — expandTierCascade then escalates and stamps
-  // "warm_cascade_engaged" / "cold_cascade_engaged" on the result.
+  // cascade or recall_explainability_partial) must still carry the token
+  // economy shape so bench coverage can prove every recall call was
+  // instrumented. We exercise the cascade-engaged branch by giving the
+  // harness empty HOT and WARM tiers and a single COLD candidate.
   // see also: packages/core/src/recall-service.ts (computeRecallTokenEconomy
   // call site, expandTierCascade).
-  it("omits token_economy on degraded (cascade-engaged) recall paths", async () => {
+  it("populates token_economy on degraded (cascade-engaged) recall paths", async () => {
     const coldOnlyMemory = createMemoryEntry({
       object_id: "11111111-1111-4111-8111-111111111111",
       storage_tier: "cold",
@@ -1486,10 +1481,15 @@ describe("RecallService", () => {
       strategy: "analyze"
     });
     expect(result.degradation_reason).not.toBeNull();
-    expect(result.diagnostics?.token_economy).toBeUndefined();
+    expect(result.diagnostics?.token_economy).toEqual(
+      expect.objectContaining({
+        coarse_pool_size: result.diagnostics?.candidate_pool_count,
+        fine_evaluated: result.diagnostics?.candidate_pool_count,
+        embedding_inference_calls: 0
+      })
+    );
     // The diagnostics envelope itself must remain present so callers can
-    // still read query_probes, candidates, etc.; only the per-call
-    // instrument is suppressed.
+    // still read query_probes, candidates, and token accounting.
     expect(result.diagnostics).toBeDefined();
   });
 
@@ -3836,6 +3836,7 @@ describe("RecallService embedding-on coarse injection", () => {
 
   function buildEmbeddingScopedService(input: {
     readonly collectWorkspaceNeighbors?: ReturnType<typeof vi.fn>;
+    readonly collectWorkspaceNeighborsWithMetadata?: ReturnType<typeof vi.fn>;
     readonly findByIds?: ReturnType<typeof vi.fn>;
   }) {
     const { dependencies } = createDependencies([lexicallyAbsentMemory]);
@@ -3858,7 +3859,13 @@ describe("RecallService embedding-on coarse injection", () => {
         })),
         ...(input.collectWorkspaceNeighbors === undefined
           ? {}
-          : { collectWorkspaceNeighbors: input.collectWorkspaceNeighbors })
+          : { collectWorkspaceNeighbors: input.collectWorkspaceNeighbors }),
+        ...(input.collectWorkspaceNeighborsWithMetadata === undefined
+          ? {}
+          : {
+              collectWorkspaceNeighborsWithMetadata:
+                input.collectWorkspaceNeighborsWithMetadata
+            })
       }
     });
   }
@@ -3926,6 +3933,31 @@ describe("RecallService embedding-on coarse injection", () => {
     expect(injected).toBeDefined();
     expect(injected?.source_channels).toContain("semantic_supplement");
     expect(injected?.score_factors?.embedding_similarity).toBeCloseTo(0.95, 5);
+  });
+
+  it("counts coarse-injection query embeddings in token economy inference calls", async () => {
+    const collectWorkspaceNeighborsWithMetadata = vi.fn(async () => ({
+      hits: [
+        Object.freeze({ object_id: lexicallyAbsentMemory.object_id, normalized_similarity: 0.95 })
+      ],
+      embedding_inference_calls: 1,
+      query_embedding_cache_hit: false
+    }));
+    const findByIds = vi.fn(async () => [lexicallyAbsentMemory]);
+    const service = buildEmbeddingScopedService({
+      collectWorkspaceNeighborsWithMetadata,
+      findByIds
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      policyOverride: buildPolicy(service, true)
+    });
+
+    expect(collectWorkspaceNeighborsWithMetadata).toHaveBeenCalledTimes(1);
+    expect(result.diagnostics?.token_economy?.embedding_inference_calls).toBe(1);
   });
 
   it("recalls nothing extra when the embedding service exposes no neighbor scan", async () => {

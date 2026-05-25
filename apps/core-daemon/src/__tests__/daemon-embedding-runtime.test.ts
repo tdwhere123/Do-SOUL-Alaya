@@ -170,6 +170,49 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
     }
   });
 
+  it("re-reads provider availability so an online-to-offline transition disables the decorator without restart", () => {
+    saveEnv();
+    const fixture = buildFixture();
+    try {
+      let available = true;
+      const provider = {
+        providerKind: "local_onnx",
+        modelId: "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+        schemaVersion: 1,
+        get isAvailable() {
+          return available;
+        },
+        embedTexts: vi.fn(async () => [new Float32Array([1])])
+      };
+      const configEnv = new Map<string, string>([
+        ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"],
+        ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]
+      ]);
+      const { defaultPolicyDecorator } = createDaemonEmbeddingRuntime({
+        database: fixture.database,
+        configEnv,
+        eventLogRepo: fixture.eventLogRepo,
+        healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
+        memoryEntryRepo: fixture.memoryEntryRepo,
+        warn: fixture.warn as unknown as WarnFn,
+        embeddingProviderOverride: provider
+      });
+
+      expect(defaultPolicyDecorator).toBeDefined();
+      expect(
+        defaultPolicyDecorator!(makeBasePolicy()).scoring_weight_overrides?.fusion_weights?.embedding_similarity
+      ).toBe(6);
+
+      available = false;
+      expect(
+        defaultPolicyDecorator!(makeBasePolicy()).scoring_weight_overrides?.fusion_weights?.embedding_similarity
+      ).toBeUndefined();
+    } finally {
+      teardown(fixture);
+      restoreEnv();
+    }
+  });
+
   it("leaves the decorator undefined and policies untouched when ALAYA_ENABLE_EMBEDDING_SUPPLEMENT is off", () => {
     saveEnv();
     const fixture = buildFixture();

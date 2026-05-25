@@ -21,6 +21,23 @@ import {
   GraphNeighborSchema,
   MemoryGraphEdgeTypeSchema
 } from "./memory-graph.js";
+import {
+  SoulBatchReviewEdgeProposalsRequestSchema,
+  SoulBatchReviewEdgeProposalsResponseSchema,
+  SoulListPendingEdgeProposalsRequestSchema,
+  SoulListPendingEdgeProposalsResponseSchema,
+  SoulProposeEdgeRequestSchema,
+  SoulProposeEdgeResponseSchema
+} from "./edge-proposal.js";
+
+export {
+  SoulBatchReviewEdgeProposalsRequestSchema,
+  SoulBatchReviewEdgeProposalsResponseSchema,
+  SoulListPendingEdgeProposalsRequestSchema,
+  SoulListPendingEdgeProposalsResponseSchema,
+  SoulProposeEdgeRequestSchema,
+  SoulProposeEdgeResponseSchema
+};
 import { MemoryDimensionSchema, PublicMemoryEntryMutableFieldsSchema } from "./memory-entry.js";
 import { ScopeClassSchema } from "./object-kind.js";
 import { ClaimLifecycleStateSchema } from "./claim-form.js";
@@ -536,6 +553,9 @@ type SoulToolName =
   | "soul.propose_memory_update"
   | "soul.review_memory_proposal"
   | "soul.list_pending_proposals"
+  | "soul.propose_edge"
+  | "soul.list_pending_edge_proposals"
+  | "soul.batch_review_edge_proposals"
   | "soul.apply_override"
   | "soul.explore_graph"
   | "soul.report_context_usage"
@@ -551,6 +571,9 @@ const soulToolRequestSchemas: Record<SoulToolName, z.ZodTypeAny> = {
   "soul.propose_memory_update": SoulProposeMemoryUpdateRequestSchema,
   "soul.review_memory_proposal": SoulReviewMemoryProposalRequestSchema,
   "soul.list_pending_proposals": SoulListPendingProposalsRequestSchema,
+  "soul.propose_edge": SoulProposeEdgeRequestSchema,
+  "soul.list_pending_edge_proposals": SoulListPendingEdgeProposalsRequestSchema,
+  "soul.batch_review_edge_proposals": SoulBatchReviewEdgeProposalsRequestSchema,
   "soul.apply_override": SoulApplyOverrideRequestSchema,
   "soul.explore_graph": SoulExploreGraphRequestSchema,
   "soul.report_context_usage": SoulReportContextUsageRequestSchema,

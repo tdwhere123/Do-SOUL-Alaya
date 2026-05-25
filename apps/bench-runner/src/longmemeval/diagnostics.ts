@@ -129,7 +129,7 @@ export interface LongMemEvalRecallEvidenceSummary {
 
 export interface LongMemEvalDiagnosticsSidecar {
   readonly schema_version: 1;
-  readonly bench_name: "public" | "public-multiturn" | "public-crossquestion";
+  readonly bench_name: "public" | "public-multiturn" | "public-crossquestion" | "public-locomo";
   readonly split: string;
   readonly run_at: string;
   readonly alaya_commit: string;
@@ -145,6 +145,30 @@ export interface LongMemEvalDiagnosticsSidecar {
   readonly query_embedding_cache?: LongMemEvalQueryEmbeddingCacheSummary;
   readonly provider_state_summary: ProviderStateSummary;
   readonly questions: readonly LongMemEvalQuestionDiagnostic[];
+}
+
+export interface LongMemEvalCompactDiagnosticsSidecar {
+  readonly schema_version: 1;
+  readonly compact_schema_version: 1;
+  readonly bench_name: LongMemEvalDiagnosticsSidecar["bench_name"];
+  readonly split: string;
+  readonly run_at: string;
+  readonly alaya_commit: string;
+  readonly recall_pipeline_version?: string;
+  readonly embedding_provider: string;
+  readonly embedding_mode: "disabled" | "env";
+  readonly policy_shape?: "stress" | "chat";
+  readonly simulate_report?: "none" | "always-used" | "gold-only" | "mixed";
+  readonly question_count: number;
+  readonly full_diagnostics_artifact_path: string;
+  readonly provider_state_summary: ProviderStateSummary;
+  readonly report_usage?: LongMemEvalReportUsageSummary;
+  readonly report_side_effects?: Omit<LongMemEvalReportSideEffectSummary, "snapshots"> & {
+    readonly snapshot_count: number;
+  };
+  readonly scored_recall_evidence?: LongMemEvalRecallEvidenceSummary;
+  readonly embedding_vector_cache?: LongMemEvalEmbeddingVectorCacheSummary;
+  readonly query_embedding_cache?: LongMemEvalQueryEmbeddingCacheSummary;
 }
 
 interface NarrowRecallDiagnostics {
@@ -716,6 +740,56 @@ export function renderDiagnosticsSidecar(
   sidecar: LongMemEvalDiagnosticsSidecar
 ): string {
   return JSON.stringify(sidecar, null, 2) + "\n";
+}
+
+export function renderCompactDiagnosticsSidecar(
+  sidecar: LongMemEvalDiagnosticsSidecar,
+  fullDiagnosticsArtifactPath: string
+): string {
+  const reportSideEffects = sidecar.report_side_effects;
+  const compact: LongMemEvalCompactDiagnosticsSidecar = {
+    schema_version: 1,
+    compact_schema_version: 1,
+    bench_name: sidecar.bench_name,
+    split: sidecar.split,
+    run_at: sidecar.run_at,
+    alaya_commit: sidecar.alaya_commit,
+    ...(sidecar.recall_pipeline_version === undefined
+      ? {}
+      : { recall_pipeline_version: sidecar.recall_pipeline_version }),
+    embedding_provider: sidecar.embedding_provider,
+    embedding_mode: sidecar.embedding_mode,
+    ...(sidecar.policy_shape === undefined ? {} : { policy_shape: sidecar.policy_shape }),
+    ...(sidecar.simulate_report === undefined ? {} : { simulate_report: sidecar.simulate_report }),
+    question_count: sidecar.questions.length,
+    full_diagnostics_artifact_path: fullDiagnosticsArtifactPath,
+    provider_state_summary: sidecar.provider_state_summary,
+    ...(sidecar.report_usage === undefined ? {} : { report_usage: sidecar.report_usage }),
+    ...(reportSideEffects === undefined
+      ? {}
+      : {
+          report_side_effects: {
+            mode: reportSideEffects.mode,
+            workspaces_observed: reportSideEffects.workspaces_observed,
+            memory_graph_edges_total: reportSideEffects.memory_graph_edges_total,
+            memory_graph_edges_by_type: reportSideEffects.memory_graph_edges_by_type,
+            recalls_edge_count: reportSideEffects.recalls_edge_count,
+            path_relations_total: reportSideEffects.path_relations_total,
+            latest_path_event_at: reportSideEffects.latest_path_event_at,
+            snapshot_count: reportSideEffects.snapshots.length
+          }
+        }),
+    ...(sidecar.scored_recall_evidence === undefined
+      ? {}
+      : { scored_recall_evidence: sidecar.scored_recall_evidence }),
+    ...(sidecar.embedding_vector_cache === undefined
+      ? {}
+      : { embedding_vector_cache: sidecar.embedding_vector_cache }),
+    ...(sidecar.query_embedding_cache === undefined
+      ? {}
+      : { query_embedding_cache: sidecar.query_embedding_cache })
+  };
+  return JSON.stringify(compact, null, 2) + "\n";
 }
 
 function readRecallDiagnostics(

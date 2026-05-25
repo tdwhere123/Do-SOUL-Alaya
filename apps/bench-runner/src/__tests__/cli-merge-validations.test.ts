@@ -184,10 +184,13 @@ function makeShardDiagnostics(
   };
 }
 
+type ShardPointerKind = "run" | "passing" | "baseline";
+
 async function writeShardRoot(
   root: string,
   kpi: KpiPayload,
-  diagnostics?: unknown
+  diagnostics?: unknown,
+  pointerKinds: readonly ShardPointerKind[] = ["run"]
 ): Promise<void> {
   const slug = "2026-05-14T100000Z-" + kpi.alaya_commit;
   const entryRoot = path.join(root, "public", slug);
@@ -205,17 +208,27 @@ async function writeShardRoot(
       "utf8"
     );
   }
-  await writeFile(
-    path.join(root, "public", "latest-baseline.json"),
-    JSON.stringify({ slug, kpi_path: `${slug}/kpi.json` }, null, 2) + "\n",
-    "utf8"
-  );
+  const pointerBody =
+    JSON.stringify({ slug, kpi_path: `${slug}/kpi.json` }, null, 2) + "\n";
+  const pointerFilenames: Record<ShardPointerKind, string> = {
+    run: "latest-run.json",
+    passing: "latest-passing.json",
+    baseline: "latest-baseline.json"
+  };
+  for (const pointerKind of pointerKinds) {
+    await writeFile(
+      path.join(root, "public", pointerFilenames[pointerKind]),
+      pointerBody,
+      "utf8"
+    );
+  }
 }
 
 async function writeHistoryEntry(
   root: string,
   slug: string,
-  kpi: KpiPayload
+  kpi: KpiPayload,
+  findingsMarkdown: string | null = null
 ): Promise<void> {
   const entryRoot = path.join(root, "public", slug);
   await mkdir(entryRoot, { recursive: true });
@@ -225,6 +238,9 @@ async function writeHistoryEntry(
     "utf8"
   );
   await writeFile(path.join(entryRoot, "report.md"), "report\n", "utf8");
+  if (findingsMarkdown !== null) {
+    await writeFile(path.join(entryRoot, "findings.md"), findingsMarkdown, "utf8");
+  }
 }
 
 describe("merge-longmemeval validations", () => {
@@ -307,7 +323,7 @@ describe("merge-longmemeval validations", () => {
 
     expect(exitCode).toBe(0);
     const pointer = JSON.parse(
-      await readFile(path.join(historyRoot, "public", "latest-baseline.json"), "utf8")
+      await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
     ) as { slug: string };
     const merged = JSON.parse(
       await readFile(
@@ -318,6 +334,214 @@ describe("merge-longmemeval validations", () => {
     expect(merged.kpi.latency_source).toBe("exact");
     expect(merged.kpi.latency_ms_p50).toBe(10);
     expect(merged.kpi.latency_ms_p95).toBe(19);
+  });
+
+  it("merges shard roots that only expose latest-run pointers", async () => {
+    const shardA = path.join(tmpRoot, "shard-latest-run-a");
+    const shardB = path.join(tmpRoot, "shard-latest-run-b");
+    await writeShardRoot(
+      shardA,
+      makeShardKpi({
+        evaluated_count: 5,
+        kpi: {
+          ...makeShardKpi().kpi,
+          per_scenario: [
+            { id: "q-latest-run-a-1", version: 1, hit_at_5: true, tier: "warm" }
+          ]
+        }
+      })
+    );
+    await writeShardRoot(
+      shardB,
+      makeShardKpi({
+        evaluated_count: 5,
+        kpi: {
+          ...makeShardKpi().kpi,
+          per_scenario: [
+            { id: "q-latest-run-b-1", version: 1, hit_at_5: true, tier: "warm" }
+          ]
+        }
+      })
+    );
+
+    await expect(
+      readFile(path.join(shardA, "public", "latest-passing.json"), "utf8")
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(
+      readFile(path.join(shardB, "public", "latest-baseline.json"), "utf8")
+    ).rejects.toMatchObject({ code: "ENOENT" });
+
+    const historyRoot = path.join(tmpRoot, "history-latest-run");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shardA,
+      shardB
+    ]);
+
+    expect(exitCode).toBe(0);
+    const pointer = JSON.parse(
+      await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
+    ) as { slug: string };
+    const merged = JSON.parse(
+      await readFile(
+        path.join(historyRoot, "public", pointer.slug, "kpi.json"),
+        "utf8"
+      )
+    ) as KpiPayload;
+    expect(merged.evaluated_count).toBe(10);
+  });
+
+  it("accepts latest-passing and legacy latest-baseline shard pointers", async () => {
+    const shardA = path.join(tmpRoot, "shard-passing");
+    const shardB = path.join(tmpRoot, "shard-baseline");
+    await writeShardRoot(
+      shardA,
+      makeShardKpi({
+        evaluated_count: 5,
+        kpi: {
+          ...makeShardKpi().kpi,
+          per_scenario: [
+            { id: "q-passing-1", version: 1, hit_at_5: true, tier: "warm" }
+          ]
+        }
+      }),
+      undefined,
+      ["passing"]
+    );
+    await writeShardRoot(
+      shardB,
+      makeShardKpi({
+        evaluated_count: 5,
+        kpi: {
+          ...makeShardKpi().kpi,
+          per_scenario: [
+            { id: "q-baseline-1", version: 1, hit_at_5: true, tier: "warm" }
+          ]
+        }
+      }),
+      undefined,
+      ["baseline"]
+    );
+
+    const historyRoot = path.join(tmpRoot, "history-compatible-pointers");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shardA,
+      shardB
+    ]);
+
+    expect(exitCode).toBe(0);
+  });
+
+  it("reports a clear error when a shard root has no usable pointer", async () => {
+    const shard = path.join(tmpRoot, "shard-no-pointer");
+    await mkdir(path.join(shard, "public"), { recursive: true });
+
+    const historyRoot = path.join(tmpRoot, "history-no-pointer");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shard
+    ]);
+
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toContain(
+      "no usable shard pointer; checked latest-passing.json, latest-run.json, latest-baseline.json"
+    );
+  });
+
+  it("diffs merged public archives against the newest passing baseline", async () => {
+    const shardA = path.join(tmpRoot, "shard-a");
+    const shardB = path.join(tmpRoot, "shard-b");
+    await writeShardRoot(
+      shardA,
+      makeShardKpi({
+        evaluated_count: 5,
+        kpi: {
+          ...makeShardKpi().kpi,
+          per_scenario: [
+            { id: "q-shard-a-1", version: 1, hit_at_5: true, tier: "warm" }
+          ]
+        }
+      })
+    );
+    await writeShardRoot(
+      shardB,
+      makeShardKpi({
+        alaya_commit: "abc1234",
+        evaluated_count: 5,
+        kpi: {
+          ...makeShardKpi().kpi,
+          per_scenario: [
+            { id: "q-shard-b-1", version: 1, hit_at_5: true, tier: "warm" }
+          ]
+        }
+      })
+    );
+    const historyRoot = path.join(tmpRoot, "history-baseline");
+    const priorPassingRunAt = "2026-05-13T12:00:00.000Z";
+    await writeHistoryEntry(
+      historyRoot,
+      "2026-05-13T120000Z-aaa1111-policy-stress",
+      makeShardKpi({
+        run_at: priorPassingRunAt,
+        alaya_commit: "aaa1111",
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 0.9
+        }
+      })
+    );
+    await writeHistoryEntry(
+      historyRoot,
+      "2026-05-13T130000Z-bbb2222-policy-stress",
+      makeShardKpi({
+        run_at: "2026-05-13T13:00:00.000Z",
+        alaya_commit: "bbb2222",
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 0.1
+        }
+      }),
+      "# findings\n- regression\n"
+    );
+
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shardA,
+      shardB
+    ]);
+
+    expect(exitCode).toBe(0);
+    const pointer = JSON.parse(
+      await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
+    ) as { slug: string };
+    const merged = JSON.parse(
+      await readFile(
+        path.join(historyRoot, "public", pointer.slug, "kpi.json"),
+        "utf8"
+      )
+    ) as KpiPayload;
+    expect(merged.diff_vs_previous?.previous_run).toBe(priorPassingRunAt);
   });
 
   it("refuses shards whose split differs", async () => {
@@ -813,7 +1037,7 @@ describe("merge-longmemeval validations", () => {
     expect(exitCode).toBe(0);
 
     const pointer = JSON.parse(
-      await readFile(path.join(historyRoot, "public", "latest-baseline.json"), "utf8")
+      await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
     ) as { slug: string };
     expect(pointer.slug).toMatch(/-policy-chat$/);
 
@@ -893,7 +1117,7 @@ describe("merge-longmemeval validations", () => {
     expect(exitCode).toBe(1);
 
     const pointer = JSON.parse(
-      await readFile(path.join(historyRoot, "public", "latest-baseline.json"), "utf8")
+      await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
     ) as { slug: string };
     const report = await readFile(
       path.join(historyRoot, "public", pointer.slug, "report.md"),
@@ -974,7 +1198,7 @@ describe("merge-longmemeval validations", () => {
 
     expect(exitCode).toBe(1);
     const pointer = JSON.parse(
-      await readFile(path.join(historyRoot, "public", "latest-baseline.json"), "utf8")
+      await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
     ) as { slug: string };
     const report = await readFile(
       path.join(historyRoot, "public", pointer.slug, "report.md"),
@@ -1060,7 +1284,7 @@ describe("merge-longmemeval validations", () => {
     expect(exitCode).toBe(0);
 
     const pointer = JSON.parse(
-      await readFile(path.join(historyRoot, "public", "latest-baseline.json"), "utf8")
+      await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
     ) as { slug: string };
     expect(pointer.slug).toMatch(/-policy-chat-report-mixed$/);
 
@@ -1088,7 +1312,9 @@ describe("merge-longmemeval validations", () => {
       report_usage?: { reports_attempted: number };
       scored_recall_evidence?: { graph_support_gold_count: number };
       provider_state_summary: { total: number; provider_not_requested: number };
-      questions: unknown[];
+      question_count: number;
+      full_diagnostics_artifact_path: string;
+      questions?: unknown[];
     };
     expect(merged.simulate_report).toBe("mixed");
     expect(report).toContain("| r_at_5 | 0.4000 | 0.8000 | +0.4000 |");
@@ -1097,7 +1323,11 @@ describe("merge-longmemeval validations", () => {
     expect(diagnostics.scored_recall_evidence?.graph_support_gold_count).toBe(1);
     expect(diagnostics.provider_state_summary.total).toBe(0);
     expect(diagnostics.provider_state_summary.provider_not_requested).toBe(0);
-    expect(diagnostics.questions).toEqual([]);
+    expect(diagnostics.question_count).toBe(0);
+    expect(diagnostics.questions).toBeUndefined();
+    expect(diagnostics.full_diagnostics_artifact_path).not.toContain(
+      "docs/bench-history"
+    );
     const comparison = JSON.parse(
       await readFile(
         path.join(
@@ -1401,7 +1631,7 @@ describe("merge-longmemeval validations", () => {
     expect(exitCode).toBe(0);
 
     const pointer = JSON.parse(
-      await readFile(path.join(historyRoot, "public", "latest-baseline.json"), "utf8")
+      await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
     ) as { slug: string };
     const merged = JSON.parse(
       await readFile(

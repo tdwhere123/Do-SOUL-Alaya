@@ -95,7 +95,9 @@ export function archiveEvidenceFromDiagnostics(
     report_side_effects: diagnostics.report_side_effects ?? null,
     scored_recall_evidence:
       diagnostics.scored_recall_evidence ??
-      summarizeLongMemEvalRecallEvidence(diagnostics.questions)
+      (Array.isArray((diagnostics as { readonly questions?: unknown }).questions)
+        ? summarizeLongMemEvalRecallEvidence(diagnostics.questions)
+        : null)
   };
 }
 

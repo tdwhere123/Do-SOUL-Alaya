@@ -446,6 +446,11 @@ function createSignal(overrides: Partial<CandidateMemorySignal> = {}): Candidate
     domain_tags: ["memory"],
     confidence: 0.8,
     evidence_refs: ["msg-user"],
+    source_memory_refs: [],
+    supersedes_refs: [],
+    exception_to_refs: [],
+    contradicts_refs: [],
+    incompatible_with_refs: [],
     raw_payload: {
       excerpt: "Use explicit evidence before durable memory."
     },
