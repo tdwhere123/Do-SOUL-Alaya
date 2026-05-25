@@ -101,15 +101,18 @@ records `full_diagnostics_artifact_path`.
 The core release runs are reproducible by:
 
 ```bash
-# LongMemEval-S single-turn sharded run.
-apps/bench-runner/scripts/run-full-public-bench.sh --variant s --shards 2
+# LongMemEval-S single-turn sharded embedding-off gate.
+apps/bench-runner/scripts/run-full-public-bench.sh --variant s --embedding disabled --shards 2 --data-dir <shared-cache>/longmemeval
 
 # LongMemEval-S multiturn and cross-question Tier 1 runs.
-node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval-multiturn --variant s --rounds 3 --data-dir <shared-cache>/longmemeval
-node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval-crossquestion --variant s --data-dir <shared-cache>/longmemeval
+node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval-multiturn --variant s --rounds 3 --embedding disabled --data-dir <shared-cache>/longmemeval
+node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval-crossquestion --variant s --embedding disabled --data-dir <shared-cache>/longmemeval
 
-# LoCoMo full release runs.
-apps/bench-runner/scripts/run-full-locomo-bench.sh --variant locomo10
+# LoCoMo embedding-off gate.
+apps/bench-runner/scripts/run-full-locomo-bench.sh --embedding disabled --data-dir <shared-cache>/locomo
+
+# LoCoMo local ONNX embedding-on gate.
+ALAYA_LOCAL_EMBEDDING_CACHE_DIR=<user-cache> node apps/bench-runner/bin/alaya-bench-runner.mjs locomo --embedding env --embedding-provider local_onnx --data-dir <shared-cache>/locomo
 
 # Local smoke/import surfaces.
 node apps/bench-runner/bin/alaya-bench-runner.mjs self
