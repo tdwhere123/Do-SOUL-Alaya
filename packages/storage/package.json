@@ -10,7 +10,9 @@
     "url": "git+https://github.com/tdwhere123/Do-SOUL-Alaya.git",
     "directory": "packages/storage"
   },
-  "files": ["dist/"],
+  "files": [
+    "dist/"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -23,6 +25,7 @@
   },
   "dependencies": {
     "@do-soul/alaya-protocol": "workspace:*",
+    "@node-rs/jieba": "2.0.1",
     "better-sqlite3": "12.9.0"
   },
   "devDependencies": {

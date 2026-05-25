@@ -839,6 +839,11 @@ describe("daemon tool runtime bootstrap", () => {
     expect(hoisted.toolSpecService.register).not.toHaveBeenCalled();
   });
 
+  it("does not continue daemon bootstrap until both CJK warmups resolve", async () => {
+    await expectBootstrapWaitsForBothCjkWarmups("core");
+    await expectBootstrapWaitsForBothCjkWarmups("storage");
+  });
+
   it("marks principal coding unavailable when a required sandbox tool is missing", async () => {
     const appModule = await import("../app.js");
 
@@ -917,6 +922,66 @@ async function bootStartedDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   // see also: apps/core-daemon/src/daemon-runtime-lifecycle.ts startHttpServer.
   await runtime.startHttpServer({ port: 0 });
   return runtime;
+}
+
+async function expectBootstrapWaitsForBothCjkWarmups(
+  firstResolved: "core" | "storage"
+): Promise<void> {
+  const coreGate = createDeferred<boolean>();
+  const storageGate = createDeferred<boolean>();
+  const configGate = createDeferred<ReadonlyMap<string, string>>();
+  const coreCallsBefore = hoisted.coreWarmCjkSegmentation.mock.calls.length;
+  const storageCallsBefore = hoisted.storageWarmCjkSegmentation.mock.calls.length;
+  const configCallsBefore = hoisted.loadConfigEnv.mock.calls.length;
+
+  hoisted.coreWarmCjkSegmentation.mockImplementationOnce(async () => coreGate.promise);
+  hoisted.storageWarmCjkSegmentation.mockImplementationOnce(async () => storageGate.promise);
+  hoisted.loadConfigEnv.mockImplementationOnce(async () => configGate.promise);
+
+  let completed = false;
+  const runtimePromise = bootDaemonRuntime().then((runtime) => {
+    completed = true;
+    return runtime;
+  });
+
+  try {
+    await waitUntil(
+      () =>
+        hoisted.coreWarmCjkSegmentation.mock.calls.length === coreCallsBefore + 1 &&
+        hoisted.storageWarmCjkSegmentation.mock.calls.length === storageCallsBefore + 1
+    );
+    expect(hoisted.loadConfigEnv.mock.calls).toHaveLength(configCallsBefore);
+    expect(completed).toBe(false);
+
+    if (firstResolved === "core") {
+      coreGate.resolve(true);
+    } else {
+      storageGate.resolve(true);
+    }
+    await Promise.resolve();
+
+    expect(hoisted.loadConfigEnv.mock.calls).toHaveLength(configCallsBefore);
+    expect(completed).toBe(false);
+
+    if (firstResolved === "core") {
+      storageGate.resolve(true);
+    } else {
+      coreGate.resolve(true);
+    }
+    await waitUntil(
+      () => hoisted.loadConfigEnv.mock.calls.length === configCallsBefore + 1
+    );
+    expect(completed).toBe(false);
+
+    configGate.resolve(new Map());
+    await runtimePromise;
+    expect(completed).toBe(true);
+  } finally {
+    coreGate.resolve(false);
+    storageGate.resolve(false);
+    configGate.resolve(new Map());
+    await runtimePromise.catch(() => undefined);
+  }
 }
 
 async function waitUntil(condition: () => boolean): Promise<void> {

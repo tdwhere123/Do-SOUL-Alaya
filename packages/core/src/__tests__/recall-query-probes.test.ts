@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { MemoryDimension, ScopeClass } from "@do-soul/alaya-protocol";
-import { compileRecallQueryProbes, expandLexicalTerms } from "../recall-query-probes.js";
+import { compileRecallQueryProbes, expandLexicalTerms, splitLexicalTokens } from "../recall-query-probes.js";
+import {
+  __resetCjkSegmentationStateForTests,
+  warmCjkSegmentation
+} from "../cjk-segmentation.js";
 
 describe("compileRecallQueryProbes", () => {
   it("extracts multilingual structural probes without a provider", () => {
@@ -100,5 +104,92 @@ describe("expandLexicalTerms", () => {
     for (const expanded of probes.expanded_terms) {
       expect(probes.lexical_terms).not.toContain(expanded);
     }
+  });
+});
+
+describe("splitLexicalTokens CJK word segmentation", () => {
+  beforeAll(async () => {
+    // anchor: warm jieba once for this suite so the sync splitLexicalTokens
+    // path observes the segmented output rather than the fail-soft fallback.
+    const ready = await warmCjkSegmentation();
+    if (!ready) {
+      throw new Error("jieba unavailable in test env; native binding missing");
+    }
+  });
+
+  it("expands a CJK-only token into jieba word pieces while keeping the surface chunk", () => {
+    const tokens = splitLexicalTokens("我喜欢咖啡");
+    expect(tokens).toContain("我喜欢咖啡");
+    expect(tokens).toEqual(expect.arrayContaining(["喜欢", "咖啡"]));
+  });
+
+  it("mixed CJK + Latin runs segment each lane independently", () => {
+    const tokens = splitLexicalTokens("我用 ALAYA 记忆");
+    expect(tokens).toContain("alaya");
+    expect(tokens).toContain("记忆");
+  });
+
+  it("Hangul tokens stay whole (jieba does not segment Korean) and survive the keep rule", () => {
+    const tokens = splitLexicalTokens("안녕 ALAYA");
+    expect(tokens).toContain("안녕");
+    expect(tokens).toContain("alaya");
+  });
+
+  it("Arabic RTL tokens pass through the Unicode-aware split without fragmentation", () => {
+    const tokens = splitLexicalTokens("مرحبا ALAYA");
+    expect(tokens).toContain("مرحبا");
+    expect(tokens).toContain("alaya");
+  });
+
+  it("token list is deterministic and surface tokens keep their duplicate occurrences", () => {
+    const first = splitLexicalTokens("我喜欢咖啡 我喜欢咖啡");
+    const second = splitLexicalTokens("我喜欢咖啡 我喜欢咖啡");
+    expect(second).toEqual(first);
+    // invariant: surface duplicates survive so distinct-token / diversity
+    // damps see the same numerator as pre-jieba. Jieba pieces themselves
+    // are deduped (a repeated CJK run does not fan out N copies of the
+    // same word piece set).
+    const surfaceCount = first.filter((token) => token === "我喜欢咖啡").length;
+    expect(surfaceCount).toBe(2);
+    const piece = "喜欢";
+    expect(first.filter((token) => token === piece).length).toBe(1);
+  });
+
+  it("compileRecallQueryProbes surfaces jieba pieces as lexical_terms for a CJK query", () => {
+    const probes = compileRecallQueryProbes("我喜欢咖啡");
+    expect(probes.lexical_terms).toEqual(expect.arrayContaining(["喜欢", "咖啡"]));
+  });
+
+  it("rejects jieba ASCII pieces from CJK-suffixed compound surfaces (RT-I-2)", () => {
+    // invariant: attacker appending a CJK char to an ASCII compound token
+    // (admin_passwords -> admin_passwords你好) must NOT cause the compound
+    // to auto-decompose via the CJK lane. surface lane keeps _/@/#/./-
+    // as word chars, so the compound is preserved as one token; jieba's
+    // ASCII pieces ("admin", "passwords") are intentionally filtered out
+    // because re-emitting them would break surface boundary integrity.
+    const tokens = splitLexicalTokens("admin_passwords你好");
+    expect(tokens).not.toContain("admin");
+    expect(tokens).not.toContain("passwords");
+    expect(tokens).toContain("你好");
+  });
+});
+
+describe("splitLexicalTokens CJK segmentation fail-soft", () => {
+  afterEach(() => {
+    // anchor: restore the cached jieba state between assertions in this
+    // block so a later suite that depends on warm jieba is unaffected.
+    __resetCjkSegmentationStateForTests();
+  });
+
+  it("falls back to the surface token when jieba has not been loaded yet", () => {
+    __resetCjkSegmentationStateForTests();
+    // First sync call kicks off the async load but cannot await it; the
+    // fail-soft contract is that the surface token alone is returned so
+    // recall paths never throw on a cold cache.
+    const tokens = splitLexicalTokens("我喜欢咖啡");
+    expect(tokens).toContain("我喜欢咖啡");
+    // No jieba pieces yet — the load is still in-flight.
+    expect(tokens).not.toContain("喜欢");
+    expect(tokens).not.toContain("咖啡");
   });
 });

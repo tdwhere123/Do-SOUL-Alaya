@@ -1,4 +1,8 @@
 import type { MemoryEntryKeywordSearchResult } from "./memory-entry-repo.js";
+import {
+  isCjkSegmentationCandidate,
+  segmentCjkRun
+} from "./shared/cjk-segmentation.js";
 
 export interface ExactKeywordCandidateRow {
   readonly object_id: string;
@@ -173,18 +177,43 @@ export function buildGroupedOrdinalScores<T>(
 
 const MAX_FTS_QUERY_TOKENS = 32;
 
-export function tokenizeFtsQuery(queryText: string): readonly string[] {
-  const tokens = Array.from(
-    new Set(
-      queryText
-        .trim()
-        .split(/\s+/u)
-        .map((token) => token.replace(/\0/gu, "").replace(/[":*]/gu, "").trim())
-        .filter((token) => token.length > 0)
-    )
-  );
+// invariant: FTS5 has more reserved metacharacters than the original
+// denylist (":, ", *) covered — at minimum `(`, `)`, `+`, `-`, `^`, plus
+// the column-filter `:` and NEAR/0 word forms. Rather than chase the FTS5
+// grammar's full set, this helper strips any codepoint outside the
+// whitelist `\p{L} \p{N} _ space`. Downstream callers MUST also
+// phrase-wrap each emitted token (e.g. `"tok"`) so a future grammar
+// extension cannot reintroduce injection via a token that slipped through.
+const FTS_QUERY_TOKEN_STRIP = /[^\p{L}\p{N}_\s]+/gu;
 
-  return Object.freeze(tokens.slice(0, MAX_FTS_QUERY_TOKENS));
+function sanitizeFtsToken(token: string): string {
+  return token.replace(FTS_QUERY_TOKEN_STRIP, "").trim();
+}
+
+export function tokenizeFtsQuery(queryText: string): readonly string[] {
+  const surfaceTokens = queryText
+    .trim()
+    .split(/\s+/u)
+    .map((token) => sanitizeFtsToken(token))
+    .filter((token) => token.length > 0);
+  const expanded: string[] = [];
+  for (const token of surfaceTokens) {
+    expanded.push(token);
+    // anchor: jieba word-level pieces are appended after the surface
+    // token so the trigram lane still sees the long form (substring
+    // match) AND any FTS5 lane that handles short tokens sees the word
+    // boundaries. see also: shared/cjk-segmentation.ts.
+    if (isCjkSegmentationCandidate(token)) {
+      for (const piece of segmentCjkRun(token)) {
+        const trimmed = sanitizeFtsToken(piece);
+        if (trimmed.length > 0 && trimmed !== token) {
+          expanded.push(trimmed);
+        }
+      }
+    }
+  }
+  const deduped = Array.from(new Set(expanded));
+  return Object.freeze(deduped.slice(0, MAX_FTS_QUERY_TOKENS));
 }
 
 export function countQueryCodepoints(value: string): number {

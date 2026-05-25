@@ -56,6 +56,7 @@ export * from "./resolution-service.js";
 export * from "./reconciliation-service.js";
 export * from "./recall-service.js";
 export * from "./recall-query-probes.js";
+export * from "./cjk-segmentation.js";
 export * from "./entity-extraction-port.js";
 export * from "./entity-extraction-rules.js";
 export * from "./recall-evidence-pack.js";

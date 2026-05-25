@@ -60,6 +60,7 @@ import {
   ToolSpecService,
   ZeroDaySecurityLayer,
   rebuildCountersFromEventLog,
+  warmCjkSegmentation,
   type ConversationServiceDependencies,
   type GlobalMemoryRecallSubscription
 } from "@do-soul/alaya-core";
@@ -107,7 +108,8 @@ import {
   SqliteWorkspaceRepo,
   createGardenBackgroundDataPorts,
   findActiveConstraints,
-  initDatabase
+  initDatabase,
+  warmCjkSegmentation as warmStorageCjkSegmentation
 } from "@do-soul/alaya-storage";
 import {
   ComputeRoutingService,
@@ -202,6 +204,25 @@ const repoRoot = resolve(__dirname, "..", "..", "..");
 const DEFAULT_GARDEN_STATUS_WORKSPACE_ID = "default";
 
 export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
+  // anchor: warm jieba (CJK word segmenter) at daemon start so the first
+  // recall query already sees segmented lexical_terms instead of paying
+  // the native-binding import cost on the user-visible path. AWAIT both
+  // module-state instances — core owns one (recall-query-probes lane),
+  // storage owns an independent one (FTS query tokenizer lane); the
+  // Package Dependency Direction forbids storage importing core. A
+  // fire-and-forget warm leaked a "loading" window during which sync
+  // tokenizers returned the surface-only fallback (no segmentation) so
+  // the first N queries — and every shard of the bench harness, which
+  // boots an isolated daemon — saw raw CJK runs instead of jieba pieces.
+  // Boot pays ~200-500ms once for native binding + dict load; the
+  // segmenters are fail-soft so a warm failure is silent and recall
+  // still degrades to surface-only matching.
+  // see also: packages/core/src/cjk-segmentation.ts,
+  //          packages/storage/src/repos/shared/cjk-segmentation.ts.
+  await Promise.all([
+    warmCjkSegmentation(),
+    warmStorageCjkSegmentation()
+  ]);
   const startupSteps: DaemonStartupStepRecord[] = [];
   const warnLogger = createWarnLogger();
   const runtimeNotifier = createRuntimeNotifier();

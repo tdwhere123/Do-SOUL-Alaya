@@ -1,4 +1,5 @@
 import { MemoryDimension, ScopeClass, type MemoryDimension as MemoryDimensionType, type ScopeClass as ScopeClassType } from "@do-soul/alaya-protocol";
+import { isCjkSegmentationCandidate, segmentCjkRun } from "./cjk-segmentation.js";
 
 export type RecallQuerySubjectHint = "self_reference";
 
@@ -147,13 +148,57 @@ function normalizeQuery(queryText: string | null): string | null {
  * lowercase+trim, drop empties, and a length>2-or-CJK-script keep rule.
  * Does NOT drop stop words. The feature-rerank tokenizer reuses this so
  * query terms and candidate terms tokenize under one identical rule.
+ *
+ * invariant: when a surface token bears Han/Hiragana/Katakana, the
+ * original surface chunk is yielded first AND jieba word-level pieces are
+ * appended (deduped). This preserves trigram-lane substring coverage on
+ * the long form while also exposing word boundaries for BM25/phrase
+ * adjacency on the short form. see also: cjk-segmentation.ts.
  */
 export function splitLexicalTokens(value: string): readonly string[] {
-  return value
+  const surfaceTokens = value
     .split(/[^\p{L}\p{N}_./@#-]+/u)
     .map((term) => term.trim().toLocaleLowerCase())
     .filter((term) => term.length > 0)
     .filter((term) => term.length > 2 || /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(term));
+  // invariant: surface tokens preserve their duplicates so downstream
+  // distinct-token / occurrence-count features (feature-rerank diversity
+  // damp, concentration damp, …) keep the same numerator behaviour as
+  // pre-jieba. Only jieba word-level pieces are deduped (against tokens
+  // already in the output) so repeated CJK runs do not fan out N copies
+  // of the same piece set.
+  const output: string[] = [];
+  const seenJiebaPieces = new Set<string>();
+  for (const token of surfaceTokens) {
+    output.push(token);
+    seenJiebaPieces.add(token);
+    if (!isCjkSegmentationCandidate(token)) {
+      continue;
+    }
+    for (const piece of segmentCjkRun(token)) {
+      const normalized = piece.trim().toLocaleLowerCase();
+      if (normalized.length === 0 || seenJiebaPieces.has(normalized)) {
+        continue;
+      }
+      // invariant: ONLY CJK-bearing jieba pieces are pushed into
+      // lexical_terms. The surface split lane (with `_/@/#/./-` kept as
+      // word-chars) already produces the canonical ASCII tokenization;
+      // re-emitting jieba's ASCII pieces would break compound tokens
+      // like `admin_passwords` apart whenever an attacker appends an
+      // unrelated CJK run (`admin_passwords你好`), bypassing surface
+      // boundary integrity and letting auto-decomposed sub-terms match
+      // memories the surface form alone would not. ASCII jieba pieces
+      // are therefore discarded; only Han/Hiragana/Katakana/Hangul
+      // pieces enter lexical_terms.
+      if (
+        /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(normalized)
+      ) {
+        output.push(normalized);
+        seenJiebaPieces.add(normalized);
+      }
+    }
+  }
+  return output;
 }
 
 function extractLexicalTerms(value: string): readonly string[] {

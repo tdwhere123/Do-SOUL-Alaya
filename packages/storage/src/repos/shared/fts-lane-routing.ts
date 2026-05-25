@@ -1,5 +1,9 @@
 import type BetterSqlite3 from "better-sqlite3";
 import { buildGroupedOrdinalScores } from "../memory-entry-keyword-search.js";
+import {
+  isCjkSegmentationCandidate,
+  segmentCjkRun
+} from "./cjk-segmentation.js";
 
 // Trigram FTS5 tables only index runs of >= 3 codepoints; shorter terms can
 // never match and must not be sent to the trigram lane.
@@ -21,11 +25,13 @@ export interface FtsLaneHit {
 }
 
 /**
- * Route FTS query tokens by character script. CJK-bearing tokens go to the
- * trigram lane (substring-capable); plain word tokens go to the porter
- * unicode61 lane (English BM25 + stemming). A mixed-script query fans out to
- * both lanes. Shared by the evidence_capsule and synthesis_capsule dual-index
- * repos so the lane-routing rule lives in exactly one place.
+ * Route FTS query tokens by character script. CJK-bearing tokens at the
+ * trigram boundary go to the trigram lane (substring-capable); shorter CJK
+ * tokens fall back to the porter unicode61 lane for exact word-token matches.
+ * Plain word tokens also go to porter (English BM25 + stemming). A
+ * mixed-script query fans out to both lanes. Shared by the evidence_capsule
+ * and synthesis_capsule dual-index repos so the lane-routing rule lives in
+ * exactly one place.
  */
 export function splitFtsLanes(tokens: readonly string[]): FtsLaneSplit {
   const porterTokens: string[] = [];
@@ -34,6 +40,8 @@ export function splitFtsLanes(tokens: readonly string[]): FtsLaneSplit {
     if (CJK_SCRIPT_PATTERN.test(token)) {
       if (Array.from(token).length >= TRIGRAM_MIN_CODEPOINTS) {
         trigramTokens.push(token);
+      } else {
+        porterTokens.push(token);
       }
     } else {
       porterTokens.push(token);
@@ -149,14 +157,38 @@ export function mergeFtsLanes(
 }
 
 /**
- * Tokenize an FTS query string into the dual-lane token set. NFKC-normalized,
- * split on non-word characters, terms shorter than 2 chars dropped, capped at
- * 16 tokens. Shared so the evidence and synthesis repos tokenize identically.
+ * Tokenize an FTS query string into the dual-lane token set. Splits on
+ * non-word characters, drops terms shorter than 2 chars, caps at 16 tokens.
+ * Shared so the evidence and synthesis repos tokenize identically.
+ *
+ * invariant: query text MUST flow through here as raw codepoints — no
+ * Unicode normalization. The FTS5 content path (migrations 077/078/079
+ * triggers) stores memory/evidence/synthesis content verbatim; if this
+ * helper normalized to NFKC while content stored raw, full-width vs
+ * half-width / compatibility-decomposed codepoints would silently miss
+ * every match. The sibling tokenizer in memory-entry-keyword-search.ts
+ * is also raw — keep them aligned. see also: cjk-segmentation.ts,
+ *   packages/storage/src/repos/memory-entry-keyword-search.ts.
+ *
+ * invariant: CJK-bearing surface tokens are kept AND jieba word-level
+ * pieces are appended so the trigram lane sees the long form (substring
+ * coverage) while word-boundary matches also become eligible. Non-CJK
+ * tokens pass through unchanged.
  */
 export function tokenizeFtsQuery(queryText: string): readonly string[] {
-  return queryText
-    .normalize("NFKC")
+  const surfaceTokens = queryText
     .split(/[^\p{L}\p{N}_]+/u)
-    .filter((token) => token.length >= 2)
-    .slice(0, 16);
+    .filter((token) => token.length >= 2);
+  const expanded: string[] = [];
+  for (const token of surfaceTokens) {
+    expanded.push(token);
+    if (isCjkSegmentationCandidate(token)) {
+      for (const piece of segmentCjkRun(token)) {
+        if (piece.length >= 2 && piece !== token) {
+          expanded.push(piece);
+        }
+      }
+    }
+  }
+  return Array.from(new Set(expanded)).slice(0, 16);
 }

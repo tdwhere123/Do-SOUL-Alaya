@@ -27,13 +27,13 @@ describe("splitFtsLanes", () => {
     expect(split.trigramTokens).toEqual(["部署流水线"]);
   });
 
-  it("drops a CJK token shorter than the trigram minimum", () => {
-    // A 2-codepoint CJK token can never match the trigram index and is not
-    // a porter token either — it must be dropped from both lanes.
+  it("routes a CJK token shorter than the trigram minimum to the porter fallback", () => {
+    // A 2-codepoint CJK token can never match the trigram index, but the
+    // porter unicode61 lane can still satisfy exact word-token matches.
     const shortCjk = "部署";
     expect(Array.from(shortCjk).length).toBeLessThan(TRIGRAM_MIN_CODEPOINTS);
     const split = splitFtsLanes([shortCjk]);
-    expect(split.porterTokens).toEqual([]);
+    expect(split.porterTokens).toEqual([shortCjk]);
     expect(split.trigramTokens).toEqual([]);
   });
 });
@@ -46,7 +46,7 @@ describe("buildFtsMatchExpression", () => {
 });
 
 describe("tokenizeFtsQuery", () => {
-  it("NFKC-normalizes, splits on non-word chars, and drops sub-2-char terms", () => {
+  it("splits on non-word chars and drops sub-2-char terms", () => {
     expect(tokenizeFtsQuery("deployment, pipeline! a")).toEqual([
       "deployment",
       "pipeline"
@@ -61,6 +61,19 @@ describe("tokenizeFtsQuery", () => {
   it("keeps CJK tokens for downstream lane routing", () => {
     expect(tokenizeFtsQuery("部署流水线 deployment")).toEqual([
       "部署流水线",
+      "deployment"
+    ]);
+  });
+
+  // invariant: query side must NOT NFKC-normalize. FTS5 migrations 077/078/
+  // 079 store memory_entries.content verbatim, so a query-side NFKC fold
+  // would convert e.g. full-width 'Ａ' (U+FF21) to half-width 'A' while the
+  // indexed row keeps the original codepoint — silently zero hits.
+  it("does NOT NFKC-normalize the query (must match raw content as stored)", () => {
+    // Full-width Latin codepoints (U+FF21..) survive intact instead of being
+    // folded to ASCII; this matches the raw bytes the FTS triggers indexed.
+    expect(tokenizeFtsQuery("ＡＢＣ deployment")).toEqual([
+      "ＡＢＣ",
       "deployment"
     ]);
   });

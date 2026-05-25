@@ -226,6 +226,20 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     expect(hits.map((hit) => hit.object_id)).not.toContain("2f5c2a90-0000-4000-8000-000000000002");
   });
 
+  it("recalls a two-character CJK evidence word below the trigram boundary", async () => {
+    const { repo } = await createRepo();
+    await repo.create(
+      createEvidenceCapsule({
+        object_id: "2f5c2a90-0000-4000-8000-000000000003",
+        gist: "短词摘要",
+        excerpt: "The release note labels the handoff keyword as 部署 before approval."
+      })
+    );
+
+    const hits = await repo.searchByKeyword!("workspace-1", "部署", 10);
+    expect(hits.map((hit) => hit.object_id)).toContain("2f5c2a90-0000-4000-8000-000000000003");
+  });
+
   it("recalls a mixed-script evidence excerpt by fanning out to both lanes", async () => {
     const { repo } = await createRepo();
     await repo.create(

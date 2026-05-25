@@ -420,6 +420,8 @@ const hoisted = vi.hoisted(() => {
     };
   });
   const serverClose = vi.fn();
+  const coreWarmCjkSegmentation = vi.fn(async () => false);
+  const storageWarmCjkSegmentation = vi.fn(async () => false);
 
   return {
     conversationToolSpecs,
@@ -488,6 +490,12 @@ const hoisted = vi.hoisted(() => {
     officialGardenProviderCtor,
     officialGardenProviderDeps: null as null | Record<string, unknown>,
     officialGardenProviderInstance,
+    coreWarmCjkSegmentation,
+    storageWarmCjkSegmentation,
+    loadConfigEnv: vi.fn(async () => new Map<string, string>()),
+    loadConfigEnvDefault: null as
+      | null
+      | ((envPath: string) => Promise<ReadonlyMap<string, string>>),
     serve: vi.fn(() => ({ close: serverClose })),
     serverClose,
     backgroundManagerStart: vi.fn(),
@@ -584,6 +592,21 @@ vi.mock("@hono/node-server", () => ({
 vi.mock("../app.js", () => ({
   createApp: hoisted.createApp
 }));
+
+vi.mock("../daemon-runtime-support.js", async () => {
+  const actual = await vi.importActual<Record<string, unknown>>(
+    "../daemon-runtime-support.js"
+  );
+  const loadConfigEnvDefault = actual["loadConfigEnv"] as (
+    envPath: string
+  ) => Promise<ReadonlyMap<string, string>>;
+  hoisted.loadConfigEnvDefault = loadConfigEnvDefault;
+  hoisted.loadConfigEnv.mockImplementation(loadConfigEnvDefault);
+  return {
+    ...actual,
+    loadConfigEnv: hoisted.loadConfigEnv
+  };
+});
 
 vi.mock("../background/bootstrap.js", () => ({
   BackgroundServiceManager: vi.fn().mockImplementation(function BackgroundServiceManager(services) {
@@ -700,6 +723,11 @@ vi.mock("@do-soul/alaya-storage", async () => {
     ...actual,
     initDatabase: vi.fn(() => hoisted.database),
     createGardenBackgroundDataPorts: vi.fn(() => gardenBackgroundDataPorts),
+    // anchor: storage owns an independent jieba module-state instance;
+    // the daemon AWAITS this warm at startup so the runtime-wiring
+    // surface must expose a fast no-op fallback (mirrors the core mock
+    // below). see also: packages/storage/src/repos/shared/cjk-segmentation.ts.
+    warmCjkSegmentation: hoisted.storageWarmCjkSegmentation,
     SqliteMemoryEmbeddingRepo: undefined,
     SqliteWorkspaceRepo: vi.fn().mockImplementation(function SqliteWorkspaceRepo() {
       return {
@@ -872,6 +900,10 @@ vi.mock("@do-soul/alaya-core", () => {
       recall: vi.fn(async () => [])
     })),
     rebuildCountersFromEventLog: hoisted.rebuildCountersFromEventLog,
+    // anchor: jieba warm-up call site lives in apps/core-daemon/src/index.ts
+    // createAlayaDaemonRuntime. The mock must expose a no-op so the
+    // fire-and-forget call does not blow up the runtime-wiring test surface.
+    warmCjkSegmentation: hoisted.coreWarmCjkSegmentation,
     CrossCuttingPermissionService: makeClass(),
     ClaudeRuntimeAdapter: makeClass(),
     DynamicsService: makeClass(),
@@ -1261,6 +1293,14 @@ export function resetToolRuntimeWiringState(): void {
   hoisted.conversationToolExecutorDeps = null;
   hoisted.conversationServiceDeps = null;
   hoisted.officialGardenProviderDeps = null;
+  hoisted.coreWarmCjkSegmentation.mockReset();
+  hoisted.coreWarmCjkSegmentation.mockImplementation(async () => false);
+  hoisted.storageWarmCjkSegmentation.mockReset();
+  hoisted.storageWarmCjkSegmentation.mockImplementation(async () => false);
+  hoisted.loadConfigEnv.mockReset();
+  if (hoisted.loadConfigEnvDefault !== null) {
+    hoisted.loadConfigEnv.mockImplementation(hoisted.loadConfigEnvDefault);
+  }
   hoisted.rebuildCountersFromEventLog.mockReset();
   hoisted.rebuildCountersFromEventLog.mockImplementation(async () => undefined);
 

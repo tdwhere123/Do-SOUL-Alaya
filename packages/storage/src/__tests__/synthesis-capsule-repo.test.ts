@@ -179,6 +179,21 @@ describe("SqliteSynthesisCapsuleRepo", () => {
     );
   });
 
+  it("recalls a two-character CJK synthesis word below the trigram boundary", async () => {
+    const { repo } = await createRepo();
+    await repo.create(
+      createSynthesisCapsule({
+        object_id: "2a000000-0000-4000-8000-000000000003",
+        summary: "The synthesis capsule keeps the short keyword 部署 as a handoff label."
+      })
+    );
+
+    const hits = await repo.searchByKeyword!("workspace-1", "部署", 10);
+    expect(hits.map((hit) => hit.object_id)).toContain(
+      "2a000000-0000-4000-8000-000000000003"
+    );
+  });
+
   // The searchByKeyword SQL filters `lifecycle_state != 'retired'`. `retired`
   // is not a SynthesisCapsule lifecycle enum value, so the row is written via
   // a direct UPDATE that bypasses the zod-validated repo path — the only way

@@ -215,6 +215,17 @@ export {
   type TrustStateRepo
 } from "./repos/trust-state-repo.js";
 export { SqliteHandoffGapRepo } from "./repos/handoff-gap-repo.js";
+// invariant: storage owns an independent jieba module-state instance (Package
+// Dependency Direction forbids importing core's copy). Daemon and bench-runner
+// MUST warm both core's and storage's segmenters at startup so the FTS query
+// path never hits the loading-state fallback on the user-visible hot path.
+// see also: packages/core/src/cjk-segmentation.ts, apps/core-daemon/src/index.ts.
+export {
+  warmCjkSegmentation,
+  segmentCjkRun,
+  isCjkSegmentationCandidate,
+  __resetCjkSegmentationStateForTests as __resetStorageCjkSegmentationStateForTests
+} from "./repos/shared/cjk-segmentation.js";
 export {
   createGardenBackgroundDataPorts,
   type GardenBackgroundDataPorts,
