@@ -112,6 +112,22 @@ function makeQualityMetrics(
   };
 }
 
+function makeSeedExtractionPath(
+  input: Partial<NonNullable<KpiPayload["kpi"]["seed_extraction_path"]>> = {}
+): NonNullable<KpiPayload["kpi"]["seed_extraction_path"]> {
+  return {
+    path: "official_api_compile",
+    cache_hits: 0,
+    llm_calls: 1,
+    offline_fallbacks: 0,
+    facts_produced: 5,
+    signals_dropped: 0,
+    parse_dropped: 0,
+    compile_overflow_dropped: 0,
+    ...input
+  };
+}
+
 function makeShardDiagnostics(
   overrides: Record<string, unknown> = {}
 ): Record<string, unknown> {
@@ -1283,6 +1299,104 @@ describe("merge-longmemeval validations", () => {
     expect(report).toContain("Seed policy: label_independent_all_fact");
     expect(report).toContain("| r_at_5 | 0.4000 | 0.8000 | +0.4000 |");
     expect(report).not.toContain("| r_at_5 | 1.0000 | 0.8000 |");
+  });
+
+  it("preserves merged seed extraction provenance and blocks degraded fallback evidence", async () => {
+    const shardA = path.join(tmpRoot, "shard-official-seed-path");
+    const shardB = path.join(tmpRoot, "shard-fallback-seed-path");
+    const rowsA = Array.from({ length: 5 }, (_, index) => ({
+      id: `q-seed-official-${index + 1}`,
+      version: 1,
+      hit_at_5: true,
+      tier: "warm" as const
+    }));
+    const rowsB = Array.from({ length: 5 }, (_, index) => ({
+      id: `q-seed-fallback-${index + 1}`,
+      version: 1,
+      hit_at_5: true,
+      tier: "warm" as const
+    }));
+    await writeShardRoot(
+      shardA,
+      makeShardKpi({
+        evaluated_count: 5,
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 1,
+          seed_extraction_path: makeSeedExtractionPath({
+            path: "official_api_compile",
+            cache_hits: 1,
+            llm_calls: 2,
+            facts_produced: 3
+          }),
+          per_scenario: rowsA
+        }
+      })
+    );
+    await writeShardRoot(
+      shardB,
+      makeShardKpi({
+        evaluated_count: 5,
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 1,
+          seed_extraction_path: makeSeedExtractionPath({
+            path: "no_credentials_fallback",
+            llm_calls: 0,
+            offline_fallbacks: 8,
+            facts_produced: 9,
+            signals_dropped: 2,
+            parse_dropped: 1
+          }),
+          per_scenario: rowsB
+        }
+      })
+    );
+
+    const historyRoot = path.join(tmpRoot, "history-seed-extraction-path");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shardA,
+      shardB
+    ]);
+
+    expect(exitCode).toBe(1);
+    const pointer = JSON.parse(
+      await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
+    ) as { slug: string };
+    const merged = JSON.parse(
+      await readFile(
+        path.join(historyRoot, "public", pointer.slug, "kpi.json"),
+        "utf8"
+      )
+    ) as KpiPayload;
+    const report = await readFile(
+      path.join(historyRoot, "public", pointer.slug, "report.md"),
+      "utf8"
+    );
+    const findings = await readFile(
+      path.join(historyRoot, "public", pointer.slug, "findings.md"),
+      "utf8"
+    );
+
+    expect(merged.kpi.seed_extraction_path).toEqual({
+      path: "no_credentials_fallback",
+      cache_hits: 1,
+      llm_calls: 2,
+      offline_fallbacks: 8,
+      facts_produced: 12,
+      signals_dropped: 2,
+      parse_dropped: 1,
+      compile_overflow_dropped: 0
+    });
+    expect(report).toContain("Seed extraction path: no_credentials_fallback");
+    expect(report).toContain("Release evidence blockers");
+    expect(findings).toContain("seed_extraction_path no_credentials_fallback");
   });
 
   it("returns non-zero when release hard gates fail without a previous baseline", async () => {

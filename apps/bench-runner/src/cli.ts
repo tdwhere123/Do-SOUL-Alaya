@@ -582,12 +582,93 @@ function exitCodeForBenchmarkResult(payload: KpiPayload): number {
   return exitCodeForVerdicts(payload.diff_vs_previous?.verdict_per_kpi);
 }
 
+function exitCodeForMergedLongMemEvalResult(payload: KpiPayload): number {
+  if (hasSeedExtractionReleaseBlocker(payload)) return 1;
+  return exitCodeForBenchmarkResult(payload);
+}
+
 function pct(ratio: number): string {
   return `${(ratio * 100).toFixed(1)}%`;
 }
 
 function ratio(count: number, total: number): number {
   return total === 0 ? 0 : count / total;
+}
+
+type SeedExtractionPathKpi = NonNullable<
+  KpiPayload["kpi"]["seed_extraction_path"]
+>;
+
+function mergeSeedExtractionPath(
+  shards: readonly KpiPayload[]
+): SeedExtractionPathKpi | undefined {
+  const present = shards
+    .map((shard) => shard.kpi.seed_extraction_path)
+    .filter((path): path is SeedExtractionPathKpi => path !== undefined);
+  if (present.length === 0) {
+    return undefined;
+  }
+  if (present.length !== shards.length) {
+    throw new Error(
+      "merge refused: seed_extraction_path is present on only some shards"
+    );
+  }
+
+  return {
+    path: present.some((path) => path.path === "no_credentials_fallback")
+      ? "no_credentials_fallback"
+      : "official_api_compile",
+    cache_hits: present.reduce((sum, path) => sum + path.cache_hits, 0),
+    llm_calls: present.reduce((sum, path) => sum + path.llm_calls, 0),
+    offline_fallbacks: present.reduce(
+      (sum, path) => sum + path.offline_fallbacks,
+      0
+    ),
+    facts_produced: present.reduce((sum, path) => sum + path.facts_produced, 0),
+    signals_dropped: present.reduce(
+      (sum, path) => sum + path.signals_dropped,
+      0
+    ),
+    parse_dropped: present.reduce((sum, path) => sum + path.parse_dropped, 0),
+    compile_overflow_dropped: present.reduce(
+      (sum, path) => sum + path.compile_overflow_dropped,
+      0
+    )
+  };
+}
+
+function hasSeedExtractionReleaseBlocker(payload: KpiPayload): boolean {
+  return payload.kpi.seed_extraction_path?.path === "no_credentials_fallback";
+}
+
+function appendSeedExtractionReleaseBlockerToReport(
+  report: string,
+  payload: KpiPayload
+): string {
+  if (!hasSeedExtractionReleaseBlocker(payload)) {
+    return report;
+  }
+  return (
+    report.trimEnd() +
+    "\n\n## Release evidence blockers\n\n" +
+    "- **seed_extraction_path no_credentials_fallback**: merged LongMemEval evidence used degraded no-credential full-turn seeding, so this archive is not release-comparable to official_api_compile evidence.\n"
+  );
+}
+
+function appendSeedExtractionReleaseBlockerToFindings(
+  findings: string | null,
+  payload: KpiPayload
+): string | null {
+  if (!hasSeedExtractionReleaseBlocker(payload)) {
+    return findings;
+  }
+  const section =
+    "## Release evidence blockers\n\n" +
+    "- **seed_extraction_path no_credentials_fallback**: merged LongMemEval evidence used degraded no-credential full-turn seeding, so this archive is blocked even if numeric KPI gates pass.\n";
+  if (findings === null) {
+    return `# Bench Findings — ${payload.bench_name} / ${payload.split}\n\n${section}`;
+  }
+  return `${findings.trimEnd()}\n\n${section}`;
 }
 
 function computePercentile(values: readonly number[], p: number): number {
@@ -1107,6 +1188,7 @@ async function runMergeLongMemEvalCommand(
       n === 0 ? 0 : perScenario.filter((r) => r.hit_at_5).length / n;
     const rAt10 = n === 0 ? 0 : totalHitAt10 / n;
     const qualityMetrics = mergeQualityMetrics(shardPayloads);
+    const seedExtractionPath = mergeSeedExtractionPath(shardPayloads);
 
     // Merge the event-sourced token economy across shards. Honest only
     // when every shard carried a token_economy block; otherwise the
@@ -1209,6 +1291,9 @@ async function runMergeLongMemEvalCommand(
           answer_turns_truncated: truncAnswerTotal,
           seed_chars_clipped: truncCharsTotal
         },
+        ...(seedExtractionPath === undefined
+          ? {}
+          : { seed_extraction_path: seedExtractionPath }),
         ...(qualityMetrics === undefined
           ? {}
           : { quality_metrics: qualityMetrics }),
@@ -1279,8 +1364,14 @@ async function runMergeLongMemEvalCommand(
       commitSha7,
       benchArchiveDiscriminator(policyShape, simulateReport)
     );
-    const report = renderReport(merged, previous, diff);
-    const findings = renderFindings(merged, diff);
+    const report = appendSeedExtractionReleaseBlockerToReport(
+      renderReport(merged, previous, diff),
+      merged
+    );
+    const findings = appendSeedExtractionReleaseBlockerToFindings(
+      renderFindings(merged, diff),
+      merged
+    );
     const shardEvidence = shardDiagnostics.map((diagnostics) =>
       archiveEvidenceFromDiagnostics(diagnostics)
     );
@@ -1345,7 +1436,7 @@ async function runMergeLongMemEvalCommand(
           : `  latency p50≤${latencyP50}ms p95≤${latencyP95}ms (worst-shard upper bound)\n`) +
         `  KPI: ${entry.kpiPath}\n`
     );
-    return exitCodeForBenchmarkResult(merged);
+    return exitCodeForMergedLongMemEvalResult(merged);
   } catch (err) {
     process.stderr.write(
       `alaya-bench-runner merge-longmemeval: ${err instanceof Error ? err.message : String(err)}\n`
