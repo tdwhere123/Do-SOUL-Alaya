@@ -25,6 +25,21 @@ const DiagnosticStreamContributionsSchema = z
 
 const DiagnosticScoreFactorsSchema = z.record(z.unknown()).readonly();
 
+const GraphExpansionPlaneCountPerHopSchema = z
+  .tuple([
+    z.number().int().nonnegative(),
+    z.number().int().nonnegative()
+  ])
+  .readonly();
+
+const GraphExpansionPlaneCountPerEdgeTypeSchema = z
+  .object({
+    derives_from: z.number().int().nonnegative(),
+    recalls: z.number().int().nonnegative(),
+    supports: z.number().int().nonnegative()
+  })
+  .readonly();
+
 export const DiagnosticRecallResultSchema = z
   .object({
     object_id: z.string(),
@@ -115,6 +130,10 @@ export const LongMemEvalQuestionDiagnosticSchema = z
     recall_diagnostics_keys: z.array(z.string()).readonly(),
     provider_state: BenchEmbeddingProviderStateSchema,
     provider_degradation_reason: z.string().nullable(),
+    graph_expansion_plane_count_per_hop:
+      GraphExpansionPlaneCountPerHopSchema,
+    graph_expansion_plane_count_per_edge_type:
+      GraphExpansionPlaneCountPerEdgeTypeSchema,
     candidate_key_collisions: z
       .array(
         z

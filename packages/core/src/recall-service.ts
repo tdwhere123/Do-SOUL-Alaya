@@ -12,6 +12,7 @@ import {
   type ActivationWeights,
   type MemoryDimension as MemoryDimensionType,
   type MemoryGraphEdge,
+  type MemoryGraphEdgeTypeValue,
   type MemoryEntry,
   type PathAnchorRef,
   type PathRelation,
@@ -76,6 +77,8 @@ import type {
   RecallFusionStreamRanks,
   RecallDiagnostics,
   RecallEmbeddingProviderStatus,
+  RecallGraphExpansionDiagnostics,
+  RecallGraphExpansionTrackedEdgeType,
   RecallPathExpansionSourceDiagnostic,
   RecallResult,
   RecallServiceDependencies,
@@ -137,6 +140,17 @@ const DYNAMIC_RECALL_SOURCE_PROXIMITY_NEIGHBORS_PER_SEED = 8;
 const SOURCE_PROXIMITY_STRUCTURAL_CARRY_MAX = 0.25;
 const STRONG_LEXICAL_DELIVERY_RANK = 0.85;
 const DYNAMIC_RECALL_EDGE_FANOUT = 12;
+const MAX_GRAPH_HOPS = 2;
+const GRAPH_EXPANSION_TRACKED_EDGE_TYPES: readonly RecallGraphExpansionTrackedEdgeType[] = [
+  "derives_from",
+  "recalls",
+  "supports"
+];
+const EDGE_TYPE_HOP_DECAY: Readonly<Record<RecallGraphExpansionTrackedEdgeType, number>> = Object.freeze({
+  derives_from: 0.6,
+  recalls: 0.3,
+  supports: 0.5
+});
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
 const NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT = 0.24;
 const QUERY_EVIDENCE_BASE_TRANSFER_MAX = 0.25;
@@ -183,7 +197,7 @@ const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>
   structural: 1,
   existing_score: 8,
   embedding_similarity: 1,
-  graph_expansion: 1,
+  graph_expansion: 3,
   // anchor: entity_seed parity with lexical_fts so entity-bearing memories
   // can compete on the same RRF axis as direct surface-term hits without
   // out-weighting the existing lexical lane. weight tuning is deferred to
@@ -221,6 +235,33 @@ interface SourceProximitySeedDraft {
   readonly strength: number;
 }
 
+interface MutableGraphExpansionDiagnostics {
+  readonly graph_expansion_plane_count_per_hop: [number, number];
+  readonly graph_expansion_plane_count_per_edge_type: Record<RecallGraphExpansionTrackedEdgeType, number>;
+}
+
+interface GraphExpansionFrontierNode {
+  readonly memoryId: string;
+  readonly pathScore: number;
+}
+
+interface GraphExpansionCandidateDraft {
+  readonly entry: Readonly<MemoryEntry>;
+  readonly score: number;
+  readonly hop: 1 | 2;
+  readonly edgeType: RecallGraphExpansionTrackedEdgeType;
+}
+
+interface GraphExpansionCandidateSourceDiagnostic {
+  readonly hop: 1 | 2;
+  readonly edgeType: RecallGraphExpansionTrackedEdgeType;
+}
+
+interface GraphExpansionCandidatesResult {
+  readonly diagnostics: Readonly<RecallGraphExpansionDiagnostics>;
+  readonly candidateSources: ReadonlyMap<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>;
+}
+
 type CoarseCandidateAdder = (
   entry: Readonly<MemoryEntry>,
   plane: RecallAdmissionPlane,
@@ -230,7 +271,7 @@ type CoarseCandidateAdder = (
   // invariant: only forwarded for plane === "entity_seed" by
   // collectEntityDerivedSeeds; other planes leave this undefined.
   entityConfidence?: number
-) => void;
+) => boolean;
 
 export class RecallService {
   private readonly generateRuntimeId: () => string;
@@ -505,6 +546,7 @@ export class RecallService {
         deliveredCount: candidates.length,
         embeddingProviderStatus,
         providerDegradationReason,
+        graphExpansionDiagnostics: coarseFilter.graphExpansionDiagnostics,
         candidates: candidateDiagnostics,
         tokenEconomy
       })
@@ -683,6 +725,8 @@ export class RecallService {
     readonly sourceCohortKeys: Readonly<Record<string, string>>;
     readonly structuralScores: Readonly<Record<string, number>>;
     readonly graphExpansionScores: Readonly<Record<string, number>>;
+    readonly graphExpansionDiagnostics: Readonly<RecallGraphExpansionDiagnostics>;
+    readonly graphExpansionCandidateSources: ReadonlyMap<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>;
     // see also: collectEntityDerivedSeeds — entity_seed plane score by memory id.
     readonly entitySeedScores: Readonly<Record<string, number>>;
     readonly pathExpansionScores: Readonly<Record<string, number>>;
@@ -721,6 +765,9 @@ export class RecallService {
     let sourceCohortKeys: Readonly<Record<string, string>> = Object.freeze({});
     const structuralScores = new Map<string, number>();
     const graphExpansionScores = new Map<string, number>();
+    let graphExpansionDiagnostics = createEmptyGraphExpansionDiagnostics();
+    let graphExpansionCandidateSources: ReadonlyMap<string, Readonly<GraphExpansionCandidateSourceDiagnostic>> =
+      new Map();
     const entitySeedScores = new Map<string, number>();
     const pathExpansionScores = new Map<string, number>();
     const addCandidate = (
@@ -730,7 +777,7 @@ export class RecallService {
       sourceChannel?: string,
       pathExpansionSource?: RecallPathExpansionSourceDiagnostic,
       entityConfidence?: number
-    ): void => {
+    ): boolean => {
       if (
         plane !== "protected_winner" &&
         plane !== "lexical" &&
@@ -744,9 +791,10 @@ export class RecallService {
         !winnerMemoryIds.has(entry.object_id) &&
         !matchesDeterministicFilter(entry, config)
       ) {
-        return;
+        return false;
       }
       const current = drafts.get(entry.object_id);
+      const hadPlane = current?.admissionPlanes.includes(plane) ?? false;
       const planeScore = clamp01(structuralScore);
       const evidenceStructuralScore =
         plane === "source_proximity"
@@ -803,6 +851,7 @@ export class RecallService {
           Math.max(sourceProximityScores.get(entry.object_id) ?? 0, planeScore)
         );
       }
+      return !hadPlane;
     };
 
     for (const entry of protectedCandidates.sort(compareMemoryEntries)) {
@@ -1002,13 +1051,15 @@ export class RecallService {
     const graphExpansionSeedIds = entityDerivedSeeds
       .filter((seed) => seed.entityConfidence >= ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR)
       .map((seed) => seed.memoryId);
-    await this.addGraphExpansionCandidates({
+    const graphExpansionResult = await this.addGraphExpansionCandidates({
       workspaceId,
       byId,
       drafts,
       addCandidate,
       extraSeedMemoryIds: graphExpansionSeedIds
     });
+    graphExpansionDiagnostics = graphExpansionResult.diagnostics;
+    graphExpansionCandidateSources = graphExpansionResult.candidateSources;
     await this.addPathExpansionCandidates({
       workspaceId,
       byId,
@@ -1063,6 +1114,8 @@ export class RecallService {
       sourceCohortKeys,
       structuralScores: Object.freeze(Object.fromEntries(structuralScores.entries())),
       graphExpansionScores: Object.freeze(Object.fromEntries(graphExpansionScores.entries())),
+      graphExpansionDiagnostics,
+      graphExpansionCandidateSources,
       entitySeedScores: Object.freeze(Object.fromEntries(entitySeedScores.entries())),
       pathExpansionScores: Object.freeze(Object.fromEntries(pathExpansionScores.entries())),
       degradation_reason: null
@@ -1351,10 +1404,12 @@ export class RecallService {
     // into graph_expansion as additional seeds so the graph plane is reachable
     // even when the query never hits a prior expansion seed.
     readonly extraSeedMemoryIds?: readonly string[];
-  }>): Promise<void> {
+  }>): Promise<Readonly<GraphExpansionCandidatesResult>> {
+    const diagnostics = createMutableGraphExpansionDiagnostics();
+    const candidateSources = new Map<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>();
     const graphExpansionPort = this.dependencies.graphExpansionPort;
     if (graphExpansionPort === undefined) {
-      return;
+      return freezeGraphExpansionCandidatesResult(diagnostics, candidateSources);
     }
 
     const draftSeeds = selectExpansionSeedDrafts(params.drafts).slice(0, DYNAMIC_RECALL_SEED_CAP);
@@ -1378,40 +1433,120 @@ export class RecallService {
       ...extraSeedEntries
     ];
     if (seedEntries.length === 0) {
-      return;
+      return freezeGraphExpansionCandidatesResult(diagnostics, candidateSources);
     }
 
-    let added = 0;
-    for (const seedEntry of seedEntries) {
-      if (added >= DYNAMIC_RECALL_PLANE_CAP) {
-        return;
-      }
-      let edges: readonly Readonly<MemoryGraphEdge>[];
-      try {
-        edges = await graphExpansionPort.findByMemoryId(seedEntry.object_id, params.workspaceId);
-      } catch (error) {
-        this.warn("graph expansion lookup failed", {
-          workspace_id: params.workspaceId,
-          seed_memory_id: seedEntry.object_id,
-          error: toErrorMessage(error)
-        });
-        continue;
-      }
-      for (const edge of edges.slice(0, DYNAMIC_RECALL_EDGE_FANOUT)) {
-        const neighborId = edge.source_memory_id === seedEntry.object_id
-          ? edge.target_memory_id
-          : edge.source_memory_id;
-        const entry = params.byId.get(neighborId);
-        if (entry === undefined) {
+    const expandedIds = new Set<string>();
+    const bestCandidates = new Map<string, GraphExpansionCandidateDraft>();
+    let frontier: readonly GraphExpansionFrontierNode[] = seedEntries.map((entry) => ({
+      memoryId: entry.object_id,
+      pathScore: 1
+    }));
+
+    for (let hop = 1; hop <= MAX_GRAPH_HOPS && frontier.length > 0; hop += 1) {
+      const nextFrontier = new Map<string, GraphExpansionFrontierNode>();
+      for (const node of frontier) {
+        if (expandedIds.has(node.memoryId)) {
           continue;
         }
-        params.addCandidate(entry, "graph_expansion", scoreGraphExpansionEdge(edge), "graph_expansion");
-        added += 1;
-        if (added >= DYNAMIC_RECALL_PLANE_CAP) {
-          return;
+        expandedIds.add(node.memoryId);
+        let edges: readonly Readonly<MemoryGraphEdge>[];
+        try {
+          edges = await graphExpansionPort.findByMemoryId(
+            node.memoryId,
+            params.workspaceId,
+            GRAPH_EXPANSION_TRACKED_EDGE_TYPES
+          );
+        } catch (error) {
+          this.warn("graph expansion lookup failed", {
+            workspace_id: params.workspaceId,
+            seed_memory_id: node.memoryId,
+            error: toErrorMessage(error)
+          });
+          continue;
+        }
+        const trackedEdges = edges
+          .map((edge) => Object.freeze({
+            edge,
+            edgeType: toTrackedGraphExpansionEdgeType(edge.edge_type)
+          }))
+          .filter((item): item is Readonly<{
+            readonly edge: Readonly<MemoryGraphEdge>;
+            readonly edgeType: RecallGraphExpansionTrackedEdgeType;
+          }> => item.edgeType !== null)
+          .slice(0, DYNAMIC_RECALL_EDGE_FANOUT);
+        for (const { edge, edgeType } of trackedEdges) {
+          const edgeScore = scoreGraphExpansionEdge(edge);
+          if (edgeScore <= 0) {
+            continue;
+          }
+          const neighborId = edge.source_memory_id === node.memoryId
+            ? edge.target_memory_id
+            : edge.target_memory_id === node.memoryId
+              ? edge.source_memory_id
+              : null;
+          if (neighborId === null) {
+            continue;
+          }
+          if (expandedIds.has(neighborId)) {
+            continue;
+          }
+          const entry = params.byId.get(neighborId);
+          if (entry === undefined) {
+            continue;
+          }
+          const candidateScore = hop === 1
+            ? edgeScore
+            : clamp01(node.pathScore * EDGE_TYPE_HOP_DECAY[edgeType] * edgeScore);
+          if (candidateScore <= 0) {
+            continue;
+          }
+          const candidate = {
+            entry,
+            score: candidateScore,
+            hop: hop as 1 | 2,
+            edgeType
+          };
+          const current = bestCandidates.get(neighborId);
+          if (current === undefined || shouldReplaceGraphExpansionCandidate(candidate, current)) {
+            bestCandidates.set(neighborId, candidate);
+          }
+          if (hop < MAX_GRAPH_HOPS && !expandedIds.has(neighborId)) {
+            const queued = nextFrontier.get(neighborId);
+            if (queued === undefined || candidateScore > queued.pathScore) {
+              nextFrontier.set(neighborId, {
+                memoryId: neighborId,
+                pathScore: candidateScore
+              });
+            }
+          }
         }
       }
+      frontier = [...nextFrontier.values()].sort((a, b) => a.memoryId.localeCompare(b.memoryId));
     }
+
+    const admitted = [...bestCandidates.values()]
+      .sort(compareGraphExpansionCandidateDrafts)
+      .slice(0, DYNAMIC_RECALL_PLANE_CAP);
+    for (const candidate of admitted) {
+      const admittedByGraphExpansion = params.addCandidate(
+        candidate.entry,
+        "graph_expansion",
+        candidate.score,
+        "graph_expansion"
+      );
+      if (!admittedByGraphExpansion) {
+        continue;
+      }
+      diagnostics.graph_expansion_plane_count_per_hop[candidate.hop - 1] += 1;
+      diagnostics.graph_expansion_plane_count_per_edge_type[candidate.edgeType] += 1;
+      candidateSources.set(candidate.entry.object_id, Object.freeze({
+        hop: candidate.hop,
+        edgeType: candidate.edgeType
+      }));
+    }
+
+    return freezeGraphExpansionCandidatesResult(diagnostics, candidateSources);
   }
 
   // anchor: query-time entity FTS seeding. Returns the memory ids of every
@@ -1796,6 +1931,12 @@ export class RecallService {
       seen.add(key);
       return true;
     });
+    const nextCandidateIds = new Set(nextCandidates.map((candidate) => candidate.entry.object_id));
+    const graphExpansionCandidateSources = mergeGraphExpansionCandidateSources(
+      current.graphExpansionCandidateSources,
+      next.graphExpansionCandidateSources,
+      nextCandidateIds
+    );
 
     return Object.freeze({
       total_scanned: current.total_scanned + next.total_scanned,
@@ -1832,10 +1973,14 @@ export class RecallService {
         ...current.structuralScores,
         ...next.structuralScores
       }),
-      graphExpansionScores: Object.freeze({
-        ...current.graphExpansionScores,
-        ...next.graphExpansionScores
-      }),
+      graphExpansionScores: mergeGraphExpansionScores(
+        current.graphExpansionScores,
+        next.graphExpansionScores,
+        nextCandidateIds
+      ),
+      graphExpansionDiagnostics:
+        summarizeGraphExpansionCandidateSources(graphExpansionCandidateSources),
+      graphExpansionCandidateSources,
       entitySeedScores: Object.freeze({
         ...current.entitySeedScores,
         ...next.entitySeedScores
@@ -3351,6 +3496,7 @@ function buildRecallDiagnostics(params: Readonly<{
   readonly deliveredCount: number;
   readonly embeddingProviderStatus: RecallEmbeddingProviderStatus;
   readonly providerDegradationReason: string | null;
+  readonly graphExpansionDiagnostics: Readonly<RecallGraphExpansionDiagnostics>;
   readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
   readonly tokenEconomy: Readonly<RecallTokenEconomy>;
 }>): Readonly<RecallDiagnostics> {
@@ -3380,6 +3526,10 @@ function buildRecallDiagnostics(params: Readonly<{
     delivered_count: params.deliveredCount,
     embedding_provider_status: params.embeddingProviderStatus,
     provider_degradation_reason: params.providerDegradationReason,
+    graph_expansion_plane_count_per_hop:
+      params.graphExpansionDiagnostics.graph_expansion_plane_count_per_hop,
+    graph_expansion_plane_count_per_edge_type:
+      params.graphExpansionDiagnostics.graph_expansion_plane_count_per_edge_type,
     fusion_breakdown: Object.freeze(
       params.candidates.map((candidate) => Object.freeze({
         candidate_key: candidate.candidate_key,
@@ -4069,6 +4219,134 @@ function draftPriority(draft: Readonly<CoarseCandidateDraft>): number {
 
 function scoreGraphExpansionEdge(edge: Readonly<MemoryGraphEdge>): number {
   return clamp01(Math.max(0, MEMORY_GRAPH_EDGE_RECALL_WEIGHTS[edge.edge_type] ?? 0));
+}
+
+function toTrackedGraphExpansionEdgeType(
+  edgeType: MemoryGraphEdgeTypeValue
+): RecallGraphExpansionTrackedEdgeType | null {
+  return GRAPH_EXPANSION_TRACKED_EDGE_TYPES.includes(edgeType as RecallGraphExpansionTrackedEdgeType)
+    ? (edgeType as RecallGraphExpansionTrackedEdgeType)
+    : null;
+}
+
+function createMutableGraphExpansionDiagnostics(): MutableGraphExpansionDiagnostics {
+  return {
+    graph_expansion_plane_count_per_hop: [0, 0],
+    graph_expansion_plane_count_per_edge_type: {
+      derives_from: 0,
+      recalls: 0,
+      supports: 0
+    }
+  };
+}
+
+function createEmptyGraphExpansionDiagnostics(): Readonly<RecallGraphExpansionDiagnostics> {
+  return freezeGraphExpansionDiagnostics(createMutableGraphExpansionDiagnostics());
+}
+
+function freezeGraphExpansionDiagnostics(
+  diagnostics: Readonly<MutableGraphExpansionDiagnostics>
+): Readonly<RecallGraphExpansionDiagnostics> {
+  return Object.freeze({
+    graph_expansion_plane_count_per_hop: Object.freeze([
+      diagnostics.graph_expansion_plane_count_per_hop[0],
+      diagnostics.graph_expansion_plane_count_per_hop[1]
+    ]) as RecallGraphExpansionDiagnostics["graph_expansion_plane_count_per_hop"],
+    graph_expansion_plane_count_per_edge_type: Object.freeze({
+      derives_from: diagnostics.graph_expansion_plane_count_per_edge_type.derives_from,
+      recalls: diagnostics.graph_expansion_plane_count_per_edge_type.recalls,
+      supports: diagnostics.graph_expansion_plane_count_per_edge_type.supports
+    })
+  });
+}
+
+function freezeGraphExpansionCandidatesResult(
+  diagnostics: Readonly<MutableGraphExpansionDiagnostics>,
+  candidateSources: ReadonlyMap<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>
+): Readonly<GraphExpansionCandidatesResult> {
+  return Object.freeze({
+    diagnostics: freezeGraphExpansionDiagnostics(diagnostics),
+    candidateSources: new Map(candidateSources)
+  });
+}
+
+function mergeGraphExpansionCandidateSources(
+  current: ReadonlyMap<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>,
+  next: ReadonlyMap<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>,
+  nextCandidateIds: ReadonlySet<string>
+): ReadonlyMap<string, Readonly<GraphExpansionCandidateSourceDiagnostic>> {
+  const merged = new Map(current);
+  for (const id of nextCandidateIds) {
+    const source = next.get(id);
+    if (source !== undefined) {
+      merged.set(id, source);
+    }
+  }
+  return merged;
+}
+
+function mergeGraphExpansionScores(
+  current: Readonly<Record<string, number>>,
+  next: Readonly<Record<string, number>>,
+  nextCandidateIds: ReadonlySet<string>
+): Readonly<Record<string, number>> {
+  const merged: Record<string, number> = { ...current };
+  for (const id of nextCandidateIds) {
+    const score = next[id];
+    if (score !== undefined) {
+      merged[id] = Math.max(merged[id] ?? 0, score);
+    }
+  }
+  return Object.freeze(merged);
+}
+
+function summarizeGraphExpansionCandidateSources(
+  sources: ReadonlyMap<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>
+): Readonly<RecallGraphExpansionDiagnostics> {
+  const diagnostics = createMutableGraphExpansionDiagnostics();
+  for (const source of sources.values()) {
+    diagnostics.graph_expansion_plane_count_per_hop[source.hop - 1] += 1;
+    diagnostics.graph_expansion_plane_count_per_edge_type[source.edgeType] += 1;
+  }
+  return freezeGraphExpansionDiagnostics(diagnostics);
+}
+
+function shouldReplaceGraphExpansionCandidate(
+  candidate: Readonly<GraphExpansionCandidateDraft>,
+  current: Readonly<GraphExpansionCandidateDraft>
+): boolean {
+  if (candidate.score !== current.score) {
+    return candidate.score > current.score;
+  }
+  if (candidate.hop !== current.hop) {
+    return candidate.hop < current.hop;
+  }
+  const edgeTypeOrder =
+    GRAPH_EXPANSION_TRACKED_EDGE_TYPES.indexOf(candidate.edgeType) -
+    GRAPH_EXPANSION_TRACKED_EDGE_TYPES.indexOf(current.edgeType);
+  if (edgeTypeOrder !== 0) {
+    return edgeTypeOrder < 0;
+  }
+  return compareMemoryEntries(candidate.entry, current.entry) < 0;
+}
+
+function compareGraphExpansionCandidateDrafts(
+  left: Readonly<GraphExpansionCandidateDraft>,
+  right: Readonly<GraphExpansionCandidateDraft>
+): number {
+  if (left.hop !== right.hop) {
+    return left.hop - right.hop;
+  }
+  if (left.score !== right.score) {
+    return right.score - left.score;
+  }
+  const edgeTypeOrder =
+    GRAPH_EXPANSION_TRACKED_EDGE_TYPES.indexOf(left.edgeType) -
+    GRAPH_EXPANSION_TRACKED_EDGE_TYPES.indexOf(right.edgeType);
+  if (edgeTypeOrder !== 0) {
+    return edgeTypeOrder;
+  }
+  return compareMemoryEntries(left.entry, right.entry);
 }
 
 function scorePathRelationExpansion(path: Readonly<PathRelation>): number {

@@ -55,6 +55,12 @@ export interface LongMemEvalArchiveDelta {
     readonly path_plasticity_gold_count: number | null;
     readonly graph_expansion_plane_count: number | null;
     readonly path_expansion_plane_count: number | null;
+    readonly graph_expansion_plane_count_per_hop: readonly [number | null, number | null];
+    readonly graph_expansion_plane_count_per_edge_type: {
+      readonly derives_from: number | null;
+      readonly recalls: number | null;
+      readonly supports: number | null;
+    };
   };
   readonly hit_at_5_flips: {
     readonly compared_count: number;
@@ -91,13 +97,18 @@ export function archiveEvidenceFromDiagnostics(
     };
   }
 
+  const scoredRecallEvidence =
+    diagnostics.scored_recall_evidence ??
+    (Array.isArray((diagnostics as { readonly questions?: unknown }).questions)
+      ? summarizeLongMemEvalRecallEvidence(diagnostics.questions)
+      : null);
+
   return {
     report_side_effects: diagnostics.report_side_effects ?? null,
     scored_recall_evidence:
-      diagnostics.scored_recall_evidence ??
-      (Array.isArray((diagnostics as { readonly questions?: unknown }).questions)
-        ? summarizeLongMemEvalRecallEvidence(diagnostics.questions)
-        : null)
+      scoredRecallEvidence === null
+        ? null
+        : normalizeRecallEvidenceSummary(scoredRecallEvidence)
   };
 }
 
@@ -252,7 +263,10 @@ function toComparisonEntry(
     tier_distribution: payload.kpi.tier_distribution,
     degradation_reasons: payload.kpi.degradation_reasons,
     report_side_effects: evidence.report_side_effects,
-    scored_recall_evidence: evidence.scored_recall_evidence
+    scored_recall_evidence:
+      evidence.scored_recall_evidence === null
+        ? null
+        : normalizeRecallEvidenceSummary(evidence.scored_recall_evidence)
   };
 }
 
@@ -262,6 +276,15 @@ function buildDelta(
   opposite: KpiPayload,
   oppositeEvidence: LongMemEvalArchiveEvidenceSummary
 ): LongMemEvalArchiveDelta {
+  const currentRecallEvidence =
+    currentEvidence.scored_recall_evidence === null
+      ? null
+      : normalizeRecallEvidenceSummary(currentEvidence.scored_recall_evidence);
+  const oppositeRecallEvidence =
+    oppositeEvidence.scored_recall_evidence === null
+      ? null
+      : normalizeRecallEvidenceSummary(oppositeEvidence.scored_recall_evidence);
+
   return {
     r_at_1: current.kpi.r_at_1 - opposite.kpi.r_at_1,
     r_at_5: current.kpi.r_at_5 - opposite.kpi.r_at_5,
@@ -301,21 +324,45 @@ function buildDelta(
     },
     scored_recall_evidence: {
       graph_support_gold_count: nullableDelta(
-        currentEvidence.scored_recall_evidence?.graph_support_gold_count,
-        oppositeEvidence.scored_recall_evidence?.graph_support_gold_count
+        currentRecallEvidence?.graph_support_gold_count,
+        oppositeRecallEvidence?.graph_support_gold_count
       ),
       path_plasticity_gold_count: nullableDelta(
-        currentEvidence.scored_recall_evidence?.path_plasticity_gold_count,
-        oppositeEvidence.scored_recall_evidence?.path_plasticity_gold_count
+        currentRecallEvidence?.path_plasticity_gold_count,
+        oppositeRecallEvidence?.path_plasticity_gold_count
       ),
       graph_expansion_plane_count: nullableDelta(
-        currentEvidence.scored_recall_evidence?.graph_expansion_plane_count,
-        oppositeEvidence.scored_recall_evidence?.graph_expansion_plane_count
+        currentRecallEvidence?.graph_expansion_plane_count,
+        oppositeRecallEvidence?.graph_expansion_plane_count
       ),
       path_expansion_plane_count: nullableDelta(
-        currentEvidence.scored_recall_evidence?.path_expansion_plane_count,
-        oppositeEvidence.scored_recall_evidence?.path_expansion_plane_count
-      )
+        currentRecallEvidence?.path_expansion_plane_count,
+        oppositeRecallEvidence?.path_expansion_plane_count
+      ),
+      graph_expansion_plane_count_per_hop: [
+        nullableDelta(
+          currentRecallEvidence?.graph_expansion_plane_count_per_hop[0],
+          oppositeRecallEvidence?.graph_expansion_plane_count_per_hop[0]
+        ),
+        nullableDelta(
+          currentRecallEvidence?.graph_expansion_plane_count_per_hop[1],
+          oppositeRecallEvidence?.graph_expansion_plane_count_per_hop[1]
+        )
+      ],
+      graph_expansion_plane_count_per_edge_type: {
+        derives_from: nullableDelta(
+          currentRecallEvidence?.graph_expansion_plane_count_per_edge_type.derives_from,
+          oppositeRecallEvidence?.graph_expansion_plane_count_per_edge_type.derives_from
+        ),
+        recalls: nullableDelta(
+          currentRecallEvidence?.graph_expansion_plane_count_per_edge_type.recalls,
+          oppositeRecallEvidence?.graph_expansion_plane_count_per_edge_type.recalls
+        ),
+        supports: nullableDelta(
+          currentRecallEvidence?.graph_expansion_plane_count_per_edge_type.supports,
+          oppositeRecallEvidence?.graph_expansion_plane_count_per_edge_type.supports
+        )
+      }
     },
     hit_at_5_flips: compareHitAt5(current, opposite)
   };
@@ -333,6 +380,13 @@ function aggregateRecallEvidence(
   let pathPlasticityGoldCount = 0;
   let graphExpansionPlaneCount = 0;
   let pathExpansionPlaneCount = 0;
+  let graphExpansionHop1Count = 0;
+  let graphExpansionHop2Count = 0;
+  const graphExpansionEdgeTypes = {
+    derives_from: 0,
+    recalls: 0,
+    supports: 0
+  };
 
   for (const item of evidence) {
     deliveredResultCount += item.delivered_result_count;
@@ -340,6 +394,19 @@ function aggregateRecallEvidence(
     pathPlasticityGoldCount += item.path_plasticity_gold_count;
     graphExpansionPlaneCount += item.graph_expansion_plane_count;
     pathExpansionPlaneCount += item.path_expansion_plane_count;
+    const graphExpansionHopCounts = readArchiveGraphExpansionPlaneCountPerHop(
+      (item as { readonly graph_expansion_plane_count_per_hop?: unknown })
+        .graph_expansion_plane_count_per_hop
+    );
+    const graphExpansionEdgeTypeCounts = readArchiveGraphExpansionPlaneCountPerEdgeType(
+      (item as { readonly graph_expansion_plane_count_per_edge_type?: unknown })
+        .graph_expansion_plane_count_per_edge_type
+    );
+    graphExpansionHop1Count += graphExpansionHopCounts[0];
+    graphExpansionHop2Count += graphExpansionHopCounts[1];
+    graphExpansionEdgeTypes.derives_from += graphExpansionEdgeTypeCounts.derives_from;
+    graphExpansionEdgeTypes.recalls += graphExpansionEdgeTypeCounts.recalls;
+    graphExpansionEdgeTypes.supports += graphExpansionEdgeTypeCounts.supports;
     mergeCounts(firstAdmitted, item.delivered_plane_counts.first_admitted);
     mergeCounts(winningAdmission, item.delivered_plane_counts.winning_admission);
     mergeCounts(goldChannels, item.gold_source_channel_counts);
@@ -352,12 +419,53 @@ function aggregateRecallEvidence(
     path_plasticity_gold_count: pathPlasticityGoldCount,
     graph_expansion_plane_count: graphExpansionPlaneCount,
     path_expansion_plane_count: pathExpansionPlaneCount,
+    graph_expansion_plane_count_per_hop: [graphExpansionHop1Count, graphExpansionHop2Count],
+    graph_expansion_plane_count_per_edge_type: graphExpansionEdgeTypes,
     delivered_plane_counts: {
       first_admitted: firstAdmitted,
       winning_admission: winningAdmission
     },
     gold_source_channel_counts: goldChannels,
     gold_source_plane_counts: goldPlanes
+  };
+}
+
+function normalizeRecallEvidenceSummary(
+  evidence: LongMemEvalRecallEvidenceSummary
+): LongMemEvalRecallEvidenceSummary {
+  return aggregateRecallEvidence([evidence]);
+}
+
+function readArchiveGraphExpansionPlaneCountPerHop(value: unknown): readonly [number, number] {
+  if (!Array.isArray(value) || value.length !== 2) return [0, 0];
+  const first = typeof value[0] === "number" && Number.isFinite(value[0])
+    ? Math.trunc(value[0])
+    : 0;
+  const second = typeof value[1] === "number" && Number.isFinite(value[1])
+    ? Math.trunc(value[1])
+    : 0;
+  return [first, second];
+}
+
+function readArchiveGraphExpansionPlaneCountPerEdgeType(value: unknown): {
+  readonly derives_from: number;
+  readonly recalls: number;
+  readonly supports: number;
+} {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return { derives_from: 0, recalls: 0, supports: 0 };
+  }
+  const record = value as Readonly<Record<string, unknown>>;
+  return {
+    derives_from: typeof record.derives_from === "number" && Number.isFinite(record.derives_from)
+      ? Math.trunc(record.derives_from)
+      : 0,
+    recalls: typeof record.recalls === "number" && Number.isFinite(record.recalls)
+      ? Math.trunc(record.recalls)
+      : 0,
+    supports: typeof record.supports === "number" && Number.isFinite(record.supports)
+      ? Math.trunc(record.supports)
+      : 0
   };
 }
 

@@ -159,6 +159,12 @@ function makeShardDiagnostics(
       path_plasticity_gold_count: 0,
       graph_expansion_plane_count: 1,
       path_expansion_plane_count: 0,
+      graph_expansion_plane_count_per_hop: [1, 0],
+      graph_expansion_plane_count_per_edge_type: {
+        derives_from: 0,
+        recalls: 0,
+        supports: 1
+      },
       delivered_plane_counts: {
         first_admitted: { graph_expansion: 1, lexical: 1 },
         winning_admission: { graph_expansion: 1, lexical: 1 }
@@ -1246,6 +1252,36 @@ describe("merge-longmemeval validations", () => {
         }
       })
     );
+    await writeFile(
+      path.join(
+        historyRoot,
+        "public",
+        "2026-05-14T100000Z-abc1234-policy-chat",
+        LONGMEMEVAL_DIAGNOSTICS_FILENAME
+      ),
+      JSON.stringify(
+        makeShardDiagnostics({
+          simulate_report: "none",
+          report_side_effects: undefined,
+          scored_recall_evidence: {
+            delivered_result_count: 2,
+            graph_support_gold_count: 0,
+            path_plasticity_gold_count: 0,
+            graph_expansion_plane_count: 0,
+            path_expansion_plane_count: 0,
+            delivered_plane_counts: {
+              first_admitted: {},
+              winning_admission: {}
+            },
+            gold_source_channel_counts: {},
+            gold_source_plane_counts: {}
+          }
+        }),
+        null,
+        2
+      ) + "\n",
+      "utf8"
+    );
     await writeHistoryEntry(
       historyRoot,
       "2026-05-14T100001Z-abc1234-policy-chat-report-mixed",
@@ -1310,7 +1346,15 @@ describe("merge-longmemeval validations", () => {
       )
     ) as {
       report_usage?: { reports_attempted: number };
-      scored_recall_evidence?: { graph_support_gold_count: number };
+      scored_recall_evidence?: {
+        graph_support_gold_count: number;
+        graph_expansion_plane_count_per_hop: [number, number];
+        graph_expansion_plane_count_per_edge_type: {
+          derives_from: number;
+          recalls: number;
+          supports: number;
+        };
+      };
       provider_state_summary: { total: number; provider_not_requested: number };
       question_count: number;
       full_diagnostics_artifact_path: string;
@@ -1321,6 +1365,12 @@ describe("merge-longmemeval validations", () => {
     expect(report).not.toContain("| r_at_5 | 1.0000 | 0.8000 |");
     expect(diagnostics.report_usage?.reports_attempted).toBe(1);
     expect(diagnostics.scored_recall_evidence?.graph_support_gold_count).toBe(1);
+    expect(diagnostics.scored_recall_evidence?.graph_expansion_plane_count_per_hop).toEqual([1, 0]);
+    expect(diagnostics.scored_recall_evidence?.graph_expansion_plane_count_per_edge_type).toEqual({
+      derives_from: 0,
+      recalls: 0,
+      supports: 1
+    });
     expect(diagnostics.provider_state_summary.total).toBe(0);
     expect(diagnostics.provider_state_summary.provider_not_requested).toBe(0);
     expect(diagnostics.question_count).toBe(0);
@@ -1342,27 +1392,71 @@ describe("merge-longmemeval validations", () => {
       current: {
         simulate_report: string;
         report_side_effects: { recalls_edge_count: number } | null;
-        scored_recall_evidence: { graph_support_gold_count: number } | null;
+        scored_recall_evidence: {
+          graph_support_gold_count: number;
+          graph_expansion_plane_count_per_hop: [number, number];
+          graph_expansion_plane_count_per_edge_type: {
+            derives_from: number;
+            recalls: number;
+            supports: number;
+          };
+        } | null;
       };
-      opposite: { simulate_report: string; r_at_5: number } | null;
+      opposite: {
+        simulate_report: string;
+        r_at_5: number;
+        scored_recall_evidence: {
+          graph_expansion_plane_count_per_hop: [number, number];
+          graph_expansion_plane_count_per_edge_type: {
+            derives_from: number;
+            recalls: number;
+            supports: number;
+          };
+        } | null;
+      } | null;
       delta_current_minus_opposite: {
         r_at_5: number;
         report_side_effects: { recalls_edge_count: number | null };
-        scored_recall_evidence: { graph_support_gold_count: number | null };
+        scored_recall_evidence: {
+          graph_support_gold_count: number | null;
+          graph_expansion_plane_count_per_hop: [number | null, number | null];
+          graph_expansion_plane_count_per_edge_type: {
+            derives_from: number | null;
+            recalls: number | null;
+            supports: number | null;
+          };
+        };
       } | null;
     };
     expect(comparison.current.simulate_report).toBe("mixed");
     expect(comparison.current.report_side_effects?.recalls_edge_count).toBe(2);
     expect(comparison.current.scored_recall_evidence?.graph_support_gold_count).toBe(1);
+    expect(comparison.current.scored_recall_evidence?.graph_expansion_plane_count_per_hop).toEqual([1, 0]);
     expect(comparison.opposite?.simulate_report).toBe("none");
     expect(comparison.opposite?.r_at_5).toBe(1);
+    expect(comparison.opposite?.scored_recall_evidence?.graph_expansion_plane_count_per_hop).toEqual([0, 0]);
+    expect(comparison.opposite?.scored_recall_evidence?.graph_expansion_plane_count_per_edge_type).toEqual({
+      derives_from: 0,
+      recalls: 0,
+      supports: 0
+    });
     expect(comparison.delta_current_minus_opposite?.r_at_5).toBeCloseTo(-0.2);
     expect(
       comparison.delta_current_minus_opposite?.report_side_effects.recalls_edge_count
     ).toBeNull();
     expect(
       comparison.delta_current_minus_opposite?.scored_recall_evidence.graph_support_gold_count
-    ).toBeNull();
+    ).toBe(1);
+    expect(
+      comparison.delta_current_minus_opposite?.scored_recall_evidence.graph_expansion_plane_count_per_hop
+    ).toEqual([1, 0]);
+    expect(
+      comparison.delta_current_minus_opposite?.scored_recall_evidence.graph_expansion_plane_count_per_edge_type
+    ).toEqual({
+      derives_from: 0,
+      recalls: 0,
+      supports: 1
+    });
   });
 
   it("refuses shards whose bench_name differs", async () => {

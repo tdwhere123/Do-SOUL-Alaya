@@ -1613,11 +1613,264 @@ describe("RecallService", () => {
     });
     expect(result.diagnostics?.candidates.find((candidate) => candidate.object_id === "graph-target")?.admission_planes)
       .toContain("graph_expansion");
+    expect(
+      result.diagnostics?.candidates.find((candidate) => candidate.object_id === "graph-target")
+        ?.fused_rank_contribution_per_stream.graph_expansion
+    ).toBeGreaterThan(0.04);
     expect(result.diagnostics?.candidates.find((candidate) => candidate.object_id === "path-target")).toMatchObject({
       object_id: "path-target"
     });
     expect(result.diagnostics?.candidates.find((candidate) => candidate.object_id === "path-target")?.admission_planes)
       .toContain("path_expansion");
+  });
+
+  it("expands graph candidates across two hops with cycle-safe edge-type decay diagnostics", async () => {
+    const memories = [
+      createMemoryEntry({
+        object_id: "seed-memory",
+        content: "Deployment recall seed.",
+        activation_score: 0.9
+      }),
+      createMemoryEntry({
+        object_id: "hop1-derived",
+        content: "First hop derived graph neighbor.",
+        activation_score: 0.1,
+        domain_tags: ["graph-hop"]
+      }),
+      createMemoryEntry({
+        object_id: "hop2-supported",
+        content: "Second hop supported graph answer.",
+        activation_score: 0.1,
+        domain_tags: ["graph-hop"]
+      }),
+      createMemoryEntry({
+        object_id: "hop2-recalled",
+        content: "Second hop recalled graph answer.",
+        activation_score: 0.1,
+        domain_tags: ["graph-hop"]
+      }),
+      createMemoryEntry({
+        object_id: "superseded-target",
+        content: "Superseded graph target should not propagate.",
+        activation_score: 0.1,
+        domain_tags: ["graph-hop"]
+      })
+    ];
+    const { dependencies } = createDependencies(memories);
+    const edgeBase = {
+      object_kind: "memory_graph_edge" as const,
+      schema_version: 1,
+      lifecycle_state: "active" as const,
+      created_at: "2026-03-20T00:00:00.000Z",
+      updated_at: "2026-03-20T00:00:00.000Z",
+      created_by: "system",
+      workspace_id: "workspace-1",
+      confidence: 0.9
+    };
+    const graphExpansionPort = {
+      findByMemoryId: vi.fn(async (memoryId: string) => {
+        if (memoryId === "seed-memory") {
+          return [
+            ...Array.from({ length: 12 }, (_, index) => ({
+              ...edgeBase,
+              object_id: `edge-supersedes-${index}`,
+              edge_type: "supersedes" as const,
+              source_memory_id: "seed-memory",
+              target_memory_id: "superseded-target"
+            })),
+            {
+              ...edgeBase,
+              object_id: "edge-1",
+              edge_type: "derives_from" as const,
+              source_memory_id: "seed-memory",
+              target_memory_id: "hop1-derived"
+            }
+          ];
+        }
+        if (memoryId === "hop1-derived") {
+          return [
+            {
+              ...edgeBase,
+              object_id: "edge-cycle",
+              edge_type: "supports" as const,
+              source_memory_id: "hop1-derived",
+              target_memory_id: "seed-memory"
+            },
+            {
+              ...edgeBase,
+              object_id: "edge-2",
+              edge_type: "supports" as const,
+              source_memory_id: "hop1-derived",
+              target_memory_id: "hop2-supported"
+            },
+            {
+              ...edgeBase,
+              object_id: "edge-3",
+              edge_type: "recalls" as const,
+              source_memory_id: "hop1-derived",
+              target_memory_id: "hop2-recalled"
+            }
+          ];
+        }
+        return [];
+      })
+    };
+    const service = new RecallService({
+      ...dependencies,
+      graphExpansionPort
+    });
+    const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+    const policy = overridePolicy(basePolicy, {
+      coarse_filter: {
+        ...basePolicy.coarse_filter,
+        precomputed_rank: {
+          ...basePolicy.coarse_filter.precomputed_rank,
+          max_candidates: 1
+        },
+        semantic_supplement: {
+          enabled: false,
+          max_supplement: 0
+        }
+      },
+      fine_assessment: {
+        ...basePolicy.fine_assessment,
+        budgets: {
+          max_total_tokens: 1000,
+          max_entries: 5,
+          per_dimension_limits: null
+        }
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(
+      expect.arrayContaining(["seed-memory", "hop1-derived", "hop2-supported", "hop2-recalled"])
+    );
+    expect(
+      result.diagnostics?.candidates.find((candidate) => candidate.object_id === "superseded-target")
+        ?.admission_planes ?? []
+    ).not.toContain("graph_expansion");
+    expect(result.diagnostics?.graph_expansion_plane_count_per_hop).toEqual([1, 2]);
+    expect(result.diagnostics?.graph_expansion_plane_count_per_edge_type).toEqual({
+      derives_from: 1,
+      recalls: 1,
+      supports: 1
+    });
+    expect(
+      result.diagnostics?.candidates.find((candidate) => candidate.object_id === "hop2-supported")?.structural_score
+    ).toBeCloseTo(0.25);
+    expect(
+      result.diagnostics?.candidates.find((candidate) => candidate.object_id === "hop2-recalled")?.structural_score
+    ).toBeCloseTo(0.045);
+    expect(graphExpansionPort.findByMemoryId).toHaveBeenCalledWith(
+      "seed-memory",
+      "workspace-1",
+      ["derives_from", "recalls", "supports"]
+    );
+    expect(graphExpansionPort.findByMemoryId.mock.calls.map((call) => call[0])).not.toContain("superseded-target");
+  });
+
+  it("does not count graph diagnostics for neighbors rejected by deterministic filters", async () => {
+    const memories = [
+      createMemoryEntry({
+        object_id: "seed-memory",
+        dimension: MemoryDimension.PROCEDURE,
+        scope_class: ScopeClass.PROJECT,
+        domain_tags: ["repo"],
+        content: "Deployment recall seed.",
+        activation_score: 0.9
+      }),
+      createMemoryEntry({
+        object_id: "filtered-neighbor",
+        dimension: MemoryDimension.PREFERENCE,
+        scope_class: ScopeClass.PROJECT,
+        domain_tags: ["repo"],
+        content: "A graph neighbor that fails the deterministic dimension filter.",
+        activation_score: 0.1
+      })
+    ];
+    const { dependencies } = createDependencies(memories);
+    const edgeBase = {
+      object_kind: "memory_graph_edge" as const,
+      schema_version: 1,
+      lifecycle_state: "active" as const,
+      created_at: "2026-03-20T00:00:00.000Z",
+      updated_at: "2026-03-20T00:00:00.000Z",
+      created_by: "system",
+      workspace_id: "workspace-1",
+      confidence: 0.9
+    };
+    const graphExpansionPort = {
+      findByMemoryId: vi.fn(async (memoryId: string) => {
+        if (memoryId !== "seed-memory") {
+          return [];
+        }
+        return [
+          {
+            ...edgeBase,
+            object_id: "edge-filtered-neighbor",
+            edge_type: "derives_from" as const,
+            source_memory_id: "seed-memory",
+            target_memory_id: "filtered-neighbor"
+          }
+        ];
+      })
+    };
+    const service = new RecallService({
+      ...dependencies,
+      graphExpansionPort
+    });
+    const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+    const policy = overridePolicy(basePolicy, {
+      coarse_filter: {
+        ...basePolicy.coarse_filter,
+        deterministic_match: {
+          ...basePolicy.coarse_filter.deterministic_match,
+          dimension_filter: [MemoryDimension.PROCEDURE]
+        },
+        precomputed_rank: {
+          ...basePolicy.coarse_filter.precomputed_rank,
+          max_candidates: 1
+        },
+        semantic_supplement: {
+          enabled: false,
+          max_supplement: 0
+        }
+      },
+      fine_assessment: {
+        ...basePolicy.fine_assessment,
+        budgets: {
+          max_total_tokens: 1000,
+          max_entries: 5,
+          per_dimension_limits: null
+        }
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      policyOverride: policy
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id)).toContain("seed-memory");
+    const filteredNeighbor = result.diagnostics?.candidates.find(
+      (candidate) => candidate.object_id === "filtered-neighbor"
+    );
+    expect(filteredNeighbor?.admission_planes ?? []).not.toContain("graph_expansion");
+    expect(result.diagnostics?.graph_expansion_plane_count_per_hop).toEqual([0, 0]);
+    expect(result.diagnostics?.graph_expansion_plane_count_per_edge_type).toEqual({
+      derives_from: 0,
+      recalls: 0,
+      supports: 0
+    });
   });
 
   it("applies conflict awareness to non-winner claim-like entries", async () => {
@@ -3225,7 +3478,11 @@ describe("RecallService", () => {
       );
       expect(neighborDiag?.admission_planes).toContain("graph_expansion");
 
-      expect(findByMemoryId).toHaveBeenCalledWith("memory-anchor", "workspace-1");
+      expect(findByMemoryId).toHaveBeenCalledWith(
+        "memory-anchor",
+        "workspace-1",
+        ["derives_from", "recalls", "supports"]
+      );
     });
 
     it("is a no-op when entityExtractionPort is not wired", async () => {
@@ -3704,7 +3961,11 @@ describe("RecallService", () => {
         (c) => c.object_id === "memory-neighbor"
       );
       expect(neighborDiag?.admission_planes).toContain("graph_expansion");
-      expect(findByMemoryId).toHaveBeenCalledWith("memory-anchor", "workspace-1");
+      expect(findByMemoryId).toHaveBeenCalledWith(
+        "memory-anchor",
+        "workspace-1",
+        ["derives_from", "recalls", "supports"]
+      );
     });
 
     it("does not let a weak entity-only draft leak into content_expansion (evidence_anchor + domain_tag_cluster)", async () => {

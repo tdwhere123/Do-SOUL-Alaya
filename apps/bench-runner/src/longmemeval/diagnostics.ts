@@ -113,12 +113,22 @@ export interface LongMemEvalReportSideEffectSummary {
   readonly snapshots: readonly LongMemEvalReportSideEffectSnapshot[];
 }
 
+export type LongMemEvalGraphExpansionPlaneCountPerHop = readonly [number, number];
+
+export interface LongMemEvalGraphExpansionPlaneCountPerEdgeType {
+  readonly derives_from: number;
+  readonly recalls: number;
+  readonly supports: number;
+}
+
 export interface LongMemEvalRecallEvidenceSummary {
   readonly delivered_result_count: number;
   readonly graph_support_gold_count: number;
   readonly path_plasticity_gold_count: number;
   readonly graph_expansion_plane_count: number;
   readonly path_expansion_plane_count: number;
+  readonly graph_expansion_plane_count_per_hop: LongMemEvalGraphExpansionPlaneCountPerHop;
+  readonly graph_expansion_plane_count_per_edge_type: Readonly<LongMemEvalGraphExpansionPlaneCountPerEdgeType>;
   readonly delivered_plane_counts: Readonly<{
     readonly first_admitted: Readonly<Record<string, number>>;
     readonly winning_admission: Readonly<Record<string, number>>;
@@ -179,6 +189,8 @@ interface NarrowRecallDiagnostics {
   readonly candidateKeysByObjectId: ReadonlyMap<string, readonly string[]>;
   readonly providerState: BenchEmbeddingProviderState;
   readonly providerDegradationReason: string | null;
+  readonly graphExpansionPlaneCountPerHop: LongMemEvalGraphExpansionPlaneCountPerHop;
+  readonly graphExpansionPlaneCountPerEdgeType: Readonly<LongMemEvalGraphExpansionPlaneCountPerEdgeType>;
 }
 
 interface CandidateDiagnostic {
@@ -344,6 +356,12 @@ export function buildQuestionDiagnostic(input: {
       diagnostics?.providerState ??
       (input.embeddingMode === "disabled" ? "provider_not_requested" : "unknown"),
     provider_degradation_reason: diagnostics?.providerDegradationReason ?? null,
+    graph_expansion_plane_count_per_hop:
+      diagnostics?.graphExpansionPlaneCountPerHop ??
+      createEmptyGraphExpansionPlaneCountPerHop(),
+    graph_expansion_plane_count_per_edge_type:
+      diagnostics?.graphExpansionPlaneCountPerEdgeType ??
+      createEmptyGraphExpansionPlaneCountPerEdgeType(),
     candidate_key_collisions: diagnostics === null
       ? []
       : [...diagnostics.candidateKeysByObjectId.entries()]
@@ -681,8 +699,26 @@ export function summarizeLongMemEvalRecallEvidence(
   let pathPlasticityGoldCount = 0;
   let graphExpansionPlaneCount = 0;
   let pathExpansionPlaneCount = 0;
+  let graphExpansionHop1Count = 0;
+  let graphExpansionHop2Count = 0;
+  const graphExpansionEdgeTypes = createEmptyMutableGraphExpansionPlaneCountPerEdgeType();
 
   for (const row of diagnostics) {
+    const graphExpansionHopCounts =
+      readGraphExpansionPlaneCountPerHop(
+        (row as { readonly graph_expansion_plane_count_per_hop?: unknown })
+          .graph_expansion_plane_count_per_hop
+      ) ?? createEmptyGraphExpansionPlaneCountPerHop();
+    const graphExpansionEdgeTypeCounts =
+      readGraphExpansionPlaneCountPerEdgeType(
+        (row as { readonly graph_expansion_plane_count_per_edge_type?: unknown })
+          .graph_expansion_plane_count_per_edge_type
+      ) ?? createEmptyGraphExpansionPlaneCountPerEdgeType();
+    graphExpansionHop1Count += graphExpansionHopCounts[0];
+    graphExpansionHop2Count += graphExpansionHopCounts[1];
+    graphExpansionEdgeTypes.derives_from += graphExpansionEdgeTypeCounts.derives_from;
+    graphExpansionEdgeTypes.recalls += graphExpansionEdgeTypeCounts.recalls;
+    graphExpansionEdgeTypes.supports += graphExpansionEdgeTypeCounts.supports;
     for (const delivered of row.delivered_results) {
       deliveredResultCount += 1;
       incrementCount(deliveredFirst, delivered.plane_first_admitted ?? "unknown");
@@ -727,6 +763,12 @@ export function summarizeLongMemEvalRecallEvidence(
     path_plasticity_gold_count: pathPlasticityGoldCount,
     graph_expansion_plane_count: graphExpansionPlaneCount,
     path_expansion_plane_count: pathExpansionPlaneCount,
+    graph_expansion_plane_count_per_hop: Object.freeze([
+      graphExpansionHop1Count,
+      graphExpansionHop2Count
+    ]) as LongMemEvalGraphExpansionPlaneCountPerHop,
+    graph_expansion_plane_count_per_edge_type:
+      freezeGraphExpansionPlaneCountPerEdgeType(graphExpansionEdgeTypes),
     delivered_plane_counts: {
       first_admitted: deliveredFirst,
       winning_admission: deliveredWinning
@@ -809,7 +851,13 @@ function readRecallDiagnostics(
     candidatesByCandidateKey: candidates.byCandidateKey,
     candidateKeysByObjectId: candidates.keysByObjectId,
     providerState: readProviderState(record, embeddingMode),
-    providerDegradationReason: readProviderDegradationReason(record)
+    providerDegradationReason: readProviderDegradationReason(record),
+    graphExpansionPlaneCountPerHop:
+      readGraphExpansionPlaneCountPerHop(record.graph_expansion_plane_count_per_hop) ??
+      createEmptyGraphExpansionPlaneCountPerHop(),
+    graphExpansionPlaneCountPerEdgeType:
+      readGraphExpansionPlaneCountPerEdgeType(record.graph_expansion_plane_count_per_edge_type) ??
+      createEmptyGraphExpansionPlaneCountPerEdgeType()
   };
 }
 
@@ -959,6 +1007,68 @@ function readNumberRecord(value: unknown): Readonly<Record<string, number>> | nu
     }
   }
   return Object.keys(result).length === 0 ? null : Object.freeze(result);
+}
+
+function readGraphExpansionPlaneCountPerHop(
+  value: unknown
+): LongMemEvalGraphExpansionPlaneCountPerHop | null {
+  if (!Array.isArray(value) || value.length !== 2) return null;
+  const first = readNumber(value[0]);
+  const second = readNumber(value[1]);
+  if (first === null || second === null) return null;
+  return Object.freeze([Math.trunc(first), Math.trunc(second)]) as LongMemEvalGraphExpansionPlaneCountPerHop;
+}
+
+function readGraphExpansionPlaneCountPerEdgeType(
+  value: unknown
+): Readonly<LongMemEvalGraphExpansionPlaneCountPerEdgeType> | null {
+  const record = readRecord(value);
+  if (record === null) return null;
+  const derivesFrom = readNumber(record.derives_from);
+  const recalls = readNumber(record.recalls);
+  const supports = readNumber(record.supports);
+  if (derivesFrom === null || recalls === null || supports === null) {
+    return null;
+  }
+  return freezeGraphExpansionPlaneCountPerEdgeType({
+    derives_from: Math.trunc(derivesFrom),
+    recalls: Math.trunc(recalls),
+    supports: Math.trunc(supports)
+  });
+}
+
+function createEmptyGraphExpansionPlaneCountPerHop(): LongMemEvalGraphExpansionPlaneCountPerHop {
+  return Object.freeze([0, 0]) as LongMemEvalGraphExpansionPlaneCountPerHop;
+}
+
+function createEmptyMutableGraphExpansionPlaneCountPerEdgeType(): {
+  derives_from: number;
+  recalls: number;
+  supports: number;
+} {
+  return {
+    derives_from: 0,
+    recalls: 0,
+    supports: 0
+  };
+}
+
+function createEmptyGraphExpansionPlaneCountPerEdgeType(): Readonly<LongMemEvalGraphExpansionPlaneCountPerEdgeType> {
+  return freezeGraphExpansionPlaneCountPerEdgeType(
+    createEmptyMutableGraphExpansionPlaneCountPerEdgeType()
+  );
+}
+
+function freezeGraphExpansionPlaneCountPerEdgeType(input: {
+  readonly derives_from: number;
+  readonly recalls: number;
+  readonly supports: number;
+}): Readonly<LongMemEvalGraphExpansionPlaneCountPerEdgeType> {
+  return Object.freeze({
+    derives_from: input.derives_from,
+    recalls: input.recalls,
+    supports: input.supports
+  });
 }
 
 function readNullableNumberRecord(value: unknown): Readonly<Record<string, number | null>> | null {

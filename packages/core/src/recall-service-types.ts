@@ -465,6 +465,22 @@ export interface RecallTokenEconomy {
   readonly embedding_inference_calls: number;
 }
 
+export type RecallGraphExpansionTrackedEdgeType =
+  | "derives_from"
+  | "recalls"
+  | "supports";
+
+export type RecallGraphExpansionPlaneCountPerHop = readonly [number, number];
+
+export type RecallGraphExpansionPlaneCountPerEdgeType = Readonly<
+  Record<RecallGraphExpansionTrackedEdgeType, number>
+>;
+
+export interface RecallGraphExpansionDiagnostics {
+  readonly graph_expansion_plane_count_per_hop: RecallGraphExpansionPlaneCountPerHop;
+  readonly graph_expansion_plane_count_per_edge_type: RecallGraphExpansionPlaneCountPerEdgeType;
+}
+
 export interface RecallDiagnostics {
   readonly query_probes: {
     readonly subject_hints: readonly string[];
@@ -491,6 +507,8 @@ export interface RecallDiagnostics {
   readonly delivered_count: number;
   readonly embedding_provider_status: RecallEmbeddingProviderStatus;
   readonly provider_degradation_reason: string | null;
+  readonly graph_expansion_plane_count_per_hop: RecallGraphExpansionPlaneCountPerHop;
+  readonly graph_expansion_plane_count_per_edge_type: RecallGraphExpansionPlaneCountPerEdgeType;
   readonly fusion_breakdown: readonly Readonly<RecallFusionBreakdown>[];
   readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
   // Per-recall structural token instrument. Optional only for legacy callers

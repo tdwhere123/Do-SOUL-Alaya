@@ -100,6 +100,22 @@ const RecallTokenEconomySchema = z
   .strict()
   .readonly();
 
+const RecallGraphExpansionPlaneCountPerHopSchema = z
+  .tuple([
+    z.number().int().nonnegative(),
+    z.number().int().nonnegative()
+  ])
+  .readonly();
+
+const RecallGraphExpansionPlaneCountPerEdgeTypeSchema = z
+  .object({
+    derives_from: z.number().int().nonnegative(),
+    recalls: z.number().int().nonnegative(),
+    supports: z.number().int().nonnegative()
+  })
+  .strict()
+  .readonly();
+
 export const BenchRecallDiagnosticsSchema = z
   .object({
     query_probes: z
@@ -135,6 +151,10 @@ export const BenchRecallDiagnosticsSchema = z
       "provider_not_requested"
     ]),
     provider_degradation_reason: z.string().nullable(),
+    graph_expansion_plane_count_per_hop:
+      RecallGraphExpansionPlaneCountPerHopSchema,
+    graph_expansion_plane_count_per_edge_type:
+      RecallGraphExpansionPlaneCountPerEdgeTypeSchema,
     fusion_breakdown: z
       .array(
         z
