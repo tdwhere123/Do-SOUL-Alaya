@@ -126,7 +126,9 @@ const SeedTruncationSchema = z
 // fact). A no-creds run re-seeds the keyword-rich full turn and can
 // out-score the tight production distilled_fact, so the two paths must
 // never be indistinguishable in the persisted report. cache_hits / llm_calls
-// / offline_fallbacks / facts_produced are the per-run extraction counters.
+// / offline_fallbacks / live_extraction_failures /
+// cached_extraction_failures / facts_produced are the per-run extraction
+// counters.
 // signals_dropped is the TOTAL signals lost between the model envelope and
 // a seeded memory_entry — a visible recall hole. parse_dropped and
 // compile_overflow_dropped attribute the two extraction-time drop stages:
@@ -145,6 +147,8 @@ const SeedExtractionPathSchema = z
     cache_hits: z.number().int().nonnegative(),
     llm_calls: z.number().int().nonnegative(),
     offline_fallbacks: z.number().int().nonnegative(),
+    live_extraction_failures: z.number().int().nonnegative().default(0),
+    cached_extraction_failures: z.number().int().nonnegative().default(0),
     facts_produced: z.number().int().nonnegative(),
     signals_dropped: z.number().int().nonnegative(),
     parse_dropped: z.number().int().nonnegative(),

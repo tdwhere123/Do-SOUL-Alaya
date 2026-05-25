@@ -1249,6 +1249,59 @@ describe("history archive", () => {
     expect(report).toContain("embedding_inference_calls");
   });
 
+  it("defaults legacy seed extraction failure counters and renders new failure attribution", () => {
+    const legacyPayload = KpiPayloadSchema.parse({
+      ...buildPayload("beef123"),
+      bench_name: "public",
+      split: "longmemeval-s",
+      kpi: {
+        ...buildPayload("beef123").kpi,
+        seed_extraction_path: {
+          path: "official_api_compile",
+          cache_hits: 276,
+          llm_calls: 0,
+          offline_fallbacks: 1,
+          facts_produced: 1872,
+          signals_dropped: 4,
+          parse_dropped: 3,
+          compile_overflow_dropped: 0
+        }
+      }
+    });
+    const legacySeedExtractionPath = legacyPayload.kpi.seed_extraction_path;
+    expect(legacySeedExtractionPath).toMatchObject({
+      live_extraction_failures: 0,
+      cached_extraction_failures: 0
+    });
+    if (legacySeedExtractionPath === undefined) {
+      throw new Error("expected seed_extraction_path");
+    }
+
+    const attributedPayload = KpiPayloadSchema.parse({
+      ...legacyPayload,
+      kpi: {
+        ...legacyPayload.kpi,
+        seed_extraction_path: {
+          ...legacySeedExtractionPath,
+          live_extraction_failures: 1,
+          cached_extraction_failures: 2
+        }
+      }
+    });
+    const report = renderReport(
+      attributedPayload,
+      null,
+      diffKpis(attributedPayload, null)
+    );
+
+    expect(report).toContain("live_failures=1 cached_failures=2");
+    expect(report).toContain(
+      "3 turn(s) fell back after official extraction failed"
+    );
+    expect(report).toContain("1 live/cache-miss failure(s)");
+    expect(report).toContain("2 cached raw JSON failure(s)");
+  });
+
   it("flags LongMemEval-S embedding full reports below the release gate", () => {
     const payload: KpiPayload = {
       ...buildPayload("beef123"),

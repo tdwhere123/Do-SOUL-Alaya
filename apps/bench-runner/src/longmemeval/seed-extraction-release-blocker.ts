@@ -100,6 +100,8 @@ function formatSeedExtractionCounters(path: SeedExtractionPathKpi): string {
   return (
     `path=${path.path} cache_hits=${path.cache_hits} ` +
     `llm_calls=${path.llm_calls} offline_fallbacks=${path.offline_fallbacks} ` +
+    `live_failures=${path.live_extraction_failures} ` +
+    `cached_failures=${path.cached_extraction_failures} ` +
     `facts=${path.facts_produced} signals_dropped=${path.signals_dropped}`
   );
 }

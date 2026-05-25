@@ -10,6 +10,7 @@ import {
   createCachingSignalExtractor,
   createCompileSeedRunner,
   resolveCompileSeedExtractionConfig,
+  toSeedExtractionPathKpi,
   type BenchSignalExtractor,
   type CompileSeedDaemon,
   type CompileSeedExtractionConfig,
@@ -79,12 +80,15 @@ describe("createCachingSignalExtractor", () => {
       cacheHits: 0,
       llmCalls: 0,
       offlineFallbacks: 0,
+      liveExtractionFailures: 0,
+      cachedExtractionFailures: 0,
       factsProduced: 0,
       signalsDropped: 0,
       parseDropped: 0,
       compileOverflowDropped: 0,
       lastTurnRawSignalCount: 0,
-      lastTurnDraftCount: 0
+      lastTurnDraftCount: 0,
+      lastExtractionSource: null
     };
     const extractor = createCachingSignalExtractor({
       delegate,
@@ -102,6 +106,9 @@ describe("createCachingSignalExtractor", () => {
     expect(delegate.extract).toHaveBeenCalledTimes(1);
     expect(stats.llmCalls).toBe(1);
     expect(stats.cacheHits).toBe(0);
+    expect(stats.liveExtractionFailures).toBe(0);
+    expect(stats.cachedExtractionFailures).toBe(0);
+    expect(stats.lastExtractionSource).toBe("live");
   });
 
   it("serves a second extraction from the on-disk fixture with zero LLM calls", async () => {
@@ -113,12 +120,15 @@ describe("createCachingSignalExtractor", () => {
       cacheHits: 0,
       llmCalls: 0,
       offlineFallbacks: 0,
+      liveExtractionFailures: 0,
+      cachedExtractionFailures: 0,
       factsProduced: 0,
       signalsDropped: 0,
       parseDropped: 0,
       compileOverflowDropped: 0,
       lastTurnRawSignalCount: 0,
-      lastTurnDraftCount: 0
+      lastTurnDraftCount: 0,
+      lastExtractionSource: null
     };
     const firstRun = createCachingSignalExtractor({
       delegate,
@@ -135,12 +145,15 @@ describe("createCachingSignalExtractor", () => {
       cacheHits: 0,
       llmCalls: 0,
       offlineFallbacks: 0,
+      liveExtractionFailures: 0,
+      cachedExtractionFailures: 0,
       factsProduced: 0,
       signalsDropped: 0,
       parseDropped: 0,
       compileOverflowDropped: 0,
       lastTurnRawSignalCount: 0,
-      lastTurnDraftCount: 0
+      lastTurnDraftCount: 0,
+      lastExtractionSource: null
     };
     const secondRun = createCachingSignalExtractor({
       delegate,
@@ -156,6 +169,9 @@ describe("createCachingSignalExtractor", () => {
     expect(delegate.extract).toHaveBeenCalledTimes(1);
     expect(secondStats.cacheHits).toBe(1);
     expect(secondStats.llmCalls).toBe(0);
+    expect(secondStats.liveExtractionFailures).toBe(0);
+    expect(secondStats.cachedExtractionFailures).toBe(0);
+    expect(secondStats.lastExtractionSource).toBe("cache");
     expect(cached.rawJson).toBe('{"signals":[{"x":1}]}');
   });
 
@@ -272,6 +288,8 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     expect(runner.stats.path).toBe("official_api_compile");
     expect(runner.stats.factsProduced).toBe(2);
     expect(runner.stats.llmCalls).toBe(1);
+    expect(runner.stats.liveExtractionFailures).toBe(0);
+    expect(runner.stats.cachedExtractionFailures).toBe(0);
   });
 
   it("seeds the full turn as one fact when the extractor finds no candidates", async () => {
@@ -356,6 +374,70 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     expect(result.seeds).toHaveLength(1);
     expect(seeded[0]?.distilledFact).toBe("A turn whose extraction will fail.");
     expect(runner.stats.offlineFallbacks).toBe(1);
+    expect(runner.stats.cacheHits).toBe(0);
+    expect(runner.stats.llmCalls).toBe(0);
+    expect(runner.stats.liveExtractionFailures).toBe(1);
+    expect(runner.stats.cachedExtractionFailures).toBe(0);
+    expect(toSeedExtractionPathKpi(runner.stats)).toMatchObject({
+      offline_fallbacks: 1,
+      live_extraction_failures: 1,
+      cached_extraction_failures: 0
+    });
+  });
+
+  it("classifies cached invalid raw JSON separately from live failures", async () => {
+    const turnContent = "A turn whose cached raw JSON is malformed.";
+    const firstDaemon = buildCompileSeedDaemon(() => buildSeed("memory-1"));
+    const firstRunner = createCompileSeedRunner({
+      config: CREDENTIALLED_CONFIG,
+      cacheRoot,
+      extractorFactory: () => ({
+        extract: async () => ({ rawJson: '{"not_signals":[]}' })
+      })
+    });
+    await firstRunner.seedTurn({
+      daemon: firstDaemon,
+      turnContent,
+      evidenceRefBase: "q1-s0-t0",
+      seedIndex: 0,
+      ...SEED_CONTEXT
+    });
+
+    const delegate = vi.fn(async () => ({ rawJson: signalsEnvelope([]) }));
+    const seeded: BenchSignalSeedInput[] = [];
+    const secondDaemon = buildCompileSeedDaemon((input) => {
+      seeded.push(input);
+      return buildSeed("memory-2");
+    });
+    const secondRunner = createCompileSeedRunner({
+      config: CREDENTIALLED_CONFIG,
+      cacheRoot,
+      extractorFactory: () => ({ extract: delegate })
+    });
+
+    const result = await secondRunner.seedTurn({
+      daemon: secondDaemon,
+      turnContent,
+      evidenceRefBase: "q1-s0-t0",
+      seedIndex: 0,
+      ...SEED_CONTEXT
+    });
+
+    expect(result.seeds).toHaveLength(1);
+    expect(seeded[0]?.distilledFact).toBe(turnContent);
+    expect(delegate).not.toHaveBeenCalled();
+    expect(secondRunner.stats.cacheHits).toBe(1);
+    expect(secondRunner.stats.llmCalls).toBe(0);
+    expect(secondRunner.stats.offlineFallbacks).toBe(1);
+    expect(secondRunner.stats.liveExtractionFailures).toBe(0);
+    expect(secondRunner.stats.cachedExtractionFailures).toBe(1);
+    expect(toSeedExtractionPathKpi(secondRunner.stats)).toMatchObject({
+      cache_hits: 1,
+      llm_calls: 0,
+      offline_fallbacks: 1,
+      live_extraction_failures: 0,
+      cached_extraction_failures: 1
+    });
   });
 
   it("maps ALL N seeded object_ids back to the source answer turn (sidecar)", async () => {
@@ -436,12 +518,15 @@ describe("extraction cache key — load-bearing inputs only", () => {
       cacheHits: 0,
       llmCalls: 0,
       offlineFallbacks: 0,
+      liveExtractionFailures: 0,
+      cachedExtractionFailures: 0,
       factsProduced: 0,
       signalsDropped: 0,
       parseDropped: 0,
       compileOverflowDropped: 0,
       lastTurnRawSignalCount: 0,
-      lastTurnDraftCount: 0
+      lastTurnDraftCount: 0,
+      lastExtractionSource: null
     };
     const firstRun = createCachingSignalExtractor({
       delegate,
@@ -464,12 +549,15 @@ describe("extraction cache key — load-bearing inputs only", () => {
       cacheHits: 0,
       llmCalls: 0,
       offlineFallbacks: 0,
+      liveExtractionFailures: 0,
+      cachedExtractionFailures: 0,
       factsProduced: 0,
       signalsDropped: 0,
       parseDropped: 0,
       compileOverflowDropped: 0,
       lastTurnRawSignalCount: 0,
-      lastTurnDraftCount: 0
+      lastTurnDraftCount: 0,
+      lastExtractionSource: null
     };
     const secondRun = createCachingSignalExtractor({
       delegate,

@@ -630,6 +630,14 @@ function mergeSeedExtractionPath(
       (sum, path) => sum + path.offline_fallbacks,
       0
     ),
+    live_extraction_failures: present.reduce(
+      (sum, path) => sum + path.live_extraction_failures,
+      0
+    ),
+    cached_extraction_failures: present.reduce(
+      (sum, path) => sum + path.cached_extraction_failures,
+      0
+    ),
     facts_produced: present.reduce((sum, path) => sum + path.facts_produced, 0),
     signals_dropped: present.reduce(
       (sum, path) => sum + path.signals_dropped,

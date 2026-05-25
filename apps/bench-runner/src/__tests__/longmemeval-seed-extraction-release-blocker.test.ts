@@ -29,6 +29,8 @@ function makeSeedExtractionPath(
     cache_hits: 276,
     llm_calls: 0,
     offline_fallbacks: 0,
+    live_extraction_failures: 0,
+    cached_extraction_failures: 0,
     facts_produced: 1872,
     signals_dropped: 4,
     parse_dropped: 3,
@@ -40,7 +42,10 @@ function makeSeedExtractionPath(
 describe("LongMemEval seed extraction release blocker", () => {
   it("blocks official extraction evidence when offline fallbacks are non-zero", () => {
     const payload = makePayload(
-      makeSeedExtractionPath({ offline_fallbacks: 1 })
+      makeSeedExtractionPath({
+        offline_fallbacks: 1,
+        live_extraction_failures: 1
+      })
     );
 
     expect(hasSeedExtractionReleaseBlocker(payload)).toBe(true);
@@ -49,6 +54,8 @@ describe("LongMemEval seed extraction release blocker", () => {
       .toContain("seed_extraction_path offline_fallbacks");
     expect(appendSeedExtractionReleaseBlockerToFindings(null, payload))
       .toContain("offline_fallbacks=1");
+    expect(appendSeedExtractionReleaseBlockerToFindings(null, payload))
+      .toContain("live_failures=1");
   });
 
   it("blocks no-credential fallback evidence even when numeric gates pass", () => {

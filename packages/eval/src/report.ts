@@ -330,6 +330,8 @@ export function renderReport(
       `- Seed extraction path: ${extractionPath.path} ` +
         `(cache_hits=${extractionPath.cache_hits} llm_calls=${extractionPath.llm_calls} ` +
         `offline_fallbacks=${extractionPath.offline_fallbacks} ` +
+        `live_failures=${extractionPath.live_extraction_failures} ` +
+        `cached_failures=${extractionPath.cached_extraction_failures} ` +
         `facts=${extractionPath.facts_produced} signals_dropped=${extractionPath.signals_dropped} ` +
         `[parse_dropped=${extractionPath.parse_dropped} ` +
         `compile_overflow_dropped=${extractionPath.compile_overflow_dropped}])`
@@ -341,6 +343,16 @@ export function renderReport(
         "    garden extraction. The keyword-rich full turn can out-score a",
         "    tight production `distilled_fact`, so this R@K is NOT comparable",
         "    to an `official_api_compile` run."
+      );
+    }
+    const extractionFailures =
+      extractionPath.live_extraction_failures +
+      extractionPath.cached_extraction_failures;
+    if (extractionFailures > 0) {
+      lines.push(
+        `  - ⚠ ${extractionFailures} turn(s) fell back after official extraction failed ` +
+          `(${extractionPath.live_extraction_failures} live/cache-miss failure(s), ` +
+          `${extractionPath.cached_extraction_failures} cached raw JSON failure(s)).`
       );
     }
     if (extractionPath.signals_dropped > 0) {

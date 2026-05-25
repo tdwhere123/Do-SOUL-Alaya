@@ -114,6 +114,10 @@ export interface CompileSeedExtractionStats {
   llmCalls: number;
   /** Turns that fell back to the no-LLM single-fact path. */
   offlineFallbacks: number;
+  /** Official extraction fallbacks caused by a live provider/cache-miss failure. */
+  liveExtractionFailures: number;
+  /** Official extraction fallbacks caused by a cached raw JSON failure. */
+  cachedExtractionFailures: number;
   /** Total candidate signals seeded across all turns. */
   factsProduced: number;
   /**
@@ -150,6 +154,7 @@ export interface CompileSeedExtractionStats {
    * = draftsParsed - signals-compile()-returned.
    */
   lastTurnDraftCount: number;
+  lastExtractionSource: "cache" | "live" | null;
 }
 
 /**
@@ -165,6 +170,8 @@ export interface SeedExtractionPathKpi {
   readonly cache_hits: number;
   readonly llm_calls: number;
   readonly offline_fallbacks: number;
+  readonly live_extraction_failures: number;
+  readonly cached_extraction_failures: number;
   readonly facts_produced: number;
   /** Total signals lost across all drop stages (parse + compile overflow). */
   readonly signals_dropped: number;
@@ -182,6 +189,8 @@ export function toSeedExtractionPathKpi(
     cache_hits: stats.cacheHits,
     llm_calls: stats.llmCalls,
     offline_fallbacks: stats.offlineFallbacks,
+    live_extraction_failures: stats.liveExtractionFailures,
+    cached_extraction_failures: stats.cachedExtractionFailures,
     facts_produced: stats.factsProduced,
     signals_dropped: stats.signalsDropped,
     parse_dropped: stats.parseDropped,
@@ -251,10 +260,14 @@ export function createCachingSignalExtractor(options: {
       const cached = readCachedExtraction(cacheRoot, cacheKey, options.model);
       if (cached !== undefined) {
         if (stats !== undefined) {
+          stats.lastExtractionSource = "cache";
           stats.cacheHits += 1;
           recordExtractionDraftCounts(stats, cached);
         }
         return { rawJson: cached };
+      }
+      if (stats !== undefined) {
+        stats.lastExtractionSource = "live";
       }
       const result = await options.delegate.extract(input);
       writeCachedExtraction(cacheRoot, cacheKey, {
@@ -570,12 +583,15 @@ export function createCompileSeedRunner(options?: {
     cacheHits: 0,
     llmCalls: 0,
     offlineFallbacks: 0,
+    liveExtractionFailures: 0,
+    cachedExtractionFailures: 0,
     factsProduced: 0,
     signalsDropped: 0,
     parseDropped: 0,
     compileOverflowDropped: 0,
     lastTurnRawSignalCount: 0,
-    lastTurnDraftCount: 0
+    lastTurnDraftCount: 0,
+    lastExtractionSource: null
   };
 
   const provider =
@@ -758,6 +774,7 @@ async function extractSeedInputs(input: {
     // back to the full turn so the answer text stays seeded; count it as an
     // offline fallback so the bench report shows the live-extraction hole.
     input.stats.offlineFallbacks += 1;
+    recordExtractionFailureSource(input.stats);
     input.stats.factsProduced += 1;
     process.stderr.write(
       `[longmemeval compile-seed] extraction failed, using full-turn fallback: ${stringifyError(error)}\n`
@@ -871,6 +888,16 @@ async function extractSeedInputs(input: {
 
   input.stats.factsProduced += drafts.length;
   return drafts;
+}
+
+function recordExtractionFailureSource(stats: CompileSeedExtractionStats): void {
+  if (stats.lastExtractionSource === "cache") {
+    stats.cachedExtractionFailures += 1;
+    return;
+  }
+  if (stats.lastExtractionSource === "live") {
+    stats.liveExtractionFailures += 1;
+  }
 }
 
 /**
