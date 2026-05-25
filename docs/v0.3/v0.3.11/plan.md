@@ -1,5 +1,27 @@
 # v0.3.11 Plan — 学 agentmemory 外围实现 + 不动 Alaya 核心
 
+## 当前 checkpoint（2026-05-25）
+
+v0.3.11 当前状态是**实现 checkpoint / evidence pending**，不是 final
+release-ready。当前分支 HEAD 是 `96e9bb9 feat(v0.3.11): calibrate
+weak-evidence abstention scores`。
+
+已落地的 post-review commits：
+
+| Commit | 内容 | release evidence |
+|---|---|---|
+| `621fcec` | governance + bench integrity checkpoint（edge proposal 路径、LoCoMo gate contract、token-economy archive/report plumbing、strict-real live runner 修复、local ONNX cache path 文档、compact diagnostics policy） | 待当前 HEAD 全 bench |
+| `8d2cbf7` | multilingual BM25 / CJK tokenization | 待当前 HEAD 全 bench |
+| `8bf07c8` | two-hop graph expansion diagnostics | 待当前 HEAD 全 bench |
+| `96e9bb9` | weak-evidence abstention calibration | 待当前 HEAD 全 bench |
+
+artifact-hygiene worker 另行 staged 了 23 个旧 full diagnostics 删除；这些删除只
+是 release/source hygiene，不是 KPI/report/pointer evidence。
+
+当前 full public bench evidence **未在 HEAD `96e9bb9` 跑完**。tracked
+`latest-baseline*` 指针是 legacy/stale baseline，不是 v0.3.11 当前 release
+evidence。后续新 full bench 必须包含 `recall_token_economy`。
+
 ## 概要
 
 v0.3.11 把"记忆系统在公开 benchmark 上 ship-grade"的目标保持不变（R@5 ≥ 90%
@@ -53,36 +75,28 @@ truth boundary。
 不动。phase 2 自研 hygiene damp / distinct-query-token / B2 evidence-gist
 rerank 等保留作 baseline（用户 2026-05-24 确认"保留不动"）。
 
-### Phase 3 — 本地 ONNX embedding 接通（修订）
+### Phase 3 — 本地 ONNX embedding 接通（checkpoint）
 
-worktree `v0.3.11-phase3` HEAD `23a75d5` 已实施 235 行 `LocalOnnxEmbeddingClient`
-（保留，与 fastembed-js 净差别 ~50 行，不划算换）。剩余工作：
+`LocalOnnxEmbeddingClient` 与 `local_onnx` provider 路径已进入当前分支；cache
+path guidance 在 `621fcec` 中更新。当前 checkpoint 的事实：
 
-- 模型预 fetch (`scripts/fetch-local-embedding-model.mjs`) 验证可重跑
-- daemon provider 选择 (`ALAYA_EMBEDDING_PROVIDER=local_onnx`) 落地
-- LoCoMo embedding-on bench → R@5 ≥ 90%
-- embedding-off 路径与 phase 2 合并后位级一致（review-loop 显式 check）
+- `ALAYA_EMBEDDING_PROVIDER=local_onnx` 仍是 opt-in；
+- local ONNX model cache 当前缺失，除非 parent 后续 supply/fetch；
+- LoCoMo embedding-on full bench 尚未在 HEAD `96e9bb9` 形成 release evidence。
 
 验收：embedding-off R@5 不退化、embedding-on LoCoMo R@5 ≥ 90%。
 
 ### Phase 4 — WS-C abstention 弃答校准
 
-放原 plan 位置不变。`recall-service.ts:2001` 弱信号压 `effectiveScore`，
-abstention top-1 落到 `ABSTENTION_FALSE_CONFIDENT_THRESHOLD = 0.91` 之下。
-四 bench 全集验证无连带回退。
+`96e9bb9` 已落地 weak-evidence abstention calibration。四 bench 全集验证无
+连带回退仍是 release evidence gate，当前未完成。
 
 ### Phase 5 — 多语 BM25 (CJK + 多字符集)
 
-`packages/core/src/recall-query-probes.ts` `splitLexicalTokens` 接 `@node-rs/jieba`
-做 CJK 分词 + 5 字符集 tokenizer (Greek / Cyrillic / Hebrew / Arabic /
-accented Latin)，对齐 agentmemory 实现。新建 `multilingual_lexical` fusion
-stream 或扩展现有 `lexical_fts` 走多语 path。
-
-storage 侧 `memory-entry-keyword-search.ts` FTS5 tokenizer 配套。FTS5 支持
-`unicode61` + 自定义 tokenizer——具体 path 由实施 subagent 验证。
+`8d2cbf7` 已落地 multilingual BM25 / CJK segmentation 相关代码与测试。
 
 验收：LongMemEval-S 包含 CJK / 多语 query 子集 R@5 不退化；新加多语 fixture
-回归测试。
+回归测试。当前 full public bench evidence 仍 pending。
 
 ### Phase 6 — Graph retriever 升级（4 子工作流）
 
@@ -97,7 +111,9 @@ storage 侧 `memory-entry-keyword-search.ts` FTS5 tokenizer 配套。FTS5 支持
 | **C. 降手动门槛** | 当前"非常难建边"的具体阻力（schema 复杂 / verb 流程长 / proof 要求重 等）找根因 + 简化路径 | 视根因决定（如果是 governance 必要不动；如果是 UX 摩擦动） |
 | **D. 召回路径 + 权重优化** | `graph_expansion` weight 1 偏低 / 多跳 BFS 缺失 / `MEMORY_GRAPH_EDGE_RECALL_WEIGHTS` 各 edge_type 校准 | 不动 truth |
 
-A/B/C/D 具体方案待 3 个并行研究 subagent 报告（已派 2026-05-24）。
+`621fcec` 已落地 governance/edge proposal checkpoint；`8bf07c8` 已落地 two-hop
+graph expansion diagnostics。A/B/C/D 的 release acceptance 仍需要当前 HEAD full
+bench 与 parent review 确认。
 
 验收：LongMemEval 多 hop 子集 R@5 ≥ 90%（agentmemory 强项区域）；
 edge 自动建立率提升（具体 metric 待 phase 6 plan 定）。
@@ -105,7 +121,8 @@ edge 自动建立率提升（具体 metric 待 phase 6 plan 定）。
 ### Phase 7 — Token efficiency measurement
 
 per recall call instrument tokens（input / output / cache hit / fusion stream
-召回数 / final delivered context tokens）。结果进：
+召回数 / final delivered context tokens）。`621fcec` 已补 bench-integrity/report
+plumbing；后续 new full bench 结果必须进：
 
 - bench-runner kpi schema 增字段
 - `docs/bench-history/*` archive 含 token cost
@@ -113,7 +130,8 @@ per recall call instrument tokens（input / output / cache hit / fusion stream
   Alaya 等价 metric 待定）
 
 验收：四 bench 全集运行后 token instrument 数据齐全；report 含 per-call
-distribution；先 measure 不 brand。
+distribution；先 measure 不 brand。当前 HEAD 尚无 full bench archive 可证明该
+验收完成。
 
 ### Closeout
 
@@ -124,7 +142,8 @@ distribution；先 measure 不 brand。
 - README.md（精简对外摘要）
 - reports/（各 phase review-loop 报告 + bench 对比）
 
-README + CHANGELOG 同步更新。
+本 checkpoint 只更新 docs truth surface；不是最终 CHANGELOG/release closeout。
+最终 closeout 仍等 full bench evidence 与 parent review。
 
 ## KPI Targets（覆盖 v0.3.10 D20 立场）
 
@@ -154,14 +173,16 @@ R@5 90% 三 bench 是 ship gate。token efficiency 是量化 must 但**先 measu
 | Phase 3 embedding-on bench 不到 90% | 提 `EMBEDDING_SIMILARITY_WEIGHT` + 调候选注入 K + 试 BGE-M3 备选 |
 | 推回 v0.3.10 D19 老路 | 本文档 + memory [[project_v0311_pivot_to_agentmemory_learning]] 锁住；任何阶段决策若触发"对标 95%倒推" 必须停下来 |
 
-## 实施顺序与并行
+## 当前后续顺序
 
 ```
 [已 merged] phase 0 → 1 → 2
-[in flight] phase 3 (实施完未 merge，剩 bench + merge)
-[next]      phase 4 / phase 5 / phase 7 (并行，互不依赖)
-[after]     phase 6 (依赖 3 个研究 subagent 报告整合)
-[final]     closeout (docs + bench archive + CHANGELOG + README)
+[checkpoint] 621fcec / 8d2cbf7 / 8bf07c8 / 96e9bb9 已在 v0.3.11-completion
+[now]        docs-truth checkpoint + parent review
+[next]       current HEAD full public benches:
+             LongMemEval-S / multiturn / crossquestion / LoCoMo off / LoCoMo local_onnx on
+[final]      final closeout report + release docs only after gates pass
 ```
 
-每个 phase 独立 worktree，review-loop 后 merge → 下一 phase rebase。
+当前 tracked pointers 是 legacy/stale baseline；不要把它们当作 HEAD
+`96e9bb9` release evidence。

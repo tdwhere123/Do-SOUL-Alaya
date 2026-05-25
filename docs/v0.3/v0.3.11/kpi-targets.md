@@ -15,12 +15,13 @@ gate（与 v0.3.10 D20 区别：v0.3.10 不追 R@5 90%；v0.3.11 走"学 agentme
 | K1.4 R@5 | LoCoMo | 1982 | off | **≥ 55%** | 物理上限承认（gold 不含 query 字面词） |
 | K1.5 R@5 | LoCoMo | 1982 | **on** | **≥ 90%** | phase 3 embedding + phase 6 entity_seed 全开 |
 
-**当前实测**（HEAD `a7c37f8`，phase 0/1/2 merged）：
-- K1.1 = 82.4%（缺 7.6pt）
-- K1.2 = 85.0%（缺 5pt）
-- K1.3 = 待跑
-- K1.4 = 43.6%（缺 11.4pt）
-- K1.5 = 待跑
+**当前证据状态**（HEAD `96e9bb9`，implementation checkpoint）：
+- K1.1 / K1.2 / K1.3 / K1.4 / K1.5 均未在当前 HEAD 完成 full release bench。
+- tracked `latest-baseline*` 指针是 legacy/stale baseline，不是 HEAD
+  `96e9bb9` evidence。
+- local ONNX model cache 当前缺失，K1.5 需要 parent supply/fetch model 后再跑。
+- 不得声明 v0.3.11 release-ready、full evidence passed、或 Phase 7 acceptance
+  complete。
 
 ## Tier 2 — Token Efficiency（must，先 measure 不 brand）
 
@@ -71,6 +72,8 @@ tokens/year / ~$10/yr 是 lifetime baseline。Alaya 等价 metric 待 phase 7
 - 非平凡调优 commit 前必跑 ≥ 500（参 [project_bench_noise_floor]）
 - per-plane / per-hop / per-edge-type diagnostic 字段进 `RecallDiagnostics`
 - bench-history archive 含 per-phase snapshot + diff
+- 每个新 full bench archive 必须包含 `recall_token_economy` per recall call；
+  没有该 block 的 archive 不能作为 v0.3.11 release evidence
 - Tier 1 / Tier 3 ship gate；Tier 2 measure & publish；Tier 4 0 回归 hard
   gate；Tier 5 性能门槛
 

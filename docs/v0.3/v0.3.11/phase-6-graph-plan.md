@@ -30,6 +30,20 @@
 | **C** 降手动门槛 | 新 verb / first-class refs / digest / backfill | ✅ proposal 路径 | 推荐方案 |
 | **D** 召回路径 + 权重 | bench fixture 注入 + weight + 2-hop + hop_decay | ✅ 仅 recall scoring | 推荐方案 |
 
+## 当前 checkpoint（2026-05-25）
+
+当前分支已经从方案阶段进入 implementation checkpoint：
+
+- `621fcec` 落地 governance/edge proposal checkpoint，修正自动边必须走 governed
+  proposal/acceptance 语义的 release surface；
+- `8bf07c8` 落地 two-hop graph expansion diagnostics；
+- staged artifact-hygiene cleanup 删除旧 full diagnostics，不删除 KPI/report/pointer；
+- full public bench evidence 仍未在 HEAD `96e9bb9` 生成。
+
+因此，本文件下方的 wave 编排是历史执行计划；当前 release truth 以后续 checkpoint
+report、full bench archive、parent review 为准。不要把 graph diagnostics landed
+解读成 Phase 6 release acceptance 已通过。
+
 ## 子工作流 A — Query-side entity 入口
 
 **方案**（用户 2026-05-24 锁定推荐）：
@@ -165,7 +179,7 @@ MEMORY_GRAPH_EDGE_RECALL_WEIGHTS:
 - `graph_expansion_plane_count_per_hop[1, 2]`
 - `graph_expansion_plane_count_per_edge_type{supports, derives_from, recalls}`
 
-## 实施顺序（用户已锁定 wave 编排）
+## 历史实施顺序（用户已锁定 wave 编排）
 
 ```
 [Wave 2 并行 3 worktree]
@@ -188,6 +202,9 @@ recall-service entity seed 入口；Phase 5 改 splitLexicalTokens 实现；
 Phase 7 改 token instrument），可同时启动。
 
 ## 验收
+
+当前 checkpoint 未完成下列 release 验收；它们仍需要 current HEAD full bench 和
+parent review。
 
 | 子流 | 验收 |
 |---|---|

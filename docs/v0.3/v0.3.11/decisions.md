@@ -143,3 +143,29 @@ Wave 2: A entity 入口 + D-1 bench fixture + Phase 5 多语 BM25 + Phase 7
 Wave 3: B+C 自动建边 + 降门槛（依赖 Wave 2 A 落地后才有 entity 共现统计）
 Wave 4: D-2/3/4 召回路径合并 + Phase 4 abstention + closeout
 ```
+
+## D14 — v0.3.11 当前只标 implementation checkpoint（2026-05-25）
+
+`621fcec` / `8d2cbf7` / `8bf07c8` / `96e9bb9` 已在 `v0.3.11-completion`
+落地 governance/bench integrity、multilingual BM25、two-hop graph diagnostics、
+weak-evidence abstention calibration。
+
+**决定**：docs/README/status surface 只能声明 implementation checkpoint /
+evidence pending；不得声明 final release-ready、full evidence passed、或所有
+B1/B2/I1-I9/N1 已最终 close。
+
+**rationale**：full public benches 尚未在 HEAD `96e9bb9` 跑完，tracked
+`latest-baseline*` 指针是 legacy/stale baseline，不是当前 release evidence。
+
+## D15 — v0.3.11 evidence pointer 与 artifact hygiene 语义（2026-05-25）
+
+artifact-hygiene worker staged 删除 23 个旧 full diagnostics；这些 deletion 只说明
+release/source surface 清理，不是 KPI/report/pointer evidence。
+
+**决定**：后续 full bench write 必须使用 `latest-run*` 记录 newest run；只有无
+findings 且 executable hard gates 通过的 archive 才能推进 `latest-passing*`。
+`latest-baseline*` 只保留 legacy alias 语义，不可作为 current HEAD `96e9bb9`
+release evidence。
+
+**local_onnx note**：LoCoMo embedding-on gate 仍要求 local ONNX model cache；当前
+cache 缺失，必须由 parent supply/fetch 后再跑。

@@ -10,9 +10,9 @@
 
 ### *A local-first memory plane for CLI coding agents.*
 
-[![status](https://img.shields.io/badge/status-v0.3.11--release--gate--ready-informational?style=flat-square)](#where-this-is-going)
+[![status](https://img.shields.io/badge/status-v0.3.11--implementation--checkpoint-informational?style=flat-square)](#where-this-is-going)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-2839%20passing-success?style=flat-square)](#where-this-is-going)
+[![evidence](https://img.shields.io/badge/evidence-full--bench--pending-yellow?style=flat-square)](#where-this-is-going)
 [![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#quickstart)
 [![pnpm](https://img.shields.io/badge/pnpm-%E2%89%A59-F69220?style=flat-square&logo=pnpm&logoColor=white)](#quickstart)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](#architecture-at-a-glance)
@@ -115,6 +115,13 @@ apps/bench-runner/scripts/run-full-locomo-bench.sh --variant locomo10
 node apps/bench-runner/bin/alaya-bench-runner.mjs self
 node apps/bench-runner/bin/alaya-bench-runner.mjs live --help
 ```
+
+Checkpoint note (2026-05-25): HEAD `96e9bb9` has not rerun the full public
+release benches yet. Current tracked `latest-baseline*` pointers are
+legacy/stale baselines, not v0.3.11 HEAD release evidence. The staged
+artifact-hygiene cleanup removes old full diagnostics only; it does not delete
+KPI, report, or pointer evidence. Every new full release bench must include
+`recall_token_economy`.
 
 The shape of the bet is unchanged: a retrieval number is useful only
 when the durable claims an agent acts on are audited, reversible, and
@@ -649,8 +656,9 @@ place to look. The full project layout is documented in
 
 ### Current state (2026-05-25)
 
-v0.3.11 is the current release-gate readiness checkpoint; v0.3.4 was the first publicly
-released v0.3.x line. Cumulative since v0.3.0: real Codex and Claude
+v0.3.11 is the current implementation checkpoint with release evidence still
+pending; v0.3.4 was the first publicly released v0.3.x line. Cumulative since
+v0.3.0: real Codex and Claude
 Code MCP sessions autonomously run `soul.recall` →
 `soul.report_context_usage` during normal conversations, with a
 live-usage EventLog witness committed under `docs/v0.3/v0.3.0/`

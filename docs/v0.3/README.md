@@ -20,6 +20,7 @@
 | [`v0.3.8`](v0.3.8/README.md) | Ontology mid-layer recapture + codex-review wiring repair | done |
 | [`v0.3.9`](v0.3.9/README.md) | Three-layer trust-loop closeout + bench truth-up + 24 carry-forward tracking | done (with carry-forward into v0.3.10+) |
 | [`v0.3.10`](v0.3.10/README.md) | Read-side ranker repair + carry-forward closure program | controller implementation/fix-loop in progress; not release-ready until every phase fix-loop and full bench gate are clean |
+| [`v0.3.11`](v0.3.11/README.md) | Agentmemory-style peripheral retrieval upgrades, governance/bench integrity, token-economy evidence path | implementation checkpoint; full public bench evidence pending |
 
 ## What v0.3.0 is
 
@@ -145,6 +146,13 @@ docs/v0.3/
 └── v0.3.7/
     ├── README.md                          ← live bench archive + Inspector 403 repair slice
     └── release-notes.md
+└── v0.3.11/
+    ├── README.md                          ← implementation checkpoint + evidence status
+    ├── plan.md
+    ├── kpi-targets.md
+    ├── phase-6-graph-plan.md
+    ├── decisions.md
+    └── reports/
 ```
 
 The former `docs/v0.2/v0.2.1/` and `docs/v0.2/v0.2.2/` plan folders
