@@ -11,9 +11,9 @@ import {
 } from "@do-soul/alaya-eval";
 import {
   summarizeLongMemEvalRecallEvidence,
-  summarizeLongMemEvalReportSideEffects,
   type LongMemEvalDiagnosticsSidecar,
   type LongMemEvalRecallEvidenceSummary,
+  type LongMemEvalReportSideEffectSnapshot,
   type LongMemEvalReportSideEffectSummary
 } from "./diagnostics.js";
 
@@ -112,29 +112,138 @@ export function archiveEvidenceFromDiagnostics(
   };
 }
 
+type CompactCompatibleReportSideEffects = Omit<
+  LongMemEvalReportSideEffectSummary,
+  "snapshots"
+> & {
+  readonly snapshot_count?: unknown;
+  readonly snapshots?: LongMemEvalReportSideEffectSummary["snapshots"];
+};
+
 export function aggregateLongMemEvalArchiveEvidence(
   evidence: readonly LongMemEvalArchiveEvidenceSummary[]
 ): LongMemEvalArchiveEvidenceSummary {
   const sideEffects = evidence
     .map((item) => item.report_side_effects)
-    .filter((item): item is LongMemEvalReportSideEffectSummary => item !== null);
+    .filter((item) => item !== null) as CompactCompatibleReportSideEffects[];
   const recallEvidence = evidence
     .map((item) => item.scored_recall_evidence)
     .filter((item): item is LongMemEvalRecallEvidenceSummary => item !== null);
 
   return {
     report_side_effects:
-      sideEffects.length === 0
-        ? null
-        : summarizeLongMemEvalReportSideEffects({
-            mode: sideEffects[0]?.mode ?? "none",
-            snapshots: sideEffects.flatMap((item) => item.snapshots)
-          }),
+      aggregateReportSideEffects(sideEffects),
     scored_recall_evidence:
       recallEvidence.length === 0
         ? null
         : aggregateRecallEvidence(recallEvidence)
   };
+}
+
+function aggregateReportSideEffects(
+  sideEffects: readonly CompactCompatibleReportSideEffects[]
+): LongMemEvalReportSideEffectSummary | null {
+  if (sideEffects.length === 0) {
+    return null;
+  }
+
+  const memoryGraphEdgesByType: Record<string, number> = {};
+  let workspacesObserved = 0;
+  let memoryGraphEdgesTotal = 0;
+  let recallsEdgeCount = 0;
+  let pathRelationsTotal = 0;
+  let latestPathEventAt: string | null = null;
+  const snapshots: LongMemEvalReportSideEffectSnapshot[] = [];
+
+  for (const item of sideEffects) {
+    if (Array.isArray(item.snapshots)) {
+      snapshots.push(...item.snapshots);
+    } else {
+      requiredNonNegativeInteger(item.snapshot_count, "snapshot_count");
+    }
+    workspacesObserved += requiredFiniteNumber(
+      item.workspaces_observed,
+      "workspaces_observed"
+    );
+    memoryGraphEdgesTotal += requiredFiniteNumber(
+      item.memory_graph_edges_total,
+      "memory_graph_edges_total"
+    );
+    recallsEdgeCount += requiredFiniteNumber(
+      item.recalls_edge_count,
+      "recalls_edge_count"
+    );
+    pathRelationsTotal += requiredFiniteNumber(
+      item.path_relations_total,
+      "path_relations_total"
+    );
+    for (const [edgeType, count] of Object.entries(
+      requiredNumberRecord(
+        item.memory_graph_edges_by_type,
+        "memory_graph_edges_by_type"
+      )
+    )) {
+      memoryGraphEdgesByType[edgeType] =
+        (memoryGraphEdgesByType[edgeType] ?? 0) + count;
+    }
+    if (
+      item.latest_path_event_at !== null &&
+      item.latest_path_event_at !== undefined &&
+      (latestPathEventAt === null || item.latest_path_event_at > latestPathEventAt)
+    ) {
+      latestPathEventAt = item.latest_path_event_at;
+    }
+  }
+
+  return {
+    mode: sideEffects[0]?.mode ?? "none",
+    workspaces_observed: workspacesObserved,
+    memory_graph_edges_total: memoryGraphEdgesTotal,
+    memory_graph_edges_by_type: memoryGraphEdgesByType,
+    recalls_edge_count: recallsEdgeCount,
+    path_relations_total: pathRelationsTotal,
+    latest_path_event_at: latestPathEventAt,
+    snapshots
+  };
+}
+
+function requiredFiniteNumber(value: unknown, fieldName: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(
+      `invalid report_side_effects.${fieldName}: expected finite number`
+    );
+  }
+  return value;
+}
+
+function requiredNonNegativeInteger(value: unknown, fieldName: string): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < 0
+  ) {
+    throw new Error(
+      `invalid report_side_effects.${fieldName}: expected non-negative integer`
+    );
+  }
+  return value;
+}
+
+function requiredNumberRecord(
+  value: unknown,
+  fieldName: string
+): Record<string, number> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(
+      `invalid report_side_effects.${fieldName}: expected number record`
+    );
+  }
+
+  const result: Record<string, number> = {};
+  for (const [key, count] of Object.entries(value)) {
+    result[key] = requiredFiniteNumber(count, `${fieldName}.${key}`);
+  }
+  return result;
 }
 
 export async function readLongMemEvalDiagnosticsSidecar(

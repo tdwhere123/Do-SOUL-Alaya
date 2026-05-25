@@ -647,8 +647,15 @@ function buildMergedLongMemEvalDiagnosticsSidecar(
   payload: KpiPayload,
   shardDiagnostics: readonly (LongMemEvalDiagnosticsSidecar | null)[],
   evidence: LongMemEvalArchiveEvidenceSummary
-): LongMemEvalDiagnosticsSidecar {
+): MergedLongMemEvalDiagnosticsPayload {
   const questions = shardDiagnostics.flatMap((diagnostics) => diagnostics?.questions ?? []);
+  const questionCount = shardDiagnostics.reduce(
+    (sum, diagnostics) => sum + diagnosticQuestionCount(diagnostics),
+    0
+  );
+  const reportSideEffectSnapshotCount = aggregateReportSideEffectSnapshotCount(
+    shardDiagnostics
+  );
   const embeddingMode =
     shardDiagnostics.find((diagnostics): diagnostics is LongMemEvalDiagnosticsSidecar => diagnostics !== null)?.embedding_mode ??
     (payload.embedding_provider === "none" ? "disabled" : "env");
@@ -674,7 +681,7 @@ function buildMergedLongMemEvalDiagnosticsSidecar(
       )
   );
 
-  return {
+  const sidecar: LongMemEvalDiagnosticsSidecar = {
     schema_version: 1,
     bench_name: "public",
     split: payload.split,
@@ -697,6 +704,89 @@ function buildMergedLongMemEvalDiagnosticsSidecar(
     provider_state_summary: summarizeProviderStates(questions),
     questions
   };
+  return {
+    sidecar,
+    question_count: questionCount,
+    report_side_effects_snapshot_count: reportSideEffectSnapshotCount
+  };
+}
+
+interface MergedLongMemEvalDiagnosticsPayload {
+  readonly sidecar: LongMemEvalDiagnosticsSidecar;
+  readonly question_count: number;
+  readonly report_side_effects_snapshot_count: number | null;
+}
+
+function diagnosticQuestionCount(
+  diagnostics: LongMemEvalDiagnosticsSidecar | null
+): number {
+  if (diagnostics === null) {
+    return 0;
+  }
+  if (Array.isArray(diagnostics.questions)) {
+    return diagnostics.questions.length;
+  }
+  const compactQuestionCount = (diagnostics as { readonly question_count?: unknown })
+    .question_count;
+  return requiredCompactNonNegativeInteger(compactQuestionCount, "question_count");
+}
+
+function aggregateReportSideEffectSnapshotCount(
+  shardDiagnostics: readonly (LongMemEvalDiagnosticsSidecar | null)[]
+): number | null {
+  let total = 0;
+  let observed = false;
+  for (const diagnostics of shardDiagnostics) {
+    const reportSideEffects = diagnostics?.report_side_effects;
+    if (reportSideEffects === undefined) continue;
+    observed = true;
+    if (Array.isArray(reportSideEffects.snapshots)) {
+      total += reportSideEffects.snapshots.length;
+      continue;
+    }
+    const compactSnapshotCount = (
+      reportSideEffects as { readonly snapshot_count?: unknown }
+    ).snapshot_count;
+    total += requiredCompactNonNegativeInteger(
+      compactSnapshotCount,
+      "report_side_effects.snapshot_count"
+    );
+  }
+  return observed ? total : null;
+}
+
+function requiredCompactNonNegativeInteger(value: unknown, fieldName: string): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < 0
+  ) {
+    throw new Error(
+      `invalid compact diagnostics ${fieldName}: expected non-negative integer`
+    );
+  }
+  return value;
+}
+
+function renderMergedLongMemEvalCompactDiagnosticsSidecar(
+  payload: MergedLongMemEvalDiagnosticsPayload,
+  fullDiagnosticsArtifactPath: string
+): string {
+  const compact = JSON.parse(
+    renderCompactDiagnosticsSidecar(payload.sidecar, fullDiagnosticsArtifactPath)
+  ) as {
+    question_count?: unknown;
+    report_side_effects?: { snapshot_count?: unknown };
+  };
+  compact.question_count = payload.question_count;
+  if (
+    compact.report_side_effects !== undefined &&
+    payload.report_side_effects_snapshot_count !== null
+  ) {
+    compact.report_side_effects.snapshot_count =
+      payload.report_side_effects_snapshot_count;
+  }
+  return JSON.stringify(compact, null, 2) + "\n";
 }
 
 function aggregateReportUsage(
@@ -1200,7 +1290,9 @@ async function runMergeLongMemEvalCommand(
       shardDiagnostics,
       currentEvidence
     );
-    const fullDiagnosticsSidecar = renderDiagnosticsSidecar(diagnosticsPayload);
+    const fullDiagnosticsSidecar = renderDiagnosticsSidecar(
+      diagnosticsPayload.sidecar
+    );
     const fullDiagnosticsArtifactPath = await writeExternalDiagnosticsArtifact({
       historyRoot: opts.historyRoot,
       benchName: "public",
@@ -1208,7 +1300,7 @@ async function runMergeLongMemEvalCommand(
       filename: LONGMEMEVAL_DIAGNOSTICS_FILENAME,
       contents: fullDiagnosticsSidecar
     });
-    const diagnosticsSidecar = renderCompactDiagnosticsSidecar(
+    const diagnosticsSidecar = renderMergedLongMemEvalCompactDiagnosticsSidecar(
       diagnosticsPayload,
       fullDiagnosticsArtifactPath
     );

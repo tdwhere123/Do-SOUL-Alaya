@@ -449,6 +449,227 @@ describe("merge-longmemeval validations", () => {
     expect(exitCode).toBe(0);
   });
 
+  it("merges compact shard diagnostics without side-effect snapshots", async () => {
+    const shardA = path.join(tmpRoot, "shard-compact-diagnostics");
+    const shardB = path.join(tmpRoot, "shard-missing-side-effects");
+    const rows = Array.from({ length: 5 }, (_, index) => ({
+      id: `q-compact-${index + 1}`,
+      version: 1,
+      hit_at_5: true,
+      tier: "warm" as const
+    }));
+    const fullDiagnostics = makeShardDiagnostics();
+    const fullReportSideEffects =
+      fullDiagnostics.report_side_effects as Record<string, unknown>;
+    const compactReportSideEffects = {
+      ...Object.fromEntries(
+        Object.entries(fullReportSideEffects).filter(([key]) => key !== "snapshots")
+      ),
+      snapshot_count: 5
+    };
+
+    await writeShardRoot(
+      shardA,
+      makeShardKpi({
+        policy_shape: "chat",
+        simulate_report: "mixed",
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 1,
+          per_scenario: rows
+        }
+      }),
+      makeShardDiagnostics({
+        compact_schema_version: 1,
+        question_count: 5,
+        full_diagnostics_artifact_path: "/tmp/full-diagnostics.json",
+        questions: undefined,
+        report_side_effects: compactReportSideEffects
+      })
+    );
+    await writeShardRoot(
+      shardB,
+      makeShardKpi({
+        policy_shape: "chat",
+        simulate_report: "mixed",
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 1,
+          per_scenario: rows.map((row) => ({
+            ...row,
+            id: row.id.replace("q-compact", "q-missing-side-effects")
+          }))
+        }
+      }),
+      makeShardDiagnostics({
+        compact_schema_version: 1,
+        question_count: 5,
+        full_diagnostics_artifact_path: "/tmp/full-diagnostics.json",
+        questions: undefined,
+        report_side_effects: undefined
+      })
+    );
+
+    const historyRoot = path.join(tmpRoot, "history-compact-diagnostics");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shardA,
+      shardB
+    ]);
+
+    expect(exitCode).toBe(0);
+    const pointer = JSON.parse(
+      await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
+    ) as { slug: string };
+    const diagnostics = JSON.parse(
+      await readFile(
+        path.join(
+          historyRoot,
+          "public",
+          pointer.slug,
+          LONGMEMEVAL_DIAGNOSTICS_FILENAME
+        ),
+        "utf8"
+      )
+    ) as {
+      question_count: number;
+      questions?: unknown[];
+      report_side_effects?: {
+        memory_graph_edges_total: number;
+        recalls_edge_count: number;
+        path_relations_total: number;
+        snapshot_count: number;
+      };
+    };
+    expect(diagnostics.question_count).toBe(10);
+    expect(diagnostics.questions).toBeUndefined();
+    expect(diagnostics.report_side_effects?.memory_graph_edges_total).toBe(2);
+    expect(diagnostics.report_side_effects?.recalls_edge_count).toBe(2);
+    expect(diagnostics.report_side_effects?.path_relations_total).toBe(0);
+    expect(diagnostics.report_side_effects?.snapshot_count).toBe(5);
+  });
+
+  it("fails closed when present side-effect counters are malformed", async () => {
+    const shard = path.join(tmpRoot, "shard-malformed-side-effects");
+    await writeShardRoot(
+      shard,
+      makeShardKpi({
+        policy_shape: "chat",
+        simulate_report: "mixed",
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 1
+        }
+      }),
+      makeShardDiagnostics({
+        report_side_effects: {
+          ...(makeShardDiagnostics().report_side_effects as Record<string, unknown>),
+          memory_graph_edges_total: "bad"
+        }
+      })
+    );
+
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      path.join(tmpRoot, "history-malformed-side-effects"),
+      "--shards",
+      shard
+    ]);
+
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toContain(
+      "invalid report_side_effects.memory_graph_edges_total: expected finite number"
+    );
+  });
+
+  it("fails closed when compact side-effect snapshot_count is malformed", async () => {
+    const shard = path.join(tmpRoot, "shard-malformed-snapshot-count");
+    const fullReportSideEffects =
+      makeShardDiagnostics().report_side_effects as Record<string, unknown>;
+    const compactReportSideEffects = {
+      ...Object.fromEntries(
+        Object.entries(fullReportSideEffects).filter(([key]) => key !== "snapshots")
+      ),
+      snapshot_count: "bad"
+    };
+    await writeShardRoot(
+      shard,
+      makeShardKpi({
+        policy_shape: "chat",
+        simulate_report: "mixed",
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 1
+        }
+      }),
+      makeShardDiagnostics({
+        compact_schema_version: 1,
+        question_count: 5,
+        questions: undefined,
+        report_side_effects: compactReportSideEffects
+      })
+    );
+
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      path.join(tmpRoot, "history-malformed-snapshot-count"),
+      "--shards",
+      shard
+    ]);
+
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toContain(
+      "invalid report_side_effects.snapshot_count: expected non-negative integer"
+    );
+  });
+
+  it("fails closed when compact question_count is malformed", async () => {
+    const shard = path.join(tmpRoot, "shard-malformed-question-count");
+    await writeShardRoot(
+      shard,
+      makeShardKpi({
+        policy_shape: "chat",
+        simulate_report: "mixed",
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 1
+        }
+      }),
+      makeShardDiagnostics({
+        compact_schema_version: 1,
+        question_count: "bad",
+        questions: undefined,
+        report_side_effects: undefined
+      })
+    );
+
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      path.join(tmpRoot, "history-malformed-question-count"),
+      "--shards",
+      shard
+    ]);
+
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toContain(
+      "invalid compact diagnostics question_count: expected non-negative integer"
+    );
+  });
+
   it("reports a clear error when a shard root has no usable pointer", async () => {
     const shard = path.join(tmpRoot, "shard-no-pointer");
     await mkdir(path.join(shard, "public"), { recursive: true });
