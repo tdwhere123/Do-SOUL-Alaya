@@ -213,6 +213,9 @@ const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>
 // edits visible to recall ordering without waiting for retention decay
 // or activation rescore. Final score stays clamp01.
 const CONFIDENCE_DIRECT_WEIGHT = 0.08;
+// Prior-only activation/confidence should not make weak query evidence look
+// answer-confident. Full evidence keeps the pre-existing score shape.
+const WEAK_EVIDENCE_PRIOR_WEIGHT_FLOOR = 0.72;
 
 interface CoarseCandidateDraft {
   readonly entry: Readonly<MemoryEntry>;
@@ -2924,12 +2927,34 @@ export class RecallService {
       relevanceFactor,
       fusionWeights
     );
-    const adjustedBaseWeight = Math.max(0, baseWeight - queryEvidenceTransfer);
+    const queryEvidenceCalibrationStrength = Math.max(
+      relevanceFactor,
+      graphSupportFactor,
+      embeddingSimilarityFactor
+    );
+    const shouldCalibrateWeakEvidence =
+      queryEvidenceCalibrationStrength < 1 &&
+      (plasticityFactor > 0 || (confidenceFactor > 0 && queryEvidenceCalibrationStrength > 0));
+    const evidenceContributionCalibration = shouldCalibrateWeakEvidence
+      ? queryEvidenceCalibrationStrength
+      : 1;
+    const priorEvidenceCalibration =
+      shouldCalibrateWeakEvidence
+        ? WEAK_EVIDENCE_PRIOR_WEIGHT_FLOOR +
+          (1 - WEAK_EVIDENCE_PRIOR_WEIGHT_FLOOR) * queryEvidenceCalibrationStrength
+        : 1;
+    const calibratedRelevanceFactor = relevanceFactor * evidenceContributionCalibration;
+    const effectiveRelevanceWeight =
+      (weights.relevance +
+        additiveWeights.NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT +
+        queryEvidenceTransfer) *
+      evidenceContributionCalibration;
+    const adjustedBaseWeight = Math.max(0, baseWeight - queryEvidenceTransfer) * priorEvidenceCalibration;
     const weightedActivation = activationScore * adjustedBaseWeight;
-    const weightedRelevance = relevanceFactor * weights.relevance;
+    const weightedRelevance = calibratedRelevanceFactor * weights.relevance;
     const weightedRelevanceDirect =
-      relevanceFactor * additiveWeights.NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT;
-    const weightedQueryEvidenceTransfer = relevanceFactor * queryEvidenceTransfer;
+      calibratedRelevanceFactor * additiveWeights.NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT;
+    const weightedQueryEvidenceTransfer = calibratedRelevanceFactor * queryEvidenceTransfer;
     const weightedGraphSupport = graphSupportFactor * weights.graph_support;
     // EMBEDDING_SIMILARITY_WEIGHT is the mode-invariant additive sub-weight: a
     // small, clamped boost applied here regardless of embedding-on / off so the
@@ -2939,7 +2964,8 @@ export class RecallService {
     // (resolveRrfFusionWeights) — neither of which goes through this term.
     const weightedEmbeddingSimilarity = embeddingSimilarityFactor * EMBEDDING_SIMILARITY_WEIGHT;
     const weightedPathPlasticity = plasticityFactor * pathPlasticityWeight;
-    const weightedConfidence = confidenceFactor * additiveWeights.CONFIDENCE_DIRECT_WEIGHT;
+    const weightedConfidence =
+      confidenceFactor * additiveWeights.CONFIDENCE_DIRECT_WEIGHT * priorEvidenceCalibration;
     const weightedBudgetPenalty = budgetPenalty * weights.budget_penalty;
     const weightedConflictPenalty = conflictPenalty * weights.conflict_penalty;
 
@@ -2981,10 +3007,7 @@ export class RecallService {
         weighted_contradiction_penalty: contradictionPenalty,
         query_evidence_transfer: queryEvidenceTransfer,
         adjusted_base_weight: adjustedBaseWeight,
-        effective_relevance_weight:
-          weights.relevance +
-          additiveWeights.NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT +
-          queryEvidenceTransfer,
+        effective_relevance_weight: effectiveRelevanceWeight,
         conflict_penalty: conflictPenalty,
         contradiction_penalty: contradictionPenalty,
         confidence: confidenceFactor,

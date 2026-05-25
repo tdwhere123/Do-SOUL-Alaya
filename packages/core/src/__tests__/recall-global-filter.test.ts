@@ -338,7 +338,7 @@ describe("RecallService global project-mapping filter", () => {
     expect((accepted?.relevance_score ?? 0) - (advisory?.relevance_score ?? 0)).toBeCloseTo(
       expectedDynamicGap
     );
-    expect((accepted?.relevance_score ?? 0) - (advisory?.relevance_score ?? 0)).toBeCloseTo(0.1362);
+    expect((accepted?.relevance_score ?? 0) - (advisory?.relevance_score ?? 0)).toBeCloseTo(0.1143348);
     expect(accepted?.is_advisory).toBe(false);
     expect(advisory?.is_advisory).toBe(true);
   });

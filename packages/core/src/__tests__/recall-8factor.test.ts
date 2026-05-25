@@ -17,6 +17,8 @@ import {
 import { RecallService, type RecallServiceDependencies } from "../recall-service.js";
 import { mapBudgetPenalty, PATH_PLASTICITY_WEIGHT } from "../recall-service-helpers.js";
 
+const FALSE_CONFIDENT_ACCEPTANCE_THRESHOLD = 0.91;
+
 function createTaskSurface(displayName = "Implement recall"): TaskObjectSurface {
   return {
     runtime_id: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
@@ -480,6 +482,183 @@ describe("RecallService 8-factor scoring", () => {
     expect(withTransfer.candidates[0]?.score_factors?.adjusted_base_weight).toBeCloseTo(0.45);
     expect(withTransfer.candidates[0]?.score_factors?.effective_relevance_weight).toBeCloseTo(0.59);
     expect(withTransfer.candidates[0]?.score_factors?.weighted_query_evidence_transfer).toBeCloseTo(0.25);
+  });
+
+  it("keeps weak or absent evidence below false-confident recall confidence", async () => {
+    const { dependencies: noEvidenceDependencies, searchByKeyword: noEvidenceSearch } = createDependencies([
+      createMemoryEntry({
+        object_id: "no-evidence",
+        content: "Dormant unrelated prior",
+        activation_score: 1,
+        confidence: 1
+      })
+    ]);
+    noEvidenceSearch.mockResolvedValue([]);
+    const noEvidenceService = new RecallService(noEvidenceDependencies);
+
+    const noEvidenceResult = await noEvidenceService.recall({
+      taskSurface: createTaskSurface("missing answer query"),
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      strategy: "build"
+    });
+    const noEvidence = noEvidenceResult.candidates.find((candidate) => candidate.object_id === "no-evidence");
+
+    expect(noEvidence?.score_factors?.content_relevance ?? 0).toBe(0);
+    expect(noEvidence?.relevance_score ?? 1).toBeLessThan(FALSE_CONFIDENT_ACCEPTANCE_THRESHOLD);
+
+    const { dependencies, searchByKeyword } = createDependencies(
+      [
+        createMemoryEntry({
+          object_id: "weak-lexical",
+          content: "Archived unrelated policy fragment",
+          activation_score: 1,
+          confidence: 1
+        })
+      ],
+      [],
+      {},
+      {
+        graphSupportByMemoryId: { "weak-lexical": 0 }
+      }
+    );
+    searchByKeyword.mockResolvedValue([{ object_id: "weak-lexical", normalized_rank: 0.65 }]);
+    const service = new RecallService(dependencies);
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface("missing answer query"),
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      strategy: "build"
+    });
+
+    const weakLexical = result.candidates.find((candidate) => candidate.object_id === "weak-lexical");
+
+    expect(weakLexical?.score_factors?.content_relevance).toBeCloseTo(0.65);
+    expect(weakLexical?.score_factors?.graph_support ?? 0).toBe(0);
+    expect(weakLexical?.score_factors?.adjusted_base_weight).toBeLessThan(
+      (weakLexical?.score_factors?.base_weight ?? 0) -
+        (weakLexical?.score_factors?.query_evidence_transfer ?? 0)
+    );
+    expect(weakLexical?.score_factors?.weighted_relevance).toBeLessThan(
+      (weakLexical?.score_factors?.content_relevance ?? 0) *
+        (weakLexical?.score_factors?.resolved_activation_weights?.relevance ?? 0)
+    );
+    const weakFactors = weakLexical?.score_factors;
+    const deliveredWeightedRelevance =
+      (weakFactors?.weighted_relevance ?? 0) +
+      (weakFactors?.weighted_relevance_direct ?? 0) +
+      (weakFactors?.weighted_query_evidence_transfer ?? 0);
+    expect(deliveredWeightedRelevance).toBeCloseTo(
+      (weakFactors?.content_relevance ?? 0) *
+        (weakFactors?.effective_relevance_weight ?? 0)
+    );
+    expect(weakLexical?.relevance_score ?? 1).toBeLessThan(FALSE_CONFIDENT_ACCEPTANCE_THRESHOLD);
+  });
+
+  it("keeps off-topic path-plasticity candidates below false-confident recall confidence", async () => {
+    const { dependencies, searchByKeyword } = createDependencies(
+      [
+        createMemoryEntry({
+          object_id: "off-topic-path",
+          content: "Dormant unrelated prior",
+          dimension: MemoryDimension.FACT,
+          activation_score: 1,
+          confidence: 1
+        })
+      ],
+      [],
+      {},
+      {
+        graphSupportByMemoryId: { "off-topic-path": 0 },
+        pathPlasticityByMemoryId: { "off-topic-path": 1 }
+      }
+    );
+    searchByKeyword.mockResolvedValue([]);
+    const service = new RecallService(dependencies);
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface("missing answer query"),
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      strategy: "chat"
+    });
+
+    const offTopic = result.candidates.find((candidate) => candidate.object_id === "off-topic-path");
+
+    expect(offTopic?.score_factors?.content_relevance).toBe(0);
+    expect(offTopic?.score_factors?.graph_support ?? 0).toBe(0);
+    expect(offTopic?.score_factors?.path_plasticity).toBe(1);
+    expect(offTopic?.relevance_score ?? 1).toBeLessThan(FALSE_CONFIDENT_ACCEPTANCE_THRESHOLD);
+  });
+
+  it("keeps weak conflicted contradiction losers below false-confident recall confidence", async () => {
+    const memories = [
+      createMemoryEntry({
+        object_id: "losing-claim",
+        content: "Stale contradicted prior",
+        dimension: MemoryDimension.PROCEDURE,
+        activation_score: 1,
+        confidence: 1,
+        contradiction_count: 1
+      }),
+      createMemoryEntry({
+        object_id: "winner-claim-1",
+        content: "Current accepted procedure",
+        dimension: MemoryDimension.PROCEDURE,
+        activation_score: 0.75,
+        confidence: 1
+      })
+    ];
+    const { dependencies, searchByKeyword } = createDependencies(
+      memories,
+      [createSlot()],
+      { "claim-form-winner-1": ["winner-claim-1"] },
+      {
+        graphSupportByMemoryId: { "losing-claim": 0, "winner-claim-1": 0 }
+      }
+    );
+    searchByKeyword.mockResolvedValue([{ object_id: "losing-claim", normalized_rank: 0.76 }]);
+    const service = new RecallService(dependencies);
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface("weak contradicted procedure"),
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      strategy: "analyze"
+    });
+
+    const loser = result.candidates.find((candidate) => candidate.object_id === "losing-claim");
+
+    expect(loser?.score_factors?.content_relevance).toBeCloseTo(0.76);
+    expect(loser?.score_factors?.conflict_penalty).toBe(1);
+    expect(loser?.score_factors?.contradiction_penalty).toBeCloseTo(0.05);
+    expect(loser?.relevance_score ?? 1).toBeLessThan(FALSE_CONFIDENT_ACCEPTANCE_THRESHOLD);
+  });
+
+  it("does not cap strong lexical evidence below useful recall confidence", async () => {
+    const { dependencies, searchByKeyword } = createDependencies([
+      createMemoryEntry({
+        object_id: "strong-evidence",
+        content: "Direct answer evidence",
+        activation_score: 1,
+        confidence: 1
+      })
+    ]);
+    searchByKeyword.mockResolvedValue([{ object_id: "strong-evidence", normalized_rank: 1 }]);
+    const service = new RecallService(dependencies);
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface("Direct answer evidence"),
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      strategy: "build"
+    });
+
+    const strong = result.candidates.find((candidate) => candidate.object_id === "strong-evidence");
+
+    expect(strong?.score_factors?.content_relevance).toBeCloseTo(1);
+    expect(strong?.relevance_score ?? 0).toBeGreaterThan(FALSE_CONFIDENT_ACCEPTANCE_THRESHOLD);
   });
 
   it.each([
