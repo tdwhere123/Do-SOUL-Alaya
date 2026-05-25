@@ -82,6 +82,10 @@ import {
   type CompileSeedRunner,
   type SessionSeededTurn
 } from "./compile-seed.js";
+import {
+  appendSeedExtractionReleaseBlockerToFindings,
+  appendSeedExtractionReleaseBlockerToReport
+} from "./seed-extraction-release-blocker.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
@@ -698,8 +702,14 @@ export async function runLongMemEval(
     benchArchiveDiscriminator(policyShape, simulateReport)
   );
 
-  const report = renderReport(payload, previous, diff);
-  const findings = renderFindings(payload, diff);
+  const report = appendSeedExtractionReleaseBlockerToReport(
+    renderReport(payload, previous, diff),
+    payload
+  );
+  const findings = appendSeedExtractionReleaseBlockerToFindings(
+    renderFindings(payload, diff),
+    payload
+  );
   const reportSideEffects = summarizeLongMemEvalReportSideEffects({
     mode: simulateReport,
     snapshots: reportSideEffectSnapshots

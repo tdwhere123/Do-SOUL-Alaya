@@ -56,6 +56,10 @@ import {
   type CompileSeedRunner,
   type SessionSeededTurn
 } from "./compile-seed.js";
+import {
+  appendSeedExtractionReleaseBlockerToFindings,
+  appendSeedExtractionReleaseBlockerToReport
+} from "./seed-extraction-release-blocker.js";
 
 const LONGMEMEVAL_DIAGNOSTICS_FILENAME = "longmemeval-diagnostics.json";
 
@@ -520,8 +524,14 @@ export async function runLongMemEvalMultiturn(
     previous?.run_at ?? ""
   );
   const slug = entrySlug(runAt, commitSha7);
-  const report = renderReport(payload, previous, diff);
-  const findings = renderFindings(payload, diff);
+  const report = appendSeedExtractionReleaseBlockerToReport(
+    renderReport(payload, previous, diff),
+    payload
+  );
+  const findings = appendSeedExtractionReleaseBlockerToFindings(
+    renderFindings(payload, diff),
+    payload
+  );
   const diagnosticsPayload = {
     schema_version: 1,
     bench_name: "public-multiturn",

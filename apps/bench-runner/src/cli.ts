@@ -48,6 +48,11 @@ import {
 import { writeExternalDiagnosticsArtifact } from "./longmemeval/diagnostics-artifacts.js";
 import { runLiveBench } from "./live/runner.js";
 import { runLongMemEval } from "./longmemeval/runner.js";
+import {
+  appendSeedExtractionReleaseBlockerToFindings,
+  appendSeedExtractionReleaseBlockerToReport,
+  seedExtractionReleaseBlockerExitCode
+} from "./longmemeval/seed-extraction-release-blocker.js";
 import { runSelfBench } from "./self/runner.js";
 import { fetchLocomo } from "./locomo/fetch.js";
 import { runLocomo } from "./locomo/runner.js";
@@ -578,12 +583,13 @@ function exitCodeForVerdicts(
 }
 
 function exitCodeForBenchmarkResult(payload: KpiPayload): number {
+  const seedExtractionExitCode = seedExtractionReleaseBlockerExitCode(payload);
+  if (seedExtractionExitCode !== 0) return seedExtractionExitCode;
   if (releaseHardGateVerdict(payload) === "fail") return 1;
   return exitCodeForVerdicts(payload.diff_vs_previous?.verdict_per_kpi);
 }
 
 function exitCodeForMergedLongMemEvalResult(payload: KpiPayload): number {
-  if (hasSeedExtractionReleaseBlocker(payload)) return 1;
   return exitCodeForBenchmarkResult(payload);
 }
 
@@ -635,40 +641,6 @@ function mergeSeedExtractionPath(
       0
     )
   };
-}
-
-function hasSeedExtractionReleaseBlocker(payload: KpiPayload): boolean {
-  return payload.kpi.seed_extraction_path?.path === "no_credentials_fallback";
-}
-
-function appendSeedExtractionReleaseBlockerToReport(
-  report: string,
-  payload: KpiPayload
-): string {
-  if (!hasSeedExtractionReleaseBlocker(payload)) {
-    return report;
-  }
-  return (
-    report.trimEnd() +
-    "\n\n## Release evidence blockers\n\n" +
-    "- **seed_extraction_path no_credentials_fallback**: merged LongMemEval evidence used degraded no-credential full-turn seeding, so this archive is not release-comparable to official_api_compile evidence.\n"
-  );
-}
-
-function appendSeedExtractionReleaseBlockerToFindings(
-  findings: string | null,
-  payload: KpiPayload
-): string | null {
-  if (!hasSeedExtractionReleaseBlocker(payload)) {
-    return findings;
-  }
-  const section =
-    "## Release evidence blockers\n\n" +
-    "- **seed_extraction_path no_credentials_fallback**: merged LongMemEval evidence used degraded no-credential full-turn seeding, so this archive is blocked even if numeric KPI gates pass.\n";
-  if (findings === null) {
-    return `# Bench Findings — ${payload.bench_name} / ${payload.split}\n\n${section}`;
-  }
-  return `${findings.trimEnd()}\n\n${section}`;
 }
 
 function computePercentile(values: readonly number[], p: number): number {

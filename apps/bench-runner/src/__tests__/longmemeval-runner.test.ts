@@ -1169,13 +1169,17 @@ describe("LongMemEval runner", () => {
       // KPI payload must pass schema validation
       const parseResult = KpiPayloadSchema.safeParse(result.payload);
       expect(parseResult.success).toBe(true);
-      expect(await readFile(result.reportPath, "utf8")).toContain("Recall weights: source=cli");
-      expect(await readFile(result.reportPath, "utf8")).toContain(
-        "Recall pipeline: fusion-rrf-synthesis-v2"
-      );
-      expect(await readFile(result.reportPath, "utf8")).toContain(
+      const report = await readFile(result.reportPath, "utf8");
+      expect(report).toContain("Recall weights: source=cli");
+      expect(report).toContain("Recall pipeline: fusion-rrf-synthesis-v2");
+      expect(report).toContain(
         "Seed policy: label_independent_all_fact (label-independent)"
       );
+      expect(report).toContain("Release evidence blockers");
+      expect(report).toContain("seed_extraction_path no_credentials_fallback");
+      const findings = await readFile(result.findingsPath, "utf8");
+      expect(findings).toContain("seed_extraction_path no_credentials_fallback");
+      expect(findings).toContain("offline_fallbacks=");
 
       // Structural assertions
       expect(result.payload.bench_name).toBe("public");

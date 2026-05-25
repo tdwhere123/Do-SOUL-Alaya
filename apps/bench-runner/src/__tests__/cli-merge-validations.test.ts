@@ -1399,6 +1399,164 @@ describe("merge-longmemeval validations", () => {
     expect(findings).toContain("seed_extraction_path no_credentials_fallback");
   });
 
+  it("blocks merged official seed extraction when any offline fallback occurs", async () => {
+    const shardA = path.join(tmpRoot, "shard-official-clean-seed");
+    const shardB = path.join(tmpRoot, "shard-official-offline-seed");
+    const rowsA = Array.from({ length: 5 }, (_, index) => ({
+      id: `q-seed-clean-${index + 1}`,
+      version: 1,
+      hit_at_5: true,
+      tier: "warm" as const
+    }));
+    const rowsB = Array.from({ length: 5 }, (_, index) => ({
+      id: `q-seed-offline-${index + 1}`,
+      version: 1,
+      hit_at_5: true,
+      tier: "warm" as const
+    }));
+    await writeShardRoot(
+      shardA,
+      makeShardKpi({
+        evaluated_count: 5,
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 1,
+          seed_extraction_path: makeSeedExtractionPath({
+            path: "official_api_compile",
+            cache_hits: 10,
+            facts_produced: 20
+          }),
+          per_scenario: rowsA
+        }
+      })
+    );
+    await writeShardRoot(
+      shardB,
+      makeShardKpi({
+        evaluated_count: 5,
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 1,
+          seed_extraction_path: makeSeedExtractionPath({
+            path: "official_api_compile",
+            cache_hits: 11,
+            offline_fallbacks: 1,
+            facts_produced: 21,
+            signals_dropped: 4,
+            parse_dropped: 3
+          }),
+          per_scenario: rowsB
+        }
+      })
+    );
+
+    const historyRoot = path.join(tmpRoot, "history-seed-offline-fallback");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shardA,
+      shardB
+    ]);
+
+    expect(exitCode).toBe(1);
+    const pointer = JSON.parse(
+      await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
+    ) as { slug: string };
+    const merged = JSON.parse(
+      await readFile(
+        path.join(historyRoot, "public", pointer.slug, "kpi.json"),
+        "utf8"
+      )
+    ) as KpiPayload;
+    const report = await readFile(
+      path.join(historyRoot, "public", pointer.slug, "report.md"),
+      "utf8"
+    );
+    const findings = await readFile(
+      path.join(historyRoot, "public", pointer.slug, "findings.md"),
+      "utf8"
+    );
+
+    expect(merged.kpi.seed_extraction_path).toMatchObject({
+      path: "official_api_compile",
+      cache_hits: 21,
+      offline_fallbacks: 1,
+      facts_produced: 41,
+      signals_dropped: 4,
+      parse_dropped: 3
+    });
+    expect(report).toContain("Seed extraction path: official_api_compile");
+    expect(report).toContain("Release evidence blockers");
+    expect(findings).toContain("seed_extraction_path offline_fallbacks");
+    expect(findings).toContain("offline_fallbacks=1");
+  });
+
+  it("does not block merged official seed extraction when offline fallbacks are zero", async () => {
+    const shardA = path.join(tmpRoot, "shard-official-zero-a");
+    const shardB = path.join(tmpRoot, "shard-official-zero-b");
+    const rowsA = Array.from({ length: 5 }, (_, index) => ({
+      id: `q-seed-zero-a-${index + 1}`,
+      version: 1,
+      hit_at_5: true,
+      tier: "warm" as const
+    }));
+    const rowsB = Array.from({ length: 5 }, (_, index) => ({
+      id: `q-seed-zero-b-${index + 1}`,
+      version: 1,
+      hit_at_5: true,
+      tier: "warm" as const
+    }));
+    await writeShardRoot(
+      shardA,
+      makeShardKpi({
+        evaluated_count: 5,
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 1,
+          seed_extraction_path: makeSeedExtractionPath({
+            path: "official_api_compile",
+            cache_hits: 5,
+            facts_produced: 10
+          }),
+          per_scenario: rowsA
+        }
+      })
+    );
+    await writeShardRoot(
+      shardB,
+      makeShardKpi({
+        evaluated_count: 5,
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 1,
+          seed_extraction_path: makeSeedExtractionPath({
+            path: "official_api_compile",
+            cache_hits: 6,
+            facts_produced: 11
+          }),
+          per_scenario: rowsB
+        }
+      })
+    );
+
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      path.join(tmpRoot, "history-seed-official-zero"),
+      "--shards",
+      shardA,
+      shardB
+    ]);
+
+    expect(exitCode).toBe(0);
+  });
+
   it("returns non-zero when release hard gates fail without a previous baseline", async () => {
     const shardA = path.join(tmpRoot, "shard-gate-a");
     const shardB = path.join(tmpRoot, "shard-gate-b");
