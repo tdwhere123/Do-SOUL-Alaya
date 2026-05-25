@@ -419,7 +419,7 @@ describe("LongMemEval runner", () => {
     });
   });
 
-  it("uses fused rank order for non-monotonic diagnostics when fusion metadata exists", () => {
+  it("uses final delivered rank order for non-monotonic diagnostics", () => {
     const row = buildQuestionDiagnostic({
       questionId: "q-fused-rank-order",
       goldMemoryIds: ["memory-a"],

@@ -611,13 +611,21 @@ function hasPathStreamContribution(delivered: DiagnosticRecallResult): boolean {
 function isDeliveredOrderNonMonotonic(
   results: readonly DiagnosticRecallResult[]
 ): boolean {
+  const deliveredRanks = results.map((result) => result.rank);
+  if (deliveredRanks.every(isFiniteDiagnosticRank)) {
+    return isDeliveredRankOrderNonMonotonic(deliveredRanks);
+  }
   const fusedRanks = results.map((result) => result.fused_rank);
-  if (fusedRanks.every((rank): rank is number => rank !== null)) {
+  if (fusedRanks.every(isFiniteDiagnosticRank)) {
     return isDeliveredRankOrderNonMonotonic(fusedRanks);
   }
   return isDeliveredScoreOrderNonMonotonic(
     results.map((result) => result.relevance_score)
   );
+}
+
+function isFiniteDiagnosticRank(rank: number | null | undefined): rank is number {
+  return typeof rank === "number" && Number.isFinite(rank);
 }
 
 function isDeliveredRankOrderNonMonotonic(ranks: readonly number[]): boolean {

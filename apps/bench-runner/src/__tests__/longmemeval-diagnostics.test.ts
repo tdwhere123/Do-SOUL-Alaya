@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { BenchRecallDiagnosticsSchema } from "../harness/recall-diagnostics-schema.js";
 import { LongMemEvalQuestionDiagnosticSchema } from "../longmemeval/diagnostics-schema.js";
 import {
+  buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic,
   summarizeLongMemEvalRecallEvidence
 } from "../longmemeval/diagnostics.js";
@@ -180,5 +181,122 @@ describe("LongMemEval recall diagnostics", () => {
         graph_expansion_plane_count_per_hop: ["bad", 0]
       })
     ).toThrow();
+  });
+
+  it("does not flag valid final delivery order when fused ranks decrease after rerank", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-final-rerank",
+      goldMemoryIds: ["memory-a"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [
+        { object_id: "memory-a", rank: 1, relevance_score: 0.8 },
+        { object_id: "memory-b", rank: 2, relevance_score: 0.95 },
+        { object_id: "memory-c", rank: 3, relevance_score: 0.7 }
+      ],
+      hitAt1: true,
+      hitAt5: true,
+      hitAt10: true,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: {
+        diagnostics: {
+          candidate_pool: [
+            { object_id: "memory-a", final_rank: 1, fused_rank: 2 },
+            { object_id: "memory-b", final_rank: 2, fused_rank: 1 },
+            { object_id: "memory-c", final_rank: 3, fused_rank: 3 }
+          ]
+        }
+      }
+    });
+
+    const metrics = buildLongMemEvalQualityMetrics([row]);
+
+    expect(row.delivered_results.map((result) => result.rank)).toEqual([1, 2, 3]);
+    expect(row.delivered_results.map((result) => result.fused_rank)).toEqual([
+      2,
+      1,
+      3
+    ]);
+    expect(metrics.non_monotonic_count).toBe(0);
+    expect(metrics.non_monotonic_rate).toBe(0);
+  });
+
+  it("flags delivered rows that are not ordered by final delivered rank", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-final-rank-disorder",
+      goldMemoryIds: ["memory-a"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [
+        { object_id: "memory-a", rank: 1, relevance_score: 0.9 },
+        { object_id: "memory-b", rank: 3, relevance_score: 0.8 },
+        { object_id: "memory-c", rank: 2, relevance_score: 0.7 }
+      ],
+      hitAt1: true,
+      hitAt5: true,
+      hitAt10: true,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: {
+        diagnostics: {
+          candidate_pool: [
+            { object_id: "memory-a", final_rank: 1, fused_rank: 1 },
+            { object_id: "memory-b", final_rank: 3, fused_rank: 2 },
+            { object_id: "memory-c", final_rank: 2, fused_rank: 3 }
+          ]
+        }
+      }
+    });
+
+    const metrics = buildLongMemEvalQualityMetrics([row]);
+
+    expect(metrics.non_monotonic_count).toBe(1);
+    expect(metrics.non_monotonic_rate).toBe(1);
+  });
+
+  it("falls back to fused rank order for legacy rows without delivered ranks", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-legacy-fused-rank",
+      goldMemoryIds: [],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [],
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: false,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: { diagnostics: { candidate_pool: [] } }
+    });
+    const legacyRow = {
+      ...row,
+      delivered_results: [
+        {
+          object_id: "memory-b",
+          relevance_score: 0.4,
+          fused_rank: 2,
+          fused_score: null,
+          per_stream_rank: null,
+          fused_rank_contribution_per_stream: null,
+          plane_first_admitted: null,
+          plane_winning_admission: null,
+          score_factors: null
+        },
+        {
+          object_id: "memory-a",
+          relevance_score: 0.5,
+          fused_rank: 1,
+          fused_score: null,
+          per_stream_rank: null,
+          fused_rank_contribution_per_stream: null,
+          plane_first_admitted: null,
+          plane_winning_admission: null,
+          score_factors: null
+        }
+      ]
+    } as unknown as typeof row;
+
+    const metrics = buildLongMemEvalQualityMetrics([legacyRow]);
+
+    expect(metrics.non_monotonic_count).toBe(1);
+    expect(metrics.non_monotonic_rate).toBe(1);
   });
 });
