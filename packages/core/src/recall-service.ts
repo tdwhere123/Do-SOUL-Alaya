@@ -213,8 +213,10 @@ const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>
 // edits visible to recall ordering without waiting for retention decay
 // or activation rescore. Final score stays clamp01.
 const CONFIDENCE_DIRECT_WEIGHT = 0.08;
-// Prior-only activation/confidence should not make weak query evidence look
-// answer-confident. Full evidence keeps the pre-existing score shape.
+// invariant: prior-only activation/confidence MUST NOT make weak query
+// evidence look answer-confident. Doubles as the gate threshold for
+// shouldCalibrateWeakEvidence: query-grounded evidence at or above this
+// floor is treated as sufficient and the score shape is preserved.
 const WEAK_EVIDENCE_PRIOR_WEIGHT_FLOOR = 0.72;
 
 interface CoarseCandidateDraft {
@@ -2932,8 +2934,13 @@ export class RecallService {
       graphSupportFactor,
       embeddingSimilarityFactor
     );
+    // invariant: calibration only fires when query-grounded evidence is
+    // BELOW WEAK_EVIDENCE_PRIOR_WEIGHT_FLOOR. At-or-above the floor evidence
+    // is treated as sufficient and the score shape is preserved. A prior-side
+    // signal (plasticity / confidence) must also be present; without one
+    // there is no prior term to dampen.
     const shouldCalibrateWeakEvidence =
-      queryEvidenceCalibrationStrength < 1 &&
+      queryEvidenceCalibrationStrength < WEAK_EVIDENCE_PRIOR_WEIGHT_FLOOR &&
       (plasticityFactor > 0 || (confidenceFactor > 0 && queryEvidenceCalibrationStrength > 0));
     const evidenceContributionCalibration = shouldCalibrateWeakEvidence
       ? queryEvidenceCalibrationStrength

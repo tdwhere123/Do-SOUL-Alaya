@@ -618,7 +618,12 @@ describe("RecallService 8-factor scoring", () => {
         graphSupportByMemoryId: { "losing-claim": 0, "winner-claim-1": 0 }
       }
     );
-    searchByKeyword.mockResolvedValue([{ object_id: "losing-claim", normalized_rank: 0.76 }]);
+    // invariant: this test exercises the WEAK-evidence arbitration-loser
+    // path. normalized_rank must keep content_relevance below
+    // WEAK_EVIDENCE_PRIOR_WEIGHT_FLOOR (0.72) so calibration fires;
+    // otherwise the loser rides priors past the false-confident floor
+    // even with conflict_penalty applied.
+    searchByKeyword.mockResolvedValue([{ object_id: "losing-claim", normalized_rank: 0.5 }]);
     const service = new RecallService(dependencies);
 
     const result = await service.recall({
@@ -630,7 +635,7 @@ describe("RecallService 8-factor scoring", () => {
 
     const loser = result.candidates.find((candidate) => candidate.object_id === "losing-claim");
 
-    expect(loser?.score_factors?.content_relevance).toBeCloseTo(0.76);
+    expect(loser?.score_factors?.content_relevance).toBeLessThan(0.72);
     expect(loser?.score_factors?.conflict_penalty).toBe(1);
     expect(loser?.score_factors?.contradiction_penalty).toBeCloseTo(0.05);
     expect(loser?.relevance_score ?? 1).toBeLessThan(FALSE_CONFIDENT_ACCEPTANCE_THRESHOLD);
@@ -659,6 +664,164 @@ describe("RecallService 8-factor scoring", () => {
 
     expect(strong?.score_factors?.content_relevance).toBeCloseTo(1);
     expect(strong?.relevance_score ?? 0).toBeGreaterThan(FALSE_CONFIDENT_ACCEPTANCE_THRESHOLD);
+  });
+
+  // invariant: shouldCalibrateWeakEvidence must NOT fire when query-grounded
+  // evidence sits at or above WEAK_EVIDENCE_PRIOR_WEIGHT_FLOOR. Strong-
+  // evidence queries keep the un-calibrated score shape; full-weak queries
+  // with no prior signal do not enter the calibration branch at all.
+  it("does not reshape strong query-grounded evidence below saturation", async () => {
+    const { dependencies, searchByKeyword } = createDependencies(
+      [
+        createMemoryEntry({
+          object_id: "strong-multi-evidence",
+          content: "Strong multi-signal evidence",
+          activation_score: 1,
+          confidence: 1
+        })
+      ],
+      [],
+      {},
+      {
+        // graph_support count 3 → normalizeGraphSupport returns 1.0 (above
+        // WEAK_EVIDENCE_PRIOR_WEIGHT_FLOOR). queryEvidenceCalibrationStrength
+        // = max(relevance, graph_support, embedding) ≥ 1.0, so the gate
+        // condition `< 0.72` is false.
+        graphSupportByMemoryId: { "strong-multi-evidence": 3 }
+      }
+    );
+    searchByKeyword.mockResolvedValue([
+      { object_id: "strong-multi-evidence", normalized_rank: 0.9 }
+    ]);
+    const service = new RecallService(dependencies);
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface("Strong multi-signal evidence"),
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      strategy: "build"
+    });
+
+    const strong = result.candidates.find(
+      (candidate) => candidate.object_id === "strong-multi-evidence"
+    );
+    const factors = strong?.score_factors;
+    expect(factors?.graph_support).toBeCloseTo(1);
+
+    // gate did not fire → weighted_relevance is content_relevance *
+    // resolved relevance weight (no evidenceContributionCalibration shrink).
+    const expectedWeightedRelevance =
+      (factors?.content_relevance ?? 0) *
+      (factors?.resolved_activation_weights?.relevance ?? 0);
+    expect(factors?.weighted_relevance ?? 0).toBeCloseTo(expectedWeightedRelevance);
+
+    // gate did not fire → adjusted_base_weight equals base_weight minus
+    // queryEvidenceTransfer (no priorEvidenceCalibration shrink).
+    const expectedAdjustedBaseWeight = Math.max(
+      0,
+      (factors?.base_weight ?? 0) - (factors?.query_evidence_transfer ?? 0)
+    );
+    expect(factors?.adjusted_base_weight ?? 0).toBeCloseTo(expectedAdjustedBaseWeight);
+  });
+
+  it("calibrates weak-evidence candidates carrying a prior signal", async () => {
+    const { dependencies, searchByKeyword } = createDependencies(
+      [
+        createMemoryEntry({
+          object_id: "weak-prior-heavy",
+          content: "Tangential prior text",
+          activation_score: 1,
+          confidence: 1
+        })
+      ],
+      [],
+      {},
+      {
+        graphSupportByMemoryId: { "weak-prior-heavy": 0 }
+      }
+    );
+    // normalized_rank 0.5 → content_relevance ≈ 0.31, below floor 0.72.
+    searchByKeyword.mockResolvedValue([
+      { object_id: "weak-prior-heavy", normalized_rank: 0.5 }
+    ]);
+    const service = new RecallService(dependencies);
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface("missing answer query"),
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      strategy: "build"
+    });
+
+    const weak = result.candidates.find(
+      (candidate) => candidate.object_id === "weak-prior-heavy"
+    );
+    const factors = weak?.score_factors;
+
+    // gate fired → weighted_relevance strictly less than the un-calibrated
+    // upper bound (content_relevance * resolved relevance weight).
+    const upperWeightedRelevance =
+      (factors?.content_relevance ?? 0) *
+      (factors?.resolved_activation_weights?.relevance ?? 0);
+    expect(factors?.weighted_relevance ?? 0).toBeLessThan(upperWeightedRelevance);
+
+    // gate fired → adjusted_base_weight strictly less than the un-calibrated
+    // upper bound (base_weight - queryEvidenceTransfer).
+    const upperAdjustedBaseWeight =
+      (factors?.base_weight ?? 0) - (factors?.query_evidence_transfer ?? 0);
+    expect(factors?.adjusted_base_weight ?? 0).toBeLessThan(upperAdjustedBaseWeight);
+    expect(weak?.relevance_score ?? 1).toBeLessThan(FALSE_CONFIDENT_ACCEPTANCE_THRESHOLD);
+  });
+
+  it("does not calibrate when neither prior nor evidence is present", async () => {
+    const { dependencies, searchByKeyword } = createDependencies(
+      [
+        createMemoryEntry({
+          object_id: "all-weak",
+          content: "Dormant unrelated text",
+          activation_score: 0,
+          confidence: 0
+        })
+      ],
+      [],
+      {},
+      {
+        graphSupportByMemoryId: { "all-weak": 0 }
+      }
+    );
+    // no FTS hit → content_relevance 0, graph_support 0, plasticity absent,
+    // activation 0, confidence 0 → prior-side inner condition is false.
+    searchByKeyword.mockResolvedValue([]);
+    const service = new RecallService(dependencies);
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface("missing answer query"),
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      strategy: "build"
+    });
+
+    const allWeak = result.candidates.find(
+      (candidate) => candidate.object_id === "all-weak"
+    );
+    const factors = allWeak?.score_factors;
+    expect(factors?.content_relevance ?? 0).toBe(0);
+
+    // gate did not fire (no prior signal) → weighted_relevance equals the
+    // un-calibrated product. Both sides are 0 here but the equality still
+    // pins the "no reshape" semantics.
+    const expectedWeightedRelevance =
+      (factors?.content_relevance ?? 0) *
+      (factors?.resolved_activation_weights?.relevance ?? 0);
+    expect(factors?.weighted_relevance ?? 0).toBeCloseTo(expectedWeightedRelevance);
+
+    // adjusted_base_weight equals base_weight - queryEvidenceTransfer, with
+    // no priorEvidenceCalibration shrink.
+    const expectedAdjustedBaseWeight = Math.max(
+      0,
+      (factors?.base_weight ?? 0) - (factors?.query_evidence_transfer ?? 0)
+    );
+    expect(factors?.adjusted_base_weight ?? 0).toBeCloseTo(expectedAdjustedBaseWeight);
   });
 
   it.each([
