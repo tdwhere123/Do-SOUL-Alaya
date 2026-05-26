@@ -1,4 +1,5 @@
 import type { KpiPayload, QualityMetrics, Verdict } from "./kpi-schema.js";
+import { evaluateSeedExtractionReleaseBlocker } from "./seed-extraction-blocker.js";
 import { rollupWorstVerdict } from "./thresholds.js";
 
 export interface BenchmarkHardGate {
@@ -39,6 +40,14 @@ export function releaseHardGateVerdict(current: KpiPayload): Verdict {
 }
 
 export function releaseHardGateAllowsLatestPassing(current: KpiPayload): boolean {
+  // @anchor seed-extraction-release-blocker
+  // Reject degraded seed-extraction provenance before any numeric gate, so a
+  // degraded archive cannot reach latest_passing through any caller that
+  // bypasses the bench-runner CLI exit (programmatic consumer, automation,
+  // Inspector). See finding B0-1.
+  if (evaluateSeedExtractionReleaseBlocker(current) !== null) {
+    return false;
+  }
   if (isTier1LatestPassingSurface(current) && !isReleaseGradeTier1Payload(current)) {
     return false;
   }

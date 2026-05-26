@@ -31,9 +31,18 @@ export {
 export {
   collectReleaseHardGates,
   combineVerdicts,
+  releaseHardGateAllowsLatestPassing,
   releaseHardGateVerdict,
   type BenchmarkHardGate
 } from "./release-gates.js";
+
+export {
+  evaluateSeedExtractionReleaseBlocker,
+  formatSeedExtractionCounters,
+  hasSeedExtractionReleaseBlocker,
+  isLongMemEvalBenchName,
+  type SeedExtractionReleaseBlocker
+} from "./seed-extraction-blocker.js";
 
 export {
   DEFAULT_THRESHOLDS,

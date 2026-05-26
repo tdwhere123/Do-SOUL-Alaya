@@ -8,10 +8,11 @@ import {
 } from "../longmemeval/seed-extraction-release-blocker.js";
 
 function makePayload(
-  seedExtractionPath?: KpiPayload["kpi"]["seed_extraction_path"]
+  seedExtractionPath?: KpiPayload["kpi"]["seed_extraction_path"],
+  benchName: KpiPayload["bench_name"] = "public"
 ): KpiPayload {
   return {
-    bench_name: "public",
+    bench_name: benchName,
     split: "longmemeval-s",
     kpi: {
       ...(seedExtractionPath === undefined
@@ -73,9 +74,8 @@ describe("LongMemEval seed extraction release blocker", () => {
       .toContain("seed_extraction_path no_credentials_fallback");
   });
 
-  it("does not block clean official extraction or legacy no-provenance payloads", () => {
+  it("does not block clean official extraction payloads", () => {
     const cleanOfficial = makePayload(makeSeedExtractionPath());
-    const legacyNoProvenance = makePayload();
 
     expect(hasSeedExtractionReleaseBlocker(cleanOfficial)).toBe(false);
     expect(seedExtractionReleaseBlockerExitCode(cleanOfficial)).toBe(0);
@@ -83,8 +83,26 @@ describe("LongMemEval seed extraction release blocker", () => {
       .toBe("report\n");
     expect(appendSeedExtractionReleaseBlockerToFindings(null, cleanOfficial))
       .toBeNull();
+  });
 
-    expect(hasSeedExtractionReleaseBlocker(legacyNoProvenance)).toBe(false);
-    expect(seedExtractionReleaseBlockerExitCode(legacyNoProvenance)).toBe(0);
+  it("blocks LongMemEval payloads with no seed_extraction_path provenance (defensive default)", () => {
+    // Previously this case ("legacy no-provenance") was silently allowed.
+    // Finding B0-1 closes the bypass: missing path on a LongMemEval bench is
+    // now treated as degraded, because seeding integrity cannot be verified.
+    const missingOnLongMemEval = makePayload();
+
+    expect(hasSeedExtractionReleaseBlocker(missingOnLongMemEval)).toBe(true);
+    expect(seedExtractionReleaseBlockerExitCode(missingOnLongMemEval)).toBe(1);
+    expect(appendSeedExtractionReleaseBlockerToFindings(null, missingOnLongMemEval))
+      .toContain("seed_extraction_path missing_on_longmemeval");
+  });
+
+  it("does not block non-LongMemEval payloads that pre-date the provenance field", () => {
+    // LoCoMo and other non-LongMemEval benches may legitimately omit the
+    // field today; back-compat is preserved until they emit it explicitly.
+    const locomoMissing = makePayload(undefined, "public-locomo");
+
+    expect(hasSeedExtractionReleaseBlocker(locomoMissing)).toBe(false);
+    expect(seedExtractionReleaseBlockerExitCode(locomoMissing)).toBe(0);
   });
 });

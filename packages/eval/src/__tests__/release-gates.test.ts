@@ -6,6 +6,24 @@ import {
   releaseHardGateVerdict
 } from "../release-gates.js";
 
+function makeSeedExtractionPath(
+  input: Partial<NonNullable<KpiPayload["kpi"]["seed_extraction_path"]>> = {}
+): NonNullable<KpiPayload["kpi"]["seed_extraction_path"]> {
+  return {
+    path: "official_api_compile",
+    cache_hits: 276,
+    llm_calls: 0,
+    offline_fallbacks: 0,
+    live_extraction_failures: 0,
+    cached_extraction_failures: 0,
+    facts_produced: 1872,
+    signals_dropped: 4,
+    parse_dropped: 3,
+    compile_overflow_dropped: 0,
+    ...input
+  };
+}
+
 function buildPayload(commit: string): KpiPayload {
   return {
     bench_name: "self",
@@ -210,7 +228,11 @@ describe("release hard gates", () => {
         ...buildPayload("abc1234").kpi,
         r_at_5: 0.95,
         latency_ms_p95: 110,
-        quality_metrics: passingQualityMetrics()
+        quality_metrics: passingQualityMetrics(),
+        // @anchor seed-extraction-release-blocker
+        // Required for LongMemEval release-grade archives — finding B0-1
+        // treats missing provenance as degraded.
+        seed_extraction_path: makeSeedExtractionPath()
       }
     };
 
@@ -251,5 +273,92 @@ describe("release hard gates", () => {
     expect(collectReleaseHardGates(payload)).toEqual([]);
     expect(releaseHardGateVerdict(payload)).toBe("ok");
     expect(releaseHardGateAllowsLatestPassing(payload)).toBe(true);
+  });
+
+  // @anchor seed-extraction-release-blocker
+  // Finding B0-1: latest_passing must also consult the seed-extraction
+  // blocker, not only the bench-runner CLI exit. Otherwise a degraded
+  // archive could promote through programmatic consumers or the history
+  // entry layer (entryAllowsLatestPassing -> releaseHardGateAllowsLatestPassing).
+  describe("seed-extraction blocker interaction (B0-1)", () => {
+    function buildLongMemEvalReleaseGradePayload(
+      seedExtractionPath?: NonNullable<KpiPayload["kpi"]["seed_extraction_path"]>
+    ): KpiPayload {
+      return {
+        ...buildPayload("abc1234"),
+        bench_name: "public",
+        split: "longmemeval-s",
+        embedding_provider: "none",
+        dataset: {
+          name: "longmemeval_s",
+          size: 500,
+          source: "fixture"
+        },
+        sample_size: 500,
+        evaluated_count: 500,
+        kpi: {
+          ...buildPayload("abc1234").kpi,
+          r_at_5: 0.95,
+          latency_ms_p95: 110,
+          quality_metrics: passingQualityMetrics(),
+          ...(seedExtractionPath === undefined
+            ? {}
+            : { seed_extraction_path: seedExtractionPath })
+        }
+      };
+    }
+
+    it("(a) blocks latest_passing when path=no_credentials_fallback on LongMemEval even if R@5 95%", () => {
+      const payload = buildLongMemEvalReleaseGradePayload(
+        makeSeedExtractionPath({
+          path: "no_credentials_fallback",
+          cache_hits: 0,
+          offline_fallbacks: 8
+        })
+      );
+
+      expect(collectReleaseHardGates(payload).every((g) => g.passed)).toBe(true);
+      expect(releaseHardGateAllowsLatestPassing(payload)).toBe(false);
+    });
+
+    it("(b) allows latest_passing when official_api_compile + offline_fallbacks=0 + R@5 95%", () => {
+      const payload = buildLongMemEvalReleaseGradePayload(makeSeedExtractionPath());
+
+      expect(collectReleaseHardGates(payload).every((g) => g.passed)).toBe(true);
+      expect(releaseHardGateAllowsLatestPassing(payload)).toBe(true);
+    });
+
+    it("(c) blocks latest_passing when seed_extraction_path is undefined on LongMemEval bench", () => {
+      const payload = buildLongMemEvalReleaseGradePayload();
+
+      expect(collectReleaseHardGates(payload).every((g) => g.passed)).toBe(true);
+      expect(releaseHardGateAllowsLatestPassing(payload)).toBe(false);
+    });
+
+    it("(d) keeps backward compat: seed_extraction_path undefined on LoCoMo (non-LongMemEval) does not block", () => {
+      const payload = buildLocomoPayload(1982, 1982, 0.56);
+
+      expect(payload.kpi.seed_extraction_path).toBeUndefined();
+      expect(releaseHardGateAllowsLatestPassing(payload)).toBe(true);
+    });
+
+    it("(e) blocks latest_passing when a non-LongMemEval bench reports degraded path explicitly", () => {
+      // Invariant: if any future bench emits seed_extraction_path with a
+      // degraded value, the blocker must fire regardless of bench name —
+      // covers LoCoMo / live if they ever adopt compile-seed provenance.
+      const payload: KpiPayload = {
+        ...buildLocomoPayload(1982, 1982, 0.95),
+        kpi: {
+          ...buildLocomoPayload(1982, 1982, 0.95).kpi,
+          seed_extraction_path: makeSeedExtractionPath({
+            offline_fallbacks: 3,
+            live_extraction_failures: 3
+          })
+        }
+      };
+
+      expect(collectReleaseHardGates(payload).every((g) => g.passed)).toBe(true);
+      expect(releaseHardGateAllowsLatestPassing(payload)).toBe(false);
+    });
   });
 });

@@ -84,6 +84,27 @@ function perCallStat(value: number) {
   return { mean: value, p50: value, p95: value, max: value };
 }
 
+// @anchor seed-extraction-release-blocker
+// Release-grade LongMemEval archives require seed_extraction_path provenance
+// per finding B0-1; missing the field on these benches is treated as
+// degraded and blocked from latest_passing.
+function cleanSeedExtractionPath(): NonNullable<
+  KpiPayload["kpi"]["seed_extraction_path"]
+> {
+  return {
+    path: "official_api_compile",
+    cache_hits: 276,
+    llm_calls: 0,
+    offline_fallbacks: 0,
+    live_extraction_failures: 0,
+    cached_extraction_failures: 0,
+    facts_produced: 1872,
+    signals_dropped: 4,
+    parse_dropped: 3,
+    compile_overflow_dropped: 0
+  };
+}
+
 function buildFullLongMemEvalPayload(
   benchName: "public" | "public-multiturn" | "public-crossquestion",
   commit: string,
@@ -111,7 +132,8 @@ function buildFullLongMemEvalPayload(
       ...buildPayload(commit).kpi,
       r_at_5: rAt5,
       latency_ms_p95: 120,
-      quality_metrics: passingQualityMetrics()
+      quality_metrics: passingQualityMetrics(),
+      seed_extraction_path: cleanSeedExtractionPath()
     }
   };
 }
@@ -1074,7 +1096,8 @@ describe("history archive", () => {
         ...buildPayload("aaa1111").kpi,
         r_at_5: 0.91,
         latency_ms_p95: 110,
-        quality_metrics: passingQualityMetrics()
+        quality_metrics: passingQualityMetrics(),
+        seed_extraction_path: cleanSeedExtractionPath()
       }
     };
 
