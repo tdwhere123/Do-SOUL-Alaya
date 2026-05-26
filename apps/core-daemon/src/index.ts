@@ -390,11 +390,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     greenService
   });
   const graphExploreService = new GraphExploreService({
-    memoryRepo: memoryEntryRepo,
     edgeRepo: memoryGraphEdgeRepo,
-    eventLogRepo,
-    runtimeNotifier,
-    eventPublisher
+    eventLogRepo
   });
   const edgeProposalService = new EdgeProposalService({
     memoryRepo: memoryEntryRepo,

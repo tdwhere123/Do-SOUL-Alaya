@@ -507,10 +507,13 @@ describe("post-turn extract Garden task", () => {
                 domain_tags: ["preference"],
                 confidence: 0.78,
                 evidence_refs: ["evidence-1"],
+                // invariant: graph-edge ref hints are first-class on
+                // CandidateMemorySignal (see candidate-memory-signal.ts §79-84).
+                // raw_payload is not a back-door for them.
+                source_memory_refs: ["memory-a"],
+                incompatible_with_refs: ["memory-b"],
                 raw_payload: {
-                  observation: "user prefers vitest watch mode",
-                  source_memory_refs: ["memory-a"],
-                  incompatible_with_refs: ["memory-b"]
+                  observation: "user prefers vitest watch mode"
                 }
               }
             ]
@@ -534,7 +537,7 @@ describe("post-turn extract Garden task", () => {
     });
   });
 
-  it("preserves invalid raw_payload graph ref keys when completing Garden tasks", async () => {
+  it("ignores raw_payload graph ref keys when completing Garden tasks (first-class fields only)", async () => {
     const harness = await createRoutingHarness({ provider_kind: "host_worker" });
     harness.enqueuePostTurnTask();
     await harness.runScheduler();

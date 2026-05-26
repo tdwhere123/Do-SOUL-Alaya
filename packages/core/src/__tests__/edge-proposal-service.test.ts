@@ -221,6 +221,64 @@ describe("EdgeProposalService", () => {
     expect(repo.findById("edge_prop_proposal-1")?.confidence).toBe(0.5);
   });
 
+  // invariant: clamp lives in proposeEdge core, not the surface
+  // wrapper. Any future caller that bypasses proposeExplicitEdge and
+  // calls proposeEdge directly with triggerSource: EXPLICIT must still
+  // be clamped to the 0.5 agent self-report ceiling.
+  it("clamps EXPLICIT-triggered proposeEdge confidence to 0.5 even when called directly", async () => {
+    const repo = createProposalRepo();
+    const service = new EdgeProposalService({
+      memoryRepo: createMemoryRepo(),
+      proposalRepo: repo,
+      graphPort: createGraphPort(),
+      eventPublisher: createEventPublisher(),
+      generateId: () => "proposal-1",
+      now: () => "2026-05-24T00:00:00.000Z"
+    });
+
+    await service.proposeEdge({
+      sourceMemoryId: "memory-a",
+      targetMemoryId: "memory-b",
+      edgeType: "recalls",
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      triggerSource: EdgeProposalTriggerSource.EXPLICIT,
+      confidence: 0.9,
+      reason: "future direct caller bypassing proposeExplicitEdge"
+    });
+
+    expect(repo.findById("edge_prop_proposal-1")?.confidence).toBe(0.5);
+  });
+
+  // Non-EXPLICIT trigger sources are produced by system code paths
+  // (system / conflict_detection / recall_cross_link / bench_seed)
+  // where the confidence is computed from evidence, not self-reported
+  // by an agent — these must NOT be clamped to 0.5.
+  it("does not clamp non-EXPLICIT proposeEdge confidence", async () => {
+    const repo = createProposalRepo();
+    const service = new EdgeProposalService({
+      memoryRepo: createMemoryRepo(),
+      proposalRepo: repo,
+      graphPort: createGraphPort(),
+      eventPublisher: createEventPublisher(),
+      generateId: () => "proposal-1",
+      now: () => "2026-05-24T00:00:00.000Z"
+    });
+
+    await service.proposeEdge({
+      sourceMemoryId: "memory-a",
+      targetMemoryId: "memory-b",
+      edgeType: "recalls",
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      triggerSource: EdgeProposalTriggerSource.RECALL_CROSS_LINK,
+      confidence: 0.85,
+      reason: "system-computed evidence weight"
+    });
+
+    expect(repo.findById("edge_prop_proposal-1")?.confidence).toBe(0.85);
+  });
+
   it("rejects cross-workspace endpoints before proposing", async () => {
     const service = new EdgeProposalService({
       memoryRepo: createMemoryRepo({ "memory-b": "workspace-2" }),

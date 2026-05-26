@@ -1,10 +1,7 @@
-import { randomUUID } from "node:crypto";
 import {
   GraphNeighborSchema,
-  MemoryGraphEdgeSchema,
   MemoryGraphEdgeTypeSchema,
   GraphAuditorEventType,
-  SoulGraphEdgeCreatedPayloadSchema,
   SoulGraphExploreCompletedPayloadSchema,
   type EventLogEntry,
   type GraphExploreDir,
@@ -13,29 +10,17 @@ import {
   type MemoryGraphEdgeTypeValue
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
-import type { EventPublisher, EventPublisherInput } from "./event-publisher.js";
 import { parseObjectId } from "./shared/validators.js";
 
-export interface GraphExploreServiceMemoryRepoPort {
-  findById(objectId: string): Promise<{ readonly object_id: string; readonly workspace_id: string } | null>;
-}
-
 export interface GraphExploreServiceEdgeRepoPort {
-  // invariant: synchronous so addEdge can wrap row insert + audit event in
-  // one SQLite transaction (`packages/protocol/src/soul/memory-graph.ts`
-  // §43-54 atomicity gap closure).
-  create(edge: Readonly<MemoryGraphEdge>): Readonly<MemoryGraphEdge>;
+  // invariant: edge writes do not enter through GraphExploreService.
+  // Durable edges may only be created by `EdgeProposalService` accept
+  // path; this port is read-only + delete here.
   findByMemoryId(
     memoryId: string,
     workspaceId: string,
     edgeTypes?: readonly MemoryGraphEdgeTypeValue[]
   ): Promise<readonly Readonly<MemoryGraphEdge>[]>;
-  findBySourceAndTarget(
-    sourceMemoryId: string,
-    targetMemoryId: string,
-    edgeType: MemoryGraphEdgeTypeValue,
-    workspaceId: string
-  ): Promise<Readonly<MemoryGraphEdge> | null>;
   /** @deprecated use `countInboundEdgesWeighted`. Retained for
    * diagnostic surfaces that still need a raw supports-only count. */
   countInboundSupports(memoryId: string, workspaceId: string): Promise<number>;
@@ -48,34 +33,10 @@ export interface GraphExploreServiceEventLogRepoPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
 }
 
-export interface GraphExploreServiceRuntimeNotifierPort {
-  notifyEntry(entry: EventLogEntry): void | Promise<void>;
-}
-
-export type GraphExploreEventPublisherPort = Pick<
-  EventPublisher,
-  "appendManyWithMutation"
->;
-
 export interface GraphExploreServiceDependencies {
-  readonly memoryRepo: GraphExploreServiceMemoryRepoPort;
   readonly edgeRepo: GraphExploreServiceEdgeRepoPort;
   readonly eventLogRepo: GraphExploreServiceEventLogRepoPort;
-  readonly runtimeNotifier: GraphExploreServiceRuntimeNotifierPort;
-  // invariant: addEdge wraps row insert + audit event in one SQLite
-  // transaction via this port. Without it, a crash between EventLog append
-  // and edge row insert leaves an orphan audit row or a silent edge.
-  readonly eventPublisher: GraphExploreEventPublisherPort;
-  readonly generateId?: () => string;
   readonly now?: () => string;
-}
-
-export interface GraphExploreAddEdgeParams {
-  readonly sourceMemoryId: string;
-  readonly targetMemoryId: string;
-  readonly edgeType: MemoryGraphEdgeTypeValue;
-  readonly workspaceId: string;
-  readonly runId?: string | null;
 }
 
 export interface GraphExploreOptions {
@@ -85,69 +46,10 @@ export interface GraphExploreOptions {
 }
 
 export class GraphExploreService {
-  private readonly generateId: () => string;
   private readonly now: () => string;
 
   public constructor(private readonly dependencies: GraphExploreServiceDependencies) {
-    this.generateId = dependencies.generateId ?? randomUUID;
     this.now = dependencies.now ?? (() => new Date().toISOString());
-  }
-
-  public async addEdge(params: GraphExploreAddEdgeParams): Promise<Readonly<MemoryGraphEdge>> {
-    const sourceMemoryId = parseObjectId(params.sourceMemoryId);
-    const targetMemoryId = parseObjectId(params.targetMemoryId);
-    const workspaceId = parseObjectId(params.workspaceId);
-    const edgeType = parseMemoryGraphEdgeType(params.edgeType);
-
-    if (sourceMemoryId === targetMemoryId) {
-      throw new CoreError("VALIDATION", "Source and target memory must be different.");
-    }
-
-    await this.requireMemoryInWorkspace(sourceMemoryId, "Source", workspaceId);
-    await this.requireMemoryInWorkspace(targetMemoryId, "Target", workspaceId);
-
-    const existing = await this.dependencies.edgeRepo.findBySourceAndTarget(
-      sourceMemoryId,
-      targetMemoryId,
-      edgeType,
-      workspaceId
-    );
-
-    if (existing !== null) {
-      return existing;
-    }
-
-    const createdAt = this.now();
-    const edge = MemoryGraphEdgeSchema.parse({
-      edge_id: `edge_${this.generateId()}`,
-      source_memory_id: sourceMemoryId,
-      target_memory_id: targetMemoryId,
-      edge_type: edgeType,
-      workspace_id: workspaceId,
-      created_at: createdAt
-    });
-
-    const eventInput: EventPublisherInput = {
-      event_type: GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED,
-      entity_type: "memory_graph_edge",
-      entity_id: edge.edge_id,
-      workspace_id: workspaceId,
-      run_id: params.runId ?? null,
-      caused_by: "system",
-      payload_json: SoulGraphEdgeCreatedPayloadSchema.parse({
-        edge_id: edge.edge_id,
-        source_memory_id: sourceMemoryId,
-        target_memory_id: targetMemoryId,
-        edge_type: edgeType,
-        workspace_id: workspaceId,
-        occurred_at: createdAt
-      })
-    };
-
-    return await this.dependencies.eventPublisher.appendManyWithMutation(
-      [eventInput],
-      (_entries: readonly EventLogEntry[]) => this.dependencies.edgeRepo.create(edge)
-    );
   }
 
   public async exploreOneHop(
@@ -238,18 +140,6 @@ export class GraphExploreService {
 
   public async deleteEdge(edgeId: string): Promise<void> {
     await this.dependencies.edgeRepo.delete(parseObjectId(edgeId));
-  }
-
-  private async requireMemoryInWorkspace(memoryId: string, label: string, workspaceId: string): Promise<void> {
-    const memory = await this.dependencies.memoryRepo.findById(memoryId);
-
-    if (memory === null) {
-      throw new CoreError("NOT_FOUND", `${label} memory not found: ${memoryId}`);
-    }
-
-    if (memory.workspace_id !== workspaceId) {
-      throw new CoreError("VALIDATION", `${label} memory does not belong to workspace ${workspaceId}: ${memoryId}`);
-    }
   }
 }
 

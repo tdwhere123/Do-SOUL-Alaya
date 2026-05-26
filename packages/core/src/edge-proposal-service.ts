@@ -120,14 +120,24 @@ export class EdgeProposalService {
     }
 
     const createdAt = this.now();
+    const triggerSource = params.triggerSource ?? EdgeProposalTriggerSource.EXPLICIT;
+    const requestedConfidence = params.confidence ?? 0.5;
+    // invariant: agent-reported confidence is policy-clamped at the
+    // service core, not at any surface wrapper. EXPLICIT proposals come
+    // from attached MCP agents whose self-reported confidence is not
+    // trusted; ceiling is 0.5 so reviewer judgement remains decisive.
+    const confidence =
+      triggerSource === EdgeProposalTriggerSource.EXPLICIT
+        ? clampAgentReportedConfidence(requestedConfidence)
+        : requestedConfidence;
     const createInput = {
       proposal_id: `edge_prop_${this.generateId()}`,
       workspace_id: workspaceId,
       source_memory_id: sourceMemoryId,
       target_memory_id: targetMemoryId,
       edge_type: params.edgeType,
-      trigger_source: params.triggerSource ?? EdgeProposalTriggerSource.EXPLICIT,
-      confidence: params.confidence ?? 0.5,
+      trigger_source: triggerSource,
+      confidence,
       reason: params.reason ?? null,
       source_signal_id: params.sourceSignalId ?? null,
       run_id: params.runId ?? null,
@@ -190,6 +200,9 @@ export class EdgeProposalService {
     readonly workspaceId: string;
     readonly runId: string | null;
   }): Promise<SoulProposeEdgeResponse> {
+    // confidence clamp now lives in `proposeEdge` (keyed on
+    // triggerSource === EXPLICIT) so any future caller invoking the
+    // core path with EXPLICIT also gets the agent self-report ceiling.
     const proposal = await this.proposeEdge({
       sourceMemoryId: input.sourceMemoryId,
       targetMemoryId: input.targetMemoryId,
@@ -197,7 +210,7 @@ export class EdgeProposalService {
       workspaceId: input.workspaceId,
       runId: input.runId,
       triggerSource: EdgeProposalTriggerSource.EXPLICIT,
-      confidence: clampAgentReportedConfidence(input.confidence),
+      confidence: input.confidence,
       reason: input.reason
     });
     return SoulProposeEdgeResponseSchema.parse({

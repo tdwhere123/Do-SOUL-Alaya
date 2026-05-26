@@ -895,8 +895,13 @@ describe("mcp memory tool handler", () => {
     );
   });
 
-  it("promotes raw_payload-only graph refs to first-class emit_candidate_signal fields", async () => {
-    const deps = createDeps();
+  // invariant: graph-edge ref hints in raw_payload are NOT promoted to
+  // first-class signal fields. The 5 ref keys are first-class on
+  // `CandidateMemorySignal`; raw_payload occurrences are logged and
+  // ignored. See `.do-it/findings/v0.3.11-codex-audit.md` §I0-3.
+  it("ignores raw_payload graph-edge ref keys and warns; first-class fields are the only entry", async () => {
+    const warn = vi.fn();
+    const deps = { ...createDeps(), warn };
     const handler = createMcpMemoryToolHandler(deps);
 
     const result = await handler.call({
@@ -918,17 +923,35 @@ describe("mcp memory tool handler", () => {
     });
 
     expect(result).toMatchObject({ ok: true });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("raw_payload contains graph-edge ref keys"),
+      expect.objectContaining({
+        offending_keys: expect.arrayContaining(["source_memory_refs", "contradicts_refs"])
+      })
+    );
     expect(deps.signalService.receiveSignal).toHaveBeenCalledWith(
       expect.objectContaining({
-        source_memory_refs: ["memory-parent"],
-        contradicts_refs: ["memory-conflict"],
-        raw_payload: { observation: "Use pnpm." }
+        // first-class fields default to [] because the request did not
+        // supply them; raw_payload entries do NOT promote.
+        source_memory_refs: [],
+        contradicts_refs: [],
+        raw_payload: {
+          observation: "Use pnpm.",
+          source_memory_refs: ["memory-parent"],
+          contradicts_refs: ["memory-conflict"]
+        }
       })
     );
   });
 
-  it("preserves invalid raw_payload graph ref keys for emit_candidate_signal", async () => {
-    const deps = createDeps();
+  // First-class ref fields supplied via the request body still flow
+  // through. raw_payload remains a free-form bag with no ref-key magic.
+  it("accepts first-class graph-edge ref fields on emit_candidate_signal", async () => {
+    const warn = vi.fn();
+    const deps = { ...createDeps(), warn };
+    deps.trustStateRecorder.findDeliveryById = vi.fn(async (deliveryId: string) =>
+      createDeliveryRecord(deliveryId)
+    );
     const handler = createMcpMemoryToolHandler(deps);
 
     const result = await handler.call({
@@ -940,22 +963,27 @@ describe("mcp memory tool handler", () => {
         domain_tags: ["tooling"],
         confidence: 0.9,
         evidence_refs: ["memory-1"],
-        raw_payload: {
-          observation: "Use pnpm.",
-          source_memory_refs: "legacy metadata, not a graph hint"
-        }
+        source_memory_refs: ["memory-parent"],
+        contradicts_refs: ["memory-conflict"],
+        raw_payload: { observation: "Use pnpm." },
+        source_delivery_ids: ["delivery-1"]
       },
       context
     });
 
     expect(result).toMatchObject({ ok: true });
+    // raw_payload contained no ref keys; the graph-ref normalizer must
+    // not emit a warning. Other unrelated warn paths are checked
+    // separately above (missing source_delivery_ids).
+    const refKeyWarnCalls = warn.mock.calls.filter(([message]) =>
+      typeof message === "string" && message.includes("raw_payload contains graph-edge ref keys")
+    );
+    expect(refKeyWarnCalls).toEqual([]);
     expect(deps.signalService.receiveSignal).toHaveBeenCalledWith(
       expect.objectContaining({
-        source_memory_refs: [],
-        raw_payload: {
-          observation: "Use pnpm.",
-          source_memory_refs: "legacy metadata, not a graph hint"
-        }
+        source_memory_refs: ["memory-parent"],
+        contradicts_refs: ["memory-conflict"],
+        raw_payload: { observation: "Use pnpm." }
       })
     );
   });

@@ -2,7 +2,6 @@ import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   CandidateMemorySignalSchema,
   CandidateMemorySignalMemoryRefKeys,
-  CandidateMemorySignalMemoryRefsSchema,
   ControlPlaneObjectKind,
   EdgeProposalTriggerSource,
   GARDEN_ROLE_TIER_MAP,
@@ -682,7 +681,7 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     await validateSourceDeliveryAnchors(request.source_delivery_ids, context);
     const signal = CandidateMemorySignalSchema.parse({
       signal_id: `signal_${generateId()}`,
-      ...normalizeCandidateSignalGraphRefs(request),
+      ...normalizeCandidateSignalGraphRefs(request, warn),
       workspace_id: context.workspaceId,
       run_id: context.runId,
       surface_id: context.surfaceId ?? null,
@@ -912,7 +911,7 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       for (const [index, signalContent] of contentOnlySignals.entries()) {
         const internalSignal = normalizeSchemaGroundedSignal(CandidateMemorySignalSchema.parse({
           signal_id: buildGardenTaskSignalId(row.id, index),
-          ...normalizeCandidateSignalGraphRefs(signalContent),
+          ...normalizeCandidateSignalGraphRefs(signalContent, warn),
           workspace_id: context.workspaceId,
           run_id: resolvedRunId,
           surface_id: null,
@@ -2004,36 +2003,36 @@ type CandidateSignalGraphRefInput = {
   readonly raw_payload: Readonly<Record<string, unknown>>;
 } & Partial<Record<CandidateSignalGraphRefKey, readonly string[]>>;
 
-function normalizeCandidateSignalGraphRefs<T extends CandidateSignalGraphRefInput>(input: T): T {
-  let normalized: Record<string, unknown> | null = null;
-  let rawPayload: Record<string, unknown> | null = null;
-
+// invariant: graph-edge ref hints (`source_memory_refs`,
+// `supersedes_refs`, `exception_to_refs`, `contradicts_refs`,
+// `incompatible_with_refs`) are first-class fields on
+// `CandidateMemorySignal` (see
+// `packages/protocol/src/candidate-memory-signal.ts` §79-84). The
+// daemon does not accept these keys via `raw_payload`; any occurrence
+// is logged and left in raw_payload unchanged. This closes the
+// "silent double-entry" path identified in
+// `.do-it/findings/v0.3.11-codex-audit.md` §I0-3 — agents that want
+// to assert graph hints must use the first-class fields, not the
+// untyped raw_payload channel.
+function normalizeCandidateSignalGraphRefs<T extends CandidateSignalGraphRefInput>(
+  input: T,
+  warn: (message: string, meta: Record<string, unknown>) => void
+): T {
+  const offendingKeys: CandidateSignalGraphRefKey[] = [];
   for (const key of CandidateMemorySignalMemoryRefKeys) {
-    if (!hasOwnProperty(input.raw_payload, key)) {
-      continue;
+    if (hasOwnProperty(input.raw_payload, key)) {
+      offendingKeys.push(key);
     }
-
-    if (input[key] !== undefined) {
-      continue;
-    }
-
-    const parsedRefs = CandidateMemorySignalMemoryRefsSchema.safeParse(input.raw_payload[key]);
-    if (!parsedRefs.success) {
-      continue;
-    }
-
-    normalized ??= { ...input };
-    rawPayload ??= { ...input.raw_payload };
-    delete rawPayload[key];
-    normalized[key] = parsedRefs.data;
   }
-
-  if (normalized === null || rawPayload === null) {
-    return input;
+  if (offendingKeys.length > 0) {
+    warn(
+      "candidate signal raw_payload contains graph-edge ref keys; use first-class fields instead. Ignoring raw_payload entries.",
+      {
+        offending_keys: offendingKeys
+      }
+    );
   }
-
-  normalized.raw_payload = rawPayload;
-  return normalized as T;
+  return input;
 }
 
 function hasOwnProperty(record: Readonly<Record<string, unknown>>, key: string): boolean {

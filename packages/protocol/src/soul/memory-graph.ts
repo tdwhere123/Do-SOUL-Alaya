@@ -46,12 +46,14 @@ export const MemoryGraphEdgeTypeSchema = z.enum(memoryGraphEdgeTypeValues);
 // will pin its preferred memories to max graph_support; per-run /
 // per-window decay would be the principled fix.
 //
-// invariant: `GraphExploreService.addEdge` wraps the
+// invariant: `EdgeProposalService.acceptProposal` wraps the
 // `SOUL_GRAPH_EDGE_CREATED` audit row and the `memory_graph_edges`
 // row insert in a single SQLite transaction via
 // `EventPublisher.appendManyWithMutation`. A row insert failure rolls
 // back the audit row in the same tx; concurrent writers serialize on
-// the SQLite write lock so no orphan audit can leak.
+// the SQLite write lock so no orphan audit can leak. Durable edge
+// writes flow only through proposal accept; no other code path may
+// create a `memory_graph_edges` row.
 export const MEMORY_GRAPH_EDGE_RECALL_WEIGHTS: Readonly<Record<typeof memoryGraphEdgeTypeValues[number], number>> = Object.freeze({
   supports: 1.0,
   derives_from: 0.5,
