@@ -120,6 +120,10 @@ interface EdgeAutoDecision {
   readonly edgeType: MemoryGraphEdgeTypeValue;
   readonly confidence: number;
   readonly reason: string;
+  // invariant: trigger_source must be one of the local_* rule-heuristic
+  // enum values (or llm_supports once Phase B B-2 lands). Routing back
+  // through SYSTEM here would collapse KPI K3.2 per-trigger breakdown.
+  readonly triggerSource: EdgeProposalTriggerSourceValue;
 }
 
 interface SimilarityFeatures {
@@ -172,7 +176,7 @@ export class EdgeAutoProducerService {
         edgeType: decision.edgeType,
         workspaceId,
         runId: input.runId,
-        triggerSource: EdgeProposalTriggerSource.SYSTEM,
+        triggerSource: decision.triggerSource,
         confidence: decision.confidence,
         reason: decision.reason,
         sourceSignalId: input.sourceSignalId
@@ -221,21 +225,24 @@ function classifyNeighbor(
     return {
       edgeType: MemoryGraphEdgeType.SUPERSEDES,
       confidence: confidence(0.55, features, 0.05, 0.85),
-      reason: describeDecision("B-3 local supersedes heuristic", features)
+      reason: describeDecision("B-3 local supersedes heuristic", features),
+      triggerSource: EdgeProposalTriggerSource.LOCAL_SUPERSEDES
     };
   }
   if (isDerivesFromCandidate(newMemory, features)) {
     return {
       edgeType: MemoryGraphEdgeType.DERIVES_FROM,
       confidence: confidence(0.55, features, 0, 0.8),
-      reason: describeDecision("B-2 local derives_from heuristic", features)
+      reason: describeDecision("B-2 local derives_from heuristic", features),
+      triggerSource: EdgeProposalTriggerSource.LOCAL_DERIVES_FROM
     };
   }
   if (features.tokenJaccard >= SUPPORTS_TOKEN_JACCARD_MIN) {
     return {
       edgeType: MemoryGraphEdgeType.SUPPORTS,
       confidence: confidence(0.55, features, 0, 0.8),
-      reason: describeDecision("B-2 local supports heuristic", features)
+      reason: describeDecision("B-2 local supports heuristic", features),
+      triggerSource: EdgeProposalTriggerSource.LOCAL_SUPPORTS
     };
   }
   return null;

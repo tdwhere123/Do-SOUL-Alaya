@@ -103,7 +103,7 @@ describe("EdgeAutoProducerService", () => {
         workspaceId: "workspace-1",
         runId: "run-1",
         sourceSignalId: "signal-1",
-        triggerSource: EdgeProposalTriggerSource.SYSTEM
+        triggerSource: EdgeProposalTriggerSource.LOCAL_SUPPORTS
       })
     );
   });
