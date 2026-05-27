@@ -645,6 +645,15 @@ export async function startBenchDaemon(
     // see also: apps/core-daemon/src/__tests__/phase6-agent-use-protocol.test.ts
     //   workspace + run seeding fixture using the same repos.
     await seedBenchWorkspaceAndRun(dataDir, workspaceId, runId);
+    // Apply bench-only SQLite tuning. The DB has now been opened by install +
+    // seedBenchWorkspaceAndRun, so initDatabase's cache returns the daemon's
+    // live connection. Production daemon (apps/core-daemon) never calls this.
+    const pragmaResult = applyBenchFastPragmaIfRequested(dataDir);
+    if (pragmaResult.applied) {
+      process.stderr.write(
+        `[bench fast-pragma] applied: ${pragmaResult.pragmas.join(", ")}\n`
+      );
+    }
   } catch (err) {
     try {
       await closeBenchDaemonResources({ mcpClient, server, runtime });
@@ -1889,6 +1898,72 @@ async function queryEdgeProposalKpiRows(
     });
   }
   return rows;
+}
+
+// @anchor BENCH_FAST_PRAGMA: bench-only SQLite tuning layered on top of the
+// production storage hardening (packages/storage/src/db.ts already sets
+// journal_mode=WAL + synchronous=NORMAL + foreign_keys + busy_timeout). The
+// bench harness adds two pragmas that production deliberately leaves at
+// default because they change the durability vs throughput tradeoff:
+//
+//   temp_store=MEMORY       — temp tables live in RAM, not on disk. Bench
+//                             writes 18k+ rows/Q so spilling temp tables to
+//                             disk doubles fsync cost; bench runs are
+//                             reproducible from fixtures so the data loss
+//                             window is acceptable.
+//   cache_size=-65536       — 64 MiB page cache (negative = KiB). Default is
+//                             ~2 MiB which is too small for the bench
+//                             hot-set; production leaves it small for
+//                             desktop multi-process coexistence.
+//
+// Gated by ALAYA_BENCH_FAST_PRAGMA env (default: ON for bench harness; set
+// "0"/"false" to opt out). Production `apps/core-daemon` does not call this
+// helper, so no production runtime is affected.
+//
+// Invariant K4.2: EventLog rows are still appended via the same SqliteEventLogRepo
+// path; only the SQLite write batching/fsync timing changes. WAL still
+// guarantees atomic per-statement commit; synchronous=NORMAL guarantees
+// system-crash recovery on the WAL frame boundary (only power-loss within
+// the last few ms of WAL flush is at risk, which bench fixtures can replay).
+const BENCH_FAST_PRAGMA_ENV = "ALAYA_BENCH_FAST_PRAGMA";
+
+function isBenchFastPragmaEnabled(): boolean {
+  const raw = process.env[BENCH_FAST_PRAGMA_ENV];
+  if (raw === undefined) return true;
+  const normalized = raw.trim().toLowerCase();
+  return normalized !== "0" && normalized !== "false" && normalized !== "off" && normalized !== "no";
+}
+
+export interface BenchFastPragmaResult {
+  readonly applied: boolean;
+  readonly pragmas: readonly string[];
+}
+
+export function applyBenchFastPragmaIfRequested(dataDir: string): BenchFastPragmaResult {
+  if (!isBenchFastPragmaEnabled()) {
+    return Object.freeze({ applied: false, pragmas: Object.freeze([]) });
+  }
+  // initDatabase caches by path, so this returns the same connection the
+  // daemon runtime is already using. The pragmas are session-scoped except
+  // journal_mode (file-scoped + persisted) — re-issuing the production set
+  // here is a no-op and documents the bench layering.
+  const db = initDatabase({ filename: join(dataDir, "alaya.db") });
+  const conn = db.connection;
+  // Production-set pragmas (re-asserted defensively; safe no-op when already on).
+  conn.pragma("journal_mode = WAL");
+  conn.pragma("synchronous = NORMAL");
+  // Bench-only adds.
+  conn.pragma("temp_store = MEMORY");
+  conn.pragma("cache_size = -65536");
+  return Object.freeze({
+    applied: true,
+    pragmas: Object.freeze([
+      "journal_mode=WAL",
+      "synchronous=NORMAL",
+      "temp_store=MEMORY",
+      "cache_size=-65536"
+    ])
+  });
 }
 
 async function seedBenchWorkspaceAndRun(
