@@ -60,6 +60,7 @@ function makeShardKpi(overrides: Partial<KpiPayload> = {}): KpiPayload {
         seed_chars_clipped: 0
       },
       quality_metrics: makeQualityMetrics(),
+      seed_extraction_path: makeSeedExtractionPath(),
       per_scenario: [
         { id: "q-shard-default-1", version: 1, hit_at_5: true, tier: "warm" }
       ]

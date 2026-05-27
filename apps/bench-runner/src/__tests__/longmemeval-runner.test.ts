@@ -95,6 +95,18 @@ function buildLongMemEvalArchivePayload(
         answer_turns_truncated: 0,
         seed_chars_clipped: 0
       },
+      seed_extraction_path: {
+        path: "official_api_compile",
+        cache_hits: 0,
+        llm_calls: 1,
+        offline_fallbacks: 0,
+        live_extraction_failures: 0,
+        cached_extraction_failures: 0,
+        facts_produced: 5,
+        signals_dropped: 0,
+        parse_dropped: 0,
+        compile_overflow_dropped: 0
+      },
       per_scenario: [
         { id: "q001", version: 1, hit_at_5: false, tier: "cold" },
         { id: "q002", version: 1, hit_at_5: true, tier: "warm" }
