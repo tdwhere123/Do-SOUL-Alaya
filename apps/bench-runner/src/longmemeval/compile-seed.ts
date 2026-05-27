@@ -8,6 +8,13 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// Phase A.1 instrument: default cwd-rooted diagnostic dump dir, shared with
+// packages/soul/src/garden/compute-provider.ts so a Phase A.2 preflight can
+// read provider-side and seed-side dumps from one place. data/* is gitignored.
+const DEFAULT_COMPILE_SEED_DIAGNOSTIC_DIR_REL =
+  "data/diagnostics/seed-extraction-failures";
+const COMPILE_SEED_CACHE_KEY_PREFIX_CHARS = 12;
 import { resolveSecretRef } from "@do-soul/alaya";
 import {
   OFFICIAL_API_GARDEN_MODEL,
@@ -155,6 +162,14 @@ export interface CompileSeedExtractionStats {
    */
   lastTurnDraftCount: number;
   lastExtractionSource: "cache" | "live" | null;
+  /**
+   * Phase A.1 instrument: cache key (or its 12-char prefix; see writers) for
+   * the most recent extract() call, so a subsequent extraction failure can
+   * dump the cache_key_prefix to the diagnostic envelope. Optional for
+   * backward compatibility with stats objects constructed by tests that
+   * predate the instrument.
+   */
+  lastCacheKey?: string | null;
 }
 
 /**
@@ -261,6 +276,10 @@ export function createCachingSignalExtractor(options: {
       if (cached !== undefined) {
         if (stats !== undefined) {
           stats.lastExtractionSource = "cache";
+          // Phase A.1: full cache key recorded here; the diagnostic writer
+          // slices to the 12-char prefix so logs stay scannable without
+          // leaking enough hash to fingerprint a private fixture path.
+          stats.lastCacheKey = cacheKey;
           stats.cacheHits += 1;
           recordExtractionDraftCounts(stats, cached);
         }
@@ -268,6 +287,7 @@ export function createCachingSignalExtractor(options: {
       }
       if (stats !== undefined) {
         stats.lastExtractionSource = "live";
+        stats.lastCacheKey = cacheKey;
       }
       const result = await options.delegate.extract(input);
       writeCachedExtraction(cacheRoot, cacheKey, {
@@ -575,6 +595,14 @@ export function createCompileSeedRunner(options?: {
   readonly extractorFactory?: (
     config: CompileSeedExtractionConfig
   ) => BenchSignalExtractor;
+  /**
+   * Phase A.1 instrument: override the directory the seed-side diagnostic
+   * dump writes failure envelopes to. Defaults to
+   * `<cwd>/data/diagnostics/seed-extraction-failures/`. Pass `null` to
+   * disable dumps entirely (read-only fs, unit tests that want zero side
+   * effects).
+   */
+  readonly diagnosticDir?: string | null;
 }): CompileSeedRunner {
   const config = options?.config ?? resolveCompileSeedExtractionConfig();
   const credentialled = config.apiKey !== null;
@@ -591,8 +619,17 @@ export function createCompileSeedRunner(options?: {
     compileOverflowDropped: 0,
     lastTurnRawSignalCount: 0,
     lastTurnDraftCount: 0,
-    lastExtractionSource: null
+    lastExtractionSource: null,
+    lastCacheKey: null
   };
+  // Phase A.1 instrument: per-runner diagnostic dump dir; null disables dumps.
+  // Defaults to a cwd-rooted data/diagnostics path (data/* is gitignored).
+  const diagnosticDir: string | null =
+    options?.diagnosticDir === null
+      ? null
+      : options?.diagnosticDir === undefined
+        ? resolve(process.cwd(), DEFAULT_COMPILE_SEED_DIAGNOSTIC_DIR_REL)
+        : resolve(options.diagnosticDir);
 
   const provider =
     credentialled === false
@@ -641,7 +678,14 @@ export function createCompileSeedRunner(options?: {
         run_id: input.runId,
         surface_id: input.surfaceId ?? null,
         turn_messages: []
-      }
+      },
+      diagnosticDir,
+      modelId: config.model,
+      // Bench seed always drives the official-API provider (or the no-creds
+      // fallback, which doesn't reach recordExtractionFailureSource). Recorded
+      // explicitly so the dump envelope shape is stable when a future
+      // host_worker / custom_api seed path lands.
+      providerKind: "official_api"
     });
 
     // invariant: every fact gets a distinct evidence_ref so the audit trail
@@ -742,6 +786,10 @@ async function extractSeedInputs(input: {
   readonly turnContent: string;
   readonly seedIndex: number;
   readonly context: GardenCompileContext;
+  // Phase A.1 instrument: absolute path or null when dumps are disabled.
+  readonly diagnosticDir?: string | null;
+  readonly modelId?: string;
+  readonly providerKind?: string;
 }): Promise<readonly SeedInputDraft[]> {
   // invariant: no garden credentials => deterministic no-LLM fallback. The
   // full turn becomes one candidate fact. This is honest (no fabricated
@@ -775,6 +823,17 @@ async function extractSeedInputs(input: {
     // offline fallback so the bench report shows the live-extraction hole.
     input.stats.offlineFallbacks += 1;
     recordExtractionFailureSource(input.stats);
+    // Phase A.1 instrument: dump cache_key_prefix / model / provider /
+    // failure source so the bench preflight (Phase A.2) can attribute the
+    // failure to a specific cache shard or live call without re-running.
+    await dumpSeedExtractionFailureDiagnostic({
+      diagnosticDir: input.diagnosticDir ?? null,
+      stats: input.stats,
+      modelId: input.modelId ?? null,
+      providerKind: input.providerKind ?? null,
+      error,
+      context: input.context
+    });
     input.stats.factsProduced += 1;
     process.stderr.write(
       `[longmemeval compile-seed] extraction failed, using full-turn fallback: ${stringifyError(error)}\n`
@@ -897,6 +956,68 @@ function recordExtractionFailureSource(stats: CompileSeedExtractionStats): void 
   }
   if (stats.lastExtractionSource === "live") {
     stats.liveExtractionFailures += 1;
+  }
+}
+
+/**
+ * Phase A.1 instrument: dump one seed-side extraction failure diagnostic to
+ * `<diagnosticDir>/compile-seed-<ISO-ts>-<uuid>.json`. Captures the cache
+ * key prefix, model id, provider kind, last-extraction-source classification,
+ * and the immediate failure message so a Phase A.2 preflight can attribute
+ * the failure to a specific cache shard or live extraction call without
+ * re-running the bench. Observation only — failures inside the dump are
+ * caught and surfaced as a single warn so the seed loop continues.
+ *
+ * Co-located with the provider-side dump in
+ * packages/soul/src/garden/compute-provider.ts:dumpInvalidResponseDiagnostic
+ * so a single readdir + JSON pass surfaces every signal of the failure.
+ */
+async function dumpSeedExtractionFailureDiagnostic(input: {
+  readonly diagnosticDir: string | null;
+  readonly stats: CompileSeedExtractionStats;
+  readonly modelId: string | null;
+  readonly providerKind: string | null;
+  readonly error: unknown;
+  readonly context: GardenCompileContext;
+}): Promise<void> {
+  if (input.diagnosticDir === null) {
+    return;
+  }
+  try {
+    const timestamp = new Date().toISOString();
+    const cacheKey = input.stats.lastCacheKey ?? null;
+    const envelope = {
+      captured_at: timestamp,
+      surface: "compile-seed",
+      provider_kind: input.providerKind,
+      model_id: input.modelId,
+      workspace_id: input.context.workspace_id,
+      run_id: input.context.run_id,
+      surface_id: input.context.surface_id,
+      cache_key_prefix:
+        cacheKey === null
+          ? null
+          : cacheKey.slice(0, COMPILE_SEED_CACHE_KEY_PREFIX_CHARS),
+      last_extraction_source: input.stats.lastExtractionSource,
+      // Counters AFTER this turn's recordExtractionFailureSource update so a
+      // dump file is self-describing: which classification bucket this
+      // failure landed in (live vs cached) is unambiguous.
+      live_extraction_failures: input.stats.liveExtractionFailures,
+      cached_extraction_failures: input.stats.cachedExtractionFailures,
+      error_message: stringifyError(input.error)
+    };
+    const fileName = `compile-seed-${timestamp.replace(/[:.]/gu, "-")}-${randomUUID()}.json`;
+    const filePath = join(input.diagnosticDir, fileName);
+    mkdirSync(dirname(filePath), { recursive: true });
+    // Atomic write: tmp + rename guards against an interrupted dump leaving
+    // a torn file (WSL2 OOM is a known crash mode on the bench host).
+    const tmpPath = `${filePath}.${randomUUID()}.tmp`;
+    writeFileSync(tmpPath, `${JSON.stringify(envelope, null, 2)}\n`, "utf8");
+    renameSync(tmpPath, filePath);
+  } catch (dumpError) {
+    process.stderr.write(
+      `[longmemeval compile-seed] diagnostic dump failed: ${stringifyError(dumpError)}\n`
+    );
   }
 }
 

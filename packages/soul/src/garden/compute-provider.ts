@@ -7,6 +7,8 @@ import {
   type CandidateMemorySignal,
   type ConversationMessage
 } from "@do-soul/alaya-protocol";
+import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
   SignalExtractorError,
@@ -41,7 +43,21 @@ interface OfficialApiGardenProviderDependencies {
   readonly extractor?: SignalExtractor;
   readonly now?: () => string;
   readonly generateSignalId?: () => string;
+  // Phase A.1 instrument: when set, a requestSignals invalid_response failure
+  // dumps a diagnostic JSON envelope to <diagnosticDir>/<ISO-ts>-<uuid>.json
+  // BEFORE the exception is rethrown. The dump is observation-only — it does
+  // not alter blocker logic or recover the failed call. Leave undefined to
+  // disable (no fs writes). Defaults to the cwd-rooted directory
+  // data/diagnostics/seed-extraction-failures/ so the bench preflight can
+  // read what the live extraction returned without bypassing the blocker.
+  readonly diagnosticDir?: string | null;
 }
+
+// Default cwd-rooted diagnostic directory used when no diagnosticDir override
+// is supplied. Generated path (data/* is gitignored); never treat as source.
+const DEFAULT_DIAGNOSTIC_DIR_REL = "data/diagnostics/seed-extraction-failures";
+const DIAGNOSTIC_BODY_PREFIX_MAX_CHARS = 4_096;
+const DIAGNOSTIC_PROMPT_PREFIX_MAX_CHARS = 512;
 
 // One parsed signal from the official-API extractor JSON. distilled_fact is
 // absent when the model omits it (or supplies a non-string / empty value);
@@ -99,6 +115,10 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
   private readonly extractor: SignalExtractor | null;
   private readonly now: () => string;
   private readonly generateSignalId: () => string;
+  // Phase A.1 instrument: absolute directory for invalid_response diagnostic
+  // dumps, or null when dumps are disabled. Resolved once at construction so
+  // a later cwd change does not retarget the dump file mid-run.
+  private readonly diagnosticDir: string | null;
 
   public constructor(deps: OfficialApiGardenProviderDependencies = {}) {
     this.apiKey = normalizeOptionalString(deps.apiKey ?? null);
@@ -114,6 +134,15 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
         }));
     this.now = deps.now ?? (() => new Date().toISOString());
     this.generateSignalId = deps.generateSignalId ?? (() => randomUUID());
+    // null sentinel ("disabled") vs undefined ("use default cwd path"). A null
+    // override is honoured exactly — production wiring that intentionally
+    // turns dumps off (e.g. read-only fs) gets no fs writes.
+    this.diagnosticDir =
+      deps.diagnosticDir === null
+        ? null
+        : deps.diagnosticDir === undefined
+          ? resolve(process.cwd(), DEFAULT_DIAGNOSTIC_DIR_REL)
+          : resolve(deps.diagnosticDir);
   }
 
   public async compile(
@@ -215,20 +244,45 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
     }
 
+    const userPrompt = JSON.stringify({
+      workspace_id: context.workspace_id,
+      run_id: context.run_id,
+      surface_id: context.surface_id,
+      turn_content: turnContent,
+      turn_messages: context.turn_messages
+    });
+    let rawJson: string | null = null;
     try {
       const response = await this.extractor.extract({
         systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-        userPrompt: JSON.stringify({
-          workspace_id: context.workspace_id,
-          run_id: context.run_id,
-          surface_id: context.surface_id,
-          turn_content: turnContent,
-          turn_messages: context.turn_messages
-        }),
+        userPrompt,
         timeoutMs: this.requestTimeoutMs
       });
-      return parseOfficialApiSignals(response.rawJson);
+      rawJson = response.rawJson;
+      return parseOfficialApiSignals(rawJson);
     } catch (error) {
+      // Phase A.1 instrument: only the invalid_response branch — JSON shape
+      // failure on the body the extractor returned, OR a SignalExtractorError
+      // of kind "invalid_json" (empty/oversized/non-JSON content). Both are
+      // what the bench preflight blocker rejects as `invalid_response`; the
+      // dump tells A.3 whether the model truncated, the provider returned
+      // chat noise, or the cache shard was torn. Network/timeout errors
+      // skip the dump — they are observable from the bench log already
+      // and the body is empty by definition.
+      const isInvalidResponse =
+        !(error instanceof SignalExtractorError) ||
+        error.kind === "invalid_json";
+      if (isInvalidResponse) {
+        // await so a Phase A.2 preflight reading the dump immediately after
+        // sees the file — but a dump that itself throws (e.g. read-only fs)
+        // must not mask the real provider error.
+        await this.dumpInvalidResponseDiagnostic({
+          error,
+          rawJson,
+          userPrompt,
+          context
+        });
+      }
       if (error instanceof SignalExtractorError) {
         throw new GardenProviderError(
           error.kind === "invalid_json"
@@ -240,6 +294,70 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       }
       throw new GardenProviderError("Official garden provider returned an invalid response.", "invalid_response", {
         cause: error
+      });
+    }
+  }
+
+  /**
+   * Phase A.1 instrument: best-effort diagnostic dump of one invalid_response
+   * failure. Writes status (if surfaced via the cause chain) / response body
+   * prefix / SignalExtractorError kind+message / user-prompt prefix / model /
+   * provider kind / timestamp to a per-failure JSON file. Atomic (tmp + rename
+   * on the same filesystem). Returns even if writing fails — observation must
+   * never destabilize the production failure path.
+   */
+  private async dumpInvalidResponseDiagnostic(input: {
+    readonly error: unknown;
+    readonly rawJson: string | null;
+    readonly userPrompt: string;
+    readonly context: GardenCompileContext;
+  }): Promise<void> {
+    if (this.diagnosticDir === null) {
+      return;
+    }
+    try {
+      const timestamp = this.now();
+      const envelope = {
+        captured_at: timestamp,
+        provider_kind: this.provider_kind,
+        model_id: this.model,
+        endpoint: this.endpoint,
+        workspace_id: input.context.workspace_id,
+        run_id: input.context.run_id,
+        surface_id: input.context.surface_id,
+        signal_extractor_error: extractSignalErrorDiagnostic(input.error),
+        // HTTP status / headers are not surfaced through SignalExtractorError;
+        // the pi-mono extractor swallows them. We capture whatever the cause
+        // chain exposes (status, statusText, headers if present) so a future
+        // transport wrapper that does pass them through gets recorded
+        // automatically — the dump shape is forward-compatible.
+        response_status: extractStatusFromCauseChain(input.error),
+        response_headers: extractHeadersFromCauseChain(input.error),
+        response_body_prefix:
+          input.rawJson === null
+            ? null
+            : input.rawJson.slice(0, DIAGNOSTIC_BODY_PREFIX_MAX_CHARS),
+        response_body_total_chars: input.rawJson === null ? null : input.rawJson.length,
+        user_prompt_prefix: input.userPrompt.slice(
+          0,
+          DIAGNOSTIC_PROMPT_PREFIX_MAX_CHARS
+        )
+      };
+      const fileName = `${timestamp.replace(/[:.]/gu, "-")}-${randomUUID()}.json`;
+      const filePath = join(this.diagnosticDir, fileName);
+      mkdirSync(dirname(filePath), { recursive: true });
+      // Atomic write: tmp + rename guards against an interrupted dump
+      // (WSL2 OOM is a known crash mode in this env) leaving a torn file
+      // a Phase A.2 reader would mis-parse.
+      const tmpPath = `${filePath}.${randomUUID()}.tmp`;
+      writeFileSync(tmpPath, `${JSON.stringify(envelope, null, 2)}\n`, "utf8");
+      renameSync(tmpPath, filePath);
+    } catch (dumpError) {
+      // observation-only — never mask the real exception by throwing here.
+      // A single warn is enough; a chronically-failing dump path is the
+      // operator's problem, not the extraction caller's.
+      console.warn("garden/compute-provider: diagnostic dump failed", {
+        error: readErrorMessage(dumpError)
       });
     }
   }
@@ -394,4 +512,132 @@ function buildTurnExcerpt(turnContent: string, matchedText: string): string {
   const start = Math.max(0, index - 40);
   const end = Math.min(turnContent.length, index + matchedText.length + 40);
   return turnContent.slice(start, end).trim();
+}
+
+interface SignalErrorDiagnostic {
+  readonly is_signal_extractor_error: boolean;
+  readonly kind: string | null;
+  readonly name: string;
+  readonly message: string;
+  readonly cause_message: string | null;
+}
+
+function extractSignalErrorDiagnostic(error: unknown): SignalErrorDiagnostic {
+  if (error instanceof SignalExtractorError) {
+    const cause = (error as { readonly cause?: unknown }).cause;
+    return {
+      is_signal_extractor_error: true,
+      kind: error.kind,
+      name: error.name,
+      message: error.message,
+      cause_message: cause instanceof Error ? cause.message : null
+    };
+  }
+  if (error instanceof Error) {
+    const cause = (error as { readonly cause?: unknown }).cause;
+    return {
+      is_signal_extractor_error: false,
+      kind: null,
+      name: error.name,
+      message: error.message,
+      cause_message: cause instanceof Error ? cause.message : null
+    };
+  }
+  return {
+    is_signal_extractor_error: false,
+    kind: null,
+    name: "UnknownError",
+    message: String(error),
+    cause_message: null
+  };
+}
+
+// Walk the .cause chain and surface any numeric HTTP status the transport
+// happened to attach. The pi-mono extractor currently does not, but
+// createGardenHttpExtractor (bench-runner) throws an Error whose .message
+// embeds the status — we read both shapes so the dump captures whichever
+// transport raised the failure.
+function extractStatusFromCauseChain(error: unknown): number | null {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (current === null || current === undefined) {
+      return null;
+    }
+    if (typeof current === "object") {
+      const candidate = (current as { readonly status?: unknown }).status;
+      if (typeof candidate === "number" && Number.isFinite(candidate)) {
+        return candidate;
+      }
+      const messageStatus = readStatusFromMessage(current);
+      if (messageStatus !== null) {
+        return messageStatus;
+      }
+      current = (current as { readonly cause?: unknown }).cause;
+      continue;
+    }
+    return null;
+  }
+  return null;
+}
+
+function readStatusFromMessage(value: object): number | null {
+  if (!(value instanceof Error)) {
+    return null;
+  }
+  const match = /\bHTTP\s+(\d{3})\b/u.exec(value.message);
+  if (match === null) {
+    return null;
+  }
+  const parsed = Number.parseInt(match[1]!, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function extractHeadersFromCauseChain(error: unknown): Record<string, string> | null {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (current === null || current === undefined) {
+      return null;
+    }
+    if (typeof current === "object") {
+      const candidate = (current as { readonly headers?: unknown }).headers;
+      const normalized = normalizeHeadersValue(candidate);
+      if (normalized !== null) {
+        return normalized;
+      }
+      current = (current as { readonly cause?: unknown }).cause;
+      continue;
+    }
+    return null;
+  }
+  return null;
+}
+
+function normalizeHeadersValue(value: unknown): Record<string, string> | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  // Web Headers / Node Headers expose .entries(); plain Records expose keys.
+  if (typeof value === "object" && typeof (value as { entries?: unknown }).entries === "function") {
+    const out: Record<string, string> = {};
+    try {
+      for (const [key, val] of (value as Iterable<[string, string]>)) {
+        if (typeof key === "string" && typeof val === "string") {
+          out[key.toLowerCase()] = val;
+        }
+      }
+      return out;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value === "object") {
+    const out: Record<string, string> = {};
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof val === "string") {
+        out[key.toLowerCase()] = val;
+      }
+    }
+    return Object.keys(out).length > 0 ? out : null;
+  }
+  return null;
 }
