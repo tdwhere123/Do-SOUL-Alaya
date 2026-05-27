@@ -777,6 +777,96 @@ describe("history archive", () => {
       .toBe("c0ffee2");
   });
 
+  // @anchor seed-extraction-release-blocker
+  // Round-2 §B1: even when the live-gates sidecar passes, a degraded
+  // seed_extraction_path (no_credentials_fallback or offline_fallbacks > 0)
+  // must block live strict-real archives from latest-passing.
+  it("blocks live strict-real latest-passing when seed_extraction_path is degraded (no_credentials_fallback)", async () => {
+    const slug = "2026-05-15T160000Z-c0ffee3";
+    const payload: KpiPayload = {
+      ...buildLivePayload("c0ffee3"),
+      kpi: {
+        ...buildLivePayload("c0ffee3").kpi,
+        seed_extraction_path: {
+          path: "no_credentials_fallback",
+          cache_hits: 0,
+          llm_calls: 0,
+          offline_fallbacks: 0,
+          live_extraction_failures: 0,
+          cached_extraction_failures: 0,
+          facts_produced: 100,
+          signals_dropped: 0,
+          parse_dropped: 0,
+          compile_overflow_dropped: 0
+        }
+      }
+    };
+
+    await writeEntry(layout, "live", slug, payload, "report\n", null, {
+      sidecars: [
+        {
+          filename: "live-gates.json",
+          contents: JSON.stringify({
+            latest_run_id: "run-1",
+            status: "pass",
+            gates: [{ id: "provider_top5", pass: true }]
+          }) + "\n"
+        }
+      ]
+    });
+
+    expect(
+      JSON.parse(await readFile(path.join(root, "live", "latest-run.json"), "utf8")).slug
+    ).toBe(slug);
+    await expect(
+      readFile(path.join(root, "live", "latest-passing.json"), "utf8")
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readLatest(layout, "live", { pointerKind: "passing" })).toBeNull();
+  });
+
+  it("blocks live strict-real latest-passing when seed_extraction_path has offline_fallbacks", async () => {
+    const slug = "2026-05-15T170000Z-c0ffee4";
+    const payload: KpiPayload = {
+      ...buildLivePayload("c0ffee4"),
+      kpi: {
+        ...buildLivePayload("c0ffee4").kpi,
+        seed_extraction_path: {
+          path: "official_api_compile",
+          cache_hits: 10,
+          llm_calls: 5,
+          offline_fallbacks: 3,
+          live_extraction_failures: 0,
+          cached_extraction_failures: 0,
+          facts_produced: 100,
+          signals_dropped: 0,
+          parse_dropped: 0,
+          compile_overflow_dropped: 0
+        }
+      }
+    };
+
+    await writeEntry(layout, "live", slug, payload, "report\n", null, {
+      sidecars: [
+        {
+          filename: "live-gates.json",
+          contents: JSON.stringify({
+            latest_run_id: "run-1",
+            status: "pass",
+            gates: [{ id: "provider_top5", pass: true }]
+          }) + "\n"
+        }
+      ]
+    });
+
+    expect(
+      JSON.parse(await readFile(path.join(root, "live", "latest-run.json"), "utf8")).slug
+    ).toBe(slug);
+    await expect(
+      readFile(path.join(root, "live", "latest-passing.json"), "utf8")
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readLatest(layout, "live", { pointerKind: "passing" })).toBeNull();
+  });
+
   it("allows mixed live-gates sidecars with status pass and at least one passing source gate", async () => {
     const mixedSlug = "2026-05-15T160000Z-c0ffee3";
 

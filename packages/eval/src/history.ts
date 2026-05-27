@@ -20,6 +20,7 @@ import {
   type KpiPayload
 } from "./kpi-schema.js";
 import { releaseHardGateAllowsLatestPassing } from "./release-gates.js";
+import { evaluateSeedExtractionReleaseBlocker } from "./seed-extraction-blocker.js";
 
 export interface HistoryLayout {
   readonly historyRoot: string;
@@ -391,6 +392,15 @@ async function entryAllowsLatestPassing(
   slug: string,
   payload: KpiPayload
 ): Promise<boolean> {
+  // @anchor seed-extraction-release-blocker
+  // Evaluate the seed-extraction blocker before any branch so degraded
+  // provenance (no_credentials_fallback, offline_fallbacks > 0, or missing
+  // path on LongMemEval) cannot reach latest_passing through the
+  // live-strict-real sidecar branch, which would otherwise short-circuit
+  // releaseHardGateAllowsLatestPassing. See round-2 finding B1.
+  if (evaluateSeedExtractionReleaseBlocker(payload) !== null) {
+    return false;
+  }
   if (payload.bench_name === "live" && payload.split === "strict-real") {
     return await liveGatesSidecarAllowsLatestPassing(layout, benchName, slug);
   }
