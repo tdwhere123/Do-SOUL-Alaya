@@ -783,14 +783,23 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     memoryRepo: memoryEntryRepo,
     graphEdgePort
   });
-  // invariant: ConflictDetectionService is opt-in. Each materialization
-  // pays O(workspace_size) for findByDimension + findByWorkspaceId;
-  // high-frequency seeding paths (bench harness, bulk import) cannot
-  // afford this. Operators enable conflict edge production through
-  // ALAYA_CONFLICT_DETECTION_ENABLED=1 (off by default).
-  const conflictDetectionEnabled =
-    process.env.ALAYA_CONFLICT_DETECTION_ENABLED === "1" ||
-    process.env.ALAYA_CONFLICT_DETECTION_ENABLED?.toLowerCase() === "true";
+  // invariant: ConflictDetectionService rule path is ON by default per
+  // v0.3.11 §C C3. Rule-path edges go through edgeProposalService.proposeEdge
+  // (graphEdgePort wraps it above), so a rule-path "contradicts" finding
+  // becomes a PENDING proposal — durable truth is never mutated by this
+  // service alone. The cost of findByDimension + findByWorkspaceId is
+  // paid per materialization; high-frequency seeding paths (bench
+  // harness, bulk import) opt OUT with ALAYA_CONFLICT_DETECTION_ENABLED=0.
+  // The LLM ambiguous-band path stays disabled by default (it would
+  // re-introduce a per-materialization cloud call) and is gated by the
+  // separate createConflictDetectionLlmPort credentials check.
+  const conflictDetectionEnabled = (() => {
+    const raw = process.env.ALAYA_CONFLICT_DETECTION_ENABLED?.toLowerCase();
+    if (raw === undefined || raw === "") {
+      return true;
+    }
+    return raw !== "0" && raw !== "false";
+  })();
   const conflictDetectionLlmPort = conflictDetectionEnabled
     ? createConflictDetectionLlmPort()
     : null;

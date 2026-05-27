@@ -275,6 +275,39 @@ describe("ConflictDetectionService", () => {
     );
   });
 
+  it("rule path fires in the 0.35..0.5 tag overlap wedge (v0.3.11 §C C3)", async () => {
+    // {coffee, beans, prep} vs {coffee, beans, dark, light}: jaccard
+    // = |∩|/|∪| = 2/5 = 0.40. Above the v0.3.11 floor (0.35) and below
+    // the pre-v0.3.11 floor (0.50) — i.e. the exact wedge §C C3 opens.
+    // Pre-v0.3.11 this contradicts would have been silently dropped.
+    const existing = createMemoryEntry({
+      object_id: "mem-A",
+      content: "I prefer dark roast coffee.",
+      domain_tags: ["coffee", "beans", "dark", "light"]
+    });
+    const memoryRepo = {
+      findByDimension: vi.fn(async () => [existing]),
+      findByWorkspaceId: vi.fn(async () => [existing])
+    };
+    const graphEdgePort = { createEdge: vi.fn(async () => undefined) };
+    const service = new ConflictDetectionService({ memoryRepo, graphEdgePort });
+
+    await service.detectAndLinkConflicts({
+      newMemoryId: "mem-B",
+      newMemoryDimension: MemoryDimension.PREFERENCE,
+      newMemoryScopeClass: ScopeClass.PROJECT,
+      newMemoryContent: "I prefer light roast tea.",
+      newMemoryDomainTags: ["coffee", "beans", "prep"],
+      workspaceId: "workspace-1",
+      runId: "run-1"
+    });
+
+    const contradictsCalls = graphEdgePort.createEdge.mock.calls.filter(
+      (call: any[]) => call[0].edgeType === "contradicts"
+    );
+    expect(contradictsCalls).toHaveLength(1);
+  });
+
   it("ruleEnabled=false with no llmPort produces no edges", async () => {
     const existing = createMemoryEntry({
       object_id: "mem-A",
