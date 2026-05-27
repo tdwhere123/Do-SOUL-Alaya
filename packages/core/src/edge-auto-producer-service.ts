@@ -23,6 +23,16 @@ const STRONG_TAG_OVERLAP_MIN = 0.5;
 // local heuristic for that neighbor) so a noisy garden response cannot
 // inject low-quality supports/derives_from proposals into the queue.
 const LLM_CONFIDENCE_FLOOR = 0.85;
+// Phase B §B-2 LLM-pregate floor: a pair below this token-Jaccard +
+// tag-overlap threshold cannot meaningfully clear DERIVES_TOKEN_JACCARD_MIN
+// (0.28) for the local heuristic either, so we skip the garden round-trip
+// and fall straight back to the (likely-null) local classifier. The
+// threshold is intentionally below the heuristic's DERIVES floor (the
+// loosest of the three classifier paths) so the LLM still gets to see
+// the "borderline" pair-space where its judgement matters most. A pair
+// with zero token overlap AND zero tag overlap is the obvious-non-pair
+// the pregate is meant to drop.
+const LLM_PREGATE_TOKEN_JACCARD_MIN = 0.2;
 
 const DERIVATION_CUES = [
   "based on",
@@ -211,7 +221,11 @@ export class EdgeAutoProducerService {
    * deterministic local heuristic, so a degraded garden never blocks
    * proposal generation. The eligibility prefilter (same workspace,
    * dimension, scope, lifecycle=active) is shared with the heuristic to
-   * spare the LLM obvious non-pairs.
+   * spare the LLM obvious non-pairs. A second, content-similarity
+   * pregate (token-Jaccard + tag-overlap) runs before the LLM call so a
+   * fan-out of 12 structurally-eligible-but-unrelated neighbors does not
+   * fire 12 garden round-trips per new memory.
+   * see also: passesLlmPregate, LLM_PREGATE_TOKEN_JACCARD_MIN.
    */
   private async decideForNeighbor(
     newMemory: Readonly<MemoryEntry>,
@@ -220,7 +234,7 @@ export class EdgeAutoProducerService {
     if (!isEligibleNeighbor(newMemory, neighbor)) {
       return null;
     }
-    if (this.deps.llmPort !== undefined) {
+    if (this.deps.llmPort !== undefined && passesLlmPregate(newMemory, neighbor)) {
       const llmDecision = await this.tryLlmDecision(newMemory, neighbor);
       if (llmDecision !== null) {
         return llmDecision;
@@ -344,6 +358,28 @@ function classifyNeighbor(
     };
   }
   return null;
+}
+
+/**
+ * Phase B §B-2 LLM cost pregate. A pair must clear EITHER a small
+ * token-Jaccard floor OR a non-empty tag-overlap signal before the LLM
+ * port is consulted. The intent is to drop the "structurally eligible
+ * but obviously unrelated" pairs (same workspace + dimension + scope
+ * but zero shared lexical content) that would otherwise fan out to
+ * NEIGHBOR_SEARCH_LIMIT garden calls per new memory under a full bench.
+ *
+ * The token-Jaccard floor (0.2) is intentionally below the local
+ * heuristic's DERIVES_TOKEN_JACCARD_MIN (0.28) so the LLM still gets
+ * the borderline pair-space where its judgement is most valuable;
+ * pairs the heuristic could already classify deterministically are not
+ * locked out, they just route through the LLM first as today.
+ */
+function passesLlmPregate(
+  newMemory: Readonly<MemoryEntry>,
+  neighbor: Readonly<MemoryEntry>
+): boolean {
+  const features = computeSimilarity(newMemory, neighbor);
+  return features.tokenJaccard >= LLM_PREGATE_TOKEN_JACCARD_MIN || features.tagOverlap > 0;
 }
 
 function isEligibleNeighbor(newMemory: Readonly<MemoryEntry>, neighbor: Readonly<MemoryEntry>): boolean {

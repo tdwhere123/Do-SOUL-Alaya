@@ -385,6 +385,116 @@ describe("EdgeAutoProducerService", () => {
     });
   });
 
+  it("B-2 pregate skips the LLM port for structurally eligible but unrelated pairs", async () => {
+    // Same workspace + dimension + scope as the new memory so the
+    // structural eligibility check passes, but zero shared content
+    // tokens and zero shared tags. This is the "obvious non-pair" the
+    // LLM cost pregate is designed to drop.
+    const newMemory = createMemoryEntry({
+      content: "RTK wrapper is required for shell commands in this repository.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const unrelatedNeighbor = createMemoryEntry({
+      object_id: "memory-unrelated",
+      content: "Friday afternoon deployment window starts at 1500 UTC.",
+      domain_tags: ["release", "operations"]
+    });
+    const { deps, graphEdgePort } = createDeps([newMemory, unrelatedNeighbor]);
+    const llmPort = {
+      classifyPair: vi.fn(async () => ({
+        edgeType: "supports" as const,
+        confidence: 0.95,
+        rationale: "should never be called"
+      }))
+    };
+    const service = new EdgeAutoProducerService({ ...deps, llmPort });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    // LLM port MUST NOT be consulted for the unrelated neighbor — that is
+    // the whole point of the pregate (full bench would otherwise fire
+    // NEIGHBOR_SEARCH_LIMIT garden round-trips per new memory).
+    expect(llmPort.classifyPair).not.toHaveBeenCalled();
+    // The local heuristic also rejects this pair (no strong tag overlap),
+    // so no edge is proposed — the pregate's only job is to skip the LLM,
+    // not to short-circuit the heuristic fallback.
+    expect(graphEdgePort.createEdge).not.toHaveBeenCalled();
+  });
+
+  it("B-2 pregate routes related pairs to the LLM port as before", async () => {
+    // High token-Jaccard pair — pregate passes, LLM verdict propagates.
+    const newMemory = createMemoryEntry({
+      content: "RTK wrapper is required for shell commands in this repository.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const relatedNeighbor = createMemoryEntry({
+      object_id: "memory-related",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, graphEdgePort } = createDeps([newMemory, relatedNeighbor]);
+    const llmPort = {
+      classifyPair: vi.fn(async () => ({
+        edgeType: "supports" as const,
+        confidence: 0.92,
+        rationale: "shared RTK rule"
+      }))
+    };
+    const service = new EdgeAutoProducerService({ ...deps, llmPort });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    expect(llmPort.classifyPair).toHaveBeenCalledTimes(1);
+    expect(graphEdgePort.createEdge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        edgeType: MemoryGraphEdgeType.SUPPORTS,
+        triggerSource: EdgeProposalTriggerSource.LLM_SUPPORTS
+      })
+    );
+  });
+
+  it("B-2 pregate still allows tag-overlap-only pairs through to the LLM", async () => {
+    // Zero content token overlap (different topics in text) but a shared
+    // domain tag — the LLM should still get a chance to judge, because
+    // tag overlap is an independent relatedness signal.
+    const newMemory = createMemoryEntry({
+      content: "Database connection pool is sized at thirty-two slots.",
+      domain_tags: ["rtk", "platform"]
+    });
+    const tagOverlapNeighbor = createMemoryEntry({
+      object_id: "memory-tag-overlap",
+      content: "Shell logging follows a structured json line format.",
+      domain_tags: ["rtk", "platform"]
+    });
+    const { deps } = createDeps([newMemory, tagOverlapNeighbor]);
+    const llmPort = {
+      classifyPair: vi.fn(async () => null)
+    };
+    const service = new EdgeAutoProducerService({ ...deps, llmPort });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    // LLM gets the call (tag overlap is a real relatedness signal); a
+    // null verdict then falls back to the local heuristic which (lacking
+    // strong tag overlap and token Jaccard) rejects the pair.
+    expect(llmPort.classifyPair).toHaveBeenCalledTimes(1);
+  });
+
   it("uses bounded local search only and has no external provider dependency", async () => {
     const newMemory = createMemoryEntry();
     const neighbors = Array.from({ length: 20 }, (_, index) =>
