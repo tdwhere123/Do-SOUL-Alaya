@@ -195,6 +195,41 @@ export interface LongMemEvalHitScoringResult {
  *   section; its LongMemEval-S text must mirror this measurement-basis
  *   note (the report.md prose lives there, not in this package).
  */
+
+// @anchor BENCH_PROFILE_TIMER: env-gated per-question phase timer. Default
+// OFF; set ALAYA_BENCH_PROFILE=1 to emit one [bench_profile] line per
+// question on stderr. Consumed by Phase E.opt smoke runs that diff phase
+// distribution before/after SQLite tuning. The timer uses hrtime.bigint()
+// (ns); rendering converts to ms with one-decimal precision. Phases are
+// optional — only those `record`-ed appear in the line.
+const BENCH_PROFILE_ENV = "ALAYA_BENCH_PROFILE";
+
+function isBenchProfileEnabled(): boolean {
+  const raw = process.env[BENCH_PROFILE_ENV];
+  if (raw === undefined) return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized !== "" && normalized !== "0" && normalized !== "false" && normalized !== "off" && normalized !== "no";
+}
+
+interface PhaseTimer {
+  readonly tick: () => bigint;
+  readonly record: (name: string, started: bigint) => void;
+  readonly format: () => string;
+}
+
+function createPhaseTimer(): PhaseTimer {
+  const samples: Array<{ name: string; ms: number }> = [];
+  return {
+    tick: () => process.hrtime.bigint(),
+    record: (name: string, started: bigint) => {
+      const elapsedNs = process.hrtime.bigint() - started;
+      const ms = Number(elapsedNs) / 1_000_000;
+      samples.push({ name, ms });
+    },
+    format: () => samples.map((s) => `${s.name}=${s.ms.toFixed(1)}ms`).join(" ")
+  };
+}
+
 export async function runLongMemEval(
   opts: LongMemEvalRunOptions
 ): Promise<LongMemEvalRunResult> {
@@ -263,6 +298,15 @@ export async function runLongMemEval(
     turnIndex: number,
     seedRunner: CompileSeedRunner
   ): Promise<WorkerResult> {
+    // Bench-only phase timing instrumentation. Gated by ALAYA_BENCH_PROFILE
+    // (default OFF — no overhead when unset). Emits one bench_profile line
+    // per question to stderr so the bench harness archive on stdout stays
+    // intact. process.hrtime.bigint() returns nanoseconds; we convert to
+    // milliseconds at log time. The phase wallclock does not include
+    // anything outside this function (the orchestrator loop tracks total).
+    const profileEnabled = isBenchProfileEnabled();
+    const phase = createPhaseTimer();
+    const tDaemonStart = phase.tick();
     const daemon = await startBenchDaemon({
       workspaceId: `lme-${question.question_id.slice(0, 8)}`,
       runId: `run-${question.question_id.slice(0, 8)}`,
@@ -272,7 +316,9 @@ export async function runLongMemEval(
         : { embeddingProviderKind: opts.embeddingProviderKind }),
       recallWeightOverrides
     });
+    phase.record("daemon_start", tDaemonStart);
     try {
+      const tSeedLoop = phase.tick();
       const sidecar = new Map<string, LongMemEvalSidecarEntry>();
       const answerSessionSet = new Set(question.answer_session_ids);
       let seedTurnsTruncated = 0;
@@ -366,6 +412,9 @@ export async function runLongMemEval(
         }
       }
 
+      phase.record("seed_loop", tSeedLoop);
+
+      const tEmbeddingWarmup = phase.tick();
       const embeddingWarmup =
         opts.embeddingMode === "env"
           ? await daemon.warmEmbeddingCache(deriveLongMemEvalMemoryObjectIds(sidecar))
@@ -374,9 +423,11 @@ export async function runLongMemEval(
         opts.embeddingMode === "env"
           ? await daemon.warmQueryEmbeddingCache([question.question])
           : null;
+      phase.record("embedding_warmup", tEmbeddingWarmup);
 
       const goldMemoryIds = deriveLongMemEvalGoldMemoryIds(sidecar, answerSessionSet);
 
+      const tRecall = phase.tick();
       const recallCycle = await runLongMemEvalRecallCycle({
         daemon,
         query: question.question,
@@ -386,6 +437,7 @@ export async function runLongMemEval(
         turnIndex,
         questionText: question.question
       });
+      phase.record("recall", tRecall);
       const recallResult = recallCycle.scoredRecallResult;
       const latencyMs = recallCycle.scoredRecallLatencyMs;
       const results = recallResult.results;
@@ -426,6 +478,7 @@ export async function runLongMemEval(
         recallResult,
         embeddingMode: opts.embeddingMode ?? "disabled"
       });
+      const tKpiQuery = phase.tick();
       const reportSideEffectSnapshot =
         await readLongMemEvalReportSideEffectSnapshot(question.question_id, daemon);
       // Event-sourced token-economy figures for this question's run: read
@@ -449,6 +502,7 @@ export async function runLongMemEval(
       // decision is durably persisted before aggregation.
       // see also: packages/eval/src/edge-proposal-kpi.ts
       const edgeProposalKpiRows = await daemon.queryEdgeProposalKpiRows();
+      phase.record("kpi_query", tKpiQuery);
 
       return {
         questionId: question.question_id,
@@ -471,7 +525,14 @@ export async function runLongMemEval(
         edgeProposalKpiRows
       };
     } finally {
+      const tShutdown = phase.tick();
       await daemon.shutdown();
+      phase.record("shutdown", tShutdown);
+      if (profileEnabled) {
+        process.stderr.write(
+          `[bench_profile] question=${question.question_id} ${phase.format()}\n`
+        );
+      }
     }
   }
 
