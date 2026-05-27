@@ -780,15 +780,16 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       await edgeProposalService.proposeEdge(params);
     }
   };
-  // invariant: Phase B §B-2 pair-classifier port. Enabled by default
+  // invariant: pair-classifier port enabled by default
   // (ALAYA_EDGE_PRODUCER_LLM_ENABLED!=0/false) so the LLM gets a chance
   // at every same-dimension same-scope candidate neighbor before the
   // deterministic local heuristic runs. The adapter walks the
   // operator's garden compute config — when the config is missing,
   // disabled, or its secret_ref does not resolve, createEdgeAutoProducerLlmPort
   // returns null and the service quietly falls back to the local
-  // heuristic. v0.3.11 §K4.5 keeps this on the local garden compute
-  // path; no new cloud dependency is introduced here.
+  // heuristic. invariant: no new cloud dependency may be introduced
+  // here; this port runs on the operator's existing garden compute
+  // config or is disabled.
   const edgeAutoProducerLlmEnabled = (() => {
     const raw = process.env.ALAYA_EDGE_PRODUCER_LLM_ENABLED?.toLowerCase();
     if (raw === undefined || raw === "") {

@@ -89,14 +89,14 @@ export interface ConflictDetectionServiceDeps {
 // content evidence within the same dimension.
 // invariant: TAG_OVERLAP_CONTRADICTS_THRESHOLD is the rule-path gate for
 // when two same-dimension memories are "about the same thing" enough to
-// even be a contradicts candidate. The 0.35 value (down from 0.5) is the
-// v0.3.11 §C C3 setting: shorter distilled facts carry fewer tags, so
-// the prior 0.5 floor rejected real contradicts where the new and old
-// fact each carried two tags with only one in common (overlap=1/3 ≈
-// 0.33). At 0.35 the rule path also lets the {coffee,alpha} vs
-// {coffee,beta} ambiguous-band case through, while still rejecting
-// single-tag drive-bys (1/N where N≥3) — those flow to the LLM ambiguous
-// path when enabled. Writes still go through proposeEdge so a stricter
+// even be a contradicts candidate. 0.35 (down from a prior 0.5) is set
+// because shorter distilled facts carry fewer tags: the 0.5 floor
+// rejected real contradicts where the new and old fact each carried
+// two tags with only one in common (overlap=1/3 ≈ 0.33). At 0.35 the
+// rule path also lets the {coffee,alpha} vs {coffee,beta}
+// ambiguous-band case through, while still rejecting single-tag
+// drive-bys (1/N where N≥3) — those flow to the LLM ambiguous path
+// when enabled. Writes still go through proposeEdge so a stricter
 // reviewer or auto-accept policy is the final gate, not this constant.
 const TAG_OVERLAP_CONTRADICTS_THRESHOLD = 0.35;
 const TOKEN_JACCARD_CONTRADICTS_MAX = 0.35;

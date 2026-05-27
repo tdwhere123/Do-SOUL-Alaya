@@ -70,11 +70,11 @@ export class DirtyStatePanicService {
     const stateChangedEvent = this.buildWorkerStateChangedEvent(workerRun, dossier);
     const updatedAt = dossier.created_at;
 
-    // Atomic: panic + worker.state_changed EventLog rows, dossier INSERT,
-    // and worker_run state UPDATE all commit (or roll back) as one SQLite
-    // transaction (see #BL-022 closure). Replaces the prior nested
-    // legacy-publish pattern flagged by A2 finding-2 — nested publish
-    // broke the single-transaction guarantee.
+    // invariant: panic + worker.state_changed EventLog rows, dossier
+    // INSERT, and worker_run state UPDATE all commit (or roll back) as
+    // one SQLite transaction. A nested-publish shape would break the
+    // single-transaction guarantee, so callers MUST keep all mutations
+    // inside the appendManyWithMutation callback.
     return await this.deps.eventPublisher.appendManyWithMutation(
       [panicEvent, stateChangedEvent],
       () => {

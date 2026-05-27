@@ -60,7 +60,7 @@ describe("mcp memory tool handler — soul.list_pending_proposals (A1)", () => {
     });
   });
 
-  it("rejects a workspace_id payload field at schema parse time (A1 finding-2)", async () => {
+  it("rejects a workspace_id payload field at schema parse time", async () => {
     // workspace_id is no longer declared on the request schema; .strict()
     // rejects it at parse time. An attached agent that tries to spoof a
     // foreign workspace via the payload fails closed before reaching the

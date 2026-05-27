@@ -77,10 +77,11 @@ export interface EdgeProposalServiceDependencies {
   readonly now?: () => string;
 }
 
-// invariant: auto-accept floor table by trigger_source. Phase B owns this
-// mapping; Phase F calibration is expected to tune these floors based on
-// per-trigger accuracy on closed bench runs. No producer may inline its
-// own magic constant — always read from this table.
+// invariant: auto-accept floor table by trigger_source. This file is
+// the single source of truth for the mapping; downstream calibration
+// tunes these floors based on per-trigger accuracy on closed bench
+// runs. No producer may inline its own magic constant — always read
+// from this table.
 //
 // EXPLICIT and CANDIDATE_SIGNAL_REF are agent-driven and intentionally
 // absent: agent-reported confidence is already clamped to 0.5 in
@@ -91,8 +92,7 @@ export interface EdgeProposalServiceDependencies {
 // with a floor here (or the caller must invoke acceptProposal directly
 // via batchReview, which is an explicit reviewer action).
 //
-// see also: docs/handbook/runtime-status.md (Phase B 4-trigger map);
-//   phase-6-graph-plan §B B-1..B-4 producer floors.
+// see also: docs/handbook/runtime-status.md (4-trigger map).
 export const AUTO_ACCEPT_FLOOR_BY_TRIGGER: Readonly<
   Partial<Record<EdgeProposalTriggerSourceValue, number>>
 > = Object.freeze({

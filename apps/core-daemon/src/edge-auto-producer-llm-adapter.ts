@@ -10,17 +10,18 @@ import type {
 /**
  * @anchor edge-auto-producer-llm-adapter
  *
- * Phase B §B-2 pair classifier adapter. Wraps the operator's official-
- * api garden compute config to ask an OpenAI-compatible chat model
- * whether a freshly materialized memory supports / is derived from a
- * candidate neighbor. The verdict (or null) flows back through
+ * Pair-classifier adapter. Wraps the operator's official-api garden
+ * compute config to ask an OpenAI-compatible chat model whether a
+ * freshly materialized memory supports / is derived from a candidate
+ * neighbor. The verdict (or null) flows back through
  * EdgeAutoProducerService.classifyPair so the proposal queue and the
- * §B-2 confidence floor remain the final gate.
+ * confidence floor (LLM_CONFIDENCE_FLOOR in edge-auto-producer-service.ts)
+ * remain the final gate.
  *
  * The transport mirrors apps/core-daemon/src/reconciliation-llm-decision.ts:
- * - garden compute local path only (zero new cloud dependency per
- *   v0.3.11 §K4.5 — caller resolves the garden secret_ref the same way
- *   the official-api garden provider does)
+ * - garden compute local path only (invariant: no new cloud dependency
+ *   may be introduced here — caller resolves the garden secret_ref the
+ *   same way the official-api garden provider does)
  * - on-disk decision cache keyed by sha256(model + new fact + neighbor
  *   fact + tags) so a credentialled run populates the cache and later
  *   runs reuse it with zero LLM calls
@@ -33,10 +34,9 @@ import type {
  *
  * anti-patterns-lint-allow: cache + transport helpers structurally
  * mirror reconciliation-llm-decision.ts; extracting a shared
- * garden-llm-cache helper requires touching that file too, which is out
- * of scope for the Phase B B-2 task. Tracked for a follow-up commit
- * once reconciliation-llm-decision.ts is in the same write-ownership
- * window.
+ * garden-llm-cache helper requires touching that file too, which is
+ * out of scope here. Tracked for a follow-up commit once both files
+ * are in the same write-ownership window.
  */
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

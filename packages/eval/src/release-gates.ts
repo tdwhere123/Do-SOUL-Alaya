@@ -44,7 +44,7 @@ export function releaseHardGateAllowsLatestPassing(current: KpiPayload): boolean
   // Reject degraded seed-extraction provenance before any numeric gate, so a
   // degraded archive cannot reach latest_passing through any caller that
   // bypasses the bench-runner CLI exit (programmatic consumer, automation,
-  // Inspector). See finding B0-1.
+  // Inspector).
   if (evaluateSeedExtractionReleaseBlocker(current) !== null) {
     return false;
   }

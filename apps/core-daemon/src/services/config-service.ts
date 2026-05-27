@@ -439,9 +439,9 @@ async function patchRuntimeEmbeddingConfig(input: {
   const occurredAt = parseIsoTimestamp(input.clock());
   const auditEntryId = input.generateAuditId();
 
-  // Per .do-it/findings/a2.md finding-1: the FS write half of this operation
-  // (env file + optional pasted secret) is genuinely async and cannot live
-  // inside a SQLite transaction. The structure is now:
+  // invariant: the FS write half of this operation (env file + optional
+  // pasted secret) is genuinely async and cannot live inside a SQLite
+  // transaction. The structure is:
   //
   //   1. applyRuntimeEmbeddingConfigFiles writes the FS files inside its
   //      cross-process lock and snapshots the previous content.

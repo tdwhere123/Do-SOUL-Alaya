@@ -479,7 +479,7 @@ export type RecallGraphExpansionPlaneCountPerEdgeType = Readonly<
 // invariant: multi-seed fan-in is measured per addGraphExpansionCandidates
 // call. When the entity_seed plane contributes 2+ distinct entity-derived
 // seeds, each seed expands independently and the per-seed candidate counts
-// are aggregated here so Phase F holistic tuning can read distribution shape
+// are aggregated here so downstream tuning can read distribution shape
 // without re-deriving from raw graph events.
 // see also: recall-service.ts addGraphExpansionCandidates
 export interface RecallMultiSeedGraphFanInDiagnostics {

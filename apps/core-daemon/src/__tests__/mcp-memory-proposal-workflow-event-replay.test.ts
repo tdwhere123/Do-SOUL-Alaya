@@ -16,10 +16,8 @@ import {
   SourceDeliveryAnchorValidationError
 } from "../mcp-memory-proposal-workflow.js";
 
-// A1 fix-loop (finding-6): the original A1 work tested that the
-// workflow *passes* reviewer_identity into the resolution events
-// (governance test) and that the proposals row persists it (storage
-// test). Neither covered the audit-replay direction:
+// invariant: reviewer_identity must survive the full audit-replay
+// path:
 //
 //   create → review → query event_log → reconstruct review record →
 //   reviewer_identity intact?
@@ -40,7 +38,7 @@ afterEach(() => {
   databases.clear();
 });
 
-describe("mcp memory proposal workflow — event_log audit replay (A1 finding-6)", () => {
+describe("mcp memory proposal workflow — event_log audit replay", () => {
   it("preserves reviewer_identity on every SOUL_REVIEW_* event_log row through real repos", async () => {
     const database = createDb();
     const proposalRepo = new SqliteProposalRepo(database);
@@ -216,8 +214,8 @@ describe("mcp memory proposal workflow — event_log audit replay (A1 finding-6)
         reason: "utf-8 reviewer",
         reviewer_identity: reviewerIdentity
       },
-      // Human-reviewer surface (runId: null) — also exercises the
-      // finding-1 loosened context check on a real repo.
+      // Human-reviewer surface (runId: null) — exercises the loosened
+      // context check on a real repo (Inspector / `alaya review`).
       { workspaceId: "ws-utf8", runId: null, agentTarget: "inspector" }
     );
 

@@ -2,7 +2,7 @@
 // Bench-runner CLI surface for the seed-extraction release blocker.
 // Source of truth for the judgment lives in packages/eval/src/
 // seed-extraction-blocker.ts so both the CLI exit and the latest_passing
-// gate share one rule. See finding B0-1.
+// gate share one rule.
 // cross-file: packages/eval/src/release-gates.ts — releaseHardGateAllowsLatestPassing
 // cross-file: packages/eval/src/seed-extraction-blocker.ts — shared judgment
 import {

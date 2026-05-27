@@ -384,13 +384,14 @@ describe("mcp memory governance", () => {
     });
   });
 
-  it("allows human reviewer (runId: null) to review a proposal stored with a non-null run_id (A1 finding-1)", async () => {
-    // A1 fix-loop (finding-1): the Inspector POST and `alaya review`
-    // CLI always pass runId: null. Before the fix, assertProposalContext
-    // rejected this with NOT_FOUND because the stored proposal carried
-    // the agent's run_id (e.g. "run-1") and strict equality required
-    // null === "run-1" → false. Locking the loosened semantics here so
-    // a regression of the strict check fails this assertion.
+  it("allows human reviewer (runId: null) to review a proposal stored with a non-null run_id", async () => {
+    // invariant: the Inspector POST and `alaya review` CLI always pass
+    // runId: null. assertProposalContext MUST accept the human-reviewer
+    // (runId: null) case even when the stored proposal carries an
+    // agent's run_id; otherwise the human reviewer surface cannot
+    // review any agent-scoped proposal. Locking the loosened semantics
+    // here so a regression to strict run_id equality fails this
+    // assertion.
     const events: EventLogEntry[] = [];
     const proposal = createProposal();
     let storedProposal = proposal;
@@ -474,7 +475,7 @@ describe("mcp memory governance", () => {
     expect(events).toHaveLength(3);
   });
 
-  it("still rejects human reviewer when workspace does not match (finding-1 — workspace check stays strict)", async () => {
+  it("still rejects human reviewer when workspace does not match (workspace check stays strict)", async () => {
     const proposal = createProposal();
     const workflow = createMcpMemoryProposalWorkflow({
       now: () => "2026-04-30T00:00:00.000Z",
@@ -516,7 +517,7 @@ describe("mcp memory governance", () => {
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
-  it("still requires run match when call context carries a non-null runId (finding-1 — agent context stays strict)", async () => {
+  it("still requires run match when call context carries a non-null runId (agent context stays strict)", async () => {
     // When an attached agent itself drives the review call, runId is
     // non-null and strict equality must still hold so an agent in run A
     // cannot review a proposal scoped to run B.
@@ -760,8 +761,8 @@ describe("mcp memory governance — soul.list_pending_proposals (A1)", () => {
     });
 
     const result = await workflow.listPendingProposals(
-      // A1 fix-loop (finding-2): workspace_id no longer in the request
-      // payload; sourced from the trusted MCP call context.
+      // invariant: workspace_id MUST NOT be in the request payload;
+      // it is sourced from the trusted MCP call context.
       { since: "2026-04-30T00:00:00.000Z", limit: 10 },
       { workspaceId: "ws1", runId: null, agentTarget: "cli" }
     );

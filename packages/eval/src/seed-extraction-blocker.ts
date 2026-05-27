@@ -4,7 +4,7 @@
 // (latest_passing and bench-runner CLI exit). The release-gate path and the
 // bench-runner CLI both call this so a degraded archive cannot reach
 // latest_passing by skipping the bench-runner exit (e.g. programmatic
-// consumer, future automation, Inspector). See finding B0-1.
+// consumer, future automation, Inspector).
 // cross-file: apps/bench-runner/src/longmemeval/seed-extraction-release-blocker.ts
 //   wraps this judgment with bench-runner-specific report/finding rendering.
 import type { KpiPayload, SeedExtractionPath } from "./kpi-schema.js";

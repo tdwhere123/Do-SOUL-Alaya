@@ -397,7 +397,7 @@ async function entryAllowsLatestPassing(
   // provenance (no_credentials_fallback, offline_fallbacks > 0, or missing
   // path on LongMemEval) cannot reach latest_passing through the
   // live-strict-real sidecar branch, which would otherwise short-circuit
-  // releaseHardGateAllowsLatestPassing. See round-2 finding B1.
+  // releaseHardGateAllowsLatestPassing.
   if (evaluateSeedExtractionReleaseBlocker(payload) !== null) {
     return false;
   }

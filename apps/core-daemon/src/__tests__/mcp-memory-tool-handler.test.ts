@@ -898,7 +898,7 @@ describe("mcp memory tool handler", () => {
   // invariant: graph-edge ref hints in raw_payload are NOT promoted to
   // first-class signal fields. The 5 ref keys are first-class on
   // `CandidateMemorySignal`; raw_payload occurrences are logged and
-  // ignored. See `.do-it/findings/v0.3.11-codex-audit.md` §I0-3.
+  // left in raw_payload unchanged (warn-and-keep).
   it("ignores raw_payload graph-edge ref keys and warns; first-class fields are the only entry", async () => {
     const warn = vi.fn();
     const deps = { ...createDeps(), warn };

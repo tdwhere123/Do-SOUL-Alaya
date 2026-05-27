@@ -18,12 +18,13 @@ const SUPPORTS_TOKEN_JACCARD_MIN = 0.45;
 const DERIVES_TOKEN_JACCARD_MIN = 0.28;
 const SUPERSEDES_TOKEN_JACCARD_MIN = 0.5;
 const STRONG_TAG_OVERLAP_MIN = 0.5;
-// Phase B §B-2 confidence floor for the LLM pair-classifier path. A
-// below-floor verdict is dropped (the service then falls back to the
-// local heuristic for that neighbor) so a noisy garden response cannot
-// inject low-quality supports/derives_from proposals into the queue.
+// invariant: LLM pair-classifier verdicts MUST clear this confidence
+// floor to enter the proposal queue. A below-floor verdict is dropped
+// (the service then falls back to the local heuristic for that
+// neighbor) so a noisy garden response cannot inject low-quality
+// supports/derives_from proposals into the queue.
 const LLM_CONFIDENCE_FLOOR = 0.85;
-// Phase B §B-2 LLM-pregate floor: a pair below this token-Jaccard +
+// invariant: LLM-pregate floor. A pair below this token-Jaccard +
 // tag-overlap threshold cannot meaningfully clear DERIVES_TOKEN_JACCARD_MIN
 // (0.28) for the local heuristic either, so we skip the garden round-trip
 // and fall straight back to the (likely-null) local classifier. The
@@ -127,10 +128,10 @@ export interface EdgeAutoProducerServiceDependencies {
   readonly memoryRepo: EdgeAutoProducerMemoryRepoPort;
   readonly graphEdgePort: EdgeAutoProducerGraphEdgePort;
   /**
-   * Optional Phase B §B-2 pair classifier. When present the service
-   * asks the port for a supports / derives_from verdict before running
-   * the local heuristic; a verdict >= LLM_CONFIDENCE_FLOOR is emitted
-   * with trigger_source = "llm_supports". A null / failing / below-floor
+   * Optional pair classifier port. When present the service asks the
+   * port for a supports / derives_from verdict before running the
+   * local heuristic; a verdict >= LLM_CONFIDENCE_FLOOR is emitted with
+   * trigger_source = "llm_supports". A null / failing / below-floor
    * verdict triggers the local-heuristic fallback for that neighbor.
    * Adapter failures are observable via the optional warn callback;
    * they never abort proposal production for the new memory.
@@ -151,7 +152,7 @@ interface EdgeAutoDecision {
   readonly confidence: number;
   readonly reason: string;
   // invariant: trigger_source must be one of the local_* rule-heuristic
-  // enum values (or llm_supports once Phase B B-2 lands). Routing back
+  // enum values, or llm_supports for LLM-port verdicts. Routing back
   // through SYSTEM here would collapse KPI K3.2 per-trigger breakdown.
   readonly triggerSource: EdgeProposalTriggerSourceValue;
 }
@@ -216,15 +217,15 @@ export class EdgeAutoProducerService {
   }
 
   /**
-   * Phase B B-2: LLM port runs first for the supports / derives_from
-   * universe. A null / failing / below-floor verdict falls back to the
-   * deterministic local heuristic, so a degraded garden never blocks
-   * proposal generation. The eligibility prefilter (same workspace,
-   * dimension, scope, lifecycle=active) is shared with the heuristic to
-   * spare the LLM obvious non-pairs. A second, content-similarity
-   * pregate (token-Jaccard + tag-overlap) runs before the LLM call so a
-   * fan-out of 12 structurally-eligible-but-unrelated neighbors does not
-   * fire 12 garden round-trips per new memory.
+   * LLM port runs first for the supports / derives_from universe. A
+   * null / failing / below-floor verdict falls back to the deterministic
+   * local heuristic, so a degraded garden never blocks proposal
+   * generation. The eligibility prefilter (same workspace, dimension,
+   * scope, lifecycle=active) is shared with the heuristic to spare the
+   * LLM obvious non-pairs. A second, content-similarity pregate
+   * (token-Jaccard + tag-overlap) runs before the LLM call so a fan-out
+   * of 12 structurally-eligible-but-unrelated neighbors does not fire
+   * 12 garden round-trips per new memory.
    * see also: passesLlmPregate, LLM_PREGATE_TOKEN_JACCARD_MIN.
    */
   private async decideForNeighbor(
@@ -281,9 +282,9 @@ export class EdgeAutoProducerService {
       edgeType,
       confidence: round2(clampedConfidence),
       // invariant: trigger_source = llm_supports for BOTH supports and
-      // derives_from when sourced from the LLM port — Phase B B-2 reuses
-      // a single per-trigger KPI bucket for the pair classifier so K3.2
-      // does not need two LLM rows.
+      // derives_from when sourced from the LLM port. Reuses a single
+      // per-trigger KPI bucket for the pair classifier so K3.2 does not
+      // need two LLM rows.
       triggerSource: EdgeProposalTriggerSource.LLM_SUPPORTS,
       reason: rationale.length === 0
         ? `B-2 llm pair classifier: ${verdict.edgeType}`
@@ -361,11 +362,11 @@ function classifyNeighbor(
 }
 
 /**
- * Phase B §B-2 LLM cost pregate. A pair must clear EITHER a small
- * token-Jaccard floor OR a non-empty tag-overlap signal before the LLM
- * port is consulted. The intent is to drop the "structurally eligible
- * but obviously unrelated" pairs (same workspace + dimension + scope
- * but zero shared lexical content) that would otherwise fan out to
+ * LLM cost pregate. A pair must clear EITHER a small token-Jaccard
+ * floor OR a non-empty tag-overlap signal before the LLM port is
+ * consulted. The intent is to drop the "structurally eligible but
+ * obviously unrelated" pairs (same workspace + dimension + scope but
+ * zero shared lexical content) that would otherwise fan out to
  * NEIGHBOR_SEARCH_LIMIT garden calls per new memory under a full bench.
  *
  * The token-Jaccard floor (0.2) is intentionally below the local

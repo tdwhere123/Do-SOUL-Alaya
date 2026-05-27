@@ -31,7 +31,7 @@ function createEdge(overrides: Partial<MemoryGraphEdge> = {}): MemoryGraphEdge {
 // invariant: GraphExploreService exposes no edge-creation surface.
 // Durable graph edges may only be created via `EdgeProposalService`
 // accept path; this service is read-only (explore + count) plus
-// delete. See `.do-it/findings/v0.3.11-codex-audit.md` §I0-2.
+// delete.
 describe("GraphExploreService", () => {
   it("explores one-hop neighbors in both directions by default and emits an explore event", async () => {
     const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) =>

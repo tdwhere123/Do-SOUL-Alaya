@@ -2007,13 +2007,12 @@ type CandidateSignalGraphRefInput = {
 // `supersedes_refs`, `exception_to_refs`, `contradicts_refs`,
 // `incompatible_with_refs`) are first-class fields on
 // `CandidateMemorySignal` (see
-// `packages/protocol/src/candidate-memory-signal.ts` §79-84). The
-// daemon does not accept these keys via `raw_payload`; any occurrence
-// is logged and left in raw_payload unchanged. This closes the
-// "silent double-entry" path identified in
-// `.do-it/findings/v0.3.11-codex-audit.md` §I0-3 — agents that want
-// to assert graph hints must use the first-class fields, not the
-// untyped raw_payload channel.
+// `packages/protocol/src/candidate-memory-signal.ts`
+// CandidateMemorySignalMemoryRefKeys). The daemon does not accept
+// these keys via `raw_payload`; any occurrence is logged and left in
+// raw_payload unchanged. Closes the "silent double-entry" path —
+// agents that want to assert graph hints MUST use the first-class
+// fields, not the untyped raw_payload channel.
 function normalizeCandidateSignalGraphRefs<T extends CandidateSignalGraphRefInput>(
   input: T,
   warn: (message: string, meta: Record<string, unknown>) => void

@@ -4083,7 +4083,7 @@ describe("RecallService", () => {
       expect(tagTargetDiag?.admission_planes ?? []).not.toContain("domain_tag_cluster");
     });
 
-    describe("multi-seed graph fan-in (Phase D-5)", () => {
+    describe("multi-seed graph fan-in", () => {
       // see also: packages/core/src/recall-service.ts addGraphExpansionCandidates
       // Pool B branch and RecallMultiSeedGraphFanInDiagnostics
       type GraphEdgeStub = {

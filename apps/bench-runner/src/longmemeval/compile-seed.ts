@@ -9,8 +9,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Phase A.1 instrument: default cwd-rooted diagnostic dump dir, shared with
-// packages/soul/src/garden/compute-provider.ts so a Phase A.2 preflight can
+// Seed-extraction diagnostic instrument: default cwd-rooted dump dir,
+// shared with packages/soul/src/garden/compute-provider.ts so a preflight can
 // read provider-side and seed-side dumps from one place. data/* is gitignored.
 const DEFAULT_COMPILE_SEED_DIAGNOSTIC_DIR_REL =
   "data/diagnostics/seed-extraction-failures";
@@ -163,9 +163,9 @@ export interface CompileSeedExtractionStats {
   lastTurnDraftCount: number;
   lastExtractionSource: "cache" | "live" | null;
   /**
-   * Phase A.1 instrument: cache key (or its 12-char prefix; see writers) for
-   * the most recent extract() call, so a subsequent extraction failure can
-   * dump the cache_key_prefix to the diagnostic envelope. Optional for
+   * Diagnostic instrument: cache key (or its 12-char prefix; see writers)
+   * for the most recent extract() call, so a subsequent extraction failure
+   * can dump the cache_key_prefix to the diagnostic envelope. Optional for
    * backward compatibility with stats objects constructed by tests that
    * predate the instrument.
    */
@@ -276,9 +276,9 @@ export function createCachingSignalExtractor(options: {
       if (cached !== undefined) {
         if (stats !== undefined) {
           stats.lastExtractionSource = "cache";
-          // Phase A.1: full cache key recorded here; the diagnostic writer
-          // slices to the 12-char prefix so logs stay scannable without
-          // leaking enough hash to fingerprint a private fixture path.
+          // Full cache key recorded here; the diagnostic writer slices to
+          // the 12-char prefix so logs stay scannable without leaking
+          // enough hash to fingerprint a private fixture path.
           stats.lastCacheKey = cacheKey;
           stats.cacheHits += 1;
           recordExtractionDraftCounts(stats, cached);
@@ -596,8 +596,8 @@ export function createCompileSeedRunner(options?: {
     config: CompileSeedExtractionConfig
   ) => BenchSignalExtractor;
   /**
-   * Phase A.1 instrument: override the directory the seed-side diagnostic
-   * dump writes failure envelopes to. Defaults to
+   * Override the directory the seed-side diagnostic dump writes failure
+   * envelopes to. Defaults to
    * `<cwd>/data/diagnostics/seed-extraction-failures/`. Pass `null` to
    * disable dumps entirely (read-only fs, unit tests that want zero side
    * effects).
@@ -622,8 +622,7 @@ export function createCompileSeedRunner(options?: {
     lastExtractionSource: null,
     lastCacheKey: null
   };
-  // Phase A.1 / A.3 instrument: per-runner diagnostic dump dir; null disables
-  // dumps. Resolution order:
+  // Per-runner diagnostic dump dir; null disables dumps. Resolution order:
   //   1. explicit options.diagnosticDir (null => off, string => use as-is)
   //   2. ALAYA_SEED_EXTRACTION_DIAG_DIR env (operator override at run time)
   //   3. cwd-rooted DEFAULT_COMPILE_SEED_DIAGNOSTIC_DIR_REL (default on)
@@ -673,10 +672,10 @@ export function createCompileSeedRunner(options?: {
           }),
           requestTimeoutMs: EXTRACTION_REQUEST_TIMEOUT_MS,
           // invariant: provider-side and seed-side dumps must land in the same
-          // dir so a Phase A.2 / Phase F reader gets every signal of a failure
-          // from one readdir. ALAYA_SEED_EXTRACTION_DIAG_DIR / explicit
-          // options.diagnosticDir applies to both layers; explicit null
-          // disables the provider dump too.
+          // dir so a single readdir surfaces every signal of a failure.
+          // ALAYA_SEED_EXTRACTION_DIAG_DIR / explicit options.diagnosticDir
+          // applies to both layers; explicit null disables the provider
+          // dump too.
           diagnosticDir
         });
 
@@ -813,7 +812,7 @@ async function extractSeedInputs(input: {
   readonly turnContent: string;
   readonly seedIndex: number;
   readonly context: GardenCompileContext;
-  // Phase A.1 instrument: absolute path or null when dumps are disabled.
+  // Absolute path or null when diagnostic dumps are disabled.
   readonly diagnosticDir?: string | null;
   readonly modelId?: string;
   readonly providerKind?: string;
@@ -850,9 +849,9 @@ async function extractSeedInputs(input: {
     // offline fallback so the bench report shows the live-extraction hole.
     input.stats.offlineFallbacks += 1;
     recordExtractionFailureSource(input.stats);
-    // Phase A.1 instrument: dump cache_key_prefix / model / provider /
-    // failure source so the bench preflight (Phase A.2) can attribute the
-    // failure to a specific cache shard or live call without re-running.
+    // Dump cache_key_prefix / model / provider / failure source so a
+    // bench preflight can attribute the failure to a specific cache
+    // shard or live call without re-running.
     await dumpSeedExtractionFailureDiagnostic({
       diagnosticDir: input.diagnosticDir ?? null,
       stats: input.stats,
@@ -987,10 +986,10 @@ function recordExtractionFailureSource(stats: CompileSeedExtractionStats): void 
 }
 
 /**
- * Phase A.1 instrument: dump one seed-side extraction failure diagnostic to
+ * Dump one seed-side extraction failure diagnostic to
  * `<diagnosticDir>/compile-seed-<ISO-ts>-<uuid>.json`. Captures the cache
  * key prefix, model id, provider kind, last-extraction-source classification,
- * and the immediate failure message so a Phase A.2 preflight can attribute
+ * and the immediate failure message so a bench preflight can attribute
  * the failure to a specific cache shard or live extraction call without
  * re-running the bench. Observation only — failures inside the dump are
  * caught and surfaced as a single warn so the seed loop continues.
@@ -1113,10 +1112,10 @@ function stringifyError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-// Phase A.3 instrument: normalize ALAYA_SEED_EXTRACTION_DIAG_DIR. Empty
-// strings and whitespace are equivalent to unset (the resolver then falls
-// through to the cwd-rooted default). A literal "null" / "off" / "disabled"
-// is NOT honored here — disabling the dump requires the explicit
+// invariant: normalize ALAYA_SEED_EXTRACTION_DIAG_DIR. Empty strings and
+// whitespace are equivalent to unset (the resolver then falls through
+// to the cwd-rooted default). A literal "null" / "off" / "disabled" is
+// NOT honored here — disabling the dump requires the explicit
 // options.diagnosticDir = null wiring, since env-driven disables on a
 // release-blocker instrument are too easy to mis-set.
 function normalizeEnvDiagDir(value: string | undefined): string | null {

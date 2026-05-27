@@ -1920,7 +1920,7 @@ async function queryEdgeProposalKpiRows(
 // "0"/"false" to opt out). Production `apps/core-daemon` does not call this
 // helper, so no production runtime is affected.
 //
-// Invariant K4.2: EventLog rows are still appended via the same SqliteEventLogRepo
+// invariant: EventLog rows are still appended via the same SqliteEventLogRepo
 // path; only the SQLite write batching/fsync timing changes. WAL still
 // guarantees atomic per-statement commit; synchronous=NORMAL guarantees
 // system-crash recovery on the WAL frame boundary (only power-loss within

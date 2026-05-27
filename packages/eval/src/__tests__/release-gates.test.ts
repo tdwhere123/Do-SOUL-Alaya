@@ -230,8 +230,8 @@ describe("release hard gates", () => {
         latency_ms_p95: 110,
         quality_metrics: passingQualityMetrics(),
         // @anchor seed-extraction-release-blocker
-        // Required for LongMemEval release-grade archives — finding B0-1
-        // treats missing provenance as degraded.
+        // Required for LongMemEval release-grade archives — the release
+        // gate treats missing provenance as degraded.
         seed_extraction_path: makeSeedExtractionPath()
       }
     };

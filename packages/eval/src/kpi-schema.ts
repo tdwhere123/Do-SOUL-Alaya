@@ -446,9 +446,9 @@ const KpiCoreSchema = z.object({
   // stay schema-valid; new LongMemEval runs always populate it.
   seed_extraction_path: SeedExtractionPathSchema.optional(),
   quality_metrics: QualityMetricsSchema.optional(),
-  // Phase B Edge Proposal KPI blocks (K3.2 + K3.4). Optional so pre-Phase-B
-  // kpi.json records stay schema-valid; new bench runs always populate them
-  // when the bench-runner sources the edge proposal aggregator.
+  // Edge Proposal KPI blocks (K3.2 + K3.4). Optional so older kpi.json
+  // records stay schema-valid; new bench runs always populate them when
+  // the bench-runner sources the edge proposal aggregator.
   edge_proposal_rate: EdgeProposalRateSchema.optional(),
   edge_proposal_auto_accept: EdgeProposalAutoAcceptSchema.optional(),
   per_scenario: z.array(PerScenarioRowSchema)

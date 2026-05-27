@@ -221,15 +221,15 @@ const CONFIDENCE_DIRECT_WEIGHT = 0.08;
 // invariant: prior dampening floor — minimum weight applied to the
 // prior signal when calibrating weak-evidence candidates so that
 // prior-only activation/confidence MUST NOT make weak query evidence
-// look answer-confident. Independent from the calibration gate
-// threshold so Phase F holistic tuning can adjust each purpose
-// without silently changing the other. See round-2 finding I2.
+// look answer-confident. Intentionally a SEPARATE constant from the
+// calibration gate below so each purpose can be tuned independently
+// without silently shifting the other.
 const WEAK_EVIDENCE_PRIOR_DAMPENING_FLOOR = 0.72;
 // invariant: calibration gate threshold — calibration only fires when
 // queryEvidenceCalibrationStrength is BELOW this floor; at-or-above
 // evidence is treated as sufficient and the score shape is preserved.
 // Matches WEAK_EVIDENCE_PRIOR_DAMPENING_FLOOR by initial design intent
-// but is intentionally a separate constant (round-2 finding I2).
+// but is intentionally a separate constant to keep each purpose tunable.
 const WEAK_EVIDENCE_CALIBRATION_GATE = 0.72;
 
 interface CoarseCandidateDraft {

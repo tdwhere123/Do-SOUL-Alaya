@@ -198,10 +198,11 @@ export interface LongMemEvalHitScoringResult {
 
 // @anchor BENCH_PROFILE_TIMER: env-gated per-question phase timer. Default
 // OFF; set ALAYA_BENCH_PROFILE=1 to emit one [bench_profile] line per
-// question on stderr. Consumed by Phase E.opt smoke runs that diff phase
-// distribution before/after SQLite tuning. The timer uses hrtime.bigint()
-// (ns); rendering converts to ms with one-decimal precision. Phases are
-// optional — only those `record`-ed appear in the line.
+// question on stderr. Consumed by smoke runs that need to diff per-phase
+// distribution (e.g. before/after SQLite tuning). The timer uses
+// hrtime.bigint() (ns); rendering converts to ms with one-decimal
+// precision. Phases are optional — only those `record`-ed appear in
+// the line.
 const BENCH_PROFILE_ENV = "ALAYA_BENCH_PROFILE";
 
 function isBenchProfileEnabled(): boolean {
@@ -286,9 +287,9 @@ export async function runLongMemEval(
     // and the run-level aggregator drops the sample before computing
     // distribution stats.
     recallTokenEconomy: BenchRecallTokenEconomy | null;
-    // Per-question EventLog rows for the Phase B K3.2 / K3.4 edge
-    // proposal KPI. SOUL_GRAPH_EDGE_PROPOSAL_CREATED + _REVIEWED. Empty
-    // when the run produced no proposals; the aggregator still returns
+    // Per-question EventLog rows for the K3.2 / K3.4 edge proposal
+    // KPI: SOUL_GRAPH_EDGE_PROPOSAL_CREATED + _REVIEWED. Empty when
+    // the run produced no proposals; the aggregator still returns
     // undefined in that case so the KPI omits the block.
     edgeProposalKpiRows: readonly EdgeProposalKpiEventRow[];
   };
@@ -486,18 +487,18 @@ export async function runLongMemEval(
       // each contributing SOUL_SIGNAL_EMITTED / SOUL_CONTEXT_LENS_ASSEMBLED
       // row is already persisted. Must run before the finally-shutdown.
       const tokenMetrics = await daemon.queryTokenMetrics();
-      // Phase 7 per-recall STRUCTURAL token-economy sample. Pulled
-      // directly off the already-parsed BenchRecallDiagnostics. A null
-      // here means RecallService skipped the instrument because the
-      // recall was degraded (any non-null degradation_reason — warm/cold
-      // cascade or recall_explainability_partial), so diagnostics carry
-      // no token_economy block. The aggregator drops nulls before the
+      // Per-recall STRUCTURAL token-economy sample. Pulled directly off
+      // the already-parsed BenchRecallDiagnostics. A null here means
+      // RecallService skipped the instrument because the recall was
+      // degraded (any non-null degradation_reason — warm/cold cascade
+      // or recall_explainability_partial), so diagnostics carry no
+      // token_economy block. The aggregator drops nulls before the
       // distribution stats so degraded recalls don't dilute the run.
       // see also: packages/core/src/recall-service.ts
       // (computeRecallTokenEconomy call site).
       const recallTokenEconomy = extractRecallTokenEconomy(recallResult);
-      // Phase B K3.2 / K3.4 edge proposal KPI rows for this question's
-      // run: SOUL_GRAPH_EDGE_PROPOSAL_CREATED + _REVIEWED EventLog rows.
+      // K3.2 / K3.4 edge proposal KPI rows for this question's run:
+      // SOUL_GRAPH_EDGE_PROPOSAL_CREATED + _REVIEWED EventLog rows.
       // Read back after seeding + recall so every auto-accept policy
       // decision is durably persisted before aggregation.
       // see also: packages/eval/src/edge-proposal-kpi.ts
@@ -677,17 +678,17 @@ export async function runLongMemEval(
   const tokenEconomyInput = aggregateBenchTokenMetrics(tokenMetricsPerQuestion);
   const tokenEconomy = buildTokenEconomy(tokenEconomyInput);
   const tokenSavedRatio = computeTokenSavedRatio(tokenEconomyInput);
-  // Phase 7 per-recall STRUCTURAL token-economy distribution (p50/p95/mean
+  // Per-recall STRUCTURAL token-economy distribution (p50/p95/mean
   // across all recall calls in the run). Null when no question produced
   // diagnostics — the KPI omits the block in that case so consumers do
   // not see a zero-filled section that looks like real data.
   const recallTokenEconomy = aggregateRecallTokenEconomy(
     recallTokenEconomySamples
   );
-  // Phase B K3.2 / K3.4: aggregate edge proposal create/review EventLog
-  // rows collected from every per-question bench daemon into one run
-  // total. Each aggregator returns undefined when no events were observed
-  // — the KPI omits the block in that case (honest reporting).
+  // K3.2 / K3.4: aggregate edge proposal create/review EventLog rows
+  // collected from every per-question bench daemon into one run total.
+  // Each aggregator returns undefined when no events were observed —
+  // the KPI omits the block in that case (honest reporting).
   const edgeProposalRate = aggregateEdgeProposalRate(
     edgeProposalKpiRowsAcrossQuestions,
     edgeProposalKpiRowsPerQuestion

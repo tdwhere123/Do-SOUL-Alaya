@@ -85,9 +85,9 @@ function perCallStat(value: number) {
 }
 
 // @anchor seed-extraction-release-blocker
-// Release-grade LongMemEval archives require seed_extraction_path provenance
-// per finding B0-1; missing the field on these benches is treated as
-// degraded and blocked from latest_passing.
+// invariant: release-grade LongMemEval archives require
+// seed_extraction_path provenance; missing the field on these benches
+// is treated as degraded and blocked from latest_passing.
 function cleanSeedExtractionPath(): NonNullable<
   KpiPayload["kpi"]["seed_extraction_path"]
 > {

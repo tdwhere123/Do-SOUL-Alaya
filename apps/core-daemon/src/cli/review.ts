@@ -93,9 +93,10 @@ async function runPending(
     return { exitCode: ALAYA_SYSEXITS.DATAERR };
   }
   const callContext = callContextResult.context;
-  // A1 fix-loop (finding-2): workspace_id is bound server-side from
-  // callContext.workspaceId; no longer placed in the request body
-  // (mirrors soul.explore_graph schema discipline).
+  // invariant: workspace_id is bound server-side from
+  // callContext.workspaceId; it must NOT be placed in the request body
+  // (mirrors soul.explore_graph schema discipline — keeps attached
+  // LLMs from being taught to pass caller scope back in the payload).
   const requestArgs: Record<string, unknown> = {};
   if (args.since !== null) requestArgs.since = args.since;
   if (args.limit !== null) requestArgs.limit = args.limit;

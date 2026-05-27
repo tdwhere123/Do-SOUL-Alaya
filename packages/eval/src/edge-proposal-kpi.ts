@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /**
  * @anchor edge-proposal-kpi-aggregator — pure EventLog → KPI fold for
- * Phase B K3.2 (edge_proposal_rate) and K3.4 (edge_proposal_auto_accept).
+ * K3.2 (edge_proposal_rate) and K3.4 (edge_proposal_auto_accept).
  *
  * The fold is structurally identical to the token-economy reader pattern
  * in apps/bench-runner/src/longmemeval/token-economy.ts: it accepts plain
@@ -39,9 +39,10 @@ import { z } from "zod";
 const EDGE_PROPOSAL_CREATED_EVENT_TYPE = "soul.graph.edge_proposal_created";
 const EDGE_PROPOSAL_REVIEWED_EVENT_TYPE = "soul.graph.edge_proposal_reviewed";
 
-// Decided status set per Phase B definition. EXPIRED is intentionally
-// excluded — expiry is policy-driven, not a review verdict, and including
-// it would inflate the K3.4 denominator without a matching numerator.
+// invariant: decided status set for the K3.4 denominator. EXPIRED is
+// intentionally excluded — expiry is policy-driven, not a review verdict,
+// and including it would inflate the K3.4 denominator without a matching
+// numerator.
 const STATUS_ACCEPTED = "accepted";
 const STATUS_AUTO_ACCEPTED = "auto_accepted";
 const STATUS_REJECTED = "rejected";
@@ -84,7 +85,7 @@ import type {
 } from "./kpi-schema.js";
 
 /**
- * @anchor edge-proposal-rate-per-question — Phase B fix-loop. Under the
+ * @anchor edge-proposal-rate-per-question — under the
  * LongMemEval bench harness every question runs against the same
  * workspaceId, so per_workspace_per_day_* collapses to the run total
  * and K3.2's "40-80 proposals / workspace / day" intent cannot be
