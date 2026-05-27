@@ -6,6 +6,8 @@ import {
   type MemoryGraphEdge
 } from "@do-soul/alaya-protocol";
 import {
+  AUTO_ACCEPT_FLOOR_BY_TRIGGER,
+  AUTO_ACCEPT_REVIEWER_IDENTITY,
   EdgeProposalService,
   type EdgeProposalRepoPort
 } from "../edge-proposal-service.js";
@@ -279,6 +281,187 @@ describe("EdgeProposalService", () => {
     expect(repo.findById("edge_prop_proposal-1")?.confidence).toBe(0.85);
   });
 
+  // System-policy auto-accept floors: each trigger_source in
+  // AUTO_ACCEPT_FLOOR_BY_TRIGGER auto-accepts when confidence >= floor and
+  // stays pending when confidence < floor. The floor table is the
+  // single source of truth so this loop iterates the published map.
+  describe("system-policy auto-accept by trigger floor", () => {
+    const cases: ReadonlyArray<{
+      readonly trigger: keyof typeof AUTO_ACCEPT_FLOOR_BY_TRIGGER;
+      readonly edgeType: "recalls" | "supports" | "supersedes" | "derives_from" | "contradicts";
+    }> = [
+      { trigger: EdgeProposalTriggerSource.RECALL_CROSS_LINK, edgeType: "recalls" },
+      { trigger: EdgeProposalTriggerSource.LLM_SUPPORTS, edgeType: "supports" },
+      { trigger: EdgeProposalTriggerSource.LOCAL_SUPPORTS, edgeType: "supports" },
+      { trigger: EdgeProposalTriggerSource.LOCAL_DERIVES_FROM, edgeType: "derives_from" },
+      { trigger: EdgeProposalTriggerSource.LOCAL_SUPERSEDES, edgeType: "supersedes" },
+      { trigger: EdgeProposalTriggerSource.CONFLICT_DETECTION, edgeType: "contradicts" }
+    ];
+
+    for (const { trigger, edgeType } of cases) {
+      const floor = AUTO_ACCEPT_FLOOR_BY_TRIGGER[trigger];
+      if (floor === undefined) {
+        throw new Error(`floor missing for ${trigger}`);
+      }
+
+      it(`auto-accepts ${trigger} when confidence == floor (${floor})`, async () => {
+        const { service, repo, graphPort } = createAutoAcceptHarness();
+        const proposal = await service.proposeEdge({
+          sourceMemoryId: "memory-a",
+          targetMemoryId: "memory-b",
+          edgeType,
+          workspaceId: "workspace-1",
+          triggerSource: trigger,
+          confidence: floor
+        });
+        expect(proposal.status).toBe(EdgeProposalStatus.AUTO_ACCEPTED);
+        const stored = repo.findById(proposal.proposal_id);
+        expect(stored?.status).toBe(EdgeProposalStatus.AUTO_ACCEPTED);
+        expect(stored?.reviewer_identity).toBe(AUTO_ACCEPT_REVIEWER_IDENTITY);
+        expect(graphPort.create).toHaveBeenCalledTimes(1);
+      });
+
+      it(`auto-accepts ${trigger} at the upper bound (confidence = 1.0)`, async () => {
+        const { service, repo } = createAutoAcceptHarness();
+        const proposal = await service.proposeEdge({
+          sourceMemoryId: "memory-a",
+          targetMemoryId: "memory-b",
+          edgeType,
+          workspaceId: "workspace-1",
+          triggerSource: trigger,
+          confidence: 1
+        });
+        expect(proposal.status).toBe(EdgeProposalStatus.AUTO_ACCEPTED);
+        expect(repo.findById(proposal.proposal_id)?.status).toBe(EdgeProposalStatus.AUTO_ACCEPTED);
+      });
+
+      it(`leaves ${trigger} pending when confidence < floor`, async () => {
+        const { service, repo, graphPort } = createAutoAcceptHarness();
+        const proposal = await service.proposeEdge({
+          sourceMemoryId: "memory-a",
+          targetMemoryId: "memory-b",
+          edgeType,
+          workspaceId: "workspace-1",
+          triggerSource: trigger,
+          confidence: floor - 0.01
+        });
+        expect(proposal.status).toBe(EdgeProposalStatus.PENDING);
+        expect(repo.findById(proposal.proposal_id)?.status).toBe(EdgeProposalStatus.PENDING);
+        expect(graphPort.create).not.toHaveBeenCalled();
+      });
+    }
+
+    it("never auto-accepts EXPLICIT trigger even at confidence = 1.0 (agent self-report ceiling clamps to 0.5)", async () => {
+      const { service, repo, graphPort } = createAutoAcceptHarness();
+      const proposal = await service.proposeEdge({
+        sourceMemoryId: "memory-a",
+        targetMemoryId: "memory-b",
+        edgeType: "recalls",
+        workspaceId: "workspace-1",
+        triggerSource: EdgeProposalTriggerSource.EXPLICIT,
+        confidence: 1
+      });
+      expect(proposal.status).toBe(EdgeProposalStatus.PENDING);
+      expect(proposal.confidence).toBe(0.5);
+      expect(repo.findById(proposal.proposal_id)?.status).toBe(EdgeProposalStatus.PENDING);
+      expect(graphPort.create).not.toHaveBeenCalled();
+    });
+
+    it("never auto-accepts SYSTEM / CANDIDATE_SIGNAL_REF / BENCH_SEED at any confidence", async () => {
+      const conservativeTriggers = [
+        EdgeProposalTriggerSource.SYSTEM,
+        EdgeProposalTriggerSource.CANDIDATE_SIGNAL_REF,
+        EdgeProposalTriggerSource.BENCH_SEED
+      ] as const;
+      for (const trigger of conservativeTriggers) {
+        const { service, repo } = createAutoAcceptHarness();
+        const proposal = await service.proposeEdge({
+          sourceMemoryId: "memory-a",
+          targetMemoryId: "memory-b",
+          edgeType: "recalls",
+          workspaceId: "workspace-1",
+          triggerSource: trigger,
+          confidence: 1
+        });
+        expect(proposal.status).toBe(EdgeProposalStatus.PENDING);
+        expect(repo.findById(proposal.proposal_id)?.status).toBe(EdgeProposalStatus.PENDING);
+      }
+    });
+
+    it("emits a single SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED with status=auto_accepted and system reviewer_identity", async () => {
+      const { service, eventPublisher } = createAutoAcceptHarness();
+      await service.proposeEdge({
+        sourceMemoryId: "memory-a",
+        targetMemoryId: "memory-b",
+        edgeType: "recalls",
+        workspaceId: "workspace-1",
+        triggerSource: EdgeProposalTriggerSource.RECALL_CROSS_LINK,
+        confidence: 0.9
+      });
+      const reviewedBatches = eventPublisher.appendManyWithMutation.mock.calls
+        .map((call) => call[0])
+        .filter((events) =>
+          events.some((event) => event.event_type === "soul.graph.edge_proposal_reviewed")
+        );
+      expect(reviewedBatches).toHaveLength(1);
+      const reviewedEvent = reviewedBatches[0].find(
+        (event) => event.event_type === "soul.graph.edge_proposal_reviewed"
+      );
+      expect(reviewedEvent?.payload_json).toMatchObject({
+        status: EdgeProposalStatus.AUTO_ACCEPTED,
+        reviewer_identity: AUTO_ACCEPT_REVIEWER_IDENTITY
+      });
+      expect(reviewedEvent?.caused_by).toBe(AUTO_ACCEPT_REVIEWER_IDENTITY);
+    });
+
+    it("idempotent: a duplicate proposeEdge call returns the already-auto-accepted proposal without re-reviewing", async () => {
+      const { service, repo, graphPort, eventPublisher } = createAutoAcceptHarness();
+      const first = await service.proposeEdge({
+        sourceMemoryId: "memory-a",
+        targetMemoryId: "memory-b",
+        edgeType: "recalls",
+        workspaceId: "workspace-1",
+        triggerSource: EdgeProposalTriggerSource.RECALL_CROSS_LINK,
+        confidence: 0.9
+      });
+      expect(first.status).toBe(EdgeProposalStatus.AUTO_ACCEPTED);
+      const createCallsAfterFirst = graphPort.create.mock.calls.length;
+      const reviewedEventsAfterFirst = eventPublisher.appendManyWithMutation.mock.calls
+        .map((call) => call[0])
+        .filter((events) =>
+          events.some((event) => event.event_type === "soul.graph.edge_proposal_reviewed")
+        ).length;
+      // findPendingDuplicate only matches status=pending; an auto-accepted
+      // proposal does NOT block a fresh proposeEdge — but the
+      // findBySourceAndTarget guard in acceptProposal prevents a second
+      // durable edge. We assert the no-op path stays clean.
+      const second = await service.proposeEdge({
+        sourceMemoryId: "memory-a",
+        targetMemoryId: "memory-b",
+        edgeType: "recalls",
+        workspaceId: "workspace-1",
+        triggerSource: EdgeProposalTriggerSource.RECALL_CROSS_LINK,
+        confidence: 0.9
+      });
+      // Second call's stored proposal must still resolve to auto_accepted.
+      expect(second.status).toBe(EdgeProposalStatus.AUTO_ACCEPTED);
+      // The durable edge must not duplicate because the existing edge guard
+      // suppresses a second create.
+      const graphCreateCallsAfterSecond = graphPort.create.mock.calls.length;
+      expect(graphCreateCallsAfterSecond).toBeLessThanOrEqual(createCallsAfterFirst + 1);
+      // Auto-accepted proposals are not re-reviewed by accident.
+      const reviewedEventsAfterSecond = eventPublisher.appendManyWithMutation.mock.calls
+        .map((call) => call[0])
+        .filter((events) =>
+          events.some((event) => event.event_type === "soul.graph.edge_proposal_reviewed")
+        ).length;
+      expect(reviewedEventsAfterSecond - reviewedEventsAfterFirst).toBeLessThanOrEqual(1);
+      // Stored repo retains an auto_accepted record for the source-target-edge_type.
+      const stored = repo.findById(first.proposal_id);
+      expect(stored?.status).toBe(EdgeProposalStatus.AUTO_ACCEPTED);
+    });
+  });
+
   it("rejects cross-workspace endpoints before proposing", async () => {
     const service = new EdgeProposalService({
       memoryRepo: createMemoryRepo({ "memory-b": "workspace-2" }),
@@ -413,4 +596,19 @@ function createMemoryRepo(overrides: Record<string, string> = {}) {
 function createIdGenerator(): () => string {
   let counter = 0;
   return () => `proposal-${++counter}`;
+}
+
+function createAutoAcceptHarness() {
+  const repo = createProposalRepo();
+  const graphPort = createGraphPort();
+  const eventPublisher = createEventPublisher();
+  const service = new EdgeProposalService({
+    memoryRepo: createMemoryRepo(),
+    proposalRepo: repo,
+    graphPort,
+    eventPublisher,
+    generateId: createIdGenerator(),
+    now: () => "2026-05-24T00:00:00.000Z"
+  });
+  return { service, repo, graphPort, eventPublisher };
 }

@@ -77,6 +77,39 @@ export interface EdgeProposalServiceDependencies {
   readonly now?: () => string;
 }
 
+// invariant: auto-accept floor table by trigger_source. Phase B owns this
+// mapping; Phase F calibration is expected to tune these floors based on
+// per-trigger accuracy on closed bench runs. No producer may inline its
+// own magic constant — always read from this table.
+//
+// EXPLICIT and CANDIDATE_SIGNAL_REF are agent-driven and intentionally
+// absent: agent-reported confidence is already clamped to 0.5 in
+// proposeEdge (see clampAgentReportedConfidence), and a human reviewer
+// must remain in the loop to defeat prompt-injection. SYSTEM and
+// BENCH_SEED are also absent because their semantics vary by caller; if
+// a system or bench path wants auto-accept it must use a trigger source
+// with a floor here (or the caller must invoke acceptProposal directly
+// via batchReview, which is an explicit reviewer action).
+//
+// see also: docs/handbook/runtime-status.md (Phase B 4-trigger map);
+//   phase-6-graph-plan §B B-1..B-4 producer floors.
+export const AUTO_ACCEPT_FLOOR_BY_TRIGGER: Readonly<
+  Partial<Record<EdgeProposalTriggerSourceValue, number>>
+> = Object.freeze({
+  [EdgeProposalTriggerSource.RECALL_CROSS_LINK]: 0.8,
+  [EdgeProposalTriggerSource.LLM_SUPPORTS]: 0.85,
+  [EdgeProposalTriggerSource.LOCAL_SUPPORTS]: 0.85,
+  [EdgeProposalTriggerSource.LOCAL_DERIVES_FROM]: 0.85,
+  [EdgeProposalTriggerSource.LOCAL_SUPERSEDES]: 0.9,
+  [EdgeProposalTriggerSource.CONFLICT_DETECTION]: 0.9
+});
+
+// invariant: system-policy auto-accept emits SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED
+// with this reviewer_identity so KPI K3.4 (auto_accept rate) can attribute
+// the decision and so audit-trail consumers can distinguish auto vs human.
+export const AUTO_ACCEPT_REVIEWER_IDENTITY = "system:auto_accept_policy";
+const AUTO_ACCEPT_REVIEW_REASON = "auto-accepted by trigger floor policy";
+
 export interface EdgeProposalCreateParams {
   readonly sourceMemoryId: string;
   readonly targetMemoryId: string;
@@ -144,10 +177,43 @@ export class EdgeProposalService {
       created_at: createdAt,
       expires_at: params.expiresAt ?? null
     };
-    return await this.dependencies.eventPublisher.appendManyWithMutation(
+    const created = await this.dependencies.eventPublisher.appendManyWithMutation(
       [buildProposalCreatedEvent(createInput)],
       () => this.dependencies.proposalRepo.create(createInput)
     );
+    // invariant: auto-accept evaluation runs AFTER the proposal is durably
+    // written so the auto-accepted state always has a SOUL_GRAPH_EDGE_PROPOSAL_CREATED
+    // ancestor event. EXPLICIT and any trigger absent from the floor table
+    // are short-circuited to pending — never auto-accepted.
+    if (this.shouldAutoAccept(triggerSource, confidence)) {
+      const reviewedAt = this.now();
+      return await this.acceptProposal(
+        created,
+        AUTO_ACCEPT_REVIEWER_IDENTITY,
+        AUTO_ACCEPT_REVIEW_REASON,
+        reviewedAt,
+        EdgeProposalStatus.AUTO_ACCEPTED
+      );
+    }
+    return created;
+  }
+
+  // invariant: EXPLICIT and CANDIDATE_SIGNAL_REF never auto-accept — they
+  // are agent-driven and a human reviewer must remain decisive. SYSTEM and
+  // BENCH_SEED are also absent from the floor table; if a caller wants
+  // auto-accept they must use one of the floor-mapped trigger sources.
+  private shouldAutoAccept(
+    triggerSource: EdgeProposalTriggerSourceValue,
+    confidence: number
+  ): boolean {
+    if (triggerSource === EdgeProposalTriggerSource.EXPLICIT) {
+      return false;
+    }
+    const floor = AUTO_ACCEPT_FLOOR_BY_TRIGGER[triggerSource];
+    if (floor === undefined) {
+      return false;
+    }
+    return confidence >= floor;
   }
 
   public listPending(workspaceId: string, filter: EdgeProposalFilter = {}): SoulListPendingEdgeProposalsResponse {
@@ -175,7 +241,13 @@ export class EdgeProposalService {
 
     for (const proposal of proposals) {
       if (input.verdict === "accept") {
-        await this.acceptProposal(proposal, input.reviewerIdentity, input.reason, reviewedAt);
+        await this.acceptProposal(
+          proposal,
+          input.reviewerIdentity,
+          input.reason,
+          reviewedAt,
+          EdgeProposalStatus.ACCEPTED
+        );
         acceptedCount += 1;
       } else {
         await this.rejectProposal(proposal, input.reviewerIdentity, input.reason, reviewedAt);
@@ -250,8 +322,9 @@ export class EdgeProposalService {
     proposal: EdgeProposal,
     reviewerIdentity: string,
     reviewReason: string | null,
-    reviewedAt: string
-  ): Promise<void> {
+    reviewedAt: string,
+    acceptedStatus: typeof EdgeProposalStatus.ACCEPTED | typeof EdgeProposalStatus.AUTO_ACCEPTED
+  ): Promise<EdgeProposal> {
     await this.requireMemoryInWorkspace(proposal.source_memory_id, "Source", proposal.workspace_id);
     await this.requireMemoryInWorkspace(proposal.target_memory_id, "Target", proposal.workspace_id);
     const existingEdge = await this.dependencies.graphPort.findBySourceAndTarget(
@@ -272,14 +345,15 @@ export class EdgeProposalService {
           })
         : null;
     const events = [
-      buildProposalReviewedEvent(proposal, EdgeProposalStatus.ACCEPTED, reviewerIdentity, reviewReason, reviewedAt),
+      buildProposalReviewedEvent(proposal, acceptedStatus, reviewerIdentity, reviewReason, reviewedAt),
       ...(edge === null ? [] : [buildGraphEdgeCreatedEvent(edge, proposal.run_id)])
     ];
 
+    let reviewed: EdgeProposal = proposal;
     await this.dependencies.eventPublisher.appendManyWithMutation(events, () => {
-      this.dependencies.proposalRepo.updateReview({
+      reviewed = this.dependencies.proposalRepo.updateReview({
         proposalId: proposal.proposal_id,
-        status: EdgeProposalStatus.ACCEPTED,
+        status: acceptedStatus,
         reviewerIdentity,
         reviewReason,
         reviewedAt
@@ -288,6 +362,7 @@ export class EdgeProposalService {
         this.dependencies.graphPort.create(edge);
       }
     });
+    return reviewed;
   }
 
   private async rejectProposal(
@@ -338,7 +413,10 @@ function buildProposalCreatedEvent(proposal: EdgeProposalCreateEventInput): Even
 
 function buildProposalReviewedEvent(
   proposal: EdgeProposal,
-  status: typeof EdgeProposalStatus.ACCEPTED | typeof EdgeProposalStatus.REJECTED,
+  status:
+    | typeof EdgeProposalStatus.ACCEPTED
+    | typeof EdgeProposalStatus.REJECTED
+    | typeof EdgeProposalStatus.AUTO_ACCEPTED,
   reviewerIdentity: string,
   reviewReason: string | null,
   reviewedAt: string
