@@ -27,7 +27,9 @@ export {
 export {
   aggregateEdgeProposalAutoAccept,
   aggregateEdgeProposalRate,
-  type EdgeProposalKpiEventRow
+  aggregateEdgeProposalRatePerQuestion,
+  type EdgeProposalKpiEventRow,
+  type ProposalsPerQuestionRollup
 } from "./edge-proposal-kpi.js";
 
 export {

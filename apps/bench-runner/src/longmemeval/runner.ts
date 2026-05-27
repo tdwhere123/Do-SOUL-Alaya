@@ -532,6 +532,12 @@ export async function runLongMemEval(
   const embeddingWarmups: BenchEmbeddingWarmupSummary[] = [];
   const queryEmbeddingWarmups: BenchQueryEmbeddingWarmupSummary[] = [];
   const edgeProposalKpiRowsAcrossQuestions: EdgeProposalKpiEventRow[] = [];
+  // @anchor edge-proposal-rate-per-question: keep per-question row chunks
+  // so aggregateEdgeProposalRate can emit the proposals_per_question
+  // distribution. K3.2's "40-80/workspace/day" target is uninterpretable
+  // off per_workspace_per_day_* alone because the bench harness uses
+  // one workspaceId per run. see also: packages/eval/src/kpi-schema.ts.
+  const edgeProposalKpiRowsPerQuestion: EdgeProposalKpiEventRow[][] = [];
 
   for (let i = 0; i < collected.length; i++) {
     const res = collected[i];
@@ -568,6 +574,7 @@ export async function runLongMemEval(
     for (const row of res.edgeProposalKpiRows) {
       edgeProposalKpiRowsAcrossQuestions.push(row);
     }
+    edgeProposalKpiRowsPerQuestion.push([...res.edgeProposalKpiRows]);
     perScenario.push({
       id: res.questionId,
       version: 1,
@@ -621,7 +628,8 @@ export async function runLongMemEval(
   // total. Each aggregator returns undefined when no events were observed
   // — the KPI omits the block in that case (honest reporting).
   const edgeProposalRate = aggregateEdgeProposalRate(
-    edgeProposalKpiRowsAcrossQuestions
+    edgeProposalKpiRowsAcrossQuestions,
+    edgeProposalKpiRowsPerQuestion
   );
   const edgeProposalAutoAccept = aggregateEdgeProposalAutoAccept(
     edgeProposalKpiRowsAcrossQuestions

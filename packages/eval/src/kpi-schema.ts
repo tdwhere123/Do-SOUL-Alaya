@@ -342,6 +342,18 @@ export type TokenEconomy = z.infer<typeof TokenEconomySchema>;
 // values to integer counts of SOUL_GRAPH_EDGE_PROPOSAL_CREATED events;
 // keys are strings so a future enum value flows through without a
 // schema migration.
+//
+// @anchor edge-proposal-rate-per-question: under the LongMemEval bench
+// harness every question runs against the same workspaceId
+// ("bench-workspace-1"), so per_workspace_per_day_* collapses to the
+// run total — K3.2's "40-80 proposals / workspace / day" target cannot
+// be interpreted directly off those fields under bench shape. The
+// optional per_question_* fields surface the row-level distribution
+// (one bucket per question) so the same KPI intent stays measurable
+// under the bench harness. Both blocks describe the same EventLog rows;
+// they differ only in how the rows are bucketed for the percentile.
+// see also: packages/eval/src/edge-proposal-kpi.ts
+// aggregateEdgeProposalRatePerQuestion.
 const EdgeProposalRateSchema = z
   .object({
     schema_version: z.literal("bench-edge-proposal-rate.v1"),
@@ -349,7 +361,25 @@ const EdgeProposalRateSchema = z
     per_workspace_per_day_min: z.number().nonnegative(),
     per_workspace_per_day_max: z.number().nonnegative(),
     per_workspace_per_day_median: z.number().nonnegative(),
-    per_trigger_source: z.record(z.string(), z.number().int().nonnegative())
+    per_trigger_source: z.record(z.string(), z.number().int().nonnegative()),
+    // Optional per-question distribution: one bucket = one bench
+    // question's SOUL_GRAPH_EDGE_PROPOSAL_CREATED count. Absent when the
+    // aggregator caller does not pass per-question chunks (e.g. pre-Phase
+    // B archives, or non-bench runtime aggregations where "per question"
+    // is undefined). Populated by the bench-runner harness so K3.2's
+    // 40-80/workspace/day intent stays interpretable under the bench's
+    // single-workspaceId shape.
+    proposals_per_question: z
+      .object({
+        question_count: z.number().int().nonnegative(),
+        total_proposals: z.number().int().nonnegative(),
+        mean: z.number().nonnegative(),
+        p50: z.number().nonnegative(),
+        p95: z.number().nonnegative(),
+        max: z.number().nonnegative()
+      })
+      .strict()
+      .optional()
   })
   .strict();
 export type EdgeProposalRate = z.infer<typeof EdgeProposalRateSchema>;

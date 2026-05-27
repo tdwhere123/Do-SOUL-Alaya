@@ -9,6 +9,7 @@ import {
 import {
   aggregateEdgeProposalAutoAccept,
   aggregateEdgeProposalRate,
+  aggregateEdgeProposalRatePerQuestion,
   type EdgeProposalKpiEventRow
 } from "../edge-proposal-kpi.js";
 
@@ -176,6 +177,187 @@ describe("aggregateEdgeProposalRate", () => {
     ];
     const result = aggregateEdgeProposalRate(rows);
     expect(result?.total_proposals).toBe(1);
+  });
+});
+
+describe("aggregateEdgeProposalRatePerQuestion (K3.2 bench-harness rollup)", () => {
+  it("returns undefined when no chunks are supplied", () => {
+    expect(aggregateEdgeProposalRatePerQuestion([])).toBeUndefined();
+  });
+
+  it("returns undefined when chunks contain no created events", () => {
+    const onlyReviewedChunk = [
+      reviewedRow({
+        proposalId: "p1",
+        status: EdgeProposalStatus.AUTO_ACCEPTED,
+        reviewerIdentity: "system:auto_accept_policy",
+        workspaceId: WORKSPACE_A,
+        reviewedAt: "2026-05-24T12:00:00.000Z"
+      })
+    ];
+    expect(
+      aggregateEdgeProposalRatePerQuestion([onlyReviewedChunk])
+    ).toBeUndefined();
+  });
+
+  it("buckets created events by question chunk and computes p50/p95/max", () => {
+    // Three questions: counts = [0, 2, 5]. Sorted = [0, 2, 5].
+    // p50 (linear at rank 1.0) = 2. p95 (linear at rank 1.9) = 4.7. max = 5.
+    const chunkA: EdgeProposalKpiEventRow[] = [];
+    const chunkB: EdgeProposalKpiEventRow[] = [
+      createdRow({
+        proposalId: "b-1",
+        triggerSource: EdgeProposalTriggerSource.RECALL_CROSS_LINK,
+        confidence: 0.9,
+        workspaceId: WORKSPACE_A,
+        createdAt: "2026-05-24T12:00:00.000Z"
+      }),
+      createdRow({
+        proposalId: "b-2",
+        triggerSource: EdgeProposalTriggerSource.LLM_SUPPORTS,
+        confidence: 0.9,
+        workspaceId: WORKSPACE_A,
+        createdAt: "2026-05-24T12:01:00.000Z"
+      })
+    ];
+    const chunkC: EdgeProposalKpiEventRow[] = Array.from({ length: 5 }).map(
+      (_, i) =>
+        createdRow({
+          proposalId: `c-${i}`,
+          triggerSource: EdgeProposalTriggerSource.RECALL_CROSS_LINK,
+          confidence: 0.9,
+          workspaceId: WORKSPACE_A,
+          createdAt: `2026-05-24T13:0${i}:00.000Z`
+        })
+    );
+
+    const rollup = aggregateEdgeProposalRatePerQuestion([
+      chunkA,
+      chunkB,
+      chunkC
+    ]);
+    expect(rollup).toBeDefined();
+    expect(rollup?.question_count).toBe(3);
+    expect(rollup?.total_proposals).toBe(7);
+    expect(rollup?.mean).toBeCloseTo(7 / 3, 5);
+    expect(rollup?.p50).toBe(2);
+    expect(rollup?.max).toBe(5);
+    // p95 linear at rank 0.95 * 2 = 1.9 -> 2 + 0.9 * (5 - 2) = 4.7
+    expect(rollup?.p95).toBeCloseTo(4.7, 5);
+  });
+
+  it("ignores reviewed events inside chunks when sizing the per-question distribution", () => {
+    const chunk: EdgeProposalKpiEventRow[] = [
+      createdRow({
+        proposalId: "p1",
+        triggerSource: EdgeProposalTriggerSource.RECALL_CROSS_LINK,
+        confidence: 0.9,
+        workspaceId: WORKSPACE_A,
+        createdAt: "2026-05-24T12:00:00.000Z"
+      }),
+      reviewedRow({
+        proposalId: "p1",
+        status: EdgeProposalStatus.AUTO_ACCEPTED,
+        reviewerIdentity: "system:auto_accept_policy",
+        workspaceId: WORKSPACE_A,
+        reviewedAt: "2026-05-24T12:00:00.000Z"
+      })
+    ];
+    const rollup = aggregateEdgeProposalRatePerQuestion([chunk]);
+    expect(rollup?.total_proposals).toBe(1);
+    expect(rollup?.max).toBe(1);
+  });
+});
+
+describe("aggregateEdgeProposalRate with perQuestionChunks (Option C)", () => {
+  it("attaches proposals_per_question when chunks are supplied", () => {
+    // bench-harness shape: every question uses the same workspaceId, so
+    // per_workspace_per_day_* collapses to total_proposals — Option C
+    // surfaces the per-question distribution alongside without breaking
+    // the existing fields.
+    const chunkA = [
+      createdRow({
+        proposalId: "a-1",
+        triggerSource: EdgeProposalTriggerSource.RECALL_CROSS_LINK,
+        confidence: 0.9,
+        workspaceId: WORKSPACE_A,
+        createdAt: "2026-05-24T12:00:00.000Z"
+      })
+    ];
+    const chunkB = [
+      createdRow({
+        proposalId: "b-1",
+        triggerSource: EdgeProposalTriggerSource.LLM_SUPPORTS,
+        confidence: 0.9,
+        workspaceId: WORKSPACE_A,
+        createdAt: "2026-05-24T12:01:00.000Z"
+      }),
+      createdRow({
+        proposalId: "b-2",
+        triggerSource: EdgeProposalTriggerSource.LLM_SUPPORTS,
+        confidence: 0.9,
+        workspaceId: WORKSPACE_A,
+        createdAt: "2026-05-24T12:02:00.000Z"
+      })
+    ];
+    const result = aggregateEdgeProposalRate(
+      [...chunkA, ...chunkB],
+      [chunkA, chunkB]
+    );
+    expect(result).toBeDefined();
+    expect(result?.total_proposals).toBe(3);
+    expect(result?.proposals_per_question).toBeDefined();
+    expect(result?.proposals_per_question?.question_count).toBe(2);
+    expect(result?.proposals_per_question?.total_proposals).toBe(3);
+    expect(result?.proposals_per_question?.max).toBe(2);
+  });
+
+  it("omits proposals_per_question when chunks are not supplied (backwards compatible)", () => {
+    const rows = [
+      createdRow({
+        proposalId: "p1",
+        triggerSource: EdgeProposalTriggerSource.RECALL_CROSS_LINK,
+        confidence: 0.9,
+        workspaceId: WORKSPACE_A,
+        createdAt: "2026-05-24T12:00:00.000Z"
+      })
+    ];
+    const result = aggregateEdgeProposalRate(rows);
+    expect(result?.proposals_per_question).toBeUndefined();
+  });
+
+  it("emits proposals_per_question with realistic multi-workspace production shape too", () => {
+    // Even outside the bench harness — if a caller hands per-question
+    // chunks they still get the per-question distribution. The bucket
+    // semantics is "one chunk = one bucket"; no workspace inference.
+    const chunkA = [
+      createdRow({
+        proposalId: "a-1",
+        triggerSource: EdgeProposalTriggerSource.RECALL_CROSS_LINK,
+        confidence: 0.9,
+        workspaceId: WORKSPACE_A,
+        createdAt: "2026-05-24T12:00:00.000Z"
+      })
+    ];
+    const chunkB = [
+      createdRow({
+        proposalId: "b-1",
+        triggerSource: EdgeProposalTriggerSource.LLM_SUPPORTS,
+        confidence: 0.9,
+        workspaceId: WORKSPACE_B,
+        createdAt: "2026-05-24T12:01:00.000Z"
+      })
+    ];
+    const result = aggregateEdgeProposalRate(
+      [...chunkA, ...chunkB],
+      [chunkA, chunkB]
+    );
+    expect(result?.proposals_per_question?.question_count).toBe(2);
+    // Two distinct workspaces -> per_workspace_per_day_* now reflects
+    // the real production shape (1 each), confirming the two layers are
+    // independent.
+    expect(result?.per_workspace_per_day_max).toBe(1);
+    expect(result?.per_workspace_per_day_min).toBe(1);
   });
 });
 

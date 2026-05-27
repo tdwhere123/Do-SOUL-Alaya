@@ -84,12 +84,87 @@ import type {
 } from "./kpi-schema.js";
 
 /**
+ * @anchor edge-proposal-rate-per-question — Phase B fix-loop. Under the
+ * LongMemEval bench harness every question runs against the same
+ * workspaceId, so per_workspace_per_day_* collapses to the run total
+ * and K3.2's "40-80 proposals / workspace / day" intent cannot be
+ * verified from those fields alone. This per-question rollup buckets
+ * created events by which question produced them (one bucket per chunk
+ * passed in) and emits mean/p50/p95/max so the bench can still report
+ * the per-bucket distribution. Returns `undefined` when no chunk
+ * contained any created event — matches aggregateEdgeProposalRate's
+ * "absent rather than zero-filled" reporting convention.
+ *
+ * @param perQuestionChunks one array per bench question; each chunk is
+ *   the EventLog rows that question's daemon produced. Reviewed events
+ *   in the chunks are silently ignored (this rollup is the rate slice).
+ */
+export function aggregateEdgeProposalRatePerQuestion(
+  perQuestionChunks: readonly (readonly EdgeProposalKpiEventRow[])[]
+): ProposalsPerQuestionRollup | undefined {
+  if (perQuestionChunks.length === 0) {
+    return undefined;
+  }
+  const perQuestionCounts: number[] = [];
+  let totalProposals = 0;
+  let anyCreatedSeen = false;
+  for (const chunk of perQuestionChunks) {
+    let chunkCount = 0;
+    for (const row of chunk) {
+      if (row.event_type !== EDGE_PROPOSAL_CREATED_EVENT_TYPE) {
+        continue;
+      }
+      if (!CreatedPayloadSchema.safeParse(row.payload_json).success) {
+        continue;
+      }
+      chunkCount += 1;
+      anyCreatedSeen = true;
+    }
+    perQuestionCounts.push(chunkCount);
+    totalProposals += chunkCount;
+  }
+  if (!anyCreatedSeen) {
+    return undefined;
+  }
+  const sorted = [...perQuestionCounts].sort((a, b) => a - b);
+  return {
+    question_count: perQuestionCounts.length,
+    total_proposals: totalProposals,
+    mean: totalProposals / perQuestionCounts.length,
+    p50: computePercentile(sorted, 50),
+    p95: computePercentile(sorted, 95),
+    max: sorted.length === 0 ? 0 : sorted[sorted.length - 1]!
+  };
+}
+
+/** Shape of the per-question rollup; mirrors EdgeProposalRate.proposals_per_question. */
+export interface ProposalsPerQuestionRollup {
+  readonly question_count: number;
+  readonly total_proposals: number;
+  readonly mean: number;
+  readonly p50: number;
+  readonly p95: number;
+  readonly max: number;
+}
+
+/**
  * Aggregate K3.2 edge_proposal_rate from SOUL_GRAPH_EDGE_PROPOSAL_CREATED
  * events. Returns `undefined` when no created events were observed, so
  * the bench-runner can leave the KPI field absent in honest reports.
+ *
+ * @param perQuestionChunks optional bench-harness rollup. When supplied,
+ *   the result carries an additional `proposals_per_question` field with
+ *   the per-question distribution (one bucket per chunk). This is the
+ *   primary K3.2 distribution under the LongMemEval bench shape, where
+ *   every question shares one workspaceId and the per_workspace_per_day_*
+ *   fields collapse to the run total. Caller invariant: when supplied,
+ *   the chunks SHOULD partition `rows` by question; the aggregator does
+ *   not enforce the partition.
+ *   see also: @anchor edge-proposal-rate-per-question
  */
 export function aggregateEdgeProposalRate(
-  rows: readonly EdgeProposalKpiEventRow[]
+  rows: readonly EdgeProposalKpiEventRow[],
+  perQuestionChunks?: readonly (readonly EdgeProposalKpiEventRow[])[]
 ): EdgeProposalRate | undefined {
   const created = collectCreatedRecords(rows);
   if (created.length === 0) {
@@ -122,13 +197,21 @@ export function aggregateEdgeProposalRate(
   const median =
     perBucketCounts.length === 0 ? 0 : computeMedian(perBucketCounts);
 
+  const proposalsPerQuestion =
+    perQuestionChunks === undefined
+      ? undefined
+      : aggregateEdgeProposalRatePerQuestion(perQuestionChunks);
+
   return {
     schema_version: "bench-edge-proposal-rate.v1",
     total_proposals: created.length,
     per_workspace_per_day_min: min,
     per_workspace_per_day_max: max,
     per_workspace_per_day_median: median,
-    per_trigger_source: perTriggerSource
+    per_trigger_source: perTriggerSource,
+    ...(proposalsPerQuestion === undefined
+      ? {}
+      : { proposals_per_question: proposalsPerQuestion })
   };
 }
 
@@ -247,4 +330,28 @@ function computeMedian(values: readonly number[]): number {
     return sorted[mid];
   }
   return (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/**
+ * Linear-interpolation percentile (nearest-rank with floor for integer
+ * counts is also acceptable, but linear keeps p95 honest on small
+ * question_count). `sorted` MUST be already ascending. Returns 0 for
+ * an empty input rather than NaN so the schema's nonnegative refinement
+ * does not break on a degenerate input.
+ */
+function computePercentile(sorted: readonly number[], percentile: number): number {
+  if (sorted.length === 0) {
+    return 0;
+  }
+  if (sorted.length === 1) {
+    return sorted[0]!;
+  }
+  const rank = (percentile / 100) * (sorted.length - 1);
+  const lower = Math.floor(rank);
+  const upper = Math.ceil(rank);
+  if (lower === upper) {
+    return sorted[lower]!;
+  }
+  const weight = rank - lower;
+  return sorted[lower]! * (1 - weight) + sorted[upper]! * weight;
 }
