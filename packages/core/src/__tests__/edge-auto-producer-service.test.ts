@@ -134,7 +134,8 @@ describe("EdgeAutoProducerService", () => {
         sourceMemoryId: "memory-new",
         targetMemoryId: "memory-source",
         edgeType: MemoryGraphEdgeType.DERIVES_FROM,
-        confidence: expect.any(Number)
+        confidence: expect.any(Number),
+        triggerSource: EdgeProposalTriggerSource.LOCAL_DERIVES_FROM
       })
     );
   });
@@ -166,7 +167,8 @@ describe("EdgeAutoProducerService", () => {
         sourceMemoryId: "memory-new",
         targetMemoryId: "memory-old",
         edgeType: MemoryGraphEdgeType.SUPERSEDES,
-        confidence: expect.any(Number)
+        confidence: expect.any(Number),
+        triggerSource: EdgeProposalTriggerSource.LOCAL_SUPERSEDES
       })
     );
     const confidence = graphEdgePort.createEdge.mock.calls[0][0].confidence;
