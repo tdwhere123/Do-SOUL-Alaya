@@ -7,6 +7,8 @@ import {
   resolveBenchRunnerVersion
 } from "../version.js";
 import {
+  aggregateEdgeProposalAutoAccept,
+  aggregateEdgeProposalRate,
   benchArchiveDiscriminator,
   buildDiffVsPrevious,
   diffKpis,
@@ -20,6 +22,7 @@ import {
   type BenchSplit,
   buildTokenEconomy,
   computeTokenSavedRatio,
+  type EdgeProposalKpiEventRow,
   type HistoryLayout,
   type KpiPayload,
   type PerScenarioRow
@@ -248,6 +251,11 @@ export async function runLongMemEval(
     // and the run-level aggregator drops the sample before computing
     // distribution stats.
     recallTokenEconomy: BenchRecallTokenEconomy | null;
+    // Per-question EventLog rows for the Phase B K3.2 / K3.4 edge
+    // proposal KPI. SOUL_GRAPH_EDGE_PROPOSAL_CREATED + _REVIEWED. Empty
+    // when the run produced no proposals; the aggregator still returns
+    // undefined in that case so the KPI omits the block.
+    edgeProposalKpiRows: readonly EdgeProposalKpiEventRow[];
   };
 
   async function runOneQuestion(
@@ -435,6 +443,12 @@ export async function runLongMemEval(
       // see also: packages/core/src/recall-service.ts
       // (computeRecallTokenEconomy call site).
       const recallTokenEconomy = extractRecallTokenEconomy(recallResult);
+      // Phase B K3.2 / K3.4 edge proposal KPI rows for this question's
+      // run: SOUL_GRAPH_EDGE_PROPOSAL_CREATED + _REVIEWED EventLog rows.
+      // Read back after seeding + recall so every auto-accept policy
+      // decision is durably persisted before aggregation.
+      // see also: packages/eval/src/edge-proposal-kpi.ts
+      const edgeProposalKpiRows = await daemon.queryEdgeProposalKpiRows();
 
       return {
         questionId: question.question_id,
@@ -453,7 +467,8 @@ export async function runLongMemEval(
         reportUsageStats: recallCycle.reportUsageStats,
         reportSideEffectSnapshot,
         tokenMetrics,
-        recallTokenEconomy
+        recallTokenEconomy,
+        edgeProposalKpiRows
       };
     } finally {
       await daemon.shutdown();
@@ -516,6 +531,7 @@ export async function runLongMemEval(
   const reportSideEffectSnapshots: LongMemEvalReportSideEffectSnapshot[] = [];
   const embeddingWarmups: BenchEmbeddingWarmupSummary[] = [];
   const queryEmbeddingWarmups: BenchQueryEmbeddingWarmupSummary[] = [];
+  const edgeProposalKpiRowsAcrossQuestions: EdgeProposalKpiEventRow[] = [];
 
   for (let i = 0; i < collected.length; i++) {
     const res = collected[i];
@@ -548,6 +564,9 @@ export async function runLongMemEval(
     tokenMetricsPerQuestion.push(res.tokenMetrics);
     if (res.recallTokenEconomy !== null) {
       recallTokenEconomySamples.push(res.recallTokenEconomy);
+    }
+    for (const row of res.edgeProposalKpiRows) {
+      edgeProposalKpiRowsAcrossQuestions.push(row);
     }
     perScenario.push({
       id: res.questionId,
@@ -596,6 +615,16 @@ export async function runLongMemEval(
   // not see a zero-filled section that looks like real data.
   const recallTokenEconomy = aggregateRecallTokenEconomy(
     recallTokenEconomySamples
+  );
+  // Phase B K3.2 / K3.4: aggregate edge proposal create/review EventLog
+  // rows collected from every per-question bench daemon into one run
+  // total. Each aggregator returns undefined when no events were observed
+  // — the KPI omits the block in that case (honest reporting).
+  const edgeProposalRate = aggregateEdgeProposalRate(
+    edgeProposalKpiRowsAcrossQuestions
+  );
+  const edgeProposalAutoAccept = aggregateEdgeProposalAutoAccept(
+    edgeProposalKpiRowsAcrossQuestions
   );
 
   const payload: KpiPayload = {
@@ -674,6 +703,12 @@ export async function runLongMemEval(
       },
       seed_extraction_path: toSeedExtractionPathKpi(extractionStats),
       quality_metrics: buildLongMemEvalQualityMetrics(questionDiagnostics),
+      ...(edgeProposalRate === undefined
+        ? {}
+        : { edge_proposal_rate: edgeProposalRate }),
+      ...(edgeProposalAutoAccept === undefined
+        ? {}
+        : { edge_proposal_auto_accept: edgeProposalAutoAccept }),
       per_scenario: perScenario
     }
   };

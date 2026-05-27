@@ -332,6 +332,49 @@ const TokenEconomySchema = z
   .strict();
 export type TokenEconomy = z.infer<typeof TokenEconomySchema>;
 
+// @anchor edge-proposal-rate: K3.2 KPI — edge proposals produced per
+// workspace-day across a bench run. Per-workspace-per-day stats let the
+// release gate detect the "edge auto-build rate 40-80 proposals /
+// workspace / day" target without re-aggregating from EventLog rows.
+// Optional so older kpi.json records stay schema-valid; new bench runs
+// always populate it when the bench-runner harness sources the edge
+// proposal aggregator. per_trigger_source maps the trigger_source enum
+// values to integer counts of SOUL_GRAPH_EDGE_PROPOSAL_CREATED events;
+// keys are strings so a future enum value flows through without a
+// schema migration.
+const EdgeProposalRateSchema = z
+  .object({
+    schema_version: z.literal("bench-edge-proposal-rate.v1"),
+    total_proposals: z.number().int().nonnegative(),
+    per_workspace_per_day_min: z.number().nonnegative(),
+    per_workspace_per_day_max: z.number().nonnegative(),
+    per_workspace_per_day_median: z.number().nonnegative(),
+    per_trigger_source: z.record(z.string(), z.number().int().nonnegative())
+  })
+  .strict();
+export type EdgeProposalRate = z.infer<typeof EdgeProposalRateSchema>;
+
+// @anchor edge-proposal-auto-accept: K3.4 KPI — fraction of reviewed
+// proposals decided by system-policy auto-accept. total_decided counts
+// SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED rows whose payload.status is one of
+// accepted / auto_accepted / rejected; auto_accepted is the numerator.
+// rate is auto_accepted / total_decided (0 when total_decided is 0).
+// per_trigger_source_rate is keyed by the originating proposal's
+// trigger_source — the aggregator joins reviewed events back to their
+// created counterparts; missing joins are dropped (the rate is
+// computed on the joined subset). Optional so pre-Phase-B kpi.json
+// records stay schema-valid.
+const EdgeProposalAutoAcceptSchema = z
+  .object({
+    schema_version: z.literal("bench-edge-proposal-auto-accept.v1"),
+    total_decided: z.number().int().nonnegative(),
+    auto_accepted: z.number().int().nonnegative(),
+    rate: RatioSchema,
+    per_trigger_source_rate: z.record(z.string(), RatioSchema)
+  })
+  .strict();
+export type EdgeProposalAutoAccept = z.infer<typeof EdgeProposalAutoAcceptSchema>;
+
 const KpiCoreSchema = z.object({
   r_at_1: RatioSchema,
   r_at_5: RatioSchema,
@@ -373,6 +416,11 @@ const KpiCoreSchema = z.object({
   // stay schema-valid; new LongMemEval runs always populate it.
   seed_extraction_path: SeedExtractionPathSchema.optional(),
   quality_metrics: QualityMetricsSchema.optional(),
+  // Phase B Edge Proposal KPI blocks (K3.2 + K3.4). Optional so pre-Phase-B
+  // kpi.json records stay schema-valid; new bench runs always populate them
+  // when the bench-runner sources the edge proposal aggregator.
+  edge_proposal_rate: EdgeProposalRateSchema.optional(),
+  edge_proposal_auto_accept: EdgeProposalAutoAcceptSchema.optional(),
   per_scenario: z.array(PerScenarioRowSchema)
 });
 export type KpiCore = z.infer<typeof KpiCoreSchema>;

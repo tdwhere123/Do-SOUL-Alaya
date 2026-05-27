@@ -9,6 +9,8 @@ export {
   Verdict,
   type DegradationReasons,
   type DiffVsPrevious,
+  type EdgeProposalAutoAccept,
+  type EdgeProposalRate,
   type KpiCore,
   type KpiPayload,
   type QualityMetrics,
@@ -21,6 +23,12 @@ export {
   type TokenEconomy,
   type RecallTokenEconomy
 } from "./kpi-schema.js";
+
+export {
+  aggregateEdgeProposalAutoAccept,
+  aggregateEdgeProposalRate,
+  type EdgeProposalKpiEventRow
+} from "./edge-proposal-kpi.js";
 
 export {
   buildTokenEconomy,

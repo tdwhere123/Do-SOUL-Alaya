@@ -11,6 +11,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
   CandidateMemorySignalSchema,
   ControlPlaneObjectKind,
+  GraphAuditorEventType,
   RecallContextEventType,
   RunMode,
   RunState,
@@ -38,6 +39,7 @@ import {
   type SoulReportContextUsageResponse,
   type SoulReviewMemoryProposalResponse
 } from "@do-soul/alaya-protocol";
+import type { EdgeProposalKpiEventRow } from "@do-soul/alaya-eval";
 import { normalizeSchemaGroundedSignal } from "@do-soul/alaya-soul";
 import {
   initDatabase,
@@ -426,6 +428,21 @@ export interface BenchDaemonHandle {
    * the seed loop and all recalls so every contributing event is present.
    */
   queryTokenMetrics(): Promise<BenchTokenMetrics>;
+  /**
+   * @anchor queryEdgeProposalKpiRows — event-sourced edge proposal reader
+   * for K3.2 / K3.4 aggregation.
+   *
+   * Re-reads SOUL_GRAPH_EDGE_PROPOSAL_CREATED + SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED
+   * rows from the bench DB. Returns the minimal row shape the aggregator
+   * in @do-soul/alaya-eval needs; the bench-runner aggregates them into
+   * KpiCore.edge_proposal_rate and KpiCore.edge_proposal_auto_accept.
+   *
+   * Call after the run completes so every contributing event is durably
+   * written.
+   *
+   * see also: packages/eval/src/edge-proposal-kpi.ts
+   */
+  queryEdgeProposalKpiRows(): Promise<readonly EdgeProposalKpiEventRow[]>;
   shutdown(): Promise<void>;
 }
 
@@ -1380,6 +1397,7 @@ export async function startBenchDaemon(
     proposeMemoriesFromCompileSignals,
     proposeSynthesis,
     queryTokenMetrics: () => queryTokenMetrics(dataDir),
+    queryEdgeProposalKpiRows: () => queryEdgeProposalKpiRows(dataDir),
     shutdown
   };
 }
@@ -1834,6 +1852,43 @@ async function queryTokenMetrics(dataDir: string): Promise<BenchTokenMetrics> {
     RecallContextEventType.SOUL_CONTEXT_LENS_ASSEMBLED
   );
   return deriveBenchTokenMetrics(emittedEvents, lensEvents);
+}
+
+// @anchor queryEdgeProposalKpiRows: event-sourced edge proposal KPI reader.
+// Same shape as queryTokenMetrics — opens the bench DB and reads the two
+// proposal event types, returning the minimal structural row shape the
+// aggregator in @do-soul/alaya-eval consumes. The aggregator is pure so it
+// stays unit-testable without standing up storage.
+// see also: packages/eval/src/edge-proposal-kpi.ts
+async function queryEdgeProposalKpiRows(
+  dataDir: string
+): Promise<readonly EdgeProposalKpiEventRow[]> {
+  const db = initDatabase({ filename: join(dataDir, "alaya.db") });
+  const eventLogRepo = new SqliteEventLogRepo(db);
+  const createdEvents = await eventLogRepo.queryByType(
+    GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_CREATED
+  );
+  const reviewedEvents = await eventLogRepo.queryByType(
+    GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED
+  );
+  const rows: EdgeProposalKpiEventRow[] = [];
+  for (const event of createdEvents) {
+    rows.push({
+      event_type: event.event_type,
+      workspace_id: event.workspace_id,
+      created_at: event.created_at,
+      payload_json: event.payload_json
+    });
+  }
+  for (const event of reviewedEvents) {
+    rows.push({
+      event_type: event.event_type,
+      workspace_id: event.workspace_id,
+      created_at: event.created_at,
+      payload_json: event.payload_json
+    });
+  }
+  return rows;
 }
 
 async function seedBenchWorkspaceAndRun(
