@@ -156,6 +156,7 @@ import {
   resolveDatabasePath
 } from "./daemon-runtime-support.js";
 import { createReconciliationLlmDecisionPort } from "./reconciliation-llm-decision.js";
+import { createEdgeAutoProducerLlmPort } from "./edge-auto-producer-llm-adapter.js";
 import { resolveAlayaConfigDir, resolveAlayaConfigPaths } from "./cli/config-files.js";
 import { resolveCoreDaemonFilesDirectory } from "./files-data-dir.js";
 import { createGardenRuntime } from "./garden-runtime.js";
@@ -779,9 +780,56 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       await edgeProposalService.proposeEdge(params);
     }
   };
+  // invariant: Phase B §B-2 pair-classifier port. Enabled by default
+  // (ALAYA_EDGE_PRODUCER_LLM_ENABLED!=0/false) so the LLM gets a chance
+  // at every same-dimension same-scope candidate neighbor before the
+  // deterministic local heuristic runs. The adapter walks the
+  // operator's garden compute config — when the config is missing,
+  // disabled, or its secret_ref does not resolve, createEdgeAutoProducerLlmPort
+  // returns null and the service quietly falls back to the local
+  // heuristic. v0.3.11 §K4.5 keeps this on the local garden compute
+  // path; no new cloud dependency is introduced here.
+  const edgeAutoProducerLlmEnabled = (() => {
+    const raw = process.env.ALAYA_EDGE_PRODUCER_LLM_ENABLED?.toLowerCase();
+    if (raw === undefined || raw === "") {
+      return true;
+    }
+    return raw !== "0" && raw !== "false";
+  })();
+  const edgeAutoProducerGardenComputeConfig = edgeAutoProducerLlmEnabled
+    ? await rawConfigService.getRuntimeGardenComputeConfig()
+    : null;
+  const edgeAutoProducerGardenApiKey = ((): string | null => {
+    if (
+      edgeAutoProducerGardenComputeConfig === null ||
+      !canResolveOfficialGardenProvider(edgeAutoProducerGardenComputeConfig)
+    ) {
+      return null;
+    }
+    try {
+      return resolveGardenSecretRefValue(
+        edgeAutoProducerGardenComputeConfig.secret_ref as string
+      );
+    } catch {
+      return null;
+    }
+  })();
+  const edgeAutoProducerLlmPort = edgeAutoProducerLlmEnabled
+    ? createEdgeAutoProducerLlmPort({
+        config: {
+          providerUrl:
+            edgeAutoProducerGardenComputeConfig?.provider_url ?? "https://yunwu.ai/v1",
+          model:
+            edgeAutoProducerGardenComputeConfig?.model_id ?? OFFICIAL_API_GARDEN_MODEL,
+          apiKey: edgeAutoProducerGardenApiKey
+        }
+      })
+    : null;
   const edgeAutoProducerService = new EdgeAutoProducerService({
     memoryRepo: memoryEntryRepo,
-    graphEdgePort
+    graphEdgePort,
+    ...(edgeAutoProducerLlmPort === null ? {} : { llmPort: edgeAutoProducerLlmPort }),
+    warn: warnLogger.warn
   });
   // invariant: ConflictDetectionService rule path is ON by default per
   // v0.3.11 §C C3. Rule-path edges go through edgeProposalService.proposeEdge

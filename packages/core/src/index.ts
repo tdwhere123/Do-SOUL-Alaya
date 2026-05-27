@@ -15,6 +15,7 @@ export * from "./path-relation-proposal-service.js";
 export * from "./dirty-state-panic-service.js";
 export * from "./dynamics-constants-runtime.js";
 export * from "./dynamics-service.js";
+export * from "./edge-auto-producer-llm-port.js";
 export * from "./edge-auto-producer-service.js";
 export * from "./embedding-backfill-handler.js";
 export * from "./edge-proposal-service.js";

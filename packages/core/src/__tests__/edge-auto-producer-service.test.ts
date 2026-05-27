@@ -209,6 +209,182 @@ describe("EdgeAutoProducerService", () => {
     expect(graphEdgePort.createEdge).not.toHaveBeenCalled();
   });
 
+  it("B-2 LLM path emits llm_supports trigger when verdict clears the 0.85 floor", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbor = createMemoryEntry({
+      object_id: "memory-existing",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, graphEdgePort } = createDeps([newMemory, neighbor]);
+    const llmPort = {
+      classifyPair: vi.fn(async () => ({
+        edgeType: "supports" as const,
+        confidence: 0.92,
+        rationale: "both rows assert the same RTK rule"
+      }))
+    };
+    const service = new EdgeAutoProducerService({ ...deps, llmPort });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    expect(llmPort.classifyPair).toHaveBeenCalledWith({ newMemory, neighbor });
+    expect(graphEdgePort.createEdge).toHaveBeenCalledTimes(1);
+    expect(graphEdgePort.createEdge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceMemoryId: "memory-new",
+        targetMemoryId: "memory-existing",
+        edgeType: MemoryGraphEdgeType.SUPPORTS,
+        triggerSource: EdgeProposalTriggerSource.LLM_SUPPORTS,
+        confidence: 0.92
+      })
+    );
+    const reason = graphEdgePort.createEdge.mock.calls[0][0].reason as string;
+    expect(reason).toContain("B-2 llm pair classifier");
+  });
+
+  it("B-2 LLM path emits llm_supports for derives_from verdicts too (one KPI bucket per port)", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbor = createMemoryEntry({
+      object_id: "memory-source",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, graphEdgePort } = createDeps([newMemory, neighbor]);
+    const llmPort = {
+      classifyPair: vi.fn(async () => ({
+        edgeType: "derives_from" as const,
+        confidence: 0.88,
+        rationale: ""
+      }))
+    };
+    const service = new EdgeAutoProducerService({ ...deps, llmPort });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    expect(graphEdgePort.createEdge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        edgeType: MemoryGraphEdgeType.DERIVES_FROM,
+        triggerSource: EdgeProposalTriggerSource.LLM_SUPPORTS
+      })
+    );
+  });
+
+  it("B-2 LLM below 0.85 floor falls back to local heuristic without crashing", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbor = createMemoryEntry({
+      object_id: "memory-existing",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, graphEdgePort } = createDeps([newMemory, neighbor]);
+    const llmPort = {
+      classifyPair: vi.fn(async () => ({
+        edgeType: "supports" as const,
+        confidence: 0.7, // below floor
+        rationale: "uncertain"
+      }))
+    };
+    const service = new EdgeAutoProducerService({ ...deps, llmPort });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    // Falls back to the local supports heuristic — same edge_type, but
+    // trigger_source is the local_supports rule-heuristic bucket.
+    expect(graphEdgePort.createEdge).toHaveBeenCalledTimes(1);
+    expect(graphEdgePort.createEdge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        edgeType: MemoryGraphEdgeType.SUPPORTS,
+        triggerSource: EdgeProposalTriggerSource.LOCAL_SUPPORTS
+      })
+    );
+  });
+
+  it("B-2 LLM null verdict falls back to local heuristic", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbor = createMemoryEntry({
+      object_id: "memory-existing",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, graphEdgePort } = createDeps([newMemory, neighbor]);
+    const llmPort = {
+      classifyPair: vi.fn(async () => null)
+    };
+    const service = new EdgeAutoProducerService({ ...deps, llmPort });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    expect(llmPort.classifyPair).toHaveBeenCalled();
+    expect(graphEdgePort.createEdge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        triggerSource: EdgeProposalTriggerSource.LOCAL_SUPPORTS
+      })
+    );
+  });
+
+  it("B-2 LLM throwing port is non-fatal: falls back, warns, never aborts other neighbors", async () => {
+    const newMemory = createMemoryEntry();
+    const neighborA = createMemoryEntry({
+      object_id: "memory-A",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const neighborB = createMemoryEntry({
+      object_id: "memory-B",
+      content: "RTK is required for shell commands in repository scripts.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, graphEdgePort } = createDeps([newMemory, neighborA, neighborB]);
+    const llmPort = {
+      classifyPair: vi.fn(async () => {
+        throw new Error("garden timed out");
+      })
+    };
+    const warn = vi.fn();
+    const service = new EdgeAutoProducerService({ ...deps, llmPort, warn });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    // Both neighbors still produce proposals through the local heuristic.
+    expect(graphEdgePort.createEdge).toHaveBeenCalledTimes(2);
+    for (const call of graphEdgePort.createEdge.mock.calls) {
+      expect(call[0].triggerSource).toBe(EdgeProposalTriggerSource.LOCAL_SUPPORTS);
+    }
+    expect(warn).toHaveBeenCalled();
+    const warnArgs = warn.mock.calls[0]!;
+    expect(warnArgs[0]).toContain("edge auto producer llm port classify failed");
+    expect(warnArgs[1]).toMatchObject({
+      new_memory_id: "memory-new",
+      error: "garden timed out"
+    });
+  });
+
   it("uses bounded local search only and has no external provider dependency", async () => {
     const newMemory = createMemoryEntry();
     const neighbors = Array.from({ length: 20 }, (_, index) =>

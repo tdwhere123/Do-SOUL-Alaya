@@ -5,6 +5,10 @@ import {
   type MemoryEntry,
   type MemoryGraphEdgeTypeValue
 } from "@do-soul/alaya-protocol";
+import type {
+  EdgeAutoProducerLlmDecision,
+  EdgeAutoProducerLlmPort
+} from "./edge-auto-producer-llm-port.js";
 import { CoreError } from "./errors.js";
 import { parseObjectId } from "./shared/validators.js";
 
@@ -14,6 +18,11 @@ const SUPPORTS_TOKEN_JACCARD_MIN = 0.45;
 const DERIVES_TOKEN_JACCARD_MIN = 0.28;
 const SUPERSEDES_TOKEN_JACCARD_MIN = 0.5;
 const STRONG_TAG_OVERLAP_MIN = 0.5;
+// Phase B §B-2 confidence floor for the LLM pair-classifier path. A
+// below-floor verdict is dropped (the service then falls back to the
+// local heuristic for that neighbor) so a noisy garden response cannot
+// inject low-quality supports/derives_from proposals into the queue.
+const LLM_CONFIDENCE_FLOOR = 0.85;
 
 const DERIVATION_CUES = [
   "based on",
@@ -107,6 +116,17 @@ export interface EdgeAutoProducerGraphEdgePort {
 export interface EdgeAutoProducerServiceDependencies {
   readonly memoryRepo: EdgeAutoProducerMemoryRepoPort;
   readonly graphEdgePort: EdgeAutoProducerGraphEdgePort;
+  /**
+   * Optional Phase B §B-2 pair classifier. When present the service
+   * asks the port for a supports / derives_from verdict before running
+   * the local heuristic; a verdict >= LLM_CONFIDENCE_FLOOR is emitted
+   * with trigger_source = "llm_supports". A null / failing / below-floor
+   * verdict triggers the local-heuristic fallback for that neighbor.
+   * Adapter failures are observable via the optional warn callback;
+   * they never abort proposal production for the new memory.
+   */
+  readonly llmPort?: EdgeAutoProducerLlmPort;
+  readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }
 
 export interface EdgeAutoProducerInput {
@@ -166,7 +186,7 @@ export class EdgeAutoProducerService {
       if (proposalCount >= MAX_EDGE_PROPOSALS_PER_MEMORY) {
         break;
       }
-      const decision = classifyNeighbor(newMemory, neighbor);
+      const decision = await this.decideForNeighbor(newMemory, neighbor);
       if (decision === null) {
         continue;
       }
@@ -182,6 +202,84 @@ export class EdgeAutoProducerService {
         sourceSignalId: input.sourceSignalId
       });
       proposalCount += 1;
+    }
+  }
+
+  /**
+   * Phase B B-2: LLM port runs first for the supports / derives_from
+   * universe. A null / failing / below-floor verdict falls back to the
+   * deterministic local heuristic, so a degraded garden never blocks
+   * proposal generation. The eligibility prefilter (same workspace,
+   * dimension, scope, lifecycle=active) is shared with the heuristic to
+   * spare the LLM obvious non-pairs.
+   */
+  private async decideForNeighbor(
+    newMemory: Readonly<MemoryEntry>,
+    neighbor: Readonly<MemoryEntry>
+  ): Promise<EdgeAutoDecision | null> {
+    if (!isEligibleNeighbor(newMemory, neighbor)) {
+      return null;
+    }
+    if (this.deps.llmPort !== undefined) {
+      const llmDecision = await this.tryLlmDecision(newMemory, neighbor);
+      if (llmDecision !== null) {
+        return llmDecision;
+      }
+    }
+    return classifyNeighbor(newMemory, neighbor);
+  }
+
+  private async tryLlmDecision(
+    newMemory: Readonly<MemoryEntry>,
+    neighbor: Readonly<MemoryEntry>
+  ): Promise<EdgeAutoDecision | null> {
+    const port = this.deps.llmPort;
+    if (port === undefined) {
+      return null;
+    }
+    let verdict: EdgeAutoProducerLlmDecision | null;
+    try {
+      verdict = await port.classifyPair({ newMemory, neighbor });
+    } catch (err) {
+      // Adapter failure must not block proposal production for the new
+      // memory; the local heuristic still runs for this neighbor and the
+      // operator gets a single observable event.
+      this.warn("edge auto producer llm port classify failed", {
+        new_memory_id: newMemory.object_id,
+        neighbor_memory_id: neighbor.object_id,
+        error: errorMessage(err)
+      });
+      return null;
+    }
+    if (verdict === null) {
+      return null;
+    }
+    const clampedConfidence = clamp01(verdict.confidence);
+    if (clampedConfidence < LLM_CONFIDENCE_FLOOR) {
+      return null;
+    }
+    const edgeType =
+      verdict.edgeType === "supports"
+        ? MemoryGraphEdgeType.SUPPORTS
+        : MemoryGraphEdgeType.DERIVES_FROM;
+    const rationale = verdict.rationale.trim();
+    return {
+      edgeType,
+      confidence: round2(clampedConfidence),
+      // invariant: trigger_source = llm_supports for BOTH supports and
+      // derives_from when sourced from the LLM port — Phase B B-2 reuses
+      // a single per-trigger KPI bucket for the pair classifier so K3.2
+      // does not need two LLM rows.
+      triggerSource: EdgeProposalTriggerSource.LLM_SUPPORTS,
+      reason: rationale.length === 0
+        ? `B-2 llm pair classifier: ${verdict.edgeType}`
+        : `B-2 llm pair classifier: ${verdict.edgeType} (${rationale})`
+    };
+  }
+
+  private warn(message: string, meta: Record<string, unknown>): void {
+    if (this.deps.warn !== undefined) {
+      this.deps.warn(message, meta);
     }
   }
 
@@ -349,4 +447,21 @@ function describeDecision(label: string, features: SimilarityFeatures): string {
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  if (value < 0) {
+    return 0;
+  }
+  if (value > 1) {
+    return 1;
+  }
+  return value;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
