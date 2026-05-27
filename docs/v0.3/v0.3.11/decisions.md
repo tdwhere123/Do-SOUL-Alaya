@@ -272,3 +272,81 @@ archive 重新声明 actually closed scope。未来 commits 应避免 "Closes" /
 **影响**：FIX-0-* 全部 land 后重派 reviewer + codex-rescue 复审；zero
 Blocking / Important 才放行 Phase A 启动。Phase B / C / G 启动前
 必须确认各自延期项已 enqueue。
+
+## D21 — C3 ConflictDetection 默认开提前在 Phase 0 fix-loop 落地（2026-05-27）
+
+**背景**：D18 声明 C3 "默认开 `ConflictDetectionService` rule path"
+属于 "Phase C 内做"。spec-compliance review §"Silent scope drift
+findings #2" 指出 commit `bc6152a` 已在 Phase 0 fix-loop carry-forward
+阶段就把默认翻转 land 了，时机早于 D18 描述。
+
+**决定**：以本条记录 C3 实际 landing 时机为 commit `bc6152a`
+（Phase 0 fix-loop carry-forward），不是 Phase C；D18 的范围归属
+（C3 在 v0.3.11 内做）不变，只是 landing 时机被提前。
+
+**rationale**：C3 始终在 v0.3.11 scope 内，未发生 silent scope drift；
+但 D14 / D15 honesty 要求所有 release 期内的实际 landing 时机
+必须 traceable，本条补齐 audit 链。后续 Phase G closeout report
+引用 C3 时直接用 `bc6152a`，不再用 "Phase C 内完成" 描述。
+
+**引用 finding**：spec-compliance review §"Silent scope drift
+findings #2"。
+
+## D22 — C7 health_inbox + EventLog audit 推 v0.3.12 release（2026-05-27）
+
+**背景**：`phase-6-graph-plan.md §C` C7 锁定 "edge 创建失败 →
+`health_inbox` 写入 + `SOUL_GRAPH_EDGE_REJECTED` EventLog 类型"
+作为 v0.3.11 范围。spec-compliance review §"Silent scope drift
+findings #1" 指出 v0.3.11 实际只完成 raw_payload normalize 删除
+（I0-3 收尾），未实现 health_inbox 写入和 audit event 落地。
+
+**决定**：明确推 v0.3.12 close condition：v0.3.12 release 必须实现
+（a）edge 创建失败时写入 `health_inbox`；（b）EventLog 增加
+`SOUL_GRAPH_EDGE_REJECTED` 类型并在失败路径发射。v0.3.11 范围内
+C7 只声明 "trigger 边界已文档化 + raw_payload normalize 已 land"，
+不声明 audit 链完整。
+
+**rationale**：v0.3.11 范围已经很大（Phase 6 graph 升级 + 多语
+BM25 + abstention + token measure）；C7 audit gap 不阻塞 K3.x KPI
+（K3.1 / K3.2 / K3.3 / K3.4 都是 edge 生产与召回度量，不依赖
+失败路径 audit）；edge 创建失败本身在当前实现里已经 throw +
+log，truth boundary 未受损——只是缺 governed audit surface。
+deferral 走 D14 / D15 honesty 原则记录，由 v0.3.12 decisions.md
+报告实施状态。
+
+**影响**：v0.3.11 Phase G closeout report 不可声明 C7 完成；只能
+声明 C7 子集 land；release notes 需点名 health_inbox + audit
+event 推 v0.3.12。
+
+**引用 finding**：spec-compliance review §"Silent scope drift
+findings #1"。
+
+## D23 — v0.3.11 release notes 必须显式声明两个默认-on 翻转（2026-05-27）
+
+**背景**：v0.3.11 涉及两个生产 daemon 行为翻转：
+（1）commit `bc6152a` 把 `ConflictDetectionService` 默认开
+（rule path）；（2）commit `06fd18f` 把
+`ALAYA_EDGE_PRODUCER_LLM_ENABLED` 默认 on。两者都是从 opt-in 翻成
+opt-out 的运维行为变化。reviewer review §"Important #3" 指出
+release notes 若不显式声明，下游 operator 升级到 v0.3.11 后会在
+不知情情况下触发新的 conflict propose / LLM edge produce 路径。
+
+**决定**：Phase G release notes 必须显式声明这两个翻转 + 各自
+opt-out env 名字：
+
+- `ConflictDetectionService` 默认开 → opt-out 环境变量
+  （Phase G 收尾时按 commit `bc6152a` 实际暴露的 env 名记录）；
+- `ALAYA_EDGE_PRODUCER_LLM_ENABLED` 默认 on → opt-out 时显式设为
+  `0` / `false`（commit `06fd18f`）。
+
+**rationale**：D14 / D15 honesty + 运维稳定性双重要求。默认翻转
+不显式声明等于 silent prod behavior change，违反 invariants §27
+（governance / configuration / import/export / backup / session
+trust changes are auditable）所导出的运维公平原则。
+
+**影响**：Phase G release notes worker 必须在产出 draft 时把这两
+段 opt-out 说明落到 release notes 第一屏；review 复检时把
+"两个 default-on 翻转是否在 release notes 显式声明" 列入
+Important 级 checklist。
+
+**引用 finding**：reviewer review §"Important #3"。
