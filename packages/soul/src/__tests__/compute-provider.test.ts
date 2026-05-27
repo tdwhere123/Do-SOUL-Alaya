@@ -649,6 +649,61 @@ describe("OfficialApiGardenProvider diagnostic dump (Phase A.1 instrument)", () 
     expect(dump.response_body_total_chars).toBeNull();
   });
 
+  it("surfaces extractorMeta (recovery_kind, retry_count) on the dump envelope", async () => {
+    // Provider got valid extractorMeta from a recovered+retried extract call,
+    // but the body shape (signals key) was still wrong — invalid_response.
+    const extractor: SignalExtractor = {
+      extract: vi.fn(async () => ({
+        rawJson: '{"not_signals":[]}',
+        extractorMeta: { recoveryKind: "markdown_strip", retryCount: 1 }
+      }))
+    };
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      model: "gpt-test-mini",
+      extractor,
+      diagnosticDir,
+      now: () => "2026-05-27T13:00:00.000Z"
+    });
+    await expect(
+      provider.compile("Call me Ash.", createContext())
+    ).rejects.toMatchObject({ name: "GardenProviderError", kind: "invalid_response" });
+    const files = readdirSync(diagnosticDir).filter((f) => f.endsWith(".json"));
+    expect(files).toHaveLength(1);
+    const dump = JSON.parse(readFileSync(join(diagnosticDir, files[0]!), "utf8")) as Record<string, unknown>;
+    expect(dump.recovery_kind).toBe("markdown_strip");
+    expect(dump.extractor_retry_count).toBe(1);
+  });
+
+  it("surfaces SignalExtractorError.retryCount on the dump envelope when extract threw", async () => {
+    const extractor: SignalExtractor = {
+      extract: vi.fn(async () => {
+        throw new SignalExtractorError(
+          "invalid_json",
+          "Signal extractor returned no text content.",
+          { retryCount: 1 }
+        );
+      })
+    };
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      model: "gpt-test-mini",
+      extractor,
+      diagnosticDir,
+      now: () => "2026-05-27T13:30:00.000Z"
+    });
+    await expect(
+      provider.compile("Call me Ash.", createContext())
+    ).rejects.toMatchObject({ name: "GardenProviderError", kind: "invalid_response" });
+    const files = readdirSync(diagnosticDir).filter((f) => f.endsWith(".json"));
+    expect(files).toHaveLength(1);
+    const dump = JSON.parse(readFileSync(join(diagnosticDir, files[0]!), "utf8")) as Record<string, unknown>;
+    expect(dump.extractor_retry_count).toBe(1);
+    // No extractorMeta because extract() threw before returning — recovery_kind
+    // defaults to "none" so the dump shape stays stable for readers.
+    expect(dump.recovery_kind).toBe("none");
+  });
+
   it("does not dump when diagnosticDir is explicitly null and skips network errors", async () => {
     // diagnosticDir: null — instrument disabled, fs untouched.
     const nullDirProvider = new OfficialApiGardenProvider({

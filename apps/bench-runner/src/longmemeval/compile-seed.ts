@@ -622,14 +622,35 @@ export function createCompileSeedRunner(options?: {
     lastExtractionSource: null,
     lastCacheKey: null
   };
-  // Phase A.1 instrument: per-runner diagnostic dump dir; null disables dumps.
-  // Defaults to a cwd-rooted data/diagnostics path (data/* is gitignored).
+  // Phase A.1 / A.3 instrument: per-runner diagnostic dump dir; null disables
+  // dumps. Resolution order:
+  //   1. explicit options.diagnosticDir (null => off, string => use as-is)
+  //   2. ALAYA_SEED_EXTRACTION_DIAG_DIR env (operator override at run time)
+  //   3. cwd-rooted DEFAULT_COMPILE_SEED_DIAGNOSTIC_DIR_REL (default on)
+  // Co-resolved at runner construction (not lazily) so a later cwd change
+  // does not retarget mid-run.
+  const envDiagDir = normalizeEnvDiagDir(
+    process.env.ALAYA_SEED_EXTRACTION_DIAG_DIR
+  );
   const diagnosticDir: string | null =
     options?.diagnosticDir === null
       ? null
-      : options?.diagnosticDir === undefined
-        ? resolve(process.cwd(), DEFAULT_COMPILE_SEED_DIAGNOSTIC_DIR_REL)
-        : resolve(options.diagnosticDir);
+      : options?.diagnosticDir !== undefined
+        ? resolve(options.diagnosticDir)
+        : envDiagDir !== null
+          ? resolve(envDiagDir)
+          : resolve(process.cwd(), DEFAULT_COMPILE_SEED_DIAGNOSTIC_DIR_REL);
+  // Pre-create the dump dir at runner construction (not first failure) so a
+  // bench run that triggers many concurrent failures does not race on mkdir.
+  // Best-effort — never block the bench start on fs failure.
+  if (diagnosticDir !== null) {
+    try {
+      mkdirSync(diagnosticDir, { recursive: true });
+    } catch {
+      // Dump path is read-only or the operator's filesystem rejected it;
+      // dumpSeedExtractionFailureDiagnostic logs the per-failure error.
+    }
+  }
 
   const provider =
     credentialled === false
@@ -650,7 +671,13 @@ export function createCompileSeedRunner(options?: {
               : { cacheRoot: options.cacheRoot }),
             stats
           }),
-          requestTimeoutMs: EXTRACTION_REQUEST_TIMEOUT_MS
+          requestTimeoutMs: EXTRACTION_REQUEST_TIMEOUT_MS,
+          // invariant: provider-side and seed-side dumps must land in the same
+          // dir so a Phase A.2 / Phase F reader gets every signal of a failure
+          // from one readdir. ALAYA_SEED_EXTRACTION_DIAG_DIR / explicit
+          // options.diagnosticDir applies to both layers; explicit null
+          // disables the provider dump too.
+          diagnosticDir
         });
 
   async function seedTurn(input: {
@@ -1084,6 +1111,20 @@ function readNonEmpty(value: string | undefined): string | undefined {
 
 function stringifyError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+// Phase A.3 instrument: normalize ALAYA_SEED_EXTRACTION_DIAG_DIR. Empty
+// strings and whitespace are equivalent to unset (the resolver then falls
+// through to the cwd-rooted default). A literal "null" / "off" / "disabled"
+// is NOT honored here — disabling the dump requires the explicit
+// options.diagnosticDir = null wiring, since env-driven disables on a
+// release-blocker instrument are too easy to mis-set.
+function normalizeEnvDiagDir(value: string | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? null : trimmed;
 }
 
 /** One seeded turn's content plus the real evidence_capsule id it materialized. */

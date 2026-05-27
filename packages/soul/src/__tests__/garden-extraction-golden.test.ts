@@ -38,7 +38,10 @@ describe("garden-extraction-golden", () => {
           userPrompt: fixture.turn,
           timeoutMs: 123
         })
-      ).resolves.toEqual({ rawJson });
+      ).resolves.toEqual({
+        rawJson,
+        extractorMeta: { recoveryKind: "none", retryCount: 0 }
+      });
 
       expect(completeImpl).toHaveBeenCalledTimes(1);
       const [, context, options] = completeImpl.mock.calls[0] as [

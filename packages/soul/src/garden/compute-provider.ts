@@ -252,6 +252,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       turn_messages: context.turn_messages
     });
     let rawJson: string | null = null;
+    let extractorMeta: { readonly recoveryKind: string; readonly retryCount: number } | null = null;
     try {
       const response = await this.extractor.extract({
         systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
@@ -259,6 +260,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
         timeoutMs: this.requestTimeoutMs
       });
       rawJson = response.rawJson;
+      extractorMeta = response.extractorMeta ?? null;
       return parseOfficialApiSignals(rawJson);
     } catch (error) {
       // Phase A.1 instrument: only the invalid_response branch — JSON shape
@@ -280,7 +282,8 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
           error,
           rawJson,
           userPrompt,
-          context
+          context,
+          extractorMeta
         });
       }
       if (error instanceof SignalExtractorError) {
@@ -311,6 +314,10 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
     readonly rawJson: string | null;
     readonly userPrompt: string;
     readonly context: GardenCompileContext;
+    // Phase A.3 instrument: surfaces tryRecoverJson branch + extractor retry
+    // attempt count when the body parsed but the post-extract envelope shape
+    // was wrong. Null when extract() threw before returning meta.
+    readonly extractorMeta: { readonly recoveryKind: string; readonly retryCount: number } | null;
   }): Promise<void> {
     if (this.diagnosticDir === null) {
       return;
@@ -341,7 +348,16 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
         user_prompt_prefix: input.userPrompt.slice(
           0,
           DIAGNOSTIC_PROMPT_PREFIX_MAX_CHARS
-        )
+        ),
+        // Phase A.3 instrument: recovery branch + retry attempts. recovery_kind
+        // is "none" when strict JSON parsed first try; "markdown_strip" /
+        // "trailing_strip" / "balanced_close" when the body was salvaged.
+        // extractor_retry_count is the count of additional attempts beyond the
+        // first (0 = no retry, 1 = retried once). Pulled from extractorMeta
+        // when the extract() call succeeded; else from
+        // SignalExtractorError.retryCount surfaced via the typed error.
+        recovery_kind: extractRecoveryKindFromInputs(input.extractorMeta, input.error),
+        extractor_retry_count: extractRetryCountFromInputs(input.extractorMeta, input.error)
       };
       const fileName = `${timestamp.replace(/[:.]/gu, "-")}-${randomUUID()}.json`;
       const filePath = join(this.diagnosticDir, fileName);
@@ -520,6 +536,32 @@ interface SignalErrorDiagnostic {
   readonly name: string;
   readonly message: string;
   readonly cause_message: string | null;
+}
+
+function extractRecoveryKindFromInputs(
+  meta: { readonly recoveryKind: string; readonly retryCount: number } | null,
+  _error: unknown
+): string {
+  if (meta !== null) {
+    return meta.recoveryKind;
+  }
+  // No meta available — the extract() call threw before returning. The
+  // recovery branch is unknowable in that case; emit "none" so the dump
+  // shape stays stable for the Phase A.2 / Phase F readers.
+  return "none";
+}
+
+function extractRetryCountFromInputs(
+  meta: { readonly recoveryKind: string; readonly retryCount: number } | null,
+  error: unknown
+): number {
+  if (meta !== null) {
+    return meta.retryCount;
+  }
+  if (error instanceof SignalExtractorError) {
+    return error.retryCount;
+  }
+  return 0;
 }
 
 function extractSignalErrorDiagnostic(error: unknown): SignalErrorDiagnostic {
