@@ -343,6 +343,58 @@ describe("EdgeAutoProducerService", () => {
     );
   });
 
+  // invariant: the LLM port can return `null` either because the model
+  // explicitly judged "no relationship" OR because the adapter failed and
+  // degraded to null. Both paths fall through to the local heuristic and
+  // a local-heuristic proposal may still be emitted (with trigger_source
+  // = local_*). This is the intended design: the LLM is advisory, never
+  // a veto. Adapter failures additionally emit a single warn event;
+  // verdict-null does not (an explicit model "no" is not an error).
+  it("LLM-rejected verdict (null) still allows a local-heuristic proposal to be emitted with no warn", async () => {
+    const newMemory = createMemoryEntry();
+    const neighbor = createMemoryEntry({
+      object_id: "memory-existing",
+      content: "Repository shell commands must use the RTK wrapper.",
+      domain_tags: ["rtk", "workflow"]
+    });
+    const { deps, graphEdgePort } = createDeps([newMemory, neighbor]);
+    const llmPort = {
+      // Simulates the model explicitly judging "no relationship" — the
+      // adapter parsed a well-formed verdict whose edge_type was "none",
+      // and createEdgeAutoProducerLlmPort.classifyPair returned null
+      // (see apps/core-daemon/src/edge-auto-producer-llm-adapter.ts
+      // materializeDecision). This is NOT an adapter failure.
+      classifyPair: vi.fn(async () => null)
+    };
+    const warn = vi.fn();
+    const service = new EdgeAutoProducerService({ ...deps, llmPort, warn });
+
+    await service.produceForNewMemory({
+      newMemoryId: newMemory.object_id,
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1"
+    });
+
+    // The local heuristic still gets to fire on the same neighbor and
+    // emits a local_supports proposal. The LLM rejection is silent: it
+    // is not an adapter error, so no warn fires.
+    expect(llmPort.classifyPair).toHaveBeenCalledTimes(1);
+    expect(graphEdgePort.createEdge).toHaveBeenCalledTimes(1);
+    expect(graphEdgePort.createEdge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        edgeType: MemoryGraphEdgeType.SUPPORTS,
+        triggerSource: EdgeProposalTriggerSource.LOCAL_SUPPORTS
+      })
+    );
+    // Verdict-null must NOT emit a warn — only adapter exceptions do.
+    // see also: B-2 LLM throwing port test above (warns + falls back).
+    const adapterWarnCalls = warn.mock.calls.filter(([message]) =>
+      typeof message === "string" && message.includes("edge auto producer llm port classify failed")
+    );
+    expect(adapterWarnCalls).toEqual([]);
+  });
+
   it("B-2 LLM throwing port is non-fatal: falls back, warns, never aborts other neighbors", async () => {
     const newMemory = createMemoryEntry();
     const neighborA = createMemoryEntry({

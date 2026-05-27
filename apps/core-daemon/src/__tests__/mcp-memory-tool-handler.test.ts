@@ -944,6 +944,75 @@ describe("mcp memory tool handler", () => {
     );
   });
 
+  // invariant: warn-and-keep regression for all 5 graph-ref keys at once.
+  // The normalizer never PROMOTES raw_payload ref keys to first-class
+  // fields (silent double-entry was the audit risk), but it must also
+  // leave raw_payload UNCHANGED — downstream subscribers may still want
+  // to read the raw envelope for diagnostics. The single warn must list
+  // every offending key so an operator gets one event per signal, not
+  // one per key. see also: apps/core-daemon/src/mcp-memory-tool-handler.ts
+  // normalizeCandidateSignalGraphRefs.
+  it("warn-and-keep: all 5 raw_payload ref keys are preserved + reported in one warn", async () => {
+    const warn = vi.fn();
+    const deps = { ...createDeps(), warn };
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const rawPayloadWithAllFiveKeys = {
+      observation: "Use pnpm.",
+      source_memory_refs: ["memory-source"],
+      supersedes_refs: ["memory-superseded"],
+      exception_to_refs: ["memory-exception"],
+      contradicts_refs: ["memory-conflict"],
+      incompatible_with_refs: ["memory-incompat"]
+    };
+    const result = await handler.call({
+      toolName: "soul.emit_candidate_signal",
+      arguments: {
+        signal_kind: "potential_preference",
+        object_kind: "memory_entry",
+        scope_hint: "project",
+        domain_tags: ["tooling"],
+        confidence: 0.9,
+        evidence_refs: ["memory-1"],
+        raw_payload: rawPayloadWithAllFiveKeys
+      },
+      context
+    });
+
+    expect(result).toMatchObject({ ok: true });
+
+    // One warn fires per signal, listing every offending key.
+    const refKeyWarnCalls = warn.mock.calls.filter(([message]) =>
+      typeof message === "string" && message.includes("raw_payload contains graph-edge ref keys")
+    );
+    expect(refKeyWarnCalls).toHaveLength(1);
+    const offendingKeys = (refKeyWarnCalls[0]![1] as { offending_keys: readonly string[] })
+      .offending_keys;
+    expect(new Set(offendingKeys)).toEqual(
+      new Set([
+        "source_memory_refs",
+        "supersedes_refs",
+        "exception_to_refs",
+        "contradicts_refs",
+        "incompatible_with_refs"
+      ])
+    );
+
+    // First-class fields stay empty (NOT promoted from raw_payload), and
+    // raw_payload itself is forwarded verbatim — the keep half of the
+    // warn-and-keep contract.
+    expect(deps.signalService.receiveSignal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source_memory_refs: [],
+        supersedes_refs: [],
+        exception_to_refs: [],
+        contradicts_refs: [],
+        incompatible_with_refs: [],
+        raw_payload: rawPayloadWithAllFiveKeys
+      })
+    );
+  });
+
   // First-class ref fields supplied via the request body still flow
   // through. raw_payload remains a free-form bag with no ref-key magic.
   it("accepts first-class graph-edge ref fields on emit_candidate_signal", async () => {
