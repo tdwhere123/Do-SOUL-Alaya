@@ -530,7 +530,16 @@ catalog of 13 verbs (doctor / install / attach / detach / status /
 inspect / update / tools / review / backup / export / import / mcp
 stdio); every mutating verb supports preview before write, attach
 / detach are atomic, and the audit log lives at
-`~/.config/alaya/audit/`.
+`~/.config/alaya/audit/`. The `review` verb is one CLI verb with
+four subcommands: `review pending|accept|reject` cover memory
+proposals, and v0.3.11 adds `review edges pending|accept|reject`
+for edge-proposal governance — the new edge subcommand surface
+does not change the top-level verb count (still 13). The new
+edge-proposal MCP tools (`soul.propose_edge`,
+`soul.list_pending_edge_proposals`,
+`soul.batch_review_edge_proposals`) extend the live MCP catalog
+listed above; the 13 `soul.*` + 3 `garden.*` = 16 tools count
+already reflects them.
 
 ---
 

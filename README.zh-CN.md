@@ -452,6 +452,15 @@ schema-bounded（`maxLength` / `maxItems` /
 / status / inspect / update / tools / review / backup / export /
 import / mcp stdio）；每个会修改的动词都支持先 preview 再写，
 attach / detach 原子，审计日志在 `~/.config/alaya/audit/`。
+`review` 是一个 CLI 动词带四个子命令：`review
+pending|accept|reject` 处理 memory proposal，v0.3.11 新增
+`review edges pending|accept|reject` 处理 edge proposal 治理——
+edges 子命令属于现有 `review` 动词的子面扩展，不是新增顶层
+动词，所以顶层动词数仍是 13。新增的三个边提案 MCP 工具
+（`soul.propose_edge`、`soul.list_pending_edge_proposals`、
+`soul.batch_review_edge_proposals`）已经计入上面列出的 live MCP
+目录；13 个 `soul.*` + 3 个 `garden.*` = 16 个工具的口径已经
+反映这三个新工具。
 
 ---
 
