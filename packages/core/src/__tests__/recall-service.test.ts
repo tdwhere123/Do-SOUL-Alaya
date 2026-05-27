@@ -4082,6 +4082,441 @@ describe("RecallService", () => {
       expect(evidenceTargetDiag?.admission_planes ?? []).not.toContain("evidence_anchor");
       expect(tagTargetDiag?.admission_planes ?? []).not.toContain("domain_tag_cluster");
     });
+
+    describe("multi-seed graph fan-in (Phase D-5)", () => {
+      // see also: packages/core/src/recall-service.ts addGraphExpansionCandidates
+      // Pool B branch and RecallMultiSeedGraphFanInDiagnostics
+      type GraphEdgeStub = {
+        readonly object_id: string;
+        readonly object_kind: "memory_graph_edge";
+        readonly schema_version: 1;
+        readonly lifecycle_state: "active";
+        readonly created_at: string;
+        readonly updated_at: string;
+        readonly created_by: string;
+        readonly workspace_id: string;
+        readonly edge_type: "derives_from" | "recalls" | "supports";
+        readonly source_memory_id: string;
+        readonly target_memory_id: string;
+        readonly confidence: number;
+      };
+      const edgeStub = (
+        id: string,
+        source: string,
+        target: string,
+        edgeType: GraphEdgeStub["edge_type"] = "derives_from"
+      ): GraphEdgeStub => ({
+        object_id: id,
+        object_kind: "memory_graph_edge",
+        schema_version: 1,
+        lifecycle_state: "active",
+        created_at: "2026-03-23T00:00:00.000Z",
+        updated_at: "2026-03-23T00:00:00.000Z",
+        created_by: "system",
+        workspace_id: "workspace-1",
+        edge_type: edgeType,
+        source_memory_id: source,
+        target_memory_id: target,
+        confidence: 0.8
+      });
+
+      it("with zero entity-derived seeds emits no multi_seed_graph_fan_in diagnostic", async () => {
+        // invariant: when no entity is extracted from the query, the pooled
+        // legacy path drives graph_expansion and the multi_seed_graph_fan_in
+        // surface stays undefined (regression protection).
+        const memories = [
+          createMemoryEntry({
+            object_id: "memory-anchor",
+            dimension: MemoryDimension.PROCEDURE,
+            scope_class: ScopeClass.PROJECT,
+            domain_tags: ["repo"],
+            content: "anchor"
+          })
+        ];
+        const { dependencies } = createDependencies(memories);
+        const findByMemoryId = vi.fn(async () => []);
+        const service = new RecallService({
+          ...dependencies,
+          graphExpansionPort: { findByMemoryId }
+          // entityExtractionPort intentionally unwired
+        });
+
+        const result = await service.recall({
+          taskSurface: {
+            ...createTaskSurface(),
+            display_name: "neutral query"
+          },
+          workspaceId: "workspace-1",
+          strategy: "chat"
+        });
+
+        expect(result.diagnostics?.multi_seed_graph_fan_in).toBeUndefined();
+      });
+
+      it("two non-overlapping entity seeds each fan independently with no dedup collisions", async () => {
+        // invariant: each entity seed runs its own BFS so disjoint neighbor
+        // sets land in the merged plane without dedup_collisions.
+        const memories = [
+          createMemoryEntry({
+            object_id: "anchor-alpha",
+            dimension: MemoryDimension.PROCEDURE,
+            scope_class: ScopeClass.PROJECT,
+            domain_tags: ["repo"],
+            content: "AlphaRouter binds writes."
+          }),
+          createMemoryEntry({
+            object_id: "anchor-beta",
+            dimension: MemoryDimension.PROCEDURE,
+            scope_class: ScopeClass.PROJECT,
+            domain_tags: ["repo"],
+            content: "BetaPlanner schedules tasks."
+          }),
+          createMemoryEntry({
+            object_id: "neighbor-alpha",
+            dimension: MemoryDimension.FACT,
+            scope_class: ScopeClass.PROJECT,
+            domain_tags: ["repo"],
+            content: "consumer of AlphaRouter outcomes"
+          }),
+          createMemoryEntry({
+            object_id: "neighbor-beta",
+            dimension: MemoryDimension.FACT,
+            scope_class: ScopeClass.PROJECT,
+            domain_tags: ["repo"],
+            content: "consumer of BetaPlanner outcomes"
+          })
+        ];
+        const { dependencies } = createDependencies(memories);
+        const searchByKeywordWithinObjectIds = vi.fn(
+          async (_workspace: string, query: string) => {
+            if (query === "AlphaRouter") {
+              return [{ object_id: "anchor-alpha", normalized_rank: 0.9 }];
+            }
+            if (query === "BetaPlanner") {
+              return [{ object_id: "anchor-beta", normalized_rank: 0.9 }];
+            }
+            return [];
+          }
+        );
+        const findByMemoryId = vi.fn(async (memoryId: string) => {
+          if (memoryId === "anchor-alpha") {
+            return [edgeStub("edge-a", "anchor-alpha", "neighbor-alpha")];
+          }
+          if (memoryId === "anchor-beta") {
+            return [edgeStub("edge-b", "anchor-beta", "neighbor-beta")];
+          }
+          return [];
+        });
+
+        const service = new RecallService({
+          ...dependencies,
+          memoryRepo: {
+            ...dependencies.memoryRepo,
+            searchByKeywordWithinObjectIds
+          },
+          graphExpansionPort: { findByMemoryId },
+          entityExtractionPort: {
+            extract: async () => [
+              Object.freeze({
+                surface: "AlphaRouter",
+                normalized: "alpharouter",
+                kind: "quoted" as const,
+                confidence: 1.0
+              }),
+              Object.freeze({
+                surface: "BetaPlanner",
+                normalized: "betaplanner",
+                kind: "quoted" as const,
+                confidence: 1.0
+              })
+            ]
+          }
+        });
+
+        const result = await service.recall({
+          taskSurface: {
+            ...createTaskSurface(),
+            display_name: "AlphaRouter and BetaPlanner coordination"
+          },
+          workspaceId: "workspace-1",
+          strategy: "chat"
+        });
+
+        const fanIn = result.diagnostics?.multi_seed_graph_fan_in;
+        expect(fanIn).toBeDefined();
+        expect(fanIn?.distinct_seeds).toBe(2);
+        expect(fanIn?.dedup_collisions).toBe(0);
+        // Each seed produced 1 candidate so the distribution is degenerate.
+        expect(fanIn?.candidates_per_seed_p50).toBe(1);
+        expect(fanIn?.candidates_per_seed_p95).toBe(1);
+      });
+
+      it("overlapping entity seeds dedup by max score and report dedup_collisions", async () => {
+        // invariant: when the same memory is reached from two distinct
+        // entity seeds, the merger keeps a single graph_expansion admission
+        // with the higher score and counts each extra arrival as a
+        // dedup_collision. No double-scoring across entity paths.
+        const memories = [
+          createMemoryEntry({
+            object_id: "anchor-alpha",
+            dimension: MemoryDimension.PROCEDURE,
+            scope_class: ScopeClass.PROJECT,
+            domain_tags: ["repo"],
+            content: "AlphaRouter binds writes."
+          }),
+          createMemoryEntry({
+            object_id: "anchor-beta",
+            dimension: MemoryDimension.PROCEDURE,
+            scope_class: ScopeClass.PROJECT,
+            domain_tags: ["repo"],
+            content: "BetaPlanner schedules tasks."
+          }),
+          createMemoryEntry({
+            object_id: "shared-neighbor",
+            dimension: MemoryDimension.FACT,
+            scope_class: ScopeClass.PROJECT,
+            domain_tags: ["repo"],
+            content: "downstream cross-cutting consumer"
+          })
+        ];
+        const { dependencies } = createDependencies(memories);
+        const searchByKeywordWithinObjectIds = vi.fn(
+          async (_workspace: string, query: string) => {
+            if (query === "AlphaRouter") {
+              return [{ object_id: "anchor-alpha", normalized_rank: 0.9 }];
+            }
+            if (query === "BetaPlanner") {
+              return [{ object_id: "anchor-beta", normalized_rank: 0.9 }];
+            }
+            return [];
+          }
+        );
+        const findByMemoryId = vi.fn(async (memoryId: string) => {
+          if (memoryId === "anchor-alpha") {
+            return [
+              {
+                ...edgeStub("edge-a-shared", "anchor-alpha", "shared-neighbor"),
+                confidence: 0.5
+              }
+            ];
+          }
+          if (memoryId === "anchor-beta") {
+            return [
+              {
+                ...edgeStub("edge-b-shared", "anchor-beta", "shared-neighbor"),
+                confidence: 0.9
+              }
+            ];
+          }
+          return [];
+        });
+
+        const service = new RecallService({
+          ...dependencies,
+          memoryRepo: {
+            ...dependencies.memoryRepo,
+            searchByKeywordWithinObjectIds
+          },
+          graphExpansionPort: { findByMemoryId },
+          entityExtractionPort: {
+            extract: async () => [
+              Object.freeze({
+                surface: "AlphaRouter",
+                normalized: "alpharouter",
+                kind: "quoted" as const,
+                confidence: 1.0
+              }),
+              Object.freeze({
+                surface: "BetaPlanner",
+                normalized: "betaplanner",
+                kind: "quoted" as const,
+                confidence: 1.0
+              })
+            ]
+          }
+        });
+
+        const result = await service.recall({
+          taskSurface: {
+            ...createTaskSurface(),
+            display_name: "AlphaRouter BetaPlanner shared consumer"
+          },
+          workspaceId: "workspace-1",
+          strategy: "chat"
+        });
+
+        const fanIn = result.diagnostics?.multi_seed_graph_fan_in;
+        expect(fanIn).toBeDefined();
+        expect(fanIn?.distinct_seeds).toBe(2);
+        expect(fanIn?.dedup_collisions).toBeGreaterThanOrEqual(1);
+
+        // The shared neighbor is admitted exactly once on graph_expansion
+        // — max-score reduction kept one row, not two.
+        const sharedDiag = result.diagnostics?.candidates.find(
+          (c) => c.object_id === "shared-neighbor"
+        );
+        expect(sharedDiag?.admission_planes).toContain("graph_expansion");
+        // Plane admission diagnostic is a set, so this also rules out
+        // duplicate admissions surfacing as multiple plane entries.
+        const planeOccurrences = (sharedDiag?.admission_planes ?? []).filter(
+          (plane) => plane === "graph_expansion"
+        ).length;
+        expect(planeOccurrences).toBe(1);
+      });
+
+      it("caps merged fan-in candidates at the plane cap when one seed overruns", async () => {
+        // invariant: MULTI_SEED_GRAPH_FAN_OUT_CAP (= DYNAMIC_RECALL_PLANE_CAP
+        // = 240) bounds the admitted set after merge. We synthesize 260
+        // neighbors reachable from a single entity seed; the post-cap
+        // admission count must not exceed 240.
+        const FAN_OUT_OVERFLOW = 260;
+        const PLANE_CAP = 240;
+        const neighborMemories = Array.from({ length: FAN_OUT_OVERFLOW }, (_, i) =>
+          createMemoryEntry({
+            object_id: `neighbor-${i.toString().padStart(3, "0")}`,
+            dimension: MemoryDimension.FACT,
+            scope_class: ScopeClass.PROJECT,
+            domain_tags: ["repo"],
+            content: `neighbor ${i}`
+          })
+        );
+        const memories = [
+          createMemoryEntry({
+            object_id: "fan-anchor",
+            dimension: MemoryDimension.PROCEDURE,
+            scope_class: ScopeClass.PROJECT,
+            domain_tags: ["repo"],
+            content: "FanRouter binds many."
+          }),
+          ...neighborMemories
+        ];
+        const { dependencies } = createDependencies(memories);
+        const searchByKeywordWithinObjectIds = vi.fn(
+          async (_workspace: string, query: string) => {
+            if (query === "FanRouter") {
+              return [{ object_id: "fan-anchor", normalized_rank: 0.9 }];
+            }
+            return [];
+          }
+        );
+        const findByMemoryId = vi.fn(async (memoryId: string) => {
+          if (memoryId === "fan-anchor") {
+            return neighborMemories.map((neighbor, i) =>
+              edgeStub(`edge-${i}`, "fan-anchor", neighbor.object_id)
+            );
+          }
+          return [];
+        });
+
+        const service = new RecallService({
+          ...dependencies,
+          memoryRepo: {
+            ...dependencies.memoryRepo,
+            searchByKeywordWithinObjectIds
+          },
+          graphExpansionPort: { findByMemoryId },
+          entityExtractionPort: {
+            extract: async () => [
+              Object.freeze({
+                surface: "FanRouter",
+                normalized: "fanrouter",
+                kind: "quoted" as const,
+                confidence: 1.0
+              })
+            ]
+          }
+        });
+
+        const result = await service.recall({
+          taskSurface: {
+            ...createTaskSurface(),
+            display_name: "FanRouter binding span"
+          },
+          workspaceId: "workspace-1",
+          strategy: "chat"
+        });
+
+        const graphExpansionCount = (result.diagnostics?.candidates ?? []).filter(
+          (c) => c.admission_planes.includes("graph_expansion")
+        ).length;
+        expect(graphExpansionCount).toBeLessThanOrEqual(PLANE_CAP);
+        // Sanity: we are not silently dropping below the cap due to other
+        // gates — the diagnostic surface confirms fan-in actually ran.
+        expect(result.diagnostics?.multi_seed_graph_fan_in?.distinct_seeds).toBe(1);
+      });
+
+      it("single entity seed records distinct_seeds=1 with degenerate distribution", async () => {
+        // invariant: even a single entity-derived seed activates the
+        // multi-seed code path (distinct_seeds = 1). p50 / p95 collapse
+        // to the per-seed count and dedup_collisions = 0.
+        const memories = [
+          createMemoryEntry({
+            object_id: "solo-anchor",
+            dimension: MemoryDimension.PROCEDURE,
+            scope_class: ScopeClass.PROJECT,
+            domain_tags: ["repo"],
+            content: "SoloRouter is unique."
+          }),
+          createMemoryEntry({
+            object_id: "solo-neighbor",
+            dimension: MemoryDimension.FACT,
+            scope_class: ScopeClass.PROJECT,
+            domain_tags: ["repo"],
+            content: "consumer of SoloRouter"
+          })
+        ];
+        const { dependencies } = createDependencies(memories);
+        const searchByKeywordWithinObjectIds = vi.fn(
+          async (_workspace: string, query: string) => {
+            if (query === "SoloRouter") {
+              return [{ object_id: "solo-anchor", normalized_rank: 0.9 }];
+            }
+            return [];
+          }
+        );
+        const findByMemoryId = vi.fn(async (memoryId: string) => {
+          if (memoryId === "solo-anchor") {
+            return [edgeStub("edge-solo", "solo-anchor", "solo-neighbor")];
+          }
+          return [];
+        });
+
+        const service = new RecallService({
+          ...dependencies,
+          memoryRepo: {
+            ...dependencies.memoryRepo,
+            searchByKeywordWithinObjectIds
+          },
+          graphExpansionPort: { findByMemoryId },
+          entityExtractionPort: {
+            extract: async () => [
+              Object.freeze({
+                surface: "SoloRouter",
+                normalized: "solorouter",
+                kind: "quoted" as const,
+                confidence: 1.0
+              })
+            ]
+          }
+        });
+
+        const result = await service.recall({
+          taskSurface: {
+            ...createTaskSurface(),
+            display_name: "SoloRouter binding scope"
+          },
+          workspaceId: "workspace-1",
+          strategy: "chat"
+        });
+
+        const fanIn = result.diagnostics?.multi_seed_graph_fan_in;
+        expect(fanIn).toBeDefined();
+        expect(fanIn?.distinct_seeds).toBe(1);
+        expect(fanIn?.dedup_collisions).toBe(0);
+        expect(fanIn?.candidates_per_seed_p50).toBe(1);
+        expect(fanIn?.candidates_per_seed_p95).toBe(1);
+      });
+    });
   });
 });
 

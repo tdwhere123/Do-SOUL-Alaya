@@ -476,9 +476,28 @@ export type RecallGraphExpansionPlaneCountPerEdgeType = Readonly<
   Record<RecallGraphExpansionTrackedEdgeType, number>
 >;
 
+// invariant: multi-seed fan-in is measured per addGraphExpansionCandidates
+// call. When the entity_seed plane contributes 2+ distinct entity-derived
+// seeds, each seed expands independently and the per-seed candidate counts
+// are aggregated here so Phase F holistic tuning can read distribution shape
+// without re-deriving from raw graph events.
+// see also: recall-service.ts addGraphExpansionCandidates
+export interface RecallMultiSeedGraphFanInDiagnostics {
+  readonly distinct_seeds: number;
+  readonly candidates_per_seed_p50: number;
+  readonly candidates_per_seed_p95: number;
+  readonly dedup_collisions: number;
+}
+
 export interface RecallGraphExpansionDiagnostics {
   readonly graph_expansion_plane_count_per_hop: RecallGraphExpansionPlaneCountPerHop;
   readonly graph_expansion_plane_count_per_edge_type: RecallGraphExpansionPlaneCountPerEdgeType;
+  // Optional only when no entity-derived seeds were fanned in (distinct_seeds
+  // would be 0 in that case). Absence preserves the legacy
+  // RecallGraphExpansionDiagnostics shape so external readers that ignore
+  // the field stay binary-compatible. see also: recall-service.ts
+  // addGraphExpansionCandidates multi-seed fan-in path.
+  readonly multi_seed_graph_fan_in?: Readonly<RecallMultiSeedGraphFanInDiagnostics>;
 }
 
 export interface RecallDiagnostics {
@@ -509,6 +528,11 @@ export interface RecallDiagnostics {
   readonly provider_degradation_reason: string | null;
   readonly graph_expansion_plane_count_per_hop: RecallGraphExpansionPlaneCountPerHop;
   readonly graph_expansion_plane_count_per_edge_type: RecallGraphExpansionPlaneCountPerEdgeType;
+  // Optional. Only present when the entity_seed plane drove 1+ entity-derived
+  // seeds into graph fan-in for this recall. Absence means the recall's
+  // graph_expansion plane was content/structural-seed driven only and has
+  // no per-seed distribution to summarise.
+  readonly multi_seed_graph_fan_in?: Readonly<RecallMultiSeedGraphFanInDiagnostics>;
   readonly fusion_breakdown: readonly Readonly<RecallFusionBreakdown>[];
   readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
   // Per-recall structural token instrument. Optional only for legacy callers

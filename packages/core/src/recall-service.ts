@@ -79,6 +79,7 @@ import type {
   RecallEmbeddingProviderStatus,
   RecallGraphExpansionDiagnostics,
   RecallGraphExpansionTrackedEdgeType,
+  RecallMultiSeedGraphFanInDiagnostics,
   RecallPathExpansionSourceDiagnostic,
   RecallResult,
   RecallServiceDependencies,
@@ -141,6 +142,10 @@ const SOURCE_PROXIMITY_STRUCTURAL_CARRY_MAX = 0.25;
 const STRONG_LEXICAL_DELIVERY_RANK = 0.85;
 const DYNAMIC_RECALL_EDGE_FANOUT = 12;
 const MAX_GRAPH_HOPS = 2;
+// anchor: shared cap for entity_seed fan-in. Reuses DYNAMIC_RECALL_PLANE_CAP
+// so the per-plane admit ceiling is the structural truth and the multi-seed
+// path inherits the same bound. see also: DYNAMIC_RECALL_PLANE_CAP
+const MULTI_SEED_GRAPH_FAN_OUT_CAP = DYNAMIC_RECALL_PLANE_CAP;
 const GRAPH_EXPANSION_TRACKED_EDGE_TYPES: readonly RecallGraphExpansionTrackedEdgeType[] = [
   "derives_from",
   "recalls",
@@ -251,6 +256,15 @@ interface SourceProximitySeedDraft {
 interface MutableGraphExpansionDiagnostics {
   readonly graph_expansion_plane_count_per_hop: [number, number];
   readonly graph_expansion_plane_count_per_edge_type: Record<RecallGraphExpansionTrackedEdgeType, number>;
+  // invariant: 0 = pooled-seed only; 1+ = entity_seed fan-in ran.
+  // see also: addGraphExpansionCandidates multi-seed branch
+  multi_seed_fan_in_distinct_seeds: number;
+  // anchor: dedup_collisions counts every collision (not unique colliders);
+  // max-score reduction keeps one candidate.
+  multi_seed_fan_in_dedup_collisions: number;
+  // anchor: per-seed candidate counts (post-dedup, pre-cap) consumed by
+  // freezeGraphExpansionDiagnostics to derive p50 / p95.
+  readonly multi_seed_fan_in_candidates_per_seed: number[];
 }
 
 interface GraphExpansionFrontierNode {
@@ -1425,33 +1439,144 @@ export class RecallService {
       return freezeGraphExpansionCandidatesResult(diagnostics, candidateSources);
     }
 
-    const draftSeeds = selectExpansionSeedDrafts(params.drafts).slice(0, DYNAMIC_RECALL_SEED_CAP);
-    const draftSeedIds = new Set(draftSeeds.map((seed) => seed.entry.object_id));
-    const extraSeedEntries: Readonly<MemoryEntry>[] = [];
+    // invariant: entity-derived seeds drive the per-seed fan-in path (Pool B)
+    // even when they were also admitted into drafts via the entity_seed plane.
+    // Filtering them out of the pooled draft seeds (Pool A) below avoids
+    // double-traversing the same anchor while keeping the legacy
+    // content/structural seed BFS intact for non-entity callers.
+    // see also: collectEntityDerivedSeeds (entity-derived seed source)
+    const entitySeedIdSet = new Set<string>();
+    const entitySeedEntries: Readonly<MemoryEntry>[] = [];
     for (const id of params.extraSeedMemoryIds ?? []) {
-      if (draftSeedIds.has(id)) {
+      if (entitySeedIdSet.has(id)) {
         continue;
       }
       const entry = params.byId.get(id);
-      if (entry !== undefined) {
-        extraSeedEntries.push(entry);
-        draftSeedIds.add(id);
+      if (entry === undefined) {
+        continue;
       }
-      if (extraSeedEntries.length + draftSeeds.length >= DYNAMIC_RECALL_SEED_CAP) {
+      entitySeedEntries.push(entry);
+      entitySeedIdSet.add(id);
+      if (entitySeedEntries.length >= DYNAMIC_RECALL_SEED_CAP) {
         break;
       }
     }
-    const seedEntries: readonly Readonly<MemoryEntry>[] = [
-      ...draftSeeds.map((seed) => seed.entry),
-      ...extraSeedEntries
-    ];
-    if (seedEntries.length === 0) {
+    const draftSeedsAll = selectExpansionSeedDrafts(params.drafts).slice(0, DYNAMIC_RECALL_SEED_CAP);
+    const draftSeeds = draftSeedsAll.filter(
+      (seed) => !entitySeedIdSet.has(seed.entry.object_id)
+    );
+
+    if (draftSeeds.length === 0 && entitySeedEntries.length === 0) {
       return freezeGraphExpansionCandidatesResult(diagnostics, candidateSources);
     }
 
-    const expandedIds = new Set<string>();
     const bestCandidates = new Map<string, GraphExpansionCandidateDraft>();
-    let frontier: readonly GraphExpansionFrontierNode[] = seedEntries.map((entry) => ({
+
+    // Pool A: content / structural draft seeds (entity-derived seeds run
+    // through Pool B instead) expand as a single pooled frontier. When no
+    // entity-derived seeds are present this is the only active branch and
+    // multi_seed_graph_fan_in stays undefined.
+    if (draftSeeds.length > 0) {
+      const draftSeedEntries = draftSeeds.map((seed) => seed.entry);
+      await this.expandGraphFrontier({
+        workspaceId: params.workspaceId,
+        byId: params.byId,
+        graphExpansionPort,
+        seedEntries: draftSeedEntries,
+        onCandidate: (candidate) => {
+          const current = bestCandidates.get(candidate.entry.object_id);
+          if (current === undefined || shouldReplaceGraphExpansionCandidate(candidate, current)) {
+            bestCandidates.set(candidate.entry.object_id, candidate);
+          }
+        }
+      });
+    }
+
+    // Pool B: entity-derived seeds fan in independently. Each seed runs its
+    // own BFS with a fresh expandedIds set so a seed reached early by one
+    // entity does not starve another entity's expansion. Per-seed candidate
+    // maps feed max-score dedup so a memory hit by two different entity
+    // paths records 1 dedup collision and keeps the higher-scoring draft.
+    if (entitySeedEntries.length > 0) {
+      diagnostics.multi_seed_fan_in_distinct_seeds = entitySeedEntries.length;
+      const perSeedCandidates: Map<string, GraphExpansionCandidateDraft>[] = [];
+      for (const seedEntry of entitySeedEntries) {
+        const seedMap = new Map<string, GraphExpansionCandidateDraft>();
+        await this.expandGraphFrontier({
+          workspaceId: params.workspaceId,
+          byId: params.byId,
+          graphExpansionPort,
+          seedEntries: [seedEntry],
+          onCandidate: (candidate) => {
+            const current = seedMap.get(candidate.entry.object_id);
+            if (current === undefined || shouldReplaceGraphExpansionCandidate(candidate, current)) {
+              seedMap.set(candidate.entry.object_id, candidate);
+            }
+          }
+        });
+        diagnostics.multi_seed_fan_in_candidates_per_seed.push(seedMap.size);
+        perSeedCandidates.push(seedMap);
+      }
+      // anchor: max-score reduction across per-seed maps. Same candidate
+      // reached by two distinct entity seeds increments dedup_collisions
+      // once per extra arrival and keeps the strongest draft via the
+      // shared shouldReplaceGraphExpansionCandidate ordering.
+      const fanInSeen = new Set<string>();
+      for (const seedMap of perSeedCandidates) {
+        for (const [neighborId, candidate] of seedMap) {
+          if (fanInSeen.has(neighborId)) {
+            diagnostics.multi_seed_fan_in_dedup_collisions += 1;
+          }
+          fanInSeen.add(neighborId);
+          const current = bestCandidates.get(neighborId);
+          if (current === undefined || shouldReplaceGraphExpansionCandidate(candidate, current)) {
+            bestCandidates.set(neighborId, candidate);
+          }
+        }
+      }
+    }
+
+    const admitted = [...bestCandidates.values()]
+      .sort(compareGraphExpansionCandidateDrafts)
+      .slice(0, MULTI_SEED_GRAPH_FAN_OUT_CAP);
+    for (const candidate of admitted) {
+      const admittedByGraphExpansion = params.addCandidate(
+        candidate.entry,
+        "graph_expansion",
+        candidate.score,
+        "graph_expansion"
+      );
+      if (!admittedByGraphExpansion) {
+        continue;
+      }
+      diagnostics.graph_expansion_plane_count_per_hop[candidate.hop - 1] += 1;
+      diagnostics.graph_expansion_plane_count_per_edge_type[candidate.edgeType] += 1;
+      candidateSources.set(candidate.entry.object_id, Object.freeze({
+        hop: candidate.hop,
+        edgeType: candidate.edgeType
+      }));
+    }
+
+    return freezeGraphExpansionCandidatesResult(diagnostics, candidateSources);
+  }
+
+  // anchor: single-source / pooled BFS expansion shared by both the pooled
+  // draft-seed path and the per-seed entity fan-in path. expandedIds is
+  // private to each invocation so a per-seed Pool B call cannot starve a
+  // sibling seed by absorbing its 1-hop neighbors first.
+  // see also: addGraphExpansionCandidates (Pool A / Pool B)
+  private async expandGraphFrontier(params: Readonly<{
+    readonly workspaceId: string;
+    readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
+    readonly graphExpansionPort: NonNullable<RecallServiceDependencies["graphExpansionPort"]>;
+    readonly seedEntries: readonly Readonly<MemoryEntry>[];
+    readonly onCandidate: (candidate: Readonly<GraphExpansionCandidateDraft>) => void;
+  }>): Promise<void> {
+    if (params.seedEntries.length === 0) {
+      return;
+    }
+    const expandedIds = new Set<string>();
+    let frontier: readonly GraphExpansionFrontierNode[] = params.seedEntries.map((entry) => ({
       memoryId: entry.object_id,
       pathScore: 1
     }));
@@ -1465,7 +1590,7 @@ export class RecallService {
         expandedIds.add(node.memoryId);
         let edges: readonly Readonly<MemoryGraphEdge>[];
         try {
-          edges = await graphExpansionPort.findByMemoryId(
+          edges = await params.graphExpansionPort.findByMemoryId(
             node.memoryId,
             params.workspaceId,
             GRAPH_EXPANSION_TRACKED_EDGE_TYPES
@@ -1514,16 +1639,12 @@ export class RecallService {
           if (candidateScore <= 0) {
             continue;
           }
-          const candidate = {
+          params.onCandidate({
             entry,
             score: candidateScore,
             hop: hop as 1 | 2,
             edgeType
-          };
-          const current = bestCandidates.get(neighborId);
-          if (current === undefined || shouldReplaceGraphExpansionCandidate(candidate, current)) {
-            bestCandidates.set(neighborId, candidate);
-          }
+          });
           if (hop < MAX_GRAPH_HOPS && !expandedIds.has(neighborId)) {
             const queued = nextFrontier.get(neighborId);
             if (queued === undefined || candidateScore > queued.pathScore) {
@@ -1537,29 +1658,6 @@ export class RecallService {
       }
       frontier = [...nextFrontier.values()].sort((a, b) => a.memoryId.localeCompare(b.memoryId));
     }
-
-    const admitted = [...bestCandidates.values()]
-      .sort(compareGraphExpansionCandidateDrafts)
-      .slice(0, DYNAMIC_RECALL_PLANE_CAP);
-    for (const candidate of admitted) {
-      const admittedByGraphExpansion = params.addCandidate(
-        candidate.entry,
-        "graph_expansion",
-        candidate.score,
-        "graph_expansion"
-      );
-      if (!admittedByGraphExpansion) {
-        continue;
-      }
-      diagnostics.graph_expansion_plane_count_per_hop[candidate.hop - 1] += 1;
-      diagnostics.graph_expansion_plane_count_per_edge_type[candidate.edgeType] += 1;
-      candidateSources.set(candidate.entry.object_id, Object.freeze({
-        hop: candidate.hop,
-        edgeType: candidate.edgeType
-      }));
-    }
-
-    return freezeGraphExpansionCandidatesResult(diagnostics, candidateSources);
   }
 
   // anchor: query-time entity FTS seeding. Returns the memory ids of every
@@ -1991,8 +2089,11 @@ export class RecallService {
         next.graphExpansionScores,
         nextCandidateIds
       ),
-      graphExpansionDiagnostics:
-        summarizeGraphExpansionCandidateSources(graphExpansionCandidateSources),
+      graphExpansionDiagnostics: mergeGraphExpansionDiagnosticsAcrossCascade({
+        sources: graphExpansionCandidateSources,
+        currentFanIn: current.graphExpansionDiagnostics.multi_seed_graph_fan_in,
+        nextFanIn: next.graphExpansionDiagnostics.multi_seed_graph_fan_in
+      }),
       graphExpansionCandidateSources,
       entitySeedScores: Object.freeze({
         ...current.entitySeedScores,
@@ -3568,6 +3669,9 @@ function buildRecallDiagnostics(params: Readonly<{
       params.graphExpansionDiagnostics.graph_expansion_plane_count_per_hop,
     graph_expansion_plane_count_per_edge_type:
       params.graphExpansionDiagnostics.graph_expansion_plane_count_per_edge_type,
+    ...(params.graphExpansionDiagnostics.multi_seed_graph_fan_in === undefined
+      ? {}
+      : { multi_seed_graph_fan_in: params.graphExpansionDiagnostics.multi_seed_graph_fan_in }),
     fusion_breakdown: Object.freeze(
       params.candidates.map((candidate) => Object.freeze({
         candidate_key: candidate.candidate_key,
@@ -4274,7 +4378,10 @@ function createMutableGraphExpansionDiagnostics(): MutableGraphExpansionDiagnost
       derives_from: 0,
       recalls: 0,
       supports: 0
-    }
+    },
+    multi_seed_fan_in_distinct_seeds: 0,
+    multi_seed_fan_in_dedup_collisions: 0,
+    multi_seed_fan_in_candidates_per_seed: []
   };
 }
 
@@ -4282,10 +4389,30 @@ function createEmptyGraphExpansionDiagnostics(): Readonly<RecallGraphExpansionDi
   return freezeGraphExpansionDiagnostics(createMutableGraphExpansionDiagnostics());
 }
 
+// anchor: percentile-of-sample helper used only by multi_seed_graph_fan_in
+// diagnostics. Linear interpolation between adjacent ranks, matches
+// numpy.percentile(..., method='linear') for stable cross-language reads.
+function percentileOfSorted(samples: readonly number[], percentile: number): number {
+  if (samples.length === 0) {
+    return 0;
+  }
+  if (samples.length === 1) {
+    return samples[0];
+  }
+  const rank = ((samples.length - 1) * percentile) / 100;
+  const lower = Math.floor(rank);
+  const upper = Math.ceil(rank);
+  if (lower === upper) {
+    return samples[lower];
+  }
+  const weight = rank - lower;
+  return samples[lower] * (1 - weight) + samples[upper] * weight;
+}
+
 function freezeGraphExpansionDiagnostics(
   diagnostics: Readonly<MutableGraphExpansionDiagnostics>
 ): Readonly<RecallGraphExpansionDiagnostics> {
-  return Object.freeze({
+  const base = {
     graph_expansion_plane_count_per_hop: Object.freeze([
       diagnostics.graph_expansion_plane_count_per_hop[0],
       diagnostics.graph_expansion_plane_count_per_hop[1]
@@ -4295,6 +4422,20 @@ function freezeGraphExpansionDiagnostics(
       recalls: diagnostics.graph_expansion_plane_count_per_edge_type.recalls,
       supports: diagnostics.graph_expansion_plane_count_per_edge_type.supports
     })
+  };
+  if (diagnostics.multi_seed_fan_in_distinct_seeds === 0) {
+    return Object.freeze(base);
+  }
+  const sortedCounts = [...diagnostics.multi_seed_fan_in_candidates_per_seed].sort((a, b) => a - b);
+  const fanIn: RecallMultiSeedGraphFanInDiagnostics = {
+    distinct_seeds: diagnostics.multi_seed_fan_in_distinct_seeds,
+    candidates_per_seed_p50: percentileOfSorted(sortedCounts, 50),
+    candidates_per_seed_p95: percentileOfSorted(sortedCounts, 95),
+    dedup_collisions: diagnostics.multi_seed_fan_in_dedup_collisions
+  };
+  return Object.freeze({
+    ...base,
+    multi_seed_graph_fan_in: Object.freeze(fanIn)
   });
 }
 
@@ -4347,6 +4488,42 @@ function summarizeGraphExpansionCandidateSources(
     diagnostics.graph_expansion_plane_count_per_edge_type[source.edgeType] += 1;
   }
   return freezeGraphExpansionDiagnostics(diagnostics);
+}
+
+// anchor: cascade merge for graph_expansion diagnostics. Re-derives hop /
+// edge_type counts from candidate sources so the merged surface stays
+// consistent with the kept candidates. multi_seed_graph_fan_in is not
+// re-derivable from sources (per-seed BFS history is local to each
+// addGraphExpansionCandidates call) so the merger prefers the cascade tier
+// with more distinct_seeds; when only one tier carries fan-in stats, that
+// tier wins. see also: mergeCoarseFilters
+function mergeGraphExpansionDiagnosticsAcrossCascade(params: Readonly<{
+  readonly sources: ReadonlyMap<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>;
+  readonly currentFanIn?: Readonly<RecallMultiSeedGraphFanInDiagnostics>;
+  readonly nextFanIn?: Readonly<RecallMultiSeedGraphFanInDiagnostics>;
+}>): Readonly<RecallGraphExpansionDiagnostics> {
+  const summary = summarizeGraphExpansionCandidateSources(params.sources);
+  const chosenFanIn = chooseStrongerFanIn(params.currentFanIn, params.nextFanIn);
+  if (chosenFanIn === undefined) {
+    return summary;
+  }
+  return Object.freeze({
+    ...summary,
+    multi_seed_graph_fan_in: chosenFanIn
+  });
+}
+
+function chooseStrongerFanIn(
+  left: Readonly<RecallMultiSeedGraphFanInDiagnostics> | undefined,
+  right: Readonly<RecallMultiSeedGraphFanInDiagnostics> | undefined
+): Readonly<RecallMultiSeedGraphFanInDiagnostics> | undefined {
+  if (left === undefined) {
+    return right;
+  }
+  if (right === undefined) {
+    return left;
+  }
+  return right.distinct_seeds > left.distinct_seeds ? right : left;
 }
 
 function shouldReplaceGraphExpansionCandidate(
