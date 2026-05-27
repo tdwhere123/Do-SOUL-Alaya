@@ -213,11 +213,19 @@ const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>
 // edits visible to recall ordering without waiting for retention decay
 // or activation rescore. Final score stays clamp01.
 const CONFIDENCE_DIRECT_WEIGHT = 0.08;
-// invariant: prior-only activation/confidence MUST NOT make weak query
-// evidence look answer-confident. Doubles as the gate threshold for
-// shouldCalibrateWeakEvidence: query-grounded evidence at or above this
-// floor is treated as sufficient and the score shape is preserved.
-const WEAK_EVIDENCE_PRIOR_WEIGHT_FLOOR = 0.72;
+// invariant: prior dampening floor — minimum weight applied to the
+// prior signal when calibrating weak-evidence candidates so that
+// prior-only activation/confidence MUST NOT make weak query evidence
+// look answer-confident. Independent from the calibration gate
+// threshold so Phase F holistic tuning can adjust each purpose
+// without silently changing the other. See round-2 finding I2.
+const WEAK_EVIDENCE_PRIOR_DAMPENING_FLOOR = 0.72;
+// invariant: calibration gate threshold — calibration only fires when
+// queryEvidenceCalibrationStrength is BELOW this floor; at-or-above
+// evidence is treated as sufficient and the score shape is preserved.
+// Matches WEAK_EVIDENCE_PRIOR_DAMPENING_FLOOR by initial design intent
+// but is intentionally a separate constant (round-2 finding I2).
+const WEAK_EVIDENCE_CALIBRATION_GATE = 0.72;
 
 interface CoarseCandidateDraft {
   readonly entry: Readonly<MemoryEntry>;
@@ -2935,20 +2943,20 @@ export class RecallService {
       embeddingSimilarityFactor
     );
     // invariant: calibration only fires when query-grounded evidence is
-    // BELOW WEAK_EVIDENCE_PRIOR_WEIGHT_FLOOR. At-or-above the floor evidence
+    // BELOW WEAK_EVIDENCE_CALIBRATION_GATE. At-or-above the gate evidence
     // is treated as sufficient and the score shape is preserved. A prior-side
     // signal (plasticity / confidence) must also be present; without one
     // there is no prior term to dampen.
     const shouldCalibrateWeakEvidence =
-      queryEvidenceCalibrationStrength < WEAK_EVIDENCE_PRIOR_WEIGHT_FLOOR &&
+      queryEvidenceCalibrationStrength < WEAK_EVIDENCE_CALIBRATION_GATE &&
       (plasticityFactor > 0 || (confidenceFactor > 0 && queryEvidenceCalibrationStrength > 0));
     const evidenceContributionCalibration = shouldCalibrateWeakEvidence
       ? queryEvidenceCalibrationStrength
       : 1;
     const priorEvidenceCalibration =
       shouldCalibrateWeakEvidence
-        ? WEAK_EVIDENCE_PRIOR_WEIGHT_FLOOR +
-          (1 - WEAK_EVIDENCE_PRIOR_WEIGHT_FLOOR) * queryEvidenceCalibrationStrength
+        ? WEAK_EVIDENCE_PRIOR_DAMPENING_FLOOR +
+          (1 - WEAK_EVIDENCE_PRIOR_DAMPENING_FLOOR) * queryEvidenceCalibrationStrength
         : 1;
     const calibratedRelevanceFactor = relevanceFactor * evidenceContributionCalibration;
     const effectiveRelevanceWeight =

@@ -620,7 +620,7 @@ describe("RecallService 8-factor scoring", () => {
     );
     // invariant: this test exercises the WEAK-evidence arbitration-loser
     // path. normalized_rank must keep content_relevance below
-    // WEAK_EVIDENCE_PRIOR_WEIGHT_FLOOR (0.72) so calibration fires;
+    // WEAK_EVIDENCE_CALIBRATION_GATE (0.72) so calibration fires;
     // otherwise the loser rides priors past the false-confident floor
     // even with conflict_penalty applied.
     searchByKeyword.mockResolvedValue([{ object_id: "losing-claim", normalized_rank: 0.5 }]);
@@ -667,7 +667,7 @@ describe("RecallService 8-factor scoring", () => {
   });
 
   // invariant: shouldCalibrateWeakEvidence must NOT fire when query-grounded
-  // evidence sits at or above WEAK_EVIDENCE_PRIOR_WEIGHT_FLOOR. Strong-
+  // evidence sits at or above WEAK_EVIDENCE_CALIBRATION_GATE. Strong-
   // evidence queries keep the un-calibrated score shape; full-weak queries
   // with no prior signal do not enter the calibration branch at all.
   it("does not reshape strong query-grounded evidence below saturation", async () => {
@@ -684,7 +684,7 @@ describe("RecallService 8-factor scoring", () => {
       {},
       {
         // graph_support count 3 → normalizeGraphSupport returns 1.0 (above
-        // WEAK_EVIDENCE_PRIOR_WEIGHT_FLOOR). queryEvidenceCalibrationStrength
+        // WEAK_EVIDENCE_CALIBRATION_GATE). queryEvidenceCalibrationStrength
         // = max(relevance, graph_support, embedding) ≥ 1.0, so the gate
         // condition `< 0.72` is false.
         graphSupportByMemoryId: { "strong-multi-evidence": 3 }
