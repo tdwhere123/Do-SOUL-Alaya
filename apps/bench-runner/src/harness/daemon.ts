@@ -443,7 +443,44 @@ export interface BenchDaemonHandle {
    * see also: packages/eval/src/edge-proposal-kpi.ts
    */
   queryEdgeProposalKpiRows(): Promise<readonly EdgeProposalKpiEventRow[]>;
+  /**
+   * @anchor attachWorkspace — bind the daemon's active workspace/run pair.
+   *
+   * The bench daemon is long-running across a full bench; per-question
+   * isolation is achieved by switching workspaces, not restarting the
+   * daemon. Returned handle exposes the same per-workspace method surface
+   * (recall, propose*, warm*, query*) as the daemon handle, bound to the
+   * workspace it was attached for. Call detach() before binding another
+   * workspace.
+   *
+   * see also: packages/core/src/recall-service.ts (workspace_id filter)
+   */
+  attachWorkspace(input: {
+    readonly workspaceId: string;
+    readonly runId: string;
+  }): Promise<BenchWorkspaceHandle>;
   shutdown(): Promise<void>;
+}
+
+/**
+ * @anchor BenchWorkspaceHandle — per-question / per-conversation workspace
+ * scoped view of an already-running bench daemon. Calls route through the
+ * same daemon resources but read activeContext for workspace_id / run_id.
+ */
+export interface BenchWorkspaceHandle {
+  readonly workspaceId: string;
+  readonly runId: string;
+  recall: BenchDaemonHandle["recall"];
+  warmEmbeddingCache: BenchDaemonHandle["warmEmbeddingCache"];
+  warmQueryEmbeddingCache: BenchDaemonHandle["warmQueryEmbeddingCache"];
+  reportContextUsage: BenchDaemonHandle["reportContextUsage"];
+  proposeMemory: BenchDaemonHandle["proposeMemory"];
+  proposeMemoryFromSignal: BenchDaemonHandle["proposeMemoryFromSignal"];
+  proposeMemoriesFromCompileSignals: BenchDaemonHandle["proposeMemoriesFromCompileSignals"];
+  proposeSynthesis: BenchDaemonHandle["proposeSynthesis"];
+  queryTokenMetrics: BenchDaemonHandle["queryTokenMetrics"];
+  queryEdgeProposalKpiRows: BenchDaemonHandle["queryEdgeProposalKpiRows"];
+  detach(): Promise<void>;
 }
 
 const MANAGED_ENV_KEYS = [
@@ -477,8 +514,17 @@ let activeBenchDaemonCount = 0;
 export async function startBenchDaemon(
   opts: BenchDaemonOptions = {}
 ): Promise<BenchDaemonHandle> {
-  const workspaceId = opts.workspaceId ?? "bench-workspace-1";
-  const runId = opts.runId ?? "bench-run-1";
+  const defaultWorkspaceId = opts.workspaceId ?? "bench-workspace-1";
+  const defaultRunId = opts.runId ?? "bench-run-1";
+  // @anchor bench-active-context: the workspace/run identity bench tool
+  // calls bind. Per-call workspace switching (attachWorkspace) mutates the
+  // same cell so the MCP contextProvider, recall(), proposeMemoryFromSignal()
+  // etc all observe the current workspace without re-emitting the daemon.
+  const activeContext: { workspaceId: string; runId: string } = {
+    workspaceId: defaultWorkspaceId,
+    runId: defaultRunId
+  };
+  const knownWorkspaces = new Set<string>([defaultWorkspaceId]);
   const embeddingMode = opts.embeddingMode ?? "disabled";
   const embeddingProviderKind: BenchEmbeddingProviderKind =
     opts.embeddingProviderKind ?? DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND;
@@ -597,8 +643,8 @@ export async function startBenchDaemon(
     server = createAlayaMcpServer({
       memoryToolHandler: runtime.services.mcpMemoryToolHandler,
       contextProvider: () => ({
-        workspaceId,
-        runId,
+        workspaceId: activeContext.workspaceId,
+        runId: activeContext.runId,
         agentTarget: "bench-runner",
         sessionId: `bench-session-${Date.now()}`,
         surfaceId: "bench"
@@ -622,7 +668,7 @@ export async function startBenchDaemon(
       JSON.stringify({
         db_path: join(dataDir, "alaya.db"),
         embedding_enabled: embeddingMode === "env",
-        default_workspace: workspaceId,
+        default_workspace: defaultWorkspaceId,
         worktree_enabled: false
       }),
       "--json"
@@ -644,7 +690,7 @@ export async function startBenchDaemon(
     // resolves to existing FK rows.
     // see also: apps/core-daemon/src/__tests__/phase6-agent-use-protocol.test.ts
     //   workspace + run seeding fixture using the same repos.
-    await seedBenchWorkspaceAndRun(dataDir, workspaceId, runId);
+    await seedBenchWorkspaceAndRun(dataDir, defaultWorkspaceId, defaultRunId);
     // Apply bench-only SQLite tuning. The DB has now been opened by install +
     // seedBenchWorkspaceAndRun, so initDatabase's cache returns the daemon's
     // live connection. Production daemon (apps/core-daemon) never calls this.
@@ -741,9 +787,9 @@ export async function startBenchDaemon(
     };
     const recallResult = await diagnosticRuntime.services.recallService.recall({
       taskSurface,
-      workspaceId,
+      workspaceId: activeContext.workspaceId,
       strategy: "chat",
-      runId,
+      runId: activeContext.runId,
       policyOverride: policy
     });
     // usedTokens (the lens event's total_token_estimate) sums only the
@@ -774,8 +820,8 @@ export async function startBenchDaemon(
     await diagnosticRuntime.services.trustStateRecorder.recordDelivery({
       delivery_id: deliveryId,
       agent_target: "bench-runner",
-      workspace_id: workspaceId,
-      run_id: runId,
+      workspace_id: activeContext.workspaceId,
+      run_id: activeContext.runId,
       delivered_object_ids: [...new Set(deliveredObjects.map((object) => object.object_id))],
       delivered_objects: [...new Map(
         deliveredObjects.map((object) => [`${object.object_kind}\0${object.object_id}`, object])
@@ -799,8 +845,8 @@ export async function startBenchDaemon(
       taskSurfaceRef: taskSurface.runtime_id,
       lensEntryCount: results.length,
       totalTokenEstimate: usedTokens,
-      runId,
-      workspaceId
+      runId: activeContext.runId,
+      workspaceId: activeContext.workspaceId
     });
     const response = SoulMemorySearchResponseSchema.parse({
       delivery_id: deliveryId,
@@ -885,7 +931,7 @@ export async function startBenchDaemon(
     let lastPassError: string | null = null;
     let summary = await readEmbeddingWarmupSummary({
       dataDir,
-      workspaceId,
+      workspaceId: activeContext.workspaceId,
       objectIds: uniqueObjectIds,
       providerKind: embeddingProviderKind,
       modelId,
@@ -903,7 +949,7 @@ export async function startBenchDaemon(
       passCount++;
       summary = await readEmbeddingWarmupSummary({
         dataDir,
-        workspaceId,
+        workspaceId: activeContext.workspaceId,
         objectIds: uniqueObjectIds,
         providerKind: embeddingProviderKind,
         modelId,
@@ -946,8 +992,8 @@ export async function startBenchDaemon(
       throw new Error("embedding query warm cache unavailable: embedding recall service is not configured");
     }
     const summary = await embeddingRecallService.warmQueryEmbeddings({
-      workspaceId,
-      runId,
+      workspaceId: activeContext.workspaceId,
+      runId: activeContext.runId,
       queryTexts
     });
     return summary;
@@ -1305,8 +1351,8 @@ export async function startBenchDaemon(
       const signal: CandidateMemorySignal = normalizeSchemaGroundedSignal(
         CandidateMemorySignalSchema.parse({
           signal_id: `bench_signal_${randomUUID().replace(/-/gu, "")}`,
-          workspace_id: workspaceId,
-          run_id: runId,
+          workspace_id: activeContext.workspaceId,
+          run_id: activeContext.runId,
           surface_id: null,
           source: SignalSource.GARDEN_COMPILE,
           signal_kind: input.signalKind,
@@ -1371,8 +1417,8 @@ export async function startBenchDaemon(
       summary: input.summary,
       evidence_refs: [...input.evidenceRefs],
       source_memory_refs: [],
-      workspace_id: workspaceId,
-      run_id: runId
+      workspace_id: activeContext.workspaceId,
+      run_id: activeContext.runId
     });
     return { synthesisId: synthesis.object_id };
   }
@@ -1390,11 +1436,63 @@ export async function startBenchDaemon(
     }
   }
 
+  // @anchor bench-workspace-attach: bind activeContext to a workspace/run
+  // pair for subsequent tool calls. FK seed for signals.workspace_id /
+  // signals.run_id (migration 003-signals.sql) happens once per workspaceId.
+  // invariant: only one workspace is bound to activeContext at a time.
+  // see also: seedBenchWorkspaceAndRun, seedBenchRunOnly, BenchWorkspaceHandle
+  async function attachWorkspace(
+    input: { readonly workspaceId: string; readonly runId: string }
+  ): Promise<BenchWorkspaceHandle> {
+    if (!knownWorkspaces.has(input.workspaceId)) {
+      await seedBenchWorkspaceAndRun(dataDir, input.workspaceId, input.runId);
+      knownWorkspaces.add(input.workspaceId);
+    } else {
+      await seedBenchRunOnly(dataDir, input.workspaceId, input.runId);
+    }
+    const previous: { workspaceId: string; runId: string } = {
+      workspaceId: activeContext.workspaceId,
+      runId: activeContext.runId
+    };
+    activeContext.workspaceId = input.workspaceId;
+    activeContext.runId = input.runId;
+    let detached = false;
+    return {
+      workspaceId: input.workspaceId,
+      runId: input.runId,
+      recall,
+      warmEmbeddingCache,
+      warmQueryEmbeddingCache,
+      reportContextUsage,
+      proposeMemory,
+      proposeMemoryFromSignal,
+      proposeMemoriesFromCompileSignals,
+      proposeSynthesis,
+      queryTokenMetrics: () => queryTokenMetrics(dataDir),
+      queryEdgeProposalKpiRows: () => queryEdgeProposalKpiRows(dataDir),
+      detach: async () => {
+        if (detached) return;
+        detached = true;
+        if (
+          activeContext.workspaceId === input.workspaceId &&
+          activeContext.runId === input.runId
+        ) {
+          activeContext.workspaceId = previous.workspaceId;
+          activeContext.runId = previous.runId;
+        }
+      }
+    };
+  }
+
   return {
     runtime: activeRuntime,
     mcpClient: activeMcpClient,
-    workspaceId,
-    runId,
+    get workspaceId() {
+      return activeContext.workspaceId;
+    },
+    get runId() {
+      return activeContext.runId;
+    },
     dataDir,
     dispatchCli: activeDispatchCli,
     recall,
@@ -1407,6 +1505,7 @@ export async function startBenchDaemon(
     proposeSynthesis,
     queryTokenMetrics: () => queryTokenMetrics(dataDir),
     queryEdgeProposalKpiRows: () => queryEdgeProposalKpiRows(dataDir),
+    attachWorkspace,
     shutdown
   };
 }
@@ -1982,6 +2081,29 @@ async function seedBenchWorkspaceAndRun(
     default_engine_binding: null,
     workspace_state: WorkspaceState.ACTIVE
   });
+  runRepo.create({
+    run_id: runId,
+    workspace_id: workspaceId,
+    title: `bench run ${runId}`,
+    goal: null,
+    run_mode: RunMode.CHAT,
+    engine_binding_id: null,
+    engine_class: null,
+    run_state: RunState.IDLE,
+    current_surface_id: null
+  });
+}
+
+// @anchor seedBenchRunOnly — extend an already-created workspace with a
+// fresh run row; bench attachWorkspace path when the workspaceId is reused
+// across rebinds. see also: seedBenchWorkspaceAndRun
+async function seedBenchRunOnly(
+  dataDir: string,
+  workspaceId: string,
+  runId: string
+): Promise<void> {
+  const db = initDatabase({ filename: join(dataDir, "alaya.db") });
+  const runRepo = new SqliteRunRepo(db);
   runRepo.create({
     run_id: runId,
     workspace_id: workspaceId,
