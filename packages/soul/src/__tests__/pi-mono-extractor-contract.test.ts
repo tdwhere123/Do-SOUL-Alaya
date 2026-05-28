@@ -27,7 +27,11 @@ describe("pi-mono-extractor-contract", () => {
       })
     ).resolves.toEqual({
       rawJson: '{"signals":[]}',
-      extractorMeta: { recoveryKind: "none", retryCount: 0 }
+      extractorMeta: {
+        recoveryKind: "none",
+        retryCount: 0,
+        retryClassification: "success_first_try"
+      }
     });
 
     const [seenModel, context, options] = completeImpl.mock.calls[0] as [
@@ -163,7 +167,11 @@ describe("pi-mono-extractor JSON recovery (Phase A.3)", () => {
     });
     const result = await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
     expect(JSON.parse(result.rawJson)).toEqual({ signals: [] });
-    expect(result.extractorMeta).toEqual({ recoveryKind: "markdown_strip", retryCount: 0 });
+    expect(result.extractorMeta).toEqual({
+      recoveryKind: "markdown_strip",
+      retryCount: 0,
+      retryClassification: "success_first_try"
+    });
   });
 
   it("strips trailing prose after a balanced top-level object", async () => {
@@ -178,7 +186,11 @@ describe("pi-mono-extractor JSON recovery (Phase A.3)", () => {
     });
     const result = await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
     expect(JSON.parse(result.rawJson)).toEqual({ signals: [] });
-    expect(result.extractorMeta).toEqual({ recoveryKind: "trailing_strip", retryCount: 0 });
+    expect(result.extractorMeta).toEqual({
+      recoveryKind: "trailing_strip",
+      retryCount: 0,
+      retryClassification: "success_first_try"
+    });
   });
 
   it("closes unbalanced trailing brackets on a truncated envelope", async () => {
@@ -195,7 +207,11 @@ describe("pi-mono-extractor JSON recovery (Phase A.3)", () => {
     const result = await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
     const parsed = JSON.parse(result.rawJson) as { signals: unknown[] };
     expect(parsed.signals).toHaveLength(1);
-    expect(result.extractorMeta).toEqual({ recoveryKind: "balanced_close", retryCount: 0 });
+    expect(result.extractorMeta).toEqual({
+      recoveryKind: "balanced_close",
+      retryCount: 0,
+      retryClassification: "success_first_try"
+    });
   });
 
   it("returns recoveryKind=none when the body is already strict JSON", async () => {
@@ -206,10 +222,14 @@ describe("pi-mono-extractor JSON recovery (Phase A.3)", () => {
       getModel: vi.fn(() => createModel())
     });
     const result = await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
-    expect(result.extractorMeta).toEqual({ recoveryKind: "none", retryCount: 0 });
+    expect(result.extractorMeta).toEqual({
+      recoveryKind: "none",
+      retryCount: 0,
+      retryClassification: "success_first_try"
+    });
   });
 
-  it("throws invalid_json when no recovery strategy salvages the body", async () => {
+  it("throws invalid_json with failure_max_retries after the full retry budget", async () => {
     const extractor = createPiMonoExtractor({
       apiKey: "sk-test",
       model: "gpt-4.1-mini",
@@ -218,8 +238,16 @@ describe("pi-mono-extractor JSON recovery (Phase A.3)", () => {
       sleep: vi.fn(async () => undefined),
       random: vi.fn(() => 0.5)
     });
+    // Budget is 3 retries (4 total attempts) — retryCount on the thrown
+    // error reflects the FINAL failed attempt's index. retryClassification
+    // labels the terminal branch.
     await expect(extractor.extract({ systemPrompt: "s", userPrompt: "t" }))
-      .rejects.toMatchObject({ name: "SignalExtractorError", kind: "invalid_json", retryCount: 1 } satisfies Partial<SignalExtractorError>);
+      .rejects.toMatchObject({
+        name: "SignalExtractorError",
+        kind: "invalid_json",
+        retryCount: 3,
+        retryClassification: "failure_max_retries"
+      } satisfies Partial<SignalExtractorError>);
   });
 });
 
@@ -245,14 +273,19 @@ describe("pi-mono-extractor retry-with-jitter (Phase A.3)", () => {
     });
     const result = await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
     expect(JSON.parse(result.rawJson)).toEqual({ signals: [] });
-    expect(result.extractorMeta).toEqual({ recoveryKind: "none", retryCount: 1 });
+    expect(result.extractorMeta).toEqual({
+      recoveryKind: "none",
+      retryCount: 1,
+      retryClassification: "success_after_retry"
+    });
     expect(complete).toHaveBeenCalledTimes(2);
     expect(sleep).toHaveBeenCalledTimes(1);
+    // Attempt 1 backoff window: 250-500ms (base) per computeJitterMs.
     expect(sleep.mock.calls[0]![0]).toBeGreaterThanOrEqual(250);
-    expect(sleep.mock.calls[0]![0]).toBeLessThanOrEqual(750);
+    expect(sleep.mock.calls[0]![0]).toBeLessThanOrEqual(500);
   });
 
-  it("retries once on HTTP 5xx then surfaces typed error with retryCount=1 after a second failure", async () => {
+  it("retries up to the budget on HTTP 5xx then surfaces failure_max_retries", async () => {
     const sleep = vi.fn(async () => undefined);
     const complete = vi.fn(async () => {
       const err = new Error("garden extraction HTTP 502");
@@ -268,12 +301,18 @@ describe("pi-mono-extractor retry-with-jitter (Phase A.3)", () => {
       random: vi.fn(() => 0)
     });
     await expect(extractor.extract({ systemPrompt: "s", userPrompt: "t" }))
-      .rejects.toMatchObject({ name: "SignalExtractorError", kind: "transport_failure", retryCount: 1 } satisfies Partial<SignalExtractorError>);
-    expect(complete).toHaveBeenCalledTimes(2);
-    expect(sleep).toHaveBeenCalledTimes(1);
+      .rejects.toMatchObject({
+        name: "SignalExtractorError",
+        kind: "transport_failure",
+        retryCount: 3,
+        retryClassification: "failure_max_retries"
+      } satisfies Partial<SignalExtractorError>);
+    // Budget = 1 first try + 3 retries = 4 attempts.
+    expect(complete).toHaveBeenCalledTimes(4);
+    expect(sleep).toHaveBeenCalledTimes(3);
   });
 
-  it("retries once on HTTP 429 (rate limit)", async () => {
+  it("retries on HTTP 429 (rate limit) and surfaces success_after_retry", async () => {
     const sleep = vi.fn(async () => undefined);
     const complete = vi
       .fn<NonNullable<Parameters<typeof createPiMonoExtractor>[0]["complete"]>>()
@@ -296,7 +335,7 @@ describe("pi-mono-extractor retry-with-jitter (Phase A.3)", () => {
     expect(complete).toHaveBeenCalledTimes(2);
   });
 
-  it("does NOT retry on HTTP 4xx other than 429 (auth/quota)", async () => {
+  it("does NOT retry on HTTP 4xx other than 429 (auth/quota) and labels failure_non_retryable_4xx", async () => {
     const sleep = vi.fn(async () => undefined);
     const complete = vi.fn(async () => {
       const err = new Error("HTTP 403 forbidden");
@@ -312,12 +351,19 @@ describe("pi-mono-extractor retry-with-jitter (Phase A.3)", () => {
       random: vi.fn(() => 0.5)
     });
     await expect(extractor.extract({ systemPrompt: "s", userPrompt: "t" }))
-      .rejects.toMatchObject({ name: "SignalExtractorError", kind: "transport_failure", retryCount: 0 } satisfies Partial<SignalExtractorError>);
+      .rejects.toMatchObject({
+        name: "SignalExtractorError",
+        kind: "transport_failure",
+        retryCount: 0,
+        retryClassification: "failure_non_retryable_4xx"
+      } satisfies Partial<SignalExtractorError>);
     expect(complete).toHaveBeenCalledTimes(1);
     expect(sleep).not.toHaveBeenCalled();
   });
 
-  it("does NOT retry on timeout (caller already chose the budget)", async () => {
+  it("retries timeouts exactly once before surfacing failure_timeout", async () => {
+    // Timeouts spend a separate (smaller) budget so a chronic slow path
+    // cannot 4x the bench wall time — at most ONE retry on timeout.
     const sleep = vi.fn(async () => undefined);
     const complete = vi.fn(async () => {
       throw new Error("request timed out");
@@ -331,12 +377,16 @@ describe("pi-mono-extractor retry-with-jitter (Phase A.3)", () => {
       random: vi.fn(() => 0.5)
     });
     await expect(extractor.extract({ systemPrompt: "s", userPrompt: "t", timeoutMs: 10 }))
-      .rejects.toMatchObject({ name: "SignalExtractorError", kind: "timeout", retryCount: 0 } satisfies Partial<SignalExtractorError>);
-    expect(complete).toHaveBeenCalledTimes(1);
-    expect(sleep).not.toHaveBeenCalled();
+      .rejects.toMatchObject({
+        name: "SignalExtractorError",
+        kind: "timeout",
+        retryClassification: "failure_timeout"
+      } satisfies Partial<SignalExtractorError>);
+    expect(complete).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledTimes(1);
   });
 
-  it("does NOT spend a second retry — caps at one extra attempt", async () => {
+  it("caps the retry budget at MAX_EXTRACTOR_RETRIES extra attempts", async () => {
     const sleep = vi.fn(async () => undefined);
     const complete = vi.fn(async () => {
       const err = new Error("HTTP 503");
@@ -352,9 +402,91 @@ describe("pi-mono-extractor retry-with-jitter (Phase A.3)", () => {
       random: vi.fn(() => 0.5)
     });
     await expect(extractor.extract({ systemPrompt: "s", userPrompt: "t" }))
-      .rejects.toMatchObject({ name: "SignalExtractorError", kind: "transport_failure", retryCount: 1 } satisfies Partial<SignalExtractorError>);
-    // 2 = first attempt + one retry. Never 3.
-    expect(complete).toHaveBeenCalledTimes(2);
+      .rejects.toMatchObject({
+        name: "SignalExtractorError",
+        kind: "transport_failure",
+        retryCount: 3,
+        retryClassification: "failure_max_retries"
+      } satisfies Partial<SignalExtractorError>);
+    // 4 = first attempt + 3 retries. Never 5.
+    expect(complete).toHaveBeenCalledTimes(4);
+  });
+
+  // invariant: bumping the retry budget to 3 with exponential jittered
+  // backoff is the v0.3.11 root-cause fix for the silent-fallback gap
+  // (yunwu.ai gpt-4.1-mini empty-text storms outlasting a 1-retry policy).
+  // The 5xx-then-success path must surface success_after_retry on the FINAL
+  // (3rd) attempt, with retryCount=3 visible in the meta — the dump
+  // consumer (compute-provider.dumpInvalidResponseDiagnostic) uses that
+  // count to attribute partial recovery vs chronic failure.
+  it("retries 3 times on transient 5xx then succeeds with retryCount=3", async () => {
+    const sleep = vi.fn(async () => undefined);
+    const complete = vi
+      .fn<NonNullable<Parameters<typeof createPiMonoExtractor>[0]["complete"]>>()
+      .mockImplementationOnce(async () => {
+        const err = new Error("HTTP 503 svc unavailable");
+        (err as { status?: number }).status = 503;
+        throw err;
+      })
+      .mockImplementationOnce(async () => {
+        const err = new Error("HTTP 503 svc unavailable");
+        (err as { status?: number }).status = 503;
+        throw err;
+      })
+      .mockImplementationOnce(async () => {
+        const err = new Error("HTTP 503 svc unavailable");
+        (err as { status?: number }).status = 503;
+        throw err;
+      })
+      .mockImplementationOnce(async () => createAssistantMessage('{"signals":[]}'));
+    const extractor = createPiMonoExtractor({
+      apiKey: "sk-test",
+      model: "gpt-4.1-mini",
+      complete,
+      getModel: vi.fn(() => createModel()),
+      sleep,
+      random: vi.fn(() => 0)
+    });
+    const result = await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
+    expect(JSON.parse(result.rawJson)).toEqual({ signals: [] });
+    expect(result.extractorMeta).toEqual({
+      recoveryKind: "none",
+      retryCount: 3,
+      retryClassification: "success_after_retry"
+    });
+    expect(complete).toHaveBeenCalledTimes(4);
+    expect(sleep).toHaveBeenCalledTimes(3);
+  });
+
+  // invariant: HTTP 401 / 403 / 422 are deterministic — retrying spends
+  // quota with no chance of success. The terminal classification must be
+  // failure_non_retryable_4xx so the bench dump and the
+  // seed_extraction_path live_extraction_failures counter both observe a
+  // single failed attempt, never a quadrupled quota burn.
+  it("does NOT retry on HTTP 401 (auth) and surfaces retryCount=0", async () => {
+    const sleep = vi.fn(async () => undefined);
+    const complete = vi.fn(async () => {
+      const err = new Error("HTTP 401 unauthorized");
+      (err as { status?: number }).status = 401;
+      throw err;
+    });
+    const extractor = createPiMonoExtractor({
+      apiKey: "sk-test",
+      model: "gpt-4.1-mini",
+      complete,
+      getModel: vi.fn(() => createModel()),
+      sleep,
+      random: vi.fn(() => 0)
+    });
+    await expect(extractor.extract({ systemPrompt: "s", userPrompt: "t" }))
+      .rejects.toMatchObject({
+        name: "SignalExtractorError",
+        kind: "transport_failure",
+        retryCount: 0,
+        retryClassification: "failure_non_retryable_4xx"
+      } satisfies Partial<SignalExtractorError>);
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
   });
 });
 

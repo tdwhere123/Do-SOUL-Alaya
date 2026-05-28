@@ -40,7 +40,11 @@ describe("garden-extraction-golden", () => {
         })
       ).resolves.toEqual({
         rawJson,
-        extractorMeta: { recoveryKind: "none", retryCount: 0 }
+        extractorMeta: {
+          recoveryKind: "none",
+          retryCount: 0,
+          retryClassification: "success_first_try"
+        }
       });
 
       expect(completeImpl).toHaveBeenCalledTimes(1);

@@ -17,15 +17,18 @@ export interface SignalExtractor {
   }): Promise<{ readonly rawJson: string; readonly extractorMeta?: SignalExtractorMeta }>;
 }
 
-// Phase A.3 instrument: per-extract-call observability surface for the
-// diagnostic dump and the bench seed report. recoveryKind records which
-// tryRecoverJson branch (markdown / trailing / balanced) salvaged the body,
-// or "none" when the model returned strict JSON. retryCount is the number
-// of additional attempts beyond the first (0 = first try succeeded,
-// 1 = recovered after one retry).
+// invariant: per-extract-call observability surface for the diagnostic dump
+// and the bench seed report. recoveryKind records which tryRecoverJson branch
+// (markdown / trailing / balanced) salvaged the body, or "none" when the
+// model returned strict JSON. retryCount is the number of additional attempts
+// beyond the first (0 = first try succeeded, N = recovered after N retries).
+// retryClassification labels the terminal outcome of the retry loop — the
+// dump consumer correlates this with retryCount so a partial-recovery vs a
+// chronic-failure pattern is unambiguous.
 export interface SignalExtractorMeta {
   readonly recoveryKind: JsonRecoveryKind;
   readonly retryCount: number;
+  readonly retryClassification: RetryClassification;
 }
 
 export type JsonRecoveryKind =
@@ -36,20 +39,42 @@ export type JsonRecoveryKind =
 
 export type SignalExtractorErrorKind = "timeout" | "transport_failure" | "invalid_json";
 
+// invariant: a closed enum so the bench / dump consumers (compute-provider
+// dumpInvalidResponseDiagnostic, compile-seed dumpSeedExtractionFailureDiagnostic,
+// seed-extraction-blocker) can branch on the terminal outcome without
+// re-deriving it from retryCount + kind.
+// see also: apps/bench-runner/src/longmemeval/compile-seed.ts
+//   createGardenHttpExtractor mirrors this classification for the bench HTTP
+//   transport that does not go through this file.
+export type RetryClassification =
+  | "success_first_try"
+  | "success_after_retry"
+  | "failure_max_retries"
+  | "failure_non_retryable_4xx"
+  | "failure_timeout"
+  | "failure_aborted";
+
 export class SignalExtractorError extends Error {
-  // Phase A.3 instrument: how many retry attempts were spent before this
-  // failure surfaced. 0 = first attempt threw and was not retried (e.g. a
-  // 4xx auth fail); 1 = first attempt failed, retried once, second attempt
-  // still failed. Observability only — does not alter blocker behavior.
+  // invariant: retryCount on the thrown error reflects the attempt index at
+  // the moment the failure escaped (0 = first attempt threw and was not
+  // retried, e.g. a 4xx auth fail; N = first attempt failed, retried N
+  // times, all attempts still failed). retryClassification labels which
+  // branch of the retry policy terminated.
   public readonly retryCount: number;
+  public readonly retryClassification: RetryClassification;
   public constructor(
     public readonly kind: SignalExtractorErrorKind,
     message: string,
-    options?: { readonly cause?: unknown; readonly retryCount?: number }
+    options?: {
+      readonly cause?: unknown;
+      readonly retryCount?: number;
+      readonly retryClassification?: RetryClassification;
+    }
   ) {
     super(message, options);
     this.name = "SignalExtractorError";
     this.retryCount = options?.retryCount ?? 0;
+    this.retryClassification = options?.retryClassification ?? "failure_max_retries";
   }
 }
 
@@ -81,15 +106,23 @@ const DEFAULT_CONTEXT_WINDOW = 128_000;
 const DEFAULT_MAX_TOKENS = 8_192;
 const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1";
 const MAX_RESPONSE_TEXT_CHARS = 256_000;
-// Phase A.3: a single retry-with-jitter on recoverable failure modes (empty
-// body / parse error / 5xx / 429). The blocker rejects offline_fallbacks > 0,
-// and the dominant failure mode observed in seed-extraction-failures dumps
-// (empty assistant text on yunwu.ai gpt-4.1-mini calls and transient 5xx)
-// recovers on the next request. ONE retry only — quota and rate-limit budget
-// must not be doubled across an N-question bench.
-const MAX_EXTRACTOR_RETRIES = 1;
-const RETRY_JITTER_MIN_MS = 250;
-const RETRY_JITTER_MAX_MS = 750;
+// invariant: up to 3 retries with exponential jittered backoff on recoverable
+// failure modes (empty body / parse error / 5xx / 429 / unknown transport).
+// Bench evidence (35-question LongMemEval shard, 11/35 fallbacks under the
+// 1-retry policy) showed yunwu.ai-routed gpt-4.1-mini empty-text storms
+// outlasting a single retry, silently degrading the archive to the full-turn
+// fallback path; raise the budget to 3 with bounded backoff (250-1500ms) so
+// the transient empty/5xx burst recovers without doubling-doubling quota
+// burn. Timeouts retry exactly ONCE (see retryBudgetForError) so a chronic
+// slow path cannot 4x the bench's wall time.
+const MAX_EXTRACTOR_RETRIES = 3;
+const MAX_EXTRACTOR_TIMEOUT_RETRIES = 1;
+// Jittered exponential backoff: attempt 1 sleeps 250-500ms, attempt 2 sleeps
+// 500-1000ms, attempt 3 sleeps 1000-1500ms. The window is intentionally
+// short — the bench is the hot path, and the operator already chose the
+// per-request timeout budget.
+const RETRY_JITTER_BASE_MS = 250;
+const RETRY_JITTER_MAX_MS = 1500;
 
 export function createPiMonoExtractor(deps: PiMonoExtractorDependencies): SignalExtractor {
   const completeImpl = deps.complete ?? complete;
@@ -105,11 +138,14 @@ export function createPiMonoExtractor(deps: PiMonoExtractorDependencies): Signal
   return {
     extract: async (input) => {
       let attempt = 0;
+      let timeoutRetries = 0;
       let lastError: unknown = null;
-      // Bounded loop: at most MAX_EXTRACTOR_RETRIES + 1 attempts. We surface
-      // the SignalExtractorError of the FINAL attempt so the diagnostic dump
-      // records the failure that actually escaped, with retryCount > 0
-      // making the retry visible.
+      // Bounded loop: at most MAX_EXTRACTOR_RETRIES + 1 attempts (default 4).
+      // Timeout failures consume a SEPARATE smaller budget so a chronic slow
+      // path cannot 4x the bench wall time. We surface the SignalExtractorError
+      // of the FINAL attempt so the diagnostic dump records the failure that
+      // actually escaped, with retryCount + retryClassification making the
+      // retry path observable.
       while (attempt <= MAX_EXTRACTOR_RETRIES) {
         try {
           const message = await completeImpl(
@@ -135,7 +171,7 @@ export function createPiMonoExtractor(deps: PiMonoExtractorDependencies): Signal
           );
           // readTextContent throws SignalExtractorError("invalid_json") on
           // empty / oversized text — handled by the catch below so it can
-          // be retried once (this is the dominant failure mode observed in
+          // be retried (this is the dominant failure mode observed in
           // yunwu.ai seed-extraction-failures dumps).
           const rawText = readTextContent(message);
           const recovered = parseOrRecoverJson(rawText);
@@ -150,7 +186,9 @@ export function createPiMonoExtractor(deps: PiMonoExtractorDependencies): Signal
             rawJson: recovered.rawJson,
             extractorMeta: {
               recoveryKind: recovered.recoveryKind,
-              retryCount: attempt
+              retryCount: attempt,
+              retryClassification:
+                attempt === 0 ? "success_first_try" : "success_after_retry"
             }
           };
         } catch (error) {
@@ -161,33 +199,66 @@ export function createPiMonoExtractor(deps: PiMonoExtractorDependencies): Signal
             input.timeoutMs,
             attempt
           );
-          // Stop retrying when the call is unrecoverable: auth/4xx-non-429
-          // failures, client-side abort, or we already hit the cap. Retry
-          // budget is single-shot so a chronically-failing call cannot
-          // double the bench's quota burn.
-          if (
-            attempt >= MAX_EXTRACTOR_RETRIES ||
-            input.abortSignal?.aborted === true ||
-            !isRetryableExtractorError(mapped, error)
-          ) {
-            throw mapped;
+          // Client-side abort: never retry — the operator stopped the run.
+          if (input.abortSignal?.aborted === true) {
+            throw withClassification(mapped, "failure_aborted");
           }
+          // Timeouts: bounded retry (smaller budget). Checked BEFORE
+          // isRetryableExtractorError because timeouts are a distinct
+          // failure family — the retry-on-timeout policy is independent
+          // from the recoverable-vs-non-retryable transport split.
+          if (mapped.kind === "timeout") {
+            if (timeoutRetries >= MAX_EXTRACTOR_TIMEOUT_RETRIES) {
+              throw withClassification(mapped, "failure_timeout");
+            }
+            if (attempt >= MAX_EXTRACTOR_RETRIES) {
+              throw withClassification(mapped, "failure_max_retries");
+            }
+            timeoutRetries += 1;
+            const jitterMs = computeJitterMs(attempt, randomImpl);
+            attempt += 1;
+            await sleepImpl(jitterMs);
+            continue;
+          }
+          // Auth / 4xx-non-429 failures are deterministic; retrying spends
+          // quota with no chance of success.
+          if (!isRetryableExtractorError(mapped, error)) {
+            throw withClassification(mapped, "failure_non_retryable_4xx");
+          }
+          if (attempt >= MAX_EXTRACTOR_RETRIES) {
+            throw withClassification(mapped, "failure_max_retries");
+          }
+          const jitterMs = computeJitterMs(attempt, randomImpl);
           attempt += 1;
-          const jitterMs = computeJitterMs(randomImpl);
           await sleepImpl(jitterMs);
         }
       }
       // Defensive: the loop always returns or throws. Surface the last
       // mapped error in the impossible-path case so a future loop edit
       // does not silently fall through to an undefined return.
-      throw mapExtractorTransportError(
+      const fallback = mapExtractorTransportError(
         lastError,
         input.abortSignal,
         input.timeoutMs,
         attempt
       );
+      throw withClassification(fallback, "failure_max_retries");
     }
   };
+}
+
+function withClassification(
+  error: SignalExtractorError,
+  classification: RetryClassification
+): SignalExtractorError {
+  if (error.retryClassification === classification) {
+    return error;
+  }
+  return new SignalExtractorError(error.kind, error.message, {
+    cause: (error as { readonly cause?: unknown }).cause,
+    retryCount: error.retryCount,
+    retryClassification: classification
+  });
 }
 
 function selectModel(input: {
@@ -464,13 +535,16 @@ function mapExtractorTransportError(
     // invariant: SignalExtractorError.retryCount must reflect the attempt
     // index at the moment it escapes the extractor loop. readTextContent
     // throws without retryCount set; rewrap so the diagnostic dump in
-    // compute-provider.ts records the true attempt count.
+    // compute-provider.ts records the true attempt count. retryClassification
+    // is intentionally NOT set here — withClassification at the throw site
+    // assigns the terminal label.
     if (error.retryCount === retryCount) {
       return error;
     }
     return new SignalExtractorError(error.kind, error.message, {
       cause: (error as { readonly cause?: unknown }).cause,
-      retryCount
+      retryCount,
+      retryClassification: error.retryClassification
     });
   }
 
@@ -548,9 +622,19 @@ function extractStatusFromError(error: unknown): number | null {
   return null;
 }
 
-function computeJitterMs(random: () => number): number {
-  const span = RETRY_JITTER_MAX_MS - RETRY_JITTER_MIN_MS;
-  return RETRY_JITTER_MIN_MS + Math.floor(random() * (span + 1));
+// Jittered exponential backoff: attempt 0 (first retry) sleeps 250-500ms,
+// attempt 1 sleeps 500-1000ms, attempt 2+ sleeps 1000-1500ms. Capped at
+// RETRY_JITTER_MAX_MS so a deep retry chain cannot stall the bench past the
+// per-question budget. `attempt` is the index of the FAILED attempt (0-based)
+// whose retry we are about to delay.
+function computeJitterMs(attempt: number, random: () => number): number {
+  const baseMs = Math.min(
+    RETRY_JITTER_BASE_MS * Math.max(1, 2 ** Math.max(0, attempt)),
+    RETRY_JITTER_MAX_MS
+  );
+  const upper = Math.min(baseMs * 2, RETRY_JITTER_MAX_MS);
+  const span = upper - baseMs;
+  return baseMs + Math.floor(random() * (span + 1));
 }
 
 function defaultSleep(ms: number): Promise<void> {

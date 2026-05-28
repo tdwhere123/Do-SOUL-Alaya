@@ -252,7 +252,13 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       turn_messages: context.turn_messages
     });
     let rawJson: string | null = null;
-    let extractorMeta: { readonly recoveryKind: string; readonly retryCount: number } | null = null;
+    let extractorMeta:
+      | {
+          readonly recoveryKind: string;
+          readonly retryCount: number;
+          readonly retryClassification?: string;
+        }
+      | null = null;
     try {
       const response = await this.extractor.extract({
         systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
@@ -314,10 +320,17 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
     readonly rawJson: string | null;
     readonly userPrompt: string;
     readonly context: GardenCompileContext;
-    // Phase A.3 instrument: surfaces tryRecoverJson branch + extractor retry
-    // attempt count when the body parsed but the post-extract envelope shape
-    // was wrong. Null when extract() threw before returning meta.
-    readonly extractorMeta: { readonly recoveryKind: string; readonly retryCount: number } | null;
+    // invariant: surfaces tryRecoverJson branch + extractor retry attempt
+    // count + retry terminal classification when the body parsed but the
+    // post-extract envelope shape was wrong. Null when extract() threw
+    // before returning meta.
+    readonly extractorMeta:
+      | {
+          readonly recoveryKind: string;
+          readonly retryCount: number;
+          readonly retryClassification?: string;
+        }
+      | null;
   }): Promise<void> {
     if (this.diagnosticDir === null) {
       return;
@@ -349,15 +362,22 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
           0,
           DIAGNOSTIC_PROMPT_PREFIX_MAX_CHARS
         ),
-        // Phase A.3 instrument: recovery branch + retry attempts. recovery_kind
-        // is "none" when strict JSON parsed first try; "markdown_strip" /
-        // "trailing_strip" / "balanced_close" when the body was salvaged.
-        // extractor_retry_count is the count of additional attempts beyond the
-        // first (0 = no retry, 1 = retried once). Pulled from extractorMeta
-        // when the extract() call succeeded; else from
-        // SignalExtractorError.retryCount surfaced via the typed error.
+        // invariant: recovery branch + retry attempts + retry classification.
+        // recovery_kind is "none" when strict JSON parsed first try;
+        // "markdown_strip" / "trailing_strip" / "balanced_close" when the
+        // body was salvaged. extractor_retry_count is the count of
+        // additional attempts beyond the first (0 = no retry, N = retried N
+        // times). retry_classification labels the terminal outcome of the
+        // retry loop (success_first_try / success_after_retry /
+        // failure_max_retries / failure_non_retryable_4xx / failure_timeout
+        // / failure_aborted) so a dump consumer can distinguish a partial
+        // recovery from a chronic failure without re-deriving from
+        // retry_count + error kind. Pulled from extractorMeta when the
+        // extract() call succeeded; else from SignalExtractorError when the
+        // typed error surfaced.
         recovery_kind: extractRecoveryKindFromInputs(input.extractorMeta, input.error),
-        extractor_retry_count: extractRetryCountFromInputs(input.extractorMeta, input.error)
+        extractor_retry_count: extractRetryCountFromInputs(input.extractorMeta, input.error),
+        retry_classification: extractRetryClassificationFromInputs(input.extractorMeta, input.error)
       };
       const fileName = `${timestamp.replace(/[:.]/gu, "-")}-${randomUUID()}.json`;
       const filePath = join(this.diagnosticDir, fileName);
@@ -538,8 +558,14 @@ interface SignalErrorDiagnostic {
   readonly cause_message: string | null;
 }
 
+type ExtractorMetaSnapshot = {
+  readonly recoveryKind: string;
+  readonly retryCount: number;
+  readonly retryClassification?: string;
+};
+
 function extractRecoveryKindFromInputs(
-  meta: { readonly recoveryKind: string; readonly retryCount: number } | null,
+  meta: ExtractorMetaSnapshot | null,
   _error: unknown
 ): string {
   if (meta !== null) {
@@ -552,7 +578,7 @@ function extractRecoveryKindFromInputs(
 }
 
 function extractRetryCountFromInputs(
-  meta: { readonly recoveryKind: string; readonly retryCount: number } | null,
+  meta: ExtractorMetaSnapshot | null,
   error: unknown
 ): number {
   if (meta !== null) {
@@ -562,6 +588,24 @@ function extractRetryCountFromInputs(
     return error.retryCount;
   }
   return 0;
+}
+
+// invariant: the dump envelope's retry_classification field is "unknown"
+// only when neither extractorMeta nor a typed SignalExtractorError carries
+// the label — happens when a transport error fires before the extractor
+// loop even started. The closed enum branches stay in sync with
+// RetryClassification in pi-mono-extractor.ts.
+function extractRetryClassificationFromInputs(
+  meta: ExtractorMetaSnapshot | null,
+  error: unknown
+): string {
+  if (meta?.retryClassification !== undefined) {
+    return meta.retryClassification;
+  }
+  if (error instanceof SignalExtractorError) {
+    return error.retryClassification;
+  }
+  return "unknown";
 }
 
 function extractSignalErrorDiagnostic(error: unknown): SignalErrorDiagnostic {
