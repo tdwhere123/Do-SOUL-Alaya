@@ -41,7 +41,11 @@ function makeSeedExtractionPath(
 }
 
 describe("LongMemEval seed extraction release blocker", () => {
-  it("blocks official extraction evidence when offline fallbacks are non-zero", () => {
+  it("blocks official extraction evidence when live_extraction_failures > 0 (specific id)", () => {
+    // invariant: live_extraction_failures is checked BEFORE offline_fallbacks
+    // because every live-call failure bumps both counters. The dump consumer
+    // sees the more specific blocker id directly, without re-deriving it
+    // from the dual counter.
     const payload = makePayload(
       makeSeedExtractionPath({
         offline_fallbacks: 1,
@@ -52,11 +56,30 @@ describe("LongMemEval seed extraction release blocker", () => {
     expect(hasSeedExtractionReleaseBlocker(payload)).toBe(true);
     expect(seedExtractionReleaseBlockerExitCode(payload)).toBe(1);
     expect(appendSeedExtractionReleaseBlockerToReport("report\n", payload))
-      .toContain("seed_extraction_path offline_fallbacks");
+      .toContain("seed_extraction_path live_extraction_failures");
     expect(appendSeedExtractionReleaseBlockerToFindings(null, payload))
       .toContain("offline_fallbacks=1");
     expect(appendSeedExtractionReleaseBlockerToFindings(null, payload))
       .toContain("live_failures=1");
+  });
+
+  it("blocks with offline_fallbacks id when ONLY offline_fallbacks > 0 (live_extraction_failures=0)", () => {
+    // A turn extraction can fall back without a live-call failure when the
+    // cached extraction path returns a malformed envelope. That signal stays
+    // attributed to offline_fallbacks; live_extraction_failures stays zero
+    // so the more specific blocker id does not fire.
+    const payload = makePayload(
+      makeSeedExtractionPath({
+        offline_fallbacks: 2,
+        live_extraction_failures: 0,
+        cached_extraction_failures: 2
+      })
+    );
+
+    expect(hasSeedExtractionReleaseBlocker(payload)).toBe(true);
+    expect(seedExtractionReleaseBlockerExitCode(payload)).toBe(1);
+    expect(appendSeedExtractionReleaseBlockerToReport("report\n", payload))
+      .toContain("seed_extraction_path offline_fallbacks");
   });
 
   it("blocks no-credential fallback evidence even when numeric gates pass", () => {

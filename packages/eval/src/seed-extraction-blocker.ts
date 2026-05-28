@@ -53,6 +53,27 @@ export function evaluateSeedExtractionReleaseBlocker(
         "even if numeric KPI gates pass."
     };
   }
+  // invariant: live_extraction_failures is checked BEFORE offline_fallbacks
+  // because every live-extraction failure also bumps offline_fallbacks (via
+  // recordExtractionFailureSource in compile-seed.ts). Reporting the more
+  // specific blocker id makes the dump consumer see the live-call layer
+  // directly without re-deriving it from the dual counter. A future
+  // transport that recovers a live failure without falling back to offline
+  // (e.g. a more aggressive retry budget) would still set
+  // live_extraction_failures = 0, so this check stays correct.
+  // cross-file: apps/bench-runner/src/longmemeval/compile-seed.ts
+  //   recordExtractionFailureSource owns the increment site.
+  if (path.live_extraction_failures > 0) {
+    return {
+      id: "seed_extraction_path live_extraction_failures",
+      detail:
+        "LongMemEval official seed extraction had live-call failures that " +
+        "exhausted the retry budget and demoted the turn to the full-turn " +
+        `fallback path (${formatSeedExtractionCounters(path)}); this archive ` +
+        "is blocked because the run is no longer a faithful official_api_compile " +
+        "evidence set."
+    };
+  }
   if (path.offline_fallbacks > 0) {
     return {
       id: "seed_extraction_path offline_fallbacks",

@@ -1499,8 +1499,14 @@ describe("merge-longmemeval validations", () => {
     });
     expect(report).toContain("Seed extraction path: official_api_compile");
     expect(report).toContain("Release evidence blockers");
-    expect(findings).toContain("seed_extraction_path offline_fallbacks");
+    // invariant: when live_extraction_failures > 0 the more specific
+    // blocker id fires (it dominates the dual counter increment in
+    // recordExtractionFailureSource). The dump consumer still sees
+    // offline_fallbacks=1 inside the formatted detail so the counter trail
+    // remains visible.
+    expect(findings).toContain("seed_extraction_path live_extraction_failures");
     expect(findings).toContain("offline_fallbacks=1");
+    expect(findings).toContain("live_failures=1");
   });
 
   it("does not block merged official seed extraction when offline fallbacks are zero", async () => {
