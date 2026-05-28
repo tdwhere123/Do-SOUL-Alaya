@@ -36,7 +36,8 @@ import {
   type BenchQueryEmbeddingWarmupSummary,
   type BenchRecallOptions,
   type BenchReportContextUsageInput,
-  type BenchTokenMetrics
+  type BenchTokenMetrics,
+  type BenchWorkspaceHandle
 } from "../harness/daemon.js";
 import { aggregateBenchTokenMetrics } from "./token-economy.js";
 import {
@@ -295,29 +296,21 @@ export async function runLongMemEval(
   };
 
   async function runOneQuestion(
+    daemon: BenchDaemonHandle,
     question: typeof window[number],
     turnIndex: number,
     seedRunner: CompileSeedRunner
   ): Promise<WorkerResult> {
-    // Bench-only phase timing instrumentation. Gated by ALAYA_BENCH_PROFILE
-    // (default OFF — no overhead when unset). Emits one bench_profile line
-    // per question to stderr so the bench harness archive on stdout stays
-    // intact. process.hrtime.bigint() returns nanoseconds; we convert to
-    // milliseconds at log time. The phase wallclock does not include
-    // anything outside this function (the orchestrator loop tracks total).
+    // @anchor bench-profile-instrumentation: per-question phase timing,
+    // gated by ALAYA_BENCH_PROFILE.
     const profileEnabled = isBenchProfileEnabled();
     const phase = createPhaseTimer();
-    const tDaemonStart = phase.tick();
-    const daemon = await startBenchDaemon({
+    const tAttach = phase.tick();
+    const workspace: BenchWorkspaceHandle = await daemon.attachWorkspace({
       workspaceId: `lme-${question.question_id.slice(0, 8)}`,
-      runId: `run-${question.question_id.slice(0, 8)}`,
-      embeddingMode: opts.embeddingMode ?? "disabled",
-      ...(opts.embeddingProviderKind === undefined
-        ? {}
-        : { embeddingProviderKind: opts.embeddingProviderKind }),
-      recallWeightOverrides
+      runId: `run-${question.question_id.slice(0, 8)}`
     });
-    phase.record("daemon_start", tDaemonStart);
+    phase.record("workspace_attach", tAttach);
     try {
       const tSeedLoop = phase.tick();
       const sidecar = new Map<string, LongMemEvalSidecarEntry>();
@@ -354,12 +347,12 @@ export async function runLongMemEval(
 
           const evidenceRef = `${question.question_id}-s${si}-r${ri}`;
           const seedResult = await seedRunner.seedTurn({
-            daemon,
+            daemon: workspace,
             turnContent: round.content,
             evidenceRefBase: evidenceRef,
             seedIndex,
-            workspaceId: daemon.workspaceId,
-            runId: daemon.runId,
+            workspaceId: workspace.workspaceId,
+            runId: workspace.runId,
             ...(previousTurnSeedMemoryIds.length === 0
               ? {}
               : { sourceMemoryRefs: previousTurnSeedMemoryIds })
@@ -401,7 +394,7 @@ export async function runLongMemEval(
           turns: sessionTurns
         });
         if (synthesisInput !== null) {
-          const synthesisResult = await daemon.proposeSynthesis(synthesisInput);
+          const synthesisResult = await workspace.proposeSynthesis(synthesisInput);
           if (synthesisResult.synthesisId !== null) {
             sidecar.set(buildLongMemEvalSidecarKey("synthesis_capsule", synthesisResult.synthesisId), {
               objectId: synthesisResult.synthesisId,
@@ -418,11 +411,11 @@ export async function runLongMemEval(
       const tEmbeddingWarmup = phase.tick();
       const embeddingWarmup =
         opts.embeddingMode === "env"
-          ? await daemon.warmEmbeddingCache(deriveLongMemEvalMemoryObjectIds(sidecar))
+          ? await workspace.warmEmbeddingCache(deriveLongMemEvalMemoryObjectIds(sidecar))
           : null;
       const queryEmbeddingWarmup =
         opts.embeddingMode === "env"
-          ? await daemon.warmQueryEmbeddingCache([question.question])
+          ? await workspace.warmQueryEmbeddingCache([question.question])
           : null;
       phase.record("embedding_warmup", tEmbeddingWarmup);
 
@@ -430,7 +423,7 @@ export async function runLongMemEval(
 
       const tRecall = phase.tick();
       const recallCycle = await runLongMemEvalRecallCycle({
-        daemon,
+        daemon: workspace,
         query: question.question,
         recallOptions,
         simulateReport,
@@ -481,12 +474,16 @@ export async function runLongMemEval(
       });
       const tKpiQuery = phase.tick();
       const reportSideEffectSnapshot =
-        await readLongMemEvalReportSideEffectSnapshot(question.question_id, daemon);
+        await readLongMemEvalReportSideEffectSnapshot(
+          question.question_id,
+          daemon,
+          workspace.workspaceId
+        );
       // Event-sourced token-economy figures for this question's run: read
       // back from the EventLog after the seed loop and every recall, so
       // each contributing SOUL_SIGNAL_EMITTED / SOUL_CONTEXT_LENS_ASSEMBLED
       // row is already persisted. Must run before the finally-shutdown.
-      const tokenMetrics = await daemon.queryTokenMetrics();
+      const tokenMetrics = await workspace.queryTokenMetrics();
       // Per-recall STRUCTURAL token-economy sample. Pulled directly off
       // the already-parsed BenchRecallDiagnostics. A null here means
       // RecallService skipped the instrument because the recall was
@@ -502,7 +499,7 @@ export async function runLongMemEval(
       // Read back after seeding + recall so every auto-accept policy
       // decision is durably persisted before aggregation.
       // see also: packages/eval/src/edge-proposal-kpi.ts
-      const edgeProposalKpiRows = await daemon.queryEdgeProposalKpiRows();
+      const edgeProposalKpiRows = await workspace.queryEdgeProposalKpiRows();
       phase.record("kpi_query", tKpiQuery);
 
       return {
@@ -526,9 +523,9 @@ export async function runLongMemEval(
         edgeProposalKpiRows
       };
     } finally {
-      const tShutdown = phase.tick();
-      await daemon.shutdown();
-      phase.record("shutdown", tShutdown);
+      const tDetach = phase.tick();
+      await workspace.detach();
+      phase.record("workspace_detach", tDetach);
       if (profileEnabled) {
         process.stderr.write(
           `[bench_profile] question=${question.question_id} ${phase.format()}\n`
@@ -545,17 +542,33 @@ export async function runLongMemEval(
   // invariant: one seed runner for the whole run so the on-disk extraction
   // cache and stats accumulate across every question. Extraction happens at
   // seed time only — never on the recall path below.
+  // @anchor longmemeval-daemon-per-run: one bench daemon spans the run;
+  // per-question isolation is via daemon.attachWorkspace (BenchDaemonHandle).
   const seedRunner = createCompileSeedRunner();
   const collected: WorkerResult[] = [];
-  for (let i = 0; i < window.length; i++) {
-    const q = window[i];
-    if (q === undefined) continue;
-    const res = await runOneQuestion(q, i + 1, seedRunner);
-    collected.push(res);
-    process.stdout.write(
-      `[${i + 1}/${window.length}] ${q.question_id.slice(0, 8)} ` +
-        `R@5=${res.hitAt5 ? "✓" : "✗"} latency=${res.latencyMs}ms\n`
-    );
+  const benchRunId = `lme-bench-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const daemon = await startBenchDaemon({
+    workspaceId: `${benchRunId}-default`,
+    runId: `${benchRunId}-default-run`,
+    embeddingMode: opts.embeddingMode ?? "disabled",
+    ...(opts.embeddingProviderKind === undefined
+      ? {}
+      : { embeddingProviderKind: opts.embeddingProviderKind }),
+    recallWeightOverrides
+  });
+  try {
+    for (let i = 0; i < window.length; i++) {
+      const q = window[i];
+      if (q === undefined) continue;
+      const res = await runOneQuestion(daemon, q, i + 1, seedRunner);
+      collected.push(res);
+      process.stdout.write(
+        `[${i + 1}/${window.length}] ${q.question_id.slice(0, 8)} ` +
+          `R@5=${res.hitAt5 ? "✓" : "✗"} latency=${res.latencyMs}ms\n`
+      );
+    }
+  } finally {
+    await daemon.shutdown();
   }
   const extractionStats = seedRunner.stats;
   // Disclose which seed path ran: official_api_compile (production garden
@@ -975,10 +988,11 @@ export async function runLongMemEvalRecallCycle(input: {
 
 async function readLongMemEvalReportSideEffectSnapshot(
   questionId: string,
-  daemon: Pick<BenchDaemonHandle, "runtime" | "workspaceId">
+  daemon: Pick<BenchDaemonHandle, "runtime">,
+  workspaceId: string
 ): Promise<LongMemEvalReportSideEffectSnapshot> {
   const status = await daemon.runtime.services.graphHealthService.getStatus(
-    daemon.workspaceId
+    workspaceId
   );
   const byType = { ...status.memory_graph_edges_by_type };
   return {

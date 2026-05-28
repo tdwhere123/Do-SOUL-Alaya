@@ -21,10 +21,12 @@ import {
 import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
 import {
   startBenchDaemon,
+  type BenchDaemonHandle,
   type BenchEmbeddingMode,
   type BenchEmbeddingProviderKind,
   type BenchEmbeddingWarmupSummary,
-  type BenchQueryEmbeddingWarmupSummary
+  type BenchQueryEmbeddingWarmupSummary,
+  type BenchWorkspaceHandle
 } from "../harness/daemon.js";
 import {
   buildLongMemEvalQualityMetrics,
@@ -113,10 +115,22 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
   let totalQa = 0;
   const conversationResults: ConversationResult[] = [];
 
+  // @anchor locomo-daemon-per-run: one bench daemon spans the run; per-
+  // conversation isolation is via daemon.attachWorkspace.
+  const benchRunId = `locomo-bench-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const daemon = await startBenchDaemon({
+    workspaceId: `${benchRunId}-default`,
+    runId: `${benchRunId}-default-run`,
+    embeddingMode,
+    ...(opts.embeddingProviderKind === undefined
+      ? {}
+      : { embeddingProviderKind: opts.embeddingProviderKind })
+  });
+  try {
   for (let i = 0; i < window.length; i++) {
     const conversation = window[i];
     if (conversation === undefined) continue;
-    const convResult = await runOneConversation(conversation, opts);
+    const convResult = await runOneConversation(daemon, conversation, opts);
     conversationResults.push(convResult);
     totalQa += convResult.qaCount;
     totalHitAt1 += convResult.hitAt1;
@@ -143,6 +157,9 @@ export async function runLocomo(opts: LocomoRunOptions): Promise<LocomoRunResult
       `[${i + 1}/${window.length}] ${conversation.sample_id} ` +
         `qa=${convResult.qaCount} R@5=${(convResult.hitAt5 / Math.max(1, convResult.qaCount) * 100).toFixed(1)}%\n`
     );
+  }
+  } finally {
+    await daemon.shutdown();
   }
 
   const rAt1 = totalQa === 0 ? 0 : totalHitAt1 / totalQa;
@@ -327,17 +344,14 @@ interface ConversationResult {
 }
 
 async function runOneConversation(
+  daemon: BenchDaemonHandle,
   conversation: LocomoSample,
   opts: LocomoRunOptions
 ): Promise<ConversationResult> {
   const embeddingMode = opts.embeddingMode ?? "disabled";
-  const daemon = await startBenchDaemon({
+  const workspace: BenchWorkspaceHandle = await daemon.attachWorkspace({
     workspaceId: `locomo-${conversation.sample_id}`,
-    runId: `run-${conversation.sample_id}`,
-    embeddingMode,
-    ...(opts.embeddingProviderKind === undefined
-      ? {}
-      : { embeddingProviderKind: opts.embeddingProviderKind })
+    runId: `run-${conversation.sample_id}`
   });
   try {
     const diaIdByMemoryId = new Map<string, string>();
@@ -355,7 +369,7 @@ async function runOneConversation(
       for (const turn of session.turns) {
         const seedContent = `${turn.speaker}: ${turn.text}`;
         const evidenceRef = `${conversation.sample_id}-${turn.dia_id}`;
-        const seed = await daemon.proposeMemory(seedContent, evidenceRef, {
+        const seed = await workspace.proposeMemory(seedContent, evidenceRef, {
           objectKind: rotatingSeedObjectKind(seedIndex),
           ...(previousTurnSeedMemoryIds.length === 0
             ? {}
@@ -370,12 +384,12 @@ async function runOneConversation(
 
     const embeddingWarmup =
       opts.embeddingMode === "env"
-        ? await daemon.warmEmbeddingCache([...memoryIdByDiaId.values()])
+        ? await workspace.warmEmbeddingCache([...memoryIdByDiaId.values()])
         : null;
     const scoredQuestions = conversation.qa.filter((qa) => qa.evidence.length > 0);
     const queryEmbeddingWarmup =
       opts.embeddingMode === "env"
-        ? await daemon.warmQueryEmbeddingCache(scoredQuestions.map((qa) => qa.question))
+        ? await workspace.warmQueryEmbeddingCache(scoredQuestions.map((qa) => qa.question))
         : null;
 
     let hitAt1 = 0;
@@ -400,7 +414,7 @@ async function runOneConversation(
         continue;
       }
       scoredCount += 1;
-      const result = await runQuestion(daemon, qa);
+      const result = await runQuestion(workspace, qa);
       latencies.push(result.latencyMs);
       const ranked = result.pointers
         .slice(0, 10)
@@ -457,7 +471,7 @@ async function runOneConversation(
       recallTokenEconomySamples
     };
   } finally {
-    await daemon.shutdown();
+    await workspace.detach();
   }
 }
 
@@ -469,11 +483,11 @@ interface QaResult {
 }
 
 async function runQuestion(
-  daemon: Awaited<ReturnType<typeof startBenchDaemon>>,
+  workspace: BenchWorkspaceHandle,
   qa: LocomoQa
 ): Promise<QaResult> {
   const recallStart = Date.now();
-  const recallResult = await daemon.recall(qa.question, { maxResults: 10 });
+  const recallResult = await workspace.recall(qa.question, { maxResults: 10 });
   const latencyMs = Date.now() - recallStart;
   const pointers = recallResult.results.slice(0, 10).map((pointer) => ({
     object_id: pointer.object_id,
