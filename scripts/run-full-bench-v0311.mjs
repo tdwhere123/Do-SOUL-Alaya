@@ -53,7 +53,6 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
-  statSync,
   writeFileSync,
   openSync,
   closeSync

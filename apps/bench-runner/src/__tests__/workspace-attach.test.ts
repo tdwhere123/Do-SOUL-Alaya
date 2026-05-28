@@ -1,5 +1,6 @@
 import { stat } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
+import type { MemorySearchResult } from "@do-soul/alaya-protocol";
 import {
   startBenchDaemon,
   type BenchDaemonHandle
@@ -82,7 +83,7 @@ describe("BenchDaemon attachWorkspace contract", () => {
       const recallA = await workspaceA.recall("coelacanth swims at depth", {
         maxResults: 10
       });
-      expect(recallA.results.map((r) => r.object_id)).toContain(seedA.memoryId);
+      expect(recallA.results.map((r: MemorySearchResult) => r.object_id)).toContain(seedA.memoryId);
       await workspaceA.detach();
 
       const workspaceB = await daemon.attachWorkspace({
@@ -95,7 +96,7 @@ describe("BenchDaemon attachWorkspace contract", () => {
       // invariant: workspace_id is the recall isolation boundary; a memory
       // seeded in workspace A must never surface in workspace B's recall.
       // see also: packages/core/src/recall-service.ts (workspaceId filter)
-      expect(recallB.results.map((r) => r.object_id)).not.toContain(
+      expect(recallB.results.map((r: MemorySearchResult) => r.object_id)).not.toContain(
         seedA.memoryId
       );
       await workspaceB.detach();
@@ -146,7 +147,7 @@ describe("BenchDaemon attachWorkspace contract", () => {
         "Active context probe workspace A",
         { maxResults: 5 }
       );
-      expect(recall.results.map((r) => r.object_id)).toContain(seedA.memoryId);
+      expect(recall.results.map((r: MemorySearchResult) => r.object_id)).toContain(seedA.memoryId);
       await workspaceAAgain.detach();
     },
     120_000
