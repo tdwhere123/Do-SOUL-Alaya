@@ -27,7 +27,8 @@
 //   node scripts/run-full-bench-v0311.mjs --bench lme-s,locomo-off  # comma list
 //   node scripts/run-full-bench-v0311.mjs --policy-shape stress  # override (default chat)
 //   node scripts/run-full-bench-v0311.mjs --limit 50             # smoke; not release-grade
-//   node scripts/run-full-bench-v0311.mjs --data-dir /tmp/bench  # override dataset cache root
+//   node scripts/run-full-bench-v0311.mjs --data-dir /tmp/bench  # override dataset root
+//                                                                # (default: apps/bench-runner/data)
 //   node scripts/run-full-bench-v0311.mjs --history-root <path>  # override archive root
 //   node scripts/run-full-bench-v0311.mjs --dry-run              # print commands only
 //   node scripts/run-full-bench-v0311.mjs --resume               # skip benches already done
@@ -111,9 +112,9 @@ Flags:
                            ${BENCH_STEPS.map((s) => s.id).join(", ")}
   --policy-shape <shape>   Bench policy shape (default: chat)
   --limit <N>              Per-bench --limit (default: undefined / full set)
-  --data-dir <path>        Dataset cache root containing longmemeval/ and
+  --data-dir <path>        Dataset root containing longmemeval/ and
                            locomo/ subdirs (default: $ALAYA_BENCH_DATA_DIR or
-                           <repo>/.bench-data)
+                           <repo>/apps/bench-runner/data)
   --history-root <path>    Archive root (default: <repo>/docs/bench-history)
   --log-root <path>        Log root (default: <repo>/var/bench-logs/v0.3.11)
   --dry-run                Print commands without executing
@@ -226,7 +227,7 @@ function buildContext(args) {
   const dataDir =
     args.dataDir ??
     process.env.ALAYA_BENCH_DATA_DIR ??
-    path.join(REPO_ROOT, ".bench-data");
+    path.join(REPO_ROOT, "apps/bench-runner/data");
   return {
     policyShape: args.policyShape,
     limit: args.limit,
