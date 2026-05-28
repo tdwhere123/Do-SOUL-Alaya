@@ -1,17 +1,20 @@
 #!/usr/bin/env node
-// Orchestrates the v0.3.11 ship-gate full-bench wave (K1.1 – K1.5).
+// Orchestrates the v0.3.11 ship-gate full-bench wave (K1.1 + K1.4).
 //
-// Runs the 5 release-grade benches sequentially (WSL2 caps shards <= 3, so
-// inter-bench parallelism would race for daemon ports and embedding cache).
+// Long-running bench-runner daemons are single-process (each step opens one
+// daemon and reuses it across every question via attachWorkspace). Within a
+// step shards is implicitly 1; across steps the orchestrator runs strictly
+// sequentially so the two daemons never coexist (WSL2 7.6 GiB cap).
+//
 // Each step spawns the bench-runner detached and waits for it before launching
 // the next. stdout/stderr per step land under var/bench-logs/v0.3.11/.
 //
 // Ship-gate matrix (docs/handbook/release/v0.3.11/kpi-targets.md, Tier-1):
-//   K1.1  longmemeval-s             embedding=disabled  policy=chat  -> R@5 >= 90%
-//   K1.2  longmemeval-s-multiturn   embedding=disabled  policy=chat  -> R@5 >= 90%
-//   K1.3  longmemeval-s-crossq      embedding=disabled  policy=chat  -> R@5 >= 90%
-//   K1.4  locomo                    embedding=disabled  policy=chat  -> R@5 >= 55%
-//   K1.5  locomo                    embedding=env(local_onnx)  policy=chat -> R@5 >= 90%
+//   K1.1  longmemeval-s   embedding=disabled         policy=chat  -> R@5 >= 90%
+//   K1.4  locomo          embedding=disabled         policy=chat  -> R@5 >= 55%
+//
+// K1.2 (lme-mt), K1.3 (lme-cq), K1.5 (locomo-on) are deferred to a later
+// v0.3.11 wave and are not orchestrated by this script.
 //
 // Each step writes its archive under the matching docs/bench-history/<root>/
 // subtree; the script verifies a fresh archive slug appeared and contains
@@ -19,9 +22,9 @@
 //
 // Usage:
 //   set -a; . .do-it/bench-env/alaya-api.env; set +a
-//   node scripts/run-full-bench-v0311.mjs                        # all 5 benches
-//   node scripts/run-full-bench-v0311.mjs --bench locomo-on      # single bench id
-//   node scripts/run-full-bench-v0311.mjs --bench lme-s,lme-mt   # comma list
+//   node scripts/run-full-bench-v0311.mjs                        # both benches
+//   node scripts/run-full-bench-v0311.mjs --bench lme-s          # single bench id
+//   node scripts/run-full-bench-v0311.mjs --bench lme-s,locomo-off  # comma list
 //   node scripts/run-full-bench-v0311.mjs --policy-shape stress  # override (default chat)
 //   node scripts/run-full-bench-v0311.mjs --limit 50             # smoke; not release-grade
 //   node scripts/run-full-bench-v0311.mjs --data-dir /tmp/bench  # override dataset cache root
@@ -34,6 +37,11 @@
 //   setsid node scripts/run-full-bench-v0311.mjs \
 //     > /tmp/v0311-full.log 2>&1 < /dev/null &
 //   disown
+//
+// Resume semantics: --resume uses a per-step sentinel under <log-root>/<id>.done.
+// Per-question intra-step resume (skip already-completed questions inside a
+// single bench) is NOT implemented; if a 500Q LongMemEval run crashes midway
+// the entire step re-runs. See unknowns in the worker return for follow-up.
 //
 // Exit codes:
 //   0  every requested bench produced a fresh archive with kpi.json
@@ -80,55 +88,12 @@ const BENCH_STEPS = [
     ]
   },
   {
-    id: "lme-mt",
-    label: "K1.2 LongMemEval-S multiturn embedding-off",
-    archiveRoot: "public-multiturn",
-    args: (ctx) => [
-      "longmemeval-multiturn",
-      "--variant", "s",
-      "--rounds", "3",
-      "--embedding", "disabled",
-      "--policy-shape", ctx.policyShape,
-      "--data-dir", path.join(ctx.dataDir, "longmemeval"),
-      ...(ctx.limit !== undefined ? ["--limit", String(ctx.limit)] : []),
-      "--history-root", ctx.historyRoot
-    ]
-  },
-  {
-    id: "lme-cq",
-    label: "K1.3 LongMemEval-S crossquestion embedding-off",
-    archiveRoot: "public-crossquestion",
-    args: (ctx) => [
-      "longmemeval-crossquestion",
-      "--variant", "s",
-      "--embedding", "disabled",
-      "--policy-shape", ctx.policyShape,
-      "--data-dir", path.join(ctx.dataDir, "longmemeval"),
-      ...(ctx.limit !== undefined ? ["--limit", String(ctx.limit)] : []),
-      "--history-root", ctx.historyRoot
-    ]
-  },
-  {
     id: "locomo-off",
     label: "K1.4 LoCoMo embedding-off",
     archiveRoot: "public-locomo",
     args: (ctx) => [
       "locomo",
       "--embedding", "disabled",
-      "--policy-shape", ctx.policyShape,
-      "--data-dir", path.join(ctx.dataDir, "locomo"),
-      ...(ctx.limit !== undefined ? ["--limit", String(ctx.limit)] : []),
-      "--history-root", ctx.historyRoot
-    ]
-  },
-  {
-    id: "locomo-on",
-    label: "K1.5 LoCoMo embedding-on (local_onnx)",
-    archiveRoot: "public-locomo",
-    args: (ctx) => [
-      "locomo",
-      "--embedding", "env",
-      "--embedding-provider", "local_onnx",
       "--policy-shape", ctx.policyShape,
       "--data-dir", path.join(ctx.dataDir, "locomo"),
       ...(ctx.limit !== undefined ? ["--limit", String(ctx.limit)] : []),
