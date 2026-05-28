@@ -9,6 +9,7 @@ import {
   computeNextTurnSeedRefs,
   createCachingSignalExtractor,
   createCompileSeedRunner,
+  createGardenHttpExtractor,
   resolveCompileSeedExtractionConfig,
   toSeedExtractionPathKpi,
   type BenchSignalExtractor,
@@ -1239,5 +1240,231 @@ describe("compile-seed diagnostic dump (Phase A.1 instrument)", () => {
     expect(dumpFiles).toHaveLength(0);
     // The classification path still ran so liveExtractionFailures is bumped.
     expect(runner.stats.liveExtractionFailures).toBe(1);
+  });
+});
+
+// invariant: the bench HTTP transport (createGardenHttpExtractor) must mirror
+// the production pi-mono-extractor retry policy — 3 retries on 5xx / 429 /
+// unknown transport, 1 retry on timeout, no retry on 4xx-non-429. Before
+// v0.3.11 this layer had ZERO retries, so a transient yunwu.ai burst that the
+// production transport would recover silently demoted the bench archive to
+// the no-credentials fallback path.
+// cross-file: packages/soul/src/garden/pi-mono-extractor.ts MAX_EXTRACTOR_RETRIES
+describe("createGardenHttpExtractor retry policy", () => {
+  const HTTP_CONFIG: CompileSeedExtractionConfig = {
+    providerUrl: "https://example.test/v1",
+    model: "test-model",
+    apiKey: "sk-test"
+  };
+
+  function makeJsonResponse(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json" }
+    });
+  }
+
+  it("retries 3 times on HTTP 5xx then succeeds with retryClassification=success_after_retry", async () => {
+    // Models the dominant yunwu.ai outage shape: a brief 503 storm followed
+    // by recovery. The 1-retry policy bench shipped with would have given up
+    // after attempt 2 and demoted the turn to the fallback path; the 3-retry
+    // budget gets it through.
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("svc unavailable", { status: 503 }))
+      .mockResolvedValueOnce(new Response("svc unavailable", { status: 503 }))
+      .mockResolvedValueOnce(new Response("svc unavailable", { status: 503 }))
+      .mockResolvedValueOnce(
+        makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })
+      );
+    const sleep = vi.fn(async () => undefined);
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep,
+      random: () => 0
+    });
+    const result = await extractor.extract({
+      systemPrompt: "system",
+      userPrompt: "turn"
+    });
+    expect(JSON.parse(result.rawJson)).toEqual({ signals: [] });
+    expect(result.extractorMeta).toEqual({
+      recoveryKind: "none",
+      retryCount: 3,
+      retryClassification: "success_after_retry"
+    });
+    // 4 = first attempt + 3 retries.
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(sleep).toHaveBeenCalledTimes(3);
+  });
+
+  it("does NOT retry on HTTP 401 (auth) and surfaces failure_non_retryable_4xx", async () => {
+    // Auth / 4xx-non-429 is deterministic; retrying spends quota with no
+    // chance of success. The thrown error carries the classification so
+    // dumpSeedExtractionFailureDiagnostic can surface it in the archive
+    // without re-deriving from the message.
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("unauthorized", { status: 401 }));
+    const sleep = vi.fn(async () => undefined);
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep,
+      random: () => 0
+    });
+    let thrown: unknown = null;
+    try {
+      await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    const benchRetry = (thrown as { benchRetry?: { retryCount: number; retryClassification: string } })
+      .benchRetry;
+    expect(benchRetry).toEqual({
+      retryCount: 0,
+      retryClassification: "failure_non_retryable_4xx"
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it("retries 429 (rate limit) and succeeds on the next attempt", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("rate limited", { status: 429 }))
+      .mockResolvedValueOnce(
+        makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })
+      );
+    const sleep = vi.fn(async () => undefined);
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep,
+      random: () => 0.5
+    });
+    const result = await extractor.extract({
+      systemPrompt: "s",
+      userPrompt: "t"
+    });
+    expect(result.extractorMeta?.retryClassification).toBe("success_after_retry");
+    expect(result.extractorMeta?.retryCount).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("caps the 5xx retry budget at MAX_RETRIES extra attempts (failure_max_retries)", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response("svc unavailable", { status: 502 }));
+    const sleep = vi.fn(async () => undefined);
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep,
+      random: () => 0
+    });
+    let thrown: unknown = null;
+    try {
+      await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
+    } catch (error) {
+      thrown = error;
+    }
+    const benchRetry = (thrown as { benchRetry?: { retryCount: number; retryClassification: string } })
+      .benchRetry;
+    expect(benchRetry).toEqual({
+      retryCount: 3,
+      retryClassification: "failure_max_retries"
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+});
+
+// invariant: a full-bench seed-extraction failure must (a) bump
+// liveExtractionFailures, (b) drop a diagnostic dump whose
+// retry_classification field surfaces the terminal outcome, (c) end up
+// blocked via seedExtractionReleaseBlocker because
+// live_extraction_failures > 0.
+// cross-file: packages/eval/src/seed-extraction-blocker.ts
+//   evaluateSeedExtractionReleaseBlocker checks live_extraction_failures.
+describe("dumpSeedExtractionFailureDiagnostic surfaces retry_classification", () => {
+  let cacheRoot: string;
+  let diagnosticDir: string;
+
+  beforeEach(async () => {
+    cacheRoot = await mkdtemp(join(tmpdir(), "compile-seed-cache-"));
+    diagnosticDir = await mkdtemp(join(tmpdir(), "compile-seed-diag-"));
+  });
+
+  afterEach(async () => {
+    await rm(cacheRoot, { recursive: true, force: true });
+    await rm(diagnosticDir, { recursive: true, force: true });
+  });
+
+  it("dumps retry_classification=failure_non_retryable_4xx when a live extraction hits HTTP 401", async () => {
+    // The extractor delegate models a chronic 401 — the retry loop must
+    // bail on the first attempt and propagate the classification. The dump
+    // file captured under diagnosticDir then carries retry_classification
+    // so a Phase-F dump reader can attribute the fallback without re-running.
+    const failingDelegate: BenchSignalExtractor = {
+      async extract() {
+        const err = new Error("garden extraction HTTP 401 unauthorized");
+        (err as { status?: number }).status = 401;
+        (err as { benchRetry?: unknown }).benchRetry = {
+          retryCount: 0,
+          retryClassification: "failure_non_retryable_4xx"
+        };
+        throw err;
+      }
+    };
+
+    const runner = createCompileSeedRunner({
+      config: CREDENTIALLED_CONFIG,
+      cacheRoot,
+      extractorFactory: () => failingDelegate,
+      diagnosticDir
+    });
+
+    const daemon = buildCompileSeedDaemon((input) => ({
+      object_id: `obj-${input.distilledFact.slice(0, 4)}`,
+      memory_entry_id: "mem-x",
+      memory_entry: {
+        memory_entry_id: "mem-x",
+        signal_id: "sig-x",
+        signal_kind: "potential_preference",
+        object_kind: "user_preference",
+        object_id: "obj-x"
+      } as never,
+      truncated: false,
+      charsClipped: 0
+    }));
+
+    await runner.seedTurn({
+      daemon,
+      turnContent: "the user prefers tea over coffee",
+      evidenceRefBase: "evidence-1",
+      seedIndex: 0,
+      workspaceId: "ws-test",
+      runId: "run-test"
+    });
+
+    // (a) liveExtractionFailures bumped — the blocker depends on this.
+    expect(runner.stats.liveExtractionFailures).toBe(1);
+    expect(runner.stats.offlineFallbacks).toBe(1);
+
+    // (b) dump file written and carries retry_classification.
+    const dumpFiles = readdirSync(diagnosticDir).filter(
+      (f) => f.startsWith("compile-seed-") && f.endsWith(".json")
+    );
+    expect(dumpFiles).toHaveLength(1);
+    const envelope = JSON.parse(
+      readFileSync(join(diagnosticDir, dumpFiles[0]!), "utf8")
+    ) as {
+      retry_classification: string;
+      retry_count: number | null;
+      live_extraction_failures: number;
+      last_extraction_source: string;
+    };
+    expect(envelope.retry_classification).toBe("failure_non_retryable_4xx");
+    expect(envelope.retry_count).toBe(0);
+    expect(envelope.live_extraction_failures).toBe(1);
+    expect(envelope.last_extraction_source).toBe("live");
   });
 });

@@ -93,6 +93,12 @@ const EXTRACTION_REQUEST_TIMEOUT_MS = 60_000;
  * `OfficialApiGardenProvider`. Declared structurally here so the bench does
  * not depend on a non-exported soul type; it matches the provider's
  * `extractor` constructor dependency.
+ *
+ * extractorMeta surfaces the retry observability the bench dump consumes —
+ * retryCount and retryClassification let dumpSeedExtractionFailureDiagnostic
+ * attribute a fallback to a specific terminal outcome of the retry loop. The
+ * field is optional so unit-test stubs that do not exercise retries stay
+ * minimal.
  */
 export interface BenchSignalExtractor {
   extract(input: {
@@ -100,7 +106,35 @@ export interface BenchSignalExtractor {
     readonly userPrompt: string;
     readonly abortSignal?: AbortSignal;
     readonly timeoutMs?: number;
-  }): Promise<{ readonly rawJson: string }>;
+  }): Promise<{
+    readonly rawJson: string;
+    readonly extractorMeta?: BenchSignalExtractorMeta;
+  }>;
+}
+
+// invariant: closed enum mirrored from
+// packages/soul/src/garden/pi-mono-extractor.ts RetryClassification so the
+// dump envelope is consistent across the production and bench transports.
+export type BenchRetryClassification =
+  | "success_first_try"
+  | "success_after_retry"
+  | "failure_max_retries"
+  | "failure_non_retryable_4xx"
+  | "failure_timeout"
+  | "failure_aborted";
+
+// invariant: BenchSignalExtractorMeta is structurally assignable to the
+// production SignalExtractorMeta in pi-mono-extractor.ts so the bench's
+// caching extractor can drop into OfficialApiGardenProvider.extractor without
+// a widening cast. recoveryKind is always "none" on the bench HTTP path —
+// JSON recovery happens inside parseOrRecoverJson, which only the pi-mono
+// loop reaches; the bench transport returns whatever content the gateway
+// emitted.
+// cross-file: packages/soul/src/garden/pi-mono-extractor.ts SignalExtractorMeta
+export interface BenchSignalExtractorMeta {
+  readonly recoveryKind: "none" | "markdown_strip" | "trailing_strip" | "balanced_close";
+  readonly retryCount: number;
+  readonly retryClassification: BenchRetryClassification;
 }
 
 export interface CompileSeedExtractionConfig {
@@ -448,69 +482,267 @@ function writeCachedExtraction(
   renameSync(tmpPath, filePath);
 }
 
+// invariant: bench retry policy is parity with pi-mono-extractor.ts. Both
+// transports must spend up to 3 retries with jittered exponential backoff on
+// recoverable failure modes (5xx / 429 / empty body / unknown transport) so a
+// transient yunwu.ai burst does not silently demote the archive to the
+// no-credentials fallback path. Timeouts retry exactly once. 4xx-non-429 and
+// aborts never retry.
+const BENCH_HTTP_MAX_RETRIES = 3;
+const BENCH_HTTP_MAX_TIMEOUT_RETRIES = 1;
+const BENCH_HTTP_JITTER_BASE_MS = 250;
+const BENCH_HTTP_JITTER_MAX_MS = 1500;
+
+function computeBenchJitterMs(attempt: number, random: () => number): number {
+  const baseMs = Math.min(
+    BENCH_HTTP_JITTER_BASE_MS * Math.max(1, 2 ** Math.max(0, attempt)),
+    BENCH_HTTP_JITTER_MAX_MS
+  );
+  const upper = Math.min(baseMs * 2, BENCH_HTTP_JITTER_MAX_MS);
+  const span = upper - baseMs;
+  return baseMs + Math.floor(random() * (span + 1));
+}
+
+interface BenchHttpError {
+  readonly classification: BenchRetryClassification;
+  readonly retryable: boolean;
+  readonly isTimeout: boolean;
+  readonly cause: unknown;
+}
+
+function classifyBenchHttpError(
+  error: unknown,
+  status: number | null
+): BenchHttpError {
+  if (error instanceof Error && /abort/iu.test(error.name + error.message)) {
+    // AbortController fired — could be operator abort or our own timeout
+    // controller; the caller disambiguates via the timer flag.
+    return {
+      classification: "failure_aborted",
+      retryable: false,
+      isTimeout: false,
+      cause: error
+    };
+  }
+  if (status !== null) {
+    if (status === 429 || (status >= 500 && status < 600)) {
+      return {
+        classification: "failure_max_retries",
+        retryable: true,
+        isTimeout: false,
+        cause: error
+      };
+    }
+    if (status >= 400 && status < 500) {
+      return {
+        classification: "failure_non_retryable_4xx",
+        retryable: false,
+        isTimeout: false,
+        cause: error
+      };
+    }
+  }
+  // Unknown transport (DNS, connection reset, empty body): retry — the
+  // dominant unobserved failure here resolves on the next request.
+  return {
+    classification: "failure_max_retries",
+    retryable: true,
+    isTimeout: false,
+    cause: error
+  };
+}
+
 /**
  * Live garden LLM delegate: OpenAI-compatible POST /chat/completions with a
- * JSON-object response format, temperature 0. This is the same transport the
- * production `createPiMonoExtractor` uses; it is re-implemented here with
- * `fetch` (no new client dependency) because the bench harness drives the
- * provider through its injectable `extractor` seam and the production pi-mono
- * extractor is not on the soul package's public surface. The provider still
- * supplies the production `OFFICIAL_API_SYSTEM_PROMPT` and parses the
- * response with the production `parseOfficialApiSignals`, so extraction
- * semantics are production-faithful — only the chat-completions transport
- * shim is bench-local.
+ * JSON-object response format, temperature 0. Wraps the raw fetch in the same
+ * retry-with-jitter loop as `createPiMonoExtractor` (3 retries on recoverable
+ * failures, 1 retry on timeout, no retry on 4xx-non-429 / abort) so the
+ * bench transport does not silently degrade to the fallback path on a
+ * transient burst the production transport would have recovered from.
+ *
+ * `extractorMeta.retryCount` + `extractorMeta.retryClassification` surface
+ * on success; on failure the thrown Error carries the same classification
+ * in its `.cause` chain so dumpSeedExtractionFailureDiagnostic records the
+ * terminal outcome.
+ *
+ * `deps.sleep` / `deps.random` are test seams so unit tests can drive the
+ * jittered backoff without wall-clock sleeps.
  */
 export function createGardenHttpExtractor(
-  config: CompileSeedExtractionConfig
+  config: CompileSeedExtractionConfig,
+  deps?: {
+    readonly sleep?: (ms: number) => Promise<void>;
+    readonly random?: () => number;
+    readonly fetch?: typeof fetch;
+  }
 ): BenchSignalExtractor {
+  const sleepImpl =
+    deps?.sleep ??
+    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const randomImpl = deps?.random ?? Math.random;
+  const fetchImpl = deps?.fetch ?? fetch;
   return {
     async extract(input) {
       if (config.apiKey === null) {
         throw new Error("garden API key is unavailable");
       }
-      const controller = new AbortController();
-      const timer = setTimeout(
-        () => controller.abort(),
-        input.timeoutMs ?? EXTRACTION_REQUEST_TIMEOUT_MS
-      );
-      try {
-        const response = await fetch(`${config.providerUrl}/chat/completions`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            authorization: `Bearer ${config.apiKey}`
-          },
-          body: JSON.stringify({
-            model: config.model,
-            temperature: 0,
-            response_format: { type: "json_object" },
-            messages: [
-              { role: "system", content: input.systemPrompt },
-              { role: "user", content: input.userPrompt }
-            ]
-          }),
-          signal: controller.signal
-        });
-        if (!response.ok) {
-          throw new Error(
-            `garden extraction HTTP ${response.status} ${response.statusText}`
-          );
+      let attempt = 0;
+      let timeoutRetries = 0;
+      let lastError: unknown = null;
+      let lastClassification: BenchRetryClassification = "failure_max_retries";
+      while (attempt <= BENCH_HTTP_MAX_RETRIES) {
+        const controller = new AbortController();
+        let timedOut = false;
+        const timer = setTimeout(() => {
+          timedOut = true;
+          controller.abort();
+        }, input.timeoutMs ?? EXTRACTION_REQUEST_TIMEOUT_MS);
+        // Chain operator abort onto our controller so a cancel still aborts
+        // the in-flight fetch.
+        const onOperatorAbort = (): void => controller.abort();
+        if (input.abortSignal !== undefined) {
+          if (input.abortSignal.aborted) {
+            controller.abort();
+          } else {
+            input.abortSignal.addEventListener("abort", onOperatorAbort);
+          }
         }
-        const payload = (await response.json()) as {
-          readonly choices?: readonly {
-            readonly message?: { readonly content?: unknown };
-          }[];
-        };
-        const content = payload.choices?.[0]?.message?.content;
-        if (typeof content !== "string" || content.trim().length === 0) {
-          throw new Error("garden extraction returned no content");
+        try {
+          const response = await fetchImpl(`${config.providerUrl}/chat/completions`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              authorization: `Bearer ${config.apiKey}`
+            },
+            body: JSON.stringify({
+              model: config.model,
+              temperature: 0,
+              response_format: { type: "json_object" },
+              messages: [
+                { role: "system", content: input.systemPrompt },
+                { role: "user", content: input.userPrompt }
+              ]
+            }),
+            signal: controller.signal
+          });
+          if (!response.ok) {
+            const err = new Error(
+              `garden extraction HTTP ${response.status} ${response.statusText}`
+            );
+            (err as { status?: number }).status = response.status;
+            throw err;
+          }
+          const payload = (await response.json()) as {
+            readonly choices?: readonly {
+              readonly message?: { readonly content?: unknown };
+            }[];
+          };
+          const content = payload.choices?.[0]?.message?.content;
+          if (typeof content !== "string" || content.trim().length === 0) {
+            throw new Error("garden extraction returned no content");
+          }
+          return {
+            rawJson: content,
+            extractorMeta: {
+              recoveryKind: "none",
+              retryCount: attempt,
+              retryClassification:
+                attempt === 0 ? "success_first_try" : "success_after_retry"
+            }
+          };
+        } catch (error) {
+          lastError = error;
+          const status = readStatusFromBenchError(error);
+          // Operator abort: never retry.
+          if (
+            input.abortSignal?.aborted === true &&
+            !timedOut
+          ) {
+            lastClassification = "failure_aborted";
+            throw wrapBenchTransportError(error, lastClassification, attempt);
+          }
+          if (timedOut) {
+            // Timer-driven abort = timeout. Bounded retry — at most once.
+            lastClassification = "failure_timeout";
+            if (timeoutRetries >= BENCH_HTTP_MAX_TIMEOUT_RETRIES) {
+              throw wrapBenchTransportError(error, lastClassification, attempt);
+            }
+            timeoutRetries += 1;
+            if (attempt >= BENCH_HTTP_MAX_RETRIES) {
+              lastClassification = "failure_max_retries";
+              throw wrapBenchTransportError(error, lastClassification, attempt);
+            }
+            const jitterMs = computeBenchJitterMs(attempt, randomImpl);
+            attempt += 1;
+            await sleepImpl(jitterMs);
+            continue;
+          }
+          const classified = classifyBenchHttpError(error, status);
+          if (!classified.retryable) {
+            lastClassification = classified.classification;
+            throw wrapBenchTransportError(error, lastClassification, attempt);
+          }
+          if (attempt >= BENCH_HTTP_MAX_RETRIES) {
+            lastClassification = "failure_max_retries";
+            throw wrapBenchTransportError(error, lastClassification, attempt);
+          }
+          const jitterMs = computeBenchJitterMs(attempt, randomImpl);
+          attempt += 1;
+          await sleepImpl(jitterMs);
+        } finally {
+          clearTimeout(timer);
+          if (input.abortSignal !== undefined) {
+            input.abortSignal.removeEventListener("abort", onOperatorAbort);
+          }
         }
-        return { rawJson: content };
-      } finally {
-        clearTimeout(timer);
       }
+      // Defensive — loop always returns or throws.
+      throw wrapBenchTransportError(
+        lastError,
+        lastClassification,
+        attempt
+      );
     }
   };
+}
+
+// invariant: surface retry_classification + retry_count via the .cause chain
+// so dumpSeedExtractionFailureDiagnostic can pluck them without re-deriving
+// from the message. Tests assert on `.benchRetry` for the dump shape.
+function wrapBenchTransportError(
+  cause: unknown,
+  classification: BenchRetryClassification,
+  retryCount: number
+): Error {
+  const message =
+    cause instanceof Error ? cause.message : `garden extraction failed: ${String(cause)}`;
+  const wrapped = new Error(message);
+  (wrapped as { cause?: unknown }).cause = cause;
+  (wrapped as { benchRetry?: unknown }).benchRetry = {
+    retryCount,
+    retryClassification: classification
+  };
+  return wrapped;
+}
+
+function readStatusFromBenchError(error: unknown): number | null {
+  if (typeof error !== "object" || error === null) {
+    return null;
+  }
+  const status = (error as { readonly status?: unknown }).status;
+  if (typeof status === "number" && Number.isFinite(status)) {
+    return status;
+  }
+  if (error instanceof Error) {
+    const match = /\bHTTP\s+(\d{3})\b/u.exec(error.message);
+    if (match !== null) {
+      const parsed = Number.parseInt(match[1]!, 10);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+  return null;
 }
 
 /** Minimal daemon surface the compile seed path needs — test-stubbable. */
@@ -985,6 +1217,62 @@ function recordExtractionFailureSource(stats: CompileSeedExtractionStats): void 
   }
 }
 
+// invariant: shape mirror of the `benchRetry` field createGardenHttpExtractor
+// attaches via wrapBenchTransportError. A SignalExtractorError surfaces the
+// same fields via direct properties (retryCount / retryClassification); we
+// read whichever is present so a future transport switch keeps the dump
+// shape stable.
+interface BenchRetrySnapshot {
+  readonly retryCount: number;
+  readonly retryClassification: BenchRetryClassification;
+}
+
+function readBenchRetryFromError(error: unknown): BenchRetrySnapshot | null {
+  // invariant: depth-limited walk over the .cause chain so a
+  // GardenProviderError wrapping the bench HTTP transport error (cause-chain
+  // depth 1) still surfaces retry meta to the dump envelope. Two shapes are
+  // accepted at each link: `.benchRetry` (the createGardenHttpExtractor
+  // wrapBenchTransportError convention) and direct `.retryCount` /
+  // `.retryClassification` properties (the SignalExtractorError shape from
+  // pi-mono-extractor.ts).
+  let current: unknown = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (current === null || current === undefined) return null;
+    if (typeof current !== "object") return null;
+    const benchRetry = (current as { benchRetry?: unknown }).benchRetry;
+    if (typeof benchRetry === "object" && benchRetry !== null) {
+      const retryCount = (benchRetry as { retryCount?: unknown }).retryCount;
+      const classification = (benchRetry as { retryClassification?: unknown })
+        .retryClassification;
+      if (
+        typeof retryCount === "number" &&
+        Number.isFinite(retryCount) &&
+        typeof classification === "string"
+      ) {
+        return {
+          retryCount,
+          retryClassification: classification as BenchRetryClassification
+        };
+      }
+    }
+    const retryCount = (current as { retryCount?: unknown }).retryCount;
+    const classification = (current as { retryClassification?: unknown })
+      .retryClassification;
+    if (
+      typeof retryCount === "number" &&
+      Number.isFinite(retryCount) &&
+      typeof classification === "string"
+    ) {
+      return {
+        retryCount,
+        retryClassification: classification as BenchRetryClassification
+      };
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return null;
+}
+
 /**
  * Dump one seed-side extraction failure diagnostic to
  * `<diagnosticDir>/compile-seed-<ISO-ts>-<uuid>.json`. Captures the cache
@@ -1012,6 +1300,7 @@ async function dumpSeedExtractionFailureDiagnostic(input: {
   try {
     const timestamp = new Date().toISOString();
     const cacheKey = input.stats.lastCacheKey ?? null;
+    const benchRetry = readBenchRetryFromError(input.error);
     const envelope = {
       captured_at: timestamp,
       surface: "compile-seed",
@@ -1030,6 +1319,18 @@ async function dumpSeedExtractionFailureDiagnostic(input: {
       // failure landed in (live vs cached) is unambiguous.
       live_extraction_failures: input.stats.liveExtractionFailures,
       cached_extraction_failures: input.stats.cachedExtractionFailures,
+      // invariant: retry observability is parity with the provider-side dump
+      // (compute-provider.ts dumpInvalidResponseDiagnostic). retry_count and
+      // retry_classification let a dump consumer attribute the fallback to
+      // the terminal outcome of the retry loop (failure_max_retries vs
+      // failure_non_retryable_4xx vs failure_timeout) so a single readdir
+      // surfaces whether the bench is hitting a chronic 4xx or a transient
+      // burst that needs a higher retry budget. "unknown" only when the
+      // thrown error did not flow through createGardenHttpExtractor's
+      // wrapBenchTransportError (e.g. a non-HTTP path in a future
+      // transport).
+      retry_count: benchRetry?.retryCount ?? null,
+      retry_classification: benchRetry?.retryClassification ?? "unknown",
       error_message: stringifyError(input.error)
     };
     const fileName = `compile-seed-${timestamp.replace(/[:.]/gu, "-")}-${randomUUID()}.json`;
