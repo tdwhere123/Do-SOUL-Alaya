@@ -31,7 +31,13 @@ function buildCompileSeedDaemon(
 ): CompileSeedDaemon {
   return {
     proposeMemoryFromSignal: async (input) => onSignal(input),
-    proposeMemoriesFromCompileSignals: async (inputs) => inputs.map(onSignal)
+    proposeMemoriesFromCompileSignals: async (inputs) => inputs.map(onSignal),
+    // The compile-seed tests do not exercise the session-level L2 synthesis
+    // emission seam (covered by harness/daemon tests); the stub keeps the
+    // CompileSeedDaemon contract satisfied and returns a null synthesisId
+    // mirroring the no-op path the real daemon takes when no synthesis
+    // capsule is created.
+    proposeSynthesis: async () => ({ synthesisId: null })
   };
 }
 
@@ -226,6 +232,11 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       memoryId,
       signalId: `signal-${memoryId}`,
       proposalId: `proposal-${memoryId}`,
+      // The bench seeders attach a real evidence_capsule per durable memory;
+      // synthesizing one here mirrors the production row the materializer
+      // would have created. Tests that need the null-evidence branch can
+      // pass it explicitly via the helper at module bottom (makeSeed).
+      evidenceId: `evidence-${memoryId}`,
       truncated: false,
       charsClipped: 0
     };
@@ -620,6 +631,7 @@ describe("bench evidence capsule — production-faithful span", () => {
         memoryId: "memory-1",
         signalId: "signal-1",
         proposalId: "proposal-1",
+        evidenceId: "evidence-1",
         truncated: false,
         charsClipped: 0
       };
@@ -676,6 +688,7 @@ describe("bench evidence capsule — production-faithful span", () => {
         memoryId: "memory-1",
         signalId: "signal-1",
         proposalId: "proposal-1",
+        evidenceId: "evidence-1",
         truncated: false,
         charsClipped: 0
       };
@@ -718,6 +731,7 @@ describe("compile() signal-drop count is observable", () => {
         memoryId: `memory-${counter}`,
         signalId: `signal-${counter}`,
         proposalId: `proposal-${counter}`,
+        evidenceId: `evidence-${counter}`,
         truncated: false,
         charsClipped: 0
       };
@@ -796,6 +810,7 @@ describe("compile() signal-drop count is observable", () => {
         memoryId: `memory-${counter}`,
         signalId: `signal-${counter}`,
         proposalId: `proposal-${counter}`,
+        evidenceId: `evidence-${counter}`,
         truncated: false,
         charsClipped: 0
       };
@@ -1017,7 +1032,9 @@ function makeSeed(memoryId: string): SeededMemoryResult {
     memoryId,
     signalId: `signal-${memoryId}`,
     proposalId: `proposal-${memoryId}`,
-    evidenceId: `evidence-${memoryId}`
+    evidenceId: `evidence-${memoryId}`,
+    truncated: false,
+    charsClipped: 0
   };
 }
 
@@ -1138,10 +1155,12 @@ describe("compile-seed diagnostic dump (Phase A.1 instrument)", () => {
         memoryId: "memory-1",
         signalId: "signal-memory-1",
         proposalId: "proposal-memory-1",
+        evidenceId: "evidence-memory-1",
         truncated: false,
         charsClipped: 0
       }),
-      proposeMemoriesFromCompileSignals: async () => []
+      proposeMemoriesFromCompileSignals: async () => [],
+      proposeSynthesis: async () => ({ synthesisId: null })
     };
     const runner = createCompileSeedRunner({
       config,
@@ -1208,10 +1227,12 @@ describe("compile-seed diagnostic dump (Phase A.1 instrument)", () => {
         memoryId: "memory-1",
         signalId: "signal-memory-1",
         proposalId: "proposal-memory-1",
+        evidenceId: "evidence-memory-1",
         truncated: false,
         charsClipped: 0
       }),
-      proposeMemoriesFromCompileSignals: async () => []
+      proposeMemoriesFromCompileSignals: async () => [],
+      proposeSynthesis: async () => ({ synthesisId: null })
     };
     const runner = createCompileSeedRunner({
       config,
@@ -1423,15 +1444,10 @@ describe("dumpSeedExtractionFailureDiagnostic surfaces retry_classification", ()
     });
 
     const daemon = buildCompileSeedDaemon((input) => ({
-      object_id: `obj-${input.distilledFact.slice(0, 4)}`,
-      memory_entry_id: "mem-x",
-      memory_entry: {
-        memory_entry_id: "mem-x",
-        signal_id: "sig-x",
-        signal_kind: "potential_preference",
-        object_kind: "user_preference",
-        object_id: "obj-x"
-      } as never,
+      memoryId: `memory-${input.distilledFact.slice(0, 4)}`,
+      signalId: "signal-x",
+      proposalId: "proposal-x",
+      evidenceId: "evidence-x",
       truncated: false,
       charsClipped: 0
     }));

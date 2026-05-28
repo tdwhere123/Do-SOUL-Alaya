@@ -106,6 +106,10 @@ function makeQualityMetrics(
     path_stream_top10_rate: 0.2,
     path_stream_top10_count: Math.ceil(denominator * 0.2),
     path_stream_top10_denominator: denominator,
+    // Synthetic shard fixture: no per-plane gold candidates were exposed, so
+    // the per-plane recall coverage map is honestly empty. The zod schema
+    // defaults this to {} on parse; the type-level shape requires the key.
+    per_plane_recall_coverage: {},
     miss_distribution: {
       budget_dropped: budgetDropped,
       candidate_absent: candidateAbsent

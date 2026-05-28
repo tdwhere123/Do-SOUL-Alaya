@@ -6,10 +6,19 @@ import {
 } from "../garden/pi-mono-extractor.js";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "../garden/compute-provider.js";
 
+// The pi-ai `complete` seam shape — used as the explicit generic on vi.fn
+// so mock.calls[i] is typed as [Model<string>, Context, ProviderStreamOptions?]
+// instead of vitest's default `[]` inference from a zero-arg arrow.
+type PiMonoCompleteFn = NonNullable<
+  Parameters<typeof createPiMonoExtractor>[0]["complete"]
+>;
+
 describe("pi-mono-extractor-contract", () => {
   it("passes exact prompts and provider options into pi-ai complete", async () => {
     const signal = new AbortController().signal;
-    const completeImpl = vi.fn(async () => createAssistantMessage('{"signals":[]}'));
+    const completeImpl = vi.fn<PiMonoCompleteFn>(async () =>
+      createAssistantMessage('{"signals":[]}')
+    );
     const model = createModel();
     const extractor = createPiMonoExtractor({
       apiKey: "sk-live",
@@ -34,11 +43,8 @@ describe("pi-mono-extractor-contract", () => {
       }
     });
 
-    const [seenModel, context, options] = completeImpl.mock.calls[0] as [
-      Model<string>,
-      Context,
-      ProviderStreamOptions
-    ];
+    const firstCall = completeImpl.mock.calls[0]!;
+    const [seenModel, context, options] = firstCall;
     expect(seenModel).toBe(model);
     expect(context.systemPrompt).toBe(OFFICIAL_API_SYSTEM_PROMPT);
     expect(context.messages).toEqual([
@@ -47,11 +53,15 @@ describe("pi-mono-extractor-contract", () => {
         content: "turn payload"
       })
     ]);
-    expect(options.apiKey).toBe("sk-live");
-    expect(options.signal).toBe(signal);
-    expect(options.timeoutMs).toBe(456);
-    expect(options.maxRetries).toBe(0);
-    expect(options.onPayload).toEqual(expect.any(Function));
+    // options is non-null on every production call (the extractor always
+    // passes apiKey / signal / maxRetries / onPayload), but typed optional
+    // because the pi-ai surface allows callers to omit it.
+    expect(options).toBeDefined();
+    expect(options!.apiKey).toBe("sk-live");
+    expect(options!.signal).toBe(signal);
+    expect(options!.timeoutMs).toBe(456);
+    expect(options!.maxRetries).toBe(0);
+    expect(options!.onPayload).toEqual(expect.any(Function));
   });
 
   it("requests JSON mode for OpenAI Responses and Chat Completions payloads", async () => {
@@ -87,7 +97,9 @@ describe("pi-mono-extractor-contract", () => {
   });
 
   it("passes endpoint overrides to pi-ai as an OpenAI-compatible base URL", async () => {
-    const completeImpl = vi.fn(async () => createAssistantMessage('{"signals":[]}'));
+    const completeImpl = vi.fn<PiMonoCompleteFn>(async () =>
+      createAssistantMessage('{"signals":[]}')
+    );
     const extractor = createPiMonoExtractor({
       apiKey: "sk-test",
       model: "custom-model",
@@ -101,7 +113,7 @@ describe("pi-mono-extractor-contract", () => {
       userPrompt: "turn"
     });
 
-    const [model] = completeImpl.mock.calls[0] as [Model<string>, Context, ProviderStreamOptions];
+    const [model] = completeImpl.mock.calls[0]!;
     expect(model.id).toBe("gpt-4.1-mini");
     expect(model.api).toBe("openai-completions");
     expect(model.baseUrl).toBe("https://proxy.example.test/v1");
@@ -255,7 +267,7 @@ describe("pi-mono-extractor JSON recovery (Phase A.3)", () => {
 // (empty body, parse error, HTTP 5xx, HTTP 429). Auth/4xx must NOT retry.
 describe("pi-mono-extractor retry-with-jitter (Phase A.3)", () => {
   it("retries once after empty assistant text and surfaces retryCount=1 on success", async () => {
-    const sleep = vi.fn(async () => undefined);
+    const sleep = vi.fn<(ms: number) => Promise<void>>(async () => undefined);
     const random = vi.fn(() => 0.5);
     const complete = vi
       .fn<NonNullable<Parameters<typeof createPiMonoExtractor>[0]["complete"]>>()
