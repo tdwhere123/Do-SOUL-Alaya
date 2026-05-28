@@ -300,20 +300,30 @@ function buildMockDaemon(overrides: {
       provider_kind: "openai",
       model_id: "text-embedding-3-small"
     }));
+  const proposeMemory = vi.fn(async (_content: string, evidenceRef: string) => {
+    const diaId = evidenceRef.split("-").at(-1) ?? "unknown";
+    return {
+      memoryId: `memory-${diaId}`,
+      signalId: `signal-${diaId}`,
+      proposalId: `proposal-${diaId}`,
+      truncated: false,
+      charsClipped: 0
+    };
+  });
   return {
-    proposeMemory: vi.fn(async (_content: string, evidenceRef: string) => {
-      const diaId = evidenceRef.split("-").at(-1) ?? "unknown";
-      return {
-        memoryId: `memory-${diaId}`,
-        signalId: `signal-${diaId}`,
-        proposalId: `proposal-${diaId}`,
-        truncated: false,
-        charsClipped: 0
-      };
-    }),
+    proposeMemory,
     warmEmbeddingCache,
     warmQueryEmbeddingCache,
     recall,
+    attachWorkspace: vi.fn(async (input: { workspaceId: string; runId: string }) => ({
+      workspaceId: input.workspaceId,
+      runId: input.runId,
+      proposeMemory,
+      warmEmbeddingCache,
+      warmQueryEmbeddingCache,
+      recall,
+      detach: vi.fn(async () => undefined)
+    })),
     shutdown: vi.fn(async () => undefined)
   };
 }
