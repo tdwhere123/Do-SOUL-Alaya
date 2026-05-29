@@ -53,6 +53,12 @@ export {
   type SignalExtractorErrorKind
 } from "./pi-mono-extractor.js";
 export {
+  WallClockTimeoutError,
+  withWallClockTimeout,
+  type WallClockTimeoutDeps,
+  type WallClockTimeoutOptions
+} from "./wall-clock-timeout.js";
+export {
   DEGRADATION_CONSTANTS,
   DegradationPipeline,
   type DegradationAssessParams,

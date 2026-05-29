@@ -17,6 +17,10 @@ import {
 } from "./pi-mono-extractor.js";
 import { buildSchemaGroundedRawPayload } from "./schema-grounding.js";
 import { DISTILLED_FACT_MAX_CHARS } from "./materialization-router.js";
+import {
+  WallClockTimeoutError,
+  withWallClockTimeout
+} from "./wall-clock-timeout.js";
 
 export const GardenProviderKind = GardenProviderKinds;
 export type GardenProviderKind = GardenProviderKindValue;
@@ -40,6 +44,10 @@ interface OfficialApiGardenProviderDependencies {
   readonly model?: string | null;
   readonly endpoint?: string | null;
   readonly requestTimeoutMs?: number;
+  // invariant: outer wall-clock budget. Defaults to readTimeoutMs + 30s.
+  // Test seam.
+  // see also: packages/soul/src/garden/wall-clock-timeout.ts
+  readonly wallClockBudgetMs?: number;
   readonly extractor?: SignalExtractor;
   readonly now?: () => string;
   readonly generateSignalId?: () => string;
@@ -84,6 +92,14 @@ export class GardenProviderError extends Error {
 }
 
 const DEFAULT_OFFICIAL_API_REQUEST_TIMEOUT_MS = 10_000;
+// invariant: outer wall-clock budget = read timeout + grace. Read timeout
+// drives the inner SDK abort; wall-clock catches stale sockets the monotonic
+// timer cannot detect after host suspend.
+// see also: packages/soul/src/garden/wall-clock-timeout.ts
+const WALL_CLOCK_OUTER_GRACE_MS = 30_000;
+function wallClockBudgetFor(readTimeoutMs: number): number {
+  return readTimeoutMs + WALL_CLOCK_OUTER_GRACE_MS;
+}
 export const OFFICIAL_API_GARDEN_MODEL = "gpt-4.1-mini";
 
 // The distilled_fact contract below is the field-standard atomic-fact
@@ -112,6 +128,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
   private readonly model: string;
   private readonly endpoint: string | null;
   private readonly requestTimeoutMs: number;
+  private readonly wallClockBudgetMs: number;
   private readonly extractor: SignalExtractor | null;
   private readonly now: () => string;
   private readonly generateSignalId: () => string;
@@ -125,6 +142,9 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
     this.model = normalizeOptionalString(deps.model) ?? OFFICIAL_API_GARDEN_MODEL;
     this.endpoint = normalizeOptionalString(deps.endpoint);
     this.requestTimeoutMs = normalizePositiveTimeoutMs(deps.requestTimeoutMs) ?? DEFAULT_OFFICIAL_API_REQUEST_TIMEOUT_MS;
+    this.wallClockBudgetMs =
+      normalizePositiveTimeoutMs(deps.wallClockBudgetMs) ??
+      wallClockBudgetFor(this.requestTimeoutMs);
     this.extractor = deps.extractor ?? (this.apiKey === null
       ? null
       : createPiMonoExtractor({
@@ -260,11 +280,22 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
         }
       | null = null;
     try {
-      const response = await this.extractor.extract({
-        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-        userPrompt,
-        timeoutMs: this.requestTimeoutMs
-      });
+      // invariant: outer wall-clock guard. Inner timeoutMs drives the SDK's
+      // monotonic-clock abort; wall-clock fires after suspend-aware grace if
+      // the inner timer was frozen by host suspend.
+      // see also: packages/soul/src/garden/wall-clock-timeout.ts withWallClockTimeout
+      const extractor = this.extractor;
+      const requestTimeoutMs = this.requestTimeoutMs;
+      const response = await withWallClockTimeout(
+        async (signal) =>
+          extractor.extract({
+            systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+            userPrompt,
+            timeoutMs: requestTimeoutMs,
+            abortSignal: signal
+          }),
+        { budgetMs: this.wallClockBudgetMs }
+      );
       rawJson = response.rawJson;
       extractorMeta = response.extractorMeta ?? null;
       return parseOfficialApiSignals(rawJson);
@@ -277,6 +308,11 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       // chat noise, or the cache shard was torn. Network/timeout errors
       // skip the dump — they are observable from the bench log already
       // and the body is empty by definition.
+      // invariant: wall-clock timeout is a network-class failure, not an
+      // invalid_response. Body was never read; skip the diagnostic dump.
+      if (error instanceof WallClockTimeoutError) {
+        throw new GardenProviderError(error.message, "network", { cause: error });
+      }
       const isInvalidResponse =
         !(error instanceof SignalExtractorError) ||
         error.kind === "invalid_json";

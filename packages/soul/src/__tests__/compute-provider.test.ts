@@ -732,6 +732,42 @@ describe("OfficialApiGardenProvider diagnostic dump (Phase A.1 instrument)", () 
     ).rejects.toMatchObject({ name: "GardenProviderError", kind: "network" });
     expect(readdirSync(diagnosticDir).filter((f) => f.endsWith(".json"))).toHaveLength(0);
   });
+
+  // invariant: wall-clock outer guard fires when the inner extractor never
+  // resolves — the host-suspend hang root cause. The fetch promise never
+  // resolves, the SDK's monotonic setTimeout is also paused, and only the
+  // outer wall-clock check rescues the call.
+  // see also: packages/soul/src/garden/wall-clock-timeout.ts
+  it("aborts a hanging extractor via the outer wall-clock guard and classifies as network", async () => {
+    const hangingExtractor: SignalExtractor = {
+      extract: vi.fn(
+        (input) =>
+          new Promise((_, reject) => {
+            if (input.abortSignal?.aborted === true) {
+              reject(new Error("aborted-by-wall-clock"));
+              return;
+            }
+            input.abortSignal?.addEventListener("abort", () => {
+              reject(new Error("aborted-by-wall-clock"));
+            });
+          })
+      )
+    };
+    // Short wallClockBudgetMs override (test seam) so the test does not wait
+    // the production 30s grace; wall-clock-only behaviour is covered by
+    // wall-clock-timeout.test.ts.
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor: hangingExtractor,
+      requestTimeoutMs: 10_000,
+      wallClockBudgetMs: 100,
+      diagnosticDir: null
+    });
+    await expect(
+      provider.compile("Call me Ash.", createContext())
+    ).rejects.toMatchObject({ name: "GardenProviderError", kind: "network" });
+    expect(hangingExtractor.extract).toHaveBeenCalledTimes(1);
+  });
 });
 
 function createContext() {
