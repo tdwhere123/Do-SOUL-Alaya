@@ -1,4 +1,5 @@
 import { DYNAMICS_CONSTANTS, type ActivationWeights, type ActivationWeightsPatch, type RecallPolicy } from "@do-soul/alaya-protocol";
+import { RECALL_FUSION_STREAMS } from "@do-soul/alaya-core";
 import type { RecallWeightOverridesSummary } from "@do-soul/alaya-eval";
 
 export const ALAYA_RECALL_WEIGHT_OVERRIDES_ENV = "ALAYA_RECALL_WEIGHT_OVERRIDES";
@@ -20,25 +21,21 @@ const ADDITIVE_WEIGHT_KEYS = [
   "PATH_PLASTICITY_WEIGHT"
 ] as const;
 
-const FUSION_WEIGHT_KEYS = [
-  "lexical_fts",
-  "evidence_fts",
-  "evidence_structural_agreement",
-  "source_proximity",
-  "source_evidence_agreement",
-  "subject_alignment",
-  "structural",
-  "existing_score",
-  "embedding_similarity",
-  "graph_expansion",
-  "entity_seed",
-  "path_expansion",
-  "temporal_recency",
-  "workspace_activation",
+// see also: resolveRrfFusionWeights, resolveFusionScoringWeights (read these
+// non-stream knobs alongside per-stream weights)
+const FUSION_NON_STREAM_KEYS = [
   "RRF_K",
   "rrf_k",
   "QUERY_EVIDENCE_BASE_TRANSFER_MAX",
   "QUERY_EVIDENCE_BASE_WEIGHT_FLOOR"
+] as const;
+
+// invariant: per-stream keys derive from RECALL_FUSION_STREAMS, so every
+// allowed key maps to a real weight slot in resolveRrfFusionWeights and a
+// new stream is sweepable without editing this list.
+const FUSION_WEIGHT_KEYS = [
+  ...RECALL_FUSION_STREAMS,
+  ...FUSION_NON_STREAM_KEYS
 ] as const;
 
 type AdditiveWeightKey = (typeof ADDITIVE_WEIGHT_KEYS)[number];

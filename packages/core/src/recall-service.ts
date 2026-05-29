@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   ControlPlaneObjectKind,
   DYNAMICS_CONSTANTS,
-  MEMORY_GRAPH_EDGE_RECALL_WEIGHTS,
+  EDGE_TYPE_RECALL_MODEL,
   RecallContextEventType,
   RetentionPolicy,
   SoulRecallCompletedPayloadSchema,
@@ -146,16 +146,29 @@ const MAX_GRAPH_HOPS = 2;
 // so the per-plane admit ceiling is the structural truth and the multi-seed
 // path inherits the same bound. see also: DYNAMIC_RECALL_PLANE_CAP
 const MULTI_SEED_GRAPH_FAN_OUT_CAP = DYNAMIC_RECALL_PLANE_CAP;
+// invariant: membership equals EDGE_TYPE_RECALL_MODEL transitive rows
+// (asserted in recall-service.test.ts). order is load-bearing — indexOf
+// here drives the edge_type tie-break, so the array stays explicit rather
+// than derived from declaration order.
+// see also: shouldReplaceGraphExpansionCandidate, compareGraphExpansionCandidateDrafts
 const GRAPH_EXPANSION_TRACKED_EDGE_TYPES: readonly RecallGraphExpansionTrackedEdgeType[] = [
   "derives_from",
   "recalls",
   "supports"
 ];
-const EDGE_TYPE_HOP_DECAY: Readonly<Record<RecallGraphExpansionTrackedEdgeType, number>> = Object.freeze({
-  derives_from: 0.6,
-  recalls: 0.3,
-  supports: 0.5
-});
+// Derived view of EDGE_TYPE_RECALL_MODEL.hop_decay restricted to the
+// transitive rows; only read at hop >= 2 in expandGraph.
+const EDGE_TYPE_HOP_DECAY: Readonly<Record<RecallGraphExpansionTrackedEdgeType, number>> = Object.freeze(
+  Object.fromEntries(
+    GRAPH_EXPANSION_TRACKED_EDGE_TYPES.map((edgeType) => {
+      const decay = EDGE_TYPE_RECALL_MODEL[edgeType].hop_decay;
+      if (decay === null) {
+        throw new Error(`graph-expansion tracked edge_type "${edgeType}" has null hop_decay in EDGE_TYPE_RECALL_MODEL`);
+      }
+      return [edgeType, decay];
+    })
+  ) as Record<RecallGraphExpansionTrackedEdgeType, number>
+);
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
 const NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT = 0.24;
 const QUERY_EVIDENCE_BASE_TRANSFER_MAX = 0.25;
@@ -165,7 +178,10 @@ const RECALL_RRF_DEFAULT_K = 60;
 // this fraction of their raw fts rank so an inflected-only match cannot
 // out-RRF a memory that matched the original query surface terms.
 const EXPANDED_QUERY_RANK_DISCOUNT = 0.6;
-const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
+// Production fusion-stream identifiers (16). Exported so bench tuners can
+// derive their override whitelist from the live set instead of hand-copying
+// it. see also: apps/bench-runner/src/harness/recall-weight-overrides.ts
+export const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
   "lexical_fts",
   "trigram_fts",
   "synthesis_fts",
@@ -4360,7 +4376,10 @@ function draftPriority(draft: Readonly<CoarseCandidateDraft>): number {
 }
 
 function scoreGraphExpansionEdge(edge: Readonly<MemoryGraphEdge>): number {
-  return clamp01(Math.max(0, MEMORY_GRAPH_EDGE_RECALL_WEIGHTS[edge.edge_type] ?? 0));
+  // single-edge admission score = EDGE_TYPE_RECALL_MODEL.contribution_weight,
+  // floored at 0 so negative-signal edges never propagate in traversal (the
+  // inbound aggregate keeps the sign; see normalizeGraphSupport).
+  return clamp01(Math.max(0, EDGE_TYPE_RECALL_MODEL[edge.edge_type]?.contribution_weight ?? 0));
 }
 
 function toTrackedGraphExpansionEdgeType(
