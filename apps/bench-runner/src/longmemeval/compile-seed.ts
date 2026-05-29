@@ -915,6 +915,18 @@ export function preflightExtractionCache(input: {
   readonly systemPrompt: string;
   readonly allowLiveExtraction?: boolean;
   readonly manifest?: ExtractionCacheManifest | undefined;
+  // The distinct turn contents THIS run will extract (its --limit/--offset
+  // question window flattened to rounds + dedup). When present, the gate is
+  // window-containment: every one of these turns must already have a fixture on
+  // disk, regardless of the manifest's coverage scalar (which is only
+  // denominated against whatever window the LAST extraction-fill recorded). A
+  // staged `extraction-fill --limit 100` writing coverage=1.0 therefore can no
+  // longer let a `longmemeval --limit 500` run silently live-extract the
+  // unfilled 400. When absent (callers that do not flatten a turn window),
+  // the gate falls back to the manifest coverage scalar below.
+  // cross-file: apps/bench-runner/src/longmemeval/extraction-fill.ts
+  //   collectDistinctTurnContents (the producer side of the same dedup)
+  readonly requiredTurnContents?: readonly string[];
   readonly warn?: (message: string) => void;
 }): void {
   const manifest =
@@ -953,14 +965,46 @@ export function preflightExtractionCache(input: {
         "prompt change."
     );
   }
+  // Window-containment gate. When the caller hands the actual run window's
+  // distinct turns, validate THIS run's window directly against on-disk
+  // fixtures instead of trusting the manifest's coverage scalar. The scalar is
+  // denominated against whatever window the last extraction-fill recorded
+  // (extraction-fill.ts coverage = (requested - failures)/requested over that
+  // fill's --limit/--offset window), so a staged 100Q fill writing coverage=1.0
+  // would otherwise let a 500Q run pass preflight and silently live-extract the
+  // unfilled 400. Containment closes that sub-channel by asserting every turn
+  // this run needs has a fixture, regardless of the scalar.
+  if (input.requiredTurnContents !== undefined) {
+    const missing = countMissingTurnFixtures(
+      input.cacheRoot,
+      input.config.model,
+      input.systemPrompt,
+      input.requiredTurnContents
+    );
+    if (missing > 0 && input.allowLiveExtraction !== true) {
+      const total = input.requiredTurnContents.length;
+      throw new Error(
+        "[longmemeval preflight] extraction cache covers only part of this " +
+          `run's question window: ${missing} of ${total} distinct turns have ` +
+          "no fixture, so this run would live-extract the gap. The cache " +
+          "manifest's coverage scalar is relative to the window the last " +
+          "extraction-fill recorded, not this run's window. Run extraction-fill " +
+          "for the FULL --limit/--offset window of this run, or pass " +
+          "--allow-live-extraction to live-extract the gap on purpose."
+      );
+    }
+    return;
+  }
   const coverage = manifest.coverage;
-  // A manifest WITHOUT a coverage field is itself a gap: a pre-fill manifest
-  // (Slice A wrote provenance but not coverage) cannot prove the cache covers
-  // the dataset, so treating "coverage absent" as "coverage ok" would silently
-  // re-open the 466h live-run hole the guard exists to close. extraction-fill
-  // now always writes coverage, so a coverage-less manifest means the cache
-  // was never filled against a known denominator. Require the same explicit
-  // opt-in a low-coverage manifest requires.
+  // A manifest WITHOUT a coverage field is itself a gap: a provenance-only
+  // manifest (built before any fill recorded a denominator) cannot prove the
+  // cache covers the dataset, so treating "coverage absent" as "coverage ok"
+  // would silently re-open the 466h live-run hole the guard exists to close.
+  // extraction-fill now always writes coverage, so a coverage-less manifest
+  // means the cache was never filled against a known denominator. Require the
+  // same explicit opt-in a low-coverage manifest requires.
+  // single source for the denominator: resolveCompileSeedExtractionConfig +
+  // ExtractionCacheManifest.coverage (extraction-fill.ts writes it).
   if (coverage === undefined) {
     if (input.allowLiveExtraction !== true) {
       throw new Error(
@@ -987,6 +1031,29 @@ export function preflightExtractionCache(input: {
         "--allow-live-extraction to live-extract the gap on purpose."
     );
   }
+}
+
+/**
+ * Count, of `turnContents`, how many have NO fixture on disk under `cacheRoot`.
+ * Each turn's cache key is the same sha256(model\0systemPrompt\0turnContent)
+ * the caching extractor writes, so a present fixture proves a cache hit and a
+ * missing one proves a live extraction would be needed. Pure file stats, no
+ * LLM. cross-file: createCachingSignalExtractor (the writer of these fixtures).
+ */
+function countMissingTurnFixtures(
+  cacheRoot: string,
+  model: string,
+  systemPrompt: string,
+  turnContents: readonly string[]
+): number {
+  let missing = 0;
+  for (const turnContent of turnContents) {
+    const cacheKey = computeCacheKey(model, systemPrompt, turnContent);
+    if (!existsSync(cacheFilePath(cacheRoot, cacheKey))) {
+      missing += 1;
+    }
+  }
+  return missing;
 }
 
 /**
@@ -1018,6 +1085,15 @@ export function createCompileSeedRunner(options?: {
    * The model + prompt guards still apply; only the coverage gate is relaxed.
    */
   readonly allowLiveExtraction?: boolean;
+  /**
+   * The distinct turn contents THIS run will extract. When provided, the
+   * run-start preflight switches from the manifest coverage scalar to
+   * window-containment: every one of these turns must already have a fixture on
+   * disk. The runner passes its flattened question window so a staged
+   * extraction-fill cannot let a wider run silently live-extract the gap.
+   * cross-file: apps/bench-runner/src/longmemeval/runner.ts (passes the window)
+   */
+  readonly requiredTurnContents?: readonly string[];
   /**
    * Skip the run-start preflight entirely. For unit tests that drive the
    * runner with a hand-built config + temp cacheRoot and do not exercise the
@@ -1052,6 +1128,9 @@ export function createCompileSeedRunner(options?: {
       ...(options?.allowLiveExtraction === undefined
         ? {}
         : { allowLiveExtraction: options.allowLiveExtraction }),
+      ...(options?.requiredTurnContents === undefined
+        ? {}
+        : { requiredTurnContents: options.requiredTurnContents }),
       ...(manifest === undefined ? {} : { manifest })
     });
   }

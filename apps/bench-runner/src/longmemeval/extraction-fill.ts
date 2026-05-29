@@ -108,7 +108,7 @@ function buildFillUserPrompt(turnContent: string): string {
  * round content collapses to one task (and one cache key) regardless of which
  * question / session it came from.
  */
-function collectDistinctTurnContents(
+export function collectDistinctTurnContents(
   questions: readonly LongMemEvalQuestion[]
 ): readonly string[] {
   const seen = new Set<string>();
@@ -176,9 +176,10 @@ async function runBoundedPool<T>(
 
 /**
  * Run the extraction-fill pass. Asserts a non-fallback extraction model from
- * the Slice-A single source (env or cache manifest) and refuses to run if the
- * garden API key is unavailable AND any task would miss the cache — a fill pass
- * with no creds and an incomplete cache cannot fill anything.
+ * the single source (resolveCompileSeedExtractionConfig: env -> cache
+ * manifest.extraction_model) and refuses to run if the garden API key is
+ * unavailable AND any task would miss the cache — a fill pass with no creds and
+ * an incomplete cache cannot fill anything.
  */
 export async function runExtractionFill(
   options: ExtractionFillOptions
