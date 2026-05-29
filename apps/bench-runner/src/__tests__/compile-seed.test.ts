@@ -1396,6 +1396,75 @@ describe("createGardenHttpExtractor retry policy", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
+
+  // invariant: the wall-clock guard inside createGardenHttpExtractor must
+  // abort a hanging fetch even if the monotonic setTimeout has not yet fired.
+  // Models the bench-runner host-suspend hang: fetch never resolves and the
+  // operator-supplied timeoutMs is large enough that without the wall-clock
+  // tick the test would time out.
+  // see also: packages/soul/src/garden/wall-clock-timeout.ts
+  it("aborts a hanging fetch via AbortController so timeout retry classification fires", async () => {
+    // Fetch that resolves only when the abort signal fires. timeoutMs=20ms
+    // ensures the per-attempt timer triggers fast; the goal is to prove the
+    // abort path WIRES through to the fetch signal and exits the await.
+    // First attempt times out, then second attempt times out — exhausts the
+    // 1-timeout-retry budget and surfaces failure_timeout.
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(
+      (_input, init) =>
+        new Promise<Response>((_, reject) => {
+          const signal = (init as RequestInit | undefined)?.signal as
+            | AbortSignal
+            | undefined;
+          signal?.addEventListener("abort", () => {
+            reject(new Error("The user aborted a request."));
+          });
+        })
+    );
+    const sleep = vi.fn(async () => undefined);
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep,
+      random: () => 0
+    });
+    let thrown: unknown = null;
+    try {
+      await extractor.extract({
+        systemPrompt: "s",
+        userPrompt: "t",
+        timeoutMs: 20
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    const benchRetry = (thrown as {
+      benchRetry?: { retryCount: number; retryClassification: string };
+    }).benchRetry;
+    expect(benchRetry?.retryClassification).toBe("failure_timeout");
+    // 2 = first attempt + 1 timeout retry (BENCH_HTTP_MAX_TIMEOUT_RETRIES).
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does NOT abort a fetch that resolves within the timeout budget", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })
+    );
+    const sleep = vi.fn(async () => undefined);
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep,
+      random: () => 0
+    });
+    const result = await extractor.extract({
+      systemPrompt: "s",
+      userPrompt: "t",
+      timeoutMs: 60_000
+    });
+    expect(JSON.parse(result.rawJson)).toEqual({ signals: [] });
+    expect(result.extractorMeta?.retryClassification).toBe("success_first_try");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
 });
 
 // invariant: a full-bench seed-extraction failure must (a) bump

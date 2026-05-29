@@ -87,6 +87,12 @@ const GARDEN_PROVIDER_URL_ENV = "OFFICIAL_API_GARDEN_PROVIDER_URL";
 
 const DEFAULT_GARDEN_PROVIDER_URL = "https://yunwu.ai/v1";
 const EXTRACTION_REQUEST_TIMEOUT_MS = 60_000;
+// invariant: wall-clock tick guards against host suspend freezing the monotonic
+// setTimeout. setInterval also rides the monotonic clock, but libuv catches up
+// suppressed intervals on resume, so the wall-clock check fires within one
+// tick after wake.
+// see also: packages/soul/src/garden/wall-clock-timeout.ts WALL_CLOCK_TICK_MS
+const EXTRACTION_WALL_CLOCK_TICK_MS = 5_000;
 
 /**
  * The injectable `SignalExtractor` shape consumed by
@@ -593,12 +599,21 @@ export function createGardenHttpExtractor(
       while (attempt <= BENCH_HTTP_MAX_RETRIES) {
         const controller = new AbortController();
         let timedOut = false;
+        const budgetMs = input.timeoutMs ?? EXTRACTION_REQUEST_TIMEOUT_MS;
+        const startedAt = Date.now();
         const timer = setTimeout(() => {
           timedOut = true;
           controller.abort();
-        }, input.timeoutMs ?? EXTRACTION_REQUEST_TIMEOUT_MS);
-        // Chain operator abort onto our controller so a cancel still aborts
-        // the in-flight fetch.
+        }, budgetMs);
+        // invariant: wall-clock fallback. setTimeout is paused during host
+        // suspend; setInterval catches up on resume and the elapsed check
+        // detects budget overrun within one tick.
+        const wallClockTimer = setInterval(() => {
+          if (Date.now() - startedAt >= budgetMs) {
+            timedOut = true;
+            controller.abort();
+          }
+        }, EXTRACTION_WALL_CLOCK_TICK_MS);
         const onOperatorAbort = (): void => controller.abort();
         if (input.abortSignal !== undefined) {
           if (input.abortSignal.aborted) {
@@ -691,6 +706,7 @@ export function createGardenHttpExtractor(
           await sleepImpl(jitterMs);
         } finally {
           clearTimeout(timer);
+          clearInterval(wallClockTimer);
           if (input.abortSignal !== undefined) {
             input.abortSignal.removeEventListener("abort", onOperatorAbort);
           }
