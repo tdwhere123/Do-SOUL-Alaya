@@ -138,6 +138,43 @@ describe("preflightExtractionCache", () => {
       })
     ).not.toThrow();
   });
+
+  // @anchor finding-1-no-coverage-gap: a manifest WITHOUT a coverage field is a
+  // gap, not a silent pass. extraction-fill always writes coverage, so a
+  // coverage-less manifest means the cache was never filled against a known
+  // denominator.
+  it("throws on a manifest with NO coverage field when allow-live is not set", () => {
+    const { coverage: _omitCoverage, ...withoutCoverage } = manifestFor();
+    void _omitCoverage;
+    writeExtractionCacheManifest(
+      cacheRoot,
+      withoutCoverage as typeof withoutCoverage & { coverage?: number }
+    );
+    expect(() =>
+      preflightExtractionCache({
+        cacheRoot,
+        config: CONFIG,
+        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+      })
+    ).toThrow(/no coverage field.*--allow-live-extraction/su);
+  });
+
+  it("allows a NO-coverage manifest when allowLiveExtraction is true", () => {
+    const { coverage: _omitCoverage, ...withoutCoverage } = manifestFor();
+    void _omitCoverage;
+    writeExtractionCacheManifest(
+      cacheRoot,
+      withoutCoverage as typeof withoutCoverage & { coverage?: number }
+    );
+    expect(() =>
+      preflightExtractionCache({
+        cacheRoot,
+        config: CONFIG,
+        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+        allowLiveExtraction: true
+      })
+    ).not.toThrow();
+  });
 });
 
 describe("single-source extraction model", () => {

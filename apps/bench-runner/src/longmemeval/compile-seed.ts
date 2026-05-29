@@ -81,7 +81,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // fixture discipline used by the pinned dataset meta. The directory is
 // created lazily on the first credentialled run; it is empty (absent)
 // until then.
-const EXTRACTION_CACHE_ROOT = resolve(
+export const EXTRACTION_CACHE_ROOT = resolve(
   __dirname,
   "../../../../docs/bench-history/datasets/longmemeval-extraction-cache"
 );
@@ -898,6 +898,11 @@ export interface CompileSeedResult {
  *   - manifest present, `sha256(systemPrompt) !== manifest.system_prompt_sha256`:
  *     throw — the prompt drifted, so every key changed and the whole cache is
  *     dead.
+ *   - manifest present, NO `coverage` field AND not an allow-live/fill run:
+ *     throw — a pre-fill manifest cannot prove the cache covers the dataset,
+ *     so it is a gap requiring `--allow-live-extraction`. extraction-fill
+ *     always writes coverage, so a coverage-less manifest means an unfilled
+ *     cache.
  *   - manifest present, `coverage < threshold` AND not an allow-live/fill run:
  *     throw, telling the operator to run extraction-fill or pass
  *     `--allow-live-extraction`.
@@ -949,8 +954,26 @@ export function preflightExtractionCache(input: {
     );
   }
   const coverage = manifest.coverage;
+  // A manifest WITHOUT a coverage field is itself a gap: a pre-fill manifest
+  // (Slice A wrote provenance but not coverage) cannot prove the cache covers
+  // the dataset, so treating "coverage absent" as "coverage ok" would silently
+  // re-open the 466h live-run hole the guard exists to close. extraction-fill
+  // now always writes coverage, so a coverage-less manifest means the cache
+  // was never filled against a known denominator. Require the same explicit
+  // opt-in a low-coverage manifest requires.
+  if (coverage === undefined) {
+    if (input.allowLiveExtraction !== true) {
+      throw new Error(
+        "[longmemeval preflight] extraction cache manifest has no coverage " +
+          "field; the cache was never filled against a known dataset " +
+          "denominator, so this run could live-extract an unknown gap. Run " +
+          "extraction-fill (which writes coverage) to populate the cache, or " +
+          "pass --allow-live-extraction to live-extract on purpose."
+      );
+    }
+    return;
+  }
   if (
-    typeof coverage === "number" &&
     coverage < EXTRACTION_CACHE_COVERAGE_THRESHOLD &&
     input.allowLiveExtraction !== true
   ) {
