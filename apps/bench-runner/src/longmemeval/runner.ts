@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   RECALL_PIPELINE_VERSION,
@@ -91,6 +93,18 @@ import {
   appendSeedExtractionReleaseBlockerToFindings,
   appendSeedExtractionReleaseBlockerToReport
 } from "./seed-extraction-release-blocker.js";
+import {
+  BENCH_DAEMON_DB_FILENAME,
+  RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
+  checkpointAndCopyBenchDb,
+  readSchemaMigrationVersion,
+  writeSnapshotManifest,
+  writeSnapshotSidecar,
+  type LongMemEvalSnapshotQuestion,
+  type SnapshotExtractionProvenance
+} from "./snapshot.js";
+import { readExtractionCacheManifest } from "./extraction-cache-manifest.js";
+import { EXTRACTION_CACHE_ROOT } from "./compile-seed.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
@@ -125,6 +139,19 @@ export interface LongMemEvalRunOptions {
   // `limit`. Pairs with process-level sharding in
   // apps/bench-runner/scripts/run-full-public-bench.sh.
   readonly offset?: number;
+  // @anchor longmemeval-datadir-root: pin the bench daemon's DB to a fixed
+  // directory instead of a throwaway mkdtemp, so the seeded DB can be
+  // snapshotted for the recall-eval fast loop. Defaults to undefined (the
+  // daemon allocates its own mkdtemp), preserving existing behaviour.
+  // see also: apps/bench-runner/src/harness/daemon.ts startBenchDaemon
+  //   (dataDirRoot)
+  readonly dataDirRoot?: string;
+  // @anchor longmemeval-snapshot-out: when set, after the run completes the
+  // seeded DB is WAL-checkpointed + copied to this path, and the per-question
+  // scoring sidecar + a version-binding manifest are written beside it, so a
+  // later recall-eval --snapshot run skips both extraction and
+  // materialization. see also: apps/bench-runner/src/longmemeval/snapshot.ts
+  readonly snapshotOut?: string;
 }
 
 export interface LongMemEvalRunResult {
@@ -294,6 +321,10 @@ export async function runLongMemEval(
     // the run produced no proposals; the aggregator still returns
     // undefined in that case so the KPI omits the block.
     edgeProposalKpiRows: readonly EdgeProposalKpiEventRow[];
+    // @anchor longmemeval-snapshot-capture: per-question persisted scoring
+    // sidecar, populated only when opts.snapshotOut is set. Undefined on a
+    // normal run so the snapshot path adds zero cost.
+    snapshotQuestion?: LongMemEvalSnapshotQuestion;
   };
 
   async function runOneQuestion(
@@ -521,7 +552,24 @@ export async function runLongMemEval(
         reportSideEffectSnapshot,
         tokenMetrics,
         recallTokenEconomy,
-        edgeProposalKpiRows
+        edgeProposalKpiRows,
+        ...(opts.snapshotOut === undefined
+          ? {}
+          : {
+              snapshotQuestion: {
+                questionId: question.question_id,
+                question: question.question,
+                answerSessionIds: [...question.answer_session_ids],
+                workspaceId: workspace.workspaceId,
+                runId: workspace.runId,
+                sidecar: [...sidecar.values()].map((entry) => ({
+                  objectId: entry.objectId,
+                  objectKind: entry.objectKind,
+                  sessionId: entry.sessionId,
+                  hasAnswer: entry.hasAnswer
+                }))
+              }
+            })
       };
     } finally {
       const tDetach = phase.tick();
@@ -556,7 +604,20 @@ export async function runLongMemEval(
       : undefined
   );
   const collected: WorkerResult[] = [];
+  // @anchor longmemeval-snapshot-capture: when seeding for a recall-eval
+  // snapshot, capture each question's scoring sidecar + workspace ids so they
+  // can be persisted beside the DB (the seed loop otherwise discards them).
+  const snapshotQuestions: LongMemEvalSnapshotQuestion[] = [];
+  const captureSnapshot = opts.snapshotOut !== undefined;
   const benchRunId = `lme-bench-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  // dataDirRoot is pinned (not the daemon's throwaway mkdtemp) when a fixed
+  // dataDirRoot is requested OR a snapshot is being produced, so the seeded DB
+  // lands at a known path to checkpoint + copy.
+  const seedDataDirRoot =
+    opts.dataDirRoot ??
+    (captureSnapshot
+      ? await mkdtemp(join(tmpdir(), "alaya-bench-seed-"))
+      : undefined);
   const daemon = await startBenchDaemon({
     workspaceId: `${benchRunId}-default`,
     runId: `${benchRunId}-default-run`,
@@ -564,6 +625,7 @@ export async function runLongMemEval(
     ...(opts.embeddingProviderKind === undefined
       ? {}
       : { embeddingProviderKind: opts.embeddingProviderKind }),
+    ...(seedDataDirRoot === undefined ? {} : { dataDirRoot: seedDataDirRoot }),
     recallWeightOverrides
   });
   try {
@@ -572,9 +634,27 @@ export async function runLongMemEval(
       if (q === undefined) continue;
       const res = await runOneQuestion(daemon, q, i + 1, seedRunner);
       collected.push(res);
+      if (captureSnapshot && res.snapshotQuestion !== undefined) {
+        snapshotQuestions.push(res.snapshotQuestion);
+      }
       process.stdout.write(
         `[${i + 1}/${window.length}] ${q.question_id.slice(0, 8)} ` +
           `R@5=${res.hitAt5 ? "✓" : "✗"} latency=${res.latencyMs}ms\n`
+      );
+    }
+    // @anchor longmemeval-seed-then-snapshot: emit the recall-eval snapshot
+    // while the daemon DB connection is still open, so wal_checkpoint flushes
+    // every committed frame before the file copy. Runs only with --snapshot-out.
+    if (opts.snapshotOut !== undefined && seedDataDirRoot !== undefined) {
+      writeRecallEvalSnapshot({
+        snapshotOut: opts.snapshotOut,
+        seedDataDirRoot,
+        variant: opts.variant,
+        commitSha7,
+        snapshotQuestions
+      });
+      process.stdout.write(
+        `[longmemeval snapshot] wrote ${snapshotQuestions.length} questions -> ${opts.snapshotOut}\n`
       );
     }
   } finally {
@@ -1153,6 +1233,71 @@ function recallOptionsForPolicyShape(
     maxResults: 10,
     conflictAwareness: policyShape === "stress"
   };
+}
+
+/**
+ * @anchor longmemeval-seed-then-snapshot — produce a recall-eval snapshot.
+ *
+ * Checkpoints + copies the seeded daemon DB to `snapshotOut`, then writes the
+ * per-question scoring sidecar + a version-binding manifest beside it. Reads
+ * the schema migration version off the live DB and the extraction-cache
+ * manifest's provenance so recall-eval can bind the snapshot and inherit
+ * gate-only fields. MUST be called before daemon.shutdown() (the DB connection
+ * must be open for the checkpoint).
+ *
+ * see also: apps/bench-runner/src/longmemeval/snapshot.ts
+ * see also: apps/bench-runner/src/longmemeval/recall-eval.ts (consumer)
+ */
+function writeRecallEvalSnapshot(input: {
+  readonly snapshotOut: string;
+  readonly seedDataDirRoot: string;
+  readonly variant: LongMemEvalVariant;
+  readonly commitSha7: string;
+  readonly snapshotQuestions: readonly LongMemEvalSnapshotQuestion[];
+}): void {
+  const liveDbPath = resolve(input.seedDataDirRoot, BENCH_DAEMON_DB_FILENAME);
+  const schemaMigrationVersion = readSchemaMigrationVersion(liveDbPath);
+  checkpointAndCopyBenchDb(liveDbPath, input.snapshotOut);
+
+  const extractionManifest = readExtractionCacheManifest(EXTRACTION_CACHE_ROOT);
+  const extractionProvenance: SnapshotExtractionProvenance | null =
+    extractionManifest === undefined
+      ? null
+      : {
+          extraction_model: extractionManifest.extraction_model,
+          provider_url: extractionManifest.provider_url,
+          system_prompt_sha256: extractionManifest.system_prompt_sha256,
+          dataset: extractionManifest.dataset,
+          dataset_revision: extractionManifest.dataset_revision,
+          ...(extractionManifest.coverage === undefined
+            ? {}
+            : { coverage: extractionManifest.coverage }),
+          ...(extractionManifest.cached_turns === undefined
+            ? {}
+            : { cached_turns: extractionManifest.cached_turns }),
+          ...(extractionManifest.requested_turns === undefined
+            ? {}
+            : { requested_turns: extractionManifest.requested_turns })
+        };
+
+  writeSnapshotSidecar(input.snapshotOut, {
+    schema_version: RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
+    variant: input.variant,
+    questions: input.snapshotQuestions
+  });
+  writeSnapshotManifest(input.snapshotOut, {
+    schema_version: RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
+    variant: input.variant,
+    question_count: input.snapshotQuestions.length,
+    recall_pipeline_version: RECALL_PIPELINE_VERSION,
+    schema_migration_version: schemaMigrationVersion,
+    bench_runner_version: resolveBenchRunnerVersion(),
+    alaya_commit: input.commitSha7,
+    db_filename: input.snapshotOut.split("/").pop() ?? "snapshot.db",
+    sidecar_filename: `${(input.snapshotOut.split("/").pop() ?? "snapshot.db")}.sidecar.json`,
+    built_at: new Date().toISOString(),
+    extraction_provenance: extractionProvenance
+  });
 }
 
 /**

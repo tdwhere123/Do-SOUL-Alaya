@@ -1445,7 +1445,13 @@ export async function startBenchDaemon(
     input: { readonly workspaceId: string; readonly runId: string }
   ): Promise<BenchWorkspaceHandle> {
     if (!knownWorkspaces.has(input.workspaceId)) {
-      await seedBenchWorkspaceAndRun(dataDir, input.workspaceId, input.runId);
+      // @anchor recall-eval-snapshot-restore: a restored snapshot DB already
+      // carries the seeded workspace rows; the daemon's in-memory
+      // knownWorkspaces Set starts empty, so probe the DB and seed only the run
+      // when the workspace row already exists (recreating it would violate the
+      // workspaces.workspace_id UNIQUE constraint). see also:
+      // apps/bench-runner/src/longmemeval/recall-eval.ts
+      await seedBenchWorkspaceIfAbsent(dataDir, input.workspaceId, input.runId);
       knownWorkspaces.add(input.workspaceId);
     } else {
       await seedBenchRunOnly(dataDir, input.workspaceId, input.runId);
@@ -2094,6 +2100,26 @@ async function seedBenchWorkspaceAndRun(
   });
 }
 
+// @anchor seedBenchWorkspaceIfAbsent — first-attach seed that tolerates a
+// workspace row already present in a restored recall-eval snapshot DB. Probes
+// the workspace by id: absent -> create workspace + run (normal first attach);
+// present -> seed only the run, idempotently, since the snapshot already holds
+// the materialized workspace. see also: seedBenchWorkspaceAndRun, seedBenchRunOnly
+async function seedBenchWorkspaceIfAbsent(
+  dataDir: string,
+  workspaceId: string,
+  runId: string
+): Promise<void> {
+  const db = initDatabase({ filename: join(dataDir, "alaya.db") });
+  const workspaceRepo = new SqliteWorkspaceRepo(db);
+  const existing = await workspaceRepo.getById(workspaceId);
+  if (existing === null) {
+    await seedBenchWorkspaceAndRun(dataDir, workspaceId, runId);
+    return;
+  }
+  await seedBenchRunIfAbsent(dataDir, workspaceId, runId);
+}
+
 // @anchor seedBenchRunOnly — extend an already-created workspace with a
 // fresh run row; bench attachWorkspace path when the workspaceId is reused
 // across rebinds. see also: seedBenchWorkspaceAndRun
@@ -2102,8 +2128,23 @@ async function seedBenchRunOnly(
   workspaceId: string,
   runId: string
 ): Promise<void> {
+  await seedBenchRunIfAbsent(dataDir, workspaceId, runId);
+}
+
+// Idempotent run seed: a restored snapshot already carries the run row keyed by
+// the same runId the sidecar persisted, so a duplicate create would violate the
+// runs.run_id constraint. Skip when the run already exists.
+async function seedBenchRunIfAbsent(
+  dataDir: string,
+  workspaceId: string,
+  runId: string
+): Promise<void> {
   const db = initDatabase({ filename: join(dataDir, "alaya.db") });
   const runRepo = new SqliteRunRepo(db);
+  const existing = await runRepo.getById(runId);
+  if (existing !== null) {
+    return;
+  }
   runRepo.create({
     run_id: runId,
     workspace_id: workspaceId,

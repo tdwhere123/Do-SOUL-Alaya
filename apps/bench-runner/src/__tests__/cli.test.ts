@@ -44,6 +44,22 @@ describe("bench-runner CLI", () => {
     expect(stdoutBuf).toContain("--force");
   });
 
+  it("mentions extraction-fill and recall-eval in help output", async () => {
+    const exitCode = await runCli(["--help"]);
+
+    expect(exitCode).toBe(0);
+    expect(stdoutBuf).toContain("extraction-fill");
+    expect(stdoutBuf).toContain("recall-eval --snapshot <db>");
+    expect(stdoutBuf).toContain("--concurrency N");
+  });
+
+  it("recall-eval without --snapshot exits 2 with an actionable message", async () => {
+    const exitCode = await runCli(["recall-eval", "--variant", "s"]);
+
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toMatch(/--snapshot <db> required/);
+  });
+
   it("rejects invalid embedding modes instead of silently disabling embeddings", async () => {
     const exitCode = await runCli(["longmemeval", "--embedding", "evn"]);
 

@@ -48,6 +48,8 @@ import {
 import { writeExternalDiagnosticsArtifact } from "./longmemeval/diagnostics-artifacts.js";
 import { runLiveBench } from "./live/runner.js";
 import { runLongMemEval } from "./longmemeval/runner.js";
+import { runExtractionFill } from "./longmemeval/extraction-fill.js";
+import { runRecallEval } from "./longmemeval/recall-eval.js";
 import {
   appendSeedExtractionReleaseBlockerToFindings,
   appendSeedExtractionReleaseBlockerToReport,
@@ -81,6 +83,8 @@ Usage:
   alaya-bench-runner live [--source <main-check.json|main-check-run.json>] [--history-root <path>]
   alaya-bench-runner controlled-replay [--history-root <path>]
   alaya-bench-runner merge-longmemeval --shards <dir1> <dir2> ... --variant <v> --history-root <path>
+  alaya-bench-runner extraction-fill [--variant oracle|s|m] [--limit N] [--offset N] [--concurrency N] [--data-dir <path>]
+  alaya-bench-runner recall-eval --snapshot <db> [--variant oracle|s|m] [--limit N] [--offset N] [--policy-shape stress|chat] [--weights '<json>'] [--history-root <path>]
   alaya-bench-runner --help
 
 Variants:
@@ -138,6 +142,10 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
       return runControlledReplayCommand(opts);
     case "merge-longmemeval":
       return runMergeLongMemEvalCommand(opts);
+    case "extraction-fill":
+      return runExtractionFillCommand(opts);
+    case "recall-eval":
+      return runRecallEvalCommand(opts);
     default:
       process.stderr.write(
         `alaya-bench-runner: unknown command '${command ?? ""}'\n${HELP_TEXT}`
@@ -161,6 +169,8 @@ interface ParsedFlags {
   readonly weightOverridesJson?: string;
   readonly rounds?: number;
   readonly force: boolean;
+  readonly snapshot?: string;
+  readonly concurrency?: number;
 }
 
 function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
@@ -177,6 +187,8 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   let weightOverridesJson: string | undefined;
   let rounds: number | undefined;
   let force = false;
+  let snapshot: string | undefined;
+  let concurrency: number | undefined;
   const shards: string[] = [];
   let collectingShards = false;
 
@@ -262,6 +274,20 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
     } else if (token === "--data-dir") {
       dataDir = args[++i];
       collectingShards = false;
+    } else if (token === "--snapshot" || token.startsWith("--snapshot=")) {
+      snapshot = token.startsWith("--snapshot=")
+        ? token.slice("--snapshot=".length)
+        : args[++i];
+      collectingShards = false;
+    } else if (token === "--concurrency" || token.startsWith("--concurrency=")) {
+      const raw = token.startsWith("--concurrency=")
+        ? token.slice("--concurrency=".length)
+        : args[++i];
+      if (raw !== undefined) {
+        const parsed = parseInt(raw, 10);
+        if (!Number.isNaN(parsed) && parsed > 0) concurrency = parsed;
+      }
+      collectingShards = false;
     } else if (token === "--force") {
       force = true;
       collectingShards = false;
@@ -300,7 +326,9 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
     simulateReport,
     weightOverridesJson,
     rounds,
-    force
+    force,
+    snapshot,
+    concurrency
   };
 }
 
@@ -1420,6 +1448,90 @@ async function runMergeLongMemEvalCommand(
   } catch (err) {
     process.stderr.write(
       `alaya-bench-runner merge-longmemeval: ${err instanceof Error ? err.message : String(err)}\n`
+    );
+    return 2;
+  }
+}
+
+/**
+ * @anchor extraction-fill-command — Layer 1 (slow, one-time, daemon-free).
+ * Fills the extraction cache + writes the cache manifest (incl. coverage).
+ * see also: apps/bench-runner/src/longmemeval/extraction-fill.ts
+ */
+async function runExtractionFillCommand(opts: ParsedFlags): Promise<number> {
+  try {
+    process.stdout.write(
+      `Filling extraction cache for ${opts.variant}` +
+        (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
+        (opts.limit !== undefined ? ` limit=${opts.limit}` : "") +
+        (opts.concurrency !== undefined ? ` concurrency=${opts.concurrency}` : "") +
+        "...\n"
+    );
+    const result = await runExtractionFill({
+      variant: opts.variant,
+      ...(opts.limit === undefined ? {} : { limit: opts.limit }),
+      ...(opts.offset === undefined ? {} : { offset: opts.offset }),
+      ...(opts.concurrency === undefined ? {} : { concurrency: opts.concurrency }),
+      ...(opts.dataDir === undefined ? {} : { dataDir: opts.dataDir })
+    });
+    process.stdout.write(
+      `Done. requested_turns=${result.requestedTurns} ` +
+        `cache_hits=${result.cacheHits} newly_extracted=${result.newlyExtracted} ` +
+        `failures=${result.failures} coverage=${pct(result.coverage)}\n`
+    );
+    return result.failures > 0 ? 1 : 0;
+  } catch (err) {
+    process.stderr.write(
+      `alaya-bench-runner extraction-fill: ${err instanceof Error ? err.message : String(err)}\n`
+    );
+    return 2;
+  }
+}
+
+/**
+ * @anchor recall-eval-command — Layers 2+3 (fast, every iteration). Recall-only
+ * against a seeded-DB snapshot; no LLM, no materialization.
+ * see also: apps/bench-runner/src/longmemeval/recall-eval.ts
+ */
+async function runRecallEvalCommand(opts: ParsedFlags): Promise<number> {
+  if (opts.snapshot === undefined) {
+    process.stderr.write(
+      "alaya-bench-runner recall-eval: --snapshot <db> required\n"
+    );
+    return 2;
+  }
+  try {
+    process.stdout.write(
+      `Running recall-eval against snapshot ${opts.snapshot}` +
+        (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
+        (opts.limit !== undefined ? ` limit=${opts.limit}` : "") +
+        ` policy_shape=${opts.policyShape}` +
+        (opts.weightOverridesJson !== undefined ? " weights=cli" : "") +
+        "...\n"
+    );
+    const result = await runRecallEval({
+      snapshotDbPath: opts.snapshot,
+      variant: opts.variant,
+      ...(opts.limit === undefined ? {} : { limit: opts.limit }),
+      ...(opts.offset === undefined ? {} : { offset: opts.offset }),
+      historyRoot: opts.historyRoot,
+      policyShape: opts.policyShape,
+      simulateReport: opts.simulateReport,
+      ...(opts.weightOverridesJson === undefined
+        ? {}
+        : { weightOverridesJson: opts.weightOverridesJson })
+    });
+    const kpi = result.payload.kpi;
+    process.stdout.write(
+      `Done. Slug: ${result.slug}\n` +
+        `  R@1=${pct(kpi.r_at_1)} R@5=${pct(kpi.r_at_5)} R@10=${pct(kpi.r_at_10)}\n` +
+        `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
+        `  KPI: ${result.kpiPath}\n`
+    );
+    return exitCodeForVerdicts(result.payload.diff_vs_previous?.verdict_per_kpi);
+  } catch (err) {
+    process.stderr.write(
+      `alaya-bench-runner recall-eval: ${err instanceof Error ? err.message : String(err)}\n`
     );
     return 2;
   }
