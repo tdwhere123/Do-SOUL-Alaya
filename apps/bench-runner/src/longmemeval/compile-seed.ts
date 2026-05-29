@@ -17,11 +17,16 @@ const DEFAULT_COMPILE_SEED_DIAGNOSTIC_DIR_REL =
 const COMPILE_SEED_CACHE_KEY_PREFIX_CHARS = 12;
 import { resolveSecretRef } from "@do-soul/alaya";
 import {
-  OFFICIAL_API_GARDEN_MODEL,
+  OFFICIAL_API_SYSTEM_PROMPT,
   OfficialApiGardenProvider,
   parseOfficialApiSignals,
   type GardenCompileContext
 } from "@do-soul/alaya-soul";
+import {
+  computeSystemPromptSha256,
+  readExtractionCacheManifest,
+  type ExtractionCacheManifest
+} from "./extraction-cache-manifest.js";
 import type {
   BenchSignalSeedInput,
   BenchSynthesisSeedInput,
@@ -84,8 +89,30 @@ const EXTRACTION_CACHE_ROOT = resolve(
 const GARDEN_SECRET_REF_ENV = "ALAYA_OFFICIAL_GARDEN_SECRET_REF";
 const GARDEN_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";
 const GARDEN_PROVIDER_URL_ENV = "OFFICIAL_API_GARDEN_PROVIDER_URL";
+const ALLOW_LIVE_EXTRACTION_ENV = "ALAYA_BENCH_ALLOW_LIVE_EXTRACTION";
+
+/**
+ * Single source for the operator opt-in that relaxes the run-start coverage
+ * gate so a run may deliberately live-extract the uncovered cache gap. Shared
+ * by the three LongMemEval entrypoints so the flag is resolved one way.
+ * Truthy values: "1" / "true" (case-insensitive).
+ */
+export function resolveBenchAllowLiveExtraction(
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  const value = env[ALLOW_LIVE_EXTRACTION_ENV];
+  if (value === undefined) {
+    return false;
+  }
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true";
+}
 
 const DEFAULT_GARDEN_PROVIDER_URL = "https://yunwu.ai/v1";
+// Run-start coverage threshold. A populated cache below this coverage means a
+// run would live-extract a large gap; the operator must pass an explicit
+// allow-live / fill flag rather than have a slow live run start silently.
+const EXTRACTION_CACHE_COVERAGE_THRESHOLD = 0.95;
 const EXTRACTION_REQUEST_TIMEOUT_MS = 60_000;
 // invariant: wall-clock tick guards against host suspend freezing the monotonic
 // setTimeout. setInterval also rides the monotonic clock, but libuv catches up
@@ -254,17 +281,47 @@ export function toSeedExtractionPathKpi(
 }
 
 /**
- * Resolve garden LLM configuration from the process environment. When the
- * secret ref is absent or unresolvable, `apiKey` is null and the seed path
- * falls back to the deterministic no-LLM path.
+ * Resolve garden LLM configuration for the bench seed path. When the secret
+ * ref is absent or unresolvable, `apiKey` is null and the seed path falls back
+ * to the deterministic no-LLM path.
+ *
+ * Single-source extraction model — NO silent production-constant fallback.
+ * The model is resolved from ONE of, in order:
+ *   1. env `OFFICIAL_API_GARDEN_MODEL` (operator override at run time)
+ *   2. the cache's own `manifest.extraction_model` (the cache self-describes
+ *      what it was built with)
+ * If neither is present, this THROWS. The old behaviour silently fell back to
+ * the compile-time production constant `gpt-4.1-mini`; when the cache was
+ * built with a different model that fallback produced a 100% cache miss that
+ * looked like a slow run (466h live extraction) rather than an error. The
+ * same resolved `model` value is what the cache-key hash component consumes
+ * (createCachingSignalExtractor -> computeCacheKey), so the provider config
+ * and the cache key can never independently re-derive a disagreeing model.
+ *
+ * cross-file: apps/bench-runner/src/longmemeval/extraction-cache-manifest.ts
  */
 export function resolveCompileSeedExtractionConfig(
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  manifest?: ExtractionCacheManifest | undefined
 ): CompileSeedExtractionConfig {
   const providerUrl = normalizeBaseUrl(
-    readNonEmpty(env[GARDEN_PROVIDER_URL_ENV]) ?? DEFAULT_GARDEN_PROVIDER_URL
+    readNonEmpty(env[GARDEN_PROVIDER_URL_ENV]) ??
+      manifest?.provider_url ??
+      DEFAULT_GARDEN_PROVIDER_URL
   );
-  const model = readNonEmpty(env[GARDEN_MODEL_ENV]) ?? OFFICIAL_API_GARDEN_MODEL;
+  const model =
+    readNonEmpty(env[GARDEN_MODEL_ENV]) ?? manifest?.extraction_model;
+  if (model === undefined || model.trim().length === 0) {
+    throw new Error(
+      "bench extraction model is unresolved: neither env " +
+        `${GARDEN_MODEL_ENV} is set nor does the extraction cache manifest ` +
+        "declare extraction_model. Source the bench env " +
+        "(set -a; . .do-it/bench-env/alaya-api.env; set +a) or build the " +
+        "cache manifest first. Refusing to fall back to a default model — a " +
+        "wrong default silently misses every cache key and degrades to a " +
+        "full live extraction."
+    );
+  }
   const secretRef = readNonEmpty(env[GARDEN_SECRET_REF_ENV]);
   if (secretRef === undefined) {
     return { providerUrl, model, apiKey: null };
@@ -826,6 +883,90 @@ export interface CompileSeedResult {
 }
 
 /**
+ * Run-start fail-loud guard. Runs in ~1s (file read + sha256, zero LLM) and
+ * turns the otherwise-silent "wrong model / changed prompt / uncovered cache"
+ * failures — which today only surface as a 466h slow run — into an immediate,
+ * actionable throw.
+ *
+ * Behaviour by case:
+ *   - NO manifest (first-ever build, before any fill pass): allow live, log
+ *     loudly to stderr. This is the only path that may legitimately live-
+ *     extract from an empty cache.
+ *   - manifest present, `config.model !== manifest.extraction_model`: throw,
+ *     naming both values — the cache would 0-hit and the run would be a full
+ *     live extraction.
+ *   - manifest present, `sha256(systemPrompt) !== manifest.system_prompt_sha256`:
+ *     throw — the prompt drifted, so every key changed and the whole cache is
+ *     dead.
+ *   - manifest present, `coverage < threshold` AND not an allow-live/fill run:
+ *     throw, telling the operator to run extraction-fill or pass
+ *     `--allow-live-extraction`.
+ *
+ * cross-file: apps/bench-runner/src/longmemeval/extraction-cache-manifest.ts
+ */
+export function preflightExtractionCache(input: {
+  readonly cacheRoot: string;
+  readonly config: CompileSeedExtractionConfig;
+  readonly systemPrompt: string;
+  readonly allowLiveExtraction?: boolean;
+  readonly manifest?: ExtractionCacheManifest | undefined;
+  readonly warn?: (message: string) => void;
+}): void {
+  const manifest =
+    input.manifest ?? readExtractionCacheManifest(input.cacheRoot);
+  const warn =
+    input.warn ?? ((message: string) => process.stderr.write(`${message}\n`));
+  if (manifest === undefined) {
+    warn(
+      "[longmemeval preflight] no extraction-cache manifest at " +
+        `${input.cacheRoot}; treating as first-ever build. The cache cannot ` +
+        "be validated and a credentialled run will live-extract every turn. " +
+        "After this run, build/commit the cache manifest so later runs fail " +
+        "loud on model/prompt drift instead of silently re-extracting."
+    );
+    return;
+  }
+  if (input.config.model !== manifest.extraction_model) {
+    throw new Error(
+      "[longmemeval preflight] extraction model mismatch: resolved model " +
+        `"${input.config.model}" != cache manifest extraction_model ` +
+        `"${manifest.extraction_model}". The cache would miss every key and ` +
+        "this run would be a full live extraction (~466h). Set " +
+        `${GARDEN_MODEL_ENV}=${manifest.extraction_model} (e.g. ` +
+        "set -a; . .do-it/bench-env/alaya-api.env; set +a) or rebuild the " +
+        "cache for the new model."
+    );
+  }
+  const systemPromptSha256 = computeSystemPromptSha256(input.systemPrompt);
+  if (systemPromptSha256 !== manifest.system_prompt_sha256) {
+    throw new Error(
+      "[longmemeval preflight] system prompt drift: sha256(systemPrompt) " +
+        `"${systemPromptSha256}" != cache manifest system_prompt_sha256 ` +
+        `"${manifest.system_prompt_sha256}". A prompt change invalidates ` +
+        "every cache key, so this run would re-extract the entire dataset " +
+        "live (~466h). Rebuild the cache for the new prompt or revert the " +
+        "prompt change."
+    );
+  }
+  const coverage = manifest.coverage;
+  if (
+    typeof coverage === "number" &&
+    coverage < EXTRACTION_CACHE_COVERAGE_THRESHOLD &&
+    input.allowLiveExtraction !== true
+  ) {
+    const coveragePct = (coverage * 100).toFixed(1);
+    throw new Error(
+      "[longmemeval preflight] extraction cache coverage " +
+        `${coveragePct}% is below the ${(
+          EXTRACTION_CACHE_COVERAGE_THRESHOLD * 100
+        ).toFixed(0)}% threshold; this run would live-extract the uncovered ` +
+        "gap. Run extraction-fill to populate the cache, or pass " +
+        "--allow-live-extraction to live-extract the gap on purpose."
+    );
+  }
+}
+
+/**
  * Build the compile-based seed runner for a whole bench run.
  *
  * When garden credentials are configured, it constructs the production
@@ -834,6 +975,11 @@ export interface CompileSeedResult {
  * `OFFICIAL_API_SYSTEM_PROMPT`. When no credentials are configured, it takes
  * the degraded no-LLM fallback (the full turn becomes one candidate fact);
  * `stats.path` records which path ran so the bench report can disclose it.
+ *
+ * At assembly time a run-start fail-loud guard (preflightExtractionCache)
+ * validates the resolved model + system prompt + cache coverage against the
+ * cache's self-describing manifest, so a model/prompt/coverage drift throws
+ * in ~1s instead of silently degrading to a 466h live run.
  *
  * `options.extractorFactory` overrides the live LLM delegate for tests.
  */
@@ -844,6 +990,18 @@ export function createCompileSeedRunner(options?: {
     config: CompileSeedExtractionConfig
   ) => BenchSignalExtractor;
   /**
+   * Opt out of the run-start coverage guard so the run may live-extract the
+   * uncovered cache gap on purpose (extraction-fill / explicit live re-run).
+   * The model + prompt guards still apply; only the coverage gate is relaxed.
+   */
+  readonly allowLiveExtraction?: boolean;
+  /**
+   * Skip the run-start preflight entirely. For unit tests that drive the
+   * runner with a hand-built config + temp cacheRoot and do not exercise the
+   * manifest guard. Production runner entrypoints never set this.
+   */
+  readonly skipPreflight?: boolean;
+  /**
    * Override the directory the seed-side diagnostic dump writes failure
    * envelopes to. Defaults to
    * `<cwd>/data/diagnostics/seed-extraction-failures/`. Pass `null` to
@@ -852,7 +1010,28 @@ export function createCompileSeedRunner(options?: {
    */
   readonly diagnosticDir?: string | null;
 }): CompileSeedRunner {
-  const config = options?.config ?? resolveCompileSeedExtractionConfig();
+  const cacheRoot = options?.cacheRoot ?? EXTRACTION_CACHE_ROOT;
+  // The cache self-describes its build model/prompt/coverage. Read it once so
+  // both config resolution (env-absent -> manifest.extraction_model, never the
+  // production constant) and the run-start guard consume the same source.
+  const manifest = options?.config
+    ? undefined
+    : readExtractionCacheManifest(cacheRoot);
+  const config =
+    options?.config ?? resolveCompileSeedExtractionConfig(process.env, manifest);
+  // Run-start fail-loud guard. Skipped only for unit tests that hand-build the
+  // config + a manifest-less temp cacheRoot; production entrypoints never skip.
+  if (options?.skipPreflight !== true) {
+    preflightExtractionCache({
+      cacheRoot,
+      config,
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      ...(options?.allowLiveExtraction === undefined
+        ? {}
+        : { allowLiveExtraction: options.allowLiveExtraction }),
+      ...(manifest === undefined ? {} : { manifest })
+    });
+  }
   const credentialled = config.apiKey !== null;
   const stats: CompileSeedExtractionStats = {
     path: credentialled ? "official_api_compile" : "no_credentials_fallback",
@@ -913,9 +1092,7 @@ export function createCompileSeedRunner(options?: {
               options?.extractorFactory?.(config) ??
               createGardenHttpExtractor(config),
             model: config.model,
-            ...(options?.cacheRoot === undefined
-              ? {}
-              : { cacheRoot: options.cacheRoot }),
+            cacheRoot,
             stats
           }),
           requestTimeoutMs: EXTRACTION_REQUEST_TIMEOUT_MS,

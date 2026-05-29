@@ -52,6 +52,7 @@ import {
   buildSessionSynthesisInput,
   computeNextTurnSeedRefs,
   createCompileSeedRunner,
+  resolveBenchAllowLiveExtraction,
   toSeedExtractionPathKpi,
   type CompileSeedRunner,
   type SessionSeededTurn
@@ -372,7 +373,16 @@ export async function runLongMemEvalMultiturn(
 
   // invariant: one seed runner for the whole run so the on-disk extraction
   // cache and stats accumulate across questions; seed-time only.
-  const seedRunner = createCompileSeedRunner();
+  // createCompileSeedRunner() runs the ~1s run-start fail-loud cache preflight
+  // (model / prompt-sha / coverage); a mismatch throws here instead of a 466h
+  // silent live run.
+  // see also: apps/bench-runner/src/longmemeval/compile-seed.ts
+  //   preflightExtractionCache
+  const seedRunner = createCompileSeedRunner(
+    resolveBenchAllowLiveExtraction()
+      ? { allowLiveExtraction: true }
+      : undefined
+  );
   const collected: QuestionResult[] = [];
   for (let i = 0; i < window.length; i++) {
     const q = window[i];

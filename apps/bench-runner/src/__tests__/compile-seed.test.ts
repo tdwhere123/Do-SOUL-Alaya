@@ -206,8 +206,37 @@ describe("createCachingSignalExtractor", () => {
 
 describe("resolveCompileSeedExtractionConfig", () => {
   it("resolves a null key when no garden secret ref is set", () => {
-    const config = resolveCompileSeedExtractionConfig({});
+    const config = resolveCompileSeedExtractionConfig({
+      OFFICIAL_API_GARDEN_MODEL: "gpt-5.4-mini"
+    });
     expect(config.apiKey).toBeNull();
+    expect(config.model).toBe("gpt-5.4-mini");
+    expect(config.providerUrl).toBe("https://yunwu.ai/v1");
+  });
+
+  it("throws when neither env model nor manifest can resolve the model", () => {
+    expect(() => resolveCompileSeedExtractionConfig({})).toThrow(
+      /extraction model is unresolved/u
+    );
+  });
+
+  it("falls back to the manifest extraction_model when env is unset", () => {
+    const config = resolveCompileSeedExtractionConfig(
+      {},
+      {
+        schema_version: 1,
+        extraction_model: "gpt-5.4-mini",
+        provider_url: "https://yunwu.ai/v1",
+        system_prompt_sha256: "deadbeef",
+        cache_key_algo: "sha256(model\\0systemPrompt\\0turnContent)",
+        dataset: "longmemeval-s",
+        dataset_revision: "rev",
+        storage: "git-tracked",
+        built_at: "2026-05-27T00:00:00Z",
+        builder: "test"
+      }
+    );
+    expect(config.model).toBe("gpt-5.4-mini");
     expect(config.providerUrl).toBe("https://yunwu.ai/v1");
   });
 });

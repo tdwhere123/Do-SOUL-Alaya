@@ -82,6 +82,7 @@ import {
   buildSessionSynthesisInput,
   computeNextTurnSeedRefs,
   createCompileSeedRunner,
+  resolveBenchAllowLiveExtraction,
   toSeedExtractionPathKpi,
   type CompileSeedRunner,
   type SessionSeededTurn
@@ -544,7 +545,16 @@ export async function runLongMemEval(
   // seed time only — never on the recall path below.
   // @anchor longmemeval-daemon-per-run: one bench daemon spans the run;
   // per-question isolation is via daemon.attachWorkspace (BenchDaemonHandle).
-  const seedRunner = createCompileSeedRunner();
+  // createCompileSeedRunner() runs a ~1s run-start fail-loud preflight against
+  // the extraction cache manifest (model / prompt-sha / coverage); a mismatch
+  // throws here instead of silently degrading to a 466h live run.
+  // see also: apps/bench-runner/src/longmemeval/compile-seed.ts
+  //   preflightExtractionCache
+  const seedRunner = createCompileSeedRunner(
+    resolveBenchAllowLiveExtraction()
+      ? { allowLiveExtraction: true }
+      : undefined
+  );
   const collected: WorkerResult[] = [];
   const benchRunId = `lme-bench-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const daemon = await startBenchDaemon({

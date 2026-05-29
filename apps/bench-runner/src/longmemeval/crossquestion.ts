@@ -46,6 +46,7 @@ import { resolveBenchEmbeddingProviderLabel } from "./runner.js";
 import {
   computeNextTurnSeedRefs,
   createCompileSeedRunner,
+  resolveBenchAllowLiveExtraction,
   toSeedExtractionPathKpi
 } from "./compile-seed.js";
 import {
@@ -143,7 +144,16 @@ export async function runLongMemEvalCrossQuestion(
   let tokenEconomyInput: BenchTokenMetrics = aggregateBenchTokenMetrics([]);
   // invariant: one seed runner for the whole run so the on-disk extraction
   // cache and stats accumulate across questions; seed-time only.
-  const seedRunner = createCompileSeedRunner();
+  // createCompileSeedRunner() runs the ~1s run-start fail-loud cache preflight
+  // (model / prompt-sha / coverage); a mismatch throws here instead of a 466h
+  // silent live run.
+  // see also: apps/bench-runner/src/longmemeval/compile-seed.ts
+  //   preflightExtractionCache
+  const seedRunner = createCompileSeedRunner(
+    resolveBenchAllowLiveExtraction()
+      ? { allowLiveExtraction: true }
+      : undefined
+  );
 
   try {
     for (let qi = 0; qi < window.length; qi++) {

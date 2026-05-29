@@ -26,9 +26,15 @@ let tmpDir: string;
 
 beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), "lme-test-"));
+  // These runs take the no-credentials offline seed path; the model value is
+  // never used for a live call, but resolveCompileSeedExtractionConfig now
+  // requires an explicit extraction model (no silent production-constant
+  // fallback), so set it for the run-start preflight/config resolution.
+  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gpt-5.4-mini");
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await rm(tmpDir, { recursive: true, force: true });
 });
 
