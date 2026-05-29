@@ -54,6 +54,7 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
   writeFileSync,
   openSync,
   closeSync
@@ -69,6 +70,65 @@ const BENCH_RUNNER = path.join(
   REPO_ROOT,
   "apps/bench-runner/bin/alaya-bench-runner.mjs"
 );
+const GARDEN_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";
+const BENCH_ENV_SOURCE_COMMAND =
+  "set -a; . .do-it/bench-env/alaya-api.env; set +a";
+const EXTRACTION_CACHE_MANIFEST_PATH = path.join(
+  REPO_ROOT,
+  "docs/bench-history/datasets/longmemeval-extraction-cache/manifest.json"
+);
+
+// Run-start env guard. A detached spawn (setsid / cron) inherits a clean env
+// where OFFICIAL_API_GARDEN_MODEL may be unset; the bench then silently falls
+// back to the production constant, misses every cache key, and degrades to a
+// full live extraction that looks like a slow run rather than an error. Fail
+// fast in the orchestrator with the exact source command, and when a cache
+// manifest exists, name the model the cache was built with so a stale env is
+// caught too.
+function assertGardenModelEnv() {
+  const present =
+    typeof process.env[GARDEN_MODEL_ENV] === "string" &&
+    process.env[GARDEN_MODEL_ENV].trim().length > 0;
+  const manifestModel = readManifestExtractionModel();
+  if (!present) {
+    const detail =
+      manifestModel === null
+        ? ""
+        : ` The committed extraction cache was built with ${GARDEN_MODEL_ENV}=${manifestModel}.`;
+    throw new Error(
+      `${GARDEN_MODEL_ENV} is not set; a detached bench spawn would ` +
+        "silently fall back to the production model, miss every cache key, " +
+        `and live-extract the full dataset (~466h).${detail} Source the bench ` +
+        `env before launching: ${BENCH_ENV_SOURCE_COMMAND}`
+    );
+  }
+  if (
+    manifestModel !== null &&
+    process.env[GARDEN_MODEL_ENV].trim() !== manifestModel
+  ) {
+    throw new Error(
+      `${GARDEN_MODEL_ENV}=${process.env[GARDEN_MODEL_ENV]} does not match ` +
+        `the extraction cache manifest model ${manifestModel}; the cache ` +
+        "would miss every key and this run would live-extract (~466h). " +
+        `Set ${GARDEN_MODEL_ENV}=${manifestModel} or rebuild the cache.`
+    );
+  }
+}
+
+function readManifestExtractionModel() {
+  if (!existsSync(EXTRACTION_CACHE_MANIFEST_PATH)) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(
+      readFileSync(EXTRACTION_CACHE_MANIFEST_PATH, "utf8")
+    );
+    const model = parsed?.extraction_model;
+    return typeof model === "string" && model.trim().length > 0 ? model : null;
+  } catch {
+    return null;
+  }
+}
 
 // id is the short selector for --bench; archiveRoot is the bench-history
 // subdirectory the harness writes to.
@@ -363,6 +423,18 @@ async function main() {
   }
 
   const ctx = buildContext(args);
+
+  // Fail fast before any detached spawn: a clean inherited env must not
+  // silently fall back to the production model and live-extract the full
+  // dataset. --dry-run only prints commands, so it skips the live-env guard.
+  if (!args.dryRun) {
+    try {
+      assertGardenModelEnv();
+    } catch (err) {
+      process.stderr.write(`run-full-bench-v0311: ${err.message}\n`);
+      process.exit(2);
+    }
+  }
 
   process.stdout.write(`run-full-bench-v0311 starting\n`);
   process.stdout.write(`  repo_root=${REPO_ROOT}\n`);
