@@ -74,7 +74,7 @@ const HELP_TEXT = `alaya-bench-runner — daemon-attached benchmark harness
 
 Usage:
   alaya-bench-runner fetch-longmemeval [--variant oracle|s|m] [--data-dir <path>] [--force]
-  alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--policy-shape stress|chat] [--simulate-report none|always-used|gold-only|mixed] [--weights '<json>'] [--data-dir <path>] [--history-root <path>]
+  alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--policy-shape stress|chat] [--simulate-report none|always-used|gold-only|mixed] [--weights '<json>'] [--data-dir <path>] [--snapshot-out <db>] [--data-dir-root <path>] [--pinned-meta-root <path>] [--history-root <path>]
   alaya-bench-runner longmemeval-multiturn [--variant oracle|s|m] [--limit N] [--offset N] [--rounds N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--data-dir <path>] [--history-root <path>]
   alaya-bench-runner longmemeval-crossquestion [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--data-dir <path>] [--history-root <path>]
   alaya-bench-runner fetch-locomo [--data-dir <path>] [--force]
@@ -170,6 +170,9 @@ interface ParsedFlags {
   readonly rounds?: number;
   readonly force: boolean;
   readonly snapshot?: string;
+  readonly snapshotOut?: string;
+  readonly dataDirRoot?: string;
+  readonly pinnedMetaRoot?: string;
   readonly concurrency?: number;
 }
 
@@ -188,6 +191,9 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   let rounds: number | undefined;
   let force = false;
   let snapshot: string | undefined;
+  let snapshotOut: string | undefined;
+  let dataDirRoot: string | undefined;
+  let pinnedMetaRoot: string | undefined;
   let concurrency: number | undefined;
   const shards: string[] = [];
   let collectingShards = false;
@@ -274,6 +280,21 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
     } else if (token === "--data-dir") {
       dataDir = args[++i];
       collectingShards = false;
+    } else if (token === "--snapshot-out" || token.startsWith("--snapshot-out=")) {
+      snapshotOut = token.startsWith("--snapshot-out=")
+        ? token.slice("--snapshot-out=".length)
+        : args[++i];
+      collectingShards = false;
+    } else if (token === "--data-dir-root" || token.startsWith("--data-dir-root=")) {
+      dataDirRoot = token.startsWith("--data-dir-root=")
+        ? token.slice("--data-dir-root=".length)
+        : args[++i];
+      collectingShards = false;
+    } else if (token === "--pinned-meta-root" || token.startsWith("--pinned-meta-root=")) {
+      pinnedMetaRoot = token.startsWith("--pinned-meta-root=")
+        ? token.slice("--pinned-meta-root=".length)
+        : args[++i];
+      collectingShards = false;
     } else if (token === "--snapshot" || token.startsWith("--snapshot=")) {
       snapshot = token.startsWith("--snapshot=")
         ? token.slice("--snapshot=".length)
@@ -328,6 +349,9 @@ function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
     rounds,
     force,
     snapshot,
+    snapshotOut,
+    dataDirRoot,
+    pinnedMetaRoot,
     concurrency
   };
 }
@@ -375,7 +399,16 @@ async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
       embeddingProviderKind: opts.embeddingProviderKind,
       policyShape: opts.policyShape,
       simulateReport: opts.simulateReport,
-      weightOverridesJson: opts.weightOverridesJson
+      weightOverridesJson: opts.weightOverridesJson,
+      // @anchor longmemeval-snapshot-out-cli: producer half of the recall-eval
+      // fast loop. When set, runLongMemEval pins the seeded DB and writes
+      // <db> + .manifest.json + .sidecar.json, which recall-eval --snapshot
+      // consumes. cross-file: longmemeval/runner.ts (snapshotOut/dataDirRoot)
+      ...(opts.snapshotOut === undefined ? {} : { snapshotOut: opts.snapshotOut }),
+      ...(opts.dataDirRoot === undefined ? {} : { dataDirRoot: opts.dataDirRoot }),
+      ...(opts.pinnedMetaRoot === undefined
+        ? {}
+        : { pinnedMetaRoot: opts.pinnedMetaRoot })
     });
     const kpi = result.payload.kpi;
     process.stdout.write(
@@ -1281,7 +1314,7 @@ async function runMergeLongMemEvalCommand(
         ...(mergedTokenEconomy === undefined
           ? {}
           : { token_economy: mergedTokenEconomy }),
-        // @anchor merged-recall-token-economy: phase 7 per-recall structural
+        // @anchor merged-recall-token-economy: per-recall structural
         // distributions live in each shard's KPI. The honest cross-shard
         // distribution would require the raw per-recall samples (not just
         // the shard summaries); since we do not persist samples, the merged
