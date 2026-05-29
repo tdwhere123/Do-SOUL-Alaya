@@ -147,9 +147,10 @@ const MAX_GRAPH_HOPS = 2;
 // path inherits the same bound. see also: DYNAMIC_RECALL_PLANE_CAP
 const MULTI_SEED_GRAPH_FAN_OUT_CAP = DYNAMIC_RECALL_PLANE_CAP;
 // invariant: membership equals EDGE_TYPE_RECALL_MODEL transitive rows
-// (asserted in recall-service.test.ts). order is load-bearing — indexOf
-// here drives the edge_type tie-break, so the array stays explicit rather
-// than derived from declaration order.
+// (membership asserted in edge-hop-decay-derivation.test.ts; order asserted
+// in recall-service.test.ts). order is load-bearing — indexOf here drives the
+// edge_type tie-break, so the array stays explicit rather than derived from
+// declaration order.
 // see also: shouldReplaceGraphExpansionCandidate, compareGraphExpansionCandidateDrafts
 const GRAPH_EXPANSION_TRACKED_EDGE_TYPES: readonly RecallGraphExpansionTrackedEdgeType[] = [
   "derives_from",
