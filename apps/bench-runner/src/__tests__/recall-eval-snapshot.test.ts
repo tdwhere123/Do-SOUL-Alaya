@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +10,10 @@ import {
   snapshotManifestPath,
   snapshotSidecarPath
 } from "../longmemeval/snapshot.js";
-import type { LongMemEvalQuestion } from "../longmemeval/dataset.js";
+import {
+  buildLongMemEvalFixtureQuestion as buildQuestion,
+  writeLongMemEvalFixtureDataset
+} from "./longmemeval-fixture.js";
 
 // @anchor recall-eval-end-to-end: seed a tiny dataset through the real bench
 // daemon (no LLM — no-credentials offline seed path), snapshot the seeded DB,
@@ -24,41 +26,15 @@ let dataDir: string;
 let pinnedMetaRoot: string;
 const VARIANT = "longmemeval_oracle";
 
-function buildQuestion(id: string, sessionId: string): LongMemEvalQuestion {
-  return {
-    question_id: id,
-    question_type: "single_session",
-    question: `coelacanth depth fact ${id}`,
-    answer: `answer ${id}`,
-    question_date: "2026-01-01",
-    haystack_session_ids: [sessionId, `decoy-${id}`],
-    haystack_dates: ["2025-12-01", "2025-11-01"],
-    haystack_sessions: [
-      [
-        {
-          role: "user",
-          content: `coelacanth depth fact ${id}: it swims very deep in the ocean.`,
-          has_answer: true
-        },
-        { role: "assistant", content: "Acknowledged." }
-      ],
-      [{ role: "user", content: "unrelated chatter about pasta recipes." }]
-    ],
-    answer_session_ids: [sessionId]
-  };
-}
-
 async function writeFixtureDataset(
-  questions: readonly LongMemEvalQuestion[]
+  questions: readonly Parameters<typeof writeLongMemEvalFixtureDataset>[0]["questions"][number][]
 ): Promise<void> {
-  const raw = JSON.stringify(questions);
-  const sha = createHash("sha256").update(raw, "utf8").digest("hex");
-  await writeFile(join(dataDir, `${VARIANT}.json`), raw, "utf8");
-  await writeFile(
-    join(pinnedMetaRoot, `${VARIANT}.meta.json`),
-    JSON.stringify({ name: VARIANT, sha256: sha, question_count: questions.length }),
-    "utf8"
-  );
+  await writeLongMemEvalFixtureDataset({
+    variant: VARIANT,
+    dataDir,
+    pinnedMetaRoot,
+    questions
+  });
 }
 
 beforeEach(async () => {
@@ -166,6 +142,25 @@ describe("recall-eval against a seeded-DB snapshot", () => {
         .map((row) => `${row.id}:${row.hit_at_5 ? 1 : 0}`)
         .sort();
       expect(secondHits).toEqual(firstHits);
+
+      // N4: prove determinism at RANK granularity, not just hit/miss. The
+      // per-question delivered object_id lists must be deep-equal in ORDER
+      // across both runs — randomUUID() never perturbs the ranking.
+      const firstDelivered = Object.fromEntries(firstRun.perQuestionDelivered);
+      const secondDelivered = Object.fromEntries(secondRun.perQuestionDelivered);
+      expect(Object.keys(secondDelivered).sort()).toEqual(
+        Object.keys(firstDelivered).sort()
+      );
+      // At least one question must actually deliver results, else the rank-list
+      // assertion would be vacuously true on empty lists.
+      const totalDelivered = Object.values(firstDelivered).reduce(
+        (sum, ids) => sum + ids.length,
+        0
+      );
+      expect(totalDelivered).toBeGreaterThan(0);
+      for (const questionId of Object.keys(firstDelivered)) {
+        expect(secondDelivered[questionId]).toEqual(firstDelivered[questionId]);
+      }
     },
     120_000
   );

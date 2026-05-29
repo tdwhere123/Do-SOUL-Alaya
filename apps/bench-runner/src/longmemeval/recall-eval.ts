@@ -8,7 +8,6 @@ import {
   computeTokenSavedRatio,
   diffKpis,
   entrySlug,
-  readLatest,
   renderFindings,
   renderReport,
   writeEntry,
@@ -52,6 +51,10 @@ import {
   type LongMemEvalQuestionDiagnostic
 } from "./diagnostics.js";
 import { isAbstentionQuestionId } from "./abstention.js";
+import {
+  RECALL_EVAL_ARCHIVE_MARKER,
+  selectRecallEvalBaseline
+} from "./recall-eval-archive.js";
 import { runLongMemEvalRecallCycle } from "./runner.js";
 import {
   buildLongMemEvalSidecarKey,
@@ -87,6 +90,8 @@ import type { LongMemEvalVariant } from "./dataset.js";
  * cross-file: apps/bench-runner/src/longmemeval/snapshot.ts (produce/restore)
  * cross-file: apps/bench-runner/src/longmemeval/runner.ts (shared scoring +
  *   recall cycle the slow path also uses)
+ * cross-file: apps/bench-runner/src/longmemeval/recall-eval-archive.ts
+ *   (RECALL_EVAL_ARCHIVE_MARKER — the fast-loop archive discriminator)
  */
 
 export interface RecallEvalOptions {
@@ -113,6 +118,9 @@ export interface RecallEvalResult {
   readonly findingsPath: string;
   readonly payload: KpiPayload;
   readonly snapshotManifest: LongMemEvalSnapshotManifest;
+  // invariant: questionId -> delivered object_ids in rank order; rank-identical
+  // across two runs on a fixed snapshot (asserted in recall-eval-snapshot.test.ts).
+  readonly perQuestionDelivered: ReadonlyMap<string, readonly string[]>;
 }
 
 interface RecallEvalQuestionResult {
@@ -127,6 +135,10 @@ interface RecallEvalQuestionResult {
   readonly tokenMetrics: BenchTokenMetrics;
   readonly recallTokenEconomy: BenchRecallTokenEconomy | null;
   readonly edgeProposalKpiRows: readonly EdgeProposalKpiEventRow[];
+  // Delivered object_ids in rank order (rank 1 first). Surfaced so a
+  // determinism test can prove randomUUID never perturbs ordering at rank
+  // granularity, not just hit/miss. cross-file: recall-eval-snapshot.test.ts
+  readonly deliveredObjectIds: readonly string[];
 }
 
 const VARIANT_TO_SPLIT: Record<LongMemEvalVariant, BenchSplit> = {
@@ -225,12 +237,14 @@ export async function runRecallEval(
   });
 
   const layout: HistoryLayout = { historyRoot: options.historyRoot };
-  const previous = await readLatest(layout, "public", {
+  // @anchor recall-eval-archive-marker — diff a fast-loop run against the
+  // latest prior fast-loop archive (apple-to-apple), never against a full run
+  // whose passing pointer shares this bucket. cross-file: recall-eval-archive.ts
+  const previous = await selectRecallEvalBaseline(layout, "public", {
     split: payload.split,
     policyShape,
     simulateReport,
-    embeddingProvider: payload.embedding_provider,
-    pointerKind: "passing"
+    embeddingProvider: payload.embedding_provider
   });
   const diff = diffKpis(payload, previous);
   payload.diff_vs_previous = buildDiffVsPrevious(
@@ -238,14 +252,20 @@ export async function runRecallEval(
     previous,
     previous?.run_at ?? ""
   );
+  // @anchor recall-eval-archive-marker — the slug also carries the marker so a
+  // fast-loop archive is human/audit-distinguishable from a full run on disk.
   const slug = entrySlug(
     runAt,
     commitSha7,
-    benchArchiveDiscriminator(policyShape, simulateReport)
+    `${benchArchiveDiscriminator(policyShape, simulateReport)}-${RECALL_EVAL_ARCHIVE_MARKER}`
   );
   const report = renderReport(payload, previous, diff);
   const findings = renderFindings(payload, diff);
   const entry = await writeEntry(layout, "public", slug, payload, report, findings);
+
+  const perQuestionDelivered = new Map<string, readonly string[]>(
+    collected.map((res) => [res.questionId, res.deliveredObjectIds] as const)
+  );
 
   return {
     slug,
@@ -253,7 +273,8 @@ export async function runRecallEval(
     reportPath: entry.reportPath,
     findingsPath: entry.findingsPath,
     payload,
-    snapshotManifest: manifest
+    snapshotManifest: manifest,
+    perQuestionDelivered
   };
 }
 
@@ -342,7 +363,8 @@ async function recallEvalOneQuestion(input: {
       diagnostics,
       tokenMetrics,
       recallTokenEconomy,
-      edgeProposalKpiRows
+      edgeProposalKpiRows,
+      deliveredObjectIds: deliveredResults.map((result) => result.object_id)
     };
   } finally {
     await workspace.detach();
@@ -450,7 +472,10 @@ function assembleRecallEvalKpi(input: {
       // recomputed. "snapshot-inherited" marks a snapshot built without a
       // pinned extraction manifest.
       checksum_sha256: provenance?.dataset_revision ?? "snapshot-inherited",
-      checksum_source: `recall-eval snapshot ${input.manifest.db_filename}`
+      // @anchor recall-eval-archive-marker (consumer: selectFullRunBaseline) —
+      // the checksum_source MUST start with RECALL_EVAL_ARCHIVE_MARKER so a
+      // full-run baseline scan can exclude this fast-loop archive.
+      checksum_source: `${RECALL_EVAL_ARCHIVE_MARKER} ${input.manifest.db_filename}`
     },
     sample_size: input.sampleSize,
     evaluated_count: input.evaluatedCount,

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   RECALL_PIPELINE_VERSION,
@@ -15,7 +15,6 @@ import {
   buildDiffVsPrevious,
   diffKpis,
   entrySlug,
-  readLatest,
   renderFindings,
   renderReport,
   writeEntry,
@@ -80,6 +79,8 @@ import {
 } from "./abstention.js";
 import { loadDataset, type FetchResult } from "./fetch.js";
 import { pairSessionIntoRounds, type LongMemEvalVariant } from "./dataset.js";
+import { collectDistinctTurnContents } from "./extraction-fill.js";
+import { selectFullRunBaseline } from "./recall-eval-archive.js";
 import {
   buildSessionSynthesisInput,
   computeNextTurnSeedRefs,
@@ -214,7 +215,7 @@ export interface LongMemEvalHitScoringResult {
  * extracted fact of the answer turn surface") and is NOT directly
  * comparable to the pre-extraction 110623Z baseline. The first
  * post-extraction full run is the reference baseline for later
- * recall-optimization slices.
+ * recall-optimization runs.
  *
  * `active_constraints[]` is an independent governance channel and is
  * recorded in diagnostics only; it is never counted toward R@K.
@@ -598,11 +599,16 @@ export async function runLongMemEval(
   // throws here instead of silently degrading to a 466h live run.
   // see also: apps/bench-runner/src/longmemeval/compile-seed.ts
   //   preflightExtractionCache
-  const seedRunner = createCompileSeedRunner(
-    resolveBenchAllowLiveExtraction()
-      ? { allowLiveExtraction: true }
-      : undefined
-  );
+  // @anchor longmemeval-window-containment-preflight: hand the preflight THIS
+  // run's flattened question window so it validates window-containment (every
+  // turn this run needs has an on-disk fixture) rather than trusting the
+  // manifest coverage scalar, which is only relative to the last
+  // extraction-fill's window. cross-file: compile-seed.ts preflightExtractionCache
+  const requiredTurnContents = collectDistinctTurnContents(window);
+  const seedRunner = createCompileSeedRunner({
+    requiredTurnContents,
+    ...(resolveBenchAllowLiveExtraction() ? { allowLiveExtraction: true } : {})
+  });
   const collected: WorkerResult[] = [];
   // @anchor longmemeval-snapshot-capture: when seeding for a recall-eval
   // snapshot, capture each question's scoring sidecar + workspace ids so they
@@ -887,16 +893,18 @@ export async function runLongMemEval(
   };
 
   const layout: HistoryLayout = { historyRoot: opts.historyRoot };
-  // Diff against the latest entry of the SAME split. Oracle vs S are
-  // not comparable retrieval evaluations (Oracle's session filter is
+  // Diff against the latest PASSING full-run entry of the SAME split. Oracle vs
+  // S are not comparable retrieval evaluations (Oracle's session filter is
   // no-op, S's is meaningful). See packages/eval/src/history.ts
-  // @anchor read-latest-split-aware.
-  const previous = await readLatest(layout, "public", {
+  // @anchor read-latest-split-aware. selectFullRunBaseline additionally
+  // excludes fast-loop recall-eval archives, which share this public/ bucket +
+  // passing pointer but never paid extraction/materialization.
+  // cross-file: apps/bench-runner/src/longmemeval/recall-eval-archive.ts
+  const previous = await selectFullRunBaseline(layout, "public", {
     split: payload.split,
     policyShape,
     simulateReport,
-    embeddingProvider: payload.embedding_provider,
-    pointerKind: "passing"
+    embeddingProvider: payload.embedding_provider
   });
   const diff = diffKpis(payload, previous);
   payload.diff_vs_previous = buildDiffVsPrevious(
@@ -1293,8 +1301,8 @@ function writeRecallEvalSnapshot(input: {
     schema_migration_version: schemaMigrationVersion,
     bench_runner_version: resolveBenchRunnerVersion(),
     alaya_commit: input.commitSha7,
-    db_filename: input.snapshotOut.split("/").pop() ?? "snapshot.db",
-    sidecar_filename: `${(input.snapshotOut.split("/").pop() ?? "snapshot.db")}.sidecar.json`,
+    db_filename: basename(input.snapshotOut),
+    sidecar_filename: `${basename(input.snapshotOut)}.sidecar.json`,
     built_at: new Date().toISOString(),
     extraction_provenance: extractionProvenance
   });
