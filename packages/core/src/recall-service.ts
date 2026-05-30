@@ -13,6 +13,7 @@ import {
   isPathRecallEligible,
   type FineAssessmentConfig,
   type ActivationWeights,
+  type ManifestationState,
   type MemoryDimension as MemoryDimensionType,
   type MemoryEntry,
   type PathAnchorRef,
@@ -90,6 +91,11 @@ import type {
   TokenEstimator
 } from "./recall-service-types.js";
 import { makeTokenEstimator } from "./recall-service-types.js";
+import {
+  GOVERNANCE_CEILING_FAILSAFE_BAND,
+  memoryGovernanceCeiling,
+  type PathGovernanceContribution
+} from "./path-manifestation-policy.js";
 import { parseRecallPolicy } from "./shared/recall-policy.js";
 
 export { classifyGlobalCandidate } from "./recall-service-helpers.js";
@@ -2462,6 +2468,11 @@ export class RecallService {
       params.coarseEvidenceFtsRanksPerRef
     );
 
+    const governanceCeilingByMemoryId = await this.collectGovernanceCeilings(
+      params.workspaceId,
+      params.candidates
+    );
+
     return Object.freeze({
       queryProbes: params.queryProbes,
       ftsRanks: params.coarseFtsRanks,
@@ -2482,7 +2493,8 @@ export class RecallService {
       graphAndPathColdScore,
       recallsEdgeCount,
       weightTransferAmount,
-      evidenceGistsByMemoryId
+      evidenceGistsByMemoryId,
+      governanceCeilingByMemoryId
     });
   }
 
@@ -2595,6 +2607,94 @@ export class RecallService {
       });
       return Object.freeze({});
     }
+  }
+
+  // invariant: governance_class is a HARD CEILING on recall manifestation.
+  // For each candidate memory, collect its INBOUND recall-eligible
+  // PathRelations (isPathRecallEligible: active + recall_bias > 0) — the paths
+  // whose target_anchor resolves to that memory — and reduce their governance
+  // contributions through memoryGovernanceCeiling. A memory with no governing
+  // inbound path is ABSENT from the returned map; the clamp site defaults it to
+  // full_eligible (unrestricted), so the ceiling only LOWERS, never suppresses
+  // an ordinary ungoverned memory.
+  //
+  // invariant: the ceiling must not ride the agent-pumpable governance band. We
+  // pass each path's legitimacy.evidence_basis alongside its governance_class so
+  // memoryGovernanceCeiling can treat an auto-promoted recall_allowed (birth
+  // marker only) as at most excerpt; only a trusted-provenance recall_allowed
+  // contributes full_eligible. (The recall-WEIGHTING / plasticity use of the
+  // promoted band elsewhere is unchanged — only this ceiling's trust narrows.)
+  //
+  // invariant: fail-OPEN vs fail-CLOSED are distinct:
+  //   - pathExpansionPort ABSENT  => governance plane not deployed; empty map =>
+  //     full_eligible (open) is an acceptable deployment choice.
+  //   - findByAnchors THREW        => transient read failure; a hard ceiling that
+  //     vanishes on error is soft. Cap EVERY candidate to the safe band
+  //     (GOVERNANCE_CEILING_FAILSAFE_BAND = excerpt) via an explicit per-id map,
+  //     NOT an empty map. Recall still returns/scores/ranks; only preview DETAIL
+  //     is conservatively bounded until governance can be read.
+  // see also: path-manifestation-policy.ts memoryGovernanceCeiling,
+  //   path-manifestation-policy.ts GOVERNANCE_CEILING_FAILSAFE_BAND,
+  //   recall-candidate-builder.ts buildRecallCandidate (clamp site).
+  private async collectGovernanceCeilings(
+    workspaceId: string,
+    candidates: readonly Readonly<MemoryEntry>[]
+  ): Promise<Readonly<Record<string, ManifestationState>>> {
+    const pathExpansionPort = this.dependencies.pathExpansionPort;
+    if (pathExpansionPort === undefined || candidates.length === 0) {
+      return Object.freeze({});
+    }
+    const candidateIds = new Set(candidates.map((candidate) => candidate.object_id));
+    const anchors: PathAnchorRef[] = [...candidateIds].map((object_id) => ({
+      kind: "object",
+      object_id
+    }));
+    let paths: readonly Readonly<PathRelation>[];
+    try {
+      paths = await pathExpansionPort.findByAnchors(workspaceId, anchors);
+    } catch (error) {
+      this.warn("governance ceiling path lookup failed", {
+        workspace_id: workspaceId,
+        candidate_count: candidates.length,
+        error: toErrorMessage(error)
+      });
+      // fail-CLOSED: cap every candidate to the safe band so a transient read
+      // error cannot lift a governed memory to its full strength tier.
+      const failsafeCeilings: Record<string, ManifestationState> = {};
+      for (const object_id of candidateIds) {
+        failsafeCeilings[object_id] = GOVERNANCE_CEILING_FAILSAFE_BAND;
+      }
+      return Object.freeze(failsafeCeilings);
+    }
+    const contributionsByMemoryId = new Map<string, PathGovernanceContribution[]>();
+    for (const path of paths) {
+      if (!isPathRecallEligible(path)) {
+        continue;
+      }
+      // invariant: the ceiling is INBOUND — keyed on the path's target memory.
+      // findByAnchors also returns paths where the candidate is the SOURCE
+      // anchor; those govern the path's target, not the source, so they must
+      // not raise/lower the source memory's ceiling.
+      const targetMemoryId = anchorMemoryId(path.anchors.target_anchor);
+      if (targetMemoryId === undefined || !candidateIds.has(targetMemoryId)) {
+        continue;
+      }
+      const contribution: PathGovernanceContribution = {
+        governance_class: path.legitimacy.governance_class,
+        evidence_basis: path.legitimacy.evidence_basis
+      };
+      const contributions = contributionsByMemoryId.get(targetMemoryId);
+      if (contributions === undefined) {
+        contributionsByMemoryId.set(targetMemoryId, [contribution]);
+      } else {
+        contributions.push(contribution);
+      }
+    }
+    const ceilingByMemoryId: Record<string, ManifestationState> = {};
+    for (const [memoryId, contributions] of contributionsByMemoryId) {
+      ceilingByMemoryId[memoryId] = memoryGovernanceCeiling(contributions);
+    }
+    return Object.freeze(ceilingByMemoryId);
   }
 
   private computeMaxWeightTransferAmount(
@@ -3184,7 +3284,10 @@ export class RecallService {
         tokenEstimate,
         budgets: config.budgets,
         index: accumulator.selected.length,
-        usedTokensBeforeCandidate: accumulator.totalTokens
+        usedTokensBeforeCandidate: accumulator.totalTokens,
+        // governance HARD CEILING; absent => unrestricted (full_eligible).
+        // see also: collectGovernanceCeilings, path-manifestation-policy.ts.
+        governanceCeiling: supplementaryData.governanceCeilingByMemoryId[entry.object_id]
       });
 
       return {

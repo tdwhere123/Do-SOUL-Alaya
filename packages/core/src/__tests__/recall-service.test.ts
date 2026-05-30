@@ -14,6 +14,7 @@ import {
   type PathAnchorRef,
   type PathRelation,
   type ProjectMappingAnchor,
+  type RecallCandidate,
   type RecallPolicy,
   type SoulActiveConstraint,
   type Slot,
@@ -116,6 +117,7 @@ function createPathRelation(overrides: {
   readonly strength?: number;
   readonly directionBias?: "source_to_target" | "target_to_source" | "bidirectional_asymmetric";
   readonly governanceClass?: "hint_only" | "attention_only" | "recall_allowed" | "strictly_governed";
+  readonly evidenceBasis?: readonly string[];
   readonly stabilityClass?: "stable" | "pinned" | "volatile" | "normal";
   readonly status?: "active" | "dormant" | "retired";
 } = {}): PathRelation {
@@ -149,7 +151,7 @@ function createPathRelation(overrides: {
       retirement_rule: "manual"
     },
     legitimacy: {
-      evidence_basis: ["test"],
+      evidence_basis: overrides.evidenceBasis ?? ["test"],
       governance_class: overrides.governanceClass ?? "recall_allowed"
     },
     created_at: "2026-03-20T00:00:00.000Z",
@@ -2271,6 +2273,243 @@ describe("RecallService", () => {
     // The weak negative path is below the strength floor, so it applies no
     // suppression: the target's fused score is unchanged versus the no-path run.
     expect(withWeakPath).toBeCloseTo(withoutPath, 10);
+  });
+
+  describe("governance manifestation HARD CEILING — truth boundary", () => {
+    // invariant: the manifestation ceiling derives from a memory's INBOUND
+    // recall-eligible PathRelations' governance band, but it must NOT trust an
+    // agent-pumpable recall_allowed (one reached via the support_events_count
+    // auto-promotion ladder) and must NOT vanish on a transient path-store read
+    // error. see also: recall-service.ts collectGovernanceCeilings,
+    //   path-manifestation-policy.ts memoryGovernanceCeiling.
+    const VICTIM_LONG_CONTENT =
+      "deployment rollback procedure detail one with enough body text to exceed the " +
+      "one-hundred-and-sixty character preview clip so a capped band visibly truncates " +
+      "the delivered preview while a full_eligible band serves the entire content body.";
+
+    const runCeilingRecall = async (params: {
+      readonly findByAnchors: RecallServicePathExpansionPort["findByAnchors"];
+    }): Promise<Readonly<RecallCandidate> | undefined> => {
+      const memories = [
+        createMemoryEntry({
+          object_id: "seed-memory",
+          content: "deployment rollback procedure overview",
+          activation_score: 0.9
+        }),
+        createMemoryEntry({
+          object_id: "victim-target",
+          content: VICTIM_LONG_CONTENT,
+          // 0.95 lands in the full_eligible strength tier, so the delivered
+          // manifestation equals the governance ceiling (clamp is a pure min).
+          activation_score: 0.95
+        })
+      ];
+      const { dependencies } = createDependencies(memories);
+      const service = new RecallService({
+        ...dependencies,
+        pathExpansionPort: { findByAnchors: params.findByAnchors }
+      });
+      const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+      const policy = overridePolicy(basePolicy, {
+        coarse_filter: {
+          ...basePolicy.coarse_filter,
+          semantic_supplement: { enabled: false, max_supplement: 0 }
+        },
+        fine_assessment: {
+          ...basePolicy.fine_assessment,
+          budgets: { max_total_tokens: 4000, max_entries: 5, per_dimension_limits: null }
+        }
+      });
+      const result = await service.recall({
+        taskSurface: { ...createTaskSurface(), display_name: "deployment rollback procedure detail one" },
+        workspaceId: "workspace-1",
+        strategy: "analyze",
+        policyOverride: policy
+      });
+      return result.candidates.find((candidate) => candidate.object_id === "victim-target");
+    };
+
+    // Returns an inbound recall-eligible path target=victim-target only when the
+    // victim id is among the ceiling-lookup anchors (the ceiling read passes
+    // every admitted candidate id and keeps paths whose target is a candidate).
+    const inboundPathFinder = (
+      path: PathRelation
+    ): RecallServicePathExpansionPort["findByAnchors"] =>
+      vi.fn(async (_workspaceId: string, anchorRefs: readonly PathAnchorRef[]) => {
+        const ids = new Set(
+          anchorRefs.flatMap((ref) => (ref.kind === "object" ? [ref.object_id] : []))
+        );
+        return ids.has("victim-target") ? [path] : [];
+      });
+
+    it("Finding #2: an auto-promoted recall_allowed (pumped support, birth marker only) caps the victim at excerpt", async () => {
+      // The inbound positive path climbed attention_only -> recall_allowed by
+      // pumping support_events_count via agent report_context_usage receipts;
+      // evidence_basis still carries only its co-usage birth marker. The ceiling
+      // must treat it as attention_only (excerpt), NOT full_eligible, so preview
+      // content is not over-surfaced.
+      const pumpedPath = createPathRelation({
+        path_id: "path-pos-pumped-recall-allowed",
+        sourceId: "seed-memory",
+        targetId: "victim-target",
+        relationKind: "co_recalled",
+        recallBias: 0.5,
+        strength: 0.95,
+        stabilityClass: "stable",
+        governanceClass: "recall_allowed",
+        evidenceBasis: ["recalls_edge_co_usage"]
+      });
+      const victim = await runCeilingRecall({ findByAnchors: inboundPathFinder(pumpedPath) });
+      expect(victim).toBeDefined();
+      expect(victim?.manifestation).toBe("excerpt");
+      // Over-surfacing is actually prevented: the delivered preview is clipped,
+      // not the full long body.
+      expect(victim?.content_preview).not.toBe(VICTIM_LONG_CONTENT);
+      expect(victim?.content_preview.length ?? 0).toBeLessThan(VICTIM_LONG_CONTENT.length);
+    });
+
+    it("Finding #2: a trusted-seed recall_allowed (signal_graph_reference) lifts the victim to full_eligible", async () => {
+      // A recall_allowed BORN at that band by the system signal-graph seed is
+      // trusted provenance; the legitimate path still serves full content.
+      const trustedPath = createPathRelation({
+        path_id: "path-pos-trusted-signal-graph",
+        sourceId: "seed-memory",
+        targetId: "victim-target",
+        relationKind: "signal_graph_ref",
+        recallBias: 0.5,
+        strength: 0.95,
+        stabilityClass: "stable",
+        governanceClass: "recall_allowed",
+        evidenceBasis: ["signal_graph_reference"]
+      });
+      const victim = await runCeilingRecall({ findByAnchors: inboundPathFinder(trustedPath) });
+      expect(victim).toBeDefined();
+      expect(victim?.manifestation).toBe("full_eligible");
+      expect(victim?.content_preview).toBe(VICTIM_LONG_CONTENT);
+    });
+
+    it("Finding #2: a human/auto edge-accept recall_allowed (edge_proposal_accept:<id>) lifts the victim to full_eligible", async () => {
+      const acceptPath = createPathRelation({
+        path_id: "path-pos-edge-accept",
+        sourceId: "seed-memory",
+        targetId: "victim-target",
+        relationKind: "supports",
+        recallBias: 0.5,
+        strength: 0.95,
+        stabilityClass: "stable",
+        governanceClass: "recall_allowed",
+        evidenceBasis: ["edge_proposal_accept:edge_prop_xyz789"]
+      });
+      const victim = await runCeilingRecall({ findByAnchors: inboundPathFinder(acceptPath) });
+      expect(victim).toBeDefined();
+      expect(victim?.manifestation).toBe("full_eligible");
+    });
+
+    it("Finding #2: strictly_governed (user-set, not auto-reachable) lifts the victim to full_eligible regardless of evidence", async () => {
+      const strictPath = createPathRelation({
+        path_id: "path-pos-strict",
+        sourceId: "seed-memory",
+        targetId: "victim-target",
+        relationKind: "supports",
+        recallBias: 0.5,
+        strength: 0.95,
+        stabilityClass: "stable",
+        governanceClass: "strictly_governed",
+        evidenceBasis: ["recalls_edge_co_usage"]
+      });
+      const victim = await runCeilingRecall({ findByAnchors: inboundPathFinder(strictPath) });
+      expect(victim).toBeDefined();
+      expect(victim?.manifestation).toBe("full_eligible");
+    });
+
+    it("Finding #3: a thrown findByAnchors fails CLOSED — every candidate is capped to the LOWEST visibility band (hint), never over-surfaced", async () => {
+      // A transient path-store read error must NOT lift a governed memory to its
+      // full strength tier. The ceiling map is NOT empty-meaning-unrestricted on
+      // throw: every candidate is capped to GOVERNANCE_CEILING_FAILSAFE_BAND
+      // (hint). hint is the only band that is never an over-surface for ANY
+      // governance class — a memory whose TRUE ceiling is hint (hint_only) is NOT
+      // over-surfaced to excerpt on a read blip. At the lens hint renders a bare
+      // `[memory ref: <id>]` (zero body); see the context-lens-assembler proof
+      // test below. see also: recall-service.ts collectGovernanceCeilings (throw),
+      //   path-manifestation-policy.ts GOVERNANCE_CEILING_FAILSAFE_BAND.
+      const throwingFinder = vi.fn(async () => {
+        throw new Error("transient path-store read failure");
+      });
+      const victim = await runCeilingRecall({ findByAnchors: throwingFinder });
+      expect(victim).toBeDefined();
+      // full_eligible strength tier capped to the fail-closed safe band (hint).
+      expect(victim?.manifestation).toBe("hint");
+      expect(victim?.content_preview).not.toBe(VICTIM_LONG_CONTENT);
+      expect(victim?.content_preview.length ?? 0).toBeLessThan(VICTIM_LONG_CONTENT.length);
+    });
+
+    it("Finding #3: a hint_only true-ceiling memory is never surfaced above hint on the failure path", async () => {
+      // The failsafe IS hint, so a memory whose TRUE governance ceiling is hint
+      // (hint_only) cannot be over-surfaced by the throw branch: the capped band
+      // equals its true ceiling exactly. This holds by construction — assert it so
+      // raising GOVERNANCE_CEILING_FAILSAFE_BAND above hint (the latent over-surface)
+      // re-fails here. see also: path-manifestation-policy.ts GOVERNANCE_MANIFESTATION_CEILING
+      //   (hint_only -> hint), GOVERNANCE_CEILING_FAILSAFE_BAND.
+      const hintOnlyPath = createPathRelation({
+        path_id: "path-pos-hint-only",
+        sourceId: "seed-memory",
+        targetId: "victim-target",
+        relationKind: "co_recalled",
+        recallBias: 0.5,
+        strength: 0.95,
+        stabilityClass: "stable",
+        governanceClass: "hint_only",
+        evidenceBasis: ["recalls_edge_co_usage"]
+      });
+      // Throw on the governance read: the victim's true ceiling (hint_only -> hint)
+      // and the failsafe band (hint) coincide, so it is at most hint either way.
+      const throwingFinder = vi.fn(async () => {
+        throw new Error("transient path-store read failure");
+      });
+      const onThrow = await runCeilingRecall({ findByAnchors: throwingFinder });
+      expect(onThrow).toBeDefined();
+      expect(onThrow?.manifestation).toBe("hint");
+      // And when the read succeeds with the hint_only path, the ceiling is hint too:
+      // the failsafe never surfaces a hint_only memory above its real ceiling.
+      const onRead = await runCeilingRecall({ findByAnchors: inboundPathFinder(hintOnlyPath) });
+      expect(onRead).toBeDefined();
+      expect(onRead?.manifestation).toBe("hint");
+    });
+
+    it("Finding #3: an ABSENT pathExpansionPort stays OPEN — the victim reaches its full strength tier", async () => {
+      // No governance plane deployed: the empty ceiling map legitimately means
+      // unrestricted (full_eligible), distinct from the thrown-lookup case.
+      const memories = [
+        createMemoryEntry({
+          object_id: "victim-target",
+          content: VICTIM_LONG_CONTENT,
+          activation_score: 0.95
+        })
+      ];
+      const { dependencies } = createDependencies(memories);
+      const service = new RecallService({ ...dependencies });
+      const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+      const policy = overridePolicy(basePolicy, {
+        coarse_filter: {
+          ...basePolicy.coarse_filter,
+          semantic_supplement: { enabled: false, max_supplement: 0 }
+        },
+        fine_assessment: {
+          ...basePolicy.fine_assessment,
+          budgets: { max_total_tokens: 4000, max_entries: 5, per_dimension_limits: null }
+        }
+      });
+      const result = await service.recall({
+        taskSurface: { ...createTaskSurface(), display_name: "deployment rollback procedure detail one" },
+        workspaceId: "workspace-1",
+        strategy: "analyze",
+        policyOverride: policy
+      });
+      const victim = result.candidates.find((candidate) => candidate.object_id === "victim-target");
+      expect(victim).toBeDefined();
+      expect(victim?.manifestation).toBe("full_eligible");
+      expect(victim?.content_preview).toBe(VICTIM_LONG_CONTENT);
+    });
   });
 
   it("expands path-graph candidates across two hops with cycle-safe edge-type decay diagnostics", async () => {
@@ -4520,13 +4759,18 @@ describe("RecallService", () => {
       );
       expect(neighborDiag?.admission_planes ?? []).not.toContain("graph_expansion");
       // invariant: the weak entity-only anchor is excluded from
-      // selectExpansionSeedDrafts, so it is never used as a findByAnchors
-      // frontier anchor. Other tier memories may still seed the traversal via
-      // their own non-entity planes, so the assertion targets this anchor id.
-      const anchorFrontierCalls = findByAnchors.mock.calls.filter((call) =>
-        call[1].some((ref) => ref.kind === "object" && ref.object_id === "memory-anchor")
-      );
-      expect(anchorFrontierCalls).toEqual([]);
+      // selectExpansionSeedDrafts, so it never seeds the path-backed traversal
+      // (the neighbor-absent-from-graph_expansion assertion above is the
+      // authoritative behavioral guarantee). A findByAnchors call carrying
+      // memory-anchor no longer implies frontier seeding: the post-coarse
+      // governance-ceiling read passes every admitted candidate id (including
+      // this entity-seed-admitted anchor) for an INBOUND-governance lookup
+      // keyed on each candidate's target_anchor, not a traversal seed.
+      // see also: recall-service.ts collectGovernanceCeilings (ceiling read)
+      //   vs expandGraphFrontier / addPathExpansionCandidates (seed reads).
+      const anchorSeededNeighborOnGraphExpansion =
+        (neighborDiag?.admission_planes ?? []).includes("graph_expansion");
+      expect(anchorSeededNeighborOnGraphExpansion).toBe(false);
     });
 
     it("admits a weak entity into graph_expansion when a co-admitting plane carries it (Fix-5b)", async () => {

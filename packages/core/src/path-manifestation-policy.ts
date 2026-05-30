@@ -1,9 +1,11 @@
 import {
   DYNAMICS_CONSTANTS,
   ManifestationLevel,
+  ManifestationState,
   PathGovernanceClass,
   StabilityClass,
   type ManifestationLevel as ManifestationLevelValue,
+  type ManifestationState as ManifestationStateValue,
   type PathGovernanceClass as PathGovernanceClassValue,
   type PathRelation,
   type StabilityClass as StabilityClassValue
@@ -94,6 +96,180 @@ function isLowerInOrder(
     return false;
   }
   return candidateIndex > referenceIndex;
+}
+
+// invariant: governance_class is a HARD CEILING on recall memory
+// manifestation. A recalled memory's delivered manifestation is
+// min(strengthTier, governanceCeiling) — the gate may only LOWER, never
+// elevate. This is the memory-level twin of the path-level
+// MANIFESTATION_AUTHORITY gradient above; both live here so the memory
+// ceiling and the path ceiling cannot drift apart.
+// see also: recall-candidate-builder.ts (clamp site),
+//   recall-service.ts collectSupplementaryData (per-memory ceiling map).
+
+// Strict manifestation ordering hidden < hint < excerpt < full_eligible.
+// Index position is the band rank; the clamp returns the lower-ranked band.
+const MEMORY_MANIFESTATION_ORDER: readonly ManifestationStateValue[] = [
+  ManifestationState.HIDDEN,
+  ManifestationState.HINT,
+  ManifestationState.EXCERPT,
+  ManifestationState.FULL_ELIGIBLE
+];
+
+// Maps each PathGovernanceClass band to the most permissive ManifestationState
+// it authorises, mirroring the MANIFESTATION_AUTHORITY gradient:
+//   hint_only         -> hint        (lowest visibility band; cf. ATTENTION_ONLY
+//                                      authorises only lens_entry, hint_only none)
+//   attention_only    -> excerpt
+//   recall_allowed    -> full_eligible
+//   strictly_governed -> full_eligible (highest trust; never throttles content)
+// The PathGovernanceClass enum has exactly these four members
+// (packages/protocol/src/soul/path-relation.ts pathGovernanceClassValues);
+// no additional bands exist, so no conservative fallback is needed.
+const GOVERNANCE_MANIFESTATION_CEILING: Readonly<
+  Record<PathGovernanceClassValue, ManifestationStateValue>
+> = Object.freeze({
+  [PathGovernanceClass.HINT_ONLY]: ManifestationState.HINT,
+  [PathGovernanceClass.ATTENTION_ONLY]: ManifestationState.EXCERPT,
+  [PathGovernanceClass.RECALL_ALLOWED]: ManifestationState.FULL_ELIGIBLE,
+  [PathGovernanceClass.STRICTLY_GOVERNED]: ManifestationState.FULL_ELIGIBLE
+});
+
+// invariant: the manifestation CEILING must trust recall_allowed only when it
+// is grounded in TRUSTED PROVENANCE, never the live plasticity-promoted band.
+// A POSITIVE path's governance_class is agent-pumpable: evolveGovernanceClass
+// auto-promotes attention_only -> recall_allowed at support_events_count >= 8,
+// and support_events_count is driven by agent-supplied report_context_usage
+// "used" receipts (positive promotion is intentionally OPEN for Hebbian recall
+// WEIGHTING). If the content-visibility ceiling consumed that promoted band
+// directly, an agent could pump ~8 reported-used turns and lift a victim
+// memory's ceiling from excerpt to full_eligible, over-surfacing preview
+// content. So a recall_allowed reached via auto-promotion (whose legitimacy
+// .evidence_basis still carries only its BIRTH marker — plasticity rewrites
+// governance_class but never evidence_basis) contributes at most EXCERPT (the
+// attention_only band) to the ceiling. Only a recall_allowed BORN at that band
+// with a trusted-provenance marker contributes full_eligible.
+//
+// Trusted recall_allowed-birth markers (the ONLY producers that mint a POSITIVE
+// recall-eligible path directly at recall_allowed):
+//   - signal_graph_reference   (path-relation-proposal-service.ts
+//                                SIGNAL_GRAPH_REF_SEED_PROFILE — system signal-graph seed)
+//   - edge_proposal_accept:<id> (edge-proposal-service.ts acceptProposal — a
+//                                human/operator or auto-accept-floor governance ruling)
+// strictly_governed is user/operator-set, not auto-reachable, so it keeps
+// full_eligible regardless of evidence_basis. The recall-WEIGHTING use of the
+// promoted band (graph_support / plasticity) is unaffected — only the
+// manifestation ceiling's trust source is narrowed here.
+// see also: path-manifestation-policy.ts evolveGovernanceClass (the pumpable ladder),
+//   path-relation-proposal-service.ts seed profiles (birth evidence markers),
+//   edge-proposal-service.ts acceptProposal (edge_proposal_accept mint),
+//   path-plasticity-service.ts buildUpdatesWithPromotion (preserves evidence_basis).
+const TRUSTED_RECALL_ALLOWED_EVIDENCE_MARKERS: ReadonlySet<string> =
+  new Set<string>(["signal_graph_reference"]);
+const TRUSTED_RECALL_ALLOWED_EVIDENCE_PREFIXES: readonly string[] = Object.freeze([
+  "edge_proposal_accept:"
+]);
+
+function recallAllowedHasTrustedProvenance(
+  evidenceBasis: readonly string[]
+): boolean {
+  for (const marker of evidenceBasis) {
+    if (TRUSTED_RECALL_ALLOWED_EVIDENCE_MARKERS.has(marker)) {
+      return true;
+    }
+    for (const prefix of TRUSTED_RECALL_ALLOWED_EVIDENCE_PREFIXES) {
+      if (marker.startsWith(prefix)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// A single inbound recall-eligible path's contribution to the memory ceiling.
+// evidence_basis is the path's BIRTH provenance (set at mint, preserved across
+// plasticity promotion), used to distinguish a trusted-born recall_allowed from
+// an auto-promoted one.
+export interface PathGovernanceContribution {
+  readonly governance_class: PathGovernanceClassValue;
+  readonly evidence_basis: readonly string[];
+}
+
+// invariant: a memory governed by MULTIPLE inbound recall-eligible paths takes
+// the MOST PERMISSIVE ceiling among their (trust-adjusted) bands — a strong
+// association is not throttled by a weak co-existing one. An empty contribution
+// set (no governing inbound path) returns full_eligible: the ceiling never
+// silently suppresses an ordinary ungoverned memory, it only lowers when a
+// governing path demands it. A recall_allowed contribution WITHOUT trusted
+// provenance is treated as attention_only (excerpt) so the agent-pumpable
+// auto-promotion ladder cannot raise the ceiling above excerpt.
+export function memoryGovernanceCeiling(
+  contributions: readonly PathGovernanceContribution[]
+): ManifestationStateValue {
+  let ceiling: ManifestationStateValue = ManifestationState.HIDDEN;
+  let sawAny = false;
+  for (const contribution of contributions) {
+    sawAny = true;
+    const band = ceilingBandForContribution(contribution);
+    if (manifestationRank(band) > manifestationRank(ceiling)) {
+      ceiling = band;
+    }
+  }
+  return sawAny ? ceiling : ManifestationState.FULL_ELIGIBLE;
+}
+
+function ceilingBandForContribution(
+  contribution: PathGovernanceContribution
+): ManifestationStateValue {
+  if (
+    contribution.governance_class === PathGovernanceClass.RECALL_ALLOWED &&
+    !recallAllowedHasTrustedProvenance(contribution.evidence_basis)
+  ) {
+    // Untrusted (auto-promoted) recall_allowed: cap its contribution at the
+    // attention_only band so a pumped support ladder cannot exceed excerpt.
+    return GOVERNANCE_MANIFESTATION_CEILING[PathGovernanceClass.ATTENTION_ONLY];
+  }
+  return GOVERNANCE_MANIFESTATION_CEILING[contribution.governance_class];
+}
+
+// invariant: fail-CLOSED ceiling band for a TRANSIENT governance-read failure.
+// When the per-recall governing-path lookup THROWS (a transient path-store read
+// error), the ceiling cannot be computed, but it must NOT silently vanish: an
+// absent ceiling defaults to full_eligible (unrestricted), which would lift
+// every governed memory to its full strength tier on a read blip. So a thrown
+// lookup caps EVERY candidate in that recall to this safe band until governance
+// can be read again. The safe band is HINT, the LOWEST non-hidden visibility
+// band: hint is the only band that is never an over-surface for ANY governance
+// class — hint_only (true ceiling hint), attention_only, recall_allowed, and
+// strictly_governed all permit at least hint, so capping to hint cannot exceed
+// any class's true ceiling on a read failure. A higher failsafe (e.g. excerpt)
+// would over-surface a hint_only-governed memory: at the lens a hint renders a
+// bare `[memory ref: <id>]` (zero body) while excerpt serves a body fragment
+// (context-lens-assembler.ts resolveContentSnapshot), so excerpt-on-throw leaks
+// preview content for a memory whose true ceiling is hint. Recall still
+// returns/scores/ranks every memory; only the delivered surface is conserved to
+// a bare ref until governance can be read — the correct conservative tradeoff
+// for a HARD ceiling. This is distinct from a missing pathExpansionPort
+// (governance plane not deployed) which legitimately stays open (full_eligible).
+// see also: recall-service.ts collectGovernanceCeilings (throw vs absent branch),
+//   context-lens-assembler.ts resolveContentSnapshot (hint = bare ref, excerpt = body).
+export const GOVERNANCE_CEILING_FAILSAFE_BAND: ManifestationStateValue =
+  ManifestationState.HINT;
+
+// invariant: pure, total min over the strict ordering
+// hidden < hint < excerpt < full_eligible. Returns the LOWER band, so the
+// governance ceiling can only cap (never elevate) the strength tier.
+export function clampManifestationByGovernance(
+  tier: ManifestationStateValue,
+  ceiling: ManifestationStateValue
+): ManifestationStateValue {
+  return manifestationRank(tier) <= manifestationRank(ceiling) ? tier : ceiling;
+}
+
+function manifestationRank(state: ManifestationStateValue): number {
+  // indexOf is total: every ManifestationState member is in the order array,
+  // so a -1 (would sort below hidden) is unreachable for valid enum inputs.
+  return MEMORY_MANIFESTATION_ORDER.indexOf(state);
 }
 
 // Stability evolution thresholds. The protocol dynamics constants are the

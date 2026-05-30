@@ -2,6 +2,7 @@ import type {
   BudgetSnapshot,
   EventLogEntry,
   EvidenceCapsule,
+  ManifestationState,
   MemoryDimension as MemoryDimensionType,
   MemoryEntry,
   PathAnchorRef,
@@ -581,6 +582,16 @@ export interface RecallSupplementaryData {
   // promoted. Absent / empty string → rerank falls back to content-only,
   // bit-identical to the pre-B2 behavior.
   readonly evidenceGistsByMemoryId: Readonly<Record<string, string>>;
+  // invariant: governance ceiling on recall manifestation, keyed by
+  // memory_entry.object_id. Derived from each candidate's inbound
+  // recall-eligible PathRelations (isPathRecallEligible) via
+  // memoryGovernanceCeiling. The fine-assess clamp lowers a candidate's
+  // strength tier to this ceiling (never elevates). A memory with no governing
+  // inbound path is ABSENT from this map; the clamp site defaults it to
+  // full_eligible (unrestricted). see also: path-manifestation-policy.ts
+  // memoryGovernanceCeiling / clampManifestationByGovernance,
+  // recall-candidate-builder.ts buildRecallCandidate.
+  readonly governanceCeilingByMemoryId: Readonly<Record<string, ManifestationState>>;
 }
 
 export interface CoarseRecallCandidate {
